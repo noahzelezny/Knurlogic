@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "knurlogic"
+version = "0.0.0"
+description = "Reserved namespace for Knurlogic. No public API yet."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Noah Zelezny" }]
+
+[project.urls]
+Homepage = "https://github.com/noahzelezny/knurlogic"
+
+[tool.setuptools.packages.find]
+where = ["src"]
