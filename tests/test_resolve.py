@@ -103,3 +103,16 @@ def test_pins_are_loaded_and_make_doctor_say_ok():
     for row in arch.check("qwen3_5_moe_text"):
         if row.module in arch.PINNED_SHA256 and row.vendored:
             assert row.state == "OK", f"{row.module} is {row.state}"
+
+
+def test_package_architectures_are_found_and_hosted_correctly():
+    """glm5_next is an mlx_vlm PACKAGE, not an mlx_lm file. Registered under
+    the wrong parent its eight relative sibling imports cannot resolve."""
+    from knurlogic import arch
+    from knurlogic.register import available, source_for
+    if "glm5_next" not in available():
+        return
+    src, is_pkg = source_for("glm5_next")
+    assert is_pkg, "glm5_next must vendor as a package"
+    assert arch.host_for("glm5_next") == "mlx_vlm"
+    assert arch.host_for("qwen4_exp") == "mlx_lm"

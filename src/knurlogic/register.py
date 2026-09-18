@@ -31,16 +31,26 @@ import sys
 from pathlib import Path
 
 ARCH_DIR = Path(__file__).parent / "architectures"
-_PREFIX = "mlx_lm.models."
 _installed: list = []
 
 
 def available() -> list:
-    """Architecture modules vendored in this package."""
+    """Architecture modules vendored here -- flat files AND packages."""
     if not ARCH_DIR.is_dir():
         return []
-    return sorted(p.stem for p in ARCH_DIR.glob("*.py")
-                  if not p.stem.startswith("_"))
+    flat = {p.stem for p in ARCH_DIR.glob("*.py") if not p.stem.startswith("_")}
+    pkgs = {d.name for d in ARCH_DIR.iterdir()
+            if d.is_dir() and (d / "__init__.py").is_file()}
+    return sorted(flat | pkgs)
+
+
+def source_for(name: str):
+    """(path, is_package) for a vendored architecture."""
+    pkg = ARCH_DIR / name
+    if (pkg / "__init__.py").is_file():
+        return pkg / "__init__.py", True
+    flat = ARCH_DIR / f"{name}.py"
+    return (flat, False) if flat.is_file() else (None, False)
 
 
 def _with_dependencies(names: list) -> list:
@@ -79,14 +89,20 @@ def register(*names: str, override: bool = False) -> list:
     """
     wanted = _with_dependencies(list(names) or available())
     done = []
+    from .arch import host_for
+
     for name in wanted:
-        src = ARCH_DIR / f"{name}.py"
-        if not src.is_file():
+        src, is_pkg = source_for(name)
+        if src is None:
             raise FileNotFoundError(f"no vendored architecture {name!r}")
-        target = _PREFIX + name
+        # Registered under the host whose siblings its relative imports need.
+        target = f"{host_for(name)}.models.{name}"
         if target in sys.modules and not override:
             continue
-        spec = importlib.util.spec_from_file_location(target, src)
+        # A package needs __path__ or its `from .language import ...` fails.
+        spec = importlib.util.spec_from_file_location(
+            target, src,
+            submodule_search_locations=[str(src.parent)] if is_pkg else None)
         mod = importlib.util.module_from_spec(spec)
         # Register BEFORE exec so intra-package relative imports
         # (`from .base import ...`) resolve against real mlx_lm.models.

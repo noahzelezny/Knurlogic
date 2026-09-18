@@ -38,29 +38,61 @@ def _mlx_lm_version(python: str) -> str:
         return "unknown"
 
 
-def _models_dir(python: str) -> Path:
+def _models_dir(python: str, host: str) -> Path:
     out = subprocess.run(
         [python, "-c",
-         "import mlx_lm.models as m,pathlib;print(pathlib.Path(m.__file__).parent)"],
+         f"import {host}.models as m,pathlib;print(pathlib.Path(m.__file__).parent)"],
         capture_output=True, text=True, check=True)
     return Path(out.stdout.strip())
 
 
-def vendor(module: str, python: str, note: str) -> int:
-    src_dir = _models_dir(python)
-    src = src_dir / f"{module}.py"
-    if not src.is_file():
-        print(f"no {module}.py in {src_dir}", file=sys.stderr)
+def _host_version(python: str, host: str) -> str:
+    try:
+        out = subprocess.run(
+            [python, "-c", f"import {host};print({host}.__version__)"],
+            capture_output=True, text=True, check=True)
+        return out.stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+def _dir_digest(d: Path) -> str:
+    """Digest of a package: every .py, path-and-content, sorted."""
+    h = hashlib.sha256()
+    for f in sorted(d.rglob("*.py")):
+        h.update(str(f.relative_to(d)).encode())
+        h.update(f.read_bytes())
+    return h.hexdigest()
+
+
+def vendor(module: str, python: str, note: str, host: str) -> int:
+    src_dir = _models_dir(python, host)
+    flat, pkg = src_dir / f"{module}.py", src_dir / module
+    is_pkg = pkg.is_dir() and (pkg / "__init__.py").is_file()
+    src = pkg if is_pkg else flat
+    if not (is_pkg or flat.is_file()):
+        print(f"no {module} (file or package) in {src_dir}", file=sys.stderr)
         return 2
 
     ARCH_DIR.mkdir(parents=True, exist_ok=True)
-    dst = ARCH_DIR / f"{module}.py"
-    if dst.is_file() and _sha256(dst) == _sha256(src):
-        print(f"{module}: already vendored, identical")
-        return 0
-    existed = dst.is_file()
-    shutil.copy2(src, dst)
-    digest, ver = _sha256(dst), _mlx_lm_version(python)
+    dst = ARCH_DIR / (module if is_pkg else f"{module}.py")
+    existed = dst.exists()
+    if is_pkg:
+        if existed and _dir_digest(dst) == _dir_digest(src):
+            print(f"{module}: already vendored, identical")
+            return 0
+        if existed:
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        digest = _dir_digest(dst)
+    else:
+        if existed and _sha256(dst) == _sha256(src):
+            print(f"{module}: already vendored, identical")
+            return 0
+        shutil.copy2(src, dst)
+        digest = _sha256(dst)
+    ver = _host_version(python, host)
 
     header = ("# Vendored architecture modules\n\n"
               "Each entry is a claim that this file is the arithmetic the\n"
@@ -73,11 +105,12 @@ def vendor(module: str, python: str, note: str) -> int:
             f"- taken: {_dt.date.today().isoformat()}\n"
             f"- from: `{src}`\n"
             f"- interpreter: `{python}`\n"
-            f"- mlx-lm: {ver}\n"
+            f"- host package: {host} {ver}\n"
+            f"- layout: {'package' if is_pkg else 'file'}\n"
             f"- sha256: `{digest}`\n"
             f"- note: {note or '(none)'}\n")
     print(f"{module}: {'re-' if existed else ''}vendored from {src}")
-    print(f"  mlx-lm {ver}  sha256 {digest[:16]}...")
+    print(f"  {host} {ver}  sha256 {digest[:16]}...")
     print(f"  -> add to PINNED_SHA256 in arch.py once validated")
     return 0
 
@@ -89,8 +122,10 @@ def main(argv=None) -> int:
                    help="interpreter of the env to take it FROM")
     p.add_argument("--note", default="",
                    help="why this env is the authoritative one")
+    p.add_argument("--host", default="mlx_lm", choices=("mlx_lm", "mlx_vlm"),
+                   help="package to take it FROM and register it UNDER")
     a = p.parse_args(argv)
-    return vendor(a.module, a.python, a.note)
+    return vendor(a.module, a.python, a.note, a.host)
 
 
 if __name__ == "__main__":
