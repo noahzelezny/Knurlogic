@@ -112,6 +112,8 @@ def vendor(module: str, python: str, note: str, host: str) -> int:
     print(f"{module}: {'re-' if existed else ''}vendored from {src}")
     print(f"  {host} {ver}  sha256 {digest[:16]}...")
     print(f"  -> add to PINNED_SHA256 in arch.py once validated")
+    print(f"  -> RECORD THE LICENSE in architectures/THIRD-PARTY.md: copied "
+          f"source carries its project's terms with it")
     return 0
 
 
