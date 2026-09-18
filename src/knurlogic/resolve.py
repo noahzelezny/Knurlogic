@@ -73,10 +73,14 @@ def resolve(artifact: Artifact, working_set_bytes: int,
     headroom = working_set_bytes - artifact.bytes_on_disk
 
     # --- the two knobs that decide runnable-vs-not --------------------------
+    # VQ_DECODE_CHUNK bounds the dense-EXPERT decode transient, which only
+    # exists on the VQ path. A stock affine artifact has no such buffer, so
+    # emitting it would be cargo cult.
     chunk = decode_chunk_for(headroom, known=working_set_bytes > 0)
-    r.env["VQ_DECODE_CHUNK"] = str(chunk)
+    if artifact.is_vq:
+        r.env["VQ_DECODE_CHUNK"] = str(chunk)
     fits = working_set_bytes <= 0 or headroom > 0
-    if chunk < S.DECODE_CHUNK_DEFAULT and fits:
+    if artifact.is_vq and chunk < S.DECODE_CHUNK_DEFAULT and fits:
         r.notes.append(
             f"VQ_DECODE_CHUNK lowered to {chunk} ({headroom/GIB:.1f} GiB "
             f"headroom): bounds the dense-expert transient, which is what "

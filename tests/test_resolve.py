@@ -57,3 +57,14 @@ def test_profile_selects_numerics_flags():
 def test_vq_without_model_file_is_a_warning():
     r = resolve(_art(model_file=None), 96 * GIB)
     assert any("model_file" in w for w in r.warnings)
+
+
+def test_non_vq_artifact_gets_only_the_generic_knobs():
+    """The value proposition is 'it runs', not 'it runs VQ'. A stock affine
+    artifact still needs the prefill and cache knobs; it has no dense-expert
+    decode buffer, so VQ_DECODE_CHUNK would be cargo cult."""
+    r = resolve(_art(vq_modules={}), 96 * GIB)
+    assert "VQ_DECODE_CHUNK" not in r.env
+    assert "VQ_MOE_GEMMSEG_RTILE" not in r.env
+    assert r.env["VQLAB_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_DEFAULT)
+    assert r.env["VQLAB_CACHE_LIMIT_GB"] == str(S.CACHE_LIMIT_GB_DEFAULT)
