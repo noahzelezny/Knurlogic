@@ -30,7 +30,21 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-#: model_type (from config.json) -> the mlx_lm.models module that must exist.
+#: TWO HOST PACKAGES, and this was not obvious (2026-09-18). mlx_lm.models
+#: holds flat text-model files (qwen4_exp.py is 1136 lines -- the real
+#: language model). mlx_vlm.models holds PACKAGES of the same names
+#: (`<arch>/{__init__,config,language,vision,<arch>}.py`, ~1400 lines) where
+#: the top-level file is multimodal glue and `language.py` carries the text
+#: half. glm5_next exists ONLY in mlx_vlm, which is why it read as "missing"
+#: when only mlx_lm was searched.
+#:
+#: Which host actually loads a given artifact depends on the loader, not only
+#: on the config: Flash-Next declares `language_model_only: false` yet vqlab
+#: scores it through mlx_lm. So `host` here records where a module LIVES;
+#: choosing the host per artifact is still an open question.
+HOST_PACKAGES = ("mlx_lm", "mlx_vlm")
+
+#: model_type (from config.json) -> the module that must exist.
 #: model_type strings are suffixed `_text` on multimodal configs.
 ARCH_FOR_MODEL_TYPE = {
     "qwen4_exp_text": "qwen4_exp",
@@ -81,12 +95,36 @@ class ArchStatus:
         return "vendored" if self.vendored else "site-packages"
 
 
-def _models_dir() -> Path | None:
+def _models_dir(host: str = "mlx_lm") -> Path | None:
     try:
-        import mlx_lm.models as m
-        return Path(m.__file__).parent
+        mod = __import__(f"{host}.models", fromlist=["models"])
+        return Path(mod.__file__).parent
     except Exception:
         return None
+
+
+def _module_file(models_dir: Path, name: str) -> Path | None:
+    """A module may be a flat file OR a package. mlx_vlm uses packages."""
+    flat = models_dir / f"{name}.py"
+    if flat.is_file():
+        return flat
+    pkg = models_dir / name / f"{name}.py"
+    if pkg.is_file():
+        return pkg
+    init = models_dir / name / "__init__.py"
+    return init if init.is_file() else None
+
+
+def locate(name: str) -> tuple:
+    """(host, path) for the first host package that has this module."""
+    for host in HOST_PACKAGES:
+        d = _models_dir(host)
+        if d is None:
+            continue
+        p = _module_file(d, name)
+        if p is not None:
+            return host, p
+    return "", None
 
 
 def required_modules(model_type: str) -> list:
@@ -118,7 +156,8 @@ def check(model_type: str, models_dir: Path | None = None) -> list:
         if vend.is_file():
             p, vendored = vend, True
         else:
-            p, vendored = ((d / f"{mod}.py") if d else None), False
+            _host, p = locate(mod)
+            vendored = False
         present = bool(p and p.is_file())
         sha = (hashlib.sha256(p.read_bytes()).hexdigest() if present else None)
         rows.append(ArchStatus(mod, present, p if present else None, sha,
