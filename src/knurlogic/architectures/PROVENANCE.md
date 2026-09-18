@@ -39,3 +39,13 @@ artifacts were validated against -- not merely that it imports.
 - mlx-lm: 0.32.0
 - sha256: `f3f8c047c2ac31306267e8de61bb06d2952f2bf3fd4adbbb8ce25b952ccac01f`
 - note: qwen4exp venv (mlx-lm 0.32.0) taken as authoritative: it is where vqlab fits and scores, and it is the SUPERSET -- qwen3_5 here carries PipelineMixin, the exo-env copy does not
+
+## glm5_next.py
+
+- taken: 2026-09-18
+- from: `/opt/anaconda3/envs/exo/lib/python3.13/site-packages/mlx_vlm/models/glm5_next`
+- interpreter: `/opt/anaconda3/envs/exo/bin/python`
+- host package: mlx_vlm 0.6.17
+- layout: package
+- sha256: `af2c17b807f426c48a55f32e803d711ae8a79443753c04bb2e82879be2b36c67`
+- note: mlx_vlm package; byte-identical in both envs that carry it. Depends on 8 mlx_vlm siblings (base, cache, mla, mlp, gated_delta, rope_utils, deepseek_v32.language, deepseek_v4.hyper_connection) which are NOT vendored -- pinning this file does not pin those
