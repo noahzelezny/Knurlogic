@@ -83,3 +83,12 @@ def test_moe_pulls_in_its_base_architecture():
     """One drifted base reaches 11 artifacts through the subclass."""
     from knurlogic import arch
     assert arch.required_modules("qwen3_5_moe_text") == ["qwen3_5_moe", "qwen3_5"]
+
+
+def test_registering_a_subclass_pulls_its_base_first():
+    """A vendored subclass must never land on a site-packages base: that
+    silently mixes two versions of the arithmetic, which is the exact failure
+    this package exists to end. It passed once only by alphabetical luck."""
+    from knurlogic.register import _with_dependencies
+    order = _with_dependencies(["qwen3_5_moe"])
+    assert order.index("qwen3_5") < order.index("qwen3_5_moe")

@@ -43,13 +43,41 @@ def available() -> list:
                   if not p.stem.startswith("_"))
 
 
+def _with_dependencies(names: list) -> list:
+    """Expand each name to [its bases..., itself], in load order.
+
+    THE BUG THIS EXISTS FOR (caught 2026-09-18): qwen3_5_moe subclasses
+    qwen3_5. Registering the subclass alone produced a VENDORED subclass
+    sitting on a SITE-PACKAGES base -- two versions of the arithmetic silently
+    mixed, which is the precise failure this package is meant to end. It
+    passed the first time only because `sorted()` happens to put qwen3_5
+    before qwen3_5_moe.
+    """
+    from .arch import ARCH_DEPENDS_ON
+
+    out: list = []
+
+    def visit(n: str) -> None:
+        if n in out:
+            return
+        for dep in ARCH_DEPENDS_ON.get(n, []):
+            visit(dep)
+        out.append(n)
+
+    for n in names:
+        visit(n)
+    return out
+
+
 def register(*names: str, override: bool = False) -> list:
     """Make the named vendored architectures resolvable as mlx_lm.models.<n>.
 
-    With `override=False` (default) a module mlx-lm already imported is left
-    alone and reported, rather than swapped underneath a loaded model.
+    Dependencies are registered FIRST: a subclass must never land on a base
+    from a different source. With `override=False` (default) a module mlx-lm
+    already imported is left alone and reported, rather than swapped
+    underneath a loaded model.
     """
-    wanted = list(names) or available()
+    wanted = _with_dependencies(list(names) or available())
     done = []
     for name in wanted:
         src = ARCH_DIR / f"{name}.py"
