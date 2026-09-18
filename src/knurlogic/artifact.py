@@ -1,0 +1,68 @@
+"""Read what an artifact declares about itself.
+
+AUTHORITY RULE (inherited from vqlab AGENTS.md): the artifact's own
+config.json is the record of what shipped. Never characterize an artifact
+from a card, a ledger, or an experiment entry -- read the config.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+GIB = 1 << 30
+
+
+@dataclass
+class Artifact:
+    path: Path
+    model_type: str
+    model_file: str | None          # bundled VQ runtime, e.g. "model.py"
+    bytes_on_disk: int
+    hidden_size: int | None
+    moe_intermediate_size: int | None
+    vq_modules: dict = field(default_factory=dict, repr=False)
+
+    @property
+    def gib(self) -> float:
+        return self.bytes_on_disk / GIB
+
+    @property
+    def is_vq(self) -> bool:
+        return bool(self.vq_modules)
+
+    @property
+    def geometries(self) -> dict:
+        """{(d, K): module_count} -- what the kernels will actually dispatch."""
+        out: dict = {}
+        for m in self.vq_modules.values():
+            if not isinstance(m, dict):
+                continue
+            d, K = m.get("d") or m.get("dim"), m.get("K") or m.get("k")
+            if d and K:
+                key = (int(d), int(K))
+                out[key] = out.get(key, 0) + 1
+        return out
+
+    @classmethod
+    def load(cls, path) -> "Artifact":
+        p = Path(path)
+        cfg_path = p / "config.json"
+        if not cfg_path.is_file():
+            raise FileNotFoundError(f"no config.json in {p}")
+        cfg = json.loads(cfg_path.read_text())
+        # Multimodal configs nest the language model; single-modal ones do not.
+        tc = cfg.get("text_config", cfg)
+        total = sum(f.stat().st_size for f in p.iterdir()
+                    if f.suffix == ".safetensors" and f.is_file())
+        return cls(
+            path=p,
+            model_type=tc.get("model_type") or cfg.get("model_type") or "unknown",
+            model_file=cfg.get("model_file"),
+            bytes_on_disk=total,
+            hidden_size=tc.get("hidden_size"),
+            moe_intermediate_size=tc.get("moe_intermediate_size"),
+            vq_modules=cfg.get("vq_modules") or {},
+        )
