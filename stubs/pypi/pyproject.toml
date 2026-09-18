@@ -4,11 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knurlogic"
-version = "0.0.0"
-description = "Reserved namespace for Knurlogic. No public API yet."
+version = "0.1.0.dev0"
+description = "Make local model runtimes manageable: resolve settings, verify the environment."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Noah Zelezny" }]
+
+[project.scripts]
+knurlogic = "knurlogic.doctor:main"
 
 [project.urls]
 Homepage = "https://github.com/noahzelezny/knurlogic"
