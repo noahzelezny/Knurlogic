@@ -6,7 +6,10 @@ ship is the ARCHITECTURE model file -- qwen4_exp, qwen3_5, gemma4_text,
 glm5_next -- which is a graft into mlx_lm/models/. Those are unversioned,
 unpinned, and in practice they DRIFT.
 
-Measured 2026-09-18 across one lab's two envs, both mlx-lm 0.31.3:
+Measured 2026-09-18 across one lab's two envs -- which turned out to be on
+DIFFERENT mlx-lm versions (0.32.0 and 0.31.9), and that is the point rather
+than a caveat: a grafted file inherits its install's version, so nothing
+answers "which arithmetic is this":
 
     qwen4_exp    1136 vs 1138 lines   cosmetic predicate-arity shim, safe
     qwen3_5       574 vs  535 lines   QK-norm rewrite: algebraically identical,
@@ -51,8 +54,9 @@ ARCH_DEPENDS_ON = {"qwen3_5_moe": ["qwen3_5"]}
 #: is not the same claim as "it is the arithmetic we measured."
 PINNED_SHA256: dict = {}
 
-#: The mlx-lm this set of architecture files was validated against.
-PINNED_MLX_LM = "0.31.3"
+#: The mlx-lm the vendored architecture set was validated against. Pinning the
+#: FILE does not pin the library it calls into, so this is checked separately.
+PINNED_MLX_LM = None  # set when the set is validated end to end
 
 
 @dataclass
@@ -62,6 +66,7 @@ class ArchStatus:
     path: Path | None
     sha256: str | None
     pinned: str | None
+    vendored: bool = False
 
     @property
     def state(self) -> str:
@@ -70,6 +75,10 @@ class ArchStatus:
         if self.pinned is None:
             return "UNPINNED"
         return "OK" if self.sha256 == self.pinned else "DRIFTED"
+
+    @property
+    def origin(self) -> str:
+        return "vendored" if self.vendored else "site-packages"
 
 
 def _models_dir() -> Path | None:
@@ -93,13 +102,25 @@ def required_modules(model_type: str) -> list:
 
 
 def check(model_type: str, models_dir: Path | None = None) -> list:
-    """Report the state of every architecture file this artifact needs."""
+    """Report the state of every architecture file this artifact needs.
+
+    A file vendored in this package WINS over one installed in site-packages:
+    that is the whole point of vendoring, and `register()` makes it the one
+    mlx-lm actually imports. The installed copy is reported only as a
+    fallback, so a user without the vendored set still gets a useful answer.
+    """
+    from .register import ARCH_DIR
+
     d = models_dir or _models_dir()
     rows = []
     for mod in required_modules(model_type):
-        p = (d / f"{mod}.py") if d else None
+        vend = ARCH_DIR / f"{mod}.py"
+        if vend.is_file():
+            p, vendored = vend, True
+        else:
+            p, vendored = ((d / f"{mod}.py") if d else None), False
         present = bool(p and p.is_file())
         sha = (hashlib.sha256(p.read_bytes()).hexdigest() if present else None)
         rows.append(ArchStatus(mod, present, p if present else None, sha,
-                               PINNED_SHA256.get(mod)))
+                               PINNED_SHA256.get(mod), vendored))
     return rows

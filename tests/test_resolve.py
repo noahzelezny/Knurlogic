@@ -68,3 +68,18 @@ def test_non_vq_artifact_gets_only_the_generic_knobs():
     assert "VQ_MOE_GEMMSEG_RTILE" not in r.env
     assert r.env["VQLAB_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_DEFAULT)
     assert r.env["VQLAB_CACHE_LIMIT_GB"] == str(S.CACHE_LIMIT_GB_DEFAULT)
+
+
+def test_vendored_architecture_wins_over_site_packages():
+    """Vendoring is only meaningful if the vendored copy is the one used."""
+    from knurlogic import arch
+    from knurlogic.register import ARCH_DIR
+    for row in arch.check("qwen4_exp_text"):
+        if (ARCH_DIR / f"{row.module}.py").is_file():
+            assert row.vendored, f"{row.module} should resolve to the vendored copy"
+
+
+def test_moe_pulls_in_its_base_architecture():
+    """One drifted base reaches 11 artifacts through the subclass."""
+    from knurlogic import arch
+    assert arch.required_modules("qwen3_5_moe_text") == ["qwen3_5_moe", "qwen3_5"]
