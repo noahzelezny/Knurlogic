@@ -62,11 +62,26 @@ ARCH_FOR_MODEL_TYPE = {
 #: every artifact of the subclass, which is how one file came to cover 11.
 ARCH_DEPENDS_ON = {"qwen3_5_moe": ["qwen3_5"]}
 
-#: Pinned digests. EMPTY ON PURPOSE -- populate with `knurlogic pin` against
-#: an env that has been validated, and never by copying whatever is installed.
-#: An unpinned architecture is reported as UNPINNED, not as OK: "it imports"
-#: is not the same claim as "it is the arithmetic we measured."
-PINNED_SHA256: dict = {}
+def _load_pins() -> dict:
+    """Digests recorded by `knurlogic smoke --pin` on a clean pass.
+
+    A pin is written only when a model actually generated a token AND every
+    architecture resolved from a place a downloader would have. Copying
+    whatever happens to be installed is exactly the habit this replaces:
+    "it imports" is not the claim, "it ran and came from here" is.
+    """
+    from .register import ARCH_DIR
+    f = ARCH_DIR / "PINS.json"
+    if not f.is_file():
+        return {}
+    import json
+    try:
+        return {k: v["sha256"] for k, v in json.loads(f.read_text()).items()}
+    except Exception:
+        return {}
+
+
+PINNED_SHA256 = _load_pins()
 
 #: The mlx-lm the vendored architecture set was validated against. Pinning the
 #: FILE does not pin the library it calls into, so this is checked separately.

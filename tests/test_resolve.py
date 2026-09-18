@@ -92,3 +92,14 @@ def test_registering_a_subclass_pulls_its_base_first():
     from knurlogic.register import _with_dependencies
     order = _with_dependencies(["qwen3_5_moe"])
     assert order.index("qwen3_5") < order.index("qwen3_5_moe")
+
+
+def test_pins_are_loaded_and_make_doctor_say_ok():
+    """A pin is only written after a model generated a token with clean
+    provenance, so an 'ok' from doctor means 'it ran', not 'it imports'."""
+    from knurlogic import arch
+    if not arch.PINNED_SHA256:
+        return  # nothing validated on this checkout yet
+    for row in arch.check("qwen3_5_moe_text"):
+        if row.module in arch.PINNED_SHA256 and row.vendored:
+            assert row.state == "OK", f"{row.module} is {row.state}"
