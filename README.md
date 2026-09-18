@@ -42,11 +42,14 @@ no blockers found
   and hope one wins: a real experiment once set a knob in a file that was
   sourced before another file which overwrote it unconditionally, so the run
   measured the same value twice and was reported as "no difference."
-* **An architecture registry.** The model files that get grafted into
-  `mlx_lm/models/` are unversioned and drift. Measured across two envs on one
-  machine, both mlx-lm 0.31.3: three of four files differed, and one was
-  absent from both. Knurlogic pins them and reports `OK` / `UNPINNED` /
-  `DRIFTED` / `MISSING`.
+* **A vendored architecture set.** The model files that get grafted into
+  `mlx_lm/models/` inherit whatever version that install happens to be, so
+  "which arithmetic am I running" has no answer. Measured across two envs on
+  one machine: three of four files differed and one was absent from both —
+  the envs were on different mlx-lm versions (0.32.0 and 0.31.9), which is
+  exactly the problem. Knurlogic ships the files inside the package, loads
+  them into `sys.modules` without writing to `site-packages`, and reports
+  `OK` / `UNPINNED` / `DRIFTED` / `MISSING`.
 * **A ledger of settings, encoded as defaults.** Every constant in
   `settings.py` carries the measurement that established it. That is the
   actual asset — the numbers cost runs, and nobody should have to rediscover

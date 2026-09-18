@@ -58,7 +58,7 @@ def run(path: str, working_set_gib: float, profile: str,
             extra = "  NOT INSTALLED -- this artifact cannot load"
         elif row.state == "DRIFTED":
             extra = "  does not match the pinned digest"
-        print(f"  {mark} {row.module}{extra}")
+        print(f"  {mark} {row.module} [{row.origin}]{extra}")
 
     print("\nsettings")
     for k, v in sorted(r.env.items()):
