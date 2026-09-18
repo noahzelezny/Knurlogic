@@ -87,7 +87,7 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
     problems = []
     for mod in needed:
         try:
-            m = importlib.import_module(f"mlx_lm.models.{mod}")
+            m = importlib.import_module(f"{arch.host_for(mod)}.models.{mod}")
             where = _origin(getattr(m, "__file__", None), a.path)
         except Exception:
             where, m = "unknown", None
@@ -126,6 +126,7 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
             if row.vendored and row.sha256:
                 data[row.module] = {
                     "sha256": row.sha256,
+                    "host": arch.host_for(row.module),
                     "validated_with_mlx_lm": mlx_lm.__version__,
                     "validated_on_artifact": a.path.name,
                 }

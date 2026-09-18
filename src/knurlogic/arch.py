@@ -44,6 +44,18 @@ from pathlib import Path
 #: choosing the host per artifact is still an open question.
 HOST_PACKAGES = ("mlx_lm", "mlx_vlm")
 
+#: Which host a module must be registered UNDER. This is not cosmetic: a
+#: module's relative imports resolve against its registered parent, and
+#: glm5_next reaches for eight siblings (..cache, ..base, ..mla, ..mlp,
+#: ..gated_delta, ..rope_utils, ..deepseek_v32.language,
+#: ..deepseek_v4.hyper_connection). Registered under the wrong parent it
+#: cannot import at all.
+ARCH_HOST = {"glm5_next": "mlx_vlm"}
+
+
+def host_for(module: str) -> str:
+    return ARCH_HOST.get(module, "mlx_lm")
+
 #: model_type (from config.json) -> the module that must exist.
 #: model_type strings are suffixed `_text` on multimodal configs.
 ARCH_FOR_MODEL_TYPE = {
@@ -162,19 +174,27 @@ def check(model_type: str, models_dir: Path | None = None) -> list:
     mlx-lm actually imports. The installed copy is reported only as a
     fallback, so a user without the vendored set still gets a useful answer.
     """
-    from .register import ARCH_DIR
+    from .register import ARCH_DIR, source_for
 
     d = models_dir or _models_dir()
     rows = []
     for mod in required_modules(model_type):
-        vend = ARCH_DIR / f"{mod}.py"
-        if vend.is_file():
-            p, vendored = vend, True
+        vsrc, is_pkg = source_for(mod)
+        if vsrc is not None:
+            p, vendored = (vsrc.parent if is_pkg else vsrc), True
         else:
             _host, p = locate(mod)
             vendored = False
-        present = bool(p and p.is_file())
-        sha = (hashlib.sha256(p.read_bytes()).hexdigest() if present else None)
+        present = bool(p and p.exists())
+        if not present:
+            sha = None
+        elif p.is_dir():
+            h = hashlib.sha256()
+            for f in sorted(p.rglob("*.py")):
+                h.update(str(f.relative_to(p)).encode()); h.update(f.read_bytes())
+            sha = h.hexdigest()
+        else:
+            sha = hashlib.sha256(p.read_bytes()).hexdigest()
         rows.append(ArchStatus(mod, present, p if present else None, sha,
                                PINNED_SHA256.get(mod), vendored))
     return rows
