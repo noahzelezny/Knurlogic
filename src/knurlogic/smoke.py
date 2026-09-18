@@ -75,13 +75,23 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
 
     from mlx_lm.utils import load
 
-    # The artifact's own model.py is executed -- that IS the VQ runtime, and
-    # mlx-lm rightly refuses to run it unless asked. Knurlogic asks, and says
-    # so, rather than enabling it quietly.
+    # The artifact's own model.py is executed -- that IS the VQ runtime.
+    #
+    # VERSION GLUE, and a small exhibit of why this package exists: mlx-lm
+    # 0.31.3 (PyPI) executes `model_file` UNCONDITIONALLY; 0.32.0 put it
+    # behind trust_remote_code= and raises without it. Passing the kwarg
+    # blindly is a TypeError on 0.31.3; omitting it is a ValueError on
+    # 0.32.0. So ask the installed signature instead of guessing, and say out
+    # loud that artifact code is being executed either way.
+    import inspect
+
+    kw = {}
     if a.model_file:
-        print(f"trust_remote_code: executing {a.model_file} from the artifact")
-    model, tokenizer = load(str(a.path),
-                            **({"trust_remote_code": True} if a.model_file else {}))
+        if "trust_remote_code" in inspect.signature(load).parameters:
+            kw["trust_remote_code"] = True
+        print(f"executing {a.model_file} from the artifact "
+              f"(its VQ kernels live there)")
+    model, tokenizer = load(str(a.path), **kw)
 
     print("\nprovenance")
     problems = []
