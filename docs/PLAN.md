@@ -543,6 +543,47 @@ whether a model emits well-formed tool calls at all is a property of the
 MODEL. The translation being correct is necessary and nowhere near
 sufficient.
 
+## Tool calling is not one format, and the failure is silent
+
+*2026-09-19. the maintainer, on Flash-Next commenting on his `file_read` tool versus
+Claude's `read_file`: "like it or not, Alibaba did do some distillation."*
+
+What is checkable is the artifact's own chat template, and it is suggestive.
+Flash-Next asks for:
+
+    <tool_call>
+    <function=example_function_name>
+    <parameter=example_parameter_1>
+    value_1
+    </parameter>
+    </function>
+    </tool_call>
+
+That is the Qwen3-Coder / agentic-harness dialect, not the JSON inside
+<tool_call> that plain Qwen3 emits. Whatever it was trained on expected
+harness-shaped tool traffic. That is as far as the evidence goes -- it does
+not identify whose traces -- and it is worth keeping separate from the
+inference about distillation.
+
+**The operational part.** mlx-lm chooses a tool parser by INFERRING it from
+the chat template (`_infer_tool_parser`), and when the inference misses it
+returns None. Tool calls then arrive as prose, nothing errors, and a harness
+looks like a model that keeps describing the function it would call instead
+of calling it -- mystifying from the outside, one line from here.
+
+Two things had to be true and both were checked rather than assumed:
+
+* this artifact keeps its template in a SEPARATE `chat_template.jinja` and
+  leaves `tokenizer_config.json`'s field empty; mlx-lm does load it (8952
+  chars), so tool calling is detected;
+* the inferred parser is `qwen3_coder`, which is the right one.
+
+Swept all 54 artifacts on this machine: 40 qwen3_coder, 7 glm47, 3 gemma4,
+1 json_tools, 3 whose template never mentions tools. **None silently
+unparsed** -- which is the good outcome and is only worth knowing because it
+was measured. `doctor` now prints the dialect, and says so loudly when a
+template asks for tool calls and the engine inferred no parser.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none
