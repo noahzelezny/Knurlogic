@@ -115,7 +115,32 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
     return out
 
 
-def decode_chunk_for(headroom_bytes: int, known: bool = True) -> int:
+def expert_transient_bytes_per_unit(artifact: Artifact):
+    """(bytes per unit of decode chunk, why) -- from the ARTIFACT'S shape.
+
+    The dense-expert transient is `chunk * out * in * 2`, and out/in are the
+    model's: gate_up is [2 * moe_intermediate_size, hidden_size]. Both fields
+    are already read off config.json; until now the resolver ignored them and
+    used a constant frozen for one rung.
+
+    That mattered more than it looks. The prefill spike is a FAMILY effect,
+    not a box effect -- the same spike on M4 and M3, DeepSeek V4 far more
+    dramatic than Qwen3.5 -- which is what this formula says it should be: H
+    and M come from the config and the machine does not enter. A resolver
+    keyed on the box alone cannot express that and will size the knob for the
+    wrong model.
+    """
+    H, M = artifact.hidden_size, artifact.moe_intermediate_size
+    if H and M:
+        return 2 * M * H * 2, f"gate_up [2x{M}, {H}] from this artifact"
+    w, x = S.DECODE_CHUNK_ASSUMED_SHAPE
+    return S.DECODE_CHUNK_BYTES_PER_UNIT, (
+        f"config declares no MoE expert shape, so the transient is sized "
+        f"from the ASSUMED [{w}, {x}] -- the one rung the auto-sizer ran on")
+
+
+def decode_chunk_for(headroom_bytes: int, known: bool = True,
+                     bytes_per_unit: int | None = None) -> int:
     """Chunk width that keeps the largest dense-expert transient bounded.
 
     transient = chunk * out * in * 2 bytes, and on a box where the model
@@ -128,7 +153,8 @@ def decode_chunk_for(headroom_bytes: int, known: bool = True) -> int:
         return S.DECODE_CHUNK_DEFAULT      # no budget given: leave the default
     if headroom_bytes <= 0:
         return S.DECODE_CHUNK_MIN          # does not fit: tightest, not default
-    per = S.DECODE_CHUNK_BYTES_PER_UNIT * S.DECODE_CHUNK_HEADROOM_DIVISOR
+    per = ((bytes_per_unit or S.DECODE_CHUNK_BYTES_PER_UNIT)
+           * S.DECODE_CHUNK_HEADROOM_DIVISOR)
     return max(S.DECODE_CHUNK_MIN,
                min(S.DECODE_CHUNK_DEFAULT, int(headroom_bytes / per)))
 
@@ -214,9 +240,25 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     # VQ_DECODE_CHUNK bounds the dense-EXPERT decode transient, which only
     # exists on the VQ path. A stock affine artifact has no such buffer, so
     # emitting it would be cargo cult.
-    chunk = decode_chunk_for(headroom, known=working_set_bytes > 0)
+    per_unit, shape_why = expert_transient_bytes_per_unit(artifact)
+    known = working_set_bytes > 0
+    chunk = decode_chunk_for(headroom, known=known, bytes_per_unit=per_unit)
+    frozen = decode_chunk_for(headroom, known=known)
+    loosened = chunk > frozen
+    if loosened and not S.DECODE_CHUNK_SHAPE_MAY_LOOSEN:
+        # Tighten on the model's shape, never loosen on it -- see
+        # DECODE_CHUNK_SHAPE_MAY_LOOSEN. Being wrong the other way is an OOM.
+        chunk = frozen
     if artifact.is_vq:
         r.env["VQ_DECODE_CHUNK"] = str(chunk)
+        if known:
+            r.notes.append(f"expert transient sized from {shape_why}")
+        if loosened and not S.DECODE_CHUNK_SHAPE_MAY_LOOSEN:
+            r.notes.append(
+                f"this artifact's experts are small enough to justify a "
+                f"larger chunk, and it was NOT taken: sizing from the model "
+                f"may only tighten until a run measures the loosening "
+                f"direction, because being wrong there is an OOM")
     fits = working_set_bytes <= 0 or headroom > 0
     if artifact.is_vq and chunk < S.DECODE_CHUNK_DEFAULT and fits:
         r.notes.append(
