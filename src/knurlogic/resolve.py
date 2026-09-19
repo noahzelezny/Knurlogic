@@ -115,6 +115,30 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
     return out
 
 
+def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
+    """Set a knob under the name THIS artifact reads, or not at all.
+
+    Returns the name used, or None when the artifact ships a runtime and that
+    runtime reads none of the aliases -- in which case emitting anything would
+    be theatre. That is not hypothetical: VQLAB_PREFILL_CHUNK was emitted for
+    every artifact and is read by none of the 37 bundled runtimes here.
+    """
+    names = S.KNOB_ALIASES.get(logical, (logical,))
+    src = artifact.runtime_source()
+    if not src:
+        name = S.default_alias(logical) if logical in S.KNOB_ALIASES else names[0]
+        r.env[name] = str(value)
+        return name
+    for name in names:
+        if name in src:
+            r.env[name] = str(value)
+            return name
+    r.notes.append(
+        f"{logical} not emitted: this artifact's bundled runtime reads none "
+        f"of {list(names)}, so any value would be a setting that does nothing")
+    return None
+
+
 def expert_transient_bytes_per_unit(artifact: Artifact):
     """(bytes per unit of decode chunk, why) -- from the ARTIFACT'S shape.
 
@@ -266,7 +290,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
                        f"requires (chunk {chunk})")
 
     if artifact.is_vq:
-        r.env["VQ_DECODE_CHUNK"] = str(chunk)
+        emit(r, artifact, "decode_chunk", chunk)
         if known:
             r.notes.append(f"expert transient sized from {shape_why}")
         if loosened and not S.DECODE_CHUNK_SHAPE_MAY_LOOSEN:
@@ -297,7 +321,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
                 f"caps it, not the profile")
         else:
             prefill = asked
-    r.env["VQLAB_PREFILL_CHUNK"] = str(prefill)
+    emit(r, artifact, "prefill_chunk", prefill)
     if prefill < S.PREFILL_CHUNK_DEFAULT:
         r.notes.append(
             "prompt chunk narrowed: token-identical at every width, so this "
@@ -319,7 +343,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
                 f"got {room}: it is reclaimable, not free, and there is only "
                 f"{headroom / GIB:.1f} GiB of headroom to hold it in")
             cache = room
-    r.env["VQLAB_CACHE_LIMIT_GB"] = str(cache)
+    emit(r, artifact, "cache_limit_gb", cache)
     if tune != "balanced":
         r.notes.append(f"tune={tune}: {t['why']}")
 
