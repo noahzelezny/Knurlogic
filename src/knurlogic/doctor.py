@@ -77,6 +77,22 @@ def run(path: str, working_set_gib: float, profile: str,
     for w in r.warnings:
         print(f"\n  WARNING: {w}")
 
+    from . import engine
+    ts = engine.tool_support(a.chat_template())
+    if ts["mentions_tools"]:
+        if ts["parser"]:
+            print(f"\ntools      {ts['parser']} dialect, read from the chat "
+                  f"template")
+        else:
+            print(f"\ntools      TEMPLATE ASKS FOR TOOL CALLS AND THE ENGINE "
+                  f"INFERRED NO PARSER.\n           Calls will come back as "
+                  f"prose, so a harness sees a model that describes the "
+                  f"function\n           it would call instead of calling "
+                  f"it.")
+    elif ts["has_template"]:
+        print("\ntools      this artifact's chat template does not mention "
+              "tools")
+
     reads = a.knobs_read()
     if reads:
         print(f"\n  this artifact's runtime reads {len(reads)} settings; "

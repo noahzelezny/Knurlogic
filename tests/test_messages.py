@@ -195,3 +195,53 @@ def test_a_dead_engine_answers_an_anthropic_shaped_error():
                           {"messages": []})
     assert started["code"] == 502
     assert json.loads(body)["error"]["type"] == "api_error"
+
+
+# --- which tool dialect an artifact speaks ----------------------------------
+# Tool calling is not one format. Across 54 artifacts on this machine:
+# 40 qwen3_coder (<tool_call><function=NAME><parameter=P>), 7 glm47,
+# 3 gemma4, 1 json_tools, 3 whose template never mentions tools. The engine
+# picks a parser by inferring it from the chat template, and when the
+# inference misses it returns None -- at which point tool calls arrive as
+# prose and a harness sees a model that describes the function it would call
+# instead of calling it.
+
+def test_the_template_is_read_from_either_place_an_artifact_keeps_it(tmp_path):
+    """Newer exports put it in chat_template.jinja and leave the tokenizer
+    config's field empty; older ones do the opposite. Reading one answers
+    'no template' for half the artifacts here."""
+    from knurlogic.artifact import Artifact
+    (tmp_path / "config.json").write_text('{"model_type":"x"}')
+    (tmp_path / "tokenizer_config.json").write_text(
+        json.dumps({"chat_template": "OLD STYLE {{ messages }}"}))
+    a = Artifact.load(tmp_path)
+    assert "OLD STYLE" in a.chat_template()
+
+    (tmp_path / "chat_template.jinja").write_text("NEW STYLE {{ messages }}")
+    assert "NEW STYLE" in Artifact.load(tmp_path).chat_template()
+
+
+def test_a_template_asking_for_tools_with_no_parser_is_flagged():
+    """The failure this catches is silent: nothing errors, the model just
+    talks about calling functions."""
+    from knurlogic import engine
+    ts = engine.tool_support(
+        "You have tools. Emit <weird_custom_tag>name</weird_custom_tag>.")
+    assert ts["mentions_tools"] is True
+    assert ts["parser"] is None
+
+
+def test_the_agentic_dialect_is_recognised():
+    """<tool_call>\\n<function=NAME>\\n<parameter=P> is the Qwen3-Coder /
+    agentic-harness form, not the JSON that plain Qwen emits."""
+    from knurlogic import engine
+    ts = engine.tool_support(
+        "reply in the following format:\n\n<tool_call>\n<function=example>\n"
+        "<parameter=p>v</parameter>\n</function>\n</tool_call>")
+    assert ts["parser"] == "qwen3_coder"
+
+
+def test_no_template_is_not_reported_as_no_tools():
+    from knurlogic import engine
+    ts = engine.tool_support("")
+    assert ts["has_template"] is False and ts["mentions_tools"] is False
