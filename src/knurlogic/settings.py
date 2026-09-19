@@ -222,3 +222,33 @@ KNOB_ALIASES = {
 #: guess should fail towards what exists rather than towards what is planned.
 def default_alias(logical: str) -> str:
     return KNOB_ALIASES[logical][-1]
+
+
+# --- who is a knob FOR ------------------------------------------------------
+# Those bundled runtimes read ~38 environment variables. Most are kernel
+# internals -- tile widths, register buffers, SIMD group sizes -- and nobody
+# outside the person writing the kernel has a reason to touch them. Showing
+# all 38 would be the busy-panel mistake: every knob visible, none of them
+# weighted, the eye with nowhere to go.
+#
+# So three tiers, by who would reach for it:
+#
+#   reach     will it run, will it OOM, how fast. The memory knobs and the
+#             tune axis. These are the page.
+#   deeper    measured performance and numerics flags. Real effects, real
+#             findings behind them, but you go looking on purpose.
+#   kernel    read by the runtime, no measured answer here. NOT defaulted and
+#             NOT hidden: listed if someone digs, labelled as the runtime's
+#             own business. Inventing defaults for unmeasured knobs is how
+#             the frozen 2048*4096*2 constant happened.
+KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "KNURLOGIC_CACHE_LIMIT_GB",
+                   "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_PREFILL_CHUNK",
+                   "VQLAB_PREFILL_CHUNK")
+
+
+def knob_tier(name: str) -> str:
+    if name in KNOB_TIER_REACH:
+        return "reach"
+    if name in PERFORMANCE_DEFAULTS or name in NUMERICS_FLAGS:
+        return "deeper"
+    return "kernel"

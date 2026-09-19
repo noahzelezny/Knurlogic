@@ -237,3 +237,31 @@ def test_with_no_bundled_runtime_it_falls_back_to_the_published_name():
                  moe_intermediate_size=1024, vq_other={"vq_linear": {"a": 1}})
     env = resolve(a, 96 * GIB).env
     assert "VQLAB_CACHE_LIMIT_GB" in env and "VQLAB_PREFILL_CHUNK" in env
+
+
+def test_knobs_are_tiered_by_who_would_reach_for_one():
+    """33 knobs on one real artifact: 2 you reach for, 8 measured flags, 23
+    kernel internals. Showing all of them equally is the busy-panel mistake --
+    every knob visible, none weighted, the eye with nowhere to go."""
+    assert S.knob_tier("VQ_DECODE_CHUNK") == "reach"
+    assert S.knob_tier("VQLAB_CACHE_LIMIT_GB") == "reach"
+    assert S.knob_tier("VQ_MOE_GEMMSEG_RTILE") == "deeper"
+    assert S.knob_tier("VQ_D8_REGBUF") == "kernel"
+
+
+def test_unmeasured_knobs_are_named_but_never_given_a_default(tmp_path):
+    """The runtime's own defaults apply. Inventing one for a knob nobody has
+    measured is how the frozen 2048*4096*2 constant happened."""
+    from knurlogic.artifact import Artifact
+    (tmp_path / "config.json").write_text(
+        '{"model_type":"x","model_file":"model.py","vq_linear":{"a":1}}')
+    (tmp_path / "model.py").write_text(
+        'import os\n'
+        'a = os.environ.get("VQ_DECODE_CHUNK")\n'
+        'b = os.environ.get("VQ_D8_REGBUF")\n'
+        'c = os.environ.get("VQ_FUSED_MAX_N")\n')
+    a = Artifact.load(tmp_path)
+    assert a.knobs_read() == ["VQ_D8_REGBUF", "VQ_DECODE_CHUNK",
+                              "VQ_FUSED_MAX_N"]
+    env = resolve(a, 96 * GIB).env
+    assert "VQ_D8_REGBUF" not in env and "VQ_FUSED_MAX_N" not in env

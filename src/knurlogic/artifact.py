@@ -61,6 +61,22 @@ class Artifact:
         except Exception:
             return ""
 
+    def knobs_read(self) -> list:
+        """Every environment variable the bundled runtime reads.
+
+        The honest size of the surface. Knurlogic has a measured answer for a
+        fraction of it, and printing its own list as though it were the whole
+        environment is a quieter version of the same overclaiming this
+        package objects to everywhere else.
+        """
+        import re
+        src = self.runtime_source()
+        if not src:
+            return []
+        return sorted(set(re.findall(
+            r'environ(?:\.get)?\(?\s*\[?["\']([A-Z][A-Z0-9_]{3,})["\']',
+            src)))
+
     def reads_knob(self, name: str) -> bool | None:
         """Does the bundled runtime read this environment variable?
 

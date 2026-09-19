@@ -392,6 +392,28 @@ honest size of the surface, and `doctor` should probably say "this artifact
 reads 38 knobs; knurlogic has a measured answer for 11" rather than implying
 the list it prints is the whole environment.
 
+## Three tiers, by who would reach for a knob
+
+*the maintainer: "we don't need to expose everything, just the things a reasonable
+person would reach for. Maybe fair enough to have more if people look."*
+That is the right cut, and it makes the tiering principled instead of
+incidental. On the real 3.2bpw artifact, 33 knobs:
+
+    reach     2    VQ_DECODE_CHUNK, VQLAB_CACHE_LIMIT_GB -- will it run,
+                   will it OOM. These are the page.
+    deeper    8    the measured performance and numerics flags. Real
+                   findings behind them; you go looking on purpose.
+    kernel   23    tile widths, register buffers, SIMD group sizes. NAMED
+                   and never defaulted -- the runtime's own defaults apply.
+
+The third tier is the honest one. Knurlogic sets none of them and says so:
+"23 more this runtime reads -- knurlogic has no measured answer for these."
+Inventing defaults for unmeasured knobs is exactly how the frozen
+2048*4096*2 constant got into the resolver in the first place.
+
+`doctor` now says the same thing in a line: this artifact reads 33 settings,
+knurlogic has a measured answer for 10.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none
