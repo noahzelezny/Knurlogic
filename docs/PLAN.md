@@ -180,6 +180,53 @@ overrideable; kernel changes still belong in the artifact's `model_file`.
 `overrides/` ships EMPTY: the first override should be one with a measurement
 behind it.
 
+## The spike is a family effect, not a box effect
+
+*2026-09-18, from the maintainer's experimental data.* The same prefill spike appeared
+on M4 and on M3; DeepSeek V4 was far more dramatic than Qwen3.5. So the model
+FAMILY is the bigger factor and the box is close to irrelevant once headroom
+is equal.
+
+That contradicted what the resolver actually did. `Artifact` has read
+`hidden_size` and `moe_intermediate_size` off config.json since it was
+written, and `resolve()` **never used either one** -- it sized the
+dense-expert transient from `DECODE_CHUNK_BYTES_PER_UNIT = 2048 * 4096 * 2`,
+which is the real formula frozen for ONE rung (H=4096, M=1024), because the
+auto-sizer it came from only ever ran there.
+
+The formula is `chunk * out * in * 2` and out/in are the MODEL'S: gate_up is
+`[2 * moe_intermediate_size, hidden_size]`. Nothing in it refers to the
+machine -- which is precisely the observation. `resolve()` now reads the
+shape off the artifact:
+
+    VQ_DECODE_CHUNK, artifact 60 GiB, by headroom left on the box
+    family                      1GiB      2GiB      4GiB      8GiB     16GiB
+    deepseek-v4-ish                4         4         9        18        32
+    the frozen constant            8        16        32        32        32
+    qwen3.5-ish                    8        16        32        32        32
+
+DeepSeek-shaped experts hold 58.7 MB per unit of chunk against the constant's
+16.8, so at 2 GiB of headroom it resolves 4 where the constant said 16 -- a
+4x tighter knob for the family that was measured as "more dramatic". Above
+~16 GiB of headroom every family caps at the default and the distinction
+stops mattering, which is why it went unnoticed.
+
+**Tighten only, for now.** Sizing from the model also LOOSENS the knob for
+small-expert families (qwen3.5-ish would take 32 at 2 GiB). That direction is
+not measured, and being wrong there is an OOM -- the failure this package
+exists to prevent -- so it is refused and the refusal is printed rather than
+hidden. `DECODE_CHUNK_SHAPE_MAY_LOOSEN` flips it in one line, and should be
+flipped by a run, not by a preference. The row above is the experiment: take
+a qwen-shaped rung to ~2 GiB of headroom and see whether 32 survives a long
+prompt where 16 does.
+
+**What this says about "presets".** If the spike keys on the family and the
+family is declared in the artifact's own config, then a preset per BOX is the
+wrong shape -- and a preset object may not be needed at all. The artifact
+already carries what decides the knob; the resolver just has to read it.
+Keep that direction: prefer computing from the artifact over enumerating
+boxes, and add a preset only for something the config genuinely cannot say.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none

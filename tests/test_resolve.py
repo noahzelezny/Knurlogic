@@ -148,3 +148,60 @@ def test_dense_vq_artifacts_are_recognised_as_vq():
     assert r.env.get("VQ_MOE_GEMMSEG_RTILE") == "32"
     assert not resolve(_art(vq_modules={}), 96 * GIB).env.get(
         "VQ_MOE_GEMMSEG_RTILE")
+
+
+# --- the spike is a FAMILY effect, not a box effect -------------------------
+# Measured across boxes and families: the same prefill spike on M4 and on M3,
+# and DeepSeek V4 far more dramatic than Qwen3.5. A resolver keyed on the box
+# alone cannot express that. The transient is chunk * out * in * 2, and
+# out/in are the model's -- gate_up is [2 * moe_intermediate_size,
+# hidden_size] -- so the formula predicts exactly the observation.
+
+def _family(hidden, moe_inter, size_gib=70):
+    return _art(hidden_size=hidden, moe_intermediate_size=moe_inter,
+                bytes_on_disk=size_gib * GIB)
+
+
+def test_same_box_different_family_resolves_differently():
+    """The observation, encoded: on ONE box, a big-expert family must get a
+    tighter chunk than a small-expert one. Same headroom, same everything
+    else -- only the model's shape differs."""
+    box = 80 * GIB
+    big = resolve(_family(7168, 2048), box)      # deepseek-shaped experts
+    small = resolve(_family(2560, 640), box)     # qwen-shaped experts
+    assert int(big.env["VQ_DECODE_CHUNK"]) < int(small.env["VQ_DECODE_CHUNK"]), (
+        "the family with larger experts holds a larger dense transient per "
+        "unit of chunk, so it is the one that has to be resolved down")
+
+
+def test_same_artifact_two_boxes_same_headroom_resolves_the_same():
+    """The other half of the observation: the box is not the discriminator.
+    An M3 and an M4 with the same usable working set get the same answer --
+    nothing in the transient formula refers to the machine."""
+    a = _family(7168, 2048, size_gib=60)
+    assert (resolve(a, 96 * GIB).env == resolve(a, 96 * GIB).env)
+
+
+def test_a_config_without_an_expert_shape_says_it_assumed_one():
+    """A dense or unusual config declares no MoE shape. Falling back is fine;
+    falling back silently is not -- the number would look measured."""
+    r = resolve(_art(hidden_size=None, moe_intermediate_size=None), 80 * GIB)
+    assert any("ASSUMED" in n or "assumed" in n.lower() for n in r.notes)
+
+
+def test_the_model_shape_may_tighten_but_not_loosen_yet():
+    """Sizing from the model loosens the knob for small-expert families. That
+    direction has not been measured, and being wrong there is an OOM -- so it
+    is refused, and the refusal is said out loud rather than hidden."""
+    from knurlogic.resolve import (decode_chunk_for,
+                                   expert_transient_bytes_per_unit)
+    small = _family(2560, 640)
+    headroom = 2 * GIB
+    per, _ = expert_transient_bytes_per_unit(small)
+    would = decode_chunk_for(headroom, bytes_per_unit=per)
+    frozen = decode_chunk_for(headroom)
+    assert would > frozen, "fixture must exercise the loosening direction"
+
+    r = resolve(small, small.bytes_on_disk + headroom)
+    assert int(r.env["VQ_DECODE_CHUNK"]) == frozen
+    assert any("NOT taken" in n for n in r.notes)
