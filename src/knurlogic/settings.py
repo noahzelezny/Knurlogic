@@ -196,3 +196,29 @@ KNOB_DOC = {
     "VQ_DECODE_BF16IO": ("bf16 IO on the decode path",
                          "F103/F105 numerics-active. Off at v1.5."),
 }
+
+
+# --- the names are the ARTIFACT'S, not ours --------------------------------
+# `VQLAB_CACHE_LIMIT_GB` is a knurlogic-shaped name for something read by 24
+# of the 37 bundled runtimes on this machine. Those files are published. A
+# tidy-up rename in the resolver would not tidy anything -- it would emit a
+# name nobody reads and silently stop bounding the cache on every artifact
+# already shipped, which is precisely the failure mode this package exists to
+# end, dressed as housekeeping.
+#
+# So a knob has a LOGICAL name here and a list of env names, preferred first.
+# The resolver emits whichever one the target artifact actually reads. A new
+# rung can bundle a runtime reading the new name and every published rung
+# keeps the one it shipped with -- the same per-artifact boundary `model_file`
+# already establishes, used for the interface rather than the engine.
+KNOB_ALIASES = {
+    "cache_limit_gb": ("KNURLOGIC_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB"),
+    "prefill_chunk": ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"),
+    "decode_chunk": ("VQ_DECODE_CHUNK",),
+}
+
+#: When no bundled runtime can be asked, emit this one. The LAST alias, not
+#: the first: the legacy name is the one with 24 artifacts behind it, and a
+#: guess should fail towards what exists rather than towards what is planned.
+def default_alias(logical: str) -> str:
+    return KNOB_ALIASES[logical][-1]

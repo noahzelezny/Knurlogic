@@ -357,6 +357,41 @@ what can be applied live -- everything else behind "all knobs". Provenance
 moved from printed-under-every-row to a click on the row. Same information,
 one decision at a time.
 
+## The VQLAB_ names: a migration, not a rename
+
+*2026-09-18. Noah: "should probably use knurlogic instead of vqlab though."*
+Right instinct, wrong operation -- and the difference is the whole lesson of
+the session.
+
+Scanned all 37 bundled runtimes on this box for the environment they actually
+read. `VQLAB_CACHE_LIMIT_GB` is read by **24 of 37**, and those files are
+published. Renaming it in the resolver would emit a name nobody reads and
+silently stop bounding the cache on every artifact already shipped -- the
+exact failure this package exists to end, dressed as housekeeping.
+
+So a knob now has a LOGICAL name and a list of env names, preferred first
+(`settings.KNOB_ALIASES`), and `resolve()` emits whichever one the target
+artifact actually reads. A new rung can bundle a runtime reading
+`KNURLOGIC_CACHE_LIMIT_GB`; every published rung keeps the name it shipped
+with. That is the `model_file` boundary again -- per artifact, never global --
+applied to the interface instead of the engine. With no runtime to ask, it
+falls back to the LEGACY name: a guess should fail towards the 24 artifacts
+that exist, not towards the one that is planned.
+
+`prefill_chunk` is now emitted for nobody, with a note saying so, because no
+runtime reads either alias.
+
+**What the scan also said, and it is worth sitting with.** Those runtimes
+read ~38 environment variables. Knurlogic resolves 11. `VQ_FUSED_MAX_N` is
+read by 37/37 and knurlogic has never heard of it; `VQ_EXPERT_SIMD`,
+`VQ_DENSE_TILED`, `VQ_D8_REGBUF` and two dozen others are read by 24-25 each.
+That is not a to-do list -- every one of those needs a measurement before it
+gets a default, and inventing defaults for knobs nobody has measured is how
+the frozen 2048*4096*2 constant happened in the first place. But it is the
+honest size of the surface, and `doctor` should probably say "this artifact
+reads 38 knobs; knurlogic has a measured answer for 11" rather than implying
+the list it prints is the whole environment.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none
