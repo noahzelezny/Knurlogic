@@ -35,6 +35,15 @@
  .go{background:var(--acc);color:var(--accfg);border-color:transparent;font-weight:600;cursor:pointer}
  .go[disabled]{opacity:.35;cursor:default}
  .ghost{background:transparent;color:var(--dim);cursor:pointer}
+ .dials{display:flex;gap:30px;flex-wrap:wrap;margin:22px 0 8px}
+ .dial{text-align:center;width:128px;-webkit-user-select:none;user-select:none}
+ .dial svg{cursor:ns-resize;touch-action:none;display:block;margin:0 auto}
+ .dial .nm{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:var(--faint);
+   margin-top:7px;letter-spacing:.2px}
+ .dial .vv{font-size:15px;font-weight:600;margin-top:5px;font-variant-numeric:tabular-nums}
+ .dial .vv em{font-style:normal;font-size:11px;color:var(--dim);font-weight:400;margin-left:3px}
+ .dial .pend{color:var(--acc)}
+ .dial .capnote{font-size:10.5px;color:var(--warn);margin-top:4px;line-height:1.35}
  .knob{padding:7px 0;border-top:1px solid var(--line);cursor:pointer}
  .knob:first-child{border-top:0}
  .knob .hd{display:flex;justify-content:space-between;gap:14px;align-items:baseline}
@@ -79,6 +88,7 @@
       <label>working set <input id="ws" type="number" min="0" step="1"></label>
       <button class="go" id="apply" disabled>Apply</button>
     </div>
+    <div class="dials" id="dials"></div>
     <div class="msg" id="applies"></div>
     <div id="knobs" style="margin-top:14px"></div>
     <details class="more"><summary>measured flags</summary><div id="rest"></div></details>
@@ -116,6 +126,104 @@ function knobHTML(k){
     <div class="why">${esc(k.what)}${k.why?' — '+esc(k.why):''}
       <br><span style="color:var(--faint)">${esc(k.reach_why)}</span></div></div>`;
 }
+// A knurl is the crosshatch cut into metal so a hand can grip a machined
+// part, so the control is a knob with a knurled rim rather than a slider.
+// It is not decoration: the positions are DISCRETE because the measurements
+// are, and the rim stops turning where the evidence stops -- 32 on the decode
+// chunk because nothing above it was ever faster, and at whatever the box's
+// headroom allows for the cache. A control that lets you choose a setting the
+// resolver would refuse is a control that lies.
+const A0=-135, A1=135;                       // sweep, degrees
+function dial(k){
+  const vals=k.values, idx=Math.max(0,vals.findIndex(v=>String(v)===String(k.running)));
+  const capIdx=k.cap==null?vals.length-1:vals.findIndex(v=>String(v)===String(k.cap));
+  const ang=i=>A0+(A1-A0)*(vals.length<2?0:i/(vals.length-1));
+  const pt=(a,r)=>[36+r*Math.sin(a*Math.PI/180), 36-r*Math.cos(a*Math.PI/180)];
+  let ticks='';
+  vals.forEach((v,i)=>{
+    const [x1,y1]=pt(ang(i),27), [x2,y2]=pt(ang(i),31);
+    const dead=i>capIdx;
+    ticks+=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${
+      dead?'var(--line)':(i<=idx?'var(--acc)':'var(--faint)')}" stroke-width="1.6"
+      stroke-linecap="round"/>`;
+  });
+  let knurl='';                              // the grip itself
+  for(let a=-180;a<180;a+=5){
+    const [x1,y1]=pt(a,17.5), [x2,y2]=pt(a,22);
+    knurl+=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+      stroke="var(--faint)" stroke-width=".85" opacity=".55"/>`;
+  }
+  const [px,py]=pt(ang(idx),16.5);
+  const unit=k.unit?`<em>${esc(k.unit)}</em>`:'';
+  const pend=k.changed?`<span class="pend">→ ${esc(k.would_be)}</span>`:'';
+  return `<div class="dial" data-name="${esc(k.name)}" data-idx="${idx}"
+      data-cap="${capIdx}" tabindex="0">
+    <svg viewBox="0 0 72 72" width="94" height="94">
+      ${ticks}
+      <circle cx="36" cy="36" r="22" fill="color-mix(in srgb,var(--fg) 5%,transparent)"
+        stroke="var(--line)"/>
+      ${knurl}
+      <circle cx="36" cy="36" r="17.5" fill="var(--bg)" stroke="var(--line)"/>
+      <line class="ptr" x1="36" y1="36" x2="${px}" y2="${py}" stroke="var(--acc)"
+        stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="36" cy="36" r="1.6" fill="var(--faint)"/>
+    </svg>
+    <div class="vv">${esc(k.running)}${unit} ${pend}</div>
+    <div class="nm">${esc(k.name.replace(/^(VQ|VQLAB|KNURLOGIC)_/,''))}</div>
+    ${k.cap!=null?`<div class="capnote">stops at ${esc(k.cap)} — ${esc(k.cap_why)}</div>`:''}
+  </div>`;
+}
+function wireDials(){
+  // Mutate the live node, never re-render it mid-gesture. Replacing the
+  // element with outerHTML destroyed the very element holding the pointer
+  // capture, so pointerup never fired and the turn was never applied -- the
+  // knob moved on screen and nothing happened underneath, which is the one
+  // behaviour a control must never have.
+  document.querySelectorAll('.dial').forEach(el=>{
+    const k=(DOC.knobs||[]).find(x=>x.name===el.dataset.name); if(!k) return;
+    const cap=+el.dataset.cap, svg=el.querySelector('svg');
+    const ticks=[...svg.querySelectorAll('line')].slice(0,k.values.length);
+    const ptr=svg.querySelector('.ptr'), vv=el.querySelector('.vv');
+    let idx=+el.dataset.idx, startY=0, startIdx=0, dragging=false;
+    const ang=i=>A0+(A1-A0)*(k.values.length<2?0:i/(k.values.length-1));
+    const draw=()=>{
+      const a=ang(idx)*Math.PI/180;
+      ptr.setAttribute('x2', 36+16.5*Math.sin(a));
+      ptr.setAttribute('y2', 36-16.5*Math.cos(a));
+      ticks.forEach((t,i)=>t.setAttribute('stroke',
+        i>cap?'var(--line)':(i<=idx?'var(--acc)':'var(--faint)')));
+      const moved=String(k.values[idx])!==String(k.running);
+      vv.innerHTML=`${k.values[idx]}${k.unit?`<em>${k.unit}</em>`:''}`+
+        (moved?' <span class="pend">•</span>':'');
+    };
+    const set=i=>{ i=Math.max(0,Math.min(cap,i)); if(i!==idx){ idx=i; draw(); } };
+    svg.addEventListener('pointerdown',e=>{
+      dragging=true; startY=e.clientY; startIdx=idx;
+      svg.setPointerCapture(e.pointerId); e.preventDefault();
+    });
+    svg.addEventListener('pointermove',e=>{
+      if(dragging) set(startIdx+Math.round((startY-e.clientY)/14));
+    });
+    const stop=()=>{ if(!dragging) return; dragging=false;
+      if(String(k.values[idx])!==String(k.running))
+        applyKnob(k.name,k.values[idx]); };
+    svg.addEventListener('pointerup',stop);
+    svg.addEventListener('pointercancel',stop);
+    el.addEventListener('keydown',e=>{
+      const d={ArrowUp:1,ArrowRight:1,ArrowDown:-1,ArrowLeft:-1}[e.key];
+      if(!d) return; e.preventDefault(); set(idx+d);
+      if(String(k.values[idx])!==String(k.running))
+        applyKnob(k.name,k.values[idx]);
+    });
+  });
+}
+async function applyKnob(name,value){
+  const r=await (await fetch('/settings.json',{method:'POST',
+    body:JSON.stringify({[name]:value})})).json();
+  const what=(r.applied||{})[name];
+  $('applies').innerHTML=what?`<b>${esc(name)}</b> ${esc(what)}`:'Nothing changed.';
+  loadSettings({tune:ASK.tune||'',working_set_gib:$('ws').value||''});
+}
 async function loadSettings(q){
   const qs=new URLSearchParams(q||{}).toString();
   try{ DOC=await (await fetch('/settings.json'+(qs?'?'+qs:''))).json() }catch(e){ return }
@@ -135,9 +243,12 @@ async function loadSettings(q){
   // the memory knobs are the page, the measured flags are a click away, and
   // the kernel internals are named but never defaulted.
   const ks=DOC.knobs||[];
-  const shown=ks.filter(k=>k.tier==='reach'||k.changed||k.reach==='live');
-  $('knobs').innerHTML=shown.map(knobHTML).join('')||
-    '<div class="msg">Nothing differs from what is running.</div>';
+  $('dials').innerHTML=ks.filter(k=>k.values&&k.reach==='live').map(dial).join('');
+  wireDials();
+  const dialled=new Set(ks.filter(k=>k.values&&k.reach==='live').map(k=>k.name));
+  const shown=ks.filter(k=>!dialled.has(k.name)&&
+    (k.tier==='reach'||k.changed||k.reach==='live'));
+  $('knobs').innerHTML=shown.map(knobHTML).join('');
   $('rest').innerHTML=ks.filter(k=>!shown.includes(k)).map(knobHTML).join('');
   const un=DOC.unmanaged||[];
   $('unmanaged').innerHTML=un.length

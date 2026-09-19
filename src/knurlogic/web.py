@@ -110,6 +110,30 @@ def settings_document(artifact, live_env: dict, live_tune: str,
         ws = ws or live_working_set
 
         r = resolve_fn(ws, tune)
+        # A knob the ARTIFACT declares outranks anything scanned or hard
+        # coded here: its config.json is the record of what shipped.
+        declared = artifact.declared_knobs()
+        headroom = max(ws - artifact.bytes_on_disk, 0)
+
+        def _range(name):
+            d = declared.get(name) or {}
+            if d.get("values"):
+                return list(d["values"]), d.get("unit", "")
+            return S.KNOB_RANGE.get(name, (None, ""))
+
+        def _cap(name, values):
+            """Where the control stops, and why. The knob turns as far as the
+            measurement allows and no further -- a control that lets you pick
+            a setting the resolver would refuse is a control that lies."""
+            if not values or "CACHE_LIMIT" not in name:
+                return None, ""
+            room = headroom / 2 / (1 << 30)
+            usable = [v for v in values if v <= room] or [values[0]]
+            if usable[-1] >= values[-1]:
+                return None, ""
+            return usable[-1], (f"{headroom / (1 << 30):.1f} GiB of headroom "
+                                f"is all there is to hold it in")
+
         knobs = []
         for k in sorted(set(live_env) | set(r.env)):
             what, why = S.KNOB_DOC.get(k, ("", ""))
@@ -123,6 +147,12 @@ def settings_document(artifact, live_env: dict, live_tune: str,
                 "what": what, "why": why,
                 "reach": reach, "reach_why": reach_why,
             })
+            vals, unit = _range(k)
+            if vals:
+                cap, cap_why = _cap(k, vals)
+                knobs[-1].update(values=vals, unit=unit, cap=cap,
+                                 cap_why=cap_why,
+                                 doc=(declared.get(k) or {}).get("doc", ""))
         return {
             "artifact": artifact.path.name,
             "live": {"tune": live_tune,

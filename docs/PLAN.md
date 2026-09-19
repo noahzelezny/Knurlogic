@@ -414,6 +414,47 @@ Inventing defaults for unmeasured knobs is exactly how the frozen
 `doctor` now says the same thing in a line: this artifact reads 33 settings,
 knurlogic has a measured answer for 10.
 
+## Knobs, and where kernel work lives
+
+*2026-09-18. Noah: kernel work stays with vqLab, which packs the kernels with
+the artifact -- then maybe those knobs become available.*
+
+That draws the line cleanly. vqLab authors kernels and the knobs that go with
+them; knurlogic does not own them and must not invent defaults for them.
+`Artifact.declared_knobs()` reads a `knobs` block from config.json --
+
+    "knobs": {"VQ_D8_ROWS_TG": {"default": "8", "values": [4, 8, 16],
+                                "doc": "rows per threadgroup"}}
+
+-- and it OUTRANKS anything knurlogic scans or hard codes, because the
+artifact's config is the record of what shipped. The block is empty in every
+artifact today; it is a hand-off point waiting for a packer to write to it.
+When one does, those 23 kernel knobs stop being a list of names and become
+controls, without knurlogic having measured a single one of them itself.
+
+## The control is a knob, because that is what a knurl is
+
+A knurl is the crosshatch cut into metal so a hand can grip a machined part.
+So the two settings a person reaches for are rotary knobs with a knurled rim,
+not sliders -- and it is not decoration:
+
+* **The positions are discrete** (4/8/16/32; 0.5-16 GiB), because the
+  measurements are. A continuous slider would invent positions no run ever
+  measured.
+* **The rim stops where the evidence stops.** VQ_DECODE_CHUNK ends at 32
+  because 128 -> 32 is 1.37x and nothing above was ever better. The cache
+  dial stops at whatever this box's headroom can hold and prints why
+  ("stops at 6 -- 12.3 GiB of headroom is all there is to hold it in").
+  Ticks past the cap are drawn dead. A control that lets you choose a setting
+  the resolver would refuse is a control that lies.
+* Turning one applies it LIVE, through the same path as the tune buttons.
+
+Bug found by driving it rather than reading it: the drag handler re-rendered
+the dial with `outerHTML` on every step, which destroyed the element holding
+the pointer capture -- so `pointerup` never fired, the knob moved on screen
+and nothing happened underneath. It mutates the live node now. That is the
+one behaviour a control must never have, and no test would have caught it.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none

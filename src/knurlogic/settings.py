@@ -252,3 +252,21 @@ def knob_tier(name: str) -> str:
     if name in PERFORMANCE_DEFAULTS or name in NUMERICS_FLAGS:
         return "deeper"
     return "kernel"
+
+
+# --- what a knob can be turned TO -------------------------------------------
+# Only the knobs a person reaches for get a range. The rest are named, not
+# turned. A range is (values, unit): discrete, because these are discrete --
+# a continuous slider over a chunk width would invent positions that no run
+# ever measured.
+#
+# The maximum is a MEASUREMENT, not a taste. VQ_DECODE_CHUNK stops at 32
+# because 128 -> 32 is 1.37x on every rung measured and nothing above it was
+# ever better; the control should stop where the evidence stops.
+KNOB_RANGE = {
+    "VQ_DECODE_CHUNK": ([4, 8, 16, 32], ""),
+    "VQLAB_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
+                             "GiB"),
+    "KNURLOGIC_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
+                                 "GiB"),
+}
