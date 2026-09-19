@@ -108,10 +108,12 @@ def run(path: str, host: str, port: int, working_set_gib: float,
           f"without a browser")
     print(f"  /settings.json - every knob, what it would be at another tune, "
           f"and why it exists")
-    print(f"\npoint a Claude-Messages harness at it with:")
-    print(f"  ANTHROPIC_BASE_URL=http://{host}:{port} ANTHROPIC_API_KEY=x \\")
-    print(f"  ANTHROPIC_DEFAULT_SONNET_MODEL={a.path.name} claude",
-          flush=True)
+    from . import connect
+    print(f"\npoint a Claude-Messages harness at it:\n")
+    print("  " + connect.claude_command(
+        f"http://{host}:{port}", a.path.name).replace("\n", "\n  "))
+    print(f"\n  knurlogic connect --port {port} --model {a.path.name}"
+          f"   for the other clients", flush=True)
     # The live environment, kept current as knobs are applied, so the panel
     # keeps telling the truth about what is RUNNING rather than about what
     # was resolved at startup.

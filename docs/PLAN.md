@@ -584,6 +584,28 @@ unparsed** -- which is the good outcome and is only worth knowing because it
 was measured. `doctor` now prints the dialect, and says so loudly when a
 template asks for tool calls and the engine inferred no parser.
 
+## `knurlogic connect`, and the blast radius of a config
+
+exo's INTEGRATIONS panel is the most useful thing in that UI: an endpoint is
+worthless until something is pointed at it, and the pointing is four
+environment variables nobody remembers. `knurlogic connect` and a CONNECT
+panel on `/` write them out, for a Claude-Messages harness and for anything
+that speaks OpenAI.
+
+Two shapes, because they have different blast radius: a terminal one-liner
+that affects one command, and a PROJECT `.claude/settings.json` that affects
+sessions started in one directory. **Deliberately not offered: writing the
+global `~/.claude/settings.json`.** That would silently route every session on
+the machine -- including work that has nothing to do with a local model -- at
+a 3-bit quantisation, and a config change nobody can see is how you spend an
+afternoon debugging the wrong thing.
+
+Also in there: `API_TIMEOUT_MS` raised, because a local model is slower per
+token than the hosted one the harness was tuned against and the default
+timeout is the first thing to bite on a long tool loop; and all three model
+slots set, or the harness falls back to a hosted name this server has never
+heard of.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none

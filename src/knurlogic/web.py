@@ -32,6 +32,14 @@ def _text(s: str) -> tuple:
     return s.encode(), "text/plain; charset=utf-8"
 
 
+def _connect_doc(artifact) -> dict:
+    """How to point a client here -- the panel exo gets right."""
+    from . import connect
+    return {"model": artifact.path.name,
+            "claude": connect.claude_command("__BASE__", artifact.path.name),
+            "openai": connect.openai_snippet("__BASE__", artifact.path.name)}
+
+
 def raw(fn):
     """Mark a handler that writes its own response.
 
@@ -194,6 +202,7 @@ def settings_document(artifact, live_env: dict, live_tune: str,
             "dead_knobs": sorted(
                 k["name"] for k in knobs if k["reach"] == "no-effect"),
             "exports": r.as_exports(),
+            "connect": _connect_doc(artifact),
             "wired": wired_advice or {},
         }
     return handler
