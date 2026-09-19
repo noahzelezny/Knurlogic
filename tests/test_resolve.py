@@ -116,3 +116,23 @@ def test_package_architectures_are_found_and_hosted_correctly():
     assert is_pkg, "glm5_next must vendor as a package"
     assert arch.host_for("glm5_next") == "mlx_vlm"
     assert arch.host_for("qwen4_exp") == "mlx_lm"
+
+
+def test_mlx_lives_behind_the_engine_seam():
+    """The point of engine.py is that it is the ONLY module importing an
+    engine. If mlx names leak back into the other modules, swapping the
+    engine stops being a one-file change and this test is the tripwire."""
+    import pathlib
+    import re
+    src = pathlib.Path(__file__).resolve().parents[1] / "src" / "knurlogic"
+    offenders = {}
+    for f in src.glob("*.py"):
+        if f.name in ("engine.py", "vendor.py"):
+            continue  # the seam itself; vendor shells out to another env
+        code = "\n".join(
+            l for l in f.read_text().splitlines()
+            if not l.lstrip().startswith("#") and '"""' not in l)
+        hits = re.findall(r"\b(?:import|from)\s+(mlx\w*)", code)
+        if hits:
+            offenders[f.name] = sorted(set(hits))
+    assert not offenders, f"mlx imported outside the seam: {offenders}"

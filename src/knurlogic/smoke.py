@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import arch, register
+from . import arch, engine, register
 from .artifact import Artifact
 from .resolve import resolve
 
@@ -73,25 +73,12 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
     import os
     os.environ.update(r.env)
 
-    from mlx_lm.utils import load
-
-    # The artifact's own model.py is executed -- that IS the VQ runtime.
-    #
-    # VERSION GLUE, and a small exhibit of why this package exists: mlx-lm
-    # 0.31.3 (PyPI) executes `model_file` UNCONDITIONALLY; 0.32.0 put it
-    # behind trust_remote_code= and raises without it. Passing the kwarg
-    # blindly is a TypeError on 0.31.3; omitting it is a ValueError on
-    # 0.32.0. So ask the installed signature instead of guessing, and say out
-    # loud that artifact code is being executed either way.
-    import inspect
-
-    kw = {}
+    print(f"engine    {engine.describe()}")
     if a.model_file:
-        if "trust_remote_code" in inspect.signature(load).parameters:
-            kw["trust_remote_code"] = True
         print(f"executing {a.model_file} from the artifact "
               f"(its VQ kernels live there)")
-    model, tokenizer = load(str(a.path), **kw)
+    model, tokenizer = engine.load(str(a.path),
+                                   executes_artifact_code=bool(a.model_file))
 
     print("\nprovenance")
     problems = []
@@ -107,11 +94,9 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
                 f"{mod} resolved from {where}; a downloader installing "
                 f"knurlogic would not have that copy")
 
-    from mlx_lm.generate import generate
     print("\ngenerating...")
-    out = generate(model, tokenizer, prompt="The capital of France is",
-                   max_tokens=max_tokens, verbose=False)
-    text = (out or "").strip()
+    text = engine.generate(model, tokenizer,
+                           "The capital of France is", max_tokens).strip()
     print(f"  -> {text!r}")
     if not text:
         print("FAIL: loaded but produced no tokens", file=sys.stderr)
@@ -131,13 +116,13 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
             print("refusing to pin: provenance is not clean", file=sys.stderr)
             return 1
         data = json.loads(PINS.read_text()) if PINS.is_file() else {}
-        import mlx_lm
         for row in arch.check(a.model_type):
             if row.vendored and row.sha256:
                 data[row.module] = {
                     "sha256": row.sha256,
                     "host": arch.host_for(row.module),
-                    "validated_with_mlx_lm": mlx_lm.__version__,
+                    "validated_with": str(engine.info(
+                        arch.host_for(row.module))),
                     "validated_on_artifact": a.path.name,
                 }
                 print(f"pinned {row.module} -> {row.sha256[:16]}...")
