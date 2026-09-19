@@ -116,6 +116,14 @@
   </section>
 
   <section>
+    <div class="lab">Connect</div>
+    <div class="msg" id="connwhy">Anything that speaks OpenAI or the Claude
+      Messages shape can use this server.</div>
+    <div class="seg" id="conntabs" style="margin:10px 0"></div>
+    <pre id="conn" style="user-select:all"></pre>
+  </section>
+
+  <section>
     <div class="lab">Try it</div>
     <div id="log"></div>
     <form id="f"><input id="q" placeholder="Ask it something" autocomplete="off">
@@ -285,6 +293,23 @@ async function loadSettings(q){
        <div class="k" style="color:var(--faint);margin-top:8px;line-height:1.9">
        ${un.map(u=>esc(u.name)).join('  ')}</div>` : '';
   $('env').textContent=DOC.exports||'';
+
+  // The endpoint is worthless until something is pointed at it, and the
+  // pointing is four variables nobody remembers.
+  const C=DOC.connect;
+  if(C){
+    const base=location.origin;
+    const tabs={'claude code':C.claude, 'openai clients':C.openai};
+    const draw=k=>{ $('conn').textContent=(tabs[k]||'').split('__BASE__').join(base);
+      [...$('conntabs').children].forEach(b=>
+        b.setAttribute('aria-pressed', b.textContent===k)); };
+    $('conntabs').innerHTML='';
+    Object.keys(tabs).forEach((k,i)=>{
+      const b=document.createElement('button');
+      b.textContent=k; b.onclick=()=>draw(k); $('conntabs').appendChild(b);
+      if(i===0) setTimeout(()=>draw(k),0);
+    });
+  }
 
   const chg=ks.filter(k=>k.changed);
   const live=chg.filter(k=>k.reach==='live'), rest=chg.filter(k=>k.reach==='restart');
