@@ -116,6 +116,7 @@ def settings_document(artifact, live_env: dict, live_tune: str,
             reach, reach_why = knob_reach(artifact, k, live_knobs,
                                           restart_why)
             knobs.append({
+                "tier": S.knob_tier(k),
                 "name": k, "running": live_env.get(k),
                 "would_be": r.env.get(k),
                 "changed": live_env.get(k) != r.env.get(k),
@@ -137,6 +138,13 @@ def settings_document(artifact, live_env: dict, live_tune: str,
             # restart, and some do nothing on this artifact at all. Saying
             # "restart" over all of them was true of most and wrong about the
             # two that matter most for not running out of memory.
+            # The knobs this artifact's runtime reads that knurlogic has no
+            # measured answer for. Not defaulted and not hidden: the runtime's
+            # own defaults apply, and pretending the resolved list is the
+            # whole environment is a quieter kind of overclaiming.
+            "unmanaged": [
+                {"name": n, "tier": S.knob_tier(n)}
+                for n in artifact.knobs_read() if n not in r.env],
             "live_knobs": sorted(
                 k["name"] for k in knobs if k["reach"] == "live"),
             "dead_knobs": sorted(

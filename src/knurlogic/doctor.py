@@ -77,6 +77,12 @@ def run(path: str, working_set_gib: float, profile: str,
     for w in r.warnings:
         print(f"\n  WARNING: {w}")
 
+    reads = a.knobs_read()
+    if reads:
+        print(f"\n  this artifact's runtime reads {len(reads)} settings; "
+              f"knurlogic has a measured answer for {len(r.env)}. The rest "
+              f"keep the runtime's own defaults.")
+
     adv = wired.advise(a.bytes_on_disk)
     if adv.get("known"):
         print("\n" + wired.render(adv))
