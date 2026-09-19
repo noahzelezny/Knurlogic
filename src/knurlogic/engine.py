@@ -65,6 +65,34 @@ def describe() -> str:
     return " | ".join(str(info(h)) for h in HOST_PACKAGES)
 
 
+def memory() -> dict:
+    try:
+        import mlx.core as mx
+    except Exception:
+        return {"available": False}
+    try:
+        info = (mx.device_info() if hasattr(mx, "device_info")
+                else mx.metal.device_info())
+        ws = int(info.get("max_recommended_working_set_size", 0))
+        total = int(info.get("memory_size", ws))
+        device = info.get("device_name", "unknown")
+    except Exception:
+        ws = total = 0
+        device = "unknown"
+    active = int(mx.get_active_memory())
+    cache = int(mx.get_cache_memory())
+    return {
+        "available": True,
+        "device": device,
+        "active_bytes": active,
+        "cache_bytes": cache,
+        "peak_bytes": int(mx.get_peak_memory()),
+        "working_set_bytes": ws,
+        "total_bytes": total,
+        "headroom_bytes": max(ws - active, 0),
+    }
+
+
 def models_module(host: str = "mlx_lm"):
     """The package a model architecture is looked up in."""
     return importlib.import_module(f"{host}.models")
@@ -87,7 +115,8 @@ def load(path: str, executes_artifact_code: bool = False):
 
 
 def serve(model_path: str, host: str, port: int,
-          executes_artifact_code: bool = False, extra: list | None = None):
+          executes_artifact_code: bool = False, extra: list | None = None,
+          status_fn=None):
     """Hand off to the engine's own OpenAI-compatible server.
 
     The engine ships a complete one -- request schema, streaming, chat
@@ -111,6 +140,38 @@ def serve(model_path: str, host: str, port: int,
         return _real(self, model_path, *a, **k)
 
     srv.ModelProvider.load = _pinned
+
+    # /status and /status.json, added to the engine's own handler. The
+    # engine serves; this only answers "what is loaded and what is it
+    # using", which nothing else does.
+    if status_fn is not None:
+        _real_get = srv.APIHandler.do_GET
+        _count = {"n": 0}
+        _real_post = srv.APIHandler.do_POST
+
+        def _post(self):
+            _count["n"] += 1
+            return _real_post(self)
+
+        def _get(self):
+            if self.path.rstrip("/") in ("/status", "/status.json"):
+                import json as _json
+
+                snap, text = status_fn(_count["n"])
+                body = (_json.dumps(snap, indent=1) if "json" in self.path
+                        else text).encode()
+                self.send_response(200)
+                self.send_header("Content-Type",
+                                 "application/json" if "json" in self.path
+                                 else "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            return _real_get(self)
+
+        srv.APIHandler.do_GET = _get
+        srv.APIHandler.do_POST = _post
 
     argv = [sys.argv[0], "--model", model_path, "--host", host,
             "--port", str(port)]
