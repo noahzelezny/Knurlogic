@@ -622,6 +622,44 @@ timeout is the first thing to bite on a long tool loop; and all three model
 slots set, or the harness falls back to a hosted name this server has never
 heard of.
 
+## The MTP head that gets thrown away
+
+*2026-09-19. Noah: "it's possible to batch with an MTP head. There's no
+reason for mlx not to. A PR would take forever, but we can just fix it.
+Knurlogic is a tool to take control of your own machine."*
+
+That is the thesis, and chasing it down found something sharper than the
+batching flag. Three separate facts, each read rather than assumed:
+
+1. **mlx-lm's batching gate is about a SEPARATE draft model**, not an MTP
+   head: `is_batchable = draft_model is None and all(hasattr(c, "merge") ...)`.
+   An MTP head lives inside the model, loads no `draft_model`, and would not
+   trip that condition at all.
+2. **The architecture never implements MTP.** `qwen4_exp.sanitize()` has:
+
+       # Multi-token-prediction head and vision tower: not implemented by
+       # this text-only port, and absent from the module tree -> drop them.
+       if k.startswith(("mtp.", "model.mtp.")): continue
+
+   The head is in the checkpoint and is discarded at load. Nothing warns.
+3. **40 of the 54 artifacts on this machine declare one** -- 3925 GiB of
+   weights, downloaded, silently not run on this path. exo's worker
+   implements MTP (its recent commits are batch-MTP work), so the same
+   checkpoint uses the head there and does not here.
+
+So "batch with MTP" on the mlx-lm path is not a flag to flip: it is
+implementing MTP in the architecture and then teaching the batch generator
+multi-token steps. That is a real piece of work, it is the biggest single
+speedup available to these artifacts, and it is exactly what an override is
+for -- `mlx_lm.models.qwen4_exp` is a module like any other, and exo already
+proves the drafting side is possible.
+
+**Built now, because it is the part that does not need the work done first:**
+`doctor` says it. An artifact that ships an MTP head, loaded by an
+architecture that drops it, now prints -- you downloaded these weights and
+they will not run. A silent discard is the same class of failure as a
+resolved setting nothing reads.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none
