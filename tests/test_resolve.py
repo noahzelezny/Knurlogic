@@ -136,3 +136,15 @@ def test_mlx_lives_behind_the_engine_seam():
         if hits:
             offenders[f.name] = sorted(set(hits))
     assert not offenders, f"mlx imported outside the seam: {offenders}"
+
+
+def test_dense_vq_artifacts_are_recognised_as_vq():
+    """Dense rungs declare vq_linear/vq_embed, not vq_modules. Keying on
+    vq_modules alone made `serve` announce "not a VQ artifact" for a VQ 27B
+    and skip every kernel setting."""
+    dense = _art(vq_modules={}, vq_other={"vq_linear": {"some": "module"}})
+    assert dense.is_vq
+    r = resolve(dense, 96 * GIB)
+    assert r.env.get("VQ_MOE_GEMMSEG_RTILE") == "32"
+    assert not resolve(_art(vq_modules={}), 96 * GIB).env.get(
+        "VQ_MOE_GEMMSEG_RTILE")
