@@ -63,6 +63,15 @@ no blockers found
   is exo's, proxied untouched, and Knurlogic adds the per-node resolution and
   one `/status` that covers every node.
 
+* **An overlay mechanism, so none of this needs a fork.** A module inside
+  `mlx_lm`, `mlx_vlm` or `exo` can be replaced from a versioned, digest-pinned
+  copy in this package — no fork, no writes to site-packages, no permanent
+  diff. It is installed through `sitecustomize.py` on `PYTHONPATH` rather than
+  `sys.modules`, because exo's runner is a spawned process and a spawned
+  process inherits the environment and nothing else; that is measured, with a
+  control arm, on exo's own interpreter. `knurlogic overlay run -- exo`
+  applies them to any command and every process it spawns.
+
 ## What it is not
 
 It does not detect machines, fit models, or score them. Memory budget is an
