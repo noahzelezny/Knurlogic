@@ -21,9 +21,40 @@ from __future__ import annotations
 # knee does not move with codebook size (K128/K256/K2048 identical).
 DECODE_CHUNK_DEFAULT = 32
 DECODE_CHUNK_MIN = 4
-# bytes of transient per unit of chunk, per expert tensor (gate_up is the
-# larger of the two; 2048*4096*2 is the shape the vqlab auto-sizer assumes)
+# Bytes of transient per unit of chunk, per expert tensor:
+#
+#     transient = chunk * out * in * 2      (gate_up, the larger of the two)
+#
+# out and in are the MODEL'S shape, not the box's: gate_up is [2 * M, H] for
+# hidden size H and moe_intermediate_size M. This constant is that formula
+# frozen for ONE model (H=4096, M=1024), which is why it was a constant at
+# all -- the auto-sizer it came from only ever ran on that rung.
+#
+# Keeping it frozen makes the resolver blind to the thing that actually
+# moves the spike. Measured across boxes and families: the same prefill
+# spike appeared on M4 and on M3, and DeepSeek V4 was far more dramatic than
+# Qwen3.5 -- so the FAMILY is the bigger factor and the BOX is close to
+# irrelevant once headroom is equal. That is exactly what this formula
+# predicts, since H and M differ per family and do not depend on the machine
+# at all. `expert_transient_bytes_per_unit` reads them off the artifact; this
+# constant is now only the fallback for a config that declares neither.
 DECODE_CHUNK_BYTES_PER_UNIT = 2048 * 4096 * 2
+#: The shape the fallback constant encodes, so a note can say whose it is.
+DECODE_CHUNK_ASSUMED_SHAPE = (2048, 4096)
+
+# May the artifact's own shape make the chunk LARGER than the frozen constant
+# would have? Not yet, and the asymmetry is deliberate.
+#
+# Sizing from the model tightens the knob for a family with bigger experts
+# (DeepSeek V4) and loosens it for one with smaller experts (Qwen3.5). The
+# tightening direction is protective: it is the case that was under-served by
+# a constant, and it is the one the measurements describe as "more dramatic".
+# The loosening direction is the one where being wrong means an OOM -- the
+# exact failure this package exists to prevent -- and it has not been
+# measured yet. So the formula may only reduce the chunk until a run says
+# otherwise. Flipping this to True is a one-line change and should be made
+# by a measurement, not by a preference.
+DECODE_CHUNK_SHAPE_MAY_LOOSEN = False
 # keep the largest transient under this fraction of remaining headroom
 DECODE_CHUNK_HEADROOM_DIVISOR = 8
 
