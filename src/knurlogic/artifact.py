@@ -51,6 +51,34 @@ class Artifact:
                 out[key] = out.get(key, 0) + 1
         return out
 
+    def runtime_source(self) -> str:
+        """The bundled runtime's text, or empty when it ships none."""
+        if not self.model_file:
+            return ""
+        f = self.path / self.model_file
+        try:
+            return f.read_text() if f.is_file() else ""
+        except Exception:
+            return ""
+
+    def reads_knob(self, name: str) -> bool | None:
+        """Does the bundled runtime read this environment variable?
+
+        None means "no bundled runtime to ask" -- not "no". The distinction
+        matters: a stock artifact is served by the engine, which has its own
+        answer, and reporting that as 'has no effect' would be a guess.
+
+        This exists because of a real miss. Knurlogic emitted
+        VQLAB_PREFILL_CHUNK for every artifact, and not one of the 37 bundled
+        runtimes on this machine reads it -- a resolved setting that does
+        nothing, which is the exact failure this package was written to
+        prevent, committed by the package.
+        """
+        src = self.runtime_source()
+        if not src:
+            return None
+        return name in src
+
     @classmethod
     def load(cls, path) -> "Artifact":
         p = Path(path)

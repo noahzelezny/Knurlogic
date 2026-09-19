@@ -152,6 +152,20 @@ def serve(model_path: str, host: str, port: int,
         _real_post = srv.APIHandler.do_POST
 
         def _post(self):
+            from urllib.parse import parse_qs, urlparse
+
+            u = urlparse(self.path)
+            handler = routes.get("POST " + (u.path.rstrip("/") or "/"))
+            if handler is not None:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(n) if n else b""
+                out, ctype = handler(parse_qs(u.query), 0, body)
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+                return
             _count["n"] += 1
             return _real_post(self)
 
@@ -186,3 +200,86 @@ def generate(model, tokenizer, prompt: str, max_tokens: int = 8) -> str:
 
     return _generate(model, tokenizer, prompt=prompt,
                      max_tokens=max_tokens, verbose=False) or ""
+
+
+#: Knobs that can be changed on a RUNNING process, and how.
+#:
+#: Measured by reading a real bundled runtime (4523 lines) rather than
+#: assuming. Of eleven knobs the resolver emits:
+#:
+#:   * VQ_DECODE_CHUNK is captured into a module global on FIRST PREFILL
+#:     (`_DECODE_CHUNK = _default_decode_chunk()`) and then read inside the
+#:     expert loop as a global. Rebinding that global takes effect on the next
+#:     prefill -- no reload.
+#:   * VQLAB_CACHE_LIMIT_GB is applied through the framework's own live API.
+#:   * the eight GEMM/numerics flags are read into module globals AT IMPORT and
+#:     baked into Metal kernel source that is compiled once. Those genuinely
+#:     need a restart, or an override module that reads them per dispatch.
+LIVE_KNOBS = ("VQ_DECODE_CHUNK", "VQLAB_CACHE_LIMIT_GB")
+
+
+def _artifact_runtime_modules():
+    """Loaded modules that look like a bundled VQ runtime.
+
+    `vars(mod)` and NOT `hasattr`. A hasattr sweep over sys.modules invokes
+    every lazy module's `__getattr__`, which in this environment reached into
+    transformers' lazy-import machinery and raised from inside a package that
+    has nothing to do with any of this. Reading __dict__ asks the question
+    without running anybody else's code.
+    """
+    import sys
+    out = []
+    for name, mod in list(sys.modules.items()):
+        try:
+            d = vars(mod)
+        except TypeError:
+            continue
+        if "_DECODE_CHUNK" in d:
+            out.append((name, mod))
+    return out
+
+
+def apply_live(env: dict) -> dict:
+    """Apply what can be applied without reloading the model.
+
+    Returns {knob: what happened}. A knob that cannot be applied is REPORTED,
+    never silently skipped: a settings panel that says "applied" over a value
+    that did not move is the same lie as an env file sourced after the one
+    that overwrites it.
+    """
+    import os
+
+    done = {}
+    for k, v in env.items():
+        if k == "VQLAB_CACHE_LIMIT_GB":
+            try:
+                import mlx.core as mx
+                nbytes = int(float(v) * (1 << 30))
+                setter = getattr(mx, "set_cache_limit", None) or \
+                    getattr(getattr(mx, "metal", None), "set_cache_limit", None)
+                if setter is None:
+                    done[k] = "no live setter in this engine build"
+                    continue
+                setter(nbytes)
+                os.environ[k] = str(v)
+                done[k] = f"applied now ({v} GiB)"
+            except Exception as e:
+                done[k] = f"failed: {e}"
+        elif k == "VQ_DECODE_CHUNK":
+            mods = _artifact_runtime_modules()
+            if not mods:
+                # Before the first prefill the global does not exist yet, but
+                # the environment is still what the runtime will read.
+                os.environ[k] = str(v)
+                done[k] = "set for the next prefill (runtime not resolved yet)"
+                continue
+            for name, mod in mods:
+                mod._DECODE_CHUNK = int(v)
+            os.environ[k] = str(v)
+            done[k] = (f"applied to {len(mods)} loaded runtime"
+                       f"{'s' if len(mods) > 1 else ''}; takes effect on the "
+                       f"next prefill")
+        else:
+            done[k] = "needs a restart: read at import and compiled into the "\
+                      "kernel"
+    return done
