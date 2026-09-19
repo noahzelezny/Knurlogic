@@ -24,6 +24,7 @@ class Artifact:
     hidden_size: int | None
     moe_intermediate_size: int | None
     vq_modules: dict = field(default_factory=dict, repr=False)
+    vq_other: dict = field(default_factory=dict, repr=False)
 
     @property
     def gib(self) -> float:
@@ -31,7 +32,11 @@ class Artifact:
 
     @property
     def is_vq(self) -> bool:
-        return bool(self.vq_modules)
+        """MoE artifacts declare `vq_modules`; DENSE ones declare `vq_linear`
+        / `vq_embed` instead. Keying on vq_modules alone called every dense
+        rung "not a VQ artifact" and skipped its kernel settings -- caught
+        2026-09-18 when `serve` printed exactly that for a VQ 27B."""
+        return bool(self.vq_modules or self.vq_other)
 
     @property
     def geometries(self) -> dict:
@@ -65,4 +70,6 @@ class Artifact:
             hidden_size=tc.get("hidden_size"),
             moe_intermediate_size=tc.get("moe_intermediate_size"),
             vq_modules=cfg.get("vq_modules") or {},
+            vq_other={k: cfg[k] for k in ("vq_linear", "vq_embed")
+                      if cfg.get(k)},
         )

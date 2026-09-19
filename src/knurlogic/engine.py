@@ -86,6 +86,41 @@ def load(path: str, executes_artifact_code: bool = False):
     return _load(path, **kw)
 
 
+def serve(model_path: str, host: str, port: int,
+          executes_artifact_code: bool = False, extra: list | None = None):
+    """Hand off to the engine's own OpenAI-compatible server.
+
+    The engine ships a complete one -- request schema, streaming, chat
+    templates, stop sequences -- and it takes its configuration through
+    argv, so this rewrites argv and calls it. Knurlogic's job ended when the
+    architectures were registered and the environment was resolved.
+    """
+    import sys
+
+    from mlx_lm import server as srv
+
+    # PIN THE SERVED MODEL. The engine's server treats a request's `model`
+    # field as something to load, and anything it does not recognise it tries
+    # to fetch from the Hub -- so a client configured with a different name
+    # (Cline, Continue, Zed all send whatever the user typed) gets a 404 from
+    # a server that is sitting on a loaded model. We serve exactly one
+    # artifact, so every request resolves to it.
+    _real = srv.ModelProvider.load
+
+    def _pinned(self, model_path_req=None, *a, **k):
+        return _real(self, model_path, *a, **k)
+
+    srv.ModelProvider.load = _pinned
+
+    argv = [sys.argv[0], "--model", model_path, "--host", host,
+            "--port", str(port)]
+    if executes_artifact_code:
+        argv.append("--trust-remote-code")
+    argv += list(extra or [])
+    sys.argv = argv
+    return srv.main()
+
+
 def generate(model, tokenizer, prompt: str, max_tokens: int = 8) -> str:
     from mlx_lm.generate import generate as _generate
 

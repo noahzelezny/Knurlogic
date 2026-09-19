@@ -12,8 +12,23 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Noah Zelezny" }]
 
+# mlx-lm is the engine (see knurlogic/engine.py, the one module that knows
+# so). Floor is 0.31.3: that is the oldest PyPI release measured to load a
+# VQ artifact's bundled `model_file` and generate coherent text with the
+# vendored architectures. No upper pin -- newer releases are the thing this
+# package exists to keep up with, and `knurlogic smoke --pin` is how a
+# version gets blessed.
+dependencies = [
+    "mlx-lm>=0.31.3",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# Multimodal architectures (glm5_next) are looked up in mlx_vlm, not mlx_lm.
+vlm = ["mlx-vlm>=0.6.17"]
+
 [project.scripts]
-knurlogic = "knurlogic.doctor:main"
+knurlogic = "knurlogic.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/noahzelezny/knurlogic"
