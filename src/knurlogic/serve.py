@@ -20,6 +20,9 @@ would silently do nothing -- the same class of bug as an env file sourced
 after the one that overwrites it.
 
     knurlogic serve <artifact> [--host H] [--port P] [--working-set-gib N]
+
+One box is the default. `--cluster` serves the same artifact across nodes by
+wrapping exo, which already places and shards; see cluster.py.
 """
 
 from __future__ import annotations
@@ -73,9 +76,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     rows = arch.check(a.model_type)
 
     def _status(requests):
-        snap = status.snapshot(artifact=a, arch_rows=rows, env=r.env,
-                               requests=requests)
-        return snap, status.render(snap)
+        # Served through `aggregate` even though there is exactly one node:
+        # /status.json is the contract, and a client that learns the cluster
+        # shape now does not get rewritten when a second node shows up.
+        snap = status.aggregate([status.snapshot(
+            artifact=a, arch_rows=rows, env=r.env, requests=requests,
+            node="local")])
+        return snap, status.render_cluster(snap)
 
     print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)")
     print(f"open http://{host}:{port}/ to see what loaded and try it")
@@ -96,7 +103,28 @@ def main(argv=None) -> int:
                    help="usable GPU working set; 0 leaves the memory knobs "
                         "at their defaults")
     p.add_argument("--profile", default="v1.5", choices=("v1.5", "v2"))
+    p.add_argument("--cluster", action="store_true",
+                   help="serve across nodes by wrapping exo: resolve settings "
+                        "per node, proxy the OpenAI surface, aggregate /status")
+    p.add_argument("--exo", default="http://127.0.0.1:52415",
+                   help="the exo API to attach to (--cluster)")
+    p.add_argument("--node", action="append", default=[], metavar="NAME:GIB",
+                   help="declare a node and its usable working set, instead "
+                        "of taking exo's system-RAM numbers (--cluster)")
+    p.add_argument("--launch", action="store_true",
+                   help="start exo rather than attaching to one, with this "
+                        "node's settings in its environment (--cluster)")
+    p.add_argument("--exo-cmd", default="",
+                   help="the command that starts exo on this box")
+    p.add_argument("--local", default=None,
+                   help="which node name is this box (--cluster --launch)")
     a, rest = p.parse_known_args(argv)
+    if a.cluster:
+        from .cluster import run as run_cluster
+
+        import shlex
+        return run_cluster(a.artifact, a.host, a.port, a.profile, a.exo,
+                           a.node, a.launch, shlex.split(a.exo_cmd), a.local)
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile, rest)
 
 
