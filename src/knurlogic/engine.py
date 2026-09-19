@@ -300,3 +300,39 @@ def apply_live(env: dict) -> dict:
             done[k] = "needs a restart: read at import and compiled into the "\
                       "kernel"
     return done
+
+
+def tool_support(chat_template: str) -> dict:
+    """Which tool-call dialect an artifact speaks, and whether we can read it.
+
+    Tool calling is not one format. This template asks for
+
+        <tool_call>\n<function=NAME>\n<parameter=P>value</parameter>...
+
+    which is the Qwen3-Coder / agentic-harness dialect, while other models
+    emit JSON inside the same <tool_call> tags, and others use
+    [TOOL_CALLS] or <|tool_calls_section_begin|>. The engine picks a parser by
+    INFERRING it from the template, and when the inference misses it returns
+    None -- at which point tool calls come back as prose. A harness then looks
+    like a model that keeps describing the function it would call instead of
+    calling it, which is a mystifying failure to debug from the outside and a
+    one-line answer from here.
+
+    The inference rule is the engine's, deliberately: reimplementing it here
+    would drift from the parser actually used at serve time. It is a private
+    function, so this is version-skew surface, which is this file's job.
+    """
+    out = {"has_template": bool(chat_template), "parser": None,
+           "mentions_tools": "tool" in (chat_template or "").lower()}
+    if not chat_template:
+        return out
+    try:
+        from mlx_lm.tokenizer_utils import _infer_tool_parser
+    except Exception:
+        out["parser"] = "unknown (this engine exposes no inference rule)"
+        return out
+    try:
+        out["parser"] = _infer_tool_parser(chat_template)
+    except Exception:
+        out["parser"] = None
+    return out

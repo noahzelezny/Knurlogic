@@ -64,6 +64,28 @@ class Artifact:
         except Exception:
             return ""
 
+    def chat_template(self) -> str:
+        """The template text, from wherever this artifact keeps it.
+
+        Newer exports put it in `chat_template.jinja` and leave
+        `tokenizer_config.json`'s field empty; older ones do the opposite.
+        Reading only one of the two answers "no template" for half the
+        artifacts on this machine.
+        """
+        f = self.path / "chat_template.jinja"
+        if f.is_file():
+            try:
+                return f.read_text()
+            except OSError:
+                return ""
+        cfg = self.path / "tokenizer_config.json"
+        if cfg.is_file():
+            try:
+                return json.loads(cfg.read_text()).get("chat_template") or ""
+            except Exception:
+                return ""
+        return ""
+
     def declared_knobs(self) -> dict:
         """Knobs the artifact DECLARES, from its own config.json.
 
