@@ -32,7 +32,7 @@ def _text(s: str) -> tuple:
     return s.encode(), "text/plain; charset=utf-8"
 
 
-def routes(status_fn=None, settings_fn=None) -> dict:
+def routes(status_fn=None, settings_fn=None, apply_fn=None) -> dict:
     """path -> handler(query: dict) -> (body, content_type).
 
     `status_fn(requests)` returns (snapshot, text). `settings_fn(query)`
@@ -58,12 +58,37 @@ def routes(status_fn=None, settings_fn=None) -> dict:
         def _settings(q, _n=0):
             return _json(settings_fn(q))
         r["/settings.json"] = _settings
+    if apply_fn is not None:
+        def _apply(q, _n=0, body=None):
+            return _json(apply_fn(q, body))
+        r["POST /settings.json"] = _apply
     return r
+
+
+RESTART_WHY = ("read at import and compiled into the kernel, so it takes a "
+               "restart")
+
+
+def knob_reach(artifact, name: str, live_knobs, restart_why=RESTART_WHY):
+    """(reach, why) for one knob on THIS artifact.
+
+    Three outcomes, and keeping them apart is the point: it applies now, it
+    needs a restart, or -- the one nobody checks -- the bundled runtime does
+    not read it at all, so it will never do anything however it is set.
+    """
+    reads = artifact.reads_knob(name)
+    if reads is False:
+        return "no-effect", ("this artifact's bundled runtime never reads "
+                             "this variable, so setting it does nothing")
+    if name in live_knobs:
+        return "live", "can be changed on the running server"
+    return "restart", restart_why
 
 
 def settings_document(artifact, live_env: dict, live_tune: str,
                       live_working_set: int, resolve_fn, wired_advice=None,
-                      tunes=("safe", "balanced", "fast")) -> callable:
+                      tunes=("safe", "balanced", "fast"),
+                      live_knobs=(), restart_why=RESTART_WHY) -> callable:
     """Build the `/settings.json` handler.
 
     The document says, for every knob: the value RUNNING, the value this
@@ -88,11 +113,14 @@ def settings_document(artifact, live_env: dict, live_tune: str,
         knobs = []
         for k in sorted(set(live_env) | set(r.env)):
             what, why = S.KNOB_DOC.get(k, ("", ""))
+            reach, reach_why = knob_reach(artifact, k, live_knobs,
+                                          restart_why)
             knobs.append({
                 "name": k, "running": live_env.get(k),
                 "would_be": r.env.get(k),
                 "changed": live_env.get(k) != r.env.get(k),
                 "what": what, "why": why,
+                "reach": reach, "reach_why": reach_why,
             })
         return {
             "artifact": artifact.path.name,
@@ -105,9 +133,14 @@ def settings_document(artifact, live_env: dict, live_tune: str,
             "tunes": [{"name": t,
                        "why": S.TUNE_PROFILES[t].get("why", "")}
                       for t in tunes],
-            # Stated rather than implied: nothing here takes effect until the
-            # server restarts, because the runtime reads these at import.
-            "applies_at": "restart",
+            # Per knob, because it is per knob: some apply now, some need a
+            # restart, and some do nothing on this artifact at all. Saying
+            # "restart" over all of them was true of most and wrong about the
+            # two that matter most for not running out of memory.
+            "live_knobs": sorted(
+                k["name"] for k in knobs if k["reach"] == "live"),
+            "dead_knobs": sorted(
+                k["name"] for k in knobs if k["reach"] == "no-effect"),
             "exports": r.as_exports(),
             "wired": wired_advice or {},
         }

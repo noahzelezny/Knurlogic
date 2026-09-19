@@ -260,9 +260,12 @@ def test_settings_json_says_running_would_be_and_how_to_get_it(tmp_path):
         resolve_fn=lambda ws, t: resolve(a, ws, tune=t))
 
     same = doc({})
-    assert same["applies_at"] == "restart"
     assert not any(k["changed"] for k in same["knobs"]), (
         "asking for the running tune must not report a pending change")
+    # Reach is per knob, not per page: some apply now, some need a restart,
+    # and some do nothing on this artifact at all.
+    assert {k["reach"] for k in same["knobs"]} <= {"live", "restart",
+                                                   "no-effect"}
 
     fast = doc({"tune": ["fast"]})
     changed = {k["name"]: (k["running"], k["would_be"])
