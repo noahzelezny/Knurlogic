@@ -10,17 +10,17 @@ WHY THIS FILE AND NOT `sys.modules`. exo's runner -- where MLX inference and
 the VQ kernels actually live -- is an `mp.Process` under start method
 "spawn" (exo/utils/async_process.py, exo/main.py). A spawned child is a
 fresh interpreter and inherits NOTHING from the parent's sys.modules, so
-registering an overlay in the process that launches exo does not reach the
+registering an override in the process that launches exo does not reach the
 process that runs the model. Measured 2026-09-18:
 
-    without overlay:  child saw parent's sys.modules edit: False | overlay: False
-    with overlay:     child saw parent's sys.modules edit: False | overlay: True
+    without override:  child saw parent's sys.modules edit: False | override: False
+    with override:     child saw parent's sys.modules edit: False | override: True
 
 The environment is what crosses a spawn boundary, so PYTHONPATH is, so this
 is. It runs at interpreter startup -- before exo or mlx import anything --
 in the master, the API and every spawned runner alike.
 
-A FINDER, NOT A PRELOAD. Importing the overlaid modules here would drag mlx
+A FINDER, NOT A PRELOAD. Importing the overridden modules here would drag mlx
 into every python process on the box and invite circular imports at
 interpreter startup. A meta-path finder fires only if something actually
 imports the target, which is also what makes "did it fire" a real signal.
@@ -30,14 +30,14 @@ import json
 import os
 import sys
 
-_MANIFEST = os.environ.get("KNURLOGIC_OVERLAY_MANIFEST", "")
-_LOG = os.environ.get("KNURLOGIC_OVERLAY_LOG", "")
+_MANIFEST = os.environ.get("KNURLOGIC_OVERRIDE_MANIFEST", "")
+_LOG = os.environ.get("KNURLOGIC_OVERRIDE_LOG", "")
 
 
 def _note(**fields):
     """Append one line of evidence that this actually happened, in THIS pid.
 
-    A spawned runner cannot be asked what it loaded, and an overlay that
+    A spawned runner cannot be asked what it loaded, and an override that
     silently did not fire looks exactly like one that did. The log is the
     channel that separates them -- the same reason a probe counts syncs as
     well as seconds.
@@ -60,7 +60,7 @@ def _sha256(path):
     return h.hexdigest()
 
 
-class _OverlayFinder:
+class _OverrideFinder:
     """Serve the named modules from knurlogic's tree instead of the install."""
 
     def __init__(self, entries):
@@ -74,7 +74,7 @@ class _OverlayFinder:
 
         src = e["path"]
         # A digest that does not match is NOT a warning. The whole claim of an
-        # overlay is "this exact arithmetic"; serving a file that is not the
+        # override is "this exact arithmetic"; serving a file that is not the
         # pinned one would make every measurement taken afterwards unciteable.
         want = e.get("sha256")
         if want:
@@ -83,7 +83,7 @@ class _OverlayFinder:
                 _note(module=fullname, event="digest-mismatch",
                       expected=want, actual=got)
                 raise ImportError(
-                    f"knurlogic overlay for {fullname} is {got[:12]} but the "
+                    f"knurlogic override for {fullname} is {got[:12]} but the "
                     f"manifest pins {want[:12]} -- refusing to import a file "
                     f"that is not the one that was measured")
         spec = importlib.util.spec_from_file_location(
@@ -128,7 +128,7 @@ def _install():
         return
     try:
         with open(_MANIFEST) as f:
-            entries = json.load(f).get("overlays", {})
+            entries = json.load(f).get("overrides", {})
     except Exception as exc:
         _note(event="manifest-unreadable", path=_MANIFEST, error=repr(exc))
         return
@@ -137,7 +137,7 @@ def _install():
     if missing:
         _note(event="missing-files", modules=missing)
     if live:
-        sys.meta_path.insert(0, _OverlayFinder(live))
+        sys.meta_path.insert(0, _OverrideFinder(live))
         _note(event="installed", modules=sorted(live))
 
 

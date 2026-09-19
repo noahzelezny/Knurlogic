@@ -11,8 +11,8 @@ is a fresh interpreter: it inherits the parent's ENVIRONMENT and nothing of
 its `sys.modules`. Measured 2026-09-18, with a second channel so a child
 that never ran could not read as a pass:
 
-    without overlay:  child saw parent's sys.modules edit: False | overlay: False
-    with overlay:     child saw parent's sys.modules edit: False | overlay: True
+    without override:  child saw parent's sys.modules edit: False | override: False
+    with override:     child saw parent's sys.modules edit: False | override: True
 
 So the installer is a `sitecustomize.py` on PYTHONPATH. Python imports it at
 interpreter startup in every process -- master, API, each spawned runner --
@@ -27,7 +27,7 @@ interpreter every iteration.
 
 WHAT THIS DOES NOT REACH. Only processes Knurlogic launches, because the
 mechanism rides on the environment. `mlx.core` is a compiled extension and
-is not overlayable this way; kernel-level changes still belong in the
+is not overrideable this way; kernel-level changes still belong in the
 artifact's own `model_file`, which is already a per-artifact runtime
 boundary.
 """
@@ -41,18 +41,18 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-OVERLAY_DIR = Path(__file__).parent / "overlays"
-SITECUSTOMIZE = OVERLAY_DIR / "_sitecustomize.py"
-MANIFEST = OVERLAY_DIR / "MANIFEST.json"
+OVERRIDE_DIR = Path(__file__).parent / "overrides"
+SITECUSTOMIZE = OVERRIDE_DIR / "_sitecustomize.py"
+MANIFEST = OVERRIDE_DIR / "MANIFEST.json"
 
-#: Packages an overlay is allowed to target. Not a safety rail -- a signpost:
-#: an overlay outside these is almost certainly a module that belongs in this
+#: Packages an override is allowed to target. Not a safety rail -- a signpost:
+#: an override outside these is almost certainly a module that belongs in this
 #: package instead of in front of someone else's.
 TARGETS = ("mlx_lm", "mlx_vlm", "exo")
 
 
 @dataclass
-class Overlay:
+class Override:
     module: str                 # e.g. "exo.master.placement_utils"
     path: Path                  # the file that replaces it
     against: str = ""           # the upstream version it was taken from
@@ -87,16 +87,16 @@ def sha256_of(path: Path) -> str:
 
 
 def load(manifest: Path | None = None) -> list:
-    """Every overlay declared in the manifest, in declaration order."""
+    """Every override declared in the manifest, in declaration order."""
     f = Path(manifest or MANIFEST)
     if not f.is_file():
         return []
     raw = json.loads(f.read_text())
     root = f.parent
     out = []
-    for module, e in raw.get("overlays", {}).items():
+    for module, e in raw.get("overrides", {}).items():
         p = Path(e["path"])
-        out.append(Overlay(module=module,
+        out.append(Override(module=module,
                            path=p if p.is_absolute() else (root / p),
                            against=e.get("against", ""), why=e.get("why", ""),
                            package=bool(e.get("package")),
@@ -104,18 +104,18 @@ def load(manifest: Path | None = None) -> list:
     return out
 
 
-def write_manifest(overlays: list, path: Path | None = None) -> Path:
+def write_manifest(overrides: list, path: Path | None = None) -> Path:
     """Record the set, pinning each file by digest as it stands now."""
     f = Path(path or MANIFEST)
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"overlays": {
+    f.write_text(json.dumps({"overrides": {
         o.module: {"path": str(o.path), "against": o.against, "why": o.why,
                    "package": o.package, "sha256": o.sha256 or o.digest}
-        for o in overlays}}, indent=1) + "\n")
+        for o in overrides}}, indent=1) + "\n")
     return f
 
 
-def install(overlays: list, root: Path, log: Path | None = None) -> dict:
+def install(overrides: list, root: Path, log: Path | None = None) -> dict:
     """Stage the installer and hand back the environment that activates it.
 
     Returns env to merge into a child process. The staging directory holds
@@ -125,19 +125,19 @@ def install(overlays: list, root: Path, log: Path | None = None) -> dict:
     """
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
-    drifted = [o for o in overlays if o.state == "DRIFTED"]
+    drifted = [o for o in overrides if o.state == "DRIFTED"]
     if drifted:
         raise ValueError(
-            "refusing to install overlays whose digest does not match the "
+            "refusing to install overrides whose digest does not match the "
             f"manifest: {[o.module for o in drifted]}. Re-pin them "
             "deliberately, or the measurement they carry is about a file "
             "that no longer exists.")
     shutil.copyfile(SITECUSTOMIZE, root / "sitecustomize.py")
-    manifest = write_manifest(overlays, root / "MANIFEST.json")
-    env = {"KNURLOGIC_OVERLAY_MANIFEST": str(manifest)}
+    manifest = write_manifest(overrides, root / "MANIFEST.json")
+    env = {"KNURLOGIC_OVERRIDE_MANIFEST": str(manifest)}
     if log is not None:
         Path(log).parent.mkdir(parents=True, exist_ok=True)
-        env["KNURLOGIC_OVERLAY_LOG"] = str(log)
+        env["KNURLOGIC_OVERRIDE_LOG"] = str(log)
     existing = os.environ.get("PYTHONPATH", "")
     env["PYTHONPATH"] = (f"{root}{os.pathsep}{existing}" if existing
                          else str(root))
@@ -147,7 +147,7 @@ def install(overlays: list, root: Path, log: Path | None = None) -> dict:
 def activations(log: Path | None) -> list:
     """What actually fired, per process, from the installer's own log.
 
-    A spawned runner cannot be asked what it imported, and an overlay that
+    A spawned runner cannot be asked what it imported, and an override that
     never fired looks exactly like one that did. This is the channel that
     tells them apart -- without it, `--cluster` would be claiming an effect
     it cannot see.
@@ -164,9 +164,9 @@ def activations(log: Path | None) -> list:
     return out
 
 
-def status(overlays: list | None = None, log: Path | None = None) -> dict:
-    """The shape `/status.json` reports overlays in."""
-    ovs = load() if overlays is None else overlays
+def status(overrides: list | None = None, log: Path | None = None) -> dict:
+    """The shape `/status.json` reports overrides in."""
+    ovs = load() if overrides is None else overrides
     acts = activations(log)
     fired = {a["module"] for a in acts if a.get("event") == "applied"}
     return {
@@ -185,7 +185,7 @@ def status(overlays: list | None = None, log: Path | None = None) -> dict:
 def render(d: dict) -> str:
     if not d.get("declared"):
         return ""
-    L = ["overlays"]
+    L = ["overrides"]
     fired = set(d.get("applied_in_launched_processes", []))
     for o in d["declared"]:
         mark = "applied" if o["module"] in fired else "not seen"
@@ -195,7 +195,7 @@ def render(d: dict) -> str:
         if o.get("why"):
             L.append(f"            {o['why']}")
     if not fired:
-        L.append("  nothing has imported an overlaid module yet -- declared "
+        L.append("  nothing has imported an overridden module yet -- declared "
                  "is not applied, and this says which")
     return "\n".join(L)
 
@@ -204,10 +204,10 @@ def render(d: dict) -> str:
 
 def _paths():
     root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return root / "knurlogic" / "overlay", root / "knurlogic" / "overlay.log"
+    return root / "knurlogic" / "override", root / "knurlogic" / "override.log"
 
 
-def add(module: str, source: Path, against: str = "", why: str = "") -> Overlay:
+def add(module: str, source: Path, against: str = "", why: str = "") -> Override:
     """Take a replacement module under version control, mirroring its path.
 
     The file is COPIED into this package rather than referenced where it sits:
@@ -217,12 +217,12 @@ def add(module: str, source: Path, against: str = "", why: str = "") -> Overlay:
     """
     if module.split(".")[0] not in TARGETS:
         raise ValueError(
-            f"{module} is not inside {TARGETS}. An overlay outside those is "
+            f"{module} is not inside {TARGETS}. An override outside those is "
             f"almost certainly a module that belongs in knurlogic itself.")
-    dest = OVERLAY_DIR.joinpath(*module.split(".")).with_suffix(".py")
+    dest = OVERRIDE_DIR.joinpath(*module.split(".")).with_suffix(".py")
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(Path(source), dest)
-    o = Overlay(module=module, path=dest, against=against, why=why)
+    o = Override(module=module, path=dest, against=against, why=why)
     o.sha256 = o.digest
     existing = [x for x in load() if x.module != module]
     write_manifest(existing + [o])
@@ -235,7 +235,7 @@ def main(argv=None) -> int:
     import sys
 
     p = argparse.ArgumentParser(
-        prog="knurlogic overlay",
+        prog="knurlogic override",
         description="replace a module inside mlx-lm, mlx-vlm or exo without "
                     "forking it")
     sub = p.add_subparsers(dest="cmd")
@@ -248,28 +248,28 @@ def main(argv=None) -> int:
     a.add_argument("--why", default="",
                    help="the measurement that justifies it")
     sub.add_parser("env", help="print the environment that applies them")
-    r = sub.add_parser("run", help="run a command with the overlays applied")
+    r = sub.add_parser("run", help="run a command with the overrides applied")
     r.add_argument("command", nargs=argparse.REMAINDER)
     args = p.parse_args(argv)
 
     root, log = _paths()
-    overlays = load()
+    overrides = load()
 
     if args.cmd == "add":
         o = add(args.module, Path(args.file), args.against, args.why)
         print(f"{o.module}  <- {args.file}")
         print(f"  pinned {o.sha256[:12]}")
         if not o.against or not o.why:
-            print("  NOTE: no --against/--why recorded. An overlay without "
+            print("  NOTE: no --against/--why recorded. An override without "
                   "the version it was taken from and the measurement that "
                   "justifies it is just a fork with extra steps.")
         return 0
 
     if args.cmd == "env":
-        if not overlays:
-            print("# no overlays declared", file=sys.stderr)
+        if not overrides:
+            print("# no overrides declared", file=sys.stderr)
             return 1
-        env = install(overlays, root=root, log=log)
+        env = install(overrides, root=root, log=log)
         for k, v in env.items():
             print(f"export {k}={v!r}")
         return 0
@@ -277,18 +277,18 @@ def main(argv=None) -> int:
     if args.cmd == "run":
         cmd = [c for c in (args.command or []) if c != "--"]
         if not cmd:
-            print("knurlogic overlay run -- <command>", file=sys.stderr)
+            print("knurlogic override run -- <command>", file=sys.stderr)
             return 2
         env = dict(os.environ)
-        if overlays:
-            env.update(install(overlays, root=root, log=log))
-            print(f"# {len(overlays)} overlays applied to {cmd[0]} and every "
+        if overrides:
+            env.update(install(overrides, root=root, log=log))
+            print(f"# {len(overrides)} overrides applied to {cmd[0]} and every "
                   f"process it spawns", file=sys.stderr)
         return subprocess.call(cmd, env=env)
 
-    d = status(overlays, log)
-    print(render(d) or "no overlays declared.\n"
-          f"  add one with: knurlogic overlay add <module> <file> "
+    d = status(overrides, log)
+    print(render(d) or "no overrides declared.\n"
+          f"  add one with: knurlogic override add <module> <file> "
           f"--against <version> --why <measurement>")
     return 0
 
