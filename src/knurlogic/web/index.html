@@ -7,32 +7,40 @@
    --faint:#9aa0a6;--line:#e6e8ec;--ok:#1a7f37;--warn:#9a5b16;--acc:#0f766e;--accfg:#fff}}
  *{box-sizing:border-box}
  body{margin:0;background:var(--bg);color:var(--fg);
-   font:14px/1.55 ui-sans-serif,-apple-system,Segoe UI,sans-serif;
+   font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace;
    -webkit-font-smoothing:antialiased}
  .wrap{max-width:660px;margin:0 auto;padding:40px 20px 64px}
- h1{font-size:19px;font-weight:600;margin:0 0 3px;letter-spacing:-.01em}
+ h1{font-size:17px;font-weight:700;margin:0 0 3px;letter-spacing:.04em;
+   text-transform:uppercase}
  .sub{color:var(--dim);font-size:13px}
- section{margin-top:36px}
- .lab{font-size:11px;text-transform:uppercase;letter-spacing:.9px;color:var(--faint);
-   font-weight:600;margin-bottom:12px}
+ section{margin-top:22px;border:1px solid var(--line);border-radius:4px;
+   padding:16px 18px 18px;position:relative}
+ section+section{margin-top:18px}
+ .lab{position:absolute;top:-7px;left:14px;background:var(--bg);padding:0 7px;
+   font-size:10px;text-transform:uppercase;letter-spacing:1.4px;color:var(--acc);
+   font-weight:700}
+ .lab:before{content:"\25c7  "}
  .row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;
    padding:5px 0;font-variant-numeric:tabular-nums}
  .row>span:first-child{color:var(--dim)}
- .big{font-size:26px;font-weight:600;letter-spacing:-.02em;margin:2px 0 10px}
+ .big{font-size:25px;font-weight:700;letter-spacing:-.01em;margin:6px 0 10px}
  .big small{font-size:13px;font-weight:400;color:var(--dim);letter-spacing:0}
- .bar{height:6px;border-radius:4px;background:var(--line);overflow:hidden;display:flex;margin-bottom:14px}
+ .bar{height:8px;background:var(--line);overflow:hidden;display:flex;
+   margin-bottom:14px;border:1px solid var(--line)}
  .bar i{display:block;height:100%}
  .k{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
- .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+ .seg{display:inline-flex;border:1px solid var(--line);overflow:hidden}
  .seg button{border:0;border-radius:0;background:transparent;color:var(--dim);
-   padding:7px 15px;font:inherit;font-size:13px;cursor:pointer}
+   padding:7px 16px;font:inherit;font-size:12px;letter-spacing:.06em;
+   text-transform:uppercase;cursor:pointer}
  .seg button[aria-pressed=true]{background:var(--acc);color:var(--accfg);font-weight:600}
  .ctl{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
  .ctl label{color:var(--faint);font-size:12px}
- input,button{font:inherit;border-radius:8px;border:1px solid var(--line);
+ input,button{font:inherit;border-radius:3px;border:1px solid var(--line);
    padding:7px 11px;background:var(--bg);color:var(--fg)}
  #ws{width:78px;text-align:right}
- .go{background:var(--acc);color:var(--accfg);border-color:transparent;font-weight:600;cursor:pointer}
+ .go{background:var(--acc);color:var(--accfg);border-color:transparent;
+   font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
  .go[disabled]{opacity:.35;cursor:default}
  .ghost{background:transparent;color:var(--dim);cursor:pointer}
  .dials{display:flex;gap:30px;flex-wrap:wrap;margin:22px 0 8px}
@@ -43,7 +51,8 @@
  .dial .vv{font-size:15px;font-weight:600;margin-top:5px;font-variant-numeric:tabular-nums}
  .dial .vv em{font-style:normal;font-size:11px;color:var(--dim);font-weight:400;margin-left:3px}
  .dial .pend{color:var(--acc)}
- .dial .capnote{font-size:10.5px;color:var(--warn);margin-top:4px;line-height:1.35}
+ .capnote{font-size:11px;color:var(--warn);margin:2px 0 0}
+ .capnote b{color:var(--warn);font-weight:700}
  .knob{padding:7px 0;border-top:1px solid var(--line);cursor:pointer}
  .knob:first-child{border-top:0}
  .knob .hd{display:flex;justify-content:space-between;gap:14px;align-items:baseline}
@@ -58,8 +67,16 @@
  .tag.dead{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
  .msg{color:var(--dim);font-size:12.5px;margin-top:14px}
  .msg b{color:var(--fg);font-weight:600}
- code{font-family:ui-monospace,Menlo,monospace;font-size:12px}
- #log{height:180px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:12px}
+ code{font-size:12px}
+ .nodes{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+ .node{border:1px solid var(--line);padding:9px 12px;min-width:172px;flex:1}
+ .node .n{font-size:11.5px;letter-spacing:.04em}
+ .node .pct{font-size:19px;font-weight:700;margin:3px 0 1px}
+ .node .sub{font-size:10.5px;color:var(--faint)}
+ .node.off{opacity:.55}
+ .node.off .pct{color:var(--warn)}
+ .nbar{height:5px;background:var(--line);display:flex;margin:6px 0 5px}
+ #log{height:170px;overflow:auto;border:1px solid var(--line);padding:12px}
  #log p{margin:0 0 10px;white-space:pre-wrap;word-wrap:break-word}
  #log b{color:var(--acc);font-weight:600}
  form{display:flex;gap:8px;margin-top:10px}form input{flex:1}
@@ -76,6 +93,7 @@
 
   <section>
     <div class="lab">Memory</div>
+    <div class="nodes" id="nodes"></div>
     <div class="big" id="headline">—</div>
     <div class="bar" id="bar"></div>
     <div id="mem"></div>
@@ -89,6 +107,7 @@
       <button class="go" id="apply" disabled>Apply</button>
     </div>
     <div class="dials" id="dials"></div>
+    <div id="dialnotes"></div>
     <div class="msg" id="applies"></div>
     <div id="knobs" style="margin-top:14px"></div>
     <details class="more"><summary>measured flags</summary><div id="rest"></div></details>
@@ -170,7 +189,6 @@ function dial(k){
     </svg>
     <div class="vv">${esc(k.running)}${unit} ${pend}</div>
     <div class="nm">${esc(k.name.replace(/^(VQ|VQLAB|KNURLOGIC)_/,''))}</div>
-    ${k.cap!=null?`<div class="capnote">stops at ${esc(k.cap)} — ${esc(k.cap_why)}</div>`:''}
   </div>`;
 }
 function wireDials(){
@@ -243,14 +261,23 @@ async function loadSettings(q){
   // the memory knobs are the page, the measured flags are a click away, and
   // the kernel internals are named but never defaulted.
   const ks=DOC.knobs||[];
-  $('dials').innerHTML=ks.filter(k=>k.values&&k.reach==='live').map(dial).join('');
+  const dialable=ks.filter(k=>k.values&&k.reach==='live');
+  $('dials').innerHTML=dialable.map(dial).join('');
   wireDials();
+  // The cap belongs on its own line, not wrapped four deep under a 94px
+  // knob: it is a sentence, and a sentence needs the width of the row.
+  $('dialnotes').innerHTML=dialable.filter(k=>k.cap!=null).map(k=>
+    `<div class="capnote"><b>${esc(k.name.replace(/^(VQ|VQLAB|KNURLOGIC)_/,''))}
+     </b> stops at ${esc(k.cap)} — ${esc(k.cap_why)}</div>`).join('');
   const dialled=new Set(ks.filter(k=>k.values&&k.reach==='live').map(k=>k.name));
   const shown=ks.filter(k=>!dialled.has(k.name)&&
     (k.tier==='reach'||k.changed||k.reach==='live'));
   $('knobs').innerHTML=shown.map(knobHTML).join('');
   $('rest').innerHTML=ks.filter(k=>!shown.includes(k)).map(knobHTML).join('');
   const un=DOC.unmanaged||[];
+  // An empty <details> still renders the browser's default "Details"
+  // marker, which is a row that says nothing.
+  $('unmanaged').style.display=un.length?'':'none';
   $('unmanaged').innerHTML=un.length
     ? `<summary>${un.length} more this runtime reads</summary>
        <div class="msg">knurlogic has no measured answer for these, so it sets
@@ -286,6 +313,20 @@ async function tick(){
   if(a){ $('title').textContent=a.name;
     $('sub').textContent=`${a.model_type} · ${gb(a.size_bytes)}`+
       (a.bundled_runtime?` · runtime ${a.bundled_runtime}`:''); }
+  // One card per node, which is what exo's topology view is actually for:
+  // where the weights are and how close each box is to full.
+  $('nodes').innerHTML=(d.nodes||[]).length>1
+    ? d.nodes.map(n=>{
+        const nm=n.memory||{}, ws=nm.working_set_bytes||1;
+        const used=100*(nm.active_bytes||0)/ws, off=n.reachable===false;
+        return `<div class="node${off?' off':''}">
+          <div class="n">${esc(n.node)}</div>
+          <div class="pct">${off?'NO ANSWER':used.toFixed(0)+'%'}</div>
+          <div class="nbar"><i style="width:${Math.min(used,100)}%;
+            background:var(--acc)"></i></div>
+          <div class="sub">${gb(nm.active_bytes||0)} of ${gb(ws)} · ${esc(n.role)}</div>
+        </div>`}).join('')
+    : '';
   if(m&&m.available){
     const ws=m.working_set_bytes||1, box=m.scope==='box';
     $('headline').innerHTML=`${gb(m.headroom_bytes)} <small>free of ${gb(ws)}</small>`;
