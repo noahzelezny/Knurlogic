@@ -28,7 +28,7 @@ import argparse
 import os
 import sys
 
-from . import arch, engine, register
+from . import arch, engine, register, status
 from .artifact import Artifact
 from .resolve import resolve
 
@@ -70,11 +70,19 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(f"\n{a.path.name} ships its own runtime ({a.model_file}) and it "
               f"WILL be executed -- that is where its kernels live.")
 
-    print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)",
-          flush=True)
+    rows = arch.check(a.model_type)
+
+    def _status(requests):
+        snap = status.snapshot(artifact=a, arch_rows=rows, env=r.env,
+                               requests=requests)
+        return snap, status.render(snap)
+
+    print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)")
+    print(f"what is loaded: http://{host}:{port}/status  "
+          f"(/status.json for the machine-readable form)", flush=True)
     return engine.serve(str(a.path), host, port,
                         executes_artifact_code=bool(a.model_file),
-                        extra=passthrough)
+                        extra=passthrough, status_fn=_status)
 
 
 def main(argv=None) -> int:
