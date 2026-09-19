@@ -1,0 +1,110 @@
+<!doctype html><meta charset="utf-8"><title>knurlogic</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+ :root{--bg:#14161a;--fg:#e8eaed;--dim:#9aa0a6;--line:#2a2e35;--ok:#7ee787;--warn:#f0a35e;--acc:#6ea8fe}
+ @media(prefers-color-scheme:light){:root{--bg:#fbfbfc;--fg:#1a1c20;--dim:#5f6368;--line:#dfe1e5;--ok:#1a7f37;--warn:#9a5b16;--acc:#0b57d0}}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-sans-serif,-apple-system,Segoe UI,sans-serif}
+ .wrap{max-width:1000px;margin:0 auto;padding:24px 16px}
+ h1{font-size:18px;margin:0 0 2px;letter-spacing:.2px}
+ .sub{color:var(--dim);font-size:13px;margin-bottom:20px}
+ .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+ @media(max-width:760px){.grid{grid-template-columns:1fr}}
+ .card{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:color-mix(in srgb,var(--fg) 3%,transparent)}
+ .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);margin:0 0 10px;font-weight:600}
+ .row{display:flex;justify-content:space-between;gap:12px;padding:3px 0;font-variant-numeric:tabular-nums}
+ .row span:first-child{color:var(--dim)}
+ .bar{height:8px;border-radius:5px;background:var(--line);overflow:hidden;margin:10px 0 6px;display:flex}
+ .bar i{display:block;height:100%}
+ .k{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+ .note{color:var(--dim);font-size:12px;margin-top:8px}
+ .pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;border:1px solid var(--line)}
+ .ok{color:var(--ok)}.warn{color:var(--warn)}
+ #log{height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg)}
+ .msg{margin:0 0 10px;white-space:pre-wrap;word-wrap:break-word}
+ .msg b{color:var(--acc);font-weight:600}
+ form{display:flex;gap:8px;margin-top:10px}
+ input,button{font:inherit;border-radius:8px;border:1px solid var(--line);padding:8px 10px;background:var(--bg);color:var(--fg)}
+ input{flex:1}button{cursor:pointer;background:var(--acc);color:#fff;border-color:transparent}
+ button:disabled{opacity:.5;cursor:default}
+ details{margin-top:10px}summary{cursor:pointer;color:var(--dim);font-size:12px}
+ pre{margin:8px 0 0;font-size:11.5px;color:var(--dim);white-space:pre-wrap}
+</style>
+<div class="wrap">
+  <h1 id="title">knurlogic</h1>
+  <div class="sub" id="sub">loading…</div>
+  <div class="grid">
+    <div class="card">
+      <h2>Loaded</h2>
+      <div id="loaded"></div>
+    </div>
+    <div class="card">
+      <h2>Memory</h2>
+      <div class="bar" id="bar"></div>
+      <div id="mem"></div>
+      <div class="note">Cache is reclaimable — it is not usage. Process RSS is
+        what Activity Monitor shows; it diverges from real usage under pressure.</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h2>Try it</h2>
+    <div id="log"></div>
+    <form id="f"><input id="q" type="text" placeholder="Ask it something — this is a smoke test, not a coding UI" autocomplete="off"><button id="go">Send</button></form>
+    <details><summary>settings resolved for this model</summary><pre id="env"></pre></details>
+  </div>
+</div>
+<script>
+const GIB=1073741824, $=id=>document.getElementById(id);
+const gb=b=>(b/GIB).toFixed(2)+' GiB';
+function row(k,v,cls){return `<div class="row"><span>${k}</span><span class="${cls||''}">${v}</span></div>`}
+async function tick(){
+  let d; try{ d=await (await fetch('/status.json')).json() }catch(e){ return }
+  const a=d.artifact, m=d.memory;
+  if(a){ $('title').textContent=a.name;
+    $('sub').innerHTML=`${a.model_type} · ${gb(a.size_bytes)} on disk `+
+      (a.is_vq?`<span class="pill">VQ</span> `:'')+
+      (a.bundled_runtime?`<span class="pill">runtime ${a.bundled_runtime}</span>`:''); }
+  let L='';
+  if(a){ const g=Object.entries(a.geometry||{});
+    if(g.length) L+=row('geometry', g.map(([k,n])=>`${k} ×${n}`).join(', '));}
+  (d.architectures||[]).forEach(r=>{
+    L+=row(r.module, `${r.origin} · <span class="${r.state==='OK'?'ok':'warn'}">${r.state}</span>`)});
+  L+=row('uptime', d.uptime_seconds.toFixed(0)+'s');
+  L+=row('requests', d.requests_served);
+  $('loaded').innerHTML=L;
+  if(m&&m.available){
+    const ws=m.working_set_bytes||1;
+    $('bar').innerHTML=`<i style="width:${100*m.active_bytes/ws}%;background:var(--acc)"></i>`+
+      `<i style="width:${100*m.cache_bytes/ws}%;background:var(--warn)"></i>`;
+    $('mem').innerHTML=row('weights + live',gb(m.active_bytes))+
+      row('cache (reclaimable)',gb(m.cache_bytes))+
+      row('peak this run',gb(m.peak_bytes))+
+      row('headroom',gb(m.headroom_bytes))+
+      row('usable / installed',gb(m.working_set_bytes)+' / '+gb(m.total_bytes))+
+      row('process RSS',gb(m.process_rss_bytes));
+  }
+  $('env').textContent=Object.entries(d.settings||{}).map(([k,v])=>k+'='+v).join('\n');
+}
+tick(); setInterval(tick,2000);
+// Enter sends. A chat box where Return does nothing is broken, and the
+// implicit-submission rules make this easy to get wrong with one input.
+$('q').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('f').requestSubmit();}
+});
+$('f').addEventListener('submit',async e=>{
+  e.preventDefault(); const q=$('q').value.trim(); if(!q)return;
+  $('q').value=''; $('go').disabled=true;
+  $('log').insertAdjacentHTML('beforeend',`<p class="msg"><b>you</b>\n${q.replace(/</g,'&lt;')}</p>`);
+  $('log').scrollTop=1e9;
+  try{
+    const r=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'loaded',messages:[{role:'user',content:q}],max_tokens:512,temperature:0.7})});
+    const j=await r.json(); const msg=j.choices?.[0]?.message||{};
+    const t=msg.content||msg.reasoning||JSON.stringify(j).slice(0,400);
+    $('log').insertAdjacentHTML('beforeend',`<p class="msg"><b>model</b>\n${String(t).replace(/</g,'&lt;')}</p>`);
+  }catch(err){
+    $('log').insertAdjacentHTML('beforeend',`<p class="msg warn"><b>error</b>\n${err}</p>`);
+  }
+  $('go').disabled=false; $('log').scrollTop=1e9; $('q').focus();
+});
+</script>

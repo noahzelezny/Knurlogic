@@ -35,3 +35,6 @@ Homepage = "https://github.com/noahzelezny/knurlogic"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+knurlogic = ["web/*.html", "architectures/*.md", "architectures/*.json"]
