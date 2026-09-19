@@ -78,8 +78,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         return snap, status.render(snap)
 
     print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)")
-    print(f"what is loaded: http://{host}:{port}/status  "
-          f"(/status.json for the machine-readable form)", flush=True)
+    print(f"open http://{host}:{port}/ to see what loaded and try it")
+    print(f"  /status (text) and /status.json for the same thing "
+          f"without a browser", flush=True)
     return engine.serve(str(a.path), host, port,
                         executes_artifact_code=bool(a.model_file),
                         extra=passthrough, status_fn=_status)

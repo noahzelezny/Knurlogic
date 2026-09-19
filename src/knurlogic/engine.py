@@ -154,6 +154,17 @@ def serve(model_path: str, host: str, port: int,
             return _real_post(self)
 
         def _get(self):
+            if self.path.rstrip("/") in ("", "/ui"):
+                from pathlib import Path
+
+                page = (Path(__file__).parent / "web" / "index.html")
+                body = page.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path.rstrip("/") in ("/status", "/status.json"):
                 import json as _json
 
