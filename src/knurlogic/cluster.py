@@ -39,7 +39,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import overlay, status
+from . import override, status
 from .artifact import Artifact
 from .resolve import Node, resolve_cluster
 
@@ -152,19 +152,19 @@ def _wait_for(exo_url: str, seconds: float) -> bool:
     return False
 
 
-def overlay_paths():
+def override_paths():
     """Where the installer and its evidence live. Stable, so a crashed run
     can still be asked what it applied."""
     root = Path(os.environ.get("XDG_CACHE_HOME",
                                Path.home() / ".cache")) / "knurlogic"
-    return root / "overlay", root / "overlay.log"
+    return root / "override", root / "override.log"
 
 
 def launch(cmd: list, env: dict, exo_url: str, wait: float = 120.0):
     """Start exo with this environment already set.
 
     Set BEFORE the process exists, which is the same reason `serve` sets it
-    before the model loads -- and it is what makes overlays possible at all:
+    before the model loads -- and it is what makes overrides possible at all:
     exo's runner is a spawned process, so the only thing that reaches it is
     the environment this call hands over.
     """
@@ -315,22 +315,22 @@ def run(path: str, host: str, port: int, profile: str, exo_url: str,
         for k, v in sorted(r.env.items()):
             print(f"  {k}={v}")
 
-    # Overlays reach only a process we start, because the mechanism rides on
+    # Overrides reach only a process we start, because the mechanism rides on
     # the environment -- so they are installed here and nowhere else.
-    ov_root, ov_log = overlay_paths()
-    overlays = overlay.load()
+    ov_root, ov_log = override_paths()
+    overrides = override.load()
     ov_env = {}
-    if overlays and do_launch:
+    if overrides and do_launch:
         if ov_log.exists():
             ov_log.unlink()      # this launch's evidence, not the last one's
-        ov_env = overlay.install(overlays, root=ov_root, log=ov_log)
-        print(f"\noverlays  {len(overlays)} installed for the process we "
+        ov_env = override.install(overrides, root=ov_root, log=ov_log)
+        print(f"\noverrides  {len(overrides)} installed for the process we "
               f"launch (and every runner it spawns)")
-        for o in overlays:
+        for o in overrides:
             print(f"  {o.state:<9s} {o.module}"
                   + (f"  against {o.against}" if o.against else ""))
-    elif overlays:
-        print(f"\noverlays  {len(overlays)} declared but NOT applied: they "
+    elif overrides:
+        print(f"\noverrides  {len(overrides)} declared but NOT applied: they "
               f"reach only a process Knurlogic starts, and this attached to "
               f"one that was already running. Use --launch.")
 
@@ -366,12 +366,12 @@ def run(path: str, host: str, port: int, profile: str, exo_url: str,
             if n.name not in c.nodes:
                 snaps.append(_snapshot_for(n, local, {}, a))
         snap = status.aggregate(snaps, artifact=a)
-        if overlays:
-            snap["overlays"] = overlay.status(
-                overlays, ov_log if do_launch else None)
+        if overrides:
+            snap["overrides"] = override.status(
+                overrides, ov_log if do_launch else None)
         text = status.render_cluster(snap)
-        if snap.get("overlays"):
-            text += "\n\n" + overlay.render(snap["overlays"])
+        if snap.get("overrides"):
+            text += "\n\n" + override.render(snap["overrides"])
         return snap, text
 
     print(f"\nserving on http://{host}:{port}/v1  (proxied to exo; "

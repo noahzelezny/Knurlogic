@@ -11,7 +11,7 @@ COMMANDS = {
     "doctor": ("doctor", "say whether an artifact will run, and why not"),
     "smoke": ("smoke", "generate a token and prove where the code came from"),
     "vendor": ("vendor", "take an architecture file under version control"),
-    "overlay": ("overlay", "replace a module inside mlx-lm, mlx-vlm or exo "
+    "override": ("override", "replace a module inside mlx-lm, mlx-vlm or exo "
                            "without forking it"),
 }
 
