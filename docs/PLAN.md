@@ -276,6 +276,40 @@ it testable -- but the COMMANDS fill it in, because forgetting the flag
 silently produced the roomy defaults, which is the exact footgun this package
 exists to remove.
 
+## The knobs are in the GUI, because that is the point of a GUI
+
+*2026-09-18. the maintainer on exo: "there are no actual settings. What's the point of
+the GUI if you don't expose the knobs available?"* Right, and a page that
+shows a green light and no knobs is a status light wearing a costume.
+
+`/settings.json` and the Settings panel on `/`. What makes it honest is that
+it keeps three questions apart and never blurs them:
+
+    what is RUNNING     what this tune WOULD give     how to get it
+
+A slider that appeared to retune a loaded model would be a lie: the runtime
+reads its environment AT IMPORT and the import already happened. So changing
+the tune shows a diff -- the running value struck through, the new one beside
+it -- and the banner names the flag (`--tune fast`) and says it takes a
+restart. That is more useful than no control and more honest than a control
+that does nothing.
+
+Every knob carries its sentence (`settings.KNOB_DOC`): what it does and the
+run that established it. A settings UI that lists names and values is a
+config file with a stylesheet -- the provenance IS the feature, and it is the
+thing this project has that nothing else does.
+
+`web.py` holds the routes so `serve` and `serve --cluster` cannot drift; the
+engine seam now takes a `path -> handler` mapping instead of knowing what a
+status page is.
+
+Fixed while looking at it, both caught only by opening the page:
+* the cluster page never showed the artifact -- the snapshot attached it to
+  the local node, and there is no local node when attaching.
+* the rollup dropped `scope`, so a box-wide total rendered under "weights +
+  live" on the page after the text renderer had already been fixed for
+  exactly that. A rollup is only as precise as its least precise node.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none
