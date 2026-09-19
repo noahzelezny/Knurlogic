@@ -25,6 +25,9 @@ class Artifact:
     moe_intermediate_size: int | None
     vq_modules: dict = field(default_factory=dict, repr=False)
     vq_other: dict = field(default_factory=dict, repr=False)
+    #: `knobs` from config.json -- what the artifact says about its own
+    #: controls. Authoritative over anything scanned out of the runtime.
+    knobs: dict = field(default_factory=dict, repr=False)
 
     @property
     def gib(self) -> float:
@@ -60,6 +63,22 @@ class Artifact:
             return f.read_text() if f.is_file() else ""
         except Exception:
             return ""
+
+    def declared_knobs(self) -> dict:
+        """Knobs the artifact DECLARES, from its own config.json.
+
+        The authority rule, applied to the control surface: the artifact is
+        the record of what shipped, so if it declares its knobs -- name,
+        default, range, one line of documentation -- that beats anything
+        knurlogic guesses by scanning the runtime for `os.environ`. Kernel
+        work belongs with whoever packs the kernels; this is the hand-off
+        point, and it is empty until a packer writes to it.
+
+            "knobs": {"VQ_D8_ROWS_TG": {"default": "8",
+                                        "values": [4, 8, 16],
+                                        "doc": "rows per threadgroup"}}
+        """
+        return self.knobs if isinstance(self.knobs, dict) else {}
 
     def knobs_read(self) -> list:
         """Every environment variable the bundled runtime reads.
@@ -116,4 +135,5 @@ class Artifact:
             vq_modules=cfg.get("vq_modules") or {},
             vq_other={k: cfg[k] for k in ("vq_linear", "vq_embed")
                       if cfg.get(k)},
+            knobs=cfg.get("knobs") or {},
         )
