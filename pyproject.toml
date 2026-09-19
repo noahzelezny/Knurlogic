@@ -25,7 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Multimodal architectures (glm5_next) are looked up in mlx_vlm, not mlx_lm.
-vlm = ["mlx-vlm>=0.6.17"]
+vlm = ["mlx-vlm>=0.7.1"]
 
 [project.scripts]
 knurlogic = "knurlogic.cli:main"

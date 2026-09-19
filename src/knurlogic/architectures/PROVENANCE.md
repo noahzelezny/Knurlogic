@@ -49,3 +49,13 @@ artifacts were validated against -- not merely that it imports.
 - layout: package
 - sha256: `af2c17b807f426c48a55f32e803d711ae8a79443753c04bb2e82879be2b36c67`
 - note: mlx_vlm package; byte-identical in both envs that carry it. Depends on 8 mlx_vlm siblings (base, cache, mla, mlp, gated_delta, rope_utils, deepseek_v32.language, deepseek_v4.hyper_connection) which are NOT vendored -- pinning this file does not pin those
+
+## glm5_next.py
+
+- taken: 2026-09-18
+- from: `/tmp/knur_clean/lib/python3.12/site-packages/mlx_vlm/models/glm5_next`
+- interpreter: `/tmp/knur_clean/bin/python`
+- host package: mlx_vlm 0.7.1
+- layout: package
+- sha256: `9ae6238925f17387828b18be881318fa4b229b9735f9bd420d492f95f4a865b9`
+- note: STOCK PyPI mlx-vlm 0.7.1, replacing a copy taken from a 0.6.17 env. Upstream was AHEAD, not behind: the older copy lacked processing.py entirely. Vendoring is for pinning a known version, not for holding a stale one.

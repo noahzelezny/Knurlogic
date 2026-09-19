@@ -13,7 +13,7 @@ anyone's `site-packages`.
 | `qwen3_5.py` | mlx-lm | MIT — Copyright © 2026 Apple Inc. |
 | `qwen3_5_moe.py` | mlx-lm | MIT — Copyright © 2026 Apple Inc. |
 | `qwen4_exp.py` | mlx-lm (via github.com/eauchs/mlx-lm) | MIT |
-| `glm5_next/` | mlx-vlm | MIT |
+| `glm5_next/` | mlx-vlm 0.7.1 | MIT |
 
 Some files carry no copyright header upstream; they are covered by their
 project's MIT license regardless, and are listed here so the obligation is
@@ -38,6 +38,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Staying current is the point
+
+Vendoring pins a KNOWN version; it is not a reason to hold an old one. The
+first `glm5_next` copied here came from a 0.6.17 env and upstream was already
+on 0.7.1 with a file the older copy did not have at all. Re-vendor when
+upstream moves, and let the smoke decide whether the new one is better.
 
 ## Replacing these
 
