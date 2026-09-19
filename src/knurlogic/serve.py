@@ -31,7 +31,7 @@ import argparse
 import os
 import sys
 
-from . import arch, engine, register, status
+from . import arch, engine, register, status, wired
 from .artifact import Artifact
 from .resolve import resolve
 
@@ -39,7 +39,7 @@ GIB = 1 << 30
 
 
 def run(path: str, host: str, port: int, working_set_gib: float,
-        profile: str, passthrough: list) -> int:
+        profile: str, passthrough: list, tune: str = "balanced") -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
@@ -60,7 +60,16 @@ def run(path: str, host: str, port: int, working_set_gib: float,
               f"helps nobody.", file=sys.stderr)
         return 2
 
-    r = resolve(a, int(working_set_gib * GIB), profile=profile)
+    ws = int(working_set_gib * GIB)
+    if ws == 0:
+        ws = wired.detected_working_set_bytes()
+        if ws:
+            print(f"working set {ws / GIB:.1f} GiB (detected; "
+                  f"--working-set-gib overrides)")
+    adv = wired.advise(a.bytes_on_disk)
+    if adv.get("action") == "raise":
+        print("\n" + wired.render(adv) + "\n")
+    r = resolve(a, ws, profile=profile, tune=tune)
     for k, v in sorted(r.env.items()):
         os.environ[k] = v
         print(f"  {k}={v}")
@@ -82,7 +91,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         snap = status.aggregate([status.snapshot(
             artifact=a, arch_rows=rows, env=r.env, requests=requests,
             node="local")])
-        return snap, status.render_cluster(snap)
+        # The wired limit belongs here because this is where somebody looks
+        # when a model will not load. Advice only -- knurlogic never sets it.
+        snap["wired"] = wired.advise(a.bytes_on_disk)
+        text = status.render_cluster(snap)
+        if snap["wired"].get("known"):
+            text += "\n\n" + wired.render(snap["wired"])
+        return snap, text
 
     print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)")
     print(f"open http://{host}:{port}/ to see what loaded and try it")
@@ -100,9 +115,14 @@ def main(argv=None) -> int:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--working-set-gib", type=float, default=0.0,
-                   help="usable GPU working set; 0 leaves the memory knobs "
-                        "at their defaults")
+                   help="usable GPU working set; 0 asks the framework what "
+                        "it may use")
     p.add_argument("--profile", default="v1.5", choices=("v1.5", "v2"))
+    p.add_argument("--tune", default="balanced",
+                   choices=("safe", "balanced", "fast"),
+                   help="safe = lowest peak memory; fast = spend headroom "
+                        "where it buys speed. Both are capped by what has "
+                        "been measured.")
     p.add_argument("--cluster", action="store_true",
                    help="serve across nodes by wrapping exo: resolve settings "
                         "per node, proxy the OpenAI surface, aggregate /status")
@@ -125,7 +145,8 @@ def main(argv=None) -> int:
         import shlex
         return run_cluster(a.artifact, a.host, a.port, a.profile, a.exo,
                            a.node, a.launch, shlex.split(a.exo_cmd), a.local)
-    return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile, rest)
+    return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile, rest,
+               a.tune)
 
 
 if __name__ == "__main__":

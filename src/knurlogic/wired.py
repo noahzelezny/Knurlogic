@@ -1,0 +1,176 @@
+"""The wired limit -- the knob that decides how much of the box a model may use.
+
+On Apple Silicon `iogpu.wired_limit_mb` caps how much memory the GPU may
+wire, and it is what the framework's "recommended working set" follows.
+Measured on this box, which is the whole reason this module states it as a
+fact rather than folklore:
+
+    iogpu.wired_limit_mb: 86016        -> 84.0 GiB
+    framework working set:                84.0 GiB   of 96 GiB installed
+
+So an artifact that "does not fit" often fits perfectly well -- the machine
+was simply never told it could use its own memory. That is the single most
+common way somebody concludes local inference does not work on their Mac.
+
+WHAT THIS MODULE WILL NOT DO. It does not set the value. Changing it needs
+root, it is a system-wide setting, and a package that quietly raises how much
+memory the GPU may wire out from under someone is not a package anyone should
+install. Knurlogic works out the number, prints the command, says what it
+costs, and the human runs it.
+
+THE RESERVE IS A JUDGEMENT, NOT A MEASUREMENT, and is labelled as one
+everywhere it is used. macOS still has to run: window server, browser, the
+editor you are reading this in. Leaving too little does not OOM the model,
+it wedges the machine.
+"""
+
+from __future__ import annotations
+
+import subprocess
+from dataclasses import dataclass
+
+GIB = 1 << 30
+MIB = 1 << 20
+
+#: Keys to try, in order. The name moved between macOS versions and the older
+#: one is still present on current systems; reading only one answers "unknown"
+#: on a box that has it.
+SYSCTL_KEYS = ("iogpu.wired_limit_mb", "debug.iogpu.wired_limit")
+
+#: Leave the OS at least this much. A JUDGEMENT: the fraction is what this
+#: box was already tuned to by hand (96 GiB installed, 84 GiB wired = 12 GiB
+#: left), which is corroboration, not proof.
+RESERVE_FRACTION = 0.125
+RESERVE_FLOOR_BYTES = 8 * GIB
+
+
+def _sysctl(key: str) -> int | None:
+    try:
+        out = subprocess.run(["sysctl", "-n", key], capture_output=True,
+                             text=True, timeout=5)
+        if out.returncode != 0:
+            return None
+        return int(out.stdout.strip())
+    except Exception:
+        return None
+
+
+@dataclass
+class Wired:
+    total_bytes: int = 0
+    limit_bytes: int = 0        # 0 when the system does not expose one
+    key: str = ""
+
+    @property
+    def known(self) -> bool:
+        return self.total_bytes > 0 and self.limit_bytes > 0
+
+    @property
+    def reserve_bytes(self) -> int:
+        return max(int(self.total_bytes * RESERVE_FRACTION),
+                   RESERVE_FLOOR_BYTES)
+
+    @property
+    def ceiling_bytes(self) -> int:
+        """The most this module will ever suggest wiring."""
+        return max(self.total_bytes - self.reserve_bytes, 0)
+
+    @property
+    def headroom_to_ceiling(self) -> int:
+        return max(self.ceiling_bytes - self.limit_bytes, 0)
+
+
+def read() -> Wired:
+    total = _sysctl("hw.memsize") or 0
+    for key in SYSCTL_KEYS:
+        mb = _sysctl(key)
+        if mb:
+            return Wired(total_bytes=total, limit_bytes=mb * MIB, key=key)
+    return Wired(total_bytes=total)
+
+
+def command_for(limit_bytes: int, key: str = SYSCTL_KEYS[0]) -> str:
+    return f"sudo sysctl {key}={int(limit_bytes // MIB)}"
+
+
+def advise(need_bytes: int = 0, w: Wired | None = None) -> dict:
+    """What to do about the wired limit, if anything.
+
+    `need_bytes` is what the artifact wants resident. The answer is one of:
+    nothing to do, raising it would help by this much, or it does not fit even
+    at the ceiling and no sysctl fixes that.
+    """
+    w = w or read()
+    d = {"known": w.known, "key": w.key, "total_bytes": w.total_bytes,
+         "limit_bytes": w.limit_bytes, "ceiling_bytes": w.ceiling_bytes,
+         "reserve_bytes": w.reserve_bytes, "action": "unknown",
+         "command": "", "note": ""}
+    if not w.known:
+        d["note"] = ("this system does not expose a wired limit, so the "
+                     "working set is whatever the framework reports")
+        return d
+
+    if need_bytes and need_bytes > w.ceiling_bytes:
+        d["action"] = "will-not-fit"
+        d["note"] = (
+            f"{need_bytes / GIB:.1f} GiB wanted against a "
+            f"{w.ceiling_bytes / GIB:.1f} GiB ceiling "
+            f"({w.total_bytes / GIB:.0f} GiB installed, leaving "
+            f"{w.reserve_bytes / GIB:.0f} GiB for macOS). Raising the wired "
+            f"limit will not fix this -- it needs a smaller rung or another "
+            f"box.")
+        return d
+
+    if need_bytes and need_bytes > w.limit_bytes:
+        target = min(w.ceiling_bytes, max(need_bytes, w.limit_bytes))
+        d.update(action="raise", target_bytes=target,
+                 command=command_for(target, w.key or SYSCTL_KEYS[0]))
+        d["note"] = (
+            f"the artifact wants {need_bytes / GIB:.1f} GiB and the GPU is "
+            f"allowed to wire {w.limit_bytes / GIB:.1f} GiB of the "
+            f"{w.total_bytes / GIB:.0f} GiB installed. It is not that the "
+            f"model does not fit -- the machine has not been told it may use "
+            f"its own memory. Raising it leaves "
+            f"{(w.total_bytes - target) / GIB:.1f} GiB for macOS; that "
+            f"reserve is a judgement, and too little wedges the machine "
+            f"rather than the model.")
+        return d
+
+    d["action"] = "ok"
+    d["note"] = (f"the GPU may wire {w.limit_bytes / GIB:.1f} GiB of "
+                 f"{w.total_bytes / GIB:.0f} GiB installed"
+                 + (f"; {w.headroom_to_ceiling / GIB:.1f} GiB more is "
+                    f"available under the reserve if a bigger rung needs it"
+                    if w.headroom_to_ceiling >= GIB else ""))
+    return d
+
+
+def render(d: dict) -> str:
+    L = ["wired limit"]
+    if not d.get("known"):
+        return f"wired limit  unknown -- {d.get('note', '')}"
+    L.append(f"  {d['limit_bytes'] / GIB:.1f} GiB of "
+             f"{d['total_bytes'] / GIB:.0f} GiB installed  [{d['key']}]")
+    if d.get("note"):
+        L.append(f"  {d['note']}")
+    if d.get("command"):
+        L.append(f"  {d['command']}")
+        L.append("  (resets at reboot; knurlogic will not run it for you -- "
+                 "it is a system-wide setting and needs root)")
+    return "\n".join(L)
+
+
+def detected_working_set_bytes() -> int:
+    """What the framework says it may use, asked through the engine seam.
+
+    `resolve()` still takes headroom as an INPUT -- that stance is what keeps
+    the resolver testable and machine-independent. This is the COMMANDS
+    filling that input in when the user did not, because the alternative is
+    what shipped: forgetting a flag silently produced the roomy defaults,
+    which is the footgun this package exists to remove.
+    """
+    try:
+        from .engine import memory
+        return int(memory().get("working_set_bytes") or 0)
+    except Exception:
+        return 0

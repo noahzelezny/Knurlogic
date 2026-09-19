@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import arch
+from . import arch, wired
 from .artifact import Artifact
 from .resolve import resolve
 
@@ -19,7 +19,7 @@ GIB = 1 << 30
 
 
 def run(path: str, working_set_gib: float, profile: str,
-        exports: bool) -> int:
+        exports: bool, tune: str = "balanced") -> int:
     try:
         a = Artifact.load(path)
     except FileNotFoundError as e:
@@ -27,7 +27,14 @@ def run(path: str, working_set_gib: float, profile: str,
         return 2
 
     ws = int(working_set_gib * GIB)
-    r = resolve(a, ws, profile=profile)
+    detected = ""
+    if ws == 0:
+        ws = wired.detected_working_set_bytes()
+        if ws:
+            detected = " (detected)"
+            working_set_gib = ws / GIB
+
+    r = resolve(a, ws, profile=profile, tune=tune)
 
     if exports:
         print(r.as_exports())
@@ -36,7 +43,8 @@ def run(path: str, working_set_gib: float, profile: str,
     print(f"artifact   {a.path.name}")
     print(f"  type     {a.model_type}")
     print(f"  size     {a.gib:.1f} GiB"
-          + (f"   working set {working_set_gib:.1f} GiB" if ws else ""))
+          + (f"   working set {working_set_gib:.1f} GiB{detected}"
+             if ws else "   working set UNKNOWN"))
     if a.is_vq:
         geo = ", ".join(f"d{d}-K{K} x{n}"
                         for (d, K), n in sorted(a.geometries.items()))
@@ -69,7 +77,17 @@ def run(path: str, working_set_gib: float, profile: str,
     for w in r.warnings:
         print(f"\n  WARNING: {w}")
 
+    adv = wired.advise(a.bytes_on_disk)
+    if adv.get("known"):
+        print("\n" + wired.render(adv))
+
+    # A model that does not fit the CURRENT limit but fits under the ceiling
+    # is not a model that does not fit. Saying "will not run" there would
+    # send someone to buy a machine they already own.
     blocked = any(row.state == "MISSING" for row in rows) or r.warnings
+    if blocked and adv.get("action") == "raise":
+        print("\n  ^ the memory warning above is a SETTING, not a limit of "
+              "this machine: the command above is the fix.")
     print("\n" + ("WILL NOT RUN as configured" if blocked
                   else "no blockers found"))
     return 1 if blocked else 0
@@ -79,13 +97,18 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="knurlogic doctor")
     p.add_argument("artifact")
     p.add_argument("--working-set-gib", type=float, default=0.0,
-                   help="usable GPU working set. 0 = unknown, which leaves "
-                        "the memory knobs at their defaults.")
+                   help="usable GPU working set. 0 = ask the framework what "
+                        "it may use; pass a number to override it.")
     p.add_argument("--profile", default="v1.5", choices=("v1.5", "v2"))
+    p.add_argument("--tune", default="balanced",
+                   choices=("safe", "balanced", "fast"),
+                   help="safe = lowest peak memory; fast = spend headroom "
+                        "where it buys speed. Both are capped by what has "
+                        "been measured.")
     p.add_argument("--exports", action="store_true",
                    help="print only `export K=V` lines, for eval")
     a = p.parse_args(argv)
-    return run(a.artifact, a.working_set_gib, a.profile, a.exports)
+    return run(a.artifact, a.working_set_gib, a.profile, a.exports, a.tune)
 
 
 if __name__ == "__main__":
