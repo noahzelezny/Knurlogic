@@ -55,17 +55,32 @@ no blockers found
   actual asset — the numbers cost runs, and nobody should have to rediscover
   them.
 
+* **A server, and a cluster front end.** `knurlogic serve <artifact>` is an
+  adapter over mlx-lm's OpenAI endpoint with the settings resolved and set
+  *before* the model loads, which is load-bearing: a VQ artifact's bundled
+  runtime reads its knobs at import. `--cluster` does the same across several
+  boxes by wrapping exo, which already places and shards — the OpenAI surface
+  is exo's, proxied untouched, and Knurlogic adds the per-node resolution and
+  one `/status` that covers every node.
+
 ## What it is not
 
 It does not detect machines, fit models, or score them. Memory budget is an
-input. Scope stays narrow on purpose.
+input. It does not implement distributed inference; it wraps something that
+does. Scope stays narrow on purpose.
 
 ## Status
 
-Early sketch. The resolver, the architecture check and `doctor` work; the
-pin table is deliberately empty (populate it against a validated env, never
-by trusting whatever happens to be installed). Serving and multi-agent
-support come later.
+The resolver, the architecture check, `doctor`, `smoke`, `vendor` and
+`serve` work, verified from a clean venv on stock PyPI mlx-lm 0.31.3. Four
+architectures are pinned by actual token generation; glm5_next is vendored
+and unpinned, because no box here fits the smallest GLM rung.
+
+`serve --cluster` resolves per node and aggregates status across a real
+two-node exo. What it applies is the environment of a node it launches —
+a node it merely attaches to gets its settings *reported*, because nothing
+here can reach into another machine's process, and printing settings that
+did not take effect is how a run ends up measuring the same value twice.
 
 ---
 
