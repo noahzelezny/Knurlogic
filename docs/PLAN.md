@@ -72,12 +72,63 @@ precede import; launching is what the cluster command does anyway.
 
 Smallest honest first targets: `routing/` (654 lines) or `master/` placement.
 
-## Two shape changes that get cheaper if done before clustering
+## The two shape changes -- done
 
-1. `resolve()` takes ONE memory budget. Clustering resolves per node against
-   different boxes; a list now is small, later it is invasive.
-2. `status` knows only its own process. Aggregation across nodes is the
-   natural shape and `/status.json` is where it should arrive.
+*2026-09-18, the session after.*
+
+1. `resolve(artifact, budget)` takes a byte count (one box, one `Resolution`,
+   the call every existing caller makes) or nodes -- a `Node`, a sequence of
+   them, or `{name: working_set_bytes}` -- and returns a `ClusterResolution`
+   with one `Resolution` per node. It is deliberately not itself a
+   `Resolution`: there is no single env dict for a cluster, and inventing one
+   puts the wrong knobs on the wrong box. What a node HOLDS is placement, so
+   `Node.holds_bytes` declares it and an undeclared shard is split
+   proportionally to working set and LABELLED as an assumption on every
+   resolution that rides on it.
+2. `status.snapshot()` still answers for its own process -- that is all it
+   can honestly do -- and gained `node`/`role`/`reachable` plus a `memory_fn`
+   seam so a snapshot can be built from numbers that came off another node.
+   `status.aggregate()` is the shape `/status.json` now serves even for one
+   box: `{schema, cluster, nodes[]}` with the old single-node keys still at
+   the top level, so a client written against one box is not rewritten when
+   a second appears. The rollup SUMS and reports `nodes_reachable`, because
+   a sum over nodes that did not answer is a smaller number that reads as
+   good news. Memory carries `scope` (`process` or `box`): a number covering
+   the whole machine is never printed under a label that says "weights".
+
+## `serve --cluster` -- wrapping exo
+
+`src/knurlogic/cluster.py`. Attaches to a running exo by default (that is
+what is actually running day to day); `--launch` starts one with this node's
+resolved settings already in its environment.
+
+* The OpenAI surface is exo's, proxied untouched. There is no second
+  implementation of chat completions in this package and there should never
+  be one.
+* `/status`, `/status.json` and `/` are Knurlogic's, aggregated over every
+  node exo reports.
+* Node inventory comes from exo's `/state` (`nodeMemory`, `nodeIdentities`).
+  Those are psutil SYSTEM RAM numbers, not the Metal recommended working
+  set; `--node NAME:GIB` overrides them, and when it does, status shows the
+  declared number, since that is what the settings were resolved against.
+* The settings of a node we LAUNCH are applied. The settings of a node we
+  attached to are reported and said to be reported. Nothing here can reach
+  into another machine's process.
+
+Verified against the live two-node exo on this desk (NozzleBook Pro,
+Noah's Mac Studio): inventory read correctly, `/v1/models` through
+Knurlogic's port answered by exo with its 153 models, `/status` aggregated
+both nodes. `tests/test_cluster.py` pins the same claims against a stub exo
+whose answers carry a marker string, so a proxy that silently answered by
+itself would fail the test rather than pass it quietly.
+
+## Not done: replacing an exo module
+
+Untouched on purpose. It is the `sys.modules` move `register.py` already
+makes for architectures, it needs Knurlogic to launch the process (which
+`--launch` now does), and the honest first targets are still `routing/`
+(654 lines) or `master/` placement. There is no MEASURED reason to do it
+yet, and doing it without one is how you acquire a permanent diff.
 
 ## Not done
 
