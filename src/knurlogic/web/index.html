@@ -69,6 +69,18 @@ async function tick(){
     if(g.length) L+=row('geometry', g.map(([k,n])=>`${k} ×${n}`).join(', '));}
   (d.architectures||[]).forEach(r=>{
     L+=row(r.module, `${r.origin} · <span class="${r.state==='OK'?'ok':'warn'}">${r.state}</span>`)});
+  const w=d.wired;
+  if(w&&w.known){
+    L+=row('wired limit', `${gb(w.limit_bytes)} of ${gb(w.total_bytes)} installed`,
+           w.action==='raise'?'warn':'ok');
+    if(w.action==='raise'&&w.command){
+      L+=`<div class="row"><span>raise it</span><span><code
+        style="user-select:all">${w.command}</code></span></div>`;
+      L+=`<div class="row"><span></span><span class="warn">${w.note}</span></div>`;
+    } else if(w.action==='will-not-fit'){
+      L+=`<div class="row"><span></span><span class="warn">${w.note}</span></div>`;
+    }
+  }
   L+=row('uptime', d.uptime_seconds.toFixed(0)+'s');
   L+=row('requests', d.requests_served);
   $('loaded').innerHTML=L;

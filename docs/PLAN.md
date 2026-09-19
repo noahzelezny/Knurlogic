@@ -227,6 +227,55 @@ already carries what decides the knob; the resolver just has to read it.
 Keep that direction: prefer computing from the artifact over enumerating
 boxes, and add a preset only for something the config genuinely cannot say.
 
+## A soft gate, a tuning axis, and the wired limit
+
+*2026-09-18.* Noah's framing: exo only shows models it has built cards for,
+and measured releases are what stop people OOMing themselves. Agreed, with
+one difference -- exo's card says what a model IS (declared metadata,
+hand-curated); the record that prevents an OOM has to say what a model DID.
+`smoke --pin` is already that primitive: it writes a digest only after a
+model generated a token. Extending it from architecture files to RUNS is the
+soft gate: curate settings for popular rungs, never block an unknown one,
+label which answer is measured and which is computed. The vocabulary already
+exists -- `OK / UNPINNED / DRIFTED / MISSING` becomes `MEASURED / PREDICTED`.
+
+A run record can also hold a NEGATIVE result ("this rung OOMed at this
+working set with these settings"), which a card describing what a model is
+structurally cannot. The failure envelope is the asset, not the success list.
+*Not built yet: the record format and `resolve()` preferring it.*
+
+**The tuning axis is built.** `--tune safe|balanced|fast` on `serve` and
+`doctor`. What makes it honest is the caps:
+
+* `fast` may NOT raise VQ_DECODE_CHUNK. Smaller is faster AND smaller in
+  memory (128 -> 32 is 1.37x), so there is no tradeoff to sell there.
+* Nothing at any setting may reach RTILE=64 (0.75-0.97x, never faster).
+* The reclaimable cache is capped, and capped again by actual headroom --
+  reclaimable is not free, it is still resident.
+* A profile that cannot have what it asked for SAYS SO. On a 4 GiB-headroom
+  box `fast` degrades to the tight prompt chunk and prints that headroom, not
+  the profile, is what capped it. The difference between a knob and a wish is
+  whether it tells you it did not happen.
+
+**The wired limit is the biggest single "it does not fit" that is not true.**
+Measured here: `iogpu.wired_limit_mb: 86016` -> 84.0 GiB, and the framework
+reports a working set of exactly 84.0 GiB of 96 installed. So the sysctl IS
+what the working set follows, and a rung that "does not fit" often fits fine
+on a machine that was never told it may use its own memory.
+
+`doctor`, `serve` and `/status[.json]` now read it, work out the number, and
+print the command. **Knurlogic does not set it** -- it needs root, it is
+system-wide, and a package that quietly raises how much memory the GPU may
+wire is not one anybody should install. The reserve left for macOS is a
+JUDGEMENT and is labelled as one everywhere: too little does not OOM the
+model, it wedges the machine.
+
+Also: `--working-set-gib` now defaults to asking the framework rather than to
+0. `resolve()` still takes headroom as an INPUT -- that stance is what keeps
+it testable -- but the COMMANDS fill it in, because forgetting the flag
+silently produced the roomy defaults, which is the exact footgun this package
+exists to remove.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none
