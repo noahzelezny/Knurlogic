@@ -348,6 +348,20 @@ transformers' lazy-import machinery and raised from inside a package that has
 nothing to do with any of this. It reads `vars(mod)` now, which asks the
 question without running anybody else's code.
 
+## Settings are a menu
+
+*Noah: "I was thinking the settings would be a menu, not always open."*
+
+The rail is now a drawer, closed by default, opened from SETTINGS or CONNECT
+in the masthead. One panel at a time -- two open at once is the busy layout
+again, arrived at by accident. Escape closes it, and the choice is remembered
+per browser, because reopening to a closed drawer you deliberately left open
+is its own small annoyance. (If that is wrong, one line: drop the
+localStorage read and it always starts closed.)
+
+Closed, the page is one column: what loaded, how full the box is, and a place
+to type. That is the whole default view.
+
 ## The page, in exo's language -- second attempt
 
 *Noah, on the first one: "the page doesn't look very much like exo btw lol."*
@@ -649,10 +663,36 @@ batching flag. Three separate facts, each read rather than assumed:
 
 So "batch with MTP" on the mlx-lm path is not a flag to flip: it is
 implementing MTP in the architecture and then teaching the batch generator
-multi-token steps. That is a real piece of work, it is the biggest single
-speedup available to these artifacts, and it is exactly what an override is
-for -- `mlx_lm.models.qwen4_exp` is a module like any other, and exo already
-proves the drafting side is possible.
+multi-token steps.
+
+**CORRECTION, from Noah: MTP is not an exo default. It is his work**, and it
+already exists in that checkout -- 3091 lines under
+`exo/worker/engines/mlx/`:
+
+    mtp/registry.py        204   per-family spec: head, capture point,
+                                 draft cache, cache semantics
+    mtp/speculative.py     393   the drafting head
+    mtp/loop.py            550   sequential decode loop
+    mtp/batch_loop.py      648   THE BATCHED ONE -- already solved
+    generator/mtp_batch_generate.py  451
+    mtp/caches.py, sampling.py, seed.py, capture.py, glm5_shim.py
+
+So the drafting side is not "possible in principle", it is written, measured
+and running. And `registry.py` says the thing that makes it portable:
+
+    There is no public mlx-lm hook for this, so we wrap that one module for
+    the duration of the generation (see capture.py) rather than
+    monkeypatching the class.
+
+It was built to work WITH stock mlx-lm, not against a fork. That makes this a
+PORT, not an implementation -- the least glamorous and most likely to succeed
+kind of work.
+
+**Tomorrow's first step, smaller than it sounds.** Do not start with
+drafting or batching. Start with the weights: make `sanitize()` keep the MTP
+head instead of dropping it, expose it as a module, and prove with a probe
+that the head produces logits that DIFFER from the main head. One arm, one
+channel, no speed claim. Everything above it already exists.
 
 **Built now, because it is the part that does not need the work done first:**
 `doctor` says it. An artifact that ships an MTP head, loaded by an
