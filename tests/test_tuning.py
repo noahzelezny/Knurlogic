@@ -265,3 +265,53 @@ def test_unmeasured_knobs_are_named_but_never_given_a_default(tmp_path):
                               "VQ_FUSED_MAX_N"]
     env = resolve(a, 96 * GIB).env
     assert "VQ_D8_REGBUF" not in env and "VQ_FUSED_MAX_N" not in env
+
+
+# --- the control stops where the evidence stops -----------------------------
+
+def test_a_dial_offers_only_positions_that_were_measured():
+    """Discrete, not continuous. A slider over chunk width would invent
+    positions no run ever measured, and 32 is the top because 128 -> 32 is
+    1.37x and nothing above it was ever better."""
+    vals, _unit = S.KNOB_RANGE["VQ_DECODE_CHUNK"]
+    assert vals == [4, 8, 16, 32]
+    assert max(vals) == S.DECODE_CHUNK_DEFAULT
+    assert min(vals) == S.DECODE_CHUNK_MIN
+
+
+def test_the_cache_dial_stops_at_what_the_box_can_hold(tmp_path):
+    """A control that lets you pick a setting the resolver would refuse is a
+    control that lies. The cap is headroom, and it says so."""
+    from knurlogic import web
+    from knurlogic.artifact import Artifact
+    (tmp_path / "config.json").write_text(
+        '{"model_type":"x","model_file":"model.py","vq_linear":{"a":1},'
+        '"hidden_size":4096,"moe_intermediate_size":1024}')
+    (tmp_path / "model.py").write_text(
+        'import os\nos.environ.get("VQLAB_CACHE_LIMIT_GB")\n'
+        'os.environ.get("VQ_DECODE_CHUNK")\n')
+    a = Artifact.load(tmp_path)
+    object.__setattr__(a, "bytes_on_disk", 70 * GIB)
+
+    doc = web.settings_document(
+        a, live_env={}, live_tune="balanced", live_working_set=76 * GIB,
+        resolve_fn=lambda ws, t: resolve(a, ws, tune=t),
+        live_knobs=("VQLAB_CACHE_LIMIT_GB",))
+    cache = next(k for k in doc({})["knobs"]
+                 if k["name"] == "VQLAB_CACHE_LIMIT_GB")
+    assert cache["cap"] == 2.0, cache          # 6 GiB headroom -> half of it
+    assert "headroom" in cache["cap_why"]
+
+
+def test_an_artifact_may_declare_its_own_knobs(tmp_path):
+    """Kernel work stays with whoever packs the kernels. When a packer
+    declares them in config.json, that beats anything scanned or hard coded
+    here -- the artifact is the record of what shipped."""
+    from knurlogic.artifact import Artifact
+    (tmp_path / "config.json").write_text(
+        '{"model_type":"x","model_file":"model.py",'
+        '"knobs":{"VQ_D8_ROWS_TG":{"default":"8","values":[4,8,16],'
+        '"doc":"rows per threadgroup"}}}')
+    (tmp_path / "model.py").write_text('import os\nos.environ.get("VQ_D8_ROWS_TG")\n')
+    a = Artifact.load(tmp_path)
+    assert a.declared_knobs()["VQ_D8_ROWS_TG"]["values"] == [4, 8, 16]
