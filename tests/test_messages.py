@@ -245,3 +245,27 @@ def test_no_template_is_not_reported_as_no_tools():
     from knurlogic import engine
     ts = engine.tool_support("")
     assert ts["has_template"] is False and ts["mentions_tools"] is False
+
+
+# --- pointing a client at the server ----------------------------------------
+
+def test_connect_offers_the_scoped_config_and_not_the_global_one():
+    """Writing ~/.claude/settings.json would route every session on the
+    machine at a local model, including the ones with nothing to do with it.
+    A config change nobody can see is how you debug the wrong thing."""
+    from knurlogic import connect
+    out = connect.render("http://127.0.0.1:8080", "some-artifact")
+    assert ".claude/settings.json" in out
+    assert "NOT your global" in out
+
+
+def test_the_timeout_is_raised_because_a_local_model_is_slower():
+    """The default timeout is the first thing to bite on a long tool loop."""
+    from knurlogic import connect
+    env = connect.env_lines("http://x", "m")
+    assert int(env["API_TIMEOUT_MS"]) > 600_000
+    assert env["ANTHROPIC_BASE_URL"] == "http://x"
+    # All three model slots, or the harness falls back to a hosted name that
+    # this server has never heard of.
+    assert all(env[f"ANTHROPIC_DEFAULT_{k}_MODEL"] == "m"
+               for k in ("OPUS", "SONNET", "HAIKU"))

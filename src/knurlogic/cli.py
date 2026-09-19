@@ -13,6 +13,7 @@ COMMANDS = {
     "vendor": ("vendor", "take an architecture file under version control"),
     "override": ("override", "replace a module inside mlx-lm, mlx-vlm or exo "
                              "without forking it"),
+    "connect": ("connect", "print how to point a client at a running server"),
     "models": ("discover", "find the models already on this machine, in "
                            "every tool's store"),
 }
