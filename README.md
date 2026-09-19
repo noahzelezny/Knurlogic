@@ -78,6 +78,10 @@ no blockers found
   against what is running, because the runtime reads its settings at import
   and a control that pretended otherwise would be lying.
 
+* **An Anthropic-Messages endpoint**, so a coding harness pointed at
+  `ANTHROPIC_BASE_URL` can run against a local model. It is a translation over
+  the engine's own OpenAI endpoint, not a second inference path.
+
 ## What it is not
 
 It does not detect machines, fit models, or score them. Memory budget is an

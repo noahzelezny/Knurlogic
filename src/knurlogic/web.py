@@ -32,7 +32,19 @@ def _text(s: str) -> tuple:
     return s.encode(), "text/plain; charset=utf-8"
 
 
-def routes(status_fn=None, settings_fn=None, apply_fn=None) -> dict:
+def raw(fn):
+    """Mark a handler that writes its own response.
+
+    Everything else here returns one body and a content type, which cannot
+    express an event stream: a harness reads tokens as they arrive, so the
+    handler needs the socket rather than a return value.
+    """
+    fn.raw = True
+    return fn
+
+
+def routes(status_fn=None, settings_fn=None, apply_fn=None,
+           messages_fn=None) -> dict:
     """path -> handler(query: dict) -> (body, content_type).
 
     `status_fn(requests)` returns (snapshot, text). `settings_fn(query)`
@@ -58,6 +70,8 @@ def routes(status_fn=None, settings_fn=None, apply_fn=None) -> dict:
         def _settings(q, _n=0):
             return _json(settings_fn(q))
         r["/settings.json"] = _settings
+    if messages_fn is not None:
+        r["POST /v1/messages"] = raw(messages_fn)
     if apply_fn is not None:
         def _apply(q, _n=0, body=None):
             return _json(apply_fn(q, body))
