@@ -108,11 +108,39 @@ def run(path: str, host: str, port: int, working_set_gib: float,
           f"without a browser")
     print(f"  /settings.json - every knob, what it would be at another tune, "
           f"and why it exists", flush=True)
+    # The live environment, kept current as knobs are applied, so the panel
+    # keeps telling the truth about what is RUNNING rather than about what
+    # was resolved at startup.
+    live_env = dict(r.env)
+
+    def _apply(query, body):
+        import json as _json
+
+        try:
+            want = _json.loads(body or b"{}")
+        except ValueError:
+            return {"error": "body must be JSON"}
+        tune_name = want.get("tune")
+        if tune_name:
+            want = {k: v for k, v in _resolve_for(ws, tune_name).env.items()}
+        want = {k: str(v) for k, v in want.items()
+                if k in engine.LIVE_KNOBS and str(v) != live_env.get(k)}
+        if not want:
+            return {"applied": {}, "note": "nothing to change on this server "
+                                           "without a restart"}
+        done = engine.apply_live(want)
+        for k, v in want.items():
+            if "applied" in done.get(k, "") or "set for" in done.get(k, ""):
+                live_env[k] = v
+        return {"applied": done, "running": dict(live_env)}
+
     routes = web.routes(
         status_fn=_status,
         settings_fn=web.settings_document(
-            a, live_env=dict(r.env), live_tune=tune, live_working_set=ws,
-            resolve_fn=_resolve_for, wired_advice=adv))
+            a, live_env=live_env, live_tune=tune, live_working_set=ws,
+            resolve_fn=_resolve_for, wired_advice=adv,
+            live_knobs=engine.LIVE_KNOBS),
+        apply_fn=_apply)
     return engine.serve(str(a.path), host, port,
                         executes_artifact_code=bool(a.model_file),
                         extra=passthrough, routes=routes)

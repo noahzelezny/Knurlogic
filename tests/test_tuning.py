@@ -119,3 +119,66 @@ def test_a_rung_over_the_ceiling_is_told_no_sysctl_fixes_it():
 def test_an_unknown_system_says_unknown_rather_than_guessing():
     d = wired.advise(10 * GIB, wired.Wired(total_bytes=0, limit_bytes=0))
     assert d["action"] == "unknown" and not d["command"]
+
+
+# --- how far a change can reach, measured rather than assumed ---------------
+# Read out of a real 4523-line bundled runtime: VQ_DECODE_CHUNK is captured
+# into a module global on first prefill and then read inside the expert loop,
+# so rebinding it lands on the next prefill. The GEMM flags are read at import
+# and compiled into Metal source. VQLAB_PREFILL_CHUNK is not read by any of
+# the 37 bundled runtimes on this machine.
+
+def test_a_live_knob_lands_on_the_loaded_runtime(monkeypatch):
+    """Rebinding the module global is what makes 'no reload' true."""
+    import sys
+    import types
+    from knurlogic import engine
+
+    fake = types.ModuleType("_fake_vq_runtime")
+    fake._DECODE_CHUNK = 32
+    monkeypatch.setitem(sys.modules, "_fake_vq_runtime", fake)
+
+    out = engine.apply_live({"VQ_DECODE_CHUNK": "8"})
+    assert fake._DECODE_CHUNK == 8
+    assert "applied" in out["VQ_DECODE_CHUNK"]
+    import os
+    assert os.environ["VQ_DECODE_CHUNK"] == "8"
+
+
+def test_a_restart_knob_is_reported_not_silently_skipped():
+    """A panel that said 'applied' over a value that did not move would be
+    the same lie as an env file sourced after the one that overwrites it."""
+    from knurlogic import engine
+    out = engine.apply_live({"VQ_MOE_GEMMSEG_RTILE": "32"})
+    assert "restart" in out["VQ_MOE_GEMMSEG_RTILE"]
+
+
+def test_the_cache_limit_uses_the_engines_live_setter():
+    from knurlogic import engine
+    out = engine.apply_live({"VQLAB_CACHE_LIMIT_GB": "2.0"})
+    assert "applied now" in out["VQLAB_CACHE_LIMIT_GB"] or \
+        "no live setter" in out["VQLAB_CACHE_LIMIT_GB"]
+
+
+def test_a_knob_the_bundled_runtime_never_reads_is_called_out(tmp_path):
+    """Knurlogic emitted VQLAB_PREFILL_CHUNK for every artifact and not one
+    bundled runtime on this machine reads it. A resolved setting that does
+    nothing is the exact failure this package exists to prevent."""
+    from knurlogic.artifact import Artifact
+    from knurlogic.web import knob_reach
+    (tmp_path / "config.json").write_text('{"model_type":"x","model_file":"model.py"}')
+    (tmp_path / "model.py").write_text(
+        'import os\nC = os.environ.get("VQ_DECODE_CHUNK", "32")\n')
+    a = Artifact.load(tmp_path)
+    assert knob_reach(a, "VQ_DECODE_CHUNK", ("VQ_DECODE_CHUNK",))[0] == "live"
+    reach, why = knob_reach(a, "VQLAB_PREFILL_CHUNK", ())
+    assert reach == "no-effect" and "never reads" in why
+
+
+def test_an_artifact_with_no_bundled_runtime_does_not_guess():
+    """No runtime to ask is not the same as 'the knob does nothing'."""
+    from knurlogic.artifact import Artifact
+    from pathlib import Path
+    a = Artifact(path=Path("/nonexistent"), model_type="x", model_file=None,
+                 bytes_on_disk=0, hidden_size=None, moe_intermediate_size=None)
+    assert a.reads_knob("VQ_DECODE_CHUNK") is None

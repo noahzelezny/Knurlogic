@@ -310,6 +310,53 @@ Fixed while looking at it, both caught only by opening the page:
   live" on the page after the text renderer had already been fixed for
   exactly that. A rollup is only as precise as its least precise node.
 
+## Why a reload was never actually required
+
+*2026-09-18. the maintainer: "why can't we adjust runtimes live? nobody wants to
+reload a model."* Correct instinct. The answer came out of READING a real
+bundled runtime (4523 lines) instead of assuming, and it is per knob:
+
+* **VQ_DECODE_CHUNK is live.** `_DECODE_CHUNK` is resolved lazily on first
+  prefill and then read as a module global inside the expert loop
+  (`for c0 in range(0, len(touched), _DECODE_CHUNK)`). Rebinding that global
+  lands on the next prefill. No reload. This is the knob that decides whether
+  a long prompt survives.
+* **VQLAB_CACHE_LIMIT_GB is live**, through the framework's own setter.
+* **The eight GEMM/numerics flags genuinely need a restart.** They are read
+  into module globals AT IMPORT and baked into Metal kernel source that is
+  compiled once. Making those live is an override's job, not a setting's.
+* **VQLAB_PREFILL_CHUNK is read by NONE of the 37 bundled runtimes on this
+  machine.** Knurlogic emitted it for every artifact. A resolved setting that
+  does nothing is the exact failure this package exists to prevent, committed
+  by the package. `Artifact.reads_knob()` now asks the artifact's own runtime
+  and the panel marks it NO EFFECT.
+
+So "restart required" was true of most knobs, wrong about the two that matter
+most for not running out of memory, and irrelevant for one that never did
+anything. `POST /settings.json` applies the live ones; everything else says
+what it needs and why.
+
+A second find, from the same file: the bundled runtime's own auto-sizer uses
+`per_expert = 2048 * 4096 * 2` -- the identical frozen constant knurlogic
+carried until this session. The artifact's own fallback has the same blind
+spot for a family with bigger experts. That is the first override with a
+measurement behind it, whenever it is wanted.
+
+Also fixed: `_artifact_runtime_modules` used `hasattr` over sys.modules,
+which invokes every lazy module's `__getattr__` -- it reached into
+transformers' lazy-import machinery and raised from inside a package that has
+nothing to do with any of this. It reads `vars(mod)` now, which asks the
+question without running anybody else's code.
+
+## The page, simplified
+
+the maintainer on exo's GUI: simple is a choice about where the eye goes, and a busy
+layout gives up that control. So: one column, one number that matters
+(headroom), three buttons, and the knob list showing only what CHANGED or
+what can be applied live -- everything else behind "all knobs". Provenance
+moved from printed-under-every-row to a click on the row. Same information,
+one decision at a time.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none

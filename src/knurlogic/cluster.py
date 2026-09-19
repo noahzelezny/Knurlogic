@@ -389,6 +389,10 @@ def run(path: str, host: str, port: int, profile: str, exo_url: str,
     settings_fn = web.settings_document(
         a, live_env=dict(c.nodes[shown].env), live_tune=tune,
         live_working_set=shown_ws, resolve_fn=_resolve_for,
+        # Nothing here can reach into another machine's process, so no knob
+        # is live from this side however it is read on that side.
+        restart_why=("this is a node's own process; knurlogic reports these "
+                     "and does not reach into it"),
         wired_advice={"known": False,
                       "note": f"these knobs are for node {shown!r}; a wired "
                               f"limit is per machine and knurlogic only reads "

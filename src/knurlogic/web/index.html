@@ -1,207 +1,201 @@
 <!doctype html><meta charset="utf-8"><title>knurlogic</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
- :root{--bg:#14161a;--fg:#e8eaed;--dim:#9aa0a6;--line:#2a2e35;--ok:#7ee787;--warn:#f0a35e;--acc:#4fd1c5}
- @media(prefers-color-scheme:light){:root{--bg:#fbfbfc;--fg:#1a1c20;--dim:#5f6368;--line:#dfe1e5;--ok:#1a7f37;--warn:#9a5b16;--acc:#0f766e}}
+ :root{--bg:#14161a;--fg:#e8eaed;--dim:#8b9197;--faint:#5c6268;--line:#23272d;
+   --ok:#7ee787;--warn:#f0a35e;--acc:#4fd1c5;--accfg:#06201d}
+ @media(prefers-color-scheme:light){:root{--bg:#fcfcfd;--fg:#16181c;--dim:#61666d;
+   --faint:#9aa0a6;--line:#e6e8ec;--ok:#1a7f37;--warn:#9a5b16;--acc:#0f766e;--accfg:#fff}}
  *{box-sizing:border-box}
- body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-sans-serif,-apple-system,Segoe UI,sans-serif}
- .wrap{max-width:1000px;margin:0 auto;padding:24px 16px}
- h1{font-size:18px;margin:0 0 2px;letter-spacing:.2px}
- .sub{color:var(--dim);font-size:13px;margin-bottom:20px}
- .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
- @media(max-width:760px){.grid{grid-template-columns:1fr}}
- .card{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:color-mix(in srgb,var(--fg) 3%,transparent)}
- .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);margin:0 0 10px;font-weight:600}
- .row{display:flex;justify-content:space-between;gap:12px;padding:3px 0;font-variant-numeric:tabular-nums}
- .row span:first-child{color:var(--dim)}
- .bar{height:8px;border-radius:5px;background:var(--line);overflow:hidden;margin:10px 0 6px;display:flex}
+ body{margin:0;background:var(--bg);color:var(--fg);
+   font:14px/1.55 ui-sans-serif,-apple-system,Segoe UI,sans-serif;
+   -webkit-font-smoothing:antialiased}
+ .wrap{max-width:660px;margin:0 auto;padding:40px 20px 64px}
+ h1{font-size:19px;font-weight:600;margin:0 0 3px;letter-spacing:-.01em}
+ .sub{color:var(--dim);font-size:13px}
+ section{margin-top:36px}
+ .lab{font-size:11px;text-transform:uppercase;letter-spacing:.9px;color:var(--faint);
+   font-weight:600;margin-bottom:12px}
+ .row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;
+   padding:5px 0;font-variant-numeric:tabular-nums}
+ .row>span:first-child{color:var(--dim)}
+ .big{font-size:26px;font-weight:600;letter-spacing:-.02em;margin:2px 0 10px}
+ .big small{font-size:13px;font-weight:400;color:var(--dim);letter-spacing:0}
+ .bar{height:6px;border-radius:4px;background:var(--line);overflow:hidden;display:flex;margin-bottom:14px}
  .bar i{display:block;height:100%}
  .k{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
- .note{color:var(--dim);font-size:12px;margin-top:8px}
- .pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;border:1px solid var(--line)}
- .ok{color:var(--ok)}.warn{color:var(--warn)}
- #log{height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg)}
- .msg{margin:0 0 10px;white-space:pre-wrap;word-wrap:break-word}
- .msg b{color:var(--acc);font-weight:600}
- form{display:flex;gap:8px;margin-top:10px}
- input,button{font:inherit;border-radius:8px;border:1px solid var(--line);padding:8px 10px;background:var(--bg);color:var(--fg)}
- input{flex:1}button{cursor:pointer;background:var(--acc);color:#fff;border-color:transparent}
- button:disabled{opacity:.5;cursor:default}
- details{margin-top:10px}summary{cursor:pointer;color:var(--dim);font-size:12px}
- pre{margin:8px 0 0;font-size:11.5px;color:var(--dim);white-space:pre-wrap}
  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
- .seg button{border:0;border-radius:0;background:transparent;color:var(--fg);padding:6px 12px;font-size:12.5px}
- .seg button[aria-pressed=true]{background:var(--acc);color:#06201d;font-weight:600}
- .knob{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:7px 0;border-top:1px solid var(--line)}
+ .seg button{border:0;border-radius:0;background:transparent;color:var(--dim);
+   padding:7px 15px;font:inherit;font-size:13px;cursor:pointer}
+ .seg button[aria-pressed=true]{background:var(--acc);color:var(--accfg);font-weight:600}
+ .ctl{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+ .ctl label{color:var(--faint);font-size:12px}
+ input,button{font:inherit;border-radius:8px;border:1px solid var(--line);
+   padding:7px 11px;background:var(--bg);color:var(--fg)}
+ #ws{width:78px;text-align:right}
+ .go{background:var(--acc);color:var(--accfg);border-color:transparent;font-weight:600;cursor:pointer}
+ .go[disabled]{opacity:.35;cursor:default}
+ .ghost{background:transparent;color:var(--dim);cursor:pointer}
+ .knob{padding:7px 0;border-top:1px solid var(--line);cursor:pointer}
  .knob:first-child{border-top:0}
- .knob .why{grid-column:1/-1;color:var(--dim);font-size:11.5px;margin-top:1px}
+ .knob .hd{display:flex;justify-content:space-between;gap:14px;align-items:baseline}
+ .knob .why{color:var(--dim);font-size:12px;margin-top:5px;display:none}
+ .knob[open] .why{display:block}
  .val{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:nowrap}
- .was{color:var(--dim);text-decoration:line-through;margin-right:6px}
+ .was{color:var(--faint);text-decoration:line-through;margin-right:7px}
  .chg{color:var(--acc);font-weight:600}
- .ctl{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:12px}
- .ctl label{color:var(--dim);font-size:12px}
- .ctl input[type=number]{width:92px;flex:none}
- .banner{border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:6px;
-   padding:8px 10px;margin:10px 0;font-size:12px;color:var(--dim)}
- code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px}
+ .tag{font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--faint);
+   border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:8px}
+ .tag.live{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 40%,transparent)}
+ .tag.dead{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
+ .msg{color:var(--dim);font-size:12.5px;margin-top:14px}
+ .msg b{color:var(--fg);font-weight:600}
+ code{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+ #log{height:180px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:12px}
+ #log p{margin:0 0 10px;white-space:pre-wrap;word-wrap:break-word}
+ #log b{color:var(--acc);font-weight:600}
+ form{display:flex;gap:8px;margin-top:10px}form input{flex:1}
+ details.more{margin-top:14px}
+ details.more summary{cursor:pointer;color:var(--faint);font-size:12px;list-style:none}
+ details.more summary::-webkit-details-marker{display:none}
+ details.more summary:before{content:"+ ";}
+ details.more[open] summary:before{content:"− ";}
+ pre{margin:10px 0 0;font-size:11.5px;color:var(--dim);white-space:pre-wrap}
 </style>
 <div class="wrap">
   <h1 id="title">knurlogic</h1>
   <div class="sub" id="sub">loading…</div>
-  <div class="grid">
-    <div class="card">
-      <h2>Loaded</h2>
-      <div id="loaded"></div>
-    </div>
-    <div class="card">
-      <h2>Memory</h2>
-      <div class="bar" id="bar"></div>
-      <div id="mem"></div>
-      <div class="note">Cache is reclaimable — it is not usage. Process RSS is
-        what Activity Monitor shows; it diverges from real usage under pressure.</div>
-    </div>
-  </div>
-  <div class="card" style="margin-top:16px">
-    <h2>Settings</h2>
+
+  <section>
+    <div class="lab">Memory</div>
+    <div class="big" id="headline">—</div>
+    <div class="bar" id="bar"></div>
+    <div id="mem"></div>
+  </section>
+
+  <section>
+    <div class="lab">Settings</div>
     <div class="ctl">
       <span class="seg" id="tunes"></span>
-      <label>working set <input id="ws" type="number" min="0" step="1"> GiB</label>
-      <button id="reset" style="background:transparent;color:var(--dim);border:1px solid var(--line)">running values</button>
+      <label>working set <input id="ws" type="number" min="0" step="1"></label>
+      <button class="go" id="apply" disabled>Apply</button>
     </div>
-    <div id="tunewhy" class="note" style="margin-top:0"></div>
-    <div id="knobs"></div>
-    <div id="snotes"></div>
-    <div class="banner" id="applies"></div>
-    <details><summary>exports for this resolution</summary>
-      <pre id="env"></pre>
-      <button id="copy" style="margin-top:8px">Copy</button></details>
-  </div>
-  <div class="card" style="margin-top:16px">
-    <h2>Try it</h2>
+    <div class="msg" id="applies"></div>
+    <div id="knobs" style="margin-top:14px"></div>
+    <details class="more"><summary>all knobs</summary><div id="rest"></div></details>
+    <details class="more"><summary>exports</summary><pre id="env"></pre></details>
+  </section>
+
+  <section>
+    <div class="lab">Try it</div>
     <div id="log"></div>
-    <form id="f"><input id="q" type="text" placeholder="Ask it something — this is a smoke test, not a coding UI" autocomplete="off"><button id="go">Send</button></form>
-  </div>
+    <form id="f"><input id="q" placeholder="Ask it something" autocomplete="off">
+      <button class="go" id="go">Send</button></form>
+  </section>
 </div>
 <script>
 const GIB=1073741824, $=id=>document.getElementById(id);
-const gb=b=>(b/GIB).toFixed(2)+' GiB';
-function row(k,v,cls){return `<div class="row"><span>${k}</span><span class="${cls||''}">${v}</span></div>`}
+const gb=b=>(b/GIB).toFixed(1)+' GiB';
+const row=(k,v)=>`<div class="row"><span>${k}</span><span>${v}</span></div>`;
+const esc=s=>String(s??'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+
 // --- settings -------------------------------------------------------------
-// Three questions kept apart on purpose: what is RUNNING, what a setting
-// WOULD give, and how to get it. The runtime reads these at import, so a
-// control that looked like it retuned a loaded model would be a lie.
-let S_ASKED={};
+// Three things kept apart: what is RUNNING, what a tune WOULD give, and how
+// far a change can reach. Reach is per knob and was measured by reading a
+// bundled runtime: two apply live, eight are compiled into the kernel at
+// import, and one is not read by these runtimes at all.
+let DOC={}, ASK={};
+function knobHTML(k){
+  const v=k.changed
+    ? `<span class="was">${esc(k.running)}</span><span class="chg">${esc(k.would_be)}</span>`
+    : esc(k.running??k.would_be);
+  const tag=k.reach==='live'?'<span class="tag live">live</span>'
+    :k.reach==='no-effect'?'<span class="tag dead">no effect</span>':'';
+  return `<div class="knob" onclick="this.toggleAttribute('open')">
+    <div class="hd"><span class="k">${k.name}${tag}</span><span class="val">${v}</span></div>
+    <div class="why">${esc(k.what)}${k.why?' — '+esc(k.why):''}
+      <br><span style="color:var(--faint)">${esc(k.reach_why)}</span></div></div>`;
+}
 async function loadSettings(q){
   const qs=new URLSearchParams(q||{}).toString();
-  let d; try{ d=await (await fetch('/settings.json'+(qs?'?'+qs:''))).json() }catch(e){ return }
-  S_ASKED=d.asked||{};
-  const T=$('tunes'); T.innerHTML='';
-  (d.tunes||[]).forEach(t=>{
+  try{ DOC=await (await fetch('/settings.json'+(qs?'?'+qs:''))).json() }catch(e){ return }
+  ASK=DOC.asked||{};
+  $('tunes').innerHTML='';
+  (DOC.tunes||[]).forEach(t=>{
     const b=document.createElement('button');
-    b.textContent=t.name; b.setAttribute('aria-pressed', t.name===d.asked.tune);
-    b.onclick=()=>loadSettings({tune:t.name, working_set_gib:$('ws').value||''});
-    b.onmouseenter=()=>$('tunewhy').textContent=t.why;
-    T.appendChild(b);
+    b.textContent=t.name; b.title=t.why;
+    b.setAttribute('aria-pressed',t.name===ASK.tune);
+    b.onclick=()=>loadSettings({tune:t.name,working_set_gib:$('ws').value||''});
+    $('tunes').appendChild(b);
   });
-  const cur=(d.tunes||[]).find(t=>t.name===d.asked.tune);
-  $('tunewhy').textContent=cur?cur.why:'';
   if(document.activeElement!==$('ws'))
-    $('ws').value=(d.asked.working_set_bytes/GIB).toFixed(0);
+    $('ws').value=(ASK.working_set_bytes/GIB).toFixed(0);
 
-  $('knobs').innerHTML=(d.knobs||[]).map(k=>{
-    const v=k.changed
-      ? `<span class="was">${k.running??'—'}</span><span class="chg">${k.would_be??'—'}</span>`
-      : `${k.running??k.would_be??'—'}`;
-    return `<div class="knob"><span class="k">${k.name}</span><span class="val">${v}</span>`+
-           `<span class="why">${k.what||''}${k.why?' — '+k.why:''}</span></div>`;
-  }).join('');
+  const ks=DOC.knobs||[];
+  const shown=ks.filter(k=>k.changed||k.reach!=='restart');
+  $('knobs').innerHTML=shown.map(knobHTML).join('')||
+    '<div class="msg">Nothing differs from what is running.</div>';
+  $('rest').innerHTML=ks.filter(k=>!shown.includes(k)).map(knobHTML).join('');
+  $('env').textContent=DOC.exports||'';
 
-  $('snotes').innerHTML=(d.warnings||[]).map(w=>`<div class="note warn">${w}</div>`).join('')
-    +(d.notes||[]).map(n=>`<div class="note">${n}</div>`).join('');
-
-  const differs=(d.knobs||[]).some(k=>k.changed);
-  $('applies').innerHTML = differs
-    ? `These are not live. The runtime reads its settings <b>at import</b>, and the
-       model is already loaded — so this is what a restart with
-       <code>--tune ${d.asked.tune}</code> would give you, not what is running now.`
-    : `This is what is running (<code>--tune ${d.live.tune}</code>).`;
-  $('env').textContent=d.exports||'';
-  $('copy').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(d.exports||'');
+  const chg=ks.filter(k=>k.changed);
+  const live=chg.filter(k=>k.reach==='live'), rest=chg.filter(k=>k.reach==='restart');
+  $('apply').disabled=!live.length;
+  $('applies').innerHTML = !chg.length
+    ? `Running <b>${esc(ASK.tune)}</b>.`
+    : (live.length?`<b>${live.length}</b> can be applied now. `:'')+
+      (rest.length?`<b>${rest.length}</b> need${rest.length===1?'s':''} a restart:
+        <code>--tune ${esc(ASK.tune)}</code>`:'');
 }
+$('apply').onclick=async()=>{
+  $('apply').disabled=true;
+  const r=await (await fetch('/settings.json',{method:'POST',
+    body:JSON.stringify({tune:ASK.tune})})).json();
+  const done=Object.entries(r.applied||{}).filter(([k,v])=>!/restart/.test(v));
+  $('applies').innerHTML=done.map(([k,v])=>`<b>${esc(k)}</b> ${esc(v)}`).join('<br>')
+    ||'Nothing changed.';
+  setTimeout(()=>loadSettings({tune:ASK.tune,working_set_gib:$('ws').value||''}),400);
+};
+$('ws').addEventListener('change',()=>loadSettings({tune:ASK.tune||'',working_set_gib:$('ws').value}));
+
+// --- status ---------------------------------------------------------------
 async function tick(){
   let d; try{ d=await (await fetch('/status.json')).json() }catch(e){ return }
-  const a=d.artifact, m=d.memory;
+  const a=d.artifact, m=d.memory, C=d.cluster;
   if(a){ $('title').textContent=a.name;
-    $('sub').innerHTML=`${a.model_type} · ${gb(a.size_bytes)} on disk `+
-      (a.is_vq?`<span class="pill">VQ</span> `:'')+
-      (a.bundled_runtime?`<span class="pill">runtime ${a.bundled_runtime}</span>`:''); }
-  let L='';
-  if(a){ const g=Object.entries(a.geometry||{});
-    if(g.length) L+=row('geometry', g.map(([k,n])=>`${k} ×${n}`).join(', '));}
-  (d.architectures||[]).forEach(r=>{
-    L+=row(r.module, `${r.origin} · <span class="${r.state==='OK'?'ok':'warn'}">${r.state}</span>`)});
-  const w=d.wired;
-  if(w&&w.known){
-    L+=row('wired limit', `${gb(w.limit_bytes)} of ${gb(w.total_bytes)} installed`,
-           w.action==='raise'?'warn':'ok');
-    if(w.action==='raise'&&w.command){
-      L+=`<div class="row"><span>raise it</span><span><code
-        style="user-select:all">${w.command}</code></span></div>`;
-      L+=`<div class="row"><span></span><span class="warn">${w.note}</span></div>`;
-    } else if(w.action==='will-not-fit'){
-      L+=`<div class="row"><span></span><span class="warn">${w.note}</span></div>`;
-    }
-  }
-  L+=row('uptime', d.uptime_seconds.toFixed(0)+'s');
-  L+=row('requests', d.requests_served);
-  $('loaded').innerHTML=L;
+    $('sub').textContent=`${a.model_type} · ${gb(a.size_bytes)}`+
+      (a.bundled_runtime?` · runtime ${a.bundled_runtime}`:''); }
   if(m&&m.available){
-    const ws=m.working_set_bytes||1;
+    const ws=m.working_set_bytes||1, box=m.scope==='box';
+    $('headline').innerHTML=`${gb(m.headroom_bytes)} <small>free of ${gb(ws)}</small>`;
     $('bar').innerHTML=`<i style="width:${100*m.active_bytes/ws}%;background:var(--acc)"></i>`+
       `<i style="width:${100*m.cache_bytes/ws}%;background:var(--warn)"></i>`;
-    // Box-wide numbers must not wear a label that says "weights": that is
-    // how a runtime gets blamed for everything else on the machine.
-    const box=m.scope==='box';
     $('mem').innerHTML=row(box?'in use on the box':'weights + live',gb(m.active_bytes))+
-      row('cache (reclaimable)',gb(m.cache_bytes))+
-      row('peak this run',gb(m.peak_bytes))+
-      row('headroom',gb(m.headroom_bytes))+
-      row('usable / installed',gb(m.working_set_bytes)+' / '+gb(m.total_bytes))+
-      row('process RSS',gb(m.process_rss_bytes));
-    if(box) $('mem').innerHTML+=`<div class="note">These come from exo, which
-      reports the machine — everything running on it, not just this runtime.</div>`;
+      row('cache · reclaimable',gb(m.cache_bytes))+
+      (C&&C.nodes_total>1?row('nodes answering',`${C.nodes_reachable}/${C.nodes_total}`):
+        row('peak this run',gb(m.peak_bytes)));
   }
-  const C=d.cluster;
-  if(C&&C.nodes_total>1){
-    $('loaded').innerHTML=(d.nodes||[]).map(n=>row(n.node,
-      n.reachable===false?'<span class="warn">no answer</span>'
-      :`${gb((n.memory||{}).active_bytes||0)} · ${n.role}`)).join('')+
-      row('nodes answering',`${C.nodes_reachable}/${C.nodes_total}`)+$('loaded').innerHTML;
-  }
+  const w=d.wired;
+  if(w&&w.action==='raise'&&w.command)
+    $('mem').innerHTML+=`<div class="msg">The GPU may wire only
+      <b>${gb(w.limit_bytes)}</b> of ${gb(w.total_bytes)} installed.
+      <code style="user-select:all">${esc(w.command)}</code></div>`;
 }
-tick(); setInterval(tick,2000);
-// Enter sends. A chat box where Return does nothing is broken, and the
-// implicit-submission rules make this easy to get wrong with one input.
-$('q').addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('f').requestSubmit();}
-});
-$('f').addEventListener('submit',async e=>{
+tick(); loadSettings({}); setInterval(tick,2000);
+
+// --- try it ---------------------------------------------------------------
+const log=$('log');
+function say(who,t){const p=document.createElement('p');p.innerHTML=`<b>${who}</b> `;
+  p.appendChild(document.createTextNode(t));log.appendChild(p);log.scrollTop=1e9;return p}
+$('f').onsubmit=async e=>{
   e.preventDefault(); const q=$('q').value.trim(); if(!q)return;
-  $('q').value=''; $('go').disabled=true;
-  $('log').insertAdjacentHTML('beforeend',`<p class="msg"><b>you</b>\n${q.replace(/</g,'&lt;')}</p>`);
-  $('log').scrollTop=1e9;
+  $('q').value=''; say('you',q); const out=say('it','…'); $('go').disabled=true;
   try{
-    const r=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'loaded',messages:[{role:'user',content:q}],max_tokens:512,temperature:0.7})});
-    const j=await r.json(); const msg=j.choices?.[0]?.message||{};
-    const t=msg.content||msg.reasoning||JSON.stringify(j).slice(0,400);
-    $('log').insertAdjacentHTML('beforeend',`<p class="msg"><b>model</b>\n${String(t).replace(/</g,'&lt;')}</p>`);
-  }catch(err){
-    $('log').insertAdjacentHTML('beforeend',`<p class="msg warn"><b>error</b>\n${err}</p>`);
-  }
-  $('go').disabled=false; $('log').scrollTop=1e9; $('q').focus();
-});
-$('ws').addEventListener('change',()=>loadSettings({tune:S_ASKED.tune||'', working_set_gib:$('ws').value}));
-$('reset').onclick=()=>loadSettings({});
-loadSettings({});
+    const r=await fetch('/v1/chat/completions',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({messages:[{role:'user',content:q}],max_tokens:256})});
+    const j=await r.json();
+    out.lastChild.textContent=j.choices?.[0]?.message?.content??JSON.stringify(j).slice(0,400);
+  }catch(err){ out.lastChild.textContent=String(err) }
+  $('go').disabled=false;
+};
 </script>
