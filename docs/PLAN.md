@@ -122,7 +122,7 @@ both nodes. `tests/test_cluster.py` pins the same claims against a stub exo
 whose answers carry a marker string, so a proxy that silently answered by
 itself would fail the test rather than pass it quietly.
 
-## Overlays: one place, no forks
+## Overrides: one place, no forks
 
 *2026-09-18, same session.* The goal moved: VQ adoption should not require a
 fork of exo plus forks of mlx-lm and mlx-vlm. One place, and the improvements
@@ -136,8 +136,8 @@ spawned child is a fresh interpreter and inherits NOTHING from the parent's
 exo, does not reach the process that runs the model. Measured, with a second
 channel so a child that never ran could not read as a pass:
 
-    without overlay:  child saw parent's sys.modules edit: False | overlay: False
-    with overlay:     child saw parent's sys.modules edit: False | overlay: True
+    without override:  child saw parent's sys.modules edit: False | override: False
+    with override:     child saw parent's sys.modules edit: False | override: True
 
 The environment is what crosses a spawn boundary. So the installer is a
 `sitecustomize.py` on PYTHONPATH, which python imports at interpreter startup
@@ -149,40 +149,40 @@ targets at startup would drag mlx into every python process on the box.
 (`/opt/anaconda3/envs/exo`, python 3.13) where knurlogic is not installed. An
 installer that imported knurlogic would pass on the box it was written on and
 fail on the one that matters -- the same shape as the bare-`python3`-in-a-loop
-version check. `tests/test_overlay.py` shadows knurlogic with a module that
+version check. `tests/test_override.py` shadows knurlogic with a module that
 raises ImportError, so that arm is tested rather than asserted.
 
 **Verified on the real target**, not only a fixture: a real exo module,
-exo's own interpreter, control arm and overlay arm, parent and spawn()ed
+exo's own interpreter, control arm and override arm, parent and spawn()ed
 child, four distinct pids.
 
     control:  exo/src/exo/routing/topics.py        proof: null
-    overlay:  <knurlogic>/.../routing/topics.py    proof: served-by-knurlogic
+    override:  <knurlogic>/.../routing/topics.py    proof: served-by-knurlogic
 
-**Rules, which are what keep an overlay from becoming a fork.** Every overlay
+**Rules, which are what keep an override from becoming a fork.** Every override
 records what upstream version it is against, why, and the measurement that
 justifies it; it is digest-pinned and REFUSED at import if the file changed,
 because serving a file that is not the pinned one makes every measurement
 taken afterwards unciteable. The installer logs each activation with its pid:
-a spawned runner cannot be asked what it imported, and an overlay that never
+a spawned runner cannot be asked what it imported, and an override that never
 fired looks exactly like one that did.
 
-    knurlogic overlay add <module> <file> --against <ver> --why <measurement>
-    knurlogic overlay run -- exo          # any command, overlays applied
-    knurlogic overlay list                # declared, and what actually fired
+    knurlogic override add <module> <file> --against <ver> --why <measurement>
+    knurlogic override run -- exo          # any command, overrides applied
+    knurlogic override list                # declared, and what actually fired
 
 `serve --cluster --launch` installs them for exo and every runner it spawns.
 Attach mode says it did NOT apply them, because it cannot.
 
 **Limits, stated once.** Only processes Knurlogic launches -- the mechanism
 rides on the environment. `mlx.core` is a compiled extension and is not
-overlayable; kernel changes still belong in the artifact's `model_file`.
-`overlays/` ships EMPTY: the first overlay should be one with a measurement
+overrideable; kernel changes still belong in the artifact's `model_file`.
+`overrides/` ships EMPTY: the first override should be one with a measurement
 behind it.
 
 ## Not done: replacing an exo module
 
-The MECHANISM is done and proven; no overlay has been written, because none
+The MECHANISM is done and proven; no override has been written, because none
 has a measurement behind it yet. The honest first targets are still
 `routing/` (654 lines) or `master/` placement -- and now also the mlx-lm and
 exo defaults that made prefill spike and OOM, which is the thing that
