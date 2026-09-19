@@ -81,7 +81,8 @@
     </div>
     <div class="msg" id="applies"></div>
     <div id="knobs" style="margin-top:14px"></div>
-    <details class="more"><summary>all knobs</summary><div id="rest"></div></details>
+    <details class="more"><summary>measured flags</summary><div id="rest"></div></details>
+    <details class="more" id="unmanaged"></details>
     <details class="more"><summary>exports</summary><pre id="env"></pre></details>
   </section>
 
@@ -130,11 +131,21 @@ async function loadSettings(q){
   if(document.activeElement!==$('ws'))
     $('ws').value=(ASK.working_set_bytes/GIB).toFixed(0);
 
+  // Tiered by who would reach for it, not by what happens to have changed:
+  // the memory knobs are the page, the measured flags are a click away, and
+  // the kernel internals are named but never defaulted.
   const ks=DOC.knobs||[];
-  const shown=ks.filter(k=>k.changed||k.reach!=='restart');
+  const shown=ks.filter(k=>k.tier==='reach'||k.changed||k.reach==='live');
   $('knobs').innerHTML=shown.map(knobHTML).join('')||
     '<div class="msg">Nothing differs from what is running.</div>';
   $('rest').innerHTML=ks.filter(k=>!shown.includes(k)).map(knobHTML).join('');
+  const un=DOC.unmanaged||[];
+  $('unmanaged').innerHTML=un.length
+    ? `<summary>${un.length} more this runtime reads</summary>
+       <div class="msg">knurlogic has no measured answer for these, so it sets
+       none of them and the runtime's own defaults apply.</div>
+       <div class="k" style="color:var(--faint);margin-top:8px;line-height:1.9">
+       ${un.map(u=>esc(u.name)).join('  ')}</div>` : '';
   $('env').textContent=DOC.exports||'';
 
   const chg=ks.filter(k=>k.changed);
