@@ -1,5 +1,10 @@
 [build-system]
-requires = ["setuptools>=68"]
+# 77, not 68: `license = "Apache-2.0"` + `license-files` is PEP 639, which
+# setuptools only understands from 77. Declaring 68 made an editable install
+# fail metadata generation on a box whose setuptools was 75.1 -- the floor
+# has to be the version the metadata actually needs, not the one that was
+# current when the file was written.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
