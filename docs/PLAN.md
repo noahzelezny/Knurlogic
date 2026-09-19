@@ -348,7 +348,23 @@ transformers' lazy-import machinery and raised from inside a package that has
 nothing to do with any of this. It reads `vars(mod)` now, which asks the
 question without running anybody else's code.
 
-## The page, in exo's language
+## The page, in exo's language -- second attempt
+
+*Noah, on the first one: "the page doesn't look very much like exo btw lol."*
+Fair. The first pass borrowed the box-and-label detail and none of the things
+that make exo read as exo: a wordmark, a nav opposite it, device graphics, a
+right rail, and using the accent colour with any confidence.
+
+Second pass: masthead with a knurled-circle mark (drawn in SVG, so the page
+is still one file) and the section nav opposite it; a two-column body with
+the rail on the right for SETTINGS and CONNECT, the way exo keeps INSTANCES
+and LOAD MODEL there; and a topology strip where **the device IS the gauge**
+-- each unit fills from the bottom with what that box is holding. A picture
+of a machine next to a separate number is decoration; a picture that IS the
+number is not. One node still gets a unit, because the picture is the gauge
+rather than an ornament that only earns its place in pairs.
+
+## The page, in exo's language -- first attempt
 
 *Restyled toward exo, teal rather than yellow.* Monospace throughout, panels
 as bordered boxes with the label sitting in the border, uppercase segmented
