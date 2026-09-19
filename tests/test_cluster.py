@@ -239,3 +239,51 @@ def test_box_wide_numbers_are_not_labelled_as_weights():
          for n in ("a", "b")]))
     assert "in use on the box" in box and "weights" not in box
     assert "weights + live" in proc
+
+
+def test_settings_json_says_running_would_be_and_how_to_get_it(tmp_path):
+    """The three questions a settings panel has to keep apart.
+
+    A slider that looks like it retunes a loaded model would be a lie -- the
+    runtime reads its environment at import and the import already happened.
+    So the document has to carry the running value, the value another tune
+    WOULD give, and the fact that it takes a restart.
+    """
+    from knurlogic import web
+    from knurlogic.resolve import resolve
+
+    a = _art(bytes_on_disk=72 * GIB)
+    live = resolve(a, 84 * GIB, tune="balanced")
+    doc = web.settings_document(
+        a, live_env=dict(live.env), live_tune="balanced",
+        live_working_set=84 * GIB,
+        resolve_fn=lambda ws, t: resolve(a, ws, tune=t))
+
+    same = doc({})
+    assert same["applies_at"] == "restart"
+    assert not any(k["changed"] for k in same["knobs"]), (
+        "asking for the running tune must not report a pending change")
+
+    fast = doc({"tune": ["fast"]})
+    changed = {k["name"]: (k["running"], k["would_be"])
+               for k in fast["knobs"] if k["changed"]}
+    assert "VQLAB_CACHE_LIMIT_GB" in changed
+    assert fast["exports"].startswith("export ")
+
+    # Every knob shown carries the sentence that explains it. A settings UI
+    # that lists names and values is a config file with a stylesheet.
+    assert all(k["what"] for k in fast["knobs"]), \
+        [k["name"] for k in fast["knobs"] if not k["what"]]
+
+
+def test_a_misspelled_tune_from_a_url_falls_back_instead_of_500ing():
+    """Query strings are user input; a typo must not take the page down."""
+    from knurlogic import web
+    from knurlogic.resolve import resolve
+    a = _art(bytes_on_disk=72 * GIB)
+    doc = web.settings_document(a, live_env={}, live_tune="balanced",
+                                live_working_set=84 * GIB,
+                                resolve_fn=lambda ws, t: resolve(a, ws, tune=t))
+    assert doc({"tune": ["turbo"]})["asked"]["tune"] == "balanced"
+    assert doc({"working_set_gib": ["not-a-number"]})[
+        "asked"]["working_set_bytes"] == 84 * GIB

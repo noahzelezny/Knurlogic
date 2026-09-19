@@ -114,6 +114,11 @@ def aggregate(snapshots, artifact=None) -> dict:
     mem = {k: sum(int(s.get("memory", {}).get(k, 0) or 0) for s in up)
            for k in _SUMMED}
     mem["available"] = any(s.get("memory", {}).get("available") for s in up)
+    # A rollup is only as precise as its least precise node: one box-wide
+    # number in the sum makes the sum box-wide, and the label has to follow
+    # or the total quietly claims to be weights.
+    mem["scope"] = ("box" if any(s.get("memory", {}).get("scope") == "box"
+                                 for s in up) else "process")
     cluster = {
         "nodes_total": len(snaps),
         "nodes_reachable": len(up),

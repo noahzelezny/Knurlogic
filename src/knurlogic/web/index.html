@@ -1,8 +1,8 @@
 <!doctype html><meta charset="utf-8"><title>knurlogic</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
- :root{--bg:#14161a;--fg:#e8eaed;--dim:#9aa0a6;--line:#2a2e35;--ok:#7ee787;--warn:#f0a35e;--acc:#6ea8fe}
- @media(prefers-color-scheme:light){:root{--bg:#fbfbfc;--fg:#1a1c20;--dim:#5f6368;--line:#dfe1e5;--ok:#1a7f37;--warn:#9a5b16;--acc:#0b57d0}}
+ :root{--bg:#14161a;--fg:#e8eaed;--dim:#9aa0a6;--line:#2a2e35;--ok:#7ee787;--warn:#f0a35e;--acc:#4fd1c5}
+ @media(prefers-color-scheme:light){:root{--bg:#fbfbfc;--fg:#1a1c20;--dim:#5f6368;--line:#dfe1e5;--ok:#1a7f37;--warn:#9a5b16;--acc:#0f766e}}
  *{box-sizing:border-box}
  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-sans-serif,-apple-system,Segoe UI,sans-serif}
  .wrap{max-width:1000px;margin:0 auto;padding:24px 16px}
@@ -29,6 +29,21 @@
  button:disabled{opacity:.5;cursor:default}
  details{margin-top:10px}summary{cursor:pointer;color:var(--dim);font-size:12px}
  pre{margin:8px 0 0;font-size:11.5px;color:var(--dim);white-space:pre-wrap}
+ .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+ .seg button{border:0;border-radius:0;background:transparent;color:var(--fg);padding:6px 12px;font-size:12.5px}
+ .seg button[aria-pressed=true]{background:var(--acc);color:#06201d;font-weight:600}
+ .knob{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:7px 0;border-top:1px solid var(--line)}
+ .knob:first-child{border-top:0}
+ .knob .why{grid-column:1/-1;color:var(--dim);font-size:11.5px;margin-top:1px}
+ .val{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:nowrap}
+ .was{color:var(--dim);text-decoration:line-through;margin-right:6px}
+ .chg{color:var(--acc);font-weight:600}
+ .ctl{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:12px}
+ .ctl label{color:var(--dim);font-size:12px}
+ .ctl input[type=number]{width:92px;flex:none}
+ .banner{border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:6px;
+   padding:8px 10px;margin:10px 0;font-size:12px;color:var(--dim)}
+ code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px}
 </style>
 <div class="wrap">
   <h1 id="title">knurlogic</h1>
@@ -47,16 +62,72 @@
     </div>
   </div>
   <div class="card" style="margin-top:16px">
+    <h2>Settings</h2>
+    <div class="ctl">
+      <span class="seg" id="tunes"></span>
+      <label>working set <input id="ws" type="number" min="0" step="1"> GiB</label>
+      <button id="reset" style="background:transparent;color:var(--dim);border:1px solid var(--line)">running values</button>
+    </div>
+    <div id="tunewhy" class="note" style="margin-top:0"></div>
+    <div id="knobs"></div>
+    <div id="snotes"></div>
+    <div class="banner" id="applies"></div>
+    <details><summary>exports for this resolution</summary>
+      <pre id="env"></pre>
+      <button id="copy" style="margin-top:8px">Copy</button></details>
+  </div>
+  <div class="card" style="margin-top:16px">
     <h2>Try it</h2>
     <div id="log"></div>
     <form id="f"><input id="q" type="text" placeholder="Ask it something — this is a smoke test, not a coding UI" autocomplete="off"><button id="go">Send</button></form>
-    <details><summary>settings resolved for this model</summary><pre id="env"></pre></details>
   </div>
 </div>
 <script>
 const GIB=1073741824, $=id=>document.getElementById(id);
 const gb=b=>(b/GIB).toFixed(2)+' GiB';
 function row(k,v,cls){return `<div class="row"><span>${k}</span><span class="${cls||''}">${v}</span></div>`}
+// --- settings -------------------------------------------------------------
+// Three questions kept apart on purpose: what is RUNNING, what a setting
+// WOULD give, and how to get it. The runtime reads these at import, so a
+// control that looked like it retuned a loaded model would be a lie.
+let S_ASKED={};
+async function loadSettings(q){
+  const qs=new URLSearchParams(q||{}).toString();
+  let d; try{ d=await (await fetch('/settings.json'+(qs?'?'+qs:''))).json() }catch(e){ return }
+  S_ASKED=d.asked||{};
+  const T=$('tunes'); T.innerHTML='';
+  (d.tunes||[]).forEach(t=>{
+    const b=document.createElement('button');
+    b.textContent=t.name; b.setAttribute('aria-pressed', t.name===d.asked.tune);
+    b.onclick=()=>loadSettings({tune:t.name, working_set_gib:$('ws').value||''});
+    b.onmouseenter=()=>$('tunewhy').textContent=t.why;
+    T.appendChild(b);
+  });
+  const cur=(d.tunes||[]).find(t=>t.name===d.asked.tune);
+  $('tunewhy').textContent=cur?cur.why:'';
+  if(document.activeElement!==$('ws'))
+    $('ws').value=(d.asked.working_set_bytes/GIB).toFixed(0);
+
+  $('knobs').innerHTML=(d.knobs||[]).map(k=>{
+    const v=k.changed
+      ? `<span class="was">${k.running??'—'}</span><span class="chg">${k.would_be??'—'}</span>`
+      : `${k.running??k.would_be??'—'}`;
+    return `<div class="knob"><span class="k">${k.name}</span><span class="val">${v}</span>`+
+           `<span class="why">${k.what||''}${k.why?' — '+k.why:''}</span></div>`;
+  }).join('');
+
+  $('snotes').innerHTML=(d.warnings||[]).map(w=>`<div class="note warn">${w}</div>`).join('')
+    +(d.notes||[]).map(n=>`<div class="note">${n}</div>`).join('');
+
+  const differs=(d.knobs||[]).some(k=>k.changed);
+  $('applies').innerHTML = differs
+    ? `These are not live. The runtime reads its settings <b>at import</b>, and the
+       model is already loaded — so this is what a restart with
+       <code>--tune ${d.asked.tune}</code> would give you, not what is running now.`
+    : `This is what is running (<code>--tune ${d.live.tune}</code>).`;
+  $('env').textContent=d.exports||'';
+  $('copy').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(d.exports||'');
+}
 async function tick(){
   let d; try{ d=await (await fetch('/status.json')).json() }catch(e){ return }
   const a=d.artifact, m=d.memory;
@@ -88,14 +159,25 @@ async function tick(){
     const ws=m.working_set_bytes||1;
     $('bar').innerHTML=`<i style="width:${100*m.active_bytes/ws}%;background:var(--acc)"></i>`+
       `<i style="width:${100*m.cache_bytes/ws}%;background:var(--warn)"></i>`;
-    $('mem').innerHTML=row('weights + live',gb(m.active_bytes))+
+    // Box-wide numbers must not wear a label that says "weights": that is
+    // how a runtime gets blamed for everything else on the machine.
+    const box=m.scope==='box';
+    $('mem').innerHTML=row(box?'in use on the box':'weights + live',gb(m.active_bytes))+
       row('cache (reclaimable)',gb(m.cache_bytes))+
       row('peak this run',gb(m.peak_bytes))+
       row('headroom',gb(m.headroom_bytes))+
       row('usable / installed',gb(m.working_set_bytes)+' / '+gb(m.total_bytes))+
       row('process RSS',gb(m.process_rss_bytes));
+    if(box) $('mem').innerHTML+=`<div class="note">These come from exo, which
+      reports the machine — everything running on it, not just this runtime.</div>`;
   }
-  $('env').textContent=Object.entries(d.settings||{}).map(([k,v])=>k+'='+v).join('\n');
+  const C=d.cluster;
+  if(C&&C.nodes_total>1){
+    $('loaded').innerHTML=(d.nodes||[]).map(n=>row(n.node,
+      n.reachable===false?'<span class="warn">no answer</span>'
+      :`${gb((n.memory||{}).active_bytes||0)} · ${n.role}`)).join('')+
+      row('nodes answering',`${C.nodes_reachable}/${C.nodes_total}`)+$('loaded').innerHTML;
+  }
 }
 tick(); setInterval(tick,2000);
 // Enter sends. A chat box where Return does nothing is broken, and the
@@ -119,4 +201,7 @@ $('f').addEventListener('submit',async e=>{
   }
   $('go').disabled=false; $('log').scrollTop=1e9; $('q').focus();
 });
+$('ws').addEventListener('change',()=>loadSettings({tune:S_ASKED.tune||'', working_set_gib:$('ws').value}));
+$('reset').onclick=()=>loadSettings({});
+loadSettings({});
 </script>
