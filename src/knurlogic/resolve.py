@@ -159,7 +159,8 @@ def decode_chunk_for(headroom_bytes: int, known: bool = True,
                min(S.DECODE_CHUNK_DEFAULT, int(headroom_bytes / per)))
 
 
-def resolve(artifact: Artifact, budget, profile: str = "v1.5"):
+def resolve(artifact: Artifact, budget, profile: str = "v1.5",
+            tune: str = "balanced"):
     """Resolve every knob for this artifact against a budget.
 
     `budget` is either a byte count -- one box, and the return is a
@@ -175,14 +176,16 @@ def resolve(artifact: Artifact, budget, profile: str = "v1.5"):
     if profile not in S.RUNTIME_PROFILES:
         raise ValueError(f"profile must be one of {sorted(S.RUNTIME_PROFILES)}")
 
+    if tune not in S.TUNE_PROFILES:
+        raise ValueError(f"tune must be one of {sorted(S.TUNE_PROFILES)}")
     if isinstance(budget, (int, float)):
         return _resolve_one(artifact, int(budget), artifact.bytes_on_disk,
-                            profile)
-    return resolve_cluster(artifact, budget, profile)
+                            profile, tune)
+    return resolve_cluster(artifact, budget, profile, tune)
 
 
-def resolve_cluster(artifact: Artifact, budget,
-                    profile: str = "v1.5") -> ClusterResolution:
+def resolve_cluster(artifact: Artifact, budget, profile: str = "v1.5",
+                    tune: str = "balanced") -> ClusterResolution:
     """Resolve per node, and say what is only true of the whole cluster."""
     nodes = _as_nodes(budget)
     if not nodes:
@@ -193,7 +196,7 @@ def resolve_cluster(artifact: Artifact, budget,
     c = ClusterResolution(inventory=nodes)
     for n in nodes:
         r = _resolve_one(artifact, n.working_set_bytes, shares[n.name],
-                         profile)
+                         profile, tune)
         if n.holds_bytes is None:
             r.notes.append(
                 f"shard size ASSUMED {shares[n.name]/GIB:.1f} GiB "
@@ -222,7 +225,8 @@ def resolve_cluster(artifact: Artifact, budget,
 
 
 def _resolve_one(artifact: Artifact, working_set_bytes: int,
-                 holds_bytes: int, profile: str) -> Resolution:
+                 holds_bytes: int, profile: str,
+                 tune: str = "balanced") -> Resolution:
     """One box. `holds_bytes` is what this box holds of the artifact, which
     is the whole thing unless something sharded it."""
     r = Resolution()
@@ -249,6 +253,18 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
         # Tighten on the model's shape, never loosen on it -- see
         # DECODE_CHUNK_SHAPE_MAY_LOOSEN. Being wrong the other way is an OOM.
         chunk = frozen
+    # Remember what HEADROOM alone decided, so the note below credits the
+    # right cause. A message that blames headroom for a lowering the tune
+    # profile made would send someone looking for memory they already have.
+    chunk_from_headroom = chunk
+
+    t = S.TUNE_PROFILES[tune]
+    scale = t.get("decode_chunk_scale", 1.0)
+    if scale != 1.0 and chunk > S.DECODE_CHUNK_MIN:
+        chunk = max(S.DECODE_CHUNK_MIN, int(chunk * scale))
+        r.notes.append(f"tune={tune}: transient bounded tighter than headroom "
+                       f"requires (chunk {chunk})")
+
     if artifact.is_vq:
         r.env["VQ_DECODE_CHUNK"] = str(chunk)
         if known:
@@ -260,21 +276,52 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
                 f"may only tighten until a run measures the loosening "
                 f"direction, because being wrong there is an OOM")
     fits = working_set_bytes <= 0 or headroom > 0
-    if artifact.is_vq and chunk < S.DECODE_CHUNK_DEFAULT and fits:
+    if (artifact.is_vq and chunk_from_headroom < S.DECODE_CHUNK_DEFAULT
+            and fits):
         r.notes.append(
             f"VQ_DECODE_CHUNK lowered to {chunk} ({headroom/GIB:.1f} GiB "
             f"headroom): bounds the dense-expert transient, which is what "
             f"caps context length on a full box")
 
     tight = working_set_bytes > 0 and headroom < S.TIGHT_HEADROOM_GIB * GIB
-    r.env["VQLAB_PREFILL_CHUNK"] = str(
-        S.PREFILL_CHUNK_TIGHT if tight else S.PREFILL_CHUNK_DEFAULT)
-    if tight:
+    prefill = S.PREFILL_CHUNK_TIGHT if tight else S.PREFILL_CHUNK_DEFAULT
+    asked = t.get("VQLAB_PREFILL_CHUNK")
+    if asked is not None and asked != prefill:
+        # A tight box wins over the axis. `fast` cannot spend headroom that
+        # is not there, and saying so is the difference between a knob and a
+        # wish.
+        if asked > prefill and tight:
+            r.notes.append(
+                f"tune={tune} asked for a {asked}-wide prompt chunk and did "
+                f"not get it: {headroom / GIB:.1f} GiB of headroom is what "
+                f"caps it, not the profile")
+        else:
+            prefill = asked
+    r.env["VQLAB_PREFILL_CHUNK"] = str(prefill)
+    if prefill < S.PREFILL_CHUNK_DEFAULT:
         r.notes.append(
             "prompt chunk narrowed: token-identical at every width, so this "
             "costs nothing but peak memory")
 
-    r.env["VQLAB_CACHE_LIMIT_GB"] = str(S.CACHE_LIMIT_GB_DEFAULT)
+    cache = float(t.get("VQLAB_CACHE_LIMIT_GB", S.CACHE_LIMIT_GB_DEFAULT))
+    if cache > S.CACHE_LIMIT_GB_MAX:
+        r.notes.append(f"tune={tune} capped: cache limit {cache} -> "
+                       f"{S.CACHE_LIMIT_GB_MAX} GiB, above which nothing has "
+                       f"been measured to improve")
+        cache = S.CACHE_LIMIT_GB_MAX
+    # Reclaimable is not free: it is still resident. On a box with little
+    # headroom a large cache is the thing that turns a long prompt into an OOM.
+    if known and cache * GIB > max(headroom, 0) / 2:
+        room = max(round(max(headroom, 0) / 2 / GIB, 1), 1.0)
+        if room < cache:
+            r.notes.append(
+                f"tune={tune} asked for a {cache} GiB reclaimable cache and "
+                f"got {room}: it is reclaimable, not free, and there is only "
+                f"{headroom / GIB:.1f} GiB of headroom to hold it in")
+            cache = room
+    r.env["VQLAB_CACHE_LIMIT_GB"] = str(cache)
+    if tune != "balanced":
+        r.notes.append(f"tune={tune}: {t['why']}")
 
     if working_set_bytes > 0 and headroom <= 0:
         r.warnings.append(

@@ -105,3 +105,51 @@ RUNTIME_PROFILES = {
     "v1.5": {f: "0" for f in NUMERICS_FLAGS},
     "v2": {f: "1" for f in NUMERICS_FLAGS},
 }
+
+
+# --- the tuning axis, and what it is NOT allowed to do ----------------------
+# "Less prefill spike at the cost of speed" and "I have headroom, go fast" are
+# the two things a person actually wants to say. The axis exists so they can
+# say it without learning what any of these names mean.
+#
+# THE CAPS ARE THE POINT. A tuning axis that just scales every knob would
+# happily walk into settings that are measured to be WORSE at both ends:
+#
+#   * VQ_DECODE_CHUNK: smaller is faster AND smaller in memory (128 -> 32 is
+#     1.37x on every rung). There is no tradeoff on this knob, so "fast" must
+#     NOT raise it. It is capped at the default in both directions.
+#   * VQ_MOE_GEMMSEG_RTILE=64 is 0.75-0.97x and never faster (F25/F33), so no
+#     setting of this axis may reach it.
+#
+# So `fast` moves only the knobs where headroom actually buys something, and
+# `safe` tightens the ones that bound peak memory. Anything a profile asks for
+# beyond a cap is refused and the refusal is printed, never silently clamped.
+TUNE_PROFILES = {
+    # prefill chunk, cache limit GiB, and whether to bound the transient
+    # harder than headroom requires
+    "safe": {
+        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "VQLAB_CACHE_LIMIT_GB": 1.0,
+        "decode_chunk_scale": 0.5,   # bound the transient below what fits
+        "why": "lowest peak memory: narrow prompt chunks, a small reclaimable "
+               "cache, and a transient bounded tighter than headroom requires",
+    },
+    "balanced": {
+        "decode_chunk_scale": 1.0,
+        "why": "the measured defaults",
+    },
+    "fast": {
+        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_DEFAULT,
+        "VQLAB_CACHE_LIMIT_GB": 8.0,
+        "decode_chunk_scale": 1.0,   # capped: smaller is already faster
+        "why": "spends headroom where it actually buys speed -- wider prompt "
+               "chunks and a larger reclaimable cache. It does NOT raise the "
+               "decode chunk, because smaller is faster there as well as "
+               "smaller in memory",
+    },
+}
+
+#: Hard ceiling on the reclaimable cache, whatever the profile asks. Freed
+#: buffers are reclaimable but they are still resident, and a cache larger
+#: than this has never been measured to buy anything.
+CACHE_LIMIT_GB_MAX = 16.0
