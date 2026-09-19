@@ -182,3 +182,58 @@ def test_an_artifact_with_no_bundled_runtime_does_not_guess():
     a = Artifact(path=Path("/nonexistent"), model_type="x", model_file=None,
                  bytes_on_disk=0, hidden_size=None, moe_intermediate_size=None)
     assert a.reads_knob("VQ_DECODE_CHUNK") is None
+
+
+# --- the env NAME belongs to the artifact -----------------------------------
+# VQLAB_CACHE_LIMIT_GB is read by 24 of the 37 bundled runtimes on this
+# machine. Those files are published. Renaming it in the resolver would emit
+# a name nobody reads and silently stop bounding the cache on every artifact
+# already shipped -- the failure this package exists to end, dressed as
+# housekeeping. So the resolver emits whichever alias the target reads.
+
+def _artifact_reading(tmp_path, *names):
+    from knurlogic.artifact import Artifact
+    (tmp_path / "config.json").write_text(
+        '{"model_type":"x","model_file":"model.py","vq_linear":{"a":1},'
+        '"hidden_size":4096,"moe_intermediate_size":1024}')
+    (tmp_path / "model.py").write_text(
+        "import os\n" + "".join(f'x = os.environ.get("{n}")\n' for n in names))
+    return Artifact.load(tmp_path)
+
+
+def test_a_legacy_artifact_keeps_the_name_it_was_published_with(tmp_path):
+    a = _artifact_reading(tmp_path, "VQLAB_CACHE_LIMIT_GB", "VQ_DECODE_CHUNK")
+    env = resolve(a, 96 * GIB).env
+    assert "VQLAB_CACHE_LIMIT_GB" in env
+    assert "KNURLOGIC_CACHE_LIMIT_GB" not in env
+
+
+def test_a_new_artifact_gets_the_new_name(tmp_path):
+    """Per rung, like `model_file` itself: a new artifact can bundle a runtime
+    reading the new name while every published one keeps its own."""
+    a = _artifact_reading(tmp_path, "KNURLOGIC_CACHE_LIMIT_GB",
+                          "VQ_DECODE_CHUNK")
+    env = resolve(a, 96 * GIB).env
+    assert "KNURLOGIC_CACHE_LIMIT_GB" in env
+    assert "VQLAB_CACHE_LIMIT_GB" not in env
+
+
+def test_a_knob_no_alias_of_which_is_read_is_not_emitted_at_all(tmp_path):
+    """Emitting it anyway is theatre, and theatre is what made a prefill knob
+    look resolved for months."""
+    a = _artifact_reading(tmp_path, "VQ_DECODE_CHUNK")
+    r = resolve(a, 96 * GIB)
+    assert not any(k.endswith("PREFILL_CHUNK") for k in r.env)
+    assert any("does nothing" in n for n in r.notes)
+
+
+def test_with_no_bundled_runtime_it_falls_back_to_the_published_name():
+    """A guess should fail towards the 24 artifacts that exist, not towards
+    the name that is planned."""
+    from pathlib import Path
+    from knurlogic.artifact import Artifact
+    a = Artifact(path=Path("/nonexistent"), model_type="x", model_file=None,
+                 bytes_on_disk=70 * GIB, hidden_size=4096,
+                 moe_intermediate_size=1024, vq_other={"vq_linear": {"a": 1}})
+    env = resolve(a, 96 * GIB).env
+    assert "VQLAB_CACHE_LIMIT_GB" in env and "VQLAB_PREFILL_CHUNK" in env
