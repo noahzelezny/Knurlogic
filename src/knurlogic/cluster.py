@@ -39,7 +39,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import override, status
+from . import override, status, web
 from .artifact import Artifact
 from .resolve import Node, resolve_cluster
 
@@ -118,7 +118,10 @@ def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
     device = ("declared with --node" if declared_ws else
               "reported by exo (system RAM, not the Metal working set)")
     return status.snapshot(
-        artifact=artifact if n.name == local_name else None,
+        # The artifact is the same on every node -- which node we happen to
+        # be launched next to is not what decides whether the page can say
+        # what is loaded.
+        artifact=artifact,
         env=env or None,
         node=n.name,
         role="local" if n.name == local_name else "remote",
@@ -193,16 +196,18 @@ def _default_cmd() -> list:
 
 # --- the front end ----------------------------------------------------------
 
-def _front(host: str, port: int, exo_url: str, status_fn):
+def _front(host: str, port: int, exo_url: str, status_fn,
+           settings_fn=None):
     """Knurlogic's own port: /status, /status.json, /, everything else to exo.
 
     The OpenAI surface is exo's and is proxied untouched. There is no second
     implementation of chat completions here and there should never be one.
     """
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    from pathlib import Path
+    from urllib.parse import parse_qs, urlparse
 
-    page = Path(__file__).parent / "web" / "index.html"
+    own = web.routes(status_fn=lambda _n=0: status_fn(),
+                     settings_fn=settings_fn)
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -234,17 +239,12 @@ def _front(host: str, port: int, exo_url: str, status_fn):
                            .encode(), "application/json", 502)
 
         def do_GET(self):
-            p = self.path.rstrip("/")
-            if p in ("", "/ui"):
-                return self._send(page.read_bytes(),
-                                  "text/html; charset=utf-8")
-            if p in ("/status", "/status.json"):
-                snap, text = status_fn()
-                if "json" in self.path:
-                    return self._send(json.dumps(snap, indent=1).encode(),
-                                      "application/json")
-                return self._send(text.encode(), "text/plain; charset=utf-8")
-            return self._proxy()
+            u = urlparse(self.path)
+            handler = own.get(u.path.rstrip("/") or "/")
+            if handler is None:
+                return self._proxy()
+            body, ctype = handler(parse_qs(u.query))
+            return self._send(body, ctype)
 
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
@@ -268,7 +268,8 @@ def _parse_node(spec: str) -> Node:
 
 
 def run(path: str, host: str, port: int, profile: str, exo_url: str,
-        nodes: list, do_launch: bool, exo_cmd: list, local: str | None) -> int:
+        nodes: list, do_launch: bool, exo_cmd: list, local: str | None,
+        tune: str = "balanced") -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"cluster   exo at {exo_url}")
@@ -299,7 +300,7 @@ def run(path: str, host: str, port: int, profile: str, exo_url: str,
         return 2
 
     declared_ws = {n.name: n.working_set_bytes for n in declared}
-    c = resolve_cluster(a, budget, profile=profile)
+    c = resolve_cluster(a, budget, profile=profile, tune=tune)
     for n in c.notes:
         print(f"  note: {n}")
     for w in c.warnings:
@@ -374,11 +375,30 @@ def run(path: str, host: str, port: int, profile: str, exo_url: str,
             text += "\n\n" + override.render(snap["overrides"])
         return snap, text
 
+    # The settings panel answers for ONE node: the knobs are per process and
+    # a single dict for a cluster would put the wrong ones on the wrong box.
+    # Which node it speaks for is named in the document.
+    shown = local if local in c.nodes else next(iter(c.nodes))
+    shown_ws = next((n.working_set_bytes for n in c.inventory
+                     if n.name == shown), 0)
+
+    def _resolve_for(ws_bytes, tune_name):
+        return resolve_cluster(a, [Node(shown, ws_bytes)],
+                               profile=profile, tune=tune_name).nodes[shown]
+
+    settings_fn = web.settings_document(
+        a, live_env=dict(c.nodes[shown].env), live_tune=tune,
+        live_working_set=shown_ws, resolve_fn=_resolve_for,
+        wired_advice={"known": False,
+                      "note": f"these knobs are for node {shown!r}; a wired "
+                              f"limit is per machine and knurlogic only reads "
+                              f"the one on the box it runs on"})
+
     print(f"\nserving on http://{host}:{port}/v1  (proxied to exo; "
           f"ctrl-c to stop)")
     print(f"  /status and /status.json aggregate every node", flush=True)
     try:
-        return _front(host, port, exo_url, _status_fn)
+        return _front(host, port, exo_url, _status_fn, settings_fn)
     except KeyboardInterrupt:
         return 0
     finally:

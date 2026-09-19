@@ -72,6 +72,12 @@ no blockers found
   control arm, on exo's own interpreter. `knurlogic override run -- exo`
   applies them to any command and every process it spawns.
 
+* **A GUI that exposes the knobs.** `/` shows what loaded, the memory split
+  nothing else shows, and a Settings panel with every resolved knob, the
+  measurement behind it, and what another `--tune` would give you — as a diff
+  against what is running, because the runtime reads its settings at import
+  and a control that pretended otherwise would be lying.
+
 ## What it is not
 
 It does not detect machines, fit models, or score them. Memory budget is an

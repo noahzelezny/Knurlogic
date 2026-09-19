@@ -116,7 +116,7 @@ def load(path: str, executes_artifact_code: bool = False):
 
 def serve(model_path: str, host: str, port: int,
           executes_artifact_code: bool = False, extra: list | None = None,
-          status_fn=None):
+          routes: dict | None = None):
     """Hand off to the engine's own OpenAI-compatible server.
 
     The engine ships a complete one -- request schema, streaming, chat
@@ -141,10 +141,12 @@ def serve(model_path: str, host: str, port: int,
 
     srv.ModelProvider.load = _pinned
 
-    # /status and /status.json, added to the engine's own handler. The
-    # engine serves; this only answers "what is loaded and what is it
-    # using", which nothing else does.
-    if status_fn is not None:
+    # Knurlogic's own routes, added to the engine's own handler. The engine
+    # serves the model; these answer what is loaded, what it is using and
+    # what the knobs are -- none of which the engine's server has an opinion
+    # about. What they CONTAIN is not this file's business: it takes a path
+    # -> handler mapping so the seam stays a seam.
+    if routes:
         _real_get = srv.APIHandler.do_GET
         _count = {"n": 0}
         _real_post = srv.APIHandler.do_POST
@@ -154,32 +156,18 @@ def serve(model_path: str, host: str, port: int,
             return _real_post(self)
 
         def _get(self):
-            if self.path.rstrip("/") in ("", "/ui"):
-                from pathlib import Path
+            from urllib.parse import parse_qs, urlparse
 
-                page = (Path(__file__).parent / "web" / "index.html")
-                body = page.read_bytes()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                return
-            if self.path.rstrip("/") in ("/status", "/status.json"):
-                import json as _json
-
-                snap, text = status_fn(_count["n"])
-                body = (_json.dumps(snap, indent=1) if "json" in self.path
-                        else text).encode()
-                self.send_response(200)
-                self.send_header("Content-Type",
-                                 "application/json" if "json" in self.path
-                                 else "text/plain; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                return
-            return _real_get(self)
+            u = urlparse(self.path)
+            handler = routes.get(u.path.rstrip("/") or "/")
+            if handler is None:
+                return _real_get(self)
+            body, ctype = handler(parse_qs(u.query), _count["n"])
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         srv.APIHandler.do_GET = _get
         srv.APIHandler.do_POST = _post

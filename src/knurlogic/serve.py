@@ -31,7 +31,7 @@ import argparse
 import os
 import sys
 
-from . import arch, engine, register, status, wired
+from . import arch, engine, register, status, web, wired
 from .artifact import Artifact
 from .resolve import resolve
 
@@ -84,6 +84,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
 
     rows = arch.check(a.model_type)
 
+    def _resolve_for(ws_bytes, tune_name):
+        return resolve(a, ws_bytes, profile=profile, tune=tune_name)
+
     def _status(requests):
         # Served through `aggregate` even though there is exactly one node:
         # /status.json is the contract, and a client that learns the cluster
@@ -102,10 +105,17 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)")
     print(f"open http://{host}:{port}/ to see what loaded and try it")
     print(f"  /status (text) and /status.json for the same thing "
-          f"without a browser", flush=True)
+          f"without a browser")
+    print(f"  /settings.json - every knob, what it would be at another tune, "
+          f"and why it exists", flush=True)
+    routes = web.routes(
+        status_fn=_status,
+        settings_fn=web.settings_document(
+            a, live_env=dict(r.env), live_tune=tune, live_working_set=ws,
+            resolve_fn=_resolve_for, wired_advice=adv))
     return engine.serve(str(a.path), host, port,
                         executes_artifact_code=bool(a.model_file),
-                        extra=passthrough, status_fn=_status)
+                        extra=passthrough, routes=routes)
 
 
 def main(argv=None) -> int:
@@ -144,7 +154,8 @@ def main(argv=None) -> int:
 
         import shlex
         return run_cluster(a.artifact, a.host, a.port, a.profile, a.exo,
-                           a.node, a.launch, shlex.split(a.exo_cmd), a.local)
+                           a.node, a.launch, shlex.split(a.exo_cmd), a.local,
+                           a.tune)
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile, rest,
                a.tune)
 

@@ -153,3 +153,46 @@ TUNE_PROFILES = {
 #: buffers are reclaimable but they are still resident, and a cache larger
 #: than this has never been measured to buy anything.
 CACHE_LIMIT_GB_MAX = 16.0
+
+
+# --- what each knob IS, in one line, for anything that shows it to a person -
+# A settings panel that lists names and values is a config file with a
+# stylesheet. The reason to show a knob at all is the sentence next to it:
+# what it does, and what run says so. Anything added to the resolver should
+# be added here too, or it will appear in the UI as a bare string.
+KNOB_DOC = {
+    "VQ_DECODE_CHUNK": (
+        "experts decoded to dense fp16 per prefill chunk",
+        "THE memory knob: prefill grew 3.35 MB/token where KV-cache theory "
+        "predicted 0.059. Smaller is also faster (128 -> 32 is 1.37x), so it "
+        "is capped at 32 and never raised."),
+    "VQLAB_PREFILL_CHUNK": (
+        "how many prompt tokens are processed at once",
+        "token-identical at every width, so it is purely a memory knob -- "
+        "narrowing costs nothing but peak."),
+    "VQLAB_CACHE_LIMIT_GB": (
+        "how much freed-buffer cache the runtime may hold",
+        "biggest single win in the memory playbook, no measured speed cost at "
+        "26k-token prefill. Reclaimable, but still resident."),
+    "VQ_MOE_GEMMSEG_CBDEV": (
+        "where the codebook lives during the MoE GEMM",
+        "F124: the device arm is +20.9% on prefill at d4-K2048; 'auto' lets "
+        "the runtime choose per module."),
+    "VQ_MOE_GEMMSEG_RTILE": (
+        "row tile width in the segmented GEMM",
+        "F25/F33: 64 is 0.75-0.97x and NEVER faster. The one 'win' was an "
+        "env-ordering bug that benchmarked 32 twice."),
+    "VQ_GEMMSEG_OTILE64": (
+        "64-wide output tiling in the segmented GEMM",
+        "F54: +5.1-6.6% prefill, bit-exact."),
+    "VQ_GEMMSEG_PH2V": ("phase-2 vectorization",
+                        "F56: part of the +11.9% stack."),
+    "VQ_D4_WALK": ("d4 codebook walk", "F56: part of the +11.9% stack."),
+    "VQ_GEMMSEG_PIPE": ("software pipelining in the segmented GEMM",
+                        "F56 arm 1.5: measured NEGATIVE, -1.8-2%. Off."),
+    "VQ_GEMMSEG_BF16IO": ("bf16 IO in the segmented GEMM",
+                          "F103/F105 numerics-active: family-local, up to "
+                          "+0.97% ppl. Off at v1.5 (bit-exact vs shipped)."),
+    "VQ_DECODE_BF16IO": ("bf16 IO on the decode path",
+                         "F103/F105 numerics-active. Off at v1.5."),
+}
