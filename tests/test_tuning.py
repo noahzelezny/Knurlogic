@@ -315,3 +315,32 @@ def test_an_artifact_may_declare_its_own_knobs(tmp_path):
     (tmp_path / "model.py").write_text('import os\nos.environ.get("VQ_D8_ROWS_TG")\n')
     a = Artifact.load(tmp_path)
     assert a.declared_knobs()["VQ_D8_ROWS_TG"]["values"] == [4, 8, 16]
+
+
+# --- the MTP head that gets thrown away -------------------------------------
+# 40 of the 54 artifacts on this machine declare a multi-token-prediction
+# head -- 3925 GiB of weights -- and mlx-lm's qwen4_exp port drops them at
+# load with a one-line `continue` in sanitize(). Nothing warns. The weights
+# were downloaded and do not run.
+
+def test_an_artifact_declaring_mtp_is_recognised(tmp_path):
+    from knurlogic.artifact import Artifact
+    (tmp_path / "config.json").write_text(
+        '{"model_type":"qwen4_exp_text","mtp":{"mtp_num_hidden_layers":1}}')
+    assert Artifact.load(tmp_path).has_mtp
+
+    (tmp_path / "config.json").write_text('{"model_type":"qwen4_exp_text"}')
+    assert not Artifact.load(tmp_path).has_mtp
+
+
+def test_the_architecture_is_asked_whether_it_keeps_them():
+    """Read off the module that will actually run, not assumed: the answer
+    is a line in sanitize(), and it is 'no'."""
+    from knurlogic import engine
+    assert engine.keeps_mtp_weights("qwen4_exp_text") is False
+
+
+def test_an_unknown_architecture_says_unknown_not_no():
+    """'Could not find the module' is not 'it discards them'."""
+    from knurlogic import engine
+    assert engine.keeps_mtp_weights("not_a_real_model_type") is None
