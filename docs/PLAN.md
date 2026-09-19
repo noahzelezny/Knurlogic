@@ -348,6 +348,18 @@ transformers' lazy-import machinery and raised from inside a package that has
 nothing to do with any of this. It reads `vars(mod)` now, which asks the
 question without running anybody else's code.
 
+## The page, in exo's language
+
+*Restyled toward exo, teal rather than yellow.* Monospace throughout, panels
+as bordered boxes with the label sitting in the border, uppercase segmented
+controls, and a node strip -- which is what exo's topology view is actually
+for: where the weights are and how close each box is to full. One card per
+node with its percentage and bar, shown only when there is more than one.
+
+The simplicity rule from before still governs: one column, one number that
+matters, and the knob list showing only what changed or what can be applied
+live. Borrowing the visual language, not the density.
+
 ## The page, simplified
 
 the maintainer on exo's GUI: simple is a choice about where the eye goes, and a busy
