@@ -19,8 +19,19 @@
    text-transform:uppercase;color:var(--dim)}
  nav a:hover{color:var(--acc)}
  .wrap{max-width:1180px;margin:0 auto;padding:22px 24px 60px}
- .cols{display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start}
- @media(max-width:920px){.cols{grid-template-columns:1fr}}
+ /* The rail is a MENU, not furniture. Closed, the page is one column and
+    the eye has one place to go; open, it is what you asked for and nothing
+    else. Two panels never sit open at once. */
+ .cols{display:grid;grid-template-columns:1fr;gap:20px;align-items:start}
+ .cols.open{grid-template-columns:1fr 380px}
+ @media(max-width:920px){.cols.open{grid-template-columns:1fr}}
+ .rail{display:none}
+ .cols.open .rail{display:block}
+ .rail .panel{display:none}
+ .rail .panel.on{display:block}
+ nav a[aria-pressed=true]{color:var(--acc)}
+ nav a{cursor:pointer;border-bottom:1px solid transparent;padding-bottom:2px}
+ nav a[aria-pressed=true]{border-bottom-color:var(--acc)}
  .panel{border:1px solid var(--line);background:var(--panel);padding:16px 18px 18px;
    position:relative;margin-bottom:20px}
  .lab{position:absolute;top:-7px;left:14px;background:var(--panel);padding:0 7px;
@@ -101,8 +112,9 @@
     <b>knurlogic</b>
   </div>
   <nav>
-    <a href="#memory">Memory</a><a href="#settings">Settings</a>
-    <a href="#connect">Connect</a><a href="/status.json">Status.json</a>
+    <a data-panel="settings">Settings</a>
+    <a data-panel="connect">Connect</a>
+    <a href="/status.json">Status.json</a>
   </nav>
 </header>
 <div class="wrap">
@@ -126,7 +138,7 @@
           <button class="go" id="go">Send</button></form>
       </section>
     </div>
-    <div>
+    <div class="rail">
       <section class="panel" id="settings">
         <div class="lab">Settings</div>
         <div class="ctl">
@@ -153,6 +165,31 @@
   </div>
 </div>
 <script>
+// --- the menu -------------------------------------------------------------
+// Settings are a thing you go and get, not a thing that is always shouting.
+// The choice is remembered per browser, because reopening the page to a
+// closed drawer you left open is its own small annoyance.
+(()=>{
+  const cols=document.querySelector('.cols');
+  const links=[...document.querySelectorAll('nav a[data-panel]')];
+  function show(name){
+    const on=name && document.getElementById(name);
+    cols.classList.toggle('open', !!on);
+    document.querySelectorAll('.rail .panel').forEach(p=>
+      p.classList.toggle('on', p.id===name));
+    links.forEach(a=>a.setAttribute('aria-pressed', a.dataset.panel===name));
+    try{ name ? localStorage.setItem('kn.panel',name)
+              : localStorage.removeItem('kn.panel') }catch(e){}
+  }
+  links.forEach(a=>a.onclick=()=>show(
+    a.getAttribute('aria-pressed')==='true' ? null : a.dataset.panel));
+  addEventListener('keydown',e=>{ if(e.key==='Escape') show(null) });
+  let saved=null;
+  try{ saved=localStorage.getItem('kn.panel') }catch(e){}
+  show(saved);
+  window.knShow=show;
+})();
+
 // The mark is a knurl: the crosshatch cut into metal so a hand can grip a
 // machined part. Drawn rather than shipped as an image, so it is one file.
 (()=>{const g=document.getElementById('knurl');let s='';
