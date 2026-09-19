@@ -336,3 +336,40 @@ def tool_support(chat_template: str) -> dict:
     except Exception:
         out["parser"] = None
     return out
+
+
+def keeps_mtp_weights(model_type: str) -> bool | None:
+    """Does the architecture that will load this artifact keep its MTP head?
+
+    Read off the module that will actually run, because the answer is a line
+    in `sanitize()`:
+
+        # Multi-token-prediction head ... not implemented by this text-only
+        # port, and absent from the module tree -> drop them.
+        if k.startswith(("mtp.", "model.mtp.")): continue
+
+    So the head is in the checkpoint and is discarded at load. Nothing warns,
+    and the weights were still downloaded. None means the module could not be
+    located, which is not the same as "it keeps them".
+    """
+    import inspect
+
+    from .arch import required_modules
+
+    mods = required_modules(model_type)
+    if not mods:
+        return None
+    try:
+        from .register import source_for
+        src_path, _is_pkg = source_for(mods[0])
+        if src_path is None:
+            from .arch import locate
+            _host, src_path = locate(mods[0])
+        if src_path is None:
+            return None
+        text = src_path.read_text()
+    except Exception:
+        return None
+    dropped = 'k.startswith(("mtp.", "model.mtp."))' in text or \
+        ('"mtp."' in text and "continue" in text)
+    return not dropped
