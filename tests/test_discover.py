@@ -1,0 +1,89 @@
+"""Finding models in four tools' stores -- and not overclaiming about them.
+
+Every test passes `include_defaults=False`. Without it they scanned the real
+machine and one of them asserted against 54 actual models -- a test that
+depends on what happens to be on the developer's disk is not a test.
+
+Four tools keep four stores and none of them looks at the others, which is
+why a person with 5 TB of weights on disk still sees an empty list. The trap
+is that FINDING a model is not being able to RUN it: ollama and most of LM
+Studio hold GGUF, and this engine loads safetensors. Checked, not assumed --
+`mlx_lm.gguf` exposes `convert_to_gguf` and no loader.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from knurlogic import discover                              # noqa: E402
+
+GIB = 1 << 30
+
+
+def _mlx_model(d: Path, model_type="qwen3_5", size=4096):
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "config.json").write_text(json.dumps({"model_type": model_type}))
+    (d / "model.safetensors").write_bytes(b"\0" * size)
+    return d
+
+
+def _gguf_model(d: Path, size=2048):
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "model.gguf").write_bytes(b"\0" * size)
+    return d
+
+
+def test_it_reads_a_flat_store_and_an_hf_cache(tmp_path):
+    _mlx_model(tmp_path / "store" / "SomeOrg--Some-Model")
+    _mlx_model(tmp_path / "hub" / "models--Qwen--Qwen3-8B" / "snapshots" / "abc")
+    rows = discover.find(include_defaults=False, extra=[tmp_path / "store", tmp_path / "hub"])
+    names = {r.name for r in rows}
+    assert "SomeOrg--Some-Model" in names
+    # An HF cache entry's real name lives in the models--org--repo directory.
+    assert "Qwen/Qwen3-8B" in names
+
+
+def test_a_gguf_model_is_found_and_reported_as_not_servable(tmp_path):
+    """A menu of entries that 500 on click is the same 'why did it fail' that
+    doctor exists to end."""
+    _gguf_model(tmp_path / "store" / "llama-3.1-8b-q4")
+    rows = discover.find(include_defaults=False, extra=[tmp_path / "store"])
+    g = next(r for r in rows if r.name == "llama-3.1-8b-q4")
+    assert g.format == "gguf" and g.servable is False
+    assert "safetensors" in g.why
+
+
+def test_it_does_not_descend_into_an_artifact(tmp_path):
+    """A model directory holds shards, subfolders and sometimes a nested
+    snapshot; walking into it would report one model several times."""
+    d = _mlx_model(tmp_path / "store" / "Model-A")
+    _mlx_model(d / "inner")
+    rows = discover.find(include_defaults=False, extra=[tmp_path / "store"])
+    assert [r.name for r in rows] == ["Model-A"]
+
+
+def test_the_same_path_reached_twice_is_reported_once(tmp_path):
+    _mlx_model(tmp_path / "store" / "Model-A")
+    rows = discover.find(include_defaults=False, extra=[tmp_path / "store", tmp_path / "store"])
+    assert len(rows) == 1
+
+
+def test_render_keeps_found_loadable_and_fits_apart(tmp_path):
+    """Three counts for three different questions: is it here, can this
+    engine read it, will it fit."""
+    _mlx_model(tmp_path / "store" / "Small", size=1024)
+    _mlx_model(tmp_path / "store" / "Huge", size=8192)
+    _gguf_model(tmp_path / "store" / "Ggufy")
+    rows = discover.find(include_defaults=False, extra=[tmp_path / "store"])
+    out = discover.render(rows, working_set_bytes=4096)
+    assert "3 found" in out and "2 in a format this engine loads" in out
+    assert "1 that fit one box" in out
+    assert "1 are GGUF" in out
+    assert "needs more than this box" in out
+
+
+def test_an_empty_machine_says_where_it_looked(tmp_path):
+    out = discover.render([])
+    assert "no models found" in out and "Looked in" in out

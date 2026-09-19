@@ -455,6 +455,45 @@ the pointer capture -- so `pointerup` never fired, the knob moved on screen
 and nothing happened underneath. It mutates the live node now. That is the
 one behaviour a control must never have, and no test would have caught it.
 
+## `knurlogic models`: four stores, none of which look at each other
+
+*2026-09-18. Noah: people will use models other than the VQ ones, and it is
+annoying that ollama, mlx and exo do not look at each other's folders.*
+
+`src/knurlogic/discover.py`, `knurlogic models`. On this machine:
+
+    54 found, 5112 GiB on disk. 54 in a format this engine loads,
+    22 that fit one box.
+
+**Finding a model is not being able to run it**, and the counts are kept
+apart for that reason: is it here, can this engine read it, will it fit.
+Ollama and most of LM Studio hold GGUF, and this engine does not load GGUF --
+checked, not assumed: `mlx_lm.gguf` exposes `convert_to_gguf` and no loader,
+and the server module never mentions the format. A GGUF model is reported
+FOUND and NOT SERVABLE with the reason. A menu of entries that 500 on click
+is the same "why did it fail" that `doctor` exists to end.
+
+**It asks the running tool where its models are.** The store location is
+per-tool configuration, and this box is the case in point: 37 artifacts on an
+external volume, named only in the environment of an exo process started
+hours earlier. Guessing at external volumes would be wrong on every other
+machine; reading `EXO_MODELS_DIR` off the running process is right on all of
+them. Parsed with a boundary regex rather than `split()`, because the value
+is "/Volumes/Thunderbay SSD/Exo Models" and splitting on spaces turns one
+real path into two that do not exist.
+
+A model too big for one box says "needs more than this box", not "does not
+fit": knurlogic serves across nodes, so that is a clustering question rather
+than a wall.
+
+Unverified: the ollama reader is written from the on-disk layout and this
+machine's ollama store is empty, so it has never run against a real pull. It
+says so in the source rather than being presented as tested.
+
+Tests pass `include_defaults=False`. Without it they scanned the real machine
+and one asserted against 54 actual models -- a test that depends on what is
+on the developer's disk is not a test.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none

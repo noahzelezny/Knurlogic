@@ -12,7 +12,9 @@ COMMANDS = {
     "smoke": ("smoke", "generate a token and prove where the code came from"),
     "vendor": ("vendor", "take an architecture file under version control"),
     "override": ("override", "replace a module inside mlx-lm, mlx-vlm or exo "
-                           "without forking it"),
+                             "without forking it"),
+    "models": ("discover", "find the models already on this machine, in "
+                           "every tool's store"),
 }
 
 
