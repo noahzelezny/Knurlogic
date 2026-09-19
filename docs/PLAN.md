@@ -494,6 +494,43 @@ Tests pass `include_defaults=False`. Without it they scanned the real machine
 and one asserted against 54 actual models -- a test that depends on what is
 on the developer's disk is not a test.
 
+## `/v1/messages`: backing a coding harness locally
+
+*2026-09-18. Noah, looking at exo's INTEGRATIONS panel: can I use the Claude
+Code harness without the sub?*
+
+Yes, and the mechanism is plain: the harness is pointed at a server with
+`ANTHROPIC_BASE_URL`, so whatever answers the Anthropic Messages shape at
+that address is the model. exo implements `/v1/messages` (`api/main.py:375`,
+`claude_messages`). mlx-lm's server answers `/v1/chat/completions`,
+`/v1/models` and `/health` and nothing else -- checked, not assumed -- so
+`knurlogic serve` could not back one. That gap is a TRANSLATION, not an
+inference problem.
+
+`src/knurlogic/messages.py` adds it, as an adapter over the endpoint the
+engine is already serving. It is a self-request on purpose: the engine owns
+chat templating, stop sequences and tool-call parsing, and a second
+implementation would give the two endpoints different behaviour for the same
+model.
+
+    knurlogic serve <artifact>
+    ANTHROPIC_BASE_URL=http://127.0.0.1:8080 ANTHROPIC_API_KEY=x \
+      ANTHROPIC_DEFAULT_SONNET_MODEL=<artifact> claude
+
+The translation that actually matters is tools, because the shapes genuinely
+differ: Anthropic puts a tool RESULT inside a user turn, OpenAI makes it its
+own message keyed to the call id. Streaming is where a harness breaks, so the
+event ORDER is built explicitly -- message_start, content blocks, then
+message_delta carrying the stop reason, then message_stop -- and tool
+arguments are forwarded as raw JSON fragments rather than parsed and
+re-serialised, since the client reassembles them.
+
+**What this cannot promise, and `doctor` should say so rather than this
+module implying otherwise:** a harness leans hard on tool calling, and
+whether a model emits well-formed tool calls at all is a property of the
+MODEL. The translation being correct is necessary and nowhere near
+sufficient.
+
 ## Not done: replacing an exo module
 
 The MECHANISM is done and proven; no override has been written, because none

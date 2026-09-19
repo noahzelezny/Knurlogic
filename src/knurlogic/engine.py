@@ -159,6 +159,23 @@ def serve(model_path: str, host: str, port: int,
             if handler is not None:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(n) if n else b""
+                if getattr(handler, "raw", False):
+                    # Writes its own response: an event stream has no length
+                    # to declare, so the response ends when the socket does.
+                    def _start(code, ctype):
+                        self.send_response(code)
+                        self.send_header("Content-Type", ctype)
+                        self.send_header("Cache-Control", "no-store")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+
+                    def _write(b):
+                        self.wfile.write(b)
+                        self.wfile.flush()
+
+                    self.close_connection = True
+                    handler(body, _write, _start)
+                    return
                 out, ctype = handler(parse_qs(u.query), 0, body)
                 self.send_response(200)
                 self.send_header("Content-Type", ctype)
