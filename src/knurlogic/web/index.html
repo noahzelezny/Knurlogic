@@ -221,6 +221,20 @@
  .opt input{width:88px;text-align:right}
  #pickinfo{margin-top:10px;font-size:10.5px;color:var(--dim)}
  #pickinfo .warn{color:var(--warn)}
+ .wired{margin-bottom:18px}
+ .wiredbar{height:12px;background:var(--med);border-radius:2px;margin:9px 0;
+   position:relative;overflow:hidden}
+ .wiredbar i{position:absolute;top:0;bottom:0;left:0;background:var(--acc);
+   opacity:.5}
+ .wiredbar u{position:absolute;top:0;bottom:0;width:2px;
+   background:var(--warn)}
+ .wiredrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+ .wiredrow input[type=range]{flex:1;min-width:160px;accent-color:var(--acc)}
+ .wiredrow output{font-weight:700;min-width:5.5em;text-align:right}
+ .wired .msg{margin-top:8px}
+ .wired pre{user-select:all;background:var(--bg);border:1px solid var(--line);
+   border-radius:var(--r);padding:8px 9px;margin-top:8px;color:var(--fg)}
+ .wired .warn{color:var(--warn);font-size:11px;margin-top:6px}
  #pickinfo div{padding:2px 0}
  .other pre{margin:7px 0 2px;font-size:10px;user-select:all;
    background:var(--bg);border:1px solid var(--line);border-radius:var(--r);
@@ -508,7 +522,12 @@
   <div class="sheetbody">
       <section class="panel" id="settings">
         <div class="lab">Settings</div>
-        <div class="ctl">
+        <!-- The one setting that belongs to the MACHINE and holds whether or
+             not anything is loaded: how much of memory the GPU may wire. It
+             is what decides if a rung loads at all, and it is normally a
+             sysctl you have to go and look up. -->
+        <div id="machine"></div>
+        <div class="ctl" id="artifactctl">
           <span class="seg" id="tunes"></span>
           <label>ws <input id="ws" type="number" min="0" step="1"></label>
           <button class="go" id="apply" disabled>Apply</button>
@@ -518,7 +537,7 @@
         <div class="msg" id="applies"></div>
         <div id="knobs" style="margin-top:12px"></div>
         <details class="more"><summary>measured flags</summary><div id="rest"></div></details>
-        <details class="more" id="unmanaged"></details>
+        <details class="more" id="unmanaged" style="display:none"></details>
         <details class="more"><summary>exports</summary><pre id="env"></pre></details>
       </section>
       <section class="panel" id="connect">
@@ -707,10 +726,60 @@ async function applyKnob(name,value){
   $('applies').innerHTML=what?`<b>${esc(name)}</b> ${esc(what)}`:'Nothing changed.';
   loadSettings({tune:ASK.tune||'',working_set_gib:$('ws').value||''});
 }
+// The wired limit: what the GPU may hold, which decides whether a rung
+// loads at all. knurlogic NEVER runs the sysctl -- it reads the current
+// value, works out where the ceiling is, and hands over the exact line.
+// A soft gate, like everything else here: past what it recommends you get
+// the command and a warning rather than a refusal.
+function renderMachine(){
+  const el=$('machine'); if(!el) return;
+  const w=DOC.wired||{};
+  if(!w.known){ el.innerHTML=''; return }
+  const cur=DOC.wired_current_gib, rec=DOC.wired_recommended_gib,
+        inst=DOC.wired_installed_gib, tgt=DOC.wired_target_gib;
+  const max=Math.round(inst-4);
+  el.innerHTML=`<div class="wired">
+    <div class="sidelab" style="margin-top:0">wired limit · ${esc(w.key)}</div>
+    <div class="wiredbar"><i style="width:${(100*tgt/inst).toFixed(1)}%"></i>
+      <u style="left:${(100*rec/inst).toFixed(1)}%" title="recommended"></u></div>
+    <div class="wiredrow">
+      <input type="range" id="wslider" min="8" max="${max}" step="1"
+        value="${Math.round(tgt)}">
+      <output id="wout">${tgt.toFixed(0)} GiB</output>
+    </div>
+    <div class="msg">now <b>${cur.toFixed(0)}</b> of ${inst.toFixed(0)} GiB
+      installed · knurlogic suggests <b>${rec.toFixed(0)}</b>, leaving
+      ${(inst-rec).toFixed(0)} for macOS</div>
+    ${DOC.wired_warn?`<div class="warn">${esc(DOC.wired_warn)}</div>`:''}
+    ${DOC.wired_command
+      ? `<pre>${esc(DOC.wired_command)}</pre>`
+      : `<div class="msg">that is what it is set to now</div>`}
+  </div>`;
+  const sl=$('wslider');
+  sl.oninput=()=>{ $('wout').textContent=sl.value+' GiB' };
+  // Only ask the server when the drag STOPS: it recomputes the command and
+  // the warning, and a request per pixel is a request per pixel.
+  sl.onchange=()=>loadSettings({...(ASK.tune?{tune:ASK.tune}:{}),
+                                wired_gib:sl.value});
+}
+
 async function loadSettings(q){
   const qs=new URLSearchParams(q||{}).toString();
-  try{ DOC=await (await fetch('/settings.json'+(qs?'?'+qs:''))).json() }catch(e){ return }
+  try{ DOC=await (await fetch('/settings.json'+(qs?'?'+qs:''))).json() }
+  catch(e){ DOC={} }
   ASK=DOC.asked||{};
+  renderMachine();
+  // Without an artifact there are no knobs to show: they are read by a
+  // bundled runtime and mean nothing on their own. Hiding the controls beats
+  // an empty frame with an Apply button in it.
+  const hasKnobs=(DOC.knobs||[]).length>0;
+  ['artifactctl','dials','dialnotes','knobs','applies'].forEach(id=>{
+    const e=$(id); if(e) e.style.display=hasKnobs?'':'none';
+  });
+  document.querySelectorAll('#settings details.more').forEach(d=>{
+    d.style.display=hasKnobs?'':'none';
+  });
+  if(!hasKnobs) return;
   $('tunes').innerHTML='';
   (DOC.tunes||[]).forEach(t=>{
     const b=document.createElement('button');

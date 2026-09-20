@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+GIB = 1 << 30
 PAGE = Path(__file__).parent / "web" / "index.html"
 
 
@@ -173,6 +174,59 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=()):
         except Exception as e:
             return {"error": f"{type(e).__name__}: {e}"}
         return {"error": f"unknown action {act!r}"}
+    return handler
+
+
+def machine_settings():
+    """`/settings.json` when no model is loaded.
+
+    Most of what Settings shows belongs to an artifact -- the knobs are read
+    by a bundled runtime and mean nothing without one. What is left is the
+    setting that belongs to the MACHINE and is the same whether anything is
+    loaded: how much of the GPU's memory macOS will let a process wire down.
+    That is the one that decides whether a rung loads at all, and it is
+    normally a sysctl somebody has to go and look up.
+
+    knurlogic never runs it. It reads the current value, works out the
+    ceiling, and hands over the exact line.
+    """
+    def handler(q: dict) -> dict:
+        from . import wired
+
+        want = q.get("wired_gib")
+        if isinstance(want, list):
+            want = want[0] if want else None
+        adv = wired.advise(0)
+        doc = {"knobs": [], "tunes": [], "unmanaged": [], "exports": "",
+               "asked": {}, "wired": adv, "machine": wired.machine()}
+        if adv.get("known"):
+            cur = adv["limit_bytes"] / GIB
+            ceil_ = adv["ceiling_bytes"] / GIB
+            try:
+                target = float(want) if want not in (None, "") else cur
+            except (TypeError, ValueError):
+                target = cur
+            # `ceiling_bytes` is knurlogic's RECOMMENDATION -- installed
+            # memory less a reserve for macOS -- and not a wall the OS
+            # enforces. So it is a soft gate, as everywhere else here: past
+            # it you get the command and a warning rather than a refusal.
+            # The hard stop is 4 GiB from the top, where the machine stops
+            # being able to run itself.
+            hard = (adv["total_bytes"] - 4 * GIB) / GIB
+            target = max(1.0, min(target, hard))
+            doc["wired_target_gib"] = round(target, 1)
+            doc["wired_recommended_gib"] = round(ceil_, 1)
+            doc["wired_current_gib"] = round(cur, 1)
+            doc["wired_installed_gib"] = round(adv["total_bytes"] / GIB, 1)
+            doc["wired_command"] = (
+                wired.command_for(int(target * GIB))
+                if abs(target - cur) >= 0.05 else "")
+            if target > ceil_ + 0.05:
+                doc["wired_warn"] = (
+                    f"above the {ceil_:.0f} GiB knurlogic recommends, which "
+                    f"leaves {adv['total_bytes'] / GIB - target:.0f} GiB for "
+                    f"macOS and everything else on the machine")
+        return doc
     return handler
 
 
