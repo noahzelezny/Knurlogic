@@ -221,6 +221,14 @@
  .opt input{width:88px;text-align:right}
  #pickinfo{margin-top:10px;font-size:10.5px;color:var(--dim)}
  #pickinfo .warn{color:var(--warn)}
+ .lk{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px}
+ .lk .lkn{flex:1;color:var(--dim);white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis}
+ .lk input,.lk select{width:84px;padding:3px 6px;font-size:11px;text-align:right}
+ .lk.set .lkn{color:var(--acc)}
+ .lk .rst{color:var(--faint);cursor:pointer;padding:0 3px;visibility:hidden}
+ .lk.set .rst{visibility:visible}
+ .lk .rst:hover{color:var(--warn)}
  .wired{margin-bottom:18px}
  .wiredbar{height:12px;background:var(--med);border-radius:2px;margin:9px 0;
    position:relative;overflow:hidden}
@@ -486,6 +494,11 @@
             <div class="optlab">Port</div>
             <input id="loadport" type="number" min="1" max="65535">
           </div>
+          <!-- Settings that can only be chosen HERE. Most of these are read
+               at import and compiled into kernel source, so a running server
+               cannot be told about them: launch is the moment or never. -->
+          <div class="optlab" style="margin-top:14px">Settings for this launch</div>
+          <div id="loadknobs"></div>
         </details>
         <div id="pickinfo"></div>
         <button class="go" id="launch" style="width:100%;margin-top:10px">
@@ -1171,6 +1184,45 @@ async function loadModels(){
   if(!SEL) SEL=MODELS.find(m=>!ws||m.size_bytes<=ws)||null;
   pickInfo();
 }
+// What this artifact WOULD resolve to, fetched when the selection changes.
+// The restart-only knobs are editable here and nowhere else: once a model is
+// up they are facts. Anything left alone is not sent, so the resolver keeps
+// its answer -- only what you actually moved becomes an override.
+let PREVIEW=null, SETS={};
+async function loadPreview(){
+  const m=SEL; if(!m){ PREVIEW=null; $('loadknobs').innerHTML=''; return }
+  const q=new URLSearchParams({artifact:m.path,
+                               tune:window.LOADTUNE||'balanced'});
+  try{ PREVIEW=await (await fetch('/settings.json?'+q)).json() }
+  catch(e){ PREVIEW=null }
+  renderLoadKnobs();
+}
+function renderLoadKnobs(){
+  const el=$('loadknobs');
+  const ks=(PREVIEW&&PREVIEW.knobs)||[];
+  if(!ks.length){ el.innerHTML='<div class="msg">nothing to set</div>'; return }
+  el.innerHTML=ks.map(k=>{
+    const v=(k.name in SETS)?SETS[k.name]:k.value;
+    const ctl=k.values&&k.values.length
+      ? `<select data-k="${esc(k.name)}">${k.values.map(o=>
+          `<option ${String(o)===String(v)?'selected':''}>${o}</option>`).join('')}</select>`
+      : `<input data-k="${esc(k.name)}" value="${esc(v)}">`;
+    return `<div class="lk ${k.name in SETS?'set':''}"
+      title="${esc((k.what||'')+(k.why?' — '+k.why:''))}">
+      <span class="lkn">${esc(k.name.replace(/^(VQ|VQLAB|KNURLOGIC)_/,''))}</span>
+      ${ctl}<span class="rst" data-r="${esc(k.name)}">↺</span></div>`;
+  }).join('');
+  el.querySelectorAll('[data-k]').forEach(c=>c.onchange=()=>{
+    const k=c.dataset.k, was=ks.find(x=>x.name===k);
+    if(String(c.value)===String(was.value)) delete SETS[k];
+    else SETS[k]=String(c.value);
+    renderLoadKnobs();
+  });
+  el.querySelectorAll('[data-r]').forEach(c=>c.onclick=()=>{
+    delete SETS[c.dataset.r]; renderLoadKnobs();
+  });
+}
+
 function pickInfo(){
   const m=SEL, el=$('pickinfo');
   $('pickname').textContent=m?m.name:'choose a model';
@@ -1183,6 +1235,7 @@ function pickInfo(){
   el.innerHTML=`<div>${tags}</div>`+
     (fits?'':`<div class="warn">${gb(m.size_bytes)} against a ${gb(ws)}
       working set — it will not fit this box</div>`);
+  SETS={}; loadPreview();
 }
 $('openpick').onclick=()=>{
   $('picker').hidden=false; document.body.style.overflow='hidden';
@@ -1199,7 +1252,8 @@ $('launch').onclick=async()=>{
   const b=$('launch'); b.disabled=true; b.textContent='Launching…';
   const j=await act({action:'load', target:m.path,
                      port:+$('loadport').value||undefined,
-                     tune:(window.LOADTUNE||'balanced')});
+                     tune:(window.LOADTUNE||'balanced'),
+                     sets:SETS});
   b.textContent='Launch'; b.disabled=false;
   if(!j.error){ tick(); loadModels();
     const st=(j.settings||{}).needs_restart||{};
@@ -1221,6 +1275,9 @@ $('launch').onclick=async()=>{
     window.LOADTUNE=b.dataset.t;
     el.querySelectorAll('button').forEach(x=>
       x.setAttribute('aria-pressed', x===b));
+    // A tune is a different set of resolved values, so the preview has to
+    // be re-asked; anything explicitly overridden stays overridden.
+    loadPreview();
   });
 })();
 
