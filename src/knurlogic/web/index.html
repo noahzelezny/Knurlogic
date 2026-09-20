@@ -1,21 +1,64 @@
 <!doctype html><meta charset="utf-8"><title>knurlogic</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
- :root{--bg:#0d0f11;--panel:#111417;--fg:#e9edef;--dim:#8a9296;--faint:#565e63;
-   --line:#242a2f;--ok:#7ee787;--warn:#f0a35e;--acc:#2ee6c5;--accfg:#04231e}
- @media(prefers-color-scheme:light){:root{--bg:#f7f8f8;--panel:#fff;--fg:#14171a;
-   --dim:#5b6165;--faint:#9aa1a6;--line:#e2e6e8;--ok:#1a7f37;--warn:#9a5b16;
-   --acc:#0d9488;--accfg:#fff}}
+ /* Exo's dashboard is a COMMAND CENTER: neutral dark greys in oklch, one
+    saturated accent, monospace everywhere, and panels that read as lit
+    instrument faces rather than cards. Its own app.css is the source for
+    every number below -- bg 0.12, card 0.16, border 0.22, muted text 0.6,
+    radius 0.375rem, 40px grid, 6px scrollbars, 0.02em body tracking.
+    The one deliberate departure is the hue: teal, not yellow. */
+ :root{
+   --bg:oklch(.12 0 0);--panel:oklch(.16 0 0);--med:oklch(.22 0 0);
+   --fg:oklch(.9 0 0);--dim:oklch(.6 0 0);--faint:oklch(.45 0 0);
+   --line:oklch(.25 0 0);--grid:oklch(.2 0 0/.3);
+   --ok:oklch(.78 .15 150);--warn:oklch(.78 .15 70);
+   --acc:oklch(.82 .14 185);--accfg:oklch(.14 .02 185);
+   --glow:0 0 20px oklch(.82 .14 185/.3);
+   --r:.375rem}
+ /* Light mode is not exo's -- exo is dark only -- but a page that blinds
+    someone at a bright desk is not usable, whatever it looks like. */
+ @media(prefers-color-scheme:light){:root{
+   --bg:oklch(.97 0 0);--panel:oklch(1 0 0);--med:oklch(.93 0 0);
+   --fg:oklch(.2 0 0);--dim:oklch(.45 0 0);--faint:oklch(.6 0 0);
+   --line:oklch(.89 0 0);--grid:oklch(.8 0 0/.35);
+   --ok:oklch(.5 .14 150);--warn:oklch(.55 .13 70);
+   --acc:oklch(.55 .11 185);--accfg:oklch(1 0 0);--glow:none}}
  *{box-sizing:border-box}
- body{margin:0;background:var(--bg);color:var(--fg);
-   font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace}
+ body{margin:0;background:var(--bg);color:var(--fg);letter-spacing:.02em;
+   font:13px/1.6 'SF Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,
+     'DejaVu Sans Mono',monospace;
+   background-image:linear-gradient(var(--grid) 1px,transparent 1px),
+     linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+   background-size:40px 40px;background-attachment:fixed}
+ /* The CRT scanline, at exo's exact period. It is the cheapest single thing
+    that makes a dark panel read as a screen instead of a div. */
+ body:before{content:'';position:fixed;inset:0;pointer-events:none;z-index:100;
+   background:repeating-linear-gradient(0deg,transparent,transparent 2px,
+     oklch(0 0 0/.03) 2px,oklch(0 0 0/.03) 4px)}
+ ::-webkit-scrollbar{width:6px;height:6px}
+ ::-webkit-scrollbar-track{background:oklch(.1 0 0)}
+ ::-webkit-scrollbar-thumb{background:oklch(.3 0 0);border-radius:3px}
+ ::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--acc) 50%,transparent)}
  a{color:inherit;text-decoration:none}
  /* --- masthead: a wordmark, and the nav exo puts opposite it -------------- */
- header{border-bottom:1px solid var(--line);padding:18px 24px;display:flex;
-   align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+ header{border-bottom:1px solid var(--line);padding:14px 24px;display:flex;
+   align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;
+   background:linear-gradient(180deg,oklch(.16 0 0/.95),oklch(.12 0 0/.98));
+   position:sticky;top:0;z-index:20;backdrop-filter:blur(6px)}
+ @media(prefers-color-scheme:light){header{
+   background:linear-gradient(180deg,oklch(1 0 0/.95),oklch(.97 0 0/.98))}}
  .mark{display:flex;align-items:center;gap:12px}
- .mark b{font-size:22px;font-weight:800;letter-spacing:.22em;text-transform:uppercase}
- nav{display:flex;gap:22px;font-size:11px;letter-spacing:.16em;
+ .mark b{font-size:19px;font-weight:700;letter-spacing:.22em;
+   text-transform:uppercase;text-shadow:var(--glow)}
+ /* exo's data-readout: 11px, uppercase, wide tracking. Small text on this
+    page is an INSTRUMENT LABEL, never prose. */
+ .ro{font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+ .live{display:flex;align-items:center;gap:7px;color:var(--dim)}
+ .live i{width:7px;height:7px;border-radius:50%;background:var(--ok);
+   box-shadow:0 0 8px currentColor;animation:pulse 2s ease-in-out infinite}
+ .live.off i{background:var(--warn);animation:none}
+ @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+ nav{display:flex;gap:20px;font-size:11px;letter-spacing:.16em;
    text-transform:uppercase;color:var(--dim)}
  nav a:hover{color:var(--acc)}
  .wrap{max-width:1180px;margin:0 auto;padding:22px 24px 60px}
@@ -32,28 +75,57 @@
  nav a[aria-pressed=true]{color:var(--acc)}
  nav a{cursor:pointer;border-bottom:1px solid transparent;padding-bottom:2px}
  nav a[aria-pressed=true]{border-bottom-color:var(--acc)}
- .panel{border:1px solid var(--line);background:var(--panel);padding:16px 18px 18px;
-   position:relative;margin-bottom:20px}
- .lab{position:absolute;top:-7px;left:14px;background:var(--panel);padding:0 7px;
+ nav a[aria-pressed=true]{text-shadow:var(--glow)}
+ .panel{border:1px solid var(--line);border-radius:var(--r);
+   padding:16px 18px 18px;position:relative;margin-bottom:20px;
+   background:linear-gradient(180deg,oklch(.16 0 0/.95) 0%,oklch(.12 0 0/.98) 100%);
+   box-shadow:inset 0 1px 0 oklch(1 0 0/.03),0 4px 20px oklch(0 0 0/.5)}
+ @media(prefers-color-scheme:light){.panel{background:var(--panel);
+   box-shadow:0 1px 3px oklch(0 0 0/.07)}}
+ .lab{position:absolute;top:-7px;left:14px;background:var(--bg);padding:0 7px;
    font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--acc);
    font-weight:700}
  .lab:before{content:"\25c6  "}
  .row{display:flex;justify-content:space-between;gap:14px;padding:3px 0}
  .row>span:first-child{color:var(--dim)}
  /* --- topology: the device IS the gauge ---------------------------------- */
- .topo{display:flex;align-items:center;justify-content:center;gap:0;flex-wrap:wrap;
-   padding:10px 0 4px}
+ /* exo draws the topology on a round CRT face -- a radial gradient with a
+    heavy inner shadow, so the devices sit INSIDE a screen rather than on a
+    background. The graph links are dashed and animate along their length,
+    which is the one piece of motion that carries information: it says the
+    link is live. */
+ .topo{display:flex;align-items:center;justify-content:center;gap:0;
+   flex-wrap:wrap;padding:26px 10px 18px;margin:2px 0 4px;border-radius:var(--r);
+   background:radial-gradient(ellipse at center,oklch(.16 0 0) 0%,
+     oklch(.12 0 0) 50%,oklch(.09 0 0) 100%);
+   box-shadow:inset 0 0 70px oklch(0 0 0/.5),0 0 40px oklch(.82 .14 185/.06)}
+ @media(prefers-color-scheme:light){.topo{background:var(--med);box-shadow:none}}
+ .flow{width:56px;height:20px;flex:none}
+ .flow line{stroke:color-mix(in srgb,var(--acc) 40%,transparent);stroke-width:1.5;
+   stroke-dasharray:8 8;animation:flow 1s linear infinite;
+   filter:drop-shadow(0 0 3px color-mix(in srgb,var(--acc) 50%,transparent))}
+ @keyframes flow{from{stroke-dashoffset:0}to{stroke-dashoffset:-16}}
+ /* Stacked, the units no longer sit either side of the connector, so a
+    horizontal link would point at nothing. Drop it: that two nodes are
+    joined is already said by both being drawn and by the node count in the
+    masthead, and a line that lies about the layout is worse than no line. */
+ @media(max-width:560px){
+   .topo{flex-direction:column;gap:18px;padding:20px 10px}
+   .flow{display:none}}
  .unit{text-align:center;padding:0 10px}
  .unit .nm{font-size:11.5px;letter-spacing:.08em;margin-bottom:8px;color:var(--dim)}
  .unit .stat{font-size:10.5px;color:var(--faint);margin-top:7px;letter-spacing:.04em}
- .unit .pct{font-size:15px;font-weight:700;color:var(--acc)}
- .link{color:var(--faint);font-size:11px;letter-spacing:.3em;padding:0 4px}
- .big{font-size:29px;font-weight:800;letter-spacing:-.01em;margin:4px 0 2px}
+ .unit .pct{font-size:15px;font-weight:700;color:var(--acc);
+   text-shadow:var(--glow)}
+ .big{font-size:29px;font-weight:700;letter-spacing:-.01em;margin:4px 0 2px;
+   text-shadow:var(--glow)}
  .big small{font-size:12px;font-weight:400;color:var(--dim);letter-spacing:.06em}
- .bar{height:9px;background:var(--line);display:flex;margin:12px 0 14px}
+ .bar{height:9px;background:var(--med);display:flex;margin:12px 0 14px;
+   border-radius:2px;overflow:hidden}
  .bar i{display:block;height:100%}
  /* --- controls ----------------------------------------------------------- */
- .seg{display:inline-flex;border:1px solid var(--line);overflow:hidden}
+ .seg{display:inline-flex;border:1px solid var(--line);overflow:hidden;
+   border-radius:var(--r);background:var(--bg)}
  .seg button{border:0;border-radius:0;background:transparent;color:var(--dim);
    padding:7px 14px;font:inherit;font-size:11.5px;letter-spacing:.1em;
    text-transform:uppercase;cursor:pointer}
@@ -61,16 +133,25 @@
  .ctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
  .ctl label{color:var(--faint);font-size:11px;letter-spacing:.06em}
  input,button{font:inherit;border:1px solid var(--line);padding:6px 10px;
-   background:var(--bg);color:var(--fg);border-radius:0}
+   background:var(--bg);color:var(--fg);border-radius:var(--r)}
+ input:focus{outline:none;border-color:var(--acc)}
  #ws{width:64px;text-align:right}
  .go{background:var(--acc);color:var(--accfg);border-color:transparent;font-weight:700;
-   letter-spacing:.1em;text-transform:uppercase;cursor:pointer}
+   letter-spacing:.1em;text-transform:uppercase;cursor:pointer;
+   box-shadow:var(--glow)}
+ .go[disabled]{box-shadow:none}
  .go[disabled]{opacity:.3;cursor:default}
  .dials{display:flex;gap:26px;justify-content:center;flex-wrap:wrap;margin:16px 0 4px}
  .dial{text-align:center;width:118px;-webkit-user-select:none;user-select:none}
- .dial svg{cursor:ns-resize;touch-action:none;display:block;margin:0 auto}
- .dial .nm{font-size:10px;color:var(--faint);margin-top:7px;letter-spacing:.1em}
- .dial .vv{font-size:15px;font-weight:700;margin-top:5px}
+ .dial svg{cursor:ns-resize;touch-action:none;display:block;margin:0 auto;
+   border-radius:50%;background:radial-gradient(circle at 50% 38%,
+     oklch(.2 0 0) 0%,oklch(.13 0 0) 70%,oklch(.1 0 0) 100%);
+   box-shadow:inset 0 1px 0 oklch(1 0 0/.05),0 2px 8px oklch(0 0 0/.5)}
+ @media(prefers-color-scheme:light){.dial svg{background:var(--med);
+   box-shadow:inset 0 1px 2px oklch(0 0 0/.12)}}
+ .dial .nm{font-size:10px;color:var(--faint);margin-top:7px;letter-spacing:.1em;
+   text-transform:uppercase}
+ .dial .vv{font-size:15px;font-weight:700;margin-top:5px;text-shadow:var(--glow)}
  .dial .vv em{font-style:normal;font-size:10.5px;color:var(--dim);font-weight:400}
  .pend{color:var(--acc)}
  .capnote{font-size:10.5px;color:var(--warn);margin-top:6px;text-align:center}
@@ -97,10 +178,15 @@
  pre{margin:8px 0 0;font-size:11px;color:var(--dim);white-space:pre-wrap;
    line-height:1.75}
  #log{height:200px;overflow:auto;border:1px solid var(--line);padding:12px;
-   background:var(--bg)}
+   background:oklch(.1 0 0);border-radius:var(--r)}
+ @media(prefers-color-scheme:light){#log{background:var(--bg)}}
  #log p{margin:0 0 10px;white-space:pre-wrap;word-wrap:break-word}
  #log b{color:var(--acc)}
  form{display:flex;gap:8px;margin-top:10px}form input{flex:1}
+ @media(prefers-reduced-motion:reduce){
+   .flow line,.live i{animation:none}
+   *,*:before,*:after{transition-duration:.01ms!important;
+     animation-duration:.01ms!important;animation-iteration-count:1!important}}
 </style>
 <header>
   <div class="mark">
@@ -111,6 +197,7 @@
     </svg>
     <b>knurlogic</b>
   </div>
+  <div class="live ro" id="state" style="margin-left:auto"><i></i><span>connecting</span></div>
   <nav>
     <a data-panel="settings">Settings</a>
     <a data-panel="connect">Connect</a>
@@ -167,8 +254,12 @@
 <script>
 // --- the menu -------------------------------------------------------------
 // Settings are a thing you go and get, not a thing that is always shouting.
-// The choice is remembered per browser, because reopening the page to a
-// closed drawer you left open is its own small annoyance.
+// The page therefore always OPENS closed. An earlier version remembered the
+// last panel in localStorage, which quietly undid the whole point: open it
+// once and it is open forever after, which is the always-on drawer again
+// wearing a menu's clothes. (It also did not survive reliably -- storage
+// comes back empty in enough situations that a feature resting on it is a
+// feature that sometimes is not there.)
 (()=>{
   const cols=document.querySelector('.cols');
   const links=[...document.querySelectorAll('nav a[data-panel]')];
@@ -178,15 +269,11 @@
     document.querySelectorAll('.rail .panel').forEach(p=>
       p.classList.toggle('on', p.id===name));
     links.forEach(a=>a.setAttribute('aria-pressed', a.dataset.panel===name));
-    try{ name ? localStorage.setItem('kn.panel',name)
-              : localStorage.removeItem('kn.panel') }catch(e){}
   }
   links.forEach(a=>a.onclick=()=>show(
     a.getAttribute('aria-pressed')==='true' ? null : a.dataset.panel));
   addEventListener('keydown',e=>{ if(e.key==='Escape') show(null) });
-  let saved=null;
-  try{ saved=localStorage.getItem('kn.panel') }catch(e){}
-  show(saved);
+  show(null);
   window.knShow=show;
 })();
 
@@ -200,7 +287,7 @@
  g.innerHTML=s})();
 
 const GIB=1073741824, $=id=>document.getElementById(id);
-const gb=b=>(b/GIB).toFixed(1)+' GiB';
+const gb=b=>Number.isFinite(b)?(b/GIB).toFixed(1)+' GiB':'--';
 const row=(k,v)=>`<div class="row"><span>${k}</span><span>${v}</span></div>`;
 const esc=s=>String(s??'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 
@@ -400,9 +487,21 @@ $('apply').onclick=async()=>{
 $('ws').addEventListener('change',()=>loadSettings({tune:ASK.tune||'',working_set_gib:$('ws').value}));
 
 // --- status ---------------------------------------------------------------
+function setState(ok, text){
+  const el=$('state');
+  el.classList.toggle('off', !ok);
+  el.lastElementChild.textContent=text;
+}
 async function tick(){
-  let d; try{ d=await (await fetch('/status.json')).json() }catch(e){ return }
+  let d;
+  try{ d=await (await fetch('/status.json')).json() }
+  catch(e){ setState(false,'no answer'); return }
   const a=d.artifact, m=d.memory, C=d.cluster;
+  // In a cluster the honest reading is how many nodes ANSWERED, not that
+  // the page it is drawn on is up.
+  const ns=d.nodes||[], up=ns.filter(n=>n.reachable!==false).length;
+  setState(up===ns.length, ns.length>1 ? `${up}/${ns.length} nodes`
+    : (up ? 'serving' : 'no answer'));
   if(a){ $('title').textContent=a.name;
     $('sub').textContent=`${a.model_type} · ${gb(a.size_bytes)}`+
       (a.bundled_runtime?` · runtime ${a.bundled_runtime}`:''); }
@@ -430,8 +529,12 @@ async function tick(){
   }
   // One node still gets its unit: the picture is the gauge, not an
   // ornament that only earns its place when there are two of them.
-  $('topo').innerHTML=(d.nodes||[]).map(unit)
-    .join('<div class="link">&lt;&mdash;&gt;</div>');
+  // The link between nodes animates along its length. That is the only
+  // motion on the page that carries information -- it says the link is
+  // live -- so it is also the only one, and it stops under reduced-motion.
+  $('topo').innerHTML=(d.nodes||[]).map(unit).join(
+    '<svg class="flow" viewBox="0 0 56 20" aria-hidden="true">'+
+    '<line x1="2" y1="10" x2="54" y2="10"/></svg>');
   if(m&&m.available){
     const ws=m.working_set_bytes||1, box=m.scope==='box';
     $('headline').innerHTML=`${gb(m.headroom_bytes)} <small>free of ${gb(ws)}</small>`;
@@ -439,8 +542,8 @@ async function tick(){
       `<i style="width:${100*m.cache_bytes/ws}%;background:var(--warn)"></i>`;
     $('mem').innerHTML=row(box?'in use on the box':'weights + live',gb(m.active_bytes))+
       row('cache · reclaimable',gb(m.cache_bytes))+
-      (C&&C.nodes_total>1?row('nodes answering',`${C.nodes_reachable}/${C.nodes_total}`):
-        row('peak this run',gb(m.peak_bytes)));
+      (C&&C.nodes_total>1?row('nodes answering',`${C.nodes_reachable}/${C.nodes_total}`)
+        :Number.isFinite(m.peak_bytes)?row('peak this run',gb(m.peak_bytes)):'');
   }
   const w=d.wired;
   if(w&&w.action==='raise'&&w.command)
