@@ -113,10 +113,14 @@ def test_render_never_prints_an_unreported_size_as_zero(fake):
 
 
 def test_nothing_running_is_an_ordinary_answer(monkeypatch):
+    """`survey()` shells out to `top` and `ps` for the memory map, so stubbing
+    only the HTTP layer let this read the developer's actual machine -- the
+    same leak the discovery tests had against the real disk."""
     monkeypatch.setattr(loaded, "_get", lambda *a, **k: None)
+    monkeypatch.setattr(loaded, "memory_map", lambda *a, **k: {})
     doc = loaded.survey()
     assert doc["resident"] == []
-    assert "nothing is loaded" in loaded.render(doc)
+    assert "nothing reports a loaded model" in loaded.render(doc)
 
 
 def test_exo_load_uses_exo_s_own_placement_object(monkeypatch):
@@ -143,3 +147,57 @@ def test_exo_load_refuses_rather_than_posting_a_guess(monkeypatch):
                         lambda *a, **k: pytest.fail("posted without placement"))
     with pytest.raises(RuntimeError, match="would not place"):
         loaded.exo_load("http://x", "m/x")
+
+
+# --- where the RAM went -----------------------------------------------------
+
+def test_a_shell_in_a_project_directory_is_not_a_runtime():
+    """Both of these were attributed on the first pass, because the match ran
+    against the whole command line: a shell whose cwd was named after a
+    project, and a tail following a log. Reported as runtimes holding
+    memory."""
+    assert loaded._runtime_of("-zsh") == ""
+    assert loaded._runtime_of("/bin/zsh /Users/x/vqlab/run.sh") == ""
+    assert loaded._runtime_of("tail -f /Users/x/exo/log.txt") == ""
+    assert loaded._runtime_of("grep -r knurlogic src/") == ""
+
+
+def test_a_runtime_is_read_from_its_executable_or_its_module():
+    assert loaded._runtime_of(
+        "/opt/anaconda3/envs/exo/bin/python3.13 run.py") == "exo"
+    assert loaded._runtime_of("/usr/bin/python3 -m knurlogic.cli serve") \
+        == "knurlogic"
+    assert loaded._runtime_of("python3 -m mlx_lm.server --model x") == "mlx-lm"
+    assert loaded._runtime_of("python -m mlx_vlm.server") == "mlx-vlm"
+    assert loaded._runtime_of("/usr/local/bin/ollama serve") == "ollama"
+    assert loaded._runtime_of("/usr/bin/python3 other.py") == ""
+
+
+def test_an_idle_runtime_is_reported_below_the_floor(monkeypatch):
+    """An idle exo holding 163 MiB is an ANSWER -- nothing is loaded. Dropped
+    under a floor it looks identical to exo not running at all, which is the
+    question the panel exists to settle."""
+    monkeypatch.setattr(loaded, "_footprints", lambda: {
+        1: 160 << 20,          # exo, idle, under the floor
+        2: 4 << 30,            # something else, over it
+        3: 100 << 20})         # something else, under it
+    monkeypatch.setattr(loaded, "_commands", lambda: {
+        1: "/opt/anaconda3/envs/exo/bin/python3.13",
+        2: "/Applications/Thing.app/Contents/MacOS/Thing",
+        3: "/usr/bin/something-small"})
+    m = loaded.memory_map(floor=256 << 20)
+    pids = {r["pid"] for r in m["processes"]}
+    assert pids == {1, 2}                 # 3 dropped, 1 kept despite the floor
+    assert m["by_runtime"] == {"exo": 160 << 20}
+
+
+def test_the_unattributed_remainder_is_reported(monkeypatch):
+    """"Where did the RAM go" is not answered by a list that sums to less
+    than the machine and does not say so."""
+    monkeypatch.setattr(loaded, "_footprints", lambda: {1: 2 << 30, 2: 6 << 30})
+    monkeypatch.setattr(loaded, "_commands", lambda: {
+        1: "/envs/exo/bin/python3", 2: "/Applications/Other"})
+    m = loaded.memory_map(floor=1 << 30)
+    assert m["runtime_bytes"] == 2 << 30
+    assert m["other_bytes"] == 6 << 30
+    assert m["seen_bytes"] == 8 << 30
