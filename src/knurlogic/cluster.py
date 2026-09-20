@@ -216,7 +216,8 @@ def _front(host: str, port: int, exo_url: str, status_fn,
 
     own = web.routes(status_fn=lambda _n=0: status_fn(),
                      settings_fn=settings_fn,
-                     models_fn=web.models_document(serving=serving))
+                     models_fn=web.models_document(serving=serving),
+                     loaded_fn=web.loaded_document())
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
