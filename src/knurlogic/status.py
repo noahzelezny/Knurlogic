@@ -65,10 +65,15 @@ SCHEMA = 2
 
 def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
              node="local", role="server", reachable=True,
-             memory_fn=None) -> dict:
+             memory_fn=None, machine_fn=None) -> dict:
     """One node's answer. `memory_fn` exists so a snapshot can be BUILT from
     numbers that came off another node (exo reports them for every node in
-    the cluster) rather than only from this process."""
+    the cluster) rather than only from this process.
+
+    `machine` says what the box IS -- a Studio, a mini, a laptop. It is
+    reported per node for the same reason memory is: in a cluster the
+    interesting fact is that these two are DIFFERENT machines, and a page
+    that draws them as identical boxes throws that away."""
     d = {
         "node": node,
         "role": role,
@@ -77,6 +82,11 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
         "requests_served": requests,
         "memory": (memory_fn or memory)(),
     }
+    if machine_fn is not None:
+        d["machine"] = machine_fn()
+    else:
+        from . import wired
+        d["machine"] = wired.machine()
     if artifact is not None:
         d["artifact"] = {
             "name": artifact.path.name,
