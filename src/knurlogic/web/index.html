@@ -61,17 +61,53 @@
  nav{display:flex;gap:20px;font-size:11px;letter-spacing:.16em;
    text-transform:uppercase;color:var(--dim)}
  nav a:hover{color:var(--acc)}
- .wrap{max-width:1180px;margin:0 auto;padding:22px 24px 60px}
- /* The rail is a MENU, not furniture. Closed, the page is one column and
-    the eye has one place to go; open, it is what you asked for and nothing
-    else. Two panels never sit open at once. */
- .cols{display:grid;grid-template-columns:1fr;gap:20px;align-items:start}
- .cols.open{grid-template-columns:1fr 380px}
- @media(max-width:920px){.cols.open{grid-template-columns:1fr}}
- .rail{display:none}
- .cols.open .rail{display:block}
- .rail .panel{display:none}
- .rail .panel.on{display:block}
+ .wrap{max-width:1240px;margin:0 auto;padding:22px 24px 60px}
+ /* Chat memory on the left, the way exo keeps it. */
+ .app{display:grid;grid-template-columns:212px 1fr;gap:24px;align-items:start}
+ @media(max-width:860px){.app{grid-template-columns:1fr}
+   .side{order:2;border:0;padding:0}}
+ .side{border-right:1px solid var(--line);padding-right:18px;min-width:0}
+ .newchat{width:100%;text-align:left;color:var(--acc);border-style:dashed;
+   cursor:pointer;margin-bottom:12px;font-size:11.5px;letter-spacing:.08em;
+   text-transform:uppercase}
+ .newchat:hover{border-color:var(--acc)}
+ .chat{padding:8px 9px;border-radius:var(--r);cursor:pointer;margin-bottom:3px;
+   border:1px solid transparent}
+ .chat:hover{background:var(--med)}
+ .chat[aria-current=true]{border-color:color-mix(in srgb,var(--acc) 40%,transparent);
+   background:color-mix(in srgb,var(--acc) 8%,transparent)}
+ .chat .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+ .chat .m{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:3px}
+ .chat .x{float:right;color:var(--faint);padding:0 2px;visibility:hidden}
+ .chat:hover .x{visibility:visible}
+ .chat .x:hover{color:var(--warn)}
+ .sidelab{font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+   color:var(--faint);margin:14px 0 7px}
+ /* A menu takes the whole screen. Half a screen of settings beside a
+    topology you are not reading is two things competing; this is one. */
+ .sheet{position:fixed;inset:0;z-index:40;background:var(--bg);
+   display:flex;flex-direction:column;
+   background-image:linear-gradient(var(--grid) 1px,transparent 1px),
+     linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+   background-size:40px 40px}
+ .sheet[hidden]{display:none}
+ .sheethd{display:flex;align-items:center;justify-content:space-between;
+   padding:16px 24px;border-bottom:1px solid var(--line);flex:none;
+   background:linear-gradient(180deg,oklch(.16 0 0/.95),oklch(.12 0 0/.98))}
+ @media(prefers-color-scheme:light){.sheethd{
+   background:linear-gradient(180deg,oklch(1 0 0/.95),oklch(.97 0 0/.98))}}
+ .sheethd b{letter-spacing:.18em;color:var(--acc);text-shadow:var(--glow)}
+ #sheetclose{background:transparent;border-color:var(--line);color:var(--dim);
+   cursor:pointer;letter-spacing:.1em}
+ #sheetclose:hover{color:var(--fg);border-color:var(--acc)}
+ .sheetbody{overflow:auto;padding:26px 24px 60px}
+ .sheetbody .panel{max-width:760px;margin:0 auto 20px}
+ .sheetbody .panel{display:none}
+ .sheetbody .panel.on{display:block}
+ /* The sheet header already names the panel; the notch label would say it
+    a second time, six lines lower. */
+ .sheetbody .panel>.lab{display:none}
+ .sheetbody .panel{padding-top:20px}
  nav a[aria-pressed=true]{color:var(--acc)}
  nav a{cursor:pointer;border-bottom:1px solid transparent;padding-bottom:2px}
  nav a[aria-pressed=true]{border-bottom-color:var(--acc)}
@@ -183,6 +219,13 @@
  @media(prefers-color-scheme:light){#log{background:var(--bg)}}
  #log p{margin:0 0 10px;white-space:pre-wrap;word-wrap:break-word}
  #log b{color:var(--acc)}
+ /* The numbers are the point of this panel, so they are not a tooltip. */
+ .met{display:flex;gap:16px;flex-wrap:wrap;margin:-4px 0 12px;
+   font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+   color:var(--faint)}
+ .met b{color:var(--fg);font-weight:700;text-transform:none;letter-spacing:0}
+ .met .warnv b{color:var(--warn)}
+ #log{height:230px}
  form{display:flex;gap:8px;margin-top:10px}form input{flex:1}
  @media(prefers-reduced-motion:reduce){
    .flow line,.live i{animation:none}
@@ -206,12 +249,20 @@
   </nav>
 </header>
 <div class="wrap">
-  <div id="head" style="margin-bottom:18px">
-    <div style="font-size:15px;font-weight:700;letter-spacing:.04em" id="title">—</div>
-    <div class="msg" style="margin-top:2px" id="sub">loading…</div>
-  </div>
-  <div class="cols">
-    <div>
+  <div class="app">
+    <!-- Chat memory, as exo keeps it: a list on the left you can go back to.
+         It lives in this browser and nowhere else -- runs are kept so a knob
+         change can be compared against the last one, which is the whole job
+         of this page. -->
+    <aside class="side">
+      <button class="newchat" id="newchat">+ New run</button>
+      <div id="chats"></div>
+    </aside>
+    <main>
+      <div id="head" style="margin-bottom:16px">
+        <div style="font-size:15px;font-weight:700;letter-spacing:.04em" id="title">—</div>
+        <div class="msg" style="margin-top:2px" id="sub">loading…</div>
+      </div>
       <section class="panel" id="memory">
         <div class="lab">Memory</div>
         <div class="topo" id="topo"></div>
@@ -219,12 +270,25 @@
       </section>
       <section class="panel" id="try">
         <div class="lab">Try it</div>
+        <div class="msg" style="margin:0 0 10px">A prompt here is a
+          MEASUREMENT, not a conversation: every reply is timed, so a knob
+          can be turned and the same prompt run again.</div>
         <div id="log"></div>
-        <form id="f"><input id="q" placeholder="Ask it something" autocomplete="off">
+        <form id="f"><input id="q" placeholder="Send a prompt and time it" autocomplete="off">
           <button class="go" id="go">Send</button></form>
       </section>
-    </div>
-    <div class="rail">
+    </main>
+  </div>
+</div>
+<!-- The menus take the whole screen. They are what you came for when they
+     are open, and the topology behind them is not something you need to
+     watch while reading why a flag is set the way it is. -->
+<div class="sheet" id="sheet" hidden>
+  <div class="sheethd">
+    <b class="ro" id="sheettitle"></b>
+    <button id="sheetclose" class="ro">Close  esc</button>
+  </div>
+  <div class="sheetbody">
       <section class="panel" id="settings">
         <div class="lab">Settings</div>
         <div class="ctl">
@@ -247,30 +311,30 @@
         <div class="seg" id="conntabs" style="margin:10px 0"></div>
         <pre id="conn" style="user-select:all"></pre>
       </section>
-    </div>
   </div>
 </div>
 <script>
 // --- the menu -------------------------------------------------------------
-// Settings are a thing you go and get, not a thing that is always shouting.
-// The page therefore always OPENS closed. An earlier version remembered the
-// last panel in localStorage, which quietly undid the whole point: open it
-// once and it is open forever after, which is the always-on drawer again
-// wearing a menu's clothes. (It also did not survive reliably -- storage
-// comes back empty in enough situations that a feature resting on it is a
-// feature that sometimes is not there.)
+// Settings are a thing you go and get, and when you get them they take the
+// screen. The page therefore always OPENS closed. An earlier version
+// remembered the last panel in localStorage, which quietly undid the point:
+// open it once and it is open forever after.
 (()=>{
-  const cols=document.querySelector('.cols');
+  const sheet=document.getElementById('sheet');
   const links=[...document.querySelectorAll('nav a[data-panel]')];
   function show(name){
     const on=name && document.getElementById(name);
-    cols.classList.toggle('open', !!on);
-    document.querySelectorAll('.rail .panel').forEach(p=>
+    sheet.hidden=!on;
+    document.querySelectorAll('.sheetbody .panel').forEach(p=>
       p.classList.toggle('on', p.id===name));
+    document.getElementById('sheettitle').textContent=name||'';
     links.forEach(a=>a.setAttribute('aria-pressed', a.dataset.panel===name));
+    document.body.style.overflow=on?'hidden':'';
+    if(on) sheet.querySelector('.sheetbody').scrollTop=0;
   }
   links.forEach(a=>a.onclick=()=>show(
     a.getAttribute('aria-pressed')==='true' ? null : a.dataset.panel));
+  document.getElementById('sheetclose').onclick=()=>show(null);
   addEventListener('keydown',e=>{ if(e.key==='Escape') show(null) });
   show(null);
   window.knShow=show;
@@ -613,20 +677,174 @@ async function tick(){
 }
 tick(); loadSettings({}); setInterval(tick,2000);
 
-// --- try it ---------------------------------------------------------------
+// --- try it, which is really "measure it" ---------------------------------
+// This panel is a bench, not a chat window. The reason to send a prompt here
+// is to turn a knob and send it again, so every reply carries three numbers:
+//
+//   TTFT        wall time to the first token. What a harness feels as lag.
+//   prefill     tokens/s through the prompt -- the phase the memory knobs
+//               actually govern, and the one that spikes.
+//   decode      tokens/s after the first token.
+//
+// Measuring prefill at all requires STREAMING (a non-streaming call cannot
+// tell you when the first token appeared) plus `stream_options.include_usage`,
+// which is how mlx-lm reports the token counts.
+//
+// THE TRAP, and it would have made this instrument lie: `prompt_tokens`
+// includes tokens served from the prompt cache, which were never prefilled.
+// Send the same prompt twice while turning a knob -- exactly what this panel
+// is for -- and the second run divides a full prompt by a near-zero prefill
+// time. So the rate uses prompt_tokens MINUS cached_tokens, and when that is
+// zero the rate is not shown at all: there is nothing to have a rate of.
 const log=$('log');
 function say(who,t){const p=document.createElement('p');p.innerHTML=`<b>${who}</b> `;
   p.appendChild(document.createTextNode(t));log.appendChild(p);log.scrollTop=1e9;return p}
+
+function metHTML(m){
+  if(!m) return '';
+  const bit=(k,v,warn)=>`<span class="${warn?'warnv':''}">${k} <b>${v}</b></span>`;
+  let h=bit('ttft', m.ttft_ms<1000?`${Math.round(m.ttft_ms)} ms`
+                                  :`${(m.ttft_ms/1000).toFixed(2)} s`);
+  if(m.prefill_tps) h+=bit('prefill', `${Math.round(m.prefill_tps)} tok/s`);
+  else if(m.cached) h+=bit('prefill','cached',1);
+  if(m.decode_tps) h+=bit('decode', `${m.decode_tps.toFixed(1)} tok/s`);
+  if(m.prompt) h+=bit('prompt', m.cached?`${m.prompt} (${m.cached} cached)`
+                                        :String(m.prompt));
+  if(m.completion) h+=bit('out', String(m.completion));
+  return `<div class="met">${h}</div>`;
+}
+function showMet(afterEl, m){
+  const d=document.createElement('div');
+  d.innerHTML=metHTML(m); const el=d.firstElementChild;
+  if(el){ afterEl.after(el); log.scrollTop=1e9 }
+}
+
+// --- chat memory ----------------------------------------------------------
+// Cheap on purpose: this browser's localStorage, no server state, no
+// database. Losing it costs a list of old prompts, which is the right price
+// for something that has to work the moment the page is opened. (The drawer
+// state was removed from storage for a different reason -- it changed what
+// the page DID. A remembered prompt does not.)
+const STORE='kn.runs';
+let RUNS=[], CUR=null;
+function loadRuns(){ try{ RUNS=JSON.parse(localStorage.getItem(STORE)||'[]') }
+  catch(e){ RUNS=[] } if(!Array.isArray(RUNS)) RUNS=[] }
+function saveRuns(){ try{ localStorage.setItem(STORE,JSON.stringify(RUNS.slice(0,40))) }
+  catch(e){} }
+function best(run){
+  // The list is for comparing runs, so the summary is the number being
+  // tuned, not the time of day.
+  const m=(run.msgs||[]).map(x=>x.met).filter(Boolean).pop();
+  if(!m) return run.tune||'';
+  const pf=m.prefill_tps?`${Math.round(m.prefill_tps)} pf`:'';
+  const dc=m.decode_tps?`${m.decode_tps.toFixed(0)} tok/s`:'';
+  return [run.tune,pf,dc].filter(Boolean).join(' · ');
+}
+function renderRuns(){
+  const el=$('chats');
+  if(!RUNS.length){ el.innerHTML=
+    '<div class="sidelab">no runs yet</div>'; return }
+  el.innerHTML='<div class="sidelab">runs</div>'+RUNS.map((r,i)=>
+    `<div class="chat" data-i="${i}" aria-current="${r.id===CUR}">
+       <span class="x" data-del="${i}" title="delete">×</span>
+       <div class="t">${esc(r.title||'untitled')}</div>
+       <div class="m">${esc(best(r))}</div></div>`).join('');
+  el.querySelectorAll('.chat').forEach(c=>c.onclick=e=>{
+    if(e.target.dataset.del!==undefined){
+      RUNS.splice(+e.target.dataset.del,1); saveRuns();
+      if(!RUNS.some(r=>r.id===CUR)) newRun(); else renderRuns();
+      return;
+    }
+    openRun(RUNS[+c.dataset.i]);
+  });
+}
+function newRun(){ CUR=null; log.innerHTML=''; renderRuns(); $('q').focus() }
+function openRun(r){
+  CUR=r.id; log.innerHTML='';
+  (r.msgs||[]).forEach(m=>{
+    const p=say(m.role==='user'?'you':'it', m.content);
+    if(m.met) showMet(p, m.met);
+  });
+  renderRuns();
+}
+function record(role, content, met){
+  if(CUR===null){
+    CUR=String(Date.now());
+    RUNS.unshift({id:CUR, title:content.slice(0,52), at:Date.now(),
+                  tune:(ASK&&ASK.tune)||'', msgs:[]});
+  }
+  const r=RUNS.find(x=>x.id===CUR);
+  if(r){ r.msgs.push({role,content,met}); r.tune=(ASK&&ASK.tune)||r.tune }
+  saveRuns(); renderRuns();
+}
+$('newchat').onclick=newRun;
+loadRuns(); renderRuns();
+
+// --- the timed request ----------------------------------------------------
+// Enter sends, explicitly. A form with one text input and a submit button
+// implicitly submits on Enter, and that is exactly the kind of "should work"
+// worth nailing down on the one control the whole panel exists to use.
+// Disabling the button does not stop implicit submission either, so the
+// in-flight guard is here rather than on the button.
+let BUSY=false;
+$('q').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){
+    e.preventDefault(); $('f').requestSubmit();
+  }
+});
 $('f').onsubmit=async e=>{
-  e.preventDefault(); const q=$('q').value.trim(); if(!q)return;
-  $('q').value=''; say('you',q); const out=say('it','…'); $('go').disabled=true;
+  e.preventDefault(); if(BUSY) return;
+  const q=$('q').value.trim(); if(!q)return;
+  BUSY=true;
+  $('q').value=''; say('you',q); record('user',q,null);
+  const out=say('it','…'); $('go').disabled=true;
+  const t0=performance.now();
+  let first=0, text='', usage=null;
   try{
     const r=await fetch('/v1/chat/completions',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages:[{role:'user',content:q}],max_tokens:256})});
-    const j=await r.json();
-    out.lastChild.textContent=j.choices?.[0]?.message?.content??JSON.stringify(j).slice(0,400);
-  }catch(err){ out.lastChild.textContent=String(err) }
-  $('go').disabled=false;
+      body:JSON.stringify({messages:[{role:'user',content:q}],max_tokens:256,
+        stream:true, stream_options:{include_usage:true}})});
+    if(!r.ok||!r.body) throw new Error('HTTP '+r.status);
+    const rd=r.body.getReader(), dec=new TextDecoder();
+    let buf='';
+    for(;;){
+      const {value,done}=await rd.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,nl).trim(); buf=buf.slice(nl+1);
+        if(!line.startsWith('data:')) continue;
+        const payload=line.slice(5).trim();
+        if(payload==='[DONE]') continue;
+        let j; try{ j=JSON.parse(payload) }catch(err){ continue }
+        if(j.usage) usage=j.usage;
+        const piece=j.choices?.[0]?.delta?.content;
+        if(piece){
+          if(!first) first=performance.now();
+          text+=piece; out.lastChild.textContent=text; log.scrollTop=1e9;
+        }
+      }
+    }
+    const end=performance.now();
+    let met=null;
+    if(first){
+      const ttft=first-t0;
+      const prompt=usage?.prompt_tokens||0;
+      const cached=usage?.prompt_tokens_details?.cached_tokens||0;
+      const fresh=Math.max(prompt-cached,0);
+      const comp=usage?.completion_tokens||0;
+      met={ttft_ms:ttft, prompt, cached, completion:comp,
+           // Only tokens actually pushed through the model count toward a
+           // prefill rate, and only when there were any.
+           prefill_tps: fresh>0 ? fresh/(ttft/1000) : 0,
+           decode_tps: (comp>1 && end>first) ? (comp-1)/((end-first)/1000) : 0};
+    }
+    if(!text) out.lastChild.textContent='(no content)';
+    showMet(out, met);
+    record('assistant', text||'(no content)', met);
+  }catch(err){ out.lastChild.textContent=String(err);
+    record('assistant',String(err),null) }
+  BUSY=false; $('go').disabled=false;
 };
 </script>
