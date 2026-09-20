@@ -151,14 +151,55 @@ quote speed only from a thermally stable box.
 
 Nothing in the algorithm. The work is packaging:
 
-1. **One copy.** Take the newer of each file (exo for caches/loop/batch_loop,
-   vqlab for the graft/pack builders exo does not have), into
-   `knurlogic/mtp/`. capture.py and sampling.py are already identical in both
-   and can be taken as-is.
-2. **Defaults that need no folklore.** Today a user has to know about
-   `EXO_NO_BATCH`, `~/.exo/engine-mode`, and that a sidecar must sit beside
-   the weights. knurlogic already detects the sidecar (`knurlogic mtp`); it
-   should pick the drafting batch engine when a head is present and say so.
+#### 1. One copy. The map, with dates checked rather than assumed
+
+Everything lands in `src/knurlogic/mtp/`. exo wins every contested file: it
+is newer on all three, and it is the copy `batch_loop.py` and the heads were
+written against, so taking exo's core keeps the set coherent rather than
+mixing two lineages.
+
+    FROM exo/src/exo/worker/engines/mlx/mtp/          lines
+      capture.py                                        68   identical in both
+      sampling.py                                      145   identical in both
+      caches.py                                        140   exo 09-17 > 09-02
+      registry.py                                      204   exo 09-03 > 09-02
+      loop.py                                          550   exo 09-17 > 09-03
+      batch_loop.py                                    648   exo only
+      speculative.py                                   393   exo only
+      pipeline.py                                      204   exo only
+      glm5_shim.py                                     185   exo only
+      seed.py                                           59   exo only
+      heads/{qwen4_exp,qwen35,glm5}.py                 789   exo only
+    FROM vqlab/src/vqlab/mtp/
+      runtime.py                                        77   vqlab only
+                                                      ----
+                                                      3462
+
+`runtime.py` is the only thing worth taking from vqlab: it loads a trunk
+across BOTH runtimes and returns the object the registry expects -- mlx-lm's
+Model, or mlx_vlm's LanguageModel and never the VLM wrapper. knurlogic needs
+exactly that and it belongs behind `engine.py`.
+
+NOT ported: `generator/mtp_batch_generate.py` (451 lines, 15 exo imports --
+it is exo's generator and knurlogic has its own seam), and the vqlab
+builders, which are a build step.
+
+The exo imports to sever are few and were counted: batch_loop 1, pipeline 1,
+speculative 4. Everything else imports nothing but mlx and mlx-lm.
+
+#### 2. Defaults that need no folklore
+
+Today drafting needs someone to know about `EXO_NO_BATCH`, `~/.exo/
+engine-mode`, and that a sidecar sits beside the weights. knurlogic already
+finds the sidecar, so it should just use it.
+
+**The drafting batch engine is the default, and sequential is a
+troubleshooting escape hatch rather than a choice anybody makes.** exo's own
+`engine_mode.py` is the argument: when the batch engine drafts, `auto` has
+nothing to flip for -- a lone request decodes as the sequential loop would
+(23.1 vs 22 tok/s, identical tokens) and a second request just joins. There
+is no tradeoff to expose, so exposing it as a decision would be inventing
+one.
 **And a line that decides what knurlogic does NOT do: vqlab builds models,
 knurlogic coalesces them.** The head builders (`mtp-graft`, `mtp-pack`) are a
 build step and stay in vqlab. They are not ported here and knurlogic never
