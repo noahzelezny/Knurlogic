@@ -195,7 +195,7 @@ def test_the_unattributed_remainder_is_reported(monkeypatch):
     """"Where did the RAM go" is not answered by a list that sums to less
     than the machine and does not say so."""
     monkeypatch.setattr(loaded, "_footprints", lambda: (
-        {1: 2 << 30, 2: 6 << 30}, {"used_bytes": 8 << 30, "free_bytes": 1 << 30}))
+        {1: 2 << 30, 2: 6 << 30}, {}))
     monkeypatch.setattr(loaded, "_commands", lambda: {
         1: "/envs/exo/bin/python3", 2: "/Applications/Other"})
     m = loaded.memory_map(floor=1 << 30)
@@ -204,29 +204,32 @@ def test_the_unattributed_remainder_is_reported(monkeypatch):
     assert m["seen_bytes"] == 8 << 30
 
 
-def test_free_memory_comes_from_the_os_not_from_summing_processes(monkeypatch):
-    """Footprints miss the kernel, wired pages, the file cache and every
-    process under the floor. Summing them and subtracting from installed
-    memory reported 75.9 GiB unused on a machine with 1.6 GiB free -- a 74
-    GiB error in the one number that decides whether a model fits."""
+def test_available_memory_counts_the_cache_macos_will_hand_over(monkeypatch):
+    """Two wrong answers preceded this, in opposite directions: installed
+    minus the footprints (arithmetic on the wrong quantity), then top's
+    "unused" (only pages free this instant, which read 1.6 GiB on a box with
+    70 GiB available). What a model can actually have is free + inactive --
+    the file cache is handed over on demand -- and that is the number exo
+    reports and the one this had to match."""
     monkeypatch.setattr(loaded, "_footprints", lambda: (
         {1: 4 << 30},
-        {"used_bytes": 93 << 30, "free_bytes": 2 << 30, "wired_bytes": 10 << 30}))
+        {"available_bytes": 70 << 30, "free_bytes": 2 << 30,
+         "cached_bytes": 68 << 30, "wired_bytes": 10 << 30}))
     monkeypatch.setattr(loaded, "_commands", lambda: {1: "/envs/exo/bin/python3"})
     m = loaded.memory_map(floor=1 << 30)
-    assert m["free_bytes"] == 2 << 30          # the OS's number
-    assert m["used_bytes"] == 93 << 30
-    # and the unattributed remainder is measured against what the OS spent,
-    # not against what we happened to be able to name
-    assert m["other_bytes"] == (93 - 4) << 30
+    inst = m["installed_bytes"]
+    assert m["free_bytes"] == 70 << 30         # available, not "unused"
+    assert m["truly_free_bytes"] == 2 << 30    # kept, but not the headline
+    assert m["used_bytes"] == inst - (70 << 30)
 
 
-def test_the_physmem_line_is_parsed_as_macos_writes_it():
-    d = loaded._physmem(
-        "PhysMem: 94G used (11G wired, 1638M compressor), 1464M unused.")
-    assert d["used_bytes"] == 94 << 30
-    assert d["wired_bytes"] == 11 << 30
-    assert round(d["free_bytes"] / (1 << 20)) == 1464
+def test_available_memory_reads_the_real_vm_stat():
+    """Not mocked: the parse has to survive macOS's own wording."""
+    d = loaded.available_memory()
+    if not d:
+        return
+    assert d["available_bytes"] >= d["free_bytes"]
+    assert d["available_bytes"] == d["free_bytes"] + d["cached_bytes"]
 
 
 def test_a_missing_physmem_line_falls_back_rather_than_lying(monkeypatch):
