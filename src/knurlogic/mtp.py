@@ -168,12 +168,26 @@ GRAFTABLE = "graftable"  # raw mtp.* in the trunk; a head can be built from it
 DECLARED = "declared"    # config says MTP, nothing shipped. The common case.
 NONE = "none"
 
+#: A SIDECAR IS A VQLAB PRODUCT. Measured across every artifact here: 11 of
+#: 11 built heads sit beside a VQ artifact and not one community rung has
+#: one. That is not a coincidence to be reported neutrally -- vqlab builds
+#: models, knurlogic runs them, and a head is something the build step made.
+#:
+#: So the absence of a head means two different things. On a community rung
+#: it means nothing at all: the `mtp` key is inherited from the upstream
+#: config and no publisher ships the weights, so there is no defect and
+#: nothing anybody can do. On a VQ artifact it means the head was not packed,
+#: which is a vqlab question and still not knurlogic's to answer.
+
 
 @dataclass
 class Status:
     state: str
     head: Head | None = None
     graft_tensors: int = 0
+    #: Whether a head could ever have been packed for this artifact by the
+    #: thing that builds them.
+    is_vq: bool = False
 
     def render(self) -> str:
         if self.state == BUILT:
@@ -188,28 +202,31 @@ class Status:
                     "drafting head can be BUILT from these; the\n           "
                     "architecture that loads the trunk discards them.")
         if self.state == DECLARED:
-            return ("config declares a multi-token-prediction head and this "
-                    "artifact ships\n           NO head weights -- not "
-                    "discarded at load, absent from the download.\n           "
-                    "MLX conversion drops them while keeping the config that "
-                    "declares them.\n           31 of the 40 declaring "
-                    "artifacts here are in this state; of the rest, 8 have"
-                    "\n           a head BUILT beside them and 1 carries "
-                    "the raw weights.")
+            if self.is_vq:
+                return ("config declares a multi-token-prediction head and "
+                        "none is packed beside\n           these weights. "
+                        "Packing one is vqlab's job -- it built this "
+                        "artifact.")
+            return ("config declares a multi-token-prediction head, which is "
+                    "inherited from\n           the upstream config. No "
+                    "publisher ships those weights and MLX conversion\n"
+                    "           drops them, so nothing is missing here and "
+                    "there is nothing to do.")
         return ""
 
 
 def status(artifact) -> Status:
     """Which of the three MTP situations this artifact is actually in."""
+    vq = bool(getattr(artifact, "is_vq", False))
     head = find_head(artifact.path)
     if head is not None:
-        return Status(BUILT, head=head)
+        return Status(BUILT, head=head, is_vq=vq)
     n = graft_weights(artifact.path)
     if n:
-        return Status(GRAFTABLE, graft_tensors=n)
+        return Status(GRAFTABLE, graft_tensors=n, is_vq=vq)
     if artifact.has_mtp:
-        return Status(DECLARED)
-    return Status(NONE)
+        return Status(DECLARED, is_vq=vq)
+    return Status(NONE, is_vq=vq)
 
 
 def survey(rows) -> str:
@@ -248,15 +265,20 @@ def survey(rows) -> str:
         for f, st in groups[GRAFTABLE]:
             L.append(f"  {f.name[:44]:<46}{st.graft_tensors:>6d} tensors")
         L.append("")
-    n = len(groups[DECLARED])
-    if n:
-        L.append(f"{n} declare a head in config.json and ship no head weights "
-                 f"at all.")
-        L.append("  Not discarded at load -- absent from the download. MLX "
-                 "conversion drops")
-        L.append("  `mtp.*` while keeping the config that declares them. "
-                 "Nothing is wrong with")
-        L.append("  these artifacts; there is simply no head to run.")
+    dec = groups[DECLARED]
+    if dec:
+        vq = [x for x in dec if x[1].is_vq]
+        L.append(f"{len(dec)} declare a head and have none packed beside "
+                 f"them.")
+        if vq:
+            L.append(f"  {len(vq)} are VQ artifacts, where packing one is "
+                     f"vqlab's job.")
+        if len(dec) - len(vq):
+            L.append(f"  {len(dec) - len(vq)} are community rungs that "
+                     f"inherited the config key; no")
+            L.append("  publisher ships those weights, so nothing is missing "
+                     "and there is nothing")
+            L.append("  to do about it.")
     return "\n".join(L) or "no artifact here declares or ships an MTP head."
 
 
