@@ -118,9 +118,40 @@ The sidecar BUILDER is the other half and lives in vqlab, not exo:
 and never goes through `sanitize()` -- which is the other reason the
 sanitize-first plan was aimed at the wrong thing.
 
-**First step.** Load one of the eleven heads and prove it produces logits
-that DIFFER from the main head on the same position. One arm, one channel, no
-speed claim. Everything above that layer already exists and is measured.
+### The first step is DONE (2026-09-20, Laptop B, mlx-lm 0.31.9)
+
+`tools/mtp_probe.py`, run against Flash-Next VQ-2.1bpw and its 2.14 GiB
+`mtp-head-q6.safetensors`. The head loads and drafts.
+
+    CONTROL  main head vs itself     max|a-b| 0.0000   cosine 1.000000
+    ARM      main head vs MTP head   max|a-b| 8.1216   cosine 0.831266
+
+The control is the point: a comparison that cannot detect SAMENESS says
+nothing about difference, so the same code path was run on the main head
+against itself first. It reported identical, so the arm means something.
+
+And the arm is better evidence than the number. On "The capital of France
+is" the main head's top-5 is `[' Paris', '\n\n', '...', ' known', '\n']` --
+token t+1. The drafting head's top-5 is `[',', '.', '\n\n', '\n', '...']`,
+which is what follows *Paris*. It is not a different answer to the same
+question; it is an answer to the NEXT question, which is what a
+multi-token-prediction head is for. A head that had loaded wrong would give
+noise, not a coherent continuation one position further on.
+
+No speed claim, and none is available from this: one arm, one position.
+
+TWO THINGS THE PROBE ESTABLISHED IN PASSING:
+
+* the sidecar loads through exo's own `registry.resolve` ->
+  `head_cls().from_sidecar(model, arch, path)` with nothing patched, which
+  is the portability claim in `registry.py` holding up under test;
+* the draft cache is ONE cache object from `spec.make_draft_cache(arch)`,
+  not a list. Passing `[cache]` raises `'list' object has no attribute
+  'offset'` inside the attention block.
+
+**Next after this.** The head drafts; nothing yet verifies the drafted token
+against the trunk, which is what makes speculation correct rather than fast.
+`loop.py` and `batch_loop.py` already do that and are the port target.
 
 Batching: mlx-lm's gate is `is_batchable = draft_model is None and all(hasattr
 (c, "merge") for c in make_prompt_cache(model))`. An MTP head lives INSIDE the
