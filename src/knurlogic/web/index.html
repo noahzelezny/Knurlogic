@@ -127,12 +127,16 @@
  .res.offered .n{color:var(--dim)}
  /* Where the memory went, from the OS rather than from each runtime's own
     account of itself. The bar is one machine; the segments are runtimes. */
- .ram{margin-top:12px}
- .ramrow{display:flex;justify-content:space-between;gap:10px;font-size:10.5px;
-   padding:1px 0}
- .ramrow span:first-child{color:var(--dim);display:flex;align-items:center;
-   gap:6px}
- .ramrow em{width:7px;height:7px;border-radius:2px;display:inline-block;
+ /* A key belongs beside the thing it explains, not in another column: this
+    sits directly under the machines whose fills it names, and reads across
+    because the panel is wide. */
+ .ram{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 20px;
+   padding:12px 4px 2px}
+ .ramrow{display:flex;align-items:center;gap:7px;font-size:10.5px;
+   letter-spacing:.04em}
+ .ramrow b{color:var(--fg);font-weight:700}
+ .ramrow span{color:var(--dim)}
+ .ramrow em{width:8px;height:8px;border-radius:2px;display:inline-block;
    font-style:normal;flex:none}
  .res .dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ok)}
  .res.loading .dot{background:var(--warn);animation:pulse 2s ease-in-out infinite}
@@ -345,6 +349,7 @@
       <section class="panel" id="memory">
         <div class="lab">Memory</div>
         <div class="topo" id="topo"></div>
+        <div id="ramwent"></div>
         <div id="mem" class="ro"></div>
       </section>
       <section class="panel" id="try">
@@ -360,17 +365,17 @@
       </section>
     </main>
     <aside class="right">
-      <section class="panel" id="modelpanel">
-        <div class="lab">Model</div>
-        <div class="loaded">
+      <section class="panel" id="runningpanel">
+        <div class="lab">Running</div>
+        <div class="loaded" id="served">
           <div class="nm" id="title">—</div>
           <div class="msg" id="sub">loading…</div>
           <div id="badges" class="badges"></div>
         </div>
-        <div class="sidelab">loaded on this machine</div>
         <div id="resident"></div>
-        <div id="ramwent"></div>
-        <div class="sidelab">on disk</div>
+      </section>
+      <section class="panel" id="diskpanel">
+        <div class="lab">On disk</div>
         <div id="others"></div>
       </section>
     </aside>
@@ -687,6 +692,8 @@ async function tick(){
   // nothing to send a prompt to -- so it goes rather than sitting there with
   // a button that would fail.
   $('try').style.display=a?'':'none';
+  $('mem').style.display=a?'':'none';
+  $('served').style.display=a?'':'none';
   if(!a){ $('title').textContent='no model loaded';
     $('sub').textContent='';
     $('badges').innerHTML=''; }
@@ -957,15 +964,15 @@ function ramWent(m){
   const inst=m.installed_bytes, by=Object.entries(m.by_runtime||{})
     .sort((a,b)=>b[1]-a[1]);
   const other=m.other_bytes||0, free=Math.max(inst-(m.seen_bytes||0),0);
-  const row=(k,b,c)=>`<div class="ramrow"><span>${
-    c?`<em style="background:${c}"></em>`:'<em></em>'}${k}</span>
-    <span>${gb(b)}</span></div>`;
+  const row=(k,b,c)=>`<div class="ramrow">${
+    c?`<em style="background:${c}"></em>`
+     :'<em style="border:1px solid var(--line)"></em>'}<span>${k}</span>
+    <b>${gb(b)}</b></div>`;
   // No bar. The machines in the topology are already gauges and now fill
   // in these colours, so a second full-width chart of the same split would
   // be the free-space bar's mistake again. This is the key to that picture,
   // and the key carries the numbers.
-  el.innerHTML=`<div class="ram"><div class="sidelab"
-      style="margin-top:14px">where the memory went</div>
+  el.innerHTML=`<div class="ram">
     ${by.map(([k,b])=>row(k,b,RAMCOL[k]||'var(--dim)')).join('')}
     ${row('everything else',other,'var(--faint)')}
     ${row('unused',free,'')}</div>`;
