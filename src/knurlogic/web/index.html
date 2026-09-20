@@ -117,12 +117,13 @@
  .unit .stat{font-size:10.5px;color:var(--faint);margin-top:7px;letter-spacing:.04em}
  .unit .pct{font-size:15px;font-weight:700;color:var(--acc);
    text-shadow:var(--glow)}
- .big{font-size:29px;font-weight:700;letter-spacing:-.01em;margin:4px 0 2px;
-   text-shadow:var(--glow)}
- .big small{font-size:12px;font-weight:400;color:var(--dim);letter-spacing:.06em}
- .bar{height:9px;background:var(--med);display:flex;margin:12px 0 14px;
-   border-radius:2px;overflow:hidden}
- .bar i{display:block;height:100%}
+ /* The free-space bar is gone. It was a third telling of a number the
+    device gauges already draw and then print: a full-width chart that said
+    less than the 66% next to the machine it belongs to, and cost more
+    vertical room than the machines did. What is left is one summary line. */
+ #mem{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;
+   color:var(--dim);padding-top:12px}
+ #mem b{color:var(--fg);font-weight:700}
  /* --- controls ----------------------------------------------------------- */
  .seg{display:inline-flex;border:1px solid var(--line);overflow:hidden;
    border-radius:var(--r);background:var(--bg)}
@@ -214,9 +215,7 @@
       <section class="panel" id="memory">
         <div class="lab">Memory</div>
         <div class="topo" id="topo"></div>
-        <div class="big" id="headline">—</div>
-        <div class="bar" id="bar"></div>
-        <div id="mem"></div>
+        <div id="mem" class="ro"></div>
       </section>
       <section class="panel" id="try">
         <div class="lab">Try it</div>
@@ -508,21 +507,72 @@ async function tick(){
   // The topology, and the device IS the gauge: each unit fills from the
   // bottom with what that box is holding. A picture of a machine next to a
   // separate number is decoration; a picture that IS the number is not.
+  // Three machines, drawn to exo's proportions rather than copied from it:
+  // a lid over a trapezoid base for a laptop, a tall block with the front
+  // slots for a Studio, a thin slab with the round foot for a mini. exo
+  // draws Studio and mini identically -- the only place this deliberately
+  // does more, because on a desk they are not remotely the same object.
+  //
+  // Each fills from the BOTTOM with what that box is holding. A picture of
+  // a machine next to a separate number is decoration; a picture that IS
+  // the number is not. An unknown machine gets a plain box, on purpose:
+  // there is no way to ask a remote node what it is, so it should look
+  // unknown rather than look like a guess.
+  const SHAPE={
+    laptop:(f,c)=>{
+      const sw=62,sh=38,sx=13,bh=5;      // screen 70% / base 30%, as exo
+      return `<rect x="${sx}" y="2" width="${sw}" height="${sh}" rx="2.5"
+          fill="none" stroke="${c}" stroke-width="1.4"/>
+        ${f>0?`<rect x="${sx+2.5}" y="${2+sh-2.5-f*(sh-5)}" width="${sw-5}"
+          height="${f*(sh-5)}" fill="${c}" opacity=".26"/>`:''}
+        <path d="M${sx-8} ${2+sh+bh} L${sx+2} ${2+sh} L${sx+sw-2} ${2+sh}
+          L${sx+sw+8} ${2+sh+bh} Z" fill="none" stroke="${c}"
+          stroke-width="1.4" stroke-linejoin="round"/>
+        <line x1="${sx+22}" y1="${2+sh+bh}" x2="${sx+sw-22}" y2="${2+sh+bh}"
+          stroke="${c}" stroke-width="1.4" opacity=".55"/>`},
+    studio:(f,c)=>{
+      const w=54,h=42,x=17,top=7;        // the tall one, with its face
+      return `<rect x="${x}" y="2" width="${w}" height="${h}" rx="3.5"
+          fill="none" stroke="${c}" stroke-width="1.4"/>
+        ${f>0?`<rect x="${x+1}" y="${2+h-1-f*(h-top-2)}" width="${w-2}"
+          height="${f*(h-top-2)}" fill="${c}" opacity=".26"/>`:''}
+        <line x1="${x}" y1="${2+top}" x2="${x+w}" y2="${2+top}" stroke="${c}"
+          stroke-width="1" opacity=".45"/>
+        <rect x="${x+8}" y="${2+h-13}" width="3" height="7" rx="1" fill="${c}"
+          opacity=".5"/>
+        <rect x="${x+14}" y="${2+h-13}" width="3" height="7" rx="1" fill="${c}"
+          opacity=".5"/>
+        <rect x="${x+w/2-5}" y="${2+h-11}" width="10" height="3" rx="1"
+          fill="${c}" opacity=".5"/>`},
+    mini:(f,c)=>{
+      const w=58,h=21,x=15,y=15;         // the slab, and the round foot
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4"
+          fill="none" stroke="${c}" stroke-width="1.4"/>
+        ${f>0?`<rect x="${x+1}" y="${y+h-1-f*(h-2)}" width="${w-2}"
+          height="${f*(h-2)}" fill="${c}" opacity=".26"/>`:''}
+        <circle cx="${x+8}" cy="${y+h/2}" r="1.6" fill="${c}" opacity=".6"/>
+        <ellipse cx="${x+w/2}" cy="${y+h+3}" rx="${w*.34}" ry="2.4"
+          fill="none" stroke="${c}" stroke-width="1.2" opacity=".55"/>`},
+    "":(f,c)=>{
+      const w=56,h=34,x=16,y=8;
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2"
+          fill="none" stroke="${c}" stroke-width="1.4" stroke-dasharray="4 3"/>
+        ${f>0?`<rect x="${x+1}" y="${y+h-1-f*(h-2)}" width="${w-2}"
+          height="${f*(h-2)}" fill="${c}" opacity=".26"/>`:''}`}};
+  SHAPE.imac=SHAPE.laptop; SHAPE.pro=SHAPE.studio;
+
   function unit(n){
     const nm=n.memory||{}, ws=nm.working_set_bytes||1;
     const pct=Math.max(0,Math.min(100,100*(nm.active_bytes||0)/ws));
     const off=n.reachable===false||!nm.available;
-    const h=46, fill=h*pct/100;
+    const c=off?'var(--line)':'var(--acc)';
+    const kind=(n.machine||{}).kind||'';
+    const draw=SHAPE[kind]||SHAPE[''];
+    const model=(n.machine||{}).model||'';
     return `<div class="unit">
       <div class="nm">${esc(n.node)}</div>
-      <svg width="88" height="64" viewBox="0 0 88 64">
-        <rect x="2" y="2" width="84" height="${h}" fill="none"
-          stroke="${off?'var(--line)':'var(--acc)'}" stroke-width="1.4"/>
-        ${off?'':`<rect x="3" y="${2+h-fill}" width="82" height="${fill}"
-          fill="var(--acc)" opacity=".26"/>`}
-        <rect x="26" y="${h+6}" width="36" height="7" fill="none"
-          stroke="${off?'var(--line)':'var(--acc)'}" stroke-width="1.4"/>
-      </svg>
+      <svg width="88" height="56" viewBox="0 0 88 56"${
+        model?` aria-label="${esc(model)}"`:''}>${draw(off?0:pct/100,c)}</svg>
       <div class="stat"><span class="pct">${off?'--':pct.toFixed(0)+'%'}</span>
         ${off?'no answer':gb(nm.active_bytes||0)+' / '+gb(ws)}</div>
     </div>`;
@@ -532,18 +582,28 @@ async function tick(){
   // The link between nodes animates along its length. That is the only
   // motion on the page that carries information -- it says the link is
   // live -- so it is also the only one, and it stops under reduced-motion.
-  $('topo').innerHTML=(d.nodes||[]).map(unit).join(
-    '<svg class="flow" viewBox="0 0 56 20" aria-hidden="true">'+
-    '<line x1="2" y1="10" x2="54" y2="10"/></svg>');
+  //
+  // It is drawn for TWO nodes and no more. Chaining it between three or
+  // four would draw a line, and a line is not the shape of the cluster --
+  // the nodes are not wired in series. With two, a connector is the truth;
+  // past two it is a picture of a topology that does not exist, and it also
+  // dangles off the end of every row that wraps.
+  const ns_=d.nodes||[];
+  $('topo').innerHTML=ns_.map(unit).join(ns_.length===2
+    ? '<svg class="flow" viewBox="0 0 56 20" aria-hidden="true">'+
+      '<line x1="2" y1="10" x2="54" y2="10"/></svg>'
+    : '');
+  // One line under the machines. The gauges carry the split; this carries
+  // the totals, and only the figures that are not already drawn above.
   if(m&&m.available){
-    const ws=m.working_set_bytes||1, box=m.scope==='box';
-    $('headline').innerHTML=`${gb(m.headroom_bytes)} <small>free of ${gb(ws)}</small>`;
-    $('bar').innerHTML=`<i style="width:${100*m.active_bytes/ws}%;background:var(--acc)"></i>`+
-      `<i style="width:${100*m.cache_bytes/ws}%;background:var(--warn)"></i>`;
-    $('mem').innerHTML=row(box?'in use on the box':'weights + live',gb(m.active_bytes))+
-      row('cache · reclaimable',gb(m.cache_bytes))+
-      (C&&C.nodes_total>1?row('nodes answering',`${C.nodes_reachable}/${C.nodes_total}`)
-        :Number.isFinite(m.peak_bytes)?row('peak this run',gb(m.peak_bytes)):'');
+    const box=m.scope==='box', bit=(k,v)=>`<span>${k} <b>${v}</b></span>`;
+    $('mem').innerHTML=
+      bit(box?'in use':'weights + live', gb(m.active_bytes))+
+      bit('cache', gb(m.cache_bytes))+
+      bit('free', gb(m.headroom_bytes))+
+      (C&&C.nodes_total>1
+        ? bit('nodes', `${C.nodes_reachable}/${C.nodes_total}`)
+        : Number.isFinite(m.peak_bytes) ? bit('peak', gb(m.peak_bytes)) : '');
   }
   const w=d.wired;
   if(w&&w.action==='raise'&&w.command)

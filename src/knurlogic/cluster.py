@@ -39,7 +39,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import override, status, web
+from . import override, status, web, wired
 from .artifact import Artifact
 from .resolve import Node, resolve_cluster
 
@@ -74,6 +74,7 @@ class ExoNode:
     name: str
     ram_total: int
     ram_available: int
+    model_id: str = ""
 
 
 def inventory(exo_url: str) -> list:
@@ -96,6 +97,7 @@ def inventory(exo_url: str) -> list:
             or node_id[:12],
             ram_total=_bytes(_pick(m, "ramTotal", "ram_total")),
             ram_available=_bytes(_pick(m, "ramAvailable", "ram_available")),
+            model_id=who.get("modelId") or who.get("model_id") or "",
         ))
     return out
 
@@ -117,6 +119,10 @@ def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
     ws = declared_ws or n.ram_total
     device = ("declared with --node" if declared_ws else
               "reported by exo (system RAM, not the Metal working set)")
+    # The LOCAL node can be asked directly; every other node gets the guess
+    # made from what it reported. Handing them all wired.machine() would
+    # label the whole cluster with this box.
+    is_local = n.name == local_name
     return status.snapshot(
         # The artifact is the same on every node -- which node we happen to
         # be launched next to is not what decides whether the page can say
@@ -124,7 +130,9 @@ def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
         artifact=artifact,
         env=env or None,
         node=n.name,
-        role="local" if n.name == local_name else "remote",
+        role="local" if is_local else "remote",
+        machine_fn=(None if is_local
+                    else lambda: wired.kind_from(n.name, n.model_id)),
         memory_fn=lambda: {
             "available": ws > 0,
             "device": device,

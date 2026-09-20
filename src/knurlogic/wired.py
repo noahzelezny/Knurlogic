@@ -174,3 +174,109 @@ def detected_working_set_bytes() -> int:
         return int(memory().get("working_set_bytes") or 0)
     except Exception:
         return 0
+
+
+#: Cached: a machine does not change model while the process runs, and the
+#: lookup costs a subprocess.
+_MACHINE = None
+
+
+def _kind_from_identifier(model_id: str) -> str:
+    """Last-resort guess from `hw.model`.
+
+    It is a GUESS and only that. The old identifiers said the product in
+    their name (`MacBookPro18,3`, `Macmini9,1`), but Apple dropped the
+    product prefix: `Mac15,14` is a Mac Studio, `Mac16,7` a MacBook Pro, and
+    nothing in either string says so. Anything without the old prefix reads
+    as unknown rather than as a coin flip dressed up as a fact.
+    """
+    m = model_id.lower()
+    if m.startswith(("macbookpro", "macbookair", "macbook")):
+        return "laptop"
+    if m.startswith("macmini"):
+        return "mini"
+    if m.startswith("macpro"):
+        return "pro"
+    if m.startswith("imac"):
+        return "imac"
+    return ""
+
+
+def machine() -> dict:
+    """What this box IS: {kind, model, model_id}.
+
+    `system_profiler SPHardwareDataType` is the channel that actually knows
+    -- it prints "Model Name: Mac Studio" -- and it answers in about 0.13s,
+    once per process. Deriving the product from `hw.model` cannot work on
+    current hardware (this box is `Mac15,14` and is a Studio), so the
+    identifier is a fallback for when the lookup fails, not the primary.
+    """
+    global _MACHINE
+    if _MACHINE is not None:
+        return _MACHINE
+    model_id = ""
+    try:
+        model_id = subprocess.run(["sysctl", "-n", "hw.model"],
+                                  capture_output=True, text=True,
+                                  timeout=2).stdout.strip()
+    except Exception:
+        pass
+    name = ""
+    try:
+        out = subprocess.run(["system_profiler", "SPHardwareDataType"],
+                             capture_output=True, text=True, timeout=8).stdout
+        for line in out.splitlines():
+            if line.strip().startswith("Model Name:"):
+                name = line.split(":", 1)[1].strip()
+                break
+    except Exception:
+        pass
+    low = name.lower()
+    if "studio" in low:
+        kind = "studio"
+    elif "mini" in low:
+        kind = "mini"
+    elif "macbook" in low:
+        kind = "laptop"
+    elif "imac" in low:
+        kind = "imac"
+    elif "mac pro" in low:
+        kind = "pro"
+    else:
+        kind = _kind_from_identifier(model_id)
+    _MACHINE = {"kind": kind, "model": name, "model_id": model_id}
+    return _MACHINE
+
+
+def kind_from(name: str = "", model_id: str = "") -> dict:
+    """Best honest guess at ANOTHER node's kind, from what it told us.
+
+    A remote node cannot be asked -- `system_profiler` answers for THIS box,
+    and labelling every node in a cluster with the local machine is the same
+    bug as running a version check with bare `python3` inside a loop over
+    envs: every iteration answers for the wrong thing.
+
+    So two weak channels, in order, and neither pretends to be strong:
+
+      1. the friendly name, because macOS seeds it from the product and
+         people leave it ("Studio A", "Laptop B");
+      2. the model identifier, which only says the product on pre-2022
+         hardware -- see `_kind_from_identifier`.
+
+    Nothing matching leaves `kind` empty, and the page draws a plain box.
+    That is the correct outcome: an unknown machine should look unknown.
+    """
+    low = (name or "").lower()
+    if "studio" in low:
+        kind = "studio"
+    elif "mini" in low:
+        kind = "mini"
+    elif "imac" in low:
+        kind = "imac"
+    elif "mac pro" in low or "macpro" in low:
+        kind = "pro"
+    elif "book" in low:        # MacBook, and the -book names people give them
+        kind = "laptop"
+    else:
+        kind = _kind_from_identifier(model_id or "")
+    return {"kind": kind, "model": "", "model_id": model_id or ""}
