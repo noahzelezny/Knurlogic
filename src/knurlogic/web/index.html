@@ -24,10 +24,15 @@
    --ok:oklch(.5 .14 150);--warn:oklch(.55 .13 70);
    --acc:oklch(.55 .11 185);--accfg:oklch(1 0 0);--glow:none}}
  *{box-sizing:border-box}
+ /* This is a control surface on a desk, often on a large display, and it
+    was capped at 1320px of 13px type -- which on a big screen is a small
+    page in a wide black frame. The type scales with the viewport and the
+    layout uses the width it is given. Nothing here is a phone concern; a
+    16" and a 27" are both ordinary. */
  body{margin:0;min-width:940px;background:var(--bg);color:var(--fg);
    letter-spacing:.02em;
-   font:13px/1.6 'SF Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,
-     'DejaVu Sans Mono',monospace;
+   font:clamp(13px, 0.95vw, 18px)/1.6 'SF Mono','Fira Code',ui-monospace,
+     SFMono-Regular,Menlo,'DejaVu Sans Mono',monospace;
    background-image:linear-gradient(var(--grid) 1px,transparent 1px),
      linear-gradient(90deg,var(--grid) 1px,transparent 1px);
    background-size:40px 40px;background-attachment:fixed}
@@ -71,7 +76,7 @@
  nav{display:flex;gap:20px;font-size:11px;letter-spacing:.16em;
    text-transform:uppercase;color:var(--dim)}
  nav a:hover{color:var(--acc)}
- .wrap{max-width:1320px;margin:0 auto;padding:22px 24px 60px}
+ .wrap{max-width:2000px;margin:0 auto;padding:22px 28px 60px}
  /* Chat memory on the left, the way exo keeps it. */
  /* Two layouts, both of them desktop: three columns, and the same three
     with the model rail dropped underneath for a window shoved to half a
@@ -82,9 +87,9 @@
     under. Three columns need 190 + 400 + 280 + gaps + padding = 990, so
     that is where it drops, and the middle column is allowed to squeeze
     rather than the rail being thrown to the bottom. */
- .app{display:grid;grid-template-columns:190px minmax(400px,1fr) 280px;
-   gap:22px;align-items:start}
- @media(max-width:1010px){.app{grid-template-columns:190px minmax(0,1fr)}
+ .app{display:grid;grid-template-columns:15em minmax(26em,1fr) 21em;
+   gap:1.7em;align-items:start}
+ @media(max-width:1010px){.app{grid-template-columns:15em minmax(0,1fr)}
    .right{grid-column:1/-1;order:3}
    .right .panel{max-width:none}}
  .right{min-width:0}
@@ -212,6 +217,7 @@
  @keyframes flow{from{stroke-dashoffset:0}to{stroke-dashoffset:-16}}
 
  .unit{text-align:center;padding:0 10px}
+ .unit svg{width:clamp(88px,9vw,150px);height:auto}
  .unit .nm{font-size:11.5px;letter-spacing:.08em;margin-bottom:8px;color:var(--dim)}
  .unit .stat{font-size:10.5px;color:var(--faint);margin-top:7px;letter-spacing:.04em}
  .unit .pct{font-size:15px;font-weight:700;color:var(--acc);
@@ -291,7 +297,7 @@
  .met .d{font-style:normal;margin-left:6px;font-weight:700}
  .met .d.up{color:var(--ok)} .met .d.down{color:var(--warn)}
  .met .d.flat{color:var(--faint)}
- #log{height:230px}
+ #log{height:clamp(230px,26vh,420px)}
  .bench{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px}
  .chk{display:flex;align-items:center;gap:7px;cursor:pointer;color:var(--dim);
    font-size:11px;letter-spacing:.06em;text-transform:uppercase}
