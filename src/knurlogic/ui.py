@@ -51,7 +51,8 @@ def _status_fn(_n=0):
     return snap, status.render_cluster(snap)
 
 
-def _spawn(path: str, port: int, tune: str = "balanced") -> dict:
+def _spawn(path: str, port: int, tune: str = "balanced",
+           sets: dict | None = None) -> dict:
     """Start `knurlogic serve` for one artifact, on its own port.
 
     Deliberately a child process rather than an in-process load: the
@@ -68,6 +69,11 @@ def _spawn(path: str, port: int, tune: str = "balanced") -> dict:
         return {"error": f"port {port} is already serving {live[1]}"}
     cmd = [sys.executable, "-m", "knurlogic.cli", "serve", path,
            "--port", str(port), "--tune", tune]
+    # Settings chosen at LAUNCH, which for most of these is the only moment
+    # they can be chosen: they are read at import and compiled into kernel
+    # source, so a running server cannot be told about them.
+    for k, v in sorted((sets or {}).items()):
+        cmd += ["--set", f"{k}={v}"]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.STDOUT)
@@ -103,7 +109,8 @@ def _load_fn(serve_port: int):
         try:
             if act == "load":
                 return _spawn(target, int(req.get("port") or serve_port),
-                              req.get("tune") or "balanced")
+                              req.get("tune") or "balanced",
+                              req.get("sets") or {})
             if act == "unload":
                 # Ours to stop only if we started it. Anything else is
                 # somebody's server and not this page's to kill.
