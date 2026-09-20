@@ -50,50 +50,85 @@ in somebody else's package without forking it.
 
 This is the headline and everything else is secondary.
 
-**The finding.** Three facts, each read rather than assumed:
+### What was measured 2026-09-20, which corrected the premise
 
-1. mlx-lm's batching gate is about a SEPARATE draft model, not an MTP head:
-   `is_batchable = draft_model is None and all(hasattr(c, "merge") for c in
-   make_prompt_cache(model))`. An MTP head lives inside the model, loads no
-   `draft_model`, and never trips that condition.
-2. **The architecture deletes the head.** `qwen4_exp.sanitize()`:
+All 54 artifacts, two independent channels -- config.json for the
+declaration, the safetensors HEADERS for the tensors, neither reading the
+other:
 
-       # Multi-token-prediction head and vision tower: not implemented by
-       # this text-only port, and absent from the module tree -> drop them.
-       if k.startswith(("mtp.", "model.mtp.")): continue
+    declares mtp in config .................... 40
+    ships upstream `mtp.*` graft weights ....... 1   (the 806 GB bf16 397B)
+    ships a BUILT head beside the weights ..... 11   (mtp-head-q6.safetensors)
+    declares one and has NOTHING ............... 31
 
-   It is in the checkpoint and is discarded at load. Nothing warns.
-3. **40 of the 54 artifacts on this machine declare one** -- 3925 GiB of
-   weights, downloaded, silently not run on this path.
+40 = 31 + 8 declaring rungs that have a built head + the 1 graftable one. The
+other 3 built heads sit beside GLM rungs whose config never declared one, so
+the declaration does not even reliably signal the head's ABSENCE.
 
-**It is a PORT, not an implementation.** MTP is not an exo default; it is
-the maintainer's work and it already exists in that checkout, 3091 lines under
-`exo/worker/engines/mlx/`:
+**The earlier reading was wrong.** "40 artifacts, 3925 GiB of downloaded MTP
+weights that `sanitize()` throws away" does not survive contact with the
+disk. The weights were never downloaded: MLX conversion drops `mtp.*` at
+CONVERSION while keeping the upstream config that declares one. `sanitize()`
+discarding those keys fires on exactly ONE artifact here. So the first step
+recorded in the last version of this file -- make `sanitize()` keep the head
+-- would have been real work for one rung out of fifty-four.
 
-    mtp/registry.py        204   per-family spec: head, capture point,
-                                 draft cache, cache semantics
-    mtp/speculative.py     393   the drafting head
-    mtp/loop.py            550   sequential decode loop
-    mtp/batch_loop.py      648   THE BATCHED ONE -- already solved
-    generator/mtp_batch_generate.py  451
-    mtp/{caches,sampling,seed,capture,pipeline,glm5_shim}.py
+Two process notes worth keeping, because both nearly went the other way:
 
-And `registry.py` records why it is portable:
+* The first pass read `model.safetensors.index.json` and found **zero** heads.
+  The sidecar is named to stay OUTSIDE the `model*.safetensors` glob ON
+  PURPOSE, so a loader never picks it up and the head costs nothing until
+  asked for -- and an index-only scan is blind to all eleven. Read the files.
+* Family is taken from the module tree, not the metadata label. The qwen4_exp
+  packs predate the `family` field entirely. Three families, three distinct
+  trees: `mixer` (qwen4_exp), `norm_out` (qwen3_5), `eh_proj` (glm5_next).
+
+### What that changes
+
+MTP is not "stop discarding what you already have". **The head is a separate
+artifact**: grafted once from the one checkpoint that carries it, quantized,
+and written beside each rung. Eleven rungs on this disk already have that
+sidecar built and sitting unread -- 2.14 GiB (qwen4_exp), 5.41 (qwen3_5),
+6.09 (glm5_next), all 6-bit.
+
+`knurlogic mtp` reports the three states and `models` flags `[MTP]`. Nothing
+loads a head yet.
+
+### The port
+
+It is a PORT, not an implementation. MTP is not an exo default; it is the maintainer's
+work, 3091 lines under `exo/src/exo/worker/engines/mlx/mtp/`, and the
+coupling was measured file by file -- exo imports per file:
+
+    registry, caches, capture, sampling, seed, loop, heads/*  ....... 0
+    batch_loop (648 lines, the batched one) ......................... 1
+    pipeline ........................................................ 1
+    generator/mtp_batch_generate.py (451) .......................... 15
+
+The family-agnostic core is already free of exo. Only the outermost generator
+is genuinely exo-shaped, and that is the layer knurlogic replaces anyway.
+`registry.py` says why it was built portable:
 
     There is no public mlx-lm hook for this, so we wrap that one module for
     the duration of the generation (see capture.py) rather than
     monkeypatching the class.
 
-It was built to work WITH stock mlx-lm.
+The sidecar BUILDER is the other half and lives in vqlab, not exo:
+`mtp_graft.py` / `mtp_pack.py`. It reads `mtp.*` off the safetensors directly
+and never goes through `sanitize()` -- which is the other reason the
+sanitize-first plan was aimed at the wrong thing.
 
-**First step, smaller than it sounds.** Do not start with drafting or
-batching. Make `sanitize()` keep the head instead of dropping it, expose it
-as a module, and prove with a probe that it produces logits that DIFFER from
-the main head. One arm, one channel, no speed claim. Everything above that
-layer already exists and is measured.
+**First step.** Load one of the eleven heads and prove it produces logits
+that DIFFER from the main head on the same position. One arm, one channel, no
+speed claim. Everything above that layer already exists and is measured.
 
-This is also the first override with a reason behind it:
-`mlx_lm.models.qwen4_exp` is a module like any other.
+Batching: mlx-lm's gate is `is_batchable = draft_model is None and all(hasattr
+(c, "merge") for c in make_prompt_cache(model))`. An MTP head lives INSIDE the
+model, loads no `draft_model`, and never trips it. Unverified against a loaded
+VQ artifact.
+
+A head is 2-6 GiB of working set that `resolve()` does not currently count.
+When a loop can load one, that has to reach the memory math.
 
 ## Measured, so it is not re-litigated
 
@@ -302,6 +337,11 @@ stylesheet; the provenance is the feature.
 * **Speed claims**: n>=3 per arm, alternating, one process per arm, quote the
   RATIO never an absolute, and refuse to quote when within-arm spread exceeds
   the between-arm difference.
+* **An index is a summary, not the disk.** The MTP survey read
+  `model.safetensors.index.json` and reported zero heads; eleven were sitting
+  right there, deliberately kept out of the index so no loader picks them up.
+  When a thing is designed to be invisible to the normal path, the normal
+  path is the wrong instrument.
 * **Tests must not depend on the developer's disk.** The discovery tests
   scanned the real machine and one asserted against 54 actual models until
   `include_defaults=False` existed.
