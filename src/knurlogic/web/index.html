@@ -158,9 +158,14 @@
  .modal{position:fixed;inset:0;z-index:50;background:oklch(0 0 0/.6);
    display:flex;align-items:center;justify-content:center;padding:40px 24px}
  .modal[hidden]{display:none}
- .modal .box{width:min(980px,100%);max-height:84vh;display:flex;
+ /* A FIXED frame. With max-height the box sized to its contents, so
+    picking a family with one model in it collapsed the whole dialog and
+    filtering felt like the window was fighting you. The frame stays put and
+    the list scrolls inside it. */
+ .modal .box{width:min(980px,100%);height:min(720px,82vh);display:flex;
    flex-direction:column;border:1px solid var(--line);border-radius:var(--r);
-   background:var(--panel);box-shadow:0 20px 60px oklch(0 0 0/.6)}
+   background:var(--panel);box-shadow:0 20px 60px oklch(0 0 0/.6);
+   overflow:hidden}
  .pickhd{display:flex;align-items:center;gap:14px;padding:12px 14px;
    border-bottom:1px solid var(--line)}
  .pickhd input{flex:1;background:transparent;border:0;font-size:13px}
@@ -168,6 +173,7 @@
  #pbudget{color:var(--faint);white-space:nowrap}
  #pbudget b{color:var(--acc)}
  .pickbody{display:grid;grid-template-columns:132px 1fr;min-height:0;flex:1}
+ .pickhd{flex:none}
  .fams{border-right:1px solid var(--line);overflow:auto;padding:6px 0}
  .fam{padding:8px 12px;cursor:pointer;font-size:11px;letter-spacing:.06em;
    text-transform:uppercase;color:var(--dim);border-left:2px solid transparent}
@@ -175,7 +181,8 @@
  .fam[aria-current=true]{color:var(--acc);border-left-color:var(--acc);
    background:color-mix(in srgb,var(--acc) 7%,transparent)}
  .fam i{font-style:normal;color:var(--faint);float:right}
- .rows{overflow:auto}
+ .rows{overflow-y:scroll}   /* always, so the rows do not shift when a
+                               filter makes the list short enough to fit */
  .sect{padding:8px 14px;font-size:10px;letter-spacing:.1em;
    text-transform:uppercase;color:var(--ok);
    background:color-mix(in srgb,var(--ok) 8%,transparent);
