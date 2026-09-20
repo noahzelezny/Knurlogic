@@ -1032,11 +1032,13 @@ async function tick(){
   const maps=ns_.map(n=>n.memory_map).filter(Boolean);
   if(maps.length){
     const merged={installed_bytes:0, seen_bytes:0, other_bytes:0,
-                  by_runtime:{}, nodes:maps.length};
+                  free_bytes:0, used_bytes:0, by_runtime:{}, nodes:maps.length};
     for(const m of maps){
       merged.installed_bytes+=m.installed_bytes||0;
       merged.seen_bytes+=m.seen_bytes||0;
       merged.other_bytes+=m.other_bytes||0;
+      merged.free_bytes+=m.free_bytes||0;
+      merged.used_bytes+=m.used_bytes||0;
       for(const [k,v] of Object.entries(m.by_runtime||{}))
         merged.by_runtime[k]=(merged.by_runtime[k]||0)+v;
     }
