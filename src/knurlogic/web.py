@@ -51,8 +51,48 @@ def raw(fn):
     return fn
 
 
+_MODELS: dict = {"at": 0.0, "rows": None}
+
+
+def models_document(serving: str = "", ttl: float = 60.0):
+    """`/models.json` -- what else is on this machine, and what is loaded.
+
+    Cached for `ttl` seconds: a scan walks every store on every volume and
+    takes about 1.4s here, which is fine once and not fine behind a status
+    poll. The TTL rather than a permanent cache because models arrive while
+    the server is up -- a download finishing should show up without a
+    restart.
+
+    Switching is NOT offered. A loaded model is loaded; what this can
+    honestly hand over is the command that would serve another one.
+    """
+    def handler(_q: dict) -> dict:
+        import time
+
+        from . import discover
+        now = time.time()
+        if _MODELS["rows"] is None or now - _MODELS["at"] > ttl:
+            try:
+                _MODELS["rows"] = discover.find()
+            except Exception:
+                _MODELS["rows"] = []
+            _MODELS["at"] = now
+        out = []
+        for f in _MODELS["rows"]:
+            out.append({
+                "name": f.name, "path": str(f.path), "store": f.store,
+                "size_bytes": f.bytes_on_disk, "model_type": f.model_type,
+                "is_vq": f.is_vq, "servable": f.servable, "why": f.why,
+                "mtp": bool(f.extra.get("mtp_head")),
+                "serving": bool(serving) and (f.name == serving
+                                              or str(f.path) == serving),
+            })
+        return {"models": out, "serving": serving}
+    return handler
+
+
 def routes(status_fn=None, settings_fn=None, apply_fn=None,
-           messages_fn=None) -> dict:
+           messages_fn=None, models_fn=None) -> dict:
     """path -> handler(query: dict) -> (body, content_type).
 
     `status_fn(requests)` returns (snapshot, text). `settings_fn(query)`
@@ -78,6 +118,10 @@ def routes(status_fn=None, settings_fn=None, apply_fn=None,
         def _settings(q, _n=0):
             return _json(settings_fn(q))
         r["/settings.json"] = _settings
+    if models_fn is not None:
+        def _models(q, _n=0):
+            return _json(models_fn(q))
+        r["/models.json"] = _models
     if messages_fn is not None:
         r["POST /v1/messages"] = raw(messages_fn)
     if apply_fn is not None:
