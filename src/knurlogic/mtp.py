@@ -7,7 +7,11 @@ safetensors HEADERS for the tensors, neither reading the other):
     declares mtp in config .................... 40
     ships upstream `mtp.*` graft weights ....... 1   (the 806 GB bf16 397B)
     ships a BUILT head beside the weights ..... 11   (mtp-head-q6.safetensors)
-    declares one and has neither ............... 39
+    declares one and has NOTHING ............... 31
+
+(40 = 31 + 8 declaring rungs with a built head + the 1 graftable one. The
+other 3 built heads sit beside GLM rungs whose config never declared one, so
+the declaration was not even a reliable signal of the head's absence.)
 
 So the previous reading of this -- "40 artifacts, 3925 GiB of downloaded MTP
 weights that mlx-lm's `sanitize()` throws away" -- was wrong, and wrong in the
@@ -188,8 +192,10 @@ class Status:
                     "artifact ships\n           NO head weights -- not "
                     "discarded at load, absent from the download.\n           "
                     "MLX conversion drops them while keeping the config that "
-                    "declares them.\n           39 of the 40 declaring "
-                    "artifacts on this machine are in this state.")
+                    "declares them.\n           31 of the 40 declaring "
+                    "artifacts here are in this state; of the rest, 8 have"
+                    "\n           a head BUILT beside them and 1 carries "
+                    "the raw weights.")
         return ""
 
 
@@ -204,3 +210,73 @@ def status(artifact) -> Status:
     if artifact.has_mtp:
         return Status(DECLARED)
     return Status(NONE)
+
+
+def survey(rows) -> str:
+    """The three states across a set of discovered models.
+
+    A per-artifact answer is what `doctor` gives. This one exists because the
+    useful question is comparative: an artifact that declares a head reads as
+    broken alone, and as completely ordinary next to the 38 others that do
+    the same thing.
+    """
+    from .artifact import Artifact
+
+    groups: dict = {BUILT: [], GRAFTABLE: [], DECLARED: []}
+    for f in rows:
+        if not f.servable:
+            continue
+        try:
+            st = status(Artifact.load(str(f.path)))
+        except Exception:
+            continue
+        if st.state in groups:
+            groups[st.state].append((f, st))
+
+    L = []
+    built = groups[BUILT]
+    if built:
+        L.append(f"{len(built)} artifacts have a BUILT drafting head beside "
+                 f"the weights:")
+        for f, st in built:
+            L.append(f"  {f.name[:44]:<46}{st.head.gib:>6.2f} GiB  "
+                     f"{st.head.family or '?'}  {st.head.bits or '?'}-bit")
+        L.append("")
+    if groups[GRAFTABLE]:
+        L.append(f"{len(groups[GRAFTABLE])} carry raw `mtp.*` weights a head "
+                 f"can be built FROM:")
+        for f, st in groups[GRAFTABLE]:
+            L.append(f"  {f.name[:44]:<46}{st.graft_tensors:>6d} tensors")
+        L.append("")
+    n = len(groups[DECLARED])
+    if n:
+        L.append(f"{n} declare a head in config.json and ship no head weights "
+                 f"at all.")
+        L.append("  Not discarded at load -- absent from the download. MLX "
+                 "conversion drops")
+        L.append("  `mtp.*` while keeping the config that declares them. "
+                 "Nothing is wrong with")
+        L.append("  these artifacts; there is simply no head to run.")
+    return "\n".join(L) or "no artifact here declares or ships an MTP head."
+
+
+def main(argv=None) -> int:
+    import argparse
+
+    from . import discover
+
+    p = argparse.ArgumentParser(
+        prog="knurlogic mtp",
+        description="which artifacts have a multi-token-prediction head, "
+                    "which could have one, and which only say they do")
+    p.add_argument("artifact", nargs="?",
+                   help="one artifact; omit to survey every model found")
+    a = p.parse_args(argv)
+
+    if a.artifact:
+        from .artifact import Artifact
+        st = status(Artifact.load(a.artifact))
+        print(st.render() or "no MTP head, and none declared.")
+        return 0
+    print(survey(discover.find()))
+    return 0
