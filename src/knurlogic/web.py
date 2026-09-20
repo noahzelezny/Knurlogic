@@ -190,8 +190,27 @@ def machine_settings():
     knurlogic never runs it. It reads the current value, works out the
     ceiling, and hands over the exact line.
     """
+    def _one(q, key):
+        v = q.get(key)
+        if isinstance(v, list):
+            v = v[0] if v else None
+        return v
+
     def handler(q: dict) -> dict:
         from . import wired
+
+        # A PREVIEW for an artifact nobody has loaded. This is the point of
+        # showing settings before a launch rather than after: nearly every
+        # knob is read at import and compiled into kernel source, so once a
+        # model is up they are facts, not settings. The only moment they can
+        # be chosen is the moment being prepared here.
+        art = _one(q, "artifact")
+        if art:
+            try:
+                return _preview(art, _one(q, "tune") or "balanced",
+                                _one(q, "working_set_gib"))
+            except Exception as e:
+                return {"knobs": [], "error": f"{type(e).__name__}: {e}"}
 
         want = q.get("wired_gib")
         if isinstance(want, list):
@@ -228,6 +247,46 @@ def machine_settings():
                     f"macOS and everything else on the machine")
         return doc
     return handler
+
+
+def _preview(path: str, tune: str, working_set_gib=None) -> dict:
+    """What this artifact WOULD resolve to, and which of those can still be
+    chosen. Nothing is loaded and nothing is set: this only reads."""
+    from . import engine, settings as S, wired
+    from .artifact import Artifact
+    from .resolve import resolve
+
+    a = Artifact.load(path)
+    try:
+        ws = int(float(working_set_gib) * GIB) if working_set_gib else 0
+    except (TypeError, ValueError):
+        ws = 0
+    ws = ws or wired.detected_working_set_bytes() or 0
+    r = resolve(a, ws, tune=tune)
+
+    knobs = []
+    for name, value in sorted(r.env.items()):
+        # KNOB_DOC and friends are keyed by the EMITTED name, which is what
+        # the resolver puts in `env`. (`default_alias` goes the other way --
+        # logical to emitted -- and calling it here threw a KeyError on the
+        # first artifact tried.)
+        what, why = S.KNOB_DOC.get(name, ("", ""))
+        reach, reach_why = knob_reach(a, name, engine.LIVE_KNOBS)
+        vals = S.KNOB_RANGE.get(name)
+        knobs.append({
+            "name": name, "value": str(value), "reach": reach,
+            "reach_why": reach_why, "what": what, "why": why,
+            "tier": S.knob_tier(name),
+            "values": vals[0] if isinstance(vals, tuple) else vals,
+        })
+    return {
+        "artifact": {"name": a.path.name, "path": str(a.path),
+                     "model_type": a.model_type, "gib": round(a.gib, 1)},
+        "tune": tune, "working_set_gib": round(ws / GIB, 1),
+        "knobs": knobs, "notes": r.notes, "warnings": r.warnings,
+        "wired": wired.advise(a.bytes_on_disk),
+        "preview": True,
+    }
 
 
 def routes(status_fn=None, settings_fn=None, apply_fn=None,

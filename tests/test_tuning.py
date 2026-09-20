@@ -344,3 +344,67 @@ def test_an_unknown_architecture_says_unknown_not_no():
     """'Could not find the module' is not 'it discards them'."""
     from knurlogic import engine
     assert engine.keeps_mtp_weights("not_a_real_model_type") is None
+
+
+# --- settings that can only be chosen before the model loads -----------------
+
+def test_an_explicit_set_beats_the_resolver(monkeypatch, tmp_path):
+    """Most of these knobs are read at import and compiled into kernel
+    source, so launch is the only moment they can be chosen at all. "The
+    resolver decides and you may not" is the wrong default for the one place
+    where choosing is possible."""
+    from knurlogic import serve
+
+    assert serve._parse_sets(["A=1", "B = two"]) == {"A": "1", "B": "two"}
+
+
+def test_a_set_without_a_value_is_refused():
+    import pytest
+
+    from knurlogic import serve
+    with pytest.raises(SystemExit, match="KEY=VALUE"):
+        serve._parse_sets(["JUST_A_NAME"])
+
+
+def test_preview_reads_and_sets_nothing(tmp_path, monkeypatch):
+    """The launch form asks what an artifact WOULD resolve to. Nothing is
+    loaded and nothing is applied -- a preview that edited the environment
+    would change the process asking the question."""
+    import json
+    import os
+
+    from knurlogic import web
+
+    d = tmp_path / "m"
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps({
+        "model_type": "qwen3_5", "hidden_size": 2048,
+        "moe_intermediate_size": 768}))
+    (d / "model.safetensors").write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")
+
+    before = dict(os.environ)
+    doc = web._preview(str(d), "balanced", 84)
+    assert doc["preview"] is True
+    assert doc["artifact"]["name"] == "m"
+    assert {k["name"] for k in doc["knobs"]}          # it resolved something
+    assert dict(os.environ) == before                 # and changed nothing
+
+
+def test_preview_says_which_knobs_are_launch_only(tmp_path):
+    """The point of showing settings BEFORE a launch: the ones marked
+    `restart` cannot be changed afterwards at all."""
+    import json
+
+    from knurlogic import web
+
+    d = tmp_path / "m"
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps({
+        "model_type": "qwen4_exp", "hidden_size": 2048,
+        "moe_intermediate_size": 768,
+        "vq_modules": {"a": {"d": 2, "K": 256}}}))
+    (d / "model.safetensors").write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")
+    doc = web._preview(str(d), "balanced", 84)
+    reach = {k["name"]: k["reach"] for k in doc["knobs"]}
+    assert any(v == "restart" for v in reach.values())
+    assert all(k["reach_why"] for k in doc["knobs"])

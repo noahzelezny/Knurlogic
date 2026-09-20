@@ -39,7 +39,8 @@ GIB = 1 << 30
 
 
 def run(path: str, host: str, port: int, working_set_gib: float,
-        profile: str, passthrough: list, tune: str = "balanced") -> int:
+        profile: str, passthrough: list, tune: str = "balanced",
+        overrides: dict | None = None) -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
@@ -70,9 +71,22 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if adv.get("action") == "raise":
         print("\n" + wired.render(adv) + "\n")
     r = resolve(a, ws, profile=profile, tune=tune)
+    # An explicit --set WINS over the resolver. Most of these knobs are read
+    # at import and compiled into kernel source, so startup is the only
+    # moment they can be chosen at all -- which makes "the resolver decides
+    # and you may not" the wrong default for the one place it is possible.
+    # Reported as overridden rather than applied quietly.
+    forced = dict(overrides or {})
     for k, v in sorted(r.env.items()):
+        if k in forced:
+            continue
         os.environ[k] = v
         print(f"  {k}={v}")
+    for k, v in sorted(forced.items()):
+        was = r.env.get(k)
+        os.environ[k] = v
+        print(f"  {k}={v}   (overridden"
+              + (f", resolver said {was}" if was is not None else "") + ")")
     for n in r.notes:
         print(f"  note: {n}")
     for w in r.warnings:
@@ -182,6 +196,16 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                         extra=passthrough, routes=routes)
 
 
+def _parse_sets(pairs) -> dict:
+    out = {}
+    for item in pairs or []:
+        k, sep, v = item.partition("=")
+        if not sep or not k.strip():
+            raise SystemExit(f"--set wants KEY=VALUE, got {item!r}")
+        out[k.strip()] = v.strip()
+    return out
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="knurlogic serve",
                                description=__doc__.split("\n")[0])
@@ -192,6 +216,10 @@ def main(argv=None) -> int:
                    help="usable GPU working set; 0 asks the framework what "
                         "it may use")
     p.add_argument("--profile", default="v1.5", choices=("v1.5", "v2"))
+    p.add_argument("--set", action="append", metavar="KEY=VALUE", dest="sets",
+                   help="force a setting, beating the resolver. Repeatable. "
+                        "Most knobs are read at import, so this is the only "
+                        "moment they can be chosen.")
     p.add_argument("--tune", default="balanced",
                    choices=("safe", "balanced", "fast"),
                    help="safe = lowest peak memory; fast = spend headroom "
@@ -221,7 +249,7 @@ def main(argv=None) -> int:
                            a.node, a.launch, shlex.split(a.exo_cmd), a.local,
                            a.tune)
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile, rest,
-               a.tune)
+               a.tune, _parse_sets(a.sets))
 
 
 if __name__ == "__main__":
