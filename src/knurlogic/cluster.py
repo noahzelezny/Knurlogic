@@ -133,6 +133,14 @@ def inventory(exo_url: str) -> list:
 _PEER: dict = {}
 
 
+#: knurlogic's own default, tried after whatever port this front end is on.
+#: exo cannot help here: it resolves exo's topology and has no idea knurlogic
+#: exists, so there is nothing in its state that says where a peer knurlogic
+#: listens. Asking a couple of likely ports is the honest substitute for
+#: assuming exactly one, and the port that answers is remembered per node.
+PEER_PORTS = (8080,)
+
+
 def peer_memory_map(ip: str, port: int, ttl: float = 6.0) -> dict | None:
     """The memory map a knurlogic on another node reports for itself.
 
@@ -141,30 +149,39 @@ def peer_memory_map(ip: str, port: int, ttl: float = 6.0) -> dict | None:
     the machine they were read on, so the node has to answer for itself.
     exo reports RAM totals per node and nothing about who is spending it.
 
-    Absent is a normal answer -- no knurlogic there, a different port, a
-    firewall. The caller draws the plain gauge it always drew.
+    Absent is a normal answer -- no knurlogic there, a port nobody guessed,
+    a firewall. The caller draws the plain gauge it always drew.
     """
     import time
 
     if not ip:
         return None
-    key = (ip, port)
-    hit = _PEER.get(key)
     now = time.time()
+    hit = _PEER.get(ip)
     if hit and now - hit[0] < ttl:
         return hit[1]
-    doc = None
-    try:
-        d = _get(f"http://{ip}:{port}/status.json", timeout=1.5)
-        nodes = (d or {}).get("nodes") or []
-        for nd in nodes:
+
+    # A port that answered before is tried first, so the common case is one
+    # request rather than a sweep every refresh.
+    tried, doc = [], None
+    known = hit[2] if hit and len(hit) > 2 else None
+    for cand in ([known] if known else []) + [port, *PEER_PORTS]:
+        if not cand or cand in tried:
+            continue
+        tried.append(cand)
+        try:
+            d = _get(f"http://{ip}:{cand}/status.json", timeout=1.0)
+        except Exception:
+            continue
+        for nd in (d or {}).get("nodes") or []:
             if nd.get("memory_map"):
                 doc = nd["memory_map"]
                 break
-    except Exception:
-        doc = None
-    _PEER[key] = (now, doc)
-    return doc
+        if doc is not None:
+            _PEER[ip] = (now, doc, cand)
+            return doc
+    _PEER[ip] = (now, None, known)
+    return None
 
 
 def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
