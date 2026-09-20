@@ -342,8 +342,36 @@ _RUNTIME_MARKS = (
 )
 
 
-def _footprints() -> dict:
-    """{pid: bytes} from `top`, which reports phys_footprint."""
+_UNIT = {"B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
+
+
+def _physmem(line: str) -> dict:
+    """macOS's own used/free, from top's PhysMem line.
+
+    WHY THIS EXISTS: summing process footprints and subtracting from
+    installed memory is NOT free memory, and the error is not small. On this
+    machine the footprints came to 20.1 GiB, so that subtraction called 75.9
+    GiB unused while macOS reported 1.6 GiB. Footprints miss the kernel,
+    wired memory, the file cache and compressed pages -- most of a busy box.
+    Free memory has to come from the thing that owns it.
+    """
+    import re
+
+    m = re.search(r"PhysMem:\s*([\d.]+)([BKMGT])\s*used.*?([\d.]+)([BKMGT])\s*unused",
+                  line)
+    if not m:
+        return {}
+    used = float(m.group(1)) * _UNIT[m.group(2)]
+    free = float(m.group(3)) * _UNIT[m.group(4)]
+    d = {"used_bytes": int(used), "free_bytes": int(free)}
+    w = re.search(r"([\d.]+)([BKMGT])\s*wired", line)
+    if w:
+        d["wired_bytes"] = int(float(w.group(1)) * _UNIT[w.group(2)])
+    return d
+
+
+def _footprints() -> tuple:
+    """({pid: bytes}, physmem) from `top`, which reports phys_footprint."""
     import re
     import subprocess
     try:
@@ -360,14 +388,16 @@ def _footprints() -> dict:
             ["top", "-l", "1", "-o", "mem", "-stats", "pid,mem"],
             capture_output=True, text=True, timeout=15).stdout
     except Exception:
-        return {}
-    mult = {"B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
-    found = {}
+        return {}, {}
+    found, phys = {}, {}
     for line in out.splitlines():
+        if line.startswith("PhysMem:"):
+            phys = _physmem(line)
+            continue
         m = re.match(r"\s*(\d+)\s+([\d.]+)([BKMGT])\s*$", line)
         if m:
-            found[int(m.group(1))] = int(float(m.group(2)) * mult[m.group(3)])
-    return found
+            found[int(m.group(1))] = int(float(m.group(2)) * _UNIT[m.group(3)])
+    return found, phys
 
 
 def _commands() -> dict:
@@ -442,7 +472,7 @@ def memory_map(floor: int = 256 << 20) -> dict:
     go" is not answered by a list that sums to less than the machine and
     does not say so.
     """
-    foot, cmds = _footprints(), _commands()
+    (foot, phys), cmds = _footprints(), _commands()
     rows, by_runtime = [], {}
     for pid, b in foot.items():
         cmd = cmds.get(pid, "")
@@ -470,14 +500,25 @@ def memory_map(floor: int = 256 << 20) -> dict:
     except Exception:
         pass
     seen = sum(r["bytes"] for r in rows)
+    rt = sum(by_runtime.values())
+    used = phys.get("used_bytes") or seen
+    # "Everything else" is what the OS says is spent MINUS what we could put
+    # a name to -- the kernel, the file cache, compressed pages and every
+    # process under the floor. Deriving it from the footprints instead made
+    # the free figure wrong by 74 GiB on this machine.
     return {
         "installed_bytes": total,
         "seen_bytes": seen,
+        "used_bytes": used,
+        "free_bytes": phys.get("free_bytes", max(total - used, 0)),
+        "wired_bytes": phys.get("wired_bytes", 0),
         "by_runtime": by_runtime,
-        "runtime_bytes": sum(by_runtime.values()),
-        "other_bytes": seen - sum(by_runtime.values()),
+        "runtime_bytes": rt,
+        "other_bytes": max(used - rt, 0),
         "processes": rows[:25],
         "floor_bytes": floor,
+        "from_os": bool(phys),
         "metric": "phys_footprint (what Activity Monitor calls Memory), not "
-                  "RSS -- measured 2.3x apart on one process here",
+                  "RSS -- measured 2.3x apart on one process here. Used and "
+                  "free come from the OS, not from summing these.",
     }

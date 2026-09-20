@@ -177,10 +177,10 @@ def test_an_idle_runtime_is_reported_below_the_floor(monkeypatch):
     """An idle exo holding 163 MiB is an ANSWER -- nothing is loaded. Dropped
     under a floor it looks identical to exo not running at all, which is the
     question the panel exists to settle."""
-    monkeypatch.setattr(loaded, "_footprints", lambda: {
+    monkeypatch.setattr(loaded, "_footprints", lambda: ({
         1: 160 << 20,          # exo, idle, under the floor
         2: 4 << 30,            # something else, over it
-        3: 100 << 20})         # something else, under it
+        3: 100 << 20}, {}))    # something else, under it
     monkeypatch.setattr(loaded, "_commands", lambda: {
         1: "/opt/anaconda3/envs/exo/bin/python3.13",
         2: "/Applications/Thing.app/Contents/MacOS/Thing",
@@ -194,10 +194,44 @@ def test_an_idle_runtime_is_reported_below_the_floor(monkeypatch):
 def test_the_unattributed_remainder_is_reported(monkeypatch):
     """"Where did the RAM go" is not answered by a list that sums to less
     than the machine and does not say so."""
-    monkeypatch.setattr(loaded, "_footprints", lambda: {1: 2 << 30, 2: 6 << 30})
+    monkeypatch.setattr(loaded, "_footprints", lambda: (
+        {1: 2 << 30, 2: 6 << 30}, {"used_bytes": 8 << 30, "free_bytes": 1 << 30}))
     monkeypatch.setattr(loaded, "_commands", lambda: {
         1: "/envs/exo/bin/python3", 2: "/Applications/Other"})
     m = loaded.memory_map(floor=1 << 30)
     assert m["runtime_bytes"] == 2 << 30
     assert m["other_bytes"] == 6 << 30
     assert m["seen_bytes"] == 8 << 30
+
+
+def test_free_memory_comes_from_the_os_not_from_summing_processes(monkeypatch):
+    """Footprints miss the kernel, wired pages, the file cache and every
+    process under the floor. Summing them and subtracting from installed
+    memory reported 75.9 GiB unused on a machine with 1.6 GiB free -- a 74
+    GiB error in the one number that decides whether a model fits."""
+    monkeypatch.setattr(loaded, "_footprints", lambda: (
+        {1: 4 << 30},
+        {"used_bytes": 93 << 30, "free_bytes": 2 << 30, "wired_bytes": 10 << 30}))
+    monkeypatch.setattr(loaded, "_commands", lambda: {1: "/envs/exo/bin/python3"})
+    m = loaded.memory_map(floor=1 << 30)
+    assert m["free_bytes"] == 2 << 30          # the OS's number
+    assert m["used_bytes"] == 93 << 30
+    # and the unattributed remainder is measured against what the OS spent,
+    # not against what we happened to be able to name
+    assert m["other_bytes"] == (93 - 4) << 30
+
+
+def test_the_physmem_line_is_parsed_as_macos_writes_it():
+    d = loaded._physmem(
+        "PhysMem: 94G used (11G wired, 1638M compressor), 1464M unused.")
+    assert d["used_bytes"] == 94 << 30
+    assert d["wired_bytes"] == 11 << 30
+    assert round(d["free_bytes"] / (1 << 20)) == 1464
+
+
+def test_a_missing_physmem_line_falls_back_rather_than_lying(monkeypatch):
+    monkeypatch.setattr(loaded, "_footprints", lambda: ({1: 4 << 30}, {}))
+    monkeypatch.setattr(loaded, "_commands", lambda: {1: "/envs/exo/bin/python3"})
+    m = loaded.memory_map(floor=1 << 30)
+    assert m["from_os"] is False
+    assert m["used_bytes"] == 4 << 30
