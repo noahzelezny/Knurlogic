@@ -118,15 +118,40 @@ def test_package_architectures_are_found_and_hosted_correctly():
     assert arch.host_for("qwen4_exp") == "mlx_lm"
 
 
+#: Directories that ARE engine code, and are allowed to import one. Each is
+#: here for a stated reason, not because a glob happened to miss it.
+ENGINE_SIDE = {
+    # Vendored architecture files. They ARE mlx-lm model code -- that is the
+    # whole point of vendoring them.
+    "architectures",
+    # The drafting head and its loops. Every line is arithmetic on an mlx
+    # model; there is no version of this that does not import mlx. What is
+    # kept out is the FRONT DOOR: `knurlogic.mtp` answers what an artifact
+    # has using nothing but the stdlib, and there is a test for that below.
+    "mtp",
+    # A standalone meta-path finder that crosses a spawn boundary. stdlib
+    # only, and tested as such; listed so nobody assumes it is exempt.
+    "overrides",
+}
+
+
 def test_mlx_lives_behind_the_engine_seam():
     """The point of engine.py is that it is the ONLY module importing an
     engine. If mlx names leak back into the other modules, swapping the
-    engine stops being a one-file change and this test is the tripwire."""
+    engine stops being a one-file change and this test is the tripwire.
+
+    It used to glob `src/knurlogic/*.py`, so every subpackage was exempt by
+    accident. It walks the tree now, and a directory is exempt only by being
+    named in ENGINE_SIDE with a reason.
+    """
     import pathlib
     import re
     src = pathlib.Path(__file__).resolve().parents[1] / "src" / "knurlogic"
     offenders = {}
-    for f in src.glob("*.py"):
+    for f in sorted(src.rglob("*.py")):
+        rel = f.relative_to(src)
+        if rel.parts[0] in ENGINE_SIDE:
+            continue
         if f.name in ("engine.py", "vendor.py"):
             continue  # the seam itself; vendor shells out to another env
         code = "\n".join(
@@ -134,8 +159,28 @@ def test_mlx_lives_behind_the_engine_seam():
             if not l.lstrip().startswith("#") and '"""' not in l)
         hits = re.findall(r"\b(?:import|from)\s+(mlx\w*)", code)
         if hits:
-            offenders[f.name] = sorted(set(hits))
+            offenders[str(rel)] = sorted(set(hits))
     assert not offenders, f"mlx imported outside the seam: {offenders}"
+
+
+def test_asking_what_an_artifact_has_does_not_load_an_engine():
+    """`doctor`, `discover` and the page all ask whether an artifact ships a
+    drafting head. That is a question about a file -- a safetensors header is
+    a length prefix and a JSON blob -- and none of them should pay for mlx to
+    answer it. The drafting code lives in the same package and imports mlx on
+    every line, so the split has to be enforced rather than intended."""
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; import knurlogic.mtp as m; m.find_head; "
+         "print(any(k == 'mlx' or k.startswith('mlx.') or "
+         "k.startswith('mlx_') for k in sys.modules))"],
+        capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "False", (
+        "importing knurlogic.mtp pulled in an engine: " + out.stdout)
 
 
 def test_dense_vq_artifacts_are_recognised_as_vq():
