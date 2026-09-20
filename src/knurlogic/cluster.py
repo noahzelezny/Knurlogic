@@ -205,7 +205,7 @@ def _default_cmd() -> list:
 # --- the front end ----------------------------------------------------------
 
 def _front(host: str, port: int, exo_url: str, status_fn,
-           settings_fn=None):
+           settings_fn=None, serving: str = ""):
     """Knurlogic's own port: /status, /status.json, /, everything else to exo.
 
     The OpenAI surface is exo's and is proxied untouched. There is no second
@@ -215,7 +215,8 @@ def _front(host: str, port: int, exo_url: str, status_fn,
     from urllib.parse import parse_qs, urlparse
 
     own = web.routes(status_fn=lambda _n=0: status_fn(),
-                     settings_fn=settings_fn)
+                     settings_fn=settings_fn,
+                     models_fn=web.models_document(serving=serving))
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -410,7 +411,8 @@ def run(path: str, host: str, port: int, profile: str, exo_url: str,
           f"ctrl-c to stop)")
     print(f"  /status and /status.json aggregate every node", flush=True)
     try:
-        return _front(host, port, exo_url, _status_fn, settings_fn)
+        return _front(host, port, exo_url, _status_fn, settings_fn,
+                      serving=a.path.name if a else "")
     except KeyboardInterrupt:
         return 0
     finally:

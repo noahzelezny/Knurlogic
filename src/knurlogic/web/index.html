@@ -1,5 +1,5 @@
 <!doctype html><meta charset="utf-8"><title>knurlogic</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+
 <style>
  /* Exo's dashboard is a COMMAND CENTER: neutral dark greys in oklch, one
     saturated accent, monospace everywhere, and panels that read as lit
@@ -24,7 +24,8 @@
    --ok:oklch(.5 .14 150);--warn:oklch(.55 .13 70);
    --acc:oklch(.55 .11 185);--accfg:oklch(1 0 0);--glow:none}}
  *{box-sizing:border-box}
- body{margin:0;background:var(--bg);color:var(--fg);letter-spacing:.02em;
+ body{margin:0;min-width:940px;background:var(--bg);color:var(--fg);
+   letter-spacing:.02em;
    font:13px/1.6 'SF Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,
      'DejaVu Sans Mono',monospace;
    background-image:linear-gradient(var(--grid) 1px,transparent 1px),
@@ -41,15 +42,24 @@
  ::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--acc) 50%,transparent)}
  a{color:inherit;text-decoration:none}
  /* --- masthead: a wordmark, and the nav exo puts opposite it -------------- */
- header{border-bottom:1px solid var(--line);padding:14px 24px;display:flex;
-   align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;
+ header{border-bottom:1px solid var(--line);padding:14px 24px;display:grid;
+   grid-template-columns:1fr auto 1fr;align-items:center;gap:20px;
    background:linear-gradient(180deg,oklch(.16 0 0/.95),oklch(.12 0 0/.98));
    position:sticky;top:0;z-index:20;backdrop-filter:blur(6px)}
  @media(prefers-color-scheme:light){header{
    background:linear-gradient(180deg,oklch(1 0 0/.95),oklch(.97 0 0/.98))}}
- .mark{display:flex;align-items:center;gap:12px}
+ /* exo centres its logo and pins everything else to the edges. */
+ header>.live{justify-self:start}
+ header>nav{justify-self:end}
+ .mark{position:relative;display:flex;align-items:center;justify-content:center;
+   justify-self:center}
  .mark b{font-size:19px;font-weight:700;letter-spacing:.22em;
-   text-transform:uppercase;text-shadow:var(--glow)}
+   text-transform:uppercase;text-shadow:var(--glow);position:relative;z-index:1}
+ /* Taller than the bar: the teeth are meant to break its top and bottom
+    edge, which is the whole reason it is a wheel and not a bullet point. */
+ .wheel{position:absolute;left:50%;top:50%;width:72px;height:72px;
+   transform:translate(-50%,-50%);pointer-events:none;overflow:visible}
+
  /* exo's data-readout: 11px, uppercase, wide tracking. Small text on this
     page is an INSTRUMENT LABEL, never prose. */
  .ro{font-size:11px;letter-spacing:.05em;text-transform:uppercase}
@@ -63,9 +73,36 @@
  nav a:hover{color:var(--acc)}
  .wrap{max-width:1240px;margin:0 auto;padding:22px 24px 60px}
  /* Chat memory on the left, the way exo keeps it. */
- .app{display:grid;grid-template-columns:212px 1fr;gap:24px;align-items:start}
- @media(max-width:860px){.app{grid-template-columns:1fr}
-   .side{order:2;border:0;padding:0}}
+ /* Two layouts, both of them desktop: three columns, and the same three
+    with the model rail dropped underneath for a window shoved to half a
+    screen. Below that the page scrolls sideways like any other desktop
+    app rather than pretending to be a phone. */
+ .app{display:grid;grid-template-columns:200px 1fr 260px;gap:24px;
+   align-items:start}
+ @media(max-width:1180px){.app{grid-template-columns:200px 1fr}
+   .right{grid-column:1/-1;order:3}
+   .right .panel{max-width:none}}
+ .right{min-width:0}
+ .right .panel{margin-bottom:0}
+ .loaded .nm{font-size:13px;font-weight:700;letter-spacing:.02em;
+   word-break:break-word}
+ .loaded .msg{margin-top:3px}
+ .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+ .badge{font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+   border:1px solid var(--line);color:var(--dim);padding:1px 5px;border-radius:2px}
+ .badge.on{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
+ /* Other models are shown, never switched to: a loaded model is loaded.
+    What is on offer is the command that would serve one. */
+ .other{padding:7px 0;border-top:1px solid var(--line);cursor:pointer}
+ .other:first-child{border-top:0}
+ .other .n{font-size:11.5px;white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis;color:var(--dim)}
+ .other:hover .n{color:var(--fg)}
+ .other .s{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:2px}
+ .other.no .n{color:var(--faint)}
+ .other pre{margin:7px 0 2px;font-size:10px;user-select:all;
+   background:var(--bg);border:1px solid var(--line);border-radius:var(--r);
+   padding:7px 8px;white-space:pre-wrap;word-break:break-all}
  .side{border-right:1px solid var(--line);padding-right:18px;min-width:0}
  .newchat{width:100%;text-align:left;color:var(--acc);border-style:dashed;
    cursor:pointer;margin-bottom:12px;font-size:11.5px;letter-spacing:.08em;
@@ -141,13 +178,7 @@
    stroke-dasharray:8 8;animation:flow 1s linear infinite;
    filter:drop-shadow(0 0 3px color-mix(in srgb,var(--acc) 50%,transparent))}
  @keyframes flow{from{stroke-dashoffset:0}to{stroke-dashoffset:-16}}
- /* Stacked, the units no longer sit either side of the connector, so a
-    horizontal link would point at nothing. Drop it: that two nodes are
-    joined is already said by both being drawn and by the node count in the
-    masthead, and a line that lies about the layout is worse than no line. */
- @media(max-width:560px){
-   .topo{flex-direction:column;gap:18px;padding:20px 10px}
-   .flow{display:none}}
+
  .unit{text-align:center;padding:0 10px}
  .unit .nm{font-size:11.5px;letter-spacing:.08em;margin-bottom:8px;color:var(--dim)}
  .unit .stat{font-size:10.5px;color:var(--faint);margin-top:7px;letter-spacing:.04em}
@@ -246,15 +277,16 @@
      animation-duration:.01ms!important;animation-iteration-count:1!important}}
 </style>
 <header>
+  <div class="live ro" id="state"><i></i><span>connecting</span></div>
+  <!-- The mark is a knurl: the crosshatch cut into a machined part so a hand
+       can grip it. The wheel sits BEHIND the word with its teeth showing
+       above and below, so the name reads as something you turn. -->
   <div class="mark">
-    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
-      <circle cx="13" cy="13" r="11" fill="none" stroke="var(--acc)" stroke-width="1.5"/>
+    <svg class="wheel" viewBox="0 0 120 120" aria-hidden="true">
       <g id="knurl"></g>
-      <circle cx="13" cy="13" r="4.4" fill="none" stroke="var(--acc)" stroke-width="1.5"/>
     </svg>
     <b>knurlogic</b>
   </div>
-  <div class="live ro" id="state" style="margin-left:auto"><i></i><span>connecting</span></div>
   <nav>
     <a data-panel="settings">Settings</a>
     <a data-panel="connect">Connect</a>
@@ -272,10 +304,6 @@
       <div id="chats"></div>
     </aside>
     <main>
-      <div id="head" style="margin-bottom:16px">
-        <div style="font-size:15px;font-weight:700;letter-spacing:.04em" id="title">—</div>
-        <div class="msg" style="margin-top:2px" id="sub">loading…</div>
-      </div>
       <section class="panel" id="memory">
         <div class="lab">Memory</div>
         <div class="topo" id="topo"></div>
@@ -293,6 +321,18 @@
         </div>
       </section>
     </main>
+    <aside class="right">
+      <section class="panel" id="modelpanel">
+        <div class="lab">Model</div>
+        <div class="loaded">
+          <div class="nm" id="title">—</div>
+          <div class="msg" id="sub">loading…</div>
+          <div id="badges" class="badges"></div>
+        </div>
+        <div class="sidelab">also on this machine</div>
+        <div id="others"></div>
+      </section>
+    </aside>
   </div>
 </div>
 <!-- The menus take the whole screen. They are what you came for when they
@@ -354,16 +394,39 @@
   window.knShow=show;
 })();
 
-// The mark is a knurl: the crosshatch cut into metal so a hand can grip a
-// machined part. Drawn rather than shipped as an image, so it is one file.
-(()=>{const g=document.getElementById('knurl');let s='';
- for(let a=0;a<360;a+=12){const r=a*Math.PI/180;
-   s+=`<line x1="${13+8.2*Math.sin(r)}" y1="${13-8.2*Math.cos(r)}"
-        x2="${13+10.6*Math.sin(r)}" y2="${13-10.6*Math.cos(r)}"
-        stroke="var(--acc)" stroke-width="1.1" opacity=".7"/>`}
- g.innerHTML=s})();
+// The knurled wheel, drawn rather than shipped as an image so the page stays
+// one file. Teeth are trapezoids around the rim -- a knurl has flanks, and a
+// ring of plain radial lines reads as a sun, not as something you grip.
+//
+// The word covers the wheel's middle, so the teeth that matter are the ones
+// at the top and bottom of the circle. Those are the only part visible, and
+// they are what makes the name sit ON a wheel rather than beside an icon.
+(()=>{
+  const g=document.getElementById('knurl'); if(!g) return;
+  const cx=60, cy=60, r0=40, r1=56, n=12, half=(180/n)*0.52;
+  // The band the word passes through. The wheel is MASKED out across it
+  // rather than drawn behind it: a rim crossing the letters is clutter, and
+  // the point is that the word is the axle the teeth turn around.
+  let out=`<defs><mask id="wm" maskUnits="userSpaceOnUse"
+      x="-40" y="-40" width="200" height="200">
+      <rect x="-40" y="-40" width="200" height="200" fill="#fff"/>
+      <rect x="-40" y="${cy-21}" width="200" height="42" fill="#000"/>
+    </mask></defs><g mask="url(#wm)">`;
+  for(let i=0;i<n;i++){
+    const a=(360/n)*i, p=[];
+    for(const [rad,off] of [[r0,-half*1.55],[r1,-half],[r1,half],[r0,half*1.55]]){
+      const t=(a+off)*Math.PI/180;
+      p.push(`${(cx+rad*Math.sin(t)).toFixed(2)},${(cy-rad*Math.cos(t)).toFixed(2)}`);
+    }
+    out+=`<polygon points="${p.join(' ')}" fill="var(--acc)" opacity=".6"/>`;
+  }
+  out+=`<circle cx="${cx}" cy="${cy}" r="${r0}" fill="none"
+        stroke="var(--acc)" stroke-width="3" opacity=".6"/></g>`;
+  g.innerHTML=out;
+})();
 
 const GIB=1073741824, $=id=>document.getElementById(id);
+let LASTWS=0;   // this box's working set, learned from the first status
 const gb=b=>Number.isFinite(b)?(b/GIB).toFixed(1)+' GiB':'--';
 const row=(k,v)=>`<div class="row"><span>${k}</span><span>${v}</span></div>`;
 const esc=s=>String(s??'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
@@ -580,8 +643,15 @@ async function tick(){
   setState(up===ns.length, ns.length>1 ? `${up}/${ns.length} nodes`
     : (up ? 'serving' : 'no answer'));
   if(a){ $('title').textContent=a.name;
-    $('sub').textContent=`${a.model_type} · ${gb(a.size_bytes)}`+
-      (a.bundled_runtime?` · runtime ${a.bundled_runtime}`:''); }
+    $('sub').textContent=`${a.model_type} · ${gb(a.size_bytes)}`;
+    const b=[];
+    if(a.is_vq) b.push(['VQ',1]);
+    if(a.bundled_runtime) b.push([a.bundled_runtime,1]);
+    (d.architectures||[]).forEach(r=>b.push([r.module+' '+r.state,
+      r.state==='OK'||r.state==='UNPINNED']));
+    $('badges').innerHTML=b.map(([t,on])=>
+      `<span class="badge${on?' on':''}">${esc(t)}</span>`).join('');
+  }
   // The topology, and the device IS the gauge: each unit fills from the
   // bottom with what that box is holding. A picture of a machine next to a
   // separate number is decoration; a picture that IS the number is not.
@@ -674,6 +744,8 @@ async function tick(){
   // One line under the machines. The gauges carry the split; this carries
   // the totals, and only the figures that are not already drawn above.
   if(m&&m.available){
+    LASTWS=(d.nodes||[]).reduce((x,n)=>Math.max(
+      x,(n.memory||{}).working_set_bytes||0), 0)||m.working_set_bytes||0;
     const box=m.scope==='box', bit=(k,v)=>`<span>${k} <b>${v}</b></span>`;
     $('mem').innerHTML=
       bit(box?'in use':'weights + live', gb(m.active_bytes))+
@@ -689,7 +761,64 @@ async function tick(){
       <b>${gb(w.limit_bytes)}</b> of ${gb(w.total_bytes)} installed.
       <code style="user-select:all">${esc(w.command)}</code></div>`;
 }
-tick(); loadSettings({}); setInterval(tick,2000);
+// --- what else is here ----------------------------------------------------
+// Shown, not offered: a loaded model is loaded, and a page that presents a
+// list of models as if any of them could be clicked into service would be
+// promising something the runtime cannot do. What it can hand over is the
+// command, which is why the row opens one.
+// Runs AFTER the first status, not beside it: "fits this box" needs the
+// working set, and two fetches racing means the list is sorted against zero
+// about half the time.
+async function loadModels(){
+  let d; try{ d=await (await fetch('/models.json')).json() }catch(e){ return }
+  const rows=(d.models||[]).filter(m=>!m.serving);
+  const el=$('others');
+  if(!rows.length){ el.innerHTML='<div class="other no"><div class="n">nothing else found</div></div>'; return }
+  // A disk with fifty rungs on it is not a list, it is a wall. What is
+  // useful next to a loaded model is the ones that would ALSO fit this
+  // machine, biggest first -- the rung above and below where you are. The
+  // rest are a count, and open if you want them.
+  const ws=(LASTWS||0);
+  const fits=rows.filter(m=>m.servable && (!ws || m.size_bytes<=ws))
+                 .sort((a,b)=>b.size_bytes-a.size_bytes);
+  const SHOW=7;
+  const rest=rows.length-Math.min(fits.length,SHOW);
+  const line=m=>`<div class="other" data-p="${esc(m.path)}">
+      <div class="n">${esc(m.name)}</div>
+      <div class="s">${(m.size_bytes/GIB).toFixed(0)} GiB${
+        m.is_vq?' · VQ':''}${m.mtp?' · MTP':''}</div></div>`;
+  el.innerHTML=fits.slice(0,SHOW).map(line).join('')
+    + (rest>0 ? `<div class="other no" id="morem"><div class="n">+ ${rest} more</div>
+        <div class="s">${fits.length>SHOW?`${fits.length-SHOW} that fit · `:''}${
+        rows.filter(m=>!m.servable||(ws&&m.size_bytes>ws)).length} that do not</div></div>`
+      : '');
+  const more=$('morem');
+  if(more) more.onclick=()=>{
+    more.remove();
+    const seen=new Set(fits.slice(0,SHOW).map(m=>m.path));
+    el.insertAdjacentHTML('beforeend', rows.filter(m=>!seen.has(m.path))
+      .sort((a,b)=>b.size_bytes-a.size_bytes)
+      .map(m=>m.servable&&(!ws||m.size_bytes<=ws) ? line(m)
+        : `<div class="other no"><div class="n">${esc(m.name)}</div>
+           <div class="s">${(m.size_bytes/GIB).toFixed(0)} GiB · ${
+           m.servable?'more than this box':'not loadable here'}</div></div>`)
+      .join(''));
+    wireOthers();
+  };
+  wireOthers();
+  function wireOthers(){
+  el.querySelectorAll('.other[data-p]').forEach(r=>r.onclick=()=>{
+    const open=r.querySelector('pre');
+    el.querySelectorAll('pre').forEach(x=>x.remove());
+    if(open) return;
+    const pre=document.createElement('pre');
+    pre.textContent=`knurlogic serve "${r.dataset.p}"`;
+    r.appendChild(pre);
+  });
+  }
+}
+
+tick().then(loadModels); loadSettings({}); setInterval(tick,2000);
 
 // --- try it, which is really "measure it" ---------------------------------
 // This panel is a bench, not a chat window. The reason to send a prompt here
