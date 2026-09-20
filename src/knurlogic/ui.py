@@ -125,6 +125,7 @@ def _load_fn(serve_port: int):
 def serve_ui(host: str, port: int, serve_port: int) -> int:
     routes = web.routes(
         status_fn=_status_fn,
+        settings_fn=web.machine_settings(),
         models_fn=web.models_document(serving=""),
         loaded_fn=web.loaded_document(),
         load_fn=_load_fn(serve_port))
