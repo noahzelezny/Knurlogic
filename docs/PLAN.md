@@ -157,7 +157,7 @@ quote speed only from a thermally stable box.
 
 Nothing in the algorithm. The work is packaging:
 
-#### 1. One copy. The map, with dates checked rather than assumed
+#### 1. One copy -- DONE 2026-09-20. The map, with dates checked
 
 Everything lands in `src/knurlogic/mtp/`. The fork wins every contested file:
 it is newer on all three, and it is the copy `batch_loop.py` and the heads
@@ -185,6 +185,37 @@ two lineages.
 across BOTH runtimes and returns the object the registry expects -- mlx-lm's
 Model, or mlx_vlm's LanguageModel and never the VLM wrapper. knurlogic needs
 exactly that and it belongs behind `engine.py`.
+
+**It is in.** 3766 lines under `src/knurlogic/mtp/`, all 14 modules import,
+and the port is verified by IDENTITY rather than by "it ran": the probe
+through knurlogic's copy returns `max|a-b| 8.12155818939209`, cosine
+`0.8312658071517944` -- the same floats, to the last digit, as the run
+through the fork. Nothing drifted in the copy.
+
+Nine exo references were severed:
+
+* `registry.py` named its head classes by exo dotted path -> `knurlogic.mtp.
+  heads.*`.
+* `batch_loop` and `speculative` took a logger from exo's runner bootstrap ->
+  a module logger, which is the stdlib answer.
+* `speculative` wanted `types.Model` (an annotation -> `Any`) and
+  `build_model_path` (exo maps a model id to a download dir; knurlogic is
+  handed the path, so the mapping is the identity).
+* `pipeline` and `speculative` reach for exo's `auto_parallel` to detect and
+  drive a SHARDED model. Those are now optional imports: without exo there is
+  no pipeline to detect, `is_pipeline_model` returns False, and the prefill
+  context is a no-op -- which is the same answer the check would have given.
+  Inside exo, the capability still works.
+
+THE FRONT DOOR IS STDLIB-ONLY AND TESTED. `knurlogic.mtp` answers what an
+artifact HAS -- that is a question about a file -- and `doctor`, `discover`
+and the page must not pay for mlx to ask it. A subprocess test asserts that
+importing `knurlogic.mtp` pulls in no `mlx*` module. The drafting half is one
+import deeper.
+
+The mlx tripwire was globbing `src/knurlogic/*.py`, so every subpackage was
+exempt by accident. It walks the tree now, and a directory is exempt only by
+being named in `ENGINE_SIDE` with a reason written next to it.
 
 NOT ported: `generator/mtp_batch_generate.py` (451 lines, 15 exo imports --
 it is exo's generator and knurlogic has its own seam), and the vqlab
