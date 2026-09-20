@@ -132,14 +132,31 @@ def serve(model_path: str, host: str, port: int,
     # field as something to load, and anything it does not recognise it tries
     # to fetch from the Hub -- so a client configured with a different name
     # (Cline, Continue, Zed all send whatever the user typed) gets a 404 from
-    # a server that is sitting on a loaded model. We serve exactly one
-    # artifact, so every request resolves to it.
+    # a server that is sitting on a loaded model. Every request resolves to
+    # whatever this process is currently serving.
+    #
+    # The pin is a VARIABLE, not a constant, which is what makes switching
+    # possible at all: `ModelProvider.load` already takes any path and swaps
+    # (it drops the old model first -- see `_load`), so the only thing
+    # standing between one artifact and another is which path this dict
+    # holds. A client still cannot steer it; only `switch()` can.
+    _SERVED["path"] = model_path
     _real = srv.ModelProvider.load
+    _real_init = srv.ModelProvider.__init__
 
     def _pinned(self, model_path_req=None, *a, **k):
-        return _real(self, model_path, *a, **k)
+        return _real(self, _SERVED["path"], *a, **k)
+
+    def _init(self, *a, **k):
+        _real_init(self, *a, **k)
+        # Captured here rather than on first request: the provider is built
+        # during server construction and `load_default()` runs inside the
+        # generator thread, so waiting for a request means `switch()` has
+        # nothing to talk to until someone has already used the server.
+        _SERVED["provider"] = self
 
     srv.ModelProvider.load = _pinned
+    srv.ModelProvider.__init__ = _init
 
     # Knurlogic's own routes, added to the engine's own handler. The engine
     # serves the model; these answer what is loaded, what it is using and
@@ -210,6 +227,76 @@ def serve(model_path: str, host: str, port: int,
     argv += list(extra or [])
     sys.argv = argv
     return srv.main()
+
+
+#: The one model this process is serving, and the provider holding it. Only
+#: `serve()` and `switch()` write here.
+_SERVED: dict = {"path": None, "provider": None}
+
+
+def served_path() -> str:
+    return _SERVED["path"] or ""
+
+
+def switch(path: str) -> dict:
+    """Load a different artifact into the running server.
+
+    The weights genuinely change: `ModelProvider._load` drops the old model
+    and tokenizer before loading, so the previous artifact's memory is
+    released rather than accumulated.
+
+    WHAT THIS CANNOT DO, and the caller has to say so out loud: the
+    environment was resolved and set BEFORE this process started, and the
+    eight GEMM/numerics flags are read at import and compiled into Metal
+    kernel source. A new artifact that resolves to different values for
+    those gets the OLD process's values. `LIVE_KNOBS` is the set that does
+    not have this problem.
+
+    UNVERIFIED (needs a box with the memory free): whether a second artifact
+    with its own bundled `model.py` re-reads its module-level settings on
+    load, or picks up the first one's module out of `sys.modules`. If it is
+    cached, even a fresh artifact's kernel flags are the first one's. Do not
+    quote a speed number across a switch until that is measured.
+    """
+    prov = _SERVED["provider"]
+    if prov is None:
+        raise RuntimeError("no model provider yet; the server is still "
+                           "starting")
+    before = _SERVED["path"]
+    _SERVED["path"] = path
+    try:
+        prov.load(path)
+    except BaseException:
+        _SERVED["path"] = before          # leave the pin pointing at what is
+        raise                             # actually loaded, not at a wish
+    return {"loaded": path, "was": before}
+
+
+def unload() -> dict:
+    """Drop the weights, keep the server up.
+
+    mlx-lm has no unload, so this is done through the provider's own fields:
+    clearing `model_key` is what makes the next `load` actually reload rather
+    than return the cached model. Dropping the references without clearing
+    the key would leave a server that says it has a model and has none.
+    """
+    prov = _SERVED["provider"]
+    if prov is None:
+        raise RuntimeError("no model provider yet")
+    had = _SERVED["path"]
+    prov.model_key = None
+    prov.model = None
+    prov.tokenizer = None
+    prov.draft_model = None
+    try:
+        import gc
+
+        import mlx.core as mx
+        gc.collect()
+        mx.clear_cache()
+    except Exception:
+        pass
+    return {"unloaded": had}
 
 
 def generate(model, tokenizer, prompt: str, max_tokens: int = 8) -> str:
