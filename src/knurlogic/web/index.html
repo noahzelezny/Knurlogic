@@ -110,37 +110,61 @@
  .other:hover .n{color:var(--fg)}
  .other .s{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:2px}
  .other.no .n{color:var(--faint)}
- /* One row per model that is actually in memory, whatever put it there. */
- .res{display:flex;align-items:center;gap:8px;padding:6px 0;
-   border-top:1px solid var(--line)}
- .res:first-child{border-top:0}
- .res .rt{font-size:9px;letter-spacing:.08em;text-transform:uppercase;
+ /* One card per thing that is running, the way exo shows an instance: a
+    header saying what it is and how to stop it, then the name, then what it
+    costs. A one-line row with a bare x made a loaded model read as a list
+    item rather than as something occupying the machine. */
+ .card{border:1px solid var(--line);border-radius:var(--r);padding:9px 10px;
+   margin-bottom:8px;background:var(--bg)}
+ .card.loaded{border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
+ .card.loading{border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
+ .cardhd{display:flex;align-items:center;gap:7px;margin-bottom:6px}
+ .cardhd .grow{flex:1}
+ .card .rt{font-size:9px;letter-spacing:.08em;text-transform:uppercase;
    border:1px solid var(--line);padding:0 4px;border-radius:2px;flex:none}
- .res .rt.knurlogic,.res .rt.exo{color:var(--acc);
+ .card .rt.knurlogic,.card .rt.exo{color:var(--acc);
    border-color:color-mix(in srgb,var(--acc) 40%,transparent)}
- .res .body{min-width:0;flex:1}
- .res .n{font-size:11.5px;white-space:nowrap;overflow:hidden;
+ .card .n{font-size:11.5px;white-space:nowrap;overflow:hidden;
    text-overflow:ellipsis}
- .res .s{font-size:10px;color:var(--faint);letter-spacing:.04em}
- .res .x{color:var(--faint);cursor:pointer;padding:0 3px;flex:none}
- .res .x:hover{color:var(--warn)}
- .res.offered .n{color:var(--dim)}
- /* Where the memory went, from the OS rather than from each runtime's own
-    account of itself. The bar is one machine; the segments are runtimes. */
- /* A key belongs beside the thing it explains, not in another column: this
-    sits directly under the machines whose fills it names, and reads across
-    because the panel is wide. */
- .ram{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 20px;
-   padding:12px 4px 2px}
+ .card .s{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:3px}
+ .card.offered .n{color:var(--dim)}
+ .card .dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ok)}
+ .card.loading .dot{background:var(--warn);animation:pulse 2s ease-in-out infinite}
+ .card.offered .dot{background:var(--faint)}
+ .mini.danger:hover:not([disabled]){color:var(--warn);border-color:var(--warn)}
+ /* The key goes INSIDE the screen, in the black beside the machines, and
+    stacked. Laid out in a row underneath it read as a caption for the panel
+    rather than as a legend for the fills -- the swatches were as far from
+    the colours they name as they had been in the other column. Beside the
+    machine, vertical, it is obviously part of the same picture. */
+ .topounits{display:flex;align-items:center;justify-content:center;gap:0;
+   flex-wrap:wrap}
+ #ramwent{position:absolute;right:clamp(12px,4%,48px);top:50%;
+   transform:translateY(-50%)}
+ .ram{display:flex;flex-direction:column;gap:5px}
  .ramrow{display:flex;align-items:center;gap:7px;font-size:10.5px;
-   letter-spacing:.04em}
+   letter-spacing:.04em;white-space:nowrap}
+ .ramrow span{flex:1}
  .ramrow b{color:var(--fg);font-weight:700}
  .ramrow span{color:var(--dim)}
  .ramrow em{width:8px;height:8px;border-radius:2px;display:inline-block;
    font-style:normal;flex:none}
- .res .dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ok)}
- .res.loading .dot{background:var(--warn);animation:pulse 2s ease-in-out infinite}
- .res.offered .dot{background:var(--faint)}
+ /* exo's rail is a WORKFLOW -- instances, then a picker with its options
+    and a launch -- not a list of the disk. Fifty rows with a button on each
+    was a catalogue pretending to be a control. */
+ .loadhd{display:flex;justify-content:flex-end;color:var(--faint);
+   font-size:10px;margin:-4px 0 8px}
+ select{width:100%;font:inherit;font-size:11.5px;background:var(--bg);
+   color:var(--fg);border:1px solid var(--line);border-radius:var(--r);
+   padding:7px 8px}
+ select:focus{outline:none;border-color:var(--acc)}
+ .opt{margin:10px 0}
+ .optlab{font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+   color:var(--faint);margin-bottom:5px}
+ .opt input{width:88px;text-align:right}
+ #pickinfo{margin-top:10px;font-size:10.5px;color:var(--dim)}
+ #pickinfo .warn{color:var(--warn)}
+ #pickinfo div{padding:2px 0}
  .other pre{margin:7px 0 2px;font-size:10px;user-select:all;
    background:var(--bg);border:1px solid var(--line);border-radius:var(--r);
    padding:7px 8px;white-space:pre-wrap;word-break:break-all}
@@ -208,8 +232,9 @@
     background. The graph links are dashed and animate along their length,
     which is the one piece of motion that carries information: it says the
     link is live. */
- .topo{display:flex;align-items:center;justify-content:center;gap:0;
-   flex-wrap:wrap;padding:26px 10px 18px;margin:2px 0 4px;border-radius:var(--r);
+ .topo{position:relative;display:flex;align-items:center;
+   justify-content:center;padding:26px 10px 18px;margin:2px 0 4px;
+   border-radius:var(--r);
    background:radial-gradient(ellipse at center,oklch(.16 0 0) 0%,
      oklch(.12 0 0) 50%,oklch(.09 0 0) 100%);
    box-shadow:inset 0 0 70px oklch(0 0 0/.5),0 0 40px oklch(.82 .14 185/.06)}
@@ -348,8 +373,8 @@
     <main>
       <section class="panel" id="memory">
         <div class="lab">Memory</div>
-        <div class="topo" id="topo"></div>
-        <div id="ramwent"></div>
+        <div class="topo"><div class="topounits" id="topo"></div>
+          <div id="ramwent"></div></div>
         <div id="mem" class="ro"></div>
       </section>
       <section class="panel" id="try">
@@ -375,8 +400,23 @@
         <div id="resident"></div>
       </section>
       <section class="panel" id="diskpanel">
-        <div class="lab">On disk</div>
-        <div id="others"></div>
+        <div class="lab">Load model</div>
+        <div class="loadhd"><span id="diskcount" class="ro"></span></div>
+        <select id="pick"></select>
+        <details class="more" id="loadopts">
+          <summary>advanced options</summary>
+          <div class="opt">
+            <div class="optlab">Tune</div>
+            <span class="seg" id="loadtune"></span>
+          </div>
+          <div class="opt">
+            <div class="optlab">Port</div>
+            <input id="loadport" type="number" min="1" max="65535">
+          </div>
+        </details>
+        <div id="pickinfo"></div>
+        <button class="go" id="launch" style="width:100%;margin-top:10px">
+          Launch</button>
       </section>
     </aside>
   </div>
@@ -876,73 +916,73 @@ async function tick(){
 // Runs AFTER the first status, not beside it: "fits this box" needs the
 // working set, and two fetches racing means the list is sorted against zero
 // about half the time.
+// --- load model -----------------------------------------------------------
+// One picker, its options, and a launch -- exo's shape. The previous version
+// listed seven models with a button on each and "+46 more", which is a
+// catalogue pretending to be a control: the answer to fifty rungs is a
+// picker, not a longer list.
+let MODELS=[];
 async function loadModels(){
   let d; try{ d=await (await fetch('/models.json')).json() }catch(e){ return }
-  const rows=(d.models||[]).filter(m=>!m.serving);
-  const el=$('others');
-  if(!rows.length){ el.innerHTML='<div class="other no"><div class="n">nothing else found</div></div>'; return }
-  // A disk with fifty rungs on it is not a list, it is a wall. What is
-  // useful next to a loaded model is the ones that would ALSO fit this
-  // machine, biggest first -- the rung above and below where you are. The
-  // rest are a count, and open if you want them.
-  const ws=(LASTWS||0);
-  const fits=rows.filter(m=>m.servable && (!ws || m.size_bytes<=ws))
-                 .sort((a,b)=>b.size_bytes-a.size_bytes);
-  const SHOW=7;
-  const rest=rows.length-Math.min(fits.length,SHOW);
-  const line=m=>`<div class="other" data-p="${esc(m.path)}">
-      <div class="n">${esc(m.name)}</div>
-      <div class="s">${(m.size_bytes/GIB).toFixed(0)} GiB${
-        m.is_vq?' · VQ':''}${m.mtp?' · MTP':''}</div></div>`;
-  el.innerHTML=fits.slice(0,SHOW).map(line).join('')
-    + (rest>0 ? `<div class="other no" id="morem"><div class="n">+ ${rest} more</div>
-        <div class="s">${fits.length>SHOW?`${fits.length-SHOW} that fit · `:''}${
-        rows.filter(m=>!m.servable||(ws&&m.size_bytes>ws)).length} that do not</div></div>`
-      : '');
-  const more=$('morem');
-  if(more) more.onclick=()=>{
-    more.remove();
-    const seen=new Set(fits.slice(0,SHOW).map(m=>m.path));
-    el.insertAdjacentHTML('beforeend', rows.filter(m=>!seen.has(m.path))
-      .sort((a,b)=>b.size_bytes-a.size_bytes)
-      .map(m=>m.servable&&(!ws||m.size_bytes<=ws) ? line(m)
-        : `<div class="other no"><div class="n">${esc(m.name)}</div>
-           <div class="s">${(m.size_bytes/GIB).toFixed(0)} GiB · ${
-           m.servable?'more than this box':'not loadable here'}</div></div>`)
-      .join(''));
-    wireOthers();
-  };
-  wireOthers();
-  function wireOthers(){
-  el.querySelectorAll('.other[data-p]').forEach(r=>r.onclick=()=>{
-    const open=r.querySelector('pre');
-    el.querySelectorAll('pre').forEach(x=>x.remove());
-    if(open) return;
-    const pre=document.createElement('pre');
-    pre.textContent=`knurlogic serve "${r.dataset.p}"`;
-    r.appendChild(pre);
-    const b=document.createElement('button');
-    b.className='mini'; b.textContent='Load here';
-    b.style.marginTop='6px';
-    b.onclick=async ev=>{
-      ev.stopPropagation(); b.textContent='loading…'; b.disabled=true;
-      const j=await act({action:'load', target:r.dataset.p});
-      b.disabled=false; b.textContent='Load here';
-      if(!j.error){ pre.remove(); b.remove(); tick(); loadModels();
-        // The switch cannot carry settings that are compiled at import, so
-        // the ones that did not survive are named rather than swallowed.
-        const st=(j.settings||{}).needs_restart||{};
-        const n=Object.keys(st).length;
-        if(n) alert(`Loaded. ${n} setting${n===1?'':'s'} this artifact `+
-          `resolves to could not be applied without a restart:\n\n`+
-          Object.entries(st).map(([k,v])=>
-            `${k}  wants ${v.wanted}, running ${v.running}`).join('\n'));
-      }
-    };
-    r.appendChild(b);
-  });
-  }
+  MODELS=(d.models||[]).filter(m=>!m.serving && m.servable)
+    .sort((a,b)=>b.size_bytes-a.size_bytes);
+  const total=(d.models||[]).length;
+  $('diskcount').textContent=`${total} models`;
+  const ws=LASTWS||0;
+  $('pick').innerHTML=MODELS.map((m,i)=>{
+    const fits=!ws||m.size_bytes<=ws;
+    return `<option value="${i}">${esc(m.name)} · ${
+      (m.size_bytes/GIB).toFixed(0)} GiB${fits?'':'  (needs more than this box)'}</option>`;
+  }).join('') || '<option disabled>nothing loadable found</option>';
+  // Open on the biggest rung that FITS, not the biggest on the disk. A
+  // picker that starts on a 751 GiB artifact next to a red warning has made
+  // its first impression a refusal.
+  const first=MODELS.findIndex(m=>!ws||m.size_bytes<=ws);
+  if(first>=0) $('pick').value=String(first);
+  $('pick').onchange=pickInfo;
+  pickInfo();
 }
+function pickInfo(){
+  const m=MODELS[+$('pick').value];
+  const el=$('pickinfo');
+  if(!m){ el.innerHTML=''; $('launch').disabled=true; return }
+  $('launch').disabled=false;
+  const ws=LASTWS||0, fits=!ws||m.size_bytes<=ws;
+  const tags=[m.is_vq?'VQ':'', m.mtp?'MTP':'', m.model_type]
+    .filter(Boolean).map(esc).join(' · ');
+  el.innerHTML=`<div>${tags}</div>`+
+    (fits?'':`<div class="warn">${(m.size_bytes/GIB).toFixed(0)} GiB against
+      a ${(ws/GIB).toFixed(0)} GiB working set — it will not fit this box</div>`);
+}
+$('launch').onclick=async()=>{
+  const m=MODELS[+$('pick').value]; if(!m) return;
+  const b=$('launch'); b.disabled=true; b.textContent='Launching…';
+  const j=await act({action:'load', target:m.path,
+                     port:+$('loadport').value||undefined,
+                     tune:(window.LOADTUNE||'balanced')});
+  b.textContent='Launch'; b.disabled=false;
+  if(!j.error){ tick(); loadModels();
+    const st=(j.settings||{}).needs_restart||{};
+    const n=Object.keys(st).length;
+    if(n) alert(`Loaded. ${n} setting${n===1?'':'s'} could not be applied `+
+      `without a restart:\n\n`+Object.entries(st).map(([k,v])=>
+        `${k}  wants ${v.wanted}, running ${v.running}`).join('\n'));
+  }
+};
+// The tune a model is launched WITH, which is a load-time decision: the
+// eight kernel flags are read at import, so this is the one moment they can
+// be chosen at all.
+(()=>{
+  const el=$('loadtune'); if(!el) return;
+  window.LOADTUNE='balanced';
+  el.innerHTML=['safe','balanced','fast'].map(t=>
+    `<button data-t="${t}" aria-pressed="${t==='balanced'}">${t}</button>`).join('');
+  el.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    window.LOADTUNE=b.dataset.t;
+    el.querySelectorAll('button').forEach(x=>
+      x.setAttribute('aria-pressed', x===b));
+  });
+})();
 
 // --- what is actually in memory, whoever put it there ---------------------
 // exo's models, ollama's models and ours in one list. A machine has one pool
@@ -990,30 +1030,34 @@ async function loadResident(){
   let d; try{ d=await (await fetch('/loaded.json')).json() }catch(e){ return }
   const rows=d.resident||[], el=$('resident');
   if(!rows.length){
-    el.innerHTML='<div class="res offered"><span class="dot"></span>'+
-      '<div class="body"><div class="n">nothing loaded</div></div></div>';
+    el.innerHTML='<div class="card offered"><div class="cardhd">'+
+      '<span class="dot"></span><span class="n">nothing loaded</span>'+
+      '</div></div>';
     return;
   }
-  el.innerHTML=rows.map((r,i)=>`<div class="res ${esc(r.state)}">
-      <span class="dot"></span>
-      <span class="rt ${esc(r.runtime)}">${esc(r.runtime)}</span>
-      <div class="body">
-        <div class="n" title="${esc(r.name)}">${esc(r.name)}</div>
-        <div class="s">${[
-          r.bytes_resident?gb(r.bytes_resident)
-            :(r.state==='offered'?'':'size not reported'),
-          r.detail].filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
-            .map(esc).join(' · ')}</div>
+  el.innerHTML=rows.map((r,i)=>`<div class="card ${esc(r.state)}">
+      <div class="cardhd">
+        <span class="dot"></span>
+        <span class="rt ${esc(r.runtime)}">${esc(r.runtime)}</span>
+        <span class="grow"></span>
+        ${r.can_unload?`<button class="mini danger" data-i="${i}"
+          >Unload</button>`:''}
       </div>
-      ${r.can_unload?`<span class="x" data-i="${i}" title="unload">×</span>`:''}
+      <div class="n" title="${esc(r.name)}">${esc(r.name)}</div>
+      <div class="s">${[
+        r.bytes_resident?gb(r.bytes_resident)
+          :(r.state==='offered'?'':'size not reported'),
+        r.detail, r.state==='loaded'?'':r.state]
+        .filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
+        .map(esc).join(' · ')}</div>
     </div>`).join('');
   // Only when status has told us nothing: in a cluster the key is the sum
   // of what the machines are drawing, and this document is one box.
   if(!RAM) ramWent(d.memory||{});
-  el.querySelectorAll('.x').forEach(x=>x.onclick=async()=>{
+  el.querySelectorAll('.cardhd button').forEach(x=>x.onclick=async()=>{
     const r=rows[+x.dataset.i];
     const how={knurlogic:'unload', exo:'exo-unload', ollama:'ollama-unload'};
-    x.textContent='…';
+    x.textContent='…'; x.disabled=true;
     await act({action:how[r.runtime], target:r.ident, where:r.where});
   });
 }
