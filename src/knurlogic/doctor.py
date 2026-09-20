@@ -77,18 +77,14 @@ def run(path: str, working_set_gib: float, profile: str,
     for w in r.warnings:
         print(f"\n  WARNING: {w}")
 
-    from . import engine
-    if a.has_mtp:
-        keeps = engine.keeps_mtp_weights(a.model_type)
-        if keeps is False:
-            print(f"\nmtp        this artifact ships a multi-token-prediction "
-                  f"head and the\n           architecture that will load it "
-                  f"DISCARDS those weights. You\n           downloaded them "
-                  f"and they will not run: no drafting, no\n           "
-                  f"multi-token steps. Another engine may use them.")
-        elif keeps:
-            print("\nmtp        multi-token-prediction head present and kept "
-                  "by the architecture")
+    from . import engine, mtp
+    m = mtp.status(a)
+    if m.state != mtp.NONE:
+        print("\nmtp        " + m.render())
+    if m.state == mtp.GRAFTABLE and engine.keeps_mtp_weights(a.model_type) is False:
+        print("           (`sanitize()` in that architecture drops them at "
+              "load, which is why\n           building the head is a "
+              "separate step and not a flag.)")
 
     ts = engine.tool_support(a.chat_template())
     if ts["mentions_tools"]:
