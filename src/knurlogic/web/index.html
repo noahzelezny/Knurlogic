@@ -149,6 +149,56 @@
  .ramrow span{color:var(--dim)}
  .ramrow em{width:8px;height:8px;border-radius:2px;display:inline-block;
    font-style:normal;flex:none}
+ .pickbtn{width:100%;display:flex;align-items:center;justify-content:space-between;
+   gap:10px;background:var(--bg);border:1px solid var(--line);
+   border-radius:var(--r);padding:9px 10px;cursor:pointer;color:var(--fg);
+   font:inherit;font-size:11.5px;text-align:left}
+ .pickbtn:hover{border-color:var(--acc)}
+ .pickbtn #picksize{color:var(--faint);flex:none}
+ .modal{position:fixed;inset:0;z-index:50;background:oklch(0 0 0/.6);
+   display:flex;align-items:center;justify-content:center;padding:40px 24px}
+ .modal[hidden]{display:none}
+ .modal .box{width:min(980px,100%);max-height:84vh;display:flex;
+   flex-direction:column;border:1px solid var(--line);border-radius:var(--r);
+   background:var(--panel);box-shadow:0 20px 60px oklch(0 0 0/.6)}
+ .pickhd{display:flex;align-items:center;gap:14px;padding:12px 14px;
+   border-bottom:1px solid var(--line)}
+ .pickhd input{flex:1;background:transparent;border:0;font-size:13px}
+ .pickhd input:focus{outline:none}
+ #pbudget{color:var(--faint);white-space:nowrap}
+ #pbudget b{color:var(--acc)}
+ .pickbody{display:grid;grid-template-columns:132px 1fr;min-height:0;flex:1}
+ .fams{border-right:1px solid var(--line);overflow:auto;padding:6px 0}
+ .fam{padding:8px 12px;cursor:pointer;font-size:11px;letter-spacing:.06em;
+   text-transform:uppercase;color:var(--dim);border-left:2px solid transparent}
+ .fam:hover{color:var(--fg)}
+ .fam[aria-current=true]{color:var(--acc);border-left-color:var(--acc);
+   background:color-mix(in srgb,var(--acc) 7%,transparent)}
+ .fam i{font-style:normal;color:var(--faint);float:right}
+ .rows{overflow:auto}
+ .sect{padding:8px 14px;font-size:10px;letter-spacing:.1em;
+   text-transform:uppercase;color:var(--ok);
+   background:color-mix(in srgb,var(--ok) 8%,transparent);
+   border-bottom:1px solid var(--line)}
+ .sect.no{color:var(--faint);background:transparent}
+ .grp{border-bottom:1px solid var(--line)}
+ .grphd{display:flex;align-items:center;gap:10px;padding:10px 14px;
+   cursor:pointer}
+ .grphd:hover{background:var(--med)}
+ .grphd .cv{color:var(--faint);flex:none;width:10px}
+ .grphd .gn{flex:1;font-size:12.5px;white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis}
+ .grphd .gv{color:var(--faint);font-size:10.5px;white-space:nowrap}
+ .vars{display:none}
+ .grp.open .vars{display:block}
+ .var{display:flex;align-items:center;gap:10px;padding:7px 14px 7px 34px;
+   cursor:pointer;font-size:11.5px;color:var(--dim)}
+ .var:hover{background:var(--med);color:var(--fg)}
+ .var .vn{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .var .vs{color:var(--faint);font-size:10.5px;white-space:nowrap}
+ .var .tag{margin:0}
+ .var.no{opacity:.45}
+ .var[aria-current=true]{color:var(--acc)}
  /* exo's rail is a WORKFLOW -- instances, then a picker with its options
     and a launch -- not a list of the disk. Fifty rows with a button on each
     was a catalogue pretending to be a control. */
@@ -402,7 +452,9 @@
       <section class="panel" id="diskpanel">
         <div class="lab">Load model</div>
         <div class="loadhd"><span id="diskcount" class="ro"></span></div>
-        <select id="pick"></select>
+        <button id="openpick" class="pickbtn">
+          <span id="pickname">choose a model</span>
+          <span id="picksize" class="ro"></span></button>
         <details class="more" id="loadopts">
           <summary>advanced options</summary>
           <div class="opt">
@@ -419,6 +471,23 @@
           Launch</button>
       </section>
     </aside>
+  </div>
+</div>
+<!-- The picker is a modal over the page, as exo's is: a search, the memory
+     it has to fit inside, families down the side, and one row per model with
+     its variants folded into it. A dropdown cannot hold fifty rungs in a way
+     anyone can read. -->
+<div class="modal" id="picker" hidden>
+  <div class="box">
+    <div class="pickhd">
+      <input id="psearch" placeholder="Search models" autocomplete="off">
+      <span class="ro" id="pbudget"></span>
+      <button id="pclose" class="mini">Close</button>
+    </div>
+    <div class="pickbody">
+      <div class="fams" id="pfams"></div>
+      <div class="rows" id="prows"></div>
+    </div>
   </div>
 </div>
 <!-- The menus take the whole screen. They are what you came for when they
@@ -921,41 +990,136 @@ async function tick(){
 // listed seven models with a button on each and "+46 more", which is a
 // catalogue pretending to be a control: the answer to fifty rungs is a
 // picker, not a longer list.
-let MODELS=[];
+let MODELS=[], GROUPS=[], FAM='All', SEL=null, QUERY='';
+
+// Grouping, tested against the real disk before any of this was drawn: 49
+// artifacts collapse to 13 rows. Publishers name a rung by its quantisation
+// -- `-8bit`, `-VQ-3.1bpw`, `-bf16` -- so stripping the publisher prefix and
+// that tail leaves the model, and the rungs of one model gather under it.
+const _PUB=/^[^/]*?(?:--|\/)/;
+const _TAIL=/[-_]?(?:vq[-_])?(?:\d+(?:\.\d+)?bpw|\d+bit|bf16|fp16|mlx|vq[-_]base|base|q\d+|instruct|it)\b.*$/i;
+// A name that parses to nothing shared and carries no publisher is a LOCAL
+// BUILD -- qwen4exp_vq_packed_mixL01p4q is not a model anybody publishes.
+// Left ungrouped they were 14 rows of one, which is the wall again.
+const ARCHLABEL={qwen4_exp_text:'Qwen3.8 Flash-Next', qwen3_5_moe_text:'Qwen3.5 MoE',
+  qwen3_5_text:'Qwen3.8 27B', glm5_next_text:'GLM-5.3 Flash',
+  gemma4_text:'Gemma 4', deepseek_v4:'DeepSeek V4'};
+const FAMS=[[/glm/,'GLM'],[/deepseek/,'DeepSeek'],[/gemma/,'Gemma'],
+            [/qwen/,'Qwen'],[/llama/,'Meta'],[/mistral/,'Mistral']];
+function famOf(m){
+  const hay=`${m.name} ${m.model_type||''}`.toLowerCase();
+  for(const [re,name] of FAMS) if(re.test(hay)) return name;
+  return 'Other';
+}
+function baseOf(n){ return n.replace(_PUB,'').replace(_TAIL,'')
+  .replace(/^[-_\s]+|[-_\s]+$/g,'') || n }
+
+function regroup(){
+  const bases={}, count={};
+  MODELS.forEach(m=>{ const b=baseOf(m.name); bases[m.name]=b;
+    count[b]=(count[b]||0)+1 });
+  const by={};
+  MODELS.forEach(m=>{
+    let key=bases[m.name];
+    const published=m.name.includes('--')||m.name.includes('/');
+    if(count[key]===1 && !published)
+      key=`${ARCHLABEL[m.model_type]||m.model_type||'unknown'} · local builds`;
+    (by[key]=by[key]||[]).push(m);
+  });
+  GROUPS=Object.entries(by).map(([name,ms])=>{
+    ms.sort((a,b)=>b.size_bytes-a.size_bytes);
+    return {name, ms, fam:famOf(ms[0]),
+            lo:Math.min(...ms.map(m=>m.size_bytes)),
+            hi:Math.max(...ms.map(m=>m.size_bytes))};
+  }).sort((a,b)=>b.hi-a.hi);
+}
+
+function renderPicker(){
+  const ws=LASTWS||0;
+  const q=QUERY.trim().toLowerCase();
+  const famCount={};
+  GROUPS.forEach(g=>famCount[g.fam]=(famCount[g.fam]||0)+1);
+  $('pfams').innerHTML=['All',...Object.keys(famCount).sort()].map(f=>
+    `<div class="fam" data-f="${esc(f)}" aria-current="${f===FAM}">${esc(f)}
+      <i>${f==='All'?GROUPS.length:famCount[f]}</i></div>`).join('');
+  $('pfams').querySelectorAll('.fam').forEach(e=>e.onclick=()=>{
+    FAM=e.dataset.f; renderPicker() });
+
+  const shown=GROUPS.filter(g=>(FAM==='All'||g.fam===FAM) &&
+    (!q || g.name.toLowerCase().includes(q) ||
+     g.ms.some(m=>m.name.toLowerCase().includes(q))));
+  const fits=g=>!ws||g.lo<=ws;
+  const rng=g=>g.ms.length===1 ? gb(g.hi)
+    : `${g.ms.length} variants (${(g.lo/GIB).toFixed(0)}–${(g.hi/GIB).toFixed(0)} GiB)`;
+  const grp=g=>`<div class="grp" data-g="${esc(g.name)}">
+      <div class="grphd"><span class="cv">›</span>
+        <span class="gn">${esc(g.name)}</span>
+        <span class="gv">${rng(g)}</span></div>
+      <div class="vars">${g.ms.map(m=>{
+        const ok=!ws||m.size_bytes<=ws;
+        return `<div class="var ${ok?'':'no'}" data-p="${esc(m.path)}"
+          aria-current="${SEL&&SEL.path===m.path}">
+          <span class="vn">${esc(m.name)}</span>
+          ${m.is_vq?'<span class="tag">VQ</span>':''}
+          ${m.mtp?'<span class="tag">MTP</span>':''}
+          <span class="vs">${gb(m.size_bytes)}</span></div>`}).join('')}</div>
+    </div>`;
+  const a=shown.filter(fits), b=shown.filter(g=>!fits(g));
+  $('prows').innerHTML=
+    (a.length?`<div class="sect">fits in this machine's memory</div>`
+      +a.map(grp).join(''):'')
+    +(b.length?`<div class="sect no">needs more than ${gb(ws)}</div>`
+      +b.map(grp).join(''):'')
+    || '<div class="sect no">nothing matches</div>';
+
+  $('prows').querySelectorAll('.grphd').forEach(h=>h.onclick=()=>
+    h.parentElement.classList.toggle('open'));
+  $('prows').querySelectorAll('.var').forEach(v=>v.onclick=()=>{
+    SEL=MODELS.find(m=>m.path===v.dataset.p);
+    $('picker').hidden=true; document.body.style.overflow='';
+    pickInfo();
+  });
+  // One group open is enough to show the shape without a wall of rungs.
+  if(a.length===1||q) $('prows').querySelectorAll('.grp').forEach(
+    g=>g.classList.add('open'));
+  $('pbudget').innerHTML=ws?`<b>${gb(ws)}</b> to fill`:'';
+}
+
 async function loadModels(){
   let d; try{ d=await (await fetch('/models.json')).json() }catch(e){ return }
   MODELS=(d.models||[]).filter(m=>!m.serving && m.servable)
     .sort((a,b)=>b.size_bytes-a.size_bytes);
-  const total=(d.models||[]).length;
-  $('diskcount').textContent=`${total} models`;
+  $('diskcount').textContent=`${(d.models||[]).length} models`;
+  regroup();
   const ws=LASTWS||0;
-  $('pick').innerHTML=MODELS.map((m,i)=>{
-    const fits=!ws||m.size_bytes<=ws;
-    return `<option value="${i}">${esc(m.name)} · ${
-      (m.size_bytes/GIB).toFixed(0)} GiB${fits?'':'  (needs more than this box)'}</option>`;
-  }).join('') || '<option disabled>nothing loadable found</option>';
-  // Open on the biggest rung that FITS, not the biggest on the disk. A
-  // picker that starts on a 751 GiB artifact next to a red warning has made
-  // its first impression a refusal.
-  const first=MODELS.findIndex(m=>!ws||m.size_bytes<=ws);
-  if(first>=0) $('pick').value=String(first);
-  $('pick').onchange=pickInfo;
+  if(!SEL) SEL=MODELS.find(m=>!ws||m.size_bytes<=ws)||null;
   pickInfo();
 }
 function pickInfo(){
-  const m=MODELS[+$('pick').value];
-  const el=$('pickinfo');
+  const m=SEL, el=$('pickinfo');
+  $('pickname').textContent=m?m.name:'choose a model';
+  $('picksize').textContent=m?gb(m.size_bytes):'';
   if(!m){ el.innerHTML=''; $('launch').disabled=true; return }
   $('launch').disabled=false;
   const ws=LASTWS||0, fits=!ws||m.size_bytes<=ws;
   const tags=[m.is_vq?'VQ':'', m.mtp?'MTP':'', m.model_type]
     .filter(Boolean).map(esc).join(' · ');
   el.innerHTML=`<div>${tags}</div>`+
-    (fits?'':`<div class="warn">${(m.size_bytes/GIB).toFixed(0)} GiB against
-      a ${(ws/GIB).toFixed(0)} GiB working set — it will not fit this box</div>`);
+    (fits?'':`<div class="warn">${gb(m.size_bytes)} against a ${gb(ws)}
+      working set — it will not fit this box</div>`);
 }
+$('openpick').onclick=()=>{
+  $('picker').hidden=false; document.body.style.overflow='hidden';
+  renderPicker(); $('psearch').focus();
+};
+$('pclose').onclick=()=>{ $('picker').hidden=true;
+  document.body.style.overflow='' };
+$('psearch').oninput=e=>{ QUERY=e.target.value; renderPicker() };
+addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('picker').hidden){
+  $('picker').hidden=true; document.body.style.overflow='' }});
+
 $('launch').onclick=async()=>{
-  const m=MODELS[+$('pick').value]; if(!m) return;
+  const m=SEL; if(!m) return;
   const b=$('launch'); b.disabled=true; b.textContent='Launching…';
   const j=await act({action:'load', target:m.path,
                      port:+$('loadport').value||undefined,
