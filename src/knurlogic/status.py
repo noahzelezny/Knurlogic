@@ -65,7 +65,7 @@ SCHEMA = 2
 
 def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
              node="local", role="server", reachable=True,
-             memory_fn=None, machine_fn=None) -> dict:
+             memory_fn=None, machine_fn=None, memory_map=None) -> dict:
     """One node's answer. `memory_fn` exists so a snapshot can be BUILT from
     numbers that came off another node (exo reports them for every node in
     the cluster) rather than only from this process.
@@ -87,6 +87,14 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
     else:
         from . import wired
         d["machine"] = wired.machine()
+    # Which runtime is holding what, ON THIS NODE. It travels inside the
+    # node's own snapshot rather than being computed centrally, because
+    # process footprints are only true of the machine they were read on --
+    # and knurlogic runs on every node, so every node can answer for itself.
+    # A node that cannot say leaves the key out; nothing downstream fills it
+    # in from somewhere else.
+    if memory_map:
+        d["memory_map"] = memory_map
     if artifact is not None:
         d["artifact"] = {
             "name": artifact.path.name,

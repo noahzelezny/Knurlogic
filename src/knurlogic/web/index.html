@@ -123,9 +123,6 @@
  /* Where the memory went, from the OS rather than from each runtime's own
     account of itself. The bar is one machine; the segments are runtimes. */
  .ram{margin-top:12px}
- .rambar{height:10px;display:flex;border-radius:2px;overflow:hidden;
-   background:var(--med);margin:7px 0 8px}
- .rambar i{display:block;height:100%}
  .ramrow{display:flex;justify-content:space-between;gap:10px;font-size:10.5px;
    padding:1px 0}
  .ramrow span:first-child{color:var(--dim);display:flex;align-items:center;
@@ -704,61 +701,88 @@ async function tick(){
   // the number is not. An unknown machine gets a plain box, on purpose:
   // there is no way to ask a remote node what it is, so it should look
   // unknown rather than look like a guess.
+  // Each shape asks for its fill through this, so the split is written once
+  // rather than four times. `bands` is [[fraction, colour], ...] stacked
+  // from the bottom; a plain node passes one band and nothing else changes.
+  function fillBands(x, y, w, h, bands){
+    let out='', at=0;
+    for(const [frac, col] of bands){
+      const fh=h*frac;
+      if(fh<=0.4) { at+=frac; continue }   // below a pixel is a lie, not a hair
+      out+=`<rect x="${x}" y="${(y+h-at*h-fh).toFixed(2)}" width="${w}"
+        height="${fh.toFixed(2)}" fill="${col}" opacity=".45"/>`;
+      at+=frac;
+    }
+    return out;
+  }
   const SHAPE={
-    laptop:(f,c)=>{
+    laptop:(bands,stroke)=>{
       const sw=62,sh=38,sx=13,bh=5;      // screen 70% / base 30%, as exo
       return `<rect x="${sx}" y="2" width="${sw}" height="${sh}" rx="2.5"
-          fill="none" stroke="${c}" stroke-width="1.4"/>
-        ${f>0?`<rect x="${sx+2.5}" y="${2+sh-2.5-f*(sh-5)}" width="${sw-5}"
-          height="${f*(sh-5)}" fill="${c}" opacity=".26"/>`:''}
+          fill="none" stroke="${stroke}" stroke-width="1.4"/>
+        ${fillBands(sx+2.5, 2+2.5, sw-5, sh-5, bands)}
         <path d="M${sx-8} ${2+sh+bh} L${sx+2} ${2+sh} L${sx+sw-2} ${2+sh}
-          L${sx+sw+8} ${2+sh+bh} Z" fill="none" stroke="${c}"
+          L${sx+sw+8} ${2+sh+bh} Z" fill="none" stroke="${stroke}"
           stroke-width="1.4" stroke-linejoin="round"/>
         <line x1="${sx+22}" y1="${2+sh+bh}" x2="${sx+sw-22}" y2="${2+sh+bh}"
-          stroke="${c}" stroke-width="1.4" opacity=".55"/>`},
-    studio:(f,c)=>{
+          stroke="${stroke}" stroke-width="1.4" opacity=".55"/>`},
+    studio:(bands,stroke)=>{
       const w=54,h=42,x=17,top=7;        // the tall one, with its face
       return `<rect x="${x}" y="2" width="${w}" height="${h}" rx="3.5"
-          fill="none" stroke="${c}" stroke-width="1.4"/>
-        ${f>0?`<rect x="${x+1}" y="${2+h-1-f*(h-top-2)}" width="${w-2}"
-          height="${f*(h-top-2)}" fill="${c}" opacity=".26"/>`:''}
-        <line x1="${x}" y1="${2+top}" x2="${x+w}" y2="${2+top}" stroke="${c}"
+          fill="none" stroke="${stroke}" stroke-width="1.4"/>
+        ${fillBands(x+1, 2+top+1, w-2, h-top-2, bands)}
+        <line x1="${x}" y1="${2+top}" x2="${x+w}" y2="${2+top}" stroke="${stroke}"
           stroke-width="1" opacity=".45"/>
-        <rect x="${x+8}" y="${2+h-13}" width="3" height="7" rx="1" fill="${c}"
+        <rect x="${x+8}" y="${2+h-13}" width="3" height="7" rx="1" fill="${stroke}"
           opacity=".5"/>
-        <rect x="${x+14}" y="${2+h-13}" width="3" height="7" rx="1" fill="${c}"
+        <rect x="${x+14}" y="${2+h-13}" width="3" height="7" rx="1" fill="${stroke}"
           opacity=".5"/>
         <rect x="${x+w/2-5}" y="${2+h-11}" width="10" height="3" rx="1"
-          fill="${c}" opacity=".5"/>`},
-    mini:(f,c)=>{
+          fill="${stroke}" opacity=".5"/>`},
+    mini:(bands,stroke)=>{
       const w=58,h=21,x=15,y=15;         // the slab, and the round foot
       return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4"
-          fill="none" stroke="${c}" stroke-width="1.4"/>
-        ${f>0?`<rect x="${x+1}" y="${y+h-1-f*(h-2)}" width="${w-2}"
-          height="${f*(h-2)}" fill="${c}" opacity=".26"/>`:''}
-        <circle cx="${x+8}" cy="${y+h/2}" r="1.6" fill="${c}" opacity=".6"/>
+          fill="none" stroke="${stroke}" stroke-width="1.4"/>
+        ${fillBands(x+1, y+1, w-2, h-2, bands)}
+        <circle cx="${x+8}" cy="${y+h/2}" r="1.6" fill="${stroke}" opacity=".6"/>
         <ellipse cx="${x+w/2}" cy="${y+h+3}" rx="${w*.34}" ry="2.4"
-          fill="none" stroke="${c}" stroke-width="1.2" opacity=".55"/>`},
-    "":(f,c)=>{
+          fill="none" stroke="${stroke}" stroke-width="1.2" opacity=".55"/>`},
+    "":(bands,stroke)=>{
       const w=56,h=34,x=16,y=8;
       return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2"
-          fill="none" stroke="${c}" stroke-width="1.4" stroke-dasharray="4 3"/>
-        ${f>0?`<rect x="${x+1}" y="${y+h-1-f*(h-2)}" width="${w-2}"
-          height="${f*(h-2)}" fill="${c}" opacity=".26"/>`:''}`}};
+          fill="none" stroke="${stroke}" stroke-width="1.4" stroke-dasharray="4 3"/>
+        ${fillBands(x+1, y+1, w-2, h-2, bands)}`}};
   SHAPE.imac=SHAPE.laptop; SHAPE.pro=SHAPE.studio;
 
   function unit(n){
     const nm=n.memory||{}, ws=nm.working_set_bytes||1;
     const pct=Math.max(0,Math.min(100,100*(nm.active_bytes||0)/ws));
     const off=n.reachable===false||!nm.available;
-    const c=off?'var(--line)':'var(--acc)';
+    const stroke=off?'var(--line)':'var(--acc)';
     const kind=(n.machine||{}).kind||'';
     const draw=SHAPE[kind]||SHAPE[''];
     const model=(n.machine||{}).model||'';
+    // Each node reports its OWN split, because knurlogic runs on each node
+    // and process footprints are only true of the machine they were read
+    // on. A node that answered gets a stacked fill; a node that did not --
+    // no knurlogic there, or a runtime that never said -- keeps the plain
+    // band. Nothing is ever painted with another node's numbers.
+    const mm=n.memory_map||(n.role==='local'||n.role==='server'?RAM:null);
+    let bands=off?[]:[[pct/100,'var(--acc)']];
+    if(mm && mm.installed_bytes && !off){
+      const by=Object.entries(mm.by_runtime||{}).sort((a,b)=>b[1]-a[1]);
+      const b2=by.map(([k,v])=>[v/ws, RAMCOL[k]||'var(--dim)']);
+      b2.push([(mm.other_bytes||0)/ws, 'var(--faint)']);
+      // Footprints are measured against installed memory and the gauge is
+      // scaled to the working set, so a full box can overrun it. Scale to
+      // fit rather than draw outside the machine.
+      const tot=b2.reduce((x,[f])=>x+f,0);
+      bands = tot>1 ? b2.map(([f,c])=>[f/tot,c]) : b2;
+    }
     return `<div class="unit">
       <div class="nm">${esc(n.node)}</div>
       <svg width="88" height="56" viewBox="0 0 88 56"${
-        model?` aria-label="${esc(model)}"`:''}>${draw(off?0:pct/100,c)}</svg>
+        model?` aria-label="${esc(model)}"`:''}>${draw(bands,stroke)}</svg>
       <div class="stat"><span class="pct">${off?'--':pct.toFixed(0)+'%'}</span>
         ${off?'no answer':gb(nm.active_bytes||0)+' / '+gb(ws)}</div>
     </div>`;
@@ -775,6 +799,22 @@ async function tick(){
   // past two it is a picture of a topology that does not exist, and it also
   // dangles off the end of every row that wraps.
   const ns_=d.nodes||[];
+  // The key in the rail is a key to THESE machines, so it is the sum of the
+  // maps they reported. A key whose numbers are one box's while the picture
+  // is four is worse than no key.
+  const maps=ns_.map(n=>n.memory_map).filter(Boolean);
+  if(maps.length){
+    const merged={installed_bytes:0, seen_bytes:0, other_bytes:0,
+                  by_runtime:{}, nodes:maps.length};
+    for(const m of maps){
+      merged.installed_bytes+=m.installed_bytes||0;
+      merged.seen_bytes+=m.seen_bytes||0;
+      merged.other_bytes+=m.other_bytes||0;
+      for(const [k,v] of Object.entries(m.by_runtime||{}))
+        merged.by_runtime[k]=(merged.by_runtime[k]||0)+v;
+    }
+    ramWent(merged);
+  }
   $('topo').innerHTML=ns_.map(unit).join(ns_.length===2
     ? '<svg class="flow" viewBox="0 0 56 20" aria-hidden="true">'+
       '<line x1="2" y1="10" x2="54" y2="10"/></svg>'
@@ -884,24 +924,26 @@ async function loadModels(){
 // processes cost are different numbers, and the gap is the thing that is
 // hard to chase down by hand. Both are shown; neither is derived from the
 // other.
+let RAM=null;   // the memory map, shared with the topology's gauges
 const RAMCOL={knurlogic:'var(--acc)', exo:'var(--warn)',
               ollama:'var(--ok)', 'mlx-lm':'#7aa2f7', 'mlx-vlm':'#bb9af7',
               vqlab:'#e0af68'};
 function ramWent(m){
   const el=$('ramwent');
-  if(!m || !m.installed_bytes){ el.innerHTML=''; return }
+  RAM=m && m.installed_bytes ? m : null;
+  if(!RAM){ el.innerHTML=''; return }
   const inst=m.installed_bytes, by=Object.entries(m.by_runtime||{})
     .sort((a,b)=>b[1]-a[1]);
   const other=m.other_bytes||0, free=Math.max(inst-(m.seen_bytes||0),0);
-  const seg=(b,c)=>`<i style="width:${(100*b/inst).toFixed(2)}%;
-    background:${c}"></i>`;
   const row=(k,b,c)=>`<div class="ramrow"><span>${
     c?`<em style="background:${c}"></em>`:'<em></em>'}${k}</span>
     <span>${gb(b)}</span></div>`;
+  // No bar. The machines in the topology are already gauges and now fill
+  // in these colours, so a second full-width chart of the same split would
+  // be the free-space bar's mistake again. This is the key to that picture,
+  // and the key carries the numbers.
   el.innerHTML=`<div class="ram"><div class="sidelab"
       style="margin-top:14px">where the memory went</div>
-    <div class="rambar">${by.map(([k,b])=>seg(b,RAMCOL[k]||'var(--dim)')).join('')}
-      ${seg(other,'var(--faint)')}</div>
     ${by.map(([k,b])=>row(k,b,RAMCOL[k]||'var(--dim)')).join('')}
     ${row('everything else',other,'var(--faint)')}
     ${row('unused',free,'')}</div>`;
@@ -936,7 +978,9 @@ async function loadResident(){
       </div>
       ${r.can_unload?`<span class="x" data-i="${i}" title="unload">×</span>`:''}
     </div>`).join('');
-  ramWent(d.memory||{});
+  // Only when status has told us nothing: in a cluster the key is the sum
+  // of what the machines are drawing, and this document is one box.
+  if(!RAM) ramWent(d.memory||{});
   el.querySelectorAll('.x').forEach(x=>x.onclick=async()=>{
     const r=rows[+x.dataset.i];
     const how={knurlogic:'unload', exo:'exo-unload', ollama:'ollama-unload'};

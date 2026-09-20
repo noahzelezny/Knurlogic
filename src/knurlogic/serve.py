@@ -87,13 +87,31 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     def _resolve_for(ws_bytes, tune_name):
         return resolve(a, ws_bytes, profile=profile, tune=tune_name)
 
+    # `top` plus `ps` costs about a third of a second, and the page polls
+    # status every two. Cached just long enough that a poll is free and a
+    # model load still shows up on the next one.
+    _mm: dict = {"at": 0.0, "doc": None}
+
+    def _memory_map():
+        import time
+
+        from . import loaded
+        now = time.time()
+        if _mm["doc"] is None or now - _mm["at"] > 4.0:
+            try:
+                _mm["doc"] = loaded.memory_map()
+            except Exception:
+                _mm["doc"] = None
+            _mm["at"] = now
+        return _mm["doc"]
+
     def _status(requests):
         # Served through `aggregate` even though there is exactly one node:
         # /status.json is the contract, and a client that learns the cluster
         # shape now does not get rewritten when a second node shows up.
         snap = status.aggregate([status.snapshot(
             artifact=a, arch_rows=rows, env=r.env, requests=requests,
-            node="local")])
+            node="local", memory_map=_memory_map())])
         # The wired limit belongs here because this is where somebody looks
         # when a model will not load. Advice only -- knurlogic never sets it.
         snap["wired"] = wired.advise(a.bytes_on_disk)

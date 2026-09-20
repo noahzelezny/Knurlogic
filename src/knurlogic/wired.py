@@ -248,7 +248,7 @@ def machine() -> dict:
     return _MACHINE
 
 
-def kind_from(name: str = "", model_id: str = "") -> dict:
+def kind_from(name: str = "", model_id: str = "", product: str = "") -> dict:
     """Best honest guess at ANOTHER node's kind, from what it told us.
 
     A remote node cannot be asked -- `system_profiler` answers for THIS box,
@@ -266,7 +266,11 @@ def kind_from(name: str = "", model_id: str = "") -> dict:
     Nothing matching leaves `kind` empty, and the page draws a plain box.
     That is the correct outcome: an unknown machine should look unknown.
     """
-    low = (name or "").lower()
+    # A PRODUCT NAME, when the source has one, is not a weak channel at all.
+    # exo reports `modelId: "Mac Studio"` / `"MacBook Pro"` -- measured
+    # against the live daemon -- so when that is present it decides, and the
+    # guessing below is only for sources that give nothing better.
+    low = (product or name or "").lower()
     if "studio" in low:
         kind = "studio"
     elif "mini" in low:
@@ -279,4 +283,4 @@ def kind_from(name: str = "", model_id: str = "") -> dict:
         kind = "laptop"
     else:
         kind = _kind_from_identifier(model_id or "")
-    return {"kind": kind, "model": "", "model_id": model_id or ""}
+    return {"kind": kind, "model": product or "", "model_id": model_id or ""}
