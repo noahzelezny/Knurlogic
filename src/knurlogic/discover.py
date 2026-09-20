@@ -156,6 +156,7 @@ def _weights_bytes(d: Path, depth: int = 1) -> int:
 
 def _from_config_dir(d: Path, store: str) -> Found | None:
     """A directory that carries a config.json is an artifact we can read."""
+    from . import mtp
     from .artifact import Artifact
     try:
         a = Artifact.load(d)
@@ -170,7 +171,12 @@ def _from_config_dir(d: Path, store: str) -> Found | None:
             break
     return Found(name=name, path=d, store=store, format="mlx",
                  bytes_on_disk=size, model_type=a.model_type, is_vq=a.is_vq,
-                 model_file=a.model_file, servable=True)
+                 model_file=a.model_file, servable=True,
+                 # A built drafting head is a property of what is ON DISK, and
+                 # it sits outside the model glob -- so nothing else in a
+                 # listing would ever mention it.
+                 extra={"mtp_head": str(h.path)} if (h := mtp.find_head(d))
+                        else {})
 
 
 def _from_gguf(d: Path, store: str, files: list) -> Found:
@@ -276,8 +282,13 @@ def render(rows: list, working_set_bytes: int = 0) -> str:
             state = f"needs more than this box ({working_set_bytes / GIB:.0f} GiB)"
         else:
             state = f.model_type or "ok"
+        # Flags describe what is ON DISK, so they hold whatever the state
+        # line says -- a model too big for one box still has its head.
+        if f.servable:
             if f.is_vq:
                 state += "  [VQ]"
+            if f.extra.get("mtp_head"):
+                state += "  [MTP]"
         L.append(f"{f.store:<12}{f.name[:43]:<44}{f.gib:>7.1f}G  {state}")
     # Three different counts, kept apart because they answer three different
     # questions: is it here, can this engine read it, will it fit.
