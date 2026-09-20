@@ -345,29 +345,58 @@ _RUNTIME_MARKS = (
 _UNIT = {"B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
 
 
-def _physmem(line: str) -> dict:
-    """macOS's own used/free, from top's PhysMem line.
+def available_memory() -> dict:
+    """How much memory a model could actually have, from `vm_stat`.
 
-    WHY THIS EXISTS: summing process footprints and subtracting from
-    installed memory is NOT free memory, and the error is not small. On this
-    machine the footprints came to 20.1 GiB, so that subtraction called 75.9
-    GiB unused while macOS reported 1.6 GiB. Footprints miss the kernel,
-    wired memory, the file cache and compressed pages -- most of a busy box.
-    Free memory has to come from the thing that owns it.
+    THIS TOOK TWO WRONG ANSWERS TO GET RIGHT, in opposite directions.
+
+    First: installed memory minus the sum of process footprints. Footprints
+    miss the kernel, wired pages and the file cache, so this was arithmetic
+    on the wrong quantity -- it happened to land near the truth here and
+    would not anywhere else.
+
+    Then: top's PhysMem "unused", which read 1.6 GiB on a machine with ~70
+    GiB available. That figure counts only pages that are free RIGHT NOW.
+    On this box 66.7 GiB was file-backed cache -- memory macOS hands over
+    the moment something asks for it. Calling that "used" tells someone
+    their machine is full when it is two-thirds empty.
+
+    Measured against exo, which reports the same box as 27.8 GB used:
+
+        free only                       1.7 GiB available   -> 94.3 used
+        free + inactive                69.9 GiB available   -> 26.1 used  <-
+        free + speculative + purgeable  2.1 GiB available   -> 93.9 used
+
+    `free + inactive` is what psutil reports as available on macOS, which is
+    where exo's number comes from, and 26.1 GiB is 28.0 GB. That is the one.
     """
     import re
-
-    m = re.search(r"PhysMem:\s*([\d.]+)([BKMGT])\s*used.*?([\d.]+)([BKMGT])\s*unused",
-                  line)
+    import subprocess
+    try:
+        out = subprocess.run(["vm_stat"], capture_output=True, text=True,
+                             timeout=10).stdout
+    except Exception:
+        return {}
+    m = re.search(r"page size of (\d+)", out)
     if not m:
         return {}
-    used = float(m.group(1)) * _UNIT[m.group(2)]
-    free = float(m.group(3)) * _UNIT[m.group(4)]
-    d = {"used_bytes": int(used), "free_bytes": int(free)}
-    w = re.search(r"([\d.]+)([BKMGT])\s*wired", line)
-    if w:
-        d["wired_bytes"] = int(float(w.group(1)) * _UNIT[w.group(2)])
-    return d
+    page = int(m.group(1))
+    st = {}
+    for line in out.splitlines()[1:]:
+        g = re.match(r'"?([^":]+)"?:\s+(\d+)', line.strip())
+        if g:
+            st[g.group(1).strip()] = int(g.group(2)) * page
+
+    free = st.get("Pages free", 0)
+    inactive = st.get("Pages inactive", 0)
+    avail = free + inactive
+    return {
+        "available_bytes": avail,
+        "free_bytes": free,
+        "cached_bytes": inactive,
+        "wired_bytes": st.get("Pages wired down", 0),
+        "compressed_bytes": st.get("Pages occupied by compressor", 0),
+    }
 
 
 def _footprints() -> tuple:
@@ -389,10 +418,9 @@ def _footprints() -> tuple:
             capture_output=True, text=True, timeout=15).stdout
     except Exception:
         return {}, {}
-    found, phys = {}, {}
+    found, phys = {}, available_memory()
     for line in out.splitlines():
         if line.startswith("PhysMem:"):
-            phys = _physmem(line)
             continue
         m = re.match(r"\s*(\d+)\s+([\d.]+)([BKMGT])\s*$", line)
         if m:
@@ -501,7 +529,8 @@ def memory_map(floor: int = 256 << 20) -> dict:
         pass
     seen = sum(r["bytes"] for r in rows)
     rt = sum(by_runtime.values())
-    used = phys.get("used_bytes") or seen
+    avail = phys.get("available_bytes")
+    used = (total - avail) if (total and avail is not None) else seen
     # "Everything else" is what the OS says is spent MINUS what we could put
     # a name to -- the kernel, the file cache, compressed pages and every
     # process under the floor. Deriving it from the footprints instead made
@@ -510,7 +539,12 @@ def memory_map(floor: int = 256 << 20) -> dict:
         "installed_bytes": total,
         "seen_bytes": seen,
         "used_bytes": used,
-        "free_bytes": phys.get("free_bytes", max(total - used, 0)),
+        # What a model could have: the free pages PLUS the file cache macOS
+        # will hand over on demand. Not top's "unused", which is only the
+        # first of those.
+        "free_bytes": phys.get("available_bytes", max(total - used, 0)),
+        "truly_free_bytes": phys.get("free_bytes", 0),
+        "cached_bytes": phys.get("cached_bytes", 0),
         "wired_bytes": phys.get("wired_bytes", 0),
         "by_runtime": by_runtime,
         "runtime_bytes": rt,
