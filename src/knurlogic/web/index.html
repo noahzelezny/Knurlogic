@@ -71,15 +71,15 @@
  nav{display:flex;gap:20px;font-size:11px;letter-spacing:.16em;
    text-transform:uppercase;color:var(--dim)}
  nav a:hover{color:var(--acc)}
- .wrap{max-width:1240px;margin:0 auto;padding:22px 24px 60px}
+ .wrap{max-width:1320px;margin:0 auto;padding:22px 24px 60px}
  /* Chat memory on the left, the way exo keeps it. */
  /* Two layouts, both of them desktop: three columns, and the same three
     with the model rail dropped underneath for a window shoved to half a
     screen. Below that the page scrolls sideways like any other desktop
     app rather than pretending to be a phone. */
- .app{display:grid;grid-template-columns:200px 1fr 260px;gap:24px;
+ .app{display:grid;grid-template-columns:200px 1fr 300px;gap:24px;
    align-items:start}
- @media(max-width:1180px){.app{grid-template-columns:200px 1fr}
+ @media(max-width:1240px){.app{grid-template-columns:200px 1fr}
    .right{grid-column:1/-1;order:3}
    .right .panel{max-width:none}}
  .right{min-width:0}
@@ -100,6 +100,24 @@
  .other:hover .n{color:var(--fg)}
  .other .s{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:2px}
  .other.no .n{color:var(--faint)}
+ /* One row per model that is actually in memory, whatever put it there. */
+ .res{display:flex;align-items:center;gap:8px;padding:6px 0;
+   border-top:1px solid var(--line)}
+ .res:first-child{border-top:0}
+ .res .rt{font-size:9px;letter-spacing:.08em;text-transform:uppercase;
+   border:1px solid var(--line);padding:0 4px;border-radius:2px;flex:none}
+ .res .rt.knurlogic,.res .rt.exo{color:var(--acc);
+   border-color:color-mix(in srgb,var(--acc) 40%,transparent)}
+ .res .body{min-width:0;flex:1}
+ .res .n{font-size:11.5px;white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis}
+ .res .s{font-size:10px;color:var(--faint);letter-spacing:.04em}
+ .res .x{color:var(--faint);cursor:pointer;padding:0 3px;flex:none}
+ .res .x:hover{color:var(--warn)}
+ .res.offered .n{color:var(--dim)}
+ .res .dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ok)}
+ .res.loading .dot{background:var(--warn);animation:pulse 2s ease-in-out infinite}
+ .res.offered .dot{background:var(--faint)}
  .other pre{margin:7px 0 2px;font-size:10px;user-select:all;
    background:var(--bg);border:1px solid var(--line);border-radius:var(--r);
    padding:7px 8px;white-space:pre-wrap;word-break:break-all}
@@ -329,7 +347,9 @@
           <div class="msg" id="sub">loading…</div>
           <div id="badges" class="badges"></div>
         </div>
-        <div class="sidelab">also on this machine</div>
+        <div class="sidelab">loaded on this machine</div>
+        <div id="resident"></div>
+        <div class="sidelab">on disk</div>
         <div id="others"></div>
       </section>
     </aside>
@@ -814,11 +834,73 @@ async function loadModels(){
     const pre=document.createElement('pre');
     pre.textContent=`knurlogic serve "${r.dataset.p}"`;
     r.appendChild(pre);
+    const b=document.createElement('button');
+    b.className='mini'; b.textContent='Load here';
+    b.style.marginTop='6px';
+    b.onclick=async ev=>{
+      ev.stopPropagation(); b.textContent='loading…'; b.disabled=true;
+      const j=await act({action:'load', target:r.dataset.p});
+      b.disabled=false; b.textContent='Load here';
+      if(!j.error){ pre.remove(); b.remove(); tick(); loadModels();
+        // The switch cannot carry settings that are compiled at import, so
+        // the ones that did not survive are named rather than swallowed.
+        const st=(j.settings||{}).needs_restart||{};
+        const n=Object.keys(st).length;
+        if(n) alert(`Loaded. ${n} setting${n===1?'':'s'} this artifact `+
+          `resolves to could not be applied without a restart:\n\n`+
+          Object.entries(st).map(([k,v])=>
+            `${k}  wants ${v.wanted}, running ${v.running}`).join('\n'));
+      }
+    };
+    r.appendChild(b);
   });
   }
 }
 
-tick().then(loadModels); loadSettings({}); setInterval(tick,2000);
+// --- what is actually in memory, whoever put it there ---------------------
+// exo's models, ollama's models and ours in one list. A machine has one pool
+// of memory and every runtime is spending from it, so opening another tool's
+// page to see what it is holding is a thing this should have made
+// unnecessary.
+async function act(payload){
+  const r=await fetch('/loaded.json',{method:'POST',
+    body:JSON.stringify(payload)});
+  const j=await r.json();
+  if(j.error) alert(j.error);
+  await loadResident();
+  return j;
+}
+async function loadResident(){
+  let d; try{ d=await (await fetch('/loaded.json')).json() }catch(e){ return }
+  const rows=d.resident||[], el=$('resident');
+  if(!rows.length){
+    el.innerHTML='<div class="res offered"><span class="dot"></span>'+
+      '<div class="body"><div class="n">nothing loaded</div></div></div>';
+    return;
+  }
+  el.innerHTML=rows.map((r,i)=>`<div class="res ${esc(r.state)}">
+      <span class="dot"></span>
+      <span class="rt ${esc(r.runtime)}">${esc(r.runtime)}</span>
+      <div class="body">
+        <div class="n" title="${esc(r.name)}">${esc(r.name)}</div>
+        <div class="s">${[
+          r.bytes_resident?gb(r.bytes_resident)
+            :(r.state==='offered'?'':'size not reported'),
+          r.detail].filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
+            .map(esc).join(' · ')}</div>
+      </div>
+      ${r.can_unload?`<span class="x" data-i="${i}" title="unload">×</span>`:''}
+    </div>`).join('');
+  el.querySelectorAll('.x').forEach(x=>x.onclick=async()=>{
+    const r=rows[+x.dataset.i];
+    const how={knurlogic:'unload', exo:'exo-unload', ollama:'ollama-unload'};
+    x.textContent='…';
+    await act({action:how[r.runtime], target:r.ident, where:r.where});
+  });
+}
+
+tick().then(loadModels).then(loadResident);
+loadSettings({}); setInterval(tick,2000); setInterval(loadResident,5000);
 
 // --- try it, which is really "measure it" ---------------------------------
 // This panel is a bench, not a chat window. The reason to send a prompt here

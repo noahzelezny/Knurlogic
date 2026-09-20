@@ -91,8 +91,94 @@ def models_document(serving: str = "", ttl: float = 60.0):
     return handler
 
 
+_LOADED: dict = {"at": 0.0, "doc": None}
+
+
+def loaded_document(ttl: float = 4.0):
+    """`/loaded.json` -- every runtime on this box and what it holds.
+
+    Short TTL, not the 60s the disk scan gets: residency changes the moment
+    someone loads something, and a stale answer here is the answer being
+    wrong rather than merely old. Four HTTP reads with short timeouts came
+    back in 0.08s against a live exo, so the TTL is about coalescing a
+    refresh burst, not about cost.
+    """
+    def handler(_q: dict) -> dict:
+        import time
+
+        from . import loaded
+        now = time.time()
+        if _LOADED["doc"] is None or now - _LOADED["at"] > ttl:
+            try:
+                _LOADED["doc"] = loaded.survey()
+            except Exception as e:
+                _LOADED["doc"] = {"resident": [], "runtimes": [],
+                                  "bytes_resident": 0, "error": str(e)}
+            _LOADED["at"] = now
+        return _LOADED["doc"]
+    return handler
+
+
+def load_action(artifact_for, resolve_fn=None, live_knobs=()):
+    """`POST /loaded.json` -- load, unload, or hand the job to exo.
+
+    The reason this is knurlogic's job and not a link to exo's page: a model
+    swapped into a running process gets the environment that process STARTED
+    with. Knurlogic is the only thing here that knows what the incoming
+    artifact would have resolved to, so it is the only thing that can say
+    which of those settings did not survive the switch. Doing the load and
+    staying quiet about that would be worse than not offering it.
+    """
+    from . import engine, loaded as L
+
+    def _drift(path: str) -> dict:
+        """Which resolved settings the running process cannot honour."""
+        if resolve_fn is None:
+            return {}
+        try:
+            a = artifact_for(path)
+            want = resolve_fn(a).env
+        except Exception:
+            return {}
+        import os
+        stuck, applied = {}, {}
+        for k, v in want.items():
+            now = os.environ.get(k)
+            if str(v) == str(now):
+                continue
+            (applied if k in live_knobs else stuck)[k] = {
+                "wanted": str(v), "running": now}
+        return {"applied_live": applied, "needs_restart": stuck}
+
+    def handler(_q: dict, body=None) -> dict:
+        try:
+            req = json.loads(body or b"{}")
+        except Exception:
+            req = {}
+        act, target = req.get("action"), req.get("target") or ""
+        where = req.get("where") or ""
+        try:
+            if act == "load":
+                r = engine.switch(target)
+                r["settings"] = _drift(target)
+                return r
+            if act == "unload":
+                return engine.unload()
+            if act == "exo-load":
+                return L.exo_load(where, target)
+            if act == "exo-unload":
+                return L.exo_unload(where, target)
+            if act == "ollama-unload":
+                return L.ollama_unload(where, target)
+        except Exception as e:
+            return {"error": f"{type(e).__name__}: {e}"}
+        return {"error": f"unknown action {act!r}"}
+    return handler
+
+
 def routes(status_fn=None, settings_fn=None, apply_fn=None,
-           messages_fn=None, models_fn=None) -> dict:
+           messages_fn=None, models_fn=None, loaded_fn=None,
+           load_fn=None) -> dict:
     """path -> handler(query: dict) -> (body, content_type).
 
     `status_fn(requests)` returns (snapshot, text). `settings_fn(query)`
@@ -122,6 +208,15 @@ def routes(status_fn=None, settings_fn=None, apply_fn=None,
         def _models(q, _n=0):
             return _json(models_fn(q))
         r["/models.json"] = _models
+    if loaded_fn is not None:
+        def _loaded(q, _n=0):
+            return _json(loaded_fn(q))
+        r["/loaded.json"] = _loaded
+    if load_fn is not None:
+        def _load(q, _n=0, body=None):
+            _LOADED["doc"] = None       # residency just changed; do not
+            return _json(load_fn(q, body))   # serve the cached answer
+        r["POST /loaded.json"] = _load
     if messages_fn is not None:
         r["POST /v1/messages"] = raw(messages_fn)
     if apply_fn is not None:
