@@ -76,10 +76,15 @@
  /* Two layouts, both of them desktop: three columns, and the same three
     with the model rail dropped underneath for a window shoved to half a
     screen. Below that the page scrolls sideways like any other desktop
-    app rather than pretending to be a phone. */
- .app{display:grid;grid-template-columns:200px 1fr 300px;gap:24px;
-   align-items:start}
- @media(max-width:1240px){.app{grid-template-columns:200px 1fr}
+    app rather than pretending to be a phone.
+    The drop was at 1240px, which is wider than plenty of ordinary windows
+    -- a maximised 13" is 1280 and a window with anything beside it is well
+    under. Three columns need 190 + 400 + 280 + gaps + padding = 990, so
+    that is where it drops, and the middle column is allowed to squeeze
+    rather than the rail being thrown to the bottom. */
+ .app{display:grid;grid-template-columns:190px minmax(400px,1fr) 280px;
+   gap:22px;align-items:start}
+ @media(max-width:1010px){.app{grid-template-columns:190px minmax(0,1fr)}
    .right{grid-column:1/-1;order:3}
    .right .panel{max-width:none}}
  .right{min-width:0}
@@ -115,6 +120,18 @@
  .res .x{color:var(--faint);cursor:pointer;padding:0 3px;flex:none}
  .res .x:hover{color:var(--warn)}
  .res.offered .n{color:var(--dim)}
+ /* Where the memory went, from the OS rather than from each runtime's own
+    account of itself. The bar is one machine; the segments are runtimes. */
+ .ram{margin-top:12px}
+ .rambar{height:10px;display:flex;border-radius:2px;overflow:hidden;
+   background:var(--med);margin:7px 0 8px}
+ .rambar i{display:block;height:100%}
+ .ramrow{display:flex;justify-content:space-between;gap:10px;font-size:10.5px;
+   padding:1px 0}
+ .ramrow span:first-child{color:var(--dim);display:flex;align-items:center;
+   gap:6px}
+ .ramrow em{width:7px;height:7px;border-radius:2px;display:inline-block;
+   font-style:normal;flex:none}
  .res .dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ok)}
  .res.loading .dot{background:var(--warn);animation:pulse 2s ease-in-out infinite}
  .res.offered .dot{background:var(--faint)}
@@ -349,6 +366,7 @@
         </div>
         <div class="sidelab">loaded on this machine</div>
         <div id="resident"></div>
+        <div id="ramwent"></div>
         <div class="sidelab">on disk</div>
         <div id="others"></div>
       </section>
@@ -862,6 +880,33 @@ async function loadModels(){
 // of memory and every runtime is spending from it, so opening another tool's
 // page to see what it is holding is a thing this should have made
 // unnecessary.
+// A runtime's own account of what it holds and the OS's account of what its
+// processes cost are different numbers, and the gap is the thing that is
+// hard to chase down by hand. Both are shown; neither is derived from the
+// other.
+const RAMCOL={knurlogic:'var(--acc)', exo:'var(--warn)',
+              ollama:'var(--ok)', 'mlx-lm':'#7aa2f7', 'mlx-vlm':'#bb9af7',
+              vqlab:'#e0af68'};
+function ramWent(m){
+  const el=$('ramwent');
+  if(!m || !m.installed_bytes){ el.innerHTML=''; return }
+  const inst=m.installed_bytes, by=Object.entries(m.by_runtime||{})
+    .sort((a,b)=>b[1]-a[1]);
+  const other=m.other_bytes||0, free=Math.max(inst-(m.seen_bytes||0),0);
+  const seg=(b,c)=>`<i style="width:${(100*b/inst).toFixed(2)}%;
+    background:${c}"></i>`;
+  const row=(k,b,c)=>`<div class="ramrow"><span>${
+    c?`<em style="background:${c}"></em>`:'<em></em>'}${k}</span>
+    <span>${gb(b)}</span></div>`;
+  el.innerHTML=`<div class="ram"><div class="sidelab"
+      style="margin-top:14px">where the memory went</div>
+    <div class="rambar">${by.map(([k,b])=>seg(b,RAMCOL[k]||'var(--dim)')).join('')}
+      ${seg(other,'var(--faint)')}</div>
+    ${by.map(([k,b])=>row(k,b,RAMCOL[k]||'var(--dim)')).join('')}
+    ${row('everything else',other,'var(--faint)')}
+    ${row('unused',free,'')}</div>`;
+}
+
 async function act(payload){
   const r=await fetch('/loaded.json',{method:'POST',
     body:JSON.stringify(payload)});
@@ -891,6 +936,7 @@ async function loadResident(){
       </div>
       ${r.can_unload?`<span class="x" data-i="${i}" title="unload">×</span>`:''}
     </div>`).join('');
+  ramWent(d.memory||{});
   el.querySelectorAll('.x').forEach(x=>x.onclick=async()=>{
     const r=rows[+x.dataset.i];
     const how={knurlogic:'unload', exo:'exo-unload', ollama:'ollama-unload'};
