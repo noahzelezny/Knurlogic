@@ -152,6 +152,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             a, live_env=live_env, live_tune=tune, live_working_set=ws,
             resolve_fn=_resolve_for, wired_advice=adv,
             live_knobs=engine.LIVE_KNOBS),
+        models_fn=web.models_document(serving=a.path.name),
         apply_fn=_apply)
     return engine.serve(str(a.path), host, port,
                         executes_artifact_code=bool(a.model_file),
