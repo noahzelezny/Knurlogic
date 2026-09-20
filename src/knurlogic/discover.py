@@ -169,9 +169,16 @@ def _from_config_dir(d: Path, store: str) -> Found | None:
         if parent.name.startswith("models--"):
             name = parent.name[len("models--"):].replace("--", "/")
             break
+    # A config.json with no weights beside it is an interrupted or evicted
+    # download, not a model. Two of these sat in the hub cache here and read
+    # as 0 GiB artifacts -- which then dragged their whole model group into
+    # "fits in memory" in the picker, because something reporting no size
+    # fits anywhere.
     return Found(name=name, path=d, store=store, format="mlx",
                  bytes_on_disk=size, model_type=a.model_type, is_vq=a.is_vq,
-                 model_file=a.model_file, servable=True,
+                 model_file=a.model_file, servable=size > 0,
+                 why="" if size else "config.json but no weight files -- an "
+                                     "interrupted or evicted download",
                  # A built drafting head is a property of what is ON DISK, and
                  # it sits outside the model glob -- so nothing else in a
                  # listing would ever mention it.
