@@ -108,9 +108,15 @@ Both are solved, in Noah's own code, and measured.
                                               pack, extract -- plus accept,
                                               probe, run, smoke. exo has
                                               none of this half.
-    exo/.../engines/mlx/mtp/      3091 lines  the same core, PLUS
+    exo-FORK/.../engines/mlx/mtp/ 3091 lines  the same core, PLUS
                                               batch_loop.py (648) and
                                               heads/{qwen4_exp,qwen35,glm5}
+
+**"exo" below always means Noah's FORK.** Upstream exo-explore/exo has no MTP
+at all -- checked, not assumed: 0 files under `engines/mlx/mtp/` on
+origin/main against 15 in the fork, and all 17 commits touching it are his.
+So this is not porting a feature out of exo. It is getting his own code out
+of a fork it is trapped in, which is the entire premise of knurlogic.
 
 **The two copies have drifted**, which is the argument for knurlogic holding
 one. Measured by diff:
@@ -153,10 +159,10 @@ Nothing in the algorithm. The work is packaging:
 
 #### 1. One copy. The map, with dates checked rather than assumed
 
-Everything lands in `src/knurlogic/mtp/`. exo wins every contested file: it
-is newer on all three, and it is the copy `batch_loop.py` and the heads were
-written against, so taking exo's core keeps the set coherent rather than
-mixing two lineages.
+Everything lands in `src/knurlogic/mtp/`. The fork wins every contested file:
+it is newer on all three, and it is the copy `batch_loop.py` and the heads
+were written against, so taking it keeps the set coherent rather than mixing
+two lineages.
 
     FROM exo/src/exo/worker/engines/mlx/mtp/          lines
       capture.py                                        68   identical in both
@@ -186,6 +192,43 @@ builders, which are a build step.
 
 The exo imports to sever are few and were counted: batch_loop 1, pipeline 1,
 speculative 4. Everything else imports nothing but mlx and mlx-lm.
+
+#### A HEAD IS BOUND TO THE MODEL, NOT TO THE RUNG (measured 2026-09-20)
+
+Asked because it decides how far any of this reaches: if a sidecar only works
+on the artifact it was packed beside, MTP is a VQ-only feature. It is not.
+
+`Qwen--Qwen3.8-Flash-Next-3bit` -- an official Qwen release converted to MLX
+3-bit, no VQ, no bundled runtime, nothing of ours in it -- was loaded with
+the sidecar packed beside `TheDrainFlorist--Qwen3.8-Flash-Next-VQ-2.1bpw`, a
+different artifact at a different bit-width. It drafted:
+
+    control   main vs itself    max|a-b| 0.0000   cosine 1.000000
+    arm       main vs draft     max|a-b| 8.0456   cosine 0.820031
+    main head top-5   [' Paris', '...', ' London', '\n\n', ' Rome']
+    draft head top-5  [',', '.', '\n\n', '\n', ' (']
+
+Same shape as on the VQ rung: the draft is a coherent continuation one
+position further on. The head carries its own block, mixer, norms and fc, and
+reads the TRUNK's embedding and lm_head -- so what it binds to is the base
+model's architecture and dimensions, not the quantisation underneath.
+
+**So community quants can draft.** The eight rungs here that declare a head
+and have none could each be given one by copying a sidecar from a VQ rung of
+the same base model. That also means vqlab's head-building generalises past
+its own artifacts, which was not obvious.
+
+WHAT THIS DOES NOT SAY: how OFTEN the draft is right. Acceptance is a
+different measurement and `vqlab mtp-accept` is the instrument; a 3-bit trunk
+may well accept less than the rung the head was packed beside. One prompt,
+one position, no acceptance claim and no speed claim.
+
+Also noted, not concluded: the first attempt died with a Metal
+`kIOGPUCommandBufferCallbackErrorTimeout` while reading 75 GB cold off the
+Thunderbay with exo live; the identical rerun was clean. Transient. The run
+before that looked like a load failure only because stdout was block-buffered
+into a pipe and the abort ate it -- `python3 -u` is not optional when the
+thing you are debugging can crash.
 
 #### 2. Defaults that need no folklore
 
