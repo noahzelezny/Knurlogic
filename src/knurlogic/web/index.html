@@ -683,6 +683,13 @@ async function tick(){
   const ns=d.nodes||[], up=ns.filter(n=>n.reachable!==false).length;
   setState(up===ns.length, ns.length>1 ? `${up}/${ns.length} nodes`
     : (up ? 'serving' : 'no answer'));
+  // Nothing loaded is a STATE, not a page still loading, and the bench has
+  // nothing to send a prompt to -- so it goes rather than sitting there with
+  // a button that would fail.
+  $('try').style.display=a?'':'none';
+  if(!a){ $('title').textContent='no model loaded';
+    $('sub').textContent='';
+    $('badges').innerHTML=''; }
   if(a){ $('title').textContent=a.name;
     $('sub').textContent=`${a.model_type} · ${gb(a.size_bytes)}`;
     const b=[];
@@ -761,9 +768,19 @@ async function tick(){
   SHAPE.imac=SHAPE.laptop; SHAPE.pro=SHAPE.studio;
 
   function unit(n){
-    const nm=n.memory||{}, ws=nm.working_set_bytes||1;
-    const pct=Math.max(0,Math.min(100,100*(nm.active_bytes||0)/ws));
-    const off=n.reachable===false||!nm.available;
+    const nm=n.memory||{};
+    // The number under a machine has to be the number the machine is
+    // DRAWING. With a memory map the fill is every process on the box
+    // against installed RAM; the engine's own active_bytes is a different
+    // quantity with a different denominator, and showing it here read 0%
+    // under a visibly full machine the first time this ran with nothing
+    // loaded -- exo was holding 46 GiB and the caption said none.
+    const mm=n.memory_map||(n.role==='local'||n.role==='server'?RAM:null);
+    const mapped=!!(mm&&mm.installed_bytes);
+    const ws=(mapped?mm.installed_bytes:nm.working_set_bytes)||1;
+    const used=mapped?(mm.seen_bytes||0):(nm.active_bytes||0);
+    const pct=Math.max(0,Math.min(100,100*used/ws));
+    const off=n.reachable===false||(!nm.available&&!mapped);
     const stroke=off?'var(--line)':'var(--acc)';
     const kind=(n.machine||{}).kind||'';
     const draw=SHAPE[kind]||SHAPE[''];
@@ -773,9 +790,8 @@ async function tick(){
     // on. A node that answered gets a stacked fill; a node that did not --
     // no knurlogic there, or a runtime that never said -- keeps the plain
     // band. Nothing is ever painted with another node's numbers.
-    const mm=n.memory_map||(n.role==='local'||n.role==='server'?RAM:null);
     let bands=off?[]:[[pct/100,'var(--acc)']];
-    if(mm && mm.installed_bytes && !off){
+    if(mapped && !off){
       const by=Object.entries(mm.by_runtime||{}).sort((a,b)=>b[1]-a[1]);
       const b2=by.map(([k,v])=>[v/ws, RAMCOL[k]||'var(--dim)']);
       b2.push([(mm.other_bytes||0)/ws, 'var(--faint)']);
@@ -790,7 +806,7 @@ async function tick(){
       <svg width="88" height="56" viewBox="0 0 88 56"${
         model?` aria-label="${esc(model)}"`:''}>${draw(bands,stroke)}</svg>
       <div class="stat"><span class="pct">${off?'--':pct.toFixed(0)+'%'}</span>
-        ${off?'no answer':gb(nm.active_bytes||0)+' / '+gb(ws)}</div>
+        ${off?'no answer':gb(used)+' / '+gb(ws)}</div>
     </div>`;
   }
   // One node still gets its unit: the picture is the gauge, not an
