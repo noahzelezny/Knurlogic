@@ -159,9 +159,23 @@ Nothing in the algorithm. The work is packaging:
    `EXO_NO_BATCH`, `~/.exo/engine-mode`, and that a sidecar must sit beside
    the weights. knurlogic already detects the sidecar (`knurlogic mtp`); it
    should pick the drafting batch engine when a head is present and say so.
-3. **The head builders reach the GUI.** 11 rungs here have a head; 39 declare
-   one and have nothing. `vqlab mtp-graft` can build from the one checkpoint
-   that carries the weights. That is a button, not a research project.
+**And a line that decides what knurlogic does NOT do: vqlab builds models,
+knurlogic coalesces them.** The head builders (`mtp-graft`, `mtp-pack`) are a
+build step and stay in vqlab. They are not ported here and knurlogic never
+grows a button for them.
+
+That line is visible in the artifacts themselves. Measured across every one
+on this disk: **11 of 11 built heads sit beside a VQ artifact, and not one
+community rung has one.** A sidecar is a thing vqlab made. So a missing head
+means two different things, and knurlogic now says which:
+
+* on a community rung -- nothing. The `mtp` key is inherited from the
+  upstream config, no publisher ships those weights, and there is no defect
+  and nothing anybody can do. 8 here.
+* on a VQ artifact -- it was not packed, which is a vqlab question. 23 here.
+
+Reporting both as "no head weights, absent from the download" sent someone
+looking for a fix that does not exist for most of them.
 
 The probe in `tools/mtp_probe.py` stays as the gate: it proved the sidecar
 loads through exo's registry with nothing patched, which is what makes the

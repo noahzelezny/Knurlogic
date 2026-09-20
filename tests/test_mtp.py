@@ -37,14 +37,28 @@ def _artifact(d, config):
     return Artifact.load(str(d))
 
 
-def test_declared_but_absent_is_its_own_state(tmp_path):
-    """The common case: 39 of 40 on this machine."""
+def test_a_community_rung_declaring_a_head_is_not_a_defect(tmp_path):
+    """The `mtp` key is inherited from the upstream config and no publisher
+    ships the weights. Measured here: 11 of 11 built heads sit beside a VQ
+    artifact and not one community rung has one. Reporting this as something
+    missing sends someone looking for a fix that does not exist."""
     a = _artifact(tmp_path / "m", {"model_type": "qwen4_exp", "mtp": {}})
     s = mtp.status(a)
-    assert s.state == mtp.DECLARED
-    assert "NO head weights" in s.render()
-    # and says so as a DENIAL of the old claim, not silently
-    assert "not discarded at load" in s.render()
+    assert s.state == mtp.DECLARED and s.is_vq is False
+    assert "nothing to do" in s.render()
+    assert "vqlab" not in s.render()
+
+
+def test_a_vq_artifact_without_a_head_points_at_the_thing_that_builds_them(
+        tmp_path):
+    """vqlab builds models, knurlogic runs them. A missing head on an
+    artifact vqlab built is a packing step that did not happen -- still not
+    knurlogic's to do, but worth naming."""
+    a = _artifact(tmp_path / "m", {"model_type": "qwen4_exp", "mtp": {},
+                                   "vq_modules": {"a": {"d": 2, "K": 256}}})
+    s = mtp.status(a)
+    assert s.state == mtp.DECLARED and s.is_vq is True
+    assert "vqlab" in s.render()
 
 
 def test_graft_weights_in_the_trunk_are_graftable(tmp_path):
