@@ -94,72 +94,78 @@ sidecar built and sitting unread -- 2.14 GiB (qwen4_exp), 5.41 (qwen3_5),
 `knurlogic mtp` reports the three states and `models` flags `[MTP]`. Nothing
 loads a head yet.
 
-### The port
+### IT IS ALREADY WORKED OUT. Do not rebuild any of it.
 
-It is a PORT, not an implementation. MTP is not an exo default; it is the maintainer's
-work, 3091 lines under `exo/src/exo/worker/engines/mlx/mtp/`, and the
-coupling was measured file by file -- exo imports per file:
+Surveyed 2026-09-20 rather than assumed, because the previous version of this
+section read as though MTP and batched MTP were open problems. They are not.
+Both are solved, in the maintainer's own code, and measured.
 
-    registry, caches, capture, sampling, seed, loop, heads/*  ....... 0
-    batch_loop (648 lines, the batched one) ......................... 1
-    pipeline ........................................................ 1
-    generator/mtp_batch_generate.py (451) .......................... 15
+**Where each piece lives.**
 
-The family-agnostic core is already free of exo. Only the outermost generator
-is genuinely exo-shaped, and that is the layer knurlogic replaces anyway.
-`registry.py` says why it was built portable:
+    vqlab/src/vqlab/mtp/          1295 lines  capture, sampling, caches,
+                                              registry, loop, runtime, bench
+    vqlab/src/vqlab/mtp_*.py      2015 lines  the HEAD BUILDERS -- graft,
+                                              pack, extract -- plus accept,
+                                              probe, run, smoke. exo has
+                                              none of this half.
+    exo/.../engines/mlx/mtp/      3091 lines  the same core, PLUS
+                                              batch_loop.py (648) and
+                                              heads/{qwen4_exp,qwen35,glm5}
 
-    There is no public mlx-lm hook for this, so we wrap that one module for
-    the duration of the generation (see capture.py) rather than
-    monkeypatching the class.
+**The two copies have drifted**, which is the argument for knurlogic holding
+one. Measured by diff:
 
-The sidecar BUILDER is the other half and lives in vqlab, not exo:
-`mtp_graft.py` / `mtp_pack.py`. It reads `mtp.*` off the safetensors directly
-and never goes through `sanitize()` -- which is the other reason the
-sanitize-first plan was aimed at the wrong thing.
+    capture.py    identical
+    sampling.py   identical
+    caches.py      30 lines differ    exo newer (09-17 vs 09-02)
+    registry.py    63 lines differ    same day
+    loop.py       296 lines differ    exo newer (09-17 vs 09-03)
 
-### The first step is DONE (2026-09-20, Laptop B, mlx-lm 0.31.9)
+**Measured, and not to be re-derived** (vqlab MORNING-REPORT 2026-09-04,
+exo stage-1, both boxes, TB4 TCP):
 
-`tools/mtp_probe.py`, run against Flash-Next VQ-2.1bpw and its 2.14 GiB
-`mtp-head-q6.safetensors`. The head loads and drafts.
+    rung                    stock 300/2000   MTP 300/2000   acceptance
+    GLM 2.7   (one box)      19.5 / 5.7      22.3 / 11.0    0.887/0.701
+    GLM 3.1   (cluster)       6.9 / 6.2      18.5 / 17.4    0.727/0.642
+    397B 2.6  (cluster)      23.7 / 23.5     23.7 / 23.4    0.853/0.851
 
-    CONTROL  main head vs itself     max|a-b| 0.0000   cosine 1.000000
-    ARM      main head vs MTP head   max|a-b| 8.1216   cosine 0.831266
+GLM cluster rungs: up to 2.8x long-generation decode. 397B: parity, and its
+stock decode does not degrade with context, so there is nothing to win.
 
-The control is the point: a comparison that cannot detect SAMENESS says
-nothing about difference, so the same code path was run on the main head
-against itself first. It reported identical, so the arm means something.
+**Batching with MTP is done too**, and the caveat that shipped with the
+report above -- "drafting currently requires EXO_NO_BATCH=1" -- has been
+retired. `mtp/batch_loop.py` drafts inside the batch engine, selected by
+`~/.exo/engine-mode`. Measured 2026-09-17 on
+Qwen3.8-Flash-Next-VQ-2.1bpw, M3: **23.1 vs 22 tok/s, identical tokens** --
+a lone request on the drafting batch engine decodes as the sequential loop
+would, and a second request simply joins the batch.
 
-And the arm is better evidence than the number. On "The capital of France
-is" the main head's top-5 is `[' Paris', '\n\n', '...', ' known', '\n']` --
-token t+1. The drafting head's top-5 is `[',', '.', '\n\n', '\n', '...']`,
-which is what follows *Paris*. It is not a different answer to the same
-question; it is an answer to the NEXT question, which is what a
-multi-token-prediction head is for. A head that had loaded wrong would give
-noise, not a coherent continuation one position further on.
+`vqlab mtp-accept` is the reliable instrument and its docstring says why:
+greedy decoding is deterministic so repeats buy nothing, prompts are the
+replicates, and the comparison is paired. Wall-clock is a property of the
+machine -- the same configuration measured twice in one process gave 1.723x
+and 1.135x on a thermally constrained M4 Max. Quote acceptance from there;
+quote speed only from a thermally stable box.
 
-No speed claim, and none is available from this: one arm, one position.
+### So what is actually left for knurlogic
 
-TWO THINGS THE PROBE ESTABLISHED IN PASSING:
+Nothing in the algorithm. The work is packaging:
 
-* the sidecar loads through exo's own `registry.resolve` ->
-  `head_cls().from_sidecar(model, arch, path)` with nothing patched, which
-  is the portability claim in `registry.py` holding up under test;
-* the draft cache is ONE cache object from `spec.make_draft_cache(arch)`,
-  not a list. Passing `[cache]` raises `'list' object has no attribute
-  'offset'` inside the attention block.
+1. **One copy.** Take the newer of each file (exo for caches/loop/batch_loop,
+   vqlab for the graft/pack builders exo does not have), into
+   `knurlogic/mtp/`. capture.py and sampling.py are already identical in both
+   and can be taken as-is.
+2. **Defaults that need no folklore.** Today a user has to know about
+   `EXO_NO_BATCH`, `~/.exo/engine-mode`, and that a sidecar must sit beside
+   the weights. knurlogic already detects the sidecar (`knurlogic mtp`); it
+   should pick the drafting batch engine when a head is present and say so.
+3. **The head builders reach the GUI.** 11 rungs here have a head; 39 declare
+   one and have nothing. `vqlab mtp-graft` can build from the one checkpoint
+   that carries the weights. That is a button, not a research project.
 
-**Next after this.** The head drafts; nothing yet verifies the drafted token
-against the trunk, which is what makes speculation correct rather than fast.
-`loop.py` and `batch_loop.py` already do that and are the port target.
-
-Batching: mlx-lm's gate is `is_batchable = draft_model is None and all(hasattr
-(c, "merge") for c in make_prompt_cache(model))`. An MTP head lives INSIDE the
-model, loads no `draft_model`, and never trips it. Unverified against a loaded
-VQ artifact.
-
-A head is 2-6 GiB of working set that `resolve()` does not currently count.
-When a loop can load one, that has to reach the memory math.
+The probe in `tools/mtp_probe.py` stays as the gate: it proved the sidecar
+loads through exo's registry with nothing patched, which is what makes the
+port a copy rather than a rewrite.
 
 ## Measured, so it is not re-litigated
 
