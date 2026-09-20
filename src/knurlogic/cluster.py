@@ -75,6 +75,25 @@ class ExoNode:
     ram_total: int
     ram_available: int
     model_id: str = ""
+    ip: str = ""
+
+
+def _node_ip(info: dict) -> str:
+    """A routable address for a node, from exo's own interface list.
+
+    Loopback is skipped: every node reports 127.0.0.1 and asking THAT for a
+    peer's status would return this box's answer for all of them -- the same
+    shape as the bare-`python3` version check that answered for the system
+    interpreter every iteration.
+    """
+    best = ""
+    for i in info.get("interfaces") or []:
+        ip = i.get("ipAddress") or i.get("ip_address") or ""
+        if not ip or ":" in ip or ip.startswith("127."):
+            continue
+        if not best or i.get("interfaceType") in ("thunderbolt", "ethernet"):
+            best = ip
+    return best
 
 
 def inventory(exo_url: str) -> list:
@@ -88,6 +107,7 @@ def inventory(exo_url: str) -> list:
     state = _get(f"{exo_url}/state")
     mem = _pick(state, "nodeMemory", "node_memory")
     ident = _pick(state, "nodeIdentities", "node_identities")
+    net = _pick(state, "nodeNetwork", "node_network")
     out = []
     for node_id, m in sorted(mem.items()):
         who = ident.get(node_id, {}) or {}
@@ -97,13 +117,59 @@ def inventory(exo_url: str) -> list:
             or node_id[:12],
             ram_total=_bytes(_pick(m, "ramTotal", "ram_total")),
             ram_available=_bytes(_pick(m, "ramAvailable", "ram_available")),
+            # exo's `modelId` is the PRODUCT NAME -- measured against the
+            # live daemon, which reports "Mac Studio" and "MacBook Pro", not
+            # `Mac15,14`. That is a stronger channel than anything this end
+            # can infer, so it is used directly rather than guessed at.
             model_id=who.get("modelId") or who.get("model_id") or "",
+            ip=_node_ip(net.get(node_id) or {}),
         ))
     return out
 
 
+#: A peer's knurlogic, asked for the one thing only that node can answer:
+#: which of ITS processes is holding ITS memory. Cached per node, because the
+#: page polls every two seconds and a cross-network fetch is not free.
+_PEER: dict = {}
+
+
+def peer_memory_map(ip: str, port: int, ttl: float = 6.0) -> dict | None:
+    """The memory map a knurlogic on another node reports for itself.
+
+    This is the whole reason it is worth running knurlogic on every node
+    rather than only in front of exo: process footprints are true only of
+    the machine they were read on, so the node has to answer for itself.
+    exo reports RAM totals per node and nothing about who is spending it.
+
+    Absent is a normal answer -- no knurlogic there, a different port, a
+    firewall. The caller draws the plain gauge it always drew.
+    """
+    import time
+
+    if not ip:
+        return None
+    key = (ip, port)
+    hit = _PEER.get(key)
+    now = time.time()
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    doc = None
+    try:
+        d = _get(f"http://{ip}:{port}/status.json", timeout=1.5)
+        nodes = (d or {}).get("nodes") or []
+        for nd in nodes:
+            if nd.get("memory_map"):
+                doc = nd["memory_map"]
+                break
+    except Exception:
+        doc = None
+    _PEER[key] = (now, doc)
+    return doc
+
+
 def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
-                  artifact=None, declared_ws: int = 0) -> dict:
+                  artifact=None, declared_ws: int = 0,
+                  peer_port: int = 0) -> dict:
     """A per-node status built from what exo reports about that node.
 
     Only `active` is knowable this way -- total minus available is everything
@@ -123,6 +189,18 @@ def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
     # made from what it reported. Handing them all wired.machine() would
     # label the whole cluster with this box.
     is_local = n.name == local_name
+    mm = None
+    if is_local:
+        from . import loaded
+        try:
+            mm = loaded.memory_map()
+        except Exception:
+            mm = None
+    elif peer_port:
+        # A peer is asked on the SAME port this front end is serving on:
+        # knurlogic on every node is the assumption the feature rests on,
+        # and a node that is not running one simply does not answer.
+        mm = peer_memory_map(n.ip, peer_port)
     return status.snapshot(
         # The artifact is the same on every node -- which node we happen to
         # be launched next to is not what decides whether the page can say
@@ -132,7 +210,8 @@ def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
         node=n.name,
         role="local" if is_local else "remote",
         machine_fn=(None if is_local
-                    else lambda: wired.kind_from(n.name, n.model_id)),
+                    else lambda: wired.kind_from(n.name, product=n.model_id)),
+        memory_map=mm,
         memory_fn=lambda: {
             "available": ws > 0,
             "device": device,
@@ -372,10 +451,12 @@ def run(path: str, host: str, port: int, profile: str, exo_url: str,
                                                  "available": False}))
             else:
                 snaps.append(_snapshot_for(n, local, c.nodes[name].env, a,
-                                           declared_ws.get(name, 0)))
+                                           declared_ws.get(name, 0),
+                                           peer_port=port))
         for n in live:                      # nodes exo sees that we did not
             if n.name not in c.nodes:
-                snaps.append(_snapshot_for(n, local, {}, a))
+                snaps.append(_snapshot_for(n, local, {}, a,
+                                           peer_port=port))
         snap = status.aggregate(snaps, artifact=a)
         if overrides:
             snap["overrides"] = override.status(
