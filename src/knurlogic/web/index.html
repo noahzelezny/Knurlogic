@@ -225,6 +225,9 @@
    color:var(--faint)}
  .met b{color:var(--fg);font-weight:700;text-transform:none;letter-spacing:0}
  .met .warnv b{color:var(--warn)}
+ .met .d{font-style:normal;margin-left:6px;font-weight:700}
+ .met .d.up{color:var(--ok)} .met .d.down{color:var(--warn)}
+ .met .d.flat{color:var(--faint)}
  #log{height:230px}
  .bench{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px}
  .chk{display:flex;align-items:center;gap:7px;cursor:pointer;color:var(--dim);
@@ -280,18 +283,13 @@
       </section>
       <section class="panel" id="try">
         <div class="lab">Bench</div>
-        <div class="msg" style="margin:0 0 10px">Nobody holds conversations
-          here — you point a harness at the endpoint for that. This is for
-          finding the settings FIRST: send a prompt, turn a knob, send the
-          same prompt again, and watch the three numbers.</div>
         <div id="log"></div>
         <form id="f"><input id="q" placeholder="A prompt to measure with" autocomplete="off">
           <button class="go" id="go">Run</button></form>
         <div class="bench">
-          <label class="chk" title="Prepend a unique marker so the prompt shares no prefix with the last one, and is therefore actually prefilled">
-            <input type="checkbox" id="fresh" checked> fresh prefill</label>
           <button id="again" class="mini" disabled>Run it again</button>
-          <span class="msg" id="benchnote"></span>
+          <label class="chk"><input type="checkbox" id="fresh" checked>
+            fresh prefill</label>
         </div>
       </section>
     </main>
@@ -323,8 +321,7 @@
       </section>
       <section class="panel" id="connect">
         <div class="lab">Connect</div>
-        <div class="msg" id="connwhy" style="margin-top:0">Anything speaking OpenAI
-          or the Claude Messages shape can use this server.</div>
+
         <div class="seg" id="conntabs" style="margin:10px 0"></div>
         <pre id="conn" style="user-select:all"></pre>
       </section>
@@ -717,26 +714,48 @@ const log=$('log');
 function say(who,t){const p=document.createElement('p');p.innerHTML=`<b>${who}</b> `;
   p.appendChild(document.createTextNode(t));log.appendChild(p);log.scrollTop=1e9;return p}
 
-function metHTML(m){
+// The point of running twice is the difference, so the page draws the
+// difference. A line telling you to compare the two numbers is a line
+// doing work the numbers should be doing themselves.
+//
+// Only against the run above it, and only when that run measured the same
+// thing: a delta against a different prompt is not a delta.
+// One sample per arm cannot support a small difference, so anything under
+// 5% reads as "=" rather than as a change. Drawing a 2% wobble with an arrow
+// on it is the same error as quoting a speed claim from a single run.
+function delta(now, was){
+  if(!(now>0&&was>0)) return '';
+  const pc=100*(now-was)/was;
+  if(Math.abs(pc)<5) return '<i class="d flat">=</i>';
+  return `<i class="d ${pc>0?'up':'down'}">${pc>0?'▲':'▼'}${
+    Math.abs(pc).toFixed(0)}%</i>`;
+}
+function metHTML(m, prev){
   if(!m) return '';
+  const same=prev && prev.prompt===m.prompt;
   const bit=(k,v,warn)=>`<span class="${warn?'warnv':''}">${k} <b>${v}</b></span>`;
   let h=bit('ttft', m.ttft_ms<1000?`${Math.round(m.ttft_ms)} ms`
                                   :`${(m.ttft_ms/1000).toFixed(2)} s`);
-  if(m.prefill_tps) h+=bit('prefill', `${Math.round(m.prefill_tps)} tok/s`);
-  else if(m.cached) h+=bit('prefill','cached',1);
-  if(m.decode_tps) h+=bit('decode', `${m.decode_tps.toFixed(1)} tok/s`);
-  if(m.prompt) h+=bit('prompt', m.cached?`${m.prompt} (${m.cached} cached)`
+  if(m.prefill_tps) h+=bit('prefill', `${Math.round(m.prefill_tps)} tok/s`+
+    (same?delta(m.prefill_tps, prev.prefill_tps):''));
+  if(m.decode_tps) h+=bit('decode', `${m.decode_tps.toFixed(1)} tok/s`+
+    (same?delta(m.decode_tps, prev.decode_tps):''));
+  // Prefill is the rate of NEW prefill either way -- cached tokens are
+  // already out of it -- so a cache hit is a smaller sample, not a wrong
+  // number. Shown because it explains a thin measurement, not warned about.
+  if(m.prompt) h+=bit('prompt', m.cached?`${m.prompt-m.cached} new of ${m.prompt}`
                                         :String(m.prompt));
   if(m.completion) h+=bit('out', String(m.completion));
-  // The prompt the model saw is not quite the prompt on screen when this is
-  // on, and a bench that hides that is not a bench.
-  if(m.fresh) h+=bit('prefix','defeated');
   return `<div class="met">${h}</div>`;
 }
-function showMet(afterEl, m){
+function showMet(afterEl, m, prev){
   const d=document.createElement('div');
-  d.innerHTML=metHTML(m); const el=d.firstElementChild;
+  d.innerHTML=metHTML(m, prev); const el=d.firstElementChild;
   if(el){ afterEl.after(el); log.scrollTop=1e9 }
+}
+function lastMet(){
+  const r=RUNS.find(x=>x.id===CUR);
+  return r ? (r.msgs||[]).map(x=>x.met).filter(Boolean).pop() : null;
 }
 
 // --- chat memory ----------------------------------------------------------
@@ -781,9 +800,10 @@ function renderRuns(){
 function newRun(){ CUR=null; log.innerHTML=''; renderRuns(); $('q').focus() }
 function openRun(r){
   CUR=r.id; log.innerHTML='';
+  let prev=null;
   (r.msgs||[]).forEach(m=>{
     const p=say(m.role==='user'?'you':'it', m.content);
-    if(m.met) showMet(p, m.met);
+    if(m.met){ showMet(p, m.met, prev); prev=m.met }
   });
   renderRuns();
 }
@@ -835,6 +855,7 @@ $('again').onclick=()=>{ if(LAST && !BUSY) send(LAST) };
 async function send(q){
   if(BUSY||!q) return;
   BUSY=true; LAST=q; $('again').disabled=true;
+  const prev=lastMet();
   $('q').value=''; say('you',q); record('user',q,null);
   const out=say('it','…'); $('go').disabled=true;
   const sent=withNonce(q);
@@ -881,14 +902,11 @@ async function send(q){
            decode_tps: (comp>1 && end>first) ? (comp-1)/((end-first)/1000) : 0};
     }
     if(!text) out.lastChild.textContent='(no content)';
-    showMet(out, met);
+    showMet(out, met, prev);
     record('assistant', text||'(no content)', met);
   }catch(err){ out.lastChild.textContent=String(err);
     record('assistant',String(err),null) }
   BUSY=false; $('go').disabled=false; $('again').disabled=!LAST;
-  $('benchnote').textContent=LAST
-    ? 'same prompt, after a knob change, is the comparison worth having'
-    : '';
 }
 $('f').onsubmit=e=>{ e.preventDefault(); send($('q').value.trim()) };
 </script>
