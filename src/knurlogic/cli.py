@@ -7,6 +7,8 @@ import sys
 from . import __version__
 
 COMMANDS = {
+    "ui": ("ui", "open the page without loading anything: every model, every "
+                 "runtime, and where the memory went"),
     "serve": ("serve", "run an OpenAI-compatible endpoint for an artifact"),
     "doctor": ("doctor", "say whether an artifact will run, and why not"),
     "smoke": ("smoke", "generate a token and prove where the code came from"),
