@@ -226,6 +226,16 @@
  .met b{color:var(--fg);font-weight:700;text-transform:none;letter-spacing:0}
  .met .warnv b{color:var(--warn)}
  #log{height:230px}
+ .bench{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px}
+ .chk{display:flex;align-items:center;gap:7px;cursor:pointer;color:var(--dim);
+   font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+ .chk input{width:13px;height:13px;accent-color:var(--acc);padding:0;cursor:pointer}
+ .mini{background:transparent;color:var(--dim);border-color:var(--line);
+   cursor:pointer;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+   padding:5px 11px}
+ .mini:hover:not([disabled]){color:var(--acc);border-color:var(--acc)}
+ .mini[disabled]{opacity:.35;cursor:default}
+ .bench .msg{margin:0;font-size:11px}
  form{display:flex;gap:8px;margin-top:10px}form input{flex:1}
  @media(prefers-reduced-motion:reduce){
    .flow line,.live i{animation:none}
@@ -269,13 +279,20 @@
         <div id="mem" class="ro"></div>
       </section>
       <section class="panel" id="try">
-        <div class="lab">Try it</div>
-        <div class="msg" style="margin:0 0 10px">A prompt here is a
-          MEASUREMENT, not a conversation: every reply is timed, so a knob
-          can be turned and the same prompt run again.</div>
+        <div class="lab">Bench</div>
+        <div class="msg" style="margin:0 0 10px">Nobody holds conversations
+          here — you point a harness at the endpoint for that. This is for
+          finding the settings FIRST: send a prompt, turn a knob, send the
+          same prompt again, and watch the three numbers.</div>
         <div id="log"></div>
-        <form id="f"><input id="q" placeholder="Send a prompt and time it" autocomplete="off">
-          <button class="go" id="go">Send</button></form>
+        <form id="f"><input id="q" placeholder="A prompt to measure with" autocomplete="off">
+          <button class="go" id="go">Run</button></form>
+        <div class="bench">
+          <label class="chk" title="Prepend a unique marker so the prompt shares no prefix with the last one, and is therefore actually prefilled">
+            <input type="checkbox" id="fresh" checked> fresh prefill</label>
+          <button id="again" class="mini" disabled>Run it again</button>
+          <span class="msg" id="benchnote"></span>
+        </div>
       </section>
     </main>
   </div>
@@ -711,6 +728,9 @@ function metHTML(m){
   if(m.prompt) h+=bit('prompt', m.cached?`${m.prompt} (${m.cached} cached)`
                                         :String(m.prompt));
   if(m.completion) h+=bit('out', String(m.completion));
+  // The prompt the model saw is not quite the prompt on screen when this is
+  // on, and a bench that hides that is not a bench.
+  if(m.fresh) h+=bit('prefix','defeated');
   return `<div class="met">${h}</div>`;
 }
 function showMet(afterEl, m){
@@ -792,18 +812,38 @@ $('q').addEventListener('keydown',e=>{
     e.preventDefault(); $('f').requestSubmit();
   }
 });
-$('f').onsubmit=async e=>{
-  e.preventDefault(); if(BUSY) return;
-  const q=$('q').value.trim(); if(!q)return;
-  BUSY=true;
+// "fresh prefill" is NOT a cache off-switch, and calling it one would be a
+// claim this server cannot honour: mlx-lm has no per-request option for it
+// (checked -- the body options are stream/temperature/penalties and no
+// more), only the `--prompt-cache-size` flag it was started with. What it
+// has is a PREFIX TRIE: a cached entry is reused only for a shared leading
+// token run. So a unique marker at the FRONT of the prompt leaves nothing to
+// share, and the prompt is genuinely pushed through the model again.
+//
+// It cannot reach zero cached tokens and does not pretend to -- the chat
+// template's own preamble sits ahead of anything we write and stays shared.
+// That is why the rate subtracts `cached_tokens` regardless of this box: the
+// checkbox makes the measurement BIG, the subtraction makes it HONEST, and
+// the two are independent.
+let LAST='';
+function withNonce(q){
+  return $('fresh').checked
+    ? `[bench ${Math.random().toString(36).slice(2,8)}] ${q}` : q;
+}
+$('again').onclick=()=>{ if(LAST && !BUSY) send(LAST) };
+
+async function send(q){
+  if(BUSY||!q) return;
+  BUSY=true; LAST=q; $('again').disabled=true;
   $('q').value=''; say('you',q); record('user',q,null);
   const out=say('it','…'); $('go').disabled=true;
+  const sent=withNonce(q);
   const t0=performance.now();
   let first=0, text='', usage=null;
   try{
     const r=await fetch('/v1/chat/completions',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages:[{role:'user',content:q}],max_tokens:256,
+      body:JSON.stringify({messages:[{role:'user',content:sent}],max_tokens:256,
         stream:true, stream_options:{include_usage:true}})});
     if(!r.ok||!r.body) throw new Error('HTTP '+r.status);
     const rd=r.body.getReader(), dec=new TextDecoder();
@@ -834,7 +874,7 @@ $('f').onsubmit=async e=>{
       const cached=usage?.prompt_tokens_details?.cached_tokens||0;
       const fresh=Math.max(prompt-cached,0);
       const comp=usage?.completion_tokens||0;
-      met={ttft_ms:ttft, prompt, cached, completion:comp,
+      met={ttft_ms:ttft, prompt, cached, completion:comp, fresh:$('fresh').checked,
            // Only tokens actually pushed through the model count toward a
            // prefill rate, and only when there were any.
            prefill_tps: fresh>0 ? fresh/(ttft/1000) : 0,
@@ -845,6 +885,10 @@ $('f').onsubmit=async e=>{
     record('assistant', text||'(no content)', met);
   }catch(err){ out.lastChild.textContent=String(err);
     record('assistant',String(err),null) }
-  BUSY=false; $('go').disabled=false;
-};
+  BUSY=false; $('go').disabled=false; $('again').disabled=!LAST;
+  $('benchnote').textContent=LAST
+    ? 'same prompt, after a knob change, is the comparison worth having'
+    : '';
+}
+$('f').onsubmit=e=>{ e.preventDefault(); send($('q').value.trim()) };
 </script>
