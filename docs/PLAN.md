@@ -520,19 +520,54 @@ stylesheet; the provenance is the feature.
 
 ## Not done
 
-* **No model picker, no load/unload.** The server holds one artifact chosen at
-  startup. This is the piece that would actually replace what exo is used for,
-  and it needs real lifecycle machinery.
-* **The soft gate is not built**: a run record (artifact + settings + working
-  set + outcome, including OOMs), `resolve()` preferring a measurement over
-  its own arithmetic, and `doctor` labelling MEASURED vs PREDICTED. A run
-  record can hold a NEGATIVE result, which a model card structurally cannot.
-  It is also what would turn `DECODE_CHUNK_SHAPE_MAY_LOOSEN` from a global
-  flag into per-family evidence.
-* **Not on PyPI.** Name reserved; the package works.
-* **glm5_next unpinned.** Do not claim GLM support until it has generated a
-  token somewhere.
-* **The ollama reader is unverified** -- written from the on-disk layout, and
-  this machine's ollama store is empty.
-* **Whether a VQ artifact satisfies mlx-lm's `is_batchable`** is unchecked; it
-  needs a loaded model. It decides whether parallel agents batch or queue.
+Ordered by what would surprise somebody most if they hit it.
+
+### 1. Drafting does not fire on a batchable artifact
+
+The head loads, binds, and sits idle. mlx-lm has TWO generators and picks the
+batch one whenever `is_batchable` -- a rule that asks only about a separate
+draft MODEL, so an MTP head does not affect it. Flash-Next VQ-2.1bpw merges
+its caches, so it takes a path the `stream_generate` swap never sees.
+Measured live: `on: true, requests: 0`.
+
+`/status.json` reports `engine_path: batch`, `drafts_now: false` and why, so
+it is visible rather than silently broken. The fix is `mtp/batch_loop.py`,
+which is ported and unused: wire it into mlx-lm's `BatchGenerator` the way
+the fork wires it into exo's. Same loop, different host.
+
+**This is the next piece of real work.**
+
+### 2. The two interfaces have drifted apart
+
+The point of this tool is that a person and an agent are served equally well.
+They are not, yet, and the gaps run both ways:
+
+    the page has, MCP does not     the wired-limit control
+    MCP has, the page does not     `ready` -- the page never says the ring
+                                   is unsettled, it just lets you Launch
+    neither has                    acceptance. vqlab measures it; nothing
+                                   here surfaces it once a head is running
+
+A capability on one side and not the other is a bug in the premise, not a
+missing feature. Worth a pass that diffs them deliberately.
+
+### 3. Verified only as far as the seam
+
+* `knurlogic mcp` -- the tools are tested as functions and the stdio loop is
+  not. No real client has spoken to it.
+* `Load here` / `load()` -- the spawn is verified to the child's argv. No
+  model has been loaded through the page or through MCP.
+* Peer memory maps need a knurlogic on the other node bound past loopback
+  (`--host 0.0.0.0`). Deliberate default, so the node draws from exo's RAM
+  figures and only the per-runtime split is missing.
+
+### 4. Smaller
+
+* The soft gate -- run records including OOMs, `resolve()` preferring a
+  measurement, `doctor` labelling MEASURED vs PREDICTED. Designed, agreed,
+  not built. The `OK / UNPINNED / DRIFTED` vocabulary is the model.
+* `mtp/_artifacts.py` holds the public front door behind a private name. It
+  reads oddly; the re-export in `__init__` is the contract.
+* 39 rungs declare a head they do not have. 8 are community rungs where that
+  means nothing. The other 23 are vqlab's to pack.
+
