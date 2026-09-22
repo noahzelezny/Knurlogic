@@ -16,6 +16,7 @@ COMMANDS = {
     "override": ("override", "replace a module inside mlx-lm, mlx-vlm or exo "
                              "without forking it"),
     "connect": ("connect", "print how to point a client at a running server"),
+    "mcp": ("mcp", "serve the agent-facing tool interface on stdio"),
     "loaded": ("loaded", "what is in memory right now, in every runtime on "
                          "this machine"),
     "mtp": ("mtp", "which artifacts have a drafting head, and which only "
