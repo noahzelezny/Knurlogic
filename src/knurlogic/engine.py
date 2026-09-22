@@ -116,7 +116,7 @@ def load(path: str, executes_artifact_code: bool = False):
 
 def serve(model_path: str, host: str, port: int,
           executes_artifact_code: bool = False, extra: list | None = None,
-          routes: dict | None = None):
+          routes: dict | None = None, draft: bool = True):
     """Hand off to the engine's own OpenAI-compatible server.
 
     The engine ships a complete one -- request schema, streaming, chat
@@ -141,11 +141,23 @@ def serve(model_path: str, host: str, port: int,
     # standing between one artifact and another is which path this dict
     # holds. A client still cannot steer it; only `switch()` can.
     _SERVED["path"] = model_path
+    _SERVED["draft"] = draft
     _real = srv.ModelProvider.load
     _real_init = srv.ModelProvider.__init__
 
     def _pinned(self, model_path_req=None, *a, **k):
-        return _real(self, _SERVED["path"], *a, **k)
+        out = _real(self, _SERVED["path"], *a, **k)
+        # A drafting head binds to a LOADED model, and the provider loads in
+        # the generator thread -- so this is the first moment one can exist.
+        # Re-run on every load, because switching artifacts changes the
+        # answer: the new one may ship a head, or may not.
+        if _SERVED.get("draft", True) and _SERVED["path"]:
+            try:
+                if load_draft_head(_SERVED["path"]) is not None:
+                    install_drafting(srv)
+            except Exception as e:
+                _DRAFT.update(on=False, why=f"{type(e).__name__}: {e}")
+        return out
 
     def _init(self, *a, **k):
         _real_init(self, *a, **k)
@@ -460,3 +472,146 @@ def keeps_mtp_weights(model_type: str) -> bool | None:
     dropped = 'k.startswith(("mtp.", "model.mtp."))' in text or \
         ('"mtp."' in text and "continue" in text)
     return not dropped
+
+
+# --- drafting ---------------------------------------------------------------
+# An artifact that ships a multi-token-prediction head carries weights mlx-lm
+# will never run: it has no MTP path at all, and neither does upstream exo.
+# knurlogic does, so a head beside the weights is simply used -- no flag, no
+# environment variable, no mode file.
+
+_DRAFT: dict = {"head": None, "spec": None, "why": "", "on": False,
+                "requests": 0, "steps": 0, "accepted": 0}
+
+
+def drafting_status() -> dict:
+    """What drafting is doing, for `/status.json` and the startup line.
+
+    `engine_path` is here because it is the thing that explains a head that
+    loaded and then never drafted. mlx-lm has two generators: a sequential
+    one that calls `stream_generate`, and a BATCH one that does not. It picks
+    the batch path whenever `is_batchable` -- which an MTP head does not
+    affect, since that rule only asks about a separate draft MODEL. So an
+    artifact whose caches can merge goes down a path the sequential swap
+    never sees, and the only symptom is `requests: 0` next to `on: True`.
+    """
+    d = dict(_DRAFT)
+    d.pop("head", None)
+    spec = d.pop("spec", None)
+    d["family"] = getattr(spec, "name", "")
+    d["acceptance"] = (d["accepted"] / d["steps"]) if d["steps"] else None
+    prov = _SERVED.get("provider")
+    batchable = getattr(prov, "is_batchable", None) if prov else None
+    d["batchable"] = batchable
+    d["engine_path"] = ("batch" if batchable
+                        else "sequential" if batchable is False else "")
+    if d["on"] and batchable:
+        d["drafts_now"] = False
+        d["blocked"] = ("this artifact's caches merge, so mlx-lm serves it "
+                        "with the batch generator, which has no drafting "
+                        "path. The head is loaded and idle.")
+    else:
+        d["drafts_now"] = bool(d["on"])
+        d["blocked"] = ""
+    return d
+
+
+def load_draft_head(model_path: str):
+    """Load the drafting head beside this artifact, if there is one.
+
+    Absent is the ordinary case and not an error: sidecars are named outside
+    mlx-lm's `model*.safetensors` glob precisely so a directory carrying one
+    still loads normally through the stock loader.
+    """
+    from .mtp import find_head
+
+    found = find_head(model_path)
+    if found is None:
+        _DRAFT.update(on=False, why="no drafting head beside the weights")
+        return None
+    prov = _SERVED.get("provider")
+    model = getattr(prov, "model", None) if prov else None
+    if model is None:
+        _DRAFT.update(on=False, why="model not loaded yet")
+        return None
+    try:
+        from .mtp.loop import load_mtp_head
+        head, spec = load_mtp_head(model, sidecar=found.path)
+    except Exception as e:
+        # A head that will not bind is a fact worth printing, not a crash:
+        # the model serves perfectly well without one.
+        _DRAFT.update(on=False, why=f"{type(e).__name__}: {e}")
+        return None
+    _DRAFT.update(head=head, spec=spec, on=True,
+                  why=f"{found.path.name}, {found.gib:.2f} GiB")
+    return head
+
+
+def install_drafting(srv) -> bool:
+    """Route the engine's own generation through the drafting loop.
+
+    mlx-lm's server calls `stream_generate(...)` once per request and reads
+    `.text`, `.token`, `.logprobs` and `.finish_reason` off what it yields.
+    `mtp_stream_generate` yields all four, so this is a swap rather than a
+    reimplementation -- knurlogic still does not have a second inference
+    path, which is the rule this package is built on.
+
+    THE SAMPLING PARAMETERS ARE THE AWKWARD PART. mlx-lm hands
+    `stream_generate` a BUILT sampler, and the drafting loop needs the
+    parameters themselves: verification is rejection sampling against the
+    target distribution, so a callable that has already collapsed it is no
+    use. They are available one frame up, in `_serve_single`, so that is
+    wrapped to put them on a thread-local. Per request, per thread, and the
+    server serves each request on its own thread.
+    """
+    if not _DRAFT.get("on"):
+        return False
+
+    import threading
+
+    from .mtp.loop import mtp_stream_generate
+
+    local = threading.local()
+    real_single = srv.ResponseGenerator._serve_single
+    real_stream = srv.stream_generate
+
+    def _serve_single(self, request):
+        local.args = request[2]
+        try:
+            return real_single(self, request)
+        finally:
+            local.args = None
+
+    def _stream(model, tokenizer, prompt, **kw):
+        args = getattr(local, "args", None)
+        head = _DRAFT.get("head")
+        # A draft model and a drafting head are two different mechanisms and
+        # stacking them is not defined; the explicit one wins.
+        if head is None or args is None or kw.get("draft_model") is not None:
+            yield from real_stream(model=model, tokenizer=tokenizer,
+                                   prompt=prompt, **kw)
+            return
+        s = args.sampling
+        _DRAFT["requests"] += 1
+        last = None
+        for r in mtp_stream_generate(
+                model, tokenizer, prompt, head,
+                max_tokens=kw.get("max_tokens", 256),
+                temp=s.temperature, top_p=s.top_p, top_k=s.top_k,
+                min_p=s.min_p, xtc_probability=s.xtc_probability,
+                xtc_threshold=s.xtc_threshold,
+                logits_processors=kw.get("logits_processors"),
+                prefill_step_size=kw.get("prefill_step_size", 2048),
+                prompt_cache=kw.get("prompt_cache"),
+                want_logprobs=True):
+            last = r
+            if r.tail:          # detokenizer flush, not a new token
+                continue
+            yield r
+        if last is not None:
+            _DRAFT["steps"] += last.steps
+            _DRAFT["accepted"] += last.accepted
+
+    srv.ResponseGenerator._serve_single = _serve_single
+    srv.stream_generate = _stream
+    return True

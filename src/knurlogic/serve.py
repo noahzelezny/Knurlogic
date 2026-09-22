@@ -31,7 +31,7 @@ import argparse
 import os
 import sys
 
-from . import arch, engine, messages, register, status, web, wired
+from . import arch, engine, messages, mtp, register, status, web, wired
 from .artifact import Artifact
 from .resolve import resolve
 
@@ -40,7 +40,7 @@ GIB = 1 << 30
 
 def run(path: str, host: str, port: int, working_set_gib: float,
         profile: str, passthrough: list, tune: str = "balanced",
-        overrides: dict | None = None) -> int:
+        overrides: dict | None = None, draft: bool = True) -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
@@ -129,6 +129,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # The wired limit belongs here because this is where somebody looks
         # when a model will not load. Advice only -- knurlogic never sets it.
         snap["wired"] = wired.advise(a.bytes_on_disk)
+        snap["drafting"] = engine.drafting_status()
         text = status.render_cluster(snap)
         if snap["wired"].get("known"):
             text += "\n\n" + wired.render(snap["wired"])
@@ -191,9 +192,18 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             resolve_fn=lambda art: resolve(art, ws, profile=profile, tune=tune),
             live_knobs=engine.LIVE_KNOBS),
         apply_fn=_apply)
+    # A packed head is used because it is there. Nobody should have to know
+    # an environment variable exists to run weights they already downloaded.
+    head = mtp.find_head(a.path)
+    if head is not None and draft:
+        print(f"\ndrafting   {head.describe()}")
+        print( "           multi-token prediction on; --no-draft turns it off")
+    elif head is not None:
+        print("\ndrafting   head present, disabled by --no-draft")
+
     return engine.serve(str(a.path), host, port,
                         executes_artifact_code=bool(a.model_file),
-                        extra=passthrough, routes=routes)
+                        extra=passthrough, routes=routes, draft=draft)
 
 
 def _parse_sets(pairs) -> dict:
@@ -216,6 +226,11 @@ def main(argv=None) -> int:
                    help="usable GPU working set; 0 asks the framework what "
                         "it may use")
     p.add_argument("--profile", default="v1.5", choices=("v1.5", "v2"))
+    p.add_argument("--no-draft", action="store_true",
+                   help="do not use a multi-token-prediction head even if "
+                        "one is packed beside the weights. Troubleshooting: "
+                        "drafting preserves the output distribution, so "
+                        "there is nothing to trade away by leaving it on.")
     p.add_argument("--set", action="append", metavar="KEY=VALUE", dest="sets",
                    help="force a setting, beating the resolver. Repeatable. "
                         "Most knobs are read at import, so this is the only "
@@ -249,7 +264,7 @@ def main(argv=None) -> int:
                            a.node, a.launch, shlex.split(a.exo_cmd), a.local,
                            a.tune)
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile, rest,
-               a.tune, _parse_sets(a.sets))
+               a.tune, _parse_sets(a.sets), draft=not a.no_draft)
 
 
 if __name__ == "__main__":
