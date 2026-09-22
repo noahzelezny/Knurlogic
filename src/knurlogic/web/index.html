@@ -139,9 +139,17 @@
     machine, vertical, it is obviously part of the same picture. */
  .topounits{display:flex;align-items:center;justify-content:center;gap:0;
    flex-wrap:wrap}
- #ramwent{position:absolute;right:clamp(12px,4%,48px);top:50%;
-   transform:translateY(-50%)}
+ /* Was absolutely positioned against the right edge, which works for one
+    machine and collides with the second: the row of units grows and the key
+    does not move. A flex item instead, so the machines and the key share
+    the space rather than being drawn on top of each other. */
+ .topounits{flex:1;min-width:0}
+ #ramwent{flex:none;margin-left:clamp(8px,2%,28px)}
  .ram{display:flex;flex-direction:column;gap:5px}
+ @media(max-width:1150px){
+   .topo{flex-wrap:wrap}
+   .topounits{flex:1 0 100%}
+   #ramwent{margin:6px auto 0}}
  .ramrow{display:flex;align-items:center;gap:7px;font-size:10.5px;
    letter-spacing:.04em;white-space:nowrap}
  .ramrow span{flex:1}
@@ -983,7 +991,11 @@ async function tick(){
     const mm=n.memory_map||(n.role==='local'||n.role==='server'?RAM:null);
     const mapped=!!(mm&&mm.installed_bytes);
     const ws=(mapped?mm.installed_bytes:nm.working_set_bytes)||1;
-    const used=mapped?(mm.seen_bytes||0):(nm.active_bytes||0);
+    // `used`, not `seen`. seen_bytes is the sum of process FOOTPRINTS and
+    // misses the kernel, wired pages and the file cache; used_bytes is what
+    // the OS says is spent. Reading seen here while the key read used made
+    // the machine and its own legend disagree by 17 GiB.
+    const used=mapped?(mm.used_bytes||mm.seen_bytes||0):(nm.active_bytes||0);
     const pct=Math.max(0,Math.min(100,100*used/ws));
     const off=n.reachable===false||(!nm.available&&!mapped);
     const stroke=off?'var(--line)':'var(--acc)';
@@ -1302,7 +1314,17 @@ function ramWent(m){
   if(!RAM){ el.innerHTML=''; return }
   const inst=m.installed_bytes, by=Object.entries(m.by_runtime||{})
     .sort((a,b)=>b[1]-a[1]);
-  const other=m.other_bytes||0, free=Math.max(inst-(m.seen_bytes||0),0);
+  // DERIVED FROM ONE BASE, never carried alongside. This line used to take
+  // `other` from other_bytes (which is used - named) and `free` from
+  // installed - seen_bytes (the sum of process FOOTPRINTS). Two different
+  // bases, so the rows summed to 118.7 GiB on a 96 GiB machine and the key
+  // disagreed with the gauge beside it. Everything here now comes from
+  // `installed` and `used` in the same object, so the rows add up to the
+  // machine by construction.
+  const used=Number.isFinite(m.used_bytes)?m.used_bytes:(m.seen_bytes||0);
+  const named=by.reduce((x,[,v])=>x+v,0);
+  const other=Math.max(used-named,0);
+  const free=Math.max(inst-used,0);
   const row=(k,b,c)=>`<div class="ramrow">${
     c?`<em style="background:${c}"></em>`
      :'<em style="border:1px solid var(--line)"></em>'}<span>${k}</span>
@@ -1352,6 +1374,10 @@ async function loadResident(){
     </div>`).join('');
   // Only when status has told us nothing: in a cluster the key is the sum
   // of what the machines are drawing, and this document is one box.
+  // NOT a second writer for the key. `tick` renders it from the node maps
+  // the machines are drawn from; this document is a different sample of the
+  // same box, and letting both write produced a key that disagreed with the
+  // gauge beside it. Only used when status supplied nothing at all.
   if(!RAM) ramWent(d.memory||{});
   el.querySelectorAll('.cardhd button').forEach(x=>x.onclick=async()=>{
     const r=rows[+x.dataset.i];
