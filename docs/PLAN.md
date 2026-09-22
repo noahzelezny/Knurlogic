@@ -531,11 +531,38 @@ its caches, so it takes a path the `stream_generate` swap never sees.
 Measured live: `on: true, requests: 0`.
 
 `/status.json` reports `engine_path: batch`, `drafts_now: false` and why, so
-it is visible rather than silently broken. The fix is `mtp/batch_loop.py`,
-which is ported and unused: wire it into mlx-lm's `BatchGenerator` the way
-the fork wires it into exo's. Same loop, different host.
+it is visible rather than silently broken.
 
-**This is the next piece of real work.**
+**This is the next piece of real work, and the map for it:**
+
+`mtp/batch_loop.py` is already here and already does the hard part --
+`MTPBatch`, `admit`, `RowParams`, one verified drafted token per row per
+step. What is NOT here is the adapter, and it cannot be copied: the fork's
+`generator/mtp_batch_generate.py` implements **exo's** `ExoBatchGenerator`
+contract (`submit / step / cancel / close / has_work`). knurlogic has to
+implement **mlx-lm's**, which is a different and smaller surface. The server
+touches exactly six things:
+
+    batch_generator.insert_segments(segments, max_tokens=, caches=,
+                                    all_tokens=, samplers=,
+                                    logits_processors=, state_machines=)
+    batch_generator.next()
+    batch_generator.extract_cache(uids)
+    batch_generator.remove(uids, return_prompt_caches=)
+    batch_generator.close()
+    batch_generator.prompt_cache_nbytes
+
+So the job is a `MTPBatchGenerator` with those six, backed by `batch_loop`.
+The fork's file is still the reference for everything underneath -- capture
+installed for the engine's lifetime rather than per request, the head's cache
+stored beside the trunk's in the same pool entry so a restored prefix hands
+back a head as far along as the trunk, and a vision request decoding without
+drafting because seeding calls `embed_tokens` under the vision patch. Read
+its docstring before writing the adapter; those three are paid for.
+
+Installing it is the same `_pinned`-style swap already in `engine.py`: when a
+head loaded and the provider says `is_batchable`, hand the server this
+generator instead of mlx-lm's.
 
 ### 2. The two interfaces have drifted apart
 
@@ -568,6 +595,22 @@ missing feature. Worth a pass that diffs them deliberately.
   not built. The `OK / UNPINNED / DRIFTED` vocabulary is the model.
 * `mtp/_artifacts.py` holds the public front door behind a private name. It
   reads oddly; the re-export in `__init__` is the contract.
-* 39 rungs declare a head they do not have. 8 are community rungs where that
-  means nothing. The other 23 are vqlab's to pack.
+* Heads across the released VQ rungs, counted properly after an earlier
+  claim here was wrong in both directions. By architecture:
+
+        glm5_next        3 with a head    0 without
+        qwen4_exp        3                0
+        qwen3_5_moe      4                4
+        qwen3_5          0                3
+
+  Every released rung of every model MTP was actually built for -- Flash-
+  Next, the 397B, GLM -- has its head. The seven without are two other
+  models (Qwen3.6-35B-A3B and Qwen3.8-27B) that a head was never built for,
+  which is a different fact from "not packed yet". The other seventeen are
+  lab intermediates (`qwen4exp_vq_fit_*`, `397b-v2-*`), not releases, and one
+  of those has a head too.
+
+  The earlier line here said "23 rungs vqlab has not packed", which lumped
+  lab scratch in with releases and implied sloppiness where the pattern is
+  family-shaped.
 
