@@ -32,6 +32,56 @@ from . import loaded, status, web, wired
 #: Children started from the page: {port: (Popen, artifact path)}.
 _CHILDREN: dict = {}
 
+#: The port a knurlogic on ANOTHER node is expected to answer on, which is
+#: the one this page launches models on.
+_SERVE_PORT: dict = {"n": 8080}
+
+
+#: Where to look for exo, only to ask WHO IS THERE. knurlogic does not need
+#: exo to run; it needs it to know about the other machines, because exo is
+#: the thing that already tracks them.
+EXO_URL = "http://127.0.0.1:52415"
+
+
+def _local_name(nodes) -> str:
+    """Which of exo's nodes is the box this is running on.
+
+    Matched on the product name exo reports (`modelId` is "Mac Studio", not
+    `Mac15,14`) against what this machine says it is. Getting this wrong
+    would put the local memory map on somebody else's gauge.
+    """
+    me = (wired.machine().get("model") or "").lower()
+    if not me:
+        return ""
+    for n in nodes:
+        if (n.model_id or "").lower() == me:
+            return n.name
+    return ""
+
+
+def _local_memory(n, mm) -> dict:
+    """This box's own numbers, preferring what it measured itself.
+
+    exo reports system RAM per node, which is the only thing available for a
+    peer. Locally there is something better -- vm_stat, read through
+    `loaded.memory_map` -- so use it and fall back to exo's figures when it
+    is unavailable. `render_cluster` needs the full shape, headroom included;
+    leaving a key out is a KeyError at render time and not a smaller answer.
+    """
+    total = (mm or {}).get("installed_bytes") or n.ram_total
+    used = (mm or {}).get("used_bytes")
+    if used is None:
+        used = max(n.ram_total - n.ram_available, 0)
+    return {
+        "available": True,
+        "device": "vm_stat" if mm else "exo (system RAM)",
+        "working_set_bytes": total,
+        "active_bytes": used,
+        "cache_bytes": 0,
+        "headroom_bytes": max(total - used, 0),
+        "scope": "box",
+    }
+
 
 def _status_fn(_n=0):
     """A status for a box that is serving nothing.
@@ -39,14 +89,44 @@ def _status_fn(_n=0):
     The node, its machine and its memory map are all still real -- that is
     the whole content of this mode. `artifact` is simply absent, and the
     page already handles that: it is the same shape `serve` emits.
+
+    If exo is up, every node it knows about is included. A machine on the
+    desk is a machine on the page whether or not this process is serving it:
+    the complaint that produced this was seeing the other box fill up in
+    exo's window and not in knurlogic's.
+
+    A peer's own memory map arrives only if a knurlogic there answers on the
+    network, and `serve` binds loopback by default -- so the usual case is
+    exo's RAM figures and a plain gauge, which is still the machine and still
+    its real occupancy.
     """
+    from . import cluster
+
     mm = None
     try:
         mm = loaded.memory_map()
     except Exception:
         pass
-    snap = status.aggregate([status.snapshot(
-        node="local", role="local", memory_map=mm)])
+
+    nodes = []
+    try:
+        nodes = cluster.inventory(EXO_URL)
+    except Exception:
+        nodes = []
+
+    if not nodes:
+        snaps = [status.snapshot(node="local", role="local", memory_map=mm)]
+    else:
+        local = _local_name(nodes)
+        snaps = []
+        for n in nodes:
+            is_local = n.name == local
+            snaps.append(cluster._snapshot_for(
+                n, local, {}, None, peer_port=_SERVE_PORT["n"])
+                if not is_local else
+                status.snapshot(node=n.name, role="local", memory_map=mm,
+                                memory_fn=lambda n=n: _local_memory(n, mm)))
+    snap = status.aggregate(snaps)
     snap["wired"] = wired.advise(0)
     return snap, status.render_cluster(snap)
 
@@ -130,6 +210,7 @@ def _load_fn(serve_port: int):
 
 
 def serve_ui(host: str, port: int, serve_port: int) -> int:
+    _SERVE_PORT["n"] = serve_port
     routes = web.routes(
         status_fn=_status_fn,
         settings_fn=web.machine_settings(),

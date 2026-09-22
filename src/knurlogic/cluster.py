@@ -149,8 +149,15 @@ def peer_memory_map(ip: str, port: int, ttl: float = 6.0) -> dict | None:
     the machine they were read on, so the node has to answer for itself.
     exo reports RAM totals per node and nothing about who is spending it.
 
-    Absent is a normal answer -- no knurlogic there, a port nobody guessed,
-    a firewall. The caller draws the plain gauge it always drew.
+    Absent is a normal answer, and the COMMON cause is not a missing
+    knurlogic: `serve` binds 127.0.0.1 by default, so a peer running one is
+    reachable only on its own loopback. That default is deliberate -- a model
+    endpoint should not appear on the network because somebody started it --
+    so this does not work around it. A peer that should answer needs
+    `--host 0.0.0.0` (or its own address) chosen on purpose.
+
+    Without it the node is still drawn, from exo's own per-node RAM figures.
+    What is lost is only the split by runtime, which nothing else can supply.
     """
     import time
 
