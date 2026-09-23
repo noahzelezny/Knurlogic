@@ -284,3 +284,30 @@ def kind_from(name: str = "", model_id: str = "", product: str = "") -> dict:
     else:
         kind = _kind_from_identifier(model_id or "")
     return {"kind": kind, "model": product or "", "model_id": model_id or ""}
+
+
+def load_budget() -> dict:
+    """What a model loaded NOW could have: the smaller of the GPU working set
+    and the memory macOS would hand over right now.
+
+    One function, because three tools used to answer this three ways. `fit`
+    measured against memory available now; `settings` and `serve` resolved
+    against the working set alone. With exo holding 41 GiB on a 96 GiB box,
+    that is 54 GiB against 84 -- so a 47.5 GiB model was "fitting with 6.8
+    GiB to spare" in one answer and "36 GiB of headroom, roomy defaults" in
+    the next, and the roomy defaults (2048-wide prefill, 8 prompts at once)
+    are what OOM a box with 6.8 GiB to spare.
+    """
+    from .loaded import available_memory
+    ws = detected_working_set_bytes()
+    try:
+        avail = int(available_memory().get("available_bytes") or 0)
+    except Exception:
+        avail = 0
+    known = [b for b in (ws, avail) if b > 0]
+    budget = min(known) if known else 0
+    limited_by = ("nothing known" if not known else
+                  "memory available now" if budget == avail and avail != ws
+                  else "the GPU working set")
+    return {"bytes": budget, "working_set_bytes": ws,
+            "available_bytes": avail, "limited_by": limited_by}

@@ -90,56 +90,125 @@ def ready(**_) -> Dict[str, Any]:
     settling = [r for r in runners
                 if r in ("RunnerLoading", "RunnerWarmingUp",
                          "RunnerConnecting", "RunnerShuttingDown")]
-    downloads = [k for k, v in (st.get("downloads") or {}).items() if v]
+    ongoing, failed, pending = _downloads(st)
     nodes = (st.get("topology") or {}).get("nodes") or []
     seen = st.get("lastSeen") or {}
     missing = [n for n in nodes if n not in seen]
 
-    blockers = []
+    # Two different questions, because `load` starts a LOCAL server and exo
+    # placement is a ring operation. A runner loading anywhere on this box
+    # moves memory, so `fit`'s number is about to be wrong: that blocks both.
+    # A download or a missing node blocks placing a model on the ring and
+    # has nothing to do with a server on this box.
+    local, ring = [], []
     if settling:
         from collections import Counter
-        blockers.append({"what": "runners in transition",
-                         "detail": dict(Counter(settling))})
-    if downloads:
-        blockers.append({"what": "downloads in flight",
-                         "detail": len(downloads)})
+        local.append({"what": "exo runners loading or unloading",
+                      "detail": dict(Counter(settling)),
+                      "why": "memory is about to change; a fit measured now "
+                             "is stale"})
+    if ongoing:
+        ring.append({"what": "downloads in progress", "detail": ongoing})
     if missing:
-        blockers.append({"what": "nodes in the topology not seen recently",
-                         "detail": len(missing)})
+        ring.append({"what": "nodes in the topology not seen recently",
+                     "detail": len(missing)})
     return {
-        "ready": not blockers,
+        "ready": not local,
+        "ready_for_exo_placement": not (local or ring),
         "exo": True,
-        "blockers": blockers,
+        "blockers": local,
+        "exo_placement_blockers": ring,
         "nodes": len(nodes),
         "instances": len(st.get("instances") or {}),
-        "checked": ["runners", "downloads", "topology vs lastSeen"],
+        "downloads": {"in_progress": len(ongoing), "failed": failed,
+                      "pending_not_started": pending},
+        "checked": ["runners", "downloads (DownloadOngoing only)",
+                    "topology vs lastSeen"],
     }
 
 
+def _downloads(st: dict) -> tuple:
+    """(ongoing [named], failed [named], pending count) from exo's state.
+
+    Only DownloadOngoing is in flight. exo lists every model card it knows
+    as DownloadPending on every node, so counting any entry at all made a
+    two-node cluster with nothing downloading report 'not ready' forever --
+    and an agent told that forever learns to pass force=true every time,
+    which is worse than no check.
+    """
+    ongoing, failed, pending = [], [], 0
+    for node, items in (st.get("downloads") or {}).items():
+        for it in (items if isinstance(items, list) else [items]):
+            if not isinstance(it, dict) or not it:
+                continue
+            kind, body = next(iter(it.items()))
+            if not isinstance(body, dict):
+                body = {}
+            card = (((body or {}).get("shardMetadata") or {})
+                    .get("PipelineShardMetadata") or
+                    next(iter(((body or {}).get("shardMetadata") or {})
+                              .values()), {}) or {}).get("modelCard") or {}
+            name = card.get("modelId", "?")
+            if kind == "DownloadOngoing":
+                prog = (body or {}).get("downloadProgress") or {}
+                done = prog.get("downloadedBytes", {}).get("inBytes") \
+                    if isinstance(prog.get("downloadedBytes"), dict) else None
+                total = prog.get("totalBytes", {}).get("inBytes") \
+                    if isinstance(prog.get("totalBytes"), dict) else None
+                ongoing.append({"model": name, "node": node[:12],
+                                "progress": (f"{done / total:.0%}"
+                                             if done and total else "?")})
+            elif kind == "DownloadFailed":
+                failed.append({"model": name, "node": node[:12]})
+            elif kind == "DownloadPending":
+                pending += 1
+    return ongoing, failed, pending
+
+
 def fit(artifact: str = "", **_) -> Dict[str, Any]:
-    """Will this artifact fit, with the arithmetic shown."""
+    """Will this artifact fit, with the arithmetic shown.
+
+    Against `wired.load_budget()` -- the same number `settings` resolves
+    against and `load` starts a server with, so the three cannot disagree.
+    """
     from .artifact import Artifact
     from .loaded import available_memory
-    from . import wired
+    from . import settings as S, wired
 
     a = Artifact.load(artifact)
     mem = available_memory()
-    avail = mem.get("available_bytes", 0)
+    b = wired.load_budget()
+    budget = b["bytes"]
     adv = wired.advise(a.bytes_on_disk)
-    fits = bool(avail) and a.bytes_on_disk <= avail
+    headroom = budget - a.bytes_on_disk
+    fits = bool(budget) and headroom > 0
+    tight = fits and headroom < S.TIGHT_HEADROOM_GIB * GIB
+    verdict = ("will not fit" if not fits else
+               "tight" if tight else "fits")
     return {
         "artifact": a.path.name,
+        "verdict": verdict,
+        "fits": fits,
         "size_gib": round(a.gib, 1),
-        "available_gib": round(avail / GIB, 1),
+        "budget_gib": round(budget / GIB, 1),
+        "headroom_gib": round(headroom / GIB, 1),
+        "limited_by": b["limited_by"],
+        "what_tight_means": (
+            f"under {S.TIGHT_HEADROOM_GIB:g} GiB left after the weights, "
+            f"so a load now narrows the prompt chunk to "
+            f"{S.PREFILL_CHUNK_TIGHT} tokens and prefills one prompt at a "
+            f"time. It loads; long prompts are slower to start."
+            if tight else ""),
+        "available_now_gib": round(b["available_bytes"] / GIB, 1),
+        "working_set_gib": round(b["working_set_bytes"] / GIB, 1),
         "free_now_gib": round(mem.get("free_bytes", 0) / GIB, 1),
         "reclaimable_cache_gib": round(mem.get("cached_bytes", 0) / GIB, 1),
-        "fits": fits,
         "wired_limit_gib": round(adv.get("limit_bytes", 0) / GIB, 1),
         "wired_action": adv.get("action"),
         "wired_note": adv.get("note", ""),
-        "how": "available = free + inactive, which is what macOS will hand "
-               "over on demand and what exo reports. The other two "
-               "definitions read 75.9 and 1.6 GiB on a box with 70 free.",
+        "how": "budget = the smaller of the GPU working set and memory "
+               "available now (free + inactive: what macOS hands over on "
+               "demand, and what exo reports).",
     }
 
 
@@ -148,9 +217,11 @@ def state(**_) -> Dict[str, Any]:
     from . import loaded
     doc = loaded.survey()
     m = doc.get("memory") or {}
+    from . import ui
     return {
         "resident": doc.get("resident", []),
         "runtimes": doc.get("runtimes", []),
+        "started_here": ui.children(),
         "memory": {
             "installed_gib": round(m.get("installed_bytes", 0) / GIB, 1),
             "used_gib": round(m.get("used_bytes", 0) / GIB, 1),
@@ -168,7 +239,8 @@ def models(fits_only: bool = False, **_) -> Dict[str, Any]:
     from .artifact import Artifact
     from .loaded import available_memory
 
-    avail = available_memory().get("available_bytes", 0)
+    from . import wired
+    avail = wired.load_budget()["bytes"]
     out = []
     for f in discover.find():
         row = {"name": f.name, "path": str(f.path), "store": f.store,
@@ -181,7 +253,9 @@ def models(fits_only: bool = False, **_) -> Dict[str, Any]:
             continue
         out.append(row)
     out.sort(key=lambda r: -r["size_gib"])
-    return {"models": out, "available_gib": round(avail / GIB, 1),
+    return {"models": out, "budget_gib": round(avail / GIB, 1),
+            "fits_means": "fits the load budget -- see `fit` for headroom "
+                          "and whether it is tight",
             "count": len(out)}
 
 
@@ -213,13 +287,15 @@ def drafting(artifact: str = "", **_) -> Dict[str, Any]:
             "family": (st.head.family if st.head else ""),
             "explanation": st.render(),
             "note": "mlx-lm has no MTP path and neither does upstream exo. "
-                    "knurlogic runs a packed head by default; --no-draft "
-                    "turns it off."}
+                    "knurlogic drafts with a packed head by default, on "
+                    "single requests and batches alike: load(draft=false) "
+                    "or `serve --no-draft` turns it off. Drafting preserves "
+                    "the output distribution, so off is for troubleshooting."}
 
 
 def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
          sets: Dict[str, str] | None = None, force: bool = False,
-         **_) -> Dict[str, Any]:
+         draft: bool = True, **_) -> Dict[str, Any]:
     """Start a server for this artifact, after checking it can work.
 
     REFUSES rather than gambles: an unsettled ring or a model that does not
@@ -235,11 +311,13 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
                 "note": "no flag overrides this; it is arithmetic."}
     r = ready()
     if not r["ready"] and not force:
-        return {"loaded": False, "refused": "cluster is not settled",
-                "detail": r,
-                "note": "pass force=true to load anyway. The failure this "
-                        "prevents is a load into a ring that is still moving."}
-    out = ui._spawn(artifact, int(port), tune, dict(sets or {}))
+        return {"loaded": False, "refused": "memory is about to move",
+                "detail": r["blockers"],
+                "note": "exo is loading or unloading a runner on this box, so "
+                        "the fit above is stale. Wait and call `ready` again; "
+                        "force=true loads anyway."}
+    out = ui._spawn(artifact, int(port), tune, dict(sets or {}),
+                    draft=bool(draft))
     out["fit"] = f
     out["ready"] = r
     return out
@@ -262,15 +340,20 @@ def deps() -> Dict[str, Any]:
 TOOLS: Dict[str, Dict[str, Any]] = {
     "ready": {
         "fn": ready,
-        "description": "Is the cluster settled enough to load? Names every "
-                       "reason it is not. Call this before loading.",
+        "description": "Is it safe to load now? `ready` covers a local "
+                       "load (exo runners moving memory on this box); "
+                       "`ready_for_exo_placement` adds ring-wide blockers "
+                       "(downloads in progress, unseen nodes). Every "
+                       "blocker is named. Call this before loading.",
         "schema": _schema({}),
     },
     "state": {
         "fn": state,
         "description": "What is loaded on this machine in every runtime "
                        "(knurlogic, exo, ollama, any OpenAI port) and where "
-                       "the memory went.",
+                       "the memory went. `started_here` follows servers "
+                       "`load` started: alive, or the exit code and the end "
+                       "of the log if one died.",
         "schema": _schema({}),
     },
     "models": {
@@ -283,8 +366,10 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     },
     "fit": {
         "fn": fit,
-        "description": "Will this artifact fit, with the arithmetic and the "
-                       "wired limit shown.",
+        "description": "Will this artifact fit NOW: verdict fits | tight "
+                       "| will not fit, with headroom and what tight "
+                       "changes. Uses the same budget `settings` and `load` "
+                       "use.",
         "schema": _schema({"artifact": S("path to the artifact")},
                           ["artifact"]),
     },
@@ -306,8 +391,10 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     },
     "load": {
         "fn": load,
-        "description": "Start a server for an artifact. Refuses if it will "
-                       "not fit or the ring is unsettled.",
+        "description": "Start a local server for an artifact, with its "
+                       "settings resolved against the load budget. Refuses "
+                       "if it will not fit (no override) or exo is moving "
+                       "memory on this box (force overrides).",
         "schema": _schema({
             "artifact": S("path to the artifact"),
             "port": S("port to serve on", "integer"),
@@ -315,7 +402,11 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "sets": {"type": "object",
                      "description": "launch-only knob overrides, KEY: VALUE"},
             "force": {"type": "boolean",
-                      "description": "load despite an unsettled ring"},
+                      "description": "load while exo runners are moving "
+                                     "memory"},
+            "draft": {"type": "boolean",
+                      "description": "use a packed drafting head "
+                                     "(default true)"},
         }, ["artifact"]),
     },
     "deps": {
@@ -352,6 +443,13 @@ def _call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"{type(e).__name__}: {e}", "tool": name}
 
 
+def _reply(rid, result=None, error=None) -> None:
+    msg = {"jsonrpc": "2.0", "id": rid}
+    msg.update({"error": error} if error is not None else {"result": result})
+    sys.stdout.write(json.dumps(msg) + "\n")
+    sys.stdout.flush()
+
+
 def _serve_stdio() -> int:
     for line in sys.stdin:
         line = line.strip()
@@ -372,16 +470,21 @@ def _serve_stdio() -> int:
             result = {"tools": tool_list()}
         elif method == "tools/call":
             out = _call(params.get("name", ""), params.get("arguments") or {})
+            # isError is how a client tells an answer from a failure. A
+            # refusal (`refused`) is an ANSWER -- the tool did its job.
             result = {"content": [{"type": "text",
-                                   "text": json.dumps(out, indent=1)}]}
-        elif method in ("notifications/initialized", "initialized"):
+                                   "text": json.dumps(out, indent=1)}],
+                      "isError": "error" in out}
+        elif method == "ping":
+            result = {}
+        elif rid is None or method.startswith("notifications/") \
+                or method == "initialized":
             continue
         else:
-            result = {}
-        if rid is not None:
-            sys.stdout.write(json.dumps(
-                {"jsonrpc": "2.0", "id": rid, "result": result}) + "\n")
-            sys.stdout.flush()
+            _reply(rid, error={"code": -32601,
+                               "message": f"method not found: {method}"})
+            continue
+        _reply(rid, result=result)
     return 0
 
 

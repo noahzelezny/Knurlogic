@@ -261,7 +261,10 @@ def _preview(path: str, tune: str, working_set_gib=None) -> dict:
         ws = int(float(working_set_gib) * GIB) if working_set_gib else 0
     except (TypeError, ValueError):
         ws = 0
-    ws = ws or wired.detected_working_set_bytes() or 0
+    budget = None
+    if not ws:
+        budget = wired.load_budget()
+        ws = budget["bytes"]
     r = resolve(a, ws, tune=tune)
 
     knobs = []
@@ -283,6 +286,13 @@ def _preview(path: str, tune: str, working_set_gib=None) -> dict:
         "artifact": {"name": a.path.name, "path": str(a.path),
                      "model_type": a.model_type, "gib": round(a.gib, 1)},
         "tune": tune, "working_set_gib": round(ws / GIB, 1),
+        "budget": ({"gib": round(ws / GIB, 1),
+                    "limited_by": budget["limited_by"],
+                    "working_set_gib": round(budget["working_set_bytes"] / GIB, 1),
+                    "available_now_gib": round(budget["available_bytes"] / GIB, 1),
+                    "headroom_gib": round((ws - a.bytes_on_disk) / GIB, 1)}
+                   if budget else {"gib": round(ws / GIB, 1),
+                                   "limited_by": "given by the caller"}),
         "knobs": knobs, "notes": r.notes, "warnings": r.warnings,
         "wired": wired.advise(a.bytes_on_disk),
         "preview": True,
