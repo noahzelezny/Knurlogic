@@ -18,14 +18,24 @@ license-files = ["LICENSE"]
 authors = [{ name = "Noah Zelezny" }]
 
 # mlx-lm is the engine (see knurlogic/engine/seam.py, the one module that knows
-# so). Floor is 0.31.3: that is the oldest PyPI release measured to load a
-# VQ artifact's bundled `model_file` and generate coherent text with the
-# vendored architectures. No upper pin -- newer releases are the thing this
-# package exists to keep up with, and `knurlogic smoke --pin` is how a
-# version gets blessed.
+# so). PINNED EXACTLY, mlx with it (design D2, docs/design/vision.md): the
+# seam wraps mlx-lm's server methods by name (`ResponseGenerator._tokenize`,
+# `_serve_single`, the prompt cache), the vision key rides mlx-lm's prompt
+# trie, and v1 of the vision design was built on line citations from a
+# different mlx-lm than the one serving (critique B4). A version is blessed
+# by re-verifying those wraps, then moving the pin, the digest in
+# [tool.knurlogic.pins] and tests/test_pins.py together. 0.31.3 is also the
+# oldest release measured to load a VQ artifact's bundled `model_file`.
+# The versions are the ones the 166-test suite ran green on, 2026-09-23.
+# The VQ runtime's pin (vqlab commit + digest) is P-VQ's, beside engine/vq/.
 dependencies = [
-    "mlx-lm>=0.31.3",
+    "mlx==0.31.2; platform_system == 'Darwin'",
+    "mlx-lm==0.31.3",
     "numpy>=1.24",
+    # Images (engine/vision/images.py): decode, EXIF transpose, the pixel
+    # hash. Tested at 12.2.0; the floor is the API it uses, not a measured
+    # oldest-good release.
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
@@ -53,3 +63,12 @@ knurlogic = ["interfaces/web/*.html",
              "engine/overrides/*.py", "engine/overrides/*.md",
              "engine/overrides/*.json", "engine/overrides/**/*.py",
              "engine/overrides/**/*.json"]
+
+[tool.knurlogic.pins]
+# One home for the facts tests/test_pins.py holds the installed stack to.
+# sha256 of mlx_lm/server.py at mlx-lm 0.31.3: the seam wraps its methods,
+# so an edited server.py is a drift even under the same version string
+# (a local patch, a fork installed as 0.31.3).
+mlx = "0.31.2"
+mlx-lm = "0.31.3"
+mlx_lm_server_sha256 = "cdfcb4ac848636f9927851a0ec7a951584526530cb7832ba58049e4a9144db8b"
