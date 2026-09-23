@@ -198,12 +198,21 @@ runs once, the cache covers at least through the end of the last image span
 on turns 2-5, and turn 5 recalls the image; memory back to baseline after
 unload.
 
-**The reuse metric is not a gate yet.** The critique showed that Qwen-style
-templates drop earlier turns' thinking, so the turn-N prompt is not turn
-N-1's prompt plus output -- the prefix diverges for TEMPLATE reasons.
-`prompt - cached` is reported per turn; the gate is "the image is never
-re-prefilled". Making thinking-model conversations fully reusable (e.g. a
-cache checkpoint at the end of each user turn) is follow-up work.
+**Reuse through turn 5 is a gate for knurlogic's own chat.** The v1 critique
+said Qwen-style templates drop earlier thinking; the released templates say
+otherwise (read 2026-09-23). Qwen3.8 / Flash-Next / 35B-A3B
+`chat_template.jinja:116` keeps earlier reasoning unless
+`preserve_thinking` is explicitly false; GLM-5.3 `chat_template.jinja:149`
+keeps it unless `clear_thinking` is explicitly true (default false). So the
+prefix is stable by default -- PROVIDED the client sends each earlier
+assistant turn's `reasoning_content` back. Most OpenAI-style clients drop
+it, the template then renders those turns without their thinking, and the
+prefix diverges there. Therefore: knurlogic's chat always echoes
+`reasoning_content`, and for it the gate is `prompt - cached <= new + 32` on
+turns 2-5; for other clients the metric is reported and the behaviour
+documented ("send reasoning_content back to keep reuse"). gemma4's template
+is not yet checked. The checkpoint-per-user-turn idea stays as the fallback
+for clients that do not echo reasoning.
 
 ## Review by Flash-Next 4.4 (local, 2026-09-23) -- folded in
 
@@ -229,6 +238,25 @@ and new to both:
    exceeds its features; the prompt-cache bytes attributable to image spans
    are counted in `tuning/resolve.py` alongside the store.
 5. **The goal overstated the gate** (fixed above).
+
+### Second pass, through Scout with tools (same day)
+
+Checked against the source before folding in:
+* CONFIRMED: `fetch_nearest_cache` returns a slice of the key it was given
+  (`mlx_lm/models/cache.py:1688,1692`), and the single path hands that slice
+  to `stream_generate` (`server.py:965-980`). D5 already routes vision to the
+  batch engine; mlx-lm sends SEEDED requests down the single path regardless
+  (`_is_batchable` is false when a seed is set), so P4 must force the route,
+  and a gate covers an exact cache hit with a remainder containing image
+  tokens, through the real ResponseGenerator.
+* CONFIRMED and it CORRECTS the v1 critique: the released Qwen templates
+  keep earlier thinking by default (see the reuse gate above).
+* NOT CONFIRMED at the pinned mlx-lm (0.31.3): a prompt-length quota that
+  image tokens would eat -- `server.py` has no `prompt_len` or
+  `max_total_tokens`; `max_tokens` bounds output only. Re-check if the pin
+  moves.
+* REFUTED: "GLM rewrites history every turn". `chat_template.jinja:149` keeps
+  reasoning unless `clear_thinking` is true, and it defaults false.
 
 Process note for the code review: Flash reasons at length -- give it a
 larger budget or disable thinking for review passes.
