@@ -171,3 +171,55 @@ def test_glm5_siblings_come_from_the_vendored_source():
     from knurlogic.machine.deps import glm5_siblings
     got = glm5_siblings()
     assert "sparse_attention" in got and "linear" in got
+
+
+def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,
+                 quiet_s=0):
+    """One registered server, with every fact the phase is read from faked."""
+    import os, time
+    from knurlogic.interfaces import ui
+    log = tmp_path / "serve.log"
+    log.write_text("artifact  x\nloading weights\n")
+    t = time.time() - quiet_s
+    os.utime(log, (t, t))
+    monkeypatch.setattr(ui, "_registry", lambda: {
+        9001: {"pid": 4242, "artifact": "/m/x", "log": str(log), "t": 0}})
+    monkeypatch.setattr(ui, "_is_our_server", lambda pid: alive)
+    monkeypatch.setattr(ui, "_answers", lambda port: answers)
+    monkeypatch.setattr(ui, "_artifact_bytes", lambda p: size)
+    monkeypatch.setattr(ui.loaded, "memory_map",
+                        lambda: {"processes": [{"pid": 4242, "bytes": held}]})
+    return ui
+
+
+@pytest.mark.parametrize("alive,answers,held,quiet,want", [
+    (True, False, 0, 5, "loading"),
+    (True, False, 0, 10_000, "stalled"),
+    (True, True, 3 << 30, 0, "warming"),        # measured: answered at 3 of 15.5
+    (True, True, 15 << 30, 0, "serving"),
+    (False, False, 0, 0, "exited"),
+])
+def test_every_server_says_what_phase_it_is_in(monkeypatch, tmp_path, alive,
+                                               answers, held, quiet, want):
+    """`alive: true` for loading, serving and hung alike is how an agent ends
+    up waiting forever. Each phase is read off evidence: the port, the
+    weights actually resident, and how long the log has been quiet."""
+    ui = _phase_world(monkeypatch, tmp_path, alive=alive, answers=answers,
+                      held=held, size=int(15.5 * (1 << 30)), quiet_s=quiet)
+    (c,) = ui.children()
+    assert c["phase"] == want
+    if want == "stalled":
+        assert "Stop waiting" in c["advice"]
+    if want == "exited":
+        assert c["log_tail"][-1] == "loading weights"
+
+
+def test_ready_waits_for_knurlogics_own_loads(monkeypatch, tmp_path):
+    """Reproduced live before this existed: with one model mid-load, ready
+    said true and fit used a budget that did not count it yet."""
+    _phase_world(monkeypatch, tmp_path, alive=True, answers=True,
+                 held=1 << 30, size=15 << 30)
+    monkeypatch.setattr(mcp, "_exo_state", lambda: {})
+    r = mcp.ready()
+    assert r["ready"] is False
+    assert r["blockers"][0]["detail"]["phase"] == "warming"
