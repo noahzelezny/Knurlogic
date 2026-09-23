@@ -114,3 +114,29 @@ def test_an_unknown_tool_says_what_there_is():
 def test_a_failing_tool_reports_rather_than_raises():
     out = mcp._call("fit", {"artifact": "/does/not/exist"})
     assert "error" in out and out["tool"] == "fit"
+
+
+def test_deps_reads_the_fix_not_the_version(tmp_path):
+    """A version names a build; it does not say what is in it. The jaccl
+    verdict comes from the fix's own env read compiled into libjaccl."""
+    import json, subprocess, sys as _s
+    from knurlogic import deps
+    pkg = tmp_path / "site" / "mlx"
+    (pkg / "lib").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "lib" / "libjaccl.dylib").write_bytes(b"\0JACCL_COLLECTIVE_TIMEOUT_MS\0")
+    (tmp_path / "site" / "mlx-9.9.9.dist-info").mkdir()
+    (tmp_path / "site" / "mlx-9.9.9.dist-info" / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: mlx\nVersion: 9.9.9\n")
+    r = subprocess.run([_s.executable, "-c", deps._PROBE, "[]"],
+                       capture_output=True, text=True,
+                       env={"PYTHONPATH": str(tmp_path / "site"),
+                            "PYTHONNOUSERSITE": "1"})
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    assert got["mlx"]["jaccl_selfheal"] is True
+
+
+def test_glm5_siblings_come_from_the_vendored_source():
+    from knurlogic.deps import glm5_siblings
+    got = glm5_siblings()
+    assert "sparse_attention" in got and "linear" in got
