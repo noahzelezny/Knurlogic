@@ -500,13 +500,50 @@ class Gemma4TextModel(nn.Module):
 
         return (per_layer_projection + per_layer_inputs) * self.per_layer_input_scale
 
-    def _make_masks(self, h, cache):
+    def _make_masks(self, h, cache, mm_mask: Optional[mx.array] = None):
+        """Per-layer-type masks, with gemma4's bidirectional image-block
+        overlay on the full-attention layers only.
+
+        `mm_mask` is [B, L]: -1 outside every image, and for image tokens the
+        index (0, 1, 2, ...) of the image that token belongs to along the
+        sequence -- so two images back to back still get separate blocks.
+        `knurlogic.engine.vision.key.image_spans` already gives that
+        grouping exactly (it knows sha/proc_hash, not just "is an image
+        token"), so this is the block-id array directly rather than a
+        recomputation from a token-type array
+        (mlx-vlm 0.6.17 `gemma4/language.py:455-469`,
+        `_block_sequence_ids_for_mask`, folds image AND audio ids into one
+        array and infers blocks from run boundaries -- unneeded here since
+        the vision-only family passes exact block ids and there is no audio
+        token in this build. `Family.chunk_boundaries` (design D5) keeps
+        every such block inside one prefill chunk, so the overlay below
+        never needs to reach across a chunk boundary).
+
+        Overlay ported from mlx-vlm 0.6.17
+        `gemma4/language.py:486-515` (`_apply_blockwise_bidirectional_overlay`
+        plus the `use_bidirectional_vision` gate), MIT, Copyright (c) 2025
+        Prince Canuma. Sliding-attention layers are left causal: the source
+        only widens `full_attention`, and `RotatingKVCache`'s window already
+        bounds those layers' prefix reuse (docs/design/vision-contracts.md,
+        gemma4 positions note)."""
+        has_visual = mm_mask is not None and bool(
+            (mm_mask >= 0).sum().item()
+        )
+        use_bidirectional = has_visual and h.shape[1] > 1
         mask = {}
         masks = []
         for l, c in zip(self.layers, cache):
             if l.layer_type not in mask:
                 if l.layer_type == "full_attention":
-                    mask["full_attention"] = create_attention_mask(h, c)
+                    m = create_attention_mask(
+                        h, c, return_array=use_bidirectional
+                    )
+                    if use_bidirectional and not isinstance(m, str):
+                        q = mx.expand_dims(mm_mask, -1)
+                        k = mx.expand_dims(mm_mask, -2)
+                        same_block = (q >= 0) & (q == k)
+                        m = m | same_block
+                    mask["full_attention"] = m
                 elif l.layer_type == "sliding_attention":
                     mask["sliding_attention"] = create_attention_mask(
                         h, c, window_size=self.window_size
@@ -520,6 +557,7 @@ class Gemma4TextModel(nn.Module):
         cache=None,
         input_embeddings: Optional[mx.array] = None,
         per_layer_inputs: Optional[mx.array] = None,
+        mm_mask: Optional[mx.array] = None,
     ):
         # Make the initial hidden state
         if input_embeddings is None:
@@ -548,7 +586,7 @@ class Gemma4TextModel(nn.Module):
 
         # Apply each layer. We save all intermediate kvs and offset and grab
         # the previous one for the shared kv layers.
-        masks = self._make_masks(h, cache)
+        masks = self._make_masks(h, cache, mm_mask=mm_mask)
         intermediates = [(None, None)] * len(self.layers)
         for idx, (layer, c, mask, prev_idx, per_layer_input) in enumerate(
             zip(
@@ -592,12 +630,14 @@ class Model(nn.Module):
         cache=None,
         input_embeddings: Optional[mx.array] = None,
         per_layer_inputs: Optional[mx.array] = None,
+        mm_mask: Optional[mx.array] = None,
     ):
         out = self.model(
             inputs,
             cache=cache,
             input_embeddings=input_embeddings,
             per_layer_inputs=per_layer_inputs,
+            mm_mask=mm_mask,
         )
         if self.tie_word_embeddings:
             out = self.model.embed_tokens.as_linear(out)
