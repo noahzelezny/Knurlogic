@@ -49,6 +49,27 @@ that and the critique showed it contradicts the bundles. Instead:
   bundled runtime give the same logits on the same short prompt (atol
   1e-5; exact greedy tokens over 40), for all 10 distinct runtimes. A rung
   that fails stays on its bundled runtime and is listed, not silently served.
+* **Where each rung's knobs come from (answered by the vqlab session,
+  2026-09-23, checked against the PUBLISHED Hub model.py):** vendor vqlab
+  HEAD (`42df84f`; last functional change `ef4e8dc`), and set every rung's
+  knobs from that rung's PUBLISHED `model.py` (`hf download <repo>
+  model.py`), never from `~/.exo` copies -- local copies have drifted from
+  the Hub on several repos. The shipped artifact is the record of what IS
+  shipped: knurlogic reproduces its flags as they are, not a plan's intent.
+  Published reality, three generations:
+    - v2 (both bf16-I/O on): Flash-Next 2.1 (per plan); **Qwen3.6-35B-A3B
+      3.8 / 4.6 / 5.4 (drift: rebundled while v2 was the repo default,
+      before `99ef3a1`; not a decision. Leave on v2 or rebundle to v1.5 is
+      the maintainer's call -- knurlogic reproduces whatever is published.)**
+    - v1.5 (both off): the rest of the flagged rungs.
+    - arc6-era, no flags at all: GLM 3.1 / 3.6 on the Hub (the local v2
+      copies were never published), GLM 2.7 to be re-read, 397B 2.4 / 2.6 /
+      3.1 (republished 2026-09-22 with corrected weights, F168, model.py
+      unchanged). 397B 2.2 was republished with a new 4684-line bundle --
+      re-read its flags from the Hub.
+  **Running an arc6-era rung on HEAD with knobs set to reproduce arc6 is a
+  runtime change, not a no-op**: G-VQ (identity against that rung's
+  published bundle) must pass before knurlogic serves it on HEAD.
 * **Bug this closes, found while deciding:** `tuning/settings.py`
   `RUNTIME_PROFILES["v1.5"]` forces `VQ_GEMMSEG_BF16IO=0` and
   `VQ_DECODE_BF16IO=0` for every VQ artifact, overriding rungs whose shipped
@@ -184,6 +205,22 @@ N-1's prompt plus output -- the prefix diverges for TEMPLATE reasons.
 `prompt - cached` is reported per turn; the gate is "the image is never
 re-prefilled". Making thinking-model conversations fully reusable (e.g. a
 cache checkpoint at the end of each user turn) is follow-up work.
+
+## Follow-up (after the release)
+
+* **Thinking-model reuse.** Default: follow the model's template (earlier
+  thinking dropped) and store a cache checkpoint at the end of each USER
+  message, so a new turn reuses everything up to there and re-prefills only
+  the previous answer without its thinking -- behaviour unchanged. Opt-in
+  "keep reasoning" setting (the maintainer's "thinking max"): earlier thinking stays in
+  context, more context used, behaviour changes; measure before claiming
+  it helps long agent tasks.
+* **Local reviewers.** Flash-Next 2.1 (fits the M3) and the 397B (needs both
+  nodes, so exo's instance comes off the Laptop B for it) review the
+  build through knurlogic's own Anthropic endpoint, beside a review. A
+  different model lineage, and dogfooding the endpoint at long context;
+  their findings are leads to verify, not verdicts. After the real-model
+  gates, so they never compete for memory.
 
 ## Risks, ranked
 
