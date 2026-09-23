@@ -131,8 +131,37 @@ def _status_fn(_n=0):
     return snap, status.render_cluster(snap)
 
 
+def serve_log(port: int) -> Path:
+    """Where a server started from here writes. A child whose output went
+    to /dev/null could crash on load and leave its caller holding
+    'starting' forever, with no way to learn why."""
+    import os
+    root = Path(os.environ.get("XDG_CACHE_HOME",
+                               Path.home() / ".cache")) / "knurlogic"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"serve-{port}.log"
+
+
+def children() -> list:
+    """Every server started from this process: alive, or how it ended."""
+    out = []
+    for port, (proc, path) in sorted(_CHILDREN.items()):
+        code = proc.poll()
+        row = {"port": port, "artifact": path, "pid": proc.pid,
+               "alive": code is None, "log": str(serve_log(port))}
+        if code is not None:
+            row["exit_code"] = code
+            try:
+                row["log_tail"] = serve_log(port).read_text(
+                    errors="replace").splitlines()[-15:]
+            except OSError:
+                row["log_tail"] = []
+        out.append(row)
+    return out
+
+
 def _spawn(path: str, port: int, tune: str = "balanced",
-           sets: dict | None = None) -> dict:
+           sets: dict | None = None, draft: bool = True) -> dict:
     """Start `knurlogic serve` for one artifact, on its own port.
 
     Deliberately a child process rather than an in-process load: the
@@ -154,13 +183,19 @@ def _spawn(path: str, port: int, tune: str = "balanced",
     # source, so a running server cannot be told about them.
     for k, v in sorted((sets or {}).items()):
         cmd += ["--set", f"{k}={v}"]
+    if not draft:
+        cmd.append("--no-draft")
+    log = serve_log(port)
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.STDOUT)
+        with open(log, "w") as fh:
+            proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT,
+                                    env={**__import__("os").environ,
+                                         "PYTHONUNBUFFERED": "1"})
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
     _CHILDREN[port] = (proc, path)
     return {"starting": path, "port": port, "pid": proc.pid,
+            "log": str(log),
             "note": "the model is loading in its own process; it appears "
                     "under LOADED when it answers"}
 

@@ -63,9 +63,12 @@ def run(path: str, host: str, port: int, working_set_gib: float,
 
     ws = int(working_set_gib * GIB)
     if ws == 0:
-        ws = wired.detected_working_set_bytes()
+        b = wired.load_budget()
+        ws = b["bytes"]
         if ws:
-            print(f"working set {ws / GIB:.1f} GiB (detected; "
+            print(f"budget    {ws / GIB:.1f} GiB, limited by {b['limited_by']} "
+                  f"(working set {b['working_set_bytes'] / GIB:.1f}, "
+                  f"available now {b['available_bytes'] / GIB:.1f}; "
                   f"--working-set-gib overrides)")
     adv = wired.advise(a.bytes_on_disk)
     if adv.get("action") == "raise":
