@@ -252,6 +252,13 @@ def unload(port: int = 8080, **_) -> Dict[str, Any]:
 
 # --- the table --------------------------------------------------------------
 
+def deps() -> Dict[str, Any]:
+    """Which build of each piece every interpreter has, read off the fix
+    itself rather than a version string."""
+    from . import deps as D
+    return D.survey()
+
+
 TOOLS: Dict[str, Dict[str, Any]] = {
     "ready": {
         "fn": ready,
@@ -310,6 +317,16 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "force": {"type": "boolean",
                       "description": "load despite an unsettled ring"},
         }, ["artifact"]),
+    },
+    "deps": {
+        "fn": deps,
+        "description": "What this stack stands on, per interpreter "
+                       "(knurlogic's and exo's): mlx, mlx-lm, mlx-vlm, exo, "
+                       "each marked stock or fork by what is installed, not "
+                       "by version -- plus what each fork carries and why it "
+                       "is or is not ported. Call this when something works "
+                       "in exo and not here, or the reverse.",
+        "schema": _schema({}),
     },
     "unload": {
         "fn": unload,

@@ -23,6 +23,8 @@ COMMANDS = {
                    "declare one"),
     "models": ("discover", "find the models already on this machine, in "
                            "every tool's store"),
+    "deps": ("deps", "what this stack stands on, per interpreter, and which "
+                     "pieces are stock and which are forks"),
 }
 
 
