@@ -73,12 +73,10 @@ that and the critique showed it contradicts the bundles. Instead:
 * **Bug this closes, found while deciding:** `tuning/settings.py`
   `RUNTIME_PROFILES["v1.5"]` forces `VQ_GEMMSEG_BF16IO=0` and
   `VQ_DECODE_BF16IO=0` for every VQ artifact, overriding rungs whose shipped
-  default is `1` (Flash-Next 2.1, GLM 3.1/3.6, ...). These flags are
-  numerics-active (F103/F105, up to +0.97% ppl). The fix: a rung's numerics
-  come from the rung (its declared knobs, falling back to its bundled
-  runtime's default); the profile applies only when a person asks for it.
-  First step: establish from vqlab's release records which value each rung
-  was VALIDATED with. Do not change a default on assumption.
+  default is `1` -- published: Flash-Next 2.1 and 35B-A3B 3.8/4.6/5.4.
+  These flags are numerics-active (F103/F105, up to +0.97% ppl). The fix: a
+  rung's numerics come from the rung (declared knobs set from its PUBLISHED
+  model.py, above); the profile applies only when a person asks for it.
 
 ### D2. Pin the stack (Noah; closes B4)
 
