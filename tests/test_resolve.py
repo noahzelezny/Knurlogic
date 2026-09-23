@@ -132,9 +132,9 @@ ENGINE_SIDE = {
 
 
 def test_mlx_lives_behind_the_engine_seam():
-    """The point of engine.py is that it is the ONLY module importing an
+    """The point of engine/ is that it is the ONLY folder importing an
     engine. If mlx names leak back into the other modules, swapping the
-    engine stops being a one-file change and this test is the tripwire.
+    engine stops being a one-folder change and this test is the tripwire.
 
     It used to glob `src/knurlogic/*.py`, so every subpackage was exempt by
     accident. It walks the tree now, and a directory is exempt only by being
@@ -184,7 +184,7 @@ def test_asking_what_an_artifact_has_does_not_load_an_engine():
         capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "False", (
-        "importing knurlogic.mtp pulled in an engine: " + out.stdout)
+        "importing knurlogic.engine.mtp pulled in an engine: " + out.stdout)
 
 
 def test_dense_vq_artifacts_are_recognised_as_vq():
