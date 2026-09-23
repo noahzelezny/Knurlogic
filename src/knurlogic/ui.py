@@ -131,30 +131,77 @@ def _status_fn(_n=0):
     return snap, status.render_cluster(snap)
 
 
-def serve_log(port: int) -> Path:
-    """Where a server started from here writes. A child whose output went
-    to /dev/null could crash on load and leave its caller holding
-    'starting' forever, with no way to learn why."""
+def _cache_dir() -> Path:
     import os
     root = Path(os.environ.get("XDG_CACHE_HOME",
                                Path.home() / ".cache")) / "knurlogic"
     root.mkdir(parents=True, exist_ok=True)
-    return root / f"serve-{port}.log"
+    return root
+
+
+def serve_log(port: int) -> Path:
+    """Where a server started from here writes. A child whose output went
+    to /dev/null could crash on load and leave its caller holding
+    'starting' forever, with no way to learn why."""
+    return _cache_dir() / f"serve-{port}.log"
+
+
+# --- servers outlive the session that started them --------------------------
+# An agent's MCP session ends; the model it loaded should not, and neither
+# should its ability to stop it. Measured: a server started through the MCP
+# kept running after the session closed, and the next session could not
+# unload it because the only record was a dict in the dead process. So the
+# record is a file, and `_CHILDREN` only keeps the Popen for exit codes.
+
+def _registry_path() -> Path:
+    return _cache_dir() / "servers.json"
+
+
+def _registry() -> dict:
+    try:
+        return {int(k): v for k, v in
+                json.loads(_registry_path().read_text()).items()}
+    except Exception:
+        return {}
+
+
+def _save_registry(reg: dict) -> None:
+    _registry_path().write_text(json.dumps(
+        {str(k): v for k, v in sorted(reg.items())}, indent=1))
+
+
+def _is_our_server(pid: int) -> bool:
+    """Alive AND still a knurlogic serve. A pid is reused once its process
+    is gone; killing whatever inherited the number would be the bug."""
+    try:
+        out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
+                             capture_output=True, text=True,
+                             timeout=5).stdout
+    except Exception:
+        return False
+    return "knurlogic" in out and " serve " in f" {out} "
 
 
 def children() -> list:
-    """Every server started from this process: alive, or how it ended."""
+    """Every server knurlogic started, from any session: alive, or how it
+    ended (exit code when this process started it, and the log's end)."""
     out = []
-    for port, (proc, path) in sorted(_CHILDREN.items()):
-        code = proc.poll()
-        row = {"port": port, "artifact": path, "pid": proc.pid,
-               "alive": code is None, "log": str(serve_log(port))}
-        if code is not None:
-            row["exit_code"] = code
+    reg = _registry()
+    for port, rec in sorted(reg.items()):
+        pid = int(rec["pid"])
+        mine = _CHILDREN.get(port)
+        code = mine[0].poll() if mine and mine[0].pid == pid else None
+        alive = code is None and _is_our_server(pid)
+        row = {"port": port, "artifact": rec.get("artifact"), "pid": pid,
+               "alive": alive, "log": rec.get("log"),
+               "started": rec.get("started")}
+        if not alive:
+            if code is not None:
+                row["exit_code"] = code
             try:
-                row["log_tail"] = serve_log(port).read_text(
+                row["log_tail"] = Path(rec["log"]).read_text(
                     errors="replace").splitlines()[-15:]
-            except OSError:
+            except (OSError, KeyError):
                 row["log_tail"] = []
         out.append(row)
     return out
@@ -171,11 +218,13 @@ def _spawn(path: str, port: int, tune: str = "balanced",
     in full -- which is the difference between this and switching a model
     inside a running server.
     """
+    import os
     if not Path(path).exists():
         return {"error": f"no such artifact: {path}"}
-    live = _CHILDREN.get(port)
-    if live and live[0].poll() is None:
-        return {"error": f"port {port} is already serving {live[1]}"}
+    rec = _registry().get(port)
+    if rec and _is_our_server(int(rec["pid"])):
+        return {"error": f"port {port} is already serving "
+                         f"{rec.get('artifact')} (pid {rec['pid']})"}
     cmd = [sys.executable, "-m", "knurlogic.cli", "serve", path,
            "--port", str(port), "--tune", tune]
     # Settings chosen at LAUNCH, which for most of these is the only moment
@@ -188,29 +237,55 @@ def _spawn(path: str, port: int, tune: str = "balanced",
     log = serve_log(port)
     try:
         with open(log, "w") as fh:
+            # Its own session, so it is not taken down with the terminal or
+            # the MCP client that asked for it.
             proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT,
-                                    env={**__import__("os").environ,
-                                         "PYTHONUNBUFFERED": "1"})
+                                    env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                                    start_new_session=True)
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
     _CHILDREN[port] = (proc, path)
+    reg = _registry()
+    reg[port] = {"pid": proc.pid, "artifact": path, "log": str(log),
+                 "started": time.strftime("%Y-%m-%d %H:%M:%S")}
+    _save_registry(reg)
     return {"starting": path, "port": port, "pid": proc.pid,
             "log": str(log),
-            "note": "the model is loading in its own process; it appears "
-                    "under LOADED when it answers"}
+            "note": "the model is loading in its own process; poll `state` "
+                    "(started_here) or GET /v1/models on the port"}
 
 
 def _stop(port: int) -> dict:
-    live = _CHILDREN.get(port)
-    if not live or live[0].poll() is not None:
-        return {"error": f"nothing started from here on port {port}"}
-    live[0].terminate()
-    try:
-        live[0].wait(timeout=10)
-    except Exception:
-        live[0].kill()
-    _CHILDREN.pop(port, None)
-    return {"stopped": live[1], "port": port}
+    import os
+    import signal
+    reg = _registry()
+    rec = reg.get(port)
+    if not rec:
+        return {"error": f"knurlogic has no record of a server on port "
+                         f"{port}; it stops only what it started"}
+    pid = int(rec["pid"])
+    if not _is_our_server(pid):
+        reg.pop(port, None)
+        _save_registry(reg)
+        _CHILDREN.pop(port, None)
+        return {"error": f"the server on port {port} (pid {pid}) is already "
+                         f"gone; record cleared", "log": rec.get("log")}
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(40):
+        time.sleep(0.25)
+        if not _is_our_server(pid):
+            break
+    else:
+        os.kill(pid, signal.SIGKILL)
+    mine = _CHILDREN.pop(port, None)
+    if mine:
+        try:
+            mine[0].wait(timeout=5)       # reap, so it is not left a zombie
+        except Exception:
+            pass
+    reg.pop(port, None)
+    _save_registry(reg)
+    return {"stopped": rec.get("artifact"), "port": port, "pid": pid}
 
 
 def _load_fn(serve_port: int):
@@ -229,8 +304,8 @@ def _load_fn(serve_port: int):
             if act == "unload":
                 # Ours to stop only if we started it. Anything else is
                 # somebody's server and not this page's to kill.
-                for port, (proc, path) in list(_CHILDREN.items()):
-                    if path == target or str(port) == str(target):
+                for port, rec in _registry().items():
+                    if rec.get("artifact") == target or str(port) == str(target):
                         return _stop(port)
                 return {"error": "this page did not start that; stop it "
                                  "where it was started"}
@@ -296,9 +371,10 @@ def serve_ui(host: str, port: int, serve_port: int) -> int:
     except KeyboardInterrupt:
         pass
     finally:
-        for proc, _p in _CHILDREN.values():
-            if proc.poll() is None:
-                proc.terminate()
+        # The page's own children end with the page. Through _stop, so the
+        # registry an MCP session reads does not keep a dead entry.
+        for port in list(_CHILDREN):
+            _stop(port)
     return 0
 
 
