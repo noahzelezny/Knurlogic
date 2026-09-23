@@ -112,6 +112,14 @@ class Row:
     draft_row: Optional[mx.array]  # [1, V] the head's draft of t2, or None
     n_prompt: int
     drafts: bool
+    #: design D4: this row's MRoPE offset (Qwen: positions after an image
+    #: run ahead of the token count by rope_delta). Recomputed from the key
+    #: at every admission -- positions are pure in the key -- so it needs no
+    #: home in the prefix cache.
+    rope_delta: int = 0
+    #: True when the family gave explicit position ids for this row; decode
+    #: then passes `position_ids` for the whole batch (see MTPBatch._pos_kw).
+    mrope: bool = False
 
 
 @dataclass
@@ -161,6 +169,11 @@ def admit(
     hcache: Any = None,
     start_pos: int = 0,
     on_chunk: Optional[Callable[[list, Any], None]] = None,
+    embeds: Optional[mx.array] = None,
+    extras: Optional[dict] = None,
+    chunk_boundaries: Optional[List[tuple]] = None,
+    rope_delta: int = 0,
+    mrope: bool = False,
 ) -> Row:
     """Prefill one prompt and seed the head for it: loop.py's prefill, kept
     as a standalone so the batch can admit rows between steps.
@@ -184,6 +197,24 @@ def admit(
     The head is seeded from position 0 (see loop.py on alignment), which is
     why an admitted row always starts from a FRESH trunk cache: a reused
     prefix would shift every rotary position the head sees.
+
+    IMAGES (design D5; docs/design/vision.md). A vision row arrives with
+    `embeds` -- the trunk's `input_embeddings` for ids[start_pos:] only, as
+    `Family.embed` builds them, [1, n - start_pos, D] -- and optional
+    `extras`, further trunk kwargs over the same span. An extras value is an
+    array whose sequence axis is 1, or an `(array, axis)` pair naming it
+    (position ids are [3, 1, L]: axis -1). Every chunk forward gets the
+    matching slice of each, the ids still ride along (the trunk ignores
+    them when embeddings are given, and a drafting head needs them).
+    `chunk_boundaries` are [start, end) spans no chunk edge may fall
+    strictly inside -- gemma attends bidirectionally within an image, so a
+    chunk that cut one would compute the first half without the second
+    (critique B5). Edges snap back to the span start, or forward past the
+    span when it starts the chunk (a span longer than the step is one
+    chunk). The last forward, which yields the first logits, is widened the
+    same way if the prompt ends inside a span. `rope_delta` / `mrope` ride
+    on the Row so MTPBatch can hand the trunk this row's positions on every
+    decode step (design D4).
     """
     import contextlib
 
@@ -203,15 +234,35 @@ def admit(
                 f"head cache at offset {hoff} cannot seed a prefix at {start_pos}"
             )
 
+    spans = [tuple(b) for b in (chunk_boundaries or ())]
+    last = _snap_down(n - 1, spans, start_pos)
+
+    def _kw(a: int, b: int) -> dict:
+        """Trunk kwargs for ids[:, a:b]: the embeds/extras slices."""
+        if embeds is None and not extras:
+            return {}
+        kw = {}
+        if embeds is not None:
+            kw["input_embeddings"] = embeds[:, a - start_pos:b - start_pos]
+        for name, v in (extras or {}).items():
+            arr, axis = v if isinstance(v, tuple) else (v, 1)
+            sl = [slice(None)] * arr.ndim
+            sl[axis] = slice(a - start_pos, b - start_pos)
+            kw[name] = arr[tuple(sl)]
+        return kw
+
     h_chunks: List[mx.array] = []
     ctx = prefill_ctx() if prefill_ctx is not None else contextlib.nullcontext()
     with ctx:
-        for i in range(start_pos, n - 1, prefill_step_size):
-            end = min(i + prefill_step_size, n - 1)
+        i = start_pos
+        while i < last:
+            end = _snap_chunk_end(i, min(i + prefill_step_size, last), spans,
+                                  last)
             chunk = ids[:, i:end]
             if not chunk.shape[1]:
-                continue
-            model(chunk, cache=cache)
+                break
+            model(chunk, cache=cache, **_kw(i, end))
+            i = end
             # Evaluate the cache and the captured hidden state, never the
             # logits: forcing them would materialise the lm_head projection
             # for every prompt position (loop.py says the same).
@@ -227,7 +278,7 @@ def admit(
             if on_progress is not None:
                 on_progress(end, n)
 
-    logits = model(ids[:, max(n - 1, 0):], cache=cache)
+    logits = model(ids[:, max(last, 0):], cache=cache, **_kw(max(last, 0), n))
     row_t1 = logits[:, -1]
     t1 = _pick(row_t1, params, []).astype(mx.int32)
 
@@ -252,7 +303,34 @@ def admit(
     return Row(
         uid=uid, params=params, cache=cache, hcache=dcache, t1=t1,
         row_t1=row_t1, draft_row=draft_row, n_prompt=n, drafts=drafts,
+        rope_delta=int(rope_delta), mrope=bool(mrope),
     )
+
+
+def _inside(p: int, spans) -> Optional[tuple]:
+    """The span p falls strictly inside (s < p < e), if any."""
+    for s, e in spans:
+        if s < p < e:
+            return (s, e)
+    return None
+
+
+def _snap_down(p: int, spans, floor: int) -> int:
+    """p moved back to the start of a span it cuts, never below floor."""
+    sp = _inside(p, spans)
+    return max(sp[0], floor) if sp is not None else p
+
+
+def _snap_chunk_end(i: int, end: int, spans, last: int) -> int:
+    """A chunk [i, end) whose end would cut a span: end at the span's start
+    if that leaves the chunk non-empty, otherwise run past the span (capped
+    at `last`, itself already snapped)."""
+    sp = _inside(end, spans)
+    if sp is None:
+        return end
+    if sp[0] > i:
+        return sp[0]
+    return min(sp[1], last) if sp[1] <= last else last
 
 
 class MTPBatch:
@@ -293,6 +371,9 @@ class MTPBatch:
         self.drafts: List[bool] = []
         self.accepted: List[int] = []
         self.steps: List[int] = []
+        self.n_prompt: List[int] = []
+        self.rope_delta: List[int] = []
+        self.mrope: List[bool] = []
 
         self.cache: list = []               # batched trunk caches
         self.hcache: Any = None             # batched head cache
@@ -402,6 +483,9 @@ class MTPBatch:
             self.drafts.append(r.drafts)
             self.accepted.append(0)
             self.steps.append(0)
+            self.n_prompt.append(r.n_prompt)
+            self.rope_delta.append(r.rope_delta)
+            self.mrope.append(r.mrope)
         # A row's arrays are consumed by the first step; nothing to eval here
         # that the step will not force anyway.
 
@@ -415,6 +499,9 @@ class MTPBatch:
         self.drafts = [self.drafts[i] for i in keep]
         self.accepted = [self.accepted[i] for i in keep]
         self.steps = [self.steps[i] for i in keep]
+        self.n_prompt = [self.n_prompt[i] for i in keep]
+        self.rope_delta = [self.rope_delta[i] for i in keep]
+        self.mrope = [self.mrope[i] for i in keep]
         if not keep:
             self.cache = []
             self.hcache = None
@@ -433,6 +520,26 @@ class MTPBatch:
     def remove(self, uids: Iterable[int]) -> None:
         drop = set(uids)
         self.filter([i for i, u in enumerate(self.uids) if u not in drop])
+
+    def _pos_kw(self, width: int) -> dict:
+        """`position_ids` for a decode forward `width` tokens wide, or {}.
+
+        Design D4: a Qwen row whose key holds an image decodes at position
+        (tokens so far + rope_delta) on all three MRoPE axes -- for EVERY
+        step, not only while the image is in the new span; missing it
+        degrades silently (critique B1). So as soon as one row needs it the
+        whole batch gets explicit ids, [3, B, width]; a row without MRoPE
+        gets its plain count, which is what the trunk would have used. The
+        count is n_prompt + tokens emitted: the row's cache length before
+        this step, tracked here rather than read off a left-padded batch
+        cache. No MRoPE row -> {} and the trunk call is exactly as before.
+        """
+        if not any(self.mrope):
+            return {}
+        base = [self.n_prompt[i] + len(self.emitted[i]) + self.rope_delta[i]
+                for i in range(len(self.uids))]
+        p = mx.array(base)[:, None] + mx.arange(width)[None, :]
+        return {"position_ids": mx.broadcast_to(p[None], (3, *p.shape))}
 
     # ------------------------------------------------------------------ step
 
@@ -486,7 +593,9 @@ class MTPBatch:
 
         # --- verify: one 2-wide forward over the batch -------------------
         csnap = snapshot(self.cache, copy=self.copy_caches)
-        lg2 = self.model(mx.stack([self.t1, d2], axis=1), cache=self.cache)
+        pos2 = self._pos_kw(2)
+        lg2 = self.model(mx.stack([self.t1, d2], axis=1), cache=self.cache,
+                         **pos2)
 
         # --- verdicts ----------------------------------------------------
         oks: List[Any] = [None] * B
@@ -530,7 +639,8 @@ class MTPBatch:
         # --- rollback + replay if anyone rejected ------------------------
         if not all(ok_flags):
             restore(self.cache, csnap)
-            lg2 = self.model(mx.stack([self.t1, t2], axis=1), cache=self.cache)
+            lg2 = self.model(mx.stack([self.t1, t2], axis=1), cache=self.cache,
+                             **pos2)
 
         # --- emit --------------------------------------------------------
         t1_list = self.t1.tolist()
@@ -599,7 +709,8 @@ class MTPBatch:
         """
         B = len(self.uids)
         assert self.t1 is not None and self.row_t1 is not None
-        lg = self.model(self.t1[:, None], cache=self.cache)     # [B, 1, V]
+        lg = self.model(self.t1[:, None], cache=self.cache,
+                        **self._pos_kw(1))                      # [B, 1, V]
         t1_list = self.t1.tolist()
         # The head already drafted the token after t1 (draft_row); the trunk
         # is about to choose it too, so score the head at no cost and keep
