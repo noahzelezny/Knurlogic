@@ -389,6 +389,8 @@
    border:1px solid var(--line);padding:0 4px;margin-left:7px}
  .tag.live{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
  .tag.dead{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+ .star{cursor:pointer;color:var(--faint);margin-right:6px}
+ .star:hover{color:var(--acc)}
  .msg{color:var(--dim);font-size:11.5px;margin-top:10px}
  .msg b{color:var(--fg)}
  code{font-size:11.5px}
@@ -425,6 +427,76 @@
  .mini[disabled]{opacity:.35;cursor:default}
  .bench .msg{margin:0;font-size:11px}
  form{display:flex;gap:8px;margin-top:10px}form input{flex:1}
+ /* --- Chat --- */
+ .tabbedlab{display:flex;align-items:center;justify-content:space-between}
+ .tabseg button{background:transparent;border:1px solid var(--line);color:var(--dim);
+   font:inherit;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+   padding:5px 12px;cursor:pointer}
+ .tabseg button+button{border-left:0}
+ .tabseg button.on{color:var(--accfg);background:var(--acc);border-color:var(--acc)}
+ #bench[hidden],#chat[hidden]{display:none}
+ #clog{height:clamp(280px,40vh,560px);overflow:auto;border:1px solid var(--line);
+   padding:12px;background:oklch(.1 0 0);border-radius:var(--r);
+   display:flex;flex-direction:column;gap:12px}
+ @media(prefers-color-scheme:light){#clog{background:var(--bg)}}
+ .bubblewrap{display:flex;flex-direction:column;gap:4px;max-width:88%}
+ .bubblewrap.user{align-self:flex-end;align-items:flex-end}
+ .bubblewrap.assistant{align-self:flex-start;align-items:flex-start}
+ .bubble{padding:9px 11px;border-radius:var(--r);
+   border:1px solid var(--line);font-size:12.5px;white-space:pre-wrap;
+   word-wrap:break-word;line-height:1.6}
+ .bubble.user{background:var(--med)}
+ .bubble.assistant{background:transparent}
+ .bubble.err{border-color:var(--warn);color:var(--warn)}
+ .bactions{display:flex;gap:8px;font-size:10px;color:var(--faint);
+   letter-spacing:.06em;text-transform:uppercase}
+ .bactions span{cursor:pointer}
+ .bactions span:hover{color:var(--acc)}
+ details.think{border:1px solid var(--line);border-radius:var(--r);
+   padding:6px 9px;font-size:11px;color:var(--dim);max-width:100%}
+ details.think summary{cursor:pointer;color:var(--faint);list-style:none}
+ details.think summary::-webkit-details-marker{display:none}
+ details.think summary:before{content:"thinking  "}
+ .think pre{white-space:pre-wrap;color:var(--faint);font-size:11px}
+ .md pre{background:oklch(.09 0 0);border:1px solid var(--line);padding:10px;
+   border-radius:var(--r);overflow:auto;position:relative}
+ @media(prefers-color-scheme:light){.md pre{background:var(--med)}}
+ .md code{background:oklch(.09 0 0);padding:1px 4px;border-radius:3px}
+ @media(prefers-color-scheme:light){.md code{background:var(--med)}}
+ .md pre code{background:transparent;padding:0}
+ .md table{border-collapse:collapse;font-size:11.5px}
+ .md td,.md th{border:1px solid var(--line);padding:4px 8px}
+ .md a{color:var(--acc)}
+ .codehd{display:flex;justify-content:space-between;font-size:10px;
+   color:var(--faint);letter-spacing:.08em;text-transform:uppercase;
+   margin:-10px -10px 8px;padding:5px 10px;border-bottom:1px solid var(--line)}
+ .codehd span{cursor:pointer}
+ .codehd span:hover{color:var(--acc)}
+ .thumbs{display:flex;gap:6px;flex-wrap:wrap}
+ .thumb{width:64px;height:64px;object-fit:cover;border-radius:var(--r);
+   border:1px solid var(--line);cursor:zoom-in}
+ .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+ .chip{display:flex;align-items:center;gap:6px;border:1px solid var(--line);
+   border-radius:var(--r);padding:3px 4px 3px 6px;font-size:10.5px;color:var(--dim)}
+ .chip img{width:24px;height:24px;object-fit:cover;border-radius:3px}
+ .chip .ctok{color:var(--faint)}
+ .chip .cx{cursor:pointer;color:var(--faint);padding:0 3px}
+ .chip .cx:hover{color:var(--warn)}
+ .crow{display:flex;gap:8px;align-items:flex-end}
+ #cq{flex:1;resize:none;background:var(--panel);color:var(--fg);
+   border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;
+   font:inherit;font-size:12.5px;max-height:160px}
+ #cq[disabled]{opacity:.5}
+ .go.danger{color:var(--warn);border-color:var(--warn)}
+ .pfbar{margin-top:8px;height:4px;background:var(--med);border-radius:2px;
+   position:relative;overflow:hidden}
+ .pfbar .pfbarfill{height:100%;background:var(--acc);width:0%;transition:width .15s}
+ .pfbar .pfbartxt{position:absolute;top:6px;left:0;font-size:10px;color:var(--faint)}
+ .lightbox{position:fixed;inset:0;background:oklch(0 0 0/.85);z-index:50;
+   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+ .lightbox img{max-width:90vw;max-height:80vh;object-fit:contain;border-radius:var(--r)}
+ .lbbar{display:flex;gap:10px}
+ .lbbar .mini{color:var(--fg);border-color:var(--line)}
  @media(prefers-reduced-motion:reduce){
    .flow line,.live i{animation:none}
    *,*:before,*:after{transition-duration:.01ms!important;
@@ -454,7 +526,7 @@
          change can be compared against the last one, which is the whole job
          of this page. -->
     <aside class="side">
-      <button class="newchat" id="newchat">+ New run</button>
+      <button class="newchat" id="newchat">+ New chat</button>
       <div id="chats"></div>
     </aside>
     <main>
@@ -465,15 +537,50 @@
         <div id="mem" class="ro"></div>
       </section>
       <section class="panel" id="try">
-        <div class="lab">Bench</div>
-        <div id="log"></div>
-        <form id="f"><input id="q" placeholder="A prompt to measure with" autocomplete="off">
-          <button class="go" id="go">Run</button></form>
-        <div class="bench">
-          <button id="again" class="mini" disabled>Run it again</button>
-          <label class="chk"><input type="checkbox" id="fresh" checked>
-            fresh prefill</label>
+        <div class="lab tabbedlab">
+          <span class="seg tabseg" id="ptabs">
+            <button class="on" data-tab="chat">Chat</button>
+            <button data-tab="bench">Bench</button>
+          </span>
         </div>
+        <section id="chat">
+          <div id="clog"></div>
+          <div id="chips" class="chips"></div>
+          <div id="pfbar" class="pfbar" hidden>
+            <div class="pfbarfill"></div><span class="pfbartxt"></span></div>
+          <form id="cf">
+            <div class="crow">
+              <button type="button" id="cattach" class="mini" title="attach image"
+                disabled>📎</button>
+              <input id="cfile" type="file" multiple hidden
+                accept="image/*,text/*,.md,.json,.py">
+              <textarea id="cq" rows="1"
+                placeholder="choose a model to chat with"></textarea>
+              <button class="go" id="csend" disabled>Send</button>
+              <button type="button" class="go danger" id="cstop" hidden>Stop</button>
+            </div>
+          </form>
+          <details class="more" id="copts">
+            <summary>chat options</summary>
+            <div class="opt"><div class="optlab">max tokens</div>
+              <input id="cmax" type="number" min="16" step="16" value="2048"></div>
+            <div class="opt"><div class="optlab">temperature</div>
+              <input id="ctemp" type="number" min="0" max="2" step="0.05" value="0.7"></div>
+            <label class="chk"><input type="checkbox" id="cthink">enable thinking</label>
+            <div class="opt"><div class="optlab">system prompt</div>
+              <input id="csys" placeholder="(none)"></div>
+          </details>
+        </section>
+        <section id="bench" hidden>
+          <div id="log"></div>
+          <form id="f"><input id="q" placeholder="A prompt to measure with" autocomplete="off">
+            <button class="go" id="go">Run</button></form>
+          <div class="bench">
+            <button id="again" class="mini" disabled>Run it again</button>
+            <label class="chk"><input type="checkbox" id="fresh" checked>
+              fresh prefill</label>
+          </div>
+        </section>
       </section>
     </main>
     <aside class="right">
@@ -530,6 +637,15 @@
       <div class="fams" id="pfams"></div>
       <div class="rows" id="prows"></div>
     </div>
+  </div>
+</div>
+<!-- Fullscreen image lightbox for chat attachments: Esc or a click on the
+     backdrop closes it, and a download link is filled in per image. -->
+<div class="lightbox" id="lightbox" hidden>
+  <img id="lbimg" alt="">
+  <div class="lbbar">
+    <a id="lbdl" download class="mini">Download</a>
+    <button id="lbclose" class="mini">Close  esc</button>
   </div>
 </div>
 <!-- The menus take the whole screen. They are what you came for when they
@@ -913,6 +1029,7 @@ async function tick(){
     $('badges').innerHTML=b.map(([t,on])=>
       `<span class="badge${on?' on':''}">${esc(t)}</span>`).join('');
   }
+  if(window.chatServedChanged) window.chatServedChanged(a);
   // The topology, and the device IS the gauge: each unit fills from the
   // bottom with what that box is holding. A picture of a machine next to a
   // separate number is decoration; a picture that IS the number is not.
@@ -1094,6 +1211,30 @@ async function tick(){
 // catalogue pretending to be a control: the answer to fifty rungs is a
 // picker, not a longer list.
 let MODELS=[], GROUPS=[], FAM='All', SEL=null, QUERY='';
+// Favorites/recents: exo's two small localStorage lists, ported as the
+// spec's §1 table calls "trivial". A set of paths, and a max-20 MRU list.
+function loadFav(){ try{ return new Set(JSON.parse(localStorage.getItem('kn.fav')||'[]')) }
+  catch(e){ return new Set() } }
+function isFav(p){ return loadFav().has(p) }
+function toggleFav(p){ const s=loadFav();
+  s.has(p)?s.delete(p):s.add(p);
+  try{ localStorage.setItem('kn.fav', JSON.stringify([...s])) }catch(e){} }
+function loadRecents(){ try{ return JSON.parse(localStorage.getItem('kn.recent')||'[]') }
+  catch(e){ return [] } }
+function pushRecent(path){
+  let r=loadRecents().filter(x=>x.path!==path);
+  r.unshift({path, at:Date.now()});
+  try{ localStorage.setItem('kn.recent', JSON.stringify(r.slice(0,20))) }catch(e){}
+}
+// No `vision` field exists on /models.json today (checked `web.py`); this is
+// a family-name heuristic until the server adds one, matching the families
+// the design doc names as vision-capable (gemma4, glm5, qwen-vl). See the
+// deviation note in the build report.
+function isVision(m){
+  const hay=`${m.name} ${m.model_type||''}`.toLowerCase();
+  return /vl\b|vision|gemma.?4|glm.?5/.test(hay);
+}
+window.isVision=isVision;
 
 // Grouping, tested against the real disk before any of this was drawn: 49
 // artifacts collapse to 13 rows. Publishers name a rung by its quantisation
@@ -1162,13 +1303,34 @@ function renderPicker(){
         const ok=!ws||m.size_bytes<=ws;
         return `<div class="var ${ok?'':'no'}" data-p="${esc(m.path)}"
           aria-current="${SEL&&SEL.path===m.path}">
+          <span class="star" data-fav="${esc(m.path)}"
+            title="favorite">${isFav(m.path)?'★':'☆'}</span>
           <span class="vn">${esc(m.name)}</span>
           ${m.is_vq?'<span class="tag">VQ</span>':''}
           ${m.mtp?'<span class="tag">MTP</span>':''}
+          ${isVision(m)?'<span class="tag">VISION</span>':''}
           <span class="vs">${gb(m.size_bytes)}</span></div>`}).join('')}</div>
     </div>`;
   const a=shown.filter(fits), b=shown.filter(g=>!fits(g));
-  $('prows').innerHTML=
+  // Favorites and recents (exo's `favorites.svelte.ts` / `recents.svelte.ts`
+  // pattern, kept trivial: two localStorage lists, shown only on the
+  // unfiltered "All" view so they never fight the search/family filters).
+  let favHTML='';
+  if(FAM==='All' && !q){
+    const favMs=MODELS.filter(m=>isFav(m.path));
+    const recMs=loadRecents().map(r=>MODELS.find(m=>m.path===r.path)).filter(Boolean);
+    const oneRow=m=>`<div class="var" data-p="${esc(m.path)}"
+        aria-current="${SEL&&SEL.path===m.path}">
+        <span class="star" data-fav="${esc(m.path)}">${isFav(m.path)?'★':'☆'}</span>
+        <span class="vn">${esc(m.name)}</span>
+        ${isVision(m)?'<span class="tag">VISION</span>':''}
+        <span class="vs">${gb(m.size_bytes)}</span></div>`;
+    if(favMs.length) favHTML+=`<div class="sect">favorites</div>
+      <div class="vars">${favMs.map(oneRow).join('')}</div>`;
+    if(recMs.length) favHTML+=`<div class="sect">recent</div>
+      <div class="vars">${recMs.map(oneRow).join('')}</div>`;
+  }
+  $('prows').innerHTML=favHTML+
     (a.length?`<div class="sect">fits in this machine's memory</div>`
       +a.map(grp).join(''):'')
     +(b.length?`<div class="sect no">needs more than ${gb(ws)}</div>`
@@ -1177,6 +1339,9 @@ function renderPicker(){
 
   $('prows').querySelectorAll('.grphd').forEach(h=>h.onclick=()=>
     h.parentElement.classList.toggle('open'));
+  $('prows').querySelectorAll('[data-fav]').forEach(s=>s.onclick=e=>{
+    e.stopPropagation(); toggleFav(s.dataset.fav); renderPicker();
+  });
   $('prows').querySelectorAll('.var').forEach(v=>v.onclick=()=>{
     SEL=MODELS.find(m=>m.path===v.dataset.p);
     $('picker').hidden=true; document.body.style.overflow='';
@@ -1269,7 +1434,7 @@ $('launch').onclick=async()=>{
                      tune:(window.LOADTUNE||'balanced'),
                      sets:SETS});
   b.textContent='Launch'; b.disabled=false;
-  if(!j.error && !j.refused){ tick(); loadModels();
+  if(!j.error && !j.refused){ tick(); loadModels(); pushRecent(m.path);
     const st=(j.settings||{}).needs_restart||{};
     const n=Object.keys(st).length;
     if(n) alert(`Loaded. ${n} setting${n===1?'':'s'} could not be applied `+
@@ -1382,7 +1547,8 @@ async function loadResident(){
         ${r.can_unload?`<button class="mini danger" data-i="${i}"
           >Unload</button>`:''}
       </div>
-      <div class="n" title="${esc(r.name)}">${esc(r.name)}</div>
+      <div class="n" title="click to chat with it" data-chatn="${i}"
+        style="cursor:pointer">${esc(r.name)}</div>
       <div class="s">${[
         r.bytes_resident?gb(r.bytes_resident)
           :(r.state==='offered'?'':'size not reported'),
@@ -1390,6 +1556,11 @@ async function loadResident(){
         .filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
         .map(esc).join(' · ')}</div>
     </div>`).join('');
+  el.querySelectorAll('[data-chatn]').forEach(x=>x.onclick=()=>{
+    const r=rows[+x.dataset.chatn];
+    if(window.switchTab) window.switchTab('chat');
+    if(window.newChat) window.newChat(r.name);
+  });
   // Only when status has told us nothing: in a cluster the key is the sum
   // of what the machines are drawing, and this document is one box.
   // NOT a second writer for the key. `tick` renders it from the node maps
@@ -1534,8 +1705,10 @@ function record(role, content, met){
   if(r){ r.msgs.push({role,content,met}); r.tune=(ASK&&ASK.tune)||r.tune }
   saveRuns(); renderRuns();
 }
-$('newchat').onclick=newRun;
-loadRuns(); renderRuns();
+$('newchat').onclick=()=>{ if(window.ACTIVETAB==='chat') window.newChat(); else newRun() };
+loadRuns();
+window.renderRunsBench=renderRuns;
+if(window.ACTIVETAB!=='chat') renderRuns();
 
 // --- the timed request ----------------------------------------------------
 // Enter sends, explicitly. A form with one text input and a submit button
@@ -1626,4 +1799,528 @@ async function send(q){
   BUSY=false; $('go').disabled=false; $('again').disabled=!LAST;
 }
 $('f').onsubmit=e=>{ e.preventDefault(); send($('q').value.trim()) };
+
+// ---------------------------------------------------------------------------
+// Chat tab. Talks to the same served model over the same /v1/chat/completions
+// the bench uses, but the opposite way on all three axes the bench deliberately
+// defeats: full history (so the model actually has a conversation), a stable
+// prompt prefix (no nonce -- that is what lets the server's prefix cache reuse
+// an unchanged image across turns), and multimodal content.
+//
+// Some of this (the SSE line-buffering shape, the <think> splitter, the
+// image-lightbox download-by-mime-type trick, the paste-to-file-at-2500-chars
+// rule) is ported from exo's dashboard (`exo/dashboard/src/lib`), which is
+// Apache-2.0 licensed:
+//
+//   Copyright 2024 exo labs inc
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//       http://www.apache.org/licenses/LICENSE-2.0
+//
+(()=>{
+'use strict';
+
+// --- tabs -------------------------------------------------------------
+window.ACTIVETAB='chat';
+function switchTab(t){
+  window.ACTIVETAB=t;
+  $('ptabs').querySelectorAll('button').forEach(b=>
+    b.classList.toggle('on', b.dataset.tab===t));
+  $('chat').hidden = t!=='chat';
+  $('bench').hidden = t!=='bench';
+  $('newchat').textContent = t==='chat' ? '+ New chat' : '+ New run';
+  if(t==='chat') renderChats(); else if(window.renderRunsBench) window.renderRunsBench();
+}
+window.switchTab=switchTab;
+$('ptabs').querySelectorAll('button').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+
+// --- IndexedDB image store ----------------------------------------------
+// Images are content-addressed by the SHA-256 of the FINAL data URL (the
+// one downscaled/re-encoded once at attach time -- §3.2/3.4). Kept out of
+// localStorage on purpose: exo's own store keeps images inline as data URLs
+// there and just logs the quota error (`app.svelte.ts:669`); a few
+// screenshots would blow past 5 MB in a couple of turns.
+let IDB=null, IDBFAIL=false;
+function openIDB(){
+  return new Promise((res)=>{
+    if(IDB){ res(IDB); return }
+    if(IDBFAIL || !window.indexedDB){ res(null); return }
+    try{
+      const rq=indexedDB.open('kn-img', 1);
+      rq.onupgradeneeded=()=>{ rq.result.createObjectStore('blobs', {keyPath:'hash'}) };
+      rq.onsuccess=()=>{ IDB=rq.result; res(IDB) };
+      rq.onerror=()=>{ IDBFAIL=true; res(null) };
+    }catch(e){ IDBFAIL=true; res(null) }
+  });
+}
+const MEMIMG={}; // session-only fallback when IndexedDB is unavailable
+async function idbPut(rec){
+  const db=await openIDB();
+  if(!db){ MEMIMG[rec.hash]=rec; return }
+  try{ await new Promise((res,rej)=>{
+    const tx=db.transaction('blobs','readwrite');
+    tx.objectStore('blobs').put(rec);
+    tx.oncomplete=res; tx.onerror=()=>rej(tx.error);
+  }) }catch(e){ MEMIMG[rec.hash]=rec }
+}
+async function idbGet(hash){
+  const db=await openIDB();
+  if(!db) return MEMIMG[hash]||null;
+  try{ return await new Promise((res,rej)=>{
+    const tx=db.transaction('blobs','readonly');
+    const rq=tx.objectStore('blobs').get(hash);
+    rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>rej(rq.error);
+  }) }catch(e){ return MEMIMG[hash]||null }
+}
+async function sha256(str){
+  const buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// --- chat store (localStorage kn.chats) ----------------------------------
+const CSTORE='kn.chats';
+let CHATS=[], CCUR=null;
+function loadChats(){ try{ CHATS=JSON.parse(localStorage.getItem(CSTORE)||'[]') }
+  catch(e){ CHATS=[] } if(!Array.isArray(CHATS)) CHATS=[] }
+function saveChats(){ try{ localStorage.setItem(CSTORE, JSON.stringify(CHATS.slice(0,100))) }
+  catch(e){} }
+function curChat(){ return CHATS.find(c=>c.id===CCUR)||null }
+
+function renderChats(){
+  const el=$('chats');
+  if(!CHATS.length){ el.innerHTML='<div class="sidelab">no chats yet</div>'; return }
+  el.innerHTML='<div class="sidelab">chats</div>'+CHATS.map((c,i)=>
+    `<div class="chat" data-i="${i}" aria-current="${c.id===CCUR}">
+       <span class="x" data-del="${i}" title="delete">×</span>
+       <div class="t" data-rn="${i}" title="rename">${esc(c.title||'untitled')}</div>
+       <div class="m">${esc(c.model||'')}</div></div>`).join('');
+  el.querySelectorAll('.chat').forEach(c=>c.onclick=e=>{
+    if(e.target.dataset.del!==undefined){
+      if(confirm('Delete this chat?')){
+        CHATS.splice(+e.target.dataset.del,1); saveChats();
+        if(!CHATS.some(x=>x.id===CCUR)) newChat(); else renderChats();
+      }
+      return;
+    }
+    if(e.target.dataset.rn!==undefined){
+      e.stopPropagation();
+      const idx=+e.target.dataset.rn, name=prompt('Rename chat', CHATS[idx].title||'');
+      if(name!=null){ CHATS[idx].title=name.slice(0,80); saveChats(); renderChats() }
+      return;
+    }
+    openChat(CHATS[+c.dataset.i]);
+  });
+}
+function newChat(modelHint){
+  CCUR=String(Date.now())+Math.random().toString(36).slice(2,6);
+  CHATS.unshift({id:CCUR, title:'new chat', model:modelHint||SERVEDNAME||'',
+                 at:Date.now(), updated:Date.now(), msgs:[]});
+  saveChats(); switchTab('chat'); renderChats(); renderClog();
+  clearAttachments(); $('cq').focus();
+}
+window.newChat=newChat;
+function openChat(c){
+  CCUR=c.id; renderChats(); renderClog();
+}
+
+// --- served-model / vision gating -----------------------------------------
+let SERVED=null, SERVEDNAME=null;
+function chatServedChanged(a){
+  SERVED=a; SERVEDNAME=a?a.name:null;
+  const vision=!!(a && (a.vision || window.isVision(a)));
+  const on=!!a;
+  $('cq').disabled=!on;
+  $('cq').placeholder=on ? 'Message the running model… (Shift+Enter for a newline)'
+                         : 'choose a model to chat with';
+  $('csend').disabled=!on || BUSYC;
+  $('cattach').disabled=!on || !vision;
+  $('cattach').title=vision ? 'attach an image'
+    : (on ? 'the served model has no vision' : 'choose a model to chat with');
+  if(on && !curChat()) newChat(a.name);
+  if(on && curChat() && !curChat().model) { curChat().model=a.name; saveChats(); renderChats() }
+}
+window.chatServedChanged=chatServedChanged;
+
+// --- attachments ------------------------------------------------------
+// Pending attachments for the message being composed. Images are downscaled
+// and re-encoded exactly ONCE, here, at attach time -- never again -- which
+// is what lets every resend be byte-identical and hit the server's cache
+// (report-chat-ui.md §0.4, §3.4).
+const MAXEDGE=1536, THUMBEDGE=160;
+let PENDING=[]; // [{kind,name,hash,mime,w,h,bytes,text?}]
+
+function clearAttachments(){ PENDING=[]; renderChips() }
+function renderChips(){
+  const el=$('chips');
+  el.innerHTML=PENDING.map((a,i)=>{
+    if(a.kind==='image'){
+      return `<div class="chip"><img src="${a.thumb}"><span>${esc(a.name)}</span>
+        <span class="ctok">≈${estTokens(a)} tok</span>
+        <span class="cx" data-rm="${i}">×</span></div>`;
+    }
+    return `<div class="chip"><span>📄 ${esc(a.name)}</span>
+      <span class="cx" data-rm="${i}">×</span></div>`;
+  }).join('');
+  el.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{
+    PENDING.splice(+x.dataset.rm,1); renderChips();
+  });
+}
+// A rough patch-count estimate (√-area / 28px patches, no family-specific
+// merge factor -- the real number comes back in `usage` after the send;
+// this is only for the chip, per §3.5). Not verified per family.
+function estTokens(a){ return Math.max(64, Math.round((a.w*a.h)/(28*28))) }
+
+function loadImage(dataURL){
+  return new Promise((res,rej)=>{
+    const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=dataURL;
+  });
+}
+function fileToDataURL(f){
+  return new Promise((res,rej)=>{
+    const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f);
+  });
+}
+async function attachImage(file){
+  const raw=await fileToDataURL(file);
+  const im=await loadImage(raw);
+  const scale=Math.min(1, MAXEDGE/Math.max(im.width, im.height));
+  const w=Math.max(1,Math.round(im.width*scale)), h=Math.max(1,Math.round(im.height*scale));
+  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+  cv.getContext('2d').drawImage(im, 0, 0, w, h);
+  const mime = file.type==='image/png' ? 'image/png' : 'image/jpeg';
+  const dataURL=cv.toDataURL(mime, 0.85);
+  const hash=await sha256(dataURL);
+  const tcv=document.createElement('canvas');
+  const ts=Math.min(1, THUMBEDGE/Math.max(w,h));
+  tcv.width=Math.max(1,Math.round(w*ts)); tcv.height=Math.max(1,Math.round(h*ts));
+  tcv.getContext('2d').drawImage(cv, 0, 0, tcv.width, tcv.height);
+  const thumb=tcv.toDataURL('image/jpeg', 0.7);
+  await idbPut({hash, dataURL, thumbDataURL:thumb, w, h, bytes:dataURL.length});
+  PENDING.push({kind:'image', name:file.name, hash, mime, w, h,
+                bytes:dataURL.length, thumb});
+  renderChips();
+}
+async function attachText(file){
+  const text=await file.text();
+  PENDING.push({kind:'text', name:file.name, text:text.slice(0,100000)});
+  renderChips();
+}
+async function handleFiles(files){
+  for(const f of files){
+    try{
+      if(f.type.startsWith('image/')) await attachImage(f);
+      else if(f.type==='application/pdf' || /\.pdf$/i.test(f.name)){
+        // PDFs left out (per the task's instruction): rendering them to page
+        // images needs pdf.js, and a quick check of a simple lazy import
+        // from jsdelivr did not fit this session's time budget cleanly
+        // alongside everything else this file owns -- see build report.
+        alert(`${f.name}: PDF attachments are not supported yet. `+
+          `Convert it to images first, or paste its text.`);
+      } else await attachText(f);
+    }catch(e){ alert(`Could not attach ${f.name}: ${e}`) }
+  }
+}
+$('cfile').addEventListener('change', e=>{ handleFiles([...e.target.files]); e.target.value='' });
+$('cattach').onclick=()=>$('cfile').click();
+$('chat').addEventListener('dragover', e=>e.preventDefault());
+$('chat').addEventListener('drop', e=>{
+  e.preventDefault();
+  if(!$('cattach').disabled && e.dataTransfer.files.length)
+    handleFiles([...e.dataTransfer.files]);
+});
+$('cq').addEventListener('paste', e=>{
+  const items=[...(e.clipboardData?.items||[])];
+  const imgs=items.filter(i=>i.type.startsWith('image/'));
+  if(imgs.length && !$('cattach').disabled){
+    e.preventDefault();
+    imgs.forEach(i=>attachImage(i.getAsFile()));
+    return;
+  }
+  const text=e.clipboardData?.getData('text/plain')||'';
+  if(text.length>2500){
+    e.preventDefault();
+    PENDING.push({kind:'text', name:'pasted-text.txt', text:text.slice(0,100000)});
+    renderChips();
+  }
+});
+
+// --- wire format ------------------------------------------------------
+// Images first, text last -- exo's order (`app.svelte.ts:2418-2446`) -- kept
+// so the same byte sequence is produced every time for a given message.
+async function toWire(m){
+  if(m.role!=='user' || !(m.att&&m.att.length)){
+    if(m.role==='assistant'){
+      const o={role:'assistant', content:m.content||''};
+      if(m.thinking) o.reasoning_content=m.thinking; // echoed back -- see §0.4
+      return o;
+    }
+    return {role:m.role, content:m.content||''};
+  }
+  const parts=[];
+  let fileText='';
+  for(const a of (m.att||[])){
+    if(a.kind==='image'){
+      const rec=await idbGet(a.hash);
+      if(rec) parts.push({type:'image_url', image_url:{url:rec.dataURL}});
+    } else if(a.kind==='text'){
+      fileText += `\n\n[File: ${a.name}]\n\`\`\`\n${a.text}\n\`\`\``;
+    }
+  }
+  parts.push({type:'text', text:(m.content||'')+fileText});
+  return {role:'user', content:parts};
+}
+
+// --- <think> / reasoning_content splitting (exo app.svelte.ts:2107-2140) --
+function splitThink(fullText){
+  const open=fullText.lastIndexOf('<think>'), close=fullText.lastIndexOf('</think>');
+  if(open<0) return {thinking:'', content:fullText};
+  if(close>open) return {thinking:fullText.slice(open+7, close),
+                          content:fullText.slice(0,open)+fullText.slice(close+8)};
+  return {thinking:fullText.slice(open+7), content:fullText.slice(0,open)}; // still open
+}
+
+// --- minimal, safe markdown (escape first, §3.8 option B) -----------------
+function mdRender(src){
+  let s=esc(src);
+  const codeBlocks=[];
+  s=s.replace(/```(\w*)\n([\s\S]*?)```/g, (_,lang,code)=>{
+    const i=codeBlocks.length;
+    codeBlocks.push({lang,code});
+    return `\u0000CB${i}\u0000`;
+  });
+  s=s.replace(/^######\s?(.*)$/gm,'<h6>$1</h6>').replace(/^#####\s?(.*)$/gm,'<h5>$1</h5>')
+    .replace(/^####\s?(.*)$/gm,'<h4>$1</h4>').replace(/^###\s?(.*)$/gm,'<h3>$1</h3>')
+    .replace(/^##\s?(.*)$/gm,'<h2>$1</h2>').replace(/^#\s?(.*)$/gm,'<h1>$1</h1>');
+  s=s.replace(/`([^`\n]+)`/g,'<code>$1</code>');
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/\*([^*]+)\*/g,'<i>$1</i>');
+  s=s.replace(/((?:^|\n)- .*(?:\n- .*)*)/g, m=>
+    '\n<ul>'+m.trim().split('\n').map(l=>`<li>${l.replace(/^- /,'')}</li>`).join('')+'</ul>');
+  // http(s) links only, per the spec's "links (http/https only)".
+  s=s.replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>');
+  s=s.replace(/\n{2,}/g,'</p><p>').replace(/\n/g,'<br>');
+  s=`<p>${s}</p>`;
+  s=s.replace(/\u0000CB(\d+)\u0000/g, (_,i)=>{
+    const {lang,code}=codeBlocks[+i];
+    const id='cb'+Math.random().toString(36).slice(2,8);
+    return `<pre><div class="codehd"><span>${esc(lang||'')}</span>`+
+      `<span data-copy="${id}">copy</span></div><code id="${id}">${code}</code></pre>`;
+  });
+  return s;
+}
+document.addEventListener('click', e=>{
+  const t=e.target.closest('[data-copy]');
+  if(t){ const code=document.getElementById(t.dataset.copy);
+    if(code) navigator.clipboard?.writeText(code.textContent).catch(()=>{}) }
+});
+
+// --- prefill progress bar (exo PrefillProgressBar.svelte:17-30, verbatim math)
+let pfStart=0;
+function pfShow(processed,total){
+  if(!total) return;
+  if(!pfStart) pfStart=performance.now();
+  const pct=Math.min(100, 100*processed/total);
+  const el=$('pfbar'); el.hidden=false;
+  el.querySelector('.pfbarfill').style.width=pct.toFixed(1)+'%';
+  const elapsed=(performance.now()-pfStart)/1000;
+  const rate = elapsed>0.2 ? processed/elapsed : 0;
+  const remain = rate>0 ? Math.max(0,(total-processed)/rate) : 0;
+  const k=n=>n>=1000 ? (n/1000).toFixed(1)+'k' : String(n);
+  el.querySelector('.pfbartxt').textContent=
+    `${k(processed)}/${k(total)} (${pct.toFixed(0)}%)`+
+    (remain>0.3 ? ` · ~${remain.toFixed(1)}s` : '');
+}
+function pfHide(){ $('pfbar').hidden=true; pfStart=0 }
+
+// --- lightbox (exo ImageLightbox.svelte, ported as vanilla JS) ------------
+function openLightbox(dataURL){
+  const ext=(dataURL.match(/^data:image\/(\w+)/)||[])[1]||'png';
+  $('lbimg').src=dataURL; $('lbdl').href=dataURL; $('lbdl').download='image.'+ext;
+  $('lightbox').hidden=false;
+}
+$('lbclose').onclick=()=>{ $('lightbox').hidden=true };
+$('lightbox').onclick=e=>{ if(e.target.id==='lightbox') $('lightbox').hidden=true };
+addEventListener('keydown', e=>{ if(e.key==='Escape' && !$('lightbox').hidden)
+  $('lightbox').hidden=true });
+
+// --- rendering the log --------------------------------------------------
+function bubbleFor(m, idx){
+  const wrap=document.createElement('div');
+  wrap.className='bubblewrap '+(m.role==='user'?'user':'assistant');
+  let thumbs='';
+  if(m.att&&m.att.length){
+    thumbs=`<div class="thumbs">${m.att.filter(a=>a.kind==='image')
+      .map(a=>`<img class="thumb" data-hash="${a.hash}" src="${a.thumb||''}">`).join('')}</div>`;
+  }
+  let thinkHTML='';
+  if(m.thinking) thinkHTML=`<details class="think" ${m._streaming?'open':''}>
+    <summary>thinking</summary><pre>${esc(m.thinking)}</pre></details>`;
+  const body = m.role==='assistant' ? `<div class="md">${mdRender(m.content||'')}</div>`
+                                     : esc(m.content||'');
+  const bubble=document.createElement('div');
+  bubble.className='bubble '+(m.role==='user'?'user':(m.err?'err assistant':'assistant'));
+  bubble.innerHTML = (thumbs?thumbs:'') + (m.role==='user'?body:'');
+  if(m.role!=='user') bubble.innerHTML = thinkHTML + `<div class="md">${mdRender(m.content||'')}</div>`;
+  wrap.appendChild(bubble);
+  if(m.met){ const met=document.createElement('div'); met.innerHTML=metHTML(m.met, null);
+    wrap.appendChild(met.firstChild) }
+  const act=document.createElement('div'); act.className='bactions';
+  act.innerHTML = `<span data-cp="${idx}">copy</span>`+
+    (m.role==='user'?`<span data-ed="${idx}">edit &amp; resend</span>`:'')+
+    (m.role==='assistant'?`<span data-rg="${idx}">regenerate</span>`:'')+
+    `<span data-del2="${idx}">delete</span>`;
+  wrap.appendChild(act);
+  wrap.querySelectorAll('.thumb').forEach(async img=>{
+    const rec=await idbGet(img.dataset.hash);
+    if(rec) img.onclick=()=>openLightbox(rec.dataURL);
+  });
+  return wrap;
+}
+function renderClog(){
+  const el=$('clog'); el.innerHTML='';
+  const c=curChat();
+  if(!c){ el.innerHTML='<div class="msg">No chat open. Click a running model, '+
+    'or "+ New chat".</div>'; return }
+  (c.msgs||[]).forEach((m,i)=>el.appendChild(bubbleFor(m,i)));
+  el.scrollTop=1e9;
+  el.querySelectorAll('[data-cp]').forEach(x=>x.onclick=()=>{
+    const m=c.msgs[+x.dataset.cp]; navigator.clipboard?.writeText(m.content||'').catch(()=>{});
+  });
+  el.querySelectorAll('[data-del2]').forEach(x=>x.onclick=()=>{
+    c.msgs.splice(+x.dataset.del2,1); saveChats(); renderClog();
+  });
+  el.querySelectorAll('[data-ed]').forEach(x=>x.onclick=()=>{
+    const i=+x.dataset.ed, m=c.msgs[i];
+    $('cq').value=m.content||''; c.msgs.length=i; saveChats(); renderClog(); $('cq').focus();
+  });
+  el.querySelectorAll('[data-rg]').forEach(x=>x.onclick=()=>{
+    const i=+x.dataset.rg;
+    // Regenerate = drop this assistant turn and everything after it, then
+    // resend using the user turn right before it.
+    let j=i; while(j>0 && c.msgs[j-1].role!=='user') j--;
+    c.msgs.length=j; saveChats(); renderClog(); runTurn();
+  });
+}
+
+// --- send / stream ------------------------------------------------------
+let BUSYC=false, ABORTC=null;
+function autoGrow(){ const q=$('cq'); q.style.height='auto';
+  q.style.height=Math.min(160,q.scrollHeight)+'px' }
+$('cq').addEventListener('input', autoGrow);
+$('cq').addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey && !e.isComposing){
+    e.preventDefault(); $('cf').requestSubmit();
+  }
+});
+$('cf').onsubmit=e=>{ e.preventDefault(); sendChat() };
+$('cstop').onclick=()=>{ if(ABORTC) ABORTC.abort() };
+
+function sendChat(){
+  if(BUSYC || !SERVED) return;
+  const text=$('cq').value.trim();
+  if(!text && !PENDING.length) return;
+  let c=curChat(); if(!c){ newChat(); c=curChat() }
+  if(c.msgs.length===0) c.title=text.slice(0,52)||'(image)';
+  c.msgs.push({role:'user', content:text, att:PENDING.slice()});
+  $('cq').value=''; autoGrow(); clearAttachments(); c.updated=Date.now();
+  saveChats(); renderChats(); renderClog();
+  runTurn();
+}
+
+async function runTurn(){
+  const c=curChat(); if(!c) return;
+  BUSYC=true; $('csend').disabled=true; $('csend').hidden=true; $('cstop').hidden=false;
+  const wire=[];
+  const sys=$('csys').value.trim();
+  if(sys) wire.push({role:'system', content:sys});
+  for(const m of c.msgs) wire.push(await toWire(m));
+  const assistant={role:'assistant', content:'', thinking:'', _streaming:true};
+  c.msgs.push(assistant); renderClog();
+  const bubbles=$('clog').children; const wrap=bubbles[bubbles.length-1];
+  const mdEl=()=>wrap.querySelector('.md');
+  ABORTC=new AbortController();
+  pfStart=0;
+  const body={messages:wire, stream:true, stream_options:{include_usage:true},
+    max_tokens:+$('cmax').value||2048, temperature:+$('ctemp').value||0.7};
+  if($('cthink').checked) body.enable_thinking=true;
+  const t0=performance.now();
+  let first=0, raw='', usage=null;
+  try{
+    const r=await fetch('/v1/chat/completions',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),
+      signal:ABORTC.signal});
+    if(!r.ok||!r.body) throw new Error('HTTP '+r.status);
+    const rd=r.body.getReader(), dec=new TextDecoder();
+    let buf='';
+    for(;;){
+      const {value,done}=await rd.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,nl); buf=buf.slice(nl+1);
+        const t=line.trim(); if(!t) continue;
+        if(t.startsWith(':')){
+          // mlx-lm's own prefill signal, `: keepalive P/T` (server.py:1410-1413);
+          // also accept exo's `: prefill_progress {json}` shape if it ever
+          // shows up here, so the bar works against either server.
+          let mm=t.match(/^:\s*keepalive\s+(\d+)\/(\d+)/);
+          if(mm){ pfShow(+mm[1], +mm[2]); continue }
+          mm=t.match(/^:\s*prefill_progress\s+(\{.*\})/);
+          if(mm){ try{ const j=JSON.parse(mm[1]);
+            pfShow(j.processed||j.prompt_processed||0, j.total||j.prompt_tokens||0);
+          }catch(e){} }
+          continue;
+        }
+        if(!t.startsWith('data:')) continue;
+        const payload=t.slice(5).trim();
+        if(payload==='[DONE]') continue;
+        let j; try{ j=JSON.parse(payload) }catch(e){ continue }
+        if(j.usage) usage=j.usage;
+        const delta=j.choices?.[0]?.delta||{};
+        if(delta.reasoning_content){
+          if(!first) first=performance.now();
+          assistant.thinking += delta.reasoning_content;
+          pfHide();
+        }
+        if(delta.content){
+          if(!first) first=performance.now();
+          raw+=delta.content; pfHide();
+          const split=splitThink(raw);
+          assistant.content=split.content;
+          if(split.thinking) assistant.thinking=split.thinking;
+          const md=mdEl(); if(md) md.innerHTML=mdRender(assistant.content);
+          const th=wrap.querySelector('.think pre');
+          if(th) th.textContent=assistant.thinking;
+          $('clog').scrollTop=1e9;
+        }
+      }
+    }
+  }catch(err){
+    if(err.name!=='AbortError'){ assistant.content=(assistant.content||'')+`\n\n[error: ${err}]`;
+      assistant.err=true }
+  }
+  pfHide();
+  const end=performance.now();
+  assistant._streaming=false;
+  if(first){
+    const ttft=first-t0;
+    const prompt=usage?.prompt_tokens||0;
+    const cached=usage?.prompt_tokens_details?.cached_tokens||0;
+    const fresh=Math.max(prompt-cached,0);
+    const comp=usage?.completion_tokens||0;
+    assistant.met={ttft_ms:ttft, prompt, cached, completion:comp,
+      prefill_tps: fresh>0 ? fresh/(ttft/1000) : 0,
+      decode_tps: (comp>1 && end>first) ? (comp-1)/((end-first)/1000) : 0};
+  }
+  if(!assistant.content && !assistant.thinking) assistant.content='(no content)';
+  c.updated=Date.now(); saveChats(); renderClog();
+  BUSYC=false; $('csend').disabled=!SERVED; $('csend').hidden=false; $('cstop').hidden=true;
+  ABORTC=null;
+}
+
+loadChats();
+document.addEventListener('DOMContentLoaded', ()=>{});
+switchTab('chat');
+renderClog();
+})();
 </script>
