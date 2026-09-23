@@ -89,6 +89,17 @@ def ready(**_) -> Dict[str, Any]:
                         "last_log_line": c.get("last_log_line", "")},
              "why": "memory is about to change; a fit measured now is stale"}
             for c in ui.loading()]
+    # The load lock (P0/`machine/loadlock.py`) is a second source of the same
+    # blocker: a load started by a DIFFERENT process (another agent, `serve`
+    # run by hand) holds it and would not otherwise show up in `ui.loading()`,
+    # which only knows about children this MCP process itself started.
+    from knurlogic.machine import loadlock
+    held = loadlock.holder()
+    if held is not None:
+        mine.append({
+            "what": "another process holds the model-load lock",
+            "detail": held,
+            "why": "memory is about to change; a fit measured now is stale"})
     st = _exo_state()
     if not st:
         return {"ready": not mine, "exo": False,
@@ -192,6 +203,8 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
     from knurlogic.tuning import settings as S
     from knurlogic.machine import wired
 
+    from knurlogic.engine.vision import registry as vision_registry
+
     a = Artifact.load(artifact)
     mem = available_memory()
     b = wired.load_budget()
@@ -206,6 +219,11 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
         "artifact": a.path.name,
         "verdict": verdict,
         "fits": fits,
+        # Static: whether a family for this model_type exists at all, not
+        # whether THIS config.json has a vision_config (that needs the build
+        # step -- registry.build -- which does not run before a load). Good
+        # enough for "would this be worth attaching an image to".
+        "vision_capable": vision_registry.has_family(a.model_type),
         "size_gib": round(a.gib, 1),
         "budget_gib": round(budget / GIB, 1),
         "headroom_gib": round(headroom / GIB, 1),
@@ -236,11 +254,17 @@ def state(**_) -> Dict[str, Any]:
     m = doc.get("memory") or {}
     from knurlogic.interfaces import ui
     from knurlogic.machine import exo
+    from knurlogic.engine.vision import served_vision
+    spec = served_vision()
     return {
         "exo_instances": exo.phases(),
         "resident": doc.get("resident", []),
         "runtimes": doc.get("runtimes", []),
         "started_here": ui.children(),
+        # None when nothing served has vision, matching the served_path()
+        # pattern the rest of `state()` follows -- absence is a fact, not
+        # an omission.
+        "vision": spec.to_json() if spec else None,
         "memory": {
             "installed_gib": round(m.get("installed_bytes", 0) / GIB, 1),
             "used_gib": round(m.get("used_bytes", 0) / GIB, 1),
@@ -260,6 +284,7 @@ def models(fits_only: bool = False, **_) -> Dict[str, Any]:
     from knurlogic.machine.loaded import available_memory
 
     from knurlogic.machine import wired
+    from knurlogic.engine.vision import registry as vision_registry
     avail = wired.load_budget()["bytes"]
     out = []
     for f in discover.find():
@@ -268,7 +293,8 @@ def models(fits_only: bool = False, **_) -> Dict[str, Any]:
                "model_type": f.model_type, "is_vq": f.is_vq,
                "servable": f.servable, "why_not": f.why,
                "fits": bool(avail) and f.bytes_on_disk <= avail,
-               "drafting_head": bool(f.extra.get("mtp_head"))}
+               "drafting_head": bool(f.extra.get("mtp_head")),
+               "vision_capable": vision_registry.has_family(f.model_type)}
         if fits_only and not (row["fits"] and row["servable"]):
             continue
         out.append(row)

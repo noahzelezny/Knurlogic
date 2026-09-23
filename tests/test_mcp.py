@@ -12,6 +12,17 @@ import pytest
 from knurlogic.interfaces import mcp
 
 
+@pytest.fixture(autouse=True)
+def _no_real_loadlock(monkeypatch):
+    """`ready()` now also asks `machine/loadlock.holder()` (P5, this file's
+    own addition below). That reads the REAL default lock path when no test
+    sets one, which would make every `ready()` test here depend on whether
+    something else on this shared machine happens to hold it right now.
+    Default it to "nothing held" so a test that cares about the lock says
+    so explicitly (see `test_ready_blocks_on_another_process_holding_the_load_lock`)."""
+    monkeypatch.setattr("knurlogic.machine.loadlock.holder", lambda *a, **k: None)
+
+
 def _artifact(d, gib=4, **cfg):
     d.mkdir(parents=True, exist_ok=True)
     (d / "config.json").write_text(json.dumps(
@@ -223,3 +234,75 @@ def test_ready_waits_for_knurlogics_own_loads(monkeypatch, tmp_path):
     r = mcp.ready()
     assert r["ready"] is False
     assert r["blockers"][0]["detail"]["phase"] == "warming"
+
+
+def test_ready_blocks_on_another_process_holding_the_load_lock(monkeypatch):
+    """The lock (`machine/loadlock.py`, P0) is a second source of the same
+    blocker `ready()` already reports for knurlogic's own children -- a
+    load started by a DIFFERENT process (another agent, a hand-run `serve`)
+    holds it, and would not show up in `ui.loading()`."""
+    monkeypatch.setattr(mcp, "_exo_state", lambda: {})
+    monkeypatch.setattr(
+        "knurlogic.machine.loadlock.holder",
+        lambda *a, **k: {"pid": 999, "artifact": "other-model",
+                         "agent": "someone-else", "started": 0})
+    r = mcp.ready()
+    assert r["ready"] is False
+    assert any("load lock" in b["what"] for b in r["blockers"])
+
+
+def test_fit_reports_vision_capability(tmp_path, monkeypatch):
+    """`registry.has_family` is a REGISTERED-model_type-and-package-present
+    check (P0); the family packages (qwen, gemma4, glm5) are P1-P3's, not
+    yet on disk here, so this drives the registry directly rather than
+    asserting True for a real model_type that may resolve False today and
+    True once P1-P3 land -- `fit`'s job is only to pass the answer through."""
+    d = _artifact(tmp_path / "vqwen", model_type="qwen3_5")
+    monkeypatch.setattr(
+        "knurlogic.machine.loaded.available_memory",
+        lambda: {"available_bytes": 64 << 30, "free_bytes": 64 << 30,
+                 "cached_bytes": 0})
+    monkeypatch.setattr(
+        "knurlogic.engine.vision.registry.has_family", lambda mt: True)
+    assert mcp.fit(artifact=str(d))["vision_capable"] is True
+    monkeypatch.setattr(
+        "knurlogic.engine.vision.registry.has_family", lambda mt: False)
+    assert mcp.fit(artifact=str(d))["vision_capable"] is False
+
+
+def test_models_lists_vision_capability(tmp_path, monkeypatch):
+    from knurlogic.machine.discover import Found
+
+    d = _artifact(tmp_path / "vqwen", model_type="qwen3_5")
+    monkeypatch.setattr(
+        "knurlogic.machine.discover.find",
+        lambda *a, **k: [Found(name="vqwen", path=d, store="given",
+                               format="mlx", bytes_on_disk=4 << 20,
+                               model_type="qwen3_5", servable=True)])
+    monkeypatch.setattr(
+        "knurlogic.engine.vision.registry.has_family", lambda mt: True)
+    r = mcp.models()
+    assert r["models"][0]["vision_capable"] is True
+
+
+def test_state_carries_the_served_vision_spec(monkeypatch):
+    from knurlogic.engine.vision import VisionSpec
+
+    spec = VisionSpec(family="qwen3_5", image_token_id=5, patch=14,
+                      merge=2, min_pixels=100, max_pixels=1000,
+                      fixed_tokens=None, proc_hash="deadbeef" * 2)
+    monkeypatch.setattr("knurlogic.engine.vision.served_vision",
+                        lambda: spec)
+    monkeypatch.setattr("knurlogic.machine.loaded.survey",
+                        lambda: {"resident": [], "runtimes": []})
+    r = mcp.state()
+    assert r["vision"]["family"] == "qwen3_5"
+
+
+def test_state_vision_is_none_when_nothing_served(monkeypatch):
+    monkeypatch.setattr("knurlogic.engine.vision.served_vision",
+                        lambda: None)
+    monkeypatch.setattr("knurlogic.machine.loaded.survey",
+                        lambda: {"resident": [], "runtimes": []})
+    r = mcp.state()
+    assert r["vision"] is None
