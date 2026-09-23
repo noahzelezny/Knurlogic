@@ -36,6 +36,19 @@ were checked in mlx-lm's server loop rather than assumed:
     a step commits was fed through the trunk, including one a stop sequence
     then hid, so the list is prompt + everything committed.
 
+IMAGES (design D5, D7 Phase A; docs/design/vision.md). Every request with
+an image comes here, head or no head (`head=None` is a plain batch engine
+with the same admission), because only `admit` snaps prefill chunks to the
+family's image spans. The prompt the server hands over is the cache KEY
+(engine/vision/key.py): ids with a sentinel per image token. `_admit_one`
+turns it back into ids for the trunk, asks the family for the embeddings of
+the uncached span and for positions over the whole key (D4), and keeps the
+key -- not the ids -- as the row's `all_tokens`, so the prefix cache is
+keyed by it. A row whose uncached span holds an image does not draft
+(Phase A): the head would be seeded from embed_tokens(pad) where the trunk
+saw image features, the defect exo has. Text-only keys take exactly the
+path they took before this existed.
+
 Costs, inherited and stated: a row is prefilled whole inside one `next()`
 call (other rows wait for it, as they did in the fork), and there is no
 end-of-segment cache insert mid-prompt -- the finished row's entry is what
@@ -55,6 +68,7 @@ from .batch_loop import MTPBatch, RowParams, admit
 from .capture import capture_input
 from .registry import resolve
 from .sampling import make_distribution
+from ..vision import key as K
 
 logger = logging.getLogger(__name__)
 
@@ -133,30 +147,53 @@ def tag_samplers(srv) -> None:
 
 
 class MTPBatchGenerator(BatchGenerator):
-    """mlx-lm's BatchGenerator, drafting every row with an MTP head."""
+    """mlx-lm's BatchGenerator, drafting every row with an MTP head -- or,
+    with `head=None`, the same engine without drafting, which is how a
+    vision model with no head serves images (design D5).
 
-    def __init__(self, model, head, *, stats: dict | None = None, **kw):
+    `vision` is the served model's `engine.vision.request.VisionServe` (or
+    None): the family, the image store and the pins taken at tokenize."""
+
+    def __init__(self, model, head, *, stats: dict | None = None,
+                 vision=None, **kw):
         super().__init__(model, **kw)
-        spec = resolve(model)
-        arch = spec.arch_module(model)
-        core = getattr(getattr(model, "language_model", model), "model", None)
-        if core is None:
-            raise RuntimeError(
-                f"{type(model).__name__} exposes neither `.model` nor "
-                f"`.language_model.model`; no capture point for the MTP head")
         self._stack = contextlib.ExitStack()
-        get_h = self._stack.enter_context(capture_input(core, spec.capture))
         self._head = head
-        self._make_draft_cache = (head.make_draft_cache
-                                  if hasattr(head, "make_draft_cache")
-                                  else (lambda: spec.make_draft_cache(arch)))
-        self._batch = MTPBatch(model, head, get_h,
-                               copy_caches=spec.cache_semantics != "reassign")
+        self._vision = vision
+        if head is not None:
+            spec = resolve(model)
+            arch = spec.arch_module(model)
+            core = getattr(getattr(model, "language_model", model), "model",
+                           None)
+            if core is None:
+                raise RuntimeError(
+                    f"{type(model).__name__} exposes neither `.model` nor "
+                    f"`.language_model.model`; no capture point for the MTP "
+                    f"head")
+            get_h = self._stack.enter_context(capture_input(core,
+                                                            spec.capture))
+            self._make_draft_cache = (
+                head.make_draft_cache if hasattr(head, "make_draft_cache")
+                else (lambda: spec.make_draft_cache(arch)))
+            copy = spec.cache_semantics != "reassign"
+            name = spec.name
+        else:
+            # No head: nothing to capture, nothing to seed. A snapshot is
+            # only taken by a drafting step, which a headless batch never
+            # takes, so the copy flag is moot; True is the safe reading.
+            get_h = lambda: None                          # noqa: E731
+            self._make_draft_cache = lambda: None         # noqa: E731
+            copy = True
+            name = None
+        self._batch = MTPBatch(model, head, get_h, copy_caches=copy)
         self._n_trunk = len(self._make_new_cache())
         # uid -> what the server gave us for that row, and what it has seen.
         self._rows: dict = {}
         self._stats = stats if stats is not None else {}
-        logger.info("batch engine drafting with the %s MTP head", spec.name)
+        if name:
+            logger.info("batch engine drafting with the %s MTP head", name)
+        else:
+            logger.info("batch engine without a drafting head (vision)")
 
     # ------------------------------------------------------------ admission
 
@@ -167,27 +204,101 @@ class MTPBatchGenerator(BatchGenerator):
         rest = [t for seg in segments for t in seg]
         prompt = prefix + rest
         n = len(prompt)
+        vis = None
+        if K.has_image(prompt):
+            vis = self._vision
+            if vis is None:
+                raise RuntimeError("an image key reached a batch generator "
+                                   "with no vision family; the serve path "
+                                   "is wired wrong")
 
-        cache, hcache, hit = split_pool_entry(
-            list(cache or []), self._n_trunk, drafts=True, hit_len=len(prefix))
+        if vis is None:
+            cache, hcache, hit = split_pool_entry(
+                list(cache or []), self._n_trunk, drafts=True,
+                hit_len=len(prefix))
+            drafts = True
+        else:
+            cache, hcache, hit, drafts = self._vision_entry(
+                list(cache or []), prompt, len(prefix))
         if len(prefix) > 0 and hit == 0:
             logger.info("prompt cache entry at %d/%d tokens has no aligned "
                         "head cache; prefilling from scratch", len(prefix), n)
         params = RowParams(max_tokens=_NEVER,
                            dist=make_distribution(**(sampling_of(sampler) or {})),
-                           processors=list(procs or []), eos=set(), drafts=True)
-        with mx.stream(self._stream):
-            row = admit(self.model, self._head, self._batch.get_h,
-                        mx.array(prompt), params, uid=uid,
-                        make_draft_cache=self._make_draft_cache,
-                        prefill_step_size=self.prefill_step_size,
-                        cache=cache or None, hcache=hcache, start_pos=hit)
-            self._batch.extend([row])
+                           processors=list(procs or []), eos=set(),
+                           drafts=drafts)
+        try:
+            with mx.stream(self._stream):
+                if vis is None:
+                    ids, kw = mx.array(prompt), {}
+                else:
+                    ids, kw = self._vision_inputs(vis, prompt, hit)
+                row = admit(self.model, self._head, self._batch.get_h,
+                            ids, params, uid=uid,
+                            make_draft_cache=self._make_draft_cache,
+                            prefill_step_size=self.prefill_step_size,
+                            cache=cache or None, hcache=hcache, start_pos=hit,
+                            **kw)
+                self._batch.extend([row])
+        finally:
+            if vis is not None:
+                # The features are in the KV now (admit evaluated every
+                # chunk); the pin taken at tokenize has done its job.
+                vis.release(K.images_in(prompt))
         self._rows[uid] = {"sm": sm, "state": sm.make_state(),
                            "max": max_tokens, "n": 0, "fed": list(prompt)}
         self._prompt_tokens_counter += n - hit
         self._stats["requests"] = self._stats.get("requests", 0) + 1
         return PromptProcessingBatch.Response(uid, (n, n), True, True)
+
+    def _vision_entry(self, entry: list, key: list, hit_len: int):
+        """(trunk, head cache, hit, drafts) for a row whose key holds an
+        image. Phase A (D7): no drafting if the uncached span holds an
+        image. Otherwise it drafts only off an entry with an aligned head --
+        and where there is none (every entry an image row stored, since
+        image rows never seed the head) the row keeps the TRUNK hit and does
+        not draft, rather than throwing the image's KV away to draft: the
+        point is that the image is never prefilled twice (G8)."""
+        fam = self._vision.family
+        spans = fam.chunk_boundaries(key)
+        if hit_len and any(s < hit_len < e for s, e in spans):
+            # A hit cut inside a bidirectional block computed its first half
+            # blind to its second; that KV is not reusable. The trie matches
+            # the same image whole, so this is not expected -- kept loud.
+            logger.warning("prefix hit at %d cuts an image block; "
+                           "prefilling from scratch", hit_len)
+            return [], None, 0, False
+        img_new = K.has_image(key[hit_len:]) if hit_len else True
+        if self._head is not None and not img_new:
+            trunk, hc, hit = split_pool_entry(entry, self._n_trunk,
+                                              drafts=True, hit_len=hit_len)
+            if hit == hit_len and hc is not None:
+                return trunk, hc, hit, True
+        trunk, _, hit = split_pool_entry(entry, self._n_trunk, drafts=False,
+                                         hit_len=hit_len)
+        return trunk, None, hit, False
+
+    def _vision_inputs(self, vis, key: list, hit: int):
+        """(ids, admit kwargs) for a vision row: embeddings for the uncached
+        span, position ids over the whole key (D4 -- even when the new span
+        is text only), the family's chunk boundaries (D5)."""
+        fam = vis.family
+        feats, refs = vis.lookup()
+        ids = mx.array(K.to_ids(key, fam.spec.image_token_id))
+        kw: dict = {"chunk_boundaries": fam.chunk_boundaries(key)}
+        extras: dict = {}
+        if K.has_image(key[hit:]):
+            got = dict(fam.embed(self.model, key, hit, feats))
+            kw["embeds"] = got.pop("input_embeddings")
+            extras.update(got)
+        pos, delta = fam.positions(key, refs)
+        if pos is not None:
+            extras["position_ids"] = (pos[..., hit:], -1)
+            kw["mrope"] = True
+        kw["rope_delta"] = int(delta)
+        if extras:
+            kw["extras"] = extras
+        return ids, kw
 
     # ----------------------------------------------------------------- step
 
@@ -196,7 +307,12 @@ class MTPBatchGenerator(BatchGenerator):
         it sits at the same offset (otherwise a restore could not draft)."""
         trunk = [c.extract(i) for c in self._batch.cache]
         h = self._batch.hcache
-        if h is not None and hasattr(h, "extract"):
+        # A row that never drafted (an image row, Phase A) never advanced
+        # its head cache, so it has no head to store -- and in a batch where
+        # NO row drafted the batched head cache holds no keys at all, which
+        # `extract` does not survive (found by G10).
+        if (h is not None and hasattr(h, "extract")
+                and self._batch.drafts[i]):
             head = h.extract(i)
             # Compare against a cache that HAS a position. On a hybrid model
             # the first layers are recurrent (ArraysCache, no offset), and
@@ -279,6 +395,14 @@ class MTPBatchGenerator(BatchGenerator):
 
     def remove(self, uids, return_prompt_caches=False):
         caches = self.extract_cache(uids) if return_prompt_caches else {}
+        if self._vision is not None:
+            # A row dropped before admission still holds its tokenize pin.
+            drop = set(uids)
+            for seq in self._unprocessed_sequences:
+                if seq[0] in drop:
+                    key = list(seq[4] or []) + [t for g in seq[1] for t in g]
+                    if K.has_image(key):
+                        self._vision.release(K.images_in(key))
         super().remove([u for u in uids if u not in set(self._batch.uids)])
         self._batch.remove(uids)
         for u in uids:
