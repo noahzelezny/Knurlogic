@@ -76,12 +76,26 @@ def ready(**_) -> Dict[str, Any]:
     and last-seen separately and a caller that checks one of them loads into
     a ring that is still moving.
     """
+    from . import ui
+    # knurlogic's OWN loads move memory too. Checking only exo let a second
+    # load through while the first was still reading weights, on a budget
+    # that did not yet count them -- the same race as placing on an
+    # unsettled exo ring, reproduced here before this check existed.
+    mine = [{"what": "a knurlogic server is still loading",
+             "detail": {"port": c["port"],
+                        "artifact": (c["artifact"] or "").split("/")[-1],
+                        "phase": c["phase"],
+                        "seconds": c["seconds_since_start"],
+                        "last_log_line": c.get("last_log_line", "")},
+             "why": "memory is about to change; a fit measured now is stale"}
+            for c in ui.loading()]
     st = _exo_state()
     if not st:
-        return {"ready": True, "exo": False,
-                "blockers": [],
-                "note": "exo is not running. Nothing to settle -- knurlogic "
-                        "serves a single box without it."}
+        return {"ready": not mine, "exo": False,
+                "blockers": mine, "exo_placement_blockers": [],
+                "ready_for_exo_placement": not mine,
+                "note": "exo is not running. Nothing to settle there -- "
+                        "knurlogic serves a single box without it."}
 
     def state_of(v):
         return next(iter(v)) if isinstance(v, dict) and v else str(v)
@@ -100,7 +114,7 @@ def ready(**_) -> Dict[str, Any]:
     # moves memory, so `fit`'s number is about to be wrong: that blocks both.
     # A download or a missing node blocks placing a model on the ring and
     # has nothing to do with a server on this box.
-    local, ring = [], []
+    local, ring = list(mine), []
     if settling:
         from collections import Counter
         local.append({"what": "exo runners loading or unloading",
@@ -315,9 +329,10 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
     if not r["ready"] and not force:
         return {"loaded": False, "refused": "memory is about to move",
                 "detail": r["blockers"],
-                "note": "exo is loading or unloading a runner on this box, so "
-                        "the fit above is stale. Wait and call `ready` again; "
-                        "force=true loads anyway."}
+                "note": "something is loading or unloading on this box, so "
+                        "the fit above is stale. Poll `state` -- each server "
+                        "says loading, serving or stalled -- then call "
+                        "`ready` again. force=true loads anyway."}
     out = ui._spawn(artifact, int(port), tune, dict(sets or {}),
                     draft=bool(draft))
     out["fit"] = f
@@ -353,9 +368,10 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": state,
         "description": "What is loaded on this machine in every runtime "
                        "(knurlogic, exo, ollama, any OpenAI port) and where "
-                       "the memory went. `started_here` follows servers "
-                       "`load` started: alive, or the exit code and the end "
-                       "of the log if one died.",
+                       "the memory went. `started_here` gives each server `load` "
+                       "started a phase -- serving, loading (with elapsed "
+                       "time and the last log line), stalled (stop waiting, "
+                       "read the log), or exited (exit code, log tail).",
         "schema": _schema({}),
     },
     "models": {

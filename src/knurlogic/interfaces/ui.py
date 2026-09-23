@@ -183,29 +183,106 @@ def _is_our_server(pid: int) -> bool:
     return "knurlogic" in out and " serve " in f" {out} "
 
 
+#: A loading server whose log has said nothing for this long is reported as
+#: stalled. Not killed -- a 400 GB rung read cold can be slow and silent --
+#: but named, so an agent stops waiting and a person looks at the log.
+STALL_QUIET_S = 180
+
+#: A server holding less than this share of its weights is still warming.
+WARM_FRACTION = 0.9
+
+
+def _artifact_bytes(path: str) -> int:
+    try:
+        from knurlogic.machine.artifact import Artifact
+        return int(Artifact.load(path).bytes_on_disk)
+    except Exception:
+        return 0
+
+
+def _answers(port: int) -> bool:
+    import urllib.request
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=1.5)
+        return True
+    except Exception:
+        return False
+
+
 def children() -> list:
-    """Every server knurlogic started, from any session: alive, or how it
-    ended (exit code when this process started it, and the log's end)."""
+    """Every server knurlogic started, from any session, with its PHASE.
+
+    `alive` alone was the trap: loading, serving and hung all read `alive:
+    true`, and an agent that cannot tell them apart either guesses or waits
+    forever -- the failure that made exo hard to drive. So each server says:
+
+      warming   the port answers but the weights are not resident yet
+                (mlx maps them lazily); memory is still moving
+      serving   answering, and holding its weights
+      loading   alive, not answering yet; with seconds elapsed, the last log
+                line, and how long the log has been quiet
+      stalled   loading, and the log has been quiet for STALL_QUIET_S --
+                stop waiting and read the log
+      exited    gone; exit code when this process started it, log tail
+    """
+    now = time.time()
+    try:
+        pids = {r["pid"]: r["bytes"] for r in loaded.memory_map()["processes"]}
+    except Exception:
+        pids = {}
     out = []
-    reg = _registry()
-    for port, rec in sorted(reg.items()):
+    for port, rec in sorted(_registry().items()):
         pid = int(rec["pid"])
         mine = _CHILDREN.get(port)
         code = mine[0].poll() if mine and mine[0].pid == pid else None
         alive = code is None and _is_our_server(pid)
+        log = Path(rec.get("log", ""))
+        try:
+            lines = [l for l in log.read_text(errors="replace").splitlines()
+                     if l.strip()]
+            quiet = now - log.stat().st_mtime
+        except OSError:
+            lines, quiet = [], None
         row = {"port": port, "artifact": rec.get("artifact"), "pid": pid,
-               "alive": alive, "log": rec.get("log"),
-               "started": rec.get("started")}
-        if not alive:
+               "log": str(log), "started": rec.get("started"),
+               "seconds_since_start": (round(now - rec["t"]) if rec.get("t")
+                                       else None)}
+        if alive and _answers(port):
+            held = pids.get(pid, 0)
+            size = _artifact_bytes(rec.get("artifact", ""))
+            row["bytes_resident"] = held
+            # Answering is not loaded. mlx maps weights lazily: measured, a
+            # 15.5 GiB model answered with 3 GiB resident and reached 15.0
+            # seconds later. Until it holds its weights, memory is still
+            # moving, and a fit taken now is stale.
+            if size and held < WARM_FRACTION * size:
+                row["phase"] = "warming"
+                row["weights_resident_fraction"] = round(held / size, 2)
+            else:
+                row["phase"] = "serving"
+        elif alive:
+            stalled = quiet is not None and quiet > STALL_QUIET_S
+            row["phase"] = "stalled" if stalled else "loading"
+            row["log_quiet_seconds"] = round(quiet) if quiet is not None else None
+            row["last_log_line"] = lines[-1][:200] if lines else ""
+            row["bytes_resident"] = pids.get(pid, 0)
+            if stalled:
+                row["advice"] = (f"no log output for {round(quiet)}s while "
+                                 f"loading. Stop waiting; read {log}. "
+                                 f"unload(port={port}) if it is hung.")
+        else:
+            row["phase"] = "exited"
             if code is not None:
                 row["exit_code"] = code
-            try:
-                row["log_tail"] = Path(rec["log"]).read_text(
-                    errors="replace").splitlines()[-15:]
-            except (OSError, KeyError):
-                row["log_tail"] = []
+            row["log_tail"] = lines[-15:]
         out.append(row)
     return out
+
+
+def loading() -> list:
+    """Servers knurlogic started whose memory is still in motion."""
+    return [c for c in children()
+            if c["phase"] in ("loading", "warming", "stalled")]
 
 
 def _spawn(path: str, port: int, tune: str = "balanced",
@@ -248,7 +325,8 @@ def _spawn(path: str, port: int, tune: str = "balanced",
     _CHILDREN[port] = (proc, path)
     reg = _registry()
     reg[port] = {"pid": proc.pid, "artifact": path, "log": str(log),
-                 "started": time.strftime("%Y-%m-%d %H:%M:%S")}
+                 "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+                 "t": time.time()}
     _save_registry(reg)
     return {"starting": path, "port": port, "pid": proc.pid,
             "log": str(log),
