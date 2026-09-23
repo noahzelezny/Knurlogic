@@ -234,8 +234,13 @@ pip `mlx` ships the ring (TCP) and jaccl (RDMA) backends and a launcher
 pipeline and tensor. So the engine half of a cluster is already
 pip-installable; what exo adds is orchestration. In order:
 
-1. One box from a clean venv with only `pip install knurlogic` (the M4 has
-   no exo). True today except GLM-5.3 (mlx-vlm).
+1. One box from a clean venv with only `pip install knurlogic`. DONE on the
+   M3, 2026-09-23: 14s install (knurlogic, mlx 0.32.2, mlx-lm 0.31.3,
+   numpy; no exo, no mlx-vlm), every command ran from outside the repo, and
+   Flash-Next VQ-2.1bpw loaded through the MCP, drafting on the batch path
+   (acceptance 0.75), answering from the venv's own interpreter. Still to
+   do: the same on the M4, which has no exo at all; and GLM-5.3, which
+   needs mlx-vlm (`pip install knurlogic[vlm]`, untested).
 2. `knurlogic node` -- a stdlib HTTP agent per Mac -- and a two-node
    pipeline over the ring backend, on a model already on both disks. exo
    stays installed until this is dependable.
