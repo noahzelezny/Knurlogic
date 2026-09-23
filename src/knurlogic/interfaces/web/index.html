@@ -1269,7 +1269,7 @@ $('launch').onclick=async()=>{
                      tune:(window.LOADTUNE||'balanced'),
                      sets:SETS});
   b.textContent='Launch'; b.disabled=false;
-  if(!j.error){ tick(); loadModels();
+  if(!j.error && !j.refused){ tick(); loadModels();
     const st=(j.settings||{}).needs_restart||{};
     const n=Object.keys(st).length;
     if(n) alert(`Loaded. ${n} setting${n===1?'':'s'} could not be applied `+
@@ -1343,9 +1343,27 @@ async function act(payload){
   const r=await fetch('/loaded.json',{method:'POST',
     body:JSON.stringify(payload)});
   const j=await r.json();
+  // A refusal is an answer, and the page has to say it the way the MCP does
+  // -- a Launch button that quietly resets is the page's version of an agent
+  // waiting on silence.
   if(j.error) alert(j.error);
+  else if(j.refused) alert(refusalText(j));
   await loadResident();
   return j;
+}
+function refusalText(j){
+  const L=['Not loaded: '+j.refused];
+  const bl=[...(j.blockers||[]),...(j.detail&&Array.isArray(j.detail)?j.detail:[])];
+  bl.forEach(b=>L.push('  - '+b.what+(b.detail&&b.detail.phase?' ('+b.detail.phase+')':'')));
+  const d=(j.detail&&!Array.isArray(j.detail))?j.detail:{};
+  if(d.short_by_gib) L.push(`  needs ${d.model_gib} GiB, ${d.available_gib_total} free: `+
+                            `${d.short_by_gib} GiB short`);
+  (j.nodes||[]).filter(n=>!n.fits).forEach(n=>
+    L.push(`  - ${n.node}: shard ${n.gib} GiB, ${n.available_gib} free`));
+  if((j.holding_memory||[]).length){ L.push('','Holding memory now:');
+    j.holding_memory.forEach(h=>L.push(`  - ${h.what} (${h.where}, ${h.phase})`)) }
+  if(j.note) L.push('',j.note);
+  return L.join('\n');
 }
 async function loadResident(){
   let d; try{ d=await (await fetch('/loaded.json')).json() }catch(e){ return }

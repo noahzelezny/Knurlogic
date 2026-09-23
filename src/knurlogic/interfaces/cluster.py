@@ -46,7 +46,7 @@ from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning.resolve import Node, resolve_cluster
 
 GIB = 1 << 30
-DEFAULT_EXO = "http://127.0.0.1:52415"
+from knurlogic.machine.exo import EXO_URL as DEFAULT_EXO  # noqa: E402
 
 
 # --- talking to exo ---------------------------------------------------------
