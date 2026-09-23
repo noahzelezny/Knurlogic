@@ -474,3 +474,14 @@ def test_a_family_spelled_with_text_still_gets_its_measured_width():
     assert S.prefill_chunk_for("qwen3_5_moe_text")[0] == 4096
     assert S.prefill_chunk_for("glm5_next_text")[0] == 2048
     assert S.prefill_chunk_for("somebody_else")[0] == S.PREFILL_CHUNK_DEFAULT
+
+
+def test_the_command_line_no_longer_forces_a_numerics_profile():
+    """serve and doctor defaulted --profile to v1.5, which forced both
+    bf16-I/O flags off on every VQ rung -- including the v2 rungs published
+    with them on. The default is now None: each rung runs what it shipped."""
+    import argparse
+    from knurlogic.interfaces import doctor, serve
+    for mod in (serve, doctor):
+        src = open(mod.__file__).read()
+        assert '"--profile", default=None' in src, mod.__name__
