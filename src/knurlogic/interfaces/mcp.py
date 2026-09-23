@@ -209,8 +209,13 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
     mem = available_memory()
     b = wired.load_budget()
     budget = b["bytes"]
+    from knurlogic.tuning.resolve import vision_budget
     adv = wired.advise(a.bytes_on_disk)
-    headroom = budget - a.bytes_on_disk
+    # A vision rung also holds its tower, its image store and its images'
+    # KV -- the resolver's terms, so `fit` and `settings` agree.
+    vb = vision_budget(a)
+    extra = vb["extra_bytes"] if vb else 0
+    headroom = budget - a.bytes_on_disk - extra
     fits = bool(budget) and headroom > 0
     tight = fits and headroom < S.TIGHT_HEADROOM_GIB * GIB
     verdict = ("will not fit" if not fits else
@@ -224,6 +229,7 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
         # step -- registry.build -- which does not run before a load). Good
         # enough for "would this be worth attaching an image to".
         "vision_capable": vision_registry.has_family(a.model_type),
+        "vision_budget": _vision_terms(vb),
         "size_gib": round(a.gib, 1),
         "budget_gib": round(budget / GIB, 1),
         "headroom_gib": round(headroom / GIB, 1),
@@ -245,6 +251,20 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
                "available now (free + inactive: what macOS hands over on "
                "demand, and what exo reports).",
     }
+
+
+def _vision_terms(vb) -> Dict[str, Any] | None:
+    """The resolver's vision terms (tuning.resolve.vision_budget) in GiB,
+    each with its note; None for a text-only artifact."""
+    if not vb:
+        return None
+    g = lambda n: round(n / GIB, 2)
+    return {"tower_gib": g(vb["tower_bytes"]),
+            "tower_added_gib": g(vb["tower_outside_bytes"]),
+            "image_store_gib": g(vb["store_bytes"]),
+            "image_kv_allowance_gib": g(vb["kv_allowance_bytes"]),
+            "added_to_size_gib": g(vb["extra_bytes"]),
+            "notes": list(vb["notes"])}
 
 
 def state(**_) -> Dict[str, Any]:
@@ -313,6 +333,13 @@ def settings(artifact: str = "", tune: str = "balanced", **_) -> Dict[str, Any]:
     """
     from knurlogic.interfaces import web
     doc = web._preview(artifact, tune)
+    from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning.resolve import vision_budget
+    try:
+        doc["vision_budget"] = _vision_terms(vision_budget(
+            Artifact.load(artifact)))
+    except (OSError, ValueError):
+        doc["vision_budget"] = None
     for k in doc.get("knobs", []):
         k["change_at"] = ("runtime" if k.get("reach") == "live"
                           else "launch only")

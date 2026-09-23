@@ -403,3 +403,42 @@ KNOB_RANGE = {
     "KNURLOGIC_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
                                  "GiB"),
 }
+
+
+# --- what a VISION rung holds besides its weights ---------------------------
+# A model with a vision tower needs three things a text model does not, and
+# the resolver must count them BEFORE a load (critique issue 10, Flash-Next
+# review point 4), not discover them as an OOM on the first screenshot:
+#
+# 1. The TOWER'S WEIGHTS. Read from the safetensors headers (tensor names
+#    under these prefixes), never guessed. Every family keeps them in the
+#    artifact's own directory -- in the shards, or Qwen's
+#    `model-vision-graft.safetensors` sidecar -- so `bytes_on_disk` already
+#    includes them; the term is shown so nobody has to take that on faith,
+#    and is added only if the scan finds tower tensors outside what
+#    bytes_on_disk counted. The prefixes are the union of the families'
+#    loaders (gemma4 vision_tower./embed_vision., glm5 vision_model./
+#    vision_tower., qwen's four namings).
+VISION_TOWER_PREFIXES = ("vision_tower.", "embed_vision.", "vision_model.",
+                         "visual.", "model.visual.",
+                         "model.language_model.visual.",
+                         "model.vision_tower.", "model.embed_vision.",
+                         "multi_modal_projector.")
+#
+# 2. The IMAGE STORE'S bound. The number is engine/vision/store.py's
+#    DEFAULT_MAX_BYTES (one home), or a live store's budget_bytes() when a
+#    store exists -- which can exceed the bound while prompt-cache entries
+#    pin images in use (engine/vision/cachehook.py).
+#
+# 3. KV for IMAGE SPANS. An image is hundreds to thousands of tokens of
+#    context that a text chat would not have had. The allowance reserves KV
+#    for this many images of this many tokens each. 4096 tokens: GLM's
+#    largest images run to ~8000, gemma's are 280, a default-sized Qwen
+#    screenshot ~1000-2500; 4096 is the middle of the families' upper
+#    ranges. 4 images: a conversation's worth, the same figure the store's
+#    256 MiB default was sized for. An ALLOWANCE, not a measurement -- the
+#    note on the resolution says so.
+VISION_KV_IMAGES = 4
+VISION_KV_TOKENS_PER_IMAGE = 4096
+#: bf16 KV, the dtype every served rung's cache runs in.
+VISION_KV_DTYPE_BYTES = 2
