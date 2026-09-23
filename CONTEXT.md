@@ -1,72 +1,85 @@
 # knurlogic — start here
 
-*Routing layer. This file says what lives where and points at the one home
-for each fact. It does not restate them: "every piece of information has one
-home, other files point there" is the rule this repo is organised by, taken
-from the Interpretable Context Methodology (Van Clief, arXiv:2603.16021).*
+*Routing layer. It says what lives where and points at the one home for
+each fact; it does not restate them. "Every piece of information has one
+home, other files point there" is the rule this repo is organised by, from
+the Interpretable Context Methodology (Van Clief, arXiv:2603.16021).*
 
 ## What this is
 
-A tool for taking control of your own machine: the settings that decide
-whether a local model runs, the ones nobody exposed, and a way to replace a
-module inside somebody else's package without forking it.
+Local models, run on your own machines, managed equally well by a person and
+by an agent. knurlogic resolves the settings that decide whether a model
+runs — the ones a person otherwise learns by running out of memory — says
+what is true about the machine, and drafts with multi-token-prediction heads
+that no stock runtime uses.
 
-It wraps rather than rebuilds. exo already places and shards; mlx-lm already
-serves. knurlogic is the layer that resolves settings before the engine
-imports anything, carries work that would otherwise be trapped in a fork, and
-answers — to a person or an agent — what is actually true about this machine.
+It wraps rather than rebuilds. mlx-lm already serves; exo already places and
+shards. knurlogic carries the work that was trapped in forks of both, and
+fills the gaps between them.
+
+## If you are an agent
+
+Use the MCP (`knurlogic mcp`, stdio). Nine tools; `tools/list` describes each.
+The order that answers "can I run X here, how, and is it safe now":
+
+    models  ->  fit  ->  settings  ->  ready  ->  load  ->  state  ->  unload
+
+Every answer says how it was measured; a refusal is an answer, an error sets
+`isError`. `deps` answers "why does this work in exo and not here".
+
+## Where things live
+
+The folder is the rule, and each folder's `__init__.py` says what it holds,
+what it may depend on, and what it enforces. Dependencies run one way, down
+this list; nothing depends on a folder below it.
+
+    src/knurlogic/
+      engine/       what runs a model. The ONLY folder that may import mlx --
+                    a test fails otherwise. The seam (seam.py), drafting
+                    (mtp/), vendored architectures, overrides.
+      machine/      what is true about this box, read rather than assumed:
+                    artifacts on disk, what is loaded, memory, the wired
+                    limit and the one load budget, installed dependencies.
+      tuning/       what the settings should be, each beside its evidence.
+      interfaces/   how a person or an agent talks to it: MCP, the page, the
+                    CLI, the OpenAI and Anthropic endpoints, the exo front.
+
+    tests/          tripwires are named in test docstrings, not here.
+    tools/          probes that gate work. mtp_probe.py gates the drafting port.
+    docs/PLAN.md    state, not log: what is true, what was measured so it is
+                    not re-derived, what is next.
 
 ## Reading order
 
 | If you want | Read |
 |---|---|
 | what is true now, and what to do next | `docs/PLAN.md` |
-| what a command does | `knurlogic <cmd> --help`, then its module |
-| why a default is what it is | `src/knurlogic/settings.py`, beside the constant |
-| why an architecture file is vendored | `src/knurlogic/arch.py` docstring |
-| what runs a model | `src/knurlogic/engine.py` — the only module that knows |
-| the agent-facing interface | `src/knurlogic/mcp.py` |
-
-## The seams, which are the real structure
-
-Folder boundaries here are enforcement, not filing.
-
-    src/knurlogic/
-      engine.py        THE SEAM. The only module that imports mlx. A test
-                       fails if any other one does; it has caught five leaks.
-      mtp/             Drafting. Engine-side by definition — every line is
-                       arithmetic on an mlx model. Its FRONT DOOR is stdlib
-                       only, so asking whether an artifact has a head costs
-                       nothing, and a test asserts that.
-      architectures/   Vendored mlx-lm model files, pinned by digest, with
-                       PROVENANCE.md saying which mlx-lm each came from.
-      overrides/       A meta-path finder that crosses a spawn boundary.
-                       stdlib only, because nothing else survives that trip.
-      web/             The page. One file.
-
-    tools/             Probes that gate work. mtp_probe.py is the one the
-                       drafting port has to keep passing.
-    tests/             115 of them. The tripwires are named in the test
-                       docstrings, not here.
-    docs/PLAN.md       State, not log: what is true, what was measured so it
-                       is not re-derived, what is next.
+| why a default is what it is | `src/knurlogic/tuning/settings.py`, beside the constant |
+| what knurlogic stands on, and which forks | `knurlogic deps`; `machine/deps.py` `PIECES` |
+| what runs a model | `src/knurlogic/engine/seam.py` |
+| how drafting works | `engine/mtp/` — `batch_loop.py` and `batch_generator.py` |
+| what an agent gets | `src/knurlogic/interfaces/mcp.py` |
+| what a command does | `knurlogic <cmd> --help`, then `interfaces/cli.py` `COMMANDS` |
 
 ## Contracts
 
-* **`/status.json` is the wire contract.** It carries the cluster shape even
-  for one box. Everything the page shows comes from it.
-* **`knurlogic mcp` is the agent contract.** Every tool answers
-  deterministically, reports what it looked at, and refuses rather than
-  gambles. Its docstring lists each rule and the failure that bought it.
-* **A measurement outranks an assumption.** Numbers in this repo carry where
-  they came from. If you cannot say how you know, say that instead.
+* **The MCP and `/status.json` are the two wire contracts**, one per
+  audience, built on the same functions. A capability on one side only is a
+  bug.
+* **One load budget.** `machine/wired.load_budget()` — the smaller of the GPU
+  working set and memory available now — is what `fit`, `settings`, `load`
+  and `serve` are all computed against. They cannot disagree.
+* **A setting nobody reads is a bug.** Every resolved knob reaches its
+  consumer: an artifact's bundled runtime, the engine's argv, or exo under
+  exo's own names. This was violated three times before it was a rule.
+* **A measurement outranks an assumption.** Numbers carry where they came
+  from. If you cannot say how you know, say that instead.
 
 ## What this repo will not do
 
-* Build models. vqlab builds; knurlogic coalesces. Head builders
-  (`mtp-graft`, `mtp-pack`) stay there and no button here invokes them.
-* Set the wired limit. It reads it, works out the ceiling, and hands over the
-  exact `sudo` line. Running it is a human's action.
+* Build models. vqlab builds; knurlogic runs what it built. Head builders
+  (`mtp-graft`, `mtp-pack`) stay there.
+* Set the wired limit. It reads it and hands over the exact `sudo` line.
 * Delete an artifact. Reading state and starting a server are reversible.
 * Implement a second inference path. If knurlogic generates a token, it is
   through an engine that already knew how.
