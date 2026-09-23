@@ -38,6 +38,9 @@ class Resolution:
     env: dict = field(default_factory=dict)
     notes: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
+    #: What a vision rung holds besides its text weights (`vision_budget`),
+    #: or None for a text-only artifact.
+    vision: dict | None = None
 
     def as_exports(self) -> str:
         return "\n".join(f"export {k}={v}" for k, v in sorted(self.env.items()))
@@ -195,7 +198,7 @@ def decode_chunk_for(headroom_bytes: int, known: bool = True,
 
 
 def resolve(artifact: Artifact, budget, profile: str | None = None,
-            tune: str = "balanced"):
+            tune: str = "balanced", store_bytes: int | None = None):
     """Resolve every knob for this artifact against a budget.
 
     `budget` is either a byte count -- one box, and the return is a
@@ -208,6 +211,10 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
     numerics-active flags, and only because someone asked -- it used to
     default to v1.5 and so silently turned off bf16 I/O on the rungs that
     shipped it on (design D1).
+
+    `store_bytes` is a live image store's `budget_bytes()`, when one exists;
+    otherwise a vision rung is budgeted at the store's default bound
+    (`vision_budget`).
     """
     if profile is not None and profile not in S.RUNTIME_PROFILES:
         raise ValueError(f"profile must be one of {sorted(S.RUNTIME_PROFILES)}")
@@ -216,12 +223,14 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
         raise ValueError(f"tune must be one of {sorted(S.TUNE_PROFILES)}")
     if isinstance(budget, (int, float)):
         return _resolve_one(artifact, int(budget), artifact.bytes_on_disk,
-                            profile, tune)
-    return resolve_cluster(artifact, budget, profile, tune)
+                            profile, tune, store_bytes=store_bytes)
+    return resolve_cluster(artifact, budget, profile, tune,
+                           store_bytes=store_bytes)
 
 
 def resolve_cluster(artifact: Artifact, budget, profile: str | None = None,
-                    tune: str = "balanced") -> ClusterResolution:
+                    tune: str = "balanced",
+                    store_bytes: int | None = None) -> ClusterResolution:
     """Resolve per node, and say what is only true of the whole cluster."""
     nodes = _as_nodes(budget)
     if not nodes:
@@ -230,9 +239,12 @@ def resolve_cluster(artifact: Artifact, budget, profile: str | None = None,
     assumed = [n.name for n in nodes if n.holds_bytes is None]
 
     c = ClusterResolution(inventory=nodes)
-    for n in nodes:
+    for i, n in enumerate(nodes):
+        # The tower, the image store and the requests' image KV live where
+        # the request enters -- the first node -- not spread with the shard.
         r = _resolve_one(artifact, n.working_set_bytes, shares[n.name],
-                         profile, tune)
+                         profile, tune, store_bytes=store_bytes,
+                         vision=(i == 0))
         if n.holds_bytes is None:
             r.notes.append(
                 f"shard size ASSUMED {shares[n.name]/GIB:.1f} GiB "
@@ -290,12 +302,124 @@ def _ring_consistent(c: ClusterResolution) -> None:
                        f"node's); ranks that disagree desync")
 
 
+def _tower_bytes(artifact: Artifact) -> tuple:
+    """(tower bytes, bytes of them OUTSIDE what bytes_on_disk counted,
+    tensors) from the safetensors headers -- read, never guessed.
+    bytes_on_disk sums the artifact directory's top-level *.safetensors;
+    anything deeper would be extra."""
+    import json
+    import struct
+
+    root = artifact.path
+    total = outside = count = 0
+    try:
+        files = sorted(root.rglob("*.safetensors"))
+    except OSError:
+        return 0, 0, 0
+    for f in files:
+        try:
+            with open(f, "rb") as fh:
+                (n,) = struct.unpack("<Q", fh.read(8))
+                if n <= 0 or n > (1 << 28):
+                    continue
+                header = json.loads(fh.read(n))
+        except (OSError, ValueError, struct.error):
+            continue
+        for k, v in header.items():
+            if k == "__metadata__" or not isinstance(v, dict):
+                continue
+            if not k.startswith(S.VISION_TOWER_PREFIXES):
+                continue
+            a, b = v.get("data_offsets", (0, 0))
+            total += int(b) - int(a)
+            count += 1
+            if f.parent != root:
+                outside += int(b) - int(a)
+    return total, outside, count
+
+
+def _kv_bytes_per_token(tc: dict) -> tuple:
+    """(bytes, why): K and V for one token over the layers whose cache
+    grows with context. Hybrid models (Qwen3.5's linear layers, gemma's
+    sliding windows) are counted by their full-attention layers only."""
+    layers = int(tc.get("num_hidden_layers") or 0)
+    types = tc.get("layer_types")
+    interval = tc.get("full_attention_interval")
+    if isinstance(types, list) and types:
+        full = sum(1 for t in types if t == "full_attention")
+        how = f"{full} full-attention of {len(types)} layers"
+    elif interval:
+        full = layers // int(interval)
+        how = f"{full} full-attention layers (every {interval}th of {layers})"
+    else:
+        full = layers
+        how = f"{layers} layers"
+    heads = int(tc.get("num_attention_heads") or 0)
+    kv = int(tc.get("num_key_value_heads") or heads or 0)
+    hd = int(tc.get("head_dim") or (
+        int(tc.get("hidden_size") or 0) // heads if heads else 0))
+    per = 2 * full * kv * hd * S.VISION_KV_DTYPE_BYTES
+    return per, f"{how} x {kv} KV heads x {hd} dims x K,V x bf16"
+
+
+def vision_budget(artifact: Artifact,
+                  store_bytes: int | None = None) -> dict | None:
+    """What a vision rung holds besides its text weights, term by term,
+    or None for an artifact with no `vision_config`.
+
+    Stdlib only (no mlx, no family import): tuning/ must not import mlx,
+    and this has to answer BEFORE a load. `extra_bytes` is what the
+    resolver adds to what the box holds; each term has its note."""
+    cfg = artifact.raw_config or {}
+    if not isinstance(cfg.get("vision_config"), dict):
+        return None
+    from knurlogic.engine.vision.store import DEFAULT_MAX_BYTES
+
+    tower, outside, n = _tower_bytes(artifact)
+    live = store_bytes is not None
+    store = int(store_bytes) if live else DEFAULT_MAX_BYTES
+    tc = cfg.get("text_config") or cfg
+    per_tok, kv_why = _kv_bytes_per_token(tc)
+    toks = S.VISION_KV_IMAGES * S.VISION_KV_TOKENS_PER_IMAGE
+    kv = per_tok * toks
+    notes = [
+        (f"vision tower: {tower / GIB:.2f} GiB in {n} tensors, read from "
+         f"the safetensors headers; "
+         + (f"{outside / GIB:.2f} GiB of it sits outside the files the "
+            f"artifact size counts, so that much is added"
+            if outside else "already inside the artifact's size, so "
+                            "nothing is added for it")),
+        (f"image store: {store / GIB:.2f} GiB reserved -- "
+         + ("the live store's budget (its bound, or more while prompt-cache "
+            "entries pin images in use)" if live else
+            "the store's default bound (engine/vision/store.py "
+            "DEFAULT_MAX_BYTES)")),
+        (f"image KV allowance: {kv / GIB:.2f} GiB for "
+         f"{S.VISION_KV_IMAGES} images x {S.VISION_KV_TOKENS_PER_IMAGE} "
+         f"tokens ({kv_why}) -- an ALLOWANCE for the context images add, "
+         f"not a measurement"),
+    ]
+    return {"tower_bytes": tower, "tower_outside_bytes": outside,
+            "tower_tensors": n, "store_bytes": store,
+            "store_is_live": live, "kv_allowance_bytes": kv,
+            "kv_bytes_per_token": per_tok, "kv_tokens": toks,
+            "extra_bytes": outside + store + kv, "notes": notes}
+
+
 def _resolve_one(artifact: Artifact, working_set_bytes: int,
                  holds_bytes: int, profile: str | None,
-                 tune: str = "balanced") -> Resolution:
+                 tune: str = "balanced", store_bytes: int | None = None,
+                 vision: bool = True) -> Resolution:
     """One box. `holds_bytes` is what this box holds of the artifact, which
-    is the whole thing unless something sharded it."""
+    is the whole thing unless something sharded it. A vision rung also
+    holds its tower, its image store and its image KV (`vision_budget`),
+    counted here, before the headroom every knob below is sized from."""
     r = Resolution()
+    vb = vision_budget(artifact, store_bytes) if vision else None
+    if vb is not None:
+        r.vision = vb
+        holds_bytes = holds_bytes + vb["extra_bytes"]
+        r.notes.extend(vb["notes"])
 
     if not artifact.is_vq:
         r.notes.append("not a VQ artifact -- kernel knobs do not apply")
