@@ -514,7 +514,8 @@ def keeps_mtp_weights(model_type: str) -> bool | None:
 # environment variable, no mode file.
 
 _DRAFT: dict = {"head": None, "spec": None, "why": "", "on": False,
-                "requests": 0, "steps": 0, "accepted": 0}
+                "requests": 0, "steps": 0, "accepted": 0,
+                "batch_installed": False}
 
 
 def drafting_status() -> dict:
@@ -538,11 +539,13 @@ def drafting_status() -> dict:
     d["batchable"] = batchable
     d["engine_path"] = ("batch" if batchable
                         else "sequential" if batchable is False else "")
-    if d["on"] and batchable:
+    batch_on = bool(d.pop("batch_installed", False))
+    if d["on"] and batchable and not batch_on:
         d["drafts_now"] = False
         d["blocked"] = ("this artifact's caches merge, so mlx-lm serves it "
-                        "with the batch generator, which has no drafting "
-                        "path. The head is loaded and idle.")
+                        "with the batch generator, and the drafting batch "
+                        "generator was not installed. The head is loaded and "
+                        "idle.")
     else:
         d["drafts_now"] = bool(d["on"])
         d["blocked"] = ""
@@ -647,4 +650,40 @@ def install_drafting(srv) -> bool:
 
     srv.ResponseGenerator._serve_single = _serve_single
     srv.stream_generate = _stream
+    _install_batch_drafting(srv)
     return True
+
+
+def _install_batch_drafting(srv) -> None:
+    """The batch half: hand the server a drafting BatchGenerator.
+
+    The server constructs `BatchGenerator(model, ...)` by the name it
+    imported, once per batch, so swapping that name is the whole
+    installation. It decides per construction: with no head bound to THIS
+    model (a switch to an artifact without one, or `--no-draft`) the server
+    gets mlx-lm's own, untouched.
+    """
+    if getattr(srv.BatchGenerator, "_knurlogic", False):
+        return
+    from .mtp.batch_generator import MTPBatchGenerator, tag_samplers
+
+    tag_samplers(srv)
+    real = srv.BatchGenerator
+
+    def _factory(model, *a, **kw):
+        head = _DRAFT.get("head")
+        prov = _SERVED.get("provider")
+        if (head is None or not _DRAFT.get("on")
+                or getattr(prov, "model", None) is not model):
+            return real(model, *a, **kw)
+        try:
+            gen = MTPBatchGenerator(model, head, stats=_DRAFT, *a, **kw)
+        except Exception as e:
+            _DRAFT.update(why=f"batch drafting refused: "
+                              f"{type(e).__name__}: {e}")
+            return real(model, *a, **kw)
+        return gen
+
+    _factory._knurlogic = True
+    srv.BatchGenerator = _factory
+    _DRAFT["batch_installed"] = True
