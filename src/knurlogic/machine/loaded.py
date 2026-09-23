@@ -156,6 +156,35 @@ def _exo(base: str) -> list:
                    "bytes_note": "bytes_resident counts only shards on THIS "
                                  "machine, estimated as the model's size "
                                  "times its share of layers"}))
+    # The phase, with its evidence, from the one home that reads it -- so
+    # the page says "loading 25/64 layers" or "stalled" where it used to say
+    # only loaded or loading. Imported here: exo.py reads HTTP through this
+    # module, so a top-level import would be circular.
+    try:
+        from knurlogic.machine import exo as _exo_mod
+        by_id = {r["instance_id"]: r for r in _exo_mod.phases(base, st)}
+    except Exception:
+        by_id = {}
+    for r in out:
+        ph = by_id.get(r.ident)
+        # Only on evidence: an instance whose shard map names no runners
+        # gives a phase read off nothing, and the survey's own reading of
+        # the runner states is better than that.
+        if not ph or not (ph["runners"] or ph.get("downloads")):
+            continue
+        r.state = ph["phase"]
+        bits = []
+        for x in ph["runners"]:
+            if x.get("total_layers"):
+                bits.append(f"{x['node']} {x['layers_loaded']}/{x['total_layers']} layers")
+            elif x.get("error"):
+                bits.append(f"{x['node']} failed: {x['error']}")
+        for d in ph.get("downloads", []):
+            bits.append(f"{d['node']} downloading {d['progress']}")
+        if ph.get("advice"):
+            bits.append(ph["advice"])
+        if bits:
+            r.detail = "; ".join(bits) + " | " + r.detail
     # Runners can be up before exo has recorded an instance for them --
     # measured against the live daemon, which held 2 WarmingUp and 1 Loading
     # against an empty instance map. Reporting "nothing loaded" there would

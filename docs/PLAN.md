@@ -22,8 +22,10 @@ trapped in forks of both.
                   runtime; one load budget; which build of each dependency
                   every interpreter has
     tuning/       settings with their evidence; resolve() -> env + argv
-    interfaces/   MCP (9 tools), page, CLI, serve, serve --cluster,
+    interfaces/   MCP (11 tools), page, CLI, serve, serve --cluster,
                   Anthropic Messages, connect, doctor
+    exo           placed on through the MCP (`place`/`unplace`), with every
+                  instance's phase read off exo's own evidence
 
 141 tests. The mlx tripwire is a folder rule: nothing outside `engine/`
 imports mlx; checked that it fires on a lazy import planted in `machine/`.
@@ -153,6 +155,26 @@ which. In short:
 * **Tool calling**: all 54 templates swept, none silently unparsed (40
   qwen3_coder, 7 glm47, 3 gemma4, 1 json_tools, 3 none).
 
+### Driving exo (2026-09-22, live, two nodes)
+
+* **A placement is invisible until exo publishes it.** A second placement
+  posted one call after the first was accepted: no instance, no runners in
+  /state yet, memory still reading free. knurlogic counts a placement as
+  moving from the moment it posts it (`exo.moving`).
+* **exo leaves ghost runners.** Removed instances left runners in
+  RunnerShuttingDown indefinitely, referenced by no instance, with the
+  node's memory back to exactly what it was. Counting them made `ready`
+  itself wait forever; an orphan unchanged for 30s is reported, not counted.
+* **exo reports load progress; nobody showed it.** RunnerLoading carries
+  layers loaded of total: 27B went 25 -> 63 of 64 layers in 8s, warmed, and
+  served at 14s. RunnerFailed carries exo's error message.
+* **exo's refusals need arithmetic added.** "No cycles found with
+  sufficient memory" becomes: 100.9 GiB needed, 37.0 free, 63.9 short, and
+  these two instances are holding it. exo's error body is
+  `{"error": {"message"}}`, not `{"detail"}`.
+* **A local server answers before it holds its weights** (mlx maps them
+  lazily): `warming` until 90% resident.
+
 ## Load-bearing design decisions
 
 * **One load budget** (`machine/wired.load_budget()`): the smaller of the
@@ -219,10 +241,11 @@ Ordered by what would surprise somebody most.
    lacks six modules the vendored glm5_next imports (`knurlogic deps` lists
    them). Upgrading mlx-vlm there is an environment change for a person to
    make.
-3. **The page and the MCP are not at parity.** The page has the wired-limit
-   control; the MCP does not. The MCP has `ready`; the page never says
-   memory is moving. Neither surfaces live acceptance, though
-   `/status.json`'s `drafting` block carries it.
+3. **The page and the MCP are nearly at parity.** Load and exo placement on
+   the page go through the MCP's own functions and show its refusals. Still
+   one-sided: the wired-limit control (page only), and live acceptance
+   (neither shows it, though `/status.json`'s `drafting` block carries it).
+   The page has no button to place on exo from `knurlogic ui` yet.
 4. **`state` sees this machine only.** Another node's memory comes from exo's
    RAM figures; the per-runtime split needs a knurlogic on that node bound
    past loopback.

@@ -43,7 +43,7 @@ _SERVE_PORT: dict = {"n": 8080}
 #: Where to look for exo, only to ask WHO IS THERE. knurlogic does not need
 #: exo to run; it needs it to know about the other machines, because exo is
 #: the thing that already tracks them.
-EXO_URL = "http://127.0.0.1:52415"
+from knurlogic.machine.exo import EXO_URL  # noqa: E402  one home
 
 
 def _local_name(nodes) -> str:
@@ -327,10 +327,20 @@ def _load_fn(serve_port: int):
         act = req.get("action")
         target, where = req.get("target") or "", req.get("where") or ""
         try:
+            # Through the MCP's own functions: the page refuses what an agent
+            # is refused -- will not fit, memory still moving -- in the same
+            # words. The page loading past a check the MCP enforces would be
+            # a capability on one side only.
             if act == "load":
-                return _spawn(target, int(req.get("port") or serve_port),
-                              req.get("tune") or "balanced",
-                              req.get("sets") or {})
+                from knurlogic.interfaces import mcp
+                return mcp.load(artifact=target,
+                                port=int(req.get("port") or serve_port),
+                                tune=req.get("tune") or "balanced",
+                                sets=req.get("sets") or {},
+                                force=bool(req.get("force")))
+            if act == "exo-load":
+                from knurlogic.interfaces import mcp
+                return mcp.place(model=target, force=bool(req.get("force")))
             if act == "unload":
                 # Ours to stop only if we started it. Anything else is
                 # somebody's server and not this page's to kill.
@@ -340,7 +350,8 @@ def _load_fn(serve_port: int):
                 return {"error": "this page did not start that; stop it "
                                  "where it was started"}
             if act == "exo-unload":
-                return loaded.exo_unload(where, target)
+                from knurlogic.interfaces import mcp
+                return mcp.unplace(instance_id=target)
             if act == "ollama-unload":
                 return loaded.ollama_unload(where, target)
         except Exception as e:

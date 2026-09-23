@@ -166,10 +166,14 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=()):
                 return r
             if act == "unload":
                 return engine.unload()
+            # The same functions the MCP calls, so the page refuses what an
+            # agent would be refused, and says why in the same words.
             if act == "exo-load":
-                return L.exo_load(where, target)
+                from knurlogic.interfaces import mcp
+                return mcp.place(model=target)
             if act == "exo-unload":
-                return L.exo_unload(where, target)
+                from knurlogic.interfaces import mcp
+                return mcp.unplace(instance_id=target)
             if act == "ollama-unload":
                 return L.ollama_unload(where, target)
         except Exception as e:
