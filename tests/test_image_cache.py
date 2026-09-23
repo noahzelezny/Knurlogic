@@ -235,6 +235,16 @@ class Harness:
             seam._VISION.update(serve=self.vision, model=model)
             set_served_vision(family.spec)
         self.cache = srv.LRUPromptCache()
+        # Every batch generator the server builds, so a gate can read what
+        # it actually PREFILLED -- not only what the trie claimed to hit.
+        self.gens = []
+        make = srv.BatchGenerator
+
+        def recorded(*a, **k):
+            g = make(*a, **k)
+            self.gens.append(g)
+            return g
+        srv.BatchGenerator = recorded
         real_thread = srv.Thread
         srv.Thread = _Parked
         try:
@@ -452,7 +462,9 @@ def test_g7_g8_warm_turn_two_equals_cold_and_reuses_the_image(server, model):
     finally:
         warm.close()
     turn1 = r1["usage"]["prompt_tokens"] + r1["usage"]["completion_tokens"]
-    assert cached(r2) == turn1                       # G8
+    assert cached(r2) == turn1                       # G8: the trie's hit ...
+    prefilled = warm.gens[-1]._prompt_tokens_counter
+    assert prefilled == r2["usage"]["prompt_tokens"] - turn1   # ... was USED
     assert n["calls"] == 1
 
     cold = Harness(server, model, family=stub_family())
