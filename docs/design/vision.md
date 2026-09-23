@@ -14,8 +14,9 @@ The five released families -- qwen3_5, qwen3_5_moe, qwen4_exp (Flash-Next),
 glm5_next (GLM-5.3), gemma4 -- serve text AND images from
 `pip install knurlogic`, with code knurlogic owns rather than mlx-vlm, and
 with **images as real context**: an image is encoded once per conversation,
-the prefix cache survives it, and turn 5 of a conversation with an image
-costs only turn 5's new tokens. The page gets a chat modelled on exo's.
+the prefix cache survives it, and the image is never prefilled twice. (Turn
+5 costing only turn 5's new tokens is the aim, and is measured; for
+thinking-model templates it waits on the follow-up below.) The page gets a chat modelled on exo's.
 
 Checked before designing: all 20 released rungs carry `vision_config` and
 their vision weights (a 333-tensor `model-vision-graft.safetensors` sidecar
@@ -203,6 +204,34 @@ N-1's prompt plus output -- the prefix diverges for TEMPLATE reasons.
 `prompt - cached` is reported per turn; the gate is "the image is never
 re-prefilled". Making thinking-model conversations fully reusable (e.g. a
 cache checkpoint at the end of each user turn) is follow-up work.
+
+## Review by Flash-Next 4.4 (local, 2026-09-23) -- folded in
+
+The design was reviewed by Qwen3.8-Flash-Next-VQ-4.4bpw through exo's
+endpoint. It ran its whole 6,000-token budget as reasoning and never wrote an
+answer; the reasoning held these, checked against the design and critique
+and new to both:
+
+1. **Store eviction breaks "encode once".** A byte-bounded LRU can evict an
+   image a live conversation still references, and turn 5 re-encodes it.
+   The store PINS an image while any prompt-cache entry references its sha
+   (refcount on insert/evict of cache entries); only unreferenced images
+   are LRU-evictable. Image METADATA (grid, token count) is never evicted.
+2. **Normalise before hashing.** EXIF orientation applied, mode converted
+   (alpha composited on white, greyscale to RGB), first frame of animated
+   formats; the hash is of the normalised pixels. Otherwise one photo can
+   hash two ways, or two different renderings one way.
+3. **The placeholder is a real special-token id.** Each family's placeholder
+   is its tokenizer's own image token, verified present in the vocabulary
+   at load; a string the tokenizer does not know is spelled out as text and
+   the image silently never reaches the sequence. A test asserts it.
+4. **Budget the KV, not only the features.** An image's KV across all layers
+   exceeds its features; the prompt-cache bytes attributable to image spans
+   are counted in `tuning/resolve.py` alongside the store.
+5. **The goal overstated the gate** (fixed above).
+
+Process note for the code review: Flash reasons at length -- give it a
+larger budget or disable thinking for review passes.
 
 ## Follow-up (after the release)
 
