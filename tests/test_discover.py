@@ -87,3 +87,18 @@ def test_render_keeps_found_loadable_and_fits_apart(tmp_path):
 def test_an_empty_machine_says_where_it_looked(tmp_path):
     out = discover.render([])
     assert "no models found" in out and "Looked in" in out
+
+
+def test_exo_model_dirs_follow_exos_own_resolution():
+    """On macOS exo's data home is ~/.exo, not XDG -- the default that went
+    missing and hid a whole external store."""
+    from knurlogic.discover import exo_model_dirs
+    assert exo_model_dirs({}, "darwin", "/h") == [Path("/h/.exo/models")]
+    assert exo_model_dirs({}, "linux", "/h") == [
+        Path("/h/.local/share/exo/models")]
+    assert exo_model_dirs({"XDG_DATA_HOME": "/x"}, "linux", "/h") == [
+        Path("/x/exo/models")]
+    got = exo_model_dirs({"EXO_DEFAULT_MODELS_DIR": "/d",
+                          "EXO_MODELS_DIRS": "/a:/b",
+                          "EXO_MODELS_READ_ONLY_DIRS": "/r"}, "darwin", "/h")
+    assert got == [Path("/d"), Path("/a"), Path("/b"), Path("/r")]
