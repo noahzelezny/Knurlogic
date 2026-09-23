@@ -110,12 +110,30 @@ def test_cluster_resolves_each_node_against_its_own_box():
     c = resolve(_art(), [Node("big", 128 * GIB, holds_bytes=90 * GIB),
                          Node("small", 64 * GIB, holds_bytes=62 * GIB)])
     assert set(c.nodes) == {"big", "small"}
-    # 38 GiB of headroom against 2 GiB: the roomy box keeps the defaults, the
-    # tight one gets both memory knobs resolved down.
-    assert c.nodes["big"].env["VQLAB_PREFILL_CHUNK"] == "2048"
-    assert c.nodes["small"].env["VQLAB_PREFILL_CHUNK"] == "512"
+    # 38 GiB of headroom against 2 GiB: the tight box gets its PER-NODE
+    # memory knobs resolved down and the roomy one keeps its own.
     assert int(c.nodes["small"].env["VQ_DECODE_CHUNK"]) < \
         int(c.nodes["big"].env["VQ_DECODE_CHUNK"])
+
+
+def test_the_prompt_chunk_is_one_value_on_every_rank():
+    """Ring-wide, not per node. This test used to assert 2048 on the big box
+    and 512 on the small one -- which is the desync the exo fork recorded
+    live (GLM-5.3 at 2048 on one rank, 4096 on the other). The tightest
+    node's chunk is everyone's, and the big node is told why."""
+    c = resolve(_art(), [Node("big", 128 * GIB, holds_bytes=90 * GIB),
+                         Node("small", 64 * GIB, holds_bytes=62 * GIB)])
+    big, small = c.nodes["big"].env, c.nodes["small"].env
+    assert big["VQLAB_PREFILL_CHUNK"] == small["VQLAB_PREFILL_CHUNK"] == "512"
+    assert big["EXO_PREFILL_STEP_SIZE"] == small["EXO_PREFILL_STEP_SIZE"] == "512"
+    assert any("every rank must match" in n for n in c.nodes["big"].notes)
+
+
+def test_exo_is_handed_the_names_it_reads():
+    """knurlogic's names in exo's environment reach nothing."""
+    c = resolve(_art(), [Node("a", 128 * GIB, holds_bytes=60 * GIB)])
+    env = c.nodes["a"].env
+    assert "EXO_PREFILL_STEP_SIZE" in env and "EXO_MLX_CACHE_LIMIT_GB" in env
 
 
 def test_shards_are_assumed_proportionally_and_it_says_so():
