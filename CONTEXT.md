@@ -69,6 +69,7 @@ this list; nothing depends on a folder below it.
 | what runs a model | `src/knurlogic/engine/seam.py` |
 | how drafting works | `engine/mtp/` — `batch_loop.py` and `batch_generator.py` |
 | what an agent gets | `src/knurlogic/interfaces/mcp.py` |
+| the vision build, and why it is shaped that way | `docs/design/vision.md` (evidence in `vision-evidence/`) |
 | what a command does | `knurlogic <cmd> --help`, then `interfaces/cli.py` `COMMANDS` |
 
 ## Contracts
