@@ -108,6 +108,8 @@ built. It does not implement distributed inference; it wraps exo, which
 does. It never sets the wired limit or deletes a model; it tells you the
 command. Scope stays narrow on purpose.
 
+Interface design inspired by exo's dashboard (Apache-2.0).
+
 ## What it stands on
 
     one box       mlx, mlx-lm (>= 0.31.3). mlx-vlm for multimodal and GLM-5.3.
