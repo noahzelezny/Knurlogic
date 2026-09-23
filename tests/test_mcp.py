@@ -178,10 +178,13 @@ def test_deps_reads_the_fix_not_the_version(tmp_path):
     assert got["mlx"]["jaccl_selfheal"] is True
 
 
-def test_glm5_siblings_come_from_the_vendored_source():
+def test_glm5_needs_nothing_from_mlx_vlm_any_more():
+    """It used to import nine mlx-vlm modules, which is why GLM-5.3 could
+    not load from a plain install. They are vendored now (engine/vision/glm5)
+    and the derived list is empty -- if an import from mlx_vlm creeps back
+    into the vendored architecture, this names it."""
     from knurlogic.machine.deps import glm5_siblings
-    got = glm5_siblings()
-    assert "sparse_attention" in got and "linear" in got
+    assert glm5_siblings() == []
 
 
 def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,

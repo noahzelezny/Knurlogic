@@ -65,11 +65,12 @@ PIECES = {
         "role": "multimodal architectures; glm5_next is looked up here",
         "fork": "",
         "carries": "",
-        "needed_for": "GLM-5.3 (glm5_next). knurlogic vendors glm5_next but "
-                      "NOT the mlx_vlm modules it imports, so the installed "
-                      "mlx-vlm must carry every one of them. Checked by file, "
-                      "from the vendored code's own imports -- a version "
-                      "floor was wrong in both directions.",
+        "needed_for": "nothing, for knurlogic. Vision for every released "
+                      "family, GLM-5.3 included, is vendored under "
+                      "engine/vision/ with provenance; glm5_siblings() is "
+                      "empty and a test keeps it so. It was needed until "
+                      "2026-09-23, when glm5_next imported nine of its "
+                      "modules.",
         "portable": True,
         "why_not_ported": "",
     },
@@ -207,14 +208,14 @@ def _verdicts(env: dict) -> list:
     if vlm:
         miss = vlm.get("glm5_missing") or []
         out.append(("mlx-vlm", vlm["version"],
-                    "carries every module knurlogic's glm5_next imports"
+                    "optional: knurlogic vendors its own vision code"
                     if not miss else
                     f"knurlogic's vendored glm5_next (taken from mlx-vlm "
                     f"0.7.1) cannot load here: missing {', '.join(miss)}. "
                     f"exo loads its own copy, so this is about serving "
                     f"GLM-5.3 through knurlogic from this interpreter"))
     else:
-        out.append(("mlx-vlm", "-", "not installed: no multimodal / GLM-5.3"))
+        out.append(("mlx-vlm", "-", "not installed -- not needed; vision is vendored"))
     ex = env.get("exo")
     if ex:
         src = (ex.get("source") or {}).get("url", "")
