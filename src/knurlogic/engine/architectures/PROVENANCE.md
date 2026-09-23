@@ -39,6 +39,20 @@ artifacts were validated against -- not merely that it imports.
 - mlx-lm: 0.32.0
 - sha256: `f3f8c047c2ac31306267e8de61bb06d2952f2bf3fd4adbbb8ce25b952ccac01f`
 - note: qwen4exp venv (mlx-lm 0.32.0) taken as authoritative: it is where vqlab fits and scores, and it is the SUPERSET -- qwen3_5 here carries PipelineMixin, the exo-env copy does not
+- **P2 edit (2026-09-23):** `_make_masks`/`Gemma4TextModel.__call__`/`Model.__call__`
+  take an added `mm_mask: Optional[mx.array]` ([B, L], -1 outside an image,
+  else the image's index along the sequence) and, on the full-attention
+  layers only, overlay bidirectional attention within same-block spans on
+  top of the causal mask. Ported from mlx-vlm 0.6.17
+  `gemma4/language.py:455-515` (`_block_sequence_ids_for_mask`,
+  `_apply_blockwise_bidirectional_overlay`, the `use_bidirectional_vision`
+  gate in `_make_masks`), MIT, Copyright (c) 2025 Prince Canuma -- with
+  `_block_sequence_ids_for_mask` NOT ported: `engine/vision/gemma4` passes
+  the block-id array directly (it already has it from
+  `engine/vision/key.image_spans`, which distinguishes images by sha, not
+  just "is a vision token"), so recomputing block ids from a token-type
+  array is unneeded here (no audio token in this build). See
+  `src/knurlogic/engine/vision/gemma4/PROVENANCE.md`.
 
 ## glm5_next.py
 
