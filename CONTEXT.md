@@ -13,9 +13,13 @@ runs — the ones a person otherwise learns by running out of memory — says
 what is true about the machine, and drafts with multi-token-prediction heads
 that no stock runtime uses.
 
-It wraps rather than rebuilds. mlx-lm already serves; exo already places and
-shards. knurlogic carries the work that was trapped in forks of both, and
-fills the gaps between them.
+**The direction: knurlogic replaces exo.** `pip install knurlogic` is the
+whole install -- one Mac or a cluster. Today it drives exo for clustering
+(`place`); the replacement is built on what pip already ships: mlx's ring
+and jaccl backends and launcher, and mlx-lm's `sharded_load`. What exo adds
+on top -- discovery, coordination, placement, per-node downloads -- is what
+knurlogic rebuilds. It still never rebuilds an ENGINE: mlx serves and
+shards; knurlogic orchestrates, resolves settings, and drafts.
 
 ## If you are an agent
 
