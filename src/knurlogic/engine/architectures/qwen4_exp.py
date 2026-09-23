@@ -164,13 +164,28 @@ def _rope_partial(x: mx.array, cos: mx.array, sin: mx.array) -> mx.array:
 
 
 class RotaryEmbedding:
-    def __init__(self, dim: int, base: float):
+    def __init__(self, dim: int, base: float, mrope_section=(11, 11, 10)):
         self.dim = dim
         self.inv_freq = base ** (-mx.arange(0, dim, 2, dtype=mx.float32) / dim)
+        # knurlogic vision P1: which of (t, h, w) feeds each frequency under
+        # MRoPE -- the interleave of mlx-vlm 0.6.17 rope_utils.py:512-517
+        # (MIT), the same selector as qwen3_5.mrope_selector (this file may
+        # not import that one; engine/arch.py gives it no such dependency).
+        half = dim // 2
+        sel = [0] * half
+        for axis in (1, 2):
+            for i in range(axis, min(mrope_section[axis] * 3, half), 3):
+                sel[i] = axis
+        self.mrope_sel = mx.array(sel, dtype=mx.int32)
 
     def __call__(self, positions: mx.array):
         # positions: (B, T) -> cos/sin (B, T, dim)
-        freqs = positions.astype(mx.float32)[..., None] * self.inv_freq
+        # or (B, T, 3) MRoPE (t, h, w) -> each frequency from its axis
+        if positions.ndim == 3:
+            pos = mx.take(positions, self.mrope_sel, axis=-1)  # (B, T, half)
+            freqs = pos.astype(mx.float32) * self.inv_freq
+        else:
+            freqs = positions.astype(mx.float32)[..., None] * self.inv_freq
         emb = mx.concatenate([freqs, freqs], axis=-1)
         return mx.cos(emb), mx.sin(emb)
 
@@ -184,6 +199,27 @@ def _positions(offset: Union[int, mx.array], S: int) -> mx.array:
     if isinstance(offset, mx.array):
         return offset.reshape(-1, 1) + mx.arange(S)
     return mx.arange(offset, offset + S)[None]
+
+
+def _as_axes(positions: mx.array, B: int) -> mx.array:
+    """(B|1, S) or (B, S, 3) positions -> (B, S, 3) int32: 1-D text
+    positions are the same on all three MRoPE axes."""
+    p = positions.astype(mx.int32)
+    if p.ndim == 2:
+        p = mx.broadcast_to(p[..., None], (*p.shape, 3))
+    if p.shape[0] != B:
+        p = mx.broadcast_to(p, (B, *p.shape[1:]))
+    return p
+
+
+def _default_pos(n_rows: int, T: int, pad=None) -> mx.array:
+    """(n_rows, T, 3) positions of T columns already cached WITHOUT stored
+    positions (a text-only prefix): column c of a row with left padding p
+    held logical position c - p, the same on every axis."""
+    p = mx.arange(T)[None]
+    if pad is not None:
+        p = p - pad.reshape(-1, 1)
+    return _as_axes(p, n_rows)
 
 
 def _left_padding(cache) -> Optional[mx.array]:
@@ -219,14 +255,33 @@ class QSAIndexer(nn.Module):
         self.q_layernorm = RMSNorm(self.head_dim, eps=args.rms_norm_eps)
         self.k_layernorm = RMSNorm(self.head_dim, eps=args.rms_norm_eps)
 
-    def __call__(self, x, rope, cache, offset, left_padding=None) -> Optional[mx.array]:
+    def __call__(
+        self, x, rope, cache, offset, left_padding=None, positions=None
+    ) -> Optional[mx.array]:
         B, S, _ = x.shape
         qk = self.index_qk_proj(x)
         split = self.n_heads * self.head_dim
         q = qk[..., :split].reshape(B, S, self.n_heads, self.head_dim)
         raw_k = qk[..., split:].reshape(B, S, self.head_dim)
 
-        if cache is not None:
+        # knurlogic vision P1. `positions` (None | (B, S) | (B, S, 3)) are the
+        # rope positions of these tokens when an image is in the row's key.
+        # mlx-vlm's indexer (qwen4_exp/language.py:306-348) ropes the query
+        # with them AND each pooled block with the position of the block's
+        # first token, kept per token in its cache -- so a row that has seen
+        # a vision position keeps (B, T, 3) positions beside its raw keys,
+        # and block rope reads them. Without positions and without stored
+        # ones this is the vendored path, unchanged.
+        full_pos = None
+        if positions is not None or (cache is not None and cache.pos is not None):
+            cur = _as_axes(
+                positions if positions is not None else _positions(offset, S), B
+            )
+            if cache is not None:
+                raw_k, full_pos = cache.update(raw_k, cur, left_padding)
+            else:
+                full_pos = cur
+        elif cache is not None:
             raw_k = cache.update(raw_k)
         kv_len = raw_k.shape[1]
 
@@ -264,11 +319,20 @@ class QSAIndexer(nn.Module):
         # Block n holds the logical positions n * compress_ratio and up in every
         # row, so the padding does not move the block rope.
         block_starts = mx.arange(n_blocks) * self.compress_ratio
-        cos_k, sin_k = rope(block_starts[None, :])
+        if full_pos is None:
+            cos_k, sin_k = rope(block_starts[None, :])
+        else:
+            # the stored position of each block's first real token
+            first = block_starts[None, :] + (0 if pad is None else pad[:, None])
+            first = mx.minimum(first, kv_len - 1)
+            bpos = mx.take_along_axis(
+                full_pos, mx.broadcast_to(first[..., None], (B, n_blocks, 3)), axis=1
+            )
+            cos_k, sin_k = rope(bpos)
         pooled = _rope_partial(pooled, cos_k, sin_k)
 
         q_pos = _positions(offset, S)
-        cos_q, sin_q = rope(q_pos)
+        cos_q, sin_q = rope(q_pos if positions is None else positions)
         q = self.q_layernorm(q)
         q = _rope_partial(q, cos_q[:, :, None, :], sin_q[:, :, None, :])
 
@@ -354,11 +418,16 @@ class Attention(nn.Module):
         self.k_norm = RMSNorm(self.head_dim, eps=args.rms_norm_eps)
         self.indexer = QSAIndexer(args)
 
-    def __call__(self, x, rope, mask, cache, idx_cache) -> mx.array:
+    def __call__(self, x, rope, mask, cache, idx_cache, positions=None) -> mx.array:
         B, S, _ = x.shape
         offset = cache.offset if cache is not None else 0
 
-        sparse = self.indexer(x, rope, idx_cache, offset, _left_padding(cache))
+        if positions is None:
+            sparse = self.indexer(x, rope, idx_cache, offset, _left_padding(cache))
+        else:
+            sparse = self.indexer(
+                x, rope, idx_cache, offset, _left_padding(cache), positions
+            )
 
         q, gate = mx.split(self.q_proj(x).reshape(B, S, self.n_heads, -1), 2, axis=-1)
         gate = gate.reshape(B, S, -1)
@@ -368,7 +437,7 @@ class Attention(nn.Module):
         )
         v = self.v_proj(x).reshape(B, S, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
 
-        cos, sin = rope(_positions(offset, S))
+        cos, sin = rope(_positions(offset, S) if positions is None else positions)
         cos, sin = cos[:, None], sin[:, None]
         q, k = _rope_partial(q, cos, sin), _rope_partial(k, cos, sin)
 
@@ -784,15 +853,20 @@ class DecoderLayer(nn.Module):
         self.attn_hyper_connection = GatedResidual(args)
         self.mlp_hyper_connection = GatedResidual(args)
 
-    def __call__(self, h, rope, mask, conv_mask, cache, idx_cache, ids, prev_ctx):
+    def __call__(
+        self, h, rope, mask, conv_mask, cache, idx_cache, ids, prev_ctx,
+        positions=None,
+    ):
         if self.ple is not None:
             h = h + self.ple(h, ids, prev_ctx, cache)
 
         x, hyper, inject = self.attn_hyper_connection(h)
         if self.layer_type == "linear_attention":
             x = self.linear_attn(x, conv_mask, cache)
-        else:
+        elif positions is None:
             x = self.self_attn(x, rope, mask, cache, idx_cache)
+        else:
+            x = self.self_attn(x, rope, mask, cache, idx_cache, positions)
         h = hyper + (x[..., None, :] * inject[..., None]).reshape(*x.shape[:-1], -1)
 
         x, hyper, inject = self.mlp_hyper_connection(h)
@@ -810,12 +884,16 @@ class Qwen4ExpModel(nn.Module):
         # no final `norm` in this model: this mixer carries it
         self.hyper_connection_mixer = GatedResidual(args, use_combine=False)
         rotary_dim = int(args.head_dim * args.partial_rotary_factor)
-        self.rope = RotaryEmbedding(rotary_dim, args.rope_theta)
+        section = (args.rope_parameters or {}).get("mrope_section", [11, 11, 10])
+        self.rope = RotaryEmbedding(rotary_dim, args.rope_theta, section)
         self.ple_layers = [
             i for i in range(args.num_hidden_layers) if (i + 1) in args.ple_layer_ids
         ]
 
-    def __call__(self, ids: mx.array, cache=None, input_embeddings=None):
+    def __call__(
+        self, ids: mx.array, cache=None, input_embeddings=None,
+        position_ids=None, rope_delta=None,
+    ):
         h = self.embed_tokens(ids) if input_embeddings is None else input_embeddings
         if cache is None:
             cache = [None] * len(self.layers)
@@ -823,6 +901,19 @@ class Qwen4ExpModel(nn.Module):
         full_idx = [
             i for i, l in enumerate(self.layers) if l.layer_type == "full_attention"
         ]
+        # knurlogic vision P1 (see qwen3_5.py's MRoPE note): position_ids
+        # [3, B, S] -> (B, S, 3) explicit MRoPE positions; rope_delta [B] | int
+        # -> 1-D positions offset + arange + delta. Neither: None below, and
+        # every layer runs the vendored path.
+        positions = None
+        if position_ids is not None:
+            positions = position_ids.transpose(1, 2, 0)
+        elif rope_delta is not None:
+            c0 = cache[full_idx[0]] if full_idx else None
+            off = c0.offset if c0 is not None else 0
+            d = rope_delta if isinstance(rope_delta, mx.array) else mx.array(
+                [rope_delta])
+            positions = _positions(off, h.shape[1]) + d.reshape(-1, 1)
         lin_idx = [
             i for i, l in enumerate(self.layers) if l.layer_type == "linear_attention"
         ]
@@ -858,31 +949,58 @@ class Qwen4ExpModel(nn.Module):
         h = mx.tile(h, (1, 1, self.hc))
         for layer, c in zip(self.layers, cache):
             idx_c = c.indexer if (c is not None and hasattr(c, "indexer")) else None
-            h = layer(h, self.rope, mask, conv_mask, c, idx_c, ids, prev_ctx)
+            if positions is None:
+                h = layer(h, self.rope, mask, conv_mask, c, idx_c, ids, prev_ctx)
+            else:
+                h = layer(
+                    h, self.rope, mask, conv_mask, c, idx_c, ids, prev_ctx, positions
+                )
         return self.hyper_connection_mixer(h)
 
 
 class _IndexerCache(_BaseCache):
-    """Holds the indexer raw keys (one per token, not pooled)."""
+    """Holds the indexer raw keys (one per token, not pooled).
+
+    `pos` (knurlogic vision P1): (B, T, 3) rope positions beside the keys,
+    None until the row first sees a vision position -- the block rope of a
+    row with an image in its key reads them (QSAIndexer). A text-only row
+    never grows one, so its state is exactly the vendored one."""
 
     def __init__(self):
         self.keys = None
+        self.pos = None
 
-    def update(self, k: mx.array) -> mx.array:
+    def update(self, k: mx.array, pos: Optional[mx.array] = None, pad=None):
+        if pos is None:
+            self.keys = (
+                k if self.keys is None else mx.concatenate([self.keys, k], axis=1)
+            )
+            return self.keys
+        if self.pos is None and self.keys is not None:
+            # a text-only prefix, cached before any vision position
+            self.pos = _default_pos(self.keys.shape[0], self.keys.shape[1], pad)
         self.keys = k if self.keys is None else mx.concatenate([self.keys, k], axis=1)
-        return self.keys
+        self.pos = pos if self.pos is None else mx.concatenate([self.pos, pos], axis=1)
+        return self.keys, self.pos
 
     def trim(self, size: int):
         if self.keys is not None:
             self.keys = self.keys[:, :size]
+        if self.pos is not None:
+            self.pos = self.pos[:, :size]
 
     @property
     def state(self):
         # `None` is not serializable, so an empty array stands for it.
-        return mx.array([]) if self.keys is None else self.keys
+        keys = mx.array([]) if self.keys is None else self.keys
+        return keys if self.pos is None else (keys, self.pos)
 
     @state.setter
     def state(self, v):
+        if isinstance(v, (tuple, list)):
+            v, self.pos = v
+        else:
+            self.pos = None
         self.keys = v if v.size > 0 else None
 
 
@@ -912,7 +1030,11 @@ class _AttnCache(KVCache):
 
 
 class _BatchAttnCache(BatchKVCache):
-    """Batched `_AttnCache`. The indexer keys follow the KV padding exactly.
+    """Batched `_AttnCache`. The indexer keys follow the KV padding exactly,
+    and so do the indexer positions (knurlogic vision P1) when any row has
+    them: every column operation below is applied to both, and a row
+    without positions gets its text positions (_default_pos) when it meets
+    one that has them.
 
     Credit: mirrors BatchQSAKVCache from Blaizzy/mlx-vlm#2028 (MIT).
     """
@@ -928,6 +1050,8 @@ class _BatchAttnCache(BatchKVCache):
         super().finalize()
         if padding is not None and self.indexer.keys is not None:
             self.indexer.keys = dynamic_roll(self.indexer.keys, padding, axis=1)
+        if padding is not None and self.indexer.pos is not None:
+            self.indexer.pos = dynamic_roll(self.indexer.pos, padding, axis=1)
 
     def trim(self, n):
         n = super().trim(n)
@@ -940,9 +1064,20 @@ class _BatchAttnCache(BatchKVCache):
         if self.indexer.keys is not None:
             keys = self.indexer.keys[batch_indices]
             self.indexer.keys = keys[:, min_pad:] if min_pad else keys
+        if self.indexer.pos is not None:
+            pos = self.indexer.pos[batch_indices]
+            self.indexer.pos = pos[:, min_pad:] if min_pad else pos
 
     def extend(self, other):
         keys, other_keys = self.indexer.keys, other.indexer.keys
+        pos, other_pos = self.indexer.pos, other.indexer.pos
+        if pos is not None or other_pos is not None:
+            if pos is None and keys is not None:
+                pos = _default_pos(keys.shape[0], keys.shape[1], self.left_padding)
+            if other_pos is None and other_keys is not None:
+                other_pos = _default_pos(
+                    other_keys.shape[0], other_keys.shape[1], other.left_padding
+                )
         idx, other_idx = self._idx, other._idx
         super().extend(other)
         if keys is None and other_keys is None:
@@ -961,6 +1096,18 @@ class _BatchAttnCache(BatchKVCache):
             [pad(keys, rows, idx), pad(other_keys, other.offset.shape[0], other_idx)],
             axis=0,
         )
+        if pos is None and other_pos is None:
+            return
+
+        def pad_pos(p, n_rows, used):
+            if p is None:
+                p = mx.zeros((n_rows, 0, 3), dtype=mx.int32)
+            return mx.pad(p[:, :used], [(0, 0), (target - used, 0), (0, 0)])
+
+        self.indexer.pos = mx.concatenate(
+            [pad_pos(pos, rows, idx), pad_pos(other_pos, other.offset.shape[0], other_idx)],
+            axis=0,
+        )
 
     def extract(self, idx):
         cache = _AttnCache()
@@ -972,6 +1119,10 @@ class _BatchAttnCache(BatchKVCache):
         if self.indexer.keys is not None:
             cache.indexer.keys = mx.contiguous(
                 self.indexer.keys[idx : idx + 1, pad : self._idx]
+            )
+        if self.indexer.pos is not None:
+            cache.indexer.pos = mx.contiguous(
+                self.indexer.pos[idx : idx + 1, pad : self._idx]
             )
         return cache
 
@@ -997,6 +1148,22 @@ class _BatchAttnCache(BatchKVCache):
                     )
                 )
                 for k, c in zip(rows, caches)
+            ],
+            axis=0,
+        )
+        if all(c.indexer.pos is None for c in caches):
+            return out
+        out.indexer.pos = mx.concatenate(
+            [
+                mx.pad(
+                    (
+                        c.indexer.pos[:, : c.offset]
+                        if c.indexer.pos is not None
+                        else _default_pos(1, c.offset)
+                    ),
+                    [(0, 0), (out._idx - c.offset, 0), (0, 0)],
+                )
+                for c in caches
             ],
             axis=0,
         )
@@ -1062,8 +1229,17 @@ class Model(nn.Module):
                 args.text.hidden_size, args.text.vocab_size, bias=False
             )
 
-    def __call__(self, inputs: mx.array, cache=None, input_embeddings=None):
-        out = self.model(inputs, cache, input_embeddings)
+    def __call__(
+        self, inputs: mx.array, cache=None, input_embeddings=None,
+        position_ids=None, rope_delta=None,
+    ):
+        """position_ids [3, B, L] and rope_delta ([B] array or int): the
+        vision path's MRoPE inputs (Qwen4ExpModel); a text call passes
+        neither. position_ids wins when both are given."""
+        if position_ids is None and rope_delta is None:
+            out = self.model(inputs, cache, input_embeddings)
+        else:
+            out = self.model(inputs, cache, input_embeddings, position_ids, rope_delta)
         if self.args.text.tie_word_embeddings:
             return self.model.embed_tokens.as_linear(out)
         return self.lm_head(out)
