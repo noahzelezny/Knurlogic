@@ -212,3 +212,16 @@ def test_exos_refusal_is_read_in_exos_own_error_format(monkeypatch):
     p = exo.plan("org/m")
     assert p["refused_by_exo"] == "No cycles found with sufficient memory"
     assert p["short_by_gib"] == 63.9
+
+
+def test_a_placement_polled_before_exo_publishes_it_is_posted_not_gone(
+        monkeypatch):
+    """Measured live on the 397B: phase_of one call after place said `gone`,
+    which an agent reads as failed."""
+    import json
+    exo._watch_path().write_text(json.dumps(
+        {"new": {"placed_at": time.time(), "model": "org/m"}}))
+    monkeypatch.setattr(exo, "phases", lambda base=None, st=None: [])
+    assert exo.phase_of("new")["phase"] == "posted"
+    monkeypatch.setattr(exo.time, "time", lambda: 10**12)
+    assert exo.phase_of("new")["phase"] == "gone"

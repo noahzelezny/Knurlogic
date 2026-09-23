@@ -374,6 +374,17 @@ def phase_of(instance_id: str, base: str = EXO_URL) -> dict:
     for row in phases(base):
         if row["instance_id"] == instance_id:
             return row
+    # Posted by knurlogic, not yet in exo's state. Measured live: polled one
+    # call after a real placement this said `gone` -- an agent would read
+    # that as failed while exo was still publishing it.
+    rec = _watch_load().get(instance_id) or {}
+    at = rec.get("placed_at")
+    if at and time.time() - at < UNPUBLISHED_S:
+        return {"instance_id": instance_id, "phase": "posted",
+                "model": rec.get("model", ""),
+                "seconds_since_posted": round(time.time() - at),
+                "advice": "exo has accepted the placement but not published "
+                          "it yet; poll again in a few seconds."}
     return {"instance_id": instance_id, "phase": "gone",
             "advice": "exo no longer lists this instance: it was removed, or "
                       "it failed out of the state. Check `ready` and place "
