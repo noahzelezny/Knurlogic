@@ -19,7 +19,7 @@ from knurlogic.tuning.resolve import resolve
 GIB = 1 << 30
 
 
-def run(path: str, working_set_gib: float, profile: str,
+def run(path: str, working_set_gib: float, profile: str | None,
         exports: bool, tune: str = "balanced") -> int:
     try:
         a = Artifact.load(path)
@@ -130,7 +130,11 @@ def main(argv=None) -> int:
     p.add_argument("--working-set-gib", type=float, default=0.0,
                    help="usable GPU working set. 0 = ask the framework what "
                         "it may use; pass a number to override it.")
-    p.add_argument("--profile", default="v1.5", choices=("v1.5", "v2"))
+    p.add_argument("--profile", default=None, choices=("v1.5", "v2"),
+                   help="force a VQ numerics profile on every rung. Default: "
+                        "none -- each rung runs the numerics it was PUBLISHED "
+                        "with (engine/vq/rungs.json). Forcing v1.5 on a v2 "
+                        "rung changes its outputs.")
     p.add_argument("--tune", default="balanced",
                    choices=("safe", "balanced", "fast"),
                    help="safe = lowest peak memory; fast = spend headroom "

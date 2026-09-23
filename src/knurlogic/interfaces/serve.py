@@ -41,7 +41,7 @@ GIB = 1 << 30
 
 
 def run(path: str, host: str, port: int, working_set_gib: float,
-        profile: str, passthrough: list, tune: str = "balanced",
+        profile: str | None, passthrough: list, tune: str = "balanced",
         overrides: dict | None = None, draft: bool = True) -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
@@ -135,6 +135,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # when a model will not load. Advice only -- knurlogic never sets it.
         snap["wired"] = wired.advise(a.bytes_on_disk)
         snap["drafting"] = engine.drafting_status()
+        # Vision on the same contract page as drafting: spec, image store
+        # size, encodes and pins -- the numbers that say whether images are
+        # being reused or re-encoded.
+        try:
+            snap["vision"] = engine.vision_status()
+        except Exception as e:
+            snap["vision"] = {"error": f"{type(e).__name__}: {e}"}
         # `served_vision()` is the P0-frozen way to say whether the served
         # model sees images at all (critique C4); the image store's own
         # size is P4's to expose (P4 owns the load path that creates it, and
@@ -258,7 +265,11 @@ def main(argv=None) -> int:
     p.add_argument("--working-set-gib", type=float, default=0.0,
                    help="usable GPU working set; 0 asks the framework what "
                         "it may use")
-    p.add_argument("--profile", default="v1.5", choices=("v1.5", "v2"))
+    p.add_argument("--profile", default=None, choices=("v1.5", "v2"),
+                   help="force a VQ numerics profile on every rung. Default: "
+                        "none -- each rung runs the numerics it was PUBLISHED "
+                        "with (engine/vq/rungs.json). Forcing v1.5 on a v2 "
+                        "rung changes its outputs.")
     p.add_argument("--no-draft", action="store_true",
                    help="do not use a multi-token-prediction head even if "
                         "one is packed beside the weights. Troubleshooting: "

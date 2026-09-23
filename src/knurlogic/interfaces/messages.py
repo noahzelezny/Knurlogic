@@ -82,6 +82,20 @@ def to_openai(req: dict) -> dict:
                                  "arguments": json.dumps(c.get("input") or {})},
                 } for c in calls],
             })
+        elif any(isinstance(b, dict) and b.get("type") == "image"
+                 for b in content or []):
+            # Images keep their place among the text, in order: a harness
+            # that sends [text, image, text] means exactly that sequence.
+            from knurlogic.interfaces.web import anthropic_images_to_openai
+            parts = []
+            for b in anthropic_images_to_openai(list(content or [])):
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "text":
+                    parts.append({"type": "text", "text": b.get("text", "")})
+                elif b.get("type") == "image_url":
+                    parts.append(b)
+            out_msgs.append({"role": role, "content": parts})
         elif text or not results:
             out_msgs.append({"role": role, "content": text})
 
