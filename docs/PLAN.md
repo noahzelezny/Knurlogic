@@ -27,7 +27,7 @@ trapped in forks of both.
     exo           placed on through the MCP (`place`/`unplace`), with every
                   instance's phase read off exo's own evidence
 
-141 tests. The mlx tripwire is a folder rule: nothing outside `engine/`
+166 tests. The mlx tripwire is a folder rule: nothing outside `engine/`
 imports mlx; checked that it fires on a lazy import planted in `machine/`.
 
 **Verified by driving it, not just by tests:**
@@ -230,13 +230,16 @@ which. In short:
 
 Ordered by what would surprise somebody most.
 
-1. **Batch drafting has not run on real weights through knurlogic.** It is
-   gated on token identity with a random head. Flash-Next VQ-2.1bpw is 47.5
-   GiB and would not fit beside exo's instance when this was written. Run it
-   on a free box: identity against the plain generator first, then speed by
-   the discipline above. The costs it inherits from the fork: a row is
-   prefilled whole inside one `next()` (other rows wait), and there is no
-   end-of-segment cache insert mid-prompt.
+1. **Batch drafting is not timed.** It runs on real weights (Flash-Next
+   VQ-2.1bpw on the M3: the batch path, 8 requests, acceptance 0.88).
+   Greedy output is not byte-identical to drafting off -- and stock mlx-lm
+   is not identical to itself between sequential and concurrent either.
+   Every divergence sat at the same few positions between the same two
+   continuations; the one measured was a 0.25 logprob margin at bf16's
+   0.125 resolution. Identity is proven on the float32 gate only. Speed
+   needs a free box and the discipline above (reloads between arms). Costs
+   inherited from the fork: a row is prefilled whole inside one `next()`,
+   and there is no end-of-segment cache insert mid-prompt.
 2. **knurlogic's own interpreter cannot serve GLM-5.3.** Its mlx-vlm 0.5.0
    lacks six modules the vendored glm5_next imports (`knurlogic deps` lists
    them). Upgrading mlx-vlm there is an environment change for a person to
