@@ -10,8 +10,8 @@ cannot exist.
 import json
 import struct
 
-from knurlogic import mtp
-from knurlogic.artifact import Artifact
+from knurlogic.engine import mtp
+from knurlogic.machine.artifact import Artifact
 
 
 def _safetensors(path, keys, metadata=None):

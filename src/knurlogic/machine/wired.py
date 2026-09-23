@@ -170,7 +170,7 @@ def detected_working_set_bytes() -> int:
     which is the footgun this package exists to remove.
     """
     try:
-        from .engine import memory
+        from knurlogic.engine.seam import memory
         return int(memory().get("working_set_bytes") or 0)
     except Exception:
         return 0
@@ -298,7 +298,7 @@ def load_budget() -> dict:
     the next, and the roomy defaults (2048-wide prefill, 8 prompts at once)
     are what OOM a box with 6.8 GiB to spare.
     """
-    from .loaded import available_memory
+    from knurlogic.machine.loaded import available_memory
     ws = detected_working_set_bytes()
     try:
         avail = int(available_memory().get("available_bytes") or 0)

@@ -23,10 +23,10 @@ mx = pytest.importorskip("mlx.core")
 
 
 def _tiny(vocab):
-    from knurlogic import register
+    from knurlogic.engine import register
     register.register("qwen3_5")
     from mlx_lm.models import qwen3_5 as arch
-    from knurlogic.mtp.heads.qwen35 import MTPHeadQwen35
+    from knurlogic.engine.mtp.heads.qwen35 import MTPHeadQwen35
 
     mx.random.seed(0)
     tc = dict(model_type="qwen3_5", hidden_size=128, intermediate_size=256,
@@ -70,7 +70,7 @@ def _run(gen, prompts, max_tokens, on_finish=None):
 def test_drafting_batch_is_token_identical_to_mlx_lm(vocab, always,
                                                      monkeypatch):
     from mlx_lm.generate import BatchGenerator
-    from knurlogic.mtp.batch_generator import MTPBatchGenerator, trunk_offset
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator, trunk_offset
 
     if always:
         monkeypatch.setenv("EXO_MTP_BATCH_MAX_ROWS", "8")
@@ -99,7 +99,7 @@ def test_a_restored_prefix_keeps_drafting():
     """The entry handed back to the prompt cache, restored at its own length,
     admits WITH its head -- not the silent fresh prefill a misaligned head
     would cause."""
-    from knurlogic.mtp.batch_generator import MTPBatchGenerator, split_pool_entry
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator, split_pool_entry
 
     model, head, prompts = _tiny(512)
     got = {}
@@ -116,8 +116,8 @@ def test_the_server_gets_the_drafting_generator_only_for_the_headed_model():
     artifact without a head) gets mlx-lm's generator untouched."""
     import types
     from mlx_lm.generate import BatchGenerator
-    from knurlogic import engine
-    from knurlogic.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine import seam as engine
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
 
     model, head, _ = _tiny(512)
     other, _, _ = _tiny(512)
@@ -148,7 +148,7 @@ def test_a_built_sampler_carries_the_parameters_verification_needs():
     needs the temperature itself, so the sampler has to carry it -- or a
     temp-0.7 request would be verified as greedy."""
     import types
-    from knurlogic.mtp.batch_generator import sampling_of, tag_samplers
+    from knurlogic.engine.mtp.batch_generator import sampling_of, tag_samplers
 
     srv = types.SimpleNamespace(_make_sampler=lambda args, tok: (lambda x: x))
     tag_samplers(srv)

@@ -143,7 +143,8 @@ def glm5_siblings() -> list:
     source. Derived every time, because a list written down beside the
     vendoring went stale: it named 8, the code imports 9 different ones."""
     import re
-    root = Path(__file__).parent / "architectures" / "glm5_next"
+    root = (Path(__file__).resolve().parents[1] / "engine" / "architectures"
+            / "glm5_next")
     found = set()
     for f in root.glob("*.py"):
         for m in re.finditer(r"^\s*from \.\.([\w.]+) import", f.read_text(),

@@ -31,13 +31,10 @@ from ._artifacts import (  # noqa: F401
     Status,
     find_head,
     graft_weights,
-    main,
     status,
-    survey,
 )
 
 __all__ = [
     "BUILT", "DECLARED", "GRAFTABLE", "NONE", "SIDECAR_GLOB",
-    "Head", "Status", "find_head", "graft_weights", "status", "survey",
-    "main",
+    "Head", "Status", "find_head", "graft_weights", "status",
 ]

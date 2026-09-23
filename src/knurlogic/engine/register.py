@@ -63,7 +63,7 @@ def _with_dependencies(names: list) -> list:
     passed the first time only because `sorted()` happens to put qwen3_5
     before qwen3_5_moe.
     """
-    from .arch import ARCH_DEPENDS_ON
+    from knurlogic.engine.arch import ARCH_DEPENDS_ON
 
     out: list = []
 
@@ -89,7 +89,7 @@ def register(*names: str, override: bool = False) -> list:
     """
     wanted = _with_dependencies(list(names) or available())
     done = []
-    from .arch import host_for
+    from knurlogic.engine.arch import host_for
 
     for name in wanted:
         src, is_pkg = source_for(name)

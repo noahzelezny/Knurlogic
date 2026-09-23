@@ -65,7 +65,7 @@ def _schema(props: Dict[str, Any], required: List[str] | None = None):
 # --- the answers ------------------------------------------------------------
 
 def _exo_state():
-    from .loaded import _get
+    from knurlogic.machine.loaded import _get
     return _get(f"{EXO_URL}/state", timeout=4.0) or {}
 
 
@@ -171,9 +171,10 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
     Against `wired.load_budget()` -- the same number `settings` resolves
     against and `load` starts a server with, so the three cannot disagree.
     """
-    from .artifact import Artifact
-    from .loaded import available_memory
-    from . import settings as S, wired
+    from knurlogic.machine.artifact import Artifact
+    from knurlogic.machine.loaded import available_memory
+    from knurlogic.tuning import settings as S
+    from knurlogic.machine import wired
 
     a = Artifact.load(artifact)
     mem = available_memory()
@@ -214,10 +215,10 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
 
 def state(**_) -> Dict[str, Any]:
     """What is loaded on this machine, in every runtime, and where the RAM went."""
-    from . import loaded
+    from knurlogic.machine import loaded
     doc = loaded.survey()
     m = doc.get("memory") or {}
-    from . import ui
+    from knurlogic.interfaces import ui
     return {
         "resident": doc.get("resident", []),
         "runtimes": doc.get("runtimes", []),
@@ -235,11 +236,12 @@ def state(**_) -> Dict[str, Any]:
 
 def models(fits_only: bool = False, **_) -> Dict[str, Any]:
     """Every model on this machine, with what can actually run."""
-    from . import discover, mtp
-    from .artifact import Artifact
-    from .loaded import available_memory
+    from knurlogic.machine import discover
+    from knurlogic.engine import mtp
+    from knurlogic.machine.artifact import Artifact
+    from knurlogic.machine.loaded import available_memory
 
-    from . import wired
+    from knurlogic.machine import wired
     avail = wired.load_budget()["bytes"]
     out = []
     for f in discover.find():
@@ -265,7 +267,7 @@ def settings(artifact: str = "", tune: str = "balanced", **_) -> Dict[str, Any]:
     The `why` is the point. A knob without its provenance is one an agent
     changes for no reason, and these were expensive to establish.
     """
-    from . import web
+    from knurlogic.interfaces import web
     doc = web._preview(artifact, tune)
     for k in doc.get("knobs", []):
         k["change_at"] = ("runtime" if k.get("reach") == "live"
@@ -278,8 +280,8 @@ def settings(artifact: str = "", tune: str = "balanced", **_) -> Dict[str, Any]:
 
 def drafting(artifact: str = "", **_) -> Dict[str, Any]:
     """Does this artifact have a multi-token-prediction head, and will it run?"""
-    from . import mtp
-    from .artifact import Artifact
+    from knurlogic.engine import mtp
+    from knurlogic.machine.artifact import Artifact
     a = Artifact.load(artifact)
     st = mtp.status(a)
     return {"artifact": a.path.name, "state": st.state,
@@ -302,7 +304,7 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
     fit is a refusal with the reason attached. `force` overrides the ring
     check only -- it will not make a model fit.
     """
-    from . import ui
+    from knurlogic.interfaces import ui
 
     f = fit(artifact=artifact)
     if not f["fits"]:
@@ -324,7 +326,7 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
 
 
 def unload(port: int = 8080, **_) -> Dict[str, Any]:
-    from . import ui
+    from knurlogic.interfaces import ui
     return ui._stop(int(port))
 
 
@@ -333,7 +335,7 @@ def unload(port: int = 8080, **_) -> Dict[str, Any]:
 def deps() -> Dict[str, Any]:
     """Which build of each piece every interpreter has, read off the fix
     itself rather than a version string."""
-    from . import deps as D
+    from knurlogic.machine import deps as D
     return D.survey()
 
 

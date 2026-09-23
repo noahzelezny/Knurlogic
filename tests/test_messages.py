@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from knurlogic import messages as M                         # noqa: E402
+from knurlogic.interfaces import messages as M
 
 MARKER = "from-the-stub-engine"
 
@@ -210,7 +210,7 @@ def test_the_template_is_read_from_either_place_an_artifact_keeps_it(tmp_path):
     """Newer exports put it in chat_template.jinja and leave the tokenizer
     config's field empty; older ones do the opposite. Reading one answers
     'no template' for half the artifacts here."""
-    from knurlogic.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact
     (tmp_path / "config.json").write_text('{"model_type":"x"}')
     (tmp_path / "tokenizer_config.json").write_text(
         json.dumps({"chat_template": "OLD STYLE {{ messages }}"}))
@@ -224,7 +224,7 @@ def test_the_template_is_read_from_either_place_an_artifact_keeps_it(tmp_path):
 def test_a_template_asking_for_tools_with_no_parser_is_flagged():
     """The failure this catches is silent: nothing errors, the model just
     talks about calling functions."""
-    from knurlogic import engine
+    from knurlogic.engine import seam as engine
     ts = engine.tool_support(
         "You have tools. Emit <weird_custom_tag>name</weird_custom_tag>.")
     assert ts["mentions_tools"] is True
@@ -234,7 +234,7 @@ def test_a_template_asking_for_tools_with_no_parser_is_flagged():
 def test_the_agentic_dialect_is_recognised():
     """<tool_call>\\n<function=NAME>\\n<parameter=P> is the Qwen3-Coder /
     agentic-harness form, not the JSON that plain Qwen emits."""
-    from knurlogic import engine
+    from knurlogic.engine import seam as engine
     ts = engine.tool_support(
         "reply in the following format:\n\n<tool_call>\n<function=example>\n"
         "<parameter=p>v</parameter>\n</function>\n</tool_call>")
@@ -242,7 +242,7 @@ def test_the_agentic_dialect_is_recognised():
 
 
 def test_no_template_is_not_reported_as_no_tools():
-    from knurlogic import engine
+    from knurlogic.engine import seam as engine
     ts = engine.tool_support("")
     assert ts["has_template"] is False and ts["mentions_tools"] is False
 
@@ -253,7 +253,7 @@ def test_connect_offers_the_scoped_config_and_not_the_global_one():
     """Writing ~/.claude/settings.json would route every session on the
     machine at a local model, including the ones with nothing to do with it.
     A config change nobody can see is how you debug the wrong thing."""
-    from knurlogic import connect
+    from knurlogic.interfaces import connect
     out = connect.render("http://127.0.0.1:8080", "some-artifact")
     assert ".claude/settings.json" in out
     assert "NOT your global" in out
@@ -261,7 +261,7 @@ def test_connect_offers_the_scoped_config_and_not_the_global_one():
 
 def test_the_timeout_is_raised_because_a_local_model_is_slower():
     """The default timeout is the first thing to bite on a long tool loop."""
-    from knurlogic import connect
+    from knurlogic.interfaces import connect
     env = connect.env_lines("http://x", "m")
     assert int(env["API_TIMEOUT_MS"]) > 600_000
     assert env["ANTHROPIC_BASE_URL"] == "http://x"

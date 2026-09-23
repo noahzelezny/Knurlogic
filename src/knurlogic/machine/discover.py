@@ -191,8 +191,8 @@ def _weights_bytes(d: Path, depth: int = 1) -> int:
 
 def _from_config_dir(d: Path, store: str) -> Found | None:
     """A directory that carries a config.json is an artifact we can read."""
-    from . import mtp
-    from .artifact import Artifact
+    from knurlogic.engine import mtp
+    from knurlogic.machine.artifact import Artifact
     try:
         a = Artifact.load(d)
     except Exception:
@@ -367,7 +367,7 @@ def main(argv=None) -> int:
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
-    from . import wired
+    from knurlogic.machine import wired
     rows = find(stores=a.store or None, extra=a.path,
                 include_defaults=not a.only_path)
     if a.servable:

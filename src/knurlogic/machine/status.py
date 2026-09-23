@@ -51,7 +51,7 @@ def _rss_bytes() -> int:
 def memory() -> dict:
     """Delegated: how memory is accounted is an ENGINE question, and the
     tripwire test caught this module importing mlx to answer it."""
-    from .engine import memory as _m
+    from knurlogic.engine.seam import memory as _m
 
     d = _m()
     d["process_rss_bytes"] = _rss_bytes()
@@ -85,7 +85,7 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
     if machine_fn is not None:
         d["machine"] = machine_fn()
     else:
-        from . import wired
+        from knurlogic.machine import wired
         d["machine"] = wired.machine()
     # Which runtime is holding what, ON THIS NODE. It travels inside the
     # node's own snapshot rather than being computed centrally, because

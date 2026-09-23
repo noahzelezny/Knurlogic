@@ -27,8 +27,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import settings as S
-from .artifact import Artifact
+from knurlogic.tuning import settings as S
+from knurlogic.machine.artifact import Artifact
 
 GIB = 1 << 30
 

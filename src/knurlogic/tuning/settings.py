@@ -98,7 +98,7 @@ def prefill_chunk_for(model_type: str) -> tuple:
     # Through the architecture map, because configs spell one family several
     # ways -- a qwen3_5 27B reports `qwen3_5_text` -- and a miss here quietly
     # hands a measured family the unmeasured default.
-    from .arch import ARCH_FOR_MODEL_TYPE
+    from knurlogic.engine.arch import ARCH_FOR_MODEL_TYPE
     family = ARCH_FOR_MODEL_TYPE.get(model_type, model_type)
     if family in PREFILL_CHUNK_BY_FAMILY:
         return PREFILL_CHUNK_BY_FAMILY[family], f"measured for {family}"
