@@ -144,6 +144,7 @@ def test_mlx_lives_behind_the_engine_seam():
     accident. It walks the tree now, and a directory is exempt only by being
     named in ENGINE_SIDE with a reason.
     """
+    import ast
     import pathlib
     import re
     src = pathlib.Path(__file__).resolve().parents[1] / "src" / "knurlogic"
@@ -154,10 +155,19 @@ def test_mlx_lives_behind_the_engine_seam():
             continue
         if f.name in ("engine.py", "vendor.py"):
             continue  # the seam itself; vendor shells out to another env
-        code = "\n".join(
-            l for l in f.read_text().splitlines()
-            if not l.lstrip().startswith("#") and '"""' not in l)
-        hits = re.findall(r"\b(?:import|from)\s+(mlx\w*)", code)
+        # Parsed, not grepped: a regex over the text matched prose -- "exo
+        # imports them from mlx-lm directly" inside a string -- and the
+        # answer to a false alarm must never be rewording the sentence.
+        # ast sees import statements, including ones nested in functions,
+        # which is exactly where a lazy import would hide.
+        hits = []
+        for node in ast.walk(ast.parse(f.read_text())):
+            if isinstance(node, ast.Import):
+                hits += [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                hits.append(node.module or "")
+        hits = [h.split(".")[0] for h in hits
+                if re.match(r"mlx\w*$", h.split(".")[0])]
         if hits:
             offenders[str(rel)] = sorted(set(hits))
     assert not offenders, f"mlx imported outside the seam: {offenders}"
