@@ -269,3 +269,18 @@ def test_the_timeout_is_raised_because_a_local_model_is_slower():
     # this server has never heard of.
     assert all(env[f"ANTHROPIC_DEFAULT_{k}_MODEL"] == "m"
                for k in ("OPUS", "SONNET", "HAIKU"))
+
+
+def test_an_anthropic_image_block_reaches_the_engine_in_order():
+    """Anthropic image blocks used to be dropped: _text_of kept only text, so
+    a Claude-shaped request with a picture reached the model without it."""
+    from knurlogic.interfaces.messages import to_openai
+    body = to_openai({"model": "m", "messages": [{"role": "user", "content": [
+        {"type": "text", "text": "what colour is"},
+        {"type": "image", "source": {"type": "base64",
+                                     "media_type": "image/png",
+                                     "data": "AAAA"}},
+        {"type": "text", "text": "this?"}]}]})
+    parts = body["messages"][-1]["content"]
+    assert [p["type"] for p in parts] == ["text", "image_url", "text"]
+    assert parts[1]["image_url"]["url"] == "data:image/png;base64,AAAA"
