@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from knurlogic import loaded
+from knurlogic.machine import loaded
 
 
 class _Fake:

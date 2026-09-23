@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from knurlogic import mcp
+from knurlogic.interfaces import mcp
 
 
 def _artifact(d, gib=4, **cfg):
@@ -93,10 +93,10 @@ def test_load_refuses_a_model_that_does_not_fit(tmp_path, monkeypatch):
     """And no flag overrides it: force is for the ring, not for arithmetic."""
     d = _artifact(tmp_path / "big", gib=8)
     monkeypatch.setattr(mcp, "_exo_state", lambda: {})
-    monkeypatch.setattr("knurlogic.loaded.available_memory",
+    monkeypatch.setattr("knurlogic.machine.loaded.available_memory",
                         lambda: {"available_bytes": 1 << 20,
                                  "free_bytes": 1 << 20, "cached_bytes": 0})
-    monkeypatch.setattr("knurlogic.ui._spawn",
+    monkeypatch.setattr("knurlogic.interfaces.ui._spawn",
                         lambda *a, **k: pytest.fail("spawned anyway"))
     r = mcp.load(artifact=str(d), force=True)
     assert r["loaded"] is False and r["refused"] == "will not fit"
@@ -109,11 +109,11 @@ def test_load_refuses_an_unsettled_ring_but_force_overrides(tmp_path,
     monkeypatch.setattr(mcp, "_exo_state", lambda: {
         "runners": {"a": {"RunnerLoading": {}}}, "downloads": {},
         "topology": {"nodes": []}, "lastSeen": {}})
-    monkeypatch.setattr("knurlogic.loaded.available_memory",
+    monkeypatch.setattr("knurlogic.machine.loaded.available_memory",
                         lambda: {"available_bytes": 64 << 30,
                                  "free_bytes": 64 << 30, "cached_bytes": 0})
     spawned = []
-    monkeypatch.setattr("knurlogic.ui._spawn",
+    monkeypatch.setattr("knurlogic.interfaces.ui._spawn",
                         lambda *a, **k: spawned.append(a) or {"starting": a[0]})
 
     r = mcp.load(artifact=str(d))
@@ -151,7 +151,7 @@ def test_deps_reads_the_fix_not_the_version(tmp_path):
     """A version names a build; it does not say what is in it. The jaccl
     verdict comes from the fix's own env read compiled into libjaccl."""
     import json, subprocess, sys as _s
-    from knurlogic import deps
+    from knurlogic.machine import deps
     pkg = tmp_path / "site" / "mlx"
     (pkg / "lib").mkdir(parents=True)
     (pkg / "__init__.py").write_text("")
@@ -168,6 +168,6 @@ def test_deps_reads_the_fix_not_the_version(tmp_path):
 
 
 def test_glm5_siblings_come_from_the_vendored_source():
-    from knurlogic.deps import glm5_siblings
+    from knurlogic.machine.deps import glm5_siblings
     got = glm5_siblings()
     assert "sparse_attention" in got and "linear" in got

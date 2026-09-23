@@ -31,9 +31,11 @@ import argparse
 import os
 import sys
 
-from . import arch, engine, messages, mtp, register, status, web, wired
-from .artifact import Artifact
-from .resolve import resolve
+from knurlogic.engine import arch, seam as engine, mtp, register
+from knurlogic.interfaces import messages, web
+from knurlogic.machine import status, wired
+from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
 
@@ -112,7 +114,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     def _memory_map():
         import time
 
-        from . import loaded
+        from knurlogic.machine import loaded
         now = time.time()
         if _mm["doc"] is None or now - _mm["at"] > 4.0:
             try:
@@ -144,7 +146,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
           f"without a browser")
     print(f"  /settings.json - every knob, what it would be at another tune, "
           f"and why it exists")
-    from . import connect
+    from knurlogic.interfaces import connect
     print(f"\npoint a Claude-Messages harness at it:\n")
     print("  " + connect.claude_command(
         f"http://{host}:{port}", a.path.name).replace("\n", "\n  "))
@@ -206,7 +208,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
 
     # The knobs the ENGINE reads -- argv and a process-global mlx call --
     # from the environment as it finally stands, overrides included.
-    from .settings import engine_settings
+    from knurlogic.tuning.settings import engine_settings
     eng = engine_settings({**r.env, **forced})
     if eng:
         print("engine    " + "  ".join(f"{k}={v}" for k, v in sorted(eng.items())))
@@ -268,7 +270,7 @@ def main(argv=None) -> int:
                    help="which node name is this box (--cluster --launch)")
     a, rest = p.parse_known_args(argv)
     if a.cluster:
-        from .cluster import run as run_cluster
+        from knurlogic.interfaces.cluster import run as run_cluster
 
         import shlex
         return run_cluster(a.artifact, a.host, a.port, a.profile, a.exo,

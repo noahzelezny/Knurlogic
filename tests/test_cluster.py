@@ -19,9 +19,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from knurlogic import cluster, status                    # noqa: E402
-from knurlogic.artifact import Artifact                  # noqa: E402
-from knurlogic.resolve import Node, resolve, resolve_cluster  # noqa: E402
+from knurlogic.interfaces import cluster
+from knurlogic.machine import status
+from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning.resolve import Node, resolve, resolve_cluster
 
 GIB = 1 << 30
 MARKER = "answered-by-the-stub-exo-not-by-knurlogic"
@@ -211,7 +212,7 @@ def test_front_proxies_openai_to_exo_and_aggregates_status():
         profile="v1.5", exo_url=exo, nodes=[], do_launch=False,
         exo_cmd=[], local=None), daemon=True)
     try:
-        import knurlogic.artifact as A
+        import knurlogic.machine.artifact as A
         real = A.Artifact.load
         A.Artifact.load = staticmethod(lambda p: _art())
         cluster.Artifact.load = staticmethod(lambda p: _art())
@@ -267,8 +268,8 @@ def test_settings_json_says_running_would_be_and_how_to_get_it(tmp_path):
     So the document has to carry the running value, the value another tune
     WOULD give, and the fact that it takes a restart.
     """
-    from knurlogic import web
-    from knurlogic.resolve import resolve
+    from knurlogic.interfaces import web
+    from knurlogic.tuning.resolve import resolve
 
     a = _art(bytes_on_disk=72 * GIB)
     live = resolve(a, 84 * GIB, tune="balanced")
@@ -299,8 +300,8 @@ def test_settings_json_says_running_would_be_and_how_to_get_it(tmp_path):
 
 def test_a_misspelled_tune_from_a_url_falls_back_instead_of_500ing():
     """Query strings are user input; a typo must not take the page down."""
-    from knurlogic import web
-    from knurlogic.resolve import resolve
+    from knurlogic.interfaces import web
+    from knurlogic.tuning.resolve import resolve
     a = _art(bytes_on_disk=72 * GIB)
     doc = web.settings_document(a, live_env={}, live_tune="balanced",
                                 live_working_set=84 * GIB,

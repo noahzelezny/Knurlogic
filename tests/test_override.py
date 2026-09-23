@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from knurlogic import override                              # noqa: E402
+from knurlogic.engine import override
 
 UPSTREAM = "upstream-module-as-installed"
 OVERLAID = "knurlogic-override-served-this"

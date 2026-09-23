@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .register import ARCH_DIR
+from knurlogic.engine.register import ARCH_DIR
 
 PROVENANCE = ARCH_DIR / "PROVENANCE.md"
 

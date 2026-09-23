@@ -42,7 +42,7 @@ from pathlib import Path
 #: on the config: Flash-Next declares `language_model_only: false` yet vqlab
 #: scores it through mlx_lm. So `host` here records where a module LIVES;
 #: choosing the host per artifact is still an open question.
-from .engine import HOST_PACKAGES  # the seam owns this
+from knurlogic.engine.seam import HOST_PACKAGES
 
 #: Which host a module must be registered UNDER. This is not cosmetic: a
 #: module's relative imports resolve against its registered parent, and
@@ -82,7 +82,7 @@ def _load_pins() -> dict:
     whatever happens to be installed is exactly the habit this replaces:
     "it imports" is not the claim, "it ran and came from here" is.
     """
-    from .register import ARCH_DIR
+    from knurlogic.engine.register import ARCH_DIR
     f = ARCH_DIR / "PINS.json"
     if not f.is_file():
         return {}
@@ -123,7 +123,7 @@ class ArchStatus:
 
 
 def _models_dir(host: str = "mlx_lm") -> Path | None:
-    from .engine import models_module
+    from knurlogic.engine.seam import models_module
     try:
         return Path(models_module(host).__file__).parent
     except Exception:
@@ -174,7 +174,7 @@ def check(model_type: str, models_dir: Path | None = None) -> list:
     mlx-lm actually imports. The installed copy is reported only as a
     fallback, so a user without the vendored set still gets a useful answer.
     """
-    from .register import ARCH_DIR, source_for
+    from knurlogic.engine.register import ARCH_DIR, source_for
 
     d = models_dir or _models_dir()
     rows = []

@@ -35,7 +35,7 @@ def _text(s: str) -> tuple:
 
 def _connect_doc(artifact) -> dict:
     """How to point a client here -- the panel exo gets right."""
-    from . import connect
+    from knurlogic.interfaces import connect
     return {"model": artifact.path.name,
             "claude": connect.claude_command("__BASE__", artifact.path.name),
             "openai": connect.openai_snippet("__BASE__", artifact.path.name)}
@@ -70,7 +70,7 @@ def models_document(serving: str = "", ttl: float = 60.0):
     def handler(_q: dict) -> dict:
         import time
 
-        from . import discover
+        from knurlogic.machine import discover
         now = time.time()
         if _MODELS["rows"] is None or now - _MODELS["at"] > ttl:
             try:
@@ -107,7 +107,7 @@ def loaded_document(ttl: float = 4.0):
     def handler(_q: dict) -> dict:
         import time
 
-        from . import loaded
+        from knurlogic.machine import loaded
         now = time.time()
         if _LOADED["doc"] is None or now - _LOADED["at"] > ttl:
             try:
@@ -130,7 +130,8 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=()):
     which of those settings did not survive the switch. Doing the load and
     staying quiet about that would be worse than not offering it.
     """
-    from . import engine, loaded as L
+    from knurlogic.engine import seam as engine
+    from knurlogic.machine import loaded as L
 
     def _drift(path: str) -> dict:
         """Which resolved settings the running process cannot honour."""
@@ -197,7 +198,7 @@ def machine_settings():
         return v
 
     def handler(q: dict) -> dict:
-        from . import wired
+        from knurlogic.machine import wired
 
         # A PREVIEW for an artifact nobody has loaded. This is the point of
         # showing settings before a launch rather than after: nearly every
@@ -252,9 +253,11 @@ def machine_settings():
 def _preview(path: str, tune: str, working_set_gib=None) -> dict:
     """What this artifact WOULD resolve to, and which of those can still be
     chosen. Nothing is loaded and nothing is set: this only reads."""
-    from . import engine, settings as S, wired
-    from .artifact import Artifact
-    from .resolve import resolve
+    from knurlogic.engine import seam as engine
+    from knurlogic.tuning import settings as S
+    from knurlogic.machine import wired
+    from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning.resolve import resolve
 
     a = Artifact.load(path)
     try:
@@ -360,7 +363,7 @@ def knob_reach(artifact, name: str, live_knobs, restart_why=RESTART_WHY):
     needs a restart, or -- the one nobody checks -- the bundled runtime does
     not read it at all, so it will never do anything however it is set.
     """
-    from . import settings as S
+    from knurlogic.tuning import settings as S
     if name in S.ENGINE_KNOB_NAMES:
         # Read by the engine -- server argv or a process-global mlx call --
         # so whether the artifact's runtime also reads it is beside the point.
@@ -389,7 +392,7 @@ def settings_document(artifact, live_env: dict, live_tune: str,
     show a number without its provenance, which is the whole complaint about
     settings UIs that show neither.
     """
-    from . import settings as S
+    from knurlogic.tuning import settings as S
 
     def handler(q: dict) -> dict:
         tune = (q.get("tune") or [live_tune])[0]

@@ -39,9 +39,11 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import override, status, web, wired
-from .artifact import Artifact
-from .resolve import Node, resolve_cluster
+from knurlogic.engine import override
+from knurlogic.machine import status, wired
+from knurlogic.interfaces import web
+from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning.resolve import Node, resolve_cluster
 
 GIB = 1 << 30
 DEFAULT_EXO = "http://127.0.0.1:52415"
@@ -215,7 +217,7 @@ def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
     is_local = n.name == local_name
     mm = None
     if is_local:
-        from . import loaded
+        from knurlogic.machine import loaded
         try:
             mm = loaded.memory_map()
         except Exception:
@@ -417,7 +419,7 @@ def run(path: str, host: str, port: int, profile: str, exo_url: str,
     # Drafting in exo is EXO_MTP, and the fork requires it identical on
     # every node. A packed head is used because it is there -- the same rule
     # `serve` follows -- and `--no-draft` is the one way to say otherwise.
-    from . import mtp
+    from knurlogic.engine import mtp
     head = mtp.find_head(a.path)
     if head is not None:
         for r in c.nodes.values():

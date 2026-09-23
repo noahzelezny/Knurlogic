@@ -27,9 +27,9 @@ import json
 import sys
 from pathlib import Path
 
-from . import arch, engine, register
-from .artifact import Artifact
-from .resolve import resolve
+from knurlogic.engine import arch, seam as engine, register
+from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
 PINS = register.ARCH_DIR / "PINS.json"

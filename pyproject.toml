@@ -33,7 +33,7 @@ dependencies = [
 vlm = ["mlx-vlm>=0.7.1"]
 
 [project.scripts]
-knurlogic = "knurlogic.cli:main"
+knurlogic = "knurlogic.interfaces.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/noahzelezny/knurlogic"
@@ -48,6 +48,8 @@ where = ["src"]
 # silently does not ship, and `pip install knurlogic` hands the user an
 # installer that is not there. Recursive, since a real override mirrors its
 # target's path: overrides/exo/master/placement_utils.py.
-knurlogic = ["web/*.html", "architectures/*.md", "architectures/*.json",
-             "overrides/*.py", "overrides/*.md", "overrides/*.json",
-             "overrides/**/*.py", "overrides/**/*.json"]
+knurlogic = ["interfaces/web/*.html",
+             "engine/architectures/*.md", "engine/architectures/*.json",
+             "engine/overrides/*.py", "engine/overrides/*.md",
+             "engine/overrides/*.json", "engine/overrides/**/*.py",
+             "engine/overrides/**/*.json"]

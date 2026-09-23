@@ -9,5 +9,5 @@ Scope on purpose: it does not detect machines, fit models, or score them.
 
 __version__ = "0.1.0.dev0"
 
-from .artifact import Artifact          # noqa: E402,F401
-from .resolve import Resolution, resolve  # noqa: E402,F401
+from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning.resolve import Resolution, resolve
