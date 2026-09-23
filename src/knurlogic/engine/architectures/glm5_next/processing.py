@@ -11,8 +11,11 @@ from transformers.image_transforms import resize as resize_image
 from transformers.image_utils import ChannelDimension, PILImageResampling
 from transformers.processing_utils import ProcessorMixin
 
-from ..base import install_auto_processor_patch, load_chat_template
-from ..qwen3_vl.processing_qwen3_vl import _flatten_images
+from knurlogic.engine.vision.glm5._vendor.base import (
+    install_auto_processor_patch,
+    load_chat_template,
+)
+from knurlogic.engine.vision.glm5._vendor.qwen3_vl_processing import _flatten_images
 
 
 def smart_resize(
