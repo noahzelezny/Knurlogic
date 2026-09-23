@@ -81,6 +81,41 @@ def _get(url: str, timeout: float = 1.5):
         return None
 
 
+def exo_placement(inst, names: dict, local_id=None) -> dict:
+    """{model, nodes: [{node, layers, bytes_est, local}]} for one instance.
+
+    exo tags its instances by kind -- {"MlxRingInstance": {...}} -- so the
+    fields are one level down. Reading them at the top found no model name
+    and reported a UUID, which is how a model held entirely by ANOTHER node
+    showed up in this machine's list as resident here with 0 bytes.
+    """
+    body = inst
+    if isinstance(inst, dict) and len(inst) == 1:
+        (only,) = inst.values()
+        if isinstance(only, dict) and ("shardAssignments" in only
+                                       or "shard_assignments" in only):
+            body = only
+    body = body if isinstance(body, dict) else {}
+    sa = body.get("shardAssignments") or body.get("shard_assignments") or {}
+    model = sa.get("modelId") or sa.get("model_id") or ""
+    runner_node = {r: n for n, r in (sa.get("nodeToRunner") or {}).items()}
+    nodes = []
+    for runner, shard in (sa.get("runnerToShard") or {}).items():
+        meta = next(iter(shard.values()), {}) if isinstance(shard, dict) else {}
+        card = meta.get("modelCard") or {}
+        n_layers = int(card.get("nLayers") or 0)
+        lo, hi = meta.get("startLayer"), meta.get("endLayer")
+        size = int((card.get("storageSize") or {}).get("inBytes") or 0)
+        share = ((hi - lo) / n_layers) if (n_layers and lo is not None
+                                           and hi is not None) else 0
+        nid = runner_node.get(runner, "")
+        nodes.append({"node": names.get(nid, nid[:12] or "?"),
+                      "layers": f"{lo}-{hi} of {n_layers}",
+                      "bytes_est": int(size * share),
+                      "local": bool(local_id) and nid == local_id})
+    return {"model": model, "nodes": nodes}
+
+
 def _exo(base: str) -> list:
     st = _get(f"{base}/state", timeout=2.5)
     if st is None:
@@ -100,18 +135,27 @@ def _exo(base: str) -> list:
     up = sum(1 for s in live if s in EXO_UP)
     coming = sum(1 for s in live if s in EXO_COMING)
 
+    local_id = _get(f"{base}/node_id", timeout=1.0)
+    names = {k: (v or {}).get("friendlyName") or k[:12]
+             for k, v in (st.get("nodeIdentities") or {}).items()}
     out = []
     for iid, inst in instances.items():
-        model = ""
-        if isinstance(inst, dict):
-            sa = inst.get("shard_assignments") or inst.get("shardAssignments") or {}
-            model = sa.get("model_id") or sa.get("modelId") or ""
+        placed = exo_placement(inst, names, local_id)
+        here = [p for p in placed["nodes"] if p["local"]]
+        where_txt = ", ".join(f"{p['node']} layers {p['layers']}"
+                              for p in placed["nodes"]) or "placement unknown"
         out.append(Resident(
-            runtime="exo", name=str(model) or iid[:12], where=base,
+            runtime="exo", name=placed["model"] or iid[:12], where=base,
             state="loaded" if up else ("loading" if coming else "offered"),
-            detail=f"{up} runner{'' if up == 1 else 's'} up" if up
-                   else "no runner up",
-            can_unload=True, ident=iid))
+            detail=(f"{up} runner{'' if up == 1 else 's'} up; {where_txt}"
+                    if up else f"no runner up; {where_txt}"),
+            bytes_resident=sum(p["bytes_est"] for p in here),
+            can_unload=True, ident=iid,
+            extra={"placement": placed["nodes"],
+                   "on_this_machine": bool(here),
+                   "bytes_note": "bytes_resident counts only shards on THIS "
+                                 "machine, estimated as the model's size "
+                                 "times its share of layers"}))
     # Runners can be up before exo has recorded an instance for them --
     # measured against the live daemon, which held 2 WarmingUp and 1 Loading
     # against an empty instance map. Reporting "nothing loaded" there would
