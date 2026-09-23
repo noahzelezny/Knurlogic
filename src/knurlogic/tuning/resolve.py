@@ -194,7 +194,7 @@ def decode_chunk_for(headroom_bytes: int, known: bool = True,
                min(S.DECODE_CHUNK_DEFAULT, int(headroom_bytes / per)))
 
 
-def resolve(artifact: Artifact, budget, profile: str = "v1.5",
+def resolve(artifact: Artifact, budget, profile: str | None = None,
             tune: str = "balanced"):
     """Resolve every knob for this artifact against a budget.
 
@@ -203,12 +203,13 @@ def resolve(artifact: Artifact, budget, profile: str = "v1.5",
     of them, or {name: working_set_bytes}), in which case the return is a
     `ClusterResolution` carrying one `Resolution` per node.
 
-    `profile` is v1.5 (bit-exact vs the published runtime) or v2 (the two
-    numerics-active flags on). An artifact shipping UNCHANGED weights gets
-    v1.5: there is no quality gain to offset a numerics regression, however
-    small. Only a repo shipping improved weights may take v2.
+    `profile` is None (the default): each rung keeps the numerics it
+    SHIPPED (`numerics_for`). "v1.5" or "v2" forces that profile's two
+    numerics-active flags, and only because someone asked -- it used to
+    default to v1.5 and so silently turned off bf16 I/O on the rungs that
+    shipped it on (design D1).
     """
-    if profile not in S.RUNTIME_PROFILES:
+    if profile is not None and profile not in S.RUNTIME_PROFILES:
         raise ValueError(f"profile must be one of {sorted(S.RUNTIME_PROFILES)}")
 
     if tune not in S.TUNE_PROFILES:
@@ -219,7 +220,7 @@ def resolve(artifact: Artifact, budget, profile: str = "v1.5",
     return resolve_cluster(artifact, budget, profile, tune)
 
 
-def resolve_cluster(artifact: Artifact, budget, profile: str = "v1.5",
+def resolve_cluster(artifact: Artifact, budget, profile: str | None = None,
                     tune: str = "balanced") -> ClusterResolution:
     """Resolve per node, and say what is only true of the whole cluster."""
     nodes = _as_nodes(budget)
@@ -290,7 +291,7 @@ def _ring_consistent(c: ClusterResolution) -> None:
 
 
 def _resolve_one(artifact: Artifact, working_set_bytes: int,
-                 holds_bytes: int, profile: str,
+                 holds_bytes: int, profile: str | None,
                  tune: str = "balanced") -> Resolution:
     """One box. `holds_bytes` is what this box holds of the artifact, which
     is the whole thing unless something sharded it."""
@@ -410,7 +411,63 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     if artifact.is_vq:
         for k, (v, why) in S.PERFORMANCE_DEFAULTS.items():
             r.env[k] = v
-        r.env.update(S.RUNTIME_PROFILES[profile])
-        r.notes.append(f"runtime profile {profile}")
+        env, note = numerics_for(artifact, profile)
+        r.env.update(env)
+        r.notes.append(note)
 
     return r
+
+
+def _numerics_source(artifact: Artifact, flag: str, source: str):
+    if source == "declared":
+        d = artifact.declared_knobs().get(flag)
+        if isinstance(d, dict) and d.get("default") is not None:
+            return str(d["default"])
+        return None
+    if source == "published":
+        from knurlogic.engine.vq import rungs
+        row = rungs.rung(artifact.path)
+        if not row:
+            return None
+        # an arc6-era bundle has no such flag; its arithmetic is the flag
+        # off, which rungs.json records as an inferred knob
+        return (row.get("published_defaults", {}).get(flag)
+                or row.get("knobs", {}).get(flag)
+                or ("0" if flag in row.get("inferred_knobs", ()) else None))
+    if source == "bundled":
+        from knurlogic.engine.vq import rungs
+        return rungs.flag_defaults(artifact.runtime_source()).get(flag)
+    raise ValueError(source)
+
+
+def numerics_for(artifact: Artifact, profile: str | None = None):
+    """(env, note): the numerics-active flags for this artifact.
+
+    A profile someone ASKED for wins, and the note names what it overrode.
+    Otherwise every flag comes from the rung itself, first source in
+    S.NUMERICS_SOURCES that answers. The bug this replaces: a v1.5 default
+    applied to every VQ artifact, forcing Flash-Next 2.1 and Qwen3.6-35B-A3B
+    3.8/4.6/5.4 -- published with both flags ON -- to run off (F103/F105:
+    numerics-active, up to +0.97% ppl)."""
+    own, where = {}, {}
+    for flag in S.NUMERICS_FLAGS:
+        for src in S.NUMERICS_SOURCES:
+            v = _numerics_source(artifact, flag, src)
+            if v is not None:
+                own[flag], where[flag] = v, src
+                break
+    if profile is not None:
+        forced = dict(S.RUNTIME_PROFILES[profile])
+        changed = {f: (own[f], v) for f, v in forced.items()
+                   if f in own and own[f] != v}
+        note = f"runtime profile {profile} (asked for)"
+        if changed:
+            note += " -- overrides what this rung shipped: " + ", ".join(
+                f"{f} {a}->{b}" for f, (a, b) in changed.items())
+        return forced, note
+    if not own:
+        return {}, ("numerics: nothing declares them -- the runtime's own "
+                    "defaults stand")
+    srcs = sorted(set(where.values()))
+    return own, ("numerics as shipped (" + ", ".join(
+        f"{f}={v}" for f, v in own.items()) + f"; from {'/'.join(srcs)})")
