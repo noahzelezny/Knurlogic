@@ -30,8 +30,9 @@ WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".npz")
 #: ships with. Adding a store is a line, which is the point -- there will be
 #: a fifth.
 STORES = (
-    ("exo", ("EXO_MODELS_DIR", "EXO_DEFAULT_MODELS_DIR"),
-     ("~/.local/share/models", "~/.cache/exo/models")),
+    # exo's own dirs come from `exo_model_dirs`, which mirrors exo's
+    # resolution; these are only the names older launch scripts exported.
+    ("exo", ("EXO_MODELS_DIR",), ("~/.cache/exo/models",)),
     ("huggingface", ("HF_HUB_CACHE",), ("~/.cache/huggingface/hub",)),
     ("ollama", ("OLLAMA_MODELS",), ("~/.ollama/models",)),
     ("lm studio", ("LMSTUDIO_MODELS",),
@@ -61,7 +62,8 @@ class Found:
 #: Variables worth reading off a RUNNING tool, since a store location is
 #: per-tool configuration and another process's environment is not ours.
 _ENV_OF_INTEREST = ("EXO_MODELS_DIR", "EXO_DEFAULT_MODELS_DIR", "HF_HOME",
-                    "HF_HUB_CACHE", "OLLAMA_MODELS")
+                    "HF_HUB_CACHE", "OLLAMA_MODELS", "EXO_MODELS_DIRS",
+                    "EXO_MODELS_READ_ONLY_DIRS")
 
 
 def _running_tool_roots() -> list:
@@ -104,10 +106,42 @@ def _running_tool_roots() -> list:
                 continue
             store = "ollama" if var == "OLLAMA_MODELS" else (
                 "huggingface" if var.startswith("HF") else "exo")
-            p = Path(val).expanduser()
-            for cand in ((p, p / "hub") if var.startswith("HF") else (p,)):
-                if cand.is_dir():
-                    out.append((store, cand))
+            vals = val.split(":") if var.endswith("_DIRS") else [val]
+            for v in filter(None, vals):
+                p = Path(v).expanduser()
+                for cand in ((p, p / "hub") if var.startswith("HF")
+                             else (p,)):
+                    if cand.is_dir():
+                        out.append((store, cand))
+    return out
+
+
+def exo_model_dirs(env=None, platform=None, home=None) -> list:
+    """Where exo itself looks for models, resolved the way exo resolves it
+    (exo/shared/constants.py), so this answers without exo running.
+
+    The default is `<data home>/models`, and on anything but Linux the data
+    home is `~/.exo` -- not the XDG path. Missing that is how a machine whose
+    `~/.exo/models` is a symlink to a 37-artifact external volume showed 13
+    artifacts: the store was only found while exo happened to be started by
+    a script that also exported a directory variable.
+    """
+    import sys
+    env = os.environ if env is None else env
+    platform = sys.platform if platform is None else platform
+    home = Path.home() if home is None else Path(home)
+    if env.get("EXO_HOME"):
+        data = home / env["EXO_HOME"]
+    elif platform != "linux":
+        data = home / ".exo"
+    else:
+        xdg = env.get("XDG_DATA_HOME")
+        data = (Path(xdg) if xdg else home / ".local" / "share") / "exo"
+    default = (Path(env["EXO_DEFAULT_MODELS_DIR"]).expanduser()
+               if env.get("EXO_DEFAULT_MODELS_DIR") else data / "models")
+    out = [default]
+    for var in ("EXO_MODELS_DIRS", "EXO_MODELS_READ_ONLY_DIRS"):
+        out += [Path(x).expanduser() for x in env.get(var, "").split(":") if x]
     return out
 
 
@@ -118,6 +152,7 @@ def _roots(extra=(), include_defaults: bool = True):
     if not include_defaults:
         return out
     out += _running_tool_roots()
+    out += [("exo", d) for d in exo_model_dirs() if d.is_dir()]
     for store, envs, defaults in STORES:
         seen = []
         for e in envs:
