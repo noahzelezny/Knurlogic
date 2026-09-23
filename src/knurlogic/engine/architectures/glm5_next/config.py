@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
 
-from ..base import BaseModelConfig
+from knurlogic.engine.vision._base import BaseModelConfig
 
 
 @dataclass

@@ -3,14 +3,32 @@ from typing import Any, Dict, List, Optional, Tuple
 import mlx.core as mx
 import mlx.nn as nn
 
-from ..base import LanguageModelOutput, create_ssm_mask, scaled_dot_product_attention
-from ..cache import ArraysCache, CacheList, KVCache, PoolingCache
-from ..deepseek_v4.hyper_connection import HyperConnection
-from ..gated_delta import gated_delta_update
-from ..linear import DECODE_BLOCK_SIZE, linear, tiled_linear
-from ..mla import MultiLinear
-from ..sparse_attention import indexed_sparse_attention
-from ..switch_layers import MoE, SwitchGLU
+from knurlogic.engine.vision.glm5._vendor.base import (
+    LanguageModelOutput,
+    create_ssm_mask,
+    scaled_dot_product_attention,
+)
+from knurlogic.engine.vision.glm5._vendor.cache import (
+    ArraysCache,
+    CacheList,
+    KVCache,
+    PoolingCache,
+)
+from knurlogic.engine.vision.glm5._vendor.deepseek_v4.hyper_connection import (
+    HyperConnection,
+)
+from knurlogic.engine.vision.glm5._vendor.gated_delta import gated_delta_update
+from knurlogic.engine.vision.glm5._vendor.linear import (
+    DECODE_BLOCK_SIZE,
+    linear,
+    tiled_linear,
+)
+from knurlogic.engine.vision.glm5._vendor.mla import MultiLinear
+from knurlogic.engine.vision.glm5._vendor.sparse_attention import (
+    indexed_sparse_attention,
+)
+from knurlogic.engine.vision.glm5._vendor.switch_layers import MoE, SwitchGLU
+
 from .config import TextConfig
 
 
