@@ -226,6 +226,25 @@ which. In short:
 * **Drive it.** Every MCP bug this session was found by using the MCP as a
   client, not by reading it; the tests passed throughout.
 
+## Next: replace exo (direction set 2026-09-22)
+
+`pip install knurlogic` and nothing else, including clustering. Verified:
+pip `mlx` ships the ring (TCP) and jaccl (RDMA) backends and a launcher
+(`mlx._distributed_utils.launch`); pip `mlx-lm` ships `sharded_load`,
+pipeline and tensor. So the engine half of a cluster is already
+pip-installable; what exo adds is orchestration. In order:
+
+1. One box from a clean venv with only `pip install knurlogic` (the M4 has
+   no exo). True today except GLM-5.3 (mlx-vlm).
+2. `knurlogic node` -- a stdlib HTTP agent per Mac -- and a two-node
+   pipeline over the ring backend, on a model already on both disks. exo
+   stays installed until this is dependable.
+3. Per-node downloads and knurlogic's own placement. exo becomes optional.
+4. The page takes over the whole interface, closer to exo's.
+
+The jaccl self-heal fork stays an optional mlx build `deps` detects; MTP
+across a pipeline is already ported (`engine/mtp/pipeline.py`).
+
 ## Not done
 
 Ordered by what would surprise somebody most.
