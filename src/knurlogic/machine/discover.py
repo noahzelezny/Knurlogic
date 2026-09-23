@@ -26,6 +26,26 @@ GIB = 1 << 30
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".npz")
 
+#: `model_type` values (config.json) this engine can find on disk but that
+#: are not chat models: embedders, ASR and image-only towers a fit/picker
+#: listed as servable chat models before this check existed (P5, per the
+#: vision v2 design's `models/fit` note) -- an agent asked to load one got a
+#: server that starts and then 400s every /v1/chat/completions call, which
+#: is a worse failure than not listing it. Not exhaustive; extend as new
+#: non-chat `model_type`s are found on disk.
+NON_CHAT_MODEL_TYPES = frozenset({
+    # text/embedding encoders
+    "bert", "nomic_bert", "roberta", "distilbert", "xlm-roberta",
+    "gte", "e5",
+    # audio (ASR)
+    "whisper",
+    # vision-only towers (no LM head)
+    "clip", "clip_vision_model", "siglip", "siglip_vision_model",
+    "siglip2", "siglip2_vision_model",
+    # background/segmentation and other image-to-image utility models
+    "rmbg", "briarmbg", "segformer",
+})
+
 #: Where each tool keeps its models. Env var first, then the defaults it
 #: ships with. Adding a store is a line, which is the point -- there will be
 #: a fifth.
@@ -209,11 +229,16 @@ def _from_config_dir(d: Path, store: str) -> Found | None:
     # as 0 GiB artifacts -- which then dragged their whole model group into
     # "fits in memory" in the picker, because something reporting no size
     # fits anywhere.
+    not_chat = a.model_type in NON_CHAT_MODEL_TYPES
     return Found(name=name, path=d, store=store, format="mlx",
                  bytes_on_disk=size, model_type=a.model_type, is_vq=a.is_vq,
-                 model_file=a.model_file, servable=size > 0,
-                 why="" if size else "config.json but no weight files -- an "
-                                     "interrupted or evicted download",
+                 model_file=a.model_file, servable=size > 0 and not not_chat,
+                 why=("" if size and not not_chat else
+                      f"model_type {a.model_type!r} is not a chat model "
+                      "this engine serves as one (an embedder, ASR or "
+                      "vision-only tower)" if not_chat and size else
+                      "config.json but no weight files -- an "
+                      "interrupted or evicted download"),
                  # A built drafting head is a property of what is ON DISK, and
                  # it sits outside the model glob -- so nothing else in a
                  # listing would ever mention it.
