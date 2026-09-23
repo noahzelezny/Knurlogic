@@ -114,9 +114,46 @@ def load(path: str, executes_artifact_code: bool = False):
     return _load(path, **kw)
 
 
+def server_argv(model_path: str, host: str, port: int,
+                executes_artifact_code: bool = False,
+                settings: dict | None = None,
+                extra: list | None = None) -> list:
+    """The engine server's argv, with the resolved settings IN it.
+
+    The prompt chunk and prompt concurrency are argv to mlx-lm's server and
+    nothing else: an environment variable with the same meaning is read by
+    nobody. Anything the caller passes through `extra` comes last and wins,
+    because a flag somebody typed is a decision, and the resolver's value is
+    a default.
+    """
+    settings = settings or {}
+    extra = list(extra or [])
+    argv = ["--model", model_path, "--host", host, "--port", str(port)]
+    if executes_artifact_code:
+        argv.append("--trust-remote-code")
+    for key, flag in (("prefill_step_size", "--prefill-step-size"),
+                      ("prompt_concurrency", "--prompt-concurrency")):
+        if key in settings and flag not in extra:
+            argv += [flag, str(int(settings[key]))]
+    return argv + extra
+
+
+def set_cache_limit(gib: float) -> str:
+    """Bound mlx's freed-buffer cache for this process. mlx-lm never sets
+    it, so without this the knob is a number on a page."""
+    import mlx.core as mx
+    setter = getattr(mx, "set_cache_limit", None) or \
+        getattr(getattr(mx, "metal", None), "set_cache_limit", None)
+    if setter is None:
+        return "no cache-limit setter in this engine build"
+    setter(int(float(gib) * (1 << 30)))
+    return f"applied ({gib} GiB)"
+
+
 def serve(model_path: str, host: str, port: int,
           executes_artifact_code: bool = False, extra: list | None = None,
-          routes: dict | None = None, draft: bool = True):
+          routes: dict | None = None, draft: bool = True,
+          settings: dict | None = None):
     """Hand off to the engine's own OpenAI-compatible server.
 
     The engine ships a complete one -- request schema, streaming, chat
@@ -232,12 +269,11 @@ def serve(model_path: str, host: str, port: int,
         srv.APIHandler.do_GET = _get
         srv.APIHandler.do_POST = _post
 
-    argv = [sys.argv[0], "--model", model_path, "--host", host,
-            "--port", str(port)]
-    if executes_artifact_code:
-        argv.append("--trust-remote-code")
-    argv += list(extra or [])
-    sys.argv = argv
+    settings = settings or {}
+    if "cache_limit_gb" in settings:
+        print(f"cache limit {set_cache_limit(settings['cache_limit_gb'])}")
+    sys.argv = [sys.argv[0]] + server_argv(
+        model_path, host, port, executes_artifact_code, settings, extra)
     return srv.main()
 
 
@@ -331,7 +367,8 @@ def generate(model, tokenizer, prompt: str, max_tokens: int = 8) -> str:
 #:   * the eight GEMM/numerics flags are read into module globals AT IMPORT and
 #:     baked into Metal kernel source that is compiled once. Those genuinely
 #:     need a restart, or an override module that reads them per dispatch.
-LIVE_KNOBS = ("VQ_DECODE_CHUNK", "VQLAB_CACHE_LIMIT_GB")
+LIVE_KNOBS = ("VQ_DECODE_CHUNK", "VQLAB_CACHE_LIMIT_GB",
+              "KNURLOGIC_CACHE_LIMIT_GB")
 
 
 def _artifact_runtime_modules():
@@ -367,16 +404,12 @@ def apply_live(env: dict) -> dict:
 
     done = {}
     for k, v in env.items():
-        if k == "VQLAB_CACHE_LIMIT_GB":
+        if k in ("VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_CACHE_LIMIT_GB"):
             try:
-                import mlx.core as mx
-                nbytes = int(float(v) * (1 << 30))
-                setter = getattr(mx, "set_cache_limit", None) or \
-                    getattr(getattr(mx, "metal", None), "set_cache_limit", None)
-                if setter is None:
-                    done[k] = "no live setter in this engine build"
+                said = set_cache_limit(v)
+                if said.startswith("no "):
+                    done[k] = said
                     continue
-                setter(nbytes)
                 os.environ[k] = str(v)
                 done[k] = f"applied now ({v} GiB)"
             except Exception as e:

@@ -350,6 +350,14 @@ def knob_reach(artifact, name: str, live_knobs, restart_why=RESTART_WHY):
     needs a restart, or -- the one nobody checks -- the bundled runtime does
     not read it at all, so it will never do anything however it is set.
     """
+    from . import settings as S
+    if name in S.ENGINE_KNOB_NAMES:
+        # Read by the engine -- server argv or a process-global mlx call --
+        # so whether the artifact's runtime also reads it is beside the point.
+        if name in live_knobs:
+            return "live", "the engine applies this on the running server"
+        return "restart", ("engine server argv, read once at startup: set it "
+                           "before loading, or restart to change it")
     reads = artifact.reads_knob(name)
     if reads is False:
         return "no-effect", ("this artifact's bundled runtime never reads "
