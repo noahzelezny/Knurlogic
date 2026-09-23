@@ -118,6 +118,10 @@ def test_nothing_running_is_an_ordinary_answer(monkeypatch):
     same leak the discovery tests had against the real disk."""
     monkeypatch.setattr(loaded, "_get", lambda *a, **k: None)
     monkeypatch.setattr(loaded, "memory_map", lambda *a, **k: {})
+    # And the server record: the survey reads ~/.cache/knurlogic/servers.json
+    # now, and this test first failed because a real model WAS running.
+    from knurlogic.machine import servers
+    monkeypatch.setattr(servers, "registry", lambda: {})
     doc = loaded.survey()
     assert doc["resident"] == []
     assert "nothing reports a loaded model" in loaded.render(doc)
@@ -238,3 +242,17 @@ def test_a_missing_physmem_line_falls_back_rather_than_lying(monkeypatch):
     m = loaded.memory_map(floor=1 << 30)
     assert m["from_os"] is False
     assert m["used_bytes"] == 4 << 30
+
+
+def test_a_registered_server_is_found_on_a_port_nobody_guessed(monkeypatch):
+    """Two models holding 33 GiB on 8092 and 8093 were invisible: the survey
+    only probed a fixed list of ports. It reads the record now."""
+    from knurlogic.machine import servers
+    monkeypatch.setattr(loaded, "_get", lambda *a, **k: None)
+    monkeypatch.setattr(loaded, "memory_map", lambda *a, **k: {})
+    monkeypatch.setattr(servers, "registry", lambda: {
+        8092: {"pid": 1, "artifact": "/m/Qwen3.6-35B-A3B"}})
+    monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
+    (r,) = loaded.survey()["resident"]
+    assert r["runtime"] == "knurlogic" and r["state"] == "loading"
+    assert r["where"].endswith(":8092")
