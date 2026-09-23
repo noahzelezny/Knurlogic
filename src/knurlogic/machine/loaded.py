@@ -232,14 +232,30 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
     for port in p.get("ollama", []):
         seen_ports.add(port)
         out += _ollama(f"http://127.0.0.1:{port}")
-    for port in p.get("openai", []):
+    # knurlogic's own servers, wherever they were started. A fixed list of
+    # guessed ports missed two models holding 33 GiB on 8092 and 8093.
+    from knurlogic.machine import servers
+    ours = {}
+    for port, rec in servers.registry().items():
+        if servers.is_our_server(int(rec["pid"])):
+            ours[port] = rec
+    for port in list(p.get("openai", [])) + sorted(ours):
         if port in seen_ports:
             continue
+        seen_ports.add(port)
         base = f"http://127.0.0.1:{port}"
         # Ours answers /status.json; anything else gets read as a plain
         # OpenAI port. Asking ours first stops knurlogic listing itself as
         # an anonymous mlx server.
         rows = _knurlogic(base) or _openai_port(base)
+        if not rows and port in ours:
+            # Alive, registered, not answering yet: it is loading, and saying
+            # so is the difference between "nothing here" and "wait".
+            rows = [Resident(runtime="knurlogic",
+                             name=Path(ours[port].get("artifact", "")).name,
+                             where=base, state="loading",
+                             detail="process up, port not answering yet",
+                             can_unload=True, ident=str(port))]
         out += rows
 
     doc = {

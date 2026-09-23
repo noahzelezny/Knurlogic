@@ -182,9 +182,9 @@ def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,
     log.write_text("artifact  x\nloading weights\n")
     t = time.time() - quiet_s
     os.utime(log, (t, t))
-    monkeypatch.setattr(ui, "_registry", lambda: {
+    monkeypatch.setattr(ui, "registry", lambda: {
         9001: {"pid": 4242, "artifact": "/m/x", "log": str(log), "t": 0}})
-    monkeypatch.setattr(ui, "_is_our_server", lambda pid: alive)
+    monkeypatch.setattr(ui, "is_our_server", lambda pid: alive)
     monkeypatch.setattr(ui, "_answers", lambda port: answers)
     monkeypatch.setattr(ui, "_artifact_bytes", lambda p: size)
     monkeypatch.setattr(ui.loaded, "memory_map",
