@@ -5,9 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from knurlogic import settings as S            # noqa: E402
-from knurlogic.artifact import Artifact        # noqa: E402
-from knurlogic.resolve import decode_chunk_for, resolve  # noqa: E402
+from knurlogic.tuning import settings as S
+from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning.resolve import decode_chunk_for, resolve
 
 GIB = 1 << 30
 
@@ -72,8 +72,8 @@ def test_non_vq_artifact_gets_only_the_generic_knobs():
 
 def test_vendored_architecture_wins_over_site_packages():
     """Vendoring is only meaningful if the vendored copy is the one used."""
-    from knurlogic import arch
-    from knurlogic.register import ARCH_DIR
+    from knurlogic.engine import arch
+    from knurlogic.engine.register import ARCH_DIR
     for row in arch.check("qwen4_exp_text"):
         if (ARCH_DIR / f"{row.module}.py").is_file():
             assert row.vendored, f"{row.module} should resolve to the vendored copy"
@@ -81,7 +81,7 @@ def test_vendored_architecture_wins_over_site_packages():
 
 def test_moe_pulls_in_its_base_architecture():
     """One drifted base reaches 11 artifacts through the subclass."""
-    from knurlogic import arch
+    from knurlogic.engine import arch
     assert arch.required_modules("qwen3_5_moe_text") == ["qwen3_5_moe", "qwen3_5"]
 
 
@@ -89,7 +89,7 @@ def test_registering_a_subclass_pulls_its_base_first():
     """A vendored subclass must never land on a site-packages base: that
     silently mixes two versions of the arithmetic, which is the exact failure
     this package exists to end. It passed once only by alphabetical luck."""
-    from knurlogic.register import _with_dependencies
+    from knurlogic.engine.register import _with_dependencies
     order = _with_dependencies(["qwen3_5_moe"])
     assert order.index("qwen3_5") < order.index("qwen3_5_moe")
 
@@ -97,7 +97,7 @@ def test_registering_a_subclass_pulls_its_base_first():
 def test_pins_are_loaded_and_make_doctor_say_ok():
     """A pin is only written after a model generated a token with clean
     provenance, so an 'ok' from doctor means 'it ran', not 'it imports'."""
-    from knurlogic import arch
+    from knurlogic.engine import arch
     if not arch.PINNED_SHA256:
         return  # nothing validated on this checkout yet
     for row in arch.check("qwen3_5_moe_text"):
@@ -108,8 +108,8 @@ def test_pins_are_loaded_and_make_doctor_say_ok():
 def test_package_architectures_are_found_and_hosted_correctly():
     """glm5_next is an mlx_vlm PACKAGE, not an mlx_lm file. Registered under
     the wrong parent its eight relative sibling imports cannot resolve."""
-    from knurlogic import arch
-    from knurlogic.register import available, source_for
+    from knurlogic.engine import arch
+    from knurlogic.engine.register import available, source_for
     if "glm5_next" not in available():
         return
     src, is_pkg = source_for("glm5_next")
@@ -121,17 +121,13 @@ def test_package_architectures_are_found_and_hosted_correctly():
 #: Directories that ARE engine code, and are allowed to import one. Each is
 #: here for a stated reason, not because a glob happened to miss it.
 ENGINE_SIDE = {
-    # Vendored architecture files. They ARE mlx-lm model code -- that is the
-    # whole point of vendoring them.
-    "architectures",
-    # The drafting head and its loops. Every line is arithmetic on an mlx
-    # model; there is no version of this that does not import mlx. What is
-    # kept out is the FRONT DOOR: `knurlogic.mtp` answers what an artifact
-    # has using nothing but the stdlib, and there is a test for that below.
-    "mtp",
-    # A standalone meta-path finder that crosses a spawn boundary. stdlib
-    # only, and tested as such; listed so nobody assumes it is exempt.
-    "overrides",
+    # THE FOLDER IS THE RULE. engine/ holds the seam, the drafting code, the
+    # vendored architectures and the tools that act on them -- every line
+    # that is arithmetic on an mlx model or edits mlx-lm's namespace. Nothing
+    # outside it may import mlx. It used to be a list of files and folders,
+    # each exempted with a reason; now that the layout says it, the list is
+    # one entry.
+    "engine",
 }
 
 
@@ -153,8 +149,6 @@ def test_mlx_lives_behind_the_engine_seam():
         rel = f.relative_to(src)
         if rel.parts[0] in ENGINE_SIDE:
             continue
-        if f.name in ("engine.py", "vendor.py"):
-            continue  # the seam itself; vendor shells out to another env
         # Parsed, not grepped: a regex over the text matched prose -- "exo
         # imports them from mlx-lm directly" inside a string -- and the
         # answer to a false alarm must never be rewording the sentence.
@@ -184,7 +178,7 @@ def test_asking_what_an_artifact_has_does_not_load_an_engine():
 
     out = subprocess.run(
         [sys.executable, "-c",
-         "import sys; import knurlogic.mtp as m; m.find_head; "
+         "import sys; import knurlogic.engine.mtp as m; m.find_head; "
          "print(any(k == 'mlx' or k.startswith('mlx.') or "
          "k.startswith('mlx_') for k in sys.modules))"],
         capture_output=True, text=True, timeout=120)
@@ -248,8 +242,7 @@ def test_the_model_shape_may_tighten_but_not_loosen_yet():
     """Sizing from the model loosens the knob for small-expert families. That
     direction has not been measured, and being wrong there is an OOM -- so it
     is refused, and the refusal is said out loud rather than hidden."""
-    from knurlogic.resolve import (decode_chunk_for,
-                                   expert_transient_bytes_per_unit)
+    from knurlogic.tuning.resolve import decode_chunk_for, expert_transient_bytes_per_unit
     small = _family(2560, 640)
     headroom = 2 * GIB
     per, _ = expert_transient_bytes_per_unit(small)

@@ -27,7 +27,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import loaded, status, web, wired
+from knurlogic.machine import loaded, status, wired
+from knurlogic.interfaces import web
 
 #: Children started from the page: {port: (Popen, artifact path)}.
 _CHILDREN: dict = {}
@@ -100,7 +101,7 @@ def _status_fn(_n=0):
     exo's RAM figures and a plain gauge, which is still the machine and still
     its real occupancy.
     """
-    from . import cluster
+    from knurlogic.interfaces import cluster
 
     mm = None
     try:
@@ -225,7 +226,7 @@ def _spawn(path: str, port: int, tune: str = "balanced",
     if rec and _is_our_server(int(rec["pid"])):
         return {"error": f"port {port} is already serving "
                          f"{rec.get('artifact')} (pid {rec['pid']})"}
-    cmd = [sys.executable, "-m", "knurlogic.cli", "serve", path,
+    cmd = [sys.executable, "-m", "knurlogic", "serve", path,
            "--port", str(port), "--tune", tune]
     # Settings chosen at LAUNCH, which for most of these is the only moment
     # they can be chosen: they are read at import and compiled into kernel

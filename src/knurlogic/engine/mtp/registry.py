@@ -124,14 +124,14 @@ def resolve(model, family: str | None = None) -> FamilySpec:
     raise KeyError(
         f"no MTP family registered for model_type {mt!r}; registered: "
         f"{sorted(FAMILIES)}. Adding one is a FamilySpec in "
-        f"knurlogic/mtp/registry.py plus a head module — read "
+        f"knurlogic/engine/mtp/registry.py plus a head module — read "
         f"that docstring.")
 
 
 # ------------------------------------------------------------------ builtins
 register(FamilySpec(
     name="qwen4_exp",
-    head="knurlogic.mtp.heads.qwen4_exp:MTPHead",
+    head="knurlogic.engine.mtp.heads.qwen4_exp:MTPHead",
     # The head drafts from the trunk activation that goes INTO the hyper-
     # connection mixer, i.e. the last thing before the final norm + lm_head.
     capture="hyper_connection_mixer",
@@ -164,7 +164,7 @@ register(FamilySpec(
 for _qwen35_name in ("qwen3_5", "qwen3_5_moe"):
     register(FamilySpec(
         name=_qwen35_name,
-        head="knurlogic.mtp.heads.qwen35:MTPHeadQwen35",
+        head="knurlogic.engine.mtp.heads.qwen35:MTPHeadQwen35",
         capture="norm",
         draft_cache="KVCache",
         sidecar_name="mtp-head-q6.safetensors",
@@ -196,7 +196,7 @@ for _qwen35_name in ("qwen3_5", "qwen3_5_moe"):
 for _glm_name in ("glm5_next", "glm5_next_text"):
     register(FamilySpec(
         name=_glm_name,
-        head="knurlogic.mtp.heads.glm5:MTPHeadGlm5",
+        head="knurlogic.engine.mtp.heads.glm5:MTPHeadGlm5",
         capture="norm",
         draft_cache="KVCache",
         sidecar_name="mtp-head-q6.safetensors",

@@ -486,16 +486,16 @@ def keeps_mtp_weights(model_type: str) -> bool | None:
     """
     import inspect
 
-    from .arch import required_modules
+    from knurlogic.engine.arch import required_modules
 
     mods = required_modules(model_type)
     if not mods:
         return None
     try:
-        from .register import source_for
+        from knurlogic.engine.register import source_for
         src_path, _is_pkg = source_for(mods[0])
         if src_path is None:
-            from .arch import locate
+            from knurlogic.engine.arch import locate
             _host, src_path = locate(mods[0])
         if src_path is None:
             return None
@@ -559,7 +559,7 @@ def load_draft_head(model_path: str):
     mlx-lm's `model*.safetensors` glob precisely so a directory carrying one
     still loads normally through the stock loader.
     """
-    from .mtp import find_head
+    from knurlogic.engine.mtp import find_head
 
     found = find_head(model_path)
     if found is None:
@@ -571,7 +571,7 @@ def load_draft_head(model_path: str):
         _DRAFT.update(on=False, why="model not loaded yet")
         return None
     try:
-        from .mtp.loop import load_mtp_head
+        from knurlogic.engine.mtp.loop import load_mtp_head
         head, spec = load_mtp_head(model, sidecar=found.path)
     except Exception as e:
         # A head that will not bind is a fact worth printing, not a crash:
@@ -605,7 +605,7 @@ def install_drafting(srv) -> bool:
 
     import threading
 
-    from .mtp.loop import mtp_stream_generate
+    from knurlogic.engine.mtp.loop import mtp_stream_generate
 
     local = threading.local()
     real_single = srv.ResponseGenerator._serve_single
@@ -665,7 +665,7 @@ def _install_batch_drafting(srv) -> None:
     """
     if getattr(srv.BatchGenerator, "_knurlogic", False):
         return
-    from .mtp.batch_generator import MTPBatchGenerator, tag_samplers
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator, tag_samplers
 
     tag_samplers(srv)
     real = srv.BatchGenerator

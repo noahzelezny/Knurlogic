@@ -11,9 +11,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import arch, wired
-from .artifact import Artifact
-from .resolve import resolve
+from knurlogic.engine import arch
+from knurlogic.machine import wired
+from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
 
@@ -77,7 +78,7 @@ def run(path: str, working_set_gib: float, profile: str,
     for w in r.warnings:
         print(f"\n  WARNING: {w}")
 
-    from . import engine, mtp
+    from knurlogic.engine import seam as engine, mtp
     m = mtp.status(a)
     if m.state != mtp.NONE:
         print("\nmtp        " + m.render())

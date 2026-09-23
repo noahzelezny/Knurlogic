@@ -11,9 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from knurlogic import settings as S, wired                 # noqa: E402
-from knurlogic.artifact import Artifact                    # noqa: E402
-from knurlogic.resolve import resolve                      # noqa: E402
+from knurlogic.tuning import settings as S
+from knurlogic.machine import wired
+from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
 
@@ -132,7 +133,7 @@ def test_a_live_knob_lands_on_the_loaded_runtime(monkeypatch):
     """Rebinding the module global is what makes 'no reload' true."""
     import sys
     import types
-    from knurlogic import engine
+    from knurlogic.engine import seam as engine
 
     fake = types.ModuleType("_fake_vq_runtime")
     fake._DECODE_CHUNK = 32
@@ -148,13 +149,13 @@ def test_a_live_knob_lands_on_the_loaded_runtime(monkeypatch):
 def test_a_restart_knob_is_reported_not_silently_skipped():
     """A panel that said 'applied' over a value that did not move would be
     the same lie as an env file sourced after the one that overwrites it."""
-    from knurlogic import engine
+    from knurlogic.engine import seam as engine
     out = engine.apply_live({"VQ_MOE_GEMMSEG_RTILE": "32"})
     assert "restart" in out["VQ_MOE_GEMMSEG_RTILE"]
 
 
 def test_the_cache_limit_uses_the_engines_live_setter():
-    from knurlogic import engine
+    from knurlogic.engine import seam as engine
     out = engine.apply_live({"VQLAB_CACHE_LIMIT_GB": "2.0"})
     assert "applied now" in out["VQLAB_CACHE_LIMIT_GB"] or \
         "no live setter" in out["VQLAB_CACHE_LIMIT_GB"]
@@ -164,8 +165,8 @@ def test_a_knob_the_bundled_runtime_never_reads_is_called_out(tmp_path):
     """Knurlogic emitted VQLAB_PREFILL_CHUNK for every artifact and not one
     bundled runtime on this machine reads it. A resolved setting that does
     nothing is the exact failure this package exists to prevent."""
-    from knurlogic.artifact import Artifact
-    from knurlogic.web import knob_reach
+    from knurlogic.machine.artifact import Artifact
+    from knurlogic.interfaces.web import knob_reach
     (tmp_path / "config.json").write_text('{"model_type":"x","model_file":"model.py"}')
     (tmp_path / "model.py").write_text(
         'import os\nC = os.environ.get("VQ_DECODE_CHUNK", "32")\n')
@@ -180,7 +181,7 @@ def test_a_knob_the_bundled_runtime_never_reads_is_called_out(tmp_path):
 
 def test_an_artifact_with_no_bundled_runtime_does_not_guess():
     """No runtime to ask is not the same as 'the knob does nothing'."""
-    from knurlogic.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact
     from pathlib import Path
     a = Artifact(path=Path("/nonexistent"), model_type="x", model_file=None,
                  bytes_on_disk=0, hidden_size=None, moe_intermediate_size=None)
@@ -195,7 +196,7 @@ def test_an_artifact_with_no_bundled_runtime_does_not_guess():
 # housekeeping. So the resolver emits whichever alias the target reads.
 
 def _artifact_reading(tmp_path, *names):
-    from knurlogic.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact
     (tmp_path / "config.json").write_text(
         '{"model_type":"x","model_file":"model.py","vq_linear":{"a":1},'
         '"hidden_size":4096,"moe_intermediate_size":1024}')
@@ -242,7 +243,7 @@ def test_an_engine_knob_is_emitted_even_when_the_runtime_ignores_it(tmp_path):
 def test_the_resolved_prompt_chunk_reaches_the_server_argv():
     """The bug this closes: the resolver explained a prompt chunk the server
     never saw, because it was an env var and the server takes argv."""
-    from knurlogic import engine
+    from knurlogic.engine import seam as engine
     argv = engine.server_argv("/m", "h", 1, settings={
         "prefill_step_size": 512, "prompt_concurrency": 1})
     assert argv[argv.index("--prefill-step-size") + 1] == "512"
@@ -250,7 +251,7 @@ def test_the_resolved_prompt_chunk_reaches_the_server_argv():
 
 
 def test_a_typed_flag_beats_the_resolver():
-    from knurlogic import engine
+    from knurlogic.engine import seam as engine
     argv = engine.server_argv("/m", "h", 1, settings={"prefill_step_size": 512},
                               extra=["--prefill-step-size", "4096"])
     assert argv.count("--prefill-step-size") == 1
@@ -261,7 +262,7 @@ def test_a_measured_family_width_is_used_and_a_tight_box_still_wins():
     """qwen3_5 measured 4096 (+115% prefill, no peak cost). A tight box caps
     it anyway: a measured width is a width that fit where it was measured."""
     from pathlib import Path
-    from knurlogic.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact
     a = Artifact(path=Path("/nonexistent"), model_type="qwen3_5",
                  model_file=None, bytes_on_disk=20 * GIB, hidden_size=4096,
                  moe_intermediate_size=1024, vq_other={})
@@ -275,7 +276,7 @@ def test_a_measured_family_width_is_used_and_a_tight_box_still_wins():
 
 def test_fast_never_narrows_below_the_measured_width():
     from pathlib import Path
-    from knurlogic.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact
     a = Artifact(path=Path("/nonexistent"), model_type="qwen3_5",
                  model_file=None, bytes_on_disk=20 * GIB, hidden_size=4096,
                  moe_intermediate_size=1024, vq_other={})
@@ -287,7 +288,7 @@ def test_with_no_bundled_runtime_it_falls_back_to_the_published_name():
     """A guess should fail towards the 24 artifacts that exist, not towards
     the name that is planned."""
     from pathlib import Path
-    from knurlogic.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact
     a = Artifact(path=Path("/nonexistent"), model_type="x", model_file=None,
                  bytes_on_disk=70 * GIB, hidden_size=4096,
                  moe_intermediate_size=1024, vq_other={"vq_linear": {"a": 1}})
@@ -308,7 +309,7 @@ def test_knobs_are_tiered_by_who_would_reach_for_one():
 def test_unmeasured_knobs_are_named_but_never_given_a_default(tmp_path):
     """The runtime's own defaults apply. Inventing one for a knob nobody has
     measured is how the frozen 2048*4096*2 constant happened."""
-    from knurlogic.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact
     (tmp_path / "config.json").write_text(
         '{"model_type":"x","model_file":"model.py","vq_linear":{"a":1}}')
     (tmp_path / "model.py").write_text(
@@ -338,8 +339,8 @@ def test_a_dial_offers_only_positions_that_were_measured():
 def test_the_cache_dial_stops_at_what_the_box_can_hold(tmp_path):
     """A control that lets you pick a setting the resolver would refuse is a
     control that lies. The cap is headroom, and it says so."""
-    from knurlogic import web
-    from knurlogic.artifact import Artifact
+    from knurlogic.interfaces import web
+    from knurlogic.machine.artifact import Artifact
     (tmp_path / "config.json").write_text(
         '{"model_type":"x","model_file":"model.py","vq_linear":{"a":1},'
         '"hidden_size":4096,"moe_intermediate_size":1024}')
@@ -363,7 +364,7 @@ def test_an_artifact_may_declare_its_own_knobs(tmp_path):
     """Kernel work stays with whoever packs the kernels. When a packer
     declares them in config.json, that beats anything scanned or hard coded
     here -- the artifact is the record of what shipped."""
-    from knurlogic.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact
     (tmp_path / "config.json").write_text(
         '{"model_type":"x","model_file":"model.py",'
         '"knobs":{"VQ_D8_ROWS_TG":{"default":"8","values":[4,8,16],'
@@ -380,7 +381,7 @@ def test_an_artifact_may_declare_its_own_knobs(tmp_path):
 # were downloaded and do not run.
 
 def test_an_artifact_declaring_mtp_is_recognised(tmp_path):
-    from knurlogic.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact
     (tmp_path / "config.json").write_text(
         '{"model_type":"qwen4_exp_text","mtp":{"mtp_num_hidden_layers":1}}')
     assert Artifact.load(tmp_path).has_mtp
@@ -392,13 +393,13 @@ def test_an_artifact_declaring_mtp_is_recognised(tmp_path):
 def test_the_architecture_is_asked_whether_it_keeps_them():
     """Read off the module that will actually run, not assumed: the answer
     is a line in sanitize(), and it is 'no'."""
-    from knurlogic import engine
+    from knurlogic.engine import seam as engine
     assert engine.keeps_mtp_weights("qwen4_exp_text") is False
 
 
 def test_an_unknown_architecture_says_unknown_not_no():
     """'Could not find the module' is not 'it discards them'."""
-    from knurlogic import engine
+    from knurlogic.engine import seam as engine
     assert engine.keeps_mtp_weights("not_a_real_model_type") is None
 
 
@@ -409,7 +410,7 @@ def test_an_explicit_set_beats_the_resolver(monkeypatch, tmp_path):
     source, so launch is the only moment they can be chosen at all. "The
     resolver decides and you may not" is the wrong default for the one place
     where choosing is possible."""
-    from knurlogic import serve
+    from knurlogic.interfaces import serve
 
     assert serve._parse_sets(["A=1", "B = two"]) == {"A": "1", "B": "two"}
 
@@ -417,7 +418,7 @@ def test_an_explicit_set_beats_the_resolver(monkeypatch, tmp_path):
 def test_a_set_without_a_value_is_refused():
     import pytest
 
-    from knurlogic import serve
+    from knurlogic.interfaces import serve
     with pytest.raises(SystemExit, match="KEY=VALUE"):
         serve._parse_sets(["JUST_A_NAME"])
 
@@ -429,7 +430,7 @@ def test_preview_reads_and_sets_nothing(tmp_path, monkeypatch):
     import json
     import os
 
-    from knurlogic import web
+    from knurlogic.interfaces import web
 
     d = tmp_path / "m"
     d.mkdir()
@@ -451,7 +452,7 @@ def test_preview_says_which_knobs_are_launch_only(tmp_path):
     `restart` cannot be changed afterwards at all."""
     import json
 
-    from knurlogic import web
+    from knurlogic.interfaces import web
 
     d = tmp_path / "m"
     d.mkdir()

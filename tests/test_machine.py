@@ -6,7 +6,7 @@ labels every node with `system_profiler` output is the same shape as a
 version check run with bare `python3` inside a loop over env paths -- every
 iteration answers for the local box.
 """
-from knurlogic import status, wired
+from knurlogic.machine import status, wired
 
 
 def test_a_modern_identifier_cannot_name_the_product():

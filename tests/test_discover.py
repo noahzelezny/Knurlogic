@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from knurlogic import discover                              # noqa: E402
+from knurlogic.machine import discover
 
 GIB = 1 << 30
 
@@ -92,7 +92,7 @@ def test_an_empty_machine_says_where_it_looked(tmp_path):
 def test_exo_model_dirs_follow_exos_own_resolution():
     """On macOS exo's data home is ~/.exo, not XDG -- the default that went
     missing and hid a whole external store."""
-    from knurlogic.discover import exo_model_dirs
+    from knurlogic.machine.discover import exo_model_dirs
     assert exo_model_dirs({}, "darwin", "/h") == [Path("/h/.exo/models")]
     assert exo_model_dirs({}, "linux", "/h") == [
         Path("/h/.local/share/exo/models")]
