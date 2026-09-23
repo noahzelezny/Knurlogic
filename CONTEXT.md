@@ -19,10 +19,16 @@ fills the gaps between them.
 
 ## If you are an agent
 
-Use the MCP (`knurlogic mcp`, stdio). Nine tools; `tools/list` describes each.
-The order that answers "can I run X here, how, and is it safe now":
+Use the MCP (`knurlogic mcp`, stdio). Eleven tools; `tools/list` describes
+each. The loop that answers "can I run X, how, and is it safe now":
 
-    models  ->  fit  ->  settings  ->  ready  ->  load  ->  state  ->  unload
+    one box      models -> fit -> settings -> ready -> load  -> state -> unload
+    the cluster  models -> ready -> place -> state (poll) -> unplace
+
+Never place or load while `ready` is false, and never wait on silence:
+every server and exo instance in `state` has a phase -- downloading,
+loading (layers), warming, serving, failed, or stalled, which means stop
+waiting and read the advice.
 
 Every answer says how it was measured; a refusal is an answer, an error sets
 `isError`. `deps` answers "why does this work in exo and not here".
