@@ -64,6 +64,49 @@ DECODE_CHUNK_HEADROOM_DIVISOR = 8
 PREFILL_CHUNK_DEFAULT = 2048
 PREFILL_CHUNK_TIGHT = 512
 
+# Per-FAMILY prompt chunk, keyed by config.json `model_type`. Carried from the
+# exo fork (worker/engines/mlx/constants.py, PREFILL_STEP_SIZE_BY_FAMILY),
+# where it was keyed by a model-id substring; model_type is the same fact
+# without guessing from a name. An entry is a MEASUREMENT with its run:
+#
+#   glm5_next  2048. 34 deltanet layers hold per-token recurrent
+#              intermediates (16.8 MB/layer) across a chunk, so the transient
+#              scales with chunk x state. 4096 OOMed BOTH boxes of a 224 GB
+#              pair on the 135 GB 3.6bpw (2026-09-01) -- but before the
+#              per-chunk eval fix. 512 after it was over-caution costing 4x
+#              the chunks; 2048 is the post-fix value.
+#   qwen3_5    4096. MEASURED, not the default leaking through: 2026-06-19
+#   qwen3_5_moe      A/B, +115% prefill tok/s at 11k tokens vs a 512 cap, no
+#              peak-memory cost, bit-identical output. Hybrid attention, 45/60
+#              layers recurrent, so there is no chunk x seq^2 transient to
+#              cap. It carries ArraysCache entries, which is why any "has SSM
+#              caches -> small chunk" heuristic catches it wrongly: a blanket
+#              SSM->512 on 2026-09-02 made its prefill 8x the chunks.
+#
+# Not here means PREFILL_CHUNK_DEFAULT. A tight box still wins over the table:
+# a measured width is a width that fit on the box it was measured on.
+PREFILL_CHUNK_BY_FAMILY = {
+    "glm5_next": 2048,
+    "qwen3_5": 4096,
+    "qwen3_5_moe": 4096,
+}
+
+
+def prefill_chunk_for(model_type: str) -> tuple:
+    """(width, source) for a family: the table's measured value, or the
+    default and the fact that nothing was measured."""
+    if model_type in PREFILL_CHUNK_BY_FAMILY:
+        return PREFILL_CHUNK_BY_FAMILY[model_type], f"measured for {model_type}"
+    return PREFILL_CHUNK_DEFAULT, "default: no measured width for this family"
+
+
+# How many prompts the engine prefills in ONE forward. mlx-lm defaults to 8,
+# and its prefill transient is per row -- eight long prompts arriving together
+# is eight chunk transients at once, the spike a single-prompt test never
+# shows. Arithmetic, not a measurement: on a tight box it is 1; elsewhere the
+# engine's own default stands, because nothing here has measured better.
+PROMPT_CONCURRENCY_TIGHT = 1
+
 # Freed MLX buffers pile up invisibly -- they do not appear in "active
 # memory." Biggest single win in vqlab's memory playbook, zero measured speed
 # cost at 26k-token prefill.
@@ -170,6 +213,10 @@ KNOB_DOC = {
         "how many prompt tokens are processed at once",
         "token-identical at every width, so it is purely a memory knob -- "
         "narrowing costs nothing but peak."),
+    "KNURLOGIC_PROMPT_CONCURRENCY": (
+        "how many prompts are prefilled together in one forward",
+        "the prefill transient is per prompt, so 8 arriving together is 8x "
+        "the spike a one-prompt test shows. 1 on a tight box."),
     "VQLAB_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
         "biggest single win in the memory playbook, no measured speed cost at "
@@ -215,7 +262,35 @@ KNOB_ALIASES = {
     "cache_limit_gb": ("KNURLOGIC_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB"),
     "prefill_chunk": ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"),
     "decode_chunk": ("VQ_DECODE_CHUNK",),
+    "prompt_concurrency": ("KNURLOGIC_PROMPT_CONCURRENCY",),
 }
+
+
+# --- which knobs the ENGINE consumes ----------------------------------------
+# Most knobs are read by an artifact's bundled runtime. These three are not:
+# mlx-lm's server takes the prompt chunk and concurrency as argv, and the
+# buffer cache is a process-global mlx setting. Emitting them as environment
+# variables and stopping there is how they were, for a while, settings that
+# did nothing -- the resolver explained a prompt chunk the server never saw.
+# `engine.serve` is the only thing that turns these into argv and calls.
+ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
+                                      "prompt_concurrency")
+                          for n in KNOB_ALIASES[k])
+
+
+def engine_settings(env: dict) -> dict:
+    """{prefill_step_size, prompt_concurrency, cache_limit_gb} from a
+    resolved environment, whichever alias it was emitted under. Absent means
+    the engine's own default stands."""
+    out = {}
+    for logical, key, cast in (("prefill_chunk", "prefill_step_size", int),
+                               ("prompt_concurrency", "prompt_concurrency", int),
+                               ("cache_limit_gb", "cache_limit_gb", float)):
+        for name in KNOB_ALIASES[logical]:
+            if name in env:
+                out[key] = cast(float(env[name]))
+                break
+    return out
 
 #: When no bundled runtime can be asked, emit this one. The LAST alias, not
 #: the first: the legacy name is the one with 24 artifacts behind it, and a
@@ -243,7 +318,7 @@ def default_alias(logical: str) -> str:
 #             the frozen 2048*4096*2 constant happened.
 KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "KNURLOGIC_CACHE_LIMIT_GB",
                    "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_PREFILL_CHUNK",
-                   "VQLAB_PREFILL_CHUNK")
+                   "VQLAB_PREFILL_CHUNK", "KNURLOGIC_PROMPT_CONCURRENCY")
 
 
 def knob_tier(name: str) -> str:
@@ -264,6 +339,11 @@ def knob_tier(name: str) -> str:
 # because 128 -> 32 is 1.37x on every rung measured and nothing above it was
 # ever better; the control should stop where the evidence stops.
 KNOB_RANGE = {
+    # 4096 is the widest ever measured (qwen3_5); the table is where a wider
+    # one would have to be earned first.
+    "VQLAB_PREFILL_CHUNK": ([512, 1024, 2048, 4096], "tokens"),
+    "KNURLOGIC_PREFILL_CHUNK": ([512, 1024, 2048, 4096], "tokens"),
+    "KNURLOGIC_PROMPT_CONCURRENCY": ([1, 2, 4, 8], "prompts"),
     "VQ_DECODE_CHUNK": ([4, 8, 16, 32], ""),
     "VQLAB_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
                              "GiB"),

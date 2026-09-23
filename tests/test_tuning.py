@@ -171,8 +171,11 @@ def test_a_knob_the_bundled_runtime_never_reads_is_called_out(tmp_path):
         'import os\nC = os.environ.get("VQ_DECODE_CHUNK", "32")\n')
     a = Artifact.load(tmp_path)
     assert knob_reach(a, "VQ_DECODE_CHUNK", ("VQ_DECODE_CHUNK",))[0] == "live"
-    reach, why = knob_reach(a, "VQLAB_PREFILL_CHUNK", ())
+    reach, why = knob_reach(a, "VQ_MOE_GEMMSEG_RTILE", ())
     assert reach == "no-effect" and "never reads" in why
+    # The prompt chunk used to be the example here. It is not any more: the
+    # engine reads it as server argv, so the runtime ignoring it is moot.
+    assert knob_reach(a, "VQLAB_PREFILL_CHUNK", ())[0] == "restart"
 
 
 def test_an_artifact_with_no_bundled_runtime_does_not_guess():
@@ -218,13 +221,66 @@ def test_a_new_artifact_gets_the_new_name(tmp_path):
     assert "VQLAB_CACHE_LIMIT_GB" not in env
 
 
-def test_a_knob_no_alias_of_which_is_read_is_not_emitted_at_all(tmp_path):
+def test_a_runtime_only_knob_no_alias_of_which_is_read_is_not_emitted(tmp_path):
     """Emitting it anyway is theatre, and theatre is what made a prefill knob
     look resolved for months."""
+    a = _artifact_reading(tmp_path, "VQLAB_CACHE_LIMIT_GB")
+    r = resolve(a, 96 * GIB)
+    assert "VQ_DECODE_CHUNK" not in r.env
+    assert any("does nothing" in n for n in r.notes)
+
+
+def test_an_engine_knob_is_emitted_even_when_the_runtime_ignores_it(tmp_path):
+    """The prompt chunk is mlx-lm server argv. Whether the artifact's runtime
+    reads an env name for it is beside the point -- the engine does, so
+    dropping it would be the theatre, just the other way round."""
     a = _artifact_reading(tmp_path, "VQ_DECODE_CHUNK")
     r = resolve(a, 96 * GIB)
-    assert not any(k.endswith("PREFILL_CHUNK") for k in r.env)
-    assert any("does nothing" in n for n in r.notes)
+    assert S.engine_settings(r.env).get("prefill_step_size")
+
+
+def test_the_resolved_prompt_chunk_reaches_the_server_argv():
+    """The bug this closes: the resolver explained a prompt chunk the server
+    never saw, because it was an env var and the server takes argv."""
+    from knurlogic import engine
+    argv = engine.server_argv("/m", "h", 1, settings={
+        "prefill_step_size": 512, "prompt_concurrency": 1})
+    assert argv[argv.index("--prefill-step-size") + 1] == "512"
+    assert argv[argv.index("--prompt-concurrency") + 1] == "1"
+
+
+def test_a_typed_flag_beats_the_resolver():
+    from knurlogic import engine
+    argv = engine.server_argv("/m", "h", 1, settings={"prefill_step_size": 512},
+                              extra=["--prefill-step-size", "4096"])
+    assert argv.count("--prefill-step-size") == 1
+    assert argv[argv.index("--prefill-step-size") + 1] == "4096"
+
+
+def test_a_measured_family_width_is_used_and_a_tight_box_still_wins():
+    """qwen3_5 measured 4096 (+115% prefill, no peak cost). A tight box caps
+    it anyway: a measured width is a width that fit where it was measured."""
+    from pathlib import Path
+    from knurlogic.artifact import Artifact
+    a = Artifact(path=Path("/nonexistent"), model_type="qwen3_5",
+                 model_file=None, bytes_on_disk=20 * GIB, hidden_size=4096,
+                 moe_intermediate_size=1024, vq_other={})
+    roomy = S.engine_settings(resolve(a, 96 * GIB).env)
+    tight = S.engine_settings(resolve(a, 24 * GIB).env)
+    assert roomy["prefill_step_size"] == 4096
+    assert "prompt_concurrency" not in roomy
+    assert tight["prefill_step_size"] == S.PREFILL_CHUNK_TIGHT
+    assert tight["prompt_concurrency"] == 1
+
+
+def test_fast_never_narrows_below_the_measured_width():
+    from pathlib import Path
+    from knurlogic.artifact import Artifact
+    a = Artifact(path=Path("/nonexistent"), model_type="qwen3_5",
+                 model_file=None, bytes_on_disk=20 * GIB, hidden_size=4096,
+                 moe_intermediate_size=1024, vq_other={})
+    env = resolve(a, 96 * GIB, tune="fast").env
+    assert S.engine_settings(env)["prefill_step_size"] == 4096
 
 
 def test_with_no_bundled_runtime_it_falls_back_to_the_published_name():

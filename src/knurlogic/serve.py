@@ -201,9 +201,17 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     elif head is not None:
         print("\ndrafting   head present, disabled by --no-draft")
 
+    # The knobs the ENGINE reads -- argv and a process-global mlx call --
+    # from the environment as it finally stands, overrides included.
+    from .settings import engine_settings
+    eng = engine_settings({**r.env, **forced})
+    if eng:
+        print("engine    " + "  ".join(f"{k}={v}" for k, v in sorted(eng.items())))
+
     return engine.serve(str(a.path), host, port,
                         executes_artifact_code=bool(a.model_file),
-                        extra=passthrough, routes=routes, draft=draft)
+                        extra=passthrough, routes=routes, draft=draft,
+                        settings=eng)
 
 
 def _parse_sets(pairs) -> dict:
