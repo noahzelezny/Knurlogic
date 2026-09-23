@@ -364,14 +364,17 @@ def test_g5_no_image_is_byte_identical_to_main(server, model):
     main = Harness(server, model)
     try:
         want = main.post(body)
-        want_seeded = main.post(dict(body, seed=3))       # sequential path
+        # A seed sends mlx-lm down its SEQUENTIAL path; sampled, so a
+        # request rerouted to the batch engine (which ignores the seed)
+        # would answer differently.
+        want_seeded = main.post(dict(body, seed=3, temperature=0.9))
     finally:
         main.close()
     install(server)
     ours = Harness(server, model)
     try:
         got = ours.post(body)
-        got_seeded = ours.post(dict(body, seed=3))
+        got_seeded = ours.post(dict(body, seed=3, temperature=0.9))
     finally:
         ours.close()
     assert want[0] == got[0] == 200
