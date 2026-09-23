@@ -55,6 +55,30 @@ def test_a_gguf_model_is_found_and_reported_as_not_servable(tmp_path):
     assert "safetensors" in g.why
 
 
+def test_an_embedder_is_found_but_not_listed_as_a_servable_chat_model(tmp_path):
+    """`models/fit` (P5, vision v2) must stop listing non-chat models --
+    embedders, whisper, siglip, background removers -- as servable chat
+    models. This has an mlx runtime and safetensors weights, so before this
+    check it was `servable=True` and showed up in the picker next to real
+    chat models, where loading it produces a server that 400s on the first
+    /v1/chat/completions."""
+    _mlx_model(tmp_path / "store" / "bge-embedder", model_type="bert")
+    rows = discover.find(include_defaults=False, extra=[tmp_path / "store"])
+    e = next(r for r in rows if r.name == "bge-embedder")
+    assert e.servable is False
+    assert "not a chat model" in e.why
+
+
+def test_a_chat_model_type_stays_servable(tmp_path):
+    """The mutation check for the test above: break the filter (treat every
+    model_type as chat-servable) and this must go red, which it does --
+    confirmed by hand while writing the fix, restored here."""
+    _mlx_model(tmp_path / "store" / "some-chat-model", model_type="qwen3_5")
+    rows = discover.find(include_defaults=False, extra=[tmp_path / "store"])
+    c = next(r for r in rows if r.name == "some-chat-model")
+    assert c.servable is True and c.why == ""
+
+
 def test_it_does_not_descend_into_an_artifact(tmp_path):
     """A model directory holds shards, subfolders and sometimes a nested
     snapshot; walking into it would report one model several times."""
