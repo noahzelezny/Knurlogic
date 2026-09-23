@@ -254,9 +254,39 @@ def resolve_cluster(artifact: Artifact, budget, profile: str = "v1.5",
             f"has {total/GIB:.1f} GiB of working set -- it does not fit even "
             f"sharded, before any runtime overhead. More nodes, or a smaller "
             f"rung.")
+    _ring_consistent(c)
+    for r in c.nodes.values():
+        r.env.update(S.exo_env(r.env))
     for name, r in c.nodes.items():
         c.warnings += [f"{name}: {w}" for w in r.warnings]
     return c
+
+
+def _ring_consistent(c: ClusterResolution) -> None:
+    """One prompt chunk on every rank: the smallest any node needs.
+
+    Per-node resolution is right for per-node memory and wrong for this. A
+    pipeline's ranks process the same chunks, so a tight node's narrow chunk
+    has to be everyone's -- and a rank that disagrees is a desync, not a
+    tuning difference.
+    """
+    want = {n: S.engine_settings(r.env).get("prefill_step_size")
+            for n, r in c.nodes.items()}
+    got = [v for v in want.values() if v]
+    if not got:
+        return
+    ring = min(got)
+    for name, r in c.nodes.items():
+        for alias in S.KNOB_ALIASES["prefill_chunk"]:
+            if alias in r.env:
+                r.env[alias] = str(ring)
+        if want[name] and want[name] != ring:
+            r.notes.append(
+                f"prompt chunk {ring}, not the {want[name]} this node alone "
+                f"would take: it is ring-wide, and every rank must match")
+    if len(set(got)) > 1:
+        c.notes.append(f"prompt chunk {ring} on every rank (the tightest "
+                       f"node's); ranks that disagree desync")
 
 
 def _resolve_one(artifact: Artifact, working_set_bytes: int,

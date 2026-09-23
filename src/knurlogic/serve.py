@@ -270,7 +270,7 @@ def main(argv=None) -> int:
         import shlex
         return run_cluster(a.artifact, a.host, a.port, a.profile, a.exo,
                            a.node, a.launch, shlex.split(a.exo_cmd), a.local,
-                           a.tune)
+                           a.tune, draft=not a.no_draft)
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile, rest,
                a.tune, _parse_sets(a.sets), draft=not a.no_draft)
 

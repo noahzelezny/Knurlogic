@@ -382,7 +382,7 @@ def _parse_node(spec: str) -> Node:
 
 def run(path: str, host: str, port: int, profile: str, exo_url: str,
         nodes: list, do_launch: bool, exo_cmd: list, local: str | None,
-        tune: str = "balanced") -> int:
+        tune: str = "balanced", draft: bool = True) -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"cluster   exo at {exo_url}")
@@ -414,6 +414,16 @@ def run(path: str, host: str, port: int, profile: str, exo_url: str,
 
     declared_ws = {n.name: n.working_set_bytes for n in declared}
     c = resolve_cluster(a, budget, profile=profile, tune=tune)
+    # Drafting in exo is EXO_MTP, and the fork requires it identical on
+    # every node. A packed head is used because it is there -- the same rule
+    # `serve` follows -- and `--no-draft` is the one way to say otherwise.
+    from . import mtp
+    head = mtp.find_head(a.path)
+    if head is not None:
+        for r in c.nodes.values():
+            r.env["EXO_MTP"] = "1" if draft else "0"
+        c.notes.append(f"drafting {'on' if draft else 'off (--no-draft)'} "
+                       f"on every node: {head.describe()}")
     for n in c.notes:
         print(f"  note: {n}")
     for w in c.warnings:
