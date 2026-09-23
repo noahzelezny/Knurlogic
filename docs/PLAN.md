@@ -226,6 +226,32 @@ which. In short:
 * **Drive it.** Every MCP bug this session was found by using the MCP as a
   client, not by reading it; the tests passed throughout.
 
+## Release (target: about a week, with the paper)
+
+The HF model cards will point at knurlogic, so every RELEASED model must
+run from `pip install knurlogic` -- five families: qwen3_5_moe, qwen3_5,
+qwen4_exp, glm5_next, gemma4.
+
+* **Vision is standard, and owned.** Checked 2026-09-23: all 20 released
+  rungs carry `vision_config` and their vision weights (333 tensors in a
+  `model-vision-graft.safetensors` sidecar for the Qwen families and one
+  gemma; inside the main shards for GLM and gemma e4b). mlx-vlm 0.6.17
+  implements all five families. So: vendor the vision tower and image
+  processor per family with provenance (GLM's seven mlx-vlm siblings come
+  with it, and mlx-vlm stops being a dependency); an image-capable serve
+  path beside the text one (text requests keep drafting); a gate per family
+  of one text answer and one image answer.
+* **The page opens a chat on the loaded model**, with image attach.
+* **`models` stops listing non-chat models** (an embedder, whisper, siglip,
+  a background remover) as servable.
+* **Credit the interface**: README and THIRD-PARTY.md -- design inspired by
+  exo's dashboard (Apache-2.0).
+* **Rewrite history once before making the repo public**, to drop the one
+  remaining Co-Authored-By trailer (the first commit, `reserve the name`).
+  File contents are unchanged; commit ids change, so any clone re-clones and
+  ids quoted in old commit messages go stale.
+* Then: HF card instructions point at knurlogic.
+
 ## Next: replace exo (direction set 2026-09-22)
 
 `pip install knurlogic` and nothing else, including clustering. Verified:
