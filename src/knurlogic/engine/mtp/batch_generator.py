@@ -307,7 +307,12 @@ class MTPBatchGenerator(BatchGenerator):
         it sits at the same offset (otherwise a restore could not draft)."""
         trunk = [c.extract(i) for c in self._batch.cache]
         h = self._batch.hcache
-        if h is not None and hasattr(h, "extract"):
+        # A row that never drafted (an image row, Phase A) never advanced
+        # its head cache, so it has no head to store -- and in a batch where
+        # NO row drafted the batched head cache holds no keys at all, which
+        # `extract` does not survive (found by G10).
+        if (h is not None and hasattr(h, "extract")
+                and self._batch.drafts[i]):
             head = h.extract(i)
             # Compare against a cache that HAS a position. On a hybrid model
             # the first layers are recurrent (ArraysCache, no offset), and
