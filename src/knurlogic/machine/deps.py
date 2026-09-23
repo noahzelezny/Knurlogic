@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 
 #: What each piece is, where the fork lives, and what it carries that
-#: upstream does not. One home for this; docs/DEPENDENCIES.md points here.
+#: upstream does not. One home for this; the README and CONTEXT.md point here.
 PIECES = {
     "mlx": {
         "role": "array framework and Metal kernels; jaccl is its RDMA ring",
@@ -85,7 +85,7 @@ PIECES = {
         "needed_for": "multi-node. One box needs no exo at all.",
         "portable": True,
         "why_not_ported": "MTP, batch MTP and the prefill table are ported "
-                          "(knurlogic.mtp, settings.PREFILL_CHUNK_BY_FAMILY). "
+                          "(knurlogic.engine.mtp, tuning.settings.PREFILL_CHUNK_BY_FAMILY). "
                           "Placement, sharding and networking stay in exo: "
                           "knurlogic wraps exo rather than rebuilding it.",
     },

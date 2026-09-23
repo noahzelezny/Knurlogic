@@ -17,7 +17,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Noah Zelezny" }]
 
-# mlx-lm is the engine (see knurlogic/engine.py, the one module that knows
+# mlx-lm is the engine (see knurlogic/engine/seam.py, the one module that knows
 # so). Floor is 0.31.3: that is the oldest PyPI release measured to load a
 # VQ artifact's bundled `model_file` and generate coherent text with the
 # vendored architectures. No upper pin -- newer releases are the thing this

@@ -9,6 +9,9 @@ defaults are tuned for other shapes. Getting either wrong produces the same
 stack trace, so nobody can tell which one bit them.
 
 Knurlogic resolves both, and says which is wrong when something will not run.
+It serves a person through a page and an agent through MCP, from the same
+answers — so Claude or Codex can see what is loaded, what fits, which
+settings a model needs and why, and load it without guessing.
 
 ```
 $ knurlogic doctor ./Qwen3.8-Flash-Next-VQ-3.2bpw --working-set-gib 96
@@ -51,9 +54,25 @@ no blockers found
   them into `sys.modules` without writing to `site-packages`, and reports
   `OK` / `UNPINNED` / `DRIFTED` / `MISSING`.
 * **A ledger of settings, encoded as defaults.** Every constant in
-  `settings.py` carries the measurement that established it. That is the
-  actual asset — the numbers cost runs, and nobody should have to rediscover
-  them.
+  `tuning/settings.py` carries the measurement that established it — the
+  prefill chunk per model family, the cache limit, the VQ kernel flags. That
+  is the actual asset: the numbers cost runs, several of them cost an
+  out-of-memory, and nobody should have to rediscover them. Each one reaches
+  whatever actually reads it — the engine's argv, a bundled runtime, or exo
+  under exo's own names.
+
+* **Multi-token-prediction drafting, which no stock runtime does.** mlx-lm
+  has no MTP path and neither does upstream exo. A drafting head packed
+  beside the weights is used because it is there — on a single request and
+  inside a batch alike, token-identical to decoding without it. `--no-draft`
+  is the troubleshooting switch.
+
+* **An agent interface.** `knurlogic mcp` speaks MCP on stdio: `models`,
+  `fit`, `settings`, `ready`, `load`, `state`, `unload`, `drafting`, `deps`.
+  `fit` and `settings` and `load` compute against one memory budget, so an
+  agent is never told a model fits with room to spare and then handed the
+  settings for a roomier box. `load` refuses what will not fit, with no
+  override, because it is arithmetic.
 
 * **A server, and a cluster front end.** `knurlogic serve <artifact>` is an
   adapter over mlx-lm's OpenAI endpoint with the settings resolved and set
@@ -84,22 +103,58 @@ no blockers found
 
 ## What it is not
 
-It does not detect machines, fit models, or score them. Memory budget is an
-input. It does not implement distributed inference; it wraps something that
-does. Scope stays narrow on purpose.
+It does not build or score models — vqlab builds, knurlogic runs what it
+built. It does not implement distributed inference; it wraps exo, which
+does. It never sets the wired limit or deletes a model; it tells you the
+command. Scope stays narrow on purpose.
+
+## What it stands on
+
+    one box       mlx, mlx-lm (>= 0.31.3). mlx-vlm for multimodal and GLM-5.3.
+    many boxes    exo as well, in its own interpreter. knurlogic never
+                  requires it and never starts it unless asked (--launch).
+
+Several of these have forks that carry fixes upstream does not, and a fix
+present in one interpreter is absent from another with nothing saying so.
+`knurlogic deps` asks each interpreter and reads every verdict off the fix
+itself rather than a version string:
+
+```
+$ knurlogic deps
+knurlogic  /opt/anaconda3/bin/python3  (python 3.12.2)
+  mlx      0.31.2                           jaccl self-heal: no -- stock ring
+  mlx-lm   0.31.3                           stock
+  mlx-vlm  0.5.0                            knurlogic's vendored glm5_next ...
+                                            cannot load here: missing ...
+exo  /opt/anaconda3/envs/exo/bin/python3.13  (python 3.13.12)
+  mlx      0.32.0.dev20260622+4c8d2590      jaccl self-heal: YES (fork)
+  mlx-lm   0.31.9                           fork (carries qwen4_exp)
+  exo      0.3.69                           fork (carries MTP)
+```
+
+What each fork carries, and why it is or is not ported, has one home:
+`PIECES` in `src/knurlogic/machine/deps.py`.
 
 ## Status
 
-The resolver, the architecture check, `doctor`, `smoke`, `vendor` and
-`serve` work, verified from a clean venv on stock PyPI mlx-lm 0.31.3. Four
-architectures are pinned by actual token generation; glm5_next is vendored
-and unpinned, because no box here fits the smallest GLM rung.
+The resolver, `doctor`, `smoke`, `vendor`, `serve`, `ui` and `mcp` work.
+Four architectures are pinned by actual token generation; glm5_next is
+vendored and unpinned, because no box here fits the smallest GLM rung.
 
-`serve --cluster` resolves per node and aggregates status across a real
-two-node exo. What it applies is the environment of a node it launches —
-a node it merely attaches to gets its settings *reported*, because nothing
-here can reach into another machine's process, and printing settings that
-did not take effect is how a run ends up measuring the same value twice.
+Drafting runs on a single request and in a batch; the batch path is gated on
+token identity against mlx-lm's own generator, and has not yet been timed on
+real weights through knurlogic (the exo fork measured the same loop at 23.1
+vs 22 tok/s, identical tokens). An agent has loaded, used and unloaded a
+model through the MCP, across two sessions.
+
+`serve --cluster` resolves per node, gives every rank one prompt chunk, and
+hands exo its settings under exo's own names. What it applies is the
+environment of a node it launches — a node it merely attaches to gets its
+settings *reported*, because nothing here can reach into another machine's
+process.
+
+`docs/PLAN.md` holds what is measured and what is next; `CONTEXT.md` is the
+map.
 
 ---
 
