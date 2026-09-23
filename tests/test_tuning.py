@@ -464,3 +464,12 @@ def test_preview_says_which_knobs_are_launch_only(tmp_path):
     reach = {k["name"]: k["reach"] for k in doc["knobs"]}
     assert any(v == "restart" for v in reach.values())
     assert all(k["reach_why"] for k in doc["knobs"])
+
+
+def test_a_family_spelled_with_text_still_gets_its_measured_width():
+    """A qwen3_5 27B reports model_type `qwen3_5_text`. Measured end to end
+    through the MCP: it got the 2048 default instead of qwen3_5's 4096."""
+    assert S.prefill_chunk_for("qwen3_5_text")[0] == 4096
+    assert S.prefill_chunk_for("qwen3_5_moe_text")[0] == 4096
+    assert S.prefill_chunk_for("glm5_next_text")[0] == 2048
+    assert S.prefill_chunk_for("somebody_else")[0] == S.PREFILL_CHUNK_DEFAULT
