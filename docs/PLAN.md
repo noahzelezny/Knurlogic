@@ -226,6 +226,39 @@ which. In short:
 * **Drive it.** Every MCP bug this session was found by using the MCP as a
   client, not by reading it; the tests passed throughout.
 
+## OPEN, and it may move published numbers: the Flash-Next PLE hash seed
+
+Found 2026-09-23 during the vision integration (P1), confirmed new by the
+vqlab session. qwen4_exp's n-gram PLE hashes n-grams with per-layer
+multipliers derived from a seed. Three sources disagree:
+
+    Flash-Next checkpoint buffer layer_multipliers   seed 1234's values
+      (model.layers.1: [23703573157769, 20109073645365, 8052911324071])
+    mlx-vlm 0.6.17 qwen4_exp/config.py:55             seed 1234
+    the maintainer's mlx-lm fork (vqlab's fit/score env),       seed 0, and the
+      exo (same fork), knurlogic (vendored copy)      stored buffer unused
+
+The official configs declare no seed, so the fork uses 0 and recomputes
+`_mults`, ignoring the checkpoint's buffer. The "seed 1234" in vqlab's
+cards is the k-means fit seed -- a coincidence, not evidence.
+
+Implication, NOT yet measured: every fork run of Flash-Next looks up PLE
+rows with a different hash than the checkpoint carries. VQ-vs-teacher KL
+stays internally consistent (both ran seed 0), but the teacher reference
+may be off, and a stock mlx-vlm user gets different PLE rows than the
+artifacts were fitted under.
+
+Before anything changes:
+1. The decisive A/B, on the bf16 TEACHER: ppl with seed 0 vs with the
+   checkpoint's layer_multipliers, same text, one process per arm. If the
+   checkpoint's hash wins, teacher caches rebuild and every published
+   Flash KL number moves (vqlab's instrument; the maintainer's call).
+2. Record which default each shipping path hits (above) -- a downloader-
+   divergence question as well as a reference-quality one.
+3. knurlogic keeps its current default until 1 has run and the maintainer decides.
+   The fix, if confirmed: use the checkpoint's stored multipliers (the
+   artifact is the authority), not a guessed seed.
+
 ## Release (target: about a week, with the paper)
 
 The HF model cards will point at knurlogic, so every RELEASED model must
