@@ -144,15 +144,35 @@ PERFORMANCE_DEFAULTS = {
 
 # Numerics-active flags (F103/F105): family-local, up to +0.97% ppl.
 # v1.5 = both off (bit-exact vs the published arc6 runtime); v2 = both on.
-# An artifact shipping UNCHANGED weights gets v1.5 -- there is no quality gain
-# to offset a numerics regression, however small. See vqlab
-# docs/RUNTIME-SHIP-PLAN.md.
+#
+# A RUNG'S NUMERICS ARE THE RUNG'S (design D1). What a released rung computes
+# with is what its PUBLISHED model.py defaults to, and that is not uniform:
+# Flash-Next 2.1 and Qwen3.6-35B-A3B 3.8/4.6/5.4 shipped v2, the rest v1.5 or
+# the arc6-era runtime with no flags at all (docs/design/vq-rung-knobs.md,
+# read off the Hub 2026-09-23). This table used to be applied to EVERY VQ
+# artifact with v1.5 as the default, which forced the v2 rungs' two flags
+# to 0 -- a numerics change nobody asked for, on exactly the rungs whose
+# weights were fitted under v2. So the resolver now takes a rung's numerics
+# from the rung (NUMERICS_SOURCES, in order) and applies a profile ONLY when
+# a person names one. See vqlab docs/RUNTIME-SHIP-PLAN.md for the profiles.
 NUMERICS_FLAGS = ("VQ_GEMMSEG_BF16IO", "VQ_DECODE_BF16IO")
 
 RUNTIME_PROFILES = {
     "v1.5": {f: "0" for f in NUMERICS_FLAGS},
     "v2": {f: "1" for f in NUMERICS_FLAGS},
 }
+
+# Where a rung's numerics come from when no profile is asked for, first
+# match wins, per flag:
+#   declared   config.json `knobs` -- the artifact's own record, which
+#              Artifact.declared_knobs() already ranks above everything
+#   published  engine/vq/rungs.json -- read from the rung's PUBLISHED
+#              model.py (never an ~/.exo copy: those drifted)
+#   bundled    the default in the artifact's own model.py, for a rung not
+#              in rungs.json (a local build, a new upload)
+# Nothing found means nothing is emitted: the runtime's own default stands,
+# and the note says so rather than inventing one.
+NUMERICS_SOURCES = ("declared", "published", "bundled")
 
 
 # --- the tuning axis, and what it is NOT allowed to do ----------------------
@@ -244,9 +264,11 @@ KNOB_DOC = {
                         "F56 arm 1.5: measured NEGATIVE, -1.8-2%. Off."),
     "VQ_GEMMSEG_BF16IO": ("bf16 IO in the segmented GEMM",
                           "F103/F105 numerics-active: family-local, up to "
-                          "+0.97% ppl. Off at v1.5 (bit-exact vs shipped)."),
+                          "+0.97% ppl. Each rung keeps what it shipped: on "
+                          "for the v2 rungs, off for v1.5."),
     "VQ_DECODE_BF16IO": ("bf16 IO on the decode path",
-                         "F103/F105 numerics-active. Off at v1.5."),
+                         "F103/F105 numerics-active. Each rung keeps what "
+                         "it shipped."),
 }
 
 
