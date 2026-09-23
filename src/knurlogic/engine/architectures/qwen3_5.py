@@ -12,11 +12,12 @@ from .base import (
     BaseModelArgs,
     create_attention_mask,
     create_ssm_mask,
+    scaled_dot_product_attention,
 )
 from .cache import ArraysCache, KVCache
 from .gated_delta import gated_delta_update
 from .pipeline import PipelineMixin
-from .qwen3_next import Qwen3NextAttention as Attention
+from .qwen3_next import Qwen3NextAttention
 from .qwen3_next import Qwen3NextMLP as MLP
 from .qwen3_next import Qwen3NextRMSNormGated as RMSNormGated
 from .qwen3_next import Qwen3NextSparseMoeBlock as SparseMoeBlock
@@ -82,6 +83,116 @@ class TextModelArgs(BaseModelArgs):
             )
             self.rope_theta = self.rope_parameters.get("rope_theta", 100000.0)
             self.rope_scaling = self.rope_parameters
+
+
+# --- MRoPE (knurlogic, vision P1) ---------------------------------------------
+# Qwen's positions are 3-D (t, h, w) wherever an image sits in the key; the
+# text path this file was vendored with knows only 1-D offsets. Two ways in,
+# both optional; with neither, every call below reaches the vendored code
+# unchanged (tests/goldens/qwen_g5_text.npz holds that to main's numbers):
+#
+#   position_ids [3, B, L]  explicit positions of these L tokens: a prefill
+#                           chunk holding image tokens, sliced from
+#                           Family.positions over the whole key (design D4)
+#   rope_delta   [B] | int  text after an image: every axis is offset + delta
+#                           (mlx-vlm qwen3_5/language.py:2022-2052). Three
+#                           equal axes ARE 1-D rope at a shifted offset, so it
+#                           runs through the same fast kernel as text; only
+#                           image chunks take the explicit path.
+#
+# The interleave is mlx-vlm 0.6.17 rope_utils.py:512-517 (MIT, Copyright (c)
+# 2025 Prince Canuma), with its non-kernel apply (:655-690): frequency i
+# takes axis 1 (h) when i % 3 == 1 and i < 3 * section[1], axis 2 (w) when
+# i % 3 == 2 and i < 3 * section[2], else axis 0 (t). Half-split pairing, as
+# nn.RoPE with traditional=False. qwen4_exp.py applies the same selector to
+# its own rope helper (it may not import this file: engine/arch.py gives it
+# no dependency on qwen3_5).
+
+
+def mrope_selector(mrope_section, freq_dim: int) -> list:
+    sel = [0] * freq_dim
+    for axis in (1, 2):
+        for i in range(axis, min(mrope_section[axis] * 3, freq_dim), 3):
+            sel[i] = axis
+    return sel
+
+
+def apply_mrope(x: mx.array, position_ids: mx.array, dims: int, base: float,
+                mrope_section) -> mx.array:
+    """x [B, H, L, D], position_ids [3, B, L]: rotate x[..., :dims], each
+    frequency's angle from its section's axis. float32 angles and rotation
+    (as mlx-vlm's compute_dtype), cast back to x's dtype."""
+    half = dims // 2
+    inv_freq = base ** (-mx.arange(0, dims, 2, dtype=mx.float32) / dims)
+    sel = mx.array(mrope_selector(mrope_section, half), dtype=mx.int32)
+    pos = mx.take(position_ids, sel, axis=0)                  # [half, B, L]
+    angle = pos.transpose(1, 2, 0).astype(mx.float32) * inv_freq
+    cos = mx.concatenate([mx.cos(angle)] * 2, axis=-1)[:, None]
+    sin = mx.concatenate([mx.sin(angle)] * 2, axis=-1)[:, None]
+    xr = x[..., :dims].astype(mx.float32)
+    rot = mx.concatenate([-xr[..., half:], xr[..., :half]], axis=-1)
+    xr = (xr * cos + rot * sin).astype(x.dtype)
+    if x.shape[-1] == dims:
+        return xr
+    return mx.concatenate([xr, x[..., dims:]], axis=-1)
+
+
+class Attention(Qwen3NextAttention):
+    """mlx-lm's Qwen3NextAttention plus the two optional position inputs;
+    with neither, the parent's __call__ runs untouched."""
+
+    def __init__(self, args):
+        super().__init__(args)
+        rp = args.rope_parameters or {}
+        self.mrope_section = list(rp.get("mrope_section", [11, 11, 10]))
+        self.rotary_dims = int(self.head_dim * args.partial_rotary_factor)
+        self.rope_base = args.rope_theta
+
+    def __call__(
+        self,
+        x: mx.array,
+        mask: Optional[mx.array] = None,
+        cache: Optional[Any] = None,
+        position_ids: Optional[mx.array] = None,
+        rope_delta: Optional[Any] = None,
+    ) -> mx.array:
+        if position_ids is None and rope_delta is None:
+            return super().__call__(x, mask, cache)
+        B, L, D = x.shape
+
+        q_proj_output = self.q_proj(x)
+        queries, gate = mx.split(
+            q_proj_output.reshape(B, L, self.num_attention_heads, -1), 2, axis=-1
+        )
+        gate = gate.reshape(B, L, -1)
+
+        keys, values = self.k_proj(x), self.v_proj(x)
+
+        queries = self.q_norm(queries).transpose(0, 2, 1, 3)
+        keys = self.k_norm(keys.reshape(B, L, self.num_key_value_heads, -1)).transpose(
+            0, 2, 1, 3
+        )
+        values = values.reshape(B, L, self.num_key_value_heads, -1).transpose(
+            0, 2, 1, 3
+        )
+
+        if position_ids is not None:
+            queries = apply_mrope(queries, position_ids, self.rotary_dims,
+                                  self.rope_base, self.mrope_section)
+            keys = apply_mrope(keys, position_ids, self.rotary_dims,
+                               self.rope_base, self.mrope_section)
+        else:
+            shifted = (cache.offset if cache is not None else 0) + rope_delta
+            queries = self.rope(queries, offset=shifted)
+            keys = self.rope(keys, offset=shifted)
+        if cache is not None:
+            keys, values = cache.update_and_fetch(keys, values)
+
+        output = scaled_dot_product_attention(
+            queries, keys, values, cache=cache, scale=self.scale, mask=mask
+        )
+        output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
+        return self.o_proj(output * mx.sigmoid(gate))
 
 
 class GatedDeltaNet(nn.Module):
@@ -231,11 +342,17 @@ class DecoderLayer(nn.Module):
         x: mx.array,
         mask: Optional[mx.array] = None,
         cache: Optional[Any] = None,
+        position_ids: Optional[mx.array] = None,
+        rope_delta: Optional[Any] = None,
     ) -> mx.array:
         if self.is_linear:
             r = self.linear_attn(self.input_layernorm(x), mask, cache)
-        else:
+        elif position_ids is None and rope_delta is None:
             r = self.self_attn(self.input_layernorm(x), mask, cache)
+        else:
+            r = self.self_attn(self.input_layernorm(x), mask, cache,
+                               position_ids=position_ids,
+                               rope_delta=rope_delta)
         h = x + r
         out = h + self.mlp(self.post_attention_layernorm(h))
         return out
@@ -269,6 +386,8 @@ class Qwen3_5TextModel(PipelineMixin, nn.Module):
         inputs: mx.array,
         cache: Optional[Any] = None,
         input_embeddings: Optional[mx.array] = None,
+        position_ids: Optional[mx.array] = None,
+        rope_delta: Optional[Any] = None,
     ) -> mx.array:
         if input_embeddings is not None:
             hidden_states = input_embeddings
@@ -292,9 +411,16 @@ class Qwen3_5TextModel(PipelineMixin, nn.Module):
         if pipeline_rank < pipeline_size - 1:
             hidden_states = mx.distributed.recv_like(hidden_states, (pipeline_rank + 1))
 
-        for layer, c in zip(self.pipeline_layers, cache):
-            mask = ssm_mask if layer.is_linear else fa_mask
-            hidden_states = layer(hidden_states, mask=mask, cache=c)
+        if position_ids is None and rope_delta is None:
+            for layer, c in zip(self.pipeline_layers, cache):
+                mask = ssm_mask if layer.is_linear else fa_mask
+                hidden_states = layer(hidden_states, mask=mask, cache=c)
+        else:
+            for layer, c in zip(self.pipeline_layers, cache):
+                mask = ssm_mask if layer.is_linear else fa_mask
+                hidden_states = layer(hidden_states, mask=mask, cache=c,
+                                      position_ids=position_ids,
+                                      rope_delta=rope_delta)
 
         # Send to the next process in the pipeline
         if pipeline_rank != 0:
@@ -330,8 +456,14 @@ class TextModel(nn.Module):
         inputs: mx.array,
         cache: Optional[Any] = None,
         input_embeddings: Optional[mx.array] = None,
+        position_ids: Optional[mx.array] = None,
+        rope_delta: Optional[Any] = None,
     ) -> mx.array:
-        out = self.model(inputs, cache, input_embeddings=input_embeddings)
+        if position_ids is None and rope_delta is None:
+            out = self.model(inputs, cache, input_embeddings=input_embeddings)
+        else:
+            out = self.model(inputs, cache, input_embeddings=input_embeddings,
+                             position_ids=position_ids, rope_delta=rope_delta)
         if self.args.tie_word_embeddings:
             out = self.model.embed_tokens.as_linear(out)
         else:
@@ -415,9 +547,21 @@ class Model(nn.Module):
         inputs: mx.array,
         cache=None,
         input_embeddings: Optional[mx.array] = None,
+        position_ids: Optional[mx.array] = None,
+        rope_delta: Optional[Any] = None,
     ):
+        """position_ids [3, B, L] and rope_delta ([B] array or int) are the
+        vision path's (MRoPE, above); a text call passes neither and runs the
+        vendored code unchanged. position_ids wins when both are given."""
+        if position_ids is None and rope_delta is None:
+            return self.language_model(
+                inputs, cache=cache, input_embeddings=input_embeddings
+            )
+        if position_ids is not None:
+            rope_delta = None
         return self.language_model(
-            inputs, cache=cache, input_embeddings=input_embeddings
+            inputs, cache=cache, input_embeddings=input_embeddings,
+            position_ids=position_ids, rope_delta=rope_delta,
         )
 
     @property
