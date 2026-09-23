@@ -115,6 +115,11 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
     return out
 
 
+#: Knobs `engine.serve` turns into argv or an mlx call, so they are real
+#: whether or not an artifact's bundled runtime reads them.
+ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "prompt_concurrency")
+
+
 def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
     """Set a knob under the name THIS artifact reads, or not at all.
 
@@ -133,6 +138,12 @@ def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
         if name in src:
             r.env[name] = str(value)
             return name
+    if logical in ENGINE_CONSUMED:
+        # The runtime does not read it, but the engine does: set it under the
+        # name `settings.engine_settings` looks for, and it reaches argv.
+        name = S.default_alias(logical)
+        r.env[name] = str(value)
+        return name
     r.notes.append(
         f"{logical} not emitted: this artifact's bundled runtime reads none "
         f"of {list(names)}, so any value would be a setting that does nothing")
@@ -308,8 +319,14 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             f"caps context length on a full box")
 
     tight = working_set_bytes > 0 and headroom < S.TIGHT_HEADROOM_GIB * GIB
-    prefill = S.PREFILL_CHUNK_TIGHT if tight else S.PREFILL_CHUNK_DEFAULT
+    family, family_why = S.prefill_chunk_for(artifact.model_type)
+    prefill = min(family, S.PREFILL_CHUNK_TIGHT) if tight else family
     asked = t.get("VQLAB_PREFILL_CHUNK")
+    if asked is not None and tune == "fast":
+        # `fast` means spend headroom, never "narrower than was measured".
+        asked = max(asked, family)
+    if family != S.PREFILL_CHUNK_DEFAULT:
+        r.notes.append(f"prompt chunk {family} {family_why}")
     if asked is not None and asked != prefill:
         # A tight box wins over the axis. `fast` cannot spend headroom that
         # is not there, and saying so is the difference between a knob and a
@@ -322,6 +339,11 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
         else:
             prefill = asked
     emit(r, artifact, "prefill_chunk", prefill)
+    if tight or tune == "safe":
+        emit(r, artifact, "prompt_concurrency", S.PROMPT_CONCURRENCY_TIGHT)
+        r.notes.append(
+            "one prompt prefilled at a time: the transient is per prompt, so "
+            "the engine's default of 8 together is 8x the spike")
     if prefill < S.PREFILL_CHUNK_DEFAULT:
         r.notes.append(
             "prompt chunk narrowed: token-identical at every width, so this "
