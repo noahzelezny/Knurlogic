@@ -135,6 +135,26 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # when a model will not load. Advice only -- knurlogic never sets it.
         snap["wired"] = wired.advise(a.bytes_on_disk)
         snap["drafting"] = engine.drafting_status()
+        # `served_vision()` is the P0-frozen way to say whether the served
+        # model sees images at all (critique C4); the image store's own
+        # size is P4's to expose (P4 owns the load path that creates it, and
+        # the contract carries no accessor for a live store instance).
+        # `engine.vision.store` is read defensively, by attribute, so this
+        # keeps working -- reporting no size rather than crashing status --
+        # whichever way P4 lands the accessor, or if it has not yet.
+        from knurlogic.engine import vision as _vision
+        spec = _vision.served_vision()
+        image_store = None
+        get_store = getattr(_vision, "served_image_store", None)
+        if callable(get_store):
+            try:
+                store = get_store()
+                if store is not None:
+                    image_store = store.stats()
+            except Exception:
+                image_store = None
+        snap["vision"] = {"served": spec.to_json() if spec else None,
+                          "image_store": image_store}
         text = status.render_cluster(snap)
         if snap["wired"].get("known"):
             text += "\n\n" + wired.render(snap["wired"])

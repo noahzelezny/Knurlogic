@@ -33,6 +33,48 @@ def _text(s: str) -> tuple:
     return s.encode(), "text/plain; charset=utf-8"
 
 
+def anthropic_images_to_openai(content) -> list:
+    """Anthropic Messages `content` blocks -> OpenAI `content` parts.
+
+    `interfaces/messages.py` translates a Claude-shaped request onto the
+    engine's OpenAI surface (`serve.py`'s `messages_fn`), and until now that
+    translation dropped image blocks on the floor -- text only. An Anthropic
+    image block is `{"type": "image", "source": {"type": "base64",
+    "media_type": "...", "data": "..."}}` (or `{"type": "url", "url": ...}`,
+    which the engine's own image loader refuses -- P0's `images.decode`
+    does not fetch http(s), and this function does not either: it only
+    reshapes the block, `served_vision`'s caller does the fetching-or-not).
+    OpenAI's chat surface wants `{"type": "image_url",
+    "image_url": {"url": "data:<media_type>;base64,<data>"}}`.
+
+    Anything already OpenAI-shaped, or any block this function does not
+    recognise as an Anthropic image, passes through unchanged -- this is a
+    shim for ONE block type, not a general content-block rewriter, and a
+    text block silently dropped would be a worse bug than one image block
+    left in a shape the engine already refuses with a clear error.
+    """
+    if not isinstance(content, list):
+        return content
+    out = []
+    for block in content:
+        if not isinstance(block, dict):
+            out.append(block)
+            continue
+        if block.get("type") == "image" and isinstance(block.get("source"), dict):
+            src = block["source"]
+            if src.get("type") == "base64" and src.get("data"):
+                media = src.get("media_type") or "image/png"
+                out.append({"type": "image_url",
+                            "image_url": {"url": f"data:{media};base64,{src['data']}"}})
+                continue
+            if src.get("type") == "url" and src.get("url"):
+                out.append({"type": "image_url",
+                            "image_url": {"url": src["url"]}})
+                continue
+        out.append(block)
+    return out
+
+
 def _connect_doc(artifact) -> dict:
     """How to point a client here -- the panel exo gets right."""
     from knurlogic.interfaces import connect
@@ -71,6 +113,7 @@ def models_document(serving: str = "", ttl: float = 60.0):
         import time
 
         from knurlogic.machine import discover
+        from knurlogic.engine.vision import registry as vision_registry
         now = time.time()
         if _MODELS["rows"] is None or now - _MODELS["at"] > ttl:
             try:
@@ -85,6 +128,11 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 "size_bytes": f.bytes_on_disk, "model_type": f.model_type,
                 "is_vq": f.is_vq, "servable": f.servable, "why": f.why,
                 "mtp": bool(f.extra.get("mtp_head")),
+                # A family EXISTING for model_type, not whether this
+                # particular config.json has a vision_config -- that needs
+                # `registry.build`, which only runs on load (chat-ui spec
+                # 3.5/picker "VISION tag"). Good enough for the picker.
+                "vision": vision_registry.has_family(f.model_type),
                 "serving": bool(serving) and (f.name == serving
                                               or str(f.path) == serving),
             })
@@ -108,13 +156,25 @@ def loaded_document(ttl: float = 4.0):
         import time
 
         from knurlogic.machine import loaded
+        from knurlogic.engine.vision import served_vision
         now = time.time()
         if _LOADED["doc"] is None or now - _LOADED["at"] > ttl:
             try:
-                _LOADED["doc"] = loaded.survey()
+                doc = loaded.survey()
             except Exception as e:
-                _LOADED["doc"] = {"resident": [], "runtimes": [],
-                                  "bytes_resident": 0, "error": str(e)}
+                doc = {"resident": [], "runtimes": [],
+                       "bytes_resident": 0, "error": str(e)}
+            # What the SERVED model sees, read fresh every time regardless
+            # of the survey's own cache path -- a load/unload changes this
+            # the moment it happens (P0 critique C4: P4 sets it, P5 reads
+            # it), and the chat panel's attach button gates on this exact
+            # field (chat-ui spec 3.1).
+            try:
+                spec = served_vision()
+                doc["vision"] = spec.to_json() if spec else None
+            except Exception:
+                doc["vision"] = None
+            _LOADED["doc"] = doc
             _LOADED["at"] = now
         return _LOADED["doc"]
     return handler
