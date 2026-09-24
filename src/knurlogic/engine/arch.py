@@ -44,36 +44,28 @@ from pathlib import Path
 #: choosing the host per artifact is still an open question.
 from knurlogic.engine.serve import HOST_PACKAGES
 
-#: Which host a module must be registered UNDER. This is not cosmetic: a
-#: module's relative imports resolve against its registered parent, and
-#: glm5_next reaches for eight siblings (..cache, ..base, ..mla, ..mlp,
-#: ..gated_delta, ..rope_utils, ..deepseek_v32.language,
-#: ..deepseek_v4.hyper_connection). Registered under the wrong parent it
-#: cannot import at all.
-ARCH_HOST = {"glm5_next": "mlx_vlm"}
+# THE FAMILY MAPS are built from each family's manifest (engine/families/),
+# the one home for what a family is; nothing here is hand-kept.
+from knurlogic.engine import families as _families
+
+_MAPS = _families.build_maps()
+
+#: Which host a module must be registered UNDER. Not cosmetic: a module's
+#: relative imports resolve against its registered parent.
+ARCH_HOST = _MAPS["arch_host"]
 
 
 def host_for(module: str) -> str:
     return ARCH_HOST.get(module, "mlx_lm")
 
-#: model_type (from config.json) -> the module that must exist.
-#: model_type strings are suffixed `_text` on multimodal configs.
-ARCH_FOR_MODEL_TYPE = {
-    "qwen4_exp_text": "qwen4_exp",
-    "qwen4_exp": "qwen4_exp",
-    "qwen3_5_text": "qwen3_5",
-    "qwen3_5": "qwen3_5",
-    "qwen3_5_moe_text": "qwen3_5_moe",   # subclasses qwen3_5
-    "qwen3_5_moe": "qwen3_5_moe",
-    "gemma4_text": "gemma4_text",
-    "gemma4": "gemma4",                   # wraps gemma4_text
-    "glm5_next_text": "glm5_next",
-    "glm5_next": "glm5_next",
-}
+#: model_type (from config.json) -> the module that must exist. Multimodal
+#: configs spell the text half with a `_text` suffix; every spelling is
+#: listed in the family's manifest.
+ARCH_FOR_MODEL_TYPE = _MAPS["arch_for_model_type"]
 
 #: Modules that inherit another's arithmetic. A drift in the base reaches
 #: every artifact of the subclass, which is how one file came to cover 11.
-ARCH_DEPENDS_ON = {"qwen3_5_moe": ["qwen3_5"], "gemma4": ["gemma4_text"]}
+ARCH_DEPENDS_ON = _MAPS["arch_depends_on"]
 
 def _load_pins() -> dict:
     """Digests recorded by `knurlogic smoke --pin` on a clean pass.

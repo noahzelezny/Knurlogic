@@ -14,6 +14,19 @@ MANIFEST = {
                                     "of a 224 GB pair on the 3.6bpw "
                                     "(2026-09-01, before the per-chunk eval "
                                     "fix); 2048 is the post-fix value"),
+            # The head is upstream `layers.45`: a plain-residual DeepSeek-
+            # style block (NoPE MLA + DSA indexer + 288-expert MoE + its own
+            # shared_head.norm) -- see heads/glm5.py for why it is NOT the
+            # trunk's hc DecoderLayer. capture="norm": the final-norm INPUT
+            # is the mean-collapsed (B, S, D) hidden that hnorm/eh_proj
+            # consume. draft_cache is vestigial: the head class provides
+            # make_draft_cache() (CacheList(main-KV, indexer-KV)).
+            # cache_semantics="reassign": check_snapshot_semantics True on
+            # the loaded 2.7bpw trunk (M4, 2026-09-02).
+            # Measured in vqlab on one box, not on a cluster: acceptance
+            # 0.8516 pooled (12 prompts x 128 tokens, q6 head, 2.7bpw, M4,
+            # 2026-09-02); 1.05x end to end WITHOUT the absorbed-MLA shim
+            # (glm5_shim.py), whose effect is unmeasured.
             "head": dict(
                 # the VLM wrapper's config says glm5_next, the bound
                 # LanguageModel's TextConfig says glm5_next_text

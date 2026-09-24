@@ -64,44 +64,33 @@ DECODE_CHUNK_HEADROOM_DIVISOR = 8
 PREFILL_CHUNK_DEFAULT = 2048
 PREFILL_CHUNK_TIGHT = 512
 
-# Per-FAMILY prompt chunk, keyed by config.json `model_type`. Carried from the
-# exo fork (worker/engines/mlx/constants.py, PREFILL_STEP_SIZE_BY_FAMILY),
-# where it was keyed by a model-id substring; model_type is the same fact
-# without guessing from a name. An entry is a MEASUREMENT with its run:
-#
-#   glm5_next  2048. 34 deltanet layers hold per-token recurrent
-#              intermediates (16.8 MB/layer) across a chunk, so the transient
-#              scales with chunk x state. 4096 OOMed BOTH boxes of a 224 GB
-#              pair on the 135 GB 3.6bpw (2026-09-01) -- but before the
-#              per-chunk eval fix. 512 after it was over-caution costing 4x
-#              the chunks; 2048 is the post-fix value.
-#   qwen3_5    4096. MEASURED, not the default leaking through: 2026-06-19
-#   qwen3_5_moe      A/B, +115% prefill tok/s at 11k tokens vs a 512 cap, no
-#              peak-memory cost, bit-identical output. Hybrid attention, 45/60
-#              layers recurrent, so there is no chunk x seq^2 transient to
-#              cap. It carries ArraysCache entries, which is why any "has SSM
-#              caches -> small chunk" heuristic catches it wrongly: a blanket
-#              SSM->512 on 2026-09-02 made its prefill 8x the chunks.
-#
-# Not here means PREFILL_CHUNK_DEFAULT. A tight box still wins over the table:
-# a measured width is a width that fit on the box it was measured on.
-PREFILL_CHUNK_BY_FAMILY = {
-    "glm5_next": 2048,
-    "qwen3_5": 4096,
-    "qwen3_5_moe": 4096,
-}
+# Per-ARCHITECTURE prompt chunk: a measurement with its run, kept in each
+# family's manifest (engine/families/<family>/__init__.py, `prefill_chunk`)
+# beside the rest of what that family is. Carried from the exo fork
+# (PREFILL_STEP_SIZE_BY_FAMILY), where it was keyed by a model-id substring.
+# Not measured means PREFILL_CHUNK_DEFAULT. A tight box still wins over a
+# measured width: it is a width that fit on the box it was measured on.
+def _measured_widths() -> dict:
+    from knurlogic.engine import families
+    return families.build_maps()["prefill_chunk"]
+
+
+#: architecture -> (width, evidence), from each family's manifest.
+PREFILL_CHUNK_MEASURED = _measured_widths()
+PREFILL_CHUNK_BY_FAMILY = {k: v[0] for k, v in PREFILL_CHUNK_MEASURED.items()}
 
 
 def prefill_chunk_for(model_type: str) -> tuple:
-    """(width, source) for a family: the table's measured value, or the
-    default and the fact that nothing was measured."""
+    """(width, source) for a family: the manifest's measured value with its
+    evidence, or the default and the fact that nothing was measured."""
     # Through the architecture map, because configs spell one family several
     # ways -- a qwen3_5 27B reports `qwen3_5_text` -- and a miss here quietly
     # hands a measured family the unmeasured default.
     from knurlogic.engine.arch import ARCH_FOR_MODEL_TYPE
     family = ARCH_FOR_MODEL_TYPE.get(model_type, model_type)
-    if family in PREFILL_CHUNK_BY_FAMILY:
-        return PREFILL_CHUNK_BY_FAMILY[family], f"measured for {family}"
+    if family in PREFILL_CHUNK_MEASURED:
+        width, why = PREFILL_CHUNK_MEASURED[family]
+        return width, f"measured for {family}: {why}"
     return PREFILL_CHUNK_DEFAULT, "default: no measured width for this family"
 
 

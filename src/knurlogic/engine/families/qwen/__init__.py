@@ -3,11 +3,29 @@ the 35B-A3B (qwen3_5_moe, subclasses qwen3_5), and Qwen3.8-Flash-Next
 (qwen4_exp). One vision tower for all three; two MTP heads.
 """
 
+# Prompt chunk 4096 -- MEASURED, not the default leaking through: an A/B on
+# 2026-06-19 gave +115% prefill tok/s at 11k tokens vs a 512 cap, no
+# peak-memory cost, bit-identical output. Hybrid attention, 45/60 layers
+# recurrent, so there is no chunk x seq^2 transient to cap. It carries
+# ArraysCache entries, which is why any "has SSM caches -> small chunk"
+# heuristic catches it wrongly: a blanket SSM->512 on 2026-09-02 made its
+# prefill 8x the chunks.
 _QWEN35_PREFILL = (4096, "measured 2026-06-19: +115% prefill tok/s at 11k "
                          "tokens vs a 512 cap, no peak-memory cost, "
                          "bit-identical output; 45/60 layers recurrent, so "
                          "no chunk x seq^2 transient to cap")
 
+# The Qwen3.5/3.8 head drafts from the activation going INTO the trunk's
+# final norm (one residual stream).
+#
+# cache_semantics="reassign" is load-bearing for SPEED. The trunk's cache
+# list is mostly recurrent (48 ArraysCache to 16 KVCache on the dense 27B,
+# 45 to 15 on the 397B); under "copy" every GatedDeltaNet state is
+# deep-copied ONCE PER SPECULATIVE STEP -- hundreds of MB per token, which
+# does not fail, it crawls (a 12-prompt run made no visible progress in 30
+# minutes). GatedDeltaNet reassigns its slots and mlx arrays are immutable,
+# so the cheap path is correct: caches.check_snapshot_semantics returned
+# True against a loaded 27B (2026-08-31).
 _QWEN35_HEAD = dict(
     head="knurlogic.engine.mtp.heads.qwen35:MTPHeadQwen35",
     capture="norm", draft_cache="KVCache",
@@ -36,7 +54,10 @@ MANIFEST = {
             "head": dict(
                 names=["qwen4_exp"],
                 head="knurlogic.engine.mtp.heads.qwen4_exp:MTPHead",
-                # the activation INTO the hyper-connection mixer
+                # the activation INTO the hyper-connection mixer, the last
+                # thing before the final norm + lm_head. Every qwen4_exp
+                # cache slot is REASSIGNED, never mutated (verified by
+                # caches.check_snapshot_semantics).
                 capture="hyper_connection_mixer", draft_cache="_AttnCache",
                 sidecar_name="mtp-head-q6.safetensors",
                 cache_semantics="reassign"),

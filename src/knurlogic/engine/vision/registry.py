@@ -1,7 +1,7 @@
 """model_type -> the family package that serves its images.
 
-FIXED STRINGS, SO NO PACKAGE EDITS THIS FILE. The table names modules that
-may not exist yet; P1-P3 each create theirs and it starts resolving. A
+FIXED STRINGS, SO NO PACKAGE EDITS THIS FILE. The table (built from the
+family manifests) names modules that may not exist yet; P1-P3 each create theirs and it starts resolving. A
 module that is not there means the capability is off (`build` -> None), so
 the packages land independently and a text-only install is the default.
 
@@ -17,15 +17,15 @@ from __future__ import annotations
 import importlib
 from typing import Any, Callable, Dict, Optional
 
-#: model_type (config.json top level) -> "module:attr". The attr is
+#: architecture module -> "module:attr", from each family's manifest
+#: (engine/families/). The attr is
 #: `build(model_path: str, text_model, config: dict) -> Family | None`.
-FAMILIES: Dict[str, str] = {
-    "qwen3_5": "knurlogic.engine.vision.qwen:build",
-    "qwen3_5_moe": "knurlogic.engine.vision.qwen:build",
-    "qwen4_exp": "knurlogic.engine.vision.qwen:build",
-    "gemma4": "knurlogic.engine.vision.gemma4:build",
-    "glm5_next": "knurlogic.engine.vision.glm5:build",
-}
+def _families() -> Dict[str, str]:
+    from knurlogic.engine import families
+    return families.build_maps()["vision"]
+
+
+FAMILIES: Dict[str, str] = _families()
 
 
 def resolve(target: str) -> Optional[Callable[..., Any]]:
