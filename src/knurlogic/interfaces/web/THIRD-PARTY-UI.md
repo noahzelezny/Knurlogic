@@ -22,5 +22,5 @@ Per exo's Apache License 2.0, this file records that the above pieces are
 derived from exo's dashboard source and carry its copyright; no NOTICE file
 changes were required by exo's own repository at the time of porting.
 
-See also `engine/architectures/THIRD-PARTY.md` for architecture-level
+See also `engine/families/*/architecture/THIRD-PARTY.md` for architecture-level
 attributions (a separate concern: model code, not UI).

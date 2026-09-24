@@ -19,9 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from knurlogic.engine.register import ARCH_DIR
-
-PROVENANCE = ARCH_DIR / "PROVENANCE.md"
+from knurlogic.engine import families
 
 
 def _sha256(p: Path) -> str:
@@ -65,7 +63,17 @@ def _dir_digest(d: Path) -> str:
     return h.hexdigest()
 
 
-def vendor(module: str, python: str, note: str, host: str) -> int:
+def vendor(module: str, python: str, note: str, host: str,
+           family: str) -> int:
+    """Copy `module` into engine/families/<family>/architecture/. The family
+    must be listed (engine/families/__init__.py) and its manifest must name
+    the module -- vendoring is part of adding a family, not a way around it."""
+    if family not in families.FAMILIES:
+        print(f"no family {family!r}; listed: {families.FAMILIES}",
+              file=sys.stderr)
+        return 2
+    ARCH_DIR = families.architecture_dir(family)
+    PROVENANCE = ARCH_DIR / "PROVENANCE.md"
     src_dir = _models_dir(python, host)
     flat, pkg = src_dir / f"{module}.py", src_dir / module
     is_pkg = pkg.is_dir() and (pkg / "__init__.py").is_file()
@@ -111,8 +119,9 @@ def vendor(module: str, python: str, note: str, host: str) -> int:
             f"- note: {note or '(none)'}\n")
     print(f"{module}: {'re-' if existed else ''}vendored from {src}")
     print(f"  {host} {ver}  sha256 {digest[:16]}...")
-    print(f"  -> add to PINNED_SHA256 in arch.py once validated")
-    print(f"  -> RECORD THE LICENSE in architectures/THIRD-PARTY.md: copied "
+    print(f"  -> `knurlogic smoke --pin` on a real artifact records the pin "
+          f"in {family}/architecture/pins.json")
+    print(f"  -> RECORD THE LICENSE in {family}/architecture/THIRD-PARTY.md: copied "
           f"source carries its project's terms with it")
     return 0
 
@@ -126,8 +135,10 @@ def main(argv=None) -> int:
                    help="why this env is the authoritative one")
     p.add_argument("--host", default="mlx_lm", choices=("mlx_lm", "mlx_vlm"),
                    help="package to take it FROM and register it UNDER")
+    p.add_argument("--family", required=True,
+                   help="the family folder it belongs to (engine/families/)")
     a = p.parse_args(argv)
-    return vendor(a.module, a.python, a.note, a.host)
+    return vendor(a.module, a.python, a.note, a.host, a.family)
 
 
 if __name__ == "__main__":

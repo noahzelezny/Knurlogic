@@ -58,7 +58,7 @@ which. In short:
                 handed to exo under exo's names, ring-consistent
       stays     placement, sharding, networking, jaccl deadline arming,
                 subnet pinning, KV-pool budget, VQ codebook sharding --
-                knurlogic wraps exo rather than rebuilding it
+                knurlogic is replacing it (see 'Next: replace exo')
     mlx-lm fork (exo-qwen4-exp)
       ported    the architectures, vendored and pinned by digest
     mlx fork (jaccl-selfheal)
@@ -374,6 +374,11 @@ rescored on the shipped v2 bundle. knurlogic reads knobs from the
 published Hub model.py, so nothing changes here.
 
 ## Release (target: about a week, with the paper)
+
+- Build release wheels from a FRESH clone (or `rm -rf build` first):
+  setuptools reuses build/lib and never drops deleted files -- a wheel
+  built here on 2026-09-24 still carried the pre-move architectures/ and
+  seam.py until build/ was removed.
 
 The HF model cards will point at knurlogic, so every RELEASED model must
 run from `pip install knurlogic` -- five families: qwen3_5_moe, qwen3_5,

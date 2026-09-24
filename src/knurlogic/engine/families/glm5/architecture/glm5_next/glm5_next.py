@@ -3,7 +3,7 @@ from typing import Optional
 import mlx.core as mx
 import mlx.nn as nn
 
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.base import InputEmbeddingsFeatures, LanguageModelOutput
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.base import InputEmbeddingsFeatures, LanguageModelOutput
 from .config import ModelConfig
 from .language import LanguageModel
 from .vision import VisionModel

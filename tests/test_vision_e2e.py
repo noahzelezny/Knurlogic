@@ -247,8 +247,8 @@ def _glm_rig(tmp):
     from fixtures_vision_glm5 import glm5_family, glm5_tiny_config
     from knurlogic.engine import register
     register.register("glm5_next")
-    from knurlogic.engine.architectures.glm5_next.config import TextConfig
-    from knurlogic.engine.architectures.glm5_next.language import \
+    from knurlogic.engine.families.glm5.architecture.glm5_next.config import TextConfig
+    from knurlogic.engine.families.glm5.architecture.glm5_next.language import \
         LanguageModel
     cfg = glm5_tiny_config()
     mx.random.seed(0)
