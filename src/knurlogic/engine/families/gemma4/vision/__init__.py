@@ -1,6 +1,6 @@
 """gemma4 vision (e4b, 26b): the Family (engine/vision/__init__.py) built
 against the vendored tower (`vision.py`) and the trunk's bidirectional
-image-block mask (`architectures/gemma4_text.py`, P2 edit -- see this
+image-block mask (`../architecture/gemma4_text.py`, P2 edit -- see this
 package's PROVENANCE.md).
 
 WHY THE TOWER IS STANDALONE. `load_weights` reads `vision_tower.*` and
@@ -17,7 +17,7 @@ WHY encode() PRE-DIVIDES BY embed_scale. mlx-vlm's `gemma4.Model
 entirely (`gemma4.py:85-170`). knurlogic's `gemma4_text.Gemma4TextModel
 .__call__` scales whatever `input_embeddings` it is handed -- text or
 already-merged -- by `embed_scale` unconditionally
-(`architectures/gemma4_text.py:527-528`, unedited: P2's edit list does not
+(`../architecture/gemma4_text.py:527-528`, unedited: P2's edit list does not
 include this scaling line, and touching it would move a P1/text behaviour
 every family shares). So this Family divides the tower's projected features
 by `embed_scale` before they are cached (`encode`, below) and merges them
@@ -252,7 +252,7 @@ class Gemma4Vision:
     def _mm_mask(self, key_slice: List[Any]) -> Optional[mx.array]:
         """[1, len(key_slice)] int32: -1 outside an image, else the index of
         the image that token belongs to along the slice (see the P2 note in
-        `architectures/PROVENANCE.md`)."""
+        `../architecture/PROVENANCE.md`)."""
         spans = image_spans(key_slice)
         if not spans:
             return None

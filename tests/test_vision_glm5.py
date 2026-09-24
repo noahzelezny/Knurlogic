@@ -94,7 +94,7 @@ def test_glm5_next_imports_without_mlx_vlm_MUTATED():
     would fail. Run manually (not on every CI pass, since it edits files):
     ``python3 -m pytest tests/test_vision_glm5.py -k MUTATED -v`` after
     changing one `_mlx_vlm` import in
-    `engine/architectures/glm5_next/language.py` back to
+    `engine/families/glm5/architecture/glm5_next/language.py` back to
     ``from ..cache import ...`` -- confirmed 2026-09-23 to turn the test
     above red (`ModuleNotFoundError: No module named 'mlx_vlm'`), then
     reverted. This test itself is a no-op marker so the record survives in
@@ -106,7 +106,7 @@ def test_vendor_siblings_import_standalone():
     """The mlx-vlm 0.6.17 modules glm5_next imports -- vendored under
     glm5_next/_mlx_vlm/, the version the released rungs were built and
     scored with -- import with no mention of the real mlx_vlm package."""
-    P = "knurlogic.engine.architectures.glm5_next._mlx_vlm"
+    P = "knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm"
     import importlib
     mods = [importlib.import_module(f"{P}.{m}") for m in (
         "models.base", "models.cache", "models.gated_delta", "models.mla",
@@ -125,7 +125,7 @@ def test_vendor_siblings_import_standalone():
 def test_glm5_siblings_now_empty():
     """`deps.glm5_siblings()` regexes glm5_next's OWN source for `from
     ..X import` lines -- the exact mlx_vlm-relative pattern this package
-    rewrote to absolute `knurlogic.engine.architectures.glm5_next._mlx_vlm.models.X` imports.
+    rewrote to absolute `knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.X` imports.
     Read 2026-09-23 (before this package): {base, cache,
     deepseek_v4.hyper_connection, gated_delta, linear, mla,
     qwen3_vl.processing_qwen3_vl, sparse_attention, switch_layers} -- 9
@@ -142,8 +142,8 @@ def test_glm5_siblings_now_empty():
 
 def test_glm5_siblings_now_empty_MUTATED():
     """Mutation check for the gate above: reverting ONE import in
-    `engine/architectures/glm5_next/language.py` from the absolute
-    `knurlogic.engine.architectures.glm5_next._mlx_vlm.models.mla` back to a relative
+    `engine/families/glm5/architecture/glm5_next/language.py` from the absolute
+    `knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.mla` back to a relative
     `from ..mla import MultiLinear` (confirmed 2026-09-23) turns
     `glm5_siblings()` non-empty again -- `test_glm5_siblings_now_empty`
     goes red as expected. Reverted after confirming."""

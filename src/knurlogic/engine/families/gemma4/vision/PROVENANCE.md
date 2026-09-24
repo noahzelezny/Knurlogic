@@ -13,7 +13,7 @@
 | `config.py` | `mlx_vlm/models/gemma4/config.py::VisionConfig` | trimmed to the fields `vision.py` reads (audio/video-only fields dropped: out of scope, vision-only package) |
 | `__init__.py::MultimodalEmbedder` | `mlx_vlm/models/gemma4/gemma4.py:22-35` | verbatim |
 | `__init__.py::RMSNormNoScale` | `mlx_vlm/models/gemma4/language.py::RMSNormNoScale` | verbatim (duplicated from `vision.VisionRMSNormNoScale` rather than shared, because it sits on `embed_vision` in the weight tree, not the tower) |
-| `architectures/gemma4_text.py::_make_masks` overlay | `mlx_vlm/models/gemma4/language.py:455-515` (`Gemma4TextModel._block_sequence_ids_for_mask`, `_apply_blockwise_bidirectional_overlay`, the `use_bidirectional_vision` gate) | ported, not copied verbatim -- see the deviation below and `architectures/PROVENANCE.md` |
+| `../architecture/gemma4_text.py::_make_masks` overlay | `mlx_vlm/models/gemma4/language.py:455-515` (`Gemma4TextModel._block_sequence_ids_for_mask`, `_apply_blockwise_bidirectional_overlay`, the `use_bidirectional_vision` gate) | ported, not copied verbatim -- see the deviation below and `../architecture/PROVENANCE.md` |
 
 `scatter.merge` (image features into text embeddings) is P0's, already
 vendored at `engine/vision/scatter.py` (mlx-vlm's `masked_scatter`,
@@ -46,7 +46,7 @@ importantly stronger fact than mlx-vlm's, which would merge two adjacent
 images of the same type into one block if it ever saw two images back to
 back with no separator. So `Gemma4Vision._mm_mask` (this package's
 `__init__.py`) builds the block-id array directly from `image_spans`, and
-`architectures/gemma4_text.py::Gemma4TextModel._make_masks` takes that
+`../architecture/gemma4_text.py::Gemma4TextModel._make_masks` takes that
 array as `mm_mask` and applies
 `_apply_blockwise_bidirectional_overlay`'s boolean-or logic verbatim,
 skipping `_block_sequence_ids_for_mask` entirely. `test_g4_mask_overlay_matches_reference`
@@ -63,7 +63,7 @@ See the docstring at the top of `__init__.py` ("WHY encode() PRE-DIVIDES BY
 embed_scale"). Short version: mlx-vlm's `gemma4.Model.get_input_embeddings`
 scales ONLY the text embeddings before scattering in the (unscaled)
 projected image features (`gemma4.py:85-170`); knurlogic's
-`architectures/gemma4_text.py::Gemma4TextModel.__call__` scales whatever
+`../architecture/gemma4_text.py::Gemma4TextModel.__call__` scales whatever
 `input_embeddings` it receives, always
 (`h = input_embeddings; h = h * self.embed_scale`, unedited by P2 -- every
 family shares this line). `Gemma4Vision.encode` divides the tower's
@@ -78,7 +78,7 @@ this end to end.
 
 mlx-vlm computes `per_layer_inputs` from `input_ids` with every
 multimodal placeholder zeroed (`gemma4.py:88-100`).
-`architectures/gemma4_text.py::Gemma4TextModel.__call__` already accepts a
+`../architecture/gemma4_text.py::Gemma4TextModel.__call__` already accepts a
 precomputed (unprojected) `per_layer_inputs` and, when given one, skips its
 own `_get_per_layer_inputs` and only projects
 (`gemma4_text.py:530-534`, unedited). So `Gemma4Vision.embed` builds the
