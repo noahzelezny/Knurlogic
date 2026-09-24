@@ -2,7 +2,7 @@
 the `vision` field on `/models.json` and `/loaded.json`.
 
 No mlx, no PIL, no real model: `web.py` reads `served_vision()` and
-`registry.has_family()`, both stdlib-only per the frozen contract
+`registry.registered()`, both stdlib-only per the frozen contract
 (`docs/design/vision-contracts.md`), and this file proves it stays that way
 by never importing anything that would drag mlx in.
 """
@@ -74,7 +74,7 @@ def test_models_document_reports_vision_capable(monkeypatch, tmp_path):
                                format="mlx", bytes_on_disk=1 << 20,
                                model_type="qwen3_5", servable=True)])
     monkeypatch.setattr(
-        "knurlogic.engine.vision.registry.has_family", lambda mt: True)
+        "knurlogic.engine.vision.registry.registered", lambda mt: True)
     doc = web.models_document()({})
     assert doc["models"][0]["vision"] is True
 
@@ -90,7 +90,7 @@ def test_models_document_false_for_a_non_vision_family(monkeypatch, tmp_path):
                                format="mlx", bytes_on_disk=1 << 20,
                                model_type="llama", servable=True)])
     monkeypatch.setattr(
-        "knurlogic.engine.vision.registry.has_family", lambda mt: False)
+        "knurlogic.engine.vision.registry.registered", lambda mt: False)
     doc = web.models_document()({})
     assert doc["models"][0]["vision"] is False
 
@@ -130,7 +130,7 @@ def test_loaded_document_vision_none_when_nothing_served(monkeypatch):
 
 
 def test_web_module_never_imports_mlx_or_pil():
-    """Consuming served_vision() and registry.has_family() must not drag
+    """Consuming served_vision() and registry.registered() must not drag
     mlx or PIL into `interfaces/` -- only `engine/` may import mlx (a repo
     wide test enforces it); this is the P5-local half of that guarantee."""
     import subprocess

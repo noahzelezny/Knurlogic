@@ -44,10 +44,38 @@ def resolve(target: str) -> Optional[Callable[..., Any]]:
     return getattr(mod, attr)
 
 
+def family_of(model_type: str) -> str:
+    """The registry name for a config's model_type.
+
+    Through arch.ARCH_FOR_MODEL_TYPE, the one home for how configs spell a
+    family: the released rungs report the TEXT config's type
+    (`qwen3_5_text`, `gemma4_text`, ...), so looking that up directly
+    reported no vision for all 20 of them. Third time this spelling bit."""
+    from knurlogic.engine.arch import ARCH_FOR_MODEL_TYPE
+    name = ARCH_FOR_MODEL_TYPE.get(model_type, model_type)
+    if name == "gemma4_text":
+        name = "gemma4"
+    return name
+
+
+def registered(model_type: str) -> bool:
+    """Has this model_type a registered vision family whose module is
+    installed? Finds the module without running it, so interfaces/ can ask
+    without importing mlx (the family modules do)."""
+    import importlib.util
+    t = FAMILIES.get(family_of(model_type))
+    if t is None:
+        return False
+    try:
+        return importlib.util.find_spec(t.split(":")[0]) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def has_family(model_type: str) -> bool:
     """Is there a registered family for this model_type whose package is
     present? (Imports the family module; engine-side callers only.)"""
-    t = FAMILIES.get(model_type)
+    t = FAMILIES.get(family_of(model_type))
     return t is not None and resolve(t) is not None
 
 
@@ -56,7 +84,7 @@ def build(model_type: str, model_path: str, text_model: Any,
     """The Family for a loaded model, or None when it has no vision here:
     an unregistered model_type, a family package not present, a config with
     no vision_config, or the family's own build declining."""
-    t = FAMILIES.get(model_type)
+    t = FAMILIES.get(family_of(model_type))
     if t is None:
         return None
     if config is None:

@@ -255,7 +255,7 @@ def test_ready_blocks_on_another_process_holding_the_load_lock(monkeypatch):
 
 
 def test_fit_reports_vision_capability(tmp_path, monkeypatch):
-    """`registry.has_family` is a REGISTERED-model_type-and-package-present
+    """`registry.registered` is a REGISTERED-model_type-and-package-present
     check (P0); the family packages (qwen, gemma4, glm5) are P1-P3's, not
     yet on disk here, so this drives the registry directly rather than
     asserting True for a real model_type that may resolve False today and
@@ -266,10 +266,10 @@ def test_fit_reports_vision_capability(tmp_path, monkeypatch):
         lambda: {"available_bytes": 64 << 30, "free_bytes": 64 << 30,
                  "cached_bytes": 0})
     monkeypatch.setattr(
-        "knurlogic.engine.vision.registry.has_family", lambda mt: True)
+        "knurlogic.engine.vision.registry.registered", lambda mt: True)
     assert mcp.fit(artifact=str(d))["vision_capable"] is True
     monkeypatch.setattr(
-        "knurlogic.engine.vision.registry.has_family", lambda mt: False)
+        "knurlogic.engine.vision.registry.registered", lambda mt: False)
     assert mcp.fit(artifact=str(d))["vision_capable"] is False
 
 
@@ -283,7 +283,7 @@ def test_models_lists_vision_capability(tmp_path, monkeypatch):
                                format="mlx", bytes_on_disk=4 << 20,
                                model_type="qwen3_5", servable=True)])
     monkeypatch.setattr(
-        "knurlogic.engine.vision.registry.has_family", lambda mt: True)
+        "knurlogic.engine.vision.registry.registered", lambda mt: True)
     r = mcp.models()
     assert r["models"][0]["vision_capable"] is True
 
