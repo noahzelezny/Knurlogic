@@ -53,6 +53,7 @@ consistent snapshot.
 | `switch_layers.py` | `models/switch_layers.py` | none |
 | `activations.py` | `models/activations.py` | none -- `switch_layers.py`'s own dependency, not in `glm5_siblings()` (glm5_next does not import it directly) but needed for the vendored copy to import standalone |
 | `fast_ops.py` | `models/fast_ops.py` | none -- `deepseek_v4/hyper_connection.py`'s dependency, same reason |
+| `quantized_verifier.py` | `models/quantized_verifier.py` | none -- added by the end-to-end pass (2026-09-23): `linear.py` and `switch_layers.py` import it INSIDE functions (`native_batch_linear`, a 2-8 token projection), so no import-only test saw it missing and the first real prefill of 2-8 tokens raised ModuleNotFoundError. Its one relative import (`.switch_layers`) is vendored beside it. sha256 f3f3c485f164fbaf237a7f294b44f7fa0ab3e2078bfcfd71c6fab6bf1a877289, equal to the wheel RECORD's entry |
 | `turboquant.py` | `turboquant.py` (package top level, not `models/`) | `from .models.cache import ...` -> `from .cache import ...` (flattened: no `models/` subpackage here) -- `base.py`'s dependency |
 | `deepseek_v4/hyper_connection.py` | `models/deepseek_v4/hyper_connection.py` | none (its own `from ..X import` lines are correct as-is: `..` from `_vendor/deepseek_v4/` IS `_vendor/`) |
 | `qwen3_vl_processing.py` | NOT a vendored file -- see below | -- |

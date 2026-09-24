@@ -539,9 +539,23 @@ class Gemma4TextModel(nn.Module):
                         h, c, return_array=use_bidirectional
                     )
                     if use_bidirectional and not isinstance(m, str):
+                        # m is [L, S]: S - L tokens already in the cache
+                        # come first. A prefill chunk may start after
+                        # them (the serve path chunks, snapping edges to
+                        # image blocks, so a block never reaches back into
+                        # the cache): they belong to no block here.
+                        ctx = m.shape[-1] - mm_mask.shape[-1]
+                        kid = mm_mask
+                        if ctx > 0:
+                            kid = mx.concatenate(
+                                [mx.full((mm_mask.shape[0], ctx), -1,
+                                         dtype=mm_mask.dtype), mm_mask],
+                                axis=-1)
                         q = mx.expand_dims(mm_mask, -1)
-                        k = mx.expand_dims(mm_mask, -2)
-                        same_block = (q >= 0) & (q == k)
+                        k = mx.expand_dims(kid, -2)
+                        same_block = (q >= 0) & (q == k)       # [B, L, S]
+                        if m.ndim == 4:                        # [B, 1, L, S]
+                            same_block = same_block[:, None]
                         m = m | same_block
                     mask["full_attention"] = m
                 elif l.layer_type == "sliding_attention":
