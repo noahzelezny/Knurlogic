@@ -903,16 +903,32 @@ def install_vision(srv) -> None:
         return real_batchable(self, args)
 
     def _tokenize(self, tokenizer, request, args):
+        from knurlogic.engine.vision import cachehook
+        from knurlogic.engine.vision import key as K
+        # Release pins a request took and never handed to the batch engine
+        # (it raised between tokenize and insert). Every request, text too.
+        cachehook.sweep()
         if not vreq.has_images(getattr(request, "messages", None)):
             return real_tokenize(self, tokenizer, request, args)
         v = _VISION.get("serve")
         if v is None:
             # Raced a switch to a text-only model after _post let it in.
             raise VisionError("the served model has no vision")
-        return v.tokenize(real_tokenize, self, tokenizer, request, args)
+        out = v.tokenize(real_tokenize, self, tokenizer, request, args)
+        cachehook.pending(v, K.images_in(out[0]))
+        return out
 
     for fn in (do_POST, generate, _is_batchable, _tokenize):
         fn._knurlogic_vision = True
+    # The pin refcount, installed HERE with the _tokenize wrap that feeds it
+    # and never separately: pending() without install_admit() lets a later
+    # sweep release pins a queued row still owns. Images a cached
+    # conversation references stay pinned (Flash-Next review point 1).
+    from knurlogic.engine.vision import cachehook
+    cachehook.install(srv, lambda: (_VISION["serve"].store
+                                    if _VISION.get("serve") else None))
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    cachehook.install_admit(MTPBatchGenerator)
     Handler.do_POST = do_POST
     RG.generate = generate
     RG._is_batchable = _is_batchable
