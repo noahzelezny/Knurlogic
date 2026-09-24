@@ -31,7 +31,7 @@ import argparse
 import os
 import sys
 
-from knurlogic.engine import arch, seam as engine, mtp, register
+from knurlogic.engine import arch, serve as engine, mtp, register
 from knurlogic.interfaces import messages, web
 from knurlogic.machine import status, wired
 from knurlogic.machine.artifact import Artifact

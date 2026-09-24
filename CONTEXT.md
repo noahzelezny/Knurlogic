@@ -45,7 +45,7 @@ this list; nothing depends on a folder below it.
 
     src/knurlogic/
       engine/       what runs a model. The ONLY folder that may import mlx --
-                    a test fails otherwise. The seam (seam.py), drafting
+                    a test fails otherwise. Serving (serve/), drafting
                     (mtp/), vendored architectures, overrides.
       machine/      what is true about this box, read rather than assumed:
                     artifacts on disk, what is loaded, memory, the wired
@@ -68,7 +68,7 @@ this list; nothing depends on a folder below it.
 | what is true now, and what to do next | `docs/PLAN.md` |
 | why a default is what it is | `src/knurlogic/tuning/settings.py`, beside the constant |
 | what knurlogic stands on, and which forks | `knurlogic deps`; `machine/deps.py` `PIECES` |
-| what runs a model | `src/knurlogic/engine/seam.py` |
+| what runs a model, and each change to mlx-lm's server | `src/knurlogic/engine/serve/` -- its `__init__.py` is the index |
 | how drafting works | `engine/mtp/` — `batch_loop.py` and `batch_generator.py` |
 | what an agent gets | `src/knurlogic/interfaces/mcp.py` |
 | the vision build, and why it is shaped that way | `docs/design/vision.md` (evidence in `vision-evidence/`) |

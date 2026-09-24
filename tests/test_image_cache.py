@@ -172,22 +172,23 @@ class Provider:
 
 @pytest.fixture
 def server(monkeypatch):
-    """Snapshots every name the vision install touches and the seam's
+    """Snapshots every name the vision install touches and the serve package's
     module state, so each test starts from a pristine mlx-lm server."""
     from mlx_lm import server as srv
-    from knurlogic.engine import seam
+    from knurlogic.engine import serve
+    from knurlogic.engine.serve import cache_report, state, vq_runtime
 
-    for owner, name in seam.VISION_WRAPS:
+    for owner, name in serve.VISION_WRAPS:
         cls = getattr(srv, owner)
         monkeypatch.setattr(cls, name, getattr(cls, name))
     monkeypatch.setattr(srv, "BatchGenerator", srv.BatchGenerator)
     monkeypatch.setattr(srv, "_make_sampler", srv._make_sampler)
-    monkeypatch.setattr(seam, "_VISION",
+    monkeypatch.setattr(state, "VISION",
                         {"serve": None, "model": None, "error": ""})
-    monkeypatch.setattr(seam, "_VISION_STATS", {})
-    monkeypatch.setattr(seam, "_DRAFT", dict(seam._DRAFT, head=None,
+    monkeypatch.setattr(state, "VISION_STATS", {})
+    monkeypatch.setattr(state, "DRAFT", dict(state.DRAFT, head=None,
                                              on=False, batch_installed=False))
-    monkeypatch.setattr(seam, "_SERVED", {"path": None, "provider": None})
+    monkeypatch.setattr(state, "SERVED", {"path": None, "provider": None})
     yield srv
     from knurlogic.engine.vision import set_served_vision
     set_served_vision(None)
@@ -221,10 +222,11 @@ class Harness:
 
     def __init__(self, srv, model, tok=None, family=None, *, store=None,
                  **cli):
-        from knurlogic.engine import seam
+        from knurlogic.engine import serve
+        from knurlogic.engine.serve import cache_report, state, vq_runtime
         self.srv = srv
         self.provider = Provider(model, tok or byte_tok(), **cli)
-        seam._SERVED["provider"] = self.provider
+        state.SERVED["provider"] = self.provider
         self.vision = None
         if family is not None:
             from knurlogic.engine.vision import set_served_vision
@@ -232,7 +234,7 @@ class Harness:
             from knurlogic.engine.vision.store import ImageStore
             self.vision = VisionServe(family, store or ImageStore(),
                                       self.provider.model_key)
-            seam._VISION.update(serve=self.vision, model=model)
+            state.VISION.update(serve=self.vision, model=model)
             set_served_vision(family.spec)
         self.cache = srv.LRUPromptCache()
         # Every batch generator the server builds, so a gate can read what
@@ -332,8 +334,9 @@ def cached(resp):
 
 
 def install(srv):
-    from knurlogic.engine import seam
-    seam.install_vision(srv)
+    from knurlogic.engine import serve
+    from knurlogic.engine.serve import cache_report, state, vq_runtime
+    serve.install_vision(srv)
 
 
 def normalize(payload):
@@ -398,8 +401,9 @@ def test_g5_text_on_a_vision_model_matches_main(server, model):
     ours = Harness(server, model, family=stub_family())
     try:
         got = json.loads(ours.post(body)[2])
-        from knurlogic.engine import seam
-        assert seam._VISION_STATS.get("requests") == 1   # it went through ours
+        from knurlogic.engine import serve
+        from knurlogic.engine.serve import cache_report, state, vq_runtime
+        assert state.VISION_STATS.get("requests") == 1   # it went through ours
     finally:
         ours.close()
     assert tokens_of(got) == tokens_of(want)
@@ -601,7 +605,8 @@ def test_load_builds_the_family_through_the_registry(server, model, tmp_path,
     """bind_vision reads config.json, builds through registry.build (here
     pointed at the P0 stub builder, exactly as a real family is), loads the
     tower and publishes the spec; clear_vision takes it all back."""
-    from knurlogic.engine import seam
+    from knurlogic.engine import serve
+    from knurlogic.engine.serve import cache_report, state, vq_runtime
     from knurlogic.engine.vision import registry, served_vision
 
     monkeypatch.setitem(registry.FAMILIES, "qwen3_5",
@@ -611,18 +616,18 @@ def test_load_builds_the_family_through_the_registry(server, model, tmp_path,
                text_config={"hidden_size": 128})
     (tmp_path / "config.json").write_text(json.dumps(cfg))
     prov = Provider(model, byte_tok())
-    v = seam.bind_vision(str(tmp_path), prov)
-    assert v is not None and seam._VISION["serve"] is v
-    assert served_vision() is v.spec and seam.served_vision() is v.spec
+    v = serve.bind_vision(str(tmp_path), prov)
+    assert v is not None and state.VISION["serve"] is v
+    assert served_vision() is v.spec and serve.served_vision() is v.spec
     assert v.spec.image_token_id == IMG
-    assert seam.vision_status()["on"]
+    assert serve.vision_status()["on"]
 
-    seam.clear_vision()
-    assert served_vision() is None and seam._VISION["serve"] is None
+    serve.clear_vision()
+    assert served_vision() is None and state.VISION["serve"] is None
 
     cfg.pop("vision_config")                      # a text-only artifact
     (tmp_path / "config.json").write_text(json.dumps(cfg))
-    assert seam.bind_vision(str(tmp_path), prov) is None
+    assert serve.bind_vision(str(tmp_path), prov) is None
     assert served_vision() is None
 
 
@@ -630,12 +635,13 @@ def test_every_wrapped_method_is_resolved_by_name(server):
     """Design D2: a pinned mlx-lm that renamed a wrapped method fails the
     install, loudly, rather than serving images through a wrap that never
     runs."""
-    from knurlogic.engine import seam
-    for owner, name in seam.VISION_WRAPS:
+    from knurlogic.engine import serve
+    from knurlogic.engine.serve import cache_report, state, vq_runtime
+    for owner, name in serve.VISION_WRAPS:
         assert callable(getattr(getattr(server, owner), name))
     fake = types.SimpleNamespace(
         APIHandler=server.APIHandler,
         ResponseGenerator=type("RG", (), {"generate": lambda s: 0,
                                           "_is_batchable": lambda s: 0}))
     with pytest.raises(AssertionError, match="_tokenize"):
-        seam.install_vision(fake)
+        serve.install_vision(fake)

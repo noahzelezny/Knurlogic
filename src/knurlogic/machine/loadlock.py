@@ -14,7 +14,7 @@ takes the lock after). The JSON record written inside is for display only
 (`holder()`, `ready()`'s blocker); whether the lock is held is always asked
 of the kernel, never read from the record.
 
-WHO TAKES IT. Real-model loads: seam.load/switch (P4), MCP load and
+WHO TAKES IT. Real-model loads: serve.load/switch (P4), MCP load and
 `knurlogic serve` (P5), tools/*.py gates. Tiny-fixture tests do not -- they
 use < 1 GB and must run in parallel. A long-lived serve holds it only until
 its phase is `serving`.

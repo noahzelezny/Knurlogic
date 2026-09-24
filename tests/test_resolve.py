@@ -121,7 +121,7 @@ def test_package_architectures_are_found_and_hosted_correctly():
 #: Directories that ARE engine code, and are allowed to import one. Each is
 #: here for a stated reason, not because a glob happened to miss it.
 ENGINE_SIDE = {
-    # THE FOLDER IS THE RULE. engine/ holds the seam, the drafting code, the
+    # THE FOLDER IS THE RULE. engine/ holds serving (serve/), the drafting code, the
     # vendored architectures and the tools that act on them -- every line
     # that is arithmetic on an mlx model or edits mlx-lm's namespace. Nothing
     # outside it may import mlx. It used to be a list of files and folders,

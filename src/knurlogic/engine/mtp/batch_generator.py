@@ -73,7 +73,7 @@ from mlx_lm.generate import (BatchGenerator, GenerationBatch,
                              PromptProcessingBatch)
 
 from .batch_loop import MTPBatch, RowParams, admit
-from knurlogic.engine import cachereport
+from knurlogic.engine.serve import cache_report as cachereport
 from .capture import capture_input
 from .registry import resolve
 from .sampling import make_distribution

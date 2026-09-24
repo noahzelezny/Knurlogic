@@ -42,7 +42,7 @@ from pathlib import Path
 #: on the config: Flash-Next declares `language_model_only: false` yet vqlab
 #: scores it through mlx_lm. So `host` here records where a module LIVES;
 #: choosing the host per artifact is still an open question.
-from knurlogic.engine.seam import HOST_PACKAGES
+from knurlogic.engine.serve import HOST_PACKAGES
 
 #: Which host a module must be registered UNDER. This is not cosmetic: a
 #: module's relative imports resolve against its registered parent, and
@@ -124,7 +124,7 @@ class ArchStatus:
 
 
 def _models_dir(host: str = "mlx_lm") -> Path | None:
-    from knurlogic.engine.seam import models_module
+    from knurlogic.engine.serve import models_module
     try:
         return Path(models_module(host).__file__).parent
     except Exception:

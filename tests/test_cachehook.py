@@ -123,7 +123,7 @@ def test_install_asserts_by_name():
 
 def _server_step(vs, fail_before_insert, inserted):
     """mlx-lm _generate's shape between _tokenize and insert_segments, with
-    the seam's _tokenize wrap as reported: sweep, tokenize, pending."""
+    serve/vision.py's _tokenize wrap as reported: sweep, tokenize, pending."""
     cachehook.sweep()
     imgs = [("x", PH)]
     vs._pin(imgs)                               # what tokenize leaves pinned

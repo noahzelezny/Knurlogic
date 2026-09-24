@@ -4,7 +4,7 @@ Design D3. mlx-lm's server tokenizes on its generator thread
 (`ResponseGenerator._tokenize`, which has `request.messages`), and generation
 runs on that same thread. v1 encoded images on the HTTP thread: two threads
 on one GPU, two uncoordinated allocations on a shared host (critique B2). So
-ALL image work happens here, called from the seam's `_tokenize` wrap:
+ALL image work happens here, called from engine/serve/vision.py's `_tokenize` wrap:
 
     image parts -> decode + clamp + pixel hash (images.load)
                 -> store hit, or preprocess + encode + put (the ONLY tower
@@ -104,7 +104,7 @@ def with_placeholders(messages: List[Dict[str, Any]],
 class VisionServe:
     """The served model's vision, as the serve path uses it: its Family,
     its image store and the model key the store is partitioned by. One per
-    loaded vision model; the seam builds it at load and drops it (and the
+    loaded vision model; serve/vision.py builds it at load and drops it (and the
     store) at unload.
 
     `encodes` counts tower runs made through here, for /status.json; G6

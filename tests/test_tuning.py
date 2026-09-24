@@ -133,7 +133,7 @@ def test_a_live_knob_lands_on_the_loaded_runtime(monkeypatch):
     """Rebinding the module global is what makes 'no reload' true."""
     import sys
     import types
-    from knurlogic.engine import seam as engine
+    from knurlogic.engine import serve as engine
 
     fake = types.ModuleType("_fake_vq_runtime")
     fake._DECODE_CHUNK = 32
@@ -149,13 +149,13 @@ def test_a_live_knob_lands_on_the_loaded_runtime(monkeypatch):
 def test_a_restart_knob_is_reported_not_silently_skipped():
     """A panel that said 'applied' over a value that did not move would be
     the same lie as an env file sourced after the one that overwrites it."""
-    from knurlogic.engine import seam as engine
+    from knurlogic.engine import serve as engine
     out = engine.apply_live({"VQ_MOE_GEMMSEG_RTILE": "32"})
     assert "restart" in out["VQ_MOE_GEMMSEG_RTILE"]
 
 
 def test_the_cache_limit_uses_the_engines_live_setter():
-    from knurlogic.engine import seam as engine
+    from knurlogic.engine import serve as engine
     out = engine.apply_live({"VQLAB_CACHE_LIMIT_GB": "2.0"})
     assert "applied now" in out["VQLAB_CACHE_LIMIT_GB"] or \
         "no live setter" in out["VQLAB_CACHE_LIMIT_GB"]
@@ -243,7 +243,7 @@ def test_an_engine_knob_is_emitted_even_when_the_runtime_ignores_it(tmp_path):
 def test_the_resolved_prompt_chunk_reaches_the_server_argv():
     """The bug this closes: the resolver explained a prompt chunk the server
     never saw, because it was an env var and the server takes argv."""
-    from knurlogic.engine import seam as engine
+    from knurlogic.engine import serve as engine
     argv = engine.server_argv("/m", "h", 1, settings={
         "prefill_step_size": 512, "prompt_concurrency": 1})
     assert argv[argv.index("--prefill-step-size") + 1] == "512"
@@ -251,7 +251,7 @@ def test_the_resolved_prompt_chunk_reaches_the_server_argv():
 
 
 def test_a_typed_flag_beats_the_resolver():
-    from knurlogic.engine import seam as engine
+    from knurlogic.engine import serve as engine
     argv = engine.server_argv("/m", "h", 1, settings={"prefill_step_size": 512},
                               extra=["--prefill-step-size", "4096"])
     assert argv.count("--prefill-step-size") == 1
@@ -393,13 +393,13 @@ def test_an_artifact_declaring_mtp_is_recognised(tmp_path):
 def test_the_architecture_is_asked_whether_it_keeps_them():
     """Read off the module that will actually run, not assumed: the answer
     is a line in sanitize(), and it is 'no'."""
-    from knurlogic.engine import seam as engine
+    from knurlogic.engine import serve as engine
     assert engine.keeps_mtp_weights("qwen4_exp_text") is False
 
 
 def test_an_unknown_architecture_says_unknown_not_no():
     """'Could not find the module' is not 'it discards them'."""
-    from knurlogic.engine import seam as engine
+    from knurlogic.engine import serve as engine
     assert engine.keeps_mtp_weights("not_a_real_model_type") is None
 
 

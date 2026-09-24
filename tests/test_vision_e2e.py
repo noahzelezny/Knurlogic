@@ -644,13 +644,14 @@ def test_e6_seeded_image_request_takes_the_batch_path(server, rigs):
     cannot read a key or snap chunks. An image request with a seed must
     still come through the batch engine (design D5) -- and answer as the
     reference does."""
-    from knurlogic.engine import seam
+    from knurlogic.engine import serve
+    from knurlogic.engine.serve import cache_report, state, vq_runtime
     rig = rigs("qwen3_5")
     msgs = [user(Q1, rig.url(41))]
     h = harness(server, rig, rig.make_family())
     r = chat(h, msgs, seed=3)
     assert len(h.gens) == 1
-    assert seam._VISION_STATS.get("requests") == 1
+    assert state.VISION_STATS.get("requests") == 1
     _, want, _ = reference(rig, rig.make_family(), msgs)
     assert said(rig, r) == want
 
@@ -680,8 +681,9 @@ def test_usage_reports_what_the_cache_actually_did(server, rigs, name):
     """usage.knurlogic.cache comes from the engine, not the trie: on turn 2
     the image sits in the reused span, cached_tokens is what was USED, and
     prompt = used + prefilled. Turn 1 used nothing."""
-    from knurlogic.engine import seam
-    seam._install_cache_report(server)
+    from knurlogic.engine import serve
+    from knurlogic.engine.serve import cache_report, state, vq_runtime
+    cache_report.install(server)
     rig = rigs(name)
     h = harness(server, rig, rig.make_family())
     m1, r1, m2, r2 = two_turns(h, rig.url(11))
@@ -705,7 +707,7 @@ def test_cache_report_says_when_an_offered_prefix_was_discarded():
     """The reason the report exists: the trie offers, the engine refuses
     (a drafting row with no aligned head), and cached_tokens must not claim
     the offer. Shown on the report function itself."""
-    from knurlogic.engine import cachereport
+    from knurlogic.engine.serve import cache_report as cachereport
     usage = {"prompt_tokens": 50,
              "prompt_tokens_details": {"cached_tokens": 40}}
     cachereport.into_usage(usage, {"offered": 40, "used": 0, "discarded": 40,
