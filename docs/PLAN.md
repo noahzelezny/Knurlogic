@@ -242,18 +242,55 @@ short forwards (an unvendored module); all released rungs reported no
 vision (the `_text` model_type spelling, third time); the chat could not
 reach any running model from the control page.
 
+Real-model gates, 2026-09-23, on the M4 (Laptop B, M4 Max) in a clean
+`pip install` venv, tools/vision_gate.py, one rung at a time:
+
+    gemma e4b VQ-PLE        PASS
+    gemma 26b-a4b 6.2       PASS
+    Qwen3.8-Flash-Next 2.1  PASS
+    Qwen3.8-27B 3.9         PASS
+    Qwen3.6-35B-A3B 3.4     cache PASS; reads "42" as "4" at 448 px, "42"
+                            at 896 px -- the model's acuity, not the path:
+                            identical preprocessing to 27B/Flash, which
+                            read the 448 px image
+
+Each gate checks: text answer, the red square, the "42", no image
+re-prefill on turns 1-4 (new tokens < the image's own token count,
+measured with/without the image), recall after five turns.
+
+Found by the real gates (all invisible to the tiny fixtures) and fixed:
+- e4b stores `embed_vision`'s projection 8-bit affine; towers are now
+  quantized to match the checkpoint before loading (engine/vision/quant.py)
+- gemma's placeholder `<image_soft_token>` is not a token in the released
+  tokenizer; it is now boi + `<|image|>` + eoi, read from tokenizer.json
+- released gemma loads through mlx-lm's `gemma4` wrapper (text under
+  `.language_model`), which drops `mm_mask`: vendored with that one edit,
+  registered from the config's outer model_type
+- Qwen3.6's template re-renders the previous assistant turn without the
+  empty think block it generated with, so on a hybrid (non-trimmable)
+  model no turn ever reused the cache. The batch generator now stops
+  prefill at the server's segment ends and hands checkpoints back
+  (end-of-segment responses); a drafting row's checkpoint holds the head
+  one step back plus h_{c-1}, replayed with the new token on restore.
+  Tested token-identical to a fresh prefill and to mlx-lm.
+
+Also seen: Flash-Next's first turn reuses nothing from an earlier request
+with the same image and different text -- expected on linear attention
+(no trim), turn continuation reuses fully. The runtime's comment that
+Flash-Next vision "stays unreachable" is stale: the standalone tower
+serves it.
+
 Before merging to main, in order:
-1. Real-model gates, one model at a time (tools/vision_gate.py): gemma e4b
-   VQ -> Qwen3.8-27B 3.9 -> 35B-A3B 3.4 -> gemma 26b -> Flash-Next 2.1.
-   Only tiny fixtures have run so far.
-2. G-VQ: knurlogic's vendored runtime vs each of the 9 distinct PUBLISHED
+1. G-VQ: knurlogic's vendored runtime vs each of the 9 distinct PUBLISHED
    runtimes (tools/vq_gate.py); every rung stays on its bundled runtime
    until it passes.
+2. A failed admission (an exception in the batch generator) kills
+   mlx-lm's generation thread: that request and every later one hang
+   with no error. Fail the one request instead.
 3. A knurlogic load path for glm5_next (mlx-lm cannot load it); GLM needs
    the cluster regardless.
 4. Adopted, not built: an encode-twice-identical gate, and a per-request
-   cache report in usage. Planned: a cache checkpoint at the end of each
-   user turn (the fix for gemma, which drops earlier thinking).
+   cache report in usage.
 5. See a full answer stream through the chat proxy from exo (verified only
    as far as exo queueing the task behind a running review).
 
@@ -287,8 +324,18 @@ Before anything changes:
 2. Record which default each shipping path hits (above) -- a downloader-
    divergence question as well as a reference-quality one.
 3. knurlogic keeps its current default until 1 has run and the maintainer decides.
+   Scheduled (vqlab, 2026-09-23): the teacher A/B runs on 2026-09-24,
+   after the paper handoff work; seed 0 stays until it reports.
    The fix, if confirmed: use the checkpoint's stored multipliers (the
    artifact is the authority), not a guessed seed.
+
+## Decided: 35B-A3B 3.8 / 4.6 / 5.4 stay on v2 numerics
+
+Their published model.py carries v2 knobs, not what the rungs were built
+with. vqlab decided (2026-09-23, docs/RUNTIME-SHIP-PLAN.md at 6f53200): no
+rebundle to v1.5 -- v2 is faster and closer to bf16; the rungs are
+rescored on the shipped v2 bundle. knurlogic reads knobs from the
+published Hub model.py, so nothing changes here.
 
 ## Release (target: about a week, with the paper)
 

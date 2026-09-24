@@ -50,13 +50,21 @@ saw image features, the defect exo has. Text-only keys take exactly the
 path they took before this existed.
 
 Costs, inherited and stated: a row is prefilled whole inside one `next()`
-call (other rows wait for it, as they did in the fork), and there is no
-end-of-segment cache insert mid-prompt -- the finished row's entry is what
-goes to the prompt cache.
+call (other rows wait for it, as they did in the fork).
+
+Segment checkpoints: the server splits a chat prompt into segments (system,
+user, the assistant header's thinking tail) and stores a prompt cache at
+each segment end. Prefill stops at those ends (`admit`'s checkpoints) and
+the snapshots are handed to the server one per `next()` call as
+end-of-segment responses, which it stores through `extract_cache`. For a
+model whose caches cannot be trimmed this is the only reuse a new turn gets
+when the template re-renders the previous assistant turn (Qwen3.6 drops the
+empty think block it generated with).
 """
 from __future__ import annotations
 
 import contextlib
+import copy
 import logging
 from typing import Any, List, Optional
 
@@ -78,8 +86,29 @@ logger = logging.getLogger(__name__)
 _NEVER = 1 << 62
 
 
+class HeadCarry:
+    """The hidden state h_{c-1} a checkpoint entry carries beside its head
+    cache (seeded to c-1), so a restore can replay the head's step at c-1
+    with the NEW token at c. Rides in the pool entry list, so it answers
+    the prompt cache's questions about size and trimming."""
+
+    def __init__(self, h):
+        self.h = h
+
+    @property
+    def nbytes(self) -> int:
+        return int(self.h.nbytes)
+
+    @property
+    def state(self):
+        return [self.h]
+
+    def is_trimmable(self) -> bool:
+        return False
+
+
 def split_pool_entry(entry: list, n_trunk: int, *, drafts: bool,
-                     hit_len: int) -> tuple:
+                     hit_len: int, replay=None) -> tuple:
     """(trunk caches, head cache or None, usable prefix length) from a pool
     entry restored at `hit_len`. From the fork, unchanged.
 
@@ -92,7 +121,13 @@ def split_pool_entry(entry: list, n_trunk: int, *, drafts: bool,
         return trunk, None, 0
     if not drafts:
         return trunk, None, hit_len
-    if extra and int(getattr(extra[0], "offset", -1) or 0) == hit_len:
+    off = int(getattr(extra[0], "offset", -1) or 0) if extra else -1
+    if off == hit_len:
+        return trunk, extra[0], hit_len
+    # A checkpoint entry: head one step behind, with the h to replay it.
+    if (off == hit_len - 1 and replay is not None and len(extra) > 1
+            and isinstance(extra[1], HeadCarry)):
+        replay(extra[0], extra[1].h)
         return trunk, extra[0], hit_len
     return [], None, 0
 
@@ -235,6 +270,10 @@ class MTPBatchGenerator(BatchGenerator):
         self._n_trunk = len(self._make_new_cache())
         # uid -> what the server gave us for that row, and what it has seen.
         self._rows: dict = {}
+        # uid -> [(key, entry)] checkpoints not yet reported to the server;
+        # uid -> (entry, key) for the one reported in this next() call.
+        self._ckpt_pending: dict = {}
+        self._ckpt_ready: dict = {}
         self._stats = stats if stats is not None else {}
         if name:
             logger.info("batch engine drafting with the %s MTP head", name)
@@ -258,14 +297,26 @@ class MTPBatchGenerator(BatchGenerator):
                                    "with no vision family; the serve path "
                                    "is wired wrong")
 
+        def replay(hc, h):
+            # The checkpoint's head stopped at c-1; its input there is
+            # (h_{c-1}, x_c), and x_c is this prompt's token at c.
+            x = K.to_ids(prompt[len(prefix):len(prefix) + 1],
+                         vis.family.spec.image_token_id if vis else -1)
+            with mx.stream(self._stream):
+                self._head.advance(h, mx.array(x)[None], hc)
+                mx.eval([a for a in (getattr(hc, "state", None) or [])
+                         if isinstance(a, mx.array)])
+
+        replay_fn = replay if self._head is not None and len(prefix) < n \
+            else None
         if vis is None:
             cache, hcache, hit = split_pool_entry(
                 list(cache or []), self._n_trunk, drafts=True,
-                hit_len=len(prefix))
+                hit_len=len(prefix), replay=replay_fn)
             drafts = True
         else:
             cache, hcache, hit, drafts = self._vision_entry(
-                list(cache or []), prompt, len(prefix))
+                list(cache or []), prompt, len(prefix), replay=replay_fn)
         if len(prefix) > 0 and hit == 0:
             logger.info("prompt cache entry at %d/%d tokens has no aligned "
                         "head cache; prefilling from scratch", len(prefix), n)
@@ -279,12 +330,30 @@ class MTPBatchGenerator(BatchGenerator):
                     ids, kw = mx.array(prompt), {}
                 else:
                     ids, kw = self._vision_inputs(vis, prompt, hit)
+                # Segment ends, as positions in the whole prompt. The last
+                # segment's end is the prompt's end: stored when the row
+                # finishes, not here.
+                bounds, at = [], len(prefix)
+                for seg in segments[:-1]:
+                    at += len(seg)
+                    bounds.append(at)
+                stash = []
+
+                def on_checkpoint(c, trunk, hc, h):
+                    entry = copy.deepcopy(list(trunk))
+                    if hc is not None:
+                        entry += [copy.deepcopy(hc), HeadCarry(mx.array(h))]
+                    stash.append((list(prompt[:c]), entry))
+
                 row = admit(self._trunk, self._head, self._batch.get_h,
                             ids, params, uid=uid,
                             make_draft_cache=self._make_draft_cache,
                             prefill_step_size=self.prefill_step_size,
                             cache=cache or None, hcache=hcache, start_pos=hit,
+                            checkpoints=bounds, on_checkpoint=on_checkpoint,
                             **kw)
+                if stash:
+                    self._ckpt_pending[uid] = stash
                 self._batch.extend([row])
         finally:
             if vis is not None:
@@ -297,7 +366,8 @@ class MTPBatchGenerator(BatchGenerator):
         self._stats["requests"] = self._stats.get("requests", 0) + 1
         return PromptProcessingBatch.Response(uid, (n, n), True, True)
 
-    def _vision_entry(self, entry: list, key: list, hit_len: int):
+    def _vision_entry(self, entry: list, key: list, hit_len: int,
+                      replay=None):
         """(trunk, head cache, hit, drafts) for a row whose key holds an
         image. Phase A (D7): no drafting if the uncached span holds an
         image. Otherwise it drafts only off an entry with an aligned head --
@@ -317,7 +387,8 @@ class MTPBatchGenerator(BatchGenerator):
         img_new = K.has_image(key[hit_len:]) if hit_len else True
         if self._head is not None and not img_new:
             trunk, hc, hit = split_pool_entry(entry, self._n_trunk,
-                                              drafts=True, hit_len=hit_len)
+                                              drafts=True, hit_len=hit_len,
+                                              replay=replay)
             if hit == hit_len and hc is not None:
                 return trunk, hc, hit, True
         trunk, _, hit = split_pool_entry(entry, self._n_trunk, drafts=False,
@@ -370,13 +441,43 @@ class MTPBatchGenerator(BatchGenerator):
                 return trunk + [head]
         return trunk
 
+    def _report_checkpoint(self) -> List[PromptProcessingBatch.Response]:
+        """One stored checkpoint per row per call, oldest first: the server
+        collects end-of-segment caches with ONE extract_cache per call,
+        keyed by uid, and labels each with the next of that row's segment
+        types -- two in one call would lose one and mislabel the other."""
+        self._ckpt_ready.clear()
+        out = []
+        for uid in list(self._ckpt_pending):
+            if uid not in self._rows:          # finished or removed
+                del self._ckpt_pending[uid]
+                continue
+            key, entry = self._ckpt_pending[uid].pop(0)
+            if not self._ckpt_pending[uid]:
+                del self._ckpt_pending[uid]
+            self._ckpt_ready[uid] = (entry, key)
+            n = len(self._rows[uid]["fed"])
+            out.append(PromptProcessingBatch.Response(uid, (n, n), True,
+                                                      False))
+        return out
+
     def _next(self):
-        prompt_responses = []
+        prompt_responses = self._report_checkpoint()
         if (self._unprocessed_sequences
                 and len(self._batch) < self.completion_batch_size):
             # One admission per call, so rows already decoding are not held
             # for a queue of prefills.
             prompt_responses.append(self._admit_one())
+            # This row's first checkpoint goes out with its admission.
+            uid = prompt_responses[-1].uid
+            if uid in self._ckpt_pending and uid not in self._ckpt_ready:
+                key, entry = self._ckpt_pending[uid].pop(0)
+                if not self._ckpt_pending[uid]:
+                    del self._ckpt_pending[uid]
+                self._ckpt_ready[uid] = (entry, key)
+                n = len(self._rows[uid]["fed"])
+                prompt_responses.insert(-1, PromptProcessingBatch.Response(
+                    uid, (n, n), True, False))
         if not len(self._batch):
             return prompt_responses, []
 
@@ -433,10 +534,16 @@ class MTPBatchGenerator(BatchGenerator):
     # never fills, so rows in the drafting batch are answered here.
 
     def extract_cache(self, uids):
+        # An end-of-segment request for a row this call reported a
+        # checkpoint for gets that checkpoint, not the row's current state.
+        ready = {u: self._ckpt_ready.pop(u) for u in list(uids)
+                 if u in self._ckpt_ready}
+        uids = [u for u in uids if u not in ready]
         mine = {u: i for i, u in enumerate(self._batch.uids) if u in set(uids)}
         out = super().extract_cache([u for u in uids if u not in mine])
         for u, i in mine.items():
             out[u] = (self._entry(i), list(self._rows[u]["fed"]))
+        out.update(ready)
         return out
 
     def remove(self, uids, return_prompt_caches=False):
