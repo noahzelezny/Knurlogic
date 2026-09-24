@@ -9,8 +9,20 @@ all use it, and none of them should pay for mlx to ask a question about a
 file. Those names are re-exported here.
 
 Everything else in this package RUNS a head, so every one of those modules
-imports mlx. They are NOT imported here. `import knurlogic.mtp` stays free;
-`from knurlogic.mtp import loop` is where the engine arrives.
+imports mlx. They are NOT imported here. `import knurlogic.engine.mtp`
+stays free; `from knurlogic.engine.mtp import loop` is where the engine
+arrives.
+
+  _artifacts.py       what an artifact HAS: a head, graft weights (stdlib)
+  registry.py         model_type -> head spec, built from the family
+                      manifests (engine/families/); the heads live there
+  loop.py             one request: prefill, seed the head, draft and verify
+  batch_loop.py       many requests in one batch (MTPBatch, admit)
+  batch_generator.py  mlx-lm's BatchGenerator contract over batch_loop,
+                      incl. segment checkpoints and the cache report
+  caches.py           snapshot and rollback for a speculative step
+  capture.py seed.py sampling.py pipeline.py   the pieces those share
+  cluster/            drafting across a pipeline ring -- NOT WIRED yet
 
 WHOSE CODE THIS IS. The drafting half was written by the maintainer in his exo fork and
 in vqlab, and upstream exo-explore/exo has none of it -- 0 files under
