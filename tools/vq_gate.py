@@ -240,13 +240,18 @@ def side(which: str, artifact: str, bundle: str, out: str,
     tok = load_tokenizer(art, eos_token_ids=config.get("eos_token_id"))
     ids = mx.array(tok.encode(prompt))[None]
     cache = make_prompt_cache(model)
-    logits = model(ids, cache=cache)
+    def fwd(x):
+        # An mlx-vlm-shaped bundle (GLM) returns an output object.
+        out = model(x, cache=cache)
+        return getattr(out, "logits", out)
+
+    logits = fwd(ids)
     prompt_logits = logits.astype(mx.float32)
     nxt = mx.argmax(logits[:, -1, :], axis=-1)
     toks = []
     for _ in range(n):
         toks.append(int(nxt.item()))
-        logits = model(nxt[:, None], cache=cache)
+        logits = fwd(nxt[:, None])
         nxt = mx.argmax(logits[:, -1, :], axis=-1)
     mx.eval(prompt_logits)
     np.savez(out, logits=np.array(prompt_logits), tokens=np.array(toks))

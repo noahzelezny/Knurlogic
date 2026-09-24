@@ -65,8 +65,22 @@
     "VQ_IDX_MEMO"
    ],
    "runtime_change": true,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/GLM-5.3-Flash-VQ-2.7bpw",
+    "bundle_sha256": "cc6dbf41fe5e675de299f6926ddfb02794b98af76bbcd17e9d81ad59df6b3009",
+    "date": "2026-09-23T20:30:08",
+    "knobs": {
+     "VQ_DENSE_SS": "0"
+    },
+    "machine": "M4 Max (NozzleBook), mlx 0.31.2, mlx-lm 0.31.3; bundle side with mlx-vlm 0.6.17 --no-deps for its config helper"
+   }
   },
   "TheDrainFlorist/GLM-5.3-Flash-VQ-3.1bpw": {
    "generation": "arc6-no-flags",

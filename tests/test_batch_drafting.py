@@ -295,3 +295,31 @@ def test_failed_admission_can_fail(monkeypatch):
     gen.insert(prompts[:1], max_tokens=[5])
     prs, _ = gen.next()
     assert not any(isinstance(r.progress, Exception) for r in prs)
+
+
+def test_a_failed_decode_step_fails_its_rows_not_the_server(monkeypatch):
+    """An exception in a decode step used to end the generation thread too.
+    The rows in the step get it as progress; the next request still runs."""
+    from knurlogic.engine.mtp import batch_generator as bg
+    model, head, prompts = _tiny(512)
+    gen = bg.MTPBatchGenerator(model, head, prefill_step_size=16)
+    (uid,) = gen.insert(prompts[:1], max_tokens=[5])
+    real = gen._batch.step
+    monkeypatch.setattr(gen._batch, "step", lambda: (_ for _ in ()).throw(
+        RuntimeError("decode boom")))
+    errs = []
+    for _ in range(5):
+        prs, _ = gen.next()                         # must not raise
+        errs += [r.progress for r in prs if isinstance(r.progress, Exception)]
+    assert [str(e) for e in errs] == ["decode boom"]
+    gen.remove([uid])
+    monkeypatch.setattr(gen._batch, "step", real)
+    (u2,) = gen.insert(prompts[1:2], max_tokens=[3])
+    done = False
+    for _ in range(50):
+        _, grs = gen.next()
+        done = done or any(r.uid == u2 and r.finish_reason for r in grs)
+        if done:
+            break
+    assert done
+    gen.close()

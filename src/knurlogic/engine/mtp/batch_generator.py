@@ -510,8 +510,21 @@ class MTPBatchGenerator(BatchGenerator):
         if not len(self._batch):
             return prompt_responses, []
 
-        with mx.stream(self._stream):
-            row_steps = self._batch.step()
+        try:
+            with mx.stream(self._stream):
+                row_steps = self._batch.step()
+        except Exception as e:
+            # Same rule as a failed admission: the rows in this step fail
+            # their own requests; the generation thread lives on.
+            logger.exception("a decode step failed; failing its %d rows",
+                             len(self._batch))
+            uids = list(self._batch.uids)
+            self._batch.remove(uids)
+            for u in uids:
+                self._rows.pop(u, None)
+                self._ckpt_pending.pop(u, None)
+                self._failed[u] = e
+            return prompt_responses + self._failed_responses(), []
 
         out: List[GenerationBatch.Response] = []
         finished = []
