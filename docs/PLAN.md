@@ -15,7 +15,7 @@ trapped in forks of both.
 
 ## What is true now
 
-    engine/       seam.py over mlx-lm's server; drafting on single requests
+    engine/       serve/ over mlx-lm's server; drafting on single requests
                   (stream_generate swap) AND batches (MTPBatchGenerator);
                   vendored architectures; overrides
     machine/      64 artifacts found across every store; residency in every
@@ -150,7 +150,7 @@ which. In short:
   running server; the GEMM/numerics flags are compiled into Metal source at
   import and need a restart; the prompt chunk and concurrency are server
   argv, read once.
-* **Version skew is the seam's job**: mlx-lm 0.31.3 runs `model_file`
+* **Version skew is engine/serve/load.py's job**: mlx-lm 0.31.3 runs `model_file`
   unconditionally, 0.32.0 raises without `trust_remote_code=`.
 * **Tool calling**: all 54 templates swept, none silently unparsed (40
   qwen3_coder, 7 glm47, 3 gemma4, 1 json_tools, 3 none).

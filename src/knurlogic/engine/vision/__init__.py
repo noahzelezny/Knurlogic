@@ -235,7 +235,7 @@ class Family(Protocol):
 
 # --- what is being served ------------------------------------------------------
 # critique C4: the page and the MCP (P5) must say whether the served model
-# sees images without importing seam.py. The serve path (P4) sets this when
+# sees images without importing engine/serve. The serve path (P4) sets this when
 # a vision family is built and clears it on unload; P5 only reads it.
 
 _SERVED_SPEC: Optional[VisionSpec] = None

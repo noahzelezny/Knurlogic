@@ -3,8 +3,9 @@
 A test enforces that boundary: anything outside engine/ that imports mlx
 fails the suite, so swapping the engine stays a change to this folder.
 
-  seam.py          the one place that calls mlx-lm and mlx-vlm: load, serve,
-                   memory, the live knobs, and installing drafting
+  serve/           the one place that calls mlx-lm and mlx-vlm: load, serve,
+                   memory, the live knobs, and each change knurlogic makes to
+                   mlx-lm's server in its own module (see serve/__init__.py)
   mtp/             multi-token-prediction drafting, sequential and batched.
                    Its front door (`knurlogic.engine.mtp`) is stdlib only, so
                    asking whether an artifact has a head costs no mlx import
@@ -13,8 +14,6 @@ fails the suite, so swapping the engine stays a change to this folder.
   vq/              knurlogic's own VQ runtime; serves a rung only once
                    tools/vq_gate.py proves it bit-identical to the rung's
                    published model.py (rungs.json)
-  cachereport.py   what the prompt cache actually did, per request, for
-                   usage.knurlogic.cache
   architectures/   model files vendored from mlx-lm / mlx-vlm, pinned by
                    digest (PROVENANCE.md says which build each came from)
   arch.py          which architecture a model_type needs, and whether it is
@@ -26,5 +25,5 @@ fails the suite, so swapping the engine stays a change to this folder.
   smoke.py         generates a token and proves where the code came from
 
 Depends on nothing else in knurlogic. Importing this package imports no mlx;
-only calling into seam.py or mtp's engine-side modules does.
+only calling into serve/ or mtp's engine-side modules does.
 """

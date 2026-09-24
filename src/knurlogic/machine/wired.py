@@ -170,7 +170,7 @@ def detected_working_set_bytes() -> int:
     which is the footgun this package exists to remove.
     """
     try:
-        from knurlogic.engine.seam import memory
+        from knurlogic.engine.serve import memory
         return int(memory().get("working_set_bytes") or 0)
     except Exception:
         return 0
