@@ -116,31 +116,31 @@ def test_the_server_gets_the_drafting_generator_only_for_the_headed_model():
     artifact without a head) gets mlx-lm's generator untouched."""
     import types
     from mlx_lm.generate import BatchGenerator
-    from knurlogic.engine import seam as engine
+    from knurlogic.engine.serve import drafting, state
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
 
     model, head, _ = _tiny(512)
     other, _, _ = _tiny(512)
     srv = types.SimpleNamespace(BatchGenerator=BatchGenerator,
                                 _make_sampler=lambda args, tok: (lambda x: x))
-    saved = dict(engine._DRAFT), dict(engine._SERVED)
+    saved = dict(state.DRAFT), dict(state.SERVED)
     try:
-        engine._DRAFT.update(head=head, on=True, batch_installed=False)
-        engine._SERVED["provider"] = types.SimpleNamespace(model=model)
-        engine._install_batch_drafting(srv)
+        state.DRAFT.update(head=head, on=True, batch_installed=False)
+        state.SERVED["provider"] = types.SimpleNamespace(model=model)
+        drafting.install_batch(srv)
         g = srv.BatchGenerator(model, prefill_step_size=16)
         assert isinstance(g, MTPBatchGenerator)
         g.close()
         g = srv.BatchGenerator(other, prefill_step_size=16)
         assert type(g) is BatchGenerator
         g.close()
-        engine._DRAFT["on"] = False                      # --no-draft
+        state.DRAFT["on"] = False                      # --no-draft
         g = srv.BatchGenerator(model, prefill_step_size=16)
         assert type(g) is BatchGenerator
         g.close()
     finally:
-        engine._DRAFT.clear(); engine._DRAFT.update(saved[0])
-        engine._SERVED.clear(); engine._SERVED.update(saved[1])
+        state.DRAFT.clear(); state.DRAFT.update(saved[0])
+        state.SERVED.clear(); state.SERVED.update(saved[1])
 
 
 def test_a_built_sampler_carries_the_parameters_verification_needs():

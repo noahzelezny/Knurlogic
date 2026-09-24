@@ -190,7 +190,7 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=()):
     which of those settings did not survive the switch. Doing the load and
     staying quiet about that would be worse than not offering it.
     """
-    from knurlogic.engine import seam as engine
+    from knurlogic.engine import serve as engine
     from knurlogic.machine import loaded as L
 
     def _drift(path: str) -> dict:
@@ -317,7 +317,7 @@ def machine_settings():
 def _preview(path: str, tune: str, working_set_gib=None) -> dict:
     """What this artifact WOULD resolve to, and which of those can still be
     chosen. Nothing is loaded and nothing is set: this only reads."""
-    from knurlogic.engine import seam as engine
+    from knurlogic.engine import serve as engine
     from knurlogic.tuning import settings as S
     from knurlogic.machine import wired
     from knurlogic.machine.artifact import Artifact

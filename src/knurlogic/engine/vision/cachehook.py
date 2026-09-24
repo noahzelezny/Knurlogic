@@ -26,7 +26,7 @@ between `_tokenize` and `insert_segments` (in `_make_state_machine`, say),
 nothing admits the row and the pins stay forever. `pending()` records the
 pins a tokenize took; `claim()` is called once `insert_segments` has queued
 the row (from then on the generator's admit/remove releases them);
-`sweep()` releases whatever was never claimed. The seam calls sweep at the
+`sweep()` releases whatever was never claimed. engine/serve/vision.py calls sweep at the
 top of every `_tokenize` -- the generator thread is sequential, so a pending
 entry still unclaimed when the next request is tokenized was abandoned.
 `install_admit(cls)` wraps a batch generator class's insert_segments to
@@ -114,7 +114,7 @@ def install(target: Any, store: StoreGetter | StoreLike) -> None:
     class itself, or an instance. The class's mutators are wrapped once
     (idempotent); each instance keeps its own refcount. `store` is the
     ImageStore, or a zero-argument callable returning the current one (or
-    None when nothing with vision is served) -- the seam passes a getter,
+    None when nothing with vision is served) -- serve/vision.py passes a getter,
     since the store changes with every load."""
     getter: StoreGetter = store if callable(store) and not hasattr(
         store, "pinned") else (lambda s=store: s)
