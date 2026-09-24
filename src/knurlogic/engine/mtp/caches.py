@@ -47,7 +47,7 @@ def is_attention_composite(c) -> bool:
     the composite rolls back like one: trim each member by its offset
     delta. A CacheList holding anything non-attention falls through to
     the TypeError — its rollback is unproven.
-    (Vendored from vqlab/mtp/caches.py, same provenance as heads/glm5.py.)"""
+    (Vendored from vqlab/mtp/caches.py, same provenance as families/glm5/heads/glm5.py.)"""
     subs = getattr(c, "caches", None)
     return (subs is not None and len(subs) > 0
             and all(is_attention(s) or is_batch_attention(s) for s in subs))

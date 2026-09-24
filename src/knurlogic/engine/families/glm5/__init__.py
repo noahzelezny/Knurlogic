@@ -31,7 +31,7 @@ MANIFEST = {
                 # the VLM wrapper's config says glm5_next, the bound
                 # LanguageModel's TextConfig says glm5_next_text
                 names=["glm5_next", "glm5_next_text"],
-                head="knurlogic.engine.mtp.heads.glm5:MTPHeadGlm5",
+                head="knurlogic.engine.families.glm5.heads.glm5:MTPHeadGlm5",
                 capture="norm", draft_cache="KVCache",
                 sidecar_name="mtp-head-q6.safetensors",
                 cache_semantics="reassign"),

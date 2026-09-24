@@ -26,7 +26,7 @@ def _tiny(vocab):
     from knurlogic.engine import register
     register.register("qwen3_5")
     from mlx_lm.models import qwen3_5 as arch
-    from knurlogic.engine.mtp.heads.qwen35 import MTPHeadQwen35
+    from knurlogic.engine.families.qwen.heads.qwen35 import MTPHeadQwen35
 
     mx.random.seed(0)
     tc = dict(model_type="qwen3_5", hidden_size=128, intermediate_size=256,
