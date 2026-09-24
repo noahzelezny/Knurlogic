@@ -64,7 +64,7 @@ knurlogic = ["interfaces/web/*.html", "interfaces/web/*.md",
              "engine/overrides/*.json", "engine/overrides/**/*.py",
              "engine/overrides/**/*.json",
              "engine/vq/*.json", "engine/vq/*.md",
-             "engine/vision/*/PROVENANCE.md"]
+             "engine/families/*/vision/PROVENANCE.md"]
 
 [tool.knurlogic.pins]
 # One home for the facts tests/test_pins.py holds the installed stack to.

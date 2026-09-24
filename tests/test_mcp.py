@@ -180,7 +180,7 @@ def test_deps_reads_the_fix_not_the_version(tmp_path):
 
 def test_glm5_needs_nothing_from_mlx_vlm_any_more():
     """It used to import nine mlx-vlm modules, which is why GLM-5.3 could
-    not load from a plain install. They are vendored now (engine/vision/glm5)
+    not load from a plain install. They are vendored now (engine/families/glm5/vision)
     and the derived list is empty -- if an import from mlx_vlm creeps back
     into the vendored architecture, this names it."""
     from knurlogic.machine.deps import glm5_siblings

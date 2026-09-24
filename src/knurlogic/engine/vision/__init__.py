@@ -14,7 +14,8 @@ is the prose home of what is written here, with the data shapes.
   request.py    a chat request with images -> the cache key (generator thread)
   cachehook.py  pins an image while a cached conversation still holds it
   quant.py      quantizes a tower's layers to match its checkpoint (mlx)
-  qwen/ gemma4/ glm5/   one package per family: tower, preprocessing, embed
+  (each family's tower, preprocessing and embed live in its folder under
+   engine/families/<family>/vision/, named by its manifest)
 
 WHY THIS FRONT DOOR IS STDLIB ONLY. The page and the MCP (interfaces/) read
 `VisionSpec` and `served_vision()` to say whether the served model sees

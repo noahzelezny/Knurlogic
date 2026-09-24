@@ -5,7 +5,7 @@
 
 gemma4_vision_tower.npz   mlx-vlm's own gemma4 VisionModel, tiny random
                           weights (seed 0), on one tiny image -- holds
-                          engine/vision/gemma4/vision.py's vendored port to
+                          engine/families/gemma4/vision/vision.py's vendored port to
                           the reference tower.
 gemma4_mask_overlay.npz   mlx-vlm's own
                           `Gemma4TextModel._apply_blockwise_bidirectional_overlay`

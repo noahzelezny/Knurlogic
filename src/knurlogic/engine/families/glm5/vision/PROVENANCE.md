@@ -86,7 +86,7 @@ full HF image processor -- exactly the "transformers bases" the design says
 to remove, and `_flatten_images` itself has no such dependency (pure list
 recursion, no `self`, no import at all beyond nothing). So only the
 function is copied here, not the file, and `transformers` never becomes an
-import of anything under `engine/vision/glm5/`.
+import of anything under `engine/families/glm5/vision/`.
 
 ## The `vision_model.*` -> `vision_tower.*` remap
 
