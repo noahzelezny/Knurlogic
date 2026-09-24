@@ -332,6 +332,14 @@ Before merging to main:
      as the tool-call dialect is (serve/load.py tool_support); the mapping
      ladder -> native kwargs is per dialect. New module serve/thinking.py
      is the plug point -- nothing touches chat_template_kwargs today.
+   - BUILT 2026-09-24 (engine/serve/thinking.py, dialects in the family
+     manifests; tests render the released templates). Not yet measured on
+     a served model: needs knurlogic serving a rung on a free box -- exo
+     cannot stand in, it IGNORES chat_template_kwargs (Flash-Next 4.4 via
+     exo still reasoned with enable_thinking=false, 2026-09-24), so no
+     client can turn thinking off through exo today. Measure per dialect,
+     n>=3 per arm: reasoning tokens and answer quality at each level, and
+     GLM's closed-think-block "off" before offering it.
    - Return reasoning as `reasoning_content`; count it in
      completion_tokens_details.reasoning_tokens; the MCP `models` tool
      lists each model's native levels.
