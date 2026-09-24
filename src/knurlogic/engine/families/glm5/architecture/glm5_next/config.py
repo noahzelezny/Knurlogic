@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.base import BaseModelConfig
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.base import BaseModelConfig
 
 
 @dataclass

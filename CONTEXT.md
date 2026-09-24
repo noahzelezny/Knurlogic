@@ -47,6 +47,10 @@ this list; nothing depends on a folder below it.
       engine/       what runs a model. The ONLY folder that may import mlx --
                     a test fails otherwise. Serving (serve/), drafting
                     (mtp/), vendored architectures, overrides.
+                    engine/families/<family>/ holds everything about one
+                    model family; adding a family is one folder plus one line
+                    in engine/families/__init__.py (see its docstring for the
+                    checklist).
       machine/      what is true about this box, read rather than assumed:
                     artifacts on disk, what is loaded, memory, the wired
                     limit and the one load budget, installed dependencies.
@@ -68,6 +72,7 @@ this list; nothing depends on a folder below it.
 | what is true now, and what to do next | `docs/PLAN.md` |
 | why a default is what it is | `src/knurlogic/tuning/settings.py`, beside the constant |
 | what knurlogic stands on, and which forks | `knurlogic deps`; `machine/deps.py` `PIECES` |
+| everything about one model family (architecture, vision, heads, settings) | `src/knurlogic/engine/families/<family>/` -- `__init__.py` is its manifest |
 | what runs a model, and each change to mlx-lm's server | `src/knurlogic/engine/serve/` -- its `__init__.py` is the index |
 | how drafting works | `engine/mtp/` — `batch_loop.py` and `batch_generator.py` |
 | what an agent gets | `src/knurlogic/interfaces/mcp.py` |

@@ -73,9 +73,9 @@ def test_non_vq_artifact_gets_only_the_generic_knobs():
 def test_vendored_architecture_wins_over_site_packages():
     """Vendoring is only meaningful if the vendored copy is the one used."""
     from knurlogic.engine import arch
-    from knurlogic.engine.register import ARCH_DIR
+    from knurlogic.engine.register import source_for
     for row in arch.check("qwen4_exp_text"):
-        if (ARCH_DIR / f"{row.module}.py").is_file():
+        if source_for(row.module)[0] is not None:
             assert row.vendored, f"{row.module} should resolve to the vendored copy"
 
 

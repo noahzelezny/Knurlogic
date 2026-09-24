@@ -7,7 +7,7 @@
 
 The trunk half -- MRoPE threaded through attention as `position_ids`
 [3, B, L] and per-row `rope_delta` -- lives in the architecture files
-(engine/architectures/qwen3_5.py, qwen4_exp.py; qwen3_5_moe inherits).
+(engine/families/qwen/architecture/qwen3_5.py, qwen4_exp.py; qwen3_5_moe inherits).
 PROVENANCE.md records every vendored line. Design: docs/design/vision.md D4.
 """
 from __future__ import annotations

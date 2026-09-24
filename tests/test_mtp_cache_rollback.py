@@ -16,7 +16,7 @@ mx = pytest.importorskip("mlx.core")
 
 def _batched_list(rows=2, steps=5):
     from mlx_lm.models.cache import BatchKVCache
-    from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.cache \
+    from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.cache \
         import CacheList
     cl = CacheList(BatchKVCache([0] * rows), BatchKVCache([0] * rows))
     for _ in range(steps):
@@ -44,7 +44,7 @@ def test_batched_cachelist_rollback_can_fail():
     """Holding anything that is not an attention cache, the composite is
     refused, not guessed at."""
     from knurlogic.engine.mtp import caches
-    from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.cache \
+    from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.cache \
         import ArraysCache, CacheList
     with pytest.raises(TypeError):
         caches.snapshot([CacheList(ArraysCache(size=2))])

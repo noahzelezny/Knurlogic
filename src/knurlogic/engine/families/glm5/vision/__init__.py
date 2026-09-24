@@ -2,7 +2,7 @@
 
 The Family that `registry.build("glm5_next", ...)` resolves to
 (`docs/design/vision-contracts.md`). Its tower is
-`knurlogic.engine.architectures.glm5_next.vision.VisionModel`, the SAME
+`knurlogic.engine.families.glm5.architecture.glm5_next.vision.VisionModel`, the SAME
 class the trunk's `Model.vision_tower` would build -- the whole point of
 package P3 (`docs/design/vision.md` v2, work package table) is that
 class no longer needs mlx-vlm installed to import, and this Family loads it
@@ -47,7 +47,7 @@ class Glm5VisionFamily:
 
     def __init__(self, config: Dict[str, Any], image_mean=None,
                  image_std=None):
-        from knurlogic.engine.architectures.glm5_next.config import VisionConfig
+        from knurlogic.engine.families.glm5.architecture.glm5_next.config import VisionConfig
 
         self.image_mean = tuple(image_mean or self.IMAGE_MEAN)
         self.image_std = tuple(image_std or self.IMAGE_STD)
@@ -85,7 +85,7 @@ class Glm5VisionFamily:
 
     def _build_tower(self):
         if self.tower_model is None:
-            from knurlogic.engine.architectures.glm5_next.vision import VisionModel
+            from knurlogic.engine.families.glm5.architecture.glm5_next.vision import VisionModel
             self.tower_model = VisionModel(self.vision_config)
         return self.tower_model
 

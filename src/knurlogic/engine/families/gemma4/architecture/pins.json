@@ -1,0 +1,15 @@
+{
+  "gemma4": {
+    "sha256": "086fb0e4c06df6cf8ad14efbf7956fff744c9835d169e064887863df551e549d",
+    "text_path_held_by": "tools/vision_gate.py on the M4, 2026-09-23: text answer, image answer (red, 42), five-turn cache reuse, recall -- all PASS. The only edit forwards mm_mask; with mm_mask=None the call is upstream's.",
+    "validated_on_artifact": "TheDrainFlorist--gemma-4-e4b-it-VQ-PLE",
+    "validated_with_mlx_lm": "0.31.3"
+  },
+  "gemma4_text": {
+    "sha256": "e05a49cc3cf75ea2f57d2495f4feeb0ab89a4e07ecdcad732dd305151ec6021a",
+    "text_path_held_by": "vision P2 added the mm_mask image-block overlay; the e2e pass (tests/test_vision_e2e.py) made it chunk-aware. With mm_mask=None (every text request) _make_masks takes the pre-P2 path unchanged; no text-path snapshot golden exists for gemma. Real-rung re-validation pending",
+    "text_path_of": "f3f8c047c2ac31306267e8de61bb06d2952f2bf3fd4adbbb8ce25b952ccac01f",
+    "validated_on_artifact": "TheDrainFlorist--gemma-4-e4b-it-VQ-PLE",
+    "validated_with_mlx_lm": "0.32.0"
+  }
+}

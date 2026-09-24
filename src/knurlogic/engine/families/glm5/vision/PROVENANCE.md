@@ -3,8 +3,8 @@
 > **Superseded 2026-09-23.** `_vendor/` (mlx-vlm 0.7.1 siblings) is gone.
 > The released GLM rungs are built on mlx-vlm 0.6.17, which 0.7.1 cannot
 > load, so glm5_next and its whole import closure were re-vendored from
-> 0.6.17 under `engine/architectures/glm5_next/_mlx_vlm/` -- see
-> `engine/architectures/PROVENANCE.md`. The tower this family builds is
+> 0.6.17 under `engine/families/glm5/architecture/glm5_next/_mlx_vlm/` -- see
+> `engine/families/glm5/architecture/PROVENANCE.md`. The tower this family builds is
 > that package's `vision.VisionModel`. Preprocessing now normalizes with the
 > artifact's image_mean/image_std (CLIP's by default), as
 > Glm5NextImageProcessor does. The record below is kept as history.
@@ -16,8 +16,8 @@ to a vendored file's imports. Design: `docs/design/vision.md` v2. Contracts:
 
 ## Why this exists
 
-`knurlogic.engine.architectures.glm5_next` (already vendored, taken from
-mlx-vlm 0.7.1, see `../../architectures/PROVENANCE.md`) is only *registered*
+`knurlogic.engine.families.glm5.architecture.glm5_next` (already vendored, taken from
+mlx-vlm 0.7.1, see `../architecture/PROVENANCE.md`) is only *registered*
 under the fake package name `mlx_vlm.models.glm5_next`
 (`knurlogic.engine.register`, `ARCH_HOST = {"glm5_next": "mlx_vlm"}`); its
 own source uses relative imports (`from ..cache import ...`) that resolve
@@ -49,7 +49,7 @@ All taken 2026-09-23 from the **mlx-vlm 0.7.1** PyPI wheel
 (`mlx_vlm-0.7.1-py3-none-any.whl`, downloaded with
 `pip download mlx-vlm==0.7.1 --no-deps`), MIT, Copyright (c) 2025 Prince
 Canuma -- the same release `glm5_next/` itself was vendored from
-(`../../architectures/PROVENANCE.md`), so tower and siblings are from one
+(`../architecture/PROVENANCE.md`), so tower and siblings are from one
 consistent snapshot.
 
 | file | from (`mlx_vlm/`) | edit |
@@ -97,7 +97,7 @@ every `vision_model.*` key straight out of the artifact's own
 `model.safetensors.index.json` shards and strips the prefix before handing
 the dict to a STANDALONE `VisionModel(vision_config)` (never attached to
 any trunk `Model`) via `VisionModel.sanitize` + `tree_unflatten`. The
-vendored `engine/architectures/glm5_next/vision.py` itself does no
+vendored `engine/families/glm5/architecture/glm5_next/vision.py` itself does no
 remapping and knows nothing about being loaded this way -- it is the exact
 class `Model.vision_tower` would have built, just built and loaded outside
 the trunk (contracts: "standalone tower... the trunk's sanitize keeps
@@ -106,11 +106,11 @@ dropping vision keys").
 ## Where 0.7.1 differs from mlx-vlm 0.6.17 by design (risk #5)
 
 `docs/design/vision.md` risk 5 says G1 for GLM must document this rather
-than hide it: `engine/architectures/glm5_next/vision.py`'s
+than hide it: `engine/families/glm5/architecture/glm5_next/vision.py`'s
 `_limited_swiglu` (clip-then-silu on both gate and up, `swiglu_limit`) and
 its patch/merge path do not exist in mlx-vlm 0.6.17's glm5_next at all --
 0.6.17 predates this GLM release; 0.7.1 is the first version that carries
-it (`../../architectures/PROVENANCE.md`: "upstream was AHEAD, not behind").
+it (`../architecture/PROVENANCE.md`: "upstream was AHEAD, not behind").
 There is therefore no 0.6.17 golden to diff against for GLM's tower; G1 for
 this family has no upstream reference to run in the exo interpreter (open
 issue below).

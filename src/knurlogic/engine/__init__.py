@@ -9,19 +9,19 @@ fails the suite, so swapping the engine stays a change to this folder.
   mtp/             multi-token-prediction drafting, sequential and batched.
                    Its front door (`knurlogic.engine.mtp`) is stdlib only, so
                    asking whether an artifact has a head costs no mlx import
-  families/        one folder per model family: its MANIFEST (architectures,
-                   model_type spellings, heads, prefill widths) and its own
-                   code (vision/ today). Adding a family = one folder + one
-                   line in families/__init__.py
+  families/        one folder per model family, everything knurlogic knows
+                   about it: MANIFEST (architectures, model_type spellings,
+                   heads, prefill widths), architecture/ (vendored model
+                   code + PROVENANCE, pins, licenses), vision/, heads/.
+                   Adding a family = one folder + one line in
+                   families/__init__.py
   vision/          images as context, family-agnostic: contracts, the cache
                    key, the image store, the request path
   vq/              knurlogic's own VQ runtime; serves a rung only once
                    tools/vq_gate.py proves it bit-identical to the rung's
                    published model.py (rungs.json)
-  architectures/   model files vendored from mlx-lm / mlx-vlm, pinned by
-                   digest (PROVENANCE.md says which build each came from)
   arch.py          which architecture a model_type needs, and whether it is
-                   present -- the one map of how configs spell a family
+                   present (the maps are built from the family manifests)
   register.py      puts vendored architectures in front of installed ones
   override.py      replaces a module inside mlx-lm, mlx-vlm or exo without
   overrides/       forking it; the files it serves live in overrides/

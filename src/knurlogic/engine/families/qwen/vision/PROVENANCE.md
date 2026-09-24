@@ -16,7 +16,7 @@ own classes (`tests/goldens/build_qwen.py`), so the tests run without it.
 | `family.py` key mapping | `qwen3_5/qwen3_5.py:16-25` `sanitize_key` (vision prefixes only) | `02bb994533e53589d9b1ee3623a79516e2e976bad34ebe533091c4c4af1c2ebd` | only the `model.visual` / `model.language_model.visual` / `vision_tower` prefixes |
 | `family.py` merge | `qwen3_5/qwen3_5.py:121-143` `merge_input_ids_with_image_features` | same | replaced by P0's `scatter.merge` (by sentinel; P0 holds its `masked_scatter` to the reference) |
 
-## The trunk half (engine/architectures, not in this folder)
+## The trunk half (../architecture/, not in this folder)
 
 | file | what | from |
 |---|---|---|

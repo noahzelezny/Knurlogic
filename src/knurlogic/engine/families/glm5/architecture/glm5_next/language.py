@@ -3,20 +3,20 @@ from typing import Any, Optional
 import mlx.core as mx
 import mlx.nn as nn
 
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.base import (
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.base import (
     LanguageModelOutput,
     create_attention_mask,
     create_ssm_mask,
     scaled_dot_product_attention,
 )
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.cache import ArraysCache, CacheList, KVCache
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.deepseek_v32.language import DeepseekV32MoE
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.deepseek_v32.language import Model as DSV32Model
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.deepseek_v4.hyper_connection import HyperConnection, hc_expand
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.gated_delta import gated_delta_update
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.mla import MultiLinear
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.mlp import DeepseekMLP
-from knurlogic.engine.architectures.glm5_next._mlx_vlm.models.rope_utils import initialize_rope
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.cache import ArraysCache, CacheList, KVCache
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.deepseek_v32.language import DeepseekV32MoE
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.deepseek_v32.language import Model as DSV32Model
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.deepseek_v4.hyper_connection import HyperConnection, hc_expand
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.gated_delta import gated_delta_update
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.mla import MultiLinear
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.mlp import DeepseekMLP
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.rope_utils import initialize_rope
 from .config import ModelConfig, TextConfig
 
 

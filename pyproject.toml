@@ -59,7 +59,8 @@ where = ["src"]
 # installer that is not there. Recursive, since a real override mirrors its
 # target's path: overrides/exo/master/placement_utils.py.
 knurlogic = ["interfaces/web/*.html", "interfaces/web/*.md",
-             "engine/architectures/*.md", "engine/architectures/*.json",
+             "engine/families/*/architecture/*.md",
+             "engine/families/*/architecture/*.json",
              "engine/overrides/*.py", "engine/overrides/*.md",
              "engine/overrides/*.json", "engine/overrides/**/*.py",
              "engine/overrides/**/*.json",

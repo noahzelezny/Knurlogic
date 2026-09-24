@@ -30,27 +30,38 @@ import importlib.util
 import sys
 from pathlib import Path
 
-ARCH_DIR = Path(__file__).parent / "architectures"
 _installed: list = []
 
 
 def available() -> list:
-    """Architecture modules vendored here -- flat files AND packages."""
-    if not ARCH_DIR.is_dir():
-        return []
-    flat = {p.stem for p in ARCH_DIR.glob("*.py") if not p.stem.startswith("_")}
-    pkgs = {d.name for d in ARCH_DIR.iterdir()
-            if d.is_dir() and (d / "__init__.py").is_file()}
-    return sorted(flat | pkgs)
+    """Every architecture module a family manifest lists AND vendors --
+    flat files and packages, under engine/families/<family>/architecture/."""
+    from knurlogic.engine import families
+    return sorted(m for mf in families.manifests()
+                  for m in mf["architectures"] if source_for(m)[0] is not None)
 
 
 def source_for(name: str):
-    """(path, is_package) for a vendored architecture."""
-    pkg = ARCH_DIR / name
+    """(path, is_package) for a vendored architecture, found through the
+    family that lists it."""
+    from knurlogic.engine import families
+    fam = families.family_of_module(name)
+    if fam is None:
+        return None, False
+    d = families.architecture_dir(fam)
+    pkg = d / name
     if (pkg / "__init__.py").is_file():
         return pkg / "__init__.py", True
-    flat = ARCH_DIR / f"{name}.py"
+    flat = d / f"{name}.py"
     return (flat, False) if flat.is_file() else (None, False)
+
+
+def is_vendored_path(path) -> bool:
+    """Does this file live in one of knurlogic's vendored architecture dirs?"""
+    from knurlogic.engine import families
+    rp = str(Path(path).resolve())
+    return any(rp.startswith(str(d.resolve()) + "/")
+               for d in families.architecture_dirs())
 
 
 def _with_dependencies(names: list) -> list:

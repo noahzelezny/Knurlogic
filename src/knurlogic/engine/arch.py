@@ -75,15 +75,17 @@ def _load_pins() -> dict:
     whatever happens to be installed is exactly the habit this replaces:
     "it imports" is not the claim, "it ran and came from here" is.
     """
-    from knurlogic.engine.register import ARCH_DIR
-    f = ARCH_DIR / "PINS.json"
-    if not f.is_file():
-        return {}
     import json
-    try:
-        return {k: v["sha256"] for k, v in json.loads(f.read_text()).items()}
-    except Exception:
-        return {}
+    out = {}
+    for f in (d / "pins.json" for d in _families.architecture_dirs()):
+        if not f.is_file():
+            continue
+        try:
+            out.update({k: v["sha256"]
+                        for k, v in json.loads(f.read_text()).items()})
+        except Exception:
+            continue
+    return out
 
 
 PINNED_SHA256 = _load_pins()
@@ -180,7 +182,7 @@ def check(model_type: str, models_dir: Path | None = None) -> list:
     mlx-lm actually imports. The installed copy is reported only as a
     fallback, so a user without the vendored set still gets a useful answer.
     """
-    from knurlogic.engine.register import ARCH_DIR, source_for
+    from knurlogic.engine.register import source_for
 
     d = models_dir or _models_dir()
     rows = []

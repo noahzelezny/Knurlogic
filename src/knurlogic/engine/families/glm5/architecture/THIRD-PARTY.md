@@ -1,19 +1,15 @@
 # Third-party source vendored here
 
-Every `.py` in this directory is a copy of a model implementation from
-another project, taken deliberately and recorded in `PROVENANCE.md`. They are
-loaded into `sys.modules` by `knurlogic.register`; nothing is written into
-anyone's `site-packages`.
+Every module in this folder is a copy of a model implementation from
+another project, taken deliberately and recorded in `PROVENANCE.md`. They
+are loaded into `sys.modules` by `knurlogic.engine.register`; nothing is
+written into anyone's `site-packages`.
 
 ## Licenses
 
 | file | upstream project | license |
 |---|---|---|
-| `gemma4_text.py` | mlx-lm | MIT — Copyright © 2025 Apple Inc. |
-| `qwen3_5.py` | mlx-lm | MIT — Copyright © 2026 Apple Inc. |
-| `qwen3_5_moe.py` | mlx-lm | MIT — Copyright © 2026 Apple Inc. |
-| `qwen4_exp.py` | mlx-lm (via github.com/eauchs/mlx-lm) | MIT |
-| `glm5_next/` | mlx-vlm 0.7.1 | MIT |
+| `glm5_next/ (incl. _mlx_vlm/)` | mlx-vlm 0.6.17 | MIT — Copyright (c) 2025 Prince Canuma |
 
 Some files carry no copyright header upstream; they are covered by their
 project's MIT license regardless, and are listed here so the obligation is
