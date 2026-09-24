@@ -226,7 +226,7 @@ def _maybe_install_glm5_shim(spec: Any) -> bool:
     """
     if spec.name not in _GLM5_FAMILIES:
         return False
-    from . import glm5_shim
+    from knurlogic.engine.families.glm5.heads import glm5_shim
 
     installed = glm5_shim.install()
     if installed:
