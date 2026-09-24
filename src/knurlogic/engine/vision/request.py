@@ -200,12 +200,22 @@ class VisionServe:
         are dropped before the exception reaches the server."""
         parts = image_parts(request.messages)
         refs: List[Any] = []
+        before = self.encodes      # tokenize runs on the one generator thread
         try:
             for p in parts:
                 refs.append(self.ensure(image_source(p)))
             texts = [self.family.placeholder_text(r) for r in refs]
             req = dataclasses.replace(
                 request, messages=with_placeholders(request.messages, texts))
+            # The handler holds the ORIGINAL request; the cache report for
+            # this one must reach it (engine/cachereport.attach).
+            req._knurlogic_origin = request
+            # Tower runs THIS request caused (store misses), for its report.
+            req._knurlogic_encoded = self.encodes - before
+            try:                    # and on the original, whichever the
+                request._knurlogic_encoded = req._knurlogic_encoded
+            except Exception:       # cache hook ends up holding
+                pass
             prompt, segments, types, state = real(gen, tokenizer, req, args)
             key, seg_keys = K.expand_segments(segments, refs,
                                               self.spec.image_token_id)

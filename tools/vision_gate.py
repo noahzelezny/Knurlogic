@@ -161,6 +161,18 @@ def run(artifact: str, image_path: str, host: str, port: int) -> int:
                         check(prompt - cached < img_tokens,
                               f"turn {turn} did not re-prefill the image "
                               f"({prompt - cached} new < {img_tokens})")
+                        # The engine's own account (usage.knurlogic.cache),
+                        # when the batch engine served the turn: nothing the
+                        # trie offered was thrown away, the tower did not run.
+                        rep = (u.get("knurlogic") or {}).get("cache")
+                        if rep is not None:
+                            check(rep["discarded"] == 0 and
+                                  rep["images"]["encoded"] == 0 and
+                                  rep["images"]["in_cached_span"] >= 1,
+                                  f"turn {turn} engine report: via "
+                                  f"{rep['via']}, discarded "
+                                  f"{rep['discarded']}, encoded "
+                                  f"{rep['images']['encoded']}")
                     convo.append({"role": "assistant", "content": said(r)})
                     convo.append({"role": "user",
                                   "content": f"Turn {turn + 1}. Say ok."})
