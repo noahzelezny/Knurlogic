@@ -1,8 +1,8 @@
 """engine/families/: one folder per model family, listed explicitly.
 
-The maps the generic engine reads are BUILT from the family manifests.
-Until every reader has switched over, the built maps must equal the
-hand-kept tables they replace -- the migration's safety net.
+The maps the generic engine reads are BUILT from the family manifests;
+there are no hand-kept tables. These tests hold the manifests to their
+contract and make a listed family tested by being listed.
 """
 import fnmatch
 import subprocess
@@ -61,12 +61,14 @@ def test_the_spellings_that_have_bitten_before_resolve():
     assert arch.ARCH_DEPENDS_ON == {"qwen3_5_moe": ["qwen3_5"],
                                     "gemma4": ["gemma4_text"]}
     assert arch.ARCH_HOST == {"glm5_next": "mlx_vlm"}
-    assert settings.PREFILL_CHUNK_BY_FAMILY == {
+    assert {k: v[0] for k, v in settings.PREFILL_CHUNK_MEASURED.items()} == {
         "glm5_next": 2048, "qwen3_5": 4096, "qwen3_5_moe": 4096}
     w, why = settings.prefill_chunk_for("qwen3_5_text")
     assert w == 4096 and why.startswith("measured for qwen3_5: ")
     assert set(vreg.FAMILIES) == {"qwen3_5", "qwen3_5_moe", "qwen4_exp",
-                                  "gemma4", "glm5_next"}
+                                  "gemma4", "gemma4_text", "glm5_next"}
+    assert vreg.family_of("gemma4_text") == "gemma4_text"
+    assert vreg.FAMILIES["gemma4_text"] == vreg.FAMILIES["gemma4"]
     assert {"glm5_next", "glm5_next_text", "qwen4_exp", "qwen3_5",
             "qwen3_5_moe"} <= set(mreg.FAMILIES)
 
@@ -78,7 +80,7 @@ def test_pins_are_not_empty_on_a_checkout():
     stop shipping (a moved file, a package-data glob that no longer
     matches) would pass silently. On a checkout they must load."""
     from knurlogic.engine import arch
-    assert arch.PINNED_SHA256, "PINS.json did not load: pin tests would skip"
+    assert arch.PINNED_SHA256, "pins.json did not load: pin tests would skip"
 
 
 def _package_data_globs():
@@ -92,7 +94,7 @@ def _package_data_globs():
 
 def test_every_data_file_in_the_package_ships():
     """A non-.py file under src/knurlogic that no package-data glob matches
-    is left out of the wheel, silently. PINS.json, PROVENANCE.md, rungs.json
+    is left out of the wheel, silently. pins.json, PROVENANCE.md, rungs.json
     and the page are all such files."""
     globs = _package_data_globs()
     pkg = SRC / "knurlogic"
@@ -117,7 +119,10 @@ def test_every_vision_family_has_an_end_to_end_rig():
     instead of quietly shipping untested."""
     sys.path.insert(0, str(ROOT / "tests"))
     import test_vision_e2e as e2e
-    assert set(e2e.FAMILIES) == set(families.build_maps()["vision"])
+    vision = families.build_maps()["vision"]
+    assert set(e2e.FAMILIES) <= set(vision)
+    # every tower builder is driven by at least one rig
+    assert {vision[a] for a in e2e.FAMILIES} == set(vision.values())
 
 
 def test_every_head_a_manifest_names_imports():
@@ -148,3 +153,15 @@ def test_every_architecture_registers_without_mlx_vlm():
     assert out.returncode == 0, out.stderr[-2000:]
     from knurlogic.engine import register
     assert out.stdout.strip() == str(sorted(register.available()))
+
+
+def test_every_pins_file_parses():
+    """arch._load_pins skips a file it cannot read, so ONE corrupt pins.json
+    would silently turn its family UNPINNED; the non-empty tripwire above
+    only catches all of them failing."""
+    import json
+    for d in families.architecture_dirs():
+        p = d / "pins.json"
+        assert p.is_file(), p
+        for mod, row in json.loads(p.read_text()).items():
+            assert "sha256" in row, (p, mod)
