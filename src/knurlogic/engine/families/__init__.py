@@ -25,6 +25,11 @@ used, so asking what a family supports imports no mlx. Its shape:
       head            the MTP head, or absent: {names, head, capture,
                       draft_cache, cache_semantics, sidecar_name}
   vision          {"build": "module:attr", "architectures": [...]}, or None
+  thinking        {dialect: {detect: {all: [...], none: [...]}, default,
+                  native: [[ladder level, native name, template kwargs]]}}
+                  -- keyed by CHAT-TEMPLATE DIALECT, not architecture: one
+                  module can ship templates with different controls. The
+                  ladder is OpenAI's: none minimal low medium high xhigh.
 
 ADDING A FAMILY, the whole checklist:
   1. engine/families/<family>/__init__.py with its MANIFEST, and one line
@@ -71,7 +76,7 @@ def manifests() -> list:
 def build_maps() -> dict:
     """The tables the generic engine reads, built from the manifests."""
     arch_for_type, host, depends, prefill = {}, {}, {}, {}
-    vision, heads = {}, {}
+    vision, heads, thinking = {}, {}, {}
     for m in manifests():
         for mod, a in m["architectures"].items():
             for t in a["model_types"]:
@@ -89,13 +94,17 @@ def build_maps() -> dict:
                 spec = {k: v for k, v in h.items() if k != "names"}
                 for n in h["names"]:
                     heads[n] = spec
+        for d, spec in (m.get("thinking") or {}).items():
+            if d in thinking:
+                raise ValueError(f"thinking dialect {d!r} claimed twice")
+            thinking[d] = spec
         v = m.get("vision")
         if v:
             for mod in v["architectures"]:
                 vision[mod] = v["build"]
     return {"arch_for_model_type": arch_for_type, "arch_host": host,
             "arch_depends_on": depends, "prefill_chunk": prefill,
-            "vision": vision, "heads": heads}
+            "vision": vision, "heads": heads, "thinking": thinking}
 
 
 def architecture_dir(family: str) -> Path:
