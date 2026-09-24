@@ -225,8 +225,22 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/Qwen3.5-397B-A17B-VQ-2.2bpw",
+    "bundle_sha256": "62b9eac33440b996062551d452fffc05100e859d7a6546babd634c7464d0d004",
+    "date": "2026-09-23T20:08:21",
+    "knobs": {
+     "VQ_DENSE_SS": "0"
+    },
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   },
   "TheDrainFlorist/Qwen3.5-397B-A17B-VQ-2.4bpw": {
    "generation": "arc6-no-flags",
@@ -439,8 +453,22 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/Qwen3.6-35B-A3B-VQ-3.4bpw",
+    "bundle_sha256": "62b9eac33440b996062551d452fffc05100e859d7a6546babd634c7464d0d004",
+    "date": "2026-09-23T19:59:24",
+    "knobs": {
+     "VQ_DENSE_SS": "0"
+    },
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   },
   "TheDrainFlorist/Qwen3.6-35B-A3B-VQ-3.8bpw": {
    "generation": "v2",
@@ -493,8 +521,24 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/Qwen3.6-35B-A3B-VQ-3.8bpw",
+    "bundle_sha256": "e7ac3e04f45065bf71fca78cf77aebbebdafbc8d13d8b06b6cedef4615526a36",
+    "date": "2026-09-23T20:00:48",
+    "knobs": {
+     "VQ_DECODE_BF16IO": "1",
+     "VQ_DENSE_SS": "0",
+     "VQ_GEMMSEG_BF16IO": "1"
+    },
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   },
   "TheDrainFlorist/Qwen3.6-35B-A3B-VQ-4.6bpw": {
    "generation": "v2",
@@ -547,8 +591,24 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/Qwen3.6-35B-A3B-VQ-4.6bpw",
+    "bundle_sha256": "e7ac3e04f45065bf71fca78cf77aebbebdafbc8d13d8b06b6cedef4615526a36",
+    "date": "2026-09-23T20:05:21",
+    "knobs": {
+     "VQ_DECODE_BF16IO": "1",
+     "VQ_DENSE_SS": "0",
+     "VQ_GEMMSEG_BF16IO": "1"
+    },
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   },
   "TheDrainFlorist/Qwen3.6-35B-A3B-VQ-5.4bpw": {
    "generation": "v2",
@@ -601,8 +661,24 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/Qwen3.6-35B-A3B-VQ-5.4bpw",
+    "bundle_sha256": "e7ac3e04f45065bf71fca78cf77aebbebdafbc8d13d8b06b6cedef4615526a36",
+    "date": "2026-09-23T20:07:15",
+    "knobs": {
+     "VQ_DECODE_BF16IO": "1",
+     "VQ_DENSE_SS": "0",
+     "VQ_GEMMSEG_BF16IO": "1"
+    },
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   },
   "TheDrainFlorist/Qwen3.8-27B-VQ-3.9bpw": {
    "generation": "v1.5",
@@ -655,8 +731,20 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/Qwen3.8-27B-VQ-3.9bpw",
+    "bundle_sha256": "8f470e550dd7737a9a5eb6ebf50152755df1718f4d6ba7258a844038dc084008",
+    "date": "2026-09-23T19:58:11",
+    "knobs": {},
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   },
   "TheDrainFlorist/Qwen3.8-27B-VQ-4.5bpw": {
    "generation": "v1.5",
@@ -709,8 +797,20 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/Qwen3.8-27B-VQ-4.5bpw",
+    "bundle_sha256": "8f470e550dd7737a9a5eb6ebf50152755df1718f4d6ba7258a844038dc084008",
+    "date": "2026-09-23T20:02:22",
+    "knobs": {},
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   },
   "TheDrainFlorist/Qwen3.8-27B-VQ-4.8bpw": {
    "generation": "v1.5",
@@ -763,8 +863,20 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/Qwen3.8-27B-VQ-4.8bpw",
+    "bundle_sha256": "8f470e550dd7737a9a5eb6ebf50152755df1718f4d6ba7258a844038dc084008",
+    "date": "2026-09-23T20:03:45",
+    "knobs": {},
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   },
   "TheDrainFlorist/Qwen3.8-Flash-Next-VQ-2.1bpw": {
    "generation": "v2",
@@ -973,8 +1085,22 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/Qwen3.8-Flash-Next-VQ-5.5bpw",
+    "bundle_sha256": "e2474b4fafff3d00b5085fea6440634df71b62976f16d8fe274eb2c20cb36064",
+    "date": "2026-09-23T19:56:54",
+    "knobs": {
+     "VQ_DENSE_SS": "0"
+    },
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   },
   "TheDrainFlorist/gemma-4-26b-a4b-it-VQ-6.2bpw": {
    "generation": "v1.5",
@@ -1025,8 +1151,22 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/gemma-4-26b-a4b-it-VQ-6.2bpw",
+    "bundle_sha256": "de30d29f2f8ac9c9f32474c57b90349c19b5befdde5ea76805c1c5567f6b2570",
+    "date": "2026-09-23T19:53:01",
+    "knobs": {
+     "VQ_DENSE_SS": "0"
+    },
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   },
   "TheDrainFlorist/gemma-4-e4b-it-VQ-PLE": {
    "generation": "v1.5",
@@ -1081,8 +1221,22 @@
    "inferred_knobs": [],
    "flags_absent_in_published": [],
    "runtime_change": false,
-   "verified": false,
-   "gate": null
+   "verified": true,
+   "gate": {
+    "pass": true,
+    "max_abs_logit_diff": 0.0,
+    "atol": 1e-05,
+    "tokens_equal": true,
+    "first_token_divergence": null,
+    "n_tokens": 40,
+    "repo": "TheDrainFlorist/gemma-4-e4b-it-VQ-PLE",
+    "bundle_sha256": "2e819b08083b83f4450fbf85bfe15a1c7ea91804fb88e59188aac4ee7a82e5cb",
+    "date": "2026-09-23T19:52:44",
+    "knobs": {
+     "VQ_DENSE_SS": "0"
+    },
+    "machine": "M4 Max (Laptop B), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+   }
   }
  }
 }
