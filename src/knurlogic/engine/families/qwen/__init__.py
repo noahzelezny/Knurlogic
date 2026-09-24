@@ -27,7 +27,7 @@ _QWEN35_PREFILL = (4096, "measured 2026-06-19: +115% prefill tok/s at 11k "
 # so the cheap path is correct: caches.check_snapshot_semantics returned
 # True against a loaded 27B (2026-08-31).
 _QWEN35_HEAD = dict(
-    head="knurlogic.engine.mtp.heads.qwen35:MTPHeadQwen35",
+    head="knurlogic.engine.families.qwen.heads.qwen35:MTPHeadQwen35",
     capture="norm", draft_cache="KVCache",
     sidecar_name="mtp-head-q6.safetensors",
     # load-bearing for speed: 'copy' deep-copies every GatedDeltaNet state
@@ -53,7 +53,7 @@ MANIFEST = {
             "model_types": ["qwen4_exp_text", "qwen4_exp"],
             "head": dict(
                 names=["qwen4_exp"],
-                head="knurlogic.engine.mtp.heads.qwen4_exp:MTPHead",
+                head="knurlogic.engine.families.qwen.heads.qwen4_exp:MTPHead",
                 # the activation INTO the hyper-connection mixer, the last
                 # thing before the final norm + lm_head. Every qwen4_exp
                 # cache slot is REASSIGNED, never mutated (verified by
