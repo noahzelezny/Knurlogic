@@ -274,6 +274,8 @@ class MTPBatchGenerator(BatchGenerator):
         # uid -> (entry, key) for the one reported in this next() call.
         self._ckpt_pending: dict = {}
         self._ckpt_ready: dict = {}
+        # uid -> exception, for rows whose admission raised (see _failed).
+        self._failed: dict = {}
         self._stats = stats if stats is not None else {}
         if name:
             logger.info("batch engine drafting with the %s MTP head", name)
@@ -461,13 +463,40 @@ class MTPBatchGenerator(BatchGenerator):
                                                       False))
         return out
 
+    def _failed_responses(self) -> List[PromptProcessingBatch.Response]:
+        """A row whose admission raised must fail ITS request, not the
+        server: an exception out of next() ends mlx-lm's generation thread,
+        and that request and every later one then hang with no error. The
+        server copies a prompt response's `progress` into the request's
+        queue as is, and the reader raises any Exception it finds there --
+        so the exception goes out once as progress. After that a plain
+        progress tuple goes out on every call until the server, seeing the
+        handler's ctx.stop(), removes the uid."""
+        out = []
+        for uid, err in list(self._failed.items()):
+            out.append(PromptProcessingBatch.Response(
+                uid, err if err is not None else (0, 0), False, False))
+            self._failed[uid] = None
+        return out
+
     def _next(self):
-        prompt_responses = self._report_checkpoint()
+        prompt_responses = self._failed_responses() + self._report_checkpoint()
         if (self._unprocessed_sequences
                 and len(self._batch) < self.completion_batch_size):
             # One admission per call, so rows already decoding are not held
             # for a queue of prefills.
-            prompt_responses.append(self._admit_one())
+            uid = self._unprocessed_sequences[0][0]
+            try:
+                admitted = self._admit_one()
+            except Exception as e:
+                logger.exception("admission of request %s failed; failing "
+                                 "that request only", uid)
+                self._rows.pop(uid, None)
+                self._ckpt_pending.pop(uid, None)
+                self._failed[uid] = e
+                prompt_responses += self._failed_responses()
+                return prompt_responses, []
+            prompt_responses.append(admitted)
             # This row's first checkpoint goes out with its admission.
             uid = prompt_responses[-1].uid
             if uid in self._ckpt_pending and uid not in self._ckpt_ready:
@@ -547,6 +576,8 @@ class MTPBatchGenerator(BatchGenerator):
         return out
 
     def remove(self, uids, return_prompt_caches=False):
+        for u in uids:
+            self._failed.pop(u, None)
         caches = self.extract_cache(uids) if return_prompt_caches else {}
         if self._vision is not None:
             # A row dropped before admission still holds its tokenize pin.
