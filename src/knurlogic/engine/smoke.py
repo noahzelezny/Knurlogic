@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 
-from knurlogic.engine import arch, seam as engine, register
+from knurlogic.engine import arch, serve as engine, register
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning.resolve import resolve
 
