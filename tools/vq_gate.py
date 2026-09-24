@@ -184,7 +184,7 @@ def cmd_fetch(a) -> int:
     bad = 0
     for repo in repos:
         out = Path(a.dir) / repo.replace("/", "--", 1)
-        p = subprocess.run(["hf", "download", repo, "model.py", "config.json",
+        p = subprocess.run([_hf(), "download", repo, "model.py", "config.json",
                             "--local-dir", str(out)],
                            capture_output=True, text=True)
         print(f"{'ok  ' if p.returncode == 0 else 'FAIL'} {repo}")
@@ -193,6 +193,13 @@ def cmd_fetch(a) -> int:
 
 
 # --- gate --------------------------------------------------------------------
+
+def _hf() -> str:
+    """The `hf` beside this interpreter (a venv not activated has it only
+    there), else whatever PATH finds."""
+    here = Path(sys.executable).parent / "hf"
+    return str(here) if here.is_file() else "hf"
+
 
 def _clean_env() -> dict:
     return {k: v for k, v in os.environ.items()
@@ -209,6 +216,15 @@ def side(which: str, artifact: str, bundle: str, out: str,
     from mlx_lm.utils import load_model, load_tokenizer
 
     art = Path(artifact)
+    # Both sides get knurlogic's vendored architecture modules, as serving
+    # does: the claim under test is the VQ runtime, and a published model.py
+    # imports its arch from mlx_lm (qwen4_exp exists only in the fork and in
+    # knurlogic's copy, not in stock mlx-lm).
+    from knurlogic.engine import arch as _arch, register as _register
+    from knurlogic.machine.artifact import Artifact
+    _mods = _arch.modules_for_artifact(Artifact.load(art))
+    if _mods:
+        _register.register(*_mods)
     if which == "bundle":
         def classes(config):
             spec = importlib.util.spec_from_file_location(
@@ -260,7 +276,7 @@ def cmd_gate(a) -> int:
     with tempfile.TemporaryDirectory() as td:
         bundle = Path(a.bundle) if a.bundle else Path(td) / "bundle"
         if not a.bundle:
-            p = subprocess.run(["hf", "download", repo, "model.py",
+            p = subprocess.run([_hf(), "download", repo, "model.py",
                                 "config.json", "--local-dir", str(bundle)],
                                capture_output=True, text=True)
             if p.returncode:
