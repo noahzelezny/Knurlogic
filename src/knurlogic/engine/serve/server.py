@@ -9,7 +9,8 @@ hands over.
 
 from __future__ import annotations
 
-from . import cache_report, drafting, load, state, vision, vq_runtime
+from . import (cache_report, drafting, load, state, thinking, vision,
+               vq_runtime)
 
 
 def serve(model_path: str, host: str, port: int,
@@ -43,6 +44,7 @@ def serve(model_path: str, host: str, port: int,
     state.SERVED["draft"] = draft
     vq_runtime.install(srv)
     cache_report.install(srv)
+    thinking.install(srv)
     _real = srv.ModelProvider.load
     _real_init = srv.ModelProvider.__init__
 
