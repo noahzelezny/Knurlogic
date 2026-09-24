@@ -1231,8 +1231,10 @@ function pushRecent(path){
 // the design doc names as vision-capable (gemma4, glm5, qwen-vl). See the
 // deviation note in the build report.
 function isVision(m){
-  const hay=`${m.name} ${m.model_type||''}`.toLowerCase();
-  return /vl\b|vision|gemma.?4|glm.?5/.test(hay);
+  // The server's answer, never a guess from the name: /models.json carries
+  // `vision` per model and /status.json the served VisionSpec. A name
+  // heuristic missed every Qwen rung (no "vl" in the name).
+  return !!(m && m.vision);
 }
 window.isVision=isVision;
 

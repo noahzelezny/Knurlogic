@@ -228,7 +228,7 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
         # whether THIS config.json has a vision_config (that needs the build
         # step -- registry.build -- which does not run before a load). Good
         # enough for "would this be worth attaching an image to".
-        "vision_capable": vision_registry.has_family(a.model_type),
+        "vision_capable": vision_registry.registered(a.model_type),
         "vision_budget": _vision_terms(vb),
         "size_gib": round(a.gib, 1),
         "budget_gib": round(budget / GIB, 1),
@@ -314,7 +314,7 @@ def models(fits_only: bool = False, **_) -> Dict[str, Any]:
                "servable": f.servable, "why_not": f.why,
                "fits": bool(avail) and f.bytes_on_disk <= avail,
                "drafting_head": bool(f.extra.get("mtp_head")),
-               "vision_capable": vision_registry.has_family(f.model_type)}
+               "vision_capable": vision_registry.registered(f.model_type)}
         if fits_only and not (row["fits"] and row["servable"]):
             continue
         out.append(row)
