@@ -122,12 +122,19 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
             pins = families.architecture_dir(
                 families.family_of_module(row.module)) / "pins.json"
             data = json.loads(pins.read_text()) if pins.is_file() else {}
-            data[row.module] = {
+            # MERGE into the row: notes a person wrote beside a pin
+            # (text_path_of, text_path_held_by) survive a re-pin. One schema
+            # for every row: the mlx-lm the run used, always, plus the host.
+            row_pin = data.setdefault(row.module, {})
+            row_pin.update({
                 "sha256": row.sha256,
                 "host": arch.host_for(row.module),
-                "validated_with": str(engine.info(arch.host_for(row.module))),
+                "validated_with_mlx_lm": engine.info("mlx_lm").version,
                 "validated_on_artifact": a.path.name,
-            }
+            })
+            if row_pin["host"] != "mlx_lm":
+                row_pin[f"validated_with_{row_pin['host']}"] = \
+                    engine.info(row_pin["host"]).version
             pins.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
             print(f"pinned {row.module} -> {row.sha256[:16]}...")
     return 0

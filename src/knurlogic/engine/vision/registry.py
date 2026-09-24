@@ -1,7 +1,7 @@
 """model_type -> the family package that serves its images.
 
-FIXED STRINGS, SO NO PACKAGE EDITS THIS FILE. The table (built from the
-family manifests) names modules that may not exist yet; P1-P3 each create theirs and it starts resolving. A
+NO PACKAGE EDITS THIS FILE: the table is built from the family manifests
+(engine/families/), and names "module:attr" strings that may not exist yet; P1-P3 each create theirs and it starts resolving. A
 module that is not there means the capability is off (`build` -> None), so
 the packages land independently and a text-only install is the default.
 
@@ -52,10 +52,7 @@ def family_of(model_type: str) -> str:
     (`qwen3_5_text`, `gemma4_text`, ...), so looking that up directly
     reported no vision for all 20 of them. Third time this spelling bit."""
     from knurlogic.engine.arch import ARCH_FOR_MODEL_TYPE
-    name = ARCH_FOR_MODEL_TYPE.get(model_type, model_type)
-    if name == "gemma4_text":
-        name = "gemma4"
-    return name
+    return ARCH_FOR_MODEL_TYPE.get(model_type, model_type)
 
 
 def registered(model_type: str) -> bool:
