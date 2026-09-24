@@ -226,6 +226,37 @@ which. In short:
 * **Drive it.** Every MCP bug this session was found by using the MCP as a
   client, not by reading it; the tests passed throughout.
 
+## Vision: built on branch `vision-integration` (2026-09-23), not yet on main
+
+Design: `docs/design/vision.md` (v2 + three reviews folded in) and
+`docs/design/vision-contracts.md`. Built by a swarm (P0 contracts; P-VQ,
+P1 Qwen, P4 serve on Opus; P2 gemma, P3 GLM, P5 interfaces on Sonnet 5),
+then integrated: end-to-end tests per family through the real serve path,
+image pinning by prompt-cache refcount, vision in the memory budget, the
+chat tab, and a guarded /chat proxy on the control page. 364 tests green on
+tiny random fixtures; every new gate mutated once.
+
+Found at the joins and fixed: gemma's image mask broke after one chunk of
+cached text; GLM silently dropped images (inputs_embeds) and crashed on
+short forwards (an unvendored module); all released rungs reported no
+vision (the `_text` model_type spelling, third time); the chat could not
+reach any running model from the control page.
+
+Before merging to main, in order:
+1. Real-model gates, one model at a time (tools/vision_gate.py): gemma e4b
+   VQ -> Qwen3.8-27B 3.9 -> 35B-A3B 3.4 -> gemma 26b -> Flash-Next 2.1.
+   Only tiny fixtures have run so far.
+2. G-VQ: knurlogic's vendored runtime vs each of the 9 distinct PUBLISHED
+   runtimes (tools/vq_gate.py); every rung stays on its bundled runtime
+   until it passes.
+3. A knurlogic load path for glm5_next (mlx-lm cannot load it); GLM needs
+   the cluster regardless.
+4. Adopted, not built: an encode-twice-identical gate, and a per-request
+   cache report in usage. Planned: a cache checkpoint at the end of each
+   user turn (the fix for gemma, which drops earlier thinking).
+5. See a full answer stream through the chat proxy from exo (verified only
+   as far as exo queueing the task behind a running review).
+
 ## OPEN, and it may move published numbers: the Flash-Next PLE hash seed
 
 Found 2026-09-23 during the vision integration (P1), confirmed new by the
