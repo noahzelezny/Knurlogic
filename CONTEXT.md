@@ -55,7 +55,9 @@ this list; nothing depends on a folder below it.
                     CLI, the OpenAI and Anthropic endpoints, the exo front.
 
     tests/          tripwires are named in test docstrings, not here.
-    tools/          probes that gate work. mtp_probe.py gates the drafting port.
+    tools/          probes that gate work on real models: mtp_probe.py (drafting),
+                    vision_gate.py (images, cache reuse), vq_gate.py (VQ runtime
+                    identity against each published rung).
     docs/PLAN.md    state, not log: what is true, what was measured so it is
                     not re-derived, what is next.
 

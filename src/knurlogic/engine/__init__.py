@@ -8,6 +8,13 @@ fails the suite, so swapping the engine stays a change to this folder.
   mtp/             multi-token-prediction drafting, sequential and batched.
                    Its front door (`knurlogic.engine.mtp`) is stdlib only, so
                    asking whether an artifact has a head costs no mlx import
+  vision/          images as context: contracts, the cache key, the image
+                   store, and one package per family (qwen, gemma4, glm5)
+  vq/              knurlogic's own VQ runtime; serves a rung only once
+                   tools/vq_gate.py proves it bit-identical to the rung's
+                   published model.py (rungs.json)
+  cachereport.py   what the prompt cache actually did, per request, for
+                   usage.knurlogic.cache
   architectures/   model files vendored from mlx-lm / mlx-vlm, pinned by
                    digest (PROVENANCE.md says which build each came from)
   arch.py          which architecture a model_type needs, and whether it is
