@@ -50,7 +50,14 @@ def is_attention_composite(c) -> bool:
     (Vendored from vqlab/mtp/caches.py, same provenance as heads/glm5.py.)"""
     subs = getattr(c, "caches", None)
     return (subs is not None and len(subs) > 0
-            and all(is_attention(s) for s in subs))
+            and all(is_attention(s) or is_batch_attention(s) for s in subs))
+
+
+def _pos(c):
+    """A member's rollback unit: offset for one row, the shared write index
+    for a batched cache (see is_batch_attention). In the batch engine a
+    CacheList's members are BatchKVCaches."""
+    return c.size() if is_batch_attention(c) else c.offset
 
 
 def snapshot(caches, *, copy: bool = True) -> list:
@@ -61,7 +68,7 @@ def snapshot(caches, *, copy: bool = True) -> list:
         elif is_batch_attention(c):
             snaps.append(("battn", c.size(), None))
         elif is_attention_composite(c):
-            snaps.append(("attn-list", [s.offset for s in c.caches], None))
+            snaps.append(("attn-list", [_pos(s) for s in c.caches], None))
         elif hasattr(c, "cache"):
             state = list(c.cache)
             if copy:
@@ -98,13 +105,13 @@ def restore(caches, snaps) -> None:
                     f"snapshot ({c.size()} < {offset}); rollback would corrupt it")
         elif kind == "attn-list":
             for sub, off in zip(c.caches, offset):
-                n = sub.offset - off
+                n = _pos(sub) - off
                 if n > 0:
                     sub.trim(n)
                 elif n < 0:
                     raise RuntimeError(
                         f"attention cache went BACKWARDS since the snapshot "
-                        f"({sub.offset} < {off}); rollback would corrupt it")
+                        f"({_pos(sub)} < {off}); rollback would corrupt it")
         else:
             c.cache = list(state)
             if offset is not None:

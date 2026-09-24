@@ -280,19 +280,32 @@ with the same image and different text -- expected on linear attention
 Flash-Next vision "stays unreachable" is stale: the standalone tower
 serves it.
 
-Before merging to main, in order:
-1. G-VQ: knurlogic's vendored runtime vs each of the 9 distinct PUBLISHED
-   runtimes (tools/vq_gate.py); every rung stays on its bundled runtime
-   until it passes.
-2. A failed admission (an exception in the batch generator) kills
-   mlx-lm's generation thread: that request and every later one hang
-   with no error. Fail the one request instead.
-3. A knurlogic load path for glm5_next (mlx-lm cannot load it); GLM needs
-   the cluster regardless.
-4. Adopted, not built: an encode-twice-identical gate, and a per-request
-   cache report in usage.
-5. See a full answer stream through the chat proxy from exo (verified only
-   as far as exo queueing the task behind a running review).
+Done 2026-09-23, all on the M4 (clean pip venv, no mlx-vlm):
+- A failed admission or decode step fails its own requests; the
+  generation thread lives on (was: every later request hung).
+- G-VQ: 13 rungs bit-identical to their published model.py (logit diff
+  0.0, 40/40 tokens): e4b, gemma 26b, Flash-Next 5.5, 27B 3.9/4.5/4.8,
+  35B-A3B 3.4/3.8/4.6/5.4, 397B 2.2, GLM 2.7 -- all 9 runtime families
+  but 397B arc6. Verified rungs now LOAD on knurlogic's runtime (serve
+  routes through it; before this, nothing did).
+- The chat proxy streams a full answer from exo (curl and the page's chat
+  tab: TTFT 446 ms, 63.8 tok/s on e4b).
+- GLM-5.3-Flash serves from `pip install knurlogic`: glm5_next re-vendored
+  from mlx-vlm 0.6.17 (the rungs' build version; 0.7.1 cannot load them),
+  loaded through the VQ runtime, MTP drafting on (acceptance ~0.83), and
+  the vision gate PASSES -- after fixing its pixel normalization (a red
+  square was "salmon").
+
+Before merging to main:
+1. G-VQ still unrun: 397B 2.4/2.6/3.1 and GLM 3.1/3.6 (larger than one
+   machine: cluster or a free M3); Flash-Next 2.1/3.2/4.4 need the HUB
+   weights -- the local copies on both machines are a lab build whose
+   vq_modules differ from the published config (Hub config and weights
+   agree). Told the vqlab session: any Flash number scored from ~/.exo for
+   those rungs is not the published artifact.
+2. The per-request cache report in usage, and the encode-twice gate.
+3. GLM needs a template knob: it has no enable_thinking and always
+   thinks, so short max_tokens return empty content.
 
 ## OPEN, and it may move published numbers: the Flash-Next PLE hash seed
 

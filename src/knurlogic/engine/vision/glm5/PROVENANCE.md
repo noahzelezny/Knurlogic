@@ -1,5 +1,15 @@
 # glm5_next vision -- provenance (P3)
 
+> **Superseded 2026-09-23.** `_vendor/` (mlx-vlm 0.7.1 siblings) is gone.
+> The released GLM rungs are built on mlx-vlm 0.6.17, which 0.7.1 cannot
+> load, so glm5_next and its whole import closure were re-vendored from
+> 0.6.17 under `engine/architectures/glm5_next/_mlx_vlm/` -- see
+> `engine/architectures/PROVENANCE.md`. The tower this family builds is
+> that package's `vision.VisionModel`. Preprocessing now normalizes with the
+> artifact's image_mean/image_std (CLIP's by default), as
+> Glm5NextImageProcessor does. The record below is kept as history.
+
+
 *What this package vendors, where each file came from, and every edit made
 to a vendored file's imports. Design: `docs/design/vision.md` v2. Contracts:
 `docs/design/vision-contracts.md`.*
