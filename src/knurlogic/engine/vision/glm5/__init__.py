@@ -40,8 +40,17 @@ _TOWER_PREFIX = "vision_tower."
 class Glm5VisionFamily:
     """`Family` (vision-contracts.md) for glm5_next."""
 
-    def __init__(self, config: Dict[str, Any]):
+    #: CLIP's, the Glm5NextImageProcessor defaults; the artifact's own
+    #: processor_config.json overrides them (see `build`).
+    IMAGE_MEAN = (0.48145466, 0.4578275, 0.40821073)
+    IMAGE_STD = (0.26862954, 0.26130258, 0.27577711)
+
+    def __init__(self, config: Dict[str, Any], image_mean=None,
+                 image_std=None):
         from knurlogic.engine.architectures.glm5_next.config import VisionConfig
+
+        self.image_mean = tuple(image_mean or self.IMAGE_MEAN)
+        self.image_std = tuple(image_std or self.IMAGE_STD)
 
         vc = config.get("vision_config") or {}
         self.vision_config = VisionConfig.from_dict(vc)
@@ -67,6 +76,7 @@ class Glm5VisionFamily:
                 "family": "glm5_next", "patch": patch, "merge": merge,
                 "temporal_patch": self.vision_config.temporal_patch_size,
                 "image_size": self.vision_config.image_size,
+                "mean": list(self.image_mean), "std": list(self.image_std),
             }),
         )
         self.tower_model = None  # built lazily, mx is engine-only
@@ -139,6 +149,11 @@ class Glm5VisionFamily:
         gh = max(merge, round(h / step) * merge)
         im = img.convert("RGB").resize((gw * p, gh * p), Image.BICUBIC)
         arr = np.asarray(im, dtype=np.float32) / 255.0            # [H, W, 3]
+        # Normalized as Glm5NextImageProcessor does (do_normalize defaults
+        # on). Found on GLM-5.3-Flash 2.7: without it a pure red square was
+        # seen as "salmon/coral" -- every colour shifted.
+        arr = (arr - np.asarray(self.image_mean, np.float32)) \
+            / np.asarray(self.image_std, np.float32)
         arr = arr.reshape(gh, p, gw, p, 3).transpose(0, 2, 1, 3, 4)
         arr = arr.reshape(gh * gw, p, p, 3)
         tp = vc.temporal_patch_size
@@ -214,6 +229,13 @@ class Glm5VisionFamily:
 def build(model_path: str, text_model: Any, config: Dict[str, Any]):
     if not config.get("vision_config"):
         return None
-    fam = Glm5VisionFamily(config)
+    mean = std = None
+    pc = Path(model_path) / "processor_config.json"
+    if pc.is_file():
+        ip = json.loads(pc.read_text())
+        ip = ip.get("image_processor", ip)
+        if ip.get("do_normalize", True) is not False:
+            mean, std = ip.get("image_mean"), ip.get("image_std")
+    fam = Glm5VisionFamily(config, image_mean=mean, image_std=std)
     fam.load_weights(model_path)
     return fam
