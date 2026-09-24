@@ -155,6 +155,52 @@ def set_cache_limit(gib: float) -> str:
     return f"applied ({gib} GiB)"
 
 
+def _install_cache_report(srv) -> None:
+    """usage.knurlogic.cache on every response the batch engine admitted
+    (engine/cachereport.py): the generation thread records the request it
+    tokenizes, the handler remembers the request it is answering, and both
+    of mlx-lm's usage builders add the engine's report."""
+    import functools
+    from knurlogic.engine import cachereport
+
+    RG, H = srv.ResponseGenerator, srv.APIHandler
+    # Each hook guards itself: something else may restore one of these
+    # names (a switch reinstalling vision, a test fixture) and not others.
+    real_tok = RG._tokenize
+    if not getattr(real_tok, "_knurlogic_cache", False):
+        @functools.wraps(real_tok)
+        def _tokenize(self, tokenizer, request, args):
+            out = real_tok(self, tokenizer, request, args)
+            cachereport.tokenizing(request)
+            return out
+        _tokenize._knurlogic_cache = True
+        RG._tokenize = _tokenize
+
+    real_hc = H.handle_completion
+    if not getattr(real_hc, "_knurlogic_cache", False):
+        @functools.wraps(real_hc)
+        def handle_completion(self, request, *a, **k):
+            self._knurlogic_request = request
+            return real_hc(self, request, *a, **k)
+        handle_completion._knurlogic_cache = True
+        H.handle_completion = handle_completion
+
+    def _with_report(real):
+        @functools.wraps(real)
+        def wrapped(self, *a, **k):
+            resp = real(self, *a, **k)
+            usage = resp.get("usage") if isinstance(resp, dict) else None
+            if usage is not None:
+                cachereport.into_usage(usage, cachereport.of(
+                    getattr(self, "_knurlogic_request", None)))
+            return resp
+        wrapped._knurlogic_cache = True
+        return wrapped
+    for name in ("generate_response", "completion_usage_response"):
+        if not getattr(getattr(H, name), "_knurlogic_cache", False):
+            setattr(H, name, _with_report(getattr(H, name)))
+
+
 def _install_vq_runtime(srv) -> None:
     """Route the server's `load` through knurlogic's VQ runtime for a rung
     rungs.json lists as VERIFIED (G-VQ: bit-identical to its published
@@ -217,6 +263,7 @@ def serve(model_path: str, host: str, port: int,
     _SERVED["path"] = model_path
     _SERVED["draft"] = draft
     _install_vq_runtime(srv)
+    _install_cache_report(srv)
     _real = srv.ModelProvider.load
     _real_init = srv.ModelProvider.__init__
 
