@@ -144,7 +144,23 @@ def test_glm_effort_reaches_the_prompt():
 
 # --- the server hook ------------------------------------------------------------
 
-def _fake_srv(template):
+QWEN38 = "enable_thinking ... reasoning_effort ... 'xhigh' <think>"
+
+
+class _Qwen38Tok:
+    """Renders like Qwen3.8's template behind mlx-lm's TokenizerWrapper,
+    which injects enable_thinking=<has_thinking> when a request is silent."""
+    chat_template = QWEN38
+
+    def apply_chat_template(self, msgs, add_generation_prompt=True,
+                            tokenize=False, **kw):
+        kw.setdefault("enable_thinking", True)
+        if kw["enable_thinking"] is False:
+            return "<think></think>"
+        return "effort=" + kw.get("reasoning_effort", "xhigh")
+
+
+def _fake_srv(tok):
     seen = {}
 
     class H:
@@ -160,10 +176,15 @@ def _fake_srv(template):
         def completion_usage_response(self, *a, **k):
             return {"choices": [], "usage": {"prompt_tokens": 1}}
 
+    class RG:
+        def generate(self, request, args, **k):
+            return "ctx", iter([types.SimpleNamespace(state=s) for s in
+                                ("reasoning", "reasoning", "normal")])
+
     from knurlogic.engine.serve import state
-    state.SERVED["provider"] = types.SimpleNamespace(
-        tokenizer=types.SimpleNamespace(chat_template=template))
-    srv = types.SimpleNamespace(APIHandler=H)
+    T._probe_cache.clear()
+    state.SERVED["provider"] = types.SimpleNamespace(tokenizer=tok)
+    srv = types.SimpleNamespace(APIHandler=H, ResponseGenerator=RG)
     T.install(srv)
     return srv, seen
 
@@ -175,28 +196,66 @@ def _handler(srv, body, client_kwargs=None):
     return h
 
 
-QWEN38 = "enable_thinking ... reasoning_effort ... 'xhigh' <think>"
+REQ = types.SimpleNamespace(request_type="chat")
 
 
-def test_the_hook_translates_reports_and_lets_the_client_win():
-    srv, seen = _fake_srv(QWEN38)
-    req = types.SimpleNamespace(request_type="chat")
+def test_the_hook_translates_and_reports():
+    srv, seen = _fake_srv(_Qwen38Tok())
     h = _handler(srv, {"reasoning_effort": "medium"})
-    assert h.handle_completion(req, []) == "served"
+    assert h.handle_completion(REQ, []) == "served"
     assert seen["kwargs"] == {"reasoning_effort": "medium"}
     resp = h.generate_response()
     assert resp["usage"]["knurlogic"]["thinking"]["applied"] == "medium"
     assert resp["choices"][0]["message"]["reasoning_content"] == "r"
 
+
+def test_a_silent_request_reports_what_the_server_renders():
+    srv, seen = _fake_srv(_Qwen38Tok())
+    h = _handler(srv, {})
+    h.handle_completion(REQ, [])
+    assert seen["kwargs"] is None
+    assert h._knurlogic_thinking["applied"] == "xhigh"   # the bare render
+
+
+def test_a_client_override_is_reported_by_what_it_renders():
+    """review's case: reasoning_effort low, but the client's own kwargs turn
+    thinking off. The prompt is closed-think; the report must say off."""
+    srv, seen = _fake_srv(_Qwen38Tok())
     h = _handler(srv, {"reasoning_effort": "low"},
-                 client_kwargs={"reasoning_effort": "xhigh", "x": 1})
-    h.handle_completion(req, [])
-    assert seen["kwargs"] == {"reasoning_effort": "xhigh", "x": 1}
-    assert "won" in h._knurlogic_thinking["note"]
+                 client_kwargs={"enable_thinking": False})
+    h.handle_completion(REQ, [])
+    rep = h._knurlogic_thinking
+    assert seen["kwargs"] == {"reasoning_effort": "low",
+                              "enable_thinking": False}
+    assert rep["applied"] == "off" and "won" in rep["note"]
+    assert "translation alone gave low" in rep["note"]
+
+
+def test_a_template_that_only_mentions_the_controls_is_not_trusted():
+    class Deaf(_Qwen38Tok):
+        def apply_chat_template(self, msgs, **kw):
+            return "same every time"
+    srv, seen = _fake_srv(Deaf())
+    h = _handler(srv, {"reasoning_effort": "low"})
+    h.handle_completion(REQ, [])
+    assert seen["kwargs"] is None
+    assert h._knurlogic_thinking["applied"] == "not controllable"
+
+
+def test_exclude_strips_reasoning_and_tokens_are_counted():
+    srv, seen = _fake_srv(_Qwen38Tok())
+    h = _handler(srv, {"reasoning": {"exclude": True}})
+    h.handle_completion(REQ, [])
+    msg = h.generate_response()["choices"][0]["message"]
+    assert "reasoning" not in msg and "reasoning_content" not in msg
+    _, it = srv.ResponseGenerator().generate(REQ, None)
+    list(it)
+    usage = h.completion_usage_response()["usage"]
+    assert usage["completion_tokens_details"]["reasoning_tokens"] == 2
 
 
 def test_the_hook_refuses_a_bad_level_with_400():
-    srv, seen = _fake_srv(QWEN38)
+    srv, seen = _fake_srv(_Qwen38Tok())
     sent = {}
     h = _handler(srv, {"reasoning_effort": "lots"})
     h.send_response = lambda c: sent.setdefault("code", c)
@@ -204,8 +263,37 @@ def test_the_hook_refuses_a_bad_level_with_400():
     h.end_headers = lambda: None
     import io
     h.wfile = io.BytesIO()
-    h.handle_completion(types.SimpleNamespace(request_type="chat"), [])
+    h.handle_completion(REQ, [])
     assert sent["code"] == 400 and "kwargs" not in seen
+
+
+# --- the probe on the REAL templates, through mlx-lm's own wrapper -----------------
+
+def _wrapper(rung):
+    d = MODELS / rung
+    if not d.is_dir():
+        pytest.skip(f"{rung} not on this box")
+    from mlx_lm.utils import load_tokenizer
+    return load_tokenizer(d)
+
+
+@pytest.mark.parametrize("rung,dialect,served_default", [
+    ("TheDrainFlorist--gemma-4-e4b-it-VQ-PLE", "gemma_toggle", "on"),
+    ("TheDrainFlorist--Qwen3.6-35B-A3B-VQ-3.4bpw", "qwen_toggle", "on"),
+    ("TheDrainFlorist--Qwen3.8-27B-VQ-3.9bpw", "qwen_effort", "xhigh"),
+    ("TheDrainFlorist--GLM-5.3-Flash-VQ-2.7bpw", "glm_effort", "max"),
+])
+def test_the_probe_verifies_each_released_template_and_finds_its_default(
+        rung, dialect, served_default):
+    """Gemma's TEMPLATE defaults off, but mlx-lm injects enable_thinking
+    when the request is silent -- served, it thinks (a review's finding)."""
+    tok = _wrapper(rung)
+    name, spec = T.detect(tok.chat_template)
+    assert name == dialect
+    T._probe_cache.clear()
+    p = T.probe(tok, tok.chat_template, spec)
+    assert p["verified"] and p["default"] == served_default
+    assert spec["default"] == served_default     # the manifest agrees
 
 
 def test_messages_thinking_disabled_asks_for_none():
@@ -227,3 +315,46 @@ def test_the_mcp_models_tool_lists_each_models_thinking_levels():
     assert [n["name"] for n in lv["native"]] == ["low", "high", "max"]
     assert T.levels(T.template_of("/nonexistent")) == {
         "dialect": None, "native": [], "default": None}
+
+
+def test_messages_returns_thinking_blocks_only_when_enabled():
+    from knurlogic.interfaces.messages import from_openai, to_openai
+    on = to_openai({"messages": [{"role": "user", "content": "hi"}],
+                    "thinking": {"type": "enabled", "budget_tokens": 2048}})
+    off = to_openai({"messages": [{"role": "user", "content": "hi"}]})
+    assert on["reasoning"] == {"exclude": False}
+    assert off["reasoning"] == {"exclude": True}
+    r = from_openai({"choices": [{"message": {"content": "4",
+                                              "reasoning_content": "2+2"},
+                                  "finish_reason": "stop"}],
+                     "usage": {"prompt_tokens": 3, "completion_tokens": 2,
+                               "knurlogic": {"thinking": {"applied": "low"}}}},
+                    "m")
+    assert r["content"][0] == {"type": "thinking", "thinking": "2+2",
+                               "signature": ""}
+    assert r["content"][1]["text"] == "4"
+    assert r["knurlogic"]["thinking"]["applied"] == "low"
+
+
+def test_messages_streams_thinking_then_text():
+    from knurlogic.interfaces.messages import stream
+    lines = [f"data: {json.dumps(c)}" for c in (
+        {"choices": [{"delta": {"reasoning_content": "let me "}}]},
+        {"choices": [{"delta": {"reasoning_content": "see"}}]},
+        {"choices": [{"delta": {"content": "4"}, "finish_reason": "stop"}]},
+    )] + ["data: [DONE]"]
+    evs = [json.loads(e.decode().split("data: ", 1)[1])
+           for e in stream(lines, "m")]
+    kinds = [(e["type"], (e.get("content_block") or e.get("delta") or {})
+              .get("type")) for e in evs]
+    assert kinds == [
+        ("message_start", None),
+        ("content_block_start", "thinking"),
+        ("content_block_delta", "thinking_delta"),
+        ("content_block_delta", "thinking_delta"),
+        ("content_block_delta", "signature_delta"),
+        ("content_block_stop", None),
+        ("content_block_start", "text"),
+        ("content_block_delta", "text_delta"),
+        ("content_block_stop", None),
+        ("message_delta", None), ("message_stop", None)]
