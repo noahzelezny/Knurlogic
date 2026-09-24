@@ -146,6 +146,49 @@ def tag_samplers(srv) -> None:
     srv._make_sampler = _make_sampler
 
 
+class LogitsTrunk:
+    """A trunk seen the way the batch engine calls one: `input_embeddings`
+    in, a logits ARRAY out.
+
+    mlx-lm's text models already are that. glm5_next's LanguageModel (an
+    mlx-vlm class, vendored) is not: it names the keyword `inputs_embeds`
+    and returns a LanguageModelOutput. Found by running the tiny GLM
+    through the serve path (tests/test_vision_e2e.py): admit's
+    `logits[:, -1]` raised on the output object, and the image embeddings
+    would have gone in under a name the trunk silently drops into
+    **kwargs. Everything else (make_cache, layers, ...) passes through."""
+
+    def __init__(self, model, rename: bool):
+        self.__dict__["_model"] = model
+        self.__dict__["_rename"] = rename
+
+    def __call__(self, inputs, cache=None, **kw):
+        if self._rename and "input_embeddings" in kw:
+            kw["inputs_embeds"] = kw.pop("input_embeddings")
+        out = self._model(inputs, cache=cache, **kw)
+        return out if isinstance(out, mx.array) else out.logits
+
+    def __getattr__(self, name):
+        return getattr(self._model, name)
+
+
+def logits_trunk(model):
+    """`model` itself when it already speaks the batch engine's convention
+    (every mlx-lm text model: the text path is untouched), else a
+    LogitsTrunk around it."""
+    import inspect
+    try:
+        sig = inspect.signature(model.__call__)
+    except (TypeError, ValueError):
+        return model
+    names = sig.parameters
+    rename = "input_embeddings" not in names and "inputs_embeds" in names
+    ret = sig.return_annotation
+    wraps_output = ret is not inspect.Signature.empty and ret is not mx.array \
+        and "array" not in str(ret)
+    return LogitsTrunk(model, rename) if (rename or wraps_output) else model
+
+
 class MTPBatchGenerator(BatchGenerator):
     """mlx-lm's BatchGenerator, drafting every row with an MTP head -- or,
     with `head=None`, the same engine without drafting, which is how a
@@ -185,7 +228,10 @@ class MTPBatchGenerator(BatchGenerator):
             self._make_draft_cache = lambda: None         # noqa: E731
             copy = True
             name = None
-        self._batch = MTPBatch(model, head, get_h, copy_caches=copy)
+        #: what admit and the decode steps call (self.model stays the
+        #: server's object: families embed with it, the server compares it)
+        self._trunk = logits_trunk(model)
+        self._batch = MTPBatch(self._trunk, head, get_h, copy_caches=copy)
         self._n_trunk = len(self._make_new_cache())
         # uid -> what the server gave us for that row, and what it has seen.
         self._rows: dict = {}
@@ -233,7 +279,7 @@ class MTPBatchGenerator(BatchGenerator):
                     ids, kw = mx.array(prompt), {}
                 else:
                     ids, kw = self._vision_inputs(vis, prompt, hit)
-                row = admit(self.model, self._head, self._batch.get_h,
+                row = admit(self._trunk, self._head, self._batch.get_h,
                             ids, params, uid=uid,
                             make_draft_cache=self._make_draft_cache,
                             prefill_step_size=self.prefill_step_size,
