@@ -148,3 +148,23 @@ def test_web_module_never_imports_mlx_or_pil():
     r = subprocess.run([sys.executable, "-c", code], capture_output=True,
                        text=True)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_the_chat_proxy_only_reaches_models_this_page_knows(monkeypatch):
+    """The control page serves no model, so its chat is proxied to the one a
+    person clicked. The target comes from the request, so it is checked
+    against a fixed list -- exo and servers knurlogic started -- or the page
+    would forward anything to any address."""
+    import io
+    from knurlogic.interfaces import ui
+    monkeypatch.setattr(ui, "chat_targets",
+                        lambda: {"http://127.0.0.1:52415"})
+    sent = {}
+
+    class H:
+        wfile = io.BytesIO()
+        def send_response(self, code): sent["code"] = code
+        def send_header(self, *a): pass
+        def end_headers(self): pass
+    ui.proxy_chat(H(), "http://169.254.169.254", b"{}")
+    assert sent["code"] == 403
