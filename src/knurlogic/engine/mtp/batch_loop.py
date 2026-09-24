@@ -174,6 +174,9 @@ def admit(
     chunk_boundaries: Optional[List[tuple]] = None,
     rope_delta: int = 0,
     mrope: bool = False,
+    checkpoints: Iterable[int] = (),
+    on_checkpoint: Optional[Callable[[int, list, Any, Optional[mx.array]],
+                                     None]] = None,
 ) -> Row:
     """Prefill one prompt and seed the head for it: loop.py's prefill, kept
     as a standalone so the batch can admit rows between steps.
@@ -215,6 +218,17 @@ def admit(
     same way if the prompt ends inside a span. `rope_delta` / `mrope` ride
     on the Row so MTPBatch can hand the trunk this row's positions on every
     decode step (design D4).
+
+    CHECKPOINTS. Positions c (the server's segment ends: after the system
+    prompt, after the last user message) where prefill stops a chunk and
+    calls `on_checkpoint(c, trunk, head_cache, h)` so the caller can store
+    the prompt cache for ids[:c]. It exists for models whose caches cannot
+    be trimmed (linear attention): when the next turn's template re-renders
+    the tail differently, only an entry that ends before the difference is
+    reusable at all. The head is seeded only to c-1 there -- its input at
+    c-1 is (h_{c-1}, x_c) and x_c is the token the next turn may change --
+    so `h` is h_{c-1}, for the restore to replay that one step with the
+    new x_c. A non-drafting row passes head_cache and h as None.
     """
     import contextlib
 
@@ -252,12 +266,20 @@ def admit(
         return kw
 
     h_chunks: List[mx.array] = []
+    seeded = start_pos          # the head is seeded over [start_pos, seeded)
+    cps = sorted(c for c in set(checkpoints or ())
+                 if start_pos < c <= last and _inside(c, spans) is None
+                 and (not drafts or c - start_pos >= 2))
+    if on_checkpoint is None:
+        cps = []
     ctx = prefill_ctx() if prefill_ctx is not None else contextlib.nullcontext()
     with ctx:
         i = start_pos
         while i < last:
             end = _snap_chunk_end(i, min(i + prefill_step_size, last), spans,
                                   last)
+            if cps and i < cps[0] < end:
+                end = cps[0]
             chunk = ids[:, i:end]
             if not chunk.shape[1]:
                 break
@@ -275,6 +297,20 @@ def admit(
             mx.clear_cache()
             if on_chunk is not None:
                 on_chunk(cache, dcache)
+            if cps and end == cps[0]:
+                c = cps.pop(0)
+                h_c = None
+                if drafts:
+                    # Seed [seeded, c-1), keep h from c-1 on for the rest.
+                    h_all = (mx.concatenate(h_chunks, axis=1)
+                             if len(h_chunks) > 1 else h_chunks[0])
+                    seed_head(head, [h_all], ids, c, dcache,
+                              prefill_step_size, start=seeded)
+                    h_chunks = [h_all[:, c - 1 - seeded:]]
+                    h_c = h_all[:, c - 1 - seeded:c - seeded]
+                    seeded = c - 1
+                    mx.eval(h_chunks[0], h_c)
+                on_checkpoint(c, cache, dcache if drafts else None, h_c)
             if on_progress is not None:
                 on_progress(end, n)
 
@@ -291,7 +327,7 @@ def admit(
         # history and cache.offset == P-1 == the true position. Chunked like
         # the trunk's prefill: one call over the whole prompt is quadratic
         # on an attention head (see seed.py).
-        seed_head(head, h_chunks, ids, n, dcache, prefill_step_size, start=start_pos)
+        seed_head(head, h_chunks, ids, n, dcache, prefill_step_size, start=seeded)
         h_chunks.clear()
         mx.clear_cache()
         # Bootstrap draft at position P-1: input (h_{P-1}, x_P).
