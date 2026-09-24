@@ -118,6 +118,12 @@ def to_openai(req: dict) -> dict:
     t = req.get("thinking")
     if isinstance(t, dict) and t.get("type") == "disabled":
         body["reasoning_effort"] = "none"
+    # Anthropic returns thinking blocks only when thinking is enabled; so
+    # does this, by asking the engine to leave reasoning out otherwise.
+    enabled = isinstance(t, dict) and t.get("type") == "enabled"
+    body["reasoning"] = {"exclude": not enabled}
+    if body.get("stream"):
+        body["stream_options"] = {"include_usage": True}
     if req.get("reasoning_effort"):
         body["reasoning_effort"] = req["reasoning_effort"]
     if req.get("tools"):
@@ -133,6 +139,12 @@ def to_openai(req: dict) -> dict:
 
 def _blocks_from_choice(msg: dict) -> list:
     blocks = []
+    reasoning = msg.get("reasoning_content") or msg.get("reasoning")
+    if reasoning:
+        # A local model signs nothing; the signature is empty, which a
+        # client echoing the block back sends to us, not to Anthropic.
+        blocks.append({"type": "thinking", "thinking": reasoning,
+                       "signature": ""})
     if msg.get("content"):
         blocks.append({"type": "text", "text": msg["content"]})
     for c in msg.get("tool_calls") or []:
@@ -170,6 +182,10 @@ def from_openai(resp: dict, model: str) -> dict:
         "content": blocks,
         "stop_reason": stop,
         "stop_sequence": None,
+        # what the engine applied and reused (usage.knurlogic), passed on
+        # so a GLM "thinking disabled" that could only go to low is SAID
+        **({"knurlogic": usage["knurlogic"]} if usage.get("knurlogic")
+           else {}),
         "usage": {"input_tokens": usage.get("prompt_tokens", 0),
                   "output_tokens": usage.get("completion_tokens", 0)},
     }
@@ -221,7 +237,28 @@ def stream(openai_lines, model: str):
         choice = (chunk.get("choices") or [{}])[0]
         delta = choice.get("delta") or {}
 
+        thought = delta.get("reasoning_content") or delta.get("reasoning")
+        if thought:
+            if open_block != "thinking":
+                if open_block is not None:
+                    yield _sse("content_block_stop",
+                               {"type": "content_block_stop", "index": index})
+                    index += 1
+                yield _sse("content_block_start", {
+                    "type": "content_block_start", "index": index,
+                    "content_block": {"type": "thinking", "thinking": "",
+                                      "signature": ""}})
+                open_block = "thinking"
+            yield _sse("content_block_delta", {
+                "type": "content_block_delta", "index": index,
+                "delta": {"type": "thinking_delta", "thinking": thought}})
+
         if delta.get("content"):
+            if open_block == "thinking":
+                # a thinking block closes with its (empty) signature
+                yield _sse("content_block_delta", {
+                    "type": "content_block_delta", "index": index,
+                    "delta": {"type": "signature_delta", "signature": ""}})
             if open_block != "text":
                 if open_block is not None:
                     yield _sse("content_block_stop",
@@ -239,6 +276,11 @@ def stream(openai_lines, model: str):
             i = tc.get("index", 0)
             fn = tc.get("function") or {}
             if i not in tool_open:
+                if open_block == "thinking":
+                    yield _sse("content_block_delta", {
+                        "type": "content_block_delta", "index": index,
+                        "delta": {"type": "signature_delta",
+                                  "signature": ""}})
                 if open_block is not None:
                     yield _sse("content_block_stop",
                                {"type": "content_block_stop", "index": index})
@@ -261,6 +303,10 @@ def stream(openai_lines, model: str):
         if choice.get("finish_reason"):
             stop = STOP_REASON.get(choice["finish_reason"], stop)
 
+    if open_block == "thinking":
+        yield _sse("content_block_delta", {
+            "type": "content_block_delta", "index": index,
+            "delta": {"type": "signature_delta", "signature": ""}})
     if open_block is not None:
         yield _sse("content_block_stop",
                    {"type": "content_block_stop", "index": index})

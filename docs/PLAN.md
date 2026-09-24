@@ -333,7 +333,17 @@ Before merging to main:
      ladder -> native kwargs is per dialect. New module serve/thinking.py
      is the plug point -- nothing touches chat_template_kwargs today.
    - BUILT 2026-09-24 (engine/serve/thinking.py, dialects in the family
-     manifests; tests render the released templates). Not yet measured on
+     manifests; tests render the released templates), then reviewed by
+     Fable 5.1 and fixed: the template text only PROPOSES a dialect -- a
+     render probe through mlx-lm's own TokenizerWrapper decides, and finds
+     the served default (gemma thinks by default when served: mlx-lm
+     injects enable_thinking for silent requests); a client override is
+     reported by what it renders; reasoning streams by default,
+     `reasoning: {"exclude": true}` strips it; reasoning_tokens counted;
+     Anthropic /v1/messages returns thinking blocks (streamed as
+     thinking_delta + signature_delta) only when thinking is enabled, and
+     passes usage.knurlogic on; /status.json carries the same answer as
+     the MCP. Not yet measured on
      a served model: needs knurlogic serving a rung on a free box -- exo
      cannot stand in, it IGNORES chat_template_kwargs (Flash-Next 4.4 via
      exo still reasoned with enable_thinking=false, 2026-09-24), so no

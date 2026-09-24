@@ -142,6 +142,12 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # when a model will not load. Advice only -- knurlogic never sets it.
         snap["wired"] = wired.advise(a.bytes_on_disk)
         snap["drafting"] = engine.drafting_status()
+        # what reasoning_effort does on the served model -- the MCP's
+        # `models` answer plus the default the server actually renders
+        try:
+            snap["thinking"] = engine.thinking_status()
+        except Exception as e:
+            snap["thinking"] = {"error": f"{type(e).__name__}: {e}"}
         # Vision on the same contract page as drafting: spec, image store
         # size, encodes and pins -- the numbers that say whether images are
         # being reused or re-encoded.
