@@ -37,6 +37,19 @@ MANIFEST = {
                 cache_semantics="reassign"),
         },
     },
+    # GLM-5.3's template: reasoning_effort in {low, high}, anything else is
+    # "max" (the default). There is NO off switch -- "none" is answered
+    # with the lowest native level and the response says so.
+    "thinking": {
+        "glm_effort": {
+            "detect": {"all": ["reasoning_effort", "Reasoning Effort"],
+                       "none": ["enable_thinking"]},
+            "default": "max",
+            "native": [["low", "low", {"reasoning_effort": "low"}],
+                       ["high", "high", {"reasoning_effort": "high"}],
+                       ["xhigh", "max", {"reasoning_effort": "max"}]],
+        },
+    },
     "vision": {"build": "knurlogic.engine.families.glm5.vision:build",
                "architectures": ["glm5_next"]},
 }

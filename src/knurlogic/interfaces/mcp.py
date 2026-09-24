@@ -305,6 +305,7 @@ def models(fits_only: bool = False, **_) -> Dict[str, Any]:
 
     from knurlogic.machine import wired
     from knurlogic.engine.vision import registry as vision_registry
+    from knurlogic.engine.serve import thinking
     avail = wired.load_budget()["bytes"]
     out = []
     for f in discover.find():
@@ -314,7 +315,10 @@ def models(fits_only: bool = False, **_) -> Dict[str, Any]:
                "servable": f.servable, "why_not": f.why,
                "fits": bool(avail) and f.bytes_on_disk <= avail,
                "drafting_head": bool(f.extra.get("mtp_head")),
-               "vision_capable": vision_registry.registered(f.model_type)}
+               "vision_capable": vision_registry.registered(f.model_type),
+               # what reasoning_effort does on this model: its template's
+               # dialect, native levels and default (engine/serve/thinking)
+               "thinking": thinking.levels(thinking.template_of(f.path))}
         if fits_only and not (row["fits"] and row["servable"]):
             continue
         out.append(row)
@@ -512,8 +516,10 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     },
     "models": {
         "fn": models,
-        "description": "Every model on this machine, with whether it fits "
-                       "and whether it has a drafting head.",
+        "description": "Every model on this machine, with whether it fits, "
+                       "whether it has a drafting head, and what "
+                       "reasoning_effort (none minimal low medium high "
+                       "xhigh) maps to on it.",
         "schema": _schema({"fits_only": {
             "type": "boolean",
             "description": "only models that can actually run here"}}),

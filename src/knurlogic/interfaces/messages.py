@@ -111,6 +111,15 @@ def to_openai(req: dict) -> dict:
             body[k] = req[k]
     if req.get("stop_sequences"):
         body["stop"] = req["stop_sequences"]
+    # Thinking: "disabled" asks for none; "enabled" leaves the model's own
+    # default. budget_tokens is NOT honoured -- knurlogic uses each model's
+    # native controls, never a token budget (engine/serve/thinking.py).
+    # An explicit reasoning_effort, if a client sends one, is passed on.
+    t = req.get("thinking")
+    if isinstance(t, dict) and t.get("type") == "disabled":
+        body["reasoning_effort"] = "none"
+    if req.get("reasoning_effort"):
+        body["reasoning_effort"] = req["reasoning_effort"]
     if req.get("tools"):
         body["tools"] = [{
             "type": "function",

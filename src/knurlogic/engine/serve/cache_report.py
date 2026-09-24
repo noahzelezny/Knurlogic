@@ -63,7 +63,7 @@ def into_usage(usage: dict, report) -> dict:
         return usage
     usage.setdefault("prompt_tokens_details", {})["cached_tokens"] = \
         report["used"]
-    usage["knurlogic"] = {"cache": report}
+    usage.setdefault("knurlogic", {})["cache"] = report
     return usage
 
 

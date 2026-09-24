@@ -57,6 +57,29 @@ MANIFEST = {
                 cache_semantics="reassign"),
         },
     },
+    # Thinking controls, per CHAT-TEMPLATE DIALECT (one module, qwen3_5,
+    # serves both): read off the released templates 2026-09-24.
+    "thinking": {
+        # Qwen3.8 27B, Flash-Next: enable_thinking, then reasoning_effort
+        # in {xhigh (default), medium, low}; anything else raises.
+        "qwen_effort": {
+            "detect": {"all": ["enable_thinking", "reasoning_effort",
+                               "xhigh"]},
+            "default": "xhigh",
+            "native": [["none", "off", {"enable_thinking": False}],
+                       ["low", "low", {"reasoning_effort": "low"}],
+                       ["medium", "medium", {"reasoning_effort": "medium"}],
+                       ["xhigh", "xhigh", {"reasoning_effort": "xhigh"}]],
+        },
+        # Qwen3.5 397B, Qwen3.6 35B-A3B: on or off, nothing graded.
+        "qwen_toggle": {
+            "detect": {"all": ["enable_thinking", "<think>"],
+                       "none": ["reasoning_effort"]},
+            "default": "on",
+            "native": [["none", "off", {"enable_thinking": False}],
+                       ["xhigh", "on", {"enable_thinking": True}]],
+        },
+    },
     "vision": {"build": "knurlogic.engine.families.qwen.vision:build",
                "architectures": ["qwen3_5", "qwen3_5_moe", "qwen4_exp"]},
 }
