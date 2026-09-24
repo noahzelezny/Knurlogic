@@ -67,7 +67,7 @@ PIECES = {
         "carries": "",
         "needed_for": "nothing, for knurlogic. Vision for every released "
                       "family, GLM-5.3 included, is vendored under "
-                      "engine/vision/ with provenance; glm5_siblings() is "
+                      "engine/families/*/vision/ with provenance; glm5_siblings() is "
                       "empty and a test keeps it so. It was needed until "
                       "2026-09-23, when glm5_next imported nine of its "
                       "modules.",

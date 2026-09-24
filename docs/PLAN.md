@@ -15,9 +15,17 @@ trapped in forks of both.
 
 ## What is true now
 
-    engine/       serve/ over mlx-lm's server; drafting on single requests
-                  (stream_generate swap) AND batches (MTPBatchGenerator);
-                  vendored architectures; overrides
+    engine/       serve/ over mlx-lm's server, one module per change it
+                  makes (vq_runtime, cache_report, drafting, vision);
+                  drafting on single requests AND batches
+                  (MTPBatchGenerator); families/ holds everything per model
+                  family; generic mtp/, vision/, vq/ name no family
+    families/     qwen, gemma4, glm5 -- each a MANIFEST (architectures keyed
+                  by module, model_type spellings, heads, prefill widths with
+                  evidence) plus architecture/ (vendored code, PROVENANCE,
+                  pins, licenses), vision/, heads/. Explicit list in
+                  families/__init__.py; being listed is being tested
+                  (tests/test_families.py). Reviewed twice in review.
     machine/      64 artifacts found across every store; residency in every
                   runtime; one load budget; which build of each dependency
                   every interpreter has
@@ -26,6 +34,11 @@ trapped in forks of both.
                   Anthropic Messages, connect, doctor
     exo           placed on through the MCP (`place`/`unplace`), with every
                   instance's phase read off exo's own evidence
+
+**Not yet run on a real model since the 2026-09-24 reorganisation**
+(engine/serve split, families move): one vision_gate pass (gemma e4b) on
+a free box, and `knurlogic smoke --pin` on GLM 2.7 -- glm5_next's import
+paths moved, so it reads UNPINNED until then.
 
 166 tests. The mlx tripwire is a folder rule: nothing outside `engine/`
 imports mlx; checked that it fires on a lazy import planted in `machine/`.
@@ -305,13 +318,20 @@ Before merging to main:
    those rungs is not the published artifact.
 2. Thinking effort, one control for every family (decided 2026-09-24):
    - accept OpenAI `reasoning_effort` on chat completions and Anthropic
-     `thinking` on /v1/messages; ladder off / low / medium / high / max;
-     aliases none, minimal, xhigh. Omitted = the model's own default.
+     `thinking` on /v1/messages. The ladder is the STANDARD names, nothing
+     invented: none / minimal / low / medium / high / xhigh. Omitted = the
+     model's own default.
    - NATIVE controls only. No token budgets (some models truncate mid
-     thought; it is rudimentary). A level a family cannot express maps to
+     thought; it is rudimentary). A level a model cannot express maps to
      its nearest native setting and the response says what was applied.
    - "auto" (thinking by difficulty) is a classification call: the
      harness's, not knurlogic's.
+   - KEYED BY CHAT-TEMPLATE DIALECT, not by architecture (a review's
+     review): Qwen3.6 (on/off) and Qwen3.8 (on/off + effort) are the same
+     qwen3_5 module. The dialect is detected from the artifact's template,
+     as the tool-call dialect is (serve/load.py tool_support); the mapping
+     ladder -> native kwargs is per dialect. New module serve/thinking.py
+     is the plug point -- nothing touches chat_template_kwargs today.
    - Return reasoning as `reasoning_content`; count it in
      completion_tokens_details.reasoning_tokens; the MCP `models` tool
      lists each model's native levels.

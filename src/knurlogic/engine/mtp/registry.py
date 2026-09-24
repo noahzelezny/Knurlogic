@@ -1,7 +1,8 @@
 """Per-family registration for MTP speculative decoding.
 
-Adding a family is a table entry here plus a head module. Nothing else in the
-package names an architecture; the loop, the caches and the sampler are all
+Adding a family's head is a `head` entry in its manifest
+(engine/families/<family>/__init__.py) plus the head module in its heads/.
+Nothing in this package names an architecture; the loop, the caches and the sampler are all
 family-agnostic.
 
 A `FamilySpec` says four things, and every one of them is a place where

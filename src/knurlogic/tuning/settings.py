@@ -77,7 +77,6 @@ def _measured_widths() -> dict:
 
 #: architecture -> (width, evidence), from each family's manifest.
 PREFILL_CHUNK_MEASURED = _measured_widths()
-PREFILL_CHUNK_BY_FAMILY = {k: v[0] for k, v in PREFILL_CHUNK_MEASURED.items()}
 
 
 def prefill_chunk_for(model_type: str) -> tuple:

@@ -10,10 +10,7 @@ the 35B-A3B (qwen3_5_moe, subclasses qwen3_5), and Qwen3.8-Flash-Next
 # ArraysCache entries, which is why any "has SSM caches -> small chunk"
 # heuristic catches it wrongly: a blanket SSM->512 on 2026-09-02 made its
 # prefill 8x the chunks.
-_QWEN35_PREFILL = (4096, "measured 2026-06-19: +115% prefill tok/s at 11k "
-                         "tokens vs a 512 cap, no peak-memory cost, "
-                         "bit-identical output; 45/60 layers recurrent, so "
-                         "no chunk x seq^2 transient to cap")
+_QWEN35_PREFILL = (4096, "measured 2026-06-19 (see the comment above)")
 
 # The Qwen3.5/3.8 head drafts from the activation going INTO the trunk's
 # final norm (one residual stream).
@@ -30,9 +27,6 @@ _QWEN35_HEAD = dict(
     head="knurlogic.engine.families.qwen.heads.qwen35:MTPHeadQwen35",
     capture="norm", draft_cache="KVCache",
     sidecar_name="mtp-head-q6.safetensors",
-    # load-bearing for speed: 'copy' deep-copies every GatedDeltaNet state
-    # per speculative step. check_snapshot_semantics True on a loaded 27B
-    # (2026-08-31).
     cache_semantics="reassign")
 
 MANIFEST = {

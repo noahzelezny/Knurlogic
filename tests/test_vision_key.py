@@ -149,14 +149,11 @@ def test_adding_a_second_image_keeps_the_first_prefix():
 
 # --- registry ----------------------------------------------------------------------
 
-def test_registry_table_is_the_frozen_one():
-    assert registry.FAMILIES == {
-        "qwen3_5": "knurlogic.engine.families.qwen.vision:build",
-        "qwen3_5_moe": "knurlogic.engine.families.qwen.vision:build",
-        "qwen4_exp": "knurlogic.engine.families.qwen.vision:build",
-        "gemma4": "knurlogic.engine.families.gemma4.vision:build",
-        "glm5_next": "knurlogic.engine.families.glm5.vision:build",
-    }
+def test_registry_table_is_the_manifests():
+    """No second copy of the table lives here: the registry reads the family
+    manifests, and tests/test_families.py holds those to their contract."""
+    from knurlogic.engine import families
+    assert registry.FAMILIES == families.build_maps()["vision"]
 
 
 def test_missing_family_module_means_no_vision(monkeypatch):
@@ -273,7 +270,7 @@ def test_merge_takes_rows_by_sentinel_across_a_prefix_cut():
 
 @pytest.mark.parametrize("model_type,family", [
     ("qwen3_5_text", "qwen3_5"), ("qwen3_5_moe_text", "qwen3_5_moe"),
-    ("qwen4_exp_text", "qwen4_exp"), ("gemma4_text", "gemma4"),
+    ("qwen4_exp_text", "qwen4_exp"), ("gemma4_text", "gemma4_text"),
     ("glm5_next_text", "glm5_next"), ("qwen3_5", "qwen3_5")])
 def test_the_released_rungs_text_spelling_finds_its_vision_family(
         model_type, family):

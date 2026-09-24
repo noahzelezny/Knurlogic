@@ -17,9 +17,9 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Noah Zelezny" }]
 
-# mlx-lm is the engine (see knurlogic/engine/seam.py, the one module that knows
-# so). PINNED EXACTLY, mlx with it (design D2, docs/design/vision.md): the
-# seam wraps mlx-lm's server methods by name (`ResponseGenerator._tokenize`,
+# mlx-lm is the engine (see knurlogic/engine/serve/, the one package that
+# knows so). PINNED EXACTLY, mlx with it (design D2, docs/design/vision.md): the
+# serve package wraps mlx-lm's server methods by name (`ResponseGenerator._tokenize`,
 # `_serve_single`, the prompt cache), the vision key rides mlx-lm's prompt
 # trie, and v1 of the vision design was built on line citations from a
 # different mlx-lm than the one serving (critique B4). A version is blessed
