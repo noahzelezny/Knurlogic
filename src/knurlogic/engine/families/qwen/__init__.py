@@ -63,8 +63,7 @@ MANIFEST = {
         # Qwen3.8 27B, Flash-Next: enable_thinking, then reasoning_effort
         # in {xhigh (default), medium, low}; anything else raises.
         "qwen_effort": {
-            "detect": {"all": ["enable_thinking", "reasoning_effort",
-                               "xhigh"]},
+            "detect": {"all": ["enable_thinking", "reasoning_effort"]},
             "default": "xhigh",
             "native": [["none", "off", {"enable_thinking": False}],
                        ["low", "low", {"reasoning_effort": "low"}],

@@ -42,8 +42,7 @@ MANIFEST = {
     # with the lowest native level and the response says so.
     "thinking": {
         "glm_effort": {
-            "detect": {"all": ["reasoning_effort", "Reasoning Effort"],
-                       "none": ["enable_thinking"]},
+            "detect": {"all": ["reasoning_effort", "Reasoning Effort"]},
             "default": "max",
             "native": [["low", "low", {"reasoning_effort": "low"}],
                        ["high", "high", {"reasoning_effort": "high"}],
