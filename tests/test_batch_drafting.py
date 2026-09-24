@@ -246,3 +246,52 @@ def test_checkpoint_restore_can_fail(monkeypatch):
     gen = bg.MTPBatchGenerator(model, head, prefill_step_size=16)
     _drive(gen, [next_b], 5, cache=copy.deepcopy(entry), prefix=key)
     assert gen._prompt_tokens_counter == len(sys_ + user + next_b)
+
+
+# --- a failed admission fails its request, not the server ----------------------
+
+def test_a_failed_admission_fails_only_its_request(monkeypatch):
+    """An exception while admitting one row used to escape next() and end
+    mlx-lm's generation thread: that request and every later one hung with
+    no error. It must reach that request as an exception in its progress,
+    while the other row still finishes."""
+    from knurlogic.engine.mtp import batch_generator as bg
+    model, head, prompts = _tiny(512)
+    gen = bg.MTPBatchGenerator(model, head, prefill_step_size=16)
+    real = bg.admit
+    calls = {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+        return real(*a, **k)
+
+    monkeypatch.setattr(bg, "admit", flaky)
+    bad, good = gen.insert(prompts[:2], max_tokens=[5, 5])
+    errors, done = [], set()
+    for _ in range(200):
+        prs, grs = gen.next()                       # must not raise
+        errors += [r.progress for r in prs if r.uid == bad
+                   and isinstance(r.progress, Exception)]
+        done |= {r.uid for r in grs if r.finish_reason}
+        if good in done and errors:
+            break
+    assert [str(e) for e in errors] == ["boom"]
+    assert good in done and bad not in done
+    gen.remove([bad])                               # the server's cleanup
+    assert not any(r.uid == bad for r in gen.next()[0])
+    gen.close()
+
+
+def test_failed_admission_can_fail(monkeypatch):
+    """Without the guard the same exception escapes next()."""
+    from knurlogic.engine.mtp import batch_generator as bg
+    model, head, prompts = _tiny(512)
+    gen = bg.MTPBatchGenerator(model, head, prefill_step_size=16)
+    monkeypatch.setattr(bg, "admit", lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("boom")))
+    monkeypatch.setattr(gen, "_failed_responses", lambda: [])
+    gen.insert(prompts[:1], max_tokens=[5])
+    prs, _ = gen.next()
+    assert not any(isinstance(r.progress, Exception) for r in prs)
