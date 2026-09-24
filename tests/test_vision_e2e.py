@@ -198,9 +198,11 @@ def _gemma_rig(tmp):
         mx.eval(f.vision_tower.parameters(), f.embed_vision.parameters())
         return f
     t = fv.tiny_ids("gemma4")
-    specials = {"<image_soft_token>": t["image_token_id"],
-                "<start_of_image>": t["boi_token_id"],
-                "<end_of_image>": t["eoi_token_id"]}
+    # The released tokenizer's strings (gemma e4b tokenizer.json): the
+    # template emits "<|image|>"; "<image_soft_token>" is not a token there.
+    specials = {"<|image|>": t["image_token_id"],
+                "<|image>": t["boi_token_id"],
+                "<image|>": t["eoi_token_id"]}
     # 144 x 144 -> 9 x 9 patches -> 9 tokens after the 3x3 pool
     return Rig("gemma4", model, make, specials, t["image_token_id"],
                img_size=(144, 144))

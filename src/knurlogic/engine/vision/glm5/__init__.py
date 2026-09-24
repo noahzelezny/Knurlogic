@@ -110,6 +110,8 @@ class Glm5VisionFamily:
         if not weights:
             return 0
         weights = tower.sanitize(weights)
+        from ..quant import artifact_quantization, quantize_like
+        quantize_like(tower, weights, artifact_quantization(model_path))
         tower.update(tree_unflatten(list(weights.items())))
         mx.eval(tower.parameters())
         return len(weights)

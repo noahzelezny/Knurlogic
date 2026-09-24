@@ -61,7 +61,7 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
               f"measures nothing.", file=sys.stderr)
         return 2
 
-    needed = arch.required_modules(a.model_type)
+    needed = arch.modules_for_artifact(a)
     if needed:
         done = register.register(*needed)
         print(f"registered {done or '(already imported)'}")

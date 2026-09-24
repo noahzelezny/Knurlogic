@@ -37,6 +37,7 @@ import json
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 RED_5X5_PNG = base64.b64decode(
@@ -48,8 +49,11 @@ def _post(url: str, body: dict, timeout: float = 60.0) -> dict:
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(), method="POST",
         headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"HTTP {e.code} from {url}: {e.read().decode()[:500]}")
 
 
 def _get(url: str, timeout: float = 10.0) -> dict:
@@ -60,13 +64,18 @@ def _get(url: str, timeout: float = 10.0) -> dict:
 def _chat(base: str, messages: list, **extra) -> dict:
     return _post(f"{base}/v1/chat/completions",
                 {"model": "served", "messages": messages,
-                 "max_tokens": 64, "stream": False, **extra})
+                 "max_tokens": 64, "stream": False,
+                 # The gate checks what the model SEES; thinking only spends
+                 # the token budget before the answer.
+                 "chat_template_kwargs": {"enable_thinking": False},
+                 **extra}, timeout=300)
 
 
 def run(artifact: str, image_path: str, host: str, port: int) -> int:
     from knurlogic.machine import loadlock
 
     base = f"http://{host}:{port}"
+    fails: list = []
     with open(image_path, "rb") as fh:
         img_b64 = base64.b64encode(fh.read()).decode()
 
@@ -75,7 +84,8 @@ def run(artifact: str, image_path: str, host: str, port: int) -> int:
             proc = subprocess.Popen(
                 [sys.executable, "-m", "knurlogic", "serve", artifact,
                  "--host", host, "--port", str(port)],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                stdout=open(f"vision_gate-{port}.log", "w"),
+                stderr=subprocess.STDOUT, text=True)
             try:
                 # Wait for /status.json to answer, not a fixed sleep -- the
                 # load time varies enormously by rung (2.1 vs 397B).
@@ -94,50 +104,63 @@ def run(artifact: str, image_path: str, host: str, port: int) -> int:
                     print("server never answered within 600s", file=sys.stderr)
                     return 1
 
+
+                def check(ok: bool, what: str) -> None:
+                    print(f"      {'PASS' if ok else 'FAIL'}  {what}")
+                    if not ok:
+                        fails.append(what)
+
+                def said(r: dict) -> str:
+                    return (r["choices"][0]["message"].get("content")
+                            or "").strip()
+
+                def img_part():
+                    return {"type": "image_url", "image_url": {
+                        "url": f"data:image/png;base64,{img_b64}"}}
+
                 print("[1/5] text-only answer")
                 r1 = _chat(base, [{"role": "user", "content": "say ok"}])
-                assert r1["choices"][0]["message"]["content"], "empty text answer"
+                check(bool(said(r1)), f"text answer {said(r1)!r}")
 
-                print("[2/5] image answer (red)")
+                print("[2/5] image answer")
                 r2 = _chat(base, [{"role": "user", "content": [
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
-                    {"type": "text", "text": "What color is this image? "
-                                              "Answer with one word."}]}])
-                ans = r2["choices"][0]["message"]["content"].lower()
-                print(f"      -> {ans!r}")
+                    img_part(), {"type": "text", "text":
+                                 "What color is the square, and what number "
+                                 "is written? Answer briefly."}]}])
+                ans = said(r2).lower()
+                check("red" in ans, f"sees the red square: {ans!r}")
+                check("42" in ans, "reads the 42")
 
                 print("[3/5] five-turn reuse")
                 convo = [{"role": "user", "content": [
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
-                    {"type": "text", "text": "Remember this image."}]}]
-                prev_new = None
+                    img_part(), {"type": "text",
+                                 "text": "Remember this image. Say ok."}]}]
+                img_prompt = None
                 for turn in range(5):
-                    r = _chat(base, convo + [{"role": "user",
-                                              "content": f"turn {turn}: ok?"}],
-                              stream_options={"include_usage": True})
-                    usage = r.get("usage", {})
-                    cached = (usage.get("prompt_tokens_details") or {}).get(
+                    r = _chat(base, convo)
+                    u = r.get("usage", {})
+                    cached = (u.get("prompt_tokens_details") or {}).get(
                         "cached_tokens", 0)
-                    new = usage.get("prompt_tokens", 0) - cached
-                    print(f"      turn {turn}: prompt={usage.get('prompt_tokens')}"
-                          f" cached={cached} new={new}")
-                    msg = r["choices"][0]["message"]
-                    convo.append({"role": "assistant",
-                                  "content": msg.get("content", "")})
+                    prompt = u.get("prompt_tokens", 0)
+                    print(f"      turn {turn}: prompt={prompt} cached={cached}"
+                          f" new={prompt - cached}")
+                    if turn == 0:
+                        img_prompt = prompt
+                    else:
+                        # Everything up to the previous turn's end is reusable;
+                        # the image span sits inside it.
+                        check(cached >= img_prompt,
+                              f"turn {turn} reused the image span "
+                              f"({cached} cached >= {img_prompt})")
+                    convo.append({"role": "assistant", "content": said(r)})
                     convo.append({"role": "user",
-                                  "content": f"turn {turn + 1}: ok?"})
-                    if turn > 0 and prev_new is not None:
-                        if new > prev_new + 50:
-                            print("      WARNING: turn's new-token count grew "
-                                  "as if the image were re-prefilled", file=sys.stderr)
-                    prev_new = new
-                r5 = _chat(base, convo + [{"role": "user",
-                                          "content": "what did I show you "
-                                                     "at the start?"}])
-                print(f"      turn5 recall -> "
-                      f"{r5['choices'][0]['message']['content']!r}")
+                                  "content": f"Turn {turn + 1}. Say ok."})
+                convo[-1] = {"role": "user", "content":
+                             "What color was the square in the image I "
+                             "showed you first? One word."}
+                r5 = _chat(base, convo)
+                check("red" in said(r5).lower(),
+                      f"recalls the image after five turns: {said(r5)!r}")
             finally:
                 print("[4/5] unload")
                 try:
@@ -154,9 +177,8 @@ def run(artifact: str, image_path: str, host: str, port: int) -> int:
         print(f"another load is in progress: {b.holder}", file=sys.stderr)
         return loadlock.EXIT_BUSY
 
-    print("[5/5] done -- read the transcript above; this script asserts "
-          "only that nothing crashed and prints what a human checks")
-    return 0
+    print(f"[5/5] {'PASS' if not fails else 'FAIL: ' + '; '.join(fails)}")
+    return 1 if fails else 0
 
 
 def main(argv=None) -> int:
