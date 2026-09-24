@@ -199,10 +199,11 @@ def test_nothing_declared_emits_nothing(tmp_path):
 def test_verified_switch_defaults_off_and_follows_the_record(monkeypatch):
     from knurlogic.engine.vq import runtime
     p = f"/m/{ORG}--Qwen3.8-27B-VQ-3.9bpw"
-    assert runtime.serves(p) is False, "nothing is verified before G-VQ runs"
     t = json.loads(json.dumps(RG.table()))
-    t["rungs"][f"{ORG}/Qwen3.8-27B-VQ-3.9bpw"]["verified"] = True
     monkeypatch.setattr(RG, "_table", lambda: t)
+    t["rungs"][f"{ORG}/Qwen3.8-27B-VQ-3.9bpw"]["verified"] = False
+    assert runtime.serves(p) is False, "an unverified rung stays on its bundle"
+    t["rungs"][f"{ORG}/Qwen3.8-27B-VQ-3.9bpw"]["verified"] = True
     assert runtime.serves(p) is True
     assert runtime.serves("/m/some-other-model") is False
 
