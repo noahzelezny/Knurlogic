@@ -45,6 +45,11 @@ RED_5X5_PNG = base64.b64decode(
     "P8v9WHzBGdgAAAABJRU5ErkJggg==")
 
 
+#: Room for the answer. A model whose template ignores enable_thinking
+#: (GLM-5.3 always thinks) needs more: --max-tokens.
+MAX_TOKENS = 64
+
+
 def _post(url: str, body: dict, timeout: float = 60.0) -> dict:
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(), method="POST",
@@ -64,7 +69,7 @@ def _get(url: str, timeout: float = 10.0) -> dict:
 def _chat(base: str, messages: list, **extra) -> dict:
     return _post(f"{base}/v1/chat/completions",
                 {"model": "served", "messages": messages,
-                 "max_tokens": 64, "stream": False,
+                 "max_tokens": MAX_TOKENS, "stream": False,
                  # The gate checks what the model SEES; thinking only spends
                  # the token budget before the answer.
                  "chat_template_kwargs": {"enable_thinking": False},
@@ -191,7 +196,10 @@ def main(argv=None) -> int:
     p.add_argument("image")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8099)
+    p.add_argument("--max-tokens", type=int, default=64)
     a = p.parse_args(argv)
+    global MAX_TOKENS
+    MAX_TOKENS = a.max_tokens
     return run(a.artifact, a.image, a.host, a.port)
 
 

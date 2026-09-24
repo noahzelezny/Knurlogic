@@ -98,8 +98,15 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(f"  WARNING: {w}", file=sys.stderr)
 
     if a.model_file:
-        print(f"\n{a.path.name} ships its own runtime ({a.model_file}) and it "
-              f"WILL be executed -- that is where its kernels live.")
+        from knurlogic.engine.vq import runtime as _vq
+        if _vq.serves(a.path):
+            print(f"\n{a.path.name} ships its own runtime ({a.model_file}); "
+                  f"knurlogic's runtime serves it instead -- verified "
+                  f"bit-identical to that file (G-VQ, rungs.json).")
+        else:
+            print(f"\n{a.path.name} ships its own runtime ({a.model_file}) "
+                  f"and it WILL be executed -- that is where its kernels "
+                  f"live (not yet verified against knurlogic's runtime).")
 
     rows = arch.check(a.model_type)
 

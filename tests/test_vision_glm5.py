@@ -93,7 +93,7 @@ def test_glm5_next_imports_without_mlx_vlm_MUTATED():
     literally breaking the import in a copy path and confirming pytest
     would fail. Run manually (not on every CI pass, since it edits files):
     ``python3 -m pytest tests/test_vision_glm5.py -k MUTATED -v`` after
-    changing one `_vendor` import in
+    changing one `_mlx_vlm` import in
     `engine/architectures/glm5_next/language.py` back to
     ``from ..cache import ...`` -- confirmed 2026-09-23 to turn the test
     above red (`ModuleNotFoundError: No module named 'mlx_vlm'`), then
@@ -103,41 +103,29 @@ def test_glm5_next_imports_without_mlx_vlm_MUTATED():
 
 
 def test_vendor_siblings_import_standalone():
-    """Every module `glm5_siblings()` derives, plus their own transitive
-    deps, import with no mention of the real mlx_vlm package."""
-    from knurlogic.engine.vision.glm5._vendor import (
-        base,
-        cache,
-        gated_delta,
-        linear,
-        mla,
-        qwen3_vl_processing,
-        sparse_attention,
-        switch_layers,
-        turboquant,
-    )
-    from knurlogic.engine.vision.glm5._vendor.deepseek_v4 import hyper_connection
-
+    """The mlx-vlm 0.6.17 modules glm5_next imports -- vendored under
+    glm5_next/_mlx_vlm/, the version the released rungs were built and
+    scored with -- import with no mention of the real mlx_vlm package."""
+    P = "knurlogic.engine.architectures.glm5_next._mlx_vlm"
+    import importlib
+    mods = [importlib.import_module(f"{P}.{m}") for m in (
+        "models.base", "models.cache", "models.gated_delta", "models.mla",
+        "models.mlp", "models.rope_utils", "models.switch_layers",
+        "models.deepseek_v32.language", "models.deepseek_v4.hyper_connection",
+        "turboquant", "kv_quant")]
+    base, cache, gd, mla = mods[:4]
     assert hasattr(base, "BaseModelConfig")
     assert hasattr(cache, "KVCache")
     assert hasattr(mla, "MultiLinear")
-    assert hasattr(gated_delta, "gated_delta_update")
-    assert hasattr(linear, "tiled_linear")
-    assert hasattr(sparse_attention, "indexed_sparse_attention")
-    assert hasattr(switch_layers, "MoE")
-    assert hasattr(hyper_connection, "HyperConnection")
-    assert qwen3_vl_processing._flatten_images([[1, 2], 3]) == [1, 2, 3]
-    assert hasattr(turboquant, "TurboQuantKVCache")
-
-    for mod in (base, cache, gated_delta, linear, mla, sparse_attention,
-               switch_layers, hyper_connection, turboquant):
+    assert hasattr(gd, "gated_delta_update")
+    for mod in mods:
         assert not mod.__name__.startswith("mlx_vlm")
 
 
 def test_glm5_siblings_now_empty():
     """`deps.glm5_siblings()` regexes glm5_next's OWN source for `from
     ..X import` lines -- the exact mlx_vlm-relative pattern this package
-    rewrote to absolute `knurlogic.engine.vision.glm5._vendor.X` imports.
+    rewrote to absolute `knurlogic.engine.architectures.glm5_next._mlx_vlm.models.X` imports.
     Read 2026-09-23 (before this package): {base, cache,
     deepseek_v4.hyper_connection, gated_delta, linear, mla,
     qwen3_vl.processing_qwen3_vl, sparse_attention, switch_layers} -- 9
@@ -155,7 +143,7 @@ def test_glm5_siblings_now_empty():
 def test_glm5_siblings_now_empty_MUTATED():
     """Mutation check for the gate above: reverting ONE import in
     `engine/architectures/glm5_next/language.py` from the absolute
-    `knurlogic.engine.vision.glm5._vendor.mla` back to a relative
+    `knurlogic.engine.architectures.glm5_next._mlx_vlm.models.mla` back to a relative
     `from ..mla import MultiLinear` (confirmed 2026-09-23) turns
     `glm5_siblings()` non-empty again -- `test_glm5_siblings_now_empty`
     goes red as expected. Reverted after confirming."""
@@ -258,3 +246,25 @@ def test_family_embed_merges_features():
     assert embeds.shape[-2] == ref.n_tokens
     assert bool(mx.allclose(embeds[0], enc.feats).item()) or bool(
         mx.array_equal(embeds[0], enc.feats).item())
+
+
+def test_preprocess_normalizes_like_the_reference_processor(tmp_path):
+    """Glm5NextImageProcessor rescales to [0,1] and then normalizes with
+    CLIP's mean/std (or the artifact's). Found on GLM-5.3-Flash 2.7: without
+    the normalize step a pure red square was read as "salmon/coral"."""
+    import json
+    import numpy as np
+    from PIL import Image
+    from fixtures_vision_glm5 import glm5_tiny_config
+    from knurlogic.engine.vision.glm5 import Glm5VisionFamily, build
+    fam = Glm5VisionFamily(glm5_tiny_config())
+    px, _ = fam.preprocess(Image.new("RGB", (56, 56), (255, 0, 0)), "x")
+    v = px["pixel_values"].reshape(px["pixel_values"].shape[0], 3, -1)
+    m, s = np.array(fam.IMAGE_MEAN), np.array(fam.IMAGE_STD)
+    want = (np.array([1.0, 0.0, 0.0]) - m) / s
+    assert np.allclose(v[0, :, 0], want, atol=1e-5)
+    # and the artifact's own values win, and change the processing hash
+    (tmp_path / "processor_config.json").write_text(json.dumps(
+        {"image_processor": {"image_mean": [0.5] * 3, "image_std": [0.5] * 3}}))
+    other = Glm5VisionFamily(glm5_tiny_config(), [0.5] * 3, [0.5] * 3)
+    assert other.spec.proc_hash != fam.spec.proc_hash

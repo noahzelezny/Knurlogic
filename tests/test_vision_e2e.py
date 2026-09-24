@@ -224,7 +224,17 @@ GLM_TEXT = dict(num_hidden_layers=4,
                 kv_lora_rank=32, q_lora_rank=64, qk_nope_head_dim=32,
                 v_head_dim=32, qk_head_dim=32, index_head_dim=32,
                 index_n_heads=4, linear_head_dim=32, linear_num_heads=4,
-                first_k_dense_replace=3, pad_token_id=0)
+                first_k_dense_replace=3, pad_token_id=0,
+                # required by mlx-vlm 0.6.17's TextConfig, the version the
+                # released GLM rungs are built on; real values at tiny size
+                n_shared_experts=1, routed_scaling_factor=2.5,
+                qk_rope_head_dim=0, max_position_embeddings=4096,
+                rms_norm_eps=1e-5, index_topk=64,
+                linear_attn_config=dict(num_heads=4, head_dim=32,
+                                        gate_lower_bound=-5.0,
+                                        short_conv_kernel_size=4,
+                                        kda_layers=[0, 1, 2],
+                                        full_attn_layers=[3]))
 
 
 def _glm_call(model, ids, cache, input_embeddings=None, **kw):

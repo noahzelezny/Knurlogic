@@ -248,15 +248,55 @@ def model_classes(cfg: dict, knobs: dict | None = None):
     bundles also take mlx-lm's arch when mlx-lm is the loader."""
     rt = runtime_module(knobs)
     base = importlib.import_module(f"mlx_lm.models.{cfg['model_type']}")
+    args_cls = getattr(base, "ModelArgs", None)
 
-    class Model(base.Model):
-        def __init__(self, args):
-            super().__init__(args)
-            self._vq_attached = attach_vq(self, cfg, rt)
+    if args_cls is not None:
+        class Model(base.Model):
+            def __init__(self, args):
+                super().__init__(args)
+                self._vq_attached = attach_vq(self, cfg, rt)
+    else:
+        # An mlx-vlm-shaped arch (glm5_next): a ModelConfig that builds its
+        # nested configs itself, and a __call__ that takes input_ids and
+        # returns an output object. mlx-lm's loader and server call
+        # model(inputs, cache=..., input_embeddings=...) and read logits, so
+        # the call goes straight to the language model -- images come in
+        # as input_embeddings from the vision family, never as pixels.
+        class args_cls:
+            """mlx-lm calls ModelArgs.from_dict(config). mlx-vlm's loader
+            builds the nested configs itself (utils.update_module_configs:
+            `<name>_config` -> `<Name>Config.from_dict`), and 0.6.17's
+            ModelConfig -- the one the GLM rungs are built on -- does not,
+            so it is done here, the same way. Generation defaults, the
+            other step of mlx-vlm's loader, set sampling fields only."""
+
+            @staticmethod
+            def from_dict(config):
+                mc = base.ModelConfig.from_dict(config)
+                for name in ("text", "vision", "perceiver", "projector",
+                             "audio"):
+                    cls = getattr(base, f"{name.title()}Config", None)
+                    sub = config.get(f"{name}_config")
+                    if cls is not None and isinstance(sub, dict) and \
+                            hasattr(mc, f"{name}_config"):
+                        setattr(mc, f"{name}_config", cls.from_dict(sub))
+                return mc
+
+        class Model(base.Model):
+            def __init__(self, args):
+                super().__init__(args)
+                self._vq_attached = attach_vq(self, cfg, rt)
+
+            def __call__(self, inputs, cache=None, input_embeddings=None,
+                         **kwargs):
+                out = self.language_model(inputs, cache=cache,
+                                          inputs_embeds=input_embeddings,
+                                          **kwargs)
+                return out.logits
 
     Model.__qualname__ = Model.__name__ = f"KnurlogicVQ_{base.Model.__name__}"
     Model.__module__ = rt.__name__
-    return Model, base.ModelArgs
+    return Model, args_cls
 
 
 def serves(path) -> bool:

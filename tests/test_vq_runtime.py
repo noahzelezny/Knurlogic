@@ -380,3 +380,31 @@ def test_each_knob_set_gets_its_own_module():
     assert (a._DECODE_BF16IO, b._DECODE_BF16IO) == (True, False)
     import os
     assert "VQ_DECODE_BF16IO" not in os.environ, "overlay must be undone"
+
+
+def test_serve_loads_a_verified_rung_on_knurlogics_runtime(tmp_path,
+                                                           monkeypatch):
+    """The routing: a rung rungs.json lists as verified loads through
+    knurlogic's runtime; anything else reaches the server's own `load`
+    untouched (bundled model.py and all)."""
+    import types
+    from knurlogic.engine import seam
+    from knurlogic.engine.vq import runtime
+    import mlx_lm.utils as mu
+
+    calls = []
+    srv = types.SimpleNamespace(
+        load=lambda p, **k: calls.append(("bundled", str(p))) or ("m", "t"))
+    seam._install_vq_runtime(srv)
+    verified = tmp_path / "verified"
+    other = tmp_path / "other"
+    verified.mkdir(), other.mkdir()
+    monkeypatch.setattr(runtime, "serves", lambda p: p.name == "verified")
+    monkeypatch.setattr(runtime, "load_model", lambda p, lazy=False: (
+        calls.append(("knurlogic", str(p))) or ("M", {"eos_token_id": 1})))
+    monkeypatch.setattr(mu, "load_tokenizer", lambda *a, **k: "T")
+
+    assert srv.load(str(verified)) == ("M", "T")
+    assert srv.load(str(other)) == ("m", "t")
+    assert [c[0] for c in calls] == ["knurlogic", "bundled"]
+    assert seam._SERVED["runtime"] == "bundled"

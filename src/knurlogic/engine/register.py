@@ -113,6 +113,15 @@ def register(*names: str, override: bool = False) -> list:
             sys.modules.pop(target, None)
             raise
         _installed.append(target)
+        # An arch hosted under mlx_vlm (for its relative imports) is also
+        # what mlx-lm's loader must find: `import_module("mlx_lm.models.X")`
+        # is how both knurlogic's VQ runtime and a published bundle resolve
+        # their base. Same module object under both names, so there is one
+        # arithmetic. A module mlx-lm already has is left alone.
+        alias = f"mlx_lm.models.{name}"
+        if alias != target and alias not in sys.modules:
+            sys.modules[alias] = mod
+            _installed.append(alias)
         done.append(name)
     return done
 
