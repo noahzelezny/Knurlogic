@@ -21,7 +21,21 @@ usage.knurlogic.thinking. Deciding HOW MUCH to think for a given question
 is the harness's call; this is only the translation.
 
 A client that sends `chat_template_kwargs` itself wins over the translation,
-key by key -- it asked for something specific.
+key by key -- it asked for something specific -- and the report then says
+what the MERGED kwargs render to, not what was asked.
+
+THE TEMPLATE TEXT PROPOSES, RENDERING DECIDES. Detection is a substring
+pre-filter on the template; with a loaded tokenizer, `probe` renders a tiny
+conversation through mlx-lm's own TokenizerWrapper once per native level
+and once bare. The dialect is only trusted when every level renders
+differently, and the model's default is whichever level the BARE render
+equals -- because mlx-lm injects enable_thinking=<has_thinking> into any
+request that is silent about it (tokenizer_utils.apply_chat_template), so
+gemma, whose template defaults off, thinks by default when served.
+
+Reasoning is streamed by default; `reasoning: {"exclude": true}`
+(OpenRouter's spelling) strips it from messages and deltas. Its token
+count goes in usage.completion_tokens_details.reasoning_tokens.
 """
 
 from __future__ import annotations
@@ -63,6 +77,11 @@ def detect(template: str | None):
             break
     _dialect_cache[h] = found
     return found
+
+
+def excluded(body: dict) -> bool:
+    r = body.get("reasoning")
+    return isinstance(r, dict) and bool(r.get("exclude"))
 
 
 def requested(body: dict):
@@ -113,6 +132,47 @@ def resolve(level, dialect: str | None, spec: dict | None):
                            "note": note}
 
 
+_PROBE_MSGS = [{"role": "user", "content": "hi"}]
+_probe_cache: dict = {}
+
+
+def _render(tokenizer, kwargs: dict):
+    try:
+        return tokenizer.apply_chat_template(
+            _PROBE_MSGS, add_generation_prompt=True, tokenize=False,
+            **kwargs)
+    except Exception:
+        return None
+
+
+def thinking_keys(spec: dict) -> set:
+    return {k for n in spec["native"] for k in n[2]}
+
+
+def probe(tokenizer, template: str, spec: dict) -> dict:
+    """Render once per native level and once bare, through the tokenizer the
+    server uses. {verified, default, renders}. Cached per template."""
+    h = hashlib.sha256((template or "").encode()).hexdigest()
+    if h in _probe_cache:
+        return _probe_cache[h]
+    renders = {n[1]: _render(tokenizer, dict(n[2])) for n in spec["native"]}
+    bare = _render(tokenizer, {})
+    ok = (None not in renders.values() and bare is not None
+          and len(set(renders.values())) == len(renders))
+    default = next((name for name, r in renders.items() if r == bare), None)
+    out = {"verified": ok, "default": default, "renders": renders}
+    _probe_cache[h] = out
+    return out
+
+
+def applied_by_render(tokenizer, spec: dict, merged: dict, p: dict):
+    """Which native level the merged kwargs actually render to, judged on
+    the thinking keys only (other client kwargs are not ours to weigh)."""
+    keys = thinking_keys(spec)
+    r = _render(tokenizer, {k: v for k, v in merged.items() if k in keys})
+    return next((name for name, x in p["renders"].items() if x == r), None)
+
+
 def levels(template: str | None) -> dict:
     """What a served template offers, for the MCP and /status.json."""
     name, spec = detect(template)
@@ -140,10 +200,27 @@ def template_of(path) -> str | None:
     return None
 
 
-def _served_template() -> str | None:
+def _served_tokenizer():
     prov = state.SERVED.get("provider")
-    tok = getattr(prov, "tokenizer", None) if prov is not None else None
+    return getattr(prov, "tokenizer", None) if prov is not None else None
+
+
+def _served_template() -> str | None:
+    tok = _served_tokenizer()
     return getattr(tok, "chat_template", None) if tok is not None else None
+
+
+def status() -> dict:
+    """For /status.json: what reasoning_effort means on the served model,
+    the same answer the MCP's `models` gives, plus the rendered default."""
+    tmpl = _served_template()
+    out = levels(tmpl)
+    name, spec = detect(tmpl)
+    tok = _served_tokenizer()
+    if spec is not None and tok is not None:
+        p = probe(tok, tmpl, spec)
+        out.update(verified=p["verified"], served_default=p["default"])
+    return out
 
 
 def _refuse(handler, msg: str) -> None:
@@ -162,27 +239,75 @@ def install(srv) -> None:
     name DeepSeek and vLLM clients read. Each hook guards itself."""
     H = srv.APIHandler
 
+    RG = srv.ResponseGenerator
+    real_gen = RG.generate
+    if not getattr(real_gen, "_knurlogic_thinking", False):
+        @functools.wraps(real_gen)
+        def generate(self, request, *a, **k):
+            ctx, it = real_gen(self, request, *a, **k)
+
+            def counted():
+                n = 0
+                try:
+                    for g in it:
+                        if getattr(g, "state", None) == "reasoning":
+                            n += 1
+                            try:
+                                request._knurlogic_reasoning_tokens = n
+                            except Exception:
+                                pass
+                        yield g
+                finally:
+                    try:
+                        request._knurlogic_reasoning_tokens = n
+                    except Exception:
+                        pass
+            return ctx, counted()
+        generate._knurlogic_thinking = True
+        RG.generate = generate
+
     real_hc = H.handle_completion
     if not getattr(real_hc, "_knurlogic_thinking", False):
         @functools.wraps(real_hc)
         def handle_completion(self, request, *a, **k):
             body = getattr(self, "body", None) or {}
             self._knurlogic_thinking = None
+            self._knurlogic_thinking_request = request
+            self._knurlogic_exclude = excluded(body)
             if getattr(request, "request_type", "chat") == "chat":
                 try:
                     level = requested(body)
                 except ValueError as e:
                     return _refuse(self, str(e))
-                name, spec = detect(_served_template())
+                tmpl = _served_template()
+                name, spec = detect(tmpl)
+                tok = _served_tokenizer()
+                p = probe(tok, tmpl, spec) if (spec is not None and
+                                               tok is not None) else None
+                if p is not None and not p["verified"]:
+                    # The text named controls the template does not act on.
+                    name, spec = None, None
                 kwargs, report = resolve(level, name, spec)
+                if level is None and p is not None and spec is not None:
+                    report["applied"] = p["default"] or "the model's own"
+                    report["note"] = ("what the server renders when the "
+                                      "request is silent")
                 client = dict(self.chat_template_kwargs or {})
-                overridden = sorted(set(kwargs) & set(client))
-                if overridden:
-                    report["note"] = (report["note"] + "; " if report["note"]
-                                      else "") + (
+                merged = {**kwargs, **client}
+                touched = spec is not None and \
+                    bool(set(client) & thinking_keys(spec))
+                if touched:
+                    was = report["applied"]
+                    got = (applied_by_render(tok, spec, merged, p)
+                           if p is not None else None)
+                    report["applied"] = got or "set by the request"
+                    report["native"] = got is not None
+                    report["note"] = (
                         f"the request's own chat_template_kwargs set "
-                        f"{', '.join(overridden)} and won")
-                self.chat_template_kwargs = {**kwargs, **client} or None
+                        f"{', '.join(sorted(set(client) & thinking_keys(spec)))}"
+                        f" and won" + (f" (translation alone gave {was})"
+                                       if was != report["applied"] else ""))
+                self.chat_template_kwargs = merged or None
                 self._knurlogic_thinking = report
             return real_hc(self, request, *a, **k)
         handle_completion._knurlogic_thinking = True
@@ -194,16 +319,28 @@ def install(srv) -> None:
             resp = real(self, *a, **k)
             if not isinstance(resp, dict):
                 return resp
+            drop = getattr(self, "_knurlogic_exclude", False)
             for choice in resp.get("choices") or []:
                 for key in ("message", "delta"):
                     part = choice.get(key)
-                    if isinstance(part, dict) and "reasoning" in part:
+                    if not isinstance(part, dict) or "reasoning" not in part:
+                        continue
+                    if drop:
+                        part.pop("reasoning", None)
+                        part.pop("reasoning_content", None)
+                    else:
                         part.setdefault("reasoning_content",
                                         part["reasoning"])
-            report = getattr(self, "_knurlogic_thinking", None)
             usage = resp.get("usage")
-            if report is not None and isinstance(usage, dict):
-                usage.setdefault("knurlogic", {})["thinking"] = report
+            if isinstance(usage, dict):
+                report = getattr(self, "_knurlogic_thinking", None)
+                if report is not None:
+                    usage.setdefault("knurlogic", {})["thinking"] = report
+                req = getattr(self, "_knurlogic_thinking_request", None)
+                n = getattr(req, "_knurlogic_reasoning_tokens", None)
+                if n is not None:
+                    usage.setdefault("completion_tokens_details", {})[
+                        "reasoning_tokens"] = n
             return resp
         wrapped._knurlogic_thinking = True
         return wrapped

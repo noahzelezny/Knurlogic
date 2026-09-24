@@ -55,6 +55,7 @@ from .server import serve, switch, unload
 from .state import served_path
 from .drafting import drafting_status, install as install_drafting, \
     load_head as load_draft_head
+from .thinking import status as thinking_status
 from .vision import (VISION_WRAPS, bind as bind_vision, clear as clear_vision,
                      install as install_vision, served_vision, vision_status)
 
@@ -64,5 +65,6 @@ __all__ = [
     "info", "install_drafting", "install_vision", "keeps_mtp_weights", "load",
     "load_draft_head", "memory", "models_module", "serve", "served_path",
     "served_vision", "server_argv", "set_cache_limit", "switch",
+    "thinking_status",
     "tool_support", "unload", "vision_status",
 ]
