@@ -73,6 +73,7 @@ from mlx_lm.generate import (BatchGenerator, GenerationBatch,
                              PromptProcessingBatch)
 
 from .batch_loop import MTPBatch, RowParams, admit
+from knurlogic.engine import cachereport
 from .capture import capture_input
 from .registry import resolve
 from .sampling import make_distribution
@@ -276,6 +277,8 @@ class MTPBatchGenerator(BatchGenerator):
         self._ckpt_ready: dict = {}
         # uid -> exception, for rows whose admission raised (see _failed).
         self._failed: dict = {}
+        # uid -> the server's request object, for its cache report.
+        self._requests: dict = {}
         self._stats = stats if stats is not None else {}
         if name:
             logger.info("batch engine drafting with the %s MTP head", name)
@@ -299,7 +302,10 @@ class MTPBatchGenerator(BatchGenerator):
                                    "with no vision family; the serve path "
                                    "is wired wrong")
 
+        via = {"checkpoint": False}
+
         def replay(hc, h):
+            via["checkpoint"] = True
             # The checkpoint's head stopped at c-1; its input there is
             # (h_{c-1}, x_c), and x_c is this prompt's token at c.
             x = K.to_ids(prompt[len(prefix):len(prefix) + 1],
@@ -356,6 +362,9 @@ class MTPBatchGenerator(BatchGenerator):
                             **kw)
                 if stash:
                     self._ckpt_pending[uid] = stash
+                self._report(uid, prompt, len(prefix), hit, n,
+                             "checkpoint" if via["checkpoint"] else None,
+                             len(stash), vis)
                 self._batch.extend([row])
         finally:
             if vis is not None:
@@ -367,6 +376,25 @@ class MTPBatchGenerator(BatchGenerator):
         self._prompt_tokens_counter += n - hit
         self._stats["requests"] = self._stats.get("requests", 0) + 1
         return PromptProcessingBatch.Response(uid, (n, n), True, True)
+
+    def _report(self, uid, prompt, offered, hit, n, via, n_ckpt, vis):
+        """The cache report for this row's request (engine/cachereport)."""
+        req = self._requests.pop(uid, None)
+        if req is None:
+            return
+        spans = K.image_spans(prompt) if vis is not None else []
+        imgs = spans
+        # whole images only: one the cache boundary cuts was prefilled
+        cached_imgs = [sp for sp in spans if sp.end <= hit]
+        cachereport.attach(req, {
+            "offered": offered, "used": hit, "discarded": offered - hit,
+            "prefilled": n - hit,
+            "via": via or ("prefix" if hit else "none"),
+            "images": {"total": len(imgs), "in_cached_span": len(cached_imgs),
+                       "prefilled": len(imgs) - len(cached_imgs),
+                       "encoded": int(getattr(req, "_knurlogic_encoded", 0))},
+            "checkpoints_stored": n_ckpt,
+        })
 
     def _vision_entry(self, entry: list, key: list, hit_len: int,
                       replay=None):
@@ -443,6 +471,13 @@ class MTPBatchGenerator(BatchGenerator):
                 return trunk + [head]
         return trunk
 
+    def insert_segments(self, *a, **kw):
+        uids = super().insert_segments(*a, **kw)
+        req = cachereport.claim()
+        if req is not None and len(uids) == 1:
+            self._requests[uids[0]] = req
+        return uids
+
     def _report_checkpoint(self) -> List[PromptProcessingBatch.Response]:
         """One stored checkpoint per row per call, oldest first: the server
         collects end-of-segment caches with ONE extract_cache per call,
@@ -494,6 +529,7 @@ class MTPBatchGenerator(BatchGenerator):
                 self._rows.pop(uid, None)
                 self._ckpt_pending.pop(uid, None)
                 self._failed[uid] = e
+                self._requests.pop(uid, None)
                 prompt_responses += self._failed_responses()
                 return prompt_responses, []
             prompt_responses.append(admitted)
@@ -591,6 +627,7 @@ class MTPBatchGenerator(BatchGenerator):
     def remove(self, uids, return_prompt_caches=False):
         for u in uids:
             self._failed.pop(u, None)
+            self._requests.pop(u, None)
         caches = self.extract_cache(uids) if return_prompt_caches else {}
         if self._vision is not None:
             # A row dropped before admission still holds its tokenize pin.

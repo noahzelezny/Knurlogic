@@ -671,3 +671,82 @@ def test_every_vision_trunk_pin_matches_its_file():
         for row in arch.check(mt):
             if row.module in arch.PINNED_SHA256 and row.vendored:
                 assert row.state == "OK", f"{row.module} is {row.state}"
+
+
+# --- the cache report ------------------------------------------------------------
+
+@pytest.mark.parametrize("name", FAMILIES)
+def test_usage_reports_what_the_cache_actually_did(server, rigs, name):
+    """usage.knurlogic.cache comes from the engine, not the trie: on turn 2
+    the image sits in the reused span, cached_tokens is what was USED, and
+    prompt = used + prefilled. Turn 1 used nothing."""
+    from knurlogic.engine import seam
+    seam._install_cache_report(server)
+    rig = rigs(name)
+    h = harness(server, rig, rig.make_family())
+    m1, r1, m2, r2 = two_turns(h, rig.url(11))
+
+    c1 = r1["usage"]["knurlogic"]["cache"]
+    assert c1["used"] == 0 and c1["via"] == "none"
+    assert c1["images"] == {"total": 1, "in_cached_span": 0, "prefilled": 1,
+                            "encoded": 1}
+
+    u2 = r2["usage"]
+    c2 = u2["knurlogic"]["cache"]
+    assert c2["used"] > 0 and c2["discarded"] == 0
+    assert u2["prompt_tokens_details"]["cached_tokens"] == c2["used"]
+    assert c2["used"] + c2["prefilled"] == u2["prompt_tokens"]
+    # turn 2 resends the image: a store hit, no tower run
+    assert c2["images"] == {"total": 1, "in_cached_span": 1, "prefilled": 0,
+                            "encoded": 0}
+
+
+def test_cache_report_says_when_an_offered_prefix_was_discarded():
+    """The reason the report exists: the trie offers, the engine refuses
+    (a drafting row with no aligned head), and cached_tokens must not claim
+    the offer. Shown on the report function itself."""
+    from knurlogic.engine import cachereport
+    usage = {"prompt_tokens": 50,
+             "prompt_tokens_details": {"cached_tokens": 40}}
+    cachereport.into_usage(usage, {"offered": 40, "used": 0, "discarded": 40,
+                                   "prefilled": 50, "via": "none",
+                                   "images": {}, "checkpoints_stored": 0})
+    assert usage["prompt_tokens_details"]["cached_tokens"] == 0
+    assert usage["knurlogic"]["cache"]["discarded"] == 40
+
+
+# --- encode-twice: the tower is deterministic -----------------------------------
+
+@pytest.mark.parametrize("name", FAMILIES)
+def test_encoding_the_same_image_twice_is_bit_identical(rigs, name):
+    """A cached image's features stand in for a fresh encode only if the
+    tower is deterministic: preprocess + encode the same picture twice,
+    from scratch, and the features must be equal bit for bit (design v2,
+    review #7, kept as a cheap invariant)."""
+    import hashlib
+    from PIL import Image
+    rig = rigs(name)
+    fam = rig.make_family()
+    img = Image.new("RGB", rig.img_size, (200, 40, 90))
+    for x in range(0, rig.img_size[0], 7):
+        img.putpixel((x, x % rig.img_size[1]), (0, 255, 0))
+    sha = hashlib.sha256(img.tobytes()).hexdigest()
+    a = fam.encode(*fam.preprocess(img, sha))
+    b = fam.encode(*fam.preprocess(img.copy(), sha))
+    mx.eval(a.feats, b.feats)
+    assert a.feats.shape == b.feats.shape
+    assert mx.array_equal(a.feats, b.feats).item()
+
+
+def test_encode_twice_can_fail(rigs):
+    """The comparison sees a one-pixel change."""
+    import hashlib
+    from PIL import Image
+    rig = rigs(FAMILIES[0])
+    fam = rig.make_family()
+    img = Image.new("RGB", rig.img_size, (200, 40, 90))
+    other = img.copy()
+    other.putpixel((0, 0), (0, 0, 0))
+    a = fam.encode(*fam.preprocess(img, "a"))
+    b = fam.encode(*fam.preprocess(other, "b"))
+    assert not mx.array_equal(a.feats, b.feats).item()

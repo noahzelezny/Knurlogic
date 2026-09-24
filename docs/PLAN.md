@@ -303,9 +303,32 @@ Before merging to main:
    vq_modules differ from the published config (Hub config and weights
    agree). Told the vqlab session: any Flash number scored from ~/.exo for
    those rungs is not the published artifact.
-2. The per-request cache report in usage, and the encode-twice gate.
-3. GLM needs a template knob: it has no enable_thinking and always
-   thinks, so short max_tokens return empty content.
+2. Thinking effort, one control for every family (decided 2026-09-24):
+   - accept OpenAI `reasoning_effort` on chat completions and Anthropic
+     `thinking` on /v1/messages; ladder off / low / medium / high / max;
+     aliases none, minimal, xhigh. Omitted = the model's own default.
+   - NATIVE controls only. No token budgets (some models truncate mid
+     thought; it is rudimentary). A level a family cannot express maps to
+     its nearest native setting and the response says what was applied.
+   - "auto" (thinking by difficulty) is a classification call: the
+     harness's, not knurlogic's.
+   - Return reasoning as `reasoning_content`; count it in
+     completion_tokens_details.reasoning_tokens; the MCP `models` tool
+     lists each model's native levels.
+   - Read from the templates: Qwen3.8 enable_thinking + effort
+     low/medium/xhigh; Qwen3.6 on/off; GLM-5.3 effort low/high/max, no
+     off; gemma 4 on/off, OFF by default; DeepSeek-V4 thinking_mode.
+     GLM "off" via an already-closed think block is its own format, not a
+     budget -- measure answer quality before offering it.
+
+Done 2026-09-24 (CPU, tiny fixtures, all five families):
+- usage.knurlogic.cache on every batch-engine response: offered, used,
+  discarded, prefilled, via (none / prefix / checkpoint), images
+  {total, in_cached_span, prefilled, encoded}, checkpoints_stored; and
+  cached_tokens is what the engine USED, not what the trie offered.
+  tools/vision_gate.py checks it on real models (discarded 0, encoded 0).
+- The encode-twice gate: same image, preprocessed and encoded twice from
+  scratch, bit-identical features.
 
 ## OPEN, and it may move published numbers: the Flash-Next PLE hash seed
 
