@@ -35,7 +35,7 @@ def glm5_family(config: Dict[str, Any] | None = None):
     output)."""
     import mlx.core as mx
 
-    from knurlogic.engine.vision.glm5 import Glm5VisionFamily
+    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
 
     mx.random.seed(0)
     cfg = config if config is not None else glm5_tiny_config()

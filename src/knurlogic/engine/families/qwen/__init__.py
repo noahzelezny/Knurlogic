@@ -63,6 +63,6 @@ MANIFEST = {
                 cache_semantics="reassign"),
         },
     },
-    "vision": {"build": "knurlogic.engine.vision.qwen:build",
+    "vision": {"build": "knurlogic.engine.families.qwen.vision:build",
                "architectures": ["qwen3_5", "qwen3_5_moe", "qwen4_exp"]},
 }

@@ -1,4 +1,4 @@
-"""engine/vision/qwen/ -- images for qwen3_5, qwen3_5_moe and qwen4_exp.
+"""engine/families/qwen/vision/ -- images for qwen3_5, qwen3_5_moe and qwen4_exp.
 
   vision.py      the tower, vendored from mlx-vlm 0.6.17 qwen3_vl
   processing.py  PIL image -> pixel_values + grid, vendored (numpy, no torch)

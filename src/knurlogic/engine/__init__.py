@@ -9,8 +9,12 @@ fails the suite, so swapping the engine stays a change to this folder.
   mtp/             multi-token-prediction drafting, sequential and batched.
                    Its front door (`knurlogic.engine.mtp`) is stdlib only, so
                    asking whether an artifact has a head costs no mlx import
-  vision/          images as context: contracts, the cache key, the image
-                   store, and one package per family (qwen, gemma4, glm5)
+  families/        one folder per model family: its MANIFEST (architectures,
+                   model_type spellings, heads, prefill widths) and its own
+                   code (vision/ today). Adding a family = one folder + one
+                   line in families/__init__.py
+  vision/          images as context, family-agnostic: contracts, the cache
+                   key, the image store, the request path
   vq/              knurlogic's own VQ runtime; serves a rung only once
                    tools/vq_gate.py proves it bit-identical to the rung's
                    published model.py (rungs.json)

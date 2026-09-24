@@ -151,11 +151,11 @@ def test_adding_a_second_image_keeps_the_first_prefix():
 
 def test_registry_table_is_the_frozen_one():
     assert registry.FAMILIES == {
-        "qwen3_5": "knurlogic.engine.vision.qwen:build",
-        "qwen3_5_moe": "knurlogic.engine.vision.qwen:build",
-        "qwen4_exp": "knurlogic.engine.vision.qwen:build",
-        "gemma4": "knurlogic.engine.vision.gemma4:build",
-        "glm5_next": "knurlogic.engine.vision.glm5:build",
+        "qwen3_5": "knurlogic.engine.families.qwen.vision:build",
+        "qwen3_5_moe": "knurlogic.engine.families.qwen.vision:build",
+        "qwen4_exp": "knurlogic.engine.families.qwen.vision:build",
+        "gemma4": "knurlogic.engine.families.gemma4.vision:build",
+        "glm5_next": "knurlogic.engine.families.glm5.vision:build",
     }
 
 

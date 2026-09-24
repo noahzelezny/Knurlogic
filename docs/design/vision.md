@@ -271,7 +271,7 @@ Checked against the source before folding in:
 The rest of the second pass (findings 3-9), executed against the files:
 * REFUTED (#4) "GLM has no image token in its vocabulary": tokenizer.json
   registers `<|image|>` = 154854 (and begin/end_of_image 154830/154831);
-  config.json `image_token_id` = 154854; engine/vision/glm5 reads it. Flash
+  config.json `image_token_id` = 154854; engine/families/glm5/vision reads it. Flash
   had marked this inferred from absence.
 * REFUTED (#3, again) "GLM drops earlier thinking": chat_template.jinja:149
   keeps reasoning unless clear_thinking; `<think></think>` is the else.
