@@ -85,10 +85,12 @@ PIECES = {
                    "sharding",
         "needed_for": "multi-node. One box needs no exo at all.",
         "portable": True,
-        "why_not_ported": "MTP, batch MTP and the prefill table are ported "
-                          "(knurlogic.engine.mtp, tuning.settings.PREFILL_CHUNK_BY_FAMILY). "
-                          "Placement, sharding and networking stay in exo: "
-                          "knurlogic wraps exo rather than rebuilding it.",
+        "why_not_ported": "MTP, batch MTP and the prefill widths are ported "
+                          "(knurlogic.engine.mtp; each family's manifest in "
+                          "knurlogic.engine.families). Placement, sharding "
+                          "and networking still run through exo today; "
+                          "knurlogic is replacing them (docs/PLAN.md, "
+                          "'Next: replace exo').",
     },
 }
 
