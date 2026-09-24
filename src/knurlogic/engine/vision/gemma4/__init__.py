@@ -53,6 +53,7 @@ from .. import EncodedImage, ImageRef, VisionSpec, proc_hash
 from ..key import Span, image_spans, is_sentinel, to_ids
 from ..scatter import merge as scatter_merge
 from .config import VisionConfig
+from ..quant import artifact_quantization, quantize_like
 from .vision import VisionModel
 
 PATCH = 16
@@ -141,6 +142,10 @@ class Gemma4Vision:
         self.boi_token_id = boi_token_id
         self.eoi_token_id = eoi_token_id
         self.text_hidden_size = text_hidden_size
+        # Filled from the artifact's tokenizer.json by build(); these are
+        # the e4b / 26b strings, kept for fixtures built without one.
+        self.token_text = {"boi": "<|image>", "image": "<|image|>",
+                           "eoi": "<image|>"}
 
         self.spec = VisionSpec(
             family="gemma4", image_token_id=image_token_id, patch=vc.patch_size,
@@ -164,6 +169,9 @@ class Gemma4Vision:
         embed_w = {k[len("embed_vision."):]: v for k, v in weights.items()
                   if k.startswith("embed_vision.")}
         tower_w = self.vision_tower.sanitize(tower_w)
+        quant = artifact_quantization(model_path)
+        quantize_like(self.vision_tower, tower_w, quant, "vision_tower.")
+        quantize_like(self.embed_vision, embed_w, quant, "embed_vision.")
         if tower_w:
             self.vision_tower.update(tree_unflatten(list(tower_w.items())))
         if embed_w:
@@ -201,23 +209,28 @@ class Gemma4Vision:
         return EncodedImage(ref=ref, feats=scaled)
 
     def placeholder_text(self, ref: ImageRef) -> str:
-        # boi/eoi are ordinary framing ids around the ONE pad token
-        # (design D6, key.py contract); the chat template already emits
-        # them for gemma, so the placeholder itself is just the pad.
-        return "<image_soft_token>"
+        # What gemma4's processor puts in place of the template's image
+        # token: boi, ONE pad (key.expand_pads widens it to n_tokens), eoi
+        # (mlx-vlm processing_gemma4.py full_image_sequence). The template
+        # itself emits only the pad, so the framing is ours to add.
+        return self.token_text["boi"] + self.token_text["image"] \
+            + self.token_text["eoi"]
 
     def embed(self, model: Any, key: List[Any], start: int,
               features) -> Dict[str, Any]:
         sl = list(key[start:])
         ids = mx.array(to_ids(sl, self.image_token_id))[None]
-        embed_tokens = model.model.embed_tokens
+        # The served model is the gemma4 wrapper (text under
+        # .language_model); tests hand the bare gemma4_text Model.
+        core = getattr(model, "language_model", model).model
+        embed_tokens = core.embed_tokens
         text_embeds = embed_tokens(ids)                          # unscaled
         input_embeddings = scatter_merge(text_embeds, sl, features)
 
         extras: Dict[str, Any] = {"input_embeddings": input_embeddings}
-        if getattr(model.model, "hidden_size_per_layer_input", 0):
+        if getattr(core, "hidden_size_per_layer_input", 0):
             zeroed = mx.array([0 if is_sentinel(x) else x for x in sl])[None]
-            extras["per_layer_inputs"] = model.model._get_per_layer_inputs(
+            extras["per_layer_inputs"] = core._get_per_layer_inputs(
                 zeroed, text_embeds)
 
         mm_mask = self._mm_mask(sl)
@@ -250,15 +263,30 @@ class Gemma4Vision:
         return mx.array(out, dtype=mx.int32)[None]
 
 
+def _added_tokens(model_path: str) -> Dict[int, str]:
+    """id -> text for the artifact's added (special) tokens."""
+    p = Path(model_path) / "tokenizer.json"
+    if not p.is_file():
+        return {}
+    return {t["id"]: t["content"]
+            for t in json.loads(p.read_text()).get("added_tokens", [])}
+
+
 def build(model_path: str, text_model: Any, config: Dict[str, Any]):
     vision_config = config.get("vision_config")
     if not vision_config:
         return None
     text_config = config.get("text_config", {})
-    return Gemma4Vision(
+    fam = Gemma4Vision(
         vision_config=vision_config,
         text_hidden_size=text_config.get("hidden_size", 2560),
         image_token_id=config.get("image_token_id", 258880),
         boi_token_id=config.get("boi_token_id"),
         eoi_token_id=config.get("eoi_token_id"),
     )
+    added = _added_tokens(model_path)
+    for name, tid in (("boi", fam.boi_token_id), ("image", fam.image_token_id),
+                      ("eoi", fam.eoi_token_id)):
+        if tid in added:
+            fam.token_text[name] = added[tid]
+    return fam
