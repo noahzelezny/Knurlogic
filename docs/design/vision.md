@@ -210,9 +210,19 @@ it, the template then renders those turns without their thinking, and the
 prefix diverges there. Therefore: knurlogic's chat always echoes
 `reasoning_content`, and for it the gate is `prompt - cached <= new + 32` on
 turns 2-5; for other clients the metric is reported and the behaviour
-documented ("send reasoning_content back to keep reuse"). gemma4's template
-is not yet checked. The checkpoint-per-user-turn idea stays as the fallback
-for clients that do not echo reasoning.
+documented ("send reasoning_content back to keep reuse").
+
+**gemma4 is the exception** (checked 2026-09-23 after the 397B's review
+flagged it): its template renders earlier reasoning only for the latest
+turn and only with tool calls (`chat_template.jinja:239`) and strips
+thinking from earlier content (`:319`, `:327`), with no switch. So on gemma
+the image is still never re-prefilled (it sits in an earlier user turn,
+before the divergence), but each new turn re-prefills the previous answer,
+whose thinking the model generated into the KV and the template then drops.
+Echoing reasoning_content cannot help. For gemma the turn-N gate is "the
+image is never re-prefilled"; full reuse needs the checkpoint below. The
+checkpoint-per-user-turn is therefore the planned fix for gemma and the
+fallback for clients that do not echo reasoning on Qwen and GLM.
 
 ## Review by Flash-Next 4.4 (local, 2026-09-23) -- folded in
 
@@ -277,6 +287,21 @@ The rest of the second pass (findings 3-9), executed against the files:
   gates can be checked from outside; the chat's token meter reads it.
 * Already addressed: #5 (processor config is fixed at load; a change is a
   key miss by construction), #9 (goal restated).
+
+### Third review: Qwen3.5-397B-A17B-VQ-2.2bpw through Scout (same day)
+
+Placed on the NozzleBook through knurlogic's own MCP. It confirmed the
+model-level claims (image tokens: Qwen 248056, GLM 154854; templates keep
+thinking on Qwen and GLM; vision weights on all released rungs), made no
+false claims, and said plainly what it could not read (Scout's read roots
+exclude site-packages, so it could not open mlx-lm's server). Its critical
+item -- tuple sentinels in mlx-lm -- was already settled by execution (P4 and
+the end-to-end tests ran them through the real server objects on all five
+families). `proc_hash` and the pins exist in code and contracts it was not
+pointed at. Its one new finding, the unchecked gemma template, was real and
+is above. Calibration across the three local passes: Flash found more and
+claimed more, including wrong claims from absence; the 397B found less and
+claimed nothing it had not read.
 
 Process note for the code review: Flash reasons at length -- give it a
 larger budget or disable thinking for review passes.
