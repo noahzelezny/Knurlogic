@@ -36,7 +36,7 @@ def tiny_text_model(text_config: Dict[str, Any]):
 
 
 def build_gemma4_family(config: Dict[str, Any]):
-    from knurlogic.engine.vision.gemma4 import build as gemma4_build
+    from knurlogic.engine.families.gemma4.vision import build as gemma4_build
     return gemma4_build(model_path="/nonexistent", text_model=None, config=config)
 
 

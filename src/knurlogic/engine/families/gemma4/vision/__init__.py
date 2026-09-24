@@ -49,11 +49,11 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
 
-from .. import EncodedImage, ImageRef, VisionSpec, proc_hash
-from ..key import Span, image_spans, is_sentinel, to_ids
-from ..scatter import merge as scatter_merge
+from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
+from knurlogic.engine.vision.key import Span, image_spans, is_sentinel, to_ids
+from knurlogic.engine.vision.scatter import merge as scatter_merge
 from .config import VisionConfig
-from ..quant import artifact_quantization, quantize_like
+from knurlogic.engine.vision.quant import artifact_quantization, quantize_like
 from .vision import VisionModel
 
 PATCH = 16

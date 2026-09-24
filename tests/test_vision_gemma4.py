@@ -19,7 +19,7 @@ mx = pytest.importorskip("mlx.core")
 
 import fixtures_vision as fv  # noqa: E402
 import fixtures_vision_gemma4 as g4fv  # noqa: E402
-from knurlogic.engine.vision.gemma4 import Gemma4Vision  # noqa: E402
+from knurlogic.engine.families.gemma4.vision import Gemma4Vision  # noqa: E402
 from knurlogic.engine.vision.key import expand, sentinel  # noqa: E402
 from knurlogic.engine.vision import ImageRef  # noqa: E402
 
@@ -86,7 +86,7 @@ def test_g1_loads_a_quantized_embedder(tmp_path):
 def test_g1_quantized_embedder_can_fail(tmp_path, monkeypatch):
     """Without the quantize step the same artifact refuses to load -- the
     e4b failure this guards ("no parameter named scales")."""
-    import knurlogic.engine.vision.gemma4 as g4
+    import knurlogic.engine.families.gemma4.vision as g4
     _write_quantized_embed(tmp_path)
     monkeypatch.setattr(g4, "quantize_like", lambda *a, **k: 0)
     with pytest.raises(ValueError, match="scales"):
@@ -98,7 +98,7 @@ def test_placeholder_is_framed_with_the_artifacts_own_tokens(tmp_path):
     boi / image / eoi, or the prompt carries no image token at all (the
     e4b gate failure: 1 image, 0 placeholders)."""
     import json
-    from knurlogic.engine.vision.gemma4 import build
+    from knurlogic.engine.families.gemma4.vision import build
     t = fv.tiny_ids("gemma4")
     (tmp_path / "tokenizer.json").write_text(json.dumps({"added_tokens": [
         {"id": t["boi_token_id"], "content": "<B>"},
