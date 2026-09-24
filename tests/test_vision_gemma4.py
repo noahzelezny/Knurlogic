@@ -54,6 +54,62 @@ def test_g1_load_weights_can_fail(tmp_path):
     assert n == 0  # RED if load_weights silently claimed tensors it never read
 
 
+def _write_quantized_embed(tmp_path):
+    """An artifact whose embed_vision projection is stored 8-bit affine and
+    whose tower is plain -- the layout gemma e4b VQ ships."""
+    import json
+    from mlx.utils import tree_flatten
+    import mlx.nn as nn
+    fam = _tiny_family()
+    gs = 32
+    nn.quantize(fam.embed_vision, group_size=gs, bits=8)
+    w = {f"vision_tower.{k}": v for k, v in
+         tree_flatten(fam.vision_tower.parameters())}
+    w.update({f"embed_vision.{k}": v for k, v in
+              tree_flatten(fam.embed_vision.parameters())})
+    mx.save_safetensors(str(tmp_path / "model.safetensors"), w)
+    (tmp_path / "config.json").write_text(json.dumps(
+        {"quantization": {"group_size": gs, "bits": 8, "mode": "affine"}}))
+    return fam
+
+
+def test_g1_loads_a_quantized_embedder(tmp_path):
+    src = _write_quantized_embed(tmp_path)
+    fresh = _tiny_family()
+    fresh.load_weights(str(tmp_path))
+    proj = fresh.embed_vision.embedding_projection
+    assert hasattr(proj, "scales")
+    assert mx.array_equal(proj.scales,
+                          src.embed_vision.embedding_projection.scales).item()
+
+
+def test_g1_quantized_embedder_can_fail(tmp_path, monkeypatch):
+    """Without the quantize step the same artifact refuses to load -- the
+    e4b failure this guards ("no parameter named scales")."""
+    import knurlogic.engine.vision.gemma4 as g4
+    _write_quantized_embed(tmp_path)
+    monkeypatch.setattr(g4, "quantize_like", lambda *a, **k: 0)
+    with pytest.raises(ValueError, match="scales"):
+        _tiny_family().load_weights(str(tmp_path))
+
+
+def test_placeholder_is_framed_with_the_artifacts_own_tokens(tmp_path):
+    """The placeholder must be the strings the artifact's tokenizer maps to
+    boi / image / eoi, or the prompt carries no image token at all (the
+    e4b gate failure: 1 image, 0 placeholders)."""
+    import json
+    from knurlogic.engine.vision.gemma4 import build
+    t = fv.tiny_ids("gemma4")
+    (tmp_path / "tokenizer.json").write_text(json.dumps({"added_tokens": [
+        {"id": t["boi_token_id"], "content": "<B>"},
+        {"id": t["image_token_id"], "content": "<P>"},
+        {"id": t["eoi_token_id"], "content": "<E>"}]}))
+    cfg = fv.tiny_config("gemma4")
+    fam = build(str(tmp_path), None, cfg)
+    ref = ImageRef(sha="x", proc_hash=fam.spec.proc_hash, n_tokens=9)
+    assert fam.placeholder_text(ref) == "<B><P><E>"
+
+
 # --- G2: encode() matches the reference tower, on the SAME weights --------
 
 def test_g2_encode_matches_reference_tower_golden():

@@ -24,5 +24,11 @@
     "validated_with_mlx_lm": "0.32.0",
     "text_path_of": "15df2080b3197db26067e1e4e23c2ce152841a8f0f60ff1fb2b2976e93dbb4b9",
     "text_path_held_by": "tests/goldens/qwen_g5_text.npz (vision P1 added MRoPE; text path bit-identical on the tiny models; real-rung re-validation pending)"
+  },
+  "gemma4": {
+    "sha256": "086fb0e4c06df6cf8ad14efbf7956fff744c9835d169e064887863df551e549d",
+    "validated_on_artifact": "TheDrainFlorist--gemma-4-e4b-it-VQ-PLE",
+    "validated_with_mlx_lm": "0.31.3",
+    "text_path_held_by": "tools/vision_gate.py on the M4, 2026-09-23: text answer, image answer (red, 42), five-turn cache reuse, recall -- all PASS. The only edit forwards mm_mask; with mm_mask=None the call is upstream's."
   }
 }

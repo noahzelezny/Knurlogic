@@ -47,7 +47,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
 
-    needed = arch.required_modules(a.model_type)
+    needed = arch.modules_for_artifact(a)
     if needed:
         done = register.register(*needed)
         print(f"registered {done or '(already imported)'} "

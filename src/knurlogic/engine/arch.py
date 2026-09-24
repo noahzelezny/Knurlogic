@@ -66,13 +66,14 @@ ARCH_FOR_MODEL_TYPE = {
     "qwen3_5_moe_text": "qwen3_5_moe",   # subclasses qwen3_5
     "qwen3_5_moe": "qwen3_5_moe",
     "gemma4_text": "gemma4_text",
+    "gemma4": "gemma4",                   # wraps gemma4_text
     "glm5_next_text": "glm5_next",
     "glm5_next": "glm5_next",
 }
 
 #: Modules that inherit another's arithmetic. A drift in the base reaches
 #: every artifact of the subclass, which is how one file came to cover 11.
-ARCH_DEPENDS_ON = {"qwen3_5_moe": ["qwen3_5"]}
+ARCH_DEPENDS_ON = {"qwen3_5_moe": ["qwen3_5"], "gemma4": ["gemma4_text"]}
 
 def _load_pins() -> dict:
     """Digests recorded by `knurlogic smoke --pin` on a clean pass.
@@ -163,6 +164,19 @@ def required_modules(model_type: str) -> list:
     for dep in ARCH_DEPENDS_ON.get(base, []):
         if dep not in out:
             out.append(dep)
+    return out
+
+
+def modules_for_artifact(a) -> list:
+    """required_modules for the text model AND the top-level config type.
+    A multimodal rung's config says `gemma4` on the outside and
+    `gemma4_text` inside; the runtime loads the OUTER one, so a wrapper we
+    vendor is only used if it is registered too."""
+    out = list(required_modules(a.model_type))
+    outer = (getattr(a, "raw_config", None) or {}).get("model_type")
+    for m in required_modules(outer) if outer else []:
+        if m not in out:
+            out.append(m)
     return out
 
 
