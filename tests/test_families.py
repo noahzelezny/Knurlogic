@@ -106,3 +106,45 @@ def test_every_data_file_in_the_package_ships():
                    fnmatch.fnmatch(rel, g.replace("**/", "")) for g in globs):
             missed.append(rel)
     assert not missed, f"data files no package-data glob ships: {missed}"
+
+
+# --- conformance: being listed is enough to be tested -----------------------------
+
+def test_every_vision_family_has_an_end_to_end_rig():
+    """tests/test_vision_e2e.py drives each vision architecture through
+    mlx-lm's real server with a tiny model, and runs the encode-twice gate.
+    A family whose manifest declares vision but has no rig there fails here,
+    instead of quietly shipping untested."""
+    sys.path.insert(0, str(ROOT / "tests"))
+    import test_vision_e2e as e2e
+    assert set(e2e.FAMILIES) == set(families.build_maps()["vision"])
+
+
+def test_every_head_a_manifest_names_imports():
+    import importlib
+    for name, h in families.build_maps()["heads"].items():
+        mod, _, attr = h["head"].partition(":")
+        assert hasattr(importlib.import_module(mod), attr), (name, h["head"])
+        assert h["cache_semantics"] in ("reassign", "copy"), name
+
+
+def test_every_architecture_registers_without_mlx_vlm():
+    """What `pip install knurlogic` has: no mlx-vlm. Every vendored module,
+    in its dependency order, must register and import anyway."""
+    code = (
+        "import sys\n"
+        "class H:\n"
+        "    def find_spec(self, n, p=None, t=None):\n"
+        "        if n == 'mlx_vlm': raise ImportError('blocked')\n"
+        "sys.meta_path.insert(0, H())\n"
+        "from knurlogic.engine import register\n"
+        "done = register.register(*register.available())\n"
+        "import importlib\n"
+        "for m in register.available():\n"
+        "    importlib.import_module(f'mlx_lm.models.{m}')\n"
+        "print(sorted(done))\n")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                         text=True, env={"PYTHONPATH": str(SRC)})
+    assert out.returncode == 0, out.stderr[-2000:]
+    from knurlogic.engine import register
+    assert out.stdout.strip() == str(sorted(register.available()))

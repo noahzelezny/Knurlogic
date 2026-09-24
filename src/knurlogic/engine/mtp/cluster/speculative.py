@@ -63,9 +63,9 @@ def build_model_path(model_id):
 #: only in annotations.
 Model = Any
 
-from .loop import load_mtp_head, mtp_stream_generate
-from .pipeline import Coordinator, is_pipeline_model, make_coordinator
-from .registry import resolve
+from ..loop import load_mtp_head, mtp_stream_generate
+from ..pipeline import Coordinator, is_pipeline_model, make_coordinator
+from ..registry import resolve
 
 _HEAD_CACHE: dict[str, Any] = {}
 _HEAD_FAILED: set[str] = set()
