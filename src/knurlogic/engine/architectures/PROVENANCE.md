@@ -47,12 +47,12 @@ artifacts were validated against -- not merely that it imports.
   `gemma4/language.py:455-515` (`_block_sequence_ids_for_mask`,
   `_apply_blockwise_bidirectional_overlay`, the `use_bidirectional_vision`
   gate in `_make_masks`), MIT, Copyright (c) 2025 Prince Canuma -- with
-  `_block_sequence_ids_for_mask` NOT ported: `engine/vision/gemma4` passes
+  `_block_sequence_ids_for_mask` NOT ported: `engine/families/gemma4/vision` passes
   the block-id array directly (it already has it from
   `engine/vision/key.image_spans`, which distinguishes images by sha, not
   just "is a vision token"), so recomputing block ids from a token-type
   array is unneeded here (no audio token in this build). See
-  `src/knurlogic/engine/vision/gemma4/PROVENANCE.md`.
+  `src/knurlogic/engine/families/gemma4/vision/PROVENANCE.md`.
 
 ## gemma4.py
 

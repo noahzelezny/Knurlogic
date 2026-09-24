@@ -8,6 +8,6 @@ MANIFEST = {
         "gemma4_text": {"model_types": ["gemma4_text"]},
         "gemma4": {"depends_on": ["gemma4_text"], "model_types": ["gemma4"]},
     },
-    "vision": {"build": "knurlogic.engine.vision.gemma4:build",
+    "vision": {"build": "knurlogic.engine.families.gemma4.vision:build",
                "architectures": ["gemma4"]},
 }

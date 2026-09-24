@@ -192,7 +192,7 @@ def _gemma_rig(tmp):
     mx.eval(model.parameters())
 
     def make():
-        from knurlogic.engine.vision.gemma4 import build
+        from knurlogic.engine.families.gemma4.vision import build
         mx.random.seed(0)
         f = build("/nonexistent", model, cfg)
         mx.eval(f.vision_tower.parameters(), f.embed_vision.parameters())

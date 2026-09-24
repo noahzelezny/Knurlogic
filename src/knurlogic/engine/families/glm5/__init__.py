@@ -37,6 +37,6 @@ MANIFEST = {
                 cache_semantics="reassign"),
         },
     },
-    "vision": {"build": "knurlogic.engine.vision.glm5:build",
+    "vision": {"build": "knurlogic.engine.families.glm5.vision:build",
                "architectures": ["glm5_next"]},
 }
