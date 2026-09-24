@@ -9,7 +9,8 @@ absorb_max_L`. Deviation from the VQLab source: none in behaviour; the
 module-level `scaled_dot_product_attention` import stays function-local
 so importing this module never imports mlx_vlm.
 
-WHERE IT IS INSTALLED IN EXO: `mtp/speculative.py:_load_head`, only when
+WHERE IT IS INSTALLED IN EXO: exo's `mtp/speculative.py:_load_head` (knurlogic's
+dormant copy: engine/mtp/cluster/speculative.py), only when
 a glm5_next MTP head is about to be built — i.e. only under EXO_MTP=1
 for a glm5_next model with a sidecar present. With EXO_MTP unset nothing
 in this file ever runs and the stock decode path is untouched.
