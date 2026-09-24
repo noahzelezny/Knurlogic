@@ -482,7 +482,7 @@
  .chip .ctok{color:var(--faint)}
  .chip .cx{cursor:pointer;color:var(--faint);padding:0 3px}
  .chip .cx:hover{color:var(--warn)}
- .crow{display:flex;gap:8px;align-items:flex-end}
+ .crow{display:flex;gap:8px;align-items:flex-end;flex:1;width:100%}
  #cq{flex:1;resize:none;background:var(--panel);color:var(--fg);
    border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;
    font:inherit;font-size:12.5px;max-height:160px}
@@ -494,6 +494,7 @@
  .pfbar .pfbartxt{position:absolute;top:6px;left:0;font-size:10px;color:var(--faint)}
  .lightbox{position:fixed;inset:0;background:oklch(0 0 0/.85);z-index:50;
    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+ .lightbox[hidden]{display:none}
  .lightbox img{max-width:90vw;max-height:80vh;object-fit:contain;border-radius:var(--r)}
  .lbbar{display:flex;gap:10px}
  .lbbar .mini{color:var(--fg);border-color:var(--line)}
@@ -1013,7 +1014,13 @@ async function tick(){
   // Nothing loaded is a STATE, not a page still loading, and the bench has
   // nothing to send a prompt to -- so it goes rather than sitting there with
   // a button that would fail.
-  $('try').style.display=a?'':'none';
+  // The chat talks to whatever is running (exo, or a server `load` started)
+  // through this page's /chat proxy, so it stays even when this page serves
+  // nothing; the bench speaks to this page's own endpoint and goes.
+  $('try').style.display='';
+  const bt=document.querySelector('#ptabs [data-tab="bench"]');
+  if(bt) bt.style.display=a?'':'none';
+  if(!a && window.ACTIVETAB==='bench' && window.switchTab) window.switchTab('chat');
   $('mem').style.display=a?'':'none';
   $('served').style.display=a?'':'none';
   if(!a){ $('title').textContent='no model loaded';
@@ -1357,6 +1364,7 @@ function renderPicker(){
 
 async function loadModels(){
   let d; try{ d=await (await fetch('/models.json')).json() }catch(e){ return }
+  window.ALLMODELS=d.models||[];
   MODELS=(d.models||[]).filter(m=>!m.serving && m.servable)
     .sort((a,b)=>b.size_bytes-a.size_bytes);
   $('diskcount').textContent=`${(d.models||[]).length} models`;
@@ -1561,7 +1569,7 @@ async function loadResident(){
   el.querySelectorAll('[data-chatn]').forEach(x=>x.onclick=()=>{
     const r=rows[+x.dataset.chatn];
     if(window.switchTab) window.switchTab('chat');
-    if(window.newChat) window.newChat(r.name);
+    if(window.newChat) window.newChat(r.name, r.where, window.visionOf(r.name));
   });
   // Only when status has told us nothing: in a cluster the key is the sum
   // of what the machines are drawing, and this document is one box.
@@ -1914,31 +1922,49 @@ function renderChats(){
     openChat(CHATS[+c.dataset.i]);
   });
 }
-function newChat(modelHint){
+function newChat(modelHint, where, vision){
   CCUR=String(Date.now())+Math.random().toString(36).slice(2,6);
   CHATS.unshift({id:CCUR, title:'new chat', model:modelHint||SERVEDNAME||'',
+                 where:where||'', vision:vision===undefined?null:!!vision,
                  at:Date.now(), updated:Date.now(), msgs:[]});
   saveChats(); switchTab('chat'); renderChats(); renderClog();
-  clearAttachments(); $('cq').focus();
+  clearAttachments(); chatGate(); $('cq').focus();
 }
+// Vision for a running model, from /models.json (the server's answer). exo
+// names a model org/name; its directory, and so the model list, org--name.
+function visionOf(name){
+  const k=String(name||'').replace('/','--');
+  const m=(window.ALLMODELS||[]).find(x=>x.name===k||x.name===name);
+  return !!(m && m.vision);
+}
+window.visionOf=visionOf;
+// Composer state follows the CURRENT chat's target: its own endpoint if it
+// has one (a running model clicked on the control page), else this page's
+// served model.
+function chatGate(){
+  const c=curChat();
+  const on=!!((c && c.where) || SERVED);
+  const vision=c && c.where ? !!c.vision : !!(SERVED && SERVED.vision);
+  $('cq').disabled=!on;
+  $('cq').placeholder=on ? 'Message the running model… (Shift+Enter for a newline)'
+                         : 'click a running model to chat with it';
+  $('csend').disabled=!on || BUSYC;
+  $('cattach').disabled=!on || !vision;
+  $('cattach').title=vision ? 'attach an image'
+    : (on ? 'this model has no vision' : 'click a running model to chat with it');
+}
+window.chatGate=chatGate;
 window.newChat=newChat;
 function openChat(c){
-  CCUR=c.id; renderChats(); renderClog();
+  CCUR=c.id; renderChats(); renderClog(); chatGate();
 }
 
 // --- served-model / vision gating -----------------------------------------
 let SERVED=null, SERVEDNAME=null;
 function chatServedChanged(a){
   SERVED=a; SERVEDNAME=a?a.name:null;
-  const vision=!!(a && (a.vision || window.isVision(a)));
   const on=!!a;
-  $('cq').disabled=!on;
-  $('cq').placeholder=on ? 'Message the running model… (Shift+Enter for a newline)'
-                         : 'choose a model to chat with';
-  $('csend').disabled=!on || BUSYC;
-  $('cattach').disabled=!on || !vision;
-  $('cattach').title=vision ? 'attach an image'
-    : (on ? 'the served model has no vision' : 'choose a model to chat with');
+  chatGate();
   if(on && !curChat()) newChat(a.name);
   if(on && curChat() && !curChat().model) { curChat().model=a.name; saveChats(); renderChats() }
 }
@@ -2217,8 +2243,11 @@ $('cq').addEventListener('keydown', e=>{
 $('cf').onsubmit=e=>{ e.preventDefault(); sendChat() };
 $('cstop').onclick=()=>{ if(ABORTC) ABORTC.abort() };
 
+function chatTargetOn(){
+  const c=curChat(); return !!((c && c.where) || SERVED);
+}
 function sendChat(){
-  if(BUSYC || !SERVED) return;
+  if(BUSYC || !chatTargetOn()) return;
   const text=$('cq').value.trim();
   if(!text && !PENDING.length) return;
   let c=curChat(); if(!c){ newChat(); c=curChat() }
@@ -2242,13 +2271,16 @@ async function runTurn(){
   const mdEl=()=>wrap.querySelector('.md');
   ABORTC=new AbortController();
   pfStart=0;
-  const body={messages:wire, stream:true, stream_options:{include_usage:true},
+  const body={model:c.model||undefined,
+    messages:wire, stream:true, stream_options:{include_usage:true},
     max_tokens:+$('cmax').value||2048, temperature:+$('ctemp').value||0.7};
   if($('cthink').checked) body.enable_thinking=true;
   const t0=performance.now();
   let first=0, raw='', usage=null;
   try{
-    const r=await fetch('/v1/chat/completions',{method:'POST',
+    const url=c.where ? '/chat?where='+encodeURIComponent(c.where)
+                      : '/v1/chat/completions';
+    const r=await fetch(url,{method:'POST',
       headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),
       signal:ABORTC.signal});
     if(!r.ok||!r.body) throw new Error('HTTP '+r.status);
@@ -2316,7 +2348,7 @@ async function runTurn(){
   }
   if(!assistant.content && !assistant.thinking) assistant.content='(no content)';
   c.updated=Date.now(); saveChats(); renderClog();
-  BUSYC=false; $('csend').disabled=!SERVED; $('csend').hidden=false; $('cstop').hidden=true;
+  BUSYC=false; $('csend').disabled=!chatTargetOn(); $('csend').hidden=false; $('cstop').hidden=true;
   ABORTC=null;
 }
 
