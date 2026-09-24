@@ -159,3 +159,90 @@ def test_a_built_sampler_carries_the_parameters_verification_needs():
     got = sampling_of(fn)
     assert got["temp"] == 0.7 and got["top_p"] == 0.9 and got["top_k"] == 20
     assert got["xtc_special_tokens"] == [2, 10]
+
+
+# --- segment checkpoints -------------------------------------------------------
+
+def _drive(gen, segments, max_tokens, cache=None, prefix=()):
+    """One request through insert_segments/next, the way mlx-lm's server
+    drives it: end-of-segment responses are answered with extract_cache.
+    Returns (tokens, [(key, entry)] checkpoints)."""
+    (uid,) = gen.insert_segments(segments=[segments], max_tokens=[max_tokens],
+                                 caches=[cache], all_tokens=[list(prefix)])
+    toks, ckpts = [], []
+    for _ in range(10_000):
+        prs, grs = gen.next()
+        eos = [r.uid for r in prs if r.end_of_segment and not r.end_of_prompt]
+        for u, (entry, key) in gen.extract_cache(eos).items():
+            ckpts.append((list(key), entry))
+        done = False
+        for r in grs:
+            toks.append(r.token)
+            done = done or r.finish_reason is not None
+        if done:
+            break
+    return toks, ckpts
+
+
+def _turns(vocab=512):
+    model, head, _ = _tiny(vocab)
+    mx.random.seed(1)
+    sys_, user = (mx.random.randint(0, vocab, (n,)).tolist() for n in (20, 30))
+    tail_a = mx.random.randint(0, vocab, (3,)).tolist()
+    next_b = mx.random.randint(0, vocab, (15,)).tolist()
+    return model, head, sys_, user, tail_a, next_b
+
+
+def test_prefill_stores_a_checkpoint_at_each_segment_end():
+    import copy
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    model, head, sys_, user, tail_a, _ = _turns()
+    _, ckpts = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
+                      [sys_, user, tail_a], 4)
+    assert [len(k) for k, _ in ckpts] == [20, 50]
+    assert ckpts[1][0] == sys_ + user
+
+
+def test_a_new_turn_restored_from_the_checkpoint_matches_a_fresh_prefill():
+    """The case the checkpoint exists for: the next turn agrees with the
+    stored prompt only up to the user segment's end (Qwen3.6 re-renders the
+    assistant tail), on a model whose linear-attention caches cannot be
+    trimmed. Restored there -- head replayed one step with the NEW token --
+    it must emit exactly what a from-scratch prefill emits, and prefill only
+    the new tokens (the channel: without the replay the head is misaligned
+    and the row falls back to a full prefill)."""
+    import copy
+    from mlx_lm.generate import BatchGenerator
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    model, head, sys_, user, tail_a, next_b = _turns()
+    _, ckpts = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
+                      [sys_, user, tail_a], 4)
+    key, entry = ckpts[-1]
+    prompt_b = sys_ + user + next_b
+
+    gen = MTPBatchGenerator(model, head, prefill_step_size=16)
+    restored, _ = _drive(gen, [next_b], 30, cache=copy.deepcopy(entry),
+                         prefix=key)
+    assert gen._prompt_tokens_counter == len(next_b)
+    gen.close()
+
+    fresh, _ = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
+                      [prompt_b], 30)
+    plain, _ = _drive(BatchGenerator(model, prefill_step_size=16),
+                      [prompt_b], 30)
+    assert restored == fresh == plain
+
+
+def test_checkpoint_restore_can_fail(monkeypatch):
+    """Drop the carried h and the same restore can no longer draft from the
+    checkpoint: the row prefills everything again."""
+    import copy
+    from knurlogic.engine.mtp import batch_generator as bg
+    model, head, sys_, user, tail_a, next_b = _turns()
+    _, ckpts = _drive(bg.MTPBatchGenerator(model, head, prefill_step_size=16),
+                      [sys_, user, tail_a], 4)
+    key, entry = ckpts[-1]
+    entry = [e for e in entry if not isinstance(e, bg.HeadCarry)]
+    gen = bg.MTPBatchGenerator(model, head, prefill_step_size=16)
+    _drive(gen, [next_b], 5, cache=copy.deepcopy(entry), prefix=key)
+    assert gen._prompt_tokens_counter == len(sys_ + user + next_b)

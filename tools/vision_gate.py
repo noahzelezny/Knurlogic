@@ -135,7 +135,12 @@ def run(artifact: str, image_path: str, host: str, port: int) -> int:
                 convo = [{"role": "user", "content": [
                     img_part(), {"type": "text",
                                  "text": "Remember this image. Say ok."}]}]
-                img_prompt = None
+                # The image's own token count: the same first message with
+                # and without it. A turn that re-prefilled the image would
+                # process at least this many new tokens.
+                bare = _chat(base, [{"role": "user", "content":
+                                     "Remember this image. Say ok."}],
+                             max_tokens=1)
                 for turn in range(5):
                     r = _chat(base, convo)
                     u = r.get("usage", {})
@@ -145,13 +150,12 @@ def run(artifact: str, image_path: str, host: str, port: int) -> int:
                     print(f"      turn {turn}: prompt={prompt} cached={cached}"
                           f" new={prompt - cached}")
                     if turn == 0:
-                        img_prompt = prompt
+                        img_tokens = prompt - bare["usage"]["prompt_tokens"]
+                        print(f"      the image is {img_tokens} tokens")
                     else:
-                        # Everything up to the previous turn's end is reusable;
-                        # the image span sits inside it.
-                        check(cached >= img_prompt,
-                              f"turn {turn} reused the image span "
-                              f"({cached} cached >= {img_prompt})")
+                        check(prompt - cached < img_tokens,
+                              f"turn {turn} did not re-prefill the image "
+                              f"({prompt - cached} new < {img_tokens})")
                     convo.append({"role": "assistant", "content": said(r)})
                     convo.append({"role": "user",
                                   "content": f"Turn {turn + 1}. Say ok."})
