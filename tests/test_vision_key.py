@@ -269,3 +269,16 @@ def test_merge_takes_rows_by_sentinel_across_a_prefix_cut():
     np.testing.assert_array_equal(out[3:], np.array(fc))
     with pytest.raises(ValueError):
         merge(mx.zeros((1, 3, D)), sl, lambda s, p: table[s])
+
+
+@pytest.mark.parametrize("model_type,family", [
+    ("qwen3_5_text", "qwen3_5"), ("qwen3_5_moe_text", "qwen3_5_moe"),
+    ("qwen4_exp_text", "qwen4_exp"), ("gemma4_text", "gemma4"),
+    ("glm5_next_text", "glm5_next"), ("qwen3_5", "qwen3_5")])
+def test_the_released_rungs_text_spelling_finds_its_vision_family(
+        model_type, family):
+    """All 20 released rungs report the text config's model_type; looked up
+    raw, /models.json said none of them had vision."""
+    from knurlogic.engine.vision import registry
+    assert registry.family_of(model_type) == family
+    assert registry.has_family(model_type)

@@ -132,7 +132,7 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 # particular config.json has a vision_config -- that needs
                 # `registry.build`, which only runs on load (chat-ui spec
                 # 3.5/picker "VISION tag"). Good enough for the picker.
-                "vision": vision_registry.has_family(f.model_type),
+                "vision": vision_registry.registered(f.model_type),
                 "serving": bool(serving) and (f.name == serving
                                               or str(f.path) == serving),
             })
