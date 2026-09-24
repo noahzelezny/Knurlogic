@@ -54,6 +54,20 @@ artifacts were validated against -- not merely that it imports.
   array is unneeded here (no audio token in this build). See
   `src/knurlogic/engine/vision/gemma4/PROVENANCE.md`.
 
+## gemma4.py
+
+- taken: 2026-09-23
+- from: `/opt/anaconda3/lib/python3.12/site-packages/mlx_lm/models/gemma4.py`
+- mlx-lm: 0.31.3 (the pinned install)
+- sha256: `4671e4a63cb9849582abac566599a0a85370a46d410f4ad69d81a88788d00fd8`
+- note: the multimodal wrapper released gemma rungs load through
+  (`model_type: gemma4`, text under `.language_model`). Vendored so it sits
+  on the vendored gemma4_text rather than beside it.
+- **edit:** `Model.__call__` takes and forwards `mm_mask` to gemma4_text;
+  upstream drops it, and a vision prefill through the wrapper raised
+  TypeError before any image-block overlay could apply (found by the e4b
+  real-model gate, 2026-09-23).
+
 ## glm5_next.py
 
 - taken: 2026-09-18

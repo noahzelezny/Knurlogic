@@ -50,6 +50,7 @@ import numpy as np
 from knurlogic.engine.vision import (EncodedImage, ImageRef, VisionError,
                                      VisionSpec, proc_hash)
 from knurlogic.engine.vision import key as K
+from knurlogic.engine.vision.quant import artifact_quantization, quantize_like
 from knurlogic.engine.vision.scatter import merge
 
 from .processing import ImageProcessor, image_kwargs
@@ -181,6 +182,7 @@ class QwenFamily:
         weights = tower.sanitize(weights)
         dtype = next(iter(weights.values())).dtype
         tower.set_dtype(dtype)
+        quantize_like(tower, weights, artifact_quantization(model_path))
         tower.load_weights(list(weights.items()), strict=True)
         tower.eval()
         mx.eval(tower.parameters())
