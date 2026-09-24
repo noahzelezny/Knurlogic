@@ -360,6 +360,76 @@ def _load_fn(serve_port: int):
     return handler
 
 
+def chat_targets() -> set:
+    """Endpoints the page may send a chat to: exo, and servers knurlogic
+    started that are still ours. A fixed allow-list, so the proxy cannot be
+    pointed at an arbitrary address by whatever is in the request."""
+    from knurlogic.machine.exo import EXO_URL
+    from knurlogic.machine.servers import is_our_server
+    out = {EXO_URL.rstrip("/")}
+    for port, rec in registry().items():
+        if is_our_server(int(rec["pid"])):
+            out.add(f"http://127.0.0.1:{port}")
+    return out
+
+
+def proxy_chat(handler, where: str, body: bytes) -> None:
+    """POST /chat?where=<base>: forward a chat request to a running model
+    and stream its answer back as it arrives.
+
+    The control page serves no model, so its chat has to reach the one the
+    person clicked -- on exo, or on a server `load` started -- and a browser
+    will not let a page on this port call another port directly. Streaming
+    is passed through byte for byte: SSE, prefill keepalives and all."""
+    import urllib.error
+    import urllib.request
+    base = (where or "").rstrip("/")
+    if base not in chat_targets():
+        body_out = json.dumps({"error": f"not a running model this page "
+                                        f"knows: {base or '(none)'}"}).encode()
+        handler.send_response(403)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(body_out)))
+        handler.end_headers()
+        handler.wfile.write(body_out)
+        return
+    req = urllib.request.Request(f"{base}/v1/chat/completions", data=body,
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
+    try:
+        up = urllib.request.urlopen(req, timeout=3600)
+        code, ctype = up.status, up.headers.get("Content-Type",
+                                                "application/json")
+    except urllib.error.HTTPError as e:
+        up, code = e, e.code
+        ctype = e.headers.get("Content-Type", "application/json")
+    except Exception as e:
+        msg = json.dumps({"error": f"{type(e).__name__}: {e}"}).encode()
+        handler.send_response(502)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(msg)))
+        handler.end_headers()
+        handler.wfile.write(msg)
+        return
+    handler.send_response(code)
+    handler.send_header("Content-Type", ctype)
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    handler.close_connection = True
+    try:
+        while True:
+            chunk = up.read1(8192) if hasattr(up, "read1") else up.read(8192)
+            if not chunk:
+                break
+            handler.wfile.write(chunk)
+            handler.wfile.flush()
+    except (BrokenPipeError, ConnectionResetError):
+        pass            # the page stopped listening; nothing to answer
+    finally:
+        up.close()
+
+
 def serve_ui(host: str, port: int, serve_port: int) -> int:
     _SERVE_PORT["n"] = serve_port
     routes = web.routes(
@@ -393,6 +463,11 @@ def serve_ui(host: str, port: int, serve_port: int) -> int:
 
         def do_POST(self):
             u = urlparse(self.path)
+            if u.path.rstrip("/") == "/chat":
+                n = int(self.headers.get("Content-Length") or 0)
+                where = (parse_qs(u.query).get("where") or [""])[0]
+                proxy_chat(self, where, self.rfile.read(n) if n else b"")
+                return
             h = routes.get("POST " + (u.path.rstrip("/") or "/"))
             if h is None:
                 self._send(b"not found", "text/plain", 404)
