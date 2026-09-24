@@ -123,82 +123,19 @@ def resolve(model, family: str | None = None) -> FamilySpec:
         return FAMILIES[mt]
     raise KeyError(
         f"no MTP family registered for model_type {mt!r}; registered: "
-        f"{sorted(FAMILIES)}. Adding one is a FamilySpec in "
-        f"knurlogic/engine/mtp/registry.py plus a head module — read "
-        f"that docstring.")
+        f"{sorted(FAMILIES)}. Adding one is a head entry in "
+        f"its family's manifest (knurlogic/engine/families/) plus a head "
+        f"module.")
 
 
 # ------------------------------------------------------------------ builtins
-register(FamilySpec(
-    name="qwen4_exp",
-    head="knurlogic.engine.mtp.heads.qwen4_exp:MTPHead",
-    # The head drafts from the trunk activation that goes INTO the hyper-
-    # connection mixer, i.e. the last thing before the final norm + lm_head.
-    capture="hyper_connection_mixer",
-    draft_cache="_AttnCache",
-    sidecar_name="mtp-head-q6.safetensors",
-    # Measured: every qwen4_exp cache slot is REASSIGNED (cache[0] = ...),
-    # never mutated, and mlx arrays are immutable, so holding the old
-    # references is a free snapshot. Verified by
-    # caches.check_snapshot_semantics in tests/test_mtp_caches.py.
-    cache_semantics="reassign",
-))
+# Every family's heads, from its manifest (engine/families/<family>/): the
+# capture point, draft cache and cache semantics are per-architecture facts
+# and live there, each beside the measurement that set it.
+def _register_builtins() -> None:
+    from knurlogic.engine import families
+    for name, h in families.build_maps()["heads"].items():
+        register(FamilySpec(name=name, **h))
 
 
-# Qwen3.5 / Qwen3.8 (`qwen3_5`, and the MoE conditional-generation wrapper
-# `qwen3_5_moe`, which is the 397B). One residual stream, so the head drafts
-# from the activation going INTO the trunk's final norm -- the same place in
-# the graph as qwen4_exp's pre-mixer row, just reached by a different name.
-#
-# cache_semantics="reassign", and this one is load-bearing for SPEED, not just
-# tidiness. The trunk's cache list is mostly recurrent: 48 ArraysCache to 16
-# KVCache on the dense 27B, 45 to 15 on the 397B. Attention caches snapshot as
-# an offset and cost nothing either way, but under "copy" every one of those
-# recurrent GatedDeltaNet states is deep-copied ONCE PER SPECULATIVE STEP --
-# hundreds of MB of pure copying per token, which does not fail, it just makes
-# generation crawl (measured: a 12-prompt run made no visible progress in 30
-# minutes). GatedDeltaNet reassigns its slots (`cache[0] = ...`, `cache[1] =
-# state`) and mlx arrays are immutable, so the cheap path is correct here.
-# Verified, not assumed: caches.check_snapshot_semantics returned True against
-# a loaded 27B (2026-08-31).
-for _qwen35_name in ("qwen3_5", "qwen3_5_moe"):
-    register(FamilySpec(
-        name=_qwen35_name,
-        head="knurlogic.engine.mtp.heads.qwen35:MTPHeadQwen35",
-        capture="norm",
-        draft_cache="KVCache",
-        sidecar_name="mtp-head-q6.safetensors",
-        cache_semantics="reassign",
-    ))
-
-
-# GLM-5.3 (glm5_next, via mlx_vlm's classes — the head binds the
-# LanguageModel, not the VLM wrapper; `arch_module` above does that walk).
-# The head is upstream `layers.45`: a plain-residual DeepSeek-style block
-# (NoPE MLA + DSA indexer + 288-expert MoE + its own shared_head.norm) —
-# see heads/glm5.py for why it is NOT the trunk's hc DecoderLayer.
-# capture="norm": the trunk's final-norm INPUT is the mean-collapsed
-# (B, S, D) hidden, which is what hnorm/eh_proj consume.
-# draft_cache is vestigial here — the head class provides
-# make_draft_cache() (CacheList(main-KV, indexer-KV)) and loop.py prefers
-# that; the attribute name is kept non-empty so the spec stays valid.
-# cache_semantics="reassign": VQLab's check_snapshot_semantics returned
-# True against the loaded 2.7bpw trunk (M4, 2026-09-02).
-#
-# Registered under both names: the VLM wrapper's config says glm5_next,
-# the TextConfig on the bound LanguageModel says glm5_next_text.
-#
-# NUMBERS MEASURED IN VQLAB ON ONE BOX, NOT IN EXO AND NOT ON A CLUSTER:
-# acceptance 0.8516 pooled (12 prompts x 128 tokens, q6 head, 2.7bpw
-# trunk, M4, 2026-09-02) and 1.05x end-to-end WITHOUT the absorbed-MLA
-# shim. exo installs that shim (glm5_shim.py) whenever this family's head
-# loads; its effect on exo's end-to-end rate is UNMEASURED.
-for _glm_name in ("glm5_next", "glm5_next_text"):
-    register(FamilySpec(
-        name=_glm_name,
-        head="knurlogic.engine.mtp.heads.glm5:MTPHeadGlm5",
-        capture="norm",
-        draft_cache="KVCache",
-        sidecar_name="mtp-head-q6.safetensors",
-        cache_semantics="reassign",
-    ))
+_register_builtins()
