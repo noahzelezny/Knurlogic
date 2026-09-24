@@ -46,24 +46,29 @@ def test_every_architecture_depends_only_on_its_own_family():
             assert mod in mods, (m["name"], mod)
 
 
-def test_built_maps_equal_the_tables_they_replace():
-    """Holds until the readers switch to the built maps (migration step 2),
-    then the tables are deleted and this test goes with them."""
+def test_the_spellings_that_have_bitten_before_resolve():
+    """The tables are built from the manifests now; these are the rows a
+    wrong manifest would break silently -- the `_text` spelling (it hid
+    vision on all 20 released rungs once), the subclass chains, the GLM
+    host, the prefill widths, the two GLM head names."""
     from knurlogic.engine import arch
     from knurlogic.engine.mtp import registry as mreg
     from knurlogic.engine.vision import registry as vreg
     from knurlogic.tuning import settings
-    b = families.build_maps()
-    assert b["arch_for_model_type"] == arch.ARCH_FOR_MODEL_TYPE
-    assert b["arch_host"] == arch.ARCH_HOST
-    assert b["arch_depends_on"] == arch.ARCH_DEPENDS_ON
-    assert b["vision"] == vreg.FAMILIES
-    assert {k: v[0] for k, v in b["prefill_chunk"].items()} == \
-        settings.PREFILL_CHUNK_BY_FAMILY
-    specs = {n: {f: getattr(s, f) for f in ("head", "capture", "draft_cache",
-                                            "sidecar_name", "cache_semantics")}
-             for n, s in mreg.FAMILIES.items()}
-    assert b["heads"] == specs
+    a = arch.ARCH_FOR_MODEL_TYPE
+    assert a["qwen3_5_text"] == "qwen3_5" and a["gemma4_text"] == "gemma4_text"
+    assert a["gemma4"] == "gemma4" and a["glm5_next_text"] == "glm5_next"
+    assert arch.ARCH_DEPENDS_ON == {"qwen3_5_moe": ["qwen3_5"],
+                                    "gemma4": ["gemma4_text"]}
+    assert arch.ARCH_HOST == {"glm5_next": "mlx_vlm"}
+    assert settings.PREFILL_CHUNK_BY_FAMILY == {
+        "glm5_next": 2048, "qwen3_5": 4096, "qwen3_5_moe": 4096}
+    w, why = settings.prefill_chunk_for("qwen3_5_text")
+    assert w == 4096 and why.startswith("measured for qwen3_5: ")
+    assert set(vreg.FAMILIES) == {"qwen3_5", "qwen3_5_moe", "qwen4_exp",
+                                  "gemma4", "glm5_next"}
+    assert {"glm5_next", "glm5_next_text", "qwen4_exp", "qwen3_5",
+            "qwen3_5_moe"} <= set(mreg.FAMILIES)
 
 
 # --- packaging tripwires -----------------------------------------------------------
