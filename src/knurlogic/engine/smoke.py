@@ -32,7 +32,6 @@ from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
-PINS = register.ARCH_DIR / "PINS.json"
 
 
 def _origin(path, artifact_dir: Path) -> str:
@@ -40,7 +39,7 @@ def _origin(path, artifact_dir: Path) -> str:
     if not path:
         return "unknown"
     rp = Path(path).resolve()
-    if str(rp).startswith(str(register.ARCH_DIR.resolve())):
+    if register.is_vendored_path(rp):
         return "knurlogic"
     if str(rp).startswith(str(artifact_dir.resolve())):
         return "artifact"
@@ -115,18 +114,22 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
         if problems:
             print("refusing to pin: provenance is not clean", file=sys.stderr)
             return 1
-        data = json.loads(PINS.read_text()) if PINS.is_file() else {}
+        from knurlogic.engine import families
         for row in arch.check(a.model_type):
-            if row.vendored and row.sha256:
-                data[row.module] = {
-                    "sha256": row.sha256,
-                    "host": arch.host_for(row.module),
-                    "validated_with": str(engine.info(
-                        arch.host_for(row.module))),
-                    "validated_on_artifact": a.path.name,
-                }
-                print(f"pinned {row.module} -> {row.sha256[:16]}...")
-        PINS.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+            if not (row.vendored and row.sha256):
+                continue
+            # Each pin goes into the pins.json of the family that owns it.
+            pins = families.architecture_dir(
+                families.family_of_module(row.module)) / "pins.json"
+            data = json.loads(pins.read_text()) if pins.is_file() else {}
+            data[row.module] = {
+                "sha256": row.sha256,
+                "host": arch.host_for(row.module),
+                "validated_with": str(engine.info(arch.host_for(row.module))),
+                "validated_on_artifact": a.path.name,
+            }
+            pins.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+            print(f"pinned {row.module} -> {row.sha256[:16]}...")
     return 0
 
 

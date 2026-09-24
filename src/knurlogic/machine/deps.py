@@ -56,7 +56,7 @@ PIECES = {
                    "qwen3_5 / qwen3_5_moe",
         "needed_for": "nothing, for knurlogic: the architectures it needs "
                       "are vendored and pinned by digest "
-                      "(architectures/PROVENANCE.md). exo still installs the "
+                      "(engine/families/*/architecture/PROVENANCE.md). exo still installs the "
                       "fork, because exo imports them from mlx-lm directly.",
         "portable": True,
         "why_not_ported": "",
@@ -146,8 +146,8 @@ def glm5_siblings() -> list:
     source. Derived every time, because a list written down beside the
     vendoring went stale: it named 8, the code imports 9 different ones."""
     import re
-    root = (Path(__file__).resolve().parents[1] / "engine" / "architectures"
-            / "glm5_next")
+    root = (Path(__file__).resolve().parents[1] / "engine" / "families"
+            / "glm5" / "architecture" / "glm5_next")
     found = set()
     for f in root.glob("*.py"):
         for m in re.finditer(r"^\s*from \.\.([\w.]+) import", f.read_text(),

@@ -1,0 +1,21 @@
+{
+  "qwen3_5": {
+    "sha256": "e4e39c3371a9fc15dab89e1d01c45fe3152d3691bc9512fd9ac54b2317a2ac4b",
+    "text_path_held_by": "tests/goldens/qwen_g5_text.npz (vision P1 added MRoPE; text path bit-identical on the tiny models; real-rung re-validation pending)",
+    "text_path_of": "14c4898a03567998e825cb1817942001871e979b9e0cefd3b4383cbbb61eddf3",
+    "validated_on_artifact": "TheDrainFlorist--Qwen3.6-35B-A3B-VQ-3.4bpw",
+    "validated_with_mlx_lm": "0.32.0"
+  },
+  "qwen3_5_moe": {
+    "sha256": "ef9e8e1f6a5c097b29587c8330e8eb9c9cbdc52fbb4597fbc2362606c1996619",
+    "validated_on_artifact": "TheDrainFlorist--Qwen3.6-35B-A3B-VQ-3.4bpw",
+    "validated_with_mlx_lm": "0.32.0"
+  },
+  "qwen4_exp": {
+    "sha256": "c250d1538435032e5e9ebbeed9bf290dc91383f486e277e4a916dcbe5028294e",
+    "text_path_held_by": "tests/goldens/qwen_g5_text.npz (vision P1 added MRoPE; text path bit-identical on the tiny models; real-rung re-validation pending)",
+    "text_path_of": "15df2080b3197db26067e1e4e23c2ce152841a8f0f60ff1fb2b2976e93dbb4b9",
+    "validated_on_artifact": "TheDrainFlorist--Qwen3.8-Flash-Next-VQ-2.1bpw",
+    "validated_with_mlx_lm": "0.32.0"
+  }
+}

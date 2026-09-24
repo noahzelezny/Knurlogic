@@ -26,6 +26,26 @@ used, so asking what a family supports imports no mlx. Its shape:
                       draft_cache, cache_semantics, sidecar_name}
   vision          {"build": "module:attr", "architectures": [...]}, or None
 
+ADDING A FAMILY, the whole checklist:
+  1. engine/families/<family>/__init__.py with its MANIFEST, and one line
+     in FAMILIES below. Every config.json spelling of each architecture
+     goes in `model_types` (the `_text` suffix has hidden vision on every
+     released rung once).
+  2. architecture/: `knurlogic vendor <module> --family <family> --python
+     <env> --host <pkg>` copies the module and writes PROVENANCE.md; add
+     its license row to THIRD-PARTY.md. Vendor the version the artifacts
+     were BUILT on (GLM needed 0.6.17; 0.7.1 could not load it).
+     `knurlogic smoke --pin` on a real artifact writes pins.json.
+  3. vision/ if it sees images: a `build(model_path, text_model, config)`
+     returning a Family (engine/vision/__init__.py has the protocol).
+     Watch the processor's normalization and the chat template's image
+     token spelling -- both were wrong once and only a real model showed it.
+  4. heads/ if it ships an MTP head: the head class, and a `head` entry in
+     the manifest (capture point, cache semantics MEASURED with
+     mtp.caches.check_snapshot_semantics).
+  5. tests/test_families.py runs over every listed family; the real-model
+     gates are tools/vision_gate.py and tools/vq_gate.py.
+
 Where a family quirk lives: code quirks in the family's own code;
 declarative ones read by generic code in the manifest, with evidence;
 facts readable from the artifact itself (tool-call dialect) nowhere here.
@@ -35,6 +55,9 @@ Stdlib only.
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
+
+HERE = Path(__file__).parent
 
 #: Every family, by package name under engine/families/.
 FAMILIES = ("qwen", "gemma4", "glm5")
@@ -73,3 +96,21 @@ def build_maps() -> dict:
     return {"arch_for_model_type": arch_for_type, "arch_host": host,
             "arch_depends_on": depends, "prefill_chunk": prefill,
             "vision": vision, "heads": heads}
+
+
+def architecture_dir(family: str) -> Path:
+    """Where a family's vendored architecture modules live."""
+    return HERE / family / "architecture"
+
+
+def family_of_module(module: str):
+    """The family whose manifest lists this architecture module, or None."""
+    for f in FAMILIES:
+        m = importlib.import_module(f"{__name__}.{f}").MANIFEST
+        if module in m["architectures"]:
+            return f
+    return None
+
+
+def architecture_dirs() -> list:
+    return [architecture_dir(f) for f in FAMILIES]
