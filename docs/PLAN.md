@@ -400,6 +400,13 @@ only; one sitting on a free box (the M4 is enough) confirms it:
   first four requests got the model's default level instead of the one
   asked for (a Flash `none` request reasoned 242 tokens). The first bench
   pass was discarded and rerun after the fix.
+* **Requests that arrive while the model is still loading got no
+  translation -- FIXED (thinking.py, `_served_tokenizer`).** mlx-lm answers
+  HTTP before its generation thread loads the model; with no tokenizer
+  there was no template, and every request was served the model's default
+  (Flash-Next 2.1: `none` requests reasoned 89-232 tokens, `low` got
+  xhigh). The artifact's tokenizer is now read off disk until the served
+  one exists. The Flash pass was discarded and rerun.
 
 ## Done 2026-09-24: the page is knurlogic's own
 
