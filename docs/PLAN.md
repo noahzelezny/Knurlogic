@@ -382,6 +382,22 @@ only; one sitting on a free box (the M4 is enough) confirms it:
    tokens and answer quality at each native level; GLM's closed-think
    "off" before it is offered.
 
+## OPEN from the M4 session (2026-09-25)
+
+* **A seeded request ignores its seed.** knurlogic serve, gemma e4b,
+  temperature 1.5: seeds 1, 2, 7, 8 all answer "Flummoxed"; unseeded
+  requests vary; t=0 is "Glimmering". In-process `mx.random.seed(s)` +
+  `stream_generate` varies with s. MLX random state is PER THREAD
+  (measured: a seed set in main does not reach a worker), and mlx-lm
+  serves a seeded request on its sequential path -- the seed is set where
+  the sampler does not read it. Probably stock mlx-lm 0.31.3; not yet
+  reproduced without knurlogic. Consequence now: tools/thinking_bench.py
+  sends no seed.
+* **The first concurrent requests after a load have no
+  `usage.knurlogic.thinking`.** gemma bench, default arm: the four run-0
+  requests (sent together) lack `applied`; every later one has it. A
+  first-request race in the thinking install.
+
 ## Done 2026-09-24: the page is knurlogic's own
 
 The chat panel's near-verbatim exo ports were rewritten from what each must
