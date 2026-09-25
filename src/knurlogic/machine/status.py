@@ -65,7 +65,8 @@ SCHEMA = 2
 
 def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
              node="local", role="server", reachable=True,
-             memory_fn=None, machine_fn=None, memory_map=None) -> dict:
+             memory_fn=None, machine_fn=None, memory_map=None,
+             metrics=None) -> dict:
     """One node's answer. `memory_fn` exists so a snapshot can be BUILT from
     numbers that came off another node (exo reports them for every node in
     the cluster) rather than only from this process.
@@ -95,6 +96,17 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
     # in from somewhere else.
     if memory_map:
         d["memory_map"] = memory_map
+    # How hard the box is working (GPU, CPU, pressure, swap, thermal) is read
+    # the same way memory is: here for this box, off the node for a peer.
+    # A peer that did not say leaves the key out, and the page draws no line.
+    if metrics is None and machine_fn is None:
+        try:
+            from knurlogic.machine import metrics as _metrics
+            metrics = _metrics.metrics(memory_map)
+        except Exception:
+            metrics = None
+    if metrics:
+        d["metrics"] = metrics
     if artifact is not None:
         d["artifact"] = {
             "name": artifact.path.name,

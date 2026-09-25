@@ -203,7 +203,7 @@ def _kind_from_identifier(model_id: str) -> str:
 
 
 def machine() -> dict:
-    """What this box IS: {kind, model, model_id}.
+    """What this box IS: {kind, model, model_id, chip}.
 
     `system_profiler SPHardwareDataType` is the channel that actually knows
     -- it prints "Model Name: Mac Studio" -- and it answers in about 0.13s,
@@ -244,7 +244,16 @@ def machine() -> dict:
         kind = "pro"
     else:
         kind = _kind_from_identifier(model_id)
-    _MACHINE = {"kind": kind, "model": name, "model_id": model_id}
+    # The chip is what a person means by "which machine": M3 Ultra, M4 Max.
+    chip = ""
+    try:
+        chip = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
+                              capture_output=True, text=True,
+                              timeout=2).stdout.strip()
+    except Exception:
+        pass
+    _MACHINE = {"kind": kind, "model": name, "model_id": model_id,
+                "chip": chip.removeprefix("Apple ").strip()}
     return _MACHINE
 
 
