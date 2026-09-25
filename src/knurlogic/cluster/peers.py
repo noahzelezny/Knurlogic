@@ -105,8 +105,9 @@ class Peers:
     or absent peer never makes the page's own status slow."""
 
     def __init__(self, me: dict, my_port: int, manual=(), store=None,
-                 fetch=None, reachable=True):
+                 fetch=None, reachable=True, persist=True):
         self.me, self.my_port = me, my_port
+        self.persist = persist           # doctor reads the store, never writes
         # A page bound to loopback does not introduce itself: the peer
         # would try the address, fail, and report a firewall problem this
         # machine does not have.
@@ -267,6 +268,8 @@ class Peers:
     def _save(self) -> None:
         """Only peers that have answered at least once are remembered, so a
         typo in --peer does not haunt every later run."""
+        if not self.persist:
+            return
         old = self._load()
         changed = False
         for p in self.all():
