@@ -311,3 +311,36 @@ def test_chunk_snap_gives_identical_tokens_across_the_split():
     for s, e in chunks:
         for bs, be in boundaries:
             assert not (bs < e < be) and not (bs < s < be)
+
+
+#: (w, h) -> ((resized w, h), soft tokens), read off mlx-vlm 0.6.17's
+#: Gemma4ImageProcessor on the M4 (2026-09-25) with the e4b artifact's
+#: processor settings: patch 16, pool 3, max_soft_tokens 280.
+REFERENCE = {
+    (896, 896): ((768, 768), 256), (448, 448): ((768, 768), 256),
+    (1000, 300): ((1440, 432), 270), (300, 1000): ((432, 1440), 270),
+    (20, 2000): ((48, 8016), 167), (2000, 20): ((8016, 48), 167),
+    (64, 64): ((768, 768), 256), (1920, 1080): ((1056, 576), 264),
+    (5, 5): ((768, 768), 256)}
+
+
+def test_resize_and_token_count_match_the_reference_processor():
+    from PIL import Image
+    fam = _tiny_family()
+    fam.patch_size, fam.pool, fam.max_soft_tokens = 16, 3, 280
+    for (w, h), (size, n) in REFERENCE.items():
+        assert fam.target_size(w, h) == size, (w, h)
+        px, ref = fam.preprocess(Image.new("RGB", (w, h)), "s")
+        assert ref.n_tokens == n, (w, h)
+        assert px["pixel_values"].shape[-2:] == (size[1], size[0])
+
+
+def test_the_tower_produces_exactly_the_predicted_count_off_square():
+    # The live failure: a count predicted without the resize disagreed with
+    # the tower. Any aspect must now agree, before the tower runs.
+    from PIL import Image
+    fam = _tiny_family()
+    for w, h in [(97, 41), (41, 97), (64, 64)]:
+        px, ref = fam.preprocess(Image.new("RGB", (w, h), (9, 90, 200)), "s")
+        enc = fam.encode(px, ref)
+        assert enc.feats.shape[0] == ref.n_tokens

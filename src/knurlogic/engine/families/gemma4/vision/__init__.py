@@ -138,6 +138,9 @@ class Gemma4Vision:
             eps=vc.rms_norm_eps)
         self.patch_size = vc.patch_size
         self.pool = vc.pooling_kernel_size
+        # the soft-token budget per image (processor max_soft_tokens, which
+        # the config carries as default_output_length: 280 on e4b)
+        self.max_soft_tokens = vc.default_output_length
         self.image_token_id = image_token_id
         self.boi_token_id = boi_token_id
         self.eoi_token_id = eoi_token_id
@@ -157,6 +160,9 @@ class Gemma4Vision:
                 "family": "gemma4", "patch_size": vc.patch_size,
                 "pooling_kernel_size": vc.pooling_kernel_size,
                 "default_output_length": vc.default_output_length,
+                # the resize changed what a given image encodes to, so
+                # features cached under the old processing must not hit
+                "resize": "aspect-preserving-v1",
             }))
 
     # -- Family protocol ------------------------------------------------------
@@ -179,19 +185,46 @@ class Gemma4Vision:
         mx.eval(self.vision_tower.parameters(), self.embed_vision.parameters())
         return len(tower_w) + len(embed_w)
 
+    def target_size(self, w: int, h: int) -> Tuple[int, int]:
+        """(width, height) gemma4's image processor resizes to.
+
+        Aspect kept; at most `default_output_length` soft tokens' worth of
+        patches; both sides a multiple of pool * patch, so the pooler's
+        k x k blocks tile the grid exactly and the token count is known
+        before the tower runs. Small images are scaled UP to that budget,
+        as the reference does. Pinned against mlx-vlm 0.6.17's processor in
+        tests/test_vision_gemma4.py -- skipping this step made a 896x896
+        image expect 348 tokens while the tower produced 343.
+        """
+        import math
+        p, k = self.patch_size, self.pool
+        max_patches = self.max_soft_tokens * k * k
+        side = k * p
+        f = math.sqrt(max_patches * p * p / (h * w))
+        th, tw = math.floor(f * h / side) * side, math.floor(f * w / side) * side
+        if th == 0 and tw == 0:
+            raise ValueError(f"image {w}x{h} resizes to nothing")
+        cap = (max_patches // (k * k)) * side
+        if th == 0:          # very wide: one row of blocks
+            th, tw = side, min(math.floor(w / h) * side, cap)
+        elif tw == 0:        # very tall: one column
+            tw, th = side, min(math.floor(h / w) * side, cap)
+        return tw, th
+
     def preprocess(self, img: Any, sha: str) -> Tuple[Dict[str, Any], ImageRef]:
         import numpy as np
-        p = self.patch_size
+        from PIL import Image
+        p, k = self.patch_size, self.pool
         w, h = img.size
-        gw, gh = max(1, w // p), max(1, h // p)
-        im = img.convert("RGB").resize((gw * p, gh * p))
+        tw, th = self.target_size(w, h)
+        im = img.convert("RGB")
+        if (tw, th) != (w, h):
+            im = im.resize((tw, th), resample=Image.BICUBIC)
+        # rescale to [0, 1] only: the artifact's processor_config has
+        # do_normalize false
         arr = np.asarray(im, dtype=np.float32) / 255.0          # [H, W, 3]
         arr = arr.transpose(2, 0, 1)[None]                      # [1, 3, H, W]
-        n_tokens = (gh * gw) // (self.pool * self.pool)
-        if n_tokens < 1:
-            raise ValueError(
-                f"image too small for gemma4's {self.pool}x{self.pool} "
-                f"pool: {gh}x{gw} patches")
+        n_tokens = (th // p) * (tw // p) // (k * k)
         ref = ImageRef(sha=sha, proc_hash=self.spec.proc_hash, n_tokens=n_tokens)
         return {"pixel_values": arr}, ref
 
