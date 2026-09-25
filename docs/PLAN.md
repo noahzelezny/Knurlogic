@@ -384,15 +384,15 @@ only; one sitting on a free box (the M4 is enough) confirms it:
 
 ## OPEN from the M4 session (2026-09-25)
 
-* **A seeded request ignores its seed.** knurlogic serve, gemma e4b,
-  temperature 1.5: seeds 1, 2, 7, 8 all answer "Flummoxed"; unseeded
-  requests vary; t=0 is "Glimmering". In-process `mx.random.seed(s)` +
-  `stream_generate` varies with s. MLX random state is PER THREAD
-  (measured: a seed set in main does not reach a worker), and mlx-lm
-  serves a seeded request on its sequential path -- the seed is set where
-  the sampler does not read it. Probably stock mlx-lm 0.31.3; not yet
-  reproduced without knurlogic. Consequence now: tools/thinking_bench.py
-  sends no seed.
+* **A seeded request ignored its seed -- FIXED (engine/serve/sampling.py).**
+  gemma e4b at temperature 1.5 answered "Flummoxed" for every seed. Cause,
+  reproduced with no model in stock mlx 0.31.2 + mlx-lm 0.31.3: mlx-lm's
+  sampler is `mx.compile`d with `mx.random.state` as input, MLX random
+  state is per thread, and the server samples on its generation thread --
+  where the compiled function reads a state nothing updates (one token
+  forever). knurlogic serve now swaps in the plain call. Worth reporting
+  upstream. The bench still sends no seed, so tonight's numbers do not
+  depend on the fix.
 * **The first concurrent requests after a load have no
   `usage.knurlogic.thinking`.** gemma bench, default arm: the four run-0
   requests (sent together) lack `applied`; every later one has it. A
