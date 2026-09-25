@@ -435,6 +435,15 @@ portable form). To check: 4 (multi-image, explicit limits). New: 1-3.
 
 ## OPEN from the M4 session (2026-09-25)
 
+* **GLM: a shared system prompt is offered but not used.** After the
+  segment fix the 472-token system checkpoint IS offered (it was never
+  stored before), then discarded: "no aligned head cache". GLM's head has
+  `reassign` cache semantics and the checkpoint/HeadCarry restore path
+  works for Qwen's head (Flash passes the same test), not GLM's. Options:
+  keep the trunk hit and do not draft that row (right for short-output
+  ingest), or make GLM's head restorable at checkpoints. A decision, not
+  a patch -- for the server build (executor step 1).
+
 * **GLM's `none` is SHIPPED** as the template's own closed-think format
   (Noah, 2026-09-25): off 0 reasoning tokens on the served model, status
   lists off/low/high/max. It exposed a latent mlx-lm crash -- an EXACT

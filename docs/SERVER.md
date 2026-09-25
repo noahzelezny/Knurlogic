@@ -121,3 +121,68 @@ where the layers run. Node discovery is cluster/ (peers, Bonjour,
    reasoning? OpenAI does not say).
 5. Anything in the ordering above that makes the cluster executor
    harder later.
+
+## Fable 5.1 review (2026-09-25): build it -- accepted
+
+1. **Executor protocol = today's BatchGenerator shapes** (insert_segments /
+   next / extract_cache / remove / close); the scheduler is a port of
+   `ResponseGenerator._generate`'s loop, not a new one. `mlx_lm.generate.
+   BatchGenerator` joins the keep-list (subclassed). Delete the three
+   patches on mlx-lm's data flow: the cache_report thread-local (pass the
+   request into admission), `tag_samplers` (pass sampling params), and
+   exception-as-progress (a `RowFailure` event).
+2. **Executor output is (uid, token, logprob_of_token, top_k?)**, never a
+   [V] row: on a pipeline only the last rank has logits.
+3. **One path, per-row keys by `mx.vmap`**: measured equal to the per-row
+   loop draw for draw, 460 us vs 444 us plain at B=8; keys advance by
+   `vmap(split)`, lazy. Rules: rebuild the key array with take/stack when
+   rows leave (a strided view under vmap gave WRONG draws on mlx 0.31.2 --
+   batch_loop.filter must gather); `rejection_correct` takes keys too.
+4. **Stops**: control tokens stay a token state machine; user `stop`
+   strings match detokenized ANSWER text after the reasoning split, with a
+   hold-back of max(len(stop))-1 chars; never inside reasoning. Stated in
+   /status.json.
+5. **OpenAI error objects** `{"error": {message, type, param, code}}`;
+   accept `max_completion_tokens`; refuse `n>1` with 400.
+6. **/v1/messages in-process** (today it self-requests over loopback).
+7. **Scout amendments**: concurrency header `X-Knurlogic-Concurrency:
+   rows=3, more=?1` (RFC 8941), `more` omitted when unmeasured, also on
+   /v1/residency -- and ingest is prefill/image-bound, where the hint is
+   weaker; `/v1/ensure` on a one-model process is a switch (409 while rows
+   are in flight unless `force`); 413 from the image header (PNG IHDR /
+   JPEG SOF) before decode; memory_bytes from mx active memory.
+8. **Cluster: the executor owns the SPMD loop.** Rank 0: HTTP + scheduler;
+   ranks 1..n: `executor.serve_forever()` applying broadcast admissions;
+   per-rank prompt caches kept identical by identical insert order;
+   tokens and the NaN verdict broadcast from the last rank; admission is
+   an event the executor acknowledges, never assumed synchronous.
+9. **Keep LRUPromptCache, own the wrapper** (the exact-hit guard moves into
+   a knurlogic PromptCache class). Own the trie later.
+10. **HTTP: ThreadingHTTPServer**, daemon threads, per-token flush, a write
+    failure stops and removes the row, requests block on `ModelHost.ready`.
+
+Build order: (1) executor protocol + MTPBatchGenerator behind it;
+(2) request.py -- detokenizer, reasoning split, text stops, usage (no
+model; flips the stop xfail); (3) host + scheduler + per-row sampling
+behind `--server knurlogic`, suite green on gemma e4b incl. seeds under
+load; (4) http openai / anthropic in-process / knurlogic endpoints
+(flips Scout's xfails); (5) Flash, GLM, Qwen, measured decode/prefill,
+switch the default, delete the patches.
+
+Suite additions required: seeded request under concurrent load equals it
+alone; stops across a token boundary, not inside reasoning, never in a
+streamed delta; client disconnect frees the row; a failing request beside
+a succeeding one; a request during load; tool calls (OpenAI tool_calls +
+streaming deltas, Anthropic tool_use/input_json_delta); OpenAI error
+shape, max_completion_tokens, n>1 refused; multi-byte UTF-8 split across
+tokens never yields U+FFFD; /v1/completions.
+
+## Suite results on today's server (2026-09-25, M4)
+
+| model | result |
+|---|---|
+| gemma e4b | 23 passed (after fixing headless prefix reuse) |
+| Qwen Flash-Next 2.1 | 23 passed |
+| GLM-5.3 2.7 | 22 passed; shared prefix: 472 offered, 0 used -- see PLAN |
+
+Known gaps pinned as strict xfails: text stop sequences; Scout's five.
