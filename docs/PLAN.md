@@ -407,6 +407,18 @@ Done 2026-09-24 (CPU, tiny fixtures, all five families):
 
 ## OPEN from the M4 session (2026-09-25)
 
+* **GLM's `none` is SHIPPED** as the template's own closed-think format
+  (Noah, 2026-09-25): off 0 reasoning tokens on the served model, status
+  lists off/low/high/max. It exposed a latent mlx-lm crash -- an EXACT
+  prompt-cache hit leaves no segment and kills the generation thread --
+  now guarded (engine/serve/cache_guard.py).
+* **"!!!!!" runs on Flash (Noah, seen in Scout).** Not the seed bug. In
+  Qwen's vocabulary token 0 is "!", and a sampler fed NaN/inf logits
+  returns 0 forever: a numerical overflow upstream of sampling. Next: a
+  NaN guard in the decode loop that stops the row and reports the step
+  (and, if cheap, the first layer that went non-finite) -- measured for
+  cost before it ships.
+
 * **A seeded request ignored its seed -- FIXED (engine/serve/sampling.py).**
   gemma e4b at temperature 1.5 answered "Flummoxed" for every seed. Cause,
   reproduced with no model in stock mlx 0.31.2 + mlx-lm 0.31.3: mlx-lm's
