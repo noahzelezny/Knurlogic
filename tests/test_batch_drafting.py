@@ -110,6 +110,38 @@ def test_a_restored_prefix_keeps_drafting():
     assert hit == len(got["toks"]) and hc is not None
 
 
+def _cachelist_at(n):
+    """GLM's head cache shape: CacheList(main KV, indexer KV), at n."""
+    from mlx_lm.models.cache import CacheList, KVCache
+    cl = CacheList(KVCache(), KVCache())
+    for c in cl.caches:
+        c.update_and_fetch(mx.zeros((1, 1, n, 4)), mx.zeros((1, 1, n, 4)))
+    return cl
+
+
+def test_a_composite_cache_has_its_members_position():
+    from knurlogic.engine.mtp.caches import position
+    from mlx_lm.models.cache import ArraysCache
+    assert position(_cachelist_at(7)) == 7
+    assert position(ArraysCache(size=2)) is None
+
+
+def test_a_glm_style_head_restores_at_a_prefix_and_at_a_checkpoint():
+    """GLM's head cache is a CacheList, which has no `offset`: read as -1,
+    every entry -- whole prompt or segment checkpoint -- was discarded as
+    'no aligned head cache' (472-token system prompt, 2026-09-25)."""
+    from knurlogic.engine.mtp.batch_generator import HeadCarry, split_pool_entry
+    trunk = [object()]
+    _, hc, hit = split_pool_entry(trunk + [_cachelist_at(10)], 1,
+                                  drafts=True, hit_len=10)
+    assert hit == 10 and hc is not None
+    replayed = []
+    _, hc, hit = split_pool_entry(
+        trunk + [_cachelist_at(9), HeadCarry(mx.zeros((1, 1, 4)))], 1,
+        drafts=True, hit_len=10, replay=lambda c, h: replayed.append(c))
+    assert hit == 10 and hc is not None and replayed == [hc]
+
+
 def test_the_server_gets_the_drafting_generator_only_for_the_headed_model():
     """Installation is one name swap in the server module. It must decide per
     construction: the head's own model drafts; anything else (a switch to an
