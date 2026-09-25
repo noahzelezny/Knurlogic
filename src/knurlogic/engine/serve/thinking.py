@@ -217,9 +217,37 @@ def template_of(path) -> str | None:
     return None
 
 
+_disk_tok: dict = {}
+
+
 def _served_tokenizer():
+    """The server's tokenizer -- or, while the model is still loading, the
+    same artifact's tokenizer read off disk.
+
+    mlx-lm answers HTTP before its generation thread has loaded the model,
+    so the first requests to a slow-loading artifact arrived with no
+    tokenizer, found no template, and were served the model's own default
+    level whatever they asked for (Flash-Next 2.1 on the M4, 2026-09-25:
+    four `none` requests reasoned 89-232 tokens). The template on disk is
+    the one the server will use; the tokenizer is loaded once, cheaply,
+    and dropped when the served one appears."""
     prov = state.SERVED.get("provider")
-    return getattr(prov, "tokenizer", None) if prov is not None else None
+    tok = getattr(prov, "tokenizer", None) if prov is not None else None
+    if tok is not None:
+        _disk_tok.clear()
+        return tok
+    path = state.served_path()
+    if not path:
+        return None
+    with _render_lock:
+        if _disk_tok.get("path") != path:
+            try:
+                from pathlib import Path
+                from mlx_lm.utils import load_tokenizer
+                _disk_tok.update(path=path, tok=load_tokenizer(Path(path)))
+            except Exception:
+                _disk_tok.update(path=path, tok=None)
+        return _disk_tok.get("tok")
 
 
 def _served_template() -> str | None:
