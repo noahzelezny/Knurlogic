@@ -393,3 +393,30 @@ def test_probe_holds_when_requests_race_it():
     for t in ts:
         t.join()
     assert all(p["verified"] and p["default"] == "on" for p in got)
+
+
+def test_a_request_during_load_still_gets_its_level(monkeypatch):
+    """mlx-lm answers HTTP before the model is loaded. A request then has
+    no served tokenizer; it must be translated from the artifact's own
+    tokenizer on disk, not served the model's default."""
+    import mlx_lm.utils
+    from knurlogic.engine.serve import state
+    srv, seen = _fake_srv(_Qwen38Tok())
+    state.SERVED["provider"] = types.SimpleNamespace(tokenizer=None)
+    state.SERVED["path"] = "/artifact/still-loading"
+    T._disk_tok.clear()
+    loads = []
+    monkeypatch.setattr(mlx_lm.utils, "load_tokenizer",
+                        lambda p: loads.append(p) or _Qwen38Tok())
+    h = _handler(srv, {"reasoning_effort": "none"})
+    h.handle_completion(REQ, [])
+    assert seen["kwargs"] == {"enable_thinking": False}
+    assert h._knurlogic_thinking["applied"] == "off"
+    # loaded once, and let go once the served tokenizer exists
+    h2 = _handler(srv, {"reasoning_effort": "low"})
+    h2.handle_completion(REQ, [])
+    assert len(loads) == 1
+    state.SERVED["provider"] = types.SimpleNamespace(tokenizer=_Qwen38Tok())
+    T._served_tokenizer()
+    assert T._disk_tok == {}
+    state.SERVED["path"] = None
