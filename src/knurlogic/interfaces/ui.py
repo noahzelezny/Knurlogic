@@ -41,7 +41,7 @@ _CHILDREN: dict = {}
 
 #: The port a knurlogic on ANOTHER node is expected to answer on, which is
 #: the one this page launches models on.
-_SERVE_PORT: dict = {"n": 8080}
+_SERVE_PORT: dict = {"n": 8080, "ui": 8899}
 
 
 #: Where to look for exo, only to ask WHO IS THERE. knurlogic does not need
@@ -136,7 +136,9 @@ def _status_fn(_n=0):
         for n in nodes:
             is_local = n.name == local
             snaps.append(cluster._snapshot_for(
-                n, local, {}, None, peer_port=_SERVE_PORT["n"])
+                # A peer's PAGE answers on the page's port; asking on the
+                # serve port found nothing whenever no model was served.
+                n, local, {}, None, peer_port=_SERVE_PORT["ui"])
                 if not is_local else
                 status.snapshot(node=n.name, role="local", memory_map=mm,
                                 memory_fn=lambda n=n: _local_memory(n, mm)))
@@ -443,6 +445,7 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
 
 def serve_ui(host: str, port: int, serve_port: int) -> int:
     _SERVE_PORT["n"] = serve_port
+    _SERVE_PORT["ui"] = port
     routes = web.routes(
         status_fn=_status_fn,
         settings_fn=web.machine_settings(),
