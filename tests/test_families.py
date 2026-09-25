@@ -165,3 +165,21 @@ def test_every_pins_file_parses():
         assert p.is_file(), p
         for mod, row in json.loads(p.read_text()).items():
             assert "sha256" in row, (p, mod)
+
+
+def test_no_serve_module_imports_a_sibling_the_package_shadows():
+    """`from . import X` reads the PACKAGE's attribute X. When __init__
+    re-exports a function with a submodule's name, that import yields the
+    function: `serve` crashed on its first real start that way."""
+    import ast
+    import types
+    from pathlib import Path
+
+    import knurlogic.engine.serve as pkg
+    for f in Path(pkg.__file__).parent.glob("*.py"):
+        for node in ast.walk(ast.parse(f.read_text())):
+            if isinstance(node, ast.ImportFrom) and node.level == 1 \
+                    and node.module is None:
+                for a in node.names:
+                    assert isinstance(getattr(pkg, a.name, None),
+                                      types.ModuleType), (f.name, a.name)
