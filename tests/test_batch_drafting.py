@@ -323,3 +323,54 @@ def test_a_failed_decode_step_fails_its_rows_not_the_server(monkeypatch):
             break
     assert done
     gen.close()
+
+
+# --- NaN guard: a row whose logits go non-finite fails, and says where ---------
+
+def test_nan_logits_fail_that_row_with_the_position_not_bangs(monkeypatch):
+    """Sampled, NaN logits are token 0 forever ('!!!!!' in Qwen). The row is
+    failed before any token of the bad step leaves; the other row finishes."""
+    from knurlogic.engine.mtp import batch_generator as bg
+    from knurlogic.engine.mtp.sampling import NonFiniteLogits
+    model, head, prompts = _tiny(512)
+    gen = bg.MTPBatchGenerator(model, head, prefill_step_size=16)
+    bad, good = gen.insert(prompts[:2], max_tokens=[12, 12])
+    real = gen._batch.step
+    calls = {"n": 0}
+
+    def poisoned():
+        out = real()
+        calls["n"] += 1
+        if calls["n"] == 2:
+            for rs in out:
+                if rs.uid == bad:
+                    for em in rs.tokens:
+                        em.logits = em.logits * mx.array(float("nan"))
+        return out
+    monkeypatch.setattr(gen._batch, "step", poisoned)
+    errors, toks, done = [], {bad: 0, good: 0}, set()
+    for _ in range(200):
+        prs, grs = gen.next()                       # must not raise
+        errors += [r.progress for r in prs if r.uid == bad
+                   and isinstance(r.progress, Exception)]
+        for r in grs:
+            toks[r.uid] += 1
+            if r.finish_reason:
+                done.add(r.uid)
+        if good in done and errors:
+            break
+    [err] = errors
+    assert isinstance(err, NonFiniteLogits) and "non-finite" in str(err)
+    assert "generated token" in str(err)
+    assert good in done and bad not in done
+    assert bad not in gen._batch.uids
+    gen.remove([bad])
+    gen.close()
+
+
+def test_finite_checks_rows_in_one_pass():
+    from knurlogic.engine.mtp.sampling import finite
+    ok = mx.zeros((1, 8))
+    assert finite([ok, ok / mx.array(0.0), ok + mx.array(float("inf"))]) \
+        == [True, False, False]
+    assert finite([]) == []
