@@ -368,6 +368,31 @@ Done 2026-09-24 (CPU, tiny fixtures, all five families):
 - The encode-twice gate: same image, preprocessed and encoded twice from
   scratch, bit-identical features.
 
+## When a box is free: one session, in order
+
+Everything below was built and tested on tiny fixtures and real templates
+only; one sitting on a free box (the M4 is enough) confirms it:
+
+1. gemma e4b through `knurlogic serve` -- tools/vision_gate.py (the
+   reorganised serve path), then thinking on it: reasoning streamed and
+   split out of `<|channel>thought`, `reasoning_effort: none` actually
+   off, reasoning_tokens counted, `/v1/messages` thinking blocks.
+2. `knurlogic smoke --pin` on GLM 2.7 (first pin since its imports moved).
+3. Thinking per dialect, n>=3 per arm, one process per arm: reasoning
+   tokens and answer quality at each native level; GLM's closed-think
+   "off" before it is offered.
+
+## Decided 2026-09-24: the page becomes knurlogic's own
+
+The chat panel's seven near-verbatim exo ports (THIRD-PARTY-UI.md) are
+too little code to be worth carrying. They are rewritten from what each
+must do -- not by rewording exo's source -- as part of the GUI work, and
+THIRD-PARTY-UI.md goes once the last one is replaced; the README credits
+exo as inspiration. Two need no rewrite: the `<think>` splitter is
+replaced by showing the server's `reasoning_content` (the server knows
+each template, and gemma's `<|channel>thought` never matched `<think>`
+anyway), and the SSE parser is a few lines. Until then the notice stays.
+
 ## OPEN, and it may move published numbers: the Flash-Next PLE hash seed
 
 Found 2026-09-23 during the vision integration (P1), confirmed new by the
