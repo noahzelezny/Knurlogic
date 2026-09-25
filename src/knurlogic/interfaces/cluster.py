@@ -78,6 +78,8 @@ class ExoNode:
     ram_available: int
     model_id: str = ""
     ip: str = ""
+    chip: str = ""          # "M4 Max": exo's chipId, "Apple " dropped
+    swap_used: int | None = None
 
 
 def _node_ip(info: dict) -> str:
@@ -96,6 +98,16 @@ def _node_ip(info: dict) -> str:
         if not best or i.get("interfaceType") in ("thunderbolt", "ethernet"):
             best = ip
     return best
+
+
+def _swap_used(m: dict):
+    """Swap in use from exo's per-node memory, or None when it did not say
+    -- a node that never reported swap is not a node with none."""
+    tot = _pick(m, "swapTotal", "swap_total")
+    free = _pick(m, "swapAvailable", "swap_available")
+    if tot == {} or free == {}:           # _pick answers {} for absent
+        return None
+    return max(_bytes(tot) - _bytes(free), 0)
 
 
 def inventory(exo_url: str) -> list:
@@ -125,6 +137,9 @@ def inventory(exo_url: str) -> list:
             # can infer, so it is used directly rather than guessed at.
             model_id=who.get("modelId") or who.get("model_id") or "",
             ip=_node_ip(net.get(node_id) or {}),
+            chip=str(who.get("chipId") or who.get("chip_id") or "")
+            .removeprefix("Apple ").strip(),
+            swap_used=_swap_used(m),
         ))
     return out
 
@@ -141,6 +156,11 @@ _PEER: dict = {}
 #: listens. Asking a couple of likely ports is the honest substitute for
 #: assuming exactly one, and the port that answers is remembered per node.
 PEER_PORTS = (8080,)
+
+
+#: The metrics a peer reported beside its memory map, by address. Filled by
+#: the same request, so asking for them costs nothing extra.
+_PEER_METRICS: dict = {}
 
 
 def peer_memory_map(ip: str, port: int, ttl: float = 6.0) -> dict | None:
@@ -185,6 +205,7 @@ def peer_memory_map(ip: str, port: int, ttl: float = 6.0) -> dict | None:
         for nd in (d or {}).get("nodes") or []:
             if nd.get("memory_map"):
                 doc = nd["memory_map"]
+                _PEER_METRICS[ip] = nd.get("metrics")
                 break
         if doc is not None:
             _PEER[ip] = (now, doc, cand)
@@ -236,8 +257,16 @@ def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
         node=n.name,
         role="local" if is_local else "remote",
         machine_fn=(None if is_local
-                    else lambda: wired.kind_from(n.name, product=n.model_id)),
+                    else lambda: {**wired.kind_from(n.name,
+                                                    product=n.model_id),
+                                  "chip": n.chip}),
         memory_map=mm,
+        # A peer's own knurlogic sends its lines; without one, exo still
+        # knows its swap, which is the reading that matters most.
+        metrics=(None if is_local else
+                 (mm and _PEER_METRICS.get(n.ip))
+                 or ({"now": {"swap_bytes": n.swap_used}, "history": []}
+                     if n.swap_used is not None else None)),
         memory_fn=lambda: {
             "available": ws > 0,
             "device": device,

@@ -11,7 +11,7 @@
    --bg:oklch(.12 0 0);--panel:oklch(.16 0 0);--med:oklch(.22 0 0);
    --fg:oklch(.9 0 0);--dim:oklch(.6 0 0);--faint:oklch(.45 0 0);
    --line:oklch(.25 0 0);--grid:oklch(.2 0 0/.3);
-   --ok:oklch(.78 .15 150);--warn:oklch(.78 .15 70);
+   --ok:oklch(.78 .15 150);--warn:oklch(.78 .15 70);--bad:oklch(.68 .19 25);
    --acc:oklch(.82 .14 185);--accfg:oklch(.14 .02 185);
    --glow:0 0 20px oklch(.82 .14 185/.3);
    --r:.375rem}
@@ -21,7 +21,7 @@
    --bg:oklch(.97 0 0);--panel:oklch(1 0 0);--med:oklch(.93 0 0);
    --fg:oklch(.2 0 0);--dim:oklch(.45 0 0);--faint:oklch(.6 0 0);
    --line:oklch(.89 0 0);--grid:oklch(.8 0 0/.35);
-   --ok:oklch(.5 .14 150);--warn:oklch(.55 .13 70);
+   --ok:oklch(.5 .14 150);--warn:oklch(.55 .13 70);--bad:oklch(.55 .19 25);
    --acc:oklch(.55 .11 185);--accfg:oklch(1 0 0);--glow:none}}
  *{box-sizing:border-box}
  /* This is a control surface on a desk, often on a large display, and it
@@ -157,6 +157,9 @@
  .ramrow span{color:var(--dim)}
  .ramrow em{width:8px;height:8px;border-radius:2px;display:inline-block;
    font-style:normal;flex:none}
+ .ramrow.sub{padding-left:10px;font-size:10px}
+ .ramrow em.hatch{background:repeating-linear-gradient(135deg,var(--c) 0 1.5px,
+   transparent 1.5px 3.5px);border:1px solid var(--c)}
  .pickbtn{width:100%;display:flex;align-items:center;justify-content:space-between;
    gap:10px;background:var(--bg);border:1px solid var(--line);
    border-radius:var(--r);padding:9px 10px;cursor:pointer;color:var(--fg);
@@ -332,9 +335,33 @@
    filter:drop-shadow(0 0 3px color-mix(in srgb,var(--acc) 50%,transparent))}
  @keyframes flow{from{stroke-dashoffset:0}to{stroke-dashoffset:-16}}
 
- .unit{text-align:center;padding:0 10px}
- .unit svg{width:clamp(88px,9vw,150px);height:auto}
- .unit .nm{font-size:11.5px;letter-spacing:.08em;margin-bottom:8px;color:var(--dim)}
+ .unit{text-align:center;padding:0 8px;flex:1 1 220px;max-width:380px}
+ .unit .nm{font-size:11.5px;letter-spacing:.08em;color:var(--dim)}
+ .unit .hw{font-size:10px;letter-spacing:.08em;color:var(--faint);
+   margin:2px 0 8px;text-transform:uppercase}
+ .ucard{display:flex;gap:10px;align-items:stretch;text-align:left;
+   border:1px solid var(--line);border-radius:var(--r);padding:9px 10px;
+   background:color-mix(in srgb,var(--bg) 70%,transparent)}
+ .unit.off .ucard{opacity:.45}
+ .mlines{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+ .mhd{display:flex;justify-content:space-between;font-size:9.5px;
+   letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+ .mhd b{color:var(--dim);font-weight:600;letter-spacing:.04em;text-transform:none}
+ .sp{display:block;width:100%;height:22px}
+ .noans{font-size:10.5px;color:var(--faint);margin:auto}
+ /* The memory bar: segments stack from the bottom, and a hatched segment
+    is memory that will be handed back when asked. */
+ .stk{position:relative;width:26px;flex:none;display:flex;
+   flex-direction:column-reverse;border:1px solid var(--line);
+   border-radius:3px;overflow:hidden;min-height:120px}
+ .stk i{display:block;flex:none;background:var(--c);opacity:.75}
+ .stk i.hatch{opacity:.9;background:repeating-linear-gradient(135deg,
+   color-mix(in srgb,var(--c) 70%,transparent) 0 2px,transparent 2px 5px)}
+ .stk u{position:absolute;left:-1px;right:-1px;height:0;
+   border-top:1px dashed var(--fg);opacity:.7}
+ .stk.off{background:var(--grid)}
+ .swap{color:var(--bad);font-weight:600;white-space:nowrap}
+
  .unit .stat{font-size:10.5px;color:var(--faint);margin-top:7px;letter-spacing:.04em}
  .unit .pct{font-size:15px;font-weight:700;color:var(--acc);
    text-shadow:var(--glow)}
@@ -1042,121 +1069,124 @@ async function tick(){
       `<span class="badge${on?' on':''}">${esc(t)}</span>`).join('');
   }
   if(window.chatServedChanged) window.chatServedChanged(a);
-  // The topology, and the device IS the gauge: each unit fills from the
-  // bottom with what that box is holding. A picture of a machine next to a
-  // separate number is decoration; a picture that IS the number is not.
-  // Three machines, drawn to exo's proportions rather than copied from it:
-  // a lid over a trapezoid base for a laptop, a tall block with the front
-  // slots for a Studio, a thin slab with the round foot for a mini. exo
-  // draws Studio and mini identically -- the only place this deliberately
-  // does more, because on a desk they are not remotely the same object.
+  // Each node is a card: its name overhead, what the hardware IS in words
+  // (a chip and a size say more than a drawing of a laptop), the lines that
+  // explain slow tokens on the left, and on the right a bar of where its
+  // memory went. The old device pictures filled with one colour and could
+  // not say whether the box was hot, swapping or busy; these can.
   //
-  // Each fills from the BOTTOM with what that box is holding. A picture of
-  // a machine next to a separate number is decoration; a picture that IS
-  // the number is not. An unknown machine gets a plain box, on purpose:
-  // there is no way to ask a remote node what it is, so it should look
-  // unknown rather than look like a guess.
-  // Each shape asks for its fill through this, so the split is written once
-  // rather than four times. `bands` is [[fraction, colour], ...] stacked
-  // from the bottom; a plain node passes one band and nothing else changes.
-  function fillBands(x, y, w, h, bands){
-    let out='', at=0;
-    for(const [frac, col] of bands){
-      const fh=h*frac;
-      if(fh<=0.4) { at+=frac; continue }   // below a pixel is a lie, not a hair
-      out+=`<rect x="${x}" y="${(y+h-at*h-fh).toFixed(2)}" width="${w}"
-        height="${fh.toFixed(2)}" fill="${col}" opacity=".45"/>`;
-      at+=frac;
-    }
-    return out;
+  // A line from a missing reading is drawn as a GAP, never as zero: a probe
+  // that failed is not an idle GPU.
+  function spark(vals, col){
+    const W=200, H=30, n=vals.length;
+    if(!n || vals.every(v=>v==null))
+      return `<svg class="sp" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"></svg>`;
+    // What history there is spans the width; a new page is not a dash in
+    // the corner for three minutes.
+    const x=i=>n<2?W:i/(n-1)*W,
+          y=v=>H-1-Math.max(0,Math.min(100,v))/100*(H-2);
+    let line='', area='', run=[];
+    const flush=()=>{ if(!run.length) return;
+      line+='M'+run.map(([i,v])=>`${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join('L');
+      area+=`M${x(run[0][0]).toFixed(1)} ${H}`+
+        run.map(([i,v])=>`L${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join('')+
+        `L${x(run[run.length-1][0]).toFixed(1)} ${H}Z`;
+      run=[] };
+    vals.forEach((v,i)=>{ if(v==null) flush(); else run.push([i,v]) });
+    flush();
+    return `<svg class="sp" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <path d="${area}" fill="${col}" opacity=".13"/>
+      <path d="${line}" fill="none" stroke="${col}" stroke-width="1.4"
+        vector-effect="non-scaling-stroke"/></svg>`;
   }
-  const SHAPE={
-    laptop:(bands,stroke)=>{
-      const sw=62,sh=38,sx=13,bh=5;      // screen 70% / base 30%, as exo
-      return `<rect x="${sx}" y="2" width="${sw}" height="${sh}" rx="2.5"
-          fill="none" stroke="${stroke}" stroke-width="1.4"/>
-        ${fillBands(sx+2.5, 2+2.5, sw-5, sh-5, bands)}
-        <path d="M${sx-8} ${2+sh+bh} L${sx+2} ${2+sh} L${sx+sw-2} ${2+sh}
-          L${sx+sw+8} ${2+sh+bh} Z" fill="none" stroke="${stroke}"
-          stroke-width="1.4" stroke-linejoin="round"/>
-        <line x1="${sx+22}" y1="${2+sh+bh}" x2="${sx+sw-22}" y2="${2+sh+bh}"
-          stroke="${stroke}" stroke-width="1.4" opacity=".55"/>`},
-    studio:(bands,stroke)=>{
-      const w=54,h=42,x=17,top=7;        // the tall one, with its face
-      return `<rect x="${x}" y="2" width="${w}" height="${h}" rx="3.5"
-          fill="none" stroke="${stroke}" stroke-width="1.4"/>
-        ${fillBands(x+1, 2+top+1, w-2, h-top-2, bands)}
-        <line x1="${x}" y1="${2+top}" x2="${x+w}" y2="${2+top}" stroke="${stroke}"
-          stroke-width="1" opacity=".45"/>
-        <rect x="${x+8}" y="${2+h-13}" width="3" height="7" rx="1" fill="${stroke}"
-          opacity=".5"/>
-        <rect x="${x+14}" y="${2+h-13}" width="3" height="7" rx="1" fill="${stroke}"
-          opacity=".5"/>
-        <rect x="${x+w/2-5}" y="${2+h-11}" width="10" height="3" rx="1"
-          fill="${stroke}" opacity=".5"/>`},
-    mini:(bands,stroke)=>{
-      const w=58,h=21,x=15,y=15;         // the slab, and the round foot
-      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4"
-          fill="none" stroke="${stroke}" stroke-width="1.4"/>
-        ${fillBands(x+1, y+1, w-2, h-2, bands)}
-        <circle cx="${x+8}" cy="${y+h/2}" r="1.6" fill="${stroke}" opacity=".6"/>
-        <ellipse cx="${x+w/2}" cy="${y+h+3}" rx="${w*.34}" ry="2.4"
-          fill="none" stroke="${stroke}" stroke-width="1.2" opacity=".55"/>`},
-    "":(bands,stroke)=>{
-      const w=56,h=34,x=16,y=8;
-      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2"
-          fill="none" stroke="${stroke}" stroke-width="1.4" stroke-dasharray="4 3"/>
-        ${fillBands(x+1, y+1, w-2, h-2, bands)}`}};
-  SHAPE.imac=SHAPE.laptop; SHAPE.pro=SHAPE.studio;
-
-  function unit(n){
+  const THERMCOL={nominal:'var(--ok)', fair:'var(--warn)',
+                  serious:'var(--bad)', critical:'var(--bad)'};
+  function lines(mx){
+    const h=(mx&&mx.history)||[], now=(mx&&mx.now)||{};
+    const row=(lab,val,cls,vals,col)=>`<div class="mrow">
+      <div class="mhd"><span>${lab}</span><b class="${cls||''}">${val}</b></div>
+      ${vals?spark(vals,col):''}</div>`;
+    const pc=v=>v==null?'--':Math.round(v)+'%';
+    const th=now.thermal;
+    return row('gpu', pc(now.gpu_pct)+(now.gpu_in_use_bytes!=null
+          ?` · ${gb(now.gpu_in_use_bytes)}`:''), '',
+        h.map(s=>s.gpu_pct), 'var(--acc)')+
+      row('cpu', pc(now.cpu_pct), '', h.map(s=>s.cpu_pct), 'var(--warn)')+
+      row('memory', pc(now.memory_pct), '', h.map(s=>s.memory_pct), '#bb9af7')+
+      row('thermal', th||'--', 'th', null)
+        .replace('class="th"', `class="th" style="color:${THERMCOL[th]||'var(--faint)'}"`);
+  }
+  // Bottom up: knurlogic's weights, knurlogic's cache (hatched, because it
+  // is reclaimable), each other runtime in its own colour, everything else
+  // on the box, then free. Only knurlogic can split weights from cache --
+  // it asks its own allocator; every other runtime is one footprint, drawn
+  // solid rather than guessed at.
+  function segs(n, mm, ws){
+    const nm=n.memory||{}, by=Object.entries(mm.by_runtime||{})
+      .sort((a,b)=>(a[0]==='knurlogic'?-1:b[0]==='knurlogic'?1:b[1]-a[1]));
+    const out=[];
+    for(const [k,v] of by){
+      if(k==='knurlogic' && nm.scope==='process' && nm.available){
+        const w=Math.min(nm.active_bytes||0, v),
+              c=Math.min(nm.cache_bytes||0, Math.max(v-w,0));
+        out.push(['knurlogic weights', w, RAMCOL.knurlogic, '']);
+        out.push(['knurlogic cache', c, RAMCOL.knurlogic, 'hatch']);
+        if(v-w-c>0) out.push(['knurlogic', v-w-c, RAMCOL.knurlogic, '']);
+      } else out.push([k, v, RAMCOL[k]||'var(--dim)', '']);
+    }
+    const used=Number.isFinite(mm.used_bytes)?mm.used_bytes:(mm.seen_bytes||0);
+    const named=by.reduce((x,[,v])=>x+v,0);
+    out.push(['everything else', Math.max(used-named,0), 'var(--faint)', '']);
+    const tot=out.reduce((x,s)=>x+s[1],0);
+    // Footprints can overrun the OS's own used figure; scale to fit rather
+    // than draw past the top of the machine.
+    return tot>ws ? out.map(s=>[s[0],s[1]*ws/tot,s[2],s[3]]) : out;
+  }
+  function stack(n, mm, off){
+    if(off) return '<div class="stk off"></div>';
     const nm=n.memory||{};
-    // The number under a machine has to be the number the machine is
-    // DRAWING. With a memory map the fill is every process on the box
-    // against installed RAM; the engine's own active_bytes is a different
-    // quantity with a different denominator, and showing it here read 0%
-    // under a visibly full machine the first time this ran with nothing
-    // loaded -- exo was holding 46 GiB and the caption said none.
+    if(!mm||!mm.installed_bytes){
+      // No map from this node: one band of what it reported, nothing split.
+      const ws=nm.working_set_bytes||1, f=100*(nm.active_bytes||0)/ws;
+      return `<div class="stk"><i style="height:${f.toFixed(1)}%;
+        background:var(--dim)" title="in use ${gb(nm.active_bytes||0)}"></i></div>`;
+    }
+    const inst=mm.installed_bytes;
+    const ss=segs(n, mm, inst).filter(s=>s[1]/inst>0.003);
+    // The GPU cannot wire all of installed memory; a model has to fit under
+    // this line, so it is drawn where a person would look for it.
+    const lim=nm.working_set_bytes && nm.working_set_bytes<inst*.99
+      ? `<u style="bottom:${(100*nm.working_set_bytes/inst).toFixed(1)}%"
+          title="GPU limit ${gb(nm.working_set_bytes)}"></u>` : '';
+    return `<div class="stk">${ss.map(([k,b,c,cls])=>
+      `<i class="${cls}" style="height:${(100*b/inst).toFixed(2)}%;--c:${c}"
+        title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}</div>`;
+  }
+  function unit(n){
+    const nm=n.memory||{}, hw=n.machine||{};
     const mm=n.memory_map||(n.role==='local'||n.role==='server'?RAM:null);
     const mapped=!!(mm&&mm.installed_bytes);
-    const ws=(mapped?mm.installed_bytes:nm.working_set_bytes)||1;
-    // `used`, not `seen`. seen_bytes is the sum of process FOOTPRINTS and
-    // misses the kernel, wired pages and the file cache; used_bytes is what
-    // the OS says is spent. Reading seen here while the key read used made
-    // the machine and its own legend disagree by 17 GiB.
+    const inst=(mapped?mm.installed_bytes:nm.working_set_bytes)||0;
     const used=mapped?(mm.used_bytes||mm.seen_bytes||0):(nm.active_bytes||0);
-    const pct=Math.max(0,Math.min(100,100*used/ws));
     const off=n.reachable===false||(!nm.available&&!mapped);
-    const stroke=off?'var(--line)':'var(--acc)';
-    const kind=(n.machine||{}).kind||'';
-    const draw=SHAPE[kind]||SHAPE[''];
-    const model=(n.machine||{}).model||'';
-    // Each node reports its OWN split, because knurlogic runs on each node
-    // and process footprints are only true of the machine they were read
-    // on. A node that answered gets a stacked fill; a node that did not --
-    // no knurlogic there, or a runtime that never said -- keeps the plain
-    // band. Nothing is ever painted with another node's numbers.
-    let bands=off?[]:[[pct/100,'var(--acc)']];
-    if(mapped && !off){
-      const by=Object.entries(mm.by_runtime||{}).sort((a,b)=>b[1]-a[1]);
-      const b2=by.map(([k,v])=>[v/ws, RAMCOL[k]||'var(--dim)']);
-      b2.push([(mm.other_bytes||0)/ws, 'var(--faint)']);
-      // Footprints are measured against installed memory and the gauge is
-      // scaled to the working set, so a full box can overrun it. Scale to
-      // fit rather than draw outside the machine.
-      const tot=b2.reduce((x,[f])=>x+f,0);
-      bands = tot>1 ? b2.map(([f,c])=>[f/tot,c]) : b2;
-    }
-    return `<div class="unit">
+    const pct=inst?Math.max(0,Math.min(100,100*used/inst)):0;
+    const swap=((n.metrics||{}).now||{}).swap_bytes;
+    const what=[hw.chip||hw.model||'', inst?gb(inst).replace(/\.\d+ /,' '):'']
+      .filter(Boolean).join(' · ');
+    return `<div class="unit${off?' off':''}">
       <div class="nm">${esc(n.node)}</div>
-      <svg width="88" height="56" viewBox="0 0 88 56"${
-        model?` aria-label="${esc(model)}"`:''}>${draw(bands,stroke)}</svg>
+      <div class="hw">${esc(what)||'&nbsp;'}</div>
+      <div class="ucard">
+        <div class="mlines">${off?'<div class="noans">no answer</div>'
+          : (n.metrics?.history||[]).length?lines(n.metrics)
+          : '<div class="noans">no metrics from this node</div>'}</div>
+        ${stack(n, mapped?mm:null, off)}
+      </div>
       <div class="stat"><span class="pct">${off?'--':pct.toFixed(0)+'%'}</span>
-        ${off?'no answer':gb(used)+' / '+gb(ws)}</div>
+        ${off?'':gb(used)+' / '+gb(inst)}${swap>(64<<20)
+          ?` <span class="swap">· ${gb(swap)} swap</span>`:''}</div>
     </div>`;
   }
-  // One node still gets its unit: the picture is the gauge, not an
-  // ornament that only earns its place when there are two of them.
   // The link between nodes animates along its length. That is the only
   // motion on the page that carries information -- it says the link is
   // live -- so it is also the only one, and it stops under reduced-motion.
@@ -1183,6 +1213,11 @@ async function tick(){
       for(const [k,v] of Object.entries(m.by_runtime||{}))
         merged.by_runtime[k]=(merged.by_runtime[k]||0)+v;
     }
+    // knurlogic's reclaimable share, keyed beside its runtime row: the only
+    // runtime whose cache can be told apart from its weights.
+    merged.knurlogic_cache=ns_.reduce((x,n)=>{const q=n.memory||{};
+      return x+(q.scope==='process'&&q.available&&(n.memory_map||{})
+        .by_runtime?.knurlogic ? (q.cache_bytes||0) : 0)},0);
     ramWent(merged);
   }
   $('topo').innerHTML=ns_.map(unit).join(ns_.length===2
@@ -1513,7 +1548,10 @@ function ramWent(m){
   // be the free-space bar's mistake again. This is the key to that picture,
   // and the key carries the numbers.
   el.innerHTML=`<div class="ram">
-    ${by.map(([k,b])=>row(k,b,RAMCOL[k]||'var(--dim)')).join('')}
+    ${by.map(([k,b])=>row(k,b,RAMCOL[k]||'var(--dim)')+
+      (k==='knurlogic'&&m.knurlogic_cache>0
+        ? `<div class="ramrow sub"><em class="hatch" style="--c:${RAMCOL.knurlogic}"></em>
+            <span>of which cache</span><b>${gb(m.knurlogic_cache)}</b></div>`:'')).join('')}
     ${row('everything else',other,'var(--faint)')}
     ${row('unused',free,'')}</div>`;
 }
