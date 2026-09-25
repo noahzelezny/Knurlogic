@@ -74,3 +74,10 @@ def test_a_missing_reading_is_none_not_zero(monkeypatch):
     s = metrics.sample()
     assert s["gpu_pct"] is None and s["swap_bytes"] is None
     assert s["memory_pct"] is None
+
+
+def test_temperature_reads_none_when_the_sensor_api_is_gone(monkeypatch):
+    from knurlogic.machine import metrics
+    monkeypatch.setattr(metrics, "_hid",
+                        lambda: (_ for _ in ()).throw(OSError("moved")))
+    assert metrics._temp_c() is None
