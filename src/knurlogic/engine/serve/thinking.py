@@ -152,11 +152,46 @@ def _render(tokenizer, kwargs: dict):
 
 def _render_unlocked(tokenizer, kwargs: dict):
     try:
-        return tokenizer.apply_chat_template(
+        return _Closing(tokenizer).apply_chat_template(
             _PROBE_MSGS, add_generation_prompt=True, tokenize=False,
             **kwargs)
     except Exception:
         return None
+
+
+#: A native level may CLOSE the think block instead of passing a template
+#: kwarg: the template's own format for a turn that did not think (GLM-5.3
+#: writes `<think></think>` into every past assistant turn; its template has
+#: no off switch). Measured before it was offered: GLM 2.7, 12/12 right, 0
+#: reasoning tokens (docs/measured/2026-09-25-thinking). Never reaches the
+#: template -- `_Closing` strips it and appends the tokenizer's think_end
+#: to the generation prompt, so mlx-lm's own rfind sees a closed block and
+#: starts the response in its normal state.
+CLOSE = "_knurlogic_close_think"
+
+
+class _Closing:
+    """A tokenizer whose generation prompt ends with the think block
+    closed when CLOSE is asked for; every other call passes through."""
+
+    def __init__(self, tok):
+        self._tok = tok
+
+    def __getattr__(self, name):
+        return getattr(self._tok, name)
+
+    def apply_chat_template(self, *a, **kw):
+        close = kw.pop(CLOSE, False)
+        out = self._tok.apply_chat_template(*a, **kw)
+        if not (close and kw.get("add_generation_prompt")):
+            return out
+        end = getattr(self._tok, "think_end", None)
+        if not end:
+            raise ValueError("closing the think block needs a tokenizer "
+                             "that knows its think_end")
+        if kw.get("tokenize", True) and not isinstance(out, str):
+            return list(out) + list(self._tok._think_end_tokens)
+        return out + end
 
 
 def thinking_keys(spec: dict) -> set:
@@ -310,6 +345,17 @@ def install(srv) -> None:
             return ctx, counted()
         generate._knurlogic_thinking = True
         RG.generate = generate
+
+    real_tok = getattr(RG, "_tokenize", None)
+    if real_tok is not None and \
+            not getattr(real_tok, "_knurlogic_thinking", False):
+        @functools.wraps(real_tok)
+        def _tokenize(self, tokenizer, request, args):
+            if CLOSE in (getattr(args, "chat_template_kwargs", None) or {}):
+                tokenizer = _Closing(tokenizer)
+            return real_tok(self, tokenizer, request, args)
+        _tokenize._knurlogic_thinking = True
+        RG._tokenize = _tokenize
 
     real_hc = H.handle_completion
     if not getattr(real_hc, "_knurlogic_thinking", False):
