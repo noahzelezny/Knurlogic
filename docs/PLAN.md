@@ -469,6 +469,30 @@ qwen4_exp, glm5_next, gemma4.
   ids quoted in old commit messages go stale.
 * Then: HF card instructions point at knurlogic.
 
+## BIG TODO: setting up several machines must be easy (Noah, 2026-09-24)
+
+The scariest part for a new user, and the first thing to get right before
+release. Found by doing it on the M4 tonight, every step a stumble:
+
+* knurlogic was not on the PATH (it lived in a venv); `command not found`.
+* The page listens on loopback by default, so a peer needs `--host` set on
+  purpose -- and nothing told you which address.
+* macOS put up "allow incoming connections?" on the OTHER machine, and
+  until someone clicked it every request hung. Nothing said why.
+* The Studio asked the peer on the wrong port, and gave up in 1 s on a
+  busy peer that took 1.4. Both fixed (`1be7110`, `32610e4`).
+* Machines are found through exo. Without exo, there is no second machine.
+
+What "easy" should mean: install on each Mac, run one command on each, and
+the machines find each other; anything blocking (firewall, wrong address,
+different versions) is NAMED on the page, on the machine that can fix it.
+
+Open for Noah (user-facing details, 2026-09-25): **resending the firewall
+prompt when it is missed on the satellite.** macOS asks once per app; a
+dismissed or denied prompt is remembered and re-asking needs the firewall
+entry removed (admin). What knurlogic can do on its own: detect "listening
+but unreachable" and say exactly that, on both machines, with the fix.
+
 ## Next: replace exo (direction set 2026-09-22)
 
 `pip install knurlogic` and nothing else, including clustering. Verified:
