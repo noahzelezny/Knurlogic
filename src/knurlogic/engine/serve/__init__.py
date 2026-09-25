@@ -9,6 +9,8 @@ change knurlogic makes to mlx-lm's own server, one module each.
   vq_runtime.py    verified rungs load on knurlogic's VQ runtime (engine/vq)
   cache_report.py  usage.knurlogic.cache: what the prompt cache actually did
   thinking.py      reasoning_effort -> each chat template's own controls
+  sampling.py      a request's seed reaches the sampler (mlx-lm's compiled
+                   sampler ignores it off the main thread)
   drafting.py      an artifact's MTP head in mlx-lm's server (engine/mtp)
   vision.py        images through mlx-lm's server (engine/vision)
 
