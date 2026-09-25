@@ -31,6 +31,10 @@ from knurlogic.machine import loaded, status, wired
 from knurlogic.machine.servers import (is_our_server, registry,
                                        save_registry, serve_log)
 from knurlogic.interfaces import web
+# Imported here, not inside the status handler: the page fires several
+# requests at once, and two threads importing a module for the first time
+# race -- measured as "partially initialized module 'typing'" on a restart.
+from knurlogic.interfaces import cluster  # noqa: E402
 
 #: Children started from the page: {port: (Popen, artifact path)}.
 _CHILDREN: dict = {}
@@ -103,8 +107,6 @@ def _status_fn(_n=0):
     exo's RAM figures and a plain gauge, which is still the machine and still
     its real occupancy.
     """
-    from knurlogic.interfaces import cluster
-
     mm = None
     try:
         mm = loaded.memory_map()
