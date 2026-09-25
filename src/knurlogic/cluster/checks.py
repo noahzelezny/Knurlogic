@@ -72,6 +72,24 @@ def firewall() -> dict:
                              "allow" in blocked else "not listed")}
 
 
+def sleep_on_ac():
+    """Minutes until system sleep on AC power (0 = never), or None.
+
+    A satellite that sleeps drops off the network and every peer sees it
+    go and come back: on this project's own M4, one minute on AC meant
+    about nine disconnects a night and a ring re-election each time
+    (fixed with `pmset -c sleep 0`)."""
+    txt = _run(["pmset", "-g", "custom"])
+    if "AC Power" not in txt:
+        return None
+    ac = txt.split("AC Power", 1)[1].split("Battery Power", 1)[0]
+    for line in ac.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == "sleep" and parts[1].isdigit():
+            return int(parts[1])
+    return None
+
+
 def browse(seconds: float = 4.0, me_id: str = "") -> list[dict]:
     from knurlogic.cluster.discovery import Discovery
     d = Discovery()
@@ -121,6 +139,14 @@ def report(port: int = 8899) -> tuple[str, int]:
                          "connections?\" prompt ON THIS SCREEN. If it was "
                          "missed or denied: System Settings -> Network -> "
                          "Firewall -> Options -> the Python above -> Allow.")
+    zz = sleep_on_ac()
+    if zz:
+        bad += 1
+        L.append("")
+        L.append(f"sleep          after {zz} min on AC power")
+        L.append("  -> a machine that sleeps leaves the cluster and comes "
+                 "back, and every peer sees it happen. For a machine that "
+                 "serves: `sudo pmset -c sleep 0` (never sleep on AC).")
     found = browse(me_id=me["id"])
     L.append("")
     L.append(f"bonjour        {len(found)} other knurlogic page(s) found")
@@ -145,7 +171,9 @@ def report(port: int = 8899) -> tuple[str, int]:
         L.append("  -> none seen. Start `knurlogic ui --host <this "
                  "machine's address>` on each Mac. If one is running and "
                  "still not seen: System Settings -> Privacy & Security -> "
-                 "Local Network -> allow the terminal app; or name it once "
+                 "Local Network -> allow the app that started knurlogic "
+                 "(the terminal; or, under launchd or a script, the Python "
+                 f"binary itself: {python_binary()}); or name it once "
                  "with `knurlogic ui --peer HOST:PORT` (it is remembered).")
     L.append("")
     L.append("to be found  " + (
