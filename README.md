@@ -104,11 +104,12 @@ no blockers found
 ## What it is not
 
 It does not build or score models — vqlab builds, knurlogic runs what it
-built. It does not implement distributed inference; it wraps exo, which
-does. It never sets the wired limit or deletes a model; it tells you the
-command. Scope stays narrow on purpose.
+built. It never sets the wired limit or deletes a model; it tells you the
+command. Clustering runs through exo today; knurlogic is replacing that
+orchestration on mlx's own distributed backends (docs/PLAN.md).
 
-Interface design inspired by exo's dashboard (Apache-2.0).
+The page's look is inspired by exo's dashboard; its code is knurlogic's
+own.
 
 ## What it stands on
 
