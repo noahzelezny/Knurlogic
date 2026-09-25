@@ -199,7 +199,10 @@ def peer_memory_map(ip: str, port: int, ttl: float = 6.0) -> dict | None:
             continue
         tried.append(cand)
         try:
-            d = _get(f"http://{ip}:{cand}/status.json", timeout=1.0)
+            # 3 s, not 1: a busy peer building its map was measured at 1.4 s,
+            # and a timeout shorter than that drops the node every time.
+            # The answer is cached for `ttl`, so this is not paid per poll.
+            d = _get(f"http://{ip}:{cand}/status.json", timeout=3.0)
         except Exception:
             continue
         for nd in (d or {}).get("nodes") or []:

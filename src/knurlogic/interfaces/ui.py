@@ -90,6 +90,9 @@ def _local_memory(n, mm) -> dict:
     }
 
 
+_MM = {"doc": None, "at": 0.0}
+
+
 def _status_fn(_n=0):
     """A status for a box that is serving nothing.
 
@@ -107,11 +110,17 @@ def _status_fn(_n=0):
     exo's RAM figures and a plain gauge, which is still the machine and still
     its real occupancy.
     """
-    mm = None
-    try:
-        mm = loaded.memory_map()
-    except Exception:
-        pass
+    # Reused for a few seconds, as `serve` does: the map runs `top`, which
+    # takes over a second on a loaded box, and the page and every peer
+    # asking for it would otherwise each pay that.
+    now = time.time()
+    if _MM["doc"] is None or now - _MM["at"] > 4.0:
+        try:
+            _MM["doc"] = loaded.memory_map()
+        except Exception:
+            _MM["doc"] = None
+        _MM["at"] = now
+    mm = _MM["doc"]
 
     nodes = []
     try:
