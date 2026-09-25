@@ -35,6 +35,8 @@ import os
 import subprocess
 import time
 
+from knurlogic.machine import metrics as _metrics
+
 GIB = 1 << 30
 _STARTED = time.time()
 
@@ -101,7 +103,6 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
     # A peer that did not say leaves the key out, and the page draws no line.
     if metrics is None and machine_fn is None:
         try:
-            from knurlogic.machine import metrics as _metrics
             metrics = _metrics.metrics(memory_map)
         except Exception:
             metrics = None
