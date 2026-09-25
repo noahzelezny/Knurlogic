@@ -137,6 +137,10 @@ def test_max_tokens_ends_with_length():
     assert r["usage"]["completion_tokens"] <= 8
 
 
+@pytest.mark.xfail(strict=True, reason="mlx-lm matches stop sequences as "
+                   "token ids: stop 'D' never matches the token ' D' "
+                   "(measured, gemma e4b, 2026-09-25). OpenAI's contract "
+                   "is text; the new server matches text.")
 def test_a_stop_sequence_ends_the_answer_before_it():
     r = chat(messages=[{"role": "user",
                         "content": "Write the letters A B C D E F, "
