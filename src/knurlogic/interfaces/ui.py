@@ -169,6 +169,8 @@ def _status_fn(_n=0):
     # cannot see connections its own firewall drops -- whether they can
     # reach it.
     snap["me"] = {**me, "port": _SERVE_PORT["ui"]}
+    if DISCOVERY is not None:
+        snap["discovery"] = DISCOVERY.status()
     if PEERS:
         snap["peers"] = [p.public() for p in peers]
         seen = PEERS.seen_by_peers()
@@ -476,14 +478,51 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
         up.close()
 
 
+#: Bonjour (cluster/discovery.py); None when it could not start.
+DISCOVERY = None
+
+
+def _start_discovery(me: dict, host: str, port: int, reachable: bool):
+    """Browse always -- a loopback page can still reach peers outbound --
+    and advertise only when bound where others can reach it: advertising an
+    address nobody can connect to is the silence this replaces."""
+    global DISCOVERY
+    try:
+        from knurlogic import __version__
+        from knurlogic.cluster import discovery as dsd
+
+        def found(services):
+            for svc in services:
+                txt = svc.get("txt") or {}
+                if txt.get("id") == me["id"] or not PEERS:
+                    continue
+                p = PEERS.add(svc["host"], svc["port"], "bonjour")
+                p.id = p.id or txt.get("id", "")
+                p.name = p.name or txt.get("name", "")
+        d = dsd.Discovery(on_change=found)
+        if reachable:
+            d.if_index = dsd.interface_of(host)
+            d.register(f"{me['name']} {me['id'][:6]}", port,
+                       {"id": me["id"], "name": me["name"],
+                        "ver": __version__, "schema": status.SCHEMA,
+                        "role": "ui"})
+            d.if_index = 0
+        d.browse()
+        DISCOVERY = d.start()
+    except Exception as e:
+        print(f"bonjour unavailable ({type(e).__name__}: {e}); peers can "
+              f"still be named with --peer", file=sys.stderr)
+
+
 def serve_ui(host: str, port: int, serve_port: int, peers=()) -> int:
     global PEERS
     _SERVE_PORT["n"] = serve_port
     _SERVE_PORT["ui"] = port
     from knurlogic.cluster.peers import Peers
-    PEERS = Peers(identity.identity(), port, manual=peers,
-                  reachable=host not in ("127.0.0.1", "localhost", "::1")
-                  ).start()
+    me = identity.identity()
+    reachable = host not in ("127.0.0.1", "localhost", "::1")
+    PEERS = Peers(me, port, manual=peers, reachable=reachable).start()
+    _start_discovery(me, host, port, reachable)
     routes = web.routes(
         status_fn=_status_fn,
         settings_fn=web.machine_settings(),
