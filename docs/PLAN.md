@@ -427,10 +427,14 @@ not tax every step.
    `offset` of its own; `split_pool_entry`, `_entry` and admit's seeding
    check read `.offset` directly, got -1/None, and discarded every GLM
    entry, checkpoint or whole prompt. `caches.position()` answers for
-   composites; unit tests cover prefix and checkpoint restores. STILL TO
-   VALIDATE on a free box: `test_a_shared_prefix_is_reused` on GLM 2.7, and
-   acceptance after a checkpoint restore equal to a fresh row (the replay
-   through `MTPHeadGlm5.advance` is exercised for the first time on GLM).
+   composites; unit tests cover prefix and checkpoint restores.
+   VALIDATED on the M4 (GLM 2.7): conformance 23 passed (was 22; shared
+   prefix now used, 411 cached tokens); draft acceptance greedy, 6 prompts
+   per arm, fresh 0.754 (0.50-0.90) vs restored from the system checkpoint
+   0.779 (0.55-0.96) -- no difference within spread, so the replay through
+   `MTPHeadGlm5.advance` keeps the head aligned. Open: one of six restored
+   requests got 0 cached tokens (interleaved with unique-prefix requests;
+   LRU eviction suspected, unconfirmed).
 3. **Server build step 1**: engine/runtime/executor.py -- protocol +
    MTPBatchGenerator behind it; test_batch_drafting/vision tests unchanged.
    Then steps 2-5 per docs/SERVER.md.

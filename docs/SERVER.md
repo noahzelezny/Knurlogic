@@ -183,6 +183,6 @@ tokens never yields U+FFFD; /v1/completions.
 |---|---|
 | gemma e4b | 23 passed (after fixing headless prefix reuse) |
 | Qwen Flash-Next 2.1 | 23 passed |
-| GLM-5.3 2.7 | 22 passed; shared prefix: 472 offered, 0 used -- see PLAN |
+| GLM-5.3 2.7 | 22 passed; shared prefix 0 used -- fixed 2026-09-25 (CacheList offset): 23 passed |
 
 Known gaps pinned as strict xfails: text stop sequences; the harness's five.
