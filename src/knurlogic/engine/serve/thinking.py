@@ -43,6 +43,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import threading
 
 from . import state
 
@@ -134,9 +135,22 @@ def resolve(level, dialect: str | None, spec: dict | None):
 
 _PROBE_MSGS = [{"role": "user", "content": "hi"}]
 _probe_cache: dict = {}
+# One render at a time. Requests arrive on the server's handler threads,
+# and the first few after a load probe together: concurrent renders through
+# the same tokenizer failed, the probe read those failures as "the template
+# does not act on its controls", and whichever thread finished last decided
+# what was cached. Measured on the M4 (2026-09-25): the first four
+# concurrent requests of every bench arm were served "not controllable" --
+# a `none` request reasoned for 242 tokens.
+_render_lock = threading.RLock()
 
 
 def _render(tokenizer, kwargs: dict):
+    with _render_lock:
+        return _render_unlocked(tokenizer, kwargs)
+
+
+def _render_unlocked(tokenizer, kwargs: dict):
     try:
         return tokenizer.apply_chat_template(
             _PROBE_MSGS, add_generation_prompt=True, tokenize=False,
@@ -153,16 +167,19 @@ def probe(tokenizer, template: str, spec: dict) -> dict:
     """Render once per native level and once bare, through the tokenizer the
     server uses. {verified, default, renders}. Cached per template."""
     h = hashlib.sha256((template or "").encode()).hexdigest()
-    if h in _probe_cache:
+    with _render_lock:
+        if h not in _probe_cache:
+            _probe_cache[h] = _probe(tokenizer, spec)
         return _probe_cache[h]
+
+
+def _probe(tokenizer, spec: dict) -> dict:
     renders = {n[1]: _render(tokenizer, dict(n[2])) for n in spec["native"]}
     bare = _render(tokenizer, {})
     ok = (None not in renders.values() and bare is not None
           and len(set(renders.values())) == len(renders))
     default = next((name for name, r in renders.items() if r == bare), None)
-    out = {"verified": ok, "default": default, "renders": renders}
-    _probe_cache[h] = out
-    return out
+    return {"verified": ok, "default": default, "renders": renders}
 
 
 def applied_by_render(tokenizer, spec: dict, merged: dict, p: dict):

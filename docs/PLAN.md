@@ -393,10 +393,13 @@ only; one sitting on a free box (the M4 is enough) confirms it:
   forever). knurlogic serve now swaps in the plain call. Worth reporting
   upstream. The bench still sends no seed, so tonight's numbers do not
   depend on the fix.
-* **The first concurrent requests after a load have no
-  `usage.knurlogic.thinking`.** gemma bench, default arm: the four run-0
-  requests (sent together) lack `applied`; every later one has it. A
-  first-request race in the thinking install.
+* **The first concurrent requests after a load were "not controllable" --
+  FIXED (thinking.py, `_render_lock`).** The probe rendered the template
+  from every handler thread at once, concurrent renders failed, and the
+  failure read as "the template ignores its controls". Every bench arm's
+  first four requests got the model's default level instead of the one
+  asked for (a Flash `none` request reasoned 242 tokens). The first bench
+  pass was discarded and rerun after the fix.
 
 ## Done 2026-09-24: the page is knurlogic's own
 

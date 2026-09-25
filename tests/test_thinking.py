@@ -358,3 +358,38 @@ def test_messages_streams_thinking_then_text():
         ("content_block_delta", "text_delta"),
         ("content_block_stop", None),
         ("message_delta", None), ("message_stop", None)]
+
+
+def test_probe_holds_when_requests_race_it():
+    """The first requests after a load probe together. A tokenizer that
+    fails when entered twice at once (as the real one did on the M4) must
+    not turn a verified template into 'not controllable'."""
+    import threading
+    import time
+    from knurlogic.engine.serve import thinking as T
+
+    class Tok:
+        busy = False
+
+        def apply_chat_template(self, msgs, **kw):
+            if Tok.busy:
+                raise RuntimeError("Already borrowed")
+            Tok.busy = True
+            try:
+                time.sleep(0.002)
+                return "on" if kw.get("enable_thinking", True) else "off"
+            finally:
+                Tok.busy = False
+
+    spec = {"default": "on",
+            "native": [["none", "off", {"enable_thinking": False}],
+                       ["xhigh", "on", {"enable_thinking": True}]]}
+    T._probe_cache.clear()
+    got = []
+    ts = [threading.Thread(target=lambda: got.append(
+        T.probe(Tok(), "race-template", spec))) for _ in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert all(p["verified"] and p["default"] == "on" for p in got)
