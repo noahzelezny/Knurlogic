@@ -155,7 +155,7 @@ _PEER: dict = {}
 #: exists, so there is nothing in its state that says where a peer knurlogic
 #: listens. Asking a couple of likely ports is the honest substitute for
 #: assuming exactly one, and the port that answers is remembered per node.
-PEER_PORTS = (8080,)
+PEER_PORTS = (8080, 8899)     # serve's default, then the page's
 
 
 #: The metrics a peer reported beside its memory map, by address. Filled by
