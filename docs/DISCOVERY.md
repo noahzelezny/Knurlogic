@@ -147,3 +147,20 @@ stays "facts about THIS box".
 Build order: identity -> reachability + `--peer` + peers.json + the
 cross-check (fixes tonight with no Bonjour) -> register -> browse/resolve
 -> `--host cluster` (Noah) -> exo demoted to `cluster/exo.py` -> doctor.
+
+## Built and measured (2026-09-25, Studio 10.0.0.1 <-> M4 10.0.0.2 over Thunderbolt)
+
+Steps 1-4 and 6 are built (`machine/identity.py`, `cluster/peers.py`,
+`cluster/discovery.py`, `cluster/exo.py`); `--host cluster` (5) waits for
+Noah, `doctor` (7) is next.
+
+* With no `--peer` and no remembered peers (fresh `KNURLOGIC_HOME`) the
+  Studio found the M4 by Bonjour alone, fetched its status, and the M4
+  learned the Studio from the introduction header: both `answering`.
+* **mDNS over the Thunderbolt link was ONE-WAY.** The Studio sees the
+  M4's services on en4; the M4 sees nothing of the Studio's on en3 --
+  not knurlogic, not `_ssh`, not `_smb` (`dns-sd -B` on each side). Not
+  a knurlogic fault, and exactly why introductions exist: one direction
+  of discovery is enough for both machines to know each other. It also
+  means a pair where NEITHER direction works needs `--peer` once; after
+  that the peer is remembered.
