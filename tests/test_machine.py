@@ -48,4 +48,29 @@ def test_a_remote_snapshot_never_inherits_the_local_machine():
 
 def test_the_local_snapshot_asks_the_host_directly():
     local = status.snapshot(memory_fn=lambda: {"available": False})
-    assert set(local["machine"]) == {"kind", "model", "model_id"}
+    assert set(local["machine"]) == {"kind", "model", "model_id", "chip"}
+
+
+def test_metrics_ride_in_the_local_snapshot_and_a_peer_gets_none_invented():
+    from knurlogic.machine import metrics
+    metrics._hist.clear()      # an earlier snapshot in this process sampled
+    local = status.snapshot(memory_fn=lambda: {"available": False},
+                            memory_map={"installed_bytes": 100,
+                                        "used_bytes": 25})
+    m = local["metrics"]
+    assert m["now"]["memory_pct"] == 25.0
+    assert m["history"][-1] is m["now"]
+    assert len(m["history"]) <= metrics.HISTORY
+    # a node built from someone else's numbers draws no lines it did not send
+    peer = status.snapshot(memory_fn=lambda: {"available": False},
+                           machine_fn=lambda: {"kind": ""})
+    assert "metrics" not in peer
+
+
+def test_a_missing_reading_is_none_not_zero(monkeypatch):
+    from knurlogic.machine import metrics
+    monkeypatch.setattr(metrics.subprocess, "run",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    s = metrics.sample()
+    assert s["gpu_pct"] is None and s["swap_bytes"] is None
+    assert s["memory_pct"] is None
