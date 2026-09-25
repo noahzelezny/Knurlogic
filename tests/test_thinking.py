@@ -62,7 +62,7 @@ EXPECT = {
                     "medium": "on", "high": "on", "xhigh": "on"},
     "gemma_toggle": {"none": "off", "minimal": "on", "low": "on",
                      "medium": "on", "high": "on", "xhigh": "on"},
-    "glm_effort": {"none": "low", "minimal": "low", "low": "low",
+    "glm_effort": {"none": "off", "minimal": "low", "low": "low",
                    "medium": "high", "high": "high", "xhigh": "max"},
 }
 
@@ -312,7 +312,7 @@ def test_the_mcp_models_tool_lists_each_models_thinking_levels():
         pytest.skip("GLM not on this box")
     lv = T.levels(T.template_of(d))
     assert lv["dialect"] == "glm_effort" and lv["default"] == "max"
-    assert [n["name"] for n in lv["native"]] == ["low", "high", "max"]
+    assert [n["name"] for n in lv["native"]] == ["off", "low", "high", "max"]
     assert T.levels(T.template_of("/nonexistent")) == {
         "dialect": None, "native": [], "default": None}
 
@@ -420,3 +420,30 @@ def test_a_request_during_load_still_gets_its_level(monkeypatch):
     T._served_tokenizer()
     assert T._disk_tok == {}
     state.SERVED["path"] = None
+
+
+def test_glm_off_closes_the_think_block_so_the_answer_starts_normal():
+    """GLM's `none` is the template's own no-thinking format: the prompt
+    ends `<think></think>`, and mlx-lm's rfind sees a closed block."""
+    tok = _wrapper("TheDrainFlorist--GLM-5.3-Flash-VQ-2.7bpw")
+    kw = _kw("glm_effort", "none")
+    assert T.CLOSE in kw
+    text = T._render(tok, kw)
+    assert text.endswith("<think></think>")
+    assert "Reasoning Effort: Low" in text
+    ids = T._Closing(tok).apply_chat_template(
+        [{"role": "user", "content": "hi"}], add_generation_prompt=True,
+        tokenize=True, **kw)
+    assert tok.rfind_think_end(ids) > tok.rfind_think_start(ids)
+    # the system-prompt split mlx-lm renders WITHOUT a generation prompt
+    # is untouched, so its segments still line up with the prompt
+    plain = T._Closing(tok).apply_chat_template(
+        [{"role": "user", "content": "hi"}], add_generation_prompt=False,
+        tokenize=True, **kw)
+    assert plain == tok.apply_chat_template(
+        [{"role": "user", "content": "hi"}], add_generation_prompt=False,
+        tokenize=True, reasoning_effort="low")
+    T._probe_cache.clear()
+    name, spec = T.detect(tok.chat_template)
+    p = T.probe(tok, tok.chat_template, spec)
+    assert p["verified"] and p["renders"]["off"] != p["renders"]["low"]
