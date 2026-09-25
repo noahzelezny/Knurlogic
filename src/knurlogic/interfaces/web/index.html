@@ -1113,7 +1113,10 @@ async function tick(){
         h.map(s=>s.gpu_pct), 'var(--acc)')+
       row('cpu', pc(now.cpu_pct), '', h.map(s=>s.cpu_pct), 'var(--warn)')+
       row('memory', pc(now.memory_pct), '', h.map(s=>s.memory_pct), '#bb9af7')+
-      row('thermal', th||'--', 'th', null)
+      // °C on a 0-100 scale, as Scout draws it: ambient near the floor,
+      // a hot die near the top.
+      row('thermal', (now.temp_c!=null?Math.round(now.temp_c)+'°C · ':'')+(th||'--'),
+          'th', h.some(s=>s.temp_c!=null)?h.map(s=>s.temp_c):null, '#fb923c')
         .replace('class="th"', `class="th" style="color:${THERMCOL[th]||'var(--faint)'}"`);
   }
   // Bottom up: knurlogic's weights, knurlogic's cache (hatched, because it

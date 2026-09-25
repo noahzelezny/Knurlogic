@@ -9,11 +9,13 @@ move decode speed, and each is readable WITHOUT sudo:
   cpu       host_statistics(HOST_CPU_LOAD_INFO) tick deltas, through ctypes
   swap      `sysctl vm.swapusage`
   thermal   NSProcessInfo.thermalState (nominal / fair / serious /
-            critical), through the Objective-C runtime
-
-Temperature in degrees is NOT here: it lives behind IOHID sensor services
-that need a native helper, and a number from a guessed sensor is worse than
-the OS's own four-step verdict, which is what throttling actually follows.
+            critical), through the Objective-C runtime -- what throttling
+            follows
+  temp_c    the hottest die sensor, from IOHIDEventSystemClient -- the
+            same sensors a compiled helper reads, reached through ctypes so
+            nothing extra is installed. Undocumented API: if Apple moves it,
+            this reads None and the line goes blank, it does not break.
+            A °C line shows heat building before the state changes.
 
 History is kept in this process, sampled when status is asked for and no
 more often than MIN_INTERVAL_S, so a page that polls fast does not make the
@@ -112,6 +114,84 @@ def _thermal():
         return None
 
 
+_HID = {}
+
+
+def _hid():
+    """The sensor client and its services, built once per process."""
+    if _HID:
+        return _HID
+    C, vp = ctypes, ctypes.c_void_p
+    io = C.CDLL("/System/Library/Frameworks/IOKit.framework/IOKit")
+    cf = C.CDLL("/System/Library/Frameworks/CoreFoundation.framework/"
+                "CoreFoundation")
+    for fn, res, args in (
+            (cf.CFStringCreateWithCString, vp, [vp, C.c_char_p, C.c_uint32]),
+            (cf.CFNumberCreate, vp, [vp, C.c_int, vp]),
+            (cf.CFDictionaryCreate, vp, [vp, vp, vp, C.c_long, vp, vp]),
+            (cf.CFArrayGetCount, C.c_long, [vp]),
+            (cf.CFArrayGetValueAtIndex, vp, [vp, C.c_long]),
+            (cf.CFStringGetCString, C.c_bool, [vp, C.c_char_p, C.c_long,
+                                               C.c_uint32]),
+            (cf.CFRelease, None, [vp]),
+            (io.IOHIDEventSystemClientCreate, vp, [vp]),
+            (io.IOHIDEventSystemClientSetMatching, None, [vp, vp]),
+            (io.IOHIDEventSystemClientCopyServices, vp, [vp]),
+            (io.IOHIDServiceClientCopyProperty, vp, [vp, vp]),
+            (io.IOHIDServiceClientCopyEvent, vp, [vp, C.c_int64, C.c_int32,
+                                                 C.c_int64]),
+            (io.IOHIDEventGetFloatValue, C.c_double, [vp, C.c_int32])):
+        fn.restype, fn.argtypes = res, args
+    utf8 = 0x08000100
+    cfs = lambda t: cf.CFStringCreateWithCString(None, t.encode(), utf8)
+
+    def num(v):
+        i = C.c_int32(v)
+        return cf.CFNumberCreate(None, 3, C.byref(i))       # kCFNumberSInt32
+    # usage page 0xff00, usage 5: Apple's temperature sensors
+    keys = (vp * 2)(cfs("PrimaryUsagePage"), cfs("PrimaryUsage"))
+    vals = (vp * 2)(num(0xff00), num(5))
+    kcb = vp.in_dll(cf, "kCFTypeDictionaryKeyCallBacks")
+    vcb = vp.in_dll(cf, "kCFTypeDictionaryValueCallBacks")
+    match = cf.CFDictionaryCreate(None, keys, vals, 2, C.addressof(kcb),
+                                  C.addressof(vcb))
+    client = io.IOHIDEventSystemClientCreate(None)
+    io.IOHIDEventSystemClientSetMatching(client, match)
+    svcs = io.IOHIDEventSystemClientCopyServices(client)
+    prod, sensors = cfs("Product"), []
+    for i in range(cf.CFArrayGetCount(svcs) if svcs else 0):
+        sv = cf.CFArrayGetValueAtIndex(svcs, i)
+        nm, buf = io.IOHIDServiceClientCopyProperty(sv, prod), \
+            C.create_string_buffer(128)
+        name = (buf.value.decode(errors="replace")
+                if nm and cf.CFStringGetCString(nm, buf, 128, utf8) else "")
+        sensors.append((name, sv))
+    # The die sensors, when the machine names them; every sensor otherwise.
+    die = [s for s in sensors if "tdie" in s[0]]
+    _HID.update(io=io, cf=cf, client=client, services=svcs,
+                sensors=die or sensors)
+    return _HID
+
+
+def _temp_c():
+    """The hottest sensor, in °C. Temperature event type 15, its value
+    field 15 << 16."""
+    try:
+        h = _hid()
+        io, cf, best = h["io"], h["cf"], None
+        for _, sv in h["sensors"]:
+            ev = io.IOHIDServiceClientCopyEvent(sv, 15, 0, 0)
+            if not ev:
+                continue
+            t = io.IOHIDEventGetFloatValue(ev, 15 << 16)
+            cf.CFRelease(ev)
+            if 0 < t < 150 and (best is None or t > best):
+                best = t
+        return round(best, 1) if best is not None else None
+    except Exception:
+        return None
+
+
 def _pressure(memory_map):
     """Used share of installed memory, from the map the page already draws,
     so the line and the bar can never disagree."""
@@ -125,7 +205,7 @@ def sample(memory_map=None) -> dict:
     return {"t": round(time.time(), 1), "gpu_pct": gpu,
             "gpu_in_use_bytes": gpu_mem, "cpu_pct": _cpu_pct(),
             "memory_pct": _pressure(memory_map), "swap_bytes": _swap(),
-            "thermal": _thermal()}
+            "thermal": _thermal(), "temp_c": _temp_c()}
 
 
 def metrics(memory_map=None) -> dict:
