@@ -368,19 +368,42 @@ Done 2026-09-24 (CPU, tiny fixtures, all five families):
 - The encode-twice gate: same image, preprocessed and encoded twice from
   scratch, bit-identical features.
 
-## When a box is free: one session, in order
+## Done 2026-09-25: the free-box session (M4 alone)
 
-Everything below was built and tested on tiny fixtures and real templates
-only; one sitting on a free box (the M4 is enough) confirms it:
+1. **gemma e4b through `knurlogic serve`: vision gate PASS** after two
+   fixes it found -- `serve` died at start (the package's `load()`
+   shadowed the `load` module; tripwire test added) and the token count
+   disagreed with the tower (gemma's aspect-preserving resize was missing;
+   pinned against mlx-vlm 0.6.17). Five turns: turns 1-4 prefill only
+   their 16 new tokens, the 258-token image never again; recall at turn 5.
+   Thinking: `<|channel>thought` split out, `none` off (0 reasoning
+   tokens), reasoning_tokens counted, `/v1/messages` gives thinking +
+   signature + text blocks, `reasoning.exclude` strips it.
+2. **GLM 2.7 smoke PASS; first pin since the families move** (mlx-lm
+   0.31.3, mlx-vlm 0.6.17).
+3. **Thinking per dialect** -- tools/thinking_bench.py, 4 checkable
+   questions x 3 unseeded runs at t=0.6, one process per arm, results in
+   docs/measured/2026-09-25-thinking/. Every arm 100% correct: these
+   questions separate levels by COST, not by accuracy.
 
-1. gemma e4b through `knurlogic serve` -- tools/vision_gate.py (the
-   reorganised serve path), then thinking on it: reasoning streamed and
-   split out of `<|channel>thought`, `reasoning_effort: none` actually
-   off, reasoning_tokens counted, `/v1/messages` thinking blocks.
-2. `knurlogic smoke --pin` on GLM 2.7 (first pin since its imports moved).
-3. Thinking per dialect, n>=3 per arm, one process per arm: reasoning
-   tokens and answer quality at each native level; GLM's closed-think
-   "off" before it is offered.
+   | model (dialect) | arm: mean reasoning tokens (per-run range) |
+   |---|---|
+   | gemma e4b (toggle) | off 0 . on 506 (426-572) |
+   | Flash-Next 2.1, dev v2 (effort) | none 0 . low 192 (180-204) . medium 258 (233-292) . xhigh 136 (126-150) |
+   | GLM-5.3 2.7 (effort) | closed 0 . low 12 (9-13) . high 17 (16-19) . max 151 (129-163) |
+   | Qwen3.5-397B 2.2 (toggle) | off 0 . on 957 (917-1015) |
+
+   * Flash: xhigh reasons LESS than low/medium on these questions; the
+     ranges do not overlap. The template is applied as written (low and
+     xhigh add their system lines, medium adds none) -- this is the model
+     on easy questions, not the controls. Not a claim about hard ones.
+   * **GLM closed-think "off" works**: prompt at low effort with
+     `<think></think>` already closed, 12/12 right, 0 reasoning, 35 tokens
+     an answer vs 59 at low. Offering it as GLM's `none` needs a prompt
+     suffix rather than a template kwarg -- a design call for the maintainer (it is
+     the template's own format for past turns, not a budget).
+   * Timing is secondary here (4 concurrent requests, run 0 includes the
+     load); not a speed claim.
 
 ## OPEN from the M4 session (2026-09-25)
 
