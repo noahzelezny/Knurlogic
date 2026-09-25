@@ -76,7 +76,7 @@ from .batch_loop import MTPBatch, RowParams, admit
 from knurlogic.engine.serve import cache_report as cachereport
 from .capture import capture_input
 from .registry import resolve
-from .sampling import (NonFiniteLogits, finite, make_distribution,
+from .sampling import (NonFiniteLogits, make_distribution,
                        nonfinite_message)
 from ..vision import key as K
 
@@ -568,12 +568,14 @@ class MTPBatchGenerator(BatchGenerator):
 
         # NaN guard: a row whose logits went non-finite this step is failed
         # before any of this step's tokens leave (sampled, they are token 0
-        # forever -- "!!!!!"). One sync for the whole batch.
-        ems = [(rs.uid, em) for rs in row_steps for em in rs.tokens]
-        ok = finite([em.logits for _, em in ems])
+        # forever -- "!!!!!"). The flags were computed inside the step's own
+        # eval (batch_loop), so this costs no sync.
         bad = {}
-        for (uid, _), good in zip(ems, ok):
-            if not good and uid not in bad:
+        for rs in row_steps:
+            for em in rs.tokens:
+                uid = rs.uid
+                if em.finite or uid in bad:
+                    continue
                 st = self._rows.get(uid)
                 bad[uid] = NonFiniteLogits(nonfinite_message(
                     (st["n"] if st else 0) + 1, "batch decode"))
