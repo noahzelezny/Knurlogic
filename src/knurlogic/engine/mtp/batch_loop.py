@@ -53,7 +53,7 @@ from typing import Any, Callable, Iterable, List, Optional
 import mlx.core as mx
 from mlx_lm.generate import _extend_cache, _merge_caches
 
-from .caches import restore, snapshot
+from .caches import position, restore, snapshot
 from .seed import seed_head
 from .sampling import Distribution, rejection_correct
 
@@ -257,7 +257,7 @@ def admit(
     drafts = params.drafts and head is not None
     dcache = hcache if hcache is not None else make_draft_cache()
     if drafts and start_pos > 0:
-        hoff = int(getattr(dcache, "offset", 0) or 0)
+        hoff = position(dcache) or 0
         if hoff != start_pos:
             raise ValueError(
                 f"head cache at offset {hoff} cannot seed a prefix at {start_pos}"

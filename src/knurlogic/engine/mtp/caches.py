@@ -53,6 +53,25 @@ def is_attention_composite(c) -> bool:
             and all(is_attention(s) or is_batch_attention(s) for s in subs))
 
 
+def position(c):
+    """The position a single-row cache sits at, or None if it has none.
+
+    A plain cache answers with `offset`; a composite (mlx's CacheList, GLM's
+    head and full-attention layers) answers with its members' common
+    offset -- it has no `offset` of its own, and reading one gave -1, which
+    discarded every GLM prefix hit as "no aligned head cache". Recurrent
+    caches carry state, not a position: None."""
+    off = getattr(c, "offset", None)
+    if off is not None and not isinstance(off, mx.array):
+        return int(off)
+    subs = getattr(c, "caches", None)
+    if subs:
+        offs = {position(m) for m in subs}
+        if len(offs) == 1:
+            return offs.pop()
+    return None
+
+
 def _pos(c):
     """A member's rollback unit: offset for one row, the shared write index
     for a batched cache (see is_batch_attention). In the batch engine a
