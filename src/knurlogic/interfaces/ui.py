@@ -500,12 +500,20 @@ def _start_discovery(me: dict, host: str, port: int, reachable: bool):
                 p.id = p.id or txt.get("id", "")
                 p.name = p.name or txt.get("name", "")
         d = dsd.Discovery(on_change=found)
-        if reachable:
+        txt = {"id": me["id"], "name": me["name"], "ver": __version__,
+               "schema": status.SCHEMA, "role": "ui"}
+        if host == "cluster":
+            # Advertised on the Thunderbolt links only: a peer that can
+            # only see us over the cable cannot pick Wi-Fi.
+            import socket as _s
+            from knurlogic.cluster import links
+            for i in links.thunderbolt():
+                d.if_index = _s.if_nametoindex(i["iface"])
+                d.register(f"{me['name']} {me['id'][:6]}", port, txt)
+            d.if_index = 0
+        elif reachable:
             d.if_index = dsd.interface_of(host)
-            d.register(f"{me['name']} {me['id'][:6]}", port,
-                       {"id": me["id"], "name": me["name"],
-                        "ver": __version__, "schema": status.SCHEMA,
-                        "role": "ui"})
+            d.register(f"{me['name']} {me['id'][:6]}", port, txt)
             d.if_index = 0
         d.browse()
         DISCOVERY = d.start()
@@ -518,8 +526,13 @@ def serve_ui(host: str, port: int, serve_port: int, peers=()) -> int:
     global PEERS
     _SERVE_PORT["n"] = serve_port
     _SERVE_PORT["ui"] = port
+    from knurlogic.cluster import links
     from knurlogic.cluster.peers import Peers
     me = identity.identity()
+    # `cluster`: every address bound, only loopback and Thunderbolt
+    # answered (cluster/links.Gate), advertised on Thunderbolt only.
+    gate = links.Gate() if host == "cluster" else None
+    bind = "0.0.0.0" if gate else host
     reachable = host not in ("127.0.0.1", "localhost", "::1")
     PEERS = Peers(me, port, manual=peers, reachable=reachable).start()
     _start_discovery(me, host, port, reachable)
@@ -543,7 +556,19 @@ def serve_ui(host: str, port: int, serve_port: int, peers=()) -> int:
             self.end_headers()
             self.wfile.write(body)
 
+        def _gated(self) -> bool:
+            """True when --host cluster refuses this connection."""
+            if gate is None:
+                return False
+            local = self.connection.getsockname()[0]
+            if gate.allows(local):
+                return False
+            self._send(gate.refusal(local), "text/plain", 403)
+            return True
+
         def do_GET(self):
+            if self._gated():
+                return
             u = urlparse(self.path)
             intro = self.headers.get("X-Knurlogic-Peer")
             if intro and PEERS:
@@ -556,6 +581,8 @@ def serve_ui(host: str, port: int, serve_port: int, peers=()) -> int:
             self._send(body, ctype)
 
         def do_POST(self):
+            if self._gated():
+                return
             u = urlparse(self.path)
             if u.path.rstrip("/") == "/chat":
                 n = int(self.headers.get("Content-Length") or 0)
@@ -571,8 +598,14 @@ def serve_ui(host: str, port: int, serve_port: int, peers=()) -> int:
                             else b"")
             self._send(body, ctype)
 
-    srv = ThreadingHTTPServer((host, port), H)
-    print(f"knurlogic  http://{host}:{port}")
+    srv = ThreadingHTTPServer((bind, port), H)
+    if gate:
+        tb = [i["ip"] for i in links.thunderbolt()]
+        print(f"knurlogic  cluster mode: answering on "
+              f"{', '.join(f'http://{ip}:{port}' for ip in tb) or 'no Thunderbolt link yet'}"
+              f" and http://127.0.0.1:{port}; Wi-Fi and Ethernet refused")
+    else:
+        print(f"knurlogic  http://{host}:{port}")
     print(f"  nothing loaded, nothing required -- not exo, not a model.")
     print(f"  loading from the page starts `knurlogic serve` on port "
           f"{serve_port}.")
@@ -594,7 +627,11 @@ def main(argv=None) -> int:
         description="the page, without loading anything: every model on the "
                     "disk, everything resident in every runtime, and where "
                     "the memory went")
-    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--host", default="127.0.0.1",
+                   help="127.0.0.1 (default: this machine only), an "
+                        "address, or `cluster`: answer on the Thunderbolt "
+                        "link(s) and loopback only, advertise there, refuse "
+                        "Wi-Fi and Ethernet")
     p.add_argument("--port", type=int, default=8899)
     p.add_argument("--serve-port", type=int, default=8080,
                    help="the port a model loaded from this page is served on")

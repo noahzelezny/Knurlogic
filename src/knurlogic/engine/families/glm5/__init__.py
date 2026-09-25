@@ -38,13 +38,17 @@ MANIFEST = {
         },
     },
     # GLM-5.3's template: reasoning_effort in {low, high}, anything else is
-    # "max" (the default). There is NO off switch -- "none" is answered
-    # with the lowest native level and the response says so.
+    # "max" (the default). It has no off KWARG; "off" is the template's own
+    # format for a turn without thinking -- the think block already closed
+    # (engine/serve/thinking.CLOSE), at low effort. Measured on 2.7 before
+    # it was offered: 12/12 right, 0 reasoning tokens.
     "thinking": {
         "glm_effort": {
             "detect": {"all": ["reasoning_effort", "Reasoning Effort"]},
             "default": "max",
-            "native": [["low", "low", {"reasoning_effort": "low"}],
+            "native": [["none", "off", {"reasoning_effort": "low",
+                                        "_knurlogic_close_think": True}],
+                       ["low", "low", {"reasoning_effort": "low"}],
                        ["high", "high", {"reasoning_effort": "high"}],
                        ["xhigh", "max", {"reasoning_effort": "max"}]],
         },
