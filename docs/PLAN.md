@@ -405,6 +405,34 @@ Done 2026-09-24 (CPU, tiny fixtures, all five families):
    * Timing is secondary here (4 concurrent requests, run 0 includes the
      load); not a speed claim.
 
+## Requirements for knurlogic's own server: Scout's ingest (2026-09-25)
+
+Sent by the Scout session at Noah's request. scout/ingest/vlm.py is the
+only client and talks through a small Backend protocol, so matching these
+keeps the exo swap to one class. Today it uses exo's GET /state, GET
+/v1/models (`capabilities` incl. "vision", `storage_size_megabytes`) and
+POST /v1/chat/completions (`image_url` data URLs,
+`chat_template_kwargs: {enable_thinking: false}`); it picks the largest
+resident vision model and falls back to a default loaded on first use.
+
+1. One honest residency endpoint for every instance kind: flat list of
+   model id, capabilities, memory used, node placement, state
+   (loading/ready/unloading).
+2. Catalog entries with `capabilities` (text/vision/thinking) and size.
+3. Idempotent "ensure loaded": same POST whether resident or not, with a
+   way to wait for ready.
+4. Several `image_url` parts in one message; size limits (max edge)
+   refused explicitly, never an OOM.
+5. Prefix-cache reuse across requests sharing a long fixed prompt, and a
+   concurrency hint (response header) saying whether a second in-flight
+   request helps.
+6. `usage` with prompt and completion tokens on every response.
+7. OpenAI shape as the wire format; nothing custom.
+
+Already true or close: 5 (prefix cache + usage.knurlogic.cache), 6, 7,
+`enable_thinking` passes through (and `reasoning_effort: none` is the
+portable form). To check: 4 (multi-image, explicit limits). New: 1-3.
+
 ## OPEN from the M4 session (2026-09-25)
 
 * **GLM's `none` is SHIPPED** as the template's own closed-think format
