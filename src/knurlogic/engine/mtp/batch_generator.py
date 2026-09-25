@@ -76,7 +76,8 @@ from .batch_loop import MTPBatch, RowParams, admit
 from knurlogic.engine.serve import cache_report as cachereport
 from .capture import capture_input
 from .registry import resolve
-from .sampling import make_distribution
+from .sampling import (NonFiniteLogits, finite, make_distribution,
+                       nonfinite_message)
 from ..vision import key as K
 
 logger = logging.getLogger(__name__)
@@ -561,6 +562,28 @@ class MTPBatchGenerator(BatchGenerator):
                 self._ckpt_pending.pop(u, None)
                 self._failed[u] = e
             return prompt_responses + self._failed_responses(), []
+
+        # NaN guard: a row whose logits went non-finite this step is failed
+        # before any of this step's tokens leave (sampled, they are token 0
+        # forever -- "!!!!!"). One sync for the whole batch.
+        ems = [(rs.uid, em) for rs in row_steps for em in rs.tokens]
+        ok = finite([em.logits for _, em in ems])
+        bad = {}
+        for (uid, _), good in zip(ems, ok):
+            if not good and uid not in bad:
+                st = self._rows.get(uid)
+                bad[uid] = NonFiniteLogits(nonfinite_message(
+                    (st["n"] if st else 0) + 1, "batch decode"))
+        if bad:
+            logger.error("non-finite logits in %d row(s); failing only those "
+                         "requests", len(bad))
+            self._batch.remove(list(bad))
+            for u, e in bad.items():
+                self._rows.pop(u, None)
+                self._ckpt_pending.pop(u, None)
+                self._failed[u] = e
+            prompt_responses += self._failed_responses()
+            row_steps = [rs for rs in row_steps if rs.uid not in bad]
 
         out: List[GenerationBatch.Response] = []
         finished = []
