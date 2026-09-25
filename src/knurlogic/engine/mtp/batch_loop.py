@@ -128,6 +128,9 @@ class Emitted:
     from_draft: bool
     finish: Optional[str]
     logits: mx.array               # [V] the trunk row that produced it
+    #: every value of `logits` finite -- computed inside the step's own
+    #: final eval, so the NaN guard adds no sync of its own
+    finite: bool = True
 
 
 @dataclass
@@ -143,6 +146,18 @@ def _apply(row: mx.array, procs, emitted: List[int]) -> mx.array:
     for proc in procs:
         row = proc(mx.array(emitted), row)
     return row
+
+
+def _finite_rows(rows: mx.array) -> mx.array:
+    """[B, V] -> [B] bool, lazy: evaluated with the step's last sync."""
+    return mx.isfinite(rows).all(axis=-1)
+
+
+def _mark(out: List["RowStep"], fin: mx.array) -> None:
+    """fin: [B, k] already evaluated; token j of row i gets fin[i][j]."""
+    for rs, flags in zip(out, fin.tolist()):
+        for em, good in zip(rs.tokens, flags):
+            em.finite = bool(good)
 
 
 def _pick(row: mx.array, p: RowParams, emitted: List[int]) -> mx.array:
@@ -678,6 +693,10 @@ class MTPBatch:
             lg2 = self.model(mx.stack([self.t1, t2], axis=1), cache=self.cache,
                              **pos2)
 
+        # NaN guard, lazy: joins the eval at the end of the step.
+        fin = mx.stack([_finite_rows(self.row_t1), _finite_rows(lg2[:, 0])],
+                       axis=1)
+
         # --- emit --------------------------------------------------------
         t1_list = self.t1.tolist()
         t2_list = t2.tolist()
@@ -714,6 +733,8 @@ class MTPBatch:
         ]
         self.filter(keep)
         if not keep:
+            mx.eval(fin)
+            _mark(out, fin)
             return out
         idx = mx.array(keep)
         row_t1 = row_t1[idx]
@@ -727,10 +748,11 @@ class MTPBatch:
             # second output drafts x_{i+3}, next step's speculative token.
             pair_ids = mx.stack([t2k, t_next], axis=1)
             self.draft_row = self.head.draft_logits(h_pair[idx], pair_ids, self.hcache)[:, -1]
-            mx.eval(t_next, self.draft_row)
+            mx.eval(t_next, self.draft_row, fin)
         else:
             self.draft_row = None if self.head is None else self.draft_row
-            mx.eval(t_next)
+            mx.eval(t_next, fin)
+        _mark(out, fin)
         self.t1 = t_next
         self.row_t1 = row_t1
         return out
@@ -747,6 +769,7 @@ class MTPBatch:
         assert self.t1 is not None and self.row_t1 is not None
         lg = self.model(self.t1[:, None], cache=self.cache,
                         **self._pos_kw(1))                      # [B, 1, V]
+        fin = _finite_rows(self.row_t1)[:, None]     # lazy NaN guard
         t1_list = self.t1.tolist()
         # The head already drafted the token after t1 (draft_row); the trunk
         # is about to choose it too, so score the head at no cost and keep
@@ -783,6 +806,8 @@ class MTPBatch:
             self.acc_est = 0.9 * self.acc_est + 0.1 * frac
         self.filter(keep)
         if not keep:
+            mx.eval(fin)
+            _mark(out, fin)
             return out
         idx = mx.array(keep)
         row_t1 = row_t1[idx]
@@ -793,9 +818,10 @@ class MTPBatch:
             # drafts x_{i+2}, which is next step's speculative token.
             self.draft_row = self.head.draft_logits(
                 h[idx], t_next[:, None], self.hcache)[:, -1]
-            mx.eval(t_next, self.draft_row)
+            mx.eval(t_next, self.draft_row, fin)
         else:
-            mx.eval(t_next)
+            mx.eval(t_next, fin)
+        _mark(out, fin)
         self.t1 = t_next
         self.row_t1 = row_t1
         return out

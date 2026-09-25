@@ -412,14 +412,16 @@ reviewed, build order there); GLM's head must be RESTARTABLE at
 checkpoints -- prefix reuse AND drafting, no compromise; the NaN guard must
 not tax every step.
 
-1. **NaN guard, nearly free**: fold the finite check into the decode
-   step's EXISTING sync (batch_loop `mx.eval(*lazy)` / the `.tolist()`
-   that already materialises the step) instead of its own; the 0.4 ms is
-   the extra sync, the reduction is tens of us. Measured facts: all-NaN
-   logits -> token 0 under argmax AND categorical; one NaN -> argmax 0 but
-   categorical returns random tokens (so a "check only on token 0"
-   shortcut is not enough); -inf is legitimate masking; +inf picks that
-   token.
+1. ~~NaN guard, nearly free~~ DONE: the finite flags are computed lazily
+   inside each step's final eval (batch_loop `_finite_rows`/`_mark`, one
+   flag per emitted token on `Emitted.finite`); the sequential loop carries
+   them in the B2 verdict broadcast, so every rank agrees. Measured
+   (synthetic step, V=151936 bf16, n=5 processes per arm, Studio, median ms):
+   B=1 none 3.54 / own sync 4.12 / fused 3.45; B=8 none 5.00 / own sync
+   5.64 / fused 5.05 -- the fused guard is within noise of none. Facts kept:
+   all-NaN -> token 0 under argmax AND categorical; one NaN -> argmax 0 but
+   categorical random (so "check only token 0" is not enough); -inf is
+   masking; +inf picks that token.
 2. **GLM head restartable at checkpoints** (glm5 head, `reassign` cache
    semantics): the system checkpoint (472 tokens) is offered then
    discarded, "no aligned head cache". Make HeadCarry/replay work for it;

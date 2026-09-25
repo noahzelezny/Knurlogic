@@ -339,14 +339,16 @@ def test_nan_logits_fail_that_row_with_the_position_not_bangs(monkeypatch):
     calls = {"n": 0}
 
     def poisoned():
-        out = real()
+        # The trunk row the next token is emitted from goes NaN for one
+        # row, as a bad forward would leave it; the step's own eval must
+        # notice (the flag is computed there, not after).
         calls["n"] += 1
-        if calls["n"] == 2:
-            for rs in out:
-                if rs.uid == bad:
-                    for em in rs.tokens:
-                        em.logits = em.logits * mx.array(float("nan"))
-        return out
+        b = gen._batch
+        if calls["n"] == 2 and bad in b.uids:
+            i = b.uids.index(bad)
+            mask = (mx.arange(b.row_t1.shape[0]) == i)[:, None]
+            b.row_t1 = mx.where(mask, mx.array(float("nan")), b.row_t1)
+        return real()
     monkeypatch.setattr(gen._batch, "step", poisoned)
     errors, toks, done = [], {bad: 0, good: 0}, set()
     for _ in range(200):
@@ -366,14 +368,6 @@ def test_nan_logits_fail_that_row_with_the_position_not_bangs(monkeypatch):
     assert bad not in gen._batch.uids
     gen.remove([bad])
     gen.close()
-
-
-def test_finite_checks_rows_in_one_pass():
-    from knurlogic.engine.mtp.sampling import finite
-    ok = mx.zeros((1, 8))
-    assert finite([ok, ok / mx.array(0.0), ok + mx.array(float("inf"))]) \
-        == [True, False, False]
-    assert finite([]) == []
 
 
 def test_a_headless_model_reuses_a_shared_prefix():

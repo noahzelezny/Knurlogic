@@ -82,7 +82,7 @@ from . import registry
 from .capture import capture_input
 from .caches import restore, snapshot
 from .pipeline import Coordinator, LocalCoordinator
-from .sampling import (Distribution, NonFiniteLogits, finite,
+from .sampling import (Distribution, NonFiniteLogits,
                        make_distribution, nonfinite_message, rejection_correct)
 from .seed import seed_head as _seed_head_chunked
 
@@ -411,23 +411,28 @@ def mtp_stream_generate(
             lg2 = model(mx.concatenate([t1, d2])[None], cache=cache)
 
             if is_last:
+                # NaN guard, evaluated with the verdict (no sync of its
+                # own). A replay recomputes lg2[:, 0] over the same prefix
+                # and the same t1, so the flag holds for it too.
+                fin = mx.stack([mx.isfinite(row_t1).all(),
+                                mx.isfinite(lg2[:, 0]).all()]).astype(mx.int32)
                 if dist is None:
                     true_t2 = mx.argmax(lg2[:, 0], axis=-1)
-                    mx.eval(true_t2)
+                    mx.eval(true_t2, fin)
                     ok = bool((true_t2 == d2).item())
                     t2 = d2 if ok else true_t2
                 else:
                     p = dist(lg2[:, 0])
                     acc, t2 = rejection_correct(p.probs, q.probs, d2)
-                    mx.eval(acc, t2)
+                    mx.eval(acc, t2, fin)
                     ok = bool(acc.item())
                 verdict = mx.concatenate(
-                    [mx.array([1 if ok else 0]), t2.astype(mx.int32)]
+                    [mx.array([1 if ok else 0]), t2.astype(mx.int32), fin]
                 ).astype(mx.int32)
             else:
-                verdict = mx.zeros((2,), dtype=mx.int32)
+                verdict = mx.zeros((4,), dtype=mx.int32)
 
-            # --- control broadcast B2: [ok, t2] -------------------------
+            # --- control broadcast B2: [ok, t2, finite t1, finite t2] ---
             # THE rollback protocol. Every rank trims iff this flag says so,
             # so the trim is lockstep by construction rather than by each
             # rank re-deriving the verdict: at temperature the verdict is a
@@ -439,6 +444,7 @@ def mtp_stream_generate(
             verdict = coord.broadcast(verdict)
             ok = bool(verdict[0].item() == 1)
             t2 = verdict[1:2]
+            fin = [bool(f) for f in verdict[2:4].tolist()]
 
             if ok:
                 accepted += 1
@@ -459,7 +465,6 @@ def mtp_stream_generate(
             # rejected token's logprob is likewise the trunk's, which is the
             # honest number: what the target model assigned to what we
             # emitted. The head's own draft distribution is never reported.
-            fin = finite([row_t1, lg2[:, 0]])
             for (tok, from_draft, row), good in zip(
                     ((t1, False, row_t1), (t2, ok, lg2[:, 0])), fin):
                 if not good:
