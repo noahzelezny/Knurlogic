@@ -27,7 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from knurlogic.machine import loaded, status, wired
+from knurlogic.machine import identity, loaded, status, wired
 from knurlogic.machine.servers import (is_our_server, registry,
                                        save_registry, serve_log)
 from knurlogic.interfaces import web
@@ -92,6 +92,10 @@ def _local_memory(n, mm) -> dict:
 
 _MM = {"doc": None, "at": 0.0}
 
+#: The other machines this page knows (cluster/peers.py); None until the
+#: page starts, so importing this module starts nothing.
+PEERS = None
+
 
 def _status_fn(_n=0):
     """A status for a box that is serving nothing.
@@ -122,28 +126,57 @@ def _status_fn(_n=0):
         _MM["at"] = now
     mm = _MM["doc"]
 
-    nodes = []
+    me = identity.identity()
+    exo_nodes = []
     try:
-        nodes = cluster.inventory(EXO_URL)
+        exo_nodes = cluster.inventory(EXO_URL)
     except Exception:
-        nodes = []
+        exo_nodes = []
+    local = _local_name(exo_nodes) if exo_nodes else ""
+    mine = next((n for n in exo_nodes if n.name == local), None)
 
-    if not nodes:
-        snaps = [status.snapshot(node="local", role="local", memory_map=mm)]
-    else:
-        local = _local_name(nodes)
-        snaps = []
-        for n in nodes:
-            is_local = n.name == local
-            snaps.append(cluster._snapshot_for(
-                # A peer's PAGE answers on the page's port; asking on the
-                # serve port found nothing whenever no model was served.
-                n, local, {}, None, peer_port=_SERVE_PORT["ui"])
-                if not is_local else
-                status.snapshot(node=n.name, role="local", memory_map=mm,
-                                memory_fn=lambda n=n: _local_memory(n, mm)))
+    # This machine, always, under its own name -- exo or no exo.
+    snaps = [status.snapshot(
+        node=me["name"], role="local", memory_map=mm,
+        memory_fn=(lambda: _local_memory(mine, mm)) if mine else None)]
+
+    # Peers first: a node that answers for itself is the best witness of
+    # itself. Then whatever only exo knows about, drawn from exo's figures.
+    peers = PEERS.all() if PEERS else []
+    claimed = {me["name"]}
+    for p in peers:
+        if p.state in ("answering", "version_mismatch") and p.node:
+            snaps.append({**p.node, "role": "remote",
+                          "found_by": sorted(p.found_by), "state": p.state,
+                          **({"problem": p.problem} if p.problem else {})})
+        else:
+            snaps.append({**status.snapshot(
+                node=p.name or p.host, role="remote", reachable=False,
+                memory_fn=lambda: {"available": False},
+                machine_fn=lambda: {}),
+                "found_by": sorted(p.found_by), "state": p.state,
+                "problem": p.problem, "address": p.key})
+        claimed |= {p.name, p.host}
+    for n in exo_nodes:
+        if n.name == local or n.name in claimed or n.ip in claimed:
+            continue
+        snaps.append({**cluster._snapshot_for(
+            n, local, {}, None, peer_port=_SERVE_PORT["ui"]),
+            "found_by": ["exo"]})
     snap = status.aggregate(snaps)
     snap["wired"] = wired.advise(0)
+    # Who this machine is, and -- measured by the peers, since this machine
+    # cannot see connections its own firewall drops -- whether they can
+    # reach it.
+    snap["me"] = {**me, "port": _SERVE_PORT["ui"]}
+    if PEERS:
+        snap["peers"] = [p.public() for p in peers]
+        seen = PEERS.seen_by_peers()
+        if seen:
+            snap["me"]["seen_by"] = seen
+        prob = PEERS.self_problem()
+        if prob:
+            snap["me"]["problem"] = prob
     return snap, status.render_cluster(snap)
 
 
@@ -443,9 +476,14 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
         up.close()
 
 
-def serve_ui(host: str, port: int, serve_port: int) -> int:
+def serve_ui(host: str, port: int, serve_port: int, peers=()) -> int:
+    global PEERS
     _SERVE_PORT["n"] = serve_port
     _SERVE_PORT["ui"] = port
+    from knurlogic.cluster.peers import Peers
+    PEERS = Peers(identity.identity(), port, manual=peers,
+                  reachable=host not in ("127.0.0.1", "localhost", "::1")
+                  ).start()
     routes = web.routes(
         status_fn=_status_fn,
         settings_fn=web.machine_settings(),
@@ -468,6 +506,9 @@ def serve_ui(host: str, port: int, serve_port: int) -> int:
 
         def do_GET(self):
             u = urlparse(self.path)
+            intro = self.headers.get("X-Knurlogic-Peer")
+            if intro and PEERS:
+                PEERS.introduce(self.client_address[0], intro)
             h = routes.get(u.path.rstrip("/") or "/")
             if h is None:
                 self._send(b"not found", "text/plain", 404)
@@ -518,5 +559,15 @@ def main(argv=None) -> int:
     p.add_argument("--port", type=int, default=8899)
     p.add_argument("--serve-port", type=int, default=8080,
                    help="the port a model loaded from this page is served on")
+    p.add_argument("--peer", action="append", default=[],
+                   metavar="HOST[:PORT]",
+                   help="another machine's knurlogic page (repeatable). "
+                        "Naming it on one side is enough: it learns this "
+                        "machine from the request. Remembered once it "
+                        "answers.")
     a = p.parse_args(argv)
-    return serve_ui(a.host, a.port, a.serve_port)
+    peers = []
+    for spec in a.peer:
+        host, _, port = spec.rpartition(":") if ":" in spec else (spec, "", "")
+        peers.append((host, int(port) if port.isdigit() else a.port))
+    return serve_ui(a.host, a.port, a.serve_port, peers)
