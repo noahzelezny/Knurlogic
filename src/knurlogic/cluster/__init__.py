@@ -12,6 +12,7 @@ authority on its own (docs/DISCOVERY.md):
   exo.py        what exo's /state says about each node: a witness, used
                 only for nodes nothing else answers for.
 
-The `knurlogic node` agent joins this package when it is built; `interfaces/` keeps only the command lines and pages that use them.
+The `knurlogic node` agent joins this package when it is built;
+`interfaces/` keeps only the command lines and pages that use them.
 Nothing here imports mlx.
 """
