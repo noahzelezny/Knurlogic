@@ -374,3 +374,18 @@ def test_finite_checks_rows_in_one_pass():
     assert finite([ok, ok / mx.array(0.0), ok + mx.array(float("inf"))]) \
         == [True, False, False]
     assert finite([]) == []
+
+
+def test_a_headless_model_reuses_a_shared_prefix():
+    """No head, nothing to align: a stored prefix is used, not discarded.
+    gemma re-prefilled a 509-token shared system prompt on every request
+    because admission asked for a head cache the model cannot have."""
+    import copy
+    from knurlogic.engine.mtp import batch_generator as bg
+    model, _, sys_, user, tail_a, next_b = _turns()
+    gen = bg.MTPBatchGenerator(model, None, prefill_step_size=16)
+    _, ckpts = _drive(gen, [sys_, user + tail_a], 3)
+    key, entry = next((k, e) for k, e in ckpts if k == sys_)
+    gen2 = bg.MTPBatchGenerator(model, None, prefill_step_size=16)
+    _drive(gen2, [next_b], 3, cache=copy.deepcopy(entry), prefix=key)
+    assert gen2._prompt_tokens_counter == len(next_b)
