@@ -126,7 +126,14 @@ def run(path: str, working_set_gib: float, profile: str | None,
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="knurlogic doctor")
-    p.add_argument("artifact")
+    p.add_argument("artifact", nargs="?",
+                   help="the artifact to check (not needed with --cluster)")
+    p.add_argument("--cluster", action="store_true",
+                   help="check what stops this Mac and the others finding "
+                        "each other: addresses, firewall, Bonjour, peers. "
+                        "Run it on each Mac.")
+    p.add_argument("--port", type=int, default=8899,
+                   help="with --cluster: the port the page runs on")
     p.add_argument("--working-set-gib", type=float, default=0.0,
                    help="usable GPU working set. 0 = ask the framework what "
                         "it may use; pass a number to override it.")
@@ -143,6 +150,13 @@ def main(argv=None) -> int:
     p.add_argument("--exports", action="store_true",
                    help="print only `export K=V` lines, for eval")
     a = p.parse_args(argv)
+    if a.cluster:
+        from knurlogic.cluster.checks import report
+        text, bad = report(a.port)
+        print(text)
+        return 1 if bad else 0
+    if not a.artifact:
+        p.error("an artifact is required (or --cluster)")
     return run(a.artifact, a.working_set_gib, a.profile, a.exports, a.tune)
 
 
