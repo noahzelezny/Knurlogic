@@ -88,8 +88,11 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
     if machine_fn is not None:
         d["machine"] = machine_fn()
     else:
-        from knurlogic.machine import wired
+        from knurlogic.machine import identity, wired
         d["machine"] = wired.machine()
+        # Only a node answering for ITSELF has an id: it is what peers
+        # deduplicate on, and a guessed one would merge two machines.
+        d["id"] = identity.identity()["id"]
     # Which runtime is holding what, ON THIS NODE. It travels inside the
     # node's own snapshot rather than being computed centrally, because
     # process footprints are only true of the machine they were read on --

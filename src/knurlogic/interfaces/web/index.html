@@ -348,7 +348,8 @@
    letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
  .mhd b{color:var(--dim);font-weight:600;letter-spacing:.04em;text-transform:none}
  .sp{display:block;width:100%;height:22px}
- .noans{font-size:10.5px;color:var(--faint);margin:auto}
+ .noans{font-size:10.5px;color:var(--faint);margin:auto;line-height:1.5;
+   text-align:center;padding:4px}
  /* The memory bar: segments stack from the bottom, and a hatched segment
     is memory that will be handed back when asked. */
  .stk{position:relative;width:26px;flex:none;display:flex;
@@ -1180,7 +1181,8 @@ async function tick(){
       <div class="nm">${esc(n.node)}</div>
       <div class="hw">${esc(what)||'&nbsp;'}</div>
       <div class="ucard">
-        <div class="mlines">${off?'<div class="noans">no answer</div>'
+        <div class="mlines">${off?`<div class="noans">${
+            n.problem?esc(n.problem):'no answer'}</div>`
           : (n.metrics?.history||[]).length?lines(n.metrics)
           : '<div class="noans">no metrics from this node</div>'}</div>
         ${stack(n, mapped?mm:null, off)}
@@ -1241,6 +1243,10 @@ async function tick(){
         ? bit('nodes', `${C.nodes_reachable}/${C.nodes_total}`)
         : Number.isFinite(m.peak_bytes) ? bit('peak', gb(m.peak_bytes)) : '');
   }
+  // Measured by the peers: this machine cannot see the connections its
+  // own firewall drops, so their view is the only evidence there is.
+  if(d.me&&d.me.problem)
+    $('mem').innerHTML+=`<div class="msg">${esc(d.me.problem)}</div>`;
   const w=d.wired;
   if(w&&w.action==='raise'&&w.command)
     $('mem').innerHTML+=`<div class="msg">The GPU may wire only
