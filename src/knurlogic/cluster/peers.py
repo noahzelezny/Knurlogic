@@ -61,6 +61,7 @@ class Peer:
     problem: str = ""
     last_seen: float = 0.0          # last time it answered
     failing_since: float = 0.0
+    link: str = ""                  # thunderbolt / wifi / ethernet / ...
     node: dict | None = None        # its own entry from its status
     doc_peers: list = field(default_factory=list)   # what IT sees
 
@@ -70,7 +71,8 @@ class Peer:
 
     def public(self) -> dict:
         d = {"id": self.id, "name": self.name, "address": self.key,
-             "found_by": sorted(self.found_by), "state": self.state}
+             "found_by": sorted(self.found_by), "state": self.state,
+             "link": self.link}
         if self.problem:
             d["problem"] = self.problem
         if self.last_seen:
@@ -157,6 +159,12 @@ class Peers:
 
     def _one(self, p: Peer) -> None:
         now = time.time()
+        if not p.link:
+            try:
+                from knurlogic.cluster.links import link_of
+                p.link = link_of(p.host)
+            except Exception:
+                p.link = "other"
         try:
             doc = self._fetch(f"http://{p.key}/status.json")
         except Exception as e:
@@ -206,10 +214,19 @@ class Peers:
                 if q is None:
                     by_id[p.id] = p
                     continue
-                keep, drop = (p, q) if p.last_seen >= q.last_seen else (q, p)
+                keep, drop = sorted((p, q), key=self._preference)
                 keep.found_by |= drop.found_by
                 self._peers.pop(drop.key, None)
                 by_id[p.id] = keep
+
+    @staticmethod
+    def _preference(p: Peer):
+        """Answering beats silent; then Thunderbolt beats Ethernet beats
+        Wi-Fi -- the same machine found over Wi-Fi and the cable is kept
+        on the cable; then the most recent answer."""
+        rank = {"thunderbolt": 0, "loopback": 1, "ethernet": 2, "other": 3,
+                "wifi": 4}.get(p.link, 3)
+        return (p.state != "answering", rank, -p.last_seen)
 
     def start(self) -> "Peers":
         if self._thread is None:
