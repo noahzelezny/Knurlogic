@@ -9,8 +9,11 @@ hands over.
 
 from __future__ import annotations
 
-from . import (cache_report, drafting, load, state, thinking, vision,
-               vq_runtime)
+from . import (cache_report, drafting, state, thinking, vision, vq_runtime)
+# By name, not as `load.`: the package re-exports a FUNCTION called `load`,
+# so `from . import load` hands back the function, not this module -- and
+# `serve` died on its first real start after the move (2026-09-25).
+from .load import server_argv, set_cache_limit
 
 
 def serve(model_path: str, host: str, port: int,
@@ -153,8 +156,8 @@ def serve(model_path: str, host: str, port: int,
 
     settings = settings or {}
     if "cache_limit_gb" in settings:
-        print(f"cache limit {load.set_cache_limit(settings['cache_limit_gb'])}")
-    sys.argv = [sys.argv[0]] + load.server_argv(
+        print(f"cache limit {set_cache_limit(settings['cache_limit_gb'])}")
+    sys.argv = [sys.argv[0]] + server_argv(
         model_path, host, port, executes_artifact_code, settings, extra)
     return srv.main()
 
