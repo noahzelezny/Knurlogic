@@ -319,10 +319,13 @@ class MTPBatchGenerator(BatchGenerator):
         replay_fn = replay if self._head is not None and len(prefix) < n \
             else None
         if vis is None:
+            # A model with no head has nothing to align: asking for a head
+            # cache discarded EVERY prefix hit on gemma (a 509-token shared
+            # system prompt re-prefilled on each request, 2026-09-25).
+            drafts = self._head is not None
             cache, hcache, hit = split_pool_entry(
-                list(cache or []), self._n_trunk, drafts=True,
+                list(cache or []), self._n_trunk, drafts=drafts,
                 hit_len=len(prefix), replay=replay_fn)
-            drafts = True
         else:
             cache, hcache, hit, drafts = self._vision_entry(
                 list(cache or []), prompt, len(prefix), replay=replay_fn)
