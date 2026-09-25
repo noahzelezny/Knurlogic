@@ -82,7 +82,8 @@ from . import registry
 from .capture import capture_input
 from .caches import restore, snapshot
 from .pipeline import Coordinator, LocalCoordinator
-from .sampling import Distribution, make_distribution, rejection_correct
+from .sampling import (Distribution, NonFiniteLogits, finite,
+                       make_distribution, nonfinite_message, rejection_correct)
 from .seed import seed_head as _seed_head_chunked
 
 __all__ = ["MTPResponse", "load_mtp_head", "mtp_generate", "mtp_stream_generate"]
@@ -458,8 +459,12 @@ def mtp_stream_generate(
             # rejected token's logprob is likewise the trunk's, which is the
             # honest number: what the target model assigned to what we
             # emitted. The head's own draft distribution is never reported.
-            for tok, from_draft, row in ((t1, False, row_t1),
-                                         (t2, ok, lg2[:, 0])):
+            fin = finite([row_t1, lg2[:, 0]])
+            for (tok, from_draft, row), good in zip(
+                    ((t1, False, row_t1), (t2, ok, lg2[:, 0])), fin):
+                if not good:
+                    raise NonFiniteLogits(nonfinite_message(
+                        len(emitted) + 1, "sequential decode"))
                 token = int(tok.item())
                 emitted.append(token)
                 if token in eos:

@@ -143,3 +143,33 @@ def acceptance_profile(p: mx.array, q: mx.array):
     total = residual.sum(axis=-1, keepdims=True)
     norm = mx.where(total > 0, residual / mx.maximum(total, 1e-30), p)
     return accept, a + (1.0 - accept)[:, None] * norm
+
+
+class NonFiniteLogits(RuntimeError):
+    """The model produced NaN or inf logits for a token.
+
+    Sampled anyway, NaN logits give token 0 -- "!" in Qwen's vocabulary --
+    and the stream fills with "!!!!!" while the server reports a normal
+    finish (seen in Scout on Flash). The number went bad upstream of
+    sampling, in the forward pass; this stops the request at the token
+    where it happened instead of inventing text from it."""
+
+
+def finite(rows):
+    """One bool per logits row: every value finite. One stacked reduction
+    and one sync for the whole batch -- measured 0.40 ms a step at one row,
+    0.47 at eight (Qwen vocab, bf16, on a busy M3), ~1% of a 30-45 ms
+    decode step; per-row reductions cost 0.70 at eight."""
+    if not rows:
+        return []
+    return [bool(f) for f in mx.isfinite(
+        mx.stack([r.reshape(-1) for r in rows])).all(axis=-1).tolist()]
+
+
+def nonfinite_message(position: int, where: str) -> str:
+    return (f"the model produced non-finite logits (NaN/inf) at generated "
+            f"token {position} ({where}); the request was stopped there "
+            f"rather than sampling from them, which emits token 0 ('!' in "
+            f"Qwen's vocabulary) forever. The overflow is in the forward "
+            f"pass -- a kernel or an activation out of range -- not in "
+            f"sampling.")
