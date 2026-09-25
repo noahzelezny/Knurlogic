@@ -164,3 +164,29 @@ the maintainer, `doctor` (7) is next.
   of discovery is enough for both machines to know each other. It also
   means a pair where NEITHER direction works needs `--peer` once; after
   that the peer is remembered.
+
+## 2026-09-25, later: `--host cluster` built, and what exo taught (transcript search)
+
+the maintainer's call: explicit beats automatic on this network. `--host cluster`
+binds every address, answers only on loopback and Thunderbolt (403 with the
+Thunderbolt address named, measured from Ethernet and Wi-Fi), advertises on
+Thunderbolt only, and keeps a peer reachable two ways on the cable.
+
+What the exo history says, and what knurlogic does about each:
+
+* **The ring split across Thunderbolt and the home LAN** (2026-05-14):
+  macOS reports the TB link as an ethernet-type interface, exo ranked it
+  equal to the M4's LAN port and built one leg over each; fixed then with
+  `EXO_RING_PREFER_SUBNET=192.0.2.`. knurlogic classifies by
+  `networksetup` hardware port ("Thunderbolt 3" / bridge), verified on
+  both Macs, and prefers it (cluster/links.py).
+* **No pairing at all** (2026-05-19): Local Network privacy blocked the
+  Python binary's mDNS; the grant is per binary PATH, so a rebuilt env
+  needs it again. `doctor --cluster` and the browse hint name the exact
+  binary.
+* **mDNS off, peers pinned** (2026-08-03 security audit): exo's libp2p
+  listened on the LAN; the fork added `--libp2p-host` and `--no-mdns`.
+  Same spirit as `--host cluster`.
+* **"Rediscovery" overnight** was the M4 sleeping after 1 min on AC (~9
+  disconnects a night, a ring re-election each); `pmset -c sleep 0`.
+  `doctor --cluster` now checks sleep on AC.
