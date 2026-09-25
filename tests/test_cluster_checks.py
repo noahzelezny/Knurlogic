@@ -42,3 +42,13 @@ def test_firewall_reads_the_binary_state(monkeypatch):
     assert fw["binary_state"] == "blocked"
     out["--getappblocked"] = "Incoming connection to /x/Python is permitted."
     assert checks.firewall()["binary_state"] == "allowed"
+
+
+def test_sleep_on_ac_is_read_from_pmset(monkeypatch):
+    out = ("Battery Power:\n sleep                1\nAC Power:\n"
+           " displaysleep         10\n sleep                1\n")
+    monkeypatch.setattr(checks, "_run", lambda cmd, timeout=5: out)
+    assert checks.sleep_on_ac() == 1
+    monkeypatch.setattr(checks, "_run", lambda cmd, timeout=5:
+                        "AC Power:\n sleep                0\n")
+    assert checks.sleep_on_ac() == 0
