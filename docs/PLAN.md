@@ -405,6 +405,35 @@ Done 2026-09-24 (CPU, tiny fixtures, all five families):
    * Timing is secondary here (4 concurrent requests, run 0 includes the
      load); not a speed claim.
 
+## NEXT (set 2026-09-25, before compacting)
+
+Noah's calls this session: server green-lit (docs/SERVER.md, Fable 5.1
+reviewed, build order there); GLM's head must be RESTARTABLE at
+checkpoints -- prefix reuse AND drafting, no compromise; the NaN guard must
+not tax every step.
+
+1. **NaN guard, nearly free**: fold the finite check into the decode
+   step's EXISTING sync (batch_loop `mx.eval(*lazy)` / the `.tolist()`
+   that already materialises the step) instead of its own; the 0.4 ms is
+   the extra sync, the reduction is tens of us. Measured facts: all-NaN
+   logits -> token 0 under argmax AND categorical; one NaN -> argmax 0 but
+   categorical returns random tokens (so a "check only on token 0"
+   shortcut is not enough); -inf is legitimate masking; +inf picks that
+   token.
+2. **GLM head restartable at checkpoints** (glm5 head, `reassign` cache
+   semantics): the system checkpoint (472 tokens) is offered then
+   discarded, "no aligned head cache". Make HeadCarry/replay work for it;
+   the conformance test `test_a_shared_prefix_is_reused` on GLM 2.7 is the
+   bar (Flash passes it).
+3. **Server build step 1**: engine/runtime/executor.py -- protocol +
+   MTPBatchGenerator behind it; test_batch_drafting/vision tests unchanged.
+   Then steps 2-5 per docs/SERVER.md.
+4. Suite additions listed in docs/SERVER.md (tool calls first).
+
+Tools: tools/thinking_bench.py, tools/vision_gate.py, tests/api (set
+KNURLOGIC_API_URL). M4 deploy: build a wheel from a fresh clone, install
+--no-deps into ~/kl-test/{venv,gvqvlm} (GLM needs gvqvlm: mlx-vlm 0.6.17).
+
 ## Requirements for knurlogic's own server: Scout's ingest (2026-09-25)
 
 Sent by the Scout session at Noah's request. scout/ingest/vlm.py is the
