@@ -382,16 +382,18 @@ only; one sitting on a free box (the M4 is enough) confirms it:
    tokens and answer quality at each native level; GLM's closed-think
    "off" before it is offered.
 
-## Decided 2026-09-24: the page becomes knurlogic's own
+## Done 2026-09-24: the page is knurlogic's own
 
-The chat panel's seven near-verbatim exo ports (THIRD-PARTY-UI.md) are
-too little code to be worth carrying. They are rewritten from what each
-must do -- not by rewording exo's source -- as part of the GUI work, and
-THIRD-PARTY-UI.md goes once the last one is replaced; the README credits
-exo as inspiration. Two need no rewrite: the `<think>` splitter is
-replaced by showing the server's `reasoning_content` (the server knows
-each template, and gemma's `<|channel>thought` never matched `<think>`
-anyway), and the SSE parser is a few lines. Until then the notice stays.
+The chat panel's near-verbatim exo ports were rewritten from what each must
+do, not from exo's source, and THIRD-PARTY-UI.md is gone; the README says
+the look is inspired by exo. The `<think>` splitter was dropped -- the page
+shows the server's `reasoning_content` (gemma's `<|channel>thought` never
+matched `<think>`) -- and the "enable thinking" checkbox, which sent a field
+nothing read, is a `reasoning_effort` picker on the standard ladder. The
+SSE reader was tested against a stream cut into 3-byte chunks (split UTF-8
+and lines, CRLF, keepalive, [DONE]); the page chatted end to end with
+Flash-Next 4.4 via exo, thinking streamed into its panel. The listed PDF
+routine was never in the page (PDFs say "not supported yet").
 
 ## OPEN, and it may move published numbers: the Flash-Next PLE hash seed
 
