@@ -9,7 +9,8 @@ hands over.
 
 from __future__ import annotations
 
-from . import (cache_report, drafting, state, thinking, vision, vq_runtime)
+from . import (cache_report, drafting, sampling, state, thinking, vision,
+               vq_runtime)
 # By name, not as `load.`: the package re-exports a FUNCTION called `load`,
 # so `from . import load` hands back the function, not this module -- and
 # `serve` died on its first real start after the move (2026-09-25).
@@ -46,6 +47,7 @@ def serve(model_path: str, host: str, port: int,
     state.SERVED["path"] = model_path
     state.SERVED["draft"] = draft
     vq_runtime.install(srv)
+    sampling.install()
     cache_report.install(srv)
     thinking.install(srv)
     _real = srv.ModelProvider.load
