@@ -8,6 +8,8 @@ change knurlogic makes to mlx-lm's own server, one module each.
   state.py         what is served, drafting, vision: the process's dicts
   vq_runtime.py    verified rungs load on knurlogic's VQ runtime (engine/vq)
   cache_report.py  usage.knurlogic.cache: what the prompt cache actually did
+  cache_guard.py   an exact prompt-cache hit still leaves a token to process
+                   (mlx-lm's batch path crashes on an empty remainder)
   thinking.py      reasoning_effort -> each chat template's own controls
   sampling.py      a request's seed reaches the sampler (mlx-lm's compiled
                    sampler ignores it off the main thread)

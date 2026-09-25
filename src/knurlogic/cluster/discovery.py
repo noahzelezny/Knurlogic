@@ -310,7 +310,10 @@ class Discovery:
                          f"is advertising (a page bound to 127.0.0.1 does "
                          f"not), or macOS is blocking discovery: System "
                          f"Settings -> Privacy & Security -> Local Network "
-                         f"-> allow the app you started knurlogic from. "
+                         f"-> allow the app you started knurlogic from (the terminal; "
+                         f"under launchd or a script, the Python binary "
+                         f"itself -- a rebuilt environment needs it "
+                         f"granted again). "
                          f"`dns-sd -B {SERVICE}` shows what this machine "
                          f"can see.")
         return d
