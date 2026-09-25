@@ -422,11 +422,15 @@ not tax every step.
    all-NaN -> token 0 under argmax AND categorical; one NaN -> argmax 0 but
    categorical random (so "check only token 0" is not enough); -inf is
    masking; +inf picks that token.
-2. **GLM head restartable at checkpoints** (glm5 head, `reassign` cache
-   semantics): the system checkpoint (472 tokens) is offered then
-   discarded, "no aligned head cache". Make HeadCarry/replay work for it;
-   the conformance test `test_a_shared_prefix_is_reused` on GLM 2.7 is the
-   bar (Flash passes it).
+2. **GLM head restartable at checkpoints** -- CAUSE FOUND AND FIXED in
+   code: GLM's head cache is a CacheList (main KV + indexer KV) with no
+   `offset` of its own; `split_pool_entry`, `_entry` and admit's seeding
+   check read `.offset` directly, got -1/None, and discarded every GLM
+   entry, checkpoint or whole prompt. `caches.position()` answers for
+   composites; unit tests cover prefix and checkpoint restores. STILL TO
+   VALIDATE on a free box: `test_a_shared_prefix_is_reused` on GLM 2.7, and
+   acceptance after a checkpoint restore equal to a fresh row (the replay
+   through `MTPHeadGlm5.advance` is exercised for the first time on GLM).
 3. **Server build step 1**: engine/runtime/executor.py -- protocol +
    MTPBatchGenerator behind it; test_batch_drafting/vision tests unchanged.
    Then steps 2-5 per docs/SERVER.md.
