@@ -205,8 +205,10 @@ def peer_memory_map(ip: str, port: int, ttl: float = 6.0) -> dict | None:
             d = _get(f"http://{ip}:{cand}/status.json", timeout=3.0)
         except Exception:
             continue
+        # The peer's OWN entry: its status lists every node it knows, and
+        # the first map in the list need not be the one it measured.
         for nd in (d or {}).get("nodes") or []:
-            if nd.get("memory_map"):
+            if nd.get("memory_map") and nd.get("role") in ("local", "server"):
                 doc = nd["memory_map"]
                 _PEER_METRICS[ip] = nd.get("metrics")
                 break
