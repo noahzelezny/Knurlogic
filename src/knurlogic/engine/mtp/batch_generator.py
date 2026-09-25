@@ -76,6 +76,7 @@ from .batch_loop import MTPBatch, RowParams, admit
 from knurlogic.engine.serve import cache_report as cachereport
 from .capture import capture_input
 from .registry import resolve
+from .caches import position
 from .sampling import (NonFiniteLogits, make_distribution,
                        nonfinite_message)
 from ..vision import key as K
@@ -123,7 +124,8 @@ def split_pool_entry(entry: list, n_trunk: int, *, drafts: bool,
         return trunk, None, 0
     if not drafts:
         return trunk, None, hit_len
-    off = int(getattr(extra[0], "offset", -1) or 0) if extra else -1
+    off = position(extra[0]) if extra else None
+    off = -1 if off is None else off
     if off == hit_len:
         return trunk, extra[0], hit_len
     # A checkpoint entry: head one step behind, with the h to replay it.
@@ -135,12 +137,12 @@ def split_pool_entry(entry: list, n_trunk: int, *, drafts: bool,
 
 
 def trunk_offset(trunk: list) -> Optional[int]:
-    """The position a trunk's caches sit at: the first one with an offset.
+    """The position a trunk's caches sit at: the first one with a position.
     Recurrent layers carry state, not a position, so they cannot answer."""
     for c in trunk:
-        off = getattr(c, "offset", None)
+        off = position(c)
         if off is not None:
-            return int(off)
+            return off
     return None
 
 
@@ -471,7 +473,7 @@ class MTPBatchGenerator(BatchGenerator):
             # every entry without its head and made every restore prefill
             # from scratch, silently.
             pos = trunk_offset(trunk)
-            if pos is not None and getattr(head, "offset", None) == pos:
+            if pos is not None and position(head) == pos:
                 return trunk + [head]
         return trunk
 
