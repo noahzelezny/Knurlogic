@@ -161,7 +161,7 @@ def test_decompression_bomb_is_refused_before_decoding():
     big = Image.new("1", (10_000, 9_000))          # 90 Mpx > 89,478,485
     buf = io.BytesIO()
     big.save(buf, format="PNG")
-    with pytest.raises(ImageTooLarge, match="maximum is 89478485 pixels"):
+    with pytest.raises(ImageTooLarge, match="maximum for its format is 89478485 pixels"):
         images.decode(buf.getvalue())
 
 
@@ -251,3 +251,21 @@ def test_tiny_configs_keep_structure_and_fit_the_vocab():
     q = fv.tiny_config("qwen3_5")
     assert q["vision_start_token_id"] < q["vision_end_token_id"] < \
         q["image_token_id"], "remap keeps the real order"
+
+
+def test_a_huge_jpeg_is_decoded_reduced_not_refused():
+    """A JPEG decodes at 1/8 scale directly, so one far over the PNG limit
+    is fine; the same pixel count as a PNG is refused (it must be unpacked
+    whole)."""
+    import io
+    from PIL import Image
+    w, h = 10000, 9500                       # 95 Mpx: over BOMB_PIXELS
+    b = io.BytesIO()
+    Image.new("RGB", (w, h), (200, 30, 30)).save(b, "JPEG", quality=30)
+    img = images.decode(b.getvalue())
+    assert img.size[0] * img.size[1] <= images.MAX_DECODE_PIXELS
+    assert img.getpixel((10, 10))[0] > 150
+    p = io.BytesIO()
+    Image.new("1", (w, h)).save(p, "PNG")
+    with pytest.raises(ImageTooLarge, match="unpacked whole"):
+        images.decode(p.getvalue())
