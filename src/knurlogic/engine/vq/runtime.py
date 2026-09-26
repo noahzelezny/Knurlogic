@@ -96,9 +96,12 @@ def runtime_module(knobs: dict | None = None) -> types.ModuleType:
     of EFFECTIVE flag values, cached: the kernels compile once per process
     per numerics, not once per load."""
     knobs = dict(knobs or {})
-    eff = effective_flags(knobs)
-    key = hashlib.sha256(repr(sorted(eff.items())).encode()).hexdigest()[:16]
     with _lock:
+        # read under the lock: _env_overlay below sets os.environ
+        # temporarily, and effective_flags reads it
+        eff = effective_flags(knobs)
+        key = hashlib.sha256(
+            repr(sorted(eff.items())).encode()).hexdigest()[:16]
         mod = _modules.get(key)
         if mod is not None:
             return mod

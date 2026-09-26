@@ -268,7 +268,8 @@ def _served_tokenizer():
     prov = state.SERVED.get("provider")
     tok = getattr(prov, "tokenizer", None) if prov is not None else None
     if tok is not None:
-        _disk_tok.clear()
+        with _render_lock:        # a reader inside it is mid-lookup
+            _disk_tok.clear()
         return tok
     path = state.served_path()
     if not path:
