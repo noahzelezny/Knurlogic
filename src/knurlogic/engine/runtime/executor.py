@@ -104,6 +104,10 @@ class Executor(Protocol):
     @property
     def cache_nbytes(self) -> int: ...
 
+    def cost_per_token(self, rows: int) -> Optional[float]:
+        """Measured seconds per token at this batch width, or None."""
+        ...
+
     def close(self) -> None: ...
 
 
@@ -162,6 +166,9 @@ class LocalExecutor:
     @property
     def cache_nbytes(self) -> int:
         return self.gen.prompt_cache_nbytes
+
+    def cost_per_token(self, rows: int):
+        return self.gen.cost_per_token(rows)
 
     def close(self) -> None:
         self.gen.close()

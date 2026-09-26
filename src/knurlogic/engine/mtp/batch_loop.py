@@ -478,6 +478,13 @@ class MTPBatch:
             return not best
         return best
 
+    def cost_per_token(self, rows: int) -> Optional[float]:
+        """The measured seconds per committed token at this width, in the
+        cheaper regime; None until a regime has been timed there."""
+        got = [c[0] for c in (self._cost.get((rows, True)),
+                              self._cost.get((rows, False))) if c]
+        return min(got) if got else None
+
     def _record_cost(self, rows: int, drafting: bool, seconds: float, tokens: int) -> None:
         if tokens <= 0:
             return
