@@ -67,3 +67,9 @@ mlx = "0.31.2"
 mlx-lm = "0.31.3"
 mlx_lm_generate_sha256 = "270778ad53eaca55a8533d82e6752660fe5d2605c4aa0879b48a50a91f69345f"
 mlx_lm_cache_sha256 = "819ed95dcbf755652363cfdb15a639890447abb534a06dcefd52c7fff5055750"
+
+[tool.pytest.ini_options]
+# Each checkout tests its OWN src: the editable install points at one
+# checkout, and a worktree's tests were importing that one's code instead
+# (found on the gui worktree, 2026-09-26).
+pythonpath = ["src"]
