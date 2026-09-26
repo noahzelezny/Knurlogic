@@ -58,11 +58,10 @@ no blockers found
   prefill chunk per model family, the cache limit, the VQ kernel flags. That
   is the actual asset: the numbers cost runs, several of them cost an
   out-of-memory, and nobody should have to rediscover them. Each one reaches
-  whatever actually reads it — the engine's argv, a bundled runtime, or exo
-  under exo's own names.
+  whatever actually reads it — the engine's argv or a bundled runtime.
 
 * **Multi-token-prediction drafting, which no stock runtime does.** mlx-lm
-  has no MTP path and neither does upstream exo. A drafting head packed
+  has no MTP path. A drafting head packed
   beside the weights is used because it is there — on a single request and
   inside a batch alike, token-identical to decoding without it. `--no-draft`
   is the troubleshooting switch.
@@ -74,22 +73,11 @@ no blockers found
   settings for a roomier box. `load` refuses what will not fit, with no
   override, because it is arithmetic.
 
-* **A server, and a cluster front end.** `knurlogic serve <artifact>` is an
-  adapter over mlx-lm's OpenAI endpoint with the settings resolved and set
-  *before* the model loads, which is load-bearing: a VQ artifact's bundled
-  runtime reads its knobs at import. `--cluster` does the same across several
-  boxes by wrapping exo, which already places and shards — the OpenAI surface
-  is exo's, proxied untouched, and Knurlogic adds the per-node resolution and
-  one `/status` that covers every node.
-
-* **An override mechanism, so none of this needs a fork.** A module inside
-  `mlx_lm`, `mlx_vlm` or `exo` can be replaced from a versioned, digest-pinned
-  copy in this package — no fork, no writes to site-packages, no permanent
-  diff. It is installed through `sitecustomize.py` on `PYTHONPATH` rather than
-  `sys.modules`, because exo's runner is a spawned process and a spawned
-  process inherits the environment and nothing else; that is measured, with a
-  control arm, on exo's own interpreter. `knurlogic override run -- exo`
-  applies them to any command and every process it spawns.
+* **A server.** `knurlogic serve <artifact>` is an adapter over mlx-lm's
+  OpenAI endpoint with the settings resolved and set *before* the model
+  loads, which is load-bearing: a VQ artifact's bundled runtime reads its
+  knobs at import. Several machines are knurlogic's own (`cluster/`: peers,
+  Bonjour discovery, `--host cluster`); knurlogic does not drive exo.
 
 * **A GUI that exposes the knobs.** `/` shows what loaded, the memory split
   nothing else shows, and a Settings panel with every resolved knob, the
@@ -105,22 +93,20 @@ no blockers found
 
 It does not build or score models — vqlab builds, knurlogic runs what it
 built. It never sets the wired limit or deletes a model; it tells you the
-command. Clustering runs through exo today; knurlogic is replacing that
-orchestration on mlx's own distributed backends (docs/PLAN.md).
+command. It does not drive exo: knurlogic replaces exo's orchestration on
+mlx's own distributed backends (docs/PLAN.md). A running exo is shown as one
+more runtime holding memory, and `~/.exo/models` is one more model store.
 
 The page's look is inspired by exo's dashboard; its code is knurlogic's
 own.
 
 ## What it stands on
 
-    one box       mlx, mlx-lm (>= 0.31.3). mlx-vlm for multimodal and GLM-5.3.
-    many boxes    exo as well, in its own interpreter. knurlogic never
-                  requires it and never starts it unless asked (--launch).
+    mlx, mlx-lm (>= 0.31.3). mlx-vlm for multimodal and GLM-5.3.
 
-Several of these have forks that carry fixes upstream does not, and a fix
-present in one interpreter is absent from another with nothing saying so.
-`knurlogic deps` asks each interpreter and reads every verdict off the fix
-itself rather than a version string:
+Some of these have forks that carry fixes upstream does not, and nothing
+else says which build is installed. `knurlogic deps` reads every verdict off
+the fix itself rather than a version string:
 
 ```
 $ knurlogic deps
@@ -129,10 +115,6 @@ knurlogic  /opt/anaconda3/bin/python3  (python 3.12.2)
   mlx-lm   0.31.3                           stock
   mlx-vlm  0.5.0                            knurlogic's vendored glm5_next ...
                                             cannot load here: missing ...
-exo  /opt/anaconda3/envs/exo/bin/python3.13  (python 3.13.12)
-  mlx      0.32.0.dev20260622+4c8d2590      jaccl self-heal: YES (fork)
-  mlx-lm   0.31.9                           fork (carries qwen4_exp)
-  exo      0.3.69                           fork (carries MTP)
 ```
 
 What each fork carries, and why it is or is not ported, has one home:
@@ -149,12 +131,6 @@ token identity against mlx-lm's own generator, and has not yet been timed on
 real weights through knurlogic (the exo fork measured the same loop at 23.1
 vs 22 tok/s, identical tokens). An agent has loaded, used and unloaded a
 model through the MCP, across two sessions.
-
-`serve --cluster` resolves per node, gives every rank one prompt chunk, and
-hands exo its settings under exo's own names. What it applies is the
-environment of a node it launches — a node it merely attaches to gets its
-settings *reported*, because nothing here can reach into another machine's
-process.
 
 `docs/PLAN.md` holds what is measured and what is next; `CONTEXT.md` is the
 map.

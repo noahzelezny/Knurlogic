@@ -78,8 +78,8 @@ them. `--host ADDR` / `0.0.0.0` stay as today.
 
 New package `knurlogic/cluster/`: `discovery.py` (dns_sd via ctypes),
 `peers.py` (manual + remembered + merge + reachability), `identity.py`.
-`interfaces/cluster.py` keeps the exo front end and CLI and imports these;
-the future `knurlogic node` agent lands in the same package. `machine/`
+(`interfaces/cluster.py`, the exo front end, was removed 2026-09-25.) The
+future `knurlogic node` agent lands in the same package. `machine/`
 stays "facts about THIS box".
 
 ## 7. Tests (no network needed)
@@ -140,7 +140,7 @@ stays "facts about THIS box".
    versioned, keyed by id, atomic write, last address updated; self is
    recognised in its own browse by id.
 9. **`cluster/` holds every source** -- `exo.py` moves there from
-   `interfaces/cluster.py`, which becomes CLI only.
+   `interfaces/cluster.py` (since removed with the exo wrap).
 10. `knurlogic doctor` runs the cluster checks; a gone peer's text says
     "asleep?"; the dns_sd tests are macOS-only.
 

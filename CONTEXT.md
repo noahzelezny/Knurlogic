@@ -14,8 +14,9 @@ what is true about the machine, and drafts with multi-token-prediction heads
 that no stock runtime uses.
 
 **The direction: knurlogic replaces exo.** `pip install knurlogic` is the
-whole install -- one Mac or a cluster. Today it drives exo for clustering
-(`place`); the replacement is built on what pip already ships: mlx's ring
+whole install -- one Mac or a cluster. knurlogic does not drive exo (it
+only reads a running exo as one more runtime); multi-machine serving is
+built on what pip already ships: mlx's ring
 and jaccl backends and launcher, and mlx-lm's `sharded_load`. What exo adds
 on top -- discovery, coordination, placement, per-node downloads -- is what
 knurlogic rebuilds. It still never rebuilds an ENGINE: mlx serves and
@@ -23,19 +24,17 @@ shards; knurlogic orchestrates, resolves settings, and drafts.
 
 ## If you are an agent
 
-Use the MCP (`knurlogic mcp`, stdio). Eleven tools; `tools/list` describes
+Use the MCP (`knurlogic mcp`, stdio). Nine tools; `tools/list` describes
 each. The loop that answers "can I run X, how, and is it safe now":
 
-    one box      models -> fit -> settings -> ready -> load  -> state -> unload
-    the cluster  models -> ready -> place -> state (poll) -> unplace
+    models -> fit -> settings -> ready -> load -> state -> unload
 
-Never place or load while `ready` is false, and never wait on silence:
-every server and exo instance in `state` has a phase -- downloading,
-loading (layers), warming, serving, failed, or stalled, which means stop
-waiting and read the advice.
+Never load while `ready` is false, and never wait on silence: every server
+`load` started has a phase in `state` -- loading, warming, serving, stalled
+(stop waiting and read the log), or exited.
 
 Every answer says how it was measured; a refusal is an answer, an error sets
-`isError`. `deps` answers "why does this work in exo and not here".
+`isError`. `deps` answers which build of mlx, mlx-lm and mlx-vlm is installed.
 
 ## Where things live
 
@@ -46,7 +45,7 @@ this list; nothing depends on a folder below it.
     src/knurlogic/
       engine/       what runs a model. The ONLY folder that may import mlx --
                     a test fails otherwise. Serving (serve/), drafting
-                    (mtp/), vendored architectures, overrides.
+                    (mtp/), vendored architectures.
                     engine/families/<family>/ holds everything about one
                     model family; adding a family is one folder plus one line
                     in engine/families/__init__.py (see its docstring for the
@@ -56,7 +55,7 @@ this list; nothing depends on a folder below it.
                     limit and the one load budget, installed dependencies.
       tuning/       what the settings should be, each beside its evidence.
       interfaces/   how a person or an agent talks to it: MCP, the page, the
-                    CLI, the OpenAI and Anthropic endpoints, the exo front.
+                    CLI, the OpenAI and Anthropic endpoints.
 
     tests/          tripwires are named in test docstrings, not here.
     tools/          probes that gate work on real models: mtp_probe.py (drafting),
@@ -88,8 +87,7 @@ this list; nothing depends on a folder below it.
   working set and memory available now — is what `fit`, `settings`, `load`
   and `serve` are all computed against. They cannot disagree.
 * **A setting nobody reads is a bug.** Every resolved knob reaches its
-  consumer: an artifact's bundled runtime, the engine's argv, or exo under
-  exo's own names. This was violated three times before it was a rule.
+  consumer: an artifact's bundled runtime or the engine's argv. This was violated three times before it was a rule.
 * **A measurement outranks an assumption.** Numbers carry where they came
   from. If you cannot say how you know, say that instead.
 
