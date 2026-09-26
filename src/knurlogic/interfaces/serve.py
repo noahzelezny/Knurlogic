@@ -299,6 +299,9 @@ def main(argv=None) -> int:
                         "segment checkpoints)")
     p.add_argument("--prompt-cache-gib", type=float, default=0.0,
                    help="cap the prompt cache's memory; 0 = entries only")
+    p.add_argument("--image-store-gib", type=float, default=0.0,
+                   help="memory for encoded images (default 0.25). A "
+                        "request's images must fit it together")
     p.add_argument("--cluster", action="store_true",
                    help="serve across nodes by wrapping exo: resolve settings "
                         "per node, proxy the OpenAI surface, aggregate /status")
@@ -326,6 +329,8 @@ def main(argv=None) -> int:
                "prompt_cache_size": a.prompt_cache_size}
     if a.prompt_cache_gib > 0:
         serving["prompt_cache_bytes"] = int(a.prompt_cache_gib * GIB)
+    if a.image_store_gib > 0:
+        serving["image_store_bytes"] = int(a.image_store_gib * GIB)
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile,
                a.tune, _parse_sets(a.sets), draft=not a.no_draft,
                serving=serving)

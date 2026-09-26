@@ -134,6 +134,12 @@ class ImageStore:
             return r
         return feats, refs
 
+    def entry_nbytes(self, model_key: Hashable, sha: str,
+                     proc_hash: str) -> int:
+        """Bytes one stored image's features take (0 if not held)."""
+        v = self._lru.get((model_key, sha, proc_hash))
+        return v[1] if v is not None else 0
+
     def __contains__(self, k: Key) -> bool:
         return k in self._lru
 
