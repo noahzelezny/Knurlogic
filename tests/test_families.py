@@ -60,7 +60,7 @@ def test_the_spellings_that_have_bitten_before_resolve():
     assert a["gemma4"] == "gemma4" and a["glm5_next_text"] == "glm5_next"
     assert arch.ARCH_DEPENDS_ON == {"qwen3_5_moe": ["qwen3_5"],
                                     "gemma4": ["gemma4_text"]}
-    assert arch.ARCH_HOST == {"glm5_next": "mlx_vlm"}
+    assert arch.ARCH_HOST == {}        # every architecture is mlx_lm's name
     assert {k: v[0] for k, v in settings.PREFILL_CHUNK_MEASURED.items()} == {
         "glm5_next": 2048, "qwen3_5": 4096, "qwen3_5_moe": 4096}
     w, why = settings.prefill_chunk_for("qwen3_5_text")
