@@ -437,7 +437,7 @@ not tax every step.
    `MTPHeadGlm5.advance` keeps the head aligned. Open: one of six restored
    requests got 0 cached tokens (interleaved with unique-prefix requests;
    LRU eviction suspected, unconfirmed).
-3. ~~Server build step 1~~ DONE (docs/SERVER.md, Build progress). Next: step 2, **request.py** (detokenizer, reasoning split, text stops, usage; flips the stop xfail).
+3. ~~Knurlogic's own server~~ DONE, all five build steps (docs/SERVER.md): the only server, conformance green on gemma/Flash/GLM/397B, equal speed to mlx-lm's within noise. Next: full-branch review review before merging to main.
 4. Suite additions listed in docs/SERVER.md (tool calls first).
 
 Tools: tools/thinking_bench.py, tools/vision_gate.py, tests/api (set
