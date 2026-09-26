@@ -151,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/models":
             return self._json(200, O.models_document(self.app.served()))
         if path == "/health":
-            return self._json(200, {"status": "ok",
+            return self._json(200, {"status": "ok", "server": "knurlogic",
                                     "model": self.app.scheduler.host.state})
         if path == "/v1/residency" and self.app.residency:
             return self._json(200, self.app.residency())

@@ -26,6 +26,21 @@ import pytest
 
 URL = os.environ.get("KNURLOGIC_API_URL", "").rstrip("/")
 TIMEOUT = float(os.environ.get("KNURLOGIC_API_TIMEOUT", "600"))
+
+
+def _ours() -> bool:
+    """Is this knurlogic's own server? Its /health says so; mlx-lm's does
+    not. The known gaps below are xfail on mlx-lm's only."""
+    if not URL:
+        return False
+    try:
+        with urllib.request.urlopen(URL + "/health", timeout=30) as r:
+            return json.loads(r.read()).get("server") == "knurlogic"
+    except Exception:
+        return False
+
+
+OURS = _ours()
 Q = "What is 2 + 3? Reply with just the number."
 
 
@@ -137,7 +152,8 @@ def test_max_tokens_ends_with_length():
     assert r["usage"]["completion_tokens"] <= 8
 
 
-@pytest.mark.xfail(strict=True, reason="mlx-lm matches stop sequences as "
+@pytest.mark.xfail(not OURS, strict=True,
+                   reason="mlx-lm matches stop sequences as "
                    "token ids: stop 'D' never matches the token ' D' "
                    "(measured, gemma e4b, 2026-09-25). OpenAI's contract "
                    "is text; the new server matches text.")
@@ -421,7 +437,8 @@ def test_status_reports_the_node_its_memory_and_the_artifact():
 # (docs/PLAN.md "Requirements for knurlogic's own server"). xfail until the
 # endpoints exist; strict, so passing by accident is noticed.
 
-new_server = pytest.mark.xfail(reason="knurlogic's own server (not built)",
+new_server = pytest.mark.xfail(not OURS,
+                               reason="knurlogic's own server only",
                                strict=True, raises=(urllib.error.HTTPError,
                                                     KeyError, AssertionError))
 
@@ -470,3 +487,119 @@ def test_a_concurrency_hint_is_in_the_headers():
         headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         assert r.headers["X-Knurlogic-Concurrency"]
+
+
+# --- additions from the server design review (docs/SERVER.md) ----------------
+
+def test_a_seeded_request_under_concurrent_load_equals_it_alone():
+    ask = dict(temperature=1.2, max_tokens=24, reasoning_effort="none",
+               seed=21, messages=[{"role": "user", "content":
+                                   "Invent a name for a small robot."}])
+    alone = chat(**ask)["choices"][0]["message"]["content"]
+    got, noise = {}, []
+
+    def seeded():
+        got["x"] = chat(**ask)["choices"][0]["message"]["content"]
+
+    def other(i):
+        noise.append(chat(temperature=1.0, max_tokens=24,
+                          reasoning_effort="none",
+                          messages=[{"role": "user", "content":
+                                     f"Say a word about the number {i}."}]))
+    ts = [threading.Thread(target=other, args=(i,)) for i in range(3)]
+    ts.append(threading.Thread(target=seeded))
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert got["x"] == alone
+
+
+def test_text_completions_answer():
+    r = post("/v1/completions", {"model": "m", "prompt": "1, 2, 3,",
+                                 "max_tokens": 6, "temperature": 0})
+    assert r["object"] == "text_completion"
+    assert isinstance(r["choices"][0]["text"], str)
+    assert r["usage"]["completion_tokens"] > 0
+
+
+def test_max_completion_tokens_is_the_same_as_max_tokens():
+    r = chat(max_completion_tokens=5, reasoning_effort="none",
+             messages=[{"role": "user", "content": "Count from 1 to 500."}])
+    assert r["usage"]["completion_tokens"] <= 5
+    assert r["choices"][0]["finish_reason"] == "length"
+
+
+@new_server
+def test_errors_are_openai_error_objects():
+    code, body = post_status("/v1/chat/completions",
+                             {"model": "m", "temperature": -1,
+                              "messages": [{"role": "user", "content": Q}]})
+    e = json.loads(body)["error"]
+    assert code == 400
+    assert {"message", "type", "param", "code"} <= set(e)
+
+
+@new_server
+def test_n_above_one_is_refused_not_ignored():
+    code, body = post_status("/v1/chat/completions",
+                             {"model": "m", "n": 2,
+                              "messages": [{"role": "user", "content": Q}]})
+    assert code == 400 and json.loads(body)["error"]["param"] == "n"
+
+
+def test_multibyte_text_streams_without_replacement_characters():
+    ev = stream("/v1/chat/completions",
+                {"model": "m", "stream": True, "max_tokens": 80,
+                 "temperature": 0, "reasoning_effort": "none",
+                 "messages": [{"role": "user", "content":
+                               "Write 日本語のテキスト and three emoji "
+                               "(🦊🌊🎈), then stop."}]})
+    text = "".join((c["choices"][0].get("delta") or {}).get("content") or ""
+                   for c in ev if isinstance(c, dict) and c.get("choices"))
+    assert text and "�" not in text
+
+
+@new_server
+def test_a_client_that_goes_away_frees_its_row():
+    import http.client
+    import time
+    from urllib.parse import urlparse
+    u = urlparse(URL)
+    conn = http.client.HTTPConnection(u.hostname, u.port, timeout=TIMEOUT)
+    conn.request("POST", "/v1/chat/completions", body=json.dumps(
+        {"model": "m", "stream": True, "max_tokens": 4000,
+         "reasoning_effort": "none",
+         "messages": [{"role": "user", "content":
+                       "Count from 1 to 5000, one number per line."}]}),
+        headers={"Content-Type": "application/json"})
+    sock = conn.sock                     # getresponse() lets go of it
+    r = conn.getresponse()
+    r.read(200)
+    import socket
+    sock.shutdown(socket.SHUT_RDWR)
+    sock.close()
+    for _ in range(100):
+        rows = get("/v1/residency")["data"][0]["rows"]
+        if rows == 0:
+            break
+        time.sleep(0.2)
+    assert rows == 0
+
+
+def test_tool_calls_come_back_as_tool_calls():
+    tools = [{"type": "function", "function": {
+        "name": "get_weather", "description": "Weather for a city.",
+        "parameters": {"type": "object", "properties": {
+            "city": {"type": "string"}}, "required": ["city"]}}}]
+    r = chat(tools=tools, reasoning_effort="none", max_tokens=300,
+             messages=[{"role": "user", "content":
+                        "What is the weather in Paris? Use the tool."}])
+    m = r["choices"][0]["message"]
+    if not m.get("tool_calls"):
+        pytest.skip("the model answered without calling the tool")
+    tc = m["tool_calls"][0]
+    assert tc["type"] == "function" and tc["id"]
+    assert tc["function"]["name"] == "get_weather"
+    assert "city" in json.loads(tc["function"]["arguments"])
+    assert r["choices"][0]["finish_reason"] == "tool_calls"
