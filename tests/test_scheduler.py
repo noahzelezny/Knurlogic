@@ -384,3 +384,28 @@ def test_a_waiting_prompt_neither_empties_the_cache_nor_blocks_the_line():
     s._waiting = [big, small]
     s._admit_waiting()
     assert admitted == [small] and s._waiting == [big]
+
+
+def test_a_held_prompt_waits_for_the_rows_it_found_not_for_newcomers():
+    from knurlogic.engine.runtime import prompt as P
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
+    s._spike = 4 * GIB                            # limit 100
+    s._active = lambda: 95 * GIB
+    s.cache = type("C", (), {"nbytes": 0})()
+    s._kv = (0.0, float(2**20))
+    big = S.Job(P.ChatRequest(), P.PromptArgs())
+    big.prompt_tokens = 20000
+    s._insert = lambda job: None
+    row = lambda: S._Row(S.Job(P.ChatRequest(), P.PromptArgs()), None, [])
+    s._rows = {1: row()}
+    s._waiting = [big]
+    s._admit_waiting()
+    assert s._waiting == [big] and big.waiting_on == {1}
+    s._rows = {2: row()}                          # 1 finished, 2 arrived
+    s._waiting = [big]
+    s._admit_waiting()
+    kind, err = big.outbox.get_nowait()
+    assert kind == "error" and isinstance(err, S.OutOfMemory)
+    assert s._waiting == []

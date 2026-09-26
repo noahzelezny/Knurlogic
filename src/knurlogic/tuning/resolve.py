@@ -349,6 +349,18 @@ def kv_bytes_per_token(tc: dict) -> tuple:
     layers = int(tc.get("num_hidden_layers") or 0)
     types = tc.get("layer_types")
     interval = tc.get("full_attention_interval")
+    if isinstance(types, list) and tc.get("kv_lora_rank"):
+        # MLA (GLM-5.3's deepseek_sparse_attention): a layer caches its
+        # compressed latent and the DSA indexer's key, not K and V per
+        # head -- counted as full attention it read 0 layers (GLM's are
+        # not named full_attention), and as K,V per head it would be ~10x
+        mla = sum(1 for t in types if t != "linear_attention")
+        width = (int(tc.get("kv_lora_rank") or 0)
+                 + int(tc.get("qk_rope_head_dim") or 0)
+                 + int(tc.get("index_head_dim") or 0))
+        per = mla * width * S.VISION_KV_DTYPE_BYTES
+        return per, (f"{mla} MLA layers of {len(types)} x {width} "
+                     f"(latent + rope + indexer key) x bf16")
     if isinstance(types, list) and types:
         full = sum(1 for t in types if t == "full_attention")
         how = f"{full} full-attention of {len(types)} layers"
