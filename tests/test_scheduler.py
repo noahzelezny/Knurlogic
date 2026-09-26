@@ -187,3 +187,52 @@ def test_a_shared_prefix_is_reused_from_the_prompt_cache(sched):
     # the checkpoint at the prompt less its last token (fed as its own
     # segment) is the nearest entry
     assert usage["prompt_tokens_details"]["cached_tokens"] == len(p) - 1
+
+
+def test_memory_past_the_limit_empties_the_prompt_cache_then_stops_the_newest():
+    """A step that outgrows the working set aborts the process in Metal, so
+    the scheduler gives up the prompt cache first, then the newest rows,
+    each with an OutOfMemory -- and keeps new requests waiting."""
+    from knurlogic.engine.runtime import prompt as P
+    from knurlogic.engine.runtime.scheduler import (GIB, Job, OutOfMemory,
+                                                    Scheduler, _Row)
+
+    class Cache:
+        nbytes = 6 * GIB
+
+        def trim_to(self, n):
+            freed = self.nbytes - n
+            self.nbytes = n
+            mem["active"] -= freed
+
+    class Ex:
+        removed = []
+
+        def remove(self, uids):
+            self.removed += uids
+            mem["active"] -= 5 * GIB * len(uids)
+
+    mem = {"active": 110 * GIB}
+    s = Scheduler(Host(None, Tok({})), memory_limit_bytes=100 * GIB)
+    s.cache, s._ex = Cache(), Ex()
+    s._active = lambda: mem["active"]
+    s._release = lambda: None
+    jobs = {uid: Job(P.ChatRequest(), P.PromptArgs()) for uid in (1, 2, 3)}
+    s._rows = {uid: _Row(j, None, []) for uid, j in jobs.items()}
+    assert not s._room_to_admit()
+    s._guard_memory()
+    # 10 GiB over: the whole 6 GiB cache goes (over + a margin), then the
+    # newest row; the older two keep running
+    assert s.cache.nbytes == 0
+    assert s._ex.removed == [3] and sorted(s._rows) == [1, 2]
+    kind, err = jobs[3].outbox.get_nowait()
+    assert kind == "error" and isinstance(err, OutOfMemory)
+    assert jobs[1].outbox.empty() and jobs[2].outbox.empty()
+    assert mem["active"] <= 100 * GIB
+
+
+def test_out_of_memory_is_a_503_to_retry():
+    from knurlogic.engine.runtime.scheduler import OutOfMemory
+    from knurlogic.interfaces.http.openai import _status_of
+    e = _status_of(OutOfMemory("stopped"))
+    assert e.status == 503 and e.code == "insufficient_memory"
