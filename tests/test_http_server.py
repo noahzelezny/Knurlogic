@@ -44,8 +44,7 @@ def url():
     sched = Scheduler(host, prefill_step_size=16).start()
     app = App(sched, served=lambda: {"id": "tiny", "capabilities": ["text"],
                                      "size_bytes": 1},
-              concurrency=lambda: scout.concurrency(sched),
-              image_limit=scout.image_limit)
+              concurrency=lambda: scout.concurrency(sched))
     app.translate = None                      # no template to translate
     srv = make_server(app, "127.0.0.1", 0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()

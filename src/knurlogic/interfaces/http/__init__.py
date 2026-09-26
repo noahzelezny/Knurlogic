@@ -59,14 +59,14 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
         from knurlogic.engine.serve import set_cache_limit
         print(f"cache limit {set_cache_limit(settings['cache_limit_gb'])}")
     mh = ModelHost(draft=draft,
-                   executes_artifact_code=bool(artifact.model_file))
+                   executes_artifact_code=bool(artifact.model_file),
+                   image_store_bytes=settings.get("image_store_bytes"))
     sched = Scheduler(mh, **scheduler_options(settings)).start()
     sched.load(str(artifact.path))
     _CURRENT["scheduler"] = sched
 
     served = scout.served(artifact, mh)
     app = App(sched, served=served, routes=routes,
-              image_limit=scout.image_limit,
               concurrency=lambda: scout.concurrency(sched),
               residency=lambda: scout.residency(artifact, mh, sched),
               ensure=lambda body: scout.ensure(body, artifact, mh, sched))

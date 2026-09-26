@@ -35,7 +35,7 @@ class App:
 
     def __init__(self, scheduler, *, served: Callable[[], dict],
                  routes: Optional[dict] = None,
-                 gate=None, image_limit: Callable = None,
+                 gate=None,
                  concurrency: Callable[[], str] = None,
                  residency: Callable[[], dict] = None,
                  ensure: Callable[[dict], dict] = None):
@@ -45,7 +45,6 @@ class App:
         self.served = served
         self.routes = routes or {}
         self.gate = gate
-        self.image_limit = image_limit
         self.concurrency = concurrency
         self.residency = residency
         self.ensure = ensure
@@ -61,8 +60,7 @@ class App:
     def submit(self, body: dict, chat: bool):
         job, ctx = O.build_job(body, chat=chat,
                                translate=self.translate if chat else None,
-                               has_vision=self.has_vision,
-                               image_limit=self.image_limit)
+                               has_vision=self.has_vision)
         self.requests += 1
         self.scheduler.submit(job)
         host = self.scheduler.host

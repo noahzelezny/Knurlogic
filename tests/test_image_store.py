@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fixtures_vision as fv  # noqa: E402
-from knurlogic.engine.vision import (EncodedImage, ImageEvicted,  # noqa: E402
+from knurlogic.engine.vision import (EncodedImage, ImageEvicted, ImageTooLarge,  # noqa: E402
                                      ImageRef, ImageRejected)
 from knurlogic.engine.vision import images  # noqa: E402
 from knurlogic.engine.vision.store import (DEFAULT_MAX_BYTES,  # noqa: E402
@@ -161,7 +161,7 @@ def test_decompression_bomb_is_refused_before_decoding():
     big = Image.new("1", (10_000, 9_000))          # 90 Mpx > 89,478,485
     buf = io.BytesIO()
     big.save(buf, format="PNG")
-    with pytest.raises(ImageRejected, match="decompression-bomb"):
+    with pytest.raises(ImageTooLarge, match="maximum is 89478485 pixels"):
         images.decode(buf.getvalue())
 
 
@@ -188,7 +188,7 @@ def test_garbage_and_oversize_are_rejected(monkeypatch):
         with pytest.raises(ImageRejected):
             images.decode(bad)
     monkeypatch.setattr(images, "MAX_BYTES", 10)
-    with pytest.raises(ImageRejected, match="over"):
+    with pytest.raises(ImageTooLarge, match="the maximum is"):
         images.decode(fv.png_bytes(fv.tiny_image()))
 
 
