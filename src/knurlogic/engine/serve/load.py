@@ -16,7 +16,9 @@ import inspect
 from dataclasses import dataclass
 
 #: Packages that can host a model architecture, in lookup order.
-HOST_PACKAGES = ("mlx_lm", "mlx_vlm")
+#: Where an architecture module is looked up. Only mlx_lm's namespace: every
+#: family registers there, GLM included (mlx-vlm is not needed, 2026-09-25).
+HOST_PACKAGES = ("mlx_lm",)
 
 
 @dataclass
