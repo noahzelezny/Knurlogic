@@ -32,7 +32,6 @@ from __future__ import annotations
 import ctypes
 import select
 import socket
-import struct
 import threading
 import time
 
@@ -101,6 +100,12 @@ def txt_decode(b: bytes) -> dict:
     return out
 
 
+def _label(s: str) -> bytes:
+    """A DNS label: at most 63 BYTES, never cut inside a UTF-8 character."""
+    b = s.encode()
+    return b[:63].decode(errors="ignore").encode() if len(b) > 63 else b
+
+
 def interface_of(ip: str) -> int:
     """The interface index an address is configured on, or 0 (all). Read
     from `ifconfig`, which is the one place that pairs the two."""
@@ -140,7 +145,9 @@ class Discovery:
         self.registered_as = ""
         self._refs: list = []          # live refs the loop selects on
         self._free: list = []          # refs to deallocate outside callbacks
-        self._keep: list = []          # callbacks, alive as long as we are
+        # each ref's callback, alive exactly as long as the ref (the daemon
+        # may call it until the ref is deallocated)
+        self._keep: dict = {}
         self._lock = threading.Lock()
         self._stop = False
         self._thread = None
@@ -149,7 +156,7 @@ class Discovery:
     def _add_ref(self, ref, cb):
         with self._lock:
             self._refs.append(ref)
-            self._keep.append(cb)
+            self._keep[id(ref)] = (ref, cb)
 
     def register(self, instance: str, port: int, txt: dict) -> bool:
         lib = _lib()
@@ -163,7 +170,7 @@ class Discovery:
         ref = vp()
         rec = txt_encode(txt)
         err = lib.DNSServiceRegister(
-            ctypes.byref(ref), 0, self.if_index, instance.encode()[:63],
+            ctypes.byref(ref), 0, self.if_index, _label(instance),
             SERVICE.encode(), None, None, socket.htons(port), len(rec),
             ctypes.c_char_p(rec), c, None)
         if err:
@@ -203,7 +210,11 @@ class Discovery:
         holder = {}
 
         def rcb(ref, flags, ifi_, err, fullname, host, port, tlen, txt, ctx):
-            self._free.append(holder.get("ref"))
+            # one answer is enough; a second callback in the same batch
+            # (a TXT change, MoreComing) must not queue the ref again
+            if not holder.get("queued"):
+                holder["queued"] = True
+                self._free.append(holder.get("ref"))
             if err:
                 self.errors.append(f"resolve {name}: error {err}")
                 return
@@ -224,6 +235,11 @@ class Discovery:
         holder = {}
 
         def acb(ref, flags, ifi, err, hostname, addr, ttl, ctx):
+            last = not flags & F_MORE
+            if last and not holder.get("queued"):
+                # the query is done with, answer or not: freed by the loop
+                holder["queued"] = True
+                self._free.append(holder.get("ref"))
             if err or not addr:
                 return
             fam = ctypes.cast(addr, ctypes.POINTER(ctypes.c_ubyte))[1]
@@ -231,8 +247,6 @@ class Discovery:
                 return
             raw = ctypes.string_at(addr, 8)
             ip = socket.inet_ntoa(raw[4:8])
-            if not flags & F_MORE:
-                self._free.append(holder.get("ref"))
             with self._lock:
                 self.found[key] = {**info, "host": ip}
             if self.on_change:
@@ -266,14 +280,23 @@ class Discovery:
                 continue
             for fd in ready:
                 lib.DNSServiceProcessResult(fds[fd])
-            # Freed here, never inside the callback that asked for it.
-            while self._free:
-                r = self._free.pop()
-                if r is None:
-                    continue
-                with self._lock:
-                    if r in self._refs:
-                        self._refs.remove(r)
+            self._drain_free(lib)
+
+    def _drain_free(self, lib) -> None:
+        """Deallocate the refs callbacks asked to free -- here, never inside
+        the callback, and only while still live: a ref leaves _refs exactly
+        once, so it is deallocated exactly once, and its callback goes
+        with it."""
+        while self._free:
+            r = self._free.pop()
+            if r is None:
+                continue
+            with self._lock:
+                live = any(x is r for x in self._refs)
+                if live:
+                    self._refs[:] = [x for x in self._refs if x is not r]
+                    self._keep.pop(id(r), None)
+            if live:
                 lib.DNSServiceRefDeallocate(r)
 
     def start(self) -> "Discovery":
