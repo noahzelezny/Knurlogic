@@ -47,8 +47,8 @@ def load_head(model_path: str):
         state.DRAFT.update(on=False, why="model not loaded yet")
         return None
     try:
-        from knurlogic.engine.mtp.loop import load_mtp_head
-        head, spec = load_mtp_head(model, sidecar=found.path)
+        from knurlogic.engine.mtp.registry import load_head
+        head, spec = load_head(model, sidecar=found.path)
     except Exception as e:
         # A head that will not bind is a fact worth printing, not a crash:
         # the model serves perfectly well without one.
