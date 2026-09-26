@@ -490,6 +490,7 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
                 targets[r["where"].rstrip("/")] = m["machine"]
     _PEER_TARGETS.clear()
     _PEER_TARGETS.update(targets)
+    _PEER_AT[0] = time.time()
     return res
 
 
@@ -635,6 +636,10 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
 ROUTE_PATHS = ("/v1/messages", "/v1/chat/completions")
 ROUTE_S = 2.0
 _ROUTES: dict = {"at": 0.0, "map": {}}
+#: when peers were last asked what they serve (peer_residency)
+_PEER_AT = [0.0]
+#: how old that may be before the router asks again itself
+PEER_SURVEY_MAX_AGE_S = 30.0
 
 
 def routable(fetch=None, ttl: float = 5.0) -> dict:
@@ -653,6 +658,14 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
         def fetch(url, t):
             with urllib.request.urlopen(url, timeout=t) as r:
                 return json.loads(r.read())
+        # the page's own polling refreshes what peers serve, but a client
+        # (Claude Code) may call before anyone has opened the page: the
+        # router then saw only this machine
+        if PEERS is not None and now - _PEER_AT[0] > PEER_SURVEY_MAX_AGE_S:
+            try:
+                peer_residency(PEERS)
+            except Exception:
+                pass
     found: dict = {}
 
     def one(base):
