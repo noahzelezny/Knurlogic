@@ -19,7 +19,10 @@ def test_txt_round_trips_and_truncates_at_255():
 @pytest.mark.skipif(sys.platform != "darwin", reason="needs mDNSResponder")
 def test_a_registered_page_is_found_resolved_and_its_txt_read():
     changes = []
-    d = Discovery(on_change=changes.append, if_index=LOCAL_ONLY)
+    # its own service type: a live page on this Mac browses _knurlogic._tcp
+    # and would list the test's record as a machine called "Test"
+    d = Discovery(on_change=changes.append, if_index=LOCAL_ONLY,
+                  service="_knurlogic-test._tcp")
     try:
         assert d.register("kl-pytest 0f0f0f", 18998,
                           {"id": "0f0f0f0f0f0f", "name": "Test"})
