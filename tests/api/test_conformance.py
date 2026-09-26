@@ -492,14 +492,23 @@ def test_a_concurrency_hint_is_in_the_headers():
 # --- additions from the server design review (docs/SERVER.md) ----------------
 
 def test_a_seeded_request_under_concurrent_load_equals_it_alone():
+    """The seed addresses each token by position, so batching cannot move
+    the random draws. What batching CAN move is the logits: a batched
+    forward is not bit-identical to a one-row forward on every kernel
+    (GLM 2.7: up to 0.09 in logprob, M4, 2026-09-25). So: a divergence
+    with identical logprobs before it is a sampling bug (fail); one with
+    the logprobs already drifted is the kernels (skip, with the drift)."""
     ask = dict(temperature=1.2, max_tokens=24, reasoning_effort="none",
-               seed=21, messages=[{"role": "user", "content":
-                                   "Invent a name for a small robot."}])
-    alone = chat(**ask)["choices"][0]["message"]["content"]
-    got, noise = {}, []
+               seed=21, logprobs=True,
+               messages=[{"role": "user", "content":
+                          "Invent a name for a small robot."}])
 
-    def seeded():
-        got["x"] = chat(**ask)["choices"][0]["message"]["content"]
+    def run():
+        c = chat(**ask)["choices"][0]
+        return [(x["token"], x["logprob"]) for x in
+                ((c.get("logprobs") or {}).get("content") or [])]
+    alone = run()
+    got, noise = {}, []
 
     def other(i):
         noise.append(chat(temperature=1.0, max_tokens=24,
@@ -507,12 +516,25 @@ def test_a_seeded_request_under_concurrent_load_equals_it_alone():
                           messages=[{"role": "user", "content":
                                      f"Say a word about the number {i}."}]))
     ts = [threading.Thread(target=other, args=(i,)) for i in range(3)]
-    ts.append(threading.Thread(target=seeded))
+    ts.append(threading.Thread(target=lambda: got.update(x=run())))
     for t in ts:
         t.start()
     for t in ts:
         t.join()
-    assert got["x"] == alone
+    loaded = got["x"]
+    assert alone, "no logprobs came back"
+    d = next((i for i, (a, b) in enumerate(zip(alone, loaded))
+              if a[0] != b[0]), None)
+    if d is None:
+        return
+    drift = max((abs(a[1] - b[1]) for a, b in zip(alone[:d], loaded[:d])),
+                default=0.0)
+    if drift > 1e-4:
+        pytest.skip(f"batched logits differ from one-row logits on this "
+                    f"model (max logprob drift {drift:.4f} before token "
+                    f"{d}); the draws are the same, the numbers are not")
+    assert False, (f"token {d} differs with identical logprobs before it: "
+                   f"the seeded draw moved under load")
 
 
 def test_text_completions_answer():
