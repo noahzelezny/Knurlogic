@@ -39,6 +39,21 @@ def _executor(model, head, **kw):
                                            **kw))
 
 
+def _assert_key_holds_stream(f, prompt, streamed):
+    """Finished.tokens keys the cache: the prompt, every streamed token, and
+    at most ONE more -- a drafting step commits two tokens to the cache, and
+    when the row finishes on the first the second is in the cache (and so in
+    the key) but never streamed. Whether the last step drafted depends on the
+    timed draft/plain choice (drafting_pays), so the key's tail is not the
+    stream's tail; the cache's length is the key's, always."""
+    from knurlogic.engine.mtp.batch_generator import trunk_offset
+    n = len(prompt)
+    assert f.tokens[:n] == prompt
+    assert f.tokens[n:n + len(streamed)] == streamed
+    assert len(f.tokens) - n - len(streamed) in (0, 1)
+    assert f.cache and trunk_offset(f.cache) == len(f.tokens)
+
+
 def test_the_executor_emits_the_engines_own_tokens():
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.runtime.executor import Admission, Finished, Token
@@ -52,9 +67,32 @@ def test_the_executor_emits_the_engines_own_tokens():
     fin = [e for e in events if isinstance(e, Finished)]
     assert sorted(f.uid for f in fin) == sorted(uids)
     for f in fin:
-        assert f.tokens[-len(toks[f.uid]):] == toks[f.uid] and f.cache
+        _assert_key_holds_stream(f, prompts[uids.index(f.uid)], toks[f.uid])
     lps = [e.logprob for e in events if isinstance(e, Token)]
     assert all(isinstance(x, float) and x <= 0 for x in lps)
+    ex.close()
+
+
+@pytest.mark.parametrize("always", [False, True])
+def test_a_row_finishing_mid_draft_streams_exactly_max_tokens(always,
+                                                              monkeypatch):
+    """Drafting forced (every step commits two) and max_tokens=1: the row
+    finishes on the first, so the second is in its cache and key but must
+    not be streamed. Without the force the timed choice decides; the
+    stream is the same either way."""
+    from knurlogic.engine.runtime.executor import Admission, Finished
+    if always:
+        monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
+    model, head, prompts = _tiny(512)
+    ex = _executor(model, head)
+    uids = [ex.insert(Admission(segments=[p], max_tokens=1)) for p in prompts]
+    toks, events = _drain(ex, uids)
+    for f in (e for e in events if isinstance(e, Finished)):
+        p = prompts[uids.index(f.uid)]
+        assert len(toks[f.uid]) == 1
+        _assert_key_holds_stream(f, p, toks[f.uid])
+        if always:
+            assert len(f.tokens) == len(p) + 2
     ex.close()
 
 
