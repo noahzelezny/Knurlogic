@@ -23,6 +23,16 @@ limit (the working set less a margin for one step's temporaries), the
 prompt cache gives up entries first -- they are a convenience -- and then
 the newest rows are stopped with `OutOfMemory` (a 503: retry), the least
 work lost. While memory is past the admission mark, new requests wait.
+
+A step cannot be interrupted, and admitting a row prefills its whole
+prompt inside one step (plus a deep copy per segment checkpoint), so the
+per-step check alone lets one long prompt jump past the limit (measured:
+an agent's 50k-token turn took the same server from 114 to 118 GiB within
+a minute, no step between). So admission estimates too: a prompt needs
+about twice its KV (the row, and its checkpoints' copies) at the bytes per
+token this model's caches were measured at; the prompt cache gives way
+for it; failing that it waits for running rows, or with none running is
+refused -- never admitted to abort the process.
 """
 
 from __future__ import annotations
@@ -46,6 +56,20 @@ GIB = 1 << 30
 
 class OutOfMemory(RuntimeError):
     """This row was stopped so the server and the other rows keep running."""
+
+
+class _Wait(Exception):
+    """Not admitted yet: the request goes back to the front of the queue."""
+
+
+def _cache_nbytes(cache) -> int:
+    n = 0
+    for c in cache or ():
+        try:
+            n += int(getattr(c, "nbytes", 0) or 0)
+        except Exception:
+            pass
+    return n
 
 
 @dataclass
@@ -138,6 +162,8 @@ class Scheduler:
         #: active bytes a step may start at; None = the working set less a
         #: margin, found on first use; 0 = unguarded
         self.memory_limit = memory_limit_bytes
+        #: KV bytes per prompt token, measured from this model's caches
+        self._bpt = 0.0
         self.cache = PromptCache(prompt_cache_size)
         self.stats = stats if stats is not None else {}
         self._jobs: "queue.Queue" = queue.Queue()
@@ -356,10 +382,19 @@ class Scheduler:
             job = self._waiting.pop(0)
             if job.cancelled:
                 continue
+            if job.prompt_tokens and self._rows \
+                    and not self._fits(job.prompt_tokens):
+                # waited before and still would not fit: do not tokenize
+                # it again every step
+                self._waiting.insert(0, job)
+                return
             images = vreq.has_images(job.request.messages)
             try:
                 self._insert(job)
-            except (P.PromptError, VisionError) as e:
+            except _Wait:
+                self._waiting.insert(0, job)
+                return
+            except (P.PromptError, VisionError, OutOfMemory) as e:
                 # the client's request, not a fault here: no traceback
                 logger.info("refused a request: %s", e)
                 self._error(job, e)
@@ -392,6 +427,7 @@ class Scheduler:
                 prompt, segs, types, initial = P.tokenize(
                     self, tok, job.request, job.args)
             job.prompt_tokens = len(prompt)
+            self._make_room(len(prompt))
             cache, rest = self.cache.fetch(self.host.model_key, prompt)
             n = len(prompt) - len(rest)
             segs, types = [list(s) for s in segs], list(types)
@@ -454,6 +490,48 @@ class Scheduler:
         return (not limit or not self._rows
                 or self._active() < limit - self._margin())
 
+    def _learn(self, tokens, cache) -> None:
+        """Bytes per token, from a cache long enough that fixed-size state
+        (linear-attention layers, the head's carry) does not dominate."""
+        if len(tokens) >= 1024:
+            self._bpt = max(self._bpt, _cache_nbytes(cache) / len(tokens))
+
+    def _fits(self, n_tokens: int) -> bool:
+        return self._room_for(n_tokens)[0]
+
+    def _room_for(self, n_tokens: int):
+        """(fits, need, room) for a prompt of n_tokens, the prompt cache
+        giving way if that is what it takes."""
+        limit = self._limit()
+        if not limit or not self._bpt:
+            return True, 0, 0
+        need = int(2 * n_tokens * self._bpt)
+        room = limit - self._margin() - self._active()
+        if need > room and self.cache is not None and self.cache.nbytes:
+            before = self.cache.nbytes
+            self.cache.trim_to(max(before - (need - room), 0))
+            self._release()
+            room = limit - self._margin() - self._active()
+            logger.info("the prompt cache gave up %.1f GiB for a %d-token "
+                        "prompt", (before - self.cache.nbytes) / GIB,
+                        n_tokens)
+        return need <= room, need, room
+
+    def _make_room(self, n_tokens: int) -> None:
+        """Return if a prompt of n_tokens fits; else _Wait (rows are
+        running and will free memory) or OutOfMemory (none are)."""
+        fits, need, room = self._room_for(n_tokens)
+        if fits:
+            return
+        limit = self._limit()
+        if self._rows:
+            raise _Wait()
+        raise OutOfMemory(
+            f"this prompt ({n_tokens} tokens) needs about {need / GIB:.1f} "
+            f"GiB for its cache; {max(room, 0) / GIB:.1f} GiB is free under "
+            f"the server's limit ({limit / GIB:.1f} GiB). Send a shorter "
+            f"conversation, or serve a smaller model")
+
     def _guard_memory(self) -> None:
         limit = self._limit()
         if not limit:
@@ -500,6 +578,7 @@ class Scheduler:
             if isinstance(e, Progress):
                 row.job.outbox.put(("progress", (e.done, e.total)))
             elif isinstance(e, Checkpoint):
+                self._learn(e.tokens, e.cache)
                 if row.types:
                     self.cache.insert(self.host.model_key, e.tokens, e.cache,
                                       row.types.pop(0))
@@ -513,6 +592,7 @@ class Scheduler:
                     drop.append(e.uid)
                     self._done(e.uid)
             elif isinstance(e, Finished):
+                self._learn(e.tokens, e.cache)
                 self.cache.insert(self.host.model_key, e.tokens, e.cache,
                                   "assistant")
                 self._done(e.uid)
