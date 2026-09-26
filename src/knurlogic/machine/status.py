@@ -218,8 +218,9 @@ def render_cluster(d: dict) -> str:
     # `scope` says whether a node's numbers came from the runtime process or
     # from the whole machine. It is a field rather than a guess at the device
     # string, because a label that drifts is worse than no label.
-    boxwide = any(s.get("memory", {}).get("scope") == "box"
-                  for s in d.get("nodes", []))
+    # aggregate() decided it from the nodes that answered, whose numbers
+    # the total holds; a silent node's stale scope must not relabel them
+    boxwide = m.get("scope") == "box"
     L.append("")
     L.append(f"cluster      {c['nodes_reachable']}/{c['nodes_total']} nodes "
              f"answering")

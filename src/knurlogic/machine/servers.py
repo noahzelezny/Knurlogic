@@ -70,6 +70,6 @@ def is_our_server(pid: int) -> bool:
                              timeout=5).stdout
     except Exception:
         return False
-    return "knurlogic" in out and " serve " in f" {out} "
+    return "knurlogic" in out and "serve" in out.split()
 
 

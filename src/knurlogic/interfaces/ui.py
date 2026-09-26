@@ -38,6 +38,10 @@ from knurlogic.cluster import exo as exo_witness  # noqa: E402
 
 #: Children started from the page: {port: (Popen, artifact path)}.
 _CHILDREN: dict = {}
+#: the page serves requests on threads: check-the-port-then-spawn is one step
+_SPAWN_LOCK = __import__("threading").Lock()
+#: the largest body the page accepts (the API server's default cap)
+MAX_BODY = 512 << 20
 
 #: The port a knurlogic on ANOTHER node is expected to answer on, which is
 #: the one this page launches models on.
@@ -283,7 +287,15 @@ def loading() -> list:
             if c["phase"] in ("loading", "warming", "stalled")]
 
 
-def _spawn(path: str, port: int, tune: str = "balanced",
+def _spawn(*a, **k):
+    """_spawn_unlocked under the lock: two loads for one port at once would
+    both pass the registry check, and the second child's record would hide
+    the first (still loading, holding its memory, invisible to unload)."""
+    with _SPAWN_LOCK:
+        return _spawn_unlocked(*a, **k)
+
+
+def _spawn_unlocked(path: str, port: int, tune: str = "balanced",
            sets: dict | None = None, draft: bool = True) -> dict:
     """Start `knurlogic serve` for one artifact, on its own port.
 
@@ -584,8 +596,15 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
             if self._gated():
                 return
             u = urlparse(self.path)
-            if u.path.rstrip("/") == "/chat":
+            try:
                 n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if not 0 <= n <= MAX_BODY:
+                self._send(b"Content-Length must be a number of bytes up "
+                           b"to %d" % MAX_BODY, "text/plain", 400)
+                return
+            if u.path.rstrip("/") == "/chat":
                 where = (parse_qs(u.query).get("where") or [""])[0]
                 proxy_chat(self, where, self.rfile.read(n) if n else b"")
                 return
@@ -593,7 +612,6 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
             if h is None:
                 self._send(b"not found", "text/plain", 404)
                 return
-            n = int(self.headers.get("Content-Length") or 0)
             body, ctype = h(parse_qs(u.query), 0, self.rfile.read(n) if n
                             else b"")
             self._send(body, ctype)

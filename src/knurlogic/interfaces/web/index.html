@@ -781,7 +781,10 @@ const GIB=1073741824, $=id=>document.getElementById(id);
 let LASTWS=0;   // this box's working set, learned from the first status
 const gb=b=>Number.isFinite(b)?(b/GIB).toFixed(1)+' GiB':'--';
 const row=(k,v)=>`<div class="row"><span>${k}</span><span>${v}</span></div>`;
-const esc=s=>String(s??'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+// quotes too: esc() also fills attributes (title="…"), and a model's name
+// is a folder name -- one day a download's -- not something this page chose
+const esc=s=>String(s??'').replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;',
+  '&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
 
 // --- settings -------------------------------------------------------------
 // Three things kept apart: what is RUNNING, what a tune WOULD give, and how
@@ -891,8 +894,8 @@ function wireDials(){
   });
 }
 async function applyKnob(name,value){
-  const r=await (await fetch('/settings.json',{method:'POST',
-    headers:{'Content-Type':'application/json'}, body:JSON.stringify({[name]:value})})).json();
+  const r=await postSettings({[name]:value});
+  if(r.error){ $('applies').textContent=r.error; return }
   const what=(r.applied||{})[name];
   $('applies').innerHTML=what?`<b>${esc(name)}</b> ${esc(what)}`:'Nothing changed.';
   loadSettings({tune:ASK.tune||'',working_set_gib:$('ws').value||''});
@@ -1017,10 +1020,16 @@ async function loadSettings(q){
       (rest.length?`<b>${rest.length}</b> need${rest.length===1?'s':''} a restart:
         <code>--tune ${esc(ASK.tune)}</code>`:'');
 }
+async function postSettings(body){
+  try{
+    return await (await fetch('/settings.json',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})).json();
+  }catch(e){ return {error:`the server did not answer: ${e.message||e}`} }
+}
 $('apply').onclick=async()=>{
   $('apply').disabled=true;
-  const r=await (await fetch('/settings.json',{method:'POST',
-    headers:{'Content-Type':'application/json'}, body:JSON.stringify({tune:ASK.tune})})).json();
+  const r=await postSettings({tune:ASK.tune});
+  if(r.error){ $('applies').textContent=r.error; $('apply').disabled=false; return }
   const done=Object.entries(r.applied||{}).filter(([k,v])=>!/restart/.test(v));
   $('applies').innerHTML=done.map(([k,v])=>`<b>${esc(k)}</b> ${esc(v)}`).join('<br>')
     ||'Nothing changed.';
@@ -1566,9 +1575,14 @@ function ramWent(m){
 }
 
 async function act(payload){
-  const r=await fetch('/loaded.json',{method:'POST',
-    headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-  const j=await r.json();
+  // A server that is down or answers with something other than JSON is an
+  // answer too: said, and the buttons that awaited this get theirs back.
+  let j;
+  try{
+    const r=await fetch('/loaded.json',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    j=await r.json();
+  }catch(e){ j={error:`the server did not answer: ${e.message||e}`} }
   // A refusal is an answer, and the page has to say it the way the MCP does
   // -- a Launch button that quietly resets is the page's version of an agent
   // waiting on silence.

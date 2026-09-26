@@ -411,3 +411,38 @@ def test_serve_loads_a_verified_rung_on_knurlogics_runtime(tmp_path,
     assert [c[0] for c in calls] == ["knurlogic", "bundled"]
     assert state.SERVED["runtime"] == "bundled"
 
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "vqlab bug in the vendored vq_dense.py (pinned bytes, not edited here): "
+    "VQEmbedding.dims/as_linear ignore pack_bits. Fix upstream, re-vendor, "
+    "and this passes -- strict, so it says so"))
+def test_a_packed_embedding_as_linear_equals_its_unpacked_twin():
+    """as_linear (a tied output head) decodes the whole table; with packed
+    codes it reads the packed words as indices and gets `dims` wrong.
+    Latent: no shipped rung ties its head to a packed embedding."""
+    import numpy as np
+    import mlx.core as mx
+    from knurlogic.engine.vq.vq_dense import VQEmbedding
+    rng = np.random.default_rng(0)
+    R, D, bits, G = 8, 2, 9, 32
+    NSUB = 64                                   # two blocks of 32 codes
+    codes = rng.integers(0, 1 << bits, size=(R, NSUB), dtype=np.uint32)
+    packed = np.zeros((R, NSUB // 32 * bits), dtype=np.uint32)
+    for r in range(R):
+        for blk in range(NSUB // 32):
+            acc = 0
+            for i in range(32):
+                acc |= int(codes[r, blk * 32 + i]) << (i * bits)
+            for w in range(bits):
+                packed[r, blk * bits + w] = (acc >> (32 * w)) & 0xFFFFFFFF
+    book = mx.array(rng.standard_normal((1 << bits, D)).astype(np.float16))
+    scales = mx.array(rng.random((R, NSUB * D // G)).astype(np.float16))
+    plain = VQEmbedding(mx.array(codes.astype(np.uint16)), book, scales, G)
+    pk = VQEmbedding(mx.array(packed), book, scales, G, pack_bits=bits,
+                     in_features=NSUB * D)
+    assert pk.dims == plain.dims == NSUB * D
+    x = mx.array(rng.standard_normal((3, NSUB * D)).astype(np.float16))
+    assert mx.allclose(pk.as_linear(x), plain.as_linear(x)).item()
+    ids = mx.array([0, 5, 7])
+    assert mx.array_equal(pk(ids), plain(ids)).item()

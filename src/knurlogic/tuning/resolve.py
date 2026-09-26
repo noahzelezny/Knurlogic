@@ -323,16 +323,22 @@ def _tower_bytes(artifact: Artifact) -> tuple:
                 header = json.loads(fh.read(n))
         except (OSError, ValueError, struct.error):
             continue
+        if not isinstance(header, dict):
+            continue
         for k, v in header.items():
             if k == "__metadata__" or not isinstance(v, dict):
                 continue
             if not k.startswith(S.VISION_TOWER_PREFIXES):
                 continue
-            a, b = v.get("data_offsets", (0, 0))
-            total += int(b) - int(a)
+            try:
+                a, b = v.get("data_offsets", (0, 0))
+                a, b = int(a), int(b)
+            except (TypeError, ValueError):
+                continue          # a malformed entry, not a crash
+            total += b - a
             count += 1
             if f.parent != root:
-                outside += int(b) - int(a)
+                outside += b - a
     return total, outside, count
 
 
