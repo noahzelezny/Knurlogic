@@ -1,14 +1,14 @@
-"""The cache key: what mlx-lm's prompt cache walks when a prompt has images.
+"""The cache key: what the prompt cache walks when a prompt has images.
 
 Design D6. The key is the prompt's token ids, the same length as the KV,
 with each image token replaced by a sentinel
 
     ("img", sha, proc_hash, k)        k = 0 .. n_tokens-1
 
-WHY A SENTINEL PER TOKEN, NOT PER IMAGE. mlx-lm's server does prefix
-arithmetic on the prompt (`prompt_cache_count = len(prompt) - len(rest)`,
-the segment trim right after it in `ResponseGenerator._generate`), so the
-key must be exactly as long as the KV it names.
+WHY A SENTINEL PER TOKEN, NOT PER IMAGE. The scheduler does prefix
+arithmetic on the prompt (the cached count is `len(prompt) - len(rest)`,
+and the segment trim follows from it: engine/runtime/scheduler._insert),
+so the key must be exactly as long as the KV it names.
 
 WHY THE TRIE ACCEPTS IT. `mlx_lm.models.cache.PromptTrie` walks
 `current[tok]` dicts; any hashable works (read at mlx-lm 0.31.3, the pinned
@@ -116,7 +116,7 @@ def expand(ids: Sequence[int], refs: Sequence[ImageRef],
 def expand_segments(segments: Sequence[Sequence[int]],
                     refs: Sequence[ImageRef],
                     image_token_id: int) -> Tuple[List[Any], List[List[Any]]]:
-    """mlx-lm's `_tokenize` returns (prompt, segments, ...), and the segments
+    """The prompt stage returns (prompt, segments, ...), and the segments
     feed `insert_segments` and the checkpoints. Rewriting only the prompt
     (v1) left the segments naming the wrong tokens -- critique issue 2.
 

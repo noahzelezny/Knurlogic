@@ -1,6 +1,6 @@
 """knurlogic's own server: HTTP here, the model in engine/runtime.
 
-    knurlogic serve <artifact> --server knurlogic
+    knurlogic serve <artifact>
 
 `serve()` builds the host and the scheduler, queues the load, and answers
 HTTP at once: /status.json and the page work while the model loads, and
@@ -31,8 +31,11 @@ def switch(model: str, *, force: bool = False, wait: bool = True,
             and st["state"] in ("ready", "loading")):
         freed = int(st.get("memory_bytes") or 0)
         a = prepare(model, served=host.path, freed_bytes=freed)
-        if str(a.path) != host.path or st["state"] not in ("ready",
-                                                           "loading"):
+        # compared resolved: the served model named through a symlink or
+        # another store's path is the same model, not a switch
+        same = host.path and Path(a.path).resolve() == \
+            Path(host.path).resolve()
+        if not same or st["state"] not in ("ready", "loading"):
             cmd = sched.load(str(a.path),
                              executes_artifact_code=bool(a.model_file),
                              force=force)
