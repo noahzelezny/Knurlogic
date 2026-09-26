@@ -342,7 +342,7 @@ def _tower_bytes(artifact: Artifact) -> tuple:
     return total, outside, count
 
 
-def _kv_bytes_per_token(tc: dict) -> tuple:
+def kv_bytes_per_token(tc: dict) -> tuple:
     """(bytes, why): K and V for one token over the layers whose cache
     grows with context. Hybrid models (Qwen3.5's linear layers, gemma's
     sliding windows) are counted by their full-attention layers only."""
@@ -383,7 +383,7 @@ def vision_budget(artifact: Artifact,
     live = store_bytes is not None
     store = int(store_bytes) if live else DEFAULT_MAX_BYTES
     tc = cfg.get("text_config") or cfg
-    per_tok, kv_why = _kv_bytes_per_token(tc)
+    per_tok, kv_why = kv_bytes_per_token(tc)
     toks = S.VISION_KV_IMAGES * S.VISION_KV_TOKENS_PER_IMAGE
     kv = per_tok * toks
     notes = [

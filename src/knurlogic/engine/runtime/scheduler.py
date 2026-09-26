@@ -61,6 +61,21 @@ class OutOfMemory(RuntimeError):
     """This row was stopped so the server and the other rows keep running."""
 
 
+def _kv_from_config(path) -> Optional[tuple]:
+    """(0, bytes per token) from the artifact's config -- its full-attention
+    layers' K and V -- so the first prompt after a load is costed before a
+    cache has been measured; the measurements replace it. None if the
+    config does not say."""
+    try:
+        from knurlogic.machine.artifact import Artifact
+        from knurlogic.tuning.resolve import kv_bytes_per_token
+        cfg = Artifact.load(path).raw_config
+        per, _why = kv_bytes_per_token(cfg.get("text_config", cfg))
+        return (0.0, float(per)) if per > 0 else None
+    except Exception:
+        return None
+
+
 class _Wait(Exception):
     """Not admitted yet: the request goes back to the front of the queue."""
 
@@ -326,9 +341,14 @@ class Scheduler:
                         "running"))
                 self._close_executor()
                 self.cache = PromptCache(self.cache.lru.max_size)
+                # what was measured belongs to the model it was measured on
+                # (a 35B's slope admitting a 397B's prompt is the abort the
+                # guard exists for)
+                self._kv, self._samples, self._spike = None, {}, 0
                 if c.kind == "load":
                     self.host.load(c.path,
                                    executes_artifact_code=c.executes)
+                    self._kv = _kv_from_config(c.path)
                 else:
                     self.host.unload()
                 if self.host.state != "ready":
@@ -385,22 +405,30 @@ class Scheduler:
         # instead of stalling every running row until all are encoded.
         from knurlogic.engine.vision import VisionError
         from knurlogic.engine.vision import request as vreq
+        held = []
+        try:
+            self._admit_from_queue(held, VisionError, vreq)
+        finally:
+            # requests still waiting for memory go back in their order
+            self._waiting[:0] = held
+
+    def _admit_from_queue(self, held, VisionError, vreq) -> None:
         while self._waiting:
             job = self._waiting.pop(0)
             if job.cancelled:
                 continue
             if job.prompt_tokens and self._rows \
                     and not self._fits(job.prompt_tokens):
-                # waited before and still would not fit: do not tokenize
-                # it again every step
-                self._waiting.insert(0, job)
-                return
+                # waited before and still would not fit: not tokenized
+                # again, and not in the way of smaller prompts behind it
+                held.append(job)
+                continue
             images = vreq.has_images(job.request.messages)
             try:
                 self._insert(job)
             except _Wait:
-                self._waiting.insert(0, job)
-                return
+                held.append(job)
+                continue
             except (P.PromptError, VisionError, OutOfMemory) as e:
                 # the client's request, not a fault here: no traceback
                 logger.info("refused a request: %s", e)
@@ -498,8 +526,13 @@ class Scheduler:
         return ws - self._margin() if ws else 0
 
     def _measure(self, before: int) -> None:
+        """The step's TRANSIENT: its peak above the larger of where it
+        started and where it ended. What it kept (an admitted row's KV,
+        checkpoint copies) is growth, not transient -- counted as spike, one
+        50k-token admission ratcheted the margin up for the life of the
+        load."""
         import mlx.core as mx
-        spike = int(mx.get_peak_memory()) - before
+        spike = int(mx.get_peak_memory()) - max(before, self._active())
         if spike > self._spike * 1.25 and spike > GIB // 4:
             logger.info("a step's transient measured at %.2f GiB: the "
                         "memory margin is now %.2f GiB", spike / GIB,
@@ -557,7 +590,15 @@ class Scheduler:
         return int(copies * (fixed + per * n_tokens))
 
     def _fits(self, n_tokens: int) -> bool:
-        return self._room_for(n_tokens, copies=1)[0]
+        """Could a prompt of n_tokens fit once, counting what the prompt
+        cache would give up? No side effects: a request that waits must not
+        empty the shared prompt cache on every tick it waits."""
+        limit = self._limit()
+        if not limit or not self._kv:
+            return True
+        room = limit - self._active() + (self.cache.nbytes
+                                         if self.cache is not None else 0)
+        return self._cost(n_tokens, 1) <= room
 
     def _room_for(self, n_tokens: int, copies: int = 2):
         """(fits, need, room) for a prompt of n_tokens held `copies` times,
