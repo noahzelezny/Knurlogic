@@ -138,6 +138,14 @@ def test_a_shell_in_a_project_directory_is_not_a_runtime():
     assert loaded._runtime_of("-zsh") == ""
     assert loaded._runtime_of("/bin/zsh /Users/x/vqlab/run.sh") == ""
     assert loaded._runtime_of("tail -f /Users/x/exo/log.txt") == ""
+    # a console script run by its interpreter names itself only as the
+    # script (the M4's `knurlogic serve` was "everything else")
+    assert loaded._runtime_of(
+        "/opt/homebrew/Cellar/python@3.12/3.12.13_2/Frameworks/Python."
+        "framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python "
+        "/Users/n/kl-test/venv/bin/knurlogic serve /m --port 8097") \
+        == "knurlogic"
+    assert loaded._runtime_of("python3 -u run.py") == ""
     assert loaded._runtime_of("grep -r knurlogic src/") == ""
 
 

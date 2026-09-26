@@ -506,21 +506,32 @@ def _runtime_of(cmd: str) -> str:
     if base in _NOT_A_RUNTIME:
         return ""
 
-    # The module after `-m`, which is what names a python process.
+    # The module after `-m`, which is what names a python process -- or,
+    # for an interpreter running a script, the script: a console-script
+    # launch (`.../Python .../venv/bin/knurlogic serve`) names itself only
+    # there, and was counted as "everything else" (the M4, 2026-09-26).
     module = ""
     for i, tok in enumerate(parts[:-1]):
         if tok == "-m":
             module = parts[i + 1].lower()
             break
+    places = [exe]
+    if not module and base.startswith("python") and len(parts) > 1 \
+            and not parts[1].startswith("-"):
+        places.append(parts[1])
 
-    low_exe = exe.lower()
     for mark, name in _RUNTIME_MARKS:
-        if base == mark or module == mark or module.startswith(mark + "."):
+        if module == mark or module.startswith(mark + "."):
             return name
-        # A path component, i.e. an env or install directory belonging to it
-        # -- `/opt/anaconda3/envs/exo/bin/python3.13` is exo's interpreter.
-        if f"/{mark}/" in low_exe:
-            return name
+        for place in places:
+            low = place.lower()
+            if low.rsplit("/", 1)[-1].lstrip("-") == mark:
+                return name
+            # A path component, i.e. an env or install directory belonging
+            # to it -- `/opt/anaconda3/envs/exo/bin/python3.13` is exo's
+            # interpreter.
+            if f"/{mark}/" in low:
+                return name
     return ""
 
 
