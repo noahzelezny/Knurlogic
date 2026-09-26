@@ -297,7 +297,7 @@ class VisionPooler(nn.Module):
                                  hidden_states)
         length = output_length or self.default_output_length
         if hidden_states.shape[1] == length:
-            mask = padding_positions
+            mask = mx.logical_not(padding_positions)  # True = valid, as pooled
         else:
             hidden_states, mask = self._avg_pool_by_positions(
                 hidden_states, patch_positions, length)

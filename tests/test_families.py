@@ -183,3 +183,32 @@ def test_no_serve_module_imports_a_sibling_the_package_shadows():
                 for a in node.names:
                     assert isinstance(getattr(pkg, a.name, None),
                                       types.ModuleType), (f.name, a.name)
+
+
+def test_a_head_name_claimed_by_two_families_is_refused(monkeypatch):
+    """Like a thinking dialect: two families naming one head would leave
+    whichever loaded last deciding the other's cache semantics."""
+    import pytest
+    two = [{"name": f, "architectures": {f"m_{f}": {
+        "model_types": [f"t_{f}"], "head": {"names": ["mtp"], "k": f}}}}
+        for f in ("a", "b")]
+    monkeypatch.setattr(families, "manifests", lambda: two)
+    with pytest.raises(ValueError, match="claimed twice"):
+        families.build_maps()
+
+
+def test_required_modules_follow_dependencies_of_dependencies(monkeypatch):
+    from knurlogic.engine import arch
+    monkeypatch.setitem(arch.ARCH_FOR_MODEL_TYPE, "t_x", "x")
+    monkeypatch.setattr(arch, "ARCH_DEPENDS_ON", {"x": ["y"], "y": ["z"]})
+    assert arch.required_modules("t_x") == ["x", "y", "z"]
+
+
+def test_one_malformed_pin_costs_only_itself(tmp_path, monkeypatch):
+    import json
+    from knurlogic.engine import arch
+    (tmp_path / "pins.json").write_text(json.dumps(
+        {"good": {"sha256": "ab"}, "bad": "TODO"}))
+    monkeypatch.setattr(arch._families, "architecture_dirs",
+                        lambda: [tmp_path])
+    assert arch._load_pins() == {"good": "ab"}
