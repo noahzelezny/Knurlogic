@@ -579,6 +579,55 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
         up.close()
 
 
+#: What `/peek` may read, and the query keys it passes along. Reads only:
+#: a running model's settings and sampling defaults, a peer page's machine
+#: settings. Nothing that changes anything is reachable through it.
+PEEK_PATHS = ("/settings.json", "/v1/models")
+PEEK_KEYS = ("tune", "working_set_gib", "wired_gib")
+PEEK_S = 3.0
+
+
+def peek_targets() -> set:
+    """Addresses `/peek` may read from: the running models the chat proxy
+    already allows, and the pages of peers that are answering -- machines
+    this page polls anyway, never an address taken from the request."""
+    out = set(chat_targets())
+    for p in (PEERS.all() if PEERS else []):
+        if p.state == "answering":
+            out.add(f"http://{p.key}")
+    return out
+
+
+def peek(q: dict, fetch=None) -> tuple:
+    """GET /peek?where=<base>&path=<path>: another server's read-only
+    document, for a page that cannot call another port or machine itself.
+
+    (status, body): the upstream's JSON as it came, or a JSON error. GET
+    only, a fixed list of paths and targets, a short deadline: Settings on
+    a peer's tab reads that peer and can never set anything on it."""
+    import urllib.parse
+    import urllib.request
+    where = ((q.get("where") or [""])[0] or "").rstrip("/")
+    path = (q.get("path") or [""])[0]
+    if path not in PEEK_PATHS:
+        return 403, json.dumps({"error": f"not a readable path: {path!r}"})
+    if where not in peek_targets():
+        return 403, json.dumps({"error": f"not a server this page knows: "
+                                         f"{where or '(none)'}"})
+    fwd = {k: q[k][0] for k in PEEK_KEYS if q.get(k)}
+    url = where + path + ("?" + urllib.parse.urlencode(fwd) if fwd else "")
+    if fetch is None:
+        def fetch(u, t):
+            with urllib.request.urlopen(u, timeout=t) as r:
+                return r.read()
+    try:
+        body = fetch(url, PEEK_S)
+        json.loads(body)          # pass on JSON only, never an HTML page
+        return 200, body.decode() if isinstance(body, bytes) else body
+    except Exception as e:
+        return 502, json.dumps({"error": f"{type(e).__name__}: {e}"})
+
+
 #: Bonjour (cluster/discovery.py); None when it could not start.
 DISCOVERY = None
 
@@ -682,6 +731,10 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
             intro = self.headers.get("X-Knurlogic-Peer")
             if intro and PEERS:
                 PEERS.introduce(self.client_address[0], intro)
+            if u.path.rstrip("/") == "/peek":
+                code, doc = peek(parse_qs(u.query))
+                self._send(doc.encode(), "application/json", code)
+                return
             h = routes.get(u.path.rstrip("/") or "/")
             if h is None:
                 self._send(b"not found", "text/plain", 404)

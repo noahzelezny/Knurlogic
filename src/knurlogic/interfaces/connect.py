@@ -60,6 +60,60 @@ def openai_snippet(base_url: str, model: str) -> str:
             f"model     {model}")
 
 
+def curl_snippet(base_url: str, model: str) -> str:
+    """One request by hand -- the quickest proof the endpoint answers."""
+    body = json.dumps({"model": model,
+                       "messages": [{"role": "user", "content": "hello"}]})
+    return (f"curl {base_url}/v1/chat/completions \\\n"
+            f"  -H 'Content-Type: application/json' \\\n"
+            f"  -d '{body}'")
+
+
+#: The MCP server is stdio, not HTTP: a client starts `knurlogic mcp` itself,
+#: so there is no base URL or model in it -- it reaches every model here.
+MCP_ADD = "claude mcp add knurlogic -- knurlogic mcp"
+
+
+def mcp_json() -> str:
+    return json.dumps({"mcpServers": {"knurlogic": {
+        "command": "knurlogic", "args": ["mcp"]}}}, indent=2)
+
+
+def endpoints(base_url: str, model: str) -> list:
+    """Every way in, one entry each, for a page that shows one at a time.
+
+    The same text `render` prints, split by client so a picker can list
+    them; the page fills in the base URL and model it is pointed at."""
+    return [
+        {"id": "openai", "name": "OpenAI-compatible",
+         "what": "anything that speaks OpenAI: Zed, Cline, Continue, "
+                 "OpenWebUI, the openai SDKs",
+         "needs_model": True,
+         "blocks": [{"label": "settings",
+                     "text": openai_snippet(base_url, model)}]},
+        {"id": "claude", "name": "Claude Code",
+         "what": "a Claude-Messages harness, over /v1/messages",
+         "needs_model": True,
+         "blocks": [{"label": "in a terminal",
+                     "text": claude_command(base_url, model)},
+                    {"label": "scoped to one directory, as "
+                              ".claude/settings.json (not the global one: "
+                              "that routes every session on the machine)",
+                     "text": project_settings(base_url, model)}]},
+        {"id": "mcp", "name": "MCP",
+         "what": "the agent-facing tools (ready, fit, settings, load) over "
+                 "stdio; the client starts it, so no address is needed",
+         "needs_model": False,
+         "blocks": [{"label": "Claude Code", "text": MCP_ADD},
+                    {"label": "any MCP client's config", "text": mcp_json()}]},
+        {"id": "curl", "name": "curl",
+         "what": "one request by hand",
+         "needs_model": True,
+         "blocks": [{"label": "chat completion",
+                     "text": curl_snippet(base_url, model)}]},
+    ]
+
+
 def render(base_url: str, model: str) -> str:
     return "\n".join([
         "a Claude-Messages harness, in a terminal:",
