@@ -1,22 +1,17 @@
-"""engine/serve/ -- the one place that knows what runs a model, and every
-change knurlogic makes to mlx-lm's own server, one module each.
+"""engine/serve/ -- what the served model is and what it can do: the
+pieces knurlogic's own server (engine/runtime, interfaces/http) builds on,
+one module each. (Until 2026-09-25 this package patched mlx-lm's server in
+~34 places; that server is gone -- docs/SERVER.md.)
 
-  server.py        serve / switch / unload: pin the served model, install
-                   the changes below, add knurlogic's routes, hand over
-  load.py          engine info, load, memory, the server's argv, the cache
-                   limit, knobs a running process can change, tool dialects
+  load.py          engine info, load, memory, the cache limit, knobs a
+                   running process can change, tool dialects
   state.py         what is served, drafting, vision: the process's dicts
-  vq_runtime.py    verified rungs load on knurlogic's VQ runtime (engine/vq)
   cache_report.py  usage.knurlogic.cache: what the prompt cache actually did
-  cache_guard.py   an exact prompt-cache hit still leaves a token to process
   segments.py      the system prompt gets its own segment (checkpoint) on
-                   templates where mlx-lm's diff finds none (GLM)
-                   (mlx-lm's batch path crashes on an empty remainder)
+                   templates where the empty-turn diff finds none (GLM)
   thinking.py      reasoning_effort -> each chat template's own controls
-  sampling.py      a request's seed reaches the sampler (mlx-lm's compiled
-                   sampler ignores it off the main thread)
-  drafting.py      an artifact's MTP head in mlx-lm's server (engine/mtp)
-  vision.py        images through mlx-lm's server (engine/vision)
+  drafting.py      an artifact's MTP head, bound to the loaded model
+  vision.py        the served model's vision family, bound at load
 
 Callers import the package and use the names below; which module holds a
 name is this package's business. Importing it imports no mlx -- only
@@ -56,21 +51,17 @@ the signature. Nobody downstream should ever learn that.
 
 from .load import (HOST_PACKAGES, LIVE_KNOBS, EngineInfo, apply_live,
                    describe, generate, info, keeps_mtp_weights, load, memory,
-                   models_module, server_argv, set_cache_limit, tool_support)
-from .server import serve, switch, unload
+                   models_module, set_cache_limit, tool_support)
 from .state import served_path
-from .drafting import drafting_status, install as install_drafting, \
-    load_head as load_draft_head
+from .drafting import drafting_status, load_head as load_draft_head
 from .thinking import status as thinking_status
-from .vision import (VISION_WRAPS, bind as bind_vision, clear as clear_vision,
-                     install as install_vision, served_vision, vision_status)
+from .vision import (bind as bind_vision, clear as clear_vision,
+                     served_vision, vision_status)
 
 __all__ = [
-    "HOST_PACKAGES", "LIVE_KNOBS", "EngineInfo", "VISION_WRAPS", "apply_live",
+    "HOST_PACKAGES", "LIVE_KNOBS", "EngineInfo", "apply_live",
     "bind_vision", "clear_vision", "describe", "drafting_status", "generate",
-    "info", "install_drafting", "install_vision", "keeps_mtp_weights", "load",
-    "load_draft_head", "memory", "models_module", "serve", "served_path",
-    "served_vision", "server_argv", "set_cache_limit", "switch",
-    "thinking_status",
-    "tool_support", "unload", "vision_status",
+    "info", "keeps_mtp_weights", "load", "load_draft_head", "memory",
+    "models_module", "served_path", "served_vision", "set_cache_limit",
+    "thinking_status", "tool_support", "vision_status",
 ]

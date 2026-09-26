@@ -282,12 +282,12 @@ KNOB_ALIASES = {
 
 
 # --- which knobs the ENGINE consumes ----------------------------------------
-# Most knobs are read by an artifact's bundled runtime. These three are not:
-# mlx-lm's server takes the prompt chunk and concurrency as argv, and the
-# buffer cache is a process-global mlx setting. Emitting them as environment
-# variables and stopping there is how they were, for a while, settings that
-# did nothing -- the resolver explained a prompt chunk the server never saw.
-# `engine.serve` is the only thing that turns these into argv and calls.
+# Most knobs are read by an artifact's bundled runtime. These are not: the
+# scheduler takes the prompt chunk directly (interfaces/http.scheduler_
+# options), and the buffer cache is a process-global mlx setting. Emitting
+# them as environment variables and stopping there is how they were, for a
+# while, settings that did nothing -- the resolver explained a prompt chunk
+# the server never saw.
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "prompt_concurrency")
                           for n in KNOB_ALIASES[k])

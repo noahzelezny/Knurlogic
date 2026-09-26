@@ -160,73 +160,36 @@ class _Qwen38Tok:
         return "effort=" + kw.get("reasoning_effort", "xhigh")
 
 
-def _fake_srv(tok):
-    seen = {}
-
-    class H:
-        def handle_completion(self, request, stop_words):
-            seen["kwargs"] = self.chat_template_kwargs
-            return "served"
-
-        def generate_response(self, *a, **k):
-            return {"choices": [{"message": {"content": "x",
-                                             "reasoning": "r"}}],
-                    "usage": {"prompt_tokens": 1}}
-
-        def completion_usage_response(self, *a, **k):
-            return {"choices": [], "usage": {"prompt_tokens": 1}}
-
-    class RG:
-        def generate(self, request, args, **k):
-            return "ctx", iter([types.SimpleNamespace(state=s) for s in
-                                ("reasoning", "reasoning", "normal")])
-
+def _serve(tok):
+    """The served tokenizer the translation reads (as the model host
+    registers it)."""
+    import types
     from knurlogic.engine.serve import state
     T._probe_cache.clear()
     state.SERVED["provider"] = types.SimpleNamespace(tokenizer=tok)
-    srv = types.SimpleNamespace(APIHandler=H, ResponseGenerator=RG)
-    T.install(srv)
-    return srv, seen
 
 
-def _handler(srv, body, client_kwargs=None):
-    h = srv.APIHandler()
-    h.body = body
-    h.chat_template_kwargs = client_kwargs
-    return h
-
-
-REQ = types.SimpleNamespace(request_type="chat")
-
-
-def test_the_hook_translates_and_reports():
-    srv, seen = _fake_srv(_Qwen38Tok())
-    h = _handler(srv, {"reasoning_effort": "medium"})
-    assert h.handle_completion(REQ, []) == "served"
-    assert seen["kwargs"] == {"reasoning_effort": "medium"}
-    resp = h.generate_response()
-    assert resp["usage"]["knurlogic"]["thinking"]["applied"] == "medium"
-    assert resp["choices"][0]["message"]["reasoning_content"] == "r"
+def test_translate_maps_the_level_and_reports_it():
+    _serve(_Qwen38Tok())
+    kwargs, rep = T.translate({"reasoning_effort": "medium"}, None)
+    assert kwargs == {"reasoning_effort": "medium"}
+    assert rep["applied"] == "medium"
 
 
 def test_a_silent_request_reports_what_the_server_renders():
-    srv, seen = _fake_srv(_Qwen38Tok())
-    h = _handler(srv, {})
-    h.handle_completion(REQ, [])
-    assert seen["kwargs"] is None
-    assert h._knurlogic_thinking["applied"] == "xhigh"   # the bare render
+    _serve(_Qwen38Tok())
+    kwargs, rep = T.translate({}, None)
+    assert kwargs is None
+    assert rep["applied"] == "xhigh"                    # the bare render
 
 
 def test_a_client_override_is_reported_by_what_it_renders():
     """Fable's case: reasoning_effort low, but the client's own kwargs turn
     thinking off. The prompt is closed-think; the report must say off."""
-    srv, seen = _fake_srv(_Qwen38Tok())
-    h = _handler(srv, {"reasoning_effort": "low"},
-                 client_kwargs={"enable_thinking": False})
-    h.handle_completion(REQ, [])
-    rep = h._knurlogic_thinking
-    assert seen["kwargs"] == {"reasoning_effort": "low",
-                              "enable_thinking": False}
+    _serve(_Qwen38Tok())
+    kwargs, rep = T.translate({"reasoning_effort": "low"},
+                              {"enable_thinking": False})
+    assert kwargs == {"reasoning_effort": "low", "enable_thinking": False}
     assert rep["applied"] == "off" and "won" in rep["note"]
     assert "translation alone gave low" in rep["note"]
 
@@ -235,36 +198,23 @@ def test_a_template_that_only_mentions_the_controls_is_not_trusted():
     class Deaf(_Qwen38Tok):
         def apply_chat_template(self, msgs, **kw):
             return "same every time"
-    srv, seen = _fake_srv(Deaf())
-    h = _handler(srv, {"reasoning_effort": "low"})
-    h.handle_completion(REQ, [])
-    assert seen["kwargs"] is None
-    assert h._knurlogic_thinking["applied"] == "not controllable"
+    _serve(Deaf())
+    kwargs, rep = T.translate({"reasoning_effort": "low"}, None)
+    assert kwargs is None
+    assert rep["applied"] == "not controllable"
 
 
-def test_exclude_strips_reasoning_and_tokens_are_counted():
-    srv, seen = _fake_srv(_Qwen38Tok())
-    h = _handler(srv, {"reasoning": {"exclude": True}})
-    h.handle_completion(REQ, [])
-    msg = h.generate_response()["choices"][0]["message"]
-    assert "reasoning" not in msg and "reasoning_content" not in msg
-    _, it = srv.ResponseGenerator().generate(REQ, None)
-    list(it)
-    usage = h.completion_usage_response()["usage"]
-    assert usage["completion_tokens_details"]["reasoning_tokens"] == 2
-
-
-def test_the_hook_refuses_a_bad_level_with_400():
-    srv, seen = _fake_srv(_Qwen38Tok())
-    sent = {}
-    h = _handler(srv, {"reasoning_effort": "lots"})
-    h.send_response = lambda c: sent.setdefault("code", c)
-    h.send_header = lambda *a: None
-    h.end_headers = lambda: None
-    import io
-    h.wfile = io.BytesIO()
-    h.handle_completion(REQ, [])
-    assert sent["code"] == 400 and "kwargs" not in seen
+def test_the_wire_refuses_a_bad_level_with_400_and_honours_exclude():
+    from knurlogic.interfaces.http import openai as O
+    _serve(_Qwen38Tok())
+    msgs = [{"role": "user", "content": "hi"}]
+    with pytest.raises(O.ApiError) as e:
+        O.build_job({"messages": msgs, "reasoning_effort": "lots"},
+                    chat=True, translate=T.translate)
+    assert e.value.status == 400 and e.value.param == "reasoning_effort"
+    _, ctx = O.build_job({"messages": msgs, "reasoning": {"exclude": True}},
+                         chat=True, translate=T.translate)
+    assert ctx["exclude"] is True
 
 
 # --- the probe on the REAL templates, through mlx-lm's own wrapper -----------------
@@ -396,25 +346,23 @@ def test_probe_holds_when_requests_race_it():
 
 
 def test_a_request_during_load_still_gets_its_level(monkeypatch):
-    """mlx-lm answers HTTP before the model is loaded. A request then has
-    no served tokenizer; it must be translated from the artifact's own
-    tokenizer on disk, not served the model's default."""
+    """A request that arrives while the model loads has no served
+    tokenizer yet; it is translated from the artifact's own tokenizer on
+    disk, not served the model's default."""
     import mlx_lm.utils
     from knurlogic.engine.serve import state
-    srv, seen = _fake_srv(_Qwen38Tok())
     state.SERVED["provider"] = types.SimpleNamespace(tokenizer=None)
     state.SERVED["path"] = "/artifact/still-loading"
+    T._probe_cache.clear()
     T._disk_tok.clear()
     loads = []
     monkeypatch.setattr(mlx_lm.utils, "load_tokenizer",
                         lambda p: loads.append(p) or _Qwen38Tok())
-    h = _handler(srv, {"reasoning_effort": "none"})
-    h.handle_completion(REQ, [])
-    assert seen["kwargs"] == {"enable_thinking": False}
-    assert h._knurlogic_thinking["applied"] == "off"
+    kwargs, rep = T.translate({"reasoning_effort": "none"}, None)
+    assert kwargs == {"enable_thinking": False}
+    assert rep["applied"] == "off"
     # loaded once, and let go once the served tokenizer exists
-    h2 = _handler(srv, {"reasoning_effort": "low"})
-    h2.handle_completion(REQ, [])
+    T.translate({"reasoning_effort": "low"}, None)
     assert len(loads) == 1
     state.SERVED["provider"] = types.SimpleNamespace(tokenizer=_Qwen38Tok())
     T._served_tokenizer()

@@ -40,30 +40,3 @@ def split_system(tokenizer, messages, prompt, segments, types, kwargs):
     if not (0 < k < len(first)) or list(prompt[:k]) != sys_tokens:
         return segments, types
     return [first[:k], first[k:], *segments[1:]], ["system", *types]
-
-
-def install(srv) -> None:
-    RG = srv.ResponseGenerator
-    real = getattr(RG, "_tokenize", None)
-    if real is None or getattr(real, "_knurlogic_segments", False):
-        return
-
-    def _tokenize(self, tokenizer, request, args):
-        prompt, segments, types, state = real(self, tokenizer, request, args)
-        if getattr(request, "request_type", "chat") != "chat":
-            return prompt, segments, types, state
-        msgs = getattr(request, "messages", None) or []
-        # the kwargs mlx-lm rendered the prompt with: its CLI defaults, then
-        # the request's own
-        prov = getattr(self, "model_provider", None)
-        kw = dict(getattr(getattr(prov, "cli_args", None),
-                          "chat_template_args", None) or {})
-        kw.update(getattr(args, "chat_template_kwargs", None) or {})
-        kw.pop("_knurlogic_close_think", None)   # generation prompt only
-        if getattr(request, "tools", None):
-            kw["tools"] = request.tools
-        segments, types = split_system(tokenizer, msgs, prompt,
-                                       segments, types, kw)
-        return prompt, segments, types, state
-    _tokenize._knurlogic_segments = True
-    RG._tokenize = _tokenize

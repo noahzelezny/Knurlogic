@@ -9,10 +9,7 @@ so a translation that quietly invented content would fail rather than pass.
 """
 
 import json
-import socket
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -22,61 +19,35 @@ from knurlogic.interfaces import messages as M
 MARKER = "from-the-stub-engine"
 
 
-def _free_port():
-    s = socket.socket(); s.bind(("127.0.0.1", 0))
-    p = s.getsockname()[1]; s.close(); return p
+STREAM = (
+    {"choices": [{"delta": {"content": MARKER}}]},
+    {"choices": [{"delta": {"tool_calls": [
+        {"index": 0, "id": "call_1",
+         "function": {"name": "read", "arguments": '{"path":'}}]}}]},
+    {"choices": [{"delta": {"tool_calls": [
+        {"index": 0, "function": {"arguments": '"a.py"}'}}]}}]},
+    {"choices": [{"delta": {}, "finish_reason": "tool_calls"}],
+     "usage": {"prompt_tokens": 7, "completion_tokens": 11}},
+)
 
 
-class _Engine(BaseHTTPRequestHandler):
-    """Answers /v1/chat/completions, streaming or not, like mlx-lm would."""
-    protocol_version = "HTTP/1.1"
-
-    def do_POST(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        req = json.loads(self.rfile.read(n) or b"{}")
-        if req.get("stream"):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Connection", "close")
-            self.end_headers()
-            for chunk in (
-                {"choices": [{"delta": {"content": MARKER}}]},
-                {"choices": [{"delta": {"tool_calls": [
-                    {"index": 0, "id": "call_1",
-                     "function": {"name": "read", "arguments": '{"path":'}}]}}]},
-                {"choices": [{"delta": {"tool_calls": [
-                    {"index": 0, "function": {"arguments": '"a.py"}'}}]}}]},
-                {"choices": [{"delta": {}, "finish_reason": "tool_calls"}],
-                 "usage": {"prompt_tokens": 7, "completion_tokens": 11}},
-            ):
-                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
-            self.wfile.write(b"data: [DONE]\n\n")
-            self.close_connection = True
-            return
-        body = json.dumps({
-            "choices": [{"message": {"role": "assistant", "content": MARKER},
+def _engine(oai: dict):
+    """An OpenAI chat transport answering like the engine's surface would:
+    the response dict, or (streaming) its SSE lines."""
+    if oai.get("stream"):
+        return [f"data: {json.dumps(c)}\n\n".encode() for c in STREAM] + \
+            [b"data: [DONE]\n\n"]
+    return {"choices": [{"message": {"role": "assistant", "content": MARKER},
                          "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 3, "completion_tokens": 5},
-            "echo": req,
-        }).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *a):
-        pass
+            "echo": oai}
 
 
-def _engine():
-    port = _free_port()
-    srv = ThreadingHTTPServer(("127.0.0.1", port), _Engine)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv, f"http://127.0.0.1:{port}/v1/chat/completions"
+def _dead(oai: dict):
+    raise M.TransportError(502, "the engine is not answering")
 
 
-def _call(url, req):
+def _call(transport, req):
     out, started = [], {}
 
     def write(b):
@@ -85,7 +56,8 @@ def _call(url, req):
     def start(code, ctype):
         started.update(code=code, ctype=ctype)
 
-    M.handler(url, model="test-model")(json.dumps(req).encode(), write, start)
+    M.handler_over(transport, model="test-model")(json.dumps(req).encode(),
+                                                  write, start)
     return started, b"".join(out)
 
 
@@ -144,13 +116,9 @@ def test_invalid_tool_json_is_passed_through_not_dropped():
 # --- over the wire ----------------------------------------------------------
 
 def test_non_streaming_round_trip():
-    srv, url = _engine()
-    try:
-        started, body = _call(url, {"model": "m", "max_tokens": 16,
+    started, body = _call(_engine, {"model": "m", "max_tokens": 16,
                                     "messages": [{"role": "user",
                                                   "content": "hi"}]})
-    finally:
-        srv.shutdown()
     assert started["code"] == 200
     out = json.loads(body)
     assert out["type"] == "message" and out["role"] == "assistant"
@@ -161,13 +129,9 @@ def test_non_streaming_round_trip():
 def test_streaming_emits_the_event_order_a_harness_parses():
     """The order is the contract. A stream that delivered the right tokens in
     the wrong frames would look fine in a terminal and break a harness."""
-    srv, url = _engine()
-    try:
-        started, body = _call(url, {"model": "m", "stream": True,
+    started, body = _call(_engine, {"model": "m", "stream": True,
                                     "messages": [{"role": "user",
                                                   "content": "hi"}]})
-    finally:
-        srv.shutdown()
     assert started["ctype"] == "text/event-stream"
     events = [l[7:] for l in body.decode().splitlines()
               if l.startswith("event: ")]
@@ -191,8 +155,7 @@ def test_streaming_emits_the_event_order_a_harness_parses():
 
 
 def test_a_dead_engine_answers_an_anthropic_shaped_error():
-    started, body = _call("http://127.0.0.1:1/v1/chat/completions",
-                          {"messages": []})
+    started, body = _call(_dead, {"messages": []})
     assert started["code"] == 502
     assert json.loads(body)["error"]["type"] == "api_error"
 

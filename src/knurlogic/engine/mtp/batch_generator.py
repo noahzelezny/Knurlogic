@@ -1,5 +1,7 @@
-"""Drafting when mlx-lm's server batches: its BatchGenerator, backed by
-batch_loop.MTPBatch instead of GenerationBatch.
+"""The batch engine: mlx-lm's BatchGenerator (as a library class), backed
+by batch_loop.MTPBatch instead of GenerationBatch -- drafting with an MTP
+head when there is one, and the same engine without. knurlogic's server
+drives it through engine/runtime/executor.LocalExecutor.
 
 Ported from the exo fork's `generator/mtp_batch_generate.py`. The engine
 underneath is the same one -- `admit` prefills a row and seeds the head,
@@ -18,14 +20,14 @@ three decisions that fork paid for:
     replay (see batch_loop's docstring for what that costs and when).
 
 What differs is only the contract on the outside. exo's runner calls
-`submit / step / cancel`; mlx-lm's server calls `insert_segments / next /
+`submit / step / cancel`; the executor calls `insert_segments / next /
 remove / extract_cache / close / prompt_cache_nbytes`. So this SUBCLASSES
 mlx-lm's BatchGenerator: queueing, uid allocation and the wired-limit
 handling are inherited unchanged, and only where a row is prefilled and
 where tokens come from are replaced.
 
 TWO THINGS THE CONSUMER ALLOWS THAT ARE WORTH SAYING OUT LOUD, because they
-were checked in mlx-lm's server loop rather than assumed:
+were checked in the consumer's loop rather than assumed:
 
   - `next()` may return more than one generation response for a uid. The
     server feeds each to that request's detokenizer in order, and only a
@@ -147,44 +149,13 @@ def trunk_offset(trunk: list) -> Optional[int]:
 
 
 def sampling_of(sampler) -> Optional[dict]:
-    """The parameters a sampler was BUILT from, if `tag_samplers` saw it.
+    """A row's sampling parameters: the executor passes them as a dict
+    (make_distribution's kwargs, plus `seed`). Verification is rejection
+    sampling against the target distribution, so the drafting loop needs
+    the parameters, not a callable that has already collapsed them. None
+    means greedy."""
+    return sampler if isinstance(sampler, dict) else None
 
-    Verification is rejection sampling against the target distribution, so
-    the drafting loop needs temperature and friends, not a callable that has
-    already collapsed them. Untagged means greedy is the only safe reading
-    of it -- and that is only right if the tag is always there, which
-    `tag_samplers` guarantees for everything the server builds."""
-    if isinstance(sampler, dict):          # the executor passes params as is
-        return sampler
-    return getattr(sampler, "_knurlogic_sampling", None)
-
-
-def tag_samplers(srv) -> None:
-    """Wrap the server's `_make_sampler` so every sampler carries its args.
-
-    The sequential path gets these one frame up, in `_serve_single`; the
-    batch path never sees `args` at all -- `insert_segments` receives only
-    the built sampler. So the sampler is where they have to travel."""
-    if getattr(srv._make_sampler, "_knurlogic", False):
-        return
-    real = srv._make_sampler
-
-    def _make_sampler(args, tokenizer):
-        fn = real(args, tokenizer)
-        s = args.sampling
-        try:
-            fn._knurlogic_sampling = dict(
-                temp=s.temperature, top_p=s.top_p, top_k=s.top_k,
-                min_p=s.min_p, xtc_probability=s.xtc_probability,
-                xtc_threshold=s.xtc_threshold,
-                xtc_special_tokens=[tokenizer.eos_token_id,
-                                    *tokenizer.encode("\n")])
-        except AttributeError:
-            pass        # a builtin callable cannot carry it: greedy, see above
-        return fn
-
-    _make_sampler._knurlogic = True
-    srv._make_sampler = _make_sampler
 
 
 class LogitsTrunk:
@@ -484,17 +455,11 @@ class MTPBatchGenerator(BatchGenerator):
 
     def insert_segments(self, *a, reports=None, **kw):
         """`reports`: one object per row to receive its cache report (the
-        executor passes them); without it, the request mlx-lm's server just
-        tokenized on this thread (cachereport.claim)."""
+        executor passes them; engine/serve/cache_report.attach)."""
         uids = super().insert_segments(*a, **kw)
-        if reports is not None:
-            for u, r in zip(uids, reports):
-                if r is not None:
-                    self._requests[u] = r
-            return uids
-        req = cachereport.claim()
-        if req is not None and len(uids) == 1:
-            self._requests[uids[0]] = req
+        for u, r in zip(uids, reports or []):
+            if r is not None:
+                self._requests[u] = r
         return uids
 
     def _report_checkpoint(self) -> List[PromptProcessingBatch.Response]:
