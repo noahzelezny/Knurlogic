@@ -10,6 +10,28 @@ inference requests wait for it (they are queued, not refused).
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+
+#: the running server's scheduler, for the page's load/unload actions,
+#: which are built before the server is
+_CURRENT: dict = {}
+
+
+def switch(path: str) -> dict:
+    sched = _CURRENT["scheduler"]
+    before = sched.host.path
+    sched.load(str(path)).wait()
+    if sched.host.state != "ready":
+        raise RuntimeError(f"loading {Path(path).name} failed: "
+                           f"{sched.host.error}")
+    return {"loaded": str(path), "was": before}
+
+
+def unload() -> dict:
+    sched = _CURRENT["scheduler"]
+    had = sched.host.path
+    sched.unload().wait()
+    return {"unloaded": had}
 
 
 def serve(artifact, host: str, port: int, *, routes: dict | None = None,
@@ -35,6 +57,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
         prompt_cache_size=int(settings.get("prompt_cache_size", 10)),
         prompt_cache_bytes=settings.get("prompt_cache_bytes")).start()
     sched.load(str(artifact.path))
+    _CURRENT["scheduler"] = sched
 
     served = scout.served(artifact, mh)
     app = App(sched, served=served, routes=routes,

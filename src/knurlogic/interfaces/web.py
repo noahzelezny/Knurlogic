@@ -180,7 +180,8 @@ def loaded_document(ttl: float = 4.0):
     return handler
 
 
-def load_action(artifact_for, resolve_fn=None, live_knobs=()):
+def load_action(artifact_for, resolve_fn=None, live_knobs=(),
+                switch_fn=None, unload_fn=None):
     """`POST /loaded.json` -- load, unload, or hand the job to exo.
 
     The reason this is knurlogic's job and not a link to exo's page: a model
@@ -220,12 +221,14 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=()):
         act, target = req.get("action"), req.get("target") or ""
         where = req.get("where") or ""
         try:
+            # knurlogic's own server passes its scheduler's: a load runs on
+            # the thread that owns the MLX stream, never on this one
             if act == "load":
-                r = engine.switch(target)
+                r = (switch_fn or engine.switch)(target)
                 r["settings"] = _drift(target)
                 return r
             if act == "unload":
-                return engine.unload()
+                return (unload_fn or engine.unload)()
             # The same functions the MCP calls, so the page refuses what an
             # agent would be refused, and says why in the same words.
             if act == "exo-load":
