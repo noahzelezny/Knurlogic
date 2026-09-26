@@ -49,7 +49,13 @@ NON_CHAT_MODEL_TYPES = frozenset({
 #: Where each tool keeps its models. Env var first, then the defaults it
 #: ships with. Adding a store is a line, which is the point -- there will be
 #: a fifth.
+#: knurlogic's own store: a VISIBLE folder, deliberately -- models are the
+#: biggest files on the disk, and a hidden one is where space goes missing.
+#: KNURLOGIC_MODELS moves it (e.g. to an external SSD).
+MODELS_DIR = "~/Knurlogic/Models"
+
 STORES = (
+    ("knurlogic", ("KNURLOGIC_MODELS",), (MODELS_DIR,)),
     # exo's own dirs come from `exo_model_dirs`, which mirrors exo's
     # resolution; these are only the names older launch scripts exported.
     ("exo", ("EXO_MODELS_DIR",), ("~/.cache/exo/models",)),
