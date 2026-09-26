@@ -375,6 +375,15 @@ def routes(status_fn=None, settings_fn=None, apply_fn=None,
     """
     r = {}
 
+    def _connect(_q, _n=0):
+        # Templates, not answers: which model the page is pointed at is the
+        # page's to say (it knows what is running on every machine), so the
+        # placeholders are filled in there.
+        from knurlogic.interfaces import connect
+        return _json({"endpoints": connect.endpoints("__BASE__",
+                                                     "__MODEL__")})
+    r["/connect.json"] = _connect
+
     if PAGE.is_file():
         def _page(_q, _n=0):
             return PAGE.read_bytes(), "text/html; charset=utf-8"
