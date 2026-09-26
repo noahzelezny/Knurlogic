@@ -28,6 +28,17 @@ logger = logging.getLogger(__name__)
 
 CHAT_PATHS = ("/v1/chat/completions", "/chat/completions")
 
+#: Largest request body read, bytes (--max-request-mib). The body is read
+#: into memory before anything else can judge it, so it is bounded first.
+#: Generous: images are bounded separately by the image store's memory.
+DEFAULT_MAX_BODY = 512 * 1024 * 1024
+
+
+class BodyError(Exception):
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+
 
 class App:
     """What the handler needs: the scheduler, what is served, the page's
@@ -38,7 +49,8 @@ class App:
                  gate=None,
                  concurrency: Callable[[], str] = None,
                  residency: Callable[[], dict] = None,
-                 ensure: Callable[[dict], dict] = None):
+                 ensure: Callable[[dict], dict] = None,
+                 max_body: int = DEFAULT_MAX_BODY):
         from knurlogic.engine.serve import thinking
         from knurlogic.interfaces import messages
         self.scheduler = scheduler
@@ -48,6 +60,7 @@ class App:
         self.concurrency = concurrency
         self.residency = residency
         self.ensure = ensure
+        self.max_body = int(max_body)
         self.translate = thinking.translate
         self.requests = 0
         self.messages = messages.handler_over(self._transport,
@@ -133,10 +146,25 @@ class Handler(BaseHTTPRequestHandler):
         self._send(403, g.refusal(local), "text/plain; charset=utf-8")
         return True
 
-    def _body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(n) if n else b""
-        return raw
+    def _body(self) -> bytes:
+        """The request body, bounded before a byte is read."""
+        cl = self.headers.get("Content-Length")
+        if cl is None:
+            if self.headers.get("Transfer-Encoding"):
+                raise BodyError(411, "send the body with a Content-Length "
+                                     "(chunked uploads are not accepted)")
+            return b""
+        try:
+            n = int(cl)
+        except ValueError:
+            raise BodyError(400, f"Content-Length {cl!r} is not a number")
+        if n < 0:
+            raise BodyError(400, "Content-Length is negative")
+        if n > self.app.max_body:
+            raise BodyError(413, f"the request body is {n} bytes; the "
+                                 f"maximum is {self.app.max_body} bytes "
+                                 f"(--max-request-mib)")
+        return self.rfile.read(n) if n else b""
 
     # -------------------------------------------------------------- verbs
 
@@ -171,7 +199,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
-        raw = self._body()
+        try:
+            raw = self._body()
+        except BodyError as e:
+            self.close_connection = True       # the unread body is left
+            return self._error(O.ApiError(e.status, str(e)))
         if path in CHAT_PATHS or path == "/v1/completions":
             return self._inference(raw, chat=path != "/v1/completions")
         if path == "/v1/messages":

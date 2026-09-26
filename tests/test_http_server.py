@@ -237,3 +237,35 @@ def test_concurrent_requests_all_answer(url):
     for t in ts:
         t.join()
     assert len(out) == 6 and all(c == 200 for c, _ in out)
+
+
+def _raw(url, head: bytes) -> bytes:
+    import socket
+    from urllib.parse import urlparse
+    u = urlparse(url)
+    s = socket.create_connection((u.hostname, u.port), timeout=30)
+    s.sendall(head)
+    out = b""
+    while True:
+        b = s.recv(65536)
+        if not b:
+            break
+        out += b
+    s.close()
+    return out
+
+
+def test_a_body_over_the_cap_is_a_413_before_it_is_read(url):
+    u, _ = url
+    out = _raw(u, b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\n"
+                  b"Content-Type: application/json\r\n"
+                  b"Content-Length: 99999999999\r\n\r\n{")
+    assert out.split(b" ", 2)[1] == b"413"
+    assert b"maximum" in out and b"--max-request-mib" in out
+
+
+def test_a_malformed_content_length_is_a_400_not_a_dropped_connection(url):
+    u, _ = url
+    out = _raw(u, b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\n"
+                  b"Content-Length: lots\r\n\r\n")
+    assert out.split(b" ", 2)[1] == b"400" and b"not a number" in out

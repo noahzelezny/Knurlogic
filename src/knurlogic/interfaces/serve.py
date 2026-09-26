@@ -299,6 +299,8 @@ def main(argv=None) -> int:
                         "segment checkpoints)")
     p.add_argument("--prompt-cache-gib", type=float, default=0.0,
                    help="cap the prompt cache's memory; 0 = entries only")
+    p.add_argument("--max-request-mib", type=int, default=512,
+                   help="largest request body accepted (413 above it)")
     p.add_argument("--image-store-gib", type=float, default=0.0,
                    help="memory for encoded images (default 0.25). A "
                         "request's images must fit it together")
@@ -326,6 +328,7 @@ def main(argv=None) -> int:
                            a.node, a.launch, shlex.split(a.exo_cmd), a.local,
                            a.tune, draft=not a.no_draft)
     serving = {"decode_concurrency": a.decode_concurrency,
+               "max_body": a.max_request_mib * 1024 * 1024,
                "prompt_cache_size": a.prompt_cache_size}
     if a.prompt_cache_gib > 0:
         serving["prompt_cache_bytes"] = int(a.prompt_cache_gib * GIB)

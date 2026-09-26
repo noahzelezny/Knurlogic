@@ -66,7 +66,9 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     _CURRENT["scheduler"] = sched
 
     served = scout.served(artifact, mh)
+    from .server import DEFAULT_MAX_BODY
     app = App(sched, served=served, routes=routes,
+              max_body=settings.get("max_body", DEFAULT_MAX_BODY),
               concurrency=lambda: scout.concurrency(sched),
               residency=lambda: scout.residency(artifact, mh, sched),
               ensure=lambda body: scout.ensure(body, artifact, mh, sched))
