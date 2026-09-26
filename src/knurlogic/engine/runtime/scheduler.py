@@ -76,6 +76,24 @@ def _kv_from_config(path) -> Optional[tuple]:
         return None
 
 
+def _timing(row, done: float, completion: int, prefilled) -> dict:
+    """What the request took, measured here where the steps run: time in
+    the queue, time to first token (from submit, as a client feels it), and
+    the rates of the two phases. Prefill is from admission to the first
+    token, over the tokens actually prefilled (not the ones the prompt
+    cache supplied); decode is over the tokens after the first."""
+    first = row.first or done
+    out = {"queue_s": round(max(row.admitted - row.job.submitted, 0), 4),
+           "ttft_s": round(max(first - row.job.submitted, 0), 4)}
+    pre = first - row.admitted
+    if prefilled and pre > 0:
+        out["prefill_tok_s"] = round(prefilled / pre, 1)
+    dec = done - first
+    if completion > 1 and dec > 0:
+        out["decode_tok_s"] = round((completion - 1) / dec, 1)
+    return out
+
+
 class _Wait(Exception):
     """Not admitted yet: the request goes back to the front of the queue."""
 
@@ -109,6 +127,8 @@ class Job:
     prompt_tokens: int = 0
     #: the rows it waits for, once it has had to wait for memory
     waiting_on: Optional[set] = None
+    #: perf_counter at submit, for usage.knurlogic.timing
+    submitted: float = 0.0
 
     def cancel(self) -> None:
         """From the HTTP thread: the client went away; free the row."""
@@ -167,6 +187,8 @@ class _Row:
     job: Job
     text: Request
     types: List[str]          # segment types still to label checkpoints
+    admitted: float = 0.0     # perf_counter when its prefill was queued
+    first: float = 0.0        # ... when its first token came out
 
 
 class Scheduler:
@@ -212,6 +234,7 @@ class Scheduler:
         self._thread.join(10)
 
     def submit(self, job: Job) -> Job:
+        job.submitted = time.perf_counter()
         self._jobs.put(job)
         self._wake.set()
         return job
@@ -514,7 +537,8 @@ class Scheduler:
         except BaseException:
             ex.remove([uid])      # admitted but unobserved: never orphaned
             raise
-        self._rows[uid] = _Row(job, text, types)
+        self._rows[uid] = _Row(job, text, types,
+                               admitted=time.perf_counter())
         if self.cache_bytes is not None:
             self.cache.trim_to(self.cache_bytes - ex.cache_nbytes)
 
@@ -712,6 +736,8 @@ class Scheduler:
                     self.cache.insert(self.host.model_key, e.tokens, e.cache,
                                       row.types.pop(0))
             elif isinstance(e, Token):
+                if not row.first:
+                    row.first = time.perf_counter()
                 d = row.text.feed(e)
                 if d:
                     row.job.outbox.put(("delta", d))
@@ -743,8 +769,12 @@ class Scheduler:
         if tail:
             row.job.outbox.put(("delta", tail))
         from knurlogic.engine.serve import cache_report
-        row.job.outbox.put(("done", row.text.usage(
-            cache_report.of(row.job.request))))
+        report = cache_report.of(row.job.request)
+        usage = row.text.usage(report)
+        usage.setdefault("knurlogic", {})["timing"] = _timing(
+            row, time.perf_counter(), usage.get("completion_tokens", 0),
+            (report or {}).get("prefilled"))
+        row.job.outbox.put(("done", usage))
 
     def _error(self, job: Job, err: BaseException) -> None:
         job.outbox.put(("error", err))

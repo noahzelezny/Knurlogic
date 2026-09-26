@@ -84,9 +84,13 @@ class App:
         return state.VISION.get("serve") is not None
 
     def submit(self, body: dict, chat: bool):
+        from knurlogic.machine.artifact import sampling_defaults
+        path = self.scheduler.host.path
         job, ctx = O.build_job(body, chat=chat,
                                translate=self.translate if chat else None,
-                               has_vision=self.has_vision)
+                               has_vision=self.has_vision,
+                               sampling_defaults=(sampling_defaults(path)
+                                                  if path else None))
         self.requests += 1
         self.scheduler.submit(job)
         host = self.scheduler.host
@@ -234,7 +238,11 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         if path == "/v1/models":
-            return self._json(200, O.models_document(self.app.served()))
+            from knurlogic.machine.artifact import sampling_defaults
+            path = self.app.scheduler.host.path
+            return self._json(200, O.models_document(
+                self.app.served(),
+                sampling_defaults(path) if path else {}))
         if path == "/health":
             return self._json(200, {"status": "ok", "server": "knurlogic",
                                     "model": self.app.scheduler.host.state})
