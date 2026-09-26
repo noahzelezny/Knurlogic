@@ -324,3 +324,63 @@ def test_397b_on_the_m4_admits_the_prompts_it_refused():
     assert s._room_to_admit()
     assert s._make_room(31222) in ("full", "lean")
     assert s._make_room(20577) == "full"
+
+
+def test_what_was_measured_goes_with_the_model():
+    """A 35B's slope must not cost a 397B's prompt (Fable 5.1)."""
+    from knurlogic.engine.runtime.scheduler import Command, Scheduler
+
+    class H:
+        state, path, error = "ready", "/m/a", ""
+
+        def load(self, p, **k):
+            self.path = p
+    s = Scheduler(H())
+    s._kv, s._samples, s._spike = (1.0, 2.0), {"lo": (1, 1)}, 5 << 30
+    c = Command("load", "/m/b")
+    s._commands.put(c)
+    s._do_commands()
+    assert c.error == "" and s._samples == {} and s._spike == 0
+    assert s._kv is None          # /m/b has no config to seed from
+
+
+def test_the_spike_is_what_the_step_did_not_keep():
+    """An admission's KV is growth; only the peak above where the step
+    ENDED is transient."""
+    import mlx.core as mx
+    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
+    s._active = lambda: int(101.5 * GIB)
+    real = mx.get_peak_memory
+    try:
+        mx.get_peak_memory = lambda: 102 * GIB
+        s._measure(100 * GIB)
+    finally:
+        mx.get_peak_memory = real
+    assert s._spike == GIB // 2
+
+
+def test_a_waiting_prompt_neither_empties_the_cache_nor_blocks_the_line():
+    from knurlogic.engine.runtime import prompt as P
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+
+    class Cache:
+        nbytes = 2 * GIB
+
+        def trim_to(self, n):
+            raise AssertionError("a waiting prompt trimmed the cache")
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
+    s._spike = 4 * GIB                            # limit 100
+    s._active = lambda: 95 * GIB
+    s.cache = Cache()
+    s._kv = (0.0, float(2**20))                   # 1 MiB per token
+    big = S.Job(P.ChatRequest(), P.PromptArgs())
+    big.prompt_tokens = 20000                     # ~19.5 GiB: cannot fit
+    small = S.Job(P.ChatRequest(), P.PromptArgs())
+    s._rows = {1: S._Row(S.Job(P.ChatRequest(), P.PromptArgs()), None, [])}
+    admitted = []
+    s._insert = lambda job: admitted.append(job)
+    s._waiting = [big, small]
+    s._admit_waiting()
+    assert admitted == [small] and s._waiting == [big]

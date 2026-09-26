@@ -251,3 +251,27 @@ def test_the_draft_step_hands_processors_the_same_history_as_a_plain_one(
     plain = run(0)                 # never drafting
     assert plain == list(range(10, 22))
     assert run(8) == plain         # always drafting
+
+
+def test_removing_a_row_frees_its_memory_now_not_at_the_next_step():
+    """Filtering the batch is lazy in MLX: without an eval the old
+    full-width arrays stay alive, and the scheduler's memory guard --
+    stopping one row to get back under the limit -- saw no drop and
+    stopped every row (Fable 5.1)."""
+    import gc
+    import mlx.core as mx
+    from knurlogic.engine.runtime.executor import Admission
+    model, head, prompts = _tiny(512)
+    ex = _executor(model, head)
+    uids = [ex.insert(Admission(segments=[p * 8], max_tokens=64))
+            for p in prompts[:3]]
+    for _ in range(6):
+        ex.step()
+    gc.collect()
+    mx.clear_cache()
+    before = mx.get_active_memory()
+    ex.remove([uids[-1]])
+    gc.collect()
+    mx.clear_cache()
+    assert mx.get_active_memory() < before
+    ex.close()
