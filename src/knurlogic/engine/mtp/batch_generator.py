@@ -77,7 +77,7 @@ from knurlogic.engine.serve import cache_report as cachereport
 from .capture import capture_input
 from .registry import resolve
 from .caches import position
-from .sampling import (NonFiniteLogits, make_distribution,
+from .sampling import (Keys, NonFiniteLogits, make_distribution,
                        nonfinite_message)
 from ..vision import key as K
 
@@ -336,10 +336,13 @@ class MTPBatchGenerator(BatchGenerator):
         if len(prefix) > 0 and hit == 0:
             logger.info("prompt cache entry at %d/%d tokens has no aligned "
                         "head cache; prefilling from scratch", len(prefix), n)
+        sampling = dict(sampling_of(sampler) or {})
+        seed = sampling.pop("seed", None)
         params = RowParams(max_tokens=_NEVER,
-                           dist=make_distribution(**(sampling_of(sampler) or {})),
+                           dist=make_distribution(**sampling),
                            processors=list(procs or []), eos=set(),
-                           drafts=drafts)
+                           drafts=drafts,
+                           keys=Keys(seed) if seed is not None else None)
         try:
             with mx.stream(self._stream):
                 if vis is None:

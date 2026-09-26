@@ -55,7 +55,7 @@ from mlx_lm.generate import _extend_cache, _merge_caches
 
 from .caches import position, restore, snapshot
 from .seed import seed_head
-from .sampling import Distribution, rejection_correct
+from .sampling import Distribution, Keys, rejection_correct
 
 __all__ = ["RowParams", "Row", "Emitted", "RowStep", "MTPBatch", "admit",
            "default_draft_max_rows"]
@@ -97,6 +97,8 @@ class RowParams:
     eos: set
     #: False for a row the head must not draft for; it still decodes correctly.
     drafts: bool = True
+    #: the request's own random stream (a seed), or None for the global one
+    keys: Optional[Keys] = None
 
 
 @dataclass
@@ -165,7 +167,12 @@ def _pick(row: mx.array, p: RowParams, emitted: List[int]) -> mx.array:
     row = _apply(row, p.processors, emitted)
     if p.dist is None:
         return mx.argmax(row, axis=-1)
-    return p.dist(row).sample()
+    return p.dist(row).sample(_key(p, len(emitted)))
+
+
+def _key(p: RowParams, position: int):
+    """The seeded row's key for the token at `position`, or None."""
+    return p.keys.at(position) if p.keys is not None else None
 
 
 def admit(
@@ -638,7 +645,8 @@ class MTPBatch:
                 qs.append(None)
             else:
                 q = p.dist(row)
-                d2_rows.append(q.sample())
+                # the draft for position len+1 (t1 is at len)
+                d2_rows.append(q.sample(_key(p, len(self.emitted[i]) + 1)))
                 qs.append(q)
         d2 = mx.concatenate(d2_rows).astype(mx.int32)
 
@@ -658,7 +666,9 @@ class MTPBatch:
             if not live[i]:
                 # Non-drafting row: the trunk's own token, committed through
                 # the replay below.
-                t2 = mx.argmax(row, axis=-1) if p.dist is None else p.dist(row).sample()
+                t2 = (mx.argmax(row, axis=-1) if p.dist is None
+                      else p.dist(row).sample(
+                          _key(p, len(self.emitted[i]) + 1)))
                 oks[i] = False
                 t2_rows[i] = t2
                 lazy.append(t2)
@@ -668,9 +678,18 @@ class MTPBatch:
                 oks[i] = ok
                 t2_rows[i] = mx.where(ok, d2[i:i + 1], true_t2)
                 lazy += [ok, t2_rows[i]]
+            elif p.keys is not None:
+                # seeded: the target's own draw under the draft's key; the
+                # draft is accepted iff they agree (sampling.Keys)
+                t2 = p.dist(row).sample(_key(p, len(self.emitted[i]) + 1))
+                acc = t2 == d2[i:i + 1]
+                oks[i] = acc
+                t2_rows[i] = t2
+                lazy += [acc, t2]
             else:
                 pt = p.dist(row)
-                acc, t2 = rejection_correct(pt.probs, qs[i].probs, d2[i:i + 1])
+                acc, t2 = rejection_correct(pt.probs, qs[i].probs,
+                                            d2[i:i + 1])
                 oks[i] = acc
                 t2_rows[i] = t2
                 lazy += [acc, t2]
