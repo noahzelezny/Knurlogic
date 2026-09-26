@@ -219,6 +219,7 @@ def test_models_and_health(url):
         d = json.loads(r.read())
     assert d["object"] == "list" and d["data"][0]["id"] == "tiny"
     assert d["data"][0]["capabilities"] == ["text"]
+    assert isinstance(d["data"][0]["context_length"], int)
     with urllib.request.urlopen(u + "/health") as r:
         assert json.loads(r.read())["status"] == "ok"
 
@@ -409,3 +410,24 @@ def test_count_tokens_is_the_prompt_the_model_would_see(url):
         body, messages=[{"role": "user", "content": "1 2 3 4 5 6"}]))
     assert code == code2 == 200
     assert json.loads(raw2)["input_tokens"] == n + 3 > 3
+
+
+def test_models_carries_the_context_window(tmp_path):
+    """/v1/models says how long a context the model takes, from its
+    config (text_config's for a multimodal wrapper); the page offers
+    max_tokens up to it. 0 when the config does not say."""
+    import json
+    from knurlogic.interfaces.http import openai as O
+    from knurlogic.machine.artifact import context_length
+    assert context_length(tmp_path) == 0
+    (tmp_path / "config.json").write_text(json.dumps(
+        {"text_config": {"max_position_embeddings": 262144}}))
+    assert context_length(tmp_path) == 262144
+    (tmp_path / "config.json").write_text(json.dumps(
+        {"max_position_embeddings": 32768,
+         "text_config": {"max_position_embeddings": 4096}}))
+    n = context_length(tmp_path)
+    assert n == 32768
+    doc = O.models_document({"id": "m"}, {}, n)
+    assert doc["data"][0]["context_length"] == 32768
+    assert O.models_document({"id": "m"})["data"][0]["context_length"] == 0

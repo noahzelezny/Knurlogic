@@ -175,6 +175,21 @@ class Artifact:
         )
 
 
+def context_length(path) -> int:
+    """The model's context window from its config.json --
+    max_position_embeddings, or text_config's for a multimodal wrapper --
+    0 when the config does not say. The page offers max_tokens up to it."""
+    try:
+        cfg = json.loads((Path(path) / "config.json").read_text())
+    except Exception:
+        return 0
+    for c in (cfg, cfg.get("text_config") if isinstance(cfg, dict) else None):
+        v = c.get("max_position_embeddings") if isinstance(c, dict) else None
+        if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+            return v
+    return 0
+
+
 #: generation_config.json key -> the sampler's name for it
 _SAMPLING_KEYS = (("temperature", "temp"), ("top_p", "top_p"),
                   ("top_k", "top_k"), ("min_p", "min_p"))
