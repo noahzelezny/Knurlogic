@@ -1,7 +1,7 @@
 """The agent-facing tools, and the two refusals that are the point of them.
 
-Managing local models by hand through exo means guessing: whether the ring
-has settled, whether a model fits. An agent guesses worse than a person and
+Managing local models by hand means guessing: whether memory has settled,
+whether a model fits. An agent guesses worse than a person and
 faster, so these tools refuse rather than gamble -- and a refusal that can be
 argued out of is not one.
 """
@@ -38,72 +38,16 @@ def test_every_tool_is_in_the_table_with_a_schema():
         assert t["name"] in mcp.TOOLS
 
 
-def _dl(kind, model, **body):
-    """One entry in exo's own shape: /state downloads[node] is a LIST of
-    {DownloadKind: {..., shardMetadata: {PipelineShardMetadata: {modelCard}}}}.
-    The old fixture was {"m": {"pct": 12}}, a shape exo never sends -- which
-    is how counting every entry as 'in flight' went unnoticed."""
-    body["shardMetadata"] = {"PipelineShardMetadata": {
-        "modelCard": {"modelId": model}}}
-    return {kind: body}
-
-
-def test_ready_names_every_reason_it_is_not(monkeypatch):
-    """Runners, downloads and unseen nodes are reported SEPARATELY by exo.
-    Runners moving memory block a local load; the rest block ring placement."""
-    monkeypatch.setattr(mcp, "_exo_state", lambda: {
-        "runners": {"a": {"RunnerShuttingDown": {}},
-                    "b": {"RunnerWarmingUp": {}}},
-        "downloads": {"node1": [
-            _dl("DownloadOngoing", "org/big", downloadProgress={
-                "downloadedBytes": {"inBytes": 25}, "totalBytes": {"inBytes": 100}}),
-            _dl("DownloadPending", "org/idle")]},
-        "topology": {"nodes": ["n1", "n2"]},
-        "lastSeen": {"n1": 1},
-    })
+def test_nothing_moving_is_ready(monkeypatch):
+    """No load in flight and no lock held: ready, with nothing to wait on."""
+    monkeypatch.setattr("knurlogic.interfaces.ui.loading", lambda: [])
     r = mcp.ready()
-    assert r["ready"] is False and r["ready_for_exo_placement"] is False
-    assert {b["what"] for b in r["blockers"]} == {
-        "exo runners loading or unloading"}
-    assert {b["what"] for b in r["exo_placement_blockers"]} == {
-        "downloads in progress", "nodes in the topology not seen recently"}
-    ongoing = r["exo_placement_blockers"][0]["detail"]
-    assert ongoing == [{"model": "org/big", "node": "node1", "progress": "25%"}]
-
-
-def test_pending_downloads_are_not_in_flight(monkeypatch):
-    """exo lists every card it knows as DownloadPending on every node. That
-    is a catalogue, not activity -- and a check that is false forever
-    teaches an agent to pass force=true every time."""
-    monkeypatch.setattr(mcp, "_exo_state", lambda: {
-        "runners": {"a": {"RunnerReady": {}}},
-        "downloads": {"n1": [_dl("DownloadPending", "x"),
-                             _dl("DownloadCompleted", "y")],
-                      "n2": [_dl("DownloadPending", "x"), 7, {}]},
-        "topology": {"nodes": ["n1"]}, "lastSeen": {"n1": 1}})
-    r = mcp.ready()
-    assert r["ready"] is True and r["ready_for_exo_placement"] is True
-    assert r["downloads"]["pending_not_started"] == 2
-
-
-def test_a_settled_ring_is_ready(monkeypatch):
-    monkeypatch.setattr(mcp, "_exo_state", lambda: {
-        "runners": {"a": {"RunnerReady": {}}},
-        "downloads": {}, "topology": {"nodes": ["n1"]}, "lastSeen": {"n1": 1}})
-    assert mcp.ready()["ready"] is True
-
-
-def test_no_exo_is_ready_not_broken(monkeypatch):
-    """knurlogic does not need exo. Absent is not a blocker."""
-    monkeypatch.setattr(mcp, "_exo_state", lambda: {})
-    r = mcp.ready()
-    assert r["ready"] is True and r["exo"] is False
+    assert r["ready"] is True and r["blockers"] == []
 
 
 def test_load_refuses_a_model_that_does_not_fit(tmp_path, monkeypatch):
-    """And no flag overrides it: force is for the ring, not for arithmetic."""
+    """And no flag overrides it: force is for moving memory, not arithmetic."""
     d = _artifact(tmp_path / "big", gib=8)
-    monkeypatch.setattr(mcp, "_exo_state", lambda: {})
     monkeypatch.setattr("knurlogic.machine.loaded.available_memory",
                         lambda: {"available_bytes": 1 << 20,
                                  "free_bytes": 1 << 20, "cached_bytes": 0})
@@ -114,12 +58,13 @@ def test_load_refuses_a_model_that_does_not_fit(tmp_path, monkeypatch):
     assert "arithmetic" in r["note"]
 
 
-def test_load_refuses_an_unsettled_ring_but_force_overrides(tmp_path,
-                                                            monkeypatch):
+def test_load_refuses_while_memory_moves_but_force_overrides(tmp_path,
+                                                             monkeypatch):
     d = _artifact(tmp_path / "small", gib=1)
-    monkeypatch.setattr(mcp, "_exo_state", lambda: {
-        "runners": {"a": {"RunnerLoading": {}}}, "downloads": {},
-        "topology": {"nodes": []}, "lastSeen": {}})
+    monkeypatch.setattr(
+        "knurlogic.machine.loadlock.holder",
+        lambda *a, **k: {"pid": 999, "artifact": "other-model",
+                         "agent": "someone-else", "started": 0})
     monkeypatch.setattr("knurlogic.machine.loaded.available_memory",
                         lambda: {"available_bytes": 64 << 30,
                                  "free_bytes": 64 << 30, "cached_bytes": 0})
@@ -233,7 +178,6 @@ def test_ready_waits_for_knurlogics_own_loads(monkeypatch, tmp_path):
     said true and fit used a budget that did not count it yet."""
     _phase_world(monkeypatch, tmp_path, alive=True, answers=True,
                  held=1 << 30, size=15 << 30)
-    monkeypatch.setattr(mcp, "_exo_state", lambda: {})
     r = mcp.ready()
     assert r["ready"] is False
     assert r["blockers"][0]["detail"]["phase"] == "warming"
@@ -244,7 +188,6 @@ def test_ready_blocks_on_another_process_holding_the_load_lock(monkeypatch):
     blocker `ready()` already reports for knurlogic's own children -- a
     load started by a DIFFERENT process (another agent, a hand-run `serve`)
     holds it, and would not show up in `ui.loading()`."""
-    monkeypatch.setattr(mcp, "_exo_state", lambda: {})
     monkeypatch.setattr(
         "knurlogic.machine.loadlock.holder",
         lambda *a, **k: {"pid": 999, "artifact": "other-model",

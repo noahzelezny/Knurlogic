@@ -1047,7 +1047,7 @@ async function tick(){
   // Nothing loaded is a STATE, not a page still loading, and the bench has
   // nothing to send a prompt to -- so it goes rather than sitting there with
   // a button that would fail.
-  // The chat talks to whatever is running (exo, or a server `load` started)
+  // The chat talks to a server `load` started
   // through this page's /chat proxy, so it stays even when this page serves
   // nothing; the bench speaks to this page's own endpoint and goes.
   $('try').style.display='';
@@ -1631,7 +1631,7 @@ async function loadResident(){
   if(!RAM) ramWent(d.memory||{});
   el.querySelectorAll('.cardhd button').forEach(x=>x.onclick=async()=>{
     const r=rows[+x.dataset.i];
-    const how={knurlogic:'unload', exo:'exo-unload', ollama:'ollama-unload'};
+    const how={knurlogic:'unload', ollama:'ollama-unload'};
     x.textContent='…'; x.disabled=true;
     await act({action:how[r.runtime], target:r.ident, where:r.where});
   });
