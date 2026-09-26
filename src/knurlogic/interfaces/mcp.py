@@ -308,8 +308,8 @@ def unload(port: int = 8080, **_) -> Dict[str, Any]:
 # --- the table --------------------------------------------------------------
 
 def deps() -> Dict[str, Any]:
-    """Which build of each piece every interpreter has, read off the fix
-    itself rather than a version string."""
+    """Which build of each piece is installed, read off the fix itself
+    rather than a version string."""
     from knurlogic.machine import deps as D
     return D.survey()
 
@@ -390,12 +390,10 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     },
     "deps": {
         "fn": deps,
-        "description": "What this stack stands on, per interpreter "
-                       "(knurlogic's and exo's): mlx, mlx-lm, mlx-vlm, exo, "
+        "description": "What this stack stands on: mlx, mlx-lm, mlx-vlm, "
                        "each marked stock or fork by what is installed, not "
                        "by version -- plus what each fork carries and why it "
-                       "is or is not ported. Call this when something works "
-                       "in exo and not here, or the reverse.",
+                       "is or is not ported.",
         "schema": _schema({}),
     },
     "unload": {
