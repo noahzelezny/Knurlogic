@@ -205,10 +205,10 @@ def render_cluster(d: dict) -> str:
                      f"NO ANSWER -- its memory is not in the total below")
             continue
         L.append(f"{s.get('node','?'):<12s} [{s.get('role','?')}]  "
-                 f"{m['active_bytes'] / GIB:6.1f} GiB live  "
-                 f"{m['cache_bytes'] / GIB:5.1f} cache  "
-                 f"{m['headroom_bytes'] / GIB:6.1f} free of "
-                 f"{m['working_set_bytes'] / GIB:.0f}")
+                 f"{_num(m.get('active_bytes')) / GIB:6.1f} GiB live  "
+                 f"{_num(m.get('cache_bytes')) / GIB:5.1f} cache  "
+                 f"{_num(m.get('headroom_bytes')) / GIB:6.1f} free of "
+                 f"{_num(m.get('working_set_bytes')) / GIB:.0f}")
     m = c["memory"]
     # Where the numbers came from changes what they MEAN. A per-process
     # snapshot separates weights from reclaimable cache; a number reported

@@ -373,9 +373,14 @@ def render(rows: list, working_set_bytes: int = 0) -> str:
              f" GiB on disk. {len(loadable)} in a format this engine loads"
              + (f", {len(fits)} that fit one box." if working_set_bytes
                 else "."))
-    if len(rows) != len(loadable):
-        L.append(f"{len(rows) - len(loadable)} are GGUF -- found, but this "
-                 f"engine loads safetensors.")
+    gguf = sum(1 for f in rows if f.format == "gguf")
+    other = len(rows) - len(loadable) - gguf
+    if gguf:
+        L.append(f"{gguf} are GGUF -- found, but this engine loads "
+                 f"safetensors.")
+    if other:
+        L.append(f"{other} are not chat models, or have no weights yet (an "
+                 f"interrupted download).")
     return "\n".join(L)
 
 

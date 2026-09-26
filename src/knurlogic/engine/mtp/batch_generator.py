@@ -645,6 +645,10 @@ class MTPBatchGenerator(BatchGenerator):
         self._batch.remove(uids)
         for u in uids:
             self._rows.pop(u, None)
+            # a removed row's checkpoint copies (deep copies of its cache)
+            # go with it, not at the next checkpoint report
+            self._ckpt_pending.pop(u, None)
+            self._ckpt_ready.pop(u, None)
         return caches
 
     def cost_per_token(self, rows: int):

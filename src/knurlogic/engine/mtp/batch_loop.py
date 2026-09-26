@@ -68,13 +68,14 @@ logger = logging.getLogger(__name__)
 
 
 def default_draft_max_rows() -> int | None:
-    """A fixed row ceiling for drafting from KNURLOGIC_MTP_BATCH_MAX_ROWS, or None
-    for the adaptive rule (`MTPBatch.drafting_pays`)."""
+    """A fixed row ceiling for drafting from KNURLOGIC_MTP_BATCH_MAX_ROWS (0:
+    never draft -- it read as 1), or None for the adaptive rule
+    (`MTPBatch.drafting_pays`)."""
     raw = os.environ.get("KNURLOGIC_MTP_BATCH_MAX_ROWS")
     if not raw:
         return None
     try:
-        return max(1, int(raw))
+        return max(0, int(raw))
     except ValueError:
         return None
 

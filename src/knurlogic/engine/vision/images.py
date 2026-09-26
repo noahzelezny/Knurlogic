@@ -106,12 +106,14 @@ def _bomb_message(size, limit: int = BOMB_PIXELS) -> str:
     edge = int(limit ** 0.5)
     got = (f"an image is {size[0]}x{size[1]} = {size[0] * size[1]} pixels"
            if size else "an image is far over the pixel limit")
-    more = (" A JPEG may be 64x larger: it decodes already reduced."
-            if limit == BOMB_PIXELS else "")
+    if limit == BOMB_PIXELS:
+        why = ("since it must be unpacked whole before it can be shrunk. "
+               "A JPEG may be 64x larger: it decodes already reduced.")
+    else:
+        why = "even decoded at 1/8 scale, as a JPEG is, that is too large."
     return (f"{got}; the maximum for its format is {limit} pixels (about "
-            f"{edge}x{edge}), since it must be unpacked whole before it "
-            f"can be shrunk. Images under it are downscaled to what the "
-            f"model takes, not refused.{more}")
+            f"{edge}x{edge}), {why} Images under it are downscaled to what "
+            f"the model takes, not refused.")
 
 
 def decode(src: Union[str, bytes], *, allow_paths: bool = False) -> Any:
@@ -122,10 +124,11 @@ def decode(src: Union[str, bytes], *, allow_paths: bool = False) -> Any:
     try:
         with warnings.catch_warnings():
             # PIL's own bomb check refuses at open, before the format is
-            # known; ours below is format-aware, so PIL's is set aside here
-            # (this is the process's one PIL decode path).
+            # known; ours below is format-aware. PIL's is raised to the
+            # largest limit ours allows (a JPEG's), not switched off: it is
+            # process-wide, and anything else opening an image keeps a bound.
             warnings.simplefilter("ignore", Image.DecompressionBombWarning)
-            Image.MAX_IMAGE_PIXELS = None
+            Image.MAX_IMAGE_PIXELS = BOMB_PIXELS * JPEG_SCALE ** 2
             img = Image.open(io.BytesIO(data))
             w, h = img.size
             if w * h > _limit(img):

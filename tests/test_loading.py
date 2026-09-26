@@ -110,3 +110,21 @@ def test_a_switch_under_running_requests_is_refused_on_the_scheduler():
     s._commands.put(c)
     s._do_commands()
     assert c.error == "" and Host.loads == ["/m/b"]
+
+
+def test_a_failed_store_scan_is_named_and_not_cached(monkeypatch):
+    """A store on an unmounted volume: the refusal says the scan failed
+    (not that the model does not exist), and the next request scans again."""
+    from knurlogic.machine import discover
+    L._KNOWN.update(at=0.0, rows=None, error="")
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(1)
+        raise OSError("volume is gone")
+    monkeypatch.setattr(discover, "find", boom)
+    for _ in range(2):
+        with pytest.raises(L.NotLoadable) as e:
+            L.resolve_name("some-model", None)
+        assert e.value.status == 503 and "volume is gone" in str(e.value)
+    assert len(calls) == 2
