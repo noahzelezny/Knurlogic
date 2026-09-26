@@ -53,7 +53,13 @@ class Keys:
     Drafting a seeded row uses the same key for the draft and the target,
     and accepts iff they agree. The emitted token is argmax(log p_n + g_n)
     with g_n fresh Gumbel noise per position -- exactly p_n-distributed --
-    and the shared noise is what makes a good draft agree."""
+    and the shared noise is what makes a good draft agree.
+
+    Two limits. XTC draws its own coin from the global stream, so a seeded
+    request with xtc_probability > 0 is not reproducible. And the key fixes
+    the noise, not the logits: a batched forward is not bit-identical to a
+    one-row forward on every kernel (GLM 2.7: up to 0.3 in logprob), so
+    under concurrent load a near-tie can go the other way."""
 
     def __init__(self, seed: int):
         self.seed = int(seed) & 0xFFFFFFFFFFFFFFFF

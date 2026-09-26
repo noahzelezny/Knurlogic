@@ -188,3 +188,28 @@ def test_seeded_draws_are_addressed_by_position_and_couple_draft_to_target():
     assert len(set(draws)) > 5
     assert all(d.sample(k.at(n)).item() == dist(logits).sample(k.at(n)).item()
                for n in range(40))
+
+
+def test_the_draft_step_hands_processors_the_same_history_as_a_plain_one(
+        monkeypatch):
+    """Position n+1's processors see t1 at the end of the history, drafting
+    or not (build review item 1). The probe boosts token id 10 + len(history),
+    so the output counts up 10, 11, 12, ... only if every position's
+    history has exactly the tokens before it."""
+    from knurlogic.engine.runtime.executor import Admission
+    model, head, prompts = _tiny(512)
+
+    def count(hist, row):
+        return row + 1e4 * (mx.arange(row.shape[-1]) == 10 + hist.size)
+
+    def run(max_rows):
+        monkeypatch.setenv("EXO_MTP_BATCH_MAX_ROWS", str(max_rows))
+        ex = _executor(model, head)
+        u = ex.insert(Admission(segments=[prompts[0]], max_tokens=12,
+                                processors=[count]))
+        toks, _ = _drain(ex, [u])
+        ex.close()
+        return toks[u]
+    plain = run(0)                 # never drafting
+    assert plain == list(range(10, 22))
+    assert run(8) == plain         # always drafting

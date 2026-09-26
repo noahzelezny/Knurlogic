@@ -106,6 +106,7 @@ class Request:
                  prompt_tokens: int = 0):
         self.detok = detokenizer
         self.detok.reset()
+        self.seqs = dict(sequences)
         self.hold_n = max((len(s) for s in sequences), default=1)
         self.stops = [s for s in (stops or []) if s]
         self.stop_hold = max((len(s) for s in self.stops), default=1) - 1
@@ -139,9 +140,24 @@ class Request:
         self._buf.append([tok.state, self.detok.last_segment, tok.token,
                           tok.logprob, tok.top_logprobs])
         if tok.match is not None:
-            # the matched control sequence's tokens say nothing
-            for e in list(self._buf)[-len(tok.match):]:
+            # The matched control sequence's tokens say nothing -- but a
+            # BPE detokenizer holds a lone space and flushes it WITH the
+            # next token's text, so text before the marker's own string
+            # is the answer's, not the marker's.
+            ents = list(self._buf)[-len(tok.match):]
+            joined = "".join(e[1] for e in ents)
+            marker = self.seqs.get(tuple(tok.match))
+            keep = joined[:joined.index(marker)] \
+                if marker and marker in joined else ""
+            for e in ents:
                 e[1] = ""
+            if keep:
+                # it belongs to the state BEFORE the marker
+                buf = list(self._buf)
+                n = len(buf) - len(ents)
+                ents[0][0] = buf[n - 1][0] if n > 0 else \
+                    (self._prev_state or "normal")
+                ents[0][1] = keep
         while len(self._buf) >= self.hold_n:
             self._route(self._buf.popleft(), out)
             if self.finished:
