@@ -25,14 +25,17 @@ import json
 CLIENTS = ("claude", "openai", "settings")
 
 
-def env_lines(base_url: str, model: str) -> dict:
-    """The variables a Claude-Messages harness reads."""
+def env_lines(base_url: str, model: str, sonnet: str = "",
+              haiku: str = "") -> dict:
+    """The variables a Claude-Messages harness reads. One model fills every
+    tier unless others are named: pointed at a model server that is all it
+    can answer; pointed at the page's router, each tier can be its own."""
     return {
         "ANTHROPIC_BASE_URL": base_url,
         "ANTHROPIC_API_KEY": "x",          # unused locally, but must be set
         "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
-        "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": sonnet or model,
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku or model,
         # A local model is slower per token than the hosted one this harness
         # was tuned against, and the default timeout is the first thing to
         # bite on a long tool loop.
@@ -40,18 +43,22 @@ def env_lines(base_url: str, model: str) -> dict:
     }
 
 
-def claude_command(base_url: str, model: str) -> str:
-    lines = [f"{k}={v} \\" for k, v in env_lines(base_url, model).items()]
+def claude_command(base_url: str, model: str, sonnet: str = "",
+                   haiku: str = "") -> str:
+    lines = [f"{k}={v} \\" for k, v in
+             env_lines(base_url, model, sonnet, haiku).items()]
     return "\n".join(lines + ["claude"])
 
 
-def project_settings(base_url: str, model: str) -> str:
+def project_settings(base_url: str, model: str, sonnet: str = "",
+                     haiku: str = "") -> str:
     """A `.claude/settings.json` that scopes this to one directory.
 
     Scoped on purpose. Put it in a scratch directory and only sessions
     started there use the local model; everything else is untouched.
     """
-    return json.dumps({"env": env_lines(base_url, model)}, indent=2)
+    return json.dumps({"env": env_lines(base_url, model, sonnet, haiku)},
+                      indent=2)
 
 
 def openai_snippet(base_url: str, model: str) -> str:
@@ -79,27 +86,37 @@ def mcp_json() -> str:
         "command": "knurlogic", "args": ["mcp"]}}}, indent=2)
 
 
-def endpoints(base_url: str, model: str) -> list:
+def endpoints(base_url: str, model: str, router_url: str = "__ROUTER__",
+              tiers=("__OPUS__", "__SONNET__", "__HAIKU__")) -> list:
     """Every way in, one entry each, for a page that shows one at a time.
 
     The same text `render` prints, split by client so a picker can list
-    them; the page fills in the base URL and model it is pointed at."""
+    them; the page fills in the base URL and model it is pointed at. Claude
+    Code's goes to the page's ROUTER (`router_url`), which hands each
+    request to the server holding the model it names, so each tier
+    (opus, sonnet, haiku) can be a different running model."""
+    opus, sonnet, haiku = tiers
     return [
         {"id": "openai", "name": "OpenAI-compatible",
          "what": "anything that speaks OpenAI: Zed, Cline, Continue, "
                  "OpenWebUI, the openai SDKs",
          "needs_model": True,
          "blocks": [{"label": "settings",
-                     "text": openai_snippet(base_url, model)}]},
+                     "text": openai_snippet(base_url, model)},
+                    {"label": "or through this page, which routes by "
+                              "`model` to every running model",
+                     "text": openai_snippet(router_url, model)}]},
         {"id": "claude", "name": "Claude Code",
          "what": "a Claude-Messages harness, over /v1/messages",
-         "needs_model": True,
+         "needs_model": True, "tiers": ["opus", "sonnet", "haiku"],
          "blocks": [{"label": "in a terminal",
-                     "text": claude_command(base_url, model)},
+                     "text": claude_command(router_url, opus, sonnet,
+                                            haiku)},
                     {"label": "scoped to one directory, as "
                               ".claude/settings.json (not the global one: "
                               "that routes every session on the machine)",
-                     "text": project_settings(base_url, model)}]},
+                     "text": project_settings(router_url, opus, sonnet,
+                                              haiku)}]},
         {"id": "mcp", "name": "MCP",
          "what": "the agent-facing tools (ready, fit, settings, load) over "
                  "stdio; the client starts it, so no address is needed",
