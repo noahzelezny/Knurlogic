@@ -304,6 +304,11 @@ def main(argv=None) -> int:
                         "allowed to call this server from a browser. "
                         "Repeatable. By default only the server's own page "
                         "and non-browser clients are answered")
+    p.add_argument("--allow-host", action="append", default=[],
+                   metavar="NAME",
+                   help="a DNS name this machine is reached by (e.g. "
+                        "studio.tail1234.ts.net). Repeatable. localhost, IP "
+                        "addresses, .local names and the hostname need none")
     p.add_argument("--max-request-mib", type=int, default=512,
                    help="largest request body accepted (413 above it)")
     p.add_argument("--image-store-gib", type=float, default=0.0,
@@ -313,6 +318,7 @@ def main(argv=None) -> int:
     serving = {"decode_concurrency": a.decode_concurrency,
                "max_body": a.max_request_mib * 1024 * 1024,
                "allow_origins": a.allow_origin,
+               "allow_hosts": a.allow_host,
                "prompt_cache_size": a.prompt_cache_size}
     if a.prompt_cache_gib > 0:
         serving["prompt_cache_bytes"] = int(a.prompt_cache_gib * GIB)
