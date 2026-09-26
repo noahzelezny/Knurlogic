@@ -252,3 +252,4 @@ Ratio = knurlogic / mlx-lm of the medians.
 | gemma e4b | 1.08 (spread 51-64) | 0.99 | 1.06 | equal within noise |
 | Flash-Next 2.1 | 0.999 | 1.01 | 0.996 | equal within noise |
 | GLM-5.3 2.7 | 0.94 (ranges overlap: 24.9-28.7 vs 26.1-27.9) | 1.06 (overlap) | 0.98 | equal within noise |
+| Qwen3.5-397B 2.2 | 1.06 (overlap) | 0.97 (overlap) | 1.00 | equal within noise |
