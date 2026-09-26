@@ -28,7 +28,7 @@ import argparse
 import os
 import sys
 
-from knurlogic.engine import arch, serve as engine, mtp, register
+from knurlogic.engine import arch, serve as engine, mtp
 from knurlogic.interfaces import web
 from knurlogic.machine import status, wired
 from knurlogic.machine.artifact import Artifact
@@ -45,16 +45,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
 
+    # the same registration a switch gets (interfaces/loading.py)
+    from knurlogic.interfaces import loading
     needed = arch.modules_for_artifact(a)
-    if needed:
-        done = register.register(*needed)
-        print(f"registered {done or '(already imported)'} "
-              f"from knurlogic's vendored set")
-    else:
-        print(f"no mapping for {a.model_type!r}; relying on what the engine "
-              f"ships")
-
-    missing = [r.module for r in arch.check(a.model_type) if not r.present]
+    print(f"registered {needed} from knurlogic's vendored set" if needed
+          else f"no mapping for {a.model_type!r}; relying on what the "
+               f"engine ships")
+    missing = loading.register(a)
     if missing:
         print(f"REFUSING: no implementation for {missing}. This artifact "
               f"cannot load, and starting a server that 500s on every request "
@@ -299,6 +296,12 @@ def main(argv=None) -> int:
                         "segment checkpoints)")
     p.add_argument("--prompt-cache-gib", type=float, default=0.0,
                    help="cap the prompt cache's memory; 0 = entries only")
+    p.add_argument("--allow-origin", action="append", default=[],
+                   metavar="URL",
+                   help="a web page origin (e.g. http://localhost:3000) "
+                        "allowed to call this server from a browser. "
+                        "Repeatable. By default only the server's own page "
+                        "and non-browser clients are answered")
     p.add_argument("--max-request-mib", type=int, default=512,
                    help="largest request body accepted (413 above it)")
     p.add_argument("--image-store-gib", type=float, default=0.0,
@@ -329,6 +332,7 @@ def main(argv=None) -> int:
                            a.tune, draft=not a.no_draft)
     serving = {"decode_concurrency": a.decode_concurrency,
                "max_body": a.max_request_mib * 1024 * 1024,
+               "allow_origins": a.allow_origin,
                "prompt_cache_size": a.prompt_cache_size}
     if a.prompt_cache_gib > 0:
         serving["prompt_cache_bytes"] = int(a.prompt_cache_gib * GIB)

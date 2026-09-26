@@ -5,7 +5,10 @@ for knurlogic's own server"), in OpenAI's shapes and nothing custom:
   /v1/residency      one flat list: model, capabilities, memory_bytes,
                      nodes, state (loading / ready / unloading / failed)
   /v1/ensure         {model, wait}: idempotent; a different model is a
-                     switch (409 while requests are running, unless force)
+                     switch -- only to an artifact this machine's stores
+                     hold, through the same checks as startup
+                     (interfaces/loading.py); 409 while requests are
+                     running, unless force
   413                an image over the decode limit (judged from its
                      header before decoding: engine/vision/images.py), or
                      a request whose images together exceed the image
@@ -58,12 +61,33 @@ def served(artifact, host):
     return current
 
 
-def residency(artifact, host, sched) -> dict:
+def ensure(body: dict) -> dict:
+    """POST /v1/ensure {model, wait?, timeout?, force?} -- see
+    interfaces/http.switch."""
+    from knurlogic.interfaces import http
+    from knurlogic.interfaces.loading import NotLoadable
+    if not isinstance(body, dict):
+        raise ApiError(400, "the body must be a JSON object")
+    try:
+        timeout = float(body.get("timeout", 3600))
+    except (TypeError, ValueError):
+        raise ApiError(400, "timeout must be a number of seconds",
+                       param="timeout")
+    try:
+        return http.switch(str(body.get("model") or ""),
+                           force=bool(body.get("force")),
+                           wait=bool(body.get("wait", False)),
+                           timeout=timeout)
+    except NotLoadable as e:
+        raise ApiError(e.status, str(e), param="model", code=e.code or None)
+
+
+def residency(host, sched) -> dict:
     from knurlogic.machine import identity
     st = host.status()
     if st["state"] == "empty":
         return {"object": "list", "data": []}
-    row = {"model": Path(st["model"] or str(artifact.path)).name,
+    row = {"model": Path(st["model"] or "").name,
            "capabilities": _capabilities() if st["state"] == "ready"
            else ["text"],
            "memory_bytes": int(st.get("memory_bytes") or 0),
@@ -73,49 +97,6 @@ def residency(artifact, host, sched) -> dict:
     if st.get("error"):
         row["error"] = st["error"]
     return {"object": "list", "data": [row]}
-
-
-def _resolve(model: str, artifact, host) -> str:
-    """A model name or path -> the artifact directory to load."""
-    cur = host.path or str(artifact.path)
-    if not model or model in (Path(cur).name, cur):
-        return cur
-    p = Path(model).expanduser()
-    if p.is_dir() and (p / "config.json").is_file():
-        return str(p.resolve())
-    raise ApiError(404, f"no artifact named {model!r} here: pass the "
-                        f"served model's id ({Path(cur).name}) or a path to "
-                        f"an artifact directory on this machine",
-                   param="model", code="model_not_found")
-
-
-def ensure(body: dict, artifact, host, sched) -> dict:
-    if not isinstance(body, dict):
-        raise ApiError(400, "the body must be a JSON object")
-    path = _resolve(str(body.get("model") or ""), artifact, host)
-    wait = bool(body.get("wait", False))
-    try:
-        timeout = float(body.get("timeout", 3600))
-    except (TypeError, ValueError):
-        raise ApiError(400, "timeout must be a number of seconds",
-                       param="timeout")
-    same = host.path == path
-    if not (same and host.state in ("ready", "loading")):
-        if not same and sched.width and not body.get("force"):
-            raise ApiError(409, f"{sched.width} request(s) are running on "
-                                f"{Path(host.path or '').name}; switching "
-                                f"would fail them. Retry when idle, or "
-                                f"send force: true",
-                           code="model_busy")
-        sched.load(path)
-    if wait:
-        host.wait_ready(timeout)
-    st = host.status()
-    if st["state"] == "failed":
-        raise ApiError(500, f"loading {Path(path).name} failed: "
-                            f"{st['error']}", type_="server_error")
-    return {"model": Path(path).name, "state": st["state"],
-            "memory_bytes": int(st.get("memory_bytes") or 0)}
 
 
 
