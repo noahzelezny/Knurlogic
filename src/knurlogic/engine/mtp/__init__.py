@@ -10,25 +10,27 @@ file. Those names are re-exported here.
 
 Everything else in this package RUNS a head, so every one of those modules
 imports mlx. They are NOT imported here. `import knurlogic.engine.mtp`
-stays free; `from knurlogic.engine.mtp import loop` is where the engine
-arrives.
+stays free; `from knurlogic.engine.mtp import batch_generator` is where the
+engine arrives.
 
   _artifacts.py       what an artifact HAS: a head, graft weights (stdlib)
   registry.py         model_type -> head spec, built from the family
-                      manifests (engine/families/); the heads live there
-  loop.py             one request: prefill, seed the head, draft and verify
-  batch_loop.py       many requests in one batch (MTPBatch, admit)
+                      manifests (engine/families/); load_head binds one
+  batch_loop.py       requests in one batch (MTPBatch, admit): prefill,
+                      seed the head, draft and verify
   batch_generator.py  mlx-lm's BatchGenerator contract over batch_loop,
                       incl. segment checkpoints and the cache report
   caches.py           snapshot and rollback for a speculative step
-  capture.py seed.py sampling.py pipeline.py   the pieces those share
-  cluster/            drafting across a pipeline ring -- NOT WIRED yet
+  capture.py seed.py sampling.py   the pieces those share
+
+Drafting across machines is not here yet: it comes with the cluster
+executor (engine/runtime/executor.py, docs/SERVER.md "Cluster readiness").
 
 WHOSE CODE THIS IS. The drafting half was written by the maintainer in his exo fork and
 in vqlab, and upstream exo-explore/exo has none of it -- 0 files under
 `engines/mlx/mtp/` on origin/main against 15 in the fork. It lived in two
-copies that had drifted apart (caches.py, registry.py and loop.py differed by
-30, 63 and 296 lines), which is the argument for one copy here rather than a
+copies that had drifted apart (caches.py, registry.py and the sequential
+loop differed by 30, 63 and 296 lines), which is the argument for one copy here rather than a
 third out there. mlx-lm has no MTP path at all, so an artifact's drafting
 head is weight nobody else will run.
 """

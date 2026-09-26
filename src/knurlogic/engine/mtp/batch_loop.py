@@ -33,14 +33,13 @@ Sampling is per row — temperature, top-p, processors, and the acceptance
 test are the row's own — so a batch may mix greedy and sampled requests. At
 temperature the verdict is the same exact rejection sampling loop.py uses
 (sampling.rejection_correct); at temperature 0 it is `draft == argmax`. One
-deliberate difference from loop.py: a row's logits processors (repetition
-penalty, eos ban) are applied to the TRUNK row that verifies the draft, not
-only to the draft and to t1 — otherwise a penalised token could be committed
+deliberate difference from the old sequential loop: a row's logits
+processors (repetition penalty, eos ban) are applied to the TRUNK row that
+verifies the draft, not only to the draft and to t1 — otherwise a penalised token could be committed
 through the verify path that sampling would have refused.
 
-Single node only. The stage-1 pipeline seam (pipeline.py's Coordinator) is
-not threaded through here; the batch engine is built for single-node
-instances and the builder gates batched drafting on `group is None`.
+Single node. Across machines, the cluster executor will own the SPMD loop
+around this engine (docs/SERVER.md, "Cluster readiness").
 """
 from __future__ import annotations
 
