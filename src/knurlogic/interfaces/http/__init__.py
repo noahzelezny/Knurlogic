@@ -100,6 +100,11 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
               concurrency=lambda: scout.concurrency(sched),
               residency=lambda: scout.residency(mh, sched),
               ensure=scout.ensure)
+    if host == "cluster":
+        # every address bound, only loopback and Thunderbolt answered --
+        # the same rule as the page's (cluster/links.Gate)
+        from knurlogic.cluster import links
+        app.gate, host = links.Gate(), "0.0.0.0"
     httpd = make_server(app, host, port)
     print(f"knurlogic's own server on http://{host}:{port}/v1 "
           f"(loading {artifact.path.name})", flush=True)
