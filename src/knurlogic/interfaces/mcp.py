@@ -279,7 +279,15 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
     moving-memory check only -- it will not make a model fit.
     """
     from knurlogic.interfaces import ui
+    from knurlogic.interfaces.loading import NotLoadable, resolve_name
 
+    # a model named, never a directory (interfaces/loading.py): the same
+    # rule a switch on a running server follows
+    try:
+        artifact = resolve_name(artifact, None)
+    except NotLoadable as e:
+        return {"loaded": False, "refused": "not a known artifact",
+                "note": str(e)}
     f = fit(artifact=artifact)
     if not f["fits"]:
         return {"loaded": False, "refused": "will not fit",

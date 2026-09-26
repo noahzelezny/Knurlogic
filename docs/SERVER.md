@@ -239,7 +239,7 @@ logits processors a history without t1, so penalties differed by regime.
 | Qwen Flash-Next 2.1 | 37 passed, 1 skipped (same); drafting 0.90 |
 | GLM-5.3 2.7 | 36 passed, 2 skipped (+ seeded-under-load: batched logits drift 0.31); drafting 0.89 |
 
-### Measured: mlx-lm's server vs knurlogic's own (tools/server_bench.py)
+### Measured: mlx-lm's server vs knurlogic's own (tools/server_bench.py, removed with mlx-lm's server; it is in git history)
 
 M4, one server process per run, 3 runs per arm alternating; decode =
 greedy streamed tok/s after the first token (median of 3), prefill = time

@@ -353,3 +353,11 @@ def test_the_cluster_gate_refuses_what_it_does_not_allow(url, monkeypatch):
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(u + "/health", timeout=30)
     assert e.value.code == 403 and e.value.read() == b"thunderbolt only"
+
+
+def test_an_allowed_host_name_is_answered():
+    from knurlogic.interfaces.http.server import browser_refusal
+    h = {"Host": "studio.tail1234.ts.net:8080"}
+    assert "--allow-host studio.tail1234.ts.net" in browser_refusal(h)
+    assert browser_refusal(h, allow_hosts=("studio.tail1234.ts.net",)) \
+        is None

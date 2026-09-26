@@ -73,10 +73,17 @@ no blockers found
   settings for a roomier box. `load` refuses what will not fit, with no
   override, because it is arithmetic.
 
-* **A server.** `knurlogic serve <artifact>` is an adapter over mlx-lm's
-  OpenAI endpoint with the settings resolved and set *before* the model
-  loads, which is load-bearing: a VQ artifact's bundled runtime reads its
-  knobs at import. Several machines are knurlogic's own (`cluster/`: peers,
+* **A server.** `knurlogic serve <artifact>` is knurlogic's own
+  OpenAI-compatible server (plus `/v1/messages` for Claude-style harnesses),
+  with the settings resolved and set *before* the model loads, which is
+  load-bearing: a VQ artifact's bundled runtime reads its knobs at import.
+  It answers ordinary clients and its own page; a web page in your browser
+  is refused unless you allow it (`--allow-origin`), and a DNS name other
+  than localhost, `.local` or the hostname needs `--allow-host`. Requests are
+  capped at `--max-request-mib`; a request's images must fit the image store
+  together (`--image-store-gib`) -- each image is downscaled to what the
+  model takes, never refused for size unless it is too big to decode
+  safely. docs/SERVER.md has the design. Several machines are knurlogic's own (`cluster/`: peers,
   Bonjour discovery, `--host cluster`); knurlogic does not drive exo.
 
 * **A GUI that exposes the knobs.** `/` shows what loaded, the memory split

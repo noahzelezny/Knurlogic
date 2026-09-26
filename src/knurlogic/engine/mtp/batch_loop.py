@@ -68,9 +68,9 @@ logger = logging.getLogger(__name__)
 
 
 def default_draft_max_rows() -> int | None:
-    """A fixed row ceiling for drafting from EXO_MTP_BATCH_MAX_ROWS, or None
+    """A fixed row ceiling for drafting from KNURLOGIC_MTP_BATCH_MAX_ROWS, or None
     for the adaptive rule (`MTPBatch.drafting_pays`)."""
-    raw = os.environ.get("EXO_MTP_BATCH_MAX_ROWS")
+    raw = os.environ.get("KNURLOGIC_MTP_BATCH_MAX_ROWS")
     if not raw:
         return None
     try:
@@ -417,7 +417,7 @@ class MTPBatch:
         self.head = head
         self.get_h = get_h
         self.copy_caches = copy_caches
-        # A fixed ceiling (explicit or EXO_MTP_BATCH_MAX_ROWS) wins; otherwise
+        # A fixed ceiling (explicit or KNURLOGIC_MTP_BATCH_MAX_ROWS) wins; otherwise
         # the regime is chosen by MEASURED cost per committed token, per row
         # count (see drafting_pays). The unknown is not acceptance alone but
         # how much more a 2-wide forward costs than a 1-wide one at each

@@ -61,7 +61,7 @@ class App:
                  residency: Callable[[], dict] = None,
                  ensure: Callable[[dict], dict] = None,
                  max_body: int = DEFAULT_MAX_BODY,
-                 allow_origins: tuple = ()):
+                 allow_origins: tuple = (), allow_hosts: tuple = ()):
         from knurlogic.engine.serve import thinking
         from knurlogic.interfaces import messages
         self.scheduler = scheduler
@@ -73,6 +73,7 @@ class App:
         self.ensure = ensure
         self.max_body = int(max_body)
         self.allow_origins = {o.rstrip("/") for o in allow_origins}
+        self.allow_hosts = {h.lower() for h in allow_hosts}
         self.translate = thinking.translate
         self.requests = 0
         self.messages = messages.handler_over(self._transport,
@@ -152,25 +153,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Vary", "Origin")
 
     def _refused_browser(self) -> bool:
-        """403 for a Host that is not this machine (DNS rebinding) or an
-        Origin that is neither this server nor allowed; True if refused."""
-        host = (self.headers.get("Host") or "").strip()
-        if host and not host_is_local(host):
-            self._send(403, (f"Host {host!r} is not this machine; if you "
-                             f"reach it by that name, it is not answered "
-                             f"here (DNS-rebinding guard).").encode(),
-                       "text/plain; charset=utf-8")
-            return True
-        o = (self.headers.get("Origin") or "").rstrip("/")
-        if o and o not in (f"http://{host}", f"https://{host}") \
-                and o not in self.app.allow_origins:
-            self._send(403, (f"requests from the web page at {o} are not "
-                             f"answered: a page in a browser must not be "
-                             f"able to drive this server. Start it with "
-                             f"--allow-origin {o} to allow that page.")
-                       .encode(), "text/plain; charset=utf-8")
-            return True
-        return False
+        why = browser_refusal(self.headers, self.app.allow_origins,
+                              self.app.allow_hosts)
+        if why is None:
+            return False
+        self._send(403, why.encode(), "text/plain; charset=utf-8")
+        return True
 
     def _gated(self) -> bool:
         g = self.app.gate
@@ -345,9 +333,35 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
-def host_is_local(host_header: str) -> bool:
+def browser_refusal(headers, allow_origins=(), allow_hosts=()):
+    """Why a request is refused, or None -- the browser guard both of
+    knurlogic's servers (this one and `knurlogic ui`) apply:
+
+      Host    must name this machine, or be allowed (--allow-host): a
+              foreign domain re-pointed at this address (DNS rebinding)
+              would otherwise look same-origin to the browser.
+      Origin  a browser marks its requests with one; answered only when it
+              is this server itself or allowed (--allow-origin). Ordinary
+              clients (SDKs, curl, harnesses) send none."""
+    host = (headers.get("Host") or "").strip()
+    if host and not host_is_local(host, allow_hosts):
+        name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+        return (f"Host {host!r} is not this machine (DNS-rebinding guard). "
+                f"If you reach it by that name, start it with "
+                f"--allow-host {name}.")
+    o = (headers.get("Origin") or "").rstrip("/")
+    if o and o not in (f"http://{host}", f"https://{host}") \
+            and o not in {x.rstrip("/") for x in allow_origins}:
+        return (f"requests from the web page at {o} are not answered: a "
+                f"page in a browser must not be able to drive this server. "
+                f"Start it with --allow-origin {o} to allow that page.")
+    return None
+
+
+def host_is_local(host_header: str, allow_hosts=()) -> bool:
     """Does a Host header name this machine: localhost, an IP literal, a
-    `.local` / `.localhost` name, or this machine's own hostname?"""
+    `.local` / `.localhost` name, this machine's hostname, or a name the
+    operator allowed?"""
     import ipaddress
     h = host_header.strip()
     if h.startswith("["):                       # [::1]:8080
@@ -355,6 +369,8 @@ def host_is_local(host_header: str) -> bool:
     elif h.count(":") == 1:
         h = h.split(":", 1)[0]
     h = h.lower().rstrip(".")
+    if h in {x.lower() for x in allow_hosts}:
+        return True
     if h in ("localhost",) or h.endswith((".localhost", ".local")):
         return True
     try:
