@@ -198,3 +198,10 @@ Known gaps pinned as strict xfails: text stop sequences; the harness's five.
    until step 5 deletes them. Checkpoints come at each segment end and at
    the prompt less its last token (mlx-lm's convention: that token is fed
    as its own segment). tests/test_executor.py.
+2. **request.py -- done (2026-09-25).** `engine/runtime/request.py`: the
+   control-token state machine (`control_machine`, no user stops in it),
+   the reasoning/answer/tool split, text stops on the answer only with a
+   max(len(stop))-1 hold-back, tool-call parsing through the tokenizer's
+   parser, usage with reasoning tokens and the cache report. The
+   detokenizer is finalized at the end (mlx-lm's server never does).
+   tests/test_request.py, no model.
