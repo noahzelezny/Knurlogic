@@ -34,3 +34,29 @@ def test_a_registered_page_is_found_resolved_and_its_txt_read():
         assert changes and not d.errors
     finally:
         d.stop()
+
+
+def test_a_ref_queued_twice_is_freed_once_and_its_callback_goes():
+    """A resolve can call back twice in one batch; freeing its ref twice
+    would hand mDNSResponder a dead pointer (segfault-capable)."""
+    import ctypes
+    import types
+    from knurlogic.cluster.discovery import Discovery
+    d = Discovery()
+    a, b = ctypes.c_void_p(1), ctypes.c_void_p(2)
+    d._add_ref(a, "cb-a")
+    d._add_ref(b, "cb-b")
+    freed = []
+    lib = types.SimpleNamespace(DNSServiceRefDeallocate=freed.append)
+    d._free += [a, a, None]
+    d._drain_free(lib)
+    assert freed == [a]
+    assert d._refs == [b] and list(d._keep) == [id(b)]
+
+
+def test_a_long_instance_name_is_cut_on_a_character_boundary():
+    from knurlogic.cluster.discovery import _label
+    name = "the maintainer’s Mac Studio — " + "é" * 40
+    b = _label(name)
+    assert len(b) <= 63
+    b.decode("utf-8")                      # never split mid-character

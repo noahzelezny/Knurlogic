@@ -128,3 +128,41 @@ def test_remembered_after_answering_and_only_then(tmp_path):
     assert p.found_by == {"remembered"} and p.name == "M4"
     stored = json.loads((tmp_path / "peers.json").read_text())
     assert stored["schema"] == 1 and "bbbbbbbbbbbb" in stored["peers"]
+
+
+def test_a_peer_that_lies_about_its_shape_cannot_break_status():
+    from knurlogic.cluster.peers import clean_node
+    from knurlogic.machine import status
+    n = clean_node({"id": 7, "node": ["x"], "memory": {"active_bytes": "x",
+                   "total_bytes": -5, "peak_bytes": 3}, "uptime_seconds": "a",
+                   "deep": {"a": {"b": {"c": {"d": {"e": {"f": 1}}}}}}})
+    assert n["memory"] == {"active_bytes": 0, "total_bytes": 0,
+                           "peak_bytes": 3}
+    assert n["id"] == "7" and isinstance(n["node"], str)
+    agg = status.aggregate([n, {"memory": {"active_bytes": "junk"}}])
+    assert agg["cluster"]["memory"]["active_bytes"] == 0
+
+
+def test_introductions_are_capped():
+    from knurlogic.cluster import peers as P
+    ps = P.Peers({"id": "me"}, 8899, store="/nonexistent/peers.json",
+                 persist=False)
+    for i in range(P.MAX_INTRODUCED + 20):
+        ps.introduce(f"10.1.{i // 250}.{i % 250}", f"id{i} 8899")
+    assert len(ps.all()) == P.MAX_INTRODUCED
+    ps.introduce("203.0.113.9", "x" * 100 + " 8899")          # junk id
+    ps.introduce("203.0.113.9", "idz 70000")                   # junk port
+    assert len(ps.all()) == P.MAX_INTRODUCED
+
+
+def test_two_machines_claiming_one_id_are_both_kept_and_flagged():
+    from knurlogic.cluster import peers as P
+    ps = P.Peers({"id": "me"}, 8899, store="/nonexistent/peers.json",
+                 persist=False)
+    a, b = ps.add("192.0.2.2", 8899, "bonjour"), ps.add("192.0.2.9", 8899,
+                                                         "introduced")
+    a.id = b.id = "same"
+    a.name, b.name = "Studio", "Impostor"
+    ps._dedupe()
+    assert len(ps.all()) == 2
+    assert "both claim" in a.problem and "both claim" in b.problem
