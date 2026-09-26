@@ -238,7 +238,10 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
     for port, rec in servers.registry().items():
         if servers.is_our_server(int(rec["pid"])):
             ours[port] = rec
-    for port in list(p.get("openai", [])) + sorted(ours):
+    # and serves started by hand: shown, but only the page's own children
+    # are offered for unloading (it stops only what it started)
+    by_hand = {port for port in servers.listening_serves() if port not in ours}
+    for port in list(p.get("openai", [])) + sorted(ours) + sorted(by_hand):
         if port in seen_ports:
             continue
         seen_ports.add(port)
@@ -247,6 +250,9 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
         # OpenAI port. Asking ours first stops knurlogic listing itself as
         # an anonymous mlx server.
         rows = _knurlogic(base) or _openai_port(base)
+        if port in by_hand:
+            for r in rows:
+                r.can_unload = False
         if not rows and port in ours:
             # Alive, registered, not answering yet: it is loading, and saying
             # so is the difference between "nothing here" and "wait".

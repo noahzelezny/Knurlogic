@@ -413,6 +413,95 @@ def _load_fn(serve_port: int):
     return handler
 
 
+#: How long the page waits for all peers together. A peer's /loaded.json
+#: runs its memory map (about a second on a busy box); past this the local
+#: answer goes out without that peer, which is listed as not answering.
+PEER_LOADED_S = 2.5
+
+#: Chat endpoints on peers, as the peers themselves last reported them:
+#: {base: machine name}. Refilled by every peer survey.
+_PEER_TARGETS: dict = {}
+
+
+def _peer_where(where: str, host: str) -> str:
+    """A peer reports its models at ITS loopback; seen from here the same
+    port is at the peer's address. Anything not on loopback is left as is."""
+    u = urlparse(where or "")
+    if u.hostname in ("127.0.0.1", "localhost", "::1") and u.port:
+        return f"{u.scheme or 'http'}://{host}:{u.port}"
+    return where or ""
+
+
+def peer_residency(peers, timeout: float = PEER_LOADED_S,
+                   fetch=None) -> list:
+    """What every answering peer says it is holding, one entry per machine.
+
+    Asked in parallel with one shared deadline, so a slow or dead peer costs
+    at most `timeout` and never the local answer. Peers are asked plain
+    /loaded.json -- never ?peers=1 -- so two pages asking each other cannot
+    recurse. Each row is labelled with its machine and its address rewritten
+    from the peer's loopback to the peer's address."""
+    import threading
+    import urllib.request
+    if fetch is None:
+        def fetch(url, t):
+            with urllib.request.urlopen(url, timeout=t) as r:
+                return json.loads(r.read())
+    todo = [p for p in (peers.all() if peers else [])
+            if p.state == "answering"]
+    out: dict = {}
+
+    def one(p):
+        try:
+            doc = fetch(f"http://{p.key}/loaded.json", timeout)
+            rows = []
+            for r in doc.get("resident") or []:
+                if isinstance(r, dict):
+                    rows.append(dict(r, machine=p.name or p.host,
+                                     where=_peer_where(r.get("where"),
+                                                       p.host)))
+            out[p.key] = {"machine": p.name or p.host, "address": p.key,
+                          "resident": rows}
+        except Exception as e:
+            out[p.key] = {"machine": p.name or p.host, "address": p.key,
+                          "resident": [],
+                          "error": f"{type(e).__name__}: {e}"}
+    ts = [threading.Thread(target=one, args=(p,), daemon=True) for p in todo]
+    for t in ts:
+        t.start()
+    end = time.time() + timeout
+    for t in ts:
+        t.join(max(end - time.time(), 0))
+    res = []
+    for p in todo:
+        # a thread still running past the deadline has written nothing yet
+        res.append(out.get(p.key) or {
+            "machine": p.name or p.host, "address": p.key, "resident": [],
+            "error": f"did not answer in {timeout:.1f} s"})
+    targets = {}
+    for m in res:
+        for r in m["resident"]:
+            if r.get("runtime") == "knurlogic" and r.get("where"):
+                targets[r["where"].rstrip("/")] = m["machine"]
+    _PEER_TARGETS.clear()
+    _PEER_TARGETS.update(targets)
+    return res
+
+
+def _loaded_fn():
+    """/loaded.json as `web` answers it for this box; with ?peers=1 (what the
+    page asks) it also carries `peers`: each other machine's residency."""
+    local = web.loaded_document()
+
+    def handler(q: dict) -> dict:
+        doc = local(q)
+        if not (q.get("peers") or [""])[0]:
+            return doc
+        # a copy: the local document is cached and shared between requests
+        return dict(doc, peers=peer_residency(PEERS))
+    return handler
+
+
 def chat_targets() -> set:
     """Endpoints the page may send a chat to: servers knurlogic started that
     are still ours. A fixed allow-list, so the proxy cannot be
@@ -422,6 +511,9 @@ def chat_targets() -> set:
     for port, rec in registry().items():
         if is_our_server(int(rec["pid"])):
             out.add(f"http://127.0.0.1:{port}")
+    # and knurlogic servers a peer reported in its own residency: machines
+    # this page already polls, never an address taken from the request
+    out.update(_PEER_TARGETS)
     return out
 
 
@@ -545,7 +637,7 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
         status_fn=_status_fn,
         settings_fn=web.machine_settings(),
         models_fn=web.models_document(serving=""),
-        loaded_fn=web.loaded_document(),
+        loaded_fn=_loaded_fn(),
         load_fn=_load_fn(serve_port))
 
     class H(BaseHTTPRequestHandler):

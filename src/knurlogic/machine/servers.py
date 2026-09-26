@@ -73,3 +73,39 @@ def is_our_server(pid: int) -> bool:
     return "knurlogic" in out and "serve" in out.split()
 
 
+
+
+def listening_serves() -> dict:
+    """port -> pid for every `knurlogic serve` on this box that is listening,
+    whoever started it. The registry holds only what the page launched; a
+    serve started by hand in a terminal is just as loaded, and leaving it
+    out made the page say "nothing loaded" beside 110 GiB of model.
+    Read-only (ps, lsof); an empty answer when either is unavailable."""
+    try:
+        ps = subprocess.run(["ps", "-axo", "pid=,command="],
+                            capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return {}
+    pids = []
+    for line in ps.splitlines():
+        pid, _, cmd = line.strip().partition(" ")
+        if "knurlogic" in cmd and "serve" in cmd.split() and pid.isdigit():
+            pids.append(pid)
+    if not pids:
+        return {}
+    try:
+        out = subprocess.run(["lsof", "-nP", "-a", "-iTCP", "-sTCP:LISTEN",
+                              "-p", ",".join(pids), "-Fpn"],
+                             capture_output=True, text=True,
+                             timeout=5).stdout
+    except Exception:
+        return {}
+    found, pid = {}, 0
+    for line in out.splitlines():
+        if line.startswith("p") and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line.startswith("n") and pid:
+            port = line.rsplit(":", 1)[-1]
+            if port.isdigit():
+                found.setdefault(int(port), pid)
+    return found
