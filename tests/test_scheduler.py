@@ -240,7 +240,8 @@ def test_out_of_memory_is_a_503_to_retry():
 
 def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
     """A row prefills whole inside one step, so a long prompt must fit
-    before it is admitted: the prompt cache gives way, then it waits for
+    before it is admitted: the prompt cache gives way; if only one copy of
+    its cache fits it goes in lean (no checkpoints); else it waits for
     running rows, or with none running it is refused."""
     import pytest
     from knurlogic.engine.runtime import prompt as P
@@ -259,21 +260,24 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
     s.cache = Cache()
     s._active = lambda: mem["active"]
     s._release = lambda: None
-    # learned from a 2048-token cache of 2 MiB/token
-    kv = type("KV", (), {"nbytes": 2048 * 2 * 2**20})()
-    s._learn(list(range(2048)), [kv])
-    assert s._bpt == 2 * 2**20
-    # 1024 tokens need 4 GiB; 5 GiB free under limit less margin: fits
-    s._make_room(1024)
-    assert s.cache.nbytes == 4 * GIB
-    # 2048 tokens need 8 GiB: the cache gives up 3 GiB and it fits
-    s._make_room(2048)
-    assert s.cache.nbytes == 1 * GIB
-    # 4096 tokens need 16: with a row running it waits ...
+
+    def kv(n):   # 64 MiB of fixed state, 1 MiB per token
+        return [type("KV", (), {"nbytes": 64 * 2**20 + n * 2**20})()]
+    s._learn(list(range(512)), kv(512))
+    s._learn(list(range(4096)), kv(4096))
+    assert s._kv == (64 * 2**20, 2**20)          # fixed + slope, not a ratio
+    # 5 GiB free under limit less margin; 1024 tokens x2 = ~2.1 GiB: full
+    assert s._make_room(1024) == "full" and s.cache.nbytes == 4 * GIB
+    # 3072 x2 = ~6.1 GiB: the cache gives up what it takes, still full
+    assert s._make_room(3072) == "full" and s.cache.nbytes < 4 * GIB
+    # 7000 tokens: twice (13.8) never fits, once (6.9) does once the cache
+    # is gone: lean
+    assert s._make_room(7000) == "lean" and s.cache.nbytes == 0
+    # 16000 tokens do not fit at all: with a row running it waits ...
     s._rows = {1: S._Row(S.Job(P.ChatRequest(), P.PromptArgs()), None, [])}
     with pytest.raises(S._Wait):
-        s._make_room(4096)
+        s._make_room(16000)
     # ... with none it is refused, and says why
     s._rows = {}
-    with pytest.raises(S.OutOfMemory, match="4096 tokens"):
-        s._make_room(4096)
+    with pytest.raises(S.OutOfMemory, match="16000 tokens"):
+        s._make_room(16000)
