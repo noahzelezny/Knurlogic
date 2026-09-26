@@ -28,11 +28,14 @@ A step cannot be interrupted, and admitting a row prefills its whole
 prompt inside one step (plus a deep copy per segment checkpoint), so the
 per-step check alone lets one long prompt jump past the limit (measured:
 an agent's 50k-token turn took the same server from 114 to 118 GiB within
-a minute, no step between). So admission estimates too: a prompt needs
-about twice its KV (the row, and its checkpoints' copies) at the bytes per
-token this model's caches were measured at; the prompt cache gives way
-for it; failing that it waits for running rows, or with none running is
-refused -- never admitted to abort the process.
+a minute, no step between). So admission estimates too, from what this
+model's caches measured (fixed state per row plus bytes per token: hybrid
+models carry linear-attention state whatever the length). A prompt wants
+its KV twice -- the row, and the checkpoint copies the prompt cache keeps;
+the prompt cache gives way for it; if only one copy fits, the row is
+admitted LEAN, without checkpoints (the request beats the cache); failing
+that it waits for running rows, or with none running is refused -- never
+admitted to abort the process.
 """
 
 from __future__ import annotations
@@ -162,8 +165,9 @@ class Scheduler:
         #: active bytes a step may start at; None = the working set less a
         #: margin, found on first use; 0 = unguarded
         self.memory_limit = memory_limit_bytes
-        #: KV bytes per prompt token, measured from this model's caches
-        self._bpt = 0.0
+        #: (fixed bytes, bytes per token) of one row's cache, measured
+        self._kv = None
+        self._samples: dict = {}
         self.cache = PromptCache(prompt_cache_size)
         self.stats = stats if stats is not None else {}
         self._jobs: "queue.Queue" = queue.Queue()
@@ -427,7 +431,7 @@ class Scheduler:
                 prompt, segs, types, initial = P.tokenize(
                     self, tok, job.request, job.args)
             job.prompt_tokens = len(prompt)
-            self._make_room(len(prompt))
+            lean = self._make_room(len(prompt)) == "lean"
             cache, rest = self.cache.fetch(self.host.model_key, prompt)
             n = len(prompt) - len(rest)
             segs, types = [list(s) for s in segs], list(types)
@@ -438,6 +442,9 @@ class Scheduler:
                 else:
                     segs[0] = segs[0][n:]
                     n = 0
+            if lean and len(segs) > 1:
+                # one segment: no checkpoint copies of this prompt
+                segs, types = [[t for s in segs for t in s]], []
             sm, seqs = control_machine(tok, initial)
             procs = []
             if job.penalties:
@@ -491,21 +498,42 @@ class Scheduler:
                 or self._active() < limit - self._margin())
 
     def _learn(self, tokens, cache) -> None:
-        """Bytes per token, from a cache long enough that fixed-size state
-        (linear-attention layers, the head's carry) does not dominate."""
-        if len(tokens) >= 1024:
-            self._bpt = max(self._bpt, _cache_nbytes(cache) / len(tokens))
+        """A row's cache as fixed + per-token bytes, from the shortest and
+        longest caches seen. One ratio on a short cache charged a hybrid
+        model's fixed linear-attention state to every token (Flash 4.4:
+        long agent turns refused that fit). Until two lengths 2048 apart
+        are known, the ratio at the longest -- an overestimate, the safe
+        side."""
+        n = len(tokens)
+        if n < 256:
+            return
+        b = _cache_nbytes(cache)
+        s = self._samples
+        if "lo" not in s or n < s["lo"][0]:
+            s["lo"] = (n, b)
+        if "hi" not in s or n > s["hi"][0]:
+            s["hi"] = (n, b)
+        (n0, b0), (n1, b1) = s["lo"], s["hi"]
+        if n1 - n0 >= 2048 and b1 > b0:
+            slope = (b1 - b0) / (n1 - n0)
+            self._kv = (max(b0 - slope * n0, 0.0), slope)
+        else:
+            self._kv = (0.0, b1 / n1)
+
+    def _cost(self, n_tokens: int, copies: int) -> int:
+        fixed, per = self._kv
+        return int(copies * (fixed + per * n_tokens))
 
     def _fits(self, n_tokens: int) -> bool:
-        return self._room_for(n_tokens)[0]
+        return self._room_for(n_tokens, copies=1)[0]
 
-    def _room_for(self, n_tokens: int):
-        """(fits, need, room) for a prompt of n_tokens, the prompt cache
-        giving way if that is what it takes."""
+    def _room_for(self, n_tokens: int, copies: int = 2):
+        """(fits, need, room) for a prompt of n_tokens held `copies` times,
+        the prompt cache giving way if that is what it takes."""
         limit = self._limit()
-        if not limit or not self._bpt:
+        if not limit or not self._kv:
             return True, 0, 0
-        need = int(2 * n_tokens * self._bpt)
+        need = self._cost(n_tokens, copies)
         room = limit - self._margin() - self._active()
         if need > room and self.cache is not None and self.cache.nbytes:
             before = self.cache.nbytes
@@ -517,12 +545,19 @@ class Scheduler:
                         n_tokens)
         return need <= room, need, room
 
-    def _make_room(self, n_tokens: int) -> None:
-        """Return if a prompt of n_tokens fits; else _Wait (rows are
-        running and will free memory) or OutOfMemory (none are)."""
-        fits, need, room = self._room_for(n_tokens)
+    def _make_room(self, n_tokens: int) -> str:
+        """"full" if a prompt of n_tokens fits with its checkpoints, "lean"
+        if only without; else _Wait (rows are running and will free memory)
+        or OutOfMemory (none are)."""
+        fits, need, room = self._room_for(n_tokens, copies=2)
         if fits:
-            return
+            return "full"
+        fits, need, room = self._room_for(n_tokens, copies=1)
+        if fits:
+            logger.info("a %d-token prompt admitted without checkpoints: "
+                        "%.1f GiB free, its cache twice would be %.1f",
+                        n_tokens, room / GIB, 2 * need / GIB)
+            return "lean"
         limit = self._limit()
         if self._rows:
             raise _Wait()
