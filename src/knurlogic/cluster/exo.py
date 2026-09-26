@@ -11,6 +11,7 @@ never launches, places on or proxies to exo.
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -18,6 +19,9 @@ from dataclasses import dataclass
 from knurlogic.machine import status, wired
 
 GIB = 1 << 30
+
+#: Where exo answers, asked only WHO IS THERE. KNURLOGIC_EXO_URL overrides.
+EXO_URL = os.environ.get("KNURLOGIC_EXO_URL", "http://127.0.0.1:52415")
 
 def _get(url: str, timeout: float = 5.0):
     with urllib.request.urlopen(url, timeout=timeout) as r:

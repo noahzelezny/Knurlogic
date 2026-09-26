@@ -69,7 +69,8 @@ def test_exo_reports_loaded_when_a_runner_is_actually_up(fake):
         "instances": {"i1": {"shardAssignments": {"modelId": "m/x"}}},
         "runners": {"r1": {"RunnerReady": {}}}}})
     r = loaded._exo("http://x")[0]
-    assert r.state == "loaded" and r.can_unload and r.ident == "i1"
+    # Read, never driven: knurlogic does not unload exo's instances.
+    assert r.state == "loaded" and not r.can_unload and r.ident == "i1"
 
 
 def test_ollama_reads_ps_not_tags(fake):
@@ -125,32 +126,6 @@ def test_nothing_running_is_an_ordinary_answer(monkeypatch):
     doc = loaded.survey()
     assert doc["resident"] == []
     assert "nothing reports a loaded model" in loaded.render(doc)
-
-
-def test_exo_load_uses_exo_s_own_placement_object(monkeypatch):
-    """The shard assignment is exo's decision, not one assembled here: the
-    object returned by /instance/placement is posted back verbatim."""
-    placement = {"MlxRingInstance": {"instanceId": "abc",
-                                     "shardAssignments": {"modelId": "m/x"}}}
-    monkeypatch.setattr(loaded, "_get", lambda url, timeout=1.5: placement)
-    sent = {}
-
-    def _post(url, payload=None, method="POST", timeout=30.0):
-        sent.update(url=url, payload=payload, method=method)
-        return {"message": "Command received."}
-    monkeypatch.setattr(loaded, "_post", _post)
-
-    loaded.exo_load("http://x", "m/x")
-    assert sent["url"] == "http://x/instance"
-    assert sent["payload"] == {"instance": placement}
-
-
-def test_exo_load_refuses_rather_than_posting_a_guess(monkeypatch):
-    monkeypatch.setattr(loaded, "_get", lambda url, timeout=1.5: None)
-    monkeypatch.setattr(loaded, "_post",
-                        lambda *a, **k: pytest.fail("posted without placement"))
-    with pytest.raises(RuntimeError, match="would not place"):
-        loaded.exo_load("http://x", "m/x")
 
 
 # --- where the RAM went -----------------------------------------------------

@@ -182,9 +182,9 @@ def loaded_document(ttl: float = 4.0):
 
 def load_action(artifact_for, resolve_fn=None, live_knobs=(),
                 switch_fn=None, unload_fn=None):
-    """`POST /loaded.json` -- load, unload, or hand the job to exo.
+    """`POST /loaded.json` -- load, unload, or ask ollama to let go.
 
-    The reason this is knurlogic's job and not a link to exo's page: a model
+    The reason this is knurlogic's job: a model
     swapped into a running process gets the environment that process STARTED
     with. Knurlogic is the only thing here that knows what the incoming
     artifact would have resolved to, so it is the only thing that can say
@@ -232,14 +232,6 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=(),
                 return r
             if act == "unload":
                 return unload_fn()
-            # The same functions the MCP calls, so the page refuses what an
-            # agent would be refused, and says why in the same words.
-            if act == "exo-load":
-                from knurlogic.interfaces import mcp
-                return mcp.place(model=target)
-            if act == "exo-unload":
-                from knurlogic.interfaces import mcp
-                return mcp.unplace(instance_id=target)
             if act == "ollama-unload":
                 return L.ollama_unload(where, target)
         except Exception as e:

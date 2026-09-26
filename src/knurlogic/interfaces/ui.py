@@ -44,10 +44,9 @@ _CHILDREN: dict = {}
 _SERVE_PORT: dict = {"n": 8080, "ui": 8899}
 
 
-#: Where to look for exo, only to ask WHO IS THERE. knurlogic does not need
-#: exo to run; it needs it to know about the other machines, because exo is
-#: the thing that already tracks them.
-from knurlogic.machine.exo import EXO_URL  # noqa: E402  one home
+#: Where to look for exo, only to ask WHO IS THERE: exo is one witness of
+#: which other machines exist (cluster/exo.py). knurlogic never drives it.
+EXO_URL = exo_witness.EXO_URL
 
 
 def _local_name(nodes) -> str:
@@ -386,9 +385,6 @@ def _load_fn(serve_port: int):
                                 tune=req.get("tune") or "balanced",
                                 sets=req.get("sets") or {},
                                 force=bool(req.get("force")))
-            if act == "exo-load":
-                from knurlogic.interfaces import mcp
-                return mcp.place(model=target, force=bool(req.get("force")))
             if act == "unload":
                 # Ours to stop only if we started it. Anything else is
                 # somebody's server and not this page's to kill.
@@ -397,9 +393,6 @@ def _load_fn(serve_port: int):
                         return _stop(port)
                 return {"error": "this page did not start that; stop it "
                                  "where it was started"}
-            if act == "exo-unload":
-                from knurlogic.interfaces import mcp
-                return mcp.unplace(instance_id=target)
             if act == "ollama-unload":
                 return loaded.ollama_unload(where, target)
         except Exception as e:
@@ -409,12 +402,11 @@ def _load_fn(serve_port: int):
 
 
 def chat_targets() -> set:
-    """Endpoints the page may send a chat to: exo, and servers knurlogic
-    started that are still ours. A fixed allow-list, so the proxy cannot be
+    """Endpoints the page may send a chat to: servers knurlogic started that
+    are still ours. A fixed allow-list, so the proxy cannot be
     pointed at an arbitrary address by whatever is in the request."""
-    from knurlogic.machine.exo import EXO_URL
     from knurlogic.machine.servers import is_our_server
-    out = {EXO_URL.rstrip("/")}
+    out = set()
     for port, rec in registry().items():
         if is_our_server(int(rec["pid"])):
             out.add(f"http://127.0.0.1:{port}")
@@ -426,7 +418,7 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
     and stream its answer back as it arrives.
 
     The control page serves no model, so its chat has to reach the one the
-    person clicked -- on exo, or on a server `load` started -- and a browser
+    person clicked -- a server `load` started -- and a browser
     will not let a page on this port call another port directly. Streaming
     is passed through byte for byte: SSE, prefill keepalives and all."""
     import urllib.error
