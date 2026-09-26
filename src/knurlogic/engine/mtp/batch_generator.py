@@ -660,6 +660,12 @@ class MTPBatchGenerator(BatchGenerator):
         return total
 
     def close(self):
+        # rows still queued hold their tokenize pins; remove() drops them
+        # (an executor closed after a failed step would leak them into a
+        # store that outlives it)
+        queued = [s[0] for s in self._unprocessed_sequences]
+        if queued:
+            self.remove(queued)
         self._batch.filter([])
         self._stack.close()
         super().close()
