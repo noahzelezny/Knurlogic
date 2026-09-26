@@ -93,6 +93,8 @@ def build_maps() -> dict:
             if h:
                 spec = {k: v for k, v in h.items() if k != "names"}
                 for n in h["names"]:
+                    if n in heads:
+                        raise ValueError(f"drafting head {n!r} claimed twice")
                     heads[n] = spec
         for d, spec in (m.get("thinking") or {}).items():
             if d in thinking:

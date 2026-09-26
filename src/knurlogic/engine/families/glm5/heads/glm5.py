@@ -162,11 +162,18 @@ class MTPHeadGlm5:
         return self
 
     def quantize(self, bits=6, group_size=32, expert_bits=None):
-        """Quantize the head, mirroring the trunk's own quant_predicate:
-        the router gate and the DSA indexer stay 8-bit/gs64 (their
-        precision is load-bearing for expert and key selection), the
-        expert stack takes `expert_bits` (~96% of the weight), everything
-        else `bits`."""
+        """Quantize the head: the expert stack takes `expert_bits` (~96% of
+        the weight), everything else `bits`. This is also the recipe
+        `from_sidecar` replays, so it must match the published heads.
+
+        The 8-bit/gs64 branch below never fires: `nn.quantize` hands the
+        predicate paths relative to `self_attn`/`mlp`, so "mlp.gate" and
+        ".indexer" do not match. As published, the router gate stays bf16
+        (it has no `to_quantized`) and the DSA indexer is `bits`/gs32
+        (mtp-head-q6: wk/wq_b/weights_proj at 6-bit, 32-wide groups).
+        Making the branch match would change the packed shapes and stop
+        every existing head loading; that is a new head format, not a
+        fix."""
         eb = bits if expert_bits is None else expert_bits
 
         def predicate(path, mod):

@@ -81,10 +81,12 @@ def _load_pins() -> dict:
         if not f.is_file():
             continue
         try:
-            out.update({k: v["sha256"]
-                        for k, v in json.loads(f.read_text()).items()})
+            rows = json.loads(f.read_text())
         except Exception:
             continue
+        for k, v in (rows.items() if isinstance(rows, dict) else ()):
+            if isinstance(v, dict) and isinstance(v.get("sha256"), str):
+                out[k] = v["sha256"]  # a malformed entry costs only itself
     return out
 
 
@@ -155,9 +157,10 @@ def required_modules(model_type: str) -> list:
     if base is None:
         return []
     out = [base]
-    for dep in ARCH_DEPENDS_ON.get(base, []):
-        if dep not in out:
-            out.append(dep)
+    for mod in out:  # grows as it goes: dependencies of dependencies too
+        for dep in ARCH_DEPENDS_ON.get(mod, []):
+            if dep not in out:
+                out.append(dep)
     return out
 
 
