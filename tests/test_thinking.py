@@ -63,7 +63,7 @@ EXPECT = {
     "gemma_toggle": {"none": "off", "minimal": "on", "low": "on",
                      "medium": "on", "high": "on", "xhigh": "on"},
     "glm_effort": {"none": "off", "minimal": "low", "low": "low",
-                   "medium": "high", "high": "high", "xhigh": "max"},
+                   "medium": "high", "high": "max", "xhigh": "max"},
 }
 
 
@@ -138,6 +138,8 @@ def test_glm_effort_reaches_the_prompt():
     assert "Reasoning Effort: Low" in _render(r, **_kw("glm_effort", "low"))
     assert "Reasoning Effort: High" in _render(r, **_kw("glm_effort",
                                                         "medium"))
+    assert "Reasoning Effort: Max" in _render(r, **_kw("glm_effort",
+                                                       "high"))
     assert "Reasoning Effort: Max" in _render(r, **_kw("glm_effort",
                                                        "xhigh"))
 
