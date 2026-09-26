@@ -644,8 +644,10 @@ pip-installable; what exo adds is orchestration. In order:
    numpy; no exo, no mlx-vlm), every command ran from outside the repo, and
    Flash-Next VQ-2.1bpw loaded through the MCP, drafting on the batch path
    (acceptance 0.75), answering from the venv's own interpreter. Still to
-   do: the same on the M4, which has no exo at all; and GLM-5.3, which
-   needs mlx-vlm (`pip install knurlogic[vlm]`, untested).
+   do: the same on the M4, which has no exo at all. GLM-5.3 needs nothing
+   extra: served from an environment WITHOUT mlx-vlm on the M4
+   (2026-09-25): conformance 36 passed / 2 skipped, vision on, drafting
+   0.91 -- the `vlm` extra is gone.
 2. `knurlogic node` -- a stdlib HTTP agent per Mac -- and a two-node
    pipeline over the ring backend, on a model already on both disks. exo
    stays installed until this is dependable.

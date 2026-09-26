@@ -114,7 +114,9 @@ count.
 
 ## What it stands on
 
-    mlx, mlx-lm (>= 0.31.3). mlx-vlm for multimodal and GLM-5.3.
+    mlx, mlx-lm (0.31.3, pinned). Nothing else: every family's
+    architecture and vision tower is vendored (engine/families/), GLM-5.3
+    included -- mlx-vlm is not needed.
 
 Some of these have forks that carry fixes upstream does not, and nothing
 else says which build is installed. `knurlogic deps` reads every verdict off
