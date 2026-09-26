@@ -103,3 +103,17 @@ def test_a_serve_started_by_hand_is_shown_but_not_offered_for_unload(
         if b.endswith(":8097") else [])
     [r] = loaded.survey(ports={"openai": []})["resident"]
     assert r["where"] == "http://127.0.0.1:8097" and r["can_unload"] is False
+
+
+def test_a_peer_may_only_offer_endpoints_on_its_own_address():
+    """What a peer reports becomes a chat proxy target: an endpoint on
+    another host (a rogue Bonjour advertiser pointing at the router, say)
+    is dropped, not proxied to."""
+    from knurlogic.interfaces.ui import _peer_where
+    assert _peer_where("http://127.0.0.1:8097", "192.0.2.2") == \
+        "http://192.0.2.2:8097"
+    assert _peer_where("http://192.0.2.2:8097", "192.0.2.2") == \
+        "http://192.0.2.2:8097"
+    assert _peer_where("http://203.0.113.101:80", "192.0.2.2") == ""
+    assert _peer_where("file:///etc/passwd", "192.0.2.2") == ""
+    assert _peer_where("", "192.0.2.2") == ""
