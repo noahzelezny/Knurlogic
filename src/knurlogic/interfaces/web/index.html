@@ -143,19 +143,29 @@
     rather than as a legend for the fills -- the swatches were as far from
     the colours they name as they had been in the other column. Beside the
     machine, vertical, it is obviously part of the same picture. */
- .topounits{display:flex;align-items:center;justify-content:center;gap:0;
-   flex-wrap:wrap}
- /* Was absolutely positioned against the right edge, which works for one
-    machine and collides with the second: the row of units grows and the key
-    does not move. A flex item instead, so the machines and the key share
-    the space rather than being drawn on top of each other. */
- .topounits{flex:1;min-width:0}
- #ramwent{flex:none;margin-left:clamp(8px,2%,28px)}
- .ram{display:flex;flex-direction:column;gap:5px}
+ /* A grid of at most two rows of three, the key always in the top row's
+    last cell: machine, machine, KEY over machine, machine, machine. One or
+    two machines are one row with the key at its end (two keep the live
+    link between them). The machines are grid items of .topo itself --
+    #topo is display:contents -- so the key, written by another function,
+    can take its cell without either knowing about the other. */
+ .topo{display:grid;align-items:start;gap:18px 12px}
+ .topo.n1{grid-template-columns:minmax(0,380px) auto;justify-content:center}
+ .topo.n2{grid-template-columns:minmax(0,1fr) 56px minmax(0,1fr) auto}
+ .topo.n3{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .topounits{display:contents}
+ #ramwent{grid-row:1;grid-column:-2;align-self:center;
+   margin-left:clamp(8px,2%,28px)}
+ .topo.n3 #ramwent{justify-self:center;margin:0}
+ .topo .flow{align-self:center}
+ .topomore{grid-column:1/-1;text-align:center;color:var(--faint)}
+ /* A window shoved to half a screen: two machines keep their row and the
+    key drops under them; three to five go two to a row, key still top right. */
  @media(max-width:1150px){
-   .topo{flex-wrap:wrap}
-   .topounits{flex:1 0 100%}
-   #ramwent{margin:6px auto 0}}
+   .topo.n2{grid-template-columns:minmax(0,1fr) 56px minmax(0,1fr)}
+   .topo.n2 #ramwent{grid-row:2;grid-column:1/-1;justify-self:center;margin:0}
+   .topo.n3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+ .ram{display:flex;flex-direction:column;gap:5px}
  .ramrow{display:flex;align-items:center;gap:7px;font-size:10.5px;
    letter-spacing:.04em;white-space:nowrap}
  .ramrow span{flex:1}
@@ -281,31 +291,39 @@
  .chat .x:hover{color:var(--warn)}
  .sidelab{font-size:10px;letter-spacing:.14em;text-transform:uppercase;
    color:var(--faint);margin:14px 0 7px}
- /* A menu takes the whole screen. Half a screen of settings beside a
-    topology you are not reading is two things competing; this is one. */
- .sheet{position:fixed;inset:0;z-index:40;background:var(--bg);
-   display:flex;flex-direction:column;
-   background-image:linear-gradient(var(--grid) 1px,transparent 1px),
-     linear-gradient(90deg,var(--grid) 1px,transparent 1px);
-   background-size:40px 40px}
- .sheet[hidden]{display:none}
+ /* Settings and Connect are overlays like the picker, not a place you go:
+    what you were looking at stays where it was underneath, and a click
+    outside or Escape puts you back on it. */
+ .modal .box.menu{width:min(820px,100%);height:auto;max-height:86vh}
  .sheethd{display:flex;align-items:center;justify-content:space-between;
-   padding:16px 24px;border-bottom:1px solid var(--line);flex:none;
-   background:linear-gradient(180deg,oklch(.16 0 0/.95),oklch(.12 0 0/.98))}
- @media(prefers-color-scheme:light){.sheethd{
-   background:linear-gradient(180deg,oklch(1 0 0/.95),oklch(.97 0 0/.98))}}
+   padding:12px 14px;border-bottom:1px solid var(--line);flex:none}
  .sheethd b{letter-spacing:.18em;color:var(--acc);text-shadow:var(--glow)}
- #sheetclose{background:transparent;border-color:var(--line);color:var(--dim);
-   cursor:pointer;letter-spacing:.1em}
- #sheetclose:hover{color:var(--fg);border-color:var(--acc)}
- .sheetbody{overflow:auto;padding:26px 24px 60px}
- .sheetbody .panel{max-width:760px;margin:0 auto 20px}
- .sheetbody .panel{display:none}
+ .sheetbody{overflow:auto;padding:6px 14px 14px}
+ .sheetbody .panel{display:none;margin:0;border:0;box-shadow:none;
+   background:transparent;padding:12px 4px 4px}
  .sheetbody .panel.on{display:block}
- /* The sheet header already names the panel; the notch label would say it
-    a second time, six lines lower. */
+ /* The overlay's header already names the panel; the notch label would say
+    it a second time, six lines lower. */
  .sheetbody .panel>.lab{display:none}
- .sheetbody .panel{padding-top:20px}
+ /* Chat options float over the transcript, anchored to the bar, instead of
+    growing the bar and shoving the conversation up to make room. */
+ .cbar{position:relative}
+ .pop{position:absolute;bottom:calc(100% + 8px);left:0;z-index:30;
+   width:min(440px,100%);border:1px solid var(--line);border-radius:var(--r);
+   background:var(--panel);box-shadow:0 12px 40px oklch(0 0 0/.55);
+   padding:6px 14px 10px}
+ .pop[hidden]{display:none}
+ .pop .opt input,.pop .opt select{width:100%;text-align:left}
+ #coptsbtn{background:transparent;border:0;padding:0;cursor:pointer;align-self:flex-start;
+   color:var(--faint);font-size:11px;margin-top:10px}
+ #coptsbtn:before{content:"+ "}
+ #coptsbtn[aria-expanded=true]{color:var(--acc)}
+ #coptsbtn[aria-expanded=true]:before{content:"\2212 "}
+ /* Which running model Send goes to, beside the attach button: in teal,
+    because a chat bar that is live should say so and say to what. */
+ #cmodel{align-self:center;color:var(--acc);font-size:11px;max-width:16em;
+   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
+ #cmodel:empty{display:none}
  nav a[aria-pressed=true]{color:var(--acc)}
  nav a{cursor:pointer;border-bottom:1px solid transparent;padding-bottom:2px}
  nav a[aria-pressed=true]{border-bottom-color:var(--acc)}
@@ -328,8 +346,7 @@
     background. The graph links are dashed and animate along their length,
     which is the one piece of motion that carries information: it says the
     link is live. */
- .topo{position:relative;display:flex;align-items:center;
-   justify-content:center;padding:26px 10px 18px;margin:2px 0 4px;
+ .topo{position:relative;padding:26px 10px 18px;margin:2px 0 4px;
    border-radius:var(--r);
    background:radial-gradient(ellipse at center,oklch(.16 0 0) 0%,
      oklch(.12 0 0) 50%,oklch(.09 0 0) 100%);
@@ -341,7 +358,8 @@
    filter:drop-shadow(0 0 3px color-mix(in srgb,var(--acc) 50%,transparent))}
  @keyframes flow{from{stroke-dashoffset:0}to{stroke-dashoffset:-16}}
 
- .unit{text-align:center;padding:0 8px;flex:1 1 220px;max-width:380px}
+ .unit{text-align:center;padding:0 8px;min-width:0;max-width:380px;
+   justify-self:center;width:100%}
  .unit .nm{font-size:11.5px;letter-spacing:.08em;color:var(--dim)}
  .unit .hw{font-size:10px;letter-spacing:.08em;color:var(--faint);
    margin:2px 0 8px;text-transform:uppercase}
@@ -531,14 +549,20 @@
     with messages in it, and the transcript takes the height the dashboard
     had. The logo, or the Dashboard button, goes back. */
  .mark{cursor:pointer}
- #home{display:none;position:absolute;top:-13px;right:14px;background:var(--bg)}
  /* HOME never draws the transcript, empty or not: the bar is pinned to the
     window's bottom, and a transcript under it would cover the dashboard. */
  body:not(.talk) #chat #clog{display:none}
  body:not(.talk) #chat .crow{margin-top:6px}
- body.talk #memory,body.talk .right{display:none}
- body.talk .app{grid-template-columns:15em minmax(0,1fr)}
- body.talk #home{display:inline-block}
+ /* TALK keeps the machines in view, in the right-hand column as exo keeps
+    its topology beside a conversation: one machine under another, the key
+    first. Loading a model is a HOME job, so that panel stays behind. */
+ body.talk #diskpanel{display:none}
+ body.talk .right #memory{margin-bottom:20px}
+ body.talk .right .topo{grid-template-columns:minmax(0,1fr);padding:18px 8px 12px}
+ body.talk .right .topo #ramwent{grid-row:auto;grid-column:auto;order:-1;margin:0;
+   justify-self:center}
+ body.talk .topo .flow{display:none}
+ body.talk #mem{gap:4px 12px}
  body.talk #try{margin-bottom:0}
  /* The chat bar belongs to the bottom of the window, as exo's does: main is
     at least the window's height (less the header and the page's padding) and
@@ -578,9 +602,9 @@
     <b>knurlogic</b>
   </div>
   <nav>
+    <a id="navhome">Home</a>
     <a data-panel="settings">Settings</a>
     <a data-panel="connect">Connect</a>
-    <a href="/status.json">Status.json</a>
   </nav>
 </header>
 <div class="wrap">
@@ -596,7 +620,7 @@
     <main>
       <section class="panel" id="memory">
         <div class="lab">Memory</div>
-        <div class="topo"><div class="topounits" id="topo"></div>
+        <div class="topo n1"><div class="topounits" id="topo"></div>
           <div id="ramwent"></div></div>
         <div id="mem" class="ro"></div>
       </section>
@@ -607,40 +631,44 @@
             <button data-tab="bench">Bench</button>
           </span>
         </div>
-        <button type="button" id="home" class="mini"
-          title="back to the dashboard">&#9666; Dashboard</button>
         <section id="chat">
           <div id="clog"></div>
           <div id="chips" class="chips"></div>
           <div id="pfbar" class="pfbar" hidden>
             <div class="pfbarfill"></div><span class="pfbartxt"></span></div>
-          <form id="cf">
-            <div class="crow">
-              <button type="button" id="cattach" class="mini" title="attach image"
-                disabled>📎</button>
-              <input id="cfile" type="file" multiple hidden
-                accept="image/*,text/*,.md,.json,.py">
-              <textarea id="cq" rows="1"
-                placeholder="Type away; click a running model to send it"></textarea>
-              <button class="go" id="csend" disabled>Send</button>
-              <button type="button" class="go danger" id="cstop" hidden>Stop</button>
+          <!-- The bar and the options that float over what is above it:
+               outside the form, so Enter in a field there is not a Send. -->
+          <div class="cbar">
+            <form id="cf">
+              <div class="crow">
+                <button type="button" id="cattach" class="mini" title="attach image"
+                  disabled>📎</button>
+                <span id="cmodel"></span>
+                <input id="cfile" type="file" multiple hidden
+                  accept="image/*,text/*,.md,.json,.py">
+                <textarea id="cq" rows="1"
+                  placeholder="Type away; click a running model to send it"></textarea>
+                <button class="go" id="csend" disabled>Send</button>
+                <button type="button" class="go danger" id="cstop" hidden>Stop</button>
+              </div>
+            </form>
+            <div class="pop" id="copts" hidden>
+              <div class="opt"><div class="optlab">max tokens</div>
+                <input id="cmax" type="number" min="16" step="16" value="2048"></div>
+              <div class="opt"><div class="optlab">temperature</div>
+                <input id="ctemp" type="number" min="0" max="2" step="0.05" value="0.7"></div>
+              <div class="opt"><div class="optlab">thinking</div>
+                <select id="ceffort" title="reasoning_effort: knurlogic maps it onto this model's own controls and says what it applied">
+                  <option value="">model default</option>
+                  <option>none</option><option>minimal</option><option>low</option>
+                  <option>medium</option><option>high</option><option>xhigh</option>
+                </select></div>
+              <div class="opt"><div class="optlab">system prompt</div>
+                <input id="csys" placeholder="(none)"></div>
             </div>
-          </form>
-          <details class="more" id="copts">
-            <summary>chat options</summary>
-            <div class="opt"><div class="optlab">max tokens</div>
-              <input id="cmax" type="number" min="16" step="16" value="2048"></div>
-            <div class="opt"><div class="optlab">temperature</div>
-              <input id="ctemp" type="number" min="0" max="2" step="0.05" value="0.7"></div>
-            <div class="opt"><div class="optlab">thinking</div>
-              <select id="ceffort" title="reasoning_effort: knurlogic maps it onto this model's own controls and says what it applied">
-                <option value="">model default</option>
-                <option>none</option><option>minimal</option><option>low</option>
-                <option>medium</option><option>high</option><option>xhigh</option>
-              </select></div>
-            <div class="opt"><div class="optlab">system prompt</div>
-              <input id="csys" placeholder="(none)"></div>
-          </details>
+          </div>
+          <button type="button" id="coptsbtn" aria-expanded="false"
+            aria-controls="copts">chat options</button>
         </section>
         <section id="bench" hidden>
           <div id="log"></div>
@@ -719,15 +747,15 @@
     <button id="lbclose" class="mini">Close  esc</button>
   </div>
 </div>
-<!-- The menus take the whole screen. They are what you came for when they
-     are open, and the topology behind them is not something you need to
-     watch while reading why a flag is set the way it is. -->
-<div class="sheet" id="sheet" hidden>
-  <div class="sheethd">
-    <b class="ro" id="sheettitle"></b>
-    <button id="sheetclose" class="ro">Close  esc</button>
-  </div>
-  <div class="sheetbody">
+<!-- Settings and Connect: the same overlay as the picker, one panel shown
+     at a time, over whichever layout you were on. -->
+<div class="modal" id="sheet" hidden>
+  <div class="box menu">
+    <div class="sheethd">
+      <b class="ro" id="sheettitle"></b>
+      <button id="sheetclose" class="mini">Close</button>
+    </div>
+    <div class="sheetbody">
       <section class="panel" id="settings">
         <div class="lab">Settings</div>
         <!-- The one setting that belongs to the MACHINE and holds whether or
@@ -754,32 +782,70 @@
         <div class="seg" id="conntabs" style="margin:10px 0"></div>
         <pre id="conn" style="user-select:all"></pre>
       </section>
+    </div>
   </div>
 </div>
 <script>
-// --- the menu -------------------------------------------------------------
-// Settings are a thing you go and get, and when you get them they take the
-// screen. The page therefore always OPENS closed. An earlier version
-// remembered the last panel in localStorage, which quietly undid the point:
-// open it once and it is open forever after.
+// --- overlays -------------------------------------------------------------
+// ONE mechanism for everything that floats over the page: the model picker,
+// Settings and Connect, and the chat options. One is open at a time; a click
+// anywhere outside its face, or Escape, closes it, and the layout underneath
+// never changed, so closing it puts you back exactly where you were.
+// `face` is the part that counts as inside (a modal's box, not its dimmed
+// backdrop); `opener` is the control that toggles it, which must not count as
+// "outside" or the click that closes it would open it again.
+const OVL=(()=>{
+  let cur=null;
+  function close(){
+    if(!cur) return;
+    const c=cur; cur=null;
+    c.el.hidden=true;
+    if(c.modal) document.body.style.overflow='';
+    if(c.onclose) c.onclose();
+  }
+  function open(el, o={}){
+    close();
+    cur={el, face:o.face||el, opener:o.opener||null,
+         modal:el.classList.contains('modal'), onclose:o.onclose};
+    el.hidden=false;
+    if(cur.modal) document.body.style.overflow='hidden';
+  }
+  // mousedown, not click: a drag that starts in a field and ends outside it
+  // (selecting text) is not a click outside.
+  addEventListener('mousedown',e=>{
+    if(!cur || cur.face.contains(e.target)) return;
+    if(cur.opener && cur.opener.contains(e.target)) return;
+    close();
+  }, true);
+  addEventListener('keydown',e=>{
+    if(e.key==='Escape' && cur && document.getElementById('lightbox').hidden)
+      close();
+  });
+  return {open, close, is:el=>!!cur && cur.el===el};
+})();
+
+// Settings and Connect: a thing you go and get, shown as an overlay. The
+// page always OPENS with it closed -- an earlier version remembered the last
+// panel in localStorage, and open once meant open forever after.
 (()=>{
   const sheet=document.getElementById('sheet');
   const links=[...document.querySelectorAll('nav a[data-panel]')];
+  const mark=name=>links.forEach(a=>
+    a.setAttribute('aria-pressed', a.dataset.panel===name));
   function show(name){
-    const on=name && document.getElementById(name);
-    sheet.hidden=!on;
+    if(!name){ OVL.close(); return }
     document.querySelectorAll('.sheetbody .panel').forEach(p=>
       p.classList.toggle('on', p.id===name));
-    document.getElementById('sheettitle').textContent=name||'';
-    links.forEach(a=>a.setAttribute('aria-pressed', a.dataset.panel===name));
-    document.body.style.overflow=on?'hidden':'';
-    if(on) sheet.querySelector('.sheetbody').scrollTop=0;
+    document.getElementById('sheettitle').textContent=name;
+    OVL.open(sheet, {face:sheet.querySelector('.box'),
+                     opener:document.querySelector('header nav'),
+                     onclose:()=>mark(null)});
+    mark(name);
+    sheet.querySelector('.sheetbody').scrollTop=0;
   }
   links.forEach(a=>a.onclick=()=>show(
     a.getAttribute('aria-pressed')==='true' ? null : a.dataset.panel));
   document.getElementById('sheetclose').onclick=()=>show(null);
-  addEventListener('keydown',e=>{ if(e.key==='Escape') show(null) });
-  show(null);
   window.knShow=show;
 })();
 
@@ -1271,10 +1337,18 @@ async function tick(){
         .by_runtime?.knurlogic ? (q.cache_bytes||0) : 0)},0);
     ramWent(merged);
   }
-  $('topo').innerHTML=ns_.map(unit).join(ns_.length===2
+  // Five machines at most: two rows of three with the key in one cell is
+  // the whole panel, and a sixth would start a third row under the chat.
+  // The rest are counted, not dropped silently. The key above still sums
+  // every machine that reported.
+  const MAXU=5, shown=ns_.slice(0,MAXU), more=ns_.length-shown.length;
+  $('memory').querySelector('.topo').className=
+    'topo n'+Math.min(Math.max(shown.length,1),3);
+  $('topo').innerHTML=shown.map(unit).join(shown.length===2
     ? '<svg class="flow" viewBox="0 0 56 20" aria-hidden="true">'+
       '<line x1="2" y1="10" x2="54" y2="10"/></svg>'
-    : '');
+    : '')+(more>0?`<div class="topomore ro">+${more} more machine${
+      more===1?'':'s'} -- this page shows five</div>`:'');
   // One line under the machines. The gauges carry the split; this carries
   // the totals, and only the figures that are not already drawn above.
   if(m&&m.available){
@@ -1447,7 +1521,7 @@ function renderPicker(){
   });
   $('prows').querySelectorAll('.var').forEach(v=>v.onclick=()=>{
     SEL=MODELS.find(m=>m.path===v.dataset.p);
-    $('picker').hidden=true; document.body.style.overflow='';
+    OVL.close();
     pickInfo();
   });
   // One group open is enough to show the shape without a wall of rungs.
@@ -1521,14 +1595,18 @@ function pickInfo(){
   SETS={}; loadPreview();
 }
 $('openpick').onclick=()=>{
-  $('picker').hidden=false; document.body.style.overflow='hidden';
+  OVL.open($('picker'), {face:$('picker').querySelector('.box')});
   renderPicker(); $('psearch').focus();
 };
-$('pclose').onclick=()=>{ $('picker').hidden=true;
-  document.body.style.overflow='' };
+$('pclose').onclick=()=>OVL.close();
 $('psearch').oninput=e=>{ QUERY=e.target.value; renderPicker() };
-addEventListener('keydown',e=>{ if(e.key==='Escape'&&!$('picker').hidden){
-  $('picker').hidden=true; document.body.style.overflow='' }});
+// Chat options float over the transcript; the same overlay as the picker.
+$('coptsbtn').onclick=()=>{
+  const b=$('coptsbtn');
+  if(OVL.is($('copts'))){ OVL.close(); return }
+  OVL.open($('copts'), {opener:b, onclose:()=>b.setAttribute('aria-expanded','false')});
+  b.setAttribute('aria-expanded','true');
+};
 
 $('launch').onclick=async()=>{
   const m=SEL; if(!m) return;
@@ -1691,6 +1769,10 @@ async function loadResident(){
     i+=n;
   }
   el.innerHTML=h;
+  // What can be chatted with right now, for the chat bar's label: a chat
+  // whose model has gone away no longer has a selection to name.
+  window.RUNNING=new Set(rows.filter(r=>r.where).map(r=>r.where));
+  if(window.chatGate) window.chatGate();
   el.querySelectorAll('[data-chatn]').forEach(x=>x.onclick=()=>{
     const r=rows[+x.dataset.chatn];
     if(window.switchTab) window.switchTab('chat');
@@ -1970,10 +2052,23 @@ function layout(){
   const c=typeof curChat==='function' ? curChat() : null;
   const has=!!(c && c.msgs && c.msgs.length);
   $('chat').classList.toggle('empty', !has);
-  document.body.classList.toggle('talk', window.ACTIVETAB==='chat' && has && !HOME);
+  const talk=window.ACTIVETAB==='chat' && has && !HOME;
+  document.body.classList.toggle('talk', talk);
+  $('navhome').setAttribute('aria-pressed', !talk);
+  // The memory panel is one element that moves: to the top of the right-hand
+  // column in TALK, back above the chat in HOME. Moved rather than drawn
+  // twice, so there is one set of machines for tick() to fill.
+  const mem=$('memory'), home=document.querySelector('main');
+  if(talk && mem.parentElement!==document.querySelector('.right'))
+    document.querySelector('.right').prepend(mem);
+  else if(!talk && mem.parentElement!==home) home.prepend(mem);
 }
-function goHome(){ HOME=true; layout(); window.scrollTo(0,0) }
-$('mark').onclick=goHome; $('home').onclick=goHome;
+// The logo and the nav's Home do the same thing: close whatever is floating,
+// show the chat tab, and put the dashboard back.
+function goHome(){ OVL.close(); HOME=true;
+  if(window.ACTIVETAB!=='chat') switchTab('chat'); else layout();
+  window.scrollTo(0,0) }
+$('mark').onclick=goHome; $('navhome').onclick=goHome;
 window.switchTab=switchTab;
 $('ptabs').querySelectorAll('button').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
 
@@ -2084,6 +2179,12 @@ function chatGate(){
   $('csend').disabled=!on || BUSYC;
   $('csend').title=on ? '' : 'click a running model to chat with it';
   $('cattach').disabled=!on || !vision;
+  // The model a clicked running model's chat sends to, named in the bar.
+  // Only while it is still running: before the first survey (RUNNING unset)
+  // the chat's own record is trusted.
+  const sel=c && c.where && (!window.RUNNING || window.RUNNING.has(c.where));
+  $('cmodel').textContent=sel ? (c.model||'') : '';
+  $('cmodel').title=sel ? 'sending to '+c.model+' at '+c.where : '';
   $('cattach').title=vision ? 'attach an image'
     : (on ? 'this model has no vision' : 'click a running model to chat with it');
 }
