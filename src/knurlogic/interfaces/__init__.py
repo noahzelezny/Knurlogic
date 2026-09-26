@@ -9,7 +9,6 @@ capability on one side only is a bug.
   web/         the page itself
   ui.py        `knurlogic ui`: the page with nothing loaded, and loading
   serve.py     `knurlogic serve`: an OpenAI endpoint, settings resolved first
-  cluster.py   `serve --cluster`: the same, wrapping exo across nodes
   messages.py  Anthropic Messages -> the engine's OpenAI endpoint
   connect.py   how to point a client at a running server
   doctor.py    will this artifact run, and why not
