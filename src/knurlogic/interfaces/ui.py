@@ -425,11 +425,16 @@ _PEER_TARGETS: dict = {}
 
 def _peer_where(where: str, host: str) -> str:
     """A peer reports its models at ITS loopback; seen from here the same
-    port is at the peer's address. Anything not on loopback is left as is."""
+    port is at the peer's address. An endpoint on any OTHER host is
+    dropped (""): peers are found by Bonjour, which anything on the network
+    can advertise into, and what a peer reports becomes an address this
+    page's chat proxy will POST to -- so a peer may only offer itself."""
     u = urlparse(where or "")
-    if u.hostname in ("127.0.0.1", "localhost", "::1") and u.port:
-        return f"{u.scheme or 'http'}://{host}:{u.port}"
-    return where or ""
+    if not u.port or u.scheme not in ("http", ""):
+        return ""
+    if u.hostname in ("127.0.0.1", "localhost", "::1", host):
+        return f"http://{host}:{u.port}"
+    return ""
 
 
 def peer_residency(peers, timeout: float = PEER_LOADED_S,
