@@ -186,3 +186,15 @@ tokens never yields U+FFFD; /v1/completions.
 | GLM-5.3 2.7 | 22 passed; shared prefix 0 used -- fixed 2026-09-25 (CacheList offset): 23 passed |
 
 Known gaps pinned as strict xfails: text stop sequences; Scout's five.
+
+## Build progress
+
+1. **Executor protocol -- done (2026-09-25).** `engine/runtime/executor.py`:
+   `Admission` in; `Progress`, `Checkpoint`, `Token` (token + its logprob,
+   top-k on request, never a [V] row), `Finished` (the row's cache) and
+   `RowFailure` out. `LocalExecutor` wraps MTPBatchGenerator, which now
+   takes sampling params as a dict and cache reports per row directly --
+   the tagged sampler and the thread-local stay only for mlx-lm's server
+   until step 5 deletes them. Checkpoints come at each segment end and at
+   the prompt less its last token (mlx-lm's convention: that token is fed
+   as its own segment). tests/test_executor.py.
