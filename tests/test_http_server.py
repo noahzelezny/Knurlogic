@@ -396,3 +396,16 @@ def test_a_silent_request_samples_as_the_model_recommends(tmp_path):
     assert sampling_defaults(tmp_path) == {}
     job, _ = O.build_job(body, chat=True, sampling_defaults={})
     assert job.sampling == {"temp": 0.0}
+
+
+def test_count_tokens_is_the_prompt_the_model_would_see(url):
+    """Claude Code asks /v1/messages/count_tokens to manage its context."""
+    u, _ = url
+    body = {"model": "x", "max_tokens": 8,
+            "messages": [{"role": "user", "content": "1 2 3"}]}
+    code, _, raw = post(u, "/v1/messages/count_tokens", body)
+    n = json.loads(raw)["input_tokens"]
+    code2, _, raw2 = post(u, "/v1/messages/count_tokens", dict(
+        body, messages=[{"role": "user", "content": "1 2 3 4 5 6"}]))
+    assert code == code2 == 200
+    assert json.loads(raw2)["input_tokens"] == n + 3 > 3
