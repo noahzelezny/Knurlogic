@@ -36,8 +36,36 @@ from mlx_lm.sample_utils import (
     make_logits_processors,
 )
 
-__all__ = ["Distribution", "make_distribution", "make_logits_processors",
-           "rejection_correct", "acceptance_profile"]
+__all__ = ["Distribution", "Keys", "make_distribution",
+           "make_logits_processors", "rejection_correct", "acceptance_profile"]
+
+
+class Keys:
+    """A seeded request's randomness, addressed by TOKEN POSITION.
+
+    The token at position n is drawn with key(seed, n) -- Gumbel-max, which
+    is what `mx.random.categorical` does with a key -- so it is the same
+    token whatever shares the batch, whichever thread samples, and whether
+    that step drafted or not. A sequential stream could not promise that:
+    a drafting step consumes more draws per token than a plain one, and the
+    engine switches between them with the batch's width.
+
+    Drafting a seeded row uses the same key for the draft and the target,
+    and accepts iff they agree. The emitted token is argmax(log p_n + g_n)
+    with g_n fresh Gumbel noise per position -- exactly p_n-distributed --
+    and the shared noise is what makes a good draft agree."""
+
+    def __init__(self, seed: int):
+        self.seed = int(seed) & 0xFFFFFFFFFFFFFFFF
+
+    def at(self, position: int) -> mx.array:
+        # splitmix64 of (seed, position): neighbouring positions and seeds
+        # get unrelated keys
+        z = (self.seed + 0x9E3779B97F4A7C15 * (int(position) + 1)) \
+            & 0xFFFFFFFFFFFFFFFF
+        z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & 0xFFFFFFFFFFFFFFFF
+        z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & 0xFFFFFFFFFFFFFFFF
+        return mx.random.key(z ^ (z >> 31))
 
 
 @dataclass(frozen=True)
@@ -50,8 +78,8 @@ class Distribution:
     probs: mx.array          # [B, V], sums to 1
     logits: mx.array         # [B, V], scaled + masked
 
-    def sample(self) -> mx.array:
-        return mx.random.categorical(self.logits)
+    def sample(self, key: Optional[mx.array] = None) -> mx.array:
+        return mx.random.categorical(self.logits, key=key)
 
     def argmax(self) -> mx.array:
         return mx.argmax(self.logits, axis=-1)

@@ -141,3 +141,50 @@ def test_sampling_params_reach_the_engine_as_given():
     assert not [e for e in events if type(e).__name__ == "RowFailure"]
     assert len(toks[g]) == len(toks[t]) == 16 and toks[g] != toks[t]
     ex.close()
+
+
+@pytest.mark.parametrize("vocab,always", [(512, False), (8, True)])
+def test_a_seeded_row_draws_the_same_alone_and_in_a_batch(vocab, always,
+                                                           monkeypatch):
+    """A seed is the row's own key: the same tokens whether it runs alone
+    or beside other sampling rows (which draw from their own streams), on
+    the drafting path too -- rejection sampling takes the row's keys."""
+    from knurlogic.engine.runtime.executor import Admission
+    if always:
+        monkeypatch.setenv("EXO_MTP_BATCH_MAX_ROWS", "8")
+    model, head, prompts = _tiny(vocab)
+    s = {"temp": 1.0, "seed": 7}
+
+    ex = _executor(model, head)
+    a = ex.insert(Admission(segments=[prompts[0]], max_tokens=20, sampling=s))
+    alone, _ = _drain(ex, [a])
+    ex.close()
+
+    ex = _executor(model, head)
+    others = [ex.insert(Admission(segments=[p], max_tokens=20,
+                                  sampling={"temp": 1.0}))
+              for p in prompts[1:]]
+    b = ex.insert(Admission(segments=[prompts[0]], max_tokens=20, sampling=s))
+    c = ex.insert(Admission(segments=[prompts[0]], max_tokens=20,
+                            sampling={"temp": 1.0, "seed": 8}))
+    batched, _ = _drain(ex, others + [b, c])
+    ex.close()
+    assert batched[b] == alone[a]
+    assert batched[c] != alone[a]
+
+
+def test_seeded_draws_are_addressed_by_position_and_couple_draft_to_target():
+    """key(seed, n) alone decides the token at n: the same key gives the
+    same draw, another position or seed another; and a draft distribution
+    equal to the target is accepted every time (shared Gumbel noise)."""
+    from knurlogic.engine.mtp.sampling import Keys, make_distribution
+    dist = make_distribution(temp=1.0)
+    logits = mx.random.normal((1, 64))
+    d = dist(logits)
+    k = Keys(3)
+    draws = [d.sample(k.at(n)).item() for n in range(40)]
+    assert draws == [d.sample(Keys(3).at(n)).item() for n in range(40)]
+    assert draws != [d.sample(Keys(4).at(n)).item() for n in range(40)]
+    assert len(set(draws)) > 5
+    assert all(d.sample(k.at(n)).item() == dist(logits).sample(k.at(n)).item()
+               for n in range(40))
