@@ -484,13 +484,9 @@ class MTPBatchGenerator(BatchGenerator):
 
     def _failed_responses(self) -> List[PromptProcessingBatch.Response]:
         """A row whose admission raised must fail ITS request, not the
-        server: an exception out of next() ends mlx-lm's generation thread,
-        and that request and every later one then hang with no error. The
-        server copies a prompt response's `progress` into the request's
-        queue as is, and the reader raises any Exception it finds there --
-        so the exception goes out once as progress. After that a plain
-        progress tuple goes out on every call until the server, seeing the
-        handler's ctx.stop(), removes the uid."""
+        engine: the exception goes out once as that row's progress (the
+        executor turns it into a RowFailure and removes the row); a plain
+        progress tuple follows on later calls until the row is removed."""
         out = []
         for uid, err in list(self._failed.items()):
             out.append(PromptProcessingBatch.Response(

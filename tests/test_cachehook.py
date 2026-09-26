@@ -122,16 +122,17 @@ def test_install_asserts_by_name():
 # --- the admit gap -----------------------------------------------------------
 
 def _server_step(vs, fail_before_insert, inserted):
-    """mlx-lm _generate's shape between _tokenize and insert_segments, with
-    serve/vision.py's _tokenize wrap as reported: sweep, tokenize, pending."""
+    """The scheduler's shape between tokenize and insert (engine/runtime/
+    scheduler._insert): sweep, then tokenize + pending inside the admit
+    guard, which claims on success and sweeps on a raise."""
     cachehook.sweep()
     imgs = [("x", PH)]
-    vs._pin(imgs)                               # what tokenize leaves pinned
-    cachehook.pending(vs, imgs)
-    if fail_before_insert:
-        raise RuntimeError("_make_state_machine blew up")
-    inserted.append(imgs)
-    cachehook.claim()                           # the insert_segments wrap
+    with cachehook.admit_guard():
+        vs._pin(imgs)                           # what tokenize leaves pinned
+        cachehook.pending(vs, imgs)
+        if fail_before_insert:
+            raise RuntimeError("building the state machine blew up")
+        inserted.append(imgs)
 
 
 def test_no_leak_when_the_server_raises_between_tokenize_and_insert():
@@ -140,8 +141,8 @@ def test_no_leak_when_the_server_raises_between_tokenize_and_insert():
     inserted = []
     with pytest.raises(RuntimeError):
         _server_step(vs, True, inserted)
-    assert vs.pinned_count() == 1               # held until the next tokenize
-    _server_step(vs, False, inserted)           # the next request sweeps it
+    assert vs.pinned_count() == 0               # the guard released it
+    _server_step(vs, False, inserted)
     assert vs.pinned_count() == 1               # only the admitted row's pin
     # the batch generator releases at admit, as it does today
     vs.release(inserted.pop())

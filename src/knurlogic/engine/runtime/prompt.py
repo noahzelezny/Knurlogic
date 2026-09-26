@@ -83,21 +83,30 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
     close = bool(kw.pop(thinking.CLOSE, False))
     messages = flatten(request.messages)
     render = dict(kw, tools=request.tools) if request.tools else dict(kw)
-    try:
-        if close:
-            # the generation prompt ends with the think block already
-            # closed; _Closing reads the flag from this call's kwargs
-            prompt = list(thinking._Closing(tokenizer).apply_chat_template(
-                messages, add_generation_prompt=True, tokenize=True,
-                **{**render, thinking.CLOSE: True}))
-        else:
-            prompt = list(tokenizer.apply_chat_template(
-                messages, add_generation_prompt=True, tokenize=True,
-                **render))
-    except Exception as e:
-        raise PromptError(f"the chat template could not render this "
-                          f"request: {type(e).__name__}: {e}") from e
+    # The thinking probe renders on HTTP threads under this lock; a
+    # tokenizer's template environment is not safe to share across threads.
+    with thinking._render_lock:
+        try:
+            prompt = _render(tokenizer, messages, render, close)
+        except Exception as e:
+            raise PromptError(f"the chat template could not render this "
+                              f"request: {type(e).__name__}: {e}") from e
+        return _segment(tokenizer, messages, render, prompt)
 
+
+def _render(tokenizer, messages, render, close) -> list:
+    if close:
+        # the generation prompt ends with the think block already closed;
+        # _Closing reads the flag from this call's kwargs
+        return list(thinking._Closing(tokenizer).apply_chat_template(
+            messages, add_generation_prompt=True, tokenize=True,
+            **{**render, thinking.CLOSE: True}))
+    return list(tokenizer.apply_chat_template(
+        messages, add_generation_prompt=True, tokenize=True, **render))
+
+
+def _segment(tokenizer, messages, render, prompt):
+    """Cut the rendered prompt into segments (see the module doc)."""
     state = "normal"
     if getattr(tokenizer, "has_thinking", False):
         if tokenizer.rfind_think_start(prompt) > \
