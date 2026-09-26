@@ -4,8 +4,8 @@ What exo's /state says about each node (name, RAM, swap, chip, address),
 and the snapshot a page draws for a node only exo knows about. Nodes that
 answer for themselves come from cluster/peers.py and cluster/discovery.py
 and win over this: a knurlogic on the node measures it; exo reports
-system RAM (docs/DISCOVERY.md, review item 9 -- moved here from
-interfaces/cluster.py, which keeps exo's CLI: launch, front end, `run`).
+system RAM (docs/DISCOVERY.md, review item 9). Read-only: knurlogic
+never launches, places on or proxies to exo.
 """
 
 from __future__ import annotations
@@ -83,8 +83,8 @@ def inventory(exo_url: str) -> list:
 
     CAVEAT, and it is printed next to the numbers: exo reports SYSTEM RAM
     (psutil), not the Metal recommended working set that `resolve` wants.
-    They are close on an Apple box and they are not the same number, so
-    `--node NAME:GIB` overrides this and should be used when it matters.
+    They are close on an Apple box and they are not the same number, which
+    is why a node that answers for itself (cluster/peers.py) wins over this.
     """
     state = _get(f"{exo_url}/state")
     mem = _pick(state, "nodeMemory", "node_memory")
@@ -134,9 +134,9 @@ _PEER_METRICS: dict = {}
 def peer_memory_map(ip: str, port: int, ttl: float = 6.0) -> dict | None:
     """The memory map a knurlogic on another node reports for itself.
 
-    This is the whole reason it is worth running knurlogic on every node
-    rather than only in front of exo: process footprints are true only of
-    the machine they were read on, so the node has to answer for itself.
+    This is the whole reason it is worth running knurlogic on every node:
+    process footprints are true only of the machine they were read on, so
+    the node has to answer for itself.
     exo reports RAM totals per node and nothing about who is spending it.
 
     Absent is a normal answer, and the COMMON cause is not a missing
@@ -187,8 +187,7 @@ def peer_memory_map(ip: str, port: int, ttl: float = 6.0) -> dict | None:
     return None
 
 
-def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
-                  artifact=None, declared_ws: int = 0,
+def _snapshot_for(n: ExoNode, local_name: str | None,
                   peer_port: int = 0) -> dict:
     """A per-node status built from what exo reports about that node.
 
@@ -198,13 +197,8 @@ def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
     as zero: it is absent, and the renderer shows what it has.
     """
     used = max(n.ram_total - n.ram_available, 0)
-    # A working set DECLARED with --node is the one the settings were
-    # resolved against, so it is the one status has to show; showing exo's
-    # RAM next to knobs computed from a different number is how you end up
-    # reading a status that cannot explain the settings above it.
-    ws = declared_ws or n.ram_total
-    device = ("declared with --node" if declared_ws else
-              "reported by exo (system RAM, not the Metal working set)")
+    ws = n.ram_total
+    device = "reported by exo (system RAM, not the Metal working set)"
     # The LOCAL node can be asked directly; every other node gets the guess
     # made from what it reported. Handing them all wired.machine() would
     # label the whole cluster with this box.
@@ -217,16 +211,11 @@ def _snapshot_for(n: ExoNode, local_name: str | None, env: dict,
         except Exception:
             mm = None
     elif peer_port:
-        # A peer is asked on the SAME port this front end is serving on:
-        # knurlogic on every node is the assumption the feature rests on,
-        # and a node that is not running one simply does not answer.
+        # A peer is asked on the port this page's servers use: knurlogic
+        # on every node is the assumption the feature rests on, and a node
+        # that is not running one simply does not answer.
         mm = peer_memory_map(n.ip, peer_port)
     return status.snapshot(
-        # The artifact is the same on every node -- which node we happen to
-        # be launched next to is not what decides whether the page can say
-        # what is loaded.
-        artifact=artifact,
-        env=env or None,
         node=n.name,
         role="local" if is_local else "remote",
         machine_fn=(None if is_local

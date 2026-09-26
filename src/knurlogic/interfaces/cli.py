@@ -16,8 +16,6 @@ COMMANDS = {
     "doctor": ("interfaces.doctor", "say whether an artifact will run, and why not"),
     "smoke": ("engine.smoke", "generate a token and prove where the code came from"),
     "vendor": ("engine.vendor", "take an architecture file under version control"),
-    "override": ("engine.override", "replace a module inside mlx-lm, mlx-vlm or exo "
-                             "without forking it"),
     "connect": ("interfaces.connect", "print how to point a client at a running server"),
     "mcp": ("interfaces.mcp", "serve the agent-facing tool interface on stdio"),
     "loaded": ("machine.loaded", "what is in memory right now, in every runtime on "

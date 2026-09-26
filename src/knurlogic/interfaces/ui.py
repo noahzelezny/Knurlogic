@@ -6,7 +6,7 @@ model on the disk, everything resident in every runtime, and where the memory
 went -- on a machine with no exo, no ollama and no weights in RAM, all of
 which are ordinary states rather than errors.
 
-`serve` is already exo-free; only `--cluster` reaches for exo. What was
+`serve` needs no exo either; nothing in knurlogic drives it. What was
 missing is a way to open the page WITHOUT loading a model, which is the
 thing "one place to see all of it" actually requires. It costs no GPU memory
 and imports no engine: this module never touches mlx.
@@ -34,7 +34,7 @@ from knurlogic.interfaces import web
 # Imported here, not inside the status handler: the page fires several
 # requests at once, and two threads importing a module for the first time
 # race -- measured as "partially initialized module 'typing'" on a restart.
-from knurlogic.interfaces import cluster  # noqa: E402
+from knurlogic.cluster import exo as exo_witness  # noqa: E402
 
 #: Children started from the page: {port: (Popen, artifact path)}.
 _CHILDREN: dict = {}
@@ -129,7 +129,7 @@ def _status_fn(_n=0):
     me = identity.identity()
     exo_nodes = []
     try:
-        exo_nodes = cluster.inventory(EXO_URL)
+        exo_nodes = exo_witness.inventory(EXO_URL)
     except Exception:
         exo_nodes = []
     local = _local_name(exo_nodes) if exo_nodes else ""
@@ -160,8 +160,8 @@ def _status_fn(_n=0):
     for n in exo_nodes:
         if n.name == local or n.name in claimed or n.ip in claimed:
             continue
-        snaps.append({**cluster._snapshot_for(
-            n, local, {}, None, peer_port=_SERVE_PORT["ui"]),
+        snaps.append({**exo_witness._snapshot_for(
+            n, local, peer_port=_SERVE_PORT["ui"]),
             "found_by": ["exo"]})
     snap = status.aggregate(snaps)
     snap["wired"] = wired.advise(0)

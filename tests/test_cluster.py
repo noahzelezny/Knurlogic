@@ -1,31 +1,22 @@
-"""The cluster wrapper, against a stub exo.
-
-These are integration tests on purpose. The claim `--cluster` makes is that
-the OpenAI surface a client hits is EXO'S, untouched, and that /status is an
-aggregate over the nodes exo reports -- and neither of those is provable by
-importing a function. So a stub exo answers /state and /v1/models with
-values nothing else in the process could produce, and the tests read them
-back through Knurlogic's port. If the proxy silently answered by itself, the
-marker would be missing.
+"""Resolving over several nodes, the aggregate status, and reading exo's
+node inventory (against a stub exo) as one witness of which machines exist.
 """
 
 import json
 import socket
 import sys
 import threading
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from knurlogic.interfaces import cluster
+from knurlogic.cluster import exo as exo_nodes
 from knurlogic.machine import status
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning.resolve import Node, resolve, resolve_cluster
 
 GIB = 1 << 30
-MARKER = "answered-by-the-stub-exo-not-by-knurlogic"
 
 STATE = {
     "nodeMemory": {
@@ -74,12 +65,7 @@ class _Stub(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/state"):
             return self._j(STATE)
-        return self._j({"marker": MARKER, "path": self.path})
-
-    def do_POST(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        sent = json.loads(self.rfile.read(n) or b"{}")
-        return self._j({"marker": MARKER, "echo": sent})
+        self.send_error(404)
 
     def log_message(self, *a):
         pass
@@ -89,11 +75,6 @@ def _serve(handler, port):
     srv = ThreadingHTTPServer(("127.0.0.1", port), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
-
-
-def _get(url):
-    with urllib.request.urlopen(url, timeout=10) as r:
-        return json.loads(r.read().decode())
 
 
 # --- the resolver over nodes -----------------------------------------------
@@ -187,58 +168,17 @@ def test_rollup_sums_and_excludes_nodes_that_did_not_answer():
     assert (c["nodes_reachable"], c["nodes_total"]) == (1, 2)
 
 
-# --- the wrapper -----------------------------------------------------------
+# --- exo as a witness of which machines exist ------------------------------
 
 def test_inventory_reads_exos_own_node_memory():
     port = _free_port()
     srv = _serve(_Stub, port)
     try:
-        nodes = cluster.inventory(f"http://127.0.0.1:{port}")
+        nodes = exo_nodes.inventory(f"http://127.0.0.1:{port}")
     finally:
         srv.shutdown()
     assert [n.name for n in nodes] == ["studio", "laptop"]
     assert nodes[0].ram_total == 128 * GIB
-
-
-def test_front_proxies_openai_to_exo_and_aggregates_status():
-    """Two claims at once, and the MARKER is what separates them: /v1 must be
-    exo's answer (so the marker is present), /status.json must be
-    Knurlogic's (so it is not)."""
-    exo_port, front_port = _free_port(), _free_port()
-    srv = _serve(_Stub, exo_port)
-    exo = f"http://127.0.0.1:{exo_port}"
-    t = threading.Thread(target=cluster.run, kwargs=dict(
-        path="/nonexistent/art", host="127.0.0.1", port=front_port,
-        profile="v1.5", exo_url=exo, nodes=[], do_launch=False,
-        exo_cmd=[], local=None), daemon=True)
-    try:
-        import knurlogic.machine.artifact as A
-        real = A.Artifact.load
-        A.Artifact.load = staticmethod(lambda p: _art())
-        cluster.Artifact.load = staticmethod(lambda p: _art())
-        t.start()
-        front = f"http://127.0.0.1:{front_port}"
-        for _ in range(100):
-            try:
-                d = _get(f"{front}/status.json")
-                break
-            except Exception:
-                import time
-                time.sleep(0.1)
-        else:
-            raise AssertionError("front end never came up")
-
-        models = _get(f"{front}/v1/models")
-        assert models["marker"] == MARKER, "must be exo's answer, not ours"
-
-        assert d["cluster"]["nodes_total"] == 2
-        assert {n["node"] for n in d["nodes"]} == {"studio", "laptop"}
-        assert "marker" not in json.dumps(d), "status is ours, not exo's"
-        assert d["cluster"]["memory"]["working_set_bytes"] == 192 * GIB
-    finally:
-        A.Artifact.load = real
-        cluster.Artifact.load = real
-        srv.shutdown()
 
 
 def test_box_wide_numbers_are_not_labelled_as_weights():

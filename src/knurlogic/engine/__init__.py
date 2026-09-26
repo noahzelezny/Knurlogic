@@ -26,8 +26,6 @@ fails the suite, so swapping the engine stays a change to this folder.
   arch.py          which architecture a model_type needs, and whether it is
                    present (the maps are built from the family manifests)
   register.py      puts vendored architectures in front of installed ones
-  override.py      replaces a module inside mlx-lm, mlx-vlm or exo without
-  overrides/       forking it; the files it serves live in overrides/
   vendor.py        takes an architecture file under version control
   smoke.py         generates a token and proves where the code came from
 
