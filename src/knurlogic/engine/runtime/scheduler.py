@@ -329,6 +329,7 @@ class Scheduler:
         # request is encoded HERE (the tower runs at tokenize), so at most
         # one per tick: a burst of images is interleaved with decode steps
         # instead of stalling every running row until all are encoded.
+        from knurlogic.engine.vision import VisionError
         from knurlogic.engine.vision import request as vreq
         while self._waiting:
             job = self._waiting.pop(0)
@@ -337,7 +338,9 @@ class Scheduler:
             images = vreq.has_images(job.request.messages)
             try:
                 self._insert(job)
-            except P.PromptError as e:
+            except (P.PromptError, VisionError) as e:
+                # the client's request, not a fault here: no traceback
+                logger.info("refused a request: %s", e)
                 self._error(job, e)
             except Exception as e:
                 logger.exception("could not admit a request")
