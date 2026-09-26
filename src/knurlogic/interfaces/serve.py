@@ -42,7 +42,8 @@ GIB = 1 << 30
 
 def run(path: str, host: str, port: int, working_set_gib: float,
         profile: str | None, passthrough: list, tune: str = "balanced",
-        overrides: dict | None = None, draft: bool = True) -> int:
+        overrides: dict | None = None, draft: bool = True,
+        server: str = "mlx-lm") -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
@@ -218,11 +219,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                 live_env[k] = v
         return {"applied": done, "running": dict(live_env)}
 
+    ours = server == "knurlogic"
     routes = web.routes(
         # `/v1/messages` so a harness pointed here with ANTHROPIC_BASE_URL
         # works. It is a translation over the engine's own OpenAI endpoint,
-        # never a second inference path.
-        messages_fn=messages.handler(
+        # never a second inference path -- over loopback HTTP on mlx-lm's
+        # server, in-process on knurlogic's own (which serves it itself).
+        messages_fn=None if ours else messages.handler(
             f"http://{host if host != '0.0.0.0' else '127.0.0.1'}:{port}"
             f"/v1/chat/completions", model=a.path.name),
         status_fn=_status,
@@ -253,6 +256,10 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if eng:
         print("engine    " + "  ".join(f"{k}={v}" for k, v in sorted(eng.items())))
 
+    if ours:
+        from knurlogic.interfaces import http
+        return http.serve(a, host, port, routes=routes, settings=eng,
+                          draft=draft)
     return engine.serve(str(a.path), host, port,
                         executes_artifact_code=bool(a.model_file),
                         extra=passthrough, routes=routes, draft=draft,
@@ -297,6 +304,12 @@ def main(argv=None) -> int:
                    help="safe = lowest peak memory; fast = spend headroom "
                         "where it buys speed. Both are capped by what has "
                         "been measured.")
+    p.add_argument("--server", default="mlx-lm",
+                   choices=("mlx-lm", "knurlogic"),
+                   help="which HTTP server answers: mlx-lm's (patched; the "
+                        "default until knurlogic's own passes the "
+                        "conformance suite on every family) or knurlogic's "
+                        "own (docs/SERVER.md)")
     p.add_argument("--cluster", action="store_true",
                    help="serve across nodes by wrapping exo: resolve settings "
                         "per node, proxy the OpenAI surface, aggregate /status")
@@ -321,7 +334,8 @@ def main(argv=None) -> int:
                            a.node, a.launch, shlex.split(a.exo_cmd), a.local,
                            a.tune, draft=not a.no_draft)
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile, rest,
-               a.tune, _parse_sets(a.sets), draft=not a.no_draft)
+               a.tune, _parse_sets(a.sets), draft=not a.no_draft,
+               server=a.server)
 
 
 if __name__ == "__main__":

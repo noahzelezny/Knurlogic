@@ -318,13 +318,36 @@ def stream(openai_lines, model: str):
 
 
 def handler(chat_url: str, model: str, timeout: float = 3600.0):
-    """A `/v1/messages` handler that calls the engine's own OpenAI endpoint.
-
-    Self-request on purpose: the engine already owns chat templating, stop
-    sequences and tool parsing, and re-implementing any of it here would give
-    the two endpoints different behaviour for the same model.
-    """
+    """A `/v1/messages` handler over the engine's OpenAI endpoint by HTTP
+    (mlx-lm's server, which is not ours to call in-process)."""
     import urllib.request
+
+    def transport(oai: dict):
+        r = urllib.request.Request(
+            chat_url, data=json.dumps(oai).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            resp = urllib.request.urlopen(r, timeout=timeout)
+        except Exception as e:
+            raise TransportError(502, f"engine at {chat_url}: {e}") from e
+        if oai.get("stream"):
+            return resp
+        return json.loads(resp.read().decode())
+
+    return handler_over(transport, model)
+
+
+class TransportError(Exception):
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+
+
+def handler_over(transport, model: str):
+    """A `/v1/messages` handler over any OpenAI chat transport:
+    transport(openai_body) -> the response dict, or (streaming) an
+    iterable of SSE lines; TransportError for a refusal. knurlogic's own
+    server passes its OpenAI surface directly -- no loopback request."""
 
     def call(body: bytes, write, start_response):
         try:
@@ -338,21 +361,18 @@ def handler(chat_url: str, model: str, timeout: float = 3600.0):
 
         want_stream = bool(req.get("stream"))
         oai = to_openai(req)
-        r = urllib.request.Request(
-            chat_url, data=json.dumps(oai).encode(),
-            headers={"Content-Type": "application/json"}, method="POST")
         try:
-            resp = urllib.request.urlopen(r, timeout=timeout)
-        except Exception as e:
-            start_response(502, "application/json")
+            resp = transport(oai)
+        except TransportError as e:
+            start_response(e.status, "application/json")
             write(json.dumps({"type": "error", "error": {
-                "type": "api_error",
-                "message": f"engine at {chat_url}: {e}"}}).encode())
+                "type": ("invalid_request_error" if e.status < 500
+                         else "api_error"),
+                "message": str(e)}}).encode())
             return
 
         if not want_stream:
-            out = from_openai(json.loads(resp.read().decode()),
-                              req.get("model", model))
+            out = from_openai(resp, req.get("model", model))
             start_response(200, "application/json")
             write(json.dumps(out).encode())
             return

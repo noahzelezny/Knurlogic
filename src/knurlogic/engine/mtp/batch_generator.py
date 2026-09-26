@@ -686,6 +686,10 @@ class MTPBatchGenerator(BatchGenerator):
             self._rows.pop(u, None)
         return caches
 
+    def cost_per_token(self, rows: int):
+        """Measured seconds per token at a batch width, or None."""
+        return self._batch.cost_per_token(rows)
+
     @property
     def prompt_cache_nbytes(self):
         total = sum(c.nbytes for p in self._unprocessed_sequences for c in p[3])

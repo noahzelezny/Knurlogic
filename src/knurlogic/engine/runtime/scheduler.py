@@ -152,6 +152,18 @@ class Scheduler:
         """Rows admitted and decoding right now."""
         return len(self._rows)
 
+    def more_helps(self, rows: int):
+        """Would one more concurrent row raise throughput? True/False from
+        the engine's timings at `rows` and `rows + 1` (seconds per token
+        across the batch), None until both are measured."""
+        ex = self._ex
+        if ex is None or rows < 1:
+            return None
+        now, more = ex.cost_per_token(rows), ex.cost_per_token(rows + 1)
+        if now is None or more is None:
+            return None
+        return more < now
+
     @property
     def busy(self) -> bool:
         return bool(self._rows) or bool(self._waiting) or \
