@@ -80,15 +80,20 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
         raise PromptError("this model has no chat template; use "
                           "/v1/completions with a prompt")
     kw = dict(args.chat_template_kwargs or {})
-    tok = tokenizer
-    if kw.pop(thinking.CLOSE, False):
-        # the generation prompt ends with the think block already closed
-        tok = thinking._Closing(tokenizer)
+    close = bool(kw.pop(thinking.CLOSE, False))
     messages = flatten(request.messages)
     render = dict(kw, tools=request.tools) if request.tools else dict(kw)
     try:
-        prompt = list(tok.apply_chat_template(
-            messages, add_generation_prompt=True, tokenize=True, **render))
+        if close:
+            # the generation prompt ends with the think block already
+            # closed; _Closing reads the flag from this call's kwargs
+            prompt = list(thinking._Closing(tokenizer).apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=True,
+                **{**render, thinking.CLOSE: True}))
+        else:
+            prompt = list(tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=True,
+                **render))
     except Exception as e:
         raise PromptError(f"the chat template could not render this "
                           f"request: {type(e).__name__}: {e}") from e
