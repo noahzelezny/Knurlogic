@@ -1,8 +1,8 @@
 """The routes Knurlogic serves next to the engine's OpenAI surface.
 
-One place, because two of them exist -- `serve` hands these to mlx-lm's
-server and `serve --cluster` hands the same ones to its own front end, and a
-settings page that differed between them would be worse than none.
+One place, because two servers use them -- `serve` and the page `knurlogic
+ui` opens -- and a settings page that differed between them would be worse
+than none.
 
 WHY THERE IS A SETTINGS ROUTE AT ALL. A GUI that shows a green light and no
 knobs is a status page wearing a costume; the knobs are the reason to open

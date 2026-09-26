@@ -29,13 +29,16 @@ exo for clustering, and carries the work that was trapped in forks of both.
                   families/__init__.py; being listed is being tested
                   (tests/test_families.py). Reviewed twice by Fable 5.1.
     machine/      64 artifacts found across every store; residency in every
-                  runtime; one load budget; which build of each dependency
-                  every interpreter has
+                  runtime (exo's read, never driven); one load budget; which
+                  build of each dependency is installed
     tuning/       settings with their evidence; resolve() -> env + argv
-    interfaces/   MCP (11 tools), page, CLI, serve, serve --cluster,
-                  Anthropic Messages, connect, doctor
-    exo           placed on through the MCP (`place`/`unplace`), with every
-                  instance's phase read off exo's own evidence
+    interfaces/   MCP (9 tools), page, CLI, serve, Anthropic Messages,
+                  connect, doctor
+    cluster/      knurlogic's own multi-machine: peers, Bonjour discovery,
+                  the `--host cluster` gate; exo's /state is read only as
+                  one witness of which machines exist. Nothing drives exo
+                  (the exo wrap -- `serve --cluster`, overrides, `place` /
+                  `unplace` -- was removed 2026-09-25)
 
 **Not yet run on a real model since the 2026-09-24 reorganisation**
 (engine/serve split, families move): one vision_gate pass (gemma e4b) on
@@ -57,23 +60,22 @@ imports mlx; checked that it fires on a lazy import planted in `machine/`.
 * Batch drafting is greedy token-identical to mlx-lm's BatchGenerator on a
   tiny random qwen3_5 -- three rows admitted mid-decode, reject-heavy
   (vocab 512) and accept-exercising (vocab 8, drafting forced).
-* `knurlogic deps` distinguishes the jaccl fork from stock by the same check
-  on two interpreters: YES in exo's, no in knurlogic's.
+* `knurlogic deps` distinguishes the jaccl fork from stock by reading the
+  built library, not a version: YES in exo's interpreter, no in knurlogic's
+  (measured while deps still probed exo's).
 
 ## Where the forks stand
 
 The one home for what each fork carries and why it is or is not ported is
-`PIECES` in `machine/deps.py`; `knurlogic deps` says which interpreter has
-which. In short:
+`PIECES` in `machine/deps.py` (mlx, mlx-lm, mlx-vlm); `knurlogic deps` says
+what is installed. In short:
 
     exo fork (mtp-stage1, 86 commits)
       ported    MTP: sequential, batched, heads, registry (engine/mtp/);
-                the per-family prefill table (tuning/settings.py);
-                EXO_PREFILL_STEP_SIZE / EXO_MLX_CACHE_LIMIT_GB / EXO_MTP
-                handed to exo under exo's names, ring-consistent
-      stays     placement, sharding, networking, jaccl deadline arming,
+                the per-family prefill table (tuning/settings.py)
+      not used  placement, sharding, networking, jaccl deadline arming,
                 subnet pinning, KV-pool budget, VQ codebook sharding --
-                knurlogic is replacing it (see 'Next: replace exo')
+                knurlogic replaces them (see 'Next: replace exo')
     mlx-lm fork (exo-qwen4-exp)
       ported    the architectures, vendored and pinned by digest
     mlx fork (jaccl-selfheal)
@@ -150,10 +152,6 @@ which. In short:
 
 ### Environments and processes
 
-* **exo's runner is spawned**: a fresh interpreter that inherits the
-  environment and nothing of `sys.modules`. Overrides therefore install
-  through a stdlib `sitecustomize.py` on PYTHONPATH. Verified on exo's own
-  interpreter, control and override arms, four pids.
 * **exo's model directory** is `<data home>/models`, and the data home is
   `~/.exo` on anything but Linux. Here `~/.exo/models` is a symlink to the
   external volume; not knowing that default hid 51 of 64 artifacts.
@@ -172,10 +170,13 @@ which. In short:
 
 ### Driving exo (2026-09-22, live, two nodes)
 
+knurlogic no longer drives exo (removed 2026-09-25). What was learned is
+kept as what knurlogic's own placement has to get right.
+
 * **A placement is invisible until exo publishes it.** A second placement
   posted one call after the first was accepted: no instance, no runners in
-  /state yet, memory still reading free. knurlogic counts a placement as
-  moving from the moment it posts it (`exo.moving`).
+  /state yet, memory still reading free. A placement has to count as
+  moving from the moment it is posted.
 * **exo leaves ghost runners.** Removed instances left runners in
   RunnerShuttingDown indefinitely, referenced by no instance, with the
   node's memory back to exactly what it was. Counting them made `ready`
@@ -199,10 +200,9 @@ which. In short:
   roomy defaults in the next.
 * **`resolve()` takes a byte count or nodes**; a cluster gets one Resolution
   per node plus ring-wide values enforced across them.
-* **`ready` separates a local load from ring placement.** Runners moving
-  memory on this box block `load`; downloads and unseen nodes block only exo
-  placement. Only `DownloadOngoing` is in flight -- exo lists every model
-  card as `DownloadPending` on every node.
+* **`ready` gates on memory in motion.** A server `load` started that is
+  still loading, or any process holding the model-load lock, blocks `load`
+  (`force` passes it; nothing passes `fit`).
 * **Servers outlive the session that started them and stay stoppable**:
   `~/.cache/knurlogic/servers.json`, each unload checking the pid is still a
   knurlogic serve. Output goes to `~/.cache/knurlogic/serve-<port>.log`.
@@ -618,7 +618,8 @@ release. Found by doing it on the M4 tonight, every step a stumble:
   until someone clicked it every request hung. Nothing said why.
 * The Studio asked the peer on the wrong port, and gave up in 1 s on a
   busy peer that took 1.4. Both fixed (`1be7110`, `32610e4`).
-* Machines are found through exo. Without exo, there is no second machine.
+* Machines were found through exo. Peers and Bonjour (cluster/) now find
+  them without it; exo's /state is only one more witness.
 
 What "easy" should mean: install on each Mac, run one command on each, and
 the machines find each other; anything blocking (firewall, wrong address,
@@ -672,19 +673,18 @@ Ordered by what would surprise somebody most.
    lacks six modules the vendored glm5_next imports (`knurlogic deps` lists
    them). Upgrading mlx-vlm there is an environment change for a person to
    make.
-3. **The page and the MCP are nearly at parity.** Load and exo placement on
-   the page go through the MCP's own functions and show its refusals. Still
-   one-sided: the wired-limit control (page only), and live acceptance
-   (neither shows it, though `/status.json`'s `drafting` block carries it).
-   The page has no button to place on exo from `knurlogic ui` yet.
-4. **`state` sees this machine only.** Another node's memory comes from exo's
-   RAM figures; the per-runtime split needs a knurlogic on that node bound
-   past loopback.
+3. **The page and the MCP are nearly at parity.** Load on the page goes
+   through the MCP's own functions and shows its refusals. Still one-sided:
+   the wired-limit control (page only), and live acceptance (neither shows
+   it, though `/status.json`'s `drafting` block carries it).
+4. **`state` sees this machine only.** On the page, another node's memory
+   comes from its own knurlogic (a peer) or, failing that, exo's RAM figures;
+   the per-runtime split needs a knurlogic on that node bound past loopback.
 5. **`models` cannot tell a release from a lab intermediate.** Both are
    "servable" and "fits"; nothing on disk marks which is which.
-6. **exo-fork knobs knurlogic does not set**: `EXO_MLX_MEM_LIMIT_GB`,
-   `EXO_KV_POOL_MAX_TOKENS`, the jaccl timeouts. Named in `PIECES`; each
-   needs a measurement before it gets a default.
+6. **Knobs the exo fork had that knurlogic's own cluster will need**: a
+   memory limit, a KV-pool token budget, the jaccl timeouts. Each needs a
+   measurement before it gets a default.
 7. **The MCP is not registered with a client.** It has been driven over
    stdio as a client would; adding it to a Claude Code or Codex config is
    the person's call.
