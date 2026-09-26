@@ -68,7 +68,8 @@ def check_array_shape(arr):
     if len(shape) not in [4, 5]:
         return False
 
-    B, out_channels, kH, KW, t = shape
+    # the last four: a 4-D weight has no leading dim to unpack (it raised)
+    out_channels, kH, KW, t = shape[-4:]
 
     if t == 3:
         return True
