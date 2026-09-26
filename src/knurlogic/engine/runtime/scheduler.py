@@ -13,6 +13,16 @@ raises fails the rows in it and rebuilds the executor. The thread lives.
 
 A request waits for the host to be ready; while nothing is running the
 loop blocks on the queue instead of spinning.
+
+Memory is guarded here too, because a step that outgrows the GPU working
+set is not an exception: Metal aborts the process (measured on the M4:
+Flash 4.4 at 97 GiB, four long reviews and a full prompt cache climbed to
+118 of 120 GiB over two hours, then "Insufficient Memory" killed the server
+and every request in it). Before each step, when active memory is past the
+limit (the working set less a margin for one step's temporaries), the
+prompt cache gives up entries first -- they are a convenience -- and then
+the newest rows are stopped with `OutOfMemory` (a 503: retry), the least
+work lost. While memory is past the admission mark, new requests wait.
 """
 
 from __future__ import annotations
@@ -31,6 +41,11 @@ from .executor import (Admission, Checkpoint, Finished, LocalExecutor,
 from .request import Delta, Request, control_machine
 
 logger = logging.getLogger(__name__)
+GIB = 1 << 30
+
+
+class OutOfMemory(RuntimeError):
+    """This row was stopped so the server and the other rows keep running."""
 
 
 @dataclass
@@ -114,11 +129,15 @@ class Scheduler:
     def __init__(self, host, *, completion_batch_size: int = 32,
                  prefill_step_size: int = 2048, prompt_cache_size: int = 10,
                  prompt_cache_bytes: Optional[int] = None,
+                 memory_limit_bytes: Optional[int] = None,
                  stats: Optional[dict] = None):
         self.host = host
         self.completion_batch_size = completion_batch_size
         self.prefill_step_size = prefill_step_size
         self.cache_bytes = prompt_cache_bytes
+        #: active bytes a step may start at; None = the working set less a
+        #: margin, found on first use; 0 = unguarded
+        self.memory_limit = memory_limit_bytes
         self.cache = PromptCache(prompt_cache_size)
         self.stats = stats if stats is not None else {}
         self._jobs: "queue.Queue" = queue.Queue()
@@ -229,7 +248,7 @@ class Scheduler:
     def _tick(self) -> None:
         self._do_commands()
         self._take_jobs()
-        if self.host.state == "ready":
+        if self.host.state == "ready" and self._room_to_admit():
             self._admit_waiting()
         elif self.host.state in ("empty", "failed") and self._waiting \
                 and self._commands.empty():
@@ -237,6 +256,8 @@ class Scheduler:
             for j in self._waiting:
                 self._error(j, RuntimeError(f"no model to serve: {why}"))
             self._waiting.clear()
+        if self._ex is not None and self._rows:
+            self._guard_memory()
         if self._ex is not None and self._rows:
             self._step()
             return
@@ -403,6 +424,64 @@ class Scheduler:
         self._rows[uid] = _Row(job, text, types)
         if self.cache_bytes is not None:
             self.cache.trim_to(self.cache_bytes - ex.cache_nbytes)
+
+    # ------------------------------------------------------------- memory
+
+    def _limit(self) -> int:
+        if self.memory_limit is None:
+            import importlib   # engine.serve exports a load() function
+            load = importlib.import_module("knurlogic.engine.serve.load")
+            ws = int(load.memory().get("working_set_bytes") or 0)
+            self.memory_limit = ws - max(4 * GIB, ws // 20) if ws else 0
+        return self.memory_limit
+
+    def _margin(self) -> int:
+        return max(2 * GIB, self._limit() // 20)
+
+    def _active(self) -> int:
+        import mlx.core as mx
+        return int(mx.get_active_memory())
+
+    def _release(self) -> None:
+        import mlx.core as mx
+        mx.clear_cache()
+
+    def _room_to_admit(self) -> bool:
+        """A request is admitted when nothing is running (it could not wait
+        for memory anyone else would free) or memory is a margin below the
+        limit."""
+        limit = self._limit()
+        return (not limit or not self._rows
+                or self._active() < limit - self._margin())
+
+    def _guard_memory(self) -> None:
+        limit = self._limit()
+        if not limit:
+            return
+        over = self._active() - limit
+        if over <= 0:
+            return
+        if self.cache is not None and self.cache.nbytes:
+            before = self.cache.nbytes
+            self.cache.trim_to(max(before - over - self._margin(), 0))
+            self._release()
+            over = self._active() - limit
+            logger.warning("memory past the limit (%.1f GiB): the prompt "
+                           "cache gave up %.1f GiB", limit / GIB,
+                           (before - self.cache.nbytes) / GIB)
+        while over > 0 and self._rows:
+            uid = max(self._rows)             # the newest: least work lost
+            row = self._rows.pop(uid)
+            self._ex.remove([uid])
+            self._release()
+            logger.warning("memory past the limit (%.1f GiB): stopped the "
+                           "newest request (%d prompt tokens)", limit / GIB,
+                           row.job.prompt_tokens)
+            self._error(row.job, OutOfMemory(
+                f"stopped to keep the server within its memory "
+                f"({limit / GIB:.1f} GiB usable, {len(self._rows)} other "
+                f"request(s) running); retry, or ask for fewer tokens"))
+            over = self._active() - limit
 
     def _step(self) -> None:
         ex = self._ex
