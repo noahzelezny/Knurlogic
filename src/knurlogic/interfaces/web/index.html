@@ -56,8 +56,11 @@
  /* exo centres its logo and pins everything else to the edges. */
  header>.live{justify-self:start}
  header>nav{justify-self:end}
- .mark{position:relative;display:flex;align-items:center;justify-content:center;
-   justify-self:center}
+ /* Dropped below the bar's centre: centred, the wheel's top teeth ran off
+    the top of the window. Lower, they clear it and the bottom ones hang
+    over the header's edge onto the page. */
+ .mark{position:relative;top:12px;display:flex;align-items:center;
+   justify-content:center;justify-self:center}
  .mark b{font-size:19px;font-weight:700;letter-spacing:.22em;
    text-transform:uppercase;text-shadow:var(--glow);position:relative;z-index:1}
  /* Taller than the bar: the teeth are meant to break its top and bottom
@@ -76,7 +79,7 @@
  nav{display:flex;gap:20px;font-size:11px;letter-spacing:.16em;
    text-transform:uppercase;color:var(--dim)}
  nav a:hover{color:var(--acc)}
- .wrap{max-width:2000px;margin:0 auto;padding:22px 28px 60px}
+ .wrap{max-width:2000px;margin:0 auto;padding:22px 28px 24px}
  /* Chat memory on the left, the way exo keeps it. */
  /* Two layouts, both of them desktop: three columns, and the same three
     with the model rail dropped underneath for a window shoved to half a
@@ -128,6 +131,9 @@
    text-overflow:ellipsis}
  .card .s{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:3px}
  .card.offered .n{color:var(--dim)}
+ #resident .machine{color:var(--faint);margin:10px 0 5px}
+ #resident .machine:first-child{margin-top:0}
+ #resident .peererr{color:var(--faint);margin-bottom:6px}
  .card .dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ok)}
  .card.loading .dot{background:var(--warn);animation:pulse 2s ease-in-out infinite}
  .card.offered .dot{background:var(--faint)}
@@ -526,13 +532,28 @@
     had. The logo, or the Dashboard button, goes back. */
  .mark{cursor:pointer}
  #home{display:none;position:absolute;top:-13px;right:14px;background:var(--bg)}
- body:not(.talk) #chat.empty #clog{display:none}
- body:not(.talk) #chat.empty .crow{margin-top:6px}
+ /* HOME never draws the transcript, empty or not: the bar is pinned to the
+    window's bottom, and a transcript under it would cover the dashboard. */
+ body:not(.talk) #chat #clog{display:none}
+ body:not(.talk) #chat .crow{margin-top:6px}
  body.talk #memory,body.talk .right{display:none}
  body.talk .app{grid-template-columns:15em minmax(0,1fr)}
  body.talk #home{display:inline-block}
  body.talk #try{margin-bottom:0}
- body.talk #clog{height:calc(100vh - 290px);min-height:260px;max-height:none}
+ /* The chat bar belongs to the bottom of the window, as exo's does: main is
+    at least the window's height (less the header and the page's padding) and
+    the bar takes the space left over above it, so in HOME the dashboard sits
+    above it and in TALK the transcript does. Sticky, so a dashboard taller
+    than the window scrolls under the bar instead of pushing it away. */
+ main{display:flex;flex-direction:column;min-height:calc(100vh - 110px)}
+ #try{margin-top:auto;margin-bottom:0;position:sticky;bottom:12px;z-index:5}
+ /* TALK: main is exactly the window, and the transcript is whatever the
+    bar and the chat options leave of it. */
+ body.talk main{height:calc(100vh - 110px)}
+ body.talk #try{flex:1;min-height:0;display:flex;flex-direction:column}
+ body.talk #chat:not([hidden]){flex:1;min-height:0;display:flex;
+   flex-direction:column}
+ body.talk #clog{flex:1;height:auto;min-height:0;max-height:none}
  #cq{height:34px;min-height:34px;line-height:1.35}
  .lightbox{position:fixed;inset:0;background:oklch(0 0 0/.85);z-index:50;
    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
@@ -600,7 +621,7 @@
               <input id="cfile" type="file" multiple hidden
                 accept="image/*,text/*,.md,.json,.py">
               <textarea id="cq" rows="1"
-                placeholder="choose a model to chat with"></textarea>
+                placeholder="Type away; click a running model to send it"></textarea>
               <button class="go" id="csend" disabled>Send</button>
               <button type="button" class="go danger" id="cstop" hidden>Stop</button>
             </div>
@@ -1622,15 +1643,19 @@ function refusalText(j){
   return L.join('\n');
 }
 async function loadResident(){
-  let d; try{ d=await (await fetch('/loaded.json')).json() }catch(e){ return }
-  const rows=d.resident||[], el=$('resident');
-  if(!rows.length){
-    el.innerHTML='<div class="card offered"><div class="cardhd">'+
-      '<span class="dot"></span><span class="n">nothing loaded</span>'+
-      '</div></div>';
-    return;
-  }
-  el.innerHTML=rows.map((r,i)=>`<div class="card ${esc(r.state)}">
+  // ?peers=1: the page process also asks every answering peer what it is
+  // holding, so a model on the other machine is on this page too, the way
+  // exo's topology shows it. The server bounds the wait; a dead peer comes
+  // back as an error line, never as a missing answer.
+  let d; try{ d=await (await fetch('/loaded.json?peers=1')).json() }catch(e){ return }
+  const peers=d.peers||[];
+  // One list, local first; a peer's rows carry `machine`. A peer's model is
+  // shown and chatted with, never unloaded from here: this page drives only
+  // what its own machine started.
+  const rows=(d.resident||[]).concat(...peers.map(m=>m.resident||[]))
+    .map(r=>r.machine?{...r, can_unload:false}:r);
+  const el=$('resident');
+  const card=(r,i)=>`<div class="card ${esc(r.state)}">
       <div class="cardhd">
         <span class="dot"></span>
         <span class="rt ${esc(r.runtime)}">${esc(r.runtime)}</span>
@@ -1649,7 +1674,23 @@ async function loadResident(){
         r.detail, r.state==='loaded'?'':r.state]
         .filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
         .map(esc).join(' · ')}</div>
-    </div>`).join('');
+    </div>`;
+  const none='<div class="card offered"><div class="cardhd">'+
+    '<span class="dot"></span><span class="n">nothing loaded</span></div></div>';
+  const local=(d.resident||[]).length;
+  // Labelled by machine only once there is another machine to tell apart.
+  let h=peers.length?'<div class="machine ro">this machine</div>':'';
+  h+=local?rows.slice(0,local).map(card).join(''):none;
+  let i=local;
+  for(const m of peers){
+    const n=(m.resident||[]).length;
+    h+=`<div class="machine ro">${esc(m.machine)}</div>`;
+    h+=n?rows.slice(i,i+n).map((r,k)=>card(r,i+k)).join('')
+       :(m.error?`<div class="s ro peererr" title="${esc(m.error)}"
+            >not answering</div>`:none);
+    i+=n;
+  }
+  el.innerHTML=h;
   el.querySelectorAll('[data-chatn]').forEach(x=>x.onclick=()=>{
     const r=rows[+x.dataset.chatn];
     if(window.switchTab) window.switchTab('chat');
@@ -2036,10 +2077,12 @@ function chatGate(){
   const c=curChat();
   const on=!!((c && c.where) || SERVED);
   const vision=c && c.where ? !!c.vision : !!(SERVED && SERVED.vision);
-  $('cq').disabled=!on;
+  // The box is always typeable, so the page never looks broken; only Send
+  // waits for a model, and the placeholder and Send's title say which.
   $('cq').placeholder=on ? 'Message the running model… (Shift+Enter for a newline)'
-                         : 'click a running model to chat with it';
+                         : 'Type away; click a running model to send it';
   $('csend').disabled=!on || BUSYC;
+  $('csend').title=on ? '' : 'click a running model to chat with it';
   $('cattach').disabled=!on || !vision;
   $('cattach').title=vision ? 'attach an image'
     : (on ? 'this model has no vision' : 'click a running model to chat with it');
