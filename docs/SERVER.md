@@ -253,3 +253,15 @@ Ratio = knurlogic / mlx-lm of the medians.
 | Flash-Next 2.1 | 0.999 | 1.01 | 0.996 | equal within noise |
 | GLM-5.3 2.7 | 0.94 (ranges overlap: 24.9-28.7 vs 26.1-27.9) | 1.06 (overlap) | 0.98 | equal within noise |
 | Qwen3.5-397B 2.2 | 1.06 (overlap) | 0.97 (overlap) | 1.00 | equal within noise |
+
+### Final build (mlx-lm's server removed, c70ec9a+), M4, 2026-09-25
+
+| model | conformance |
+|---|---|
+| gemma e4b | 37 passed, 1 skipped (text-model refusal) |
+| Qwen Flash-Next 2.1 | 37 passed, 1 skipped (same) |
+| GLM-5.3 2.7 | 36 passed, 2 skipped (same + batched-logit drift 0.21) |
+| Qwen3.5-397B 2.2 | 37 passed, 1 skipped (same) |
+
+No tracebacks in any server log. Migration steps 1-4 done; the default is
+knurlogic's own server and the only one.
