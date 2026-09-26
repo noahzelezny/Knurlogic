@@ -18,7 +18,7 @@ single-box call is the same call it always was; the cluster case was made
 cheap now because threading a second budget through later is invasive.
 
 What a node HOLDS is a placement question and placement belongs to whatever
-does the sharding -- exo, here. When nobody says, this assumes the shard is
+does the sharding. When nobody says, this assumes the shard is
 proportional to the node's working set, which is an ASSUMPTION and is
 recorded as a note on every resolution that rides on it, not a measurement.
 """
@@ -268,8 +268,6 @@ def resolve_cluster(artifact: Artifact, budget, profile: str | None = None,
             f"sharded, before any runtime overhead. More nodes, or a smaller "
             f"rung.")
     _ring_consistent(c)
-    for r in c.nodes.values():
-        r.env.update(S.exo_env(r.env))
     for name, r in c.nodes.items():
         c.warnings += [f"{name}: {w}" for w in r.warnings]
     return c

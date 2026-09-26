@@ -293,32 +293,6 @@ ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                           for n in KNOB_ALIASES[k])
 
 
-# --- the same knobs, spelled the way the exo fork reads them ---------------
-# When exo is the engine, the prompt chunk and buffer cache reach its runners
-# through ITS variables (worker/engines/mlx/constants.py and utils_mlx.py).
-# Emitting knurlogic's names into exo's environment reaches nothing -- the
-# same fault as an env var mlx-lm's server never reads.
-#
-# RING-WIDE means every rank must hold the same value or the ranks desync:
-# the fork found this live when one launcher dropped EXO_PREFILL_STEP_SIZE
-# and its mirror did not (GLM-5.3 at 2048 on one rank, 4096 on the other).
-# `resolve_cluster` gives those one value on every node.
-EXO_NAMES = {
-    "prefill_step_size": ("EXO_PREFILL_STEP_SIZE", "ring"),
-    "cache_limit_gb": ("EXO_MLX_CACHE_LIMIT_GB", "node"),
-}
-
-
-def exo_env(env: dict) -> dict:
-    """The EXO_* variables for a resolved node environment."""
-    out = {}
-    for key, v in engine_settings(env).items():
-        if key in EXO_NAMES:
-            out[EXO_NAMES[key][0]] = (str(int(v)) if isinstance(v, int)
-                                      else f"{v:g}")
-    return out
-
-
 def engine_settings(env: dict) -> dict:
     """{prefill_step_size, prompt_concurrency, cache_limit_gb} from a
     resolved environment, whichever alias it was emitted under. Absent means
