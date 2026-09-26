@@ -605,3 +605,35 @@ def test_a_failure_between_tokenize_and_admit_releases_the_images(
     assert code == 500 and b"fell over" in body
     assert h.vision.pinned_count() == 0
     monkeypatch.setattr(h.sched.cache, "fetch", real)
+
+
+def test_a_burst_of_image_requests_interleaves_with_decoding(server, model,
+                                                             monkeypatch):
+    """Images are encoded at tokenize, on the scheduler thread; at most one
+    image request is admitted per tick, so a decoding row gets a step
+    between encodes instead of waiting for the whole burst."""
+    from knurlogic.engine.mtp import batch_loop
+    h = Harness(server, model, family=stub_family(), start=False)
+    order = []
+    real_insert = h.sched._insert
+    real_step = batch_loop.MTPBatch.step
+
+    def insert(job):
+        order.append("admit")
+        return real_insert(job)
+
+    def step(self):
+        order.append("step")
+        return real_step(self)
+    monkeypatch.setattr(h.sched, "_insert", insert)
+    monkeypatch.setattr(batch_loop.MTPBatch, "step", step)
+    replies = [h.submit(dict(messages=[user("x ", data_url(80 + i))],
+                             max_tokens=4, logit_bias=BAN))
+               for i in range(3)]
+    h.sched.start()
+    for r in replies:
+        h.result(r)
+    admits = [i for i, x in enumerate(order) if x == "admit"]
+    assert len(admits) == 3
+    # a step ran between each pair of admissions
+    assert all("step" in order[a:b] for a, b in zip(admits, admits[1:]))
