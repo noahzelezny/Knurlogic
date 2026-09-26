@@ -120,7 +120,8 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 
 #: Knobs `engine.serve` turns into argv or an mlx call, so they are real
 #: whether or not an artifact's bundled runtime reads them.
-ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "prompt_concurrency")
+ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "prompt_concurrency",
+                   "context_length")
 
 
 def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
@@ -510,6 +511,12 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
         else:
             prefill = asked
     emit(r, artifact, "prefill_chunk", prefill)
+    cfg = artifact.raw_config or {}
+    window = int((cfg.get("text_config") or cfg).get("max_position_embeddings")
+                 or cfg.get("max_position_embeddings") or 0)
+    if window:
+        # the model's own window: the cap a person lowers, never raises past
+        emit(r, artifact, "context_length", window)
     if tight or tune == "safe":
         emit(r, artifact, "prompt_concurrency", S.PROMPT_CONCURRENCY_TIGHT)
         r.notes.append(

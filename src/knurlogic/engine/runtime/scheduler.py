@@ -61,6 +61,16 @@ class OutOfMemory(RuntimeError):
     """This row was stopped so the server and the other rows keep running."""
 
 
+def _context_cap() -> int:
+    """KNURLOGIC_CONTEXT_LENGTH: the longest prompt + answer a request may
+    use, read at every admission so the setting applies live. 0 = none."""
+    import os
+    try:
+        return max(int(os.environ.get("KNURLOGIC_CONTEXT_LENGTH") or 0), 0)
+    except ValueError:
+        return 0
+
+
 def _kv_from_config(path) -> Optional[tuple]:
     """(0, bytes per token) from the artifact's config -- its full-attention
     layers' K and V -- so the first prompt after a load is costed before a
@@ -504,6 +514,14 @@ class Scheduler:
                 prompt, segs, types, initial = P.tokenize(
                     self, tok, job.request, job.args)
             job.prompt_tokens = len(prompt)
+            cap = _context_cap()
+            if cap and len(prompt) >= cap:
+                raise P.PromptError(
+                    f"this prompt is {len(prompt)} tokens; this server's "
+                    f"context length is {cap} (KNURLOGIC_CONTEXT_LENGTH), "
+                    f"which leaves no room for an answer")
+            if cap:
+                job.max_tokens = min(job.max_tokens, cap - len(prompt))
             lean = self._make_room(len(prompt)) == "lean"
             cache, rest = self.cache.fetch(self.host.model_key, prompt)
             n = len(prompt) - len(rest)
