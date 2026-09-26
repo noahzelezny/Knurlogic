@@ -435,9 +435,7 @@ not tax every step.
    `MTPHeadGlm5.advance` keeps the head aligned. Open: one of six restored
    requests got 0 cached tokens (interleaved with unique-prefix requests;
    LRU eviction suspected, unconfirmed).
-3. **Server build step 1**: engine/runtime/executor.py -- protocol +
-   MTPBatchGenerator behind it; test_batch_drafting/vision tests unchanged.
-   Then steps 2-5 per docs/SERVER.md.
+3. ~~Server build step 1~~ DONE (docs/SERVER.md, Build progress). Next: step 2, **request.py** (detokenizer, reasoning split, text stops, usage; flips the stop xfail).
 4. Suite additions listed in docs/SERVER.md (tool calls first).
 
 Tools: tools/thinking_bench.py, tools/vision_gate.py, tests/api (set
