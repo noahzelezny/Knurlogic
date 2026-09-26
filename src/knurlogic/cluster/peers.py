@@ -195,12 +195,17 @@ class Peers:
         if pid == self.me.get("id") or not 0 < port < 65536:
             return                                  # ourselves, or junk
         with self._lock:
-            known = f"{host}:{port}" in self._peers
+            # checked and added in one hold: handler threads introducing
+            # at once each saw room under the cap and all added
+            key = f"{host}:{port}"
             only = sum(1 for p in self._peers.values()
                        if p.found_by == {"introduced"})
-        if not known and only >= MAX_INTRODUCED:
-            return
-        p = self.add(host, port, "introduced")
+            if key not in self._peers and only >= MAX_INTRODUCED:
+                return
+            p = self._peers.get(key)
+            if p is None:
+                p = self._peers[key] = Peer(host, int(port))
+            p.found_by.add("introduced")
         p.id = p.id or pid
 
     # -- refresh --------------------------------------------------------
@@ -225,8 +230,16 @@ class Peers:
             p.state, p.problem = "not_answering", _describe(e, p)
             p.failing_since = p.failing_since or now
             return
+        if not isinstance(doc, dict):
+            # a peer's word is checked for shape before it is read: a list
+            # or null here raised in the refresh and left the peer's old
+            # "answering" in place
+            p.state = "not_answering"
+            p.problem = f"{p.key} answered with something not a status"
+            return
         own = next((n for n in doc.get("nodes") or []
-                    if n.get("role") in ("local", "server")), None)
+                    if isinstance(n, dict)
+                    and n.get("role") in ("local", "server")), None)
         if own is None or own.get("id") == self.me.get("id"):
             # Answered, but as someone else -- or as us, through a loop.
             p.state = "not_answering"

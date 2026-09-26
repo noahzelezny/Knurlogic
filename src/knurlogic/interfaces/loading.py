@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 GIB = 1 << 30
-_KNOWN: dict = {"at": 0.0, "rows": None}
+_KNOWN: dict = {"at": 0.0, "rows": None, "error": ""}
 
 
 class NotLoadable(Exception):
@@ -40,9 +40,13 @@ def known_artifacts(ttl: float = 60.0) -> list:
         try:
             _KNOWN["rows"] = [f for f in discover.find()
                               if f.servable and f.format == "mlx"]
-        except Exception:
-            _KNOWN["rows"] = []
-        _KNOWN["at"] = now
+            _KNOWN["at"], _KNOWN["error"] = now, ""
+        except Exception as e:
+            # not cached: a store on a volume that was briefly away is
+            # scanned again on the next request, and until then the
+            # refusal names the scan, not the model
+            _KNOWN["error"] = f"{type(e).__name__}: {e}"
+            return []
     return _KNOWN["rows"]
 
 
@@ -60,6 +64,10 @@ def resolve_name(model: str, served: Optional[str]) -> str:
         p = str(Path(f.path).resolve())
         if model in (f.name, Path(f.path).name) or want == p:
             return str(f.path)
+    if _KNOWN.get("error"):
+        raise NotLoadable(503, f"the model stores could not be scanned "
+                               f"({_KNOWN['error']}); is a volume holding "
+                               f"them unmounted?", "store_unavailable")
     raise NotLoadable(404, f"{model!r} is not an artifact in this machine's "
                            f"model stores. /models.json lists the ones that "
                            f"are; a model is named by its id there, not by "

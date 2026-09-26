@@ -37,6 +37,9 @@ def load_head(model_path: str):
     """
     from knurlogic.engine.mtp import find_head
 
+    # a new model's counters start at zero: after a switch to one with no
+    # head, /status.json showed the previous model's acceptance as current
+    state.DRAFT.update(steps=0, accepted=0)
     found = find_head(model_path)
     if found is None:
         state.DRAFT.update(on=False, why="no drafting head beside the weights")
