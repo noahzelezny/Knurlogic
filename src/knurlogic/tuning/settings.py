@@ -226,6 +226,13 @@ KNOB_DOC = {
         "how many prompt tokens are processed at once",
         "token-identical at every width, so it is purely a memory knob -- "
         "narrowing costs nothing but peak."),
+    "KNURLOGIC_CONTEXT_LENGTH": (
+        "the longest conversation (prompt + answer, in tokens) a request may "
+        "use",
+        "nothing is reserved up front -- a cap, not an allocation: a longer "
+        "prompt is refused (400) and max_tokens is trimmed to fit, so no "
+        "request can take more KV memory than this allows. The default is "
+        "the model's own window."),
     "KNURLOGIC_PROMPT_CONCURRENCY": (
         "how many prompts are prefilled together in one forward",
         "the prefill transient is per prompt, so 8 arriving together is 8x "
@@ -278,6 +285,7 @@ KNOB_ALIASES = {
     "prefill_chunk": ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"),
     "decode_chunk": ("VQ_DECODE_CHUNK",),
     "prompt_concurrency": ("KNURLOGIC_PROMPT_CONCURRENCY",),
+    "context_length": ("KNURLOGIC_CONTEXT_LENGTH",),
 }
 
 
@@ -333,7 +341,8 @@ def default_alias(logical: str) -> str:
 #             the frozen 2048*4096*2 constant happened.
 KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "KNURLOGIC_CACHE_LIMIT_GB",
                    "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_PREFILL_CHUNK",
-                   "VQLAB_PREFILL_CHUNK", "KNURLOGIC_PROMPT_CONCURRENCY")
+                   "VQLAB_PREFILL_CHUNK", "KNURLOGIC_PROMPT_CONCURRENCY",
+                   "KNURLOGIC_CONTEXT_LENGTH")
 
 
 def knob_tier(name: str) -> str:
@@ -359,6 +368,10 @@ KNOB_RANGE = {
     "VQLAB_PREFILL_CHUNK": ([512, 1024, 2048, 4096], "tokens"),
     "KNURLOGIC_PREFILL_CHUNK": ([512, 1024, 2048, 4096], "tokens"),
     "KNURLOGIC_PROMPT_CONCURRENCY": ([1, 2, 4, 8], "prompts"),
+    # powers of two up to the longest window a released model has; the
+    # control stops at the model's own (the resolver's value)
+    "KNURLOGIC_CONTEXT_LENGTH": ([8192, 16384, 32768, 65536, 131072,
+                                  262144, 524288, 1048576], "tokens"),
     "VQ_DECODE_CHUNK": ([4, 8, 16, 32], ""),
     "VQLAB_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
                              "GiB"),

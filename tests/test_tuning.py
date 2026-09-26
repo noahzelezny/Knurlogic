@@ -495,3 +495,15 @@ def test_mla_caches_are_costed_as_their_latent():
                           "linear_attention", "deepseek_sparse_attention"]}
     per, why = kv_bytes_per_token(tc)
     assert per == 2 * 640 * 2 and "MLA" in why
+
+
+def test_the_context_length_applies_live(monkeypatch):
+    from knurlogic.engine.serve.load import LIVE_KNOBS, apply_live
+    monkeypatch.delenv("KNURLOGIC_CONTEXT_LENGTH", raising=False)
+    assert "KNURLOGIC_CONTEXT_LENGTH" in LIVE_KNOBS
+    done = apply_live({"KNURLOGIC_CONTEXT_LENGTH": "32768"})
+    assert done["KNURLOGIC_CONTEXT_LENGTH"].startswith("applied")
+    import os
+    assert os.environ["KNURLOGIC_CONTEXT_LENGTH"] == "32768"
+    assert apply_live({"KNURLOGIC_CONTEXT_LENGTH": "-1"})[
+        "KNURLOGIC_CONTEXT_LENGTH"].startswith("failed")

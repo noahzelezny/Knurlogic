@@ -419,3 +419,15 @@ def test_usage_says_what_the_request_took(sched):
     assert t["ttft_s"] >= t["queue_s"] >= 0
     if usage["completion_tokens"] > 1:
         assert t["decode_tok_s"] > 0
+
+
+def test_the_context_length_caps_a_request_live(sched, monkeypatch):
+    """KNURLOGIC_CONTEXT_LENGTH is a cap, read at each admission: a prompt
+    at or over it is refused, max_tokens is trimmed to fit under it."""
+    p = sched.prompts[0]
+    monkeypatch.setenv("KNURLOGIC_CONTEXT_LENGTH", str(len(p)))
+    kind, err = sched.submit(_job(p, max_tokens=12)).outbox.get(timeout=60)
+    assert kind == "error" and "context length" in str(err)
+    monkeypatch.setenv("KNURLOGIC_CONTEXT_LENGTH", str(len(p) + 3))
+    _text, usage = _collect(sched.submit(_job(p, max_tokens=12)))
+    assert usage["completion_tokens"] <= 3
