@@ -41,7 +41,7 @@ def _origin(path, artifact_dir: Path) -> str:
     rp = Path(path).resolve()
     if register.is_vendored_path(rp):
         return "knurlogic"
-    if str(rp).startswith(str(artifact_dir.resolve())):
+    if rp.is_relative_to(artifact_dir.resolve()):
         return "artifact"
     if "site-packages" in str(rp) or "dist-packages" in str(rp):
         return "site-packages"
