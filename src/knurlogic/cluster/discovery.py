@@ -136,7 +136,11 @@ class Discovery:
     for services that resolved to an IPv4 address; `on_change` is called
     (from the loop thread) whenever it changes."""
 
-    def __init__(self, on_change=None, if_index: int = 0):
+    def __init__(self, on_change=None, if_index: int = 0,
+                 service: str = SERVICE):
+        #: the DNS-SD type; tests use their own, so a live page on the
+        #: same Mac never lists them as a machine
+        self.service = service
         self.on_change = on_change
         self.if_index = if_index
         self.found: dict = {}
@@ -171,7 +175,7 @@ class Discovery:
         rec = txt_encode(txt)
         err = lib.DNSServiceRegister(
             ctypes.byref(ref), 0, self.if_index, _label(instance),
-            SERVICE.encode(), None, None, socket.htons(port), len(rec),
+            self.service.encode(), None, None, socket.htons(port), len(rec),
             ctypes.c_char_p(rec), c, None)
         if err:
             self.errors.append(f"register: error {err}")
@@ -197,7 +201,7 @@ class Discovery:
         c = BROWSE_CB(cb)
         ref = vp()
         err = lib.DNSServiceBrowse(ctypes.byref(ref), 0, self.if_index,
-                                   SERVICE.encode(), None, c, None)
+                                   self.service.encode(), None, c, None)
         if err:
             self.errors.append(f"browse: error {err}")
             return False
@@ -324,7 +328,7 @@ class Discovery:
             return [dict(v) for v in self.found.values()]
 
     def status(self) -> dict:
-        d = {"service": SERVICE, "registered_as": self.registered_as,
+        d = {"service": self.service, "registered_as": self.registered_as,
              "found": len(self.found), "errors": self.errors[-3:]}
         if self.started and not self.found and \
                 time.time() - self.started > 10:
