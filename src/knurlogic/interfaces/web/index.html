@@ -264,7 +264,6 @@
  .wiredbar u{position:absolute;top:0;bottom:0;width:2px;
    background:var(--warn)}
  .wiredrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
- .wiredrow input[type=range]{flex:1;min-width:160px;accent-color:var(--acc)}
  .wiredrow output{font-weight:700;min-width:5.5em;text-align:right}
  .wired .msg{margin-top:8px}
  .wired pre{user-select:all;background:var(--bg);border:1px solid var(--line);
@@ -285,7 +284,8 @@
  .chat[aria-current=true]{border-color:color-mix(in srgb,var(--acc) 40%,transparent);
    background:color-mix(in srgb,var(--acc) 8%,transparent)}
  .chat .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
- .chat .m{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:3px}
+ .chat .m{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:3px;
+   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .chat .x{float:right;color:var(--faint);padding:0 2px;visibility:hidden}
  .chat:hover .x{visibility:visible}
  .chat .x:hover{color:var(--warn)}
@@ -294,36 +294,62 @@
  /* Settings and Connect are overlays like the picker, not a place you go:
     what you were looking at stays where it was underneath, and a click
     outside or Escape puts you back on it. */
- .modal .box.menu{width:min(820px,100%);height:auto;max-height:86vh}
+ .modal .box.menu{width:min(860px,100%);height:min(640px,84vh)}
  .sheethd{display:flex;align-items:center;justify-content:space-between;
    padding:12px 14px;border-bottom:1px solid var(--line);flex:none}
  .sheethd b{letter-spacing:.18em;color:var(--acc);text-shadow:var(--glow)}
- .sheetbody{overflow:auto;padding:6px 14px 14px}
+ .sheetbody{flex:1;min-height:0;display:flex}
  .sheetbody .panel{display:none;margin:0;border:0;box-shadow:none;
-   background:transparent;padding:12px 4px 4px}
- .sheetbody .panel.on{display:block}
+   background:transparent;padding:0;flex:1;min-width:0}
+ .sheetbody .panel.on{display:flex}
+ .sheetbody .pickbody{flex:1;grid-template-columns:150px 1fr}
+ .sbody{overflow:auto;padding:14px 18px 18px;min-width:0}
+ .fam small{display:block;text-transform:none;letter-spacing:0;
+   color:var(--faint);font-size:10px;margin-top:2px}
+ .shd{font-size:12.5px;margin:0 0 4px}
+ .shd .ro{color:var(--faint);font-size:10.5px;margin-left:8px}
+ .sgrp{border-top:1px solid var(--line);margin-top:16px;padding-top:12px}
+ .sgrp:first-child{border-top:0;margin-top:0;padding-top:0}
+ .ktab{display:grid;grid-template-columns:1fr auto auto;gap:0 14px}
+ .connblk{margin-top:14px}
+ .connblk .optlab{display:flex;justify-content:space-between;gap:10px;
+   text-transform:none;letter-spacing:.02em}
+ .connblk pre{user-select:all;background:var(--bg);border:1px solid var(--line);
+   border-radius:var(--r);padding:9px 10px;white-space:pre-wrap;
+   word-break:break-all;margin:0;font-size:11px}
+ .wiredrow input[type=number]{width:6em;text-align:right}
  /* The overlay's header already names the panel; the notch label would say
     it a second time, six lines lower. */
  .sheetbody .panel>.lab{display:none}
- /* Chat options float over the transcript, anchored to the bar, instead of
-    growing the bar and shoving the conversation up to make room. */
  .cbar{position:relative}
- .pop{position:absolute;bottom:calc(100% + 8px);left:0;z-index:30;
-   width:min(440px,100%);border:1px solid var(--line);border-radius:var(--r);
-   background:var(--panel);box-shadow:0 12px 40px oklch(0 0 0/.55);
-   padding:6px 14px 10px}
- .pop[hidden]{display:none}
- .pop .opt input,.pop .opt select{width:100%;text-align:left}
- #coptsbtn{background:transparent;border:0;padding:0;cursor:pointer;align-self:flex-start;
-   color:var(--faint);font-size:11px;margin-top:10px}
- #coptsbtn:before{content:"+ "}
- #coptsbtn[aria-expanded=true]{color:var(--acc)}
- #coptsbtn[aria-expanded=true]:before{content:"\2212 "}
- /* Which running model Send goes to, beside the attach button: in teal,
-    because a chat bar that is live should say so and say to what. */
- #cmodel{align-self:center;color:var(--acc);font-size:11px;max-width:16em;
-   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
+ /* The chat list is a handful tall and scrolls: fifteen chats pushed the
+    settings under it off the screen. */
+ #chats{max-height:17em;overflow-y:auto;margin-right:-6px;padding-right:6px}
+ #chats .sidelab{position:sticky;top:0;background:var(--bg);margin-top:0;
+   padding:4px 0 7px}
+ #csettings{border-top:1px solid var(--line);margin-top:12px}
+ .cs{display:flex;align-items:center;gap:8px;margin:6px 0}
+ .cs label,.cslab{flex:1;font-size:10px;letter-spacing:.1em;
+   text-transform:uppercase;color:var(--faint)}
+ .cslab{display:block;margin:12px 0 5px}
+ .cs select,.cs input{width:6.5em;flex:none;padding:4px 6px;font-size:11px;
+   text-align:right}
+ .cs input:placeholder-shown{border-style:dashed}
+ .csnote{font-size:10px;color:var(--faint);margin-top:6px;line-height:1.5}
+ .csnote b{color:var(--dim);font-weight:400}
+ #csys{width:100%;resize:vertical;background:var(--panel);color:var(--fg);
+   border:1px solid var(--line);border-radius:var(--r);padding:6px 8px;
+   font:inherit;font-size:11.5px;box-sizing:border-box}
+ body.bench #csettings{display:none}
+ /* Which running model Send goes to, and how hard it thinks, at the top
+    right of the box: in teal, because a live chat bar should say so and
+    say to what. */
+ .chd{display:flex;justify-content:flex-end;align-items:center;gap:10px;
+   margin-bottom:6px}
+ #cmodel{color:var(--acc);font-size:11px;max-width:24em;
+   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  #cmodel:empty{display:none}
+ #ceffort{width:auto;padding:3px 6px;font-size:10.5px;color:var(--dim)}
  nav a[aria-pressed=true]{color:var(--acc)}
  nav a{cursor:pointer;border-bottom:1px solid transparent;padding-bottom:2px}
  nav a[aria-pressed=true]{border-bottom-color:var(--acc)}
@@ -616,6 +642,43 @@
     <aside class="side">
       <button class="newchat" id="newchat">+ New chat</button>
       <div id="chats"></div>
+      <!-- Chat settings stay on screen: this chat is for testing models, and
+           what a reply was asked with is half of reading it. A floating menu
+           hid exactly that. Sampling fields start EMPTY, which sends
+           nothing, so the server applies the model's own recommendation
+           (its generation_config.json); the placeholder shows that value. -->
+      <section id="csettings">
+        <div class="sidelab">chat settings</div>
+        <div class="cs">
+          <label for="cmax">max tokens</label>
+          <!-- Steps, not a number field or a slider: nobody types 3187, and
+               a select is one click and as wide as its longest label. -->
+          <select id="cmax">
+            <option value="256">256</option><option value="512">512</option>
+            <option value="1024">1k</option><option value="2048" selected>2k</option>
+            <option value="4096">4k</option><option value="8192">8k</option>
+            <option value="16384">16k</option><option value="32768">32k</option>
+            <option value="65536">64k</option>
+          </select>
+        </div>
+        <div class="cs">
+          <label for="ctemp">temperature</label>
+          <input id="ctemp" type="number" min="0" max="2" step="0.05"
+            placeholder="model">
+        </div>
+        <div class="cs">
+          <label for="ctopp">top p</label>
+          <input id="ctopp" type="number" min="0" max="1" step="0.05"
+            placeholder="model">
+        </div>
+        <div class="cs">
+          <label for="ctopk">top k</label>
+          <input id="ctopk" type="number" min="0" step="1" placeholder="model">
+        </div>
+        <div class="csnote" id="csdef"></div>
+        <label class="cslab" for="csys">system prompt</label>
+        <textarea id="csys" rows="3" placeholder="(none)"></textarea>
+      </section>
     </aside>
     <main>
       <section class="panel" id="memory">
@@ -639,11 +702,24 @@
           <!-- The bar and the options that float over what is above it:
                outside the form, so Enter in a field there is not a Send. -->
           <div class="cbar">
+            <!-- What Send goes to and how hard it thinks, on one line above
+                 the box: the two things to check before sending. -->
+            <div class="chd">
+              <span id="cmodel"></span>
+              <select id="ceffort" title="reasoning_effort: knurlogic maps it onto this model's own controls and says what it applied">
+                <option value="">thinking: model default</option>
+                <option value="none">thinking: none</option>
+                <option value="minimal">thinking: minimal</option>
+                <option value="low">thinking: low</option>
+                <option value="medium">thinking: medium</option>
+                <option value="high">thinking: high</option>
+                <option value="xhigh">thinking: xhigh</option>
+              </select>
+            </div>
             <form id="cf">
               <div class="crow">
                 <button type="button" id="cattach" class="mini" title="attach image"
                   disabled>📎</button>
-                <span id="cmodel"></span>
                 <input id="cfile" type="file" multiple hidden
                   accept="image/*,text/*,.md,.json,.py">
                 <textarea id="cq" rows="1"
@@ -652,23 +728,7 @@
                 <button type="button" class="go danger" id="cstop" hidden>Stop</button>
               </div>
             </form>
-            <div class="pop" id="copts" hidden>
-              <div class="opt"><div class="optlab">max tokens</div>
-                <input id="cmax" type="number" min="16" step="16" value="2048"></div>
-              <div class="opt"><div class="optlab">temperature</div>
-                <input id="ctemp" type="number" min="0" max="2" step="0.05" value="0.7"></div>
-              <div class="opt"><div class="optlab">thinking</div>
-                <select id="ceffort" title="reasoning_effort: knurlogic maps it onto this model's own controls and says what it applied">
-                  <option value="">model default</option>
-                  <option>none</option><option>minimal</option><option>low</option>
-                  <option>medium</option><option>high</option><option>xhigh</option>
-                </select></div>
-              <div class="opt"><div class="optlab">system prompt</div>
-                <input id="csys" placeholder="(none)"></div>
-            </div>
           </div>
-          <button type="button" id="coptsbtn" aria-expanded="false"
-            aria-controls="copts">chat options</button>
         </section>
         <section id="bench" hidden>
           <div id="log"></div>
@@ -756,31 +816,49 @@
       <button id="sheetclose" class="mini">Close</button>
     </div>
     <div class="sheetbody">
+      <!-- Laid out like the picker: what to look at down the side, one of
+           them at a time on the right. A tab per machine because every knob
+           here is a machine's -- resolved for its memory, read by the model
+           it is running -- plus the cluster, to see them side by side. -->
       <section class="panel" id="settings">
         <div class="lab">Settings</div>
-        <!-- The one setting that belongs to the MACHINE and holds whether or
-             not anything is loaded: how much of memory the GPU may wire. It
-             is what decides if a rung loads at all, and it is normally a
-             sysctl you have to go and look up. -->
-        <div id="machine"></div>
-        <div class="ctl" id="artifactctl">
-          <span class="seg" id="tunes"></span>
-          <label>ws <input id="ws" type="number" min="0" step="1"></label>
-          <button class="go" id="apply" disabled>Apply</button>
+        <div class="pickbody">
+          <div class="fams" id="settabs"></div>
+          <div class="sbody">
+            <div id="clusterbody" hidden></div>
+            <div id="peerbody" hidden></div>
+            <div id="localbody">
+              <!-- The one setting that belongs to the MACHINE and holds
+                   whether or not anything is loaded: how much of memory the
+                   GPU may wire. It decides if a rung loads at all, and it is
+                   normally a sysctl you have to go and look up. -->
+              <div id="machine"></div>
+              <!-- When this page is itself a model's server, its knobs, with
+                   Apply. The control page serves no model: then the models
+                   it started are read below, and applied nowhere from here. -->
+              <div class="ctl" id="artifactctl">
+                <span class="seg" id="tunes"></span>
+                <label>ws <input id="ws" type="number" min="0" step="1"></label>
+                <button class="go" id="apply" disabled>Apply</button>
+              </div>
+              <div class="dials" id="dials"></div>
+              <div id="dialnotes"></div>
+              <div class="msg" id="applies"></div>
+              <div id="knobs" style="margin-top:12px"></div>
+              <details class="more"><summary>measured flags</summary><div id="rest"></div></details>
+              <details class="more" id="unmanaged" style="display:none"></details>
+              <details class="more"><summary>exports</summary><pre id="env"></pre></details>
+              <div id="localmodels"></div>
+            </div>
+          </div>
         </div>
-        <div class="dials" id="dials"></div>
-        <div id="dialnotes"></div>
-        <div class="msg" id="applies"></div>
-        <div id="knobs" style="margin-top:12px"></div>
-        <details class="more"><summary>measured flags</summary><div id="rest"></div></details>
-        <details class="more" id="unmanaged" style="display:none"></details>
-        <details class="more"><summary>exports</summary><pre id="env"></pre></details>
       </section>
       <section class="panel" id="connect">
         <div class="lab">Connect</div>
-
-        <div class="seg" id="conntabs" style="margin:10px 0"></div>
-        <pre id="conn" style="user-select:all"></pre>
+        <div class="pickbody">
+          <div class="fams" id="conntabs"></div>
+          <div class="sbody" id="conn"></div>
+        </div>
       </section>
     </div>
   </div>
@@ -788,7 +866,7 @@
 <script>
 // --- overlays -------------------------------------------------------------
 // ONE mechanism for everything that floats over the page: the model picker,
-// Settings and Connect, and the chat options. One is open at a time; a click
+// Settings and Connect. One is open at a time; a click
 // anywhere outside its face, or Escape, closes it, and the layout underneath
 // never changed, so closing it puts you back exactly where you were.
 // `face` is the part that counts as inside (a modal's box, not its dimmed
@@ -837,6 +915,8 @@ const OVL=(()=>{
     document.querySelectorAll('.sheetbody .panel').forEach(p=>
       p.classList.toggle('on', p.id===name));
     document.getElementById('sheettitle').textContent=name;
+    if(name==='settings'){ renderSetTabs(); showSetTab() }
+    if(name==='connect') showConnect();
     OVL.open(sheet, {face:sheet.querySelector('.box'),
                      opener:document.querySelector('header nav'),
                      onclose:()=>mark(null)});
@@ -1020,9 +1100,8 @@ function renderMachine(){
     <div class="wiredbar"><i style="width:${(100*tgt/inst).toFixed(1)}%"></i>
       <u style="left:${(100*rec/inst).toFixed(1)}%" title="recommended"></u></div>
     <div class="wiredrow">
-      <input type="range" id="wslider" min="8" max="${max}" step="1"
-        value="${Math.round(tgt)}">
-      <output id="wout">${tgt.toFixed(0)} GiB</output>
+      <label class="ro">set to <input type="number" id="wslider" min="8"
+        max="${max}" step="1" value="${Math.round(tgt)}"> GiB</label>
     </div>
     <div class="msg">now <b>${cur.toFixed(0)}</b> of ${inst.toFixed(0)} GiB
       installed · knurlogic suggests <b>${rec.toFixed(0)}</b>, leaving
@@ -1033,9 +1112,9 @@ function renderMachine(){
       : `<div class="msg">that is what it is set to now</div>`}
   </div>`;
   const sl=$('wslider');
-  sl.oninput=()=>{ $('wout').textContent=sl.value+' GiB' };
-  // Only ask the server when the drag STOPS: it recomputes the command and
-  // the warning, and a request per pixel is a request per pixel.
+  // A number, not a slider: a slider spent the panel's width on one value.
+  // Asked on change (Enter or leaving the field): the server recomputes the
+  // command and the warning.
   sl.onchange=()=>loadSettings({...(ASK.tune?{tune:ASK.tune}:{}),
                                 wired_gib:sl.value});
 }
@@ -1097,23 +1176,6 @@ async function loadSettings(q){
        ${un.map(u=>esc(u.name)).join('  ')}</div>` : '';
   $('env').textContent=DOC.exports||'';
 
-  // The endpoint is worthless until something is pointed at it, and the
-  // pointing is four variables nobody remembers.
-  const C=DOC.connect;
-  if(C){
-    const base=location.origin;
-    const tabs={'claude code':C.claude, 'openai clients':C.openai};
-    const draw=k=>{ $('conn').textContent=(tabs[k]||'').split('__BASE__').join(base);
-      [...$('conntabs').children].forEach(b=>
-        b.setAttribute('aria-pressed', b.textContent===k)); };
-    $('conntabs').innerHTML='';
-    Object.keys(tabs).forEach((k,i)=>{
-      const b=document.createElement('button');
-      b.textContent=k; b.onclick=()=>draw(k); $('conntabs').appendChild(b);
-      if(i===0) setTimeout(()=>draw(k),0);
-    });
-  }
-
   const chg=ks.filter(k=>k.changed);
   const live=chg.filter(k=>k.reach==='live'), rest=chg.filter(k=>k.reach==='restart');
   $('apply').disabled=!live.length;
@@ -1139,6 +1201,179 @@ $('apply').onclick=async()=>{
   setTimeout(()=>loadSettings({tune:ASK.tune,working_set_gib:$('ws').value||''}),400);
 };
 $('ws').addEventListener('change',()=>loadSettings({tune:ASK.tune||'',working_set_gib:$('ws').value}));
+
+// --- settings, per machine --------------------------------------------------
+// Why the control page showed one setting: its own /settings.json is the
+// MACHINE's (the wired limit) -- the knobs belong to a model's server, and
+// the page never asked one. Now each machine's tab reads that machine's page
+// and every model it is running, through /peek (GET only, the addresses the
+// page already knows). Read here, applied nowhere: a model's knobs are set
+// when it is loaded, and Apply exists only when this page IS the server.
+const peekURL=(where,path,q)=>'/peek?'+new URLSearchParams({where,path,...(q||{})});
+async function getJSON(url){
+  try{ const r=await fetch(url); const j=await r.json();
+       return r.ok ? j : {error:j.error||('HTTP '+r.status)} }
+  catch(e){ return {error:String(e.message||e)} }
+}
+let STAB='local';
+function machines(){
+  const d=window.RESIDENCY||{};
+  const ours=r=>r.runtime==='knurlogic' && r.where;
+  return [{id:'local', name:'this machine', page:'', models:(d.resident||[]).filter(ours)}]
+    .concat((d.peers||[]).map(p=>({id:p.address, name:p.machine,
+      page:'http://'+p.address, error:p.error, models:(p.resident||[]).filter(ours)})));
+}
+function renderSetTabs(){
+  const ms=machines();
+  if(STAB!=='cluster' && !ms.some(m=>m.id===STAB)) STAB='local';
+  $('settabs').innerHTML=[{id:'cluster', name:'cluster',
+      sub:`${ms.length} machine${ms.length===1?'':'s'}`}]
+    .concat(ms.map(m=>({id:m.id, name:m.name,
+      sub:m.error?'not answering':`${m.models.length} running`})))
+    .map(t=>`<div class="fam" data-t="${esc(t.id)}" aria-current="${t.id===STAB}"
+      >${esc(t.name)}<small>${esc(t.sub)}</small></div>`).join('');
+  $('settabs').querySelectorAll('.fam').forEach(f=>f.onclick=()=>{
+    STAB=f.dataset.t; renderSetTabs(); showSetTab() });
+}
+// One model's knobs, read-only: running, what its tune would give, and why
+// (a click on a row opens the why). Tunes preview another resolution.
+function modelHTML(r, doc, tune){
+  if(doc.error) return `<div class="sgrp"><div class="shd">${esc(r.name)}</div>
+    <div class="msg">could not read its settings: ${esc(doc.error)}</div></div>`;
+  const ks=(doc.knobs||[]).slice().sort((a,b)=>(a.tier==='reach'?0:1)-(b.tier==='reach'?0:1));
+  const live=doc.live||{}, asked=doc.asked||{};
+  const tunes=(doc.tunes||[]).map(t=>`<button data-tune="${esc(t.name)}"
+    title="${esc(t.why)}" aria-pressed="${t.name===asked.tune}">${esc(t.name)}</button>`).join('');
+  const chg=ks.filter(k=>k.changed).length;
+  return `<div class="sgrp" data-where="${esc(r.where)}">
+    <div class="shd">${esc(r.name)}<span class="ro">${esc(r.where)} · running
+      ${esc(live.tune||'?')} · ws ${gb(live.working_set_bytes)}</span></div>
+    ${tunes?`<div class="ctl" style="margin:8px 0"><span class="seg">${tunes}</span>
+      <span class="ro">${asked.tune&&asked.tune!==live.tune
+        ? `would change ${chg}; takes a reload with <code>--tune ${esc(asked.tune)}</code>`
+        : 'what it is running at'}</span></div>`:''}
+    ${ks.map(knobHTML).join('')||'<div class="msg">no knobs</div>'}
+    ${(doc.warnings||[]).map(w=>`<div class="warn">${esc(w)}</div>`).join('')}
+    ${(doc.unmanaged||[]).length?`<div class="msg">${doc.unmanaged.length} more
+      this runtime reads that knurlogic sets none of: ${esc(doc.unmanaged.map(u=>u.name).join('  '))}</div>`:''}
+  </div>`;
+}
+async function modelsInto(el, models, tunes){
+  if(!models.length){ el.innerHTML=''; return false }
+  const docs=await Promise.all(models.map(r=>getJSON(peekURL(r.where,'/settings.json',
+    tunes[r.where]?{tune:tunes[r.where]}:{}))));
+  el.innerHTML=models.map((r,i)=>modelHTML(r,docs[i])).join('');
+  el.querySelectorAll('[data-tune]').forEach(b=>b.onclick=()=>{
+    const w=b.closest('[data-where]').dataset.where;
+    tunes[w]=b.dataset.tune; modelsInto(el, models, tunes);
+  });
+  return true;
+}
+const TUNES={};
+function wiredLine(doc){
+  if(!doc || doc.error) return `<div class="msg">${esc(doc&&doc.error||'no answer')}</div>`;
+  if(!(doc.wired||{}).known) return '<div class="msg">wired limit not known</div>';
+  return `<div class="msg">wired limit now <b>${doc.wired_current_gib.toFixed(0)}</b>
+    of ${doc.wired_installed_gib.toFixed(0)} GiB · knurlogic suggests
+    <b>${doc.wired_recommended_gib.toFixed(0)}</b></div>`;
+}
+async function showSetTab(){
+  const tab=STAB, ms=machines();
+  $('clusterbody').hidden=tab!=='cluster';
+  $('localbody').hidden=tab!=='local';
+  $('peerbody').hidden=tab==='cluster'||tab==='local';
+  if(tab==='local'){
+    // This page's own server has its knobs above, with Apply; otherwise
+    // the models this machine is running, and with none, what the model
+    // picked under Load model would be launched with.
+    const own=(DOC.knobs||[]).length>0, el=$('localmodels');
+    if(own){ el.innerHTML=''; return }
+    const any=await modelsInto(el, ms[0].models, TUNES);
+    if(any || STAB!=='local') return;
+    const pv=PREVIEW;
+    el.innerHTML = pv && (pv.knobs||[]).length
+      ? `<div class="sgrp"><div class="shd">nothing running<span class="ro">what
+          ${esc(pv.artifact.name)} would load with at ${esc(pv.tune)}</span></div>
+          ${pv.knobs.map(k=>knobHTML({...k, would_be:k.value})).join('')}</div>`
+      : `<div class="sgrp"><div class="msg">Nothing is running on this machine.
+          Pick a model under Load model to see what it would load with.</div></div>`;
+    return;
+  }
+  if(tab==='cluster'){
+    const el=$('clusterbody');
+    el.innerHTML='<div class="msg">asking every machine…</div>';
+    const docs=await Promise.all(ms.map(m=>getJSON(m.page
+      ? peekURL(m.page,'/settings.json') : '/settings.json')));
+    const mdocs=await Promise.all(ms.map(m=>Promise.all(m.models.map(r=>
+      getJSON(peekURL(r.where,'/settings.json'))))));
+    if(STAB!=='cluster') return;
+    el.innerHTML=`<div class="msg" style="margin-top:0">Each machine resolves
+      its own knobs for its own memory, when a model is loaded; nothing here is
+      shared between them. Side by side:</div>`+ms.map((m,i)=>
+      `<div class="sgrp"><div class="shd">${esc(m.name)}<span class="ro">${
+        esc(m.page||location.host)}</span></div>${wiredLine(docs[i])}
+        ${m.models.map((r,j)=>{ const d=mdocs[i][j]||{}, ks=d.knobs||[];
+          return `<div class="knob"><div class="hd"><span class="k">${esc(r.name)}</span>
+            <span class="val">${d.error?'unreadable':esc((d.live||{}).tune||'?')+' · '+
+            ks.length+' knobs'}</span></div></div>` }).join('')
+          ||'<div class="msg">nothing running</div>'}</div>`).join('');
+    return;
+  }
+  const m=ms.find(x=>x.id===tab), el=$('peerbody');
+  if(!m){ el.innerHTML=''; return }
+  el.innerHTML=`<div class="shd">${esc(m.name)}<span class="ro">${esc(m.page)}</span></div>
+    <div id="peerwired" class="msg">reading…</div><div id="peermodels"></div>`;
+  const doc=await getJSON(peekURL(m.page,'/settings.json'));
+  if(STAB!==tab) return;
+  $('peerwired').outerHTML=wiredLine(doc)+`<div class="msg">Read from ${esc(m.name)};
+    changed there, on its own page.</div>`;
+  if(!await modelsInto($('peermodels'), m.models, TUNES))
+    $('peermodels').innerHTML='<div class="sgrp"><div class="msg">nothing running</div></div>';
+}
+
+// --- connect ----------------------------------------------------------------
+// The endpoint is worthless until something is pointed at it, and the
+// pointing is a handful of lines nobody remembers. One way in at a time, for
+// the model the chat is on (else the first one running). It was empty on the
+// control page: its text came with a model server's settings, which that
+// page never has.
+let CONNDOC=null, CONNSEL='openai';
+function connTarget(){
+  const d=window.RESIDENCY||{};
+  const rows=(d.resident||[]).concat(...(d.peers||[]).map(p=>p.resident||[]))
+    .filter(r=>r.runtime==='knurlogic' && r.where);
+  const c=window.curChatPub && window.curChatPub();
+  if(c && c.where){ const r=rows.find(r=>r.where===c.where); if(r) return r }
+  if(window.PAGEMODEL) return {name:window.PAGEMODEL.name, where:location.origin};
+  return rows[0]||null;
+}
+async function showConnect(){
+  if(!CONNDOC) CONNDOC=await getJSON('/connect.json');
+  const eps=CONNDOC.endpoints||[];
+  $('conntabs').innerHTML=eps.map(e=>`<div class="fam" data-e="${esc(e.id)}"
+    aria-current="${e.id===CONNSEL}">${esc(e.name)}</div>`).join('');
+  $('conntabs').querySelectorAll('.fam').forEach(f=>f.onclick=()=>{
+    CONNSEL=f.dataset.e; showConnect() });
+  const e=eps.find(x=>x.id===CONNSEL); if(!e){ $('conn').innerHTML=
+    `<div class="msg">${esc(CONNDOC.error||'nothing to show')}</div>`; return }
+  const t=connTarget();
+  let h=`<div class="shd">${esc(e.name)}</div><div class="msg" style="margin-top:0">${esc(e.what)}</div>`;
+  if(e.needs_model && !t){
+    $('conn').innerHTML=h+`<div class="msg">Nothing is running, so there is no
+      address to point at yet. Load a model, then come back.</div>`; return }
+  if(e.needs_model) h+=`<div class="msg">for <b style="color:var(--acc)">${esc(t.name)}</b>
+    at ${esc(t.where)}</div>`;
+  const fill=s=>s.split('__BASE__').join(t?t.where.replace(/\/$/,''):'')
+                 .split('__MODEL__').join(t?t.name:'');
+  h+=e.blocks.map((b,i)=>`<div class="connblk"><div class="optlab"><span>${esc(b.label)}</span>
+    <button class="mini" data-cp="${i}">copy</button></div><pre>${esc(fill(b.text))}</pre></div>`).join('');
+  $('conn').innerHTML=h;
+  $('conn').querySelectorAll('[data-cp]').forEach(x=>x.onclick=()=>{
+    navigator.clipboard?.writeText(fill(e.blocks[+x.dataset.cp].text))
+      .then(()=>{ x.textContent='copied'; setTimeout(()=>x.textContent='copy',1200) })
+      .catch(()=>{});
+  });
+}
 
 // --- status ---------------------------------------------------------------
 function setState(ok, text){
@@ -1181,6 +1416,7 @@ async function tick(){
     $('badges').innerHTML=b.map(([t,on])=>
       `<span class="badge${on?' on':''}">${esc(t)}</span>`).join('');
   }
+  window.PAGEMODEL=a;
   if(window.chatServedChanged) window.chatServedChanged(a);
   // Each node is a card: its name overhead, what the hardware IS in words
   // (a chip and a size say more than a drawing of a laptop), the lines that
@@ -1600,13 +1836,6 @@ $('openpick').onclick=()=>{
 };
 $('pclose').onclick=()=>OVL.close();
 $('psearch').oninput=e=>{ QUERY=e.target.value; renderPicker() };
-// Chat options float over the transcript; the same overlay as the picker.
-$('coptsbtn').onclick=()=>{
-  const b=$('coptsbtn');
-  if(OVL.is($('copts'))){ OVL.close(); return }
-  OVL.open($('copts'), {opener:b, onclose:()=>b.setAttribute('aria-expanded','false')});
-  b.setAttribute('aria-expanded','true');
-};
 
 $('launch').onclick=async()=>{
   const m=SEL; if(!m) return;
@@ -1727,6 +1956,7 @@ async function loadResident(){
   // back as an error line, never as a missing answer.
   let d; try{ d=await (await fetch('/loaded.json?peers=1')).json() }catch(e){ return }
   const peers=d.peers||[];
+  window.RESIDENCY=d;       // Settings' machine tabs and Connect read this
   // One list, local first; a peer's rows carry `machine`. A peer's model is
   // shown and chatted with, never unloaded from here: this page drives only
   // what its own machine started.
@@ -1841,6 +2071,7 @@ function metHTML(m, prev){
   const bit=(k,v,warn)=>`<span class="${warn?'warnv':''}">${k} <b>${v}</b></span>`;
   let h=bit('ttft', m.ttft_ms<1000?`${Math.round(m.ttft_ms)} ms`
                                   :`${(m.ttft_ms/1000).toFixed(2)} s`);
+  if(m.queue_ms>=50) h+=bit('queued', `${(m.queue_ms/1000).toFixed(2)} s`);
   if(m.prefill_tps) h+=bit('prefill', `${Math.round(m.prefill_tps)} tok/s`+
     (same?delta(m.prefill_tps, prev.prefill_tps):''));
   if(m.decode_tps) h+=bit('decode', `${m.decode_tps.toFixed(1)} tok/s`+
@@ -1851,7 +2082,9 @@ function metHTML(m, prev){
   if(m.prompt) h+=bit('prompt', m.cached?`${m.prompt-m.cached} new of ${m.prompt}`
                                         :String(m.prompt));
   if(m.completion) h+=bit('out', String(m.completion));
-  return `<div class="met">${h}</div>`;
+  // Whose clock: the server's timing when it sent one, else the page's.
+  return `<div class="met" title="${m.server?'measured by the server':
+    'measured by this page (includes the network)'}">${h}</div>`;
 }
 function showMet(afterEl, m, prev){
   const d=document.createElement('div');
@@ -2040,6 +2273,7 @@ function switchTab(t){
     b.classList.toggle('on', b.dataset.tab===t));
   $('chat').hidden = t!=='chat';
   $('bench').hidden = t!=='bench';
+  document.body.classList.toggle('bench', t==='bench');
   $('newchat').textContent = t==='chat' ? '+ New chat' : '+ New run';
   if(t==='chat') renderChats(); else if(window.renderRunsBench) window.renderRunsBench();
   layout();
@@ -2187,8 +2421,66 @@ function chatGate(){
   $('cmodel').title=sel ? 'sending to '+c.model+' at '+c.where : '';
   $('cattach').title=vision ? 'attach an image'
     : (on ? 'this model has no vision' : 'click a running model to chat with it');
+  loadSampling(c && c.where ? c.where : (SERVED ? '' : null));
 }
 window.chatGate=chatGate;
+window.curChatPub=()=>curChat();
+
+// --- chat settings ----------------------------------------------------------
+// What a request leaves out, the server fills from the model's own
+// generation_config.json and lists in /v1/models as sampling_defaults ({} is
+// greedy). The page shows those as the fields' placeholders and sends a
+// value only once one is typed -- an invented 0.7 was a setting nobody chose.
+const SAMP=[['ctemp','temperature'],['ctopp','top_p'],['ctopk','top_k']];
+function sampling(){
+  const o={};
+  for(const [id,key] of SAMP){
+    const v=$(id).value.trim();
+    if(v!=='' && Number.isFinite(+v)) o[key]=+v;
+  }
+  return o;
+}
+// Per target, once: a model's defaults do not change while it is loaded.
+const SDEF={};
+let SDEFAT;
+async function loadSampling(where){
+  SDEFAT=where;
+  if(where===null){ showSampling(null); return }
+  if(!(where in SDEF)){
+    // A clicked model is reached through this page's read-only /peek (a
+    // browser will not call another port); the page's own model directly.
+    const url=where ? '/peek?'+new URLSearchParams({where, path:'/v1/models'})
+                    : '/v1/models';
+    SDEF[where]=fetch(url).then(r=>r.ok?r.json():null)
+      // absent (a server older than sampling_defaults) is "unknown", not
+      // greedy: the server still applies whatever it applies
+      .then(j=>j&&j.data&&j.data[0] ? j.data[0].sampling_defaults : undefined)
+      .catch(()=>undefined);
+  }
+  const d=await SDEF[where];
+  if(d===undefined) delete SDEF[where];      // ask again next time
+  if(SDEFAT===where) showSampling(d);
+}
+function showSampling(d){
+  for(const [id,key] of SAMP)
+    $(id).placeholder = d && d[key]!=null ? String(d[key]) : 'model';
+  const set=d?SAMP.filter(([,k])=>d[k]!=null).map(([,k])=>`${k} ${d[k]}`):[];
+  $('csdef').innerHTML = d===null ? 'no model selected'
+    : d===undefined ? 'empty fields use the model&#39;s default'
+    : !set.length ? 'model default: <b>greedy</b> (it recommends nothing)'
+    : 'model default · <b>'+esc(set.join(' · '))+'</b>';
+}
+// The fields as last left, in this browser only: a convenience, not state.
+(()=>{
+  const ids=['cmax','ctemp','ctopp','ctopk','csys','ceffort'];
+  try{
+    const v=JSON.parse(localStorage.getItem('kn.copts')||'{}');
+    ids.forEach(id=>{ if(v[id]!=null) $(id).value=v[id] });
+  }catch(e){}
+  const save=()=>{ try{ localStorage.setItem('kn.copts', JSON.stringify(
+    Object.fromEntries(ids.map(id=>[id,$(id).value])))) }catch(e){} };
+  ids.forEach(id=>$(id).addEventListener('change',save));
+})();
 window.newChat=newChat;
 function openChat(c){
   CCUR=c.id; HOME=false; renderChats(); renderClog(); chatGate();
@@ -2543,9 +2835,13 @@ async function runTurn(){
   const mdEl=()=>wrap.querySelector('.md');
   ABORTC=new AbortController();
   pf=null;
+  // include_usage: the final chunk then carries the token counts and the
+  // server's own timing (usage.knurlogic.timing). Sampling is sent only
+  // when a field was filled in; left out, the server applies the model's
+  // recommendation and says so in usage.knurlogic.sampling.
   const body={model:c.model||undefined,
     messages:wire, stream:true, stream_options:{include_usage:true},
-    max_tokens:+$('cmax').value||2048, temperature:+$('ctemp').value||0.7};
+    max_tokens:+$('cmax').value||2048, ...sampling()};
   const effort=$('ceffort').value;
   if(effort) body.reasoning_effort=effort;
   const t0=performance.now();
@@ -2600,6 +2896,23 @@ async function runTurn(){
       prefill_tps: fresh>0 ? fresh/(ttft/1000) : 0,
       decode_tps: (comp>1 && end>first) ? (comp-1)/((end-first)/1000) : 0};
   }
+  // The server's own measurement wins where it has one: it timed the steps
+  // where they ran, while the page's clock also counts the proxy and the
+  // queue. Kept whole (and with the message) so a later look can tell
+  // which numbers were the server's.
+  const kt=usage?.knurlogic?.timing;
+  if(kt){
+    const m=assistant.met||(assistant.met={prompt:usage.prompt_tokens||0,
+      cached:usage.prompt_tokens_details?.cached_tokens||0,
+      completion:usage.completion_tokens||0});
+    m.server=kt;
+    if(kt.ttft_s!=null) m.ttft_ms=kt.ttft_s*1000;
+    m.prefill_tps=kt.prefill_tok_s||0;
+    m.decode_tps=kt.decode_tok_s||0;
+    if(kt.queue_s) m.queue_ms=kt.queue_s*1000;
+  }
+  const ks=usage?.knurlogic?.sampling;
+  if(ks && assistant.met) assistant.met.sampling=ks;
   if(!assistant.content && !assistant.thinking) assistant.content='(no content)';
   c.updated=Date.now(); saveChats(); renderClog();
   BUSYC=false; $('csend').disabled=!chatTargetOn(); $('csend').hidden=false; $('cstop').hidden=true;
