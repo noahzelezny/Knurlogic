@@ -158,7 +158,8 @@ def loaded_document(ttl: float = 4.0):
         from knurlogic.machine import loaded
         from knurlogic.engine.vision import served_vision
         now = time.time()
-        if _LOADED["doc"] is None or now - _LOADED["at"] > ttl:
+        doc = _LOADED["doc"]   # read once: a POST may clear it meanwhile
+        if doc is None or now - _LOADED["at"] > ttl:
             try:
                 doc = loaded.survey()
             except Exception as e:
@@ -176,7 +177,7 @@ def loaded_document(ttl: float = 4.0):
                 doc["vision"] = None
             _LOADED["doc"] = doc
             _LOADED["at"] = now
-        return _LOADED["doc"]
+        return doc
     return handler
 
 

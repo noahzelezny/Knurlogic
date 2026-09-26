@@ -199,6 +199,11 @@ def apply_live(env: dict) -> dict:
             except Exception as e:
                 done[k] = f"failed: {e}"
         elif k == "VQ_DECODE_CHUNK":
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                done[k] = f"failed: {v!r} is not a whole number of tokens"
+                continue
             mods = _artifact_runtime_modules()
             if not mods:
                 # Before the first prefill the global does not exist yet, but
