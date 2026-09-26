@@ -296,6 +296,10 @@ def main(argv=None) -> int:
     p.add_argument("--prompt-cache-size", type=int, default=10,
                    help="prompt-cache entries kept (whole prompts and "
                         "segment checkpoints)")
+    p.add_argument("--context-length", type=int, default=0,
+                   help="the longest prompt + answer a request may use, in "
+                        "tokens (KNURLOGIC_CONTEXT_LENGTH): a cap, nothing "
+                        "reserved. Default: the model's own window")
     p.add_argument("--prompt-cache-gib", type=float, default=0.0,
                    help="cap the prompt cache's memory; 0 = entries only")
     p.add_argument("--allow-origin", action="append", default=[],
@@ -324,9 +328,11 @@ def main(argv=None) -> int:
         serving["prompt_cache_bytes"] = int(a.prompt_cache_gib * GIB)
     if a.image_store_gib > 0:
         serving["image_store_bytes"] = int(a.image_store_gib * GIB)
+    sets = _parse_sets(a.sets)
+    if a.context_length > 0:
+        sets["KNURLOGIC_CONTEXT_LENGTH"] = str(a.context_length)
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile,
-               a.tune, _parse_sets(a.sets), draft=not a.no_draft,
-               serving=serving)
+               a.tune, sets, draft=not a.no_draft, serving=serving)
 
 
 if __name__ == "__main__":

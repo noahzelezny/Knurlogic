@@ -152,7 +152,7 @@ def generate(model, tokenizer, prompt: str, max_tokens: int = 8) -> str:
 #:     baked into Metal kernel source that is compiled once. Those genuinely
 #:     need a restart, or an override module that reads them per dispatch.
 LIVE_KNOBS = ("VQ_DECODE_CHUNK", "VQLAB_CACHE_LIMIT_GB",
-              "KNURLOGIC_CACHE_LIMIT_GB")
+              "KNURLOGIC_CACHE_LIMIT_GB", "KNURLOGIC_CONTEXT_LENGTH")
 
 
 def _artifact_runtime_modules():
@@ -198,6 +198,16 @@ def apply_live(env: dict) -> dict:
                 done[k] = f"applied now ({v} GiB)"
             except Exception as e:
                 done[k] = f"failed: {e}"
+        elif k == "KNURLOGIC_CONTEXT_LENGTH":
+            # the scheduler reads it at every admission
+            try:
+                v = int(v)
+                assert v > 0
+            except (TypeError, ValueError, AssertionError):
+                done[k] = f"failed: {v!r} is not a positive number of tokens"
+                continue
+            os.environ[k] = str(v)
+            done[k] = f"applied: requests from now on are capped at {v} tokens"
         elif k == "VQ_DECODE_CHUNK":
             try:
                 v = int(v)
