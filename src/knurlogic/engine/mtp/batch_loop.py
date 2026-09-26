@@ -593,6 +593,23 @@ class MTPBatch:
         self.row_t1 = self.row_t1[idx]
         if self.draft_row is not None:
             self.draft_row = self.draft_row[idx]
+        # Evaluated now, not at the next step: filtering is lazy, so until
+        # then the full-width arrays stay referenced and nothing is freed --
+        # and the scheduler's memory guard, stopping one row to get back
+        # under the limit, read no drop and stopped them all (Fable 5.1).
+        mx.eval(self._arrays())
+
+    def _arrays(self) -> list:
+        from mlx.utils import tree_flatten
+        out = [a for a in (self.t1, self.row_t1, self.draft_row)
+               if a is not None]
+        for c in list(self.cache) + ([self.hcache] if self.hcache else []):
+            try:
+                out += [a for _, a in tree_flatten(c.state)
+                        if isinstance(a, mx.array)]
+            except Exception:
+                pass            # a cache with no state to read yet
+        return out
 
     def remove(self, uids: Iterable[int]) -> None:
         drop = set(uids)
