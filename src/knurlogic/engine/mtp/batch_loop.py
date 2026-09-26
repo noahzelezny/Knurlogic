@@ -144,10 +144,22 @@ class RowStep:
     steps: int
 
 
-def _apply(row: mx.array, procs, emitted: List[int]) -> mx.array:
+def _apply(row: mx.array, procs, emitted) -> mx.array:
+    """Logits processors over the history; `emitted` is a list of ids or
+    an id array (lazy: the draft step's history ends in t1, which it has
+    not read back yet)."""
+    if not procs:
+        return row
+    hist = emitted if isinstance(emitted, mx.array) else mx.array(emitted)
     for proc in procs:
-        row = proc(mx.array(emitted), row)
+        row = proc(hist, row)
     return row
+
+
+def _with(emitted: List[int], t1: mx.array) -> mx.array:
+    """The history for the position after t1: what was emitted, then t1."""
+    return mx.concatenate([mx.array(emitted, dtype=mx.int32),
+                           t1.astype(mx.int32)])
 
 
 def _finite_rows(rows: mx.array) -> mx.array:
@@ -646,7 +658,10 @@ class MTPBatch:
                 d2_rows.append(self.t1[i:i + 1])
                 qs.append(None)
                 continue
-            row = _apply(self.draft_row[i:i + 1], p.processors, self.emitted[i])
+            # position len+1: its history includes t1, as in a plain step
+            row = _apply(self.draft_row[i:i + 1], p.processors,
+                         _with(self.emitted[i], self.t1[i:i + 1])
+                         if p.processors else self.emitted[i])
             if p.dist is None:
                 d2_rows.append(mx.argmax(row, axis=-1))
                 qs.append(None)
@@ -669,7 +684,9 @@ class MTPBatch:
         lazy: List[mx.array] = []
         for i in range(B):
             p = self.params[i]
-            row = _apply(lg2[i:i + 1, 0], p.processors, self.emitted[i])
+            row = _apply(lg2[i:i + 1, 0], p.processors,
+                         _with(self.emitted[i], self.t1[i:i + 1])
+                         if p.processors else self.emitted[i])
             if not live[i]:
                 # Non-drafting row: the trunk's own token, committed through
                 # the replay below.
