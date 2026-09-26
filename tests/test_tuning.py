@@ -240,22 +240,17 @@ def test_an_engine_knob_is_emitted_even_when_the_runtime_ignores_it(tmp_path):
     assert S.engine_settings(r.env).get("prefill_step_size")
 
 
-def test_the_resolved_prompt_chunk_reaches_the_server_argv():
-    """The bug this closes: the resolver explained a prompt chunk the server
-    never saw, because it was an env var and the server takes argv."""
-    from knurlogic.engine import serve as engine
-    argv = engine.server_argv("/m", "h", 1, settings={
-        "prefill_step_size": 512, "prompt_concurrency": 1})
-    assert argv[argv.index("--prefill-step-size") + 1] == "512"
-    assert argv[argv.index("--prompt-concurrency") + 1] == "1"
-
-
-def test_a_typed_flag_beats_the_resolver():
-    from knurlogic.engine import serve as engine
-    argv = engine.server_argv("/m", "h", 1, settings={"prefill_step_size": 512},
-                              extra=["--prefill-step-size", "4096"])
-    assert argv.count("--prefill-step-size") == 1
-    assert argv[argv.index("--prefill-step-size") + 1] == "4096"
+def test_the_resolved_prompt_chunk_reaches_the_scheduler():
+    """The bug this closes (mlx-lm era): the resolver explained a prompt
+    chunk the server never saw. Now the scheduler takes it directly."""
+    from knurlogic.interfaces.http import scheduler_options
+    got = scheduler_options({"prefill_step_size": 512,
+                             "decode_concurrency": 4,
+                             "prompt_cache_bytes": 1 << 30})
+    assert got["prefill_step_size"] == 512
+    assert got["completion_batch_size"] == 4
+    assert got["prompt_cache_bytes"] == 1 << 30
+    assert scheduler_options({})["prefill_step_size"] == 2048
 
 
 def test_a_measured_family_width_is_used_and_a_tight_box_still_wins():

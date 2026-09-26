@@ -1,16 +1,16 @@
-"""What a knurlogic server must do on the wire, pinned before the server is
-rewritten (docs/PLAN.md, "knurlogic's own server").
+"""What knurlogic's server must do on the wire (docs/SERVER.md). Pinned
+before the server was rewritten, against mlx-lm's patched server; the new
+one had to pass it (and the known gaps, then xfail, now pass).
 
-Every test talks HTTP to KNURLOGIC_API_URL and nothing else, so it holds the
-current server (mlx-lm's, patched) and the next one to the same contract.
+Every test talks HTTP to KNURLOGIC_API_URL and nothing else.
 Model-dependent checks read what the server says about itself first
 (/status.json: thinking dialect, vision) and skip what the served model
 cannot do, rather than assuming a particular model.
 
 Sections: catalog . chat . streaming . usage and the cache report .
 reasoning . sampling . images . Anthropic messages . limits and errors .
-concurrency . status . Scout's ingest (targets for the new server; xfail
-until they exist).
+concurrency . status . Scout's ingest . the server design review's
+additions.
 """
 from __future__ import annotations
 
@@ -28,19 +28,6 @@ URL = os.environ.get("KNURLOGIC_API_URL", "").rstrip("/")
 TIMEOUT = float(os.environ.get("KNURLOGIC_API_TIMEOUT", "600"))
 
 
-def _ours() -> bool:
-    """Is this knurlogic's own server? Its /health says so; mlx-lm's does
-    not. The known gaps below are xfail on mlx-lm's only."""
-    if not URL:
-        return False
-    try:
-        with urllib.request.urlopen(URL + "/health", timeout=30) as r:
-            return json.loads(r.read()).get("server") == "knurlogic"
-    except Exception:
-        return False
-
-
-OURS = _ours()
 Q = "What is 2 + 3? Reply with just the number."
 
 
@@ -152,11 +139,6 @@ def test_max_tokens_ends_with_length():
     assert r["usage"]["completion_tokens"] <= 8
 
 
-@pytest.mark.xfail(not OURS, strict=True,
-                   reason="mlx-lm matches stop sequences as "
-                   "token ids: stop 'D' never matches the token ' D' "
-                   "(measured, gemma e4b, 2026-09-25). OpenAI's contract "
-                   "is text; the new server matches text.")
 def test_a_stop_sequence_ends_the_answer_before_it():
     r = chat(messages=[{"role": "user",
                         "content": "Write the letters A B C D E F, "
@@ -433,17 +415,8 @@ def test_status_reports_the_node_its_memory_and_the_artifact():
     assert s["artifact"]["name"] and s["memory"]
 
 
-# --- Scout's ingest: targets for knurlogic's own server ----------------------
-# (docs/PLAN.md "Requirements for knurlogic's own server"). xfail until the
-# endpoints exist; strict, so passing by accident is noticed.
+# --- Scout's ingest (docs/PLAN.md "Requirements for knurlogic's own server")
 
-new_server = pytest.mark.xfail(not OURS,
-                               reason="knurlogic's own server only",
-                               strict=True, raises=(urllib.error.HTTPError,
-                                                    KeyError, AssertionError))
-
-
-@new_server
 def test_residency_is_one_flat_honest_list():
     r = get("/v1/residency")
     row = r["data"][0]
@@ -452,14 +425,12 @@ def test_residency_is_one_flat_honest_list():
     assert row["state"] in ("loading", "ready", "unloading")
 
 
-@new_server
 def test_the_catalog_carries_capabilities_and_size():
     m = get("/v1/models")["data"][0]
     assert set(m["capabilities"]) <= {"text", "vision", "thinking"}
     assert m["size_bytes"] > 0
 
 
-@new_server
 def test_ensure_loaded_is_idempotent_and_can_wait():
     served = get("/v1/models")["data"][0]["id"]
     a = post("/v1/ensure", {"model": served, "wait": True})
@@ -467,7 +438,6 @@ def test_ensure_loaded_is_idempotent_and_can_wait():
     assert a["state"] == b["state"] == "ready"
 
 
-@new_server
 def test_an_image_over_the_size_limit_is_refused_explicitly():
     if not has_vision():
         pytest.skip("the served model has no vision")
@@ -477,7 +447,6 @@ def test_an_image_over_the_size_limit_is_refused_explicitly():
     assert code == 413 and "max" in body.lower()
 
 
-@new_server
 def test_a_concurrency_hint_is_in_the_headers():
     req = urllib.request.Request(
         URL + "/v1/chat/completions", method="POST",
@@ -552,7 +521,6 @@ def test_max_completion_tokens_is_the_same_as_max_tokens():
     assert r["choices"][0]["finish_reason"] == "length"
 
 
-@new_server
 def test_errors_are_openai_error_objects():
     code, body = post_status("/v1/chat/completions",
                              {"model": "m", "temperature": -1,
@@ -562,7 +530,6 @@ def test_errors_are_openai_error_objects():
     assert {"message", "type", "param", "code"} <= set(e)
 
 
-@new_server
 def test_n_above_one_is_refused_not_ignored():
     code, body = post_status("/v1/chat/completions",
                              {"model": "m", "n": 2,
@@ -582,7 +549,6 @@ def test_multibyte_text_streams_without_replacement_characters():
     assert text and "�" not in text
 
 
-@new_server
 def test_a_client_that_goes_away_frees_its_row():
     import http.client
     import time

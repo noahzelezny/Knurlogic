@@ -142,55 +142,13 @@ def test_a_glm_style_head_restores_at_a_prefix_and_at_a_checkpoint():
     assert hit == 10 and hc is not None and replayed == [hc]
 
 
-def test_the_server_gets_the_drafting_generator_only_for_the_headed_model():
-    """Installation is one name swap in the server module. It must decide per
-    construction: the head's own model drafts; anything else (a switch to an
-    artifact without a head) gets mlx-lm's generator untouched."""
-    import types
-    from mlx_lm.generate import BatchGenerator
-    from knurlogic.engine.serve import drafting, state
-    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
-
-    model, head, _ = _tiny(512)
-    other, _, _ = _tiny(512)
-    srv = types.SimpleNamespace(BatchGenerator=BatchGenerator,
-                                _make_sampler=lambda args, tok: (lambda x: x))
-    saved = dict(state.DRAFT), dict(state.SERVED)
-    try:
-        state.DRAFT.update(head=head, on=True, batch_installed=False)
-        state.SERVED["provider"] = types.SimpleNamespace(model=model)
-        drafting.install_batch(srv)
-        g = srv.BatchGenerator(model, prefill_step_size=16)
-        assert isinstance(g, MTPBatchGenerator)
-        g.close()
-        g = srv.BatchGenerator(other, prefill_step_size=16)
-        assert type(g) is BatchGenerator
-        g.close()
-        state.DRAFT["on"] = False                      # --no-draft
-        g = srv.BatchGenerator(model, prefill_step_size=16)
-        assert type(g) is BatchGenerator
-        g.close()
-    finally:
-        state.DRAFT.clear(); state.DRAFT.update(saved[0])
-        state.SERVED.clear(); state.SERVED.update(saved[1])
-
-
-def test_a_built_sampler_carries_the_parameters_verification_needs():
-    """insert_segments only ever sees a BUILT sampler. Rejection sampling
-    needs the temperature itself, so the sampler has to carry it -- or a
-    temp-0.7 request would be verified as greedy."""
-    import types
-    from knurlogic.engine.mtp.batch_generator import sampling_of, tag_samplers
-
-    srv = types.SimpleNamespace(_make_sampler=lambda args, tok: (lambda x: x))
-    tag_samplers(srv)
-    s = types.SimpleNamespace(temperature=0.7, top_p=0.9, top_k=20, min_p=0.0,
-                              xtc_probability=0.0, xtc_threshold=0.0)
-    tok = types.SimpleNamespace(eos_token_id=2, encode=lambda t: [10])
-    fn = srv._make_sampler(types.SimpleNamespace(sampling=s), tok)
-    got = sampling_of(fn)
-    assert got["temp"] == 0.7 and got["top_p"] == 0.9 and got["top_k"] == 20
-    assert got["xtc_special_tokens"] == [2, 10]
+def test_sampling_params_are_read_as_given():
+    """The executor passes a row's sampling as a dict; anything else is
+    greedy -- rejection sampling needs the temperature itself."""
+    from knurlogic.engine.mtp.batch_generator import sampling_of
+    assert sampling_of({"temp": 0.7, "top_p": 0.9}) == {"temp": 0.7,
+                                                         "top_p": 0.9}
+    assert sampling_of(lambda x: x) is None and sampling_of(None) is None
 
 
 # --- segment checkpoints -------------------------------------------------------

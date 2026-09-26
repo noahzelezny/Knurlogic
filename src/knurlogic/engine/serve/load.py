@@ -76,48 +76,45 @@ def models_module(host: str = "mlx_lm"):
 
 
 def load(path: str, executes_artifact_code: bool = False):
-    """Load a model and tokenizer.
+    """Load a model and tokenizer, under the machine's load lock.
 
     `executes_artifact_code` says the artifact ships its own runtime, which
     WILL be executed. It is a separate argument rather than something inferred
     quietly, so a caller has to state it and can say so to the user.
     """
-    from mlx_lm.utils import load as _load
-
     from knurlogic.machine import loadlock
 
+    # The box is shared: one model load at a time, across processes
+    # (machine/loadlock.py; vision-contracts.md "Load lock" names this caller).
+    with loadlock.model_load(str(path), "serve.load"):
+        return load_unlocked(path, executes_artifact_code)
+
+
+def load_unlocked(path: str, executes_artifact_code: bool = False):
+    """`load` for a caller already holding the load lock (the model host).
+    A rung rungs.json lists as VERIFIED (tools/vq_gate.py proved it
+    bit-identical to its published model.py) loads on knurlogic's own VQ
+    runtime; everything else through the artifact's loader, bundled
+    model.py and all. `state.SERVED["runtime"]` says which."""
+    from pathlib import Path
+
+    from mlx_lm.utils import load as _load, load_tokenizer
+
+    from knurlogic.engine.vq import runtime
+
+    from . import state
+    p = Path(str(path))
+    if p.is_dir() and runtime.serves(p):
+        model, config = runtime.load_model(p)
+        tok = load_tokenizer(p, None, eos_token_ids=config.get("eos_token_id"))
+        state.SERVED["runtime"] = "knurlogic"
+        return model, tok
+    state.SERVED["runtime"] = "bundled"
     kw = {}
     if executes_artifact_code and \
             "trust_remote_code" in inspect.signature(_load).parameters:
         kw["trust_remote_code"] = True
-    # The box is shared: one model load at a time, across processes
-    # (machine/loadlock.py; vision-contracts.md "Load lock" names this caller).
-    with loadlock.model_load(str(path), "serve.load"):
-        return _load(path, **kw)
-
-
-def server_argv(model_path: str, host: str, port: int,
-                executes_artifact_code: bool = False,
-                settings: dict | None = None,
-                extra: list | None = None) -> list:
-    """The engine server's argv, with the resolved settings IN it.
-
-    The prompt chunk and prompt concurrency are argv to mlx-lm's server and
-    nothing else: an environment variable with the same meaning is read by
-    nobody. Anything the caller passes through `extra` comes last and wins,
-    because a flag somebody typed is a decision, and the resolver's value is
-    a default.
-    """
-    settings = settings or {}
-    extra = list(extra or [])
-    argv = ["--model", model_path, "--host", host, "--port", str(port)]
-    if executes_artifact_code:
-        argv.append("--trust-remote-code")
-    for key, flag in (("prefill_step_size", "--prefill-step-size"),
-                      ("prompt_concurrency", "--prompt-concurrency")):
-        if key in settings and flag not in extra:
-            argv += [flag, str(int(settings[key]))]
-    return argv + extra
+    return _load(path, **kw)
 
 
 def set_cache_limit(gib: float) -> str:

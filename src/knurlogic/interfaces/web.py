@@ -191,7 +191,6 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=(),
     which of those settings did not survive the switch. Doing the load and
     staying quiet about that would be worse than not offering it.
     """
-    from knurlogic.engine import serve as engine
     from knurlogic.machine import loaded as L
 
     def _drift(path: str) -> dict:
@@ -221,14 +220,18 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=(),
         act, target = req.get("action"), req.get("target") or ""
         where = req.get("where") or ""
         try:
-            # knurlogic's own server passes its scheduler's: a load runs on
-            # the thread that owns the MLX stream, never on this one
+            # the server's own: a load runs on the scheduler's thread,
+            # which owns the MLX stream, never on this one
+            if act in ("load", "unload") and (switch_fn is None or
+                                              unload_fn is None):
+                return {"error": "this page is not attached to a server "
+                                 "that can load models"}
             if act == "load":
-                r = (switch_fn or engine.switch)(target)
+                r = switch_fn(target)
                 r["settings"] = _drift(target)
                 return r
             if act == "unload":
-                return (unload_fn or engine.unload)()
+                return unload_fn()
             # The same functions the MCP calls, so the page refuses what an
             # agent would be refused, and says why in the same words.
             if act == "exo-load":

@@ -2,15 +2,15 @@
 
 WHY THIS EXISTS. A coding harness -- Claude Code among them -- speaks the
 Anthropic Messages shape and is pointed at a server with ANTHROPIC_BASE_URL.
-exo implements `/v1/messages` and can therefore back one; mlx-lm's server
-answers only `/v1/chat/completions`, so `knurlogic serve` could not, and the
-gap is a translation rather than an inference problem.
+The gap between that and an OpenAI server is a translation, not an
+inference problem.
 
-IT IS A TRANSLATION, NOT A SECOND INFERENCE PATH. The engine already owns
-chat templates, stop sequences, streaming and tool-call parsing, and a second
-implementation of any of that would drift from the first. So this converts a
-request into the OpenAI shape, hands it to the endpoint the engine is already
-serving, and converts what comes back. Knurlogic's job stays what it was.
+IT IS A TRANSLATION, NOT A SECOND INFERENCE PATH. The OpenAI surface already
+owns chat templates, stop sequences, streaming and tool-call parsing, and a
+second implementation of any of that would drift from the first. So this
+converts a request into the OpenAI shape, hands it to that surface
+(`handler_over`: knurlogic's server passes its own, in-process), and
+converts what comes back.
 
 WHAT IT CANNOT PROMISE. A harness leans hard on tool-calling: whether a given
 model emits well-formed tool calls at all is a property of the model, not of
@@ -323,26 +323,6 @@ def stream(openai_lines, model: str):
         "delta": {"stop_reason": stop, "stop_sequence": None},
         "usage": {"output_tokens": usage["output_tokens"]}})
     yield _sse("message_stop", {"type": "message_stop"})
-
-
-def handler(chat_url: str, model: str, timeout: float = 3600.0):
-    """A `/v1/messages` handler over the engine's OpenAI endpoint by HTTP
-    (mlx-lm's server, which is not ours to call in-process)."""
-    import urllib.request
-
-    def transport(oai: dict):
-        r = urllib.request.Request(
-            chat_url, data=json.dumps(oai).encode(),
-            headers={"Content-Type": "application/json"}, method="POST")
-        try:
-            resp = urllib.request.urlopen(r, timeout=timeout)
-        except Exception as e:
-            raise TransportError(502, f"engine at {chat_url}: {e}") from e
-        if oai.get("stream"):
-            return resp
-        return json.loads(resp.read().decode())
-
-    return handler_over(transport, model)
 
 
 class TransportError(Exception):
