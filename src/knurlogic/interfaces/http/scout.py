@@ -93,7 +93,11 @@ def ensure(body: dict, artifact, host, sched) -> dict:
         raise ApiError(400, "the body must be a JSON object")
     path = _resolve(str(body.get("model") or ""), artifact, host)
     wait = bool(body.get("wait", False))
-    timeout = float(body.get("timeout", 3600))
+    try:
+        timeout = float(body.get("timeout", 3600))
+    except (TypeError, ValueError):
+        raise ApiError(400, "timeout must be a number of seconds",
+                       param="timeout")
     same = host.path == path
     if not (same and host.state in ("ready", "loading")):
         if not same and sched.width and not body.get("force"):

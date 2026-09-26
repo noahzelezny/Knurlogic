@@ -65,9 +65,15 @@ class App:
                                image_limit=self.image_limit)
         self.requests += 1
         self.scheduler.submit(job)
-        tok = self.scheduler.host.tokenizer
+        host = self.scheduler.host
+
+        def decode(t):
+            # resolved when used: a request that arrived during a load has
+            # the tokenizer by the time it has tokens
+            tok = host.tokenizer
+            return tok.decode([t]) if tok is not None else ""
         reply = O.Reply(job, ctx, served=self.served().get("id", ""),
-                        decode=(lambda t: tok.decode([t])) if tok else None)
+                        decode=decode)
         return job, reply
 
     def _transport(self, oai: dict):
@@ -175,11 +181,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/ensure" and self.app.ensure:
             try:
                 body = json.loads(raw or b"{}")
+            except ValueError:
+                return self._error(O.ApiError(400, "body must be JSON"))
+            try:
                 return self._json(200, self.app.ensure(body))
             except O.ApiError as e:
                 return self._error(e)
-            except ValueError:
-                return self._error(O.ApiError(400, "body must be JSON"))
         h = self.app.routes.get("POST " + path)
         if h is None:
             return self._json(404, {"error": {"message": f"no route {path}",

@@ -184,6 +184,7 @@ class Scheduler:
             # process segfaults when the model is freed on the main thread
             # after a stopped scheduler).
             self._fail_all(RuntimeError("the server is stopping"))
+            self._fail_queued(RuntimeError("the server is stopping"))
             self._close_executor()
             self.cache = None
             # the model too: its lazily built arrays (rope tables, caches)
@@ -229,6 +230,10 @@ class Scheduler:
                 cmd, arg, done = self._commands.get_nowait()
             except queue.Empty:
                 return
+            if cmd == "load" and self.host.state == "ready" \
+                    and self.host.path == arg:
+                done.set()        # already served: nothing to fail or drop
+                continue
             try:
                 if self._rows:
                     self._fail_all(RuntimeError(
@@ -340,11 +345,15 @@ class Scheduler:
                 prefix=prompt[:len(prompt) - len(rest)],
                 sampling=job.sampling, processors=procs, state_machine=sm,
                 top_logprobs=job.top_logprobs, report=job.request))
-        text = Request(tok.detokenizer, sequences=seqs, stops=job.stops,
-                       tool_parser=getattr(tok, "tool_parser", None),
-                       tools=job.request.tools,
-                       logprobs=job.logprobs or bool(job.top_logprobs),
-                       prompt_tokens=len(prompt))
+        try:
+            text = Request(tok.detokenizer, sequences=seqs, stops=job.stops,
+                           tool_parser=getattr(tok, "tool_parser", None),
+                           tools=job.request.tools,
+                           logprobs=job.logprobs or bool(job.top_logprobs),
+                           prompt_tokens=len(prompt))
+        except BaseException:
+            ex.remove([uid])      # admitted but unobserved: never orphaned
+            raise
         self._rows[uid] = _Row(job, text, types)
         if self.cache_bytes is not None:
             self.cache.trim_to(self.cache_bytes - ex.cache_nbytes)
@@ -410,3 +419,9 @@ class Scheduler:
         for uid, row in list(self._rows.items()):
             self._error(row.job, err)
         self._rows.clear()
+
+    def _fail_queued(self, err: BaseException) -> None:
+        self._take_jobs()
+        for j in self._waiting:
+            self._error(j, err)
+        self._waiting.clear()

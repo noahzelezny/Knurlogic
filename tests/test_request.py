@@ -165,3 +165,44 @@ def test_nothing_after_the_finish():
     assert d.finish == "stop"
     assert not req.feed(Token(0, 11, 0.0, state="normal"))
     assert not req.finish()
+
+
+class HoldingDetok(Detok):
+    """Like mlx-lm's BPE detokenizer: a lone space is held and flushed
+    together with the next token's text."""
+
+    def add_token(self, t):
+        self.tokens.append(t)
+        piece = VOCAB[t]
+        if piece == " ":
+            self._held = " "
+            return
+        self.text += getattr(self, "_held", "") + piece
+        self._held = ""
+
+
+def test_a_held_space_flushed_with_a_marker_stays_in_the_answer():
+    VOCAB[30] = " "
+    sm, seqs = control_machine(Tok())
+    req = Request(HoldingDetok(), sequences=seqs)
+    st, text = sm.make_state(), ""
+    for t in (10, 30, 3, 17, 4, 90):          # "The" " " <tool_call> ...
+        st, match, cur = sm.match(st, t)
+        d = req.feed(Token(0, t, 0.0, "stop" if cur is None and match
+                           else None, cur, match))
+        text += d.content
+    assert text == "The "
+
+
+def test_an_engine_error_mid_stream_is_an_anthropic_error_event():
+    import json as _j
+    from knurlogic.interfaces import messages
+    lines = [b'data: {"choices": [{"delta": {"content": "par"}}]}\n\n',
+             b'data: {"error": {"message": "non-finite logits"}}\n\n',
+             b"data: [DONE]\n\n"]
+    evs = list(messages.stream(lines, "m"))
+    kinds = [e.split(b"\n", 1)[0] for e in evs]
+    assert b"event: error" in kinds
+    assert not any(b"end_turn" in e for e in evs)
+    err = [e for e in evs if e.startswith(b"event: error")][0]
+    assert b"non-finite" in err
