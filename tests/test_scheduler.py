@@ -409,3 +409,13 @@ def test_a_held_prompt_waits_for_the_rows_it_found_not_for_newcomers():
     kind, err = big.outbox.get_nowait()
     assert kind == "error" and isinstance(err, S.OutOfMemory)
     assert s._waiting == []
+
+
+def test_usage_says_what_the_request_took(sched):
+    """TTFT, prefill and decode rates, measured where the steps run."""
+    j = sched.submit(_job(sched.prompts[0], max_tokens=12))
+    _text, usage = _collect(j)
+    t = usage["knurlogic"]["timing"]
+    assert t["ttft_s"] >= t["queue_s"] >= 0
+    if usage["completion_tokens"] > 1:
+        assert t["decode_tok_s"] > 0

@@ -173,3 +173,26 @@ class Artifact:
             knobs=cfg.get("knobs") or {},
             raw_config=cfg,
         )
+
+
+#: generation_config.json key -> the sampler's name for it
+_SAMPLING_KEYS = (("temperature", "temp"), ("top_p", "top_p"),
+                  ("top_k", "top_k"), ("min_p", "min_p"))
+
+
+def sampling_defaults(path) -> dict:
+    """The sampling a model's makers recommend (its generation_config.json),
+    as the sampler names it: {} when there is none, or when it says
+    do_sample false (greedy is then what they meant)."""
+    try:
+        g = json.loads((Path(path) / "generation_config.json").read_text())
+    except Exception:
+        return {}
+    if not isinstance(g, dict) or g.get("do_sample") is False:
+        return {}
+    out = {}
+    for key, name in _SAMPLING_KEYS:
+        v = g.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[name] = v
+    return out

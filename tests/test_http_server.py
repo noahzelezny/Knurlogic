@@ -337,7 +337,7 @@ def test_a_route_that_raises_answers_500_with_a_body(url, monkeypatch):
     u, _ = url
     from knurlogic.interfaces.http import openai as O
     monkeypatch.setattr(O, "models_document",
-                        lambda served: 1 / 0)
+                        lambda *a: 1 / 0)
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(u + "/v1/models", timeout=30)
     assert e.value.code == 500
@@ -367,3 +367,32 @@ def test_an_allowed_host_name_is_answered():
     assert "--allow-host studio.tail1234.ts.net" in browser_refusal(h)
     assert browser_refusal(h, allow_hosts=("studio.tail1234.ts.net",)) \
         is None
+
+
+def test_a_silent_request_samples_as_the_model_recommends(tmp_path):
+    """Silence meant greedy, which Qwen's thinking models are documented
+    to loop under; the model's generation_config fills what the request
+    leaves out, and the answer says which."""
+    import json
+    from knurlogic.interfaces.http import openai as O
+    from knurlogic.machine.artifact import sampling_defaults
+    (tmp_path / "generation_config.json").write_text(json.dumps(
+        {"do_sample": True, "temperature": 0.6, "top_p": 0.95,
+         "top_k": 20}))
+    model = sampling_defaults(tmp_path)
+    assert model == {"temp": 0.6, "top_p": 0.95, "top_k": 20}
+    body = {"messages": [{"role": "user", "content": "hi"}]}
+    job, ctx = O.build_job(body, chat=True, sampling_defaults=model)
+    assert job.sampling == {"temp": 0.6, "top_p": 0.95, "top_k": 20}
+    assert ctx["sampling"]["from_model"] == ["temperature", "top_p",
+                                             "top_k"]
+    # what the request says wins, key by key
+    job, ctx = O.build_job(dict(body, temperature=0), chat=True,
+                           sampling_defaults=model)
+    assert job.sampling["temp"] == 0.0 and job.sampling["top_p"] == 0.95
+    # a model that says do_sample false, or nothing, stays greedy
+    (tmp_path / "generation_config.json").write_text(json.dumps(
+        {"do_sample": False, "temperature": 0.6}))
+    assert sampling_defaults(tmp_path) == {}
+    job, _ = O.build_job(body, chat=True, sampling_defaults={})
+    assert job.sampling == {"temp": 0.0}
