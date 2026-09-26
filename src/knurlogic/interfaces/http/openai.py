@@ -50,8 +50,15 @@ def _num(body, name, kind, lo=None, hi=None, default=None):
 
 
 def build_job(body: dict, *, chat: bool, translate: Callable = None,
-              has_vision: Callable[[], bool] = lambda: False) -> tuple:
-    """(Job, context) from a request body; ApiError to refuse."""
+              has_vision: Callable[[], bool] = lambda: False,
+              sampling_defaults: Optional[dict] = None) -> tuple:
+    """(Job, context) from a request body; ApiError to refuse.
+
+    `sampling_defaults`: the served model's recommended sampling
+    (machine/artifact.sampling_defaults), used for each parameter the
+    request leaves out. Silence used to mean greedy, which Qwen's thinking
+    models are documented to degrade and loop under; a model that says
+    nothing (or do_sample false) is still greedy."""
     if not isinstance(body, dict):
         raise ApiError(400, "the request body must be a JSON object")
     n = _num(body, "n", int, lo=1)
@@ -65,7 +72,13 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
             or max_tokens < 0:
         raise ApiError(400, "max_tokens must be a non-negative integer",
                        param="max_tokens")
-    temp = _num(body, "temperature", (int, float), lo=0, default=0.0)
+    model = dict(sampling_defaults or {})
+    temp = _num(body, "temperature", (int, float), lo=0)
+    filled = []
+    if temp is None:
+        temp = model.get("temp", 0.0)
+        if "temp" in model:
+            filled.append("temperature")
     sampling = {"temp": float(temp)}
     for name, key, kind, lo, hi in (
             ("top_p", "top_p", (int, float), 0, 1),
@@ -74,6 +87,9 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
             ("xtc_probability", "xtc_probability", (int, float), 0, 1),
             ("xtc_threshold", "xtc_threshold", (int, float), 0, 0.5)):
         v = _num(body, name, kind, lo, hi)
+        if v is None and key in model:
+            v = model[key]
+            filled.append(name)
         if v is not None:
             sampling[key] = v
     seed = _num(body, "seed", int)
@@ -110,7 +126,12 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
            "include_usage": bool((body.get("stream_options") or {}).get(
                "include_usage")),
            "model": body.get("model") or "default",
-           "thinking": None, "exclude": False, "chat": chat}
+           "thinking": None, "exclude": False, "chat": chat,
+           # what sampled this request, and which of it was the model's
+           # recommendation rather than the request's
+           "sampling": {"applied": {k: v for k, v in sampling.items()
+                                    if k != "seed"},
+                        "from_model": filled}}
     if chat:
         msgs = body.get("messages")
         if not isinstance(msgs, list) or not msgs:
@@ -304,6 +325,8 @@ class Reply:
         u = dict(usage or {})
         if self.ctx.get("thinking") is not None:
             u.setdefault("knurlogic", {})["thinking"] = self.ctx["thinking"]
+        if self.ctx.get("sampling") is not None:
+            u.setdefault("knurlogic", {})["sampling"] = self.ctx["sampling"]
         return u
 
 
@@ -318,11 +341,14 @@ def _data(obj: Any) -> bytes:
     return f"data: {json.dumps(obj)}\n\n".encode()
 
 
-def models_document(served: dict) -> dict:
-    """/v1/models: the one served model, with what Scout asked for."""
+def models_document(served: dict, sampling: Optional[dict] = None) -> dict:
+    """/v1/models: the one served model, with what Scout asked for, and the
+    sampling a request that says nothing gets (the model's recommendation;
+    {} is greedy)."""
     return {"object": "list", "data": [
         {"id": served["id"], "object": "model",
          "created": int(served.get("created") or 0),
          "owned_by": "knurlogic",
          "capabilities": served.get("capabilities") or ["text"],
-         "size_bytes": int(served.get("size_bytes") or 0)}]}
+         "size_bytes": int(served.get("size_bytes") or 0),
+         "sampling_defaults": dict(sampling or {})}]}
