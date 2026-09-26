@@ -2,7 +2,8 @@
 template's own.
 
 A client asks with OpenAI's `reasoning_effort` (or OpenRouter's
-`reasoning: {"effort": ...}`), on the standard ladder
+`reasoning: {"effort": ...}`, and its `{"enabled": false}` for none), on
+the standard ladder
 
     none < minimal < low < medium < high < xhigh
 
@@ -91,6 +92,9 @@ def requested(body: dict):
     r = body.get("reasoning")
     if level is None and isinstance(r, dict):
         level = r.get("effort")
+        # OpenRouter's switch: some clients say "no thinking" only this way
+        if level is None and r.get("enabled") is False:
+            level = "none"
     if level is None:
         return None
     level = str(level).strip().lower()
