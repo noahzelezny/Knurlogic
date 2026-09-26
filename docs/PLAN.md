@@ -9,17 +9,19 @@ is next. The git history holds the narrative. `CONTEXT.md` is the map.*
 Local models on your own machines, managed equally well by a person (the
 page, the CLI) and by an agent (the MCP). It resolves the settings that
 decide whether a model runs, reports what is true about the machine, and
-drafts with multi-token-prediction heads no stock runtime uses. It wraps
-mlx-lm and exo rather than rebuilding them, and carries the work that was
-trapped in forks of both.
+drafts with multi-token-prediction heads no stock runtime uses. It serves
+with its own server over mlx-lm as a library (docs/SERVER.md), replaces
+exo for clustering, and carries the work that was trapped in forks of both.
 
 ## What is true now
 
-    engine/       serve/ over mlx-lm's server, one module per change it
-                  makes (vq_runtime, cache_report, drafting, vision);
-                  drafting on single requests AND batches
-                  (MTPBatchGenerator); families/ holds everything per model
-                  family; generic mtp/, vision/, vq/ name no family
+    engine/       runtime/ is knurlogic's own server's engine half (host,
+                  scheduler, executor, prompt and request stages; HTTP is
+                  interfaces/http); serve/ says what is served (load,
+                  thinking, vision, drafting head, cache report); drafting
+                  on every batch (MTPBatchGenerator); families/ holds
+                  everything per model family; generic mtp/, vision/, vq/
+                  name no family
     families/     qwen, gemma4, glm5 -- each a MANIFEST (architectures keyed
                   by module, model_type spellings, heads, prefill widths with
                   evidence) plus architecture/ (vendored code, PROVENANCE,
