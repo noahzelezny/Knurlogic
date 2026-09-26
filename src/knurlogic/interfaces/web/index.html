@@ -358,8 +358,8 @@
  .cs select,.cs input{width:6.5em;flex:none;padding:4px 6px;font-size:11px;
    text-align:right}
  .cs input:placeholder-shown{border-style:dashed}
- .csnote{font-size:10px;color:var(--faint);margin-top:6px;line-height:1.5}
- .csnote b{color:var(--dim);font-weight:400}
+ .csh{display:flex;align-items:center;justify-content:space-between;color:var(--fg)}
+ .csh .mini{padding:2px 7px;font-size:9.5px}
  #csys{width:100%;resize:vertical;background:var(--panel);color:var(--fg);
    border:1px solid var(--line);border-radius:var(--r);padding:6px 8px;
    font:inherit;font-size:11.5px;box-sizing:border-box}
@@ -482,7 +482,6 @@
  .kstage{font-size:10.5px;color:var(--acc);margin:-3px 0 6px;text-align:right}
  .kstage:empty{display:none}
  .knob:not(.staged) .kstage{color:var(--warn)}
- .khid{font-size:10.5px;color:var(--faint);margin-top:8px;cursor:help}
  .unl{font-size:10.5px;color:var(--faint);margin-top:6px;line-height:1.9;
    word-spacing:.4em}
  .mhd{font-size:12px;margin:0 0 10px}
@@ -492,8 +491,10 @@
  .shd .seg button{padding:1px 7px;font-size:10px}
  #stagepop .sh{margin-top:10px;font-size:10px;letter-spacing:.08em;
    text-transform:uppercase;color:var(--faint)}
- #stagepop{position:absolute;right:14px;top:44px;z-index:40;width:24em;
-   max-width:calc(100% - 28px);padding:12px 14px;background:var(--bg);
+ /* centred on the screen: a question, not a menu off the corner */
+ #stagepop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+   z-index:40;width:24em;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);
+   overflow:auto;padding:12px 14px;background:var(--bg);
    border:1px solid var(--acc);border-radius:var(--r);
    box-shadow:0 6px 24px oklch(0 0 0/.55)}
  #stagepop[hidden]{display:none}
@@ -551,14 +552,18 @@
     the eye lands on the numbers. */
  .rmet{margin:4px 0 2px;font-size:11px;color:var(--faint);white-space:nowrap}
  .rmet .k{color:var(--acc)} .rmet b{color:var(--fg);font-weight:700}
- /* Waiting vs Thinking: the gear holds still while nothing has come back
-    (the server holds even the headers while a request is queued) and
-    turns once the prompt is being processed. */
+ /* Waiting vs Thinking: while nothing has come back (the server holds even
+    the headers while a request is queued) the mark fades in and out -- in a
+    queue, not stuck -- and the gear turns once the prompt is being processed. */
  .wait{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--dim);
-   letter-spacing:.05em;text-transform:uppercase}
- .wait svg{width:16px;height:16px}
+   letter-spacing:.05em;text-transform:uppercase;line-height:1}
+ .wait svg{width:16px;height:16px;display:block;flex:none}
+ .wait:not(.on){animation:waitfade 2.4s ease-in-out infinite}
  .wait.on svg{animation:gear 1.6s linear infinite}
  @keyframes gear{to{transform:rotate(360deg)}}
+ @keyframes waitfade{50%{opacity:.3}}
+ /* the pill holding only the mark: no room left under it */
+ .bubble.assistant:has(> .wait:only-child){padding:6px 10px;line-height:1}
  #log{height:clamp(230px,26vh,420px)}
  .bench{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px}
  .chk{display:flex;align-items:center;gap:7px;cursor:pointer;color:var(--dim);
@@ -592,10 +597,11 @@
  .bubble.user{background:var(--med)}
  .bubble.assistant{background:transparent}
  .bubble.err{border-color:var(--warn);color:var(--warn)}
- .bactions{display:flex;gap:8px;font-size:10px;color:var(--faint);
-   letter-spacing:.06em;text-transform:uppercase}
- .bactions span{cursor:pointer}
- .bactions span:hover{color:var(--acc)}
+ .bactions{display:flex;gap:2px}
+ .bactions button{background:none;border:0;padding:3px;color:var(--faint);
+   cursor:pointer;line-height:0;border-radius:var(--r)}
+ .bactions button:hover,.bactions button:focus-visible{color:var(--fg)}
+ .bactions svg{width:14px;height:14px}
  details.think{border:1px solid var(--line);border-radius:var(--r);
    padding:6px 9px;font-size:11px;color:var(--dim);max-width:100%}
  details.think summary{cursor:pointer;color:var(--faint);list-style:none}
@@ -633,6 +639,7 @@
    border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;
    font:inherit;font-size:12.5px;max-height:160px}
  #cq[disabled]{opacity:.5}
+ #cq:focus::placeholder{color:transparent}
  .go.danger{color:var(--warn);border-color:var(--warn)}
  .pfbar{margin-top:8px;height:4px;background:var(--med);border-radius:2px;
    position:relative;overflow:hidden}
@@ -680,7 +687,7 @@
  .lbbar{display:flex;gap:10px}
  .lbbar .mini{color:var(--fg);border-color:var(--line)}
  @media(prefers-reduced-motion:reduce){
-   .flow line,.live i,.wait.on svg{animation:none}
+   .flow line,.live i,.wait,.wait.on svg{animation:none}
    *,*:before,*:after{transition-duration:.01ms!important;
      animation-duration:.01ms!important;animation-iteration-count:1!important}}
 </style>
@@ -711,15 +718,16 @@
       <div id="chats"></div>
       <!-- Chat settings stay on screen: this chat is for testing models, and
            what a reply was asked with is half of reading it. A floating menu
-           hid exactly that. Sampling fields start EMPTY, which sends
-           nothing, so the server applies the model's own recommendation
-           (its generation_config.json); the placeholder shows that value. -->
+           hid exactly that. Sampling fields show the model's own
+           recommendation (its generation_config.json); a field left at it
+           sends nothing, so the server applies that same value. -->
       <section id="csettings">
-        <div class="sidelab">chat test bench</div>
+        <div class="sidelab csh">chat test bench<button type="button" class="mini"
+          id="cdefaults" title="set every field back to the model's defaults">defaults</button></div>
         <!-- How full the conversation is: the last reply's prompt + answer
              over the served model's window. Read-only: there is no context
              knob to turn. -->
-        <div class="cs"><span class="cslab" style="margin:0;flex:1">context<i class="info" tabindex="0">i<span class="bub">knurlogic reserves nothing up front: the model&#39;s whole context window is always available, so there is nothing to set here.</span></i></span><span class="ro" id="cctx" style="text-transform:none">--</span></div>
+        <div class="cs"><span class="cslab" style="margin:0;flex:1">context<i class="info" tabindex="0">i<span class="bub">knurlogic reserves nothing up front: the model&#39;s whole context window is always available, so there is nothing to set here.</span></i></span><span class="ro" id="cctx" style="text-transform:none">—</span></div>
         <div class="cs">
           <label for="cmax">max tokens<i class="info" tabindex="0">i<span class="bub">The longest the answer may run, thinking included. It caps the reply, not the conversation: the list stops at the model&#39;s context window, which prompt and answer share.</span></i></label>
           <!-- Steps, not a number field or a slider: nobody types 3187, and
@@ -746,7 +754,6 @@
           <label for="ctopk">top k<i class="info" tabindex="0">i<span class="bub">Picks only among this many likeliest words. Lower is narrower and steadier; 0 means no limit. Empty uses the model&#39;s recommended value.</span></i></label>
           <input id="ctopk" type="number" min="0" step="1" placeholder="model">
         </div>
-        <div class="csnote" id="csdef"></div>
         <label class="cslab" for="csys">system prompt</label>
         <textarea id="csys" rows="3" placeholder="(none)"></textarea>
       </section>
@@ -1318,8 +1325,7 @@ function modelHTML(r, doc){
   if(doc.error) return `<div class="sgrp"><div class="shd">${esc(r.name)}</div>
     <div class="msg">could not read its settings: ${esc(doc.error)}</div></div>`;
   const all=doc.knobs||[];
-  // never read by these runtimes: not a row, one quiet line at the end
-  const dead=all.filter(k=>k.reach==='no-effect');
+  // knobs these runtimes never read are not shown at all
   const ks=all.filter(k=>k.reach!=='no-effect')
     .sort((a,b)=>(a.tier==='reach'?0:1)-(b.tier==='reach'?0:1));
   const live=doc.live||{}, asked=doc.asked||{}, un=doc.unmanaged||[];
@@ -1331,17 +1337,10 @@ function modelHTML(r, doc){
       ${esc(live.tune||'?')} tune</span>${tunes?`<span class="seg">${tunes}</span>`:''}</div>
     ${ks.map(k=>knobHTML(k,c)).join('')||'<div class="msg">no knobs</div>'}
     ${(doc.warnings||[]).map(w=>`<div class="warn">${esc(w)}</div>`).join('')}
-    ${hiddenLine(dead)}
     ${un.length?`<details class="more"><summary>${un.length} other variables this
       runtime reads; knurlogic sets none of them</summary><div class="unl">${
       esc(un.map(u=>u.name).join('  '))}</div></details>`:''}
   </div>`;
-}
-// Knobs no runtime reads are not rows: one quiet line, the names on hover.
-function hiddenLine(dead){
-  return dead.length ? `<div class="khid" title="${esc(dead.map(k=>k.name).join('\n'))}">${
-    dead.length} setting${dead.length===1?'':'s'} these runtimes never read ${
-    dead.length===1?'is':'are'} hidden</div>` : '';
 }
 async function modelsInto(el, models, tunes){
   if(!models.length){ el.innerHTML=''; return false }
@@ -1388,8 +1387,7 @@ async function showMachine(m){
     ? `<div class="sgrp"><div class="shd">${esc(name)}<span class="ro">not running ·
         how it would launch at ${esc(pv.tune)}</span></div>
         ${pv.knobs.filter(k=>k.reach!=='no-effect').map(k=>knobHTML(k,
-          {g:'launch:'+name, where:null, model:name, label:name})).join('')}
-        ${hiddenLine(pv.knobs.filter(k=>k.reach==='no-effect'))}</div>`
+          {g:'launch:'+name, where:null, model:name, label:name})).join('')}</div>`
     : `<div class="sgrp"><div class="msg">Nothing is running${own?` on this machine.
         Pick a model under Load model to see what it would load with.`:'.'}</div></div>`;
 }
@@ -2546,7 +2544,7 @@ function chatGate(){
   const vision=c && c.where ? !!c.vision : !!(SERVED && SERVED.vision);
   // The box is always typeable, so the page never looks broken; only Send
   // waits for a model, and the placeholder and Send's title say which.
-  $('cq').placeholder=on ? 'Message the running model… (Shift+Enter for a newline)'
+  $('cq').placeholder=on ? 'Message'
                          : 'Type away; click a running model to send it';
   $('csend').disabled=!on || BUSYC;
   $('csend').title=on ? '' : 'click a running model to chat with it';
@@ -2567,14 +2565,22 @@ window.curChatPub=()=>curChat();
 // --- chat settings ----------------------------------------------------------
 // What a request leaves out, the server fills from the model's own
 // generation_config.json and lists in /v1/models as sampling_defaults ({} is
-// greedy). The page shows those as the fields' placeholders and sends a
-// value only once one is typed -- an invented 0.7 was a setting nobody chose.
+// greedy, so temperature 0). The fields show those values, and a field still
+// at the model's default sends nothing -- the server applies the same value --
+// while one the person changed is sent.
 const SAMP=[['ctemp','temperature'],['ctopp','top_p'],['ctopk','top_k']];
+let SDEFS;                      // the shown model's defaults per field; undefined unknown
+function sampDef(d,key){
+  return d==null ? '' : d[key]!=null ? String(d[key]) : key==='temperature' ? '0' : '';
+}
 function sampling(){
   const o={};
   for(const [id,key] of SAMP){
     const v=$(id).value.trim();
-    if(v!=='' && Number.isFinite(+v)) o[key]=+v;
+    if(v==='' || !Number.isFinite(+v)) continue;
+    const d=sampDef(SDEFS,key);
+    if(d!=='' && +d===+v) continue;
+    o[key]=+v;
   }
   return o;
 }
@@ -2617,7 +2623,7 @@ function showCtx(){
   const k=v=>v<1000?String(v):v<1e6?(v/1000).toFixed(v<1e5?1:0).replace(/\.0$/,'')+'k'
     :(v/1e6).toFixed(1).replace(/\.0$/,'')+'M';
   const used=m?(m.prompt||0)+(m.completion||0):null;
-  el.textContent=used==null ? (CTXLEN?`-- / ${k(CTXLEN)}`:'--')
+  el.textContent=used==null ? '—'
     : CTXLEN ? `${k(used)} / ${k(CTXLEN)}` : k(used);
   el.title=used==null?'no reply yet in this chat'
     :`${used.toLocaleString()} tokens`+(CTXLEN?` of ${CTXLEN.toLocaleString()}`:'');
@@ -2635,15 +2641,25 @@ function maxSteps(ctx){
     :'the model\'s context is unknown to this page, so the list stops at 64k';
 }
 $('cmax').addEventListener('change',()=>{ MAXWANT=+$('cmax').value });
+// A new model's defaults move the fields still at the old model's (or
+// empty) to the new ones; a field the person changed stays as they left it.
 function showSampling(d){
-  for(const [id,key] of SAMP)
-    $(id).placeholder = d && d[key]!=null ? String(d[key]) : 'model';
-  const set=d?SAMP.filter(([,k])=>d[k]!=null).map(([,k])=>`${k} ${d[k]}`):[];
-  $('csdef').innerHTML = d===null ? 'no model selected'
-    : d===undefined ? 'empty fields use the model&#39;s default'
-    : !set.length ? 'model default: <b>greedy</b> (it recommends nothing)'
-    : 'model default · <b>'+esc(set.join(' · '))+'</b>';
+  for(const [id,key] of SAMP){
+    const el=$(id), was=sampDef(SDEFS,key), now=sampDef(d,key), v=el.value.trim();
+    if(v==='' || (was!=='' && +v===+was)) el.value=now;
+    el.placeholder='';
+    el.title = d===undefined ? 'this server does not say the model\'s defaults; empty sends nothing'
+      : d===null ? 'no model selected' : now!=='' ? `the model's default is ${now}` : '';
+  }
+  SDEFS=d;
 }
+// Every field back to the model's defaults: sampling as it recommends, the
+// max-tokens step the page starts at, no system prompt.
+$('cdefaults').onclick=()=>{
+  for(const [id,key] of SAMP) $(id).value=sampDef(SDEFS,key);
+  MAXWANT=null; $('cmax').value='2048'; maxSteps(CTXLEN); $('csys').value='';
+  $('ctemp').dispatchEvent(new Event('change'));      // remembered as left
+};
 // The fields as last left, in this browser only: a convenience, not state.
 (()=>{
   const ids=['cmax','ctemp','ctopp','ctopk','csys','ceffort'];
@@ -2914,6 +2930,16 @@ function setWait(w){
   const d=document.createElement('div'); d.innerHTML=waitHTML(w);
   if(el) el.replaceWith(d.firstChild); else b.prepend(d.firstChild);
 }
+// A message's actions as icons (stroke, like the rest of the marks), each
+// named by its tooltip and aria-label.
+const ICONS={
+  cp:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  ed:'<path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>',
+  rg:'<path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/>',
+  del2:'<path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/>'};
+function actBtn(k, idx, name){
+  return `<button type="button" data-${k}="${idx}" title="${name}" aria-label="${name}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></button>`;
+}
 function bubbleFor(m, idx){
   const wrap=document.createElement('div');
   wrap.className='bubblewrap '+(m.role==='user'?'user':'assistant');
@@ -2936,10 +2962,10 @@ function bubbleFor(m, idx){
   if(m.met){ const met=document.createElement('div'); met.innerHTML=replyMetHTML(m.met);
     wrap.appendChild(met.firstChild) }
   const act=document.createElement('div'); act.className='bactions';
-  act.innerHTML = `<span data-cp="${idx}">copy</span>`+
-    (m.role==='user'?`<span data-ed="${idx}">edit &amp; resend</span>`:'')+
-    (m.role==='assistant'?`<span data-rg="${idx}">regenerate</span>`:'')+
-    `<span data-del2="${idx}">delete</span>`;
+  act.innerHTML = actBtn('cp',idx,'Copy')+
+    (m.role==='user'?actBtn('ed',idx,'Edit & resend'):'')+
+    (m.role==='assistant'?actBtn('rg',idx,'Regenerate'):'')+
+    actBtn('del2',idx,'Delete');
   wrap.appendChild(act);
   wrap.querySelectorAll('.thumb').forEach(async img=>{
     const rec=await idbGet(img.dataset.hash);
