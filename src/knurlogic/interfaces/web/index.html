@@ -534,7 +534,9 @@
    padding:6px 9px;font-size:11px;color:var(--dim);max-width:100%}
  details.think summary{cursor:pointer;color:var(--faint);list-style:none}
  details.think summary::-webkit-details-marker{display:none}
- details.think summary:before{content:"thinking  "}
+ /* the marker the hidden native one was; the word is the summary's own */
+ details.think summary:before{content:"\25B8  "}
+ details.think[open] summary:before{content:"\25BE  "}
  .think pre{white-space:pre-wrap;color:var(--faint);font-size:11px}
  .md pre{background:oklch(.09 0 0);border:1px solid var(--line);padding:10px;
    border-radius:var(--r);overflow:auto;position:relative}
