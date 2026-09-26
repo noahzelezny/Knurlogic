@@ -41,8 +41,8 @@ PIECES = {
                           "wheel, not as Python a package can carry",
     },
     "mlx-lm": {
-        "role": "model architectures, the loader, and the OpenAI server "
-                "`knurlogic serve` runs",
+        "role": "the library under knurlogic's server: model classes, the "
+                "loader, tokenizer, caches, BatchGenerator",
         "fork": "github.com/noahzelezny/mlx-lm @ exo-qwen4-exp",
         "carries": "the qwen4_exp architecture and PipelineMixin on "
                    "qwen3_5 / qwen3_5_moe",
@@ -52,26 +52,12 @@ PIECES = {
         "portable": True,
         "why_not_ported": "",
     },
-    "mlx-vlm": {
-        "role": "multimodal architectures; glm5_next is looked up here",
-        "fork": "",
-        "carries": "",
-        "needed_for": "nothing, for knurlogic. Vision for every released "
-                      "family, GLM-5.3 included, is vendored under "
-                      "engine/families/*/vision/ with provenance; glm5_siblings() is "
-                      "empty and a test keeps it so. It was needed until "
-                      "2026-09-23, when glm5_next imported nine of its "
-                      "modules.",
-        "portable": True,
-        "why_not_ported": "",
-    },
 }
 
 #: Run by each interpreter. Stdlib only, and it must stay that way: it is the
 #: probe, and a probe that imports what it measures measures its own import.
 _PROBE = r"""
 import importlib.metadata as md, importlib.util as u, json, os, sys
-SIBLINGS = json.loads(sys.argv[1]) if len(sys.argv) > 1 else []
 out = {"python": sys.version.split()[0], "executable": sys.executable}
 def dist(n):
     try:
@@ -89,7 +75,7 @@ def contains(path, needle):
             return needle in f.read()
     except OSError:
         return None
-for n, mod in (("mlx", "mlx"), ("mlx-lm", "mlx_lm"), ("mlx-vlm", "mlx_vlm")):
+for n, mod in (("mlx", "mlx"), ("mlx-lm", "mlx_lm")):
     d = dist(n)
     if d:
         d["dir"] = pkgdir(mod)
@@ -101,19 +87,15 @@ if m and m["dir"]:
 l = out.get("mlx-lm")
 if l and l["dir"]:
     l["fork"] = os.path.exists(os.path.join(l["dir"], "models", "qwen4_exp.py"))
-v = out.get("mlx-vlm")
-if v and v["dir"]:
-    base = os.path.join(v["dir"], "models")
-    v["glm5_missing"] = [m for m in SIBLINGS
-        if not (os.path.exists(os.path.join(base, *m.split(".")) + ".py")
-                or os.path.isdir(os.path.join(base, *m.split("."))))]
 print(json.dumps(out))
 """
 
 
 def glm5_siblings() -> list:
-    """The mlx_vlm modules the vendored glm5_next imports, read off its
-    source. Derived every time, because a list written down beside the
+    """Modules OUTSIDE its own package that the vendored glm5_next imports
+    (relative `from ..X`), read off its source -- empty, and a test keeps it
+    so: it registers under mlx_lm's name, where such an import would reach
+    into mlx-lm. Derived every time, because a list written down beside the
     vendoring went stale: it named 8, the code imports 9 different ones."""
     import re
     root = (Path(__file__).resolve().parents[1] / "engine" / "families"
@@ -129,7 +111,7 @@ def glm5_siblings() -> list:
 def probe(python: str) -> dict:
     """What this interpreter has installed, asked of the interpreter."""
     try:
-        r = subprocess.run([python, "-c", _PROBE, json.dumps(glm5_siblings())],
+        r = subprocess.run([python, "-c", _PROBE],
                            capture_output=True, text=True, timeout=30)
         return json.loads(r.stdout.strip().splitlines()[-1])
     except Exception as e:
@@ -153,16 +135,6 @@ def _verdicts(env: dict) -> list:
     out.append(("mlx-lm", lm["version"] if lm else "-",
                 ("fork (carries qwen4_exp)" if lm.get("fork") else "stock")
                 if lm else "not installed"))
-    vlm = env.get("mlx-vlm")
-    if vlm:
-        miss = vlm.get("glm5_missing") or []
-        out.append(("mlx-vlm", vlm["version"],
-                    "optional: knurlogic vendors its own vision code"
-                    if not miss else
-                    f"knurlogic's vendored glm5_next (taken from mlx-vlm "
-                    f"0.7.1) cannot load here: missing {', '.join(miss)}"))
-    else:
-        out.append(("mlx-vlm", "-", "not installed -- not needed; vision is vendored"))
     return out
 
 
