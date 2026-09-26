@@ -520,6 +520,20 @@
    position:relative;overflow:hidden}
  .pfbar .pfbarfill{height:100%;background:var(--acc);width:0%;transition:width .15s}
  .pfbar .pfbartxt{position:absolute;top:6px;left:0;font-size:10px;color:var(--faint)}
+ /* Two layouts, as exo has: HOME is the dashboard (memory, what is running,
+    load a model) with the chat as one line under it; TALK is a conversation
+    with messages in it, and the transcript takes the height the dashboard
+    had. The logo, or the Dashboard button, goes back. */
+ .mark{cursor:pointer}
+ #home{display:none;position:absolute;top:-13px;right:14px;background:var(--bg)}
+ body:not(.talk) #chat.empty #clog{display:none}
+ body:not(.talk) #chat.empty .crow{margin-top:6px}
+ body.talk #memory,body.talk .right{display:none}
+ body.talk .app{grid-template-columns:15em minmax(0,1fr)}
+ body.talk #home{display:inline-block}
+ body.talk #try{margin-bottom:0}
+ body.talk #clog{height:calc(100vh - 290px);min-height:260px;max-height:none}
+ #cq{height:34px;min-height:34px;line-height:1.35}
  .lightbox{position:fixed;inset:0;background:oklch(0 0 0/.85);z-index:50;
    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
  .lightbox[hidden]{display:none}
@@ -536,7 +550,7 @@
   <!-- The mark is a knurl: the crosshatch cut into a machined part so a hand
        can grip it. The wheel sits BEHIND the word with its teeth showing
        above and below, so the name reads as something you turn. -->
-  <div class="mark">
+  <div class="mark" id="mark" title="Dashboard">
     <svg class="wheel" viewBox="0 0 120 120" aria-hidden="true">
       <g id="knurl"></g>
     </svg>
@@ -572,6 +586,8 @@
             <button data-tab="bench">Bench</button>
           </span>
         </div>
+        <button type="button" id="home" class="mini"
+          title="back to the dashboard">&#9666; Dashboard</button>
         <section id="chat">
           <div id="clog"></div>
           <div id="chips" class="chips"></div>
@@ -1903,7 +1919,20 @@ function switchTab(t){
   $('bench').hidden = t!=='bench';
   $('newchat').textContent = t==='chat' ? '+ New chat' : '+ New run';
   if(t==='chat') renderChats(); else if(window.renderRunsBench) window.renderRunsBench();
+  layout();
 }
+// HOME vs TALK. The page is in TALK while the chat tab shows a conversation
+// with messages, unless the dashboard was asked for; opening a chat or
+// sending one asks for the conversation again.
+let HOME=false;
+function layout(){
+  const c=typeof curChat==='function' ? curChat() : null;
+  const has=!!(c && c.msgs && c.msgs.length);
+  $('chat').classList.toggle('empty', !has);
+  document.body.classList.toggle('talk', window.ACTIVETAB==='chat' && has && !HOME);
+}
+function goHome(){ HOME=true; layout(); window.scrollTo(0,0) }
+$('mark').onclick=goHome; $('home').onclick=goHome;
 window.switchTab=switchTab;
 $('ptabs').querySelectorAll('button').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
 
@@ -2018,7 +2047,7 @@ function chatGate(){
 window.chatGate=chatGate;
 window.newChat=newChat;
 function openChat(c){
-  CCUR=c.id; renderChats(); renderClog(); chatGate();
+  CCUR=c.id; HOME=false; renderChats(); renderClog(); chatGate();
 }
 
 // --- served-model / vision gating -----------------------------------------
@@ -2279,6 +2308,7 @@ function bubbleFor(m, idx){
 function renderClog(){
   const el=$('clog'); el.innerHTML='';
   const c=curChat();
+  layout();
   if(!c){ el.innerHTML='<div class="msg">No chat open. Click a running model, '+
     'or "+ New chat".</div>'; return }
   (c.msgs||[]).forEach((m,i)=>el.appendChild(bubbleFor(m,i)));
@@ -2323,6 +2353,7 @@ function sendChat(){
   const text=$('cq').value.trim();
   if(!text && !PENDING.length) return;
   let c=curChat(); if(!c){ newChat(); c=curChat() }
+  HOME=false;
   if(c.msgs.length===0) c.title=text.slice(0,52)||'(image)';
   c.msgs.push({role:'user', content:text, att:PENDING.slice()});
   $('cq').value=''; autoGrow(); clearAttachments(); c.updated=Date.now();
