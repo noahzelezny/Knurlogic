@@ -520,12 +520,14 @@ class Scheduler:
         mx.clear_cache()
 
     def _room_to_admit(self) -> bool:
-        """A request is admitted when nothing is running (it could not wait
-        for memory anyone else would free) or memory is a margin below the
-        limit."""
+        """A request is considered when nothing is running (it could not
+        wait for memory anyone else would free) or memory is under the
+        limit; whether ITS prompt fits is _make_room's question. The limit
+        already holds a step's measured transient back -- holding a margin
+        back again here (and in _room_for) left 397B, whose weights leave 8
+        GiB, refusing 20k-token prompts with nothing else running."""
         limit = self._limit()
-        return (not limit or not self._rows
-                or self._active() < limit - self._margin())
+        return (not limit or not self._rows or self._active() < limit)
 
     def _learn(self, tokens, cache) -> None:
         """A row's cache as fixed + per-token bytes, from the shortest and
@@ -564,12 +566,12 @@ class Scheduler:
         if not limit or not self._kv:
             return True, 0, 0
         need = self._cost(n_tokens, copies)
-        room = limit - self._margin() - self._active()
+        room = limit - self._active()
         if need > room and self.cache is not None and self.cache.nbytes:
             before = self.cache.nbytes
             self.cache.trim_to(max(before - (need - room), 0))
             self._release()
-            room = limit - self._margin() - self._active()
+            room = limit - self._active()
             logger.info("the prompt cache gave up %.1f GiB for a %d-token "
                         "prompt", (before - self.cache.nbytes) / GIB,
                         n_tokens)

@@ -256,7 +256,7 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
             mem["active"] -= self.nbytes - n
             self.nbytes = n
 
-    mem = {"active": 90 * GIB}
+    mem = {"active": 95 * GIB}
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
     s._spike = 4 * GIB          # measured: margin 5, limit 100
     s.cache = Cache()
@@ -268,7 +268,7 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
     s._learn(list(range(512)), kv(512))
     s._learn(list(range(4096)), kv(4096))
     assert s._kv == (64 * 2**20, 2**20)          # fixed + slope, not a ratio
-    # 5 GiB free under limit less margin; 1024 tokens x2 = ~2.1 GiB: full
+    # 5 GiB free under the limit; 1024 tokens x2 = ~2.1 GiB: full
     assert s._make_room(1024) == "full" and s.cache.nbytes == 4 * GIB
     # 3072 x2 = ~6.1 GiB: the cache gives up what it takes, still full
     assert s._make_room(3072) == "full" and s.cache.nbytes < 4 * GIB
@@ -307,3 +307,20 @@ def test_the_step_margin_is_measured_not_published():
         assert s._limit() == 120 * GIB - int(2.5 * GIB)
     finally:
         mx.get_peak_memory = real
+
+
+def test_397b_on_the_m4_admits_the_prompts_it_refused():
+    """The M4, 2026-09-26: 397B at 106.9 GiB active, a 5.2 GiB measured
+    spike, and 31k/20k-token prompts needing ~1 GiB each were refused with
+    nothing else running -- the margin was held back twice."""
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
+    s._spike = int(5.2 * GIB)                    # margin 6.5, limit 113.5
+    s._active = lambda: int(106.9 * GIB)
+    s._release = lambda: None
+    s.cache = type("C", (), {"nbytes": 0})()
+    s._kv = (0.0, 1.1 * GIB / 31222)             # as measured: 1.1 GiB
+    assert s._room_to_admit()
+    assert s._make_room(31222) in ("full", "lean")
+    assert s._make_room(20577) == "full"
