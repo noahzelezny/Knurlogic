@@ -231,3 +231,15 @@ def test_a_registered_server_is_found_on_a_port_nobody_guessed(monkeypatch):
     (r,) = loaded.survey()["resident"]
     assert r["runtime"] == "knurlogic" and r["state"] == "loading"
     assert r["where"].endswith(":8092")
+
+
+def test_a_malformed_server_record_is_skipped_not_a_keyerror(tmp_path,
+                                                            monkeypatch):
+    import json as _j
+    from knurlogic.machine import servers
+    p = tmp_path / "servers.json"
+    p.write_text(_j.dumps({"8080": {"pid": 12, "log": "x"},
+                           "8081": {"log": "no pid"},
+                           "8082": {"pid": "nope"}, "junk": {"pid": 1}}))
+    monkeypatch.setattr(servers, "registry_path", lambda: p)
+    assert list(servers.registry()) == [8080]
