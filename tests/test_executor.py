@@ -1,0 +1,143 @@
+"""The executor protocol over the local batch engine (docs/SERVER.md step 1):
+same tokens as the engine driven directly, typed events, failures as
+RowFailure, checkpoints and finished caches as events, the cache report
+delivered to the object admission names."""
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+mx = pytest.importorskip("mlx.core")
+
+from test_batch_drafting import _run, _tiny  # noqa: E402
+
+
+def _drain(ex, uids, limit=10_000):
+    toks, events = {u: [] for u in uids}, []
+    done = set()
+    for _ in range(limit):
+        evs = ex.step()
+        events += evs
+        for e in evs:
+            if type(e).__name__ == "Token":
+                assert e.uid not in done, "a token after its finish"
+                toks[e.uid].append(e.token)
+            if type(e).__name__ in ("Finished", "RowFailure"):
+                done.add(e.uid)
+        if done >= set(uids):
+            break
+    return toks, events
+
+
+def _executor(model, head, **kw):
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime.executor import LocalExecutor
+    return LocalExecutor(MTPBatchGenerator(model, head, prefill_step_size=16,
+                                           **kw))
+
+
+def test_the_executor_emits_the_engines_own_tokens():
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime.executor import Admission, Finished, Token
+    model, head, prompts = _tiny(512)
+    direct = _run(MTPBatchGenerator(model, head, prefill_step_size=16),
+                  prompts, 24)
+    ex = _executor(model, head)
+    uids = [ex.insert(Admission(segments=[p], max_tokens=24)) for p in prompts]
+    toks, events = _drain(ex, uids)
+    assert [toks[u] for u in uids] == direct
+    fin = [e for e in events if isinstance(e, Finished)]
+    assert sorted(f.uid for f in fin) == sorted(uids)
+    for f in fin:
+        assert f.tokens[-len(toks[f.uid]):] == toks[f.uid] and f.cache
+    lps = [e.logprob for e in events if isinstance(e, Token)]
+    assert all(isinstance(x, float) and x <= 0 for x in lps)
+    ex.close()
+
+
+def test_top_logprobs_only_when_asked_and_sorted():
+    from knurlogic.engine.runtime.executor import Admission, Token
+    model, head, prompts = _tiny(512)
+    ex = _executor(model, head)
+    a = ex.insert(Admission(segments=[prompts[0]], max_tokens=4,
+                            top_logprobs=3))
+    b = ex.insert(Admission(segments=[prompts[1]], max_tokens=4))
+    _, events = _drain(ex, [a, b])
+    for e in (e for e in events if isinstance(e, Token)):
+        if e.uid == b:
+            assert e.top_logprobs is None
+        else:
+            vals = [v for _, v in e.top_logprobs]
+            assert len(vals) == 3 and vals == sorted(vals, reverse=True)
+    ex.close()
+
+
+def test_a_failing_admission_is_a_row_failure_beside_a_working_row(
+        monkeypatch):
+    from knurlogic.engine.runtime.executor import (Admission, Progress,
+                                                   RowFailure, Token)
+    model, head, prompts = _tiny(512)
+    ex = _executor(model, head)
+    real = ex.gen._admit_one
+    boom = {"n": 0}
+
+    def admit():
+        boom["n"] += 1
+        if boom["n"] == 1:
+            ex.gen._unprocessed_sequences.popleft()
+            raise RuntimeError("bad admission")
+        return real()
+    monkeypatch.setattr(ex.gen, "_admit_one", admit)
+    bad = ex.insert(Admission(segments=[prompts[0]], max_tokens=6))
+    good = ex.insert(Admission(segments=[prompts[1]], max_tokens=6))
+    toks, events = _drain(ex, [bad, good])
+    [f] = [e for e in events if isinstance(e, RowFailure)]
+    assert f.uid == bad and "bad admission" in str(f.error)
+    # nothing about the failed row after its failure
+    after = events[events.index(f) + 1:]
+    assert not [e for e in after if getattr(e, "uid", None) == bad]
+    assert not [e for e in events
+                if isinstance(e, (Progress, Token)) and e.uid == bad]
+    assert len(toks[good]) == 6
+    ex.close()
+
+
+def test_a_segment_end_is_a_checkpoint_event_and_the_report_arrives():
+    from knurlogic.engine.runtime.executor import Admission, Checkpoint
+
+    class Req:
+        pass
+    model, head, prompts = _tiny(512)
+    ex = _executor(model, head)
+    req = Req()
+    sys_, user = prompts[2][:40], prompts[2][40:]
+    uid = ex.insert(Admission(segments=[sys_, user], max_tokens=4, report=req))
+    _, events = _drain(ex, [uid])
+    # The system segment's end, and the prompt less its last token (the
+    # engine feeds that token as its own segment, as mlx-lm does).
+    cps = [e for e in events if isinstance(e, Checkpoint)]
+    assert [c.tokens for c in cps] == [sys_, prompts[2][:-1]]
+    assert all(c.uid == uid and c.cache for c in cps)
+    from knurlogic.engine.serve import cache_report
+    rep = cache_report.of(req)
+    assert rep["checkpoints_stored"] == 2 and rep["prefilled"] == len(prompts[2])
+    ex.close()
+
+
+def test_sampling_params_reach_the_engine_as_given():
+    """Temperature goes in as a dict, not a sampler tagged after the fact:
+    draws at high temperature differ from greedy, and both rows finish (a
+    wrong key would fail the row, and differ for the wrong reason)."""
+    from knurlogic.engine.runtime.executor import Admission
+    model, head, prompts = _tiny(512)
+    ex = _executor(model, head)
+    g = ex.insert(Admission(segments=[prompts[0]], max_tokens=16))
+    t = ex.insert(Admission(segments=[prompts[0]], max_tokens=16,
+                            sampling={"temp": 5.0}))
+    toks, events = _drain(ex, [g, t])
+    assert not [e for e in events if type(e).__name__ == "RowFailure"]
+    assert len(toks[g]) == len(toks[t]) == 16 and toks[g] != toks[t]
+    ex.close()
