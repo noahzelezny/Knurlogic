@@ -632,8 +632,10 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
 
 
 #: The paths the page's router forwards by `model`: the two chat surfaces
-#: a client pointed at this page (Claude Code, an OpenAI SDK) uses.
-ROUTE_PATHS = ("/v1/messages", "/v1/chat/completions")
+#: a client pointed at this page (Claude Code, an OpenAI SDK) uses, and
+#: Claude Code's token count (it names the model too).
+ROUTE_PATHS = ("/v1/messages", "/v1/chat/completions",
+               "/v1/messages/count_tokens")
 ROUTE_S = 2.0
 _ROUTES: dict = {"at": 0.0, "map": {}}
 #: when peers were last asked what they serve (peer_residency)
