@@ -72,13 +72,13 @@ def test_glm5_next_imports_without_mlx_vlm(no_mlx_vlm):
     from knurlogic.engine import register
     register.unregister()
     for name in list(_sys.modules):
-        if name.startswith("mlx_vlm.models.glm5_next"):
+        if name.startswith("mlx_lm.models.glm5_next"):
             del _sys.modules[name]
 
     done = register.register("glm5_next")
     assert done == ["glm5_next"]
 
-    mod = importlib.import_module("mlx_vlm.models.glm5_next")
+    mod = importlib.import_module("mlx_lm.models.glm5_next")
     assert hasattr(mod, "Model")
 
     with pytest.raises(ImportError):

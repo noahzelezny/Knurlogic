@@ -106,15 +106,16 @@ def test_pins_are_loaded_and_make_doctor_say_ok():
 
 
 def test_package_architectures_are_found_and_hosted_correctly():
-    """glm5_next is an mlx_vlm PACKAGE, not an mlx_lm file. Registered under
-    the wrong parent its eight relative sibling imports cannot resolve."""
+    """glm5_next is a PACKAGE (vendored with its import closure), not a flat
+    file; it registers under mlx_lm's name like every other architecture
+    (mlx-vlm is not needed: 2026-09-25)."""
     from knurlogic.engine import arch
     from knurlogic.engine.register import available, source_for
     if "glm5_next" not in available():
         return
     src, is_pkg = source_for("glm5_next")
     assert is_pkg, "glm5_next must vendor as a package"
-    assert arch.host_for("glm5_next") == "mlx_vlm"
+    assert arch.host_for("glm5_next") == "mlx_lm"
     assert arch.host_for("qwen4_exp") == "mlx_lm"
 
 

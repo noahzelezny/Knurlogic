@@ -6,7 +6,7 @@ MANIFEST = {
     "name": "glm5",
     "architectures": {
         "glm5_next": {
-            "host": "mlx_vlm",
+            "host": "mlx_lm",
             "model_types": ["glm5_next_text", "glm5_next"],
             "prefill_chunk": (2048, "34 deltanet layers hold per-token "
                                     "recurrent intermediates (16.8 MB/layer) "
