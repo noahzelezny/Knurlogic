@@ -39,11 +39,21 @@ def registry_path() -> Path:
 
 
 def registry() -> dict:
+    """port -> record, for records that name a port and a numeric pid; a
+    hand-edited or half-written entry is skipped, not a KeyError later."""
     try:
-        return {int(k): v for k, v in
-                json.loads(registry_path().read_text()).items()}
+        raw = json.loads(registry_path().read_text())
     except Exception:
         return {}
+    out = {}
+    for k, v in (raw.items() if isinstance(raw, dict) else ()):
+        try:
+            port = int(k)
+            v = dict(v, pid=int(v["pid"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        out[port] = v
+    return out
 
 
 def save_registry(reg: dict) -> None:
