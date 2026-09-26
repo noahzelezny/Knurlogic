@@ -236,3 +236,44 @@ def test_out_of_memory_is_a_503_to_retry():
     from knurlogic.interfaces.http.openai import _status_of
     e = _status_of(OutOfMemory("stopped"))
     assert e.status == 503 and e.code == "insufficient_memory"
+
+
+def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
+    """A row prefills whole inside one step, so a long prompt must fit
+    before it is admitted: the prompt cache gives way, then it waits for
+    running rows, or with none running it is refused."""
+    import pytest
+    from knurlogic.engine.runtime import prompt as P
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+
+    class Cache:
+        nbytes = 4 * GIB
+
+        def trim_to(self, n):
+            mem["active"] -= self.nbytes - n
+            self.nbytes = n
+
+    mem = {"active": 90 * GIB}
+    s = S.Scheduler(Host(None, Tok({})), memory_limit_bytes=100 * GIB)
+    s.cache = Cache()
+    s._active = lambda: mem["active"]
+    s._release = lambda: None
+    # learned from a 2048-token cache of 2 MiB/token
+    kv = type("KV", (), {"nbytes": 2048 * 2 * 2**20})()
+    s._learn(list(range(2048)), [kv])
+    assert s._bpt == 2 * 2**20
+    # 1024 tokens need 4 GiB; 5 GiB free under limit less margin: fits
+    s._make_room(1024)
+    assert s.cache.nbytes == 4 * GIB
+    # 2048 tokens need 8 GiB: the cache gives up 3 GiB and it fits
+    s._make_room(2048)
+    assert s.cache.nbytes == 1 * GIB
+    # 4096 tokens need 16: with a row running it waits ...
+    s._rows = {1: S._Row(S.Job(P.ChatRequest(), P.PromptArgs()), None, [])}
+    with pytest.raises(S._Wait):
+        s._make_room(4096)
+    # ... with none it is refused, and says why
+    s._rows = {}
+    with pytest.raises(S.OutOfMemory, match="4096 tokens"):
+        s._make_room(4096)
