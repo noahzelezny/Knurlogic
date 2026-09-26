@@ -1,7 +1,7 @@
 # Finding the other machines without exo (design, 2026-09-24, for review)
 
-Today `cluster.inventory(EXO_URL)` is the only source of "which machines
-exist": no exo, no second machine. This replaces that source and leaves
+At the time of writing, exo's inventory (now read-only in cluster/exo.py)
+was the only source of "which machines exist": no exo, no second machine. This replaces that source and leaves
 exo, when it is running, as one more witness rather than the authority.
 Scope: discovery, identity and reachability only. Running a model across
 machines (`knurlogic node`, the ring/jaccl pipeline) is the next step and

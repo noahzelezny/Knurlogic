@@ -121,7 +121,7 @@ def test_g11_per_row_rope_delta_in_a_batch():
 
 def test_g10_drafting_machinery_leaves_image_rows_alone(monkeypatch):
     from test_batch_drafting import _tiny
-    monkeypatch.setenv("EXO_MTP_BATCH_MAX_ROWS", "8")     # draft every step
+    monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")     # draft every step
     model, head, _ = _tiny(512)
     fam = fv.StubFamily(IMG, 128)
     vis = _vision(fam)

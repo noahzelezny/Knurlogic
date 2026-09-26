@@ -3,7 +3,7 @@ BatchGenerator, greedy, on a tiny random qwen3_5 with a random head.
 
 A random head is rejected almost every step, so this is the rollback path at
 its hardest; the small-vocab case forces drafting every step
-(EXO_MTP_BATCH_MAX_ROWS) so accepts happen too. Three prompts of different
+(KNURLOGIC_MTP_BATCH_MAX_ROWS) so accepts happen too. Three prompts of different
 lengths, admitted one per call, so rows join a batch already decoding.
 
 WHY NOT VOCAB 4. Measured: the verify forward is 2 tokens wide and the plain
@@ -73,7 +73,7 @@ def test_drafting_batch_is_token_identical_to_mlx_lm(vocab, always,
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator, trunk_offset
 
     if always:
-        monkeypatch.setenv("EXO_MTP_BATCH_MAX_ROWS", "8")
+        monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
     model, head, prompts = _tiny(vocab)
     n_trunk = len(model.make_cache())
 

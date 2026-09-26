@@ -514,7 +514,8 @@ def _start_discovery(me: dict, host: str, port: int, reachable: bool):
               f"still be named with --peer", file=sys.stderr)
 
 
-def serve_ui(host: str, port: int, serve_port: int, peers=()) -> int:
+def serve_ui(host: str, port: int, serve_port: int, peers=(),
+             allow_origins=(), allow_hosts=()) -> int:
     global PEERS
     _SERVE_PORT["n"] = serve_port
     _SERVE_PORT["ui"] = port
@@ -549,14 +550,21 @@ def serve_ui(host: str, port: int, serve_port: int, peers=()) -> int:
             self.wfile.write(body)
 
         def _gated(self) -> bool:
-            """True when --host cluster refuses this connection."""
-            if gate is None:
-                return False
-            local = self.connection.getsockname()[0]
-            if gate.allows(local):
-                return False
-            self._send(gate.refusal(local), "text/plain", 403)
-            return True
+            """True when this request is refused: --host cluster's gate,
+            or the browser guard knurlogic's server applies too (a page
+            in the user's browser must not drive this one either)."""
+            if gate is not None:
+                local = self.connection.getsockname()[0]
+                if not gate.allows(local):
+                    self._send(gate.refusal(local), "text/plain", 403)
+                    return True
+            from knurlogic.interfaces.http.server import browser_refusal
+            why = browser_refusal(self.headers, allow_origins, allow_hosts)
+            if why is not None:
+                self.close_connection = True
+                self._send(why.encode(), "text/plain; charset=utf-8", 403)
+                return True
+            return False
 
         def do_GET(self):
             if self._gated():
@@ -633,9 +641,16 @@ def main(argv=None) -> int:
                         "Naming it on one side is enough: it learns this "
                         "machine from the request. Remembered once it "
                         "answers.")
+    p.add_argument("--allow-origin", action="append", default=[],
+                   metavar="URL", help="a web page origin allowed to call "
+                   "this page's API from a browser (repeatable)")
+    p.add_argument("--allow-host", action="append", default=[],
+                   metavar="NAME", help="a DNS name this machine is reached "
+                   "by, beyond localhost, IPs, .local and its hostname")
     a = p.parse_args(argv)
     peers = []
     for spec in a.peer:
         host, _, port = spec.rpartition(":") if ":" in spec else (spec, "", "")
         peers.append((host, int(port) if port.isdigit() else a.port))
-    return serve_ui(a.host, a.port, a.serve_port, peers)
+    return serve_ui(a.host, a.port, a.serve_port, peers,
+                    allow_origins=a.allow_origin, allow_hosts=a.allow_host)

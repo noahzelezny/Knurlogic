@@ -1608,8 +1608,11 @@ async function loadResident(){
         ${r.can_unload?`<button class="mini danger" data-i="${i}"
           >Unload</button>`:''}
       </div>
-      <div class="n" title="click to chat with it" data-chatn="${i}"
-        style="cursor:pointer">${esc(r.name)}</div>
+      ${r.runtime==='exo'
+        ? `<div class="n" title="exo's model: shown, not driven by knurlogic"
+            >${esc(r.name)}</div>`
+        : `<div class="n" title="click to chat with it" data-chatn="${i}"
+            style="cursor:pointer">${esc(r.name)}</div>`}
       <div class="s">${[
         r.bytes_resident?gb(r.bytes_resident)
           :(r.state==='offered'?'':'size not reported'),

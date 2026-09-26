@@ -151,7 +151,7 @@ def test_a_seeded_row_draws_the_same_alone_and_in_a_batch(vocab, always,
     the drafting path too -- rejection sampling takes the row's keys."""
     from knurlogic.engine.runtime.executor import Admission
     if always:
-        monkeypatch.setenv("EXO_MTP_BATCH_MAX_ROWS", "8")
+        monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
     model, head, prompts = _tiny(vocab)
     s = {"temp": 1.0, "seed": 7}
 
@@ -203,7 +203,7 @@ def test_the_draft_step_hands_processors_the_same_history_as_a_plain_one(
         return row + 1e4 * (mx.arange(row.shape[-1]) == 10 + hist.size)
 
     def run(max_rows):
-        monkeypatch.setenv("EXO_MTP_BATCH_MAX_ROWS", str(max_rows))
+        monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", str(max_rows))
         ex = _executor(model, head)
         u = ex.insert(Admission(segments=[prompts[0]], max_tokens=12,
                                 processors=[count]))

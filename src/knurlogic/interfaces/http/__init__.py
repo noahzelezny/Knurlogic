@@ -100,6 +100,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     app = App(sched, served=served, routes=routes,
               max_body=settings.get("max_body", DEFAULT_MAX_BODY),
               allow_origins=tuple(settings.get("allow_origins") or ()),
+              allow_hosts=tuple(settings.get("allow_hosts") or ()),
               concurrency=lambda: scout.concurrency(sched),
               residency=lambda: scout.residency(mh, sched),
               ensure=scout.ensure)

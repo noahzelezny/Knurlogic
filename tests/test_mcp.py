@@ -47,6 +47,8 @@ def test_nothing_moving_is_ready(monkeypatch):
 
 def test_load_refuses_a_model_that_does_not_fit(tmp_path, monkeypatch):
     """And no flag overrides it: force is for moving memory, not arithmetic."""
+    from knurlogic.interfaces import loading
+    monkeypatch.setattr(loading, "resolve_name", lambda m, served: m)
     d = _artifact(tmp_path / "big", gib=8)
     monkeypatch.setattr("knurlogic.machine.loaded.available_memory",
                         lambda: {"available_bytes": 1 << 20,
@@ -60,6 +62,8 @@ def test_load_refuses_a_model_that_does_not_fit(tmp_path, monkeypatch):
 
 def test_load_refuses_while_memory_moves_but_force_overrides(tmp_path,
                                                              monkeypatch):
+    from knurlogic.interfaces import loading
+    monkeypatch.setattr(loading, "resolve_name", lambda m, served: m)
     d = _artifact(tmp_path / "small", gib=1)
     monkeypatch.setattr(
         "knurlogic.machine.loadlock.holder",
