@@ -173,10 +173,14 @@ class Handler(BaseHTTPRequestHandler):
     def _body(self) -> bytes:
         """The request body, bounded before a byte is read."""
         cl = self.headers.get("Content-Length")
+        if self.headers.get("Transfer-Encoding"):
+            # with a Content-Length too, the two framings disagree about
+            # where this request ends and the next begins (smuggling);
+            # alone, it is chunked, which this server does not read
+            raise BodyError(411, "send the body with a Content-Length "
+                                 "and no Transfer-Encoding (chunked "
+                                 "uploads are not accepted)")
         if cl is None:
-            if self.headers.get("Transfer-Encoding"):
-                raise BodyError(411, "send the body with a Content-Length "
-                                     "(chunked uploads are not accepted)")
             return b""
         try:
             n = int(cl)
@@ -378,8 +382,12 @@ def host_is_local(host_header: str, allow_hosts=()) -> bool:
         return True
     except ValueError:
         pass
-    names = _machine_names()
-    return h in names or h.split(".")[0] in names
+    # This machine's own name, exactly. Never "the first label matches":
+    # noahs-mac.attacker.example would pass that, and a name an attacker
+    # controls can be pointed at 127.0.0.1 (DNS rebinding) -- the Origin
+    # check compares against this same Host, so it would pass too. A name
+    # this machine is reached by (a tailnet, a LAN domain) is --allow-host.
+    return h in _machine_names()
 
 
 _NAMES: set = set()
