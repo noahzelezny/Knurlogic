@@ -430,7 +430,22 @@ knurlogic's own (visible) store.
 4. Firewall-prompt UX for a satellite that missed it (Noah decides the
    details).
 5. Upstream the mlx-lm bugs found (seed on threads, exact-hit crash, stop
-   strings as token ids, NaN as token 0, system-segment diff).
+   strings as token ids, NaN as token 0, system-segment diff), and the
+   vqlab one (VQEmbedding.as_linear/dims ignore pack_bits: the strict
+   xfail in tests/test_vq_runtime.py).
+6. **Analytics, ported from Scout's internal tools** (Noah, 2026-09-26):
+   settings like the prefill chunk have per-family sweet spots, and are
+   easier to tune against recorded data than by feel. The server already
+   measures the pieces (step transient -> memory margin, bytes per token,
+   drafting acceptance, per-width cost); record them per run and model,
+   and give the page somewhere to look at them.
+7. **Peers' resident models on the page**: the page lists the other
+   machines (status.json nodes) but Running surveys only this box, so a
+   model serving on the M4 is invisible from the Studio's page (exo's
+   topology shows it). Part of 2's cluster view.
+8. **Chat layout** (in progress, a subagent's branch): one-line input, and
+   exo's split -- dashboard when idle, transcript layout once a chat has
+   messages.
 
 Machines: the M3 Studio is off-limits for model loads unless told. The M4
 (ssh 10.0.0.2, ~/kl-test/venv, wheel from a fresh clone) is the test box;
