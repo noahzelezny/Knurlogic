@@ -238,11 +238,13 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         if path == "/v1/models":
-            from knurlogic.machine.artifact import sampling_defaults
+            from knurlogic.machine.artifact import (context_length,
+                                                    sampling_defaults)
             path = self.app.scheduler.host.path
             return self._json(200, O.models_document(
                 self.app.served(),
-                sampling_defaults(path) if path else {}))
+                sampling_defaults(path) if path else {},
+                context_length(path) if path else 0))
         if path == "/health":
             return self._json(200, {"status": "ok", "server": "knurlogic",
                                     "model": self.app.scheduler.host.state})

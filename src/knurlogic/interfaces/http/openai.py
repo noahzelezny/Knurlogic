@@ -341,14 +341,16 @@ def _data(obj: Any) -> bytes:
     return f"data: {json.dumps(obj)}\n\n".encode()
 
 
-def models_document(served: dict, sampling: Optional[dict] = None) -> dict:
-    """/v1/models: the one served model, with what the harness asked for, and the
+def models_document(served: dict, sampling: Optional[dict] = None,
+                    context_length: int = 0) -> dict:
+    """/v1/models: the one served model, with what the harness asked for, the
     sampling a request that says nothing gets (the model's recommendation;
-    {} is greedy)."""
+    {} is greedy), and its context window (0: the config does not say)."""
     return {"object": "list", "data": [
         {"id": served["id"], "object": "model",
          "created": int(served.get("created") or 0),
          "owned_by": "knurlogic",
          "capabilities": served.get("capabilities") or ["text"],
          "size_bytes": int(served.get("size_bytes") or 0),
-         "sampling_defaults": dict(sampling or {})}]}
+         "sampling_defaults": dict(sampling or {}),
+         "context_length": int(context_length or 0)}]}
