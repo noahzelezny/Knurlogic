@@ -407,42 +407,35 @@ Done 2026-09-24 (CPU, tiny fixtures, all five families):
    * Timing is secondary here (4 concurrent requests, run 0 includes the
      load); not a speed claim.
 
-## NEXT (set 2026-09-25, before compacting)
+## NEXT (set 2026-09-25, second compaction)
 
-the maintainer's calls this session: server green-lit (docs/SERVER.md, a review
-reviewed, build order there); GLM's head must be RESTARTABLE at
-checkpoints -- prefix reuse AND drafting, no compromise; the NaN guard must
-not tax every step.
+Done today: knurlogic's own server is the only one (docs/SERVER.md: four
+families conformant on the M4, equal speed to mlx-lm's within noise); two
+a review reviews (full branch, then re-review: MERGE); the exo wrap is
+gone (exo is read, never driven); mlx-vlm is not a dependency (GLM served
+without it); browser guards on both servers; ~/Knurlogic/Models is
+knurlogic's own (visible) store.
 
-1. ~~NaN guard, nearly free~~ DONE: the finite flags are computed lazily
-   inside each step's final eval (batch_loop `_finite_rows`/`_mark`, one
-   flag per emitted token on `Emitted.finite`); the sequential loop carries
-   them in the B2 verdict broadcast, so every rank agrees. Measured
-   (synthetic step, V=151936 bf16, n=5 processes per arm, Studio, median ms):
-   B=1 none 3.54 / own sync 4.12 / fused 3.45; B=8 none 5.00 / own sync
-   5.64 / fused 5.05 -- the fused guard is within noise of none. Facts kept:
-   all-NaN -> token 0 under argmax AND categorical; one NaN -> argmax 0 but
-   categorical random (so "check only token 0" is not enough); -inf is
-   masking; +inf picks that token.
-2. **GLM head restartable at checkpoints** -- CAUSE FOUND AND FIXED in
-   code: GLM's head cache is a CacheList (main KV + indexer KV) with no
-   `offset` of its own; `split_pool_entry`, `_entry` and admit's seeding
-   check read `.offset` directly, got -1/None, and discarded every GLM
-   entry, checkpoint or whole prompt. `caches.position()` answers for
-   composites; unit tests cover prefix and checkpoint restores.
-   VALIDATED on the M4 (GLM 2.7): conformance 23 passed (was 22; shared
-   prefix now used, 411 cached tokens); draft acceptance greedy, 6 prompts
-   per arm, fresh 0.754 (0.50-0.90) vs restored from the system checkpoint
-   0.779 (0.55-0.96) -- no difference within spread, so the replay through
-   `MTPHeadGlm5.advance` keeps the head aligned. Open: one of six restored
-   requests got 0 cached tokens (interleaved with unique-prefix requests;
-   LRU eviction suspected, unconfirmed).
-3. ~~Knurlogic's own server~~ DONE, all five build steps (docs/SERVER.md): the only server, conformance green on gemma/Flash/GLM/397B, equal speed to mlx-lm's within noise. Next: full-branch review review before merging to main.
-4. Suite additions listed in docs/SERVER.md (tool calls first).
+1. **Merge vision-integration to main** -- the maintainer's call; the re-review said
+   merge.
+2. **Multi-machine serving, knurlogic's own** (replaces exo): the cluster
+   executor behind engine/runtime/executor.py (docs/SERVER.md "Cluster
+   readiness": rank 0 HTTP + scheduler, ranks 1..n serve_forever, tokens
+   and the NaN verdict broadcast from the last rank), over cluster/
+   (peers, Bonjour, --host cluster). Placement lessons: "Driving exo"
+   findings below.
+3. **HF download + a hub search tab** on the page (exo's shape), into
+   ~/Knurlogic/Models (KNURLOGIC_MODELS moves it). Needed by 2 as well
+   (a model onto a second Mac).
+4. Firewall-prompt UX for a satellite that missed it (the maintainer decides the
+   details).
+5. Upstream the mlx-lm bugs found (seed on threads, exact-hit crash, stop
+   strings as token ids, NaN as token 0, system-segment diff).
 
-Tools: tools/thinking_bench.py, tools/vision_gate.py, tests/api (set
-KNURLOGIC_API_URL). M4 deploy: build a wheel from a fresh clone, install
---no-deps into ~/kl-test/{venv,gvqvlm} (GLM needs gvqvlm: mlx-vlm 0.6.17).
+Machines: the M3 Studio is off-limits for model loads unless told. The M4
+(ssh 192.0.2.2, ~/kl-test/venv, wheel from a fresh clone) is the test box;
+its GLM env (gvqvlm) was removed -- everything runs from venv now. Models
+live on /Volumes/Models/Models (~/.exo/models links there).
 
 ## Requirements for knurlogic's own server: the harness's ingest (2026-09-25)
 

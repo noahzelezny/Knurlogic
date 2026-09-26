@@ -243,3 +243,15 @@ def test_a_malformed_server_record_is_skipped_not_a_keyerror(tmp_path,
                            "8082": {"pid": "nope"}, "junk": {"pid": 1}}))
     monkeypatch.setattr(servers, "registry_path", lambda: p)
     assert list(servers.registry()) == [8080]
+
+
+def test_knurlogics_own_store_is_scanned_and_movable(tmp_path, monkeypatch):
+    import json as _j
+    from knurlogic.machine import discover
+    d = tmp_path / "Models" / "tiny"
+    d.mkdir(parents=True)
+    (d / "config.json").write_text(_j.dumps({"model_type": "qwen3_5"}))
+    (d / "model.safetensors").write_bytes(b"\0" * 8)
+    monkeypatch.setenv("KNURLOGIC_MODELS", str(tmp_path / "Models"))
+    rows = discover.find(stores=["knurlogic"])
+    assert [r.name for r in rows] == ["tiny"] and rows[0].store == "knurlogic"
