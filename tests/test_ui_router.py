@@ -172,3 +172,13 @@ def test_apply_passes_the_servers_report_back(monkeypatch):
     code, doc = ui.apply_settings("http://h:1", b"{}",
                                   post=lambda u, d, t: (200, b"<html>"))
     assert code == 502
+
+
+def test_count_tokens_goes_to_the_model_it_names(cluster):
+    """Claude Code asks the token count per model, like its messages."""
+    page, _, _, seen = cluster
+    code, _, _ = _post(page + "/v1/messages/count_tokens",
+                       {"model": "qwen-local", "messages": []})
+    assert code == 200
+    assert [(m, p) for m, p, _, _ in seen] == [
+        ("qwen-local", "/v1/messages/count_tokens")]
