@@ -480,3 +480,18 @@ def test_the_command_line_no_longer_forces_a_numerics_profile():
     for mod in (serve, doctor):
         src = open(mod.__file__).read()
         assert '"--profile", default=None' in src, mod.__name__
+
+
+def test_mla_caches_are_costed_as_their_latent():
+    """GLM-5.3's attention layers are deepseek_sparse_attention with an MLA
+    latent: they read as 0 full-attention layers (the first prompt after a
+    load went uncosted), and as K,V per head would be ~10x too high."""
+    from knurlogic.tuning.resolve import kv_bytes_per_token
+    tc = {"num_hidden_layers": 4, "kv_lora_rank": 512,
+          "qk_rope_head_dim": 0, "index_head_dim": 128,
+          "num_attention_heads": 64, "num_key_value_heads": 64,
+          "hidden_size": 4096,
+          "layer_types": ["linear_attention", "deepseek_sparse_attention",
+                          "linear_attention", "deepseek_sparse_attention"]}
+    per, why = kv_bytes_per_token(tc)
+    assert per == 2 * 640 * 2 and "MLA" in why
