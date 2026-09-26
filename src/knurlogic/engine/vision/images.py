@@ -89,13 +89,29 @@ def _bytes_of(src: Union[str, bytes], allow_paths: bool) -> bytes:
     return data
 
 
-def _bomb_message(size) -> str:
-    edge = int(BOMB_PIXELS ** 0.5)
+#: A JPEG decodes at 1/8 scale directly (its DCT), never unpacked whole,
+#: so its limit is the reduced decode's: 64x the pixels.
+JPEG_SCALE = 8
+
+
+def _limit(img) -> int:
+    """The largest image of this format decoded safely: formats that must
+    be unpacked whole before shrinking (PNG and most others) stop at
+    BOMB_PIXELS; a JPEG is decoded already reduced, so it may be
+    JPEG_SCALE^2 times larger."""
+    return BOMB_PIXELS * (JPEG_SCALE ** 2 if img.format == "JPEG" else 1)
+
+
+def _bomb_message(size, limit: int = BOMB_PIXELS) -> str:
+    edge = int(limit ** 0.5)
     got = (f"an image is {size[0]}x{size[1]} = {size[0] * size[1]} pixels"
            if size else "an image is far over the pixel limit")
-    return (f"{got}; the maximum is {BOMB_PIXELS} pixels (about "
-            f"{edge}x{edge}). Images under it are downscaled to what the "
-            f"model takes, not refused.")
+    more = (" A JPEG may be 64x larger: it decodes already reduced."
+            if limit == BOMB_PIXELS else "")
+    return (f"{got}; the maximum for its format is {limit} pixels (about "
+            f"{edge}x{edge}), since it must be unpacked whole before it "
+            f"can be shrunk. Images under it are downscaled to what the "
+            f"model takes, not refused.{more}")
 
 
 def decode(src: Union[str, bytes], *, allow_paths: bool = False) -> Any:
@@ -105,17 +121,15 @@ def decode(src: Union[str, bytes], *, allow_paths: bool = False) -> Any:
     data = _bytes_of(src, allow_paths)
     try:
         with warnings.catch_warnings():
-            # PIL warns (not raises) between 1x and 2x its limit; ours is a
-            # hard limit at 1x, checked below from the header.
+            # PIL's own bomb check refuses at open, before the format is
+            # known; ours below is format-aware, so PIL's is set aside here
+            # (this is the process's one PIL decode path).
             warnings.simplefilter("ignore", Image.DecompressionBombWarning)
-            try:
-                img = Image.open(io.BytesIO(data))
-            except Image.DecompressionBombError:
-                # PIL refuses at open above 2x its own limit
-                raise ImageTooLarge(_bomb_message(None)) from None
+            Image.MAX_IMAGE_PIXELS = None
+            img = Image.open(io.BytesIO(data))
             w, h = img.size
-            if w * h > BOMB_PIXELS:
-                raise ImageTooLarge(_bomb_message((w, h)))
+            if w * h > _limit(img):
+                raise ImageTooLarge(_bomb_message((w, h), _limit(img)))
             if getattr(img, "n_frames", 1) > 1:
                 img.seek(0)
             if w * h > MAX_DECODE_PIXELS:
