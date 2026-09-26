@@ -1,16 +1,17 @@
 """A chat request with images -> the cache key, on the generator thread.
 
-Design D3. mlx-lm's server tokenizes on its generator thread
-(`ResponseGenerator._tokenize`, which has `request.messages`), and generation
-runs on that same thread. v1 encoded images on the HTTP thread: two threads
-on one GPU, two uncoordinated allocations on a shared host (critique B2). So
-ALL image work happens here, called from engine/serve/vision.py's `_tokenize` wrap:
+Design D3. The scheduler tokenizes on its own thread
+(engine/runtime/scheduler.py), and generation runs on that same thread. v1
+encoded images on the HTTP thread: two threads on one GPU, two
+uncoordinated allocations on a shared host (critique B2). So ALL image work
+happens here, called from the scheduler's tokenize:
 
     image parts -> decode + clamp + pixel hash (images.load)
                 -> store hit, or preprocess + encode + put (the ONLY tower
                    call; G6 counts it from outside)
                 -> each part replaced by Family.placeholder_text(ref)
-                -> the real _tokenize (template, segments, thinking state)
+                -> the prompt stage (engine/runtime/prompt.tokenize:
+                   template, segments, thinking state)
                 -> key.expand_segments: one pad per image widened to
                    n_tokens, each image token a sentinel
                 -> (key, segment keys, types, state) back to the server

@@ -1,13 +1,10 @@
 """`knurlogic serve` -- an OpenAI-compatible endpoint that loads these models.
 
-This is an ADAPTER, not a server. mlx-lm already ships a complete
-OpenAI-compatible server -- request schema, streaming, chat templates, stop
-sequences -- and rewriting that would be the least valuable thing in this
-package. What it does NOT do is get the environment right: the architecture
-may be one mlx-lm does not ship, the artifact may carry its own runtime, and
-the memory knobs that decide whether a long prompt survives are not exposed.
-
-So: Knurlogic resolves and registers, mlx-lm serves.
+Knurlogic resolves the environment, registers the architecture, and serves
+with its own server (interfaces/http over engine/runtime; docs/SERVER.md):
+mlx-lm is the library underneath -- model classes, tokenizer, caches --
+not the server. Its server was patched in ~34 places until 2026-09-25 and
+is no longer used.
 
 Point Cline, Continue, Zed, OpenWebUI or anything else that speaks OpenAI at
 http://host:port/v1 -- which is the whole reason to prefer an endpoint over a
@@ -32,7 +29,7 @@ import os
 import sys
 
 from knurlogic.engine import arch, serve as engine, mtp, register
-from knurlogic.interfaces import messages, web
+from knurlogic.interfaces import web
 from knurlogic.machine import status, wired
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning.resolve import resolve
@@ -41,9 +38,9 @@ GIB = 1 << 30
 
 
 def run(path: str, host: str, port: int, working_set_gib: float,
-        profile: str | None, passthrough: list, tune: str = "balanced",
+        profile: str | None, tune: str = "balanced",
         overrides: dict | None = None, draft: bool = True,
-        server: str = "mlx-lm") -> int:
+        serving: dict | None = None) -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
@@ -219,23 +216,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                 live_env[k] = v
         return {"applied": done, "running": dict(live_env)}
 
-    ours = server == "knurlogic"
+    from knurlogic.interfaces import http
 
-    def _http_switch(path):
-        from knurlogic.interfaces import http
-        return http.switch(path)
-
-    def _http_unload():
-        from knurlogic.interfaces import http
-        return http.unload()
+    # /v1/messages is served by the server itself (in-process over its
+    # OpenAI surface), so it is not one of these routes.
     routes = web.routes(
-        # `/v1/messages` so a harness pointed here with ANTHROPIC_BASE_URL
-        # works. It is a translation over the engine's own OpenAI endpoint,
-        # never a second inference path -- over loopback HTTP on mlx-lm's
-        # server, in-process on knurlogic's own (which serves it itself).
-        messages_fn=None if ours else messages.handler(
-            f"http://{host if host != '0.0.0.0' else '127.0.0.1'}:{port}"
-            f"/v1/chat/completions", model=a.path.name),
         status_fn=_status,
         settings_fn=web.settings_document(
             a, live_env=live_env, live_tune=tune, live_working_set=ws,
@@ -247,8 +232,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             artifact_for=lambda p: Artifact.load(p),
             resolve_fn=lambda art: resolve(art, ws, profile=profile, tune=tune),
             live_knobs=engine.LIVE_KNOBS,
-            switch_fn=_http_switch if ours else None,
-            unload_fn=_http_unload if ours else None),
+            switch_fn=http.switch, unload_fn=http.unload),
         apply_fn=_apply)
     # A packed head is used because it is there. Nobody should have to know
     # an environment variable exists to run weights they already downloaded.
@@ -266,14 +250,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if eng:
         print("engine    " + "  ".join(f"{k}={v}" for k, v in sorted(eng.items())))
 
-    if ours:
-        from knurlogic.interfaces import http
-        return http.serve(a, host, port, routes=routes, settings=eng,
-                          draft=draft)
-    return engine.serve(str(a.path), host, port,
-                        executes_artifact_code=bool(a.model_file),
-                        extra=passthrough, routes=routes, draft=draft,
-                        settings=eng)
+    return http.serve(a, host, port, routes=routes,
+                      settings={**eng, **(serving or {})}, draft=draft)
 
 
 def _parse_sets(pairs) -> dict:
@@ -314,12 +292,13 @@ def main(argv=None) -> int:
                    help="safe = lowest peak memory; fast = spend headroom "
                         "where it buys speed. Both are capped by what has "
                         "been measured.")
-    p.add_argument("--server", default="mlx-lm",
-                   choices=("mlx-lm", "knurlogic"),
-                   help="which HTTP server answers: mlx-lm's (patched; the "
-                        "default until knurlogic's own passes the "
-                        "conformance suite on every family) or knurlogic's "
-                        "own (docs/SERVER.md)")
+    p.add_argument("--decode-concurrency", type=int, default=32,
+                   help="most requests decoding at once (the batch width)")
+    p.add_argument("--prompt-cache-size", type=int, default=10,
+                   help="prompt-cache entries kept (whole prompts and "
+                        "segment checkpoints)")
+    p.add_argument("--prompt-cache-gib", type=float, default=0.0,
+                   help="cap the prompt cache's memory; 0 = entries only")
     p.add_argument("--cluster", action="store_true",
                    help="serve across nodes by wrapping exo: resolve settings "
                         "per node, proxy the OpenAI surface, aggregate /status")
@@ -335,7 +314,7 @@ def main(argv=None) -> int:
                    help="the command that starts exo on this box")
     p.add_argument("--local", default=None,
                    help="which node name is this box (--cluster --launch)")
-    a, rest = p.parse_known_args(argv)
+    a = p.parse_args(argv)
     if a.cluster:
         from knurlogic.interfaces.cluster import run as run_cluster
 
@@ -343,9 +322,13 @@ def main(argv=None) -> int:
         return run_cluster(a.artifact, a.host, a.port, a.profile, a.exo,
                            a.node, a.launch, shlex.split(a.exo_cmd), a.local,
                            a.tune, draft=not a.no_draft)
-    return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile, rest,
+    serving = {"decode_concurrency": a.decode_concurrency,
+               "prompt_cache_size": a.prompt_cache_size}
+    if a.prompt_cache_gib > 0:
+        serving["prompt_cache_bytes"] = int(a.prompt_cache_gib * GIB)
+    return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile,
                a.tune, _parse_sets(a.sets), draft=not a.no_draft,
-               server=a.server)
+               serving=serving)
 
 
 if __name__ == "__main__":

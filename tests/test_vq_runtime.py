@@ -384,19 +384,17 @@ def test_each_knob_set_gets_its_own_module():
 
 def test_serve_loads_a_verified_rung_on_knurlogics_runtime(tmp_path,
                                                            monkeypatch):
-    """The routing: a rung rungs.json lists as verified loads through
-    knurlogic's runtime; anything else reaches the server's own `load`
-    untouched (bundled model.py and all)."""
-    import types
-    from knurlogic.engine import serve
-    from knurlogic.engine.serve import cache_report, state, vq_runtime
+    """The routing (engine/serve/load.load_unlocked, which the model host
+    calls): a rung rungs.json lists as verified loads through knurlogic's
+    runtime; anything else through the artifact's own loader, bundled
+    model.py and all."""
+    # by module path: the package re-exports a FUNCTION named `load`
+    from knurlogic.engine.serve.load import load_unlocked
+    from knurlogic.engine.serve import state
     from knurlogic.engine.vq import runtime
     import mlx_lm.utils as mu
 
     calls = []
-    srv = types.SimpleNamespace(
-        load=lambda p, **k: calls.append(("bundled", str(p))) or ("m", "t"))
-    vq_runtime.install(srv)
     verified = tmp_path / "verified"
     other = tmp_path / "other"
     verified.mkdir(), other.mkdir()
@@ -404,8 +402,12 @@ def test_serve_loads_a_verified_rung_on_knurlogics_runtime(tmp_path,
     monkeypatch.setattr(runtime, "load_model", lambda p, lazy=False: (
         calls.append(("knurlogic", str(p))) or ("M", {"eos_token_id": 1})))
     monkeypatch.setattr(mu, "load_tokenizer", lambda *a, **k: "T")
+    monkeypatch.setattr(mu, "load", lambda p, **k: (
+        calls.append(("bundled", str(p))) or ("m", "t")))
 
-    assert srv.load(str(verified)) == ("M", "T")
-    assert srv.load(str(other)) == ("m", "t")
+    assert load_unlocked(str(verified)) == ("M", "T")
+    assert state.SERVED["runtime"] == "knurlogic"
+    assert load_unlocked(str(other)) == ("m", "t")
     assert [c[0] for c in calls] == ["knurlogic", "bundled"]
     assert state.SERVED["runtime"] == "bundled"
+

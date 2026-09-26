@@ -21,7 +21,6 @@ import gc
 import logging
 import threading
 import time
-from pathlib import Path
 from typing import Optional
 
 from knurlogic.engine.serve import state
@@ -119,24 +118,8 @@ class ModelHost:
         self._set("empty")
 
     def _weights(self, path: str):
-        from knurlogic.engine.vq import runtime
-        p = Path(path)
-        if p.is_dir() and runtime.serves(p):
-            from mlx_lm.utils import load_tokenizer
-            model, config = runtime.load_model(p)
-            tok = load_tokenizer(p, None,
-                                 eos_token_ids=config.get("eos_token_id"))
-            state.SERVED["runtime"] = "knurlogic"
-            return model, tok
-        state.SERVED["runtime"] = "bundled"
-        import inspect
-
-        from mlx_lm.utils import load as _load
-        kw = {}
-        if self.executes_artifact_code and \
-                "trust_remote_code" in inspect.signature(_load).parameters:
-            kw["trust_remote_code"] = True
-        return _load(path, **kw)
+        from knurlogic.engine.serve.load import load_unlocked
+        return load_unlocked(path, self.executes_artifact_code)
 
     def _bind_vision(self, path: str) -> None:
         from knurlogic.engine.serve import vision

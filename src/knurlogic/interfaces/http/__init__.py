@@ -34,6 +34,16 @@ def unload() -> dict:
     return {"unloaded": had}
 
 
+def scheduler_options(settings: dict) -> dict:
+    """The resolved settings (tuning.settings.engine_settings plus the
+    serve flags) as the scheduler takes them."""
+    return {"completion_batch_size": int(settings.get("decode_concurrency",
+                                                      32)),
+            "prefill_step_size": int(settings.get("prefill_step_size", 2048)),
+            "prompt_cache_size": int(settings.get("prompt_cache_size", 10)),
+            "prompt_cache_bytes": settings.get("prompt_cache_bytes")}
+
+
 def serve(artifact, host: str, port: int, *, routes: dict | None = None,
           settings: dict | None = None, draft: bool = True) -> int:
     from knurlogic.engine.runtime.host import ModelHost
@@ -50,12 +60,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
         print(f"cache limit {set_cache_limit(settings['cache_limit_gb'])}")
     mh = ModelHost(draft=draft,
                    executes_artifact_code=bool(artifact.model_file))
-    sched = Scheduler(
-        mh,
-        completion_batch_size=int(settings.get("decode_concurrency", 32)),
-        prefill_step_size=int(settings.get("prefill_step_size", 2048)),
-        prompt_cache_size=int(settings.get("prompt_cache_size", 10)),
-        prompt_cache_bytes=settings.get("prompt_cache_bytes")).start()
+    sched = Scheduler(mh, **scheduler_options(settings)).start()
     sched.load(str(artifact.path))
     _CURRENT["scheduler"] = sched
 

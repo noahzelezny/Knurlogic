@@ -1,12 +1,12 @@
 """The stack is pinned (design D2): the installed mlx and mlx-lm are the
-versions pyproject.toml pins, and mlx-lm's server.py is the file the seam's
-wraps were verified against.
+versions pyproject.toml pins, and the mlx-lm files knurlogic builds on are
+the files it was verified against.
 
-WHY A DIGEST AS WELL AS VERSIONS. The seam wraps `ResponseGenerator`
-methods by name and the vision key rides the prompt trie; v1 of the vision
-design cited mlx-lm lines from a build that was not the one serving
-(critique B4). A local patch or a fork installed under the same version
-string changes server.py without changing the version -- the digest sees it.
+WHY A DIGEST AS WELL AS VERSIONS. MTPBatchGenerator subclasses mlx-lm's
+BatchGenerator and reads its internals (the queue tuple, the response
+shapes), and the image pins read LRUPromptCache's order. A local patch or
+a fork installed under the same version string changes those files
+without changing the version -- the digest sees it.
 
 One home: the pins live in pyproject.toml ([project] dependencies and
 [tool.knurlogic.pins]); this test reads them and holds the install to them.
@@ -24,16 +24,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REVERIFY = (
     "Before moving the pin, re-verify against the new build: "
-    "(1) every seam wrap still resolves by name -- ResponseGenerator."
-    "_tokenize (returns prompt, segments, segment_types, initial_state), "
-    "_serve_single, _generate's fetch_nearest_cache / segment trim / "
-    "insert_segments, BatchGenerator; "
-    "(2) mlx_lm.models.cache.PromptTrie / LRUPromptCache still accept "
-    "non-int hashable tokens (tests/test_vision_key.py runs the real one); "
-    "(3) process_message_content still rejects non-text parts the way "
-    "the _tokenize wrap expects; "
-    "(4) the full suite. Then update pyproject.toml's dependency pins and "
-    "[tool.knurlogic.pins] together.")
+    "(1) BatchGenerator: `_unprocessed_sequences` entries are still (uid, "
+    "segments, max_tokens, cache, all_tokens, sampler, procs, sm), "
+    "insert_segments/extract_cache/remove/close keep their contracts, and "
+    "PromptProcessingBatch/GenerationBatch.Response keep their fields; "
+    "(2) LRUPromptCache: fetch_nearest_cache/insert_cache/trim_to and "
+    "`_lru._lrus` (engine/vision/cachehook.py), and non-int hashable tokens "
+    "(tests/test_vision_key.py runs the real one); (3) SequenceStateMachine "
+    "and TokenizerWrapper's think/tool fields (engine/runtime/request.py); "
+    "(4) the full suite and tests/api on a served model. Then update "
+    "pyproject.toml's dependency pins and [tool.knurlogic.pins] together.")
 
 
 def _pyproject():
@@ -76,15 +76,17 @@ def test_installed_version_is_the_pin(dist):
         + REVERIFY)
 
 
-def test_mlx_lm_server_is_the_verified_file():
+@pytest.mark.parametrize("rel,key", [
+    ("generate.py", "mlx_lm_generate_sha256"),
+    ("models/cache.py", "mlx_lm_cache_sha256")])
+def test_the_mlx_lm_files_we_build_on_are_the_verified_ones(rel, key):
     try:
         import mlx_lm
     except ImportError:
         pytest.skip("mlx-lm not installed in this interpreter")
-    server = Path(mlx_lm.__file__).parent / "server.py"
-    have = hashlib.sha256(server.read_bytes()).hexdigest()
-    want = _pyproject()["tool"]["knurlogic"]["pins"]["mlx_lm_server_sha256"]
+    f = Path(mlx_lm.__file__).parent / rel
+    have = hashlib.sha256(f.read_bytes()).hexdigest()
+    want = _pyproject()["tool"]["knurlogic"]["pins"][key]
     assert have == want, (
-        f"{server} has sha256 {have}, not the verified {want} (mlx-lm "
-        f"{md.version('mlx-lm')}). The seam wraps this file's methods. "
-        + REVERIFY)
+        f"{f} has sha256 {have}, not the verified {want} (mlx-lm "
+        f"{md.version('mlx-lm')}). " + REVERIFY)

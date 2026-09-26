@@ -3,9 +3,12 @@
 A test enforces that boundary: anything outside engine/ that imports mlx
 fails the suite, so swapping the engine stays a change to this folder.
 
-  serve/           the one place that calls mlx-lm and mlx-vlm: load, serve,
-                   memory, the live knobs, and each change knurlogic makes to
-                   mlx-lm's server in its own module (see serve/__init__.py)
+  serve/           what is served: load, memory, the live knobs, thinking
+                   translation, the vision family and drafting head bound
+                   to the loaded model (see serve/__init__.py)
+  runtime/         knurlogic's own server's engine half: the model host,
+                   the scheduler, the executor, the prompt and request
+                   stages (docs/SERVER.md; HTTP is interfaces/http)
   mtp/             multi-token-prediction drafting, sequential and batched.
                    Its front door (`knurlogic.engine.mtp`) is stdlib only, so
                    asking whether an artifact has a head costs no mlx import

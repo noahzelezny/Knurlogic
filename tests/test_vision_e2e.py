@@ -4,11 +4,10 @@ P4 built and tested the serve path against P0's StubFamily only
 (positions -> (None, 0), no extras). The real families disagree with it on
 the join -- what `embed` returns, what `positions` means in decode, what the
 trunk calls its keywords, what a forward returns. This file runs each tiny
-family through the same objects a served request uses: mlx-lm's own
-`APIHandler.do_POST`, the `_tokenize` wrap (engine/vision/request.py), the
-real `LRUPromptCache`, and `MTPBatchGenerator` admit and decode
-(test_image_cache.Harness, which runs mlx-lm's `_generate` loop on the main
-thread -- see its `_Parked` for the mlx 0.31.2 thread-exit segfault).
+family through the same objects a served request uses: knurlogic's own
+server -- the OpenAI surface, the scheduler's tokenize (vision's
+engine/vision/request.py inside it), the real `LRUPromptCache`, and
+`MTPBatchGenerator` admit and decode (test_image_cache.Harness).
 
   E1  turn 1 (image + text): greedy tokens == the family's own model-level
       reference forward (embed + positions -> trunk, one shot, the path
@@ -23,13 +22,14 @@ thread -- see its `_Parked` for the mlx 0.31.2 thread-exit segfault).
       its solo run (per-row rope_delta).
   E5  gemma with prefill_step_size=16 and an image block straddling token
       16: tokens identical to the one-shot reference (chunk snapping).
-  E6  a seeded image request still takes the batch path (mlx-lm routes
-      seeded requests to its sequential path otherwise).
+  E6  a seeded image request takes the batch path and answers as the
+      reference does.
 
 Tiny random models only (float32, seed 0, vocab 512). No real model, no
 server socket, no exo.
 """
 import json
+import types
 import sys
 import threading
 import time
@@ -46,7 +46,7 @@ mx = pytest.importorskip("mlx.core")
 
 import fixtures_vision as fv  # noqa: E402
 from test_image_cache import (Harness, cached, data_url, first_top,  # noqa: E402,F401
-                              install, server)
+                              server)
 
 from knurlogic.engine.vision import key as K  # noqa: E402
 
@@ -400,7 +400,6 @@ def chat(h, messages, **kw):
 
 
 def harness(server, rig, fam, **cli):
-    install(server)
     return Harness(server, rig.model, rig.tok(), family=fam, **cli)
 
 
@@ -431,7 +430,14 @@ def test_e1_e2_e3_two_turns_through_the_serve_path(server, rigs, name):
     tower = counted(fam)
     url = rig.url(11)
     h = harness(server, rig, fam)
-    m1, r1, m2, r2 = two_turns(h, url)
+    m1 = [user(Q1, url)]
+    r1 = chat(h, m1)
+    before = h.prefilled
+    m2 = m1 + [{"role": "assistant",
+                "content": r1["choices"][0]["message"].get("content", "")},
+               user(Q2)]
+    r2 = chat(h, m2)
+    prefilled2 = h.prefilled - before
 
     # E3: one tower run across both turns (turn 2 resends the image: a
     # store hit, and its KV is inside the cached prefix anyway)
@@ -456,8 +462,7 @@ def test_e1_e2_e3_two_turns_through_the_serve_path(server, rigs, name):
     # E2: turn 2 warm (turn 1 restored from the prompt cache) == cold
     turn1 = r1["usage"]["prompt_tokens"] + r1["usage"]["completion_tokens"]
     assert cached(r2) == turn1
-    assert h.gens[-1]._prompt_tokens_counter == (
-        r2["usage"]["prompt_tokens"] - turn1)       # the hit was USED
+    assert prefilled2 == r2["usage"]["prompt_tokens"] - turn1  # USED
     cold = harness(server, rig, rig.make_family())
     c2 = chat(cold, m2)
     assert cached(c2) == 0
@@ -478,69 +483,11 @@ def test_e1_e2_e3_two_turns_through_the_serve_path(server, rigs, name):
 # --- E4: two rows, one batch ----------------------------------------------------
 
 def post_together(h, bodies):
-    """Every body queued BEFORE mlx-lm's loop runs, so they land in one
-    batch generator: the first builds it, the rest are inserted into it."""
-    results = [None] * len(bodies)
-    errs = []
-
-    def one(i, body):
-        try:
-            results[i] = h.post_raw(body)
-        except BaseException as e:           # surfaced below
-            errs.append(e)
-
-    ts = [threading.Thread(target=one, args=(i, b), daemon=True)
-          for i, b in enumerate(bodies)]
-    for t in ts:
-        t.start()
-    for _ in range(500):
-        if h.rg.requests.qsize() == len(bodies):
-            break
-        time.sleep(0.01)
-    assert h.rg.requests.qsize() == len(bodies)
-
-    def stopper():
-        for t in ts:
-            t.join()
-        h.rg._stop = True
-    st = threading.Thread(target=stopper, daemon=True)
-    h.rg._stop = False
-    st.start()
-    h.rg._generate()
-    st.join()
-    if errs:
-        raise errs[0]
-    return results
-
-
-class RawHarness(Harness):
-    """Harness whose `post_raw` only does the HTTP half (the caller runs
-    the loop), so several requests can be in flight at once."""
-
-    def post_raw(self, body, path="/v1/chat/completions"):
-        srv = self.srv
-        import io
-
-        class H(srv.APIHandler):
-            def log_message(self, *a):
-                pass
-
-        raw = json.dumps(body).encode()
-        h = H.__new__(H)
-        h.created = 0
-        h.system_fingerprint = "fp"
-        h.response_generator = self.rg
-        h.rfile, h.wfile = io.BytesIO(raw), io.BytesIO()
-        h.headers = {"Content-Length": str(len(raw))}
-        h.path, h.command = path, "POST"
-        h.request_version, h.requestline = "HTTP/1.1", "POST " + path
-        h.client_address = ("test", 0)
-        h.close_connection = True
-        h.do_POST()
-        head, _, payload = h.wfile.getvalue().partition(b"\r\n\r\n")
-        status = int(head.split(b"\r\n")[0].split()[1])
-        assert status == 200, payload
-        return json.loads(payload)
+    """Every body queued BEFORE the scheduler starts, so they are admitted
+    into one batch: the first builds it, the rest join it."""
+    replies = [h.submit(b) for b in bodies]
+    h.sched.start()
+    return [h.result(r) for r in replies]
 
 
 def _body(messages):
@@ -568,11 +515,10 @@ def test_e4_image_row_and_text_row_in_one_batch(server, rigs, name,
         return real_step(self)
     monkeypatch.setattr(batch_loop.MTPBatch, "step", step)
 
-    install(server)
-    h = RawHarness(server, rig.model, rig.tok(), family=rig.make_family())
+    h = Harness(server, rig.model, rig.tok(), family=rig.make_family(),
+                start=False)
     together = post_together(h, [_body(img_msgs), _body(txt_msgs)])
-    assert len(h.gens) == 1                     # one generator ...
-    assert max(widths) == 2                     # ... both rows in one step
+    assert max(widths) == 2                     # both rows in one step
     widths.clear()
 
     alone = []
@@ -640,17 +586,14 @@ def test_e5_gemma_chunk_edges_never_split_an_image(server, rigs, monkeypatch,
 # --- E6: a seed does not take an image off the batch path ---------------------------
 
 def test_e6_seeded_image_request_takes_the_batch_path(server, rigs):
-    """mlx-lm serves a request carrying `seed` on its sequential path, which
-    cannot read a key or snap chunks. An image request with a seed must
-    still come through the batch engine (design D5) -- and answer as the
-    reference does."""
-    from knurlogic.engine import serve
-    from knurlogic.engine.serve import cache_report, state, vq_runtime
+    """A seeded image request comes through the batch engine like any
+    other (mlx-lm sent seeds down a sequential path that could not read a
+    key) -- and answers as the reference does."""
+    from knurlogic.engine.serve import state
     rig = rigs("qwen3_5")
     msgs = [user(Q1, rig.url(41))]
     h = harness(server, rig, rig.make_family())
     r = chat(h, msgs, seed=3)
-    assert len(h.gens) == 1
     assert state.VISION_STATS.get("requests") == 1
     _, want, _ = reference(rig, rig.make_family(), msgs)
     assert said(rig, r) == want
@@ -681,9 +624,6 @@ def test_usage_reports_what_the_cache_actually_did(server, rigs, name):
     """usage.knurlogic.cache comes from the engine, not the trie: on turn 2
     the image sits in the reused span, cached_tokens is what was USED, and
     prompt = used + prefilled. Turn 1 used nothing."""
-    from knurlogic.engine import serve
-    from knurlogic.engine.serve import cache_report, state, vq_runtime
-    cache_report.install(server)
     rig = rigs(name)
     h = harness(server, rig, rig.make_family())
     m1, r1, m2, r2 = two_turns(h, rig.url(11))
@@ -706,13 +646,13 @@ def test_usage_reports_what_the_cache_actually_did(server, rigs, name):
 def test_cache_report_says_when_an_offered_prefix_was_discarded():
     """The reason the report exists: the trie offers, the engine refuses
     (a drafting row with no aligned head), and cached_tokens must not claim
-    the offer. Shown on the report function itself."""
-    from knurlogic.engine.serve import cache_report as cachereport
-    usage = {"prompt_tokens": 50,
-             "prompt_tokens_details": {"cached_tokens": 40}}
-    cachereport.into_usage(usage, {"offered": 40, "used": 0, "discarded": 40,
-                                   "prefilled": 50, "via": "none",
-                                   "images": {}, "checkpoints_stored": 0})
+    the offer. Shown on the usage the request stage builds."""
+    from knurlogic.engine.runtime.request import Request
+    r = Request(types.SimpleNamespace(reset=lambda: None), sequences={},
+                prompt_tokens=50)
+    usage = r.usage({"offered": 40, "used": 0, "discarded": 40,
+                     "prefilled": 50, "via": "none", "images": {},
+                     "checkpoints_stored": 0})
     assert usage["prompt_tokens_details"]["cached_tokens"] == 0
     assert usage["knurlogic"]["cache"]["discarded"] == 40
 
