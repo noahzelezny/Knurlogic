@@ -217,8 +217,28 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        if self._gated() or self._refused_browser():
-            return
+        self._guarded(self._get)
+
+    def do_POST(self):
+        self._guarded(self._post)
+
+    def _guarded(self, fn) -> None:
+        """Any error a route did not answer itself is a 500 with a body --
+        never a dropped connection and a traceback on stderr only."""
+        try:
+            if self._gated() or self._refused_browser():
+                return
+            fn()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            logger.exception("%s %s failed", self.command, self.path)
+            try:
+                self._error(O.ApiError(500, f"{type(e).__name__}: {e}"))
+            except Exception:
+                pass
+
+    def _get(self):
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         if path == "/v1/models":
@@ -235,9 +255,7 @@ class Handler(BaseHTTPRequestHandler):
         body, ctype = h(parse_qs(u.query), self.app.requests)
         self._send(200, body, ctype)
 
-    def do_POST(self):
-        if self._gated() or self._refused_browser():
-            return
+    def _post(self):
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         try:

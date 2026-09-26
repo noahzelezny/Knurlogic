@@ -116,6 +116,19 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
         if not isinstance(msgs, list) or not msgs:
             raise ApiError(400, "messages must be a non-empty list",
                            param="messages")
+        for i, m in enumerate(msgs):
+            if not isinstance(m, dict) or not isinstance(m.get("role"), str):
+                raise ApiError(400, f"messages[{i}] must be an object with "
+                                    f"a string role", param="messages")
+            c = m.get("content")
+            if c is not None and not isinstance(c, (str, list)):
+                raise ApiError(400, f"messages[{i}].content must be a "
+                                    f"string or a list of parts",
+                               param="messages")
+            if isinstance(c, list) and not all(isinstance(p, dict)
+                                               for p in c):
+                raise ApiError(400, f"messages[{i}].content parts must be "
+                                    f"objects", param="messages")
         from knurlogic.engine.vision import request as vreq
         if vreq.has_images(msgs):
             if not has_vision():
