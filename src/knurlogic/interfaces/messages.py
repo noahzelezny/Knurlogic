@@ -230,6 +230,14 @@ def stream(openai_lines, model: str):
             chunk = json.loads(payload)
         except ValueError:
             continue
+        if isinstance(chunk.get("error"), dict):
+            # the engine failed mid-stream: say so, never end_turn with a
+            # truncated answer
+            err = chunk["error"]
+            yield _sse("error", {"type": "error", "error": {
+                "type": "api_error",
+                "message": err.get("message") or "the engine failed"}})
+            return
         u = chunk.get("usage") or {}
         if u:
             usage = {"input_tokens": u.get("prompt_tokens", 0),
