@@ -316,3 +316,40 @@ def test_host_is_local_accepts_this_machine_only():
         assert host_is_local(h), h
     for h in ("evil.example", "evil.example:8080", "127.0.0.1.nip.io"):
         assert not host_is_local(h), h
+
+
+@pytest.mark.parametrize("msgs", [["hi"], [{"content": "no role"}],
+                                  [{"role": "user", "content": 5}],
+                                  [{"role": "user", "content": ["x"]}]])
+def test_malformed_messages_are_a_400(url, msgs):
+    u, _ = url
+    code, _, raw = post(u, "/v1/chat/completions", {"messages": msgs})
+    assert code == 400 and json.loads(raw)["error"]["param"] == "messages"
+
+
+def test_a_route_that_raises_answers_500_with_a_body(url, monkeypatch):
+    u, _ = url
+    from knurlogic.interfaces.http import openai as O
+    monkeypatch.setattr(O, "models_document",
+                        lambda served: 1 / 0)
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(u + "/v1/models", timeout=30)
+    assert e.value.code == 500
+    assert "ZeroDivisionError" in json.loads(e.value.read())["error"]["message"]
+
+
+def test_the_cluster_gate_refuses_what_it_does_not_allow(url, monkeypatch):
+    u, _ = url
+    from knurlogic.interfaces.http import server as S
+
+    class Closed:
+        def allows(self, ip):
+            return False
+
+        def refusal(self, ip):
+            return b"thunderbolt only"
+    handler = [c for c in S.Handler.__subclasses__()][-1]
+    monkeypatch.setattr(handler.app, "gate", Closed())
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(u + "/health", timeout=30)
+    assert e.value.code == 403 and e.value.read() == b"thunderbolt only"
