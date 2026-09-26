@@ -42,6 +42,10 @@ MANIFEST = {
     # format for a turn without thinking -- the think block already closed
     # (engine/serve/thinking.CLOSE), at low effort. Measured on 2.7 before
     # it was offered: 12/12 right, 0 reasoning tokens.
+    # Its three levels are the ladder's low/medium/high under other names
+    # (the maintainer, 2026-09-26): "high" is its middle, "max" its top -- and the
+    # default, which is why a harness that asks nothing reasons for 64k.
+    # xhigh has no level of its own and goes to max, the highest there is.
     "thinking": {
         "glm_effort": {
             "detect": {"all": ["reasoning_effort", "Reasoning Effort"]},
@@ -49,8 +53,8 @@ MANIFEST = {
             "native": [["none", "off", {"reasoning_effort": "low",
                                         "_knurlogic_close_think": True}],
                        ["low", "low", {"reasoning_effort": "low"}],
-                       ["high", "high", {"reasoning_effort": "high"}],
-                       ["xhigh", "max", {"reasoning_effort": "max"}]],
+                       ["medium", "high", {"reasoning_effort": "high"}],
+                       ["high", "max", {"reasoning_effort": "max"}]],
         },
     },
     "vision": {"build": "knurlogic.engine.families.glm5.vision:build",
