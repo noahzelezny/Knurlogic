@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
@@ -44,15 +45,77 @@ class PromptError(ValueError):
     """The request cannot be rendered (400)."""
 
 
-def flatten(messages: List[dict]) -> List[dict]:
+#: a text part vision put in place of an image; its control tokens are real
+PLACEHOLDER = "knurlogic_placeholder"
+_ZWSP = "\u200b"
+
+
+def control_strings(tokenizer) -> Optional["re.Pattern"]:
+    """The tokenizer's control tokens as they are spelled in text --
+    added tokens that read as markup (`<|im_end|>`, `<start_of_turn>`,
+    `<think>`, `[gMASK]`) -- as one pattern, longest first; None if none.
+
+    A tokenizer turns those spellings into the control token wherever they
+    appear, message content included. So a message quoting `<|im_end|>`
+    ended its own turn, and `<|im_start|>system` inside a user message or a
+    tool result opened a system turn (measured on Qwen3.8 Flash: models
+    reviewing this code stopped mid-thought when they quoted one)."""
+    cached = getattr(tokenizer, "_knurlogic_controls", False)
+    if cached is not False:
+        return cached
+    # mlx-lm's TokenizerWrapper forwards these to the HF tokenizer (its
+    # `_tokenizer`); a fast HF tokenizer's own `_tokenizer` is the Rust
+    # one, which has neither -- so ask the object itself
+    names = set()
+    try:
+        for t in (getattr(tokenizer, "added_tokens_decoder", None)
+                  or {}).values():
+            names.add(getattr(t, "content", str(t)))
+        names.update(getattr(tokenizer, "all_special_tokens", None) or [])
+    except Exception:
+        pass
+    names = sorted((n for n in names if isinstance(n, str) and len(n) >= 3
+                    and n[0] in "<[" and n[-1] in ">]"), key=len, reverse=True)
+    pat = re.compile("|".join(map(re.escape, names))) if names else None
+    try:
+        tokenizer._knurlogic_controls = pat
+    except Exception:
+        pass
+    return pat
+
+
+def neutralize(text: str, pattern) -> str:
+    """Control-token spellings in `text` made plain text: a zero-width space
+    after the first character. The model reads the same characters; the
+    tokenizer no longer matches the control token."""
+    if pattern is None or not text:
+        return text
+    return pattern.sub(lambda m: m[0][0] + _ZWSP + m[0][1:], text)
+
+
+def _neutralize_values(v, pattern):
+    if isinstance(v, str):
+        return neutralize(v, pattern)
+    if isinstance(v, dict):
+        return {k: _neutralize_values(x, pattern) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_neutralize_values(x, pattern) for x in v]
+    return v
+
+
+def flatten(messages: List[dict], tokenizer=None) -> List[dict]:
     """A copy with list-of-parts content joined into one string (images are
     already placeholders by now) and tool-call arguments decoded, which is
-    what chat templates expect."""
+    what chat templates expect. Content and tool-call arguments are
+    neutralized (control_strings): only the template and vision's
+    placeholders write control tokens."""
+    pat = control_strings(tokenizer) if tokenizer is not None else None
     out = copy.deepcopy(messages)
     for m in out:
         c = m.get("content")
         if isinstance(c, list):
-            texts = [p.get("text", "") for p in c
+            texts = [p.get("text", "") if p.get(PLACEHOLDER)
+                     else neutralize(p.get("text", ""), pat) for p in c
                      if isinstance(p, dict) and p.get("type") == "text"]
             if len(texts) != len(c):
                 raise PromptError("a message part is not text, and this "
@@ -60,6 +123,8 @@ def flatten(messages: List[dict]) -> List[dict]:
             m["content"] = "".join(texts)
         elif c is None:
             m["content"] = ""
+        else:
+            m["content"] = neutralize(c, pat) if isinstance(c, str) else c
         for tc in m.get("tool_calls") or []:
             fn = tc.get("function") or {}
             if isinstance(fn.get("arguments"), str):
@@ -67,6 +132,8 @@ def flatten(messages: List[dict]) -> List[dict]:
                     fn["arguments"] = json.loads(fn["arguments"])
                 except ValueError:
                     pass
+            if "arguments" in fn:
+                fn["arguments"] = _neutralize_values(fn["arguments"], pat)
     return out
 
 
@@ -81,7 +148,7 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
                           "/v1/completions with a prompt")
     kw = dict(args.chat_template_kwargs or {})
     close = bool(kw.pop(thinking.CLOSE, False))
-    messages = flatten(request.messages)
+    messages = flatten(request.messages, tokenizer)
     render = dict(kw, tools=request.tools) if request.tools else dict(kw)
     # The thinking probe renders on HTTP threads under this lock; a
     # tokenizer's template environment is not safe to share across threads.
