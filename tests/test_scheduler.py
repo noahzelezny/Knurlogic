@@ -213,7 +213,8 @@ def test_memory_past_the_limit_empties_the_prompt_cache_then_stops_the_newest():
             mem["active"] -= 5 * GIB * len(uids)
 
     mem = {"active": 110 * GIB}
-    s = Scheduler(Host(None, Tok({})), memory_limit_bytes=100 * GIB)
+    s = Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
+    s._spike = 4 * GIB          # measured: margin 5, limit 100
     s.cache, s._ex = Cache(), Ex()
     s._active = lambda: mem["active"]
     s._release = lambda: None
@@ -256,7 +257,8 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
             self.nbytes = n
 
     mem = {"active": 90 * GIB}
-    s = S.Scheduler(Host(None, Tok({})), memory_limit_bytes=100 * GIB)
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
+    s._spike = 4 * GIB          # measured: margin 5, limit 100
     s.cache = Cache()
     s._active = lambda: mem["active"]
     s._release = lambda: None
@@ -281,3 +283,27 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
     s._rows = {}
     with pytest.raises(S.OutOfMemory, match="16000 tokens"):
         s._make_room(16000)
+
+
+def test_the_step_margin_is_measured_not_published():
+    """A guess until a step has run; then the largest spike measured, with
+    a quarter again -- per model, since a prefill chunk's transient depends
+    on the family's attention."""
+    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
+    assert s._margin() == 6 * GIB                 # the guess: 5%
+    peak = {"v": 0}
+    s._active = lambda: 100 * GIB
+    import mlx.core as mx
+    real = mx.get_peak_memory
+    try:
+        mx.get_peak_memory = lambda: peak["v"]
+        peak["v"] = 102 * GIB
+        s._measure(100 * GIB)
+        assert s._margin() == int(2.5 * GIB)       # 2 GiB spike x 1.25
+        peak["v"] = 101 * GIB                      # a smaller one: kept max
+        s._measure(100 * GIB)
+        assert s._margin() == int(2.5 * GIB)
+        assert s._limit() == 120 * GIB - int(2.5 * GIB)
+    finally:
+        mx.get_peak_memory = real

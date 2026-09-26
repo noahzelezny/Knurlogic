@@ -156,15 +156,18 @@ class Scheduler:
     def __init__(self, host, *, completion_batch_size: int = 32,
                  prefill_step_size: int = 2048, prompt_cache_size: int = 10,
                  prompt_cache_bytes: Optional[int] = None,
-                 memory_limit_bytes: Optional[int] = None,
+                 working_set_bytes: Optional[int] = None,
                  stats: Optional[dict] = None):
         self.host = host
         self.completion_batch_size = completion_batch_size
         self.prefill_step_size = prefill_step_size
         self.cache_bytes = prompt_cache_bytes
-        #: active bytes a step may start at; None = the working set less a
-        #: margin, found on first use; 0 = unguarded
-        self.memory_limit = memory_limit_bytes
+        #: the GPU working set the guard keeps under; None = asked of the
+        #: framework on first use; 0 = unguarded
+        self.working_set = working_set_bytes
+        #: the largest transient a step has been measured to add (bytes
+        #: above the active memory it started at), 0 until measured
+        self._spike = 0
         #: (fixed bytes, bytes per token) of one row's cache, measured
         self._kv = None
         self._samples: dict = {}
@@ -470,16 +473,43 @@ class Scheduler:
 
     # ------------------------------------------------------------- memory
 
-    def _limit(self) -> int:
-        if self.memory_limit is None:
+    def _working_set(self) -> int:
+        if self.working_set is None:
             import importlib   # engine.serve exports a load() function
             load = importlib.import_module("knurlogic.engine.serve.load")
-            ws = int(load.memory().get("working_set_bytes") or 0)
-            self.memory_limit = ws - max(4 * GIB, ws // 20) if ws else 0
-        return self.memory_limit
+            self.working_set = int(load.memory().get("working_set_bytes")
+                                   or 0)
+        return self.working_set
 
     def _margin(self) -> int:
-        return max(2 * GIB, self._limit() // 20)
+        """Room one step's temporaries need. Measured: the largest spike a
+        step of THIS model has made (its prefill chunk, its attention, its
+        batch), with a quarter again of headroom. Until a step has been
+        measured, a guess -- 5% of the working set, at least 4 GiB -- which
+        the first steps replace."""
+        if self._spike:
+            return max(GIB, int(self._spike * 1.25))
+        return max(4 * GIB, self._working_set() // 20)
+
+    def _limit(self) -> int:
+        """Active bytes a step may start at: the working set less a step's
+        temporaries. 0 = unguarded."""
+        ws = self._working_set()
+        return ws - self._margin() if ws else 0
+
+    def _measure(self, before: int) -> None:
+        import mlx.core as mx
+        spike = int(mx.get_peak_memory()) - before
+        if spike > self._spike * 1.25 and spike > GIB // 4:
+            logger.info("a step's transient measured at %.2f GiB: the "
+                        "memory margin is now %.2f GiB", spike / GIB,
+                        max(GIB, int(spike * 1.25)) / GIB)
+        self._spike = max(self._spike, spike)
+
+    def _reset_peak(self) -> int:
+        import mlx.core as mx
+        mx.reset_peak_memory()
+        return self._active()
 
     def _active(self) -> int:
         import mlx.core as mx
@@ -598,6 +628,7 @@ class Scheduler:
 
     def _step(self) -> None:
         ex = self._ex
+        before = self._reset_peak()
         try:
             events = ex.step()          # on the executor's own stream
         except Exception as e:
@@ -605,6 +636,7 @@ class Scheduler:
             self._fail_all(e)
             self._close_executor()
             return
+        self._measure(before)
         drop = []
         for e in events:
             row = self._rows.get(e.uid)
