@@ -70,6 +70,20 @@ class ImageRejected(VisionError, ValueError):
     or over the decompression-bomb pixel limit. A client error (400)."""
 
 
+class ImageTooLarge(ImageRejected):
+    """An image the server will not decode: over the encoded-bytes limit or
+    the decompression-bomb pixel limit, judged before any pixel is decoded.
+    (Anything under them is downscaled -- first to MAX_DECODE_PIXELS, then
+    by the family's own processor to what the model takes -- never
+    refused.) The server answers 413, naming the limit."""
+
+
+class ImagesOverBudget(ImageTooLarge):
+    """A request's images do not fit the image store's memory budget
+    together -- they must all be resident at admission. 413, naming both
+    numbers."""
+
+
 class NoVision(VisionError):
     """An image was sent to a model with no vision tower (400)."""
 
