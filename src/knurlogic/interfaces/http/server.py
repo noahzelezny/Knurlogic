@@ -11,6 +11,16 @@ one thread per connection, every model operation handed to the scheduler.
 
 A write that fails (the client went away) cancels the Job, so the
 scheduler frees its row on the next step.
+
+BROWSERS. A web page open in the user's browser can send requests to
+localhost; without care, any site could make this server load a model.
+Browsers mark their requests with `Origin`, and ordinary clients (SDKs,
+curl, harnesses) send none. So a request carrying an Origin is answered
+only when that origin is this server itself (the page it serves) or one
+the operator allowed (`--allow-origin`), and only those get CORS headers.
+The Host header must name this machine (a hostname, `.local` name or IP
+literal), which stops DNS rebinding -- a foreign domain re-pointed at
+127.0.0.1 to look same-origin.
 """
 
 from __future__ import annotations
@@ -50,7 +60,8 @@ class App:
                  concurrency: Callable[[], str] = None,
                  residency: Callable[[], dict] = None,
                  ensure: Callable[[dict], dict] = None,
-                 max_body: int = DEFAULT_MAX_BODY):
+                 max_body: int = DEFAULT_MAX_BODY,
+                 allow_origins: tuple = ()):
         from knurlogic.engine.serve import thinking
         from knurlogic.interfaces import messages
         self.scheduler = scheduler
@@ -61,6 +72,7 @@ class App:
         self.residency = residency
         self.ensure = ensure
         self.max_body = int(max_body)
+        self.allow_origins = {o.rstrip("/") for o in allow_origins}
         self.translate = thinking.translate
         self.requests = 0
         self.messages = messages.handler_over(self._transport,
@@ -134,7 +146,31 @@ class Handler(BaseHTTPRequestHandler):
         self._json(e.status, e.body())
 
     def _cors(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
+        o = self.headers.get("Origin")
+        if o and o.rstrip("/") in self.app.allow_origins:
+            self.send_header("Access-Control-Allow-Origin", o)
+            self.send_header("Vary", "Origin")
+
+    def _refused_browser(self) -> bool:
+        """403 for a Host that is not this machine (DNS rebinding) or an
+        Origin that is neither this server nor allowed; True if refused."""
+        host = (self.headers.get("Host") or "").strip()
+        if host and not host_is_local(host):
+            self._send(403, (f"Host {host!r} is not this machine; if you "
+                             f"reach it by that name, it is not answered "
+                             f"here (DNS-rebinding guard).").encode(),
+                       "text/plain; charset=utf-8")
+            return True
+        o = (self.headers.get("Origin") or "").rstrip("/")
+        if o and o not in (f"http://{host}", f"https://{host}") \
+                and o not in self.app.allow_origins:
+            self._send(403, (f"requests from the web page at {o} are not "
+                             f"answered: a page in a browser must not be "
+                             f"able to drive this server. Start it with "
+                             f"--allow-origin {o} to allow that page.")
+                       .encode(), "text/plain; charset=utf-8")
+            return True
+        return False
 
     def _gated(self) -> bool:
         g = self.app.gate
@@ -169,14 +205,19 @@ class Handler(BaseHTTPRequestHandler):
     # -------------------------------------------------------------- verbs
 
     def do_OPTIONS(self):
+        o = (self.headers.get("Origin") or "").rstrip("/")
         self.send_response(204)
-        self._cors()
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "*")
+        if o and o in self.app.allow_origins:
+            self._cors()
+            self.send_header("Access-Control-Allow-Methods",
+                             "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers",
+                             "Content-Type, Authorization, x-api-key, "
+                             "anthropic-version")
         self.end_headers()
 
     def do_GET(self):
-        if self._gated():
+        if self._gated() or self._refused_browser():
             return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
@@ -195,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body, ctype)
 
     def do_POST(self):
-        if self._gated():
+        if self._gated() or self._refused_browser():
             return
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
@@ -284,6 +325,41 @@ class Handler(BaseHTTPRequestHandler):
             handler(raw, write, start)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+
+def host_is_local(host_header: str) -> bool:
+    """Does a Host header name this machine: localhost, an IP literal, a
+    `.local` / `.localhost` name, or this machine's own hostname?"""
+    import ipaddress
+    h = host_header.strip()
+    if h.startswith("["):                       # [::1]:8080
+        h = h[1:h.find("]")] if "]" in h else h
+    elif h.count(":") == 1:
+        h = h.split(":", 1)[0]
+    h = h.lower().rstrip(".")
+    if h in ("localhost",) or h.endswith((".localhost", ".local")):
+        return True
+    try:
+        ipaddress.ip_address(h)
+        return True
+    except ValueError:
+        pass
+    names = _machine_names()
+    return h in names or h.split(".")[0] in names
+
+
+_NAMES: set = set()
+
+
+def _machine_names() -> set:
+    """This machine's hostname, once. Not getfqdn(): that is a DNS lookup
+    (seconds on a network without reverse DNS), and `.local` names are
+    accepted above anyway."""
+    import socket
+    if not _NAMES:
+        n = socket.gethostname().lower()
+        _NAMES.update({n, n.split(".")[0]})
+    return _NAMES
 
 
 def make_server(app: App, host: str, port: int) -> ThreadingHTTPServer:

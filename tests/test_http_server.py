@@ -257,7 +257,7 @@ def _raw(url, head: bytes) -> bytes:
 
 def test_a_body_over_the_cap_is_a_413_before_it_is_read(url):
     u, _ = url
-    out = _raw(u, b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\n"
+    out = _raw(u, b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\n"
                   b"Content-Type: application/json\r\n"
                   b"Content-Length: 99999999999\r\n\r\n{")
     assert out.split(b" ", 2)[1] == b"413"
@@ -266,6 +266,53 @@ def test_a_body_over_the_cap_is_a_413_before_it_is_read(url):
 
 def test_a_malformed_content_length_is_a_400_not_a_dropped_connection(url):
     u, _ = url
-    out = _raw(u, b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\n"
+    out = _raw(u, b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\n"
                   b"Content-Length: lots\r\n\r\n")
     assert out.split(b" ", 2)[1] == b"400" and b"not a number" in out
+
+
+def _req(url, path, headers, body=b'{"messages": []}'):
+    req = urllib.request.Request(url + path, data=body, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, dict(r.headers), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read()
+
+
+def test_a_foreign_web_page_cannot_drive_the_server(url):
+    """A page open in the browser posts text/plain (no preflight) with its
+    Origin: refused, and nothing grants it CORS."""
+    u, _ = url
+    code, headers, body = _req(u, "/v1/ensure",
+                               {"Content-Type": "text/plain",
+                                "Origin": "https://evil.example"})
+    assert code == 403 and b"--allow-origin" in body
+    assert "Access-Control-Allow-Origin" not in headers
+
+
+def test_the_servers_own_page_and_plain_clients_are_answered(url):
+    u, prompts = url
+    host = u.split("//", 1)[1]
+    ok = {"Content-Type": "application/json"}
+    body = json.dumps({"messages": _msg(prompts[0]),
+                       "max_tokens": 1}).encode()
+    assert _req(u, "/v1/chat/completions", ok, body)[0] == 200
+    assert _req(u, "/v1/chat/completions",
+                dict(ok, Origin=f"http://{host}"), body)[0] == 200
+
+
+def test_a_rebound_domain_is_refused_by_host(url):
+    u, _ = url
+    code, _, body = _req(u, "/health", {"Host": "attacker.example:80"},
+                         body=None)
+    assert code == 403 and b"DNS-rebinding" in body
+
+
+def test_host_is_local_accepts_this_machine_only():
+    from knurlogic.interfaces.http.server import host_is_local
+    for h in ("localhost:8080", "127.0.0.1:1", "[::1]:80", "192.0.2.2:8098",
+              "mac.local", "foo.localhost"):
+        assert host_is_local(h), h
+    for h in ("evil.example", "evil.example:8080", "127.0.0.1.nip.io"):
+        assert not host_is_local(h), h
