@@ -24,8 +24,8 @@ COMMANDS = {
                    "declare one"),
     "models": ("machine.discover", "find the models already on this machine, in "
                            "every tool's store"),
-    "deps": ("machine.deps", "what this stack stands on, per interpreter, and which "
-                     "pieces are stock and which are forks"),
+    "deps": ("machine.deps", "what this stack stands on, and which pieces are "
+                     "stock and which are forks"),
 }
 
 
