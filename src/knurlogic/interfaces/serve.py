@@ -220,6 +220,14 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         return {"applied": done, "running": dict(live_env)}
 
     ours = server == "knurlogic"
+
+    def _http_switch(path):
+        from knurlogic.interfaces import http
+        return http.switch(path)
+
+    def _http_unload():
+        from knurlogic.interfaces import http
+        return http.unload()
     routes = web.routes(
         # `/v1/messages` so a harness pointed here with ANTHROPIC_BASE_URL
         # works. It is a translation over the engine's own OpenAI endpoint,
@@ -238,7 +246,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         load_fn=web.load_action(
             artifact_for=lambda p: Artifact.load(p),
             resolve_fn=lambda art: resolve(art, ws, profile=profile, tune=tune),
-            live_knobs=engine.LIVE_KNOBS),
+            live_knobs=engine.LIVE_KNOBS,
+            switch_fn=_http_switch if ours else None,
+            unload_fn=_http_unload if ours else None),
         apply_fn=_apply)
     # A packed head is used because it is there. Nobody should have to know
     # an environment variable exists to run weights they already downloaded.
