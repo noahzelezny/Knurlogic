@@ -32,8 +32,10 @@ class ModelHost:
     is_batchable = True        # every request goes through the batch engine
 
     def __init__(self, *, draft: bool = True,
-                 executes_artifact_code: bool = False):
+                 executes_artifact_code: bool = False,
+                 image_store_bytes: Optional[int] = None):
         self.draft = draft
+        self.image_store_bytes = image_store_bytes
         self.executes_artifact_code = executes_artifact_code
         self.state = "empty"
         self.path: Optional[str] = None
@@ -124,7 +126,7 @@ class ModelHost:
     def _bind_vision(self, path: str) -> None:
         from knurlogic.engine.serve import vision
         try:
-            vision.bind(path, self)
+            vision.bind(path, self, store_bytes=self.image_store_bytes)
         except Exception as e:
             # A vision build that fails must not take the text model with
             # it; it is said on /status.json and images get a 400.

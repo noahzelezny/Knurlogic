@@ -6,8 +6,10 @@ for knurlogic's own server"), in OpenAI's shapes and nothing custom:
                      nodes, state (loading / ready / unloading / failed)
   /v1/ensure         {model, wait}: idempotent; a different model is a
                      switch (409 while requests are running, unless force)
-  413                an image over the decode limit, from its header,
-                     before anything is decoded
+  413                an image over the decode limit (judged from its
+                     header before decoding: engine/vision/images.py), or
+                     a request whose images together exceed the image
+                     store's memory budget
   X-Knurlogic-Concurrency: rows=N, more=?1|?0  (RFC 8941) -- the batch's
                      width now, and whether one more row measured faster
                      per token; `more` is left out until both widths have
@@ -17,7 +19,6 @@ for knurlogic's own server"), in OpenAI's shapes and nothing custom:
 
 from __future__ import annotations
 
-import base64
 from pathlib import Path
 
 from .openai import ApiError
@@ -117,44 +118,6 @@ def ensure(body: dict, artifact, host, sched) -> dict:
             "memory_bytes": int(st.get("memory_bytes") or 0)}
 
 
-def _image_bytes(url: str):
-    if not isinstance(url, str) or not url.startswith("data:"):
-        return None
-    try:
-        return base64.b64decode(url.split(",", 1)[1], validate=False)
-    except Exception:
-        return None
-
-
-def image_limit(messages) -> None:
-    """413 for an image the server would refuse to decode, judged from its
-    encoded size and its header (PIL reads the PNG IHDR / JPEG SOF without
-    decoding pixels)."""
-    import io
-
-    from knurlogic.engine.vision import images
-    from knurlogic.engine.vision import request as vreq
-    for part in vreq.image_parts(messages):
-        data = _image_bytes(vreq.image_source(part))
-        if data is None:
-            continue
-        if len(data) > images.MAX_BYTES:
-            raise ApiError(413, f"an image is {len(data)} bytes; the maximum "
-                                f"is {images.MAX_BYTES} bytes",
-                           param="messages", code="image_too_large")
-        try:
-            from PIL import Image
-            with Image.open(io.BytesIO(data)) as im:
-                w, h = im.size
-        except Exception:
-            continue            # not readable: decode will say why (400)
-        if w * h > images.BOMB_PIXELS:
-            edge = int(images.BOMB_PIXELS ** 0.5)
-            raise ApiError(413, f"an image is {w}x{h} = {w * h} pixels; the "
-                                f"maximum is {images.BOMB_PIXELS} pixels "
-                                f"(about {edge}x{edge}). Larger images "
-                                f"under it are downscaled, not refused.",
-                           param="messages", code="image_too_large")
 
 
 def concurrency(sched) -> str:

@@ -199,12 +199,31 @@ class VisionServe:
         the key stays pinned (one pin per image occurrence) until the batch
         generator admits or removes the row -- on any failure here the pins
         are dropped before the exception reaches the server."""
+        from . import ImagesOverBudget
         parts = image_parts(request.messages)
         refs: List[Any] = []
         before = self.encodes      # tokenize runs on the one generator thread
+        seen: Dict[Tuple[str, str], int] = {}
         try:
             for p in parts:
-                refs.append(self.ensure(image_source(p)))
+                r = self.ensure(image_source(p))
+                refs.append(r)
+                # No count limit: the bound is memory. Every image of a
+                # request must be resident at admission, so together they
+                # must fit the store's budget -- checked as they arrive, so
+                # an oversized request stops one image past the line.
+                k = (r.sha, r.proc_hash)
+                if k not in seen:
+                    seen[k] = self.store.entry_nbytes(self.model_key, *k)
+                need = sum(seen.values())
+                if need > self.store.max_bytes:
+                    raise ImagesOverBudget(
+                        f"this request's images need more than "
+                        f"{need / 2**20:.0f} MiB of encoded features "
+                        f"({len(seen)} of {len(parts)} encoded so far); the "
+                        f"image store holds {self.store.max_bytes / 2**20:.0f}"
+                        f" MiB. Send fewer or smaller images per request, "
+                        f"or raise the store with --image-store-gib.")
             texts = [self.family.placeholder_text(r) for r in refs]
             req = dataclasses.replace(
                 request, messages=with_placeholders(request.messages, texts))

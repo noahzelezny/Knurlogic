@@ -41,7 +41,7 @@ import warnings
 from pathlib import Path
 from typing import Any, Optional, Tuple, Union
 
-from . import ImageRejected
+from . import ImageRejected, ImageTooLarge
 
 #: Encoded input bytes accepted per image (after base64 decode).
 MAX_BYTES = 32 * 1024 * 1024
@@ -69,10 +69,12 @@ def _bytes_of(src: Union[str, bytes], allow_paths: bool) -> bytes:
         elif allow_paths and len(s) < 4096 and Path(s).expanduser().is_file():
             p = Path(s).expanduser()
             if p.stat().st_size > MAX_BYTES:
-                raise ImageRejected(f"image file over {MAX_BYTES} bytes")
+                raise ImageTooLarge(f"an image file is over the maximum of "
+                                    f"{MAX_BYTES} bytes")
             return p.read_bytes()
         if len(s) > MAX_BYTES * 4 // 3 + 4:
-            raise ImageRejected(f"image over {MAX_BYTES} bytes")
+            raise ImageTooLarge(f"an image is over the maximum of "
+                                f"{MAX_BYTES} bytes")
         try:
             data = base64.b64decode(s, validate=False)
         except (binascii.Error, ValueError) as e:
@@ -80,10 +82,20 @@ def _bytes_of(src: Union[str, bytes], allow_paths: bool) -> bytes:
     else:
         raise ImageRejected(f"unsupported image source {type(src).__name__}")
     if len(data) > MAX_BYTES:
-        raise ImageRejected(f"image over {MAX_BYTES} bytes")
+        raise ImageTooLarge(f"an image is {len(data)} bytes; the maximum is "
+                            f"{MAX_BYTES} bytes")
     if not data:
         raise ImageRejected("empty image")
     return data
+
+
+def _bomb_message(size) -> str:
+    edge = int(BOMB_PIXELS ** 0.5)
+    got = (f"an image is {size[0]}x{size[1]} = {size[0] * size[1]} pixels"
+           if size else "an image is far over the pixel limit")
+    return (f"{got}; the maximum is {BOMB_PIXELS} pixels (about "
+            f"{edge}x{edge}). Images under it are downscaled to what the "
+            f"model takes, not refused.")
 
 
 def decode(src: Union[str, bytes], *, allow_paths: bool = False) -> Any:
@@ -96,13 +108,22 @@ def decode(src: Union[str, bytes], *, allow_paths: bool = False) -> Any:
             # PIL warns (not raises) between 1x and 2x its limit; ours is a
             # hard limit at 1x, checked below from the header.
             warnings.simplefilter("ignore", Image.DecompressionBombWarning)
-            img = Image.open(io.BytesIO(data))
+            try:
+                img = Image.open(io.BytesIO(data))
+            except Image.DecompressionBombError:
+                # PIL refuses at open above 2x its own limit
+                raise ImageTooLarge(_bomb_message(None)) from None
             w, h = img.size
             if w * h > BOMB_PIXELS:
-                raise ImageRejected(f"image is {w}x{h} = {w * h} px, over the "
-                                    f"decompression-bomb limit {BOMB_PIXELS}")
+                raise ImageTooLarge(_bomb_message((w, h)))
             if getattr(img, "n_frames", 1) > 1:
                 img.seek(0)
+            if w * h > MAX_DECODE_PIXELS:
+                # decode at reduced size where the format can (JPEG's DCT
+                # scaling): a legal 80 Mpx photo need not be unpacked whole
+                # before clamp() downscales it
+                s = (MAX_DECODE_PIXELS / (w * h)) ** 0.5
+                img.draft("RGB", (max(1, int(w * s)), max(1, int(h * s))))
             img = ImageOps.exif_transpose(img)
             img = img.convert("RGB")
     except ImageRejected:

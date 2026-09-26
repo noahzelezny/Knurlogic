@@ -50,8 +50,7 @@ def _num(body, name, kind, lo=None, hi=None, default=None):
 
 
 def build_job(body: dict, *, chat: bool, translate: Callable = None,
-              has_vision: Callable[[], bool] = lambda: False,
-              image_limit: Callable = None) -> tuple:
+              has_vision: Callable[[], bool] = lambda: False) -> tuple:
     """(Job, context) from a request body; ApiError to refuse."""
     if not isinstance(body, dict):
         raise ApiError(400, "the request body must be a JSON object")
@@ -123,8 +122,6 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
                 raise ApiError(400, "this request has images but the "
                                     "served model has no vision; send text "
                                     "only", param="messages")
-            if image_limit is not None:
-                image_limit(msgs)
         kwargs = body.get("chat_template_kwargs")
         if translate is not None:
             from knurlogic.engine.serve import thinking
@@ -152,9 +149,13 @@ def _status_of(err: BaseException) -> ApiError:
         return err
     if isinstance(err, P.PromptError):
         return ApiError(400, str(err))
+    from knurlogic.engine.vision import ImageTooLarge, VisionError
     name = type(err).__name__
-    if name == "VisionError":
-        return ApiError(400, str(err))
+    if isinstance(err, ImageTooLarge):
+        return ApiError(413, str(err), param="messages",
+                        code="image_too_large")
+    if isinstance(err, VisionError):
+        return ApiError(400, str(err), param="messages")
     if "no model" in str(err):
         return ApiError(503, str(err), type_="server_error")
     return ApiError(500, f"{name}: {err}")

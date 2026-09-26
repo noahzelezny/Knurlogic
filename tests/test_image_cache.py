@@ -233,15 +233,14 @@ class Harness:
             from knurlogic.engine.vision import set_served_vision
             from knurlogic.engine.vision.request import VisionServe
             from knurlogic.engine.vision.store import ImageStore
-            self.vision = VisionServe(family, store or ImageStore(),
+            self.vision = VisionServe(family, store if store is not None else ImageStore(),
                                       self.host.model_key)
             state.VISION.update(serve=self.vision, model=model)
             set_served_vision(family.spec)
         self.sched = Scheduler(self.host, prefill_step_size=prefill_step_size)
         if start:
             self.sched.start()
-        self.app = App(self.sched, served=lambda: {"id": "tiny"},
-                       image_limit=scout.image_limit)
+        self.app = App(self.sched, served=lambda: {"id": "tiny"})
         self.app.translate = None
 
     @property
@@ -566,3 +565,25 @@ def test_load_builds_the_family_through_the_registry(server, model, tmp_path,
     (tmp_path / "config.json").write_text(json.dumps(cfg))
     assert serve.bind_vision(str(tmp_path), prov) is None
     assert served_vision() is None
+
+
+def test_images_that_overflow_the_store_together_are_a_413(server, model):
+    """No count limit: the bound is the store's memory. Every image of a
+    request must be resident at admission, so a request whose images do not
+    fit together is refused with the numbers -- and its pins are released."""
+    from knurlogic.engine.vision.store import ImageStore
+    fam = stub_family()
+    probe = Harness(server, model, family=fam)
+    probe.chat([user("x ", data_url(60))])
+    one = probe.vision.store.nbytes               # one image's features
+    small = ImageStore(max_bytes=int(one * 2.5))  # two fit, three do not
+    h = Harness(server, model, family=stub_family(), store=small)
+    assert h.post(dict(messages=[user("two ", data_url(61), data_url(62))],
+                       max_tokens=2, logit_bias=BAN))[0] == 200
+    code, _, body = h.post(dict(messages=[user(
+        "three ", data_url(63), data_url(64), data_url(65))], max_tokens=2,
+        logit_bias=BAN))
+    err = json.loads(body)["error"]
+    assert code == 413 and err["code"] == "image_too_large"
+    assert "MiB" in err["message"] and "--image-store-gib" in err["message"]
+    assert h.vision.pinned_count() == 0
