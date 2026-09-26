@@ -482,6 +482,24 @@
  .kw{font-size:9.5px;letter-spacing:.06em;margin-left:7px;font-weight:400}
  .kw.live{color:var(--acc)}
  .kw.dead{color:var(--warn)}
+ .kw{cursor:help}
+ /* the (i) describes the setting, so it leads the name */
+ .knob .k .info{margin:0 6px 0 0}
+ /* staged, not yet sent: the teal dot and the value it will be */
+ .knob.staged .k:after{content:"";width:6px;height:6px;border-radius:50%;
+   background:var(--acc);margin-left:7px}
+ .kstage{font-size:10.5px;color:var(--acc);margin-top:2px;text-align:right}
+ #stagepop{position:absolute;right:14px;top:44px;z-index:40;width:24em;
+   max-width:calc(100% - 28px);padding:12px 14px;background:var(--bg);
+   border:1px solid var(--acc);border-radius:var(--r);
+   box-shadow:0 6px 24px oklch(0 0 0/.55)}
+ #stagepop[hidden]{display:none}
+ #stagepop .sg{margin-top:8px;font-size:11px}
+ #stagepop .sg .ro{display:block;margin-bottom:2px}
+ #stagepop .ctl{margin-top:12px;justify-content:flex-end;gap:8px}
+ /* Claude Code's tiers stand out from the model names they are set to: the
+    page's amber, the one warm colour it has */
+ .cs.tier{color:var(--warn)}
  .kedit{display:flex;align-items:center;justify-content:flex-end;gap:6px;
    margin-top:4px}
  .kedit select,.kedit input{width:auto;max-width:8em;padding:2px 5px;
@@ -661,7 +679,6 @@
     <b>knurlogic</b>
   </div>
   <nav>
-    <a id="navhome">Home</a>
     <a data-panel="settings">Settings</a>
     <a data-panel="connect">Connect</a>
   </nav>
@@ -681,7 +698,9 @@
            nothing, so the server applies the model's own recommendation
            (its generation_config.json); the placeholder shows that value. -->
       <section id="csettings">
-        <div class="sidelab">chat settings</div>
+        <div class="sidelab">test chat</div>
+        <div class="csnote" style="margin:0 0 4px">for this page&#39;s test chat
+          only; endpoints use each request&#39;s own settings</div>
         <div class="cs">
           <label for="cmax">max tokens<i class="info" tabindex="0">i<span class="bub">The longest the answer may run, thinking included. It caps the reply, not the conversation: the list stops at the model&#39;s context window, which prompt and answer share.</span></i></label>
           <!-- Steps, not a number field or a slider: nobody types 3187, and
@@ -907,17 +926,20 @@
 // "outside" or the click that closes it would open it again.
 const OVL=(()=>{
   let cur=null;
-  function close(){
+  // `force` skips the overlay's own say (Settings asks about what is staged)
+  function close(force){
     if(!cur) return;
+    if(!force && cur.beforeclose && !cur.beforeclose()) return;
     const c=cur; cur=null;
     c.el.hidden=true;
     if(c.modal) document.body.style.overflow='';
     if(c.onclose) c.onclose();
   }
   function open(el, o={}){
-    close();
+    close(true);
     cur={el, face:o.face||el, opener:o.opener||null,
-         modal:el.classList.contains('modal'), onclose:o.onclose};
+         modal:el.classList.contains('modal'), onclose:o.onclose,
+         beforeclose:o.beforeclose};
     el.hidden=false;
     if(cur.modal) document.body.style.overflow='hidden';
   }
@@ -945,6 +967,8 @@ const OVL=(()=>{
     a.setAttribute('aria-pressed', a.dataset.panel===name));
   function show(name){
     if(!name){ OVL.close(); return }
+    // switching panels is a close of Settings too: ask first
+    if(OVL.is(sheet) && stagedCount() && name!=='settings'){ OVL.close(); return }
     document.querySelectorAll('.sheetbody .panel').forEach(p=>
       p.classList.toggle('on', p.id===name));
     document.getElementById('sheettitle').textContent=name;
@@ -952,7 +976,8 @@ const OVL=(()=>{
     if(name==='connect') showConnect();
     OVL.open(sheet, {face:sheet.querySelector('.box'),
                      opener:document.querySelector('header nav'),
-                     onclose:()=>mark(null)});
+                     onclose:()=>{ mark(null); STAGEPOP.hide() },
+                     beforeclose:()=>STAGEPOP.beforeClose()});
     mark(name);
     sheet.querySelector('.sheetbody').scrollTop=0;
   }
@@ -1009,18 +1034,22 @@ const esc=s=>String(s??'').replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;',
 // import, and one is not read by these runtimes at all.
 let DOC={}, ASK={};
 // `where`: the model server the row belongs to ('' is this page's own), so
-// a live knob can be changed there -- on a click of its Apply and nothing
-// else. Without one (a preview of a load) the row only reads.
+// a live knob can be changed there -- staged, and sent only by the Apply
+// asked for when Settings closes. Without one (a preview of a load) the row only reads.
 function infoHTML(text, cls){
   return text ? `<i class="info ${cls||''}" tabindex="0">i<span class="bub">${text}</span></i>` : '';
 }
+// What the two reach words mean, for their hover.
+const REACH={live:'applies to the running model immediately, no reload',
+  dead:'these runtimes never read it: setting it changes nothing'};
 function knobHTML(k, where){
   const cur=k.running??k.would_be;
+  const st=where!=null ? stagedVal(where,k.name) : undefined, sel=st??cur;
   const v=k.changed
     ? `<span class="was">${esc(k.running)}</span><span class="chg">${esc(k.would_be)}</span>`
     : esc(cur);
-  const tag=k.reach==='live'?'<span class="kw live">live</span>'
-    :k.reach==='no-effect'?'<span class="kw dead">no effect</span>':'';
+  const tag=k.reach==='live'?`<span class="kw live" title="${esc(REACH.live)}">live</span>`
+    :k.reach==='no-effect'?`<span class="kw dead" title="${esc(REACH.dead)}">no effect</span>`:'';
   const about=[k.what,k.why].filter(Boolean).map(esc).join(' — ')+
     (k.reach_why?`<br><span style="color:var(--faint)">${esc(k.reach_why)}</span>`:'');
   let edit='';
@@ -1033,45 +1062,118 @@ function knobHTML(k, where){
     const cap=k.cap==null||ci<0?vals.length-1:ci;
     const ctl=vals.length
       ? `<select aria-label="${esc(k.name)}">${(vals.some(x=>same(x,cur))?[]:[cur])
-          .concat(vals.filter((x,i)=>i<=cap||same(x,cur))).map(x=>
-          `<option${same(x,cur)?' selected':''}>${esc(x)}</option>`).join('')}</select>`
-      : `<input type="number" aria-label="${esc(k.name)}" value="${esc(cur)}">`;
-    edit=`<div class="kedit" data-knob="${esc(k.name)}" data-where="${esc(where)}">${ctl}${
-      k.unit?`<span class="ro">${esc(k.unit)}</span>`:''}<button class="mini"
-      data-kapply>Apply</button></div><div class="krep"></div>`;
+          .concat(vals.filter((x,i)=>i<=cap||same(x,cur)||same(x,sel))).map(x=>
+          `<option${same(x,sel)?' selected':''}>${esc(x)}</option>`).join('')}</select>`
+      : `<input type="number" aria-label="${esc(k.name)}" value="${esc(sel)}">`;
+    edit=`<div class="kedit" data-knob="${esc(k.name)}" data-where="${esc(where)}"
+      data-cur="${esc(cur)}">${ctl}${k.unit?`<span class="ro">${esc(k.unit)}</span>`:''}</div>
+      <div class="kstage">${st!=null?`changed · ${esc(cur)} → ${esc(st)} on close`:''}</div>`;
   }else if(where!=null && k.reach==='restart'){
     edit=`<div class="kreload">takes a reload: relaunch with <code>--set ${esc(k.name)}=&lt;value&gt;</code></div>`;
   }
-  return `<div class="knob">
-    <div class="hd"><span class="k">${esc(k.name)}${tag}${infoHTML(about,'down')}</span>
+  return `<div class="knob${st!=null?' staged':''}">
+    <div class="hd"><span class="k">${infoHTML(about,'down')}${esc(k.name)}${tag}</span>
       <span class="val">${v}</span></div>${edit}</div>`;
 }
 // (i) opens on a click too (it takes focus), without the click reaching a
-// label's field; a knob's Apply sends that one knob to its server and shows
-// the server's own per-knob report -- the only way this page changes one.
-document.addEventListener('click', async e=>{
+// label's field.
+document.addEventListener('click', e=>{
   const i=e.target.closest('.info');
-  if(i && !e.target.closest('.bub')){ e.preventDefault(); i.focus(); return }
-  const b=e.target.closest('[data-kapply]'); if(!b) return;
-  const box=b.closest('.kedit'), out=box.nextElementSibling;
-  const val=box.querySelector('select,input').value.trim();
-  if(val==='') return;
-  b.disabled=true; out.textContent='applying…';
-  const where=box.dataset.where;
-  const url=where ? '/apply?'+new URLSearchParams({where}) : '/settings.json';
-  let r;
-  try{
-    const x=await fetch(url,{method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({[box.dataset.knob]:val})});
-    r=await x.json();
-    if(!x.ok && !r.error) r={error:'HTTP '+x.status};
-  }catch(err){ r={error:String(err.message||err)} }
-  b.disabled=false;
-  const done=Object.entries(r.applied||{});
-  out.innerHTML=r.error ? `<span style="color:var(--warn)">${esc(r.error)}</span>`
-    : done.length ? done.map(([k,v])=>`<b>${esc(k)}</b> ${esc(v)}`).join('<br>')
-    : esc(r.note||'nothing changed');
+  if(i && !e.target.closest('.bub')){ e.preventDefault(); i.focus() }
 });
+// --- staged knob changes ----------------------------------------------------
+// A change in Settings is STAGED, never sent as it is made: a select
+// that fires on every arrow key, or a dial let go one notch off, would
+// otherwise change a running model by accident. Closing the overlay with
+// something staged asks once -- Apply, Discard, Keep editing -- and Apply is
+// the only thing that sends. Keyed by server ('' is this page's own), each
+// with the label it is listed under.
+const STAGED=new Map();       // where -> {label, knobs:{name:{from,to}}}
+function stagedVal(where,name){ const g=STAGED.get(where); return g&&g.knobs[name]?g.knobs[name].to:undefined }
+function stagedCount(){ let n=0; STAGED.forEach(g=>n+=Object.keys(g.knobs).length); return n }
+function stage(where,label,name,from,to){
+  const same=String(from)===String(to)||(String(to).trim()!==''&&+from===+to);
+  let g=STAGED.get(where);
+  if(same||String(to).trim()===''){
+    if(g){ delete g.knobs[name]; if(!Object.keys(g.knobs).length) STAGED.delete(where) }
+    return;
+  }
+  if(!g) STAGED.set(where, g={label, knobs:{}});
+  g.knobs[name]={from, to};
+}
+document.addEventListener('change', e=>{
+  const box=e.target.closest('.kedit'); if(!box) return;
+  const where=box.dataset.where, name=box.dataset.knob;
+  const grp=box.closest('.sgrp');
+  const label=where==='' ? 'this machine'
+    : (grp&&grp.querySelector('.shd')?grp.querySelector('.shd').firstChild.textContent.trim():where);
+  stage(where,label,name,box.dataset.cur,e.target.value.trim());
+  const to=stagedVal(where,name), row=box.closest('.knob');
+  row.classList.toggle('staged', to!=null);
+  box.nextElementSibling.textContent = to!=null
+    ? `changed · ${box.dataset.cur} → ${to} on close` : '';
+});
+// The pop-up: listed by server, then sent one POST per server -- through
+// /apply to a model server, or to this page's own /settings.json -- and each
+// server's own per-knob report shown where the list was.
+const STAGEPOP=(()=>{
+  const pop=document.createElement('div');
+  pop.id='stagepop'; pop.hidden=true;
+  pop.setAttribute('role','dialog'); pop.setAttribute('aria-label','staged changes');
+  document.querySelector('#sheet .box').appendChild(pop);
+  const list=()=>[...STAGED].map(([where,g])=>`<div class="sg"><span class="ro">${
+    esc(g.label)}${where?' · '+esc(where):''}</span>${Object.entries(g.knobs).map(([k,v])=>
+    `<div><b>${esc(k)}</b> <span class="was">${esc(v.from)}</span><span class="chg">${
+    esc(v.to)}</span></div>`).join('')}</div>`).join('');
+  function show(){
+    const n=stagedCount();
+    pop.innerHTML=`<b>Apply ${n} change${n===1?'':'s'}?</b>${list()}
+      <div class="ctl"><button class="mini" data-s="keep">Keep editing</button>
+      <button class="mini" data-s="discard">Discard</button>
+      <button class="go" data-s="apply">Apply</button></div>`;
+    pop.hidden=false; pop.querySelector('[data-s=apply]').focus();
+  }
+  async function apply(){
+    pop.querySelectorAll('button').forEach(b=>b.disabled=true);
+    pop.querySelector('b').textContent='applying…';
+    const out=await Promise.all([...STAGED].map(async ([where,g])=>{
+      const url=where ? '/apply?'+new URLSearchParams({where}) : '/settings.json';
+      const body=Object.fromEntries(Object.entries(g.knobs).map(([k,v])=>[k,v.to]));
+      let r;
+      try{
+        const x=await fetch(url,{method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(body)});
+        r=await x.json();
+        if(!x.ok && !r.error) r={error:'HTTP '+x.status};
+      }catch(err){ r={error:String(err.message||err)} }
+      // what did not go stays staged, to try again or discard next close
+      if(!r.error) STAGED.delete(where);
+      const done=Object.entries(r.applied||{});
+      return `<div class="sg"><span class="ro">${esc(g.label)}${where?' · '+esc(where):''}</span>${
+        r.error ? `<span style="color:var(--warn)">${esc(r.error)}</span>`
+        : done.length ? done.map(([k,v])=>`<div><b>${esc(k)}</b> ${esc(v)}</div>`).join('')
+        : esc(r.note||'nothing changed')}</div>`;
+    }));
+    pop.innerHTML=`<b>Applied</b>${out.join('')}
+      <div class="ctl"><button class="go" data-s="done">Close</button></div>`;
+    pop.querySelector('[data-s=done]').focus();
+  }
+  pop.addEventListener('click', e=>{
+    const s=e.target.closest('[data-s]'); if(!s) return;
+    if(s.dataset.s==='keep') hide();
+    else if(s.dataset.s==='discard'){ STAGED.clear(); hide(); OVL.close(true) }
+    else if(s.dataset.s==='apply') apply();
+    else if(s.dataset.s==='done'){ hide(); OVL.close(true) }
+  });
+  function hide(){ pop.hidden=true }
+  // asked by the overlay before Settings closes: false keeps it open
+  function beforeClose(){
+    if(!pop.hidden){ if(!pop.querySelector('[data-s=done]')) hide(); return false }
+    if(!stagedCount()) return true;
+    show(); return false;
+  }
+  return {beforeClose, hide};
+})();
 // A knurl is the crosshatch cut into metal so a hand can grip a machined
 // part, so the control is a knob with a knurled rim rather than a slider.
 // It is not decoration: the positions are DISCRETE because the measurements
@@ -1081,7 +1183,8 @@ document.addEventListener('click', async e=>{
 // resolver would refuse is a control that lies.
 const A0=-135, A1=135;                       // sweep, degrees
 function dial(k){
-  const vals=k.values, idx=Math.max(0,vals.findIndex(v=>String(v)===String(k.running)));
+  const want=stagedVal('',k.name)??k.running;
+  const vals=k.values, idx=Math.max(0,vals.findIndex(v=>String(v)===String(want)));
   const capIdx=k.cap==null?vals.length-1:vals.findIndex(v=>String(v)===String(k.cap));
   const ang=i=>A0+(A1-A0)*(vals.length<2?0:i/(vals.length-1));
   const pt=(a,r)=>[36+r*Math.sin(a*Math.PI/180), 36-r*Math.cos(a*Math.PI/180)];
@@ -1150,24 +1253,23 @@ function wireDials(){
       if(dragging) set(startIdx+Math.round((startY-e.clientY)/14));
     });
     const stop=()=>{ if(!dragging) return; dragging=false;
-      if(String(k.values[idx])!==String(k.running))
-        applyKnob(k.name,k.values[idx]); };
+      applyKnob(k.name,k.values[idx]); };
     svg.addEventListener('pointerup',stop);
     svg.addEventListener('pointercancel',stop);
     el.addEventListener('keydown',e=>{
       const d={ArrowUp:1,ArrowRight:1,ArrowDown:-1,ArrowLeft:-1}[e.key];
       if(!d) return; e.preventDefault(); set(idx+d);
-      if(String(k.values[idx])!==String(k.running))
-        applyKnob(k.name,k.values[idx]);
+      applyKnob(k.name,k.values[idx]);
     });
   });
 }
-async function applyKnob(name,value){
-  const r=await postSettings({[name]:value});
-  if(r.error){ $('applies').textContent=r.error; return }
-  const what=(r.applied||{})[name];
-  $('applies').innerHTML=what?`<b>${esc(name)}</b> ${esc(what)}`:'Nothing changed.';
-  loadSettings({tune:ASK.tune||'',working_set_gib:$('ws').value||''});
+// A dial let go staged its value like any other knob (see STAGED): it
+// is sent with the rest when Settings closes and Apply is clicked.
+function applyKnob(name,value){
+  const k=(DOC.knobs||[]).find(x=>x.name===name);
+  stage('','this machine',name,k?k.running:'',value);
+  const n=stagedCount();
+  $('applies').innerHTML=n?`<b>${n}</b> change${n===1?'':'s'} staged; applied when you close Settings and confirm.`:'';
 }
 // The wired limit: what the GPU may hold, which decides whether a rung
 // loads at all. knurlogic NEVER runs the sysctl -- it reads the current
@@ -1293,8 +1395,8 @@ $('ws').addEventListener('change',()=>loadSettings({tune:ASK.tune||'',working_se
 // MACHINE's (the wired limit) -- the knobs belong to a model's server, and
 // the page never asked one. Now each machine's tab reads that machine's page
 // and every model it is running, through /peek (GET only, the addresses the
-// page already knows). Read through /peek; a live knob is changed only by its
-// own Apply, through /apply (a known model server's /settings.json, nothing
+// page already knows). Read through /peek; a live knob is changed only by the
+// Apply asked for on close (STAGED), through /apply (a known model server's /settings.json, nothing
 // else); the rest are set when a model is loaded.
 const peekURL=(where,path,q)=>'/peek?'+new URLSearchParams({where,path,...(q||{})});
 async function getJSON(url){
@@ -1323,7 +1425,7 @@ function renderSetTabs(){
     STAB=f.dataset.t; renderSetTabs(); showSetTab() });
 }
 // One model's knobs: running, what its tune would give, and why (the (i)).
-// Live ones can be changed on that server with their Apply; the rest say
+// Live ones can be staged for that server (sent on close, on Apply); the rest say
 // what a reload takes. Tunes preview another resolution.
 function modelHTML(r, doc, tune){
   if(doc.error) return `<div class="sgrp"><div class="shd">${esc(r.name)}</div>
@@ -1467,7 +1569,7 @@ async function showConnect(){
     const pref=ids.includes(t&&t.name)?t.name:ids[0];
     e.tiers.forEach(x=>{ if(!ids.includes(CONNTIER[x])) CONNTIER[x]=pref });
     h+=`<div class="ctl conntiers" style="gap:10px;margin-top:10px;flex-wrap:wrap">${
-      e.tiers.map(x=>`<label class="cs" style="margin:0;gap:6px">${esc(x)}
+      e.tiers.map(x=>`<label class="cs tier" style="margin:0;gap:6px">${esc(x)}
         <select data-tier="${esc(x)}" style="width:auto">${ids.map(id=>
           `<option${id===CONNTIER[x]?' selected':''}>${esc(id)}</option>`).join('')}</select></label>`).join('')}</div>
       <div class="msg">${ids.length<e.tiers.length
@@ -2405,7 +2507,6 @@ function layout(){
   $('chat').classList.toggle('empty', !has);
   const talk=window.ACTIVETAB==='chat' && has && !HOME;
   document.body.classList.toggle('talk', talk);
-  $('navhome').setAttribute('aria-pressed', !talk);
   // The memory panel is one element that moves: to the top of the right-hand
   // column in TALK, back above the chat in HOME. Moved rather than drawn
   // twice, so there is one set of machines for tick() to fill.
@@ -2414,12 +2515,13 @@ function layout(){
     document.querySelector('.right').prepend(mem);
   else if(!talk && mem.parentElement!==home) home.prepend(mem);
 }
-// The logo and the nav's Home do the same thing: close whatever is floating,
-// show the chat tab, and put the dashboard back.
+// The logo is the way home (the overlays float over the page, so a Home tab
+// had nothing left to do): close whatever is floating, show the chat tab,
+// and put the dashboard back.
 function goHome(){ OVL.close(); HOME=true;
   if(window.ACTIVETAB!=='chat') switchTab('chat'); else layout();
   window.scrollTo(0,0) }
-$('mark').onclick=goHome; $('navhome').onclick=goHome;
+$('mark').onclick=goHome;
 window.switchTab=switchTab;
 $('ptabs').querySelectorAll('button').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
 
@@ -2592,7 +2694,10 @@ function maxSteps(ctx){
   const lab=v=>v<1024?String(v):v<1048576?(v/1024)+'k':(v/1048576)+'M';
   el.innerHTML=steps.map(v=>`<option value="${v}">${lab(v)}</option>`).join('');
   el.value=String(steps.filter(v=>v<=want).pop()||steps[0]);
-  el.title=ctx>0?`this model's context window is ${ctx.toLocaleString()} tokens`:'';
+  // unknown (a server without context_length) stops at 64k; say why the
+  // list ends there rather than leave it looking like the model's limit
+  el.title=ctx>0?`this model's context window is ${ctx.toLocaleString()} tokens`
+    :'the model\'s context is unknown to this page, so the list stops at 64k';
 }
 $('cmax').addEventListener('change',()=>{ MAXWANT=+$('cmax').value });
 function showSampling(d){
