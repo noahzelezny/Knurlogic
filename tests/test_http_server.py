@@ -316,6 +316,12 @@ def test_host_is_local_accepts_this_machine_only():
         assert host_is_local(h), h
     for h in ("evil.example", "evil.example:8080", "127.0.0.1.nip.io"):
         assert not host_is_local(h), h
+    # this machine's name is accepted exactly, never as a first label: a
+    # rebinding domain named after the machine must not pass
+    import socket
+    me = socket.gethostname().lower().split(".")[0]
+    assert host_is_local(f"{me}:8080")
+    assert not host_is_local(f"{me}.attacker.example:8080")
 
 
 @pytest.mark.parametrize("msgs", [["hi"], [{"content": "no role"}],
