@@ -45,8 +45,19 @@ class PromptError(ValueError):
     """The request cannot be rendered (400)."""
 
 
-#: a text part vision put in place of an image; its control tokens are real
+class _Mark:
+    """Marks a text part vision put in place of an image (its control tokens
+    are real). An object, not a flag: a client's JSON can set any key to
+    true, but cannot make this -- and it survives flatten's deepcopy."""
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+
 PLACEHOLDER = "knurlogic_placeholder"
+MARK = _Mark()
 _ZWSP = "\u200b"
 
 
@@ -84,13 +95,15 @@ def control_strings(tokenizer) -> Optional["re.Pattern"]:
     return pat
 
 
-def neutralize(text: str, pattern) -> str:
+def neutralize(text: str, pattern, keep=()) -> str:
     """Control-token spellings in `text` made plain text: a zero-width space
     after the first character. The model reads the same characters; the
-    tokenizer no longer matches the control token."""
+    tokenizer no longer matches the control token. `keep`: spellings left
+    as they are."""
     if pattern is None or not text:
         return text
-    return pattern.sub(lambda m: m[0][0] + _ZWSP + m[0][1:], text)
+    return pattern.sub(lambda m: m[0] if m[0] in keep
+                       else m[0][0] + _ZWSP + m[0][1:], text)
 
 
 def _neutralize_values(v, pattern):
@@ -110,12 +123,25 @@ def flatten(messages: List[dict], tokenizer=None) -> List[dict]:
     neutralized (control_strings): only the template and vision's
     placeholders write control tokens."""
     pat = control_strings(tokenizer) if tokenizer is not None else None
+    # An assistant turn a client sends back may carry its reasoning inline
+    # (<think>...</think>answer, as Ollama/llama.cpp-era clients store it);
+    # the templates split on those tags to drop or wrap it, so they stay.
+    # (the control spellings INSIDE the markers: gemma's is
+    # "<|channel>thought", whose control token is "<|channel>")
+    marks = [t for t in (getattr(tokenizer, "think_start", None),
+                         getattr(tokenizer, "think_end", None))
+             if isinstance(t, str) and t]
+    think = set(pat.findall(" ".join(marks))) if pat is not None else set()
     out = copy.deepcopy(messages)
     for m in out:
+        keep = think if m.get("role") == "assistant" else ()
+        rc = m.get("reasoning_content")
+        if isinstance(rc, str):
+            m["reasoning_content"] = neutralize(rc, pat)
         c = m.get("content")
         if isinstance(c, list):
-            texts = [p.get("text", "") if p.get(PLACEHOLDER)
-                     else neutralize(p.get("text", ""), pat) for p in c
+            texts = [p.get("text", "") if p.get(PLACEHOLDER) is MARK
+                     else neutralize(p.get("text", ""), pat, keep) for p in c
                      if isinstance(p, dict) and p.get("type") == "text"]
             if len(texts) != len(c):
                 raise PromptError("a message part is not text, and this "
@@ -124,7 +150,8 @@ def flatten(messages: List[dict], tokenizer=None) -> List[dict]:
         elif c is None:
             m["content"] = ""
         else:
-            m["content"] = neutralize(c, pat) if isinstance(c, str) else c
+            m["content"] = (neutralize(c, pat, keep) if isinstance(c, str)
+                            else c)
         for tc in m.get("tool_calls") or []:
             fn = tc.get("function") or {}
             if isinstance(fn.get("arguments"), str):
@@ -149,7 +176,11 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
     kw = dict(args.chat_template_kwargs or {})
     close = bool(kw.pop(thinking.CLOSE, False))
     messages = flatten(request.messages, tokenizer)
-    render = dict(kw, tools=request.tools) if request.tools else dict(kw)
+    # tool descriptions are rendered into the prompt too, and an MCP
+    # server's are third-party text
+    tools = _neutralize_values(request.tools, control_strings(tokenizer)) \
+        if request.tools else None
+    render = dict(kw, tools=tools) if tools else dict(kw)
     # The thinking probe renders on HTTP threads under this lock; a
     # tokenizer's template environment is not safe to share across threads.
     with thinking._render_lock:
