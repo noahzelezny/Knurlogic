@@ -267,6 +267,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._inference(raw, chat=path != "/v1/completions")
         if path == "/v1/messages":
             return self._raw(self.app.messages, raw)
+        if path == "/v1/messages/count_tokens":
+            return self._count_tokens(raw)
         if path == "/v1/ensure" and self.app.ensure:
             try:
                 body = json.loads(raw or b"{}")
@@ -323,6 +325,36 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             job.cancel()           # the scheduler frees the row
+
+    def _count_tokens(self, raw: bytes) -> None:
+        """POST /v1/messages/count_tokens: what the prompt would be, in the
+        served model's tokens, rendered by its own template -- Claude Code
+        asks this to manage its context. Image blocks are left out (their
+        cost is known only once encoded), so with images it is a floor."""
+        from knurlogic.engine.runtime import prompt as P
+        from knurlogic.interfaces import messages as M
+        try:
+            req = json.loads(raw or b"{}")
+            oai = M.to_openai(req if isinstance(req, dict) else {})
+        except ValueError:
+            return self._error(O.ApiError(400, "body must be JSON"))
+        tok = getattr(self.app.scheduler.host, "tokenizer", None)
+        if tok is None:
+            return self._error(O.ApiError(503, "no model is loaded",
+                                          type_="server_error"))
+        msgs = []
+        for m in oai.get("messages") or []:
+            c = m.get("content")
+            if isinstance(c, list):
+                c = [p for p in c
+                     if isinstance(p, dict) and p.get("type") == "text"]
+            msgs.append(dict(m, content=c))
+        try:
+            prompt, *_ = P.tokenize(None, tok, P.ChatRequest(
+                "chat", "", msgs, oai.get("tools") or None), P.PromptArgs())
+        except P.PromptError as e:
+            return self._error(O.ApiError(400, str(e)))
+        return self._json(200, {"input_tokens": len(prompt)})
 
     def _raw(self, handler, raw: bytes) -> None:
         """A handler that writes its own response (an event stream has no
