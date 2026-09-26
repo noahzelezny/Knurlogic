@@ -169,6 +169,10 @@ def _status_of(err: BaseException) -> ApiError:
                         code="image_too_large")
     if isinstance(err, VisionError):
         return ApiError(400, str(err), param="messages")
+    from knurlogic.engine.runtime.scheduler import OutOfMemory
+    if isinstance(err, OutOfMemory):
+        return ApiError(503, str(err), type_="server_error",
+                        code="insufficient_memory")
     if "no model" in str(err):
         return ApiError(503, str(err), type_="server_error")
     return ApiError(500, f"{name}: {err}")
