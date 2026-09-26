@@ -88,13 +88,15 @@ def with_placeholders(messages: List[Dict[str, Any]],
     (server.process_message_content), so the placeholder lands exactly
     where the image was. The caller's messages are not touched: mlx-lm
     rewrites content in place, and the request may be read again."""
+    from knurlogic.engine.runtime.prompt import PLACEHOLDER
     it = iter(texts)
     out = []
     for m in messages:
         m = copy.copy(m)
         c = m.get("content")
         if isinstance(c, list):
-            m["content"] = [{"type": "text", "text": next(it)}
+            m["content"] = [{"type": "text", "text": next(it),
+                             PLACEHOLDER: True}
                             if _is_image_part(p) else p for p in c]
         out.append(m)
     rest = list(it)
