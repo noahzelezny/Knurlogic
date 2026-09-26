@@ -324,12 +324,17 @@ class Scheduler:
             self._ex = None
 
     def _admit_waiting(self) -> None:
-        # One admission per tick into the executor's queue; the executor
-        # itself admits one row per step, so decoding rows are not held.
+        # Text requests are cheap to tokenize and all go in; the executor
+        # admits one row per step, so decoding rows are not held. An image
+        # request is encoded HERE (the tower runs at tokenize), so at most
+        # one per tick: a burst of images is interleaved with decode steps
+        # instead of stalling every running row until all are encoded.
+        from knurlogic.engine.vision import request as vreq
         while self._waiting:
             job = self._waiting.pop(0)
             if job.cancelled:
                 continue
+            images = vreq.has_images(job.request.messages)
             try:
                 self._insert(job)
             except P.PromptError as e:
@@ -337,6 +342,8 @@ class Scheduler:
             except Exception as e:
                 logger.exception("could not admit a request")
                 self._error(job, e)
+            if images and self._rows:
+                return            # decode a step before the next encode
 
     def _insert(self, job: Job) -> None:
         from knurlogic.engine.vision import cachehook
