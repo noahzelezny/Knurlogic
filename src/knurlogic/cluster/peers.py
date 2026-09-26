@@ -43,6 +43,52 @@ HEADER = "X-Knurlogic-Peer"
 STORE_SCHEMA = 1
 TIMEOUT_S = 3.0          # a busy peer was measured at 1.4 s
 REFRESH_S = 4.0
+#: Peers known ONLY because they introduced themselves: any client can send
+#: the header, so they are capped, and forgotten after an hour of silence.
+MAX_INTRODUCED = 32
+FORGET_INTRODUCED_S = 3600.0
+
+
+def clean(obj, depth: int = 6):
+    """A peer's JSON, as data this page can show: JSON types only, strings
+    and lists bounded, nothing deeper than `depth`. A peer is another
+    machine on the network; what it says about itself is displayed, never
+    trusted to have the right shape."""
+    if depth <= 0:
+        return None
+    if isinstance(obj, bool) or obj is None:
+        return obj
+    if isinstance(obj, (int, float)):
+        return obj if obj == obj and abs(obj) < 1e18 else 0   # no NaN/huge
+    if isinstance(obj, str):
+        return obj[:512]
+    if isinstance(obj, list):
+        return [clean(x, depth - 1) for x in obj[:256]]
+    if isinstance(obj, dict):
+        return {str(k)[:64]: clean(v, depth - 1)
+                for k, v in list(obj.items())[:256]}
+    return None
+
+
+def clean_node(node: dict) -> dict:
+    """clean(), plus the numbers the rollup sums coerced to numbers (a
+    peer answering {"memory": {"active_bytes": "x"}} broke /status.json
+    for everyone)."""
+    n = clean(node) if isinstance(node, dict) else {}
+    mem = n.get("memory") if isinstance(n.get("memory"), dict) else {}
+    for k, v in list(mem.items()):
+        if k.endswith("_bytes"):
+            mem[k] = v if isinstance(v, (int, float)) and \
+                not isinstance(v, bool) and v >= 0 else 0
+    n["memory"] = mem
+    for k in ("requests_served", "uptime_seconds"):
+        v = n.get(k)
+        n[k] = v if isinstance(v, (int, float)) and not isinstance(v, bool) \
+            else 0
+    for k in ("id", "node", "role"):
+        if not isinstance(n.get(k), str):
+            n[k] = str(n.get(k) or "")
+    return n
 
 
 def store_path() -> Path:
@@ -139,13 +185,21 @@ class Peers:
             return p
 
     def introduce(self, host: str, header: str) -> None:
-        """A peer asked for our status and said who it is."""
+        """A peer asked for our status and said who it is. Anyone can send
+        the header, so an introduction adds a peer only up to
+        MAX_INTRODUCED of them (see refresh for forgetting)."""
         parts = (header or "").split()
-        if len(parts) != 2 or not parts[1].isdigit():
+        if len(parts) != 2 or not parts[1].isdigit() or len(parts[0]) > 64:
             return
         pid, port = parts[0], int(parts[1])
-        if pid == self.me.get("id"):
-            return                                  # ourselves
+        if pid == self.me.get("id") or not 0 < port < 65536:
+            return                                  # ourselves, or junk
+        with self._lock:
+            known = f"{host}:{port}" in self._peers
+            only = sum(1 for p in self._peers.values()
+                       if p.found_by == {"introduced"})
+        if not known and only >= MAX_INTRODUCED:
+            return
         p = self.add(host, port, "introduced")
         p.id = p.id or pid
 
@@ -179,8 +233,12 @@ class Peers:
             p.problem = (f"{p.key} answered, but not as a knurlogic node"
                          if own is None else f"{p.key} is this machine")
             return
-        p.id, p.name = own.get("id", p.id), own.get("node", p.name)
-        p.node, p.doc_peers = own, doc.get("peers") or []
+        own = clean_node(own)
+        p.id, p.name = own.get("id") or p.id, own.get("node") or p.name
+        peers = doc.get("peers")
+        p.node = own
+        p.doc_peers = [q for q in (clean(peers) if isinstance(peers, list)
+                                   else []) if isinstance(q, dict)]
         p.last_seen, p.failing_since = now, 0.0
         if doc.get("schema") != SCHEMA:
             p.state = "version_mismatch"
@@ -192,6 +250,12 @@ class Peers:
 
     def refresh(self) -> None:
         with self._lock:
+            # introduced-only peers silent for an hour are forgotten
+            now = time.time()
+            for k, p in list(self._peers.items()):
+                if p.found_by == {"introduced"} and p.failing_since and \
+                        now - p.failing_since > FORGET_INTRODUCED_S:
+                    self._peers.pop(k)
             todo = list(self._peers.values())
         ts = [threading.Thread(target=self._one, args=(p,), daemon=True)
               for p in todo]
@@ -203,8 +267,11 @@ class Peers:
         self._save()
 
     def _dedupe(self) -> None:
-        """One machine, one peer: the same id at two addresses keeps the one
-        that answered most recently, and inherits the other's sources."""
+        """One machine, one peer: the same id AND name at two addresses (the
+        cable and Wi-Fi of one Mac) keeps the preferred one, which inherits
+        the other's sources. An id is what a peer SAYS it is, so two
+        machines claiming one id under different names are both kept, and
+        flagged -- never one silently merged away."""
         with self._lock:
             by_id: dict[str, Peer] = {}
             for k, p in list(self._peers.items()):
@@ -213,6 +280,12 @@ class Peers:
                 q = by_id.get(p.id)
                 if q is None:
                     by_id[p.id] = p
+                    continue
+                if p.name and q.name and p.name != q.name:
+                    for x, y in ((p, q), (q, p)):
+                        x.problem = (f"{x.key} and {y.key} both claim to be "
+                                     f"machine {x.id} ({x.name} / {y.name});"
+                                     f" one of them is not what it says")
                     continue
                 keep, drop = sorted((p, q), key=self._preference)
                 keep.found_by |= drop.found_by

@@ -136,6 +136,15 @@ _SUMMED = ("active_bytes", "cache_bytes", "peak_bytes", "working_set_bytes",
            "total_bytes", "headroom_bytes", "process_rss_bytes")
 
 
+def _num(v) -> int:
+    """A summed figure from a node's snapshot: a number, or 0 -- a remote
+    node's snapshot is its own word, not a guarantee of shape."""
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def aggregate(snapshots, artifact=None) -> dict:
     """The cluster shape. One node in, one node out -- with the rollup.
 
@@ -145,7 +154,7 @@ def aggregate(snapshots, artifact=None) -> dict:
     """
     snaps = list(snapshots)
     up = [s for s in snaps if s.get("reachable", True)]
-    mem = {k: sum(int(s.get("memory", {}).get(k, 0) or 0) for s in up)
+    mem = {k: sum(_num(s.get("memory", {}).get(k)) for s in up)
            for k in _SUMMED}
     mem["available"] = any(s.get("memory", {}).get("available") for s in up)
     # A rollup is only as precise as its least precise node: one box-wide
