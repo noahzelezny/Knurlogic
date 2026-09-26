@@ -192,10 +192,10 @@ class VisionServe:
 
     def tokenize(self, real: Callable, gen: Any, tokenizer: Any,
                  request: Any, args: Any):
-        """The `_tokenize` wrap's body for a request with images.
-
-        Returns what mlx-lm's `_tokenize` returns, with the prompt and the
-        segments replaced by the key and the segment keys. Every image of
+        """Tokenize a request with images, through `real` -- the prompt
+        stage (engine/runtime/prompt.tokenize). Returns what `real` returns,
+        with the prompt and the segments replaced by the key and the
+        segment keys. Every image of
         the key stays pinned (one pin per image occurrence) until the batch
         generator admits or removes the row -- on any failure here the pins
         are dropped before the exception reaches the server."""

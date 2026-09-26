@@ -38,26 +38,25 @@ else from `server.py`.
 ## Own (new)
 
 ```
-interfaces/http/            the wire: routes, SSE, errors, auth-free by design
-  openai.py                 /v1/chat/completions, /v1/completions, /v1/models
-  anthropic.py              /v1/messages (today's interfaces/messages.py)
-  knurlogic.py              /status.json, /v1/residency, /v1/ensure, ui routes
+interfaces/http/            the wire (as built)
+  server.py                 ThreadingHTTPServer, routes, body cap, the
+                            browser guards (Origin / Host), --host cluster
+  openai.py                 /v1/chat/completions, /v1/completions,
+                            /v1/models, OpenAI error objects, SSE
+  scout.py                  /v1/residency, /v1/ensure, the concurrency hint
+  __init__.py               serve(), switch() (through interfaces/loading)
+interfaces/messages.py      /v1/messages: handler_over(), in-process
+interfaces/loading.py       what a model must pass before it loads
 engine/runtime/             everything that touches mlx (engine rule holds)
-  host.py                   ModelHost: load / ensure / unload, one state
-                            machine per model: loading -> ready -> unloading;
-                            requests wait for `ready`, never race the load
-  scheduler.py              ONE generation thread that owns the MLX stream;
-                            request queue -> admission -> batch step ->
-                            per-request emit; failures are per request
-  request.py                per-request state: detokenizer, reasoning/answer
-                            split, tool-call parse, TEXT stop matcher,
-                            usage, cache report, NaN verdict
-  sampling.py               per-request RNG key (seed -> key; unseeded ->
-                            split from the scheduler's key), so a seed is
-                            reproducible under batching, on any thread
-  executor.py               the step: local batch engine today
-                            (MTPBatchGenerator, drafting or not, vision);
-                            the cluster pipeline later, same interface
+  host.py                   ModelHost: empty/loading/ready/unloading/failed
+  scheduler.py              ONE thread owns the MLX stream: commands,
+                            tokenize, prompt cache, admission, steps
+  prompt.py                 template, segments, initial reasoning state
+  request.py                per-request text: reasoning split, text stops,
+                            tool calls, usage
+  executor.py               the step: the local batch engine today; the
+                            cluster pipeline later, same interface
+engine/mtp/sampling.py      per-request seeds (Keys: key(seed, position))
 ```
 
 The existing pieces move in unchanged where they already are the design:

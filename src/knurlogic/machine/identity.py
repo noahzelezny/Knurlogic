@@ -9,8 +9,9 @@ get changed, and addresses move when a Thunderbolt cable is replugged.
         network, and is only sent to peers that ask for status.
   name  the ComputerName ("Studio A"), for display only.
 
-Read through IOKit with ctypes, the same way the temperature sensors are:
-no subprocess, nothing to install. A failure falls back to the hostname's
+The id is read through IOKit with ctypes, the same way the temperature
+sensors are; the name from `scutil --get ComputerName`. Nothing to
+install. A failure falls back to the hostname's
 hash and says so in `id_source`, rather than inventing a UUID.
 """
 
