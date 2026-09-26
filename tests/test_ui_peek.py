@@ -84,6 +84,15 @@ def test_connect_json_lists_every_way_in():
     assert "__MODEL__" in by["curl"]["blocks"][0]["text"]
     assert not by["mcp"]["needs_model"]
     assert "knurlogic mcp" in by["mcp"]["blocks"][0]["text"]
+    # Claude Code and Codex each have a line, marked by client for the page
+    mcp = {b.get("client"): b for b in by["mcp"]["blocks"][:2]}
+    assert mcp["claude"]["text"] == "claude mcp add knurlogic -- knurlogic mcp"
+    assert mcp["codex"]["text"] == "codex mcp add knurlogic -- knurlogic mcp"
+    toml = by["mcp"]["blocks"][2]
+    assert toml["client"] == "codex" and "config.toml" in toml["label"]
+    assert toml["text"].splitlines() == ["[mcp_servers.knurlogic]",
+                                         'command = "knurlogic"',
+                                         'args = ["mcp"]']
     # Claude Code goes to the page's router, one model per tier
     assert by["claude"]["tiers"] == ["opus", "sonnet", "haiku"]
     cmd = by["claude"]["blocks"][0]["text"]

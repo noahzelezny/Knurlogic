@@ -81,6 +81,20 @@ def curl_snippet(base_url: str, model: str) -> str:
 MCP_ADD = "claude mcp add knurlogic -- knurlogic mcp"
 
 
+#: Codex CLI registers MCP servers itself too, or reads them from its own
+#: config file; either way it starts the same stdio command.
+CODEX_MCP_ADD = "codex mcp add knurlogic -- knurlogic mcp"
+
+
+def codex_toml() -> str:
+    """The ~/.codex/config.toml entry. Codex has no per-directory config, so
+    this one is global -- harmless here: an MCP server only adds tools, it
+    does not reroute the model Codex talks to."""
+    return ('[mcp_servers.knurlogic]\n'
+            'command = "knurlogic"\n'
+            'args = ["mcp"]')
+
+
 def mcp_json() -> str:
     return json.dumps({"mcpServers": {"knurlogic": {
         "command": "knurlogic", "args": ["mcp"]}}}, indent=2)
@@ -121,7 +135,14 @@ def endpoints(base_url: str, model: str, router_url: str = "__ROUTER__",
          "what": "the agent-facing tools (ready, fit, settings, load) over "
                  "stdio; the client starts it, so no address is needed",
          "needs_model": False,
-         "blocks": [{"label": "Claude Code", "text": MCP_ADD},
+         # `client` names whose line a block is, so the page can mark it
+         # (Claude Code in its tier amber, Codex in white)
+         "blocks": [{"label": "Claude Code", "client": "claude",
+                     "text": MCP_ADD},
+                    {"label": "Codex CLI", "client": "codex",
+                     "text": CODEX_MCP_ADD},
+                    {"label": "Codex CLI, as ~/.codex/config.toml",
+                     "client": "codex", "text": codex_toml()},
                     {"label": "any MCP client's config", "text": mcp_json()}]},
         {"id": "curl", "name": "curl",
          "what": "one request by hand",
