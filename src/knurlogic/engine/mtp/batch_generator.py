@@ -154,6 +154,8 @@ def sampling_of(sampler) -> Optional[dict]:
     already collapsed them. Untagged means greedy is the only safe reading
     of it -- and that is only right if the tag is always there, which
     `tag_samplers` guarantees for everything the server builds."""
+    if isinstance(sampler, dict):          # the executor passes params as is
+        return sampler
     return getattr(sampler, "_knurlogic_sampling", None)
 
 
@@ -477,8 +479,16 @@ class MTPBatchGenerator(BatchGenerator):
                 return trunk + [head]
         return trunk
 
-    def insert_segments(self, *a, **kw):
+    def insert_segments(self, *a, reports=None, **kw):
+        """`reports`: one object per row to receive its cache report (the
+        executor passes them); without it, the request mlx-lm's server just
+        tokenized on this thread (cachereport.claim)."""
         uids = super().insert_segments(*a, **kw)
+        if reports is not None:
+            for u, r in zip(uids, reports):
+                if r is not None:
+                    self._requests[u] = r
+            return uids
         req = cachereport.claim()
         if req is not None and len(uids) == 1:
             self._requests[uids[0]] = req
