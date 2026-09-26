@@ -27,7 +27,10 @@ _QWEN35_HEAD = dict(
     head="knurlogic.engine.families.qwen.heads.qwen35:MTPHeadQwen35",
     capture="norm", draft_cache="KVCache",
     sidecar_name="mtp-head-q6.safetensors",
-    cache_semantics="reassign")
+    cache_semantics="reassign",
+    # a sidecar's top-level tensor prefixes: how a head is recognised when
+    # its metadata does not say (measured from the sidecars on disk)
+    layout=("block", "fc", "norm_e", "norm_h", "norm_out"))
 
 MANIFEST = {
     "name": "qwen",
@@ -54,7 +57,9 @@ MANIFEST = {
                 # caches.check_snapshot_semantics).
                 capture="hyper_connection_mixer", draft_cache="_AttnCache",
                 sidecar_name="mtp-head-q6.safetensors",
-                cache_semantics="reassign"),
+                cache_semantics="reassign",
+                # the qwen4_exp packs predate the `family` metadata field
+                layout=("block", "fc", "mixer", "norm_e", "norm_h")),
         },
     },
     # Thinking controls, per CHAT-TEMPLATE DIALECT (one module, qwen3_5,

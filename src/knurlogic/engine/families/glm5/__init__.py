@@ -25,8 +25,7 @@ MANIFEST = {
             # the loaded 2.7bpw trunk (M4, 2026-09-02).
             # Measured in vqlab on one box, not on a cluster: acceptance
             # 0.8516 pooled (12 prompts x 128 tokens, q6 head, 2.7bpw, M4,
-            # 2026-09-02); 1.05x end to end WITHOUT the absorbed-MLA shim
-            # (glm5_shim.py), whose effect is unmeasured.
+            # 2026-09-02); 1.05x end to end.
             "head": dict(
                 # the VLM wrapper's config says glm5_next, the bound
                 # LanguageModel's TextConfig says glm5_next_text
@@ -34,7 +33,8 @@ MANIFEST = {
                 head="knurlogic.engine.families.glm5.heads.glm5:MTPHeadGlm5",
                 capture="norm", draft_cache="KVCache",
                 sidecar_name="mtp-head-q6.safetensors",
-                cache_semantics="reassign"),
+                cache_semantics="reassign",
+                layout=("eh_proj", "enorm", "hnorm", "final_norm")),
         },
     },
     # GLM-5.3's template: reasoning_effort in {low, high}, anything else is

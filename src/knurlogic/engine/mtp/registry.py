@@ -53,6 +53,8 @@ class FamilySpec:
     draft_cache: str
     sidecar_name: str = "mtp-head-q6.safetensors"
     cache_semantics: str = "copy"
+    #: the sidecar's top-level tensor prefixes (engine/mtp/_artifacts)
+    layout: tuple = ()
 
     def head_cls(self):
         mod, _, attr = self.head.partition(":")
@@ -86,6 +88,31 @@ class FamilySpec:
 
 
 FAMILIES: dict[str, FamilySpec] = {}
+
+
+def load_head(model, sidecar=None, family: str | None = None,
+              model_path=None):
+    """Load a drafting head for `model` -> (head, spec).
+
+    `sidecar` may be a file; if omitted, the family's sidecar name is looked
+    for in `model_path`. The head is optional by construction: sidecars are
+    named outside mlx-lm's `model*.safetensors` glob, so a model directory
+    carrying one still loads normally through the stock loader.
+    """
+    import pathlib
+
+    spec = resolve(model, family)
+    if sidecar is None:
+        if model_path is None:
+            raise ValueError("pass either sidecar= or model_path=")
+        sidecar = pathlib.Path(model_path) / spec.sidecar_name
+    sidecar = pathlib.Path(sidecar)
+    if not sidecar.exists():
+        raise FileNotFoundError(
+            f"no MTP sidecar at {sidecar}; build one with `vqlab mtp-pack`. "
+            f"The head is optional -- without it the model decodes normally.")
+    arch = spec.arch_module(model)
+    return spec.head_cls().from_sidecar(model, arch, sidecar), spec
 
 
 def register(spec: FamilySpec, *, replace: bool = False) -> FamilySpec:

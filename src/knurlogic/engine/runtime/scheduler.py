@@ -353,6 +353,10 @@ class Scheduler:
                                         "served model has no vision")
                 prompt, segs, types, initial = v.tokenize(
                     P.tokenize, self, tok, job.request, job.args)
+                # the pins tokenize took belong to the guard until the row
+                # is admitted: a failure before then releases them
+                from knurlogic.engine.vision import key as K
+                cachehook.pending(v, K.images_in(prompt))
             else:
                 prompt, segs, types, initial = P.tokenize(
                     self, tok, job.request, job.args)

@@ -587,3 +587,21 @@ def test_images_that_overflow_the_store_together_are_a_413(server, model):
     assert code == 413 and err["code"] == "image_too_large"
     assert "MiB" in err["message"] and "--image-store-gib" in err["message"]
     assert h.vision.pinned_count() == 0
+
+
+def test_a_failure_between_tokenize_and_admit_releases_the_images(
+        server, model, monkeypatch):
+    """Tokenize pins the request's images; if admission fails before the
+    engine owns the row, the pins must go (the scheduler's admit guard)."""
+    fam = stub_family()
+    h = Harness(server, model, family=fam)
+    real = h.sched.cache.fetch
+
+    def boom(*a, **k):
+        raise RuntimeError("the prompt cache fell over")
+    monkeypatch.setattr(h.sched.cache, "fetch", boom)
+    code, _, body = h.post(dict(messages=[user("x ", data_url(70))],
+                                max_tokens=2, logit_bias=BAN))
+    assert code == 500 and b"fell over" in body
+    assert h.vision.pinned_count() == 0
+    monkeypatch.setattr(h.sched.cache, "fetch", real)

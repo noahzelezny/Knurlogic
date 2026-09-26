@@ -49,15 +49,19 @@ GIB = 1 << 30
 #: glob is the contract, this is only the default.
 SIDECAR_GLOB = "mtp-head*.safetensors"
 
-#: Top-level key prefixes -> the family whose head has that module tree.
-#: Measured from the eleven sidecars on this disk; three families, three
-#: distinct layouts, and the layout identifies the family when the metadata
-#: does not say (the qwen4_exp packs predate the `family` field).
-_LAYOUTS = (
-    ({"block", "fc", "mixer", "norm_e", "norm_h"}, "qwen4_exp"),
-    ({"block", "fc", "norm_e", "norm_h", "norm_out"}, "qwen3_5"),
-    ({"eh_proj", "enorm", "hnorm", "final_norm"}, "glm5_next"),
-)
+def head_layouts() -> list:
+    """(top-level tensor prefixes, head name) per head the family manifests
+    declare (engine/families/<family>, head `layout`), most specific first
+    so a superset layout is matched before its subset. The layout
+    identifies the family when a sidecar's metadata does not say."""
+    from knurlogic.engine import families
+    seen, out = set(), []
+    for name, h in families.build_maps()["heads"].items():
+        lay = frozenset(h.get("layout") or ())
+        if lay and lay not in seen:
+            seen.add(lay)
+            out.append((lay, name))
+    return sorted(out, key=lambda x: -len(x[0]))
 
 
 @dataclass
@@ -82,7 +86,7 @@ class Head:
         because the metadata is cheaper to trust when present and matching.
         """
         declared = self.recipe.get("family")
-        for keys, fam in _LAYOUTS:
+        for keys, fam in head_layouts():
             if keys <= set(self.prefixes):
                 return fam
         return declared or ""
