@@ -107,6 +107,8 @@ class Job:
     cancelled: bool = False
     #: set once tokenized
     prompt_tokens: int = 0
+    #: the rows it waits for, once it has had to wait for memory
+    waiting_on: Optional[set] = None
 
     def cancel(self) -> None:
         """From the HTTP thread: the client went away; free the row."""
@@ -421,13 +423,13 @@ class Scheduler:
                     and not self._fits(job.prompt_tokens):
                 # waited before and still would not fit: not tokenized
                 # again, and not in the way of smaller prompts behind it
-                held.append(job)
+                self._hold(job, held)
                 continue
             images = vreq.has_images(job.request.messages)
             try:
                 self._insert(job)
             except _Wait:
-                held.append(job)
+                self._hold(job, held)
                 continue
             except (P.PromptError, VisionError, OutOfMemory) as e:
                 # the client's request, not a fault here: no traceback
@@ -438,6 +440,23 @@ class Scheduler:
                 self._error(job, e)
             if images and self._rows:
                 return            # decode a step before the next encode
+
+    def _hold(self, job: Job, held: list) -> None:
+        """A request that does not fit waits for the rows running when it
+        was first held -- not for whatever arrives after: under a steady
+        stream of small prompts those never all finish, and it waited until
+        its client gave up (Fable 5.1). Once they have all finished and it
+        still does not fit, it is refused, as it would be on an idle box."""
+        if job.waiting_on is None:
+            job.waiting_on = set(self._rows)
+        if job.waiting_on & set(self._rows):
+            held.append(job)
+            return
+        self._error(job, OutOfMemory(
+            f"this prompt ({job.prompt_tokens} tokens) waited for the "
+            f"requests running when it arrived; they have finished and it "
+            f"still does not fit beside the ones running now. Retry, send a "
+            f"shorter conversation, or serve a smaller model"))
 
     def _insert(self, job: Job) -> None:
         from knurlogic.engine.vision import cachehook
