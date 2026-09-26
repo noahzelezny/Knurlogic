@@ -653,7 +653,8 @@ pip-installable; what exo adds is orchestration. In order:
 4. The page takes over the whole interface, closer to exo's.
 
 The jaccl self-heal fork stays an optional mlx build `deps` detects; MTP
-across a pipeline is already ported (`engine/mtp/pipeline.py`).
+across a pipeline comes with the cluster executor (docs/SERVER.md,
+"Cluster readiness"); the exo-era pipeline port was removed unused.
 
 ## Not done
 

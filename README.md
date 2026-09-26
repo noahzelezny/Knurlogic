@@ -98,7 +98,12 @@ mlx's own distributed backends (docs/PLAN.md). A running exo is shown as one
 more runtime holding memory, and `~/.exo/models` is one more model store.
 
 The page's look is inspired by exo's dashboard; its code is knurlogic's
-own.
+own. The server's prompt segmentation (system / conversation / thinking
+tail, for prompt-cache checkpoints) and the shape of its scheduling loop
+follow mlx-lm's server, rewritten here (engine/runtime/prompt.py,
+scheduler.py); the MTP drafting began in the owner's exo fork and vqlab;
+image-feature caching follows mlx-vlm's idea with a byte bound instead of a
+count.
 
 ## What it stands on
 
