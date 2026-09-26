@@ -4,22 +4,21 @@
     knurlogic mcp            # serve on stdio
     knurlogic mcp --list     # print the tool table
 
-Stdio JSON-RPC, stdlib only -- same rule as vqlab's server, for the same
-reason: this has to run inside the exo envs and those must not have anything
-pip-installed into them.
+Stdio JSON-RPC, stdlib only: it reads the machine and starts servers, and
+imports nothing that could load a model into this process.
 
-WHAT THIS IS FOR. Managing local models by hand through exo means guessing:
-whether the ring has settled, whether a model fits, what the knobs are and
-why they are set that way. An agent guesses worse than a person, and faster.
+WHAT THIS IS FOR. Managing local models by hand means guessing: whether
+memory has settled, whether a model fits, what the knobs are and why they
+are set that way. An agent guesses worse than a person, and faster.
 Every tool here answers deterministically, reports what it looked at, and
 refuses rather than gambles.
 
 DESIGN RULES, each one paid for:
 
-* `ready` is a gate, not a status line. Loading into an unsettled ring is the
-  failure Noah hits repeatedly: runners still shutting down, downloads in
-  flight, a node not yet seen. `ready` names every reason it is not, and
-  `load` calls it first and REFUSES rather than trying anyway.
+* `ready` is a gate, not a status line. Loading while another load is still
+  moving memory is the failure Noah hits repeatedly. `ready` names every
+  reason it is not, and `load` calls it first and REFUSES rather than trying
+  anyway.
 
 * `fit` refuses to be optimistic. It measures available memory as free +
   inactive (the file cache macOS hands over on demand), because both other
@@ -50,8 +49,6 @@ SERVER_NAME = "knurlogic"
 SERVER_VERSION = "0"
 GIB = 1 << 30
 
-from knurlogic.machine.exo import EXO_URL  # noqa: E402  one home
-
 
 def S(desc: str, typ: str = "string") -> Dict[str, Any]:
     return {"type": typ, "description": desc}
@@ -64,31 +61,24 @@ def _schema(props: Dict[str, Any], required: List[str] | None = None):
 
 # --- the answers ------------------------------------------------------------
 
-def _exo_state():
-    from knurlogic.machine.loaded import _get
-    return _get(f"{EXO_URL}/state", timeout=4.0) or {}
-
-
 def ready(**_) -> Dict[str, Any]:
-    """Is the cluster in a state where loading will work?
+    """Is this machine in a state where loading will work?
 
-    Every reason it is not, named. exo reports runners, instances, downloads
-    and last-seen separately and a caller that checks one of them loads into
-    a ring that is still moving.
+    Every reason it is not, named: a load still reading weights moves memory,
+    so a fit measured now would be stale.
     """
     from . import ui
-    # knurlogic's OWN loads move memory too. Checking only exo let a second
-    # load through while the first was still reading weights, on a budget
-    # that did not yet count them -- the same race as placing on an
-    # unsettled exo ring, reproduced here before this check existed.
-    mine = [{"what": "a knurlogic server is still loading",
-             "detail": {"port": c["port"],
-                        "artifact": (c["artifact"] or "").split("/")[-1],
-                        "phase": c["phase"],
-                        "seconds": c["seconds_since_start"],
-                        "last_log_line": c.get("last_log_line", "")},
-             "why": "memory is about to change; a fit measured now is stale"}
-            for c in ui.loading()]
+    # A second load let through while the first was still reading weights,
+    # on a budget that did not yet count them, is the race this gate ends.
+    blockers = [{"what": "a knurlogic server is still loading",
+                 "detail": {"port": c["port"],
+                            "artifact": (c["artifact"] or "").split("/")[-1],
+                            "phase": c["phase"],
+                            "seconds": c["seconds_since_start"],
+                            "last_log_line": c.get("last_log_line", "")},
+                 "why": "memory is about to change; a fit measured now is "
+                        "stale"}
+                for c in ui.loading()]
     # The load lock (P0/`machine/loadlock.py`) is a second source of the same
     # blocker: a load started by a DIFFERENT process (another agent, `serve`
     # run by hand) holds it and would not otherwise show up in `ui.loading()`,
@@ -96,100 +86,12 @@ def ready(**_) -> Dict[str, Any]:
     from knurlogic.machine import loadlock
     held = loadlock.holder()
     if held is not None:
-        mine.append({
+        blockers.append({
             "what": "another process holds the model-load lock",
             "detail": held,
             "why": "memory is about to change; a fit measured now is stale"})
-    st = _exo_state()
-    if not st:
-        return {"ready": not mine, "exo": False,
-                "blockers": mine, "exo_placement_blockers": [],
-                "ready_for_exo_placement": not mine,
-                "note": "exo is not running. Nothing to settle there -- "
-                        "knurlogic serves a single box without it."}
-
-    def state_of(v):
-        return next(iter(v)) if isinstance(v, dict) and v else str(v)
-
-    from knurlogic.machine import exo
-    transit, ghosts = exo.runner_activity(st)
-    ongoing, failed, pending = _downloads(st)
-    nodes = (st.get("topology") or {}).get("nodes") or []
-    seen = st.get("lastSeen") or {}
-    missing = [n for n in nodes if n not in seen]
-
-    # Two different questions, because `load` starts a LOCAL server and exo
-    # placement is a ring operation. A runner loading anywhere on this box
-    # moves memory, so `fit`'s number is about to be wrong: that blocks both.
-    # A download or a missing node blocks placing a model on the ring and
-    # has nothing to do with a server on this box.
-    local, ring = list(mine) + exo.moving(st=st), []
-    if transit:
-        local.append({"what": "exo runners loading or unloading",
-                      "detail": transit,
-                      "why": "memory is about to change; a fit measured now "
-                             "is stale"})
-    if ongoing:
-        ring.append({"what": "downloads in progress", "detail": ongoing})
-    if missing:
-        ring.append({"what": "nodes in the topology not seen recently",
-                     "detail": len(missing)})
-    return {
-        "ready": not local,
-        "ready_for_exo_placement": not (local or ring),
-        "exo": True,
-        "blockers": local,
-        "exo_placement_blockers": ring,
-        "nodes": len(nodes),
-        "instances": len(st.get("instances") or {}),
-        "downloads": {"in_progress": len(ongoing), "failed": failed,
-                      "pending_not_started": pending},
-        "checked": ["runners", "downloads (DownloadOngoing only)",
-                    "topology vs lastSeen", "placements not yet published"],
-        **({"stale_runner_records": ghosts,
-            "stale_note": "runners no instance references, unchanged for "
-                          f"{exo.GHOST_S}s+: exo never marked them shut down. "
-                          "Not counted as memory in motion."}
-           if ghosts else {}),
-    }
-
-
-def _downloads(st: dict) -> tuple:
-    """(ongoing [named], failed [named], pending count) from exo's state.
-
-    Only DownloadOngoing is in flight. exo lists every model card it knows
-    as DownloadPending on every node, so counting any entry at all made a
-    two-node cluster with nothing downloading report 'not ready' forever --
-    and an agent told that forever learns to pass force=true every time,
-    which is worse than no check.
-    """
-    ongoing, failed, pending = [], [], 0
-    for node, items in (st.get("downloads") or {}).items():
-        for it in (items if isinstance(items, list) else [items]):
-            if not isinstance(it, dict) or not it:
-                continue
-            kind, body = next(iter(it.items()))
-            if not isinstance(body, dict):
-                body = {}
-            card = (((body or {}).get("shardMetadata") or {})
-                    .get("PipelineShardMetadata") or
-                    next(iter(((body or {}).get("shardMetadata") or {})
-                              .values()), {}) or {}).get("modelCard") or {}
-            name = card.get("modelId", "?")
-            if kind == "DownloadOngoing":
-                prog = (body or {}).get("downloadProgress") or {}
-                done = prog.get("downloadedBytes", {}).get("inBytes") \
-                    if isinstance(prog.get("downloadedBytes"), dict) else None
-                total = prog.get("totalBytes", {}).get("inBytes") \
-                    if isinstance(prog.get("totalBytes"), dict) else None
-                ongoing.append({"model": name, "node": node[:12],
-                                "progress": (f"{done / total:.0%}"
-                                             if done and total else "?")})
-            elif kind == "DownloadFailed":
-                failed.append({"model": name, "node": node[:12]})
-            elif kind == "DownloadPending":
-                pending += 1
-    return ongoing, failed, pending
+    return {"ready": not blockers, "blockers": blockers,
+            "checked": ["servers this MCP started", "the model-load lock"]}
 
 
 def fit(artifact: str = "", **_) -> Dict[str, Any]:
@@ -249,7 +151,7 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
         "wired_note": adv.get("note", ""),
         "how": "budget = the smaller of the GPU working set and memory "
                "available now (free + inactive: what macOS hands over on "
-               "demand, and what exo reports).",
+               "demand).",
     }
 
 
@@ -273,11 +175,9 @@ def state(**_) -> Dict[str, Any]:
     doc = loaded.survey()
     m = doc.get("memory") or {}
     from knurlogic.interfaces import ui
-    from knurlogic.machine import exo
     from knurlogic.engine.vision import served_vision
     spec = served_vision()
     return {
-        "exo_instances": exo.phases(),
         "resident": doc.get("resident", []),
         "runtimes": doc.get("runtimes", []),
         "started_here": ui.children(),
@@ -363,8 +263,7 @@ def drafting(artifact: str = "", **_) -> Dict[str, Any]:
             "head": (st.head.describe() if st.head else ""),
             "family": (st.head.family if st.head else ""),
             "explanation": st.render(),
-            "note": "mlx-lm has no MTP path and neither does upstream exo. "
-                    "knurlogic drafts with a packed head by default, on "
+            "note": "mlx-lm has no MTP path. knurlogic drafts with a packed head by default, on "
                     "single requests and batches alike: load(draft=false) "
                     "or `serve --no-draft` turns it off. Drafting preserves "
                     "the output distribution, so off is for troubleshooting."}
@@ -375,9 +274,9 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
          draft: bool = True, **_) -> Dict[str, Any]:
     """Start a server for this artifact, after checking it can work.
 
-    REFUSES rather than gambles: an unsettled ring or a model that does not
-    fit is a refusal with the reason attached. `force` overrides the ring
-    check only -- it will not make a model fit.
+    REFUSES rather than gambles: memory still moving or a model that does
+    not fit is a refusal with the reason attached. `force` overrides the
+    moving-memory check only -- it will not make a model fit.
     """
     from knurlogic.interfaces import ui
 
@@ -401,85 +300,6 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
     return out
 
 
-def _holders() -> List[Dict[str, Any]]:
-    """What is holding memory right now, by name -- the answer to 'what
-    would I unload to make room', which a bare refusal never gives."""
-    from knurlogic.machine import exo
-    from knurlogic.interfaces import ui
-    out = [{"what": r["model"],
-            "where": "exo, " + ", ".join(x["node"] for x in r["runners"]),
-            "phase": r["phase"],
-            "remove_with": f"unplace(instance_id='{r['instance_id']}')"}
-           for r in exo.phases()]
-    out += [{"what": (c["artifact"] or "").split("/")[-1],
-             "where": f"knurlogic, this machine, port {c['port']}",
-             "gib": round(c.get("bytes_resident", 0) / GIB, 1),
-             "phase": c["phase"], "remove_with": f"unload(port={c['port']})"}
-            for c in ui.children() if c["phase"] != "exited"]
-    return out
-
-
-def place(model: str = "", sharding: str = "Pipeline", min_nodes: int = 1,
-          force: bool = False, **_) -> Dict[str, Any]:
-    """Put a model on the exo cluster -- only on a settled ring, only if it
-    fits every node it lands on.
-
-    The failure this replaces: an agent places on a ring still moving, then
-    waits for something to happen and nothing does. So it refuses first and
-    says why, and afterwards every poll of `state` gives the instance a
-    phase, including `stalled` when nothing has moved for minutes.
-    """
-    from knurlogic.machine import exo
-    from knurlogic.tuning import settings as S
-
-    if not model:
-        return {"error": "pass model: an exo model id (org/name) or a path "
-                         "from `models` in exo's store"}
-    r = ready()
-    if not r["ready_for_exo_placement"] and not force:
-        return {"placed": False, "refused": "the cluster is not settled",
-                "blockers": r["blockers"] + r["exo_placement_blockers"],
-                "note": "placing now is how an instance ends up waiting on a "
-                        "rank that never connects. Poll `ready`; force=true "
-                        "places anyway."}
-    p = exo.plan(model, sharding=sharding, min_nodes=min_nodes)
-    if p.get("error"):
-        out = {"placed": False, "refused": p["error"],
-               "detail": {k: v for k, v in p.items()
-                          if k not in ("instance", "error")},
-               "holding_memory": _holders()}
-        if p.get("short_by_gib"):
-            out["note"] = (f"{p['short_by_gib']} GiB short across the "
-                           f"cluster. `holding_memory` is what could be "
-                           f"unloaded to make room.")
-        return out
-    if not p["fits"]:
-        return {"placed": False, "refused": "a shard does not fit its node",
-                "nodes": p["nodes"], "holding_memory": _holders(),
-                "note": "no override: it is arithmetic. Unload something from "
-                        "`holding_memory`, or raise min_nodes."}
-    tight = [n for n in p["nodes"] if n["headroom_gib"] < S.TIGHT_HEADROOM_GIB]
-    placed = exo.place(p)
-    out = {"placed": True, "instance_id": placed["instance_id"],
-           "model_id": p["model_id"], "nodes": p["nodes"],
-           "next": "poll `state` (exo_instances) until this instance is "
-                   "serving; it reports downloading, loading (layers), "
-                   "warming, failed, or stalled -- never silence."}
-    if tight:
-        out["warning"] = (f"tight on {', '.join(n['node'] for n in tight)}: "
-                          f"under {S.TIGHT_HEADROOM_GIB:g} GiB left after the "
-                          f"shard, and long prompts need room to prefill")
-    return out
-
-
-def unplace(instance_id: str = "", **_) -> Dict[str, Any]:
-    """Remove an instance from the exo cluster."""
-    from knurlogic.machine import exo
-    if not instance_id:
-        return {"error": "pass instance_id; `state` lists them"}
-    return exo.unplace(instance_id)
-
-
 def unload(port: int = 8080, **_) -> Dict[str, Any]:
     from knurlogic.interfaces import ui
     return ui._stop(int(port))
@@ -497,17 +317,16 @@ def deps() -> Dict[str, Any]:
 TOOLS: Dict[str, Dict[str, Any]] = {
     "ready": {
         "fn": ready,
-        "description": "Is it safe to load now? `ready` covers a local "
-                       "load (exo runners moving memory on this box); "
-                       "`ready_for_exo_placement` adds ring-wide blockers "
-                       "(downloads in progress, unseen nodes). Every "
+        "description": "Is it safe to load now? Not while another load "
+                       "(a server `load` started, or any process holding "
+                       "the model-load lock) is still moving memory. Every "
                        "blocker is named. Call this before loading.",
         "schema": _schema({}),
     },
     "state": {
         "fn": state,
         "description": "What is loaded on this machine in every runtime "
-                       "(knurlogic, exo, ollama, any OpenAI port) and where "
+                       "(knurlogic, ollama, exo, any OpenAI port) and where "
                        "the memory went. `started_here` gives each server `load` "
                        "started a phase -- serving, loading (with elapsed "
                        "time and the last log line), stalled (stop waiting, "
@@ -553,8 +372,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": load,
         "description": "Start a local server for an artifact, with its "
                        "settings resolved against the load budget. Refuses "
-                       "if it will not fit (no override) or exo is moving "
-                       "memory on this box (force overrides).",
+                       "if it will not fit (no override) or another load is "
+                       "still moving memory (force overrides).",
         "schema": _schema({
             "artifact": S("path to the artifact"),
             "port": S("port to serve on", "integer"),
@@ -562,8 +381,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "sets": {"type": "object",
                      "description": "launch-only knob overrides, KEY: VALUE"},
             "force": {"type": "boolean",
-                      "description": "load while exo runners are moving "
-                                     "memory"},
+                      "description": "load while another load is still "
+                                     "moving memory"},
             "draft": {"type": "boolean",
                       "description": "use a packed drafting head "
                                      "(default true)"},
@@ -579,32 +398,10 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                        "in exo and not here, or the reverse.",
         "schema": _schema({}),
     },
-    "place": {
-        "fn": place,
-        "description": "Put a model on the exo cluster. Refuses on an "
-                       "unsettled ring (force overrides) and when any "
-                       "node's shard will not fit (no override), naming "
-                       "what is holding memory. Then poll `state`: the "
-                       "instance reports downloading, loading (layers), "
-                       "warming, serving, failed or stalled.",
-        "schema": _schema({
-            "model": S("exo model id (org/name) or a path from `models`"),
-            "sharding": S("Pipeline (default) or Tensor"),
-            "min_nodes": S("at least this many nodes", "integer"),
-            "force": {"type": "boolean",
-                      "description": "place on an unsettled ring anyway"},
-        }, ["model"]),
-    },
-    "unplace": {
-        "fn": unplace,
-        "description": "Remove an instance from the exo cluster.",
-        "schema": _schema({"instance_id": S("from `state` exo_instances")},
-                          ["instance_id"]),
-    },
     "unload": {
         "fn": unload,
         "description": "Stop a local server knurlogic started (any "
-                       "session). For exo instances use `unplace`.",
+                       "session).",
         "schema": _schema({"port": S("port it was started on", "integer")}),
     },
 }

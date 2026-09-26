@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import json
 import urllib.error
-import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -150,41 +149,12 @@ def _exo(base: str) -> list:
             detail=(f"{up} runner{'' if up == 1 else 's'} up; {where_txt}"
                     if up else f"no runner up; {where_txt}"),
             bytes_resident=sum(p["bytes_est"] for p in here),
-            can_unload=True, ident=iid,
+            ident=iid,
             extra={"placement": placed["nodes"],
                    "on_this_machine": bool(here),
                    "bytes_note": "bytes_resident counts only shards on THIS "
                                  "machine, estimated as the model's size "
                                  "times its share of layers"}))
-    # The phase, with its evidence, from the one home that reads it -- so
-    # the page says "loading 25/64 layers" or "stalled" where it used to say
-    # only loaded or loading. Imported here: exo.py reads HTTP through this
-    # module, so a top-level import would be circular.
-    try:
-        from knurlogic.machine import exo as _exo_mod
-        by_id = {r["instance_id"]: r for r in _exo_mod.phases(base, st)}
-    except Exception:
-        by_id = {}
-    for r in out:
-        ph = by_id.get(r.ident)
-        # Only on evidence: an instance whose shard map names no runners
-        # gives a phase read off nothing, and the survey's own reading of
-        # the runner states is better than that.
-        if not ph or not (ph["runners"] or ph.get("downloads")):
-            continue
-        r.state = ph["phase"]
-        bits = []
-        for x in ph["runners"]:
-            if x.get("total_layers"):
-                bits.append(f"{x['node']} {x['layers_loaded']}/{x['total_layers']} layers")
-            elif x.get("error"):
-                bits.append(f"{x['node']} failed: {x['error']}")
-        for d in ph.get("downloads", []):
-            bits.append(f"{d['node']} downloading {d['progress']}")
-        if ph.get("advice"):
-            bits.append(ph["advice"])
-        if bits:
-            r.detail = "; ".join(bits) + " | " + r.detail
     # Runners can be up before exo has recorded an instance for them --
     # measured against the live daemon, which held 2 WarmingUp and 1 Loading
     # against an empty instance map. Reporting "nothing loaded" there would
@@ -358,8 +328,8 @@ def main(argv=None) -> int:
 
 
 # --- acting on them ---------------------------------------------------------
-# Reading is half of it. Nobody should have to open exo's own page to put a
-# model on the cluster or take it off, so the two calls that do it live here.
+# Reading is half of it. ollama's models can be let go from the page too;
+# exo is only read, never driven.
 
 def _post(url: str, payload=None, method: str = "POST", timeout: float = 30.0):
     data = None if payload is None else json.dumps(payload).encode()
@@ -369,34 +339,6 @@ def _post(url: str, payload=None, method: str = "POST", timeout: float = 30.0):
     with urllib.request.urlopen(req, timeout=timeout) as r:
         body = r.read().decode()
     return json.loads(body) if body.strip() else {}
-
-
-def exo_load(base: str, model_id: str, min_nodes: int = 1,
-             sharding: str = "Pipeline") -> dict:
-    """Put a model on the exo cluster: placement, then instance.
-
-    Two calls, and the first one is why this is not guesswork --
-    `GET /instance/placement` returns the very `Instance` object that
-    `POST /instance` takes as `payload.instance`, so the shard assignment is
-    exo's own decision rather than something assembled here. Verified live
-    against the running daemon (a 0.7 GB Llama rung), which answered with a
-    full MlxRingInstance including runnerToShard.
-
-    exo refuses with a 400 when the model will not fit, and that refusal is
-    worth passing through verbatim: it is the same check knurlogic's resolver
-    does, made by the thing that will actually hold the weights.
-    """
-    q = urllib.parse.urlencode({"model_id": model_id, "sharding": sharding,
-                                "min_nodes": min_nodes})
-    inst = _get(f"{base}/instance/placement?{q}", timeout=30.0)
-    if not inst:
-        raise RuntimeError(f"exo would not place {model_id!r}: no placement "
-                           f"returned (is it downloaded?)")
-    return _post(f"{base}/instance", {"instance": inst})
-
-
-def exo_unload(base: str, instance_id: str) -> dict:
-    return _post(f"{base}/instance/{instance_id}", method="DELETE")
 
 
 def ollama_unload(base: str, model: str) -> dict:
