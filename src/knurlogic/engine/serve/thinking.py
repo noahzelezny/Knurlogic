@@ -303,6 +303,42 @@ def status() -> dict:
     return out
 
 
+def translate(body: dict, client_kwargs: dict | None):
+    """A chat request's reasoning level -> (chat_template_kwargs or None,
+    report). The request's own chat_template_kwargs win over the
+    translation, and the report says so. ValueError: a level off the
+    ladder, for the caller to refuse with 400."""
+    level = requested(body)
+    tmpl = _served_template()
+    name, spec = detect(tmpl)
+    tok = _served_tokenizer()
+    p = probe(tok, tmpl, spec) if (spec is not None and
+                                   tok is not None) else None
+    if p is not None and not p["verified"]:
+        # The text named controls the template does not act on.
+        name, spec = None, None
+    kwargs, report = resolve(level, name, spec)
+    if level is None and p is not None and spec is not None:
+        report["applied"] = p["default"] or "the model's own"
+        report["note"] = ("what the server renders when the "
+                          "request is silent")
+    client = dict(client_kwargs or {})
+    merged = {**kwargs, **client}
+    touched = spec is not None and bool(set(client) & thinking_keys(spec))
+    if touched:
+        was = report["applied"]
+        got = (applied_by_render(tok, spec, merged, p)
+               if p is not None else None)
+        report["applied"] = got or "set by the request"
+        report["native"] = got is not None
+        report["note"] = (
+            f"the request's own chat_template_kwargs set "
+            f"{', '.join(sorted(set(client) & thinking_keys(spec)))}"
+            f" and won" + (f" (translation alone gave {was})"
+                           if was != report["applied"] else ""))
+    return merged or None, report
+
+
 def _refuse(handler, msg: str) -> None:
     body = json.dumps({"error": msg}).encode()
     handler.send_response(400)
@@ -367,38 +403,10 @@ def install(srv) -> None:
             self._knurlogic_exclude = excluded(body)
             if getattr(request, "request_type", "chat") == "chat":
                 try:
-                    level = requested(body)
+                    merged, report = translate(body, self.chat_template_kwargs)
                 except ValueError as e:
                     return _refuse(self, str(e))
-                tmpl = _served_template()
-                name, spec = detect(tmpl)
-                tok = _served_tokenizer()
-                p = probe(tok, tmpl, spec) if (spec is not None and
-                                               tok is not None) else None
-                if p is not None and not p["verified"]:
-                    # The text named controls the template does not act on.
-                    name, spec = None, None
-                kwargs, report = resolve(level, name, spec)
-                if level is None and p is not None and spec is not None:
-                    report["applied"] = p["default"] or "the model's own"
-                    report["note"] = ("what the server renders when the "
-                                      "request is silent")
-                client = dict(self.chat_template_kwargs or {})
-                merged = {**kwargs, **client}
-                touched = spec is not None and \
-                    bool(set(client) & thinking_keys(spec))
-                if touched:
-                    was = report["applied"]
-                    got = (applied_by_render(tok, spec, merged, p)
-                           if p is not None else None)
-                    report["applied"] = got or "set by the request"
-                    report["native"] = got is not None
-                    report["note"] = (
-                        f"the request's own chat_template_kwargs set "
-                        f"{', '.join(sorted(set(client) & thinking_keys(spec)))}"
-                        f" and won" + (f" (translation alone gave {was})"
-                                       if was != report["applied"] else ""))
-                self.chat_template_kwargs = merged or None
+                self.chat_template_kwargs = merged
                 self._knurlogic_thinking = report
             return real_hc(self, request, *a, **k)
         handle_completion._knurlogic_thinking = True
