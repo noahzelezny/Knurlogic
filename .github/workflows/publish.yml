@@ -3,7 +3,7 @@
 # Trusted Publishing: PyPI trusts this workflow, in this repository, in the
 # `pypi` environment, to upload -- so no API token exists anywhere to leak.
 # On pypi.org the project's publisher names: owner noahzelezny, repository
-# knurlogic, workflow publish.yml, environment pypi.
+# Knurlogic, workflow publish.yml, environment pypi.
 name: publish
 
 on:

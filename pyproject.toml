@@ -51,7 +51,7 @@ dependencies = [
 knurlogic = "knurlogic.interfaces.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/noahzelezny/knurlogic"
+Homepage = "https://github.com/noahzelezny/Knurlogic"
 
 [tool.setuptools.packages.find]
 where = ["src"]
