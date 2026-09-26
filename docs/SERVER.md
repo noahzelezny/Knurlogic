@@ -205,3 +205,49 @@ Known gaps pinned as strict xfails: text stop sequences; the harness's five.
    parser, usage with reasoning tokens and the cache report. The
    detokenizer is finalized at the end (mlx-lm's server never does).
    tests/test_request.py, no model.
+3. **Host, scheduler, per-row sampling -- done.** `engine/runtime/host.py`
+   (empty/loading/ready/unloading/failed; poses as mlx-lm's provider for
+   the status code), `scheduler.py` (one thread owns the MLX stream:
+   commands, tokenizing incl. vision, the prompt cache with the exact-hit
+   rule, admission, steps, per-request text, cancellation), `prompt.py`
+   (template, segments, initial reasoning state). Seeds: the token at
+   position n is drawn with key(seed, n) (Gumbel-max); a seeded row
+   verifies a draft by drawing the target under the same key -- identical
+   across batch composition and drafting/plain regimes up to the logits
+   themselves (a batched forward is not bit-identical on every kernel:
+   GLM 2.7 drifts up to 0.3 in logprob under load; gemma and Flash held).
+   MLX arrays made on the scheduler's stream are freed on it: freed after
+   it ends, the process segfaults (measured), so stop() unloads there.
+4. **HTTP -- done.** `interfaces/http/`: `server.py` (ThreadingHTTPServer,
+   daemon threads, per-token flush, a failed write cancels the row),
+   `openai.py` (chat/completions/models, OpenAI error objects,
+   max_completion_tokens, n>1 refused, a render failure is a 400 before
+   any stream, prefill keepalives), `/v1/messages` in-process
+   (messages.handler_over), `scout.py` (/v1/residency, /v1/ensure,
+   capabilities + size in /v1/models, 413 from the image header,
+   X-Knurlogic-Concurrency from the engine's per-width timings). The
+   page's load/unload go through the scheduler.
+
+a review build review (2026-09-25): no blockers; eight findings, all
+fixed (20ea528) -- notably a pre-existing one: the draft step handed the
+logits processors a history without t1, so penalties differed by regime.
+
+### Conformance on knurlogic's own server (M4, 2026-09-25)
+
+| model | result |
+|---|---|
+| gemma e4b | 37 passed, 1 skipped (text-model refusal: it has vision) |
+| Qwen Flash-Next 2.1 | 37 passed, 1 skipped (same); drafting 0.90 |
+| GLM-5.3 2.7 | 36 passed, 2 skipped (+ seeded-under-load: batched logits drift 0.31); drafting 0.89 |
+
+### Measured: mlx-lm's server vs knurlogic's own (tools/server_bench.py)
+
+M4, one server process per run, 3 runs per arm alternating; decode =
+greedy streamed tok/s after the first token (median of 3), prefill = time
+to first token on a ~3000-token fresh prompt, batch4 = 4 concurrent.
+Ratio = knurlogic / mlx-lm of the medians.
+
+| model | decode | prefill TTFT | batch4 | verdict |
+|---|---|---|---|---|
+| gemma e4b | 1.08 (spread 51-64) | 0.99 | 1.06 | equal within noise |
+| Flash-Next 2.1 | 0.999 | 1.01 | 0.996 | equal within noise |

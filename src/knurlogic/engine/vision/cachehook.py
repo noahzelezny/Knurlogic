@@ -21,16 +21,15 @@ stable); a replacement of an equal key is a new list, so the old entry's pins
 go and the new one's come.
 
 THE ADMIT GAP (P4's leak). VisionServe.tokenize pins a request's images
-until the batch generator admits the row. If mlx-lm's `_generate` raises
-between `_tokenize` and `insert_segments` (in `_make_state_machine`, say),
+until the batch generator admits the row. If the scheduler raises between
+tokenize and insert (building the state machine, say),
 nothing admits the row and the pins stay forever. `pending()` records the
 pins a tokenize took; `claim()` is called once `insert_segments` has queued
 the row (from then on the generator's admit/remove releases them);
-`sweep()` releases whatever was never claimed. engine/serve/vision.py calls sweep at the
-top of every `_tokenize` -- the generator thread is sequential, so a pending
-entry still unclaimed when the next request is tokenized was abandoned.
-`install_admit(cls)` wraps a batch generator class's insert_segments to
-claim; `admit_guard()` is the same protocol as a context manager.
+`sweep()` releases whatever was never claimed. The scheduler
+(engine/runtime/scheduler.py) sweeps before every tokenize -- its thread is
+sequential, so a pending entry still unclaimed then was abandoned -- and
+wraps tokenize-to-insert in `admit_guard()`, which claims on success.
 
 Stdlib only; no mlx import (the wrapped objects are mlx-lm's, passed in).
 """
@@ -223,24 +222,7 @@ def admit_guard() -> Iterator[None]:
     claim()
 
 
-def install_admit(cls: type) -> None:
-    """Wrap a batch generator class's insert_segments (by name, asserted)
-    so a successful insert claims this thread's pending pins."""
-    real = getattr(cls, "insert_segments", None)
-    assert callable(real), (
-        f"{cls.__name__}.insert_segments is gone: the admit claim wraps it "
-        f"by name.")
-    if getattr(real, "_knurlogic_cachehook", False):
-        return
-
-    def insert_segments(self, *a, **kw):
-        out = real(self, *a, **kw)
-        claim()
-        return out
-    insert_segments._knurlogic_cachehook = True
-    insert_segments.__wrapped__ = real
-    cls.insert_segments = insert_segments
 
 
 __all__ = ["MUTATORS", "install", "pinned_entries", "release", "pending",
-           "claim", "sweep", "outstanding", "admit_guard", "install_admit"]
+           "claim", "sweep", "outstanding", "admit_guard"]

@@ -149,7 +149,7 @@ def test_no_leak_when_the_server_raises_between_tokenize_and_insert():
     assert cachehook.outstanding() == 0
 
 
-def test_admit_guard_and_insert_wrap():
+def test_admit_guard_sweeps_on_error_and_claims_on_success():
     store = ImageStore(max_bytes=150)
     vs = VisionServe(family=None, store=store, model_key=MK)
     imgs = [("y", PH)]
@@ -160,13 +160,10 @@ def test_admit_guard_and_insert_wrap():
             raise ValueError
     assert vs.pinned_count() == 0
 
-    class Gen:
-        def insert_segments(self, **kw):
-            return [1]
-    cachehook.install_admit(Gen)
-    vs._pin(imgs)
-    cachehook.pending(vs, imgs)
-    Gen().insert_segments(segments=[])
+    # a clean exit claims: the row owns the pin from then on
+    with cachehook.admit_guard():
+        vs._pin(imgs)
+        cachehook.pending(vs, imgs)
     assert cachehook.outstanding() == 0
     assert cachehook.sweep() == 0
     assert vs.pinned_count() == 1               # the row owns it now

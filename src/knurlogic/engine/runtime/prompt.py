@@ -3,8 +3,8 @@
 Segments are where the prompt cache stores checkpoints: the system prompt,
 the conversation, and a short thinking tail the template may open. A later
 request that shares the system prompt restores from the first checkpoint
-instead of prefilling it again. The rules are mlx-lm's server's, rewritten
-here with knurlogic's fix folded in (the system segment is found on
+instead of prefilling it again. The rules are the ones mlx-lm's server used,
+rewritten here with knurlogic's fix folded in (the system segment is found on
 templates where the empty user turn renders as a pure prefix -- GLM).
 
 `tokenize` has the signature vision's `VisionServe.tokenize` calls as its
