@@ -397,3 +397,12 @@ def test_glm_off_closes_the_think_block_so_the_answer_starts_normal():
     name, spec = T.detect(tok.chat_template)
     p = T.probe(tok, tok.chat_template, spec)
     assert p["verified"] and p["renders"]["off"] != p["renders"]["low"]
+
+
+def test_every_way_of_saying_no_thinking_is_none():
+    from knurlogic.engine.serve.thinking import requested
+    assert requested({"reasoning_effort": "none"}) == "none"
+    assert requested({"reasoning": {"effort": "none"}}) == "none"
+    assert requested({"reasoning": {"enabled": False}}) == "none"
+    # enabled without a level leaves the model's own default
+    assert requested({"reasoning": {"enabled": True}}) is None
