@@ -892,7 +892,7 @@ function wireDials(){
 }
 async function applyKnob(name,value){
   const r=await (await fetch('/settings.json',{method:'POST',
-    body:JSON.stringify({[name]:value})})).json();
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({[name]:value})})).json();
   const what=(r.applied||{})[name];
   $('applies').innerHTML=what?`<b>${esc(name)}</b> ${esc(what)}`:'Nothing changed.';
   loadSettings({tune:ASK.tune||'',working_set_gib:$('ws').value||''});
@@ -1020,7 +1020,7 @@ async function loadSettings(q){
 $('apply').onclick=async()=>{
   $('apply').disabled=true;
   const r=await (await fetch('/settings.json',{method:'POST',
-    body:JSON.stringify({tune:ASK.tune})})).json();
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({tune:ASK.tune})})).json();
   const done=Object.entries(r.applied||{}).filter(([k,v])=>!/restart/.test(v));
   $('applies').innerHTML=done.map(([k,v])=>`<b>${esc(k)}</b> ${esc(v)}`).join('<br>')
     ||'Nothing changed.';
@@ -1567,7 +1567,7 @@ function ramWent(m){
 
 async function act(payload){
   const r=await fetch('/loaded.json',{method:'POST',
-    body:JSON.stringify(payload)});
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
   const j=await r.json();
   // A refusal is an answer, and the page has to say it the way the MCP does
   // -- a Launch button that quietly resets is the page's version of an agent

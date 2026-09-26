@@ -17,20 +17,46 @@ from pathlib import Path
 _CURRENT: dict = {}
 
 
-def switch(path: str) -> dict:
+def switch(model: str, *, force: bool = False, wait: bool = True,
+           timeout: float = 3600.0) -> dict:
+    """Serve `model` (an id from /models.json, or the served one): the
+    checks startup makes (interfaces/loading.prepare), then a load on the
+    scheduler's thread. Idempotent. NotLoadable says why not; `force`
+    switches even with requests running (they fail, saying so)."""
+    from knurlogic.interfaces.loading import NotLoadable, prepare
     sched = _CURRENT["scheduler"]
-    before = sched.host.path
-    sched.load(str(path)).wait()
-    if sched.host.state != "ready":
-        raise RuntimeError(f"loading {Path(path).name} failed: "
-                           f"{sched.host.error}")
-    return {"loaded": str(path), "was": before}
+    host = sched.host
+    st = host.status()
+    if not (model in ("", Path(host.path or "").name, host.path)
+            and st["state"] in ("ready", "loading")):
+        freed = int(st.get("memory_bytes") or 0)
+        a = prepare(model, served=host.path, freed_bytes=freed)
+        if str(a.path) != host.path or st["state"] not in ("ready",
+                                                           "loading"):
+            cmd = sched.load(str(a.path),
+                             executes_artifact_code=bool(a.model_file),
+                             force=force)
+            cmd.started.wait()
+            if cmd.error:
+                raise NotLoadable(409, cmd.error, "model_busy")
+    if wait:
+        host.wait_ready(timeout)
+    st = host.status()
+    if st["state"] == "failed":
+        raise NotLoadable(500, f"loading {Path(st['model'] or '').name} "
+                               f"failed: {st['error']}", "load_failed")
+    return {"model": Path(st["model"] or "").name, "state": st["state"],
+            "memory_bytes": int(st.get("memory_bytes") or 0)}
 
 
 def unload() -> dict:
     sched = _CURRENT["scheduler"]
     had = sched.host.path
-    sched.unload().wait()
+    cmd = sched.unload(force=False)
+    cmd.done.wait()
+    if cmd.error:
+        from knurlogic.interfaces.loading import NotLoadable
+        raise NotLoadable(409, cmd.error, "model_busy")
     return {"unloaded": had}
 
 
@@ -62,16 +88,18 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                    executes_artifact_code=bool(artifact.model_file),
                    image_store_bytes=settings.get("image_store_bytes"))
     sched = Scheduler(mh, **scheduler_options(settings)).start()
-    sched.load(str(artifact.path))
+    sched.load(str(artifact.path),
+               executes_artifact_code=bool(artifact.model_file))
     _CURRENT["scheduler"] = sched
 
     served = scout.served(artifact, mh)
     from .server import DEFAULT_MAX_BODY
     app = App(sched, served=served, routes=routes,
               max_body=settings.get("max_body", DEFAULT_MAX_BODY),
+              allow_origins=tuple(settings.get("allow_origins") or ()),
               concurrency=lambda: scout.concurrency(sched),
-              residency=lambda: scout.residency(artifact, mh, sched),
-              ensure=lambda body: scout.ensure(body, artifact, mh, sched))
+              residency=lambda: scout.residency(mh, sched),
+              ensure=scout.ensure)
     httpd = make_server(app, host, port)
     print(f"knurlogic's own server on http://{host}:{port}/v1 "
           f"(loading {artifact.path.name})", flush=True)

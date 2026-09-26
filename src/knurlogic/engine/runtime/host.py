@@ -76,8 +76,13 @@ class ModelHost:
 
     # ------------------------------------------- scheduler thread only below
 
-    def load(self, path: str) -> None:
+    def load(self, path: str, *, executes_artifact_code: bool = None) -> None:
+        """`executes_artifact_code`: this artifact ships a runtime that WILL
+        run (its own `model_file`) -- stated per load, since each artifact
+        answers for itself."""
         path = str(path)
+        if executes_artifact_code is not None:
+            self.executes_artifact_code = bool(executes_artifact_code)
         if self.state == "ready" and self.path == path:
             return
         if self.model is not None:

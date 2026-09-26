@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import queue
+from pathlib import Path
 import threading
 import time
 from dataclasses import dataclass, field
@@ -89,6 +90,20 @@ class PromptCache:
 
 
 @dataclass
+class Command:
+    """A load or unload for the scheduler thread; `done` is set when it has
+    run (or was refused: `error`)."""
+    kind: str
+    path: Optional[str] = None
+    force: bool = True
+    executes: bool = False
+    #: set when the scheduler has taken it on (or refused it: then `done`)
+    started: threading.Event = field(default_factory=threading.Event)
+    done: threading.Event = field(default_factory=threading.Event)
+    error: str = ""
+
+
+@dataclass
 class _Row:
     job: Job
     text: Request
@@ -132,20 +147,25 @@ class Scheduler:
         self._wake.set()
         return job
 
-    def load(self, path: str) -> threading.Event:
-        """Queue a load; the event is set when it has finished (either
-        way -- read host.state)."""
-        done = threading.Event()
-        self.host.expect(str(path))
-        self._commands.put(("load", str(path), done))
-        self._wake.set()
-        return done
+    def load(self, path: str, *, executes_artifact_code: bool = False,
+             force: bool = True) -> "Command":
+        """Queue a load. `force=False` refuses (Command.error) if requests
+        are running or queued when the switch would happen -- decided on
+        the scheduler thread, so it cannot race them. Wait on
+        Command.done; read Command.error, then host.state."""
+        if self.host.state == "empty":
+            # the first load: requests arriving now wait for it
+            self.host.expect(str(path))
+        return self._command(Command("load", str(path), force,
+                                     executes_artifact_code))
 
-    def unload(self) -> threading.Event:
-        done = threading.Event()
-        self._commands.put(("unload", None, done))
+    def unload(self, *, force: bool = True) -> "Command":
+        return self._command(Command("unload", None, force))
+
+    def _command(self, cmd: "Command") -> "Command":
+        self._commands.put(cmd)
         self._wake.set()
-        return done
+        return cmd
 
     @property
     def width(self) -> int:
@@ -227,13 +247,24 @@ class Scheduler:
     def _do_commands(self) -> None:
         while True:
             try:
-                cmd, arg, done = self._commands.get_nowait()
+                c = self._commands.get_nowait()
             except queue.Empty:
                 return
-            if cmd == "load" and self.host.state == "ready" \
-                    and self.host.path == arg:
-                done.set()        # already served: nothing to fail or drop
+            if c.kind == "load" and self.host.state == "ready" \
+                    and self.host.path == c.path:
+                c.started.set()
+                c.done.set()      # already served: nothing to fail or drop
                 continue
+            self._take_jobs()
+            busy = len(self._rows) + len(self._waiting)
+            if busy and not c.force:
+                c.error = (f"{busy} request(s) are running or queued on "
+                           f"{Path(self.host.path or '').name}; switching "
+                           f"would fail them. Retry when idle, or force.")
+                c.started.set()
+                c.done.set()
+                continue
+            c.started.set()
             try:
                 if self._rows:
                     self._fail_all(RuntimeError(
@@ -241,8 +272,9 @@ class Scheduler:
                         "running"))
                 self._close_executor()
                 self.cache = PromptCache(self.cache.lru.max_size)
-                if cmd == "load":
-                    self.host.load(arg)
+                if c.kind == "load":
+                    self.host.load(c.path,
+                                   executes_artifact_code=c.executes)
                 else:
                     self.host.unload()
                 if self.host.state != "ready":
@@ -251,7 +283,7 @@ class Scheduler:
                             f"no model is loaded: {self.host.error or 'unloaded'}"))
                     self._waiting.clear()
             finally:
-                done.set()
+                c.done.set()
 
     def _take_jobs(self) -> None:
         while True:
