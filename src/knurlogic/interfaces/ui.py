@@ -522,43 +522,33 @@ def chat_targets() -> set:
     return out
 
 
-def proxy_chat(handler, where: str, body: bytes) -> None:
-    """POST /chat?where=<base>: forward a chat request to a running model
-    and stream its answer back as it arrives.
+def _send_json(handler, code: int, doc) -> None:
+    out = json.dumps(doc).encode()
+    handler.send_response(code)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(out)))
+    handler.end_headers()
+    handler.wfile.write(out)
 
-    The control page serves no model, so its chat has to reach the one the
-    person clicked -- a server `load` started -- and a browser
-    will not let a page on this port call another port directly. Streaming
-    is passed through byte for byte: SSE, prefill keepalives and all."""
+
+def _stream(handler, url: str, body: bytes, timeout: float = 3600) -> None:
+    """POST `body` to `url` and pass the answer back as it arrives, byte for
+    byte: SSE, prefill keepalives and all. The upstream's status and
+    Content-Type go with it; an upstream that cannot be reached is a 502."""
     import urllib.error
     import urllib.request
-    base = (where or "").rstrip("/")
-    if base not in chat_targets():
-        body_out = json.dumps({"error": f"not a running model this page "
-                                        f"knows: {base or '(none)'}"}).encode()
-        handler.send_response(403)
-        handler.send_header("Content-Type", "application/json")
-        handler.send_header("Content-Length", str(len(body_out)))
-        handler.end_headers()
-        handler.wfile.write(body_out)
-        return
-    req = urllib.request.Request(f"{base}/v1/chat/completions", data=body,
+    req = urllib.request.Request(url, data=body,
                                  headers={"Content-Type": "application/json"},
                                  method="POST")
     try:
-        up = urllib.request.urlopen(req, timeout=3600)
+        up = urllib.request.urlopen(req, timeout=timeout)
         code, ctype = up.status, up.headers.get("Content-Type",
                                                 "application/json")
     except urllib.error.HTTPError as e:
         up, code = e, e.code
         ctype = e.headers.get("Content-Type", "application/json")
     except Exception as e:
-        msg = json.dumps({"error": f"{type(e).__name__}: {e}"}).encode()
-        handler.send_response(502)
-        handler.send_header("Content-Type", "application/json")
-        handler.send_header("Content-Length", str(len(msg)))
-        handler.end_headers()
-        handler.wfile.write(msg)
+        _send_json(handler, 502, {"error": f"{type(e).__name__}: {e}"})
         return
     handler.send_response(code)
     handler.send_header("Content-Type", ctype)
@@ -574,9 +564,148 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
             handler.wfile.write(chunk)
             handler.wfile.flush()
     except (BrokenPipeError, ConnectionResetError):
-        pass            # the page stopped listening; nothing to answer
+        pass            # the client stopped listening; nothing to answer
     finally:
         up.close()
+
+
+def proxy_chat(handler, where: str, body: bytes) -> None:
+    """POST /chat?where=<base>: forward a chat request to a running model
+    and stream its answer back as it arrives.
+
+    The control page serves no model, so its chat has to reach the one the
+    person clicked -- a server `load` started -- and a browser
+    will not let a page on this port call another port directly."""
+    base = (where or "").rstrip("/")
+    if base not in chat_targets():
+        _send_json(handler, 403, {"error": f"not a running model this page "
+                                           f"knows: {base or '(none)'}"})
+        return
+    _stream(handler, f"{base}/v1/chat/completions", body)
+
+
+#: the largest settings change `/apply` forwards; a knob set is a few bytes
+APPLY_MAX = 16 << 10
+APPLY_S = 10.0
+
+
+def apply_settings(where: str, body: bytes, post=None) -> tuple:
+    """POST /apply?where=<base>: forward a live-knob change to a running
+    model server's own POST /settings.json and hand back its per-knob report.
+
+    Only a knurlogic model server this page knows (chat_targets) -- never a
+    peer's page, never another path -- a small JSON object, a short
+    deadline. The page sends it only when the person clicks Apply; which
+    knobs actually move is the model server's to decide and report."""
+    import urllib.error
+    import urllib.request
+    base = (where or "").rstrip("/")
+    if base not in chat_targets():
+        return 403, {"error": f"not a running model this page knows: "
+                              f"{base or '(none)'}"}
+    if len(body or b"") > APPLY_MAX:
+        return 413, {"error": f"a settings change is at most {APPLY_MAX} "
+                              f"bytes"}
+    try:
+        want = json.loads(body or b"")
+    except ValueError:
+        want = None
+    if not isinstance(want, dict):
+        return 400, {"error": "the body must be a JSON object of knobs"}
+    if post is None:
+        def post(url, data, t):
+            req = urllib.request.Request(
+                url, data=data, method="POST",
+                headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=t) as r:
+                    return r.status, r.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read()
+    try:
+        code, raw = post(f"{base}/settings.json",
+                         json.dumps(want).encode(), APPLY_S)
+        return code, json.loads(raw)      # JSON only, never an HTML page
+    except Exception as e:
+        return 502, {"error": f"{type(e).__name__}: {e}"}
+
+
+#: The paths the page's router forwards by `model`: the two chat surfaces
+#: a client pointed at this page (Claude Code, an OpenAI SDK) uses.
+ROUTE_PATHS = ("/v1/messages", "/v1/chat/completions")
+ROUTE_S = 2.0
+_ROUTES: dict = {"at": 0.0, "map": {}}
+
+
+def routable(fetch=None, ttl: float = 5.0) -> dict:
+    """{model id: base} for every running knurlogic server this page knows
+    (chat_targets: its own and the ones peers reported). Each is asked its
+    /v1/models -- the id a client names is the one the server answers to --
+    in parallel with one deadline; one that does not answer is left out.
+    Cached for a few seconds: Claude Code sends several requests a turn."""
+    import threading
+    import urllib.request
+    now = time.time()
+    if fetch is None:
+        if now - _ROUTES["at"] < ttl:
+            return dict(_ROUTES["map"])
+
+        def fetch(url, t):
+            with urllib.request.urlopen(url, timeout=t) as r:
+                return json.loads(r.read())
+    found: dict = {}
+
+    def one(base):
+        try:
+            for m in fetch(f"{base}/v1/models", ROUTE_S).get("data") or []:
+                if isinstance(m, dict) and m.get("id"):
+                    found.setdefault(str(m["id"]), base)
+        except Exception:
+            pass
+    ts = [threading.Thread(target=one, args=(b,), daemon=True)
+          for b in sorted(chat_targets())]
+    for t in ts:
+        t.start()
+    end = time.time() + ROUTE_S
+    for t in ts:
+        t.join(max(end - time.time(), 0))
+    out = dict(found)
+    _ROUTES.update(at=now, map=out)
+    return out
+
+
+def route_models_document(fetch=None) -> dict:
+    """GET /v1/models on the page: every model its router can reach."""
+    return {"object": "list", "data": [
+        {"id": m, "object": "model", "owned_by": "knurlogic", "server": b}
+        for m, b in sorted(routable(fetch).items())]}
+
+
+def route(handler, path: str, body: bytes, fetch=None) -> None:
+    """POST /v1/messages or /v1/chat/completions on the page: forward to
+    the running knurlogic server whose model id is the request's `model`.
+
+    Claude Code takes ONE base URL and names a model per tier; each
+    knurlogic server holds one model. So the page, which already knows
+    every running server here and on its peers, is the one address that
+    can hand each request to the server holding the model it names. Only
+    to those servers -- the same allow-list the page's chat uses."""
+    try:
+        model = json.loads(body or b"{}").get("model")
+    except Exception:
+        model = None
+    table = routable(fetch)
+    base = table.get(model) if isinstance(model, str) else None
+    if base is None:
+        # say it in the shape either client reads as an error
+        _send_json(handler, 404, {
+            "type": "error",
+            "error": {"type": "not_found_error",
+                      "message": f"no running model {model!r}; running: "
+                                 f"{', '.join(sorted(table)) or 'none'}"},
+            "models": sorted(table)})
+        return
+    _stream(handler, base + path, body)
 
 
 #: What `/peek` may read, and the query keys it passes along. Reads only:
@@ -672,27 +801,10 @@ def _start_discovery(me: dict, host: str, port: int, reachable: bool):
               f"still be named with --peer", file=sys.stderr)
 
 
-def serve_ui(host: str, port: int, serve_port: int, peers=(),
-             allow_origins=(), allow_hosts=()) -> int:
-    global PEERS
-    _SERVE_PORT["n"] = serve_port
-    _SERVE_PORT["ui"] = port
-    from knurlogic.cluster import links
-    from knurlogic.cluster.peers import Peers
-    me = identity.identity()
-    # `cluster`: every address bound, only loopback and Thunderbolt
-    # answered (cluster/links.Gate), advertised on Thunderbolt only.
-    gate = links.Gate() if host == "cluster" else None
-    bind = "0.0.0.0" if gate else host
-    reachable = host not in ("127.0.0.1", "localhost", "::1")
-    PEERS = Peers(me, port, manual=peers, reachable=reachable).start()
-    _start_discovery(me, host, port, reachable)
-    routes = web.routes(
-        status_fn=_status_fn,
-        settings_fn=web.machine_settings(),
-        models_fn=web.models_document(serving=""),
-        loaded_fn=_loaded_fn(),
-        load_fn=_load_fn(serve_port))
+def make_handler(routes: dict, gate=None, allow_origins=(),
+                 allow_hosts=()):
+    """The page's request handler: its routes, the router, the proxies, and
+    the guards in front of every one of them."""
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -731,6 +843,10 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
             intro = self.headers.get("X-Knurlogic-Peer")
             if intro and PEERS:
                 PEERS.introduce(self.client_address[0], intro)
+            if u.path.rstrip("/") == "/v1/models":
+                self._send(json.dumps(route_models_document()).encode(),
+                           "application/json")
+                return
             if u.path.rstrip("/") == "/peek":
                 code, doc = peek(parse_qs(u.query))
                 self._send(doc.encode(), "application/json", code)
@@ -758,6 +874,21 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
                 where = (parse_qs(u.query).get("where") or [""])[0]
                 proxy_chat(self, where, self.rfile.read(n) if n else b"")
                 return
+            if u.path.rstrip("/") in ROUTE_PATHS:
+                route(self, u.path.rstrip("/"),
+                      self.rfile.read(n) if n else b"")
+                return
+            if u.path.rstrip("/") == "/apply":
+                where = (parse_qs(u.query).get("where") or [""])[0]
+                if n > APPLY_MAX:
+                    self._send(b"a settings change is small", "text/plain",
+                               413)
+                    return
+                code, doc = apply_settings(where, self.rfile.read(n)
+                                           if n else b"")
+                self._send(json.dumps(doc).encode(), "application/json",
+                           code)
+                return
             h = routes.get("POST " + (u.path.rstrip("/") or "/"))
             if h is None:
                 self._send(b"not found", "text/plain", 404)
@@ -765,6 +896,32 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
             body, ctype = h(parse_qs(u.query), 0, self.rfile.read(n) if n
                             else b"")
             self._send(body, ctype)
+    return H
+
+
+def serve_ui(host: str, port: int, serve_port: int, peers=(),
+             allow_origins=(), allow_hosts=()) -> int:
+    global PEERS
+    _SERVE_PORT["n"] = serve_port
+    _SERVE_PORT["ui"] = port
+    from knurlogic.cluster import links
+    from knurlogic.cluster.peers import Peers
+    me = identity.identity()
+    # `cluster`: every address bound, only loopback and Thunderbolt
+    # answered (cluster/links.Gate), advertised on Thunderbolt only.
+    gate = links.Gate() if host == "cluster" else None
+    bind = "0.0.0.0" if gate else host
+    reachable = host not in ("127.0.0.1", "localhost", "::1")
+    PEERS = Peers(me, port, manual=peers, reachable=reachable).start()
+    _start_discovery(me, host, port, reachable)
+    routes = web.routes(
+        status_fn=_status_fn,
+        settings_fn=web.machine_settings(),
+        models_fn=web.models_document(serving=""),
+        loaded_fn=_loaded_fn(),
+        load_fn=_load_fn(serve_port))
+
+    H = make_handler(routes, gate, allow_origins, allow_hosts)
 
     srv = ThreadingHTTPServer((bind, port), H)
     if gate:

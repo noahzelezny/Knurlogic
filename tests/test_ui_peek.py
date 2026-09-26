@@ -84,6 +84,15 @@ def test_connect_json_lists_every_way_in():
     assert "__MODEL__" in by["curl"]["blocks"][0]["text"]
     assert not by["mcp"]["needs_model"]
     assert "knurlogic mcp" in by["mcp"]["blocks"][0]["text"]
+    # Claude Code goes to the page's router, one model per tier
+    assert by["claude"]["tiers"] == ["opus", "sonnet", "haiku"]
+    cmd = by["claude"]["blocks"][0]["text"]
+    for line in ("ANTHROPIC_BASE_URL=__ROUTER__",
+                 "ANTHROPIC_DEFAULT_OPUS_MODEL=__OPUS__",
+                 "ANTHROPIC_DEFAULT_SONNET_MODEL=__SONNET__",
+                 "ANTHROPIC_DEFAULT_HAIKU_MODEL=__HAIKU__"):
+        assert line in cmd
+    assert "__ROUTER__/v1" in by["openai"]["blocks"][1]["text"]
     # the scoped settings file, never the global one
     assert all("~/.claude" not in b["text"]
                for b in by["claude"]["blocks"])
