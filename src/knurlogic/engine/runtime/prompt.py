@@ -203,6 +203,10 @@ def _render(tokenizer, messages, render, close) -> list:
         messages, add_generation_prompt=True, tokenize=True, **render))
 
 
+#: the roles a prompt may end with and still be cut into segments
+ANSWERED = ("user", "tool")
+
+
 def _segment(tokenizer, messages, render, prompt):
     """Cut the rendered prompt into segments (see the module doc)."""
     state = "normal"
@@ -210,7 +214,11 @@ def _segment(tokenizer, messages, render, prompt):
         if tokenizer.rfind_think_start(prompt) > \
                 tokenizer.rfind_think_end(prompt):
             state = "reasoning"
-    if not messages or messages[-1].get("role") != "user":
+    # a turn the model answers: a user's, or a tool result an agent sends
+    # back (every agent turn after its first -- without a checkpoint there,
+    # a hybrid model re-prefilled the whole conversation each turn). An
+    # assistant message last is a prefill: one segment.
+    if not messages or messages[-1].get("role") not in ANSWERED:
         return prompt, [prompt], ["assistant"], state
 
     segs: List[List[int]] = []
