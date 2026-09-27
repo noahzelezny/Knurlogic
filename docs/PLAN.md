@@ -407,50 +407,42 @@ Done 2026-09-24 (CPU, tiny fixtures, all five families):
    * Timing is secondary here (4 concurrent requests, run 0 includes the
      load); not a speed claim.
 
-## NEXT (set 2026-09-25, second compaction)
+## NEXT (set 2026-09-26, third compaction)
 
-Done today: knurlogic's own server is the only one (docs/SERVER.md: four
-families conformant on the M4, equal speed to mlx-lm's within noise); two
-Fable 5.1 reviews (full branch, then re-review: MERGE); the exo wrap is
-gone (exo is read, never driven); mlx-vlm is not a dependency (GLM served
-without it); browser guards on both servers; ~/Knurlogic/Models is
-knurlogic's own (visible) store.
+Branches (clean as you go): vision-integration (241bc6d, Fable-reviewed,
+pushed) <- hardening (every server fix since: memory guard, admission,
+margin floor, control-token neutralization, Host guard, sampling defaults,
+timing, context-length cap, count_tokens, audit fixes; Fable 5.1: MERGE
+after two rounds) <- gui (the page: layouts, overlays, router by model,
+/peek, /apply, Connect, Settings, test bench, metrics) <- release (0.1.0:
+version from metadata, classifiers, Trusted Publishing workflow). Worktrees:
+../knurlogic-gui (gui), ../knurlogic-release (release); the main checkout is
+on hardening. Noah's page on :8899 runs from ../knurlogic-gui/src.
 
-1. **Merge vision-integration to main** -- Noah's call; the re-review said
-   merge.
-2. **Multi-machine serving, knurlogic's own** (replaces exo): the cluster
-   executor behind engine/runtime/executor.py (docs/SERVER.md "Cluster
-   readiness": rank 0 HTTP + scheduler, ranks 1..n serve_forever, tokens
-   and the NaN verdict broadcast from the last rank), over cluster/
-   (peers, Bonjour, --host cluster). Placement lessons: "Driving exo"
-   findings below.
-3. **HF download + a hub search tab** on the page (exo's shape), into
-   ~/Knurlogic/Models (KNURLOGIC_MODELS moves it). Needed by 2 as well
-   (a model onto a second Mac).
-4. Firewall-prompt UX for a satellite that missed it (Noah decides the
-   details).
-5. Upstream the mlx-lm bugs found (seed on threads, exact-hit crash, stop
-   strings as token ids, NaN as token 0, system-segment diff), and the
-   vqlab one (VQEmbedding.as_linear/dims ignore pack_bits: the strict
-   xfail in tests/test_vq_runtime.py).
-6. **Analytics, ported from Scout's internal tools** (Noah, 2026-09-26):
-   settings like the prefill chunk have per-family sweet spots, and are
-   easier to tune against recorded data than by feel. The server already
-   measures the pieces (step transient -> memory margin, bytes per token,
-   drafting acceptance, per-width cost); record them per run and model,
-   and give the page somewhere to look at them.
-7. **Peers' resident models on the page**: the page lists the other
-   machines (status.json nodes) but Running surveys only this box, so a
-   model serving on the M4 is invisible from the Studio's page (exo's
-   topology shows it). Part of 2's cluster view.
-8. **Chat layout** (in progress, a subagent's branch): one-line input, and
-   exo's split -- dashboard when idle, transcript layout once a chat has
-   messages.
+Release 0.1.0 (tonight or next):
+1. Fable 5.1 review of `gui` (router, /apply, /peek, the page) -> fixes.
+2. Update the M4 to gui once the shootout is done; one real end-to-end pass
+   (server timing + sampling defaults on the bench, Settings on a real
+   model, Claude Code through the page's router incl. count_tokens).
+3. History: rewrite while private (author email -> 262450986+noahzelezny@
+   users.noreply.github.com, home-directory paths -> ~/), backup first,
+   force-push all branches -- ONLY on Noah's explicit go. Then public.
+4. Merge vision-integration -> hardening -> gui into main; rebase release;
+   tag v0.1.0. PyPI: pending publisher added (noahzelezny/Knurlogic,
+   publish.yml, env pypi); the GitHub `pypi` environment exists. The name is
+   only claimed by the first upload.
 
-Machines: the M3 Studio is off-limits for model loads unless told. The M4
-(ssh 10.0.0.2, ~/kl-test/venv, wheel from a fresh clone) is the test box;
-its GLM env (gvqvlm) was removed -- everything runs from venv now. Models
-live on /Volumes/Thunderbay SSD/Exo Models (~/.exo/models links there).
+Shootout (scratchpad shootout/, M4 ~/kl-test/shootout): Flash done (one-shot
+24 + tool-use 8, triaged: ledger.md); 397B 2/8 tool-use audits, remaining
+running (chain7); GLM-5.3 2.7bpw produced nothing: ~6 GiB left above its
+weights on the 128 GB M4, four uncompacted 36k agents cannot fit (Scout's
+one-at-a-time + auto-compact does). All greedy (explicit temperature 0);
+rerun with each model's own sampling defaults after the release, and GLM
+with one compacting agent.
+
+After 0.1.0: multi-machine serving (cluster executor), HF download + hub
+tab, analytics from Scout's tools, firewall-prompt UX, upstream the mlx-lm
+bugs and vqlab's packed as_linear (strict xfail).
 
 ## Requirements for knurlogic's own server: Scout's ingest (2026-09-25)
 
