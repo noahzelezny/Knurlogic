@@ -389,3 +389,21 @@ def test_a_two_rank_split_computes_the_whole_models_logits(tmp_path):
     assert whole.shape == split.shape == (7, whole.shape[1])
     assert np.abs(whole - split).max() < 1e-3, np.abs(whole - split).max()
     assert (whole.argmax(-1) == split.argmax(-1)).all()
+
+
+def test_rank_0s_frees_never_lower_the_peers_estimate(monkeypatch):
+    """Tensor: what rank 0 took since the exchange raises the peers'
+    over-limit, what it freed does not lower it. Pipeline (unequal
+    stages): the peers' own number, untouched by rank 0's memory."""
+    import mlx.core as mx
+    from types import SimpleNamespace
+    from knurlogic.engine.runtime import tensor as T
+    mem = {"a": 50}
+    monkeypatch.setattr(mx, "get_active_memory", lambda: mem["a"])
+    for split, took, freed in (("tensor", 17, 7), ("pipeline", 7, 7)):
+        r = T.Ring(SimpleNamespace(size=2), split=split)
+        r.peer_over, r.local_then = 7, 50
+        mem["a"] = 60
+        assert r.peers_over_now() == took
+        mem["a"] = 30
+        assert r.peers_over_now() == freed

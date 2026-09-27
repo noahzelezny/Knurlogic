@@ -118,8 +118,10 @@ One model, N ranks, every layer's weights split N ways
   byte trims become counted pops. Identical ops in identical order keep
   every rank's LRU identical.
 - **Memory**: the guard reads the tightest rank -- the peers' over-limit
-  from the last exchange, moved by what rank 0 freed since (equal shards,
-  same ops) -- so eviction and admission are decided once, on rank 0.
+  from the last exchange, raised by what rank 0 has taken since (equal
+  shards, same ops) and never lowered by what it freed (a free here is not
+  yet a free there) -- so eviction and admission are decided once, on
+  rank 0.
 - **VQ**: a codebook is replicated, never sliced (`tensor.predicate`);
   codes and scales split. `tuning/resolve.tensor_refusals` refuses with the
   arithmetic when heads do not divide or a packed down_proj slice would cut
@@ -211,9 +213,9 @@ unchanged). `--split pipeline`.
   store on every rank; the embeddings are needed at the first stage only,
   but MRoPE positions are needed at every stage, so they go in the admit
   op (they are pure in the key).
-- **Memory guard**: as tensor (the tightest rank, via the control vector);
-  stages are unequal, so "peers move with rank 0" is an approximation
-  until the next exchange.
+- **Memory guard**: as tensor (the tightest rank, via the control vector),
+  but the peers' own over-limit is used as reported, refreshed every step:
+  stages are unequal, so rank 0's memory says nothing about a peer's.
 - **Bring-up**: `knurlogic serve <artifact> --rank r --world n --split
   pipeline --link ring --hosts a:p,b:p --prefill-chunk N
   --working-set-gib G [--layers a,b] [--bandwidth-gbs X]`.

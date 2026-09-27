@@ -718,8 +718,8 @@ class Scheduler:
 
     def _active(self) -> int:
         """Active memory as the guard counts it. On a ring, the tightest
-        rank rules: the peers' over-limit from the last exchange (moved by
-        what this rank has freed since) is read as if it were here."""
+        rank rules: the peers' over-limit from the last exchange
+        (tensor.Ring.peers_over_now) is read as if it were here."""
         a = self._local_active()
         peers = self.tensor.peers_over_now() if self.tensor is not None \
             else None
@@ -834,7 +834,9 @@ class Scheduler:
             return
         if self.cache is not None and self.cache.nbytes:
             before = self.cache.nbytes
-            self.cache.trim_to(max(before - over - self._margin(), 0))
+            # the limit already leaves a step's margin; trimming another
+            # would evict a margin's worth of prompt cache for nothing
+            self.cache.trim_to(max(before - over, 0))
             self._release()
             over = self._active() - limit
             logger.warning("memory past the limit (%.1f GiB): the prompt "
