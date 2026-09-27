@@ -1,5 +1,5 @@
-"""Load/unload on ONE peer: the coordinator forwards by identity with the
-peer's launch token; the peer refuses anything else. No model loads: the
+"""Load/unload on ONE peer: the coordinator forwards by identity; the
+peer refuses anything off its gate, with an Origin, or naming a path. No model loads: the
 peer's loader and resolver are stubs, and the "peer" in the happy path is a
 local http server running the real handler."""
 
@@ -10,15 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from knurlogic.cluster import launch
 from knurlogic.interfaces import ui
 from knurlogic.machine import artifact
-
-
-@pytest.fixture(autouse=True)
-def cfg(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
-    yield
 
 
 class Open:
@@ -38,7 +31,7 @@ def hdr(**kw):
 def call(body, headers=None, gate=Open(), **kw):
     loads = []
     code, doc = ui.peer_launch(
-        {launch.HEADER: launch.token()} if headers is None else headers, "10.0.0.1", "10.0.0.2",
+        {} if headers is None else headers, "10.0.0.1", "10.0.0.2",
         json.dumps(body).encode(), gate=gate,
         load=lambda **a: loads.append(a) or {"starting": a["artifact"]},
         resolve=kw.get("resolve", lambda i: "/models/X" if i == "abc"
@@ -53,30 +46,15 @@ LOAD = {"action": "load", "identity": "abc", "tune": "fast",
 
 # --- the peer's side ---------------------------------------------------------
 
-def test_refused_until_this_machine_opts_in():
-    code, doc, loads = call(LOAD)
-    assert code == 403 and "accept launches" in doc["error"] and not loads
-
-
-def test_refused_with_wrong_or_missing_token():
-    launch.set_accepting(True)
-    for h in ({}, {launch.HEADER: "nope"}, {launch.HEADER: ""}):
-        code, doc, loads = call(LOAD, headers=h)
-        assert code == 403 and "token" in doc["error"] and not loads
-
-
 def test_refused_with_any_origin_header():
-    launch.set_accepting(True)
-    code, doc, loads = call(LOAD, headers={launch.HEADER: launch.token(),
-                                           "Origin": "http://10.0.0.2:8899"})
+    code, doc, loads = call(LOAD, headers={"Origin": "http://10.0.0.2:8899"})
     assert code == 403 and not loads
 
 
 def test_refused_off_the_gate_unless_a_named_peer():
-    launch.set_accepting(True)
     code, _, loads = call(LOAD, gate=Shut())
     assert code == 403 and not loads
-    code, _ = ui.peer_launch({launch.HEADER: launch.token()}, "10.0.0.1",
+    code, _ = ui.peer_launch({}, "10.0.0.1",
                                 "192.168.1.5", json.dumps(LOAD).encode(),
                                 gate=Shut(), manual_hosts=["10.0.0.1"],
                                 load=lambda **a: {}, resolve=lambda i: "/m")
@@ -85,19 +63,16 @@ def test_refused_off_the_gate_unless_a_named_peer():
 
 @pytest.mark.parametrize("key", ["path", "target", "artifact", "where"])
 def test_refused_when_a_path_is_in_the_payload(key):
-    launch.set_accepting(True)
     code, doc, loads = call({**LOAD, key: "/etc"})
     assert code == 400 and "identity" in doc["error"] and not loads
 
 
 def test_unknown_identity_is_a_plain_refusal():
-    launch.set_accepting(True)
     code, doc, loads = call({**LOAD, "identity": "zzz"})
     assert code == 404 and doc["refused"].startswith("not on") and not loads
 
 
 def test_knobs_outside_the_allow_list_are_refused():
-    launch.set_accepting(True)
     code, doc, loads = call({**LOAD, "sets": {"DYLD_INSERT_LIBRARIES": "x"}})
     assert code == 400 and not loads
     code, doc, loads = call({**LOAD, "sets": {"VQ_DECODE_CHUNK": "1;rm"}})
@@ -105,20 +80,9 @@ def test_knobs_outside_the_allow_list_are_refused():
 
 
 def test_accepted_load_resolves_identity_here():
-    launch.set_accepting(True)
     code, doc, [a] = call(LOAD)
     assert code == 200 and a["artifact"] == "/models/X"
     assert a["tune"] == "fast" and a["sets"] == {"VQ_DECODE_CHUNK": "16"}
-
-
-def test_token_is_stable_regenerable_and_private(tmp_path):
-    t = launch.token()
-    assert t == launch.token() and len(t) >= 32
-    assert launch.regenerate() != t
-    assert "launch_token" not in launch.public(False)
-    assert launch.public(True)["launch_token"] == launch.token()
-    import stat
-    assert stat.S_IMODE(launch.path().stat().st_mode) == 0o600
 
 
 # --- identity ----------------------------------------------------------------
@@ -159,7 +123,6 @@ def peer(state="answering"):
 
 def test_forward_refuses_unknown_or_silent_peer(monkeypatch):
     peers_with(peer("not_answering"), monkeypatch=monkeypatch)
-    launch.set_peer_token("m4id", "t" * 32)
     sent = []
     doc = ui.forward_launch({"action": "load", "node": "m4id",
                              "identity": "abc"},
@@ -171,16 +134,8 @@ def test_forward_refuses_unknown_or_silent_peer(monkeypatch):
     assert "error" in doc and not sent
 
 
-def test_forward_needs_the_pasted_token(monkeypatch):
-    peers_with(peer(), monkeypatch=monkeypatch)
-    doc = ui.forward_launch({"action": "load", "node": "m4id",
-                             "identity": "abc"}, post=lambda *a: 1 / 0)
-    assert "no launch token" in doc["error"]
-
-
 def test_forward_never_sends_a_path(monkeypatch):
     peers_with(peer(), monkeypatch=monkeypatch)
-    launch.set_peer_token("m4id", "t" * 32)
     for extra in ({"target": "/x"}, {"path": "/x"}, {"artifact": "/x"}):
         doc = ui.forward_launch({"action": "load", "node": "m4id",
                                  "identity": "abc", **extra},
@@ -190,9 +145,7 @@ def test_forward_never_sends_a_path(monkeypatch):
 
 def test_forward_to_a_real_peer_page(monkeypatch):
     """The coordinator's forward_launch against the real handler on a local
-    port: token, opt-in, identity resolution, refusal text passed back."""
-    launch.set_accepting(True)
-    mine = launch.token()
+    port: identity resolution, refusal text passed back."""
     loads = []
     monkeypatch.setattr(ui, "peer_launch", _stubbed(ui.peer_launch, loads))
     srv = ThreadingHTTPServer(("127.0.0.1", 0), ui.make_handler({}))
@@ -203,7 +156,6 @@ def test_forward_to_a_real_peer_page(monkeypatch):
                             port=port, state="answering",
                             key=f"127.0.0.1:{port}", found_by={"manual"})
         peers_with(p, monkeypatch=monkeypatch)
-        launch.set_peer_token("m4id", mine)
         doc = ui.forward_launch({"action": "load", "node": "m4id",
                                  "identity": "abc", "tune": "safe",
                                  "sets": {"VQ_DECODE_CHUNK": "8"}})
@@ -215,17 +167,13 @@ def test_forward_to_a_real_peer_page(monkeypatch):
         doc = ui.forward_launch({"action": "unload", "node": "m4id",
                                  "port": 8123})
         assert doc["stopped"] == 8123
-        launch.set_peer_token("m4id", "wrong" * 8)
-        doc = ui.forward_launch({"action": "load", "node": "m4id",
-                                 "identity": "abc"})
-        assert "token" in doc["error"]
         # a browser page cannot reach the peer route
         import urllib.error
         import urllib.request
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}{ui.PEER_LOAD_PATH}", method="POST",
             data=json.dumps({"action": "load", "identity": "abc"}).encode(),
-            headers={launch.HEADER: mine, "Origin": "http://evil.example"})
+            headers={"Origin": "http://evil.example"})
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(req, timeout=5)
         assert e.value.code == 403

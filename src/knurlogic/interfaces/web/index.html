@@ -1554,60 +1554,13 @@ async function showMachine(m){
     <div class="mwired"><div class="msg">reading…</div></div>
     <div class="mallow"></div>
     ${own?'':'<div class="msg">Its wired limit and allowance are set on that machine\'s own page.</div>'}
-    <div class="mlaunch"></div>
   </div>`;
-  launchSection(el.querySelector('.mlaunch'), m, own);
   const doc=own ? DOC : await getJSON(peekURL(m.page,'/settings.json'));
   const row=el.querySelector(`[data-m="${CSS.escape(m.id)}"]`);
   if(seq!==SEQ || !row) return;
   row.querySelector('.mwired').innerHTML=wiredHTML(doc, own);
   row.querySelector('.mallow').innerHTML=allowHTML(doc&&doc.allowance, m, own);
   if(own) wireWired();
-}
-// Launches from another machine. On this machine's own page: accept or not
-// (off until turned on here) and the token another page needs. On a peer's
-// tab: where its token is pasted. The token never leaves this machine except
-// by a person copying it.
-async function launchSection(el, m, own){
-  if(!el) return;
-  const d=await getJSON('/launch.json');
-  const head='<div class="sidelab">launches from other machines</div>';
-  if(d.error){ el.innerHTML=`<div class="allow">${head}<div class="msg">${esc(d.error)}</div></div>`; return }
-  const post=async body=>{ await fetch('/launch.json',{method:'POST',
-    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    launchSection(el, m, own) };
-  if(own){
-    if(!('launch_token' in d)){ el.innerHTML=`<div class="allow">${head}<div class="msg">
-      shown only on this machine's own page (opened on this Mac)</div></div>`; return }
-    el.innerHTML=`<div class="allow">${head}
-      <label><input type="checkbox" class="lacc" ${d.accept_launches?'checked':''}>
-        accept launches from another machine's page</label>
-      <div class="msg">${d.accept_launches?'Another page loads here with this token:':
-        'Off. When on, another page loads here only with this token:'}</div>
-      <div><code class="ltok">${esc(d.launch_token)}</code>
-        <button class="mini lcopy">Copy</button>
-        <button class="mini lnew" title="every page that has the old token needs the new one">New token</button></div>
-      <div class="msg">Paste it on the other machine's page: Settings &gt; Cluster &gt; this machine.</div></div>`;
-    el.querySelector('.lacc').onchange=e=>post({accept:e.target.checked});
-    el.querySelector('.lnew').onclick=()=>post({regenerate:true});
-    el.querySelector('.lcopy').onclick=()=>navigator.clipboard&&
-      navigator.clipboard.writeText(d.launch_token);
-    return;
-  }
-  const peer=((window.RESIDENCY||{}).peers||[]).find(p=>p.address===m.id)||{};
-  if(!peer.id){ el.innerHTML=`<div class="allow">${head}<div class="msg">not answering</div></div>`; return }
-  const has=(d.peers_with_token||[]).includes(peer.id);
-  el.innerHTML=`<div class="allow">${head}
-    <div class="msg">${has?`This page has ${esc(m.name)}'s launch token: Launch with
-      ${esc(m.name)} picked loads there.`:`To launch on ${esc(m.name)}: on its own page,
-      Settings &gt; Cluster, turn on accepting launches and copy its token.`}</div>
-    <div><input class="ltokin" type="password" placeholder="${has?'replace token':'paste token'}"
-      autocomplete="off" spellcheck="false">
-      <button class="mini lsave">Save</button>
-      ${has?'<button class="mini lforget">Forget</button>':''}</div></div>`;
-  el.querySelector('.lsave').onclick=()=>{
-    const t=el.querySelector('.ltokin').value.trim(); if(t) post({peer:peer.id, token:t}) };
-  const f=el.querySelector('.lforget'); if(f) f.onclick=()=>post({peer:peer.id, token:''});
 }
 // Every base model: the picker's groups over what is on this disk, plus any
 // running on a peer that this disk does not have; the running ones first.
@@ -2345,7 +2298,7 @@ function launchBlock(ns){
 // The peer's own /models.json (read through /peek) says what it has, by
 // identity -- never by path; a model it does not have is greyed "not on".
 // The load itself goes to this page's POST /loaded.json with `node`, which
-// forwards it with the launch token pasted under Settings > Cluster.
+// forwards it by identity; the peer runs its own checks.
 const PEERMODELS={};   // node id -> Set of identities, once read
 const launchPeer=()=>{ const ns=selNodes();
   return ns.length===1 && !isLocal(ns[0]) ? ns[0] : null };
@@ -2509,7 +2462,7 @@ async function loadResident(){
   // shown and chatted with, never unloaded from here: this page drives only
   // what its own machine started.
   // A peer's knurlogic model is unloaded through that peer (forwarded
-  // with its launch token; the peer stops only what it started).
+  // by port; the peer stops only what it started).
   const rows=(d.resident||[]).concat(...peers.map(m=>(m.resident||[])
       .map(r=>({...r, node:m.id}))))
     .map(r=>r.machine?{...r, can_unload:r.runtime==='knurlogic' && !!r.node
