@@ -200,3 +200,65 @@ def test_relay_resolves_by_folder_name_or_the_only_model():
     assert ui._resolve(t, "/models/org--Qwen/") == "http://127.0.0.1:1"
     assert ui._resolve(t, None) == "http://127.0.0.1:1"
     assert ui._resolve(t, "other") is None
+
+
+def _counting_survey(monkeypatch, rows):
+    """peer_residency, answering `rows` for the peer; -> the call count."""
+    real, calls = ui.peer_residency, []
+
+    def survey(peers, timeout=ui.PEER_LOADED_S, fetch=None):
+        calls.append(1)
+        return real(peers, timeout,
+                    fetch=lambda url, t: {"resident": list(rows)})
+    monkeypatch.setattr(ui, "peer_residency", survey)
+    return calls
+
+
+def test_a_chat_to_a_model_the_page_has_not_surveyed_yet_resurveys(
+        two, monkeypatch):
+    here, _, seen = two
+    ui._PEER_TARGETS.clear()            # launched since the last survey
+    calls = _counting_survey(monkeypatch, [
+        {"runtime": "knurlogic", "name": "glm-peer",
+         "where": "http://127.0.0.1:8080"}])
+    code, _, raw = _post(here + "/chat?where=http://127.0.0.1:8080",
+                         {"model": "glm-peer", "stream": True})
+    assert code == 200 and raw == SSE and calls == [1]
+    # and a model nobody serves is still refused, after one survey
+    code, _, raw = _post(here + "/chat?where=http://127.0.0.1:9",
+                         {"model": "x"})
+    assert code == 403 and calls == [1, 1]
+
+
+def test_the_router_resurveys_once_on_a_miss(two, monkeypatch):
+    here, _, seen = two
+    ui._PEER_TARGETS.clear()
+    ui._ROUTES.update(at=1e18, map={})      # a fresh, empty cached table
+    calls = _counting_survey(monkeypatch, [
+        {"runtime": "knurlogic", "name": "glm-peer",
+         "where": "http://127.0.0.1:8080"}])
+    code, _, raw = _post(here + "/v1/messages", {"model": "glm-peer"})
+    assert code == 200 and json.loads(raw) == PLAIN and len(calls) >= 1
+
+
+@pytest.mark.parametrize("req,which,answer,refresh", [
+    ({"action": "load", "identity": "abc", "nodes": ["m4", "m3"],
+      "split": "tensor", "link": "ring"}, "cluster_launch",
+     {"job": "ab", "port": 8080}, True),
+    ({"action": "load", "identity": "abc", "nodes": ["m4", "m3"],
+      "split": "tensor", "link": "ring"}, "cluster_launch",
+     {"refused": "nothing started"}, False),
+    ({"action": "load", "identity": "abc", "node": "m4"}, "forward_launch",
+     {"starting": "/m", "port": 8080, "machine": "M4"}, True),
+    ({"action": "load", "identity": "abc", "node": "m4"}, "forward_launch",
+     {"error": "M4 did not answer"}, False),
+])
+def test_a_launch_refreshes_what_the_page_can_reach(monkeypatch, req, which,
+                                                    answer, refresh):
+    calls = []
+    monkeypatch.setattr(ui, which, lambda *a, **k: answer)
+    monkeypatch.setattr(ui, "refresh_targets", lambda: calls.append(1))
+    from knurlogic.machine import identity
+    monkeypatch.setitem(identity._ID, "id", "m3")
+    out = ui._load_fn(8080)({}, json.dumps(req).encode())
+    assert out == answer and bool(calls) is refresh

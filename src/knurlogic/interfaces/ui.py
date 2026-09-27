@@ -400,7 +400,7 @@ def _load_fn(serve_port: int):
         act = req.get("action")
         nodes = req.get("nodes")
         if act == "load" and isinstance(nodes, list) and len(nodes) >= 2:
-            return cluster_launch(req, serve_port)
+            return _then_refresh(cluster_launch(req, serve_port))
         if act == "load" and isinstance(nodes, list) and len(nodes) == 1:
             req = {k: v for k, v in req.items()
                    if k not in ("nodes", "split", "link")}
@@ -410,7 +410,7 @@ def _load_fn(serve_port: int):
             return cluster_jobs.stop(str(req["job"]), reason="unloaded")
         node = req.get("node")
         if node and node != identity.identity().get("id"):
-            return forward_launch(req)
+            return _then_refresh(forward_launch(req))
         if node:
             # this machine, picked by id: the page's own load, by identity
             from knurlogic.machine.artifact import resolve_identity
@@ -424,11 +424,11 @@ def _load_fn(serve_port: int):
             # a capability on one side only.
             if act == "load":
                 from knurlogic.interfaces import mcp
-                return mcp.load(artifact=target,
+                return _then_refresh(mcp.load(artifact=target,
                                 port=int(req.get("port") or serve_port),
                                 tune=req.get("tune") or "balanced",
                                 sets=req.get("sets") or {},
-                                force=bool(req.get("force")))
+                                force=bool(req.get("force"))))
             if act == "unload":
                 # Ours to stop only if we started it. Anything else is
                 # somebody's server and not this page's to kill.
@@ -804,6 +804,37 @@ def _loaded_fn():
     return handler
 
 
+def refresh_targets() -> None:
+    """Ask the peers what they serve NOW and forget the router's cached
+    table: after a launch, and once before refusing a model this page does
+    not know, so a chat to a job launched a moment ago is not refused until
+    the page's next survey."""
+    _ROUTES["at"] = 0.0
+    if PEERS is not None:
+        try:
+            peer_residency(PEERS)
+        except Exception:
+            pass
+
+
+def _then_refresh(out):
+    """A launch's answer, passed on; a launch that went ahead first
+    refreshes what this page's chat and router can reach."""
+    if isinstance(out, dict) and not out.get("error") \
+            and not out.get("refused") and out.get("loaded") is not False:
+        refresh_targets()
+    return out
+
+
+def known_target(base: str) -> bool:
+    """`base` is one this page may send to -- re-surveying the peers once
+    before saying no."""
+    if base in chat_targets():
+        return True
+    refresh_targets()
+    return base in chat_targets()
+
+
 def chat_targets() -> set:
     """Endpoints the page may send a chat to: servers knurlogic started that
     are still ours. A fixed allow-list, so the proxy cannot be
@@ -874,7 +905,7 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
     person clicked -- a server `load` started -- and a browser
     will not let a page on this port call another port directly."""
     base = (where or "").rstrip("/")
-    if base not in chat_targets():
+    if not known_target(base):
         _send_json(handler, 403, {"error": f"not a running model this page "
                                            f"knows: {base or '(none)'}"})
         return
@@ -897,7 +928,7 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
     import urllib.error
     import urllib.request
     base = (where or "").rstrip("/")
-    if base not in chat_targets():
+    if not known_target(base):
         return 403, {"error": f"not a running model this page knows: "
                               f"{base or '(none)'}"}
     if len(body or b"") > APPLY_MAX:
@@ -1008,6 +1039,11 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
         model = None
     table = routable(fetch)
     base = table.get(model) if isinstance(model, str) else None
+    if base is None:
+        # launched a moment ago? ask the peers once more before refusing
+        refresh_targets()
+        table = routable(fetch)
+        base = table.get(model) if isinstance(model, str) else None
     if base is None:
         # say it in the shape either client reads as an error
         _send_json(handler, 404, {
