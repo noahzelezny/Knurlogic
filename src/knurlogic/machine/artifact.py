@@ -211,3 +211,61 @@ def sampling_defaults(path) -> dict:
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             out[name] = v
     return out
+
+
+# --- identity: the same weights on another machine ---------------------------
+# A peer is asked to load an artifact by WHAT it is, never by where it sits:
+# a path from another machine means nothing here, and a path taken from a
+# request is a way to point a loader at an arbitrary directory. The identity
+# is cheap on purpose -- no hashing of weights: sha256 over config.json's
+# bytes, the safetensors index's bytes (when there is one) and the total
+# safetensors size. Two copies of one published rung agree; a re-export, a
+# different quantisation or a truncated download does not.
+_IDENT: dict = {}
+
+
+def identity(path) -> str:
+    """16 hex of sha256(config.json + model.safetensors.index.json + total
+    safetensors bytes); "" when there is no config.json. Cached per path
+    until config.json's mtime or size changes."""
+    import hashlib
+    p = Path(path)
+    cfg = p / "config.json"
+    try:
+        st = cfg.stat()
+    except OSError:
+        return ""
+    key = str(p)
+    hit = _IDENT.get(key)
+    if hit and hit[0] == (st.st_mtime_ns, st.st_size):
+        return hit[1]
+    h = hashlib.sha256()
+    try:
+        h.update(cfg.read_bytes())
+        idx = p / "model.safetensors.index.json"
+        h.update(b"\0index\0")
+        if idx.is_file():
+            h.update(idx.read_bytes())
+        total = sum(f.stat().st_size for f in p.iterdir()
+                    if f.suffix == ".safetensors" and f.is_file())
+    except OSError:
+        return ""
+    h.update(b"\0bytes\0" + str(total).encode())
+    out = h.hexdigest()[:16]
+    _IDENT[key] = ((st.st_mtime_ns, st.st_size), out)
+    return out
+
+
+def resolve_identity(ident: str, paths=None) -> str | None:
+    """The local artifact directory with this identity, or None. `paths`
+    defaults to every artifact in this machine's model stores
+    (machine/discover.py); nothing outside them is ever considered."""
+    if not isinstance(ident, str) or not ident or len(ident) > 64:
+        return None
+    if paths is None:
+        from knurlogic.machine import discover
+        paths = [f.path for f in discover.find()]
+    for p in paths:
+        if identity(p) == ident:
+            return str(p)
+    return None

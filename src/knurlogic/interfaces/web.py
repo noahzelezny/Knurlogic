@@ -123,10 +123,13 @@ def models_document(serving: str = "", ttl: float = 60.0):
             _MODELS["at"] = now
         out = []
         from knurlogic.machine import allowance, wired
+        from knurlogic.machine.artifact import identity as artifact_identity
         ws = allowance.cap(wired.detected_working_set_bytes())
         for f in _MODELS["rows"]:
             out.append({
                 "name": f.name, "path": str(f.path), "store": f.store,
+                # what a peer is asked to load by (machine/artifact.py)
+                "identity": artifact_identity(f.path),
                 "size_bytes": f.bytes_on_disk, "model_type": f.model_type,
                 "is_vq": f.is_vq, "servable": f.servable, "why": f.why,
                 "mtp": bool(f.extra.get("mtp_head")),

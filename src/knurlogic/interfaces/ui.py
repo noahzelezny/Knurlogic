@@ -383,7 +383,12 @@ def _load_fn(serve_port: int):
             req = json.loads(body or b"{}")
         except Exception:
             req = {}
+        if not isinstance(req, dict):
+            req = {}
         act = req.get("action")
+        node = req.get("node")
+        if node and node != identity.identity().get("id"):
+            return forward_launch(req)
         target, where = req.get("target") or "", req.get("where") or ""
         try:
             # Through the MCP's own functions: the page refuses what an agent
@@ -411,6 +416,245 @@ def _load_fn(serve_port: int):
             return {"error": f"{type(e).__name__}: {e}"}
         return {"error": f"unknown action {act!r}"}
     return handler
+
+
+# --- load / unload on ONE peer ---------------------------------------------
+# The coordinator page (this one, with a peer picked) never tells a peer a
+# path and never takes the peer's address from the request: the address is
+# the one its PEERS store has for an ANSWERING peer with that id, the
+# artifact is named by identity (machine/artifact.identity), and the request
+# carries the launch token the person pasted from that peer's own page
+# (cluster/launch.py). The peer decides: its own opt-in, its own token, its
+# own fit check against its own load budget. The refusal text comes back
+# as the peer wrote it.
+
+#: the peer-only route a forwarded load arrives on
+PEER_LOAD_PATH = "/peer/loaded.json"
+#: a forwarded request is a few fields; anything bigger is not one
+PEER_LOAD_MAX = 16 << 10
+#: a load answers once the fit is checked and the child started
+PEER_LOAD_S = 60.0
+TUNES = ("safe", "balanced", "fast")
+#: request keys that would name a place on disk; refused outright, never
+#: ignored, so a coordinator that sends one learns it is wrong
+PATH_KEYS = ("path", "target", "artifact", "where", "dir", "directory")
+
+
+def launch_knobs() -> frozenset:
+    """The knob names a forwarded load may set: the ones knurlogic documents
+    (tuning/settings.KNOB_DOC) and their aliases. Nothing else is passed on:
+    `--set` puts it in the child's environment."""
+    from knurlogic.tuning import settings as S
+    return frozenset(S.KNOB_DOC) | frozenset(
+        n for v in S.KNOB_ALIASES.values() for n in v) | frozenset(
+        S.NUMERICS_FLAGS)
+
+
+def clean_sets(sets) -> tuple:
+    """(allowed {name: value}, [refused names]). Values are short plain
+    tokens: digits, letters, '.', '-', '_'."""
+    import re
+    ok, bad = {}, []
+    allowed = launch_knobs()
+    for k, v in (sets.items() if isinstance(sets, dict) else ()):
+        v = str(v)
+        if k in allowed and len(v) <= 64 and re.fullmatch(r"[\w.\-]*", v):
+            ok[k] = v
+        else:
+            bad.append(str(k)[:64])
+    return ok, bad
+
+
+def _peer_by_id(node: str):
+    for p in (PEERS.all() if PEERS else []):
+        if getattr(p, "id", "") == node and p.state == "answering":
+            return p
+    return None
+
+
+def _post_json(url: str, doc: dict, headers: dict, timeout: float):
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(
+        url, data=json.dumps(doc).encode(), method="POST",
+        headers={"Content-Type": "application/json", **headers})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def forward_launch(req: dict, post=None) -> dict:
+    """A load or unload for the peer `req["node"]`, sent to that peer's
+    PEER_LOAD_PATH. Builds the forwarded request from scratch: action,
+    identity, port, tune, allow-listed sets, force -- nothing else of what
+    the page sent goes over."""
+    from knurlogic.cluster import launch
+    node = str(req.get("node") or "")
+    if any(k in req for k in PATH_KEYS if k != "target") or (
+            req.get("action") == "load" and req.get("target")):
+        return {"error": "a model on another machine is named by its "
+                         "identity, never by a path"}
+    p = _peer_by_id(node)
+    if p is None:
+        return {"error": f"{node!r} is not a machine that is answering this "
+                         f"page; it can only launch on peers it can see"}
+    who = p.name or p.host
+    tok = launch.peer_token(node)
+    if not tok:
+        return {"error": f"no launch token for {who}. On {who}'s own page, "
+                         f"Settings -> Cluster: turn on 'accept launches' "
+                         f"and copy its token; paste it here under "
+                         f"Settings -> Cluster -> {who}."}
+    act = req.get("action")
+    if act == "load":
+        sets, bad = clean_sets(req.get("sets") or {})
+        if bad:
+            return {"error": f"not a launch setting knurlogic passes to "
+                             f"another machine: {', '.join(bad)}"}
+        doc = {"action": "load", "identity": str(req.get("identity") or ""),
+               "tune": req.get("tune") if req.get("tune") in TUNES
+               else "balanced", "sets": sets, "force": bool(req.get("force"))}
+        if req.get("port"):
+            doc["port"] = int(req["port"])
+        if not doc["identity"]:
+            return {"error": "no identity for that model; this page's "
+                             "/models.json gives one per artifact"}
+    elif act == "unload":
+        try:
+            doc = {"action": "unload", "port": int(req.get("port"))}
+        except (TypeError, ValueError):
+            return {"error": "unload on another machine names the port"}
+    else:
+        return {"error": f"unknown action {act!r}"}
+    post = post or _post_json
+    try:
+        code, raw = post(f"http://{p.key}{PEER_LOAD_PATH}", doc,
+                         {launch.HEADER: tok}, PEER_LOAD_S)
+    except Exception as e:
+        return {"error": f"{who} did not answer: {type(e).__name__}: {e}"}
+    try:
+        out = json.loads(raw)
+    except Exception:
+        out = None
+    if not isinstance(out, dict):
+        text = raw.decode(errors="replace")[:500] if isinstance(
+            raw, bytes) else str(raw)[:500]
+        return {"error": f"{who} refused ({code}): {text}"}
+    out = clean(out)
+    out["machine"] = who
+    return out
+
+
+def clean(doc):
+    from knurlogic.cluster.peers import clean as _clean
+    return _clean(doc)
+
+
+def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
+                gate=None, manual_hosts=(), load=None, stop=None,
+                resolve=None) -> tuple:
+    """POST /peer/loaded.json, on the machine asked to load: (status, doc).
+
+    Refused, in this order, unless: no Origin header (a browser never
+    reaches this); the connection arrived on loopback or Thunderbolt, or
+    from a peer address named with --peer; this machine accepts launches
+    (its own page turned that on); the token is this machine's. Then the
+    request is a load by identity -- resolved to a path HERE, from this
+    machine's own stores -- or an unload of a port this machine started."""
+    from knurlogic.cluster import launch
+    from knurlogic.cluster.links import Gate
+    if headers.get("Origin") is not None:
+        return 403, {"error": "a web page cannot drive another machine's "
+                              "loads"}
+    ip = (client_ip or "").removeprefix("::ffff:")
+    g = gate or Gate()
+    if not (g.allows(local_ip) or ip in set(manual_hosts)):
+        return 403, {"error": f"launches are taken over Thunderbolt or "
+                              f"loopback, or from a peer named with --peer; "
+                              f"this came from {ip}"}
+    if not launch.accepting():
+        return 403, {"error": "this machine does not accept launches from "
+                              "other machines. Turn it on on its own page: "
+                              "Settings -> Cluster -> accept launches."}
+    if not launch.check(headers.get(launch.HEADER)):
+        return 403, {"error": "wrong or missing launch token. Copy it again "
+                              "from this machine's own page (Settings -> "
+                              "Cluster)."}
+    if len(body or b"") > PEER_LOAD_MAX:
+        return 413, {"error": "a launch request is small"}
+    try:
+        req = json.loads(body or b"")
+    except ValueError:
+        req = None
+    if not isinstance(req, dict):
+        return 400, {"error": "the body must be a JSON object"}
+    if any(k in req for k in PATH_KEYS):
+        return 400, {"error": "a launch names a model by identity, never by "
+                              "a path"}
+    act = req.get("action")
+    if act == "unload":
+        port = req.get("port")
+        if not isinstance(port, int) or isinstance(port, bool):
+            return 400, {"error": "unload names the port"}
+        return 200, (stop or _stop)(port)
+    if act != "load":
+        return 400, {"error": f"unknown action {act!r}"}
+    sets, bad = clean_sets(req.get("sets") or {})
+    if bad:
+        return 400, {"error": f"not a launch setting: {', '.join(bad)}"}
+    tune = req.get("tune") if req.get("tune") in TUNES else "balanced"
+    from knurlogic.machine.artifact import resolve_identity
+    path = (resolve or resolve_identity)(req.get("identity"))
+    if not path:
+        name = identity.identity().get("name") or "this machine"
+        return 404, {"loaded": False, "refused": f"not on {name}",
+                     "note": f"{name} has no artifact with identity "
+                             f"{str(req.get('identity'))[:64]!r} in its "
+                             f"model stores. Copy it there first."}
+    port = req.get("port")
+    port = port if isinstance(port, int) and not isinstance(port, bool) \
+        and 1024 <= port < 65536 else _SERVE_PORT["n"]
+    if load is None:
+        from knurlogic.interfaces import mcp
+        load = mcp.load
+    # the fit check is this machine's, against its own load budget
+    return 200, load(artifact=path, port=port, tune=tune, sets=sets,
+                     force=bool(req.get("force")))
+
+
+def launch_doc(own: bool) -> dict:
+    from knurlogic.cluster import launch
+    return launch.public(own)
+
+
+def set_launch(body: bytes) -> tuple:
+    """POST /launch.json, on this machine's own page only: {accept: bool},
+    {regenerate: true}, or {peer: id, token: str}."""
+    from knurlogic.cluster import launch
+    try:
+        req = json.loads(body or b"")
+    except ValueError:
+        req = None
+    if not isinstance(req, dict):
+        return 400, {"error": "the body must be a JSON object"}
+    try:
+        if "accept" in req:
+            launch.set_accepting(req["accept"] is True)
+        if req.get("regenerate") is True:
+            launch.regenerate()
+        if "peer" in req:
+            launch.set_peer_token(str(req["peer"]), str(req.get("token")
+                                                         or ""))
+    except ValueError as e:
+        return 400, {"error": str(e)}
+    return 200, launch.public(True)
+
+
+def _is_loopback(ip: str) -> bool:
+    ip = (ip or "").removeprefix("::ffff:")
+    return ip == "::1" or ip.startswith("127.")
 
 
 #: How long the page waits for all peers together. A peer's /loaded.json
@@ -466,7 +710,7 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
                                      where=_peer_where(r.get("where"),
                                                        p.host)))
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
-                          "resident": rows}
+                          "id": getattr(p, "id", ""), "resident": rows}
         except Exception as e:
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
                           "resident": [],
@@ -726,7 +970,7 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
 #: What `/peek` may read, and the query keys it passes along. Reads only:
 #: a running model's settings and sampling defaults, a peer page's machine
 #: settings. Nothing that changes anything is reachable through it.
-PEEK_PATHS = ("/settings.json", "/v1/models")
+PEEK_PATHS = ("/settings.json", "/v1/models", "/models.json")
 PEEK_KEYS = ("tune", "working_set_gib", "wired_gib")
 PEEK_S = 3.0
 
@@ -855,6 +1099,11 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             if self._gated():
                 return
             u = urlparse(self.path)
+            if u.path.rstrip("/") == "/launch.json":
+                # the token only to this machine's own page (loopback)
+                self._send(json.dumps(launch_doc(_is_loopback(
+                    self.client_address[0]))).encode(), "application/json")
+                return
             intro = self.headers.get("X-Knurlogic-Peer")
             if intro and PEERS:
                 PEERS.introduce(self.client_address[0], intro)
@@ -874,9 +1123,12 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             self._send(body, ctype)
 
         def do_POST(self):
+            u = urlparse(self.path)
+            if u.path.rstrip("/") == PEER_LOAD_PATH:
+                self._peer_load()
+                return
             if self._gated():
                 return
-            u = urlparse(self.path)
             try:
                 n = int(self.headers.get("Content-Length") or 0)
             except ValueError:
@@ -904,6 +1156,15 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 self._send(json.dumps(doc).encode(), "application/json",
                            code)
                 return
+            if u.path.rstrip("/") == "/launch.json":
+                if not _is_loopback(self.client_address[0]):
+                    self._send(b"launches are set on this machine's own "
+                               b"page", "text/plain", 403)
+                    return
+                code, doc = set_launch(self.rfile.read(n) if n else b"")
+                self._send(json.dumps(doc).encode(), "application/json",
+                           code)
+                return
             h = routes.get("POST " + (u.path.rstrip("/") or "/"))
             if h is None:
                 self._send(b"not found", "text/plain", 404)
@@ -911,6 +1172,28 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             body, ctype = h(parse_qs(u.query), 0, self.rfile.read(n) if n
                             else b"")
             self._send(body, ctype)
+
+        def _peer_load(self):
+            """PEER_LOAD_PATH: its own checks (peer_launch), not the
+            browser guard's -- it refuses ANY Origin, and its gate is
+            Thunderbolt/loopback or a --peer address in every mode."""
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if not 0 <= n <= PEER_LOAD_MAX:
+                self._send(b'{"error": "a launch request is small"}',
+                           "application/json", 413)
+                return
+            manual = [p.host for p in (PEERS.all() if PEERS else [])
+                      if "manual" in p.found_by]
+            code, doc = peer_launch(
+                self.headers, self.client_address[0],
+                self.connection.getsockname()[0],
+                self.rfile.read(n) if n else b"", manual_hosts=manual)
+            if code == 200:
+                web._LOADED["doc"] = None     # residency just changed
+            self._send(json.dumps(doc).encode(), "application/json", code)
     return H
 
 
