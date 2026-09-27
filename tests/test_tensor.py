@@ -318,3 +318,31 @@ def test_a_sliced_codebook_is_caught():
             self.proj = h
     with pytest.raises(RuntimeError, match="codebook was split"):
         check_codebooks(M())
+
+
+def test_a_ring_serves_its_first_model_and_refuses_switching():
+    from knurlogic.engine.runtime.scheduler import Command, Scheduler
+
+    class H:
+        state, path, error, model = "empty", None, "", None
+
+        def expect(self, p):
+            self.state, self.path = "loading", p
+
+        def load(self, p, **k):
+            self.state, self.path, self.model = "ready", p, object()
+
+    class R:
+        world, journal = 2, None
+    s = Scheduler(H(), tensor=R())
+    s.host.expect("/m/a")                   # what Scheduler.load does first
+    first = Command("load", "/m/a")
+    s._commands.put(first)
+    s._do_commands()
+    assert first.error == "" and s.host.state == "ready"
+    for c in (Command("load", "/m/b"), Command("unload")):
+        s._commands.put(c)
+        s._do_commands()
+        assert "split across 2 ranks" in c.error
+    with pytest.raises(ValueError, match="count-based"):
+        Scheduler(H(), tensor=R(), prompt_cache_bytes=1 << 30)

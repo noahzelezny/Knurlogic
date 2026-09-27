@@ -375,7 +375,9 @@ class Scheduler:
                 c.done.set()      # already served: nothing to fail or drop
                 continue
             if self.tensor is not None and (
-                    c.kind == "unload" or self.host.state != "empty"):
+                    c.kind == "unload"
+                    or getattr(self.host, "model", None) is not None):
+                # the first load is the ring's; nothing after it
                 c.error = ("this server's model is split across "
                            f"{self.tensor.world} ranks; it serves "
                            f"{Path(self.host.path or '').name} until it "
