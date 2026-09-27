@@ -255,6 +255,21 @@ loopback, Thunderbolt, or a `--peer` address).
   loading, set to 60000 after load (the maintainer's d2e82f92 / 43dc7f56).
 - **Registry**: `jobs/jobs.json`, keyed `<job>/<rank>`; rank 0 also in
   `servers.json` by its port (chat, relay, residency find it there).
+- **Measured across two Macs** (2026-09-27; M4 Max 128 GB leads, M3 Ultra
+  96 GB follows, Thunderbolt, launched from the M3's page, greedy, 200
+  tokens, n=3, prompt chunk 512). 35B-A3B VQ 3.4bpw: one process 71.5 (M4)
+  / 55.6 (M3) tok/s; tensor ring 38.5, tensor jaccl 51.5; pipeline ring
+  57.8, pipeline jaccl 59.1. 397B-A17B VQ 2.4bpw (the biggest rung whose
+  identity matches on both): tensor jaccl 25.6 (prefill 254 tok/s at 4.4k
+  tokens; 56 GiB a rank), tensor ring 19.9 (277), pipeline jaccl 27.3
+  (265; 36/24 layers, M4 73 GiB, M3 ~50), and 27.0 with the M3 leading.
+  Before MLX_METAL_FAST_SYNCH the 35B's tensor split made 14 (jaccl) and
+  10.7 (ring). Tensor is token-identical ring vs jaccl; pipeline on one
+  machine is token-identical to one process, across two chips it forks at
+  the first near-tie (0.13 nats at token 7), as M4 vs M3 alone do. Killing
+  either rank mid-stream stops both within ~3 s with nothing left behind:
+  the follower's death is a 503 `cluster_failed`, rank 0's a 502 from the
+  page relay (nobody is left to write the 503).
 
 ## Migration
 
