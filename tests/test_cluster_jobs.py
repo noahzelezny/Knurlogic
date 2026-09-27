@@ -428,9 +428,20 @@ def test_kill_rank_0_and_its_page_has_rank_1_killed(two_pages):
     assert wait(lambda: not alive(p.rank0["pid"]), 5)
     stopped = C.watch_once()
     assert stopped and stopped[0][0] == p.job and "exited" in stopped[0][1]
+    # the reason names the machine rank 0 ran on, not "this machine":
+    # stop() sends these same words to B's page
+    assert p.rank0["machine"] == "A" and p.rank1["machine"] == "B"
+    assert "rank 0 on A " in stopped[0][1], stopped
     assert wait(lambda: not alive(p.rank1["pid"]), 20)
     ended = [d for d in C.jobs_document() if d["job"] == p.job]
     assert ended and ended[0]["phase"] == "stopped"
+
+
+def test_the_verdict_names_a_ranks_machine_from_the_job_when_unrecorded():
+    w = J.Watch()
+    why = w.verdict("j", [{"rank": 1, "pid": 5, "machines": ["A", "B"]}],
+                    lambda p: False, now=1)
+    assert "rank 1 on B " in why
 
 
 def test_a_stalled_ring_is_torn_down(two_pages, monkeypatch):
