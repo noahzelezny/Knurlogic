@@ -68,13 +68,19 @@ logger = logging.getLogger(__name__)
 
 
 
+#: the ceiling that means "draft at every width": KNURLOGIC_MTP_DYNAMIC=off
+ALWAYS_DRAFT = 1 << 30
+
+
 def default_draft_max_rows() -> int | None:
     """A fixed row ceiling for drafting from KNURLOGIC_MTP_BATCH_MAX_ROWS (0:
-    never draft -- it read as 1), or None for the adaptive rule
+    never draft -- it read as 1); with none, KNURLOGIC_MTP_DYNAMIC=off
+    drafts every step (ALWAYS_DRAFT); else None for the adaptive rule
     (`MTPBatch.drafting_pays`)."""
     raw = os.environ.get("KNURLOGIC_MTP_BATCH_MAX_ROWS")
     if not raw:
-        return None
+        dyn = os.environ.get("KNURLOGIC_MTP_DYNAMIC", "").strip().lower()
+        return ALWAYS_DRAFT if dyn in ("off", "0", "false", "no") else None
     try:
         return max(0, int(raw))
     except ValueError:
