@@ -744,3 +744,45 @@ def test_a_cut_stream_that_is_no_cluster_job_just_ends(monkeypatch):
     h = _Capture()
     ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
     assert h.wfile.getvalue() == b'data: {"x": 1}\n\n'
+
+
+def test_slot_skips_the_ring_ports_of_live_jobs(monkeypatch):
+    job = "0005" + "0" * 12                      # its own slot is 5
+    assert C._slot(job, used=set()) == 5
+    assert C._slot(job, used={5, 6}) == 7
+    assert C._slot("0063" + "0" * 12, used={99}) == 0    # wraps
+    with pytest.raises(ValueError, match="every ring-port slot"):
+        C._slot(job, used=set(range(100)))
+    # the registry's live jobs: a recorded ring port, else the nonce's slot
+    monkeypatch.setattr(J, "by_job", lambda: {
+        "aaaa000000000000": [{"ring_port": C.RING_PORT + 5 * 20 + 1}],
+        "0006000000000000": [{"rank": 0}]})
+    assert C._used_slots() == {5, 6}
+    assert C._slot(job) == 7
+
+
+def test_jaccl_without_an_rdma_subnet_is_refused_not_rerouted(cache,
+                                                             monkeypatch):
+    """RDMA up on both Macs, but on different cables: refused, with each
+    Mac's active devices -- never jaccl over some other device."""
+    monkeypatch.setattr(C, "_resolve", lambda i: "/m/x")
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
+    rd = lambda dev: {"available": True, "reason": "", "devices": [dev],
+                      "active": [dev]}
+    ia = {**info("Apple M4 Max", "192.0.2.1", rdma=rd("rdma_en4")),
+          "thunderbolt": [{"iface": "en4", "ip": "192.0.2.1"}]}
+    ib = {**info("Apple M3 Ultra", "198.51.100.2", rdma=rd("rdma_en7")),
+          "thunderbolt": [{"iface": "en7", "ip": "198.51.100.2"},
+                          {"iface": "en2", "ip": "192.0.2.2"}]}
+    peer = SimpleNamespace(id="bbbb", name="B", host="192.0.2.2",
+                           key="192.0.2.2:8765", state="answering",
+                           link="thunderbolt", node={"cluster": ib})
+    out = C.launch({"action": "load", "identity": "abc",
+                    "nodes": ["aaaa", "bbbb"], "split": "tensor",
+                    "link": "jaccl"},
+                   me={"id": "aaaa", "name": "A"}, peers=[peer],
+                   local_info=ia, ui_port=1, serve_port=2,
+                   post=lambda *a, **k: pytest.fail("posted"))
+    assert "refused" in out and "no Thunderbolt subnet" in out["refused"]
+    assert "rdma_en4" in out["refused"] and "rdma_en7" in out["refused"]
+    assert C._rdma_device(ia, ib) is None
