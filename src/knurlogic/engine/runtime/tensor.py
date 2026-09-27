@@ -26,6 +26,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_map, tree_map_with_path
 
+from knurlogic.cluster.jobs import progress
+
 from . import plan as P
 from .executor import (Admission, Checkpoint, Finished, LocalExecutor)
 
@@ -228,6 +230,7 @@ class Link:
         if len(steps) != 1:
             raise Desync(f"ranks at different steps: {[r[P.STEP] for r in rows]}")
         self.step += 1
+        progress(step=self.step)
         length = rows[0][P.LENGTH]
         if not length:
             return rows, None
@@ -533,6 +536,7 @@ def init(link_kind: str) -> Link:
     logger.info("rank %d of %d joined the %s ring", link.rank, link.size,
                 backend)
     link.barrier()
+    progress(phase="loading")
     return link
 
 
@@ -566,6 +570,8 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                            f"{host.error}")
     logger.info("rank %d: %s loaded, %.1f GiB active", link.rank, path,
                 mx.get_active_memory() / GIB)
+    from knurlogic.cluster.jobs import after_load
+    after_load()
     from knurlogic.engine.serve import state
     head = state.DRAFT.get("head") if state.DRAFT.get("on") else None
     return follow(host.model, host.tokenizer, host.model_key, link,

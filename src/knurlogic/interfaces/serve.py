@@ -92,6 +92,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                   f"+ {pl['replicated_bytes'] / GIB:.1f} replicated)")
             draft = False
         _ring_env(ring)
+        _ring_marker(ring)
         # the ring-wide knobs beat the resolver like any --set
         overrides = dict(overrides or {})
         for alias in ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"):
@@ -385,6 +386,17 @@ def _ring_env(ring: dict) -> None:
     else:
         os.environ["MLX_IBV_DEVICES"] = str(ring["ibv_devices"])
         os.environ["MLX_JACCL_COORDINATOR"] = str(ring["coordinator"])
+
+
+def _ring_marker(ring: dict) -> None:
+    """A job the page started (its id is a nonce) gets a progress marker
+    in its job dir, which the page watches (cluster/jobs.py). A ring
+    started by hand has no page watching it and no marker."""
+    from knurlogic.cluster import jobs
+    if not jobs.JOB_RX.fullmatch(str(ring.get("job") or "")):
+        return
+    jobs.CURRENT["marker"] = jobs.Marker(ring["job"],
+                                         int(ring["rank"])).start()
 
 
 def _parse_sets(pairs) -> dict:
