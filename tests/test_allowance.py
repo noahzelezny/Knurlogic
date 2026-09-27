@@ -107,4 +107,5 @@ def test_room_never_goes_negative_and_says_when_kv_is_unknown():
     from knurlogic.tuning.resolve import context_room
     r = context_room(10 * GIB, 9 * GIB, {})
     assert r["left_bytes"] == 0 and r["tokens"] == 0 and r["small"]
+    assert r["fits"] and not context_room(10 * GIB, 11 * GIB, {})["fits"]
     assert "not known" in r["text"]

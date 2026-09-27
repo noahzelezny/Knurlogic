@@ -408,7 +408,8 @@ def context_room(working_set_bytes: int, weights_bytes: int,
     left = max(ws - int(weights_bytes) - margin, 0)
     tokens = left // per if per else 0
     small = left < 2 * GIB or bool(per and window and tokens < window / 5)
-    return {"working_set_bytes": ws, "weights_bytes": int(weights_bytes),
+    return {"fits": bool(ws) and int(weights_bytes) <= ws,
+            "working_set_bytes": ws, "weights_bytes": int(weights_bytes),
             "margin_bytes": margin, "left_bytes": left,
             "kv_bytes_per_token": per, "kv_why": why,
             "tokens": tokens, "window": window, "small": small,
