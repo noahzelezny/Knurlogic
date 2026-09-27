@@ -53,6 +53,8 @@ from typing import Any, Callable, Iterable, List, Optional
 import mlx.core as mx
 from mlx_lm.generate import _extend_cache, _merge_caches
 
+from knurlogic.cluster.jobs import chunk_done
+
 from .caches import position, restore, snapshot
 from .seed import seed_head
 from .sampling import Distribution, Keys, rejection_correct
@@ -339,6 +341,7 @@ def admit(
                 want.append(h)
             mx.eval(want)
             mx.clear_cache()
+            chunk_done()
             if on_chunk is not None:
                 on_chunk(cache, dcache)
             if cps and end == cps[0]:

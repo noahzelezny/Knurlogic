@@ -94,7 +94,7 @@ class Marker:
     def __init__(self, job: str, rank: int, probe=None):
         self.path = marker_path(job, rank)
         self.doc = {"job": job, "rank": int(rank), "pid": os.getpid(),
-                    "phase": "joining", "step": 0, "busy": None,
+                    "phase": "joining", "step": 0, "chunk": 0, "busy": None,
                     "t": time.time(), "since": time.time()}
         self.probe = probe
         self._lock = threading.Lock()
@@ -108,6 +108,14 @@ class Marker:
                 self._last = 0.0          # a phase change is written now
             self.doc.update({k: v for k, v in fields.items()
                              if v is not None})
+            now = time.time()
+            if now - self._last >= MARK_S:
+                self._flush(now)
+
+    def bump(self, field: str) -> None:
+        """Count one more unit of work in `field` (a prefill chunk)."""
+        with self._lock:
+            self.doc[field] = int(self.doc.get(field) or 0) + 1
             now = time.time()
             if now - self._last >= MARK_S:
                 self._flush(now)
@@ -155,6 +163,15 @@ def progress(**fields) -> None:
         m.set(**fields)
 
 
+def chunk_done() -> None:
+    """A prefill chunk finished (engine/mtp/batch_loop.admit). One step
+    admits a whole prompt, so a 30k-token prefill of the 397B over two Macs
+    is one step of ~2 minutes: the chunk count is what shows it moving."""
+    m = CURRENT["marker"]
+    if m is not None:
+        m.bump("chunk")
+
+
 def after_load() -> None:
     """The model is in memory: arm the jaccl self-heal deadline, if the
     page asked for one (it does only when the fork is installed and the
@@ -198,12 +215,15 @@ class Watch:
                 return (f"rank {rank} on {who} has not joined the ring in "
                         f"{JOIN_S:.0f} s")
             step = int(m.get("step") or 0)
+            # a step, or a prefill chunk inside one (a long prompt is one
+            # step of many chunks), is progress
+            work = (step, int(m.get("chunk") or 0))
             key = (job, rank)
             was = self.seen.get(key)
             # the clock runs only while work is in flight: a ring idle for
             # an hour and then given a request has not been stalled an hour
-            if was is None or was[0] != step or not m.get("busy"):
-                self.seen[key] = (step, now)
+            if was is None or was[0] != work or not m.get("busy"):
+                self.seen[key] = (work, now)
                 continue
             if m.get("busy") and now - was[1] > STALL_S:
                 return (f"rank {rank} on {who} has had work in flight and "

@@ -373,3 +373,17 @@ def test_a_headless_model_reuses_a_shared_prefix():
     gen2 = bg.MTPBatchGenerator(model, None, prefill_step_size=16)
     _drive(gen2, [next_b], 3, cache=copy.deepcopy(entry), prefix=key)
     assert gen2._prompt_tokens_counter == len(next_b)
+
+
+def test_every_prefill_chunk_is_reported_to_the_job_marker(monkeypatch):
+    """A long prompt is admitted in ONE engine step; the cluster watcher
+    judges a stall by progress, so each prefill chunk says it finished
+    (cluster/jobs.chunk_done). 70 tokens at 16 a chunk: 5 chunks."""
+    from knurlogic.engine.mtp import batch_loop as bl
+    from knurlogic.engine.mtp import batch_generator as bg
+    model, head, prompts = _tiny(512)
+    n = {"c": 0}
+    monkeypatch.setattr(bl, "chunk_done", lambda: n.__setitem__("c", n["c"] + 1))
+    _run(bg.MTPBatchGenerator(model, head, prefill_step_size=16),
+         [prompts[2]], 2)
+    assert n["c"] == 5

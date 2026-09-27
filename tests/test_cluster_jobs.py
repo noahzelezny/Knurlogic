@@ -361,6 +361,32 @@ def test_verdict_idle_is_not_stalled_but_busy_and_still_is(monkeypatch):
     assert w.verdict("j", ranks, alive, now=2e6, read=lambda j, r: moved) == ""
 
 
+def test_verdict_a_long_prefill_is_one_step_of_many_chunks_not_a_stall():
+    """397B over the M4+M3: a 30k-token prompt missing the prompt cache is
+    one step of ~2 minutes; the page stopped the job as stalled at 122 s
+    while both ranks were computing (2026-09-27). Chunks are progress."""
+    w = J.Watch()
+    ranks = [{"rank": 0, "pid": 1, "machine": "A"}]
+    alive = lambda p: True
+    doc = lambda c: (lambda j, r: {"phase": "ready", "step": 9, "busy": True,
+                                   "chunk": c})
+    assert w.verdict("j", ranks, alive, now=0, read=doc(0)) == ""
+    for k in range(1, 6):          # a chunk every 60 s, no step for 300 s
+        assert w.verdict("j", ranks, alive, now=60 * k, read=doc(k)) == ""
+    assert "stalled" in w.verdict("j", ranks, alive,
+                                  now=300 + J.STALL_S + 1, read=doc(5))
+
+
+def test_a_prefill_chunk_bumps_the_marker(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    m = J.Marker("ab12cd34ef567890", 0)
+    monkeypatch.setitem(J.CURRENT, "marker", m)
+    J.chunk_done()
+    J.chunk_done()
+    m.beat()
+    assert J.read_marker("ab12cd34ef567890", 0)["chunk"] == 2
+
+
 def test_verdict_dead_pid_and_never_joined():
     w = J.Watch()
     ranks = [{"rank": 1, "pid": 7, "machine": "B", "t": 0}]
