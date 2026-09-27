@@ -440,6 +440,16 @@ one-at-a-time + auto-compact does). All greedy (explicit temperature 0);
 rerun with each model's own sampling defaults after the release, and GLM
 with one compacting agent.
 
+Headroom is estimated, not yet measured (gui: tuning/resolve.context_room):
+kv_bytes_per_token prices GLM-5.3's MLA cache at 14 KB/token, but the
+scheduler measured ~40-190 KB/token on the M4 (three 8-12k conversations took
+109 -> 114.6 GiB), so "leaves 6 GiB, about 456k tokens" was 3-10x
+optimistic. Fix: the scheduler saves each artifact's measured (fixed, per
+token) and step spike per machine (~/.config/knurlogic, beside the
+allowance); context_room uses the measurement when there is one, the
+formula only before a first run. Find out what GLM's cache actually holds
+(decompressed K/V? the indexer?) -- the formula should match it.
+
 After 0.1.0: multi-machine serving (cluster executor), HF download + hub
 tab, analytics from Scout's tools, firewall-prompt UX, upstream the mlx-lm
 bugs and vqlab's packed as_linear (strict xfail).
