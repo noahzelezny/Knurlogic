@@ -167,7 +167,9 @@ class PromptCache:
             return cache, list(tokens[-1:])
         return None, list(tokens)
 
-    def insert(self, key, tokens, cache, kind: str) -> None:
+    def insert(self, key, tokens, cache, kind: str, origin=None) -> None:
+        """`origin`: (event, uid) the cache came from -- what a ring's
+        journal names (engine/runtime/tensor.JournalPromptCache)."""
         self.lru.insert_cache(key, list(tokens), cache, cache_type=kind)
 
     def trim_to(self, n_bytes: int) -> None:
@@ -206,7 +208,15 @@ class Scheduler:
                  prefill_step_size: int = 2048, prompt_cache_size: int = 10,
                  prompt_cache_bytes: Optional[int] = None,
                  working_set_bytes: Optional[int] = None,
-                 stats: Optional[dict] = None):
+                 stats: Optional[dict] = None, tensor=None):
+        """`tensor`: rank 0's engine/runtime/tensor.Ring when this model is
+        split across ranks; the prompt cache is then count-based only."""
+        if tensor is not None and prompt_cache_bytes:
+            raise ValueError("a tensor-split server's prompt cache is "
+                             "count-based: every rank must evict the same "
+                             "entries, and bytes are each rank's own. Drop "
+                             "the prompt cache byte cap")
+        self.tensor = tensor
         self.host = host
         self.completion_batch_size = completion_batch_size
         self.prefill_step_size = prefill_step_size
@@ -220,7 +230,7 @@ class Scheduler:
         #: (fixed bytes, bytes per token) of one row's cache, measured
         self._kv = None
         self._samples: dict = {}
-        self.cache = PromptCache(prompt_cache_size)
+        self.cache = self._new_cache(prompt_cache_size)
         self.stats = stats if stats is not None else {}
         self._jobs: "queue.Queue" = queue.Queue()
         self._commands: "queue.Queue" = queue.Queue()
@@ -308,6 +318,11 @@ class Scheduler:
             self._fail_all(RuntimeError("the server is stopping"))
             self._fail_queued(RuntimeError("the server is stopping"))
             self._close_executor()
+            if self.tensor is not None:
+                try:
+                    self.tensor.stop()        # the other ranks leave too
+                except Exception:
+                    logger.exception("stopping the other ranks")
             self.cache = None
             # the model too: its lazily built arrays (rope tables, caches)
             # were made on this thread
@@ -359,6 +374,15 @@ class Scheduler:
                 c.started.set()
                 c.done.set()      # already served: nothing to fail or drop
                 continue
+            if self.tensor is not None and (
+                    c.kind == "unload" or self.host.state != "empty"):
+                c.error = ("this server's model is split across "
+                           f"{self.tensor.world} ranks; it serves "
+                           f"{Path(self.host.path or '').name} until it "
+                           "stops. Restart the ring to serve another model")
+                c.started.set()
+                c.done.set()
+                continue
             self._take_jobs()
             busy = len(self._rows) + len(self._waiting)
             if busy and not c.force:
@@ -375,7 +399,7 @@ class Scheduler:
                         "the model was switched while this request was "
                         "running"))
                 self._close_executor()
-                self.cache = PromptCache(self.cache.lru.max_size)
+                self.cache = self._new_cache(self.cache.lru.max_size)
                 # what was measured belongs to the model it was measured on
                 # (a 35B's slope admitting a 397B's prompt is the abort the
                 # guard exists for)
@@ -401,7 +425,32 @@ class Scheduler:
             except queue.Empty:
                 return
 
+    def _new_cache(self, size: int):
+        c = PromptCache(size)
+        if self.tensor is None:
+            return c
+        from .tensor import JournalPromptCache
+        return JournalPromptCache(c, self.tensor.journal)
+
     def _executor(self) -> LocalExecutor:
+        if self._ex is not None or self.tensor is None:
+            return self._executor_local()
+        from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+        from .tensor import TensorExecutor
+        # no drafting head and no vision on a ring (this slice)
+        gen = MTPBatchGenerator(
+            self.host.model, None, stats={}, vision=None,
+            completion_batch_size=self.completion_batch_size,
+            prefill_step_size=self.prefill_step_size, stream=self._stream)
+        self._ex = TensorExecutor(gen, self.tensor, over=self._over_local)
+        return self._ex
+
+    def _over_local(self) -> int:
+        """This rank's active memory past its limit (signed; 0 unguarded)."""
+        limit = self._limit()
+        return self._local_active() - limit if limit else 0
+
+    def _executor_local(self) -> LocalExecutor:
         if self._ex is None:
             from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
             from knurlogic.engine.serve import state
@@ -499,6 +548,12 @@ class Scheduler:
         ex = self._executor()
         cachehook.sweep()
         with cachehook.admit_guard():
+            if self.tensor is not None and \
+                    vreq.has_images(job.request.messages):
+                raise P.PromptError(
+                    f"this server's model is split across "
+                    f"{self.tensor.world} ranks, which does not take images "
+                    f"yet; send text, or serve the model on one machine")
             if vreq.has_images(job.request.messages):
                 v = state.VISION.get("serve")
                 if v is None:
@@ -541,11 +596,18 @@ class Scheduler:
             if job.penalties:
                 from mlx_lm.sample_utils import make_logits_processors
                 procs = make_logits_processors(**job.penalties)
+            sampling, wire = job.sampling, None
+            if self.tensor is not None:
+                from .tensor import assign_seed
+                sampling = assign_seed(sampling)
+                wire = {"penalties": dict(job.penalties or {}),
+                        "initial": initial}
             uid = ex.insert(Admission(
                 segments=segs, max_tokens=job.max_tokens, cache=cache,
                 prefix=prompt[:len(prompt) - len(rest)],
-                sampling=job.sampling, processors=procs, state_machine=sm,
-                top_logprobs=job.top_logprobs, report=job.request))
+                sampling=sampling, processors=procs, state_machine=sm,
+                top_logprobs=job.top_logprobs, report=job.request,
+                wire=wire))
         try:
             text = Request(tok.detokenizer, sequences=seqs, stops=job.stops,
                            tool_parser=getattr(tok, "tool_parser", None),
@@ -596,7 +658,7 @@ class Scheduler:
         50k-token admission ratcheted the margin up for the life of the
         load."""
         import mlx.core as mx
-        spike = int(mx.get_peak_memory()) - max(before, self._active())
+        spike = int(mx.get_peak_memory()) - max(before, self._here())
         if spike > self._spike * 1.25 and spike > GIB // 4:
             logger.info("a step's transient measured at %.2f GiB: the "
                         "memory margin is now %.2f GiB", spike / GIB,
@@ -606,9 +668,28 @@ class Scheduler:
     def _reset_peak(self) -> int:
         import mlx.core as mx
         mx.reset_peak_memory()
-        return self._active()
+        return self._here()
+
+    def _here(self) -> int:
+        """This process's active memory (a step's transient is measured
+        here, never against the peers')."""
+        return self._active() if self.tensor is None else \
+            self._local_active()
 
     def _active(self) -> int:
+        """Active memory as the guard counts it. On a ring, the tightest
+        rank rules: the peers' over-limit from the last exchange (moved by
+        what this rank has freed since) is read as if it were here."""
+        a = self._local_active()
+        peers = self.tensor.peers_over_now() if self.tensor is not None \
+            else None
+        if peers is not None:
+            limit = self._limit()
+            if limit:
+                a = max(a, limit + peers)
+        return a
+
+    def _local_active(self) -> int:
         import mlx.core as mx
         return int(mx.get_active_memory())
 
@@ -755,7 +836,8 @@ class Scheduler:
                 self._learn(e.tokens, e.cache)
                 if row.types:
                     self.cache.insert(self.host.model_key, e.tokens, e.cache,
-                                      row.types.pop(0))
+                                      row.types.pop(0),
+                                      origin=("checkpoint", e.uid))
             elif isinstance(e, Token):
                 if not row.first:
                     row.first = time.perf_counter()
@@ -770,7 +852,7 @@ class Scheduler:
             elif isinstance(e, Finished):
                 self._learn(e.tokens, e.cache)
                 self.cache.insert(self.host.model_key, e.tokens, e.cache,
-                                  "assistant")
+                                  "assistant", origin=("finished", e.uid))
                 self._done(e.uid)
             elif isinstance(e, RowFailure):
                 self._rows.pop(e.uid, None)

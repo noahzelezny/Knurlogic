@@ -58,6 +58,12 @@ class Node:
     name: str
     working_set_bytes: int
     holds_bytes: int | None = None
+    #: what the machine is, for rank order (rank_order) and, later,
+    #: pipeline layer shares: "Apple M4 Max", its P-core clock, and its
+    #: memory bandwidth when known
+    chip: str | None = None
+    p_core_ghz: float | None = None
+    memory_bandwidth_gbs: float | None = None
 
 
 @dataclass
@@ -685,3 +691,232 @@ def numerics_for(artifact: Artifact, profile: str | None = None):
     srcs = sorted(set(where.values()))
     return own, ("numerics as shipped (" + ", ".join(
         f"{f}={v}" for f, v in own.items()) + f"; from {'/'.join(srcs)})")
+
+
+# ------------------------------------------------------------ tensor split
+#
+# One model served by N ranks, every layer's weights split N ways (the
+# qwen3_5 families: engine/runtime/tensor.py does the split). Pure
+# arithmetic over the config and the safetensors headers, so a refusal is
+# said -- with its numbers -- before anything loads.
+
+#: the model types engine/runtime/tensor.py knows how to split
+TENSOR_TYPES = ("qwen3_5", "qwen3_5_moe", "qwen3_5_text", "qwen3_5_moe_text")
+
+#: layer weights split N ways under tensor; everything else is replicated
+_TENSOR_SHARDED = (
+    ".linear_attn.conv1d.", ".linear_attn.in_proj_", ".linear_attn.dt_bias",
+    ".linear_attn.A_log", ".linear_attn.out_proj.",
+    ".self_attn.q_proj.", ".self_attn.k_proj.", ".self_attn.v_proj.",
+    ".self_attn.o_proj.",
+    ".mlp.gate_proj.", ".mlp.up_proj.", ".mlp.down_proj.",
+    ".mlp.shared_expert.", ".mlp.switch_mlp.",
+    ".mlp.experts.",
+)
+
+
+def tensor_sharded(name: str) -> bool:
+    """Is this weight split across ranks under tensor? A VQ codebook never
+    is: it is a lookup table the codes index, replicated whole."""
+    if name.endswith("codebook"):
+        return False
+    return ".layers." in name and any(s in name for s in _TENSOR_SHARDED)
+
+
+def tensor_refusals(cfg: dict, n: int) -> list:
+    """Why this config cannot be split `n` ways, one line per reason with
+    its arithmetic; [] when it can."""
+    out = []
+    if n < 2:
+        return out
+    tc = cfg.get("text_config", cfg)
+    types = {cfg.get("model_type"), tc.get("model_type")}
+    if not types & set(TENSOR_TYPES):
+        out.append(f"tensor split knows {', '.join(TENSOR_TYPES[:2])}; this "
+                   f"is {cfg.get('model_type')!r}")
+        return out
+
+    def div(what, v, why=""):
+        if v is None:
+            return
+        if int(v) % n:
+            out.append(f"{what} = {v} is not divisible by {n} ranks "
+                       f"({v} / {n} = {int(v) / n:g}){why}")
+
+    div("num_attention_heads", tc.get("num_attention_heads"))
+    kv = tc.get("num_key_value_heads")
+    if kv:
+        if kv >= n:
+            div("num_key_value_heads", kv)
+        elif n % kv:
+            out.append(f"num_key_value_heads = {kv} is fewer than {n} ranks "
+                       f"and does not divide them ({n} % {kv} = {n % kv}): "
+                       f"the heads cannot be repeated evenly")
+    div("linear_num_key_heads", tc.get("linear_num_key_heads"))
+    div("linear_num_value_heads", tc.get("linear_num_value_heads"))
+    if tc.get("num_experts"):
+        div("moe_intermediate_size", tc.get("moe_intermediate_size"))
+        div("shared_expert_intermediate_size",
+            tc.get("shared_expert_intermediate_size"))
+    else:
+        div("intermediate_size", tc.get("intermediate_size"))
+
+    # sharded-to-all layers split their INPUT axis: each rank's slice must
+    # start on a quantization group
+    q = cfg.get("quantization") or {}
+    g = q.get("group_size") if isinstance(q, dict) else None
+    if g:
+        hd = tc.get("head_dim") or (tc.get("hidden_size", 0)
+                                    // max(tc.get("num_attention_heads") or 1, 1))
+        ins = {"self_attn.o_proj": (tc.get("num_attention_heads") or 0) * hd,
+               "linear_attn.out_proj": (tc.get("linear_num_value_heads") or 0)
+               * (tc.get("linear_value_head_dim") or 0),
+               "shared_expert.down_proj":
+                   tc.get("shared_expert_intermediate_size") or 0}
+        for what, IN in ins.items():
+            if IN and (IN // n) % g:
+                out.append(f"{what}: input {IN} / {n} = {IN // n} is not a "
+                           f"multiple of the quantization group {g}")
+
+    if cfg.get("vq_linear"):
+        out.append(f"{len(cfg['vq_linear'])} VQ dense linear(s) (vq_linear): "
+                   f"not split by tensor in this build")
+    if cfg.get("vq_embed"):
+        out.append(f"{len(cfg['vq_embed'])} VQ embedding(s) (vq_embed): not "
+                   f"split by tensor in this build")
+    for path, m in sorted((cfg.get("vq_modules") or {}).items()):
+        IN, OUT = int(m.get("in", 0)), int(m.get("out", 0))
+        G, D = int(m.get("group", 64)), int(m.get("dim", 1))
+        packed = bool(m.get("pack_bits"))
+        if path.endswith("down_proj"):
+            # sharded-to-all: codes split on their input axis. Packed codes
+            # are uint32 words holding 32 codes per BITS words, so a slice
+            # must hold whole 32-code blocks -- 32*dim inputs -- and whole
+            # scale groups.
+            unit = max(G, 32 * D) if packed else max(G, D)
+            if IN % n or (IN // n) % unit:
+                out.append(
+                    f"{path}: input {IN} / {n} = {IN / n:g}, not a multiple "
+                    f"of {unit} (max(group {G}, "
+                    + (f"32 x dim {D}" if packed else f"dim {D}")
+                    + ")): a rank's slice would cut a "
+                    + ("packed code word" if packed else "scale group"))
+        elif OUT % n:
+            out.append(f"{path}: output {OUT} / {n} = {OUT / n:g}")
+        if len(out) > 12:
+            out.append("... (and more)")
+            break
+    return out
+
+
+def tensor_placement_of(tensors: dict, n: int) -> dict:
+    """{name: bytes} -> what each of `n` ranks holds under tensor: the
+    sharded weights' Nth plus every replicated one."""
+    sharded = sum(b for k, b in tensors.items() if tensor_sharded(k))
+    replicated = sum(b for k, b in tensors.items() if not tensor_sharded(k))
+    return {"ranks": n, "sharded_bytes": sharded,
+            "replicated_bytes": replicated,
+            "per_rank_bytes": -(-sharded // max(n, 1)) + replicated}
+
+
+def tensor_placement(artifact: Artifact, n: int) -> dict:
+    """tensor_placement_of over the artifact's top-level safetensors
+    headers (the tower and a packed MTP head are not the trunk: neither
+    loads under tensor)."""
+    import json
+    import struct
+
+    sizes = {}
+    for f in sorted(artifact.path.glob("*.safetensors")):
+        if f.name.startswith(("mtp", "model-vision")):
+            continue
+        try:
+            with open(f, "rb") as fh:
+                (hn,) = struct.unpack("<Q", fh.read(8))
+                if hn <= 0 or hn > (1 << 28):
+                    continue
+                header = json.loads(fh.read(hn))
+        except (OSError, ValueError, struct.error):
+            continue
+        for k, v in header.items():
+            if k == "__metadata__" or not isinstance(v, dict):
+                continue
+            if k.startswith(S.VISION_TOWER_PREFIXES):
+                continue
+            a, b = v.get("data_offsets", (0, 0))
+            sizes[k] = int(b) - int(a)
+    return tensor_placement_of(sizes, n)
+
+
+# ------------------------------------------------------------- rank order
+#
+# Nobody types --rank. The cluster page asks this for the order, passes
+# --rank/--world to each machine's `serve`, and lets the user drag a
+# machine to the front (an explicit order, which wins).
+#
+# Rank 0 does the CPU and Python side -- HTTP, the scheduler, tokenizing,
+# sampling, encoding the plan -- while under tensor every rank's GPU work
+# is equal. So the leader is the fastest single core: the newest chip
+# generation, then the higher P-core clock; then the most free memory (it
+# may host extras, like the vision tower); then the order given.
+
+#: link kinds, fastest first
+LINK_SPEED = ("rdma", "tb5", "tb4", "ethernet", "wifi")
+
+
+def _link_rank(kind) -> int:
+    k = str(kind or "").lower()
+    return LINK_SPEED.index(k) if k in LINK_SPEED else len(LINK_SPEED)
+
+
+def chip_generation(chip) -> int:
+    """"Apple M4 Max" -> 4; 0 when it does not say."""
+    import re
+    m = re.search(r"\bM(\d+)\b", str(chip or ""))
+    return int(m.group(1)) if m else 0
+
+
+def leader_key(m: dict, position: int = 0) -> tuple:
+    """Sort key for the leader, smallest first: newest chip generation,
+    higher P-core clock, more free memory, earlier in the given order."""
+    free = m.get("free_bytes")
+    if free is None:
+        free = m.get("working_set_bytes") or 0
+    return (-chip_generation(m.get("chip")),
+            -float(m.get("p_core_ghz") or 0.0), -int(free), position)
+
+
+def rank_order(machines: list, explicit: list | None = None) -> list:
+    """Machine names in rank order.
+
+    `machines`: [{"name", "chip" ("Apple M4 Max"), "p_core_ghz",
+    "free_bytes" (else "working_set_bytes"), "links": {other name: link
+    kind}, ...}]; anything else (memory bandwidth, ...) rides along for
+    later placement and is ignored here. Rank 0 is `leader_key`'s first.
+    Each next rank is the unplaced machine the previous one reaches over
+    the fastest link (LINK_SPEED; the ring follows the links), ties by
+    `leader_key`.
+
+    `explicit`: names in the order wanted (the page's drag). Every machine
+    must appear once; it is returned as is."""
+    names = [m["name"] for m in machines]
+    if len(set(names)) != len(names):
+        raise ValueError(f"machine names repeat: {names}")
+    if explicit is not None:
+        if sorted(explicit) != sorted(names):
+            raise ValueError(f"explicit order {list(explicit)} is not a "
+                             f"permutation of the machines {names}")
+        return list(explicit)
+    if not machines:
+        return []
+    pos = {n: i for i, n in enumerate(names)}
+    by = {m["name"]: m for m in machines}
+    order = [min(machines, key=lambda m: leader_key(m, pos[m["name"]]))["name"]]
+    left = [n for n in names if n != order[0]]
+    while left:
+        here = by[order[-1]].get("links") or {}
+        nxt = min(left, key=lambda n: (_link_rank(here.get(n)),)
+                  + leader_key(by[n], pos[n]))
+        order.append(nxt)
+        left.remove(nxt)
+    return order
