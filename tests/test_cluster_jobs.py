@@ -377,6 +377,26 @@ def test_verdict_a_long_prefill_is_one_step_of_many_chunks_not_a_stall():
                                   now=300 + J.STALL_S + 1, read=doc(5))
 
 
+def test_verdict_a_request_waiting_on_a_slow_load_is_not_a_stall():
+    """Qwen3.8-Flash-Next-6bit read over SMB on the M4: a request arrived
+    while the ranks were still loading (busy, step 0) and the page stopped
+    the job as stalled at 122 s, mid-load (2026-09-27). Only a loaded ring
+    can stall; loading has its own clock (the pid, the join deadline)."""
+    w = J.Watch()
+    ranks = [{"rank": 0, "pid": 1, "machine": "A"}]
+    alive = lambda p: True
+    loading = lambda j, r: {"phase": "loading", "step": 0, "busy": True}
+    assert w.verdict("j", ranks, alive, now=0, read=loading) == ""
+    assert w.verdict("j", ranks, alive, now=10 * J.STALL_S,
+                     read=loading) == ""
+    # once ready, the clock starts from there
+    ready = lambda j, r: {"phase": "ready", "step": 0, "busy": True}
+    t = 10 * J.STALL_S + 1
+    assert w.verdict("j", ranks, alive, now=t, read=ready) == ""
+    assert "stalled" in w.verdict("j", ranks, alive, now=t + J.STALL_S + 1,
+                                  read=ready)
+
+
 def test_a_prefill_chunk_bumps_the_marker(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     m = J.Marker("ab12cd34ef567890", 0)
