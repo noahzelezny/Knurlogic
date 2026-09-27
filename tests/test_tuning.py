@@ -507,3 +507,13 @@ def test_the_context_length_applies_live(monkeypatch):
     assert os.environ["KNURLOGIC_CONTEXT_LENGTH"] == "32768"
     assert apply_live({"KNURLOGIC_CONTEXT_LENGTH": "-1"})[
         "KNURLOGIC_CONTEXT_LENGTH"].startswith("failed")
+
+
+def test_tight_headroom_scales_with_the_machine():
+    """12 GiB was tight for a 96 GiB box and not for a 120 GiB one: 397B
+    on the M4 kept ~14 GiB, took the 4096 prompt chunk, and one agent at
+    25k tokens aborted Metal. A fifth of the working set, at least 12."""
+    from knurlogic.tuning import settings as S
+    G = 1 << 30
+    assert S.tight_headroom_bytes(120 * G) == 24 * G
+    assert S.tight_headroom_bytes(48 * G) == 12 * G
