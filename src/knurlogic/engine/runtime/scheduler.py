@@ -571,14 +571,17 @@ class Scheduler:
         return self.working_set
 
     def _margin(self) -> int:
-        """Room one step's temporaries need. Measured: the largest spike a
-        step of THIS model has made (its prefill chunk, its attention, its
-        batch), with a quarter again of headroom. Until a step has been
-        measured, a guess -- 5% of the working set, at least 4 GiB -- which
-        the first steps replace."""
-        if self._spike:
-            return max(GIB, int(self._spike * 1.25))
-        return max(4 * GIB, self._working_set() // 20)
+        """Room one step's temporaries need: the largest spike a step of
+        THIS model has made (its prefill chunk, its attention, its batch),
+        with a quarter again -- but never below 5% of the working set (at
+        least 4 GiB). The floor is measured too: a step's transient grows
+        with the context its attention spans, so a spike learned while
+        conversations were short under-reads a later one. GLM-5.3 on the M4
+        (2026-09-26) learned 2.6 GiB at 8k-token prompts, ran at 116 of a
+        116.8 GiB limit, and a step at 16k aborted Metal; Flash and 397B ran
+        for hours at the 5% floor."""
+        floor = max(4 * GIB, self._working_set() // 20)
+        return max(floor, int(self._spike * 1.25))
 
     def _limit(self) -> int:
         """Active bytes a step may start at: the working set less a step's
