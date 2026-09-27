@@ -566,7 +566,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                    prefill_step_size: int,
                    executes_artifact_code: bool = False,
                    split: str = "tensor", pipeline: Optional[dict] = None,
-                   draft: bool = True) -> int:
+                   draft: bool = True, kv_bits: Optional[int] = None) -> int:
     """A rank >= 1 from start to stop: join, load its shard, follow.
     `pipeline`: agree()'s keyword arguments for a pipeline split."""
     from .host import ModelHost
@@ -584,7 +584,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                      executes_artifact_code=executes_artifact_code,
                      shard=cut, vision=False, load_wait_s=3600.0,
                      head_agree=(agree_head(link) if split == "pipeline"
-                                 else None))
+                                 else None), kv_bits=kv_bits)
     host.load(path)
     if host.state != "ready":
         raise RuntimeError(f"rank {link.rank} could not load {path}: "

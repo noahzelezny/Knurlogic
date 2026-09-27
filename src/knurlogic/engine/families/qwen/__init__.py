@@ -32,22 +32,40 @@ _QWEN35_HEAD = dict(
     # its metadata does not say (measured from the sidecars on disk)
     layout=("block", "fc", "norm_e", "norm_h", "norm_out"))
 
+# KV precision: the full-attention layers are mlx-lm's plain KVCache, which
+# engine/kvquant.py stores quantized; the GatedDeltaNet layers' recurrent
+# state (ArraysCache) is not KV and stays as it is. Not measured on a real
+# model yet (tiny fixtures only: tests/test_kvquant.py).
+_QWEN35_KVQ = {"bits": [8, 6, 4],
+               "why": "full-attention layers only (a quarter of the "
+                      "layers); the deltanet state is not KV and stays "
+                      "bf16. Unmeasured on a real model"}
+
 MANIFEST = {
     "name": "qwen",
     "architectures": {
         "qwen3_5": {
             "model_types": ["qwen3_5_text", "qwen3_5"],
             "prefill_chunk": _QWEN35_PREFILL,
+            "kv_quant": _QWEN35_KVQ,
             "head": dict(_QWEN35_HEAD, names=["qwen3_5"]),
         },
         "qwen3_5_moe": {
             "depends_on": ["qwen3_5"],
             "model_types": ["qwen3_5_moe_text", "qwen3_5_moe"],
             "prefill_chunk": _QWEN35_PREFILL,
+            "kv_quant": _QWEN35_KVQ,
             "head": dict(_QWEN35_HEAD, names=["qwen3_5_moe"]),
         },
         "qwen4_exp": {
             "model_types": ["qwen4_exp_text", "qwen4_exp"],
+            # its attention cache is its own (_AttnCache/_BatchAttnCache:
+            # K/V plus the sparse indexer's keys and positions, rolled and
+            # filtered together); a quantized pair of those is not written
+            "kv_quant": {"refused": "Flash-Next's attention cache is its own "
+                                    "class (K/V plus the sparse indexer's "
+                                    "keys, moved together); no quantized "
+                                    "version of it exists yet"},
             "head": dict(
                 names=["qwen4_exp"],
                 head="knurlogic.engine.families.qwen.heads.qwen4_exp:MTPHead",

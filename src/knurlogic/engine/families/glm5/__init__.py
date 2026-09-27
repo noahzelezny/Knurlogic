@@ -8,6 +8,16 @@ MANIFEST = {
         "glm5_next": {
             "host": "mlx_lm",
             "model_types": ["glm5_next_text", "glm5_next"],
+            # MLA: the cache is the compressed latent + rope key and the DSA
+            # indexer's keys, in mlx-vlm's own cache classes. The vendored
+            # mlx-vlm carries kv_quant/turboquant for its own generate loop;
+            # knurlogic's batch engine has never run them, and a latent is
+            # not the per-head K/V engine/kvquant.py stores.
+            "kv_quant": {"refused": "GLM caches an MLA latent and the DSA "
+                                    "indexer's keys in mlx-vlm's own cache "
+                                    "classes, not per-head K/V; its vendored "
+                                    "kv_quant/turboquant path is not wired "
+                                    "into the batch engine"},
             "prefill_chunk": (2048, "34 deltanet layers hold per-token "
                                     "recurrent intermediates (16.8 MB/layer) "
                                     "across a chunk; 4096 OOMed both boxes "

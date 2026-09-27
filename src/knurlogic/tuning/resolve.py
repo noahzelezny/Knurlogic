@@ -41,6 +41,9 @@ class Resolution:
     #: What a vision rung holds besides its text weights (`vision_budget`),
     #: or None for a text-only artifact.
     vision: dict | None = None
+    #: knob -> the values THIS artifact may take, where they are narrower
+    #: than settings.KNOB_RANGE (KV bits on a family that refuses them)
+    ranges: dict = field(default_factory=dict)
 
     def as_exports(self) -> str:
         return "\n".join(f"export {k}={v}" for k, v in sorted(self.env.items()))
@@ -127,7 +130,7 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 #: Knobs `engine.serve` turns into argv or an mlx call, so they are real
 #: whether or not an artifact's bundled runtime reads them.
 ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "prompt_concurrency",
-                   "context_length")
+                   "context_length", "mtp", "mtp_dynamic", "kv_bits")
 
 
 def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
@@ -206,7 +209,7 @@ def decode_chunk_for(headroom_bytes: int, known: bool = True,
 
 def resolve(artifact: Artifact, budget, profile: str | None = None,
             tune: str = "balanced", store_bytes: int | None = None,
-            holds_bytes: int | None = None):
+            holds_bytes: int | None = None, kv_bits=None):
     """Resolve every knob for this artifact against a budget.
 
     `budget` is either a byte count -- one box, and the return is a
@@ -226,6 +229,9 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
 
     `holds_bytes`: what this box holds of the artifact when it is one rank
     of a split (its share); default, the whole artifact.
+
+    `kv_bits`: the KV precision the model will launch with (a launch
+    setting), for what its KV is counted at; None = bf16.
     """
     if profile is not None and profile not in S.RUNTIME_PROFILES:
         raise ValueError(f"profile must be one of {sorted(S.RUNTIME_PROFILES)}")
@@ -236,7 +242,8 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
         holds = artifact.bytes_on_disk if holds_bytes is None \
             else int(holds_bytes)
         return _resolve_one(artifact, int(budget), holds,
-                            profile, tune, store_bytes=store_bytes)
+                            profile, tune, store_bytes=store_bytes,
+                            kv_bits=kv_bits)
     return resolve_cluster(artifact, budget, profile, tune,
                            store_bytes=store_bytes)
 
@@ -355,10 +362,12 @@ def _tower_bytes(artifact: Artifact) -> tuple:
     return total, outside, count
 
 
-def kv_bytes_per_token(tc: dict) -> tuple:
+def kv_bytes_per_token(tc: dict, kv_bits=None) -> tuple:
     """(bytes, why): K and V for one token over the layers whose cache
     grows with context. Hybrid models (Qwen3.5's linear layers, gemma's
-    sliding windows) are counted by their full-attention layers only."""
+    sliding windows) are counted by their full-attention layers only.
+    `kv_bits` (8/6/4, None = bf16): the attention K/V's stored precision
+    (KNURLOGIC_KV_BITS); an MLA latent is never quantized."""
     layers = int(tc.get("num_hidden_layers") or 0)
     types = tc.get("layer_types")
     interval = tc.get("full_attention_interval")
@@ -387,8 +396,10 @@ def kv_bytes_per_token(tc: dict) -> tuple:
     kv = int(tc.get("num_key_value_heads") or heads or 0)
     hd = int(tc.get("head_dim") or (
         int(tc.get("hidden_size") or 0) // heads if heads else 0))
-    per = 2 * full * kv * hd * S.VISION_KV_DTYPE_BYTES
-    return per, f"{how} x {kv} KV heads x {hd} dims x K,V x bf16"
+    el = S.kv_bytes_per_element(kv_bits)
+    per = int(2 * full * kv * hd * el)
+    dt = "bf16" if kv_bits is None else f"{kv_bits}-bit (+ group scales)"
+    return per, f"{how} x {kv} KV heads x {hd} dims x K,V x {dt}"
 
 
 def step_margin(working_set_bytes: int) -> int:
@@ -400,7 +411,7 @@ def step_margin(working_set_bytes: int) -> int:
 
 
 def context_room(working_set_bytes: int, weights_bytes: int,
-                 cfg: dict) -> dict:
+                 cfg: dict, kv_bits=None) -> dict:
     """What a model that fits leaves for its conversations: the working set
     (or allowance) less the weights less the step margin, and about how
     many tokens of context that is at the model's KV bytes per token --
@@ -412,7 +423,7 @@ def context_room(working_set_bytes: int, weights_bytes: int,
     `small` is under a fifth of the model's own window, or under 2 GiB."""
     cfg = cfg or {}
     tc = cfg.get("text_config") or cfg
-    per, why = kv_bytes_per_token(tc)
+    per, why = kv_bytes_per_token(tc, kv_bits)
     window = int(tc.get("max_position_embeddings")
                  or cfg.get("max_position_embeddings") or 0)
     ws = int(working_set_bytes or 0)
@@ -429,7 +440,7 @@ def context_room(working_set_bytes: int, weights_bytes: int,
 
 
 def room_for(weights_bytes: int, cfg: dict,
-             working_set_bytes: int | None = None) -> dict:
+             working_set_bytes: int | None = None, kv_bits=None) -> dict:
     """`context_room` against THIS machine: its GPU working set under the
     knurlogic allowance. Not memory available now -- what other programs
     hold today comes and goes; the working set is what the scheduler's
@@ -437,7 +448,7 @@ def room_for(weights_bytes: int, cfg: dict,
     if working_set_bytes is None:
         from knurlogic.machine import allowance, wired
         working_set_bytes = allowance.cap(wired.detected_working_set_bytes())
-    return context_room(working_set_bytes, weights_bytes, cfg)
+    return context_room(working_set_bytes, weights_bytes, cfg, kv_bits)
 
 
 def room_text(left: int, tokens: int, per: int) -> str:
@@ -450,8 +461,8 @@ def room_text(left: int, tokens: int, per: int) -> str:
                if per else " (its KV size per token is not known)"))
 
 
-def vision_budget(artifact: Artifact,
-                  store_bytes: int | None = None) -> dict | None:
+def vision_budget(artifact: Artifact, store_bytes: int | None = None,
+                  kv_bits=None) -> dict | None:
     """What a vision rung holds besides its text weights, term by term,
     or None for an artifact with no `vision_config`.
 
@@ -467,7 +478,7 @@ def vision_budget(artifact: Artifact,
     live = store_bytes is not None
     store = int(store_bytes) if live else DEFAULT_MAX_BYTES
     tc = cfg.get("text_config") or cfg
-    per_tok, kv_why = kv_bytes_per_token(tc)
+    per_tok, kv_why = kv_bytes_per_token(tc, kv_bits)
     toks = S.VISION_KV_IMAGES * S.VISION_KV_TOKENS_PER_IMAGE
     kv = per_tok * toks
     notes = [
@@ -497,13 +508,13 @@ def vision_budget(artifact: Artifact,
 def _resolve_one(artifact: Artifact, working_set_bytes: int,
                  holds_bytes: int, profile: str | None,
                  tune: str = "balanced", store_bytes: int | None = None,
-                 vision: bool = True) -> Resolution:
+                 vision: bool = True, kv_bits=None) -> Resolution:
     """One box. `holds_bytes` is what this box holds of the artifact, which
     is the whole thing unless something sharded it. A vision rung also
     holds its tower, its image store and its image KV (`vision_budget`),
     counted here, before the headroom every knob below is sized from."""
     r = Resolution()
-    vb = vision_budget(artifact, store_bytes) if vision else None
+    vb = vision_budget(artifact, store_bytes, kv_bits) if vision else None
     if vb is not None:
         r.vision = vb
         holds_bytes = holds_bytes + vb["extra_bytes"]
@@ -625,6 +636,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     emit(r, artifact, "cache_limit_gb", cache)
     if tune != "balanced":
         r.notes.append(f"tune={tune}: {t['why']}")
+    model_launch(r, artifact, kv_bits)
 
     if working_set_bytes > 0 and headroom <= 0:
         r.warnings.append(
@@ -642,6 +654,41 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
         r.notes.append(note)
 
     return r
+
+
+def model_launch(r: Resolution, artifact: Artifact, kv_bits=None) -> None:
+    """The model's own launch settings: MTP drafting and its controller
+    where a head ships beside the weights, and the KV precision this
+    family allows (every value but bf16 refused, with the reason, where
+    its caches cannot be quantized)."""
+    from knurlogic.engine.mtp import find_head
+    try:
+        head = find_head(artifact.path)
+    except Exception:
+        head = None
+    if head is not None:
+        emit(r, artifact, "mtp", "on")
+        emit(r, artifact, "mtp_dynamic", "on")
+    bits, why = S.kv_quant_for(artifact.model_type)
+    emit(r, artifact, "kv_bits", "bf16")
+    r.ranges["KNURLOGIC_KV_BITS"] = ["bf16"] + [str(b) for b in bits]
+    if not bits:
+        r.notes.append(f"KV cache stays bf16: {why}")
+    elif kv_bits is not None:
+        r.notes.append(f"KV cache counted at {kv_bits} bits "
+                       f"({S.kv_bytes_per_element(kv_bits):.3g} bytes per "
+                       f"element against bf16's 2): {why}")
+
+
+def kv_refusal(artifact: Artifact, kv_bits) -> str | None:
+    """Why this artifact cannot launch with `kv_bits`, or None."""
+    if kv_bits is None:
+        return None
+    bits, why = S.kv_quant_for(artifact.model_type)
+    if int(kv_bits) not in bits:
+        return (f"KV cache at {kv_bits} bits is refused for "
+                f"{artifact.model_type}: {why}")
+    return None
 
 
 def _numerics_source(artifact: Artifact, flag: str, source: str):

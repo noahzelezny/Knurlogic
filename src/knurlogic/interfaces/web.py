@@ -291,7 +291,8 @@ def machine_settings():
         if art:
             try:
                 return _preview(art, _one(q, "tune") or "balanced",
-                                _one(q, "working_set_gib"))
+                                _one(q, "working_set_gib"),
+                                kv_bits=_one(q, "kv_bits"))
             except Exception as e:
                 return {"knobs": [], "error": f"{type(e).__name__}: {e}"}
 
@@ -367,13 +368,17 @@ def set_allowance(body) -> dict:
             f"{gib:g} GiB" if gib else "none"}}
 
 
-def _preview(path: str, tune: str, working_set_gib=None) -> dict:
+def _preview(path: str, tune: str, working_set_gib=None,
+             kv_bits=None) -> dict:
     """What this artifact WOULD resolve to, and which of those can still be
-    chosen. Nothing is loaded and nothing is set: this only reads."""
+    chosen. Nothing is loaded and nothing is set: this only reads.
+    `kv_bits`: the KV precision it would launch with ('bf16', '8', ...),
+    for the room its context is counted in."""
     from knurlogic.engine import serve as engine
     from knurlogic.tuning import settings as S
     from knurlogic.machine import wired
     from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning.resolve import kv_refusal as resolve_kv_refusal
     from knurlogic.tuning.resolve import resolve, room_for
 
     a = Artifact.load(path)
@@ -385,7 +390,10 @@ def _preview(path: str, tune: str, working_set_gib=None) -> dict:
     if not ws:
         budget = wired.load_budget()
         ws = budget["bytes"]
-    r = resolve(a, ws, tune=tune)
+    bits = S.kv_bits_of(kv_bits)
+    if resolve_kv_refusal(a, bits):
+        bits = None
+    r = resolve(a, ws, tune=tune, kv_bits=bits)
 
     knobs = []
     for name, value in sorted(r.env.items()):
@@ -396,6 +404,8 @@ def _preview(path: str, tune: str, working_set_gib=None) -> dict:
         what, why = S.KNOB_DOC.get(name, ("", ""))
         reach, reach_why = knob_reach(a, name, engine.LIVE_KNOBS)
         vals = S.KNOB_RANGE.get(name)
+        if name in r.ranges:
+            vals = (list(r.ranges[name]), vals[1] if vals else "")
         knobs.append({
             "name": name, "value": str(value), "reach": reach,
             "reach_why": reach_why, "what": what, "why": why,
@@ -418,7 +428,7 @@ def _preview(path: str, tune: str, working_set_gib=None) -> dict:
         # what the fit leaves to talk in, against the working set given or
         # this machine's (under its allowance)
         "room": room_for(a.bytes_on_disk, a.raw_config,
-                         ws if budget is None else None),
+                         ws if budget is None else None, kv_bits=bits),
         "preview": True,
     }
 
@@ -544,6 +554,9 @@ def settings_document(artifact, live_env: dict, live_tune: str,
             d = declared.get(name) or {}
             if d.get("values"):
                 return list(d["values"]), d.get("unit", "")
+            if name in r.ranges:
+                return list(r.ranges[name]), S.KNOB_RANGE.get(
+                    name, (None, ""))[1]
             return S.KNOB_RANGE.get(name, (None, ""))
 
         def _cap(name, values):

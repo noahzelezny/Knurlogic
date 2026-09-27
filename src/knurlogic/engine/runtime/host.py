@@ -35,12 +35,15 @@ class ModelHost:
                  executes_artifact_code: bool = False,
                  image_store_bytes: Optional[int] = None,
                  shard=None, vision: bool = True, load_wait_s: float = 0.0,
-                 head_agree=None):
+                 head_agree=None, kv_bits: Optional[int] = None):
         """`shard(model)`: split the weights in place before they are read
         (a tensor ring: loaded lazily, split, then evaluated, so a rank
         never holds the whole model). `vision=False` binds no tower.
         `load_wait_s`: how long to wait for the machine's load lock (ranks
-        of one ring on one machine load one after another)."""
+        of one ring on one machine load one after another).
+        `kv_bits`: store attention K/V at 8/6/4 bits (engine/kvquant.py);
+        a model with no cache that can be is refused, not served bf16."""
+        self.kv_bits = kv_bits
         self.shard = shard
         #: head_agree(bound: bool) -> bool, called after the head binds (or
         #: does not) on every load: a pipeline's ranks draft together or
@@ -115,6 +118,7 @@ class ModelHost:
             with loadlock.model_load(path, "runtime.host",
                                      wait_s=self.load_wait_s):
                 self.model, self.tokenizer = self._weights(path, lazy)
+                self._quantize_kv()
                 self.model_key = (path, None, None)
                 self._bind_vision(path)
                 self._bind_head(path)
@@ -170,6 +174,20 @@ class ModelHost:
         mx.eval(model.parameters())
         return model, tok
 
+    def _quantize_kv(self) -> None:
+        state.SERVED["kv_bits"] = self.kv_bits
+        if self.kv_bits is None:
+            return
+        from knurlogic.engine import kvquant
+        n = kvquant.install(self.model, self.kv_bits)
+        if n == 0:
+            raise RuntimeError(
+                f"KV cache at {self.kv_bits} bits: this model has no "
+                f"attention cache engine/kvquant.py can store quantized "
+                f"(its family's own cache classes); launch it at bf16")
+        logger.info("KV cache: %d attention layers at %d bits", n,
+                    self.kv_bits)
+
     def _bind_vision(self, path: str) -> None:
         from knurlogic.engine.serve import vision
         if not self.vision:
@@ -190,7 +208,7 @@ class ModelHost:
     def _bind_head(self, path: str) -> None:
         state.DRAFT.update(head=None, spec=None, on=False)
         if not self.draft:
-            state.DRAFT["why"] = "disabled (--no-draft)"
+            state.DRAFT["why"] = "disabled (KNURLOGIC_MTP=off or --no-draft)"
             return
         from knurlogic.engine.serve import drafting
         drafting.load_head(path)

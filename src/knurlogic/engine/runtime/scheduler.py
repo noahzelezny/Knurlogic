@@ -76,7 +76,7 @@ def _context_cap() -> int:
         return 0
 
 
-def _kv_from_config(path) -> Optional[tuple]:
+def _kv_from_config(path, kv_bits=None) -> Optional[tuple]:
     """(0, bytes per token) from the artifact's config -- its full-attention
     layers' K and V -- so the first prompt after a load is costed before a
     cache has been measured; the measurements replace it. None if the
@@ -85,7 +85,7 @@ def _kv_from_config(path) -> Optional[tuple]:
         from knurlogic.machine.artifact import Artifact
         from knurlogic.tuning.resolve import kv_bytes_per_token
         cfg = Artifact.load(path).raw_config
-        per, _why = kv_bytes_per_token(cfg.get("text_config", cfg))
+        per, _why = kv_bytes_per_token(cfg.get("text_config", cfg), kv_bits)
         return (0.0, float(per)) if per > 0 else None
     except Exception:
         return None
@@ -451,7 +451,8 @@ class Scheduler:
                 if c.kind == "load":
                     self.host.load(c.path,
                                    executes_artifact_code=c.executes)
-                    self._kv = _kv_from_config(c.path)
+                    self._kv = _kv_from_config(
+                        c.path, getattr(self.host, "kv_bits", None))
                 else:
                     self.host.unload()
                 if self.host.state != "ready":

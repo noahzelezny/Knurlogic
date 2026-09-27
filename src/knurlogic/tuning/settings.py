@@ -260,6 +260,24 @@ KNOB_DOC = {
         "how many prompts are prefilled together in one forward",
         "the prefill transient is per prompt, so 8 arriving together is 8x "
         "the spike a one-prompt test shows. 1 on a tight box."),
+    "KNURLOGIC_MTP": (
+        "multi-token prediction: draft with the head packed beside the "
+        "weights",
+        "drafting preserves the output distribution, so on is the default "
+        "wherever a head ships; off frees the head's memory and every "
+        "step is a plain one."),
+    "KNURLOGIC_MTP_DYNAMIC": (
+        "switch between drafting and plain steps by their measured cost",
+        "on: each regime is timed per batch width and the cheaper one "
+        "taken, the loser re-tried on a backoff. Off: every step drafts "
+        "while a head is bound, whatever it costs. Only with MTP on."),
+    "KNURLOGIC_KV_BITS": (
+        "precision of the attention KV cache: bf16, or 8, 6 or 4 bits",
+        "the cache (and the prompt cache's entries) take about 53%, 41% or "
+        "28% of bf16's memory; K/V are dequantized for each step, so decode "
+        "is not faster and may be slower. Attention layers only -- "
+        "recurrent state and sliding windows stay bf16. Unmeasured on a "
+        "real model."),
     "VQLAB_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
         "biggest single win in the memory playbook, no measured speed cost at "
@@ -309,7 +327,14 @@ KNOB_ALIASES = {
     "decode_chunk": ("VQ_DECODE_CHUNK",),
     "prompt_concurrency": ("KNURLOGIC_PROMPT_CONCURRENCY",),
     "context_length": ("KNURLOGIC_CONTEXT_LENGTH",),
+    "mtp": ("KNURLOGIC_MTP",),
+    "mtp_dynamic": ("KNURLOGIC_MTP_DYNAMIC",),
+    "kv_bits": ("KNURLOGIC_KV_BITS",),
 }
+
+#: launch settings of the model itself, read when it loads: the same on
+#: every rank of a split (interfaces/cluster_jobs passes them ring-wide)
+MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS")
 
 
 # --- which knobs the ENGINE consumes ----------------------------------------
@@ -320,8 +345,61 @@ KNOB_ALIASES = {
 # while, settings that did nothing -- the resolver explained a prompt chunk
 # the server never saw.
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
-                                      "prompt_concurrency")
+                                      "prompt_concurrency", "mtp",
+                                      "mtp_dynamic", "kv_bits")
                           for n in KNOB_ALIASES[k])
+
+
+def on_off(v, default: bool = True) -> bool:
+    """'on'/'off' (and 1/0, true/false); None or '' is `default`."""
+    s = str(v if v is not None else "").strip().lower()
+    if not s:
+        return default
+    if s in ("on", "1", "true", "yes"):
+        return True
+    if s in ("off", "0", "false", "no"):
+        return False
+    raise ValueError(f"{v!r}: on or off")
+
+
+#: what KNURLOGIC_KV_BITS may be; "bf16" is the unquantized cache
+KV_BITS_VALUES = ["bf16", "8", "6", "4"]
+
+
+def kv_bits_of(v):
+    """'bf16'/''/None -> None; '8'/'6'/'4' -> int; anything else raises.
+    The same reading as engine/kvquant.parse_bits, without mlx."""
+    s = str(v if v is not None else "").strip().lower()
+    if s in ("", "bf16", "16", "none", "off"):
+        return None
+    if s not in KV_BITS_VALUES:
+        raise ValueError(f"KV bits {v!r}: one of {KV_BITS_VALUES}")
+    return int(s)
+
+
+def kv_bytes_per_element(bits) -> float:
+    """One stored K or V element: 2 bytes at bf16; bits/8 plus a bf16
+    scale and bias per group of 64 when quantized (engine/kvquant.py;
+    a head dim that is not a multiple of 64 groups by 32 and costs a
+    little more)."""
+    if bits is None:
+        return 2.0
+    return int(bits) / 8 + 4 / 64
+
+
+def kv_quant_for(model_type: str) -> tuple:
+    """([bits allowed], why) for a family: its manifest's `kv_quant`
+    (engine/families), [] with the reason where it is refused."""
+    from knurlogic.engine import families
+    from knurlogic.engine.arch import ARCH_FOR_MODEL_TYPE
+    arch = ARCH_FOR_MODEL_TYPE.get(model_type, model_type)
+    spec = families.build_maps()["kv_quant"].get(arch)
+    if not spec:
+        return [], (f"{model_type or 'this model'}: no family declares "
+                    f"whether its KV cache can be quantized")
+    if spec.get("refused"):
+        return [], spec["refused"]
+    return [int(b) for b in spec["bits"]], spec.get("why", "")
 
 
 def engine_settings(env: dict) -> dict:
@@ -331,10 +409,14 @@ def engine_settings(env: dict) -> dict:
     out = {}
     for logical, key, cast in (("prefill_chunk", "prefill_step_size", int),
                                ("prompt_concurrency", "prompt_concurrency", int),
-                               ("cache_limit_gb", "cache_limit_gb", float)):
+                               ("cache_limit_gb", "cache_limit_gb", float),
+                               ("mtp", "mtp", on_off),
+                               ("mtp_dynamic", "mtp_dynamic", on_off),
+                               ("kv_bits", "kv_bits", kv_bits_of)):
         for name in KNOB_ALIASES[logical]:
             if name in env:
-                out[key] = cast(float(env[name]))
+                out[key] = (cast(float(env[name])) if cast in (int, float)
+                            else cast(env[name]))
                 break
     return out
 
@@ -365,7 +447,7 @@ def default_alias(logical: str) -> str:
 KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "KNURLOGIC_CACHE_LIMIT_GB",
                    "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_PREFILL_CHUNK",
                    "VQLAB_PREFILL_CHUNK", "KNURLOGIC_PROMPT_CONCURRENCY",
-                   "KNURLOGIC_CONTEXT_LENGTH")
+                   "KNURLOGIC_CONTEXT_LENGTH") + MODEL_KNOBS
 
 
 def knob_tier(name: str) -> str:
@@ -396,6 +478,11 @@ KNOB_RANGE = {
     "KNURLOGIC_CONTEXT_LENGTH": ([8192, 16384, 32768, 65536, 131072,
                                   262144, 524288, 1048576], "tokens"),
     "VQ_DECODE_CHUNK": ([4, 8, 16, 32], ""),
+    "KNURLOGIC_MTP": (["on", "off"], ""),
+    "KNURLOGIC_MTP_DYNAMIC": (["on", "off"], ""),
+    # narrowed per family by the resolver (Resolution.ranges): a family
+    # that refuses quantized KV offers bf16 alone
+    "KNURLOGIC_KV_BITS": (KV_BITS_VALUES, "bits"),
     "VQLAB_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
                              "GiB"),
     "KNURLOGIC_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
