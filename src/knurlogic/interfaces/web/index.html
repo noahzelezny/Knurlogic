@@ -400,11 +400,9 @@
    margin-bottom:6px}
  .chd .cl{font-size:10.5px;color:var(--faint);display:flex;align-items:center;gap:6px;
    min-width:0}
- .chd .cl:has(#cmodel:empty){visibility:hidden}
- #cmodel{color:var(--acc);font-size:11px;max-width:24em;
-   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- #cmodel:empty{display:none}
- #ceffort{width:auto;padding:3px 6px;font-size:10.5px;color:var(--dim)}
+ #cmodel,#ceffort{width:auto;padding:3px 6px;font-size:10.5px;color:var(--dim)}
+ #cmodel{color:var(--acc);max-width:24em;text-overflow:ellipsis}
+ #cmodel:has(option[value=""]:checked){color:var(--dim)}
  nav a[aria-pressed=true]{color:var(--acc)}
  nav a{cursor:pointer;border-bottom:1px solid transparent;padding-bottom:2px}
  nav a[aria-pressed=true]{border-bottom-color:var(--acc)}
@@ -839,7 +837,8 @@
             <!-- What Send goes to and how hard it thinks, on one line above
                  the box: the two things to check before sending. -->
             <div class="chd">
-              <span class="cl">Model: <span id="cmodel"></span></span>
+              <label class="cl">Model:
+              <select id="cmodel" title="the running model Send goes to"></select></label>
               <label class="cl">Thinking:
               <select id="ceffort" title="reasoning_effort: knurlogic maps it onto this model's own controls and says what it applied">
                 <option value="">model default</option>
@@ -1740,8 +1739,9 @@ async function tick(){
   // through this page's /chat proxy, so it stays even when this page serves
   // nothing; the bench speaks to this page's own endpoint and goes.
   $('try').style.display='';
-  const bt=document.querySelector('#ptabs [data-tab="bench"]');
-  if(bt) bt.style.display=a?'':'none';
+  // The Chat/Bench strip only when there is a Bench to switch to: alone,
+  // a teal "Chat" tab over the chat is a label for what is already plain.
+  $('ptabs').parentElement.style.display=a?'':'none';
   if(!a && window.ACTIVETAB==='bench' && window.switchTab) window.switchTab('chat');
   $('mem').style.display=a?'':'none';
   $('served').style.display=a?'':'none';
@@ -2453,6 +2453,8 @@ async function loadResident(){
   // What can be chatted with right now, for the chat bar's label: a chat
   // whose model has gone away no longer has a selection to name.
   window.RUNNING=new Set(rows.filter(r=>r.where).map(r=>r.where));
+  // what the chat bar's Model: offers -- the rows a click on the name chats with
+  window.CHATTABLE=rows.filter(r=>r.where && r.runtime!=='exo');
   if(window.chatGate) window.chatGate();
   el.querySelectorAll('[data-chatn]').forEach(x=>x.onclick=()=>{
     const r=rows[+x.dataset.chatn];
@@ -2890,13 +2892,34 @@ function chatGate(){
   // Only while it is still running: before the first survey (RUNNING unset)
   // the chat's own record is trusted.
   const sel=c && c.where && (!window.RUNNING || window.RUNNING.has(c.where));
-  $('cmodel').textContent=sel ? shortModel(c.model) : '';
-  $('cmodel').title=sel ? 'sending to '+c.model+' at '+c.where : '';
+  const opts=window.CHATTABLE||[], el=$('cmodel');
+  const sig=opts.map(r=>r.where+'|'+r.name).join('\n');
+  if(el.dataset.sig!==sig){
+    el.dataset.sig=sig;
+    el.innerHTML=`<option value="">${opts.length?'choose':'none running'}</option>`+
+      opts.map(r=>`<option value="${esc(r.where)}">${esc(shortModel(r.name))}${
+        r.machine?' · '+esc(r.machine):''}</option>`).join('');
+  }
+  el.disabled=!opts.length;
+  el.value=sel && opts.some(r=>r.where===c.where) ? c.where : '';
+  el.title=sel ? 'sending to '+c.model+' at '+c.where : 'the running model Send goes to';
   $('cattach').title=vision ? 'attach an image'
     : (on ? 'this model has no vision' : 'click a running model to chat with it');
   loadSampling(c && c.where ? c.where : (SERVED ? '' : null));
 }
 window.chatGate=chatGate;
+// Picking in Model: points this chat at that model while it is still empty,
+// and starts a new chat once it has messages -- a conversation keeps the
+// model it was had with.
+$('cmodel').onchange=()=>{
+  const r=(window.CHATTABLE||[]).find(x=>x.where===$('cmodel').value);
+  if(!r){ chatGate(); return }
+  const c=curChat();
+  if(c && !(c.msgs||[]).length){
+    c.where=r.where; c.model=r.name; c.vision=visionOf(r.name);
+    saveChats(); renderChats(); chatGate();
+  } else newChat(r.name, r.where, visionOf(r.name));
+};
 window.curChatPub=()=>curChat();
 
 // --- chat settings ----------------------------------------------------------
