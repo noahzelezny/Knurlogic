@@ -23,7 +23,7 @@ import random
 from typing import Callable, List, Optional
 
 import mlx.core as mx
-from mlx.nn.layers.distributed import shard_linear
+import mlx.nn as nn
 from mlx.utils import tree_map, tree_map_with_path
 
 from . import plan as P
@@ -55,6 +55,9 @@ def predicate(kind: str) -> Callable:
     return pred
 
 
+_S2A = predicate("sharded-to-all")
+
+
 def split_params(params, pred, rank: int, n: int, segments=1):
     """`params` with every array `pred` names split n ways along its axis
     (within each of `segments`: a fused QKV splits each part), keeping
@@ -76,7 +79,39 @@ def split_params(params, pred, rank: int, n: int, segments=1):
 
 
 def _split_inplace(module, pred, rank, n, segments=1) -> None:
+    if pred is _S2A and "bias" in module:
+        # a split input axis gives each rank a partial sum; a bias added on
+        # every rank would be summed N times
+        raise ValueError(f"{type(module).__name__} has a bias; a "
+                         f"sharded-to-all split of it is not built")
     module.update(split_params(module.parameters(), pred, rank, n, segments))
+
+
+class Reduce(nn.Module):
+    """`inner`'s partial output summed across the ranks -- in float32.
+
+    A split layer's ranks each round their partial sum to the activation
+    dtype (bf16) and the sum of two rounded halves is rounded again; the
+    whole layer rounds once. Summing the halves in float32 leaves one
+    rounding after the sum, the whole layer's count plus the partials'."""
+
+    def __init__(self, inner, group):
+        super().__init__()
+        self.inner = inner
+        self._group = group
+
+    def __call__(self, *a, **kw):
+        y = self.inner(*a, **kw)
+        return mx.distributed.all_sum(y.astype(mx.float32),
+                                      group=self._group).astype(y.dtype)
+
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            if "inner" not in self:
+                raise
+            return getattr(self["inner"], name)
 
 
 def shard(model, group) -> None:
@@ -85,7 +120,7 @@ def shard(model, group) -> None:
     Refuse first (tuning/resolve.tensor_refusals) -- this assumes the
     arithmetic was checked."""
     n, rank = group.size(), group.rank()
-    a2s, s2a = predicate("all-to-sharded"), predicate("sharded-to-all")
+    a2s, s2a = predicate("all-to-sharded"), _S2A
 
     def repeat_kv(layer, h):
         # fewer KV heads than ranks: each rank gets a copy of its head
@@ -102,7 +137,6 @@ def shard(model, group) -> None:
         if layer.is_linear:
             la = layer.linear_attn
             kd = la.key_dim
-            la.sharding_group = group
             _split_inplace(la.conv1d, lambda p, w: 0, rank, n,
                            segments=[kd, 2 * kd])
             la.conv1d.groups //= n
@@ -117,20 +151,22 @@ def shard(model, group) -> None:
             la.key_dim //= n
             la.value_dim //= n
             la.conv_dim //= n
+            la.sharding_group = None            # Reduce sums it, in fp32
+            layer.linear_attn = Reduce(la, group)
         else:
             at = layer.self_attn
-            at.o_proj = shard_linear(at.o_proj, "sharded-to-all", group=group)
-            at.q_proj = shard_linear(at.q_proj, "all-to-sharded", group=group)
+            _split_inplace(at.q_proj, a2s, rank, n)
             repeat_kv(at.k_proj, at.num_key_value_heads)
             repeat_kv(at.v_proj, at.num_key_value_heads)
-            at.k_proj = shard_linear(at.k_proj, "all-to-sharded", group=group)
-            at.v_proj = shard_linear(at.v_proj, "all-to-sharded", group=group)
+            _split_inplace(at.k_proj, a2s, rank, n)
+            _split_inplace(at.v_proj, a2s, rank, n)
+            _split_inplace(at.o_proj, s2a, rank, n)
             at.num_attention_heads //= n
             at.num_key_value_heads = max(1, at.num_key_value_heads // n)
+            layer.self_attn = Reduce(at, group)
 
         mlp = layer.mlp
         if hasattr(mlp, "switch_mlp"):
-            mlp.sharding_group = group
             se = mlp.shared_expert
             _split_inplace(se.gate_proj, a2s, rank, n)
             _split_inplace(se.up_proj, a2s, rank, n)
@@ -139,13 +175,12 @@ def shard(model, group) -> None:
             _split_inplace(sw.gate_proj, a2s, rank, n)
             _split_inplace(sw.up_proj, a2s, rank, n)
             _split_inplace(sw.down_proj, s2a, rank, n)
+            mlp.sharding_group = None
         else:
-            mlp.gate_proj = shard_linear(mlp.gate_proj, "all-to-sharded",
-                                         group=group)
-            mlp.up_proj = shard_linear(mlp.up_proj, "all-to-sharded",
-                                       group=group)
-            mlp.down_proj = shard_linear(mlp.down_proj, "sharded-to-all",
-                                         group=group)
+            _split_inplace(mlp.gate_proj, a2s, rank, n)
+            _split_inplace(mlp.up_proj, a2s, rank, n)
+            _split_inplace(mlp.down_proj, s2a, rank, n)
+        layer.mlp = Reduce(mlp, group)
     check_codebooks(model)
 
 
