@@ -40,7 +40,7 @@ GIB = 1 << 30
 def run(path: str, host: str, port: int, working_set_gib: float,
         profile: str | None, tune: str = "balanced",
         overrides: dict | None = None, draft: bool = True,
-        serving: dict | None = None) -> int:
+        serving: dict | None = None, ring: dict | None = None) -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
@@ -57,6 +57,31 @@ def run(path: str, host: str, port: int, working_set_gib: float,
               f"cannot load, and starting a server that 500s on every request "
               f"helps nobody.", file=sys.stderr)
         return 2
+
+    ring = ring or {}
+    world = int(ring.get("world") or 1)
+    if world > 1:
+        why = _ring_refusals(a, ring, working_set_gib, overrides or {})
+        if why:
+            print(f"REFUSING a {world}-rank tensor split of {a.path.name}:",
+                  file=sys.stderr)
+            for w in why:
+                print(f"  - {w}", file=sys.stderr)
+            return 2
+        from knurlogic.tuning.resolve import tensor_placement
+        pl = tensor_placement(a, world)
+        print(f"tensor    rank {ring['rank']} of {world} over "
+              f"{ring['link']}: holds ~{pl['per_rank_bytes'] / GIB:.1f} GiB "
+              f"({pl['sharded_bytes'] / GIB:.1f} split {world} ways + "
+              f"{pl['replicated_bytes'] / GIB:.1f} replicated)")
+        draft = False
+        _ring_env(ring)
+        # the ring-wide knobs beat the resolver like any --set
+        overrides = dict(overrides or {})
+        for alias in ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"):
+            overrides[alias] = str(int(ring["prefill_chunk"]))
+        if ring.get("decode_chunk"):
+            overrides["VQ_DECODE_CHUNK"] = str(int(ring["decode_chunk"]))
 
     ws = int(working_set_gib * GIB)
     if ws == 0:
@@ -175,6 +200,22 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             text += "\n\n" + wired.render(snap["wired"])
         return snap, text
 
+    if world > 1 and int(ring["rank"]) > 0:
+        # a follower: no HTTP, no scheduler -- rank 0's plans, until it stops
+        from knurlogic.engine.runtime import tensor
+        print(f"\nrank {ring['rank']}: following rank 0 (no HTTP here)",
+              flush=True)
+        tensor.serve_follower(
+            str(a.path), link_kind=ring["link"],
+            working_set=int(working_set_gib * GIB),
+            prompt_cache_size=int((serving or {}).get("prompt_cache_size",
+                                                      10)),
+            completion_batch_size=int((serving or {}).get(
+                "decode_concurrency", 32)),
+            prefill_step_size=int(ring["prefill_chunk"]),
+            executes_artifact_code=bool(a.model_file))
+        return 0
+
     print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)")
     print(f"open http://{host}:{port}/ to see what loaded and try it")
     print(f"  /status (text) and /status.json for the same thing "
@@ -258,7 +299,55 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     return http.serve(a, host, port, routes=routes,
                       settings={**eng, **(serving or {}),
                                 **({"working_set_bytes": guard}
-                                   if guard else {})}, draft=draft)
+                                   if guard else {})}, draft=draft,
+                      ring=ring if world > 1 else None)
+
+
+def _ring_refusals(a: Artifact, ring: dict, working_set_gib: float,
+                   overrides: dict) -> list:
+    """Why this rank cannot join a tensor split, with the numbers."""
+    from knurlogic.tuning.resolve import tensor_refusals
+    why = []
+    if ring.get("split") != "tensor":
+        why.append(f"--split {ring.get('split')!r}: this build splits "
+                   f"'tensor' only")
+    if not 0 <= int(ring["rank"]) < int(ring["world"]):
+        why.append(f"rank {ring['rank']} is outside a world of "
+                   f"{ring['world']}")
+    if working_set_gib <= 0:
+        why.append("a ring needs --working-set-gib: every rank's memory "
+                   "guard is stated, not detected")
+    if not ring.get("prefill_chunk"):
+        why.append("a ring needs --prefill-chunk: the prompt chunk is "
+                   "ring-wide, never resolved per rank")
+    if ring.get("link") == "ring" and not ring.get("hosts"):
+        why.append("--link ring needs --hosts (one address:port per rank)")
+    if ring.get("link") == "ring" and ring.get("hosts") and \
+            len(ring["hosts"]) != int(ring["world"]):
+        why.append(f"--hosts names {len(ring['hosts'])} ranks for a world "
+                   f"of {ring['world']}")
+    if ring.get("link") == "jaccl" and not (ring.get("ibv_devices")
+                                            and ring.get("coordinator")):
+        why.append("--link jaccl needs --ibv-devices and --coordinator")
+    why += tensor_refusals(a.raw_config, int(ring["world"]))
+    return why
+
+
+def _ring_env(ring: dict) -> None:
+    """What mx.distributed.init reads, set before anything loads. The ring
+    hostfile is written where the job's files live."""
+    import json
+    from pathlib import Path
+    os.environ["MLX_RANK"] = str(int(ring["rank"]))
+    if ring["link"] == "ring":
+        d = Path.home() / ".cache" / "knurlogic" / "jobs" / ring["job"]
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / f"hostfile-rank{int(ring['rank'])}.json"
+        f.write_text(json.dumps([[h] for h in ring["hosts"]]))
+        os.environ["MLX_HOSTFILE"] = str(f)
+    else:
+        os.environ["MLX_IBV_DEVICES"] = str(ring["ibv_devices"])
+        os.environ["MLX_JACCL_COORDINATOR"] = str(ring["coordinator"])
 
 
 def _parse_sets(pairs) -> dict:
@@ -328,7 +417,31 @@ def main(argv=None) -> int:
     p.add_argument("--image-store-gib", type=float, default=0.0,
                    help="memory for encoded images (default 0.25). A "
                         "request's images must fit it together")
+    # Cluster plumbing: the cluster page passes these to each machine's
+    # serve (tuning/resolve.rank_order picks the order). Hidden from --help:
+    # nobody types a rank.
+    hide = argparse.SUPPRESS
+    p.add_argument("--rank", type=int, default=0, help=hide)
+    p.add_argument("--world", type=int, default=1, help=hide)
+    p.add_argument("--split", default="tensor", help=hide)
+    p.add_argument("--link", default="ring", choices=("ring", "jaccl"),
+                   help=hide)
+    p.add_argument("--hosts", default="", help=hide)
+    p.add_argument("--job", default="", help=hide)
+    p.add_argument("--ibv-devices", default="", help=hide)
+    p.add_argument("--coordinator", default="", help=hide)
+    p.add_argument("--prefill-chunk", type=int, default=0, help=hide)
+    p.add_argument("--decode-chunk", type=int, default=0, help=hide)
     a = p.parse_args(argv)
+    ring = None
+    if a.world > 1:
+        hosts = [h for h in a.hosts.split(",") if h]
+        ring = {"rank": a.rank, "world": a.world, "split": a.split,
+                "link": a.link, "hosts": hosts,
+                "job": a.job or f"tensor-{a.port}",
+                "ibv_devices": a.ibv_devices, "coordinator": a.coordinator,
+                "prefill_chunk": a.prefill_chunk,
+                "decode_chunk": a.decode_chunk}
     serving = {"decode_concurrency": a.decode_concurrency,
                "max_body": a.max_request_mib * 1024 * 1024,
                "allow_origins": a.allow_origin,
@@ -342,7 +455,8 @@ def main(argv=None) -> int:
     if a.context_length > 0:
         sets["KNURLOGIC_CONTEXT_LENGTH"] = str(a.context_length)
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile,
-               a.tune, sets, draft=not a.no_draft, serving=serving)
+               a.tune, sets, draft=not a.no_draft, serving=serving,
+               ring=ring)
 
 
 if __name__ == "__main__":

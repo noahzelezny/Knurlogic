@@ -94,6 +94,45 @@ stays the same: admission, batching and per-request state do not care
 where the layers run. Node discovery is cluster/ (peers, Bonjour,
 `--host cluster`). exo is not in the path.
 
+## Cluster: tensor split (2026-09-27, first slice)
+
+One model, N ranks, every layer's weights split N ways
+(`engine/runtime/tensor.py`, protocol `engine/runtime/plan.py`).
+
+- **Rank 0** owns HTTP, the scheduler, tokenizing and ALL sampling. Its
+  executor is `TensorExecutor`: the local batch engine, with every
+  admission, removal and prompt-cache change journaled.
+- **Each step**: one fixed-size `all_gather` of a control vector per rank
+  (`[active - limit, step, plan length]`), then, when rank 0 has
+  something to say, one `all_sum` of the plan's JSON bytes (never pickle;
+  the other ranks contribute zeros). The plan's ops, in order: `admit`
+  (tokens, the prompt-cache hit rank 0 found -- the follower repeats the
+  fetch and checks it --, sampling with an assigned seed, penalties, the
+  control machine's start), `remove`, `insert` (store the cache from last
+  step's checkpoint/finished event), `pop` (evict n LRU entries), `reset`,
+  `stop`; and `tokens`: rank 0's next token for every live row. Ranks >= 1
+  (`follow`) apply it, overwrite their batch's next tokens with rank 0's,
+  and run the same step. A plan ending in `reset` or `stop` is not
+  followed by a step.
+- **Prompt cache**: count-based on a ring (a byte cap is refused); rank 0's
+  byte trims become counted pops. Identical ops in identical order keep
+  every rank's LRU identical.
+- **Memory**: the guard reads the tightest rank -- the peers' over-limit
+  from the last exchange, moved by what rank 0 freed since (equal shards,
+  same ops) -- so eviction and admission are decided once, on rank 0.
+- **VQ**: a codebook is replicated, never sliced (`tensor.predicate`);
+  codes and scales split. `tuning/resolve.tensor_refusals` refuses with the
+  arithmetic when heads do not divide or a packed down_proj slice would cut
+  a code word (IN/N % max(group, 32 x dim)); VQ dense/embedding modules are
+  refused in this slice.
+- **Off in this slice**: MTP drafting, images (400), switching models.
+- **Bring-up**: `knurlogic serve <artifact> --rank r --world n --split
+  tensor --link ring|jaccl --hosts a:p,b:p --prefill-chunk N
+  --working-set-gib G` (hidden flags: the cluster page passes them; rank
+  order is `tuning/resolve.rank_order`). `mx.distributed.init(strict=True)`,
+  a barrier, then each rank loads lazily, splits, and evaluates its shard.
+  Only rank 0 binds HTTP.
+
 ## Migration
 
 1. The conformance suite (tests/api) passes on today's server: done on
@@ -131,7 +170,11 @@ where the layers run. Node discovery is cluster/ (peers, Bonjour,
    request into admission), `tag_samplers` (pass sampling params), and
    exception-as-progress (a `RowFailure` event).
 2. **Executor output is (uid, token, logprob_of_token, top_k?)**, never a
-   [V] row: on a pipeline only the last rank has logits.
+   [V] row. (Corrected 2026-09-27: this said "on a pipeline only the
+   last rank has logits". mlx-lm's pipeline all_gathers the last stage's
+   hidden state, so every rank computes logits; under tensor every rank
+   does too. The rule stands for a different reason: rank 0 samples, and
+   what crosses a boundary stays small.)
 3. **One path, per-row keys by `mx.vmap`**: measured equal to the per-row
    loop draw for draw, 460 us vs 444 us plain at B=8; keys advance by
    `vmap(split)`, lazy. Rules: rebuild the key array with take/stack when
@@ -153,7 +196,8 @@ where the layers run. Node discovery is cluster/ (peers, Bonjour,
 8. **Cluster: the executor owns the SPMD loop.** Rank 0: HTTP + scheduler;
    ranks 1..n: `executor.serve_forever()` applying broadcast admissions;
    per-rank prompt caches kept identical by identical insert order;
-   tokens and the NaN verdict broadcast from the last rank; admission is
+   tokens and the NaN verdict broadcast from the last rank (as built for
+   tensor: from rank 0, which samples -- see "Cluster: tensor split"); admission is
    an event the executor acknowledges, never assumed synchronous.
 9. **Keep LRUPromptCache, own the wrapper** (the exact-hit guard moves into
    a knurlogic PromptCache class). Own the trie later.
