@@ -125,6 +125,19 @@ One model, N ranks, every layer's weights split N ways
   arithmetic when heads do not divide or a packed down_proj slice would cut
   a code word (IN/N % max(group, 32 x dim)); VQ dense/embedding modules are
   refused in this slice.
+- **Measured** (M4, TheDrainFlorist--Qwen3.6-35B-A3B-VQ-3.4bpw, two
+  ranks on one machine over the ring on 127.0.0.1, prompt chunk 512,
+  greedy): each rank holds 6.9 GiB (placement said 6.9). Decode 29.6
+  tok/s against 70.7 in one process (n=4 each; the ring's loopback
+  collectives, 80 per token, are the cost -- one machine is the proof
+  rig, not the use). Rank 1 disagreed with rank 0's token 0 times in 2211
+  steps (concurrent rows, a cancel, prompt-cache hits, sampled rows), and
+  a ring is reproducible run to run. It is NOT token-identical to one
+  process: the split sums bf16-rounded partials, first-token logits move
+  by a few bf16 ulps, and greedy text forks at the first near-tie (tokens
+  36, 61, 74 of the three prompts; the tied pairs were 0.00, 0.13 and 0.13
+  nats apart). One process is not batch-invariant either: the same prompt
+  sequential vs beside two others forked at token 49-63.
 - **Off in this slice**: MTP drafting, images (400), switching models.
 - **Bring-up**: `knurlogic serve <artifact> --rank r --world n --split
   tensor --link ring|jaccl --hosts a:p,b:p --prefill-chunk N
