@@ -451,6 +451,30 @@ allowance); context_room uses the measurement when there is one, the
 formula only before a first run. Find out what GLM's cache actually holds
 (decompressed K/V? the indexer?) -- the formula should match it.
 
+In flight at the fourth compaction (2026-09-26 late):
+- Chunk sweep on the M4 (scratchpad shootout/chunk_bench.py -> M4
+  ~/kl-test/shootout/chunk_bench.jsonl; one server per arm, n=3, 4k/16k
+  prompts, server prefill tok/s + max step spike). Flash 4.4: chunk width
+  buys nothing (512 ~565 tok/s at 4k, 2048/4096 no faster at 4k, +6% at
+  16k) for 0.8 -> 4.1 GiB spikes. 397B: 512 ~192/160 tok/s, 1024 ~225 at 4k
+  (+17%), 2048/4096 pending (4096 measured an 8.1 GiB spike earlier and
+  aborted Metal with one agent). The June qwen manifest A/B said 4096 =
+  +115% at 11k vs 512 with no peak cost (hybrid, recurrent layers) -- the
+  sweep tests that. Hypothesis: the gain is VQ weight unpacking per chunk
+  (the maintainer recalls chunk not mattering on a non-VQ 397B).
+- A stash on hardening: "512 default everywhere -- pending 397B's chunk
+  sweep" (settings.PREFILL_CHUNK_DEFAULT 512; family widths only with
+  tune=fast). Four tests encode the old policy and need updating with it.
+  Decide from 397B's numbers: small everywhere, or per family where it pays
+  and the spike fits (settable per base model in Settings).
+- 397B shootout: tool-use audits done: mtp, machine, runtime (the last
+  with the 512 chunk, one agent, 16 turns, no crash). GLM: none (no room).
+- gui: Settings is picker-style (CLUSTER | MODELS tabs, a list left,
+  detail right; base-model settings; allowance in ~/.config/knurlogic).
+  A subagent is renaming "local builds" groups to "· VQ", adding a VQ
+  sub-header, and checking why Qwen VQ builds show fewer VQ knobs than GLM
+  (runtime reads vs a bug).
+
 After 0.1.0: multi-machine serving (cluster executor), HF download + hub
 tab, analytics from the harness's tools, firewall-prompt UX, upstream the mlx-lm
 bugs and vqlab's packed as_linear (strict xfail).
