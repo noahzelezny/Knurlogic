@@ -1126,6 +1126,36 @@ def _largest_remainder(n: int, weights: list, floor: list, cap: list) -> list:
     return out
 
 
+def _byte_bounds(layer_bytes: list, weights: list, cap: list):
+    """Contiguous runs by the real bytes: rank n-1 takes the first layers,
+    each rank's run as near its weight's share of the bytes still unplaced
+    as whole layers allow, within what it can hold, leaving every later rank
+    one layer; rank 0 takes the rest. [(start, end) per rank], or None when
+    a rank would hold more than it can."""
+    n, L = len(weights), len(layer_bytes)
+    bounds = [None] * n
+    at, left = 0, float(sum(layer_bytes))
+    for r in range(n - 1, 0, -1):
+        wsum = sum(weights[:r + 1])
+        target = left * (weights[r] / wsum if wsum > 0 else 1.0 / (r + 1))
+        end, acc = at, 0
+        while end < L - r:            # leave ranks r-1 .. 0 a layer each
+            nxt = acc + layer_bytes[end]
+            if nxt > cap[r] or (end > at and
+                                abs(nxt - target) > abs(acc - target)):
+                break
+            acc, end = nxt, end + 1
+        if end == at:
+            return None
+        bounds[r] = (at, end)
+        left -= acc
+        at = end
+    bounds[0] = (at, L)
+    if any(sum(layer_bytes[a:b]) > cap[r] for r, (a, b) in enumerate(bounds)):
+        return None
+    return bounds
+
+
 def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dict:
     """Which layers each rank holds.
 
@@ -1183,6 +1213,16 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dic
         at += counts[r]
     got = [sum(layer_bytes[a:b]) for a, b in bounds]
     over = [i for i in range(n) if got[i] > cap[i]]
+    if over:
+        # counting by the average layer is wrong when layers are not alike
+        # (Qwen3.8 Flash's layer 1 carries a 42 GiB n-gram embedding): cut
+        # by the real bytes instead, and refuse only when that fails too
+        alt = _byte_bounds(layer_bytes, weights, cap)
+        if alt is not None:
+            bounds = alt
+            counts = [b - a for a, b in bounds]
+            got = [sum(layer_bytes[a:b]) for a, b in bounds]
+            over = []
     if over:
         i = over[0]
         raise ValueError(
