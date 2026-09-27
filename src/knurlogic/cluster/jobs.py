@@ -222,7 +222,10 @@ class Watch:
             was = self.seen.get(key)
             # the clock runs only while work is in flight: a ring idle for
             # an hour and then given a request has not been stalled an hour
-            if was is None or was[0] != work or not m.get("busy"):
+            # and only on a loaded ring: a request that arrives while the
+            # ranks read their weights (137 GiB over SMB) waits on the load
+            if was is None or was[0] != work or not m.get("busy") \
+                    or phase != "ready":
                 self.seen[key] = (work, now)
                 continue
             if m.get("busy") and now - was[1] > STALL_S:
