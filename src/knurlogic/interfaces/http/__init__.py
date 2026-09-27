@@ -78,7 +78,10 @@ def scheduler_options(settings: dict) -> dict:
 
 
 def serve(artifact, host: str, port: int, *, routes: dict | None = None,
-          settings: dict | None = None, draft: bool = True) -> int:
+          settings: dict | None = None, draft: bool = True,
+          ring: dict | None = None) -> int:
+    """`ring`: this is rank 0 of a tensor split (interfaces/serve.py's
+    ring dict); the other ranks follow its scheduler."""
     from knurlogic.engine.runtime.host import ModelHost
     from knurlogic.engine.runtime.scheduler import Scheduler
 
@@ -91,10 +94,18 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     if "cache_limit_gb" in settings:
         from knurlogic.engine.serve import set_cache_limit
         print(f"cache limit {set_cache_limit(settings['cache_limit_gb'])}")
-    mh = ModelHost(draft=draft,
+    tensor = shard = None
+    if ring:
+        from knurlogic.engine.runtime import tensor as T
+        link = T.init(ring["link"])
+        tensor, shard = T.Ring(link), (lambda m: T.shard(m, link.group))
+    mh = ModelHost(draft=draft and not ring,
                    executes_artifact_code=bool(artifact.model_file),
-                   image_store_bytes=settings.get("image_store_bytes"))
-    sched = Scheduler(mh, **scheduler_options(settings)).start()
+                   image_store_bytes=settings.get("image_store_bytes"),
+                   shard=shard, vision=not ring,
+                   load_wait_s=3600.0 if ring else 0.0)
+    sched = Scheduler(mh, **scheduler_options(settings),
+                      tensor=tensor).start()
     sched.load(str(artifact.path),
                executes_artifact_code=bool(artifact.model_file))
     _CURRENT["scheduler"] = sched
