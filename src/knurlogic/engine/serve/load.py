@@ -92,7 +92,8 @@ def load(path: str, executes_artifact_code: bool = False):
         return load_unlocked(path, executes_artifact_code)
 
 
-def load_unlocked(path: str, executes_artifact_code: bool = False):
+def load_unlocked(path: str, executes_artifact_code: bool = False,
+                  lazy: bool = False):
     """`load` for a caller already holding the load lock (the model host).
     A rung rungs.json lists as VERIFIED (tools/vq_gate.py proved it
     bit-identical to its published model.py) loads on knurlogic's own VQ
@@ -107,12 +108,12 @@ def load_unlocked(path: str, executes_artifact_code: bool = False):
     from . import state
     p = Path(str(path))
     if p.is_dir() and runtime.serves(p):
-        model, config = runtime.load_model(p)
+        model, config = runtime.load_model(p, lazy=lazy)
         tok = load_tokenizer(p, None, eos_token_ids=config.get("eos_token_id"))
         state.SERVED["runtime"] = "knurlogic"
         return model, tok
     state.SERVED["runtime"] = "bundled"
-    kw = {}
+    kw = {"lazy": True} if lazy else {}
     if executes_artifact_code and \
             "trust_remote_code" in inspect.signature(_load).parameters:
         kw["trust_remote_code"] = True
