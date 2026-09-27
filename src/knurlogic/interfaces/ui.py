@@ -937,7 +937,7 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
     handler.end_headers()
     handler.close_connection = True
     sse = "text/event-stream" in (ctype or "")
-    tail, cut = b"", False
+    tail, cut, told = b"", False, False
     try:
         while True:
             try:
@@ -948,13 +948,16 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
                 break
             if not chunk:
                 break
+            told = told or b'"cluster_failed"' in tail + chunk
             tail = (tail + chunk)[-64:]
             handler.wfile.write(chunk)
             handler.wfile.flush()
         # An event stream that ends without its [DONE] was cut. From a
         # cluster job's rank 0 the client is told why, as one last event,
-        # instead of a stream that simply stops.
-        if sse and base and code == 200 and (cut or b"[DONE]" not in tail):
+        # instead of a stream that simply stops -- unless the upstream (a
+        # peer page's relay) already said so.
+        if sse and base and code == 200 and not told and (
+                cut or b"[DONE]" not in tail):
             why = cluster_failure(base)
             if why:
                 handler.wfile.write(b"data: " + json.dumps(
