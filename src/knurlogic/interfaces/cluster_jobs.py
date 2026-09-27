@@ -102,6 +102,38 @@ def _mlx_version() -> str:
         return ""
 
 
+_BUILD: dict = {}
+
+
+def build_fingerprint(root=None, cache=None) -> str:
+    """Which build of knurlogic this is, beyond its version string (every
+    dev build says 0.1.0.dev0): a hash over the installed package's .py
+    files -- relative path and bytes, in a fixed order, so a wheel install
+    and a PYTHONPATH source tree of the same commit agree -- and the mlx
+    version, as "<12 hex>+mlx<version>". Read once per process."""
+    import hashlib
+    memo = _BUILD if cache is None else cache
+    if root is None:
+        import knurlogic
+        root = Path(knurlogic.__file__).resolve().parent
+    root = Path(root)
+    key = str(root)
+    if key not in memo:
+        h = hashlib.sha256()
+        for f in sorted(root.rglob("*.py"),
+                        key=lambda q: q.relative_to(root).as_posix()):
+            if "__pycache__" in f.parts:
+                continue
+            h.update(f.relative_to(root).as_posix().encode() + b"\0")
+            try:
+                h.update(f.read_bytes())
+            except OSError:
+                pass
+            h.update(b"\0")
+        memo[key] = h.hexdigest()[:12]
+    return f"{memo[key]}+mlx{_mlx_version() or 'none'}"
+
+
 def _selfheal() -> bool:
     from knurlogic.machine import deps
     m = deps.probe(sys.executable).get("mlx") or {}
@@ -131,7 +163,8 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
                "bandwidth_gbs": chip_bandwidth_gbs(chip),
                "thunderbolt": tb, "rdma": links.rdma(),
                "versions": {"knurlogic": __version__,
-                            "mlx": _mlx_version()},
+                            "mlx": _mlx_version(),
+                            "build": build_fingerprint()},
                "jaccl_selfheal": heal}
         _INFO.update(doc=doc, at=now)
     from knurlogic.machine import allowance
@@ -350,11 +383,14 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     refusals = []
     want = spec.get("versions") or {}
     have = info.get("versions") or {}
-    for k in ("knurlogic", "mlx"):
+    for k in ("knurlogic", "mlx", "build"):
         if want.get(k) != have.get(k):
-            refusals.append(f"{k} {have.get(k) or 'missing'} here, "
+            what = "build" if k == "build" else k
+            refusals.append(f"{what} {have.get(k) or 'missing'} here, "
                             f"{want.get(k) or 'missing'} on the coordinator"
                             f": every rank runs the same build")
+            if k == "mlx":
+                break           # the build names mlx too; say it once
     rank, world = spec["rank"], spec["world"]
     try:
         sh = (shape or shape_of)(path, world, spec["split"])

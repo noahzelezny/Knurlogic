@@ -32,7 +32,8 @@ from knurlogic.machine import identity
 GIB = 1 << 30
 HERE = Path(__file__).resolve().parent
 SRC = str(HERE.parent / "src")
-VERSIONS = {"knurlogic": "0.1.0.dev0", "mlx": "0.31.2"}
+VERSIONS = {"knurlogic": "0.1.0.dev0", "mlx": "0.31.2",
+            "build": "0123456789ab+mlx0.31.2"}
 
 
 def info(chip, tb, ws=64 * GIB, rdma=None):
@@ -200,6 +201,48 @@ def test_prepare_accepts_and_remembers(cache):
 def test_prepare_refuses_with_its_reason(cache, change, why):
     code, doc = prep(spec(**change))
     assert code == 200 and not doc["ok"] and why in doc["refused"]
+
+
+def test_prepare_refuses_another_build_of_the_same_version(cache):
+    other = dict(VERSIONS, build="ba9876543210+mlx0.31.2")
+    code, doc = prep(spec(versions=other))
+    assert code == 200 and not doc["ok"]
+    # both fingerprints, so the person sees which side is stale
+    assert VERSIONS["build"] in doc["refused"]
+    assert other["build"] in doc["refused"]
+    code, doc = prep(spec(versions={k: v for k, v in VERSIONS.items()
+                                    if k != "build"}))
+    assert not doc["ok"] and "build" in doc["refused"]
+
+
+def test_build_fingerprint_hashes_the_source_and_names_mlx(tmp_path,
+                                                          monkeypatch):
+    pkg = tmp_path / "pkg"
+    (pkg / "sub").mkdir(parents=True)
+    (pkg / "a.py").write_text("x = 1\n")
+    (pkg / "sub" / "b.py").write_text("y = 2\n")
+    monkeypatch.setattr(C, "_mlx_version", lambda: "0.31.2")
+    one = C.build_fingerprint(root=pkg, cache={})
+    assert one == C.build_fingerprint(root=pkg, cache={})
+    assert one.endswith("+mlx0.31.2")
+    (pkg / "sub" / "b.py").write_text("y = 3\n")
+    assert C.build_fingerprint(root=pkg, cache={}) != one
+    # cached per process: a second call does not re-read
+    memo = {}
+    first = C.build_fingerprint(root=pkg, cache=memo)
+    (pkg / "a.py").write_text("x = 9\n")
+    assert C.build_fingerprint(root=pkg, cache=memo) == first
+
+
+def test_the_cluster_block_carries_the_build(monkeypatch):
+    monkeypatch.setattr(C, "_INFO", {"doc": None, "at": 0.0})
+    monkeypatch.setattr(C, "_chip", lambda: "Apple M4 Max")
+    monkeypatch.setattr(C, "_selfheal", lambda: False)
+    monkeypatch.setattr(links, "thunderbolt", lambda: [])
+    monkeypatch.setattr(links, "rdma", lambda: {"available": False})
+    v = C.node_info(0)["versions"]
+    assert v["build"] == C.build_fingerprint()
+    assert v["build"].endswith("+mlx" + (v["mlx"] or "none"))
 
 
 def test_prepare_refuses_a_share_that_does_not_fit_here(cache):
