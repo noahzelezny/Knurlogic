@@ -810,3 +810,235 @@ def test_jaccl_without_an_rdma_subnet_is_refused_not_rerouted(cache,
     assert "refused" in out and "no Thunderbolt subnet" in out["refused"]
     assert "rdma_en4" in out["refused"] and "rdma_en7" in out["refused"]
     assert C._rdma_device(ia, ib) is None
+
+
+# --- one machine never holds two jobs' shares (the M3 OOM, 2026-09-27) ------
+# A 397B pipeline job's rank 1 held 49.5 GiB on the M3 (84 GiB working
+# set) when a second job's rank 1 started loading the same share beside it:
+# Metal wedged and the Mac rebooted, and the M4's rank 0 sat idle in a
+# collective for three hours with nobody to tear it down.
+
+def test_prepare_refuses_a_share_beside_what_another_job_holds(cache):
+    big = dict(SHAPE, tensor_per_rank_bytes=50 * GIB)
+    ws = info("Apple M3 Ultra", "10.0.0.2", ws=84 * GIB)
+    held = [("job 41648583878fcdfc rank 1", 54699, int(49.5 * GIB))]
+    code, doc = C.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
+                          shape=lambda p, w, s: big, registry=lambda: {},
+                          held=lambda job: held)
+    assert not doc["ok"], doc
+    r = doc["refused"]
+    assert "50.0 GiB" in r and "84.0 GiB" in r and "49.5 GiB of it held now" in r
+    assert "pid 54699" in r and "41648583878fcdfc" in r
+    code, doc = C.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
+                          shape=lambda p, w, s: big, registry=lambda: {},
+                          held=lambda job: [])
+    assert doc["ok"], doc
+    C.PREPARED.clear()
+
+
+def test_what_is_held_counts_live_ranks_and_servers_not_the_stopping(
+        cache, monkeypatch):
+    from knurlogic.machine import servers
+    monkeypatch.setattr(C, "_alive", lambda job, pid: pid != 4)
+    monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
+    reg = {"aaaa0000/1": {"job": "aaaa0000", "rank": 1, "pid": 1},
+           "bbbb0000/0": {"job": "bbbb0000", "rank": 0, "pid": 2,
+                          "stopping": 1.0},
+           "cccc0000/1": {"job": "cccc0000", "rank": 1, "pid": 3},
+           "dddd0000/1": {"job": "dddd0000", "rank": 1, "pid": 4}}
+    sreg = {8080: {"pid": 5}, 8081: {"pid": 1, "job": "aaaa0000"}}
+    got = C.held_here("cccc0000", reg=reg, sreg=sreg,
+                      rss=lambda pid: pid * GIB)
+    assert sorted(p for _, p, _ in got) == [1, 5]
+    assert ("the server on port 8080", 5, 5 * GIB) in got
+
+
+def test_prepare_refuses_while_another_jobs_rank_is_loading(cache):
+    other = "0123456789abcdef"
+    reg = {f"{other}/1": {"job": other, "rank": 1, "pid": 1}}
+    J._write(J.marker_path(other, 1), {"phase": "loading"})
+    code, doc = C.prepare(spec(), resolve=lambda i: "/m/x",
+                          info=info("Apple M3 Ultra", "10.0.0.2"),
+                          shape=lambda p, w, s: SHAPE, registry=lambda: reg,
+                          held=lambda job: [])
+    assert not doc["ok"] and "one load at a time" in doc["refused"]
+    J._write(J.marker_path(other, 1), {"phase": "ready"})
+    code, doc = C.prepare(spec(), resolve=lambda i: "/m/x",
+                          info=info("Apple M3 Ultra", "10.0.0.2"),
+                          shape=lambda p, w, s: SHAPE, registry=lambda: reg,
+                          held=lambda job: [])
+    assert doc["ok"], doc
+    C.PREPARED.clear()
+
+
+SLOW = ("import signal, sys, time\n"
+        "def bye(*a):\n"
+        "    time.sleep(float(sys.argv[1]))\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, bye)\n"
+        "print('up', flush=True)\n"
+        "time.sleep(120)\n")
+
+
+def slow_rank(job, rank, exit_s):
+    """A fake rank that takes `exit_s` to go after SIGTERM (a rank giving
+    back 50 GiB of Metal memory), registered as this page's."""
+    p = subprocess.Popen([sys.executable, "-c", SLOW, str(exit_s),
+                          "--job", job], stdout=subprocess.PIPE, text=True)
+    assert p.stdout.readline().strip() == "up"
+    C._PROCS[(job, rank)] = p
+    reg = J.registry()
+    reg[f"{job}/{rank}"] = {"job": job, "rank": rank, "world": 2,
+                            "pid": p.pid, "machines": ["A", "B"],
+                            "t": time.time()}
+    J.save_registry(reg)
+    return p
+
+
+def test_stop_then_immediately_launch_waits_for_the_old_rank_to_be_gone(
+        cache, monkeypatch):
+    """The smoke test's sequence: stop a job and launch the next at once.
+    The old rank takes a while to exit; the new rank must not be spawned
+    (nor the old job reported stopped) while it is still there."""
+    monkeypatch.setattr(C, "_local_info",
+                        lambda: info("Apple M3 Ultra", "10.0.0.2"))
+    old, new = "41648583878fcdfc", "db0cb292aefeba55"
+    p = slow_rank(old, 1, 1.5)
+    stopper = threading.Thread(
+        target=lambda: C.stop(old, propagate=False, grace=5), daemon=True)
+    stopper.start()
+    assert wait(lambda: J.registry().get(f"{old}/1", {}).get("stopping"), 5)
+    # while it exits: "stopping", never "stopped", and its memory is not
+    # counted as staying (start waits for it instead)
+    doc = {d["job"]: d for d in C.jobs_document()}
+    assert doc[old]["phase"] == "stopping" and doc[old]["exiting"] == [p.pid]
+    code, got = prep(spec(job=new))
+    assert got["ok"], got
+    seen = {}
+
+    def spawn(cmd, **kw):
+        seen["old_alive"] = p.poll() is None and alive(p.pid)
+        return subprocess.Popen([sys.executable, "-c",
+                                 "import time; time.sleep(60)",
+                                 "--job", new], **kw)
+    code, out = C.start(new, spawn=spawn)
+    assert code == 200, out
+    assert seen == {"old_alive": False}
+    stopper.join(10)
+    assert [d["phase"] for d in C.jobs_document() if d["job"] == old] \
+        == ["stopped"]
+    C.stop(new, propagate=False, grace=1)
+    C.ENDED.clear()
+
+
+def test_start_refuses_when_a_stopped_rank_will_not_go(cache, monkeypatch):
+    monkeypatch.setattr(C, "_local_info",
+                        lambda: info("Apple M3 Ultra", "10.0.0.2"))
+    old, new = "41648583878fcdfc", "db0cb292aefeba55"
+    p = slow_rank(old, 1, 60)
+    reg = J.registry()
+    reg[f"{old}/1"]["stopping"] = time.time()
+    J.save_registry(reg)
+    code, got = prep(spec(job=new))
+    assert got["ok"], got
+    spawned = []
+    code, out = C.start(new, spawn=lambda *a, **k: spawned.append(a),
+                        wait_s=0.5)
+    assert code == 409 and not spawned
+    assert f"pid {p.pid}" in out["error"] and "still exiting" in out["error"]
+    p.kill()
+    p.wait()
+    C._PROCS.clear()
+    J.save_registry({})
+
+
+def test_a_stop_whose_rank_outlives_the_reap_is_finished_by_the_watcher(
+        cache, monkeypatch):
+    job = "41648583878fcdfc"
+    monkeypatch.setattr(C, "_peer_pages", lambda: {})
+    p = slow_rank(job, 1, 3)
+    out = C.stop(job, propagate=False, grace=0.2, reap=0.1)
+    # SIGKILL takes a Popen at once; a slow reaper is modelled by the
+    # record: still exiting means still recorded, and not "stopped"
+    if out["exiting"]:
+        assert [d["phase"] for d in C.jobs_document()] == ["stopping"]
+        assert wait(lambda: not alive(p.pid), 10)
+        C.watch_once()
+    assert J.registry() == {}
+    assert [d["phase"] for d in C.jobs_document()] == ["stopped"]
+    C.ENDED.clear()
+
+
+# --- a peer that vanishes takes the job with it ------------------------------
+
+def test_peer_verdict_counts_an_unreachable_page_for_peer_gone_s(
+        monkeypatch):
+    monkeypatch.setattr(C, "_PEER_OK", {})
+    job = "ab12cd34ef567890"
+    recs = [{"job": job, "rank": 0, "pid": 1, "t": 0.0,
+             "nodes": [{"rank": 0, "id": "a", "name": "M4"},
+                       {"rank": 1, "id": "b", "name": "M3"}]}]
+
+    def down(page, j):
+        raise OSError("no route to host")
+    kw = dict(pages={"b": "10.0.0.1:8765"}, me="a")
+    assert C.peer_verdict(job, recs, now=100, ask=down, **kw) == ""
+    assert C.peer_verdict(job, recs, now=110, ask=down, **kw) == ""
+    why = C.peer_verdict(job, recs, now=100 + J.PEER_GONE_S, ask=down, **kw)
+    assert "M3's page has not answered" in why and "20 s" in why
+    # an answer with the rank running resets the clock
+    up = (lambda page, j: {"ranks_here": [1]})
+    assert C.peer_verdict(job, recs, now=130, ask=up, **kw) == ""
+    assert C.peer_verdict(job, recs, now=145, ask=down, **kw) == ""
+    # answering without the rank counts the same as not answering
+    gone = (lambda page, j: {"ranks_here": [], "prepared": False})
+    assert "no longer runs its rank" in C.peer_verdict(
+        job, recs, now=151, ask=gone, **kw)
+    # a page that says the job ended there: at once, with its reason
+    ended = (lambda page, j: {"ranks_here": [], "ended": "rank 1 exited"})
+    assert C.peer_verdict(job, recs, now=131, ask=ended, **kw) \
+        == "M3 stopped the job: rank 1 exited"
+    # a peer this page no longer knows is unreachable too
+    monkeypatch.setattr(C, "_PEER_OK", {})
+    assert C.peer_verdict(job, recs, now=0, ask=up, pages={}, me="a") == ""
+    assert "M3" in C.peer_verdict(job, recs, now=J.PEER_GONE_S, ask=up,
+                                  pages={}, me="a")
+
+
+def test_the_job_route_says_what_this_page_runs(two_pages):
+    p = two_pages
+    code, doc = C.peer_route(C.JOB_PATH, json.dumps({"job": p.job}).encode())
+    assert code == 200 and doc["ranks_here"] == [0] and not doc["ended"]
+    code, doc = C.peer_route(C.JOB_PATH, b'{"job": "../x"}')
+    assert code == 400
+
+
+def test_a_vanished_peer_page_has_the_idle_rank_0_torn_down(
+        two_pages, monkeypatch):
+    """The M3 rebooted; the M4's rank 0 was idle in a collective, so no
+    stall verdict, and its page watched only its own ranks. Now it watches
+    the job's other pages too."""
+    p = two_pages
+    monkeypatch.setattr(J, "PEER_GONE_S", 1.0)
+    assert C.watch_once() == []                 # B answers: healthy
+    p.page_b.kill()                             # B's page is gone
+    p.page_b.wait()
+    assert C.watch_once() == []                 # the clock starts
+    time.sleep(1.2)
+    stopped = C.watch_once()
+    assert stopped and stopped[0][0] == p.job
+    assert "B's page has not answered" in stopped[0][1]
+    assert not alive(p.rank0["pid"])
+    ended = [d for d in C.jobs_document() if d["job"] == p.job]
+    assert ended and ended[0]["phase"] == "stopped"
+
+
+def test_a_peer_page_that_stopped_the_job_has_this_one_stop_too(
+        two_pages, monkeypatch):
+    """B's page (in its own process) watches A's: A forgetting the job
+    without telling B is caught from B's side."""
+    p = two_pages
+    monkeypatch.setattr(J, "PEER_GONE_S", 0.5)
+    # A drops its ranks without propagating: B must notice by itself
+    C.stop(p.job, reason="rank 0 on A exited", propagate=False, grace=1)
+    assert wait(lambda: not alive(p.rank1["pid"]), 30)

@@ -38,6 +38,13 @@ STALL_S = 120.0
 JOIN_S = 300.0
 #: SIGTERM, then this long, then SIGKILL
 GRACE_S = 10.0
+#: after the SIGKILL, this long for the process to be gone: a rank holding
+#: 50 GiB of Metal memory takes seconds to give it back, and a job is not
+#: stopped -- nor its memory free -- until its pid is
+REAP_S = 30.0
+#: a peer page of a job unreachable (or not running its rank) this long:
+#: the job is gone, and this page's ranks go too
+PEER_GONE_S = 20.0
 #: the self-heal deadline set after load, when the fork is present
 JACCL_TIMEOUT_MS = 60000
 #: a job id: what the coordinator mints; nothing else is a path part
@@ -175,6 +182,8 @@ class Watch:
         says whether that rank's process is still there."""
         now = time.time() if now is None else now
         for r in ranks:
+            if r.get("stopping"):
+                continue                  # being torn down already
             rank = int(r["rank"])
             ms = r.get("machines") or []
             who = r.get("machine") or (ms[rank] if rank < len(ms)
@@ -259,8 +268,10 @@ def is_rank(pid: int, job: str) -> bool:
     return f"--job {job}" in out or f"--job={job}" in out
 
 
-def terminate(pids: list, grace: float = GRACE_S, alive=None) -> list:
-    """SIGTERM every pid, wait up to `grace`, SIGKILL what is left.
+def terminate(pids: list, grace: float = GRACE_S, alive=None,
+              reap: float = 0.0) -> list:
+    """SIGTERM every pid, wait up to `grace`, SIGKILL what is left, then
+    up to `reap` for the killed to be gone (wait_gone says which are not).
     -> the pids that needed the SIGKILL."""
     import signal
     alive = alive or _pid_alive
@@ -280,7 +291,35 @@ def terminate(pids: list, grace: float = GRACE_S, alive=None) -> list:
                 killed.append(pid)
             except OSError:
                 pass
+    if killed and reap > 0:
+        wait_gone(killed, reap, alive)
     return killed
+
+
+def wait_gone(pids: list, timeout: float, alive=None,
+              every: float = 0.1) -> list:
+    """Wait up to `timeout` for every pid to be gone. -> the ones still
+    there."""
+    alive = alive or _pid_alive
+    end = time.time() + timeout
+    left = [p for p in pids if alive(p)]
+    while left and time.time() < end:
+        time.sleep(every)
+        left = [p for p in left if alive(p)]
+    return left
+
+
+def rss_bytes(pid: int) -> int:
+    """A process's resident size (on Apple silicon its Metal buffers are in
+    it: a loaded 397B share reads ~50 GiB); 0 when it is gone."""
+    import subprocess
+    try:
+        out = subprocess.run(["ps", "-o", "rss=", "-p", str(int(pid))],
+                             capture_output=True, text=True,
+                             timeout=5).stdout.strip()
+        return int(out) * 1024 if out.isdigit() else 0
+    except Exception:
+        return 0
 
 
 def _pid_alive(pid: int) -> bool:
