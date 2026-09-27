@@ -123,6 +123,21 @@ def _cache_nbytes(cache) -> int:
     return n
 
 
+def _fixed_nbytes(cache) -> int:
+    """The bytes of a row's cache that do not grow with its length: the
+    layers that cannot trim (a hybrid's linear-attention / recurrent state).
+    A layer that does not say is counted as growing -- the safe side."""
+    n = 0
+    for c in cache or ():
+        try:
+            t = getattr(c, "is_trimmable", None)
+            if callable(t) and not t():
+                n += int(getattr(c, "nbytes", 0) or 0)
+        except Exception:
+            pass
+    return n
+
+
 @dataclass
 class Job:
     """One request as the scheduler takes it."""
@@ -759,6 +774,7 @@ class Scheduler:
             return
         b = _cache_nbytes(cache)
         s = self._samples
+        s["fixed"] = max(s.get("fixed", 0), min(_fixed_nbytes(cache), b))
         if "lo" not in s or n < s["lo"][0]:
             s["lo"] = (n, b)
         if "hi" not in s or n > s["hi"][0]:
@@ -768,7 +784,12 @@ class Scheduler:
             slope = (b1 - b0) / (n1 - n0)
             self._kv = (max(b0 - slope * n0, 0.0), slope)
         else:
-            self._kv = (0.0, b1 / n1)
+            # one length: what cannot grow (a hybrid's recurrent state) is
+            # fixed, the rest per token. Charging a Flash's 34 deltanet
+            # layers to every token of short runs priced a 24k prompt at
+            # 3.4 GiB (0.85 measured) and refused it (M4, 2026-09-27)
+            f = float(s.get("fixed", 0))
+            self._kv = (f, max(b1 - f, 0) / n1)
 
     def _cost(self, n_tokens: int, copies: int) -> int:
         fixed, per = self._kv
@@ -793,7 +814,13 @@ class Scheduler:
             return True, 0, 0
         need = self._cost(n_tokens, copies)
         room = limit - self._active()
-        if need > room and self.cache is not None and self.cache.nbytes:
+        held = self.cache.nbytes if self.cache is not None else 0
+        if need > room + held:
+            # not even an empty prompt cache would make it fit: evicting
+            # for it only threw away the entries a lean admission (or the
+            # next request) could have hit
+            return False, need, room
+        if need > room and held:
             before = self.cache.nbytes
             self.cache.trim_to(max(before - (need - room), 0))
             self._release()
