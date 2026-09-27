@@ -286,12 +286,12 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
 
 
 def test_the_step_margin_is_measured_not_published():
-    """A guess until a step has run; then the largest spike measured, with
-    a quarter again -- per model, since a prefill chunk's transient depends
-    on the family's attention."""
+    """The largest spike measured, with a quarter again -- never below 5%
+    of the working set: a spike learned on short contexts under-reads a
+    longer one (GLM-5.3 aborted Metal at a 3.2 GiB learned margin)."""
     from knurlogic.engine.runtime.scheduler import GIB, Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
-    assert s._margin() == 6 * GIB                 # the guess: 5%
+    assert s._margin() == 6 * GIB                 # the floor: 5%
     peak = {"v": 0}
     s._active = lambda: 100 * GIB
     import mlx.core as mx
@@ -300,11 +300,13 @@ def test_the_step_margin_is_measured_not_published():
         mx.get_peak_memory = lambda: peak["v"]
         peak["v"] = 102 * GIB
         s._measure(100 * GIB)
-        assert s._margin() == int(2.5 * GIB)       # 2 GiB spike x 1.25
+        assert s._margin() == 6 * GIB              # 2.5 GiB is under it
+        peak["v"] = 108 * GIB
+        s._measure(100 * GIB)
+        assert s._margin() == 10 * GIB             # 8 GiB spike x 1.25
         peak["v"] = 101 * GIB                      # a smaller one: kept max
         s._measure(100 * GIB)
-        assert s._margin() == int(2.5 * GIB)
-        assert s._limit() == 120 * GIB - int(2.5 * GIB)
+        assert s._limit() == 110 * GIB
     finally:
         mx.get_peak_memory = real
 
