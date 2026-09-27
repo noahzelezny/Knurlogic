@@ -457,7 +457,13 @@ RANK_ARGV = [rank_argv]
 
 
 def rank_env(spec: dict, files: dict, selfheal: bool) -> dict:
-    env = {"PYTHONUNBUFFERED": "1", "MLX_RANK": str(spec["rank"])}
+    # MLX_METAL_FAST_SYNCH: the GPU hands each collective to the CPU (and
+    # takes it back) by a spinning shared event, not a command-buffer
+    # completion. Measured M4 + M3 Ultra over Thunderbolt, 35B-A3B VQ split
+    # two ways, one decode step (80 all_sums): jaccl 71 -> 18.5 ms, ring
+    # 94 -> 25 ms. exo sets it for every runner.
+    env = {"PYTHONUNBUFFERED": "1", "MLX_RANK": str(spec["rank"]),
+           "MLX_METAL_FAST_SYNCH": "1"}
     if spec["link"] == "ring":
         env["MLX_HOSTFILE"] = files["hostfile"]
     else:
