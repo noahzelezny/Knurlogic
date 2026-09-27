@@ -166,6 +166,13 @@ def _status_fn(_n=0):
         snaps.append({**exo_witness._snapshot_for(
             n, local, peer_port=_SERVE_PORT["ui"]),
             "found_by": ["exo"]})
+    # what a coordinator page needs of this machine to place a rank on it
+    try:
+        from knurlogic.interfaces import cluster_jobs
+        snaps[0]["cluster"] = cluster_jobs.node_info(
+            (snaps[0].get("memory") or {}).get("working_set_bytes") or 0)
+    except Exception as e:
+        snaps[0]["cluster"] = {"error": f"{type(e).__name__}: {e}"}
     snap = status.aggregate(snaps)
     snap["wired"] = wired.advise(0)
     # Who this machine is, and -- measured by the peers, since this machine
@@ -352,6 +359,11 @@ def _stop(port: int) -> dict:
     if not rec:
         return {"error": f"knurlogic has no record of a server on port "
                          f"{port}; it stops only what it started"}
+    if rec.get("job"):
+        # rank 0 of a cluster job: the job stops, on every machine
+        from knurlogic.interfaces import cluster_jobs
+        out = cluster_jobs.stop(rec["job"], reason="unloaded")
+        return {**out, "stopped": rec.get("artifact"), "port": port}
     pid = int(rec["pid"])
     if not is_our_server(pid):
         reg.pop(port, None)
@@ -386,9 +398,24 @@ def _load_fn(serve_port: int):
         if not isinstance(req, dict):
             req = {}
         act = req.get("action")
+        nodes = req.get("nodes")
+        if act == "load" and isinstance(nodes, list) and len(nodes) >= 2:
+            return cluster_launch(req, serve_port)
+        if act == "load" and isinstance(nodes, list) and len(nodes) == 1:
+            req = {k: v for k, v in req.items()
+                   if k not in ("nodes", "split", "link")}
+            req["node"] = nodes[0]
+        if act == "unload" and req.get("job"):
+            from knurlogic.interfaces import cluster_jobs
+            return cluster_jobs.stop(str(req["job"]), reason="unloaded")
         node = req.get("node")
         if node and node != identity.identity().get("id"):
             return forward_launch(req)
+        if node:
+            # this machine, picked by id: the page's own load, by identity
+            from knurlogic.machine.artifact import resolve_identity
+            req = dict(req, target=req.get("target") or resolve_identity(
+                req.get("identity")) or "")
         target, where = req.get("target") or "", req.get("where") or ""
         try:
             # Through the MCP's own functions: the page refuses what an agent
@@ -538,6 +565,25 @@ def forward_launch(req: dict, post=None) -> dict:
     out = clean(out)
     out["machine"] = who
     return out
+
+
+def cluster_launch(req: dict, serve_port: int) -> dict:
+    """POST /loaded.json {action: load, identity, nodes: [>= 2 ids],
+    split, link}: this page coordinates (interfaces/cluster_jobs.py)."""
+    from knurlogic.interfaces import cluster_jobs
+    if any(k in req for k in PATH_KEYS if k != "target") or req.get("target"):
+        return {"error": "a model across machines is named by its "
+                         "identity, never by a path"}
+    link = {"tcp": "ring", "rdma": "jaccl"}.get(req.get("link"),
+                                                req.get("link"))
+    snap, _ = _status_fn()
+    own = next((n for n in snap.get("nodes") or []
+                if n.get("role") in ("local", "server")), {})
+    return cluster_jobs.launch(
+        dict(req, link=link), me=identity.identity(),
+        peers=PEERS.all() if PEERS else [],
+        local_info=own.get("cluster") or cluster_jobs.node_info(),
+        ui_port=_SERVE_PORT["ui"], serve_port=serve_port)
 
 
 def clean(doc):
@@ -720,16 +766,36 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
     return res
 
 
+def with_jobs(doc: dict) -> dict:
+    """/loaded.json plus the cluster jobs with a rank here (`jobs`), and
+    rank 0's resident row marked with its job, so the job is listed once,
+    on its leader, with its machines."""
+    try:
+        from knurlogic.interfaces import cluster_jobs
+        js = cluster_jobs.jobs_document()
+    except Exception:
+        js = []
+    ports = {j["port"]: j for j in js if j.get("port")}
+    rows = []
+    for r in doc.get("resident") or []:
+        u = urlparse((r.get("where") or "") if isinstance(r, dict) else "")
+        j = ports.get(u.port) if u.port else None
+        rows.append(dict(r, cluster={k: j.get(k) for k in (
+            "job", "split", "link", "machines", "leader", "phase")})
+                    if j else r)
+    return dict(doc, resident=rows, jobs=js)
+
+
 def _loaded_fn():
     """/loaded.json as `web` answers it for this box; with ?peers=1 (what the
     page asks) it also carries `peers`: each other machine's residency."""
     local = web.loaded_document()
 
     def handler(q: dict) -> dict:
-        doc = local(q)
+        # a copy: the local document is cached and shared between requests
+        doc = with_jobs(local(q))
         if not (q.get("peers") or [""])[0]:
             return doc
-        # a copy: the local document is cached and shared between requests
         return dict(doc, peers=peer_residency(PEERS))
     return handler
 
@@ -1132,9 +1198,11 @@ def _start_discovery(me: dict, host: str, port: int, reachable: bool):
 
 
 def make_handler(routes: dict, gate=None, allow_origins=(),
-                 allow_hosts=()):
+                 allow_hosts=(), gate_for_peers=None):
     """The page's request handler: its routes, the router, the proxies, and
-    the guards in front of every one of them."""
+    the guards in front of every one of them. `gate_for_peers`: the
+    /peer/ gate's link check (default cluster/links.Gate; tests pass
+    their own)."""
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -1195,6 +1263,10 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             u = urlparse(self.path)
             if u.path.rstrip("/") == PEER_LOAD_PATH:
                 self._peer_load()
+                return
+            from knurlogic.interfaces import cluster_jobs
+            if u.path.rstrip("/") in cluster_jobs.PEER_PATHS:
+                self._peer_cluster(u.path.rstrip("/"))
                 return
             if u.path.startswith(PEER_RELAY + "/v1/"):
                 self._peer_relay("POST", u.path)
@@ -1269,6 +1341,32 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             peer_relay(self, method,
                        path[len(PEER_RELAY):].rstrip("/"), body)
 
+        def _peer_cluster(self, path: str):
+            """/peer/cluster/*: the same gate as PEER_LOAD_PATH."""
+            from knurlogic.interfaces import cluster_jobs
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if not 0 <= n <= cluster_jobs.PEER_MAX:
+                self.close_connection = True
+                _send_json(self, 413, {"error": "a cluster request is small"})
+                return
+            manual = [p.host for p in (PEERS.all() if PEERS else [])
+                      if "manual" in p.found_by]
+            refused = peer_refusal(
+                self.headers, self.client_address[0],
+                self.connection.getsockname()[0], gate=gate_for_peers,
+                manual_hosts=manual, what="cluster requests")
+            body = self.rfile.read(n) if n else b""
+            if refused:
+                self.close_connection = True
+                _send_json(self, *refused)
+                return
+            code, doc = cluster_jobs.peer_route(path, body)
+            web._LOADED["doc"] = None
+            _send_json(self, code, doc)
+
         def _peer_load(self):
             """PEER_LOAD_PATH: its own checks (peer_launch), not the
             browser guard's -- it refuses ANY Origin, and its gate is
@@ -1323,6 +1421,8 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
         web.set_allowance(body))
 
     H = make_handler(routes, gate, allow_origins, allow_hosts)
+    from knurlogic.interfaces import cluster_jobs
+    cluster_jobs.start_watching_existing()
 
     srv = ThreadingHTTPServer((bind, port), H)
     if gate:
@@ -1344,6 +1444,10 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
         # registry an MCP session reads does not keep a dead entry.
         for port in list(_CHILDREN):
             _stop(port)
+        # and the cluster ranks it started, on every machine of their job
+        from knurlogic.interfaces import cluster_jobs
+        for job in list(cluster_jobs.SPECS):
+            cluster_jobs.stop(job, reason="the page that started it closed")
     return 0
 
 
