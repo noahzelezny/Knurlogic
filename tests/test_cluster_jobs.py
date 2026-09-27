@@ -62,7 +62,7 @@ def test_placement_leader_is_the_newest_chip_and_it_is_deterministic():
 
 def test_pipeline_placement_gives_rank_0_the_last_layers():
     ms = [{"name": "A", **info("Apple M4 Max", "10.0.0.1", ws=20 * GIB)},
-          {"name": "B", **info("Apple M3 Ultra", "10.0.0.2", ws=5 * GIB)}]
+          {"name": "B", **info("Apple M3 Ultra", "10.0.0.2", ws=9 * GIB)}]
     p = C.placement(ms, SHAPE, "pipeline")
     assert p["order"] == ["A", "B"] and sum(p["layers"]) == 8
     assert p["shares"][0]["bounds"][1] == 8          # rank 0 ends the model
@@ -75,6 +75,27 @@ def test_placement_refuses_a_share_that_does_not_fit():
           {"name": "B", **info("Apple M3 Ultra", "10.0.0.2")}]
     with pytest.raises(ValueError, match="A: its tensor share"):
         C.placement(ms, SHAPE, "tensor")
+
+
+def test_placement_leaves_the_step_margin():
+    """A share that fits the working set but not its step margin (5%, at
+    least 4 GiB) is refused; the reason says what each rank leaves."""
+    ms = [{"name": "A", **info("Apple M4 Max", "10.0.0.1", ws=7 * GIB)},
+          {"name": "B", **info("Apple M3 Ultra", "10.0.0.2")}]
+    with pytest.raises(ValueError, match="4.0 GiB step margin"):
+        C.placement(ms, SHAPE, "tensor")              # 4 of 7 GiB: 3 left
+    ms[0]["working_set_bytes"] = 8 * GIB
+    t = C.placement(ms, SHAPE, "tensor")
+    assert "A leaves 4.0 GiB" in t["reason"]
+    # pipeline: 8 x 1 GiB layers + 1 GiB each; after the 4 GiB margins
+    # 12 and 6 GiB hold 7 and 1 layers (the bare working sets would 11 + 5)
+    ms = [{"name": "A", **info("Apple M4 Max", "10.0.0.1", ws=12 * GIB)},
+          {"name": "B", **info("Apple M3 Ultra", "10.0.0.2", ws=6 * GIB)}]
+    p = C.placement(ms, SHAPE, "pipeline")
+    assert p["layers"] == [7, 1]
+    assert all(s["bytes"] <= m - 4 * GIB for s, m in
+               zip(p["shares"], [12 * GIB, 6 * GIB]))
+    assert "leaves 4.0 GiB" in p["reason"]
 
 
 def test_ring_ips_pick_the_shared_thunderbolt_subnet():
@@ -252,6 +273,14 @@ def test_prepare_refuses_a_share_that_does_not_fit_here(cache):
     s = spec(split="pipeline", layers=[2, 6])        # rank 1: layers 0..5
     code, doc = prep(s, info=info("Apple M3 Ultra", "10.0.0.2", ws=6 * GIB))
     assert not doc["ok"] and "7.0 GiB" in doc["refused"]
+    # fits the working set, not the step margin: 4 GiB in 7 leaves 3
+    code, doc = prep(spec(), info=info("Apple M3 Ultra", "10.0.0.2",
+                                       ws=7 * GIB))
+    assert not doc["ok"] and "4.0 GiB step margin" in doc["refused"]
+    code, doc = prep(spec(), info=info("Apple M3 Ultra", "10.0.0.2",
+                                       ws=8 * GIB))
+    assert doc["ok"], doc
+    C.PREPARED.clear()
 
 
 def test_prepare_says_not_on_and_rejects_bad_shapes(cache):
