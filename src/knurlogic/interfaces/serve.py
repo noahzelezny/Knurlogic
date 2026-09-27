@@ -37,6 +37,18 @@ from knurlogic.tuning.resolve import resolve
 GIB = 1 << 30
 
 
+def pipeline_share_bytes(per: list, other: int, rank: int, world: int,
+                         counts=None) -> int:
+    """What pipeline rank `rank` holds: its layers (rank 0 the LAST
+    `counts[0]`, as cluster_jobs.prepare places them) plus what every rank
+    holds. Counts not given yet (the resolver's split is made once the ring
+    is up): an even share of the layers."""
+    if counts:
+        start = sum(counts[rank + 1:])
+        return sum(per[start:start + counts[rank]]) + int(other)
+    return -(-sum(per) // max(world, 1)) + int(other)
+
+
 def run(path: str, host: str, port: int, working_set_gib: float,
         profile: str | None, tune: str = "balanced",
         overrides: dict | None = None, draft: bool = True,
@@ -60,6 +72,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
 
     ring = ring or {}
     world = int(ring.get("world") or 1)
+    share = None
     if world > 1:
         why = _ring_refusals(a, ring, working_set_gib, overrides or {})
         if why:
@@ -78,6 +91,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                 "layer_bytes": per, "other_bytes": other,
                 "working_set": int(working_set_gib * GIB),
                 "bandwidth_gbs": bw, "counts": ring.get("layers") or None}
+            share = pipeline_share_bytes(per, other, int(ring["rank"]),
+                                         world, ring.get("layers") or None)
             print(f"pipeline  rank {ring['rank']} of {world} over "
                   f"{ring['link']}: {len(per)} layers, "
                   f"{sum(per) / GIB:.1f} GiB split by layer + "
@@ -86,6 +101,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         else:
             from knurlogic.tuning.resolve import tensor_placement
             pl = tensor_placement(a, world)
+            share = int(pl["per_rank_bytes"])
             print(f"tensor    rank {ring['rank']} of {world} over "
                   f"{ring['link']}: holds ~{pl['per_rank_bytes'] / GIB:.1f} "
                   f"GiB ({pl['sharded_bytes'] / GIB:.1f} split {world} ways "
@@ -112,7 +128,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     adv = wired.advise(a.bytes_on_disk)
     if adv.get("action") == "raise":
         print("\n" + wired.render(adv) + "\n")
-    r = resolve(a, ws, profile=profile, tune=tune)
+    # a rank holds its share, not the artifact: judged against the whole
+    # 115 GiB, every rank of a 397B split warned it "does not fit this box"
+    r = resolve(a, ws, profile=profile, tune=tune, holds_bytes=share)
     # An explicit --set WINS over the resolver. Most of these knobs are read
     # at import and compiled into kernel source, so startup is the only
     # moment they can be chosen at all -- which makes "the resolver decides
@@ -148,7 +166,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     rows = arch.check(a.model_type)
 
     def _resolve_for(ws_bytes, tune_name):
-        return resolve(a, ws_bytes, profile=profile, tune=tune_name)
+        return resolve(a, ws_bytes, profile=profile, tune=tune_name,
+                       holds_bytes=share)
 
     # `top` plus `ps` costs about a third of a second, and the page polls
     # status every two. Cached just long enough that a poll is free and a

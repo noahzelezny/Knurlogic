@@ -254,3 +254,24 @@ def test_the_model_shape_may_tighten_but_not_loosen_yet():
     r = resolve(small, small.bytes_on_disk + headroom)
     assert int(r.env["VQ_DECODE_CHUNK"]) == frozen
     assert any("NOT taken" in n for n in r.notes)
+
+
+def test_a_rank_is_judged_on_its_share_not_the_whole_artifact():
+    """Each rank of a 397B pipeline split printed '114.9 GiB to hold
+    against a 84.0 GiB working set -- it does not fit this box' though its
+    share fit: the warning must be about what THIS box holds."""
+    a = _art(bytes_on_disk=115 * GIB)
+    assert any("does not fit" in w for w in resolve(a, 84 * GIB).warnings)
+    r = resolve(a, 84 * GIB, holds_bytes=50 * GIB)
+    assert not any("does not fit" in w for w in r.warnings)
+    r = resolve(a, 40 * GIB, holds_bytes=50 * GIB)
+    assert any("50.0 GiB to hold" in w for w in r.warnings)
+
+
+def test_a_pipeline_ranks_share_is_its_layers_plus_what_every_rank_holds():
+    from knurlogic.interfaces.serve import pipeline_share_bytes
+    per = [GIB] * 8
+    # rank 0 holds the LAST counts[0] layers, rank 1 the first counts[1]
+    assert pipeline_share_bytes(per, GIB, 0, 2, [6, 2]) == 7 * GIB
+    assert pipeline_share_bytes(per, GIB, 1, 2, [6, 2]) == 3 * GIB
+    assert pipeline_share_bytes(per, GIB, 1, 2, None) == 5 * GIB
