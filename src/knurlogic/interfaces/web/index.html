@@ -1554,13 +1554,60 @@ async function showMachine(m){
     <div class="mwired"><div class="msg">reading…</div></div>
     <div class="mallow"></div>
     ${own?'':'<div class="msg">Its wired limit and allowance are set on that machine\'s own page.</div>'}
+    <div class="mlaunch"></div>
   </div>`;
+  launchSection(el.querySelector('.mlaunch'), m, own);
   const doc=own ? DOC : await getJSON(peekURL(m.page,'/settings.json'));
   const row=el.querySelector(`[data-m="${CSS.escape(m.id)}"]`);
   if(seq!==SEQ || !row) return;
   row.querySelector('.mwired').innerHTML=wiredHTML(doc, own);
   row.querySelector('.mallow').innerHTML=allowHTML(doc&&doc.allowance, m, own);
   if(own) wireWired();
+}
+// Launches from another machine. On this machine's own page: accept or not
+// (off until turned on here) and the token another page needs. On a peer's
+// tab: where its token is pasted. The token never leaves this machine except
+// by a person copying it.
+async function launchSection(el, m, own){
+  if(!el) return;
+  const d=await getJSON('/launch.json');
+  const head='<div class="sidelab">launches from other machines</div>';
+  if(d.error){ el.innerHTML=`<div class="allow">${head}<div class="msg">${esc(d.error)}</div></div>`; return }
+  const post=async body=>{ await fetch('/launch.json',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    launchSection(el, m, own) };
+  if(own){
+    if(!('launch_token' in d)){ el.innerHTML=`<div class="allow">${head}<div class="msg">
+      shown only on this machine's own page (opened on this Mac)</div></div>`; return }
+    el.innerHTML=`<div class="allow">${head}
+      <label><input type="checkbox" class="lacc" ${d.accept_launches?'checked':''}>
+        accept launches from another machine's page</label>
+      <div class="msg">${d.accept_launches?'Another page loads here with this token:':
+        'Off. When on, another page loads here only with this token:'}</div>
+      <div><code class="ltok">${esc(d.launch_token)}</code>
+        <button class="mini lcopy">Copy</button>
+        <button class="mini lnew" title="every page that has the old token needs the new one">New token</button></div>
+      <div class="msg">Paste it on the other machine's page: Settings &gt; Cluster &gt; this machine.</div></div>`;
+    el.querySelector('.lacc').onchange=e=>post({accept:e.target.checked});
+    el.querySelector('.lnew').onclick=()=>post({regenerate:true});
+    el.querySelector('.lcopy').onclick=()=>navigator.clipboard&&
+      navigator.clipboard.writeText(d.launch_token);
+    return;
+  }
+  const peer=((window.RESIDENCY||{}).peers||[]).find(p=>p.address===m.id)||{};
+  if(!peer.id){ el.innerHTML=`<div class="allow">${head}<div class="msg">not answering</div></div>`; return }
+  const has=(d.peers_with_token||[]).includes(peer.id);
+  el.innerHTML=`<div class="allow">${head}
+    <div class="msg">${has?`This page has ${esc(m.name)}'s launch token: Launch with
+      ${esc(m.name)} picked loads there.`:`To launch on ${esc(m.name)}: on its own page,
+      Settings &gt; Cluster, turn on accepting launches and copy its token.`}</div>
+    <div><input class="ltokin" type="password" placeholder="${has?'replace token':'paste token'}"
+      autocomplete="off" spellcheck="false">
+      <button class="mini lsave">Save</button>
+      ${has?'<button class="mini lforget">Forget</button>':''}</div></div>`;
+  el.querySelector('.lsave').onclick=()=>{
+    const t=el.querySelector('.ltokin').value.trim(); if(t) post({peer:peer.id, token:t}) };
+  const f=el.querySelector('.lforget'); if(f) f.onclick=()=>post({peer:peer.id, token:''});
 }
 // Every base model: the picker's groups over what is on this disk, plus any
 // running on a peer that this disk does not have; the running ones first.
@@ -2124,8 +2171,9 @@ function renderPicker(){
   const shown=GROUPS.filter(g=>(FAM==='All'||g.fam===FAM) &&
     (!q || g.name.toLowerCase().includes(q) ||
      g.ms.some(m=>m.name.toLowerCase().includes(q))));
-  const fits=g=>!ws||g.lo<=ws;
-  const okm=m=>!ws||m.size_bytes<=ws;
+  const okm=m=>(!ws||m.size_bytes<=ws) && onPeer(m);
+  const fits=g=>g.ms.some(okm);
+  const pn=launchPeer();
   const rng=g=>g.ms.length===1 ? gb(g.hi)
     : `${g.ms.length} variants (${(g.lo/GIB).toFixed(0)}–${(g.hi/GIB).toFixed(0)} GiB)`;
   const grp=g=>`<div class="grp${fits(g)?'':' no'}" data-g="${esc(g.name)}">
@@ -2139,6 +2187,7 @@ function renderPicker(){
           <span class="star" data-fav="${esc(m.path)}"
             title="favorite">${isFav(m.path)?'★':'☆'}</span>
           <span class="vn">${esc(m.name)}</span>
+          ${onPeer(m)?'':`<span class="tag">not on ${esc(pn.node)}</span>`}
           ${m.is_vq?'<span class="tag">VQ</span>':''}
           ${m.mtp?'<span class="tag">MTP</span>':''}
           ${isVision(m)?'<span class="tag">VISION</span>':''}
@@ -2166,7 +2215,7 @@ function renderPicker(){
   $('prows').innerHTML=favHTML+
     (a.length?`<div class="sect">fits in ${esc(fitWhere())}</div>`
       +a.map(grp).join(''):'')
-    +(b.length?`<div class="sect no">needs more than ${gb(ws)}</div>`
+    +(b.length?`<div class="sect no">${pn?`not on ${esc(pn.node)}, or `:``}needs more than ${gb(ws)}</div>`
       +b.map(grp).join(''):'')
     || '<div class="sect no">nothing matches</div>';
 
@@ -2285,9 +2334,31 @@ function pickInfo(){
 }
 function launchBlock(ns){
   if(ns.length>1) return 'loading across machines comes after 0.1.0';
-  if(ns.length===1 && !isLocal(ns[0])) return `this page launches on its own
-    machine only; open ${ns[0].node}'s page to load there`;
+  if(ns.length===1 && !isLocal(ns[0])){
+    const n=ns[0];
+    if(!n.id || n.state!=='answering') return `${n.node} is not answering`;
+    if(SEL && !onPeer(SEL)) return `not on ${n.node}`;
+  }
   return '';
+}
+// --- one peer picked: Launch goes there -------------------------------------
+// The peer's own /models.json (read through /peek) says what it has, by
+// identity -- never by path; a model it does not have is greyed "not on".
+// The load itself goes to this page's POST /loaded.json with `node`, which
+// forwards it with the launch token pasted under Settings > Cluster.
+const PEERMODELS={};   // node id -> Set of identities, once read
+const launchPeer=()=>{ const ns=selNodes();
+  return ns.length===1 && !isLocal(ns[0]) ? ns[0] : null };
+function onPeer(m){
+  const n=launchPeer(); if(!n) return true;
+  const have=PEERMODELS[n.id]; return !have || have.has(m.identity);
+}
+async function loadPeerModels(){
+  const n=launchPeer(); if(!n || !n.address || PEERMODELS[n.id]) return;
+  const d=await getJSON(peekURL('http://'+n.address,'/models.json'));
+  if(d.error || !Array.isArray(d.models)) return;
+  PEERMODELS[n.id]=new Set(d.models.map(m=>m.identity).filter(Boolean));
+  pickInfo(); if(!$('picker').hidden) renderPicker();
 }
 // A pick changed what "fits" means: the rail and an open picker follow.
 // Sharding and interconnect for a multi-machine launch: page state only.
@@ -2299,6 +2370,7 @@ $('multiopts').querySelectorAll('.seg').forEach(g=>
   }));
 function nodeSelChanged(){
   $('multiopts').hidden=selNodes().length<2;
+  loadPeerModels();
   pickInfo();
   if(!$('picker').hidden) renderPicker();
 }
@@ -2312,7 +2384,11 @@ $('psearch').oninput=e=>{ QUERY=e.target.value; renderPicker() };
 $('launch').onclick=async()=>{
   const m=SEL; if(!m || launchBlock(selNodes())) return;
   const b=$('launch'); b.disabled=true; b.textContent='Launching…';
-  const j=await act({action:'load', target:m.path,
+  const pn=launchPeer();
+  const j=await act(pn ? {action:'load', node:pn.id, identity:m.identity,
+                     port:+$('loadport').value||undefined,
+                     tune:(window.LOADTUNE||'balanced'), sets:SETS}
+    : {action:'load', target:m.path,
                      port:+$('loadport').value||undefined,
                      tune:(window.LOADTUNE||'balanced'),
                      sets:SETS});
@@ -2432,8 +2508,12 @@ async function loadResident(){
   // One list, local first; a peer's rows carry `machine`. A peer's model is
   // shown and chatted with, never unloaded from here: this page drives only
   // what its own machine started.
-  const rows=(d.resident||[]).concat(...peers.map(m=>m.resident||[]))
-    .map(r=>r.machine?{...r, can_unload:false}:r);
+  // A peer's knurlogic model is unloaded through that peer (forwarded
+  // with its launch token; the peer stops only what it started).
+  const rows=(d.resident||[]).concat(...peers.map(m=>(m.resident||[])
+      .map(r=>({...r, node:m.id}))))
+    .map(r=>r.machine?{...r, can_unload:r.runtime==='knurlogic' && !!r.node
+      && /:\d+\/?$/.test(r.where||'')}:r);
   const el=$('resident');
   const card=(r,i)=>`<div class="card ${esc(r.state)}">
       <div class="cardhd">
@@ -2493,7 +2573,9 @@ async function loadResident(){
     const r=rows[+x.dataset.i];
     const how={knurlogic:'unload', ollama:'ollama-unload'};
     x.textContent='…'; x.disabled=true;
-    await act({action:how[r.runtime], target:r.ident, where:r.where});
+    await act(r.machine
+      ? {action:'unload', node:r.node, port:+r.where.replace(/\/$/,'').split(':').pop()}
+      : {action:how[r.runtime], target:r.ident, where:r.where});
   });
 }
 
