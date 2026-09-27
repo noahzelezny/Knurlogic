@@ -64,7 +64,7 @@ PEER_PATHS = (PREPARE_PATH, START_PATH, STOP_PATH, SHAPE_PATH, JOB_PATH)
 SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
              "port", "working_set_gib", "bandwidth_gbs", "nodes", "versions",
-             "jaccl_timeout_ms", "sets")
+             "jaccl_timeout_ms", "sets", "chips")
 SPLITS = ("tensor", "pipeline")
 LINKS = ("ring", "jaccl")
 #: the prompt chunk every rank runs (ring-wide): 512, as everywhere
@@ -184,7 +184,9 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
             heal = _selfheal()
         except Exception:
             heal = False
-        doc = {"chip": chip, "p_core_ghz": None,
+        from knurlogic.engine.crosschip import gpu_architecture
+        doc = {"chip": chip, "gpu_architecture": gpu_architecture(),
+               "p_core_ghz": None,
                "bandwidth_gbs": chip_bandwidth_gbs(chip),
                "thunderbolt": tb, "rdma": links.rdma(),
                "versions": {"knurlogic": __version__,
@@ -429,6 +431,13 @@ def check_spec(spec) -> str:
     sets = spec.get("sets")
     if sets is not None and not isinstance(sets, dict):
         return "sets is an object"
+    chips = spec.get("chips")
+    if chips is not None and not (
+            isinstance(chips, list) and len(chips) <= 64 and all(
+                isinstance(c, dict) and set(c) <= {"name", "arch"} and all(
+                    isinstance(v, str) and len(v) <= 64 for v in c.values())
+                for c in chips)):
+        return "chips is [{name, arch}]"
     lay = spec.get("layers") or []
     if not isinstance(lay, list) or (lay and len(lay) != spec["world"]):
         return "layers is one count per rank"
@@ -621,6 +630,10 @@ def rank_argv(path: str, spec: dict, files: dict) -> list:
         cmd += ["--bandwidth-gbs", str(float(spec["bandwidth_gbs"]))]
     for k, v in sorted((spec.get("sets") or {}).items()):
         cmd += ["--set", f"{k}={v}"]
+    if spec.get("chips"):
+        # every rank's chip, so each resolves KNURLOGIC_CROSS_CHIP=auto
+        # the same way (engine/crosschip.resolve)
+        cmd += ["--ring-chips", json.dumps(spec["chips"])]
     return cmd
 
 
@@ -1193,7 +1206,12 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             ("safe", "balanced", "fast") else "balanced",
             "nodes": nodes, "versions": local_info.get("versions") or {},
             "jaccl_timeout_ms": J.JACCL_TIMEOUT_MS if link == "jaccl" else 0,
-            "sets": sets}
+            "sets": sets,
+            # each machine's chip and GPU architecture, rank order: the
+            # ranks resolve KNURLOGIC_CROSS_CHIP=auto from it
+            "chips": [{"name": m.get("chip") or m.get("name") or "",
+                       "arch": m.get("gpu_architecture") or ""}
+                      for m in order]}
     specs = []
     for r, m in enumerate(order):
         specs.append({**base, "rank": r,
