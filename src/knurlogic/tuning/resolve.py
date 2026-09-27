@@ -205,7 +205,8 @@ def decode_chunk_for(headroom_bytes: int, known: bool = True,
 
 
 def resolve(artifact: Artifact, budget, profile: str | None = None,
-            tune: str = "balanced", store_bytes: int | None = None):
+            tune: str = "balanced", store_bytes: int | None = None,
+            holds_bytes: int | None = None):
     """Resolve every knob for this artifact against a budget.
 
     `budget` is either a byte count -- one box, and the return is a
@@ -222,6 +223,9 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
     `store_bytes` is a live image store's `budget_bytes()`, when one exists;
     otherwise a vision rung is budgeted at the store's default bound
     (`vision_budget`).
+
+    `holds_bytes`: what this box holds of the artifact when it is one rank
+    of a split (its share); default, the whole artifact.
     """
     if profile is not None and profile not in S.RUNTIME_PROFILES:
         raise ValueError(f"profile must be one of {sorted(S.RUNTIME_PROFILES)}")
@@ -229,7 +233,9 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
     if tune not in S.TUNE_PROFILES:
         raise ValueError(f"tune must be one of {sorted(S.TUNE_PROFILES)}")
     if isinstance(budget, (int, float)):
-        return _resolve_one(artifact, int(budget), artifact.bytes_on_disk,
+        holds = artifact.bytes_on_disk if holds_bytes is None \
+            else int(holds_bytes)
+        return _resolve_one(artifact, int(budget), holds,
                             profile, tune, store_bytes=store_bytes)
     return resolve_cluster(artifact, budget, profile, tune,
                            store_bytes=store_bytes)
