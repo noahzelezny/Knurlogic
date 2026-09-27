@@ -424,9 +424,10 @@ Release 0.1.0 (tonight or next):
 2. Update the M4 to gui once the shootout is done; one real end-to-end pass
    (server timing + sampling defaults on the bench, Settings on a real
    model, Claude Code through the page's router incl. count_tokens).
-3. History: rewrite while private (author email -> 262450986+noahzelezny@
-   users.noreply.github.com, home-directory paths -> ~/), backup first,
-   force-push all branches -- ONLY on Noah's explicit go. Then public.
+3. History: DONE 2026-09-26 (private repo rewritten: every commit's author
+   is the GitHub noreply address, home paths are ~/; all five branches
+   pushed; backup bundle beside the repo, knurlogic-history-backup-*.bundle).
+   Flip the repo public when Noah says.
 4. Merge vision-integration -> hardening -> gui into main; rebase release;
    tag v0.1.0. PyPI: pending publisher added (noahzelezny/Knurlogic,
    publish.yml, env pypi); the GitHub `pypi` environment exists. The name is
