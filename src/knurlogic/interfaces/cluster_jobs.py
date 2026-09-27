@@ -23,7 +23,17 @@ everything can:
 
 Every page that runs a rank watches it (cluster/jobs.py); any rank dying
 or stalling stops the whole job: its own ranks SIGTERM then SIGKILL, and
-/peer/cluster/stop to every other page of the job. Unloading the job from
+/peer/cluster/stop to every other page of the job. It also asks the job's
+other pages (/peer/cluster/job) whether they still run their ranks: one
+unreachable, or answering without its rank, for PEER_GONE_S -- or saying
+the job ended there -- stops the job here too (a rank idle in a
+collective on a peer that vanished never exits and is never "stalled").
+
+A stop is done when the ranks' processes are gone, not when they were
+signalled: until then their records stay, marked stopping. A prepare
+refuses a share that does not fit beside what this machine's other ranks
+and servers hold now, or while another job's rank is still loading here;
+a start waits (START_WAIT_S) for stopped ranks to be gone, else refuses. Unloading the job from
 any page does the same. Rank 0's HTTP port is where chat goes, through the
 existing relay.
 
@@ -47,7 +57,9 @@ PREPARE_PATH = "/peer/cluster/prepare"
 START_PATH = "/peer/cluster/start"
 STOP_PATH = "/peer/cluster/stop"
 SHAPE_PATH = "/peer/cluster/shape"
-PEER_PATHS = (PREPARE_PATH, START_PATH, STOP_PATH, SHAPE_PATH)
+#: a page of the job asking this one whether it still runs its ranks
+JOB_PATH = "/peer/cluster/job"
+PEER_PATHS = (PREPARE_PATH, START_PATH, STOP_PATH, SHAPE_PATH, JOB_PATH)
 #: a prepare's fields; nothing else is read, and a path is refused
 SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
@@ -66,6 +78,12 @@ PREPARED_S = 120.0
 PEER_S = 30.0
 #: how often the page checks its ranks
 WATCH_S = 2.0
+#: how long start waits for a stopped rank's process on this machine to be
+#: gone before it refuses: two jobs' shares in one working set is the OOM
+#: that rebooted the M3 (a 397B share loading beside the last job's 50 GiB)
+START_WAIT_S = 20.0
+#: how long one peer-page check may take (the watcher asks every WATCH_S)
+PEER_CHECK_S = 5.0
 
 #: job -> prepared spec (+ resolved path), awaiting start
 PREPARED: dict = {}
@@ -78,6 +96,13 @@ _PROCS: dict = {}
 _LOCK = threading.Lock()
 _WATCH = J.Watch()
 _WATCHER: list = []
+#: one start at a time on this page: the loading check and the spawn are
+#: one step, so two jobs' ranks never begin loading together
+_START_LOCK = threading.Lock()
+#: jobs a stop() in this process is tearing down right now
+_STOPPING: set = set()
+#: (job, peer id) -> when that peer's page last said it runs its rank
+_PEER_OK: dict = {}
 
 
 # ------------------------------------------------------------ this machine
@@ -410,8 +435,48 @@ def check_spec(spec) -> str:
     return ""
 
 
+def held_here(job: str = "", reg=None, sreg=None, rss=None) -> list:
+    """What knurlogic ranks and servers on this machine hold now, other
+    than `job`'s: [(what, pid, bytes)]. A rank being stopped is left out
+    -- start waits for it to be gone -- so this is what a new load would
+    have to share the working set with."""
+    rss = rss or J.rss_bytes
+    reg = J.registry() if reg is None else reg
+    out, seen = [], set()
+    for rec in reg.values():
+        j = str(rec.get("job") or "")
+        pid = int(rec["pid"])
+        if j == job or rec.get("stopping") or not _alive(j, pid):
+            continue
+        seen.add(pid)
+        out.append((f"job {j} rank {rec.get('rank')}", pid, rss(pid)))
+    from knurlogic.machine import servers
+    for port, rec in sorted((servers.registry() if sreg is None
+                             else sreg).items()):
+        pid = int(rec["pid"])
+        if pid in seen or (job and rec.get("job") == job) \
+                or not servers.is_our_server(pid):
+            continue
+        out.append((f"the server on port {port}", pid, rss(pid)))
+    return out
+
+
+def _loading_elsewhere(job: str, reg: dict) -> str:
+    """"" unless another job's rank here is still joining or loading --
+    one load at a time on a machine."""
+    for j, recs in J.by_job(reg).items():
+        live = [r for r in recs if not r.get("stopping")]
+        if j == job or not live:
+            continue
+        ph = J.phase_of(j, live)
+        if ph != "ready":
+            return (f"job {j}'s rank {live[0].get('rank')} is still "
+                    f"{ph} here; one load at a time")
+    return ""
+
+
 def prepare(spec: dict, *, resolve=None, info=None, shape=None,
-            registry=None) -> tuple:
+            registry=None, held=None) -> tuple:
     """POST /peer/cluster/prepare, on the page asked to run one rank:
     (status, doc). Checks, and remembers the job for start; starts
     nothing."""
@@ -462,11 +527,23 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                 + int(sh.get("other_bytes") or 0) if counts else 0
         from knurlogic.tuning.resolve import step_margin
         margin = step_margin(ws)
-        if need and ws and need > ws - margin:
+        busy = (held or held_here)(spec["job"]) if need and ws else []
+        hold = sum(b for _, _, b in busy)
+        if need and ws and need > ws - margin and not hold:
             refusals.append(f"rank {rank}'s share is {need / GIB:.1f} GiB "
                             f"and {me}'s working set (under its allowance) "
                             f"is {ws / GIB:.1f} GiB, which must leave its "
                             f"{margin / GIB:.1f} GiB step margin")
+        elif need and ws and need > ws - hold - margin:
+            refusals.append(
+                f"rank {rank}'s share is {need / GIB:.1f} GiB and {me}'s "
+                f"working set (under its allowance) is {ws / GIB:.1f} GiB, "
+                f"{hold / GIB:.1f} GiB of it held now by "
+                + ", ".join(f"{w} (pid {p}, {b / GIB:.1f} GiB)"
+                            for w, p, b in busy if b)
+                + f"; the {(ws - hold) / GIB:.1f} GiB left must also leave "
+                  f"its {margin / GIB:.1f} GiB step margin. Unload that "
+                  f"first")
     if spec["link"] == "ring":
         ip = spec["hosts"][rank].rsplit(":", 1)[0]
         mine = {t.get("ip") for t in info.get("thunderbolt") or []}
@@ -487,6 +564,9 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     reg = registry() if registry else J.registry()
     if any(k.startswith(spec["job"] + "/") for k in reg):
         refusals.append(f"job {spec['job']} already runs here")
+    why = _loading_elsewhere(spec["job"], reg)
+    if why:
+        refusals.append(why)
     if rank == 0:
         from knurlogic.machine.servers import is_our_server
         from knurlogic.machine.servers import registry as sreg
@@ -570,13 +650,41 @@ def rank_env(spec: dict, files: dict, selfheal: bool) -> dict:
     return env
 
 
-def start(job: str, *, spawn=None) -> tuple:
-    """POST /peer/cluster/start: spawn this page's prepared rank."""
+def _exiting(reg: dict) -> dict:
+    """{pid: job} of the ranks here that were stopped and are not gone."""
+    return {int(r["pid"]): str(r.get("job") or "") for r in reg.values()
+            if r.get("stopping")}
+
+
+def start(job: str, *, spawn=None, wait_s: float | None = None) -> tuple:
+    """POST /peer/cluster/start: spawn this page's prepared rank -- once
+    every stopped rank on this machine is gone (up to START_WAIT_S), and
+    never beside another job's rank still loading."""
     with _LOCK:
         prep = PREPARED.pop(str(job or ""), None)
     if prep is None:
         return 404, {"error": f"no prepared job {str(job)[:40]!r} here"}
+    with _START_LOCK:
+        return _start(prep, spawn, START_WAIT_S if wait_s is None
+                      else wait_s)
+
+
+def _start(prep: dict, spawn, wait_s: float) -> tuple:
     spec, path = prep["spec"], prep["path"]
+    from knurlogic.machine import identity
+    me = identity.identity().get("name") or "this machine"
+    going = _exiting(J.registry())
+    left = J.wait_gone(list(going), wait_s,
+                       alive=lambda p: _alive(going[p], p)) if going else []
+    if left:
+        return 409, {"error": f"{me} refuses rank {spec['rank']}: "
+                              + ", ".join(f"job {going[p]}'s rank (pid {p})"
+                                          for p in left)
+                              + f" was stopped and is still exiting after "
+                                f"{wait_s:.0f} s; its memory is not free"}
+    why = _loading_elsewhere(spec["job"], J.registry())
+    if why:
+        return 409, {"error": f"{me} refuses rank {spec['rank']}: {why}"}
     d = J.job_dir(spec["job"])
     files = {"hostfile": str(d / f"hostfile-rank{spec['rank']}.json"),
              "ibv": str(d / "ibv-devices.json")}
@@ -608,6 +716,10 @@ def start(job: str, *, spawn=None) -> tuple:
            "machine": spec["nodes"][spec["rank"]].get("name")
            if spec["rank"] < len(spec["nodes"]) else None,
            "leader": spec["nodes"][0].get("name"),
+           # every machine of the job by id, so the watcher can ask their
+           # pages -- after a page restart too (SPECS is in memory)
+           "nodes": [{"rank": n.get("rank"), "id": n.get("id"),
+                      "name": n.get("name")} for n in spec["nodes"]],
            "started": time.strftime("%Y-%m-%d %H:%M:%S"), "t": time.time()}
     if spec.get("port") and spec["rank"] == 0:
         rec["port"] = int(spec["port"])
@@ -642,7 +754,8 @@ def _alive(job: str, pid: int) -> bool:
 
 
 def stop(job: str, reason: str = "unloaded", propagate: bool = True,
-         post=None, grace: float = J.GRACE_S) -> dict:
+         post=None, grace: float = J.GRACE_S,
+         reap: float = J.REAP_S) -> dict:
     """Stop every rank of `job` on this machine (SIGTERM, then SIGKILL
     after `grace`), forget it, and -- when `propagate` -- tell every other
     page of the job to do the same."""
@@ -650,29 +763,52 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     with _LOCK:
         PREPARED.pop(job, None)
         spec = SPECS.pop(job, None)
+        _STOPPING.add(job)
         reg = J.registry()
         mine = {k: v for k, v in reg.items() if v.get("job") == job}
-    pids = [int(v["pid"]) for v in mine.values()
-            if _alive(job, int(v["pid"]))]
-    killed = J.terminate(pids, grace=grace,
-                         alive=lambda p: _alive(job, p)) if pids else []
+        # marked first: a start on this page waits for these to be gone,
+        # and a prepare does not count them as staying
+        for k in mine:
+            reg[k] = dict(reg[k], stopping=reg[k].get("stopping")
+                          or time.time(),
+                          stop_reason=reg[k].get("stop_reason") or reason)
+        if mine:
+            J.save_registry(reg)
+    try:
+        pids = [int(v["pid"]) for v in mine.values()
+                if _alive(job, int(v["pid"]))]
+        alive = (lambda p: _alive(job, p))
+        killed = J.terminate(pids, grace=grace, alive=alive,
+                             reap=reap) if pids else []
+        left = [p for p in pids if alive(p)]
+    finally:
+        with _LOCK:
+            _STOPPING.discard(job)
     with _LOCK:
         for (j, r) in [k for k in _PROCS if k[0] == job]:
+            if _PROCS[(j, r)].pid in left:
+                continue
             try:
                 _PROCS.pop((j, r)).wait(timeout=2)
             except Exception:
                 pass
         reg = J.registry()
-        for k in mine:
-            reg.pop(k, None)
+        for k, v in mine.items():
+            if int(v["pid"]) not in left:
+                reg.pop(k, None)
         J.save_registry(reg)
         from knurlogic.machine import servers
         sreg = servers.registry()
-        for port in [p for p, v in sreg.items() if v.get("job") == job]:
+        for port in [p for p, v in sreg.items() if v.get("job") == job
+                     and int(v["pid"]) not in left]:
             sreg.pop(port)
         servers.save_registry(sreg)
         _WATCH.forget(job)
-        if mine or spec:
+        for k in [k for k in _PEER_OK if k[0] == job]:
+            _PEER_OK.pop(k)
+        # stopped means gone: a rank still exiting keeps its record
+        # (phase "stopping"), and the watcher finishes the stop
+        if (mine or spec) and not left:
             any_rec = next(iter(mine.values()), {})
             port = next((int(v["port"]) for v in mine.values()
                          if v.get("port")), None) or (
@@ -695,14 +831,20 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
             if not page:
                 continue
             try:
-                (post or _post)(f"http://{page}{STOP_PATH}",
-                                {"job": job, "reason": reason})
+                (post or _stop_post)(f"http://{page}{STOP_PATH}",
+                                     {"job": job, "reason": reason})
                 told.append(n.get("name"))
             except Exception:
                 pass
     return {"stopped": job, "ranks_here": sorted(v["rank"] for v in
                                                  mine.values()),
-            "killed": killed, "told": told, "reason": reason}
+            "killed": killed, "exiting": left, "told": told,
+            "reason": reason}
+
+
+def _stop_post(url: str, doc: dict) -> dict:
+    # the peer answers once its ranks are gone: its grace, then its reap
+    return _post(url, doc, timeout=J.GRACE_S + J.REAP_S + 10)
 
 
 def _peer_pages() -> dict:
@@ -722,12 +864,82 @@ def watch_once(now: float | None = None) -> list:
     -> [(job, reason)] stopped."""
     out = []
     for job, recs in J.by_job().items():
+        if job in _STOPPING:
+            continue
+        if all(r.get("stopping") for r in recs):
+            # stopped, and a rank was still exiting: finish it
+            stop(job, reason=recs[0].get("stop_reason") or "stopped",
+                 propagate=False)
+            continue
         why = _WATCH.verdict(job, recs, lambda pid, j=job: _alive(j, pid),
-                             now=now)
+                             now=now) or peer_verdict(job, recs, now=now)
         if why:
             stop(job, reason=why)
             out.append((job, why))
     return out
+
+
+def job_state(job: str) -> dict:
+    """JOB_PATH: whether this page still runs its ranks of `job`."""
+    recs = J.by_job().get(job, [])
+    live = sorted(int(r["rank"]) for r in recs if not r.get("stopping")
+                  and _alive(job, int(r["pid"])))
+    ended = ENDED.get(job) or {}
+    stopping = [r for r in recs if r.get("stopping")]
+    return {"job": job, "ranks_here": live, "prepared": job in PREPARED,
+            "stopping": bool(stopping),
+            "ended": ended.get("reason") or (
+                stopping[0].get("stop_reason") if stopping else None)}
+
+
+def _ask_job(page: str, job: str) -> dict:
+    return _post(f"http://{page}{JOB_PATH}", {"job": job},
+                 timeout=PEER_CHECK_S)
+
+
+def peer_verdict(job: str, recs: list, now: float | None = None,
+                 ask=None, pages=None, me=None) -> str:
+    """"" while every other machine of the job still runs its rank, else
+    why not: its page says the job ended there, or it has been unreachable
+    -- or answering without the rank -- for PEER_GONE_S. A rank blocked in
+    a collective on a peer that vanished never exits and never counts as
+    stalled (it is idle), so this is how its page learns."""
+    now = time.time() if now is None else now
+    nodes = next((r.get("nodes") for r in recs if r.get("nodes")), None) \
+        or (SPECS.get(job) or {}).get("nodes") or []
+    if not nodes:
+        return ""
+    if me is None:
+        from knurlogic.machine import identity
+        me = identity.identity().get("id")
+    pages = _peer_pages() if pages is None else pages
+    ask = ask or _ask_job
+    for n in nodes:
+        nid = str(n.get("id") or "")
+        if not nid or nid == me:
+            continue
+        name = n.get("name") or nid
+        key = (job, nid)
+        page = pages.get(nid)
+        why = ""
+        try:
+            if not page:
+                raise ConnectionError("not a peer this page knows")
+            doc = ask(page, job)
+            if doc.get("ended"):
+                return f"{name} stopped the job: {doc['ended']}"[:300]
+            if doc.get("ranks_here") or doc.get("prepared"):
+                _PEER_OK[key] = now
+                continue
+            why = f"{name} no longer runs its rank of the job"
+        except Exception as e:
+            why = (f"{name}'s page has not answered "
+                   f"({type(e).__name__})")
+        # the clock starts at the last good answer, or at first sight
+        last = _PEER_OK.setdefault(key, now)
+        if now - last >= J.PEER_GONE_S:
+            return f"{why} for {now - last:.0f} s; the job cannot run"
+    return ""
 
 
 def _ensure_watcher() -> None:
@@ -760,6 +972,14 @@ def jobs_document() -> list:
     out = []
     for job, recs in J.by_job().items():
         r0 = min(recs, key=lambda r: r["rank"])
+        if all(r.get("stopping") for r in recs):
+            out.append({"job": job, "phase": "stopping",
+                        "reason": r0.get("stop_reason"),
+                        "machines": r0.get("machines"),
+                        "port": next((r.get("port") for r in recs
+                                      if r.get("port")), None),
+                        "exiting": sorted(int(r["pid"]) for r in recs)})
+            continue
         out.append({"job": job, "split": r0.get("split"),
                     "link": r0.get("link"), "machines": r0.get("machines"),
                     "leader": r0.get("leader"), "world": r0.get("world"),
@@ -1059,6 +1279,10 @@ def peer_route(path: str, body: bytes) -> tuple:
             return 400, {"error": "job is a hex nonce"}
         reason = str(req.get("reason") or "stopped by another machine")[:300]
         return 200, stop(req["job"], reason=reason, propagate=False)
+    if path == JOB_PATH:
+        if not J.JOB_RX.fullmatch(str(req.get("job") or "")):
+            return 400, {"error": "job is a hex nonce"}
+        return 200, job_state(req["job"])
     if path == SHAPE_PATH:
         p = _resolve(req.get("identity"))
         if not p:
