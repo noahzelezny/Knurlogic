@@ -84,3 +84,49 @@ class Gate:
         return (f"this knurlogic answers on its Thunderbolt link only "
                 f"(--host cluster); the request arrived on {local_ip}. "
                 f"Thunderbolt addresses: {tb}.").encode()
+
+
+# ----------------------------------------------------------------- RDMA
+
+def _out(cmd) -> str | None:
+    """stdout, or None when the tool is not there or fails to run."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+    except Exception:
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def rdma(run=_out) -> dict:
+    """Whether jaccl can run here: {"available", "reason", "devices",
+    "active"}. `rdma_ctl status` says whether RDMA over Thunderbolt is
+    enabled (it is off until `rdma_ctl enable` from recovery), `ibv_devices`
+    lists the rdma_en* devices, and `ibv_devinfo` says which have a cable
+    in (PORT_ACTIVE). Nothing is changed."""
+    st = run(["rdma_ctl", "status"])
+    if st is None:
+        return {"available": False, "devices": [], "active": [],
+                "reason": "no rdma_ctl: this macOS has no RDMA over "
+                          "Thunderbolt (macOS 26.2 or later)"}
+    if "enabled" not in st.lower() or "disabled" in st.lower():
+        return {"available": False, "devices": [], "active": [],
+                "reason": "RDMA over Thunderbolt is disabled: run "
+                          "`rdma_ctl enable` from recoveryOS, then reboot"}
+    devs = [ln.split()[0] for ln in (run(["ibv_devices"]) or "").splitlines()
+            if ln.strip().startswith("rdma_")]
+    if not devs:
+        return {"available": False, "devices": [], "active": [],
+                "reason": "RDMA is enabled but ibv_devices lists no device"}
+    active, cur = [], None
+    for ln in (run(["ibv_devinfo"]) or "").splitlines():
+        s = ln.strip()
+        if s.startswith("hca_id:"):
+            cur = s.split(":", 1)[1].strip()
+        elif s.startswith("state:") and "PORT_ACTIVE" in s and cur:
+            active.append(cur)
+    if not active:
+        return {"available": False, "devices": devs, "active": [],
+                "reason": "no Thunderbolt port has an RDMA link up (no "
+                          "cable, or the other Mac has RDMA off)"}
+    return {"available": True, "devices": devs, "active": active,
+            "reason": ""}

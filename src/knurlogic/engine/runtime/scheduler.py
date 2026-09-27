@@ -61,6 +61,11 @@ class OutOfMemory(RuntimeError):
     """This row was stopped so the server and the other rows keep running."""
 
 
+class RingFailed(RuntimeError):
+    """A rank of this split model is gone or stalled: the job is being torn
+    down, and every request in flight is answered with a 503."""
+
+
 def _context_cap() -> int:
     """KNURLOGIC_CONTEXT_LENGTH: the longest prompt + answer a request may
     use, read at every admission so the setting applies live. 0 = none."""
@@ -238,6 +243,8 @@ class Scheduler:
         self._rows: Dict[int, _Row] = {}
         self._ex: Optional[LocalExecutor] = None
         self._stop = False
+        #: set by abort(): every request from then on gets this error
+        self._aborted: Optional[BaseException] = None
         self._wake = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True,
                                         name="knurlogic-scheduler")
@@ -255,9 +262,29 @@ class Scheduler:
 
     def submit(self, job: Job) -> Job:
         job.submitted = time.perf_counter()
+        if self._aborted is not None:
+            job.outbox.put(("error", self._aborted))
+            return job
         self._jobs.put(job)
         self._wake.set()
         return job
+
+    def abort(self, err: BaseException) -> None:
+        """From ANY thread, including a signal handler while the scheduler
+        thread is blocked in a collective that will never return: answer
+        every admitted, waiting and queued request with `err`, and every
+        later one too. Only thread-safe queues are written; the scheduler's
+        own structures are read, never changed."""
+        self._aborted = err
+        for row in list(self._rows.values()):
+            row.job.outbox.put(("error", err))
+        for job in list(self._waiting):
+            job.outbox.put(("error", err))
+        while True:
+            try:
+                self._jobs.get_nowait().outbox.put(("error", err))
+            except queue.Empty:
+                break
 
     def load(self, path: str, *, executes_artifact_code: bool = False,
              force: bool = True) -> "Command":

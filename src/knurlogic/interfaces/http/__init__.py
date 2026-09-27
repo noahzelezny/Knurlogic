@@ -77,6 +77,46 @@ def scheduler_options(settings: dict) -> dict:
             "working_set_bytes": settings.get("working_set_bytes")}
 
 
+def watch_ring(sched, mh, exit_after: float = 1.5) -> None:
+    """Rank 0 of a split model: its progress marker says whether work is
+    in flight (the page tells idle from stalled by it), and a SIGTERM --
+    the page tearing the job down because another rank died or stalled --
+    answers every request in flight with a 503 before the process goes.
+    The scheduler thread may be blocked in a collective that never
+    returns, so the exit does not wait for it."""
+    import os
+    import signal
+    import threading
+
+    from knurlogic.cluster import jobs
+    from knurlogic.engine.runtime.scheduler import RingFailed
+
+    armed = []
+
+    def probe():
+        if not armed and getattr(mh, "state", "") == "ready":
+            armed.append(1)
+            jobs.after_load()
+        return {"busy": bool(sched.busy)}
+    m = jobs.CURRENT["marker"]
+    if m is not None:
+        m.probe = probe
+
+    def on_term(_sig, _frame):
+        sched.abort(RingFailed(
+            "this model is split across machines and the cluster job is "
+            "stopping (a rank exited or stalled, or it was unloaded); "
+            "retry once it is loaded again"))
+        jobs.progress(phase="stopping")
+
+        def leave():
+            import time
+            time.sleep(exit_after)      # the 503s go out first
+            os._exit(0)
+        threading.Thread(target=leave, daemon=True).start()
+    signal.signal(signal.SIGTERM, on_term)
+
+
 def serve(artifact, host: str, port: int, *, routes: dict | None = None,
           settings: dict | None = None, draft: bool = True,
           ring: dict | None = None) -> int:
@@ -119,6 +159,8 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     sched.load(str(artifact.path),
                executes_artifact_code=bool(artifact.model_file))
     _CURRENT["scheduler"] = sched
+    if ring:
+        watch_ring(sched, mh)
 
     served = scout.served(artifact, mh)
     from .server import DEFAULT_MAX_BODY
