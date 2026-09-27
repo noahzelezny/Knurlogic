@@ -119,7 +119,7 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
     extra = vb["extra_bytes"] if vb else 0
     headroom = budget - a.bytes_on_disk - extra
     fits = bool(budget) and headroom > 0
-    tight = fits and headroom < S.TIGHT_HEADROOM_GIB * GIB
+    tight = fits and headroom < S.tight_headroom_bytes(budget)
     verdict = ("will not fit" if not fits else
                "tight" if tight else "fits")
     return {
@@ -137,7 +137,8 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
         "headroom_gib": round(headroom / GIB, 1),
         "limited_by": b["limited_by"],
         "what_tight_means": (
-            f"under {S.TIGHT_HEADROOM_GIB:g} GiB left after the weights, "
+            f"under {S.tight_headroom_bytes(budget) / GIB:.0f} GiB left "
+            f"after the weights, "
             f"so a load now narrows the prompt chunk to "
             f"{S.PREFILL_CHUNK_TIGHT} tokens and prefills one prompt at a "
             f"time. It loads; long prompts are slower to start."

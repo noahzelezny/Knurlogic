@@ -490,7 +490,8 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             f"headroom): bounds the dense-expert transient, which is what "
             f"caps context length on a full box")
 
-    tight = working_set_bytes > 0 and headroom < S.TIGHT_HEADROOM_GIB * GIB
+    tight = working_set_bytes > 0 and \
+        headroom < S.tight_headroom_bytes(working_set_bytes)
     family, family_why = S.prefill_chunk_for(artifact.model_type)
     prefill = min(family, S.PREFILL_CHUNK_TIGHT) if tight else family
     asked = t.get("VQLAB_PREFILL_CHUNK")

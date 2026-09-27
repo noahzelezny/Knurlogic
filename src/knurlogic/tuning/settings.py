@@ -106,8 +106,19 @@ PROMPT_CONCURRENCY_TIGHT = 1
 CACHE_LIMIT_GB_DEFAULT = 4.0
 
 # Below this much free headroom after the weights, treat the box as tight and
-# resolve the memory knobs down rather than leaving performance defaults.
+# resolve the memory knobs down rather than leaving performance defaults:
+# the larger of a floor and a fraction of the working set. A fixed 12 GiB let
+# 397B on the 128 GB M4 (~14 GiB above its weights) take the measured
+# 4096-token prefill chunk; its first step alone measured 8.1 GiB of
+# transient, and one agent at a 25k-token context aborted Metal
+# (2026-09-26). A share of the working set scales with the machine.
 TIGHT_HEADROOM_GIB = 12.0
+TIGHT_HEADROOM_SHARE = 0.20
+
+
+def tight_headroom_bytes(working_set_bytes: int) -> int:
+    return int(max(TIGHT_HEADROOM_GIB * (1 << 30),
+                   TIGHT_HEADROOM_SHARE * working_set_bytes))
 
 # --- performance knobs with a measured basis --------------------------------
 # value -> (default, why). Anything not listed should not be set by a
