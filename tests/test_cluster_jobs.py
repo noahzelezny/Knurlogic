@@ -541,3 +541,69 @@ def test_every_rank_syncs_the_gpu_fast():
         s = {**spec(), "link": link}
         assert C.rank_env(s, files, selfheal=False)[
             "MLX_METAL_FAST_SYNCH"] == "1"
+
+
+class _Capture:
+    """Just enough of a request handler for ui._send_json."""
+
+    def __init__(self):
+        import io
+        self.code, self.wfile = None, io.BytesIO()
+
+    def send_response(self, code):
+        self.code = code
+
+    def send_header(self, *_a):
+        pass
+
+    def end_headers(self):
+        pass
+
+    def doc(self):
+        return json.loads(self.wfile.getvalue())
+
+
+def test_a_dead_rank_0_is_a_503_cluster_failed_with_the_reason(two_pages):
+    p = two_pages
+    os.kill(p.rank0["pid"], 9)
+    assert wait(lambda: not alive(p.rank0["pid"]), 5)
+    base = f"http://127.0.0.1:{p.port}"
+    h = _Capture()
+    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    assert h.code == 503, h.doc()
+    err = h.doc()["error"]
+    assert err["code"] == "cluster_failed" and err["type"] == "server_error"
+    assert "rank 0 on A " in err["message"] and "exited" in err["message"]
+    # and once the job is stopped, still that reason (not a 502)
+    h = _Capture()
+    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    assert h.code == 503 and "rank 0 on A " in h.doc()["error"]["message"]
+
+
+def test_an_unreachable_server_that_is_no_job_is_still_a_502(cache):
+    port = free_port()
+    base = f"http://127.0.0.1:{port}"
+    h = _Capture()
+    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    assert h.code == 502
+
+
+def test_a_peers_dead_rank_0_is_a_503_with_the_peers_stop_reason(
+        monkeypatch):
+    base = "http://192.0.2.2:8080"
+    dead = f"http://127.0.0.1:{free_port()}"
+    monkeypatch.setitem(ui._PEER_TARGETS, base, {
+        "machine": "M4", "relay": dead, "job": "ab12cd34ef567890"})
+
+    def survey():
+        ui._PEER_JOBS["ab12cd34ef567890"] = {
+            "job": "ab12cd34ef567890", "phase": "stopped",
+            "reason": "rank 0 on M4 (pid 7) exited"}
+    monkeypatch.setattr(ui, "refresh_targets", survey)
+    h = _Capture()
+    ui._stream(h, ui.upstream(base, "/v1/chat/completions"), b"{}",
+               base=base)
+    assert h.code == 503
+    assert h.doc()["error"]["code"] == "cluster_failed"
+    assert "rank 0 on M4 (pid 7) exited" in h.doc()["error"]["message"]
+    ui._PEER_JOBS.clear()
