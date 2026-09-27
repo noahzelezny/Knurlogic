@@ -232,6 +232,28 @@ def test_memory_past_the_limit_empties_the_prompt_cache_then_stops_the_newest():
     assert mem["active"] <= 100 * GIB
 
 
+def test_the_guard_trims_the_cache_by_the_overage_not_a_margin_more():
+    """The limit already leaves a step's margin: 10 GiB over with a 20 GiB
+    cache gives up 10, not 10 + the margin."""
+    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+
+    class Cache:
+        nbytes = 20 * GIB
+
+        def trim_to(self, n):
+            mem["active"] -= self.nbytes - n
+            self.nbytes = n
+
+    mem = {"active": 105 * GIB}
+    s = Scheduler(Host(None, Tok({})), working_set_bytes=100 * GIB)
+    s._spike = 4 * GIB          # margin 5, limit 95
+    s.cache = Cache()
+    s._active = lambda: mem["active"]
+    s._release = lambda: None
+    s._guard_memory()
+    assert s.cache.nbytes == 10 * GIB and mem["active"] == 95 * GIB
+
+
 def test_out_of_memory_is_a_503_to_retry():
     from knurlogic.engine.runtime.scheduler import OutOfMemory
     from knurlogic.interfaces.http.openai import _status_of

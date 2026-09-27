@@ -283,12 +283,19 @@ class Ring:
         self.local_then = int(mx.get_active_memory())
 
     def peers_over_now(self) -> Optional[int]:
-        """The peers' over-limit, moved by what rank 0 has freed or taken
-        since the exchange (the ranks hold equal shards and apply the same
-        ops, so memory moves together)."""
+        """The peers' over-limit as of the last exchange. Under tensor the
+        ranks hold equal shards and apply the same ops, so what rank 0 has
+        TAKEN since is added; what it has freed is not subtracted -- a free
+        here is not yet a free there, and an estimate that drops on rank
+        0's word alone lets a peer run past its limit. Under pipeline the
+        stages are unequal and nothing about rank 0's memory says anything
+        about a peer's: the peers' own number, refreshed every step."""
         if self.peer_over is None:
             return None
-        return self.peer_over + int(mx.get_active_memory()) - self.local_then
+        if self.split == "pipeline":
+            return self.peer_over
+        return self.peer_over + max(
+            0, int(mx.get_active_memory()) - self.local_then)
 
     def stop(self) -> None:
         ops = self.journal.take() + [{"op": "stop"}]
