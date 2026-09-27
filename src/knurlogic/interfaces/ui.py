@@ -545,6 +545,24 @@ def clean(doc):
     return _clean(doc)
 
 
+def peer_refusal(headers, client_ip: str, local_ip: str, gate=None,
+                 manual_hosts=(), what: str = "peer requests"):
+    """The gate every /peer/ route shares: (status, doc) when refused, else
+    None. No Origin header (a browser never reaches a peer route), and the
+    connection arrived on loopback or Thunderbolt, or from a peer address
+    named with --peer -- in every mode, whatever --host says."""
+    from knurlogic.cluster.links import Gate
+    if headers.get("Origin") is not None:
+        return 403, {"error": "a web page cannot drive another machine"}
+    ip = (client_ip or "").removeprefix("::ffff:")
+    g = gate or Gate()
+    if not (g.allows(local_ip) or ip in set(manual_hosts)):
+        return 403, {"error": f"{what} are taken over Thunderbolt or "
+                              f"loopback, or from a peer named with --peer; "
+                              f"this came from {ip}"}
+    return None
+
+
 def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
                 gate=None, manual_hosts=(), load=None, stop=None,
                 resolve=None) -> tuple:
@@ -556,16 +574,10 @@ def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
     is its consent to load for the cluster, as with exo. Then the
     request is a load by identity -- resolved to a path HERE, from this
     machine's own stores -- or an unload of a port this machine started."""
-    from knurlogic.cluster.links import Gate
-    if headers.get("Origin") is not None:
-        return 403, {"error": "a web page cannot drive another machine's "
-                              "loads"}
-    ip = (client_ip or "").removeprefix("::ffff:")
-    g = gate or Gate()
-    if not (g.allows(local_ip) or ip in set(manual_hosts)):
-        return 403, {"error": f"launches are taken over Thunderbolt or "
-                              f"loopback, or from a peer named with --peer; "
-                              f"this came from {ip}"}
+    refused = peer_refusal(headers, client_ip, local_ip, gate,
+                           manual_hosts, what="launches")
+    if refused:
+        return refused
     if len(body or b"") > PEER_LOAD_MAX:
         return 413, {"error": "a launch request is small"}
     try:
@@ -614,8 +626,25 @@ def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
 PEER_LOADED_S = 2.5
 
 #: Chat endpoints on peers, as the peers themselves last reported them:
-#: {base: machine name}. Refilled by every peer survey.
+#: {base: {"machine": name, "relay": the peer's page}}. `base` is the
+#: model's address as seen from here (what the page shows and keys a chat
+#: by); a peer's server listens on ITS loopback, so every request for it
+#: goes to the peer's page relay (PEER_RELAY) instead. Refilled by every
+#: peer survey.
 _PEER_TARGETS: dict = {}
+#: the peer page's relay prefix: /peer/v1/... reaches the model servers
+#: that page itself started, by model name (peer_relay)
+PEER_RELAY = "/peer"
+
+
+def upstream(base: str, path: str) -> str:
+    """The URL a request for `path` on the model at `base` goes to: the
+    server itself when it is this machine's, the peer page's relay when it
+    is a peer's."""
+    t = _PEER_TARGETS.get(base)
+    if t:
+        return t["relay"] + PEER_RELAY + path
+    return base + path
 
 
 def _peer_where(where: str, host: str) -> str:
@@ -682,7 +711,9 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
     for m in res:
         for r in m["resident"]:
             if r.get("runtime") == "knurlogic" and r.get("where"):
-                targets[r["where"].rstrip("/")] = m["machine"]
+                targets[r["where"].rstrip("/")] = {
+                    "machine": m["machine"],
+                    "relay": f"http://{m['address']}"}
     _PEER_TARGETS.clear()
     _PEER_TARGETS.update(targets)
     _PEER_AT[0] = time.time()
@@ -777,7 +808,7 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
         _send_json(handler, 403, {"error": f"not a running model this page "
                                            f"knows: {base or '(none)'}"})
         return
-    _stream(handler, f"{base}/v1/chat/completions", body)
+    _stream(handler, upstream(base, "/v1/chat/completions"), body)
 
 
 #: the largest settings change `/apply` forwards; a knob set is a few bytes
@@ -867,7 +898,8 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
 
     def one(base):
         try:
-            for m in fetch(f"{base}/v1/models", ROUTE_S).get("data") or []:
+            for m in fetch(upstream(base, "/v1/models"),
+                           ROUTE_S).get("data") or []:
                 if isinstance(m, dict) and m.get("id"):
                     found.setdefault(str(m["id"]), base)
         except Exception:
@@ -915,6 +947,94 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
                                  f"{', '.join(sorted(table)) or 'none'}"},
             "models": sorted(table)})
         return
+    _stream(handler, upstream(base, path), body)
+
+
+def local_models(fetch=None) -> dict:
+    """{model id: base} over the servers THIS machine started (never the
+    ones peers reported, so two pages relaying for each other cannot
+    loop). What a peer page's relay resolves a model name against."""
+    import threading
+    import urllib.request
+    from knurlogic.machine.servers import is_our_server
+    if fetch is None:
+        def fetch(url, t):
+            with urllib.request.urlopen(url, timeout=t) as r:
+                return json.loads(r.read())
+    bases = sorted(f"http://127.0.0.1:{port}" for port, rec in
+                   registry().items() if is_our_server(int(rec["pid"])))
+    found: dict = {}
+
+    def one(base):
+        try:
+            for m in fetch(f"{base}/v1/models", ROUTE_S).get("data") or []:
+                if isinstance(m, dict) and m.get("id"):
+                    found.setdefault(str(m["id"]), base)
+        except Exception:
+            pass
+    ts = [threading.Thread(target=one, args=(b,), daemon=True)
+          for b in bases]
+    for t in ts:
+        t.start()
+    end = time.time() + ROUTE_S
+    for t in ts:
+        t.join(max(end - time.time(), 0))
+    return dict(found)
+
+
+def _resolve(table: dict, model):
+    """The base serving `model`: by exact id, else by its last path part
+    (a page may name a model by its folder). Absent, and only one model is
+    running, that one."""
+    if isinstance(model, str) and model:
+        if model in table:
+            return table[model]
+        tail = model.rstrip("/").split("/")[-1]
+        hits = {b for m, b in table.items()
+                if m.rstrip("/").split("/")[-1] == tail}
+        return hits.pop() if len(hits) == 1 else None
+    bases = set(table.values())
+    return bases.pop() if len(bases) == 1 else None
+
+
+def peer_relay(handler, method: str, path: str, body: bytes,
+               fetch=None) -> None:
+    """GET /peer/v1/models, POST /peer/v1/chat/completions, /v1/messages,
+    /v1/messages/count_tokens -- on the machine holding the model, for a
+    peer page whose router or chat names it. The caller has passed
+    peer_refusal. Resolved by model name against the servers this machine
+    started (local_models) and streamed back as it arrives."""
+    table = local_models(fetch)
+    if method == "GET":
+        if path != "/v1/models":
+            _send_json(handler, 404, {"error": "not a relayed path"})
+            return
+        _send_json(handler, 200, {"object": "list", "data": [
+            {"id": m, "object": "model", "owned_by": "knurlogic"}
+            for m in sorted(table)]})
+        return
+    if path not in ROUTE_PATHS:
+        _send_json(handler, 404, {"error": "not a relayed path"})
+        return
+    try:
+        doc = json.loads(body or b"{}")
+    except ValueError:
+        doc = None
+    if not isinstance(doc, dict):
+        _send_json(handler, 400, {"error": "the body must be a JSON object"})
+        return
+    model = doc.get("model")
+    base = _resolve(table, model)
+    if base is None:
+        _send_json(handler, 404, {
+            "type": "error",
+            "error": {"type": "not_found_error",
+                      "message": f"no running model {model!r} on "
+                                 f"{identity.identity().get('name') or 'this machine'}"
+                                 f"; running: "
+                                 f"{', '.join(sorted(table)) or 'none'}"},
+            "models": sorted(table)})
+        return
     _stream(handler, base + path, body)
 
 
@@ -954,7 +1074,7 @@ def peek(q: dict, fetch=None) -> tuple:
         return 403, json.dumps({"error": f"not a server this page knows: "
                                          f"{where or '(none)'}"})
     fwd = {k: q[k][0] for k in PEEK_KEYS if q.get(k)}
-    url = where + path + ("?" + urllib.parse.urlencode(fwd) if fwd else "")
+    url = upstream(where, path) + ("?" + urllib.parse.urlencode(fwd) if fwd else "")
     if fetch is None:
         def fetch(u, t):
             with urllib.request.urlopen(u, timeout=t) as r:
@@ -1047,9 +1167,12 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             return False
 
         def do_GET(self):
+            u = urlparse(self.path)
+            if u.path.startswith(PEER_RELAY + "/v1/"):
+                self._peer_relay("GET", u.path)
+                return
             if self._gated():
                 return
-            u = urlparse(self.path)
             intro = self.headers.get("X-Knurlogic-Peer")
             if intro and PEERS:
                 PEERS.introduce(self.client_address[0], intro)
@@ -1072,6 +1195,9 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             u = urlparse(self.path)
             if u.path.rstrip("/") == PEER_LOAD_PATH:
                 self._peer_load()
+                return
+            if u.path.startswith(PEER_RELAY + "/v1/"):
+                self._peer_relay("POST", u.path)
                 return
             if self._gated():
                 return
@@ -1109,6 +1235,39 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             body, ctype = h(parse_qs(u.query), 0, self.rfile.read(n) if n
                             else b"")
             self._send(body, ctype)
+
+        def _peer_relay(self, method: str, path: str):
+            """PEER_RELAY/v1/...: a peer page reaching a model this machine
+            started. The peer gate (peer_refusal), then a plain
+            Content-Length body -- never Transfer-Encoding, the framing a
+            smuggled request hides behind -- then peer_relay."""
+            manual = [p.host for p in (PEERS.all() if PEERS else [])
+                      if "manual" in p.found_by]
+            refused = peer_refusal(
+                self.headers, self.client_address[0],
+                self.connection.getsockname()[0], manual_hosts=manual,
+                what="relayed requests")
+            if refused:
+                self.close_connection = True
+                _send_json(self, *refused)
+                return
+            if self.headers.get("Transfer-Encoding"):
+                self.close_connection = True
+                _send_json(self, 411, {"error": "send the body with a "
+                           "Content-Length and no Transfer-Encoding"})
+                return
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if not 0 <= n <= MAX_BODY:
+                self.close_connection = True
+                _send_json(self, 400, {"error": f"Content-Length must be a "
+                                       f"number of bytes up to {MAX_BODY}"})
+                return
+            body = self.rfile.read(n) if n else b""
+            peer_relay(self, method,
+                       path[len(PEER_RELAY):].rstrip("/"), body)
 
         def _peer_load(self):
             """PEER_LOAD_PATH: its own checks (peer_launch), not the
