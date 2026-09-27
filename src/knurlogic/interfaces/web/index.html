@@ -397,7 +397,8 @@
     right of the box: in teal, because a live chat bar should say so and
     say to what. */
  .chd{display:flex;justify-content:space-between;align-items:center;gap:10px;
-   margin-bottom:6px}
+   margin:0 0 3px}
+ #csend,#cstop{height:34px;padding-top:0;padding-bottom:0}
  .chd .cl{font-size:12.5px;color:var(--faint);display:flex;align-items:center;gap:6px;
    min-width:0}
  #cmodel,#ceffort{width:auto;padding:3px 6px;font-size:12.5px;color:var(--dim)}
@@ -895,7 +896,9 @@
         <button id="openpick" class="pickbtn">
           <span id="pickname">choose a model</span>
           <span id="picksize" class="ro"></span></button>
-        <details class="more" id="loadopts">
+        <!-- Tune, port and launch knobs live in Settings; kept here hidden
+             so launch still reads their defaults. -->
+        <details class="more" id="loadopts" hidden>
           <summary>advanced options</summary>
           <div class="opt">
             <div class="optlab">Tune</div>
@@ -911,6 +914,12 @@
           <div class="optlab" style="margin-top:14px">Settings for this launch</div>
           <div id="loadknobs"></div>
         </details>
+        <div id="multiopts" hidden>
+          <div class="opt"><div class="optlab">Sharding</div>
+            <span class="seg" data-k="shard"><button data-v="tensor" aria-pressed="true">Tensor</button><button data-v="pipeline" aria-pressed="false">Pipeline</button></span></div>
+          <div class="opt"><div class="optlab">Interconnect</div>
+            <span class="seg" data-k="link"><button data-v="tcp" aria-pressed="true">TCP/IP</button><button data-v="rdma" aria-pressed="false">RDMA</button></span></div>
+        </div>
         <div id="pickinfo"></div>
         <button class="go" id="launch" style="width:100%;margin-top:10px">
           Launch</button>
@@ -1867,9 +1876,9 @@ async function tick(){
     // a Mac Studio is a tall square box -- the front is nearly square and
     // carries two USB-C ports, the SD slot and the power light -- where the
     // mini beside it is a flat slab
-    studio:'<rect x="4" y="5" width="16" height="15" rx="2.5"/>'+
-      '<path d="M4 17h16M7.5 13v1.5M10 13v1.5M13 13.75h4"/>'+
-      '<circle cx="17" cy="8" r=".5"/>',
+    studio:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/>'+
+      '<path d="M7 14.5v2M9.5 14.5v2"/>'+
+      '<circle cx="17" cy="16" r=".6" fill="currentColor" stroke="none"/>',
     mini:'<rect x="4" y="11" width="16" height="5" rx="1.5"/>',
     imac:'<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M10 16l-1 4h6l-1-4"/>',
     pro:'<rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M10 7v10M14 7v10"/>',
@@ -1951,6 +1960,7 @@ async function tick(){
     : '')+(more>0?`<div class="topomore ro">+${more} more machine${
       more===1?'':'s'} -- this page shows five</div>`:'');
   LASTNODES=ns_;
+  $('multiopts').hidden=selNodes().length<2;
   $('topo').querySelectorAll('.unit[data-node]').forEach(u=>u.onclick=()=>{
     const k=u.dataset.node;
     NODESEL.has(k)?NODESEL.delete(k):NODESEL.add(k); saveNodeSel();
@@ -2078,6 +2088,7 @@ function baseKeys(ms){
 // Org/Name in a hub cache) with an architecture it knows. Local and
 // experimental builds (qwen4exp_*, 397b-v2-*, ...) are not something to pick.
 const published=m=>m.servable && /--|\//.test(m.name)
+  && !/-VQ-BASE$/i.test(m.name)
   && !!m.model_type && m.model_type!=='unknown';
 // A running model's name as its runtime gives it: exo's org/name is the
 // directory org--name; one not on this disk is named by the same rule.
@@ -2132,8 +2143,7 @@ function renderPicker(){
           ${m.mtp?'<span class="tag">MTP</span>':''}
           ${isVision(m)?'<span class="tag">VISION</span>':''}
           <span class="vs${m.room&&m.room.small?' tight':''}"${m.room?` title="fits · ${
-            esc(m.room.text)}"`:''}>${gb(m.size_bytes)}${m.room&&m.room.kv_bytes_per_token?
-            ' · '+ktok(m.room.tokens)+' ctx':''}</span></div>`}).join('')}</div>
+            esc(m.room.text)}"`:''}>${gb(m.size_bytes)}</span></div>`}).join('')}</div>
     </div>`;
   const a=shown.filter(fits), b=shown.filter(g=>!fits(g));
   // Favorites and recents, shown only on the unfiltered "All" view so they
@@ -2280,7 +2290,15 @@ function launchBlock(ns){
   return '';
 }
 // A pick changed what "fits" means: the rail and an open picker follow.
+// Sharding and interconnect for a multi-machine launch: page state only.
+const MULTI={shard:'tensor', link:'tcp'};
+$('multiopts').querySelectorAll('.seg').forEach(g=>
+  g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    MULTI[g.dataset.k]=b.dataset.v;
+    g.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed', x===b));
+  }));
 function nodeSelChanged(){
+  $('multiopts').hidden=selNodes().length<2;
   pickInfo();
   if(!$('picker').hidden) renderPicker();
 }
