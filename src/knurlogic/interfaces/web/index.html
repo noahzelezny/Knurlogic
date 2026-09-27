@@ -445,6 +445,17 @@
  .unit .uhead{display:flex;align-items:center;justify-content:center;
    gap:10px;margin-bottom:8px}
  .unit .uhead .mk{width:36px;height:36px;flex:none;stroke:var(--acc);opacity:.9}
+ /* A machine is picked by clicking it: the teal line goes round the whole
+    unit, its name as well as its card. None picked is automatic. */
+ .unit{cursor:pointer;border-radius:var(--r);outline:1px solid transparent;
+   outline-offset:8px;transition:outline-color .15s}
+ .unit:hover{outline-color:var(--line)}
+ .unit.sel{outline-color:var(--acc);
+   box-shadow:0 0 0 8px color-mix(in srgb,var(--acc) 5%,transparent),
+     0 0 18px 8px color-mix(in srgb,var(--acc) 10%,transparent)}
+ .grp.no{opacity:.45}
+ .grp.no .var.no{opacity:1}
+ #pickinfo .note{color:var(--faint);margin-top:6px}
  .unit .uhead .mk.big{width:44px;height:44px;margin:-4px 0}
  .unit .uhead .ut{text-align:left;min-width:0}
  .unit .hw{font-size:10px;letter-spacing:.08em;color:var(--faint);
@@ -1080,6 +1091,37 @@ const OVL=(()=>{
 
 const GIB=1073741824, $=id=>document.getElementById(id);
 let LASTWS=0;   // this box's working set, learned from the first status
+// The machines picked in the MEMORY grid, by node name. None = automatic.
+// Kept in this browser as a convenience; the page state is the Set.
+let LASTNODES=[];
+const NODESEL=(()=>{ try{ return new Set(JSON.parse(
+  localStorage.getItem('kn.nodesel')||'[]')) }catch(e){ return new Set() } })();
+function saveNodeSel(){
+  try{ localStorage.setItem('kn.nodesel', JSON.stringify([...NODESEL])) }catch(e){} }
+// the picked machines that are still in the cluster
+const selNodes=()=>LASTNODES.filter(n=>NODESEL.has(n.node));
+const isLocal=n=>n.role==='local'||n.role==='server';
+// What a model has to fit in: the picked machines' working sets (each under
+// its allowance) added up, or with none picked, what it always was.
+function fitWS(){
+  const ns=selNodes();
+  return ns.length ? ns.reduce((x,n)=>x+nodeWS(n),0) : (LASTWS||0);
+}
+// A machine's room under its knurlogic allowance. For this one that is the
+// server's own answer (every model's `room` is worked out against it); with
+// nothing loaded the status reports the whole box, which is more than the
+// allowance lets knurlogic take. A peer's status carries its GPU working
+// set, the most its own page would allow.
+function nodeWS(n){
+  if(isLocal(n)){
+    const r=(window.ALLMODELS||[]).find(m=>m.room&&m.room.working_set_bytes);
+    if(r) return r.room.working_set_bytes;
+  }
+  return (n.memory||{}).working_set_bytes||0;
+}
+const fitWhere=()=>{ const ns=selNodes();
+  return !ns.length ? "this machine's memory"
+    : ns.length===1 ? `${ns[0].node}'s memory` : `the ${ns.length} picked machines' memory` };
 const gb=b=>Number.isFinite(b)?(b/GIB).toFixed(1)+' GiB':'--';
 const row=(k,v)=>`<div class="row"><span>${k}</span><span>${v}</span></div>`;
 // quotes too: esc() also fills attributes (title="…"), and a model's name
@@ -1551,7 +1593,7 @@ async function showBase(b){
   el.innerHTML='<div class="msg">reading…</div>';
   // what the resolver would give the rung that fits, as launch settings
   const preview=async lead=>{
-    const ws=LASTWS||0, m=b.ms.find(x=>!ws||x.size_bytes<=ws)||b.ms[0];
+    const ws=fitWS(), m=b.ms.find(x=>!ws||x.size_bytes<=ws)||b.ms[0];
     const doc=await getJSON('/settings.json?'+new URLSearchParams({artifact:m.path, tune:'balanced'}));
     if(seq!==SEQ) return;
     el.innerHTML=modelHTML(b, null, doc, `${lead}<div class="msg" style="margin-top:0">${
@@ -1843,7 +1885,8 @@ async function tick(){
     const swap=((n.metrics||{}).now||{}).swap_bytes;
     const what=[hw.chip||hw.model||'', inst?gb(inst).replace(/\.\d+ /,' '):'']
       .filter(Boolean).join(' · ');
-    return `<div class="unit${off?' off':''}">
+    return `<div class="unit${off?' off':''}${NODESEL.has(n.node)?' sel':''}"
+      data-node="${esc(n.node)}" title="click to pick this machine for Load model">
       <div class="uhead">${macIcon(hw.kind)}<div class="ut">
         <div class="nm">${esc(n.node)}</div>
         <div class="hw">${esc(what)||'&nbsp;'}</div></div></div>
@@ -1904,6 +1947,13 @@ async function tick(){
       '<line x1="2" y1="10" x2="54" y2="10"/></svg>'
     : '')+(more>0?`<div class="topomore ro">+${more} more machine${
       more===1?'':'s'} -- this page shows five</div>`:'');
+  LASTNODES=ns_;
+  $('topo').querySelectorAll('.unit[data-node]').forEach(u=>u.onclick=()=>{
+    const k=u.dataset.node;
+    NODESEL.has(k)?NODESEL.delete(k):NODESEL.add(k); saveNodeSel();
+    u.classList.toggle('sel', NODESEL.has(k));
+    nodeSelChanged();
+  });
   // One line under the machines. The gauges carry the split; this carries
   // the totals, and only the figures that are not already drawn above.
   if(m&&m.available){
@@ -2046,7 +2096,7 @@ function regroup(){
 }
 
 function renderPicker(){
-  const ws=LASTWS||0;
+  const ws=fitWS();
   const q=QUERY.trim().toLowerCase();
   const famCount={};
   GROUPS.forEach(g=>famCount[g.fam]=(famCount[g.fam]||0)+1);
@@ -2060,14 +2110,15 @@ function renderPicker(){
     (!q || g.name.toLowerCase().includes(q) ||
      g.ms.some(m=>m.name.toLowerCase().includes(q))));
   const fits=g=>!ws||g.lo<=ws;
+  const okm=m=>!ws||m.size_bytes<=ws;
   const rng=g=>g.ms.length===1 ? gb(g.hi)
     : `${g.ms.length} variants (${(g.lo/GIB).toFixed(0)}–${(g.hi/GIB).toFixed(0)} GiB)`;
-  const grp=g=>`<div class="grp" data-g="${esc(g.name)}">
+  const grp=g=>`<div class="grp${fits(g)?'':' no'}" data-g="${esc(g.name)}">
       <div class="grphd"><span class="cv">›</span>
         <span class="gn">${esc(vqName(g.name,g.ms))}</span>
         <span class="gv">${rng(g)}</span></div>
-      <div class="vars">${g.ms.map(m=>{
-        const ok=!ws||m.size_bytes<=ws;
+      <div class="vars">${[...g.ms.filter(okm),...g.ms.filter(m=>!okm(m))].map(m=>{
+        const ok=okm(m);
         return `<div class="var ${ok?'':'no'}" data-p="${esc(m.path)}"
           aria-current="${SEL&&SEL.path===m.path}">
           <span class="star" data-fav="${esc(m.path)}"
@@ -2099,7 +2150,7 @@ function renderPicker(){
       <div class="vars">${recMs.map(oneRow).join('')}</div>`;
   }
   $('prows').innerHTML=favHTML+
-    (a.length?`<div class="sect">fits in this machine's memory</div>`
+    (a.length?`<div class="sect">fits in ${esc(fitWhere())}</div>`
       +a.map(grp).join(''):'')
     +(b.length?`<div class="sect no">needs more than ${gb(ws)}</div>`
       +b.map(grp).join(''):'')
@@ -2130,7 +2181,7 @@ async function loadModels(){
   BASEKEY=baseKeys((d.models||[]).filter(m=>m.servable));
   migrateLaunchSets();
   regroup();
-  const ws=LASTWS||0;
+  const ws=fitWS();
   if(!SEL) SEL=MODELS.find(m=>!ws||m.size_bytes<=ws)||null;
   pickInfo();
 }
@@ -2201,14 +2252,33 @@ function pickInfo(){
   $('pickname').textContent=m?m.name:'choose a model';
   $('picksize').textContent=m?gb(m.size_bytes):'';
   if(!m){ el.innerHTML=''; $('launch').disabled=true; return }
-  $('launch').disabled=false;
-  const ws=LASTWS||0, fits=!ws||m.size_bytes<=ws;
+  const ws=fitWS(), fits=!ws||m.size_bytes<=ws, ns=selNodes();
   const tags=[m.is_vq?'VQ':'', m.mtp?'MTP':'', m.model_type]
     .filter(Boolean).map(esc).join(' · ');
+  // Launch loads on THIS machine and nowhere else: the page has no way yet
+  // to start a model on a peer, or across several. Picking those still
+  // answers the fit question; it does not pretend to launch.
+  const blocked=launchBlock(ns);
+  $('launch').disabled=!!blocked;
   el.innerHTML=`<div>${tags}</div>`+
-    (fits?`<div id="pickroom">${roomHTML(m.room)}</div>`:`<div class="warn">${gb(m.size_bytes)} against a ${gb(ws)}
-      working set — it will not fit this box</div>`);
+    (!fits?`<div class="warn">${gb(m.size_bytes)} against ${gb(ws)} of
+      working set in ${esc(fitWhere())} — it will not fit</div>`
+     : ns.length && !(ns.length===1&&isLocal(ns[0]))
+       ? `<div class="room">fits · ${gb(ws-m.size_bytes)} left in ${esc(fitWhere())}</div>`
+       : `<div id="pickroom">${roomHTML(m.room)}</div>`)+
+    (blocked?`<div class="note">${esc(blocked)}</div>`:'');
   SETS=launchSets(baseKey(m.name)); loadPreview();
+}
+function launchBlock(ns){
+  if(ns.length>1) return 'loading across machines comes after 0.1.0';
+  if(ns.length===1 && !isLocal(ns[0])) return `this page launches on its own
+    machine only; open ${ns[0].node}'s page to load there`;
+  return '';
+}
+// A pick changed what "fits" means: the rail and an open picker follow.
+function nodeSelChanged(){
+  pickInfo();
+  if(!$('picker').hidden) renderPicker();
 }
 $('openpick').onclick=()=>{
   OVL.open($('picker'), {face:$('picker').querySelector('.box')});
@@ -2218,7 +2288,7 @@ $('pclose').onclick=()=>OVL.close();
 $('psearch').oninput=e=>{ QUERY=e.target.value; renderPicker() };
 
 $('launch').onclick=async()=>{
-  const m=SEL; if(!m) return;
+  const m=SEL; if(!m || launchBlock(selNodes())) return;
   const b=$('launch'); b.disabled=true; b.textContent='Launching…';
   const j=await act({action:'load', target:m.path,
                      port:+$('loadport').value||undefined,
