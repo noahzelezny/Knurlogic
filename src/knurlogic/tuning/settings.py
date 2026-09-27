@@ -61,7 +61,19 @@ DECODE_CHUNK_HEADROOM_DIVISOR = 8
 # Prompt chunk width. Token-identical at every value (vqlab
 # tests/test_mtp_prefill.py gates this) -- purely a memory knob. mlx-lm's
 # server does not expose it, which is why it must be resolved here.
-PREFILL_CHUNK_DEFAULT = 2048
+#
+# 512 by default, every family, every box -- small chunk, parallel agents.
+# M4 sweep 2026-09-26, prefill tok/s at 4k/16k-token prompts (median of 3,
+# one server per arm), then the step transient:
+#   Qwen3.8 Flash 4.4bpw:  512 565/484 0.79 GiB | 1024 528/490 0.99
+#                          2048 552/524 2.11    | 4096 551/499 4.05
+#   Qwen3.5-397B VQ 2.2:   512 194/155 0.33 GiB | 1024 224/186 1.15-1.54
+#                          2048 244/205 2.95    | 4096 249/206 5.6-7.5
+# Width buys nothing on Flash, and up to ~30% prefill on the 397B VQ for a
+# 9-23x larger transient (4096 aborted Metal with one agent at 25k tokens).
+# A family's measured width is taken only on purpose: tune=fast on a box
+# with room, or set per base model.
+PREFILL_CHUNK_DEFAULT = 512
 PREFILL_CHUNK_TIGHT = 512
 
 # Per-ARCHITECTURE prompt chunk: a measurement with its run, kept in each
