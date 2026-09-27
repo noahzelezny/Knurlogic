@@ -711,6 +711,15 @@ def _sse_upstream(events, done):
             c.sendall(b"data: " + e + b"\n\n")
         if done:
             c.sendall(b"data: [DONE]\n\n")
+        # a FIN, not a reset: closing with request bytes still unread
+        # would reset the socket and lose what was sent before it
+        c.shutdown(socket.SHUT_WR)
+        c.settimeout(2)
+        try:
+            while c.recv(65536):
+                pass
+        except OSError:
+            pass
         c.close()
         srv.close()
     threading.Thread(target=run, daemon=True).start()
@@ -736,6 +745,21 @@ def test_a_rank_0_dying_mid_stream_ends_the_stream_with_cluster_failed(
     err = json.loads(last[6:])["error"]
     assert err["code"] == "cluster_failed"
     assert "rank 1 on B exited" in err["message"]
+
+
+def test_a_relayed_cluster_failed_is_not_said_twice(monkeypatch):
+    """A peer's rank 0 dies: the peer page's relay already ends the stream
+    with its cluster_failed event; this page passes that on and adds none
+    of its own (which would name whichever rank it saw exit last)."""
+    monkeypatch.setattr(ui, "cluster_failure",
+                        lambda b: "rank 1 on B exited")
+    relayed = json.dumps(ui.cluster_failed("rank 0 on A exited")).encode()
+    base = _sse_upstream([b'{"x": 1}', relayed], False)
+    h = _Capture()
+    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    out = h.wfile.getvalue().decode()
+    assert out.count("cluster_failed") == 1
+    assert "rank 0 on A exited" in out and "rank 1 on B" not in out
 
 
 def test_a_cut_stream_that_is_no_cluster_job_just_ends(monkeypatch):
