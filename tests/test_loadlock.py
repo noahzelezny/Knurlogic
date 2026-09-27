@@ -119,3 +119,35 @@ def test_no_engine_import():
         capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "False"
+
+
+def test_ring_ranks_on_one_machine_do_not_deadlock_on_the_lock(
+        tmp_path, monkeypatch):
+    """Two ranks of one ring on one box: the split's collective and the
+    head agreement are rendezvous both ranks must reach, so neither may
+    run while one rank holds the machine's load lock (the pipeline hang
+    of 2026-09-27: rank 0 in the dtype all_gather holding the lock, rank 1
+    waiting for it)."""
+    import threading
+    import mlx.nn as nn
+    from knurlogic.engine.runtime import host as H
+    import importlib
+    L = importlib.import_module("knurlogic.engine.serve.load")
+    monkeypatch.setenv("KNURLOGIC_LOADLOCK", str(tmp_path / "load.lock"))
+    monkeypatch.setattr(L, "load_unlocked",
+                        lambda path, code, lazy=False: (nn.Linear(2, 2),
+                                                        object()))
+    monkeypatch.setattr(H.ModelHost, "_bind_head", lambda self, path: None)
+    meet = threading.Barrier(2, timeout=10)
+    hosts = [H.ModelHost(shard=lambda m: meet.wait(), vision=False,
+                         load_wait_s=10.0,
+                         head_agree=lambda bound: meet.wait() >= 0)
+             for _ in range(2)]
+    ts = [threading.Thread(target=h.load, args=(str(tmp_path),))
+          for h in hosts]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(30)
+    assert [h.state for h in hosts] == ["ready", "ready"], \
+        [h.error for h in hosts]
