@@ -232,6 +232,7 @@
  .var .vs{color:var(--faint);font-size:10.5px;white-space:nowrap}
  .var .tag{margin:0}
  .var.no{opacity:.45}
+ .var .vs.tight{color:var(--warn)}
  .var[aria-current=true]{color:var(--acc)}
  /* exo's rail is a WORKFLOW -- instances, then a picker with its options
     and a launch -- not a list of the disk. Fifty rows with a button on each
@@ -315,8 +316,13 @@
  .sheetbody .panel.on{display:flex}
  .sheetbody .pickbody{flex:1;grid-template-columns:118px 1fr}
  #settings{flex-direction:column}
- #setmach{align-self:flex-start;margin:0 0 10px}
+ .scol{display:flex;flex-direction:column;min-width:0;min-height:0}
+ #setmach{align-self:flex-start;margin:8px 0 0 18px;flex-wrap:wrap}
  #setmach button{padding:5px 12px;font-size:10.5px}
+ #setmach button small{opacity:.7;font-size:9.5px;margin-left:6px}
+ .allow{margin-top:18px}
+ .room{font-size:11px;color:var(--dim);margin-top:4px}
+ .room.small{color:var(--warn)}
  #settabs .fam{overflow-wrap:anywhere}
  .mfacts{font-size:11px;color:var(--dim);margin:-4px 0 14px}
  .sbody{overflow:auto;padding:14px 18px 18px;min-width:0}
@@ -915,19 +921,19 @@
       <button id="sheetclose" class="mini">Close</button>
     </div>
     <div class="sheetbody">
-      <!-- Laid out like the picker: what to look at down the side, one of
-           them at a time on the right. The machine is picked across the top
-           because every knob here is a machine's -- resolved for its memory,
-           read by the model it is running; down the side, that machine's own
-           tabs: Machine, one per running model, Next launch. -->
+      <!-- Laid out like the picker: two sections down the side, CLUSTER
+           (a tab per machine: its memory, wired limit and knurlogic
+           allowance) and MODELS (a tab per running model, whichever machine
+           runs it, and Next launch) -- a model's knobs are the model's, and
+           which machine it sits on does not change them. The tabs across the
+           top are the picked section's, starting where the side ends. -->
       <section class="panel" id="settings">
         <div class="lab">Settings</div>
-        <div class="seg" id="setmach" role="group" aria-label="machine"></div>
         <div class="pickbody">
           <div class="fams" id="settabs"></div>
-          <div class="sbody">
-            <!-- every machine's tabs: one layout, drawn by showMachine -->
-            <div id="machbody"></div>
+          <div class="scol">
+            <div class="seg" id="setmach" role="group" aria-label="tabs"></div>
+            <div class="sbody"><div id="machbody"></div></div>
           </div>
         </div>
       </section>
@@ -1100,7 +1106,8 @@ function saveLaunchSets(model, sets){
 // One knob, one line: NAME (i) live|on restart, and its control on the
 // right. `c` says whose it is: g (the staging group), where (the model
 // server, '' this page's own, null for a model not running), model (its
-// name, for launch settings) and label (how the confirm lists it).
+// name, for launch settings), label (how the confirm lists it) and url
+// (a setting of this page's own, POSTed there as {gib}: the allowance).
 // Nothing running means nothing is live: every knob waits for a launch.
 function knobHTML(k, c){
   const cur=k.running??k.would_be??k.value;
@@ -1129,7 +1136,7 @@ function knobHTML(k, c){
   return `<div class="knob${st!=null?' staged':''}">
     <div class="hd"><span class="k">${esc(k.name)}${infoHTML(about,'down')}${tag}</span>
       <span class="kedit" data-knob="${esc(k.name)}" data-g="${esc(c.g)}"
-        ${c.where!=null?`data-where="${esc(c.where)}"`:''} data-model="${esc(c.model)}"
+        ${c.where!=null?`data-where="${esc(c.where)}"`:''}${c.url?` data-url="${esc(c.url)}"`:''} data-model="${esc(c.model)}"
         data-label="${esc(c.label)}" data-reach="${reach}" data-cur="${esc(cur)}"
         data-from="${esc(from)}"${next!=null?` data-next="${esc(next)}"`:''}>${ctl}${
         k.unit?`<span class="ro">${esc(k.unit)}</span>`:''}</span></div>
@@ -1172,7 +1179,7 @@ function stage(key, grp, name, knob){
 document.addEventListener('change', e=>{
   const box=e.target.closest('.kedit'); if(!box) return;
   const d=box.dataset;
-  stage(d.g, {label:d.label, where:d.where, model:d.model}, d.knob,
+  stage(d.g, {label:d.label, where:d.where, model:d.model, url:d.url}, d.knob,
         {from:d.from, to:e.target.value.trim(), reach:d.reach, cur:d.cur});
   const to=stagedVal(d.g,d.knob), row=box.closest('.knob');
   row.classList.toggle('staged', to!=null);
@@ -1195,7 +1202,7 @@ const STAGEPOP=(()=>{
   function show(){
     const n=stagedCount(), now=part('live'), later=part('restart');
     pop.innerHTML=`<b>${n} change${n===1?'':'s'}</b>
-      ${now?`<div class="sh">apply now, to the running model</div>${now}`:''}
+      ${now?`<div class="sh">apply now</div>${now}`:''}
       ${later?`<div class="sh">on its next launch from this page</div>${later}
         <div class="msg">Saved as that model's launch settings; it keeps
         running as it is until it is launched again. Nothing is restarted.</div>`:''}
@@ -1219,8 +1226,8 @@ const STAGEPOP=(()=>{
         lines.push(...later.map(([k,v])=>`<div><b>${esc(k)}</b> ${esc(v.to)} on next launch</div>`));
       }
       if(live.length){
-        const url=g.where ? '/apply?'+new URLSearchParams({where:g.where}) : '/settings.json';
-        const body=Object.fromEntries(live.map(([k,v])=>[k,v.to]));
+        const url=g.url || (g.where ? '/apply?'+new URLSearchParams({where:g.where}) : '/settings.json');
+        const body=g.url ? {gib:+live[0][1].to} : Object.fromEntries(live.map(([k,v])=>[k,v.to]));
         let r;
         try{
           const x=await fetch(url,{method:'POST', headers:{'Content-Type':'application/json'},
@@ -1243,6 +1250,8 @@ const STAGEPOP=(()=>{
       <div class="ctl"><button class="go" data-s="done">Close</button></div>`;
     pop.querySelector('[data-s=done]').focus();
     if(SEL) { SETS=launchSets(SEL.name); renderLoadKnobs() }
+    // the allowance moves what fits and the room each model leaves
+    if(out.length){ loadSettings(ASK); loadModels() }
   }
   pop.addEventListener('click', e=>{
     const s=e.target.closest('[data-s]'); if(!s) return;
@@ -1302,6 +1311,8 @@ async function loadSettings(q){
   ASK=DOC.asked||{};
   const w=document.querySelector('#machbody[data-t="local"] .mwired');
   if(w){ w.innerHTML=wiredHTML(DOC,true); wireWired() }
+  const al=document.querySelector('#machbody[data-t="local"] .mallow');
+  if(al) al.innerHTML=allowHTML(DOC.allowance, machines()[0], true);
 }
 
 // --- settings, per machine --------------------------------------------------
@@ -1321,7 +1332,8 @@ async function getJSON(url){
        return r.ok ? j : {error:j.error||('HTTP '+r.status)} }
   catch(e){ return {error:String(e.message||e)} }
 }
-let STAB='local', SSUB='machine';
+// SSEC is the side's section; STAB the tab picked across the top in it.
+let SSEC='cluster', STAB='local';
 // Every machine alike: this one first, then each answering peer; its name
 // and hardware from /status.json's nodes, its models from the residency.
 function machines(){
@@ -1343,29 +1355,30 @@ function machModels(m){
   return [{name:(DOC.artifact||{}).name||'this server', where:''}]
     .concat(m.models.filter(r=>r.where.replace(/\/$/,'')!==location.origin));
 }
-// Next launch is this page's: a peer's launches are made on its own page,
-// and what it has picked there is not readable from here, so it has none.
-const hasLaunch=m=>m.id==='local';
+// Every running model, whichever machine runs it, labelled with the machine.
+function allModels(){
+  return machines().flatMap(m=>machModels(m).map(r=>({...r, mach:m})));
+}
 function renderSetTabs(){
-  const ms=machines();
-  if(!ms.some(m=>m.id===STAB)) STAB='local';
-  const m=ms.find(x=>x.id===STAB), models=machModels(m);
-  $('setmach').innerHTML=ms.map(x=>`<button data-m="${esc(x.id)}"
-    aria-pressed="${x.id===STAB}" title="${esc(x.error?'not answering':
-    (x.page||location.host).replace(/^https?:\/\//,''))}">${esc(x.name)}</button>`).join('');
-  $('setmach').querySelectorAll('button').forEach(b=>b.onclick=()=>{
-    if(b.dataset.m===STAB) return;
-    STAB=b.dataset.m; SSUB='machine'; renderSetTabs(); showSetTab() });
-  const tabs=[{id:'machine', name:'Machine'}]
-    .concat(models.map(r=>({id:'m:'+r.where, name:shortName(r.name), full:r.name,
-      sub:r.where?r.where.replace(/^https?:\/\//,''):location.host})))
-    .concat(hasLaunch(m)?[{id:'launch', name:'Next launch'}]:[]);
-  if(!tabs.some(t=>t.id===SSUB)) SSUB='machine';
-  $('settabs').innerHTML=tabs.map(t=>`<div class="fam" data-t="${esc(t.id)}"
-    aria-current="${t.id===SSUB}"${t.full?` title="${esc(t.full)}"`:''}>${esc(t.name)}${
-    t.sub?`<small>${esc(t.sub)}</small>`:''}</div>`).join('');
+  const secs=[{id:'cluster', name:'Cluster'}, {id:'models', name:'Models'}];
+  $('settabs').innerHTML=secs.map(t=>`<div class="fam" data-s="${t.id}"
+    aria-current="${t.id===SSEC}">${t.name}</div>`).join('');
   $('settabs').querySelectorAll('.fam').forEach(f=>f.onclick=()=>{
-    SSUB=f.dataset.t; renderSetTabs(); showSetTab() });
+    if(f.dataset.s===SSEC) return;
+    SSEC=f.dataset.s; STAB=''; renderSetTabs(); showSetTab() });
+  const tabs=SSEC==='cluster'
+    ? machines().map(x=>({id:x.id, name:x.name, title:x.error?'not answering':
+        (x.page||location.host).replace(/^https?:\/\//,'')}))
+    : allModels().map(r=>({id:'m:'+r.where, name:shortName(r.name), sub:r.mach.name,
+        title:r.name+' · '+(r.where||location.host).replace(/^https?:\/\//,'')}))
+        .concat([{id:'launch', name:'Next launch'}]);
+  if(!tabs.some(t=>t.id===STAB)) STAB=tabs[0].id;
+  $('setmach').innerHTML=tabs.map(t=>`<button data-t="${esc(t.id)}"
+    aria-pressed="${t.id===STAB}" title="${esc(t.title||'')}">${esc(t.name)}${
+    t.sub?`<small>${esc(t.sub)}</small>`:''}</button>`).join('');
+  $('setmach').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    if(b.dataset.t===STAB) return;
+    STAB=b.dataset.t; renderSetTabs(); showSetTab() });
 }
 // One model's section: its header, the tunes to preview, a row per knob a
 // runtime reads, and the rest folded away.
@@ -1402,44 +1415,78 @@ function factsHTML(n){
     ws&&`GPU working set ${gb(ws).replace(/\.\d+ /,' ')}`].filter(Boolean);
   return f.length ? `<div class="mfacts">${esc(f.join(' · '))}</div>` : '';
 }
-// One machine's selected tab, this one's or a peer's, drawn by the same
-// code; only where the data comes from differs.
+// The knurlogic allowance: the most memory knurlogic may use on the machine
+// -- the ceiling for a load's fit check and a model server's memory guard.
+// This machine's is staged like a knob and sent on close (POST
+// /allowance.json); a peer's is read from its /settings.json and set on
+// that peer's own page.
+function allowHTML(a, m, own){
+  const head='<div class="sidelab">knurlogic allowance</div>';
+  if(!a) return `<div class="allow">${head}<div class="msg">${own?'not read':
+    'not reported: that machine\'s knurlogic predates the allowance'}</div></div>`;
+  const none=!a.allowance_gib;
+  const say=`${none?'none -- knurlogic takes the working set':
+    'at most '+a.allowance_gib+' GiB'} · a load may have ${a.effective_gib} GiB`;
+  if(!own) return `<div class="allow">${head}<div class="msg">${esc(say)}</div>
+    <div class="msg">Set on that machine's own page.</div></div>`;
+  const k={name:'knurlogic allowance', value:String(a.allowance_gib), reach:'live',
+    unit:'GiB', what:'The most memory knurlogic may use on this machine: the '+
+      'ceiling for a load\'s fit check and for the memory guard of a model '+
+      'server it starts. 0 is none.',
+    reach_why:'A load checks against it at once; a model already running '+
+      'keeps the working set it started with. Kept in '+a.file};
+  return `<div class="allow">${head}${knobHTML(k,{g:'allowance', where:'',
+    url:'/allowance.json', model:'', label:m.name+' · machine'})}
+    <div class="msg">${esc(say)}</div></div>`;
+}
+// A cluster tab: one machine, this one's or a peer's, drawn by the same code;
+// only where the data comes from differs.
 async function showMachine(m){
-  const tab=STAB+'|'+SSUB, own=m.id==='local', el=$('machbody');
-  const stale=()=>STAB+'|'+SSUB!==tab;
-  el.dataset.t=SSUB==='machine'?m.id:'';
+  const tab=SSEC+'|'+STAB, own=m.id==='local', el=$('machbody');
+  const stale=()=>SSEC+'|'+STAB!==tab;
+  el.dataset.t=m.id;
   const where=own?location.host:m.page.replace(/^https?:\/\//,'');
-  if(SSUB==='machine'){
-    el.innerHTML=`<div class="mhd">${esc(m.name)}<span class="ro">${esc(where)}</span></div>
-      ${factsHTML(m.node||{})}<div class="mwired"><div class="msg">reading…</div></div>
-      ${own?'':'<div class="msg">Its wired limit is set on that machine\'s own page.</div>'}`;
-    const doc=own ? DOC : await getJSON(peekURL(m.page,'/settings.json'));
-    if(stale()) return;
-    el.querySelector('.mwired').innerHTML=wiredHTML(doc, own);
-    if(own) wireWired();
-    return;
-  }
-  if(SSUB==='launch'){
+  el.innerHTML=`<div class="mhd">${esc(m.name)}<span class="ro">${esc(where)}</span></div>
+    ${factsHTML(m.node||{})}<div class="mwired"><div class="msg">reading…</div></div>
+    ${own?'':'<div class="msg">Its wired limit is set on that machine\'s own page.</div>'}
+    <div class="mallow"></div>`;
+  const doc=own ? DOC : await getJSON(peekURL(m.page,'/settings.json'));
+  if(stale()) return;
+  el.querySelector('.mwired').innerHTML=wiredHTML(doc, own);
+  el.querySelector('.mallow').innerHTML=allowHTML(doc&&doc.allowance, m, own);
+  if(own) wireWired();
+}
+// A models tab: one running model's knobs (the machine is only a label), or
+// Next launch -- this page's picked model; a peer's launches are made on its
+// own page.
+async function showModel(){
+  const tab=SSEC+'|'+STAB, el=$('machbody');
+  el.dataset.t='';
+  if(STAB==='launch'){
     // keyed as Launch keys it (the picked model's name), so both agree
     const pv=PREVIEW, name=pv&&((SEL&&SEL.name)||(pv.artifact&&pv.artifact.name));
+    const me=machines()[0];
     el.innerHTML = name && (pv.knobs||[]).length
       ? `<div class="sgrp"><div class="shd">${esc(name)}<span class="ro">picked under
           Load model · how it would launch at ${esc(pv.tune)}</span></div>
+          ${roomHTML(pv.room)}
           ${pv.knobs.filter(k=>k.reach!=='no-effect').map(k=>knobHTML(k,
-            {g:'launch:'+name, where:null, model:name, label:m.name+' · '+shortName(name)})).join('')}</div>`
+            {g:'launch:'+name, where:null, model:name, label:me.name+' · '+shortName(name)})).join('')}</div>`
       : `<div class="msg">Pick a model under Load model to see what it would
           load with; its knobs are saved here as its launch settings.</div>`;
     return;
   }
-  const r=machModels(m).find(x=>'m:'+x.where===SSUB); if(!r) return;
+  const r=allModels().find(x=>'m:'+x.where===STAB);
+  if(!r){ el.innerHTML='<div class="msg">No model is running.</div>'; return }
   el.innerHTML='<div class="msg">reading…</div>';
   const doc=await getJSON(docURL(r.where, TUNES[r.where]?{tune:TUNES[r.where]}:{}));
-  if(stale()) return;
-  el.innerHTML=modelHTML(r, doc, m.name);
+  if(SSEC+'|'+STAB!==tab) return;
+  el.innerHTML=modelHTML(r, doc, r.mach.name);
   el.querySelectorAll('[data-tune]').forEach(b=>b.onclick=()=>{
-    TUNES[r.where]=b.dataset.tune; showMachine(m) });
+    TUNES[r.where]=b.dataset.tune; showModel() });
 }
 function showSetTab(){
+  if(SSEC==='models') return showModel();
   const m=machines().find(x=>x.id===STAB); if(m) showMachine(m);
 }
 
@@ -1882,7 +1929,9 @@ function renderPicker(){
           ${m.is_vq?'<span class="tag">VQ</span>':''}
           ${m.mtp?'<span class="tag">MTP</span>':''}
           ${isVision(m)?'<span class="tag">VISION</span>':''}
-          <span class="vs">${gb(m.size_bytes)}</span></div>`}).join('')}</div>
+          <span class="vs${m.room&&m.room.small?' tight':''}"${m.room?` title="fits · ${
+            esc(m.room.text)}"`:''}>${gb(m.size_bytes)}${m.room&&m.room.kv_bytes_per_token?
+            ' · '+ktok(m.room.tokens)+' ctx':''}</span></div>`}).join('')}</div>
     </div>`;
   const a=shown.filter(fits), b=shown.filter(g=>!fits(g));
   // Favorites and recents, shown only on the unfiltered "All" view so they
@@ -1947,6 +1996,8 @@ async function loadPreview(){
                                tune:window.LOADTUNE||'balanced'});
   try{ PREVIEW=await (await fetch('/settings.json?'+q)).json() }
   catch(e){ PREVIEW=null }
+  // the preview's room is asked against the tune picked, and fresher
+  const pr=$('pickroom'); if(pr && PREVIEW && PREVIEW.room) pr.innerHTML=roomHTML(PREVIEW.room);
   renderLoadKnobs();
 }
 function renderLoadKnobs(){
@@ -1978,6 +2029,24 @@ function renderLoadKnobs(){
   });
 }
 
+// What a model that fits leaves to talk in (the server's context_room):
+// the working set, under this machine's allowance, less the weights and the
+// scheduler's step margin -- in GiB and about how many tokens of context,
+// shared by every conversation. Amber when it is small: GLM-5.3 "fit" the
+// 128 GB M4 with 6 GiB left, and four long agent conversations never ran.
+const ktok=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?Math.round(n/1e3)+'k':String(n);
+function roomHTML(r){
+  if(!r) return '';
+  // asked of THIS machine: a model picked for a bigger peer does not fit here
+  if(!r.fits) return `<div class="room small">${gb(r.weights_bytes)} does not fit
+    this machine's ${gb(r.working_set_bytes)} (its working set, under the
+    knurlogic allowance)</div>`;
+  return `<div class="room${r.small?' small':''}" title="${esc(
+    `working set ${gb(r.working_set_bytes)} − weights ${gb(r.weights_bytes)} − `+
+    `step margin ${gb(r.margin_bytes)}`+(r.kv_why?` · KV ${r.kv_why}`:'')+
+    (r.window?` · its window is ${r.window.toLocaleString()} tokens`:''))}">fits · ${esc(r.text)}${
+    r.small?' — little room for long conversations':''}</div>`;
+}
 function pickInfo(){
   const m=SEL, el=$('pickinfo');
   $('pickname').textContent=m?m.name:'choose a model';
@@ -1988,7 +2057,7 @@ function pickInfo(){
   const tags=[m.is_vq?'VQ':'', m.mtp?'MTP':'', m.model_type]
     .filter(Boolean).map(esc).join(' · ');
   el.innerHTML=`<div>${tags}</div>`+
-    (fits?'':`<div class="warn">${gb(m.size_bytes)} against a ${gb(ws)}
+    (fits?`<div id="pickroom">${roomHTML(m.room)}</div>`:`<div class="warn">${gb(m.size_bytes)} against a ${gb(ws)}
       working set — it will not fit this box</div>`);
   SETS=launchSets(m.name); loadPreview();
 }
