@@ -390,6 +390,9 @@ def _preview(path: str, tune: str, working_set_gib=None,
     if not ws:
         budget = wired.load_budget()
         ws = budget["bytes"]
+    if not kv_bits and tune in S.TUNE_PROFILES:
+        # the room is counted at the preset's KV precision (lean: 8-bit)
+        kv_bits = S.preset_launch(tune, a.model_type)[0].get("kv_bits")
     bits = S.kv_bits_of(kv_bits)
     if resolve_kv_refusal(a, bits):
         bits = None
@@ -522,7 +525,7 @@ def knob_reach(artifact, name: str, live_knobs, restart_why=RESTART_WHY):
 
 def settings_document(artifact, live_env: dict, live_tune: str,
                       live_working_set: int, resolve_fn, wired_advice=None,
-                      tunes=("safe", "balanced", "fast"),
+                      tunes=None,
                       live_knobs=(), restart_why=RESTART_WHY) -> callable:
     """Build the `/settings.json` handler.
 
@@ -533,6 +536,7 @@ def settings_document(artifact, live_env: dict, live_tune: str,
     settings UIs that show neither.
     """
     from knurlogic.tuning import settings as S
+    tunes = tunes or S.PRESETS
 
     def handler(q: dict) -> dict:
         tune = (q.get("tune") or [live_tune])[0]

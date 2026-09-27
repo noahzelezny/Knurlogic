@@ -44,6 +44,10 @@ class Resolution:
     #: knob -> the values THIS artifact may take, where they are narrower
     #: than settings.KNOB_RANGE (KV bits on a family that refuses them)
     ranges: dict = field(default_factory=dict)
+    #: the launch preset (= the tune): its name, the values it set, and --
+    #: once `apply_preset_overrides` has run -- which of them an explicit
+    #: per-model setting beat
+    preset: dict = field(default_factory=dict)
 
     def as_exports(self) -> str:
         return "\n".join(f"export {k}={v}" for k, v in sorted(self.env.items()))
@@ -131,7 +135,7 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 #: whether or not an artifact's bundled runtime reads them.
 ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "prompt_concurrency",
                    "context_length", "mtp", "mtp_dynamic", "kv_bits",
-                   "cross_chip")
+                   "cross_chip", "preset")
 
 
 def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
@@ -608,8 +612,10 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     if window:
         # the model's own window: the cap a person lowers, never raises past
         emit(r, artifact, "context_length", window)
-    if tight or tune == "safe":
-        emit(r, artifact, "prompt_concurrency", S.PROMPT_CONCURRENCY_TIGHT)
+    launch, launch_notes = S.preset_launch(tune, artifact.model_type)
+    if tight or tune == "safe" or "prompt_concurrency" in launch:
+        emit(r, artifact, "prompt_concurrency",
+             launch.get("prompt_concurrency", S.PROMPT_CONCURRENCY_TIGHT))
         r.notes.append(
             "one prompt prefilled at a time: the transient is per prompt, so "
             "the engine's default of 8 together is 8x the spike")
@@ -637,7 +643,9 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     emit(r, artifact, "cache_limit_gb", cache)
     if tune != "balanced":
         r.notes.append(f"tune={tune}: {t['why']}")
-    model_launch(r, artifact, kv_bits)
+    model_launch(r, artifact, kv_bits, tune)
+    r.notes.extend(launch_notes)
+    _preset_record(r, tune, launch)
 
     if working_set_bytes > 0 and headroom <= 0:
         r.warnings.append(
@@ -657,7 +665,45 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     return r
 
 
-def model_launch(r: Resolution, artifact: Artifact, kv_bits=None) -> None:
+def _preset_record(r: Resolution, tune: str, launch: dict) -> None:
+    """Which env values the preset put there: its launch settings, plus the
+    prompt chunk / cache limit its profile names."""
+    t = S.TUNE_PROFILES[tune]
+    logicals = set(launch)
+    if "VQLAB_PREFILL_CHUNK" in t:
+        logicals.add("prefill_chunk")
+    if "VQLAB_CACHE_LIMIT_GB" in t:
+        logicals.add("cache_limit_gb")
+    names = {n for lg in logicals for n in S.KNOB_ALIASES.get(lg, (lg,))}
+    r.preset = {"name": tune, "why": t.get("why", ""),
+                "from_preset": {k: v for k, v in sorted(r.env.items())
+                                if k in names},
+                "overridden": {}}
+
+
+def apply_preset_overrides(r: Resolution, overrides: dict) -> dict:
+    """Record which of the preset's values an explicit setting beat:
+    {name: {"preset": value, "set": value}}. The explicit value wins; this
+    only says so. Returns r.preset."""
+    fp = r.preset.setdefault("from_preset", {})
+    ov = r.preset.setdefault("overridden", {})
+    for k, v in (overrides or {}).items():
+        if k in fp and str(fp[k]) != str(v):
+            ov[k] = {"preset": fp.pop(k), "set": str(v)}
+    return r.preset
+
+
+def preset_env(artifact: Artifact, tune: str) -> dict:
+    """The preset's model launch settings as env names (MODEL_KNOBS), for a
+    caller that must read them before resolving (serve: KV bits change
+    what the context costs)."""
+    launch, _ = S.preset_launch(tune, artifact.model_type)
+    return {S.KNOB_ALIASES[k][0]: str(v) for k, v in launch.items()
+            if S.KNOB_ALIASES[k][0] in S.MODEL_KNOBS}
+
+
+def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
+                 tune: str = S.PRESET_DEFAULT) -> None:
     """The model's own launch settings: MTP drafting and its controller
     where a head ships beside the weights, and the KV precision this
     family allows (every value but bf16 refused, with the reason, where
@@ -667,12 +713,14 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None) -> None:
         head = find_head(artifact.path)
     except Exception:
         head = None
+    launch, _ = S.preset_launch(tune, artifact.model_type)
     if head is not None:
-        emit(r, artifact, "mtp", "on")
-        emit(r, artifact, "mtp_dynamic", "on")
+        emit(r, artifact, "mtp", launch.get("mtp", "on"))
+        emit(r, artifact, "mtp_dynamic", launch.get("mtp_dynamic", "on"))
     bits, why = S.kv_quant_for(artifact.model_type)
-    emit(r, artifact, "kv_bits", "bf16")
-    emit(r, artifact, "cross_chip", "off")
+    emit(r, artifact, "kv_bits", launch.get("kv_bits", "bf16"))
+    emit(r, artifact, "cross_chip", launch.get("cross_chip", "off"))
+    emit(r, artifact, "preset", tune)
     r.ranges["KNURLOGIC_KV_BITS"] = ["bf16"] + [str(b) for b in bits]
     if not bits:
         r.notes.append(f"KV cache stays bf16: {why}")
