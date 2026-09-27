@@ -33,7 +33,16 @@ class ModelHost:
 
     def __init__(self, *, draft: bool = True,
                  executes_artifact_code: bool = False,
-                 image_store_bytes: Optional[int] = None):
+                 image_store_bytes: Optional[int] = None,
+                 shard=None, vision: bool = True, load_wait_s: float = 0.0):
+        """`shard(model)`: split the weights in place before they are read
+        (a tensor ring: loaded lazily, split, then evaluated, so a rank
+        never holds the whole model). `vision=False` binds no tower.
+        `load_wait_s`: how long to wait for the machine's load lock (ranks
+        of one ring on one machine load one after another)."""
+        self.shard = shard
+        self.vision = vision
+        self.load_wait_s = load_wait_s
         self.draft = draft
         self.image_store_bytes = image_store_bytes
         self.executes_artifact_code = executes_artifact_code
@@ -92,7 +101,8 @@ class ModelHost:
         self._set("loading")
         try:
             from knurlogic.machine import loadlock
-            with loadlock.model_load(path, "runtime.host"):
+            with loadlock.model_load(path, "runtime.host",
+                                     wait_s=self.load_wait_s):
                 self.model, self.tokenizer = self._weights(path)
             self.model_key = (path, None, None)
             self._bind_vision(path)
@@ -126,10 +136,22 @@ class ModelHost:
 
     def _weights(self, path: str):
         from knurlogic.engine.serve.load import load_unlocked
-        return load_unlocked(path, self.executes_artifact_code)
+        if self.shard is None:
+            return load_unlocked(path, self.executes_artifact_code)
+        import mlx.core as mx
+        model, tok = load_unlocked(path, self.executes_artifact_code,
+                                   lazy=True)
+        self.shard(model)
+        mx.eval(model.parameters())
+        return model, tok
 
     def _bind_vision(self, path: str) -> None:
         from knurlogic.engine.serve import vision
+        if not self.vision:
+            state.VISION.update(serve=None, model=self.model,
+                                error="not on a tensor-split ring")
+            vision.set_spec(None)
+            return
         try:
             vision.bind(path, self, store_bytes=self.image_store_bytes)
         except Exception as e:
