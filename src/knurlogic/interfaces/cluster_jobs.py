@@ -614,7 +614,10 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
         _WATCH.forget(job)
         if mine or spec:
             any_rec = next(iter(mine.values()), {})
-            ENDED[job] = {"reason": reason, "t": time.time(),
+            port = next((int(v["port"]) for v in mine.values()
+                         if v.get("port")), None) or (
+                int((spec or {}).get("port") or 0) or None)
+            ENDED[job] = {"reason": reason, "t": time.time(), "port": port,
                           "machines": any_rec.get("machines")
                           or [n.get("name") for n in (spec or {}).get(
                               "nodes") or []]}
@@ -694,6 +697,32 @@ def jobs_document() -> list:
         else:
             out.append({"job": job, "phase": "stopped", **e})
     return out
+
+
+def failure_of_port(port) -> str:
+    """Why the cluster job whose rank 0 serves on `port` here cannot
+    answer -- "" when no job of this machine's serves there. A dropped
+    connection to a live job's rank 0 has the watcher look at once, so the
+    answer carries the job's real stop reason, not a guess."""
+    try:
+        port = int(port or 0)
+    except (TypeError, ValueError):
+        return ""
+    if not port:
+        return ""
+    job = job_of_port(port)
+    if job:
+        try:
+            watch_once()
+        except Exception:
+            pass
+    for j, e in sorted(ENDED.items(), key=lambda kv: -kv[1]["t"]):
+        if (job and j == job) or (not job and e.get("port") == port):
+            return e.get("reason") or "stopped"
+    if job:
+        return (f"rank 0 of cluster job {job} dropped the connection; the "
+                f"job is failing")
+    return ""
 
 
 def job_of_port(port: int) -> str:

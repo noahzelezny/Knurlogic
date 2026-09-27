@@ -679,6 +679,9 @@ PEER_LOADED_S = 2.5
 #: goes to the peer's page relay (PEER_RELAY) instead. Refilled by every
 #: peer survey.
 _PEER_TARGETS: dict = {}
+#: the cluster jobs peers last reported, {job: doc} (running, and the ones
+#: that ended lately with why): what a dropped connection is explained by
+_PEER_JOBS: dict = {}
 #: the peer page's relay prefix: /peer/v1/... reaches the model servers
 #: that page itself started, by model name (peer_relay)
 PEER_RELAY = "/peer"
@@ -757,15 +760,23 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
         res.append(out.get(p.key) or {
             "machine": p.name or p.host, "address": p.key, "resident": [],
             "error": f"did not answer in {timeout:.1f} s"})
-    targets = {}
+    targets, pjobs = {}, {}
     for m in res:
         for r in m["resident"]:
             if r.get("runtime") == "knurlogic" and r.get("where"):
+                c = r.get("cluster") if isinstance(r.get("cluster"),
+                                                   dict) else {}
                 targets[r["where"].rstrip("/")] = {
                     "machine": m["machine"],
-                    "relay": f"http://{m['address']}"}
+                    "relay": f"http://{m['address']}",
+                    "job": str(c.get("job") or "")}
+        for j in m.get("jobs") or []:
+            if j.get("job"):
+                pjobs[str(j["job"])] = j
     _PEER_TARGETS.clear()
     _PEER_TARGETS.update(targets)
+    # a job that ended stays explainable after its page stops listing it
+    _PEER_JOBS.update(pjobs)
     _PEER_AT[0] = time.time()
     return res
 
@@ -859,10 +870,45 @@ def _send_json(handler, code: int, doc) -> None:
     handler.wfile.write(out)
 
 
-def _stream(handler, url: str, body: bytes, timeout: float = 3600) -> None:
+def cluster_failure(base: str) -> str:
+    """Why the model at `base` is a cluster job that cannot answer, or ""
+    when it is not one. A peer's job is looked up in a fresh survey (its
+    page reports the jobs that ended, with why); this machine's by port."""
+    base = (base or "").rstrip("/")
+    t = _PEER_TARGETS.get(base)
+    if t is not None:
+        job = t.get("job")
+        if not job:
+            return ""
+        refresh_targets()
+        e = _PEER_JOBS.get(job) or {}
+        if e.get("phase") == "stopped" and e.get("reason"):
+            return e["reason"]
+        return (f"rank 0 of cluster job {job} on {t.get('machine')} "
+                f"dropped the connection; the job is failing")
+    try:
+        from knurlogic.interfaces import cluster_jobs
+        return cluster_jobs.failure_of_port(urlparse(base).port)
+    except Exception:
+        return ""
+
+
+def cluster_failed(reason: str) -> dict:
+    """The OpenAI-style error a rank 0 answers with when its ring fails
+    (http/openai.py _status_of), for a job that could not answer at all."""
+    return {"error": {"message": f"this model is split across machines and "
+                                 f"its cluster job failed: {reason}",
+                      "type": "server_error", "param": None,
+                      "code": "cluster_failed"}}
+
+
+def _stream(handler, url: str, body: bytes, timeout: float = 3600,
+            base: str = "") -> None:
     """POST `body` to `url` and pass the answer back as it arrives, byte for
     byte: SSE, prefill keepalives and all. The upstream's status and
-    Content-Type go with it; an upstream that cannot be reached is a 502."""
+    Content-Type go with it; an upstream that cannot be reached is a 502 --
+    or a 503 `cluster_failed` with the job's stop reason when `base` is a
+    cluster job's rank 0 (dead, or its job stopped)."""
     import urllib.error
     import urllib.request
     req = urllib.request.Request(url, data=body,
@@ -876,7 +922,11 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600) -> None:
         up, code = e, e.code
         ctype = e.headers.get("Content-Type", "application/json")
     except Exception as e:
-        _send_json(handler, 502, {"error": f"{type(e).__name__}: {e}"})
+        why = cluster_failure(base) if base else ""
+        if why:
+            _send_json(handler, 503, cluster_failed(why))
+        else:
+            _send_json(handler, 502, {"error": f"{type(e).__name__}: {e}"})
         return
     handler.send_response(code)
     handler.send_header("Content-Type", ctype)
@@ -909,7 +959,8 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
         _send_json(handler, 403, {"error": f"not a running model this page "
                                            f"knows: {base or '(none)'}"})
         return
-    _stream(handler, upstream(base, "/v1/chat/completions"), body)
+    _stream(handler, upstream(base, "/v1/chat/completions"), body,
+            base=base)
 
 
 #: the largest settings change `/apply` forwards; a knob set is a few bytes
@@ -1053,7 +1104,7 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
                                  f"{', '.join(sorted(table)) or 'none'}"},
             "models": sorted(table)})
         return
-    _stream(handler, upstream(base, path), body)
+    _stream(handler, upstream(base, path), body, base=base)
 
 
 def local_models(fetch=None) -> dict:
@@ -1141,7 +1192,7 @@ def peer_relay(handler, method: str, path: str, body: bytes,
                                  f"{', '.join(sorted(table)) or 'none'}"},
             "models": sorted(table)})
         return
-    _stream(handler, base + path, body)
+    _stream(handler, base + path, body, base=base)
 
 
 #: What `/peek` may read, and the query keys it passes along. Reads only:
