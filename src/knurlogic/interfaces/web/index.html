@@ -340,6 +340,7 @@
  .shd{font-size:12.5px;margin:0 0 4px}
  .shd .ro{color:var(--faint);font-size:10.5px;margin-left:8px}
  .sgrp{border-top:1px solid var(--line);margin-top:16px;padding-top:12px}
+ .ksub{font-size:10px;letter-spacing:.1em;color:var(--dim);margin:14px 0 4px}
  .sgrp:first-child{border-top:0;margin-top:0;padding-top:0}
  .ktab{display:grid;grid-template-columns:1fr auto auto;gap:0 14px}
  .connblk{margin-top:14px}
@@ -1422,12 +1423,17 @@ function modelHTML(b, r, doc, runs){
        launch:true, label:b.name};
   return `<div class="sgrp"${r?` data-where="${esc(r.where)}"`:''}>
     ${hd}${tunes?`<span class="seg">${tunes}</span>`:''}</div>${runs}
-    ${ks.map(k=>knobHTML(k,c)).join('')||'<div class="msg">no knobs</div>'}
+    ${ks.filter(k=>!isVQ(k)).map(k=>knobHTML(k,c)).join('')}
+    ${ks.some(isVQ)?`<div class="ksub">VQ</div>${
+      ks.filter(isVQ).map(k=>knobHTML(k,c)).join('')}`:''}
+    ${ks.length?'':'<div class="msg">no knobs</div>'}
     ${un.length?`<details class="more"><summary>${un.length} other variables this
       runtime reads; knurlogic sets none of them</summary><div class="unl">${
       esc(un.map(u=>u.name).join('  '))}</div></details>`:''}
   </div>`;
 }
+// the VQ runtime's own knobs, under their own header after the general ones
+const isVQ=k=>/^VQ(LAB)?_/.test(k.name);
 const TUNES={};
 // The facts beside the wired limit: what the Mac is, what it has, what the
 // GPU may hold of it (from /status.json's node; left out when not known).
@@ -1946,8 +1952,9 @@ window.isVision=isVision;
 // that tail leaves the model, and the rungs of one model gather under it.
 const _PUB=/^[^/]*?(?:--|\/)/;
 const _TAIL=/[-_]?(?:vq[-_])?(?:\d+(?:\.\d+)?bpw|\d+bit|bf16|fp16|mlx|vq[-_]base|base|q\d+|instruct|it)\b.*$/i;
-// A name that parses to nothing shared and carries no publisher is a LOCAL
-// BUILD -- qwen4exp_vq_packed_mixL01p4q is not a model anybody publishes.
+// A name that parses to nothing shared and carries no publisher is a local
+// build -- qwen4exp_vq_packed_mixL01p4q is not a model anybody publishes --
+// and it groups under its architecture ("Qwen3.8 Flash-Next · VQ").
 // Left ungrouped they were 14 rows of one, which is the wall again.
 const ARCHLABEL={qwen4_exp_text:'Qwen3.8 Flash-Next', qwen3_5_moe_text:'Qwen3.5 MoE',
   qwen3_5_text:'Qwen3.8 27B', glm5_next_text:'GLM-5.3 Flash',
@@ -1971,12 +1978,17 @@ function baseKeys(ms){
   const bases={}, count={}, out={};
   ms.forEach(m=>{ const b=baseOf(m.name); bases[m.name]=b;
     count[b]=(count[b]||0)+1 });
+  const lone=m=>count[bases[m.name]]===1
+    && !m.name.includes('--') && !m.name.includes('/');
+  const arch=m=>ARCHLABEL[m.model_type]||m.model_type||'unknown';
+  // named by what they are: an architecture's VQ builds, when every one of
+  // them is VQ, else just the architecture
+  const allvq={};
+  ms.filter(lone).forEach(m=>{ const a=arch(m);
+    allvq[a]=(allvq[a]??true) && !!m.is_vq });
   ms.forEach(m=>{
-    let key=bases[m.name];
-    const published=m.name.includes('--')||m.name.includes('/');
-    if(count[key]===1 && !published)
-      key=`${ARCHLABEL[m.model_type]||m.model_type||'unknown'} · local builds`;
-    out[m.name]=key;
+    out[m.name]=lone(m) ? (allvq[arch(m)] ? `${arch(m)} · VQ` : arch(m))
+      : bases[m.name];
   });
   return out;
 }
