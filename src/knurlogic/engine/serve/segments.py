@@ -27,7 +27,7 @@ def split_system(tokenizer, messages, prompt, segments, types, kwargs):
         if m.get("role") != "system":
             break
         n_sys += 1
-    if n_sys == 0 or messages[-1].get("role") != "user":
+    if n_sys == 0 or messages[-1].get("role") not in ("user", "tool"):
         return segments, types
     try:
         sys_tokens = list(tokenizer.apply_chat_template(

@@ -69,6 +69,25 @@ def test_the_system_prompt_gets_its_own_segment():
     assert sum(segs, []) == p
 
 
+def test_a_turn_ending_in_a_tool_result_is_checkpointed_like_a_user_turn():
+    """An agent's every turn after the first ends in a tool result. Those
+    prompts were one "assistant" segment -- no checkpoint -- and on a
+    hybrid model (linear attention: the finished entry cannot be trimmed
+    back) each turn re-prefilled everything after the first user message:
+    397B agents at 15-22k tokens reused 881 (2026-09-27, cluster shootout)."""
+    p, segs, types, _ = P.tokenize(
+        None, Tok(), _req(("system", "abcd"), ("user", "hi"),
+                          ("assistant", "call"), ("tool", "result")),
+        P.PromptArgs())
+    assert types == ["system", "user", "assistant"]
+    assert segs[-1] == [TS] and sum(segs, []) == p
+    # an assistant prefill (the last message is the assistant's) stays one
+    p, segs, types, _ = P.tokenize(
+        None, Tok(), _req(("user", "hi"), ("assistant", "par")),
+        P.PromptArgs())
+    assert types == ["assistant"] and segs == [p]
+
+
 def test_list_content_is_joined_and_non_text_refused():
     import pytest
     r = P.ChatRequest(messages=[{"role": "user", "content": [
