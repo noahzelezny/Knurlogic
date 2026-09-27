@@ -313,7 +313,12 @@
  .sheetbody .panel{display:none;margin:0;border:0;box-shadow:none;
    background:transparent;padding:0;flex:1;min-width:0}
  .sheetbody .panel.on{display:flex}
- .sheetbody .pickbody{flex:1;grid-template-columns:150px 1fr}
+ .sheetbody .pickbody{flex:1;grid-template-columns:118px 1fr}
+ #settings{flex-direction:column}
+ #setmach{align-self:flex-start;margin:0 0 10px}
+ #setmach button{padding:5px 12px;font-size:10.5px}
+ #settabs .fam{overflow-wrap:anywhere}
+ .mfacts{font-size:11px;color:var(--dim);margin:-4px 0 14px}
  .sbody{overflow:auto;padding:14px 18px 18px;min-width:0}
  .fam small{display:block;text-transform:none;letter-spacing:0;
    color:var(--faint);font-size:10px;margin-top:2px}
@@ -911,16 +916,17 @@
     </div>
     <div class="sheetbody">
       <!-- Laid out like the picker: what to look at down the side, one of
-           them at a time on the right. A tab per machine because every knob
-           here is a machine's -- resolved for its memory, read by the model
-           it is running -- plus the cluster, to see them side by side. -->
+           them at a time on the right. The machine is picked across the top
+           because every knob here is a machine's -- resolved for its memory,
+           read by the model it is running; down the side, that machine's own
+           tabs: Machine, one per running model, Next launch. -->
       <section class="panel" id="settings">
         <div class="lab">Settings</div>
+        <div class="seg" id="setmach" role="group" aria-label="machine"></div>
         <div class="pickbody">
           <div class="fams" id="settabs"></div>
           <div class="sbody">
-            <div id="clusterbody" hidden></div>
-            <!-- this machine and each peer: one layout, drawn by showMachine -->
+            <!-- every machine's tabs: one layout, drawn by showMachine -->
             <div id="machbody"></div>
           </div>
         </div>
@@ -1315,29 +1321,55 @@ async function getJSON(url){
        return r.ok ? j : {error:j.error||('HTTP '+r.status)} }
   catch(e){ return {error:String(e.message||e)} }
 }
-let STAB='local';
+let STAB='local', SSUB='machine';
+// Every machine alike: this one first, then each answering peer; its name
+// and hardware from /status.json's nodes, its models from the residency.
 function machines(){
-  const d=window.RESIDENCY||{};
+  const d=window.RESIDENCY||{}, ns=window.NODES||[];
   const ours=r=>r.runtime==='knurlogic' && r.where;
-  return [{id:'local', name:'this machine', page:'', models:(d.resident||[]).filter(ours)}]
+  const me=ns.find(n=>n.role==='local')||{};
+  return [{id:'local', name:me.node||'this machine', page:'', node:me,
+      models:(d.resident||[]).filter(ours)}]
     .concat((d.peers||[]).map(p=>({id:p.address, name:p.machine,
-      page:'http://'+p.address, error:p.error, models:(p.resident||[]).filter(ours)})));
+      page:'http://'+p.address, error:p.error, node:ns.find(n=>n.node===p.machine)||{},
+      models:(p.resident||[]).filter(ours)})));
 }
+// "TheDrainFlorist--GLM-5.3-Flash" and "org/name" read as the name alone
+const shortName=n=>String(n||'').replace(/^.*\//,'').replace(/^.*?--/,'');
+// A machine's models: a page that is itself a model's server has that
+// model as its own.
+function machModels(m){
+  if(m.id!=='local' || !(DOC.knobs||[]).length) return m.models;
+  return [{name:(DOC.artifact||{}).name||'this server', where:''}]
+    .concat(m.models.filter(r=>r.where.replace(/\/$/,'')!==location.origin));
+}
+// Next launch is this page's: a peer's launches are made on its own page,
+// and what it has picked there is not readable from here, so it has none.
+const hasLaunch=m=>m.id==='local';
 function renderSetTabs(){
   const ms=machines();
-  if(STAB!=='cluster' && !ms.some(m=>m.id===STAB)) STAB='local';
-  $('settabs').innerHTML=[{id:'cluster', name:'cluster',
-      sub:`${ms.length} machine${ms.length===1?'':'s'}`}]
-    .concat(ms.map(m=>({id:m.id, name:m.name,
-      sub:m.error?'not answering':`${m.models.length} running`})))
-    .map(t=>`<div class="fam" data-t="${esc(t.id)}" aria-current="${t.id===STAB}"
-      >${esc(t.name)}<small>${esc(t.sub)}</small></div>`).join('');
+  if(!ms.some(m=>m.id===STAB)) STAB='local';
+  const m=ms.find(x=>x.id===STAB), models=machModels(m);
+  $('setmach').innerHTML=ms.map(x=>`<button data-m="${esc(x.id)}"
+    aria-pressed="${x.id===STAB}" title="${esc(x.error?'not answering':
+    (x.page||location.host).replace(/^https?:\/\//,''))}">${esc(x.name)}</button>`).join('');
+  $('setmach').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    if(b.dataset.m===STAB) return;
+    STAB=b.dataset.m; SSUB='machine'; renderSetTabs(); showSetTab() });
+  const tabs=[{id:'machine', name:'Machine'}]
+    .concat(models.map(r=>({id:'m:'+r.where, name:shortName(r.name), full:r.name,
+      sub:r.where?r.where.replace(/^https?:\/\//,''):location.host})))
+    .concat(hasLaunch(m)?[{id:'launch', name:'Next launch'}]:[]);
+  if(!tabs.some(t=>t.id===SSUB)) SSUB='machine';
+  $('settabs').innerHTML=tabs.map(t=>`<div class="fam" data-t="${esc(t.id)}"
+    aria-current="${t.id===SSUB}"${t.full?` title="${esc(t.full)}"`:''}>${esc(t.name)}${
+    t.sub?`<small>${esc(t.sub)}</small>`:''}</div>`).join('');
   $('settabs').querySelectorAll('.fam').forEach(f=>f.onclick=()=>{
-    STAB=f.dataset.t; renderSetTabs(); showSetTab() });
+    SSUB=f.dataset.t; renderSetTabs(); showSetTab() });
 }
 // One model's section: its header, the tunes to preview, a row per knob a
 // runtime reads, and the rest folded away.
-function modelHTML(r, doc){
+function modelHTML(r, doc, mname){
   if(doc.error) return `<div class="sgrp"><div class="shd">${esc(r.name)}</div>
     <div class="msg">could not read its settings: ${esc(doc.error)}</div></div>`;
   const all=doc.knobs||[];
@@ -1347,7 +1379,8 @@ function modelHTML(r, doc){
   const live=doc.live||{}, asked=doc.asked||{}, un=doc.unmanaged||[];
   const tunes=(doc.tunes||[]).map(t=>`<button data-tune="${esc(t.name)}"
     title="${esc(t.why)}" aria-pressed="${t.name===asked.tune}">${esc(t.name)}</button>`).join('');
-  const c={g:r.where, where:r.where, model:r.name, label:r.name};
+  const c={g:r.where, where:r.where, model:r.name,
+    label:(mname?mname+' · ':'')+shortName(r.name)};  // the confirm groups by it
   return `<div class="sgrp" data-where="${esc(r.where)}">
     <div class="shd">${esc(r.name)}<span class="ro">${esc(r.where||location.host)} ·
       ${esc(live.tune||'?')} tune</span>${tunes?`<span class="seg">${tunes}</span>`:''}</div>
@@ -1358,80 +1391,56 @@ function modelHTML(r, doc){
       esc(un.map(u=>u.name).join('  '))}</div></details>`:''}
   </div>`;
 }
-async function modelsInto(el, models, tunes){
-  if(!models.length){ el.innerHTML=''; return false }
-  const docs=await Promise.all(models.map(r=>getJSON(docURL(r.where,
-    tunes[r.where]?{tune:tunes[r.where]}:{}))));
-  el.innerHTML=models.map((r,i)=>modelHTML(r,docs[i])).join('');
-  el.querySelectorAll('[data-tune]').forEach(b=>b.onclick=()=>{
-    const w=b.closest('[data-where]').dataset.where;
-    tunes[w]=b.dataset.tune; modelsInto(el, models, tunes);
-  });
-  return true;
-}
 const TUNES={};
-function wiredLine(doc){
-  if(!doc || doc.error) return `<div class="msg">${esc(doc&&doc.error||'no answer')}</div>`;
-  if(!(doc.wired||{}).known) return '<div class="msg">wired limit not known</div>';
-  return `<div class="msg">wired limit now <b>${doc.wired_current_gib.toFixed(0)}</b>
-    of ${doc.wired_installed_gib.toFixed(0)} GiB · knurlogic suggests
-    <b>${doc.wired_recommended_gib.toFixed(0)}</b></div>`;
+// The facts beside the wired limit: what the Mac is, what it has, what the
+// GPU may hold of it (from /status.json's node; left out when not known).
+function factsHTML(n){
+  const hw=n.machine||{}, nm=n.memory||{}, mm=n.memory_map||{};
+  const inst=mm.installed_bytes||0, ws=nm.working_set_bytes||0;
+  const f=[hw.chip&&(hw.model?hw.model+' · ':'')+hw.chip,
+    inst&&`${gb(inst).replace(/\.\d+ /,' ')} installed`,
+    ws&&`GPU working set ${gb(ws).replace(/\.\d+ /,' ')}`].filter(Boolean);
+  return f.length ? `<div class="mfacts">${esc(f.join(' · '))}</div>` : '';
 }
-// A machine's tab, this one's or a peer's: header, wired limit, then a
-// section per model it runs. With nothing running here, the model picked
-// under Load model is shown as it would launch, every knob "on restart".
+// One machine's selected tab, this one's or a peer's, drawn by the same
+// code; only where the data comes from differs.
 async function showMachine(m){
-  const tab=STAB, own=m.id==='local', el=$('machbody');
-  el.dataset.t=tab;
-  el.innerHTML=`<div class="mhd">${esc(m.name)}<span class="ro">${
-    esc(own?location.host:m.page.replace(/^https?:\/\//,''))}</span></div>
-    <div class="mwired"><div class="msg">reading…</div></div><div class="mmodels"></div>`;
-  const doc=own ? DOC : await getJSON(peekURL(m.page,'/settings.json'));
-  if(STAB!==tab) return;
-  el.querySelector('.mwired').innerHTML=wiredHTML(doc, own);
-  if(own) wireWired();
-  // a page that is itself a model's server has that model as its own
-  let models=m.models;
-  if(own && (DOC.knobs||[]).length)
-    models=[{name:(DOC.artifact||{}).name||'this server', where:''}]
-      .concat(models.filter(r=>r.where.replace(/\/$/,'')!==location.origin));
-  const mm=el.querySelector('.mmodels');
-  if(await modelsInto(mm, models, TUNES) || STAB!==tab) return;
-  // keyed as Launch keys it (the picked model's name), so both agree
-  const pv=own&&PREVIEW, name=pv&&((SEL&&SEL.name)||(pv.artifact&&pv.artifact.name));
-  mm.innerHTML = name && (pv.knobs||[]).length
-    ? `<div class="sgrp"><div class="shd">${esc(name)}<span class="ro">not running ·
-        how it would launch at ${esc(pv.tune)}</span></div>
-        ${pv.knobs.filter(k=>k.reach!=='no-effect').map(k=>knobHTML(k,
-          {g:'launch:'+name, where:null, model:name, label:name})).join('')}</div>`
-    : `<div class="sgrp"><div class="msg">Nothing is running${own?` on this machine.
-        Pick a model under Load model to see what it would load with.`:'.'}</div></div>`;
-}
-async function showSetTab(){
-  const tab=STAB, ms=machines();
-  $('clusterbody').hidden=tab!=='cluster';
-  $('machbody').hidden=tab==='cluster';
-  if(tab!=='cluster'){
-    const m=ms.find(x=>x.id===tab); if(m) showMachine(m);
+  const tab=STAB+'|'+SSUB, own=m.id==='local', el=$('machbody');
+  const stale=()=>STAB+'|'+SSUB!==tab;
+  el.dataset.t=SSUB==='machine'?m.id:'';
+  const where=own?location.host:m.page.replace(/^https?:\/\//,'');
+  if(SSUB==='machine'){
+    el.innerHTML=`<div class="mhd">${esc(m.name)}<span class="ro">${esc(where)}</span></div>
+      ${factsHTML(m.node||{})}<div class="mwired"><div class="msg">reading…</div></div>
+      ${own?'':'<div class="msg">Its wired limit is set on that machine\'s own page.</div>'}`;
+    const doc=own ? DOC : await getJSON(peekURL(m.page,'/settings.json'));
+    if(stale()) return;
+    el.querySelector('.mwired').innerHTML=wiredHTML(doc, own);
+    if(own) wireWired();
     return;
   }
-  const el=$('clusterbody');
-  el.innerHTML='<div class="msg">asking every machine…</div>';
-  const docs=await Promise.all(ms.map(m=>getJSON(m.page
-    ? peekURL(m.page,'/settings.json') : '/settings.json')));
-  const mdocs=await Promise.all(ms.map(m=>Promise.all(m.models.map(r=>
-    getJSON(peekURL(r.where,'/settings.json'))))));
-  if(STAB!=='cluster') return;
-  el.innerHTML=`<div class="msg" style="margin-top:0">Each machine resolves
-    its own knobs for its own memory, when a model is loaded; nothing here is
-    shared between them. Side by side:</div>`+ms.map((m,i)=>
-    `<div class="sgrp"><div class="shd">${esc(m.name)}<span class="ro">${
-      esc(m.page||location.host)}</span></div>${wiredLine(docs[i])}
-      ${m.models.map((r,j)=>{ const d=mdocs[i][j]||{}, ks=d.knobs||[];
-        return `<div class="knob"><div class="hd"><span class="k">${esc(r.name)}</span>
-          <span class="val">${d.error?'unreadable':esc((d.live||{}).tune||'?')+' · '+
-          ks.length+' knobs'}</span></div></div>` }).join('')
-        ||'<div class="msg">nothing running</div>'}</div>`).join('');
+  if(SSUB==='launch'){
+    // keyed as Launch keys it (the picked model's name), so both agree
+    const pv=PREVIEW, name=pv&&((SEL&&SEL.name)||(pv.artifact&&pv.artifact.name));
+    el.innerHTML = name && (pv.knobs||[]).length
+      ? `<div class="sgrp"><div class="shd">${esc(name)}<span class="ro">picked under
+          Load model · how it would launch at ${esc(pv.tune)}</span></div>
+          ${pv.knobs.filter(k=>k.reach!=='no-effect').map(k=>knobHTML(k,
+            {g:'launch:'+name, where:null, model:name, label:m.name+' · '+shortName(name)})).join('')}</div>`
+      : `<div class="msg">Pick a model under Load model to see what it would
+          load with; its knobs are saved here as its launch settings.</div>`;
+    return;
+  }
+  const r=machModels(m).find(x=>'m:'+x.where===SSUB); if(!r) return;
+  el.innerHTML='<div class="msg">reading…</div>';
+  const doc=await getJSON(docURL(r.where, TUNES[r.where]?{tune:TUNES[r.where]}:{}));
+  if(stale()) return;
+  el.innerHTML=modelHTML(r, doc, m.name);
+  el.querySelectorAll('[data-tune]').forEach(b=>b.onclick=()=>{
+    TUNES[r.where]=b.dataset.tune; showMachine(m) });
+}
+function showSetTab(){
+  const m=machines().find(x=>x.id===STAB); if(m) showMachine(m);
 }
 
 // --- connect ----------------------------------------------------------------
@@ -1538,6 +1547,7 @@ async function tick(){
   // In a cluster the honest reading is how many nodes ANSWERED, not that
   // the page it is drawn on is up.
   const ns=d.nodes||[], up=ns.filter(n=>n.reachable!==false).length;
+  window.NODES=ns;          // Settings' Machine tab reads chip and memory here
   setState(up===ns.length, ns.length>1 ? `${up}/${ns.length} nodes`
     : (up ? 'serving' : 'no answer'));
   // Nothing loaded is a STATE, not a page still loading, and the bench has
