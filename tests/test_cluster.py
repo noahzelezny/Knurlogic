@@ -102,9 +102,16 @@ def test_the_prompt_chunk_is_one_value_on_every_rank():
     """Ring-wide, not per node. This test used to assert 2048 on the big box
     and 512 on the small one -- which is the desync recorded live on a
     pipeline ring (GLM-5.3 at 2048 on one rank, 4096 on the other). The tightest
-    node's chunk is everyone's, and the big node is told why."""
+    node's chunk is everyone's, and the big node is told why. Every rank is
+    512 by default, so the ring rule is exercised where widths can differ:
+    tune=fast on a measured-wide family, one roomy rank and one tight."""
     c = resolve(_art(), [Node("big", 128 * GIB, holds_bytes=90 * GIB),
                          Node("small", 64 * GIB, holds_bytes=62 * GIB)])
+    assert c.nodes["big"].env["VQLAB_PREFILL_CHUNK"] == \
+        c.nodes["small"].env["VQLAB_PREFILL_CHUNK"] == "512"
+    c = resolve(_art(model_type="qwen3_5"),
+                [Node("big", 128 * GIB, holds_bytes=48 * GIB),
+                 Node("small", 64 * GIB, holds_bytes=62 * GIB)], tune="fast")
     big, small = c.nodes["big"].env, c.nodes["small"].env
     assert big["VQLAB_PREFILL_CHUNK"] == small["VQLAB_PREFILL_CHUNK"] == "512"
     assert any("every rank must match" in n for n in c.nodes["big"].notes)
