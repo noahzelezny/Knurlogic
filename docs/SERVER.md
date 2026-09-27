@@ -146,6 +146,78 @@ One model, N ranks, every layer's weights split N ways
   a barrier, then each rank loads lazily, splits, and evaluates its shard.
   Only rank 0 binds HTTP.
 
+## Cluster: pipeline split (2026-09-27, second slice)
+
+One model, N ranks, each holding a contiguous run of layers
+(`engine/runtime/pipeline.py`; the step plan is the tensor split's,
+unchanged). `--split pipeline`.
+
+- **Layout**: rank 0 -- the leader, which samples -- holds the LAST layers,
+  the final norm and lm_head; rank N-1 holds the first layers and embeds.
+  Hidden states go rank N-1 -> ... -> 0 by `send`/`recv`, each in its own
+  rank's dtype (the ranks' stage dtypes are gathered when the model is
+  split; a send is cast to its receiver's, never read off a placeholder:
+  the maintainer's 574a7bd7). Every send is evaluated inside the forward that makes
+  it and every receive is waited for inside the forward that uses it, so
+  point-to-point messages and the CPU collectives stay in program order on
+  every rank.
+- **Who samples, and how logits reach rank 0**: they are born there.
+  mlx-lm's pipeline all_gathers the last stage's hidden state so every
+  rank computes logits; we do not, because no follower needs them -- the
+  plan carries rank 0's tokens, as under tensor. A follower's trunk
+  (`pipeline.Silent`) returns zeros of the logits' shape, so its lm_head
+  never runs and its NaN guard never fires alone. Cost per decode step:
+  zero bytes for logits, against one all_gather of [B, L, H] (plus a
+  follower lm_head each) for the gather design. B0: the step that admits a
+  row broadcasts every row's next token after the admission, because the
+  admission samples its first token after that step's plan went out.
+- **Layer shares** (`tuning/resolve.pipeline_shares`, pure Python): each
+  rank's weight is what it can hold (working set less the replicated
+  embed/norm/lm_head), times its memory bandwidth when EVERY rank's is
+  known (a table of unbinned chips, or `--bandwidth-gbs`; a binned Max is
+  unknown, never guessed); largest remainder, ties to the lower rank,
+  every rank >= 1 layer, capped by what fits by the average layer and then
+  checked with the real per-layer bytes from the safetensors headers. After
+  the ring is up every rank all_gathers (working set, bandwidth, layer
+  count, layer-bytes checksum), refuses if the artifacts differ, and
+  computes the same split; rank 0 prints it with the reason.
+  `--layers a,b,...` (rank order) overrides it.
+- **Families**: qwen3_5 / qwen3_5_moe (PipelineMixin's start/end contract
+  kept, its uniform split and all_gather not used; fa_idx/ssm_idx
+  recomputed on the slice), glm5_next (fa_idx/ssm_idx, the maintainer's f3ab3a83),
+  qwen4_exp (ple_layers and a sliced make_cache, the maintainer's dd946407). Gemma4
+  is refused: it shares KV across layers. Tested two ways on 127.0.0.1,
+  float32, against the unsplit model: logits (every family, uneven cuts)
+  equal to 1e-4 -- in fact 0.0: the same arithmetic in the same order.
+- **MTP on pipeline** (qwen3_5 families; the maintainer's exo design): the head
+  lives on rank 0, which has the true final hidden state. A follower runs
+  a head too, on its own stage's output: its drafts are never used, but
+  its head cache moves exactly as rank 0's, so prompt-cache entries,
+  offsets and replays are the same code on every rank. Per step, fixed:
+  B1 `[drafting, d2 per row]` before the verify forward (rank 0's timed
+  regime choice and its drafts), and, only when B1 said drafting, B2
+  `[ok per row, t2 per row]` after it (the verdicts that drive every
+  rank's rollback and the one replay forward). The count depends on B1,
+  which every rank receives, never on a rank's own verdict. Every rank
+  drafts or none does (`tensor.agree_head` after load). Tested: rank 0's
+  tokens are the unsplit engine's (random head, mostly rejected; and
+  drafting forced on vocab 8 so accepts happen), both ranks made the same
+  B0/B1/B2 counts, and the serving path (TensorExecutor + follow) streams
+  the unsplit executor's tokens.
+- **Images**: refused (400) in this slice, as under tensor. The choice for
+  when they land: rank 0 runs the tower and SENDS the image rows'
+  embeddings to rank N-1 (its ring neighbour), with MTP off for image
+  rows. Running the tower on every rank would need the image bytes and the
+  store on every rank; the embeddings are needed at the first stage only,
+  but MRoPE positions are needed at every stage, so they go in the admit
+  op (they are pure in the key).
+- **Memory guard**: as tensor (the tightest rank, via the control vector);
+  stages are unequal, so "peers move with rank 0" is an approximation
+  until the next exchange.
+- **Bring-up**: `knurlogic serve <artifact> --rank r --world n --split
+  pipeline --link ring --hosts a:p,b:p --prefill-chunk N
+  --working-set-gib G [--layers a,b] [--bandwidth-gbs X]`.
+
 ## Migration
 
 1. The conformance suite (tests/api) passes on today's server: done on
@@ -186,8 +258,9 @@ One model, N ranks, every layer's weights split N ways
    [V] row. (Corrected 2026-09-27: this said "on a pipeline only the
    last rank has logits". mlx-lm's pipeline all_gathers the last stage's
    hidden state, so every rank computes logits; under tensor every rank
-   does too. The rule stands for a different reason: rank 0 samples, and
-   what crosses a boundary stays small.)
+   does too. knurlogic's own pipeline does not gather: rank 0 holds the
+   last layers, and only it has logits. The rule stands for a different
+   reason: rank 0 samples, and what crosses a boundary stays small.)
 3. **One path, per-row keys by `mx.vmap`**: measured equal to the per-row
    loop draw for draw, 460 us vs 444 us plain at B=8; keys advance by
    `vmap(split)`, lazy. Rules: rebuild the key array with take/stack when
