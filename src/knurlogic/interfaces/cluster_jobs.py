@@ -511,6 +511,10 @@ def start(job: str, *, spawn=None) -> tuple:
            "pid": proc.pid, "artifact": path, "log": str(log),
            "split": spec["split"], "link": spec["link"],
            "machines": [n.get("name") for n in spec["nodes"]],
+           # the machine THIS rank runs on, so a stop reason names it --
+           # the reason is propagated to every page of the job
+           "machine": spec["nodes"][spec["rank"]].get("name")
+           if spec["rank"] < len(spec["nodes"]) else None,
            "leader": spec["nodes"][0].get("name"),
            "started": time.strftime("%Y-%m-%d %H:%M:%S"), "t": time.time()}
     if spec.get("port") and spec["rank"] == 0:

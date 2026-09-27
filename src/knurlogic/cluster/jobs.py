@@ -175,7 +175,10 @@ class Watch:
         says whether that rank's process is still there."""
         now = time.time() if now is None else now
         for r in ranks:
-            rank, who = int(r["rank"]), r.get("machine") or "this machine"
+            rank = int(r["rank"])
+            ms = r.get("machines") or []
+            who = r.get("machine") or (ms[rank] if rank < len(ms)
+                                       else None) or "this machine"
             if not alive(int(r["pid"])):
                 return f"rank {rank} on {who} (pid {r['pid']}) exited"
             m = read(job, rank) or {}
