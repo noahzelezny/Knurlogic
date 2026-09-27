@@ -202,3 +202,19 @@ def test_the_serving_path_follows_rank_0s_plan_on_a_pipeline(tmp_path):
     and the follower stops when told."""
     d = _ring(tmp_path, "engine")
     assert d["split"] == d["whole"] and all(len(t) == 30 for t in d["whole"])
+
+
+@pytest.mark.parametrize("split,fail", [("pipeline", "nan"),
+                                        ("pipeline", "admit"),
+                                        ("tensor", "nan"),
+                                        ("tensor", "admit")])
+def test_a_row_failing_on_rank_0_only_fails_that_row(tmp_path, split, fail):
+    """Rank 0 alone fails one row (non-finite logits mid-decode, or an
+    admission that raised after its forward): that row ends, the others
+    stream every token, and the follower -- which still held the row --
+    drops it from the next plan's remove instead of raising Desync (both
+    processes exit 0; _ring asserts it)."""
+    d = _ring(tmp_path, "engine", fail, split)
+    lens = [len(t) for t in d["split"]]
+    assert lens[0] == lens[2] == 30, lens
+    assert lens[1] < 30, lens
