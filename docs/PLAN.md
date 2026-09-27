@@ -419,19 +419,32 @@ version from metadata, classifiers, Trusted Publishing workflow). Worktrees:
 ../knurlogic-gui (gui), ../knurlogic-release (release); the main checkout is
 on hardening. Noah's page on :8899 runs from ../knurlogic-gui/src.
 
+Multi-machine serving is IN 0.1.0 (branch `cluster`, on top of gui): the
+page launches a model across Macs (tensor or pipeline split, TCP ring or
+jaccl over Thunderbolt RDMA), rank 0 serves the OpenAI API, and a failed
+rank stops the whole job with a 503 `cluster_failed`. Measured M3 Ultra +
+M4 Max over Thunderbolt: 397B-A17B VQ 2.4bpw pipeline jaccl ~27 tok/s,
+tensor jaccl ~25.6, tensor ring ~20; 35B-A3B pipeline jaccl 59.
+
 Release 0.1.0 (tonight or next):
-1. Fable 5.1 review of `gui` (router, /apply, /peek, the page) -> fixes.
-2. Update the M4 to gui once the shootout is done; one real end-to-end pass
-   (server timing + sampling defaults on the bench, Settings on a real
-   model, Claude Code through the page's router incl. count_tokens).
-3. History: DONE 2026-09-26 (private repo rewritten: every commit's author
-   is the GitHub noreply address, home paths are ~/; all five branches
-   pushed; backup bundle beside the repo, knurlogic-history-backup-*.bundle).
-   Flip the repo public when Noah says.
-4. Merge vision-integration -> hardening -> gui into main; rebase release;
-   tag v0.1.0. PyPI: pending publisher added (noahzelezny/Knurlogic,
-   publish.yml, env pypi); the GitHub `pypi` environment exists. The name is
-   only claimed by the first upload.
+1. History: DONE 2026-09-26 (private repo rewritten: every commit's author
+   is the GitHub noreply address, home paths are ~/; all branches pushed;
+   backup bundle beside the repo, knurlogic-history-backup-*.bundle).
+2. Merge vision-integration -> hardening -> gui -> cluster into main;
+   rebase release on it; push; tag v0.1.0. PyPI: pending publisher added
+   (noahzelezny/Knurlogic, publish.yml, env pypi); the GitHub `pypi`
+   environment exists. The name is only claimed by the first upload.
+3. Flip the repo public when Noah says.
+
+Open on the cluster path (not blocking the tag):
+- GLM MTP verify fast path (glm5_next: the verify forward on the decode
+  path) -- in progress.
+- MTP on a pipeline with a real model and its head: tested only on the tiny
+  fixture.
+- Images under a pipeline split: untested.
+- Rings of three or more ranks: untested (every measurement is two Macs).
+- The 397B 3.1 and 2.6 bpw copies differ between the two Macs (identity
+  mismatch), so only 2.4 bpw ran across both.
 
 Shootout (scratchpad shootout/, M4 ~/kl-test/shootout): Flash done (one-shot
 24 + tool-use 8, triaged: ledger.md); 397B 2/8 tool-use audits, remaining
@@ -475,8 +488,7 @@ In flight at the fourth compaction (2026-09-26 late):
   sub-header, and checking why Qwen VQ builds show fewer VQ knobs than GLM
   (runtime reads vs a bug).
 
-After 0.1.0: multi-machine serving (cluster executor), HF download + hub
-tab, analytics from Scout's tools, firewall-prompt UX, upstream the mlx-lm
+After 0.1.0: HF download + hub tab, analytics from Scout's tools, firewall-prompt UX, upstream the mlx-lm
 bugs and vqlab's packed as_linear (strict xfail).
 
 ## Requirements for knurlogic's own server: Scout's ingest (2026-09-25)
