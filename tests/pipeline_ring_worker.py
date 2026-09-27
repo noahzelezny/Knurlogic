@@ -161,9 +161,45 @@ class FakeTok:
         return f"<{t}>"
 
 
-def engine(link, out_path):
+def _fail_on_rank_0(gen, fail):
+    """Make rank 0 fail one row the follower does not: "nan" marks the
+    second row's logits non-finite at the fourth decode step; "admit" makes
+    the second admission raise after its forward ran (the follower's
+    admission of it succeeded)."""
+    if fail == "nan":
+        real, n = gen._batch.step, [0]
+
+        def step():
+            out = real()
+            n[0] += 1
+            if n[0] == 4:
+                victim = sorted(gen._batch.uids)[1]
+                for rs in out:
+                    if rs.uid == victim:
+                        for em in rs.tokens:
+                            em.finite = False
+            return out
+        gen._batch.step = step
+    elif fail == "admit":
+        real, n = gen._admit_one, [0]
+
+        def admit():
+            r = real()
+            n[0] += 1
+            if n[0] == 2:
+                gen._batch.remove([r.uid])
+                raise RuntimeError("injected admission failure")
+            return r
+        gen._admit_one = admit
+
+
+def engine(link, out_path, fail="", split_kind="pipeline"):
     """The serving path: rank 0's TensorExecutor journals a step plan, the
-    follower runs tensor.follow (split="pipeline"), MTP on both."""
+    follower runs tensor.follow (split="pipeline"), MTP on both.
+
+    `fail`: rank 0 alone fails one row (_fail_on_rank_0); the other rows
+    stream to the end and the follower drops the row from the next plan.
+    `split_kind="tensor"`: the tiny qwen3_5_moe sharded, no head."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.runtime import pipeline as PL
     from knurlogic.engine.runtime import tensor as T
@@ -195,8 +231,10 @@ def engine(link, out_path):
                 break
         return [toks[u] for u in uids]
 
+    if split_kind == "tensor":
+        return _tensor_engine(link, out_path, fail, admissions, drain, tok)
     whole = None
-    if link.rank == 0:
+    if link.rank == 0 and not fail:
         model, head, prompts = _tiny_with_head(512)
         ex = LocalExecutor(MTPBatchGenerator(model, head, prefill_step_size=16,
                                              completion_batch_size=32))
@@ -213,11 +251,35 @@ def engine(link, out_path):
     gen = MTPBatchGenerator(model, head, stats={}, prefill_step_size=16,
                             completion_batch_size=32)
     PL.coordinate(gen, link.group)
+    _fail_on_rank_0(gen, fail)
     ring = T.Ring(link, split="pipeline")
     ex = T.TensorExecutor(gen, ring, over=lambda: 0)
     split = drain(ex, [ex.insert(a) for a in admissions(prompts)])
     ring.stop()
     json.dump({"whole": whole, "split": split}, open(out_path, "w"))
+
+
+def _tensor_engine(link, out_path, fail, admissions, drain, tok):
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime import tensor as T
+    from tensor_ring_worker import build
+    prompts = [[5, 17, 3, 99, 42, 7, 64, 11], [23, 31, 104, 33, 9, 8, 7, 6],
+               [1, 4, 9, 16, 25, 36, 49, 64]]
+    model = build()
+    T.shard(model, link.group)
+    if link.rank > 0:
+        T.follow(model, tok, ("tiny", None, None), link,
+                 prompt_cache_size=4, completion_batch_size=32,
+                 prefill_step_size=16, working_set=0, split="tensor")
+        return
+    gen = MTPBatchGenerator(model, None, stats={}, prefill_step_size=16,
+                            completion_batch_size=32)
+    _fail_on_rank_0(gen, fail)
+    ring = T.Ring(link)
+    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    split = drain(ex, [ex.insert(a) for a in admissions(prompts)])
+    ring.stop()
+    json.dump({"whole": None, "split": split}, open(out_path, "w"))
 
 
 def main(argv):
@@ -228,7 +290,7 @@ def main(argv):
     link = T.init("ring")
     mode, out_path = argv[0], argv[1]
     if mode == "engine":
-        engine(link, out_path)
+        engine(link, out_path, *argv[2:])
     elif mode == "logits":
         logits(link, out_path, argv[2], [int(x) for x in argv[3].split(",")])
     else:
