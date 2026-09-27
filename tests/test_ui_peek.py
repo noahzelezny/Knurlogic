@@ -80,8 +80,13 @@ def test_connect_json_lists_every_way_in():
     ids = [e["id"] for e in doc["endpoints"]]
     assert ids == ["openai", "claude", "mcp", "curl"]
     by = {e["id"]: e for e in doc["endpoints"]}
-    assert "__BASE__/v1" in by["openai"]["blocks"][0]["text"]
-    assert "__MODEL__" in by["curl"]["blocks"][0]["text"]
+    # OpenAI and curl: the router first, the model's own server second
+    for k in ("openai", "curl"):
+        assert by[k]["pick_model"]
+        assert "__ROUTER__/v1" in by[k]["blocks"][0]["text"]
+        assert by[k]["blocks"][1]["direct"]
+        assert "__BASE__/v1" in by[k]["blocks"][1]["text"]
+        assert "__MODEL__" in by[k]["blocks"][0]["text"]
     assert not by["mcp"]["needs_model"]
     assert "knurlogic mcp" in by["mcp"]["blocks"][0]["text"]
     # Claude Code and Codex each have a line, marked by client for the page
@@ -101,7 +106,6 @@ def test_connect_json_lists_every_way_in():
                  "ANTHROPIC_DEFAULT_SONNET_MODEL=__SONNET__",
                  "ANTHROPIC_DEFAULT_HAIKU_MODEL=__HAIKU__"):
         assert line in cmd
-    assert "__ROUTER__/v1" in by["openai"]["blocks"][1]["text"]
     # the scoped settings file, never the global one
     assert all("~/.claude" not in b["text"]
                for b in by["claude"]["blocks"])
