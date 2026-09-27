@@ -17,7 +17,7 @@ GIB = 1 << 30
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     return tmp_path
 
 

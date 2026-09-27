@@ -8,9 +8,9 @@ knurlogic would otherwise take: the load budget (`wired.load_budget`, and so
 the fit check in `interfaces/loading.prepare`) and the model server's
 working set, which is what the scheduler's memory guard counts against.
 
-Kept in ~/.cache/knurlogic/allowance.json (XDG_CACHE_HOME honoured) -- the
-directory servers.json and load.lock already live in, so everything
-knurlogic keeps about this machine is in one place a person can find.
+Kept in ~/.config/knurlogic/allowance.json (XDG_CONFIG_HOME honoured): it
+is a setting a person chose, so it lives where settings live -- not in the
+cache directory beside servers.json, which clearing caches would wipe.
 Stdlib only: the page server and the CLI read it without the engine.
 """
 from __future__ import annotations
@@ -22,8 +22,11 @@ GIB = 1 << 30
 
 
 def path() -> Path:
-    from knurlogic.machine.servers import _cache_dir
-    return _cache_dir() / "allowance.json"
+    import os
+    root = Path(os.environ.get("XDG_CONFIG_HOME",
+                               Path.home() / ".config")) / "knurlogic"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "allowance.json"
 
 
 def get() -> int:
