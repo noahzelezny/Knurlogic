@@ -479,3 +479,11 @@ def test_a_ranks_working_set_is_the_wired_limit_not_the_ram():
     assert C.gpu_working_set(96 * gib, 0) == 96 * gib
     assert C.gpu_working_set(0, 84 * gib) == 84 * gib
     assert C.gpu_working_set(0, 0) == 0
+
+
+def test_every_rank_syncs_the_gpu_fast():
+    for link, files in (("ring", {"hostfile": "/j/h.json"}),
+                        ("jaccl", {"ibv": "/j/ibv.json", "hostfile": ""})):
+        s = {**spec(), "link": link}
+        assert C.rank_env(s, files, selfheal=False)[
+            "MLX_METAL_FAST_SYNCH"] == "1"
