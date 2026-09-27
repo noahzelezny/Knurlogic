@@ -220,6 +220,42 @@ unchanged). `--split pipeline`.
   pipeline --link ring --hosts a:p,b:p --prefill-chunk N
   --working-set-gib G [--layers a,b] [--bandwidth-gbs X]`.
 
+## Cluster: launch and failure (2026-09-27, third slice)
+
+Page to page, two phases (`interfaces/cluster_jobs.py`; files and markers
+`cluster/jobs.py`). No token: running knurlogic is consent; every
+`/peer/cluster/*` route has `/peer/loaded.json`'s gate (no Origin;
+loopback, Thunderbolt, or a `--peer` address).
+
+- **Launch**: the page's `POST /loaded.json {action: load, identity,
+  nodes: [ids], split: tensor|pipeline, link: ring|jaccl}` (one node: the
+  single-peer path). The coordinator reads each machine's `cluster` block
+  from its status (chip, working set under the allowance, bandwidth,
+  Thunderbolt addresses, RDMA, knurlogic/mlx versions, self-heal), orders
+  ranks (`resolve.rank_order`), places the model (tensor share /
+  `pipeline_shares`) and shows it. `prepare` to every page: each checks
+  the artifact by identity, the fit of ITS share, versions, its link;
+  any refusal and nothing starts. Then `start`: each page spawns its own
+  rank (`serve --rank/--world/--split/--link/--hosts/--job/--layers ...`,
+  MLX_RANK and MLX_HOSTFILE in the job dir; jaccl: MLX_IBV_DEVICES from
+  the rdma_<iface> on the peer's Thunderbolt subnet, MLX_JACCL_COORDINATOR
+  on rank 0's Thunderbolt address). Prompt chunk 512, ring-wide.
+- **RDMA probe**: `rdma_ctl status`, `ibv_devices`, `ibv_devinfo`
+  (PORT_ACTIVE); the page greys RDMA with the reason.
+- **Failure**: stock mlx has no collective timeout, so it is out of band.
+  Each rank writes `~/.cache/knurlogic/jobs/<job>/rank<r>.json` (phase
+  joining/loading/ready, step, rank 0's busy) every 2 s and at each phase
+  change. The page that started a rank watches it: pid gone, never joined
+  (300 s), or rank 0 busy with a still step counter for 120 s (idle is not
+  stalled). Any of them: that page SIGTERMs its ranks (SIGKILL after 10 s)
+  and sends `/peer/cluster/stop` to every other page of the job. Rank 0's
+  SIGTERM answers every request in flight with a 503 (`cluster_failed`)
+  before it exits. Unloading the job from any page is the same stop.
+- **jaccl self-heal** (fork present): JACCL_COLLECTIVE_TIMEOUT_MS=0 while
+  loading, set to 60000 after load (the maintainer's d2e82f92 / 43dc7f56).
+- **Registry**: `jobs/jobs.json`, keyed `<job>/<rank>`; rank 0 also in
+  `servers.json` by its port (chat, relay, residency find it there).
+
 ## Migration
 
 1. The conformance suite (tests/api) passes on today's server: done on
