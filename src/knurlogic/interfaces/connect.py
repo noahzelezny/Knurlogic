@@ -111,15 +111,19 @@ def endpoints(base_url: str, model: str, router_url: str = "__ROUTER__",
     (opus, sonnet, haiku) can be a different running model."""
     opus, sonnet, haiku = tiers
     return [
+        # `pick_model`: the page offers a select of the running models, and
+        # the router block (one address for every model) comes first; the
+        # `direct` block is that model's own server, secondary.
         {"id": "openai", "name": "OpenAI-compatible",
          "what": "anything that speaks OpenAI: Zed, Cline, Continue, "
                  "OpenWebUI, the openai SDKs",
-         "needs_model": True,
-         "blocks": [{"label": "settings",
-                     "text": openai_snippet(base_url, model)},
-                    {"label": "or through this page, which routes by "
-                              "`model` to every running model",
-                     "text": openai_snippet(router_url, model)}]},
+         "needs_model": True, "pick_model": True,
+         "blocks": [{"label": "settings, through this page, which routes "
+                              "by `model` to every running model",
+                     "text": openai_snippet(router_url, model)},
+                    {"label": "or straight to that model's own server",
+                     "direct": True,
+                     "text": openai_snippet(base_url, model)}]},
         {"id": "claude", "name": "Claude Code",
          "what": "a Claude-Messages harness, over /v1/messages",
          "needs_model": True, "tiers": ["opus", "sonnet", "haiku"],
@@ -146,8 +150,11 @@ def endpoints(base_url: str, model: str, router_url: str = "__ROUTER__",
                     {"label": "any MCP client's config", "text": mcp_json()}]},
         {"id": "curl", "name": "curl",
          "what": "one request by hand",
-         "needs_model": True,
-         "blocks": [{"label": "chat completion",
+         "needs_model": True, "pick_model": True,
+         "blocks": [{"label": "chat completion, through this page",
+                     "text": curl_snippet(router_url, model)},
+                    {"label": "or straight to that model's own server",
+                     "direct": True,
                      "text": curl_snippet(base_url, model)}]},
     ]
 

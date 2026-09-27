@@ -292,7 +292,11 @@
    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  /* The model is what a bench chat is ABOUT, so it wraps rather than clips. */
  .chat .m{color:var(--acc);white-space:normal;overflow-wrap:anywhere}
- .chat .sp{font-size:10px;color:var(--faint);margin-top:2px}
+ /* One line in the sidebar's width: the page's mono runs ~35% wider than
+    it has room for, so this one line is set in the system face. */
+ .chat .spd{font:10px system-ui,sans-serif;letter-spacing:0;
+   color:var(--faint);margin:2px -6px 0 0;
+   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .chat .x{float:right;color:var(--faint);padding:0 2px;visibility:hidden}
  .chat:hover .x{visibility:visible}
  .chat .x:hover{color:var(--warn)}
@@ -367,8 +371,11 @@
  /* Which running model Send goes to, and how hard it thinks, at the top
     right of the box: in teal, because a live chat bar should say so and
     say to what. */
- .chd{display:flex;justify-content:flex-end;align-items:center;gap:10px;
+ .chd{display:flex;justify-content:space-between;align-items:center;gap:10px;
    margin-bottom:6px}
+ .chd .cl{font-size:10.5px;color:var(--faint);display:flex;align-items:center;gap:6px;
+   min-width:0}
+ .chd .cl:has(#cmodel:empty){visibility:hidden}
  #cmodel{color:var(--acc);font-size:11px;max-width:24em;
    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  #cmodel:empty{display:none}
@@ -597,7 +604,12 @@
  .bubble.user{background:var(--med)}
  .bubble.assistant{background:transparent}
  .bubble.err{border-color:var(--warn);color:var(--warn)}
- .bactions{display:flex;gap:2px}
+ /* The metrics line on the left, the actions at the right for both roles:
+    copying is always in one place. */
+ .bfoot{display:flex;align-items:center;justify-content:space-between;gap:10px;
+   align-self:stretch}
+ .bfoot .rmet{margin:0}
+ .bactions{display:flex;gap:2px;margin-left:auto}
  .bactions button{background:none;border:0;padding:3px;color:var(--faint);
    cursor:pointer;line-height:0;border-radius:var(--r)}
  .bactions button:hover,.bactions button:focus-visible{color:var(--fg)}
@@ -640,6 +652,9 @@
    font:inherit;font-size:12.5px;max-height:160px}
  #cq[disabled]{opacity:.5}
  #cq:focus::placeholder{color:transparent}
+ /* the page's teal, not the browser's blue, and still a ring to see */
+ #cq:focus{outline:none;border-color:var(--acc)}
+ #cq:focus-visible{box-shadow:0 0 0 1px var(--acc)}
  .go.danger{color:var(--warn);border-color:var(--warn)}
  .pfbar{margin-top:8px;height:4px;background:var(--med);border-radius:2px;
    position:relative;overflow:hidden}
@@ -783,16 +798,17 @@
             <!-- What Send goes to and how hard it thinks, on one line above
                  the box: the two things to check before sending. -->
             <div class="chd">
-              <span id="cmodel"></span>
+              <span class="cl">Model: <span id="cmodel"></span></span>
+              <label class="cl">Thinking:
               <select id="ceffort" title="reasoning_effort: knurlogic maps it onto this model's own controls and says what it applied">
-                <option value="">thinking: model default</option>
-                <option value="none">thinking: none</option>
-                <option value="minimal">thinking: minimal</option>
-                <option value="low">thinking: low</option>
-                <option value="medium">thinking: medium</option>
-                <option value="high">thinking: high</option>
-                <option value="xhigh">thinking: xhigh</option>
-              </select>
+                <option value="">model default</option>
+                <option value="none">none</option>
+                <option value="minimal">minimal</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="xhigh">xhigh</option>
+              </select></label>
             </div>
             <form id="cf">
               <div class="crow">
@@ -1429,10 +1445,16 @@ let CONNDOC=null, CONNSEL='openai';
 // whose router hands each request to the server holding the model it names.
 // Only a running model can be routed to, so the choices are those.
 const CONNTIER={};
-function connTarget(){
+// OpenAI-compatible and curl name one model: picked the same way, and sent
+// through the same router; that model's own server is shown second.
+let CONNPICK='';
+function connRows(){
   const d=window.RESIDENCY||{};
-  const rows=(d.resident||[]).concat(...(d.peers||[]).map(p=>p.resident||[]))
+  return (d.resident||[]).concat(...(d.peers||[]).map(p=>p.resident||[]))
     .filter(r=>r.runtime==='knurlogic' && r.where);
+}
+function connTarget(){
+  const rows=connRows();
   const c=window.curChatPub && window.curChatPub();
   if(c && c.where){ const r=rows.find(r=>r.where===c.where); if(r) return r }
   if(window.PAGEMODEL) return {name:window.PAGEMODEL.name, where:location.origin};
@@ -1452,37 +1474,51 @@ async function showConnect(){
   if(e.needs_model && !t){
     $('conn').innerHTML=h+`<div class="msg">Nothing is running, so there is no
       address to point at yet. Load a model, then come back.</div>`; return }
-  if(e.tiers) h+=`<div class="msg">through this page, <b style="color:var(--acc)">${
+  if(e.tiers||e.pick_model) h+=`<div class="msg">through this page, <b style="color:var(--acc)">${
     esc(location.origin)}</b>, which sends each request to the running model it names</div>`;
   else if(e.needs_model) h+=`<div class="msg">for <b style="color:var(--acc)">${esc(t.name)}</b>
     at ${esc(t.where)}</div>`;
-  let ids=[];
-  if(e.tiers){
+  let ids=[], direct=null;
+  if(e.tiers||e.pick_model){
     const j=await getJSON('/v1/models');
     ids=(j.data||[]).map(m=>m.id).filter(Boolean);
     if(CONNSEL!==e.id) return;
     if(!ids.length){ $('conn').innerHTML=h+`<div class="msg">No running model
       answers to its name here yet; the router only reaches loaded models.</div>`; return }
     const pref=ids.includes(t&&t.name)?t.name:ids[0];
-    e.tiers.forEach(x=>{ if(!ids.includes(CONNTIER[x])) CONNTIER[x]=pref });
+    if(e.pick_model){
+      if(!ids.includes(CONNPICK)) CONNPICK=pref;
+      // the chosen model's own server, when this page can see which it is
+      const tail=n=>String(n||'').replace(/\/+$/,'').split('/').pop();
+      direct=connRows().find(r=>r.name===CONNPICK||tail(r.name)===tail(CONNPICK))||null;
+      h+=`<div class="ctl" style="gap:10px;margin-top:10px"><label class="cs" style="margin:0;gap:6px">model
+        <select data-pick style="width:auto">${ids.map(id=>
+          `<option${id===CONNPICK?' selected':''}>${esc(id)}</option>`).join('')}</select></label></div>`;
+    }
+    if(e.tiers){ e.tiers.forEach(x=>{ if(!ids.includes(CONNTIER[x])) CONNTIER[x]=pref });
     h+=`<div class="ctl conntiers" style="gap:10px;margin-top:10px;flex-wrap:wrap">${
       e.tiers.map(x=>`<label class="cs tier" style="margin:0;gap:6px">${esc(x)}
         <select data-tier="${esc(x)}" style="width:auto">${ids.map(id=>
-          `<option${id===CONNTIER[x]?' selected':''}>${esc(id)}</option>`).join('')}</select></label>`).join('')}</div>`;
+          `<option${id===CONNTIER[x]?' selected':''}>${esc(id)}</option>`).join('')}</select></label>`).join('')}</div>`; }
   }
-  const fill=s=>s.split('__BASE__').join(t?t.where.replace(/\/$/,''):'')
+  const base=e.pick_model ? (direct?direct.where:'') : (t?t.where:'');
+  const model=e.pick_model ? CONNPICK : (t?t.name:'');
+  const blocks=e.blocks.filter(b=>!b.direct||base);
+  const fill=s=>s.split('__BASE__').join(base.replace(/\/$/,''))
                  .split('__ROUTER__').join(location.origin)
                  .split('__OPUS__').join(CONNTIER.opus||'')
                  .split('__SONNET__').join(CONNTIER.sonnet||'')
                  .split('__HAIKU__').join(CONNTIER.haiku||'')
-                 .split('__MODEL__').join(t?t.name:'');
-  h+=e.blocks.map((b,i)=>`<div class="connblk"><div class="optlab"><span${b.client?` class="cl-${esc(b.client)}"`:''}>${esc(b.label)}</span>
-    <button class="mini" data-cp="${i}">copy</button></div><pre>${esc(fill(b.text))}</pre></div>`).join('');
+                 .split('__MODEL__').join(model);
+  h+=blocks.map((b,i)=>`<div class="connblk"><div class="optlab"><span${b.client?` class="cl-${esc(b.client)}"`:''}>${esc(b.label)}</span>
+    <button class="mini" data-cp="${i}">copy</button></div><pre${b.direct?' style="color:var(--dim)"':''}>${esc(fill(b.text))}</pre></div>`).join('');
   $('conn').innerHTML=h;
   $('conn').querySelectorAll('[data-tier]').forEach(x=>x.onchange=()=>{
     CONNTIER[x.dataset.tier]=x.value; showConnect() });
+  $('conn').querySelectorAll('[data-pick]').forEach(x=>x.onchange=()=>{
+    CONNPICK=x.value; showConnect() });
   $('conn').querySelectorAll('[data-cp]').forEach(x=>x.onclick=()=>{
-    navigator.clipboard?.writeText(fill(e.blocks[+x.dataset.cp].text))
+    navigator.clipboard?.writeText(fill(blocks[+x.dataset.cp].text))
       .then(()=>{ x.textContent='copied'; setTimeout(()=>x.textContent='copy',1200) })
       .catch(()=>{});
   });
@@ -2487,11 +2523,13 @@ function chatSpeeds(c){
   const ms=(c.msgs||[]).map(x=>x.met).filter(Boolean);
   const avg=k=>{ const v=ms.map(m=>m[k]).filter(x=>x>0);
     return v.length ? v.reduce((a,b)=>a+b,0)/v.length : 0 };
-  const pf=avg('prefill_tps'), dc=avg('decode_tps');
-  const bits=[pf?`prefill ${Math.round(pf)} tok/s`:'', dc?`decode ${dc.toFixed(1)} tok/s`:'']
-    .filter(Boolean);
-  return bits.length ? `<div class="sp" title="mean over this chat's replies">${
-    bits.join(' · ')}</div>` : '';
+  const tt=avg('ttft_ms'), pf=avg('prefill_tps'), dc=avg('decode_tps');
+  if(!tt && !pf && !dc) return '';
+  // One line, the labels in the tooltip; a speed not measured is a dash.
+  const bits=[tt ? 'TTFT '+(tt<1000?`${Math.round(tt)} ms`:`${(tt/1000).toFixed(2)} s`) : 'TTFT —',
+    pf?`${Math.round(pf)} tok/s`:'—', dc?`${dc.toFixed(1)} tok/s`:'—'];
+  return `<div class="spd" title="time to first token • prefill • decode, mean over this chat's replies">${
+    bits.join(' • ')}</div>`;
 }
 function renderChats(){
   const el=$('chats');
@@ -2915,6 +2953,19 @@ function replyMetHTML(m){
   return `<div class="rmet" title="${m.server?'measured by the server':
     'measured by this page'}">${bits.join(' · ')}</div>`;
 }
+// The page's own clock, when the server sent no timing. All times are
+// performance.now() ms: t0 the send, ka the first prefill keepalive (0 if
+// none), first/last the first and last GENERATED token (reasoning counts),
+// not the stream's close. Prefill under ~256 new tokens or ~50 ms is too
+// thin to be a rate, so it is left out (shown as a dash).
+function pageMetrics(t){
+  const fresh=Math.max((t.prompt||0)-(t.cached||0),0);
+  const pft=t.first-(t.ka||t.t0), dt=(t.last||0)-t.first;
+  return {ttft_ms:t.first-t.t0,
+    prefill_tps: fresh>=256 && pft>=50 ? fresh/(pft/1000) : 0,
+    decode_tps: t.completion>1 && dt>0 ? (t.completion-1)/(dt/1000) : 0};
+}
+window.pageMetrics=pageMetrics;
 // The in-flight mark, drawn into the streaming reply until its answer starts.
 function waitHTML(w){
   const on=w.phase==='thinking';
@@ -2959,14 +3010,15 @@ function bubbleFor(m, idx){
   if(m.role!=='user') bubble.innerHTML = (m._streaming && !m.content && WAIT ? waitHTML(WAIT) : '')
     + thinkHTML + `<div class="md">${mdRender(m.content||'')}</div>`;
   wrap.appendChild(bubble);
+  const foot=document.createElement('div'); foot.className='bfoot';
   if(m.met){ const met=document.createElement('div'); met.innerHTML=replyMetHTML(m.met);
-    wrap.appendChild(met.firstChild) }
+    if(met.firstChild) foot.appendChild(met.firstChild) }
   const act=document.createElement('div'); act.className='bactions';
   act.innerHTML = actBtn('cp',idx,'Copy')+
     (m.role==='user'?actBtn('ed',idx,'Edit & resend'):'')+
     (m.role==='assistant'?actBtn('rg',idx,'Regenerate'):'')+
     actBtn('del2',idx,'Delete');
-  wrap.appendChild(act);
+  foot.appendChild(act); wrap.appendChild(foot);
   wrap.querySelectorAll('.thumb').forEach(async img=>{
     const rec=await idbGet(img.dataset.hash);
     if(rec) img.onclick=()=>openLightbox(rec.dataURL);
@@ -3078,7 +3130,7 @@ async function runTurn(){
   const effort=$('ceffort').value;
   if(effort) body.reasoning_effort=effort;
   const t0=performance.now();
-  let first=0, ka=0, usage=null;
+  let first=0, last=0, ka=0, usage=null;
   try{
     const url=c.where ? '/chat?where='+encodeURIComponent(c.where)
                       : '/v1/chat/completions';
@@ -3103,7 +3155,7 @@ async function runTurn(){
       const delta=j.choices?.[0]?.delta||{};
       const thought=delta.reasoning_content||delta.reasoning;
       if(thought){
-        if(!first) first=performance.now();
+        last=performance.now(); if(!first) first=last;
         assistant.thinking+=thought; pfHide();
         // Reasoning is still thinking: the gear keeps turning, the % goes.
         if(WAIT && (WAIT.phase!=='thinking' || WAIT.pct!=null)) setWait({phase:'thinking'});
@@ -3112,7 +3164,7 @@ async function runTurn(){
         if(th) th.textContent=assistant.thinking;
       }
       if(delta.content){
-        if(!first) first=performance.now();
+        last=performance.now(); if(!first) first=last;
         assistant.content+=delta.content; pfHide(); if(WAIT) setWait(null);
         const md=$('clog').lastElementChild.querySelector('.md');
         if(md) md.innerHTML=mdRender(assistant.content);
@@ -3124,20 +3176,17 @@ async function runTurn(){
       assistant.err=true }
   }
   pfHide(); WAIT=null;
-  const end=performance.now();
   assistant._streaming=false;
   if(first){
-    const ttft=first-t0;
     const prompt=usage?.prompt_tokens||0;
     const cached=usage?.prompt_tokens_details?.cached_tokens||0;
-    const fresh=Math.max(prompt-cached,0);
     const comp=usage?.completion_tokens||0;
     // Prefill starts at the first keepalive when there was one: before it
-    // the request may only have been queued.
-    const pft=first-(ka||t0);
-    assistant.met={ttft_ms:ttft, prompt, cached, completion:comp,
-      prefill_tps: fresh>0 && pft>0 ? fresh/(pft/1000) : 0,
-      decode_tps: (comp>1 && end>first) ? (comp-1)/((end-first)/1000) : 0};
+    // the request may only have been queued. Decode ends at the last token,
+    // not when the stream closed (the usage chunk and the close can trail
+    // it by seconds, which on a short reply read as 0.1 tok/s).
+    assistant.met={prompt, cached, completion:comp,
+      ...pageMetrics({t0, ka, first, last, prompt, cached, completion:comp})};
   }
   // The server's own measurement wins where it has one: it timed the steps
   // where they ran, while the page's clock also counts the proxy and the
