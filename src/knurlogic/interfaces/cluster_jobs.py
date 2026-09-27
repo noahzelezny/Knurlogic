@@ -135,8 +135,21 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
                "jaccl_selfheal": heal}
         _INFO.update(doc=doc, at=now)
     from knurlogic.machine import allowance
-    return dict(doc, working_set_bytes=allowance.cap(int(working_set_bytes
-                                                         or 0)))
+    return dict(doc, working_set_bytes=allowance.cap(
+        gpu_working_set(int(working_set_bytes or 0))))
+
+
+def gpu_working_set(installed: int, wired_limit=None) -> int:
+    """What a rank may use on this machine: the GPU's wired limit
+    (iogpu.wired_limit_mb -- what Metal recommends, what one-machine `serve`
+    guards), never the installed RAM the page's status reports. The M3
+    Ultra's 96 GiB has 84 wired; placing a 90 GiB share there on RAM
+    alone would pass prepare and fail at load."""
+    if wired_limit is None:
+        from knurlogic.machine import wired
+        wired_limit = wired.read().limit_bytes
+    known = [b for b in (int(installed or 0), int(wired_limit or 0)) if b > 0]
+    return min(known) if known else 0
 
 
 # ------------------------------------------------------------ plan
@@ -145,8 +158,30 @@ def _subnet(ip: str) -> str:
     return ".".join(str(ip).split(".")[:3])
 
 
-def _ring_ips(infos: list) -> list:
-    """Each rank's address on the ring, in rank order: a Thunderbolt
+def _shared_subnet(a: dict, b: dict, rdma: bool = False) -> str:
+    """The one Thunderbolt /24 two machines both sit on ("" if none) --
+    lowest first, so every page picks the same. Two Macs joined by two
+    cables share two subnets; BOTH ends of a link must be on the same one
+    (the M4's en2 at 198.51.100.2 and the M3's en4 at 192.0.2.1 are different
+    cables, and a jaccl queue pair across them fails RTR with errno 60).
+    `rdma`: only a subnet whose interface has RDMA up on both ends."""
+    def on(m):
+        act = set((m.get("rdma") or {}).get("active") or [])
+        return {_subnet(t["ip"]) for t in m.get("thunderbolt") or []
+                if t.get("ip") and (not rdma
+                                    or f"rdma_{t.get('iface')}" in act)}
+    both = sorted(on(a) & on(b))
+    return both[0] if both else ""
+
+
+def _on_subnet(m: dict, net: str, key: str = "ip"):
+    return next((t.get(key) for t in m.get("thunderbolt") or []
+                 if t.get("ip") and _subnet(t["ip"]) == net), None)
+
+
+def _ring_ips(infos: list, rdma: bool = False) -> list:
+    """Each rank's address on the ring, in rank order. Two machines: both
+    on the subnet they share (`_shared_subnet`). More: a Thunderbolt
     address sharing a /24 with a neighbour's when there is one, else its
     first. Raises ValueError naming a machine with none."""
     ips = []
@@ -156,6 +191,13 @@ def _ring_ips(infos: list) -> list:
         if not mine:
             raise ValueError(f"{m['name']} has no Thunderbolt address: the "
                              f"ring runs over the Thunderbolt bridge")
+    if n == 2:
+        net = _shared_subnet(infos[0], infos[1], rdma) \
+            or _shared_subnet(infos[0], infos[1])
+        if net:
+            return [_on_subnet(m, net) for m in infos]
+    for r, m in enumerate(infos):
+        mine = [t["ip"] for t in m.get("thunderbolt") or [] if t.get("ip")]
         near = {_subnet(t["ip"]) for k in ((r - 1) % n, (r + 1) % n)
                 for t in infos[k].get("thunderbolt") or []}
         ips.append(next((ip for ip in mine if _subnet(ip) in near), mine[0]))
@@ -163,15 +205,14 @@ def _ring_ips(infos: list) -> list:
 
 
 def _rdma_device(m: dict, peer: dict):
-    """The rdma_<iface> device on `m` that reaches `peer`: the one whose
-    Thunderbolt interface shares a /24 with one of the peer's addresses
-    (en4 at 192.0.2.1 reaches 192.0.2.2), else the only active one."""
-    near = {_subnet(t.get("ip")) for t in peer.get("thunderbolt") or []}
+    """The rdma_<iface> device on `m` that reaches `peer`: the one on the
+    Thunderbolt subnet both share with RDMA up at both ends (en4 at
+    192.0.2.1 reaches 192.0.2.2) -- the same subnet from either side --,
+    else the only active one."""
     act = (m.get("rdma") or {}).get("active") or []
-    for t in m.get("thunderbolt") or []:
-        d = "rdma_" + str(t.get("iface"))
-        if _subnet(t.get("ip")) in near and d in act:
-            return d
+    net = _shared_subnet(m, peer, rdma=True)
+    if net:
+        return "rdma_" + str(_on_subnet(m, net, "iface"))
     return act[0] if len(act) == 1 else None
 
 
@@ -729,7 +770,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     order = [next(m for m in infos if m["name"] == nm) for nm in plan["order"]]
     job = secrets.token_hex(8)
     try:
-        ips = _ring_ips(order)
+        ips = _ring_ips(order, rdma=link == "jaccl")
     except ValueError as e:
         return {"refused": str(e), "placement": plan}
     slot = _slot(job)
