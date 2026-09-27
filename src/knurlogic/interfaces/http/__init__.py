@@ -70,7 +70,11 @@ def scheduler_options(settings: dict) -> dict:
                                                       32)),
             "prefill_step_size": int(settings.get("prefill_step_size", 2048)),
             "prompt_cache_size": int(settings.get("prompt_cache_size", 10)),
-            "prompt_cache_bytes": settings.get("prompt_cache_bytes")}
+            "prompt_cache_bytes": settings.get("prompt_cache_bytes"),
+            # what the memory guard counts against: --working-set-gib, else
+            # the machine's knurlogic allowance (machine/allowance.py) under
+            # the detected working set; None lets the scheduler detect it
+            "working_set_bytes": settings.get("working_set_bytes")}
 
 
 def serve(artifact, host: str, port: int, *, routes: dict | None = None,
