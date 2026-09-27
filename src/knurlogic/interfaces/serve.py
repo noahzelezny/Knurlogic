@@ -247,8 +247,18 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if eng:
         print("engine    " + "  ".join(f"{k}={v}" for k, v in sorted(eng.items())))
 
+    from knurlogic.machine import allowance
+    guard = int(working_set_gib * GIB) or (
+        allowance.cap(wired.detected_working_set_bytes())
+        if allowance.get() else 0)
+    if guard:
+        print(f"memory    the scheduler guards {guard / GIB:.1f} GiB ("
+              + ("--working-set-gib" if working_set_gib else
+                 f"the knurlogic allowance, {allowance.path()}") + ")")
     return http.serve(a, host, port, routes=routes,
-                      settings={**eng, **(serving or {})}, draft=draft)
+                      settings={**eng, **(serving or {}),
+                                **({"working_set_bytes": guard}
+                                   if guard else {})}, draft=draft)
 
 
 def _parse_sets(pairs) -> dict:
