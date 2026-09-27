@@ -35,7 +35,8 @@ class ModelHost:
                  executes_artifact_code: bool = False,
                  image_store_bytes: Optional[int] = None,
                  shard=None, vision: bool = True, load_wait_s: float = 0.0,
-                 head_agree=None, kv_bits: Optional[int] = None):
+                 head_agree=None, kv_bits: Optional[int] = None,
+                 cross_chip: Optional[dict] = None):
         """`shard(model)`: split the weights in place before they are read
         (a tensor ring: loaded lazily, split, then evaluated, so a rank
         never holds the whole model). `vision=False` binds no tower.
@@ -44,6 +45,8 @@ class ModelHost:
         `kv_bits`: store attention K/V at 8/6/4 bits (engine/kvquant.py);
         a model with no cache that can be is refused, not served bf16."""
         self.kv_bits = kv_bits
+        #: engine/crosschip.resolve(...) for this job, None = off
+        self.cross_chip = cross_chip
         self.shard = shard
         #: head_agree(bound: bool) -> bool, called after the head binds (or
         #: does not) on every load: a pipeline's ranks draft together or
@@ -119,6 +122,7 @@ class ModelHost:
                                      wait_s=self.load_wait_s):
                 self.model, self.tokenizer = self._weights(path, lazy)
                 self._quantize_kv()
+                self._cross_chip()
                 self.model_key = (path, None, None)
                 self._bind_vision(path)
                 self._bind_head(path)
@@ -173,6 +177,18 @@ class ModelHost:
         model, tok = lazy
         mx.eval(model.parameters())
         return model, tok
+
+    def _cross_chip(self) -> None:
+        """Pad 9-31-row quantized matmuls to 32 (engine/crosschip.py) so
+        a split across GPU architectures rounds identically everywhere.
+        Process-wide and idempotent."""
+        from knurlogic.engine import crosschip
+        cc = dict(self.cross_chip or {"on": False, "why": "not set"})
+        if cc.get("on"):
+            crosschip.install()
+            logger.info("cross-chip: %s", crosschip.describe(cc))
+        cc["installed"] = crosschip.installed()
+        state.SERVED["cross_chip"] = cc
 
     def _quantize_kv(self) -> None:
         state.SERVED["kv_bits"] = self.kv_bits

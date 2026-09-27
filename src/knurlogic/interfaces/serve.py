@@ -134,6 +134,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         return 2
     if launch.get("mtp") is False:
         draft = False
+    # identical rounding across GPU architectures (engine/crosschip.py):
+    # off by default; auto is on when this job's machines differ
+    from knurlogic.engine import crosschip
+    cross = crosschip.resolve(launch.get("cross_chip", "off"),
+                              ring.get("chips") if world > 1 else None)
 
     ws = int(working_set_gib * GIB)
     if ws == 0:
@@ -218,6 +223,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # when a model will not load. Advice only -- knurlogic never sets it.
         snap["wired"] = wired.advise(a.bytes_on_disk)
         snap["drafting"] = engine.drafting_status()
+        from knurlogic.engine.serve import state as _st
+        snap["cross_chip"] = dict(_st.SERVED.get("cross_chip") or cross)
         # what reasoning_effort does on the served model -- the MCP's
         # `models` answer plus the default the server actually renders
         try:
@@ -271,7 +278,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             prefill_step_size=int(ring["prefill_chunk"]),
             executes_artifact_code=bool(a.model_file),
             split=ring.get("split", "tensor"), pipeline=ring.get("pipeline"),
-            draft=draft, kv_bits=kv_bits)
+            draft=draft, kv_bits=kv_bits, cross_chip=cross)
         return 0
 
     print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)")
@@ -345,6 +352,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
               "--no-draft)")
     if kv_bits is not None:
         print(f"kv cache   attention K/V stored at {kv_bits} bits")
+    print(f"cross-chip: {crosschip.describe(cross)}")
 
     # The knobs the ENGINE reads -- argv and a process-global mlx call --
     # from the environment as it finally stands, overrides included.
@@ -362,10 +370,21 @@ def run(path: str, host: str, port: int, working_set_gib: float,
               + ("--working-set-gib" if working_set_gib else
                  f"the knurlogic allowance, {allowance.path()}") + ")")
     return http.serve(a, host, port, routes=routes,
-                      settings={**eng, **(serving or {}),
+                      settings={**eng, "cross_chip": cross, **(serving or {}),
                                 **({"working_set_bytes": guard}
                                    if guard else {})}, draft=draft,
                       ring=ring if world > 1 else None)
+
+
+def _ring_chips(text: str) -> list | None:
+    """--ring-chips: a JSON list of {name, arch}; None if absent or bad."""
+    import json
+    try:
+        v = json.loads(text) if text else None
+    except ValueError:
+        return None
+    return [c for c in v if isinstance(c, dict)] \
+        if isinstance(v, list) else None
 
 
 def _ring_refusals(a: Artifact, ring: dict, working_set_gib: float,
@@ -542,6 +561,8 @@ def main(argv=None) -> int:
     # machine's memory bandwidth when the chip table does not know it
     p.add_argument("--layers", default="", help=hide)
     p.add_argument("--bandwidth-gbs", type=float, default=0.0, help=hide)
+    # every rank's {name, arch} as JSON, for KNURLOGIC_CROSS_CHIP=auto
+    p.add_argument("--ring-chips", default="", help=hide)
     a = p.parse_args(argv)
     ring = None
     if a.world > 1:
@@ -553,7 +574,8 @@ def main(argv=None) -> int:
                 "prefill_chunk": a.prefill_chunk,
                 "decode_chunk": a.decode_chunk,
                 "layers": [int(x) for x in a.layers.split(",") if x],
-                "bandwidth_gbs": a.bandwidth_gbs or None}
+                "bandwidth_gbs": a.bandwidth_gbs or None,
+                "chips": _ring_chips(a.ring_chips)}
     serving = {"decode_concurrency": a.decode_concurrency,
                "max_body": a.max_request_mib * 1024 * 1024,
                "allow_origins": a.allow_origin,

@@ -566,9 +566,11 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                    prefill_step_size: int,
                    executes_artifact_code: bool = False,
                    split: str = "tensor", pipeline: Optional[dict] = None,
-                   draft: bool = True, kv_bits: Optional[int] = None) -> int:
+                   draft: bool = True, kv_bits: Optional[int] = None,
+                   cross_chip: Optional[dict] = None) -> int:
     """A rank >= 1 from start to stop: join, load its shard, follow.
-    `pipeline`: agree()'s keyword arguments for a pipeline split."""
+    `pipeline`: agree()'s keyword arguments for a pipeline split.
+    `cross_chip`: engine/crosschip.resolve(...) for this job."""
     from .host import ModelHost
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
@@ -584,7 +586,8 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                      executes_artifact_code=executes_artifact_code,
                      shard=cut, vision=False, load_wait_s=3600.0,
                      head_agree=(agree_head(link) if split == "pipeline"
-                                 else None), kv_bits=kv_bits)
+                                 else None), kv_bits=kv_bits,
+                     cross_chip=cross_chip)
     host.load(path)
     if host.state != "ready":
         raise RuntimeError(f"rank {link.rank} could not load {path}: "

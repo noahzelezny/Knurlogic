@@ -1171,6 +1171,8 @@ function migrateLaunchSets(){
 // name), base (its base model, whose launch settings these are), launch
 // (nothing of it runs: every change is a launch setting), label (how the confirm lists it) and url
 // (a setting of this page's own, POSTed there as {gib}: the allowance).
+// a launch setting's plain name, where its variable is not one
+const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Identical results across chips'};
 function knobHTML(k, c){
   const cur=k.running??k.would_be??k.value;
   // with no variant running, every knob waits for a launch, live or not
@@ -1180,7 +1182,7 @@ function knobHTML(k, c){
   const tag=k.reach==='live'
     ? `<span class="kw live" title="${esc(REACH.live)}">live</span>`
     : `<span class="kw rst" title="${esc(REACH.restart)}">needs reload</span>`;
-  const about=[k.what,k.why].filter(Boolean).map(esc).join(' — ')+
+  const about=(KNOB_TITLE[k.name]?[k.what]:[k.what,k.why]).filter(Boolean).map(esc).join(' — ')+
     (k.reach_why?`<br><span style="color:var(--faint)">${esc(k.reach_why)}</span>`:'');
   // the measured steps, stopping where the headroom does; else a field
   const vals=k.values||[], ci=vals.findIndex(x=>sameVal(x,k.cap));
@@ -1198,7 +1200,7 @@ function knobHTML(k, c){
   const tuneNote=k.changed&&st==null ? `the tune gives ${esc(k.would_be)}` : '';
   return `<div class="knob${st!=null?' staged':''}" data-name="${esc(k.name)}"${
     c.hide&&c.hide(k.name)?' hidden':''}>
-    <div class="hd"><span class="k">${esc(k.name)}${infoHTML(about,'down')}${tag}</span>
+    <div class="hd"><span class="k">${esc(KNOB_TITLE[k.name]||k.name)}${infoHTML(about,'down')}${tag}</span>
       <span class="kedit" data-knob="${esc(k.name)}" data-g="${esc(c.g)}"
         ${c.where!=null?`data-where="${esc(c.where)}"`:''}${c.url?` data-url="${esc(c.url)}"`:''} data-model="${esc(c.model)}"
         data-base="${esc(c.base||'')}" data-label="${esc(c.label)}" data-reach="${reach}" data-cur="${esc(cur)}"

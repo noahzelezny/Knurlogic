@@ -278,6 +278,14 @@ KNOB_DOC = {
         "is not faster and may be slower. Attention layers only -- "
         "recurrent state and sliding windows stay bf16. Unmeasured on a "
         "real model."),
+    "KNURLOGIC_CROSS_CHIP": (
+        "identical results across chips: a split over an M3 and an M4 "
+        "gives the same tokens a split over two of one",
+        "mlx picks a different quantized-matmul kernel for 9-31 rows on "
+        "each GPU generation, so they round differently; on pads those "
+        "calls to 32 rows (+2-6% on them only). Off by default: rank 0 "
+        "samples every token, so a cluster cannot desync. auto: on when the "
+        "machines of a cluster job have different GPU architectures."),
     "VQLAB_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
         "biggest single win in the memory playbook, no measured speed cost at "
@@ -330,11 +338,13 @@ KNOB_ALIASES = {
     "mtp": ("KNURLOGIC_MTP",),
     "mtp_dynamic": ("KNURLOGIC_MTP_DYNAMIC",),
     "kv_bits": ("KNURLOGIC_KV_BITS",),
+    "cross_chip": ("KNURLOGIC_CROSS_CHIP",),
 }
 
 #: launch settings of the model itself, read when it loads: the same on
 #: every rank of a split (interfaces/cluster_jobs passes them ring-wide)
-MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS")
+MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
+               "KNURLOGIC_CROSS_CHIP")
 
 
 # --- which knobs the ENGINE consumes ----------------------------------------
@@ -346,7 +356,8 @@ MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS")
 # the server never saw.
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "prompt_concurrency", "mtp",
-                                      "mtp_dynamic", "kv_bits")
+                                      "mtp_dynamic", "kv_bits",
+                                      "cross_chip")
                           for n in KNOB_ALIASES[k])
 
 
@@ -402,6 +413,12 @@ def kv_quant_for(model_type: str) -> tuple:
     return [int(b) for b in spec["bits"]], spec.get("why", "")
 
 
+def cross_chip_of(v) -> str:
+    """'auto' | 'on' | 'off' (engine/crosschip.parse, without mlx)."""
+    from knurlogic.engine.crosschip import parse
+    return parse(v)
+
+
 def engine_settings(env: dict) -> dict:
     """{prefill_step_size, prompt_concurrency, cache_limit_gb} from a
     resolved environment, whichever alias it was emitted under. Absent means
@@ -412,7 +429,8 @@ def engine_settings(env: dict) -> dict:
                                ("cache_limit_gb", "cache_limit_gb", float),
                                ("mtp", "mtp", on_off),
                                ("mtp_dynamic", "mtp_dynamic", on_off),
-                               ("kv_bits", "kv_bits", kv_bits_of)):
+                               ("kv_bits", "kv_bits", kv_bits_of),
+                               ("cross_chip", "cross_chip", cross_chip_of)):
         for name in KNOB_ALIASES[logical]:
             if name in env:
                 out[key] = (cast(float(env[name])) if cast in (int, float)
@@ -483,6 +501,7 @@ KNOB_RANGE = {
     # narrowed per family by the resolver (Resolution.ranges): a family
     # that refuses quantized KV offers bf16 alone
     "KNURLOGIC_KV_BITS": (KV_BITS_VALUES, "bits"),
+    "KNURLOGIC_CROSS_CHIP": (["off", "on", "auto"], ""),
     "VQLAB_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
                              "GiB"),
     "KNURLOGIC_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],

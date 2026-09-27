@@ -154,7 +154,8 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                    image_store_bytes=settings.get("image_store_bytes"),
                    shard=shard, vision=not ring,
                    load_wait_s=3600.0 if ring else 0.0,
-                   kv_bits=settings.get("kv_bits"))
+                   kv_bits=settings.get("kv_bits"),
+                   cross_chip=settings.get("cross_chip"))
     sched = Scheduler(mh, **scheduler_options(settings),
                       tensor=tensor).start()
     sched.load(str(artifact.path),
