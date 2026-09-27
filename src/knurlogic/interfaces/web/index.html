@@ -1411,7 +1411,7 @@ function renderSetTabs(){
 // a runtime reads, and the rest folded away. `r` is the running variant
 // whose live values are shown; none, and every change is a launch setting.
 function modelHTML(b, r, doc, runs){
-  const hd=`<div class="shd">${esc(b.name)}<span class="ro">${b.ms.length||'no'}
+  const hd=`<div class="shd">${esc(vqName(b.name,b.ms))}<span class="ro">${b.ms.length||'no'}
     variant${b.ms.length===1?'':'s'} on this disk</span>`;
   if(doc.error) return `<div class="sgrp">${hd}</div>${runs}
     <div class="msg">could not read its settings: ${esc(doc.error)}</div></div>`;
@@ -1525,7 +1525,7 @@ function showModels(){
   const bs=settingBases(), L=$('setlist');
   if(!bs.some(b=>b.name===SBASE)) SBASE=bs.length?bs[0].name:'';
   const row=b=>`<div class="fam" data-b="${esc(b.name)}" aria-current="${b.name===SBASE}"
-      title="${esc(b.ms.map(m=>m.name).join('\n'))}">${esc(b.name)}
+      title="${esc(b.ms.map(m=>(m.is_vq?'VQ  ':'     ')+m.name).join('\n'))}">${esc(vqName(b.name,b.ms))}
       <small${b.runs.length?' class="on"':''}>${b.runs.length?'on '+esc(runsOn(b)):
         b.ms.length+' variant'+(b.ms.length===1?'':'s')}</small></div>`;
   const on=bs.filter(b=>b.runs.length), off=bs.filter(b=>!b.runs.length);
@@ -2015,6 +2015,16 @@ function baseKeys(ms){
   });
   return out;
 }
+// A group's name as shown: '· VQ' when its variants are VQ builds. The
+// base key itself is not changed (launch settings are kept under it); a
+// local build's key already says it. A group that mixes stock and VQ rungs
+// (Qwen3.5-397B: bf16 and MLX beside the published VQ builds) says how many
+// are VQ, and each VQ rung carries its own VQ tag in the variant list.
+function vqName(name, ms){
+  const n=(ms||[]).filter(m=>m.is_vq).length;
+  if(!n || /· VQ$/.test(name)) return name;
+  return n===ms.length ? `${name} · VQ` : `${name} · VQ ${n}/${ms.length}`;
+}
 // A running model's name as its runtime gives it: exo's org/name is the
 // directory org--name; one not on this disk is named by the same rule.
 function baseKey(name){
@@ -2054,7 +2064,7 @@ function renderPicker(){
     : `${g.ms.length} variants (${(g.lo/GIB).toFixed(0)}–${(g.hi/GIB).toFixed(0)} GiB)`;
   const grp=g=>`<div class="grp" data-g="${esc(g.name)}">
       <div class="grphd"><span class="cv">›</span>
-        <span class="gn">${esc(g.name)}</span>
+        <span class="gn">${esc(vqName(g.name,g.ms))}</span>
         <span class="gv">${rng(g)}</span></div>
       <div class="vars">${g.ms.map(m=>{
         const ok=!ws||m.size_bytes<=ws;
