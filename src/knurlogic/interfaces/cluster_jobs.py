@@ -426,8 +426,9 @@ def check_spec(spec) -> str:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
             return f"{k} is a number >= 0"
     tune = spec.get("tune")
-    if tune is not None and tune not in ("safe", "balanced", "fast"):
-        return "tune is safe|balanced|fast"
+    from knurlogic.tuning.settings import PRESETS
+    if tune is not None and tune not in PRESETS:
+        return f"tune is {'|'.join(PRESETS)}"
     sets = spec.get("sets")
     if sets is not None and not isinstance(sets, dict):
         return "sets is an object"
@@ -1194,7 +1195,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     port = req.get("port")
     port = port if isinstance(port, int) and 1024 <= port < 65536 \
         else serve_port
-    from knurlogic.interfaces.ui import clean_sets
+    from knurlogic.interfaces.ui import clean_sets, TUNES
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         return {"error": f"not a launch setting: {', '.join(bad)}"}
@@ -1203,7 +1204,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "coordinator": coord, "layers": plan["layers"],
             "prefill_chunk": PREFILL_CHUNK,
             "tune": req.get("tune") if req.get("tune") in
-            ("safe", "balanced", "fast") else "balanced",
+            TUNES else "balanced",
             "nodes": nodes, "versions": local_info.get("versions") or {},
             "jaccl_timeout_ms": J.JACCL_TIMEOUT_MS if link == "jaccl" else 0,
             "sets": sets,
