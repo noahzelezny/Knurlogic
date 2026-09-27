@@ -1414,10 +1414,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 self.close_connection = True
                 _send_json(self, *refused)
                 return
-            if self.headers.get("Transfer-Encoding"):
-                self.close_connection = True
-                _send_json(self, 411, {"error": "send the body with a "
-                           "Content-Length and no Transfer-Encoding"})
+            if self._refuse_chunked():
                 return
             try:
                 n = int(self.headers.get("Content-Length") or 0)
@@ -1432,9 +1429,22 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             peer_relay(self, method,
                        path[len(PEER_RELAY):].rstrip("/"), body)
 
+        def _refuse_chunked(self) -> bool:
+            """A peer route's body is a plain Content-Length body -- never
+            Transfer-Encoding, the framing a smuggled request hides behind:
+            411 and the connection closed. -> True when refused."""
+            if not self.headers.get("Transfer-Encoding"):
+                return False
+            self.close_connection = True
+            _send_json(self, 411, {"error": "send the body with a "
+                       "Content-Length and no Transfer-Encoding"})
+            return True
+
         def _peer_cluster(self, path: str):
             """/peer/cluster/*: the same gate as PEER_LOAD_PATH."""
             from knurlogic.interfaces import cluster_jobs
+            if self._refuse_chunked():
+                return
             try:
                 n = int(self.headers.get("Content-Length") or 0)
             except ValueError:
@@ -1462,6 +1472,8 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             """PEER_LOAD_PATH: its own checks (peer_launch), not the
             browser guard's -- it refuses ANY Origin, and its gate is
             Thunderbolt/loopback or a --peer address in every mode."""
+            if self._refuse_chunked():
+                return
             try:
                 n = int(self.headers.get("Content-Length") or 0)
             except ValueError:
