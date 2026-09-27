@@ -3,14 +3,17 @@ the model's steps (docs/SERVER.md, build step 1).
 
 A scheduler hands the executor admissions and asks it for steps; the
 executor answers with events. Today there is one executor, the local batch
-engine (MTPBatchGenerator, drafting or not, with vision). A cluster
-pipeline executor comes later behind the same protocol: nothing here
+engine (MTPBatchGenerator, drafting or not, with vision). A
+tensor split (engine/runtime/tensor.py) runs the same executor on every
+rank, rank 0's journaling each admission for the others; a pipeline
+executor comes later behind the same protocol: nothing here
 assumes the layers run in this process.
 
 Rules the protocol keeps (Fable 5.1 review, 2026-09-25):
 
   * A token event carries the token and ITS logprob (plus top-k when
-    asked), never a [V] row: on a pipeline only the last rank has logits.
+    asked), never a [V] row: what crosses a process boundary stays small
+    (every rank of a ring computes the logits; only rank 0 samples).
   * A failure is a `RowFailure` event for that row, not an exception passed
     along as progress; the executor has already dropped the row.
   * Admission carries the request's sampling parameters and the object
@@ -45,6 +48,10 @@ class Admission:
     top_logprobs: int = 0
     #: receives the cache report (engine/serve/cache_report.attach)
     report: Any = None
+    #: on a tensor ring, what the other ranks need to rebuild what is not
+    #: data here (processors, the state machine): {"penalties": the
+    #: make_logits_processors kwargs, "initial": the machine's start state}
+    wire: Optional[dict] = None
 
 
 @dataclass
