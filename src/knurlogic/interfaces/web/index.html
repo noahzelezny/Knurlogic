@@ -445,6 +445,7 @@
  .unit .uhead{display:flex;align-items:center;justify-content:center;
    gap:10px;margin-bottom:8px}
  .unit .uhead .mk{width:36px;height:36px;flex:none;stroke:var(--acc);opacity:.9}
+ .unit .uhead .mk.big{width:44px;height:44px;margin:-4px 0}
  .unit .uhead .ut{text-align:left;min-width:0}
  .unit .hw{font-size:10px;letter-spacing:.08em;color:var(--faint);
    margin-top:2px;text-transform:uppercase}
@@ -1818,12 +1819,17 @@ async function tick(){
   // reads it from system_profiler's Model Name, hw.model as a fallback).
   const MACS={
     laptop:'<rect x="5" y="5" width="14" height="10" rx="1"/><path d="M3 18h18"/>',
-    studio:'<rect x="5" y="9" width="14" height="9" rx="2"/><path d="M9 15h2"/>',
+    // a Mac Studio is a tall square box -- the front is nearly square and
+    // carries two USB-C ports, the SD slot and the power light -- where the
+    // mini beside it is a flat slab
+    studio:'<rect x="4" y="5" width="16" height="15" rx="2.5"/>'+
+      '<path d="M4 17h16M7.5 13v1.5M10 13v1.5M13 13.75h4"/>'+
+      '<circle cx="17" cy="8" r=".5"/>',
     mini:'<rect x="4" y="11" width="16" height="5" rx="1.5"/>',
     imac:'<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M10 16l-1 4h6l-1-4"/>',
     pro:'<rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M10 7v10M14 7v10"/>',
     desktop:'<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/>'};
-  const macIcon=k=>`<svg class="mk" viewBox="0 0 24 24" fill="none" stroke-width="1.6"
+  const macIcon=k=>`<svg class="mk${k==='studio'?' big':''}" viewBox="0 0 24 24" fill="none" stroke-width="1.6"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${
     MACS[k]||MACS.desktop}</svg>`;
   function unit(n){
