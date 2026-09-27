@@ -1172,7 +1172,7 @@ function migrateLaunchSets(){
 // (nothing of it runs: every change is a launch setting), label (how the confirm lists it) and url
 // (a setting of this page's own, POSTed there as {gib}: the allowance).
 // a launch setting's plain name, where its variable is not one
-const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Identical results across chips'};
+const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Identical results across chips', KNURLOGIC_PRESET:'Launch preset'};
 function knobHTML(k, c){
   const cur=k.running??k.would_be??k.value;
   // with no variant running, every knob waits for a launch, live or not
@@ -1600,11 +1600,13 @@ async function showBase(b){
   // what the resolver would give the rung that fits, as launch settings
   const preview=async lead=>{
     const ws=fitWS(), m=b.ms.find(x=>!ws||x.size_bytes<=ws)||b.ms[0];
-    const doc=await getJSON('/settings.json?'+new URLSearchParams({artifact:m.path, tune:'balanced'}));
+    // resolved at the base model's saved launch preset
+    const pre=launchSets(b.name).KNURLOGIC_PRESET||'balanced';
+    const doc=await getJSON('/settings.json?'+new URLSearchParams({artifact:m.path, tune:pre}));
     if(seq!==SEQ) return;
     el.innerHTML=modelHTML(b, null, doc, `${lead}<div class="msg" style="margin-top:0">${
       b.runs.length?'Its server does not answer, so nothing can change live.':'Not running.'}
-      The resolver's values for ${esc(m.name)} (balanced tune); a change is kept
+      The resolver's values for ${esc(m.name)} (${esc(pre)} preset); a change is kept
       for whichever variant launches next.</div>`);
   };
   if(!b.runs.length) return preview('');

@@ -221,12 +221,66 @@ TUNE_PROFILES = {
         "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_DEFAULT,
         "VQLAB_CACHE_LIMIT_GB": 8.0,
         "decode_chunk_scale": 1.0,   # capped: smaller is already faster
-        "why": "spends headroom where it actually buys speed -- wider prompt "
-               "chunks and a larger reclaimable cache. It does NOT raise the "
-               "decode chunk, because smaller is faster there as well as "
-               "smaller in memory",
+        "launch": {"mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16",
+                   "cross_chip": "off"},
+        "why": "spends headroom where it actually buys speed -- the "
+               "family's measured wider prompt chunk where the box has room, "
+               "a larger reclaimable cache, MTP with its dynamic controller, "
+               "bf16 KV. It does NOT raise the decode chunk, because smaller "
+               "is faster there as well as smaller in memory",
+    },
+    "stable": {
+        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "VQLAB_CACHE_LIMIT_GB": 2.0,
+        "decode_chunk_scale": 0.5,   # more room left for a step's spike
+        "launch": {"cross_chip": "on", "mtp": "on", "mtp_dynamic": "off",
+                   "kv_bits": "bf16"},
+        "why": "repeatable: 512-token prompt chunks, identical rounding "
+               "across chips, MTP drafting every step (no controller "
+               "switching regimes) for steady timing, bf16 KV, and "
+               "conservative memory -- a smaller reclaimable cache and a "
+               "transient bounded tighter than headroom requires",
+    },
+    "lean": {
+        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "launch": {"kv_bits": "8", "mtp": "off", "prompt_concurrency": 1},
+        "why": "most context and most agents: 8-bit KV where the family "
+               "takes it (bf16 where it does not, and said), 512-token "
+               "prompt chunks, one prompt prefilled at a time, MTP off so "
+               "the head's memory is free",
     },
 }
+
+#: The launch presets ARE the tune axis: one named bundle per value, the
+#: default "balanced" (the measured defaults, unchanged). A per-model
+#: KNURLOGIC_PRESET (Settings -> Models) picks one for that base model;
+#: any explicit knob set beside it beats the preset's value for that knob.
+PRESETS = ("balanced", "fast", "stable", "lean", "safe")
+PRESET_DEFAULT = "balanced"
+
+
+def preset_of(v, default: str = PRESET_DEFAULT) -> str:
+    s = str(v or "").strip().lower()
+    if not s:
+        return default
+    if s not in TUNE_PROFILES:
+        raise ValueError(f"preset {v!r}: one of {list(PRESETS)}")
+    return s
+
+
+def preset_launch(tune: str, model_type: str = "") -> tuple:
+    """({logical: value}, [notes]) -- the model launch settings a preset
+    asks for, narrowed to what this family takes (a KV precision it
+    refuses falls back to bf16, and the note says so)."""
+    want = dict(TUNE_PROFILES[tune].get("launch") or {})
+    notes = []
+    if want.get("kv_bits") not in (None, "bf16"):
+        bits, why = kv_quant_for(model_type)
+        if int(want["kv_bits"]) not in bits:
+            notes.append(f"preset {tune}: KV cache stays bf16 -- "
+                         f"{want['kv_bits']}-bit is not taken here ({why})")
+            want["kv_bits"] = "bf16"
+    return want, notes
 
 #: Hard ceiling on the reclaimable cache, whatever the profile asks. Freed
 #: buffers are reclaimable but they are still resident, and a cache larger
@@ -286,6 +340,14 @@ KNOB_DOC = {
         "calls to 32 rows (+2-6% on them only). Off by default: rank 0 "
         "samples every token, so a cluster cannot desync. auto: on when the "
         "machines of a cluster job have different GPU architectures."),
+    "KNURLOGIC_PRESET": (
+        "launch preset: balanced, fast, stable, lean (or safe)",
+        "one named bundle of the settings below. fast: the family's wider "
+        "prompt chunk where there is room, MTP + dynamic MTP. stable: "
+        "512-token chunks, identical results across chips, MTP drafting "
+        "every step, conservative memory. lean: 8-bit KV where the family "
+        "takes it, MTP off, one prompt at a time -- most context and "
+        "agents. Any setting changed beside it beats the preset's value."),
     "VQLAB_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
         "biggest single win in the memory playbook, no measured speed cost at "
@@ -339,12 +401,13 @@ KNOB_ALIASES = {
     "mtp_dynamic": ("KNURLOGIC_MTP_DYNAMIC",),
     "kv_bits": ("KNURLOGIC_KV_BITS",),
     "cross_chip": ("KNURLOGIC_CROSS_CHIP",),
+    "preset": ("KNURLOGIC_PRESET",),
 }
 
 #: launch settings of the model itself, read when it loads: the same on
 #: every rank of a split (interfaces/cluster_jobs passes them ring-wide)
 MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
-               "KNURLOGIC_CROSS_CHIP")
+               "KNURLOGIC_CROSS_CHIP", "KNURLOGIC_PRESET")
 
 
 # --- which knobs the ENGINE consumes ----------------------------------------
@@ -357,7 +420,7 @@ MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "prompt_concurrency", "mtp",
                                       "mtp_dynamic", "kv_bits",
-                                      "cross_chip")
+                                      "cross_chip", "preset")
                           for n in KNOB_ALIASES[k])
 
 
@@ -502,6 +565,7 @@ KNOB_RANGE = {
     # that refuses quantized KV offers bf16 alone
     "KNURLOGIC_KV_BITS": (KV_BITS_VALUES, "bits"),
     "KNURLOGIC_CROSS_CHIP": (["off", "on", "auto"], ""),
+    "KNURLOGIC_PRESET": (list(PRESETS), ""),
     "VQLAB_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
                              "GiB"),
     "KNURLOGIC_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],

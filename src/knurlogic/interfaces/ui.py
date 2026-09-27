@@ -461,7 +461,7 @@ PEER_LOAD_PATH = "/peer/loaded.json"
 PEER_LOAD_MAX = 16 << 10
 #: a load answers once the fit is checked and the child started
 PEER_LOAD_S = 60.0
-TUNES = ("safe", "balanced", "fast")
+TUNES = ("balanced", "fast", "stable", "lean", "safe")  # tuning/settings.PRESETS
 #: request keys that would name a place on disk; refused outright, never
 #: ignored, so a coordinator that sends one learns it is wrong
 PATH_KEYS = ("path", "target", "artifact", "where", "dir", "directory")

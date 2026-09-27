@@ -120,10 +120,21 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # read before the resolver, since the KV bits change what the context
     # costs, and refused here with the reason rather than at load.
     from knurlogic.tuning import settings as S
-    from knurlogic.tuning.resolve import kv_refusal
+    from knurlogic.tuning.resolve import (kv_refusal, preset_env,
+                                          apply_preset_overrides)
+    # A launch preset IS the tune: a per-model KNURLOGIC_PRESET (Settings
+    # -> Models, carried ring-wide like every launch set) picks it over
+    # --tune; its launch values are defaults every explicit set beats.
+    overrides = dict(overrides or {})
     try:
-        launch = S.engine_settings({k: v for k, v in (overrides or {}).items()
-                                    if k in S.MODEL_KNOBS})
+        tune = S.preset_of(overrides.pop("KNURLOGIC_PRESET", None), tune)
+    except ValueError as e:
+        print(f"REFUSING: {e}", file=sys.stderr)
+        return 2
+    try:
+        launch = S.engine_settings({**preset_env(a, tune),
+                                    **{k: v for k, v in overrides.items()
+                                       if k in S.MODEL_KNOBS}})
     except ValueError as e:
         print(f"REFUSING: {e}", file=sys.stderr)
         return 2
@@ -156,6 +167,10 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # 115 GiB, every rank of a 397B split warned it "does not fit this box"
     r = resolve(a, ws, profile=profile, tune=tune, holds_bytes=share,
                 kv_bits=kv_bits)
+    apply_preset_overrides(r, overrides)
+    print(f"preset    {tune}" + (
+        f" (overridden: {', '.join(sorted(r.preset['overridden']))})"
+        if r.preset.get("overridden") else ""))
     # An explicit --set WINS over the resolver. Most of these knobs are read
     # at import and compiled into kernel source, so startup is the only
     # moment they can be chosen at all -- which makes "the resolver decides
@@ -225,6 +240,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         snap["drafting"] = engine.drafting_status()
         from knurlogic.engine.serve import state as _st
         snap["cross_chip"] = dict(_st.SERVED.get("cross_chip") or cross)
+        snap["preset"] = dict(r.preset)
         # what reasoning_effort does on the served model -- the MCP's
         # `models` answer plus the default the server actually renders
         try:
@@ -475,6 +491,7 @@ def _parse_sets(pairs) -> dict:
 
 
 def main(argv=None) -> int:
+    from knurlogic.tuning import settings as S
     p = argparse.ArgumentParser(prog="knurlogic serve",
                                description=__doc__.split("\n")[0])
     p.add_argument("artifact")
@@ -509,11 +526,17 @@ def main(argv=None) -> int:
                    help="force a setting, beating the resolver. Repeatable. "
                         "Most knobs are read at import, so this is the only "
                         "moment they can be chosen.")
-    p.add_argument("--tune", default="balanced",
-                   choices=("safe", "balanced", "fast"),
-                   help="safe = lowest peak memory; fast = spend headroom "
-                        "where it buys speed. Both are capped by what has "
-                        "been measured.")
+    p.add_argument("--tune", "--preset", dest="tune", default="balanced",
+                   choices=S.PRESETS,
+                   help="launch preset (default balanced, the measured "
+                        "defaults). fast = the family's wider prompt chunk "
+                        "where there is room + dynamic MTP; stable = 512 "
+                        "chunks, cross-chip on, MTP every step, "
+                        "conservative memory; lean = 8-bit KV where the "
+                        "family takes it, MTP off, one prompt at a time; "
+                        "safe = lowest peak memory. Explicit settings "
+                        "(--set, --kv-bits, a per-model KNURLOGIC_PRESET) "
+                        "beat it.")
     p.add_argument("--decode-concurrency", type=int, default=32,
                    help="most requests decoding at once (the batch width)")
     p.add_argument("--prompt-cache-size", type=int, default=10,
