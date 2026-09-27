@@ -31,7 +31,7 @@
     16" and a 27" are both ordinary. */
  body{margin:0;min-width:940px;background:var(--bg);color:var(--fg);
    letter-spacing:.02em;
-   font:clamp(13px, 0.95vw, 18px)/1.6 'SF Mono','Fira Code',ui-monospace,
+   font:clamp(15px, calc(0.95vw + 2px), 20px)/1.6 'SF Mono','Fira Code',ui-monospace,
      SFMono-Regular,Menlo,'DejaVu Sans Mono',monospace;
    background-image:linear-gradient(var(--grid) 1px,transparent 1px),
      linear-gradient(90deg,var(--grid) 1px,transparent 1px);
@@ -70,13 +70,13 @@
 
  /* exo's data-readout: 11px, uppercase, wide tracking. Small text on this
     page is an INSTRUMENT LABEL, never prose. */
- .ro{font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+ .ro{font-size:13px;letter-spacing:.05em;text-transform:uppercase}
  .live{display:flex;align-items:center;gap:7px;color:var(--dim)}
  .live i{width:7px;height:7px;border-radius:50%;background:var(--ok);
    box-shadow:0 0 8px currentColor;animation:pulse 2s ease-in-out infinite}
  .live.off i{background:var(--warn);animation:none}
  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
- nav{display:flex;gap:20px;font-size:11px;letter-spacing:.16em;
+ nav{display:flex;gap:20px;font-size:13px;letter-spacing:.16em;
    text-transform:uppercase;color:var(--dim)}
  nav a:hover{color:var(--acc)}
  .wrap{max-width:2000px;margin:0 auto;padding:22px 28px 24px}
@@ -97,21 +97,21 @@
    .right .panel{max-width:none}}
  .right{min-width:0}
  .right .panel{margin-bottom:0}
- .loaded .nm{font-size:13px;font-weight:700;letter-spacing:.02em;
+ .loaded .nm{font-size:15px;font-weight:700;letter-spacing:.02em;
    word-break:break-word}
  .loaded .msg{margin-top:3px}
  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
- .badge{font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+ .badge{font-size:11px;letter-spacing:.1em;text-transform:uppercase;
    border:1px solid var(--line);color:var(--dim);padding:1px 5px;border-radius:2px}
  .badge.on{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
  /* Other models are shown, never switched to: a loaded model is loaded.
     What is on offer is the command that would serve one. */
  .other{padding:7px 0;border-top:1px solid var(--line);cursor:pointer}
  .other:first-child{border-top:0}
- .other .n{font-size:11.5px;white-space:nowrap;overflow:hidden;
+ .other .n{font-size:13.5px;white-space:nowrap;overflow:hidden;
    text-overflow:ellipsis;color:var(--dim)}
  .other:hover .n{color:var(--fg)}
- .other .s{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:2px}
+ .other .s{font-size:12px;color:var(--faint);letter-spacing:.04em;margin-top:2px}
  .other.no .n{color:var(--faint)}
  /* One card per thing that is running, the way exo shows an instance: a
     header saying what it is and how to stop it, then the name, then what it
@@ -123,13 +123,13 @@
  .card.loading{border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
  .cardhd{display:flex;align-items:center;gap:7px;margin-bottom:6px}
  .cardhd .grow{flex:1}
- .card .rt{font-size:9px;letter-spacing:.08em;text-transform:uppercase;
+ .card .rt{font-size:11px;letter-spacing:.08em;text-transform:uppercase;
    border:1px solid var(--line);padding:0 4px;border-radius:2px;flex:none}
  .card .rt.knurlogic,.card .rt.exo{color:var(--acc);
    border-color:color-mix(in srgb,var(--acc) 40%,transparent)}
- .card .n{font-size:11.5px;white-space:nowrap;overflow:hidden;
+ .card .n{font-size:13.5px;white-space:nowrap;overflow:hidden;
    text-overflow:ellipsis}
- .card .s{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:3px}
+ .card .s{font-size:12px;color:var(--faint);letter-spacing:.04em;margin-top:3px}
  .card.offered .n{color:var(--dim)}
  #resident .machine{color:var(--faint);margin:10px 0 5px}
  #resident .machine:first-child{margin-top:0}
@@ -166,20 +166,20 @@
    .topo.n2 #ramwent{grid-row:2;grid-column:1/-1;justify-self:center;margin:0}
    .topo.n3{grid-template-columns:repeat(2,minmax(0,1fr))}}
  .ram{display:flex;flex-direction:column;gap:5px}
- .ramrow{display:flex;align-items:center;gap:7px;font-size:10.5px;
-   letter-spacing:.04em;white-space:nowrap}
+ .ramrow{display:flex;align-items:center;gap:7px;font-size:12.5px;
+   letter-spacing:.04em}
  .ramrow span{flex:1}
  .ramrow b{color:var(--fg);font-weight:700}
  .ramrow span{color:var(--dim)}
  .ramrow em{width:8px;height:8px;border-radius:2px;display:inline-block;
    font-style:normal;flex:none}
- .ramrow.sub{padding-left:10px;font-size:10px}
+ .ramrow.sub{padding-left:10px;font-size:12px}
  .ramrow em.hatch{background:repeating-linear-gradient(135deg,var(--c) 0 1.5px,
    transparent 1.5px 3.5px);border:1px solid var(--c)}
  .pickbtn{width:100%;display:flex;align-items:center;justify-content:space-between;
    gap:10px;background:var(--bg);border:1px solid var(--line);
    border-radius:var(--r);padding:9px 10px;cursor:pointer;color:var(--fg);
-   font:inherit;font-size:11.5px;text-align:left}
+   font:inherit;font-size:13.5px;text-align:left}
  .pickbtn:hover{border-color:var(--acc)}
  .pickbtn #picksize{color:var(--faint);flex:none}
  .modal{position:fixed;inset:0;z-index:50;background:oklch(0 0 0/.6);
@@ -195,14 +195,14 @@
    overflow:hidden}
  .pickhd{display:flex;align-items:center;gap:14px;padding:12px 14px;
    border-bottom:1px solid var(--line)}
- .pickhd input{flex:1;background:transparent;border:0;font-size:13px}
+ .pickhd input{flex:1;background:transparent;border:0;font-size:15px}
  .pickhd input:focus{outline:none}
  #pbudget{color:var(--faint);white-space:nowrap}
  #pbudget b{color:var(--acc)}
  .pickbody{display:grid;grid-template-columns:132px 1fr;min-height:0;flex:1}
  .pickhd{flex:none}
  .fams{border-right:1px solid var(--line);overflow:auto;padding:6px 0}
- .fam{padding:8px 12px;cursor:pointer;font-size:11px;letter-spacing:.06em;
+ .fam{padding:8px 12px;cursor:pointer;font-size:13px;letter-spacing:.06em;
    text-transform:uppercase;color:var(--dim);border-left:2px solid transparent}
  .fam:hover{color:var(--fg)}
  .fam[aria-current=true]{color:var(--acc);border-left-color:var(--acc);
@@ -210,7 +210,7 @@
  .fam i{font-style:normal;color:var(--faint);float:right}
  .rows{overflow-y:scroll}   /* always, so the rows do not shift when a
                                filter makes the list short enough to fit */
- .sect{padding:8px 14px;font-size:10px;letter-spacing:.1em;
+ .sect{padding:8px 14px;font-size:12px;letter-spacing:.1em;
    text-transform:uppercase;color:var(--ok);
    background:color-mix(in srgb,var(--ok) 8%,transparent);
    border-bottom:1px solid var(--line)}
@@ -220,16 +220,16 @@
    cursor:pointer}
  .grphd:hover{background:var(--med)}
  .grphd .cv{color:var(--faint);flex:none;width:10px}
- .grphd .gn{flex:1;font-size:12.5px;white-space:nowrap;overflow:hidden;
+ .grphd .gn{flex:1;font-size:14.5px;white-space:nowrap;overflow:hidden;
    text-overflow:ellipsis}
- .grphd .gv{color:var(--faint);font-size:10.5px;white-space:nowrap}
+ .grphd .gv{color:var(--faint);font-size:12.5px;white-space:nowrap}
  .vars{display:none}
  .grp.open .vars{display:block}
  .var{display:flex;align-items:center;gap:10px;padding:7px 14px 7px 34px;
-   cursor:pointer;font-size:11.5px;color:var(--dim)}
+   cursor:pointer;font-size:13.5px;color:var(--dim)}
  .var:hover{background:var(--med);color:var(--fg)}
  .var .vn{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- .var .vs{color:var(--faint);font-size:10.5px;white-space:nowrap}
+ .var .vs{color:var(--faint);font-size:12.5px;white-space:nowrap}
  .var .tag{margin:0}
  .var.no{opacity:.45}
  .var .vs.tight{color:var(--warn)}
@@ -238,21 +238,21 @@
     and a launch -- not a list of the disk. Fifty rows with a button on each
     was a catalogue pretending to be a control. */
  .loadhd{display:flex;justify-content:flex-end;color:var(--faint);
-   font-size:10px;margin:-4px 0 8px}
- select{width:100%;font:inherit;font-size:11.5px;background:var(--bg);
+   font-size:12px;margin:-4px 0 8px}
+ select{width:100%;font:inherit;font-size:13.5px;background:var(--bg);
    color:var(--fg);border:1px solid var(--line);border-radius:var(--r);
    padding:7px 8px}
  select:focus{outline:none;border-color:var(--acc)}
  .opt{margin:10px 0}
- .optlab{font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+ .optlab{font-size:12px;letter-spacing:.1em;text-transform:uppercase;
    color:var(--faint);margin-bottom:5px}
  .opt input{width:88px;text-align:right}
- #pickinfo{margin-top:10px;font-size:10.5px;color:var(--dim)}
+ #pickinfo{margin-top:10px;font-size:12.5px;color:var(--dim)}
  #pickinfo .warn{color:var(--warn)}
- .lk{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px}
+ .lk{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px}
  .lk .lkn{flex:1;color:var(--dim);white-space:nowrap;overflow:hidden;
    text-overflow:ellipsis}
- .lk input,.lk select{width:84px;padding:3px 6px;font-size:11px;text-align:right}
+ .lk input,.lk select{width:84px;padding:3px 6px;font-size:13px;text-align:right}
  .lk.set .lkn{color:var(--acc)}
  .lk .rst{color:var(--faint);cursor:pointer;padding:0 3px;visibility:hidden}
  .lk.set .rst{visibility:visible}
@@ -269,9 +269,9 @@
  .wired .msg{margin-top:8px}
  .wired pre{user-select:all;background:var(--bg);border:1px solid var(--line);
    border-radius:var(--r);padding:8px 9px;margin-top:8px;color:var(--fg)}
- .wired .warn{color:var(--warn);font-size:11px;margin-top:6px}
+ .wired .warn{color:var(--warn);font-size:13px;margin-top:6px}
  #pickinfo div{padding:2px 0}
- .other pre{margin:7px 0 2px;font-size:10px;user-select:all;
+ .other pre{margin:7px 0 2px;font-size:12px;user-select:all;
    background:var(--bg);border:1px solid var(--line);border-radius:var(--r);
    padding:7px 8px;white-space:pre-wrap;word-break:break-all}
  /* The column runs the full height of the row, and the chat settings sit
@@ -280,7 +280,7 @@
  .side{border-right:1px solid var(--line);padding-right:18px;min-width:0;
    align-self:stretch;display:flex;flex-direction:column}
  .newchat{width:100%;text-align:left;color:var(--acc);border-style:dashed;
-   cursor:pointer;margin-bottom:12px;font-size:11.5px;letter-spacing:.08em;
+   cursor:pointer;margin-bottom:12px;font-size:13.5px;letter-spacing:.08em;
    text-transform:uppercase}
  .newchat:hover{border-color:var(--acc)}
  .chat{padding:8px 9px;border-radius:var(--r);cursor:pointer;margin-bottom:3px;
@@ -288,20 +288,20 @@
  .chat:hover{background:var(--med)}
  .chat[aria-current=true]{border-color:color-mix(in srgb,var(--acc) 40%,transparent);
    background:color-mix(in srgb,var(--acc) 8%,transparent)}
- .chat .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
- .chat .m{font-size:10px;color:var(--faint);letter-spacing:.04em;margin-top:3px;
+ .chat .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
+ .chat .m{font-size:12px;color:var(--faint);letter-spacing:.04em;margin-top:3px;
    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  /* The model is what a bench chat is ABOUT, so it wraps rather than clips. */
  .chat .m{color:var(--acc);white-space:normal;overflow-wrap:anywhere}
  /* One line in the sidebar's width: the page's mono runs ~35% wider than
     it has room for, so this one line is set in the system face. */
- .chat .spd{font:10px system-ui,sans-serif;letter-spacing:0;
+ .chat .spd{font:12px system-ui,sans-serif;letter-spacing:0;
    color:var(--faint);margin:2px -6px 0 0;
    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .chat .x{float:right;color:var(--faint);padding:0 2px;visibility:hidden}
  .chat:hover .x{visibility:visible}
  .chat .x:hover{color:var(--warn)}
- .sidelab{font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+ .sidelab{font-size:12px;letter-spacing:.14em;text-transform:uppercase;
    color:var(--faint);margin:14px 0 7px}
  /* Settings and Connect are overlays like the picker, not a place you go:
     what you were looking at stays where it was underneath, and a click
@@ -319,8 +319,8 @@
  #machbody{min-height:0}
  /* a machine's row: what it is on one line, its two memory settings side
     by side under it */
- .chd{font-size:12.5px;margin:0 0 4px}
- .chd .ro{color:var(--faint);font-size:10.5px;margin-left:8px}
+ .chd{font-size:14.5px;margin:0 0 4px}
+ .chd .ro{color:var(--faint);font-size:12.5px;margin-left:8px}
  /* the tab's list down the side, the picker's rail made wide enough for a
     model's name; each item's second line says where it runs or what it has */
  #settings .pickbody{grid-template-columns:230px 1fr}
@@ -329,18 +329,18 @@
  #setlist .sect{padding:8px 12px}
  .runs{margin:2px 0 10px;display:flex;flex-direction:column;gap:3px;
    align-items:flex-start}
- .runs button{padding:2px 8px;font-size:10.5px}
+ .runs button{padding:2px 8px;font-size:12.5px}
  .allow{margin-top:18px}
- .room{font-size:11px;color:var(--dim);margin-top:4px}
+ .room{font-size:13px;color:var(--dim);margin-top:4px}
  .room.small{color:var(--warn)}
- .mfacts{font-size:11px;color:var(--dim);margin:-4px 0 14px}
+ .mfacts{font-size:13px;color:var(--dim);margin:-4px 0 14px}
  .sbody{overflow:auto;padding:14px 18px 18px;min-width:0}
  .fam small{display:block;text-transform:none;letter-spacing:0;
-   color:var(--faint);font-size:10px;margin-top:2px}
- .shd{font-size:12.5px;margin:0 0 4px}
- .shd .ro{color:var(--faint);font-size:10.5px;margin-left:8px}
+   color:var(--faint);font-size:12px;margin-top:2px}
+ .shd{font-size:14.5px;margin:0 0 4px}
+ .shd .ro{color:var(--faint);font-size:12.5px;margin-left:8px}
  .sgrp{border-top:1px solid var(--line);margin-top:16px;padding-top:12px}
- .ksub{font-size:10px;letter-spacing:.1em;color:var(--dim);margin:14px 0 4px}
+ .ksub{font-size:12px;letter-spacing:.1em;color:var(--dim);margin:14px 0 4px}
  .sgrp:first-child{border-top:0;margin-top:0;padding-top:0}
  .ktab{display:grid;grid-template-columns:1fr auto auto;gap:0 14px}
  .connblk{margin-top:14px}
@@ -348,7 +348,7 @@
    text-transform:none;letter-spacing:.02em}
  .connblk pre{user-select:all;background:var(--bg);border:1px solid var(--line);
    border-radius:var(--r);padding:9px 10px;white-space:pre-wrap;
-   word-break:break-all;margin:0;font-size:11px}
+   word-break:break-all;margin:0;font-size:13px}
  .wiredrow input[type=number]{width:6em;text-align:right}
  /* The overlay's header already names the panel; the notch label would say
     it a second time, six lines lower. */
@@ -365,42 +365,42 @@
  /* (i): a short plain explanation, on hover or on a click (focus). */
  .info{position:relative;display:inline-block;flex:none;cursor:help;
    width:13px;height:13px;line-height:12px;border:1px solid var(--line);
-   border-radius:50%;text-align:center;font-size:9px;font-style:normal;
+   border-radius:50%;text-align:center;font-size:11px;font-style:normal;
    color:var(--faint);text-transform:none;letter-spacing:0;
    vertical-align:middle;margin-left:5px}
  .info:hover,.info:focus{color:var(--acc);border-color:var(--acc);outline:0}
  .info .bub{display:none;position:absolute;left:-4px;bottom:calc(100% + 6px);
    z-index:30;width:17em;padding:7px 9px;background:var(--bg);
    border:1px solid var(--line);border-radius:var(--r);color:var(--dim);
-   font-size:11px;line-height:1.45;text-align:left;white-space:normal;
+   font-size:13px;line-height:1.45;text-align:left;white-space:normal;
    box-shadow:0 4px 16px oklch(0 0 0/.5);cursor:default}
  .info.down .bub{bottom:auto;top:calc(100% + 6px)}
  .info:hover .bub,.info:focus .bub,.info:focus-within .bub{display:block}
  .cs{display:flex;align-items:center;gap:8px;margin:6px 0}
- .cs label,.cslab{flex:1;font-size:10px;letter-spacing:.1em;
+ .cs label,.cslab{flex:1;font-size:12px;letter-spacing:.1em;
    text-transform:uppercase;color:var(--faint)}
  .cslab{display:block;margin:12px 0 5px}
- .cs select,.cs input{width:6.5em;flex:none;padding:4px 6px;font-size:11px;
+ .cs select,.cs input{width:6.5em;flex:none;padding:4px 6px;font-size:13px;
    text-align:right}
  .cs input:placeholder-shown{border-style:dashed}
  .csh{display:flex;align-items:center;justify-content:space-between;color:var(--fg)}
- .csh .mini{padding:2px 7px;font-size:9.5px}
+ .csh .mini{padding:2px 7px;font-size:11.5px}
  /* the two text boxes grow with what is typed and never show a scrollbar
     (an empty one showed a horizontal one that vanished on the first key) */
  #csys,#cq{overflow-x:hidden;scrollbar-width:none}
  #csys::-webkit-scrollbar,#cq::-webkit-scrollbar{display:none}
  #csys{width:100%;resize:none;background:var(--panel);color:var(--fg);
    border:1px solid var(--line);border-radius:var(--r);padding:6px 8px;
-   font:inherit;font-size:11.5px;box-sizing:border-box}
+   font:inherit;font-size:13.5px;box-sizing:border-box}
  body.bench #csettings{display:none}
  /* Which running model Send goes to, and how hard it thinks, at the top
     right of the box: in teal, because a live chat bar should say so and
     say to what. */
  .chd{display:flex;justify-content:space-between;align-items:center;gap:10px;
    margin-bottom:6px}
- .chd .cl{font-size:10.5px;color:var(--faint);display:flex;align-items:center;gap:6px;
+ .chd .cl{font-size:12.5px;color:var(--faint);display:flex;align-items:center;gap:6px;
    min-width:0}
- #cmodel,#ceffort{width:auto;padding:3px 6px;font-size:10.5px;color:var(--dim)}
+ #cmodel,#ceffort{width:auto;padding:3px 6px;font-size:12.5px;color:var(--dim)}
  #cmodel{color:var(--acc);max-width:24em;text-overflow:ellipsis}
  #cmodel:has(option[value=""]:checked){color:var(--dim)}
  nav a[aria-pressed=true]{color:var(--acc)}
@@ -414,7 +414,7 @@
  @media(prefers-color-scheme:light){.panel{background:var(--panel);
    box-shadow:0 1px 3px oklch(0 0 0/.07)}}
  .lab{position:absolute;top:-7px;left:14px;background:var(--bg);padding:0 7px;
-   font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--acc);
+   font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--acc);
    font-weight:700}
  .lab:before{content:"\25c6  "}
  .row{display:flex;justify-content:space-between;gap:14px;padding:3px 0}
@@ -437,9 +437,9 @@
    filter:drop-shadow(0 0 3px color-mix(in srgb,var(--acc) 50%,transparent))}
  @keyframes flow{from{stroke-dashoffset:0}to{stroke-dashoffset:-16}}
 
- .unit{text-align:center;padding:0 8px;min-width:0;max-width:380px;
+ .unit{text-align:center;padding:0 8px;min-width:0;max-width:420px;
    justify-self:center;width:100%}
- .unit .nm{font-size:11.5px;letter-spacing:.08em;color:var(--dim)}
+ .unit .nm{font-size:13.5px;letter-spacing:.08em;color:var(--dim)}
  .unit .uhead{display:flex;align-items:center;justify-content:center;
    gap:10px;margin-bottom:8px}
  .unit .uhead .mk{width:36px;height:36px;flex:none;stroke:var(--acc);opacity:.9}
@@ -456,18 +456,18 @@
  #pickinfo .note{color:var(--faint);margin-top:6px}
  .unit .uhead .mk.big{width:44px;height:44px;margin:-4px 0}
  .unit .uhead .ut{text-align:left;min-width:0}
- .unit .hw{font-size:10px;letter-spacing:.08em;color:var(--faint);
+ .unit .hw{font-size:12px;letter-spacing:.08em;color:var(--faint);
    margin-top:2px;text-transform:uppercase}
  .ucard{display:flex;gap:10px;align-items:stretch;text-align:left;
    border:1px solid var(--line);border-radius:var(--r);padding:9px 10px;
    background:color-mix(in srgb,var(--bg) 70%,transparent)}
  .unit.off .ucard{opacity:.45}
  .mlines{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
- .mhd{display:flex;justify-content:space-between;font-size:9.5px;
+ .mhd{display:flex;justify-content:space-between;font-size:11.5px;
    letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
  .mhd b{color:var(--dim);font-weight:600;letter-spacing:.04em;text-transform:none}
  .sp{display:block;width:100%;height:22px}
- .noans{font-size:10.5px;color:var(--faint);margin:auto;line-height:1.5;
+ .noans{font-size:12.5px;color:var(--faint);margin:auto;line-height:1.5;
    text-align:center;padding:4px}
  /* The memory bar: segments stack from the bottom, and a hatched segment
     is memory that will be handed back when asked. */
@@ -482,8 +482,8 @@
  .stk.off{background:var(--grid)}
  .swap{color:var(--bad);font-weight:600;white-space:nowrap}
 
- .unit .stat{font-size:10.5px;color:var(--faint);margin-top:7px;letter-spacing:.04em}
- .unit .pct{font-size:15px;font-weight:700;color:var(--acc);
+ .unit .stat{font-size:12.5px;color:var(--faint);margin-top:7px;letter-spacing:.04em}
+ .unit .pct{font-size:17px;font-weight:700;color:var(--acc);
    text-shadow:var(--glow)}
  /* The free-space bar is gone. It was a third telling of a number the
     device gauges already draw and then print: a full-width chart that said
@@ -496,11 +496,11 @@
  .seg{display:inline-flex;border:1px solid var(--line);overflow:hidden;
    border-radius:var(--r);background:var(--bg)}
  .seg button{border:0;border-radius:0;background:transparent;color:var(--dim);
-   padding:7px 14px;font:inherit;font-size:11.5px;letter-spacing:.1em;
+   padding:7px 14px;font:inherit;font-size:13.5px;letter-spacing:.1em;
    text-transform:uppercase;cursor:pointer}
  .seg button[aria-pressed=true]{background:var(--acc);color:var(--accfg);font-weight:700}
  .ctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
- .ctl label{color:var(--faint);font-size:11px;letter-spacing:.06em}
+ .ctl label{color:var(--faint);font-size:13px;letter-spacing:.06em}
  input,button{font:inherit;border:1px solid var(--line);padding:6px 10px;
    background:var(--bg);color:var(--fg);border-radius:var(--r)}
  input:focus{outline:none;border-color:var(--acc)}
@@ -511,12 +511,12 @@
  .go[disabled]{opacity:.3;cursor:default}
  /* One row height for every knob, the control on the same line as the
     name: a settings list reads down one edge, not in zigzags. */
- .knob{border-top:1px solid var(--line);font-size:11.5px}
+ .knob{border-top:1px solid var(--line);font-size:13.5px}
  .knob:first-child{border-top:0}
  .knob .hd{display:flex;justify-content:space-between;align-items:center;
    gap:12px;min-height:30px}
  .knob .k{display:inline-flex;align-items:center;gap:0;min-width:0}
- .kw{font-size:9.5px;letter-spacing:.06em;margin-left:7px;font-weight:400}
+ .kw{font-size:11.5px;letter-spacing:.06em;margin-left:7px;font-weight:400}
  .kw.live{color:var(--acc)}
  .kw.rst{color:var(--warn)}
  .kw{cursor:help}
@@ -525,17 +525,20 @@
  /* staged, not yet sent: the teal dot and the value it will be */
  .knob.staged .k:after{content:"";width:6px;height:6px;border-radius:50%;
    background:var(--acc);margin-left:7px}
- .kstage{font-size:10.5px;color:var(--acc);margin:-3px 0 6px;text-align:right}
+ .kstage{font-size:12.5px;color:var(--acc);margin:-3px 0 6px;text-align:right}
  .kstage:empty{display:none}
  .knob:not(.staged) .kstage{color:var(--warn)}
- .unl{font-size:10.5px;color:var(--faint);margin-top:6px;line-height:1.9;
+ .unl{font-size:12.5px;color:var(--faint);margin-top:6px;line-height:1.9;
    word-spacing:.4em}
- .mhd{font-size:12px;margin:0 0 10px}
- .mhd .ro{color:var(--faint);font-size:10.5px;margin-left:8px}
+ .mhd{font-size:14px;margin:0 0 10px}
+ /* a machine card's metric heads: the Settings rule above is for a model
+    header; here the label and its reading stay on one line */
+ .mlines .mhd{font-size:12.5px;letter-spacing:.06em;white-space:nowrap;gap:6px}
+ .mhd .ro{color:var(--faint);font-size:12.5px;margin-left:8px}
  .shd{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 8px}
  .shd .seg{margin-left:auto}
- .shd .seg button{padding:1px 7px;font-size:10px}
- #stagepop .sh{margin-top:10px;font-size:10px;letter-spacing:.08em;
+ .shd .seg button{padding:1px 7px;font-size:12px}
+ #stagepop .sh{margin-top:10px;font-size:12px;letter-spacing:.08em;
    text-transform:uppercase;color:var(--faint)}
  /* centred on the screen: a question, not a menu off the corner */
  #stagepop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
@@ -544,7 +547,7 @@
    border:1px solid var(--acc);border-radius:var(--r);
    box-shadow:0 6px 24px oklch(0 0 0/.55)}
  #stagepop[hidden]{display:none}
- #stagepop .sg{margin-top:8px;font-size:11px}
+ #stagepop .sg{margin-top:8px;font-size:13px}
  #stagepop .sg .ro{display:block;margin-bottom:2px}
  #stagepop .ctl{margin-top:12px;justify-content:flex-end;gap:8px}
  /* Claude Code's tiers stand out from the model names they are set to: the
@@ -557,28 +560,28 @@
  .kedit{display:flex;align-items:center;justify-content:flex-end;gap:6px;
    flex:none}
  .kedit select,.kedit input{width:auto;max-width:8em;padding:2px 5px;
-   font-size:11px}
+   font-size:13px}
  .kedit input{width:6em;text-align:right}
  .kedit .mini{padding:2px 8px}
- .krep{font-size:10.5px;color:var(--dim);margin-top:2px;text-align:right}
- .val{font-size:12px;white-space:nowrap}
+ .krep{font-size:12.5px;color:var(--dim);margin-top:2px;text-align:right}
+ .val{font-size:14px;white-space:nowrap}
  .was{color:var(--faint);text-decoration:line-through;margin-right:6px}
  .chg{color:var(--acc);font-weight:700}
- .tag{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
+ .tag{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
    border:1px solid var(--line);padding:0 4px;margin-left:7px}
  .tag.live{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
  .tag.dead{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
  .star{cursor:pointer;color:var(--faint);margin-right:6px}
  .star:hover{color:var(--acc)}
- .msg{color:var(--dim);font-size:11.5px;margin-top:10px}
+ .msg{color:var(--dim);font-size:13.5px;margin-top:10px}
  .msg b{color:var(--fg)}
- code{font-size:11.5px}
+ code{font-size:13.5px}
  details.more{margin-top:10px}
- details.more summary{cursor:pointer;color:var(--faint);font-size:11px;list-style:none}
+ details.more summary{cursor:pointer;color:var(--faint);font-size:13px;list-style:none}
  details.more summary::-webkit-details-marker{display:none}
  details.more summary:before{content:"+ "}
  details.more[open] summary:before{content:"\2212 "}
- pre{margin:8px 0 0;font-size:11px;color:var(--dim);white-space:pre-wrap;
+ pre{margin:8px 0 0;font-size:13px;color:var(--dim);white-space:pre-wrap;
    line-height:1.75}
  #log{height:200px;overflow:auto;border:1px solid var(--line);padding:12px;
    background:oklch(.1 0 0);border-radius:var(--r)}
@@ -587,7 +590,7 @@
  #log b{color:var(--acc)}
  /* The numbers are the point of this panel, so they are not a tooltip. */
  .met{display:flex;gap:16px;flex-wrap:wrap;margin:-4px 0 12px;
-   font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+   font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;
    color:var(--faint)}
  .met b{color:var(--fg);font-weight:700;text-transform:none;letter-spacing:0}
  .met .warnv b{color:var(--warn)}
@@ -596,12 +599,12 @@
  .met .d.flat{color:var(--faint)}
  /* A reply's own line: labels in the accent, values in the text colour, so
     the eye lands on the numbers. */
- .rmet{margin:4px 0 2px;font-size:11px;color:var(--faint);white-space:nowrap}
+ .rmet{margin:4px 0 2px;font-size:13px;color:var(--faint);white-space:nowrap}
  .rmet .k{color:var(--acc)} .rmet b{color:var(--fg);font-weight:700}
  /* Waiting vs Thinking: while nothing has come back (the server holds even
     the headers while a request is queued) the mark fades in and out -- in a
     queue, not stuck -- and the gear turns once the prompt is being processed. */
- .wait{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--dim);
+ .wait{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--dim);
    letter-spacing:.05em;text-transform:uppercase;line-height:1}
  .wait svg{width:16px;height:16px;display:block;flex:none}
  .wait:not(.on){animation:waitfade 2.4s ease-in-out infinite}
@@ -613,19 +616,19 @@
  #log{height:clamp(230px,26vh,420px)}
  .bench{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px}
  .chk{display:flex;align-items:center;gap:7px;cursor:pointer;color:var(--dim);
-   font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+   font-size:13px;letter-spacing:.06em;text-transform:uppercase}
  .chk input{width:13px;height:13px;accent-color:var(--acc);padding:0;cursor:pointer}
  .mini{background:transparent;color:var(--dim);border-color:var(--line);
-   cursor:pointer;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+   cursor:pointer;font-size:13px;letter-spacing:.08em;text-transform:uppercase;
    padding:5px 11px}
  .mini:hover:not([disabled]){color:var(--acc);border-color:var(--acc)}
  .mini[disabled]{opacity:.35;cursor:default}
- .bench .msg{margin:0;font-size:11px}
+ .bench .msg{margin:0;font-size:13px}
  form{display:flex;gap:8px;margin-top:10px}form input{flex:1}
  /* --- Chat --- */
  .tabbedlab{display:flex;align-items:center;justify-content:space-between}
  .tabseg button{background:transparent;border:1px solid var(--line);color:var(--dim);
-   font:inherit;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+   font:inherit;font-size:13px;letter-spacing:.08em;text-transform:uppercase;
    padding:5px 12px;cursor:pointer}
  .tabseg button+button{border-left:0}
  .tabseg button.on{color:var(--accfg);background:var(--acc);border-color:var(--acc)}
@@ -638,7 +641,7 @@
  .bubblewrap.user{align-self:flex-end;align-items:flex-end}
  .bubblewrap.assistant{align-self:flex-start;align-items:flex-start}
  .bubble{padding:9px 11px;border-radius:var(--r);
-   border:1px solid var(--line);font-size:12.5px;white-space:pre-wrap;
+   border:1px solid var(--line);font-size:14.5px;white-space:pre-wrap;
    word-wrap:break-word;line-height:1.6}
  .bubble.user{background:var(--med)}
  .bubble.assistant{background:transparent}
@@ -654,23 +657,23 @@
  .bactions button:hover,.bactions button:focus-visible{color:var(--fg)}
  .bactions svg{width:14px;height:14px}
  details.think{border:1px solid var(--line);border-radius:var(--r);
-   padding:6px 9px;font-size:11px;color:var(--dim);max-width:100%}
+   padding:6px 9px;font-size:13px;color:var(--dim);max-width:100%}
  details.think summary{cursor:pointer;color:var(--faint);list-style:none}
  details.think summary::-webkit-details-marker{display:none}
  /* the marker the hidden native one was; the word is the summary's own */
  details.think summary:before{content:"\25B8  "}
  details.think[open] summary:before{content:"\25BE  "}
- .think pre{white-space:pre-wrap;color:var(--faint);font-size:11px}
+ .think pre{white-space:pre-wrap;color:var(--faint);font-size:13px}
  .md pre{background:oklch(.09 0 0);border:1px solid var(--line);padding:10px;
    border-radius:var(--r);overflow:auto;position:relative}
  @media(prefers-color-scheme:light){.md pre{background:var(--med)}}
  .md code{background:oklch(.09 0 0);padding:1px 4px;border-radius:3px}
  @media(prefers-color-scheme:light){.md code{background:var(--med)}}
  .md pre code{background:transparent;padding:0}
- .md table{border-collapse:collapse;font-size:11.5px}
+ .md table{border-collapse:collapse;font-size:13.5px}
  .md td,.md th{border:1px solid var(--line);padding:4px 8px}
  .md a{color:var(--acc)}
- .codehd{display:flex;justify-content:space-between;font-size:10px;
+ .codehd{display:flex;justify-content:space-between;font-size:12px;
    color:var(--faint);letter-spacing:.08em;text-transform:uppercase;
    margin:-10px -10px 8px;padding:5px 10px;border-bottom:1px solid var(--line)}
  .codehd span{cursor:pointer}
@@ -680,7 +683,7 @@
    border:1px solid var(--line);cursor:zoom-in}
  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
  .chip{display:flex;align-items:center;gap:6px;border:1px solid var(--line);
-   border-radius:var(--r);padding:3px 4px 3px 6px;font-size:10.5px;color:var(--dim)}
+   border-radius:var(--r);padding:3px 4px 3px 6px;font-size:12.5px;color:var(--dim)}
  .chip img{width:24px;height:24px;object-fit:cover;border-radius:3px}
  .chip .ctok{color:var(--faint)}
  .chip .cx{cursor:pointer;color:var(--faint);padding:0 3px}
@@ -688,7 +691,7 @@
  .crow{display:flex;gap:8px;align-items:flex-end;flex:1;width:100%}
  #cq{flex:1;resize:none;background:var(--panel);color:var(--fg);
    border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;
-   font:inherit;font-size:12.5px;max-height:160px}
+   font:inherit;font-size:14.5px;max-height:160px}
  #cq[disabled]{opacity:.5}
  #cq:focus::placeholder{color:transparent}
  /* the page's teal, not the browser's blue, and still a ring to see */
@@ -698,7 +701,7 @@
  .pfbar{margin-top:8px;height:4px;background:var(--med);border-radius:2px;
    position:relative;overflow:hidden}
  .pfbar .pfbarfill{height:100%;background:var(--acc);width:0%;transition:width .15s}
- .pfbar .pfbartxt{position:absolute;top:6px;left:0;font-size:10px;color:var(--faint)}
+ .pfbar .pfbartxt{position:absolute;top:6px;left:0;font-size:12px;color:var(--faint)}
  /* Two layouts, as exo has: HOME is the dashboard (memory, what is running,
     load a model) with the chat as one line under it; TALK is a conversation
     with messages in it, and the transcript takes the height the dashboard
@@ -820,7 +823,7 @@
         <div id="mem" class="ro"></div>
       </section>
       <section class="panel" id="try">
-        <div class="lab tabbedlab">
+        <div class="lab tabbedlab" style="display:none">
           <span class="seg tabseg" id="ptabs">
             <button class="on" data-tab="chat">Chat</button>
             <button data-tab="bench">Bench</button>
