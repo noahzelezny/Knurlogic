@@ -512,7 +512,7 @@
  .go[disabled]{opacity:.3;cursor:default}
  /* One row height for every knob, the control on the same line as the
     name: a settings list reads down one edge, not in zigzags. */
- .knob{border-top:1px solid var(--line);font-size:13.5px}
+ .knob{border-top:1px solid var(--line);font-size:13.5px} .knob[hidden]{display:none}
  .knob:first-child{border-top:0}
  .knob .hd{display:flex;justify-content:space-between;align-items:center;
    gap:12px;min-height:30px}
@@ -1196,7 +1196,8 @@ function knobHTML(k, c){
     ctl=`<input type="${num?'number':'text'}" aria-label="${esc(k.name)}" value="${esc(sel)}">`;
   }
   const tuneNote=k.changed&&st==null ? `the tune gives ${esc(k.would_be)}` : '';
-  return `<div class="knob${st!=null?' staged':''}">
+  return `<div class="knob${st!=null?' staged':''}" data-name="${esc(k.name)}"${
+    c.hide&&c.hide(k.name)?' hidden':''}>
     <div class="hd"><span class="k">${esc(k.name)}${infoHTML(about,'down')}${tag}</span>
       <span class="kedit" data-knob="${esc(k.name)}" data-g="${esc(c.g)}"
         ${c.where!=null?`data-where="${esc(c.where)}"`:''}${c.url?` data-url="${esc(c.url)}"`:''} data-model="${esc(c.model)}"
@@ -1246,6 +1247,10 @@ document.addEventListener('change', e=>{
         {from:d.from, to:e.target.value.trim(), reach:d.reach, cur:d.cur});
   const to=stagedVal(d.g,d.knob), row=box.closest('.knob');
   row.classList.toggle('staged', to!=null);
+  if(d.knob==='KNURLOGIC_MTP'){
+    const dyn=row.parentElement.querySelector('.knob[data-name="KNURLOGIC_MTP_DYNAMIC"]');
+    if(dyn) dyn.hidden=e.target.value.trim()==='off';
+  }
   row.querySelector('.kstage').innerHTML=stageNote(d.reach,d.cur,to,d.next);
 });
 // The pop-up: what applies NOW (live, one POST per server -- /apply to a
@@ -1461,6 +1466,12 @@ function modelHTML(b, r, doc, runs){
   const c=r ? {g:r.where, where:r.where, model:r.name, base:b.name, label:b.name}
     : {g:'launch|'+b.name, model:(doc.artifact||{}).name||'', base:b.name,
        launch:true, label:b.name};
+  // dynamic MTP means something only while MTP is on: its row is hidden
+  // while the launch (staged, saved, else running) says off
+  const mk=ks.find(k=>k.name==='KNURLOGIC_MTP');
+  const mtp=mk ? (stagedVal(c.g,mk.name)??launchSets(b.name)[mk.name]??
+    mk.running??mk.would_be) : 'off';
+  c.hide=n=>n==='KNURLOGIC_MTP_DYNAMIC' && String(mtp)==='off';
   return `<div class="sgrp"${r?` data-where="${esc(r.where)}"`:''}>
     ${hd}${tunes?`<span class="seg">${tunes}</span>`:''}</div>${runs}
     ${ks.filter(k=>!isVQ(k)).map(k=>knobHTML(k,c)).join('')}
@@ -2191,6 +2202,9 @@ async function loadPreview(){
   const m=SEL; if(!m){ PREVIEW=null; return }
   const q=new URLSearchParams({artifact:m.path,
                                tune:window.LOADTUNE||'balanced'});
+  // the room is counted at the KV precision it would launch with
+  const kvb=launchSets(baseKey(m.name)).KNURLOGIC_KV_BITS;
+  if(kvb) q.set('kv_bits', kvb);
   try{ PREVIEW=await (await fetch('/settings.json?'+q)).json() }
   catch(e){ PREVIEW=null }
   // the preview's room is asked against the tune picked, and fresher
