@@ -1423,7 +1423,6 @@ function modelHTML(b, r, doc, runs){
   return `<div class="sgrp"${r?` data-where="${esc(r.where)}"`:''}>
     ${hd}${tunes?`<span class="seg">${tunes}</span>`:''}</div>${runs}
     ${ks.map(k=>knobHTML(k,c)).join('')||'<div class="msg">no knobs</div>'}
-    ${(doc.warnings||[]).map(w=>`<div class="warn">${esc(w)}</div>`).join('')}
     ${un.length?`<details class="more"><summary>${un.length} other variables this
       runtime reads; knurlogic sets none of them</summary><div class="unl">${
       esc(un.map(u=>u.name).join('  '))}</div></details>`:''}
