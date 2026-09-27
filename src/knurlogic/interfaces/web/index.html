@@ -442,6 +442,8 @@
  .unit{text-align:center;padding:0 8px;min-width:0;max-width:380px;
    justify-self:center;width:100%}
  .unit .nm{font-size:11.5px;letter-spacing:.08em;color:var(--dim)}
+ .unit .nm .mk{width:16px;height:16px;vertical-align:-3px;margin-right:6px;
+   stroke:var(--acc);opacity:.85}
  .unit .hw{font-size:10px;letter-spacing:.08em;color:var(--faint);
    margin:2px 0 8px;text-transform:uppercase}
  .ucard{display:flex;gap:10px;align-items:stretch;text-align:left;
@@ -1810,6 +1812,18 @@ async function tick(){
       `<i class="${cls}" style="height:${(100*b/inst).toFixed(2)}%;--c:${c}"
         title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}</div>`;
   }
+  // A quiet line glyph of the kind of Mac, from machine.kind (the server
+  // reads it from system_profiler's Model Name, hw.model as a fallback).
+  const MACS={
+    laptop:'<rect x="5" y="5" width="14" height="10" rx="1"/><path d="M3 18h18"/>',
+    studio:'<rect x="5" y="9" width="14" height="9" rx="2"/><path d="M9 15h2"/>',
+    mini:'<rect x="4" y="11" width="16" height="5" rx="1.5"/>',
+    imac:'<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M10 16l-1 4h6l-1-4"/>',
+    pro:'<rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M10 7v10M14 7v10"/>',
+    desktop:'<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/>'};
+  const macIcon=k=>`<svg class="mk" viewBox="0 0 24 24" fill="none" stroke-width="1.6"
+    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${
+    MACS[k]||MACS.desktop}</svg>`;
   function unit(n){
     const nm=n.memory||{}, hw=n.machine||{};
     const mm=n.memory_map||(n.role==='local'||n.role==='server'?RAM:null);
@@ -1822,7 +1836,7 @@ async function tick(){
     const what=[hw.chip||hw.model||'', inst?gb(inst).replace(/\.\d+ /,' '):'']
       .filter(Boolean).join(' · ');
     return `<div class="unit${off?' off':''}">
-      <div class="nm">${esc(n.node)}</div>
+      <div class="nm">${macIcon(hw.kind)}${esc(n.node)}</div>
       <div class="hw">${esc(what)||'&nbsp;'}</div>
       <div class="ucard">
         <div class="mlines">${off?`<div class="noans">${
