@@ -245,6 +245,8 @@ class MTPBatchGenerator(BatchGenerator):
         self._trunk = logits_trunk(model)
         self._batch = MTPBatch(self._trunk, head, get_h, copy_caches=copy)
         self._n_trunk = len(self._make_new_cache())
+        #: engine/runtime/pipeline.Coord on a pipeline split, else None
+        self._coord = None
         # uid -> what the server gave us for that row, and what it has seen.
         self._rows: dict = {}
         # uid -> [(key, entry)] checkpoints not yet reported to the server;
@@ -513,6 +515,10 @@ class MTPBatchGenerator(BatchGenerator):
                 prompt_responses += self._failed_responses()
                 return prompt_responses, []
             prompt_responses.append(admitted)
+            if self._coord is not None:
+                # B0: the admitted row's first token is rank 0's (the plan
+                # for this step went out before the admission sampled it)
+                self._batch.t1 = self._coord.b0(self._batch.t1)
             # This row's first checkpoint goes out with its admission.
             uid = prompt_responses[-1].uid
             if uid in self._ckpt_pending and uid not in self._ckpt_ready:

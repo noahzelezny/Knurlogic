@@ -34,13 +34,18 @@ class ModelHost:
     def __init__(self, *, draft: bool = True,
                  executes_artifact_code: bool = False,
                  image_store_bytes: Optional[int] = None,
-                 shard=None, vision: bool = True, load_wait_s: float = 0.0):
+                 shard=None, vision: bool = True, load_wait_s: float = 0.0,
+                 head_agree=None):
         """`shard(model)`: split the weights in place before they are read
         (a tensor ring: loaded lazily, split, then evaluated, so a rank
         never holds the whole model). `vision=False` binds no tower.
         `load_wait_s`: how long to wait for the machine's load lock (ranks
         of one ring on one machine load one after another)."""
         self.shard = shard
+        #: head_agree(bound: bool) -> bool, called after the head binds (or
+        #: does not) on every load: a pipeline's ranks draft together or
+        #: not at all (engine/runtime/tensor.agree_head)
+        self.head_agree = head_agree
         self.vision = vision
         self.load_wait_s = load_wait_s
         self.draft = draft
@@ -107,6 +112,12 @@ class ModelHost:
             self.model_key = (path, None, None)
             self._bind_vision(path)
             self._bind_head(path)
+            if self.head_agree is not None:
+                bound = bool(state.DRAFT.get("on"))
+                if not self.head_agree(bound) and bound:
+                    state.DRAFT.update(head=None, on=False,
+                                       why="not every rank of the pipeline "
+                                           "bound a drafting head")
         except BaseException as e:
             logger.exception("loading %s failed", path)
             self.model = self.tokenizer = self.model_key = None

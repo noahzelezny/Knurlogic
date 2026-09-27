@@ -438,12 +438,23 @@ class Scheduler:
         if self._ex is not None or self.tensor is None:
             return self._executor_local()
         from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+        from knurlogic.engine.serve import state
         from .tensor import TensorExecutor
-        # no drafting head and no vision on a ring (this slice)
+        # no vision on a ring; a drafting head on a pipeline only (rank 0
+        # holds the last layers, so the true final hidden state)
+        pipe = getattr(self.tensor, "split", "tensor") == "pipeline"
+        head = state.DRAFT.get("head") if (pipe and state.DRAFT.get("on")) \
+            else None
         gen = MTPBatchGenerator(
-            self.host.model, None, stats={}, vision=None,
+            self.host.model, head,
+            stats=state.DRAFT if head is not None else {}, vision=None,
             completion_batch_size=self.completion_batch_size,
             prefill_step_size=self.prefill_step_size, stream=self._stream)
+        if pipe:
+            from .pipeline import coordinate
+            coordinate(gen, self.tensor.link.group)
+            if head is not None:
+                state.DRAFT["batch_installed"] = True
         self._ex = TensorExecutor(gen, self.tensor, over=self._over_local)
         return self._ex
 
