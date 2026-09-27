@@ -46,8 +46,9 @@ def test_safe_bounds_the_transient_tighter_than_headroom_requires():
     balanced = resolve(a, 96 * GIB, tune="balanced")
     assert int(safe.env["VQ_DECODE_CHUNK"]) < int(
         balanced.env["VQ_DECODE_CHUNK"])
-    assert int(safe.env["VQLAB_PREFILL_CHUNK"]) < int(
-        balanced.env["VQLAB_PREFILL_CHUNK"])
+    # the prompt chunk is already the narrowest by default; safe never widens
+    assert int(safe.env["VQLAB_PREFILL_CHUNK"]) <= int(
+        balanced.env["VQLAB_PREFILL_CHUNK"]) == S.PREFILL_CHUNK_TIGHT
     assert float(safe.env["VQLAB_CACHE_LIMIT_GB"]) < float(
         balanced.env["VQLAB_CACHE_LIMIT_GB"])
 
@@ -55,7 +56,7 @@ def test_safe_bounds_the_transient_tighter_than_headroom_requires():
 def test_fast_on_a_tight_box_degrades_and_says_why():
     """`fast` cannot spend headroom that is not there. The difference between
     a knob and a wish is whether it tells you it did not happen."""
-    a = _art()
+    a = _art(model_type="qwen3_5")                 # measured wider than 512
     r = resolve(a, 74 * GIB, tune="fast")          # 4 GiB of headroom
     assert r.env["VQLAB_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_TIGHT)
     assert any("did not get it" in n for n in r.notes)
@@ -253,16 +254,20 @@ def test_the_resolved_prompt_chunk_reaches_the_scheduler():
     assert scheduler_options({})["prefill_step_size"] == 2048
 
 
-def test_a_measured_family_width_is_used_and_a_tight_box_still_wins():
-    """qwen3_5 measured 4096 (+115% prefill, no peak cost). A tight box caps
-    it anyway: a measured width is a width that fit where it was measured."""
+def test_a_measured_family_width_is_taken_only_with_fast_and_a_tight_box_still_wins():
+    """qwen3_5 measured 4096. It is 512 by default (small chunk, parallel
+    agents); tune=fast takes the measured width on a box with room, and a
+    tight box caps it anyway: a measured width is a width that fit where it
+    was measured."""
     from pathlib import Path
     from knurlogic.machine.artifact import Artifact
     a = Artifact(path=Path("/nonexistent"), model_type="qwen3_5",
                  model_file=None, bytes_on_disk=20 * GIB, hidden_size=4096,
                  moe_intermediate_size=1024, vq_other={})
-    roomy = S.engine_settings(resolve(a, 96 * GIB).env)
-    tight = S.engine_settings(resolve(a, 24 * GIB).env)
+    default = S.engine_settings(resolve(a, 96 * GIB).env)
+    roomy = S.engine_settings(resolve(a, 96 * GIB, tune="fast").env)
+    tight = S.engine_settings(resolve(a, 24 * GIB, tune="fast").env)
+    assert default["prefill_step_size"] == S.PREFILL_CHUNK_DEFAULT == 512
     assert roomy["prefill_step_size"] == 4096
     assert "prompt_concurrency" not in roomy
     assert tight["prefill_step_size"] == S.PREFILL_CHUNK_TIGHT

@@ -493,13 +493,20 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     tight = working_set_bytes > 0 and \
         headroom < S.tight_headroom_bytes(working_set_bytes)
     family, family_why = S.prefill_chunk_for(artifact.model_type)
-    prefill = min(family, S.PREFILL_CHUNK_TIGHT) if tight else family
+    # the small default everywhere (settings.PREFILL_CHUNK_DEFAULT says why);
+    # a family's measured width is spent only when asked for: tune=fast on
+    # a box with room for it
+    prefill = S.PREFILL_CHUNK_DEFAULT
+    if tune == "fast" and not tight:
+        prefill = max(prefill, family)
     asked = t.get("VQLAB_PREFILL_CHUNK")
     if asked is not None and tune == "fast":
-        # `fast` means spend headroom, never "narrower than was measured".
         asked = max(asked, family)
-    if family != S.PREFILL_CHUNK_DEFAULT:
-        r.notes.append(f"prompt chunk {family} {family_why}")
+    if family > S.PREFILL_CHUNK_DEFAULT and prefill < family:
+        r.notes.append(
+            f"prompt chunk {prefill}: {family} was {family_why}, and buys "
+            f"some prefill for a step transient several times "
+            f"larger -- take it with tune=fast or per base model")
     if asked is not None and asked != prefill:
         # A tight box wins over the axis. `fast` cannot spend headroom that
         # is not there, and saying so is the difference between a knob and a
