@@ -1,0 +1,240 @@
+"""One rank of tests/test_pipeline.py's two-process ring (not a test module).
+
+    logits <family> <counts>   the tiny model split by layer runs
+                               (counts: layers per rank, rank order) runs a
+                               prefill + fixed decode tokens; rank 0 also
+                               runs the unsplit model and writes both logits
+    mtp <always>               the tiny qwen3_5 with a random MTP head in the
+                               batch engine on both ranks, rank 0 drafting and
+                               sampling, the follower silenced; rank 0 also
+                               runs the unsplit engine and writes both token
+                               streams and every rank's broadcast counts
+
+Run with MLX_RANK and MLX_HOSTFILE set."""
+import json
+import os
+import sys
+
+import numpy as np
+
+
+def build_glm():
+    import mlx.core as mx
+    from test_vision_e2e import GLM_TEXT
+    from fixtures_vision_glm5 import glm5_tiny_config
+    from knurlogic.engine import register
+    register.register("glm5_next")
+    from knurlogic.engine.families.glm5.architecture.glm5_next.config import \
+        TextConfig
+    from knurlogic.engine.families.glm5.architecture.glm5_next.language \
+        import LanguageModel
+    mx.random.seed(0)
+    model = LanguageModel(TextConfig.from_dict(dict(
+        glm5_tiny_config()["text_config"], **GLM_TEXT)))
+    model.set_dtype(mx.float32)
+    mx.eval(model.parameters())
+    return model
+
+
+def build(family, seed=0, dtype="float32"):
+    import importlib
+    if family == "glm5_next":
+        return build_glm()
+
+    import mlx.core as mx
+    from mlx.utils import tree_flatten, tree_unflatten
+
+    from knurlogic.engine import register
+    import fixtures_vision_qwen as FQ
+    register.register(family, override=True)
+    m = importlib.import_module(f"mlx_lm.models.{family}")
+    # qwen4_exp's defaults are full size; its tiny config is the fixture's
+    cfg = FQ.config(family) if family == "qwen4_exp" else \
+        dict(FQ.TEXT[family], model_type=family)
+    model = m.Model(m.ModelArgs.from_dict(cfg))
+    shapes = {k: v.shape for k, v in tree_flatten(model.parameters())}
+    w = FQ.init_weights(shapes, seed)
+    model.update(tree_unflatten([(k, mx.array(v).astype(getattr(mx, dtype)))
+                                 for k, v in w.items()]))
+    mx.eval(model.parameters())
+    return model
+
+
+def run(model, ids, then):
+    import mlx.core as mx
+    cache = model.make_cache()
+
+    def call(x):
+        y = model(mx.array(x), cache=cache)
+        return (y if isinstance(y, mx.array) else y.logits)[:, -1]
+    out = [call([ids])]
+    for t in then:
+        out.append(call([[t]]))
+    y = mx.concatenate(out).astype(mx.float32)
+    mx.eval(y)
+    return np.array(y)
+
+
+def logits(link, out_path, family, counts):
+    from knurlogic.engine.runtime import pipeline as PL
+    ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]
+    then = [31, 104, 331, 32, 439, 214]
+    whole = run(build(family), ids, then) if link.rank == 0 else None
+    model = build(family)
+    info = PL.split(model, link.group, PL.bounds_of(counts))
+    split = run(model, ids, then)
+    link.barrier()
+    if link.rank == 0:
+        json.dump({"whole": whole.tolist(), "split": split.tolist(),
+                   "info": info}, open(out_path, "w"))
+
+
+def _tiny_with_head(vocab):
+    sys.path.insert(0, os.path.dirname(__file__))
+    from test_batch_drafting import _tiny
+    return _tiny(vocab)
+
+
+def mtp(link, out_path, always):
+    import mlx.core as mx
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime import pipeline as PL
+    if always:
+        os.environ["KNURLOGIC_MTP_BATCH_MAX_ROWS"] = "8"
+    vocab, max_tokens = (8, 40) if always else (512, 40)
+
+    def drive(gen, prompts, coord=None):
+        """Insert every prompt, step until all finish. With `coord`, rank
+        0's next tokens reach the follower before each step (the step
+        plan's `tokens`) and a flag says whether to go on."""
+        uids = gen.insert(prompts, max_tokens=[max_tokens] * len(prompts))
+        out, done = {u: [] for u in uids}, set()
+        steps = 0
+        while True:
+            go = len(done) < len(uids)
+            if coord is not None:
+                go = bool(coord._bcast([int(go)])[0])
+            if not go:
+                break
+            b = gen._batch
+            if coord is not None and len(b):
+                t = coord._bcast([int(x) for x in b.t1.tolist()])
+                b.t1 = mx.array(t, dtype=mx.int32)
+            _, responses = gen.next()
+            steps += 1
+            for r in responses:
+                out[r.uid].append(r.token)
+                if r.finish_reason:
+                    done.add(r.uid)
+        gen.close()
+        return [out[u] for u in uids], steps
+
+    whole = None
+    if link.rank == 0:
+        model, head, prompts = _tiny_with_head(vocab)
+        whole, _ = drive(MTPBatchGenerator(model, head, stats={},
+                                           prefill_step_size=16), prompts)
+    model, head, prompts = _tiny_with_head(vocab)
+    PL.split(model, link.group, PL.bounds_of([1, 3]))
+    stats = {}
+    gen = MTPBatchGenerator(model, head, stats=stats, prefill_step_size=16)
+    if link.rank > 0:
+        PL.silence(gen)
+    coord = PL.coordinate(gen, link.group)
+    split, steps = drive(gen, prompts, coord)
+    counts = mx.distributed.all_gather(
+        mx.array([coord.calls["b0"], coord.calls["b1"], coord.calls["b2"],
+                  steps]), group=link.group, stream=mx.cpu).tolist()
+    link.barrier()
+    if link.rank == 0:
+        json.dump({"whole": whole, "split": split,
+                   "calls": [counts[:4], counts[4:]],
+                   "accepted": stats.get("accepted", 0),
+                   "drafted": stats.get("steps", 0)}, open(out_path, "w"))
+
+
+class FakeTok:
+    """What control_machine reads of a tokenizer: token 2 ends a turn."""
+    eos_token_ids = [2]
+
+    def convert_ids_to_tokens(self, t):
+        return f"<{t}>"
+
+
+def engine(link, out_path):
+    """The serving path: rank 0's TensorExecutor journals a step plan, the
+    follower runs tensor.follow (split="pipeline"), MTP on both."""
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.runtime.executor import (Admission, LocalExecutor,
+                                                   Token)
+    from knurlogic.engine.runtime.request import control_machine
+    tok = FakeTok()
+
+    def admissions(prompts):
+        out = []
+        for p in prompts:
+            sm, _ = control_machine(tok, "normal")
+            out.append(Admission(
+                segments=[p[:5], p[5:]], max_tokens=30,
+                sampling={"seed": 7}, state_machine=sm,
+                wire={"penalties": {}, "initial": "normal"}))
+        return out
+
+    def drain(ex, uids):
+        toks = {u: [] for u in uids}
+        done = set()
+        for _ in range(10_000):
+            for e in ex.step():
+                if isinstance(e, Token):
+                    toks[e.uid].append(e.token)
+                if type(e).__name__ in ("Finished", "RowFailure"):
+                    done.add(e.uid)
+            if done >= set(uids):
+                break
+        return [toks[u] for u in uids]
+
+    whole = None
+    if link.rank == 0:
+        model, head, prompts = _tiny_with_head(512)
+        ex = LocalExecutor(MTPBatchGenerator(model, head, prefill_step_size=16,
+                                             completion_batch_size=32))
+        whole = drain(ex, [ex.insert(a) for a in admissions(prompts)])
+        ex.close()
+    model, head, prompts = _tiny_with_head(512)
+    PL.split(model, link.group, PL.bounds_of([1, 3]))
+    if link.rank > 0:
+        steps = T.follow(model, tok, ("tiny", None, None), link,
+                         prompt_cache_size=4, completion_batch_size=32,
+                         prefill_step_size=16, working_set=0,
+                         split="pipeline", head=head)
+        return
+    gen = MTPBatchGenerator(model, head, stats={}, prefill_step_size=16,
+                            completion_batch_size=32)
+    PL.coordinate(gen, link.group)
+    ring = T.Ring(link, split="pipeline")
+    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    split = drain(ex, [ex.insert(a) for a in admissions(prompts)])
+    ring.stop()
+    json.dump({"whole": whole, "split": split}, open(out_path, "w"))
+
+
+def main(argv):
+    import faulthandler
+    faulthandler.dump_traceback_later(float(os.environ.get(
+        "PIPELINE_WORKER_DEADLINE", "150")), exit=True)
+    from knurlogic.engine.runtime import tensor as T
+    link = T.init("ring")
+    mode, out_path = argv[0], argv[1]
+    if mode == "engine":
+        engine(link, out_path)
+    elif mode == "logits":
+        logits(link, out_path, argv[2], [int(x) for x in argv[3].split(",")])
+    else:
+        mtp(link, out_path, argv[2] == "1")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

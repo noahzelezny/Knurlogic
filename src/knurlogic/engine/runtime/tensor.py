@@ -257,8 +257,11 @@ class Ring:
     """Rank 0's side of the ring, kept across executors and prompt caches
     (both are rebuilt; the ring is not)."""
 
-    def __init__(self, link: Link):
+    def __init__(self, link: Link, split: str = "tensor"):
         self.link = link
+        #: "tensor" or "pipeline" (engine/runtime/pipeline.py): the plan is
+        #: the same; a pipeline's batch engine also carries a Coord
+        self.split = split
         self.journal = Journal()
         #: max over ranks >= 1 of (active - limit) at the last exchange, and
         #: rank 0's own active memory then
@@ -409,9 +412,15 @@ class Mark:
 
 def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
            completion_batch_size: int, prefill_step_size: int,
-           working_set: int) -> int:
+           working_set: int, split: str = "tensor", head=None) -> int:
     """Rank >= 1: apply rank 0's plans and step until told to stop. The
-    return value is the number of steps taken."""
+    return value is the number of steps taken.
+
+    `split="pipeline"`: this rank holds a run of layers, not a slice of
+    every layer. Its trunk returns zeros for logits (pipeline.Silent: its
+    samples are never used, so they are not compared with rank 0's), and
+    `head` (the drafting head, when every rank bound one) moves in step
+    with rank 0's through the Coord broadcasts."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from .request import control_machine
     from .scheduler import PromptCache
@@ -426,10 +435,15 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     def executor() -> LocalExecutor:
         nonlocal ex
         if ex is None:
-            ex = LocalExecutor(MTPBatchGenerator(
-                model, None, stats={}, vision=None,
-                completion_batch_size=completion_batch_size,
-                prefill_step_size=prefill_step_size, stream=stream))
+            gen = MTPBatchGenerator(
+                model, head if split == "pipeline" else None, stats={},
+                vision=None, completion_batch_size=completion_batch_size,
+                prefill_step_size=prefill_step_size, stream=stream)
+            if split == "pipeline":
+                from . import pipeline as PL
+                PL.silence(gen)
+                PL.coordinate(gen, link.group)
+            ex = LocalExecutor(gen)
         return ex
 
     while True:
@@ -488,7 +502,9 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
         if [int(u) for u in b.uids] != [u for u, _ in toks]:
             raise Desync(f"batch rows {list(b.uids)} here, "
                          f"{[u for u, _ in toks]} on rank 0")
-        if toks:
+        if toks and split == "pipeline":
+            b.t1 = mx.array([t for _, t in toks], dtype=mx.int32)
+        elif toks:
             mine = b.t1.tolist()
             theirs = [t for _, t in toks]
             if mine != theirs:
@@ -523,23 +539,48 @@ def init(link_kind: str) -> Link:
 def serve_follower(path: str, *, link_kind: str, working_set: int,
                    prompt_cache_size: int, completion_batch_size: int,
                    prefill_step_size: int,
-                   executes_artifact_code: bool = False) -> int:
-    """A rank >= 1 from start to stop: join, load its shard, follow."""
+                   executes_artifact_code: bool = False,
+                   split: str = "tensor", pipeline: Optional[dict] = None,
+                   draft: bool = True) -> int:
+    """A rank >= 1 from start to stop: join, load its shard, follow.
+    `pipeline`: agree()'s keyword arguments for a pipeline split."""
     from .host import ModelHost
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     link = init(link_kind)
-    host = ModelHost(draft=False, executes_artifact_code=executes_artifact_code,
-                     shard=lambda m: shard(m, link.group), vision=False,
-                     load_wait_s=3600.0)
+    if split == "pipeline":
+        from . import pipeline as PL
+        shares = PL.agree(link.group, **(pipeline or {}))
+        print(f"pipeline  rank {link.rank}: {shares['reason']}", flush=True)
+        cut = (lambda m: PL.split(m, link.group, shares["bounds"]))
+    else:
+        cut = (lambda m: shard(m, link.group))
+    host = ModelHost(draft=draft and split == "pipeline",
+                     executes_artifact_code=executes_artifact_code,
+                     shard=cut, vision=False, load_wait_s=3600.0,
+                     head_agree=(agree_head(link) if split == "pipeline"
+                                 else None))
     host.load(path)
     if host.state != "ready":
         raise RuntimeError(f"rank {link.rank} could not load {path}: "
                            f"{host.error}")
     logger.info("rank %d: %s loaded, %.1f GiB active", link.rank, path,
                 mx.get_active_memory() / GIB)
+    from knurlogic.engine.serve import state
+    head = state.DRAFT.get("head") if state.DRAFT.get("on") else None
     return follow(host.model, host.tokenizer, host.model_key, link,
                   prompt_cache_size=prompt_cache_size,
                   completion_batch_size=completion_batch_size,
                   prefill_step_size=prefill_step_size,
-                  working_set=working_set)
+                  working_set=working_set, split=split, head=head)
+
+
+def agree_head(link: Link):
+    """ModelHost's `head_agree` on a pipeline: every rank drafts or none
+    does (a head on one rank only would put B1 on one side of the ring)."""
+    def agree(has: bool) -> bool:
+        got = mx.distributed.all_gather(mx.array([int(bool(has))]),
+                                        group=link.group,
+                                        stream=mx.cpu).tolist()
+        return all(got)
+    return agree

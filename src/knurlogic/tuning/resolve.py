@@ -920,3 +920,207 @@ def rank_order(machines: list, explicit: list | None = None) -> list:
         order.append(nxt)
         left.remove(nxt)
     return order
+
+
+# ---------------------------------------------------------- pipeline split
+#
+# One model served by N ranks, each holding a contiguous run of layers
+# (engine/runtime/pipeline.py). Rank 0 -- the leader, which samples -- holds
+# the LAST layers, so the logits are born where they are used and nothing
+# is gathered; rank N-1 holds the first layers and embeds. Pure arithmetic,
+# so the split is said, with its reason, before anything loads.
+
+#: model types engine/runtime/pipeline.py knows how to slice (each has its
+#: own index fixups there); anything else is refused with a reason
+PIPELINE_TYPES = ("qwen3_5", "qwen3_5_moe", "qwen3_5_text",
+                  "qwen3_5_moe_text", "glm5_next", "qwen4_exp",
+                  "qwen4_exp_text")
+
+_PIPELINE_WHY_NOT = {
+    "gemma4": "gemma4 shares KV across layers (a layer reads a cache another "
+              "layer wrote), so a cut between them would need that cache on "
+              "two ranks; not built",
+}
+
+#: memory bandwidth (GB/s) of chips that come in ONE bandwidth only. A Max
+#: that is sold binned (M3 Max 300/400, M4 Max 410/546) is not here:
+#: unknown is said, never guessed.
+CHIP_BANDWIDTH_GBS = {
+    "Apple M1 Max": 400.0, "Apple M1 Ultra": 800.0,
+    "Apple M2 Max": 400.0, "Apple M2 Ultra": 800.0,
+    "Apple M3 Ultra": 819.0, "Apple M4 Pro": 273.0,
+}
+
+
+def chip_bandwidth_gbs(chip) -> float | None:
+    return CHIP_BANDWIDTH_GBS.get(str(chip or "").strip())
+
+
+def pipeline_refusals(cfg: dict, n: int) -> list:
+    """Why this config cannot be pipelined `n` ways; [] when it can."""
+    if n < 2:
+        return []
+    tc = cfg.get("text_config", cfg) or {}
+    types = {cfg.get("model_type"), tc.get("model_type")}
+    if not types & set(PIPELINE_TYPES):
+        mt = cfg.get("model_type")
+        why = next((w for k, w in _PIPELINE_WHY_NOT.items()
+                    if any(str(t or "").startswith(k) for t in types)), None)
+        return [f"pipeline split knows {', '.join(PIPELINE_TYPES[:2])}, "
+                f"glm5_next and qwen4_exp; this is {mt!r}"
+                + (f": {why}" if why else "")]
+    L = tc.get("num_hidden_layers") or cfg.get("num_hidden_layers")
+    if L is not None and int(L) < n:
+        return [f"num_hidden_layers = {L} is fewer than {n} ranks: every "
+                f"rank holds at least one layer"]
+    return []
+
+
+def layer_bytes_of(tensors: dict, n_layers: int) -> tuple:
+    """{name: bytes} -> ([bytes of layer i for i < n_layers], bytes outside
+    the layers). A tensor of layer i is one whose name holds `.layers.i.`;
+    an index >= n_layers, or a name under `mtp.` (a grafted head), counts
+    as outside."""
+    import re
+    per = [0] * n_layers
+    other = 0
+    rx = re.compile(r"\.layers\.(\d+)\.")
+    for k, b in tensors.items():
+        m = None if k.split(".")[0] == "mtp" else rx.search(k)
+        i = int(m.group(1)) if m else -1
+        if 0 <= i < n_layers:
+            per[i] += int(b)
+        else:
+            other += int(b)
+    return per, other
+
+
+def _largest_remainder(n: int, weights: list, floor: list, cap: list) -> list:
+    """n items shared by weight, each share within [floor, cap]; ties go
+    to the lower index. Deterministic: plain arithmetic, no sort instability
+    (keys carry the index)."""
+    k = len(weights)
+    out = list(floor)
+    left = n - sum(out)
+    free = [i for i in range(k) if out[i] < cap[i]]
+    while left > 0 and free:
+        tot = sum(weights[i] for i in free)
+        if tot <= 0:
+            want = {i: left / len(free) for i in free}
+        else:
+            want = {i: left * weights[i] / tot for i in free}
+        give = {i: min(int(want[i]), cap[i] - out[i]) for i in free}
+        if sum(give.values()) == 0:
+            # remainders: the largest fractional part first, lower rank on a tie
+            order = sorted(free, key=lambda i: (-(want[i] - int(want[i])), i))
+            give = {i: 0 for i in free}
+            for i in order[:left]:
+                give[i] = 1
+        for i, g in give.items():
+            out[i] += g
+            left -= g
+        free = [i for i in range(k) if out[i] < cap[i]]
+    return out
+
+
+def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dict:
+    """Which layers each rank holds.
+
+    `layer_bytes`: bytes of each layer, in order. `ranks`: in rank order,
+    [{"name", "working_set_bytes", "memory_bandwidth_gbs" (None: unknown)}].
+    `other_bytes`: what every rank holds besides its layers (embeddings,
+    final norm, lm_head -- replicated).
+
+    A rank's weight is what it can hold (working set less the replicated
+    bytes), times its memory bandwidth when EVERY rank's is known (decode
+    reads each layer's weights once per step, so a faster rank should read
+    more of them); a mix of known and unknown bandwidths weighs by capacity
+    only, and says so. Every rank holds at least one layer and no rank more
+    than fits; rank 0 holds the LAST run of layers, rank N-1 the first.
+
+    -> {"layers": [count per rank], "bounds": [(start, end) per rank],
+        "bytes": [layer bytes per rank], "weights": [...], "reason": str}
+    Raises ValueError, with the arithmetic, when it cannot be done."""
+    n, L = len(ranks), len(layer_bytes)
+    if n < 1:
+        raise ValueError("no ranks")
+    if L < n:
+        raise ValueError(f"{L} layers cannot give each of {n} ranks one")
+    names = [str(r.get("name", f"rank{i}")) for i, r in enumerate(ranks)]
+    cap = [int(r.get("working_set_bytes") or 0) - int(other_bytes)
+           for r in ranks]
+    for i, c in enumerate(cap):
+        if c <= 0:
+            raise ValueError(
+                f"{names[i]}: working set {int(ranks[i].get('working_set_bytes') or 0) / GIB:.1f} GiB "
+                f"holds none of the layers after the {other_bytes / GIB:.1f} "
+                f"GiB every rank keeps (embeddings, norm, lm_head)")
+    bws = [r.get("memory_bandwidth_gbs") for r in ranks]
+    known = all(b for b in bws)
+    weights = [cap[i] * (float(bws[i]) if known else 1.0) for i in range(n)]
+    avg = sum(layer_bytes) / L if L else 0
+    # a rank's ceiling in layers, by the average layer; checked exactly below
+    ceil = [max(1, min(L, int(cap[i] // avg))) if avg else L for i in range(n)]
+    if sum(ceil) < L:
+        raise ValueError(
+            f"{L} layers x {avg / GIB:.2f} GiB average = "
+            f"{sum(layer_bytes) / GIB:.1f} GiB; the ranks hold "
+            + " + ".join(f"{names[i]} {cap[i] / GIB:.1f}" for i in range(n))
+            + f" = {sum(cap) / GIB:.1f} GiB of layers")
+    counts = _largest_remainder(L, weights, [1] * n, ceil)
+    # stage order: rank n-1 first ... rank 0 last
+    bounds = [None] * n
+    at = 0
+    for r in range(n - 1, -1, -1):
+        bounds[r] = (at, at + counts[r])
+        at += counts[r]
+    got = [sum(layer_bytes[a:b]) for a, b in bounds]
+    over = [i for i in range(n) if got[i] > cap[i]]
+    if over:
+        i = over[0]
+        raise ValueError(
+            f"{names[i]}: layers {bounds[i][0]}..{bounds[i][1] - 1} are "
+            f"{got[i] / GIB:.1f} GiB against {cap[i] / GIB:.1f} GiB it can "
+            f"hold")
+    how = ("capacity x memory bandwidth" if known else
+           "capacity only (memory bandwidth unknown on "
+           + ", ".join(names[i] for i in range(n) if not bws[i]) + ")")
+    reason = (f"{L} layers by {how}: " + "; ".join(
+        f"rank {i} {names[i]} holds {counts[i]} (layers {bounds[i][0]}.."
+        f"{bounds[i][1] - 1}, {got[i] / GIB:.1f} of {cap[i] / GIB:.1f} GiB"
+        + (f", {float(bws[i]):g} GB/s" if bws[i] else "") + ")"
+        for i in range(n)) + "; rank 0 holds the last layers and samples")
+    return {"layers": counts, "bounds": [tuple(b) for b in bounds],
+            "bytes": got, "weights": weights, "reason": reason}
+
+
+def pipeline_layer_bytes(artifact: Artifact) -> tuple:
+    """layer_bytes_of over the artifact's top-level safetensors headers
+    (the tower is not the trunk; an MTP sidecar is counted as replicated)."""
+    import json
+    import struct
+
+    cfg = artifact.raw_config or {}
+    tc = cfg.get("text_config", cfg) or {}
+    L = int(tc.get("num_hidden_layers") or cfg.get("num_hidden_layers") or 0)
+    sizes = {}
+    for f in sorted(artifact.path.glob("*.safetensors")):
+        if f.name.startswith("model-vision"):
+            continue
+        try:
+            with open(f, "rb") as fh:
+                (hn,) = struct.unpack("<Q", fh.read(8))
+                if hn <= 0 or hn > (1 << 28):
+                    continue
+                header = json.loads(fh.read(hn))
+        except (OSError, ValueError, struct.error):
+            continue
+        for k, v in header.items():
+            if k == "__metadata__" or not isinstance(v, dict):
+                continue
+            if k.startswith(S.VISION_TOWER_PREFIXES):
+                continue
+            a, b = v.get("data_offsets", (0, 0))
+            sizes["mtp." + k if f.name.startswith("mtp") else k] = \
+                int(b) - int(a)
+    return layer_bytes_of(sizes, L)

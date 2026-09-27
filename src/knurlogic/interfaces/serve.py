@@ -63,18 +63,34 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if world > 1:
         why = _ring_refusals(a, ring, working_set_gib, overrides or {})
         if why:
-            print(f"REFUSING a {world}-rank tensor split of {a.path.name}:",
-                  file=sys.stderr)
+            print(f"REFUSING a {world}-rank {ring.get('split')} split of "
+                  f"{a.path.name}:", file=sys.stderr)
             for w in why:
                 print(f"  - {w}", file=sys.stderr)
             return 2
-        from knurlogic.tuning.resolve import tensor_placement
-        pl = tensor_placement(a, world)
-        print(f"tensor    rank {ring['rank']} of {world} over "
-              f"{ring['link']}: holds ~{pl['per_rank_bytes'] / GIB:.1f} GiB "
-              f"({pl['sharded_bytes'] / GIB:.1f} split {world} ways + "
-              f"{pl['replicated_bytes'] / GIB:.1f} replicated)")
-        draft = False
+        if ring.get("split") == "pipeline":
+            from knurlogic.tuning import resolve as R
+            per, other = R.pipeline_layer_bytes(a)
+            bw = ring.get("bandwidth_gbs") or R.chip_bandwidth_gbs(_chip())
+            # every rank's working set and bandwidth are gathered once the
+            # ring is up; the split is computed the same way on every rank
+            ring["pipeline"] = {
+                "layer_bytes": per, "other_bytes": other,
+                "working_set": int(working_set_gib * GIB),
+                "bandwidth_gbs": bw, "counts": ring.get("layers") or None}
+            print(f"pipeline  rank {ring['rank']} of {world} over "
+                  f"{ring['link']}: {len(per)} layers, "
+                  f"{sum(per) / GIB:.1f} GiB split by layer + "
+                  f"{other / GIB:.1f} GiB on every rank; memory bandwidth "
+                  + (f"{bw:g} GB/s" if bw else "unknown here"))
+        else:
+            from knurlogic.tuning.resolve import tensor_placement
+            pl = tensor_placement(a, world)
+            print(f"tensor    rank {ring['rank']} of {world} over "
+                  f"{ring['link']}: holds ~{pl['per_rank_bytes'] / GIB:.1f} "
+                  f"GiB ({pl['sharded_bytes'] / GIB:.1f} split {world} ways "
+                  f"+ {pl['replicated_bytes'] / GIB:.1f} replicated)")
+            draft = False
         _ring_env(ring)
         # the ring-wide knobs beat the resolver like any --set
         overrides = dict(overrides or {})
@@ -213,7 +229,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             completion_batch_size=int((serving or {}).get(
                 "decode_concurrency", 32)),
             prefill_step_size=int(ring["prefill_chunk"]),
-            executes_artifact_code=bool(a.model_file))
+            executes_artifact_code=bool(a.model_file),
+            split=ring.get("split", "tensor"), pipeline=ring.get("pipeline"),
+            draft=draft)
         return 0
 
     print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)")
@@ -308,9 +326,9 @@ def _ring_refusals(a: Artifact, ring: dict, working_set_gib: float,
     """Why this rank cannot join a tensor split, with the numbers."""
     from knurlogic.tuning.resolve import tensor_refusals
     why = []
-    if ring.get("split") != "tensor":
+    if ring.get("split") not in ("tensor", "pipeline"):
         why.append(f"--split {ring.get('split')!r}: this build splits "
-                   f"'tensor' only")
+                   f"'tensor' or 'pipeline'")
     if not 0 <= int(ring["rank"]) < int(ring["world"]):
         why.append(f"rank {ring['rank']} is outside a world of "
                    f"{ring['world']}")
@@ -329,8 +347,27 @@ def _ring_refusals(a: Artifact, ring: dict, working_set_gib: float,
     if ring.get("link") == "jaccl" and not (ring.get("ibv_devices")
                                             and ring.get("coordinator")):
         why.append("--link jaccl needs --ibv-devices and --coordinator")
-    why += tensor_refusals(a.raw_config, int(ring["world"]))
+    if ring.get("split") == "pipeline":
+        from knurlogic.tuning.resolve import pipeline_refusals
+        why += pipeline_refusals(a.raw_config, int(ring["world"]))
+        n = ring.get("layers") or []
+        if n and len(n) != int(ring["world"]):
+            why.append(f"--layers names {len(n)} ranks for a world of "
+                       f"{ring['world']}")
+    else:
+        why += tensor_refusals(a.raw_config, int(ring["world"]))
     return why
+
+
+def _chip() -> str:
+    """This machine's chip ("Apple M4 Max"), or "" when it does not say."""
+    import subprocess
+    try:
+        return subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
+                              capture_output=True, text=True,
+                              timeout=5).stdout.strip()
+    except Exception:
+        return ""
 
 
 def _ring_env(ring: dict) -> None:
@@ -432,6 +469,11 @@ def main(argv=None) -> int:
     p.add_argument("--coordinator", default="", help=hide)
     p.add_argument("--prefill-chunk", type=int, default=0, help=hide)
     p.add_argument("--decode-chunk", type=int, default=0, help=hide)
+    # pipeline only: layers per rank (rank order; default: the resolver's
+    # shares from every rank's working set and bandwidth), and this
+    # machine's memory bandwidth when the chip table does not know it
+    p.add_argument("--layers", default="", help=hide)
+    p.add_argument("--bandwidth-gbs", type=float, default=0.0, help=hide)
     a = p.parse_args(argv)
     ring = None
     if a.world > 1:
@@ -441,7 +483,9 @@ def main(argv=None) -> int:
                 "job": a.job or f"tensor-{a.port}",
                 "ibv_devices": a.ibv_devices, "coordinator": a.coordinator,
                 "prefill_chunk": a.prefill_chunk,
-                "decode_chunk": a.decode_chunk}
+                "decode_chunk": a.decode_chunk,
+                "layers": [int(x) for x in a.layers.split(",") if x],
+                "bandwidth_gbs": a.bandwidth_gbs or None}
     serving = {"decode_concurrency": a.decode_concurrency,
                "max_body": a.max_request_mib * 1024 * 1024,
                "allow_origins": a.allow_origin,

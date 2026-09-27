@@ -38,8 +38,9 @@ processors (repetition penalty, eos ban) are applied to the TRUNK row that
 verifies the draft, not only to the draft and to t1 — otherwise a penalised token could be committed
 through the verify path that sampling would have refused.
 
-Single node. Across machines, the cluster executor will own the SPMD loop
-around this engine (docs/SERVER.md, "Cluster readiness").
+Across machines (a pipeline split, engine/runtime/pipeline.py) every rank
+runs this same loop; `coord` carries rank 0's regime and drafts (B1) and
+its verdicts (B2) to the others, one fixed broadcast each per step.
 """
 from __future__ import annotations
 
@@ -434,6 +435,9 @@ class MTPBatch:
         self._regime: Optional[bool] = None  # last step drafted? (for the log)
         self._since_recheck = 0
         self._explore: Optional[tuple] = None   # (rows, drafting, steps left)
+        #: engine/runtime/pipeline.Coord on a pipeline split: rank 0's regime,
+        #: drafts and verdicts reach every rank through it (B1, B2)
+        self.coord = None
 
         self.uids: List[int] = []
         self.params: List[RowParams] = []
@@ -649,20 +653,30 @@ class MTPBatch:
             return []
         assert self.t1 is not None and self.row_t1 is not None
         drafting = self.drafting_pays(B)
+        pre = None
+        if self.coord is not None and self.head is not None:
+            # B1, every step with a head: rank 0's regime and drafts
+            if self.coord.leader and drafting:
+                pre = self._drafts(B)
+            drafting, d2 = self.coord.b1(drafting, pre[1] if pre else None, B)
+            if drafting and pre is None:
+                pre = (self._live(B), d2, [None] * B)
         self._note_regime(drafting, B)
         t0 = self._clock()
-        out = self._plain_step() if not drafting else self._draft_step(B)
+        out = self._plain_step() if not drafting else self._draft_step(B, pre)
         self._record_cost(B, drafting, self._clock() - t0,
                           sum(len(rs.tokens) for rs in out))
         return out
 
-    def _draft_step(self, B: int) -> List[RowStep]:
-        """One speculative step: every row commits t1 and a verified t2."""
-        assert self.t1 is not None and self.row_t1 is not None
-
+    def _live(self, B: int) -> List[bool]:
         # A row drafts this step iff it is a drafting row AND the head has
         # produced a draft for it (the batch may hold only non-drafting rows).
-        live = [self.drafts[i] and self.draft_row is not None for i in range(B)]
+        return [self.drafts[i] and self.draft_row is not None
+                for i in range(B)]
+
+    def _drafts(self, B: int):
+        """(live, d2 [B] int32, the draft distributions) for this step."""
+        live = self._live(B)
 
         # --- draft d2 per row -------------------------------------------
         d2_rows: List[mx.array] = []
@@ -688,6 +702,13 @@ class MTPBatch:
                 d2_rows.append(q.sample(_key(p, len(self.emitted[i]) + 1)))
                 qs.append(q)
         d2 = mx.concatenate(d2_rows).astype(mx.int32)
+        return live, d2, qs
+
+    def _draft_step(self, B: int, pre=None) -> List[RowStep]:
+        """One speculative step: every row commits t1 and a verified t2.
+        `pre`: (live, d2, qs) already drawn (a pipeline's B1)."""
+        assert self.t1 is not None and self.row_t1 is not None
+        live, d2, qs = pre if pre is not None else self._drafts(B)
 
         # --- verify: one 2-wide forward over the batch -------------------
         csnap = snapshot(self.cache, copy=self.copy_caches)
@@ -696,10 +717,12 @@ class MTPBatch:
                          **pos2)
 
         # --- verdicts ----------------------------------------------------
-        oks: List[Any] = [None] * B
-        t2_rows: List[Any] = [None] * B
+        oks: List[Any] = [False] * B
+        t2_rows: List[Any] = [self.t1[i:i + 1] for i in range(B)]
         lazy: List[mx.array] = []
-        for i in range(B):
+        # a pipeline follower's logits are zeros: its verdicts come in B2
+        judge = self.coord is None or self.coord.leader
+        for i in (range(B) if judge else ()):
             p = self.params[i]
             row = _apply(lg2[i:i + 1, 0], p.processors,
                          _with(self.emitted[i], self.t1[i:i + 1])
@@ -734,9 +757,13 @@ class MTPBatch:
                 oks[i] = acc
                 t2_rows[i] = t2
                 lazy += [acc, t2]
-        mx.eval(*lazy)
+        if lazy:
+            mx.eval(*lazy)
         ok_flags = [bool(o.item()) if isinstance(o, mx.array) else bool(o) for o in oks]
         t2 = mx.concatenate(t2_rows).astype(mx.int32)
+        if self.coord is not None:
+            # B2: rank 0's verdicts drive every rank's rollback and replay
+            ok_flags, t2 = self.coord.b2(ok_flags, t2, B)
 
         n_live = sum(live)
         if n_live:
