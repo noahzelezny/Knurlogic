@@ -2,11 +2,22 @@
 released rungs load through (gemma4). No MTP head.
 """
 
+# KV precision: the full-attention layers' KVCache is stored quantized
+# (engine/kvquant.py); the sliding-window layers (RotatingKVCache) are
+# bounded by their window and stay bf16; the KV-shared layers reuse the
+# dequantized arrays their source layer returns. Unmeasured on a real model.
+_KVQ = {"bits": [8, 6, 4],
+        "why": "full-attention layers only; sliding-window layers are "
+               "bounded by their window and stay bf16. Unmeasured on a "
+               "real model"}
+
 MANIFEST = {
     "name": "gemma4",
     "architectures": {
-        "gemma4_text": {"model_types": ["gemma4_text"]},
-        "gemma4": {"depends_on": ["gemma4_text"], "model_types": ["gemma4"]},
+        "gemma4_text": {"model_types": ["gemma4_text"],
+                        "kv_quant": _KVQ},
+        "gemma4": {"depends_on": ["gemma4_text"], "model_types": ["gemma4"],
+                   "kv_quant": _KVQ},
     },
     # The TEMPLATE defaults off (enable_thinking must be true), but mlx-lm
     # passes enable_thinking=True to any request that is silent about it
