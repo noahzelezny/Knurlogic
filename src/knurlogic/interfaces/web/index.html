@@ -1620,25 +1620,26 @@ async function tick(){
   // memory went. The old device pictures filled with one colour and could
   // not say whether the box was hot, swapping or busy; these can.
   //
-  // A line from a missing reading is drawn as a GAP, never as zero: a probe
-  // that failed is not an idle GPU.
+  // A missing reading is stepped over: the line joins the readings either
+  // side of it and never drops to zero (a probe that failed is not an idle
+  // GPU). Drawn as gaps it read as a broken line on a busy machine, where
+  // one probe in a few runs late.
   function spark(vals, col){
     const W=200, H=30, n=vals.length;
-    if(!n || vals.every(v=>v==null))
+    const pts=vals.map((v,i)=>[i,v]).filter(([,v])=>v!=null);
+    if(!pts.length)
       return `<svg class="sp" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"></svg>`;
     // What history there is spans the width; a new page is not a dash in
-    // the corner for three minutes.
+    // the corner for three minutes. The scale is 0-100 (or the peak, if a
+    // reading goes past it) with a band of headroom above: a peak drawn on
+    // the top edge lost half its stroke to the svg's edge.
+    const top=Math.max(100, ...pts.map(([,v])=>v)), PAD=4;
     const x=i=>n<2?W:i/(n-1)*W,
-          y=v=>H-1-Math.max(0,Math.min(100,v))/100*(H-2);
-    let line='', area='', run=[];
-    const flush=()=>{ if(!run.length) return;
-      line+='M'+run.map(([i,v])=>`${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join('L');
-      area+=`M${x(run[0][0]).toFixed(1)} ${H}`+
-        run.map(([i,v])=>`L${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join('')+
-        `L${x(run[run.length-1][0]).toFixed(1)} ${H}Z`;
-      run=[] };
-    vals.forEach((v,i)=>{ if(v==null) flush(); else run.push([i,v]) });
-    flush();
+          y=v=>H-1-Math.max(0,v)/top*(H-1-PAD);
+    const xy=([i,v])=>`${x(i).toFixed(1)} ${y(v).toFixed(1)}`;
+    const line='M'+pts.map(xy).join('L');
+    const area=`M${x(pts[0][0]).toFixed(1)} ${H}L`+pts.map(xy).join('L')+
+      `L${x(pts[pts.length-1][0]).toFixed(1)} ${H}Z`;
     return `<svg class="sp" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
       <path d="${area}" fill="${col}" opacity=".13"/>
       <path d="${line}" fill="none" stroke="${col}" stroke-width="1.4"
