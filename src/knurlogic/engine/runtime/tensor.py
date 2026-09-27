@@ -348,6 +348,17 @@ class JournalPromptCache:
         return self.inner.nbytes
 
 
+def _admission_coord(gen, group) -> None:
+    """Under tensor the batch engine carries a Coord for B0 alone (not the
+    batch loop's B1/B2: every rank samples the same tokens): its admission
+    broadcast tells every rank when one rank's admission failed, so all of
+    them skip that call's decode step instead of all_summing different row
+    counts (pipeline.Coord.diverged)."""
+    if getattr(gen, "_coord", None) is None:
+        from .pipeline import Coord
+        gen._coord = Coord(group)
+
+
 class TensorExecutor(LocalExecutor):
     """Rank 0's executor on a ring: the local batch engine, with every
     admission and removal journaled and the plan sent before each step."""
@@ -356,6 +367,7 @@ class TensorExecutor(LocalExecutor):
         super().__init__(generator)
         self.ring = ring
         self._over = over
+        _admission_coord(generator, ring.link.group)
 
     def insert(self, a: Admission) -> int:
         if a.wire is None:
@@ -453,6 +465,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                 from . import pipeline as PL
                 PL.silence(gen)
                 PL.coordinate(gen, link.group)
+            else:
+                _admission_coord(gen, link.group)
             ex = LocalExecutor(gen)
         return ex
 

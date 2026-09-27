@@ -252,6 +252,11 @@ class Coord:
         self.group = group
         self.leader = group.rank() == 0
         self.calls = {"b0": 0, "b1": 0, "b2": 0}
+        #: the last b0 found the ranks holding different row counts (one
+        #: rank's admission failed): every rank skips that call's decode
+        #: step, whose collectives would not line up, and rank 0's next
+        #: plan removes the row
+        self.diverged = False
 
     def _bcast(self, vals: List[int]) -> List[int]:
         n = len(vals)
@@ -259,11 +264,30 @@ class Coord:
         out = mx.distributed.all_gather(v, group=self.group, stream=mx.cpu)
         return out[:n].tolist()           # rank 0's block is the first
 
-    def b0(self, t1: mx.array) -> mx.array:
-        """After an admission: every row's next token, rank 0's."""
+    def b0(self, t1: Optional[mx.array]) -> Optional[mx.array]:
+        """After every admission attempt (and a failed decode step): every
+        row's next token, rank 0's. Made even when the admission failed on
+        one rank, so the ranks' collective counts stay equal; the row counts
+        may then differ (rank 0 dropped a row the follower still holds, or
+        the reverse), and a rank whose count is not rank 0's keeps its own
+        t1 -- the follower's rows and tokens are set from the next plan --
+        and `diverged` is set."""
         self.calls["b0"] += 1
-        return mx.array(self._bcast([int(t) for t in t1.tolist()]),
-                        dtype=mx.int32)
+        mine = [] if t1 is None else [int(t) for t in t1.tolist()]
+        ns = mx.distributed.all_gather(
+            mx.array([len(mine)], dtype=mx.int32), group=self.group,
+            stream=mx.cpu).tolist()
+        m = max(ns)
+        self.diverged = len(set(ns)) > 1
+        if m == 0:
+            return t1
+        v = mx.array((mine if self.leader else [0] * len(mine))
+                     + [0] * (m - len(mine)), dtype=mx.int32)
+        got = mx.distributed.all_gather(v, group=self.group,
+                                        stream=mx.cpu).tolist()
+        if ns[0] != len(mine):
+            return t1
+        return mx.array(got[:ns[0]], dtype=mx.int32)
 
     def b1(self, drafting: bool, d2: Optional[mx.array], B: int):
         """-> (drafting, d2 [B] int32 or None)."""

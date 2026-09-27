@@ -514,11 +514,15 @@ class MTPBatchGenerator(BatchGenerator):
                 self._requests.pop(uid, None)
                 prompt_responses += self._failed_responses()
                 return prompt_responses, []
+            finally:
+                if self._coord is not None:
+                    # B0, after every admission attempt (a failed one too:
+                    # the ranks make the same broadcasts; rank 0's plan
+                    # removes the row the follower still holds): the
+                    # admitted row's first token is rank 0's (the plan for
+                    # this step went out before the admission sampled it)
+                    self._batch.t1 = self._coord.b0(self._batch.t1)
             prompt_responses.append(admitted)
-            if self._coord is not None:
-                # B0: the admitted row's first token is rank 0's (the plan
-                # for this step went out before the admission sampled it)
-                self._batch.t1 = self._coord.b0(self._batch.t1)
             # This row's first checkpoint goes out with its admission.
             uid = prompt_responses[-1].uid
             if uid in self._ckpt_pending and uid not in self._ckpt_ready:
@@ -529,6 +533,9 @@ class MTPBatchGenerator(BatchGenerator):
                 n = len(self._rows[uid]["fed"])
                 prompt_responses.insert(-1, PromptProcessingBatch.Response(
                     uid, (n, n), True, False))
+            if self._coord is not None and self._coord.diverged:
+                # another rank failed this admission: no decode this call
+                return prompt_responses, []
         if not len(self._batch):
             return prompt_responses, []
 
@@ -546,6 +553,9 @@ class MTPBatchGenerator(BatchGenerator):
                 self._rows.pop(u, None)
                 self._ckpt_pending.pop(u, None)
                 self._failed[u] = e
+            if self._coord is not None:
+                # the same broadcast count as a failed admission's
+                self._batch.t1 = self._coord.b0(self._batch.t1)
             return prompt_responses + self._failed_responses(), []
 
         # NaN guard: a row whose logits went non-finite this step is failed
