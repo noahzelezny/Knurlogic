@@ -85,6 +85,9 @@ def default_draft_max_rows() -> int | None:
 #: the currently-losing regime is re-tried at the same width.
 EXPLORE_STEPS = 6
 RECHECK_EVERY = 96
+#: a recheck that confirms the winner doubles the wait before the next one
+#: (per width), up to this many base intervals; a flip resets it
+RECHECK_BACKOFF_MAX = 64
 
 
 @dataclass
@@ -434,6 +437,8 @@ class MTPBatch:
         self._cost: dict = {}
         self._regime: Optional[bool] = None  # last step drafted? (for the log)
         self._since_recheck = 0
+        # rows -> (backoff multiplier, winner when the last recheck began)
+        self._backoff: dict = {}
         self._explore: Optional[tuple] = None   # (rows, drafting, steps left)
         #: engine/runtime/pipeline.Coord on a pipeline split: rank 0's regime,
         #: drafts and verdicts reach every rank through it (B1, B2)
@@ -488,8 +493,18 @@ class MTPBatch:
             self._explore = (rows, False, EXPLORE_STEPS)
             return False
         best = d[0] <= p[0]
-        if self._since_recheck >= RECHECK_EVERY:
+        mult, last = self._backoff.get(rows, (1, None))
+        if last is not None:
+            # a recheck just finished: same winner -> wait twice as long
+            mult = 1 if best != last else min(mult * 2, RECHECK_BACKOFF_MAX)
+            self._backoff[rows] = (mult, None)
+        # Re-trying the loser costs EXPLORE_STEPS of it; stretch the wait by
+        # how much it loses so that probe stays a small share of the time
+        # (a draft 13x dearer than plain is not re-tried every 96 steps).
+        ratio = max(d[0], p[0]) / max(min(d[0], p[0]), 1e-9)
+        if self._since_recheck >= RECHECK_EVERY * mult * max(1.0, ratio):
             self._since_recheck = 0
+            self._backoff[rows] = (mult, best)
             self._explore = (rows, not best, EXPLORE_STEPS)
             return not best
         return best
