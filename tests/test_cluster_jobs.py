@@ -292,6 +292,56 @@ def test_prepare_says_not_on_and_rejects_bad_shapes(cache):
         assert code == 400
 
 
+@pytest.mark.parametrize("bad", [
+    {"port": "8080"}, {"port": -1}, {"port": True},
+    {"working_set_gib": "60"}, {"bandwidth_gbs": [1]}, {"tune": "turbo"},
+    {"nodes": [1, 2]},
+    {"nodes": [{"rank": 0, "id": "a", "page": "x:1"},
+               {"rank": 1, "id": "b", "name": "B", "page": "y:1"}]},
+    {"nodes": [{"rank": 0, "id": "a", "name": "A", "page": 5},
+               {"rank": 1, "id": "b", "name": "B", "page": "y:1"}]},
+    {"sets": ["a=b"]},
+])
+def test_prepare_type_checks_the_spec(cache, bad):
+    code, doc = prep(spec(**bad))
+    assert code == 400, doc
+
+
+def test_prepare_refuses_unknown_sets_and_stores_only_clean_ones(
+        cache, monkeypatch):
+    monkeypatch.setattr(ui, "launch_knobs",
+                        lambda: frozenset({"kv_bits"}))
+    code, doc = prep(spec(sets={"kv_bits": "8", "evil": "x"}))
+    assert not doc["ok"] and "evil" in doc["refused"]
+    code, doc = prep(spec(sets={"kv_bits": "8; rm"}))
+    assert not doc["ok"] and "kv_bits" in doc["refused"]
+    code, doc = prep(spec(sets={"kv_bits": "8"}))
+    assert doc["ok"]
+    assert C.PREPARED["ab12cd34ef567890"]["spec"]["sets"] == {"kv_bits": "8"}
+    C.PREPARED.clear()
+
+
+def test_stop_tells_only_pages_this_page_knows(cache, monkeypatch):
+    """The spec's page addresses are never posted to: a node is told at
+    the address this page's PEERS store has for its id, or not at all."""
+    from knurlogic.cluster.peers import Peer
+    s = spec(nodes=[{"rank": 0, "id": "me", "name": "A", "page": "x:1"},
+                    {"rank": 1, "id": "b", "name": "B",
+                     "page": "evil.example:80"},
+                    {"rank": 2, "id": "c", "name": "C", "page": "z:1"}])
+    monkeypatch.setattr(identity, "identity", lambda: {"id": "me"})
+    peers = [Peer(host="192.0.2.2", port=8765, id="b", name="B",
+                  state="answering")]
+    monkeypatch.setattr(ui, "PEERS", SimpleNamespace(all=lambda: peers))
+    C.SPECS["ab12cd34ef567890"] = s
+    posted = []
+    out = C.stop("ab12cd34ef567890", post=lambda u, d: posted.append(u),
+                 grace=0)
+    assert posted == ["http://192.0.2.2:8765" + C.STOP_PATH]
+    assert out["told"] == ["B"]
+    C.ENDED.pop("ab12cd34ef567890", None)
+
+
 # --- the stall verdict -------------------------------------------------------
 
 def test_verdict_idle_is_not_stalled_but_busy_and_still_is(monkeypatch):
@@ -411,12 +461,18 @@ def two_pages(tmp_path, monkeypatch):
     env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "B")}
     page_b = subprocess.Popen(
         [sys.executable, str(HERE / "cluster_fake_page.py"), str(ui_b),
-         "bbbb", "B", json.dumps(info_b)], env=env,
+         "bbbb", "B", json.dumps(info_b), "aaaa", f"127.0.0.1:{ui_a}"],
+        env=env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     assert "up" in page_b.stdout.readline()
     peer = SimpleNamespace(id="bbbb", name="B", host="127.0.0.1",
                            key=f"127.0.0.1:{ui_b}", state="answering",
                            link="thunderbolt", node={"cluster": info_b})
+    from knurlogic.cluster.peers import Peer
+    known = Peer(host="127.0.0.1", port=ui_b, id="bbbb", name="B",
+                 state="answering")
+    monkeypatch.setattr(ui, "PEERS", SimpleNamespace(
+        all=lambda: [known], introduce=lambda *a, **k: None))
     serve_port = free_port()
     out = C.launch({"action": "load", "identity": "abc",
                     "nodes": ["aaaa", "bbbb"], "split": "tensor",

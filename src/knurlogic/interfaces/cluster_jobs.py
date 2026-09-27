@@ -361,6 +361,27 @@ def check_spec(spec) -> str:
     nodes = spec.get("nodes")
     if not isinstance(nodes, list) or len(nodes) != spec["world"]:
         return "nodes names one machine per rank"
+    for n in nodes:
+        if not isinstance(n, dict) or not all(
+                isinstance(n.get(k), str) for k in ("name", "id")) or not (
+                n.get("page") is None or isinstance(n.get("page"), str)):
+            return "each node is {name, id, page}"
+    port = spec.get("port", 0)
+    if not isinstance(port, int) or isinstance(port, bool) \
+            or not 0 <= port <= 65535:
+        return "port is 0..65535"
+    for k in ("working_set_gib", "bandwidth_gbs"):
+        v = spec.get(k, 0)
+        if v is None:
+            continue
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
+            return f"{k} is a number >= 0"
+    tune = spec.get("tune")
+    if tune is not None and tune not in ("safe", "balanced", "fast"):
+        return "tune is safe|balanced|fast"
+    sets = spec.get("sets")
+    if sets is not None and not isinstance(sets, dict):
+        return "sets is an object"
     lay = spec.get("layers") or []
     if not isinstance(lay, list) or (lay and len(lay) != spec["world"]):
         return "layers is one count per rank"
@@ -395,6 +416,12 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                             f": every rank runs the same build")
             if k == "mlx":
                 break           # the build names mlx too; say it once
+    from knurlogic.interfaces import ui
+    ok_sets, bad_sets = ui.clean_sets(spec.get("sets") or {})
+    if bad_sets:
+        refusals.append(f"settings a rank does not take: "
+                        f"{', '.join(bad_sets)}")
+    spec = dict(spec, sets=ok_sets)
     rank, world = spec["rank"], spec["world"]
     try:
         sh = (shape or shape_of)(path, world, spec["split"])
@@ -632,11 +659,17 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     if propagate and spec:
         from knurlogic.machine import identity
         me = identity.identity().get("id")
+        known = _peer_pages()
         for n in spec.get("nodes") or []:
-            if n.get("id") == me or not n.get("page"):
+            if n.get("id") == me:
+                continue
+            # the address is this page's own record of that peer, never the
+            # spec's: a prepare body cannot aim this page's stop elsewhere
+            page = known.get(str(n.get("id") or ""))
+            if not page:
                 continue
             try:
-                (post or _post)(f"http://{n['page']}{STOP_PATH}",
+                (post or _post)(f"http://{page}{STOP_PATH}",
                                 {"job": job, "reason": reason})
                 told.append(n.get("name"))
             except Exception:
@@ -644,6 +677,18 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     return {"stopped": job, "ranks_here": sorted(v["rank"] for v in
                                                  mine.values()),
             "killed": killed, "told": told, "reason": reason}
+
+
+def _peer_pages() -> dict:
+    """{peer id: page address} from this page's PEERS store (an answering
+    record first)."""
+    from knurlogic.interfaces import ui
+    out = {}
+    peers = ui.PEERS.all() if ui.PEERS else []
+    for p in sorted(peers, key=lambda p: p.state == "answering"):
+        if getattr(p, "id", ""):
+            out[p.id] = p.key
+    return out
 
 
 def watch_once(now: float | None = None) -> list:
