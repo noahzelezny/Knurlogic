@@ -116,6 +116,25 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         if ring.get("decode_chunk"):
             overrides["VQ_DECODE_CHUNK"] = str(int(ring["decode_chunk"]))
 
+    # The model's own launch settings (MTP, its controller, KV precision):
+    # read before the resolver, since the KV bits change what the context
+    # costs, and refused here with the reason rather than at load.
+    from knurlogic.tuning import settings as S
+    from knurlogic.tuning.resolve import kv_refusal
+    try:
+        launch = S.engine_settings({k: v for k, v in (overrides or {}).items()
+                                    if k in S.MODEL_KNOBS})
+    except ValueError as e:
+        print(f"REFUSING: {e}", file=sys.stderr)
+        return 2
+    kv_bits = launch.get("kv_bits")
+    why = kv_refusal(a, kv_bits)
+    if why:
+        print(f"REFUSING: {why}", file=sys.stderr)
+        return 2
+    if launch.get("mtp") is False:
+        draft = False
+
     ws = int(working_set_gib * GIB)
     if ws == 0:
         b = wired.load_budget()
@@ -130,7 +149,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print("\n" + wired.render(adv) + "\n")
     # a rank holds its share, not the artifact: judged against the whole
     # 115 GiB, every rank of a 397B split warned it "does not fit this box"
-    r = resolve(a, ws, profile=profile, tune=tune, holds_bytes=share)
+    r = resolve(a, ws, profile=profile, tune=tune, holds_bytes=share,
+                kv_bits=kv_bits)
     # An explicit --set WINS over the resolver. Most of these knobs are read
     # at import and compiled into kernel source, so startup is the only
     # moment they can be chosen at all -- which makes "the resolver decides
@@ -167,7 +187,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
 
     def _resolve_for(ws_bytes, tune_name):
         return resolve(a, ws_bytes, profile=profile, tune=tune_name,
-                       holds_bytes=share)
+                       holds_bytes=share, kv_bits=kv_bits)
 
     # `top` plus `ps` costs about a third of a second, and the page polls
     # status every two. Cached just long enough that a poll is free and a
@@ -251,7 +271,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             prefill_step_size=int(ring["prefill_chunk"]),
             executes_artifact_code=bool(a.model_file),
             split=ring.get("split", "tensor"), pipeline=ring.get("pipeline"),
-            draft=draft)
+            draft=draft, kv_bits=kv_bits)
         return 0
 
     print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)")
@@ -315,9 +335,16 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     head = mtp.find_head(a.path)
     if head is not None and draft:
         print(f"\ndrafting   {head.describe()}")
-        print( "           multi-token prediction on; --no-draft turns it off")
+        print( "           multi-token prediction on"
+              + ("; dynamic (drafts when it measures cheaper)"
+                 if launch.get("mtp_dynamic", True) else
+                 "; every step drafts (KNURLOGIC_MTP_DYNAMIC=off)")
+              + "; KNURLOGIC_MTP=off turns it off")
     elif head is not None:
-        print("\ndrafting   head present, disabled by --no-draft")
+        print("\ndrafting   head present, off (KNURLOGIC_MTP=off or "
+              "--no-draft)")
+    if kv_bits is not None:
+        print(f"kv cache   attention K/V stored at {kv_bits} bits")
 
     # The knobs the ENGINE reads -- argv and a process-global mlx call --
     # from the environment as it finally stands, overrides included.
@@ -446,9 +473,19 @@ def main(argv=None) -> int:
                         "rung changes its outputs.")
     p.add_argument("--no-draft", action="store_true",
                    help="do not use a multi-token-prediction head even if "
-                        "one is packed beside the weights. Troubleshooting: "
-                        "drafting preserves the output distribution, so "
-                        "there is nothing to trade away by leaving it on.")
+                        "one is packed beside the weights (the same as "
+                        "--set KNURLOGIC_MTP=off). Drafting preserves the "
+                        "output distribution.")
+    p.add_argument("--mtp-dynamic", choices=("on", "off"), default=None,
+                   help="on: switch between drafting and plain steps by "
+                        "their measured cost (default); off: draft every "
+                        "step while a head is bound "
+                        "(KNURLOGIC_MTP_DYNAMIC)")
+    p.add_argument("--kv-bits", choices=("bf16", "8", "6", "4"),
+                   default=None,
+                   help="attention KV-cache precision (KNURLOGIC_KV_BITS): "
+                        "bf16 by default; refused for a family whose "
+                        "caches cannot be quantized")
     p.add_argument("--set", action="append", metavar="KEY=VALUE", dest="sets",
                    help="force a setting, beating the resolver. Repeatable. "
                         "Most knobs are read at import, so this is the only "
@@ -529,6 +566,10 @@ def main(argv=None) -> int:
     sets = _parse_sets(a.sets)
     if a.context_length > 0:
         sets["KNURLOGIC_CONTEXT_LENGTH"] = str(a.context_length)
+    if a.mtp_dynamic:
+        sets["KNURLOGIC_MTP_DYNAMIC"] = a.mtp_dynamic
+    if a.kv_bits:
+        sets["KNURLOGIC_KV_BITS"] = a.kv_bits
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile,
                a.tune, sets, draft=not a.no_draft, serving=serving,
                ring=ring)

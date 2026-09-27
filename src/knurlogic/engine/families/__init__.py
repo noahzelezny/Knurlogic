@@ -22,6 +22,9 @@ used, so asking what a family supports imports no mlx. Its shape:
       depends_on      modules whose arithmetic it inherits
       model_types     every config.json spelling that means this module
       prefill_chunk   (width, evidence) measured for it, or absent
+      kv_quant        {"bits": [8, 6, 4], "why": ...} when its attention
+                      K/V may be stored quantized (engine/kvquant.py), or
+                      {"refused": reason}; absent reads as refused
       head            the MTP head, or absent: {names, head, capture,
                       draft_cache, cache_semantics, sidecar_name}
   vision          {"build": "module:attr", "architectures": [...]}, or None
@@ -76,7 +79,7 @@ def manifests() -> list:
 def build_maps() -> dict:
     """The tables the generic engine reads, built from the manifests."""
     arch_for_type, host, depends, prefill = {}, {}, {}, {}
-    vision, heads, thinking = {}, {}, {}
+    vision, heads, thinking, kvq = {}, {}, {}, {}
     for m in manifests():
         for mod, a in m["architectures"].items():
             for t in a["model_types"]:
@@ -89,6 +92,8 @@ def build_maps() -> dict:
                 depends[mod] = list(a["depends_on"])
             if a.get("prefill_chunk"):
                 prefill[mod] = a["prefill_chunk"]
+            if a.get("kv_quant"):
+                kvq[mod] = a["kv_quant"]
             h = a.get("head")
             if h:
                 spec = {k: v for k, v in h.items() if k != "names"}
@@ -106,7 +111,8 @@ def build_maps() -> dict:
                 vision[mod] = v["build"]
     return {"arch_for_model_type": arch_for_type, "arch_host": host,
             "arch_depends_on": depends, "prefill_chunk": prefill,
-            "vision": vision, "heads": heads, "thinking": thinking}
+            "vision": vision, "heads": heads, "thinking": thinking,
+            "kv_quant": kvq}
 
 
 def architecture_dir(family: str) -> Path:
