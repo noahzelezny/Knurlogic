@@ -294,9 +294,10 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
     assert s._make_room(1024) == "full" and s.cache.nbytes == 4 * GIB
     # 3072 x2 = ~6.1 GiB: the cache gives up what it takes, still full
     assert s._make_room(3072) == "full" and s.cache.nbytes < 4 * GIB
-    # 7000 tokens: twice (13.8) never fits, once (6.9) does once the cache
-    # is gone: lean
-    assert s._make_room(7000) == "lean" and s.cache.nbytes == 0
+    # 7000 tokens: twice (13.8) never fits, so nothing is evicted for it;
+    # once (6.9) does with the cache giving up only what that takes: lean
+    held = s.cache.nbytes
+    assert s._make_room(7000) == "lean" and 0 < s.cache.nbytes < held
     # 16000 tokens do not fit at all: with a row running it waits ...
     s._rows = {1: S._Row(S.Job(P.ChatRequest(), P.PromptArgs()), None, [])}
     with pytest.raises(S._Wait):
@@ -305,6 +306,52 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
     s._rows = {}
     with pytest.raises(S.OutOfMemory, match="16000 tokens"):
         s._make_room(16000)
+
+
+def test_one_length_prices_a_hybrids_fixed_state_once():
+    """Short runs alone: the recurrent layers (cannot trim) are fixed state,
+    not bytes per token -- the ratio at one length priced a 24k prompt at
+    4x its measured cache and refused it (GLM-5.3 Flash, drafting, M4)."""
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
+
+    class Rec:                                     # deltanet: 512 MiB
+        nbytes = 512 * 2**20
+        def is_trimmable(self): return False
+
+    class KV:
+        def __init__(self, n): self.nbytes = n * 2**10
+        def is_trimmable(self): return True
+
+    s._learn(list(range(1000)), [Rec(), KV(1000)])
+    assert s._kv == (512 * 2**20, 2**10)
+    assert s._cost(24000, 1) == 512 * 2**20 + 24000 * 2**10
+
+
+def test_a_cache_that_could_never_make_room_is_not_evicted():
+    """Two copies that would not fit with the prompt cache empty evict
+    nothing: the lean admission that follows keeps the entries it (or the
+    next request) could hit."""
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+
+    class Cache:
+        nbytes = 1 * GIB
+
+        def trim_to(self, n):
+            mem["active"] -= self.nbytes - n
+            self.nbytes = n
+
+    mem = {"active": 97 * GIB}
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
+    s._spike = 4 * GIB                             # limit 100: 3 GiB free
+    s.cache = Cache()
+    s._active = lambda: mem["active"]
+    s._release = lambda: None
+    s._kv = (0.0, float(2**20))                    # 1 MiB per token
+    assert s._make_room(2500) == "lean"            # 2x5 > 3+1; 2.5 <= 3
+    assert s.cache.nbytes == 1 * GIB
 
 
 def test_the_step_margin_is_measured_not_published():
