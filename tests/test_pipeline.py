@@ -67,10 +67,30 @@ def test_shares_are_deterministic_and_ties_go_to_the_lower_rank():
 
 
 def test_uneven_layers_are_checked_exactly():
-    # the average says 2 + 2 fits; the real last two layers do not
+    # the average says 2 + 2; the real last two layers (6 GiB) do not fit
+    # a 5 GiB rank, so the cut goes by bytes: 1+1+3 and 3
     per = [1 * GIB, 1 * GIB, 3 * GIB, 3 * GIB]
+    s = R.pipeline_shares(per, _ranks(9, 9))
+    assert s["bounds"] == [(3, 4), (0, 3)] and s["layers"] == [1, 3]
+    assert s["bytes"] == [3 * GIB, 5 * GIB]
+    # and when no contiguous cut fits, the count split's arithmetic is said
     with pytest.raises(ValueError, match="layers 2..3 are 6.0 GiB"):
-        R.pipeline_shares(per, _ranks(9, 9))
+        R.pipeline_shares(per, _ranks(8, 8))
+
+
+def test_one_huge_layer_is_placed_by_bytes_not_by_count():
+    # Qwen3.8-Flash-Next-6bit: 48 layers of 1.96 GiB, and layer 1 also
+    # holds a 41.7 GiB n-gram embedding. By count the M3 (rank 1, first
+    # layers) got 18 layers = 79 GiB against 72.8 it holds, and the model
+    # was refused though it fits the pair with room
+    per = [int(1.96 * GIB)] * 48
+    per[1] += int(41.75 * GIB)
+    s = R.pipeline_shares(per, _ranks(120, 84), other_bytes=GIB)
+    assert sum(s["layers"]) == 48 and s["bounds"][1][0] == 0
+    caps = [120 - 1 - R.step_margin(int(120 * GIB)) / GIB,
+            84 - 1 - R.step_margin(int(84 * GIB)) / GIB]
+    assert all(b / GIB <= c for b, c in zip(s["bytes"], caps))
+    assert s["bounds"][0][1] == 48
 
 
 def test_layer_bytes_keep_the_head_and_the_rest_out_of_the_layers():
