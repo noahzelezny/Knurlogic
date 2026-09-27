@@ -628,8 +628,9 @@ def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
         return 413, {"error": "a launch request is small"}
     try:
         req = json.loads(body or b"")
-    except ValueError:
-        req = None
+    except ValueError as e:
+        return 400, {"error": f"the body must be a JSON object: not JSON "
+                              f"({e})"}
     if not isinstance(req, dict):
         return 400, {"error": "the body must be a JSON object"}
     if any(k in req for k in PATH_KEYS):
