@@ -924,7 +924,7 @@
       <!-- Laid out like the picker: two sections down the side, CLUSTER
            (a tab per machine: its memory, wired limit and knurlogic
            allowance) and MODELS (a tab per running model, whichever machine
-           runs it, and Next launch) -- a model's knobs are the model's, and
+           runs it) -- a model's knobs are the model's, and
            which machine it sits on does not change them. The tabs across the
            top are the picked section's, starting where the side ends. -->
       <section class="panel" id="settings">
@@ -1082,7 +1082,7 @@ function infoHTML(text, cls){
 }
 // What the two reach words mean, for their hover.
 const REACH={live:'applies to the running model immediately',
-  restart:'read when the model loads -- the change is used the next time it launches'};
+  restart:'read when the model loads: the new value takes effect when this model is next launched from this page'};
 // "4.0" running is the step 4: compared as numbers where both are numbers
 const sameVal=(a,b)=>a!=null&&b!=null&&(String(a)===String(b)||
   (String(a).trim()!==''&&String(b).trim()!==''&&+a===+b));
@@ -1103,20 +1103,19 @@ function saveLaunchSets(model, sets){
   try{ localStorage.setItem(LSKEY, JSON.stringify(all)) }catch(e){}
 }
 
-// One knob, one line: NAME (i) live|on restart, and its control on the
+// One knob, one line: NAME (i) live|needs reload, and its control on the
 // right. `c` says whose it is: g (the staging group), where (the model
-// server, '' this page's own, null for a model not running), model (its
+// server, '' this page's own), model (its
 // name, for launch settings), label (how the confirm lists it) and url
 // (a setting of this page's own, POSTed there as {gib}: the allowance).
-// Nothing running means nothing is live: every knob waits for a launch.
 function knobHTML(k, c){
   const cur=k.running??k.would_be??k.value;
-  const reach=c.where==null ? 'restart' : k.reach;
+  const reach=k.reach;
   const next=reach==='restart' ? launchSets(c.model)[k.name] : undefined;
   const from=next??cur, st=stagedVal(c.g,k.name), sel=st??from;
   const tag=reach==='live'
     ? `<span class="kw live" title="${esc(REACH.live)}">live</span>`
-    : `<span class="kw rst" title="${esc(REACH.restart)}">on restart</span>`;
+    : `<span class="kw rst" title="${esc(REACH.restart)}">needs reload</span>`;
   const about=[k.what,k.why].filter(Boolean).map(esc).join(' — ')+
     (k.reach_why?`<br><span style="color:var(--faint)">${esc(k.reach_why)}</span>`:'');
   // the measured steps, stopping where the headroom does; else a field
@@ -1162,7 +1161,7 @@ document.addEventListener('click', e=>{
 // fires on every arrow key would otherwise change a running model by
 // accident. Closing the overlay with something staged asks once -- Apply,
 // Discard, Keep editing -- and Apply is the only thing that sends. Live
-// knobs go to their server; on-restart ones become that model's launch
+// knobs go to their server; needs-reload ones become that model's launch
 // settings and nothing is restarted.
 const STAGED=new Map();       // g -> {label, where, model, knobs:{name:{from,to,reach,cur}}}
 function stagedVal(g,name){ const x=STAGED.get(g); return x&&x.knobs[name]?x.knobs[name].to:undefined }
@@ -1203,9 +1202,10 @@ const STAGEPOP=(()=>{
     const n=stagedCount(), now=part('live'), later=part('restart');
     pop.innerHTML=`<b>${n} change${n===1?'':'s'}</b>
       ${now?`<div class="sh">apply now</div>${now}`:''}
-      ${later?`<div class="sh">on its next launch from this page</div>${later}
+      ${later?`<div class="sh">needs a reload</div>${later}
         <div class="msg">Saved as that model's launch settings; it keeps
-        running as it is until it is launched again. Nothing is restarted.</div>`:''}
+        running as it is until it is next launched from this page; this
+        does not restart it.</div>`:''}
       <div class="ctl"><button class="mini" data-s="keep">Keep editing</button>
       <button class="mini" data-s="discard">Discard</button>
       <button class="go" data-s="apply">${now?'Apply':'Save'}</button></div>`;
@@ -1370,9 +1370,8 @@ function renderSetTabs(){
     ? machines().map(x=>({id:x.id, name:x.name, title:x.error?'not answering':
         (x.page||location.host).replace(/^https?:\/\//,'')}))
     : allModels().map(r=>({id:'m:'+r.where, name:shortName(r.name), sub:r.mach.name,
-        title:r.name+' · '+(r.where||location.host).replace(/^https?:\/\//,'')}))
-        .concat([{id:'launch', name:'Next launch'}]);
-  if(!tabs.some(t=>t.id===STAB)) STAB=tabs[0].id;
+        title:r.name+' · '+(r.where||location.host).replace(/^https?:\/\//,'')}));
+  if(!tabs.some(t=>t.id===STAB)) STAB=tabs.length?tabs[0].id:'';
   $('setmach').innerHTML=tabs.map(t=>`<button data-t="${esc(t.id)}"
     aria-pressed="${t.id===STAB}" title="${esc(t.title||'')}">${esc(t.name)}${
     t.sub?`<small>${esc(t.sub)}</small>`:''}</button>`).join('');
@@ -1456,28 +1455,15 @@ async function showMachine(m){
   el.querySelector('.mallow').innerHTML=allowHTML(doc&&doc.allowance, m, own);
   if(own) wireWired();
 }
-// A models tab: one running model's knobs (the machine is only a label), or
-// Next launch -- this page's picked model; a peer's launches are made on its
-// own page.
+// A models tab: one running model's knobs (the machine is only a label).
+// Settings for a launch are made under Load model's advanced options.
 async function showModel(){
   const tab=SSEC+'|'+STAB, el=$('machbody');
   el.dataset.t='';
-  if(STAB==='launch'){
-    // keyed as Launch keys it (the picked model's name), so both agree
-    const pv=PREVIEW, name=pv&&((SEL&&SEL.name)||(pv.artifact&&pv.artifact.name));
-    const me=machines()[0];
-    el.innerHTML = name && (pv.knobs||[]).length
-      ? `<div class="sgrp"><div class="shd">${esc(name)}<span class="ro">picked under
-          Load model · how it would launch at ${esc(pv.tune)}</span></div>
-          ${roomHTML(pv.room)}
-          ${pv.knobs.filter(k=>k.reach!=='no-effect').map(k=>knobHTML(k,
-            {g:'launch:'+name, where:null, model:name, label:me.name+' · '+shortName(name)})).join('')}</div>`
-      : `<div class="msg">Pick a model under Load model to see what it would
-          load with; its knobs are saved here as its launch settings.</div>`;
-    return;
-  }
   const r=allModels().find(x=>'m:'+x.where===STAB);
-  if(!r){ el.innerHTML='<div class="msg">No model is running.</div>'; return }
+  if(!r){ el.innerHTML='<div class="msg">Nothing running -- a model\'s settings '+
+    'appear here once it runs; settings for a launch are in Load model\'s '+
+    'advanced options.</div>'; return }
   el.innerHTML='<div class="msg">reading…</div>';
   const doc=await getJSON(docURL(r.where, TUNES[r.where]?{tune:TUNES[r.where]}:{}));
   if(SSEC+'|'+STAB!==tab) return;
