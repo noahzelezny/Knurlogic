@@ -908,7 +908,9 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
     byte: SSE, prefill keepalives and all. The upstream's status and
     Content-Type go with it; an upstream that cannot be reached is a 502 --
     or a 503 `cluster_failed` with the job's stop reason when `base` is a
-    cluster job's rank 0 (dead, or its job stopped)."""
+    cluster job's rank 0 (dead, or its job stopped). When such a rank 0
+    dies mid-way through an event stream, one `data: {"error": ...
+    cluster_failed}` event goes out before the stream closes."""
     import urllib.error
     import urllib.request
     req = urllib.request.Request(url, data=body,
@@ -934,13 +936,30 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
     handler.send_header("Connection", "close")
     handler.end_headers()
     handler.close_connection = True
+    sse = "text/event-stream" in (ctype or "")
+    tail, cut = b"", False
     try:
         while True:
-            chunk = up.read1(8192) if hasattr(up, "read1") else up.read(8192)
+            try:
+                chunk = (up.read1(8192) if hasattr(up, "read1")
+                         else up.read(8192))
+            except Exception:
+                cut = True          # the upstream died mid-answer
+                break
             if not chunk:
                 break
+            tail = (tail + chunk)[-64:]
             handler.wfile.write(chunk)
             handler.wfile.flush()
+        # An event stream that ends without its [DONE] was cut. From a
+        # cluster job's rank 0 the client is told why, as one last event,
+        # instead of a stream that simply stops.
+        if sse and base and code == 200 and (cut or b"[DONE]" not in tail):
+            why = cluster_failure(base)
+            if why:
+                handler.wfile.write(b"data: " + json.dumps(
+                    cluster_failed(why)).encode() + b"\n\n")
+                handler.wfile.flush()
     except (BrokenPipeError, ConnectionResetError):
         pass            # the client stopped listening; nothing to answer
     finally:
