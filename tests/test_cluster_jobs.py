@@ -94,6 +94,27 @@ def test_rdma_device_is_the_one_on_the_peers_subnet():
     assert C._rdma_device(b, a) == "rdma_en2"
 
 
+def test_two_cables_both_ends_on_one_subnet():
+    # the M3/M4 rig: two cables, 10.0.0.x (M3 en4 - M4 en3) and 10.0.1.x
+    # (M3 en7 - M4 en2). Each side picking "a device on the peer's subnet"
+    # took M4 en2 and M3 en4 -- two different cables; jaccl failed RTR.
+    m3 = {"name": "M3", "thunderbolt": [{"iface": "en4", "ip": "10.0.0.1"},
+                                        {"iface": "en7", "ip": "10.0.1.1"}],
+          "rdma": {"active": ["rdma_en4", "rdma_en7"]}}
+    m4 = {"name": "M4", "thunderbolt": [{"iface": "en2", "ip": "10.0.1.2"},
+                                        {"iface": "en3", "ip": "10.0.0.2"}],
+          "rdma": {"active": ["rdma_en2", "rdma_en3"]}}
+    assert C._rdma_device(m4, m3) == "rdma_en3"
+    assert C._rdma_device(m3, m4) == "rdma_en4"
+    assert C._ring_ips([m4, m3]) == ["10.0.0.2", "10.0.0.1"]
+    assert C._ring_ips([m4, m3], rdma=True) == ["10.0.0.2", "10.0.0.1"]
+    # RDMA down on 10.0.0.x at one end: both move to 10.0.1.x
+    m4d = {**m4, "rdma": {"active": ["rdma_en2"]}}
+    assert C._rdma_device(m4d, m3) == "rdma_en2"
+    assert C._rdma_device(m3, m4d) == "rdma_en7"
+    assert C._ring_ips([m4d, m3], rdma=True) == ["10.0.1.2", "10.0.1.1"]
+
+
 # --- RDMA probe --------------------------------------------------------------
 
 DEVINFO = """hca_id:\trdma_en2
@@ -450,3 +471,11 @@ def test_peer_cluster_routes_are_gated_like_peer_loaded(two_pages):
     code, doc = C.peer_route(C.PREPARE_PATH, json.dumps(
         {**spec(), "path": "/etc"}).encode())
     assert code == 400 and "identity" in doc["error"]
+
+
+def test_a_ranks_working_set_is_the_wired_limit_not_the_ram():
+    gib = 1 << 30
+    assert C.gpu_working_set(96 * gib, 84 * gib) == 84 * gib
+    assert C.gpu_working_set(96 * gib, 0) == 96 * gib
+    assert C.gpu_working_set(0, 84 * gib) == 84 * gib
+    assert C.gpu_working_set(0, 0) == 0
