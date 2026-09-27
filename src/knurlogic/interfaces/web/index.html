@@ -896,29 +896,11 @@
         <button id="openpick" class="pickbtn">
           <span id="pickname">choose a model</span>
           <span id="picksize" class="ro"></span></button>
-        <!-- Tune, port and launch knobs live in Settings; kept here hidden
-             so launch still reads their defaults. -->
-        <details class="more" id="loadopts" hidden>
-          <summary>advanced options</summary>
-          <div class="opt">
-            <div class="optlab">Tune</div>
-            <span class="seg" id="loadtune"></span>
-          </div>
-          <div class="opt">
-            <div class="optlab">Port</div>
-            <input id="loadport" type="number" min="1" max="65535">
-          </div>
-          <!-- Settings that can only be chosen HERE. Most of these are read
-               at import and compiled into kernel source, so a running server
-               cannot be told about them: launch is the moment or never. -->
-          <div class="optlab" style="margin-top:14px">Settings for this launch</div>
-          <div id="loadknobs"></div>
-        </details>
         <div id="multiopts" hidden>
           <div class="opt"><div class="optlab">Sharding</div>
             <span class="seg" data-k="shard"><button data-v="tensor" aria-pressed="true">Tensor</button><button data-v="pipeline" aria-pressed="false">Pipeline</button></span></div>
           <div class="opt"><div class="optlab">Interconnect</div>
-            <span class="seg" data-k="link"><button data-v="tcp" aria-pressed="true">TCP/IP</button><button data-v="rdma" aria-pressed="false">RDMA</button></span></div>
+            <span class="seg" data-k="link"><button data-v="ring" aria-pressed="true">TCP/IP</button><button data-v="jaccl" aria-pressed="false">RDMA</button></span></div>
         </div>
         <div id="pickinfo"></div>
         <button class="go" id="launch" style="width:100%;margin-top:10px">
@@ -1331,7 +1313,7 @@ const STAGEPOP=(()=>{
     pop.innerHTML=`<b>Done</b>${out.join('')}
       <div class="ctl"><button class="go" data-s="done">Close</button></div>`;
     pop.querySelector('[data-s=done]').focus();
-    if(SEL) { SETS=launchSets(baseKey(SEL.name)); renderLoadKnobs() }
+    if(SEL) SETS=launchSets(baseKey(SEL.name));
     // the allowance moves what fits and the room each model leaves
     if(out.length){ loadSettings(ASK); loadModels() }
   }
@@ -2202,47 +2184,17 @@ async function loadModels(){
   pickInfo();
 }
 // What this artifact WOULD resolve to, fetched when the selection changes.
-// The restart-only knobs are editable here and nowhere else: once a model is
-// up they are facts. Anything left alone is not sent, so the resolver keeps
-// its answer -- only what you actually moved becomes an override.
+// What a model would launch with, asked for its room against the tune; the
+// launch settings themselves (SETS) are edited in Settings.
 let PREVIEW=null, SETS={};
 async function loadPreview(){
-  const m=SEL; if(!m){ PREVIEW=null; $('loadknobs').innerHTML=''; return }
+  const m=SEL; if(!m){ PREVIEW=null; return }
   const q=new URLSearchParams({artifact:m.path,
                                tune:window.LOADTUNE||'balanced'});
   try{ PREVIEW=await (await fetch('/settings.json?'+q)).json() }
   catch(e){ PREVIEW=null }
   // the preview's room is asked against the tune picked, and fresher
   const pr=$('pickroom'); if(pr && PREVIEW && PREVIEW.room) pr.innerHTML=roomHTML(PREVIEW.room);
-  renderLoadKnobs();
-}
-function renderLoadKnobs(){
-  const el=$('loadknobs');
-  const ks=(PREVIEW&&PREVIEW.knobs)||[];
-  if(!ks.length){ el.innerHTML='<div class="msg">nothing to set</div>'; return }
-  el.innerHTML=ks.map(k=>{
-    const v=(k.name in SETS)?SETS[k.name]:k.value;
-    const ctl=k.values&&k.values.length
-      ? `<select data-k="${esc(k.name)}">${k.values.map(o=>
-          `<option ${String(o)===String(v)?'selected':''}>${o}</option>`).join('')}</select>`
-      : `<input data-k="${esc(k.name)}" value="${esc(v)}">`;
-    return `<div class="lk ${k.name in SETS?'set':''}"
-      title="${esc((k.what||'')+(k.why?' — '+k.why:''))}">
-      <span class="lkn">${esc(k.name.replace(/^(VQ|VQLAB|KNURLOGIC)_/,''))}</span>
-      ${ctl}<span class="rst" data-r="${esc(k.name)}">↺</span></div>`;
-  }).join('');
-  el.querySelectorAll('[data-k]').forEach(c=>c.onchange=()=>{
-    const k=c.dataset.k, was=ks.find(x=>x.name===k);
-    if(String(c.value)===String(was.value)) delete SETS[k];
-    else SETS[k]=String(c.value);
-    // the same store Settings saves "on next launch" into, so both agree
-    if(SEL) saveLaunchSets(baseKey(SEL.name), SETS);
-    renderLoadKnobs();
-  });
-  el.querySelectorAll('[data-r]').forEach(c=>c.onclick=()=>{
-    delete SETS[c.dataset.r]; if(SEL) saveLaunchSets(baseKey(SEL.name), SETS);
-    renderLoadKnobs();
-  });
 }
 
 // What a model that fits leaves to talk in (the server's context_room):
@@ -2286,7 +2238,15 @@ function pickInfo(){
   SETS=launchSets(baseKey(m.name)); loadPreview();
 }
 function launchBlock(ns){
-  if(ns.length>1) return 'loading across machines comes after 0.1.0';
+  if(ns.length>1){
+    for(const n of ns){
+      if(isLocal(n)) continue;
+      if(!n.id || n.state!=='answering') return `${n.node} is not answering`;
+      if(SEL && !onNode(n, SEL)) return `not on ${n.node}`;
+    }
+    if(MULTI.link==='jaccl'){ const why=rdmaWhy(ns); if(why) return why }
+    return '';
+  }
   if(ns.length===1 && !isLocal(ns[0])){
     const n=ns[0];
     if(!n.id || n.state!=='answering') return `${n.node} is not answering`;
@@ -2302,27 +2262,65 @@ function launchBlock(ns){
 const PEERMODELS={};   // node id -> Set of identities, once read
 const launchPeer=()=>{ const ns=selNodes();
   return ns.length===1 && !isLocal(ns[0]) ? ns[0] : null };
-function onPeer(m){
-  const n=launchPeer(); if(!n) return true;
+function onNode(n, m){
   const have=PEERMODELS[n.id]; return !have || have.has(m.identity);
 }
+// every picked peer must hold the model: one of them missing it greys it
+function onPeer(m){
+  return selNodes().filter(n=>!isLocal(n)).every(n=>onNode(n, m));
+}
 async function loadPeerModels(){
-  const n=launchPeer(); if(!n || !n.address || PEERMODELS[n.id]) return;
-  const d=await getJSON(peekURL('http://'+n.address,'/models.json'));
-  if(d.error || !Array.isArray(d.models)) return;
-  PEERMODELS[n.id]=new Set(d.models.map(m=>m.identity).filter(Boolean));
-  pickInfo(); if(!$('picker').hidden) renderPicker();
+  const todo=selNodes().filter(n=>!isLocal(n) && n.address && !PEERMODELS[n.id]);
+  for(const n of todo){
+    const d=await getJSON(peekURL('http://'+n.address,'/models.json'));
+    if(d.error || !Array.isArray(d.models)) continue;
+    PEERMODELS[n.id]=new Set(d.models.map(m=>m.identity).filter(Boolean));
+  }
+  if(todo.length){ pickInfo(); if(!$('picker').hidden) renderPicker() }
+}
+// RDMA (jaccl) needs it up on every picked machine: each machine's status
+// says why not (cluster/links.rdma), and the button is greyed with that
+function rdmaWhy(ns){
+  if(ns.length!==2) return 'RDMA joins exactly two machines; use TCP/IP';
+  for(const n of ns){
+    const r=(n.cluster||{}).rdma;
+    if(!r) return `${n.node} does not report RDMA (update knurlogic there)`;
+    if(!r.available) return `RDMA on ${n.node}: ${r.reason}`;
+  }
+  return '';
 }
 // A pick changed what "fits" means: the rail and an open picker follow.
 // Sharding and interconnect for a multi-machine launch: page state only.
-const MULTI={shard:'tensor', link:'tcp'};
+const MULTI={shard:'tensor', link:'ring'};
 $('multiopts').querySelectorAll('.seg').forEach(g=>
   g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    if(b.disabled) return;
     MULTI[g.dataset.k]=b.dataset.v;
     g.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed', x===b));
+    pickInfo();
   }));
+// RDMA greyed, with the reason on hover, when a picked machine cannot
+function multiState(){
+  const ns=selNodes(), b=$('multiopts').querySelector('[data-v=jaccl]');
+  const why=ns.length>1 ? rdmaWhy(ns) : '';
+  b.disabled=!!why; b.title=why||'RDMA over Thunderbolt (jaccl)';
+  if(why && MULTI.link==='jaccl'){
+    MULTI.link='ring';
+    b.parentNode.querySelectorAll('button').forEach(x=>
+      x.setAttribute('aria-pressed', x.dataset.v==='ring'));
+  }
+}
+// What a cluster launch placed where, as the coordinator decided it
+function placementHTML(p){
+  if(!p) return '';
+  return `<div class="room">leader ${esc(p.leader)} · ${esc(p.split)}</div>`+
+    (p.shares||[]).map(s=>`<div class="note">rank ${s.rank} ${esc(s.machine)}: ${
+      s.layers!=null?`${s.layers} layers (${s.bounds[0]}..${s.bounds[1]-1}), `:''}${gb(s.bytes)}</div>`).join('')+
+    `<div class="note">${esc(p.reason)}</div>`;
+}
 function nodeSelChanged(){
   $('multiopts').hidden=selNodes().length<2;
+  multiState();
   loadPeerModels();
   pickInfo();
   if(!$('picker').hidden) renderPicker();
@@ -2337,15 +2335,17 @@ $('psearch').oninput=e=>{ QUERY=e.target.value; renderPicker() };
 $('launch').onclick=async()=>{
   const m=SEL; if(!m || launchBlock(selNodes())) return;
   const b=$('launch'); b.disabled=true; b.textContent='Launching…';
-  const pn=launchPeer();
-  const j=await act(pn ? {action:'load', node:pn.id, identity:m.identity,
-                     port:+$('loadport').value||undefined,
-                     tune:(window.LOADTUNE||'balanced'), sets:SETS}
-    : {action:'load', target:m.path,
-                     port:+$('loadport').value||undefined,
-                     tune:(window.LOADTUNE||'balanced'),
-                     sets:SETS});
+  const pn=launchPeer(), ns=selNodes();
+  const tune=window.LOADTUNE||'balanced';
+  const j=await act(ns.length>1
+    ? {action:'load', identity:m.identity, nodes:ns.map(n=>n.id),
+       split:MULTI.shard, link:MULTI.link, tune, sets:SETS}
+    : pn ? {action:'load', node:pn.id, identity:m.identity, tune, sets:SETS}
+    : {action:'load', target:m.path, tune, sets:SETS});
   b.textContent='Launch'; b.disabled=false;
+  // across machines: where it went (or would have), from the coordinator
+  if(j.placement) $('pickinfo').insertAdjacentHTML('beforeend',
+    `<div class="placement">${placementHTML(j.placement)}</div>`);
   if(!j.error && !j.refused){ tick(); loadModels(); pushRecent(m.path);
     const st=(j.settings||{}).needs_restart||{};
     const n=Object.keys(st).length;
@@ -2354,23 +2354,7 @@ $('launch').onclick=async()=>{
         `${k}  wants ${v.wanted}, running ${v.running}`).join('\n'));
   }
 };
-// The tune a model is launched WITH, which is a load-time decision: the
-// eight kernel flags are read at import, so this is the one moment they can
-// be chosen at all.
-(()=>{
-  const el=$('loadtune'); if(!el) return;
-  window.LOADTUNE='balanced';
-  el.innerHTML=['safe','balanced','fast'].map(t=>
-    `<button data-t="${t}" aria-pressed="${t==='balanced'}">${t}</button>`).join('');
-  el.querySelectorAll('button').forEach(b=>b.onclick=()=>{
-    window.LOADTUNE=b.dataset.t;
-    el.querySelectorAll('button').forEach(x=>
-      x.setAttribute('aria-pressed', x===b));
-    // A tune is a different set of resolved values, so the preview has to
-    // be re-asked; anything explicitly overridden stays overridden.
-    loadPreview();
-  });
-})();
+window.LOADTUNE='balanced';
 
 // --- what is actually in memory, whoever put it there ---------------------
 // exo's models, ollama's models and ours in one list. A machine has one pool
@@ -2484,6 +2468,9 @@ async function loadResident(){
       <div class="s">${[
         r.bytes_resident?gb(r.bytes_resident)
           :(r.state==='offered'?'':'size not reported'),
+        r.cluster?`cluster · ${r.cluster.split} over ${
+          r.cluster.link==='jaccl'?'RDMA':'TCP/IP'} · ${(r.cluster.machines||[]).join(' + ')}${
+          r.cluster.phase&&r.cluster.phase!=='ready'?' · '+r.cluster.phase:''}`:'',
         r.detail, r.state==='loaded'?'':r.state]
         .filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
         .map(esc).join(' · ')}</div>
@@ -2503,6 +2490,13 @@ async function loadResident(){
             >not answering</div>`:none);
     i+=n;
   }
+  // a cluster job that stopped says why, on every page that ran a rank
+  const ended=[...(d.jobs||[]), ...peers.flatMap(m=>m.jobs||[])]
+    .filter(j=>j.phase==='stopped');
+  const seen=new Set();
+  for(const j of ended){ if(seen.has(j.job)) continue; seen.add(j.job);
+    h+=`<div class="s ro peererr" title="${esc(j.reason)}">cluster job on ${
+      esc((j.machines||[]).join(' + '))} stopped: ${esc(j.reason)}</div>` }
   el.innerHTML=h;
   // What can be chatted with right now, for the chat bar's label: a chat
   // whose model has gone away no longer has a selection to name.

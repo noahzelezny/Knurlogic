@@ -735,8 +735,11 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
                     rows.append(dict(r, machine=p.name or p.host,
                                      where=_peer_where(r.get("where"),
                                                        p.host)))
+            js = [clean(j) for j in doc.get("jobs") or []
+                  if isinstance(j, dict)]
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
-                          "id": getattr(p, "id", ""), "resident": rows}
+                          "id": getattr(p, "id", ""), "resident": rows,
+                          "jobs": js}
         except Exception as e:
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
                           "resident": [],
