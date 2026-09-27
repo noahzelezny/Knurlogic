@@ -185,6 +185,28 @@ def test_relay_refuses_transfer_encoding(two):
     assert not seen
 
 
+@pytest.mark.parametrize("path", ["/peer/cluster/prepare",
+                                  "/peer/cluster/stop", ui.PEER_LOAD_PATH])
+def test_peer_cluster_and_load_refuse_transfer_encoding(two, monkeypatch,
+                                                       path):
+    from knurlogic.interfaces import cluster_jobs
+    _, peer, _ = two
+    called = []
+    monkeypatch.setattr(cluster_jobs, "peer_route",
+                        lambda *a: called.append(a) or (200, {}))
+    monkeypatch.setattr(ui, "peer_launch",
+                        lambda *a, **k: called.append(a) or (200, {}))
+    host, port = peer.removeprefix("http://").split(":")
+    c = http.client.HTTPConnection(host, int(port), timeout=5)
+    c.putrequest("POST", path)
+    c.putheader("Content-Type", "application/json")
+    c.putheader("Transfer-Encoding", "chunked")
+    c.endheaders()
+    c.send(b"5\r\n{\"a\":\r\n0\r\n\r\n")
+    assert c.getresponse().status == 411
+    assert not called
+
+
 def test_relay_gate_refuses_other_networks():
     class No:
         def allows(self, ip):
