@@ -321,23 +321,18 @@
     by side under it */
  .chd{font-size:12.5px;margin:0 0 4px}
  .chd .ro{color:var(--faint);font-size:10.5px;margin-left:8px}
- .mcols{display:grid;grid-template-columns:1fr 1fr;gap:0 22px;align-items:start}
- .mcols .allow{margin-top:0}
- /* Models: the base models down a list, like the picker's rows, and the
-    picked one's settings beside it, each scrolling on its own */
- #machbody.models{padding:0;overflow:hidden;display:grid;
-   grid-template-columns:230px 1fr}
- .blist{border-right:1px solid var(--line);overflow:auto;min-height:0}
- .blist .var{padding:7px 12px}
- .blist .vs.on{color:var(--acc)}
- .bset{overflow:auto;padding:14px 18px 18px;min-width:0;min-height:0}
+ /* the tab's list down the side, the picker's rail made wide enough for a
+    model's name; each item's second line says where it runs or what it has */
+ #settings .pickbody{grid-template-columns:230px 1fr}
+ #setlist .fam{text-transform:none;letter-spacing:.02em;overflow-wrap:anywhere}
+ #setlist .fam small.on{color:var(--acc)}
+ #setlist .sect{padding:8px 12px}
  .runs{margin:2px 0 10px;display:flex;flex-direction:column;gap:3px;
    align-items:flex-start}
  .runs button{padding:2px 8px;font-size:10.5px}
  .allow{margin-top:18px}
  .room{font-size:11px;color:var(--dim);margin-top:4px}
  .room.small{color:var(--warn)}
- #settabs .fam{overflow-wrap:anywhere}
  .mfacts{font-size:11px;color:var(--dim);margin:-4px 0 14px}
  .sbody{overflow:auto;padding:14px 18px 18px;min-width:0}
  .fam small{display:block;text-transform:none;letter-spacing:0;
@@ -939,15 +934,16 @@
       <button id="sheetclose" class="mini">Close</button>
     </div>
     <div class="sheetbody">
-      <!-- Laid out like the picker: two sections down the side. CLUSTER is
-           a row per machine (its memory, wired limit and knurlogic
-           allowance); MODELS is the picker's list of base models, each
-           with its settings -- a model's knobs are the model's, whichever
-           rung of it runs and whichever machine it sits on. -->
+      <!-- Laid out like the picker: CLUSTER | MODELS across the top, the
+           tab's list down the side (the machines; the base models), and the
+           picked one's settings beside it -- a model's knobs are the
+           model's, whichever rung of it runs and whichever machine it sits
+           on. -->
       <section class="panel" id="settings">
         <div class="lab">Settings</div>
+        <div class="pickhd"><span class="seg tabseg" id="settabs"></span></div>
         <div class="pickbody">
-          <div class="fams" id="settabs"></div>
+          <div class="fams" id="setlist"></div>
           <div class="sbody" id="machbody"></div>
         </div>
       </section>
@@ -1390,13 +1386,19 @@ function machModels(m){
 function allModels(){
   return machines().flatMap(m=>machModels(m).map(r=>({...r, mach:m})));
 }
+// the tab and the pick, remembered for this session
+const SKEEP=(()=>{ try{ return JSON.parse(sessionStorage.getItem('kl.settings')||'{}') }catch(e){ return {} } })();
+if(SKEEP.sec) SSEC=SKEEP.sec; if(SKEEP.base) SBASE=SKEEP.base;
+let SMACH=SKEEP.mach||'local';
+function keepSet(){ try{ sessionStorage.setItem('kl.settings',
+  JSON.stringify({sec:SSEC, base:SBASE, mach:SMACH})) }catch(e){} }
 function renderSetTabs(){
   const secs=[{id:'cluster', name:'Cluster'}, {id:'models', name:'Models'}];
-  $('settabs').innerHTML=secs.map(t=>`<div class="fam" data-s="${t.id}"
-    aria-current="${t.id===SSEC}">${t.name}</div>`).join('');
-  $('settabs').querySelectorAll('.fam').forEach(f=>f.onclick=()=>{
+  $('settabs').innerHTML=secs.map(t=>`<button data-s="${t.id}"
+    class="${t.id===SSEC?'on':''}">${t.name}</button>`).join('');
+  $('settabs').querySelectorAll('button').forEach(f=>f.onclick=()=>{
     if(f.dataset.s===SSEC) return;
-    SSEC=f.dataset.s; renderSetTabs(); showSetTab() });
+    SSEC=f.dataset.s; keepSet(); renderSetTabs(); showSetTab() });
 }
 // One base model's settings: its header, where its variants run (or which
 // rung the resolver was asked about), the tunes to preview, a row per knob
@@ -1462,32 +1464,40 @@ function allowHTML(a, m, own){
     url:'/allowance.json', model:'', label:m.name+' · machine'})}
     <div class="msg">${esc(say)}</div></div>`;
 }
-// Cluster: a row per machine, this one first, then each answering peer,
-// all drawn by the same code; only where the data comes from differs. A
-// peer's settings are read through /peek (one GET each) and set on its own
-// page.
+// Cluster: the machines down the side, this one first, then each answering
+// peer, all drawn by the same code; only where the data comes from differs.
+// A peer's settings are read through /peek (one GET) and set on its own page.
 function showCluster(){
-  const el=$('machbody'), seq=++SEQ, ms=machines();
-  el.className='sbody';
-  el.innerHTML=ms.map(m=>{
-    const own=m.id==='local', where=own?location.host:m.page.replace(/^https?:\/\//,'');
-    return `<div class="sgrp" data-m="${esc(m.id)}">
-      <div class="chd">${esc(m.name)}<span class="ro">${esc(where)}${own?' · this machine':
-        m.error?' · not answering':''}</span></div>
-      ${factsHTML(m.node||{})}
-      <div class="mcols"><div class="mwired"><div class="msg">reading…</div></div>
-        <div class="mallow"></div></div>
-      ${own?'':'<div class="msg">Its wired limit and allowance are set on that machine\'s own page.</div>'}
-    </div>`}).join('');
-  ms.forEach(async m=>{
-    const own=m.id==='local';
-    const doc=own ? DOC : await getJSON(peekURL(m.page,'/settings.json'));
-    const row=el.querySelector(`[data-m="${CSS.escape(m.id)}"]`);
-    if(seq!==SEQ || !row) return;
-    row.querySelector('.mwired').innerHTML=wiredHTML(doc, own);
-    row.querySelector('.mallow').innerHTML=allowHTML(doc&&doc.allowance, m, own);
-    if(own) wireWired();
+  const ms=machines();
+  if(!ms.some(m=>m.id===SMACH)) SMACH=ms[0].id;
+  $('setlist').innerHTML=ms.map(m=>`<div class="fam" data-m="${esc(m.id)}"
+    aria-current="${m.id===SMACH}">${esc(m.name)}<small>${m.id==='local'?'this machine':
+      esc(m.id)+(m.error?' · not answering':'')}</small></div>`).join('');
+  $('setlist').querySelectorAll('[data-m]').forEach(v=>v.onclick=()=>{
+    if(v.dataset.m===SMACH) return;
+    SMACH=v.dataset.m; keepSet();
+    $('setlist').querySelectorAll('[data-m]').forEach(x=>x.setAttribute('aria-current', x===v));
+    showMachine(ms.find(m=>m.id===SMACH));
   });
+  keepSet(); showMachine(ms.find(m=>m.id===SMACH));
+}
+async function showMachine(m){
+  const el=$('machbody'), seq=++SEQ, own=m.id==='local';
+  const where=own?location.host:m.page.replace(/^https?:\/\//,'');
+  el.innerHTML=`<div class="sgrp" data-m="${esc(m.id)}">
+    <div class="chd">${esc(m.name)}<span class="ro">${esc(where)}${own?' · this machine':
+      m.error?' · not answering':''}</span></div>
+    ${factsHTML(m.node||{})}
+    <div class="mwired"><div class="msg">reading…</div></div>
+    <div class="mallow"></div>
+    ${own?'':'<div class="msg">Its wired limit and allowance are set on that machine\'s own page.</div>'}
+  </div>`;
+  const doc=own ? DOC : await getJSON(peekURL(m.page,'/settings.json'));
+  const row=el.querySelector(`[data-m="${CSS.escape(m.id)}"]`);
+  if(seq!==SEQ || !row) return;
+  row.querySelector('.mwired').innerHTML=wiredHTML(doc, own);
+  row.querySelector('.mallow').innerHTML=allowHTML(doc&&doc.allowance, m, own);
+  if(own) wireWired();
 }
 // Every base model: the picker's groups over what is on this disk, plus any
 // running on a peer that this disk does not have; the running ones first.
@@ -1502,27 +1512,23 @@ function settingBases(){
 }
 const runsOn=b=>[...new Set(b.runs.map(r=>r.mach.name))].join(', ');
 function showModels(){
-  const el=$('machbody'), bs=settingBases();
-  el.className='sbody models';
+  const bs=settingBases(), L=$('setlist');
   if(!bs.some(b=>b.name===SBASE)) SBASE=bs.length?bs[0].name:'';
-  const row=b=>`<div class="var" data-b="${esc(b.name)}" aria-current="${b.name===SBASE}"
-      title="${esc(b.ms.map(m=>m.name).join('\n'))}">
-      <span class="vn">${esc(b.name)}</span>
-      <span class="vs${b.runs.length?' on':''}">${b.runs.length?'on '+esc(runsOn(b)):
-        b.ms.length+' variant'+(b.ms.length===1?'':'s')}</span></div>`;
+  const row=b=>`<div class="fam" data-b="${esc(b.name)}" aria-current="${b.name===SBASE}"
+      title="${esc(b.ms.map(m=>m.name).join('\n'))}">${esc(b.name)}
+      <small${b.runs.length?' class="on"':''}>${b.runs.length?'on '+esc(runsOn(b)):
+        b.ms.length+' variant'+(b.ms.length===1?'':'s')}</small></div>`;
   const on=bs.filter(b=>b.runs.length), off=bs.filter(b=>!b.runs.length);
-  el.innerHTML=`<div class="blist">${
-    on.length?`<div class="sect">running</div>${on.map(row).join('')}`:''}${
+  L.innerHTML=`${on.length?`<div class="sect">running</div>${on.map(row).join('')}`:''}${
     off.length?`<div class="sect">on this disk</div>${off.map(row).join('')}`:''}${
-    bs.length?'':'<div class="msg" style="padding:0 12px">no models</div>'}</div>
-    <div class="bset" id="bset"></div>`;
-  el.querySelectorAll('[data-b]').forEach(v=>v.onclick=()=>{
+    bs.length?'':'<div class="msg" style="padding:0 12px">no models</div>'}`;
+  L.querySelectorAll('[data-b]').forEach(v=>v.onclick=()=>{
     if(v.dataset.b===SBASE) return;
-    SBASE=v.dataset.b;
-    el.querySelectorAll('[data-b]').forEach(x=>x.setAttribute('aria-current', x===v));
+    SBASE=v.dataset.b; keepSet();
+    L.querySelectorAll('[data-b]').forEach(x=>x.setAttribute('aria-current', x===v));
     showBase(bs.find(b=>b.name===SBASE));
   });
-  showBase(bs.find(b=>b.name===SBASE));
+  keepSet(); showBase(bs.find(b=>b.name===SBASE));
 }
 // A base model's settings. Running: the running variant's own settings
 // (live ones apply to it; the rest wait for a launch), and a line for each
@@ -1530,7 +1536,7 @@ function showModels(){
 // resolver would give the rung that fits (the preview Load model asks for),
 // every change saved for its next launch. Reads only; Apply on close sends.
 async function showBase(b){
-  const el=$('bset'), seq=++SEQ;
+  const el=$('machbody'), seq=++SEQ;
   if(!b){ el.innerHTML='<div class="msg">No models on this disk, and nothing running.</div>'; return }
   el.innerHTML='<div class="msg">reading…</div>';
   // what the resolver would give the rung that fits, as launch settings
