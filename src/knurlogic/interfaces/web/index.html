@@ -442,10 +442,12 @@
  .unit{text-align:center;padding:0 8px;min-width:0;max-width:380px;
    justify-self:center;width:100%}
  .unit .nm{font-size:11.5px;letter-spacing:.08em;color:var(--dim)}
- .unit .nm .mk{width:16px;height:16px;vertical-align:-3px;margin-right:6px;
-   stroke:var(--acc);opacity:.85}
+ .unit .uhead{display:flex;align-items:center;justify-content:center;
+   gap:10px;margin-bottom:8px}
+ .unit .uhead .mk{width:36px;height:36px;flex:none;stroke:var(--acc);opacity:.9}
+ .unit .uhead .ut{text-align:left;min-width:0}
  .unit .hw{font-size:10px;letter-spacing:.08em;color:var(--faint);
-   margin:2px 0 8px;text-transform:uppercase}
+   margin-top:2px;text-transform:uppercase}
  .ucard{display:flex;gap:10px;align-items:stretch;text-align:left;
    border:1px solid var(--line);border-radius:var(--r);padding:9px 10px;
    background:color-mix(in srgb,var(--bg) 70%,transparent)}
@@ -1836,8 +1838,9 @@ async function tick(){
     const what=[hw.chip||hw.model||'', inst?gb(inst).replace(/\.\d+ /,' '):'']
       .filter(Boolean).join(' · ');
     return `<div class="unit${off?' off':''}">
-      <div class="nm">${macIcon(hw.kind)}${esc(n.node)}</div>
-      <div class="hw">${esc(what)||'&nbsp;'}</div>
+      <div class="uhead">${macIcon(hw.kind)}<div class="ut">
+        <div class="nm">${esc(n.node)}</div>
+        <div class="hw">${esc(what)||'&nbsp;'}</div></div></div>
       <div class="ucard">
         <div class="mlines">${off?`<div class="noans">${
             n.problem?esc(n.problem):'no answer'}</div>`
