@@ -375,7 +375,11 @@
  .cs input:placeholder-shown{border-style:dashed}
  .csh{display:flex;align-items:center;justify-content:space-between;color:var(--fg)}
  .csh .mini{padding:2px 7px;font-size:9.5px}
- #csys{width:100%;resize:vertical;background:var(--panel);color:var(--fg);
+ /* the two text boxes grow with what is typed and never show a scrollbar
+    (an empty one showed a horizontal one that vanished on the first key) */
+ #csys,#cq{overflow-x:hidden;scrollbar-width:none}
+ #csys::-webkit-scrollbar,#cq::-webkit-scrollbar{display:none}
+ #csys{width:100%;resize:none;background:var(--panel);color:var(--fg);
    border:1px solid var(--line);border-radius:var(--r);padding:6px 8px;
    font:inherit;font-size:11.5px;box-sizing:border-box}
  body.bench #csettings{display:none}
@@ -3122,6 +3126,10 @@ let BUSYC=false, ABORTC=null;
 function autoGrow(){ const q=$('cq'); q.style.height='auto';
   q.style.height=Math.min(160,q.scrollHeight)+'px' }
 $('cq').addEventListener('input', autoGrow);
+// the system prompt grows the same way, up to a few lines
+function sysGrow(){ const s=$('csys'); s.style.height='auto';
+  s.style.height=Math.min(240,Math.max(s.scrollHeight,54))+'px' }
+$('csys').addEventListener('input', sysGrow);
 $('cq').addEventListener('keydown', e=>{
   if(e.key==='Enter' && !e.shiftKey && !e.isComposing){
     e.preventDefault(); $('cf').requestSubmit();
