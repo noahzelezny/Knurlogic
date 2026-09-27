@@ -346,3 +346,46 @@ def test_a_ring_serves_its_first_model_and_refuses_switching():
         assert "split across 2 ranks" in c.error
     with pytest.raises(ValueError, match="count-based"):
         Scheduler(H(), tensor=R(), prompt_cache_bytes=1 << 30)
+
+
+def test_a_two_rank_split_computes_the_whole_models_logits(tmp_path):
+    """Two processes on 127.0.0.1, the tiny qwen3_5_moe split in two
+    (float32, so rounding cannot hide a wrong split): the split model's
+    logits over a prefill and six decode steps are the unsplit model's."""
+    import json
+    import os
+    import socket
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    def free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+    hosts = tmp_path / "hosts.json"
+    hosts.write_text(json.dumps([[f"127.0.0.1:{free_port()}"],
+                                 [f"127.0.0.1:{free_port()}"]]))
+    here = Path(__file__).parent
+    out = tmp_path / "logits.json"
+    env = dict(os.environ, MLX_HOSTFILE=str(hosts),
+               PYTHONPATH=os.pathsep.join(
+                   [str(here.parent / "src"), str(here)] + sys.path))
+    procs = [subprocess.Popen(
+        [sys.executable, str(here / "tensor_ring_worker.py"), str(out)],
+        env=dict(env, MLX_RANK=str(r)), stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT) for r in range(2)]
+    try:
+        logs = [p.communicate(timeout=120)[0].decode() for p in procs]
+    finally:
+        for p in procs:
+            p.kill()
+    assert all(p.returncode == 0 for p in procs), "\n".join(logs)
+    import numpy as np
+    d = json.loads(out.read_text())
+    whole, split = np.array(d["whole"]), np.array(d["split"])
+    assert whole.shape == split.shape == (7, whole.shape[1])
+    assert np.abs(whole - split).max() < 1e-3, np.abs(whole - split).max()
+    assert (whole.argmax(-1) == split.argmax(-1)).all()
