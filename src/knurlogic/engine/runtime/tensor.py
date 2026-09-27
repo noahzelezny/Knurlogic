@@ -90,10 +90,14 @@ def _split_inplace(module, pred, rank, n, segments=1) -> None:
 class Reduce(nn.Module):
     """`inner`'s partial output summed across the ranks -- in float32.
 
-    A split layer's ranks each round their partial sum to the activation
-    dtype (bf16) and the sum of two rounded halves is rounded again; the
-    whole layer rounds once. Summing the halves in float32 leaves one
-    rounding after the sum, the whole layer's count plus the partials'."""
+    Each rank's partial is already rounded to the activation dtype (bf16)
+    by its matmul, so the split cannot be bit-identical to the whole layer
+    (which rounds once, after a reduction in another order). Summing in
+    float32 rounds once after the sum; with two ranks that equals a bf16
+    add, with more it saves the intermediate roundings. Measured on the M4
+    (35B-A3B VQ, two ranks over the ring on 127.0.0.1): the float32 sum
+    decodes at 29.6 tok/s where mlx's in-dtype bf16 all_sum made 13.6 --
+    the ring backend reduces float32 far faster than bf16."""
 
     def __init__(self, inner, group):
         super().__init__()

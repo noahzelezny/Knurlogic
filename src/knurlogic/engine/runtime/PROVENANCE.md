@@ -11,5 +11,7 @@
   divisions).
 - changed: switch_mlp and shared_expert parameters split through
   `tensor.predicate`, which never splits a VQ `codebook`; the split itself
-  (`split_params`) is our own so it is testable in one process. mlx's
-  `shard_linear` is used as-is for attention and dense MLPs.
+  (`split_params`) is our own so it is testable in one process; every
+  split layer is wrapped in `Reduce`, our own float32 all_sum, in place of
+  mlx's `shard_linear` classes and the models' in-dtype `sharding_group`
+  sums (left unset).
