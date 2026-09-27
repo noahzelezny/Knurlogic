@@ -42,9 +42,10 @@ def test_shares_weigh_bandwidth_only_when_every_rank_says_it():
 def test_shares_are_capped_by_what_fits_and_every_rank_gets_one():
     per = [GIB] * 40
     # bandwidth wants rank 0 to take ~36; it holds 30 layers at most
-    s = R.pipeline_shares(per, _ranks(30.5, 100, bw=[8000, 100]))
+    # (working sets here are what the layers get plus the 4+ GiB margin)
+    s = R.pipeline_shares(per, _ranks(34.5, 104, bw=[8000, 100]))
     assert s["layers"] == [30, 10]
-    tiny = R.pipeline_shares([GIB] * 4, _ranks(100, 1.001, 100,
+    tiny = R.pipeline_shares([GIB] * 4, _ranks(104, 5.001, 104,
                                               bw=[1, 1, 1]))
     assert min(tiny["layers"]) >= 1 and sum(tiny["layers"]) == 4
     with pytest.raises(ValueError, match="cannot give each of 3 ranks"):
@@ -57,10 +58,10 @@ def test_shares_are_capped_by_what_fits_and_every_rank_gets_one():
 
 def test_shares_are_deterministic_and_ties_go_to_the_lower_rank():
     per = [3, 1, 4, 1, 5, 9, 2, 6, 5]
-    a = R.pipeline_shares(per, _ranks(10, 10))
-    assert a == R.pipeline_shares(list(per), _ranks(10, 10))
+    a = R.pipeline_shares(per, _ranks(14, 14))
+    assert a == R.pipeline_shares(list(per), _ranks(14, 14))
     assert a["layers"] == [5, 4]                        # 4.5 : 4.5
-    three = R.pipeline_shares([1] * 10, _ranks(1, 1, 1))
+    three = R.pipeline_shares([1] * 10, _ranks(5, 5, 5))
     assert three["layers"] == [4, 3, 3]
     assert three["bounds"] == [(6, 10), (3, 6), (0, 3)]
 
@@ -69,7 +70,7 @@ def test_uneven_layers_are_checked_exactly():
     # the average says 2 + 2 fits; the real last two layers do not
     per = [1 * GIB, 1 * GIB, 3 * GIB, 3 * GIB]
     with pytest.raises(ValueError, match="layers 2..3 are 6.0 GiB"):
-        R.pipeline_shares(per, _ranks(5, 5))
+        R.pipeline_shares(per, _ranks(9, 9))
 
 
 def test_layer_bytes_keep_the_head_and_the_rest_out_of_the_layers():

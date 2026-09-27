@@ -1035,7 +1035,8 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dic
     bytes), times its memory bandwidth when EVERY rank's is known (decode
     reads each layer's weights once per step, so a faster rank should read
     more of them); a mix of known and unknown bandwidths weighs by capacity
-    only, and says so. Every rank holds at least one layer and no rank more
+    only, and says so. What a rank can hold leaves its step margin
+    (step_margin) free; the reason says what each rank leaves. Every rank holds at least one layer and no rank more
     than fits; rank 0 holds the LAST run of layers, rank N-1 the first.
 
     -> {"layers": [count per rank], "bounds": [(start, end) per rank],
@@ -1047,14 +1048,17 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dic
     if L < n:
         raise ValueError(f"{L} layers cannot give each of {n} ranks one")
     names = [str(r.get("name", f"rank{i}")) for i, r in enumerate(ranks)]
-    cap = [int(r.get("working_set_bytes") or 0) - int(other_bytes)
-           for r in ranks]
+    wss = [int(r.get("working_set_bytes") or 0) for r in ranks]
+    # a rank's layers leave its step margin free, as a single machine's
+    # weights do (the scheduler's floor: 5%, at least 4 GiB)
+    cap = [w - int(other_bytes) - step_margin(w) for w in wss]
     for i, c in enumerate(cap):
         if c <= 0:
             raise ValueError(
-                f"{names[i]}: working set {int(ranks[i].get('working_set_bytes') or 0) / GIB:.1f} GiB "
+                f"{names[i]}: working set {wss[i] / GIB:.1f} GiB "
                 f"holds none of the layers after the {other_bytes / GIB:.1f} "
-                f"GiB every rank keeps (embeddings, norm, lm_head)")
+                f"GiB every rank keeps (embeddings, norm, lm_head) and its "
+                f"{step_margin(wss[i]) / GIB:.1f} GiB step margin")
     bws = [r.get("memory_bandwidth_gbs") for r in ranks]
     known = all(b for b in bws)
     weights = [cap[i] * (float(bws[i]) if known else 1.0) for i in range(n)]
@@ -1088,6 +1092,7 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dic
     reason = (f"{L} layers by {how}: " + "; ".join(
         f"rank {i} {names[i]} holds {counts[i]} (layers {bounds[i][0]}.."
         f"{bounds[i][1] - 1}, {got[i] / GIB:.1f} of {cap[i] / GIB:.1f} GiB"
+        f", leaves {(wss[i] - int(other_bytes) - got[i]) / GIB:.1f} GiB"
         + (f", {float(bws[i]):g} GB/s" if bws[i] else "") + ")"
         for i in range(n)) + "; rank 0 holds the last layers and samples")
     return {"layers": counts, "bounds": [tuple(b) for b in bounds],

@@ -272,17 +272,21 @@ def placement(machines: list, shape: dict, split: str,
     n = len(names)
     if split == "tensor":
         per = int(shape["tensor_per_rank_bytes"])
-        shares = []
+        shares, left = [], []
         for r, nm in enumerate(names):
             ws = int(by[nm].get("working_set_bytes") or 0)
-            if per > ws:
+            margin = R.step_margin(ws)
+            if per > ws - margin:
                 raise ValueError(f"{nm}: its tensor share {per / GIB:.1f} "
                                  f"GiB does not fit its working set "
-                                 f"{ws / GIB:.1f} GiB")
+                                 f"{ws / GIB:.1f} GiB less its "
+                                 f"{margin / GIB:.1f} GiB step margin")
             shares.append({"rank": r, "machine": nm, "bytes": per})
+            left.append(f"{nm} leaves {(ws - per) / GIB:.1f} GiB")
         reason = (f"tensor split {n} ways: every rank holds "
-                  f"~{per / GIB:.1f} GiB; rank 0 {names[0]} leads (newest "
-                  f"chip, then P-core clock, then free memory) and samples")
+                  f"~{per / GIB:.1f} GiB ({', '.join(left)}); rank 0 "
+                  f"{names[0]} leads (newest chip, then P-core clock, then "
+                  f"free memory) and samples")
         return {"order": names, "leader": names[0], "split": split,
                 "shares": shares, "layers": [], "reason": reason}
     ranks = [{"name": nm,
@@ -407,10 +411,13 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
             start = sum(counts[rank + 1:])
             need = sum(sh["layer_bytes"][start:start + counts[rank]]) \
                 + int(sh.get("other_bytes") or 0) if counts else 0
-        if need and ws and need > ws:
+        from knurlogic.tuning.resolve import step_margin
+        margin = step_margin(ws)
+        if need and ws and need > ws - margin:
             refusals.append(f"rank {rank}'s share is {need / GIB:.1f} GiB "
                             f"and {me}'s working set (under its allowance) "
-                            f"is {ws / GIB:.1f} GiB")
+                            f"is {ws / GIB:.1f} GiB, which must leave its "
+                            f"{margin / GIB:.1f} GiB step margin")
     if spec["link"] == "ring":
         ip = spec["hosts"][rank].rsplit(":", 1)[0]
         mine = {t.get("ip") for t in info.get("thunderbolt") or []}
