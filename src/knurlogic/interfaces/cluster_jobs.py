@@ -241,16 +241,38 @@ def _rdma_device(m: dict, peer: dict):
     """The rdma_<iface> device on `m` that reaches `peer`: the one on the
     Thunderbolt subnet both share with RDMA up at both ends (en4 at
     192.0.2.1 reaches 192.0.2.2) -- the same subnet from either side --,
-    else the only active one."""
-    act = (m.get("rdma") or {}).get("active") or []
+    else None: a device on another subnet is another cable, never a
+    fallback."""
     net = _shared_subnet(m, peer, rdma=True)
     if net:
         return "rdma_" + str(_on_subnet(m, net, "iface"))
-    return act[0] if len(act) == 1 else None
+    return None
 
 
-def _slot(job: str) -> int:
-    return int(job[:4], 16) % 100
+def _slot(job: str, used=None) -> int:
+    """The job's ring-port slot: its nonce's, or the next one after it that
+    no live job on this machine holds (`used`: default, the registry's)."""
+    if used is None:
+        used = _used_slots()
+    start = int(job[:4], 16) % 100
+    for i in range(100):
+        s = (start + i) % 100
+        if s not in used:
+            return s
+    raise ValueError("every ring-port slot is held by a live job here")
+
+
+def _used_slots() -> set:
+    """The ring-port slots of the live jobs in this machine's registry."""
+    out = set()
+    for job, recs in J.by_job().items():
+        for r in recs:
+            rp = r.get("ring_port")
+            if isinstance(rp, int) and rp >= RING_PORT:
+                out.add((rp - RING_PORT) // 20)
+            else:
+                out.add(int(job[:4], 16) % 100)
+    return out
 
 
 def placement(machines: list, shape: dict, split: str,
@@ -589,6 +611,10 @@ def start(job: str, *, spawn=None) -> tuple:
            "started": time.strftime("%Y-%m-%d %H:%M:%S"), "t": time.time()}
     if spec.get("port") and spec["rank"] == 0:
         rec["port"] = int(spec["port"])
+    try:
+        rec["ring_port"] = int(spec["hosts"][spec["rank"]].rsplit(":", 1)[1])
+    except (IndexError, ValueError, TypeError, AttributeError):
+        pass
     with _LOCK:
         _PROCS[(spec["job"], spec["rank"])] = proc
         SPECS[spec["job"]] = spec
@@ -896,11 +922,24 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         return {"refused": f"cannot place it: {e}"}
     order = [next(m for m in infos if m["name"] == nm) for nm in plan["order"]]
     job = secrets.token_hex(8)
+    if link == "jaccl" and not _shared_subnet(order[0], order[1], rdma=True):
+        def up(m):
+            return ", ".join((m.get("rdma") or {}).get("active") or []) \
+                or "none"
+        return {"refused": f"jaccl needs RDMA up at both ends of one "
+                           f"Thunderbolt cable, and no Thunderbolt subnet "
+                           f"has it ({order[0]['name']}: {up(order[0])}; "
+                           f"{order[1]['name']}: {up(order[1])}). Use the "
+                           f"TCP ring, or bring RDMA up on the shared cable.",
+                "placement": plan}
     try:
         ips = _ring_ips(order, rdma=link == "jaccl")
     except ValueError as e:
         return {"refused": str(e), "placement": plan}
-    slot = _slot(job)
+    try:
+        slot = _slot(job)
+    except ValueError as e:
+        return {"refused": str(e), "placement": plan}
     hosts = [f"{ip}:{RING_PORT + slot * 20 + r}" for r, ip in enumerate(ips)]
     ibv, coord = None, ""
     if link == "jaccl":
