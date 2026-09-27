@@ -692,3 +692,55 @@ def test_a_peers_dead_rank_0_is_a_503_with_the_peers_stop_reason(
     assert h.doc()["error"]["code"] == "cluster_failed"
     assert "rank 0 on M4 (pid 7) exited" in h.doc()["error"]["message"]
     ui._PEER_JOBS.clear()
+
+
+def _sse_upstream(events, done):
+    """A one-shot upstream that answers an event stream -- `events`, then
+    [DONE] when `done` -- and drops the socket (a rank 0 dying mid-way
+    when not `done`)."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+
+    def run():
+        c, _ = srv.accept()
+        c.recv(65536)
+        c.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+                  b"Connection: close\r\n\r\n")
+        for e in events:
+            c.sendall(b"data: " + e + b"\n\n")
+        if done:
+            c.sendall(b"data: [DONE]\n\n")
+        c.close()
+        srv.close()
+    threading.Thread(target=run, daemon=True).start()
+    return f"http://127.0.0.1:{srv.getsockname()[1]}"
+
+
+@pytest.mark.parametrize("done", [False, True])
+def test_a_rank_0_dying_mid_stream_ends_the_stream_with_cluster_failed(
+        monkeypatch, done):
+    asked = []
+    monkeypatch.setattr(ui, "cluster_failure",
+                        lambda b: asked.append(b) or "rank 1 on B exited")
+    base = _sse_upstream([b'{"x": 1}'], done)
+    h = _Capture()
+    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    out = h.wfile.getvalue().decode()
+    assert h.code == 200 and out.startswith('data: {"x": 1}')
+    if done:
+        assert "cluster_failed" not in out and not asked
+        return
+    last = out.strip().split("\n\n")[-1]
+    assert last.startswith("data: ")
+    err = json.loads(last[6:])["error"]
+    assert err["code"] == "cluster_failed"
+    assert "rank 1 on B exited" in err["message"]
+
+
+def test_a_cut_stream_that_is_no_cluster_job_just_ends(monkeypatch):
+    monkeypatch.setattr(ui, "cluster_failure", lambda b: "")
+    base = _sse_upstream([b'{"x": 1}'], False)
+    h = _Capture()
+    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    assert h.wfile.getvalue() == b'data: {"x": 1}\n\n'
