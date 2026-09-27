@@ -103,6 +103,10 @@ def check(plan) -> None:
             raise PlanError(f"pop n must be a positive int, got {op['n']!r}")
         if op["op"] == "admit":
             _ints(op["prompt"], "admit prompt")
+            if not isinstance(op["segs"], list):
+                raise PlanError("admit segs is a list of lists of ints")
+            if not isinstance(op["hit"], int) or isinstance(op["hit"], bool):
+                raise PlanError(f"admit hit must be an int, got {op['hit']!r}")
             for s in op["segs"]:
                 _ints(s, "admit segs")
             if not 0 <= op["hit"] <= len(op["prompt"]):

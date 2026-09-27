@@ -62,6 +62,13 @@ def test_plan_admit_must_be_the_prompt_after_the_hit():
         P.encode({"ops": [_admit(prompt=[1, True, 3, 4, 5])]})
 
 
+@pytest.mark.parametrize("bad", [{"hit": True}, {"hit": 1.0}, {"hit": "1"},
+                                 {"segs": 5}, {"segs": None}, {"segs": "ab"}])
+def test_plan_admit_types_are_plan_errors(bad):
+    with pytest.raises(P.PlanError):
+        P.encode({"ops": [_admit(**bad)]})
+
+
 # ------------------------------------------------------------- refusals
 
 QWEN36 = {"model_type": "qwen3_5_moe", "quantization": {"group_size": 64},

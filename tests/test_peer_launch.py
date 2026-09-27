@@ -67,6 +67,14 @@ def test_refused_when_a_path_is_in_the_payload(key):
     assert code == 400 and "identity" in doc["error"] and not loads
 
 
+def test_a_body_that_is_not_json_says_why():
+    code, doc = ui.peer_launch({}, "192.0.2.1", "192.0.2.2", b'{"action": ',
+                               gate=Open(), load=lambda **a: {},
+                               resolve=lambda i: "/m")
+    assert code == 400 and "JSON" in doc["error"]
+    assert "line 1" in doc["error"]          # the parser's own message
+
+
 def test_unknown_identity_is_a_plain_refusal():
     code, doc, loads = call({**LOAD, "identity": "zzz"})
     assert code == 404 and doc["refused"].startswith("not on") and not loads
