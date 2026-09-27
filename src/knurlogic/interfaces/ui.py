@@ -149,7 +149,7 @@ def _status_fn(_n=0):
     claimed = {me["name"]}
     for p in peers:
         if p.state in ("answering", "version_mismatch") and p.node:
-            snaps.append({**p.node, "role": "remote",
+            snaps.append({**p.node, "role": "remote", "address": p.key,
                           "found_by": sorted(p.found_by), "state": p.state,
                           **({"problem": p.problem} if p.problem else {})})
         else:
