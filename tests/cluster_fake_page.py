@@ -4,7 +4,9 @@ in its own process, with its own cache dir (XDG_CACHE_HOME) and identity,
 and only the machine facts faked: its artifact, the model's shape, its
 cluster block, and the rank it spawns (tests/cluster_fake_rank.py).
 
-argv: <port> <id> <name> <info json>
+argv: <port> <id> <name> <info json> [<peer id> <peer address>]
+(the peer: this page's PEERS record of the other page -- a stop is only
+ever posted to an address PEERS knows)
 """
 import json
 import os
@@ -26,6 +28,15 @@ def main():
     C._local_info = lambda: info
     C.RANK_ARGV[0] = fake_argv
     C.WATCH_S = 0.3
+    if len(sys.argv) > 6:
+        from types import SimpleNamespace
+
+        from knurlogic.cluster.peers import Peer
+        host, pport = sys.argv[6].rsplit(":", 1)
+        peer = Peer(host=host, port=int(pport), id=sys.argv[5],
+                    state="answering")
+        ui.PEERS = SimpleNamespace(all=lambda: [peer],
+                                   introduce=lambda *a, **k: None)
     srv = ThreadingHTTPServer(("127.0.0.1", port), ui.make_handler({}))
     print("fake page up", flush=True)
     srv.serve_forever()
