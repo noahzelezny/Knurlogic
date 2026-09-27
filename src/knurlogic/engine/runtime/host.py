@@ -106,12 +106,18 @@ class ModelHost:
         self._set("loading")
         try:
             from knurlogic.machine import loadlock
+            # A ring's collectives (the pipeline split's dtype gather, the
+            # head agreement) run OUTSIDE the machine's load lock: ranks of
+            # one ring on one machine take it in turn, and a rank holding
+            # it inside a collective waits forever on a sibling waiting for
+            # the lock. Split lazily (no weights read) before the lock.
+            lazy = self._split_lazily(path) if self.shard else None
             with loadlock.model_load(path, "runtime.host",
                                      wait_s=self.load_wait_s):
-                self.model, self.tokenizer = self._weights(path)
-            self.model_key = (path, None, None)
-            self._bind_vision(path)
-            self._bind_head(path)
+                self.model, self.tokenizer = self._weights(path, lazy)
+                self.model_key = (path, None, None)
+                self._bind_vision(path)
+                self._bind_head(path)
             if self.head_agree is not None:
                 bound = bool(state.DRAFT.get("on"))
                 if not self.head_agree(bound) and bound:
@@ -145,14 +151,22 @@ class ModelHost:
                 pass
         self._set("empty")
 
-    def _weights(self, path: str):
+    def _split_lazily(self, path: str):
+        """A ring's model, loaded lazily and split in place: nothing read
+        yet, and the split's collectives done."""
         from knurlogic.engine.serve.load import load_unlocked
-        if self.shard is None:
-            return load_unlocked(path, self.executes_artifact_code)
-        import mlx.core as mx
         model, tok = load_unlocked(path, self.executes_artifact_code,
                                    lazy=True)
         self.shard(model)
+        return model, tok
+
+    def _weights(self, path: str, lazy=None):
+        """`lazy`: _split_lazily's (model, tokenizer), evaluated here."""
+        from knurlogic.engine.serve.load import load_unlocked
+        if lazy is None:
+            return load_unlocked(path, self.executes_artifact_code)
+        import mlx.core as mx
+        model, tok = lazy
         mx.eval(model.parameters())
         return model, tok
 
