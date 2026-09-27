@@ -268,8 +268,9 @@ loopback, Thunderbolt, or a `--peer` address).
   machine is token-identical to one process, across two chips it forks at
   the first near-tie (0.13 nats at token 7), as M4 vs M3 alone do. Killing
   either rank mid-stream stops both within ~3 s with nothing left behind:
-  the follower's death is a 503 `cluster_failed`, rank 0's a 502 from the
-  page relay (nobody is left to write the 503).
+  the follower's death is a 503 `cluster_failed`, and so is rank 0's: the
+  page answers it with the job's stop reason (a stream already under way
+  ends with one `data: {"error": ... "cluster_failed"}` event).
 
 ## Migration
 
