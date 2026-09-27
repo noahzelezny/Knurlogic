@@ -128,3 +128,15 @@ def test_a_failed_store_scan_is_named_and_not_cached(monkeypatch):
             L.resolve_name("some-model", None)
         assert e.value.status == 503 and "volume is gone" in str(e.value)
     assert len(calls) == 2
+
+
+def test_the_knurlogic_allowance_caps_what_a_load_may_have(machine):
+    """A model the working set would take is refused past the machine's
+    allowance, and the refusal names it."""
+    machine.mem.update(working_set_bytes=100 * GIB, available_bytes=100 * GIB)
+    machine.mem["allowance_bytes"] = 50 * GIB
+    with pytest.raises(L.NotLoadable) as e:
+        L.prepare("big-model")
+    assert e.value.status == 507 and "allowance 50.0" in str(e.value)
+    machine.mem["allowance_bytes"] = 0
+    assert L.prepare("big-model").path == machine.big

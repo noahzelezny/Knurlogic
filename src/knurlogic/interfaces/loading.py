@@ -104,13 +104,16 @@ def prepare(model: str, *, served: Optional[str] = None,
                           "unsupported_architecture")
     b = wired.load_budget()
     ws, avail = b["working_set_bytes"], b["available_bytes"]
-    room = min(x for x in (ws, avail + int(freed_bytes)) if x > 0) \
-        if (ws or avail) else 0
+    allow = b.get("allowance_bytes") or 0
+    room = min((x for x in (ws, avail + int(freed_bytes), allow) if x > 0),
+               default=0)
     if room and a.bytes_on_disk > room:
         raise NotLoadable(
             507, f"{a.path.name} needs {a.bytes_on_disk / GIB:.1f} GiB; "
                  f"{room / GIB:.1f} GiB is available to it (GPU working set "
                  f"{ws / GIB:.1f}, free now {avail / GIB:.1f}"
+                 + (f", knurlogic allowance {allow / GIB:.1f}" if allow
+                    else "")
                  + (f" + {freed_bytes / GIB:.1f} from unloading the current "
                     f"model" if freed_bytes else "") + "). /loaded.json "
                  f"shows what else is holding memory.", "insufficient_memory")

@@ -379,6 +379,64 @@ def kv_bytes_per_token(tc: dict) -> tuple:
     return per, f"{how} x {kv} KV heads x {hd} dims x K,V x bf16"
 
 
+def step_margin(working_set_bytes: int) -> int:
+    """The floor of the scheduler's step margin (engine/runtime/scheduler.py
+    `_margin`): 5% of the working set, at least 4 GiB. Repeated here, not
+    imported, because the scheduler lives on the mlx side of the line and
+    this has to answer before anything loads."""
+    return max(4 * GIB, int(working_set_bytes) // 20)
+
+
+def context_room(working_set_bytes: int, weights_bytes: int,
+                 cfg: dict) -> dict:
+    """What a model that fits leaves for its conversations: the working set
+    (or allowance) less the weights less the step margin, and about how
+    many tokens of context that is at the model's KV bytes per token --
+    shared by every conversation at once, not each one's.
+
+    Why it is said at all: GLM-5.3 2.7bpw "fit" on the 128 GB M4 and left
+    about 6 GiB, and four long agent conversations could never run
+    (2026-09-26). A fit that leaves no room to talk is not much of a fit.
+    `small` is under a fifth of the model's own window, or under 2 GiB."""
+    cfg = cfg or {}
+    tc = cfg.get("text_config") or cfg
+    per, why = kv_bytes_per_token(tc)
+    window = int(tc.get("max_position_embeddings")
+                 or cfg.get("max_position_embeddings") or 0)
+    ws = int(working_set_bytes or 0)
+    margin = step_margin(ws)
+    left = max(ws - int(weights_bytes) - margin, 0)
+    tokens = left // per if per else 0
+    small = left < 2 * GIB or bool(per and window and tokens < window / 5)
+    return {"working_set_bytes": ws, "weights_bytes": int(weights_bytes),
+            "margin_bytes": margin, "left_bytes": left,
+            "kv_bytes_per_token": per, "kv_why": why,
+            "tokens": tokens, "window": window, "small": small,
+            "text": room_text(left, tokens, per)}
+
+
+def room_for(weights_bytes: int, cfg: dict,
+             working_set_bytes: int | None = None) -> dict:
+    """`context_room` against THIS machine: its GPU working set under the
+    knurlogic allowance. Not memory available now -- what other programs
+    hold today comes and goes; the working set is what the scheduler's
+    guard will count against for the life of the load."""
+    if working_set_bytes is None:
+        from knurlogic.machine import allowance, wired
+        working_set_bytes = allowance.cap(wired.detected_working_set_bytes())
+    return context_room(working_set_bytes, weights_bytes, cfg)
+
+
+def room_text(left: int, tokens: int, per: int) -> str:
+    """'leaves 6 GiB, about 400k tokens of context across all
+    conversations' -- one sentence, shared by the page and doctor."""
+    t = (f"{tokens / 1e6:.1f}M" if tokens >= 1e6 else
+         f"{tokens / 1e3:.0f}k" if tokens >= 1e3 else str(tokens))
+    return (f"leaves {left / GIB:.0f} GiB"
+            + (f", about {t} tokens of context across all conversations"
+               if per else " (its KV size per token is not known)"))
+
+
 def vision_budget(artifact: Artifact,
                   store_bytes: int | None = None) -> dict | None:
     """What a vision rung holds besides its text weights, term by term,

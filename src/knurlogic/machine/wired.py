@@ -313,10 +313,18 @@ def load_budget() -> dict:
         avail = int(available_memory().get("available_bytes") or 0)
     except Exception:
         avail = 0
-    known = [b for b in (ws, avail) if b > 0]
+    # the knurlogic allowance (machine/allowance.py) caps both: the most
+    # this machine's owner lets knurlogic have, whatever the GPU could hold
+    from knurlogic.machine import allowance
+    allow = allowance.get()
+    known = [b for b in (ws, avail, allow) if b > 0]
     budget = min(known) if known else 0
+    machine = min((b for b in (ws, avail) if b > 0), default=0)
     limited_by = ("nothing known" if not known else
-                  "memory available now" if budget == avail and avail != ws
+                  "the knurlogic allowance" if allow and (not machine
+                                                          or allow < machine)
+                  else "memory available now" if budget == avail and avail != ws
                   else "the GPU working set")
     return {"bytes": budget, "working_set_bytes": ws,
-            "available_bytes": avail, "limited_by": limited_by}
+            "available_bytes": avail, "allowance_bytes": allow,
+            "limited_by": limited_by}

@@ -111,7 +111,7 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
     mem = available_memory()
     b = wired.load_budget()
     budget = b["bytes"]
-    from knurlogic.tuning.resolve import vision_budget
+    from knurlogic.tuning.resolve import room_for, vision_budget
     adv = wired.advise(a.bytes_on_disk)
     # A vision rung also holds its tower, its image store and its images'
     # KV -- the resolver's terms, so `fit` and `settings` agree.
@@ -143,8 +143,11 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
             f"{S.PREFILL_CHUNK_TIGHT} tokens and prefills one prompt at a "
             f"time. It loads; long prompts are slower to start."
             if tight else ""),
+        # what a fit leaves to talk in (tuning/resolve.context_room)
+        "room": room_for(a.bytes_on_disk + extra, a.raw_config),
         "available_now_gib": round(b["available_bytes"] / GIB, 1),
         "working_set_gib": round(b["working_set_bytes"] / GIB, 1),
+        "allowance_gib": round(b.get("allowance_bytes", 0) / GIB, 1),
         "free_now_gib": round(mem.get("free_bytes", 0) / GIB, 1),
         "reclaimable_cache_gib": round(mem.get("cached_bytes", 0) / GIB, 1),
         "wired_limit_gib": round(adv.get("limit_bytes", 0) / GIB, 1),

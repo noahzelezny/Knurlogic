@@ -122,6 +122,8 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 _MODELS["rows"] = []
             _MODELS["at"] = now
         out = []
+        from knurlogic.machine import allowance, wired
+        ws = allowance.cap(wired.detected_working_set_bytes())
         for f in _MODELS["rows"]:
             out.append({
                 "name": f.name, "path": str(f.path), "store": f.store,
@@ -135,9 +137,23 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 "vision": vision_registry.registered(f.model_type),
                 "serving": bool(serving) and (f.name == serving
                                               or str(f.path) == serving),
+                "room": _room(f, ws),
             })
         return {"models": out, "serving": serving}
     return handler
+
+
+def _room(f, ws: int):
+    """A found model's room to talk (tuning/resolve.context_room), for the
+    picker -- None when it would not fit at all or cannot be read."""
+    from knurlogic.tuning.resolve import room_for
+    if not (f.servable and ws and f.bytes_on_disk < ws):
+        return None
+    try:
+        cfg = json.loads((Path(f.path) / "config.json").read_text())
+        return room_for(f.bytes_on_disk, cfg, ws)
+    except Exception:
+        return None
 
 
 _LOADED: dict = {"at": 0.0, "doc": None}
@@ -309,8 +325,43 @@ def machine_settings():
                     f"above the {ceil_:.0f} GiB knurlogic recommends, which "
                     f"leaves {adv['total_bytes'] / GIB - target:.0f} GiB for "
                     f"macOS and everything else on the machine")
+        # read here too, so a peer's tab shows it through /peek -- which
+        # reads /settings.json and nothing that can change anything
+        doc["allowance"] = allowance_doc()
         return doc
     return handler
+
+
+def allowance_doc() -> dict:
+    """`GET /allowance.json`: the knurlogic allowance (machine/allowance.py)
+    and what it is lowering -- 0 means none, knurlogic takes the working
+    set."""
+    from knurlogic.machine import allowance, wired
+    ws = wired.detected_working_set_bytes()
+    a = allowance.get()
+    return {"allowance_gib": round(a / GIB, 1), "working_set_gib":
+            round(ws / GIB, 1), "effective_gib": round(allowance.cap(ws)
+                                                      / GIB, 1),
+            "file": str(allowance.path())}
+
+
+def set_allowance(body) -> dict:
+    """`POST /allowance.json` {"gib": N}: remember it (0 clears). Only this
+    machine's: a peer's is set on that peer's own page. Refused above the
+    installed memory -- an allowance past it would not lower anything and
+    reads as a mistake."""
+    from knurlogic.machine import allowance, wired
+    try:
+        gib = float(json.loads(body or b"{}").get("gib"))
+    except Exception:
+        return {"error": "send {\"gib\": N}; 0 clears the allowance"}
+    total = (wired.advise(0).get("total_bytes") or 0) / GIB
+    if gib < 0 or (total and gib > total):
+        return {"error": f"{gib:g} GiB is not between 0 and the "
+                         f"{total:.0f} GiB installed"}
+    allowance.set(int(gib * GIB))
+    return {**allowance_doc(), "applied": {"knurlogic allowance":
+            f"{gib:g} GiB" if gib else "none"}}
 
 
 def _preview(path: str, tune: str, working_set_gib=None) -> dict:
@@ -320,7 +371,7 @@ def _preview(path: str, tune: str, working_set_gib=None) -> dict:
     from knurlogic.tuning import settings as S
     from knurlogic.machine import wired
     from knurlogic.machine.artifact import Artifact
-    from knurlogic.tuning.resolve import resolve
+    from knurlogic.tuning.resolve import resolve, room_for
 
     a = Artifact.load(path)
     try:
@@ -361,6 +412,10 @@ def _preview(path: str, tune: str, working_set_gib=None) -> dict:
                                    "limited_by": "given by the caller"}),
         "knobs": knobs, "notes": r.notes, "warnings": r.warnings,
         "wired": wired.advise(a.bytes_on_disk),
+        # what the fit leaves to talk in, against the working set given or
+        # this machine's (under its allowance)
+        "room": room_for(a.bytes_on_disk, a.raw_config,
+                         ws if budget is None else None),
         "preview": True,
     }
 

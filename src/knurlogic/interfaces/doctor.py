@@ -33,6 +33,10 @@ def run(path: str, working_set_gib: float, profile: str | None,
         ws = wired.detected_working_set_bytes()
         if ws:
             detected = " (detected)"
+            from knurlogic.machine import allowance
+            if allowance.get() and allowance.cap(ws) < ws:
+                ws = allowance.cap(ws)
+                detected = " (the knurlogic allowance)"
             working_set_gib = ws / GIB
 
     r = resolve(a, ws, profile=profile, tune=tune)
@@ -46,6 +50,11 @@ def run(path: str, working_set_gib: float, profile: str | None,
     print(f"  size     {a.gib:.1f} GiB"
           + (f"   working set {working_set_gib:.1f} GiB{detected}"
              if ws else "   working set UNKNOWN"))
+    if ws and a.bytes_on_disk < ws:
+        from knurlogic.tuning.resolve import room_for
+        room = room_for(a.bytes_on_disk, a.raw_config, ws)
+        print(f"  room     {room['text']}"
+              + ("   SMALL: little to talk in" if room["small"] else ""))
     if a.is_vq:
         geo = ", ".join(f"d{d}-K{K} x{n}"
                         for (d, K), n in sorted(a.geometries.items()))

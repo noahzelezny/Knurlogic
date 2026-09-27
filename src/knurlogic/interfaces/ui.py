@@ -935,6 +935,13 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
         models_fn=web.models_document(serving=""),
         loaded_fn=_loaded_fn(),
         load_fn=_load_fn(serve_port))
+    # the knurlogic allowance: THIS machine's only, and set only by a POST
+    # the page sends when its user applies it; a peer's is read from that
+    # peer's /settings.json through /peek
+    routes["/allowance.json"] = lambda _q, _n=0: web._json(
+        web.allowance_doc())
+    routes["POST /allowance.json"] = lambda _q, _n=0, body=None: web._json(
+        web.set_allowance(body))
 
     H = make_handler(routes, gate, allow_origins, allow_hosts)
 
