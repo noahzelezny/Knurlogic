@@ -319,8 +319,10 @@ class Glm5NextIndexer(nn.Module):
 
         if mask is not None and mask.dtype == mx.bool_ and mask.shape == (B, S):
             valid_cur = mask
+            valid_cur_all = False
         else:
             valid_cur = mx.ones((B, S), dtype=mx.bool_)
+            valid_cur_all = True
 
         # Pack per-token state and append to the indexer cache so pooling/selection
         # run over the full cached sequence -- unifies prefill and incremental decode.
@@ -356,15 +358,21 @@ class Glm5NextIndexer(nn.Module):
         # guard matters under continuous batching: BatchGenerator grows/shrinks the
         # batch (extend/filter) on the batch axis but does not carry this per-cache
         # _pool along, so a stale _pool must be discarded and rebuilt for one step.
+        # Small S (MTP verify, S<=SMALL_L) takes the same path: the new tokens only
+        # touch pools at or after the previous length. After a speculative rollback
+        # the cache is trimmed below the length the cached pools were built at, so
+        # only pools wholly before min(t_prev, T - S) are reused -- those positions
+        # were never rewritten.
         if (
-            S == 1
+            S <= SMALL_L
+            and valid_cur_all
             and cache is not None
             and getattr(cache, "_pool", None) is not None
             and getattr(cache, "_no_pad", False)
             and cache._pool[0].shape[0] == B
         ):
             ck, ci, cv, t_prev = cache._pool
-            n_stable = t_prev // self.index_kpool
+            n_stable = min(t_prev, T - S) // self.index_kpool
             s0 = n_stable * self.index_kpool
             pk_s, pi_s, pv_s = self._pooled_states(
                 k_full[:, s0:], gate_full[:, s0:], valid[:, s0:]
@@ -432,6 +440,49 @@ class Glm5NextIndexer(nn.Module):
             out.append(topk)
         topk = out[0] if len(out) == 1 else mx.concatenate(out, axis=1)
         return topk[:, None].astype(mx.int32)
+
+
+# Query widths that take the decode-style attention (absorbed MLA + sparse gather):
+# single-token decode and the MTP verify forward (1 + draft depth tokens).
+SMALL_L = 4
+
+
+def _gather_selected(kv_latent, topk, mask, B, L, Kv):
+    """Gather the L rows' selected latent keys; mask each row to its own block.
+
+    kv_latent [B, 1, Kv, D]; topk [B, L, K] (-1 = unselected). Returns the gathered
+    latent [B, 1, L*K, D] and a bool mask [B, 1, L, L*K] where row i sees only the
+    valid entries of its own K-block (and, if a bool `mask` is given, only keys that
+    mask allows for row i). Duplicates across rows live in other rows' blocks and are
+    masked, so each row attends exactly its own selection -- the same set the dense
+    scatter mask picks, without touching the rest of the context.
+    """
+    K = topk.shape[-1]
+    valid = topk >= 0
+    clamped = mx.clip(topk, 0, Kv - 1)
+    flat = clamped.reshape(B, 1, L * K, 1)
+    gathered = mx.take_along_axis(
+        kv_latent,
+        mx.broadcast_to(flat, (B, 1, L * K, kv_latent.shape[-1])),
+        axis=2,
+    )
+    if mask is not None and mask.dtype == mx.bool_:
+        # Bool masks arrive as a causal [L, Kv] (create_causal_mask), a per-key
+        # [B, Kv] at L == 1, or [B, 1, 1|L, Kv] from a batch cache: bring to
+        # [B, L, Kv] and read each row's own keys.
+        m = mask
+        if m.ndim == 2:
+            m = m[None] if (L > 1 and m.shape[0] == L) else m[:, None, :]
+        else:
+            m = m.reshape(m.shape[0], -1, m.shape[-1])
+        m = mx.broadcast_to(m, (B, L, Kv))
+        valid = valid & mx.take_along_axis(m, clamped, axis=-1)
+    if L == 1:
+        return gathered, valid[:, None]
+    eye = mx.eye(L, dtype=mx.bool_)  # [L, L]
+    block = eye[:, :, None] & valid[:, None, :, :]  # [B, L(row), L(block), K]
+    return gathered, block.reshape(B, 1, L, L * K)
+
 
 
 class Glm5NextSparseAttention(nn.Module):
@@ -503,33 +554,17 @@ class Glm5NextSparseAttention(nn.Module):
             cache = [None] * 2
 
         topk_indices = self.indexer(x, qr, mask, cache=cache[1])
+        # Absorbed MLA (queries into the latent, one shared K=V latent head) for
+        # decode and small verify widths; the expanded per-head K/V only for prefill.
+        absorbed = L <= SMALL_L
         attn_mask = mask
         if topk_indices is not None:
             Kv = kv_latent.shape[2]
             valid_sel = topk_indices >= 0
-            if L == 1:
-                clamped = mx.clip(topk_indices[:, :, 0, :], 0, Kv - 1)
-                idx = clamped[..., None]
-                kv_latent = mx.take_along_axis(
-                    kv_latent,
-                    mx.broadcast_to(idx, idx.shape[:-1] + (kv_latent.shape[-1],)),
-                    axis=2,
+            if absorbed:
+                kv_latent, attn_mask = _gather_selected(
+                    kv_latent, topk_indices[:, 0], mask, B, L, Kv
                 )
-                sel_mask = valid_sel[:, :, 0, :][:, :, None, :]
-                if mask is not None and mask.dtype == mx.bool_:
-                    # Single-stream decode passes mask=None here; under continuous
-                    # batching the batched cache supplies a left-pad mask that can be
-                    # 4-D ([B, 1, 1, Kv]) while `clamped` is 3-D. At S=1 the mask is
-                    # purely per-key (no causal), so reduce it to [B, Kv] and gather the
-                    # selected key positions -- rank-agnostic and batch-safe.
-                    mkeys = mask.reshape(B, -1, Kv)[:, 0, :]
-                    gathered = mx.take_along_axis(
-                        mx.broadcast_to(mkeys[:, None, :], (B, clamped.shape[1], Kv)),
-                        clamped,
-                        axis=-1,
-                    )
-                    sel_mask = sel_mask & gathered[:, :, None, :]
-                attn_mask = sel_mask
             else:
                 shape = list(topk_indices.shape)
                 shape[-1] = Kv + 1
@@ -551,7 +586,7 @@ class Glm5NextSparseAttention(nn.Module):
         ):
             cache[0].keys = mx.depends(cache[0].keys, (cache[1].keys, cache[1].values))
 
-        if L == 1:
+        if absorbed:
             q = self.embed_q(q)
             k = v = kv_latent
         else:
@@ -561,7 +596,7 @@ class Glm5NextSparseAttention(nn.Module):
         output = scaled_dot_product_attention(
             q, k, v, cache=cache, scale=self.scale, mask=attn_mask
         )
-        if L == 1:
+        if absorbed:
             output = self.unembed_out(output)
 
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
