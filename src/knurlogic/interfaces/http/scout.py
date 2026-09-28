@@ -93,7 +93,8 @@ def residency(host, sched) -> dict:
            "memory_bytes": int(st.get("memory_bytes") or 0),
            "nodes": [identity.identity().get("name") or "local"],
            "state": st["state"],
-           "rows": sched.width}
+           "rows": sched.width,
+           "requests": sched.requests()}
     if st.get("error"):
         row["error"] = st["error"]
     return {"object": "list", "data": [row]}

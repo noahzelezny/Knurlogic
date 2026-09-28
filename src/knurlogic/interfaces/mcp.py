@@ -185,6 +185,12 @@ def state(**_) -> Dict[str, Any]:
         "resident": doc.get("resident", []),
         "runtimes": doc.get("runtimes", []),
         "started_here": ui.children(),
+        # per knurlogic model: in_flight, pending, capacity,
+        # oldest_pending_s, holding (its server's /status.json `requests`)
+        "requests": [dict(r.get("requests") or {}, model=r.get("name"),
+                          where=r.get("where"))
+                     for r in doc.get("resident", [])
+                     if isinstance(r, dict) and r.get("requests")],
         # None when nothing served has vision, matching the served_path()
         # pattern the rest of `state()` follows -- absence is a fact, not
         # an omission.
