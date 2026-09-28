@@ -162,8 +162,9 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                    load_wait_s=3600.0 if ring else 0.0,
                    kv_bits=settings.get("kv_bits"),
                    cross_chip=settings.get("cross_chip"))
+    from knurlogic.engine.serve.load import gpu_in_use
     sched = Scheduler(mh, **scheduler_options(settings),
-                      tensor=tensor).start()
+                      tensor=tensor, gpu_in_use=gpu_in_use).start()
     sched.load(str(artifact.path),
                executes_artifact_code=bool(artifact.model_file))
     _CURRENT["scheduler"] = sched

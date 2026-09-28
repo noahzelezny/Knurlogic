@@ -380,6 +380,116 @@ def test_the_step_margin_is_measured_not_published():
         mx.get_peak_memory = real
 
 
+def _rows_of(s, *contexts):
+    """Running rows spanning these contexts (the margin reads only them)."""
+    from knurlogic.engine.runtime import scheduler as S
+    job = lambda n: type("J", (), {"prompt_tokens": n})()
+    s._rows = {i: S._Row(job(n), None, []) for i, n in enumerate(contexts)}
+
+
+def test_the_margin_follows_the_context_the_step_will_span():
+    """The 27B on the M3, 2026-09-28: the transient grew 1.58 -> 3.39 GiB as
+    four agents' prompts grew, and the first step at a longer context than
+    any measured ran past a margin the shorter ones had set."""
+    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    s = Scheduler(Host(None, Tok({})), working_set_bytes=80 * GIB)
+    s._tx = {"lo": (10_000, 1 * GIB), "hi": (50_000, 3 * GIB)}
+    s._spike = 3 * GIB
+    _rows_of(s, 50_000)
+    assert s._margin() == 4 * GIB                 # 3.75 under the floor
+    _rows_of(s, 60_000, 30_000)                  # 90k: 3 + 40k x 1/20k
+    assert s._transient(90_000) == 5 * GIB
+    assert s._margin() == int(6.25 * GIB)
+    # admitting a prompt adds its tokens to the context the step spans
+    assert s._limit(10_000) == 80 * GIB - int(5.5 * 1.25 * GIB)
+    _rows_of(s, 20_000)                          # inside what was measured
+    assert s._margin() == 4 * GIB
+
+
+def test_one_context_measured_scales_the_transient_in_proportion():
+    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    s = Scheduler(Host(None, Tok({})), working_set_bytes=200 * GIB)
+    s._spike = 2 * GIB
+    s._tx = {"lo": (40_000, 2 * GIB), "hi": (40_000, 2 * GIB)}
+    assert s._transient(100_000) == 5 * GIB       # the safe side
+
+
+def test_measure_records_the_transient_against_its_context():
+    import mlx.core as mx
+    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
+    s._active = lambda: 100 * GIB
+    real = mx.get_peak_memory
+    try:
+        mx.get_peak_memory = lambda: 101 * GIB
+        s._measure(100 * GIB, 20_000)
+        mx.get_peak_memory = lambda: 103 * GIB
+        s._measure(100 * GIB, 60_000)
+        mx.get_peak_memory = lambda: int(100.5 * GIB)
+        s._measure(100 * GIB, 70_000)            # a decode step: small
+    finally:
+        mx.get_peak_memory = real
+    assert s._tx == {"lo": (20_000, GIB), "hi": (70_000, 3 * GIB)}
+    assert s._spike == 3 * GIB
+
+
+def test_other_processes_gpu_memory_comes_off_the_working_set():
+    """iogpu.wired_limit_mb caps every process's GPU memory together."""
+    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    seen = {"v": 50 * GIB}
+    s = Scheduler(Host(None, Tok({})), working_set_bytes=100 * GIB,
+                  gpu_in_use=lambda: seen["v"])
+    s._local_active = lambda: 45 * GIB
+    s._cached = lambda: 2 * GIB
+    assert s._limit() == 100 * GIB - 3 * GIB - 5 * GIB
+    seen["v"] = 47 * GIB                         # they let go: the most
+    s._others_at = 0.0                           # recent readings rule
+    assert s._others_bytes() == 3 * GIB
+
+
+def test_mlx_buffer_cache_is_cleared_before_a_step_it_would_crowd():
+    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    s = Scheduler(Host(None, Tok({})), working_set_bytes=100 * GIB)
+    freed = []
+    s._active = s._local_active = lambda: 94 * GIB
+    s._cached = lambda: 0 if freed else 3 * GIB
+    s._release = lambda: freed.append(1)
+    _rows_of(s, 1000)
+    s._guard_memory()                            # 94 + 3 over a 95 limit
+    assert freed == [1]
+
+
+def test_an_admission_is_priced_as_the_copies_the_engine_makes():
+    """Measured on the 27B (M3, 2026-09-28; mlx active memory around each
+    admission): 24.6k tokens segmented [8223, 16357, 1, 1] beside a running
+    row grew memory 7.27 GiB; 41.0k tokens with a 24.6k hit, 7.96 alone
+    and 10.65 beside a row. Priced as a row and one checkpoint they were
+    3.4, 5.4 and 5.4."""
+    from knurlogic.engine.runtime import prompt as P
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=84 * GIB)
+    s._kv = (153944064.0, 67190.3)                # as learned there
+    row = S._Row(S.Job(P.ChatRequest(), P.PromptArgs()), None, [])
+    cks = S._checkpoints([[0] * 8223, [0] * 16357, [0], [0]], 24582, 0)
+    assert cks == [8223, 24580, 24581]
+    s._rows = {1: row}
+    assert abs(s._need(24582, cks) / GIB - 7.27) < 0.15
+    cks = S._checkpoints([[0] * 24581, [0] * 16446, [0], [0]], 41029, 24581)
+    assert cks == [41027, 41028]                  # none inside the hit
+    assert abs(s._need(41029, cks) / GIB - 10.65) < 0.25
+    s._rows = {}
+    assert abs(s._need(41029, cks) / GIB - 7.96) < 0.25
+
+
+def test_a_hit_inside_a_segment_keeps_that_segments_checkpoint():
+    from knurlogic.engine.runtime.scheduler import _checkpoints
+    segs = [[0] * 100, [0] * 100, [0] * 100]
+    assert _checkpoints(segs, 300, 0) == [100, 200]
+    assert _checkpoints(segs, 300, 150) == [200]
+    assert _checkpoints(segs, 300, 200) == []
+
+
 def test_397b_on_the_m4_admits_the_prompts_it_refused():
     """The M4, 2026-09-26: 397B at 106.9 GiB active, a 5.2 GiB measured
     spike, and 31k/20k-token prompts needing ~1 GiB each were refused with

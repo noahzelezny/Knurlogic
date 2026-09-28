@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import inspect
 from dataclasses import dataclass
+from typing import Optional
 
 #: Packages that can host a model architecture, in lookup order.
 #: Where an architecture module is looked up. Only mlx_lm's namespace: every
@@ -70,6 +71,24 @@ def memory() -> dict:
         "total_bytes": total,
         "headroom_bytes": max(ws - active, 0),
     }
+
+
+def gpu_in_use() -> Optional[int]:
+    """Bytes of GPU memory in use on this Mac by EVERY process (the IOGPU
+    driver's "In use system memory"), or None where it cannot be read.
+    iogpu.wired_limit_mb caps this total, not one process's share: the
+    27B on the M3 (2026-09-28) aborted Metal with its own peak under the
+    working set while other processes held 2.9 GiB of it."""
+    import re
+    import subprocess
+    try:
+        out = subprocess.run(["ioreg", "-r", "-c", "IOAccelerator", "-d1",
+                              "-w0"], capture_output=True, text=True,
+                             timeout=2).stdout
+    except Exception:
+        return None
+    m = re.search(r'"In use system memory"=(\d+)', out)
+    return int(m.group(1)) if m else None
 
 
 def models_module(host: str = "mlx_lm"):
