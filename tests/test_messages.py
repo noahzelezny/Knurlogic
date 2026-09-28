@@ -123,7 +123,9 @@ def test_non_streaming_round_trip():
     out = json.loads(body)
     assert out["type"] == "message" and out["role"] == "assistant"
     assert out["content"][0]["text"] == MARKER, "must be the engine's answer"
-    assert out["usage"] == {"input_tokens": 3, "output_tokens": 5}
+    assert out["usage"] == {"input_tokens": 3, "output_tokens": 5,
+                            "cache_creation_input_tokens": 0,
+                            "cache_read_input_tokens": 0}
 
 
 def test_streaming_emits_the_event_order_a_harness_parses():
