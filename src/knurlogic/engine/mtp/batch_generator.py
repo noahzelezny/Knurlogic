@@ -300,17 +300,8 @@ class MTPBatchGenerator(BatchGenerator):
 
         replay_fn = replay if self._head is not None and len(prefix) < n \
             else None
-        if vis is None:
-            # A model with no head has nothing to align: asking for a head
-            # cache discarded EVERY prefix hit on gemma (a 509-token shared
-            # system prompt re-prefilled on each request, 2026-09-25).
-            drafts = self._head is not None
-            cache, hcache, hit = split_pool_entry(
-                list(cache or []), self._n_trunk, drafts=drafts,
-                hit_len=len(prefix), replay=replay_fn)
-        else:
-            cache, hcache, hit, drafts = self._vision_entry(
-                list(cache or []), prompt, len(prefix), replay=replay_fn)
+        cache, hcache, hit, drafts = self._split_entry(
+            list(cache or []), prompt, len(prefix), vis, replay_fn)
         if len(prefix) > 0 and hit == 0:
             logger.info("prompt cache entry at %d/%d tokens has no aligned "
                         "head cache; prefilling from scratch", len(prefix), n)
@@ -319,7 +310,7 @@ class MTPBatchGenerator(BatchGenerator):
         params = RowParams(max_tokens=_NEVER,
                            dist=make_distribution(**sampling),
                            processors=list(procs or []), eos=set(),
-                           drafts=drafts,
+                           drafts=drafts, mirror=self._head is None,
                            keys=Keys(seed) if seed is not None else None)
         try:
             with mx.stream(self._stream):
@@ -384,6 +375,50 @@ class MTPBatchGenerator(BatchGenerator):
                        "encoded": int(getattr(req, "_knurlogic_encoded", 0))},
             "checkpoints_stored": n_ckpt,
         })
+
+    def _split_entry(self, entry: list, prompt: list, hit_len: int, vis,
+                     replay):
+        """(trunk, head cache, hit, drafts) for a row offered a prompt-cache
+        entry at `hit_len`. On a pipeline whose rank 0 drafts, rank 0's
+        (hit, drafts) are every rank's (Coord.ba): only rank 0 holds a head
+        cache to align, so only it can say whether the entry is usable for
+        a drafting row, and whether the row drafts decides its
+        checkpoints. A follower's own answer is the trunk hit, which rank
+        0's is either equal to or 0."""
+        coord = self._coord if (self._coord is not None
+                                and self._coord.head) else None
+        try:
+            if vis is None:
+                # A model with no head has nothing to align: asking for a
+                # head cache discarded EVERY prefix hit on gemma (a
+                # 509-token shared system prompt re-prefilled on each
+                # request, 2026-09-25).
+                drafts = self._head is not None
+                trunk, hcache, hit = split_pool_entry(
+                    entry, self._n_trunk, drafts=drafts, hit_len=hit_len,
+                    replay=replay)
+            else:
+                trunk, hcache, hit, drafts = self._vision_entry(
+                    entry, prompt, hit_len, replay=replay)
+        except Exception:
+            if coord is not None:
+                try:
+                    coord.ba(False, 0, False)
+                except RuntimeError:
+                    pass
+            raise
+        if coord is None:
+            return trunk, hcache, hit, drafts
+        hit0, drafts0 = coord.ba(True, hit, drafts)
+        if not coord.leader:
+            drafts = drafts0
+            if hit0 != hit:
+                if hit0:
+                    raise RuntimeError(
+                        f"rank 0 reuses {hit0} cached tokens; this rank's "
+                        f"entry gives {hit}")
+                trunk, hit = [], 0
+        return trunk, hcache, hit, drafts
 
     def _vision_entry(self, entry: list, key: list, hit_len: int,
                       replay=None):

@@ -618,16 +618,18 @@ def apply_set(op: dict, rank: int) -> str:
 
 def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
            completion_batch_size: int, prefill_step_size: int,
-           working_set: int, split: str = "tensor", head=None,
+           working_set: int, split: str = "tensor", drafting: bool = False,
            why: str = "") -> int:
     """Rank >= 1: apply rank 0's plans and step until told to stop. The
     return value is the number of steps taken.
 
     `split="pipeline"`: this rank holds a run of layers, not a slice of
     every layer. Its trunk returns zeros for logits (pipeline.Silent: its
-    samples are never used, so they are not compared with rank 0's), and
-    `head` (the drafting head, when every rank bound one) moves in step
-    with rank 0's through the Coord broadcasts."""
+    samples are never used, so they are not compared with rank 0's).
+    `drafting`: rank 0 drafts with an MTP head (agree_head). This rank
+    holds none; it runs rank 0's drafting steps -- the verify forward with
+    the drafted tokens, the rollback and replay -- as the Coord broadcasts
+    say."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from .request import control_machine
     from .scheduler import PromptCache
@@ -643,14 +645,13 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
         nonlocal ex
         if ex is None:
             gen = MTPBatchGenerator(
-                model, head if split == "pipeline" else None, stats={},
-                vision=None, why=why,
+                model, None, stats={}, vision=None, why=why,
                 completion_batch_size=completion_batch_size,
                 prefill_step_size=prefill_step_size, stream=stream)
             if split == "pipeline":
                 from . import pipeline as PL
                 PL.silence(gen)
-                PL.coordinate(gen, link.group)
+                PL.coordinate(gen, link.group, drafting=drafting)
             else:
                 _admission_coord(gen, link.group)
             ex = LocalExecutor(gen)
@@ -786,11 +787,13 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
         cut = (lambda m: PL.split(m, link.group, shares["bounds"]))
     else:
         cut = (lambda m: shard(m, link.group))
-    host = ModelHost(draft=draft and split == "pipeline",
+    # a follower never loads the MTP head: rank 0 drafts, and tells this
+    # rank whether it does (agree_head)
+    heads = agree_head(link) if split == "pipeline" else None
+    host = ModelHost(draft=False,
                      executes_artifact_code=executes_artifact_code,
                      shard=cut, vision=False, load_wait_s=3600.0,
-                     head_agree=(agree_head(link) if split == "pipeline"
-                                 else None), kv_bits=kv_bits,
+                     head_agree=heads, kv_bits=kv_bits,
                      cross_chip=cross_chip)
     host.load(path)
     if host.state != "ready":
@@ -800,22 +803,29 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                 mx.get_active_memory() / GIB)
     from knurlogic.cluster.jobs import after_load
     after_load()
-    from knurlogic.engine.serve import state
-    head = state.DRAFT.get("head") if state.DRAFT.get("on") else None
+    drafting = bool(heads and heads.leader)
     return follow(host.model, host.tokenizer, host.model_key, link,
                   prompt_cache_size=prompt_cache_size,
                   completion_batch_size=completion_batch_size,
                   prefill_step_size=prefill_step_size,
-                  working_set=working_set, split=split, head=head,
-                  why=str(state.DRAFT.get("why") or ""))
+                  working_set=working_set, split=split, drafting=drafting,
+                  why=("rank 0 drafts; this rank runs its verify steps"
+                       if drafting else "rank 0 does not draft"))
 
 
-def agree_head(link: Link):
-    """ModelHost's `head_agree` on a pipeline: every rank drafts or none
-    does (a head on one rank only would put B1 on one side of the ring)."""
-    def agree(has: bool) -> bool:
+class agree_head:
+    """ModelHost's `head_agree` on a pipeline, on every rank after its
+    load: rank 0's answer (it bound a head, or not) told to every rank.
+    Only rank 0 holds one; `leader` is what a follower's Coord needs
+    (every rank makes B1 / BA, or none does)."""
+
+    def __init__(self, link: Link):
+        self.link = link
+        self.leader = False
+
+    def __call__(self, has: bool) -> bool:
         got = mx.distributed.all_gather(mx.array([int(bool(has))]),
-                                        group=link.group,
+                                        group=self.link.group,
                                         stream=mx.cpu).tolist()
-        return all(got)
-    return agree
+        self.leader = bool(got[0])
+        return self.leader
