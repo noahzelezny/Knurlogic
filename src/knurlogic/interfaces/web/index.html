@@ -1855,6 +1855,7 @@ async function tick(){
     $('sub').textContent=`${a.model_type} · ${gb(a.size_bytes)}`;
     const b=[];
     if(a.is_vq) b.push(['VQ',1]);
+    if(d.vision && d.vision.served) b.push(['VISION',1]);
     if(a.bundled_runtime) b.push([a.bundled_runtime,1]);
     (d.architectures||[]).forEach(r=>b.push([r.module+' '+r.state,
       r.state==='OK'||r.state==='UNPINNED']));
