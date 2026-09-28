@@ -127,7 +127,8 @@ class App:
                 return events()
             return reply.complete(first)
         except O.ApiError as e:
-            raise TransportError(e.status, str(e)) from e
+            raise TransportError(e.status, str(e),
+                                 getattr(e, "retry_after", None)) from e
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -154,7 +155,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj).encode(), headers=headers)
 
     def _error(self, e: O.ApiError) -> None:
-        self._json(e.status, e.body())
+        ra = getattr(e, "retry_after", None)
+        self._json(e.status, e.body(),
+                   headers={"Retry-After": str(int(ra))} if ra else None)
 
     def _cors(self) -> None:
         o = self.headers.get("Origin")
@@ -354,7 +357,8 @@ class Handler(BaseHTTPRequestHandler):
         tok = getattr(self.app.scheduler.host, "tokenizer", None)
         if tok is None:
             return self._error(O.ApiError(503, "no model is loaded",
-                                          type_="server_error"))
+                                          type_="server_error",
+                                          retry_after=5))
         msgs = []
         for m in oai.get("messages") or []:
             c = m.get("content")
@@ -372,9 +376,11 @@ class Handler(BaseHTTPRequestHandler):
     def _raw(self, handler, raw: bytes) -> None:
         """A handler that writes its own response (an event stream has no
         length to declare, so it ends when the socket does)."""
-        def start(code, ctype):
+        def start(code, ctype, headers=None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "close")
             self._cors()
