@@ -22,3 +22,16 @@ def _no_real_page(monkeypatch):
     stops a real job -- so it points at a port nothing listens on, and a
     test that wants a page starts one and says where."""
     monkeypatch.setenv("KNURLOGIC_PAGE", "127.0.0.1:9")
+
+
+@pytest.fixture(autouse=True)
+def _no_recovery_thread(monkeypatch, tmp_path):
+    """Auto-recovery (interfaces/recovery.py) tracks what a launch starts
+    and relaunches it from a thread: a test's killed rank must not come back
+    after the test, nor a test write the REAL recovery.json. Tests call
+    recovery.tick by hand, on their own records and file."""
+    from knurlogic.interfaces import recovery
+    monkeypatch.setattr(recovery, "_THREAD", [1])
+    monkeypatch.setattr(recovery, "MODELS", {})
+    path = tmp_path / "recovery.json"
+    monkeypatch.setattr(recovery, "_path", lambda: path)
