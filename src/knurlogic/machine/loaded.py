@@ -65,6 +65,9 @@ class Resident:
     detail: str = ""
     can_unload: bool = False
     ident: str = ""                 # what an unload would name
+    #: knurlogic only: the 16-hex id given at launch (a single-Mac server),
+    #: or a cluster job's id (its instance is its job id); "" elsewhere
+    instance: str = ""
     #: knurlogic only: in_flight, pending, capacity, oldest_pending_s,
     #: holding from the server's /status.json; None elsewhere
     requests: dict | None = None
@@ -227,8 +230,23 @@ def _knurlogic(base: str) -> list:
         bytes_resident=int(m.get("active_bytes") or 0),
         detail=detail, can_unload=True,
         ident=a.get("path") or a.get("name") or "",
+        instance=_instance_of(base),
         requests=d.get("requests") if isinstance(d.get("requests"), dict)
         else None)]
+
+
+def _instance_of(base: str) -> str:
+    """The instance id of the knurlogic server at `base`: a cluster job's
+    id (rank 0 writes `job` into the same registry a single-Mac load
+    writes `instance` into), read from THIS box's own registry -- a peer's
+    row already carries whatever its own survey put there."""
+    from urllib.parse import urlparse
+    from knurlogic.machine import servers
+    port = urlparse(base).port
+    if not port:
+        return ""
+    rec = servers.registry().get(port) or {}
+    return str(rec.get("job") or rec.get("instance") or "")
 
 
 def survey(ports: dict | None = None, self_url: str = "") -> dict:
@@ -272,7 +290,10 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
                              name=Path(ours[port].get("artifact", "")).name,
                              where=base, state="loading",
                              detail="process up, port not answering yet",
-                             can_unload=True, ident=str(port))]
+                             can_unload=True, ident=str(port),
+                             instance=str(ours[port].get("job")
+                                         or ours[port].get("instance")
+                                         or ""))]
         out += rows
 
     doc = {
