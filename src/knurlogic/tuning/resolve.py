@@ -1155,13 +1155,16 @@ def _byte_bounds(layer_bytes: list, weights: list, cap: list):
     return bounds
 
 
-def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dict:
+def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
+                    leader_bytes: int = 0) -> dict:
     """Which layers each rank holds.
 
     `layer_bytes`: bytes of each layer, in order. `ranks`: in rank order,
     [{"name", "working_set_bytes", "memory_bandwidth_gbs" (None: unknown)}].
     `other_bytes`: what every rank holds besides its layers (embeddings,
-    final norm, lm_head -- replicated).
+    final norm, lm_head -- replicated). `leader_bytes`: what rank 0 alone
+    holds besides (the MTP head and the vision tower:
+    `pipeline_leader_bytes`), so rank 0 takes fewer layers for them.
 
     A rank's weight is what it can hold (working set less the replicated
     bytes), times its memory bandwidth when EVERY rank's is known (decode
@@ -1183,14 +1186,19 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dic
     wss = [int(r.get("working_set_bytes") or 0) for r in ranks]
     # a rank's layers leave its step margin free, as a single machine's
     # weights do (the scheduler's floor: 5%, at least 4 GiB)
-    cap = [w - int(other_bytes) - step_margin(w) for w in wss]
+    held = [int(other_bytes) + (int(leader_bytes) if i == 0 else 0)
+            for i in range(n)]
+    cap = [w - held[i] - step_margin(w) for i, w in enumerate(wss)]
     for i, c in enumerate(cap):
         if c <= 0:
             raise ValueError(
                 f"{names[i]}: working set {wss[i] / GIB:.1f} GiB "
-                f"holds none of the layers after the {other_bytes / GIB:.1f} "
-                f"GiB every rank keeps (embeddings, norm, lm_head) and its "
-                f"{step_margin(wss[i]) / GIB:.1f} GiB step margin")
+                f"holds none of the layers after the {held[i] / GIB:.1f} "
+                f"GiB it keeps besides them (embeddings, norm, lm_head"
+                + (", and on rank 0 the MTP head and vision tower"
+                   if i == 0 and leader_bytes else "")
+                + f") and its {step_margin(wss[i]) / GIB:.1f} GiB step "
+                f"margin")
     bws = [r.get("memory_bandwidth_gbs") for r in ranks]
     known = all(b for b in bws)
     weights = [cap[i] * (float(bws[i]) if known else 1.0) for i in range(n)]
@@ -1233,7 +1241,7 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dic
     reason = (f"{L} layers by {how}: " + "; ".join(
         f"rank {i} {names[i]} holds {counts[i]} (layers {bounds[i][0]}.."
         f"{bounds[i][1] - 1}, {got[i] / GIB:.1f} of {cap[i] / GIB:.1f} GiB"
-        f", leaves {(wss[i] - int(other_bytes) - got[i]) / GIB:.1f} GiB"
+        f", leaves {(wss[i] - held[i] - got[i]) / GIB:.1f} GiB"
         + (f", {float(bws[i]):g} GB/s" if bws[i] else "") + ")"
         for i in range(n)) + "; rank 0 holds the last layers and samples")
     return {"layers": counts, "bounds": [tuple(b) for b in bounds],
@@ -1241,8 +1249,9 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dic
 
 
 def pipeline_layer_bytes(artifact: Artifact) -> tuple:
-    """layer_bytes_of over the artifact's top-level safetensors headers
-    (the tower is not the trunk; an MTP sidecar is counted as replicated)."""
+    """layer_bytes_of over the artifact's top-level safetensors headers.
+    Neither the tower nor an MTP head is the trunk, and neither is on every
+    rank: rank 0 alone holds them (`pipeline_leader_bytes`)."""
     import json
     import struct
 
@@ -1266,7 +1275,36 @@ def pipeline_layer_bytes(artifact: Artifact) -> tuple:
                 continue
             if k.startswith(S.VISION_TOWER_PREFIXES):
                 continue
+            if f.name.startswith("mtp") or k.split(".")[0] == "mtp":
+                continue
             a, b = v.get("data_offsets", (0, 0))
-            sizes["mtp." + k if f.name.startswith("mtp") else k] = \
-                int(b) - int(a)
+            sizes[k] = int(b) - int(a)
     return layer_bytes_of(sizes, L)
+
+
+def pipeline_leader_bytes(artifact: Artifact) -> int:
+    """What rank 0 of a pipeline holds and no other rank does: the MTP
+    head (it drafts where the last layers are; the followers only run the
+    verify rows) and the vision tower (it encodes at tokenize and ships the
+    image rows; a follower binds the family without one). Read off the
+    safetensors headers."""
+    import json
+    import struct
+
+    total = 0
+    for f in sorted(artifact.path.glob("*.safetensors")):
+        try:
+            with open(f, "rb") as fh:
+                (hn,) = struct.unpack("<Q", fh.read(8))
+                if hn <= 0 or hn > (1 << 28):
+                    continue
+                header = json.loads(fh.read(hn))
+        except (OSError, ValueError, struct.error):
+            continue
+        for k, v in header.items():
+            if k == "__metadata__" or not isinstance(v, dict):
+                continue
+            if f.name.startswith("mtp") or k.split(".")[0] == "mtp":
+                a, b = v.get("data_offsets", (0, 0))
+                total += int(b) - int(a)
+    return total + _tower_bytes(artifact)[0]

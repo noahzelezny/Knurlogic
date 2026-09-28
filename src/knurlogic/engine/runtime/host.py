@@ -36,10 +36,12 @@ class ModelHost:
                  image_store_bytes: Optional[int] = None,
                  shard=None, vision: bool = True, load_wait_s: float = 0.0,
                  head_agree=None, kv_bits: Optional[int] = None,
-                 cross_chip: Optional[dict] = None):
+                 cross_chip: Optional[dict] = None, tower: bool = True):
         """`shard(model)`: split the weights in place before they are read
         (a tensor ring: loaded lazily, split, then evaluated, so a rank
-        never holds the whole model). `vision=False` binds no tower.
+        never holds the whole model). `vision=False` binds no tower;
+        `tower=False` binds the vision family without one (a follower rank
+        of a split model: rank 0 encodes and ships the image rows).
         `load_wait_s`: how long to wait for the machine's load lock (ranks
         of one ring on one machine load one after another).
         `kv_bits`: store attention K/V at 8/6/4 bits (engine/kvquant.py);
@@ -49,10 +51,12 @@ class ModelHost:
         self.cross_chip = cross_chip
         self.shard = shard
         #: head_agree(bound: bool) -> bool, called after the head binds (or
-        #: does not) on every load: a pipeline's ranks draft together or
-        #: not at all (engine/runtime/tensor.agree_head)
+        #: does not) on every load of a pipeline rank: rank 0's answer,
+        #: told to every rank -- only rank 0 holds a head, and the others
+        #: follow its drafting steps (engine/runtime/tensor.agree_head)
         self.head_agree = head_agree
         self.vision = vision
+        self.tower = tower
         self.load_wait_s = load_wait_s
         self.draft = draft
         self.image_store_bytes = image_store_bytes
@@ -218,11 +222,12 @@ class ModelHost:
         from knurlogic.engine.serve import vision
         if not self.vision:
             state.VISION.update(serve=None, model=self.model,
-                                error="not on a tensor-split ring")
+                                error="vision is off for this instance")
             vision.set_spec(None)
             return
         try:
-            vision.bind(path, self, store_bytes=self.image_store_bytes)
+            vision.bind(path, self, store_bytes=self.image_store_bytes,
+                        tower=self.tower)
         except Exception as e:
             # A vision build that fails must not take the text model with
             # it; it is said on /status.json and images get a 400.

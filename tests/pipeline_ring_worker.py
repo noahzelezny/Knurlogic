@@ -4,9 +4,10 @@
                                (counts: layers per rank, rank order) runs a
                                prefill + fixed decode tokens; rank 0 also
                                runs the unsplit model and writes both logits
-    mtp <always>               the tiny qwen3_5 with a random MTP head in the
-                               batch engine on both ranks, rank 0 drafting and
-                               sampling, the follower silenced; rank 0 also
+    mtp <always>               the tiny qwen3_5 with a random MTP head in
+                               rank 0's batch engine, rank 0 drafting and
+                               sampling, the follower silenced and holding
+                               no head (it runs the verify rows); rank 0 also
                                runs the unsplit engine and writes both token
                                streams and every rank's broadcast counts
 
@@ -145,18 +146,23 @@ def mtp(link, out_path, always):
     model, head, prompts = _tiny_with_head(vocab)
     PL.split(model, link.group, PL.bounds_of([1, 3]))
     stats = {}
-    gen = MTPBatchGenerator(model, head, stats=stats, prefill_step_size=16)
+    gen = MTPBatchGenerator(model, head if link.rank == 0 else None,
+                            stats=stats, prefill_step_size=16)
     if link.rank > 0:
         PL.silence(gen)
-    coord = PL.coordinate(gen, link.group)
+    coord = PL.coordinate(gen, link.group, drafting=True)
     split, steps = drive(gen, prompts, coord)
     counts = mx.distributed.all_gather(
         mx.array([coord.calls["b0"], coord.calls["b1"], coord.calls["b2"],
-                  steps]), group=link.group, stream=mx.cpu).tolist()
+                  steps, coord.calls["ba"]]), group=link.group,
+        stream=mx.cpu).tolist()
+    sent = mx.distributed.all_gather(
+        mx.array([sum(sd.overlapped for sd in PL.sends_of(model))]),
+        group=link.group, stream=mx.cpu).tolist()
     link.barrier()
     if link.rank == 0:
         json.dump({"whole": whole, "split": split,
-                   "calls": [counts[:4], counts[4:]],
+                   "calls": [counts[:5], counts[5:]], "overlapped": sent,
                    "accepted": stats.get("accepted", 0),
                    "drafted": stats.get("steps", 0)}, open(out_path, "w"))
 
@@ -254,7 +260,7 @@ def engine(link, out_path, fail="", split_kind="pipeline"):
         steps = T.follow(model, tok, ("tiny", None, None), link,
                          prompt_cache_size=4, completion_batch_size=32,
                          prefill_step_size=16, working_set=0,
-                         split="pipeline", head=head)
+                         split="pipeline", drafting=True)
         return
     gen = MTPBatchGenerator(model, head, stats={}, prefill_step_size=16,
                             completion_batch_size=32)
@@ -290,6 +296,197 @@ def _tensor_engine(link, out_path, fail, admissions, drain, tok):
     json.dump({"whole": None, "split": split}, open(out_path, "w"))
 
 
+def hit(link, out_path):
+    """A prompt-cache hit only the follower could use: rank 0 stores the
+    first prompt's checkpoint (at 5 tokens) WITHOUT its head cache, as a
+    non-drafting row would; the follower stores its own (which never has
+    one). The second prompt shares those 5 tokens: rank 0's drafting row
+    cannot use a headless entry and prefills from scratch, and the
+    follower must too (Coord.ba) -- its own trie says 5. Both prompts'
+    tokens are the unsplit executor's."""
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.runtime.executor import (Admission, Checkpoint,
+                                                   LocalExecutor, Token)
+    from knurlogic.engine.runtime.request import control_machine
+    from knurlogic.engine.runtime.scheduler import PromptCache
+    tok = FakeTok()
+    key = ("tiny", None, None)
+
+    def admission(p, cache=None, hit=0):
+        sm, _ = control_machine(tok, "normal")
+        rest = p[hit:]
+        segs = [rest[:5 - hit], rest[5 - hit:]] if hit < 5 else [rest]
+        return Admission(segments=[s for s in segs if s], max_tokens=20,
+                         cache=cache, prefix=p[:hit], sampling={"seed": 7},
+                         state_machine=sm,
+                         wire={"penalties": {}, "initial": "normal"})
+
+    def drain(ex, uid, on_ckpt=None):
+        toks = []
+        for _ in range(10_000):
+            evs = ex.step()
+            for e in evs:
+                if isinstance(e, Token) and e.uid == uid:
+                    toks.append(e.token)
+                if isinstance(e, Checkpoint) and on_ckpt:
+                    on_ckpt(e)
+            if any(type(e).__name__ == "Finished" and e.uid == uid
+                   for e in evs):
+                return toks
+        raise AssertionError("did not finish")
+
+    model, head, prompts = _tiny_with_head(512)
+    a = prompts[0][:12]
+    b = a[:5] + [7, 8, 9, 10, 11, 12, 13]
+    whole = None
+    if link.rank == 0:
+        ex = LocalExecutor(MTPBatchGenerator(model, head, prefill_step_size=4,
+                                             completion_batch_size=8))
+        whole = [drain(ex, ex.insert(admission(p))) for p in (a, b)]
+        ex.close()
+    model, head, _ = _tiny_with_head(512)
+    PL.split(model, link.group, PL.bounds_of([1, 3]))
+    if link.rank > 0:
+        T.follow(model, tok, key, link, prompt_cache_size=4,
+                 completion_batch_size=8, prefill_step_size=4,
+                 working_set=0, split="pipeline", drafting=True)
+        return
+    gen = MTPBatchGenerator(model, head, stats={}, prefill_step_size=4,
+                            completion_batch_size=8)
+    PL.coordinate(gen, link.group)
+    ring = T.Ring(link, split="pipeline")
+    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    pc = T.JournalPromptCache(PromptCache(4), ring.journal)
+    n_trunk = gen._n_trunk
+
+    def store(e):
+        # the trunk only: the entry a non-drafting row would have left
+        pc.insert(key, e.tokens, e.cache[:n_trunk], "system",
+                  origin=("checkpoint", e.uid))
+    split = [drain(ex, ex.insert(admission(a)), store)]
+    c, rest = pc.fetch(key, b)
+    got = len(b) - len(rest)
+    split.append(drain(ex, ex.insert(admission(b, c, got))))
+    ring.stop()
+    json.dump({"whole": whole, "split": split, "hit": got},
+              open(out_path, "w"))
+
+
+def image(link, out_path, split_kind="pipeline"):
+    """A prompt with two images on a split tiny qwen3_5 (the vision
+    goldens' model): rank 0 alone has the tower and the image store; the
+    follower binds the family without one (MirrorVision) and gets each
+    image's ref in the admit op and its rows in the admission. The first
+    prompt stores a checkpoint just past the last image on both ranks; the
+    second shares that prefix (images inside the hit) and goes on in text,
+    so the follower's key must be rank 0's for its trie to hit, and its
+    positions must come from the refs alone. Both prompts' tokens are the
+    unsplit engine's."""
+    import mlx.core as mx
+    sys.path.insert(0, os.path.dirname(__file__))
+    import test_vision_qwen as tq
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.runtime.executor import (Admission, Checkpoint,
+                                                   LocalExecutor, Token)
+    from knurlogic.engine.runtime.request import control_machine
+    from knurlogic.engine.runtime.scheduler import PromptCache
+    from knurlogic.engine.vision import key as K
+    from knurlogic.engine.vision import registry
+    from knurlogic.engine.vision.request import MirrorVision, VisionServe
+    from knurlogic.engine.vision.store import ImageStore
+    from pathlib import Path
+    tok = FakeTok()
+    fam = "qwen3_5"
+    mkey = ("tiny-vl", None, None)
+    arrays, meta = tq._golden(fam)
+    d = Path(out_path).parent / f"rung{link.rank}"
+    d.mkdir(exist_ok=True)
+    tq._model_dir(d, fam, meta, "hf")
+
+    def admission(p, cache=None, hit=0, cut=None):
+        sm, _ = control_machine(tok, "normal")
+        rest = p[hit:]
+        segs = [rest[:cut - hit], rest[cut - hit:]] if cut else [rest]
+        return Admission(segments=[s for s in segs if s], max_tokens=10,
+                         cache=cache, prefix=p[:hit], sampling={"seed": 7},
+                         state_machine=sm,
+                         wire={"penalties": {}, "initial": "normal"})
+
+    def drain(ex, uid, on_ckpt=None):
+        toks = []
+        for _ in range(10_000):
+            evs = ex.step()
+            for e in evs:
+                if isinstance(e, Token) and e.uid == uid:
+                    toks.append(e.token)
+                if isinstance(e, Checkpoint) and on_ckpt:
+                    on_ckpt(e)
+                if type(e).__name__ == "RowFailure":
+                    raise e.error if hasattr(e, "error") else \
+                        RuntimeError(repr(e))
+            if any(type(e).__name__ == "Finished" and e.uid == uid
+                   for e in evs):
+                return toks
+        raise AssertionError("did not finish")
+
+    vs = key = None
+    if link.rank == 0:
+        f = registry.build(fam, str(d), None, meta["config"])
+        f.load_weights(str(d))
+        vs = VisionServe(f, ImageStore(), mkey)
+        refs = []
+        for i in (1, 2):
+            pix, ref = f.preprocess(tq._image(arrays, i), f"sha{i}")
+            vs.store.put(mkey, f.encode(pix, ref))
+            refs.append(ref)
+        key = tq._key(f, arrays["ids"], refs)
+    else:
+        vs = MirrorVision(registry.build(fam, str(d), None, meta["config"]))
+        assert vs.family.tower is None
+    whole = None
+    if link.rank == 0:
+        cut = K.image_spans(key)[-1].end + 1
+        second = key[:cut] + [int(x) for x in arrays["t2_ids"][-12:]]
+        ex = LocalExecutor(MTPBatchGenerator(
+            tq._trunk(fam, meta), None, vision=vs, prefill_step_size=16,
+            completion_batch_size=8))
+        whole = [drain(ex, ex.insert(admission(p))) for p in (key, second)]
+        ex.close()
+    model = tq._trunk(fam, meta)
+    if split_kind == "pipeline":
+        PL.split(model, link.group, PL.bounds_of([1, 3]))
+    else:
+        T.shard(model, link.group)
+    if link.rank > 0:
+        T.follow(model, tok, mkey, link, prompt_cache_size=4,
+                 completion_batch_size=8, prefill_step_size=16,
+                 working_set=0, split=split_kind, vision=vs)
+        return
+    gen = MTPBatchGenerator(model, None, stats={}, vision=vs,
+                            prefill_step_size=16, completion_batch_size=8)
+    if split_kind == "pipeline":
+        coord = PL.coordinate(gen, link.group)
+    ring = T.Ring(link, split=split_kind)
+    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    coord = gen._coord
+    pc = T.JournalPromptCache(PromptCache(4), ring.journal)
+
+    def store(e):
+        pc.insert(mkey, e.tokens, e.cache, "user",
+                  origin=("checkpoint", e.uid))
+    split = [drain(ex, ex.insert(admission(key, cut=cut)), store)]
+    c, rest = pc.fetch(mkey, second)
+    got = len(second) - len(rest)
+    split.append(drain(ex, ex.insert(admission(second, c, got))))
+    ring.stop()
+    json.dump({"whole": whole, "split": split, "hit": got, "cut": cut,
+               "images": coord.calls["img"]}, open(out_path, "w"))
+
+
 def main(argv):
     import faulthandler
     faulthandler.dump_traceback_later(float(os.environ.get(
@@ -299,6 +496,10 @@ def main(argv):
     mode, out_path = argv[0], argv[1]
     if mode == "engine":
         engine(link, out_path, *argv[2:])
+    elif mode == "image":
+        image(link, out_path, *argv[2:])
+    elif mode == "hit":
+        hit(link, out_path)
     elif mode == "logits":
         logits(link, out_path, argv[2], [int(x) for x in argv[3].split(",")])
     else:

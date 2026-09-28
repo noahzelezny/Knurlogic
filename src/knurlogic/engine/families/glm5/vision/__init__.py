@@ -236,6 +236,7 @@ def build(model_path: str, text_model: Any, config: Dict[str, Any]):
         ip = ip.get("image_processor", ip)
         if ip.get("do_normalize", True) is not False:
             mean, std = ip.get("image_mean"), ip.get("image_std")
-    fam = Glm5VisionFamily(config, image_mean=mean, image_std=std)
-    fam.load_weights(model_path)
-    return fam
+    # the tower is read by serve/vision.bind (fam.load_weights), not here:
+    # it was read twice per load, and a follower rank builds the family
+    # without one
+    return Glm5VisionFamily(config, image_mean=mean, image_std=std)

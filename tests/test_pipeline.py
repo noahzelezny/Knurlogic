@@ -107,6 +107,49 @@ def test_layer_bytes_keep_the_head_and_the_rest_out_of_the_layers():
     assert per == [10, 8] and other == 155
 
 
+def test_what_rank_0_alone_holds_counts_on_rank_0_alone():
+    """The MTP head and the vision tower live on rank 0 only: their bytes
+    come off rank 0's room for layers, not every rank's."""
+    per = [GIB] * 40
+    even = R.pipeline_shares(per, _ranks(104, 104), other_bytes=4 * GIB)
+    lead = R.pipeline_shares(per, _ranks(104, 104), other_bytes=4 * GIB,
+                             leader_bytes=10 * GIB)
+    assert even["layers"] == [20, 20]
+    assert lead["layers"][0] < 20 < lead["layers"][1]
+    assert "leaves" in lead["reason"]
+    with pytest.raises(ValueError, match="MTP head"):
+        R.pipeline_shares([GIB] * 4, _ranks(10, 104), other_bytes=GIB,
+                          leader_bytes=5 * GIB)
+
+
+def test_the_head_and_tower_are_not_in_the_replicated_bytes(tmp_path):
+    import json
+    import struct
+
+    def shard(path, tensors):
+        header = {}
+        at = 0
+        for k, n in tensors.items():
+            header[k] = {"dtype": "U8", "shape": [n],
+                         "data_offsets": [at, at + n]}
+            at += n
+        h = json.dumps(header).encode()
+        path.write_bytes(struct.pack("<Q", len(h)) + h + b"\0" * at)
+    shard(tmp_path / "model.safetensors", {
+        "language_model.model.layers.0.mlp.weight": 10,
+        "language_model.model.layers.1.mlp.weight": 10,
+        "language_model.model.embed_tokens.weight": 100,
+        "vision_tower.blocks.0.attn.qkv.weight": 30})
+    shard(tmp_path / "mtp.safetensors", {"mtp.layers.0.mlp.weight": 50})
+
+    class A:
+        path = tmp_path
+        raw_config = {"text_config": {"num_hidden_layers": 2}}
+    per, other = R.pipeline_layer_bytes(A)
+    assert per == [10, 10] and other == 100
+    assert R.pipeline_leader_bytes(A) == 50 + 30     # head + tower
+
+
 # ------------------------------------------------------------ refusals
 
 def test_pipeline_families():
@@ -220,15 +263,19 @@ def test_a_pipeline_over_an_8_bit_kv_cache_is_the_whole_model(
 def test_mtp_drafting_on_a_pipeline_is_the_unsplit_engine(tmp_path, always):
     """The tiny qwen3_5 with a random head (rejected almost every step:
     the replay path at its hardest; `always` drafts every step on a vocab of
-    8, so accepts happen too): rank 0 drafts and samples, the follower's
-    logits are zeros -- and every row's tokens are the unsplit engine's.
-    Every rank made the same broadcasts: B1 once per decode step, B2 once
-    per drafting step, B0 once per admission."""
+    8, so accepts happen too): rank 0 alone holds the head, drafts and
+    samples; the follower holds none and its logits are zeros -- and every
+    row's tokens are the unsplit engine's. Every rank made the same
+    broadcasts: B1 once per decode step, B2 once per drafting step, B0 and
+    BA once per admission."""
     d = _ring(tmp_path, "mtp", "1" if always else "0")
     assert d["split"] == d["whole"]
-    (b0, b1, b2, steps), follower = d["calls"]
-    assert follower == [b0, b1, b2, steps]
-    assert b0 == 3                                  # three admissions
+    (b0, b1, b2, steps, ba), follower = d["calls"]
+    assert follower == [b0, b1, b2, steps, ba]
+    assert b0 == ba == 3                            # three admissions
+    # the follower's prefill chunks (16 tokens; prompts of 37, 9, 70) were
+    # sent while the next one computed; rank 0 sends nothing
+    assert d["overlapped"][0] == 0 and d["overlapped"][1] > 0
     assert 0 < b2 <= b1 <= steps
     assert d["drafted"] > 0
     if always:
@@ -242,6 +289,32 @@ def test_the_serving_path_follows_rank_0s_plan_on_a_pipeline(tmp_path):
     and the follower stops when told."""
     d = _ring(tmp_path, "engine")
     assert d["split"] == d["whole"] and all(len(t) == 30 for t in d["whole"])
+
+
+def test_a_prefix_only_the_follower_could_use_is_prefilled_on_every_rank(
+        tmp_path):
+    """Rank 0 alone holds the head, so only rank 0 can tell whether a
+    prompt-cache entry is usable for a drafting row: the follower takes
+    rank 0's answer (BA) and prefills from scratch with it -- the second
+    prompt's tokens are the unsplit engine's, and the ring stays in step."""
+    d = _ring(tmp_path, "hit")
+    assert d["hit"] == 5
+    assert d["split"] == d["whole"]
+    assert all(len(t) == 20 for t in d["whole"])
+
+
+@pytest.mark.parametrize("split", ["pipeline", "tensor"])
+def test_images_on_a_split_model_are_the_unsplit_engines(tmp_path, split):
+    """Two images in a prompt, rank 0 alone holding the tower: every row's
+    tokens are the unsplit engine's, the rows travelled once (the first
+    prompt; the second's images are inside its prompt-cache hit), and the
+    follower's trie hit the same image prefix as rank 0's (follow raises
+    Desync if its hit differs)."""
+    d = _ring(tmp_path, "image", split, timeout=300)
+    assert d["hit"] == d["cut"]
+    assert d["images"] == 1
+    assert d["split"] == d["whole"]
+    assert all(len(t) == 10 for t in d["whole"])
 
 
 @pytest.mark.parametrize("split,fail", [("pipeline", "nan"),
@@ -300,6 +373,27 @@ def test_unwrap_sees_through_both_ends_of_a_one_layer_stage():
     both = PL.Send(PL.Recv(lin, 1, None, mx.float32), 0, None, mx.float32)
     assert PL.unwrap(both) is lin and PL.unwrap(lin) is lin
     assert type(both) is not nn.Linear and both.weight is lin.weight
+
+
+def test_overlap_finds_a_stages_send_and_is_undone_on_the_way_out(
+        monkeypatch):
+    """`overlapped` turns on the stage's Send (found through a one-layer
+    stage's Recv) for the prefill chunks only, and KNURLOGIC_PIPELINE_
+    OVERLAP=off leaves every send synchronous (the A/B)."""
+    import types
+    import mlx.nn as nn
+    from knurlogic.engine.runtime import pipeline as PL
+    send = PL.Send(PL.Recv(nn.Linear(2, 2), 1, None, mx.float32), 0, None,
+                   mx.float32)
+    model = types.SimpleNamespace(model=types.SimpleNamespace(
+        layers=[nn.Linear(2, 2), send]))
+    assert PL.sends_of(model) == [send]
+    with PL.overlapped(model):
+        assert send.overlap
+    assert not send.overlap
+    monkeypatch.setenv("KNURLOGIC_PIPELINE_OVERLAP", "off")
+    with PL.overlapped(model):
+        assert not send.overlap
 
 
 @pytest.mark.parametrize("start,end,recv,send", [(0, 3, False, True),

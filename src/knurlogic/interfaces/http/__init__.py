@@ -158,7 +158,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     mh = ModelHost(draft=draft and (not ring or pipe), head_agree=agree,
                    executes_artifact_code=bool(artifact.model_file),
                    image_store_bytes=settings.get("image_store_bytes"),
-                   shard=shard, vision=not ring,
+                   shard=shard, vision=True,
                    load_wait_s=3600.0 if ring else 0.0,
                    kv_bits=settings.get("kv_bits"),
                    cross_chip=settings.get("cross_chip"))

@@ -251,6 +251,55 @@ class VisionServe:
         return key, seg_keys, types, state
 
 
+class MirrorVision:
+    """A follower rank's vision on a split model (engine/runtime/tensor.py):
+    the served model's Family with NO tower and no image store. Rank 0
+    encodes every image (the one tokenize); a follower gets each image's
+    ref in the admit op (`add_refs`) and its rows in the admission
+    (pipeline.Coord.images), and embeds and positions with the family's own
+    code -- so its prompt, its positions and its cache key are rank 0's.
+
+    Duck-types VisionServe where the batch generator reads it: `family`,
+    `spec`, `lookup()`, `release()`. Refs are kept like the store's (never
+    evicted: positions for a text turn after an image need its grid) until
+    `clear()` -- a reset, as rank 0's store is cleared at unload."""
+
+    def __init__(self, family: Any):
+        self.family = family
+        self._refs: Dict[Tuple[str, str], Any] = {}
+
+    @property
+    def spec(self):
+        return self.family.spec
+
+    def add_refs(self, refs: List[List[Any]]) -> None:
+        """The admit op's refs: [sha, proc_hash, n_tokens, grid_thw]."""
+        from . import ImageRef
+        for sha, ph, n, grid in refs:
+            self._refs[(sha, ph)] = ImageRef(
+                sha=sha, proc_hash=ph, n_tokens=int(n),
+                grid_thw=tuple(grid) if grid else None)
+
+    def lookup(self):
+        """(features, refs): no features here -- they arrive with the
+        admission -- so the first is None."""
+        from . import ImageEvicted
+
+        def refs(sha: str, ph: str):
+            r = self._refs.get((sha, ph))
+            if r is None:
+                raise ImageEvicted(f"no ref for image {sha[:12]} ({ph}) on "
+                                   f"this rank; rank 0's admit op carries it")
+            return r
+        return None, refs
+
+    def release(self, images) -> None:
+        """Nothing is pinned here."""
+
+    def clear(self) -> None:
+        self._refs.clear()
+
+
 def tagged(args: Any) -> bool:
     """Was this request marked as carrying images on the HTTP thread?"""
     return bool(getattr(args, "_knurlogic_images", False))
@@ -261,5 +310,6 @@ def tag(args: Any) -> None:
 
 
 __all__ = ["IMAGE_TYPES", "image_parts", "image_source", "has_images",
-           "with_placeholders", "VisionServe", "tag", "tagged"]
+           "with_placeholders", "VisionServe", "MirrorVision", "tag",
+           "tagged"]
 

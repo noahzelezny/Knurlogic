@@ -14,7 +14,8 @@ def _admit(**kw):
     op = {"op": "admit", "uid": 3, "prompt": [1, 2, 3, 4, 5],
           "segs": [[4], [5]], "hit": 3, "max_tokens": 16,
           "sampling": {"temp": 0.7, "seed": 11},
-          "penalties": {"repetition_penalty": 1.1}, "initial": "normal"}
+          "penalties": {"repetition_penalty": 1.1}, "initial": "normal",
+          "images": [], "refs": []}
     op.update(kw)
     return op
 
@@ -73,6 +74,46 @@ def test_plan_empty_and_control():
 def test_plan_refuses_what_is_not_a_plan(bad):
     with pytest.raises(P.PlanError):
         P.decode(bad)
+
+
+def test_an_image_key_travels_and_comes_back_as_rank_0s_key():
+    """A follower's prompt cache is keyed by the same sentinels as rank
+    0's: the admit op carries the key as ids plus its image runs and refs,
+    and rebuilds it exactly -- a run the hit cut into (k0 > 0) and the same
+    image twice included."""
+    from knurlogic.engine.vision import key as K
+    a = [("img", "aa", "p1", k) for k in range(3)]
+    b = [("img", "bb", "p1", k) for k in range(2)]
+    key = [1, 2] + a + [3] + b + a + [4]
+    grids = {"aa": (1, 2, 6), "bb": (1, 2, 4)}
+    ids, images, refs = P.key_to_wire(
+        key, lambda sha, ph: ({"aa": 3, "bb": 2}[sha], grids[sha]))
+    assert ids[:2] == [1, 2] and ids[2] == -1 and ids[5] == 3
+    assert refs == [["aa", "p1", 3, [1, 2, 6]], ["bb", "p1", 2, [1, 2, 4]]]
+    assert images == [[2, 5, 0, 0], [6, 8, 1, 0], [8, 11, 0, 0]]
+    op = _admit(prompt=ids, segs=[ids[4:]], hit=4, images=images, refs=refs)
+    back = P.decode(P.encode({"ops": [op]}))["ops"][0]
+    assert P.key_from_wire(back["prompt"], back["images"],
+                           back["refs"]) == key
+    # a key sliced inside an image keeps its k0
+    cut = key[3:]
+    ids, images, refs = P.key_to_wire(cut, lambda s, p: (3 if s == "aa"
+                                                        else 2, None))
+    assert images[0] == [0, 2, 0, 1]
+    assert P.key_from_wire(ids, images, refs) == cut
+    assert P.key_to_wire([5, 6], None) == ([5, 6], [], [])
+    assert K.has_image(P.key_from_wire(ids, images, refs))
+
+
+@pytest.mark.parametrize("images,refs", [
+    ([[0, 9, 0, 0]], [["aa", "p", 3, None]]),        # past the prompt
+    ([[0, 2, 1, 0]], [["aa", "p", 3, None]]),        # no such ref
+    ([[0, 3, 0, 1]], [["aa", "p", 3, None]]),        # past the image
+    ([[0, 2, 0, 0]], [["aa", "p", "3", None]]),      # n_tokens not an int
+])
+def test_plan_refuses_an_image_run_that_does_not_fit(images, refs):
+    with pytest.raises(P.PlanError):
+        P.encode({"ops": [_admit(images=images, refs=refs)]})
 
 
 def test_plan_admit_must_be_the_prompt_after_the_hit():
