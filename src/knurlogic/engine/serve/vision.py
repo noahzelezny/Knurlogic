@@ -30,14 +30,19 @@ def vision_status() -> dict:
     return out
 
 
-def bind(model_path: str, provider, *, store_bytes: int | None = None):
+def bind(model_path: str, provider, *, store_bytes: int | None = None,
+         tower: bool = True):
     """Build the loaded model's Family through the registry and serve it.
 
     Called after every load. model_type and config come from the artifact's
     config.json; `registry.build` answers None for a model without vision
     (unregistered type, no vision_config, family package absent), and that
     is the ordinary case, not an error. The store is keyed by mlx-lm's
-    `model_key`, the same key its prompt cache uses."""
+    `model_key`, the same key its prompt cache uses.
+
+    `tower=False`: a follower rank of a split model -- the family without
+    its tower or a store (engine.vision.request.MirrorVision); rank 0
+    encodes and ships the image rows."""
     import json
     from pathlib import Path
 
@@ -53,6 +58,12 @@ def bind(model_path: str, provider, *, store_bytes: int | None = None):
     state.VISION.update(model=provider.model, error="")
     if fam is None:
         return None
+    if not tower:
+        from knurlogic.engine.vision.request import MirrorVision
+        serve = MirrorVision(fam)
+        state.VISION["serve"] = serve
+        set_spec(fam.spec)
+        return serve
     n = fam.load_weights(str(model_path))
     serve = VisionServe(fam, ImageStore(store_bytes or DEFAULT_MAX_BYTES),
                         provider.model_key)
@@ -67,6 +78,8 @@ def clear() -> None:
     they index dies with the model), and say no vision is served."""
     v = state.VISION.get("serve")
     if v is not None:
-        v.store.clear()
+        store = getattr(v, "store", None)
+        # a follower's MirrorVision has no store, only refs
+        (store if store is not None else v).clear()
     state.VISION.update(serve=None, model=None, error="")
     set_spec(None)
