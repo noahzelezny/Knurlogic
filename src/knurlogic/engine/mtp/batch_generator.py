@@ -210,7 +210,7 @@ class MTPBatchGenerator(BatchGenerator):
     None): the family, the image store and the pins taken at tokenize."""
 
     def __init__(self, model, head, *, stats: dict | None = None,
-                 vision=None, **kw):
+                 vision=None, why: str = "", **kw):
         super().__init__(model, **kw)
         self._stack = contextlib.ExitStack()
         self._head = head
@@ -261,7 +261,12 @@ class MTPBatchGenerator(BatchGenerator):
         if name:
             logger.info("batch engine drafting with the %s MTP head", name)
         else:
-            logger.info("batch engine without a drafting head (vision)")
+            # `why`: state.DRAFT's reason (no sidecar, MTP off, a pipeline
+            # rank that could not bind one). "vision" only when this engine
+            # serves images: the line once said it on a text-only ring.
+            logger.info("batch engine without a drafting head%s%s",
+                        " (vision model)" if vision is not None else "",
+                        f": {why}" if why else "")
 
     # ------------------------------------------------------------ admission
 

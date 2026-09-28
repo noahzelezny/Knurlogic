@@ -491,6 +491,7 @@ class Scheduler:
         gen = MTPBatchGenerator(
             self.host.model, head,
             stats=state.DRAFT if head is not None else {}, vision=None,
+            why=str(state.DRAFT.get("why") or ""),
             completion_batch_size=self.completion_batch_size,
             prefill_step_size=self.prefill_step_size, stream=self._stream)
         if pipe:
@@ -515,7 +516,7 @@ class Scheduler:
             gen = MTPBatchGenerator(
                 self.host.model, head,
                 stats=state.DRAFT if head is not None else state.VISION_STATS,
-                vision=vision,
+                vision=vision, why=str(state.DRAFT.get("why") or ""),
                 completion_batch_size=self.completion_batch_size,
                 prefill_step_size=self.prefill_step_size,
                 stream=self._stream)
