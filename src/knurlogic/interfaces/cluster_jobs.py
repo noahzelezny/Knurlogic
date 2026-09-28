@@ -688,6 +688,20 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     why = _loading_elsewhere(spec["job"], reg)
     if why:
         refusals.append(why)
+    stale = _wait_for_exit(reg, PEER_S)
+    if stale:
+        refusals.append("; ".join(
+            f"rank {r} of job {j} is still exiting on {me}"
+            for j, r, _ in stale))
+    else:
+        conflict = _slot_conflict(spec, reg)
+        if conflict:
+            j, r, pid = conflict
+            left = J.wait_gone([pid], PEER_S, alive=lambda p: _alive(j, p))
+            if left:
+                refusals.append(f"rank {r} of job {j} is still exiting on "
+                                f"{me} and holds this job's ring port; "
+                                f"wait for it to finish")
     if rank == 0:
         from knurlogic.machine.servers import is_our_server
         from knurlogic.machine.servers import registry as sreg
@@ -781,6 +795,46 @@ def _exiting(reg: dict) -> dict:
             if r.get("stopping")}
 
 
+def _wait_for_exit(reg: dict, wait_s: float) -> list:
+    """Wait up to `wait_s` for every rank on this machine that was stopped
+    (a previous job, mid-relaunch) to be gone. -> [(job, rank, pid)] still
+    alive after the wait: a job being stopped counts as alive until its
+    process is reaped, and its memory -- and its ring port -- are not
+    free until then."""
+    going = {int(r["pid"]): (str(r.get("job") or ""), r.get("rank"))
+             for r in reg.values() if r.get("stopping")}
+    if not going:
+        return []
+    left = J.wait_gone(list(going), wait_s,
+                       alive=lambda p: _alive(going[p][0], p))
+    return [(going[p][0], going[p][1], p) for p in left]
+
+
+def _slot_conflict(spec: dict, reg: dict):
+    """(job, rank, pid) of an alive rank of a DIFFERENT job on this
+    machine whose ring port falls in this job's slot, else None. A
+    coordinator's `_slot` only scans its own registry (`_used_slots`),
+    so a quick relaunch can still hand a job a slot a previous job's
+    still-live rank holds on a PEER machine; this is the peer-side net
+    that catches it before two jobs' ranks talk over the same port."""
+    try:
+        port = int(spec["hosts"][spec["rank"]].rsplit(":", 1)[1])
+    except (IndexError, ValueError, TypeError, AttributeError, KeyError):
+        return None
+    slot = (port - RING_PORT) // 20
+    for rec in reg.values():
+        j = str(rec.get("job") or "")
+        if not j or j == spec["job"]:
+            continue
+        rp = rec.get("ring_port")
+        if not isinstance(rp, int) or (rp - RING_PORT) // 20 != slot:
+            continue
+        pid = int(rec["pid"])
+        if _alive(j, pid):
+            return j, rec.get("rank"), pid
+    return None
+
+
 def start(job: str, *, spawn=None, wait_s: float | None = None) -> tuple:
     """POST /peer/cluster/start: spawn this page's prepared rank -- once
     every stopped rank on this machine is gone (up to START_WAIT_S), and
@@ -810,6 +864,15 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
     why = _loading_elsewhere(spec["job"], J.registry())
     if why:
         return 409, {"error": f"{me} refuses rank {spec['rank']}: {why}"}
+    conflict = _slot_conflict(spec, J.registry())
+    if conflict:
+        j, r, pid = conflict
+        left = J.wait_gone([pid], wait_s, alive=lambda p: _alive(j, p))
+        if left:
+            return 409, {"error": f"{me} refuses rank {spec['rank']}: rank "
+                                  f"{r} of job {j} is still exiting on "
+                                  f"{me} and holds this job's ring port; "
+                                  f"its memory is not free"}
     d = J.job_dir(spec["job"])
     files = {"hostfile": str(d / f"hostfile-rank{spec['rank']}.json"),
              "ibv": str(d / "ibv-devices.json")}
