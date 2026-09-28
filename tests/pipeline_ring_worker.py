@@ -79,8 +79,16 @@ def logits(link, out_path, family, counts):
     from knurlogic.engine.runtime import pipeline as PL
     ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]
     then = [31, 104, 331, 32, 439, 214]
-    whole = run(build(family), ids, then) if link.rank == 0 else None
-    model = build(family)
+    bits = os.environ.get("KNURLOGIC_KV_BITS")
+
+    def built():
+        m = build(family)
+        if bits:
+            from knurlogic.engine import kvquant
+            assert kvquant.install(m, kvquant.parse_bits(bits)) > 0
+        return m
+    whole = run(built(), ids, then) if link.rank == 0 else None
+    model = built()
     info = PL.split(model, link.group, PL.bounds_of(counts))
     split = run(model, ids, then)
     link.barrier()

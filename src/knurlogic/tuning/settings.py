@@ -322,12 +322,15 @@ KNOB_DOC = {
         "taken, the loser re-tried on a backoff. Off: every step drafts "
         "while a head is bound, whatever it costs. Only with MTP on."),
     "KNURLOGIC_KV_BITS": (
-        "precision of the attention KV cache: bf16, or 8, 6 or 4 bits",
+        "precision of the attention KV cache: bf16, or 8, 6 or 4 bits. "
+        "8 is the recommendation: every family takes it",
         "the cache (and the prompt cache's entries) take about 53%, 41% or "
         "28% of bf16's memory; K/V are dequantized for each step, so decode "
-        "is not faster and may be slower. Attention layers only -- "
-        "recurrent state and sliding windows stay bf16. Unmeasured on a "
-        "real model."),
+        "is not faster and may be slower. Attention K/V (GLM: its MLA "
+        "latent) only -- recurrent state, sliding windows and sparse-"
+        "attention indexer keys stay bf16. GLM takes 8 only. 8-bit moves "
+        "the tiny test models' logits by ~0.3% of their range; not yet "
+        "measured on a real model."),
     "KNURLOGIC_CROSS_CHIP": (
         "identical results across chips: a split over an M3 and an M4 "
         "gives the same tokens a split over two of one",
