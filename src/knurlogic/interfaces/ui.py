@@ -352,9 +352,24 @@ def _spawn_unlocked(path: str, port: int, tune: str = "balanced",
                     "(started_here) or GET /v1/models on the port"}
 
 
+def tracked_load(**kw) -> dict:
+    """mcp.load, for a load this page was asked for: a server it starts is
+    relaunched if it dies unasked (interfaces/recovery.py)."""
+    from knurlogic.interfaces import mcp, recovery
+    out = mcp.load(**kw)
+    if isinstance(out, dict) and out.get("pid") and out.get("port"):
+        recovery.track_single(int(out["port"]), {
+            "artifact": out.get("starting") or kw.get("artifact"),
+            "tune": kw.get("tune"), "sets": kw.get("sets") or {},
+            "draft": kw.get("draft", True)}, pid=int(out["pid"]))
+    return out
+
+
 def _stop(port: int) -> dict:
     import os
     import signal
+    from knurlogic.interfaces import recovery
+    recovery.cancel_port(port)          # asked for: never recovered
     reg = registry()
     rec = reg.get(port)
     if not rec:
@@ -424,8 +439,7 @@ def _load_fn(serve_port: int):
             # words. The page loading past a check the MCP enforces would be
             # a capability on one side only.
             if act == "load":
-                from knurlogic.interfaces import mcp
-                return _then_refresh(mcp.load(artifact=target,
+                return _then_refresh(tracked_load(artifact=target,
                                 port=int(req.get("port") or serve_port),
                                 tune=req.get("tune") or "balanced",
                                 sets=req.get("sets") or {},
@@ -687,8 +701,7 @@ def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
     port = port if isinstance(port, int) and not isinstance(port, bool) \
         and 1024 <= port < 65536 else _SERVE_PORT["n"]
     if load is None:
-        from knurlogic.interfaces import mcp
-        load = mcp.load
+        load = tracked_load
     # the fit check is this machine's, against its own load budget
     return 200, load(artifact=path, port=port, tune=tune, sets=sets,
                      force=bool(req.get("force")))
@@ -824,14 +837,33 @@ def with_jobs(doc: dict) -> dict:
         if j.get("port") and (j.get("phase") != "stopped"
                               or j["port"] not in ports):
             ports[j["port"]] = j
+    from knurlogic.interfaces import recovery
+    for j in js:
+        j["recovery"] = (recovery.for_job(j["job"]) if j.get("job")
+                         else None) or (recovery.served_view(
+                             j["port"], j.get("phase") == "ready")
+                             if j.get("port") and j.get("phase")
+                             not in ("stopped", "stopping") else None)
     rows = []
     for r in doc.get("resident") or []:
-        u = urlparse((r.get("where") or "") if isinstance(r, dict) else "")
+        if not isinstance(r, dict):
+            rows.append(r)
+            continue
+        u = urlparse(r.get("where") or "")
         j = ports.get(u.port) if u.port else None
+        rec = None
+        if u.port and r.get("runtime") == "knurlogic" and \
+                u.hostname in ("127.0.0.1", "localhost", None):
+            rec = recovery.for_port(u.port) or recovery.served_view(
+                u.port, r.get("state") not in ("loading",))
+        if j and j.get("recovery"):
+            rec = j["recovery"]
+        r = dict(r, recovery=rec)
         rows.append(dict(r, cluster={k: j.get(k) for k in (
             "job", "split", "link", "machines", "leader", "phase")})
                     if j else r)
-    return dict(doc, resident=rows, jobs=js)
+    # tracked here and not serving now: waiting to be relaunched, or failed
+    return dict(doc, resident=rows, jobs=js, recovery=recovery.not_serving())
 
 
 #: How long after its start a server's load is still reported (`loads`):

@@ -291,6 +291,22 @@ def is_rank(pid: int, job: str) -> bool:
     return f"--job {job}" in out or f"--job={job}" in out
 
 
+def pids_of_job(job: str) -> list:
+    """Every process on this machine running a rank of `job` (by its
+    command line), records or not."""
+    import subprocess
+    if not JOB_RX.fullmatch(str(job or "")):
+        return []
+    try:
+        out = subprocess.run(["pgrep", "-f", f"[-]-job[ =]{job}( |$)"],
+                             capture_output=True, text=True,
+                             timeout=5).stdout
+    except Exception:
+        return []
+    return sorted(int(x) for x in out.split() if x.isdigit()
+                  and int(x) != os.getpid())
+
+
 def terminate(pids: list, grace: float = GRACE_S, alive=None,
               reap: float = 0.0) -> list:
     """SIGTERM every pid, wait up to `grace`, SIGKILL what is left, then
