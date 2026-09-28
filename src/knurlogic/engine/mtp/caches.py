@@ -144,7 +144,9 @@ def check_snapshot_semantics(caches, advance) -> bool:
     `advance()` (one forward through the model), and check the snapshot's
     arrays are still what they were. True means the family may use
     cache_semantics="reassign"; False means it writes state in place and must
-    copy. Returns True for an all-attention cache list (nothing to alias).
+    copy. Returns True for an all-attention cache list (nothing to alias):
+    attention snapshots, batched ("battn") and composite ("attn-list") too,
+    hold positions, not arrays.
 
     This is the gate that lets a new family claim the cheap path, and it fails
     on an in-place cache by construction — see tests/test_mtp_caches.py, where
@@ -152,11 +154,11 @@ def check_snapshot_semantics(caches, advance) -> bool:
     """
     snaps = snapshot(caches, copy=False)
     witness = [[mx.array(x) if isinstance(x, mx.array) else x for x in s[2]]
-               for s in snaps if s[0] != "attn"]
+               for s in snaps if s[0] == "state"]
     for w in witness:
         mx.eval(*[x for x in w if isinstance(x, mx.array)])
     advance()
-    held = [s[2] for s in snaps if s[0] != "attn"]
+    held = [s[2] for s in snaps if s[0] == "state"]
     for kept, ref in zip(held, witness):
         for a, b in zip(kept, ref):
             if not isinstance(a, mx.array) or not isinstance(b, mx.array):

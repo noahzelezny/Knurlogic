@@ -48,3 +48,34 @@ def test_batched_cachelist_rollback_can_fail():
         import ArraysCache, CacheList
     with pytest.raises(TypeError):
         caches.snapshot([CacheList(ArraysCache(size=2))])
+
+
+def test_snapshot_semantics_check_takes_batched_and_composite_caches():
+    """Found by Qwen3.8-Flash-Next-6bit (cluster shootout 2026-09-27):
+    the check copied s[2] of every non-"attn" snapshot, and "battn" /
+    "attn-list" snapshots carry None there -- a TypeError on exactly the
+    caches the batch engine uses, instead of an answer."""
+    import mlx.core as mx
+    from types import SimpleNamespace
+    from knurlogic.engine.mtp import caches as C
+
+    class Batched:                       # keys + trim, per-row offsets
+        def __init__(self):
+            self.keys, self.offset = mx.zeros((1,)), mx.array([3])
+
+        def trim(self, n):
+            pass
+
+        def size(self):
+            return 3
+
+    state = SimpleNamespace(cache=[mx.array([1.0])])
+
+    def reassign():
+        state.cache = [mx.array([2.0])]
+    assert C.check_snapshot_semantics([Batched(), state], reassign) is True
+
+    def mutate():
+        state.cache[0][0] = 5.0
+    state.cache = [mx.array([1.0])]
+    assert C.check_snapshot_semantics([Batched(), state], mutate) is False
