@@ -8,8 +8,8 @@ released rungs load through (gemma4). No MTP head.
 # dequantized arrays their source layer returns. Unmeasured on a real model.
 _KVQ = {"bits": [8, 6, 4],
         "why": "full-attention layers only; sliding-window layers are "
-               "bounded by their window and stay bf16. Unmeasured on a "
-               "real model"}
+               "bounded by their window and stay bf16. 8 is the "
+               "recommendation"}
 
 MANIFEST = {
     "name": "gemma4",

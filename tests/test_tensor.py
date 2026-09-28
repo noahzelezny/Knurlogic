@@ -377,10 +377,15 @@ def test_a_ring_serves_its_first_model_and_refuses_switching():
         Scheduler(H(), tensor=R(), prompt_cache_bytes=1 << 30)
 
 
-def test_a_two_rank_split_computes_the_whole_models_logits(tmp_path):
+@pytest.mark.parametrize("kv_bits", ["bf16", "8"])
+def test_a_two_rank_split_computes_the_whole_models_logits(tmp_path,
+                                                           kv_bits):
     """Two processes on 127.0.0.1, the tiny qwen3_5_moe split in two
     (float32, so rounding cannot hide a wrong split): the split model's
-    logits over a prefill and six decode steps are the unsplit model's."""
+    logits over a prefill and six decode steps are the unsplit model's.
+    At 8-bit KV too: groups run along a head's dims, so a rank's half of
+    the heads quantizes as it does in the whole cache (up to a last-bit
+    difference in the sharded projections that feed it)."""
     import json
     import os
     import socket
@@ -399,7 +404,7 @@ def test_a_two_rank_split_computes_the_whole_models_logits(tmp_path):
                                  [f"127.0.0.1:{free_port()}"]]))
     here = Path(__file__).parent
     out = tmp_path / "logits.json"
-    env = dict(os.environ, MLX_HOSTFILE=str(hosts),
+    env = dict(os.environ, MLX_HOSTFILE=str(hosts), KNURLOGIC_KV_BITS=kv_bits,
                PYTHONPATH=os.pathsep.join(
                    [str(here.parent / "src"), str(here)] + sys.path))
     procs = [subprocess.Popen(
@@ -416,7 +421,12 @@ def test_a_two_rank_split_computes_the_whole_models_logits(tmp_path):
     d = json.loads(out.read_text())
     whole, split = np.array(d["whole"]), np.array(d["split"])
     assert whole.shape == split.shape == (7, whole.shape[1])
-    assert np.abs(whole - split).max() < 1e-3, np.abs(whole - split).max()
+    # 8-bit: the sharded projections round differently in the last float32
+    # bit, which can move an element across a quantization step (~0.4% of
+    # its group's range) -- bounded by the 8-bit gate of test_kvquant, 1%
+    # of the largest |logit|, not bit-equal
+    tol = 1e-3 if kv_bits == "bf16" else 0.01 * np.abs(whole).max()
+    assert np.abs(whole - split).max() < tol, np.abs(whole - split).max()
     assert (whole.argmax(-1) == split.argmax(-1)).all()
 
 
