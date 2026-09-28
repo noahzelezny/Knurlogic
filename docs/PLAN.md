@@ -32,13 +32,25 @@ exo for clustering, and carries the work that was trapped in forks of both.
                   runtime (exo's read, never driven); one load budget; which
                   build of each dependency is installed
     tuning/       settings with their evidence; resolve() -> env + argv
-    interfaces/   MCP (9 tools), page, CLI, serve, Anthropic Messages,
-                  connect, doctor
+    interfaces/   MCP (9 tools), CLI, serve, connect, doctor; http/ is
+                  the chat wire (OpenAI, Anthropic Messages, scout routes),
+                  page/ is the page (server.py = `knurlogic ui`,
+                  documents.py, assets/index.html)
     cluster/      knurlogic's own multi-machine: peers, Bonjour discovery,
-                  the `--host cluster` gate; exo's /state is read only as
-                  one witness of which machines exist. Nothing drives exo
-                  (the exo wrap -- `serve --cluster`, overrides, `place` /
-                  `unplace` -- was removed 2026-09-25)
+                  the `--host cluster` gate, and running one model across
+                  machines (launch.py page to page, jobs.py, recovery.py);
+                  launch and recovery never import interfaces/ -- the page
+                  injects what they need at startup. exo's /state is read
+                  only as one witness of which machines exist. Nothing
+                  drives exo (the exo wrap -- `serve --cluster`, overrides,
+                  `place` / `unplace` -- was removed 2026-09-25)
+    context_management/  what the model sees: history surgery
+                  (context_edits.py) and compaction (compaction.py);
+                  model-agnostic, no mlx, no HTTP
+
+**Where new code goes.** Chat wire -> `interfaces/http`; the page ->
+`interfaces/page`; multi-machine orchestration -> `cluster`; history and
+compaction logic -> `context_management`; model runtime -> `engine`.
 
 **Not yet run on a real model since the 2026-09-24 reorganisation**
 (engine/serve split, families move): one vision_gate pass (gemma e4b) on

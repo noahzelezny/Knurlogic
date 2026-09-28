@@ -1,4 +1,4 @@
-"""interfaces/ui.py: what peers are serving, gathered for the page.
+"""interfaces/page/server.py: what peers are serving, gathered for the page.
 
 No network: peers are stand-ins and every fetch is a stub.
 """
@@ -6,7 +6,7 @@ No network: peers are stand-ins and every fetch is a stub.
 import time
 from types import SimpleNamespace
 
-from knurlogic.interfaces import ui
+from knurlogic.interfaces.page import server as ui
 
 
 def peer(name, host, state="answering", port=8899):
@@ -109,7 +109,7 @@ def test_a_peer_may_only_offer_endpoints_on_its_own_address():
     """What a peer reports becomes a chat proxy target: an endpoint on
     another host (a rogue Bonjour advertiser pointing at the router, say)
     is dropped, not proxied to."""
-    from knurlogic.interfaces.ui import _peer_where
+    from knurlogic.interfaces.page.server import _peer_where
     assert _peer_where("http://127.0.0.1:8097", "10.0.0.2") == \
         "http://10.0.0.2:8097"
     assert _peer_where("http://10.0.0.2:8097", "10.0.0.2") == \
