@@ -1,10 +1,11 @@
-"""interfaces/ui.py `/peek` and web.py `/connect.json`: read-only views of
-other servers for the page. No network: every fetch is a stub."""
+"""interfaces/page/server.py `/peek` and page/documents.py `/connect.json`:
+read-only views of other servers for the page. No network: every fetch is a stub."""
 
 import json
 from types import SimpleNamespace
 
-from knurlogic.interfaces import ui, web
+from knurlogic.interfaces.page import server as ui
+from knurlogic.interfaces.page import documents as web
 
 
 class Peers:

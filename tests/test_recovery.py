@@ -1,4 +1,4 @@
-"""Auto-recovery (interfaces/recovery.py): a model that dies unasked is
+"""Auto-recovery (cluster/recovery.py): a model that dies unasked is
 relaunched by the page that launched it, bounded; a requested stop or an
 out-of-memory one never is.
 
@@ -13,9 +13,9 @@ import time
 import pytest
 
 from knurlogic.cluster import jobs as J
-from knurlogic.interfaces import cluster_jobs as C
-from knurlogic.interfaces import recovery as R
-from knurlogic.interfaces import ui
+from knurlogic.cluster import launch as C
+from knurlogic.cluster import recovery as R
+from knurlogic.interfaces.page import server as ui
 
 from test_cluster_jobs import alive, two_pages, wait  # noqa: F401
 

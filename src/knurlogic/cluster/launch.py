@@ -59,8 +59,9 @@ def _no_status():
 
 
 # What this module needs of the page that runs it, injected by that page at
-# startup (interfaces/ui.py) so this module never imports it. Unset, this
-# machine is alone: no status snapshot (node_info() answers) and no peers.
+# startup (interfaces/page/server.py) so this module never imports it.
+# Unset, this machine is alone: no status snapshot (node_info() answers)
+# and no peers.
 #: () -> (status snapshot, _): the page's own status document
 status_fn = _no_status
 #: () -> [peer record]: the page's PEERS store
@@ -948,7 +949,7 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
     if "port" in rec:
         # this job's recovery row (a relaunch carries it; a launch by
         # somebody clears it), for rank 0's own /v1/residency
-        from knurlogic.interfaces import recovery
+        from knurlogic.cluster import recovery
         recovery.write_port(rec["port"], spec.get("recovery"))
     _ensure_watcher()
     return 200, {"started": spec["job"], "rank": spec["rank"],
@@ -970,7 +971,7 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     after `grace`), forget it, and -- when `propagate` -- tell every other
     page of the job to do the same."""
     job = str(job or "")
-    from knurlogic.interfaces import recovery
+    from knurlogic.cluster import recovery
     if recovery.kind(reason) == "requested":
         recovery.cancel_job(job)          # asked for: never recovered
     with _LOCK:
@@ -1095,7 +1096,7 @@ def watch_once(now: float | None = None) -> list:
             if line:
                 why = f"{why}: link init failed: {line}"[:300]
             else:
-                from knurlogic.interfaces.recovery import memory_line
+                from knurlogic.cluster.recovery import memory_line
                 mem = next((x for x in (memory_line(_log_tail(
                     r.get("log"))) for r in recs) if x), "")
                 if mem:
@@ -1197,7 +1198,7 @@ def start_watching_existing() -> None:
     and the models an earlier page process was recovering are again."""
     if J.registry():
         _ensure_watcher()
-    from knurlogic.interfaces import recovery
+    from knurlogic.cluster import recovery
     recovery.restore()
 
 
@@ -1322,7 +1323,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     the job (`follow`, a thread by default): a rank whose link init fails
     on that cable has the job relaunched on the next one, the cable
     remembered as failing for the pair. `tried`/`moved`: that relaunch.
-    `recovering`: this is auto-recovery's relaunch (interfaces/recovery.py),
+    `recovering`: this is auto-recovery's relaunch (cluster/recovery.py),
     carrying its report to rank 0's page; any other launch that starts is
     tracked there for recovery."""
     post = post or _post
@@ -1569,7 +1570,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     if note:
         print(f"cluster job {job}: {note}", file=sys.stderr, flush=True)
     if recovering is None:
-        from knurlogic.interfaces import recovery
+        from knurlogic.cluster import recovery
         # a relaunch is the same launch: this machine order (so the same
         # split), this port, link, tune and settings
         recovery.track_cluster(

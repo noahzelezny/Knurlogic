@@ -82,8 +82,9 @@ def _no_load(**_):
 
 
 # What recovery needs of the page that runs it, injected by that page at
-# startup (interfaces/ui.py) so this module never imports it. Unset, there
-# is nothing to relaunch with and nothing of the page's to look at.
+# startup (interfaces/page/server.py) so this module never imports it.
+# Unset, there is nothing to relaunch with and nothing of the page's to
+# look at.
 #: () -> [peer record]: the page's PEERS store
 peers_fn = list
 #: port -> (Popen, artifact) | None: a server this page process started
@@ -493,7 +494,7 @@ def _defer(rec: dict, now: float, why: str) -> str:
 # ------------------------------------------------------------ cluster
 
 def _tick_cluster(rec: dict, now: float) -> str:
-    from knurlogic.interfaces import cluster_jobs as C
+    from knurlogic.cluster import launch as C
     if rec.get("state") == "failed":
         return ""
     if not rec.get("pending"):
@@ -551,7 +552,7 @@ def _tick_cluster(rec: dict, now: float) -> str:
 
 def _cluster_phase(rec: dict) -> str:
     from knurlogic.cluster import jobs as J
-    from knurlogic.interfaces import cluster_jobs as C
+    from knurlogic.cluster import launch as C
     job = rec["job"]
     phases = []
     recs = J.by_job().get(job)
@@ -589,7 +590,7 @@ def _fresh_peers(rec: dict) -> list:
 def _machines_down(rec: dict) -> str:
     """"" when every machine of the job answers its page, else who does
     not."""
-    from knurlogic.interfaces import cluster_jobs as C
+    from knurlogic.cluster import launch as C
     post = rec["args"].get("post") or C._post
     for m in rec["order"]:
         if not m.get("page"):
@@ -608,7 +609,7 @@ def _leftovers(rec: dict, job: str) -> str:
     """"" when no rank of `job` is left on any of its machines (by record
     and by process), else which."""
     from knurlogic.cluster import jobs as J
-    from knurlogic.interfaces import cluster_jobs as C
+    from knurlogic.cluster import launch as C
     if not job:
         return ""
     here = [int(r["pid"]) for r in J.by_job().get(job, [])] \

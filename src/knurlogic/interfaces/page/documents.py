@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 
 GIB = 1 << 30
-PAGE = Path(__file__).parent / "web" / "index.html"
+PAGE = Path(__file__).parent / "assets" / "index.html"
 
 
 def _json(obj) -> tuple:
@@ -36,7 +36,7 @@ def _text(s: str) -> tuple:
 def anthropic_images_to_openai(content) -> list:
     """Anthropic Messages `content` blocks -> OpenAI `content` parts.
 
-    `interfaces/messages.py` translates a Claude-shaped request onto the
+    `interfaces/http/messages.py` translates a Claude-shaped request onto the
     engine's OpenAI surface (`serve.py`'s `messages_fn`), and until now that
     translation dropped image blocks on the floor -- text only. An Anthropic
     image block is `{"type": "image", "source": {"type": "base64",

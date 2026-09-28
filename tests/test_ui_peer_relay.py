@@ -1,4 +1,4 @@
-"""interfaces/ui.py: a peer's model reached through the peer's PAGE.
+"""interfaces/page/server.py: a peer's model reached through the peer's PAGE.
 
 A peer's model server listens on the peer's loopback; this page reaches it
 through the peer page's /peer/v1/... relay, by model name. Everything here
@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from knurlogic.interfaces import ui
+from knurlogic.interfaces.page import server as ui
 
 SSE = b": keepalive\n\ndata: {\"a\": 1}\n\ndata: [DONE]\n\n"
 PLAIN = {"id": "x", "choices": [{"message": {"content": "hi"}}]}
@@ -189,7 +189,7 @@ def test_relay_refuses_transfer_encoding(two):
                                   "/peer/cluster/stop", ui.PEER_LOAD_PATH])
 def test_peer_cluster_and_load_refuse_transfer_encoding(two, monkeypatch,
                                                        path):
-    from knurlogic.interfaces import cluster_jobs
+    from knurlogic.cluster import launch as cluster_jobs
     _, peer, _ = two
     called = []
     monkeypatch.setattr(cluster_jobs, "peer_route",

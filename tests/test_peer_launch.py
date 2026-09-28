@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from knurlogic.interfaces import ui
+from knurlogic.interfaces.page import server as ui
 from knurlogic.machine import artifact
 
 

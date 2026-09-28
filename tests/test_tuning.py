@@ -167,7 +167,7 @@ def test_a_knob_the_bundled_runtime_never_reads_is_called_out(tmp_path):
     bundled runtime on this machine reads it. A resolved setting that does
     nothing is the exact failure this package exists to prevent."""
     from knurlogic.machine.artifact import Artifact
-    from knurlogic.interfaces.web import knob_reach
+    from knurlogic.interfaces.page.documents import knob_reach
     (tmp_path / "config.json").write_text('{"model_type":"x","model_file":"model.py"}')
     (tmp_path / "model.py").write_text(
         'import os\nC = os.environ.get("VQ_DECODE_CHUNK", "32")\n')
@@ -342,7 +342,7 @@ def test_a_dial_offers_only_positions_that_were_measured():
 def test_the_cache_dial_stops_at_what_the_box_can_hold(tmp_path):
     """A control that lets you pick a setting the resolver would refuse is a
     control that lies. The cap is headroom, and it says so."""
-    from knurlogic.interfaces import web
+    from knurlogic.interfaces.page import documents as web
     from knurlogic.machine.artifact import Artifact
     (tmp_path / "config.json").write_text(
         '{"model_type":"x","model_file":"model.py","vq_linear":{"a":1},'
@@ -433,7 +433,7 @@ def test_preview_reads_and_sets_nothing(tmp_path, monkeypatch):
     import json
     import os
 
-    from knurlogic.interfaces import web
+    from knurlogic.interfaces.page import documents as web
 
     d = tmp_path / "m"
     d.mkdir()
@@ -455,7 +455,7 @@ def test_preview_says_which_knobs_are_launch_only(tmp_path):
     `restart` cannot be changed afterwards at all."""
     import json
 
-    from knurlogic.interfaces import web
+    from knurlogic.interfaces.page import documents as web
 
     d = tmp_path / "m"
     d.mkdir()
