@@ -692,14 +692,15 @@
    cursor:pointer;line-height:0;border-radius:var(--r)}
  .bactions button:hover,.bactions button:focus-visible{color:var(--fg)}
  .bactions svg{width:14px;height:14px}
+ /* One header only: the gear (.wait) mark IS the summary, live or not --
+    no second, inner "thinking" triangle on top of it. */
  details.think{border:1px solid var(--line);border-radius:var(--r);
    padding:6px 9px;font-size:13px;color:var(--dim);max-width:100%}
- details.think summary{cursor:pointer;color:var(--faint);list-style:none}
+ details.think summary{cursor:pointer;list-style:none;margin:0}
  details.think summary::-webkit-details-marker{display:none}
- /* the marker the hidden native one was; the word is the summary's own */
- details.think summary:before{content:"\25B8  "}
- details.think[open] summary:before{content:"\25BE  "}
+ details.think summary.wait{display:inline-flex}
  .think pre{white-space:pre-wrap;color:var(--faint);font-size:13px;margin:4px 0 0}
+ details.think:not([open]) pre{display:none}
  .md pre{background:oklch(.09 0 0);border:1px solid var(--line);padding:10px;
    border-radius:var(--r);overflow:auto;position:relative}
  @media(prefers-color-scheme:light){.md pre{background:var(--med)}}
@@ -820,16 +821,27 @@
         <!-- How full the conversation is: the last reply's prompt + answer
              over the served model's window. Read-only: there is no context
              knob to turn. -->
-        <div class="cs"><span class="cslab" style="margin:0;flex:1">context<i class="info" tabindex="0">i<span class="bub">knurlogic reserves nothing up front: the model&#39;s whole context window is always available, so there is nothing to set here.</span></i></span><span class="ro" id="cctx" style="text-transform:none">—</span></div>
+        <div class="cs"><span class="cslab" style="margin:0;flex:1">context<i class="info" tabindex="0">i<span class="bub">knurlogic reserves nothing up front: the model&#39;s whole context window is always available. The limit below is only about what THIS page sends once a chat grows past it.</span></i></span><span class="ro" id="cctx" style="text-transform:none">—</span></div>
+        <div class="cs">
+          <label for="cctxlimit">context limit<i class="info" tabindex="0">i<span class="bub">Caps how much of this chat is sent as it grows. Past the limit, the oldest turns are dropped from the request -- the system prompt and your latest message are always kept. Default is the model&#39;s whole window, so normally nothing is dropped.</span></i></label>
+          <select id="cctxlimit">
+            <option value="0">model max</option>
+            <option value="32768">32k</option>
+            <option value="65536">64k</option>
+            <option value="131072">128k</option>
+            <option value="262144">262k</option>
+          </select>
+        </div>
+        <div class="cs" id="cctxnoterow" hidden><span class="ro" id="cctxnote" style="text-transform:none"></span></div>
         <div class="cs">
           <label for="cmax">max tokens<i class="info" tabindex="0">i<span class="bub">The longest the answer may run, thinking included. It caps the reply, not the conversation: the list stops at the model&#39;s context window, which prompt and answer share.</span></i></label>
           <!-- Steps, not a number field or a slider: nobody types 3187, and
                a select is one click and as wide as its longest label. -->
           <select id="cmax">
             <option value="256">256</option><option value="512">512</option>
-            <option value="1024">1k</option><option value="2048" selected>2k</option>
+            <option value="1024">1k</option><option value="2048">2k</option>
             <option value="4096">4k</option><option value="8192">8k</option>
-            <option value="16384">16k</option><option value="32768">32k</option>
+            <option value="16384" selected>16k</option><option value="32768">32k</option>
             <option value="65536">64k</option>
           </select>
         </div>
@@ -3217,7 +3229,7 @@ function newChat(modelHint, where, vision){
   CHATS.unshift({id:CCUR, title:'new chat', model:modelHint||SERVEDNAME||'',
                  where:where||'', vision:vision===undefined?null:!!vision,
                  at:Date.now(), updated:Date.now(), msgs:[]});
-  saveChats(); switchTab('chat'); renderChats(); renderClog();
+  saveChats(); switchTab('chat'); renderChats(); renderClog(); showCtxNote(0);
   clearAttachments(); chatGate(); $('cq').focus();
 }
 // Vision for a running model, from /models.json (the server's answer). exo
@@ -3378,23 +3390,33 @@ const MAXDEF=[256,512,1024,2048,4096,8192,16384,32768,65536];
 const MAXALL=MAXDEF.concat([131072,262144,524288,1048576]);
 let MAXWANT=null;               // what the person picked, kept across models
 let CTXLEN=0;                   // the served model's window; 0 is unknown
+let CTXWANT=0;                  // the person's context limit; 0 is "model max"
+// Shared with showCtx and the dropped-turns note: 1200 -> "1.2k".
+const kfmt=v=>v<1000?String(v):v<1e6?(v/1000).toFixed(v<1e5?1:0).replace(/\.0$/,'')+'k'
+  :(v/1e6).toFixed(1).replace(/\.0$/,'')+'M';
 // The bench's context line: what the last reply used (its prompt plus its
 // answer, as the server counted them) over the window. Unknown window: just
 // the count, since a made-up denominator would read as a limit.
 function showCtx(){
   const el=$('cctx'); if(!el) return;
   const c=curChat(), m=c&&(c.msgs||[]).map(x=>x.met).filter(Boolean).pop();
-  const k=v=>v<1000?String(v):v<1e6?(v/1000).toFixed(v<1e5?1:0).replace(/\.0$/,'')+'k'
-    :(v/1e6).toFixed(1).replace(/\.0$/,'')+'M';
   const used=m?(m.prompt||0)+(m.completion||0):null;
   el.textContent=used==null ? '—'
-    : CTXLEN ? `${k(used)} / ${k(CTXLEN)}` : k(used);
+    : CTXLEN ? `${kfmt(used)} / ${kfmt(CTXLEN)}` : kfmt(used);
   el.title=used==null?'no reply yet in this chat'
     :`${used.toLocaleString()} tokens`+(CTXLEN?` of ${CTXLEN.toLocaleString()}`:'');
 }
+// "context: N oldest turns dropped to fit 32k" -- shown after a send that
+// had to trim the wire; cleared (and hidden) otherwise.
+function showCtxNote(dropped, cap){
+  const row=$('cctxnoterow'), el=$('cctxnote'); if(!row||!el) return;
+  if(!dropped){ row.hidden=true; el.textContent=''; return }
+  row.hidden=false;
+  el.textContent=`context: ${dropped} oldest turn${dropped===1?'':'s'} dropped to fit ${kfmt(cap)}`;
+}
 function maxSteps(ctx){
   CTXLEN=ctx>0?ctx:0; showCtx();
-  const el=$('cmax'), want=+(MAXWANT??el.value)||2048;
+  const el=$('cmax'), want=+(MAXWANT??el.value)||16384;
   const steps=ctx>0 ? MAXALL.filter(v=>v<=ctx) : MAXDEF;
   const lab=v=>v<1024?String(v):v<1048576?(v/1024)+'k':(v/1048576)+'M';
   el.innerHTML=steps.map(v=>`<option value="${v}">${lab(v)}</option>`).join('');
@@ -3405,6 +3427,7 @@ function maxSteps(ctx){
     :'the model\'s context is unknown to this page, so the list stops at 64k';
 }
 $('cmax').addEventListener('change',()=>{ MAXWANT=+$('cmax').value });
+$('cctxlimit').addEventListener('change',()=>{ CTXWANT=+$('cctxlimit').value||0; showCtxNote(0) });
 // A new model's defaults move the fields still at the old model's (or
 // empty) to the new ones; a field the person changed stays as they left it.
 function showSampling(d){
@@ -3421,18 +3444,20 @@ function showSampling(d){
 // max-tokens step the page starts at, no system prompt.
 $('cdefaults').onclick=()=>{
   for(const [id,key] of SAMP) $(id).value=sampDef(SDEFS,key);
-  MAXWANT=null; $('cmax').value='2048'; maxSteps(CTXLEN); $('csys').value='';
+  MAXWANT=null; $('cmax').value='16384'; maxSteps(CTXLEN); $('csys').value='';
+  CTXWANT=0; $('cctxlimit').value='0'; showCtxNote(0);
   $('ctemp').dispatchEvent(new Event('change'));      // remembered as left
 };
 // The fields as last left, in this browser only: a convenience, not state.
 // Sampling is not kept: each model's recommended values fill in.
 (()=>{
-  const ids=['cmax','csys','ceffort'];
+  const ids=['cmax','csys','ceffort','cctxlimit'];
   try{
     const v=JSON.parse(localStorage.getItem('kn.copts')||'{}');
     ids.forEach(id=>{ if(v[id]!=null) $(id).value=v[id] });
     // a step above 64k exists only once a model's context allows it
     if(v.cmax!=null) MAXWANT=+v.cmax;
+    if(v.cctxlimit!=null) CTXWANT=+v.cctxlimit||0;
     maxSteps(0);
   }catch(e){}
   const save=()=>{ try{ localStorage.setItem('kn.copts', JSON.stringify(
@@ -3441,7 +3466,7 @@ $('cdefaults').onclick=()=>{
 })();
 window.newChat=newChat;
 function openChat(c){
-  CCUR=c.id; HOME=false; renderChats(); renderClog(); chatGate();
+  CCUR=c.id; HOME=false; showCtxNote(0); renderChats(); renderClog(); chatGate();
 }
 
 // --- served-model / vision gating -----------------------------------------
@@ -3693,20 +3718,35 @@ function pageMetrics(t){
     decode_tps: t.completion>1 && dt>0 ? (t.completion-1)/(dt/1000) : 0};
 }
 window.pageMetrics=pageMetrics;
-// The in-flight mark, drawn into the streaming reply until its answer starts.
-function waitHTML(w){
+// The in-flight mark, drawn into the streaming reply until its answer
+// starts. While waiting there's nothing to show yet, so it's a plain pill;
+// once thinking begins the SAME gear mark becomes the one-and-only header
+// of the thinking block (no separate inner "thinking" summary), and the
+// text streams straight into its <pre> with no gap above it.
+function waitHTML(w, think){
   const on=w.phase==='thinking';
   const word=on ? 'Thinking'+(w.pct!=null&&w.pct<100?` · ${w.pct}%`:'') : 'Waiting';
-  return `<div class="wait${on?' on':''}" role="status">${window.GEAR||''}<span>${word}</span></div>`;
+  const gear=`${window.GEAR||''}<span>${word}</span>`;
+  if(on) return `<details class="think waitwrap" open><summary class="wait on" role="status">${gear}</summary><pre>${esc(think||'')}</pre></details>`;
+  return `<div class="wait waitwrap" role="status">${gear}</div>`;
 }
 let WAIT=null;
-function setWait(w){
+function setWait(w, think){
   WAIT=w;
   const b=$('clog').lastElementChild?.querySelector('.bubble.assistant'); if(!b) return;
-  let el=b.querySelector('.wait');
+  let el=b.querySelector('.waitwrap');
   if(!w){ if(el) el.remove(); return }
-  const d=document.createElement('div'); d.innerHTML=waitHTML(w);
+  const d=document.createElement('div'); d.innerHTML=waitHTML(w, think);
   if(el) el.replaceWith(d.firstChild); else b.prepend(d.firstChild);
+}
+// Once the answer itself starts, the live gear stops turning -- but if
+// there was thinking, its block (now the ordinary, static header) stays
+// put rather than vanishing out from under the reply.
+function freezeWait(){
+  const b=$('clog').lastElementChild?.querySelector('.bubble.assistant'); if(!b) return;
+  const w=b.querySelector('.waitwrap.think');
+  if(w){ w.classList.remove('on'); w.querySelector('summary')?.classList.remove('on') }
+  else b.querySelector('.waitwrap')?.remove();
 }
 // A message's actions as icons (stroke, like the rest of the marks), each
 // named by its tooltip and aria-label.
@@ -3726,16 +3766,20 @@ function bubbleFor(m, idx){
     thumbs=`<div class="thumbs">${m.att.filter(a=>a.kind==='image')
       .map(a=>`<img class="thumb" data-hash="${a.hash}" src="${a.thumb||''}">`).join('')}</div>`;
   }
-  let thinkHTML='';
-  if(m.thinking && m.thinking.trim()) thinkHTML=`<details class="think" ${m._streaming?'open':''}>
-    <summary>thinking</summary><pre>${esc(m.thinking.trim())}</pre></details>`;
+  // One header for the thinking block, live or finished: the gear. While
+  // still waiting on the answer, WAIT drives it (and carries the thinking
+  // seen so far, if any); once content has started, the message's own
+  // .thinking is all there is and the block is just a static, closed one.
+  let thinkBlock='';
+  if(m.role!=='user' && m._streaming && !m.content && WAIT) thinkBlock=waitHTML(WAIT, m.thinking);
+  else if(m.thinking && m.thinking.trim())
+    thinkBlock=`<details class="think waitwrap" ${m._streaming?'open':''}><summary class="wait" role="status">${window.GEAR||''}<span>Thinking</span></summary><pre>${esc(m.thinking.trim())}</pre></details>`;
   const body = m.role==='assistant' ? `<div class="md">${mdRender(m.content||'')}</div>`
                                      : esc(m.content||'');
   const bubble=document.createElement('div');
   bubble.className='bubble '+(m.role==='user'?'user':(m.err?'err assistant':'assistant'));
   bubble.innerHTML = (thumbs?thumbs:'') + (m.role==='user'?body:'');
-  if(m.role!=='user') bubble.innerHTML = (m._streaming && !m.content && WAIT ? waitHTML(WAIT) : '')
-    + thinkHTML + `<div class="md">${mdRender(m.content||'')}</div>`;
+  if(m.role!=='user') bubble.innerHTML = thinkBlock + `<div class="md">${mdRender(m.content||'')}</div>`;
   wrap.appendChild(bubble);
   const foot=document.createElement('div'); foot.className='bfoot';
   if(m.met){ const met=document.createElement('div'); met.innerHTML=replyMetHTML(m.met);
@@ -3840,10 +3884,35 @@ async function* events(body){
 async function runTurn(){
   const c=curChat(); if(!c) return;
   BUSYC=true; $('csend').disabled=true; $('csend').hidden=true; $('cstop').hidden=false;
-  const wire=[];
   const sys=$('csys').value.trim();
+  const turns=[];
+  for(const m of c.msgs) turns.push(await toWire(m));
+  // Context limit: the person's pick, capped by the model's own window when
+  // that's known. 0/unknown means the model's whole window -- normally
+  // nothing is dropped, since a chat this bench is used for rarely fills it.
+  const cap = CTXWANT>0 ? (CTXLEN>0?Math.min(CTXWANT,CTXLEN):CTXWANT)
+            : (CTXLEN>0?CTXLEN:0);
+  const tokOf=o=>{
+    const s=typeof o.content==='string'?o.content
+      :(Array.isArray(o.content)?o.content.map(p=>p.text||'').join(''):'');
+    return Math.ceil(s.length/4);
+  };
+  let dropped=0;
+  if(cap>0 && turns.length>1){
+    const lastMet=(c.msgs||[]).map(x=>x.met).filter(Boolean).pop();
+    // The last reply's own prompt_tokens is the truest count of everything
+    // up to (and including) that turn; chars/4 only estimates what's new
+    // since -- the latest, not-yet-answered user turn.
+    let est = lastMet ? lastMet.prompt + tokOf(turns[turns.length-1])
+      : (sys?Math.ceil(sys.length/4):0) + turns.reduce((a,o)=>a+tokOf(o),0);
+    let i=0;
+    while(est>cap && i<turns.length-1){ est-=tokOf(turns[i]); i++; dropped++ }
+    if(i) turns.splice(0,i);
+  }
+  showCtxNote(dropped, cap||CTXLEN);
+  const wire=[];
   if(sys) wire.push({role:'system', content:sys});
-  for(const m of c.msgs) wire.push(await toWire(m));
+  wire.push(...turns);
   const assistant={role:'assistant', content:'', thinking:'', _streaming:true};
   WAIT={phase:'waiting'};
   c.msgs.push(assistant); renderClog();
@@ -3857,7 +3926,7 @@ async function runTurn(){
   // recommendation and says so in usage.knurlogic.sampling.
   const body={model:c.model||undefined,
     messages:wire, stream:true, stream_options:{include_usage:true},
-    max_tokens:+$('cmax').value||2048, ...sampling()};
+    max_tokens:+$('cmax').value||16384, ...sampling()};
   const effort=$('ceffort').value;
   if(effort) body.reasoning_effort=effort;
   const t0=performance.now();
@@ -3877,7 +3946,7 @@ async function runTurn(){
           if(!ka) ka=performance.now();
           pfShow(+mm[1], +mm[2]);
           if(!first) setWait({phase:'thinking',
-            pct:+mm[2] ? Math.floor(100*+mm[1]/+mm[2]) : null});
+            pct:+mm[2] ? Math.floor(100*+mm[1]/+mm[2]) : null}, assistant.thinking.trim());
         }
         continue;
       }
@@ -3891,15 +3960,17 @@ async function runTurn(){
       if(thought){
         last=performance.now(); if(!first) first=last;
         assistant.thinking+=thought; pfHide();
-        // Reasoning is still thinking: the gear keeps turning, the % goes.
-        if(WAIT && (WAIT.phase!=='thinking' || WAIT.pct!=null)) setWait({phase:'thinking'});
+        // The gear (one header) is the live thinking block itself; once it
+        // exists, stream straight into its <pre> instead of re-rendering.
         let th=$('clog').lastElementChild.querySelector('.think pre');
-        if(!th){ renderClog(); th=$('clog').lastElementChild.querySelector('.think pre') }
-        if(th) th.textContent=assistant.thinking.trim();
+        if(!th){ setWait({phase:'thinking'}, assistant.thinking.trim());
+          th=$('clog').lastElementChild.querySelector('.think pre') }
+        else th.textContent=assistant.thinking.trim();
       }
       if(delta.content){
         last=performance.now(); if(!first) first=last;
-        assistant.content+=delta.content; pfHide(); if(WAIT) setWait(null);
+        assistant.content+=delta.content; pfHide();
+        if(WAIT){ WAIT=null; freezeWait() }
         const md=$('clog').lastElementChild.querySelector('.md');
         if(md) md.innerHTML=mdRender(assistant.content);
       }
