@@ -192,6 +192,22 @@ class PromptCache:
             return cache, list(tokens[-1:])
         return None, list(tokens)
 
+    def hit_length(self, key, tokens) -> int:
+        """Tokens fetch() would hand back cached, without the copy fetch
+        makes (the admission prices the checkpoints past the hit before it
+        fetches). 0 if the trie cannot be asked: every boundary priced, the
+        safe side."""
+        try:
+            r = self.lru._trie.search(key, tokens)
+        except Exception:
+            return 0
+        if r.exact is not None:
+            return max(len(tokens) - 1, 0)
+        short = len(r.shorter) if r.shorter is not None else 0
+        if r.longer is not None and r.common_prefix > short:
+            return min(len(tokens) - 1, r.common_prefix)
+        return short
+
     def insert(self, key, tokens, cache, kind: str, origin=None) -> None:
         """`origin`: (event, uid) the cache came from -- what a ring's
         journal names (engine/runtime/tensor.JournalPromptCache)."""
@@ -219,6 +235,18 @@ class Command:
     error: str = ""
 
 
+def _checkpoints(segs, n: int, hit: int) -> List[int]:
+    """The lengths the engine copies the row's cache at: every segment's
+    end but the last (the prompt's own end is stored when the row
+    finishes), past the prompt cache's hit."""
+    out, at = [], 0
+    for seg in segs[:-1]:
+        at += len(seg)
+        if hit < at < n:
+            out.append(at)
+    return out
+
+
 @dataclass
 class _Row:
     job: Job
@@ -226,6 +254,7 @@ class _Row:
     types: List[str]          # segment types still to label checkpoints
     admitted: float = 0.0     # perf_counter when its prefill was queued
     first: float = 0.0        # ... when its first token came out
+    made: int = 0             # tokens it has generated (its context grows)
 
 
 class Scheduler:
@@ -233,9 +262,13 @@ class Scheduler:
                  prefill_step_size: int = 2048, prompt_cache_size: int = 10,
                  prompt_cache_bytes: Optional[int] = None,
                  working_set_bytes: Optional[int] = None,
-                 stats: Optional[dict] = None, tensor=None):
+                 stats: Optional[dict] = None, tensor=None,
+                 gpu_in_use=None):
         """`tensor`: rank 0's engine/runtime/tensor.Ring when this model is
-        split across ranks; the prompt cache is then count-based only."""
+        split across ranks; the prompt cache is then count-based only.
+        `gpu_in_use`: () -> bytes of GPU memory every process on this
+        machine holds (serve.load.gpu_in_use), or None; what the others
+        hold comes off the working set."""
         if tensor is not None and prompt_cache_bytes:
             raise ValueError("a tensor-split server's prompt cache is "
                              "count-based: every rank must evict the same "
@@ -252,6 +285,14 @@ class Scheduler:
         #: the largest transient a step has been measured to add (bytes
         #: above the active memory it started at), 0 until measured
         self._spike = 0
+        #: the transient against the context a step spans: "lo" and "hi"
+        #: are (context tokens, bytes) at the shortest context seen and
+        #: (longest context, largest transient) -- _transient's line
+        self._tx: dict = {}
+        self._gpu_in_use = gpu_in_use
+        #: other processes' GPU bytes, the largest of the recent readings
+        self._others: List[int] = []
+        self._others_at = 0.0
         #: (fixed bytes, bytes per token) of one row's cache, measured
         self._kv = None
         self._samples: dict = {}
@@ -525,6 +566,7 @@ class Scheduler:
                 # (a 35B's slope admitting a 397B's prompt is the abort the
                 # guard exists for)
                 self._kv, self._samples, self._spike = None, {}, 0
+                self._tx = {}
                 if c.kind == "load":
                     self.host.load(c.path,
                                    executes_artifact_code=c.executes)
@@ -714,7 +756,11 @@ class Scheduler:
                     f"which leaves no room for an answer")
             if cap:
                 job.max_tokens = min(job.max_tokens, cap - len(prompt))
-            lean = self._make_room(len(prompt)) == "lean"
+            hit = getattr(self.cache, "hit_length", lambda k, t: 0)(
+                self.host.model_key, prompt)
+            lean = self._make_room(len(prompt),
+                                   _checkpoints(segs, len(prompt), hit)) \
+                == "lean"
             cache, rest = self.cache.fetch(self.host.model_key, prompt)
             n = len(prompt) - len(rest)
             segs, types = [list(s) for s in segs], list(types)
@@ -769,38 +815,85 @@ class Scheduler:
                                    or 0)
         return self.working_set
 
-    def _margin(self) -> int:
-        """Room one step's temporaries need: the largest spike a step of
-        THIS model has made (its prefill chunk, its attention, its batch),
-        with a quarter again -- but never below 5% of the working set (at
-        least 4 GiB). The floor is measured too: a step's transient grows
-        with the context its attention spans, so a spike learned while
-        conversations were short under-reads a later one. GLM-5.3 on the M4
-        (2026-09-26) learned 2.6 GiB at 8k-token prompts, ran at 116 of a
-        116.8 GiB limit, and a step at 16k aborted Metal; Flash and 397B ran
-        for hours at the 5% floor."""
+    def _margin(self, extra: int = 0) -> int:
+        """Room one step's temporaries need: the transient a step of THIS
+        model is predicted to make at the context it is about to span (the
+        running rows' plus `extra`, a prompt being admitted), with a
+        quarter again -- but never below 5% of the working set (at least 4
+        GiB). GLM-5.3 on the M4 (2026-09-26) learned 2.6 GiB at 8k-token
+        prompts, ran at 116 of a 116.8 GiB limit, and a step at 16k aborted
+        Metal: the largest transient seen so far under-reads a longer
+        context's."""
         floor = max(4 * GIB, self._working_set() // 20)
-        return max(floor, int(self._spike * 1.25))
+        return max(floor, int(self._transient(self._context() + extra)
+                              * 1.25))
 
-    def _limit(self) -> int:
-        """Active bytes a step may start at: the working set less a step's
-        temporaries. 0 = unguarded."""
+    def _context(self) -> int:
+        """Tokens of context the running rows' next step spans."""
+        return sum(r.job.prompt_tokens + r.made for r in self._rows.values())
+
+    def _transient(self, ctx: int) -> int:
+        """A step's transient at `ctx` tokens of context: the largest
+        measured, or, past the longest context measured, that line carried
+        on. A prefill chunk attends over every token before it, so its
+        temporaries grow with the context: the 27B on the M3 (2026-09-28)
+        measured 1.58, 2.40 then 3.39 GiB as four agents' prompts grew to
+        98k tokens, and the step that first ran past the margin those left
+        aborted Metal. Until two contexts 8192 apart are known, the
+        transient is taken as proportional to the context -- an
+        overestimate, the safe side."""
+        lo, hi = self._tx.get("lo"), self._tx.get("hi")
+        if hi is None or ctx <= hi[0]:
+            return self._spike
+        if hi[0] - lo[0] >= 8192 and hi[1] > lo[1]:
+            slope = (hi[1] - lo[1]) / (hi[0] - lo[0])
+        else:
+            slope = hi[1] / hi[0]
+        return max(self._spike, int(hi[1] + slope * (ctx - hi[0])))
+
+    def _limit(self, extra: int = 0) -> int:
+        """Active bytes a step may start at: the working set less what
+        other processes hold of the GPU and a step's temporaries. 0 =
+        unguarded."""
         ws = self._working_set()
-        return ws - self._margin() if ws else 0
+        return ws - self._others_bytes() - self._margin(extra) if ws else 0
 
-    def _measure(self, before: int) -> None:
+    def _others_bytes(self) -> int:
+        """GPU memory the other processes on this machine hold, the most
+        of the last ten readings (at most one every two seconds): the
+        wired limit caps everyone's total, and a window server or another
+        agent's model grows between readings."""
+        if self._gpu_in_use is None:
+            return 0
+        now = time.monotonic()
+        if now - self._others_at >= 2.0:
+            self._others_at = now
+            total = self._gpu_in_use()
+            if total is not None:
+                mine = self._local_active() + self._cached()
+                self._others = (self._others + [max(total - mine, 0)])[-10:]
+        return max(self._others, default=0)
+
+    def _measure(self, before: int, ctx: int = 0) -> None:
         """The step's TRANSIENT: its peak above the larger of where it
         started and where it ended. What it kept (an admitted row's KV,
         checkpoint copies) is growth, not transient -- counted as spike, one
         50k-token admission ratcheted the margin up for the life of the
-        load (Fable 5.1)."""
+        load (Fable 5.1). `ctx`: the context the step spanned."""
         import mlx.core as mx
         spike = int(mx.get_peak_memory()) - max(before, self._here())
-        if spike > self._spike * 1.25 and spike > GIB // 4:
-            logger.info("a step's transient measured at %.2f GiB: the "
-                        "memory margin is now %.2f GiB", spike / GIB,
-                        max(GIB, int(spike * 1.25)) / GIB)
+        grew = spike > self._transient(ctx) * 1.25 and spike > GIB // 4
         self._spike = max(self._spike, spike)
+        if ctx >= 1024 and spike > 0:
+            lo, hi = self._tx.get("lo"), self._tx.get("hi")
+            if lo is None or ctx < lo[0]:
+                self._tx["lo"] = (ctx, spike)
+            self._tx["hi"] = (max(ctx, hi[0] if hi else 0),
+                              max(spike, hi[1] if hi else 0))
+        if grew:
+            logger.info("a step's transient measured at %.2f GiB over %d "
+                        "tokens of context: the memory margin is now %.2f "
+                        "GiB", spike / GIB, ctx, self._margin() / GIB)
 
     def _reset_peak(self) -> int:
         import mlx.core as mx
@@ -829,6 +922,10 @@ class Scheduler:
     def _local_active(self) -> int:
         import mlx.core as mx
         return int(mx.get_active_memory())
+
+    def _cached(self) -> int:
+        import mlx.core as mx
+        return int(mx.get_cache_memory())
 
     def _release(self) -> None:
         import mlx.core as mx
@@ -877,24 +974,41 @@ class Scheduler:
         fixed, per = self._kv
         return int(copies * (fixed + per * n_tokens))
 
+    def _need(self, n_tokens: int, checkpoints) -> int:
+        """Bytes admitting a prompt of n_tokens adds, measured on the 27B
+        (M3, 2026-09-28) to within 2%: the row's cache; a copy of it at
+        each checkpoint (a segment boundary past the prompt cache's hit --
+        a chat's trailing one-token segments are two nearly whole copies);
+        and, with rows running, the copy the running batch concatenates
+        it into, while the row's own is still held. Priced as one row and
+        one checkpoint, a 57k-token prompt beside two running rows was
+        charged 7.3 GiB, grew memory 21.3, and the next step aborted
+        Metal."""
+        one = lambda n: self._cost(n, 1)                  # noqa: E731
+        need = one(n_tokens) + sum(one(c) for c in checkpoints)
+        if self._rows:
+            need += one(n_tokens)
+        return need
+
     def _fits(self, n_tokens: int) -> bool:
         """Could a prompt of n_tokens fit once, counting what the prompt
         cache would give up? No side effects: a request that waits must not
         empty the shared prompt cache on every tick it waits."""
-        limit = self._limit()
+        limit = self._limit(n_tokens)
         if not limit or not self._kv:
             return True
         room = limit - self._active() + (self.cache.nbytes
                                          if self.cache is not None else 0)
-        return self._cost(n_tokens, 1) <= room
+        return self._need(n_tokens, ()) <= room
 
-    def _room_for(self, n_tokens: int, copies: int = 2):
-        """(fits, need, room) for a prompt of n_tokens held `copies` times,
-        the prompt cache giving way if that is what it takes."""
-        limit = self._limit()
+    def _room_for(self, n_tokens: int, checkpoints=()):
+        """(fits, need, room) for a prompt of n_tokens with checkpoints at
+        these lengths, the prompt cache giving way if that is what it
+        takes."""
+        limit = self._limit(n_tokens)
         if not limit or not self._kv:
             return True, 0, 0
-        need = self._cost(n_tokens, copies)
+        need = self._need(n_tokens, checkpoints)
         room = limit - self._active()
         held = self.cache.nbytes if self.cache is not None else 0
         if need > room + held:
@@ -913,20 +1027,23 @@ class Scheduler:
                         n_tokens)
         return need <= room, need, room
 
-    def _make_room(self, n_tokens: int) -> str:
-        """"full" if a prompt of n_tokens fits with its checkpoints, "lean"
-        if only without; else _Wait (rows are running and will free memory)
-        or OutOfMemory (none are)."""
-        fits, need, room = self._room_for(n_tokens, copies=2)
+    def _make_room(self, n_tokens: int, checkpoints=None) -> str:
+        """"full" if a prompt of n_tokens fits with its checkpoints (at
+        these lengths; None = one, at its end), "lean" if only without;
+        else _Wait (rows are running and will free memory) or OutOfMemory
+        (none are)."""
+        if checkpoints is None:
+            checkpoints = [n_tokens]
+        fits, full, room = self._room_for(n_tokens, checkpoints)
         if fits:
             return "full"
-        fits, need, room = self._room_for(n_tokens, copies=1)
+        fits, need, room = self._room_for(n_tokens)
         if fits:
             logger.info("a %d-token prompt admitted without checkpoints: "
-                        "%.1f GiB free, its cache twice would be %.1f",
-                        n_tokens, room / GIB, 2 * need / GIB)
+                        "%.1f GiB free, with them it would take %.1f",
+                        n_tokens, room / GIB, full / GIB)
             return "lean"
-        limit = self._limit()
+        limit = self._limit(n_tokens)
         if self._rows:
             raise _Wait()
         # On a ring the peers' number is as of the last exchange: what the
@@ -948,6 +1065,10 @@ class Scheduler:
         limit = self._limit()
         if not limit:
             return
+        # mlx's freed buffers stay wired until cleared, and the step's
+        # transient lands on top of them: past the limit, they go first
+        if self._cached() and self._local_active() + self._cached() > limit:
+            self._release()
         over = self._active() - limit
         if over <= 0:
             return
@@ -977,6 +1098,7 @@ class Scheduler:
 
     def _step(self) -> None:
         ex = self._ex
+        ctx = self._context()
         before = self._reset_peak()
         try:
             events = ex.step()          # on the executor's own stream
@@ -985,7 +1107,7 @@ class Scheduler:
             self._fail_all(e)
             self._close_executor()
             return
-        self._measure(before)
+        self._measure(before, ctx)
         drop = []
         for e in events:
             row = self._rows.get(e.uid)
@@ -1000,6 +1122,7 @@ class Scheduler:
                                       row.types.pop(0),
                                       origin=("checkpoint", e.uid))
             elif isinstance(e, Token):
+                row.made += 1
                 if not row.first:
                     row.first = time.perf_counter()
                 d = row.text.feed(e)
