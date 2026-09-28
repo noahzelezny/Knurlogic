@@ -97,15 +97,17 @@ def prompt_cache_policy(serving: dict, world: int, working_set: int,
 
 
 def pipeline_share_bytes(per: list, other: int, rank: int, world: int,
-                         counts=None) -> int:
+                         counts=None, leader: int = 0) -> int:
     """What pipeline rank `rank` holds: its layers (rank 0 the LAST
     `counts[0]`, as cluster_jobs.prepare places them) plus what every rank
-    holds. Counts not given yet (the resolver's split is made once the ring
-    is up): an even share of the layers."""
+    holds, plus `leader` (the head and tower) on rank 0. Counts not given
+    yet (the resolver's split is made once the ring is up): an even share
+    of the layers."""
+    own = int(other) + (int(leader) if rank == 0 else 0)
     if counts:
         start = sum(counts[rank + 1:])
-        return sum(per[start:start + counts[rank]]) + int(other)
-    return -(-sum(per) // max(world, 1)) + int(other)
+        return sum(per[start:start + counts[rank]]) + own
+    return -(-sum(per) // max(world, 1)) + own
 
 
 def run(path: str, host: str, port: int, working_set_gib: float,
@@ -143,15 +145,18 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         if ring.get("split") == "pipeline":
             from knurlogic.tuning import resolve as R
             per, other = R.pipeline_layer_bytes(a)
+            lead = R.pipeline_leader_bytes(a)
             bw = ring.get("bandwidth_gbs") or R.chip_bandwidth_gbs(_chip())
             # every rank's working set and bandwidth are gathered once the
             # ring is up; the split is computed the same way on every rank
             ring["pipeline"] = {
                 "layer_bytes": per, "other_bytes": other,
+                "leader_bytes": lead,
                 "working_set": int(working_set_gib * GIB),
                 "bandwidth_gbs": bw, "counts": ring.get("layers") or None}
             share = pipeline_share_bytes(per, other, int(ring["rank"]),
-                                         world, ring.get("layers") or None)
+                                         world, ring.get("layers") or None,
+                                         leader=lead)
             print(f"pipeline  rank {ring['rank']} of {world} over "
                   f"{ring['link']}: {len(per)} layers, "
                   f"{sum(per) / GIB:.1f} GiB split by layer + "

@@ -223,20 +223,26 @@ unchanged). `--split pipeline`.
   float32, against the unsplit model: logits (every family, uneven cuts)
   equal to 1e-4 -- in fact 0.0: the same arithmetic in the same order.
 - **MTP on pipeline** (qwen3_5 families; the maintainer's exo design): the head
-  lives on rank 0, which has the true final hidden state. A follower runs
-  a head too, on its own stage's output: its drafts are never used, but
-  its head cache moves exactly as rank 0's, so prompt-cache entries,
-  offsets and replays are the same code on every rank. Per step, fixed:
-  B1 `[drafting, d2 per row]` before the verify forward (rank 0's timed
-  regime choice and its drafts), and, only when B1 said drafting, B2
-  `[ok per row, t2 per row]` after it (the verdicts that drive every
-  rank's rollback and the one replay forward). The count depends on B1,
-  which every rank receives, never on a rank's own verdict. Every rank
-  drafts or none does (`tensor.agree_head` after load). Tested: rank 0's
-  tokens are the unsplit engine's (random head, mostly rejected; and
-  drafting forced on vocab 8 so accepts happen), both ranks made the same
-  B0/B1/B2 counts, and the serving path (TensorExecutor + follow) streams
-  the unsplit executor's tokens.
+  lives on rank 0 ALONE, which has the true final hidden state. A follower
+  never loads it (its bytes count on rank 0 only: `pipeline_leader_bytes`
+  -> `pipeline_shares(leader_bytes=)`) and never runs it; it still takes
+  part in every verify -- its stage runs the drafted token as the second
+  position of the 2-wide forward, and rolls back and replays as rank 0
+  says. Per step, fixed: B1 `[drafting, d2 per row]` before the verify
+  forward (rank 0's timed regime choice and its drafts), and, only when B1
+  said drafting, B2 `[ok per row, t2 per row]` after it (the verdicts
+  that drive every rank's rollback and the one replay forward). Per
+  admission, BA `[ok, hit, drafts]` before its prefill: only rank 0 can
+  tell whether a prompt-cache entry has a head cache aligned for a
+  drafting row (a follower's entries never carry one), and whether the row
+  drafts moves its checkpoints. The count depends on B1 and BA, which
+  every rank receives, never on a rank's own verdict. `tensor.agree_head`
+  tells every rank after load whether rank 0 bound a head. Tested: rank
+  0's tokens are the unsplit engine's (random head, mostly rejected; and
+  drafting forced on vocab 8 so accepts happen) with a headless follower,
+  both ranks made the same B0/B1/B2/BA counts, the serving path
+  (TensorExecutor + follow) streams the unsplit executor's tokens, and a
+  prefix only the follower's trie could use is re-prefilled on both.
 - **Images**: refused (400) in this slice, as under tensor. The choice for
   when they land: rank 0 runs the tower and SENDS the image rows'
   embeddings to rank N-1 (its ring neighbour), with MTP off for image

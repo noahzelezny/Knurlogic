@@ -410,8 +410,8 @@ def placement(machines: list, shape: dict, split: str,
               order: list | None = None) -> dict:
     """Rank order and each rank's share. `machines`: [{"name", "chip",
     "p_core_ghz", "working_set_bytes", "bandwidth_gbs", "links"}];
-    `shape`: the artifact's {"layer_bytes", "other_bytes",
-    "tensor_per_rank_bytes", "refusals"}. Pure: the same inputs give the
+    `shape`: the artifact's {"layer_bytes", "other_bytes", "leader_bytes"
+    (rank 0's alone: the MTP head), "tensor_per_rank_bytes", "refusals"}. Pure: the same inputs give the
     same answer on every page.
     -> {"order": [names], "leader", "split", "shares": [{"rank", "machine",
         "bytes", "layers"?, "bounds"?}], "layers": [counts] | [],
@@ -446,10 +446,12 @@ def placement(machines: list, shape: dict, split: str,
               "working_set_bytes": int(by[nm].get("working_set_bytes") or 0),
               "memory_bandwidth_gbs": by[nm].get("bandwidth_gbs")}
              for nm in names]
+    lead = int(shape.get("leader_bytes") or 0)
     sh = R.pipeline_shares(list(shape["layer_bytes"]), ranks,
-                           int(shape.get("other_bytes") or 0))
+                           int(shape.get("other_bytes") or 0), lead)
     shares = [{"rank": r, "machine": nm,
-               "bytes": sh["bytes"][r] + int(shape.get("other_bytes") or 0),
+               "bytes": sh["bytes"][r] + int(shape.get("other_bytes") or 0)
+               + (lead if r == 0 else 0),
                "layers": sh["layers"][r], "bounds": list(sh["bounds"][r])}
               for r, nm in enumerate(names)]
     return {"order": names, "leader": names[0], "split": split,
@@ -466,6 +468,7 @@ def shape_of(path: str, world: int, split: str) -> dict:
         per, other = R.pipeline_layer_bytes(a)
         refusals = R.pipeline_refusals(a.raw_config, world)
         return {"layer_bytes": per, "other_bytes": other,
+                "leader_bytes": R.pipeline_leader_bytes(a),
                 "tensor_per_rank_bytes": 0, "refusals": refusals}
     return {"layer_bytes": [], "other_bytes": 0,
             "tensor_per_rank_bytes":
@@ -645,7 +648,9 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
             counts = spec.get("layers") or []
             start = sum(counts[rank + 1:])
             need = sum(sh["layer_bytes"][start:start + counts[rank]]) \
-                + int(sh.get("other_bytes") or 0) if counts else 0
+                + int(sh.get("other_bytes") or 0) \
+                + (int(sh.get("leader_bytes") or 0) if rank == 0 else 0) \
+                if counts else 0
         from knurlogic.tuning.resolve import step_margin
         margin = step_margin(ws)
         busy = (held or held_here)(spec["job"]) if need and ws else []

@@ -49,8 +49,9 @@ class ModelHost:
         self.cross_chip = cross_chip
         self.shard = shard
         #: head_agree(bound: bool) -> bool, called after the head binds (or
-        #: does not) on every load: a pipeline's ranks draft together or
-        #: not at all (engine/runtime/tensor.agree_head)
+        #: does not) on every load of a pipeline rank: rank 0's answer,
+        #: told to every rank -- only rank 0 holds a head, and the others
+        #: follow its drafting steps (engine/runtime/tensor.agree_head)
         self.head_agree = head_agree
         self.vision = vision
         self.load_wait_s = load_wait_s

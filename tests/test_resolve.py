@@ -275,3 +275,8 @@ def test_a_pipeline_ranks_share_is_its_layers_plus_what_every_rank_holds():
     assert pipeline_share_bytes(per, GIB, 0, 2, [6, 2]) == 7 * GIB
     assert pipeline_share_bytes(per, GIB, 1, 2, [6, 2]) == 3 * GIB
     assert pipeline_share_bytes(per, GIB, 1, 2, None) == 5 * GIB
+    # the MTP head is rank 0's alone
+    assert pipeline_share_bytes(per, GIB, 0, 2, [6, 2], leader=2 * GIB) \
+        == 9 * GIB
+    assert pipeline_share_bytes(per, GIB, 1, 2, [6, 2], leader=2 * GIB) \
+        == 3 * GIB
