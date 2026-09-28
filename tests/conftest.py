@@ -33,6 +33,7 @@ def _no_recovery_thread(monkeypatch, tmp_path):
     from knurlogic.interfaces import recovery
     monkeypatch.setattr(recovery, "_THREAD", [1])
     monkeypatch.setattr(recovery, "MODELS", {})
+    monkeypatch.setattr(recovery, "_SAVED", {})
     path = tmp_path / "recovery.json"
     monkeypatch.setattr(recovery, "_path", lambda: path)
 

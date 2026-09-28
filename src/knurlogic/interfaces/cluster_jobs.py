@@ -951,11 +951,15 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                           or [n.get("name") for n in (spec or {}).get(
                               "nodes") or []]}
     told = []
-    if propagate and spec:
+    # the job's machines: its spec, or -- after a page restart, SPECS being
+    # in memory -- the ids its rank records here keep
+    nodes = (spec or {}).get("nodes") or next(
+        (v["nodes"] for v in mine.values() if v.get("nodes")), [])
+    if propagate and nodes:
         from knurlogic.machine import identity
         me = identity.identity().get("id")
         known = _peer_pages()
-        for n in spec.get("nodes") or []:
+        for n in nodes:
             if n.get("id") == me:
                 continue
             # the address is this page's own record of that peer, never the
@@ -1110,9 +1114,12 @@ def _ensure_watcher() -> None:
 
 
 def start_watching_existing() -> None:
-    """At page start: ranks from an earlier page process are watched too."""
+    """At page start: ranks from an earlier page process are watched too,
+    and the models an earlier page process was recovering are again."""
     if J.registry():
         _ensure_watcher()
+    from knurlogic.interfaces import recovery
+    recovery.restore()
 
 
 def jobs_document() -> list:
