@@ -174,23 +174,40 @@ def _vision_terms(vb) -> Dict[str, Any] | None:
 
 
 def state(**_) -> Dict[str, Any]:
-    """What is loaded on this machine, in every runtime, and where the RAM went."""
+    """What is loaded on this machine, in every runtime, and where the RAM
+    went -- plus `models`: every model resident on this Mac and the peers
+    answering its page, a cluster job once."""
     from knurlogic.machine import loaded
     doc = loaded.survey()
     m = doc.get("memory") or {}
     from knurlogic.interfaces import ui
     from knurlogic.engine.vision import served_vision
     spec = served_vision()
+    # across machines: what the page on this Mac sees (its own residency and
+    # each answering peer's). Without the page, this Mac's survey alone.
+    try:
+        page = _page_get("/loaded.json?peers=1")
+    except PageDown as e:
+        page, page_note = None, str(e)
+    else:
+        page_note = ""
+    here = _me_name()
+    everywhere = (models_across(page, here) if page is not None else
+                  models_across({"resident": doc.get("resident", [])}, here))
     return {
+        # one entry per model: a cluster job once, on its leader, with its
+        # machines, split, link, job and rank 0's `requests`
+        "models": everywhere,
+        "machines": _machines_of(page, here),
+        **({"page": page_note} if page_note else {}),
         "resident": doc.get("resident", []),
         "runtimes": doc.get("runtimes", []),
         "started_here": ui.children(),
         # per knurlogic model: in_flight, pending, capacity,
         # oldest_pending_s, holding (its server's /status.json `requests`)
-        "requests": [dict(r.get("requests") or {}, model=r.get("name"),
-                          where=r.get("where"))
-                     for r in doc.get("resident", [])
-                     if isinstance(r, dict) and r.get("requests")],
+        "requests": [dict(r["requests"], model=r["name"], where=r["where"],
+                          machine=r["machine"])
+                     for r in everywhere if r.get("requests")],
         # None when nothing served has vision, matching the served_path()
         # pattern the rest of `state()` follows -- absence is a fact, not
         # an omission.
@@ -204,6 +221,191 @@ def state(**_) -> Dict[str, Any]:
             "unattributed_gib": round(m.get("other_bytes", 0) / GIB, 1),
         },
     }
+
+
+# --- across machines: through the page on this Mac ---------------------------
+# The page (`knurlogic ui`) is each Mac's node agent. It holds the peers it
+# can see, the cluster jobs it coordinates and the watcher that tears a
+# failed one down -- state that lives in ITS process, not this one. So every
+# tool that reaches past this Mac asks that page over loopback, with the
+# same POST /loaded.json its Launch and Unload buttons send: one code path,
+# and a job the MCP started is watched and failed over like any other.
+
+#: the page on this Mac, host:port (`knurlogic ui --port`, default 8899)
+PAGE_ENV = "KNURLOGIC_PAGE"
+#: a cluster launch answers once every machine has prepared and started
+PAGE_LOAD_S = 300.0
+PAGE_READ_S = 15.0
+#: the MCP's link names, and the page's
+LINKS = {"tcp": "ring", "rdma": "jaccl"}
+SPLITS = ("tensor", "pipeline")
+
+
+class PageDown(Exception):
+    pass
+
+
+def _page_addr() -> str:
+    import os
+    return os.environ.get(PAGE_ENV) or "127.0.0.1:8899"
+
+
+def _page_call(path: str, doc=None, timeout: float = PAGE_READ_S):
+    import urllib.error
+    import urllib.request
+    url = f"http://{_page_addr()}{path}"
+    req = urllib.request.Request(
+        url, data=None if doc is None else json.dumps(doc).encode(),
+        method="GET" if doc is None else "POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read()
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+    except Exception as e:
+        raise PageDown(f"the page on this Mac ({url.split(path)[0]}) did "
+                       f"not answer: {type(e).__name__}: {e}. Across "
+                       f"machines goes through it: start `knurlogic ui` "
+                       f"(set {PAGE_ENV}=host:port if it is not on 8899)")
+    try:
+        out = json.loads(raw)
+    except ValueError:
+        raise PageDown(f"the page at {url} answered with something other "
+                       f"than JSON: {raw[:200]!r}")
+    if not isinstance(out, dict):
+        raise PageDown(f"the page at {url} answered {str(out)[:200]}")
+    return out
+
+
+def _page_get(path: str) -> dict:
+    return _page_call(path)
+
+
+def _page_post(doc: dict, timeout: float = PAGE_LOAD_S) -> dict:
+    return _page_call("/loaded.json", doc, timeout)
+
+
+def _me_name() -> str:
+    from knurlogic.machine import identity
+    return identity.identity().get("name") or "this Mac"
+
+
+def _machines_of(page, here: str) -> list:
+    """This Mac and each peer its page asked, with whether it answered."""
+    out = [{"machine": here, "here": True}]
+    for p in (page or {}).get("peers") or []:
+        if isinstance(p, dict):
+            out.append({"machine": p.get("machine"), "here": False,
+                        **({"error": p["error"]} if p.get("error") else {})})
+    return out
+
+
+def _link_name(link):
+    return {v: k for k, v in LINKS.items()}.get(link, link)
+
+
+def models_across(page: dict, here: str) -> list:
+    """Every resident model in a page's /loaded.json?peers=1, one entry per
+    model: a cluster job ONCE (rank 0's row, which carries its `requests`;
+    or the job itself while rank 0 has no row yet), never one per rank."""
+    rows = [(here, r) for r in page.get("resident") or []
+            if isinstance(r, dict)]
+    jobs = [(here, j) for j in page.get("jobs") or [] if isinstance(j, dict)]
+    for p in page.get("peers") or []:
+        if not isinstance(p, dict):
+            continue
+        rows += [(p.get("machine"), r) for r in p.get("resident") or []
+                 if isinstance(r, dict)]
+        jobs += [(p.get("machine"), j) for j in p.get("jobs") or []
+                 if isinstance(j, dict)]
+    live = {}
+    for machine, j in jobs:
+        if j.get("job") and j.get("phase") != "stopped":
+            # the leader's copy knows the port; any copy knows the rest
+            if j["job"] not in live or j.get("port"):
+                live[j["job"]] = dict(j, _on=machine)
+    out, seen = [], set()
+    for machine, r in rows:
+        c = r.get("cluster") if isinstance(r.get("cluster"), dict) else {}
+        job = str(c.get("job") or "")
+        if job and job in seen:
+            continue
+        j = live.get(job, {})
+        if job:
+            seen.add(job)
+        out.append({
+            "name": r.get("name"), "runtime": r.get("runtime"),
+            "machine": machine, "where": r.get("where"),
+            "port": _port_of(r.get("where")),
+            "state": r.get("state"),
+            "requests": r.get("requests"),
+            "machines": list(c.get("machines") or j.get("machines")
+                             or [machine]),
+            "split": c.get("split") or j.get("split"),
+            "link": _link_name(c.get("link") or j.get("link")),
+            "job": job or None,
+            "leader": c.get("leader") or j.get("leader"),
+            **({"phase": c.get("phase") or j.get("phase")} if job else {}),
+            **({k: j[k] for k in ("cable", "cable_note") if j.get(k)}),
+        })
+    for job, j in live.items():
+        if job in seen:
+            continue
+        # no rank 0 row yet (still loading) or its page did not answer
+        out.append({
+            "name": j.get("artifact"), "runtime": "knurlogic",
+            "machine": j.get("leader") or j["_on"], "where": None,
+            "port": j.get("port"), "state": None, "requests": None,
+            "machines": list(j.get("machines") or []),
+            "split": j.get("split"), "link": _link_name(j.get("link")),
+            "job": job, "leader": j.get("leader"), "phase": j.get("phase"),
+            **({k: j[k] for k in ("cable", "cable_note") if j.get(k)})})
+    return out
+
+
+def _port_of(where):
+    from urllib.parse import urlparse
+    try:
+        return urlparse(where or "").port
+    except ValueError:
+        return None
+
+
+def _node_ids(names: List[str]) -> tuple:
+    """([page node ids], refusal or None): machine names as this Mac's page
+    knows them -- itself and the peers answering it. An id is accepted too."""
+    st = _page_get("/status.json")
+    me = st.get("me") or {}
+    known = [(me.get("id"), me.get("name"), "answering")] + [
+        (p.get("id"), p.get("name"), p.get("state"))
+        for p in st.get("peers") or [] if isinstance(p, dict)]
+    ids = []
+    for n in names:
+        hit = [k for k in known if n in (k[0], k[1])] or [
+            k for k in known if str(k[1] or "").lower() == str(n).lower()]
+        if not hit:
+            return [], {"loaded": False,
+                        "refused": f"{n!r} is not a machine this Mac's page "
+                                   f"knows",
+                        "machines": [k[1] for k in known
+                                     if k[2] == "answering"]}
+        if hit[0][2] != "answering":
+            return [], {"loaded": False,
+                        "refused": f"{hit[0][1]} is not answering "
+                                   f"({hit[0][2]})"}
+        ids.append(hit[0][0])
+    return ids, None
+
+
+def _refusal(out: dict) -> Dict[str, Any] | None:
+    """The page's refusal, as a refusal: an answer, never a crash."""
+    why = out.get("refused") or out.get("error")
+    if not why:
+        return None
+    return {"loaded": False, "refused": why,
+            **{k: out[k] for k in ("note", "detail", "placement", "machine")
+               if k in out}}
 
 
 def models(fits_only: bool = False, **_) -> Dict[str, Any]:
@@ -281,13 +483,22 @@ def drafting(artifact: str = "", **_) -> Dict[str, Any]:
 
 def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
          sets: Dict[str, str] | None = None, force: bool = False,
-         draft: bool = True, **_) -> Dict[str, Any]:
+         draft: bool = True, machines: List[str] | None = None,
+         split: str = "", link: str = "", cable: str = "",
+         **_) -> Dict[str, Any]:
     """Start a server for this artifact, after checking it can work.
 
     REFUSES rather than gambles: memory still moving or a model that does
     not fit is a refusal with the reason attached. `force` overrides the
     moving-memory check only -- it will not make a model fit.
+
+    `machines` names where: empty is this Mac. Another Mac, or several,
+    go through the page on this Mac -- its Launch, the same request.
     """
+    names = [str(m) for m in (machines or []) if str(m)]
+    if names:
+        return _load_on(names, artifact, port, tune, sets, force, draft,
+                        split, link, cable)
     from knurlogic.interfaces import ui
     from knurlogic.interfaces.loading import NotLoadable, resolve_name
 
@@ -318,9 +529,152 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
     return out
 
 
-def unload(port: int = 8080, **_) -> Dict[str, Any]:
+def _identity_of(artifact: str) -> tuple:
+    """(identity, refusal): a model on other machines is named by identity
+    (machine/artifact.identity), read from this Mac's copy; a 16-hex
+    identity is taken as given, for a model this Mac does not hold."""
+    import re
+    from knurlogic.interfaces.loading import NotLoadable, resolve_name
+    from knurlogic.machine.artifact import identity
+    try:
+        ident = identity(resolve_name(artifact, None))
+    except NotLoadable as e:
+        if re.fullmatch(r"[0-9a-f]{16}", str(artifact or "")):
+            return artifact, None
+        return "", {"loaded": False, "refused": "not a known artifact",
+                    "note": f"{e}. A model this Mac does not hold is named "
+                            f"by its identity (the page's /models.json on a "
+                            f"Mac that has it)."}
+    if not ident:
+        return "", {"loaded": False, "refused": "no identity",
+                    "note": f"{artifact} has no config.json"}
+    return ident, None
+
+
+def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
+             cable) -> Dict[str, Any]:
+    """`load` on other machines: the page's Launch request, sent to the
+    page on this Mac (ui._load_fn), which forwards a one-peer load and
+    coordinates a cluster (cluster_jobs.launch)."""
+    if len(set(names)) != len(names):
+        return {"loaded": False, "refused": "a machine is named twice"}
+    if len(names) >= 2:
+        if split not in SPLITS:
+            return {"loaded": False,
+                    "refused": f"split is tensor | pipeline, not {split!r}"}
+        if link not in LINKS:
+            return {"loaded": False,
+                    "refused": f"link is tcp | rdma, not {link!r}"}
+        if not draft:
+            return {"loaded": False,
+                    "refused": "draft=false is a one-machine option; a "
+                               "cluster job's ranks take no --no-draft"}
+    ident, no = _identity_of(artifact)
+    if no:
+        return no
+    try:
+        ids, no = _node_ids(names)
+        if no:
+            return no
+        from knurlogic.machine import identity
+        if len(ids) == 1 and ids[0] == identity.identity().get("id"):
+            # this Mac, named: the same as naming none
+            return load(artifact=artifact, port=port, tune=tune, sets=sets,
+                        force=force, draft=draft)
+        req = {"action": "load", "identity": ident, "tune": tune,
+               "sets": dict(sets or {}), "port": int(port)}
+        if len(ids) == 1:
+            req.update(node=ids[0], force=bool(force))
+        else:
+            req.update(nodes=ids, split=split, link=link)
+            if cable:
+                req["cable"] = cable
+        out = _page_post(req)
+    except PageDown as e:
+        return {"error": str(e)}
+    no = _refusal(out)
+    if no:
+        return no
+    if len(ids) == 1:
+        return dict(out, machines=names)
+    plan = dict(out.get("placement") or {})
+    plan.update(cable=out.get("cable"), cable_note=out.get("cable_note"))
+    return {"starting": out.get("starting"), "artifact": artifact,
+            "job": out.get("job"), "port": out.get("port"),
+            "leader": out.get("leader"), "machines": out.get("machines"),
+            "split": split, "link": link, "placement": plan,
+            "note": out.get("note", "") + " -- or `state`: the job is one "
+                    "entry in `models`, with its phase."}
+
+
+def unload(port: int | None = None, model: str = "", job: str = "",
+           machine: str = "", **_) -> Dict[str, Any]:
+    """Stop a model knurlogic started: by port on this Mac (as before), or
+    by model name or job id on any machine this Mac's page sees. A cluster
+    job stops on every machine -- the page's Unload, the same request."""
     from knurlogic.interfaces import ui
-    return ui._stop(int(port))
+    if not (port or model or job):
+        return {"error": "name the port, the model or the job"}
+    try:
+        page = _page_get("/loaded.json?peers=1")
+    except PageDown as e:
+        if port and not (model or job or machine):
+            return ui._stop(int(port))      # this Mac, without its page
+        return {"error": str(e)}
+    here = _me_name()
+    rows = [r for r in models_across(page, here)
+            if r.get("runtime") == "knurlogic"]
+    if job:
+        hit = [r for r in rows if r.get("job") == str(job)]
+    else:
+        hit = rows
+        if model:
+            hit = [r for r in hit if r.get("name") == model] or [
+                r for r in hit if str(r.get("name") or "").lower().endswith(
+                    str(model).lower())]
+        if machine:
+            hit = [r for r in hit if r.get("machine") == machine
+                   or machine in (r.get("machines") or [])]
+        elif port and not model:
+            hit = [r for r in hit if r.get("machine") == here]
+        if port:
+            hit = [r for r in hit if r.get("port") == int(port)]
+    if not hit:
+        if port and not (model or job or machine):
+            return ui._stop(int(port))      # e.g. a server still loading
+        return {"error": "no knurlogic model matches that",
+                "resident": [{k: r.get(k) for k in
+                              ("name", "machine", "port", "job")}
+                             for r in rows]}
+    if len(hit) > 1:
+        return {"error": "more than one model matches; name the job, or "
+                         "the machine and port",
+                "matches": [{k: r.get(k) for k in
+                             ("name", "machine", "port", "job")}
+                            for r in hit]}
+    r = hit[0]
+    try:
+        if r.get("job") and any(j.get("job") == r["job"]
+                                for j in page.get("jobs") or []):
+            # a rank of it runs here: this page stops it everywhere
+            out = _page_post({"action": "unload", "job": r["job"]}, 60)
+        elif r.get("machine") == here:
+            out = _page_post({"action": "unload",
+                              "target": str(r.get("port"))}, 60)
+        else:
+            if not r.get("port"):
+                return {"error": f"{r.get('name')} on {r.get('machine')} "
+                                 f"has no port yet; stop it there"}
+            ids, no = _node_ids([r["machine"]])
+            if no:
+                return {"error": no["refused"]}
+            # the peer's rank 0 port: that page stops its job everywhere
+            out = _page_post({"action": "unload", "node": ids[0],
+                              "port": int(r["port"])}, 60)
+    except PageDown as e:
+        return {"error": str(e)}
+    return dict(out, model=r.get("name"), machine=r.get("machine"),
+                machines=r.get("machines"), job=r.get("job"))
 
 
 # --- the table --------------------------------------------------------------
@@ -343,12 +697,22 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     },
     "state": {
         "fn": state,
-        "description": "What is loaded on this machine in every runtime "
-                       "(knurlogic, ollama, exo, any OpenAI port) and where "
-                       "the memory went. `started_here` gives each server `load` "
-                       "started a phase -- serving, loading (with elapsed "
-                       "time and the last log line), stalled (stop waiting, "
-                       "read the log), or exited (exit code, log tail).",
+        "description": "What is loaded, here and on every machine this "
+                       "Mac's page (`knurlogic ui`) sees. `models`: one "
+                       "entry per resident model -- name, machine, port, "
+                       "machines, split (tensor | pipeline), link (tcp | "
+                       "rdma), job, leader, phase, and `requests` "
+                       "(in_flight, pending, capacity, oldest_pending_s, "
+                       "holding; null when its server does not report "
+                       "them). A cluster job is ONE entry, on its leader, "
+                       "never one per rank. `machines`: the peers asked, "
+                       "with any that did not answer. The rest is this Mac "
+                       "alone: every runtime (knurlogic, ollama, exo, any "
+                       "OpenAI port), where the memory went, and "
+                       "`started_here` -- each server `load` started with "
+                       "its phase: serving, loading (elapsed time, last log "
+                       "line), stalled (stop waiting, read the log), or "
+                       "exited (exit code, log tail).",
         "schema": _schema({}),
     },
     "models": {
@@ -388,22 +752,51 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     },
     "load": {
         "fn": load,
-        "description": "Start a local server for an artifact, with its "
-                       "settings resolved against the load budget. Refuses "
-                       "if it will not fit (no override) or another load is "
-                       "still moving memory (force overrides).",
+        "description": "Start a model. With no `machines`, a server on "
+                       "this Mac, its settings resolved against the load "
+                       "budget; refused if it will not fit (no override) "
+                       "or another load is still moving memory (force "
+                       "overrides). With `machines`, through this Mac's "
+                       "page (`knurlogic ui` must run), exactly as its "
+                       "Launch button: one other Mac is a load there, "
+                       "checked by that Mac; two or more is a cluster job "
+                       "-- placement, leader and cable are chosen, never "
+                       "asked for. Returns job, port (rank 0 serves the "
+                       "model there, on the leader), leader, machines and "
+                       "placement {order, leader, layers, cable, "
+                       "cable_note}; the job loads in the background -- "
+                       "poll `state`. Refused, with the reason and nothing "
+                       "started, when a share does not fit, a machine is "
+                       "not answering, the model is not on a machine, rdma "
+                       "has no Thunderbolt 5 cable with RDMA up, or a "
+                       "machine is already loading (one load at a time). "
+                       "Nothing is ever evicted to make room: unload first.",
         "schema": _schema({
-            "artifact": S("path to the artifact"),
-            "port": S("port to serve on", "integer"),
+            "artifact": S("the model's name (or, for machines that are "
+                          "not this Mac, its 16-hex identity)"),
+            "port": S("port to serve on (a cluster job: rank 0's port on "
+                      "the leader)", "integer"),
             "tune": S("safe | balanced | fast"),
             "sets": {"type": "object",
                      "description": "launch-only knob overrides, KEY: VALUE"},
             "force": {"type": "boolean",
                       "description": "load while another load is still "
-                                     "moving memory"},
+                                     "moving memory (one machine only)"},
             "draft": {"type": "boolean",
                       "description": "use a packed drafting head "
-                                     "(default true)"},
+                                     "(default true; one machine only)"},
+            "machines": {"type": "array", "items": {"type": "string"},
+                         "description": "machine names, as `state` lists "
+                                        "them; empty: this Mac only"},
+            "split": S("with two or more machines: tensor (every layer "
+                       "split, same share each) | pipeline (layers in "
+                       "runs, sized to each machine)"),
+            "link": S("with two or more machines: tcp (the ring, any "
+                      "link) | rdma (jaccl over Thunderbolt 5, exactly "
+                      "two machines)"),
+            "cable": S("optional, two machines: the Thunderbolt subnet to "
+                       "use (e.g. 198.51.100); by default the fastest shared "
+                       "one, moving to the next if link init fails"),
         }, ["artifact"]),
     },
     "deps": {
@@ -416,9 +809,17 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     },
     "unload": {
         "fn": unload,
-        "description": "Stop a local server knurlogic started (any "
-                       "session).",
-        "schema": _schema({"port": S("port it was started on", "integer")}),
+        "description": "Stop a model knurlogic started. `port` alone: the "
+                       "server on that port of this Mac. `model` or `job`: "
+                       "on any machine this Mac's page sees (`machine` and "
+                       "`port` narrow it when a name matches twice). A "
+                       "cluster job stops on every machine it runs on.",
+        "schema": _schema({
+            "port": S("port it serves on (this Mac, unless `machine`)",
+                      "integer"),
+            "model": S("its name, as `state` lists it"),
+            "job": S("a cluster job's id, from `load` or `state`"),
+            "machine": S("the machine it runs on")}),
     },
 }
 
