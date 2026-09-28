@@ -49,7 +49,7 @@ Homepage = "https://github.com/noahzelezny/knurlogic"
 where = ["src"]
 
 [tool.setuptools.package-data]
-knurlogic = ["interfaces/web/*.html", "interfaces/web/*.md",
+knurlogic = ["interfaces/page/assets/*",
              "engine/families/*/architecture/*.md",
              "engine/families/*/architecture/*.json",
              "engine/vq/*.json", "engine/vq/*.md",

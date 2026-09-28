@@ -86,7 +86,7 @@ def test_engine_settings_reads_them():
 
 
 def test_the_launch_allowlist_takes_them():
-    from knurlogic.interfaces.ui import clean_sets
+    from knurlogic.interfaces.page.server import clean_sets
     ok, bad = clean_sets({"KNURLOGIC_MTP": "off",
                           "KNURLOGIC_MTP_DYNAMIC": "off",
                           "KNURLOGIC_KV_BITS": "8"})
@@ -203,7 +203,7 @@ def test_serve_counts_the_bits_it_launches_with(tmp_path, monkeypatch):
 def test_a_cluster_job_passes_the_same_sets_to_every_rank():
     """Ring-wide: one `sets` dict in the job's base spec, the same --set
     flags on every rank's argv."""
-    from knurlogic.interfaces.cluster_jobs import rank_argv
+    from knurlogic.cluster.launch import rank_argv
     sets = {"KNURLOGIC_KV_BITS": "8", "KNURLOGIC_MTP_DYNAMIC": "off"}
     argvs = [rank_argv("/m", {"rank": r, "world": 2, "split": "pipeline",
                               "link": "ring", "job": "ab", "hosts": ["a", "b"],
@@ -216,7 +216,7 @@ def test_a_cluster_job_passes_the_same_sets_to_every_rank():
 def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
     """Settings -> MODELS: one row per launch knob, needs reload, and the
     KV control narrowed to what the family allows."""
-    from knurlogic.interfaces import web
+    from knurlogic.interfaces.page import documents as web
     for mt, want in (("glm5_next", ["bf16", "8"]),
                      ("qwen3_5_text", ["bf16", "8", "6", "4"])):
         (tmp_path / mt).mkdir()

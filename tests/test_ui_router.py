@@ -1,4 +1,4 @@
-"""interfaces/ui.py: the page's router (POST /v1/messages and
+"""interfaces/page/server.py: the page's router (POST /v1/messages and
 /v1/chat/completions forwarded by `model`, GET /v1/models) and the live
 settings proxy (POST /apply). Every upstream is a fake on loopback."""
 
@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from knurlogic.interfaces import ui
+from knurlogic.interfaces.page import server as ui
 
 
 def _serve(handler_cls):

@@ -26,8 +26,8 @@ import pytest
 
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import links
-from knurlogic.interfaces import cluster_jobs as C
-from knurlogic.interfaces import ui
+from knurlogic.cluster import launch as C
+from knurlogic.interfaces.page import server as ui
 from knurlogic.machine import identity
 from knurlogic.tuning import settings
 

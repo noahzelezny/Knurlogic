@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from knurlogic.interfaces import messages as M
+from knurlogic.interfaces.http import messages as M
 
 MARKER = "from-the-stub-engine"
 
@@ -239,7 +239,7 @@ def test_the_timeout_is_raised_because_a_local_model_is_slower():
 def test_an_anthropic_image_block_reaches_the_engine_in_order():
     """Anthropic image blocks used to be dropped: _text_of kept only text, so
     a Claude-shaped request with a picture reached the model without it."""
-    from knurlogic.interfaces.messages import to_openai
+    from knurlogic.interfaces.http.messages import to_openai
     body = to_openai({"model": "m", "messages": [{"role": "user", "content": [
         {"type": "text", "text": "what colour is"},
         {"type": "image", "source": {"type": "base64",
