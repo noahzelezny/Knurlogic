@@ -22,7 +22,9 @@ Hidden states cross ranks with send / recv, each evaluated where it is
 built (a follower's step finishes its send inside the forward; rank 0's
 receive is waited for inside the forward), so the order of point-to-point
 messages and of the CPU collectives (the plan exchange, B0-B2 below) is
-the program order on every rank. A receive is made in the RECEIVING rank's
+the program order on every rank. A prompt's prefill chunks are the one
+exception (`overlapped`): a chunk's send runs while the next chunk
+computes, and every send has completed before the prefill's last forward. A receive is made in the RECEIVING rank's
 own activation dtype and a send is cast to its receiver's (the dtypes are
 agreed when the model is split), never the dtype of a placeholder: an
 unloaded embedding is float32, and a float32 receive of bf16 bytes ran a
@@ -58,6 +60,7 @@ entries carry no head cache; BA makes that invisible.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import List, Optional, Sequence, Tuple
 
@@ -142,18 +145,82 @@ class Recv(_Wrap):
 
 class Send(_Wrap):
     """The last layer of a stage that is not the last: its output goes to
-    the next stage in that stage's dtype, sent before the forward returns."""
+    the next stage in that stage's dtype, sent before the forward returns
+    -- or, inside `overlapped` (a prompt's prefill chunks), sent while the
+    next chunk computes: at most two sends are in flight, and all of them
+    have completed before the prefill's last forward, so nothing is in
+    flight when the next collective runs."""
 
     def __init__(self, inner, dst: int, group, dtype):
         super().__init__(inner)
         self._dst, self._group, self._dtype = dst, group, dtype
+        self.overlap = False
+        self._pending: list = []
+        #: sends made asynchronously (the tests read it)
+        self.overlapped = 0
 
     def __call__(self, x, *a, **kw):
         y = self.inner(x, *a, **kw)
         s = mx.distributed.send(y.astype(self._dtype), self._dst,
                                 group=self._group)
-        mx.eval(s)
+        if not self.overlap:
+            mx.eval(s)
+            return y
+        # this chunk's layers and send go to the device now; the previous
+        # chunk's send is waited for only after, while this one computes
+        mx.async_eval(s)
+        self._pending.append(s)
+        self.overlapped += 1
+        if len(self._pending) > 1:
+            mx.eval(self._pending[:-1])
+            del self._pending[:-1]
         return y
+
+    def flush(self) -> None:
+        """Wait for every send in flight."""
+        if self._pending:
+            mx.eval(self._pending)
+            self._pending.clear()
+
+
+def sends_of(model) -> List[Send]:
+    """This stage's Send (none on rank 0), seen through its wrappers."""
+    out = []
+    for layer in core_of(model).layers:
+        while isinstance(layer, _Wrap):
+            if isinstance(layer, Send):
+                out.append(layer)
+            layer = layer["inner"]
+    return out
+
+
+def overlap_on() -> bool:
+    """KNURLOGIC_PIPELINE_OVERLAP=off sends each prefill chunk before the
+    next one computes (the A/B for the overlap's gain)."""
+    import os
+    v = os.environ.get("KNURLOGIC_PIPELINE_OVERLAP", "").strip().lower()
+    return v not in ("off", "0", "false", "no")
+
+
+@contextlib.contextmanager
+def overlapped(model):
+    """Around a prompt's prefill chunks (batch_loop.admit's prefill_ctx):
+    each chunk's hidden state is sent while the next chunk computes (Noah's
+    exo fork queued its prefill sends for the same reason), and every send
+    has completed on the way out -- before the prefill's last forward and
+    any collective after it. Nothing but sends and receives happens
+    between the chunks, so the point-to-point order is the program order
+    on every rank, as without it."""
+    sends = sends_of(model) if overlap_on() else []
+    for sd in sends:
+        sd.overlap = True
+    try:
+        yield
+    finally:
+        for sd in sends:
+            sd.overlap = False
+        for sd in sends:
+            sd.flush()
 
 
 def bounds_of(counts: Sequence[int]) -> List[Tuple[int, int]]:
@@ -264,10 +331,13 @@ class Silent:
 
 
 def silence(gen) -> None:
-    """Make a follower's batch engine call its trunk through `Silent`."""
+    """Make a follower's batch engine call its trunk through `Silent`, and
+    overlap its prefill sends with the next chunk (`overlapped`)."""
     s = Silent(gen._trunk)
     gen._trunk = s
     gen._batch.model = s
+    model = gen.model
+    gen._prefill_ctx = lambda: overlapped(model)
 
 
 # ------------------------------------------------------------ coordinator

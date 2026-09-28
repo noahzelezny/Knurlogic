@@ -256,6 +256,9 @@ def test_mtp_drafting_on_a_pipeline_is_the_unsplit_engine(tmp_path, always):
     (b0, b1, b2, steps, ba), follower = d["calls"]
     assert follower == [b0, b1, b2, steps, ba]
     assert b0 == ba == 3                            # three admissions
+    # the follower's prefill chunks (16 tokens; prompts of 37, 9, 70) were
+    # sent while the next one computed; rank 0 sends nothing
+    assert d["overlapped"][0] == 0 and d["overlapped"][1] > 0
     assert 0 < b2 <= b1 <= steps
     assert d["drafted"] > 0
     if always:
@@ -353,6 +356,27 @@ def test_unwrap_sees_through_both_ends_of_a_one_layer_stage():
     both = PL.Send(PL.Recv(lin, 1, None, mx.float32), 0, None, mx.float32)
     assert PL.unwrap(both) is lin and PL.unwrap(lin) is lin
     assert type(both) is not nn.Linear and both.weight is lin.weight
+
+
+def test_overlap_finds_a_stages_send_and_is_undone_on_the_way_out(
+        monkeypatch):
+    """`overlapped` turns on the stage's Send (found through a one-layer
+    stage's Recv) for the prefill chunks only, and KNURLOGIC_PIPELINE_
+    OVERLAP=off leaves every send synchronous (the A/B)."""
+    import types
+    import mlx.nn as nn
+    from knurlogic.engine.runtime import pipeline as PL
+    send = PL.Send(PL.Recv(nn.Linear(2, 2), 1, None, mx.float32), 0, None,
+                   mx.float32)
+    model = types.SimpleNamespace(model=types.SimpleNamespace(
+        layers=[nn.Linear(2, 2), send]))
+    assert PL.sends_of(model) == [send]
+    with PL.overlapped(model):
+        assert send.overlap
+    assert not send.overlap
+    monkeypatch.setenv("KNURLOGIC_PIPELINE_OVERLAP", "off")
+    with PL.overlapped(model):
+        assert not send.overlap
 
 
 @pytest.mark.parametrize("start,end,recv,send", [(0, 3, False, True),

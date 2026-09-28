@@ -193,7 +193,12 @@ unchanged). `--split pipeline`.
   Noah's 574a7bd7). Every send is evaluated inside the forward that makes
   it and every receive is waited for inside the forward that uses it, so
   point-to-point messages and the CPU collectives stay in program order on
-  every rank.
+  every rank. The one exception is a prompt's prefill chunks
+  (`pipeline.overlapped`, as Noah's exo fork queued its prefill sends): a
+  follower's chunk is sent while its next chunk computes, at most two sends
+  in flight, and all of them complete before the prefill's last forward --
+  no collective runs between chunks. `KNURLOGIC_PIPELINE_OVERLAP=off` sends
+  synchronously (the A/B).
 - **Who samples, and how logits reach rank 0**: they are born there.
   mlx-lm's pipeline all_gathers the last stage's hidden state so every
   rank computes logits; we do not, because no follower needs them -- the
