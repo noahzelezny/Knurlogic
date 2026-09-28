@@ -114,6 +114,29 @@ Where it appears:
 The existing 503s carry `Retry-After`: 5 s for no model loaded, 10 s for
 insufficient memory, 30 s for a cluster that is stopping. No new 429 or 503.
 
+### Instance ids
+
+exo gives a running instance a stable id; a single-Mac knurlogic server had
+none, so two Macs both answering on :8080 were easy to confuse. Now every
+server the page starts (page launch or MCP `load`) gets a 16-hex `instance`
+id, stored in its registry record next to its pid; a cluster job's instance
+id is simply its job id (already 8-32 hex, already stable across its ranks).
+
+Where it appears, wherever known:
+- `GET /v1/residency` -> each `data[]` row's `instance` (Scout), read from
+  this box's own registry by the port it is serving on;
+- the page's `GET /loaded.json` -> each knurlogic `resident[]` row's
+  `instance` (`machine/loaded.py` `_instance_of`);
+- the MCP's `state()` -> each `models[]` entry's `instance`; the same
+  instance reported by two pages (a cluster job, from more than one
+  rank's page) is one entry, not two;
+- the Instances card (the page) shows the first 6 hex characters in its
+  detail line.
+
+`unload(instance=...)` stops it -- on this Mac or on a peer, the same way
+`unload(model=...)` already reaches a peer's page -- alongside `port`,
+`model` and `job`, which keep working unchanged.
+
 ## Cluster readiness
 
 `executor.py` is the seam. A pipeline executor runs stages on several
