@@ -3336,8 +3336,9 @@ $('cdefaults').onclick=()=>{
   $('ctemp').dispatchEvent(new Event('change'));      // remembered as left
 };
 // The fields as last left, in this browser only: a convenience, not state.
+// Sampling is not kept: each model's recommended values fill in.
 (()=>{
-  const ids=['cmax','ctemp','ctopp','ctopk','csys','ceffort'];
+  const ids=['cmax','csys','ceffort'];
   try{
     const v=JSON.parse(localStorage.getItem('kn.copts')||'{}');
     ids.forEach(id=>{ if(v[id]!=null) $(id).value=v[id] });
