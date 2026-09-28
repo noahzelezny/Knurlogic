@@ -29,6 +29,7 @@ STOP_REASON = {
     "length": "max_tokens",
     "tool_calls": "tool_use",
     "function_call": "tool_use",
+    "compaction": "compaction",
     None: "end_turn",
 }
 
@@ -61,6 +62,19 @@ def to_openai(req: dict) -> dict:
             continue
         if isinstance(content, str):
             out_msgs.append({"role": role, "content": content})
+            continue
+
+        # A compaction block (the server's own, resent) is a cut point:
+        # its own message, for interfaces/context_edits to fold on. The
+        # rest of the message follows it as usual.
+        for b in content or []:
+            if isinstance(b, dict) and b.get("type") == "compaction":
+                out_msgs.append({"role": "assistant", "content": None,
+                                 "compaction": str(b.get("content") or "")})
+        content = [b for b in content or []
+                   if not (isinstance(b, dict)
+                           and b.get("type") == "compaction")]
+        if not content:
             continue
 
         # A user turn may carry tool RESULTS, which OpenAI models as separate
@@ -141,6 +155,9 @@ def to_openai(req: dict) -> dict:
         body["stream_options"] = {"include_usage": True}
     if req.get("reasoning_effort"):
         body["reasoning_effort"] = req["reasoning_effort"]
+    # performed by the server (interfaces/compaction), whichever API asked
+    if req.get("context_management") is not None:
+        body["context_management"] = req["context_management"]
     if req.get("tools"):
         body["tools"] = [{
             "type": "function",
@@ -154,6 +171,10 @@ def to_openai(req: dict) -> dict:
 
 def _blocks_from_choice(msg: dict) -> list:
     blocks = []
+    if msg.get("compaction") is not None:
+        # first, as the API places it: everything before it is what it
+        # summarizes, and the client resends it with the rest
+        blocks.append({"type": "compaction", "content": msg["compaction"]})
     reasoning = msg.get("reasoning_content") or msg.get("reasoning")
     if reasoning:
         # A local model signs nothing; the signature is empty, which a
@@ -176,6 +197,35 @@ def _blocks_from_choice(msg: dict) -> list:
     return blocks or [{"type": "text", "text": ""}]
 
 
+def _usage(usage: dict) -> dict:
+    """OpenAI usage -> Anthropic's: input_tokens is what was NOT read from
+    the prompt cache, cache_read_input_tokens what was (a harness adds the
+    two for the context it is using); a summary pass is an iteration;
+    usage.knurlogic (context tokens against the window, ...) passed on."""
+    cached = int((usage.get("prompt_tokens_details") or {})
+                 .get("cached_tokens", 0) or 0)
+    prompt = int(usage.get("prompt_tokens", 0) or 0)
+    out = {"input_tokens": max(prompt - cached, 0),
+           "cache_creation_input_tokens": 0,
+           "cache_read_input_tokens": cached,
+           "output_tokens": int(usage.get("completion_tokens", 0) or 0)}
+    kn = usage.get("knurlogic") or {}
+    if kn.get("compaction"):
+        c = kn["compaction"]
+        out["iterations"] = [
+            {"type": "compaction",
+             "input_tokens": max(c.get("input_tokens", 0)
+                                 - c.get("cache_read_input_tokens", 0), 0),
+             "cache_read_input_tokens": c.get("cache_read_input_tokens", 0),
+             "output_tokens": c.get("output_tokens", 0)},
+            {"type": "message", "input_tokens": out["input_tokens"],
+             "cache_read_input_tokens": cached,
+             "output_tokens": out["output_tokens"]}]
+    if kn:
+        out["knurlogic"] = kn
+    return out
+
+
 def _id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:24]}"
 
@@ -189,7 +239,10 @@ def from_openai(resp: dict, model: str) -> dict:
     stop = STOP_REASON.get(choice.get("finish_reason"), "end_turn")
     if any(b["type"] == "tool_use" for b in blocks):
         stop = "tool_use"
-    return {
+    if choice.get("finish_reason") == "compaction":
+        # paused after compaction: the summary alone, no text block
+        blocks = [b for b in blocks if b["type"] == "compaction"]
+    out = {
         "id": _id("msg"),
         "type": "message",
         "role": "assistant",
@@ -201,9 +254,11 @@ def from_openai(resp: dict, model: str) -> dict:
         # so a GLM "thinking disabled" that could only go to low is SAID
         **({"knurlogic": usage["knurlogic"]} if usage.get("knurlogic")
            else {}),
-        "usage": {"input_tokens": usage.get("prompt_tokens", 0),
-                  "output_tokens": usage.get("completion_tokens", 0)},
+        "usage": _usage(usage),
     }
+    if resp.get("context_management"):
+        out["context_management"] = resp["context_management"]
+    return out
 
 
 def _sse(event: str, data: dict) -> bytes:
@@ -231,11 +286,17 @@ def stream(openai_lines, model: str):
     index, open_block, stop = 0, None, "end_turn"
     tool_open = {}
     usage = {"input_tokens": 0, "output_tokens": 0}
+    managed = None
 
     for line in openai_lines:
         if isinstance(line, bytes):
             line = line.decode("utf-8", "replace")
         line = line.strip()
+        if line.startswith(": keepalive"):
+            # a summary pass (or a long prefill) under way: say so, as the
+            # API does, so the client does not time out
+            yield _sse("ping", {"type": "ping"})
+            continue
         if not line.startswith("data:"):
             continue
         payload = line[5:].strip()
@@ -255,10 +316,30 @@ def stream(openai_lines, model: str):
             return
         u = chunk.get("usage") or {}
         if u:
-            usage = {"input_tokens": u.get("prompt_tokens", 0),
-                     "output_tokens": u.get("completion_tokens", 0)}
+            usage = _usage(u)
+        if chunk.get("context_management"):
+            managed = chunk["context_management"]
         choice = (chunk.get("choices") or [{}])[0]
         delta = choice.get("delta") or {}
+
+        if delta.get("compaction") is not None:
+            # whole, as the API streams it: start, one compaction_delta,
+            # stop -- before any other block
+            if open_block is not None:
+                yield _sse("content_block_stop",
+                           {"type": "content_block_stop", "index": index})
+                index += 1
+            yield _sse("content_block_start", {
+                "type": "content_block_start", "index": index,
+                "content_block": {"type": "compaction", "content": ""}})
+            yield _sse("content_block_delta", {
+                "type": "content_block_delta", "index": index,
+                "delta": {"type": "compaction_delta",
+                          "content": delta["compaction"]}})
+            yield _sse("content_block_stop",
+                       {"type": "content_block_stop", "index": index})
+            index += 1
+            open_block = None
 
         thought = delta.get("reasoning_content") or delta.get("reasoning")
         if thought:
@@ -333,10 +414,12 @@ def stream(openai_lines, model: str):
     if open_block is not None:
         yield _sse("content_block_stop",
                    {"type": "content_block_stop", "index": index})
-    yield _sse("message_delta", {
-        "type": "message_delta",
-        "delta": {"stop_reason": stop, "stop_sequence": None},
-        "usage": {"output_tokens": usage["output_tokens"]}})
+    final = {"type": "message_delta",
+             "delta": {"stop_reason": stop, "stop_sequence": None},
+             "usage": usage}
+    if managed:
+        final["context_management"] = managed
+    yield _sse("message_delta", final)
     yield _sse("message_stop", {"type": "message_stop"})
 
 

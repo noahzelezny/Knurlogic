@@ -89,7 +89,7 @@ class App:
         with self._count_lock:
             self.requests += 1
 
-    def submit(self, body: dict, chat: bool):
+    def submit(self, body: dict, chat: bool, extra: dict = None):
         from knurlogic.machine.artifact import sampling_defaults
         path = self.scheduler.host.path
         job, ctx = O.build_job(body, chat=chat,
@@ -97,6 +97,9 @@ class App:
                                has_vision=self.has_vision,
                                sampling_defaults=(sampling_defaults(path)
                                                   if path else None))
+        if chat:
+            ctx["window"] = self.window()
+        ctx.update(extra or {})
         self._count()
         self.scheduler.submit(job)
         host = self.scheduler.host
@@ -114,21 +117,192 @@ class App:
         """/v1/messages -> the OpenAI surface, in-process."""
         from knurlogic.interfaces.messages import TransportError
         try:
-            job, reply = self.submit(oai, chat=True)
-            first = reply.first()
-            if first[0] == "error":
-                raise O._status_of(first[1])
-            if oai.get("stream"):
-                def events():
-                    try:
-                        yield from reply.events(first)
-                    finally:
-                        job.cancel()     # abandoned mid-stream: free the row
-                return events()
-            return reply.complete(first)
+            kind, val = self.chat(oai)
+            return val
         except O.ApiError as e:
             raise TransportError(e.status, str(e),
                                  getattr(e, "retry_after", None)) from e
+
+    # ------------------------------------------------------- context
+
+    def window(self) -> int:
+        """The context a request may use: the server's cap
+        (KNURLOGIC_CONTEXT_LENGTH) else the model's own window; 0 when
+        neither is known."""
+        from knurlogic.engine.runtime.scheduler import _context_cap
+        cap = _context_cap()
+        if cap:
+            return cap
+        path = getattr(self.scheduler.host, "path", None)
+        if not path:
+            return 0
+        from knurlogic.machine.artifact import context_length
+        return context_length(path)
+
+    def count(self, messages: list, tools=None) -> int:
+        """A chat prompt's length in the served model's tokens, rendered
+        by its own template; images left out (a floor with them). 0 with
+        no model loaded."""
+        from knurlogic.engine.runtime import prompt as P
+        tok = getattr(self.scheduler.host, "tokenizer", None)
+        if tok is None:
+            return 0
+        msgs = []
+        for m in messages or []:
+            c = m.get("content")
+            if isinstance(c, list):
+                c = [p for p in c
+                     if isinstance(p, dict) and p.get("type") == "text"]
+            msgs.append(dict(m, content=c))
+        prompt, *_ = P.tokenize(None, tok, P.ChatRequest(
+            "chat", "", msgs, tools or None), P.PromptArgs())
+        return len(prompt)
+
+    def _generate(self, body: dict) -> dict:
+        """One non-streaming completion, in-process (the summary pass).
+        A template with no way to turn thinking off is asked again
+        without the ask."""
+        try:
+            job, reply = self.submit(body, chat=True)
+        except O.ApiError:
+            if "reasoning_effort" not in body:
+                raise
+            body = {k: v for k, v in body.items() if k != "reasoning_effort"}
+            job, reply = self.submit(body, chat=True)
+        first = reply.first()
+        if first[0] == "error":
+            raise O._status_of(first[1])
+        return reply.complete(first)
+
+    def _warm(self, body: dict) -> None:
+        """Prefill a compacted prompt so it is in the prompt cache before
+        the client's next turn asks for it (pause_after_compaction: no
+        continuation prefilled it). One token; nobody waits on it."""
+        def run():
+            try:
+                job, reply = self.submit(dict(body, max_tokens=1,
+                                              stream=False), chat=True)
+                reply.complete(reply.first())
+            except Exception as e:
+                logger.debug("warming the compacted prompt: %s", e)
+        threading.Thread(target=run, daemon=True).start()
+
+    def chat(self, body: dict):
+        """A chat request through context management, then the engine:
+        ("json", completion) or ("stream", SSE byte iterator); ApiError to
+        refuse. A request that needs a summary pass and streams is
+        answered 200 at once and kept alive while the summary is written;
+        a later failure is an error event."""
+        from knurlogic.interfaces import compaction as C
+        from knurlogic.interfaces import context_edits as E
+        if not isinstance(body, dict):
+            raise O.ApiError(400, "the request body must be a JSON object")
+        try:
+            run, out, pending = C.prepare(
+                body, count=self.count,
+                window=self.window() if (body.get("context_management")
+                                         or C.settings()["auto"]) else 0)
+        except E.EditError as e:
+            raise O.ApiError(400, str(e), param="context_management")
+        except Exception as e:
+            # a template that cannot render this history is the engine's
+            # to refuse, as it would without context management
+            if not isinstance(e, ValueError):
+                raise
+            run, out, pending = dict(body), C.Outcome(), None
+            run.pop("context_management", None)
+
+        def extra():
+            return {"compaction": out.compaction, "applied": out.applied,
+                    "iteration": out.iteration}
+
+        def pause_doc():
+            import time
+            import uuid
+            self._warm(run2[0])
+            return C.paused(out, id_=f"chatcmpl-{uuid.uuid4().hex}",
+                            created=int(time.time()),
+                            model=self.served().get("id", "")
+                            or body.get("model") or "default",
+                            context={"tokens": 0, "window": self.window()})
+
+        run2 = [run]
+        if pending is not None and not body.get("stream"):
+            run2[0] = C.summarize(run, pending, out, self._generate)
+            if out.pause:
+                return "json", pause_doc()
+            pending = None
+        if pending is None:
+            job, reply = self.submit(run2[0], chat=True, extra=extra())
+            first = reply.first()
+            if first[0] == "error":
+                raise O._status_of(first[1])
+            if not reply.ctx["stream"]:
+                return "json", reply.complete(first)
+
+            def events():
+                try:
+                    yield from reply.events(first)
+                finally:
+                    job.cancel()         # abandoned mid-stream: free the row
+            return "stream", events()
+
+        def summarized():
+            box = {}
+
+            def work():
+                try:
+                    box["run"] = C.summarize(run, pending, out,
+                                             self._generate)
+                except BaseException as e:      # noqa: BLE001
+                    box["error"] = e
+            t = threading.Thread(target=work, daemon=True)
+            t.start()
+            while t.is_alive():
+                t.join(5)
+                if t.is_alive():
+                    yield b": keepalive compaction\n\n"
+            if "error" in box:
+                yield O._data(O._status_of(box["error"]).body())
+                yield b"data: [DONE]\n\n"
+                return
+            run2[0] = box["run"]
+            if out.pause:
+                doc = pause_doc()
+                msg = doc["choices"][0]["message"]
+                base = {"id": doc["id"], "object": "chat.completion.chunk",
+                        "created": doc["created"], "model": doc["model"]}
+                yield O._data(dict(base, choices=[{
+                    "index": 0, "finish_reason": None,
+                    "delta": {"role": "assistant",
+                              "compaction": msg["compaction"]}}]))
+                yield O._data(dict(base, choices=[],
+                                   context_management=doc[
+                                       "context_management"]))
+                yield O._data(dict(base, choices=[{
+                    "index": 0, "finish_reason": "compaction",
+                    "delta": {}}]))
+                if (body.get("stream_options") or {}).get("include_usage"):
+                    yield O._data(dict(base, choices=[],
+                                       usage=doc["usage"]))
+                yield b"data: [DONE]\n\n"
+                return
+            try:
+                job, reply = self.submit(run2[0], chat=True, extra=extra())
+            except O.ApiError as e:
+                yield O._data(e.body())
+                yield b"data: [DONE]\n\n"
+                return
+            try:
+                first = reply.first()
+                if first[0] == "error":
+                    yield O._data(O._status_of(first[1]).body())
+                    yield b"data: [DONE]\n\n"
+                    return
+                yield from reply.events(first)
+            finally:
+                job.cancel()
+        return "stream", summarized()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -314,6 +488,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw or b"{}")
         except ValueError as e:
             return self._error(O.ApiError(400, f"invalid JSON: {e}"))
+        if chat:
+            return self._chat(body)
         try:
             job, reply = self.app.submit(body, chat)
         except O.ApiError as e:
@@ -342,6 +518,30 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             job.cancel()           # the scheduler frees the row
 
+    def _chat(self, body) -> None:
+        try:
+            kind, val = self.app.chat(body)
+        except O.ApiError as e:
+            return self._error(e)
+        if kind == "json":
+            return self._json(200, val, self._headers())
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self._cors()
+        for k, v in self._headers().items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.close_connection = True
+        try:
+            for chunk in val:
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            val.close()            # cancels the Job: the row is freed
+
     def _count_tokens(self, raw: bytes) -> None:
         """POST /v1/messages/count_tokens: what the prompt would be, in the
         served model's tokens, rendered by its own template -- Claude Code
@@ -354,24 +554,20 @@ class Handler(BaseHTTPRequestHandler):
             oai = M.to_openai(req if isinstance(req, dict) else {})
         except ValueError:
             return self._error(O.ApiError(400, "body must be JSON"))
-        tok = getattr(self.app.scheduler.host, "tokenizer", None)
-        if tok is None:
+        if getattr(self.app.scheduler.host, "tokenizer", None) is None:
             return self._error(O.ApiError(503, "no model is loaded",
                                           type_="server_error",
                                           retry_after=5))
-        msgs = []
-        for m in oai.get("messages") or []:
-            c = m.get("content")
-            if isinstance(c, list):
-                c = [p for p in c
-                     if isinstance(p, dict) and p.get("type") == "text"]
-            msgs.append(dict(m, content=c))
         try:
-            prompt, *_ = P.tokenize(None, tok, P.ChatRequest(
-                "chat", "", msgs, oai.get("tools") or None), P.PromptArgs())
+            # as the model would see it: resent compactions folded in
+            from knurlogic.interfaces import compaction as C
+            from knurlogic.interfaces import context_edits as E
+            msgs, _ = E.view(oai.get("messages") or [],
+                             C.settings()["keep"])
+            n = self.app.count(msgs, oai.get("tools"))
         except P.PromptError as e:
             return self._error(O.ApiError(400, str(e)))
-        return self._json(200, {"input_tokens": len(prompt)})
+        return self._json(200, {"input_tokens": n})
 
     def _raw(self, handler, raw: bytes) -> None:
         """A handler that writes its own response (an event stream has no
