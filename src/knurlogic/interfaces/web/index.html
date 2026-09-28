@@ -477,7 +477,7 @@
  .unit .uhead .ut{text-align:left;min-width:0}
  .unit .hw{font-size:12px;letter-spacing:.08em;color:var(--faint);
    margin-top:2px;text-transform:uppercase}
- .ucard{display:flex;flex-direction:column;gap:6px;text-align:left;
+ .ucard{display:flex;gap:10px;align-items:stretch;text-align:left;
    border:1px solid var(--line);border-radius:var(--r);padding:9px 10px;
    background:color-mix(in srgb,var(--bg) 70%,transparent)}
  .unit.off .ucard{opacity:.45}
@@ -490,21 +490,33 @@
    text-align:center;padding:4px}
  /* The memory bar: segments stack from the bottom, and a hatched segment
     is memory that will be handed back when asked. */
- .stk{position:relative;height:12px;display:flex;
-   border:1px solid var(--line);border-radius:3px;overflow:hidden}
+ .stk{position:relative;width:26px;flex:none;display:flex;
+   flex-direction:column-reverse;border:1px solid var(--line);
+   border-radius:3px;overflow:hidden;min-height:120px}
  .stk i{display:block;flex:none;background:var(--c);opacity:.75}
  .stk i.hatch{opacity:.9;background:repeating-linear-gradient(135deg,
    color-mix(in srgb,var(--c) 70%,transparent) 0 2px,transparent 2px 5px)}
- .stk u{position:absolute;top:-1px;bottom:-1px;width:0;
-   border-left:1px dashed var(--fg);opacity:.7}
- .utemp{margin-left:8px;font-size:12px;letter-spacing:.04em}
- /* one line each, so every node's card starts at the same height */
- .unit .nm{display:flex;min-width:0}
- .unit .nm span,.unit .hw{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- .unit .nm .utemp{flex:none}
- .mhd .swap{text-transform:none;letter-spacing:.04em}
+ .stk u{position:absolute;left:-1px;right:-1px;height:0;
+   border-top:1px dashed var(--fg);opacity:.7}
  .stk.off{background:var(--grid)}
  .swap{color:var(--bad);font-weight:600;white-space:nowrap}
+ /* TALK: the compact card only; HOME: the full one only */
+ .ucompact,.utemp{display:none}
+ body.talk .ufull,body.talk .unit .stat{display:none}
+ body.talk .ucompact{display:flex;flex-direction:column;gap:6px}
+ body.talk .unit .uhead{justify-content:flex-start}
+ body.talk .utemp{display:block;margin-left:auto;align-self:center;
+   font-size:17px;font-weight:600;color:#fb923c}
+ .mhd .swap{text-transform:none;letter-spacing:.04em}
+ .ucompact .mhd b{white-space:nowrap}
+ .hstk{position:relative;height:12px;display:flex;margin-top:4px;
+   border:1px solid var(--line);border-radius:3px;overflow:hidden}
+ .hstk i{display:block;flex:none;background:var(--c);opacity:.75}
+ .hstk i.hatch{opacity:.9;background:repeating-linear-gradient(135deg,
+   color-mix(in srgb,var(--c) 70%,transparent) 0 2px,transparent 2px 5px)}
+ .hstk u{position:absolute;top:-1px;bottom:-1px;width:0;
+   border-left:1px dashed var(--fg);opacity:.7}
+ .hstk.off{background:var(--grid)}
 
  .unit .stat{font-size:12.5px;color:var(--faint);margin-top:7px;letter-spacing:.04em}
  .unit .pct{font-size:17px;font-weight:700;color:var(--acc);
@@ -1838,15 +1850,51 @@ async function tick(){
     const th=now.thermal;
     return row('gpu', pc(now.gpu_pct)+(now.gpu_in_use_bytes!=null
           ?` · ${gb(now.gpu_in_use_bytes)}`:''), '',
-        h.map(s=>s.gpu_pct), 'var(--acc)');
+        h.map(s=>s.gpu_pct), 'var(--acc)')+
+      row('cpu', pc(now.cpu_pct), '', h.map(s=>s.cpu_pct), 'var(--warn)')+
+      row('memory', pc(now.memory_pct), '', h.map(s=>s.memory_pct), '#bb9af7')+
+      // °C on a 0-100 scale, as Scout draws it: ambient near the floor,
+      // a hot die near the top.
+      row('thermal', (now.temp_c!=null?Math.round(now.temp_c)+'°C · ':'')+(th||'--'),
+          'th', h.some(s=>s.temp_c!=null)?h.map(s=>s.temp_c):null, '#fb923c')
+        .replace('class="th"', `class="th" style="color:${THERMCOL[th]||'var(--faint)'}"`);
   }
-  // Compact: the GPU line is the one that explains slow tokens; the
-  // temperature rides beside the name, memory is the bar under the line.
-  function temp(mx){
-    const now=(mx&&mx.now)||{}, th=now.thermal;
-    if(now.temp_c==null && !th) return '';
-    return `<span class="utemp" style="color:${THERMCOL[th]||'var(--faint)'}"
-      title="thermal: ${esc(th||'--')}">${now.temp_c!=null?Math.round(now.temp_c)+'°C':esc(th)}</span>`;
+  // TALK (a node beside a conversation): the GPU line and a memory bar
+  // laid flat under it, the temperature at the right of the name. HOME
+  // keeps the full card; the page switches between them with body.talk.
+  function hbar(n, mm, off){
+    if(off) return '<div class="hstk off"></div>';
+    const nm=n.memory||{};
+    if(!mm||!mm.installed_bytes){
+      const ws=nm.working_set_bytes||1, f=100*(nm.active_bytes||0)/ws;
+      return `<div class="hstk"><i style="width:${f.toFixed(1)}%;--c:var(--dim)"></i></div>`;
+    }
+    const inst=mm.installed_bytes;
+    const ss=segs(n, mm, inst).filter(s=>s[1]/inst>0.003);
+    const lim=nm.working_set_bytes && nm.working_set_bytes<inst*.99
+      ? `<u style="left:${(100*nm.working_set_bytes/inst).toFixed(1)}%"
+          title="GPU limit ${gb(nm.working_set_bytes)}"></u>` : '';
+    return `<div class="hstk">${ss.map(([k,b,c,cls])=>
+      `<i class="${cls}" style="width:${(100*b/inst).toFixed(2)}%;--c:${c}"
+        title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}</div>`;
+  }
+  function compact(n, mm, off, used, inst, pct, swap){
+    const h=(n.metrics&&n.metrics.history)||[], now=(n.metrics&&n.metrics.now)||{};
+    const pc=v=>v==null?'--':Math.round(v)+'%';
+    return `<div class="ucard ucompact">${off?`<div class="noans">${
+        n.problem?esc(n.problem):'no answer'}</div>`:`
+      <div class="mrow"><div class="mhd"><span>gpu</span><b>${pc(now.gpu_pct)}${
+        now.gpu_in_use_bytes!=null?' · '+gb(now.gpu_in_use_bytes):''}</b></div>
+        ${h.length?spark(h.map(s=>s.gpu_pct),'var(--acc)'):''}</div>
+      <div class="mrow"><div class="mhd"><span>memory</span><b>${swap>(64<<20)
+        ?`<span class="swap">${gb(swap)} swap</span> · `:''}${
+        Math.round(used/GIB)} / ${Math.round(inst/GIB)} GiB</b></div>${hbar(n, mm, off)}</div>`}</div>`;
+  }
+  function ttemp(n, off){
+    const now=((n.metrics||{}).now)||{};
+    if(off || now.temp_c==null) return '';
+    return `<span class="utemp" title="thermal: ${esc(now.thermal||'--')}"
+      >${Math.round(now.temp_c)}°C</span>`;
   }
   // Bottom up: knurlogic's weights, knurlogic's cache (hatched, because it
   // is reclaimable), each other runtime in its own colour, everything else
@@ -1876,12 +1924,11 @@ async function tick(){
   }
   function stack(n, mm, off){
     if(off) return '<div class="stk off"></div>';
-    // left to right now: the card is one bar under the GPU line
     const nm=n.memory||{};
     if(!mm||!mm.installed_bytes){
       // No map from this node: one band of what it reported, nothing split.
       const ws=nm.working_set_bytes||1, f=100*(nm.active_bytes||0)/ws;
-      return `<div class="stk"><i style="width:${f.toFixed(1)}%;
+      return `<div class="stk"><i style="height:${f.toFixed(1)}%;
         background:var(--dim)" title="in use ${gb(nm.active_bytes||0)}"></i></div>`;
     }
     const inst=mm.installed_bytes;
@@ -1889,10 +1936,10 @@ async function tick(){
     // The GPU cannot wire all of installed memory; a model has to fit under
     // this line, so it is drawn where a person would look for it.
     const lim=nm.working_set_bytes && nm.working_set_bytes<inst*.99
-      ? `<u style="left:${(100*nm.working_set_bytes/inst).toFixed(1)}%"
+      ? `<u style="bottom:${(100*nm.working_set_bytes/inst).toFixed(1)}%"
           title="GPU limit ${gb(nm.working_set_bytes)}"></u>` : '';
     return `<div class="stk">${ss.map(([k,b,c,cls])=>
-      `<i class="${cls}" style="width:${(100*b/inst).toFixed(2)}%;--c:${c}"
+      `<i class="${cls}" style="height:${(100*b/inst).toFixed(2)}%;--c:${c}"
         title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}</div>`;
   }
   // A quiet line glyph of the kind of Mac, from machine.kind (the server
@@ -1926,19 +1973,19 @@ async function tick(){
     return `<div class="unit${off?' off':''}${NODESEL.has(n.node)?' sel':''}"
       data-node="${esc(n.node)}" title="click to pick this machine for Load model">
       <div class="uhead">${macIcon(hw.kind)}<div class="ut">
-        <div class="nm"><span>${esc(n.node)}</span>${off?'':temp(n.metrics)}</div>
-        <div class="hw">${esc(what)||'&nbsp;'}</div></div></div>
-      <div class="ucard">
+        <div class="nm">${esc(n.node)}</div>
+        <div class="hw">${esc(what)||'&nbsp;'}</div></div>${ttemp(n, off)}</div>
+      ${compact(n, mapped?mm:null, off, used, inst, pct, swap)}
+      <div class="ucard ufull">
         <div class="mlines">${off?`<div class="noans">${
             n.problem?esc(n.problem):'no answer'}</div>`
           : (n.metrics?.history||[]).length?lines(n.metrics)
           : '<div class="noans">no metrics from this node</div>'}</div>
-        <div class="mhd">${swap>(64<<20)
-          ?`<span class="swap">${gb(swap)} swap</span>`:'<span>memory</span>'}</div>
         ${stack(n, mapped?mm:null, off)}
       </div>
       <div class="stat"><span class="pct">${off?'--':pct.toFixed(0)+'%'}</span>
-        ${off?'':gb(used)+' / '+gb(inst)}</div>
+        ${off?'':gb(used)+' / '+gb(inst)}${swap>(64<<20)
+          ?` <span class="swap">· ${gb(swap)} swap</span>`:''}</div>
     </div>`;
   }
   // The link between nodes animates along its length. That is the only
