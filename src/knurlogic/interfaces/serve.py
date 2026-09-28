@@ -603,8 +603,9 @@ def main(argv=None) -> int:
     p.add_argument("--kv-bits", choices=("bf16", "8", "6", "4"),
                    default=None,
                    help="attention KV-cache precision (KNURLOGIC_KV_BITS): "
-                        "bf16 by default; refused for a family whose "
-                        "caches cannot be quantized")
+                        "bf16 by default; 8 is the recommended setting for "
+                        "more context in the same memory, taken by every "
+                        "family (6 and 4 where the family allows them)")
     p.add_argument("--set", action="append", metavar="KEY=VALUE", dest="sets",
                    help="force a setting, beating the resolver. Repeatable. "
                         "Most knobs are read at import, so this is the only "

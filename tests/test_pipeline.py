@@ -199,6 +199,23 @@ def test_a_two_rank_pipeline_computes_the_whole_models_logits(
     assert d["info"]["dtypes"] == ["mlx.core.float32"] * 2
 
 
+@pytest.mark.parametrize("family,counts", [("qwen3_5_moe", "2,2"),
+                                           ("qwen4_exp", "3,1"),
+                                           ("glm5_next", "3,1")])
+def test_a_pipeline_over_an_8_bit_kv_cache_is_the_whole_model(
+        tmp_path, monkeypatch, family, counts):
+    """KNURLOGIC_KV_BITS=8 on both ranks: the split model's logits are the
+    unsplit quantized model's. qwen3_5_moe 2,2 puts an attention layer last
+    on the follower, whose cache write hangs on the send (mx.depends over
+    the quantized triple)."""
+    import numpy as np
+    monkeypatch.setenv("KNURLOGIC_KV_BITS", "8")
+    d = _ring(tmp_path, "logits", family, counts)
+    whole, split = np.array(d["whole"]), np.array(d["split"])
+    assert np.abs(whole - split).max() < 1e-4, np.abs(whole - split).max()
+    assert (whole.argmax(-1) == split.argmax(-1)).all()
+
+
 @pytest.mark.parametrize("always", [False, True])
 def test_mtp_drafting_on_a_pipeline_is_the_unsplit_engine(tmp_path, always):
     """The tiny qwen3_5 with a random head (rejected almost every step:

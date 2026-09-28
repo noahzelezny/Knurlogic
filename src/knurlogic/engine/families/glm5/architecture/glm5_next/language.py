@@ -442,6 +442,16 @@ class Glm5NextIndexer(nn.Module):
         return topk[:, None].astype(mx.int32)
 
 
+class _LatentCache(KVCache):
+    """The MLA layer's latent cache (K = V = the normed compressed latent).
+    A plain KVCache until engine/kvquant.install swaps it (the manifest's
+    `kv_quant.caches`): then the latent is stored quantized
+    (kvquant.QuantKVCache) and fetched dequantized, so the absorbed
+    (SMALL_L) and expanded paths read it as before. The DSA indexer's cache (the CacheList's second member) is a
+    plain KVCache, not named by the manifest: its packed keys pick the
+    sparse set and stay exact."""
+
+
 # Query widths that take the decode-style attention (absorbed MLA + sparse gather):
 # single-token decode and the MTP verify forward (1 + draft depth tokens).
 SMALL_L = 4
@@ -584,6 +594,8 @@ class Glm5NextSparseAttention(nn.Module):
             and cache[1] is not None
             and cache[1].keys is not None
         ):
+            # a quantized latent's keys are a triple: mx.depends takes and
+            # returns the list (engine/kvquant.QuantKVCache)
             cache[0].keys = mx.depends(cache[0].keys, (cache[1].keys, cache[1].values))
 
         if absorbed:
@@ -807,5 +819,5 @@ class LanguageModel(nn.Module):
             if layer.is_linear:
                 caches.append(ArraysCache(size=2))
             else:
-                caches.append(CacheList(KVCache(), KVCache()))
+                caches.append(CacheList(_LatentCache(), KVCache()))
         return caches
