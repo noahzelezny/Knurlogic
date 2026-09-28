@@ -733,8 +733,71 @@ def upstream(base: str, path: str) -> str:
     is a peer's."""
     t = _PEER_TARGETS.get(base)
     if t:
+        if path == PEER_SETTINGS:
+            # a model's settings are not a /v1/ path the relay resolves by
+            # model name: the peer is asked by the port it started it on
+            return (t["relay"] + PEER_RELAY + path + "?port="
+                    + str(urlparse(base).port or ""))
         return t["relay"] + PEER_RELAY + path
     return base + path
+
+
+#: a model server's settings document, readable (/peek) and changeable
+#: (/apply) on a peer through that peer page's PEER_RELAY + PEER_SETTINGS
+PEER_SETTINGS = "/settings.json"
+
+
+def peer_settings(method: str, q: dict, body: bytes, call=None) -> tuple:
+    """GET|POST /peer/settings.json?port=N, on the machine running the
+    model, for a peer page's Settings (the caller has passed peer_refusal):
+    (status, doc). Only a server this machine started (the registry, still
+    ours) -- never another port -- and only its /settings.json: GET reads
+    it (tune and working_set_gib passed on), POST is its live apply, which
+    refuses and reports per knob exactly as it does for this machine's own
+    page. It is how a peer's live knob changes the peer, not this page."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    from knurlogic.machine.servers import is_our_server
+    try:
+        port = int((q.get("port") or [""])[0])
+    except (TypeError, ValueError):
+        return 400, {"error": "name the model server by its port"}
+    rec = registry().get(port)
+    if not rec or not is_our_server(int(rec["pid"])):
+        return 404, {"error": f"no model server this machine started on "
+                              f"port {port}"}
+    url = f"http://127.0.0.1:{port}{PEER_SETTINGS}"
+    if method == "GET":
+        fwd = {k: q[k][0] for k in PEEK_KEYS if q.get(k)}
+        if fwd:
+            url += "?" + urllib.parse.urlencode(fwd)
+        data = None
+    else:
+        if len(body or b"") > APPLY_MAX:
+            return 413, {"error": f"a settings change is at most "
+                                  f"{APPLY_MAX} bytes"}
+        try:
+            if not isinstance(json.loads(body or b""), dict):
+                raise ValueError
+        except ValueError:
+            return 400, {"error": "the body must be a JSON object of knobs"}
+        data = body
+    if call is None:
+        def call(u, d, t):
+            req = urllib.request.Request(
+                u, data=d, method="POST" if d is not None else "GET",
+                headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=t) as r:
+                    return r.status, r.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read()
+    try:
+        code, raw = call(url, data, APPLY_S)
+        return code, json.loads(raw)
+    except Exception as e:
+        return 502, {"error": f"{type(e).__name__}: {e}"}
 
 
 def _peer_where(where: str, host: str) -> str:
@@ -1152,7 +1215,9 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
             except urllib.error.HTTPError as e:
                 return e.code, e.read()
     try:
-        code, raw = post(f"{base}/settings.json",
+        # a peer's model through that peer's page (peer_settings): its
+        # server listens on the peer's loopback, not at `base`
+        code, raw = post(upstream(base, PEER_SETTINGS),
                          json.dumps(want).encode(), APPLY_S)
         return code, json.loads(raw)      # JSON only, never an HTML page
     except Exception as e:
@@ -1396,7 +1461,9 @@ def peek(q: dict, fetch=None) -> tuple:
         return 403, json.dumps({"error": f"not a server this page knows: "
                                          f"{where or '(none)'}"})
     fwd = {k: q[k][0] for k in PEEK_KEYS if q.get(k)}
-    url = upstream(where, path) + ("?" + urllib.parse.urlencode(fwd) if fwd else "")
+    url = upstream(where, path)
+    if fwd:
+        url += ("&" if "?" in url else "?") + urllib.parse.urlencode(fwd)
     if fetch is None:
         def fetch(u, t):
             with urllib.request.urlopen(u, timeout=t) as r:
@@ -1497,6 +1564,9 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             if u.path.startswith(PEER_RELAY + "/v1/"):
                 self._peer_relay("GET", u.path)
                 return
+            if u.path.rstrip("/") == PEER_RELAY + PEER_SETTINGS:
+                self._peer_settings("GET", parse_qs(u.query))
+                return
             if self._gated():
                 return
             intro = self.headers.get("X-Knurlogic-Peer")
@@ -1528,6 +1598,9 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 return
             if u.path.startswith(PEER_RELAY + "/v1/"):
                 self._peer_relay("POST", u.path)
+                return
+            if u.path.rstrip("/") == PEER_RELAY + PEER_SETTINGS:
+                self._peer_settings("POST", parse_qs(u.query))
                 return
             if self._gated():
                 return
@@ -1595,6 +1668,32 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             body = self.rfile.read(n) if n else b""
             peer_relay(self, method,
                        path[len(PEER_RELAY):].rstrip("/"), body)
+
+        def _peer_settings(self, method: str, q: dict):
+            """PEER_RELAY + PEER_SETTINGS: the peer gate, a plain
+            Content-Length body, then peer_settings."""
+            manual = [p.host for p in (PEERS.all() if PEERS else [])
+                      if "manual" in p.found_by]
+            refused = peer_refusal(
+                self.headers, self.client_address[0],
+                self.connection.getsockname()[0], manual_hosts=manual,
+                what="settings")
+            if refused:
+                self.close_connection = True
+                _send_json(self, *refused)
+                return
+            if self._refuse_chunked():
+                return
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if not 0 <= n <= APPLY_MAX:
+                self.close_connection = True
+                _send_json(self, 413, {"error": "a settings change is small"})
+                return
+            body = self.rfile.read(n) if n else b""
+            _send_json(self, *peer_settings(method, q, body))
 
         def _refuse_chunked(self) -> bool:
             """A peer route's body is a plain Content-Length body -- never

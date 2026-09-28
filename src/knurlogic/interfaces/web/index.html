@@ -1175,6 +1175,7 @@ function infoHTML(text, cls){
 }
 // What the two reach words mean, for their hover.
 const REACH={live:'applies to the running model immediately',
+  launch:'nothing of this model is running: the value is saved as its launch setting and used when it is next launched from this page',
   restart:'read when the model loads: the new value takes effect when this model is next launched from this page'};
 // "4.0" running is the step 4: compared as numbers where both are numbers
 const sameVal=(a,b)=>a!=null&&b!=null&&(String(a)===String(b)||
@@ -1204,6 +1205,11 @@ function migrateLaunchSets(){
   const all=launchAll(); let moved=0;
   Object.keys(all).forEach(k=>{ const b=BASEKEY[k];
     if(b && b!==k){ all[b]={...all[k], ...(all[b]||{})}; delete all[k]; moved++ } });
+  // the prompt chunk's legacy name, saved before it was shown as
+  // KNURLOGIC_PREFILL_CHUNK (the server takes either; this one shows)
+  Object.values(all).forEach(v=>{ if(v && 'VQLAB_PREFILL_CHUNK' in v){
+    if(!('KNURLOGIC_PREFILL_CHUNK' in v)) v.KNURLOGIC_PREFILL_CHUNK=v.VQLAB_PREFILL_CHUNK;
+    delete v.VQLAB_PREFILL_CHUNK; moved++ } });
   if(moved) try{ localStorage.setItem(LSKEY, JSON.stringify(all)) }catch(e){}
 }
 
@@ -1220,12 +1226,19 @@ function knobHTML(k, c){
   // with no variant running, every knob waits for a launch, live or not
   const reach=c.launch ? 'restart' : k.reach;
   const next=reach==='restart' ? launchSets(c.base)[k.name] : undefined;
+  // a live knob's saved launch setting still goes to the next launch
+  const saved=reach==='live'&&c.base ? launchSets(c.base)[k.name] : undefined;
   const from=next??cur, st=stagedVal(c.g,k.name), sel=st??from;
-  const tag=k.reach==='live'
+  // the tag says what a change here does NOW: with nothing of it running,
+  // even a knob the server applies live waits for the launch (it said
+  // "live" over "on next launch · …" -- the second was the true one)
+  const tag=reach==='live'
     ? `<span class="kw live" title="${esc(REACH.live)}">live</span>`
+    : c.launch ? `<span class="kw rst" title="${esc(REACH.launch)}">next launch</span>`
     : `<span class="kw rst" title="${esc(REACH.restart)}">needs reload</span>`;
   const about=(KNOB_TITLE[k.name]?[k.what]:[k.what,k.why]).filter(Boolean).map(esc).join(' — ')+
-    (k.reach_why?`<br><span style="color:var(--faint)">${esc(k.reach_why)}</span>`:'');
+    (k.max_why?`<br><b>${esc(k.max_why)}</b>`:'')+
+    (k.reach_why&&!c.launch?`<br><span style="color:var(--faint)">${esc(k.reach_why)}</span>`:'');
   // the measured steps, stopping where the headroom does; else a field
   const vals=k.values||[], ci=vals.findIndex(x=>sameVal(x,k.cap));
   const cap=k.cap==null||ci<0?vals.length-1:ci;
@@ -1237,7 +1250,8 @@ function knobHTML(k, c){
       `<option${sameVal(x,sel)?' selected':''}>${esc(x)}</option>`).join('')}</select>`;
   }else{
     const num=String(cur??'').trim()!=='' && !isNaN(+cur);
-    ctl=`<input type="${num?'number':'text'}" aria-label="${esc(k.name)}" value="${esc(sel)}">`;
+    ctl=`<input type="${num?'number':'text'}" aria-label="${esc(k.name)}" value="${esc(sel)}"${
+      num&&!c.url?' min="1" step="1"':''}${k.max?` max="${esc(k.max)}"`:''}>`;
   }
   const tuneNote=k.changed&&st==null ? `the tune gives ${esc(k.would_be)}` : '';
   return `<div class="knob${st!=null?' staged':''}" data-name="${esc(k.name)}"${
@@ -1246,17 +1260,29 @@ function knobHTML(k, c){
       <span class="kedit" data-knob="${esc(k.name)}" data-g="${esc(c.g)}"
         ${c.where!=null?`data-where="${esc(c.where)}"`:''}${c.url?` data-url="${esc(c.url)}"`:''} data-model="${esc(c.model)}"
         data-base="${esc(c.base||'')}" data-label="${esc(c.label)}" data-reach="${reach}" data-cur="${esc(cur)}"
-        data-from="${esc(from)}"${next!=null?` data-next="${esc(next)}"`:''}>${ctl}${
+        data-from="${esc(from)}"${next!=null?` data-next="${esc(next)}"`:''}${
+        k.max?` data-max="${esc(k.max)}"`:''}${saved!=null?` data-saved="${esc(saved)}"`:''}>${ctl}${
         k.unit?`<span class="ro">${esc(k.unit)}</span>`:''}</span></div>
-    <div class="kstage">${stageNote(reach,cur,st,next)||tuneNote}</div></div>`;
+    <div class="kstage">${stageNote(reach,cur,st,next,saved)||tuneNote}</div></div>`;
 }
 // The line under a row: what is staged, else a launch setting already saved.
-function stageNote(reach, cur, to, next){
+function stageNote(reach, cur, to, next, saved){
   if(to!=null) return reach==='live'
     ? `changed · ${esc(cur)} → ${esc(to)}, applied on close`
     : sameVal(to,cur) ? `back to ${esc(cur)} on next launch, saved on close`
     : `${esc(to)} on next launch, saved on close`;
   if(next!=null && !sameVal(next,cur)) return `on next launch · ${esc(next)}`;
+  if(saved!=null && !sameVal(saved,cur)) return `saved launch setting ${esc(saved)} · used on its next launch`;
+  return '';
+}
+// A value this knob cannot take, said before it is staged: a number field
+// that is not a positive whole number, or past the model's maximum (the
+// server refuses both; this only says so sooner).
+function knobRefusal(d, el){
+  const v=el.value, s=String(v).trim(); if(s==='') return '';
+  if(el.type==='number' && (d.url ? !(+s>=0) : !/^\d+$/.test(s) || +s<1))
+    return `${esc(s)} is not ${d.url?'a number of GiB':'a positive whole number'}`;
+  if(d.max && +v>+d.max) return `${esc(v)} is past this model's maximum of ${(+d.max).toLocaleString()} tokens`;
   return '';
 }
 // (i) opens on a click too (it takes focus), without the click reaching a
@@ -1287,6 +1313,10 @@ function stage(key, grp, name, knob){
 document.addEventListener('change', e=>{
   const box=e.target.closest('.kedit'); if(!box) return;
   const d=box.dataset;
+  const no=knobRefusal(d, e.target);
+  if(no){ box.closest('.knob').querySelector('.kstage').innerHTML=
+      `<span style="color:var(--warn)">${no} -- not staged</span>`;
+    e.target.value=stagedVal(d.g,d.knob)??d.from; return }
   stage(d.g, {label:d.label, where:d.where, model:d.model, base:d.base, url:d.url}, d.knob,
         {from:d.from, to:e.target.value.trim(), reach:d.reach, cur:d.cur});
   const to=stagedVal(d.g,d.knob), row=box.closest('.knob');
@@ -1295,7 +1325,7 @@ document.addEventListener('change', e=>{
     const dyn=row.parentElement.querySelector('.knob[data-name="KNURLOGIC_MTP_DYNAMIC"]');
     if(dyn) dyn.hidden=e.target.value.trim()==='off';
   }
-  row.querySelector('.kstage').innerHTML=stageNote(d.reach,d.cur,to,d.next);
+  row.querySelector('.kstage').innerHTML=stageNote(d.reach,d.cur,to,d.next,d.saved);
 });
 // The pop-up: what applies NOW (live, one POST per server -- /apply to a
 // model server, or this page's own /settings.json) apart from what waits for
@@ -1528,7 +1558,10 @@ function modelHTML(b, r, doc, runs){
   </div>`;
 }
 // the VQ runtime's own knobs, under their own header after the general ones
-const isVQ=k=>/^VQ(LAB)?_/.test(k.name);
+// (VQ_ only: VQLAB_CACHE_LIMIT_GB is the engine's buffer cache under the
+// name published runtimes read, not a VQ setting; the prompt chunk, filed
+// here as VQLAB_PREFILL_CHUNK, is KNURLOGIC_PREFILL_CHUNK now)
+const isVQ=k=>/^VQ_/.test(k.name);
 const TUNES={};
 // The facts beside the wired limit: what the Mac is, what it has, what the
 // GPU may hold of it (from /status.json's node; left out when not known).

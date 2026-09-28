@@ -47,8 +47,8 @@ def test_safe_bounds_the_transient_tighter_than_headroom_requires():
     assert int(safe.env["VQ_DECODE_CHUNK"]) < int(
         balanced.env["VQ_DECODE_CHUNK"])
     # the prompt chunk is already the narrowest by default; safe never widens
-    assert int(safe.env["VQLAB_PREFILL_CHUNK"]) <= int(
-        balanced.env["VQLAB_PREFILL_CHUNK"]) == S.PREFILL_CHUNK_TIGHT
+    assert int(safe.env["KNURLOGIC_PREFILL_CHUNK"]) <= int(
+        balanced.env["KNURLOGIC_PREFILL_CHUNK"]) == S.PREFILL_CHUNK_TIGHT
     assert float(safe.env["VQLAB_CACHE_LIMIT_GB"]) < float(
         balanced.env["VQLAB_CACHE_LIMIT_GB"])
 
@@ -58,7 +58,7 @@ def test_fast_on_a_tight_box_degrades_and_says_why():
     a knob and a wish is whether it tells you it did not happen."""
     a = _art(model_type="qwen3_5")                 # measured wider than 512
     r = resolve(a, 74 * GIB, tune="fast")          # 4 GiB of headroom
-    assert r.env["VQLAB_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_TIGHT)
+    assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_TIGHT)
     assert any("did not get it" in n for n in r.notes)
     assert any("headroom to hold it in" in n for n in r.notes)
 
@@ -269,9 +269,9 @@ def test_a_measured_family_width_is_taken_only_with_fast_and_a_tight_box_still_w
     tight = S.engine_settings(resolve(a, 24 * GIB, tune="fast").env)
     assert default["prefill_step_size"] == S.PREFILL_CHUNK_DEFAULT == 512
     assert roomy["prefill_step_size"] == 4096
-    assert "prompt_concurrency" not in roomy
+    assert "prompt_concurrency" not in roomy   # dead: settings.py says why
     assert tight["prefill_step_size"] == S.PREFILL_CHUNK_TIGHT
-    assert tight["prompt_concurrency"] == 1
+    assert "prompt_concurrency" not in tight
 
 
 def test_fast_never_narrows_below_the_measured_width():
@@ -293,7 +293,10 @@ def test_with_no_bundled_runtime_it_falls_back_to_the_published_name():
                  bytes_on_disk=70 * GIB, hidden_size=4096,
                  moe_intermediate_size=1024, vq_other={"vq_linear": {"a": 1}})
     env = resolve(a, 96 * GIB).env
-    assert "VQLAB_CACHE_LIMIT_GB" in env and "VQLAB_PREFILL_CHUNK" in env
+    assert "VQLAB_CACHE_LIMIT_GB" in env
+    # ...but the prompt chunk's legacy name has no runtime behind it (only
+    # the engine reads it, under either name): knurlogic's own is emitted
+    assert "KNURLOGIC_PREFILL_CHUNK" in env and "VQLAB_PREFILL_CHUNK" not in env
 
 
 def test_knobs_are_tiered_by_who_would_reach_for_one():

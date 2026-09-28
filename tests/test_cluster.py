@@ -107,13 +107,13 @@ def test_the_prompt_chunk_is_one_value_on_every_rank():
     tune=fast on a measured-wide family, one roomy rank and one tight."""
     c = resolve(_art(), [Node("big", 128 * GIB, holds_bytes=90 * GIB),
                          Node("small", 64 * GIB, holds_bytes=62 * GIB)])
-    assert c.nodes["big"].env["VQLAB_PREFILL_CHUNK"] == \
-        c.nodes["small"].env["VQLAB_PREFILL_CHUNK"] == "512"
+    assert c.nodes["big"].env["KNURLOGIC_PREFILL_CHUNK"] == \
+        c.nodes["small"].env["KNURLOGIC_PREFILL_CHUNK"] == "512"
     c = resolve(_art(model_type="qwen3_5"),
                 [Node("big", 128 * GIB, holds_bytes=48 * GIB),
                  Node("small", 64 * GIB, holds_bytes=62 * GIB)], tune="fast")
     big, small = c.nodes["big"].env, c.nodes["small"].env
-    assert big["VQLAB_PREFILL_CHUNK"] == small["VQLAB_PREFILL_CHUNK"] == "512"
+    assert big["KNURLOGIC_PREFILL_CHUNK"] == small["KNURLOGIC_PREFILL_CHUNK"] == "512"
     assert any("every rank must match" in n for n in c.nodes["big"].notes)
 
 
