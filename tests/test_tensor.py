@@ -31,6 +31,28 @@ def test_plan_round_trips():
     assert P.encode(P.decode(data)) == data          # canonical bytes
 
 
+def test_plan_carries_a_live_knob():
+    plan = {"ops": [{"op": "set", "name": "VQ_DECODE_CHUNK", "value": "256"},
+                    {"op": "park"}]}
+    assert P.decode(P.encode(plan)) == plan
+
+
+@pytest.mark.parametrize("op", [
+    {"op": "set", "name": "KNURLOGIC_CONTEXT_LENGTH", "value": "8192"},
+    {"op": "set", "name": "PATH", "value": "/tmp"},
+    {"op": "set", "name": "VQ_DECODE_CHUNK", "value": 256},
+    {"op": "set", "name": "VQ_DECODE_CHUNK"},
+])
+def test_plan_refuses_a_set_that_is_not_a_ranks_live_knob(op):
+    with pytest.raises(P.PlanError):
+        P.encode({"ops": [op]})
+
+
+def test_the_knobs_that_travel_are_live_ones():
+    from knurlogic.engine.serve.load import LIVE_KNOBS
+    assert set(P.SETS) < set(LIVE_KNOBS)
+
+
 def test_plan_empty_and_control():
     assert P.empty({"ops": []}) and P.empty({})
     assert not P.empty({"ops": [], "tokens": [[0, 1]]})
@@ -414,3 +436,65 @@ def test_rank_0s_frees_never_lower_the_peers_estimate(monkeypatch):
         assert r.peers_over_now() == took
         mem["a"] = 30
         assert r.peers_over_now() == freed
+
+
+class _FakeLink:
+    """follow()'s side of the ring, replayed: one plan per exchange."""
+
+    def __init__(self, plans):
+        self.plans, self.rank, self.slept = list(plans), 1, 0
+
+    def exchange(self, over, payload):
+        return [], P.encode(self.plans.pop(0))
+
+    def sleep(self):
+        self.slept += 1
+
+
+def test_a_follower_applies_a_set_even_while_parked(monkeypatch):
+    import importlib
+    from knurlogic.engine.runtime import tensor as T
+    load = importlib.import_module("knurlogic.engine.serve.load")
+    got = []
+    monkeypatch.setattr(load, "apply_live",
+                        lambda env: got.append(env) or {
+                            k: "applied" for k in env})
+    link = _FakeLink([
+        {"ops": [{"op": "set", "name": "KNURLOGIC_CACHE_LIMIT_GB",
+                  "value": "20"}, {"op": "park"}]},
+        {"ops": [{"op": "stop"}]}])
+    assert T.follow(None, None, "m", link, prompt_cache_size=2,
+                    completion_batch_size=1, prefill_step_size=512,
+                    working_set=0) == 0
+    assert got == [{"KNURLOGIC_CACHE_LIMIT_GB": "20"}] and link.slept == 1
+
+
+def test_a_set_journaled_while_parked_rings_the_ring():
+    """Rank 0 idle, the others parked: a Settings apply is journaled on the
+    scheduler thread and the next park() rings them to take it."""
+    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.runtime.scheduler import Scheduler
+
+    sent = []
+
+    class L:
+        size, socks, parked = 2, [object()], True
+
+        def exchange(self, over, payload):
+            sent.append(P.decode(payload))
+            return [[0, 0, 0], [0, 0, 0]], None
+
+    class H:
+        state, path, error, model = "ready", "/m/a", "", object()
+
+    ring = T.Ring(L())
+    s = Scheduler(H(), tensor=ring)
+    ring.park()
+    assert sent == []                       # parked, nothing new: asleep
+    s.share_live({"VQ_DECODE_CHUNK": "128",
+                  "KNURLOGIC_CONTEXT_LENGTH": "4096"})
+    s._journal_sets()
+    ring.park()
+    assert sent == [{"ops": [{"op": "set", "name": "VQ_DECODE_CHUNK",
+                              "value": "128"}, {"op": "park"}]}]
+    assert ring.link.parked

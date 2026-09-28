@@ -513,6 +513,15 @@ class Mark:
         return out
 
 
+def apply_set(op: dict, rank: int) -> str:
+    """A follower applies a live knob rank 0 applied (the `set` op) to its
+    own engine, exactly as rank 0's Settings apply did. -> what happened."""
+    from knurlogic.engine.serve.load import apply_live
+    said = apply_live({op["name"]: op["value"]}).get(op["name"], "")
+    logger.info("rank %d: %s=%s: %s", rank, op["name"], op["value"], said)
+    return said
+
+
 def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
            completion_batch_size: int, prefill_step_size: int,
            working_set: int, split: str = "tensor", head=None,
@@ -590,6 +599,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                 cache.insert(model_key, got[0], got[1], op["kind"])
             elif kind == "pop":
                 cache.lru.trim_to(n_sequences=len(cache.lru) - op["n"])
+            elif kind == "set":
+                apply_set(op, link.rank)
             elif kind == "reset":
                 if ex is not None:
                     ex.close()
