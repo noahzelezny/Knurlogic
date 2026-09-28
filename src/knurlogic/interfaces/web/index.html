@@ -2605,6 +2605,17 @@ function ramWent(m){
     ${row('unused',free,'')}</div>`;
 }
 
+// A failed request in the server's own words: its JSON error's message
+// (OpenAI {error:{message}}, ours {error:"..."}), else its text -- never a
+// bare status.
+async function httpWhy(r){
+  let t=''; try{ t=await r.text() }catch(e){}
+  let j=null; try{ j=JSON.parse(t) }catch(e){}
+  const e=j && (j.error ?? j.message ?? j.detail);
+  const msg=typeof e==='string' ? e : e && (e.message||JSON.stringify(e));
+  return msg || (t && !/^\s*</.test(t) ? t.slice(0,300) : '')
+    || `the server answered ${r.status}${r.statusText?' '+r.statusText:''} with no message`;
+}
 async function act(payload){
   // A server that is down or answers with something other than JSON is an
   // answer too: said, and the buttons that awaited this get theirs back.
@@ -2912,7 +2923,7 @@ async function send(q){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({messages:[{role:'user',content:sent}],max_tokens:256,
         stream:true, stream_options:{include_usage:true}})});
-    if(!r.ok||!r.body) throw new Error('HTTP '+r.status);
+    if(!r.ok||!r.body) throw new Error(await httpWhy(r));
     const rd=r.body.getReader(), dec=new TextDecoder();
     let buf='';
     for(;;){
@@ -3131,15 +3142,26 @@ window.visionOf=visionOf;
 // has one (a running model clicked on the control page), else this page's
 // served model.
 function chatGate(){
-  const c=curChat();
-  const on=!!((c && c.where) || SERVED);
+  const c=curChat(), running=window.CHATTABLE||[];
+  // A chat whose model has stopped: an empty one moves to a running model;
+  // one with messages keeps its model, and says to pick a running one (a
+  // pick starts a new chat). Never a send that can only fail.
+  let gone=!!(c && c.where && window.RUNNING && !window.RUNNING.has(c.where));
+  if(gone && !(c.msgs||[]).length && running.length){
+    const r=running[0];
+    c.where=r.where; c.model=r.name; c.vision=visionOf(r.name);
+    saveChats(); renderChats(); gone=false;
+  }
+  const on=!gone && !!((c && c.where) || SERVED);
   const vision=c && c.where ? !!c.vision : !!(SERVED && SERVED.vision);
   // The box is always typeable, so the page never looks broken; only Send
   // waits for a model, and the placeholder and Send's title say which.
-  $('cq').placeholder=on ? 'Message'
+  const goneMsg=gone ? `${shortModel(c.model)||'this chat\'s model'} isn't running — pick a running model`+
+    (running.length?' in Model:':'') : '';
+  $('cq').placeholder=gone ? goneMsg : on ? 'Message'
                          : 'Type away; click a running model to send it';
   $('csend').disabled=!on || BUSYC;
-  $('csend').title=on ? '' : 'click a running model to chat with it';
+  $('csend').title=gone ? goneMsg : on ? '' : 'click a running model to chat with it';
   $('cattach').disabled=!on || !vision;
   // The model a clicked running model's chat sends to, named in the bar.
   // Only while it is still running: before the first survey (RUNNING unset)
@@ -3743,7 +3765,7 @@ async function runTurn(){
     const r=await fetch(url,{method:'POST',
       headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),
       signal:ABORTC.signal});
-    if(!r.ok||!r.body) throw new Error('HTTP '+r.status);
+    if(!r.ok||!r.body) throw new Error(await httpWhy(r));
     for await (const ev of events(r.body)){
       if(ev.comment!==undefined){
         // mlx-lm's prefill signal: `: keepalive done/total`
@@ -3778,7 +3800,7 @@ async function runTurn(){
       $('clog').scrollTop=1e9;
     }
   }catch(err){
-    if(err.name!=='AbortError'){ assistant.content=(assistant.content||'')+`\n\n[error: ${err}]`;
+    if(err.name!=='AbortError'){ assistant.content=(assistant.content||'')+`\n\n[error: ${err.message||err}]`;
       assistant.err=true }
   }
   pfHide(); WAIT=null;
