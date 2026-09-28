@@ -402,7 +402,9 @@
  .chd .cl{font-size:12.5px;color:var(--faint);display:flex;align-items:center;gap:6px;
    min-width:0}
  #cmodel,#ceffort{width:auto;padding:3px 6px;font-size:12.5px;color:var(--dim)}
- #cmodel{color:var(--acc);max-width:24em;text-overflow:ellipsis}
+ #cmodel{color:var(--acc);max-width:24em;min-width:0;text-overflow:ellipsis}
+ .chd .cl:first-child{flex:0 1 auto;overflow:hidden}
+ .chd .cl:first-child #cmodel{max-width:100%}
  #cmodel:has(option[value=""]:checked){color:var(--dim)}
  nav a[aria-pressed=true]{color:var(--acc)}
  nav a{cursor:pointer;border-bottom:1px solid transparent;padding-bottom:2px}
@@ -475,7 +477,7 @@
  .unit .uhead .ut{text-align:left;min-width:0}
  .unit .hw{font-size:12px;letter-spacing:.08em;color:var(--faint);
    margin-top:2px;text-transform:uppercase}
- .ucard{display:flex;gap:10px;align-items:stretch;text-align:left;
+ .ucard{display:flex;flex-direction:column;gap:6px;text-align:left;
    border:1px solid var(--line);border-radius:var(--r);padding:9px 10px;
    background:color-mix(in srgb,var(--bg) 70%,transparent)}
  .unit.off .ucard{opacity:.45}
@@ -488,14 +490,19 @@
    text-align:center;padding:4px}
  /* The memory bar: segments stack from the bottom, and a hatched segment
     is memory that will be handed back when asked. */
- .stk{position:relative;width:26px;flex:none;display:flex;
-   flex-direction:column-reverse;border:1px solid var(--line);
-   border-radius:3px;overflow:hidden;min-height:120px}
+ .stk{position:relative;height:12px;display:flex;
+   border:1px solid var(--line);border-radius:3px;overflow:hidden}
  .stk i{display:block;flex:none;background:var(--c);opacity:.75}
  .stk i.hatch{opacity:.9;background:repeating-linear-gradient(135deg,
    color-mix(in srgb,var(--c) 70%,transparent) 0 2px,transparent 2px 5px)}
- .stk u{position:absolute;left:-1px;right:-1px;height:0;
-   border-top:1px dashed var(--fg);opacity:.7}
+ .stk u{position:absolute;top:-1px;bottom:-1px;width:0;
+   border-left:1px dashed var(--fg);opacity:.7}
+ .utemp{margin-left:8px;font-size:12px;letter-spacing:.04em}
+ /* one line each, so every node's card starts at the same height */
+ .unit .nm{display:flex;min-width:0}
+ .unit .nm span,.unit .hw{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .unit .nm .utemp{flex:none}
+ .mhd .swap{text-transform:none;letter-spacing:.04em}
  .stk.off{background:var(--grid)}
  .swap{color:var(--bad);font-weight:600;white-space:nowrap}
 
@@ -1113,9 +1120,11 @@ function saveNodeSel(){
 const selNodes=()=>LASTNODES.filter(n=>NODESEL.has(n.node));
 const isLocal=n=>n.role==='local'||n.role==='server';
 // What a model has to fit in: the picked machines' working sets (each under
-// its allowance) added up, or with none picked, what it always was.
+// its allowance) added up; with none picked, the whole cluster's -- nothing
+// is assumed to be meant for this machine.
+const clusterNodes=()=>LASTNODES.filter(n=>isLocal(n)||n.state==='answering');
 function fitWS(){
-  const ns=selNodes();
+  const ns=selNodes().length ? selNodes() : clusterNodes();
   return ns.length ? ns.reduce((x,n)=>x+nodeWS(n),0) : (LASTWS||0);
 }
 // A machine's room under its knurlogic allowance. For this one that is the
@@ -1131,7 +1140,7 @@ function nodeWS(n){
   return (n.memory||{}).working_set_bytes||0;
 }
 const fitWhere=()=>{ const ns=selNodes();
-  return !ns.length ? "this machine's memory"
+  return !ns.length ? (clusterNodes().length>1 ? "the cluster's memory" : "this machine's memory")
     : ns.length===1 ? `${ns[0].node}'s memory` : `the ${ns.length} picked machines' memory` };
 const gb=b=>Number.isFinite(b)?(b/GIB).toFixed(1)+' GiB':'--';
 const row=(k,v)=>`<div class="row"><span>${k}</span><span>${v}</span></div>`;
@@ -1829,14 +1838,15 @@ async function tick(){
     const th=now.thermal;
     return row('gpu', pc(now.gpu_pct)+(now.gpu_in_use_bytes!=null
           ?` · ${gb(now.gpu_in_use_bytes)}`:''), '',
-        h.map(s=>s.gpu_pct), 'var(--acc)')+
-      row('cpu', pc(now.cpu_pct), '', h.map(s=>s.cpu_pct), 'var(--warn)')+
-      row('memory', pc(now.memory_pct), '', h.map(s=>s.memory_pct), '#bb9af7')+
-      // °C on a 0-100 scale, as Scout draws it: ambient near the floor,
-      // a hot die near the top.
-      row('thermal', (now.temp_c!=null?Math.round(now.temp_c)+'°C · ':'')+(th||'--'),
-          'th', h.some(s=>s.temp_c!=null)?h.map(s=>s.temp_c):null, '#fb923c')
-        .replace('class="th"', `class="th" style="color:${THERMCOL[th]||'var(--faint)'}"`);
+        h.map(s=>s.gpu_pct), 'var(--acc)');
+  }
+  // Compact: the GPU line is the one that explains slow tokens; the
+  // temperature rides beside the name, memory is the bar under the line.
+  function temp(mx){
+    const now=(mx&&mx.now)||{}, th=now.thermal;
+    if(now.temp_c==null && !th) return '';
+    return `<span class="utemp" style="color:${THERMCOL[th]||'var(--faint)'}"
+      title="thermal: ${esc(th||'--')}">${now.temp_c!=null?Math.round(now.temp_c)+'°C':esc(th)}</span>`;
   }
   // Bottom up: knurlogic's weights, knurlogic's cache (hatched, because it
   // is reclaimable), each other runtime in its own colour, everything else
@@ -1866,11 +1876,12 @@ async function tick(){
   }
   function stack(n, mm, off){
     if(off) return '<div class="stk off"></div>';
+    // left to right now: the card is one bar under the GPU line
     const nm=n.memory||{};
     if(!mm||!mm.installed_bytes){
       // No map from this node: one band of what it reported, nothing split.
       const ws=nm.working_set_bytes||1, f=100*(nm.active_bytes||0)/ws;
-      return `<div class="stk"><i style="height:${f.toFixed(1)}%;
+      return `<div class="stk"><i style="width:${f.toFixed(1)}%;
         background:var(--dim)" title="in use ${gb(nm.active_bytes||0)}"></i></div>`;
     }
     const inst=mm.installed_bytes;
@@ -1878,10 +1889,10 @@ async function tick(){
     // The GPU cannot wire all of installed memory; a model has to fit under
     // this line, so it is drawn where a person would look for it.
     const lim=nm.working_set_bytes && nm.working_set_bytes<inst*.99
-      ? `<u style="bottom:${(100*nm.working_set_bytes/inst).toFixed(1)}%"
+      ? `<u style="left:${(100*nm.working_set_bytes/inst).toFixed(1)}%"
           title="GPU limit ${gb(nm.working_set_bytes)}"></u>` : '';
     return `<div class="stk">${ss.map(([k,b,c,cls])=>
-      `<i class="${cls}" style="height:${(100*b/inst).toFixed(2)}%;--c:${c}"
+      `<i class="${cls}" style="width:${(100*b/inst).toFixed(2)}%;--c:${c}"
         title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}</div>`;
   }
   // A quiet line glyph of the kind of Mac, from machine.kind (the server
@@ -1915,18 +1926,19 @@ async function tick(){
     return `<div class="unit${off?' off':''}${NODESEL.has(n.node)?' sel':''}"
       data-node="${esc(n.node)}" title="click to pick this machine for Load model">
       <div class="uhead">${macIcon(hw.kind)}<div class="ut">
-        <div class="nm">${esc(n.node)}</div>
+        <div class="nm"><span>${esc(n.node)}</span>${off?'':temp(n.metrics)}</div>
         <div class="hw">${esc(what)||'&nbsp;'}</div></div></div>
       <div class="ucard">
         <div class="mlines">${off?`<div class="noans">${
             n.problem?esc(n.problem):'no answer'}</div>`
           : (n.metrics?.history||[]).length?lines(n.metrics)
           : '<div class="noans">no metrics from this node</div>'}</div>
+        <div class="mhd">${swap>(64<<20)
+          ?`<span class="swap">${gb(swap)} swap</span>`:'<span>memory</span>'}</div>
         ${stack(n, mapped?mm:null, off)}
       </div>
       <div class="stat"><span class="pct">${off?'--':pct.toFixed(0)+'%'}</span>
-        ${off?'':gb(used)+' / '+gb(inst)}${swap>(64<<20)
-          ?` <span class="swap">· ${gb(swap)} swap</span>`:''}</div>
+        ${off?'':gb(used)+' / '+gb(inst)}</div>
     </div>`;
   }
   // The link between nodes animates along its length. That is the only
@@ -2279,19 +2291,20 @@ function pickInfo(){
   el.innerHTML=`<div>${tags}</div>`+
     (!fits?`<div class="warn">${gb(m.size_bytes)} against ${gb(ws)} of
       working set in ${esc(fitWhere())} — it will not fit</div>`
-     : ns.length && !(ns.length===1&&isLocal(ns[0]))
+     : !ns.length || !(ns.length===1&&isLocal(ns[0]))
        ? `<div class="room">fits · ${gb(ws-m.size_bytes)} left in ${esc(fitWhere())}</div>`
        : `<div id="pickroom">${roomHTML(m.room)}</div>`)+
     (blocked && !/does not fit/.test(blocked)?`<div class="note">${esc(blocked)}</div>`:'');
   SETS=launchSets(baseKey(m.name)); mtpState(); loadPreview();
 }
 function launchBlock(ns){
+  if(!ns.length) return 'pick the machines to run it on: click them in Memory';
   // the info pane's "it will not fit" is a reason Launch cannot go
   if(SEL){ const ws=fitWS();
     if(ws && SEL.size_bytes>ws) return `${gb(SEL.size_bytes)} does not fit ${fitWhere()} (${gb(ws)})`
     // on this machine: its own answer, under the knurlogic allowance
     const r=SEL.room || (PREVIEW && PREVIEW.for===SEL.path && PREVIEW.room);
-    if((!ns.length || (ns.length===1&&isLocal(ns[0]))) && r && r.fits===false)
+    if(ns.length===1 && isLocal(ns[0]) && r && r.fits===false)
       return `${gb(r.weights_bytes)} does not fit this machine's ${gb(r.working_set_bytes)}` }
   if(ns.length>1){
     for(const n of ns){
@@ -2439,8 +2452,8 @@ window.LOADTUNE='balanced';
 const localName=()=>((LASTNODES.find(isLocal)||{}).node)||'this Mac';
 function whereLine(){
   const ns=selNodes();
-  $('lmwhere').textContent='on: '+(ns.length ? ns.map(n=>n.node).join(' + ')
-                                              : 'this Mac (auto)');
+  $('lmwhere').textContent=ns.length ? 'on: '+ns.map(n=>n.node).join(' + ')
+    : 'on: none picked (click machines in Memory)';
 }
 // MTP for this launch: shown only for a model that ships a draft head. The
 // default is its saved launch settings (Settings -> Models), else what the
@@ -2716,13 +2729,6 @@ async function loadResident(){
   for(const m of peers) if(m.error)
     h+=`<div class="s ro peererr" title="${esc(m.error)}">${
       esc(m.machine)} not answering</div>`;
-  // a cluster job that stopped says why, on every page that ran a rank
-  const ended=[...(d.jobs||[]), ...peers.flatMap(m=>m.jobs||[])]
-    .filter(j=>j.phase==='stopped');
-  const seen=new Set();
-  for(const j of ended){ if(seen.has(j.job)) continue; seen.add(j.job);
-    h+=`<div class="s ro peererr" title="${esc(j.reason)}">cluster job on ${
-      esc((j.machines||[]).join(' + '))} stopped: ${esc(j.reason)}</div>` }
   el.innerHTML=h;
   // What can be chatted with right now, for the chat bar's label: a chat
   // whose model has gone away no longer has a selection to name.
@@ -2734,7 +2740,7 @@ async function loadResident(){
     if(e.target.closest('button')) return;
     const r=rows[+x.dataset.chatn];
     if(window.switchTab) window.switchTab('chat');
-    if(window.newChat) window.newChat(r.name, r.where, window.visionOf(r.name));
+    if(window.useModel) window.useModel(r);
   });
   // Only when status has told us nothing: in a cluster the key is the sum
   // of what the machines are drawing, and this document is one box.
@@ -3186,7 +3192,9 @@ function chatGate(){
     el.dataset.sig=sig;
     el.innerHTML=`<option value="">${opts.length?'choose':'none running'}</option>`+
       opts.map(r=>`<option value="${esc(r.where)}">${esc(shortModel(r.name))}${
-        r.machine?' · '+esc(r.machine):''}</option>`).join('');
+        r.cluster&&(r.cluster.machines||[]).length>1
+          ?' · '+esc(r.cluster.machines.join(' + '))
+          :r.machine?' · '+esc(r.machine):''}</option>`).join('');
   }
   el.disabled=!opts.length;
   el.value=sel && opts.some(r=>r.where===c.where) ? c.where : '';
@@ -3202,12 +3210,19 @@ window.chatGate=chatGate;
 $('cmodel').onchange=()=>{
   const r=(window.CHATTABLE||[]).find(x=>x.where===$('cmodel').value);
   if(!r){ chatGate(); return }
-  const c=curChat();
-  if(c && !(c.msgs||[]).length){
-    c.where=r.where; c.model=r.name; c.vision=visionOf(r.name);
-    saveChats(); renderChats(); chatGate();
-  } else newChat(r.name, r.where, visionOf(r.name));
+  useModel(r);
 };
+// A running model picked (here or by clicking its card): the open chat --
+// else the latest one -- sends to it from now on; a new chat only when
+// there is none at all.
+function useModel(r){
+  let c=curChat();
+  if(!c && CHATS.length){ openChat(CHATS[0]); c=curChat() }
+  if(!c){ newChat(r.name, r.where, visionOf(r.name)); return }
+  c.where=r.where; c.model=r.name; c.vision=visionOf(r.name);
+  saveChats(); renderChats(); chatGate(); $('cq').focus();
+}
+window.useModel=useModel;
 window.curChatPub=()=>curChat();
 
 // --- chat settings ----------------------------------------------------------
