@@ -10,6 +10,7 @@ as rank 0, answers through the real scheduler abort and SIGTERM path."""
 
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -975,6 +976,68 @@ def test_stop_then_immediately_launch_waits_for_the_old_rank_to_be_gone(
         == ["stopped"]
     C.stop(new, propagate=False, grace=1)
     C.ENDED.clear()
+
+
+def test_prepare_waits_for_a_stopping_rank_then_goes(cache, monkeypatch):
+    """A relaunch's prepare, while a previous job's rank on this machine
+    is still exiting (job cd587ad0856f3f3a / fe954df14c29e6eb,
+    2026-09-27): it waits, bounded, instead of granting the new job a
+    share -- and a ring port -- the old rank still holds, then goes once
+    the old rank is gone."""
+    monkeypatch.setattr(C, "PEER_S", 3.0)
+    old, new = "41648583878fcdfc", "db0cb292aefeba55"
+    p = slow_rank(old, 1, 0.3)
+    reg = J.registry()
+    reg[f"{old}/1"]["stopping"] = time.time()
+    J.save_registry(reg)
+    p.send_signal(signal.SIGTERM)          # its bye handler exits in 0.3s
+    code, doc = C.prepare(spec(job=new), resolve=lambda i: "/m/x",
+                         info=info("Apple M3 Ultra", "192.0.2.2"),
+                         shape=lambda p, w, s: SHAPE, held=lambda job: [])
+    assert doc["ok"], doc
+    p.wait(timeout=5)
+    C._PROCS.clear()
+    J.save_registry({})
+    C.PREPARED.clear()
+
+
+def test_prepare_names_a_stuck_old_rank_in_its_refusal(cache, monkeypatch):
+    monkeypatch.setattr(C, "PEER_S", 0.3)
+    old, new = "41648583878fcdfc", "db0cb292aefeba55"
+    p = slow_rank(old, 1, 60)
+    reg = J.registry()
+    reg[f"{old}/1"]["stopping"] = time.time()
+    J.save_registry(reg)
+    code, doc = C.prepare(spec(job=new), resolve=lambda i: "/m/x",
+                         info=info("Apple M3 Ultra", "192.0.2.2"),
+                         shape=lambda p, w, s: SHAPE, held=lambda job: [])
+    assert not doc["ok"], doc
+    assert old in doc["refused"] and "still exiting" in doc["refused"]
+    p.kill()
+    p.wait()
+    C._PROCS.clear()
+    J.save_registry({})
+
+
+def test_slot_conflict_finds_an_alive_rank_of_another_job_on_the_port(
+        monkeypatch):
+    """A quick relaunch's `_slot` only scans this machine's own registry
+    (`_used_slots`), so a coordinator elsewhere can still hand a new job
+    the same ring/jaccl slot a previous job's still-live rank holds
+    here. `prepare`/`start` catch it on the port instead."""
+    s = spec(job="db0cb292aefeba55", rank=1,
+             hosts=["192.0.2.1:47201", "192.0.2.2:47202"])
+    reg = {"old/1": {"job": "41648583878fcdfc", "rank": 1, "pid": 999,
+                     "ring_port": 47202}}
+    monkeypatch.setattr(C, "_alive", lambda job, pid: True)
+    assert C._slot_conflict(s, reg) == ("41648583878fcdfc", 1, 999)
+    monkeypatch.setattr(C, "_alive", lambda job, pid: False)
+    assert C._slot_conflict(s, reg) is None
+    assert C._slot_conflict(s, {}) is None
+    # a different slot never conflicts
+    other = dict(reg, **{"old/1": {**reg["old/1"], "ring_port": 47222}})
+    monkeypatch.setattr(C, "_alive", lambda job, pid: True)
+    assert C._slot_conflict(s, other) is None
 
 
 def test_start_refuses_when_a_stopped_rank_will_not_go(cache, monkeypatch):

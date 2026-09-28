@@ -742,14 +742,31 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
 
 def init(link_kind: str) -> Link:
     """Join the ring (MLX_RANK and MLX_HOSTFILE, or the jaccl variables,
-    already set) and wait for every rank before anything loads."""
+    already set) and wait for every rank before anything loads.
+
+    JACCL_COLLECTIVE_TIMEOUT_MS is 0 (no timeout) around the load: a cold
+    read of a 400 GB artifact is not a hang. But that same 0 covers the
+    join below (mx.distributed.init's handshake, the barrier, the
+    [port, nonce] exchange in bell()) -- so a peer stuck in one of those,
+    on a collective this rank has already passed, hangs forever instead
+    of failing. Read live by libjaccl on every collective, so it can be
+    armed here for the join alone and dropped back to 0 once the ring is
+    up, before the model's own cold read."""
     backend = {"ring": "ring", "jaccl": "jaccl"}[link_kind]
-    group = mx.distributed.init(backend=backend, strict=True)
-    link = Link(group)
-    logger.info("rank %d of %d joined the %s ring", link.rank, link.size,
-                backend)
-    link.barrier()
-    link.bell()
+    join_ms = os.environ.get("KNURLOGIC_JACCL_TIMEOUT_MS")
+    armed = bool(join_ms and join_ms.isdigit())
+    if armed:
+        os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = join_ms
+    try:
+        group = mx.distributed.init(backend=backend, strict=True)
+        link = Link(group)
+        logger.info("rank %d of %d joined the %s ring", link.rank,
+                    link.size, backend)
+        link.barrier()
+        link.bell()
+    finally:
+        if armed:
+            os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = "0"
     progress(phase="loading")
     return link
 
