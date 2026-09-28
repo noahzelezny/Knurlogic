@@ -36,7 +36,7 @@ import json
 
 from fixtures_thunderbolt import (PORTS_M3, PORTS_M4, SP_THUNDERBOLT_M3,
                                   SP_THUNDERBOLT_M4)
-from knurlogic.interfaces import cluster_jobs as C
+from knurlogic.cluster import launch as C
 
 
 def ports_of(text):
@@ -145,8 +145,8 @@ def test_no_thunderbolt_5_cable_greys_rdma_with_the_reason(monkeypatch):
     assert why.startswith("RDMA needs a Thunderbolt 5 cable between these "
                           "Macs; the 192.0.2 link is Thunderbolt 4")
     # the page greys the button with the same words
-    from pathlib import Path
-    page = (Path(C.__file__).parent / "web" / "index.html").read_text()
+    from knurlogic.interfaces.page.documents import PAGE
+    page = PAGE.read_text()
     assert "RDMA needs a Thunderbolt 5 cable between these Macs; " in page
     assert "tb5Why(" in page
 

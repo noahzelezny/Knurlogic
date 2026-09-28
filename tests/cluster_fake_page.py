@@ -1,5 +1,5 @@
 """A fake peer page for tests/test_cluster_jobs.py (not a test module): the
-REAL page handler and cluster routes (interfaces/ui, interfaces/cluster_jobs)
+REAL page handler and cluster routes (interfaces/page/server, cluster/launch)
 in its own process, with its own cache dir (XDG_CACHE_HOME) and identity,
 and only the machine facts faked: its artifact, the model's shape, its
 cluster block, and the rank it spawns (tests/cluster_fake_rank.py).
@@ -19,8 +19,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 def main():
     port, nid, name, info = (int(sys.argv[1]), sys.argv[2], sys.argv[3],
                              json.loads(sys.argv[4]))
-    from knurlogic.interfaces import cluster_jobs as C
-    from knurlogic.interfaces import ui
+    from knurlogic.cluster import launch as C
+    from knurlogic.interfaces.page import server as ui
     from knurlogic.machine import identity
     identity._ID.update(id=nid, name=name, id_source="test")
     C._resolve = lambda ident: "/fake/artifact" if ident == "abc" else None

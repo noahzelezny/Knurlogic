@@ -26,9 +26,10 @@ import pytest
 
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import links
-from knurlogic.interfaces import cluster_jobs as C
-from knurlogic.interfaces import ui
+from knurlogic.cluster import launch as C
+from knurlogic.interfaces.page import server as ui
 from knurlogic.machine import identity
+from knurlogic.tuning import settings
 
 GIB = 1 << 30
 HERE = Path(__file__).resolve().parent
@@ -310,7 +311,7 @@ def test_prepare_type_checks_the_spec(cache, bad):
 
 def test_prepare_refuses_unknown_sets_and_stores_only_clean_ones(
         cache, monkeypatch):
-    monkeypatch.setattr(ui, "launch_knobs",
+    monkeypatch.setattr(settings, "launch_knobs",
                         lambda: frozenset({"kv_bits"}))
     code, doc = prep(spec(sets={"kv_bits": "8", "evil": "x"}))
     assert not doc["ok"] and "evil" in doc["refused"]
