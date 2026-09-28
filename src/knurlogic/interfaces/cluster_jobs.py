@@ -1410,10 +1410,23 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         return {"error": f"not a launch setting: {', '.join(bad)}"}
+    # the base model's saved prompt chunk (Settings -> Models) is the
+    # ring's, like every launch set; unset, the ring runs PREFILL_CHUNK.
+    # It used to be PREFILL_CHUNK whatever was saved: serve puts the ring's
+    # value over any --set, so the saved one was shown and never ran.
+    chunk = PREFILL_CHUNK
+    for k in ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"):
+        if k in sets:
+            from knurlogic.tuning.settings import check_knob
+            why = check_knob(k, sets[k])
+            if why:
+                return {"error": why}
+            chunk = int(sets[k])
+            break
     base = {"job": job, "world": world, "split": split, "link": link,
             "identity": ident, "hosts": hosts, "ibv_devices": ibv,
             "coordinator": coord, "layers": plan["layers"],
-            "prefill_chunk": PREFILL_CHUNK,
+            "prefill_chunk": chunk,
             "tune": req.get("tune") if req.get("tune") in
             TUNES else "balanced",
             "nodes": nodes, "versions": local_info.get("versions") or {},

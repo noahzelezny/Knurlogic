@@ -105,12 +105,13 @@ def prefill_chunk_for(model_type: str) -> tuple:
     return PREFILL_CHUNK_DEFAULT, "default: no measured width for this family"
 
 
-# How many prompts the engine prefills in ONE forward. mlx-lm defaults to 8,
-# and its prefill transient is per row -- eight long prompts arriving together
-# is eight chunk transients at once, the spike a single-prompt test never
-# shows. Arithmetic, not a measurement: on a tight box it is 1; elsewhere the
-# engine's own default stands, because nothing here has measured better.
-PROMPT_CONCURRENCY_TIGHT = 1
+# How many prompts are prefilled in ONE forward. mlx-lm's server defaulted
+# to 8 (--prompt-concurrency), each with its own transient. knurlogic's own
+# engine admits ONE row per step (engine/mtp/batch_generator._next), so
+# prompts are always prefilled one at a time and there is nothing to set:
+# KNURLOGIC_PROMPT_CONCURRENCY went with mlx-lm's server (a64bba7) and is
+# no longer emitted or shown. It is still ACCEPTED (KNOB_ALIASES) so a
+# launch setting saved before cannot fail a launch; it does nothing.
 
 # Freed MLX buffers pile up invisibly -- they do not appear in "active
 # memory." Biggest single win in vqlab's memory playbook, zero measured speed
@@ -243,11 +244,10 @@ TUNE_PROFILES = {
     },
     "lean": {
         "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
-        "launch": {"kv_bits": "8", "mtp": "off", "prompt_concurrency": 1},
+        "launch": {"kv_bits": "8", "mtp": "off"},
         "why": "most context and most agents: 8-bit KV where the family "
                "takes it (bf16 where it does not, and said), 512-token "
-               "prompt chunks, one prompt prefilled at a time, MTP off so "
-               "the head's memory is free",
+               "prompt chunks, MTP off so the head's memory is free",
     },
 }
 
@@ -299,7 +299,7 @@ KNOB_DOC = {
         "THE memory knob: prefill grew 3.35 MB/token where KV-cache theory "
         "predicted 0.059. Smaller is also faster (128 -> 32 is 1.37x), so it "
         "is capped at 32 and never raised."),
-    "VQLAB_PREFILL_CHUNK": (
+    "KNURLOGIC_PREFILL_CHUNK": (
         "how many prompt tokens are processed at once",
         "token-identical at every width, so it is purely a memory knob -- "
         "narrowing costs nothing but peak."),
@@ -310,10 +310,6 @@ KNOB_DOC = {
         "prompt is refused (400) and max_tokens is trimmed to fit, so no "
         "request can take more KV memory than this allows. The default is "
         "the model's own window."),
-    "KNURLOGIC_PROMPT_CONCURRENCY": (
-        "how many prompts are prefilled together in one forward",
-        "the prefill transient is per prompt, so 8 arriving together is 8x "
-        "the spike a one-prompt test shows. 1 on a tight box."),
     "KNURLOGIC_MTP": (
         "multi-token prediction: draft with the head packed beside the "
         "weights",
@@ -346,8 +342,7 @@ KNOB_DOC = {
         "prompt chunk where there is room, MTP + dynamic MTP. stable: "
         "512-token chunks, identical results across chips, MTP drafting "
         "every step, conservative memory. lean: 8-bit KV where the family "
-        "takes it, MTP off, one prompt at a time -- most context and "
-        "agents. Any setting changed beside it beats the preset's value."),
+        "takes it, MTP off -- most context and agents. Any setting changed beside it beats the preset's value."),
     "VQLAB_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
         "biggest single win in the memory playbook, no measured speed cost at "
@@ -418,7 +413,7 @@ MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
 # while, settings that did nothing -- the resolver explained a prompt chunk
 # the server never saw.
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
-                                      "prompt_concurrency", "mtp",
+                                      "context_length", "mtp",
                                       "mtp_dynamic", "kv_bits",
                                       "cross_chip", "preset")
                           for n in KNOB_ALIASES[k])
@@ -483,12 +478,11 @@ def cross_chip_of(v) -> str:
 
 
 def engine_settings(env: dict) -> dict:
-    """{prefill_step_size, prompt_concurrency, cache_limit_gb} from a
+    """{prefill_step_size, cache_limit_gb, mtp, ...} from a
     resolved environment, whichever alias it was emitted under. Absent means
     the engine's own default stands."""
     out = {}
     for logical, key, cast in (("prefill_chunk", "prefill_step_size", int),
-                               ("prompt_concurrency", "prompt_concurrency", int),
                                ("cache_limit_gb", "cache_limit_gb", float),
                                ("mtp", "mtp", on_off),
                                ("mtp_dynamic", "mtp_dynamic", on_off),
@@ -501,11 +495,39 @@ def engine_settings(env: dict) -> dict:
                 break
     return out
 
-#: When no bundled runtime can be asked, emit this one. The LAST alias, not
-#: the first: the legacy name is the one with 24 artifacts behind it, and a
-#: guess should fail towards what exists rather than towards what is planned.
+#: Logical knobs whose LEGACY name is read by published bundled runtimes
+#: (VQLAB_CACHE_LIMIT_GB: 24 of the 37). The prompt chunk is not one of
+#: them: no bundled runtime reads VQLAB_PREFILL_CHUNK -- only the engine
+#: does (engine_settings, under either name) -- so it is emitted under
+#: knurlogic's own name, and the legacy one is only still ACCEPTED (a saved
+#: launch setting, a --set, a ring spec may carry it).
+LEGACY_EMITTED = ("cache_limit_gb",)
+
+
+def canonical_sets(sets: dict) -> dict:
+    """Explicit settings with an accepted legacy name moved to the name
+    the resolver emits (VQLAB_PREFILL_CHUNK -> KNURLOGIC_PREFILL_CHUNK),
+    so an explicit value cannot lose to the resolver's under the other
+    alias (engine_settings takes the first alias present). Where both are
+    given, knurlogic's own name wins."""
+    out = dict(sets or {})
+    for logical, names in KNOB_ALIASES.items():
+        if logical in LEGACY_EMITTED:
+            continue
+        for old in names[1:]:
+            if old in out:
+                v = out.pop(old)
+                out.setdefault(names[0], v)
+    return out
+
+
+#: When no bundled runtime can be asked, emit this one. For a knob in
+#: LEGACY_EMITTED, the LAST alias: the legacy name is the one with artifacts
+#: behind it, and a guess should fail towards what exists rather than
+#: towards what is planned. Otherwise knurlogic's own (first) name.
 def default_alias(logical: str) -> str:
-    return KNOB_ALIASES[logical][-1]
+    names = KNOB_ALIASES[logical]
+    return names[-1] if logical in LEGACY_EMITTED else names[0]
 
 
 # --- who is a knob FOR ------------------------------------------------------
@@ -527,7 +549,7 @@ def default_alias(logical: str) -> str:
 #             the frozen 2048*4096*2 constant happened.
 KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "KNURLOGIC_CACHE_LIMIT_GB",
                    "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_PREFILL_CHUNK",
-                   "VQLAB_PREFILL_CHUNK", "KNURLOGIC_PROMPT_CONCURRENCY",
+                   "VQLAB_PREFILL_CHUNK",
                    "KNURLOGIC_CONTEXT_LENGTH") + MODEL_KNOBS
 
 
@@ -553,7 +575,6 @@ KNOB_RANGE = {
     # one would have to be earned first.
     "VQLAB_PREFILL_CHUNK": ([512, 1024, 2048, 4096], "tokens"),
     "KNURLOGIC_PREFILL_CHUNK": ([512, 1024, 2048, 4096], "tokens"),
-    "KNURLOGIC_PROMPT_CONCURRENCY": ([1, 2, 4, 8], "prompts"),
     # powers of two up to the longest window a released model has; the
     # control stops at the model's own (the resolver's value)
     "KNURLOGIC_CONTEXT_LENGTH": ([8192, 16384, 32768, 65536, 131072,
@@ -572,6 +593,92 @@ KNOB_RANGE = {
                                  "GiB"),
 }
 
+
+
+# --- the longest context a model was built for -------------------------------
+# max_position_embeddings is the trained window. A config that declares YaRN
+# rope scaling was built to run past it: the window is then
+# original_max_position_embeddings * factor. Anything else -- rope_type
+# "default", no scaling at all -- stops at max_position_embeddings. The
+# engine does not refuse a position past it (rope is computed for any
+# position), it just runs a model past the length it was trained on, which
+# is quietly worse output rather than an error. So the cap is refused above
+# this, not honoured.
+def model_window(cfg: dict) -> tuple:
+    """(tokens, why) for an artifact's config.json; (0, why) when it does
+    not say."""
+    cfg = cfg or {}
+    text = cfg.get("text_config") if isinstance(
+        cfg.get("text_config"), dict) else {}
+    mpe = int(text.get("max_position_embeddings")
+              or cfg.get("max_position_embeddings") or 0)
+    rope = None
+    for c in (text, cfg):
+        for key in ("rope_scaling", "rope_parameters"):
+            if isinstance(c.get(key), dict):
+                rope = c[key]
+                break
+        if rope:
+            break
+    kind = str((rope or {}).get("rope_type") or (rope or {}).get("type")
+               or "").lower()
+    if kind == "yarn" and rope.get("factor"):
+        orig = int(rope.get("original_max_position_embeddings") or mpe or 0)
+        yarn = int(orig * float(rope["factor"]))
+        if yarn > mpe:
+            return yarn, (f"{orig:,} trained x YaRN factor "
+                          f"{float(rope['factor']):g} (rope_scaling)")
+    if mpe:
+        return mpe, ("max_position_embeddings; no YaRN rope scaling in its "
+                     "config, so nothing longer was trained")
+    return 0, "its config does not say (no max_position_embeddings)"
+
+
+#: numeric knobs: (type, lowest, highest or None, what it counts)
+KNOB_BOUNDS = {
+    "KNURLOGIC_PREFILL_CHUNK": (int, 16, 4096, "tokens"),
+    "VQLAB_PREFILL_CHUNK": (int, 16, 4096, "tokens"),
+    "KNURLOGIC_CONTEXT_LENGTH": (int, 256, None, "tokens"),
+    "VQ_DECODE_CHUNK": (int, DECODE_CHUNK_MIN, DECODE_CHUNK_DEFAULT, ""),
+    "VQLAB_CACHE_LIMIT_GB": (float, 0.0, CACHE_LIMIT_GB_MAX, "GiB"),
+    "KNURLOGIC_CACHE_LIMIT_GB": (float, 0.0, CACHE_LIMIT_GB_MAX, "GiB"),
+}
+
+
+def check_knob(name: str, value, window: int = 0):
+    """None when `value` is one `name` may take, else the sentence saying
+    why not. `window`: the model's (model_window), which caps the context
+    length. Enumerated knobs are checked against their values; numeric ones
+    for type and range; anything else is the runtime's own business."""
+    s = str(value if value is not None else "").strip()
+    if name in KNOB_BOUNDS:
+        cast, lo, hi, unit = KNOB_BOUNDS[name]
+        try:
+            v = cast(s)
+        except ValueError:
+            return (f"{name}={s!r}: not a "
+                    f"{'whole number' if cast is int else 'number'}")
+        if name == "KNURLOGIC_CONTEXT_LENGTH" and window:
+            hi = window
+        if v < lo or (hi is not None and v > hi):
+            where = (f"this model's maximum is {hi:,} tokens" if
+                     name == "KNURLOGIC_CONTEXT_LENGTH" and window else
+                     f"between {lo:g} and {hi:g}{' ' + unit if unit else ''}"
+                     if hi is not None else f"at least {lo:g}")
+            return f"{name}={s}: {where}"
+        return None
+    try:
+        if name in ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC"):
+            on_off(s)
+        elif name == "KNURLOGIC_KV_BITS":
+            kv_bits_of(s)
+        elif name == "KNURLOGIC_PRESET":
+            preset_of(s)
+        elif name == "KNURLOGIC_CROSS_CHIP":
+            cross_chip_of(s)
+    except ValueError as e:
+        return f"{name}: {e}"
+    return None
 
 # --- what a VISION rung holds besides its weights ---------------------------
 # A model with a vision tower needs three things a text model does not, and
