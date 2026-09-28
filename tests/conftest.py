@@ -11,7 +11,7 @@ def _no_cluster_watcher_thread(monkeypatch):
     job's peer page unknown for 20 s, and stopped that job -- a pytest run
     on the M3 killed the 397B cluster job's rank 1 mid-review (2026-09-27).
     Tests call watch_once by hand; no thread is started."""
-    from knurlogic.interfaces import cluster_jobs
+    from knurlogic.cluster import launch as cluster_jobs
     monkeypatch.setattr(cluster_jobs, "_WATCHER", [1])
 
 
@@ -26,11 +26,11 @@ def _no_real_page(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_recovery_thread(monkeypatch, tmp_path):
-    """Auto-recovery (interfaces/recovery.py) tracks what a launch starts
+    """Auto-recovery (cluster/recovery.py) tracks what a launch starts
     and relaunches it from a thread: a test's killed rank must not come back
     after the test, nor a test write the REAL recovery.json. Tests call
     recovery.tick by hand, on their own records and file."""
-    from knurlogic.interfaces import recovery
+    from knurlogic.cluster import recovery
     monkeypatch.setattr(recovery, "_THREAD", [1])
     monkeypatch.setattr(recovery, "MODELS", {})
     monkeypatch.setattr(recovery, "_SAVED", {})

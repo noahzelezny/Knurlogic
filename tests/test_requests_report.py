@@ -90,7 +90,8 @@ def test_status_json_requests_reach_loaded_rows(monkeypatch):
 
 
 def test_mcp_state_lists_requests_per_model(monkeypatch):
-    from knurlogic.interfaces import mcp, ui
+    from knurlogic.interfaces import mcp
+    from knurlogic.interfaces.page import server as ui
     from knurlogic.machine import loaded
     req = {"in_flight": 1, "pending": 0, "capacity": 4,
            "oldest_pending_s": 0.0, "holding": None}
@@ -115,7 +116,7 @@ def test_the_503s_say_when_to_retry():
 
 
 def test_messages_refusal_sends_retry_after():
-    from knurlogic.interfaces import messages as M
+    from knurlogic.interfaces.http import messages as M
     sent = []
 
     def transport(_oai):

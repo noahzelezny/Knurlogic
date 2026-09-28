@@ -249,7 +249,7 @@ def test_the_probe_verifies_each_released_template_and_finds_its_default(
 
 
 def test_messages_thinking_disabled_asks_for_none():
-    from knurlogic.interfaces.messages import to_openai
+    from knurlogic.interfaces.http.messages import to_openai
     b = to_openai({"messages": [{"role": "user", "content": "hi"}],
                    "thinking": {"type": "disabled"}})
     assert b["reasoning_effort"] == "none"
@@ -270,7 +270,7 @@ def test_the_mcp_models_tool_lists_each_models_thinking_levels():
 
 
 def test_messages_returns_thinking_blocks_only_when_enabled():
-    from knurlogic.interfaces.messages import from_openai, to_openai
+    from knurlogic.interfaces.http.messages import from_openai, to_openai
     on = to_openai({"messages": [{"role": "user", "content": "hi"}],
                     "thinking": {"type": "enabled", "budget_tokens": 2048}})
     off = to_openai({"messages": [{"role": "user", "content": "hi"}]})
@@ -289,7 +289,7 @@ def test_messages_returns_thinking_blocks_only_when_enabled():
 
 
 def test_messages_streams_thinking_then_text():
-    from knurlogic.interfaces.messages import stream
+    from knurlogic.interfaces.http.messages import stream
     lines = [f"data: {json.dumps(c)}" for c in (
         {"choices": [{"delta": {"reasoning_content": "let me "}}]},
         {"choices": [{"delta": {"reasoning_content": "see"}}]},

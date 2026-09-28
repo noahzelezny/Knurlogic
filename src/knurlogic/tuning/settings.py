@@ -403,7 +403,7 @@ KNOB_ALIASES = {
 }
 
 #: launch settings of the model itself, read when it loads: the same on
-#: every rank of a split (interfaces/cluster_jobs passes them ring-wide)
+#: every rank of a split (cluster/launch passes them ring-wide)
 MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
                "KNURLOGIC_CROSS_CHIP", "KNURLOGIC_PRESET")
 
@@ -724,7 +724,7 @@ VISION_KV_TOKENS_PER_IMAGE = 4096
 VISION_KV_DTYPE_BYTES = 2
 
 
-# --- server-side context compaction (interfaces/compaction.py) --------------
+# --- server-side context compaction (context_management/compaction.py) ----
 # The operator's defaults for what a request's `context_management` leaves
 # out, and whether the server compacts a request that asks for nothing.
 # Read per request from the environment, so each applies live on a running
