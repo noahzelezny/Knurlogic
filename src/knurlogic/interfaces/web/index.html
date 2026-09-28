@@ -1347,20 +1347,31 @@ const STAGEPOP=(()=>{
   pop.id='stagepop'; pop.hidden=true;
   pop.setAttribute('role','dialog'); pop.setAttribute('aria-label','staged changes');
   document.querySelector('#sheet .box').appendChild(pop);
-  const part=reach=>[...STAGED].map(([,g])=>{
+  // a launch setting's staged group: nothing of that model runs, so its g is
+  // 'launch|' + the base model (its rows have no running server to reload) --
+  // distinct from a running model's g (its server address, '' this page's own)
+  const isLaunch=key=>String(key).startsWith('launch|');
+  const part=(reach, check=()=>true)=>[...STAGED].map(([key,g])=>{
+    if(!check(key,g)) return '';
     const ks=Object.entries(g.knobs).filter(([,v])=>v.reach===reach);
     return ks.length ? `<div class="sg"><span class="ro">${esc(g.label)}${
       g.where?' · '+esc(g.where):''}</span>${ks.map(([k,v])=>
       `<div><b>${esc(k)}</b> <span class="was">${esc(v.from)}</span><span class="chg">${
       esc(v.to)}</span></div>`).join('')}</div>` : '' }).join('');
   function show(){
-    const n=stagedCount(), now=part('live'), later=part('restart');
+    const n=stagedCount(), now=part('live'),
+      later=part('restart', key=>!isLaunch(key)),
+      next=part('restart', isLaunch);
     pop.innerHTML=`<b>${n} change${n===1?'':'s'}</b>
       ${now?`<div class="sh">apply now</div>${now}`:''}
       ${later?`<div class="sh">needs a reload</div>${later}
         <div class="msg">Saved as that base model's launch settings, for
         whichever of its variants is launched next from this page; what is
         running keeps running as it is -- this does not restart it.</div>`:''}
+      ${next?`<div class="sh">applies on next launch</div>${next}
+        <div class="msg">Nothing of this model is running, so the change
+        cannot be applied to it; it is saved as the model's launch setting
+        and takes effect when it is launched next from this page.</div>`:''}
       <div class="ctl"><button class="mini" data-s="keep">Keep editing</button>
       <button class="mini" data-s="discard">Discard</button>
       <button class="go" data-s="apply">${now?'Apply':'Save'}</button></div>`;
