@@ -31,6 +31,8 @@ import mlx.nn as nn
 from mlx_lm.models.base import create_attention_mask
 from mlx.utils import tree_flatten, tree_unflatten
 
+from knurlogic.engine.runtime.pipeline import unwrap
+
 SIDECAR_NAME = "mtp-head-q6.safetensors"
 
 
@@ -82,19 +84,13 @@ class MTPHead:
         self.D = args_t.hidden_size
         self.hc = core.hc
         self.eps = getattr(args_t, "rms_norm_eps", 1e-6)
-        fa_idx = [i for i, l in enumerate(core.layers)
-                  if l.layer_type == "full_attention"][0]
-        self.fa_idx = fa_idx
-        # a pipeline stage wraps its first layer (engine/runtime/pipeline
-        # Recv/Send): the block is the layer's own class, not the wrapper's
-        lay = core.layers[fa_idx]
-        while "inner" in lay:
-            lay = lay["inner"]
-        # built by its GLOBAL index: the class picks its attention type from
+        # Built by its GLOBAL index: the class picks its attention type from
         # args.layer_types[idx], and a pipeline stage holds a slice of the
-        # layers, so fa_idx (local) can name a linear-attention layer there
-        g_idx = args_t.layer_types.index("full_attention")
-        self.block = type(lay)(args_t, g_idx)
+        # layers -- one that may hold no full-attention layer at all (a
+        # follower binds a head too; engine/runtime/pipeline). The class is
+        # the layer's own, never a stage end's Recv / Send wrapper.
+        self.fa_idx = args_t.layer_types.index("full_attention")
+        self.block = type(unwrap(core.layers[0]))(args_t, self.fa_idx)
         # The head has no PLE bank. A zero-filled stand-in is NOT a no-op
         # through this class, so the submodule has to go entirely.
         self.block.ple = None

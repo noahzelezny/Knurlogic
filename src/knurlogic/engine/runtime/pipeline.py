@@ -107,6 +107,16 @@ class _Wrap(nn.Module):
             return getattr(self["inner"], name)
 
 
+def unwrap(layer):
+    """The layer a stage end wraps (`Recv` / `Send`, possibly both on a
+    one-layer stage), or `layer` itself. Attribute reads already see through
+    a wrapper; `type(...)` and `isinstance(...)` do not, so code that asks
+    what class a layer is asks this first."""
+    while isinstance(layer, _Wrap):
+        layer = layer["inner"]
+    return layer
+
+
 class Recv(_Wrap):
     """The first layer of a stage that is not the first: its input is the
     previous stage's output, received in this rank's own dtype."""
@@ -153,6 +163,40 @@ def _dtype_code(dt) -> int:
     return _DTYPES.index(dt)
 
 
+def restage(model, keep: list, start: int, end: int) -> None:
+    """Make `model` a stage holding `keep` = its layers [start, end), stage
+    ends already wrapped: the layer list, and the per-family indices the
+    trunk froze from the whole list. Every layer is read through its
+    wrapper (attribute reads see through `Recv` / `Send`)."""
+    fam = family_of(model)
+    core = core_of(model)
+    core.layers = keep
+    if fam == "qwen3_5":
+        # PipelineMixin's contract, uniform split and all_gather not used
+        core.start_idx, core.end_idx = 0, None
+        core.pipeline_rank, core.pipeline_size = 0, 1
+        core.ssm_idx = next((i for i, l in enumerate(keep) if l.is_linear),
+                            None)
+        core.fa_idx = next((i for i, l in enumerate(keep)
+                            if not l.is_linear), None)
+    elif fam == "glm5_next":
+        # frozen from the full list at __init__ (the maintainer's f3ab3a83)
+        core.ssm_idx = next((i for i, l in enumerate(keep)
+                             if getattr(l, "is_linear", False)), 0)
+        core.fa_idx = next((i for i, l in enumerate(keep)
+                            if not getattr(l, "is_linear", True)), 0)
+    elif fam == "qwen4_exp":
+        # full-model indices in ple_layers and a full-length make_cache
+        # (the maintainer's dd946407)
+        core.ple_layers = [i - start for i in core.ple_layers
+                           if start <= i < end]
+        whole = model.make_cache
+
+        def make_cache():
+            return whole()[start:end]
+        model.make_cache = make_cache
+
+
 def split(model, group, bounds: Sequence[Tuple[int, int]]) -> dict:
     """Keep this rank's layers of `model` (bounds[rank]) and wire its stage
     ends, in place, before the weights are read. -> what was done."""
@@ -183,31 +227,7 @@ def split(model, group, bounds: Sequence[Tuple[int, int]]) -> dict:
     if rank > 0:                           # not the last stage: send
         keep[-1] = Send(keep[-1], rank - 1, group, dts[rank - 1])
 
-    core.layers = keep
-    if fam == "qwen3_5":
-        # PipelineMixin's contract, uniform split and all_gather not used
-        core.start_idx, core.end_idx = 0, None
-        core.pipeline_rank, core.pipeline_size = 0, 1
-        core.ssm_idx = next((i for i, l in enumerate(keep) if l.is_linear),
-                            None)
-        core.fa_idx = next((i for i, l in enumerate(keep)
-                            if not l.is_linear), None)
-    elif fam == "glm5_next":
-        # frozen from the full list at __init__ (the maintainer's f3ab3a83)
-        core.ssm_idx = next((i for i, l in enumerate(keep)
-                             if getattr(l, "is_linear", False)), 0)
-        core.fa_idx = next((i for i, l in enumerate(keep)
-                            if not getattr(l, "is_linear", True)), 0)
-    elif fam == "qwen4_exp":
-        # full-model indices in ple_layers and a full-length make_cache
-        # (the maintainer's dd946407)
-        core.ple_layers = [i - start for i in core.ple_layers
-                           if start <= i < end]
-        whole = model.make_cache
-
-        def make_cache():
-            return whole()[start:end]
-        model.make_cache = make_cache
+    restage(model, keep, start, end)
     logger.info("pipeline rank %d of %d (%s): layers [%d, %d) of %d, "
                 "stage dtype %s", rank, n, fam, start, end, len(full),
                 dts[rank])
