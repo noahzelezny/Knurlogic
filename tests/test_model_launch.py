@@ -53,17 +53,15 @@ def test_mtp_knobs_appear_only_where_a_head_ships(tmp_path):
                                      ("qwen3_5_moe", ["8", "6", "4"]),
                                      ("gemma4", ["8", "6", "4"]),
                                      ("gemma4_text", ["8", "6", "4"]),
-                                     ("qwen4_exp_text", []),
-                                     ("glm5_next", [])])
+                                     ("qwen4_exp_text", ["8", "6", "4"]),
+                                     ("glm5_next", ["8"])])
 def test_kv_bits_offered_per_family(tmp_path, mt, bits):
     r = resolve(_art(tmp_path, mt), 96 * GIB)
     assert r.env["KNURLOGIC_KV_BITS"] == "bf16"
     assert r.ranges["KNURLOGIC_KV_BITS"] == ["bf16"] + bits
-    if not bits:
-        assert any("KV cache stays bf16" in n for n in r.notes)
-        assert kv_refusal(_art(tmp_path, mt), 8)
-    else:
-        assert kv_refusal(_art(tmp_path, mt), 4) is None
+    assert kv_refusal(_art(tmp_path, mt), 8) is None
+    for b in ("6", "4"):
+        assert (kv_refusal(_art(tmp_path, mt), int(b)) is None) == (b in bits)
     assert kv_refusal(_art(tmp_path, mt), None) is None
 
 
@@ -111,11 +109,12 @@ def test_the_room_left_holds_more_tokens_at_fewer_bits():
     assert b["tokens"] > 3 * a["tokens"]
 
 
-def test_an_mla_latent_is_not_counted_quantized():
+def test_an_mla_latent_is_counted_at_the_bits_and_its_keys_are_not():
     tc = {"num_hidden_layers": 2, "kv_lora_rank": 512,
           "qk_rope_head_dim": 64, "index_head_dim": 128,
           "layer_types": ["linear_attention", "deepseek_sparse_attention"]}
-    assert kv_bytes_per_token(tc, 4) == kv_bytes_per_token(tc)
+    assert kv_bytes_per_token(tc)[0] == (512 + 192) * 2
+    assert kv_bytes_per_token(tc, 8)[0] == int(512 * 1.0625 + 192 * 2)
 
 
 def test_the_scheduler_costs_the_first_prompt_at_the_bits(tmp_path):
@@ -189,7 +188,7 @@ def test_serve_refuses_kv_bits_for_a_family_that_cannot(tmp_path,
                                                          capsys):
     art = _art(tmp_path, "glm5_next")
     rc, seen = _serve_until_resolve(monkeypatch, art,
-                                    [str(tmp_path), "--kv-bits", "8"])
+                                    [str(tmp_path), "--kv-bits", "4"])
     assert rc == 2 and not seen
     assert "MLA latent" in capsys.readouterr().err
 
@@ -218,7 +217,7 @@ def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
     """Settings -> MODELS: one row per launch knob, needs reload, and the
     KV control narrowed to what the family allows."""
     from knurlogic.interfaces import web
-    for mt, want in (("glm5_next", ["bf16"]),
+    for mt, want in (("glm5_next", ["bf16", "8"]),
                      ("qwen3_5_text", ["bf16", "8", "6", "4"])):
         (tmp_path / mt).mkdir()
         a = _art(_with_head(tmp_path / mt), mt)
