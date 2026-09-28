@@ -76,12 +76,18 @@ class App:
         self.allow_hosts = {h.lower() for h in allow_hosts}
         self.translate = thinking.translate
         self.requests = 0
+        self._count_lock = threading.Lock()
         self.messages = messages.handler_over(self._transport,
                                               served().get("id", ""))
 
     def has_vision(self) -> bool:
         from knurlogic.engine.serve import state
         return state.VISION.get("serve") is not None
+
+    def _count(self) -> None:
+        """One more request served (the handler threads race otherwise)."""
+        with self._count_lock:
+            self.requests += 1
 
     def submit(self, body: dict, chat: bool):
         from knurlogic.machine.artifact import sampling_defaults
@@ -91,7 +97,7 @@ class App:
                                has_vision=self.has_vision,
                                sampling_defaults=(sampling_defaults(path)
                                                   if path else None))
-        self.requests += 1
+        self._count()
         self.scheduler.submit(job)
         host = self.scheduler.host
 
