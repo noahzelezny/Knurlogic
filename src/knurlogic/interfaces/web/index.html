@@ -519,6 +519,7 @@
  .hstk.off{background:var(--grid)}
 
  .unit .stat{font-size:12.5px;color:var(--faint);margin-top:7px;letter-spacing:.04em}
+ .unit .swapl{margin-top:5px;margin-bottom:-4px;height:18px;line-height:18px}
  .unit .pct{font-size:17px;font-weight:700;color:var(--acc);
    text-shadow:var(--glow)}
  /* The free-space bar is gone. It was a third telling of a number the
@@ -1871,9 +1872,10 @@ async function tick(){
     }
     const inst=mm.installed_bytes;
     const ss=segs(n, mm, inst).filter(s=>s[1]/inst>0.003);
-    const lim=nm.working_set_bytes && nm.working_set_bytes<inst*.99
-      ? `<u style="left:${(100*nm.working_set_bytes/inst).toFixed(1)}%"
-          title="GPU limit ${gb(nm.working_set_bytes)}"></u>` : '';
+    const wl=isLocal(n) ? nodeWS(n) : nm.working_set_bytes;
+    const lim=wl && wl<inst*.99
+      ? `<u style="left:${(100*wl/inst).toFixed(1)}%"
+          title="limit ${gb(wl)}"></u>` : '';
     return `<div class="hstk">${ss.map(([k,b,c,cls])=>
       `<i class="${cls}" style="width:${(100*b/inst).toFixed(2)}%;--c:${c}"
         title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}</div>`;
@@ -1935,9 +1937,12 @@ async function tick(){
     const ss=segs(n, mm, inst).filter(s=>s[1]/inst>0.003);
     // The GPU cannot wire all of installed memory; a model has to fit under
     // this line, so it is drawn where a person would look for it.
-    const lim=nm.working_set_bytes && nm.working_set_bytes<inst*.99
-      ? `<u style="bottom:${(100*nm.working_set_bytes/inst).toFixed(1)}%"
-          title="GPU limit ${gb(nm.working_set_bytes)}"></u>` : '';
+    // this machine's limit is its knurlogic allowance (the box reports all
+    // of itself); a peer's is its GPU working set
+    const wl=isLocal(n) ? nodeWS(n) : nm.working_set_bytes;
+    const lim=wl && wl<inst*.99
+      ? `<u style="bottom:${(100*wl/inst).toFixed(1)}%"
+          title="limit ${gb(wl)}"></u>` : '';
     return `<div class="stk">${ss.map(([k,b,c,cls])=>
       `<i class="${cls}" style="height:${(100*b/inst).toFixed(2)}%;--c:${c}"
         title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}</div>`;
@@ -1983,9 +1988,10 @@ async function tick(){
           : '<div class="noans">no metrics from this node</div>'}</div>
         ${stack(n, mapped?mm:null, off)}
       </div>
+      <div class="swapl stat">${swap>(64<<20)
+          ?`<span class="swap">${gb(swap)} swap</span>`:'&nbsp;'}</div>
       <div class="stat"><span class="pct">${off?'--':pct.toFixed(0)+'%'}</span>
-        ${off?'':gb(used)+' / '+gb(inst)}${swap>(64<<20)
-          ?` <span class="swap">· ${gb(swap)} swap</span>`:''}</div>
+        ${off?'':gb(used)+' / '+gb(inst)}</div>
     </div>`;
   }
   // The link between nodes animates along its length. That is the only
