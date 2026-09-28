@@ -478,35 +478,9 @@ PEER_LOAD_PATH = "/peer/loaded.json"
 PEER_LOAD_MAX = 16 << 10
 #: a load answers once the fit is checked and the child started
 PEER_LOAD_S = 60.0
-TUNES = ("balanced", "fast", "stable", "lean", "safe")  # tuning/settings.PRESETS
-#: request keys that would name a place on disk; refused outright, never
-#: ignored, so a coordinator that sends one learns it is wrong
-PATH_KEYS = ("path", "target", "artifact", "where", "dir", "directory")
-
-
-def launch_knobs() -> frozenset:
-    """The knob names a forwarded load may set: the ones knurlogic documents
-    (tuning/settings.KNOB_DOC) and their aliases. Nothing else is passed on:
-    `--set` puts it in the child's environment."""
-    from knurlogic.tuning import settings as S
-    return frozenset(S.KNOB_DOC) | frozenset(
-        n for v in S.KNOB_ALIASES.values() for n in v) | frozenset(
-        S.NUMERICS_FLAGS)
-
-
-def clean_sets(sets) -> tuple:
-    """(allowed {name: value}, [refused names]). Values are short plain
-    tokens: digits, letters, '.', '-', '_'."""
-    import re
-    ok, bad = {}, []
-    allowed = launch_knobs()
-    for k, v in (sets.items() if isinstance(sets, dict) else ()):
-        v = str(v)
-        if k in allowed and len(v) <= 64 and re.fullmatch(r"[\w.\-]*", v):
-            ok[k] = v
-        else:
-            bad.append(str(k)[:64])
-    return ok, bad
+# the launch facts cluster jobs share: tuning/settings owns them
+from knurlogic.tuning.settings import (PATH_KEYS, TUNES,  # noqa: E402
+                                       clean_sets, launch_knobs)
 
 
 def _peer_by_id(node: str):
@@ -1855,3 +1829,18 @@ def main(argv=None) -> int:
         peers.append((host, int(port) if port.isdigit() else a.port))
     return serve_ui(a.host, a.port, a.serve_port, peers,
                     allow_origins=a.allow_origin, allow_hosts=a.allow_host)
+
+
+def _wire() -> None:
+    """Give cluster_jobs and recovery what they need of this page. Each is
+    a late-bound lambda, so a swapped PEERS or mcp.load is what they see."""
+    from knurlogic.interfaces import cluster_jobs, mcp, recovery
+    cluster_jobs.status_fn = lambda: _status_fn()
+    cluster_jobs.peers_fn = lambda: PEERS.all() if PEERS else []
+    recovery.peers_fn = lambda: PEERS.all() if PEERS else []
+    recovery.child_fn = lambda port: _CHILDREN.get(port)
+    recovery.answers_fn = lambda port: _answers(port)
+    recovery.load_fn = lambda **kw: mcp.load(**kw)
+
+
+_wire()

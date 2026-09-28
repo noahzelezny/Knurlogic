@@ -75,6 +75,24 @@ MEMORY_LINE_RX = re.compile(
     r"Resource limit|Unable to allocate|Failed to allocate|MemoryError)"
     r"[^\n]*", re.I)
 
+
+
+def _no_load(**_):
+    return {"error": "no page has set recovery.load_fn"}
+
+
+# What recovery needs of the page that runs it, injected by that page at
+# startup (interfaces/ui.py) so this module never imports it. Unset, there
+# is nothing to relaunch with and nothing of the page's to look at.
+#: () -> [peer record]: the page's PEERS store
+peers_fn = list
+#: port -> (Popen, artifact) | None: a server this page process started
+child_fn = {}.get
+#: port -> bool: that port's server answers
+answers_fn = (lambda port: False)
+#: (**load arguments) -> dict: start a single-Mac server (mcp.load)
+load_fn = _no_load
+
 #: key -> record (in this page process)
 MODELS: dict = {}
 _LOCK = threading.RLock()
@@ -555,11 +573,9 @@ def _cluster_phase(rec: dict) -> str:
 def _fresh_peers(rec: dict) -> list:
     """The peers now, where their record carries the cluster block; the
     launch's own record of a peer otherwise."""
-    from knurlogic.interfaces import ui
     stored = {getattr(p, "id", ""): p for p in rec["args"].get("peers") or []}
     try:
-        now = {getattr(p, "id", ""): p for p in (ui.PEERS.all()
-                                                  if ui.PEERS else [])}
+        now = {getattr(p, "id", ""): p for p in peers_fn()}
     except Exception:
         now = {}
     out = []
@@ -614,7 +630,6 @@ def _leftovers(rec: dict, job: str) -> str:
 # ------------------------------------------------------------ one Mac
 
 def _tick_single(rec: dict, now: float) -> str:
-    from knurlogic.interfaces import ui
     from knurlogic.machine import servers
     port = rec["port"]
     if rec.get("state") == "failed":
@@ -627,10 +642,10 @@ def _tick_single(rec: dict, now: float) -> str:
         pid = int(srec["pid"])
         if rec.get("pid") is None:
             rec["pid"] = pid
-        mine = ui._CHILDREN.get(port)
+        mine = child_fn(port)
         code = mine[0].poll() if mine and mine[0].pid == pid else None
         if code is None and servers.is_our_server(pid):
-            if rec.get("state") == "recovering" and ui._answers(port):
+            if rec.get("state") == "recovering" and answers_fn(port):
                 rec.update(state="recovered", last_at=now)
                 return f"recovered: port {port} answers"
             if rec.get("state") == "recovered" and \
@@ -661,13 +676,12 @@ def _tick_single(rec: dict, now: float) -> str:
                                 f"(pid {', '.join(map(str, left))})")
     rec.setdefault("attempts", []).append(now)
     n = len(_window(rec, now))
-    from knurlogic.interfaces import mcp
     ld = rec["load"]
     try:
-        out = mcp.load(artifact=ld.get("artifact") or "", port=port,
-                       tune=ld.get("tune") or "balanced",
-                       sets=ld.get("sets") or {}, force=False,
-                       draft=ld.get("draft", True))
+        out = load_fn(artifact=ld.get("artifact") or "", port=port,
+                          tune=ld.get("tune") or "balanced",
+                          sets=ld.get("sets") or {}, force=False,
+                          draft=ld.get("draft", True))
     except Exception as ex:
         out = {"error": f"{type(ex).__name__}: {ex}"}
     if out.get("pid"):
