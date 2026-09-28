@@ -331,6 +331,8 @@ def _spawn_unlocked(path: str, port: int, tune: str = "balanced",
     if not draft:
         cmd.append("--no-draft")
     log = serve_log(port)
+    from knurlogic.machine.servers import new_instance
+    instance = new_instance()
     try:
         with open(log, "w") as fh:
             # Its own session, so it is not taken down with the terminal or
@@ -344,10 +346,10 @@ def _spawn_unlocked(path: str, port: int, tune: str = "balanced",
     reg = registry()
     reg[port] = {"pid": proc.pid, "artifact": path, "log": str(log),
                  "started": time.strftime("%Y-%m-%d %H:%M:%S"),
-                 "t": time.time()}
+                 "t": time.time(), "instance": instance}
     save_registry(reg)
     return {"starting": path, "port": port, "pid": proc.pid,
-            "log": str(log),
+            "log": str(log), "instance": instance,
             "note": "the model is loading in its own process; poll `state` "
                     "(started_here) or GET /v1/models on the port"}
 
