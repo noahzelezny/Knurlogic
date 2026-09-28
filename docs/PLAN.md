@@ -407,6 +407,38 @@ Done 2026-09-24 (CPU, tiny fixtures, all five families):
    * Timing is secondary here (4 concurrent requests, run 0 includes the
      load); not a speed claim.
 
+## OPEN THREADS (2026-09-28, after the session crash) -- read first
+
+Merged on `cluster` this sprint (not pushed): byte-based pipeline split; ring cache-trim
+wait; test-isolated XDG cache; wired limit read without mlx; Settings audit; request
+reporting; MCP load/unload across machines; auto-recovery (survives page restarts); idle
+bell/park; Metal OOM guard (admission priced with checkpoint copies + other processes'
+GPU memory + context-scaled margin); exo parity (3 head bugs, unwrap/restage); ring-wide
+live settings; join waits for old ranks + armed jaccl timeout; 8-bit KV for every family;
+cluster parity (images on a split, MTP head on rank 0 only, prefill send overlap);
+compaction (docs/design/compaction.md); instance ids; UI (instances card, swap band,
+model_type + VISION tag, new chat on Send).
+
+Still to prove live (M3 is Noah's now -- use the M4):
+- OOM guard: 3 rounds of 4 growing chats to 110k tokens, must never abort Metal (M4,
+  Flash-Next VQ 4.4, scripts in ~/kl-oomproof on the M4). Before the fix: 3/3 crashed.
+- Compaction on a real model: tokens before/after, summary quality, cache hit.
+- 8-bit KV vs bf16 on a real model (output agreement, memory per 1k tokens, speed).
+- Cluster parity on the pair (needs the M3): images on a split, MTP drafting from rank 0,
+  rank 1 memory smaller, prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off.
+
+Queued work:
+- Prefill cost: fewer checkpoint deep copies (share or keep only the last), and prefill
+  a long prompt across several steps so the guard can act and decode rows keep going.
+- SMB loads: cold reads vary 3x because the M3 serves the SSD while loading its own
+  models; timing is now logged -- read it on the next slow load.
+- A cluster job's tensor placement does not count the vision tower yet.
+- Compaction phase 3 (dropped: advocacy/header); Scout adopting knurlogic's compaction.
+- Scout changeover list (after Noah's own review).
+- Local-model sub-agents: two long runs failed (Flash refused by the ring memory race;
+  35B timed out after 1h45 on a multi-file task). Give them short, contained jobs only.
+- Release: Fable review, merge the stack into main, v0.1.0 -- only after the above.
+
 ## NEXT (set 2026-09-26, third compaction)
 
 Branches (clean as you go): vision-integration (241bc6d, Fable-reviewed,
