@@ -49,8 +49,16 @@ def to_openai(req: dict) -> dict:
     if system:
         out_msgs.append({"role": "system", "content": _text_of(system)})
 
+    # A system message inside `messages` (Claude Code sends one mid-way) is
+    # folded into the leading one: chat templates such as Qwen's refuse a
+    # system message anywhere but first.
+    late_system = []
     for m in req.get("messages", []):
         role, content = m.get("role"), m.get("content")
+        if role == "system":
+            late_system.append(content if isinstance(content, str)
+                               else _text_of(content))
+            continue
         if isinstance(content, str):
             out_msgs.append({"role": role, "content": content})
             continue
@@ -98,6 +106,13 @@ def to_openai(req: dict) -> dict:
             out_msgs.append({"role": role, "content": parts})
         elif text or not results:
             out_msgs.append({"role": role, "content": text})
+
+    late = "\n\n".join(t for t in late_system if t)
+    if late:
+        if out_msgs and out_msgs[0]["role"] == "system":
+            out_msgs[0]["content"] = out_msgs[0]["content"] + "\n\n" + late
+        else:
+            out_msgs.insert(0, {"role": "system", "content": late})
 
     body = {
         "model": req.get("model", "local"),
