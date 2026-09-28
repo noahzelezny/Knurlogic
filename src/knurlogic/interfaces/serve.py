@@ -37,6 +37,65 @@ from knurlogic.tuning.resolve import resolve
 GIB = 1 << 30
 
 
+#: prompt-cache entries one conversation keeps: its system prompt, turns
+#: and segment checkpoints (on a hybrid model each checkpoint is a whole
+#: entry). A server-wide cap of 10 evicted four agents' entries on a
+#: hybrid model (2026-09-27): each agent needs its own
+PROMPT_CACHE_PER_AGENT = 10
+#: a ring counts at most this many concurrent agents (its decode
+#: concurrency, which every rank has from the same argv)
+PROMPT_CACHE_AGENTS_MAX = 8
+#: one machine: the entry cap under the byte cap -- bytes decide
+PROMPT_CACHE_ENTRIES_BYTE_SIZED = 256
+#: one machine: the share of the headroom (working set less the model)
+#: the prompt cache may hold; the memory guard takes it back before a
+#: request's own KV would not fit
+PROMPT_CACHE_HEADROOM_SHARE = 0.5
+
+
+def prompt_cache_policy(serving: dict, world: int, working_set: int,
+                        holds: int) -> tuple:
+    """(size, bytes or None, why) of the prompt cache.
+
+    One machine: sized by bytes -- PROMPT_CACHE_HEADROOM_SHARE of what the
+    working set leaves beside the model -- with a generous entry cap, so
+    it is memory, not a count, that evicts. A ring: count-based by design
+    (every rank must evict the same entries; bytes are each rank's own),
+    so the count is PROMPT_CACHE_PER_AGENT per concurrent agent. An
+    explicit --prompt-cache-size / --prompt-cache-gib wins."""
+    size = int(serving.get("prompt_cache_size") or 0)
+    cap = serving.get("prompt_cache_bytes")
+    dc = int(serving.get("decode_concurrency") or 32)
+    agents = max(1, min(dc, PROMPT_CACHE_AGENTS_MAX))
+    per = (f"{PROMPT_CACHE_PER_AGENT} per agent x {agents} concurrent "
+           f"agents (decode concurrency {dc}, at most "
+           f"{PROMPT_CACHE_AGENTS_MAX} counted)")
+    if world > 1:
+        if size:
+            return size, None, (f"{size} entries (--prompt-cache-size); a "
+                                f"ring's prompt cache is count-based")
+        n = PROMPT_CACHE_PER_AGENT * agents
+        return n, None, (f"{n} entries: {per}; a ring's prompt cache is "
+                         f"count-based -- every rank evicts the same "
+                         f"entries -- and the memory guard still takes "
+                         f"entries back first")
+    if cap:
+        n = size or PROMPT_CACHE_ENTRIES_BYTE_SIZED
+        return n, int(cap), (f"{int(cap) / GIB:.1f} GiB "
+                             f"(--prompt-cache-gib), up to {n} entries")
+    room = int(working_set or 0) - int(holds or 0)
+    if room > 0:
+        b = int(room * PROMPT_CACHE_HEADROOM_SHARE)
+        n = size or PROMPT_CACHE_ENTRIES_BYTE_SIZED
+        return n, b, (f"{b / GIB:.1f} GiB ({PROMPT_CACHE_HEADROOM_SHARE:.0%}"
+                      f" of the {room / GIB:.1f} GiB the working set leaves "
+                      f"beside the model), up to {n} entries: sized by "
+                      f"memory, not a count")
+    n = size or PROMPT_CACHE_PER_AGENT * agents
+    return n, None, (f"{n} entries" + ("" if size else f": {per}")
+                     + "; the working set is unknown, so not sized by bytes")
+
+
 def pipeline_share_bytes(per: list, other: int, rank: int, world: int,
                          counts=None) -> int:
     """What pipeline rank `rank` holds: its layers (rank 0 the LAST
@@ -278,6 +337,15 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         if snap["wired"].get("known"):
             text += "\n\n" + wired.render(snap["wired"])
         return snap, text
+
+    serving = dict(serving or {})
+    pc_size, pc_bytes, pc_why = prompt_cache_policy(
+        serving, world, ws, share if share is not None else a.bytes_on_disk)
+    serving["prompt_cache_size"] = pc_size
+    serving.pop("prompt_cache_bytes", None)
+    if pc_bytes:
+        serving["prompt_cache_bytes"] = pc_bytes
+    print(f"prompt cache  {pc_why}")
 
     if world > 1 and int(ring["rank"]) > 0:
         # a follower: no HTTP, no scheduler -- rank 0's plans, until it stops
@@ -539,15 +607,18 @@ def main(argv=None) -> int:
                         "beat it.")
     p.add_argument("--decode-concurrency", type=int, default=32,
                    help="most requests decoding at once (the batch width)")
-    p.add_argument("--prompt-cache-size", type=int, default=10,
+    p.add_argument("--prompt-cache-size", type=int, default=0,
                    help="prompt-cache entries kept (whole prompts and "
-                        "segment checkpoints)")
+                        "segment checkpoints). Default: sized by memory on "
+                        "one machine, 10 per concurrent agent on a ring")
     p.add_argument("--context-length", type=int, default=0,
                    help="the longest prompt + answer a request may use, in "
                         "tokens (KNURLOGIC_CONTEXT_LENGTH): a cap, nothing "
                         "reserved. Default: the model's own window")
     p.add_argument("--prompt-cache-gib", type=float, default=0.0,
-                   help="cap the prompt cache's memory; 0 = entries only")
+                   help="cap the prompt cache's memory. Default: half of "
+                        "what the working set leaves beside the model (one "
+                        "machine); a ring's cache is count-based")
     p.add_argument("--allow-origin", action="append", default=[],
                    metavar="URL",
                    help="a web page origin (e.g. http://localhost:3000) "
