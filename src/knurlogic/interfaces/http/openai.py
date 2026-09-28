@@ -254,16 +254,22 @@ class Reply:
                 msg["reasoning"] = msg["reasoning_content"] = reasoning
             if calls:
                 msg["tool_calls"] = [_call(c) for c in calls]
+            if self.ctx.get("compaction") is not None:
+                msg["compaction"] = self.ctx["compaction"]
             choice["message"] = msg
         else:
             choice["text"] = content
         if lps:
             choice["logprobs"] = {"content": [self._lp(x) for x in lps]}
-        return {"id": self.id, "object": ("chat.completion"
-                                          if self.ctx["chat"]
-                                          else "text_completion"),
-                "created": self.created, "model": self.model,
-                "choices": [choice], "usage": self._usage(usage)}
+        out = {"id": self.id, "object": ("chat.completion"
+                                         if self.ctx["chat"]
+                                         else "text_completion"),
+               "created": self.created, "model": self.model,
+               "choices": [choice], "usage": self._usage(usage)}
+        if self.ctx.get("applied"):
+            out["context_management"] = {"applied_edits":
+                                         self.ctx["applied"]}
+        return out
 
     # ----------------------------------------------------------- stream
 
@@ -274,6 +280,17 @@ class Reply:
             "text_completion"
         if self.ctx["chat"]:
             yield self._sse(obj, {"role": "assistant", "content": ""}, None)
+            # what context management did, before the answer: the summary
+            # as its own delta (a client keeps it and resends it), the
+            # edits applied beside it
+            if self.ctx.get("compaction") is not None:
+                yield self._sse(obj, {"compaction": self.ctx["compaction"]},
+                                None)
+            if self.ctx.get("applied"):
+                yield _data({"id": self.id, "object": obj,
+                             "created": self.created, "model": self.model,
+                             "choices": [], "context_management": {
+                                 "applied_edits": self.ctx["applied"]}})
         ev = first
         while True:
             kind, val = ev
@@ -334,6 +351,15 @@ class Reply:
             u.setdefault("knurlogic", {})["thinking"] = self.ctx["thinking"]
         if self.ctx.get("sampling") is not None:
             u.setdefault("knurlogic", {})["sampling"] = self.ctx["sampling"]
+        # how full the context is, so a harness can decide when to ask
+        # for compaction: this prompt against the model's window
+        if self.ctx["chat"] and "prompt_tokens" in u:
+            u.setdefault("knurlogic", {})["context"] = {
+                "tokens": int(u["prompt_tokens"]),
+                "window": int(self.ctx.get("window") or 0)}
+        if self.ctx.get("iteration"):
+            u.setdefault("knurlogic", {})["compaction"] = \
+                self.ctx["iteration"]
         return u
 
 
