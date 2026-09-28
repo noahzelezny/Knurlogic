@@ -215,10 +215,17 @@ def _knurlogic(base: str) -> list:
     if not a:
         return []
     m = d.get("memory") or {}
+    # The full model_type (Artifact.load prefers it over the nested TEXT
+    # config's), plus a VISION tag only when this instance actually serves
+    # images -- a ring with vision=False gets neither tag, since claiming
+    # text-only would be as wrong as calling it "_text".
+    detail = a.get("model_type") or ""
+    if bool((d.get("vision") or {}).get("served")):
+        detail = f"{detail} · VISION" if detail else "VISION"
     return [Resident(
         runtime="knurlogic", name=a.get("name") or "?", where=base,
         bytes_resident=int(m.get("active_bytes") or 0),
-        detail=a.get("model_type") or "", can_unload=True,
+        detail=detail, can_unload=True,
         ident=a.get("path") or a.get("name") or "",
         requests=d.get("requests") if isinstance(d.get("requests"), dict)
         else None)]
