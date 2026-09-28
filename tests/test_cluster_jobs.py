@@ -1300,3 +1300,13 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
         page_b.kill()
         srv.shutdown()
         C.ENDED.clear()
+
+
+def test_a_stopped_job_never_claims_the_port_the_next_job_serves_on(monkeypatch):
+    # the M4 reused :8080 and its card said "stopped" for the job then loading
+    monkeypatch.setattr(C, "jobs_document", lambda: [
+        {"job": "new", "phase": "ready", "port": 8080, "split": "pipeline"},
+        {"job": "old", "phase": "stopped", "port": 8080}])
+    doc = ui.with_jobs({"resident": [
+        {"runtime": "knurlogic", "where": "http://10.0.1.2:8080"}]})
+    assert doc["resident"][0]["cluster"]["job"] == "new"
