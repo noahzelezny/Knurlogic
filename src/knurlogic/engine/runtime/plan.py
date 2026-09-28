@@ -24,7 +24,8 @@ Ops, applied in order (every field explicit):
             prompt-cache hit and the lean decision), hit (tokens the prompt
             cache supplied: rank 0's fetch, repeated and checked), max_tokens,
             sampling (make_distribution kwargs + an assigned seed),
-            penalties, initial (the control machine's start state)
+            penalties, initial (the control machine's start state),
+            images, refs (a prompt with images: `key_to_wire`; [] for text)
     remove  uids
     insert  uid, event ("checkpoint" | "finished"), kind: store this
             rank's cache from that event of the last step in the prompt cache
@@ -38,6 +39,15 @@ Ops, applied in order (every field explicit):
 
 `tokens` (optional): [uid, token] for every row rank 0's batch holds at
 the start of this step, in batch order.
+
+A prompt with images is a cache KEY (engine/vision/key.py): ids with a
+sentinel ("img", sha, proc_hash, k) per image token. JSON has no tuples,
+and a follower's prompt cache must be keyed exactly as rank 0's, so the
+admit op carries the key as ids (-1 at every image token), `images`
+[[start, end, ref, k0]] per image run and `refs` [[sha, proc_hash,
+n_tokens, grid_thw]] per image -- what a follower needs to rebuild the key
+and to compute positions. The image rows themselves never travel in the
+plan (they follow in the admission: pipeline.Coord.images).
 """
 
 from __future__ import annotations
@@ -51,7 +61,7 @@ OVER, STEP, LENGTH = range(CONTROL_LEN)
 OPS = ("admit", "remove", "insert", "pop", "reset", "stop", "park", "set")
 _FIELDS = {
     "admit": ("uid", "prompt", "segs", "hit", "max_tokens", "sampling",
-              "penalties", "initial"),
+              "penalties", "initial", "images", "refs"),
     "remove": ("uids",),
     "insert": ("uid", "event", "kind"),
     "pop": ("n",),
@@ -126,12 +136,70 @@ def check(plan) -> None:
                 raise PlanError(f"admit hit {op['hit']} outside the prompt")
             if sum(len(s) for s in op["segs"]) != len(op["prompt"]) - op["hit"]:
                 raise PlanError("admit segs are not the prompt after the hit")
+            _images(op, len(op["prompt"]))
     toks = plan.get("tokens")
     if toks is not None:
         if not isinstance(toks, list) or not all(
                 isinstance(t, list) and len(t) == 2 for t in toks):
             raise PlanError("tokens is a list of [uid, token]")
         _ints([x for t in toks for x in t], "tokens")
+
+
+def _images(op: dict, n: int) -> None:
+    refs, spans = op["refs"], op["images"]
+    if not isinstance(refs, list) or not all(
+            isinstance(r, list) and len(r) == 4 and isinstance(r[0], str)
+            and isinstance(r[1], str) and isinstance(r[2], int)
+            and (r[3] is None or (isinstance(r[3], list) and len(r[3]) == 3))
+            for r in refs):
+        raise PlanError("admit refs is a list of [sha, proc_hash, n_tokens, "
+                        "grid_thw or null]")
+    if not isinstance(spans, list) or not all(
+            isinstance(x, list) and len(x) == 4 for x in spans):
+        raise PlanError("admit images is a list of [start, end, ref, k0]")
+    _ints([v for x in spans for v in x], "admit images")
+    for a, b, r, k0 in spans:
+        if not (0 <= a < b <= n and 0 <= r < len(refs) and k0 >= 0
+                and k0 + (b - a) <= refs[r][2]):
+            raise PlanError(f"admit image run {[a, b, r, k0]} does not fit "
+                            f"the prompt ({n}) or its image")
+
+
+def key_to_wire(key: list, ref_of) -> tuple:
+    """A cache key -> (ids, images, refs) for the admit op. `ref_of(sha,
+    proc_hash)` -> (n_tokens, grid_thw or None). A key with no image:
+    (the key, [], [])."""
+    from knurlogic.engine.vision.key import image_spans, is_sentinel
+    spans = image_spans(key)
+    if not spans:
+        return list(key), [], []
+    ids = [-1 if is_sentinel(x) else int(x) for x in key]
+    refs: List[list] = []
+    at: dict = {}
+    images = []
+    for sp in spans:
+        k = (sp.sha, sp.proc_hash)
+        if k not in at:
+            n, grid = ref_of(*k)
+            at[k] = len(refs)
+            refs.append([sp.sha, sp.proc_hash, int(n),
+                         list(map(int, grid)) if grid else None])
+        images.append([sp.start, sp.end, at[k], sp.k0])
+    return ids, images, refs
+
+
+def key_from_wire(ids: list, images: list, refs: list) -> list:
+    """The admit op's (prompt, images, refs) -> the key rank 0 holds."""
+    from knurlogic.engine.vision.key import TAG
+    key = list(ids)
+    for a, b, r, k0 in images:
+        sha, ph = refs[r][0], refs[r][1]
+        for j in range(a, b):
+            key[j] = (TAG, sha, ph, k0 + j - a)
+    if any(type(x) is int and x < 0 for x in key):
+        raise PlanError("an image token in the admit prompt is not in any "
+                        "image run")
+    return key
 
 
 def _ints(xs, what: str) -> None:
