@@ -82,11 +82,17 @@ def ensure(body: dict) -> dict:
         raise ApiError(e.status, str(e), param="model", code=e.code or None)
 
 
-def residency(host, sched) -> dict:
+def residency(host, sched, port: int = 0) -> dict:
+    from knurlogic.interfaces import recovery
     from knurlogic.machine import identity
     st = host.status()
     if st["state"] == "empty":
         return {"object": "list", "data": []}
+    try:
+        rec = recovery.served_view(port, st["state"] == "ready") \
+            if port else None
+    except Exception:
+        rec = None
     row = {"model": Path(st["model"] or "").name,
            "capabilities": _capabilities() if st["state"] == "ready"
            else ["text"],
@@ -94,7 +100,10 @@ def residency(host, sched) -> dict:
            "nodes": [identity.identity().get("name") or "local"],
            "state": st["state"],
            "rows": sched.width,
-           "requests": sched.requests()}
+           "requests": sched.requests(),
+           # relaunched by its page after dying unasked (interfaces/
+           # recovery.py): attempts, last_reason, last_at, next_at, state
+           "recovery": rec}
     if st.get("error"):
         row["error"] = st["error"]
     return {"object": "list", "data": [row]}

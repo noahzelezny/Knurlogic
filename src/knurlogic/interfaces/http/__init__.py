@@ -177,7 +177,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
               allow_origins=tuple(settings.get("allow_origins") or ()),
               allow_hosts=tuple(settings.get("allow_hosts") or ()),
               concurrency=lambda: scout.concurrency(sched),
-              residency=lambda: scout.residency(mh, sched),
+              residency=lambda: scout.residency(mh, sched, port),
               ensure=scout.ensure)
     if host == "cluster":
         # every address bound, only loopback and Thunderbolt answered --
