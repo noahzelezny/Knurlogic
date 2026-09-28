@@ -40,7 +40,10 @@ through the verify path that sampling would have refused.
 
 Across machines (a pipeline split, engine/runtime/pipeline.py) every rank
 runs this same loop; `coord` carries rank 0's regime and drafts (B1) and
-its verdicts (B2) to the others, one fixed broadcast each per step.
+its verdicts (B2) to the others, one fixed broadcast each per step. Only
+rank 0 holds the head: a follower's batch has `head=None` and mirrors
+rank 0's drafting rows (RowParams.mirror), running the verify and replay
+forwards with the tokens B1 and B2 hand it.
 """
 from __future__ import annotations
 
@@ -111,6 +114,11 @@ class RowParams:
     drafts: bool = True
     #: the request's own random stream (a seed), or None for the global one
     keys: Optional[Keys] = None
+    #: a pipeline follower's drafting row: rank 0 drafts it with the head
+    #: this rank does not hold. The row is prefilled and batched as a
+    #: drafting row (same checkpoints, same verify steps); nothing here
+    #: seeds or runs a head for it.
+    mirror: bool = False
 
 
 @dataclass
@@ -286,6 +294,10 @@ def admit(
         cache = model.make_cache()
         start_pos = 0
     drafts = params.drafts and head is not None
+    # a drafting row on this rank's side of the batch: with a head, or
+    # mirrored for rank 0's (a pipeline follower). Its checkpoints move
+    # with it, so they must be the same on every rank.
+    row_drafts = drafts or (params.drafts and params.mirror)
     dcache = hcache if hcache is not None else make_draft_cache()
     if drafts and start_pos > 0:
         hoff = position(dcache) or 0
@@ -315,7 +327,7 @@ def admit(
     seeded = start_pos          # the head is seeded over [start_pos, seeded)
     cps = sorted(c for c in set(checkpoints or ())
                  if start_pos < c <= last and _inside(c, spans) is None
-                 and (not drafts or c - start_pos >= 2))
+                 and (not row_drafts or c - start_pos >= 2))
     if on_checkpoint is None:
         cps = []
     ctx = prefill_ctx() if prefill_ctx is not None else contextlib.nullcontext()
@@ -385,7 +397,7 @@ def admit(
 
     return Row(
         uid=uid, params=params, cache=cache, hcache=dcache, t1=t1,
-        row_t1=row_t1, draft_row=draft_row, n_prompt=n, drafts=drafts,
+        row_t1=row_t1, draft_row=draft_row, n_prompt=n, drafts=row_drafts,
         rope_delta=int(rope_delta), mrope=bool(mrope),
     )
 
@@ -678,8 +690,10 @@ class MTPBatch:
         assert self.t1 is not None and self.row_t1 is not None
         drafting = self.drafting_pays(B)
         pre = None
-        if self.coord is not None and self.head is not None:
-            # B1, every step with a head: rank 0's regime and drafts
+        if self.coord is not None and (self.head is not None
+                                       or self.coord.head):
+            # B1, every step while rank 0 holds a head: rank 0's regime and
+            # drafts (a follower holds none and asks)
             if self.coord.leader and drafting:
                 pre = self._drafts(B)
             drafting, d2 = self.coord.b1(drafting, pre[1] if pre else None, B)
@@ -695,7 +709,10 @@ class MTPBatch:
     def _live(self, B: int) -> List[bool]:
         # A row drafts this step iff it is a drafting row AND the head has
         # produced a draft for it (the batch may hold only non-drafting rows).
-        return [self.drafts[i] and self.draft_row is not None
+        # A follower has no head and no drafts of its own: its drafting rows
+        # are live on rank 0's word (B1 said drafting).
+        return [self.drafts[i] and (self.draft_row is not None
+                                    or self.head is None)
                 for i in range(B)]
 
     def _drafts(self, B: int):
