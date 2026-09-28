@@ -275,3 +275,24 @@ def test_removing_a_row_frees_its_memory_now_not_at_the_next_step():
     mx.clear_cache()
     assert mx.get_active_memory() < before
     ex.close()
+
+
+@pytest.mark.parametrize("vision", [False, True])
+def test_a_headless_engine_says_why_and_names_vision_only_for_vision(
+        caplog, vision):
+    """A pipeline rank that dropped its head logged 'without a drafting
+    head (vision)' with no image anywhere (the M4 segfault of 2026-09-27
+    was first read as an image switching engines on one rank): the line
+    says why there is no head, and 'vision' only when it serves images."""
+    import logging
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    model, _head, _ = _tiny(512)
+    why = "not every rank of the pipeline bound a drafting head"
+    with caplog.at_level(logging.INFO,
+                         logger="knurlogic.engine.mtp.batch_generator"):
+        MTPBatchGenerator(model, None, vision=object() if vision else None,
+                          why=why, prefill_step_size=16)
+    line = next(r.getMessage() for r in caplog.records
+                if "drafting head" in r.getMessage())
+    assert why in line
+    assert ("vision" in line) == vision
