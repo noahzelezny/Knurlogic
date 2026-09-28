@@ -60,7 +60,9 @@ def test_shares_are_deterministic_and_ties_go_to_the_lower_rank():
     per = [3, 1, 4, 1, 5, 9, 2, 6, 5]
     a = R.pipeline_shares(per, _ranks(14, 14))
     assert a == R.pipeline_shares(list(per), _ranks(14, 14))
-    assert a["layers"] == [5, 4]                        # 4.5 : 4.5
+    # by bytes (36, equal ranks): rank 1 takes 3+1+4+1+5 = 14 (the 9 would
+    # make it 23, further from 18); rank 0 the other 22
+    assert a["layers"] == [4, 5]
     three = R.pipeline_shares([1] * 10, _ranks(5, 5, 5))
     assert three["layers"] == [4, 3, 3]
     assert three["bounds"] == [(6, 10), (3, 6), (0, 3)]
@@ -239,3 +241,13 @@ def test_a_row_failing_on_rank_0_only_fails_that_row(tmp_path, split, fail):
     lens = [len(t) for t in d["split"]]
     assert lens[0] == lens[2] == 30, lens
     assert lens[1] < 30, lens
+
+
+def test_a_heavy_first_layer_is_balanced_by_bytes_not_count():
+    # Qwen3.8 Flash: layer 1 carries a 42 GiB n-gram embedding. Counted, the
+    # smaller M3 took 19 layers = 63.5 GiB and fit with 13 GiB to spare while
+    # the M4 kept 70; by bytes each rank fills about the same fraction.
+    per = [0.5 * GIB, 42 * GIB] + [1.4 * GIB] * 46
+    s = R.pipeline_shares(per, _ranks(120, 84))
+    fill = [s["bytes"][i] / (w * GIB) for i, w in enumerate((120, 84))]
+    assert abs(fill[0] - fill[1]) < 0.15, s["reason"]
