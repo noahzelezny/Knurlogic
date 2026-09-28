@@ -271,6 +271,8 @@ class Scheduler:
         #: set by abort(): every request from then on gets this error
         self._aborted: Optional[BaseException] = None
         self._wake = threading.Event()
+        #: live knobs rank 0 applied, for the other ranks (share_live)
+        self._sets: "queue.Queue" = queue.Queue()
         self._thread = threading.Thread(target=self._run, daemon=True,
                                         name="knurlogic-scheduler")
 
@@ -325,6 +327,28 @@ class Scheduler:
 
     def unload(self, *, force: bool = True) -> "Command":
         return self._command(Command("unload", None, force))
+
+    def share_live(self, applied: dict) -> None:
+        """Knobs this server just applied live (engine/serve.apply_live):
+        on a ring, the ones that act on a rank's own engine (plan.SETS) go
+        to every other rank as `set` ops. Journaled on the scheduler thread
+        (the journal is that thread's); an idle, parked ring is rung to
+        take them (Ring.park)."""
+        if self.tensor is None:
+            return
+        from .plan import SETS
+        for k, v in applied.items():
+            if k in SETS:
+                self._sets.put((k, str(v)))
+        self._wake.set()
+
+    def _journal_sets(self) -> None:
+        while True:
+            try:
+                k, v = self._sets.get_nowait()
+            except queue.Empty:
+                return
+            self.tensor.journal.add("set", name=k, value=v)
 
     def _command(self, cmd: "Command") -> "Command":
         self._commands.put(cmd)
@@ -424,6 +448,8 @@ class Scheduler:
 
     def _tick(self) -> None:
         self._do_commands()
+        if self.tensor is not None:
+            self._journal_sets()
         self._take_jobs()
         room = self.host.state == "ready" and self._room_to_admit()
         if room:
