@@ -117,15 +117,25 @@ class ModelHost:
             # one ring on one machine take it in turn, and a rank holding
             # it inside a collective waits forever on a sibling waiting for
             # the lock. Split lazily (no weights read) before the lock.
+            t0 = time.monotonic()
             lazy = self._split_lazily(path) if self.shard else None
             with loadlock.model_load(path, "runtime.host",
                                      wait_s=self.load_wait_s):
+                t1 = time.monotonic()
                 self.model, self.tokenizer = self._weights(path, lazy)
+                t2 = time.monotonic()
                 self._quantize_kv()
                 self._cross_chip()
                 self.model_key = (path, None, None)
                 self._bind_vision(path)
                 self._bind_head(path)
+                t3 = time.monotonic()
+            # each step's time, so a slow load says which step was slow
+            # (the read itself, the lock, or vision and the drafting head)
+            gib = _active_gib()
+            logger.info("loaded %s: weights %.1f GiB in %.1fs (%.2f GiB/s), "
+                        "lock + split %.1fs, vision + head %.1fs", path, gib,
+                        t2 - t1, gib / max(t2 - t1, 1e-3), t1 - t0, t3 - t2)
             if self.head_agree is not None:
                 bound = bool(state.DRAFT.get("on"))
                 if not self.head_agree(bound) and bound:
@@ -240,3 +250,11 @@ class ModelHost:
             except Exception:
                 pass
         return out
+
+
+def _active_gib() -> float:
+    try:
+        import mlx.core as mx
+        return mx.get_active_memory() / (1 << 30)
+    except Exception:
+        return 0.0
