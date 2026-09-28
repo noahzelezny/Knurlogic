@@ -3219,7 +3219,10 @@ window.curChatPub=()=>curChat();
 const SAMP=[['ctemp','temperature'],['ctopp','top_p'],['ctopk','top_k']];
 let SDEFS;                      // the shown model's defaults per field; undefined unknown
 function sampDef(d,key){
-  return d==null ? '' : d[key]!=null ? String(d[key]) : key==='temperature' ? '0' : '';
+  // servers name temperature `temp` (mlx-lm's sampler); a model that says
+  // nothing gets nothing sent, never a made-up 0 (that is greedy decoding)
+  const v=d==null ? null : key==='temperature' ? (d.temperature ?? d.temp) : d[key];
+  return v!=null ? String(v) : '';
 }
 function sampling(){
   const o={};
