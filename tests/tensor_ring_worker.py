@@ -49,8 +49,17 @@ def main(out_path):
     link = T.init("ring")
     ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]
     then = [31, 104, 331, 32, 439, 214]
-    whole = run(build(), ids, then) if link.rank == 0 else None
-    model = build()
+    import os
+    from knurlogic.engine import kvquant
+    bits = kvquant.parse_bits(os.environ.get("KNURLOGIC_KV_BITS"))
+
+    def built():
+        m = build()
+        if bits:
+            assert kvquant.install(m, bits) > 0
+        return m
+    whole = run(built(), ids, then) if link.rank == 0 else None
+    model = built()
     T.shard(model, link.group)
     split = run(model, ids, then)
     link.barrier()

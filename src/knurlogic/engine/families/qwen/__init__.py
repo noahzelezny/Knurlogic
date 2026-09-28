@@ -39,7 +39,7 @@ _QWEN35_HEAD = dict(
 _QWEN35_KVQ = {"bits": [8, 6, 4],
                "why": "full-attention layers only (a quarter of the "
                       "layers); the deltanet state is not KV and stays "
-                      "bf16. Unmeasured on a real model"}
+                      "bf16. 8 is the recommendation"}
 
 MANIFEST = {
     "name": "qwen",
@@ -60,12 +60,15 @@ MANIFEST = {
         "qwen4_exp": {
             "model_types": ["qwen4_exp_text", "qwen4_exp"],
             # its attention cache is its own (_AttnCache/_BatchAttnCache:
-            # K/V plus the sparse indexer's keys and positions, rolled and
-            # filtered together); a quantized pair of those is not written
-            "kv_quant": {"refused": "Flash-Next's attention cache is its own "
-                                    "class (K/V plus the sparse indexer's "
-                                    "keys, moved together); no quantized "
-                                    "version of it exists yet"},
+            # K/V plus the sparse indexer's keys and positions, moved
+            # together); kvcache.py's subclasses store the K/V quantized and
+            # keep the indexer's keys exact
+            "kv_quant": {"bits": [8, 6, 4],
+                         "why": "full-attention K/V only; the QSA indexer's "
+                                "keys, the deltanet state and the PLE / "
+                                "n-gram slots stay bf16",
+                         "caches": {"_AttnCache": "knurlogic.engine.families."
+                                    "qwen.kvcache:QuantAttnCache"}},
             "head": dict(
                 names=["qwen4_exp"],
                 head="knurlogic.engine.families.qwen.heads.qwen4_exp:MTPHead",

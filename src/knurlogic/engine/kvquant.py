@@ -34,10 +34,13 @@ bf16, not less -- expect decode to be slower, not faster. Nothing here is
 measured on a real model yet.
 
 What is quantized: mlx-lm's plain `KVCache` (exact type) in the list
-`model.make_cache()` returns, and inside a CacheList. Not: recurrent state
-(ArraysCache: deltanet/SSM), sliding windows (RotatingKVCache, bounded by
-their window), a family's own cache classes (qwen4_exp's _AttnCache, GLM's
-mlx_vlm caches), or the MTP head's draft cache. Rollback and prompt-cache
+`model.make_cache()` returns, and inside a CacheList; and a family's own
+cache class its manifest names (`kv_quant.caches`): qwen4_exp's
+attention cache (K/V quantized, the sparse indexer's keys kept exact) and
+GLM's MLA latent (quantized; the DSA indexer's cache kept exact). Not:
+recurrent state (ArraysCache: deltanet/SSM), sliding windows
+(RotatingKVCache, bounded by their window), or the MTP head's draft cache
+(one layer; the draft stays bf16). Rollback and prompt-cache
 trims move the write index only, exactly as for bf16: the stale tail is
 overwritten by the next update.
 """
@@ -342,19 +345,54 @@ class BatchQuantKVCache(BatchKVCache):
         return _nbytes(self.keys) + _nbytes(self.values)
 
 
-def quantize_cache_list(caches: list, bits: int) -> tuple:
+def family_caches() -> dict:
+    """{(arch, class name): factory(bits)}: the family cache classes a
+    manifest says how to quantize (`kv_quant.caches`, "module:attr")."""
+    import importlib
+
+    from knurlogic.engine import families
+    out = {}
+    for arch, spec in families.build_maps()["kv_quant"].items():
+        for name, where in (spec.get("caches") or {}).items():
+            mod, attr = where.split(":")
+            out[(arch, name)] = (lambda m, a: lambda bits: getattr(
+                importlib.import_module(m), a)(bits))(mod, attr)
+    return out
+
+
+def _family_factory(c, table):
+    """The factory for `c`'s exact class: its name, and an arch that is a
+    component of its module (mlx_lm.models.qwen4_exp, or
+    ...glm5_next.language)."""
+    t = type(c)
+    parts = t.__module__.split(".")
+    for (arch, name), make in table.items():
+        if name == t.__name__ and arch in parts:
+            return make
+    return None
+
+
+def quantize_cache_list(caches: list, bits: int, table=None) -> tuple:
     """(new list, how many were quantized): each plain mlx-lm KVCache --
-    exact type, empty -- becomes a QuantKVCache; a CacheList's members the
-    same way. Everything else passes through untouched."""
+    exact type, empty -- becomes a QuantKVCache; a family cache class a
+    manifest names (qwen4_exp's attention cache, GLM's MLA latent) becomes
+    what its factory builds; a CacheList's members the same way (mlx-lm's
+    or the vendored one, by its `caches`). Everything else passes through
+    untouched."""
     n = 0
+    table = family_caches() if table is None else table
 
     def one(c):
         nonlocal n
         if type(c) is KVCache and c.keys is None:
             n += 1
             return QuantKVCache(bits)
-        if type(c) is CacheList:
-            return CacheList(*(one(s) for s in c.caches))
+        make = _family_factory(c, table)
+        if make is not None and getattr(c, "keys", None) is None:
+            n += 1
+            return make(bits)
+        if isinstance(getattr(c, "caches", None), (tuple, list)):
+            return type(c)(*(one(s) for s in c.caches))
         return c
 
     out = [one(c) for c in caches]
@@ -368,12 +406,13 @@ def install(model, bits: Optional[int]) -> int:
     if bits is None:
         return 0
     whole = model.make_cache
-    probe, n = quantize_cache_list(whole(), bits)
+    table = family_caches()
+    probe, n = quantize_cache_list(whole(), bits, table)
     if n == 0:
         return 0
 
     def make_cache():
-        return quantize_cache_list(whole(), bits)[0]
+        return quantize_cache_list(whole(), bits, table)[0]
 
     model.make_cache = make_cache
     return n

@@ -371,7 +371,8 @@ def kv_bytes_per_token(tc: dict, kv_bits=None) -> tuple:
     grows with context. Hybrid models (Qwen3.5's linear layers, gemma's
     sliding windows) are counted by their full-attention layers only.
     `kv_bits` (8/6/4, None = bf16): the attention K/V's stored precision
-    (KNURLOGIC_KV_BITS); an MLA latent is never quantized."""
+    (KNURLOGIC_KV_BITS); an MLA latent is stored at those bits too, its
+    rope key and DSA indexer key stay bf16."""
     layers = int(tc.get("num_hidden_layers") or 0)
     types = tc.get("layer_types")
     interval = tc.get("full_attention_interval")
@@ -381,12 +382,14 @@ def kv_bytes_per_token(tc: dict, kv_bits=None) -> tuple:
         # head -- counted as full attention it read 0 layers (GLM's are
         # not named full_attention), and as K,V per head it would be ~10x
         mla = sum(1 for t in types if t != "linear_attention")
-        width = (int(tc.get("kv_lora_rank") or 0)
-                 + int(tc.get("qk_rope_head_dim") or 0)
+        latent = int(tc.get("kv_lora_rank") or 0)
+        exact = (int(tc.get("qk_rope_head_dim") or 0)
                  + int(tc.get("index_head_dim") or 0))
-        per = mla * width * S.VISION_KV_DTYPE_BYTES
-        return per, (f"{mla} MLA layers of {len(types)} x {width} "
-                     f"(latent + rope + indexer key) x bf16")
+        el = S.kv_bytes_per_element(kv_bits)
+        per = int(mla * (latent * el + exact * S.VISION_KV_DTYPE_BYTES))
+        dt = "bf16" if kv_bits is None else f"{kv_bits}-bit"
+        return per, (f"{mla} MLA layers of {len(types)} x ({latent} latent "
+                     f"x {dt} + {exact} rope + indexer key x bf16)")
     if isinstance(types, list) and types:
         full = sum(1 for t in types if t == "full_attention")
         how = f"{full} full-attention of {len(types)} layers"

@@ -66,11 +66,23 @@ def test_lean_quantizes_kv_where_the_family_takes_it():
     assert preset_env(_art(), "lean")["KNURLOGIC_MTP"] == "off"
 
 
-def test_lean_on_a_family_that_refuses_kv_quant_stays_bf16_and_says_so():
+def test_lean_on_a_family_that_refuses_kv_quant_stays_bf16_and_says_so(
+        monkeypatch):
+    """Every served family takes 8 bits now; a family that declared none
+    (a new one, before its caches are wired) still falls back."""
+    monkeypatch.setattr(S, "kv_quant_for",
+                        lambda mt: ([], "no family declares it"))
     r = resolve(_art("glm5_next"), 96 * GIB, tune="lean")
     assert S.engine_settings(r.env)["kv_bits"] is None
     assert any("stays bf16" in n and "preset lean" in n for n in r.notes)
     assert preset_env(_art("glm5_next"), "lean")["KNURLOGIC_KV_BITS"] == "bf16"
+
+
+@pytest.mark.parametrize("mt", ["qwen3_5", "qwen4_exp_text", "glm5_next",
+                                "gemma4_text"])
+def test_lean_takes_8_bit_kv_on_every_family(mt):
+    r = resolve(_art(mt), 96 * GIB, tune="lean")
+    assert S.engine_settings(r.env)["kv_bits"] == 8
 
 
 def test_an_explicit_setting_beats_the_preset_and_is_reported():
