@@ -243,13 +243,24 @@ unchanged). `--split pipeline`.
   both ranks made the same B0/B1/B2/BA counts, the serving path
   (TensorExecutor + follow) streams the unsplit executor's tokens, and a
   prefix only the follower's trie could use is re-prefilled on both.
-- **Images**: refused (400) in this slice, as under tensor. The choice for
-  when they land: rank 0 runs the tower and SENDS the image rows'
-  embeddings to rank N-1 (its ring neighbour), with MTP off for image
-  rows. Running the tower on every rank would need the image bytes and the
-  store on every rank; the embeddings are needed at the first stage only,
-  but MRoPE positions are needed at every stage, so they go in the admit
-  op (they are pure in the key).
+- **Images** (tensor and pipeline): rank 0 ALONE holds the tower and the
+  image store, and encodes at tokenize as on one Mac; its bytes count on
+  rank 0 only (`pipeline_leader_bytes`). A follower binds the family
+  without a tower (`engine.vision.request.MirrorVision`). The admit op
+  carries the cache key as ids plus its image runs and refs
+  (`plan.key_to_wire`), so a follower's prompt cache is keyed by the same
+  sentinels and its positions (MRoPE) come from the refs. An admission
+  whose uncached span holds images ships the rows of those images from
+  rank 0 (`Coord.images`: one all_sum on the CPU, float32 -- exact for
+  bf16 rows); every rank embeds them with the family's own code (under
+  tensor every rank embeds; under pipeline only rank N-1's embedding is
+  used). Why rank 0 and not the embedding rank: the store, the pins and
+  the one tokenize are already there, the tower is loaded once, and only
+  the image rows travel (an image's features, not the prompt's
+  embeddings). Image rows do not draft (Phase A), on every rank alike.
+  Tested on 127.0.0.1 with the tiny vision qwen3_5, both splits: tokens
+  equal the unsplit engine's, and a second prompt whose prompt-cache hit
+  holds both images hits on the follower too.
 - **Memory guard**: as tensor (the tightest rank, via the control vector),
   but the peers' own over-limit is used as reported, refreshed every step:
   stages are unequal, so rank 0's memory says nothing about a peer's.
