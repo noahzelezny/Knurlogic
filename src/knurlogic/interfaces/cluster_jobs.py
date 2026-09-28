@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -64,7 +65,7 @@ PEER_PATHS = (PREPARE_PATH, START_PATH, STOP_PATH, SHAPE_PATH, JOB_PATH)
 SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
              "port", "working_set_gib", "bandwidth_gbs", "nodes", "versions",
-             "jaccl_timeout_ms", "sets", "chips")
+             "jaccl_timeout_ms", "sets", "chips", "cable", "cable_note")
 SPLITS = ("tensor", "pipeline")
 LINKS = ("ring", "jaccl")
 #: the prompt chunk every rank runs (ring-wide): 512, as everywhere
@@ -103,6 +104,19 @@ _START_LOCK = threading.Lock()
 _STOPPING: set = set()
 #: (job, peer id) -> when that peer's page last said it runs its rank
 _PEER_OK: dict = {}
+#: frozenset of two machine ids -> {subnet: why} -- a cable a rank's link
+#: init failed on this page session (the 192.0.2.x cable failing jaccl QP
+#: RTR with errno 96 after the M3 rebooted, while 198.51.100.x worked): tried
+#: last from then on
+BAD_CABLES: dict = {}
+#: how long the coordinator watches a job it launched for a link-init
+#: failure to move to the next cable on
+FAILOVER_S = 300.0
+FAILOVER_POLL_S = 2.0
+#: a rank's link init failing: its log line (mlx's jaccl / ring errors)
+LINK_INIT_RX = re.compile(
+    r"[^\n]*\[(?:jaccl|ring)\][^\n]*(?:RTR|RTS|queue pair|connect|"
+    r"Connection)[^\n]*", re.I)
 
 
 # ------------------------------------------------------------ this machine
@@ -218,19 +232,53 @@ def _subnet(ip: str) -> str:
     return ".".join(str(ip).split(".")[:3])
 
 
+def _pair(a: dict, b: dict) -> frozenset:
+    return frozenset((str(a.get("id") or a.get("name") or ""),
+                      str(b.get("id") or b.get("name") or "")))
+
+
+def _shared_subnets(a: dict, b: dict, rdma: bool = False) -> list:
+    """Every Thunderbolt /24 two machines both sit on, the order a launch
+    tries them: lowest first (so every page picks the same), except that a
+    cable whose link init failed between these two this session goes
+    last."""
+    def on(m):
+        act = set((m.get("rdma") or {}).get("active") or [])
+        return {_subnet(t["ip"]) for t in m.get("thunderbolt") or []
+                if t.get("ip") and (not rdma
+                                    or f"rdma_{t.get('iface')}" in act)}
+    bad = BAD_CABLES.get(_pair(a, b)) or {}
+    return sorted(on(a) & on(b), key=lambda n: (n in bad, n))
+
+
+def link_init_failure(text: str) -> str:
+    """The line of a rank's output saying its link init failed ("" if
+    none): jaccl's queue pair not reaching RTR, a ring that could not
+    connect."""
+    m = LINK_INIT_RX.search(text or "")
+    return m.group(0).strip()[:240] if m else ""
+
+
+def _log_tail(path, n: int = 64 << 10) -> str:
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(fh.tell() - n, 0))
+            return fh.read().decode("utf-8", "replace")
+    except (OSError, TypeError):
+        return ""
+
+
 def _shared_subnet(a: dict, b: dict, rdma: bool = False) -> str:
     """The one Thunderbolt /24 two machines both sit on ("" if none) --
     lowest first, so every page picks the same. Two Macs joined by two
     cables share two subnets; BOTH ends of a link must be on the same one
     (the M4's en2 at 198.51.100.2 and the M3's en4 at 192.0.2.1 are different
     cables, and a jaccl queue pair across them fails RTR with errno 60).
-    `rdma`: only a subnet whose interface has RDMA up on both ends."""
-    def on(m):
-        act = set((m.get("rdma") or {}).get("active") or [])
-        return {_subnet(t["ip"]) for t in m.get("thunderbolt") or []
-                if t.get("ip") and (not rdma
-                                    or f"rdma_{t.get('iface')}" in act)}
-    both = sorted(on(a) & on(b))
+    `rdma`: only a subnet whose interface has RDMA up on both ends. A
+    cable that failed link init between the two this session goes last
+    (`_shared_subnets`)."""
+    both = _shared_subnets(a, b, rdma)
     return both[0] if both else ""
 
 
@@ -239,7 +287,7 @@ def _on_subnet(m: dict, net: str, key: str = "ip"):
                  if t.get("ip") and _subnet(t["ip"]) == net), None)
 
 
-def _ring_ips(infos: list, rdma: bool = False) -> list:
+def _ring_ips(infos: list, rdma: bool = False, net: str = "") -> list:
     """Each rank's address on the ring, in rank order. Two machines: both
     on the subnet they share (`_shared_subnet`). More: a Thunderbolt
     address sharing a /24 with a neighbour's when there is one, else its
@@ -252,7 +300,7 @@ def _ring_ips(infos: list, rdma: bool = False) -> list:
             raise ValueError(f"{m['name']} has no Thunderbolt address: the "
                              f"ring runs over the Thunderbolt bridge")
     if n == 2:
-        net = _shared_subnet(infos[0], infos[1], rdma) \
+        net = net or _shared_subnet(infos[0], infos[1], rdma) \
             or _shared_subnet(infos[0], infos[1])
         if net:
             return [_on_subnet(m, net) for m in infos]
@@ -264,13 +312,13 @@ def _ring_ips(infos: list, rdma: bool = False) -> list:
     return ips
 
 
-def _rdma_device(m: dict, peer: dict):
+def _rdma_device(m: dict, peer: dict, net: str = ""):
     """The rdma_<iface> device on `m` that reaches `peer`: the one on the
     Thunderbolt subnet both share with RDMA up at both ends (en4 at
     192.0.2.1 reaches 192.0.2.2) -- the same subnet from either side --,
     else None: a device on another subnet is another cable, never a
     fallback."""
-    net = _shared_subnet(m, peer, rdma=True)
+    net = net or _shared_subnet(m, peer, rdma=True)
     if net:
         return "rdma_" + str(_on_subnet(m, net, "iface"))
     return None
@@ -439,6 +487,10 @@ def check_spec(spec) -> str:
                     isinstance(v, str) and len(v) <= 64 for v in c.values())
                 for c in chips)):
         return "chips is [{name, arch}]"
+    for k, most in (("cable", 32), ("cable_note", 400)):
+        v = spec.get(k)
+        if v is not None and not (isinstance(v, str) and len(v) <= most):
+            return f"{k} is a short string"
     lay = spec.get("layers") or []
     if not isinstance(lay, list) or (lay and len(lay) != spec["world"]):
         return "layers is one count per rank"
@@ -887,6 +939,11 @@ def watch_once(now: float | None = None) -> list:
             continue
         why = _WATCH.verdict(job, recs, lambda pid, j=job: _alive(j, pid),
                              now=now) or peer_verdict(job, recs, now=now)
+        if why and " exited" in why:
+            line = next((x for x in (link_init_failure(_log_tail(
+                r.get("log"))) for r in recs) if x), "")
+            if line:
+                why = f"{why}: link init failed: {line}"[:300]
         if why:
             stop(job, reason=why)
             out.append((job, why))
@@ -1001,7 +1058,10 @@ def jobs_document() -> list:
                     "port": next((r.get("port") for r in recs
                                   if r.get("port")), None),
                     "artifact": Path(r0.get("artifact") or "").name,
-                    "phase": J.phase_of(job, recs)})
+                    "phase": J.phase_of(job, recs),
+                    **{k: (SPECS.get(job) or {}).get(k) for k in
+                       ("cable", "cable_note")
+                       if (SPECS.get(job) or {}).get(k)}})
     now = time.time()
     for job, e in list(ENDED.items()):
         if now - e["t"] > 600:
@@ -1081,11 +1141,22 @@ def _parallel(fn, items: list) -> list:
     return out
 
 
+CABLE_RX = re.compile(r"(\d{1,3}\.\d{1,3}\.\d{1,3})(?:\.(?:\d{1,3}|x|0/24))?")
+
+
 def launch(req: dict, *, me: dict, peers: list, local_info: dict,
-           ui_port: int, serve_port: int, post=None) -> dict:
+           ui_port: int, serve_port: int, post=None, follow=None,
+           tried: tuple = (), moved: dict | None = None) -> dict:
     """The coordinator: plan, prepare everywhere, start everywhere.
     `me`: this machine's identity; `peers`: the answering peers
-    (cluster/peers.Peer); `local_info`: this machine's cluster block."""
+    (cluster/peers.Peer); `local_info`: this machine's cluster block.
+
+    Two machines on more than one shared Thunderbolt cable: the job runs
+    on one cable's subnet (`req["cable"]` names it, else the first of
+    `_shared_subnets`), and unless it was named the coordinator follows
+    the job (`follow`, a thread by default): a rank whose link init fails
+    on that cable has the job relaunched on the next one, the cable
+    remembered as failing for the pair. `tried`/`moved`: that relaunch."""
     post = post or _post
     ids = req.get("nodes")
     if not isinstance(ids, list) or len(ids) < 2 or \
@@ -1156,7 +1227,42 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         return {"refused": f"cannot place it: {e}"}
     order = [next(m for m in infos if m["name"] == nm) for nm in plan["order"]]
     job = secrets.token_hex(8)
-    if link == "jaccl" and not _shared_subnet(order[0], order[1], rdma=True):
+    cable = req.get("cable")
+    net, note, nets = "", "", []
+    if world == 2:
+        nets = _shared_subnets(order[0], order[1], rdma=link == "jaccl")
+    if cable not in (None, ""):
+        c = CABLE_RX.fullmatch(str(cable).strip()) if isinstance(
+            cable, str) else None
+        if world != 2 or not c or c.group(1) not in nets:
+            return {"refused": f"cable {str(cable)[:40]!r}: a launch names "
+                               f"the Thunderbolt subnet both machines share"
+                               + (" with RDMA up at both ends"
+                                  if link == "jaccl" else "")
+                               + f" ({', '.join(nets) or 'none here'})",
+                    "placement": plan}
+        net, note = c.group(1), f"cable {c.group(1)}: named by the launch"
+    elif nets:
+        left = [n for n in nets if n not in tried]
+        if not left:
+            return {"refused": f"every shared Thunderbolt cable failed link "
+                               f"init: {', '.join(tried)}",
+                    "placement": plan}
+        net = left[0]
+        bad = BAD_CABLES.get(_pair(order[0], order[1])) or {}
+        if moved:
+            note = (f"cable {net}: moved from {moved['from']}, whose link "
+                    f"init failed ({moved['why']})")
+        elif bad and net != min(nets):
+            b = min(bad)
+            note = (f"cable {net}: {b} failed link init earlier this "
+                    f"session ({bad[b]})")
+        else:
+            note = f"cable {net}: the lowest shared Thunderbolt subnet"
+        rest = [n for n in left[1:]]
+        if rest:
+            note += f"; {rest[0]} next if link init fails"
+    if link == "jaccl" and not net:
         def up(m):
             return ", ".join((m.get("rdma") or {}).get("active") or []) \
                 or "none"
@@ -1167,7 +1273,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                            f"TCP ring, or bring RDMA up on the shared cable.",
                 "placement": plan}
     try:
-        ips = _ring_ips(order, rdma=link == "jaccl")
+        ips = _ring_ips(order, rdma=link == "jaccl", net=net)
     except ValueError as e:
         return {"refused": str(e), "placement": plan}
     try:
@@ -1177,8 +1283,8 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     hosts = [f"{ip}:{RING_PORT + slot * 20 + r}" for r, ip in enumerate(ips)]
     ibv, coord = None, ""
     if link == "jaccl":
-        a0 = _rdma_device(order[0], order[1])
-        a1 = _rdma_device(order[1], order[0])
+        a0 = _rdma_device(order[0], order[1], net)
+        a1 = _rdma_device(order[1], order[0], net)
         for m, d in ((order[0], a0), (order[1], a1)):
             if d is None:
                 return {"refused": f"{m['name']} has RDMA up on "
@@ -1207,7 +1313,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             TUNES else "balanced",
             "nodes": nodes, "versions": local_info.get("versions") or {},
             "jaccl_timeout_ms": J.JACCL_TIMEOUT_MS if link == "jaccl" else 0,
-            "sets": sets,
+            "sets": sets, "cable": net, "cable_note": note[:400],
             # each machine's chip and GPU architecture, rank order: the
             # ranks resolve KNURLOGIC_CROSS_CHIP=auto from it
             "chips": [{"name": m.get("chip") or m.get("name") or "",
@@ -1248,11 +1354,86 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         return {"error": "a rank did not start, so none run: " + "; ".join(
             f"{nm}: {(g or {}).get('error') or 'no answer'}"
             for nm, g in bad), "placement": plan}
+    if net and cable in (None, ""):
+        (follow or _follow_thread)(job, {
+            "req": req, "net": net, "tried": tuple(tried) + (net,),
+            "order": order, "link": link, "post": post,
+            "args": {"me": me, "peers": peers, "local_info": local_info,
+                     "ui_port": ui_port, "serve_port": serve_port,
+                     "post": post, "follow": follow}})
+    if note:
+        print(f"cluster job {job}: {note}", file=sys.stderr, flush=True)
     return {"job": job, "starting": ident, "placement": plan,
             "leader": plan["leader"], "port": port,
-            "machines": plan["order"],
+            "machines": plan["order"], "cable": net, "cable_note": note,
             "note": f"rank 0 on {plan['leader']} serves on port {port} once "
                     f"every rank has loaded; poll /loaded.json"}
+
+
+def _job_end(job: str, order: list, post):
+    """None while `job` runs (or loads) on every page, else why it ended:
+    this page's record, or a page of the job saying it ended there."""
+    e = ENDED.get(job)
+    if e:
+        return e.get("reason") or "stopped"
+    for m in order:
+        if m.get("page") is None:
+            continue
+        try:
+            doc = post(f"http://{m['page']}{JOB_PATH}", {"job": job})
+        except Exception:
+            continue
+        if isinstance(doc, dict) and doc.get("ended"):
+            return str(doc["ended"])
+    return None
+
+
+def failover(job: str, ctx: dict, reason: str):
+    """`job` ended for `reason`: when that is a rank's link init failing,
+    remember the cable as failing for the pair and relaunch on the next
+    one (-> the relaunch's answer); else None."""
+    line = link_init_failure(reason)
+    if not line:
+        return None
+    a, b = ctx["order"]
+    BAD_CABLES.setdefault(_pair(a, b), {})[ctx["net"]] = line
+    out = launch(ctx["req"], tried=ctx["tried"],
+                 moved={"from": ctx["net"], "why": line, "job": job},
+                 **ctx["args"])
+    to = out.get("job")
+    msg = (f"; relaunched on cable {out.get('cable')} as job {to}" if to
+           else f"; not relaunched: {out.get('refused') or out.get('error')}")
+    with _LOCK:
+        e = ENDED.setdefault(job, {"reason": reason, "t": time.time(),
+                                   "port": None, "machines": [
+                                       m.get("name") for m in ctx["order"]]})
+        e["reason"] = (str(e.get("reason") or reason) + msg)[:600]
+        if to:
+            e["relaunched"] = to
+    print(f"cluster job {job}: cable {ctx['net']} failed link init "
+          f"({line}){msg}", file=sys.stderr, flush=True)
+    return out
+
+
+def _follow(job: str, ctx: dict, clock=time.time, sleep=time.sleep):
+    """The coordinator's watch on a job it launched, until it is serving
+    (ready here) or FAILOVER_S: a link-init failure moves it to the next
+    cable (`failover`)."""
+    end = clock() + FAILOVER_S
+    while clock() < end:
+        sleep(FAILOVER_POLL_S)
+        why = _job_end(job, ctx["order"], ctx["post"])
+        if why is not None:
+            return failover(job, ctx, why)
+        recs = J.by_job().get(job)
+        if recs and J.phase_of(job, recs) == "ready":
+            return None
+    return None
+
+
+def _follow_thread(job: str, ctx: dict) -> None:
+    threading.Thread(target=_follow, args=(job, ctx), daemon=True,
+                     name=f"knurlogic-cluster-follow-{job}").start()
 
 
 def _abandon(job: str, order: list, post, reason: str = "refused") -> None:

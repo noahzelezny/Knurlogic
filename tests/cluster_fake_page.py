@@ -49,7 +49,8 @@ SHAPE = {"layer_bytes": [1 << 30] * 8, "other_bytes": 1 << 30,
 def fake_argv(path, spec, files):
     return [sys.executable, os.path.join(HERE, "cluster_fake_rank.py"),
             path, "knurlogic", "serve", "--rank", str(spec["rank"]),
-            "--job", spec["job"], "--port", str(spec.get("port") or 0)]
+            "--job", spec["job"], "--port", str(spec.get("port") or 0),
+            "--cable", str(spec.get("cable") or "")]
 
 
 if __name__ == "__main__":

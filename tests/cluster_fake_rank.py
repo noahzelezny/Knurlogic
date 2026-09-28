@@ -9,6 +9,7 @@ request is held in flight until the job is torn down, then 503s.
 
 argv: <artifact> knurlogic serve --rank R --job J [--port P] ...
 env:  FAKE_STEPS=1  advance the step counter (a healthy, busy ring)
+      FAKE_BAD_CABLE=<subnet>  rank 1 fails jaccl init on that cable
 """
 import json
 import os
@@ -28,6 +29,12 @@ def main():
     m = jobs.Marker(job, rank).start()
     jobs.CURRENT["marker"] = m
     time.sleep(0.2)
+    bad = os.environ.get("FAKE_BAD_CABLE")
+    if bad and rank == 1 and flag("--cable") == bad:
+        # what mlx's jaccl says when the queue pair cannot reach RTR
+        print("ValueError: [jaccl] Changing queue pair to RTR failed with "
+              "errno 96", flush=True)
+        sys.exit(1)
     jobs.progress(phase="loading")
     if rank != 0:
         jobs.after_load()

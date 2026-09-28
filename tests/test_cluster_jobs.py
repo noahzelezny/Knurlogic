@@ -1088,3 +1088,215 @@ def test_a_peer_page_that_stopped_the_job_has_this_one_stop_too(
     # A drops its ranks without propagating: B must notice by itself
     C.stop(p.job, reason="rank 0 on A exited", propagate=False, grace=1)
     assert wait(lambda: not alive(p.rank1["pid"]), 30)
+
+
+# --- the cable: two Thunderbolt cables, one failing link init ---------------
+# After the M3 rebooted, jaccl on the 192.0.2.x cable failed QP RTR (errno
+# 96) even in a bare two-rank mlx test while 198.51.100.x worked, and every
+# launch picked the lowest shared subnet.
+
+def two_cable_infos():
+    rd = {"available": True, "reason": "", "devices": ["rdma_en4",
+                                                       "rdma_en7"],
+          "active": ["rdma_en4", "rdma_en7"]}
+    a = {**info("Apple M4 Max", "127.0.0.1", rdma=rd), "thunderbolt": [
+        {"iface": "en4", "ip": "127.0.0.1"},
+        {"iface": "en7", "ip": "127.0.1.1"}]}
+    b = {**info("Apple M3 Ultra", "127.0.0.2", rdma=rd), "thunderbolt": [
+        {"iface": "en4", "ip": "127.0.0.2"},
+        {"iface": "en7", "ip": "127.0.1.2"}]}
+    return a, b
+
+
+def test_link_init_failure_reads_jaccl_and_ring_lines():
+    assert "RTR failed with errno 96" in C.link_init_failure(
+        "loading\nValueError: [jaccl] Changing queue pair to RTR failed "
+        "with errno 96\n")
+    assert C.link_init_failure("[ring] Couldn't connect (error: 61)")
+    assert C.link_init_failure("rank 1 exited") == ""
+
+
+def test_a_failing_cable_goes_last_for_that_pair_only(monkeypatch):
+    a, b = two_cable_infos()
+    a, b = {**a, "id": "aaaa"}, {**b, "id": "bbbb"}
+    monkeypatch.setattr(C, "BAD_CABLES", {})
+    assert C._shared_subnets(a, b, rdma=True) == ["127.0.0", "127.0.1"]
+    C.BAD_CABLES[C._pair(a, b)] = {"127.0.0": "RTR errno 96"}
+    assert C._shared_subnets(a, b, rdma=True) == ["127.0.1", "127.0.0"]
+    assert C._rdma_device(a, b) == "rdma_en7"
+    assert C._ring_ips([a, b]) == ["127.0.1.1", "127.0.1.2"]
+    c = {**b, "id": "cccc"}
+    assert C._shared_subnet(a, c) == "127.0.0"
+
+
+def jaccl_launch(monkeypatch, req, post=None, follow=None):
+    a, b = two_cable_infos()
+    monkeypatch.setattr(C, "_resolve", lambda i: "/m/x")
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
+    peer = SimpleNamespace(id="bbbb", name="B", host="127.0.0.2",
+                           key="127.0.0.2:8765", state="answering",
+                           link="thunderbolt", node={"cluster": b})
+    got = []
+
+    def fake_post(url, doc):
+        got.append((url, doc))
+        if url.endswith(C.PREPARE_PATH):
+            return {"ok": True}
+        if url.endswith(C.START_PATH):
+            return {"started": doc["job"]}
+        return {}
+    monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
+    monkeypatch.setattr(C, "start", lambda job: (200, {"started": job}))
+    out = C.launch({"action": "load", "identity": "abc",
+                    "nodes": ["aaaa", "bbbb"], "split": "pipeline",
+                    "link": "jaccl", **req},
+                   me={"id": "aaaa", "name": "A"}, peers=[peer],
+                   local_info=a, ui_port=1, serve_port=2,
+                   post=post or fake_post,
+                   follow=follow or (lambda job, ctx: None))
+    return out, got
+
+
+def test_a_launch_can_name_its_cable(cache, monkeypatch):
+    monkeypatch.setattr(C, "BAD_CABLES", {})
+    followed = []
+    out, got = jaccl_launch(monkeypatch, {"cable": "127.0.1.x"},
+                            follow=lambda j, c: followed.append(j))
+    assert out.get("job") and out["cable"] == "127.0.1", out
+    assert "named by the launch" in out["cable_note"]
+    spec = next(d for u, d in got if u.endswith(C.PREPARE_PATH))
+    assert spec["cable"] == "127.0.1"
+    assert spec["ibv_devices"] == [[None, "rdma_en7"], ["rdma_en7", None]]
+    assert spec["coordinator"].startswith("127.0.1.")
+    assert not followed                  # a named cable is never moved off
+    out, _ = jaccl_launch(monkeypatch, {"cable": "10.9.9"})
+    assert "refused" in out and "127.0.0, 127.0.1" in out["refused"]
+
+
+def test_the_default_is_the_lowest_cable_and_says_what_is_next(
+        cache, monkeypatch):
+    monkeypatch.setattr(C, "BAD_CABLES", {})
+    followed = []
+    out, _ = jaccl_launch(monkeypatch, {},
+                          follow=lambda j, c: followed.append((j, c)))
+    assert out["cable"] == "127.0.0"
+    assert "127.0.1 next if link init fails" in out["cable_note"]
+    assert followed and followed[0][1]["tried"] == ("127.0.0",)
+
+
+def test_a_link_init_failure_relaunches_on_the_next_cable(cache,
+                                                          monkeypatch):
+    monkeypatch.setattr(C, "BAD_CABLES", {})
+    ctxs = []
+    out, _ = jaccl_launch(monkeypatch, {},
+                          follow=lambda j, c: ctxs.append((j, c)))
+    job, ctx = ctxs[0]
+    # a failure that is not the link's: nothing moves
+    assert C.failover(job, ctx, "rank 1 on B (pid 9) exited") is None
+    why = ("rank 1 on B (pid 9) exited: link init failed: ValueError: "
+           "[jaccl] Changing queue pair to RTR failed with errno 96")
+    C.ENDED[job] = {"reason": why, "t": time.time(), "port": 2,
+                    "machines": ["A", "B"]}
+    new = C.failover(job, ctx, why)
+    assert new["job"] and new["job"] != job and new["cable"] == "127.0.1"
+    assert "moved from 127.0.0" in new["cable_note"]
+    assert "errno 96" in new["cable_note"]
+    assert C.ENDED[job]["relaunched"] == new["job"]
+    assert "relaunched on cable 127.0.1" in C.ENDED[job]["reason"]
+    assert "127.0.0" in C.BAD_CABLES[frozenset(("aaaa", "bbbb"))]
+    # the next launch this session starts on the working cable, and says so
+    later, _ = jaccl_launch(monkeypatch, {})
+    assert later["cable"] == "127.0.1"
+    assert "127.0.0 failed link init earlier" in later["cable_note"]
+    # the relaunch failing too: nothing left to try, said
+    ctx2 = ctxs[1][1]
+    last = C.failover(new["job"], ctx2, why)
+    assert "every shared Thunderbolt cable failed" in last["refused"]
+    C.ENDED.clear()
+
+
+def test_the_follower_stops_at_a_failure_or_gives_up(cache, monkeypatch):
+    monkeypatch.setattr(C, "BAD_CABLES", {})
+    ctxs = []
+    jaccl_launch(monkeypatch, {}, follow=lambda j, c: ctxs.append((j, c)))
+    job, ctx = ctxs[0]
+    seen = []
+    monkeypatch.setattr(C, "failover",
+                        lambda j, c, why: seen.append(why) or "moved")
+    ctx = dict(ctx, post=lambda url, doc: {"ended": "rank 1 exited: "
+                                           "[jaccl] RTR failed"})
+    assert C._follow(job, ctx, sleep=lambda s: None) == "moved"
+    assert seen == ["rank 1 exited: [jaccl] RTR failed"]
+    t = iter(range(0, 10 ** 6, 100))
+    ctx = dict(ctx, post=lambda url, doc: {"ranks_here": [1]})
+    assert C._follow(job, ctx, clock=lambda: next(t),
+                     sleep=lambda s: None) is None
+
+
+def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
+        tmp_path, monkeypatch):
+    """Two real pages and fake ranks: rank 1 on B fails link init on the
+    first cable; B's page stops the job naming the jaccl line, and A (the
+    coordinator) relaunches on the second cable, where it runs."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "A"))
+    monkeypatch.setenv("PYTHONPATH", SRC + os.pathsep
+                       + os.environ.get("PYTHONPATH", ""))
+    monkeypatch.setenv("FAKE_BAD_CABLE", "127.0.0")
+    monkeypatch.setitem(identity._ID, "id", "aaaa")
+    monkeypatch.setitem(identity._ID, "name", "A")
+    monkeypatch.setattr(C, "_resolve",
+                        lambda i: "/fake/artifact" if i == "abc" else None)
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
+    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(C, "FAILOVER_POLL_S", 0.2)
+    info_a, info_b = two_cable_infos()
+    monkeypatch.setattr(C, "_local_info", lambda: info_a)
+    sys.path.insert(0, str(HERE))
+    import cluster_fake_page
+    monkeypatch.setattr(C, "RANK_ARGV", [cluster_fake_page.fake_argv])
+    monkeypatch.setattr(C, "_WATCHER", [1])
+    ui_a, ui_b = free_port(), free_port()
+    srv = ThreadingHTTPServer(("127.0.0.1", ui_a), ui.make_handler({}))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "B")}
+    page_b = subprocess.Popen(
+        [sys.executable, str(HERE / "cluster_fake_page.py"), str(ui_b),
+         "bbbb", "B", json.dumps(info_b), "aaaa", f"127.0.0.1:{ui_a}"],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    assert "up" in page_b.stdout.readline()
+    peer = SimpleNamespace(id="bbbb", name="B", host="127.0.0.1",
+                           key=f"127.0.0.1:{ui_b}", state="answering",
+                           link="thunderbolt", node={"cluster": info_b})
+    from knurlogic.cluster.peers import Peer
+    known = Peer(host="127.0.0.1", port=ui_b, id="bbbb", name="B",
+                 state="answering")
+    monkeypatch.setattr(ui, "PEERS", SimpleNamespace(
+        all=lambda: [known], introduce=lambda *a, **k: None))
+    jobs = []
+    try:
+        out = C.launch({"action": "load", "identity": "abc",
+                        "nodes": ["aaaa", "bbbb"], "split": "pipeline",
+                        "link": "jaccl"},
+                       me={"id": "aaaa", "name": "A"}, peers=[peer],
+                       local_info=info_a, ui_port=ui_a,
+                       serve_port=free_port())
+        assert out.get("job") and out["cable"] == "127.0.0", out
+        jobs.append(out["job"])
+        moved = wait(lambda: (C.ENDED.get(out["job"]) or {}).get(
+            "relaunched"), 40)
+        assert moved, C.ENDED.get(out["job"])
+        jobs.append(moved)
+        e = C.ENDED[out["job"]]
+        assert "errno 96" in e["reason"] and "127.0.1" in e["reason"]
+        assert wait(lambda: (J.read_marker(moved, 0) or {}).get("phase")
+                    == "ready", 20)
+        doc = next(d for d in C.jobs_document() if d["job"] == moved)
+        assert doc["cable"] == "127.0.1"
+        assert "moved from 127.0.0" in doc["cable_note"]
+        assert "127.0.0" in C.BAD_CABLES[frozenset(("aaaa", "bbbb"))]
+    finally:
+        for j in jobs:
+            C.stop(j, grace=1)
+        page_b.kill()
+        srv.shutdown()
+        C.ENDED.clear()

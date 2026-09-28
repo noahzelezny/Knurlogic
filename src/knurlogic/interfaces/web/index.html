@@ -455,6 +455,22 @@
  .grp.no{opacity:.45}
  .grp.no .var.no{opacity:1}
  #pickinfo .note{color:var(--faint);margin-top:6px}
+ #lmwhere{font-size:12.5px;color:var(--dim);margin-top:8px;overflow-wrap:anywhere}
+ .optrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0}
+ .optrow .optlab{margin:0}
+ #lmprog:empty{display:none}
+ #lmprog{margin-top:10px;display:grid;gap:6px}
+ .lp{border:1px solid var(--line);border-radius:var(--r);padding:7px 9px;font-size:12.5px;color:var(--dim)}
+ .lp.ready{border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+ .lp.failed{border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
+ .lp .lph{display:flex;align-items:center;gap:6px;color:var(--fg)}
+ .lp .lph b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+ .lp .ph{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--warn)}
+ .lp.ready .ph{color:var(--ok)}
+ .lp .bar{height:4px;background:var(--line);border-radius:2px;margin:5px 0 3px;overflow:hidden}
+ .lp .bar i{display:block;height:100%;background:var(--acc)}
+ .lp .why{color:var(--warn);margin-top:4px;overflow-wrap:anywhere}
+ .lp .x{padding:0 6px}
  .unit .uhead .mk.big{width:44px;height:44px;margin:-4px 0}
  .unit .uhead .ut{text-align:left;min-width:0}
  .unit .hw{font-size:12px;letter-spacing:.08em;color:var(--faint);
@@ -902,9 +918,17 @@
           <div class="opt"><div class="optlab">Interconnect</div>
             <span class="seg" data-k="link"><button data-v="ring" aria-pressed="true">TCP/IP</button><button data-v="jaccl" aria-pressed="false">RDMA</button></span></div>
         </div>
+        <div id="lmwhere"></div>
+        <div id="mtpopts" hidden>
+          <div class="optrow"><div class="optlab">MTP</div>
+            <span class="seg" data-k="mtp" title="multi-token prediction: draft with the head the model ships (KNURLOGIC_MTP)"><button data-v="on" aria-pressed="true">On</button><button data-v="off" aria-pressed="false">Off</button></span></div>
+          <div class="optrow" id="mtpdynrow"><div class="optlab">Dynamic MTP</div>
+            <span class="seg" data-k="dyn" title="switch between drafting and plain steps by their measured cost (KNURLOGIC_MTP_DYNAMIC)"><button data-v="on" aria-pressed="true">On</button><button data-v="off" aria-pressed="false">Off</button></span></div>
+        </div>
         <div id="pickinfo"></div>
         <button class="go" id="launch" style="width:100%;margin-top:10px">
           Launch</button>
+        <div id="lmprog" aria-live="polite"></div>
       </section>
     </aside>
   </div>
@@ -2002,6 +2026,8 @@ async function tick(){
 // catalogue pretending to be a control: the answer to fifty rungs is a
 // picker, not a longer list.
 let MODELS=[], GROUPS=[], FAM='All', SEL=null, QUERY='';
+// a launch that went ahead clears the pick; loadModels must not re-pick
+let SELCLEARED=false;
 // Favorites/recents: a set of starred paths and a 20-entry most-recent list,
 // both in localStorage (the idea is exo's picker; the code is ours).
 function loadFav(){ try{ return new Set(JSON.parse(localStorage.getItem('kn.fav')||'[]')) }
@@ -2175,7 +2201,7 @@ function renderPicker(){
     e.stopPropagation(); toggleFav(s.dataset.fav); renderPicker();
   });
   $('prows').querySelectorAll('.var').forEach(v=>v.onclick=()=>{
-    SEL=MODELS.find(m=>m.path===v.dataset.p);
+    SEL=MODELS.find(m=>m.path===v.dataset.p); SELCLEARED=false;
     OVL.close();
     pickInfo();
   });
@@ -2195,7 +2221,7 @@ async function loadModels(){
   migrateLaunchSets();
   regroup();
   const ws=fitWS();
-  if(!SEL) SEL=MODELS.find(m=>!ws||m.size_bytes<=ws)||null;
+  if(!SEL && !SELCLEARED) SEL=MODELS.find(m=>!ws||m.size_bytes<=ws)||null;
   pickInfo();
 }
 // What this artifact WOULD resolve to, fetched when the selection changes.
@@ -2209,10 +2235,17 @@ async function loadPreview(){
   // the room is counted at the KV precision it would launch with
   const kvb=launchSets(baseKey(m.name)).KNURLOGIC_KV_BITS;
   if(kvb) q.set('kv_bits', kvb);
-  try{ PREVIEW=await (await fetch('/settings.json?'+q)).json() }
+  try{ PREVIEW=await (await fetch('/settings.json?'+q)).json(); PREVIEW.for=m.path }
   catch(e){ PREVIEW=null }
+  if(SEL!==m) return;
   // the preview's room is asked against the tune picked, and fresher
   const pr=$('pickroom'); if(pr && PREVIEW && PREVIEW.room) pr.innerHTML=roomHTML(PREVIEW.room);
+  mtpState(); launchGate();
+}
+function launchGate(){
+  const why=SEL ? launchBlock(selNodes()) : 'choose a model';
+  const b=$('launch'); if(b.textContent.trim()!=='Launch') return;
+  b.disabled=!!why; b.title=why||'';
 }
 
 // What a model that fits leaves to talk in (the server's context_room):
@@ -2237,7 +2270,9 @@ function pickInfo(){
   const m=SEL, el=$('pickinfo');
   $('pickname').textContent=m?m.name:'choose a model';
   $('picksize').textContent=m?gb(m.size_bytes):'';
-  if(!m){ el.innerHTML=''; $('launch').disabled=true; return }
+  whereLine();
+  if(!m){ el.innerHTML=''; $('launch').disabled=true; $('launch').title='choose a model';
+    $('mtpopts').hidden=true; return }
   const ws=fitWS(), fits=!ws||m.size_bytes<=ws, ns=selNodes();
   const tags=[m.is_vq?'VQ':'', m.mtp?'MTP':'', m.model_type]
     .filter(Boolean).map(esc).join(' · ');
@@ -2246,16 +2281,24 @@ function pickInfo(){
   // answers the fit question; it does not pretend to launch.
   const blocked=launchBlock(ns);
   $('launch').disabled=!!blocked;
+  $('launch').title=blocked||'';
   el.innerHTML=`<div>${tags}</div>`+
     (!fits?`<div class="warn">${gb(m.size_bytes)} against ${gb(ws)} of
       working set in ${esc(fitWhere())} — it will not fit</div>`
      : ns.length && !(ns.length===1&&isLocal(ns[0]))
        ? `<div class="room">fits · ${gb(ws-m.size_bytes)} left in ${esc(fitWhere())}</div>`
        : `<div id="pickroom">${roomHTML(m.room)}</div>`)+
-    (blocked?`<div class="note">${esc(blocked)}</div>`:'');
-  SETS=launchSets(baseKey(m.name)); loadPreview();
+    (blocked && !/does not fit/.test(blocked)?`<div class="note">${esc(blocked)}</div>`:'');
+  SETS=launchSets(baseKey(m.name)); mtpState(); loadPreview();
 }
 function launchBlock(ns){
+  // the info pane's "it will not fit" is a reason Launch cannot go
+  if(SEL){ const ws=fitWS();
+    if(ws && SEL.size_bytes>ws) return `${gb(SEL.size_bytes)} does not fit ${fitWhere()} (${gb(ws)})`
+    // on this machine: its own answer, under the knurlogic allowance
+    const r=SEL.room || (PREVIEW && PREVIEW.for===SEL.path && PREVIEW.room);
+    if((!ns.length || (ns.length===1&&isLocal(ns[0]))) && r && r.fits===false)
+      return `${gb(r.weights_bytes)} does not fit this machine's ${gb(r.working_set_bytes)}` }
   if(ns.length>1){
     for(const n of ns){
       if(isLocal(n)) continue;
@@ -2355,16 +2398,22 @@ $('launch').onclick=async()=>{
   const b=$('launch'); b.disabled=true; b.textContent='Launching…';
   const pn=launchPeer(), ns=selNodes();
   const tune=window.LOADTUNE||'balanced';
+  const sets=launchMTP(m);
+  const t0=Date.now();
   const j=await act(ns.length>1
     ? {action:'load', identity:m.identity, nodes:ns.map(n=>n.id),
-       split:MULTI.shard, link:MULTI.link, tune, sets:SETS}
-    : pn ? {action:'load', node:pn.id, identity:m.identity, tune, sets:SETS}
-    : {action:'load', target:m.path, tune, sets:SETS});
+       split:MULTI.shard, link:MULTI.link, tune, sets}
+    : pn ? {action:'load', node:pn.id, identity:m.identity, tune, sets}
+    : {action:'load', target:m.path, tune, sets});
   b.textContent='Launch'; b.disabled=false;
+  trackLaunch(m, ns, pn, j, t0);
   // across machines: where it went (or would have), from the coordinator
   if(j.placement) $('pickinfo').insertAdjacentHTML('beforeend',
     `<div class="placement">${placementHTML(j.placement)}</div>`);
-  if(!j.error && !j.refused){ tick(); loadModels(); pushRecent(m.path);
+  if(!j.error && !j.refused){
+    // done with this pick: back to "choose a model"
+    SEL=null; SELCLEARED=true; pickInfo();
+    tick(); loadModels(); pushRecent(m.path);
     const st=(j.settings||{}).needs_restart||{};
     const n=Object.keys(st).length;
     if(n) alert(`Loaded. ${n} setting${n===1?'':'s'} could not be applied `+
@@ -2373,6 +2422,141 @@ $('launch').onclick=async()=>{
   }
 };
 window.LOADTUNE='balanced';
+
+// --- which machines, and MTP -------------------------------------------------
+const localName=()=>((LASTNODES.find(isLocal)||{}).node)||'this Mac';
+function whereLine(){
+  const ns=selNodes();
+  $('lmwhere').textContent='on: '+(ns.length ? ns.map(n=>n.node).join(' + ')
+                                              : 'this Mac (auto)');
+}
+// MTP for this launch: shown only for a model that ships a draft head. The
+// default is its saved launch settings (Settings -> Models), else what the
+// preset resolves to (the preview), else on; a click here is for this launch.
+const LMTP={for:null, mtp:null, dyn:null};
+function mtpDefault(name){
+  const saved=SETS[name]; if(saved) return String(saved);
+  const k=((PREVIEW&&SEL&&PREVIEW.for===SEL.path&&PREVIEW.knobs)||[]).find(k=>k.name===name);
+  const v=k && (k.value??k.would_be);
+  return v==='off'||v===false||v==='0' ? 'off' : 'on';
+}
+function mtpState(){
+  const m=SEL, box=$('mtpopts');
+  if(!m || !m.mtp){ box.hidden=true; return }
+  if(LMTP.for!==m.path){ LMTP.for=m.path; LMTP.mtp=LMTP.dyn=null }
+  const mtp=LMTP.mtp||mtpDefault('KNURLOGIC_MTP');
+  const dyn=LMTP.dyn||mtpDefault('KNURLOGIC_MTP_DYNAMIC');
+  box.hidden=false;
+  const set=(k,v)=>box.querySelectorAll(`[data-k=${k}] button`).forEach(b=>
+    b.setAttribute('aria-pressed', b.dataset.v===v));
+  set('mtp',mtp); set('dyn',dyn);
+  $('mtpdynrow').hidden=mtp==='off';
+}
+$('mtpopts').querySelectorAll('.seg').forEach(g=>
+  g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    LMTP[g.dataset.k]=b.dataset.v; mtpState();
+  }));
+// The launch's settings: the saved ones, with this panel's MTP choice
+function launchMTP(m){
+  const sets={...SETS};
+  if(m.mtp){
+    sets.KNURLOGIC_MTP=LMTP.mtp||mtpDefault('KNURLOGIC_MTP');
+    if(sets.KNURLOGIC_MTP==='on')
+      sets.KNURLOGIC_MTP_DYNAMIC=LMTP.dyn||mtpDefault('KNURLOGIC_MTP_DYNAMIC');
+    else delete sets.KNURLOGIC_MTP_DYNAMIC;
+  }
+  return sets;
+}
+
+// --- a launch, followed until it is ready or has failed ----------------------
+// Read from the residency the page already polls (/loaded.json?peers=1):
+// each machine's `loads` (its servers started lately: phase, bytes held of
+// the artifact's size, the last log line, why one exited) and `jobs` (a
+// cluster job's phase per machine, and its stop reason).
+const LAUNCHES=[];
+let LSEQ=0;
+function trackLaunch(m, ns, pn, j, t0){
+  const L={id:++LSEQ, name:m.name, t0, port:j.port||0, job:j.job||'',
+    machines:ns.length?ns.map(n=>n.node):[localName()],
+    node:pn?pn.id:'', cluster:ns.length>1, phase:'starting', samples:[]};
+  if(j.error||j.refused){ L.phase='failed';
+    L.why=j.error||('not loaded: '+j.refused+(j.note?' -- '+j.note:'')) }
+  LAUNCHES.unshift(L); if(LAUNCHES.length>4) LAUNCHES.length=4;
+  renderLaunches();
+}
+// every machine's document, named: this page's and each peer's
+function machinesOf(d){
+  return [{name:localName(), id:'', doc:d}].concat((d.peers||[]).map(p=>
+    ({name:p.machine, id:p.id, doc:p})));
+}
+function followLaunch(L, d){
+  if(L.phase==='ready'||L.phase==='failed') return;
+  const ms=machinesOf(d), secs=(Date.now()-L.t0)/1000;
+  const mine=ms.filter(x=>L.cluster ? true : L.node ? x.id===L.node : x.id==='');
+  const nm=L.name.split('/').pop();
+  const ld=mine.flatMap(x=>(x.doc.loads||[]).filter(e=>
+    (!L.port||e.port===L.port) && e.name===nm));
+  const e=ld.sort((a,b)=>a.seconds-b.seconds)[0];
+  if(e){ L.bytes=e.bytes; L.total=e.total_bytes; L.last=e.last_log_line;
+    L.samples.push([Date.now(), e.bytes]); if(L.samples.length>6) L.samples.shift() }
+  if(L.cluster && L.job){
+    L.per=[];
+    for(const x of ms) for(const jb of (x.doc.jobs||[])) if(jb.job===L.job){
+      L.per.push({machine:x.name, phase:jb.phase});
+      if(jb.phase==='stopped'||jb.phase==='stopping'){
+        L.phase='failed'; L.why=jb.reason||'the cluster job stopped'; return }
+    }
+    const lead=ms.flatMap(x=>x.doc.resident||[]).find(r=>r.cluster&&r.cluster.job===L.job);
+    const ph=L.per.map(p=>p.phase);
+    if(lead && lead.state==='loaded' && ph.length && ph.every(p=>p==='ready')
+       && (!e || e.phase==='ready')) L.phase='ready';
+    else L.phase=ph.includes('joining')?'joining ring':ph.includes('loading')?'loading weights'
+      :e&&e.phase==='warming'?'warming':'starting';
+    return;
+  }
+  if(e){
+    if(e.phase==='exited'){ L.phase='failed';
+      L.why=(e.log_tail||[]).slice(-2).join(' / ')||'the server exited'; return }
+    L.phase={loading:'loading weights', stalled:'stalled', warming:'warming',
+             ready:'ready'}[e.phase]||'starting';
+    if(e.phase==='stalled') L.why=`no log output for a while; last: ${e.last_log_line||'--'}`;
+    return;
+  }
+  // a machine that does not report `loads` (older knurlogic): its row says
+  const r=mine.flatMap(x=>x.doc.resident||[]).find(r=>r.runtime==='knurlogic'
+    && r.name===nm && (!L.port||(r.where||'').endsWith(':'+L.port)));
+  if(r) L.phase=r.state==='loaded'?'ready':'loading weights';
+  else if(secs>60) L.phase='starting';
+}
+function renderLaunches(){
+  const el=$('lmprog'); if(!el) return;
+  el.innerHTML=LAUNCHES.map(L=>{
+    const secs=Math.round((Date.now()-L.t0)/1000);
+    const el2=secs<90?secs+'s':Math.floor(secs/60)+'m '+(secs%60)+'s';
+    const pct=L.total?Math.min(100,Math.round(100*L.bytes/L.total)):null;
+    let rate='';
+    if(L.samples.length>1){ const [a,b]=[L.samples[0],L.samples[L.samples.length-1]];
+      const r=(b[1]-a[1])/((b[0]-a[0])/1000); if(r>0) rate=` · ${(r/1e9).toFixed(2)} GB/s` }
+    const busy=L.phase!=='ready'&&L.phase!=='failed';
+    return `<div class="lp ${L.phase==='ready'?'ready':L.phase==='failed'?'failed':''}">
+      <div class="lph"><span class="ph">${esc(L.phase)}</span><b title="${esc(L.name)}">${esc(String(L.name).split("--").pop())}</b>
+        <button class="mini x" data-lx="${L.id}" title="dismiss">✕</button></div>
+      <div>on ${esc(L.machines.join(' + '))} · ${el2}${busy&&L.total?` · ${gb(L.bytes)} of ${gb(L.total)}`:''}${busy?rate:''}</div>
+      ${busy&&pct!=null?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}
+      ${L.per&&L.per.length&&busy?`<div>${L.per.map(p=>esc(p.machine+': '+p.phase)).join(' · ')}</div>`:''}
+      ${L.phase==='ready'?'<div>ready: pick it in the chat bar\'s Model:</div>':''}
+      ${L.why?`<div class="why">${esc(L.why)}</div>`:''}
+    </div>`}).join('');
+  el.querySelectorAll('[data-lx]').forEach(b=>b.onclick=()=>{
+    const i=LAUNCHES.findIndex(L=>L.id===+b.dataset.lx);
+    if(i>=0) LAUNCHES.splice(i,1); renderLaunches();
+  });
+}
+function followLaunches(d){
+  if(!LAUNCHES.length) return;
+  for(const L of LAUNCHES) followLaunch(L, d);
+  renderLaunches();
+}
 
 // --- what is actually in memory, whoever put it there ---------------------
 // exo's models, ollama's models and ours in one list. A machine has one pool
@@ -2460,6 +2644,7 @@ async function loadResident(){
   let d; try{ d=await (await fetch('/loaded.json?peers=1')).json() }catch(e){ return }
   const peers=d.peers||[];
   window.RESIDENCY=d;       // Settings' machine tabs and Connect read this
+  followLaunches(d);
   // One list, local first; a peer's rows carry `machine`. A peer's model is
   // shown and chatted with, never unloaded from here: this page drives only
   // what its own machine started.
@@ -2973,7 +3158,7 @@ function chatGate(){
   el.title=sel ? 'sending to '+c.model+' at '+c.where : 'the running model Send goes to';
   $('cattach').title=vision ? 'attach an image'
     : (on ? 'this model has no vision' : 'click a running model to chat with it');
-  loadSampling(c && c.where ? c.where : (SERVED ? '' : null));
+  loadSampling(c && c.where ? c.where : (SERVED ? '' : null), c && c.model);
 }
 window.chatGate=chatGate;
 // Picking in Model: points this chat at that model while it is still empty,
@@ -3015,26 +3200,53 @@ function sampling(){
 // Per target, once: a model's defaults do not change while it is loaded.
 const SDEF={};
 let SDEFAT;
-async function loadSampling(where){
-  SDEFAT=where;
-  if(where===null){ showSampling(null); return }
-  if(!(where in SDEF)){
+async function loadSampling(where, model){
+  const key=where===null ? null : where+'|'+(model||'');
+  SDEFAT=key;
+  if(where===null){ showSampling(null); thinkLevels(undefined); return }
+  if(!(key in SDEF)){
     // A clicked model is reached through this page's read-only /peek (a
     // browser will not call another port); the page's own model directly.
+    // A peer's relay lists every model that machine runs: take this one's.
     const url=where ? '/peek?'+new URLSearchParams({where, path:'/v1/models'})
                     : '/v1/models';
-    SDEF[where]=fetch(url).then(r=>r.ok?r.json():null)
-      .then(j=>j&&j.data&&j.data[0] ? j.data[0] : undefined)
+    const k=String(model||''), alt=k.replace('/','--');
+    SDEF[key]=fetch(url).then(r=>r.ok?r.json():null)
+      .then(j=>{ const d=j&&Array.isArray(j.data)?j.data:[];
+        return d.find(x=>x.id===k||x.id===alt)||d[0]; })
       .catch(()=>undefined);
   }
-  const m=await SDEF[where];
-  if(m===undefined) delete SDEF[where];      // ask again next time
-  if(SDEFAT!==where) return;
+  const m=await SDEF[key];
+  if(m===undefined) delete SDEF[key];      // ask again next time
+  if(SDEFAT!==key) return;
   // absent (a server older than sampling_defaults) is "unknown", not
   // greedy: the server still applies whatever it applies
   showSampling(m ? m.sampling_defaults : undefined);
+  thinkLevels(m ? m.thinking : undefined);
   maxSteps(m && m.context_length);
 }
+// Thinking: only the levels this model's template has, in its own names
+// (/v1/models `thinking`: native [{level, name}]), plus its default. The
+// value sent is the reasoning_effort ladder level that maps exactly onto
+// that native level, so the server applies it as named. A server that does
+// not say keeps the whole ladder.
+const LADDER=['none','minimal','low','medium','high','xhigh'];
+let EFFWANT=null;                 // what the person picked, kept across models
+function thinkLevels(t){
+  const el=$('ceffort');
+  if(EFFWANT===null) EFFWANT=el.value;
+  const nat=t && Array.isArray(t.native) && t.native.length ? t.native : null;
+  const opts=nat ? nat.map(n=>[n.level, n.name]) : LADDER.map(l=>[l,l]);
+  const sig=JSON.stringify(opts)+(t&&t.default||'');
+  if(el.dataset.sig===sig) return;
+  el.dataset.sig=sig;
+  el.innerHTML=`<option value="">model default${t&&t.default?' ('+esc(t.default)+')':''}</option>`+
+    opts.map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
+  el.value=opts.some(o=>o[0]===EFFWANT) ? EFFWANT : '';
+  el.title=nat ? `this model's thinking levels (${t.dialect}); sent as reasoning_effort, applied as named`
+    : "reasoning_effort: knurlogic maps it onto this model's own controls and says what it applied";
+}
+$('ceffort').addEventListener('change',()=>{ EFFWANT=$('ceffort').value });
 // max_tokens caps the ANSWER, and the ceiling is the model's context window
 // (/v1/models context_length, from its config): steps up to it. Unknown
 // keeps the list the page always had.
