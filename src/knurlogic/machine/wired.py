@@ -161,14 +161,28 @@ def render(d: dict) -> str:
 
 
 def detected_working_set_bytes() -> int:
-    """What the framework says it may use, asked through the engine seam.
+    """What the framework says it may use, read where it comes from.
 
     `resolve()` still takes headroom as an INPUT -- that stance is what keeps
     the resolver testable and machine-independent. This is the COMMANDS
     filling that input in when the user did not, because the alternative is
     what shipped: forgetting a flag silently produced the roomy defaults,
     which is the footgun this package exists to remove.
+
+    The number is the wired limit, and this module already reads it from
+    sysctl: MLX's `max_recommended_working_set_size` is exactly
+    `iogpu.wired_limit_mb` in bytes (this module's docstring measured the
+    two agreeing on this box), and the engine's `memory()` asks the same
+    sysctl through mlx. Reading it here instead keeps callers OUT of engine/
+    -- the page process must never import mlx to report a number, and
+    `memory()` would drag the whole framework in for one integer. Same
+    value, no engine.
     """
+    limit = read().limit_bytes
+    if limit:
+        return limit
+    # the sysctl left at its default reads 0: only the framework knows the
+    # default it applies, so it is asked -- on a box nobody has tuned
     try:
         from knurlogic.engine.serve import memory
         return int(memory().get("working_set_bytes") or 0)
