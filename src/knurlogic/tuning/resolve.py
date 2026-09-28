@@ -133,8 +133,7 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 
 #: Knobs `engine.serve` turns into argv or an mlx call, so they are real
 #: whether or not an artifact's bundled runtime reads them.
-ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "prompt_concurrency",
-                   "context_length", "mtp", "mtp_dynamic", "kv_bits",
+ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp", "mtp_dynamic", "kv_bits",
                    "cross_chip", "preset")
 
 
@@ -606,19 +605,15 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
         else:
             prefill = asked
     emit(r, artifact, "prefill_chunk", prefill)
-    cfg = artifact.raw_config or {}
-    window = int((cfg.get("text_config") or cfg).get("max_position_embeddings")
-                 or cfg.get("max_position_embeddings") or 0)
+    window, _ = S.model_window(artifact.raw_config or {})
     if window:
         # the model's own window: the cap a person lowers, never raises past
+        # (settings.check_knob refuses more), so the control stops there
         emit(r, artifact, "context_length", window)
+        steps = [v for v in S.KNOB_RANGE["KNURLOGIC_CONTEXT_LENGTH"][0]
+                 if v < window]
+        r.ranges["KNURLOGIC_CONTEXT_LENGTH"] = steps + [window]
     launch, launch_notes = S.preset_launch(tune, artifact.model_type)
-    if tight or tune == "safe" or "prompt_concurrency" in launch:
-        emit(r, artifact, "prompt_concurrency",
-             launch.get("prompt_concurrency", S.PROMPT_CONCURRENCY_TIGHT))
-        r.notes.append(
-            "one prompt prefilled at a time: the transient is per prompt, so "
-            "the engine's default of 8 together is 8x the spike")
     if prefill < S.PREFILL_CHUNK_DEFAULT:
         r.notes.append(
             "prompt chunk narrowed: token-identical at every width, so this "

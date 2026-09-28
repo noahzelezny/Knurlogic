@@ -170,8 +170,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         _ring_marker(ring)
         # the ring-wide knobs beat the resolver like any --set
         overrides = dict(overrides or {})
-        for alias in ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"):
-            overrides[alias] = str(int(ring["prefill_chunk"]))
+        overrides.pop("VQLAB_PREFILL_CHUNK", None)
+        overrides["KNURLOGIC_PREFILL_CHUNK"] = str(int(ring["prefill_chunk"]))
         if ring.get("decode_chunk"):
             overrides["VQ_DECODE_CHUNK"] = str(int(ring["decode_chunk"]))
 
@@ -184,7 +184,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # A launch preset IS the tune: a per-model KNURLOGIC_PRESET (Settings
     # -> Models, carried ring-wide like every launch set) picks it over
     # --tune; its launch values are defaults every explicit set beats.
-    overrides = dict(overrides or {})
+    overrides = S.canonical_sets(overrides)
+    why = web.refuse_sets(a, overrides)
+    if why:
+        print(f"REFUSING: {why}", file=sys.stderr)
+        return 2
     try:
         tune = S.preset_of(overrides.pop("KNURLOGIC_PRESET", None), tune)
     except ValueError as e:
@@ -397,6 +401,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             want = {k: v for k, v in _resolve_for(ws, tune_name).env.items()}
         want = {k: str(v) for k, v in want.items()
                 if k in engine.LIVE_KNOBS and str(v) != live_env.get(k)}
+        why = web.refuse_sets(a, want)
+        if why:
+            return {"error": why}
         if not want:
             return {"applied": {}, "note": "nothing to change on this server "
                                            "without a restart"}
@@ -604,7 +611,7 @@ def main(argv=None) -> int:
                         "where there is room + dynamic MTP; stable = 512 "
                         "chunks, cross-chip on, MTP every step, "
                         "conservative memory; lean = 8-bit KV where the "
-                        "family takes it, MTP off, one prompt at a time; "
+                        "family takes it, MTP off; "
                         "safe = lowest peak memory. Explicit settings "
                         "(--set, --kv-bits, a per-model KNURLOGIC_PRESET) "
                         "beat it.")

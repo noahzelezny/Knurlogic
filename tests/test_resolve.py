@@ -24,7 +24,7 @@ def _art(**kw):
 def test_unknown_budget_keeps_defaults():
     r = resolve(_art(), 0)
     assert r.env["VQ_DECODE_CHUNK"] == str(S.DECODE_CHUNK_DEFAULT)
-    assert r.env["VQLAB_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_DEFAULT)
+    assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_DEFAULT)
 
 
 def test_does_not_fit_goes_tightest_not_default():
@@ -66,7 +66,7 @@ def test_non_vq_artifact_gets_only_the_generic_knobs():
     r = resolve(_art(vq_modules={}), 96 * GIB)
     assert "VQ_DECODE_CHUNK" not in r.env
     assert "VQ_MOE_GEMMSEG_RTILE" not in r.env
-    assert r.env["VQLAB_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_DEFAULT)
+    assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_DEFAULT)
     assert r.env["VQLAB_CACHE_LIMIT_GB"] == str(S.CACHE_LIMIT_GB_DEFAULT)
 
 
