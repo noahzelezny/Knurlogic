@@ -193,7 +193,12 @@ unchanged). `--split pipeline`.
   the maintainer's 574a7bd7). Every send is evaluated inside the forward that makes
   it and every receive is waited for inside the forward that uses it, so
   point-to-point messages and the CPU collectives stay in program order on
-  every rank.
+  every rank. The one exception is a prompt's prefill chunks
+  (`pipeline.overlapped`, as the maintainer's exo fork queued its prefill sends): a
+  follower's chunk is sent while its next chunk computes, at most two sends
+  in flight, and all of them complete before the prefill's last forward --
+  no collective runs between chunks. `KNURLOGIC_PIPELINE_OVERLAP=off` sends
+  synchronously (the A/B).
 - **Who samples, and how logits reach rank 0**: they are born there.
   mlx-lm's pipeline all_gathers the last stage's hidden state so every
   rank computes logits; we do not, because no follower needs them -- the
@@ -223,27 +228,44 @@ unchanged). `--split pipeline`.
   float32, against the unsplit model: logits (every family, uneven cuts)
   equal to 1e-4 -- in fact 0.0: the same arithmetic in the same order.
 - **MTP on pipeline** (qwen3_5 families; the maintainer's exo design): the head
-  lives on rank 0, which has the true final hidden state. A follower runs
-  a head too, on its own stage's output: its drafts are never used, but
-  its head cache moves exactly as rank 0's, so prompt-cache entries,
-  offsets and replays are the same code on every rank. Per step, fixed:
-  B1 `[drafting, d2 per row]` before the verify forward (rank 0's timed
-  regime choice and its drafts), and, only when B1 said drafting, B2
-  `[ok per row, t2 per row]` after it (the verdicts that drive every
-  rank's rollback and the one replay forward). The count depends on B1,
-  which every rank receives, never on a rank's own verdict. Every rank
-  drafts or none does (`tensor.agree_head` after load). Tested: rank 0's
-  tokens are the unsplit engine's (random head, mostly rejected; and
-  drafting forced on vocab 8 so accepts happen), both ranks made the same
-  B0/B1/B2 counts, and the serving path (TensorExecutor + follow) streams
-  the unsplit executor's tokens.
-- **Images**: refused (400) in this slice, as under tensor. The choice for
-  when they land: rank 0 runs the tower and SENDS the image rows'
-  embeddings to rank N-1 (its ring neighbour), with MTP off for image
-  rows. Running the tower on every rank would need the image bytes and the
-  store on every rank; the embeddings are needed at the first stage only,
-  but MRoPE positions are needed at every stage, so they go in the admit
-  op (they are pure in the key).
+  lives on rank 0 ALONE, which has the true final hidden state. A follower
+  never loads it (its bytes count on rank 0 only: `pipeline_leader_bytes`
+  -> `pipeline_shares(leader_bytes=)`) and never runs it; it still takes
+  part in every verify -- its stage runs the drafted token as the second
+  position of the 2-wide forward, and rolls back and replays as rank 0
+  says. Per step, fixed: B1 `[drafting, d2 per row]` before the verify
+  forward (rank 0's timed regime choice and its drafts), and, only when B1
+  said drafting, B2 `[ok per row, t2 per row]` after it (the verdicts
+  that drive every rank's rollback and the one replay forward). Per
+  admission, BA `[ok, hit, drafts]` before its prefill: only rank 0 can
+  tell whether a prompt-cache entry has a head cache aligned for a
+  drafting row (a follower's entries never carry one), and whether the row
+  drafts moves its checkpoints. The count depends on B1 and BA, which
+  every rank receives, never on a rank's own verdict. `tensor.agree_head`
+  tells every rank after load whether rank 0 bound a head. Tested: rank
+  0's tokens are the unsplit engine's (random head, mostly rejected; and
+  drafting forced on vocab 8 so accepts happen) with a headless follower,
+  both ranks made the same B0/B1/B2/BA counts, the serving path
+  (TensorExecutor + follow) streams the unsplit executor's tokens, and a
+  prefix only the follower's trie could use is re-prefilled on both.
+- **Images** (tensor and pipeline): rank 0 ALONE holds the tower and the
+  image store, and encodes at tokenize as on one Mac; its bytes count on
+  rank 0 only (`pipeline_leader_bytes`). A follower binds the family
+  without a tower (`engine.vision.request.MirrorVision`). The admit op
+  carries the cache key as ids plus its image runs and refs
+  (`plan.key_to_wire`), so a follower's prompt cache is keyed by the same
+  sentinels and its positions (MRoPE) come from the refs. An admission
+  whose uncached span holds images ships the rows of those images from
+  rank 0 (`Coord.images`: one all_sum on the CPU, float32 -- exact for
+  bf16 rows); every rank embeds them with the family's own code (under
+  tensor every rank embeds; under pipeline only rank N-1's embedding is
+  used). Why rank 0 and not the embedding rank: the store, the pins and
+  the one tokenize are already there, the tower is loaded once, and only
+  the image rows travel (an image's features, not the prompt's
+  embeddings). Image rows do not draft (Phase A), on every rank alike.
+  Tested on 127.0.0.1 with the tiny vision qwen3_5, both splits: tokens
+  equal the unsplit engine's, and a second prompt whose prompt-cache hit
+  holds both images hits on the follower too.
 - **Memory guard**: as tensor (the tightest rank, via the control vector),
   but the peers' own over-limit is used as reported, refreshed every step:
   stages are unequal, so rank 0's memory says nothing about a peer's.
