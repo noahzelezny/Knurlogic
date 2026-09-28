@@ -84,7 +84,7 @@ def ensure(body: dict) -> dict:
 
 def residency(host, sched, port: int = 0) -> dict:
     from knurlogic.interfaces import recovery
-    from knurlogic.machine import identity
+    from knurlogic.machine import identity, servers
     st = host.status()
     if st["state"] == "empty":
         return {"object": "list", "data": []}
@@ -104,6 +104,17 @@ def residency(host, sched, port: int = 0) -> dict:
            # relaunched by its page after dying unasked (interfaces/
            # recovery.py): attempts, last_reason, last_at, next_at, state
            "recovery": rec}
+    if port:
+        # a 16-hex id (a single-Mac load) or a cluster job's id (rank 0's
+        # own registry row), from this box's own registry -- known only
+        # when a page (or `serve` itself, for a cluster rank) wrote it
+        try:
+            srec = servers.registry().get(int(port)) or {}
+            inst = str(srec.get("job") or srec.get("instance") or "")
+        except Exception:
+            inst = ""
+        if inst:
+            row["instance"] = inst
     if st.get("error"):
         row["error"] = st["error"]
     return {"object": "list", "data": [row]}

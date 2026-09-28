@@ -340,11 +340,14 @@ def models_across(page: dict, here: str) -> list:
     for machine, r in rows:
         c = r.get("cluster") if isinstance(r.get("cluster"), dict) else {}
         job = str(c.get("job") or "")
-        if job and job in seen:
+        # a cluster job's instance is its job id; a single-Mac server's is
+        # the 16-hex id its page gave it at launch (loaded.py _instance_of)
+        instance = str(r.get("instance") or job or "")
+        if instance and instance in seen:
             continue
         j = live.get(job, {})
-        if job:
-            seen.add(job)
+        if instance:
+            seen.add(instance)
         out.append({
             "name": r.get("name"), "runtime": r.get("runtime"),
             "machine": machine, "where": r.get("where"),
@@ -356,6 +359,7 @@ def models_across(page: dict, here: str) -> list:
             "split": c.get("split") or j.get("split"),
             "link": _link_name(c.get("link") or j.get("link")),
             "job": job or None,
+            "instance": instance or None,
             "leader": c.get("leader") or j.get("leader"),
             **({"phase": c.get("phase") or j.get("phase")} if job else {}),
             **({k: j[k] for k in ("cable", "cable_note") if j.get(k)}),
@@ -372,7 +376,8 @@ def models_across(page: dict, here: str) -> list:
             "port": j.get("port"), "state": None, "requests": None,
             "machines": list(j.get("machines") or []),
             "split": j.get("split"), "link": _link_name(j.get("link")),
-            "job": job, "leader": j.get("leader"), "phase": j.get("phase"),
+            "job": job, "instance": job, "leader": j.get("leader"),
+            "phase": j.get("phase"),
             **({k: j[k] for k in ("cable", "cable_note") if j.get(k)}),
             "recovery": recs.get(job)})
     # tracked by a page and not serving now: waiting to be relaunched, or
@@ -388,6 +393,7 @@ def models_across(page: dict, here: str) -> list:
             "port": d.get("port"), "state": d.get("state"),
             "requests": None, "machines": ms, "split": d.get("split"),
             "link": _link_name(d.get("link")), "job": d.get("job"),
+            "instance": d.get("job") or None,
             "leader": ms[0] if d.get("job") else None,
             "recovery": d.get("recovery")})
     return out
@@ -647,23 +653,29 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
 
 
 def unload(port: int | None = None, model: str = "", job: str = "",
-           machine: str = "", **_) -> Dict[str, Any]:
+           instance: str = "", machine: str = "", **_) -> Dict[str, Any]:
     """Stop a model knurlogic started: by port on this Mac (as before), or
-    by model name or job id on any machine this Mac's page sees. A cluster
-    job stops on every machine -- the page's Unload, the same request."""
+    by model name, job id or instance id on any machine this Mac's page
+    sees. A cluster job stops on every machine -- the page's Unload, the
+    same request. `instance` is the id `load` returned, or `state`'s
+    `models[].instance` -- a single-Mac server's own 16-hex id, or a
+    cluster job's id (its instance is its job id, so `instance` and `job`
+    both find it)."""
     from knurlogic.interfaces import ui
-    if not (port or model or job):
-        return {"error": "name the port, the model or the job"}
+    if not (port or model or job or instance):
+        return {"error": "name the port, the model, the job or the instance"}
     try:
         page = _page_get("/loaded.json?peers=1")
     except PageDown as e:
-        if port and not (model or job or machine):
+        if port and not (model or job or instance or machine):
             return ui._stop(int(port))      # this Mac, without its page
         return {"error": str(e)}
     here = _me_name()
     rows = [r for r in models_across(page, here)
             if r.get("runtime") == "knurlogic"]
-    if job:
+    if instance:
+        hit = [r for r in rows if r.get("instance") == str(instance)]
+    elif job:
         hit = [r for r in rows if r.get("job") == str(job)]
     else:
         hit = rows
@@ -679,17 +691,17 @@ def unload(port: int | None = None, model: str = "", job: str = "",
         if port:
             hit = [r for r in hit if r.get("port") == int(port)]
     if not hit:
-        if port and not (model or job or machine):
+        if port and not (model or job or instance or machine):
             return ui._stop(int(port))      # e.g. a server still loading
         return {"error": "no knurlogic model matches that",
                 "resident": [{k: r.get(k) for k in
-                              ("name", "machine", "port", "job")}
+                              ("name", "machine", "port", "job", "instance")}
                              for r in rows]}
     if len(hit) > 1:
-        return {"error": "more than one model matches; name the job, or "
-                         "the machine and port",
+        return {"error": "more than one model matches; name the job, the "
+                         "instance, or the machine and port",
                 "matches": [{k: r.get(k) for k in
-                             ("name", "machine", "port", "job")}
+                             ("name", "machine", "port", "job", "instance")}
                             for r in hit]}
     r = hit[0]
     try:
@@ -713,7 +725,8 @@ def unload(port: int | None = None, model: str = "", job: str = "",
     except PageDown as e:
         return {"error": str(e)}
     return dict(out, model=r.get("name"), machine=r.get("machine"),
-                machines=r.get("machines"), job=r.get("job"))
+                machines=r.get("machines"), job=r.get("job"),
+                instance=r.get("instance"))
 
 
 # --- the table --------------------------------------------------------------
@@ -740,7 +753,9 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                        "Mac's page (`knurlogic ui`) sees. `models`: one "
                        "entry per resident model -- name, machine, port, "
                        "machines, split (tensor | pipeline), link (tcp | "
-                       "rdma), job, leader, phase, and `requests` "
+                       "rdma), job, instance (a single-Mac server's own "
+                       "16-hex id, or a cluster job's id), leader, phase, "
+                       "and `requests` "
                        "(in_flight, pending, capacity, oldest_pending_s, "
                        "holding; null when its server does not report "
                        "them). A cluster job is ONE entry, on its leader, "
@@ -849,15 +864,19 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     "unload": {
         "fn": unload,
         "description": "Stop a model knurlogic started. `port` alone: the "
-                       "server on that port of this Mac. `model` or `job`: "
-                       "on any machine this Mac's page sees (`machine` and "
-                       "`port` narrow it when a name matches twice). A "
-                       "cluster job stops on every machine it runs on.",
+                       "server on that port of this Mac. `model`, `job` or "
+                       "`instance`: on any machine this Mac's page sees "
+                       "(`machine` and `port` narrow it when a name matches "
+                       "twice). A cluster job stops on every machine it "
+                       "runs on.",
         "schema": _schema({
             "port": S("port it serves on (this Mac, unless `machine`)",
                       "integer"),
             "model": S("its name, as `state` lists it"),
             "job": S("a cluster job's id, from `load` or `state`"),
+            "instance": S("its instance id, from `load` or `state`'s "
+                          "`models[].instance` -- a single-Mac server's own "
+                          "16-hex id, or a cluster job's id"),
             "machine": S("the machine it runs on")}),
     },
 }
