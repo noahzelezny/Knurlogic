@@ -699,7 +699,7 @@
  /* the marker the hidden native one was; the word is the summary's own */
  details.think summary:before{content:"\25B8  "}
  details.think[open] summary:before{content:"\25BE  "}
- .think pre{white-space:pre-wrap;color:var(--faint);font-size:13px}
+ .think pre{white-space:pre-wrap;color:var(--faint);font-size:13px;margin:4px 0 0}
  .md pre{background:oklch(.09 0 0);border:1px solid var(--line);padding:10px;
    border-radius:var(--r);overflow:auto;position:relative}
  @media(prefers-color-scheme:light){.md pre{background:var(--med)}}
@@ -3727,8 +3727,8 @@ function bubbleFor(m, idx){
       .map(a=>`<img class="thumb" data-hash="${a.hash}" src="${a.thumb||''}">`).join('')}</div>`;
   }
   let thinkHTML='';
-  if(m.thinking) thinkHTML=`<details class="think" ${m._streaming?'open':''}>
-    <summary>thinking</summary><pre>${esc(m.thinking)}</pre></details>`;
+  if(m.thinking && m.thinking.trim()) thinkHTML=`<details class="think" ${m._streaming?'open':''}>
+    <summary>thinking</summary><pre>${esc(m.thinking.trim())}</pre></details>`;
   const body = m.role==='assistant' ? `<div class="md">${mdRender(m.content||'')}</div>`
                                      : esc(m.content||'');
   const bubble=document.createElement('div');
@@ -3861,7 +3861,7 @@ async function runTurn(){
   const effort=$('ceffort').value;
   if(effort) body.reasoning_effort=effort;
   const t0=performance.now();
-  let first=0, last=0, ka=0, usage=null;
+  let first=0, last=0, ka=0, usage=null, finishReason=null, streamErr=null, aborted=false;
   try{
     const url=c.where ? '/chat?where='+encodeURIComponent(c.where)
                       : '/v1/chat/completions';
@@ -3882,7 +3882,10 @@ async function runTurn(){
         continue;
       }
       const j=ev.data; if(!j) continue;
+      if(j.error){ streamErr=j.error.message||j.error; continue }
       if(j.usage) usage=j.usage;
+      const fr=j.choices?.[0]?.finish_reason;
+      if(fr) finishReason=fr;
       const delta=j.choices?.[0]?.delta||{};
       const thought=delta.reasoning_content||delta.reasoning;
       if(thought){
@@ -3892,7 +3895,7 @@ async function runTurn(){
         if(WAIT && (WAIT.phase!=='thinking' || WAIT.pct!=null)) setWait({phase:'thinking'});
         let th=$('clog').lastElementChild.querySelector('.think pre');
         if(!th){ renderClog(); th=$('clog').lastElementChild.querySelector('.think pre') }
-        if(th) th.textContent=assistant.thinking;
+        if(th) th.textContent=assistant.thinking.trim();
       }
       if(delta.content){
         last=performance.now(); if(!first) first=last;
@@ -3905,9 +3908,20 @@ async function runTurn(){
   }catch(err){
     if(err.name!=='AbortError'){ assistant.content=(assistant.content||'')+`\n\n[error: ${err.message||err}]`;
       assistant.err=true }
+    else aborted=true;
   }
   pfHide(); WAIT=null;
   assistant._streaming=false;
+  // The stream can end without ever saying why: a hop between here and
+  // rank 0 dropped the connection, or the server sent one last error
+  // event instead of a finish_reason. Either way, say so visibly instead
+  // of leaving a silent half sentence -- the speeds still shown below are
+  // real, so a quiet cutoff reads as a finished answer otherwise.
+  if(!aborted && !assistant.err && (assistant.content || assistant.thinking)){
+    if(streamErr) assistant.content += `\n\n[stopped: ${streamErr}]`;
+    else if(finishReason==='length') assistant.content += `\n\n[stopped: hit the max tokens limit]`;
+    else if(!finishReason) assistant.content += `\n\n[stopped: stream ended early]`;
+  }
   if(first){
     const prompt=usage?.prompt_tokens||0;
     const cached=usage?.prompt_tokens_details?.cached_tokens||0;
