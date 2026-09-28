@@ -500,6 +500,13 @@
    border-top:1px dashed var(--fg);opacity:.7}
  .stk.off{background:var(--grid)}
  .swap{color:var(--bad);font-weight:600;white-space:nowrap}
+ /* Swap: a red band from the TOP of the memory bar, not stacked with the
+    used-memory segments (position:absolute keeps it out of the flex flow,
+    so the bar's own shape/size never moves). */
+ .stk .swapbar{position:absolute;top:0;left:0;right:0;min-height:2px;
+   background:var(--bad);opacity:.85;z-index:2}
+ .hstk .swapbar{position:absolute;top:0;bottom:0;right:0;min-width:2px;
+   background:var(--bad);opacity:.85;z-index:2}
  /* TALK: the compact card only; HOME: the full one only */
  .ucompact,.utemp{display:none}
  body.talk .ufull,body.talk .unit .stat{display:none}
@@ -1859,6 +1866,7 @@ async function tick(){
     $('sub').textContent=`${a.model_type} · ${gb(a.size_bytes)}`;
     const b=[];
     if(a.is_vq) b.push(['VQ',1]);
+    if(d.vision && d.vision.served) b.push(['VISION',1]);
     if(a.bundled_runtime) b.push([a.bundled_runtime,1]);
     (d.architectures||[]).forEach(r=>b.push([r.module+' '+r.state,
       r.state==='OK'||r.state==='UNPINNED']));
@@ -1911,8 +1919,7 @@ async function tick(){
           ?` · ${gb(now.gpu_in_use_bytes)}`:''), '',
         h.map(s=>s.gpu_pct), 'var(--acc)')+
       row('cpu', pc(now.cpu_pct), '', h.map(s=>s.cpu_pct), 'var(--warn)')+
-      row('memory', pc(now.memory_pct)+(swap==null
-          ?'':` · <span class="swap">${gb0(swap)} swap</span>`), '',
+      row('memory', pc(now.memory_pct), '',
         h.map(s=>s.memory_pct), '#bb9af7')+
       // °C on a 0-100 scale, as Scout draws it: ambient near the floor,
       // a hot die near the top.
@@ -1923,12 +1930,21 @@ async function tick(){
   // TALK (a node beside a conversation): the GPU line and a memory bar
   // laid flat under it, the temperature at the right of the name. HOME
   // keeps the full card; the page switches between them with body.talk.
-  function hbar(n, mm, off){
+  // The red swap band: a sensible minimum visible size even when swap is a
+  // sliver of installed memory, so it never disappears to nothing.
+  function swapFrac(swap, inst){
+    return swap==null||!inst ? 0 : Math.max(1.5, Math.min(100, 100*swap/inst));
+  }
+  function swapTip(swap){ return `${gb0(swap)} swapped`; }
+  function hbar(n, mm, off, swap){
     if(off) return '<div class="hstk off"></div>';
     const nm=n.memory||{};
+    const swapEl=inst=>swap==null?'':`<div class="swapbar"
+      style="width:${swapFrac(swap,inst).toFixed(2)}%" title="${esc(swapTip(swap))}"></div>`;
     if(!mm||!mm.installed_bytes){
       const ws=nm.working_set_bytes||1, f=100*(nm.active_bytes||0)/ws;
-      return `<div class="hstk"><i style="width:${f.toFixed(1)}%;--c:var(--dim)"></i></div>`;
+      return `<div class="hstk"><i style="width:${f.toFixed(1)}%;--c:var(--dim)"></i>${
+        swapEl(ws)}</div>`;
     }
     const inst=mm.installed_bytes;
     const ss=segs(n, mm, inst).filter(s=>s[1]/inst>0.003);
@@ -1938,7 +1954,7 @@ async function tick(){
           title="limit ${gb(wl)}"></u>` : '';
     return `<div class="hstk">${ss.map(([k,b,c,cls])=>
       `<i class="${cls}" style="width:${(100*b/inst).toFixed(2)}%;--c:${c}"
-        title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}</div>`;
+        title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}${swapEl(inst)}</div>`;
   }
   function compact(n, mm, off, used, inst, pct, swap){
     const h=(n.metrics&&n.metrics.history)||[], now=(n.metrics&&n.metrics.now)||{};
@@ -1948,9 +1964,8 @@ async function tick(){
       <div class="mrow"><div class="mhd"><span>gpu</span><b>${pc(now.gpu_pct)}${
         now.gpu_in_use_bytes!=null?' · '+gb(now.gpu_in_use_bytes):''}</b></div>
         ${h.length?spark(h.map(s=>s.gpu_pct),'var(--acc)'):''}</div>
-      <div class="mrow"><div class="mhd"><span>memory</span><b>${swap!=null
-        ?`<span class="swap">${gb0(swap)} swap</span> · `:''}${
-        Math.round(used/GIB)} / ${Math.round(inst/GIB)} GiB</b></div>${hbar(n, mm, off)}</div>`}</div>`;
+      <div class="mrow"><div class="mhd"><span>memory</span><b>${
+        Math.round(used/GIB)} / ${Math.round(inst/GIB)} GiB</b></div>${hbar(n, mm, off, swap)}</div>`}</div>`;
   }
   // Swap only means something right now if it's actively growing (the
   // machine is under pressure this minute) or it's grown large -- macOS
@@ -1996,14 +2011,17 @@ async function tick(){
     // than draw past the top of the machine.
     return tot>ws ? out.map(s=>[s[0],s[1]*ws/tot,s[2],s[3]]) : out;
   }
-  function stack(n, mm, off){
+  function stack(n, mm, off, swap){
     if(off) return '<div class="stk off"></div>';
     const nm=n.memory||{};
+    const swapEl=inst=>swap==null?'':`<div class="swapbar"
+      style="height:${swapFrac(swap,inst).toFixed(2)}%" title="${esc(swapTip(swap))}"></div>`;
     if(!mm||!mm.installed_bytes){
       // No map from this node: one band of what it reported, nothing split.
       const ws=nm.working_set_bytes||1, f=100*(nm.active_bytes||0)/ws;
       return `<div class="stk"><i style="height:${f.toFixed(1)}%;
-        background:var(--dim)" title="in use ${gb(nm.active_bytes||0)}"></i></div>`;
+        background:var(--dim)" title="in use ${gb(nm.active_bytes||0)}"></i>${
+        swapEl(ws)}</div>`;
     }
     const inst=mm.installed_bytes;
     const ss=segs(n, mm, inst).filter(s=>s[1]/inst>0.003);
@@ -2017,7 +2035,7 @@ async function tick(){
           title="limit ${gb(wl)}"></u>` : '';
     return `<div class="stk">${ss.map(([k,b,c,cls])=>
       `<i class="${cls}" style="height:${(100*b/inst).toFixed(2)}%;--c:${c}"
-        title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}</div>`;
+        title="${esc(k)} ${gb(b)}"></i>`).join('')}${lim}${swapEl(inst)}</div>`;
   }
   // A quiet line glyph of the kind of Mac, from machine.kind (the server
   // reads it from system_profiler's Model Name, hw.model as a fallback).
@@ -2058,7 +2076,7 @@ async function tick(){
             n.problem?esc(n.problem):'no answer'}</div>`
           : (n.metrics?.history||[]).length?lines(n.metrics, swap)
           : '<div class="noans">no metrics from this node</div>'}</div>
-        ${stack(n, mapped?mm:null, off)}
+        ${stack(n, mapped?mm:null, off, swap)}
       </div>
       <div class="stat"><span class="pct">${off?'--':pct.toFixed(0)+'%'}</span>
         ${off?'':gb(used)+' / '+gb(inst)}</div>
@@ -3298,8 +3316,16 @@ function chatGate(){
     c.where=r.where; c.model=r.name; c.vision=visionOf(r.name);
     saveChats(); renderChats(); gone=false;
   }
-  const on=!gone && !!((c && c.where) || SERVED);
-  const vision=c && c.where ? !!c.vision : !!(SERVED && SERVED.vision);
+  // A pick not yet sent, still running: what the bar shows and what Send
+  // will actually go to -- the open chat's own stored model/where are
+  // untouched until Send commits it (or creates a new chat for it).
+  if(PENDMODEL && window.RUNNING && !window.RUNNING.has(PENDMODEL.where))
+    PENDMODEL=null;
+  const eff=PENDMODEL || (c && c.where ? {where:c.where, name:c.model,
+    vision: c.vision} : null);
+  const on=!gone && !!(eff || SERVED);
+  const vision=eff ? !!(PENDMODEL ? visionOf(eff.name) : c.vision)
+                    : !!(SERVED && SERVED.vision);
   // The box is always typeable, so the page never looks broken; only Send
   // waits for a model, and the placeholder and Send's title say which.
   const goneMsg=gone ? `${shortModel(c.model)||'this chat\'s model'} isn't running — pick a running model`+
@@ -3309,10 +3335,6 @@ function chatGate(){
   $('csend').disabled=!on || BUSYC;
   $('csend').title=gone ? goneMsg : on ? '' : 'click a running model to chat with it';
   $('cattach').disabled=!on || !vision;
-  // The model a clicked running model's chat sends to, named in the bar.
-  // Only while it is still running: before the first survey (RUNNING unset)
-  // the chat's own record is trusted.
-  const sel=c && c.where && (!window.RUNNING || window.RUNNING.has(c.where));
   const opts=window.CHATTABLE||[], el=$('cmodel');
   const sig=opts.map(r=>r.where+'|'+r.name).join('\n');
   if(el.dataset.sig!==sig){
@@ -3324,30 +3346,26 @@ function chatGate(){
           :r.machine?' · '+esc(r.machine):''}</option>`).join('');
   }
   el.disabled=!opts.length;
-  el.value=sel && opts.some(r=>r.where===c.where) ? c.where : '';
-  el.title=sel ? 'sending to '+c.model+' at '+c.where : 'the running model Send goes to';
+  el.value=eff && opts.some(r=>r.where===eff.where) ? eff.where : '';
+  el.title=eff ? 'sending to '+eff.name+' at '+eff.where : 'the running model Send goes to';
   $('cattach').title=vision ? 'attach an image'
     : (on ? 'this model has no vision' : 'click a running model to chat with it');
-  loadSampling(c && c.where ? c.where : (SERVED ? '' : null), c && c.model);
+  loadSampling(eff ? eff.where : (SERVED ? '' : null), eff ? eff.name : (c && c.model));
 }
 window.chatGate=chatGate;
-// Picking in Model: points this chat at that model while it is still empty,
-// and starts a new chat once it has messages -- a conversation keeps the
-// model it was had with.
+// Picking in Model: (or clicking an instance card) only names what the
+// NEXT Send goes to -- it does not touch the open chat's stored model or
+// its list entry. Send itself decides: a chat with messages already in a
+// different model gets a new chat; an empty chat, or the same model, just
+// sends where it is.
+let PENDMODEL=null;
 $('cmodel').onchange=()=>{
   const r=(window.CHATTABLE||[]).find(x=>x.where===$('cmodel').value);
-  if(!r){ chatGate(); return }
-  useModel(r);
+  useModel(r||null);
 };
-// A running model picked (here or by clicking its card): the open chat --
-// else the latest one -- sends to it from now on; a new chat only when
-// there is none at all.
 function useModel(r){
-  let c=curChat();
-  if(!c && CHATS.length){ openChat(CHATS[0]); c=curChat() }
-  if(!c){ newChat(r.name, r.where, visionOf(r.name)); return }
-  c.where=r.where; c.model=r.name; c.vision=visionOf(r.name);
-  saveChats(); renderChats(); chatGate(); $('cq').focus();
+  PENDMODEL=r||null;
+  chatGate(); $('cq').focus();
 }
 window.useModel=useModel;
 window.curChatPub=()=>curChat();
@@ -3888,10 +3906,25 @@ function chatTargetOn(){
   const c=curChat(); return !!((c && c.where) || SERVED);
 }
 function sendChat(){
-  if(BUSYC || !chatTargetOn()) return;
+  if(BUSYC) return;
   const text=$('cq').value.trim();
   if(!text && !PENDING.length) return;
-  let c=curChat(); if(!c){ newChat(); c=curChat() }
+  let c=curChat();
+  const pend=PENDMODEL;
+  if(pend){
+    // Differs from the model this chat already has messages with: a NEW
+    // chat, with the picked model, gets the message. Empty, or the same
+    // model: the open chat just adopts the pick and sends.
+    if(!c || ((c.msgs||[]).length && c.model!==pend.name)){
+      newChat(pend.name, pend.where, visionOf(pend.name));
+      c=curChat();
+    } else {
+      c.where=pend.where; c.model=pend.name; c.vision=visionOf(pend.name);
+    }
+  }
+  if(!c){ if(!chatTargetOn()) return; newChat(); c=curChat() }
+  if(!((c.where)||SERVED)) return;
+  PENDMODEL=null;
   HOME=false;
   if(c.msgs.length===0) c.title=text.slice(0,52)||'(image)';
   c.msgs.push({role:'user', content:text, att:PENDING.slice()});
