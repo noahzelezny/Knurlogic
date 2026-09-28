@@ -108,8 +108,8 @@ def test_layer_bytes_keep_the_head_and_the_rest_out_of_the_layers():
 
 
 def test_what_rank_0_alone_holds_counts_on_rank_0_alone():
-    """The MTP head lives on rank 0 only: its bytes come off rank 0's room
-    for layers, not every rank's."""
+    """The MTP head and the vision tower live on rank 0 only: their bytes
+    come off rank 0's room for layers, not every rank's."""
     per = [GIB] * 40
     even = R.pipeline_shares(per, _ranks(104, 104), other_bytes=4 * GIB)
     lead = R.pipeline_shares(per, _ranks(104, 104), other_bytes=4 * GIB,
@@ -122,7 +122,7 @@ def test_what_rank_0_alone_holds_counts_on_rank_0_alone():
                           leader_bytes=5 * GIB)
 
 
-def test_the_head_is_not_in_the_replicated_bytes(tmp_path):
+def test_the_head_and_tower_are_not_in_the_replicated_bytes(tmp_path):
     import json
     import struct
 
@@ -138,7 +138,8 @@ def test_the_head_is_not_in_the_replicated_bytes(tmp_path):
     shard(tmp_path / "model.safetensors", {
         "language_model.model.layers.0.mlp.weight": 10,
         "language_model.model.layers.1.mlp.weight": 10,
-        "language_model.model.embed_tokens.weight": 100})
+        "language_model.model.embed_tokens.weight": 100,
+        "vision_tower.blocks.0.attn.qkv.weight": 30})
     shard(tmp_path / "mtp.safetensors", {"mtp.layers.0.mlp.weight": 50})
 
     class A:
@@ -146,7 +147,7 @@ def test_the_head_is_not_in_the_replicated_bytes(tmp_path):
         raw_config = {"text_config": {"num_hidden_layers": 2}}
     per, other = R.pipeline_layer_bytes(A)
     assert per == [10, 10] and other == 100
-    assert R.pipeline_leader_bytes(A) == 50
+    assert R.pipeline_leader_bytes(A) == 50 + 30     # head + tower
 
 
 # ------------------------------------------------------------ refusals
@@ -280,6 +281,20 @@ def test_a_prefix_only_the_follower_could_use_is_prefilled_on_every_rank(
     assert d["hit"] == 5
     assert d["split"] == d["whole"]
     assert all(len(t) == 20 for t in d["whole"])
+
+
+@pytest.mark.parametrize("split", ["pipeline", "tensor"])
+def test_images_on_a_split_model_are_the_unsplit_engines(tmp_path, split):
+    """Two images in a prompt, rank 0 alone holding the tower: every row's
+    tokens are the unsplit engine's, the rows travelled once (the first
+    prompt; the second's images are inside its prompt-cache hit), and the
+    follower's trie hit the same image prefix as rank 0's (follow raises
+    Desync if its hit differs)."""
+    d = _ring(tmp_path, "image", split, timeout=300)
+    assert d["hit"] == d["cut"]
+    assert d["images"] == 1
+    assert d["split"] == d["whole"]
+    assert all(len(t) == 10 for t in d["whole"])
 
 
 @pytest.mark.parametrize("split,fail", [("pipeline", "nan"),
