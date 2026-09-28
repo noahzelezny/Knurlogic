@@ -817,7 +817,13 @@ def with_jobs(doc: dict) -> dict:
         js = cluster_jobs.jobs_document()
     except Exception:
         js = []
-    ports = {j["port"]: j for j in js if j.get("port")}
+    # a port is reused by the next job: an ended job never claims the row
+    # of the one now serving there
+    ports = {}
+    for j in js:
+        if j.get("port") and (j.get("phase") != "stopped"
+                              or j["port"] not in ports):
+            ports[j["port"]] = j
     rows = []
     for r in doc.get("resident") or []:
         u = urlparse((r.get("where") or "") if isinstance(r, dict) else "")

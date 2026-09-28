@@ -862,12 +862,6 @@
               <label class="cl">Thinking:
               <select id="ceffort" title="reasoning_effort: knurlogic maps it onto this model's own controls and says what it applied">
                 <option value="">model default</option>
-                <option value="none">none</option>
-                <option value="minimal">minimal</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="xhigh">xhigh</option>
               </select></label>
             </div>
             <form id="cf">
@@ -2163,7 +2157,7 @@ function renderPicker(){
           <span class="star" data-fav="${esc(m.path)}"
             title="favorite">${isFav(m.path)?'★':'☆'}</span>
           <span class="vn">${esc(m.name)}</span>
-          ${onPeer(m)?'':`<span class="tag">not on ${esc(pn.node)}</span>`}
+          ${onPeer(m)?'':`<span class="tag">not on ${esc(selNodes().filter(n=>!isLocal(n)&&!onNode(n,m)).map(n=>n.node).join(' + '))}</span>`}
           ${m.is_vq?'<span class="tag">VQ</span>':''}
           ${m.mtp?'<span class="tag">MTP</span>':''}
           ${isVision(m)?'<span class="tag">VISION</span>':''}
@@ -2684,7 +2678,13 @@ async function loadResident(){
     .map(r=>r.machine?{...r, can_unload:r.runtime==='knurlogic' && !!r.node
       && /:\d+\/?$/.test(r.where||'')}:r);
   const el=$('resident');
-  const card=(r,i)=>`<div class="card ${esc(r.state)}">
+  // One card per instance, not per machine: a cluster job is one instance,
+  // named once with the machines it runs on. The whole card opens a chat.
+  const on=r=>r.cluster?(r.cluster.machines||[]).join(' + ')
+    :(r.machine||((window.NODES||[]).find(n=>n.role==='local')||{}).node||'this machine');
+  const card=(r,i)=>`<div class="card ${esc(r.state)}"${r.runtime==='exo'?
+      ' title="exo\'s model: shown, not driven by knurlogic"'
+      :` title="click to chat with it" data-chatn="${i}" style="cursor:pointer"`}>
       <div class="cardhd">
         <span class="dot"></span>
         <span class="rt ${esc(r.runtime)}">${esc(r.runtime)}</span>
@@ -2692,36 +2692,30 @@ async function loadResident(){
         ${r.can_unload?`<button class="mini danger" data-i="${i}"
           >Unload</button>`:''}
       </div>
-      ${r.runtime==='exo'
-        ? `<div class="n" title="exo's model: shown, not driven by knurlogic"
-            >${esc(r.name)}</div>`
-        : `<div class="n" title="click to chat with it" data-chatn="${i}"
-            style="cursor:pointer">${esc(r.name)}</div>`}
+      <div class="n">${esc(r.name)}</div>
       <div class="s">${[
         r.bytes_resident?gb(r.bytes_resident)
           :(r.state==='offered'?'':'size not reported'),
-        r.cluster?`cluster · ${r.cluster.split} over ${
-          r.cluster.link==='jaccl'?'RDMA':'TCP/IP'} · ${(r.cluster.machines||[]).join(' + ')}${
+        r.cluster?`${r.cluster.split} over ${
+          r.cluster.link==='jaccl'?'RDMA':'TCP/IP'}${
           r.cluster.phase&&r.cluster.phase!=='ready'?' · '+r.cluster.phase:''}`:'',
         r.detail, r.state==='loaded'?'':r.state]
         .filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
         .map(esc).join(' · ')}</div>
+      <div class="s">on ${esc(on(r))}</div>
     </div>`;
   const none='<div class="card offered"><div class="cardhd">'+
     '<span class="dot"></span><span class="n">nothing loaded</span></div></div>';
-  const local=(d.resident||[]).length;
-  // Labelled by machine only once there is another machine to tell apart.
-  let h=peers.length?'<div class="machine ro">this machine</div>':'';
-  h+=local?rows.slice(0,local).map(card).join(''):none;
-  let i=local;
-  for(const m of peers){
-    const n=(m.resident||[]).length;
-    h+=`<div class="machine ro">${esc(m.machine)}</div>`;
-    h+=n?rows.slice(i,i+n).map((r,k)=>card(r,i+k)).join('')
-       :(m.error?`<div class="s ro peererr" title="${esc(m.error)}"
-            >not answering</div>`:none);
-    i+=n;
-  }
+  // a cluster job reported by more than one page is still one instance
+  const jobs=new Set();
+  const shown=rows.map((r,i)=>[r,i]).filter(([r])=>{
+    if(!r.cluster||!r.cluster.job) return true;
+    if(jobs.has(r.cluster.job)) return false;
+    jobs.add(r.cluster.job); return true });
+  let h=shown.length?shown.map(([r,i])=>card(r,i)).join(''):none;
+  for(const m of peers) if(m.error)
+    h+=`<div class="s ro peererr" title="${esc(m.error)}">${
+      esc(m.machine)} not answering</div>`;
   // a cluster job that stopped says why, on every page that ran a rank
   const ended=[...(d.jobs||[]), ...peers.flatMap(m=>m.jobs||[])]
     .filter(j=>j.phase==='stopped');
@@ -2736,7 +2730,8 @@ async function loadResident(){
   // what the chat bar's Model: offers -- the rows a click on the name chats with
   window.CHATTABLE=rows.filter(r=>r.where && r.runtime!=='exo');
   if(window.chatGate) window.chatGate();
-  el.querySelectorAll('[data-chatn]').forEach(x=>x.onclick=()=>{
+  el.querySelectorAll('[data-chatn]').forEach(x=>x.onclick=e=>{
+    if(e.target.closest('button')) return;
     const r=rows[+x.dataset.chatn];
     if(window.switchTab) window.switchTab('chat');
     if(window.newChat) window.newChat(r.name, r.where, window.visionOf(r.name));
@@ -3269,14 +3264,14 @@ async function loadSampling(where, model){
 // (/v1/models `thinking`: native [{level, name}]), plus its default. The
 // value sent is the reasoning_effort ladder level that maps exactly onto
 // that native level, so the server applies it as named. A server that does
-// not say keeps the whole ladder.
-const LADDER=['none','minimal','low','medium','high','xhigh'];
+// not say gets the plain levels; no model chosen, only its default.
+const LADDER=['none','low','medium','high'];
 let EFFWANT=null;                 // what the person picked, kept across models
 function thinkLevels(t){
   const el=$('ceffort');
   if(EFFWANT===null) EFFWANT=el.value;
   const nat=t && Array.isArray(t.native) && t.native.length ? t.native : null;
-  const opts=nat ? nat.map(n=>[n.level, n.name]) : LADDER.map(l=>[l,l]);
+  const opts=nat ? nat.map(n=>[n.level, n.name]) : t ? LADDER.map(l=>[l,l]) : [];
   const sig=JSON.stringify(opts)+(t&&t.default||'');
   if(el.dataset.sig===sig) return;
   el.dataset.sig=sig;
