@@ -667,6 +667,8 @@ def check_knob(name: str, value, window: int = 0):
                      if hi is not None else f"at least {lo:g}")
             return f"{name}={s}: {where}"
         return None
+    if name in COMPACT_KNOBS:
+        return check_compact_knob(name, value)
     try:
         if name in ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC"):
             on_off(s)
@@ -717,3 +719,106 @@ VISION_KV_IMAGES = 4
 VISION_KV_TOKENS_PER_IMAGE = 4096
 #: bf16 KV, the dtype every served rung's cache runs in.
 VISION_KV_DTYPE_BYTES = 2
+
+
+# --- server-side context compaction (interfaces/compaction.py) --------------
+# The operator's defaults for what a request's `context_management` leaves
+# out, and whether the server compacts a request that asks for nothing.
+# Read per request from the environment, so each applies live on a running
+# server (POST /settings.json) and, set before a launch, from its start.
+# Not measured: these are policy, ported from the harness's compactor
+# (scout/tasks/agent_loop_compaction.py, keep_recent=6) and the design's
+# summary budget (a tenth of what is dropped, 1k-8k).
+COMPACT_KNOBS = {
+    # name: (default, values, unit, what, why)
+    "KNURLOGIC_COMPACT_AUTO": (
+        "off", ["off", "on"], "",
+        "compact a request that asks for nothing, once its prompt passes "
+        "the trigger",
+        "off: the harness asks (context_management) and the server "
+        "performs. On: a request without context_management is compacted "
+        "as if it had asked, and the summary still goes back in the "
+        "response for the client to resend -- nothing is kept here."),
+    "KNURLOGIC_COMPACT_TRIGGER": (
+        "0.8", ["0.5", "0.6", "0.7", "0.8", "0.9"], "of the window",
+        "where compaction starts, as a share of the model's context window",
+        "used by automatic compaction, and by a compact edit that names no "
+        "trigger when the window is below the API's 150k default."),
+    "KNURLOGIC_COMPACT_KEEP_TURNS": (
+        "6", ["2", "4", "6", "8", "12", "16"], "messages",
+        "the most recent messages kept word for word",
+        "the harness's keep_recent. The kept tail never starts on a tool result: "
+        "it is widened back to the call that asked for it. The first "
+        "message and the goal turn are always kept as well."),
+    "KNURLOGIC_COMPACT_SUMMARY_MIN": (
+        "1024", ["512", "1024", "2048", "4096"], "tokens",
+        "the smallest summary budget",
+        "the budget is a tenth of the tokens being dropped, clamped between "
+        "this and the maximum."),
+    "KNURLOGIC_COMPACT_SUMMARY_MAX": (
+        "8192", ["2048", "4096", "8192", "16384"], "tokens",
+        "the largest summary budget",
+        "the budget is a tenth of the tokens being dropped, clamped between "
+        "the minimum and this."),
+    "KNURLOGIC_COMPACT_TOOL_RESULTS": (
+        "distill", ["distill", "clear"], "",
+        "what becomes of a dropped tool result: a one-line finding, or "
+        "nothing",
+        "distill: the summary pass also writes, per dropped tool call, what "
+        "it established (a Grep for X -> 'X is defined at src/foo.py:120'), "
+        "in the same model pass; a call it misses is cleared. clear: only "
+        "the call is named."),
+}
+
+
+def compact_settings(env: dict) -> dict:
+    """The operator's compaction defaults from an environment, each
+    falling back to its default when absent or unreadable:
+    {auto, trigger, keep, summary_min, summary_max, distill}."""
+    def get(name):
+        v = str((env or {}).get(name, "") or "").strip()
+        return v or COMPACT_KNOBS[name][0]
+
+    def num(name, cast, lo, hi):
+        try:
+            v = cast(get(name))
+        except ValueError:
+            v = cast(COMPACT_KNOBS[name][0])
+        return min(max(v, lo), hi)
+    try:
+        auto = on_off(get("KNURLOGIC_COMPACT_AUTO"), False)
+    except ValueError:
+        auto = False
+    lo = num("KNURLOGIC_COMPACT_SUMMARY_MIN", int, 64, 65536)
+    hi = num("KNURLOGIC_COMPACT_SUMMARY_MAX", int, 64, 65536)
+    return {"auto": auto,
+            "trigger": num("KNURLOGIC_COMPACT_TRIGGER", float, 0.05, 0.99),
+            "keep": num("KNURLOGIC_COMPACT_KEEP_TURNS", int, 0, 1000),
+            "summary_min": min(lo, hi), "summary_max": max(lo, hi),
+            "distill": get("KNURLOGIC_COMPACT_TOOL_RESULTS") != "clear"}
+
+
+def check_compact_knob(name: str, value):
+    """None when `value` is one compaction knob `name` may take, else why
+    not."""
+    s = str(value if value is not None else "").strip()
+    if name == "KNURLOGIC_COMPACT_AUTO":
+        try:
+            on_off(s)
+            return None
+        except ValueError as e:
+            return f"{name}: {e}"
+    if name == "KNURLOGIC_COMPACT_TOOL_RESULTS":
+        return None if s in ("distill", "clear") else \
+            f"{name}={s!r}: distill or clear"
+    cast, lo, hi = {"KNURLOGIC_COMPACT_TRIGGER": (float, 0.05, 0.99),
+                    "KNURLOGIC_COMPACT_KEEP_TURNS": (int, 0, 1000),
+                    "KNURLOGIC_COMPACT_SUMMARY_MIN": (int, 64, 65536),
+                    "KNURLOGIC_COMPACT_SUMMARY_MAX": (int, 64, 65536)}[name]
+    try:
+        v = cast(s)
+    except ValueError:
+        return f"{name}={s!r}: not a number"
+    if not lo <= v <= hi:
+        return f"{name}={s}: between {lo:g} and {hi:g}"
+    return None
