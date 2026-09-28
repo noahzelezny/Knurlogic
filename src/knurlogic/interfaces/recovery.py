@@ -30,7 +30,10 @@ next_at, state}, state recovering | recovered | failed; None when there is
 nothing to report. The page writes each record also to this machine's
 recovery.json under the serving port, and a relaunch carries it to the page
 of the machine running rank 0, so that model's own /v1/residency row says
-it too. Stdlib only: the page never imports mlx.
+it too. What it takes to relaunch -- each tracked model's record, its
+launch request and attempts -- is kept in recovery-models.json beside it,
+so a page restarted mid-recovery picks up where it was (restore()).
+Stdlib only: the page never imports mlx.
 """
 from __future__ import annotations
 
@@ -112,6 +115,89 @@ def _path() -> Path:
                                Path.home() / ".cache")) / "knurlogic"
     base.mkdir(parents=True, exist_ok=True)
     return base / "recovery.json"
+
+
+def _models_path() -> Path:
+    return _path().with_name("recovery-models.json")
+
+
+#: launch arguments kept across a page restart; `post`/`follow` are the
+#: tests' hooks and never written, `peers` is kept as what launch reads of
+#: each (and fresher records from the peer store win on the relaunch)
+_ARGS = ("me", "local_info", "ui_port", "serve_port")
+_PEER = ("id", "name", "key", "state", "link", "node")
+
+
+def _saved(rec: dict) -> dict:
+    out = {k: v for k, v in rec.items() if k != "args"}
+    if "args" in rec:
+        args = rec["args"] or {}
+        out["args"] = {k: args[k] for k in _ARGS if k in args}
+        out["args"]["peers"] = [{k: getattr(p, k, None) for k in _PEER}
+                                for p in args.get("peers") or []]
+    return out
+
+
+def _peer(d: dict):
+    from knurlogic.cluster.peers import Peer
+    host, _, port = str(d.get("key") or "").rpartition(":")
+    return Peer(host=host, port=int(port) if port.isdigit() else 0,
+                id=str(d.get("id") or ""), name=str(d.get("name") or ""),
+                state=str(d.get("state") or "not_answering"),
+                link=str(d.get("link") or ""),
+                node=d.get("node") if isinstance(d.get("node"), dict)
+                else None)
+
+
+#: what save() last wrote (the loop saves each tick; unchanged, it is not
+#: written again)
+_SAVED: dict = {}
+
+
+def save() -> None:
+    """Every tracked model's record, to this machine's recovery-models.json
+    (what restore() reads back after a page restart)."""
+    with _LOCK:
+        try:
+            doc = json.dumps({k: _saved(r) for k, r in MODELS.items()},
+                             default=lambda o: None)
+        except (TypeError, ValueError):
+            return
+        if doc == _SAVED.get("doc"):
+            return
+        tmp = _models_path().with_suffix(".tmp")
+        try:
+            tmp.write_text(doc)
+            tmp.replace(_models_path())
+            _SAVED["doc"] = doc
+        except OSError:
+            pass
+
+
+def restore() -> list:
+    """At page start: take back the models an earlier page process was
+    tracking (not those this one already tracks). -> their keys."""
+    try:
+        d = json.loads(_models_path().read_text())
+    except (OSError, ValueError):
+        return []
+    got = []
+    with _LOCK:
+        for k, r in (d.items() if isinstance(d, dict) else ()):
+            if not isinstance(r, dict) or k in MODELS \
+                    or r.get("kind") not in ("cluster", "single") \
+                    or r.get("key") != k:
+                continue
+            if r["kind"] == "cluster":
+                a = r.get("args") or {}
+                r["args"] = dict(a, peers=[_peer(p) for p in
+                                           a.get("peers") or []
+                                           if isinstance(p, dict)])
+            MODELS[k] = r
+            got.append(k)
+    if got:
+        ensure_thread()
+    return got
 
 
 def read_file() -> dict:
@@ -212,6 +298,7 @@ def track_cluster(job: str, *, req: dict, args: dict, order: list,
         if previous and rec and previous in (rec.get("job"),
                                              rec.get("ended_job")):
             rec.update(job=job, pending=False, ended_job=None)
+            save()
             return
         MODELS[key] = {
             "key": key, "kind": "cluster", "job": job, "req": dict(req),
@@ -221,6 +308,7 @@ def track_cluster(job: str, *, req: dict, args: dict, order: list,
             "split": req.get("split"), "link": req.get("link"),
             "attempts": [], "state": None, "pending": False}
     _sync(key)
+    save()
     ensure_thread()
 
 
@@ -234,6 +322,7 @@ def track_single(port: int, load: dict, pid: int | None = None) -> None:
                        "name": Path(str(load.get("artifact") or "")).name,
                        "attempts": [], "pending": False, "leader_here": True}
     write_port(port, None)
+    save()
     ensure_thread()
 
 
@@ -256,6 +345,8 @@ def _drop(key: str) -> None:
     rec = MODELS.pop(key, None)
     if rec and rec.get("leader_here") and rec.get("port"):
         write_port(rec["port"], None)
+    if rec:
+        save()
 
 
 def _sync(key: str) -> None:
@@ -336,6 +427,7 @@ def tick(now: float | None = None) -> list:
             _log(rec, what)
         if key in MODELS:
             _sync(key)
+    save()
     return out
 
 

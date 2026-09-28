@@ -234,42 +234,26 @@ class Link:
         ring, so nothing else can take a rank's place."""
         import secrets
         import socket
-        import struct
-        import numpy as np
         host = _rank0_host()
         if self.rank == 0:
             srv = socket.create_server((host, 0))
             port = srv.getsockname()[1]
             nonce = secrets.randbits(62)
+            logger.info("bell: rank 0 listening on %s:%d for ranks 1..%d",
+                        host, port, self.size - 1)
         else:
             srv, port, nonce = None, 0, 0
+            logger.info("bell: rank %d waiting for rank 0's port over the "
+                        "ring", self.rank)
         got = mx.distributed.all_sum(mx.array([port, nonce], dtype=mx.int64),
                                      group=self.group, stream=mx.cpu).tolist()
         port, nonce = int(got[0]), int(got[1])
-        want = struct.pack("<q", nonce)
         if self.rank == 0:
-            srv.settimeout(60)
-            try:
-                while len(self.socks) < self.size - 1:
-                    c, _ = srv.accept()
-                    c.settimeout(10)
-                    try:
-                        ok = c.recv(8) == want
-                    except OSError:
-                        ok = False
-                    if not ok:
-                        c.close()
-                        continue
-                    c.settimeout(None)
-                    self.socks.append(c)
-            finally:
-                srv.close()
+            self.socks = bell_answer(srv, host, nonce, self.size, BELL_S)
         else:
-            c = socket.create_connection((host, port), timeout=60)
-            c.sendall(want)
-            c.settimeout(None)
-            c.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            self.socks = [c]
+            logger.info("bell: rank %d dialing rank 0 at %s:%d", self.rank,
+                        host, port)
+            self.socks = [bell_dial(host, port, nonce, self.rank, BELL_S)]
         for c in self.socks:
             c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
@@ -305,6 +289,116 @@ class Link:
             buf = mx.zeros((length,), dtype=mx.uint8)
         out = mx.distributed.all_sum(buf, group=self.group, stream=mx.cpu)
         return rows, np.array(out).tobytes()
+
+
+#: how long rank 0 waits for every rank's bell connection, and a rank
+#: keeps dialing rank 0 for it
+BELL_S = 60.0
+#: a rank's bell hello: the ring's nonce, then its rank
+_HELLO = "<qq"
+
+
+def _recv_exact(c, n: int) -> bytes:
+    buf = b""
+    while len(buf) < n:
+        part = c.recv(n - len(buf))
+        if not part:
+            break
+        buf += part
+    return buf
+
+
+def bell_answer(srv, host: str, nonce: int, size: int, wait_s: float):
+    """Rank 0: accept one bell connection per rank 1..size-1 on `srv`
+    (closed on return), each presenting the ring's nonce and its rank, in
+    order by rank. Past `wait_s`, a TimeoutError naming the address and the
+    ranks that never connected."""
+    import socket
+    import struct
+    import time
+    port = srv.getsockname()[1]
+    want = set(range(1, size))
+    got: dict = {}
+    deadline = time.monotonic() + wait_s
+    try:
+        while want - set(got):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                missing = sorted(want - set(got))
+                raise TimeoutError(
+                    f"bell: rank(s) {missing} never connected to rank 0 at "
+                    f"{host}:{port} within {wait_s:.0f}s (connected: "
+                    f"{sorted(got) or 'none'}); see those ranks' logs -- a "
+                    f"rank that never logged 'dialing rank 0' is stuck "
+                    f"before it, in the ring's port exchange")
+            srv.settimeout(left)
+            try:
+                c, addr = srv.accept()
+            except socket.timeout:
+                continue
+            c.settimeout(min(10.0, max(left, 0.1)))
+            try:
+                hello = _recv_exact(c, struct.calcsize(_HELLO))
+                n, r = struct.unpack(_HELLO, hello) if len(hello) == \
+                    struct.calcsize(_HELLO) else (None, None)
+            except OSError:
+                n = r = None
+            if n != nonce or r not in want or r in got:
+                logger.warning("bell: refused a connection from %s:%d "
+                               "(%s)", addr[0], addr[1],
+                               "wrong nonce" if n != nonce else
+                               f"rank {r} not expected")
+                c.close()
+                continue
+            c.settimeout(None)
+            got[r] = c
+            logger.info("bell: rank %d connected from %s:%d", r, addr[0],
+                        addr[1])
+    except BaseException:
+        for c in got.values():
+            c.close()
+        raise
+    finally:
+        srv.close()
+    return [got[r] for r in sorted(got)]
+
+
+def bell_dial(host: str, port: int, nonce: int, rank: int, wait_s: float,
+              pause_s: float = 0.5):
+    """Rank >= 1: connect to rank 0's bell and say who it is, retrying a
+    refused or unanswered connect until `wait_s`; then a ConnectionError
+    naming the address and the last error."""
+    import socket
+    import struct
+    import time
+    deadline = time.monotonic() + wait_s
+    tries, last = 0, None
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise ConnectionError(
+                f"bell: rank {rank} could not reach rank 0 at {host}:{port} "
+                f"in {wait_s:.0f}s ({tries} tries; last: "
+                f"{type(last).__name__}: {last})")
+        tries += 1
+        try:
+            c = socket.create_connection((host, port),
+                                         timeout=min(10.0, left))
+        except OSError as e:
+            last = e
+            time.sleep(min(pause_s, max(deadline - time.monotonic(), 0)))
+            continue
+        try:
+            c.sendall(struct.pack(_HELLO, nonce, rank))
+        except OSError as e:
+            c.close()
+            last = e
+            continue
+        c.settimeout(None)
+        c.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        logger.info("bell: rank %d connected to rank 0 at %s:%d (try %d)",
+                    rank, host, port, tries)
+        return c
 
 
 class Journal:
