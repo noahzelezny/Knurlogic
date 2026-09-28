@@ -166,3 +166,101 @@ def test_two_machines_claiming_one_id_are_both_kept_and_flagged():
     ps._dedupe()
     assert len(ps.all()) == 2
     assert "both claim" in a.problem and "both claim" in b.problem
+
+
+# --- one machine on two cables (the M3/M4 rig after a replug) ---------------
+
+M4 = "002779f847e1"
+SPEED = {"198.51.100.2": ("thunderbolt", 80.0), "192.0.2.2": ("thunderbolt", 40.0)}
+
+
+def rig_doc():
+    d = doc(M4, "Laptop B")
+    d["nodes"][0]["cluster"] = {"thunderbolt": [
+        {"iface": "en3", "ip": "192.0.2.2", "gbps": 40},
+        {"iface": "en2", "ip": "198.51.100.2", "gbps": 80}]}
+    return d
+
+
+def rig(tmp_path, monkeypatch, answers=("192.0.2.2", "198.51.100.2"), **kw):
+    monkeypatch.setattr(Peers, "_speed", staticmethod(
+        lambda h: SPEED.get(h, ("other", 0.0))))
+    asked = []
+
+    def fetch(url):
+        host = url.split("//")[1].split(":")[0]
+        asked.append(host)
+        if host in answers:
+            return rig_doc()
+        raise socket.timeout("timed out")
+    return make(tmp_path, fetch, **kw), asked
+
+
+def test_an_unanswering_address_of_a_known_machine_is_not_a_second_one(
+        tmp_path, monkeypatch):
+    # the M4 answers on the TB4 cable; Bonjour then offers its TB5 address
+    # (no TXT id yet) and that address does not answer: still one machine
+    ps, _ = rig(tmp_path, monkeypatch, answers=("192.0.2.2",))
+    ps.refresh()
+    ps.add("198.51.100.2", 8899, "bonjour")
+    ps.refresh()
+    [p] = ps.all()
+    assert (p.id, p.state, p.key) == (M4, "answering", "192.0.2.2:8899")
+    assert "bonjour" in p.found_by
+    assert p.addresses == {"192.0.2.2:8899", "198.51.100.2:8899"}
+    assert p.public()["other_addresses"] == ["198.51.100.2:8899"]
+
+
+def test_an_id_less_silent_address_learned_first_folds_in(tmp_path,
+                                                          monkeypatch):
+    # the silent address was already a peer of its own before the machine
+    # answered on the other cable: the refresh folds it in
+    ps, _ = rig(tmp_path, monkeypatch, answers=("192.0.2.2",),
+                manual=(("198.51.100.2", 8899), ("192.0.2.2", 8899)))
+    ps.refresh()
+    [p] = ps.all()
+    assert p.key == "192.0.2.2:8899" and p.found_by == {"manual"}
+    assert "198.51.100.2:8899" in p.addresses
+
+
+def test_the_same_machine_at_both_cables_keeps_the_faster(tmp_path,
+                                                          monkeypatch):
+    ps, _ = rig(tmp_path, monkeypatch,
+                manual=(("192.0.2.2", 8899), ("198.51.100.2", 8899)))
+    ps.refresh()
+    [p] = ps.all()
+    assert p.key == "198.51.100.2:8899" and p.gbps == 80.0
+    assert p.addresses == {"192.0.2.2:8899", "198.51.100.2:8899"}
+
+
+def test_a_machine_is_asked_at_its_fastest_address_and_moves_there(
+        tmp_path, monkeypatch):
+    ps, asked = rig(tmp_path, monkeypatch)
+    ps.refresh()                        # known only at 192.0.2.2 (TB4)
+    ps.add("198.51.100.2", 8899, "bonjour", id=M4)   # its TB5 address
+    assert len(ps.all()) == 1
+    asked.clear()
+    ps.refresh()
+    [p] = ps.all()
+    assert asked == ["198.51.100.2"]
+    assert p.key == "198.51.100.2:8899" and p.state == "answering"
+    # the TB5 cable pulled: it answers on the other one, still one machine
+    ps._fetch = lambda url: (rig_doc() if "192.0.2.2" in url
+                             else (_ for _ in ()).throw(
+                                 socket.timeout("timed out")))
+    ps.refresh()
+    [p] = ps.all()
+    assert p.key == "192.0.2.2:8899" and p.state == "answering"
+
+
+def test_introductions_and_bonjour_instances_fold_into_the_machine(
+        tmp_path, monkeypatch):
+    ps, _ = rig(tmp_path, monkeypatch, answers=("192.0.2.2",))
+    ps.refresh()
+    ps.introduce("198.51.100.2", f"{M4} 8899")
+    assert len(ps.all()) == 1 and "introduced" in ps.all()[0].found_by
+    assert ps.id_of_instance(f"Laptop B {M4[:6]}") == M4
+    assert ps.id_of_instance("Someone Else 123456") == ""
+    # a stranger at an unknown address is still its own peer
+    ps.add("203.0.113.99", 8899, "bonjour")
+    assert len(ps.all()) == 2

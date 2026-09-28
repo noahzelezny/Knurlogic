@@ -159,7 +159,8 @@ def _status_fn(_n=0):
                 machine_fn=lambda: {}),
                 "found_by": sorted(p.found_by), "state": p.state,
                 "problem": p.problem, "address": p.key})
-        claimed |= {p.name, p.host}
+        claimed |= {p.name, p.host} | {
+            k.rpartition(":")[0] for k in getattr(p, "addresses", ())}
     for n in exo_nodes:
         if n.name == local or n.name in claimed or n.ip in claimed:
             continue
@@ -1388,8 +1389,10 @@ def _start_discovery(me: dict, host: str, port: int, reachable: bool):
                 txt = svc.get("txt") or {}
                 if txt.get("id") == me["id"] or not PEERS:
                     continue
-                p = PEERS.add(svc["host"], svc["port"], "bonjour")
-                p.id = p.id or txt.get("id", "")
+                pid = txt.get("id", "") or PEERS.id_of_instance(
+                    svc.get("name", ""))
+                p = PEERS.add(svc["host"], svc["port"], "bonjour", id=pid)
+                p.id = p.id or pid
                 p.name = p.name or txt.get("name", "")
         d = dsd.Discovery(on_change=found)
         txt = {"id": me["id"], "name": me["name"], "ver": __version__,
