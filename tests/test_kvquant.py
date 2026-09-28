@@ -243,3 +243,167 @@ def test_gemma4_quantizes_its_full_attention_and_keeps_the_windows():
     got = forced()
     assert mx.argmax(got[0]).item() == mx.argmax(ref[0]).item()
     assert mx.abs(got - ref).max().item() < 0.1 * mx.abs(ref).max().item()
+
+
+# --- qwen4_exp (Flash-Next) and glm5_next ---------------------------------------
+#
+# TOLERANCE. 8-bit affine in groups of 64 rounds each K/V element to within
+# half a step of its group's range / 255 -- about 0.2% of that range. The
+# tiny float32 fixtures move their logits by 0.2-0.3% of the largest |logit|
+# at 8 bits (qwen3_5 0.26%, qwen4_exp 0.31%, glm5_next 0.21%), ~1% at 6 and
+# 4-6% at 4. The gate is 1% of the largest |logit| at 8 bits -- 3x the
+# measured drift, and below what 6 bits already costs, so a regression that
+# halves the precision fails -- plus the same greedy token at every position.
+
+def _family(name):
+    import pipeline_ring_worker as W
+    return W.build(name)
+
+
+def _forced(model, prompt, toks, widths=(1,)):
+    """Teacher-forced logits: the prompt, then `toks` fed `widths[i]` at a
+    time (a width of 2-4 is GLM's SMALL_L verify path)."""
+    c = model.make_cache()
+
+    def call(x):
+        y = model(mx.array([x]), cache=c)
+        return (y if isinstance(y, mx.array) else y.logits)[0]
+    out = [call(prompt)[-1:]]
+    i, w = 0, 0
+    while i < len(toks):
+        n = widths[w % len(widths)]
+        out.append(call(toks[i:i + n]))
+        i, w = i + n, w + 1
+    return mx.concatenate(out), c
+
+
+def _close(got, ref, frac):
+    assert mx.array_equal(mx.argmax(got, -1), mx.argmax(ref, -1))
+    drift = mx.abs(got - ref).max().item() / mx.abs(ref).max().item()
+    assert drift < frac, drift
+
+
+def _prompt(n=90, m=8, seed=3):
+    mx.random.seed(seed)
+    return (mx.random.randint(0, 200, (n,)).tolist(),
+            mx.random.randint(0, 200, (m,)).tolist())
+
+
+def test_flash_next_quantizes_its_attention_and_keeps_the_indexer():
+    import importlib
+    from knurlogic.engine.kvquant import install
+    model = _family("qwen4_exp")
+    Q = importlib.import_module(type(model).__module__)
+    prompt, toks = _prompt()
+    ref, _ = _forced(model, prompt, toks)
+    assert install(model, 8) == 1
+    got, cache = _forced(model, prompt, toks)
+    _close(got, ref, 0.01)
+    attn = [c for c in cache if hasattr(c, "indexer")]
+    assert [type(c).__name__ for c in attn] == ["QuantAttnCache"]
+    a = attn[0]
+    assert type(a.keys) is tuple and a.keys[0].dtype == mx.uint32
+    assert a.indexer.keys.dtype != mx.uint32          # exact, as before
+    assert a.indexer.keys.shape[1] == a.offset == len(prompt) + len(toks)
+    assert isinstance(a, Q._AttnCache) and not hasattr(a, "bits")
+
+
+def test_flash_next_quantized_cache_trims_and_restores_its_indexer():
+    import copy
+    from mlx_lm.models.cache import trim_prompt_cache
+    from knurlogic.engine.kvquant import install
+    model = _family("qwen4_exp")
+    install(model, 8)
+    prompt, toks = _prompt(40, 4)
+    _, cache = _forced(model, prompt, toks)
+    a = [c for c in cache if hasattr(c, "indexer")][0]
+    b = copy.deepcopy(a)
+    b.state = a.state
+    b.meta_state = a.meta_state
+    assert b.offset == a.offset and b.indexer.keys.shape == a.indexer.keys.shape
+    assert trim_prompt_cache([a], 4) == 4
+    assert a.offset == a.indexer.keys.shape[1] == len(prompt)
+
+
+def test_glm_quantizes_the_mla_latent_and_keeps_the_indexer():
+    """90 tokens: past index_topk (64), so the DSA picks a sparse set; the
+    prefill takes the expanded path, single steps and widths 2-4 the
+    absorbed SMALL_L one -- both read the dequantized latent."""
+    from knurlogic.engine.kvquant import QuantKVCache, install
+    model = _family("glm5_next")
+    prompt, toks = _prompt(90, 9)
+    for widths in ((1,), (2, 3, 4)):
+        ref, _ = _forced(model, prompt, toks, widths)
+        m = _family("glm5_next")
+        assert install(m, 8) == 1
+        got, cache = _forced(m, prompt, toks, widths)
+        _close(got, ref, 0.01)
+    fa = [c for c in cache if hasattr(c, "caches")][0]
+    latent, indexer = fa.caches
+    assert type(latent) is QuantKVCache
+    assert type(indexer).__name__ == "KVCache"
+    assert indexer.keys.dtype != mx.uint32
+
+
+@pytest.mark.parametrize("family", ["qwen4_exp", "glm5_next"])
+def test_a_quantized_batch_is_each_row_alone(family):
+    """merge (admission), filter (a row finishing), extract (the prompt
+    cache it hands back) on the family's quantized cache: three rows in one
+    batch emit what each emits alone."""
+    from knurlogic.engine.kvquant import install
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    model = _family(family)
+    install(model, 8)
+    mx.random.seed(1)
+    prompts = [mx.random.randint(0, 200, (n,)).tolist() for n in (37, 9, 90)]
+    kept = []
+    both = _run(MTPBatchGenerator(model, None, prefill_step_size=16),
+                prompts, 20, on_finish=lambda r: kept.append(r.prompt_cache))
+    alone = [_run(MTPBatchGenerator(model, None, prefill_step_size=16),
+                  [p], 20)[0] for p in prompts]
+    assert both == alone
+    held = [c.caches[0] if hasattr(c, "caches") else c for c in kept[0]]
+    assert any(getattr(c, "kv_bits", None) == 8 for c in held)
+
+
+def _head(family, model):
+    import importlib
+    arch = importlib.import_module(type(model).__module__)
+    if family == "qwen4_exp":
+        from knurlogic.engine.families.qwen.heads.qwen4_exp import MTPHead
+        h = MTPHead(model, arch)
+        D, hc = h.D, h.hc
+        h.norm_e = h._norm(D, mx.ones((D,)))
+        h.norm_h = h._norm(hc * D, mx.ones((hc * D,)), group_size=D)
+        h.fc = 0.02 * mx.random.normal((D, 2 * D))
+        return h
+    from knurlogic.engine.families.glm5.heads.glm5 import MTPHeadGlm5
+    h = MTPHeadGlm5(model, arch)
+    for m in h._modules().values():
+        m.set_dtype(mx.float32)
+        mx.eval(m.parameters())
+    return h
+
+
+@pytest.mark.parametrize("family", ["qwen4_exp", "glm5_next"])
+def test_drafting_over_a_quantized_family_cache_matches_plain_steps(
+        family, monkeypatch):
+    """A random head drafting every step: its rejections roll the quantized
+    trunk cache (and the exact indexer beside it) back, GLM's verify runs
+    the SMALL_L path over the dequantized latent -- and the tokens are
+    the plain steps'. The head's own draft cache stays bf16."""
+    from knurlogic.engine.kvquant import install
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
+    model = _family(family)
+    install(model, 8)
+    mx.random.seed(1)
+    prompts = [mx.random.randint(0, 200, (n,)).tolist() for n in (37, 9, 90)]
+    head = _head(family, model)
+    plain = _run(MTPBatchGenerator(model, None, prefill_step_size=16),
+                 prompts, 30)
+    stats = {}
+    draft = _run(MTPBatchGenerator(model, head, stats=stats,
+                                   prefill_step_size=16), prompts, 30)
+    assert stats["steps"] > 0
+    assert draft == plain

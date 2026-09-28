@@ -8,16 +8,22 @@ MANIFEST = {
         "glm5_next": {
             "host": "mlx_lm",
             "model_types": ["glm5_next_text", "glm5_next"],
-            # MLA: the cache is the compressed latent + rope key and the DSA
-            # indexer's keys, in mlx-vlm's own cache classes. The vendored
-            # mlx-vlm carries kv_quant/turboquant for its own generate loop;
-            # knurlogic's batch engine has never run them, and a latent is
-            # not the per-head K/V engine/kvquant.py stores.
-            "kv_quant": {"refused": "GLM caches an MLA latent and the DSA "
-                                    "indexer's keys in mlx-vlm's own cache "
-                                    "classes, not per-head K/V; its vendored "
-                                    "kv_quant/turboquant path is not wired "
-                                    "into the batch engine"},
+            # MLA: each attention layer caches the normed compressed latent
+            # (K = V, one shared head) and the DSA indexer's packed keys.
+            # 8-bit stores the LATENT quantized (language._LatentCache ->
+            # engine/kvquant.QuantKVCache, groups of 64 along kv_lora_rank)
+            # and keeps the indexer exact: it picks the sparse set, and a
+            # rounding there changes WHICH tokens are read, not how well.
+            # Only 8: the latent is every head's K and V at once, so its
+            # error is not averaged over heads the way per-head K/V's is;
+            # 6/4 wait for a measurement on a real rung.
+            "kv_quant": {"bits": [8],
+                         "why": "the MLA latent only (K = V, every head reads "
+                                "it); the DSA indexer's keys and the deltanet "
+                                "state stay bf16. 6 and 4 bits are refused "
+                                "until measured on a real model",
+                         "caches": {"_LatentCache": "knurlogic.engine."
+                                    "kvquant:QuantKVCache"}},
             "prefill_chunk": (2048, "34 deltanet layers hold per-token "
                                     "recurrent intermediates (16.8 MB/layer) "
                                     "across a chunk; 4096 OOMed both boxes "
