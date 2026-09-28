@@ -300,6 +300,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         from knurlogic.engine.serve import state as _st
         snap["cross_chip"] = dict(_st.SERVED.get("cross_chip") or cross)
         snap["preset"] = dict(r.preset)
+        # what is running and what is waiting (scheduler.requests)
+        from knurlogic.interfaces import http as _http
+        snap["requests"] = _http.requests_now()
         # what reasoning_effort does on the served model -- the MCP's
         # `models` answer plus the default the server actually renders
         try:

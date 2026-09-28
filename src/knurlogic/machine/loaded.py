@@ -65,6 +65,9 @@ class Resident:
     detail: str = ""
     can_unload: bool = False
     ident: str = ""                 # what an unload would name
+    #: knurlogic only: in_flight, pending, capacity, oldest_pending_s,
+    #: holding from the server's /status.json; None elsewhere
+    requests: dict | None = None
     extra: dict = field(default_factory=dict, repr=False)
 
     @property
@@ -216,7 +219,9 @@ def _knurlogic(base: str) -> list:
         runtime="knurlogic", name=a.get("name") or "?", where=base,
         bytes_resident=int(m.get("active_bytes") or 0),
         detail=a.get("model_type") or "", can_unload=True,
-        ident=a.get("path") or a.get("name") or "")]
+        ident=a.get("path") or a.get("name") or "",
+        requests=d.get("requests") if isinstance(d.get("requests"), dict)
+        else None)]
 
 
 def survey(ports: dict | None = None, self_url: str = "") -> dict:
