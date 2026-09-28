@@ -1186,7 +1186,7 @@ function infoHTML(text, cls){
   return text ? `<i class="info ${cls||''}" tabindex="0">i<span class="bub">${text}</span></i>` : '';
 }
 // What the two reach words mean, for their hover.
-const REACH={live:'applies to the running model immediately',
+const REACH={live:'applies to the running model without reloading it -- on every machine a split model runs on',
   launch:'nothing of this model is running: the value is saved as its launch setting and used when it is next launched from this page',
   restart:'read when the model loads: the new value takes effect when this model is next launched from this page'};
 // "4.0" running is the step 4: compared as numbers where both are numbers
