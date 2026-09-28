@@ -299,3 +299,75 @@ def test_a_one_mac_server_that_dies_is_relaunched_the_same_way(
     # its Unload: gone from recovery
     ui._stop(8093)
     assert not R.MODELS and "8093" not in R.read_file()
+
+
+# --- a page restart -------------------------------------------------------
+
+def _restart_page():
+    """What a page restart leaves: the files, not this process's memory."""
+    R.MODELS.clear()
+    R._SAVED.clear()
+    C.ENDED.clear()
+    C.SPECS.clear()
+
+
+def test_a_page_restarted_mid_recovery_still_relaunches(two_pages,
+                                                        monkeypatch):
+    """Rank 1 dies, the page schedules the relaunch, then the page
+    restarts: the new page process reads what to relaunch back and
+    relaunches the same launch."""
+    p = two_pages
+    monkeypatch.setattr(R, "BACKOFF_S", (0.5, 0.5, 0.5))
+    os.kill(p.rank1["pid"], 9)
+    assert wait(lambda: p.job in C.ENDED, 30)
+    what = ticks_until(lambda w: w.startswith("down"))
+    assert what and "relaunch 1 in" in what
+    before = next(iter(R.MODELS.values()))
+    _restart_page()
+    assert R.for_job(p.job) is None             # nothing in memory
+    C.start_watching_existing()                 # the page's start
+    assert list(R.MODELS) == [before["key"]]
+    assert R.for_job(p.job)["state"] == "recovering"
+    new = None
+    try:
+        what = ticks_until(lambda w: w.startswith("relaunch 1"))
+        assert what, R.MODELS
+        new = next(iter(R.MODELS.values()))["job"]
+        assert new != p.job
+        recs = J.by_job()[new]
+        assert recs[0]["machines"] == ["A", "B"]
+        assert recs[0]["split"] == "tensor" and recs[0].get("port") == p.port
+        assert ticks_until(lambda w: w.startswith("recovered"))
+        assert R.for_job(new)["attempts"] == 1
+    finally:
+        if new:
+            C.stop(new, grace=1)
+
+
+def test_a_restored_model_keeps_its_attempts_and_limits(faked):
+    t = 1000.0
+    faked["ended"] = "rank 1 on B (pid 1) exited"
+    R.tick(t)
+    t += R.BACKOFF_S[0]
+    assert R.tick(t)[0][1].startswith("relaunch 1:")
+    _restart_page()
+    assert R.restore() and R.restore() == []    # once, not twice
+    faked["ended"] = "rank 1 on B (pid 2) exited"
+    what = R.tick(t + 1)[0][1]
+    assert f"relaunch 2 in {R.BACKOFF_S[1]:.0f} s" in what
+    t += 1 + R.BACKOFF_S[1]
+    assert R.tick(t)[0][1].startswith("relaunch 2:")
+    req, k = faked["launches"][-1]
+    assert req["order"] == ["A", "B"] and req["sets"] == {"kv_bits": "8"}
+    assert k["recovering"]["attempts"] == 2
+
+
+def test_a_one_mac_server_is_restored_too(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    R.track_single(8093, {"artifact": "/m/qwen", "tune": "fast"}, pid=7)
+    _restart_page()
+    assert R.restore() == ["single:8093"]
+    assert R.MODELS["single:8093"]["load"]["tune"] == "fast"
+    R.cancel_port(8093)                          # an unload after it
+    _restart_page()
+    assert R.restore() == []

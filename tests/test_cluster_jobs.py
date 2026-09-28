@@ -1310,3 +1310,14 @@ def test_a_stopped_job_never_claims_the_port_the_next_job_serves_on(monkeypatch)
     doc = ui.with_jobs({"resident": [
         {"runtime": "knurlogic", "where": "http://10.0.1.2:8080"}]})
     assert doc["resident"][0]["cluster"]["job"] == "new"
+
+
+def test_an_unload_after_a_page_restart_still_tells_the_other_pages(
+        two_pages):
+    """SPECS is this page process's memory: after a restart the job's
+    machines come from its rank records, so the stop still reaches B."""
+    p = two_pages
+    C.SPECS.clear()                             # the page restarted
+    out = C.stop(p.job, grace=1)
+    assert out["told"] == ["B"]
+    assert wait(lambda: not alive(p.rank1["pid"]), 30)
