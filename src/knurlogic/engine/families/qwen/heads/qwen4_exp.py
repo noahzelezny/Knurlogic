@@ -85,7 +85,12 @@ class MTPHead:
         fa_idx = [i for i, l in enumerate(core.layers)
                   if l.layer_type == "full_attention"][0]
         self.fa_idx = fa_idx
-        self.block = type(core.layers[fa_idx])(args_t, fa_idx)
+        # a pipeline stage wraps its first layer (engine/runtime/pipeline
+        # Recv/Send): the block is the layer's own class, not the wrapper's
+        lay = core.layers[fa_idx]
+        while "inner" in lay:
+            lay = lay["inner"]
+        self.block = type(lay)(args_t, fa_idx)
         # The head has no PLE bank. A zero-filled stand-in is NOT a no-op
         # through this class, so the submodule has to go entirely.
         self.block.ple = None

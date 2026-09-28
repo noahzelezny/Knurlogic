@@ -911,7 +911,7 @@
     </main>
     <aside class="right">
       <section class="panel" id="runningpanel">
-        <div class="lab">Running</div>
+        <div class="lab">Instances</div>
         <div class="loaded" id="served">
           <div class="nm" id="title">—</div>
           <div class="msg" id="sub">loading…</div>
@@ -2767,7 +2767,11 @@ async function loadResident(){
       :` title="click to chat with it" data-chatn="${i}" style="cursor:pointer"`}>
       <div class="cardhd">
         <span class="dot"></span>
-        <span class="rt ${esc(r.runtime)}">${esc(r.runtime)}</span>
+        <span class="rt ${esc(r.runtime)}"${r.runtime==='knurlogic'?` title="knurlogic"`:''}>${
+          r.runtime!=='knurlogic' ? esc(r.runtime)
+          : r.recovery&&r.recovery.state==='recovering' ? 'recovering'
+          : r.state!=='loaded' ? esc(r.state)
+          : r.requests&&(r.requests.in_flight||r.requests.pending) ? 'running' : 'ready'}</span>
         <span class="grow"></span>
         ${r.can_unload?`<button class="mini danger" data-i="${i}"
           >Unload</button>`:''}
