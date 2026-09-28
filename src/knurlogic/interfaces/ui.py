@@ -537,7 +537,11 @@ def forward_launch(req: dict, post=None) -> dict:
                "tune": req.get("tune") if req.get("tune") in TUNES
                else "balanced", "sets": sets, "force": bool(req.get("force"))}
         if req.get("port"):
-            doc["port"] = int(req["port"])
+            try:
+                doc["port"] = int(req["port"])
+            except (TypeError, ValueError):
+                return {"error": f"port {str(req['port'])[:20]!r} is not "
+                                 f"a number"}
         if not doc["identity"]:
             return {"error": "no identity for that model; this page's "
                              "/models.json gives one per artifact"}
@@ -591,6 +595,27 @@ def clean(doc):
     return _clean(doc)
 
 
+_ADDRS: dict = {}
+
+
+def _addresses_of(host: str, ttl: float = 60.0) -> set:
+    """The addresses a --peer NAME resolves to (cached a minute): the
+    operator named that machine, so its address is trusted as the name
+    is. An IP literal resolves to itself."""
+    now = time.time()
+    hit = _ADDRS.get(host)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    import socket
+    try:
+        got = {a[4][0].split("%")[0] for a in socket.getaddrinfo(
+            host, None, proto=socket.IPPROTO_TCP)}
+    except (OSError, UnicodeError):
+        got = set()
+    _ADDRS[host] = (now, got)
+    return got
+
+
 def peer_refusal(headers, client_ip: str, local_ip: str, gate=None,
                  manual_hosts=(), what: str = "peer requests"):
     """The gate every /peer/ route shares: (status, doc) when refused, else
@@ -602,7 +627,8 @@ def peer_refusal(headers, client_ip: str, local_ip: str, gate=None,
         return 403, {"error": "a web page cannot drive another machine"}
     ip = (client_ip or "").removeprefix("::ffff:")
     g = gate or Gate()
-    if not (g.allows(local_ip) or ip in set(manual_hosts)):
+    if not (g.allows(local_ip) or ip in set(manual_hosts)
+            or any(ip in _addresses_of(h) for h in manual_hosts)):
         return 403, {"error": f"{what} are taken over Thunderbolt or "
                               f"loopback, or from a peer named with --peer; "
                               f"this came from {ip}"}
