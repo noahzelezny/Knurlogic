@@ -22,19 +22,28 @@ Hidden states cross ranks with send / recv, each evaluated where it is
 built (a follower's step finishes its send inside the forward; rank 0's
 receive is waited for inside the forward), so the order of point-to-point
 messages and of the CPU collectives (the plan exchange, B0-B2 below) is
-the program order on every rank. A receive is made in the RECEIVING rank's
+the program order on every rank. A prompt's prefill chunks are the one
+exception (`overlapped`): a chunk's send runs while the next chunk
+computes, and every send has completed before the prefill's last forward. A receive is made in the RECEIVING rank's
 own activation dtype and a send is cast to its receiver's (the dtypes are
 agreed when the model is split), never the dtype of a placeholder: an
 unloaded embedding is float32, and a float32 receive of bf16 bytes ran a
 whole shard in float32 on the 397B (Noah's 574a7bd7).
 
 MTP on pipeline (the head lives on rank 0, which holds the last layers and
-so the true final hidden state). A follower runs a head too, on its own
-stage's hidden state: its drafts are never used, but its head cache moves
-exactly as rank 0's does, so every rank's bookkeeping (prompt-cache entries,
-offsets, the replay) is the same code. Per step, fixed and never dependent
-on a verdict (`Coord`):
+so the true final hidden state -- and on rank 0 ALONE: a follower never
+loads a head and never runs one). A follower still takes part in every
+verify: its stage runs the drafted token as the second position of the
+2-wide forward, and rolls back and replays as rank 0 says. What a head
+would have decided on a follower is told to it instead (`Coord`), so the
+collective count per step is the same on every rank and never depends on
+a verdict:
 
+    BA  [ok, hit, drafts]        per admission, before its prefill: rank
+                                 0's usable prefix (a drafting row needs
+                                 an entry with an aligned head cache, which
+                                 only rank 0 can see) and whether the row
+                                 drafts (which moves its checkpoints)
     B1  [drafting, d2 per row]   before the verify forward: whether this
                                  step drafts (rank 0's timing decides) and
                                  the drafted tokens the first stage embeds
@@ -45,11 +54,13 @@ on a verdict (`Coord`):
 
 and, on the step that admits a row, B0 [t1 per row]: the admitted row's
 first token is sampled inside the admission, after the step's plan was
-sent, and a follower's own sample is noise.
+sent, and a follower's own sample is noise. A follower's prompt-cache
+entries carry no head cache; BA makes that invisible.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import List, Optional, Sequence, Tuple
 
@@ -134,18 +145,82 @@ class Recv(_Wrap):
 
 class Send(_Wrap):
     """The last layer of a stage that is not the last: its output goes to
-    the next stage in that stage's dtype, sent before the forward returns."""
+    the next stage in that stage's dtype, sent before the forward returns
+    -- or, inside `overlapped` (a prompt's prefill chunks), sent while the
+    next chunk computes: at most two sends are in flight, and all of them
+    have completed before the prefill's last forward, so nothing is in
+    flight when the next collective runs."""
 
     def __init__(self, inner, dst: int, group, dtype):
         super().__init__(inner)
         self._dst, self._group, self._dtype = dst, group, dtype
+        self.overlap = False
+        self._pending: list = []
+        #: sends made asynchronously (the tests read it)
+        self.overlapped = 0
 
     def __call__(self, x, *a, **kw):
         y = self.inner(x, *a, **kw)
         s = mx.distributed.send(y.astype(self._dtype), self._dst,
                                 group=self._group)
-        mx.eval(s)
+        if not self.overlap:
+            mx.eval(s)
+            return y
+        # this chunk's layers and send go to the device now; the previous
+        # chunk's send is waited for only after, while this one computes
+        mx.async_eval(s)
+        self._pending.append(s)
+        self.overlapped += 1
+        if len(self._pending) > 1:
+            mx.eval(self._pending[:-1])
+            del self._pending[:-1]
         return y
+
+    def flush(self) -> None:
+        """Wait for every send in flight."""
+        if self._pending:
+            mx.eval(self._pending)
+            self._pending.clear()
+
+
+def sends_of(model) -> List[Send]:
+    """This stage's Send (none on rank 0), seen through its wrappers."""
+    out = []
+    for layer in core_of(model).layers:
+        while isinstance(layer, _Wrap):
+            if isinstance(layer, Send):
+                out.append(layer)
+            layer = layer["inner"]
+    return out
+
+
+def overlap_on() -> bool:
+    """KNURLOGIC_PIPELINE_OVERLAP=off sends each prefill chunk before the
+    next one computes (the A/B for the overlap's gain)."""
+    import os
+    v = os.environ.get("KNURLOGIC_PIPELINE_OVERLAP", "").strip().lower()
+    return v not in ("off", "0", "false", "no")
+
+
+@contextlib.contextmanager
+def overlapped(model):
+    """Around a prompt's prefill chunks (batch_loop.admit's prefill_ctx):
+    each chunk's hidden state is sent while the next chunk computes (Noah's
+    exo fork queued its prefill sends for the same reason), and every send
+    has completed on the way out -- before the prefill's last forward and
+    any collective after it. Nothing but sends and receives happens
+    between the chunks, so the point-to-point order is the program order
+    on every rank, as without it."""
+    sends = sends_of(model) if overlap_on() else []
+    for sd in sends:
+        sd.overlap = True
+    try:
+        yield
+    finally:
+        for sd in sends:
+            sd.overlap = False
+        for sd in sends:
+            sd.flush()
 
 
 def bounds_of(counts: Sequence[int]) -> List[Tuple[int, int]]:
@@ -256,22 +331,30 @@ class Silent:
 
 
 def silence(gen) -> None:
-    """Make a follower's batch engine call its trunk through `Silent`."""
+    """Make a follower's batch engine call its trunk through `Silent`, and
+    overlap its prefill sends with the next chunk (`overlapped`)."""
     s = Silent(gen._trunk)
     gen._trunk = s
     gen._batch.model = s
+    model = gen.model
+    gen._prefill_ctx = lambda: overlapped(model)
 
 
 # ------------------------------------------------------------ coordinator
 
 class Coord:
     """The per-step control broadcasts of a pipeline (module docstring):
-    rank 0's values on every rank, one all_gather on the CPU each."""
+    rank 0's values on every rank, one all_gather on the CPU each.
 
-    def __init__(self, group):
+    `head`: rank 0 drafts (it bound a head; `tensor.agree_head` told every
+    rank). The same on every rank, so BA / B1 are made on every rank or on
+    none -- a follower holds no head of its own to ask."""
+
+    def __init__(self, group, head: bool = False):
         self.group = group
         self.leader = group.rank() == 0
-        self.calls = {"b0": 0, "b1": 0, "b2": 0}
+        self.head = bool(head)
+        self.calls = {"b0": 0, "b1": 0, "b2": 0, "ba": 0, "img": 0}
         #: the last b0 found the ranks holding different row counts (one
         #: rank's admission failed): every rank skips that call's decode
         #: step, whose collectives would not line up, and rank 0's next
@@ -309,6 +392,66 @@ class Coord:
             return t1
         return mx.array(got[:ns[0]], dtype=mx.int32)
 
+    def ba(self, ok: bool, hit: int, drafts: bool) -> Tuple[int, bool]:
+        """Before an admission's prefill, on a drafting pipeline: -> rank
+        0's (hit, drafts). Every rank says whether it got this far; if any
+        did not, every rank's admission fails here (RuntimeError), before
+        a prefill whose sends one rank would never make."""
+        self.calls["ba"] += 1
+        got = mx.distributed.all_gather(
+            mx.array([int(bool(ok)), int(hit), int(bool(drafts))],
+                     dtype=mx.int64), group=self.group,
+            stream=mx.cpu).tolist()
+        if not all(got[0::3]):
+            bad = [r for r, o in enumerate(got[0::3]) if not o]
+            raise RuntimeError(f"rank(s) {bad} failed this admission before "
+                               f"its prefill")
+        return int(got[1]), bool(got[2])
+
+    def images(self, key_slice: list, features, refs):
+        """An admission whose uncached span holds images, on every rank
+        (tensor and pipeline): rank 0's encoded rows of every image in
+        `key_slice`, in order of first appearance, reach every rank. -> a
+        FeatureLookup over them (rank 0: its own `features`). Rank 0 alone
+        runs the tower; a follower's family embeds from these rows exactly
+        as rank 0's would from its store (float32 on the wire: exact for
+        bf16 rows). `refs`: every rank's RefLookup (a follower's from the
+        admit op), which says each image's row count. Raises VisionError
+        on every rank when rank 0 could not read its rows."""
+        from knurlogic.engine.vision import EncodedImage, VisionError
+        from knurlogic.engine.vision.key import images_in
+        self.calls["img"] += 1
+        imgs = list(dict.fromkeys(images_in(key_slice)))
+        ns = [int(refs(sha, ph).n_tokens) for sha, ph in imgs]
+        rows, dim, ok = None, 0, 0
+        if self.leader:
+            try:
+                parts = [features(sha, ph).feats[:n]
+                         for (sha, ph), n in zip(imgs, ns)]
+                rows = mx.concatenate(parts, axis=0).astype(mx.float32)
+                dim, ok = int(rows.shape[1]), 1
+            except Exception:
+                logger.exception("rank 0 could not read an image's rows")
+        ok, dim = self._bcast([ok, dim])
+        if not ok:
+            raise VisionError("rank 0 could not read this request's image "
+                              "rows; the admission fails on every rank")
+        if not self.leader:
+            rows = mx.zeros((sum(ns), dim), dtype=mx.float32)
+        got = mx.distributed.all_sum(rows, group=self.group, stream=mx.cpu)
+        mx.eval(got)
+        if self.leader:
+            return features
+        table, at = {}, 0
+        for (sha, ph), n in zip(imgs, ns):
+            table[(sha, ph)] = EncodedImage(ref=refs(sha, ph),
+                                            feats=got[at:at + n])
+            at += n
+
+        def lookup(sha: str, ph: str):
+            return table[(sha, ph)]
+        return lookup
+
     def b1(self, drafting: bool, d2: Optional[mx.array], B: int):
         """-> (drafting, d2 [B] int32 or None)."""
         self.calls["b1"] += 1
@@ -329,9 +472,13 @@ class Coord:
         return [bool(o) for o in got[:B]], mx.array(got[B:], dtype=mx.int32)
 
 
-def coordinate(gen, group) -> Coord:
-    """Install a Coord on a batch engine (every rank of a pipeline)."""
-    c = Coord(group)
+def coordinate(gen, group, drafting: Optional[bool] = None) -> Coord:
+    """Install a Coord on a batch engine (every rank of a pipeline).
+    `drafting`: rank 0 drafts; default, whether this engine holds a head
+    (rank 0's own answer)."""
+    if drafting is None:
+        drafting = gen._head is not None
+    c = Coord(group, head=drafting)
     gen._coord = c
     gen._batch.coord = c
     return c
@@ -341,10 +488,12 @@ def coordinate(gen, group) -> Coord:
 
 def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
           working_set: int, bandwidth_gbs: Optional[float] = None,
-          counts: Optional[Sequence[int]] = None) -> dict:
+          counts: Optional[Sequence[int]] = None,
+          leader_bytes: int = 0) -> dict:
     """Every rank's working set and memory bandwidth, gathered, and the
     layer split computed from them the same way on every rank
-    (tuning/resolve.pipeline_shares: same inputs, same split). `counts`
+    (tuning/resolve.pipeline_shares: same inputs, same split; rank 0's
+    `leader_bytes` -- the head and the tower -- counted on rank 0 alone). `counts`
     (layers per rank, rank order) overrides the arithmetic. Raises when the
     ranks read different artifacts."""
     import json
@@ -353,7 +502,8 @@ def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
     from knurlogic.tuning import resolve as R
     n, rank = group.size(), group.rank()
     sig = zlib.crc32(json.dumps([list(map(int, layer_bytes)),
-                                 int(other_bytes)]).encode()) & 0x7FFFFFFF
+                                 int(other_bytes), int(leader_bytes)]
+                                ).encode()) & 0x7FFFFFFF
     row = [int(working_set), int(round((bandwidth_gbs or 0) * 1000)),
            len(layer_bytes), sig]
     got = mx.distributed.all_gather(mx.array(row, dtype=mx.int64),
@@ -379,7 +529,8 @@ def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
                          f"{','.join(map(str, counts))}); rank 0 holds the "
                          f"last layers and samples"}
     else:
-        out = R.pipeline_shares(list(layer_bytes), ranks, int(other_bytes))
+        out = R.pipeline_shares(list(layer_bytes), ranks, int(other_bytes),
+                                int(leader_bytes))
     out["ranks"] = ranks
     out["rank"] = rank
     return out

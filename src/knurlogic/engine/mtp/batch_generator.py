@@ -38,7 +38,9 @@ were checked in the consumer's loop rather than assumed:
     a step commits was fed through the trunk, including one a stop sequence
     then hid, so the list is prompt + everything committed.
 
-IMAGES (design D5, D7 Phase A; docs/design/vision.md). Every request with
+IMAGES (design D5, D7 Phase A; docs/design/vision.md; on a split model,
+engine/runtime/tensor.py: rank 0 encodes and ships the rows, every rank
+embeds with its own family). Every request with
 an image comes here, head or no head (`head=None` is a plain batch engine
 with the same admission), because only `admit` snaps prefill chunks to the
 family's image spans. The prompt the server hands over is the cache KEY
@@ -247,6 +249,9 @@ class MTPBatchGenerator(BatchGenerator):
         self._n_trunk = len(self._make_new_cache())
         #: engine/runtime/pipeline.Coord on a pipeline split, else None
         self._coord = None
+        #: wraps a row's prefill chunks (admit's prefill_ctx): a pipeline
+        #: follower's overlapped sends (pipeline.silence), else None
+        self._prefill_ctx = None
         # uid -> what the server gave us for that row, and what it has seen.
         self._rows: dict = {}
         # uid -> [(key, entry)] checkpoints not yet reported to the server;
@@ -300,17 +305,8 @@ class MTPBatchGenerator(BatchGenerator):
 
         replay_fn = replay if self._head is not None and len(prefix) < n \
             else None
-        if vis is None:
-            # A model with no head has nothing to align: asking for a head
-            # cache discarded EVERY prefix hit on gemma (a 509-token shared
-            # system prompt re-prefilled on each request, 2026-09-25).
-            drafts = self._head is not None
-            cache, hcache, hit = split_pool_entry(
-                list(cache or []), self._n_trunk, drafts=drafts,
-                hit_len=len(prefix), replay=replay_fn)
-        else:
-            cache, hcache, hit, drafts = self._vision_entry(
-                list(cache or []), prompt, len(prefix), replay=replay_fn)
+        cache, hcache, hit, drafts = self._split_entry(
+            list(cache or []), prompt, len(prefix), vis, replay_fn)
         if len(prefix) > 0 and hit == 0:
             logger.info("prompt cache entry at %d/%d tokens has no aligned "
                         "head cache; prefilling from scratch", len(prefix), n)
@@ -319,7 +315,7 @@ class MTPBatchGenerator(BatchGenerator):
         params = RowParams(max_tokens=_NEVER,
                            dist=make_distribution(**sampling),
                            processors=list(procs or []), eos=set(),
-                           drafts=drafts,
+                           drafts=drafts, mirror=self._head is None,
                            keys=Keys(seed) if seed is not None else None)
         try:
             with mx.stream(self._stream):
@@ -346,6 +342,7 @@ class MTPBatchGenerator(BatchGenerator):
                             ids, params, uid=uid,
                             make_draft_cache=self._make_draft_cache,
                             prefill_step_size=self.prefill_step_size,
+                            prefill_ctx=self._prefill_ctx,
                             cache=cache or None, hcache=hcache, start_pos=hit,
                             checkpoints=bounds, on_checkpoint=on_checkpoint,
                             **kw)
@@ -384,6 +381,50 @@ class MTPBatchGenerator(BatchGenerator):
                        "encoded": int(getattr(req, "_knurlogic_encoded", 0))},
             "checkpoints_stored": n_ckpt,
         })
+
+    def _split_entry(self, entry: list, prompt: list, hit_len: int, vis,
+                     replay):
+        """(trunk, head cache, hit, drafts) for a row offered a prompt-cache
+        entry at `hit_len`. On a pipeline whose rank 0 drafts, rank 0's
+        (hit, drafts) are every rank's (Coord.ba): only rank 0 holds a head
+        cache to align, so only it can say whether the entry is usable for
+        a drafting row, and whether the row drafts decides its
+        checkpoints. A follower's own answer is the trunk hit, which rank
+        0's is either equal to or 0."""
+        coord = self._coord if (self._coord is not None
+                                and self._coord.head) else None
+        try:
+            if vis is None:
+                # A model with no head has nothing to align: asking for a
+                # head cache discarded EVERY prefix hit on gemma (a
+                # 509-token shared system prompt re-prefilled on each
+                # request, 2026-09-25).
+                drafts = self._head is not None
+                trunk, hcache, hit = split_pool_entry(
+                    entry, self._n_trunk, drafts=drafts, hit_len=hit_len,
+                    replay=replay)
+            else:
+                trunk, hcache, hit, drafts = self._vision_entry(
+                    entry, prompt, hit_len, replay=replay)
+        except Exception:
+            if coord is not None:
+                try:
+                    coord.ba(False, 0, False)
+                except RuntimeError:
+                    pass
+            raise
+        if coord is None:
+            return trunk, hcache, hit, drafts
+        hit0, drafts0 = coord.ba(True, hit, drafts)
+        if not coord.leader:
+            drafts = drafts0
+            if hit0 != hit:
+                if hit0:
+                    raise RuntimeError(
+                        f"rank 0 reuses {hit0} cached tokens; this rank's "
+                        f"entry gives {hit}")
+                trunk, hit = [], 0
+        return trunk, hcache, hit, drafts
 
     def _vision_entry(self, entry: list, key: list, hit_len: int,
                       replay=None):
@@ -424,6 +465,11 @@ class MTPBatchGenerator(BatchGenerator):
         kw: dict = {"chunk_boundaries": fam.chunk_boundaries(key)}
         extras: dict = {}
         if K.has_image(key[hit:]):
+            if self._coord is not None:
+                # a split model: rank 0's rows reach every rank (only rank
+                # 0 has a tower); every rank decides this the same way --
+                # the key and the hit are rank 0's
+                feats = self._coord.images(key[hit:], feats, refs)
             got = dict(fam.embed(self.model, key, hit, feats))
             kw["embeds"] = got.pop("input_embeddings")
             extras.update(got)
