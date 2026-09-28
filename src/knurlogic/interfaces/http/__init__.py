@@ -17,6 +17,12 @@ from pathlib import Path
 _CURRENT: dict = {}
 
 
+def requests_now():
+    """The running server's scheduler.requests(), or None before it runs."""
+    sched = _CURRENT.get("scheduler")
+    return sched.requests() if sched is not None else None
+
+
 def switch(model: str, *, force: bool = False, wait: bool = True,
            timeout: float = 3600.0) -> dict:
     """Serve `model` (an id from /models.json, or the served one): the
