@@ -1844,7 +1844,7 @@ async function tick(){
   }
   const THERMCOL={nominal:'var(--ok)', fair:'var(--warn)',
                   serious:'var(--bad)', critical:'var(--bad)'};
-  function lines(mx){
+  function lines(mx, swap){
     const h=(mx&&mx.history)||[], now=(mx&&mx.now)||{};
     const row=(lab,val,cls,vals,col)=>`<div class="mrow">
       <div class="mhd"><span>${lab}</span><b class="${cls||''}">${val}</b></div>
@@ -1855,7 +1855,9 @@ async function tick(){
           ?` · ${gb(now.gpu_in_use_bytes)}`:''), '',
         h.map(s=>s.gpu_pct), 'var(--acc)')+
       row('cpu', pc(now.cpu_pct), '', h.map(s=>s.cpu_pct), 'var(--warn)')+
-      row('memory', pc(now.memory_pct), '', h.map(s=>s.memory_pct), '#bb9af7')+
+      row('memory', pc(now.memory_pct)+(swap==null
+          ?'':` · <span class="swap">${gb0(swap)} swap</span>`), '',
+        h.map(s=>s.memory_pct), '#bb9af7')+
       // °C on a 0-100 scale, as Scout draws it: ambient near the floor,
       // a hot die near the top.
       row('thermal', (now.temp_c!=null?Math.round(now.temp_c)+'°C · ':'')+(th||'--'),
@@ -1998,13 +2000,12 @@ async function tick(){
       <div class="ucard ufull">
         <div class="mlines">${off?`<div class="noans">${
             n.problem?esc(n.problem):'no answer'}</div>`
-          : (n.metrics?.history||[]).length?lines(n.metrics)
+          : (n.metrics?.history||[]).length?lines(n.metrics, swap)
           : '<div class="noans">no metrics from this node</div>'}</div>
         ${stack(n, mapped?mm:null, off)}
       </div>
       <div class="stat"><span class="pct">${off?'--':pct.toFixed(0)+'%'}</span>
-        ${off?'':gb(used)+' / '+gb(inst)}${swap==null?'':
-          ` · <span class="swap">${gb0(swap)} swap</span>`}</div>
+        ${off?'':gb(used)+' / '+gb(inst)}</div>
     </div>`;
   }
   // The link between nodes animates along its length. That is the only
