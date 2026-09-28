@@ -29,7 +29,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from knurlogic.interfaces import context_edits as E
+from knurlogic.context_management import context_edits as E
 
 logger = logging.getLogger(__name__)
 

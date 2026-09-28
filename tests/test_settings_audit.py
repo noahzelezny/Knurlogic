@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from knurlogic.interfaces import ui, web
+from knurlogic.interfaces.page import server as ui
+from knurlogic.interfaces.page import documents as web
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning import settings as S
 from knurlogic.tuning.resolve import resolve

@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 from knurlogic.machine import identity, loaded, status, wired
 from knurlogic.machine.servers import (is_our_server, registry,
                                        save_registry, serve_log)
-from knurlogic.interfaces import web
+from knurlogic.interfaces.page import documents as web
 # Imported here, not inside the status handler: the page fires several
 # requests at once, and two threads importing a module for the first time
 # race -- measured as "partially initialized module 'typing'" on a restart.
@@ -169,7 +169,7 @@ def _status_fn(_n=0):
             "found_by": ["exo"]})
     # what a coordinator page needs of this machine to place a rank on it
     try:
-        from knurlogic.interfaces import cluster_jobs
+        from knurlogic.cluster import launch as cluster_jobs
         snaps[0]["cluster"] = cluster_jobs.node_info(
             (snaps[0].get("memory") or {}).get("working_set_bytes") or 0)
     except Exception as e:
@@ -356,8 +356,9 @@ def _spawn_unlocked(path: str, port: int, tune: str = "balanced",
 
 def tracked_load(**kw) -> dict:
     """mcp.load, for a load this page was asked for: a server it starts is
-    relaunched if it dies unasked (interfaces/recovery.py)."""
-    from knurlogic.interfaces import mcp, recovery
+    relaunched if it dies unasked (cluster/recovery.py)."""
+    from knurlogic.interfaces import mcp
+    from knurlogic.cluster import recovery
     out = mcp.load(**kw)
     if isinstance(out, dict) and out.get("pid") and out.get("port"):
         recovery.track_single(int(out["port"]), {
@@ -370,7 +371,7 @@ def tracked_load(**kw) -> dict:
 def _stop(port: int) -> dict:
     import os
     import signal
-    from knurlogic.interfaces import recovery
+    from knurlogic.cluster import recovery
     recovery.cancel_port(port)          # asked for: never recovered
     reg = registry()
     rec = reg.get(port)
@@ -379,7 +380,7 @@ def _stop(port: int) -> dict:
                          f"{port}; it stops only what it started"}
     if rec.get("job"):
         # rank 0 of a cluster job: the job stops, on every machine
-        from knurlogic.interfaces import cluster_jobs
+        from knurlogic.cluster import launch as cluster_jobs
         out = cluster_jobs.stop(rec["job"], reason="unloaded")
         return {**out, "stopped": rec.get("artifact"), "port": port}
     pid = int(rec["pid"])
@@ -424,7 +425,7 @@ def _load_fn(serve_port: int):
                    if k not in ("nodes", "split", "link")}
             req["node"] = nodes[0]
         if act == "unload" and req.get("job"):
-            from knurlogic.interfaces import cluster_jobs
+            from knurlogic.cluster import launch as cluster_jobs
             return cluster_jobs.stop(str(req["job"]), reason="unloaded")
         node = req.get("node")
         if node and node != identity.identity().get("id"):
@@ -478,35 +479,9 @@ PEER_LOAD_PATH = "/peer/loaded.json"
 PEER_LOAD_MAX = 16 << 10
 #: a load answers once the fit is checked and the child started
 PEER_LOAD_S = 60.0
-TUNES = ("balanced", "fast", "stable", "lean", "safe")  # tuning/settings.PRESETS
-#: request keys that would name a place on disk; refused outright, never
-#: ignored, so a coordinator that sends one learns it is wrong
-PATH_KEYS = ("path", "target", "artifact", "where", "dir", "directory")
-
-
-def launch_knobs() -> frozenset:
-    """The knob names a forwarded load may set: the ones knurlogic documents
-    (tuning/settings.KNOB_DOC) and their aliases. Nothing else is passed on:
-    `--set` puts it in the child's environment."""
-    from knurlogic.tuning import settings as S
-    return frozenset(S.KNOB_DOC) | frozenset(
-        n for v in S.KNOB_ALIASES.values() for n in v) | frozenset(
-        S.NUMERICS_FLAGS)
-
-
-def clean_sets(sets) -> tuple:
-    """(allowed {name: value}, [refused names]). Values are short plain
-    tokens: digits, letters, '.', '-', '_'."""
-    import re
-    ok, bad = {}, []
-    allowed = launch_knobs()
-    for k, v in (sets.items() if isinstance(sets, dict) else ()):
-        v = str(v)
-        if k in allowed and len(v) <= 64 and re.fullmatch(r"[\w.\-]*", v):
-            ok[k] = v
-        else:
-            bad.append(str(k)[:64])
-    return ok, bad
+# the launch facts cluster jobs share: tuning/settings owns them
+from knurlogic.tuning.settings import (PATH_KEYS, TUNES,  # noqa: E402
+                                       clean_sets, launch_knobs)
 
 
 def _peer_by_id(node: str):
@@ -590,8 +565,8 @@ def forward_launch(req: dict, post=None) -> dict:
 
 def cluster_launch(req: dict, serve_port: int) -> dict:
     """POST /loaded.json {action: load, identity, nodes: [>= 2 ids],
-    split, link[, cable]}: this page coordinates (interfaces/cluster_jobs.py)."""
-    from knurlogic.interfaces import cluster_jobs
+    split, link[, cable]}: this page coordinates (cluster/launch.py)."""
+    from knurlogic.cluster import launch as cluster_jobs
     if any(k in req for k in PATH_KEYS if k != "target") or req.get("target"):
         return {"error": "a model across machines is named by its "
                          "identity, never by a path"}
@@ -891,7 +866,7 @@ def with_jobs(doc: dict) -> dict:
     rank 0's resident row marked with its job, so the job is listed once,
     on its leader, with its machines."""
     try:
-        from knurlogic.interfaces import cluster_jobs
+        from knurlogic.cluster import launch as cluster_jobs
         js = cluster_jobs.jobs_document()
     except Exception:
         js = []
@@ -902,7 +877,7 @@ def with_jobs(doc: dict) -> dict:
         if j.get("port") and (j.get("phase") != "stopped"
                               or j["port"] not in ports):
             ports[j["port"]] = j
-    from knurlogic.interfaces import recovery
+    from knurlogic.cluster import recovery
     for j in js:
         j["recovery"] = (recovery.for_job(j["job"]) if j.get("job")
                          else None) or (recovery.served_view(
@@ -1080,7 +1055,7 @@ def cluster_failure(base: str) -> str:
         return (f"rank 0 of cluster job {job} on {t.get('machine')} "
                 f"dropped the connection; the job is failing")
     try:
-        from knurlogic.interfaces import cluster_jobs
+        from knurlogic.cluster import launch as cluster_jobs
         return cluster_jobs.failure_of_port(urlparse(base).port)
     except Exception:
         return ""
@@ -1594,7 +1569,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             if u.path.rstrip("/") == PEER_LOAD_PATH:
                 self._peer_load()
                 return
-            from knurlogic.interfaces import cluster_jobs
+            from knurlogic.cluster import launch as cluster_jobs
             if u.path.rstrip("/") in cluster_jobs.PEER_PATHS:
                 self._peer_cluster(u.path.rstrip("/"))
                 return
@@ -1710,7 +1685,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
 
         def _peer_cluster(self, path: str):
             """/peer/cluster/*: the same gate as PEER_LOAD_PATH."""
-            from knurlogic.interfaces import cluster_jobs
+            from knurlogic.cluster import launch as cluster_jobs
             if self._refuse_chunked():
                 return
             try:
@@ -1792,7 +1767,7 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
         web.set_allowance(body))
 
     H = make_handler(routes, gate, allow_origins, allow_hosts)
-    from knurlogic.interfaces import cluster_jobs
+    from knurlogic.cluster import launch as cluster_jobs
     cluster_jobs.start_watching_existing()
 
     srv = ThreadingHTTPServer((bind, port), H)
@@ -1816,7 +1791,7 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
         for port in list(_CHILDREN):
             _stop(port)
         # and the cluster ranks it started, on every machine of their job
-        from knurlogic.interfaces import cluster_jobs
+        from knurlogic.cluster import launch as cluster_jobs
         for job in list(cluster_jobs.SPECS):
             cluster_jobs.stop(job, reason="the page that started it closed")
     return 0
@@ -1855,3 +1830,20 @@ def main(argv=None) -> int:
         peers.append((host, int(port) if port.isdigit() else a.port))
     return serve_ui(a.host, a.port, a.serve_port, peers,
                     allow_origins=a.allow_origin, allow_hosts=a.allow_host)
+
+
+def _wire() -> None:
+    """Give cluster_jobs and recovery what they need of this page. Each is
+    a late-bound lambda, so a swapped PEERS or mcp.load is what they see."""
+    from knurlogic.interfaces import mcp
+    from knurlogic.cluster import launch as cluster_jobs
+    from knurlogic.cluster import recovery
+    cluster_jobs.status_fn = lambda: _status_fn()
+    cluster_jobs.peers_fn = lambda: PEERS.all() if PEERS else []
+    recovery.peers_fn = lambda: PEERS.all() if PEERS else []
+    recovery.child_fn = lambda port: _CHILDREN.get(port)
+    recovery.answers_fn = lambda port: _answers(port)
+    recovery.load_fn = lambda **kw: mcp.load(**kw)
+
+
+_wire()

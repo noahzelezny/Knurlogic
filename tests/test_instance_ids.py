@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from knurlogic.interfaces import mcp, ui
+from knurlogic.interfaces import mcp
+from knurlogic.interfaces.page import server as ui
 from knurlogic.machine import loaded, servers
 
 from test_mcp_cluster import JOB, REQS, STATUS, page, residency  # noqa: F401
