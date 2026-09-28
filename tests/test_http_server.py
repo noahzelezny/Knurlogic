@@ -431,3 +431,23 @@ def test_models_carries_the_context_window(tmp_path):
     doc = O.models_document({"id": "m"}, {}, n)
     assert doc["data"][0]["context_length"] == 32768
     assert O.models_document({"id": "m"})["data"][0]["context_length"] == 0
+
+
+def test_the_request_counter_does_not_lose_concurrent_increments(
+        monkeypatch):
+    """Found by Qwen3.8-Flash-Next-6bit (cluster shootout 2026-09-27):
+    `self.requests += 1` ran unlocked on every handler thread. The count
+    now goes through one locked step; many threads, no lost update."""
+    import threading
+    from types import SimpleNamespace
+    from knurlogic.interfaces.http import server as S
+    app = S.App.__new__(S.App)
+    app.requests = 0
+    app._count_lock = threading.Lock()
+    ts = [threading.Thread(target=lambda: [app._count() for _ in range(5000)])
+          for _ in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert app.requests == 40000
