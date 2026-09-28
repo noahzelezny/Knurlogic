@@ -2348,7 +2348,25 @@ function rdmaWhy(ns){
     if(!r) return `${n.node} does not report RDMA (update knurlogic there)`;
     if(!r.available) return `RDMA on ${n.node}: ${r.reason}`;
   }
-  return '';
+  return tb5Why(ns[0].cluster, ns[1].cluster);
+}
+// RDMA runs only over a Thunderbolt 5 (80 Gb/s) cable: over Thunderbolt 4
+// the port still reads active and jaccl fails (cluster_jobs.rdma_pair_reason
+// says the same on launch). A link an older knurlogic does not time passes.
+function tb5Why(a, b){
+  const net=ip=>String(ip).split('.').slice(0,3).join('.');
+  const on=m=>{ const act=new Set(((m.rdma||{}).active)||[]), o={};
+    for(const t of m.thunderbolt||[]) if(t.ip && act.has('rdma_'+t.iface))
+      o[net(t.ip)]=t.gbps||0;
+    return o };
+  const A=on(a||{}), B=on(b||{}), slow=[];
+  for(const k of Object.keys(A)) if(k in B){
+    const g=Math.min(A[k]||1e9, B[k]||1e9);
+    if(g>=80) return '';
+    slow.push(`the ${k} link is Thunderbolt ${g>=40?4:3} (${g} Gb/s)`);
+  }
+  return slow.length ? 'RDMA needs a Thunderbolt 5 cable between these Macs; '
+    + slow.join('; ') : '';
 }
 // A pick changed what "fits" means: the rail and an open picker follow.
 // Sharding and interconnect for a multi-machine launch: page state only.

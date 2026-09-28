@@ -190,7 +190,8 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
         from knurlogic.tuning.resolve import chip_bandwidth_gbs
         chip = _chip()
         try:
-            tb = [{"iface": i["iface"], "ip": i["ip"]}
+            tb = [{"iface": i["iface"], "ip": i["ip"],
+                   "gbps": i.get("gbps"), "generation": i.get("generation")}
                   for i in links.thunderbolt()]
         except Exception:
             tb = []
@@ -237,18 +238,69 @@ def _pair(a: dict, b: dict) -> frozenset:
                       str(b.get("id") or b.get("name") or "")))
 
 
+def _link_gbps(a: dict, b: dict, net: str):
+    """The speed of the cable on subnet `net` between two machines: the
+    slower end's Gb/s, None when either end does not say (an older
+    knurlogic)."""
+    sp = []
+    for m in (a, b):
+        g = next((t.get("gbps") for t in m.get("thunderbolt") or []
+                  if t.get("ip") and _subnet(t["ip"]) == net), None)
+        if not isinstance(g, (int, float)) or isinstance(g, bool) or g <= 0:
+            return None
+        sp.append(g)
+    return min(sp)
+
+
+def _cable_name(gbps) -> str:
+    from knurlogic.cluster.links import generation
+    g = generation(gbps)
+    return f"Thunderbolt {g} ({gbps:g} Gb/s)" if g else "speed unknown"
+
+
 def _shared_subnets(a: dict, b: dict, rdma: bool = False) -> list:
     """Every Thunderbolt /24 two machines both sit on, the order a launch
-    tries them: lowest first (so every page picks the same), except that a
-    cable whose link init failed between these two this session goes
-    last."""
+    tries them: the fastest cable first (Thunderbolt 5 over Thunderbolt 4;
+    a link whose speed an older peer does not report counts as slowest),
+    then the lowest subnet, so every page picks the same -- except that a
+    cable whose link init failed between these two this session goes last.
+    `rdma`: only a subnet with RDMA up at both ends AND a Thunderbolt 5
+    link at both ends: over a 40 Gb/s Thunderbolt 4 cable ibv_devinfo
+    still says PORT_ACTIVE, and jaccl fails RTR with errno 96."""
+    from knurlogic.cluster.links import TB5_GBPS
+
     def on(m):
         act = set((m.get("rdma") or {}).get("active") or [])
         return {_subnet(t["ip"]) for t in m.get("thunderbolt") or []
                 if t.get("ip") and (not rdma
                                     or f"rdma_{t.get('iface')}" in act)}
     bad = BAD_CABLES.get(_pair(a, b)) or {}
-    return sorted(on(a) & on(b), key=lambda n: (n in bad, n))
+    both = on(a) & on(b)
+    if rdma:
+        both = {n for n in both
+                if (_link_gbps(a, b, n) or TB5_GBPS) >= TB5_GBPS}
+    return sorted(both, key=lambda n: (n in bad, -(_link_gbps(a, b, n) or 0),
+                                       n))
+
+
+def rdma_pair_reason(a: dict, b: dict) -> str:
+    """Why jaccl cannot join these two machines ("" when it can): RDMA off
+    at either end, or no Thunderbolt 5 cable between them."""
+    from knurlogic.cluster.links import TB5_GBPS
+    for m in (a, b):
+        rd = m.get("rdma") or {}
+        if not rd.get("available"):
+            return f"RDMA on {m.get('name')}: {rd.get('reason') or 'unknown'}"
+    if _shared_subnets(a, b, rdma=True):
+        return ""
+    slow = [n for n in _shared_subnets(a, b)
+            if (_link_gbps(a, b, n) or TB5_GBPS) < TB5_GBPS]
+    if slow:
+        return ("RDMA needs a Thunderbolt 5 cable between these Macs; "
+                + "; ".join(f"the {n} link is "
+                            f"{_cable_name(_link_gbps(a, b, n))}"
+                            for n in slow))
+    return ""
 
 
 def link_init_failure(text: str) -> str:
@@ -1258,11 +1310,34 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             note = (f"cable {net}: {b} failed link init earlier this "
                     f"session ({bad[b]})")
         else:
-            note = f"cable {net}: the lowest shared Thunderbolt subnet"
+            a_, b_ = order[0], order[1]
+            sp = _link_gbps(a_, b_, net)
+            others = [n for n in _shared_subnets(a_, b_) if n != net]
+            if sp and any((_link_gbps(a_, b_, n) or 0) < sp
+                          for n in others):
+                note = (f"cable {net}: {_cable_name(sp)}, the fastest "
+                        f"shared Thunderbolt link")
+            elif sp:
+                note = (f"cable {net}: {_cable_name(sp)}, the lowest shared "
+                        f"Thunderbolt subnet")
+            else:
+                note = f"cable {net}: the lowest shared Thunderbolt subnet"
+            skipped = [n for n in others if n not in nets]
+            if skipped and link == "jaccl":
+                note += "; not " + ", ".join(
+                    f"{n} ({_cable_name(_link_gbps(a_, b_, n))}: RDMA "
+                    f"needs Thunderbolt 5)" if _link_gbps(a_, b_, n)
+                    else f"{n} (no RDMA at both ends)" for n in skipped)
         rest = [n for n in left[1:]]
         if rest:
             note += f"; {rest[0]} next if link init fails"
     if link == "jaccl" and not net:
+        why = rdma_pair_reason(order[0], order[1])
+        if why:
+            return {"refused": why + ". Use the TCP ring, or join them "
+                                     "with a Thunderbolt 5 cable.",
+                    "placement": plan}
+
         def up(m):
             return ", ".join((m.get("rdma") or {}).get("active") or []) \
                 or "none"
