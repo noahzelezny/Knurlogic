@@ -1137,7 +1137,8 @@ def _byte_bounds(layer_bytes: list, weights: list, cap: list):
         while end < L - r:            # leave ranks r-1 .. 0 a layer each
             nxt = acc + layer_bytes[end]
             if nxt > cap[r] or (end > at and
-                                abs(nxt - target) > abs(acc - target)):
+                                abs(nxt - target) >= abs(acc - target)):
+                # a tie leaves the layer to the lower ranks (rank 0 last)
                 break
             acc, end = nxt, end + 1
         if end == at:
@@ -1206,18 +1207,17 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0) -> dic
     for r in range(n - 1, -1, -1):
         bounds[r] = (at, at + counts[r])
         at += counts[r]
+    # Cut by the real bytes, not by counting layers: layers are not alike
+    # (Qwen3.8 Flash's layer 1 carries a 42 GiB n-gram embedding). Counted,
+    # the M3 took layers 0..18 -- 63.5 GiB of 110 -- and fit, but with 13 GiB
+    # left for every prompt's KV while the M4 kept 70 GiB free, and long
+    # prompts were refused. The count is the fallback, not the rule.
+    alt = _byte_bounds(layer_bytes, weights, cap)
+    if alt is not None:
+        bounds = alt
+        counts = [b - a for a, b in bounds]
     got = [sum(layer_bytes[a:b]) for a, b in bounds]
     over = [i for i in range(n) if got[i] > cap[i]]
-    if over:
-        # counting by the average layer is wrong when layers are not alike
-        # (Qwen3.8 Flash's layer 1 carries a 42 GiB n-gram embedding): cut
-        # by the real bytes instead, and refuse only when that fails too
-        alt = _byte_bounds(layer_bytes, weights, cap)
-        if alt is not None:
-            bounds = alt
-            counts = [b - a for a, b in bounds]
-            got = [sum(layer_bytes[a:b]) for a, b in bounds]
-            over = []
     if over:
         i = over[0]
         raise ValueError(
