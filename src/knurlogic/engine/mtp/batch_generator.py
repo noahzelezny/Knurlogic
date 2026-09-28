@@ -249,6 +249,9 @@ class MTPBatchGenerator(BatchGenerator):
         self._n_trunk = len(self._make_new_cache())
         #: engine/runtime/pipeline.Coord on a pipeline split, else None
         self._coord = None
+        #: wraps a row's prefill chunks (admit's prefill_ctx): a pipeline
+        #: follower's overlapped sends (pipeline.silence), else None
+        self._prefill_ctx = None
         # uid -> what the server gave us for that row, and what it has seen.
         self._rows: dict = {}
         # uid -> [(key, entry)] checkpoints not yet reported to the server;
@@ -339,6 +342,7 @@ class MTPBatchGenerator(BatchGenerator):
                             ids, params, uid=uid,
                             make_draft_cache=self._make_draft_cache,
                             prefill_step_size=self.prefill_step_size,
+                            prefill_ctx=self._prefill_ctx,
                             cache=cache or None, hcache=hcache, start_pos=hit,
                             checkpoints=bounds, on_checkpoint=on_checkpoint,
                             **kw)
