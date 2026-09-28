@@ -30,6 +30,10 @@ Ops, applied in order (every field explicit):
             rank's cache from that event of the last step in the prompt cache
     pop     n: evict the n least recently used prompt-cache entries
     reset   close the executor (rank 0 closed its own)
+    set     name, value: a live knob rank 0 applied to itself (a Settings
+            apply); every rank applies it to its own engine before the step.
+            Only SETS travel: a knob read by rank 0's scheduler alone
+            (KNURLOGIC_CONTEXT_LENGTH) changes nothing on a follower
     stop    leave the loop
 
 `tokens` (optional): [uid, token] for every row rank 0's batch holds at
@@ -44,7 +48,7 @@ from typing import List
 CONTROL_LEN = 3
 OVER, STEP, LENGTH = range(CONTROL_LEN)
 
-OPS = ("admit", "remove", "insert", "pop", "reset", "stop", "park")
+OPS = ("admit", "remove", "insert", "pop", "reset", "stop", "park", "set")
 _FIELDS = {
     "admit": ("uid", "prompt", "segs", "hit", "max_tokens", "sampling",
               "penalties", "initial"),
@@ -54,7 +58,11 @@ _FIELDS = {
     "reset": (),
     "stop": (),
     "park": (),
+    "set": ("name", "value"),
 }
+#: the live knobs (engine/serve/load.LIVE_KNOBS) that act on a rank's own
+#: engine, so a change on rank 0 must reach every rank
+SETS = ("VQ_DECODE_CHUNK", "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_CACHE_LIMIT_GB")
 EVENTS = ("checkpoint", "finished")
 
 
@@ -102,6 +110,10 @@ def check(plan) -> None:
             raise PlanError(f"insert event {op['event']!r}")
         if op["op"] == "pop" and (not isinstance(op["n"], int) or op["n"] < 1):
             raise PlanError(f"pop n must be a positive int, got {op['n']!r}")
+        if op["op"] == "set" and (op["name"] not in SETS
+                                  or not isinstance(op["value"], str)):
+            raise PlanError(f"set takes a knob of {list(SETS)} and a string "
+                            f"value, got {op['name']!r}={op['value']!r}")
         if op["op"] == "admit":
             _ints(op["prompt"], "admit prompt")
             if not isinstance(op["segs"], list):

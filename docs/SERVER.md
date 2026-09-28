@@ -137,8 +137,11 @@ One model, N ranks, every layer's weights split N ways
   (tokens, the prompt-cache hit rank 0 found -- the follower repeats the
   fetch and checks it --, sampling with an assigned seed, penalties, the
   control machine's start), `remove`, `insert` (store the cache from last
-  step's checkpoint/finished event), `pop` (evict n LRU entries), `reset`,
-  `stop`; and `tokens`: rank 0's next token for every live row. Ranks >= 1
+  step's checkpoint/finished event), `pop` (evict n LRU entries), `set`
+  (a live knob rank 0's Settings apply changed that acts on a rank's own
+  engine -- `VQ_DECODE_CHUNK` and the cache limits, not the context cap
+  rank 0's scheduler alone reads; a parked ring is rung to take it),
+  `reset`, `stop`; and `tokens`: rank 0's next token for every live row. Ranks >= 1
   (`follow`) apply it, overwrite their batch's next tokens with rank 0's,
   and run the same step. A plan ending in `reset` or `stop` is not
   followed by a step.
