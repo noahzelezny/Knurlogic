@@ -53,6 +53,20 @@ from pathlib import Path
 
 from knurlogic.cluster import jobs as J
 
+
+def _no_status():
+    raise LookupError("no page has set cluster_jobs.status_fn")
+
+
+# What this module needs of the page that runs it, injected by that page at
+# startup (interfaces/page/server.py) so this module never imports it.
+# Unset, this machine is alone: no status snapshot (node_info() answers)
+# and no peers.
+#: () -> (status snapshot, _): the page's own status document
+status_fn = _no_status
+#: () -> [peer record]: the page's PEERS store
+peers_fn = list
+
 GIB = 1 << 30
 PREPARE_PATH = "/peer/cluster/prepare"
 START_PATH = "/peer/cluster/start"
@@ -627,8 +641,8 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                             f": every rank runs the same build")
             if k == "mlx":
                 break           # the build names mlx too; say it once
-    from knurlogic.interfaces import ui
-    ok_sets, bad_sets = ui.clean_sets(spec.get("sets") or {})
+    from knurlogic.tuning.settings import clean_sets
+    ok_sets, bad_sets = clean_sets(spec.get("sets") or {})
     if bad_sets:
         refusals.append(f"settings a rank does not take: "
                         f"{', '.join(bad_sets)}")
@@ -729,9 +743,8 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
 
 def _local_info() -> dict:
     """This machine's cluster block, off the page's own status."""
-    from knurlogic.interfaces import ui
     try:
-        snap, _ = ui._status_fn()
+        snap, _ = status_fn()
         own = next(n for n in snap.get("nodes") or []
                    if n.get("role") in ("local", "server"))
         return own.get("cluster") or node_info()
@@ -936,7 +949,7 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
     if "port" in rec:
         # this job's recovery row (a relaunch carries it; a launch by
         # somebody clears it), for rank 0's own /v1/residency
-        from knurlogic.interfaces import recovery
+        from knurlogic.cluster import recovery
         recovery.write_port(rec["port"], spec.get("recovery"))
     _ensure_watcher()
     return 200, {"started": spec["job"], "rank": spec["rank"],
@@ -958,7 +971,7 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     after `grace`), forget it, and -- when `propagate` -- tell every other
     page of the job to do the same."""
     job = str(job or "")
-    from knurlogic.interfaces import recovery
+    from knurlogic.cluster import recovery
     if recovery.kind(reason) == "requested":
         recovery.cancel_job(job)          # asked for: never recovered
     with _LOCK:
@@ -1055,9 +1068,8 @@ def _stop_post(url: str, doc: dict) -> dict:
 def _peer_pages() -> dict:
     """{peer id: page address} from this page's PEERS store (an answering
     record first)."""
-    from knurlogic.interfaces import ui
     out = {}
-    peers = ui.PEERS.all() if ui.PEERS else []
+    peers = peers_fn()
     for p in sorted(peers, key=lambda p: p.state == "answering"):
         if getattr(p, "id", ""):
             out[p.id] = p.key
@@ -1084,7 +1096,7 @@ def watch_once(now: float | None = None) -> list:
             if line:
                 why = f"{why}: link init failed: {line}"[:300]
             else:
-                from knurlogic.interfaces.recovery import memory_line
+                from knurlogic.cluster.recovery import memory_line
                 mem = next((x for x in (memory_line(_log_tail(
                     r.get("log"))) for r in recs) if x), "")
                 if mem:
@@ -1186,7 +1198,7 @@ def start_watching_existing() -> None:
     and the models an earlier page process was recovering are again."""
     if J.registry():
         _ensure_watcher()
-    from knurlogic.interfaces import recovery
+    from knurlogic.cluster import recovery
     recovery.restore()
 
 
@@ -1311,7 +1323,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     the job (`follow`, a thread by default): a rank whose link init fails
     on that cable has the job relaunched on the next one, the cable
     remembered as failing for the pair. `tried`/`moved`: that relaunch.
-    `recovering`: this is auto-recovery's relaunch (interfaces/recovery.py),
+    `recovering`: this is auto-recovery's relaunch (cluster/recovery.py),
     carrying its report to rank 0's page; any other launch that starts is
     tracked there for recovery."""
     post = post or _post
@@ -1481,7 +1493,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     port = req.get("port")
     port = port if isinstance(port, int) and 1024 <= port < 65536 \
         else serve_port
-    from knurlogic.interfaces.ui import clean_sets, TUNES
+    from knurlogic.tuning.settings import clean_sets, TUNES
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         return {"error": f"not a launch setting: {', '.join(bad)}"}
@@ -1558,7 +1570,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     if note:
         print(f"cluster job {job}: {note}", file=sys.stderr, flush=True)
     if recovering is None:
-        from knurlogic.interfaces import recovery
+        from knurlogic.cluster import recovery
         # a relaunch is the same launch: this machine order (so the same
         # split), this port, link, tune and settings
         recovery.track_cluster(
@@ -1676,7 +1688,7 @@ def peer_route(path: str, body: bytes) -> tuple:
         req = None
     if not isinstance(req, dict):
         return 400, {"error": "the body must be a JSON object"}
-    from knurlogic.interfaces.ui import PATH_KEYS
+    from knurlogic.tuning.settings import PATH_KEYS
     if any(k in req for k in PATH_KEYS):
         return 400, {"error": "a cluster job names its model by identity, "
                               "never by a path"}

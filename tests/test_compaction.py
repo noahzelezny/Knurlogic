@@ -1,5 +1,5 @@
-"""Server-side compaction (interfaces/context_edits, interfaces/compaction):
-the request's shapes on both APIs, the history surgery and its invariants,
+"""Server-side compaction (context_management/context_edits and
+context_management/compaction): the request's shapes on both APIs, the history surgery and its invariants,
 distillation and its fallback, the response shapes -- and one round trip
 on the tiny model over real sockets."""
 import json
@@ -11,9 +11,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from knurlogic.interfaces import compaction as C  # noqa: E402
-from knurlogic.interfaces import context_edits as E  # noqa: E402
-from knurlogic.interfaces import messages as M  # noqa: E402
+from knurlogic.context_management import compaction as C  # noqa: E402
+from knurlogic.context_management import context_edits as E  # noqa: E402
+from knurlogic.interfaces.http import messages as M  # noqa: E402
 
 ENV = {"KNURLOGIC_COMPACT_KEEP_TURNS": "2"}
 

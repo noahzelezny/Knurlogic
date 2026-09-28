@@ -54,8 +54,14 @@ this list; nothing depends on a folder below it.
                     artifacts on disk, what is loaded, memory, the wired
                     limit and the one load budget, installed dependencies.
       tuning/       what the settings should be, each beside its evidence.
-      interfaces/   how a person or an agent talks to it: MCP, the page, the
-                    CLI, the OpenAI and Anthropic endpoints.
+      context_management/
+                    what the model sees of a long conversation: history
+                    surgery and compaction. Model-agnostic; no mlx, no HTTP.
+      cluster/      the other machines, and running one model across them:
+                    peers, discovery, links, cluster launch and recovery.
+      interfaces/   how a person or an agent talks to it: MCP, CLI, the
+                    chat wire (http/: OpenAI and Anthropic endpoints), the
+                    page (page/).
 
     tests/          tripwires are named in test docstrings, not here.
     tools/          probes that gate work on real models: mtp_probe.py (drafting),

@@ -67,7 +67,7 @@ def ready(**_) -> Dict[str, Any]:
     Every reason it is not, named: a load still reading weights moves memory,
     so a fit measured now would be stale.
     """
-    from . import ui
+    from knurlogic.interfaces.page import server as ui
     # A second load let through while the first was still reading weights,
     # on a budget that did not yet count them, is the race this gate ends.
     blockers = [{"what": "a knurlogic server is still loading",
@@ -180,7 +180,7 @@ def state(**_) -> Dict[str, Any]:
     from knurlogic.machine import loaded
     doc = loaded.survey()
     m = doc.get("memory") or {}
-    from knurlogic.interfaces import ui
+    from knurlogic.interfaces.page import server as ui
     from knurlogic.engine.vision import served_vision
     spec = served_vision()
     # across machines: what the page on this Mac sees (its own residency and
@@ -492,7 +492,7 @@ def settings(artifact: str = "", tune: str = "balanced", **_) -> Dict[str, Any]:
     The `why` is the point. A knob without its provenance is one an agent
     changes for no reason, and these were expensive to establish.
     """
-    from knurlogic.interfaces import web
+    from knurlogic.interfaces.page import documents as web
     doc = web._preview(artifact, tune)
     from knurlogic.machine.artifact import Artifact
     from knurlogic.tuning.resolve import vision_budget
@@ -544,7 +544,7 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
     if names:
         return _load_on(names, artifact, port, tune, sets, force, draft,
                         split, link, cable)
-    from knurlogic.interfaces import ui
+    from knurlogic.interfaces.page import server as ui
     from knurlogic.interfaces.loading import NotLoadable, resolve_name
 
     # a model named, never a directory (interfaces/loading.py): the same
@@ -661,7 +661,7 @@ def unload(port: int | None = None, model: str = "", job: str = "",
     `models[].instance` -- a single-Mac server's own 16-hex id, or a
     cluster job's id (its instance is its job id, so `instance` and `job`
     both find it)."""
-    from knurlogic.interfaces import ui
+    from knurlogic.interfaces.page import server as ui
     if not (port or model or job or instance):
         return {"error": "name the port, the model, the job or the instance"}
     try:

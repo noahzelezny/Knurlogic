@@ -63,7 +63,7 @@ class App:
                  max_body: int = DEFAULT_MAX_BODY,
                  allow_origins: tuple = (), allow_hosts: tuple = ()):
         from knurlogic.engine.serve import thinking
-        from knurlogic.interfaces import messages
+        from knurlogic.interfaces.http import messages
         self.scheduler = scheduler
         self.served = served
         self.routes = routes or {}
@@ -115,7 +115,7 @@ class App:
 
     def _transport(self, oai: dict):
         """/v1/messages -> the OpenAI surface, in-process."""
-        from knurlogic.interfaces.messages import TransportError
+        from knurlogic.interfaces.http.messages import TransportError
         try:
             kind, val = self.chat(oai)
             return val
@@ -193,8 +193,8 @@ class App:
         refuse. A request that needs a summary pass and streams is
         answered 200 at once and kept alive while the summary is written;
         a later failure is an error event."""
-        from knurlogic.interfaces import compaction as C
-        from knurlogic.interfaces import context_edits as E
+        from knurlogic.context_management import compaction as C
+        from knurlogic.context_management import context_edits as E
         if not isinstance(body, dict):
             raise O.ApiError(400, "the request body must be a JSON object")
         try:
@@ -548,7 +548,7 @@ class Handler(BaseHTTPRequestHandler):
         asks this to manage its context. Image blocks are left out (their
         cost is known only once encoded), so with images it is a floor."""
         from knurlogic.engine.runtime import prompt as P
-        from knurlogic.interfaces import messages as M
+        from knurlogic.interfaces.http import messages as M
         try:
             req = json.loads(raw or b"{}")
             oai = M.to_openai(req if isinstance(req, dict) else {})
@@ -560,8 +560,8 @@ class Handler(BaseHTTPRequestHandler):
                                           retry_after=5))
         try:
             # as the model would see it: resent compactions folded in
-            from knurlogic.interfaces import compaction as C
-            from knurlogic.interfaces import context_edits as E
+            from knurlogic.context_management import compaction as C
+            from knurlogic.context_management import context_edits as E
             msgs, _ = E.view(oai.get("messages") or [],
                              C.settings()["keep"])
             n = self.app.count(msgs, oai.get("tools"))

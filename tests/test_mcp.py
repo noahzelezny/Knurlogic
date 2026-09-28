@@ -40,7 +40,7 @@ def test_every_tool_is_in_the_table_with_a_schema():
 
 def test_nothing_moving_is_ready(monkeypatch):
     """No load in flight and no lock held: ready, with nothing to wait on."""
-    monkeypatch.setattr("knurlogic.interfaces.ui.loading", lambda: [])
+    monkeypatch.setattr("knurlogic.interfaces.page.server.loading", lambda: [])
     r = mcp.ready()
     assert r["ready"] is True and r["blockers"] == []
 
@@ -53,7 +53,7 @@ def test_load_refuses_a_model_that_does_not_fit(tmp_path, monkeypatch):
     monkeypatch.setattr("knurlogic.machine.loaded.available_memory",
                         lambda: {"available_bytes": 1 << 20,
                                  "free_bytes": 1 << 20, "cached_bytes": 0})
-    monkeypatch.setattr("knurlogic.interfaces.ui._spawn",
+    monkeypatch.setattr("knurlogic.interfaces.page.server._spawn",
                         lambda *a, **k: pytest.fail("spawned anyway"))
     r = mcp.load(artifact=str(d), force=True)
     assert r["loaded"] is False and r["refused"] == "will not fit"
@@ -73,7 +73,7 @@ def test_load_refuses_while_memory_moves_but_force_overrides(tmp_path,
                         lambda: {"available_bytes": 64 << 30,
                                  "free_bytes": 64 << 30, "cached_bytes": 0})
     spawned = []
-    monkeypatch.setattr("knurlogic.interfaces.ui._spawn",
+    monkeypatch.setattr("knurlogic.interfaces.page.server._spawn",
                         lambda *a, **k: spawned.append(a) or {"starting": a[0]})
 
     r = mcp.load(artifact=str(d))
@@ -140,7 +140,7 @@ def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,
                  quiet_s=0):
     """One registered server, with every fact the phase is read from faked."""
     import os, time
-    from knurlogic.interfaces import ui
+    from knurlogic.interfaces.page import server as ui
     log = tmp_path / "serve.log"
     log.write_text("artifact  x\nloading weights\n")
     t = time.time() - quiet_s

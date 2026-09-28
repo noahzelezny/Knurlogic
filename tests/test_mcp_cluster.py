@@ -14,8 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from knurlogic.interfaces import cluster_jobs as C
-from knurlogic.interfaces import mcp, ui, web
+from knurlogic.cluster import launch as C
+from knurlogic.interfaces import mcp
+from knurlogic.interfaces.page import server as ui
+from knurlogic.interfaces.page import documents as web
 from knurlogic.machine import identity
 
 import test_cluster_jobs as T

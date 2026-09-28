@@ -44,9 +44,14 @@ interfaces/http/            the wire (as built)
   openai.py                 /v1/chat/completions, /v1/completions,
                             /v1/models, OpenAI error objects, SSE
   scout.py                  /v1/residency, /v1/ensure, the concurrency hint
+  messages.py               /v1/messages: handler_over(), in-process
   __init__.py               serve(), switch() (through interfaces/loading)
-interfaces/messages.py      /v1/messages: handler_over(), in-process
+interfaces/page/            the page: server.py (`knurlogic ui`),
+                            documents.py, assets/index.html
 interfaces/loading.py       what a model must pass before it loads
+cluster/launch.py           a cluster job, page to page; recovery.py
+context_management/         context_edits.py, compaction.py: what the
+                            model sees, no mlx, no HTTP
 engine/runtime/             everything that touches mlx (engine rule holds)
   host.py                   ModelHost: empty/loading/ready/unloading/failed
   scheduler.py              ONE thread owns the MLX stream: commands,
@@ -298,7 +303,7 @@ unchanged). `--split pipeline`.
 
 ## Cluster: launch and failure (2026-09-27, third slice)
 
-Page to page, two phases (`interfaces/cluster_jobs.py`; files and markers
+Page to page, two phases (`cluster/launch.py`; files and markers
 `cluster/jobs.py`). No token: running knurlogic is consent; every
 `/peer/cluster/*` route has `/peer/loaded.json`'s gate (no Origin;
 loopback, Thunderbolt, or a `--peer` address).
@@ -355,7 +360,7 @@ this Mac (`knurlogic ui`) holds the peers, the jobs it coordinates and the
 watcher that fails one over. So everything past this Mac is a request to
 that page over loopback (`KNURLOGIC_PAGE`, default `127.0.0.1:8899`) --
 the same `POST /loaded.json` its Launch and Unload buttons send, not a
-second copy of `cluster_jobs.launch`. Without the page, `load` and
+second copy of `cluster/launch.launch`. Without the page, `load` and
 `unload` work on this Mac by port as before, and `state` lists this Mac.
 
 - `load(artifact, port, tune, sets, machines, split, link[, cable])`:
@@ -387,13 +392,13 @@ to stop is relaunched by the page that launched it, and says so. Strong
 endpoint behavior, bounded: eviction and model choice stay with the harness, and
 recovery only brings back what was running -- the same machines, rank
 order (so the same split), link, port, tune and settings.
-`interfaces/recovery.py`.
+`cluster/recovery.py`.
 
-- **Who.** The page that coordinated a cluster launch (`cluster_jobs.launch`
+- **Who.** The page that coordinated a cluster launch (`cluster/launch.launch`
   tracks every job it starts, whether the page's Launch or the MCP asked)
   and the page that started a one-Mac server (its Launch, or a peer's
   forwarded load). A relaunch goes through the same path: a cluster job is
-  `cluster_jobs.launch` again with the recorded request -- prepare on every
+  `cluster/launch.launch` again with the recorded request -- prepare on every
   page checks fit beside what is held, versions, links and one load at a
   time, and the cable failover still follows it -- and a one-Mac server is
   `mcp.load` again (the fit and memory-still-moving refusals). A link-init

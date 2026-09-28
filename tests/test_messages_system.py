@@ -1,4 +1,4 @@
-from knurlogic.interfaces.messages import to_openai
+from knurlogic.interfaces.http.messages import to_openai
 
 
 def test_a_system_message_inside_messages_joins_the_leading_one():

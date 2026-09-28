@@ -99,7 +99,7 @@ def test_an_explicit_setting_beats_the_preset_and_is_reported():
 def test_the_preset_is_a_launch_knob_with_a_native_range():
     assert "KNURLOGIC_PRESET" in S.MODEL_KNOBS
     assert S.KNOB_RANGE["KNURLOGIC_PRESET"][0] == list(S.PRESETS)
-    from knurlogic.interfaces.ui import TUNES, clean_sets
+    from knurlogic.interfaces.page.server import TUNES, clean_sets
     assert set(TUNES) == set(S.PRESETS)
     ok, bad = clean_sets({"KNURLOGIC_PRESET": "lean"})
     assert ok == {"KNURLOGIC_PRESET": "lean"} and not bad

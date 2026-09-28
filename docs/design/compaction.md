@@ -62,8 +62,10 @@ can decide when to ask. No custom advisory header (no harness looks for one).
 
 ## Code
 
-`interfaces/context_edits.py` (history surgery, no model), `interfaces/compaction.py`
-(prepare / summarize), `http/server.py` App.chat wiring, knobs `KNURLOGIC_COMPACT_*`
+`context_management/context_edits.py` (history surgery, no model),
+`context_management/compaction.py` (prepare / summarize) -- a top-level
+package, model-agnostic, no mlx and no HTTP; `interfaces/http/server.py`
+App.chat wiring, knobs `KNURLOGIC_COMPACT_*`
 in `tuning/settings.py` (AUTO off, TRIGGER 0.8, KEEP_TURNS 6, SUMMARY_MIN 1024,
 SUMMARY_MAX 8192, TOOL_RESULTS distill), Settings "Compaction" tab. Tests:
 `tests/test_compaction.py`.

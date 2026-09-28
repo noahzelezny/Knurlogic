@@ -403,7 +403,7 @@ KNOB_ALIASES = {
 }
 
 #: launch settings of the model itself, read when it loads: the same on
-#: every rank of a split (interfaces/cluster_jobs passes them ring-wide)
+#: every rank of a split (cluster/launch passes them ring-wide)
 MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
                "KNURLOGIC_CROSS_CHIP", "KNURLOGIC_PRESET")
 
@@ -724,7 +724,7 @@ VISION_KV_TOKENS_PER_IMAGE = 4096
 VISION_KV_DTYPE_BYTES = 2
 
 
-# --- server-side context compaction (interfaces/compaction.py) --------------
+# --- server-side context compaction (context_management/compaction.py) ----
 # The operator's defaults for what a request's `context_management` leaves
 # out, and whether the server compacts a request that asks for nothing.
 # Read per request from the environment, so each applies live on a running
@@ -825,3 +825,37 @@ def check_compact_knob(name: str, value):
     if not lo <= v <= hi:
         return f"{name}={s}: between {lo:g} and {hi:g}"
     return None
+
+
+# --- what a launch request may carry ----------------------------------------
+# The page, a forwarded load and a cluster job all check a request against
+# these; they are settings facts, so they live here.
+
+TUNES = ("balanced", "fast", "stable", "lean", "safe")  # the names of PRESETS
+#: request keys that would name a place on disk; refused outright, never
+#: ignored, so a coordinator that sends one learns it is wrong
+PATH_KEYS = ("path", "target", "artifact", "where", "dir", "directory")
+
+
+def launch_knobs() -> frozenset:
+    """The knob names a forwarded load may set: the ones knurlogic documents
+    (KNOB_DOC) and their aliases. Nothing else is passed on:
+    `--set` puts it in the child's environment."""
+    return frozenset(KNOB_DOC) | frozenset(
+        n for v in KNOB_ALIASES.values() for n in v) | frozenset(
+        NUMERICS_FLAGS)
+
+
+def clean_sets(sets) -> tuple:
+    """(allowed {name: value}, [refused names]). Values are short plain
+    tokens: digits, letters, '.', '-', '_'."""
+    import re
+    ok, bad = {}, []
+    allowed = launch_knobs()
+    for k, v in (sets.items() if isinstance(sets, dict) else ()):
+        v = str(v)
+        if k in allowed and len(v) <= 64 and re.fullmatch(r"[\w.\-]*", v):
+            ok[k] = v
+        else:
+            bad.append(str(k)[:64])
+    return ok, bad

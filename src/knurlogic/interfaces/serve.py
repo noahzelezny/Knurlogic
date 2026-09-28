@@ -29,7 +29,7 @@ import os
 import sys
 
 from knurlogic.engine import arch, serve as engine, mtp
-from knurlogic.interfaces import web
+from knurlogic.interfaces.page import documents as web
 from knurlogic.machine import status, wired
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning.resolve import resolve
@@ -406,7 +406,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             want = {k: v for k, v in _resolve_for(ws, tune_name).env.items()}
         from knurlogic.tuning.settings import COMPACT_KNOBS
         # compaction's knobs are read per request by this server's HTTP
-        # side (interfaces/compaction): the environment is the setting
+        # side (context_management/compaction): the environment is the setting
         compact = {k: str(v) for k, v in want.items()
                    if k in COMPACT_KNOBS
                    and str(v) != os.environ.get(k, COMPACT_KNOBS[k][0])}

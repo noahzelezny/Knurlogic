@@ -12,7 +12,19 @@ authority on its own (docs/DISCOVERY.md):
   exo.py        what exo's /state says about each node: a witness, used
                 only for nodes nothing else answers for.
 
-The `knurlogic node` agent joins this package when it is built;
+And running one model across them:
+
+  launch.py     a cluster job, page to page: prepare, start, watch and
+                stop each machine's rank.
+  jobs.py       a job's files, its ranks' progress markers, and the
+                verdict on whether it is still healthy.
+  recovery.py   a model that died unasked is relaunched, bounded.
+  links.py      which link a peer is reached over, and which links a page
+                answers on.
+
+launch.py and recovery.py never import interfaces/: the page injects its
+status, peers, children and load at startup (interfaces/page/server.py
+_wire). The `knurlogic node` agent joins this package when it is built;
 `interfaces/` keeps only the command lines and pages that use them.
 Nothing here imports mlx.
 """

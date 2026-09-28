@@ -83,7 +83,7 @@ def ensure(body: dict) -> dict:
 
 
 def residency(host, sched, port: int = 0) -> dict:
-    from knurlogic.interfaces import recovery
+    from knurlogic.cluster import recovery
     from knurlogic.machine import identity, servers
     st = host.status()
     if st["state"] == "empty":
