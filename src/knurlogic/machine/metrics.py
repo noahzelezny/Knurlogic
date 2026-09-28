@@ -8,6 +8,8 @@ move decode speed, and each is readable WITHOUT sudo:
             "Device Utilization %" Activity Monitor's GPU History draws
   cpu       host_statistics(HOST_CPU_LOAD_INFO) tick deltas, through ctypes
   swap      `sysctl vm.swapusage`
+  pressure  `sysctl kern.memorystatus_vm_pressure_level` (1 normal, 2 warn,
+            4 critical) -- with swap growth, whether swap is happening NOW
   thermal   NSProcessInfo.thermalState (nominal / fair / serious /
             critical), through the Objective-C runtime -- what throttling
             follows
@@ -93,6 +95,39 @@ def _swap():
         return int(float(m.group(1)) * _UNITS[m.group(2)]) if m else None
     except Exception:
         return None
+
+
+def _vm_pressure():
+    """macOS's own memory pressure level: 1 normal, 2 warn, 4 critical."""
+    try:
+        out = subprocess.run(["sysctl", "-n",
+                              "kern.memorystatus_vm_pressure_level"],
+                             capture_output=True, text=True,
+                             timeout=2).stdout
+        return int(out.strip())
+    except Exception:
+        return None
+
+
+#: How far back swap growth is looked for.
+SWAP_WINDOW_S = 60
+
+
+def _swapping(now, hist) -> bool:
+    """Whether pressure is pushing into swap right now. macOS keeps swap
+    `used` long after the pressure that caused it has passed (6.6 GiB on a
+    box 96% free), so a used figure alone is history: it counts only when
+    the kernel says warn/critical, or swap grew within SWAP_WINDOW_S."""
+    if (now.get("vm_pressure") or 0) >= 2:
+        return True
+    s = now.get("swap_bytes")
+    if s is None:
+        return False
+    cutoff = now["t"] - SWAP_WINDOW_S
+    base = next((h["swap_bytes"] for h in hist
+                 if h["t"] >= cutoff and h.get("swap_bytes") is not None),
+                None)
+    return base is not None and s > base
 
 
 def _thermal():
@@ -205,6 +240,7 @@ def sample(memory_map=None) -> dict:
     return {"t": round(time.time(), 1), "gpu_pct": gpu,
             "gpu_in_use_bytes": gpu_mem, "cpu_pct": _cpu_pct(),
             "memory_pct": _pressure(memory_map), "swap_bytes": _swap(),
+            "vm_pressure": _vm_pressure(),
             "thermal": _thermal(), "temp_c": _temp_c()}
 
 
@@ -212,6 +248,8 @@ def metrics(memory_map=None) -> dict:
     """The latest sample plus the history, sampling only if the newest one
     is older than MIN_INTERVAL_S."""
     if not _hist or time.time() - _hist[-1]["t"] >= MIN_INTERVAL_S:
-        _hist.append(sample(memory_map))
+        now = sample(memory_map)
+        now["swapping"] = _swapping(now, _hist)
+        _hist.append(now)
     return {"now": _hist[-1], "history": list(_hist),
             "interval_seconds": MIN_INTERVAL_S}

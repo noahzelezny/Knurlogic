@@ -2027,17 +2027,13 @@ async function tick(){
       <div class="mrow"><div class="mhd"><span>memory</span><b>${
         Math.round(used/GIB)} / ${Math.round(inst/GIB)} GiB</b></div>${hbar(n, mm, off, swap)}</div>`}</div>`;
   }
-  // Swap only means something right now if it's actively growing (the
-  // machine is under pressure this minute) or it's grown large -- macOS
-  // keeps pages it swapped out long after the pressure that caused it has
-  // passed, so a small, flat swap figure is stale history, not a signal.
+  // Swap only means something while pressure is pushing into it -- macOS
+  // keeps pages it swapped out long after the pressure has passed. The
+  // server says when (machine/metrics.py: warn/critical pressure, or swap
+  // grown in the last minute); a node that does not say shows no band.
   function swapToShow(n){
     const now=((n.metrics||{}).now)||{}, s=now.swap_bytes;
-    if(s==null) return null;
-    const h=(n.metrics&&n.metrics.history)||[], cutoff=(now.t||0)-60;
-    const base=h.find(x=>x.swap_bytes!=null && x.t>=cutoff);
-    const growing=base && s>base.swap_bytes;
-    return (growing || s>4*GIB) ? s : null;
+    return s!=null && now.swapping ? s : null;
   }
   function ttemp(n, off){
     const now=((n.metrics||{}).now)||{};
@@ -2173,6 +2169,8 @@ async function tick(){
     merged.knurlogic_cache=ns_.reduce((x,n)=>{const q=n.memory||{};
       return x+(q.scope==='process'&&q.available&&(n.memory_map||{})
         .by_runtime?.knurlogic ? (q.cache_bytes||0) : 0)},0);
+    // The swap band's key row, only while some machine draws the band.
+    merged.swap_bytes=ns_.reduce((x,n)=>x+(swapToShow(n)||0),0);
     ramWent(merged);
   }
   // Five machines at most: two rows of three with the key in one cell is
@@ -2828,7 +2826,8 @@ function ramWent(m){
         ? `<div class="ramrow sub"><em class="hatch" style="--c:${RAMCOL.knurlogic}"></em>
             <span>of which cache</span><b>${gb(m.knurlogic_cache)}</b></div>`:'')).join('')}
     ${row('everything else',other,'var(--faint)')}
-    ${row('unused',free,'')}</div>`;
+    ${row('unused',free,'')}
+    ${m.swap_bytes>0?row('swap',m.swap_bytes,'var(--bad)'):''}</div>`;
 }
 
 // A failed request in the server's own words: its JSON error's message
