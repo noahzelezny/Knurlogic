@@ -54,6 +54,22 @@ def main(out_path):
     T.shard(model, link.group)
     split = run(model, ids, then)
     link.barrier()
+    # idle: rank 0 parks rank 1 on the bell, then the next exchange wakes it
+    import time
+    from knurlogic.engine.runtime import plan as P
+    if link.rank == 0:
+        T.Ring(link).park()
+        time.sleep(1.0)
+        link.exchange(0, None)
+    else:
+        _, data = link.exchange(0, None)
+        assert [o["op"] for o in P.decode(data)["ops"]] == ["park"]
+        t0 = time.process_time()
+        link.sleep()
+        slept_cpu = time.process_time() - t0
+        link.exchange(0, None)
+        assert slept_cpu < 0.2, f"parked rank used {slept_cpu:.2f}s CPU"
+    link.barrier()
     if link.rank == 0:
         json.dump({"whole": whole.tolist(), "split": split.tolist()},
                   open(out_path, "w"))
