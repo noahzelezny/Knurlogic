@@ -434,7 +434,8 @@ class Mark:
 
 def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
            completion_batch_size: int, prefill_step_size: int,
-           working_set: int, split: str = "tensor", head=None) -> int:
+           working_set: int, split: str = "tensor", head=None,
+           why: str = "") -> int:
     """Rank >= 1: apply rank 0's plans and step until told to stop. The
     return value is the number of steps taken.
 
@@ -459,7 +460,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
         if ex is None:
             gen = MTPBatchGenerator(
                 model, head if split == "pipeline" else None, stats={},
-                vision=None, completion_batch_size=completion_batch_size,
+                vision=None, why=why,
+                completion_batch_size=completion_batch_size,
                 prefill_step_size=prefill_step_size, stream=stream)
             if split == "pipeline":
                 from . import pipeline as PL
@@ -602,7 +604,8 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                   prompt_cache_size=prompt_cache_size,
                   completion_batch_size=completion_batch_size,
                   prefill_step_size=prefill_step_size,
-                  working_set=working_set, split=split, head=head)
+                  working_set=working_set, split=split, head=head,
+                  why=str(state.DRAFT.get("why") or ""))
 
 
 def agree_head(link: Link):
