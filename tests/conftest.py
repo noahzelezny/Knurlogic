@@ -13,3 +13,12 @@ def _no_cluster_watcher_thread(monkeypatch):
     Tests call watch_once by hand; no thread is started."""
     from knurlogic.interfaces import cluster_jobs
     monkeypatch.setattr(cluster_jobs, "_WATCHER", [1])
+
+
+@pytest.fixture(autouse=True)
+def _no_real_page(monkeypatch):
+    """The MCP's cross-machine tools ask the page on this Mac (127.0.0.1:8899
+    by default). A test must never reach the REAL page -- an `unload` there
+    stops a real job -- so it points at a port nothing listens on, and a
+    test that wants a page starts one and says where."""
+    monkeypatch.setenv("KNURLOGIC_PAGE", "127.0.0.1:9")

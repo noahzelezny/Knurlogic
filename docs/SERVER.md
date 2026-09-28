@@ -106,8 +106,10 @@ Where it appears:
 - the page's `GET /loaded.json` -> each knurlogic `resident[]` row's
   `requests` (read from that server's /status.json; `null` for other
   runtimes). A cluster's row is rank 0's server, which runs the scheduler;
-- the MCP's `state()` -> `requests`: one entry per knurlogic model, the
-  fields above plus `model` and `where`.
+- the MCP's `state()` -> `requests`: one entry per knurlogic model on this
+  Mac and the peers its page sees, the fields above plus `model`, `where`
+  and `machine`; and each `models[]` entry's `requests` (a cluster job is
+  one entry, carrying rank 0's).
 
 The existing 503s carry `Retry-After`: 5 s for no model loaded, 10 s for
 insufficient memory, 30 s for a cluster that is stopping. No new 429 or 503.
@@ -297,6 +299,38 @@ loopback, Thunderbolt, or a `--peer` address).
   the follower's death is a 503 `cluster_failed`, and so is rank 0's: the
   page answers it with the job's stop reason (a stream already under way
   ends with one `data: {"error": ... "cluster_failed"}` event).
+
+### The MCP across machines
+
+The MCP (`interfaces/mcp.py`, stdio) runs in its own process; the page on
+this Mac (`knurlogic ui`) holds the peers, the jobs it coordinates and the
+watcher that fails one over. So everything past this Mac is a request to
+that page over loopback (`KNURLOGIC_PAGE`, default `127.0.0.1:8899`) --
+the same `POST /loaded.json` its Launch and Unload buttons send, not a
+second copy of `cluster_jobs.launch`. Without the page, `load` and
+`unload` work on this Mac by port as before, and `state` lists this Mac.
+
+- `load(artifact, port, tune, sets, machines, split, link[, cable])`:
+  `machines` empty is this Mac (the fit and ready checks, then a child
+  server). One other Mac: the page's single-peer load (`node`), checked by
+  that Mac. Two or more: `{action: load, identity, nodes, split, link}`;
+  `link` is `tcp` (ring) or `rdma` (jaccl), mapped by the page. The answer
+  is the job, rank 0's `port`, the `leader`, `machines` and `placement
+  {order, leader, layers, cable, cable_note}`. Every refusal the page
+  gives -- a share that does not fit, a machine not answering, the model
+  not on a machine, RDMA without a Thunderbolt 5 cable, another load still
+  in progress -- comes back as `{loaded: false, refused}` with nothing
+  started. The server never evicts: the harness unloads first.
+- `unload(port | model | job[, machine])`: a job with a rank on this Mac is
+  `{action: unload, job}` (stopped on every machine); a peer's model or
+  job is `{action: unload, node, port}` to its leader's page, which does
+  the same.
+- `state()` -> `models`: every resident model on this Mac and the
+  answering peers (`/loaded.json?peers=1`), each with `machine`, `port`,
+  `machines`, `split`, `link` (tcp | rdma), `job`, `leader`, `phase` and
+  `requests`. A cluster job is one entry (rank 0's row, or the job itself
+  while rank 0 has none yet), never one per rank; `machines` names any
+  peer that did not answer.
 
 ## Migration
 
