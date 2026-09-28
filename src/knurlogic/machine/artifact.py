@@ -162,7 +162,11 @@ class Artifact:
                     if f.suffix == ".safetensors" and f.is_file())
         return cls(
             path=p,
-            model_type=tc.get("model_type") or cfg.get("model_type") or "unknown",
+            # The full model's type (e.g. qwen3_5), not the nested TEXT
+            # config's (qwen3_5_text) -- a vision model loaded with its
+            # tower still IS the full type; the text config's own spelling
+            # is a fallback only for a config that never nests one.
+            model_type=cfg.get("model_type") or tc.get("model_type") or "unknown",
             model_file=cfg.get("model_file"),
             bytes_on_disk=total,
             hidden_size=tc.get("hidden_size"),
