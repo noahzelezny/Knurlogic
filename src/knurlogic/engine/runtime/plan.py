@@ -44,7 +44,7 @@ from typing import List
 CONTROL_LEN = 3
 OVER, STEP, LENGTH = range(CONTROL_LEN)
 
-OPS = ("admit", "remove", "insert", "pop", "reset", "stop")
+OPS = ("admit", "remove", "insert", "pop", "reset", "stop", "park")
 _FIELDS = {
     "admit": ("uid", "prompt", "segs", "hit", "max_tokens", "sampling",
               "penalties", "initial"),
@@ -53,6 +53,7 @@ _FIELDS = {
     "pop": ("n",),
     "reset": (),
     "stop": (),
+    "park": (),
 }
 EVENTS = ("checkpoint", "finished")
 
