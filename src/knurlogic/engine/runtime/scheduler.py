@@ -401,7 +401,10 @@ class Scheduler:
         if self._ex is not None and self._rows:
             self._step()
             return
-        # idle: block until something arrives
+        # idle: block until something arrives; on a ring the other ranks
+        # sleep too, rather than spin in the next collective
+        if self.tensor is not None and self.host.state == "ready":
+            self.tensor.park()
         self._wake.wait(0.5 if self._waiting else None)
         self._wake.clear()
 
