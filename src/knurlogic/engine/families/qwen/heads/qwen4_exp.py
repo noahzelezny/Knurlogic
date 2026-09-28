@@ -90,7 +90,11 @@ class MTPHead:
         lay = core.layers[fa_idx]
         while "inner" in lay:
             lay = lay["inner"]
-        self.block = type(lay)(args_t, fa_idx)
+        # built by its GLOBAL index: the class picks its attention type from
+        # args.layer_types[idx], and a pipeline stage holds a slice of the
+        # layers, so fa_idx (local) can name a linear-attention layer there
+        g_idx = args_t.layer_types.index("full_attention")
+        self.block = type(lay)(args_t, g_idx)
         # The head has no PLE bank. A zero-filled stand-in is NOT a no-op
         # through this class, so the submodule has to go entirely.
         self.block.ple = None
