@@ -2917,19 +2917,22 @@ async function loadResident(){
         r.cluster?`${r.cluster.split} over ${
           r.cluster.link==='jaccl'?'RDMA':'TCP/IP'}${
           r.cluster.phase&&r.cluster.phase!=='ready'?' · '+r.cluster.phase:''}`:'',
-        r.detail, r.state==='loaded'?'':r.state]
+        r.detail, r.state==='loaded'?'':r.state,
+        r.instance?`id ${r.instance.slice(0,6)}`:'']
         .filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
         .map(esc).join(' · ')}</div>
       <div class="s">on ${esc(on(r))}</div>
     </div>`;
   const none='<div class="card offered"><div class="cardhd">'+
     '<span class="dot"></span><span class="n">nothing loaded</span></div></div>';
-  // a cluster job reported by more than one page is still one instance
-  const jobs=new Set();
+  // the same instance reported by more than one page (a cluster job,
+  // named by more than one rank's page) is still one card
+  const seen=new Set();
   const shown=rows.map((r,i)=>[r,i]).filter(([r])=>{
-    if(!r.cluster||!r.cluster.job) return true;
-    if(jobs.has(r.cluster.job)) return false;
-    jobs.add(r.cluster.job); return true });
+    const inst=r.instance||(r.cluster&&r.cluster.job);
+    if(!inst) return true;
+    if(seen.has(inst)) return false;
+    seen.add(inst); return true });
   let h=shown.length?shown.map(([r,i])=>card(r,i)).join(''):none;
   for(const m of peers) if(m.error)
     h+=`<div class="s ro peererr" title="${esc(m.error)}">${
