@@ -519,7 +519,6 @@
  .hstk.off{background:var(--grid)}
 
  .unit .stat{font-size:12.5px;color:var(--faint);margin-top:7px;letter-spacing:.04em}
- .unit .swapl{margin-top:5px;margin-bottom:-4px;height:18px;line-height:18px}
  .unit .pct{font-size:17px;font-weight:700;color:var(--acc);
    text-shadow:var(--glow)}
  /* The free-space bar is gone. It was a third telling of a number the
@@ -1156,6 +1155,9 @@ const fitWhere=()=>{ const ns=selNodes();
   return !ns.length ? (clusterNodes().length>1 ? "the cluster's memory" : "this machine's memory")
     : ns.length===1 ? `${ns[0].node}'s memory` : `the ${ns.length} picked machines' memory` };
 const gb=b=>Number.isFinite(b)?(b/GIB).toFixed(1)+' GiB':'--';
+// A whole-GiB rounding, for spots (like an inline swap note) that can't
+// afford the decimal's width.
+const gb0=b=>Number.isFinite(b)?Math.round(b/GIB)+' GiB':'--';
 const row=(k,v)=>`<div class="row"><span>${k}</span><span>${v}</span></div>`;
 // quotes too: esc() also fills attributes (title="…"), and a model's name
 // is a folder name -- one day a download's -- not something this page chose
@@ -1888,9 +1890,21 @@ async function tick(){
       <div class="mrow"><div class="mhd"><span>gpu</span><b>${pc(now.gpu_pct)}${
         now.gpu_in_use_bytes!=null?' · '+gb(now.gpu_in_use_bytes):''}</b></div>
         ${h.length?spark(h.map(s=>s.gpu_pct),'var(--acc)'):''}</div>
-      <div class="mrow"><div class="mhd"><span>memory</span><b>${swap>(64<<20)
-        ?`<span class="swap">${gb(swap)} swap</span> · `:''}${
+      <div class="mrow"><div class="mhd"><span>memory</span><b>${swap!=null
+        ?`<span class="swap">${gb0(swap)} swap</span> · `:''}${
         Math.round(used/GIB)} / ${Math.round(inst/GIB)} GiB</b></div>${hbar(n, mm, off)}</div>`}</div>`;
+  }
+  // Swap only means something right now if it's actively growing (the
+  // machine is under pressure this minute) or it's grown large -- macOS
+  // keeps pages it swapped out long after the pressure that caused it has
+  // passed, so a small, flat swap figure is stale history, not a signal.
+  function swapToShow(n){
+    const now=((n.metrics||{}).now)||{}, s=now.swap_bytes;
+    if(s==null) return null;
+    const h=(n.metrics&&n.metrics.history)||[], cutoff=(now.t||0)-60;
+    const base=h.find(x=>x.swap_bytes!=null && x.t>=cutoff);
+    const growing=base && s>base.swap_bytes;
+    return (growing || s>4*GIB) ? s : null;
   }
   function ttemp(n, off){
     const now=((n.metrics||{}).now)||{};
@@ -1972,7 +1986,7 @@ async function tick(){
     const used=mapped?(mm.used_bytes||mm.seen_bytes||0):(nm.active_bytes||0);
     const off=n.reachable===false||(!nm.available&&!mapped);
     const pct=inst?Math.max(0,Math.min(100,100*used/inst)):0;
-    const swap=((n.metrics||{}).now||{}).swap_bytes;
+    const swap=swapToShow(n);
     const what=[hw.chip||hw.model||'', inst?gb(inst).replace(/\.\d+ /,' '):'']
       .filter(Boolean).join(' · ');
     return `<div class="unit${off?' off':''}${NODESEL.has(n.node)?' sel':''}"
@@ -1988,10 +2002,9 @@ async function tick(){
           : '<div class="noans">no metrics from this node</div>'}</div>
         ${stack(n, mapped?mm:null, off)}
       </div>
-      <div class="swapl stat">${swap>(64<<20)
-          ?`<span class="swap">${gb(swap)} swap</span>`:'&nbsp;'}</div>
       <div class="stat"><span class="pct">${off?'--':pct.toFixed(0)+'%'}</span>
-        ${off?'':gb(used)+' / '+gb(inst)}</div>
+        ${off?'':gb(used)+' / '+gb(inst)}${swap==null?'':
+          ` · <span class="swap">${gb0(swap)} swap</span>`}</div>
     </div>`;
   }
   // The link between nodes animates along its length. That is the only
