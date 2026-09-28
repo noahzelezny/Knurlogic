@@ -99,8 +99,9 @@ def test_mcp_state_lists_requests_per_model(monkeypatch):
         {"name": "x", "where": "http://127.0.0.1:11434", "requests": None}],
         "runtimes": ["knurlogic"], "memory": {}})
     monkeypatch.setattr(ui, "children", lambda: [])
-    st = mcp.state()
-    assert st["requests"] == [dict(req, model="m",
+    monkeypatch.setattr(mcp, "_me_name", lambda: "here")
+    st = mcp.state()           # no page (conftest): this Mac's survey
+    assert st["requests"] == [dict(req, model="m", machine="here",
                                    where="http://127.0.0.1:9")]
 
 
