@@ -371,8 +371,12 @@ class Ring:
         """Rank 0 has nothing to run: the other ranks sleep on the bell
         instead of spinning in the next collective (Link.bell). The next
         exchange rings it first."""
-        if self.link.parked or not self.link.socks or \
-                getattr(self, "stopped", False):
+        if not self.link.socks or getattr(self, "stopped", False):
+            return
+        # parked with nothing new: stay asleep. Ops taken while idle (the
+        # prompt cache's pops as it makes room) ring the others to apply
+        # them and report their memory, then park them again.
+        if self.link.parked and not self.journal.ops:
             return
         ops = self.journal.take() + [{"op": "park"}]
         self.link.exchange(0, P.encode({"ops": ops}))

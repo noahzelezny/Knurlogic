@@ -113,6 +113,11 @@ class _Wait(Exception):
     """Not admitted yet: the request goes back to the front of the queue."""
 
 
+class _RingWait(_Wait):
+    """The prompt cache gave way on a ring; wait one exchange for the
+    peers' memory before deciding (Scheduler._make_room)."""
+
+
 def _cache_nbytes(cache) -> int:
     n = 0
     for c in cache or ():
@@ -258,6 +263,9 @@ class Scheduler:
         self._rows: Dict[int, _Row] = {}
         #: why the last tick left requests waiting (requests()), or None
         self._holding: Optional[str] = None
+        #: the prompt cache gave way on a ring and the peers have not yet
+        #: said what that freed there (_make_room)
+        self._ring_trimmed = False
         self._ex: Optional[LocalExecutor] = None
         self._stop = False
         #: set by abort(): every request from then on gets this error
@@ -610,6 +618,9 @@ class Scheduler:
             images = vreq.has_images(job.request.messages)
             try:
                 self._insert(job)
+            except _RingWait:
+                held.append(job)        # retried after the next exchange
+                continue
             except _Wait:
                 self._hold(job, held)
                 continue
@@ -868,6 +879,7 @@ class Scheduler:
         if need > room and held:
             before = self.cache.nbytes
             self.cache.trim_to(max(before - (need - room), 0))
+            self._ring_trimmed = self.cache.nbytes < before
             self._release()
             room = limit - self._active()
             logger.info("the prompt cache gave up %.1f GiB for a %d-token "
@@ -891,6 +903,15 @@ class Scheduler:
         limit = self._limit()
         if self._rows:
             raise _Wait()
+        # On a ring the peers' number is as of the last exchange: what the
+        # prompt cache just gave up here is given up there only when the
+        # pops travel (the next exchange; an idle rank 0 sends them in
+        # park()). Wait for that rather than refuse on a stale number --
+        # once nothing is left to give up, the refusal below stands.
+        if self.tensor is not None and self.cache is not None and \
+                self._ring_trimmed:
+            self._ring_trimmed = False
+            raise _RingWait()
         raise OutOfMemory(
             f"this prompt ({n_tokens} tokens) needs about {need / GIB:.1f} "
             f"GiB for its cache; {max(room, 0) / GIB:.1f} GiB is free under "
