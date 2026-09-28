@@ -312,6 +312,8 @@ def models_across(page: dict, here: str) -> list:
     rows = [(here, r) for r in page.get("resident") or []
             if isinstance(r, dict)]
     jobs = [(here, j) for j in page.get("jobs") or [] if isinstance(j, dict)]
+    down = [(here, d) for d in page.get("recovery") or []
+            if isinstance(d, dict)]
     for p in page.get("peers") or []:
         if not isinstance(p, dict):
             continue
@@ -319,6 +321,15 @@ def models_across(page: dict, here: str) -> list:
                  if isinstance(r, dict)]
         jobs += [(p.get("machine"), j) for j in p.get("jobs") or []
                  if isinstance(j, dict)]
+        down += [(p.get("machine"), d) for d in p.get("recovery") or []
+                 if isinstance(d, dict)]
+    # a job's recovery report: the coordinator's copy is the live one (a
+    # rank 0 page only has what the relaunch told it)
+    recs: dict = {}
+    for _, j in jobs:
+        v = j.get("recovery")
+        if j.get("job") and isinstance(v, dict):
+            recs[j["job"]] = _newer(recs.get(j["job"]), v)
     live = {}
     for machine, j in jobs:
         if j.get("job") and j.get("phase") != "stopped":
@@ -348,6 +359,8 @@ def models_across(page: dict, here: str) -> list:
             "leader": c.get("leader") or j.get("leader"),
             **({"phase": c.get("phase") or j.get("phase")} if job else {}),
             **({k: j[k] for k in ("cable", "cable_note") if j.get(k)}),
+            "recovery": _newer(r.get("recovery") if isinstance(
+                r.get("recovery"), dict) else None, recs.get(job)),
         })
     for job, j in live.items():
         if job in seen:
@@ -360,8 +373,34 @@ def models_across(page: dict, here: str) -> list:
             "machines": list(j.get("machines") or []),
             "split": j.get("split"), "link": _link_name(j.get("link")),
             "job": job, "leader": j.get("leader"), "phase": j.get("phase"),
-            **({k: j[k] for k in ("cable", "cable_note") if j.get(k)})})
+            **({k: j[k] for k in ("cable", "cable_note") if j.get(k)}),
+            "recovery": recs.get(job)})
+    # tracked by a page and not serving now: waiting to be relaunched, or
+    # failed until someone loads it again
+    for machine, d in down:
+        if (d.get("job") and d["job"] in seen) or any(
+                o["job"] and o["job"] == d.get("job") for o in out):
+            continue
+        ms = list(d.get("machines") or [machine])
+        out.append({
+            "name": d.get("name"), "runtime": "knurlogic",
+            "machine": ms[0] if d.get("job") else machine, "where": None,
+            "port": d.get("port"), "state": d.get("state"),
+            "requests": None, "machines": ms, "split": d.get("split"),
+            "link": _link_name(d.get("link")), "job": d.get("job"),
+            "leader": ms[0] if d.get("job") else None,
+            "recovery": d.get("recovery")})
     return out
+
+
+def _newer(a, b):
+    """Of two recovery reports of one model, the later; at a tie the
+    settled one (recovered / failed) over recovering."""
+    if not a or not b:
+        return a or b
+    ka = (a.get("last_at") or 0, a.get("state") != "recovering")
+    kb = (b.get("last_at") or 0, b.get("state") != "recovering")
+    return a if ka >= kb else b
 
 
 def _port_of(where):

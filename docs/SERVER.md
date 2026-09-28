@@ -332,6 +332,64 @@ second copy of `cluster_jobs.launch`. Without the page, `load` and
   while rank 0 has none yet), never one per rank; `machines` names any
   peer that did not answer.
 
+## Auto-recovery (2026-09-27)
+
+A model whose server or cluster rank dies or stalls without being asked
+to stop is relaunched by the page that launched it, and says so. Strong
+endpoint behavior, bounded: eviction and model choice stay with the harness, and
+recovery only brings back what was running -- the same machines, rank
+order (so the same split), link, port, tune and settings.
+`interfaces/recovery.py`.
+
+- **Who.** The page that coordinated a cluster launch (`cluster_jobs.launch`
+  tracks every job it starts, whether the page's Launch or the MCP asked)
+  and the page that started a one-Mac server (its Launch, or a peer's
+  forwarded load). A relaunch goes through the same path: a cluster job is
+  `cluster_jobs.launch` again with the recorded request -- prepare on every
+  page checks fit beside what is held, versions, links and one load at a
+  time, and the cable failover still follows it -- and a one-Mac server is
+  `mcp.load` again (the fit and memory-still-moving refusals). A link-init
+  failure the cable failover is handling is left to it; recovery follows
+  the job it moves to.
+- **Never recovered.** Any requested stop: an unload from any page or the
+  MCP (a peer's unload arrives as "B stopped the job: unloaded"), a page
+  closing, a launch abandoned. A stop because the model does not fit or a
+  machine ran out of memory -- a reason saying so, a prepare refusal for
+  memory held, or a rank's or server's own log line (`Insufficient Memory`,
+  `Unable to allocate`, ...), which the watcher now appends to the stop
+  reason as `out of memory: <line>` -- is `failed` at once and surfaced:
+  relaunching into the same memory is what rebooted the M3 once.
+- **A machine gone.** A stop because a peer's page went away or stopped
+  answering is retried only once every machine of the job answers its page
+  again, within the window; otherwise `failed`.
+- **Limits.** At most 3 relaunches per model in a 15-minute window, after
+  10 s, 30 s and 90 s. The next failure after that makes the model
+  `failed`, with the last reason, until someone loads it again (a launch
+  by anybody starts a fresh record). A relaunch starts only once no rank
+  of the old job is left on any of its machines -- by record and by
+  process (`pgrep` for `--job <job>` on each page, `/peer/cluster/job`'s
+  new `processes`) -- and a one-Mac server once no `knurlogic serve` on
+  its port is left.
+- **Reported.** `recovery: {attempts, last_reason, last_at, next_at,
+  state}` (state `recovering` | `recovered` | `failed`; times are epoch
+  seconds; `attempts` counts relaunches in the window; `next_at` only
+  while one is scheduled), or `null` when there is nothing to report, on:
+  each `/loaded.json` resident row and job; `/loaded.json`'s new
+  `recovery` list -- tracked models with nothing serving now (waiting for
+  a relaunch, or failed); each MCP `state()` model (a failed or waiting
+  model is an entry with `state` failed / recovering); and the the harness
+  `/v1/residency` row of the server itself. The page writes the record to
+  its machine's `~/.cache/knurlogic/recovery.json` under the port, and a
+  cluster relaunch carries it (spec field `recovery`) to the page running
+  rank 0, so that server's row says it too -- `recovered` once it is
+  ready, and nothing 15 minutes later. A relaunch shows on the page's
+  progress cards as a launch. `recovered` stays reported for the window.
+- **Switch.** `KNURLOGIC_RECOVER=off` in the page's environment turns it
+  off (on by default): a failure stops the job and is reported, as before.
+- Not covered: a one-Mac server that hangs without exiting (its `stalled`
+  phase is shown, not acted on); recovery state lives in the page process,
+  so a page restart forgets what it was tracking.
+
 ## Migration
 
 1. The conformance suite (tests/api) passes on today's server: done on
