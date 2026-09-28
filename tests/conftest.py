@@ -35,3 +35,15 @@ def _no_recovery_thread(monkeypatch, tmp_path):
     monkeypatch.setattr(recovery, "MODELS", {})
     path = tmp_path / "recovery.json"
     monkeypatch.setattr(recovery, "_path", lambda: path)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_cache(monkeypatch, tmp_path_factory):
+    """Every test gets its own ~/.cache/knurlogic: the server registry, the
+    job registry, the load lock and recovery.json all live there. With the
+    real one, a test's `unload(port=8080)` found the REAL server on :8080 in
+    the registry and stopped it -- a pytest run killed the 27B that a local
+    agent was running on (2026-09-28). A test that wants a cache sets its
+    own XDG_CACHE_HOME after this."""
+    monkeypatch.setenv("XDG_CACHE_HOME",
+                       str(tmp_path_factory.mktemp("xdg-cache")))
