@@ -20,6 +20,15 @@ def _cache_dir() -> Path:
     return root
 
 
+def new_instance() -> str:
+    """A 16-hex id for a server this box starts -- what exo calls an
+    instance id, so two servers, even one on this Mac and one on a peer
+    both answering on :8080, are never confused with each other. A cluster
+    job needs none of this: its job id already is its instance id."""
+    import secrets
+    return secrets.token_hex(8)
+
+
 def serve_log(port: int) -> Path:
     """Where a server started from here writes. A child whose output went
     to /dev/null could crash on load and leave its caller holding
