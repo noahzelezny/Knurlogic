@@ -62,7 +62,7 @@ def test_lean_quantizes_kv_where_the_family_takes_it():
     e = S.engine_settings(r.env)
     assert e["kv_bits"] == 8
     assert e["prefill_step_size"] == 512
-    assert e["prompt_concurrency"] == 1
+    assert "prompt_concurrency" not in e    # the engine prefills one anyway
     assert preset_env(_art(), "lean")["KNURLOGIC_MTP"] == "off"
 
 
@@ -76,11 +76,11 @@ def test_lean_on_a_family_that_refuses_kv_quant_stays_bf16_and_says_so():
 def test_an_explicit_setting_beats_the_preset_and_is_reported():
     r = resolve(_art(), 96 * GIB, tune="lean")
     rec = apply_preset_overrides(r, {"KNURLOGIC_KV_BITS": "4",
-                                     "KNURLOGIC_PROMPT_CONCURRENCY": "1"})
+                                     "KNURLOGIC_PREFILL_CHUNK": "512"})
     assert rec["overridden"] == {
         "KNURLOGIC_KV_BITS": {"preset": "8", "set": "4"}}
     # the same value set explicitly is still the preset's
-    assert rec["from_preset"]["KNURLOGIC_PROMPT_CONCURRENCY"] == "1"
+    assert rec["from_preset"]["KNURLOGIC_PREFILL_CHUNK"] == "512"
     assert "KNURLOGIC_KV_BITS" not in rec["from_preset"]
 
 

@@ -414,6 +414,7 @@ def _preview(path: str, tune: str, working_set_gib=None,
             "reach_why": reach_why, "what": what, "why": why,
             "tier": S.knob_tier(name),
             "values": vals[0] if isinstance(vals, tuple) else vals,
+            **knob_limit(a, name),
         })
     return {
         "artifact": {"name": a.path.name, "path": str(a.path),
@@ -493,6 +494,33 @@ def routes(status_fn=None, settings_fn=None, apply_fn=None,
             return _json(apply_fn(q, body))
         r["POST /settings.json"] = _apply
     return r
+
+
+def knob_limit(artifact, name: str) -> dict:
+    """{max, max_why} where the MODEL bounds a knob: the context length
+    stops at its window (tuning/settings.model_window). {} otherwise."""
+    from knurlogic.tuning import settings as S
+    if name != "KNURLOGIC_CONTEXT_LENGTH":
+        return {}
+    w, why = S.model_window(getattr(artifact, "raw_config", None) or {})
+    if not w:
+        return {}
+    return {"max": w, "max_why": f"this model's maximum is {w:,} tokens: "
+                                 f"{why}"}
+
+
+def refuse_sets(artifact, sets: dict):
+    """None when every {name: value} in `sets` is one it may take on this
+    artifact (tuning/settings.check_knob, the context length against the
+    model's window), else the first refusal. Used by a live apply and by a
+    launch, so neither takes a value the other would refuse."""
+    from knurlogic.tuning import settings as S
+    w, _ = S.model_window(getattr(artifact, "raw_config", None) or {})
+    for k, v in (sets or {}).items():
+        why = S.check_knob(k, v, w)
+        if why:
+            return why
+    return None
 
 
 RESTART_WHY = ("read at import and compiled into the kernel, so it takes a "
@@ -588,6 +616,7 @@ def settings_document(artifact, live_env: dict, live_tune: str,
                 "changed": live_env.get(k) != r.env.get(k),
                 "what": what, "why": why,
                 "reach": reach, "reach_why": reach_why,
+                **knob_limit(artifact, k),
             })
             vals, unit = _range(k)
             if vals:
