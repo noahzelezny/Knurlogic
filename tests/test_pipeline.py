@@ -251,3 +251,80 @@ def test_a_heavy_first_layer_is_balanced_by_bytes_not_count():
     s = R.pipeline_shares(per, _ranks(120, 84))
     fill = [s["bytes"][i] / (w * GIB) for i, w in enumerate((120, 84))]
     assert abs(fill[0] - fill[1]) < 0.15, s["reason"]
+
+
+# ------------------------------------------ a stage's wrapped layers, one process
+
+def _tiny(family):
+    import os
+    import sys
+    sys.path.insert(0, os.path.dirname(__file__))
+    import pipeline_ring_worker as W
+    return W.build(family)
+
+
+def _stage(model, start, end, *, recv, send):
+    """`model` as the pipeline stage holding layers [start, end), its ends
+    wrapped the way split() wraps them (no ring: nothing is called)."""
+    from knurlogic.engine.runtime import pipeline as PL
+    keep = list(PL.core_of(model).layers)[start:end]
+    if recv:
+        keep[0] = PL.Recv(keep[0], 1, None, mx.float32)
+    if send:
+        keep[-1] = PL.Send(keep[-1], 0, None, mx.float32)
+    PL.restage(model, keep, start, end)
+    return model
+
+
+def test_unwrap_sees_through_both_ends_of_a_one_layer_stage():
+    import mlx.nn as nn
+    from knurlogic.engine.runtime import pipeline as PL
+    lin = nn.Linear(2, 2)
+    both = PL.Send(PL.Recv(lin, 1, None, mx.float32), 0, None, mx.float32)
+    assert PL.unwrap(both) is lin and PL.unwrap(lin) is lin
+    assert type(both) is not nn.Linear and both.weight is lin.weight
+
+
+@pytest.mark.parametrize("start,end,recv,send", [(0, 3, False, True),
+                                                 (1, 4, True, False),
+                                                 (1, 2, True, True)])
+def test_the_flash_next_head_binds_on_any_stage(start, end, recv, send):
+    """qwen4_exp's head is a full-attention block of the layers' own class,
+    built by the global index -- on a stage whose first layer is rank 0's
+    Recv, and on a follower's stage holding no full-attention layer at all
+    (the tiny model's only one is layer 3). Before: TypeError from building
+    a Recv, then an IndexError / a linear-attention block -- the head did
+    not bind and MTP was off on every rank of the pipeline."""
+    import importlib
+    from knurlogic.engine.families.qwen.heads.qwen4_exp import MTPHead
+    from knurlogic.engine.runtime import pipeline as PL
+    model = _stage(_tiny("qwen4_exp"), start, end, recv=recv, send=send)
+    core = PL.core_of(model)
+    arch = importlib.import_module(type(core).__module__)
+    head = MTPHead(model, arch)
+    assert type(head.block) is arch.DecoderLayer
+    assert head.block.layer_type == "full_attention"
+    assert head.fa_idx == core.args.layer_types.index("full_attention") == 3
+    # and it drafts: random glue, the block's own random weights
+    D, hc = head.D, head.hc
+    head.norm_e = head._norm(D, mx.ones((D,)))
+    head.norm_h = head._norm(hc * D, mx.ones((hc * D,)), group_size=D)
+    head.fc = 0.02 * mx.random.normal((D, 2 * D))
+    out = head.draft_logits(mx.random.normal((1, 1, hc * D)),
+                            mx.array([[5]]))
+    mx.eval(out)
+    assert out.shape[:2] == (1, 1) and bool(mx.isfinite(out).all())
+
+
+@pytest.mark.parametrize("family", ["qwen3_5_moe", "glm5_next"])
+def test_restage_reads_the_layer_kinds_through_the_stage_ends(family):
+    """The per-family indices are read through a wrapped first / last layer:
+    the tiny models' layers 0-2 are linear and layer 3 full attention, so
+    the stage [2, 4) with both ends wrapped has its recurrent cache at 0 and
+    its attention cache at 1."""
+    from knurlogic.engine.runtime import pipeline as PL
+    model = _stage(_tiny(family), 2, 4, recv=True, send=True)
+    core = PL.core_of(model)
+    assert (core.ssm_idx, core.fa_idx) == (0, 1)
+    assert isinstance(core.layers[0], PL.Recv)
+    assert isinstance(core.layers[1], PL.Send)
