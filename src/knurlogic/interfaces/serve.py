@@ -478,13 +478,18 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print("engine    " + "  ".join(f"{k}={v}" for k, v in sorted(eng.items())))
 
     from knurlogic.machine import allowance
+    # the guard keeps under the budget printed above, not Metal's
+    # recommended working set: on the 128 GB M4 (2026-09-28) the budget
+    # was 112.3 GiB, the guard asked mlx and kept under 120, the machine
+    # swapped 6.6 GiB and a step aborted Metal
     guard = int(working_set_gib * GIB) or (
         allowance.cap(wired.detected_working_set_bytes())
-        if allowance.get() else 0)
+        if allowance.get() else ws)
     if guard:
         print(f"memory    the scheduler guards {guard / GIB:.1f} GiB ("
               + ("--working-set-gib" if working_set_gib else
-                 f"the knurlogic allowance, {allowance.path()}") + ")")
+                 f"the knurlogic allowance, {allowance.path()}"
+                 if allowance.get() else "the budget") + ")")
     return http.serve(a, host, port, routes=routes,
                       settings={**eng, "cross_chip": cross, **(serving or {}),
                                 **({"working_set_bytes": guard}
