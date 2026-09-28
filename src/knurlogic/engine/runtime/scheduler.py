@@ -256,6 +256,8 @@ class Scheduler:
         self._commands: "queue.Queue" = queue.Queue()
         self._waiting: List[Job] = []
         self._rows: Dict[int, _Row] = {}
+        #: why the last tick left requests waiting (requests()), or None
+        self._holding: Optional[str] = None
         self._ex: Optional[LocalExecutor] = None
         self._stop = False
         #: set by abort(): every request from then on gets this error
@@ -326,6 +328,33 @@ class Scheduler:
         """Rows admitted and decoding right now."""
         return len(self._rows)
 
+    def requests(self) -> dict:
+        """What is running and what is waiting, from any thread, without a
+        lock: only copies of the scheduler's structures are read (each copy
+        is one bytecode under the GIL), never the engine.
+
+        in_flight  rows admitted and generating (at most `capacity`)
+        pending    requests waiting: queued, held for memory, or admitted
+                   past the batch and waiting for a slot in it
+        capacity   the most rows decoded together (decode_concurrency)
+        oldest_pending_s  how long the oldest pending one has waited
+        holding    why they wait: loading | memory | batch_full | None"""
+        cap = int(self.completion_batch_size)
+        rows = [r for _, r in sorted(dict(self._rows).items())]
+        waiting = list(self._waiting) + list(self._jobs.queue)
+        waiting = [j for j in waiting if not j.cancelled]
+        past = [r.job for r in rows[cap:]]
+        pend = waiting + past
+        now = time.perf_counter()
+        oldest = max((now - j.submitted for j in pend if j.submitted),
+                     default=0.0)
+        holding = self._holding if pend else None
+        if pend and holding is None:
+            holding = "batch_full" if past else "queued"
+        return {"in_flight": min(len(rows), cap), "pending": len(pend),
+                "capacity": cap, "oldest_pending_s": round(oldest, 1),
+                "holding": holding}
+
     def more_helps(self, rows: int):
         """Would one more concurrent row raise throughput? True/False from
         the engine's timings at `rows` and `rows + 1` (seconds per token
@@ -388,7 +417,8 @@ class Scheduler:
     def _tick(self) -> None:
         self._do_commands()
         self._take_jobs()
-        if self.host.state == "ready" and self._room_to_admit():
+        room = self.host.state == "ready" and self._room_to_admit()
+        if room:
             self._admit_waiting()
         elif self.host.state in ("empty", "failed") and self._waiting \
                 and self._commands.empty():
@@ -396,6 +426,7 @@ class Scheduler:
             for j in self._waiting:
                 self._error(j, RuntimeError(f"no model to serve: {why}"))
             self._waiting.clear()
+        self._holding = self._why_waiting(room)
         if self._ex is not None and self._rows:
             self._guard_memory()
         if self._ex is not None and self._rows:
@@ -407,6 +438,15 @@ class Scheduler:
             self.tensor.park()
         self._wake.wait(0.5 if self._waiting else None)
         self._wake.clear()
+
+    def _why_waiting(self, room: bool) -> Optional[str]:
+        if not self._waiting:
+            return None
+        if self.host.state != "ready":
+            return "loading"
+        if not room or any(j.waiting_on for j in self._waiting):
+            return "memory"
+        return None
 
     def _do_commands(self) -> None:
         while True:

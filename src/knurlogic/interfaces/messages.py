@@ -326,9 +326,10 @@ def stream(openai_lines, model: str):
 
 
 class TransportError(Exception):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, retry_after: int = None):
         super().__init__(message)
         self.status = status
+        self.retry_after = retry_after
 
 
 def handler_over(transport, model: str):
@@ -352,7 +353,11 @@ def handler_over(transport, model: str):
         try:
             resp = transport(oai)
         except TransportError as e:
-            start_response(e.status, "application/json")
+            if e.retry_after:
+                start_response(e.status, "application/json",
+                               {"Retry-After": str(int(e.retry_after))})
+            else:
+                start_response(e.status, "application/json")
             write(json.dumps({"type": "error", "error": {
                 "type": ("invalid_request_error" if e.status < 500
                          else "api_error"),

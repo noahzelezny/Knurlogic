@@ -86,6 +86,32 @@ request goes through the batch executor; a seed is a per-row key.
 6. `usage` with prompt/completion/total on every response (today; keep).
 7. OpenAI shape only; nothing custom.
 
+### Requests: what is running and what is waiting
+
+Any number of requests may wait; nothing is refused for queue length. The
+server decides how many run at once and reports, per model, a `requests`
+object (`Scheduler.requests()`, lock-free, cheap enough to poll):
+
+| field | meaning |
+|---|---|
+| `in_flight` | rows admitted and generating (at most `capacity`) |
+| `pending` | requests waiting: queued, held for memory, or admitted past the batch and waiting for a slot |
+| `capacity` | the most rows decoded together (`decode_concurrency`) |
+| `oldest_pending_s` | seconds the oldest pending request has waited (0 when none) |
+| `holding` | why they wait: `loading`, `memory`, `batch_full`, `queued` (arrived, admitted next step), or `null` when nothing waits |
+
+Where it appears:
+- `GET /status.json` -> `requests` (the server's own status document);
+- `GET /v1/residency` -> each `data[]` row's `requests` (the harness);
+- the page's `GET /loaded.json` -> each knurlogic `resident[]` row's
+  `requests` (read from that server's /status.json; `null` for other
+  runtimes). A cluster's row is rank 0's server, which runs the scheduler;
+- the MCP's `state()` -> `requests`: one entry per knurlogic model, the
+  fields above plus `model` and `where`.
+
+The existing 503s carry `Retry-After`: 5 s for no model loaded, 10 s for
+insufficient memory, 30 s for a cluster that is stopping. No new 429 or 503.
+
 ## Cluster readiness
 
 `executor.py` is the seam. A pipeline executor runs stages on several

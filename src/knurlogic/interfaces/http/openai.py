@@ -23,9 +23,13 @@ DEFAULT_MAX_TOKENS = 512
 
 class ApiError(Exception):
     def __init__(self, status: int, message: str, *, type_: str = None,
-                 param: str = None, code: str = None):
+                 param: str = None, code: str = None,
+                 retry_after: int = None):
         super().__init__(message)
         self.status = status
+        #: seconds, sent as Retry-After (the 503s: busy memory, no model,
+        #: a cluster stopping); None sends none
+        self.retry_after = retry_after
         self.type = type_ or ("invalid_request_error" if status < 500
                               else "server_error")
         self.param, self.code = param, code
@@ -193,12 +197,12 @@ def _status_of(err: BaseException) -> ApiError:
     from knurlogic.engine.runtime.scheduler import OutOfMemory, RingFailed
     if isinstance(err, RingFailed):
         return ApiError(503, str(err), type_="server_error",
-                        code="cluster_failed")
+                        code="cluster_failed", retry_after=30)
     if isinstance(err, OutOfMemory):
         return ApiError(503, str(err), type_="server_error",
-                        code="insufficient_memory")
+                        code="insufficient_memory", retry_after=10)
     if "no model" in str(err):
-        return ApiError(503, str(err), type_="server_error")
+        return ApiError(503, str(err), type_="server_error", retry_after=5)
     return ApiError(500, f"{name}: {err}")
 
 
