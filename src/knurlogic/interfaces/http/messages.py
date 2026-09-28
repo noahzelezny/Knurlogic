@@ -65,7 +65,7 @@ def to_openai(req: dict) -> dict:
             continue
 
         # A compaction block (the server's own, resent) is a cut point:
-        # its own message, for interfaces/context_edits to fold on. The
+        # its own message, for context_management/context_edits to fold on. The
         # rest of the message follows it as usual.
         for b in content or []:
             if isinstance(b, dict) and b.get("type") == "compaction":
@@ -108,7 +108,8 @@ def to_openai(req: dict) -> dict:
                  for b in content or []):
             # Images keep their place among the text, in order: a harness
             # that sends [text, image, text] means exactly that sequence.
-            from knurlogic.interfaces.web import anthropic_images_to_openai
+            from knurlogic.interfaces.page.documents import (
+                anthropic_images_to_openai)
             parts = []
             for b in anthropic_images_to_openai(list(content or [])):
                 if not isinstance(b, dict):
@@ -155,7 +156,8 @@ def to_openai(req: dict) -> dict:
         body["stream_options"] = {"include_usage": True}
     if req.get("reasoning_effort"):
         body["reasoning_effort"] = req["reasoning_effort"]
-    # performed by the server (interfaces/compaction), whichever API asked
+    # performed by the server (context_management/compaction), whichever
+    # API asked
     if req.get("context_management") is not None:
         body["context_management"] = req["context_management"]
     if req.get("tools"):

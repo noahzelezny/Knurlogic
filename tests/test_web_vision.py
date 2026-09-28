@@ -1,14 +1,14 @@
-"""P5's `interfaces/web.py` changes: the Anthropic->OpenAI image shim, and
-the `vision` field on `/models.json` and `/loaded.json`.
+"""P5's `interfaces/page/documents.py` changes: the Anthropic->OpenAI image
+shim, and the `vision` field on `/models.json` and `/loaded.json`.
 
-No mlx, no PIL, no real model: `web.py` reads `served_vision()` and
-`registry.registered()`, both stdlib-only per the frozen contract
-(`docs/design/vision-contracts.md`), and this file proves it stays that way
-by never importing anything that would drag mlx in.
+No mlx, no PIL, no real model: `interfaces/page/documents.py` reads
+`served_vision()` and `registry.registered()`, both stdlib-only per the
+frozen contract (`docs/design/vision-contracts.md`), and this file proves it
+stays that way by never importing anything that would drag mlx in.
 """
 import json
 
-from knurlogic.interfaces import web
+from knurlogic.interfaces.page import documents as web
 
 
 # --- anthropic_images_to_openai --------------------------------------------
@@ -138,7 +138,7 @@ def test_web_module_never_imports_mlx_or_pil():
 
     code = (
         "import sys\n"
-        "import knurlogic.interfaces.web as web\n"
+        "import knurlogic.interfaces.page.documents as web\n"
         "web.models_document()({})\n"
         "web.loaded_document()({})\n"
         "assert 'mlx' not in sys.modules, sorted(sys.modules)\n"
@@ -156,7 +156,7 @@ def test_the_chat_proxy_only_reaches_models_this_page_knows(monkeypatch):
     against a fixed list -- servers knurlogic started -- or the page
     would forward anything to any address."""
     import io
-    from knurlogic.interfaces import ui
+    from knurlogic.interfaces.page import server as ui
     monkeypatch.setattr(ui, "chat_targets",
                         lambda: {"http://127.0.0.1:8080"})
     sent = {}
@@ -168,3 +168,10 @@ def test_the_chat_proxy_only_reaches_models_this_page_knows(monkeypatch):
         def end_headers(self): pass
     ui.proxy_chat(H(), "http://169.254.169.254", b"{}")
     assert sent["code"] == 403
+
+
+def test_the_page_asset_ships_with_the_package():
+    """interfaces/page/assets/index.html is package data: a wheel or a move
+    that loses it must fail here, not as a blank page."""
+    from knurlogic.interfaces.page.documents import PAGE
+    assert PAGE.exists(), PAGE
