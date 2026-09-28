@@ -301,7 +301,9 @@ def machine_settings():
             want = want[0] if want else None
         adv = wired.advise(0)
         doc = {"knobs": [], "tunes": [], "unmanaged": [], "exports": "",
-               "asked": {}, "wired": adv, "machine": wired.machine()}
+               "asked": {}, "wired": adv, "machine": wired.machine(),
+               # the defaults a model launched from this page starts with
+               "compaction": compaction_document({}, running=False)}
         if adv.get("known"):
             cur = adv["limit_bytes"] / GIB
             ceil_ = adv["ceiling_bytes"] / GIB
@@ -551,6 +553,38 @@ def knob_reach(artifact, name: str, live_knobs, restart_why=RESTART_WHY):
     return "restart", restart_why
 
 
+def compaction_document(env=None, running: bool = True) -> dict:
+    """The Compaction tab: each operator default for server-side
+    compaction (tuning/settings.COMPACT_KNOBS), its value and what it does.
+    Read per request by a running server, so each is `live` there; for a
+    model not running, a launch setting (`restart`)."""
+    import os
+    from knurlogic.tuning import settings as S
+    env = os.environ if env is None else env
+    knobs = []
+    for name, (default, values, unit, what, why) in S.COMPACT_KNOBS.items():
+        knobs.append({
+            "name": name, "running": (env.get(name) or default)
+            if running else None,
+            "would_be": default, "value": env.get(name) or default,
+            "changed": False, "tier": "reach",
+            "what": what, "why": why, "values": list(values), "unit": unit,
+            "reach": "live" if running else "restart",
+            "reach_why": ("read by this server for every request: a change "
+                          "applies to the next one" if running else
+                          "saved as a launch setting; read by the server "
+                          "from its start")})
+    return {"knobs": knobs,
+            "effective": S.compact_settings(env),
+            "about": ("Harnesses ask with context_management (Anthropic's "
+                      "compact_20260112, clear_tool_uses_20250919, "
+                      "clear_thinking_20251015; the same object on "
+                      "/v1/chat/completions); the server summarizes and "
+                      "returns the summary for the client to resend. "
+                      "Nothing is stored. usage.knurlogic.context reports "
+                      "the prompt's tokens against the window.")}
+
+
 def settings_document(artifact, live_env: dict, live_tune: str,
                       live_working_set: int, resolve_fn, wired_advice=None,
                       tunes=None,
@@ -651,6 +685,7 @@ def settings_document(artifact, live_env: dict, live_tune: str,
             "dead_knobs": sorted(
                 k["name"] for k in knobs if k["reach"] == "no-effect"),
             "exports": r.as_exports(),
+            "compaction": compaction_document(),
             "connect": _connect_doc(artifact),
             "wired": wired_advice or {},
         }
