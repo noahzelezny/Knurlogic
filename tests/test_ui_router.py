@@ -29,7 +29,11 @@ def _fake_model(model_id, seen):
             pass
 
         def do_GET(self):
-            out = json.dumps({"data": [{"id": model_id}]}).encode()
+            out = json.dumps({"data": [{
+                "id": model_id, "context_length": 4096,
+                "sampling_defaults": {"temp": 0.6},
+                "thinking": {"dialect": "qwen_toggle", "default": "on"}}]}
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(out)))
@@ -120,6 +124,20 @@ def test_models_lists_every_routable_model(cluster):
         doc = json.loads(r.read())
     assert {m["id"]: m["server"] for m in doc["data"]} == {
         "glm-peer": base_b, "qwen-local": base_a}
+
+
+def test_models_carry_each_servers_own_entry(cluster):
+    """The page's chat reads a model's recommended sampling and thinking
+    levels from /v1/models; the router listed only ids, so a cluster job
+    reached through the M3 page had neither (2026-09-27)."""
+    page, _, _, _ = cluster
+    with urllib.request.urlopen(page + "/v1/models", timeout=5) as r:
+        doc = json.loads(r.read())
+    for m in doc["data"]:
+        assert m["sampling_defaults"] == {"temp": 0.6}
+        assert m["thinking"]["dialect"] == "qwen_toggle"
+        assert m["context_length"] == 4096
+        assert m["object"] == "model" and m["owned_by"] == "knurlogic"
 
 
 def test_the_browser_guard_applies_to_the_router(cluster):

@@ -1126,7 +1126,7 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
 ROUTE_PATHS = ("/v1/messages", "/v1/chat/completions",
                "/v1/messages/count_tokens")
 ROUTE_S = 2.0
-_ROUTES: dict = {"at": 0.0, "map": {}}
+_ROUTES: dict = {"at": 0.0, "map": {}, "docs": {}}
 #: when peers were last asked what they serve (peer_residency)
 _PEER_AT = [0.0]
 #: how old that may be before the router asks again itself
@@ -1158,6 +1158,7 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
             except Exception:
                 pass
     found: dict = {}
+    docs: dict = {}
 
     def one(base):
         try:
@@ -1165,6 +1166,7 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
                            ROUTE_S).get("data") or []:
                 if isinstance(m, dict) and m.get("id"):
                     found.setdefault(str(m["id"]), base)
+                    docs.setdefault(str(m["id"]), m)
         except Exception:
             pass
     ts = [threading.Thread(target=one, args=(b,), daemon=True)
@@ -1175,15 +1177,20 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
     for t in ts:
         t.join(max(end - time.time(), 0))
     out = dict(found)
-    _ROUTES.update(at=now, map=out)
+    _ROUTES.update(at=now, map=out, docs=docs)
     return out
 
 
 def route_models_document(fetch=None) -> dict:
-    """GET /v1/models on the page: every model its router can reach."""
+    """GET /v1/models on the page: every model its router can reach, each
+    with its server's own entry (sampling_defaults, thinking,
+    context_length: what the page's chat reads)."""
+    table = routable(fetch)
+    docs = _ROUTES.get("docs") or {}
     return {"object": "list", "data": [
-        {"id": m, "object": "model", "owned_by": "knurlogic", "server": b}
-        for m, b in sorted(routable(fetch).items())]}
+        dict(docs.get(m) or {}, id=m, object="model", owned_by="knurlogic",
+             server=b)
+        for m, b in sorted(table.items())]}
 
 
 def route(handler, path: str, body: bytes, fetch=None) -> None:
