@@ -65,7 +65,8 @@ PEER_PATHS = (PREPARE_PATH, START_PATH, STOP_PATH, SHAPE_PATH, JOB_PATH)
 SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
              "port", "working_set_gib", "bandwidth_gbs", "nodes", "versions",
-             "jaccl_timeout_ms", "sets", "chips", "cable", "cable_note")
+             "jaccl_timeout_ms", "sets", "chips", "cable", "cable_note",
+             "recovery")
 SPLITS = ("tensor", "pipeline")
 LINKS = ("ring", "jaccl")
 #: the prompt chunk every rank runs (ring-wide): 512, as everywhere
@@ -113,6 +114,9 @@ BAD_CABLES: dict = {}
 #: failure to move to the next cable on
 FAILOVER_S = 300.0
 FAILOVER_POLL_S = 2.0
+#: jobs a coordinator's _follow is watching now (recovery leaves a link-init
+#: failure of one of these to the cable failover)
+FOLLOWING: set = set()
 #: a rank's link init failing: its log line (mlx's jaccl / ring errors)
 LINK_INIT_RX = re.compile(
     r"[^\n]*\[(?:jaccl|ring)\][^\n]*(?:RTR|RTS|queue pair|connect|"
@@ -543,6 +547,9 @@ def check_spec(spec) -> str:
         v = spec.get(k)
         if v is not None and not (isinstance(v, str) and len(v) <= most):
             return f"{k} is a short string"
+    rv = spec.get("recovery")
+    if rv is not None and not (isinstance(rv, dict) and len(rv) <= 8):
+        return "recovery is an object"
     lay = spec.get("layers") or []
     if not isinstance(lay, list) or (lay and len(lay) != spec["world"]):
         return "layers is one count per rank"
@@ -858,6 +865,11 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
                                  "log": str(log), "job": spec["job"],
                                  "started": rec["started"], "t": rec["t"]}
             servers.save_registry(sreg)
+    if "port" in rec:
+        # this job's recovery row (a relaunch carries it; a launch by
+        # somebody clears it), for rank 0's own /v1/residency
+        from knurlogic.interfaces import recovery
+        recovery.write_port(rec["port"], spec.get("recovery"))
     _ensure_watcher()
     return 200, {"started": spec["job"], "rank": spec["rank"],
                  "pid": proc.pid, "log": str(log)}
@@ -878,6 +890,9 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     after `grace`), forget it, and -- when `propagate` -- tell every other
     page of the job to do the same."""
     job = str(job or "")
+    from knurlogic.interfaces import recovery
+    if recovery.kind(reason) == "requested":
+        recovery.cancel_job(job)          # asked for: never recovered
     with _LOCK:
         PREPARED.pop(job, None)
         spec = SPECS.pop(job, None)
@@ -996,6 +1011,12 @@ def watch_once(now: float | None = None) -> list:
                 r.get("log"))) for r in recs) if x), "")
             if line:
                 why = f"{why}: link init failed: {line}"[:300]
+            else:
+                from knurlogic.interfaces.recovery import memory_line
+                mem = next((x for x in (memory_line(_log_tail(
+                    r.get("log"))) for r in recs) if x), "")
+                if mem:
+                    why = f"{why}: out of memory: {mem}"[:300]
         if why:
             stop(job, reason=why)
             out.append((job, why))
@@ -1011,6 +1032,11 @@ def job_state(job: str) -> dict:
     stopping = [r for r in recs if r.get("stopping")]
     return {"job": job, "ranks_here": live, "prepared": job in PREPARED,
             "stopping": bool(stopping),
+            "phase": J.phase_of(job, [r for r in recs
+                                      if not r.get("stopping")])
+            if live else None,
+            # by process, records or not: a relaunch waits for none left
+            "processes": J.pids_of_job(job),
             "ended": ended.get("reason") or (
                 stopping[0].get("stop_reason") if stopping else None)}
 
@@ -1198,7 +1224,8 @@ CABLE_RX = re.compile(r"(\d{1,3}\.\d{1,3}\.\d{1,3})(?:\.(?:\d{1,3}|x|0/24))?")
 
 def launch(req: dict, *, me: dict, peers: list, local_info: dict,
            ui_port: int, serve_port: int, post=None, follow=None,
-           tried: tuple = (), moved: dict | None = None) -> dict:
+           tried: tuple = (), moved: dict | None = None,
+           recovering: dict | None = None) -> dict:
     """The coordinator: plan, prepare everywhere, start everywhere.
     `me`: this machine's identity; `peers`: the answering peers
     (cluster/peers.Peer); `local_info`: this machine's cluster block.
@@ -1208,7 +1235,10 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     `_shared_subnets`), and unless it was named the coordinator follows
     the job (`follow`, a thread by default): a rank whose link init fails
     on that cable has the job relaunched on the next one, the cable
-    remembered as failing for the pair. `tried`/`moved`: that relaunch."""
+    remembered as failing for the pair. `tried`/`moved`: that relaunch.
+    `recovering`: this is auto-recovery's relaunch (interfaces/recovery.py),
+    carrying its report to rank 0's page; any other launch that starts is
+    tracked there for recovery."""
     post = post or _post
     ids = req.get("nodes")
     if not isinstance(ids, list) or len(ids) < 2 or \
@@ -1393,7 +1423,8 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             # ranks resolve KNURLOGIC_CROSS_CHIP=auto from it
             "chips": [{"name": m.get("chip") or m.get("name") or "",
                        "arch": m.get("gpu_architecture") or ""}
-                      for m in order]}
+                      for m in order],
+            "recovery": recovering}
     specs = []
     for r, m in enumerate(order):
         specs.append({**base, "rank": r,
@@ -1438,6 +1469,18 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                      "post": post, "follow": follow}})
     if note:
         print(f"cluster job {job}: {note}", file=sys.stderr, flush=True)
+    if recovering is None:
+        from knurlogic.interfaces import recovery
+        # a relaunch is the same launch: this machine order (so the same
+        # split), this port, link, tune and settings
+        recovery.track_cluster(
+            job, req=dict(req, order=list(plan["order"]), port=port),
+            args={"me": me, "peers": peers, "local_info": local_info,
+                  "ui_port": ui_port, "serve_port": serve_port,
+                  "post": post, "follow": follow},
+            order=order, port=port,
+            leader_here=order[0]["page"] is None,
+            previous=(moved or {}).get("job"))
     return {"job": job, "starting": ident, "placement": plan,
             "leader": plan["leader"], "port": port,
             "machines": plan["order"], "cable": net, "cable_note": note,
@@ -1494,16 +1537,20 @@ def _follow(job: str, ctx: dict, clock=time.time, sleep=time.sleep):
     """The coordinator's watch on a job it launched, until it is serving
     (ready here) or FAILOVER_S: a link-init failure moves it to the next
     cable (`failover`)."""
-    end = clock() + FAILOVER_S
-    while clock() < end:
-        sleep(FAILOVER_POLL_S)
-        why = _job_end(job, ctx["order"], ctx["post"])
-        if why is not None:
-            return failover(job, ctx, why)
-        recs = J.by_job().get(job)
-        if recs and J.phase_of(job, recs) == "ready":
-            return None
-    return None
+    FOLLOWING.add(job)
+    try:
+        end = clock() + FAILOVER_S
+        while clock() < end:
+            sleep(FAILOVER_POLL_S)
+            why = _job_end(job, ctx["order"], ctx["post"])
+            if why is not None:
+                return failover(job, ctx, why)
+            recs = J.by_job().get(job)
+            if recs and J.phase_of(job, recs) == "ready":
+                return None
+        return None
+    finally:
+        FOLLOWING.discard(job)
 
 
 def _follow_thread(job: str, ctx: dict) -> None:
