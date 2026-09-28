@@ -1282,7 +1282,9 @@ def pipeline_layer_bytes(artifact: Artifact) -> tuple:
 def pipeline_leader_bytes(artifact: Artifact) -> int:
     """What rank 0 of a pipeline holds and no other rank does: the MTP
     head (it drafts where the last layers are; the followers only run the
-    verify rows). Read off the safetensors headers."""
+    verify rows) and the vision tower (it encodes at tokenize and ships the
+    image rows; a follower binds the family without one). Read off the
+    safetensors headers."""
     import json
     import struct
 
@@ -1302,4 +1304,4 @@ def pipeline_leader_bytes(artifact: Artifact) -> int:
             if f.name.startswith("mtp") or k.split(".")[0] == "mtp":
                 a, b = v.get("data_offsets", (0, 0))
                 total += int(b) - int(a)
-    return total
+    return total + _tower_bytes(artifact)[0]

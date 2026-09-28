@@ -38,7 +38,9 @@ were checked in the consumer's loop rather than assumed:
     a step commits was fed through the trunk, including one a stop sequence
     then hid, so the list is prompt + everything committed.
 
-IMAGES (design D5, D7 Phase A; docs/design/vision.md). Every request with
+IMAGES (design D5, D7 Phase A; docs/design/vision.md; on a split model,
+engine/runtime/tensor.py: rank 0 encodes and ships the rows, every rank
+embeds with its own family). Every request with
 an image comes here, head or no head (`head=None` is a plain batch engine
 with the same admission), because only `admit` snaps prefill chunks to the
 family's image spans. The prompt the server hands over is the cache KEY
@@ -459,6 +461,11 @@ class MTPBatchGenerator(BatchGenerator):
         kw: dict = {"chunk_boundaries": fam.chunk_boundaries(key)}
         extras: dict = {}
         if K.has_image(key[hit:]):
+            if self._coord is not None:
+                # a split model: rank 0's rows reach every rank (only rank
+                # 0 has a tower); every rank decides this the same way --
+                # the key and the hit are rank 0's
+                feats = self._coord.images(key[hit:], feats, refs)
             got = dict(fam.embed(self.model, key, hit, feats))
             kw["embeds"] = got.pop("input_embeddings")
             extras.update(got)

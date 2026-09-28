@@ -411,7 +411,7 @@ def placement(machines: list, shape: dict, split: str,
     """Rank order and each rank's share. `machines`: [{"name", "chip",
     "p_core_ghz", "working_set_bytes", "bandwidth_gbs", "links"}];
     `shape`: the artifact's {"layer_bytes", "other_bytes", "leader_bytes"
-    (rank 0's alone: the MTP head), "tensor_per_rank_bytes", "refusals"}. Pure: the same inputs give the
+    (rank 0's alone: the MTP head and the vision tower), "tensor_per_rank_bytes", "refusals"}. Pure: the same inputs give the
     same answer on every page.
     -> {"order": [names], "leader", "split", "shares": [{"rank", "machine",
         "bytes", "layers"?, "bounds"?}], "layers": [counts] | [],

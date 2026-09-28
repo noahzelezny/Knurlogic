@@ -284,7 +284,7 @@ class Coord:
         self.group = group
         self.leader = group.rank() == 0
         self.head = bool(head)
-        self.calls = {"b0": 0, "b1": 0, "b2": 0, "ba": 0}
+        self.calls = {"b0": 0, "b1": 0, "b2": 0, "ba": 0, "img": 0}
         #: the last b0 found the ranks holding different row counts (one
         #: rank's admission failed): every rank skips that call's decode
         #: step, whose collectives would not line up, and rank 0's next
@@ -338,6 +338,50 @@ class Coord:
                                f"its prefill")
         return int(got[1]), bool(got[2])
 
+    def images(self, key_slice: list, features, refs):
+        """An admission whose uncached span holds images, on every rank
+        (tensor and pipeline): rank 0's encoded rows of every image in
+        `key_slice`, in order of first appearance, reach every rank. -> a
+        FeatureLookup over them (rank 0: its own `features`). Rank 0 alone
+        runs the tower; a follower's family embeds from these rows exactly
+        as rank 0's would from its store (float32 on the wire: exact for
+        bf16 rows). `refs`: every rank's RefLookup (a follower's from the
+        admit op), which says each image's row count. Raises VisionError
+        on every rank when rank 0 could not read its rows."""
+        from knurlogic.engine.vision import EncodedImage, VisionError
+        from knurlogic.engine.vision.key import images_in
+        self.calls["img"] += 1
+        imgs = list(dict.fromkeys(images_in(key_slice)))
+        ns = [int(refs(sha, ph).n_tokens) for sha, ph in imgs]
+        rows, dim, ok = None, 0, 0
+        if self.leader:
+            try:
+                parts = [features(sha, ph).feats[:n]
+                         for (sha, ph), n in zip(imgs, ns)]
+                rows = mx.concatenate(parts, axis=0).astype(mx.float32)
+                dim, ok = int(rows.shape[1]), 1
+            except Exception:
+                logger.exception("rank 0 could not read an image's rows")
+        ok, dim = self._bcast([ok, dim])
+        if not ok:
+            raise VisionError("rank 0 could not read this request's image "
+                              "rows; the admission fails on every rank")
+        if not self.leader:
+            rows = mx.zeros((sum(ns), dim), dtype=mx.float32)
+        got = mx.distributed.all_sum(rows, group=self.group, stream=mx.cpu)
+        mx.eval(got)
+        if self.leader:
+            return features
+        table, at = {}, 0
+        for (sha, ph), n in zip(imgs, ns):
+            table[(sha, ph)] = EncodedImage(ref=refs(sha, ph),
+                                            feats=got[at:at + n])
+            at += n
+
+        def lookup(sha: str, ph: str):
+            return table[(sha, ph)]
+        return lookup
+
     def b1(self, drafting: bool, d2: Optional[mx.array], B: int):
         """-> (drafting, d2 [B] int32 or None)."""
         self.calls["b1"] += 1
@@ -379,7 +423,7 @@ def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
     """Every rank's working set and memory bandwidth, gathered, and the
     layer split computed from them the same way on every rank
     (tuning/resolve.pipeline_shares: same inputs, same split; rank 0's
-    `leader_bytes` -- the head -- counted on rank 0 alone). `counts`
+    `leader_bytes` -- the head and the tower -- counted on rank 0 alone). `counts`
     (layers per rank, rank order) overrides the arithmetic. Raises when the
     ranks read different artifacts."""
     import json
