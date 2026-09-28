@@ -1543,7 +1543,8 @@ let SMACH=SKEEP.mach||'local';
 function keepSet(){ try{ sessionStorage.setItem('kl.settings',
   JSON.stringify({sec:SSEC, base:SBASE, mach:SMACH})) }catch(e){} }
 function renderSetTabs(){
-  const secs=[{id:'cluster', name:'Cluster'}, {id:'models', name:'Models'}];
+  const secs=[{id:'cluster', name:'Cluster'}, {id:'models', name:'Models'},
+    {id:'compaction', name:'Compaction'}];
   $('settabs').innerHTML=secs.map(t=>`<button data-s="${t.id}"
     class="${t.id===SSEC?'on':''}">${t.name}</button>`).join('');
   $('settabs').querySelectorAll('button').forEach(f=>f.onclick=()=>{
@@ -1737,7 +1738,66 @@ async function showBase(b){
   el.querySelectorAll('[data-run]').forEach(x=>x.onclick=()=>{
     SRUN[b.name]=x.dataset.run; showBase(b) });
 }
-function showSetTab(){ return SSEC==='models' ? showModels() : showCluster() }
+function showSetTab(){ return SSEC==='models' ? showModels()
+  : SSEC==='compaction' ? showCompaction() : showCluster() }
+
+// --- compaction -------------------------------------------------------------
+// Server-side compaction's operator defaults, per model server: when a
+// harness asks (context_management) the server summarizes and hands the
+// summary back; these say how, and whether it compacts unasked. A running
+// server reads them per request, so each is live there; a model not running
+// takes them as launch settings, like any knob. The rows are knobHTML's, so
+// a change is staged and applied on close with the rest.
+let SCOMP=SKEEP.comp||'';
+function showCompaction(){
+  const L=$('setlist'), runs=allModels(),
+    off=settingBases().filter(b=>!b.runs.length);
+  const items=runs.map(r=>({id:'run|'+r.where, r}))
+    .concat(off.map(b=>({id:'base|'+b.name, b})));
+  if(!items.some(x=>x.id===SCOMP)) SCOMP=items.length?items[0].id:'';
+  const row=x=>x.r
+    ? `<div class="fam" data-c="${esc(x.id)}" aria-current="${x.id===SCOMP}">${esc(shortName(x.r.name))}
+        <small class="on">on ${esc(x.r.mach.name)}</small></div>`
+    : `<div class="fam" data-c="${esc(x.id)}" aria-current="${x.id===SCOMP}">${esc(x.b.name)}
+        <small>next launch</small></div>`;
+  const on=items.filter(x=>x.r), dn=items.filter(x=>x.b);
+  L.innerHTML=`${on.length?`<div class="sect">running</div>${on.map(row).join('')}`:''}${
+    dn.length?`<div class="sect">on this disk</div>${dn.map(row).join('')}`:''}${
+    items.length?'':'<div class="msg" style="padding:0 12px">no models</div>'}`;
+  L.querySelectorAll('[data-c]').forEach(v=>v.onclick=()=>{
+    if(v.dataset.c===SCOMP) return;
+    SCOMP=v.dataset.c; keepComp();
+    L.querySelectorAll('[data-c]').forEach(x=>x.setAttribute('aria-current', x===v));
+    showCompactionOf(items.find(x=>x.id===SCOMP));
+  });
+  keepComp(); showCompactionOf(items.find(x=>x.id===SCOMP));
+}
+function keepComp(){ try{ const k=JSON.parse(sessionStorage.getItem('kl.settings')||'{}');
+  k.comp=SCOMP; sessionStorage.setItem('kl.settings', JSON.stringify(k)) }catch(e){} }
+async function showCompactionOf(x){
+  const el=$('machbody'), seq=++SEQ;
+  if(!x){ el.innerHTML='<div class="msg">No models on this disk, and nothing running.</div>'; return }
+  el.innerHTML='<div class="msg">reading…</div>';
+  let doc, c, head;
+  if(x.r){
+    const d=await getJSON(docURL(x.r.where));
+    if(seq!==SEQ) return;
+    doc=d.error?{error:d.error}:(d.compaction||{error:'this server predates server-side compaction'});
+    c={g:x.r.where, where:x.r.where, model:x.r.name, base:baseKey(x.r.name),
+       label:shortName(x.r.name)};
+    head=`${esc(shortName(x.r.name))}<span class="ro">running on ${esc(x.r.mach.name)} · ${
+      esc((x.r.where||location.host).replace(/^https?:\/\//,''))}</span>`;
+  }else{
+    doc=DOC.compaction||{error:'this page predates server-side compaction'};
+    c={g:'launch|'+x.b.name, model:'', base:x.b.name, launch:true, label:x.b.name};
+    head=`${esc(x.b.name)}<span class="ro">not running · the values its next launch starts with</span>`;
+  }
+  if(doc.error){ el.innerHTML=`<div class="sgrp"><div class="shd">${head}</div>
+    <div class="msg">${esc(doc.error)}</div></div>`; return }
+  el.innerHTML=`<div class="sgrp"><div class="shd">${head}</div>
+    <div class="msg" style="margin-top:0">${esc(doc.about||'')}</div>
+    ${(doc.knobs||[]).map(k=>knobHTML(k,c)).join('')}</div>`;
+}
 
 // --- connect ----------------------------------------------------------------
 // The endpoint is worthless until something is pointed at it, and the

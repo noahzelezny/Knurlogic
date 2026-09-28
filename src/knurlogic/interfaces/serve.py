@@ -399,15 +399,27 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         tune_name = want.get("tune")
         if tune_name:
             want = {k: v for k, v in _resolve_for(ws, tune_name).env.items()}
+        from knurlogic.tuning.settings import COMPACT_KNOBS
+        # compaction's knobs are read per request by this server's HTTP
+        # side (interfaces/compaction): the environment is the setting
+        compact = {k: str(v) for k, v in want.items()
+                   if k in COMPACT_KNOBS
+                   and str(v) != os.environ.get(k, COMPACT_KNOBS[k][0])}
         want = {k: str(v) for k, v in want.items()
                 if k in engine.LIVE_KNOBS and str(v) != live_env.get(k)}
-        why = web.refuse_sets(a, want)
+        why = web.refuse_sets(a, {**want, **compact})
         if why:
             return {"error": why}
-        if not want:
+        if not want and not compact:
             return {"applied": {}, "note": "nothing to change on this server "
                                            "without a restart"}
-        done = engine.apply_live(want)
+        for k, v in compact.items():
+            os.environ[k] = v
+        done = {k: f"applied now ({v}; read per request)"
+                for k, v in compact.items()}
+        if not want:
+            return {"applied": done, "running": dict(live_env)}
+        done.update(engine.apply_live(want))
         for k, v in want.items():
             if "applied" in done.get(k, "") or "set for" in done.get(k, ""):
                 live_env[k] = v
