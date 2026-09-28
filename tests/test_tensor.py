@@ -498,3 +498,78 @@ def test_a_set_journaled_while_parked_rings_the_ring():
     assert sent == [{"ops": [{"op": "set", "name": "VQ_DECODE_CHUNK",
                               "value": "128"}, {"op": "park"}]}]
     assert ring.link.parked
+
+def _bell_server():
+    import socket
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    port = srv.getsockname()[1]
+    srv.close()
+    return port
+
+
+def test_a_rank_dialing_before_rank_0_listens_keeps_trying(caplog):
+    """The bell: a rank that dials before rank 0's socket is up retries
+    until it is, and rank 0 logs which rank came from where."""
+    import logging
+    import socket
+    import threading
+    import time
+    from knurlogic.engine.runtime import tensor as T
+    port = _bell_server()
+    got = {}
+
+    def dial():
+        got["c"] = T.bell_dial("127.0.0.1", port, 1234, 1, 10.0,
+                               pause_s=0.05)
+    t = threading.Thread(target=dial)
+    t.start()
+    time.sleep(0.4)                          # refused a few times meanwhile
+    srv = socket.create_server(("127.0.0.1", port))
+    with caplog.at_level(logging.INFO, logger=T.__name__):
+        socks = T.bell_answer(srv, "127.0.0.1", 1234, 2, 10.0)
+    t.join(5)
+    assert len(socks) == 1
+    socks[0].sendall(b"w")
+    assert got["c"].recv(1) == b"w"
+    assert "bell: rank 1 connected from 127.0.0.1" in caplog.text
+    for c in socks + [got["c"]]:
+        c.close()
+
+
+def test_rank_0s_bell_names_the_ranks_that_never_came():
+    """Rank 0 of three: rank 2 connects, a stranger with the wrong nonce is
+    turned away, rank 1 never comes -- the error says the address and
+    rank 1, and not rank 2."""
+    import socket
+    import threading
+    import pytest
+    from knurlogic.engine.runtime import tensor as T
+    srv = socket.create_server(("127.0.0.1", 0))
+    port = srv.getsockname()[1]
+    held = []
+
+    def others():
+        held.append(T.bell_dial("127.0.0.1", port, 99, 2, 5.0))
+        s = socket.create_connection(("127.0.0.1", port))
+        s.sendall(b"\0" * 16)
+        held.append(s)
+    t = threading.Thread(target=others)
+    t.start()
+    with pytest.raises(TimeoutError) as e:
+        T.bell_answer(srv, "127.0.0.1", 99, 3, 1.0)
+    t.join(5)
+    msg = str(e.value)
+    assert f"127.0.0.1:{port}" in msg and "[1]" in msg
+    assert "connected: [2]" in msg
+    for c in held:
+        c.close()
+
+
+def test_a_rank_that_cannot_reach_rank_0_says_where_it_dialed():
+    import pytest
+    from knurlogic.engine.runtime import tensor as T
+    port = _bell_server()
+    with pytest.raises(ConnectionError, match=f"rank 1 could not reach rank "
+                       f"0 at 127.0.0.1:{port}"):
+        T.bell_dial("127.0.0.1", port, 1, 1, 0.3, pause_s=0.05)
