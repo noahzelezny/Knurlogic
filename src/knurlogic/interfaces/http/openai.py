@@ -345,15 +345,21 @@ def _data(obj: Any) -> bytes:
 
 
 def models_document(served: dict, sampling: Optional[dict] = None,
-                    context_length: int = 0) -> dict:
+                    context_length: int = 0,
+                    thinking: Optional[dict] = None) -> dict:
     """/v1/models: the one served model, with what the harness asked for, the
     sampling a request that says nothing gets (the model's recommendation;
-    {} is greedy), and its context window (0: the config does not say)."""
-    return {"object": "list", "data": [
-        {"id": served["id"], "object": "model",
+    {} is greedy), its context window (0: the config does not say), and
+    the thinking levels its template has (engine/serve/thinking.levels:
+    dialect, default, native [{level on the reasoning_effort ladder, the
+    template's own name}]) when known."""
+    m = {"id": served["id"], "object": "model",
          "created": int(served.get("created") or 0),
          "owned_by": "knurlogic",
          "capabilities": served.get("capabilities") or ["text"],
          "size_bytes": int(served.get("size_bytes") or 0),
          "sampling_defaults": dict(sampling or {}),
-         "context_length": int(context_length or 0)}]}
+         "context_length": int(context_length or 0)}
+    if thinking is not None:
+        m["thinking"] = thinking
+    return {"object": "list", "data": [m]}

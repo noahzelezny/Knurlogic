@@ -79,7 +79,7 @@ def two(monkeypatch):
     # both pages share this process: the peer page's own servers are the
     # fake model; this page has none of its own
     monkeypatch.setattr(ui, "local_models",
-                        lambda fetch=None: {"glm-peer": mbase})
+                        lambda fetch=None, docs=None: {"glm-peer": mbase})
     monkeypatch.setattr(ui, "registry", lambda: {})
     peer_page, pport = _serve(ui.make_handler({}))
     here, hport = _serve(ui.make_handler({}))

@@ -573,7 +573,7 @@ def forward_launch(req: dict, post=None) -> dict:
 
 def cluster_launch(req: dict, serve_port: int) -> dict:
     """POST /loaded.json {action: load, identity, nodes: [>= 2 ids],
-    split, link}: this page coordinates (interfaces/cluster_jobs.py)."""
+    split, link[, cable]}: this page coordinates (interfaces/cluster_jobs.py)."""
     from knurlogic.interfaces import cluster_jobs
     if any(k in req for k in PATH_KEYS if k != "target") or req.get("target"):
         return {"error": "a model across machines is named by its "
@@ -827,6 +827,63 @@ def with_jobs(doc: dict) -> dict:
     return dict(doc, resident=rows, jobs=js)
 
 
+#: How long after its start a server's load is still reported (`loads`):
+#: long enough for a cold 400 GB read, short enough that an old failure
+#: does not linger on the page.
+LOAD_REPORT_S = 1800
+_SIZES: dict = {}
+
+
+def load_progress(doc: dict) -> list:
+    """What this machine's recent launches are doing, for the page's load
+    indicator -- from what /loaded.json already gathered (the resident rows
+    and the OS memory map), plus each server's log: no extra HTTP.
+
+    One entry per server started in the last LOAD_REPORT_S: phase (loading,
+    stalled, warming, ready, exited), seconds since start, bytes its process
+    holds against the artifact's size, the last log line, and for one that
+    exited the tail of its log (why it failed)."""
+    from knurlogic.machine.servers import is_our_server
+    now = time.time()
+    procs = {int(p.get("pid", 0)): int(p.get("bytes", 0)) for p in
+             ((doc.get("memory") or {}).get("processes") or [])
+             if isinstance(p, dict)}
+    rows = {urlparse(r.get("where") or "").port: r
+            for r in doc.get("resident") or []
+            if isinstance(r, dict) and r.get("runtime") == "knurlogic"}
+    out = []
+    for port, rec in sorted(registry().items()):
+        t = rec.get("t")
+        if not t or now - t > LOAD_REPORT_S:
+            continue
+        path, pid = rec.get("artifact") or "", int(rec.get("pid") or 0)
+        if path not in _SIZES:
+            _SIZES[path] = _artifact_bytes(path)
+        log = Path(rec.get("log", ""))
+        try:
+            lines = [l for l in log.read_text(errors="replace").splitlines()
+                     if l.strip()]
+            quiet = now - log.stat().st_mtime
+        except OSError:
+            lines, quiet = [], None
+        e = {"port": port, "name": Path(path).name,
+             "seconds": round(now - t), "bytes": procs.get(pid, 0),
+             "total_bytes": _SIZES[path],
+             "last_log_line": lines[-1][:200] if lines else ""}
+        r = rows.get(port)
+        if not is_our_server(pid):
+            e.update(phase="exited", log_tail=[l[:200] for l in lines[-4:]])
+        elif r is None or r.get("state") == "loading":
+            e["phase"] = ("stalled" if quiet is not None
+                          and quiet > STALL_QUIET_S else "loading")
+        elif e["total_bytes"] and e["bytes"] < WARM_FRACTION * e["total_bytes"]:
+            e["phase"] = "warming"
+        else:
+            e["phase"] = "ready"
+        out.append(e)
+    return out
+
+
 def _loaded_fn():
     """/loaded.json as `web` answers it for this box; with ?peers=1 (what the
     page asks) it also carries `peers`: each other machine's residency."""
@@ -835,6 +892,12 @@ def _loaded_fn():
     def handler(q: dict) -> dict:
         # a copy: the local document is cached and shared between requests
         doc = with_jobs(local(q))
+        try:
+            loads = load_progress(doc)
+        except Exception:
+            loads = []
+        if loads:
+            doc = dict(doc, loads=loads)
         if not (q.get("peers") or [""])[0]:
             return doc
         return dict(doc, peers=peer_residency(PEERS))
@@ -1155,10 +1218,12 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
     _stream(handler, upstream(base, path), body, base=base)
 
 
-def local_models(fetch=None) -> dict:
+def local_models(fetch=None, docs=None) -> dict:
     """{model id: base} over the servers THIS machine started (never the
     ones peers reported, so two pages relaying for each other cannot
-    loop). What a peer page's relay resolves a model name against."""
+    loop). What a peer page's relay resolves a model name against.
+    `docs`, when given, is filled with each model's own /v1/models entry
+    (sampling_defaults, context_length) for the relay's GET."""
     import threading
     import urllib.request
     from knurlogic.machine.servers import is_our_server
@@ -1175,6 +1240,8 @@ def local_models(fetch=None) -> dict:
             for m in fetch(f"{base}/v1/models", ROUTE_S).get("data") or []:
                 if isinstance(m, dict) and m.get("id"):
                     found.setdefault(str(m["id"]), base)
+                    if docs is not None:
+                        docs.setdefault(str(m["id"]), m)
         except Exception:
             pass
     ts = [threading.Thread(target=one, args=(b,), daemon=True)
@@ -1209,13 +1276,17 @@ def peer_relay(handler, method: str, path: str, body: bytes,
     peer page whose router or chat names it. The caller has passed
     peer_refusal. Resolved by model name against the servers this machine
     started (local_models) and streamed back as it arrives."""
-    table = local_models(fetch)
+    docs: dict = {}
+    table = local_models(fetch, docs)
     if method == "GET":
         if path != "/v1/models":
             _send_json(handler, 404, {"error": "not a relayed path"})
             return
+        # each server's own entry, so a peer page's chat sees the model's
+        # sampling_defaults and context_length, not just its name
         _send_json(handler, 200, {"object": "list", "data": [
-            {"id": m, "object": "model", "owned_by": "knurlogic"}
+            dict(docs.get(m) or {}, id=m, object="model",
+                 owned_by="knurlogic")
             for m in sorted(table)]})
         return
     if path not in ROUTE_PATHS:
