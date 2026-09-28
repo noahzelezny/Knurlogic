@@ -18,6 +18,7 @@ ranks goes through `Link.exchange`, on the scheduler's thread.
 
 from __future__ import annotations
 
+import os
 import logging
 import random
 from typing import Callable, List, Optional
@@ -214,14 +215,78 @@ class Link:
         self.rank = group.rank()
         self.size = group.size()
         self.step = 0
+        #: the side channel a parked rank sleeps on (bell()); None until set
+        self.socks: list = []
+        self.parked = False
 
     def barrier(self) -> None:
         mx.eval(mx.distributed.all_sum(mx.array(1), group=self.group,
                                        stream=mx.cpu))
 
+    def bell(self) -> None:
+        """A plain TCP connection from each rank to rank 0, beside the ring.
+        jaccl's collectives busy-poll the Thunderbolt completion queue: a
+        rank waiting in one for an idle rank 0 burns a whole core (and the
+        M3 showed ~50% GPU) for as long as nothing is asked. So an idle
+        rank 0 parks the others (the `park` op) and they sleep in a recv
+        here until it rings. Rank 0 listens on the address the ring
+        already uses; a connection must present the nonce shared over the
+        ring, so nothing else can take a rank's place."""
+        import secrets
+        import socket
+        import struct
+        import numpy as np
+        host = _rank0_host()
+        if self.rank == 0:
+            srv = socket.create_server((host, 0))
+            port = srv.getsockname()[1]
+            nonce = secrets.randbits(62)
+        else:
+            srv, port, nonce = None, 0, 0
+        got = mx.distributed.all_sum(mx.array([port, nonce], dtype=mx.int64),
+                                     group=self.group, stream=mx.cpu).tolist()
+        port, nonce = int(got[0]), int(got[1])
+        want = struct.pack("<q", nonce)
+        if self.rank == 0:
+            srv.settimeout(60)
+            try:
+                while len(self.socks) < self.size - 1:
+                    c, _ = srv.accept()
+                    c.settimeout(10)
+                    try:
+                        ok = c.recv(8) == want
+                    except OSError:
+                        ok = False
+                    if not ok:
+                        c.close()
+                        continue
+                    c.settimeout(None)
+                    self.socks.append(c)
+            finally:
+                srv.close()
+        else:
+            c = socket.create_connection((host, port), timeout=60)
+            c.sendall(want)
+            c.settimeout(None)
+            c.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            self.socks = [c]
+        for c in self.socks:
+            c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+    def sleep(self) -> None:
+        """A parked rank >= 1: wait, without spinning, for rank 0's bell."""
+        if not self.socks:
+            return
+        if self.socks[0].recv(1) != b"w":
+            raise ConnectionError("rank 0 left while this rank was parked")
+
     def exchange(self, over: int, payload: Optional[bytes] = None):
         """-> (control rows, one per rank; the plan bytes or None)."""
         import numpy as np
+        if self.parked:
+            for c in self.socks:
+                c.sendall(b"w")
+            self.parked = False
         n = len(payload) if (self.rank == 0 and payload) else 0
         ctl = mx.array([P.control(over, self.step, n)], dtype=mx.int64)
         rows = mx.distributed.all_gather(ctl, group=self.group,
@@ -300,6 +365,18 @@ class Ring:
     def stop(self) -> None:
         ops = self.journal.take() + [{"op": "stop"}]
         self.link.exchange(0, P.encode({"ops": ops}))
+        self.stopped = True
+
+    def park(self) -> None:
+        """Rank 0 has nothing to run: the other ranks sleep on the bell
+        instead of spinning in the next collective (Link.bell). The next
+        exchange rings it first."""
+        if self.link.parked or not self.link.socks or \
+                getattr(self, "stopped", False):
+            return
+        ops = self.journal.take() + [{"op": "park"}]
+        self.link.exchange(0, P.encode({"ops": ops}))
+        self.link.parked = True
 
 
 def assign_seed(sampling: dict) -> dict:
@@ -475,10 +552,12 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     while True:
         _, data = link.exchange(mark.over(), None)
         plan = P.decode(data) if data else {"ops": []}
-        halt = False
+        halt = park = False
         for op in plan.get("ops", []):
             kind = op["op"]
-            if kind == "admit":
+            if kind == "park":
+                park = halt = True
+            elif kind == "admit":
                 prompt = op["prompt"]
                 c, rest = cache.fetch(model_key, prompt)
                 if len(prompt) - len(rest) != op["hit"]:
@@ -520,6 +599,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                             mismatches)
                 return steps
         last = {}
+        if park:
+            link.sleep()
         if halt:
             continue
         e = executor()
@@ -559,8 +640,20 @@ def init(link_kind: str) -> Link:
     logger.info("rank %d of %d joined the %s ring", link.rank, link.size,
                 backend)
     link.barrier()
+    link.bell()
     progress(phase="loading")
     return link
+
+
+def _rank0_host() -> str:
+    """Rank 0's address on the ring: the jaccl coordinator's host, or the
+    ring hostfile's first entry."""
+    import json
+    coord = os.environ.get("MLX_JACCL_COORDINATOR")
+    if coord:
+        return coord.rsplit(":", 1)[0]
+    with open(os.environ["MLX_HOSTFILE"]) as f:
+        return json.load(f)[0][0].rsplit(":", 1)[0]
 
 
 def serve_follower(path: str, *, link_kind: str, working_set: int,
