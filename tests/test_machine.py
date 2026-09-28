@@ -73,6 +73,7 @@ def test_a_missing_reading_is_none_not_zero(monkeypatch):
                         lambda *a, **k: (_ for _ in ()).throw(OSError()))
     s = metrics.sample()
     assert s["gpu_pct"] is None and s["swap_bytes"] is None
+    assert s["vm_pressure"] is None
     assert s["memory_pct"] is None
 
 
@@ -81,3 +82,26 @@ def test_temperature_reads_none_when_the_sensor_api_is_gone(monkeypatch):
     monkeypatch.setattr(metrics, "_hid",
                         lambda: (_ for _ in ()).throw(OSError("moved")))
     assert metrics._temp_c() is None
+
+
+def test_swap_counts_only_under_pressure_or_while_growing():
+    from knurlogic.machine import metrics
+    G = 1 << 30
+    old = [{"t": 0.0, "swap_bytes": 6 * G}, {"t": 50.0, "swap_bytes": 6 * G}]
+    # stale swap, normal pressure: history, not a signal
+    assert not metrics._swapping(
+        {"t": 100.0, "swap_bytes": 6 * G, "vm_pressure": 1}, old)
+    # the kernel says warn or critical
+    assert metrics._swapping(
+        {"t": 100.0, "swap_bytes": 6 * G, "vm_pressure": 2}, old)
+    assert metrics._swapping(
+        {"t": 100.0, "swap_bytes": 0, "vm_pressure": 4}, [])
+    # grown within the window
+    assert metrics._swapping(
+        {"t": 100.0, "swap_bytes": 7 * G, "vm_pressure": 1}, old)
+    # grown, but only since a reading older than the window
+    assert not metrics._swapping(
+        {"t": 100.0, "swap_bytes": 7 * G, "vm_pressure": 1}, old[:1])
+    # nothing read: nothing claimed
+    assert not metrics._swapping(
+        {"t": 100.0, "swap_bytes": None, "vm_pressure": None}, old)
