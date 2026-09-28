@@ -108,6 +108,10 @@ class Peer:
     last_seen: float = 0.0          # last time it answered
     failing_since: float = 0.0
     link: str = ""                  # thunderbolt / wifi / ethernet / ...
+    gbps: float = 0.0               # the link's speed, when Thunderbolt says
+    #: every host:port this machine was seen at (its other cable, Wi-Fi):
+    #: one machine, one peer, however many addresses
+    addresses: set = field(default_factory=set)
     node: dict | None = None        # its own entry from its status
     doc_peers: list = field(default_factory=list)   # what IT sees
 
@@ -119,6 +123,11 @@ class Peer:
         d = {"id": self.id, "name": self.name, "address": self.key,
              "found_by": sorted(self.found_by), "state": self.state,
              "link": self.link}
+        if self.gbps:
+            d["gbps"] = self.gbps
+        other = sorted(self.addresses - {self.key})
+        if other:
+            d["other_addresses"] = other
         if self.problem:
             d["problem"] = self.problem
         if self.last_seen:
@@ -176,13 +185,54 @@ class Peers:
                 p.last_seen = rec.get("last_seen", 0.0)
 
     # -- sources --------------------------------------------------------
-    def add(self, host: str, port: int, source: str) -> Peer:
+    def add(self, host: str, port: int, source: str, id: str = "") -> Peer:
+        """The peer at host:port -- or, when that address belongs to a
+        machine already known (its id, or one of the addresses it reported
+        or was seen at), that machine, which gains the address. A Mac on
+        two cables is one machine: replugging one must not make the page
+        show a second, silent one."""
         with self._lock:
-            p = self._peers.get(f"{host}:{port}")
+            key = f"{host}:{port}"
+            p = self._peers.get(key) or self._owner(host, int(port), id)
             if p is None:
-                p = self._peers[f"{host}:{port}"] = Peer(host, int(port))
+                p = self._peers[key] = Peer(host, int(port))
+            p.addresses.add(key)
             p.found_by.add(source)
             return p
+
+    def _owner(self, host: str, port: int, id: str = ""):
+        """The known machine an address (or id) belongs to, else None.
+        Called holding the lock."""
+        for q in self._peers.values():
+            if not q.id or q.port != port:
+                continue
+            if (id and q.id == id) or host in self._hosts_of(q):
+                return q
+        return None
+
+    def id_of_instance(self, instance: str) -> str:
+        """The id of the known machine a Bonjour instance name ("<name>
+        <first six of id>", as ui._start_discovery registers it) belongs
+        to, "" if none -- for an advertisement whose TXT did not arrive."""
+        name, _, short = (instance or "").rpartition(" ")
+        if len(short) != 6:
+            return ""
+        with self._lock:
+            return next((q.id for q in self._peers.values()
+                         if q.id.startswith(short)
+                         and (not q.name or q.name == name)), "")
+
+    @staticmethod
+    def _hosts_of(p: Peer) -> set:
+        """Every address a machine is known by: the ones it was seen at,
+        and the Thunderbolt addresses its own status reports."""
+        hs = {k.rpartition(":")[0] for k in p.addresses} | {p.host}
+        c = (p.node or {}).get("cluster") if p.node else None
+        for t in (c or {}).get("thunderbolt") or [] \
+                if isinstance(c, dict) else []:
+            if isinstance(t, dict) and isinstance(t.get("ip"), str):
+                hs.add(t["ip"])
+        return hs
 
     def introduce(self, host: str, header: str) -> None:
         """A peer asked for our status and said who it is. Anyone can send
@@ -198,13 +248,14 @@ class Peers:
             # checked and added in one hold: handler threads introducing
             # at once each saw room under the cap and all added
             key = f"{host}:{port}"
-            only = sum(1 for p in self._peers.values()
-                       if p.found_by == {"introduced"})
-            if key not in self._peers and only >= MAX_INTRODUCED:
+            p = self._peers.get(key) or self._owner(host, port, pid)
+            only = sum(1 for q in self._peers.values()
+                       if q.found_by == {"introduced"})
+            if p is None and only >= MAX_INTRODUCED:
                 return
-            p = self._peers.get(key)
             if p is None:
                 p = self._peers[key] = Peer(host, int(port))
+            p.addresses.add(key)
             p.found_by.add("introduced")
         p.id = p.id or pid
 
@@ -216,18 +267,43 @@ class Peers:
         with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
             return json.loads(r.read())
 
+    @staticmethod
+    def _speed(host: str) -> tuple:
+        """(link kind, Gb/s) of the local interface that reaches `host`."""
+        try:
+            from knurlogic.cluster.links import gbps_of, link_of
+            kind = link_of(host)
+            return kind, float((gbps_of(host) if kind == "thunderbolt"
+                                else 0) or 0)
+        except Exception:
+            return "other", 0.0
+
     def _one(self, p: Peer) -> None:
+        """Ask the machine for its status: at the fastest of its addresses
+        first, then the others, so a machine answering on its other cable
+        stays one answering machine."""
         now = time.time()
         if not p.link:
+            p.link, p.gbps = self._speed(p.host)
+        p.addresses.add(p.key)
+        speed = {k: self._speed(k.rpartition(":")[0])[1]
+                 for k in p.addresses if k != p.key}
+        speed[p.key] = p.gbps
+        tries = sorted(speed, key=lambda k: (-speed[k], k != p.key))
+        doc, err = None, None
+        for k in tries[:3]:
             try:
-                from knurlogic.cluster.links import link_of
-                p.link = link_of(p.host)
-            except Exception:
-                p.link = "other"
-        try:
-            doc = self._fetch(f"http://{p.key}/status.json")
-        except Exception as e:
-            p.state, p.problem = "not_answering", _describe(e, p)
+                doc = self._fetch(f"http://{k}/status.json")
+            except Exception as e:
+                err = err or e
+                continue
+            if k != p.key:
+                h, _, port = k.rpartition(":")
+                p.host, p.port = h, int(port)
+                p.link, p.gbps = self._speed(h)
+            break
+        else:
+            p.state, p.problem = "not_answering", _describe(err, p)
             p.failing_since = p.failing_since or now
             return
         if not isinstance(doc, dict):
@@ -286,6 +362,16 @@ class Peers:
         machines claiming one id under different names are both kept, and
         flagged -- never one silently merged away."""
         with self._lock:
+            # a peer that answered at another of its addresses moves there
+            for k, p in list(self._peers.items()):
+                if k != p.key:
+                    self._peers.pop(k)
+                    q = self._peers.get(p.key)
+                    if q is None or q is p:
+                        self._peers[p.key] = p
+                    else:
+                        q.found_by |= p.found_by
+                        q.addresses |= p.addresses
             by_id: dict[str, Peer] = {}
             for k, p in list(self._peers.items()):
                 if not p.id:
@@ -302,17 +388,35 @@ class Peers:
                     continue
                 keep, drop = sorted((p, q), key=self._preference)
                 keep.found_by |= drop.found_by
+                keep.addresses |= drop.addresses | {drop.key}
                 self._peers.pop(drop.key, None)
                 by_id[p.id] = keep
+            # an address that does not answer, and that a known machine
+            # reports as its own (the M4's other cable, learned by Bonjour
+            # or an introduction), is that machine -- never a second one
+            for k, p in list(self._peers.items()):
+                if p.state == "answering" and p.id:
+                    continue
+                owner = next((q for q in by_id.values()
+                              if q is not p and q.state == "answering"
+                              and q.port == p.port
+                              and (p.host in self._hosts_of(q)
+                                   or (p.id and p.id == q.id))), None)
+                if owner is None:
+                    continue
+                owner.found_by |= p.found_by
+                owner.addresses |= p.addresses | {p.key}
+                self._peers.pop(k, None)
 
     @staticmethod
     def _preference(p: Peer):
         """Answering beats silent; then Thunderbolt beats Ethernet beats
         Wi-Fi -- the same machine found over Wi-Fi and the cable is kept
-        on the cable; then the most recent answer."""
+        on the cable; then the faster cable (Thunderbolt 5 over 4); then
+        the most recent answer."""
         rank = {"thunderbolt": 0, "loopback": 1, "ethernet": 2, "other": 3,
                 "wifi": 4}.get(p.link, 3)
-        return (p.state != "answering", rank, -p.last_seen)
+        return (p.state != "answering", rank, -(p.gbps or 0), -p.last_seen)
 
     def start(self) -> "Peers":
         if self._thread is None:
