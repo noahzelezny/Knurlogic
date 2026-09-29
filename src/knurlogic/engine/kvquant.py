@@ -113,7 +113,7 @@ def _cat(xs, ys):
 #: query lengths up to this remember their packed K/V for the 8-bit
 #: decode kernel (engine/kvattn). 1: decode steps only -- an MTP verify
 #: (2-4 rows per sequence) measured 1.2-1.7x SLOWER through the kernel than
-#: dequantize+sdpa on an M4 Max (128 GB) (tools/kv8/tune.py, L=2/4), so it stays there.
+#: dequantize+sdpa on an M4 Max (128 GB), so it stays there.
 KERNEL_MAX_QUERY = 1
 
 
