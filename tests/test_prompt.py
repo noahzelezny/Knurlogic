@@ -218,23 +218,25 @@ class QwenTok:
     has_thinking = True
     think_start, think_end = "<think>", "</think>"
 
-    def __init__(self):
+    def __init__(self, golden="qwen3_6_chat_template.jinja"):
         import jinja2
         from jinja2.sandbox import ImmutableSandboxedEnvironment
         self.chat_template = (Path(__file__).parent / "goldens"
-                              / "qwen3_6_chat_template.jinja").read_text()
-        env = ImmutableSandboxedEnvironment(trim_blocks=True,
-                                            lstrip_blocks=True)
+                              / golden).read_text()
+        self._env = ImmutableSandboxedEnvironment(trim_blocks=True,
+                                                  lstrip_blocks=True)
 
         def fail(msg):
             raise jinja2.TemplateError(msg)
-        env.globals["raise_exception"] = fail
-        self._t = env.from_string(self.chat_template)
+        self._env.globals["raise_exception"] = fail
 
     def apply_chat_template(self, messages, add_generation_prompt=False,
-                            tokenize=True, **kw):
-        s = self._t.render(messages=messages,
-                           add_generation_prompt=add_generation_prompt, **kw)
+                            tokenize=True, chat_template=None, **kw):
+        # transformers renders a `chat_template` argument in place of the
+        # tokenizer's own
+        t = self._env.from_string(chat_template or self.chat_template)
+        s = t.render(messages=messages,
+                     add_generation_prompt=add_generation_prompt, **kw)
         return [ord(c) for c in s]
 
     def _rfind(self, p, word, start):
@@ -299,3 +301,44 @@ def test_a_request_can_turn_preserve_thinking_off():
     # the template's own behaviour: earlier turns lose their think blocks
     assert b[:_checkpoints(segs)[-1]] != a[:_checkpoints(segs)[-1]]
     assert "<think>" not in "".join(map(chr, b))[:-10]
+
+
+QWEN3_5 = "qwen3_5_chat_template.jinja"   # Qwen/Qwen3.5-397B-A17B, Apache-2.0
+
+
+def test_qwen3_5_gets_qwen3_6s_preserve_thinking_switch():
+    """Qwen3.5's template (397B-A17B) drops earlier turns' think blocks the
+    same way and has no switch. Its condition gets Qwen3.6's, verbatim:
+    the patched line is the 3.6 golden's line."""
+    tok = QwenTok(QWEN3_5)
+    assert P.PRESERVE not in tok.chat_template
+    new = P._preserving_template(tok)
+    six = (Path(__file__).parent / "goldens"
+           / "qwen3_6_chat_template.jinja").read_text().splitlines()
+    assert new.splitlines()[99] == six[99]
+    assert P._preserving_template(QwenTok()) is None   # has its own
+
+
+def test_qwen3_5_user_turn_after_tool_calls_continues_from_the_checkpoint():
+    tok = QwenTok(QWEN3_5)
+    h = _agent_history()
+    for m in h:
+        if m["role"] == "assistant":
+            m["reasoning_content"] = "why"
+    a, segs, _, _ = P.tokenize(None, tok, P.ChatRequest(messages=h),
+                               P.PromptArgs())
+    for ask in ("Summarize.", "Next question."):
+        b, _, _, _ = P.tokenize(None, tok, P.ChatRequest(
+            messages=h + [{"role": "user", "content": ask}]), P.PromptArgs())
+        ends = _checkpoints(segs)
+        assert ends and b[:ends[-1]] == a[:ends[-1]]
+    assert "<think>\nwhy\n</think>" in "".join(map(chr, b))
+
+
+def test_qwen3_5_preserve_thinking_off_is_the_templates_own_render():
+    tok = QwenTok(QWEN3_5)
+    h = _agent_history() + [{"role": "user", "content": "Summarize."}]
+    off = P.tokenize(None, tok, P.ChatRequest(messages=h),
+                     P.PromptArgs({"preserve_thinking": False}))[0]
+    raw = tok.apply_chat_template(P.flatten(h), add_generation_prompt=True)
+    assert off == raw
