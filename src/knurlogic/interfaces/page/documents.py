@@ -22,7 +22,42 @@ import json
 from pathlib import Path
 
 GIB = 1 << 30
-PAGE = Path(__file__).parent / "assets" / "index.html"
+ASSETS = Path(__file__).parent / "assets"
+PAGE = ASSETS / "index.html"
+# The page is plain static files the browser loads as they are (native ES
+# modules, no build step); only these kinds are served.
+ASSET_TYPES = {".html": "text/html; charset=utf-8",
+               ".css": "text/css; charset=utf-8",
+               ".js": "application/javascript; charset=utf-8"}
+
+
+def asset(name: str):
+    """(bytes, content type) of the page file at `name` (a path relative to
+    assets/, "/"-separated), or None: only a regular file of a served type
+    whose real path is inside the assets directory -- no "..", no symlink
+    that leads out of it."""
+    parts = name.split("/")
+    if "\\" in name or any(p in ("", ".", "..") for p in parts):
+        return None
+    ctype = ASSET_TYPES.get(Path(parts[-1]).suffix)
+    if ctype is None:
+        return None
+    root = ASSETS.resolve()
+    try:
+        real = ASSETS.joinpath(*parts).resolve(strict=True)
+    except OSError:
+        return None
+    if not real.is_relative_to(root) or not real.is_file():
+        return None
+    return real.read_bytes(), ctype
+
+
+def asset_names() -> list:
+    """Every page file asset() would serve, as its "/"-separated name."""
+    if not ASSETS.is_dir():
+        return []
+    names = (p.relative_to(ASSETS).as_posix() for p in ASSETS.rglob("*"))
+    return sorted(n for n in names if asset(n) is not None)
 
 
 def _json(obj) -> tuple:
@@ -487,10 +522,20 @@ def routes(status_fn=None, settings_fn=None, apply_fn=None,
                                                      "__MODEL__")})
     r["/connect.json"] = _connect
 
-    if PAGE.is_file():
-        def _page(_q, _n=0):
-            return PAGE.read_bytes(), "text/html; charset=utf-8"
-        r["/"] = r["/ui"] = _page
+    # The page: index.html at / and /ui, every other file under assets/ at
+    # its own path (/app.js, /views/chat.js ...). Only the files there when
+    # the server starts are routes, and each is read, and checked again,
+    # when it is asked for -- a restart shows new code.
+    def _asset(name):
+        def _serve(_q, _n=0):
+            got = asset(name)
+            return got if got is not None else _text("not found")
+        return _serve
+    for name in asset_names():
+        if name == "index.html":
+            r["/"] = r["/ui"] = _asset(name)
+        else:
+            r["/" + name] = _asset(name)
 
     if status_fn is not None:
         def _status(_q, n=0):
