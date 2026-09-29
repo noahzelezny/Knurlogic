@@ -86,7 +86,7 @@ def test_every_released_rung_is_listed_and_starts_unverified():
 
 
 def test_generations_are_what_the_hub_ships():
-    """Design D1's three published generations, as recorded."""
+    """The three published runtime generations, as recorded."""
     rows = {r.split("/", 1)[1]: v for r, v in _table()["rungs"].items()}
     assert {n for n, v in rows.items() if v["generation"] == "v2"} == V2
     assert {n for n, v in rows.items()
