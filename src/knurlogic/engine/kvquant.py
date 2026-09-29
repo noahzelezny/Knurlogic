@@ -28,10 +28,13 @@ does not mistake the dequantized arrays for quantized ones (the attribute
 is `kv_bits`).
 
 The cost of that choice, stated: memory is what shrinks (the stored cache,
-the prompt cache's entries). Decode reads the quantized cache and writes a
-dequantized copy per layer per step, which is MORE memory traffic than
-bf16, not less -- expect decode to be slower, not faster. Nothing here is
-measured on a real model yet.
+the prompt cache's entries). Dequantizing per layer per step is MORE
+memory traffic than bf16, so at 8 bits a decode step (query length 1)
+instead goes through engine/kvattn's Metal kernel, which reads the packed
+K/V directly (the dequantized arrays returned beside it are lazy and never
+computed). M4, Qwen3.6-35B-A3B, decode tok/s bf16 / dequantize / kernel:
+70.0 / 63.9 / 66.3 at 6k context, 65.5 / 54.0 / 61.9 at 16k. Prefill and
+6/4 bits stay dequantize + sdpa.
 
 What is quantized: mlx-lm's plain `KVCache` (exact type) in the list
 `model.make_cache()` returns, and inside a CacheList; and a family's own
@@ -105,6 +108,28 @@ def _cat(xs, ys):
     return tuple(mx.concatenate([x, y], axis=2) for x, y in zip(xs, ys))
 
 
+#: query lengths up to this remember their packed K/V for the 8-bit
+#: decode kernel (engine/kvattn). 1: decode steps only -- an MTP verify
+#: (2-4 rows per sequence) measured 1.2-1.7x SLOWER through the kernel than
+#: dequantize+sdpa on the M4 (tools/kv8/tune.py, L=2/4), so it stays there.
+KERNEL_MAX_QUERY = 1
+#: set by `install` at 8 bits when engine/kvattn is on and took the model
+KERNEL = False
+
+
+def _fetch(c, n, S, kdt, vdt):
+    """The dequantized K/V `update_and_fetch` returns (lazy: never
+    computed if the attention takes the kernel instead), and, for a short
+    8-bit query with the kernel on, what engine/kvattn.sdpa needs."""
+    g, bits = c.group, c.kv_bits
+    K, V = _slice(c.keys, 0, n), _slice(c.values, 0, n)
+    k, v = _dq(K, g, bits, kdt), _dq(V, g, bits, vdt)
+    c.kv8_fetch = None
+    if KERNEL and bits == 8 and S <= KERNEL_MAX_QUERY:
+        c.kv8_fetch = (k, K, V, g)
+    return k, v
+
+
 def _nbytes(parts) -> int:
     return sum(int(p.nbytes) for p in parts) if parts is not None else 0
 
@@ -143,9 +168,7 @@ class QuantKVCache(KVCache):
                          (self.values, _q(values, g, bits))):
             for d, s in zip(dst, src):
                 d[..., prev:self.offset, :] = s
-        return (_dq(_slice(self.keys, 0, self.offset), g, bits, keys.dtype),
-                _dq(_slice(self.values, 0, self.offset), g, bits,
-                    values.dtype))
+        return _fetch(self, self.offset, S, keys.dtype, values.dtype)
 
     @property
     def state(self):
@@ -217,9 +240,7 @@ class BatchQuantKVCache(BatchKVCache):
                          (self.values, _q(values, g, bits))):
             for d, s in zip(dst, src):
                 d[..., prev:self._idx, :] = s
-        return (_dq(_slice(self.keys, 0, self._idx), g, bits, keys.dtype),
-                _dq(_slice(self.values, 0, self._idx), g, bits,
-                    values.dtype))
+        return _fetch(self, self._idx, S, keys.dtype, values.dtype)
 
     def finalize(self):
         if self._right_padding is not None:
@@ -410,6 +431,11 @@ def install(model, bits: Optional[int]) -> int:
     probe, n = quantize_cache_list(whole(), bits, table)
     if n == 0:
         return 0
+
+    if bits == 8:
+        from knurlogic.engine import kvattn
+        global KERNEL
+        KERNEL = kvattn.enabled() and kvattn.patch_model(model) > 0
 
     def make_cache():
         return quantize_cache_list(whole(), bits, table)[0]

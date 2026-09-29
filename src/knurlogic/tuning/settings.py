@@ -400,12 +400,26 @@ KNOB_DOC = {
         "precision of the attention KV cache: bf16, or 8, 6 or 4 bits",
         "fewer bits hold more context and more agents: 8-bit takes about "
         "53% of bf16's memory (6: 41%, 4: 28%). The cost is speed and a "
-        "little precision: K/V are dequantized every step, measured at "
-        "decode ~7% slower at 6k tokens of context and ~18% at 16k (8-bit, "
-        "M4), no measured prefill cost; 8-bit moves the tiny test models' "
-        "logits by ~0.3% of their range, not yet measured on a real model, "
-        "and 6/4 not measured at all. Attention K/V only (GLM: its MLA "
-        "latent; GLM takes 8 only)."),
+        "little precision: at 8 bits decode reads the cache through a "
+        "fused kernel (KNURLOGIC_KV_KERNEL), measured ~5% slower than bf16 "
+        "at 6k tokens of context and ~6% at 16k (M4, kernel on; ~7% / ~18% "
+        "with it off), no measured prefill cost; 6/4 dequantize K/V every "
+        "step and are not measured. 8-bit moves the tiny test models' "
+        "logits by ~0.3% of their range; a planted-needle answer stayed "
+        "exact on Qwen3.6-35B at 26k tokens. Attention K/V only (GLM: its "
+        "MLA latent; GLM takes 8 only)."),
+    "KNURLOGIC_KV_KERNEL": (
+        "8-bit KV decode through the fused kernel (on) or dequantize + "
+        "attention (off)",
+        "only with an 8-bit KV cache: decode steps read the 8-bit K/V "
+        "directly instead of dequantizing the whole cache each step "
+        "(engine/kvattn.py). M4 Qwen3.6-35B decode: +4% at 6k, +15% at 16k "
+        "context over off; the needle answer is exact either way. Off is "
+        "for A/B -- check /status.json kv_kernel hits vs misses to see "
+        "which path is actually live (GLM's MLA latent and gemma4's "
+        "KV-shared layers always take dequantize + attention). A row with "
+        "every key masked returns 0 here where mlx sdpa returns NaN. "
+        "Prefill is dequantize + attention either way."),
     "KNURLOGIC_CROSS_CHIP": (
         "identical results across chips: a split over an M3 and an M4 "
         "gives the same tokens as a split over two of one",
@@ -483,6 +497,8 @@ KNOB_ALIASES = {
     "mtp": ("KNURLOGIC_MTP",),
     "mtp_dynamic": ("KNURLOGIC_MTP_DYNAMIC",),
     "kv_bits": ("KNURLOGIC_KV_BITS",),
+    # the 8-bit KV decode kernel (engine/kvattn): on unless "off"; A/B knob
+    "kv_kernel": ("KNURLOGIC_KV_KERNEL",),
     "cross_chip": ("KNURLOGIC_CROSS_CHIP",),
     "preset": ("KNURLOGIC_PRESET",),
 }
@@ -490,7 +506,8 @@ KNOB_ALIASES = {
 #: launch settings of the model itself, read when it loads: the same on
 #: every rank of a split (cluster/launch passes them ring-wide)
 MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
-               "KNURLOGIC_CROSS_CHIP", "KNURLOGIC_PRESET")
+               "KNURLOGIC_KV_KERNEL", "KNURLOGIC_CROSS_CHIP",
+               "KNURLOGIC_PRESET")
 
 
 # --- which knobs the ENGINE consumes ----------------------------------------
@@ -502,7 +519,7 @@ MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
 # the server never saw.
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "context_length", "mtp",
-                                      "mtp_dynamic", "kv_bits",
+                                      "mtp_dynamic", "kv_bits", "kv_kernel",
                                       "cross_chip", "preset")
                           for n in KNOB_ALIASES[k])
 
@@ -673,6 +690,7 @@ KNOB_RANGE = {
     # narrowed per family by the resolver (Resolution.ranges): a family
     # that refuses quantized KV offers bf16 alone
     "KNURLOGIC_KV_BITS": (KV_BITS_VALUES, "bits"),
+    "KNURLOGIC_KV_KERNEL": (["on", "off"], ""),
     "KNURLOGIC_CROSS_CHIP": (["off", "on", "auto"], ""),
     "KNURLOGIC_PRESET": (list(PRESETS), ""),
     "VQLAB_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
