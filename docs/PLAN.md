@@ -478,9 +478,6 @@ Still to prove live:
 - Prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off on the pair (not measured).
 
 Queued work:
-- A cluster job's leader listens on 127.0.0.1 only: a request to 192.0.2.2:8080 from the
-  other Mac fails (paper session, 2026-09-28, went over ssh). Decide: bind the leader to
-  the cluster link, or document the page's router as the way in.
 - Names: `load` says link tcp/rdma, the recovery record says ring/jaccl (mlx's backend
   names). Show one vocabulary.
 - DeepSeek-V4-Flash watch: the first prompt past ~2k tokens is the first time edits 1-2
@@ -499,7 +496,8 @@ Queued work:
 - the harness changeover list (after the maintainer's own review).
 - Local-model sub-agents: two long runs failed (Flash refused by the ring memory race;
   35B timed out after 1h45 on a multi-file task). Give them short, contained jobs only.
-- Release: review review, merge the stack into main, v0.1.0 -- only after the above.
+- Release v0.1.0: review's final gate said TAG (2026-09-29); nothing in this queue blocks it.
+  The tag is the maintainer's call.
 
 ## NEXT (set 2026-09-26, third compaction)
 

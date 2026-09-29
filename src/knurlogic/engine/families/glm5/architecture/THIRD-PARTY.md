@@ -10,6 +10,7 @@ written into anyone's `site-packages`.
 | file | upstream project | license |
 |---|---|---|
 | `glm5_next/ (incl. _mlx_vlm/)` | mlx-vlm 0.6.17 | MIT — Copyright (c) 2025 Prince Canuma |
+| `glm5_next/_mlx_vlm/models/deepseek_v4/hyper_connection.py` | mlx-vlm 0.6.17 | MIT — Copyright (c) 2026 Apple Inc. |
 
 Some files carry no copyright header upstream; they are covered by their
 project's MIT license regardless, and are listed here so the obligation is
