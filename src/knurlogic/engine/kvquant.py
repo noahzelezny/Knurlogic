@@ -31,8 +31,10 @@ The cost of that choice, stated: memory is what shrinks (the stored cache,
 the prompt cache's entries). Dequantizing per layer per step is MORE
 memory traffic than bf16, so at 8 bits a decode step (query length 1)
 instead goes through engine/kvattn's Metal kernel, which reads the packed
-K/V directly (the dequantized arrays returned beside it are lazy and never
-computed). M4, Qwen3.6-35B-A3B, decode tok/s bf16 / dequantize / kernel:
+K/V directly. The dequantized arrays still returned beside it are lazy:
+computed only if something reads them -- which gemma4's KV-shared layers
+do (they attend over the owner layer's returned keys with cache=None), so
+there the copy is still made for those layers. M4, Qwen3.6-35B-A3B, decode tok/s bf16 / dequantize / kernel:
 70.0 / 63.9 / 66.3 at 6k context, 65.5 / 54.0 / 61.9 at 16k. Prefill and
 6/4 bits stay dequantize + sdpa.
 
@@ -113,8 +115,6 @@ def _cat(xs, ys):
 #: (2-4 rows per sequence) measured 1.2-1.7x SLOWER through the kernel than
 #: dequantize+sdpa on the M4 (tools/kv8/tune.py, L=2/4), so it stays there.
 KERNEL_MAX_QUERY = 1
-#: set by `install` at 8 bits when engine/kvattn is on and took the model
-KERNEL = False
 
 
 def _fetch(c, n, S, kdt, vdt):
@@ -124,10 +124,21 @@ def _fetch(c, n, S, kdt, vdt):
     g, bits = c.group, c.kv_bits
     K, V = _slice(c.keys, 0, n), _slice(c.values, 0, n)
     k, v = _dq(K, g, bits, kdt), _dq(V, g, bits, vdt)
+    if getattr(c, "kv8_fetch", None) is not None:
+        # handed out last step and never taken: its attention did not go
+        # through kvattn.sdpa (it calls mx.fast directly, or a family's own)
+        from knurlogic.engine import kvattn
+        kvattn.count(False, "the attention never asked for it")
     c.kv8_fetch = None
-    if KERNEL and bits == 8 and S <= KERNEL_MAX_QUERY:
+    if c.kv8_kernel and bits == 8 and S <= KERNEL_MAX_QUERY:
         c.kv8_fetch = (k, K, V, g)
     return k, v
+
+
+def _carry(out, caches):
+    """`out` takes the kernel setting of the caches it was built from."""
+    out.kv8_kernel = any(getattr(c, "kv8_kernel", False) for c in caches)
+    return out
 
 
 def _nbytes(parts) -> int:
@@ -140,6 +151,12 @@ class QuantKVCache(KVCache):
     dequantized arrays of the dtype it was given."""
 
     step = 256
+    #: this cache hands its packed K/V to engine/kvattn's decode kernel:
+    #: set per cache by `install`'s make_cache, carried by merge / extract /
+    #: extend (never process-global: two models in one process each keep
+    #: their own setting)
+    kv8_kernel = False
+    kv8_fetch = None
 
     def __init__(self, kv_bits: int = 8):
         super().__init__()
@@ -207,6 +224,12 @@ class BatchQuantKVCache(BatchKVCache):
     parent's; everything that touches the stored arrays is here."""
 
     step = 256
+    #: this cache hands its packed K/V to engine/kvattn's decode kernel:
+    #: set per cache by `install`'s make_cache, carried by merge / extract /
+    #: extend (never process-global: two models in one process each keep
+    #: their own setting)
+    kv8_kernel = False
+    kv8_fetch = None
 
     def __init__(self, left_padding: List[int], kv_bits: int = 8):
         super().__init__(left_padding)
@@ -291,6 +314,7 @@ class BatchQuantKVCache(BatchKVCache):
             self.offset = mx.concatenate([self.offset, other.offset])
             return
         self._meta_from(other)
+        self.kv8_kernel = self.kv8_kernel or other.kv8_kernel
         other._meta_from(self)
         src = self if self.keys is not None else other
         H, dt = src.keys[0].shape[1], src.keys[1].dtype
@@ -323,6 +347,7 @@ class BatchQuantKVCache(BatchKVCache):
 
     def extract(self, idx):
         c = QuantKVCache(self.kv_bits)
+        c.kv8_kernel = self.kv8_kernel
         c.group, c.dims = self.group, self.dims
         pad = self.left_padding[idx].item()
         if self.keys is not None:
@@ -339,7 +364,7 @@ class BatchQuantKVCache(BatchKVCache):
         lengths = [c.size() for c in caches]
         L = max(lengths)
         if L == 0:
-            return cls([0] * len(caches), bits)
+            return _carry(cls([0] * len(caches), bits), caches)
         first = next(c for c in caches if c.keys is not None)
         pad = [L - n for n in lengths]
         B = len(caches)
@@ -354,7 +379,7 @@ class BatchQuantKVCache(BatchKVCache):
             for dst, src in ((keys, c.keys), (values, c.values)):
                 for d, s in zip(dst, src):
                     d[i:i + 1, :, p:p + c.offset] = s[..., :c.offset, :]
-        out = cls(pad, bits)
+        out = _carry(cls(pad, bits), caches)
         out.group, out.dims = first.group, first.dims
         out.keys, out.values = keys, values
         out.offset += L
@@ -432,14 +457,28 @@ def install(model, bits: Optional[int]) -> int:
     if n == 0:
         return 0
 
+    kernel = False
     if bits == 8:
         from knurlogic.engine import kvattn
-        global KERNEL
-        KERNEL = kvattn.enabled() and kvattn.patch_model(model) > 0
+        kernel = kvattn.enabled() and kvattn.patch_model(model) > 0
+        kvattn.reset(kernel)
+    model.kv8_kernel = kernel
 
     def make_cache():
-        return quantize_cache_list(whole(), bits, table)[0]
+        out = quantize_cache_list(whole(), bits, table)[0]
+        if kernel:
+            mark_kernel(out)
+        return out
 
     model.make_cache = make_cache
     return n
 
+
+def mark_kernel(caches) -> None:
+    """Let kvquant's caches (family subclasses included) in `caches` hand
+    their packed K/V to the 8-bit decode kernel (engine/kvattn)."""
+    for c in caches:
+        if isinstance(c, (QuantKVCache, BatchQuantKVCache)):
+            c.kv8_kernel = True
+        elif isinstance(getattr(c, "caches", None), (tuple, list)):
+            mark_kernel(c.caches)

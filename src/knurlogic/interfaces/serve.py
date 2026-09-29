@@ -313,6 +313,10 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         snap["drafting"] = engine.drafting_status()
         from knurlogic.engine.serve import state as _st
         snap["cross_chip"] = dict(_st.SERVED.get("cross_chip") or cross)
+        # 8-bit KV decode kernel: hits vs fallbacks, so an A/B of
+        # KNURLOGIC_KV_KERNEL can see which path actually ran
+        if _st.SERVED.get("kv_kernel") is not None:
+            snap["kv_kernel"] = dict(_st.SERVED["kv_kernel"])
         snap["preset"] = dict(r.preset)
         # what is running and what is waiting (scheduler.requests)
         from knurlogic.interfaces import http as _http

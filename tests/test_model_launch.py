@@ -226,5 +226,16 @@ def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
             resolve_fn=lambda ws, t: resolve(a, ws, tune=t))({})
         ks = {k["name"]: k for k in doc["knobs"]}
         assert ks["KNURLOGIC_KV_BITS"]["values"] == want
+        # the 8-bit decode kernel's switch is offered only at 8 bits
+        assert "KNURLOGIC_KV_KERNEL" not in ks
         for k in S.MODEL_KNOBS:
-            assert ks[k]["reach"] == "restart"
+            if k != "KNURLOGIC_KV_KERNEL":
+                assert ks[k]["reach"] == "restart"
+
+
+def test_the_kv_kernel_switch_is_emitted_only_at_8_bits(tmp_path):
+    a = _art(tmp_path, "qwen3_5_text")
+    assert "KNURLOGIC_KV_KERNEL" not in resolve(a, 96 * GIB).env
+    r = resolve(a, 96 * GIB, kv_bits=8)
+    assert r.env["KNURLOGIC_KV_KERNEL"] == "on"
+    assert "KNURLOGIC_KV_KERNEL" not in resolve(a, 96 * GIB, kv_bits=4).env

@@ -30,7 +30,7 @@ def setmode(m):
         return
     os.environ[kvattn.ENV] = "on" if m == "q8k" else "off"
     kvquant.install(model, 8)
-    assert kvquant.KERNEL == (m == "q8k")
+    assert model.kv8_kernel == (m == "q8k")
 
 
 def prefill(ids, cache, C=512):

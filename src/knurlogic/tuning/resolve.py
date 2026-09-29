@@ -717,7 +717,10 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
         emit(r, artifact, "mtp_dynamic", launch.get("mtp_dynamic", "on"))
     bits, why = S.kv_quant_for(artifact.model_type)
     emit(r, artifact, "kv_bits", launch.get("kv_bits", "bf16"))
-    emit(r, artifact, "kv_kernel", launch.get("kv_kernel", "on"))
+    # the decode kernel reads 8-bit K/V only: shown where it can matter
+    if str(kv_bits if kv_bits is not None
+           else launch.get("kv_bits", "bf16")) == "8":
+        emit(r, artifact, "kv_kernel", launch.get("kv_kernel", "on"))
     emit(r, artifact, "cross_chip", launch.get("cross_chip", "off"))
     emit(r, artifact, "preset", tune)
     r.ranges["KNURLOGIC_KV_BITS"] = ["bf16"] + [str(b) for b in bits]
