@@ -35,7 +35,7 @@ third out there. mlx-lm has no MTP path at all, so an artifact's drafting
 head is weight nobody else will run.
 """
 
-from ._artifacts import (  # noqa: F401
+from ._artifacts import (  # noqa: F401 -- re-exported, the package's API
     BUILT,
     DECLARED,
     GRAFTABLE,

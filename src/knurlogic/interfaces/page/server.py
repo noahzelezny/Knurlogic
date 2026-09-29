@@ -32,12 +32,14 @@ from knurlogic.machine import identity, loaded, status, wired
 from knurlogic.machine.servers import (is_our_server, registry,
                                        save_registry, serve_log)
 from knurlogic.interfaces.page import documents
-
-logger = logging.getLogger(__name__)
+# the launch facts cluster jobs share: tuning/settings owns them
+from knurlogic.tuning.settings import PATH_KEYS, TUNES, clean_sets
 # Imported here, not inside the status handler: the page fires several
 # requests at once, and two threads importing a module for the first time
 # race -- measured as "partially initialized module 'typing'" on a restart.
-from knurlogic.cluster import exo as exo_witness  # noqa: E402
+from knurlogic.cluster import exo as exo_witness
+
+logger = logging.getLogger(__name__)
 
 #: Children started from the page: {port: (Popen, artifact path)}.
 _CHILDREN: dict = {}
@@ -488,9 +490,6 @@ PEER_LOAD_PATH = "/peer/loaded.json"
 PEER_LOAD_MAX = 16 << 10
 #: a load answers once the fit is checked and the child started
 PEER_LOAD_S = 60.0
-# the launch facts cluster jobs share: tuning/settings owns them
-from knurlogic.tuning.settings import (PATH_KEYS, TUNES,  # noqa: E402
-                                       clean_sets, launch_knobs)
 
 
 def _default_tune() -> str:
