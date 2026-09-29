@@ -68,7 +68,7 @@ from pathlib import Path
 HERE = Path(__file__).parent
 
 #: Every family, by package name under engine/families/.
-FAMILIES = ("qwen", "gemma4", "glm5")
+FAMILIES = ("qwen", "gemma4", "glm5", "deepseek")
 
 
 def manifests() -> list:
