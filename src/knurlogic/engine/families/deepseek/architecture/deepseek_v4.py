@@ -2853,7 +2853,7 @@ class Model(nn.Module):
             # Checkpoint ships hyper-connection submodules as `attn_hc` / `ffn_hc`
             # (suffix form) but the model class declares them as `hc_attn` /
             # `hc_ffn` (prefix form). Fork-level naming inconsistency.
-            # the harness patch 2026-05-18.
+            # Fork patch 2026-05-18.
             nk = nk.replace(".attn_hc.", ".hc_attn.")
             nk = nk.replace(".ffn_hc.", ".hc_ffn.")
             for sub in ("attn", "ffn"):
@@ -2887,7 +2887,7 @@ class Model(nn.Module):
         # → kIOGPUCommandBufferCallbackErrorTimeout. Chunked-stack approach:
         # stack EXPERTS_CHUNK at a time, eval each chunk, then concatenate
         # the chunks at the end. Each chunk is small enough to finish under
-        # the watchdog. the harness patch 2026-05-18; researched via mlx PR #1864.
+        # the watchdog. Fork patch 2026-05-18; researched via mlx PR #1864.
         EXPERTS_CHUNK = 32
 
         def _chunked_stack(tensors):
