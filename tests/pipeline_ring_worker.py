@@ -37,10 +37,23 @@ def build_glm():
     return model
 
 
+def build_deepseek_v4():
+    """The tiny random DeepSeek-V4 golden (float32), through mlx-lm's
+    loader over knurlogic's vendored module."""
+    from pathlib import Path
+    from mlx_lm.utils import load_model
+    from knurlogic.engine import register
+    register.register("deepseek_v4")
+    here = Path(__file__).parent / "goldens" / "deepseek_v4_tiny"
+    return load_model(here)[0]
+
+
 def build(family, seed=0, dtype="float32"):
     import importlib
     if family == "glm5_next":
         return build_glm()
+    if family == "deepseek_v4":
+        return build_deepseek_v4()
 
     import mlx.core as mx
     from mlx.utils import tree_flatten, tree_unflatten
@@ -80,6 +93,8 @@ def logits(link, out_path, family, counts):
     from knurlogic.engine.runtime import pipeline as PL
     ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]
     then = [31, 104, 331, 32, 439, 214]
+    if family == "deepseek_v4":                 # its vocabulary is 64
+        ids, then = [t % 64 for t in ids], [t % 64 for t in then]
     bits = os.environ.get("KNURLOGIC_KV_BITS")
 
     def built():
