@@ -980,8 +980,8 @@ VISION_KV_DTYPE_BYTES = 2
 # out, and whether the server compacts a request that asks for nothing.
 # Read per request from the environment, so each applies live on a running
 # server (POST /settings.json) and, set before a launch, from its start.
-# Not measured: these are policy, ported from the harness's compactor
-# (scout/tasks/agent_loop_compaction.py, keep_recent=6). There is no summary
+# Not measured: these are policy, ported from an earlier agent-loop
+# compactor (keep_recent=6). There is no summary
 # budget: a summary is only never longer than what it replaces.
 COMPACT_KNOBS = {
     # name: (default, values, unit, what, why)

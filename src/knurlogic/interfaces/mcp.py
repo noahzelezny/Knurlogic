@@ -16,7 +16,7 @@ refuses rather than gambles.
 DESIGN RULES, each one paid for:
 
 * `ready` is a gate, not a status line. Loading while another load is still
-  moving memory is the failure the maintainer hits repeatedly. `ready` names every
+  moving memory is a common failure. `ready` names every
   reason it is not, and `load` calls it first and REFUSES rather than trying
   anyway.
 

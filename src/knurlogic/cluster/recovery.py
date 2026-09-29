@@ -12,7 +12,7 @@ Who      the page that coordinated a cluster launch (cluster_jobs.launch
 Never    a requested stop (an unload from any page or the MCP, a page
          closing); a stop because the model does not fit or a machine ran
          out of memory -- relaunching into the same memory is what rebooted
-         the M3 once -- which is `failed` at once, with the reason.
+         the M3 Ultra once -- which is `failed` at once, with the reason.
 Waits    a machine that went away or stopped answering: the relaunch waits
          until every machine of the job answers its page again, within the
          window; else `failed`.
@@ -127,7 +127,7 @@ def memory_line(text: str) -> str:
 
 # ------------------------------------------------------------ the file
 # port -> view, on the machine serving that port: a server's /v1/residency
-# reads its own port's row (interfaces/http/scout.residency).
+# reads its own port's row (interfaces/http/residency.residency).
 
 def _path() -> Path:
     base = Path(os.environ.get("XDG_CACHE_HOME",

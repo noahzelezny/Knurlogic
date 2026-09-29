@@ -295,7 +295,7 @@ def test_mcp_load_state_unload_across_two_pages(page_a, monkeypatch):
 def test_a_cluster_load_sends_the_artifacts_name_with_its_identity(page):
     # the ranks resolve the identity to the artifact CALLED this, or refuse
     page.answer = {"starting": True}
-    mcp.load(artifact="/Volumes/x/paperv5--q397-e112-A", machines=["A", "B"],
+    mcp.load(artifact="/models/paperv5--q397-e112-A", machines=["A", "B"],
              split="pipeline", link="tcp")
     assert page.posts[0]["identity"] == "abc"
     assert page.posts[0]["name"] == "paperv5--q397-e112-A"

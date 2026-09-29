@@ -13,7 +13,7 @@ def _source_version(here=None):
     """The version in the pyproject.toml beside `src/` when this package
     runs from a source tree (src/knurlogic/..), else None. A source copy
     run by PYTHONPATH has no metadata of its own, and any it finds belongs
-    to some other install (the M4's said 0.1.0.dev0)."""
+    to some other install (one test install reported 0.1.0.dev0)."""
     import re
     from pathlib import Path
     pkg = Path(here or __file__).resolve().parent

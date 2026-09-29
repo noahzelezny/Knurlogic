@@ -7,7 +7,7 @@ get changed, and addresses move when a Thunderbolt cable is replugged.
         addresses and renames. Not the raw hardware UUID on the wire -- but
         it IS a persistent identifier for this machine on the local
         network, and is only sent to peers that ask for status.
-  name  the ComputerName ("Studio A"), for display only.
+  name  the ComputerName ("Alex's Mac Studio"), for display only.
 
 The id is read through IOKit with ctypes, the same way the temperature
 sensors are; the name from `scutil --get ComputerName`. Nothing to

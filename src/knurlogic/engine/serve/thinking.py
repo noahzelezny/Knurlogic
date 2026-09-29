@@ -142,7 +142,7 @@ _probe_cache: dict = {}
 # and the first few after a load probe together: concurrent renders through
 # the same tokenizer failed, the probe read those failures as "the template
 # does not act on its controls", and whichever thread finished last decided
-# what was cached. Measured on the M4 (2026-09-25): the first four
+# what was cached. Measured on an M4 Max (128 GB) (2026-09-25): the first four
 # concurrent requests of every bench arm were served "not controllable" --
 # a `none` request reasoned for 242 tokens.
 _render_lock = threading.RLock()
@@ -270,7 +270,7 @@ def _served_tokenizer():
     mlx-lm answers HTTP before its generation thread has loaded the model,
     so the first requests to a slow-loading artifact arrived with no
     tokenizer, found no template, and were served the model's own default
-    level whatever they asked for (Flash-Next 2.1 on the M4, 2026-09-25:
+    level whatever they asked for (Flash-Next 2.1 on an M4 Max (128 GB), 2026-09-25:
     four `none` requests reasoned 89-232 tokens). The template on disk is
     the one the server will use; the tokenizer is loaded once, cheaply,
     and dropped when the served one appears."""

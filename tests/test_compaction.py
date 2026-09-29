@@ -186,7 +186,7 @@ def test_findings_are_parsed_and_a_missed_one_falls_back_to_a_clear():
     assert E.render(summary, uses, found, distill=False)[1:] == (0, 3)
 
 
-def test_the_summary_prompt_is_scouts_extended_and_lists_the_calls():
+def test_the_summary_prompt_is_extended_and_lists_the_calls():
     uses = E.tool_uses(agent_history(2))
     p = E.prompt(uses)
     for h in ("Decisions made", "Information gathered", "Files and "

@@ -27,7 +27,7 @@ exo for clustering, and carries the work that was trapped in forks of both.
                   evidence) plus architecture/ (vendored code, PROVENANCE,
                   pins, licenses), vision/, heads/. Explicit list in
                   families/__init__.py; being listed is being tested
-                  (tests/test_families.py). Reviewed twice in review.
+                  (tests/test_families.py). Reviewed twice.
     machine/      64 artifacts found across every store; residency in every
                   runtime (exo's read, never driven); one load budget; which
                   build of each dependency is installed
@@ -269,7 +269,7 @@ short forwards (an unvendored module); all released rungs reported no
 vision (the `_text` model_type spelling, third time); the chat could not
 reach any running model from the control page.
 
-Real-model gates, 2026-09-23, on the M4 (Laptop B, M4 Max) in a clean
+Real-model gates, 2026-09-23, on an M4 Max 128 GB in a clean
 `pip install` venv, tools/vision_gate.py, one rung at a time:
 
     gemma e4b VQ-PLE        PASS
@@ -340,15 +340,15 @@ Before merging to main:
      its nearest native setting and the response says what was applied.
    - "auto" (thinking by difficulty) is a classification call: the
      harness's, not knurlogic's.
-   - KEYED BY CHAT-TEMPLATE DIALECT, not by architecture (a review's
-     review): Qwen3.6 (on/off) and Qwen3.8 (on/off + effort) are the same
+   - KEYED BY CHAT-TEMPLATE DIALECT, not by architecture (design review):
+     Qwen3.6 (on/off) and Qwen3.8 (on/off + effort) are the same
      qwen3_5 module. The dialect is detected from the artifact's template,
      as the tool-call dialect is (serve/load.py tool_support); the mapping
      ladder -> native kwargs is per dialect. New module serve/thinking.py
      is the plug point -- nothing touches chat_template_kwargs today.
    - BUILT 2026-09-24 (engine/serve/thinking.py, dialects in the family
-     manifests; tests render the released templates), then reviewed by
-     a review and fixed: the template text only PROPOSES a dialect -- a
+     manifests; tests render the released templates), then reviewed
+     and fixed: the template text only PROPOSES a dialect -- a
      render probe through mlx-lm's own TokenizerWrapper decides, and finds
      the served default (gemma thinks by default when served: mlx-lm
      injects enable_thinking for silent requests); a client override is
@@ -440,7 +440,7 @@ Proven live on the M4 (2026-09-28, Qwen3.6-35B-A3B, minutes each):
   was run order + thermal drift); decode +7% at 6k, +18% at 16k (dequantize every step).
 
 Parked: memory pacing / ledger (docs/design/memory-pacing.md, memory-ledger.md, branch
-memory-pacing). The 4 growing agents with compaction off is not a real workload (the maintainer).
+memory-pacing). The 4 growing agents with compaction off is not a real workload.
 Revisit worst-case hardening only against realistic loads (compaction on).
 
 - Images (27B): shapes, colours, positions and text read exactly; repeats hit the image
@@ -486,7 +486,7 @@ Queued work:
 - 8-bit KV decode kernel: merged (engine/kvattn.py, KNURLOGIC_KV_KERNEL, /status.json
   kv_kernel hits/misses). Gemma4 KV-shared layers still pay the dequantize.
 - Gemma 4 strips earlier reasoning by design (Google's guidance): each user turn re-prefills.
-  Left alone (the maintainer).
+  Left alone.
 - Prefill cost: fewer checkpoint deep copies (share or keep only the last), and prefill
   a long prompt across several steps so the guard can act and decode rows keep going.
 - SMB loads: cold reads vary 3x because the M3 serves the SSD while loading its own
@@ -496,20 +496,20 @@ Queued work:
 - the harness changeover list (after the maintainer's own review).
 - Local-model sub-agents: two long runs failed (Flash refused by the ring memory race;
   35B timed out after 1h45 on a multi-file task). Give them short, contained jobs only.
-- Release v0.1.0: review's final gate said TAG (2026-09-29); nothing in this queue blocks it.
+- Release v0.1.0: the final review gate said TAG (2026-09-29); nothing in this queue blocks it.
   The tag is the maintainer's call.
 
 ## NEXT (set 2026-09-26, third compaction)
 
-Branches (clean as you go): vision-integration (241bc6d, review-reviewed,
+Branches (clean as you go): vision-integration (241bc6d, reviewed,
 pushed) <- hardening (every server fix since: memory guard, admission,
 margin floor, control-token neutralization, Host guard, sampling defaults,
-timing, context-length cap, count_tokens, audit fixes; a review: MERGE
+timing, context-length cap, count_tokens, audit fixes; review verdict: MERGE
 after two rounds) <- gui (the page: layouts, overlays, router by model,
 /peek, /apply, Connect, Settings, test bench, metrics) <- release (0.1.0:
 version from metadata, classifiers, Trusted Publishing workflow). Worktrees:
 ../knurlogic-gui (gui), ../knurlogic-release (release); the main checkout is
-on hardening. the maintainer's page on :8899 runs from ../knurlogic-gui/src.
+on hardening. The maintainer's page on :8899 runs from ../knurlogic-gui/src.
 
 Multi-machine serving is IN 0.1.0 (branch `cluster`, on top of gui): the
 page launches a model across Macs (tensor or pipeline split, TCP ring or
@@ -538,7 +538,7 @@ Open on the cluster path (not blocking the tag):
 - The 397B 3.1 and 2.6 bpw copies differ between the two Macs (identity
   mismatch), so only 2.4 bpw ran across both.
 
-Shootout (scratchpad shootout/, M4 ~/kl-test/shootout): Flash done (one-shot
+Shootout (scratchpad shootout/, the test machine): Flash done (one-shot
 24 + tool-use 8, triaged: ledger.md); 397B 2/8 tool-use audits, remaining
 running (chain7); GLM-5.3 2.7bpw produced nothing: ~6 GiB left above its
 weights on the 128 GB M4, four uncompacted 36k agents cannot fit (the harness's
@@ -558,7 +558,7 @@ formula only before a first run. Find out what GLM's cache actually holds
 
 In flight at the fourth compaction (2026-09-26 late):
 - Chunk sweep on the M4 (scratchpad shootout/chunk_bench.py -> M4
-  ~/kl-test/shootout/chunk_bench.jsonl; one server per arm, n=3, 4k/16k
+  a test directory/chunk_bench.jsonl; one server per arm, n=3, 4k/16k
   prompts, server prefill tok/s + max step spike). Flash 4.4: chunk width
   buys nothing (512 ~565 tok/s at 4k, 2048/4096 no faster at 4k, +6% at
   16k) for 0.8 -> 4.1 GiB spikes. 397B: 512 ~192/160 tok/s, 1024 ~225 at 4k
@@ -623,7 +623,7 @@ portable form). To check: 4 (multi-image, explicit limits). New: 1-3.
   a patch -- for the server build (executor step 1).
 
 * **GLM's `none` is SHIPPED** as the template's own closed-think format
-  (the maintainer, 2026-09-25): off 0 reasoning tokens on the served model, status
+  (2026-09-25): off 0 reasoning tokens on the served model, status
   lists off/low/high/max. It exposed a latent mlx-lm crash -- an EXACT
   prompt-cache hit leaves no segment and kills the generation thread --
   now guarded (engine/serve/cache_guard.py).
@@ -680,7 +680,7 @@ multipliers derived from a seed. Three sources disagree:
     Flash-Next checkpoint buffer layer_multipliers   seed 1234's values
       (model.layers.1: [23703573157769, 20109073645365, 8052911324071])
     mlx-vlm 0.6.17 qwen4_exp/config.py:55             seed 1234
-    the maintainer's mlx-lm fork (vqlab's fit/score env),       seed 0, and the
+    the project's mlx-lm fork (vqlab's fit/score env),       seed 0, and the
       exo (same fork), knurlogic (vendored copy)      stored buffer unused
 
 The official configs declare no seed, so the fork uses 0 and recomputes
@@ -745,7 +745,7 @@ qwen4_exp, glm5_next, gemma4.
   ids quoted in old commit messages go stale.
 * Then: HF card instructions point at knurlogic.
 
-## BIG TODO: setting up several machines must be easy (the maintainer, 2026-09-24)
+## BIG TODO: setting up several machines must be easy (2026-09-24)
 
 The scariest part for a new user, and the first thing to get right before
 release. Found by doing it on the M4 tonight, every step a stumble:

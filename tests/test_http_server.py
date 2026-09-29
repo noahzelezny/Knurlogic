@@ -1,6 +1,6 @@
 """knurlogic's own HTTP server on the tiny model, over real sockets: the
 OpenAI shapes, SSE framing, errors, the Anthropic surface in-process, and
-the harness's endpoints. Templates and thinking are the conformance suite's job
+the residency endpoints. Templates and thinking are the conformance suite's job
 (tests/api, on a real model); this is the wire."""
 import json
 import sys
@@ -31,7 +31,7 @@ def url():
     import mlx.nn as nn
     from knurlogic.engine.runtime.scheduler import Scheduler
     from knurlogic.engine.serve import state
-    from knurlogic.interfaces.http import scout
+    from knurlogic.interfaces.http import residency as res_api
     from knurlogic.interfaces.http.server import App, make_server
     model, head, prompts = _tiny(512)
     mx.eval([v if isinstance(v, mx.array) else v.parameters()
@@ -44,7 +44,7 @@ def url():
     sched = Scheduler(host, prefill_step_size=16).start()
     app = App(sched, served=lambda: {"id": "tiny", "capabilities": ["text"],
                                      "size_bytes": 1},
-              concurrency=lambda: scout.concurrency(sched))
+              concurrency=lambda: res_api.concurrency(sched))
     app.translate = None                      # no template to translate
     srv = make_server(app, "127.0.0.1", 0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()

@@ -167,7 +167,11 @@ def main(argv=None) -> int:
         print(text)
         return 1 if bad else 0
     if not a.artifact:
-        p.error("an artifact is required (or --cluster)")
+        from knurlogic.machine import discover
+        print(discover.render(discover.find()))
+        print("\nRun `knurlogic doctor <artifact>` to check one model "
+              "against this machine, or `knurlogic doctor --cluster`.")
+        return 0
     return run(a.artifact, a.working_set_gib, a.profile, a.exports, a.tune)
 
 
