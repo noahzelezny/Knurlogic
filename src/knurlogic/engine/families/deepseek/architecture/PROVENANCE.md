@@ -105,4 +105,4 @@ index_topk no pool reaches, so it checks everything the edits leave alone.
 
 ## Edit 12 (2026-09-29)
 
-Two comments said "Scout patch"; they now say "Fork patch". No code change.
+Two comments that named another project now say "Fork patch". No code change.
