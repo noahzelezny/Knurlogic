@@ -80,9 +80,36 @@ SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
              "port", "working_set_gib", "bandwidth_gbs", "nodes", "versions",
              "jaccl_timeout_ms", "sets", "chips", "cable", "cable_note",
-             "recovery")
+             "recovery", "serve_hosts")
 SPLITS = ("tensor", "pipeline")
 LINKS = ("ring", "jaccl")
+#: the link names people see (load(), state(), the page, the recovery
+#: record) -> mlx's distributed backend. The ONE place they are mapped:
+#: ring/jaccl are only ever the backend argument inside a job's spec.
+LINK_NAMES = {"tcp": "ring", "rdma": "jaccl"}
+
+
+def backend(link) -> str | None:
+    """mlx's backend for a link named either way (tcp|rdma, or an older
+    record's ring|jaccl); None when it is neither."""
+    if link in LINK_NAMES:
+        return LINK_NAMES[link]
+    return link if link in LINKS else None
+
+
+def link_name(link):
+    """The name people see for a link named either way: tcp | rdma."""
+    return {v: k for k, v in LINK_NAMES.items()}.get(link, link)
+
+
+def leader_url(spec: dict) -> str:
+    """The job's API as the other machines reach it: rank 0's link
+    address (the leader binds loopback and that), or '' when unknown."""
+    hs = [h for h in (spec.get("serve_hosts") or [])
+          if h not in ("127.0.0.1", "::1", "localhost")]
+    port = spec.get("port")
+    return f"http://{hs[0]}:{int(port)}/v1" if hs and port else ""
+
 #: the prompt chunk every rank runs (ring-wide): 512, as everywhere
 PREFILL_CHUNK = 512
 #: first ring port; a job's ranks take RING_PORT + slot*20 + rank, and
@@ -518,6 +545,16 @@ def check_spec(spec) -> str:
     if not isinstance(hosts, list) or not all(isinstance(h, str)
                                               for h in hosts):
         return "hosts is a list of address:port"
+    sh = spec.get("serve_hosts")
+    if sh is not None:
+        import ipaddress
+        try:
+            ok = isinstance(sh, list) and 1 <= len(sh) <= 4 and all(
+                isinstance(h, str) and ipaddress.ip_address(h) for h in sh)
+        except ValueError:
+            ok = False
+        if not ok:
+            return "serve_hosts is a list of IP addresses"
     if spec["link"] == "ring" and len(hosts) != spec["world"]:
         return "hosts names one address per rank"
     if spec["link"] == "jaccl":
@@ -763,6 +800,10 @@ def rank_argv(path: str, spec: dict, files: dict) -> list:
            "--tune", spec.get("tune") or "balanced"]
     if spec.get("port"):
         cmd += ["--port", str(int(spec["port"]))]
+    if spec.get("serve_hosts") and spec["rank"] == 0:
+        # the leader answers the job's other machines on its link
+        # address, and this one on loopback -- never every interface
+        cmd += ["--host", ",".join(spec["serve_hosts"])]
     if spec["link"] == "ring":
         cmd += ["--hosts", ",".join(spec["hosts"])]
     else:
@@ -1217,7 +1258,8 @@ def jobs_document() -> list:
                         "exiting": sorted(int(r["pid"]) for r in recs)})
             continue
         out.append({"job": job, "split": r0.get("split"),
-                    "link": r0.get("link"), "machines": r0.get("machines"),
+                    "link": link_name(r0.get("link")),
+                    "machines": r0.get("machines"),
                     "leader": r0.get("leader"), "world": r0.get("world"),
                     "ranks_here": sorted(r["rank"] for r in recs),
                     "port": next((r.get("port") for r in recs
@@ -1226,7 +1268,10 @@ def jobs_document() -> list:
                     "phase": J.phase_of(job, recs),
                     **{k: (SPECS.get(job) or {}).get(k) for k in
                        ("cable", "cable_note")
-                       if (SPECS.get(job) or {}).get(k)}})
+                       if (SPECS.get(job) or {}).get(k)},
+                    **({"url": leader_url(dict(SPECS[job], port=next(
+                        (r.get("port") for r in recs if r.get("port")),
+                        None)))} if SPECS.get(job) else {})})
     now = time.time()
     for job, e in list(ENDED.items()):
         if now - e["t"] > 600:
@@ -1332,9 +1377,9 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             len(set(map(str, ids))) != len(ids):
         return {"error": "a cluster launch names two or more machines"}
     split = req.get("split") if req.get("split") in SPLITS else None
-    link = req.get("link") if req.get("link") in LINKS else None
+    link = backend(req.get("link"))
     if not split or not link:
-        return {"error": "split is tensor|pipeline, link is ring|jaccl"}
+        return {"error": "split is tensor|pipeline, link is tcp|rdma"}
     ident = str(req.get("identity") or "")
     if not ident:
         return {"error": "a cluster launch names the model by identity"}
@@ -1368,8 +1413,8 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             m["links"][mine["name"]] = k
     if link == "jaccl":
         if len(infos) != 2:
-            return {"error": "jaccl here joins exactly two machines; use "
-                             "the TCP ring for more"}
+            return {"error": "link rdma here joins exactly two machines; "
+                             "use tcp for more"}
         for m in infos:
             rd = m.get("rdma") or {}
             if not rd.get("available"):
@@ -1458,11 +1503,11 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         def up(m):
             return ", ".join((m.get("rdma") or {}).get("active") or []) \
                 or "none"
-        return {"refused": f"jaccl needs RDMA up at both ends of one "
+        return {"refused": f"link rdma needs RDMA up at both ends of one "
                            f"Thunderbolt cable, and no Thunderbolt subnet "
                            f"has it ({order[0]['name']}: {up(order[0])}; "
-                           f"{order[1]['name']}: {up(order[1])}). Use the "
-                           f"TCP ring, or bring RDMA up on the shared cable.",
+                           f"{order[1]['name']}: {up(order[1])}). Use "
+                           f"link tcp, or bring RDMA up on the shared cable.",
                 "placement": plan}
     try:
         ips = _ring_ips(order, rdma=link == "jaccl", net=net)
@@ -1524,7 +1569,9 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "chips": [{"name": m.get("chip") or m.get("name") or "",
                        "arch": m.get("gpu_architecture") or ""}
                       for m in order],
-            "recovery": recovering}
+            "recovery": recovering,
+            # rank 0 binds loopback and its own link address
+            "serve_hosts": ["127.0.0.1", ips[0]]}
     specs = []
     for r, m in enumerate(order):
         specs.append({**base, "rank": r,
@@ -1583,9 +1630,12 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             previous=(moved or {}).get("job"))
     return {"job": job, "starting": ident, "placement": plan,
             "leader": plan["leader"], "port": port,
+            "link": link_name(link), "url": leader_url(base | {"port": port}),
             "machines": plan["order"], "cable": net, "cable_note": note,
-            "note": f"rank 0 on {plan['leader']} serves on port {port} once "
-                    f"every rank has loaded; poll /loaded.json"}
+            "note": f"rank 0 on {plan['leader']} serves on port {port} "
+                    f"(loopback there, {leader_url(base | {'port': port})} "
+                    f"from the job's machines) once every rank has loaded; "
+                    f"poll /loaded.json"}
 
 
 def _job_end(job: str, order: list, post):

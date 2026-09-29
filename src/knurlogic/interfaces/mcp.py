@@ -236,8 +236,8 @@ PAGE_ENV = "KNURLOGIC_PAGE"
 #: a cluster launch answers once every machine has prepared and started
 PAGE_LOAD_S = 300.0
 PAGE_READ_S = 15.0
-#: the MCP's link names, and the page's
-LINKS = {"tcp": "ring", "rdma": "jaccl"}
+#: the MCP's link names, and the page's (cluster/launch.LINK_NAMES)
+LINKS = ("tcp", "rdma")
 SPLITS = ("tensor", "pipeline")
 
 
@@ -302,7 +302,8 @@ def _machines_of(page, here: str) -> list:
 
 
 def _link_name(link):
-    return {v: k for k, v in LINKS.items()}.get(link, link)
+    from knurlogic.cluster.launch import link_name
+    return link_name(link)
 
 
 def models_across(page: dict, here: str) -> list:
@@ -359,6 +360,8 @@ def models_across(page: dict, here: str) -> list:
             "split": c.get("split") or j.get("split"),
             "link": _link_name(c.get("link") or j.get("link")),
             "job": job or None,
+            **({"url": c.get("url") or j.get("url")}
+               if c.get("url") or j.get("url") else {}),
             "instance": instance or None,
             "leader": c.get("leader") or j.get("leader"),
             **({"phase": c.get("phase") or j.get("phase")} if job else {}),
@@ -377,6 +380,7 @@ def models_across(page: dict, here: str) -> list:
             "machines": list(j.get("machines") or []),
             "split": j.get("split"), "link": _link_name(j.get("link")),
             "job": job, "instance": job, "leader": j.get("leader"),
+            **({"url": j["url"]} if j.get("url") else {}),
             "phase": j.get("phase"),
             **({k: j[k] for k in ("cable", "cable_note") if j.get(k)}),
             "recovery": recs.get(job)})
@@ -646,8 +650,9 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
     plan.update(cable=out.get("cable"), cable_note=out.get("cable_note"))
     return {"starting": out.get("starting"), "artifact": artifact,
             "job": out.get("job"), "port": out.get("port"),
+            "url": out.get("url"),
             "leader": out.get("leader"), "machines": out.get("machines"),
-            "split": split, "link": link, "placement": plan,
+            "split": split, "link": _link_name(out.get("link") or link), "placement": plan,
             "note": out.get("note", "") + " -- or `state`: the job is one "
                     "entry in `models`, with its phase."}
 
