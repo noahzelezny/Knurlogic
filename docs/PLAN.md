@@ -431,15 +431,33 @@ cluster parity (images on a split, MTP head on rank 0 only, prefill send overlap
 compaction (docs/design/compaction.md); instance ids; UI (instances card, swap band,
 model_type + VISION tag, new chat on Send).
 
-Still to prove live (M3 is Noah's now -- use the M4):
-- OOM guard: 3 rounds of 4 growing chats to 110k tokens, must never abort Metal (M4,
-  Flash-Next VQ 4.4, scripts in ~/kl-oomproof on the M4). Before the fix: 3/3 crashed.
-- Compaction on a real model: tokens before/after, summary quality, cache hit.
-- 8-bit KV vs bf16 on a real model (output agreement, memory per 1k tokens, speed).
+Proven live on the M4 (2026-09-28, Qwen3.6-35B-A3B, minutes each):
+- Compaction: 13.7k -> 6.0k tokens, good summary + per-tool findings; the summary pass and
+  the next turn are cache hits (after 5ba5a21 checkpoint-at-message-end and the
+  preserve_thinking fix for Qwen3.6/3.5 templates). Summary has no token budget; the
+  prompt is context_management/prompts/*.md.
+- 8-bit KV: needle exact, answers equivalent; no measured prefill cost (the first 15-20%
+  was run order + thermal drift); decode +7% at 6k, +18% at 16k (dequantize every step).
+
+Parked: memory pacing / ledger (docs/design/memory-pacing.md, memory-ledger.md, branch
+memory-pacing). The 4 growing agents with compaction off is not a real workload (Noah).
+Revisit worst-case hardening only against realistic loads (compaction on).
+
+Still to prove live:
+- Images and MTP on a single Mac (M4, small model).
 - Cluster parity on the pair (needs the M3): images on a split, MTP drafting from rank 0,
   rank 1 memory smaller, prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off.
 
 Queued work:
+- DeepSeek-V4-Flash: the mlx-community chat_template.jinja is a stub (no tool calls, no
+  tool results, reasoning dropped) -- agents are broken on it. Port DeepSeek's official
+  encoding.
+- 8-bit KV decode kernel (tools/kv8, branch kv8-kernel): fused Metal kernel reading 8-bit
+  K/V, 1.3-1.7x faster than mlx's quantized sdpa; being wired in.
+- Gemma 4 strips earlier reasoning by design (Google's guidance): each user turn re-prefills.
+  Left alone (Noah).
+- KNURLOGIC_KV_BITS in the environment is silently overridden; only --kv-bits / the page
+  apply it. At least say so.
 - Prefill cost: fewer checkpoint deep copies (share or keep only the last), and prefill
   a long prompt across several steps so the guard can act and decode rows keep going.
 - SMB loads: cold reads vary 3x because the M3 serves the SSD while loading its own
