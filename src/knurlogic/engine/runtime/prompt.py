@@ -175,7 +175,11 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
                           "/v1/completions with a prompt")
     kw = dict(args.chat_template_kwargs or {})
     close = bool(kw.pop(thinking.CLOSE, False))
-    if PRESERVE not in kw and PRESERVE in _template_text(tokenizer):
+    patched = _preserving_template(tokenizer)
+    if patched is not None and "chat_template" not in kw:
+        kw["chat_template"] = patched
+    if PRESERVE not in kw and (patched is not None
+                               or PRESERVE in _template_text(tokenizer)):
         kw[PRESERVE] = True
     messages = flatten(request.messages, tokenizer)
     # tool descriptions are rendered into the prompt too, and an MCP
@@ -205,6 +209,40 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
 #: reasoning when a client sends it back, which Qwen3.6 is trained for.
 #: A request's own chat_template_kwargs value wins.
 PRESERVE = "preserve_thinking"
+
+
+#: Qwen3.5's think-drop condition, the one Qwen3.6 put the switch in front
+#: of (its template differs from 3.5's here and nowhere that matters). The
+#: 3.5 templates (397B-A17B) have the same failure -- a user message after
+#: tool calls drops every earlier turn's think block, so the next question
+#: and the compaction summary re-prefill the whole history -- and no
+#: switch; this adds Qwen3.6's own, spelled as 3.6 spells it. Trade-off:
+#: the model sees its earlier turns' reasoning (what it wrote, which a
+#: client sent back; empty blocks when it sent none), which 3.5 was not
+#: trained on the way 3.6 is -- the price of not re-prefilling a hybrid
+#: model's whole conversation once per user turn. A request's
+#: `preserve_thinking: false` restores the template's own behaviour.
+_DROP = re.compile(r"(\{%-?\s*if\s+)(loop\.index0\s*>\s*ns\.last_query_index)"
+                   r"(\s*-?%\})")
+_SWITCH = "(preserve_thinking is defined and preserve_thinking is true) or "
+
+
+def _preserving_template(tokenizer) -> Optional[str]:
+    """The template with Qwen3.6's preserve_thinking switch added, for a
+    template that has Qwen3.5's think-drop and no switch; else None."""
+    t = getattr(tokenizer, "chat_template", None)
+    if not isinstance(t, str) or PRESERVE in t:
+        return None
+    cached = getattr(tokenizer, "_knurlogic_preserving", False)
+    if cached is not False and cached[0] is t:
+        return cached[1]
+    new, n = _DROP.subn(lambda m: f"{m[1]}{_SWITCH}({m[2]}){m[3]}", t)
+    out = new if n == 1 else None
+    try:
+        tokenizer._knurlogic_preserving = (t, out)
+    except Exception:
+        pass
+    return out
 
 
 def _template_text(tokenizer) -> str:
