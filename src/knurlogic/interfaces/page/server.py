@@ -444,7 +444,7 @@ def _load_fn(serve_port: int):
             if act == "load":
                 return _then_refresh(tracked_load(artifact=target,
                                 port=int(req.get("port") or serve_port),
-                                tune=req.get("tune") or "balanced",
+                                tune=req.get("tune") or _default_tune(),
                                 sets=req.get("sets") or {},
                                 force=bool(req.get("force"))))
             if act == "unload":
@@ -482,6 +482,13 @@ PEER_LOAD_S = 60.0
 # the launch facts cluster jobs share: tuning/settings owns them
 from knurlogic.tuning.settings import (PATH_KEYS, TUNES,  # noqa: E402
                                        clean_sets, launch_knobs)
+
+
+def _default_tune() -> str:
+    """The tune a launch takes when none is named: this machine's knurlogic
+    strategy (machine/strategy.py), balanced unless one was chosen."""
+    from knurlogic.machine import strategy
+    return strategy.get()
 
 
 def _peer_by_id(node: str):
@@ -665,7 +672,7 @@ def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         return 400, {"error": f"not a launch setting: {', '.join(bad)}"}
-    tune = req.get("tune") if req.get("tune") in TUNES else "balanced"
+    tune = req.get("tune") if req.get("tune") in TUNES else _default_tune()
     from knurlogic.machine.artifact import resolve_identity
     path = (resolve or resolve_identity)(req.get("identity"))
     if not path:
@@ -775,6 +782,95 @@ def peer_settings(method: str, q: dict, body: bytes, call=None) -> tuple:
         return code, json.loads(raw)
     except Exception as e:
         return 502, {"error": f"{type(e).__name__}: {e}"}
+
+
+# --- a MACHINE's own settings, set from any page ---------------------------
+# The allowance and the strategy are each machine's own, kept in its own
+# ~/.config. A page changes a peer's by asking that peer's page (the peer
+# gate, PEER_MACHINE), which applies it to itself -- never by writing
+# anything of the peer's here. The wired limit is not one of them: it is a
+# `sudo sysctl` knurlogic never runs; a peer's command is read through /peek
+# (wired_gib) and shown to run on that machine.
+
+#: the peer-only route a machine setting arrives on
+PEER_MACHINE = "/peer/machine.json"
+MACHINE_MAX = 1 << 10
+
+
+def peer_machine(body: bytes) -> tuple:
+    """POST PEER_MACHINE on the machine being changed (the caller has
+    passed peer_refusal): {"allowance_gib": N} and/or {"strategy": name},
+    applied here exactly as this machine's own page applies them.
+    -> (status, doc): the machine's allowance and strategy after, with
+    what applied, or the first refusal."""
+    from knurlogic.interfaces.page import documents as web
+    try:
+        want = json.loads(body or b"")
+    except ValueError:
+        want = None
+    if not isinstance(want, dict) or not want or set(want) - {
+            "allowance_gib", "strategy"}:
+        return 400, {"error": "send {\"allowance_gib\": N} and/or "
+                              "{\"strategy\": name}"}
+    applied = {}
+    if "allowance_gib" in want:
+        out = web.set_allowance(json.dumps({"gib": want["allowance_gib"]}))
+        if "error" in out:
+            return 400, out
+        applied.update(out["applied"])
+    if "strategy" in want:
+        out = web.set_strategy(json.dumps({"preset": want["strategy"]}))
+        if "error" in out:
+            return 400, out
+        applied.update(out["applied"])
+    return 200, {"allowance": web.allowance_doc(),
+                 "strategy": web.strategy_doc(), "applied": applied,
+                 "machine": identity.identity().get("name") or ""}
+
+
+def peer_pages() -> set:
+    """The pages of peers answering this one, as http://host:port -- the
+    only places a machine setting is sent, never an address from the
+    request."""
+    return {f"http://{p.key}" for p in (PEERS.all() if PEERS else [])
+            if p.state == "answering"}
+
+
+def machine_apply(where: str, body: bytes, post=None) -> tuple:
+    """POST /machine.json?where=<peer page>: a machine setting for THAT
+    machine, sent to its PEER_MACHINE; where '' is this machine, applied
+    here. -> (status, doc) as the machine answered."""
+    base = (where or "").rstrip("/")
+    if len(body or b"") > MACHINE_MAX:
+        return 413, {"error": "a machine setting is small"}
+    if not base:
+        return peer_machine(body)
+    if base not in peer_pages():
+        return 403, {"error": f"not a machine answering this page: {base}"}
+    try:
+        want = json.loads(body or b"")
+    except ValueError:
+        want = None
+    if not isinstance(want, dict):
+        return 400, {"error": "the body must be a JSON object"}
+    post = post or _post_json
+    try:
+        code, raw = post(base + PEER_MACHINE, want, {}, APPLY_S)
+    except Exception as e:
+        return 502, {"error": f"{base} did not answer: "
+                              f"{type(e).__name__}: {e}"}
+    if code == 404:
+        return 502, {"error": f"{base} did not take it: its knurlogic "
+                              f"predates setting it from another page; "
+                              f"update it, or set it on its own page"}
+    try:
+        out = json.loads(raw)
+        if not isinstance(out, dict):
+            raise ValueError
+    except ValueError:
+        return 502, {"error": f"{base} answered {code} without a JSON "
+                              f"object"}
+    return code, out
 
 
 def _peer_where(where: str, host: str) -> str:
@@ -1579,6 +1675,9 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             if u.path.rstrip("/") == PEER_RELAY + PEER_SETTINGS:
                 self._peer_settings("POST", parse_qs(u.query))
                 return
+            if u.path.rstrip("/") == PEER_MACHINE:
+                self._peer_machine()
+                return
             if self._gated():
                 return
             try:
@@ -1596,6 +1695,13 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             if u.path.rstrip("/") in ROUTE_PATHS:
                 route(self, u.path.rstrip("/"),
                       self.rfile.read(n) if n else b"")
+                return
+            if u.path.rstrip("/") == "/machine.json":
+                where = (parse_qs(u.query).get("where") or [""])[0]
+                code, doc = machine_apply(where, self.rfile.read(n)
+                                          if n else b"")
+                self._send(json.dumps(doc).encode(), "application/json",
+                           code)
                 return
             if u.path.rstrip("/") == "/apply":
                 where = (parse_qs(u.query).get("where") or [""])[0]
@@ -1671,6 +1777,31 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 return
             body = self.rfile.read(n) if n else b""
             _send_json(self, *peer_settings(method, q, body))
+
+        def _peer_machine(self):
+            """PEER_MACHINE: the peer gate, a plain Content-Length body,
+            then peer_machine -- this machine changes its own setting."""
+            manual = [p.host for p in (PEERS.all() if PEERS else [])
+                      if "manual" in p.found_by]
+            refused = peer_refusal(
+                self.headers, self.client_address[0],
+                self.connection.getsockname()[0], manual_hosts=manual,
+                what="machine settings")
+            if refused:
+                self.close_connection = True
+                _send_json(self, *refused)
+                return
+            if self._refuse_chunked():
+                return
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if not 0 <= n <= MACHINE_MAX:
+                self.close_connection = True
+                _send_json(self, 413, {"error": "a machine setting is small"})
+                return
+            _send_json(self, *peer_machine(self.rfile.read(n) if n else b""))
 
         def _refuse_chunked(self) -> bool:
             """A peer route's body is a plain Content-Length body -- never
@@ -1765,6 +1896,10 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
         web.allowance_doc())
     routes["POST /allowance.json"] = lambda _q, _n=0, body=None: web._json(
         web.set_allowance(body))
+    # the knurlogic strategy: this machine's default launch preset
+    routes["/strategy.json"] = lambda _q, _n=0: web._json(web.strategy_doc())
+    routes["POST /strategy.json"] = lambda _q, _n=0, body=None: web._json(
+        web.set_strategy(body))
 
     H = make_handler(routes, gate, allow_origins, allow_hosts)
     from knurlogic.cluster import launch as cluster_jobs
