@@ -1385,3 +1385,25 @@ def test_an_unload_after_a_page_restart_still_tells_the_other_pages(
     out = C.stop(p.job, grace=1)
     assert out["told"] == ["B"]
     assert wait(lambda: not alive(p.rank1["pid"]), 30)
+
+
+def test_a_source_tree_reads_its_version_from_pyproject(tmp_path):
+    import knurlogic
+    pkg = tmp_path / "src" / "knurlogic"
+    pkg.mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["x"]\n\n[project]\nname = "knurlogic"\n'
+        'version = "9.8.7"\n\n[tool.x]\nversion = "0"\n')
+    assert knurlogic._source_version(pkg / "__init__.py") == "9.8.7"
+    # an installed package (no src/ parent) defers to its metadata
+    site = tmp_path / "site" / "knurlogic"
+    site.mkdir(parents=True)
+    assert knurlogic._source_version(site / "__init__.py") is None
+
+
+def test_same_build_different_version_string_is_accepted_with_a_note(cache):
+    other = dict(VERSIONS, knurlogic="0.1.0")
+    code, doc = prep(spec(versions=other))
+    assert code == 200 and doc["ok"], doc
+    assert "0.1.0.dev0" in doc["note"]
+    C.PREPARED.clear()

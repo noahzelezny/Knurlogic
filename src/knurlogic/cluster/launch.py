@@ -682,7 +682,12 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     refusals = []
     want = spec.get("versions") or {}
     have = info.get("versions") or {}
-    for k in ("knurlogic", "mlx", "build"):
+    # "same build" is the code hash (it names mlx too): when both sides
+    # send one, the version string is information only -- a source copy
+    # and a wheel of the same commit can disagree on it
+    keys = ("mlx", "build") if want.get("build") and have.get("build") \
+        else ("knurlogic", "mlx", "build")
+    for k in keys:
         if want.get(k) != have.get(k):
             what = "build" if k == "build" else k
             refusals.append(f"{what} {have.get(k) or 'missing'} here, "
@@ -787,7 +792,13 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         for j in [j for j, p in PREPARED.items() if now - p["t"] > PREPARED_S]:
             PREPARED.pop(j)
         PREPARED[spec["job"]] = {"spec": dict(spec), "path": path, "t": now}
-    return 200, {"ok": True, "machine": me, "rank": rank}
+    doc = {"ok": True, "machine": me, "rank": rank}
+    if want.get("knurlogic") != have.get("knurlogic"):
+        doc["note"] = (f"same build, but knurlogic says "
+                       f"{have.get('knurlogic') or 'missing'} here and "
+                       f"{want.get('knurlogic') or 'missing'} on the "
+                       f"coordinator")
+    return 200, doc
 
 
 def _local_info() -> dict:
