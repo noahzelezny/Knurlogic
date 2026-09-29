@@ -259,6 +259,58 @@ PRESETS = ("balanced", "fast", "stable", "lean", "safe")
 PRESET_DEFAULT = "balanced"
 
 
+#: Each preset in plain words, for the Knurlogic tab: what it trades, what
+#: it changes, and who should pick it. Order is the order shown.
+PRESET_GUIDE = {
+    "balanced": {
+        "title": "Balanced",
+        "trades": "Nothing in particular -- the measured defaults.",
+        "changes": "Each family's measured prompt chunk (512 tokens), the "
+                   "default reclaimable cache, MTP as the family ships it.",
+        "who": "Most people. Start here and move only for a reason.",
+    },
+    "fast": {
+        "title": "Fast",
+        "trades": "Memory headroom for speed: faster prompts and replies, "
+                  "less room left for long contexts and parallel agents.",
+        "changes": "The family's wider measured prompt chunk where the "
+                   "machine has room, a larger reclaimable cache (8 GiB), "
+                   "MTP with its dynamic controller, bf16 KV cache.",
+        "who": "One person, one conversation at a time, on a machine with "
+               "memory to spare.",
+    },
+    "stable": {
+        "title": "Stable",
+        "trades": "Some speed for repeatability: the same answer and "
+                  "steady timing, run after run and across machines.",
+        "changes": "512-token prompt chunks, identical rounding across "
+                   "chips, MTP drafting every step (no controller), bf16 "
+                   "KV, a smaller cache and a tighter memory transient.",
+        "who": "Clusters of mixed Macs, benchmarks, and anyone debugging "
+               "or comparing outputs.",
+    },
+    "lean": {
+        "title": "Lean",
+        "trades": "Some speed and a little precision for capacity: the "
+                  "most context and the most agents at once.",
+        "changes": "8-bit KV cache where the family takes it (bf16 where "
+                   "not), 512-token prompt chunks, MTP off so its memory "
+                   "is free.",
+        "who": "Long documents, many parallel agents, or a big model on a "
+               "machine it only just fits.",
+    },
+    "safe": {
+        "title": "Safe",
+        "trades": "Speed for the lowest peak memory: the least likely to "
+                  "run the machine out of memory.",
+        "changes": "Narrow prompt chunks, a 1 GiB reclaimable cache, and a "
+                   "memory transient bounded tighter than needed.",
+        "who": "A machine that also does other work, or after a load has "
+               "run out of memory.",
+    },
+}
+
+
 def preset_of(v, default: str = PRESET_DEFAULT) -> str:
     s = str(v or "").strip().lower()
     if not s:
