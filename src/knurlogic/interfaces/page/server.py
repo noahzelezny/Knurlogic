@@ -1632,6 +1632,9 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            # the page's files and documents are always asked for again:
+            # a restart shows new code, never a stale module
+            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(body)
 
