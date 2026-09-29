@@ -6,7 +6,7 @@ capability on one side only is a bug.
 
   mcp.py       the agent interface: stdio JSON-RPC, stdlib only
   http/        the chat wire: OpenAI and Anthropic Messages on one server
-               (server.py, openai.py, messages.py, scout.py)
+               (server.py, openai.py, messages.py, residency.py)
   page/        the page: `knurlogic ui` (server.py), the routes it and
                /status.json are built on (documents.py), assets/index.html
   serve.py     `knurlogic serve`: an OpenAI endpoint, settings resolved first

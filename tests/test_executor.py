@@ -257,7 +257,7 @@ def test_removing_a_row_frees_its_memory_now_not_at_the_next_step():
     """Filtering the batch is lazy in MLX: without an eval the old
     full-width arrays stay alive, and the scheduler's memory guard --
     stopping one row to get back under the limit -- saw no drop and
-    stopped every row (Fable 5.1)."""
+    stopped every row."""
     import gc
     import mlx.core as mx
     from knurlogic.engine.runtime.executor import Admission

@@ -19,7 +19,7 @@ band instead:
 With the jaccl self-heal fork (machine/deps.py), a wedged RDMA collective
 also throws inside the rank -- but only once JACCL_COLLECTIVE_TIMEOUT_MS is
 set, which happens AFTER the load (0 while loading: a cold 400 GB read is
-not a hang). Noah's pattern, fork d2e82f92 / 43dc7f56.
+not a hang). The pattern follows the project's exo fork, commits d2e82f92 / 43dc7f56.
 """
 from __future__ import annotations
 

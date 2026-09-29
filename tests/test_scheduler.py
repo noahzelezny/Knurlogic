@@ -508,7 +508,7 @@ def test_397b_on_the_m4_admits_the_prompts_it_refused():
 
 
 def test_what_was_measured_goes_with_the_model():
-    """A 35B's slope must not cost a 397B's prompt (Fable 5.1)."""
+    """A 35B's slope must not cost a 397B's prompt."""
     from knurlogic.engine.runtime.scheduler import Command, Scheduler
 
     class H:

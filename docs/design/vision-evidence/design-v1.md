@@ -290,7 +290,7 @@ P0 ──┬─> P1 (Qwen) ─┐
 3. `Qwen3.6-35B-A3B-VQ-3.4bpw` (14G; MoE)
 4. `gemma-4-26b-a4b-it-VQ-6.2bpw` (19G; 356-tensor sidecar)
 5. `Qwen3.8-Flash-Next-VQ-2.1bpw` (47G): only if `ready()` and fit ≥ 55G
-6. GLM-5.3 (108G) and Qwen3.5-397B (112G, HF-key sidecar): **tower-only** local check (load only the vision keys via safetensors filter, compare to the mlx-vlm tower, one tower at a time). The full gate waits for cluster serving and needs Noah's go-ahead.
+6. GLM-5.3 (108G) and Qwen3.5-397B (112G, HF-key sidecar): **tower-only** local check (load only the vision keys via safetensors filter, compare to the mlx-vlm tower, one tower at a time). The full gate waits for cluster serving and needs the maintainer's go-ahead.
 
 Per-artifact pass conditions:
 - vision tensor count

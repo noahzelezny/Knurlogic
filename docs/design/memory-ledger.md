@@ -18,7 +18,7 @@ prefill is one step) and only reports a mistake after it is made. Every live
 bug in memory-pacing phase 1 came from it; each fix added a heuristic
 (learned prices, x1.3, growth ratio, min-of-readings, reservations).
 
-Fable also found what the "unexplained" growth was: `BatchKVCache` is one
+The review also found what the "unexplained" growth was: `BatchKVCache` is one
 dense `[B, H, Lmax, D]` tensor per layer. A 1k row beside a 130k row costs
 130k of full-attention KV, and growth by `concatenate` in 256-token steps
 briefly holds old + new -- a transient the size of the whole batch KV.

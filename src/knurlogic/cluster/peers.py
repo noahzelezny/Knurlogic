@@ -392,7 +392,7 @@ class Peers:
                 self._peers.pop(drop.key, None)
                 by_id[p.id] = keep
             # an address that does not answer, and that a known machine
-            # reports as its own (the M4's other cable, learned by Bonjour
+            # reports as its own (the M4 Max's other cable, learned by Bonjour
             # or an introduction), is that machine -- never a second one
             for k, p in list(self._peers.items()):
                 if p.state == "answering" and p.id:
