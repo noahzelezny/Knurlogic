@@ -133,7 +133,7 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 
 #: Knobs `engine.serve` turns into argv or an mlx call, so they are real
 #: whether or not an artifact's bundled runtime reads them.
-ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp", "mtp_dynamic", "kv_bits",
+ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp", "mtp_dynamic", "kv_bits", "kv_kernel",
                    "cross_chip", "preset")
 
 
@@ -717,6 +717,7 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
         emit(r, artifact, "mtp_dynamic", launch.get("mtp_dynamic", "on"))
     bits, why = S.kv_quant_for(artifact.model_type)
     emit(r, artifact, "kv_bits", launch.get("kv_bits", "bf16"))
+    emit(r, artifact, "kv_kernel", launch.get("kv_kernel", "on"))
     emit(r, artifact, "cross_chip", launch.get("cross_chip", "off"))
     emit(r, artifact, "preset", tune)
     r.ranges["KNURLOGIC_KV_BITS"] = ["bf16"] + [str(b) for b in bits]
