@@ -163,10 +163,68 @@ def _rope_partial(x: mx.array, cos: mx.array, sin: mx.array) -> mx.array:
     return mx.concatenate([xr, xp], axis=-1) if xp.shape[-1] else xr
 
 
+def yarn_inv_freq(dim: int, base: float, scaling: dict):
+    """(inv_freq, attention_factor) of YaRN (arXiv 2309.00071), as
+    transformers' `_compute_yarn_parameters` (truncate=True) and mlx-lm's
+    YarnRoPE compute them: frequencies interpolated by `factor` below the
+    beta_slow..beta_fast ramp over the ORIGINAL window, kept above it, and
+    cos/sin scaled by 0.1 ln(factor) + 1 (both q and k: logits by its
+    square). knurlogic: this file may not import mlx-lm's rope_utils
+    (engine/arch.py gives it no such dependency), so it is here."""
+    factor = float(scaling["factor"])
+    orig = float(scaling["original_max_position_embeddings"])
+    beta_fast = float(scaling.get("beta_fast") or 32)
+    beta_slow = float(scaling.get("beta_slow") or 1)
+
+    def corr(rot):
+        return dim * math.log(orig / (rot * 2 * math.pi)) / (2 * math.log(base))
+
+    low = max(math.floor(corr(beta_fast)), 0)
+    high = min(math.ceil(corr(beta_slow)), dim - 1)
+    if low == high:
+        high += 0.001
+    ramp = mx.clip((mx.arange(dim // 2, dtype=mx.float32) - low)
+                   / (high - low), 0, 1)
+    extra = base ** (-mx.arange(0, dim, 2, dtype=mx.float32) / dim)
+    inv_freq = extra / factor * ramp + extra * (1 - ramp)
+
+    def get_mscale(scale, m=1.0):
+        return 1.0 if scale <= 1 else 0.1 * m * math.log(scale) + 1.0
+    af = scaling.get("attention_factor")
+    if af is None:
+        ms, msa = scaling.get("mscale"), scaling.get("mscale_all_dim")
+        af = (get_mscale(factor, ms) / get_mscale(factor, msa)
+              if ms and msa else get_mscale(factor))
+    return inv_freq, float(af)
+
+
+def rope_scaling_of(rope_parameters) -> Optional[dict]:
+    """The YaRN parameters in a config's rope_parameters, or None for the
+    plain rope every released config ships (KNURLOGIC_LONG_CONTEXT=yarn
+    adds them at load, tuning/settings.long_context_config)."""
+    rp = rope_parameters or {}
+    kind = str(rp.get("rope_type") or rp.get("type") or "default").lower()
+    if kind == "default":
+        return None
+    if kind != "yarn":
+        raise ValueError(f"qwen4_exp: rope type {kind!r} is not supported "
+                         f"(default or yarn)")
+    return rp
+
+
 class RotaryEmbedding:
-    def __init__(self, dim: int, base: float, mrope_section=(11, 11, 10)):
+    def __init__(self, dim: int, base: float, mrope_section=(11, 11, 10),
+                 scaling: Optional[dict] = None):
         self.dim = dim
-        self.inv_freq = base ** (-mx.arange(0, dim, 2, dtype=mx.float32) / dim)
+        self.scaling = scaling
+        self.mrope_section = tuple(mrope_section)
+        self.attention_factor = 1.0
+        if scaling:
+            self.inv_freq, self.attention_factor = yarn_inv_freq(
+                dim, base, scaling)
+        else:
+            self.inv_freq = base ** (
+                -mx.arange(0, dim, 2, dtype=mx.float32) / dim)
         # knurlogic vision P1: which of (t, h, w) feeds each frequency under
         # MRoPE -- the interleave of mlx-vlm 0.6.17 rope_utils.py:512-517
         # (MIT), the same selector as qwen3_5.mrope_selector (this file may
@@ -187,6 +245,9 @@ class RotaryEmbedding:
         else:
             freqs = positions.astype(mx.float32)[..., None] * self.inv_freq
         emb = mx.concatenate([freqs, freqs], axis=-1)
+        if self.attention_factor != 1.0:
+            return (mx.cos(emb) * self.attention_factor,
+                    mx.sin(emb) * self.attention_factor)
         return mx.cos(emb), mx.sin(emb)
 
 
@@ -885,7 +946,8 @@ class Qwen4ExpModel(nn.Module):
         self.hyper_connection_mixer = GatedResidual(args, use_combine=False)
         rotary_dim = int(args.head_dim * args.partial_rotary_factor)
         section = (args.rope_parameters or {}).get("mrope_section", [11, 11, 10])
-        self.rope = RotaryEmbedding(rotary_dim, args.rope_theta, section)
+        self.rope = RotaryEmbedding(rotary_dim, args.rope_theta, section,
+                                    rope_scaling_of(args.rope_parameters))
         self.ple_layers = [
             i for i in range(args.num_hidden_layers) if (i + 1) in args.ple_layer_ids
         ]

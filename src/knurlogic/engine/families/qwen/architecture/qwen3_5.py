@@ -118,12 +118,19 @@ def mrope_selector(mrope_section, freq_dim: int) -> list:
 
 
 def apply_mrope(x: mx.array, position_ids: mx.array, dims: int, base: float,
-                mrope_section) -> mx.array:
+                mrope_section, rope=None) -> mx.array:
     """x [B, H, L, D], position_ids [3, B, L]: rotate x[..., :dims], each
     frequency's angle from its section's axis. float32 angles and rotation
-    (as mlx-vlm's compute_dtype), cast back to x's dtype."""
+    (as mlx-vlm's compute_dtype), cast back to x's dtype. `rope`: the
+    layer's own; a YarnRoPE (KNURLOGIC_LONG_CONTEXT=yarn) lends its
+    frequencies and mscale so an image chunk ropes as its text does."""
     half = dims // 2
-    inv_freq = base ** (-mx.arange(0, dims, 2, dtype=mx.float32) / dims)
+    freqs = getattr(rope, "_freqs", None)
+    inv_freq = (1.0 / freqs if freqs is not None else
+                base ** (-mx.arange(0, dims, 2, dtype=mx.float32) / dims))
+    mscale = float(getattr(rope, "mscale", 1.0) or 1.0)
+    if mscale != 1.0:
+        x = mx.concatenate([x[..., :dims] * mscale, x[..., dims:]], axis=-1)
     sel = mx.array(mrope_selector(mrope_section, half), dtype=mx.int32)
     pos = mx.take(position_ids, sel, axis=0)                  # [half, B, L]
     angle = pos.transpose(1, 2, 0).astype(mx.float32) * inv_freq
@@ -178,9 +185,10 @@ class Attention(Qwen3NextAttention):
 
         if position_ids is not None:
             queries = apply_mrope(queries, position_ids, self.rotary_dims,
-                                  self.rope_base, self.mrope_section)
+                                  self.rope_base, self.mrope_section,
+                                  self.rope)
             keys = apply_mrope(keys, position_ids, self.rotary_dims,
-                               self.rope_base, self.mrope_section)
+                               self.rope_base, self.mrope_section, self.rope)
         else:
             shifted = (cache.offset if cache is not None else 0) + rope_delta
             queries = self.rope(queries, offset=shifted)

@@ -134,7 +134,7 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 #: Knobs `engine.serve` turns into argv or an mlx call, so they are real
 #: whether or not an artifact's bundled runtime reads them.
 ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp", "mtp_dynamic", "kv_bits", "kv_kernel",
-                   "cross_chip", "preset")
+                   "cross_chip", "long_context", "preset")
 
 
 def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
@@ -213,7 +213,8 @@ def decode_chunk_for(headroom_bytes: int, known: bool = True,
 
 def resolve(artifact: Artifact, budget, profile: str | None = None,
             tune: str = "balanced", store_bytes: int | None = None,
-            holds_bytes: int | None = None, kv_bits=None):
+            holds_bytes: int | None = None, kv_bits=None,
+            long_context=None):
     """Resolve every knob for this artifact against a budget.
 
     `budget` is either a byte count -- one box, and the return is a
@@ -236,6 +237,10 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
 
     `kv_bits`: the KV precision the model will launch with (a launch
     setting), for what its KV is counted at; None = bf16.
+
+    `long_context`: KNURLOGIC_LONG_CONTEXT ('off' | 'yarn'), which moves
+    the context cap to the YaRN window and is checked against the room the
+    KV of that context needs (`long_context_room`).
     """
     if profile is not None and profile not in S.RUNTIME_PROFILES:
         raise ValueError(f"profile must be one of {sorted(S.RUNTIME_PROFILES)}")
@@ -247,7 +252,7 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
             else int(holds_bytes)
         return _resolve_one(artifact, int(budget), holds,
                             profile, tune, store_bytes=store_bytes,
-                            kv_bits=kv_bits)
+                            kv_bits=kv_bits, long_context=long_context)
     return resolve_cluster(artifact, budget, profile, tune,
                            store_bytes=store_bytes)
 
@@ -535,7 +540,8 @@ def vision_budget(artifact: Artifact, store_bytes: int | None = None,
 def _resolve_one(artifact: Artifact, working_set_bytes: int,
                  holds_bytes: int, profile: str | None,
                  tune: str = "balanced", store_bytes: int | None = None,
-                 vision: bool = True, kv_bits=None) -> Resolution:
+                 vision: bool = True, kv_bits=None,
+                 long_context=None) -> Resolution:
     """One box. `holds_bytes` is what this box holds of the artifact, which
     is the whole thing unless something sharded it. A vision rung also
     holds its tower, its image store and its image KV (`vision_budget`),
@@ -628,7 +634,9 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
         else:
             prefill = asked
     emit(r, artifact, "prefill_chunk", prefill)
-    window, _ = S.model_window(artifact.raw_config or {})
+    window, _ = S.model_window(
+        _long_context_cfg(r, artifact, long_context, working_set_bytes,
+                          holds_bytes, kv_bits))
     if window:
         # the model's own window: the cap a person lowers, never raises past
         # (settings.check_knob refuses more), so the control stops there
@@ -750,6 +758,59 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
         r.notes.append(f"KV cache counted at {kv_bits} bits "
                        f"({S.kv_bytes_per_element(kv_bits):.3g} bytes per "
                        f"element against bf16's 2): {why}")
+
+
+def _long_context_cfg(r: Resolution, artifact: Artifact, long_context,
+                      working_set_bytes: int, holds_bytes: int,
+                      kv_bits) -> dict:
+    """The config the window is read from under KNURLOGIC_LONG_CONTEXT,
+    with the knob emitted (off / yarn where the family's model card
+    documents YaRN) and the KV room for the YaRN window warned about."""
+    cfg = artifact.raw_config or {}
+    mt = artifact.model_type
+    if S.long_context_family(mt) is None:
+        return cfg
+    mode = S.long_context_of(long_context)
+    emit(r, artifact, "long_context", mode)
+    r.ranges["KNURLOGIC_LONG_CONTEXT"] = list(S.LONG_CONTEXT_VALUES)
+    if mode == "off":
+        return cfg
+    cfg = S.with_long_context(cfg, mode)
+    window, why = S.model_window(cfg)
+    r.notes.append(f"long context (YaRN): the cap is {window:,} tokens "
+                   f"({why}); static YaRN may cost a little quality on "
+                   f"short prompts (Qwen's model card)")
+    if working_set_bytes > 0:
+        short = long_context_room(artifact, working_set_bytes, holds_bytes,
+                                  window, kv_bits)
+        if short:
+            r.warnings.append(short)
+    return cfg
+
+
+def long_context_room(artifact: Artifact, working_set_bytes: int,
+                      holds_bytes: int, context: int, kv_bits=None):
+    """None when this box can hold the KV of `context` tokens beside what
+    it holds of the model and the step margin, else the sentence saying
+    how short it is and what would fit."""
+    tc = (artifact.raw_config or {}).get("text_config") \
+        or artifact.raw_config or {}
+    per, why = kv_bytes_per_token(tc, kv_bits)
+    if not per or not context:
+        return None
+    need = per * int(context)
+    left = max(int(working_set_bytes) - int(holds_bytes)
+               - step_margin(working_set_bytes), 0)
+    if need <= left:
+        return None
+    fits = left // per
+    half = ("" if kv_bits is not None else
+            f"; 8-bit KV (KNURLOGIC_KV_BITS=8) needs "
+            f"{kv_bytes_per_token(tc, 8)[0] * int(context) / GIB:.1f} GiB")
+    return (f"{int(context):,} tokens of context need {need / GIB:.1f} GiB "
+            f"of KV ({per:,} bytes per token: {why}) and this box leaves "
+            f"{left / GIB:.1f} GiB after the model and the step margin -- "
+            f"about {fits:,} tokens. Lower KNURLOGIC_CONTEXT_LENGTH{half}")
 
 
 def kv_refusal(artifact: Artifact, kv_bits) -> str | None:
