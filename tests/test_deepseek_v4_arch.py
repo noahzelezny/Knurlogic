@@ -311,3 +311,11 @@ def test_a_prefill_chooses_what_decoding_the_same_tokens_chooses():
     halves = model(mx.array([p[9:]]), cache=c)[0, -1]
     assert mx.abs(whole - one).max().item() < 1e-4
     assert mx.abs(whole - halves).max().item() < 1e-4
+
+
+def test_ragged_prev_is_not_compiled():
+    """Its `lens` is a Python list: compiled, it traced one graph per emit
+    pattern per layer (knurlogic edit 11)."""
+    src = (ARCH / "deepseek_v4.py").read_text()
+    i = src.index("def _ragged_prev(")
+    assert "@mx.compile" not in src[max(0, i - 40):i]
