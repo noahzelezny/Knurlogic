@@ -1,15 +1,16 @@
 # engine/vq provenance
 
-Vendored from vqlab at commit **d271035** (42df84f plus five comment-only
-lines; the last functional change to `vq_switch.py` is `ef4e8dc`,
-"VQ_DENSE_SS on by default").
+Vendored from vqlab at commit **45782ba**: d271035 plus the cache knob
+renamed VQ_CACHE_LIMIT_GB (VQLAB_CACHE_LIMIT_GB still read as a fallback for
+one release). d271035 is 42df84f plus five comment-only lines; the last
+change to the kernels is `ef4e8dc`, "VQ_DENSE_SS on by default".
 
 | file | source | lines | sha256 |
 |---|---|---|---|
-| `vq_switch.py` | `src/vqlab/vq_switch.py` | 4453 | `31e56dfb0e1c2138286a6f9cd84e90f0b6cecb0611f9cf4a3bb08fc6ddd38aeb` |
+| `vq_switch.py` | `src/vqlab/vq_switch.py` | 4457 | `c495fe903bb838a8bd2682e799bc5562c73b494db8137adb16f1475de60fbcb5` |
 | `vq_dense.py` | `src/vqlab/vq_dense.py` | 513 | `5066de6e71ccbacaed7b29cea031ea2977369043fcc05d7888b7eddc761b8995` |
 
-Both are **verbatim** (`git show d271035:<path>`); no line is changed. They
+Both are **verbatim** (`git show 45782ba:<path>`); no line is changed. They
 are not imported as modules: `runtime.py` executes the two texts, joined, into
 one fresh namespace per knob set -- the way a published `model.py` carries
 them -- so `vq_dense._resolve_kernel` finds vq_switch's kernels in its own

@@ -228,8 +228,8 @@ TUNE_PROFILES = {
     # prefill chunk, cache limit GiB, and whether to bound the transient
     # harder than headroom requires
     "safe": {
-        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
-        "VQLAB_CACHE_LIMIT_GB": 1.0,
+        "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "VQ_CACHE_LIMIT_GB": 1.0,
         "decode_chunk_scale": 0.5,   # bound the transient below what fits
         "why": "lowest peak memory: narrow prompt chunks, a small reclaimable "
                "cache, and a transient bounded tighter than headroom requires",
@@ -239,7 +239,7 @@ TUNE_PROFILES = {
         "why": "the measured defaults",
     },
     "fast": {
-        "VQLAB_CACHE_LIMIT_GB": 8.0,
+        "VQ_CACHE_LIMIT_GB": 8.0,
         "decode_chunk_scale": 1.0,   # capped: smaller is already faster
         "launch": {"mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16",
                    "cross_chip": "off"},
@@ -249,8 +249,8 @@ TUNE_PROFILES = {
                "is faster there as well as smaller in memory",
     },
     "stable": {
-        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
-        "VQLAB_CACHE_LIMIT_GB": 2.0,
+        "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "VQ_CACHE_LIMIT_GB": 2.0,
         "decode_chunk_scale": 0.5,   # more room left for a step's spike
         "launch": {"cross_chip": "on", "mtp": "on", "mtp_dynamic": "off",
                    "kv_bits": "bf16"},
@@ -261,7 +261,7 @@ TUNE_PROFILES = {
                "transient bounded tighter than headroom requires",
     },
     "lean": {
-        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
         "launch": {"kv_bits": "8", "mtp": "off"},
         "why": "most context and most agents: 8-bit KV where the family "
                "takes it (bf16 where it does not, and said), 512-token "
@@ -479,6 +479,12 @@ KNOB_DOC = {
         "memory headroom; stable buys repeatability with some speed; lean "
         "buys context and agents with some speed and precision (8-bit KV). "
         "Any setting changed beside it beats the preset's value."),
+    "VQ_CACHE_LIMIT_GB": (
+        "how much freed-buffer cache the runtime may hold",
+        "larger keeps more freed buffers for reuse, but they stay resident: "
+        "memory a long context or another agent cannot use. Smaller frees "
+        "it, with no measured speed cost at 26k-token prefill -- the "
+        "biggest single win in the memory playbook."),
     "VQLAB_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
         "larger keeps more freed buffers for reuse, but they stay resident: "
@@ -519,20 +525,15 @@ KNOB_DOC = {
 
 
 # --- the names are the ARTIFACT'S, not ours --------------------------------
-# `VQLAB_CACHE_LIMIT_GB` is a knurlogic-shaped name for something read by 24
-# of the 37 bundled runtimes on this machine. Those files are published. A
-# tidy-up rename in the resolver would not tidy anything -- it would emit a
-# name nobody reads and silently stop bounding the cache on every artifact
-# already shipped, which is precisely the failure mode this package exists to
-# end, dressed as housekeeping.
-#
-# So a knob has a LOGICAL name here and a list of env names, preferred first.
-# The resolver emits whichever one the target artifact actually reads. A new
-# rung can bundle a runtime reading the new name and every published rung
-# keeps the one it shipped with -- the same per-artifact boundary `model_file`
-# already establishes, used for the interface rather than the engine.
+# A knob has a LOGICAL name here and a list of env names, preferred first.
+# The resolver emits whichever one the target artifact's bundled runtime
+# actually reads: published runtimes read `VQLAB_CACHE_LIMIT_GB` (the VQ
+# runtime's old name, now `VQ_CACHE_LIMIT_GB`), and renaming it for them
+# would silently stop bounding their cache. Every other case gets the first
+# name. The old names are still accepted from a saved setting or `--set`.
 KNOB_ALIASES = {
-    "cache_limit_gb": ("KNURLOGIC_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB"),
+    "cache_limit_gb": ("VQ_CACHE_LIMIT_GB", "KNURLOGIC_CACHE_LIMIT_GB",
+                       "VQLAB_CACHE_LIMIT_GB"),
     "prefill_chunk": ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"),
     "decode_chunk": ("VQ_DECODE_CHUNK",),
     "prompt_concurrency": ("KNURLOGIC_PROMPT_CONCURRENCY",),
@@ -647,25 +648,14 @@ def engine_settings(env: dict) -> dict:
                 break
     return out
 
-#: Logical knobs whose LEGACY name is read by published bundled runtimes
-#: (VQLAB_CACHE_LIMIT_GB: 24 of the 37). The prompt chunk is not one of
-#: them: no bundled runtime reads VQLAB_PREFILL_CHUNK -- only the engine
-#: does (engine_settings, under either name) -- so it is emitted under
-#: knurlogic's own name, and the legacy one is only still ACCEPTED (a saved
-#: launch setting, a --set, a ring spec may carry it).
-LEGACY_EMITTED = ("cache_limit_gb",)
-
-
 def canonical_sets(sets: dict) -> dict:
-    """Explicit settings with an accepted legacy name moved to the name
-    the resolver emits (VQLAB_PREFILL_CHUNK -> KNURLOGIC_PREFILL_CHUNK),
-    so an explicit value cannot lose to the resolver's under the other
-    alias (engine_settings takes the first alias present). Where both are
-    given, knurlogic's own name wins."""
+    """Explicit settings with an accepted old name moved to the name the
+    resolver emits first (VQLAB_PREFILL_CHUNK -> KNURLOGIC_PREFILL_CHUNK,
+    VQLAB_CACHE_LIMIT_GB -> VQ_CACHE_LIMIT_GB), so an explicit value cannot
+    lose to the resolver's under another alias. Where both are given, the
+    current name wins."""
     out = dict(sets or {})
     for logical, names in KNOB_ALIASES.items():
-        if logical in LEGACY_EMITTED:
-            continue
         for old in names[1:]:
             if old in out:
                 v = out.pop(old)
@@ -673,13 +663,22 @@ def canonical_sets(sets: dict) -> dict:
     return out
 
 
-#: When no bundled runtime can be asked, emit this one. For a knob in
-#: LEGACY_EMITTED, the LAST alias: the legacy name is the one with artifacts
-#: behind it, and a guess should fail towards what exists rather than
-#: towards what is planned. Otherwise knurlogic's own (first) name.
+def legacy_mirror(env: dict, forced: dict) -> dict:
+    """An explicit value set under a knob's current name, copied to the old
+    name the resolver emitted for this artifact's bundled runtime (which
+    reads only that one). Returns the extra {name: value} to set."""
+    out = {}
+    for logical, names in KNOB_ALIASES.items():
+        if names[0] in forced:
+            for old in names[1:]:
+                if old in env and old not in forced:
+                    out[old] = forced[names[0]]
+    return out
+
+
+#: The env name for a logical knob when no bundled runtime can be asked.
 def default_alias(logical: str) -> str:
-    names = KNOB_ALIASES[logical]
-    return names[-1] if logical in LEGACY_EMITTED else names[0]
+    return KNOB_ALIASES[logical][0]
 
 
 # --- who is a knob FOR ------------------------------------------------------
@@ -699,7 +698,8 @@ def default_alias(logical: str) -> str:
 #             NOT hidden: listed if someone digs, labelled as the runtime's
 #             own business. Inventing defaults for unmeasured knobs is how
 #             the frozen 2048*4096*2 constant happened.
-KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "KNURLOGIC_CACHE_LIMIT_GB",
+KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB",
+                   "KNURLOGIC_CACHE_LIMIT_GB",
                    "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_PREFILL_CHUNK",
                    "VQLAB_PREFILL_CHUNK",
                    "KNURLOGIC_CONTEXT_LENGTH") + MODEL_KNOBS
@@ -743,6 +743,8 @@ KNOB_RANGE = {
     # documents YaRN
     "KNURLOGIC_LONG_CONTEXT": (["off", "yarn"], ""),
     "KNURLOGIC_PRESET": (list(PRESETS), ""),
+    "VQ_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
+                          "GiB"),
     "VQLAB_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
                              "GiB"),
     "KNURLOGIC_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
@@ -885,6 +887,7 @@ KNOB_BOUNDS = {
     "VQLAB_PREFILL_CHUNK": (int, 16, 4096, "tokens"),
     "KNURLOGIC_CONTEXT_LENGTH": (int, 256, None, "tokens"),
     "VQ_DECODE_CHUNK": (int, DECODE_CHUNK_MIN, DECODE_CHUNK_DEFAULT, ""),
+    "VQ_CACHE_LIMIT_GB": (float, 0.0, CACHE_LIMIT_GB_MAX, "GiB"),
     "VQLAB_CACHE_LIMIT_GB": (float, 0.0, CACHE_LIMIT_GB_MAX, "GiB"),
     "KNURLOGIC_CACHE_LIMIT_GB": (float, 0.0, CACHE_LIMIT_GB_MAX, "GiB"),
 }

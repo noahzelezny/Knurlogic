@@ -280,6 +280,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # and you may not" the wrong default for the one place it is possible.
     # Reported as overridden rather than applied quietly.
     forced = dict(overrides or {})
+    # an explicit value under a knob's current name also reaches the old
+    # name this artifact's bundled runtime reads
+    forced.update(S.legacy_mirror(r.env, forced))
     for line in ignored_env(r.env, forced, os.environ):
         print(line)
     for k, v in sorted(r.env.items()):

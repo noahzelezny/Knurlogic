@@ -638,7 +638,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             f"headroom): bounds the dense-expert transient, which is what "
             f"caps context length on a full box")
 
-    cache = float(t.get("VQLAB_CACHE_LIMIT_GB", S.CACHE_LIMIT_GB_DEFAULT))
+    cache = float(t.get("VQ_CACHE_LIMIT_GB", S.CACHE_LIMIT_GB_DEFAULT))
     if cache > S.CACHE_LIMIT_GB_MAX:
         r.notes.append(f"tune={tune} capped: cache limit {cache} -> "
                        f"{S.CACHE_LIMIT_GB_MAX} GiB, above which nothing has "
@@ -655,7 +655,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
                 f"{headroom / GIB:.1f} GiB of headroom to hold it in")
             cache = room
     family, family_why = S.prefill_chunk_for(artifact.model_type)
-    asked = t.get("VQLAB_PREFILL_CHUNK")
+    asked = t.get("KNURLOGIC_PREFILL_CHUNK")
     if asked is not None:
         # safe / stable / lean: narrow whatever the room
         prefill = asked
@@ -715,9 +715,9 @@ def _preset_record(r: Resolution, tune: str, launch: dict) -> None:
     prompt chunk / cache limit its profile names."""
     t = S.TUNE_PROFILES[tune]
     logicals = set(launch)
-    if "VQLAB_PREFILL_CHUNK" in t:
+    if "KNURLOGIC_PREFILL_CHUNK" in t:
         logicals.add("prefill_chunk")
-    if "VQLAB_CACHE_LIMIT_GB" in t:
+    if "VQ_CACHE_LIMIT_GB" in t:
         logicals.add("cache_limit_gb")
     names = {n for lg in logicals for n in S.KNOB_ALIASES.get(lg, (lg,))}
     r.preset = {"name": tune, "why": t.get("why", ""),

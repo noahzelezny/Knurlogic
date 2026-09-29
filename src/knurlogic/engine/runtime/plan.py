@@ -40,7 +40,8 @@ _FIELDS = {
 }
 #: the live knobs (engine/serve/load.LIVE_KNOBS) that act on a rank's own
 #: engine, so a change on rank 0 must reach every rank
-SETS = ("VQ_DECODE_CHUNK", "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_CACHE_LIMIT_GB")
+SETS = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB",
+        "KNURLOGIC_CACHE_LIMIT_GB")
 EVENTS = ("checkpoint", "finished")
 
 

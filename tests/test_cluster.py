@@ -158,7 +158,7 @@ def test_settings_json_says_running_would_be_and_how_to_get_it(tmp_path):
     fast = doc({"tune": ["fast"]})
     changed = {k["name"]: (k["running"], k["would_be"])
                for k in fast["knobs"] if k["changed"]}
-    assert "VQLAB_CACHE_LIMIT_GB" in changed
+    assert "VQ_CACHE_LIMIT_GB" in changed
     assert fast["exports"].startswith("export ")
 
     # Every knob shown carries the sentence that explains it. A settings UI
