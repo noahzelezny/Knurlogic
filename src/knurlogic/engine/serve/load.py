@@ -122,6 +122,7 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
 
     from mlx_lm.utils import load as _load, load_tokenizer
 
+    from knurlogic.engine import templates
     from knurlogic.engine.vq import runtime
 
     from . import state
@@ -129,6 +130,7 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
     if p.is_dir() and runtime.serves(p):
         model, config = runtime.load_model(p, lazy=lazy)
         tok = load_tokenizer(p, None, eos_token_ids=config.get("eos_token_id"))
+        templates.install(tok)
         state.SERVED["runtime"] = "knurlogic"
         return model, tok
     state.SERVED["runtime"] = "bundled"
@@ -136,7 +138,9 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
     if executes_artifact_code and \
             "trust_remote_code" in inspect.signature(_load).parameters:
         kw["trust_remote_code"] = True
-    return _load(path, **kw)
+    model, tok = _load(path, **kw)
+    templates.install(tok)
+    return model, tok
 
 
 def set_cache_limit(gib: float) -> str:
@@ -286,6 +290,12 @@ def tool_support(chat_template: str) -> dict:
         out["parser"] = _infer_tool_parser(chat_template)
     except Exception:
         out["parser"] = None
+    from knurlogic.engine import templates
+    fam = templates.served_family(chat_template)
+    if fam in templates.PARSERS:
+        # knurlogic's own template and parser (engine/templates)
+        out["parser"] = f"{fam} (knurlogic)"
+        out["mentions_tools"] = True
     return out
 
 
