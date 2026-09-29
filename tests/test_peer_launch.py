@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from knurlogic.interfaces.page import server as ui
+from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import artifact
 
 
@@ -30,7 +30,7 @@ def hdr(**kw):
 
 def call(body, headers=None, gate=Open(), **kw):
     loads = []
-    code, doc = ui.peer_launch(
+    code, doc = page_server.peer_launch(
         {} if headers is None else headers, "10.0.0.1", "10.0.0.2",
         json.dumps(body).encode(), gate=gate,
         load=lambda **a: loads.append(a) or {"starting": a["artifact"]},
@@ -54,7 +54,7 @@ def test_refused_with_any_origin_header():
 def test_refused_off_the_gate_unless_a_named_peer():
     code, _, loads = call(LOAD, gate=Shut())
     assert code == 403 and not loads
-    code, _ = ui.peer_launch({}, "10.0.0.1",
+    code, _ = page_server.peer_launch({}, "10.0.0.1",
                                 "192.168.1.5", json.dumps(LOAD).encode(),
                                 gate=Shut(), manual_hosts=["10.0.0.1"],
                                 load=lambda **a: {}, resolve=lambda i: "/m")
@@ -68,7 +68,7 @@ def test_refused_when_a_path_is_in_the_payload(key):
 
 
 def test_a_body_that_is_not_json_says_why():
-    code, doc = ui.peer_launch({}, "10.0.0.1", "10.0.0.2", b'{"action": ',
+    code, doc = page_server.peer_launch({}, "10.0.0.1", "10.0.0.2", b'{"action": ',
                                gate=Open(), load=lambda **a: {},
                                resolve=lambda i: "/m")
     assert code == 400 and "JSON" in doc["error"]
@@ -120,7 +120,7 @@ def test_identity_is_content_not_place(tmp_path):
 # --- the coordinator's side --------------------------------------------------
 
 def peers_with(*ps, monkeypatch):
-    monkeypatch.setattr(ui, "PEERS", SimpleNamespace(all=lambda: list(ps)))
+    monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(all=lambda: list(ps)))
 
 
 def peer(state="answering"):
@@ -132,11 +132,11 @@ def peer(state="answering"):
 def test_forward_refuses_unknown_or_silent_peer(monkeypatch):
     peers_with(peer("not_answering"), monkeypatch=monkeypatch)
     sent = []
-    doc = ui.forward_launch({"action": "load", "node": "m4id",
+    doc = page_server.forward_launch({"action": "load", "node": "m4id",
                              "identity": "abc"},
                             post=lambda *a: sent.append(a))
     assert "not a machine that is answering" in doc["error"] and not sent
-    doc = ui.forward_launch({"action": "load", "node": "other",
+    doc = page_server.forward_launch({"action": "load", "node": "other",
                              "identity": "abc"},
                             post=lambda *a: sent.append(a))
     assert "error" in doc and not sent
@@ -145,7 +145,7 @@ def test_forward_refuses_unknown_or_silent_peer(monkeypatch):
 def test_forward_never_sends_a_path(monkeypatch):
     peers_with(peer(), monkeypatch=monkeypatch)
     for extra in ({"target": "/x"}, {"path": "/x"}, {"artifact": "/x"}):
-        doc = ui.forward_launch({"action": "load", "node": "m4id",
+        doc = page_server.forward_launch({"action": "load", "node": "m4id",
                                  "identity": "abc", **extra},
                                 post=lambda *a: 1 / 0)
         assert "identity" in doc["error"]
@@ -155,8 +155,8 @@ def test_forward_to_a_real_peer_page(monkeypatch):
     """The coordinator's forward_launch against the real handler on a local
     port: identity resolution, refusal text passed back."""
     loads = []
-    monkeypatch.setattr(ui, "peer_launch", _stubbed(ui.peer_launch, loads))
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), ui.make_handler({}))
+    monkeypatch.setattr(page_server, "peer_launch", _stubbed(page_server.peer_launch, loads))
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         port = srv.server_address[1]
@@ -164,22 +164,22 @@ def test_forward_to_a_real_peer_page(monkeypatch):
                             port=port, state="answering",
                             key=f"127.0.0.1:{port}", found_by={"manual"})
         peers_with(p, monkeypatch=monkeypatch)
-        doc = ui.forward_launch({"action": "load", "node": "m4id",
+        doc = page_server.forward_launch({"action": "load", "node": "m4id",
                                  "identity": "abc", "tune": "safe",
                                  "sets": {"VQ_DECODE_CHUNK": "8"}})
         assert doc.get("starting") == "/models/X", doc
         assert doc["machine"] == "M4" and loads[0]["port"] == 8080
-        doc = ui.forward_launch({"action": "load", "node": "m4id",
+        doc = page_server.forward_launch({"action": "load", "node": "m4id",
                                  "identity": "zzz"})
         assert doc["refused"].startswith("not on")
-        doc = ui.forward_launch({"action": "unload", "node": "m4id",
+        doc = page_server.forward_launch({"action": "unload", "node": "m4id",
                                  "port": 8123})
         assert doc["stopped"] == 8123
         # a browser page cannot reach the peer route
         import urllib.error
         import urllib.request
         req = urllib.request.Request(
-            f"http://127.0.0.1:{port}{ui.PEER_LOAD_PATH}", method="POST",
+            f"http://127.0.0.1:{port}{page_server.PEER_LOAD_PATH}", method="POST",
             data=json.dumps({"action": "load", "identity": "abc"}).encode(),
             headers={"Origin": "http://evil.example"})
         with pytest.raises(urllib.error.HTTPError) as e:
@@ -205,7 +205,7 @@ def test_forward_refuses_a_port_that_is_not_a_number(monkeypatch):
     load's port went through int() unguarded -- a 500 -- where unload's
     answers with what is wrong."""
     peers_with(peer(), monkeypatch=monkeypatch)
-    doc = ui.forward_launch({"action": "load", "node": "m4id",
+    doc = page_server.forward_launch({"action": "load", "node": "m4id",
                              "identity": "abc", "port": "x"},
                             post=lambda *a: 1 / 0)
     assert "port" in doc["error"]

@@ -233,7 +233,7 @@ def machine() -> dict:
         model_id = subprocess.run(["sysctl", "-n", "hw.model"],
                                   capture_output=True, text=True,
                                   timeout=2).stdout.strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
     name = ""
     try:
@@ -243,7 +243,7 @@ def machine() -> dict:
             if line.strip().startswith("Model Name:"):
                 name = line.split(":", 1)[1].strip()
                 break
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
     low = name.lower()
     if "studio" in low:
@@ -264,7 +264,7 @@ def machine() -> dict:
         chip = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
                               capture_output=True, text=True,
                               timeout=2).stdout.strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
     _MACHINE = {"kind": kind, "model": name, "model_id": model_id,
                 "chip": chip.removeprefix("Apple ").strip()}

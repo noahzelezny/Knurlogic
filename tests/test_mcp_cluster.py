@@ -16,8 +16,8 @@ import pytest
 
 from knurlogic.cluster import launch as C
 from knurlogic.interfaces import mcp
-from knurlogic.interfaces.page import server as ui
-from knurlogic.interfaces.page import documents as web
+from knurlogic.interfaces.page import server as page_server
+from knurlogic.interfaces.page import documents
 from knurlogic.machine import identity
 
 import test_cluster_jobs as T
@@ -215,13 +215,13 @@ def page_a(tmp_path, monkeypatch):
                            key=f"127.0.0.1:{ui_b}", state="answering",
                            link="thunderbolt", node={"cluster": info_b},
                            found_by=set())
-    monkeypatch.setattr(ui, "PEERS", SimpleNamespace(
+    monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(
         all=lambda: [peer], introduce=lambda *a, **k: None))
-    monkeypatch.setattr(ui, "_status_fn", lambda _n=0: ({
+    monkeypatch.setattr(page_server, "_status_fn", lambda _n=0: ({
         "nodes": [{"role": "local", "cluster": info_a}],
         "me": {"id": "aaaa", "name": "A"},
         "peers": [{"id": "bbbb", "name": "B", "state": "answering"}]}, ""))
-    monkeypatch.setitem(ui._SERVE_PORT, "ui", ui_a)
+    monkeypatch.setitem(page_server._SERVE_PORT, "ui", ui_a)
     from knurlogic.machine import servers
 
     def local_residency():
@@ -231,12 +231,12 @@ def page_a(tmp_path, monkeypatch):
                  "where": f"http://127.0.0.1:{port}", "requests": REQS}
                 for port in servers.registry()]}
         return doc
-    monkeypatch.setattr(web, "loaded_document", local_residency)
+    monkeypatch.setattr(documents, "loaded_document", local_residency)
     monkeypatch.setattr("knurlogic.machine.loaded.survey", lambda: {})
     serve_port = T.free_port()
-    routes = web.routes(status_fn=ui._status_fn, loaded_fn=ui._loaded_fn(),
-                        load_fn=ui._load_fn(serve_port))
-    srv = ThreadingHTTPServer(("127.0.0.1", ui_a), ui.make_handler(routes))
+    routes = documents.routes(status_fn=page_server._status_fn, loaded_fn=page_server._loaded_fn(),
+                        load_fn=page_server._load_fn(serve_port))
+    srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler(routes))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     monkeypatch.setenv("KNURLOGIC_PAGE", f"127.0.0.1:{ui_a}")
     ctx = SimpleNamespace(port=serve_port, page_b=page_b, pids=[])

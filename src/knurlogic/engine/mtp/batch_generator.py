@@ -238,8 +238,9 @@ class MTPBatchGenerator(BatchGenerator):
             # No head: nothing to capture, nothing to seed. A snapshot is
             # only taken by a drafting step, which a headless batch never
             # takes, so the copy flag is moot; True is the safe reading.
-            get_h = lambda: None                          # noqa: E731
-            self._make_draft_cache = lambda: None         # noqa: E731
+            def get_h():
+                return None
+            self._make_draft_cache = lambda: None
             copy = True
             name = None
         #: what admit and the decode steps call (self.model stays the
