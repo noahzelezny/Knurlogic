@@ -730,8 +730,8 @@ VISION_KV_DTYPE_BYTES = 2
 # Read per request from the environment, so each applies live on a running
 # server (POST /settings.json) and, set before a launch, from its start.
 # Not measured: these are policy, ported from Scout's compactor
-# (scout/tasks/agent_loop_compaction.py, keep_recent=6) and the design's
-# summary budget (a tenth of what is dropped, 1k-8k).
+# (scout/tasks/agent_loop_compaction.py, keep_recent=6). There is no summary
+# budget: a summary is only never longer than what it replaces.
 COMPACT_KNOBS = {
     # name: (default, values, unit, what, why)
     "KNURLOGIC_COMPACT_AUTO": (
@@ -753,16 +753,6 @@ COMPACT_KNOBS = {
         "Scout's keep_recent. The kept tail never starts on a tool result: "
         "it is widened back to the call that asked for it. The first "
         "message and the goal turn are always kept as well."),
-    "KNURLOGIC_COMPACT_SUMMARY_MIN": (
-        "1024", ["512", "1024", "2048", "4096"], "tokens",
-        "the smallest summary budget",
-        "the budget is a tenth of the tokens being dropped, clamped between "
-        "this and the maximum."),
-    "KNURLOGIC_COMPACT_SUMMARY_MAX": (
-        "8192", ["2048", "4096", "8192", "16384"], "tokens",
-        "the largest summary budget",
-        "the budget is a tenth of the tokens being dropped, clamped between "
-        "the minimum and this."),
     "KNURLOGIC_COMPACT_TOOL_RESULTS": (
         "distill", ["distill", "clear"], "",
         "what becomes of a dropped tool result: a one-line finding, or "
@@ -777,7 +767,7 @@ COMPACT_KNOBS = {
 def compact_settings(env: dict) -> dict:
     """The operator's compaction defaults from an environment, each
     falling back to its default when absent or unreadable:
-    {auto, trigger, keep, summary_min, summary_max, distill}."""
+    {auto, trigger, keep, distill}."""
     def get(name):
         v = str((env or {}).get(name, "") or "").strip()
         return v or COMPACT_KNOBS[name][0]
@@ -792,12 +782,9 @@ def compact_settings(env: dict) -> dict:
         auto = on_off(get("KNURLOGIC_COMPACT_AUTO"), False)
     except ValueError:
         auto = False
-    lo = num("KNURLOGIC_COMPACT_SUMMARY_MIN", int, 64, 65536)
-    hi = num("KNURLOGIC_COMPACT_SUMMARY_MAX", int, 64, 65536)
     return {"auto": auto,
             "trigger": num("KNURLOGIC_COMPACT_TRIGGER", float, 0.05, 0.99),
             "keep": num("KNURLOGIC_COMPACT_KEEP_TURNS", int, 0, 1000),
-            "summary_min": min(lo, hi), "summary_max": max(lo, hi),
             "distill": get("KNURLOGIC_COMPACT_TOOL_RESULTS") != "clear"}
 
 
@@ -815,9 +802,7 @@ def check_compact_knob(name: str, value):
         return None if s in ("distill", "clear") else \
             f"{name}={s!r}: distill or clear"
     cast, lo, hi = {"KNURLOGIC_COMPACT_TRIGGER": (float, 0.05, 0.99),
-                    "KNURLOGIC_COMPACT_KEEP_TURNS": (int, 0, 1000),
-                    "KNURLOGIC_COMPACT_SUMMARY_MIN": (int, 64, 65536),
-                    "KNURLOGIC_COMPACT_SUMMARY_MAX": (int, 64, 65536)}[name]
+                    "KNURLOGIC_COMPACT_KEEP_TURNS": (int, 0, 1000)}[name]
     try:
         v = cast(s)
     except ValueError:
