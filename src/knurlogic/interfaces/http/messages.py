@@ -34,6 +34,48 @@ STOP_REASON = {
 }
 
 
+def anthropic_images_to_openai(content) -> list:
+    """Anthropic Messages `content` blocks -> OpenAI `content` parts.
+
+    This module translates a Claude-shaped request onto the
+    engine's OpenAI surface (`serve.py`'s `messages_fn`), and until now that
+    translation dropped image blocks on the floor -- text only. An Anthropic
+    image block is `{"type": "image", "source": {"type": "base64",
+    "media_type": "...", "data": "..."}}` (or `{"type": "url", "url": ...}`,
+    which the engine's own image loader refuses -- P0's `images.decode`
+    does not fetch http(s), and this function does not either: it only
+    reshapes the block, `served_vision`'s caller does the fetching-or-not).
+    OpenAI's chat surface wants `{"type": "image_url",
+    "image_url": {"url": "data:<media_type>;base64,<data>"}}`.
+
+    Anything already OpenAI-shaped, or any block this function does not
+    recognise as an Anthropic image, passes through unchanged -- this is a
+    shim for ONE block type, not a general content-block rewriter, and a
+    text block silently dropped would be a worse bug than one image block
+    left in a shape the engine already refuses with a clear error.
+    """
+    if not isinstance(content, list):
+        return content
+    out = []
+    for block in content:
+        if not isinstance(block, dict):
+            out.append(block)
+            continue
+        if block.get("type") == "image" and isinstance(block.get("source"), dict):
+            src = block["source"]
+            if src.get("type") == "base64" and src.get("data"):
+                media = src.get("media_type") or "image/png"
+                out.append({"type": "image_url",
+                            "image_url": {"url": f"data:{media};base64,{src['data']}"}})
+                continue
+            if src.get("type") == "url" and src.get("url"):
+                out.append({"type": "image_url",
+                            "image_url": {"url": src["url"]}})
+                continue
+        out.append(block)
+    return out
+
+
 def _text_of(content) -> str:
     """Anthropic content is a string or a list of blocks."""
     if isinstance(content, str):
@@ -108,8 +150,6 @@ def to_openai(req: dict) -> dict:
                  for b in content or []):
             # Images keep their place among the text, in order: a harness
             # that sends [text, image, text] means exactly that sequence.
-            from knurlogic.interfaces.page.documents import (
-                anthropic_images_to_openai)
             parts = []
             for b in anthropic_images_to_openai(list(content or [])):
                 if not isinstance(b, dict):
