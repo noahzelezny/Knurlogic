@@ -31,7 +31,7 @@
            recommendation (its generation_config.json); a field left at it
            sends nothing, so the server applies that same value. -->
       <section id="csettings">
-        <div class="sidelab csh">chat test bench<button type="button" class="mini"
+        <div class="sidelab csh">Chat Settings<button type="button" class="mini"
           id="cdefaults" title="set every field back to the model's defaults">defaults</button></div>
         <!-- How full the conversation is: the last reply's prompt + answer
              over the served model's window. Read-only: there is no context
@@ -60,22 +60,25 @@
             <option value="65536">64k</option>
           </select>
         </div>
-        <div class="cs">
-          <label for="ctemp">temperature<i class="info" tabindex="0">i<span class="bub">How adventurous each word choice is. Lower is steadier and more repetitive (0 always takes the likeliest word); higher is more varied and, past about 1, more erratic. Empty uses the model&#39;s recommended value.</span></i></label>
-          <input id="ctemp" type="number" min="0" max="2" step="0.05"
-            placeholder="model">
-        </div>
-        <div class="cs">
-          <label for="ctopp">top p<i class="info" tabindex="0">i<span class="bub">Picks only among the likeliest words that together make up this share of the chance. Lower (0.5) keeps to safe choices; 1 considers everything. Empty uses the model&#39;s recommended value.</span></i></label>
-          <input id="ctopp" type="number" min="0" max="1" step="0.05"
-            placeholder="model">
-        </div>
-        <div class="cs">
-          <label for="ctopk">top k<i class="info" tabindex="0">i<span class="bub">Picks only among this many likeliest words. Lower is narrower and steadier; 0 means no limit. Empty uses the model&#39;s recommended value.</span></i></label>
-          <input id="ctopk" type="number" min="0" step="1" placeholder="model">
-        </div>
-        <label class="cslab" for="csys">system prompt</label>
-        <textarea id="csys" rows="3" placeholder="(none)"></textarea>
+        <details id="cadv">
+          <summary>Advanced</summary>
+          <div class="cs">
+            <label for="ctemp">temperature<i class="info" tabindex="0">i<span class="bub">How adventurous each word choice is. Lower is steadier and more repetitive (0 always takes the likeliest word); higher is more varied and, past about 1, more erratic. Empty uses the model&#39;s recommended value.</span></i></label>
+            <input id="ctemp" type="number" min="0" max="2" step="0.05"
+              placeholder="model">
+          </div>
+          <div class="cs">
+            <label for="ctopp">top p<i class="info" tabindex="0">i<span class="bub">Picks only among the likeliest words that together make up this share of the chance. Lower (0.5) keeps to safe choices; 1 considers everything. Empty uses the model&#39;s recommended value.</span></i></label>
+            <input id="ctopp" type="number" min="0" max="1" step="0.05"
+              placeholder="model">
+          </div>
+          <div class="cs">
+            <label for="ctopk">top k<i class="info" tabindex="0">i<span class="bub">Picks only among this many likeliest words. Lower is narrower and steadier; 0 means no limit. Empty uses the model&#39;s recommended value.</span></i></label>
+            <input id="ctopk" type="number" min="0" step="1" placeholder="model">
+          </div>
+          <label class="cslab" for="csys">system prompt</label>
+          <textarea id="csys" rows="3" placeholder="(none)"></textarea>
+        </details>
       </section>
     </aside>
     <main>
