@@ -6,8 +6,8 @@ artifacts were validated against -- not merely that it imports.
 ## gemma4_text.py
 
 - taken: 2026-09-18
-- from: `/Volumes/Thunderbay SSD/venvs/qwen4exp/lib/python3.12/site-packages/mlx_lm/models/gemma4_text.py`
-- interpreter: `/Volumes/Thunderbay SSD/venvs/qwen4exp/bin/python`
+- from: `<a venv>`
+- interpreter: `<a venv>`
 - mlx-lm: 0.32.0
 - sha256: `f3f8c047c2ac31306267e8de61bb06d2952f2bf3fd4adbbb8ce25b952ccac01f`
 - note: qwen4exp venv (mlx-lm 0.32.0) taken as authoritative: it is where vqlab fits and scores, and it is the SUPERSET -- qwen3_5 here carries PipelineMixin, the exo-env copy does not

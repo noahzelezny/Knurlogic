@@ -1,3 +1,5 @@
+> **Parked (2026-09-28)** with memory pacing: the workload that motivated it (4 agents growing without compaction) is not a real one. Not built.
+
 # Memory ledger (design, 2026-09-28) -- replaces measured-memory pacing
 
 Goal: knurlogic never crashes from memory. Whatever agents send, however many
