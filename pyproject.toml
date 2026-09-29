@@ -9,13 +9,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knurlogic"
-version = "0.1.0.dev0"
-description = "Make local model runtimes manageable: resolve settings, verify the environment."
+version = "0.1.0"
+description = "Serve local models on Apple Silicon: an OpenAI- and Anthropic-compatible server, a page for people and an MCP for agents, with the settings and the memory worked out."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Noah Zelezny" }]
+keywords = ["mlx", "apple-silicon", "llm", "inference", "server", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 
 # mlx-lm is the library underneath (model classes, tokenizer, caches,
 # BatchGenerator; knurlogic's own server is engine/runtime + interfaces/http).
@@ -43,7 +51,7 @@ dependencies = [
 knurlogic = "knurlogic.interfaces.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/noahzelezny/knurlogic"
+Homepage = "https://github.com/noahzelezny/Knurlogic"
 
 [tool.setuptools.packages.find]
 where = ["src"]
