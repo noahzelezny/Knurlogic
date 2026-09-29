@@ -1,0 +1,36 @@
+# Changelog
+
+## 0.1.0
+
+First public release (alpha).
+
+* `knurlogic serve`: an OpenAI-compatible server (`/v1/chat/completions`,
+  `/v1/completions`, `/v1/models`) with an Anthropic Messages endpoint
+  (`/v1/messages`) for Claude Code and similar harnesses.
+* Settings resolved from each model's `config.json` and the memory
+  available, with launch bundles (`--tune`) and per-setting overrides.
+* `doctor`, `models`, `loaded`, `deps`, `smoke`: whether a model fits and
+  will run, what is on disk, what is in memory in every runtime, and which
+  build of the stack is installed.
+* The page (`knurlogic ui`): models, memory, chat with images, settings,
+  launch and stop.
+* An MCP server (`knurlogic mcp`) for agents: `models`, `fit`, `settings`,
+  `drafting`, `ready`, `load`, `state`, `unload`, `deps`.
+* Model families: Qwen 3.5/3.6/3.8, Gemma 4, GLM-5, DeepSeek-V4, with
+  vendored, pinned architectures; VQ-quantized models on a vendored,
+  verified VQ runtime.
+* Multi-token-prediction drafting for models that ship a head; images for
+  Qwen, Gemma 4 and GLM-5; 8-bit KV cache; YaRN long context for Qwen;
+  context compaction.
+* Two Macs: one model split by tensor or pipeline over Thunderbolt, with
+  Bonjour discovery and `--host cluster`.
+
+### Renamed settings
+
+* `VQLAB_CACHE_LIMIT_GB` is now `VQ_CACHE_LIMIT_GB`, matching the VQ
+  runtime. The old name is still accepted from saved settings and `--set`,
+  and is still set for models whose bundled runtime reads only it; it will
+  be removed in a later release.
+* `VQLAB_PREFILL_CHUNK` is now `KNURLOGIC_PREFILL_CHUNK`. The old name is
+  still accepted from saved settings and `--set`; it will be removed in a
+  later release.

@@ -1,46 +1,39 @@
 [build-system]
-# 77, not 68: `license = "Apache-2.0"` + `license-files` is PEP 639, which
-# setuptools only understands from 77. Declaring 68 made an editable install
-# fail metadata generation on a box whose setuptools was 75.1 -- the floor
-# has to be the version the metadata actually needs, not the one that was
-# current when the file was written.
+# 77: `license` + `license-files` (PEP 639) need setuptools 77.
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "knurlogic"
 version = "0.1.0"
-description = "Serve local models on Apple Silicon: an OpenAI- and Anthropic-compatible server, a page for people and an MCP for agents, with the settings and the memory worked out."
+description = "Serve local language models on Apple Silicon, for people and agents."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Noah Zelezny" }]
-keywords = ["mlx", "apple-silicon", "llm", "inference", "server", "mcp"]
+keywords = ["mlx", "apple-silicon", "llm", "inference", "openai", "anthropic",
+            "mcp", "local-models"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: MacOS X",
     "Intended Audience :: Developers",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# mlx-lm is the library underneath (model classes, tokenizer, caches,
-# BatchGenerator; knurlogic's own server is engine/runtime + interfaces/http).
-# PINNED EXACTLY, mlx with it: the batch
-# engine subclasses BatchGenerator and reads its internals, and the vision
-# key rides mlx-lm's prompt trie. A version is blessed by re-verifying
-# those (tests/test_pins.py lists them), then moving the pin, the digests in
-# [tool.knurlogic.pins] and tests/test_pins.py together. 0.31.3 is also the
-# oldest release measured to load a VQ artifact's bundled `model_file`.
-# The VQ runtime's pin (commit + digest) is in engine/vq/PROVENANCE.md.
+# mlx and mlx-lm are PINNED EXACTLY: the batch engine subclasses mlx-lm's
+# BatchGenerator and reads its internals. Move the pin together with the
+# digests in [tool.knurlogic.pins] (tests/test_pins.py checks them).
 dependencies = [
     "mlx==0.31.2; platform_system == 'Darwin'",
     "mlx-lm==0.31.3",
     "numpy>=1.24",
-    # Images (engine/vision/images.py): decode, EXIF transpose, the pixel
-    # hash. Tested at 12.2.0; the floor is the API it uses, not a measured
-    # oldest-good release.
+    # images: decode, EXIF transpose, the pixel hash
     "Pillow>=10.0",
 ]
 
@@ -49,6 +42,9 @@ knurlogic = "knurlogic.interfaces.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/noahzelezny/Knurlogic"
+Repository = "https://github.com/noahzelezny/Knurlogic"
+Issues = "https://github.com/noahzelezny/Knurlogic/issues"
+Changelog = "https://github.com/noahzelezny/Knurlogic/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -64,19 +60,14 @@ knurlogic = ["interfaces/page/assets/**/*",
              "context_management/prompts/*.md"]
 
 [tool.knurlogic.pins]
-# One home for the facts tests/test_pins.py holds the installed stack to.
-# sha256 of the mlx-lm 0.31.3 files knurlogic builds on as a library:
-# generate.py (MTPBatchGenerator subclasses BatchGenerator and reads its
-# queue and response shapes) and models/cache.py (LRUPromptCache, whose
-# order the image pins read). An edited file is a drift even under the
-# same version string (a local patch, a fork installed as 0.31.3).
-# mlx-lm's server.py is not used (docs/design/server.md).
+# What tests/test_pins.py holds the installed stack to: the versions, and
+# sha256 of the two mlx-lm files knurlogic builds on (an edited file is a
+# drift even under the same version string).
 mlx = "0.31.2"
 mlx-lm = "0.31.3"
 mlx_lm_generate_sha256 = "270778ad53eaca55a8533d82e6752660fe5d2605c4aa0879b48a50a91f69345f"
 mlx_lm_cache_sha256 = "819ed95dcbf755652363cfdb15a639890447abb534a06dcefd52c7fff5055750"
 
 [tool.pytest.ini_options]
-# Each checkout tests its OWN src: the editable install points at one
-# checkout, and a worktree's tests would otherwise import that one's code.
+# each checkout tests its own src, whatever is installed
 pythonpath = ["src"]
