@@ -30,7 +30,7 @@ HERE = Path(__file__).parent
 #: lines; last functional change
 #: to vq_switch.py ef4e8dc). The digests are the pin: tests hold the files to
 #: them, so an edit here is a visible re-vendor, not drift.
-VQLAB_COMMIT = "d271035"
+VENDORED_COMMIT = "d271035"
 RUNTIME_FILES = {
     "vq_switch.py":
         "31e56dfb0e1c2138286a6f9cd84e90f0b6cecb0611f9cf4a3bb08fc6ddd38aeb",
@@ -92,7 +92,7 @@ def runtime_module(knobs: dict | None = None) -> types.ModuleType:
         name = f"knurlogic.engine.vq._rt_{key}"
         mod = types.ModuleType(name)
         mod.__file__ = str(HERE / "vq_switch.py")
-        code = compile(source(), f"<knurlogic vq runtime {VQLAB_COMMIT}>",
+        code = compile(source(), f"<knurlogic vq runtime {VENDORED_COMMIT}>",
                        "exec")
         with _env_overlay(knobs):
             exec(code, mod.__dict__)
