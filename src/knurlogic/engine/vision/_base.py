@@ -3,16 +3,14 @@
 
 Vendored verbatim from mlx-vlm 0.6.17, `mlx_vlm/models/base.py`
 (sha256 7e61bb9bfc8cf8faec64023c42d15d89ecdc03ad84b7a265290ac728ffd647fa),
-MIT, Copyright (c) 2025 Prince Canuma:
-  BaseModelConfig    base.py:104-120  (glm5_next/config.py subclasses it)
-  check_array_shape  base.py:390-410  (qwen3_vl/vision.py sanitize)
-  ensure_fused_sdpa  base.py:528-538  (qwen3_vl and gemma4 vision attention)
+MIT, Copyright (c) 2025 Prince Canuma: BaseModelConfig (base.py:104-120),
+check_array_shape (:390-410), ensure_fused_sdpa (:528-538).
 
-WHY NOT IMPORT base.py. It imports turboquant and mlx-vlm's cache at module
-top (base.py:13-15) and PIL; the point of the vision build is that
-`pip install knurlogic` serves images without mlx-vlm. The family packages
-change `from ..base import X` to `from knurlogic.engine.vision._base import
-X` and record that edit in their PROVENANCE.md.
+Not an import of base.py: it imports turboquant, mlx-vlm's cache and PIL
+at module top, and `pip install knurlogic` serves images without mlx-vlm.
+The family packages change `from ..base import X` to
+`from knurlogic.engine.vision._base import X` and record that edit in
+their PROVENANCE.md.
 """
 import inspect
 from dataclasses import dataclass

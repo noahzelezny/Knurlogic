@@ -129,7 +129,7 @@ def test_a_composite_cache_has_its_members_position():
 def test_a_glm_style_head_restores_at_a_prefix_and_at_a_checkpoint():
     """GLM's head cache is a CacheList, which has no `offset`: read as -1,
     every entry -- whole prompt or segment checkpoint -- was discarded as
-    'no aligned head cache' (472-token system prompt, 2026-09-25)."""
+    'no aligned head cache' (a 472-token system prompt)."""
     from knurlogic.engine.mtp.batch_generator import HeadCarry, split_pool_entry
     trunk = [object()]
     _, hc, hit = split_pool_entry(trunk + [_cachelist_at(10)], 1,

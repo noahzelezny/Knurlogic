@@ -29,11 +29,11 @@ classifiers = [
 # BatchGenerator; knurlogic's own server is engine/runtime + interfaces/http).
 # PINNED EXACTLY, mlx with it: the batch
 # engine subclasses BatchGenerator and reads its internals, and the vision
-# key rides mlx-lm's prompt trie. A version is blessed by re-verifying those (tests/test_pins.py lists them),
-# then moving the pin, the digests in
+# key rides mlx-lm's prompt trie. A version is blessed by re-verifying
+# those (tests/test_pins.py lists them), then moving the pin, the digests in
 # [tool.knurlogic.pins] and tests/test_pins.py together. 0.31.3 is also the
 # oldest release measured to load a VQ artifact's bundled `model_file`.
-# The VQ runtime's pin (vqlab commit + digest) is in engine/vq/PROVENANCE.md.
+# The VQ runtime's pin (commit + digest) is in engine/vq/PROVENANCE.md.
 dependencies = [
     "mlx==0.31.2; platform_system == 'Darwin'",
     "mlx-lm==0.31.3",
@@ -78,6 +78,5 @@ mlx_lm_cache_sha256 = "819ed95dcbf755652363cfdb15a639890447abb534a06dcefd52c7fff
 
 [tool.pytest.ini_options]
 # Each checkout tests its OWN src: the editable install points at one
-# checkout, and a worktree's tests were importing that one's code instead
-# (found on the gui worktree, 2026-09-26).
+# checkout, and a worktree's tests would otherwise import that one's code.
 pythonpath = ["src"]

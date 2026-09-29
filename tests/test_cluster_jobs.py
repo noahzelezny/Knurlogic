@@ -119,9 +119,9 @@ def test_rdma_device_is_the_one_on_the_peers_subnet():
 
 
 def test_two_cables_both_ends_on_one_subnet():
-    # the M3/M4 rig: two cables, 10.0.0.x (M3 en4 - M4 en3) and 10.0.1.x
-    # (M3 en7 - M4 en2). Each side picking "a device on the peer's subnet"
-    # took M4 en2 and M3 en4 -- two different cables; jaccl failed RTR.
+    # two cables: 10.0.0.x (M3 en4 - M4 en3) and 10.0.1.x (M3 en7 -
+    # M4 en2). Each side picking "a device on the peer's subnet" would take
+    # M4 en2 and M3 en4 -- two different cables; jaccl fails RTR.
     m3 = {"name": "M3", "thunderbolt": [{"iface": "en4", "ip": "10.0.0.1"},
                                         {"iface": "en7", "ip": "10.0.1.1"}],
           "rdma": {"active": ["rdma_en4", "rdma_en7"]}}
@@ -364,9 +364,9 @@ def test_verdict_idle_is_not_stalled_but_busy_and_still_is(monkeypatch):
 
 
 def test_verdict_a_long_prefill_is_one_step_of_many_chunks_not_a_stall():
-    """397B over the M4+M3: a 30k-token prompt missing the prompt cache is
-    one step of ~2 minutes; the page stopped the job as stalled at 122 s
-    while both ranks were computing (2026-09-27). Chunks are progress."""
+    """397B over two Macs: a 30k-token prompt missing the prompt cache is
+    one step of ~2 minutes, and must not read as stalled at 122 s while
+    both ranks are computing. Chunks are progress."""
     w = J.Watch()
     ranks = [{"rank": 0, "pid": 1, "machine": "A"}]
     alive = lambda p: True
@@ -380,10 +380,10 @@ def test_verdict_a_long_prefill_is_one_step_of_many_chunks_not_a_stall():
 
 
 def test_verdict_a_request_waiting_on_a_slow_load_is_not_a_stall():
-    """Qwen3.8-Flash-Next-6bit read over SMB on the M4: a request arrived
-    while the ranks were still loading (busy, step 0) and the page stopped
-    the job as stalled at 122 s, mid-load (2026-09-27). Only a loaded ring
-    can stall; loading has its own clock (the pid, the join deadline)."""
+    """Qwen3.8-Flash-Next-6bit read over SMB: a request arriving while
+    the ranks are still loading (busy, step 0) must not read as stalled
+    at 122 s, mid-load. Only a loaded ring can stall; loading has its
+    own clock (the pid, the join deadline)."""
     w = J.Watch()
     ranks = [{"rank": 0, "pid": 1, "machine": "A"}]
     alive = lambda p: True
@@ -860,11 +860,11 @@ def test_jaccl_without_an_rdma_subnet_is_refused_not_rerouted(cache,
     assert C._rdma_device(ia, ib) is None
 
 
-# --- one machine never holds two jobs' shares (the M3 OOM, 2026-09-27) ------
-# A 397B pipeline job's rank 1 held 49.5 GiB on the M3 (84 GiB working
+# --- one machine never holds two jobs' shares -------------------------------
+# A 397B pipeline job's rank 1 held 49.5 GiB on an M3 Ultra (84 GiB working
 # set) when a second job's rank 1 started loading the same share beside it:
-# Metal wedged and the Mac rebooted, and the M4's rank 0 sat idle in a
-# collective for three hours with nobody to tear it down.
+# Metal wedged and the Mac rebooted, and rank 0 on the other machine sat
+# idle in a collective with nobody to tear it down.
 
 def test_prepare_refuses_a_share_beside_what_another_job_holds(cache):
     big = dict(SHAPE, tensor_per_rank_bytes=50 * GIB)
@@ -981,8 +981,7 @@ def test_stop_then_immediately_launch_waits_for_the_old_rank_to_be_gone(
 
 def test_prepare_waits_for_a_stopping_rank_then_goes(cache, monkeypatch):
     """A relaunch's prepare, while a previous job's rank on this machine
-    is still exiting (job cd587ad0856f3f3a / fe954df14c29e6eb,
-    2026-09-27): it waits, bounded, instead of granting the new job a
+    is still exiting: it waits, bounded, instead of granting the new job a
     share -- and a ring port -- the old rank still holds, then goes once
     the old rank is gone."""
     monkeypatch.setattr(C, "PEER_S", 3.0)
@@ -1125,9 +1124,9 @@ def test_the_job_route_says_what_this_page_runs(two_pages):
 
 def test_a_vanished_peer_page_has_the_idle_rank_0_torn_down(
         two_pages, monkeypatch):
-    """The M3 rebooted; the M4's rank 0 was idle in a collective, so no
-    stall verdict, and its page watched only its own ranks. Now it watches
-    the job's other pages too."""
+    """One machine reboots; the other's rank 0 is idle in a collective, so
+    no stall verdict. Its page watches the job's other pages too, not only
+    its own ranks."""
     p = two_pages
     monkeypatch.setattr(J, "PEER_GONE_S", 1.0)
     assert C.watch_once() == []                 # B answers: healthy
@@ -1155,9 +1154,9 @@ def test_a_peer_page_that_stopped_the_job_has_this_one_stop_too(
 
 
 # --- the cable: two Thunderbolt cables, one failing link init ---------------
-# After the M3 rebooted, jaccl on the 10.0.0.x cable failed QP RTR (errno
-# 96) even in a bare two-rank mlx test while 10.0.1.x worked, and every
-# launch picked the lowest shared subnet.
+# jaccl on one cable (10.0.0.x) can fail QP RTR (errno 96), even in a bare
+# two-rank mlx test, while the other (10.0.1.x) works; a launch must not
+# keep picking the lowest shared subnet.
 
 def two_cable_infos():
     rd = {"available": True, "reason": "", "devices": ["rdma_en4",
@@ -1367,7 +1366,7 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
 
 
 def test_a_stopped_job_never_claims_the_port_the_next_job_serves_on(monkeypatch):
-    # the M4 reused :8080 and its card said "stopped" for the job then loading
+    # a new job reuses :8080: its card must not say "stopped" while loading
     monkeypatch.setattr(C, "jobs_document", lambda: [
         {"job": "new", "phase": "ready", "port": 8080, "split": "pipeline"},
         {"job": "old", "phase": "stopped", "port": 8080}])

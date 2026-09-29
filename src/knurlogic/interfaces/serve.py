@@ -1,25 +1,15 @@
 """`knurlogic serve` -- an OpenAI-compatible endpoint that loads these models.
 
-Knurlogic resolves the environment, registers the architecture, and serves
-with its own server (interfaces/http over engine/runtime; docs/design/server.md):
-mlx-lm is the library underneath -- model classes, tokenizer, caches --
-not the server. Its server was patched in ~34 places until 2026-09-25 and
-is no longer used.
-
-Point Cline, Continue, Zed, OpenWebUI or anything else that speaks OpenAI at
-http://host:port/v1 -- which is the whole reason to prefer an endpoint over a
-chat UI nobody asked for.
-
-ENV IS SET BEFORE THE SERVER LOADS ANYTHING, and that ordering is not
-incidental: a VQ artifact's bundled runtime reads its knobs AT IMPORT, and
-the import happens inside the server's own model load. Setting them after
-would silently do nothing -- the same class of bug as an env file sourced
-after the one that overwrites it.
-
     knurlogic serve <artifact> [--host H] [--port P] [--working-set-gib N]
 
-Serving across machines is knurlogic's own (cluster/: peers, Bonjour
-discovery, and `--host cluster`); it does not drive exo.
+knurlogic resolves the environment, registers the architecture, and serves
+with its own server (interfaces/http over engine/runtime); mlx-lm is the
+library underneath, not the server. The environment is set before the
+server loads anything, because a VQ artifact's bundled runtime reads its
+knobs at import, inside the model load. Serving across machines is
+knurlogic's own (cluster/ and `--host cluster`).
+
+Design: docs/design/server.md.
 """
 
 from __future__ import annotations
@@ -39,8 +29,8 @@ GIB = 1 << 30
 
 #: prompt-cache entries one conversation keeps: its system prompt, turns
 #: and segment checkpoints (on a hybrid model each checkpoint is a whole
-#: entry). A server-wide cap of 10 evicted four agents' entries on a
-#: hybrid model (2026-09-27): each agent needs its own
+#: entry). A server-wide cap of 10 evicts four agents' entries on a
+#: hybrid model: each agent needs its own
 PROMPT_CACHE_PER_AGENT = 10
 #: a ring counts at most this many concurrent agents (its decode
 #: concurrency, which every rank has from the same argv)
@@ -264,7 +254,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if adv.get("action") == "raise":
         print("\n" + wired.render(adv) + "\n")
     # a rank holds its share, not the artifact: judged against the whole
-    # 115 GiB, every rank of a 397B split warned it "does not fit this box"
+    # 115 GiB, every rank of a 397B split would warn "does not fit this
+    # box"
     r = resolve(a, ws, profile=profile, tune=tune, holds_bytes=share,
                 kv_bits=kv_bits, long_context=long_context)
     apply_preset_overrides(r, overrides)

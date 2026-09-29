@@ -1,4 +1,4 @@
-"""P5's changes: the Anthropic->OpenAI image shim (`interfaces/http/messages.py`),
+"""The Anthropic->OpenAI image shim (`interfaces/http/messages.py`),
 and the `vision` field on `/models.json` and `/loaded.json`.
 
 No mlx, no PIL, no real model: `interfaces/page/documents.py` reads
