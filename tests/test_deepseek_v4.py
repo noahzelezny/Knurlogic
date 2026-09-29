@@ -8,6 +8,7 @@ that encoder: its four golden outputs, and agent conversations rendered
 both ways. Then the prompt stage's prefix rule on it, and the DSML
 tool-call parser. No model."""
 import copy
+import os
 import hashlib
 import json
 import sys
@@ -29,8 +30,9 @@ from knurlogic.engine.runtime import prompt as P  # noqa: E402
 TEMPLATE = templates.text("deepseek_v4")
 BOS, EOS = "<｜begin▁of▁sentence｜>", "<｜end▁of▁sentence｜>"
 D = "｜DSML｜"
-STUB = Path("/Volumes/Thunderbay SSD/Exo Models/"
-            "mlx-community--DeepSeek-V4-Flash")
+# A local DeepSeek-V4-Flash artifact directory; the tests that need it skip
+# without it.
+STUB = Path(os.environ.get("KNURLOGIC_TEST_DEEPSEEK_V4") or "/nonexistent")
 
 
 def render(messages, tools=None, gen=True, **kw):
@@ -299,7 +301,7 @@ def test_a_control_token_quoted_in_a_tool_result_stays_text():
 
 
 @pytest.mark.skipif(not (STUB / "chat_template.jinja").is_file(),
-                    reason="the mlx-community conversion is not mounted")
+                    reason="the mlx-community conversion is not mounted (set KNURLOGIC_TEST_DEEPSEEK_V4)")
 def test_the_mlx_community_stub_is_known_by_hash():
     t = (STUB / "chat_template.jinja").read_text()
     assert hashlib.sha256(t.encode()).hexdigest() in templates.STUBS
@@ -369,12 +371,11 @@ def test_install_gives_a_wrapper_the_dsml_parser():
     assert templates.install(w) == "deepseek_v4"      # idempotent
 
 
-_REAL = Path("/Volumes/Thunderbay SSD/Exo Models/"
-             "mlx-community--DeepSeek-V4-Flash/tokenizer.json")
+_REAL = STUB / "tokenizer.json"
 
 
 @pytest.mark.skipif(not _REAL.is_file(),
-                    reason="the DeepSeek-V4 tokenizer is not mounted")
+                    reason="the DeepSeek-V4 tokenizer is not mounted (set KNURLOGIC_TEST_DEEPSEEK_V4)")
 def test_a_dsml_tool_call_parses_through_the_engine(tmp_path):
     """DeepSeek-V4's real tokenizer: a model turn with reasoning, text and
     a DSML call, fed token by token through the engine's control machine

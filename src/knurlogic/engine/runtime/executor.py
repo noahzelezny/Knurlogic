@@ -9,7 +9,7 @@ rank, rank 0's journaling each admission for the others; a pipeline
 executor comes later behind the same protocol: nothing here
 assumes the layers run in this process.
 
-Rules the protocol keeps (Fable 5.1 review, 2026-09-25):
+Rules the protocol keeps:
 
   * A token event carries the token and ITS logprob (plus top-k when
     asked), never a [V] row: what crosses a process boundary stays small

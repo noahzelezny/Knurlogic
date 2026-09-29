@@ -175,7 +175,7 @@ SPEED = {"10.0.1.2": ("thunderbolt", 80.0), "10.0.0.2": ("thunderbolt", 40.0)}
 
 
 def rig_doc():
-    d = doc(M4, "NozzleBook Pro")
+    d = doc(M4, "laptop")
     d["nodes"][0]["cluster"] = {"thunderbolt": [
         {"iface": "en3", "ip": "10.0.0.2", "gbps": 40},
         {"iface": "en2", "ip": "10.0.1.2", "gbps": 80}]}
@@ -259,7 +259,7 @@ def test_introductions_and_bonjour_instances_fold_into_the_machine(
     ps.refresh()
     ps.introduce("10.0.1.2", f"{M4} 8899")
     assert len(ps.all()) == 1 and "introduced" in ps.all()[0].found_by
-    assert ps.id_of_instance(f"NozzleBook Pro {M4[:6]}") == M4
+    assert ps.id_of_instance(f"laptop {M4[:6]}") == M4
     assert ps.id_of_instance("Someone Else 123456") == ""
     # a stranger at an unknown address is still its own peer
     ps.add("10.0.9.9", 8899, "bonjour")

@@ -5,7 +5,7 @@ messages plus an EMPTY user turn and taking the first token where that
 differs from the real prompt. When the empty turn renders as a pure prefix
 of the real one -- GLM-5.3: `<|user|>` and nothing after it -- nothing
 differs, the system segment is never made, and no checkpoint is stored at
-its end: a long shared system prompt (Scout's ingest schema) was
+its end: a long shared system prompt (an ingest client's schema) was
 re-prefilled on every request (GLM 2.7, 482 tokens, 0 reused;
 2026-09-25). Qwen's templates escape it by accident (the empty turn ends in
 `<|im_end|>`, which differs).
