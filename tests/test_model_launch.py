@@ -239,3 +239,33 @@ def test_the_kv_kernel_switch_is_emitted_only_at_8_bits(tmp_path):
     r = resolve(a, 96 * GIB, kv_bits=8)
     assert r.env["KNURLOGIC_KV_KERNEL"] == "on"
     assert "KNURLOGIC_KV_KERNEL" not in resolve(a, 96 * GIB, kv_bits=4).env
+
+
+def test_bf16_rows_do_not_follow_the_vision_allowance_dtype(monkeypatch):
+    """DeepSeek-V4's pools and MLA rope keys are bf16 in their own right;
+    changing the vision allowance's dtype must not move them."""
+    from knurlogic.tuning import settings as S
+    v4 = {"model_type": "deepseek_v4", "num_hidden_layers": 3,
+          "head_dim": 512, "index_head_dim": 128, "compress_ratios": [0, 4, 128],
+          "sliding_window": 128}
+    mla = {"num_hidden_layers": 2, "kv_lora_rank": 512,
+           "qk_rope_head_dim": 64, "index_head_dim": 128,
+           "layer_types": ["linear_attention", "deepseek_sparse_attention"]}
+    before = kv_bytes_per_token(v4)[0], kv_bytes_per_token(mla)[0]
+    assert before[0] == round((512 / 4 + 128 / 4 + 512 / 128) * 2)
+    monkeypatch.setattr(S, "VISION_KV_DTYPE_BYTES", 4)
+    assert (kv_bytes_per_token(v4)[0], kv_bytes_per_token(mla)[0]) == before
+
+
+def test_serve_says_when_an_environment_knob_is_ignored():
+    from knurlogic.interfaces.serve import ignored_env
+    env = {"KNURLOGIC_KV_BITS": "bf16", "KNURLOGIC_MTP": "on"}
+    lines = ignored_env(env, {}, {"KNURLOGIC_KV_BITS": "8",
+                                  "KNURLOGIC_MTP": "on"})
+    assert len(lines) == 1
+    assert "KNURLOGIC_KV_BITS=8" in lines[0] and "--kv-bits" in lines[0]
+    # a --set / flag value is applied, not ignored: nothing to say
+    assert ignored_env(env, {"KNURLOGIC_KV_BITS": "8"},
+                       {"KNURLOGIC_KV_BITS": "8"}) == []
+    assert "--set KNURLOGIC_X=" in ignored_env(
+        {"KNURLOGIC_X": "1"}, {}, {"KNURLOGIC_X": "2"})[0]

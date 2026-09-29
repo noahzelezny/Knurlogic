@@ -197,14 +197,20 @@ class QuantKVCache(KVCache):
         self.keys, self.values = (tuple(x) for x in v)
         self.offset = self.keys[0].shape[2]
 
+    # the kernel flag rides in meta_state: a cache rebuilt by mlx-lm's
+    # from_state (cls.__new__, no make_cache) came back with it off -- the
+    # silent dequantize path, not even counted as a kernel miss
     @property
     def meta_state(self):
-        return tuple(map(str, (self.offset, self.kv_bits, self.group or 0)))
+        return tuple(map(str, (self.offset, self.kv_bits, self.group or 0,
+                               int(bool(self.kv8_kernel)))))
 
     @meta_state.setter
     def meta_state(self, v):
-        self.offset, self.kv_bits, g = map(int, v)
+        v = tuple(map(int, v))
+        self.offset, self.kv_bits, g = v[:3]
         self.group = g or None
+        self.kv8_kernel = bool(v[3]) if len(v) > 3 else False
 
     def to_quantized(self, *a, **k):
         raise TypeError("already quantized")
@@ -286,6 +292,23 @@ class BatchQuantKVCache(BatchKVCache):
         k, vv, self.offset, self.left_padding = v
         self.keys, self.values = tuple(k), tuple(vv)
         self._idx = self.keys[0].shape[2]
+
+    @property
+    def meta_state(self):
+        # as QuantKVCache's: what from_state needs beyond the arrays,
+        # the kernel flag included
+        dk, dv = self.dims or (0, 0)
+        return tuple(map(str, (self.kv_bits, self.group or 0, dk, dv,
+                               int(bool(self.kv8_kernel)))))
+
+    @meta_state.setter
+    def meta_state(self, v):
+        bits, g, dk, dv, k = (tuple(map(int, v)) + (0,) * 5)[:5]
+        self.kv_bits, self.group = bits or 8, g or None
+        self.dims = (dk, dv) if dk else None
+        self.kv8_kernel = bool(k)
+        if not hasattr(self, "_right_padding"):
+            self._right_padding = None     # from_state skips __init__
 
     def filter(self, batch_indices):
         if self.keys is not None:

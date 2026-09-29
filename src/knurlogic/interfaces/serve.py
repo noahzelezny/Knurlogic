@@ -110,6 +110,28 @@ def pipeline_share_bytes(per: list, other: int, rank: int, world: int,
     return -(-sum(per) // max(world, 1)) + own
 
 
+
+#: the serve flag that sets a knob, where one exists (else --set K=V)
+_FLAG_FOR = {"KNURLOGIC_KV_BITS": "--kv-bits",
+             "KNURLOGIC_CONTEXT_LENGTH": "--context-length",
+             "KNURLOGIC_MTP_DYNAMIC": "--mtp-dynamic"}
+
+
+def ignored_env(env: dict, forced: dict, environ) -> list:
+    """One line per knob set in the environment that the resolver's value
+    replaces. Serve takes knobs from its flags and --set, not from the
+    environment (the resolver writes every knob it emits); a value set
+    there was dropped without a word (KNURLOGIC_KV_BITS=8 ran bf16)."""
+    out = []
+    for k, v in sorted(env.items()):
+        have = environ.get(k)
+        if k in forced or have is None or have == v:
+            continue
+        flag = _FLAG_FOR.get(k, f"--set {k}=...")
+        out.append(f"  note: {k}={have} in the environment is ignored "
+                   f"(runs {v}); use {flag}")
+    return out
+
 def run(path: str, host: str, port: int, working_set_gib: float,
         profile: str | None, tune: str = "balanced",
         overrides: dict | None = None, draft: bool = True,
@@ -250,6 +272,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # and you may not" the wrong default for the one place it is possible.
     # Reported as overridden rather than applied quietly.
     forced = dict(overrides or {})
+    for line in ignored_env(r.env, forced, os.environ):
+        print(line)
     for k, v in sorted(r.env.items()):
         if k in forced:
             continue
@@ -317,6 +341,10 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # KNURLOGIC_KV_KERNEL can see which path actually ran
         if _st.SERVED.get("kv_kernel") is not None:
             snap["kv_kernel"] = dict(_st.SERVED["kv_kernel"])
+        # a split's every rank, from the per-step control exchange: the
+        # followers serve no status of their own
+        if _st.SERVED.get("ranks"):
+            snap["ranks"] = [dict(x) for x in _st.SERVED["ranks"]]
         snap["preset"] = dict(r.preset)
         # what is running and what is waiting (scheduler.requests)
         from knurlogic.interfaces import http as _http

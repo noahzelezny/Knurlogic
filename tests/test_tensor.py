@@ -57,8 +57,9 @@ def test_the_knobs_that_travel_are_live_ones():
 def test_plan_empty_and_control():
     assert P.empty({"ops": []}) and P.empty({})
     assert not P.empty({"ops": [], "tokens": [[0, 1]]})
-    assert P.control(-5, 9, 0) == [-5, 9, 0]
-    assert P.CONTROL_LEN == 3
+    assert P.control(-5, 9, 0) == [-5, 9, 0, 0, 0]
+    assert P.control(-5, 9, 0, 11, 12)[P.ACTIVE:] == [11, 12]
+    assert P.CONTROL_LEN == 5
 
 
 @pytest.mark.parametrize("bad", [
@@ -624,3 +625,23 @@ def test_a_rank_that_cannot_reach_rank_0_says_where_it_dialed():
     with pytest.raises(ConnectionError, match=f"rank 1 could not reach rank "
                        f"0 at 127.0.0.1:{port}"):
         T.bell_dial("127.0.0.1", port, 1, 1, 0.3, pause_s=0.05)
+
+
+def test_rank_0_publishes_every_ranks_memory(monkeypatch):
+    """A pipeline follower serves no /status.json: its memory comes back
+    in the control rows and rank 0 publishes it (`ranks`)."""
+    import mlx.core as mx
+    from types import SimpleNamespace
+    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.serve import state
+    monkeypatch.setitem(state.SERVED, "ranks", None)
+    rows = [P.control(0, 3, 0, 100, 150), P.control(-4, 3, 0, 200, 260)]
+    link = SimpleNamespace(size=2, exchange=lambda over, payload: (rows, None))
+    r = T.Ring(link, split="pipeline")
+    r.exchange(0, {"ops": []})
+    assert state.SERVED["ranks"] == [
+        {"rank": 0, "active_bytes": 100, "peak_bytes": 150,
+         "over_limit_bytes": 0},
+        {"rank": 1, "active_bytes": 200, "peak_bytes": 260,
+         "over_limit_bytes": -4}]
+    assert r.peer_over == -4
