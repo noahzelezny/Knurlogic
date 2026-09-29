@@ -1,7 +1,6 @@
-"""P2: gemma4 vision (e4b, 26b). Gates G1-G5 plus the chunk-snap identity
-check the package's OWNS line asks for. Runs WITHOUT mlx-vlm (goldens are
-pre-built .npz, `tests/goldens/build_gemma4.py` in the reference
-interpreter -- design D2).
+"""gemma4 vision (e4b, 26b): gates G1-G5 plus the chunk-snap identity
+check. Runs WITHOUT mlx-vlm (goldens are pre-built .npz,
+`tests/goldens/build_gemma4.py` in an interpreter that has it).
 """
 from __future__ import annotations
 

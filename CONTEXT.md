@@ -1,9 +1,8 @@
 # knurlogic — start here
 
 *Routing layer. It says what lives where and points at the one home for
-each fact; it does not restate them. "Every piece of information has one
-home, other files point there" is the rule this repo is organised by, from
-the Interpretable Context Methodology (Van Clief, arXiv:2603.16021).*
+each fact; it does not restate them. Every piece of information has one
+home; other files point there.*
 
 ## What this is
 

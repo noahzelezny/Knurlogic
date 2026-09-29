@@ -38,7 +38,7 @@ were checked in the consumer's loop rather than assumed:
     a step commits was fed through the trunk, including one a stop sequence
     then hid, so the list is prompt + everything committed.
 
-IMAGES (design D5, D7 Phase A; docs/design/vision.md; on a split model,
+IMAGES (docs/design/vision.md; on a split model,
 engine/runtime/tensor.py: rank 0 encodes and ships the rows, every rank
 embeds with its own family). Every request with
 an image comes here, head or no head (`head=None` is a plain batch engine
@@ -206,7 +206,7 @@ def logits_trunk(model):
 class MTPBatchGenerator(BatchGenerator):
     """mlx-lm's BatchGenerator, drafting every row with an MTP head -- or,
     with `head=None`, the same engine without drafting, which is how a
-    vision model with no head serves images (design D5).
+    vision model with no head serves images.
 
     `vision` is the served model's `engine.vision.request.VisionServe` (or
     None): the family, the image store and the pins taken at tokenize."""
