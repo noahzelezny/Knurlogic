@@ -11,7 +11,7 @@ artifacts were validated against -- not merely that it imports.
   his permission. No exo code is in it.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.31.3.
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `746f9dd0e4560d01436556621caf5c6ba6926488b4202fbbc0df78a994dc98ea`
+- vendored sha256: `d4fc963282e1214a6f5f74b21e3874fb0fd341a77cac218600bc89393afc50b0`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -92,3 +92,10 @@ index_topk no pool reaches, so it checks everything the edits leave alone.
 10. The transformers config shim sets `max_position_embeddings` and `rope_theta` before
    `PretrainedConfig.__init__`; transformers 5.x reads them while standardizing rope
    params and raised AttributeError when loading the tokenizer.
+
+## Edit 11 (2026-09-29)
+
+11. `_ragged_prev` (edit 4's per-row carry) is no longer `@mx.compile`d. Its `lens`
+   is a Python list, so the compiled function traced one graph per distinct emit
+   pattern per layer -- at 8 rows, up to hundreds of variants x 41 layers -- to save
+   a handful of slices. Arithmetic unchanged.

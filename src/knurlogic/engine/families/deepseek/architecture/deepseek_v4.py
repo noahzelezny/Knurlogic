@@ -1508,12 +1508,15 @@ def _compressor_split(kv_gate, split):
     return kv_gate[..., :split], kv_gate[..., split:]
 
 
-@mx.compile
 def _ragged_prev(old, win, lens, fill):
     """knurlogic edit: the overlap compressor's carry after an emit. `win`
     [B, W, ratio, C] holds this step's windows; row i completed lens[i] of
     them (None: every row completed all W). A row that completed none keeps
-    its old carry (or `fill` if it has none yet)."""
+    its old carry (or `fill` if it has none yet).
+
+    knurlogic edit 11: not @mx.compile'd. `lens` is a Python list, so a
+    compiled version traced one graph per distinct emit pattern per layer
+    (hundreds of variants x 41 layers at 8 rows) for a few slices."""
     if lens is None:
         return win[:, -1, :, :]
     rows = []
