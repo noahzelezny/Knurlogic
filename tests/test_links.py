@@ -145,8 +145,8 @@ def test_no_thunderbolt_5_cable_greys_rdma_with_the_reason(monkeypatch):
     assert why.startswith("RDMA needs a Thunderbolt 5 cable between these "
                           "Macs; the 192.0.2 link is Thunderbolt 4")
     # the page greys the button with the same words
-    from knurlogic.interfaces.page.documents import PAGE
-    page = PAGE.read_text()
+    from knurlogic.interfaces.page.documents import ASSETS
+    page = "".join(p.read_text() for p in ASSETS.rglob("*.js"))
     assert "RDMA needs a Thunderbolt 5 cable between these Macs; " in page
     assert "tb5Why(" in page
 
