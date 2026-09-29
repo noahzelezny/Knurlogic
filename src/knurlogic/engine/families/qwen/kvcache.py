@@ -63,6 +63,7 @@ def _classes():
             c = QuantAttnCache(self.kv_bits)
             c.keys, c.values, c.offset = q.keys, q.values, q.offset
             c.group, c.dims = q.group, q.dims
+            c.kv8_kernel = self.kv8_kernel
             pad = self.left_padding[idx].item()
             if self.indexer.keys is not None:
                 c.indexer.keys = mx.contiguous(
@@ -75,7 +76,9 @@ def _classes():
         @classmethod
         def merge(cls, caches):
             if max(c.size() for c in caches) == 0:
-                return cls([0] * len(caches), caches[0].kv_bits)
+                out = cls([0] * len(caches), caches[0].kv_bits)
+                out.kv8_kernel = any(c.kv8_kernel for c in caches)
+                return out
             # the vendored merge's super() is BatchQuantKVCache.merge here,
             # which builds `cls(padding, bits)`; the indexer rows follow
             return Q._BatchAttnCache.merge.__func__(cls, caches)

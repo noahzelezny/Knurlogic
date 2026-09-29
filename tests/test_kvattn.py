@@ -58,13 +58,15 @@ def _ref(q, K, V, g, mask):
 def _check(q, K, V, g, mask, tol=None):
     from knurlogic.engine import kvattn
     assert kvattn.supports(q, K, V, 8, g, mask)
-    got = kvattn.decode_sdpa(q, K, V, q.shape[-1] ** -0.5, mask, g, 8)
     ref = _ref(q, K, V, g, mask)
-    assert got.shape == q.shape and got.dtype == q.dtype
     big = max(1.0, mx.abs(ref).max().item())
     tol = tol or (2e-5 if q.dtype == mx.float32 else 8e-3) * big
-    err = mx.abs(got.astype(mx.float32) - ref).max().item()
-    assert err < tol, err
+    for same in (False, True):          # bias at its own strides / scale's
+        got = kvattn.decode_sdpa(q, K, V, q.shape[-1] ** -0.5, mask, g, 8,
+                                 same_layout=same)
+        assert got.shape == q.shape and got.dtype == q.dtype
+        err = mx.abs(got.astype(mx.float32) - ref).max().item()
+        assert err < tol, (same, err)
 
 
 @pytest.mark.parametrize("D", [128, 256, 512])
@@ -143,13 +145,13 @@ def test_install_takes_the_kernel_and_matches_the_dequantized_path(
     whole = model.make_cache
     monkeypatch.setenv(kvattn.ENV, "off")
     kvquant.install(model, 8)
-    assert kvquant.KERNEL is False
+    assert model.kv8_kernel is False
     off_t, off_l = _greedy(model, prompts[0])
     assert not calls
     model.make_cache = whole
     monkeypatch.delenv(kvattn.ENV)
     kvquant.install(model, 8)
-    assert kvquant.KERNEL is True
+    assert model.kv8_kernel is True
     on_t, on_l = _greedy(model, prompts[0])
     assert calls                        # decode steps took the kernel
     assert on_t == off_t
@@ -181,3 +183,118 @@ def test_a_batched_quantized_decode_through_the_kernel_is_each_row_alone(
               prompts, 20)
     assert any(shape[0] > 1 for shape in calls)     # a batch took it
     assert on == off
+
+
+# --- review follow-ups -------------------------------------------------------
+
+def test_float16_queries():
+    q, K, V, g = _case(2, 8, 2, 1, 900, 256, dtype=mx.float16)
+    _check(q, K, V, g, None)
+
+
+def test_the_bias_is_read_with_its_own_strides():
+    """A bias that is a strided view (not laid out like its scale) is read
+    at its own strides."""
+    q, K, V, g = _case(1, 8, 2, 1, 300, 128)
+    wide = mx.concatenate([K[2], K[2]], axis=-1)       # (1, 2, 300, 4)
+    Kv = (K[0], K[1], wide[..., :K[2].shape[-1]])
+    assert mx.array_equal(Kv[2], K[2])
+    from knurlogic.engine import kvattn
+    ref = _ref(q, K, V, g, None)
+    got = kvattn.decode_sdpa(q, Kv, V, 128 ** -0.5, None, g, 8)
+    assert mx.abs(got.astype(mx.float32) - ref).max().item() < 3e-2
+
+
+@pytest.mark.parametrize("v,on", [(None, True), ("", True), ("on", True),
+                                  ("1", True), ("off", False), ("0", False),
+                                  ("false", False), ("NO", False)])
+def test_enabled_parsing(v, on, monkeypatch):
+    from knurlogic.engine import kvattn
+    if v is None:
+        monkeypatch.delenv(kvattn.ENV, raising=False)
+    else:
+        monkeypatch.setenv(kvattn.ENV, v)
+    assert kvattn.enabled() is on
+
+
+def test_patch_model_twice_is_idempotent():
+    from knurlogic.engine import kvattn
+    model, _, _ = _tiny()
+    n = kvattn.patch_model(model)
+    assert n > 0 and kvattn.patch_model(model) == n
+    from mlx_lm.models import base
+    assert base._kl_orig_sdpa is not kvattn.sdpa
+
+
+def test_the_setting_is_per_model_not_per_process(monkeypatch):
+    """A second model installed with the kernel off does not turn it off
+    for the first one's caches (or on for its own)."""
+    from knurlogic.engine import kvattn, kvquant
+    a, _, _ = _tiny()
+    b, _, _ = _tiny()
+    monkeypatch.delenv(kvattn.ENV, raising=False)
+    kvquant.install(a, 8)
+    monkeypatch.setenv(kvattn.ENV, "off")
+    kvquant.install(b, 8)
+    ka = [c for c in a.make_cache() if isinstance(c, kvquant.QuantKVCache)]
+    kb = [c for c in b.make_cache() if isinstance(c, kvquant.QuantKVCache)]
+    assert ka and all(c.kv8_kernel for c in ka)
+    assert kb and not any(c.kv8_kernel for c in kb)
+    merged = kvquant.BatchQuantKVCache.merge(ka[:1] * 2)
+    assert merged.kv8_kernel and merged.extract(0).kv8_kernel
+
+
+def test_a_ragged_sparse_mask_through_install_counts_hits(monkeypatch):
+    """A decode step with a boolean mask that is ragged per row and sparse
+    within a row (keys dropped mid-sequence), through the cache and the
+    patched attention: the kernel serves it (a hit) and matches the float32
+    reference."""
+    from knurlogic.engine import kvattn, kvquant
+    monkeypatch.delenv(kvattn.ENV, raising=False)
+    model, _, _ = _tiny()
+    kvquant.install(model, 8)
+    c = kvquant.BatchQuantKVCache([0, 3, 40], 8)
+    c.kv8_kernel = True
+    B, Hk, N, D = 3, 2, 64, 128
+    mx.random.seed(3)
+    k = mx.random.normal((B, Hk, N, D)).astype(mx.bfloat16)
+    c.update_and_fetch(k, k)
+    k1 = mx.random.normal((B, Hk, 1, D)).astype(mx.bfloat16)
+    mask = c.make_mask(1, return_array=True)       # as the model does
+    kk, vv = c.update_and_fetch(k1, k1)
+    q = mx.random.normal((B, 8, 1, D)).astype(mx.bfloat16)
+    mask = mask & (mx.arange(N + 1) % 5 != 2)          # sparse holes
+    before = kvattn.STATS["hits"]
+    got = kvattn.sdpa(q, kk, vv, c, D ** -0.5, mask)
+    assert kvattn.STATS["hits"] == before + 1
+    ref = mx.fast.scaled_dot_product_attention(
+        q.astype(mx.float32), kk.astype(mx.float32), vv.astype(mx.float32),
+        scale=D ** -0.5, mask=mask)
+    assert mx.abs(got.astype(mx.float32) - ref).max().item() < 3e-2
+
+
+def test_keys_transformed_after_the_fetch_fall_back_and_count_a_miss(
+        monkeypatch):
+    """GLM-style: the attention reshapes/projects the fetched keys before
+    sdpa. The kernel must not run on the cache's packed K/V then."""
+    from knurlogic.engine import kvattn, kvquant
+    monkeypatch.delenv(kvattn.ENV, raising=False)
+    kvattn.reset(True)
+    c = kvquant.QuantKVCache(8)
+    c.kv8_kernel = True
+    D = 128
+    k = mx.random.normal((1, 2, 40, D)).astype(mx.bfloat16)
+    c.update_and_fetch(k, k)
+    kk, vv = c.update_and_fetch(k[:, :, :1], k[:, :, :1])
+    kk2 = kk * 2                                         # transformed
+    q = mx.random.normal((1, 4, 1, D)).astype(mx.bfloat16)
+    got = kvattn.sdpa(q, kk2, vv, c, D ** -0.5, None)
+    ref = mx.fast.scaled_dot_product_attention(q, kk2, vv, scale=D ** -0.5)
+    assert mx.allclose(got, ref)
+    assert kvattn.STATS["misses"] == 1 and kvattn.STATS["hits"] == 0
+    # an attention that never calls sdpa: counted at the next fetch
+    c.update_and_fetch(k[:, :, :1], k[:, :, :1])
+    c.update_and_fetch(k[:, :, :1], k[:, :, :1])
+    assert kvattn.STATS["misses"] == 2
+    from knurlogic.engine.serve import state
+    assert state.SERVED["kv_kernel"] is kvattn.STATS

@@ -13,7 +13,9 @@ context, 65.5 / 54.0 / 61.9 at 16k (tools/kv8/README.md).
 
 HOW IT IS WIRED, without touching a family's attention: kvquant's caches
 still return dequantized arrays from `update_and_fetch` -- lazily, so if
-nothing reads them they are never computed -- and, for a short query,
+nothing reads them they are never computed (gemma4's KV-shared layers do
+read them: they attend over the owner's returned keys with cache=None, so
+those layers still pay the dequantize) -- and, for a decode step,
 remember (returned keys, packed K, packed V). `install` rebinds the
 `scaled_dot_product_attention` name in the model's own modules to `sdpa`
 below, which takes the kernel when it is handed exactly the keys that cache
@@ -29,14 +31,56 @@ shared across heads (a batch's left padding, ragged rows). Anything else --
 sinks, an additive or per-head mask, head dim 64, GLM's MLA latent (its
 own attention function, not rebound) -- takes the old path.
 
+One difference from mlx sdpa: a query row with EVERY key masked returns
+0 here, where mlx sdpa returns NaN.
+
 `KNURLOGIC_KV_KERNEL=off` turns it off (tuning/settings.py), for A/B.
+Whether it is actually live is counted, not assumed: `STATS` (hits: decode
+attentions it served; misses: a decode step the cache offered it that took
+dequantize + sdpa -- keys transformed after the fetch, as GLM's MLA does,
+an unsupported shape, or an attention that calls mx.fast directly) is
+state.SERVED["kv_kernel"] and /status.json's kv_kernel, and the first
+hit and first miss are each logged once.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
 import mlx.core as mx
+
+logger = logging.getLogger(__name__)
+
+#: {on, hits, misses, last_miss}: live counters (state.SERVED["kv_kernel"]
+#: is this same dict)
+STATS: dict = {"on": False, "hits": 0, "misses": 0, "last_miss": None}
+_LOGGED = set()
+
+
+def reset(on: bool) -> None:
+    """Zero the counters for a newly installed model and publish them."""
+    STATS.update(on=bool(on), hits=0, misses=0, last_miss=None)
+    _LOGGED.clear()
+    from knurlogic.engine.serve import state
+    state.SERVED["kv_kernel"] = STATS
+
+
+def count(hit: bool, why: str = "") -> None:
+    """One decode attention: through the kernel (hit) or not (miss)."""
+    if hit:
+        STATS["hits"] += 1
+    else:
+        STATS["misses"] += 1
+        STATS["last_miss"] = why
+    if hit not in _LOGGED:
+        _LOGGED.add(hit)
+        if hit:
+            logger.info("kv kernel: live -- 8-bit decode reads the packed "
+                        "K/V (engine/kvattn)")
+        else:
+            logger.warning("kv kernel: a decode step fell back to "
+                           "dequantize + sdpa: %s", why)
 
 #: query rows per KV head (GQA ratio x query length) the kernel takes
 MAX_ROWS = 64
@@ -90,6 +134,17 @@ _SRC = r"""
     size_t sb = (size_t)b * ks_strides[0] + (size_t)h * ks_strides[1];
     size_t vb = (size_t)b * vw_strides[0] + (size_t)h * vw_strides[1];
     size_t tb = (size_t)b * vs_strides[0] + (size_t)h * vs_strides[1];
+#if SAME_LAYOUT
+    // bias laid out exactly like its scale (kvquant's caches, by
+    // construction): one index for both -- separate strides cost ~10%
+#define KBI(n) kbias[sb + (size_t)(n) * ks_strides[2] + gi]
+#define VBI(n) vbias[tb + (size_t)(n) * vs_strides[2] + gi]
+#else
+    size_t kbb = (size_t)b * kbias_strides[0] + (size_t)h * kbias_strides[1];
+    size_t vbb = (size_t)b * vbias_strides[0] + (size_t)h * vbias_strides[1];
+#define KBI(n) kbias[kbb + (size_t)(n) * kbias_strides[2] + gi]
+#define VBI(n) vbias[vbb + (size_t)(n) * vbias_strides[2] + gi]
+#endif
     for (int n = n0 + sg; n < n1; n += SG) {
         bool any = true;
 #if HAS_MASK
@@ -104,10 +159,12 @@ _SRC = r"""
             for (int e = 0; e < EPW; e++) kx[w * EPW + e] = float((word >> (e * BITS)) & MASKB);
         }
         size_t si = sb + (size_t)n * ks_strides[2] + gi;
-        float ksc = float(ks[si]), kbi = float(kbias[si]);
+        float ksc = float(ks[si]);
+        float kbi = float(KBI(n));
         size_t vr = vb + (size_t)n * vw_strides[2] + lane * WPL;
         size_t ti = tb + (size_t)n * vs_strides[2] + gi;
-        float vsc = float(vs[ti]), vbi = float(vbias[ti]);
+        float vsc = float(vs[ti]);
+        float vbi = float(VBI(n));
         float vx[DPL];
         for (int w = 0; w < WPL; w++) {
             uint word = vw[vr + w];
@@ -157,16 +214,18 @@ _CSRC = r"""
 _K = {}
 
 
-def _kernel(has_mask: bool):
-    k = _K.get(has_mask)
+def _kernel(has_mask: bool, same: bool):
+    key = (has_mask, same)
+    k = _K.get(key)
     if k is None:
         ins = ["q", "scale", "kw", "ks", "kbias", "vw", "vs", "vbias"]
         if has_mask:
             ins.append("mask")
-        k = _K[has_mask] = mx.fast.metal_kernel(
-            name=f"kl_kv8_decode_{int(has_mask)}", input_names=ins,
-            output_names=["out_o", "out_m", "out_l"],
-            header=f"#define HAS_MASK {int(has_mask)}\n",
+        k = _K[key] = mx.fast.metal_kernel(
+            name=f"kl_kv8_decode_{int(has_mask)}{int(same)}",
+            input_names=ins, output_names=["out_o", "out_m", "out_l"],
+            header=(f"#define HAS_MASK {int(has_mask)}\n"
+                    f"#define SAME_LAYOUT {int(same)}\n"),
             source=_SRC, ensure_row_contiguous=False)
     return k
 
@@ -192,6 +251,9 @@ def supports(q, K, V, bits: int, group: int, mask=None, sinks=None) -> bool:
         return False
     if group % (D // 32) or D % group or K[0].shape[0] != B:
         return False
+    for w, sc, bi in (K, V):
+        if sc.shape != bi.shape or sc.shape[:3] != w.shape[:3]:
+            return False
     if (H // Hk) * L > MAX_ROWS:
         return False
     if q.dtype not in (mx.bfloat16, mx.float16, mx.float32):
@@ -221,10 +283,15 @@ def _mask_rows(mask, B, L, N):
 
 
 def decode_sdpa(q, K, V, scale: float, mask=None, group: int = 64,
-                bits: int = 8):
+                bits: int = 8, same_layout: bool = False):
     """Attention of q (B, H, L, D) over K, V -- each the kvquant triple
     (packed uint32, scales, biases) of shape (B, Hk, N, *) -- with mlx
-    sdpa's semantics. Returns (B, H, L, D) in q's dtype."""
+    sdpa's semantics. Returns (B, H, L, D) in q's dtype.
+
+    `same_layout`: each bias is laid out exactly like its scale (same
+    shape and strides), so the kernel indexes both with the scale's
+    strides. True only for kvquant's caches, which allocate and slice the
+    two together; any other caller reads each bias at its own strides."""
     B, H, L, D = q.shape
     Hk, N = K[0].shape[1], K[0].shape[2]
     rep = H // Hk
@@ -237,7 +304,7 @@ def decode_sdpa(q, K, V, scale: float, mask=None, group: int = 64,
         ins.append(mx.contiguous(m))
     slots = nblk * SG
     rc = next(c for c in range(min(RC, R), 0, -1) if R % c == 0)
-    o, mm, ll = _kernel(m is not None)(
+    o, mm, ll = _kernel(m is not None, same_layout)(
         inputs=ins,
         template=[("BITS", bits), ("D", D), ("G", group), ("R", R),
                   ("L", L), ("NB", NB), ("SG", SG), ("RC", rc)],
@@ -268,8 +335,16 @@ def sdpa(queries, keys, values, cache, scale, mask, sinks=None):
     if hit is not None:
         cache.kv8_fetch = None
         kret, K, V, g = hit
-        if kret is keys and supports(queries, K, V, 8, g, mask, sinks):
-            return decode_sdpa(queries, K, V, scale, mask, g, 8)
+        if kret is not keys:
+            count(False, "keys changed between the cache and the attention")
+        elif not supports(queries, K, V, 8, g, mask, sinks):
+            count(False, f"unsupported: q {tuple(queries.shape)}, mask "
+                         f"{getattr(mask, 'shape', mask)}, sinks "
+                         f"{sinks is not None}")
+        else:
+            count(True)
+            return decode_sdpa(queries, K, V, scale, mask, g, 8,
+                               same_layout=True)
     return _base_sdpa()(queries, keys, values, cache=cache, scale=scale,
                         mask=mask, sinks=sinks)
 
