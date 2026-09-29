@@ -62,26 +62,49 @@ DECODE_CHUNK_HEADROOM_DIVISOR = 8
 # tests/test_mtp_prefill.py gates this) -- purely a memory knob. mlx-lm's
 # server does not expose it, which is why it must be resolved here.
 #
-# 512 by default, every family, every box -- small chunk, parallel agents.
+# Chosen from the room ACTUALLY free at launch (the load budget: the
+# smaller of the working set and what macOS would hand over now), never
+# from installed RAM. "No reason to leave headroom unused, but read the
+# room": take the widest width on the ladder, capped at the family's
+# measured best, whose predicted step transient fits in
+# PREFILL_TRANSIENT_ROOM_SHARE of the room left after the weights, a KV
+# allowance and the reclaimable (prompt) cache; else step down, floor 512.
+# A family with no measurement stays 512.
+#
 # M4 sweep 2026-09-26, prefill tok/s at 4k/16k-token prompts (median of 3,
 # one server per arm), then the step transient:
 #   Qwen3.8 Flash 4.4bpw:  512 565/484 0.79 GiB | 1024 528/490 0.99
 #                          2048 552/524 2.11    | 4096 551/499 4.05
 #   Qwen3.5-397B VQ 2.2:   512 194/155 0.33 GiB | 1024 224/186 1.15-1.54
 #                          2048 244/205 2.95    | 4096 249/206 5.6-7.5
-# Width buys nothing on Flash, and up to ~30% prefill on the 397B VQ for a
-# 9-23x larger transient (4096 aborted Metal with one agent at 25k tokens).
-# A family's measured width is taken only on purpose: tune=fast on a box
-# with room, or set per base model.
+# M4 Max 128 GB 2026-09-29, Qwen3.6-35B-A3B VQ 3.4 (13.8 GiB), 28,727-token
+# prompt, interleaved, n=3, prefill tok/s:
+#   512 642.7/642.6/649.5 | 2048 1182.9/1164.5/1141.9 | 4096 1173.2/1166.5/1133.8
+# So width is worth ~1.8x on the 35B-A3B up to 2048 and nothing past it;
+# ~30% on the 397B VQ for a 9-23x larger transient -- 4096 aborted Metal
+# with one agent at 25k tokens on a box with ~14 GiB left, which is what
+# the room rule keeps at 512.
 PREFILL_CHUNK_DEFAULT = 512
 PREFILL_CHUNK_TIGHT = 512
+#: The widths the room rule may choose from (and the knob's native range).
+PREFILL_CHUNK_LADDER = (512, 1024, 2048, 4096)
+#: Predicted step transient per prompt token per unit of hidden size:
+#: transient(width) = width * hidden_size * this. Calibrated to the WORST
+#: measured case, the 397B VQ at 4096 (7.5 GiB, hidden 4096): 7.5 GiB /
+#: (4096 * 4096) = 480 bytes. It over-predicts the milder rungs (0.94 vs
+#: 0.33 GiB at 512 on the 397B), which is the safe direction.
+PREFILL_TRANSIENT_BYTES_PER_TOKEN_HIDDEN = 480
+#: The transient may take at most this share of the room left.
+PREFILL_TRANSIENT_ROOM_SHARE = 0.10
+#: KV held back before the rule sizes a chunk: one long conversation.
+PREFILL_KV_ALLOWANCE_TOKENS = 32768
 
 # Per-ARCHITECTURE prompt chunk: a measurement with its run, kept in each
 # family's manifest (engine/families/<family>/__init__.py, `prefill_chunk`)
 # beside the rest of what that family is. Carried from the exo fork
 # (PREFILL_STEP_SIZE_BY_FAMILY), where it was keyed by a model-id substring.
-# Not measured means PREFILL_CHUNK_DEFAULT. A tight box still wins over a
-# measured width: it is a width that fit on the box it was measured on.
+# Not measured means PREFILL_CHUNK_DEFAULT. A measured width is a CAP, not
+# a default: the room rule (above) decides how much of it this launch takes.
 def _measured_widths() -> dict:
     from knurlogic.engine import families
     return families.build_maps()["prefill_chunk"]
@@ -219,14 +242,12 @@ TUNE_PROFILES = {
         "why": "the measured defaults",
     },
     "fast": {
-        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_DEFAULT,
         "VQLAB_CACHE_LIMIT_GB": 8.0,
         "decode_chunk_scale": 1.0,   # capped: smaller is already faster
         "launch": {"mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16",
                    "cross_chip": "off"},
-        "why": "spends headroom where it actually buys speed -- the "
-               "family's measured wider prompt chunk where the box has room, "
-               "a larger reclaimable cache, MTP with its dynamic controller, "
+        "why": "spends headroom where it actually buys speed -- a "
+               "larger reclaimable cache, MTP with its dynamic controller, "
                "bf16 KV. It does NOT raise the decode chunk, because smaller "
                "is faster there as well as smaller in memory",
     },
@@ -267,19 +288,26 @@ PRESET_GUIDE = {
         "trades": "Neither extreme: the measured defaults. Leaves speed on "
                   "the table on a roomy machine, and more memory in use "
                   "than lean or safe on a tight one.",
-        "changes": "Each family's measured prompt chunk (512 tokens), the "
-                   "default reclaimable cache, MTP as the family ships it.",
+        "changes": "The prompt chunk read from the room free at launch: "
+                   "the widest of 512/1024/2048/4096, up to the family's "
+                   "measured best, whose step spike fits in 10% of the "
+                   "room left after weights, KV and cache (512 where "
+                   "the family is unmeasured or the room is small). On "
+                   "the 35B-A3B that is 2048 on a roomy M4 -- ~1.8x "
+                   "prefill over 512 (1163 vs 645 tok/s, 28.7k tokens) "
+                   "-- and 512 for the 397B with ~14 GiB left. Default "
+                   "reclaimable cache, MTP as the family ships it.",
         "who": "Most people. Start here and move only for a reason.",
     },
     "fast": {
         "title": "Fast",
         "trades": "Memory headroom for speed: faster prompts and replies "
-                  "(wider prompt chunks: up to ~30% faster prefill on the "
-                  "397B, with a 9-23x larger memory spike), less room left "
-                  "for long contexts and parallel agents; timing varies "
-                  "as dynamic MTP switches.",
-        "changes": "The family's wider measured prompt chunk where the "
-                   "machine has room, a larger reclaimable cache (8 GiB), "
+                  "(the prompt chunk follows the same room rule as "
+                  "balanced), less room left for long contexts and "
+                  "parallel agents; timing varies as dynamic MTP switches.",
+        "changes": "The same room-read prompt chunk as balanced (the "
+                   "larger cache leaves slightly less room for it), a "
+                   "larger reclaimable cache (8 GiB), "
                    "MTP with its dynamic controller, bf16 KV cache.",
         "who": "One person, one conversation at a time, on a machine with "
                "memory to spare.",
@@ -369,11 +397,16 @@ KNOB_DOC = {
         "prefill memory spike further; the speed below 32 is not measured."),
     "KNURLOGIC_PREFILL_CHUNK": (
         "how many prompt tokens are processed at once",
-        "wider can prefill faster -- up to ~30% on the 397B VQ, nothing on "
-        "Qwen3.8 Flash (M4, 2026-09-26) -- but each step's memory spike "
-        "grows 9-23x from 512 to 4096, which is what runs a long prompt or "
-        "parallel agents out of memory. Output is identical at every "
-        "width."),
+        "wider can prefill faster -- ~1.8x from 512 to 2048 on the "
+        "35B-A3B VQ (645 -> 1163 tok/s at 28.7k tokens, M4, 4096 no "
+        "better), up to ~30% on the 397B VQ, nothing on Qwen3.8 Flash -- "
+        "but each step's memory spike grows 9-23x from 512 to 4096, which "
+        "is what runs a long prompt or parallel agents out of memory. "
+        "Unset, it is read from the room free at launch: the widest "
+        "width up to the family's measured best whose predicted spike "
+        "fits in 10% of the room left after weights, KV and cache, else "
+        "512 (safe, stable, lean: always 512). Output is identical at "
+        "every width."),
     "KNURLOGIC_CONTEXT_LENGTH": (
         "the longest conversation (prompt + answer, in tokens) a request may "
         "use",
