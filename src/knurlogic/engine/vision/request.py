@@ -236,7 +236,7 @@ class VisionServe:
             req._knurlogic_encoded = self.encodes - before
             try:                    # and on the original, whichever the
                 request._knurlogic_encoded = req._knurlogic_encoded
-            except Exception:       # cache hook ends up holding
+            except (AttributeError, TypeError):  # cache hook ends up holding
                 pass
             prompt, segments, types, state = real(gen, tokenizer, req, args)
             key, seg_keys = K.expand_segments(segments, refs,

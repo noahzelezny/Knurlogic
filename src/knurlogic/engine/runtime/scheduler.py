@@ -124,7 +124,7 @@ def _cache_nbytes(cache) -> int:
         try:
             n += int(getattr(c, "nbytes", 0) or 0)
         except Exception:
-            pass
+            pass    # an estimate: a layer that cannot report its size counts 0
     return n
 
 
@@ -139,7 +139,7 @@ def _fixed_nbytes(cache) -> int:
             if callable(t) and not t():
                 n += int(getattr(c, "nbytes", 0) or 0)
         except Exception:
-            pass
+            pass    # an estimate: a layer that cannot report its size counts 0
     return n
 
 
@@ -985,7 +985,8 @@ class Scheduler:
         one checkpoint, a 57k-token prompt beside two running rows was
         charged 7.3 GiB, grew memory 21.3, and the next step aborted
         Metal."""
-        one = lambda n: self._cost(n, 1)                  # noqa: E731
+        def one(n):
+            return self._cost(n, 1)
         need = one(n_tokens) + sum(one(c) for c in checkpoints)
         if self._rows:
             need += one(n_tokens)

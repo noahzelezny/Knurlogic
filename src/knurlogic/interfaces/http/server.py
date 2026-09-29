@@ -261,7 +261,7 @@ class App:
                 try:
                     box["run"] = C.summarize(run, pending, out,
                                              self._generate)
-                except BaseException as e:      # noqa: BLE001
+                except BaseException as e:  # any end of the worker becomes the reply
                     box["error"] = e
             t = threading.Thread(target=work, daemon=True)
             t.start()
@@ -422,7 +422,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._error(O.ApiError(500, f"{type(e).__name__}: {e}"))
             except Exception:
-                pass
+                pass    # the client is gone; the failure is logged above
 
     def _get(self):
         u = urlparse(self.path)

@@ -22,9 +22,12 @@ server holds, in OpenAI's shapes and nothing custom:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from .openai import ApiError
+
+logger = logging.getLogger(__name__)
 
 
 def _capabilities() -> list:
@@ -36,7 +39,7 @@ def _capabilities() -> list:
         if thinking.status().get("dialect"):
             caps.append("thinking")
     except Exception:
-        pass
+        logger.debug("thinking status unavailable", exc_info=True)
     return caps
 
 

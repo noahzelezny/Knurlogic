@@ -29,6 +29,7 @@ written atomically. It holds addresses, not secrets.
 
 from __future__ import annotations
 
+import logging
 import json
 import os
 import threading
@@ -38,6 +39,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from knurlogic.machine.status import SCHEMA
+
+logger = logging.getLogger(__name__)
 
 HEADER = "X-Knurlogic-Peer"
 STORE_SCHEMA = 1
@@ -425,7 +428,7 @@ class Peers:
                     try:
                         self.refresh()
                     except Exception:
-                        pass
+                        logger.debug("peer refresh failed; retrying in %ss", REFRESH_S, exc_info=True)
                     time.sleep(REFRESH_S)
             self._thread = threading.Thread(target=loop, daemon=True,
                                             name="knurlogic-peers")

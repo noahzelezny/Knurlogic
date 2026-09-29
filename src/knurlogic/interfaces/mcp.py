@@ -67,7 +67,7 @@ def ready(**_) -> Dict[str, Any]:
     Every reason it is not, named: a load still reading weights moves memory,
     so a fit measured now would be stale.
     """
-    from knurlogic.interfaces.page import server as ui
+    from knurlogic.interfaces.page import server as page_server
     # A second load let through while the first was still reading weights,
     # on a budget that did not yet count them, is the race this gate ends.
     blockers = [{"what": "a knurlogic server is still loading",
@@ -78,7 +78,7 @@ def ready(**_) -> Dict[str, Any]:
                             "last_log_line": c.get("last_log_line", "")},
                  "why": "memory is about to change; a fit measured now is "
                         "stale"}
-                for c in ui.loading()]
+                for c in page_server.loading()]
     # The load lock (P0/`machine/loadlock.py`) is a second source of the same
     # blocker: a load started by a DIFFERENT process (another agent, `serve`
     # run by hand) holds it and would not otherwise show up in `ui.loading()`,
@@ -180,7 +180,7 @@ def state(**_) -> Dict[str, Any]:
     from knurlogic.machine import loaded
     doc = loaded.survey()
     m = doc.get("memory") or {}
-    from knurlogic.interfaces.page import server as ui
+    from knurlogic.interfaces.page import server as page_server
     from knurlogic.engine.vision import served_vision
     spec = served_vision()
     # across machines: what the page on this Mac sees (its own residency and
@@ -202,7 +202,7 @@ def state(**_) -> Dict[str, Any]:
         **({"page": page_note} if page_note else {}),
         "resident": doc.get("resident", []),
         "runtimes": doc.get("runtimes", []),
-        "started_here": ui.children(),
+        "started_here": page_server.children(),
         # per knurlogic model: in_flight, pending, capacity,
         # oldest_pending_s, holding (its server's /status.json `requests`)
         "requests": [dict(r["requests"], model=r["name"], where=r["where"],
@@ -496,8 +496,8 @@ def settings(artifact: str = "", tune: str = "balanced", **_) -> Dict[str, Any]:
     The `why` is the point. A knob without its provenance is one an agent
     changes for no reason, and these were expensive to establish.
     """
-    from knurlogic.interfaces.page import documents as web
-    doc = web._preview(artifact, tune)
+    from knurlogic.interfaces.page import documents
+    doc = documents._preview(artifact, tune)
     from knurlogic.machine.artifact import Artifact
     from knurlogic.tuning.resolve import vision_budget
     try:
@@ -548,7 +548,7 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
     if names:
         return _load_on(names, artifact, port, tune, sets, force, draft,
                         split, link, cable)
-    from knurlogic.interfaces.page import server as ui
+    from knurlogic.interfaces.page import server as page_server
     from knurlogic.interfaces.loading import NotLoadable, resolve_name
 
     # a model named, never a directory (interfaces/loading.py): the same
@@ -571,7 +571,7 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
                         "the fit above is stale. Poll `state` -- each server "
                         "says loading, serving or stalled -- then call "
                         "`ready` again. force=true loads anyway."}
-    out = ui._spawn(artifact, int(port), tune, dict(sets or {}),
+    out = page_server._spawn(artifact, int(port), tune, dict(sets or {}),
                     draft=bool(draft))
     out["fit"] = f
     out["ready"] = r
@@ -619,8 +619,8 @@ def _artifact_name(artifact: str) -> str:
 def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
              cable) -> Dict[str, Any]:
     """`load` on other machines: the page's Launch request, sent to the
-    page on this Mac (ui._load_fn), which forwards a one-peer load and
-    coordinates a cluster (cluster_jobs.launch)."""
+    page on this Mac (page_server._load_fn), which forwards a one-peer load and
+    coordinates a cluster (cluster/launch.launch)."""
     if len(set(names)) != len(names):
         return {"loaded": False, "refused": "a machine is named twice"}
     if len(names) >= 2:
@@ -685,14 +685,14 @@ def unload(port: int | None = None, model: str = "", job: str = "",
     `models[].instance` -- a single-Mac server's own 16-hex id, or a
     cluster job's id (its instance is its job id, so `instance` and `job`
     both find it)."""
-    from knurlogic.interfaces.page import server as ui
+    from knurlogic.interfaces.page import server as page_server
     if not (port or model or job or instance):
         return {"error": "name the port, the model, the job or the instance"}
     try:
         page = _page_get("/loaded.json?peers=1")
     except PageDown as e:
         if port and not (model or job or instance or machine):
-            return ui._stop(int(port))      # this Mac, without its page
+            return page_server._stop(int(port))      # this Mac, without its page
         return {"error": str(e)}
     here = _me_name()
     rows = [r for r in models_across(page, here)
@@ -716,7 +716,7 @@ def unload(port: int | None = None, model: str = "", job: str = "",
             hit = [r for r in hit if r.get("port") == int(port)]
     if not hit:
         if port and not (model or job or instance or machine):
-            return ui._stop(int(port))      # e.g. a server still loading
+            return page_server._stop(int(port))      # e.g. a server still loading
         return {"error": "no knurlogic model matches that",
                 "resident": [{k: r.get(k) for k in
                               ("name", "machine", "port", "job", "instance")}

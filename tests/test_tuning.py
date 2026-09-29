@@ -335,7 +335,7 @@ def test_a_dial_offers_only_positions_that_were_measured():
 def test_the_cache_dial_stops_at_what_the_box_can_hold(tmp_path):
     """A control that lets you pick a setting the resolver would refuse is a
     control that lies. The cap is headroom, and it says so."""
-    from knurlogic.interfaces.page import documents as web
+    from knurlogic.interfaces.page import documents
     from knurlogic.machine.artifact import Artifact
     (tmp_path / "config.json").write_text(
         '{"model_type":"x","model_file":"model.py","vq_linear":{"a":1},'
@@ -346,7 +346,7 @@ def test_the_cache_dial_stops_at_what_the_box_can_hold(tmp_path):
     a = Artifact.load(tmp_path)
     object.__setattr__(a, "bytes_on_disk", 70 * GIB)
 
-    doc = web.settings_document(
+    doc = documents.settings_document(
         a, live_env={}, live_tune="balanced", live_working_set=76 * GIB,
         resolve_fn=lambda ws, t: resolve(a, ws, tune=t),
         live_knobs=("VQLAB_CACHE_LIMIT_GB",))
@@ -426,7 +426,7 @@ def test_preview_reads_and_sets_nothing(tmp_path, monkeypatch):
     import json
     import os
 
-    from knurlogic.interfaces.page import documents as web
+    from knurlogic.interfaces.page import documents
 
     d = tmp_path / "m"
     d.mkdir()
@@ -436,7 +436,7 @@ def test_preview_reads_and_sets_nothing(tmp_path, monkeypatch):
     (d / "model.safetensors").write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")
 
     before = dict(os.environ)
-    doc = web._preview(str(d), "balanced", 84)
+    doc = documents._preview(str(d), "balanced", 84)
     assert doc["preview"] is True
     assert doc["artifact"]["name"] == "m"
     assert {k["name"] for k in doc["knobs"]}          # it resolved something
@@ -448,7 +448,7 @@ def test_preview_says_which_knobs_are_launch_only(tmp_path):
     `restart` cannot be changed afterwards at all."""
     import json
 
-    from knurlogic.interfaces.page import documents as web
+    from knurlogic.interfaces.page import documents
 
     d = tmp_path / "m"
     d.mkdir()
@@ -457,7 +457,7 @@ def test_preview_says_which_knobs_are_launch_only(tmp_path):
         "moe_intermediate_size": 768,
         "vq_modules": {"a": {"d": 2, "K": 256}}}))
     (d / "model.safetensors").write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")
-    doc = web._preview(str(d), "balanced", 84)
+    doc = documents._preview(str(d), "balanced", 84)
     reach = {k["name"]: k["reach"] for k in doc["knobs"]}
     assert any(v == "restart" for v in reach.values())
     assert all(k["reach_why"] for k in doc["knobs"])

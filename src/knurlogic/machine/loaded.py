@@ -606,7 +606,7 @@ def memory_map(floor: int = 256 << 20) -> dict:
         total = int(subprocess.run(["sysctl", "-n", "hw.memsize"],
                                    capture_output=True, text=True,
                                    timeout=5).stdout.strip() or 0)
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         pass
     seen = sum(r["bytes"] for r in rows)
     rt = sum(by_runtime.values())

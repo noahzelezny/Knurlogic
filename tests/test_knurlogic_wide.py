@@ -6,8 +6,8 @@ import json
 import pytest
 
 from knurlogic.context_management import compaction as C
-from knurlogic.interfaces.page import documents as web
-from knurlogic.interfaces.page import server as ui
+from knurlogic.interfaces.page import documents
+from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import preferences
 from knurlogic.tuning import settings as S
 
@@ -55,7 +55,7 @@ def test_compaction_is_read_per_request_and_beats_a_servers_env(
 
 def test_compaction_document_is_one_live_set(home):
     preferences.set({"KNURLOGIC_COMPACT_TRIGGER": "0.6"})
-    doc = web.compaction_document()
+    doc = documents.compaction_document()
     by = {k["name"]: k for k in doc["knobs"]}
     assert set(by) == set(S.COMPACT_KNOBS)
     assert by["KNURLOGIC_COMPACT_TRIGGER"]["value"] == "0.6"
@@ -64,7 +64,7 @@ def test_compaction_document_is_one_live_set(home):
 
 
 def test_peer_machine_saves_knurlogic_wide_settings(home):
-    code, doc = ui.peer_machine(json.dumps(
+    code, doc = page_server.peer_machine(json.dumps(
         {"strategy": "stable",
          "settings": {"KNURLOGIC_CROSS_CHIP": "auto",
                       "KNURLOGIC_COMPACT_AUTO": "on"}}).encode())
@@ -72,18 +72,18 @@ def test_peer_machine_saves_knurlogic_wide_settings(home):
     assert doc["knurlogic"]["saved"] == {"KNURLOGIC_CROSS_CHIP": "auto",
                                          "KNURLOGIC_COMPACT_AUTO": "on"}
     assert doc["knurlogic"]["cross_chip"]["value"] == "auto"
-    code, doc = ui.peer_machine(
+    code, doc = page_server.peer_machine(
         b'{"settings": {"KNURLOGIC_PREFILL_CHUNK": "512"}}')
     assert code == 400
     assert preferences.get()["KNURLOGIC_CROSS_CHIP"] == "auto"
 
 
 def test_set_knurlogic_clears_and_reports(home):
-    out = web.set_knurlogic(b'{"KNURLOGIC_CROSS_CHIP": "on"}')
+    out = documents.set_knurlogic(b'{"KNURLOGIC_CROSS_CHIP": "on"}')
     assert out["applied"] == {"KNURLOGIC_CROSS_CHIP": "on"}
-    out = web.set_knurlogic(b'{"KNURLOGIC_CROSS_CHIP": ""}')
+    out = documents.set_knurlogic(b'{"KNURLOGIC_CROSS_CHIP": ""}')
     assert out["applied"] == {"KNURLOGIC_CROSS_CHIP": "cleared"}
-    assert "error" in web.set_knurlogic(b'{"KNURLOGIC_CROSS_CHIP": "x"}')
+    assert "error" in documents.set_knurlogic(b'{"KNURLOGIC_CROSS_CHIP": "x"}')
 
 
 def test_every_setting_says_what_it_costs():

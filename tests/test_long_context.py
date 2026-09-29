@@ -142,13 +142,13 @@ def test_a_context_the_box_cannot_hold_is_refused_with_the_numbers():
 
 
 def test_the_page_accepts_a_million_tokens_only_with_yarn():
-    from knurlogic.interfaces.page import documents as web
+    from knurlogic.interfaces.page import documents
     a = _art()
-    assert web.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "1000000"})
-    assert web.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "1000000",
+    assert documents.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "1000000"})
+    assert documents.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "1000000",
                                "KNURLOGIC_LONG_CONTEXT": "yarn"}) is None
     glm = _art({"model_type": "glm5_next", "max_position_embeddings": 202752})
-    assert "refused" in web.refuse_sets(glm, {"KNURLOGIC_LONG_CONTEXT": "yarn"})
+    assert "refused" in documents.refuse_sets(glm, {"KNURLOGIC_LONG_CONTEXT": "yarn"})
 
 
 def test_the_loader_overlays_from_the_launch_env(tmp_path):

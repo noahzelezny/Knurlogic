@@ -846,7 +846,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
     if split == "pipeline":
         from . import pipeline as PL
         shares = PL.agree(link.group, **(pipeline or {}))
-        print(f"pipeline  rank {link.rank}: {shares['reason']}", flush=True)
+        logger.info("pipeline  rank %s: %s", link.rank, shares["reason"])
         cut = (lambda m: PL.split(m, link.group, shares["bounds"]))
     else:
         cut = (lambda m: shard(m, link.group))
