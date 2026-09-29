@@ -1,26 +1,17 @@
 """Sampling for speculative decoding: the same distribution mlx-lm would
 sample from, plus exact rejection sampling with residual correction.
 
-The samplers are mlx-lm's (`mlx_lm.sample_utils`, Apache-2.0). We do not
-reimplement top-p/top-k/min-p/XTC or the penalties — we adapt the *shape* of
-mlx-lm's sampler, which returns a token, into one that also returns the
-normalized distribution it sampled from, because speculative verification
-needs the probabilities and not just the draw.
+The samplers are mlx-lm's (`mlx_lm.sample_utils`, Apache-2.0), not
+reimplemented: mlx-lm's sampler, which returns a token, is adapted into one
+that also returns the normalized distribution it sampled from. Filter order
+matches `make_sampler` (filters on unscaled logprobs, temperature at the
+categorical draw).
 
-Filter order matches `make_sampler` exactly: the filters run on unscaled
-logprobs and the temperature is applied at the categorical draw. So for the
-same parameters a token from `Distribution.sample` is drawn from the same
-distribution `mlx_lm`'s sampler would have used.
-
-Correction (Leviathan et al. 2023, "Fast Inference from Transformers via
-Speculative Decoding"; Chen et al. 2023): given a draft x ~ q and the target p,
-
-    accept x with probability min(1, p(x)/q(x));
-    otherwise draw from the normalized residual max(p - q, 0).
-
-The resulting draw is distributed exactly as p, for ANY q. That is what makes
-a bad draft cost speed and never quality — the same guarantee greedy decoding
-gets from `argmax(p) == x`, which is this rule's zero-temperature limit.
+Correction (Leviathan et al. 2023; Chen et al. 2023): given a draft x ~ q
+and the target p, accept x with probability min(1, p(x)/q(x)); otherwise
+draw from the normalized residual max(p - q, 0). The result is distributed
+exactly as p for ANY q, so a bad draft costs speed, never quality;
+`argmax(p) == x` is the zero-temperature limit.
 """
 from __future__ import annotations
 

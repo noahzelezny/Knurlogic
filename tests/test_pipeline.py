@@ -82,9 +82,9 @@ def test_uneven_layers_are_checked_exactly():
 
 def test_one_huge_layer_is_placed_by_bytes_not_by_count():
     # Qwen3.8-Flash-Next-6bit: 48 layers of 1.96 GiB, and layer 1 also
-    # holds a 41.7 GiB n-gram embedding. By count the M3 (rank 1, first
-    # layers) got 18 layers = 79 GiB against 72.8 it holds, and the model
-    # was refused though it fits the pair with room
+    # holds a 41.7 GiB n-gram embedding. By count the M3 Ultra (rank 1,
+    # first layers) would get 18 layers = 79 GiB against 72.8 it holds, and
+    # the model would be refused though it fits the pair with room
     per = [int(1.96 * GIB)] * 48
     per[1] += int(41.75 * GIB)
     s = R.pipeline_shares(per, _ranks(120, 84), other_bytes=GIB)
@@ -338,8 +338,8 @@ def test_a_row_failing_on_rank_0_only_fails_that_row(tmp_path, split, fail):
 
 def test_a_heavy_first_layer_is_balanced_by_bytes_not_count():
     # Qwen3.8 Flash: layer 1 carries a 42 GiB n-gram embedding. Counted, the
-    # smaller M3 took 19 layers = 63.5 GiB and fit with 13 GiB to spare while
-    # the M4 kept 70; by bytes each rank fills about the same fraction.
+    # smaller M3 Ultra takes 19 layers = 63.5 GiB with 13 GiB to spare while
+    # the M4 Max keeps 70; by bytes each rank fills about the same fraction.
     per = [0.5 * GIB, 42 * GIB] + [1.4 * GIB] * 46
     s = R.pipeline_shares(per, _ranks(120, 84))
     fill = [s["bytes"][i] / (w * GIB) for i, w in enumerate((120, 84))]

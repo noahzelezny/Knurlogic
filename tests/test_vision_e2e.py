@@ -1,6 +1,6 @@
 """Vision end to end: every REAL family through the REAL serve path.
 
-P4 built and tested the serve path against P0's StubFamily only
+The serve path's own tests use the shared StubFamily only
 (positions -> (None, 0), no extras). The real families disagree with it on
 the join -- what `embed` returns, what `positions` means in decode, what the
 trunk calls its keywords, what a forward returns. This file runs each tiny
@@ -11,7 +11,7 @@ engine/vision/request.py inside it), the real `LRUPromptCache`, and
 
   E1  turn 1 (image + text): greedy tokens == the family's own model-level
       reference forward (embed + positions -> trunk, one shot, the path
-      P1/P2/P3 tested) for the same input.
+      each family's own tests use) for the same input.
   E2  turn 2 (text only), WARM from turn 1's prompt-cache entry == COLD
       (fresh server): tokens identical, first-token logprobs close. G7b
       through the real path; for Qwen it fails if rope_delta is lost on the
@@ -178,7 +178,7 @@ def _qwen_rig(fam, tmp):
 
 
 #: gemma: 6 layers, not the scaler's 35 (fixtures_vision leaves
-#: num_hidden_layers unscaled for gemma4 -- P2's open issue 6). Keeps the
+#: num_hidden_layers unscaled for gemma4). Keeps the
 #: real structure: sliding + full layers, KV-shared tail layers, PLE.
 GEMMA_TEXT = dict(num_hidden_layers=6, num_kv_shared_layers=2,
                   layer_types=["sliding_attention", "sliding_attention",
@@ -602,11 +602,10 @@ def test_e6_seeded_image_request_takes_the_batch_path(server, rigs):
 # --- the trunks vision edited are pinned as they are ---------------------------------
 
 def test_every_vision_trunk_pin_matches_its_file():
-    """P1 and P2 edited vendored trunks (MRoPE; the image-block mask), and
-    this pass edited gemma4_text again. A trunk whose file no longer
-    matches PINS.json reads DRIFTED in `doctor` -- gemma4_text did, from
-    P2's merge until this pass, because the existing pin test only walks
-    the qwen3_5_moe_text chain."""
+    """The vision work edits vendored trunks (MRoPE; the image-block
+    mask). A trunk whose file no longer matches PINS.json reads DRIFTED in
+    `doctor`; the qwen3_5_moe_text pin test alone would not catch
+    gemma4_text drifting."""
     from knurlogic.engine import arch
     if not arch.PINNED_SHA256:
         pytest.skip("no pins on this checkout")

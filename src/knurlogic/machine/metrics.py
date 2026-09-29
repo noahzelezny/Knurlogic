@@ -1,28 +1,15 @@
-"""How hard this box is working, over the last few minutes.
+"""How hard this machine is working, over the last few minutes.
 
-Memory says what fits; these say why tokens are slow. GPU busy, CPU busy,
-memory pressure, swap and thermal state are the five things that quietly
-move decode speed, and each is readable WITHOUT sudo:
+Memory says what fits; these say why tokens are slow. Each is readable
+without sudo: gpu (`ioreg` AGXAccelerator utilization), cpu
+(host_statistics ticks), swap (`sysctl vm.swapusage`), pressure
+(`kern.memorystatus_vm_pressure_level`), thermal (NSProcessInfo) and
+temp_c (IOHIDEventSystemClient, undocumented: reads None if it moves).
 
-  gpu       `ioreg -c AGXAccelerator` PerformanceStatistics -- the same
-            "Device Utilization %" Activity Monitor's GPU History draws
-  cpu       host_statistics(HOST_CPU_LOAD_INFO) tick deltas, through ctypes
-  swap      `sysctl vm.swapusage`
-  pressure  `sysctl kern.memorystatus_vm_pressure_level` (1 normal, 2 warn,
-            4 critical) -- with swap growth, whether swap is happening NOW
-  thermal   NSProcessInfo.thermalState (nominal / fair / serious /
-            critical), through the Objective-C runtime -- what throttling
-            follows
-  temp_c    the hottest die sensor, from IOHIDEventSystemClient -- the
-            same sensors a compiled helper reads, reached through ctypes so
-            nothing extra is installed. Undocumented API: if Apple moves it,
-            this reads None and the line goes blank, it does not break.
-            A °C line shows heat building before the state changes.
+History is kept in-process, sampled on status requests no more often than
+MIN_INTERVAL_S. Every probe fails to None, never to 0.
 
-History is kept in this process, sampled when status is asked for and no
-more often than MIN_INTERVAL_S, so a page that polls fast does not make the
-box work harder to report how hard it is working. Every probe fails to
-None, never to 0: a missing reading drawn as idle is a lie.
+Design: docs/design/memory.md (metrics).
 """
 
 from __future__ import annotations

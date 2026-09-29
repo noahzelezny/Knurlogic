@@ -2,33 +2,16 @@
 
 A port of mlx-vlm 0.6.17 `qwen3_5/language.py` `get_rope_index`
 (:1729-1904, sha256 4805ae90fb3bba463512cbce89c9bb7fa78d56b25bd8b541db1392ad34f18ae0,
-MIT, Copyright (c) 2025 Prince Canuma) for ONE row with no attention mask --
-the only shape the serve path asks for -- in numpy, taking each image's grid
-from its ref instead of a batch-wide `image_grid_thw`:
+MIT, Copyright (c) 2025 Prince Canuma) for ONE row with no attention mask,
+in numpy, taking each image's grid from its ref. `vision_start_token_id`
+comes from the model's config (248053 in every released rung, not the
+class default 248045); getting it wrong silently zeroes the image count.
 
-  * images are counted the way the reference counts them: an image token
-    right after `vision_start_token_id` (:1756-1762). vision_start comes from
-    the model's config -- 248053 in every released rung, not the class
-    default 248045 (report-mlx-vlm-families.md section 1), and getting it
-    wrong silently zeroes the image count;
-  * the k-th image is the k-th run found by `index(image_token_id, st)`
-    (:1768-1776), given the k-th grid;
-  * text before an image continues from the previous segment's max + 1; an
-    image's (t, h, w) = its grid indices (h and w after the spatial merge)
-    + text_len + st_idx (:1799-1837); trailing text likewise (:1838-1849);
-  * rope_delta = max + 1 - len (:1882-1885).
-
-WHY PURE. A text-only turn after an image still needs positions shifted by
-that image's delta; computing them only when the new suffix has an image
-gets that turn wrong. Here nothing is carried between calls: the same key
-gives the same positions, cold or warm.
-
-The delta also never changes as text is appended after the last image
-(trailing text is linear), so a caller may compute it once per row and add it
-to the cache offset at every decode step -- the trunk's `rope_delta` input.
-
-Held to the reference by G3 (tests/test_vision_qwen.py: positions and delta
-of a two-image prompt exact against mlx-vlm's own get_rope_index).
+Pure: nothing is carried between calls, so a text-only turn after an image
+still gets positions shifted by that image's delta, cold or warm. The delta
+never changes as text is appended after the last image, so a caller may
+compute it once per row. Held to the reference by G3
+(tests/test_vision_qwen.py). Design: docs/design/vision.md (Qwen MRoPE).
 """
 from __future__ import annotations
 

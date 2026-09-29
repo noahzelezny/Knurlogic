@@ -7,10 +7,9 @@ import pytest
 def _no_cluster_watcher_thread(monkeypatch):
     """A test that starts a rank (launch.start) would start the
     page's watcher thread, which outlives the test and its XDG_CACHE_HOME:
-    it then read the REAL ~/.cache/knurlogic/jobs registry, found a real
-    job's peer page unknown for 20 s, and stopped that job -- a pytest run
-    on the M3 killed the 397B cluster job's rank 1 mid-review (2026-09-27).
-    Tests call watch_once by hand; no thread is started."""
+    would read the REAL ~/.cache/knurlogic/jobs registry, find a real
+    job's peer page unknown for 20 s, and stop that job. Tests call
+    watch_once by hand; no thread is started."""
     from knurlogic.cluster import launch
     monkeypatch.setattr(launch, "_WATCHER", [1])
 
@@ -42,9 +41,8 @@ def _no_recovery_thread(monkeypatch, tmp_path):
 def _no_real_cache(monkeypatch, tmp_path_factory):
     """Every test gets its own ~/.cache/knurlogic: the server registry, the
     job registry, the load lock and recovery.json all live there. With the
-    real one, a test's `unload(port=8080)` found the REAL server on :8080 in
-    the registry and stopped it -- a pytest run killed the 27B that a local
-    agent was running on (2026-09-28). A test that wants a cache sets its
+    real one, a test's `unload(port=8080)` would find the REAL server on
+    :8080 in the registry and stop it. A test that wants a cache sets its
     own XDG_CACHE_HOME after this."""
     monkeypatch.setenv("XDG_CACHE_HOME",
                        str(tmp_path_factory.mktemp("xdg-cache")))

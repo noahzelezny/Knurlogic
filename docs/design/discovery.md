@@ -1,192 +1,178 @@
-# Finding the other machines without exo (design, 2026-09-24, for review)
+# Finding the other machines
 
-At the time of writing, exo's inventory (now read-only in cluster/exo.py)
-was the only source of "which machines exist": no exo, no second machine. This replaces that source and leaves
-exo, when it is running, as one more witness rather than the authority.
-Scope: discovery, identity and reachability only. Running a model across
-machines (`knurlogic node`, the ring/jaccl pipeline) is the next step and
-builds on this.
+How a knurlogic page learns which machines exist, who each one is, and
+whether it can be reached. Running a model across machines builds on this
+(see [server.md](server.md), "Cluster").
 
-## 1. Standard name, standard mechanism
+Code: `machine/identity.py` (who this machine is), `cluster/discovery.py`
+(Bonjour), `cluster/peers.py` (named, remembered and introduced peers,
+merge, reachability), `cluster/links.py` (which link, `--host cluster`),
+`cluster/checks.py` (`knurlogic doctor --cluster`). `machine/` holds facts
+about this box; `cluster/` holds everything about other boxes.
 
-DNS-SD over multicast DNS (Bonjour), service type **`_knurlogic._tcp`**.
-It is what every Mac already runs, what AirPlay and printers use, and it
-needs no daemon, no dependency and no configuration.
+## Bonjour: the standard mechanism
 
-* **Register**: every `knurlogic ui` / `serve` bound to a non-loopback
-  address registers `_knurlogic._tcp` on THAT interface only (the
-  interface index of the bound address), port = its HTTP port. A process
-  bound to loopback registers nothing: advertising what nobody can reach
-  is the M4 stumble again.
-* **TXT record**: `id` (stable node id, below), `name` (ComputerName),
-  `ver` (knurlogic version), `schema` (status SCHEMA), `role` (ui/serve).
-* **Browse + resolve**: `DNSServiceBrowse` -> `DNSServiceResolve` ->
-  `DNSServiceGetAddrInfo` (IPv4 first, link-local v6 kept as fallback).
+DNS-SD over multicast DNS, service type **`_knurlogic._tcp`**. Every Mac
+already runs it (AirPlay and printers use it); it needs no daemon, no
+dependency and no configuration.
 
-Implementation: ctypes against the `dns_sd.h` API in libSystem
-(`DNSServiceRegister`, `Browse`, `Resolve`, `GetAddrInfo`,
-`DNSServiceRefSockFD`, `DNSServiceProcessResult`), one daemon thread
-running `select` over the refs' sockets. No subprocess parsing of the
-`dns-sd` CLI (its output format is not an interface). Same approach as the
-temperature reader: stdlib only, and a failure is "no peers found", never
-a crash.
+* **One advertisement per machine**: the page (`knurlogic ui`) registers;
+  `serve` does not. It registers on the interface it is bound to, and a
+  process bound to loopback registers nothing -- advertising what nobody
+  can reach is worse than silence. The instance name is
+  `<ComputerName> <id[:6]>`, so two "MacBook Pro"s never autorename to
+  "(2)".
+* **TXT record**: `id` (node id, below), `name` (ComputerName), `ver`
+  (knurlogic version), `schema` (status schema), `role`.
+* **Browse -> resolve -> addrinfo**, IPv4 only (urllib cannot carry a
+  `%bridge0` zone id, and the Thunderbolt bridge self-assigns 169.254
+  anyway). Browse results are keyed by (instance, interface index) and that
+  index is passed to resolve and addrinfo: a Thunderbolt peer also seen on
+  Wi-Fi is two results, and resolving without the index can return the
+  Wi-Fi address for the Thunderbolt one.
 
-## 2. Identity
+Implementation: ctypes against `dns_sd.h` in libSystem (`DNSServiceRegister`,
+`Browse`, `Resolve`, `GetAddrInfo`, `DNSServiceRefSockFD`,
+`DNSServiceProcessResult`), one daemon thread running `select` over the refs'
+sockets. mDNSResponder owns the registration and sends goodbyes, which is why
+a stdlib mDNS stack would be worse (a second responder on 5353, stale records
+after a crash). The `dns-sd` CLI is never parsed; `dns-sd -B _knurlogic._tcp`
+is printed as a diagnostic. ctypes rules that are load-bearing: callbacks and
+refs are owned by the discovery object; a ref is never deallocated inside its
+own callback; MoreComing and Add/remove are honoured. Any failure is "nothing
+found", never a crash, and `status()` says which.
 
-A node is its **id**, not its name: names collide ("MacBook Pro") and get
-renamed. `id` = first 12 hex of sha256(IOPlatformUUID) -- stable across
-reboots and addresses, and not the raw hardware UUID on the wire. `name`
-is display only (`scutil --get ComputerName`, e.g. "Alex's Mac Studio").
-exo's node records are matched to ours by name, then by model/chip, and
-only for showing exo's placements.
+## Identity
 
-## 3. Sources, merged
+A node is its **id**, not its name: names collide and get renamed. `id` =
+first 12 hex of sha256(IOPlatformUUID), read through IOKit and cached --
+stable across reboots and addresses, and not the raw hardware UUID on the
+wire. It is still a persistent LAN identifier, and the code says so. `name`
+(`ComputerName`) is display only. A page recognises itself in its own browse
+by id.
 
-`inventory()` becomes: **self + Bonjour + manual + exo**, deduplicated by
-id, each node carrying `found_by: ["bonjour", "manual", "exo"]`.
+## Sources, merged
 
-* **Manual**: `--peer HOST[:PORT]` (repeatable) for networks where
-  multicast is blocked. A peer that ever answered is remembered in
-  `~/.knurlogic/peers.json` (id, name, last address), so the second run
-  needs no flags. Remembered peers that stop answering are shown as
-  "not answering since <time>", not dropped silently.
-* **exo**: consulted only if it answers. A node only exo knows about is
-  still drawn from exo's figures, as today.
+Peers come from four sources, deduplicated by id, each carrying `found_by`:
 
-## 4. Reachability is named, on both ends
+* **bonjour** -- the browse above.
+* **named** -- `--peer HOST[:PORT]` (repeatable), for networks where
+  multicast is blocked.
+* **remembered** -- a peer that ever answered is kept in
+  `~/.knurlogic/peers.json` (versioned, keyed by id, written atomically,
+  addresses only), so the second run needs no flags.
+* **introduced** -- every status request carries
+  `X-Knurlogic-Peer: <id> <port>`, so the receiving page learns the
+  requester. One direction of discovery is enough for both machines to know
+  each other; this matters because mDNS over a Thunderbolt link can be
+  one-way (one side sees the other's services, not the reverse). Introduced
+  peers are capped at 32 and forgotten after an hour of silence, since any
+  client can send the header.
 
-The failure tonight was silence. Every peer gets one of:
+Two nodes with the same name and different ids stay two nodes.
 
-| state | meaning | said where |
-|---|---|---|
-| `answering` | status fetched | -- |
-| `found, not answering` | advertised, HTTP times out: almost always the macOS firewall on THAT machine | this page AND that machine's page (it can see inbound attempts never arrive? no -- see open question 2) |
-| `answering, different version` | schema/ver differ | both |
-| `remembered, gone` | in peers.json, not advertised, not answering | this page |
+## Reachability is named
 
-The fix text is concrete: which machine, which setting, which binary
-(the interpreter path, since that is what the firewall lists).
+Silence is the failure mode, so every peer has a state:
 
-## 5. Binding
+| state | meaning |
+|---|---|
+| `answering` | status fetched |
+| `not_answering` | known but the request fails, with a `problem`; a remembered peer shows how long it has been gone ("asleep?") and is never dropped silently |
+| `version_mismatch` | schema or version differ |
 
-Default stays **loopback** (a model endpoint should not appear on the
-network by accident). New: `--host cluster` binds the Thunderbolt and
-wired Ethernet addresses (never Wi-Fi unless named) and advertises on
-them. `--host ADDR` / `0.0.0.0` stay as today.
+**A blocked machine learns it is blocked from its peers.** Its outbound
+connections work: it fetches a peer's status, which says "found, not
+answering" about it, and reports that the firewall on THIS machine refuses
+the connection. `socketfilterfw --getglobalstate/--listapps` is read (never
+written) to name the exact binary the firewall lists -- the framework's
+`Python.app`, not a venv symlink.
 
-## 6. Where it lives
+**Local Network privacy (macOS Sequoia and later)** is a second silent
+blocker: a browse that returns nothing is reported as "no results in N s;
+check Privacy -> Local Network for <app>". The grant is per binary path, so
+a rebuilt environment needs it again.
 
-New package `knurlogic/cluster/`: `discovery.py` (dns_sd via ctypes),
-`peers.py` (manual + remembered + merge + reachability), `identity.py`.
-(`interfaces/cluster.py`, the exo front end, was removed 2026-09-25.) The
-future `knurlogic node` agent lands in the same package. `machine/`
-stays "facts about THIS box".
+`knurlogic doctor --cluster` runs these checks, plus sleep on AC power
+(`pmset -c sleep 0`): a machine that sleeps drops off the network and every
+peer sees it leave and return.
 
-## 7. Tests (no network needed)
+## Binding
+
+The default is **loopback**: a model endpoint must not appear on the network
+by accident. `--host cluster` binds every address but answers only on
+loopback and the Thunderbolt links, checked per connection against the local
+address it arrived on (`getsockname()`), so a replugged bridge that
+re-addresses keeps working; a request from elsewhere gets 403 naming the
+Thunderbolt address. It advertises only on Thunderbolt. Links are classified
+by `networksetup` hardware port ("Thunderbolt" / bridge), not by interface
+type (macOS reports the Thunderbolt link as ethernet), and a peer reachable
+two ways is kept on Thunderbolt. `--host ADDR` and `0.0.0.0` bind as named;
+POSTs are unauthenticated, so exposing wired Ethernet or Wi-Fi is an explicit
+choice.
+
+## Tests (no network needed)
 
 * Register and browse on `kDNSServiceInterfaceIndexLocalOnly`: a service
-  registered in-process is found, resolved, and its TXT parsed.
-* Merge: the same id from bonjour + manual + exo is one node with three
-  `found_by`; two nodes with the same name and different ids stay two.
+  registered in-process is found, resolved, and its TXT parsed (macOS only).
+* Merge: the same id from several sources is one node with several
+  `found_by`; same name, different ids stay two.
 * Reachability states from stubbed fetches (timeout, version mismatch).
-* The engine-import tripwire still holds (none of this imports mlx).
+* None of this imports mlx.
 
-## Open questions
+## Module notes
 
-1. `--host cluster` vs making advertise-on-Thunderbolt the default for
-   `ui` only (not `serve`). The maintainer's call tomorrow.
-2. The firewall: can the BLOCKED machine detect it on its own? It sees its
-   own listener but not the dropped connections. Candidate: each node
-   probes its own non-loopback address from itself (the firewall blocks
-   that too -- observed tonight on the M4) and reports "my own address
-   does not answer me: firewall". Cheap and local; needs checking that
-   self-connections are filtered the same way on every macOS in use.
-3. Resending the firewall prompt when missed: re-asking needs the
-   app's firewall entry removed, which is admin. Probably: detect (2),
-   then name the exact System Settings path; never touch the setting.
+### knurlogic/cluster/discovery.py
 
-## Design review (2026-09-24): build it, with these changes -- accepted
+DNS-SD service type `_knurlogic._tcp`, through the `dns_sd.h` API in
+libSystem. mDNSResponder -- the daemon every Mac already runs -- owns the
+registration and the multicast; the module only asks it. A stdlib mDNS
+stack would be worse: a second responder on port 5353, its own probing and
+TTLs, and stale records for an hour after a crash. With mDNSResponder the
+registration dies with the process.
 
-1. **The blocked machine learns it is blocked FROM ITS PEERS.** Its
-   outbound works: it fetches a peer's status, which already says "M4:
-   found, not answering", and reports "the Studio sees me and cannot
-   connect: the firewall on THIS machine". A self-probe is a secondary
-   hint only, unmeasured across macOS versions. `socketfilterfw
-   --getglobalstate/--listapps` is READ to name the exact binary (the
-   framework's `Python.app`, not the venv symlink); never written.
-2. **Local Network privacy (Sequoia+) is a second silent blocker.** A
-   browse that returns nothing is reported as "no results in N s; check
-   Privacy -> Local Network for <terminal app>", not "no peers".
-3. **Bind 0.0.0.0 and filter by the accepted connection's local address**
-   (`getsockname()`), not one socket per address: the Thunderbolt Bridge
-   re-addresses on replug. `cluster` = Thunderbolt Bridge only; wired
-   Ethernet must be named, with a printed warning that POSTs are
-   unauthenticated. HELD for the maintainer (it changes what is exposed).
-4. **One advertisement per machine: `ui` registers, `serve` does not**;
-   `serve_port` goes in TXT. Instance name `<ComputerName> <id[:6]>` so two
-   "MacBook Pro"s never autorename to "(2)". Answers open question 1.
-5. **ctypes rules**: callbacks and refs owned by the discovery object;
-   never deallocate a ref inside its callback; honour MoreComing and
-   Add/remove; key browse results by (instance, interfaceIndex) and pass
-   that index to Resolve/GetAddrInfo. mDNSResponder owns the registration
-   and sends goodbyes -- the reason a stdlib mDNS is worse. `dns-sd -B
-   _knurlogic._tcp` is printed as the diagnostic, not parsed.
-6. **IPv4 only in v1** (urllib cannot carry `%bridge0` zone ids; the
-   bridge self-assigns 169.254 anyway).
-7. **Identity via IOKit ctypes** (IOPlatformExpertDevice -> IOPlatformUUID),
-   cached; lives in `machine/identity.py` -- a fact about this box. The
-   hashed id is a persistent LAN identifier, and says so.
-8. **Merge**: key `id`; exo matched by IP, then name; `peers.json`
-   versioned, keyed by id, atomic write, last address updated; self is
-   recognised in its own browse by id.
-9. **`cluster/` holds every source** -- `exo.py` moves there from
-   `interfaces/cluster.py` (since removed with the exo wrap).
-10. `knurlogic doctor` runs the cluster checks; a gone peer's text says
-    "asleep?"; the dns_sd tests are macOS-only.
+- **register** -- one advertisement per machine, from the page (`ui`), on
+  the interface it is bound to; `serve` does not advertise. TXT: id, name,
+  ver, schema, role.
+- **browse -> resolve -> addrinfo** (IPv4), each step on the interface the
+  service was seen on: a Thunderbolt peer seen on Wi-Fi too is two browse
+  results, and resolving without the index can hand back the Wi-Fi address
+  for the Thunderbolt one.
 
-Build order: identity -> reachability + `--peer` + peers.json + the
-cross-check (fixes tonight with no Bonjour) -> register -> browse/resolve
--> `--host cluster` -> exo demoted to `cluster/exo.py` -> doctor.
+Load-bearing ctypes rules: every CFUNCTYPE and DNSServiceRef is owned by
+the Discovery object for as long as the daemon may call it back; a ref is
+never deallocated from inside its own callback (it is queued and freed by
+the loop); MoreComing and Add/remove are honoured.
 
-## Built and measured (2026-09-25, Studio 10.0.0.1 <-> M4 10.0.0.2 over Thunderbolt)
+A failure anywhere is "nothing found", never a crash, and `status()` says
+which: no library, a register error, or a browse that has seen nothing --
+which on Sequoia and later is often the Local Network privacy setting of
+the app that started knurlogic, named in the message.
 
-Steps 1-4 and 6 are built (`machine/identity.py`, `cluster/peers.py`,
-`cluster/discovery.py`, `cluster/exo.py`); `--host cluster` (5) waits for
-The maintainer, `doctor` (7) is next.
+### knurlogic/cluster/peers.py
 
-* With no `--peer` and no remembered peers (fresh `KNURLOGIC_HOME`) the
-  Studio found the M4 by Bonjour alone, fetched its status, and the M4
-  learned the Studio from the introduction header: both `answering`.
-* **mDNS over the Thunderbolt link was ONE-WAY.** The Studio sees the
-  M4's services on en4; the M4 sees nothing of the Studio's on en3 --
-  not knurlogic, not `_ssh`, not `_smb` (`dns-sd -B` on each side). Not
-  a knurlogic fault, and exactly why introductions exist: one direction
-  of discovery is enough for both machines to know each other. It also
-  means a pair where NEITHER direction works needs `--peer` once; after
-  that the peer is remembered.
+A second Mac can sit silent because a firewall prompt is waiting on its
+own screen, with nothing on either machine saying so. So every peer carries
+a state, and a state that is not `answering` carries the fix, on the
+machine that can apply it:
 
-## 2026-09-25, later: `--host cluster` built, and what exo taught (transcript search)
+| state | meaning |
+|---|---|
+| `answering` | its status came back |
+| `not_answering` | known (named, remembered or introduced) but the request failed; `problem` says what the failure looked like |
+| `version_mismatch` | answering, with a status schema this one does not read |
 
-The maintainer's call: explicit beats automatic on this network. `--host cluster`
-binds every address, answers only on loopback and Thunderbolt (403 with the
-Thunderbolt address named, measured from Ethernet and Wi-Fi), advertises on
-Thunderbolt only, and keeps a peer reachable two ways on the cable.
+A peer that stops answering is kept and shown with how long it has been
+gone -- machines sleep -- never dropped silently.
 
-What the exo history says, and what knurlogic does about each:
+**How a peer learns about this machine.** Every status request carries an
+introduction header (`X-Knurlogic-Peer: <id> <port>`); the receiving page
+records the requester's address with that port as an `introduced` peer. So
+naming a machine on one side is enough for both to know each other, and the
+side that cannot be reached still finds out: it asks its peers what they
+see, and a peer that lists it as `not_answering` is a measured fact --
+"they can see me and cannot connect", which on a Mac is almost always the
+application firewall on this machine.
 
-* **The ring split across Thunderbolt and the home LAN** (2026-05-14):
-  macOS reports the TB link as an ethernet-type interface, exo ranked it
-  equal to the M4's LAN port and built one leg over each; fixed then with
-  `EXO_RING_PREFER_SUBNET=10.0.0.`. knurlogic classifies by
-  `networksetup` hardware port ("Thunderbolt 3" / bridge), verified on
-  both Macs, and prefers it (cluster/links.py).
-* **No pairing at all** (2026-05-19): Local Network privacy blocked the
-  Python binary's mDNS; the grant is per binary PATH, so a rebuilt env
-  needs it again. `doctor --cluster` and the browse hint name the exact
-  binary.
-* **mDNS off, peers pinned** (2026-08-03 security audit): exo's libp2p
-  listened on the LAN; the fork added `--libp2p-host` and `--no-mdns`.
-  Same spirit as `--host cluster`.
-* **"Rediscovery" overnight** was the M4 sleeping after 1 min on AC (~9
-  disconnects a night, a ring re-election each); `pmset -c sleep 0`.
-  `doctor --cluster` now checks sleep on AC.
+`peers.json` (`~/.knurlogic/peers.json`) is keyed by node id, versioned,
+and written atomically. It holds addresses, not secrets.

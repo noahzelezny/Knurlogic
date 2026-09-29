@@ -1,34 +1,17 @@
 """A chat request with images -> the cache key, on the generator thread.
 
-Design D3. The scheduler tokenizes on its own thread
-(engine/runtime/scheduler.py), and generation runs on that same thread. v1
-encoded images on the HTTP thread: two threads on one GPU, two
-uncoordinated allocations on a shared host. So ALL image work
-happens here, called from the scheduler's tokenize:
+The scheduler tokenizes on its own thread, the same one generation runs
+on, so ALL image work happens here (one GPU, one allocator): decode, clamp
+and pixel hash; a store hit or preprocess + encode + put (the ONLY tower
+call); each part replaced by Family.placeholder_text(ref); the prompt
+stage; then key.expand_segments widens each image to n_tokens sentinels.
+The server does its prefix arithmetic on the key and the batch generator
+turns it back into ids and embeddings; no side table carries images
+between threads.
 
-    image parts -> decode + clamp + pixel hash (images.load)
-                -> store hit, or preprocess + encode + put (the ONLY tower
-                   call; G6 counts it from outside)
-                -> each part replaced by Family.placeholder_text(ref)
-                -> the prompt stage (engine/runtime/prompt.tokenize:
-                   template, segments, thinking state)
-                -> key.expand_segments: one pad per image widened to
-                   n_tokens, each image token a sentinel
-                -> (key, segment keys, types, state) back to the server
-
-The server then does its own prefix arithmetic on the key -- it is the same
-length as the KV (key.py) -- and hands it to the batch generator, which turns
-it back into ids and embeddings (mtp/batch_generator.py). No side table
-carries images between threads; the key names them.
-
-PINS (vision-contracts.md, "For P4"). Between this tokenize and the batch
-admit, other requests may be tokenized and a small store could evict this
-one's images. Every image of the key is pinned here and released by the
-generator when the row is admitted (or removed unadmitted). Pins are counted
-per image, so two queued requests on one image hold it twice.
-
-Stdlib only at import, like the rest of engine/vision's front door: PIL
-and mlx are reached through images.load and the family.
+Every image of the key is pinned here and released by the generator when
+the row is admitted (or removed unadmitted), so a small store cannot evict
+it in between. Stdlib only at import. Design: docs/design/vision.md.
 """
 from __future__ import annotations
 
@@ -42,8 +25,7 @@ from . import ImageRejected, key as K
 
 #: OpenAI chat content part types that carry an image. `image_url` is the
 #: Chat Completions form; `input_image` the Responses form; `image` what
-#: several clients (and P5's Anthropic translation, if it keeps the name)
-#: send. A part of any other non-text type is left for mlx-lm to refuse, as
+#: several clients (and the Anthropic translation) send. A part of any other non-text type is left for mlx-lm to refuse, as
 #: it does today.
 IMAGE_TYPES = ("image_url", "input_image", "image")
 

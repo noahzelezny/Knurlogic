@@ -111,7 +111,7 @@ def test_pins_are_loaded_and_make_doctor_say_ok():
 def test_package_architectures_are_found_and_hosted_correctly():
     """glm5_next is a PACKAGE (vendored with its import closure), not a flat
     file; it registers under mlx_lm's name like every other architecture
-    (mlx-vlm is not needed: 2026-09-25)."""
+    (mlx-vlm is not needed)."""
     from knurlogic.engine import arch
     from knurlogic.engine.register import available, source_for
     if "glm5_next" not in available():

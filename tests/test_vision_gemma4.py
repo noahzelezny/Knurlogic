@@ -313,7 +313,7 @@ def test_chunk_snap_gives_identical_tokens_across_the_split():
 
 
 #: (w, h) -> ((resized w, h), soft tokens), read off mlx-vlm 0.6.17's
-#: Gemma4ImageProcessor on the M4 (2026-09-25) with the e4b artifact's
+#: Gemma4ImageProcessor with the e4b artifact's
 #: processor settings: patch 16, pool 3, max_soft_tokens 280.
 REFERENCE = {
     (896, 896): ((768, 768), 256), (448, 448): ((768, 768), 256),
