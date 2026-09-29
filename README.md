@@ -38,6 +38,145 @@ no blockers found
 
 `--exports` prints the same settings as `export K=V` lines.
 
+## Requirements
+
+* A Mac with Apple Silicon, macOS. The weights have to fit in its unified
+  memory; `knurlogic models` and `doctor` say whether they do.
+* Python 3.10 or newer.
+* mlx 0.31.2 and mlx-lm 0.31.3, pinned exactly (pip installs them). The
+  engine subclasses mlx-lm's internals, so another version is not assumed
+  to work.
+
+## Install
+
+    pip install knurlogic
+
+From source:
+
+    git clone https://github.com/noahzelezny/Knurlogic
+    cd Knurlogic && pip install -e .
+
+## Quickstart
+
+A model is a directory with a `config.json` and its weights
+(`.safetensors`) beside it, in MLX format. Get one from Hugging Face:
+
+    hf download <org>/<mlx-model> --local-dir ~/Knurlogic/Models/<mlx-model>
+
+(any MLX-format repo of a supported family below, sized for your memory;
+without `--local-dir` it lands in the Hugging Face cache, which is found
+too.)
+`knurlogic models` finds what is already on the machine, in every tool's
+store -- `~/Knurlogic/Models` (`KNURLOGIC_MODELS`), exo's model dirs
+(`EXO_MODELS_DIR`, `EXO_MODELS_DIRS`), the Hugging Face cache
+(`HF_HUB_CACHE`, `HF_HOME`), Ollama and LM Studio -- and `--servable` keeps
+only what this engine can load. `--path DIR` scans one more directory.
+
+Check it, then serve it:
+
+    knurlogic doctor ~/Knurlogic/Models/<mlx-model>
+    knurlogic serve  ~/Knurlogic/Models/<mlx-model>
+
+`serve` listens on `127.0.0.1:8080` by default (`--host`, `--port`) and
+prints how to reach it. Then:
+
+    curl http://127.0.0.1:8080/v1/chat/completions \
+      -H 'Content-Type: application/json' \
+      -d '{"model": "local", "messages": [{"role": "user", "content": "Hello"}]}'
+
+`http://127.0.0.1:8080/` is the page for that server: what loaded, the
+memory split, a chat, and the Settings panel. `/status.json` and
+`/settings.json` are the same without a browser.
+
+`knurlogic ui` opens the page without loading anything: every model on the
+disk, every runtime holding memory, and a Launch button per model (served on
+`--serve-port`).
+
+## Point a harness at it
+
+`serve` prints these lines; `knurlogic connect --port 8080` prints them again
+for a running server.
+
+Claude Code (or any Claude-Messages harness), in one terminal:
+
+    ANTHROPIC_BASE_URL=http://127.0.0.1:8080 \
+    ANTHROPIC_API_KEY=x \
+    ANTHROPIC_DEFAULT_OPUS_MODEL=local \
+    ANTHROPIC_DEFAULT_SONNET_MODEL=local \
+    ANTHROPIC_DEFAULT_HAIKU_MODEL=local \
+    API_TIMEOUT_MS=3000000 \
+    claude
+
+The same as a project's `.claude/settings.json` `env` block scopes it to one
+directory. Not the global `~/.claude/settings.json`: that routes every
+session on the machine to the local model.
+
+Anything that speaks OpenAI (Codex, Zed, Cline, Continue, OpenWebUI):
+base URL `http://127.0.0.1:8080/v1`, any API key, model `local`. The server
+answers the one model it loaded whatever name is sent.
+
+An agent that should manage models rather than talk to one gets the MCP
+server, on stdio:
+
+    claude mcp add knurlogic -- knurlogic mcp
+
+Its tools: `models` (what is on disk, whether it fits), `fit`, `settings`,
+`drafting`, `ready` (is it safe to load now), `load`, `state`, `unload`,
+`deps`. `knurlogic mcp --list` prints each with its description. `load`
+refuses what will not fit; nothing is evicted to make room.
+
+## Two Macs
+
+One model can be split across two Macs, by tensor or by pipeline (layers).
+A cluster job needs:
+
+* the same knurlogic build, and the model, on both machines;
+* a link between them: Thunderbolt (TCP over the bridge, or RDMA on a
+  Thunderbolt 5 cable with RDMA enabled) or another TCP network;
+* the page running on each: `knurlogic ui --host cluster` (answers on the
+  Thunderbolt link and loopback only). Macs find each other over Bonjour;
+  `--peer HOST` names one directly. `knurlogic doctor --cluster` on each
+  says what stops them seeing each other.
+
+Then load with machines named -- the page's Launch, or the MCP `load` tool
+with `machines` (and `split`). Placement, leader and cable are chosen for
+you; a share that does not fit is refused before anything starts.
+docs/DISCOVERY.md and docs/SERVER.md have the detail.
+
+## Settings
+
+Every knob is resolved from the model's `config.json` and the memory
+budget, and shown with the measurement behind it in the page's Settings
+panel and `/settings.json`. A launch strategy picks a bundle: `balanced`
+(the default, the measured values), `fast` (wider prompt chunk where there
+is room, dynamic MTP), `stable` (512-token chunks, MTP every step,
+conservative memory), `lean` (8-bit KV, MTP off), `safe` (lowest peak
+memory) -- `serve --tune`, or per model in Settings -> Models
+(`KNURLOGIC_PRESET`); `--set KEY=VALUE` beats all of them. `--kv-bits 8`
+stores the KV cache at 8 bits, about half the memory, taken by every family
+but DeepSeek-V4. Compaction (`KNURLOGIC_COMPACT_AUTO`, off by default)
+summarizes older turns when a harness asks for it or, when on, once a
+prompt passes the trigger share of the window; it can be changed on a
+running server. Long context: `KNURLOGIC_LONG_CONTEXT=yarn` applies Qwen's
+documented YaRN (factor 4 over 262,144, ~1M tokens), Qwen families only,
+opt-in because it can slightly hurt short prompts; a box that cannot hold
+the chosen context's KV is refused with the numbers.
+
+## Supported models
+
+The families resolved from `config.json`'s `model_type`, each with its
+architecture vendored in `engine/families/`:
+
+* **Qwen** -- `qwen3_5` (dense), `qwen3_5_moe` (e.g. Qwen3.6-35B-A3B),
+  `qwen4_exp` (Qwen3.8, including VQ artifacts). Vision, MTP drafting where
+  the artifact packs a head, 8-bit KV, YaRN.
+* **Gemma 4** -- `gemma4`, `gemma4_text`. Vision; 8-bit KV. Earlier reasoning
+  is stripped by design, so each user turn re-prefills.
+* **GLM-5** -- `glm5_next`. Vendored and unpinned: no box here fits the
+  smallest one.
+* **DeepSeek-V4** -- `deepseek_v4`. Needs the pair: DeepSeek-V4-Flash has run
+  split across two Macs (about 145 GiB of weights between them); no 8-bit KV.
+
 ## What it is
 
 * **A resolver.** One dict, resolved from the artifact's own `config.json`
@@ -136,15 +275,20 @@ What each fork carries, and why it is or is not ported, has one home:
 
 ## Status
 
-The resolver, `doctor`, `smoke`, `vendor`, `serve`, `ui` and `mcp` work.
-Four architectures are pinned by actual token generation; glm5_next is
-vendored and unpinned, because no box here fits the smallest GLM rung.
+Alpha (0.1.0). The resolver, `doctor`, `smoke`, `vendor`, `serve`, `ui` and
+`mcp` work. Four architectures are pinned by actual token generation;
+glm5_next is vendored and unpinned.
 
-Drafting runs on a single request and in a batch; the batch path is gated on
-token identity against mlx-lm's own generator, and has not yet been timed on
-real weights through knurlogic (the exo fork measured the same loop at 23.1
-vs 22 tok/s, identical tokens). An agent has loaded, used and unloaded a
-model through the MCP, across two sessions.
+Proven live on real weights: MTP drafting (Qwen3.8 Flash VQ, 30.2 vs 20.0
+decode tok/s), images (Qwen 27B), compaction and 8-bit KV (Qwen3.6-35B-A3B),
+a YaRN needle at 442,578 tokens (1M not run), a pipeline split across two
+Macs, and DeepSeek-V4-Flash across two Macs with tool calls and compaction.
+An agent has loaded, used and unloaded a model through the MCP.
+
+Not yet proven live: images and MTP drafting on a split, and pipeline
+prefill overlap. Known limits: a cluster job's leader answers on 127.0.0.1
+only, so reach it from the other Mac through the page; a cluster job's
+placement does not count the vision tower yet.
 
 `docs/PLAN.md` holds what is measured and what is next; `CONTEXT.md` is the
 map.
