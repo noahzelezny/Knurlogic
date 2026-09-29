@@ -28,6 +28,13 @@ try:
 
         def __init__(self, rope_scaling=None, **kwargs):
             self.rope_scaling = rope_scaling
+            # knurlogic edit 10: transformers 5.x standardizes rope params in
+            # PretrainedConfig.__post_init__ and reads these first; without
+            # them loading the tokenizer raised AttributeError on
+            # max_position_embeddings (transformers 5.5, M3, 2026-09-29).
+            self.max_position_embeddings = kwargs.get(
+                "max_position_embeddings", 1048576)
+            self.rope_theta = kwargs.get("rope_theta", 10000.0)
             super().__init__(**kwargs)
 
     AutoConfig.register("deepseek_v4", _DeepseekV4HFConfig, exist_ok=True)
@@ -38,6 +45,9 @@ except ImportError:
 @dataclass
 class ModelArgs(BaseModelArgs):
     model_type: str = "deepseek_v4"
+    #: the artifact's MLX quantization config (knurlogic edit 9): present when
+    #: the loader quantizes the experts, absent for a raw FP4 checkpoint
+    quantization: Optional[dict] = None
     vocab_size: int = 129280
     hidden_size: int = 4096
     num_hidden_layers: int = 43
@@ -2562,13 +2572,22 @@ class DeepseekV4MoE(nn.Module):
             args.n_routed_experts,
             activation=_DSV4SwiGLU(args.swiglu_limit),
         )
-        for name in ("gate_proj", "up_proj", "down_proj"):
-            sub = getattr(self.switch_mlp, name)
-            setattr(
-                self.switch_mlp,
-                name,
-                sub.to_quantized(group_size=32, bits=4, mode="mxfp4"),
-            )
+        # knurlogic edit 9: the fork quantized the three projections here and
+        # relied on its patched mlx_lm/utils.py to skip already-quantized
+        # modules. Stock mlx-lm 0.31.3 quantizes by the config's per-layer
+        # entries (mxfp4 for these), so pre-quantizing made every rank fail
+        # with "Unable to quantize ... QuantizedSwitchLinear" (M3+M4 load,
+        # 2026-09-29). An MLX-quantized artifact is converted by the loader;
+        # a raw FP4 checkpoint (no quantization config) is still quantized
+        # here.
+        if not getattr(args, "quantization", None):
+            for name in ("gate_proj", "up_proj", "down_proj"):
+                sub = getattr(self.switch_mlp, name)
+                setattr(
+                    self.switch_mlp,
+                    name,
+                    sub.to_quantized(group_size=32, bits=4, mode="mxfp4"),
+                )
         self.gate = MoEGate(args, layer_id)
         if args.n_shared_experts:
             self.shared_experts = DeepseekV4MLP(

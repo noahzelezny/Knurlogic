@@ -11,7 +11,7 @@ artifacts were validated against -- not merely that it imports.
   his permission. No exo code is in it.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.31.3.
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `22fb601b1a5508d86fc5b7c0cb943333390f7e4656575f75a8b59e5353ca652f`
+- vendored sha256: `746f9dd0e4560d01436556621caf5c6ba6926488b4202fbbc0df78a994dc98ea`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -81,3 +81,14 @@ prefilled alone, and rows join a batch that is already decoding); 1-2 to
 any prompt past index_topk compressed rows. The golden
 (tests/goldens/deepseek_v4_tiny.npz) is computed BY THE FORK, with an
 index_topk no pool reaches, so it checks everything the edits leave alone.
+
+## Edits 9-10 (2026-09-29, first live load)
+
+9. `DeepseekV4MoE.__init__` pre-quantized the experts to mxfp4; the fork's patched
+   `mlx_lm/utils.py` skipped already-quantized modules, stock mlx-lm 0.31.3 does not, so
+   every rank failed with "Unable to quantize ... QuantizedSwitchLinear". Now the experts
+   are pre-quantized only when the config carries no `quantization` (a raw FP4 checkpoint);
+   an MLX-quantized artifact is converted by the loader. `ModelArgs.quantization` added.
+10. The transformers config shim sets `max_position_embeddings` and `rope_theta` before
+   `PretrainedConfig.__init__`; transformers 5.x reads them while standardizing rope
+   params and raised AttributeError when loading the tokenizer.
