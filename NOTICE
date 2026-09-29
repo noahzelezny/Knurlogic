@@ -1,0 +1,45 @@
+knurlogic
+Copyright 2026 Noah Zelezny
+
+This product is licensed under the Apache License, Version 2.0 (LICENSE).
+
+This product includes software developed by other projects, vendored under
+their own licenses. Each folder that carries vendored source records it in
+a THIRD-PARTY.md (license) and PROVENANCE.md (origin, version, digest).
+
+mlx-lm (https://github.com/ml-explore/mlx-lm)
+  MIT License, Copyright (c) 2023-2026 Apple Inc.
+  Model architectures in src/knurlogic/engine/families/qwen/architecture/
+  (qwen3_5.py, qwen3_5_moe.py; qwen4_exp.py via the mlx-lm fork at
+  https://github.com/eauchs/mlx-lm) and
+  src/knurlogic/engine/families/gemma4/architecture/ (gemma4.py,
+  gemma4_text.py).
+
+mlx-lm fork (the knurlogic author's own)
+  MIT License, Copyright (c) 2023-2025 Apple Inc.; changes by Noah Zelezny
+  src/knurlogic/engine/families/deepseek/architecture/deepseek_v4.py
+
+mlx-vlm (https://github.com/Blaizzy/mlx-vlm)
+  MIT License, Copyright (c) 2025 Prince Canuma
+  src/knurlogic/engine/families/glm5/architecture/glm5_next/ and the
+  vision towers in src/knurlogic/engine/families/{qwen,gemma4}/vision/.
+  hyper_connection.py (glm5_next/_mlx_vlm/models/deepseek_v4/):
+  MIT License, Copyright (c) 2026 Apple Inc.
+
+DeepSeek-V4 chat encoding
+(https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash)
+  MIT License, Copyright (c) 2023 DeepSeek
+  src/knurlogic/engine/templates/deepseek_v4.jinja (a Jinja port) and
+  tests/fixtures_deepseek_v4/ (the encoder and its golden outputs).
+
+vqlab (https://github.com/noahzelezny/VQLab)
+  Apache License 2.0, Copyright 2026 Noah Zelezny
+  src/knurlogic/engine/vq/vq_switch.py and vq_dense.py (verbatim), and
+  src/knurlogic/engine/families/glm5/heads/glm5.py and the snapshot caches
+  in src/knurlogic/engine/mtp/caches.py.
+
+exo fork (https://github.com/noahzelezny/exo)
+  Apache License 2.0; the ported code is the knurlogic author's own
+  src/knurlogic/engine/mtp/batch_generator.py: ported from the maintainer's
+  own code in github.com/noahzelezny/exo (generator/mtp_batch_generate.py),
+  Apache-2.0. It contains no code from upstream exo.
