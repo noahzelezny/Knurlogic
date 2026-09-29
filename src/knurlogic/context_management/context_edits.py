@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
@@ -306,52 +307,23 @@ def tool_uses(msgs: list) -> List[ToolUse]:
 
 # ------------------------------------------------------------ the prompt
 
-def budget(dropped_tokens: int, lo: int, hi: int) -> int:
-    """A tenth of what is dropped, clamped to [lo, hi]."""
-    return int(min(max(dropped_tokens // 10, lo), hi))
-
-
 # the harness's prompt (scout/coherence/summarizer.py _build_prompt), extended
 # for a coding agent: its four headings, plus files touched, the current and
-# next step, and open errors; tool results distilled, not dropped.
-SUMMARY_PROMPT = """\
-The conversation above is being compacted to bound its context. Your \
-summary replaces the older messages: whoever continues this work will see \
-the first user message, your summary, and the most recent messages \
-verbatim -- nothing else.
-
-Summarize the conversation in concise bullet points under these headings:
-## Goal
-## Decisions made
-## Information gathered (key tool results)
-## Files and identifiers touched
-## Current step
-## Next step
-## Open errors and questions
-
-Keep exact file paths, line numbers, identifiers, commands and error \
-messages. Keep within {budget} tokens (~{chars} characters). Do not call \
-tools. Return ONLY the summary."""
-
-FINDINGS_PROMPT = """\
-
-Then add a line "## Tool findings" and, for each tool call listed below, \
-one line "T<n>: <finding>" saying in one sentence what that call \
-established -- the answer to what it was for, not its raw output (a search \
-for where X is defined: "T3: X is defined at src/foo.py:120"). If it \
-established nothing, write "T<n>: nothing relevant".
-
-{calls}"""
+# next step, and open errors; tool results distilled, not dropped. Markdown
+# beside this module (prompts/), since it is a document that asks an agent
+# to fix its own context. No token budget: the summary must only be no
+# longer than what it replaces (the pass's max_tokens holds it to that).
+_PROMPTS = Path(__file__).with_name("prompts")
+SUMMARY_PROMPT = (_PROMPTS / "compact.md").read_text().rstrip("\n")
+FINDINGS_PROMPT = (_PROMPTS / "findings.md").read_text().rstrip("\n")
 
 
-def prompt(budget_tokens: int, uses: List[ToolUse],
-           instructions: Optional[str] = None) -> str:
+def prompt(uses: List[ToolUse], instructions: Optional[str] = None) -> str:
     """The user turn that asks for the summary, appended to the
     conversation as it stands (so the history is a prefix-cache hit).
     `instructions` replace the summary prompt, as the API documents; the
     tool findings are still asked for."""
-    head = instructions or SUMMARY_PROMPT.format(
-        budget=budget_tokens, chars=budget_tokens * 4)
+    head = instructions or SUMMARY_PROMPT
     if not uses:
         return head
     calls = "\n".join(f"T{u.n}: {u.name} {u.args}" for u in uses)

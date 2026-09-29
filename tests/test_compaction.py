@@ -188,22 +188,30 @@ def test_findings_are_parsed_and_a_missed_one_falls_back_to_a_clear():
 
 def test_the_summary_prompt_is_scouts_extended_and_lists_the_calls():
     uses = E.tool_uses(agent_history(2))
-    p = E.prompt(2000, uses)
+    p = E.prompt(uses)
     for h in ("Decisions made", "Information gathered", "Files and "
               "identifiers touched", "Current step", "Next step",
               "Open errors"):
         assert h in p
-    assert "2000 tokens" in p and 'T2: Grep {"pattern":"p1"}' in p
+    assert "never longer than the conversation you replace" in p
+    assert "tokens" not in p and 'T2: Grep {"pattern":"p1"}' in p
     # instructions replace the summary prompt; the findings are still asked
-    q = E.prompt(2000, uses, "custom")
+    q = E.prompt(uses, "custom")
     assert q.startswith("custom") and "Decisions made" not in q
     assert "T1:" in q
 
 
-def test_the_budget_is_a_tenth_clamped():
-    assert E.budget(5_000, 1024, 8192) == 1024
-    assert E.budget(40_000, 1024, 8192) == 4000
-    assert E.budget(900_000, 1024, 8192) == 8192
+def test_the_prompts_ship_as_markdown_beside_the_module():
+    import tomllib
+    from pathlib import Path
+    here = Path(E.__file__).with_name("prompts")
+    for name in ("compact.md", "findings.md"):
+        assert (here / name).is_file()
+    assert "{calls}" in E.FINDINGS_PROMPT and "{" not in E.SUMMARY_PROMPT
+    root = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((root / "pyproject.toml").read_text())
+    assert "context_management/prompts/*.md" in \
+        data["tool"]["setuptools"]["package-data"]["knurlogic"]
 
 
 # ------------------------------------------------------------ orchestration
@@ -226,6 +234,9 @@ def test_a_summary_pass_is_a_continuation_and_distills_in_one_call():
     body = _body(agent_history(4))
     run, out, pending = C.prepare(body, count=count, env=ENV)
     assert pending is not None and len(pending.uses) == 3
+    # no budget: never longer than the span it replaces, plus the findings
+    assert C.summary_body(body, pending)["max_tokens"] == \
+        pending.dropped_tokens + C.TOKENS_PER_FINDING * 3
     calls = []
 
     def gen(b):
@@ -280,7 +291,6 @@ def test_the_settings_fall_back_to_their_defaults():
     from knurlogic.tuning import settings as S
     cfg = S.compact_settings({"KNURLOGIC_COMPACT_TRIGGER": "lots"})
     assert cfg == {"auto": False, "trigger": 0.8, "keep": 6,
-                   "summary_min": 1024, "summary_max": 8192,
                    "distill": True}
     assert S.check_knob("KNURLOGIC_COMPACT_TOOL_RESULTS", "burn")
     assert S.check_knob("KNURLOGIC_COMPACT_TRIGGER", "0.7") is None
@@ -425,8 +435,6 @@ def _post(url, path, body):
 
 def test_a_round_trip_on_the_tiny_model(server, monkeypatch):
     monkeypatch.setenv("KNURLOGIC_COMPACT_KEEP_TURNS", "2")
-    monkeypatch.setenv("KNURLOGIC_COMPACT_SUMMARY_MIN", "64")
-    monkeypatch.setenv("KNURLOGIC_COMPACT_SUMMARY_MAX", "64")
     words = " ".join(f"w{i}" for i in range(60))
     msgs = [{"role": "user", "content": "the goal " + words}]
     for i in range(6):
