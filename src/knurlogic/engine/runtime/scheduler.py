@@ -1,4 +1,4 @@
-"""The scheduler: ONE thread that owns the MLX stream (docs/SERVER.md).
+"""The scheduler: ONE thread that owns the MLX stream (docs/design/server.md).
 
     HTTP threads --submit(Job)--> queue --> tokenize --> prompt cache
       --> executor.insert --> executor.step --> events --> per-request text

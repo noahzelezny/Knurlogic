@@ -65,21 +65,20 @@ this list; nothing depends on a folder below it.
     tools/          probes that gate work on real models:
                     vision_gate.py (images, cache reuse), vq_gate.py (VQ runtime
                     identity against each published rung).
-    docs/PLAN.md    state, not log: what is true, what was measured so it is
-                    not re-derived, what is next.
+    docs/design/    why the larger pieces are shaped the way they are.
 
 ## Reading order
 
 | If you want | Read |
 |---|---|
-| what is true now, and what to do next | `docs/PLAN.md` |
+| how the server, discovery, vision and memory are designed | `docs/design/` |
 | why a default is what it is | `src/knurlogic/tuning/settings.py`, beside the constant |
 | what knurlogic stands on, and which forks | `knurlogic deps`; `machine/deps.py` `PIECES` |
 | everything about one model family (architecture, vision, heads, settings) | `src/knurlogic/engine/families/<family>/` -- `__init__.py` is its manifest |
 | what runs a model, and each change to mlx-lm's server | `src/knurlogic/engine/serve/` -- its `__init__.py` is the index |
 | how drafting works | `engine/mtp/` — `batch_loop.py` and `batch_generator.py` |
 | what an agent gets | `src/knurlogic/interfaces/mcp.py` |
-| the vision build, and why it is shaped that way | `docs/design/vision.md` (evidence in `vision-evidence/`) |
+| the vision build, and why it is shaped that way | `docs/design/vision.md` |
 | what a command does | `knurlogic <cmd> --help`, then `interfaces/cli.py` `COMMANDS` |
 
 ## Contracts

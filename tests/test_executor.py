@@ -1,4 +1,4 @@
-"""The executor protocol over the local batch engine (docs/SERVER.md step 1):
+"""The executor protocol over the local batch engine (docs/design/server.md step 1):
 same tokens as the engine driven directly, typed events, failures as
 RowFailure, checkpoints and finished caches as events, the cache report
 delivered to the object admission names."""

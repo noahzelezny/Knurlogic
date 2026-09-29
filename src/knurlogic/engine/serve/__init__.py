@@ -1,7 +1,7 @@
 """engine/serve/ -- what the served model is and what it can do: the
 pieces knurlogic's own server (engine/runtime, interfaces/http) builds on,
 one module each. (Until 2026-09-25 this package patched mlx-lm's server in
-~34 places; that server is gone -- docs/SERVER.md.)
+~34 places; that server is gone -- docs/design/server.md.)
 
   load.py          engine info, load, memory, the cache limit, knobs a
                    running process can change, tool dialects

@@ -1,7 +1,7 @@
 """`knurlogic serve` -- an OpenAI-compatible endpoint that loads these models.
 
 Knurlogic resolves the environment, registers the architecture, and serves
-with its own server (interfaces/http over engine/runtime; docs/SERVER.md):
+with its own server (interfaces/http over engine/runtime; docs/design/server.md):
 mlx-lm is the library underneath -- model classes, tokenizer, caches --
 not the server. Its server was patched in ~34 places until 2026-09-25 and
 is no longer used.

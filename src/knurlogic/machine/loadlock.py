@@ -1,10 +1,9 @@
 """The model-load lock: one real model loading on this box at a time.
 
-WHY. The Mac is shared -- exo, knurlogic servers, and parallel build agents
-running real-model gates. MCP `ready()` is a CHECK, not a mutex: two agents
-can both see `ready: true` and both load, and the second load lands on a
-budget measured before the first one's weights arrived. The lock makes the
-check-then-act atomic (vision-evidence/report-test-plan.md section 4).
+WHY. A Mac may be shared by several servers and agents loading models. MCP
+`ready()` is a CHECK, not a mutex: two agents can both see `ready: true`
+and both load, and the second load lands on a budget measured before the
+first one's weights arrived. The lock makes the check-then-act atomic.
 
 HOW. `fcntl.flock(LOCK_EX | LOCK_NB)` on ~/.cache/knurlogic/load.lock
 (next to servers.json). The KERNEL releases a flock when the holding process
