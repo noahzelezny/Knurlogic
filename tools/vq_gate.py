@@ -1,31 +1,16 @@
-"""The identity gate: knurlogic's VQ runtime against a rung's PUBLISHED bundle.
+"""The identity gate: knurlogic's VQ runtime against a rung's published bundle.
 
     python tools/vq_gate.py fetch <dir> [repo ...]     # model.py + config.json
     python tools/vq_gate.py knobs <dir> [--write] [--markdown]
     python tools/vq_gate.py gate <artifact> [--bundle <dir>] [--record]
 
-`fetch` downloads ONLY the two small text files per repo (`hf download
-<repo> model.py config.json`), never weights. `knobs` reads every flag
-default out of each published model.py and regenerates
-src/knurlogic/engine/vq/rungs.json (and the table in
-docs/design/vq-rung-knobs.md): the record is the shipped artifact, never a
-local copy, which may have drifted from the Hub.
-
-`gate` is the identity gate, run by hand on real rungs, one at a time,
-behind the model-load lock. Same artifact weights, same short prompt,
-two runtimes: the rung's PUBLISHED bundled model.py, and knurlogic's
-(vendored vqlab 42df84f + the rung's knobs from rungs.json). PASS means
-logits over the whole prompt within atol 1e-5 AND 40 greedy tokens
-identical. `--record` then marks the rung verified in rungs.json -- the
-only thing that lets knurlogic serve it on its own runtime.
-
-WHY EACH SIDE IS ITS OWN PROCESS. Both runtimes read their flags ONCE at
-import, into module globals, and both size the mlx buffer cache at import.
-Two sides in one process would share whatever the first import froze and
-whatever memory the first model left; a gate that can pass by sharing state
-is not a gate. Each side also runs with every VQ_*/VQLAB_* variable removed
-from its environment, so each reads its OWN defaults -- the bundle its baked
-text, knurlogic its knobs -- which is exactly the claim under test.
+`fetch` downloads only model.py and config.json per repo, never weights.
+`knobs` reads each published model.py's flag defaults and regenerates
+src/knurlogic/engine/vq/rungs.json and docs/design/vq-rung-knobs.md.
+`gate` runs the same weights and prompt through the published model.py and
+knurlogic's runtime, each in its own clean process behind the load lock:
+PASS is logits within atol 1e-5 and 40 identical greedy tokens; `--record`
+marks the rung verified in rungs.json.
 """
 from __future__ import annotations
 

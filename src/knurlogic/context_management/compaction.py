@@ -1,25 +1,14 @@
 """Server-side compaction: the harness asks, the server performs.
 
-A chat request (OpenAI's shape; /v1/messages arrives here translated) goes
-through `prepare` before it becomes a Job:
+`prepare` folds in resent compactions (context_edits.view), applies the
+clearing edits in order, and turns a compact edit whose trigger the prompt
+has passed (or any request, with KNURLOGIC_COMPACT_AUTO on) into a
+`Pending` summary pass. `summarize` runs that pass as a continuation of the
+conversation, so only the summary's own tokens cost anything. Nothing is
+kept server-side; if the pass fails, the span is dropped behind a backstop
+marker with `fallback: true` and the user's turn still runs.
 
-  1. every compaction the client resent is folded in (context_edits.view),
-  2. the clearing edits are applied in the order given,
-  3. a compact edit whose trigger the prompt has passed becomes a `Pending`
-     summary pass -- or, with KNURLOGIC_COMPACT_AUTO on, a request that
-     asked for nothing does too.
-
-`summarize` runs that pass as a CONTINUATION of the conversation: the
-history as the model already saw it (a prefix-cache hit), plus one user
-turn asking for the summary and, in the same pass, a one-line finding per
-dropped tool call. Only the summary's own tokens cost anything. The
-request then runs on the compacted prompt, whose prefill is the fresh
-prompt-cache entry the client's next turn hits.
-
-Nothing is kept here: the summary goes back in the response and the client
-resends it. Where the pass fails -- an error, an empty answer, one longer
-than what it replaces -- the span is dropped behind a backstop marker and the
-edit says `fallback: true`; the user's turn never fails for it.
+Design: docs/design/compaction.md.
 """
 
 from __future__ import annotations

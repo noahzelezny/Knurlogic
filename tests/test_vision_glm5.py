@@ -1,12 +1,11 @@
-"""P3: glm5_next vision, and knurlogic stops depending on mlx-vlm for GLM.
+"""glm5_next vision, and knurlogic stops depending on mlx-vlm for GLM.
 
-Structural gates only (no real model, no network, no server) -- design v2's
+Structural gates only (no real model, no network, no server) -- the
 full G1-G11 sweep needs real weights or an mlx-vlm 0.6.17 reference that
 does not exist for GLM (PROVENANCE.md, "Deviations"). What IS gated here:
 
 * the vendored architecture imports and builds its `Model` with `mlx_vlm`
-  BLOCKED from ever resolving (the package's core acceptance test, given
-  explicitly in the brief);
+  BLOCKED from ever resolving (the package's core acceptance test);
 * every `_vendor/` sibling glm5_next actually imports resolves with no
   reference to the real, installed mlx-vlm;
 * `Glm5VisionFamily` (the registry target) preprocesses, encodes and embeds
@@ -14,8 +13,8 @@ does not exist for GLM (PROVENANCE.md, "Deviations"). What IS gated here:
   protocol (`docs/design/vision-contracts.md`).
 
 Every gate here was mutated once and confirmed red before being restored
-(reported in PROVENANCE.md / the return to the integrator), per the design's
-"every gate is mutated once" rule.
+(recorded in PROVENANCE.md), per the design's "every gate is mutated
+once" rule.
 """
 from __future__ import annotations
 
@@ -95,7 +94,7 @@ def test_glm5_next_imports_without_mlx_vlm_MUTATED():
     ``python3 -m pytest tests/test_vision_glm5.py -k MUTATED -v`` after
     changing one `_mlx_vlm` import in
     `engine/families/glm5/architecture/glm5_next/language.py` back to
-    ``from ..cache import ...`` -- confirmed 2026-09-23 to turn the test
+    ``from ..cache import ...`` -- confirmed to turn the test
     above red (`ModuleNotFoundError: No module named 'mlx_vlm'`), then
     reverted. This test itself is a no-op marker so the record survives in
     git; see PROVENANCE.md for the manual run's result."""
@@ -126,7 +125,7 @@ def test_glm5_siblings_now_empty():
     """`deps.glm5_siblings()` regexes glm5_next's OWN source for `from
     ..X import` lines -- the exact mlx_vlm-relative pattern this package
     rewrote to absolute `knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.X` imports.
-    Read 2026-09-23 (before this package): {base, cache,
+    Before vendoring: {base, cache,
     deepseek_v4.hyper_connection, gated_delta, linear, mla,
     qwen3_vl.processing_qwen3_vl, sparse_attention, switch_layers} -- 9
     modules, all now vendored under `_vendor/` (see PROVENANCE.md). This
@@ -144,7 +143,7 @@ def test_glm5_siblings_now_empty_MUTATED():
     """Mutation check for the gate above: reverting ONE import in
     `engine/families/glm5/architecture/glm5_next/language.py` from the absolute
     `knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.mla` back to a relative
-    `from ..mla import MultiLinear` (confirmed 2026-09-23) turns
+    `from ..mla import MultiLinear` (confirmed) turns
     `glm5_siblings()` non-empty again -- `test_glm5_siblings_now_empty`
     goes red as expected. Reverted after confirming."""
     assert True
@@ -200,7 +199,7 @@ def test_family_encode_shape_mismatch_raises():
 def test_family_encode_shape_mismatch_raises_MUTATED():
     """Mutation check for the gate above: temporarily removing the
     `feats.shape[0] != ref.n_tokens` check in `Glm5VisionFamily.encode`
-    (confirmed 2026-09-23) turns `test_family_encode_shape_mismatch_raises`
+    (confirmed) turns `test_family_encode_shape_mismatch_raises`
     green-to-red as expected (no `ValueError` raised); restored."""
     assert True
 

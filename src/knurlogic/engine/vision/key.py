@@ -1,33 +1,18 @@
 """The cache key: what the prompt cache walks when a prompt has images.
 
-Design D6. The key is the prompt's token ids, the same length as the KV,
-with each image token replaced by a sentinel
+The key is the prompt's token ids, the same length as the KV, with each
+image token replaced by a sentinel
 
     ("img", sha, proc_hash, k)        k = 0 .. n_tokens-1
 
-WHY A SENTINEL PER TOKEN, NOT PER IMAGE. The scheduler does prefix
-arithmetic on the prompt (the cached count is `len(prompt) - len(rest)`,
-and the segment trim follows from it: engine/runtime/scheduler._insert),
-so the key must be exactly as long as the KV it names.
-
-WHY THE TRIE ACCEPTS IT. `mlx_lm.models.cache.PromptTrie` walks
-`current[tok]` dicts; any hashable works (read at mlx-lm 0.31.3, the pinned
-version -- tests/test_vision_key.py runs the real LRUPromptCache so a
-version that stops accepting it goes red).
-
-WHAT IT BUYS. Every image's run is the same pad id, so with plain ids two
-different images of the same size collide and the cache hands back KV
-computed from the wrong picture -- fluent, wrong, silent. With sentinels two
-such images diverge at the image's first token (k=0) and the same image hits
-all the way through. proc_hash is in the sentinel so a
-processor change that keeps n_tokens cannot hit stale features.
-
-WHY IT FAILS LOUD. A sentinel that reaches mx.array raises; it can never be
-read as a wrong id. Risk 2 in the design (sentinels reaching mlx-lm code
-that assumes ints) is guarded end to end by G6-G9, with negative-int
-sentinels as the fallback -- a change confined to this module.
-
-Stdlib only.
+One sentinel per TOKEN because the scheduler does prefix arithmetic on the
+prompt. `mlx_lm.models.cache.PromptTrie` accepts any hashable
+(tests/test_vision_key.py runs the real LRUPromptCache). With plain pad ids
+two same-size images collide and the cache returns KV from the wrong
+picture; with sentinels they diverge at k=0, and proc_hash keeps a
+processor change from hitting stale features. A sentinel that reaches
+mx.array raises, so it can never be read as a wrong id.
+Stdlib only. Design: docs/design/vision.md (cache key).
 """
 from __future__ import annotations
 
@@ -51,7 +36,7 @@ def is_sentinel(x: Any) -> bool:
 
 def has_image(key: Iterable[Any]) -> bool:
     """Does this key hold any image token? The test that decides whether a
-    row needs `Family.positions` on EVERY step (D4), not just the ones whose
+    row needs `Family.positions` on EVERY step, not just the ones whose
     new suffix has an image."""
     return any(type(x) is tuple for x in key)
 

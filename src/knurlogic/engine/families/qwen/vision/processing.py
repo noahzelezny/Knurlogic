@@ -3,22 +3,12 @@
 Vendored from mlx-vlm 0.6.17 `mlx_vlm/models/qwen3_vl/processing_qwen3_vl.py`
 (sha256 21d68148d9bd99952445beaee21237993510dc4c3a2c94a2c5cda5f19429b180),
 MIT, Copyright (c) 2025 Prince Canuma, itself a numpy port of HF's
-qwen2_vl image processor:
-  _smart_resize_image    :182-205   verbatim
-  _resize_video_frames   :164-179   verbatim (the image path resizes through it)
-  _to_numpy_image        :208-227   verbatim
-  ImageProcessor         :230-412   the image half of Qwen3VLImageProcessor:
-                                    __init__, _resolved_size, _process_one,
-                                    num_image_tokens verbatim; the
-                                    transformers base class (ImageProcessingMixin)
-                                    dropped -- it only carried from_pretrained
-  image_kwargs           :593-626   _qwen_vl_image_kwargs, LOCAL files only
-                                    (the Hub fallback is dropped: the server
-                                    does not fetch)
-Video is not served (design: images only), so none of the video half.
+qwen2_vl image processor. The image half only (video is not served); the
+transformers base class and the Hub fallback are dropped (the server reads
+LOCAL files only). Per-function source lines: PROVENANCE.md.
 
-WHY NUMPY AND PIL, NOT mlx. Preprocessing is pixel shuffling; the arrays go
-to the tower as mx arrays at encode time. Held to the reference by G2
+Numpy and PIL, not mlx: preprocessing is pixel shuffling; the arrays go to
+the tower as mx arrays at encode time. Held to the reference by G2
 (tests/test_vision_qwen.py: grid, token count and pixel_values against
 mlx-vlm's own processor on the same image).
 """

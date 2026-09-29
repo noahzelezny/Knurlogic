@@ -4,13 +4,11 @@ N ways (docs/design/server.md, "Cluster: tensor split").
     rank 0:   HTTP -> Scheduler -> TensorExecutor --plan--> ranks 1..N-1
     rank r:   follow(): apply the plan, run the same step, never sample
 
-Written for knurlogic (no exo code). The layer split follows the layout of
-mlx-lm's Qwen3_5 `Model.shard` (MIT; engine/runtime/PROVENANCE.md) with one
-change that is the point of this module: a VQ codebook is REPLICATED, never
-sliced. mlx's default predicates split every parameter of a sharded layer;
-applied to a VQSwitchLinear they cut the [K, d] codebook (all-to-sharded) or
-its d axis (sharded-to-all). VQSwitchLinear's own guard catches only the
-first; the second decodes against half a codebook and emits fluent garbage.
+The layer split follows mlx-lm's Qwen3_5 `Model.shard` (MIT;
+PROVENANCE.md) with one change: a VQ codebook is REPLICATED, never sliced.
+mlx's default predicates split every parameter of a sharded layer; applied
+to a VQSwitchLinear they cut the [K, d] codebook or its d axis, and the
+latter decodes against half a codebook and emits fluent garbage.
 
 The step protocol is engine/runtime/plan.py. Everything that moves between
 ranks goes through `Link.exchange`, on the scheduler's thread.
@@ -226,8 +224,8 @@ class Link:
     def bell(self) -> None:
         """A plain TCP connection from each rank to rank 0, beside the ring.
         jaccl's collectives busy-poll the Thunderbolt completion queue: a
-        rank waiting in one for an idle rank 0 burns a whole core (and the
-        M3 showed ~50% GPU) for as long as nothing is asked. So an idle
+        rank waiting in one for an idle rank 0 burns a whole core (and an
+        M3 Ultra shows ~50% GPU) for as long as nothing is asked. So an idle
         rank 0 parks the others (the `park` op) and they sleep in a recv
         here until it rings. Rank 0 listens on the address the ring
         already uses; a connection must present the nonce shared over the

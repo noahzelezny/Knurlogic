@@ -4,7 +4,7 @@ Every number here came off a run. The point of Knurlogic is that a downloader
 should never have to know them: the resolver turns them into defaults. Each
 constant carries the measurement that established it, so a future change
 has to argue with a measurement rather than a preference. The VQ kernel
-numbers were measured in vqlab, where the runtime is developed.
+numbers were measured in the VQ runtime's upstream project.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 # --- the two knobs that decide runnable-vs-not ------------------------------
 
 # Experts decoded to dense fp16 per prefill chunk. THIS IS THE MEMORY KNOB,
-# not the KV cache: measured 2026-08-15 on a 128 GB M4 Max running the
+# not the KV cache: measured on a 128 GB M4 Max running the
 # 110.8 GiB 397B, prefill grew 3.35 MB/token where KV-cache theory predicts
 # 0.059 -- a 57x gap owned entirely by these buffers.
 #   transient = chunk * out * in * 2 bytes
@@ -57,8 +57,8 @@ DECODE_CHUNK_SHAPE_MAY_LOOSEN = False
 # keep the largest transient under this fraction of remaining headroom
 DECODE_CHUNK_HEADROOM_DIVISOR = 8
 
-# Prompt chunk width. Token-identical at every value (vqlab
-# tests/test_mtp_prefill.py gates this) -- purely a memory knob. mlx-lm's
+# Prompt chunk width. Token-identical at every value (gated upstream by
+# the VQ runtime's prefill tests) -- purely a memory knob. mlx-lm's
 # server does not expose it, which is why it must be resolved here.
 #
 # Chosen from the room ACTUALLY free at launch (the load budget: the
@@ -70,15 +70,16 @@ DECODE_CHUNK_HEADROOM_DIVISOR = 8
 # allowance and the reclaimable (prompt) cache; else step down, floor 512.
 # A family with no measurement stays 512.
 #
-# M4 sweep 2026-09-26, prefill tok/s at 4k/16k-token prompts (median of 3,
+# M4 Max 128 GB sweep, prefill tok/s at 4k/16k-token prompts (median of 3,
 # one server per arm), then the step transient:
 #   Qwen3.8 Flash 4.4bpw:  512 565/484 0.79 GiB | 1024 528/490 0.99
 #                          2048 552/524 2.11    | 4096 551/499 4.05
 #   Qwen3.5-397B VQ 2.2:   512 194/155 0.33 GiB | 1024 224/186 1.15-1.54
 #                          2048 244/205 2.95    | 4096 249/206 5.6-7.5
-# M4 Max 128 GB 2026-09-29, Qwen3.6-35B-A3B VQ 3.4 (13.8 GiB), 28,727-token
+# M4 Max 128 GB, Qwen3.6-35B-A3B VQ 3.4 (13.8 GiB), 28,727-token
 # prompt, interleaved, n=3, prefill tok/s:
-#   512 642.7/642.6/649.5 | 2048 1182.9/1164.5/1141.9 | 4096 1173.2/1166.5/1133.8
+#   512 642.7/642.6/649.5 | 2048 1182.9/1164.5/1141.9
+#   4096 1173.2/1166.5/1133.8
 # So width is worth ~1.8x on the 35B-A3B up to 2048 and nothing past it;
 # ~30% on the 397B VQ for a 9-23x larger transient -- 4096 aborted Metal
 # with one agent at 25k tokens on a box with ~14 GiB left, which is what
@@ -100,8 +101,7 @@ PREFILL_KV_ALLOWANCE_TOKENS = 32768
 
 # Per-ARCHITECTURE prompt chunk: a measurement with its run, kept in each
 # family's manifest (engine/families/<family>/__init__.py, `prefill_chunk`)
-# beside the rest of what that family is. Carried from the exo fork
-# (PREFILL_STEP_SIZE_BY_FAMILY), where it was keyed by a model-id substring.
+# beside the rest of what that family is.
 # Not measured means PREFILL_CHUNK_DEFAULT. A measured width is a CAP, not
 # a default: the room rule (above) decides how much of it this launch takes.
 def _measured_widths() -> dict:
@@ -136,17 +136,17 @@ def prefill_chunk_for(model_type: str) -> tuple:
 # launch setting saved before cannot fail a launch; it does nothing.
 
 # Freed MLX buffers pile up invisibly -- they do not appear in "active
-# memory." Biggest single win in vqlab's memory playbook, zero measured speed
+# memory." The biggest single memory win measured, zero measured speed
 # cost at 26k-token prefill.
 CACHE_LIMIT_GB_DEFAULT = 4.0
 
 # Below this much free headroom after the weights, treat the box as tight and
 # resolve the memory knobs down rather than leaving performance defaults:
-# the larger of a floor and a fraction of the working set. A fixed 12 GiB let
-# 397B on the 128 GB M4 (~14 GiB above its weights) take the measured
+# the larger of a floor and a fraction of the working set. A fixed 12 GiB
+# lets the 397B on a 128 GB M4 Max (~14 GiB above its weights) take the
 # 4096-token prefill chunk; its first step alone measured 8.1 GiB of
-# transient, and one agent at a 25k-token context aborted Metal
-# (2026-09-26). A share of the working set scales with the machine.
+# transient, and one agent at a 25k-token context aborted Metal. A share of the
+# working set scales with the machine.
 TIGHT_HEADROOM_GIB = 12.0
 TIGHT_HEADROOM_SHARE = 0.20
 
@@ -181,11 +181,11 @@ PERFORMANCE_DEFAULTS = {
 # with is what its PUBLISHED model.py defaults to, and that is not uniform:
 # Flash-Next 2.1 and Qwen3.6-35B-A3B 3.8/4.6/5.4 shipped v2, the rest v1.5 or
 # the arc6-era runtime with no flags at all (docs/design/vq-rung-knobs.md,
-# read off the Hub 2026-09-23). This table used to be applied to EVERY VQ
-# artifact with v1.5 as the default, which forced the v2 rungs' two flags
-# to 0 -- a numerics change nobody asked for, on exactly the rungs whose
-# weights were fitted under v2. So the resolver now takes a rung's numerics
-# from the rung (NUMERICS_SOURCES, in order) and applies a profile ONLY when
+# read off the Hub). Applying one table to every VQ artifact with v1.5 as
+# the default would force the v2 rungs' two flags to 0 -- a numerics change
+# nobody asked for, on exactly the rungs whose weights were fitted under
+# v2. So the resolver takes a rung's numerics from the rung (NUMERICS_SOURCES,
+# in order) and applies a profile ONLY when
 # a person names one.
 NUMERICS_FLAGS = ("VQ_GEMMSEG_BF16IO", "VQ_DECODE_BF16IO")
 
@@ -797,7 +797,7 @@ def model_window(cfg: dict) -> tuple:
 # and vLLM/sglang raise their max length (VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 # --max-model-len 1010000; SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=1
 # --context-length 1010000). Static YaRN: "potentially impacting performance
-# on shorter texts". Sources (read 2026-09-29):
+# on shorter texts". Sources:
 #   https://huggingface.co/Qwen/Qwen3.5-397B-A17B   (1,010,000)
 #   https://huggingface.co/Qwen/Qwen3.6-35B-A3B     (1,010,000)
 #   https://huggingface.co/Qwen/Qwen3.8-27B         (1,000,000)
@@ -931,7 +931,8 @@ def check_knob(name: str, value, window: int = 0):
 
 # --- what a VISION rung holds besides its weights ---------------------------
 # A model with a vision tower needs three things a text model does not, and
-# the resolver must count them BEFORE a load, not discover them as an OOM on the first screenshot:
+# the resolver must count them BEFORE a load, not discover them as an OOM on
+# the first screenshot:
 #
 # 1. The TOWER'S WEIGHTS. Read from the safetensors headers (tensor names
 #    under these prefixes), never guessed. Every family keeps them in the

@@ -1,24 +1,16 @@
 """Identical results across chips (KNURLOGIC_CROSS_CHIP).
 
-mlx 0.31.2's `mx.quantized_matmul` moves from its matrix-vector kernel (qmv)
-to its matrix-matrix kernel (qmm) at a row count that depends on the GPU
-architecture (M3 applegpu_g15d vs M4 applegpu_g16s). A forward of about
-10-31 rows -- a short prompt, a prefill chunk's tail, 10-31 decode rows at
-once -- therefore rounds differently on the two chips in every
-affine-quantized layer (attention, shared experts, lm_head), and the ranks
-of a split across them drift apart.
+mlx 0.31.2's `mx.quantized_matmul` switches from its matrix-vector kernel
+(qmv) to its matrix-matrix kernel (qmm) at a row count that depends on the
+GPU architecture (applegpu_g15d vs applegpu_g16s), so a 10-31 row forward
+rounds differently on M3- and M4-generation chips. A call with 9-31 rows
+against a 2-D weight is therefore zero-padded to 32 rows, run (qmm on every
+chip) and sliced back; 1-8 and >=32 rows are untouched.
 
-The fix: a call with 9-31 rows against a 2-D weight is flattened,
-zero-padded to 32 rows, run (qmm on every chip) and sliced back. Rows of a
-matmul are independent, so the result is what a real 32-row call gives for
-those rows; 1-8 and >=32 rows are untouched. Measured: M3 and M4
-bit-identical across all layers; +2-6% on the affected calls only.
-
-Off by default: rank 0 samples every token, so rounding differences cannot
-desync a cluster, and nothing has failed for want of it. `on` forces it
-(a "Stable" preset will); `auto` turns it on for a cluster job whose
+Off by default (rank 0 samples every token, so rounding cannot desync a
+cluster). `on` forces it; `auto` turns it on for a cluster job whose
 machines have different GPU architectures. mlx is imported only by
-`install`.
+`install`. Design: docs/design/server.md (cross-chip rounding).
 """
 from __future__ import annotations
 

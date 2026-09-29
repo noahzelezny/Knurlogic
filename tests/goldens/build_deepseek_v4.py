@@ -4,11 +4,10 @@ logits as computed by the FORK the vendored file came from.
 
     # 1. the tiny artifact (knurlogic's vendored module builds the shapes)
     PYTHONPATH=src python tests/goldens/build_deepseek_v4.py weights
-    # 2. the golden, run where the fork is installed (the M4's exo env,
-    #    mlx-lm 0.31.9 fork) -- the independent reference
-    scp -r tests/goldens/deepseek_v4_tiny tests/goldens/build_deepseek_v4.py m4:/tmp/
-    /opt/homebrew/anaconda3/envs/exo/bin/python /tmp/build_deepseek_v4.py \
-        golden /tmp/deepseek_v4_tiny /tmp/deepseek_v4_tiny.npz
+    # 2. the golden, run in an interpreter where the fork (mlx-lm 0.31.9
+    #    fork) is installed -- the independent reference
+    $FORK_PYTHON tests/goldens/build_deepseek_v4.py \
+        golden tests/goldens/deepseek_v4_tiny deepseek_v4_tiny.npz
 
 `logits_of` is what the test runs through knurlogic's load path.
 """

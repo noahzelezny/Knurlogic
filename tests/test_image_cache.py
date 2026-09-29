@@ -6,8 +6,7 @@ thread (vision included), meets the real prompt cache (mlx-lm's
 LRUPromptCache behind the scheduler's wrapper) and comes back as the
 response. Sentinel keys reaching code that assumes ints (prefix
 arithmetic, the segment trim, `insert_cache`, usage counts) is run for
-real rather than argued about. (Until 2026-09-25 this drove mlx-lm's own
-server objects; the gates are the same.)
+real rather than argued about.
 
 Fixtures, and why each is shaped the way it is:
 
@@ -18,10 +17,10 @@ Fixtures, and why each is shaped the way it is:
   real template drops earlier thinking, which would fail G8 for template
   reasons). Byte ids 0-255, every other id a private-use char, so a reply
   re-encodes to exactly the ids generated and turn 2's key extends turn 1's
-  stored entry. `<image>` is the one image token (P0 contract: the
+  stored entry. `<image>` is the one image token (the contract: the
   placeholder is a single special id). The image and eos ids are banned by
   logit_bias so a random model cannot type them.
-* P0's `StubFamily` (identity tower, pixel-dependent features), never a
+* the shared `StubFamily` (identity tower, pixel-dependent features), never a
   real family package. Tower calls are counted by wrapping
   `fam.tower` from OUTSIDE.
 """
@@ -641,7 +640,7 @@ def test_a_burst_of_image_requests_interleaves_with_decoding(server, model,
 
 def test_an_image_sent_while_the_model_loads_waits(monkeypatch):
     """Vision is unknown until the model has loaded: an image request
-    queues like a text one instead of a 400 (M4 2026-09-28, the 27B)."""
+    queues like a text one instead of a 400."""
     from knurlogic.engine.serve import state
     from knurlogic.interfaces.http.server import App
     monkeypatch.setitem(state.VISION, "serve", None)

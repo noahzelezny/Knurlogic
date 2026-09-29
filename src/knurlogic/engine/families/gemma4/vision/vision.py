@@ -1,19 +1,14 @@
 """gemma4's vision tower -- standalone, not attached to any trunk (the
-trunk's `sanitize` keeps dropping vision keys,
-so this tower loads its own tensors under `vision_tower.*` /
-`embed_vision.*` and is never part of the text `Model`).
+trunk's `sanitize` drops vision keys, so this tower loads its own tensors
+under `vision_tower.*` / `embed_vision.*`).
 
 Vendored from mlx-vlm 0.6.17 `mlx_vlm/models/gemma4/vision.py` (562 lines,
 MIT, Copyright (c) 2025 Prince Canuma), with `from ..base import
 ensure_fused_sdpa` changed to `from .._base import ensure_fused_sdpa`
-(the three-helper shim, `engine/vision/_base.py` -- so this package never
-imports mlx-vlm). One structural trim, documented at `VisionModel.__call__`
-below: the batched/list-of-different-sized-images branch and the
-`pixel_position_ids`-supplied branch are dropped, since `Family.encode`
-(this package's `__init__.py`) only ever calls the tower with ONE already
-patchified image at a time (`Family.preprocess` runs per image, per the
-Family protocol) -- the list branch existed in mlx-vlm to batch a whole
-turn's images through one forward pass, which this build does not do
+(`engine/vision/_base.py`, so this package never imports mlx-vlm). One
+structural trim, documented at `VisionModel.__call__`: the batched
+list-of-images and `pixel_position_ids`-supplied branches are dropped,
+since `Family.encode` calls the tower with ONE patchified image at a time
 (images are encoded and cached individually).
 """
 from __future__ import annotations

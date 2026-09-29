@@ -37,10 +37,9 @@ function pushRecent(path){
   r.unshift({path, at:Date.now()});
   try{ localStorage.setItem('kn.recent', JSON.stringify(r.slice(0,20))) }catch(e){}
 }
-// No `vision` field exists on /models.json today (checked `interfaces/page/documents.py`); this is
-// a family-name heuristic until the server adds one, matching the families
-// the design doc names as vision-capable (gemma4, glm5, qwen-vl). See the
-// deviation note in the build report.
+// /models.json has no `vision` field (interfaces/page/documents.py), so
+// this is a family-name heuristic matching the vision-capable families
+// (gemma4, glm5, qwen-vl) until the server reports one.
 function isVision(m){
   // The server's answer, never a guess from the name: /models.json carries
   // `vision` per model and /status.json the served VisionSpec. A name

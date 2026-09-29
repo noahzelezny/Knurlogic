@@ -1,18 +1,15 @@
 """Per-family capture of the pre-lm_head activation.
 
 The MTP head drafts token t+2 from the trunk's hidden state at t. mlx-lm's
-public contract is `model(tokens, cache=cache) -> logits`; it hands back
-logits and nothing else, so the hidden state has to be taken from inside.
-
-The technique is a wrapper module that records its own input and forwards.
-That much is unavoidable. What is avoidable is doing it as a permanent
-monkeypatch on a hardcoded attribute name: here the attribute is a registry
-field, and the wrap is a context manager, so the trunk is left exactly as it
+public contract is `model(tokens, cache=cache) -> logits`, so the hidden
+state has to be taken from inside: a wrapper module that records its own
+input and forwards. The attribute is a registry field, not a hardcoded
+name, and the wrap is a context manager, so the trunk is left exactly as it
 was found even if generation raises.
 
-The wrapper is an nn.Module so that the wrapped submodule stays reachable from
-`model.parameters()` while it is installed. The captured array is kept in a
-closure cell rather than as an attribute, so it never enters the module tree.
+The wrapper is an nn.Module so the wrapped submodule stays reachable from
+`model.parameters()` while installed; the captured array is kept in a
+closure cell, so it never enters the module tree.
 """
 from __future__ import annotations
 

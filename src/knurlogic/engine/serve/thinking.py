@@ -2,41 +2,15 @@
 template's own.
 
 A client asks with OpenAI's `reasoning_effort` (or OpenRouter's
-`reasoning: {"effort": ...}`, and its `{"enabled": false}` for none), on
-the standard ladder
-
-    none < minimal < low < medium < high < xhigh
-
-and this module turns it into the `chat_template_kwargs` the served
-model's template actually reads. Which controls a template has is its
-DIALECT, detected from the template text -- not from the architecture: one
-module (qwen3_5) ships templates with on/off only (Qwen3.6) and with graded
-effort (Qwen3.8). The dialects and their native levels live in the family
-manifests (engine/families/<family>/__init__.py, "thinking").
-
-Native controls only, never a token budget. A level the template cannot
-express goes to the nearest native level AT OR ABOVE it (never less thought
-than asked), or the highest there is; "none" on a template with no off
-switch goes to its lowest level. Every response says what was applied, in
-usage.knurlogic.thinking. Deciding HOW MUCH to think for a given question
-is the harness's call; this is only the translation.
-
-A client that sends `chat_template_kwargs` itself wins over the translation,
-key by key -- it asked for something specific -- and the report then says
-what the MERGED kwargs render to, not what was asked.
-
-THE TEMPLATE TEXT PROPOSES, RENDERING DECIDES. Detection is a substring
-pre-filter on the template; with a loaded tokenizer, `probe` renders a tiny
-conversation through mlx-lm's own TokenizerWrapper once per native level
-and once bare. The dialect is only trusted when every level renders
-differently, and the model's default is whichever level the BARE render
-equals -- because mlx-lm injects enable_thinking=<has_thinking> into any
-request that is silent about it (tokenizer_utils.apply_chat_template), so
-gemma, whose template defaults off, thinks by default when served.
-
-Reasoning is streamed by default; `reasoning: {"exclude": true}`
-(OpenRouter's spelling) strips it from messages and deltas. Its token
-count goes in usage.completion_tokens_details.reasoning_tokens.
+`reasoning: {"effort": ...}`) on the ladder
+none < minimal < low < medium < high < xhigh, and this module turns it
+into the `chat_template_kwargs` the template reads. Which controls a
+template has is its DIALECT, detected from the template text and confirmed
+by rendering (family manifests, "thinking"). Native controls only, never a
+token budget: a level the template cannot express goes to the nearest
+native level AT OR ABOVE it. A client's own `chat_template_kwargs` wins,
+key by key. What was applied is reported in usage.knurlogic.thinking.
+Design: docs/design/server.md (thinking).
 """
 
 from __future__ import annotations
@@ -140,11 +114,11 @@ _PROBE_MSGS = [{"role": "user", "content": "hi"}]
 _probe_cache: dict = {}
 # One render at a time. Requests arrive on the server's handler threads,
 # and the first few after a load probe together: concurrent renders through
-# the same tokenizer failed, the probe read those failures as "the template
-# does not act on its controls", and whichever thread finished last decided
-# what was cached. Measured on an M4 Max (128 GB) (2026-09-25): the first four
-# concurrent requests of every bench arm were served "not controllable" --
-# a `none` request reasoned for 242 tokens.
+# the same tokenizer fail, the probe reads those failures as "the template
+# does not act on its controls", and whichever thread finishes last decides
+# what is cached. Measured on an M4 Max (128 GB) without the lock: the first
+# four concurrent requests of every bench arm were served "not
+# controllable" -- a `none` request reasoned for 242 tokens.
 _render_lock = threading.RLock()
 
 
@@ -268,9 +242,9 @@ def _served_tokenizer():
     same artifact's tokenizer read off disk.
 
     mlx-lm answers HTTP before its generation thread has loaded the model,
-    so the first requests to a slow-loading artifact arrived with no
-    tokenizer, found no template, and were served the model's own default
-    level whatever they asked for (Flash-Next 2.1 on an M4 Max (128 GB), 2026-09-25:
+    so the first requests to a slow-loading artifact can arrive with no
+    tokenizer, find no template, and be served the model's own default
+    level whatever they asked for (Flash-Next 2.1 on an M4 Max (128 GB):
     four `none` requests reasoned 89-232 tokens). The template on disk is
     the one the server will use; the tokenizer is loaded once, cheaply,
     and dropped when the served one appears."""

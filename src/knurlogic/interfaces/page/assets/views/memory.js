@@ -20,11 +20,11 @@ function ramWent(m){
   if(!RAM){ el.innerHTML=''; return }
   const inst=m.installed_bytes, by=Object.entries(m.by_runtime||{})
     .sort((a,b)=>b[1]-a[1]);
-  // DERIVED FROM ONE BASE, never carried alongside. This line used to take
-  // `other` from other_bytes (which is used - named) and `free` from
-  // installed - seen_bytes (the sum of process FOOTPRINTS). Two different
-  // bases, so the rows summed to 118.7 GiB on a 96 GiB machine and the key
-  // disagreed with the gauge beside it. Everything here now comes from
+  // DERIVED FROM ONE BASE, never carried alongside. Taking `other` from
+  // other_bytes (used - named) and `free` from installed - seen_bytes (the
+  // sum of process FOOTPRINTS) mixes two bases: the rows can sum to
+  // 118.7 GiB on a 96 GiB machine and disagree with the gauge beside them.
+  // Everything here comes from
   // `installed` and `used` in the same object, so the rows add up to the
   // machine by construction.
   const used=Number.isFinite(m.used_bytes)?m.used_bytes:(m.seen_bytes||0);

@@ -35,7 +35,7 @@ artifacts were validated against -- not merely that it imports.
   DeepSeek-V4-Flash weights: pins.json is empty until `knurlogic smoke
   --pin` passes on it.
 
-### Edits (2026-09-29), each found by a tiny-model test the fork fails
+### Edits 1-8, each found by a tiny-model test the fork fails
 
 1. **Indexer query RoPE** (`Indexer.__call__`). The indexer's q is
    `[B, S, H, D]`, and `mx.fast.rope` puts positions on axis -2 -- the
@@ -59,7 +59,7 @@ artifacts were validated against -- not merely that it imports.
    local cache a BatchRotatingKVCache), a short row attended to its empty
    window slots and to the zero rows padding its pools. Now, only in that
    case, the batch cache's own window mask plus per-row pool visibility.
-   Single-row and same-length batches still take the fork's mask-free path.
+   Single-row and same-length batches take the fork's mask-free path.
 4. **Overlap carry per row** (`Compressor.__call__`, `_ragged_prev`). When
    one row completed a ratio-4 window, every row's `prev_kv/prev_gate`
    carry was replaced. Now only rows that emitted move their carry.
@@ -85,24 +85,22 @@ any prompt past index_topk compressed rows. The golden
 (tests/goldens/deepseek_v4_tiny.npz) is computed BY THE FORK, with an
 index_topk no pool reaches, so it checks everything the edits leave alone.
 
-## Edits 9-10 (2026-09-29, first live load)
+### Edits 9-12, needed to load real artifacts
 
-9. `DeepseekV4MoE.__init__` pre-quantized the experts to mxfp4; the fork's patched
-   `mlx_lm/utils.py` skipped already-quantized modules, stock mlx-lm 0.31.3 does not, so
-   every rank failed with "Unable to quantize ... QuantizedSwitchLinear". Now the experts
-   are pre-quantized only when the config carries no `quantization` (a raw FP4 checkpoint);
-   an MLX-quantized artifact is converted by the loader. `ModelArgs.quantization` added.
-10. The transformers config shim sets `max_position_embeddings` and `rope_theta` before
-   `PretrainedConfig.__init__`; transformers 5.x reads them while standardizing rope
-   params and raised AttributeError when loading the tokenizer.
-
-## Edit 11 (2026-09-29)
-
-11. `_ragged_prev` (edit 4's per-row carry) is no longer `@mx.compile`d. Its `lens`
-   is a Python list, so the compiled function traced one graph per distinct emit
-   pattern per layer -- at 8 rows, up to hundreds of variants x 41 layers -- to save
-   a handful of slices. Arithmetic unchanged.
-
-## Edit 12 (2026-09-29)
-
-Two comments that named another project now say "Fork patch". No code change.
+9. `DeepseekV4MoE.__init__` pre-quantized the experts to mxfp4; the fork's
+   patched `mlx_lm/utils.py` skips already-quantized modules, stock mlx-lm
+   0.31.3 does not ("Unable to quantize ... QuantizedSwitchLinear"). The
+   experts are pre-quantized only when the config carries no
+   `quantization` (a raw FP4 checkpoint); an MLX-quantized artifact is
+   converted by the loader. `ModelArgs.quantization` added.
+10. The transformers config shim sets `max_position_embeddings` and
+   `rope_theta` before `PretrainedConfig.__init__`; transformers 5.x reads
+   them while standardizing rope params and otherwise raises
+   AttributeError when loading the tokenizer.
+11. `_ragged_prev` (edit 4's per-row carry) is not `@mx.compile`d. Its
+   `lens` is a Python list, so a compiled function would trace one graph
+   per distinct emit pattern per layer -- at 8 rows, up to hundreds of
+   variants x 41 layers -- to save a handful of slices. Arithmetic
+   unchanged.
+12. Comment-only: two comments say "Fork patch" instead of naming another
+   project. No code change.

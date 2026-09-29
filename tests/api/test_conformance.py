@@ -275,7 +275,7 @@ def test_reasoning_exclude_strips_it_and_still_counts_it():
 
 def test_every_request_reports_the_level_it_got_even_the_first():
     """The first requests after a load were served the default whatever
-    they asked for (two causes, both fixed 2026-09-25). Several at once."""
+    they asked for. Several at once."""
     t = thinking()
     if not t.get("native"):
         pytest.skip("this model has no thinking controls")
@@ -297,8 +297,8 @@ def test_every_request_reports_the_level_it_got_even_the_first():
 # --- sampling -----------------------------------------------------------------
 
 def test_a_seed_makes_sampling_repeatable_and_different_seeds_differ():
-    """mlx-lm's compiled sampler ignored the seed off the main thread; the
-    same answer came back for every seed (fixed 2026-09-25)."""
+    """mlx-lm's compiled sampler ignores the seed off the main thread;
+    without the fix the same answer comes back for every seed."""
     ask = dict(temperature=1.5, max_tokens=12, reasoning_effort="none",
                messages=[{"role": "user",
                           "content": "Write one unusual adjective."}])
@@ -464,7 +464,7 @@ def test_a_seeded_request_under_concurrent_load_equals_it_alone():
     """The seed addresses each token by position, so batching cannot move
     the random draws. What batching CAN move is the logits: a batched
     forward is not bit-identical to a one-row forward on every kernel
-    (GLM 2.7: up to 0.09 in logprob, M4, 2026-09-25). So: a divergence
+    (GLM 2.7 on an M4 Max: up to 0.09 in logprob). So: a divergence
     with identical logprobs before it is a sampling bug (fail); one with
     the logprobs already drifted is the kernels (skip, with the drift)."""
     ask = dict(temperature=1.2, max_tokens=24, reasoning_effort="none",

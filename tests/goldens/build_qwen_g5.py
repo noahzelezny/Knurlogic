@@ -1,5 +1,5 @@
-"""Build the G5 golden: the Qwen trunks' TEXT path as it was BEFORE P1
-threaded MRoPE through them -- run once, at the parent of P1's first trunk
+"""Build the G5 golden: the Qwen trunks' TEXT path as it was BEFORE MRoPE
+was threaded through them -- run once, at the parent of the first trunk
 edit, in the TEST interpreter (knurlogic's own architectures, no mlx-vlm):
 
     python3 tests/goldens/build_qwen_g5.py

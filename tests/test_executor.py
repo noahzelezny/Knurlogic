@@ -281,9 +281,9 @@ def test_removing_a_row_frees_its_memory_now_not_at_the_next_step():
 def test_a_headless_engine_says_why_and_names_vision_only_for_vision(
         caplog, vision):
     """A pipeline rank that dropped its head logged 'without a drafting
-    head (vision)' with no image anywhere (the M4 segfault of 2026-09-27
-    was first read as an image switching engines on one rank): the line
-    says why there is no head, and 'vision' only when it serves images."""
+    head (vision)' with no image anywhere, which misleads (it reads as an
+    image switching engines on one rank): the line says why there is no
+    head, and 'vision' only when it serves images."""
     import logging
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     model, _head, _ = _tiny(512)

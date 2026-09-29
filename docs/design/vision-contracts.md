@@ -1,10 +1,11 @@
-# Vision contracts (P0, frozen)
+# Vision contracts
 
-*2026-09-23. What P1-P5 and P-VQ build against. The code is the authority --
+The interfaces every vision component builds against: the families, the
+serve path, the interfaces and the VQ runtime. The code is the authority --
 `src/knurlogic/engine/vision/__init__.py` holds every signature below with
 its reasons; this page is the map, with data shapes. Design:
-`docs/design/vision.md` (v2). A change here is a change to every package:
-say so in the commit and re-run all the gates.*
+[vision.md](vision.md). A change here is a change to every family and the
+serve path: re-run all the gates.
 
 ## Modules
 
@@ -40,9 +41,11 @@ proc_hash(settings: dict) -> str   # canonical JSON, sha256, 16 hex
   pixels of the decoded, EXIF-transposed, RGB, clamped image.
 * `feats` row k is the embedding for sentinel k. Evaluate before `put`.
 * `fixed_tokens` stays `None` unless the family's processor was read and
-  shows a fixed count (critique issue 5).
+  shows a fixed count.
 
-## The key (design D6)
+## The key
+
+See [vision.md](vision.md), "The cache key".
 
 ```
 key = token ids, same length as the KV, each image token replaced by
@@ -59,7 +62,7 @@ key = token ids, same length as the KV, each image token replaced by
 key.expand_pads(ids, refs, image_token_id) -> list[int]      # 1 pad -> n_tokens
 key.expand(ids, refs, image_token_id) -> key                 # expanded ids -> key
 key.expand_segments(segments, refs, image_token_id) -> (key, segment_keys)
-                                   # UNexpanded segments from mlx-lm's _tokenize;
+                                   # UNexpanded prompt segments;
                                    # sum(len(s)) == len(key), checked
 key.to_ids(key, image_token_id) -> list[int]
 key.image_spans(key) -> [Span(start, end, sha, proc_hash, k0)]   # k0: first k in the slice
@@ -90,19 +93,19 @@ FeatureLookup = Callable[[sha, proc_hash], EncodedImage]     # raises ImageEvict
 RefLookup     = Callable[[sha, proc_hash], ImageRef]         # never evicted
 ```
 
-* All calls happen on the generator thread (D3).
+* All calls happen on the scheduler thread (the one thread that owns the MLX stream).
 * `load_weights`: standalone tower, not attached to the trunk; the trunk's
-  sanitize keeps dropping vision keys (critique B3, option a).
+  sanitize keeps dropping vision keys.
 * `embed` returns `{"input_embeddings": mx [1, len(key)-start, D], **extras}`
   with extras under the trunk's own kwarg names (`position_ids`,
   `per_layer_inputs`, a mask). Image rows come from `scatter.merge`, which
   takes row k of the sentinel's image: a slice cut mid-image needs no
   global feature index.
-* `positions(key, refs)`: pure in the FULL key (D4); called on every
+* `positions(key, refs)`: pure in the FULL key; called on every
   prefill and decode of a row whose key has an image. `None` = trunk's 1D
   positions (gemma, GLM). Qwen: `[3, 1, len(key)]` and `rope_delta`.
 * `chunk_boundaries(key)`: `[start, end)` spans no prefill chunk edge may
-  fall strictly inside (D5). gemma: every image span. Causal: `[]`.
+  fall strictly inside. gemma: every image span. Causal: `[]`.
 
 Family `build` (the registry target):
 `build(model_path: str, text_model, config: dict) -> Family | None`.
@@ -149,7 +152,7 @@ estimate_nbytes(n_tokens, text_hidden, dtype_bytes=2) -> int
 * **For tuning/resolve.py:** reserve `DEFAULT_MAX_BYTES` (or the configured
   `max_bytes`) per served vision model BEFORE the load; a live store answers
   `budget_bytes()`.
-* **For P4:** pin every image of a request from the `_tokenize` wrap
+* **For the serve path:** pin every image of a request from tokenize (`engine/vision/request.py`)
   through admit (`with store.pinned(mk, key.images_in(prompt_key))` or an
   explicit pin held on the row), so an image cannot be evicted between the
   two.
@@ -178,10 +181,11 @@ MAX_BYTES = 32 MiB   BOMB_PIXELS = 89_478_485   MAX_DECODE_PIXELS = 4096 * 4096
 `VisionError` > `KeyMismatch` (400), `ImageRejected` (400, also ValueError),
 `NoVision` (400), `ImageEvicted` (500, also KeyError).
 
-## Served spec (critique C4)
+## Served spec
 
 `served_vision() -> VisionSpec | None`, `set_served_vision(spec | None)`.
-P4 sets it when a family is built and clears it on unload; P5 reads it.
+The serve path sets it when a family is built and clears it on unload;
+the interfaces read it.
 
 ## Load lock
 
@@ -195,8 +199,9 @@ loadlock.EXIT_BUSY = 75                     # a gate tool's exit when Busy
 
 `flock(LOCK_EX|LOCK_NB)`: the kernel releases a dead holder's lock, SIGKILL
 included. Not reentrant. Record `{pid, host, agent, artifact, purpose,
-started}` is display only. Callers: seam.load/switch (P4); MCP load, serve,
-`ready()` blocker (P5); tools gates. Tiny tests never take it.
+started}` is display only. Callers: model load and switch
+(`engine/runtime/host.py`, `engine/serve/load.py`); the MCP's `ready()`
+blocker; the gate tools. Tiny tests never take it.
 
 ## Test fixtures and goldens
 
@@ -214,15 +219,16 @@ fixtures_vision.run_reference(script, *args)   # runs in the mlx-vlm 0.6.17 inte
 
 * Per-family fixtures: `tests/fixtures_vision_<family>.py`, owned by the
   family package. Goldens: `tests/goldens/<name>.npz`, built by
-  `tests/goldens/build_<name>.py` under `REFERENCE_PYTHON`
-  (`/opt/anaconda3/envs/exo/bin/python`, override `KNURLOGIC_VLM_PYTHON`);
+  `tests/goldens/build_<name>.py` under `REFERENCE_PYTHON` (an
+  interpreter with mlx-vlm 0.6.17, set by `KNURLOGIC_VLM_PYTHON`);
   tests load them with numpy only. A missing golden fails, never skips.
 * `StubFamily`: identity tower (patch pixels padded to `hidden`), one token
   per patch, `positions -> (None, 0)`, image-span `chunk_boundaries` when
   `bidirectional`. Count tower calls by wrapping `fam.tower` from outside.
 
-## Pins (design D2)
+## Pins
 
 `pyproject.toml` pins `mlx==0.31.2`, `mlx-lm==0.31.3`; `[tool.knurlogic.pins]`
 holds those and the sha256 of `mlx_lm/server.py`. `tests/test_pins.py` fails
-on drift and lists what to re-verify. The VQ runtime's pin is P-VQ's.
+on drift and lists what to re-verify. The VQ runtime is pinned by commit
+and digest in `src/knurlogic/engine/vq/PROVENANCE.md`.

@@ -1,24 +1,13 @@
-"""The model-load lock: one real model loading on this box at a time.
+"""The model-load lock: one real model loading on this machine at a time.
 
-WHY. A Mac may be shared by several servers and agents loading models. MCP
-`ready()` is a CHECK, not a mutex: two agents can both see `ready: true`
-and both load, and the second load lands on a budget measured before the
-first one's weights arrived. The lock makes the check-then-act atomic.
+MCP `ready()` is a check, not a mutex; this lock makes check-then-act
+atomic. `fcntl.flock(LOCK_EX | LOCK_NB)` on ~/.cache/knurlogic/load.lock:
+the kernel releases it however the holder dies, so there is never a stale
+lock (tests/test_loadlock.py). The JSON record inside is for display only.
 
-HOW. `fcntl.flock(LOCK_EX | LOCK_NB)` on ~/.cache/knurlogic/load.lock
-(next to servers.json). The KERNEL releases a flock when the holding process
-dies, however it dies -- a `kill -9`'d gate never leaves a stale lock, which
-a pidfile would (tests/test_loadlock.py kills a holder with SIGKILL and
-takes the lock after). The JSON record written inside is for display only
-(`holder()`, `ready()`'s blocker); whether the lock is held is always asked
-of the kernel, never read from the record.
-
-WHO TAKES IT. Real-model loads: serve.load/switch (P4), MCP load and
-`knurlogic serve` (P5), tools/*.py gates. Tiny-fixture tests do not -- they
-use < 1 GB and must run in parallel. A long-lived serve holds it only until
-its phase is `serving`.
-
-Stdlib only (machine/): asking who holds the lock must not import an engine.
+Taken by real-model loads: serve.load/switch, MCP load, `knurlogic serve`
+and the tools/*.py gates. Tiny-fixture tests do not take it. A long-lived
+serve holds it only until its phase is `serving`. Stdlib only.
 """
 from __future__ import annotations
 

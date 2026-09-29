@@ -8,7 +8,7 @@
   MIT License, Copyright (c) 2023 DeepSeek (the repo's LICENSE; model card
   `license: mit`). DeepSeek ships V4's chat encoding as Python only: the
   official tokenizer_config.json has no `chat_template`.
-- ported to Jinja for knurlogic, 2026-09-28: merge_tool_messages,
+- ported to Jinja for knurlogic: merge_tool_messages,
   sort_tool_results_by_call_order, drop_thinking, render_message (system,
   developer, user, latest_reminder, assistant; DSML tool calls; tasks;
   response_format) rendered in one template.

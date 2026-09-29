@@ -1,56 +1,18 @@
 """The qwen3_5 / qwen3_5_moe multi-token-prediction head: build, quantize,
 save, load.
 
-Structurally far simpler than the qwen4_exp head (vqlab/mtp_head.py): this
-architecture has a single residual stream, so there are no hyper-connections
-and no per-stream norm statistics, and the head's transformer block is a
-stock `DecoderLayer` that owns its own rope.
+A single residual stream, so no hyper-connections: the head is
+RMSNorm(hidden) and RMSNorm(embedding of t+1), concatenated through `fc`
+[D, 2D], ONE full-attention `DecoderLayer` (its own MoE on an MoE trunk),
+the head's own final `norm`, then the shared lm_head.
 
-Wiring, from the checkpoint's own key set:
-
-    h     -> RMSNorm(D)  (pre_fc_norm_hidden)     trunk hidden at position t
-    e     -> RMSNorm(D)  (pre_fc_norm_embedding)  embedding of token t+1
-    concat -> fc  [D, 2D]  -> D
-          -> ONE full-attention DecoderLayer (its own MoE, if the trunk is MoE)
-          -> RMSNorm(D)  (the head's own final `norm`)
-          -> the shared lm_head
-
-THREE details are not determined by the key set, and each one is a silent
-zero-acceptance failure if guessed wrong. All three are therefore flags, and
-`vqlab mtp-probe35` sweeps them rather than trusting a guess:
-
-  norm_shift  This family stores RMSNorm gains as DELTAS: mlx-lm's
-              `TextModel.sanitize` adds 1.0 to every norm it recognizes, but
-              only when the checkpoint still carries unsanitized conv1d
-              weights, and it drops every `mtp.*` key before it gets there.
-              So a hand-loaded head owns the convention. Measured on the
-              source 397B checkpoint (2026-08-31): conv1d.weight is
-              [12288, 1, 4], i.e. unsanitized, so the trunk norms ARE shifted
-              and the head's must be too. This agrees with the dense 27B
-              measurement (0.0000 -> 0.7285 with the shift), and was
-              confirmed directly: with the shift the 27B head drafts at
-              0.6562, without it at exactly 0.0000 in all four other
-              wirings. Default 1.0.
-
-  fc_order    The checkpoint fuses the two input projections into ONE
-              `fc.weight` of [D, 2D], so unlike qwen4_exp (separate
-              fc_embedding / fc_hidden tensors) the concat order is not
-              recoverable from the file. Measured on the dense 27B
-              (2026-08-31, 512 positions): "eh" = [embedding | hidden] gives
-              0.6562 acceptance, "he" gives 0.0020 -- i.e. chance. Default
-              "eh".
-
-  h_source    Whether the head consumes the trunk's hidden state before or
-              after the trunk's own final norm. Measured: pre_norm 0.6562 vs
-              post_norm 0.6582 over 512 positions -- a ONE-token difference,
-              so this flag is not resolved by that experiment and probably
-              cannot be: `pre_fc_norm_hidden` is applied immediately after,
-              and an RMSNorm of an already-normed vector is close to
-              idempotent. Default "pre_norm", which is what the head carrying
-              its own hidden norm argues for.
-
-Head precision cannot affect output quality -- the trunk verifies every
-drafted token, so a coarser head costs a rejection, never a wrong token.
+Three details are not determined by the key set and each is a silent
+zero-acceptance failure if guessed wrong, so all three are flags
+(`vqlab mtp-probe35` sweeps them): `norm_shift` (gains stored as deltas;
+default 1.0), `fc_order` (default "eh" = [embedding | hidden]) and
+`h_source` (default "pre_norm"). Head precision cannot affect output
+quality -- the trunk verifies every drafted token.
+Design: docs/design/drafting.md (qwen3_5 head).
 """
 from __future__ import annotations
 
@@ -236,7 +198,7 @@ class MTPHeadQwen35:
     @classmethod
     def from_sidecar(cls, model, arch, path):
         w = mx.load(str(path))
-        # Sidecars built before 2026-09-07 stored the shifted norm gains in
+        # Older sidecars store the shifted norm gains in
         # float32 (the accumulate dtype leaked into the file). Seven tensors
         # — the two layernorms, q_norm/k_norm, and the three pre-fc norms —
         # are enough to promote the head's attention to float32, which at

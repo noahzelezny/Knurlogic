@@ -1,6 +1,7 @@
-"""Build P0's goldens in the reference interpreter (mlx-vlm 0.6.17):
+"""Build the shared vision goldens in the reference interpreter
+(mlx-vlm 0.6.17):
 
-    /opt/anaconda3/envs/exo/bin/python tests/goldens/build_p0.py
+    $KNURLOGIC_VLM_PYTHON tests/goldens/build_p0.py
 
 p0_masked_scatter.npz  mlx-vlm's own gemma4 `masked_scatter` on seeded
                        inputs -- holds engine/vision/scatter.py's vendored

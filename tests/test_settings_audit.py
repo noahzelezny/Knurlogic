@@ -1,4 +1,4 @@
-"""The Settings audit (2026-09-28): what each knob claims against what the
+"""The settings audit: what each knob claims against what the
 code does -- the context length's cap, the prompt chunk's one name, the
 dead prompt concurrency, and a peer's model's settings reaching the peer."""
 

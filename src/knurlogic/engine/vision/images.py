@@ -1,35 +1,16 @@
 """Request bytes -> a bounded RGB image, and the hash that names it.
 
-The hash is of PIXELS, not of the base64 a client sent: the same picture
-re-encoded (a client that re-compresses PNGs, a different base64 wrapping)
-still hits the store and the prompt cache. exo's precedent (vision.py:724,
-749-754) hashed `tobytes()` alone; here mode and size go in too, so a
-100x1 and a 1x100 image of the same bytes cannot share a name.
+The hash is of PIXELS plus mode and size, not of the base64 a client sent,
+so the same picture re-encoded still hits the store and the prompt cache.
+Normalisation matches mlx-vlm 0.6.17's `utils.load_image` exactly
+(`ImageOps.exif_transpose` then `.convert("RGB")`), because the identity
+gates (G1-G4) compare against goldens made through that function.
 
-Normalisation matches mlx-vlm 0.6.17's `utils.load_image` exactly --
-`ImageOps.exif_transpose` then `.convert("RGB")` -- because the identity
-gates (G1-G4) compare against goldens made through that function: the same
-file must reach the processor as the same pixels on both sides.
-
-CLAMPS, BEFORE HASHING. An image arrives from
-an HTTP client on a shared host:
-  * MAX_BYTES of encoded input, checked before decoding anything;
-  * BOMB_PIXELS: PIL's own decompression-bomb limit (Image.MAX_IMAGE_PIXELS
-    default, 89,478,485 px), checked from the header before pixels are
-    decoded; over it is refused (ImageRejected), not shrunk -- shrinking
-    would first have to decode it;
-  * MAX_DECODE_PIXELS: anything larger but legal is downscaled (aspect kept,
-    BICUBIC, deterministic) before hashing, so the hash names what the
-    processor actually sees. It is a safety bound, not a quality knob: each
-    family's processor applies its own max_pixels after this (VisionSpec).
-
-No URLs are fetched: a server that fetches client-supplied URLs is an SSRF
-hole, and reading a local path named by a remote client is worse. Paths are
-allowed only when the caller says the request is local (allow_paths).
-
-PIL is imported lazily: this module is imported by the serve path's front
-door, and a text-only server should not pay for PIL (not measured; the
-same rule as every lazy import in engine/).
+Clamps, before hashing: MAX_BYTES of encoded input; BOMB_PIXELS (PIL's
+decompression-bomb limit, read from the header) is refused, not shrunk;
+MAX_DECODE_PIXELS downscales anything larger but legal. No URLs are
+fetched (SSRF); local paths only when the caller says the request is local
+(allow_paths). PIL is imported lazily. Design: docs/design/vision.md.
 """
 from __future__ import annotations
 

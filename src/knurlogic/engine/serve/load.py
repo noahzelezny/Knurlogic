@@ -18,7 +18,7 @@ from typing import Optional
 
 #: Packages that can host a model architecture, in lookup order.
 #: Where an architecture module is looked up. Only mlx_lm's namespace: every
-#: family registers there, GLM included (mlx-vlm is not needed, 2026-09-25).
+#: family registers there, GLM included (mlx-vlm is not needed).
 HOST_PACKAGES = ("mlx_lm",)
 
 
@@ -77,8 +77,8 @@ def gpu_in_use() -> Optional[int]:
     """Bytes of GPU memory in use on this Mac by EVERY process (the IOGPU
     driver's "In use system memory"), or None where it cannot be read.
     iogpu.wired_limit_mb caps this total, not one process's share: the
-    27B on an M3 Ultra (96 GB) (2026-09-28) aborted Metal with its own peak under the
-    working set while other processes held 2.9 GiB of it."""
+    27B on an M3 Ultra (96 GB) aborted Metal with its own peak under
+    the working set while other processes held 2.9 GiB of it."""
     import re
     import subprocess
     try:
@@ -282,7 +282,7 @@ def apply_live(env: dict) -> dict:
 
 
 def tool_support(chat_template: str) -> dict:
-    """Which tool-call dialect an artifact speaks, and whether we can read it.
+    """Which tool-call dialect an artifact speaks, and whether knurlogic can read it.
 
     Tool calling is not one format. This template asks for
 

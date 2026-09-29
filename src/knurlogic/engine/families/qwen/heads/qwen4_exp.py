@@ -1,10 +1,8 @@
 """The qwen4_exp multi-token-prediction head: build, quantize, save, load.
 
-One module so the wiring lives in exactly one place. Every detail below was
-settled by measurement against the architecture itself.
-
-Wiring, per the llama.cpp qwen4-exp port (PR #27739) with the ambiguities
-resolved against the architecture itself:
+One module so the wiring lives in exactly one place. Wiring, per the
+llama.cpp qwen4-exp port (PR #27739) with the ambiguities resolved by
+measurement against the architecture itself:
 
     h_row -> RMSNorm(hc*D, group_size=D)   one statistic per stream, as every
                                            other wide norm in this arch does
@@ -16,10 +14,9 @@ resolved against the architecture itself:
           -> the head's own hyper_connection_mixer (carries the final norm)
           -> the shared lm_head / tied embedding
 
-The norms MUST be applied by the architecture's own RMSNorm, which is
-zero-centered (y = norm(x) * (1 + weight)). Hand-rolling `n * w` drops the
-+1.0 and drives draft acceptance to exactly 0.0 -- that single mistake was
-the entire reason the head looked dead. Do not "simplify" it back.
+The norms MUST be the architecture's own zero-centered RMSNorm
+(y = norm(x) * (1 + weight)); a hand-rolled `n * w` drops the +1.0 and
+drives draft acceptance to exactly 0.0. Do not "simplify" it back.
 """
 from __future__ import annotations
 
@@ -43,7 +40,7 @@ def _quantizable(path, mod):
     return hasattr(mod, "to_quantized") and not path.endswith("mlp.gate")
 
 
-# Measured from the bf16 graft header (2026-08-31): the 512-expert MoE stack
+# Measured from the bf16 graft header: the 512-expert MoE stack
 # is 4.688 of the head's 4.856 GiB -- 96.5% of it, in TWO tensors. Everything
 # else together (attention, hyper-connections, the fc fuse, the shared expert,
 # the norms) is 0.168 GiB. So head size is essentially a single dial, the

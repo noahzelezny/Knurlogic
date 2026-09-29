@@ -1,32 +1,16 @@
 """knurlogic's own VQ runtime: the vendored kernels plus the attach step.
 
-WHAT A PUBLISHED BUNDLE IS. Every released rung's `model.py` is three texts
-concatenated by vqlab's bundlers: `vq_switch.py` (MoE expert + PLE kernels),
-`vq_dense.py` on the dense rungs (VQLinear / VQEmbedding), and a loader shim
-that builds the registry architecture and swaps each VQ-coded module for its
-drop-in before weights load. The rungs differ from each other (and from vqlab
-HEAD) in the DEFAULTS of a few env flags baked into that text -- measured
-against the Hub on 2026-09-23: 27B == HEAD byte for byte; Flash-Next 2.1 ==
-HEAD but for three default lines; see docs/design/vq-rung-knobs.md.
-
-So this module reproduces a bundle without its text: the two runtime files
-are vendored VERBATIM (PROVENANCE.md pins commit and digest), executed into
-one fresh namespace per knob set -- concatenated, exactly as a bundle is, so
-vq_dense finds vq_switch's kernels in its own globals the way it does inside
-a model.py -- with the rung's knobs in the environment while the flags are
-read. The shim's job (attach) is done by `model_classes` below.
-
-WHY A FRESH NAMESPACE PER KNOB SET, NOT ONE IMPORT. The flags are module
-globals read ONCE at import (`_GEMMSEG_BF16IO = os.environ.get(...)` and
-~30 more). One shared import would freeze the first rung's numerics into
-every rung loaded after it in the process.
-
-ENV PRECEDENCE: a flag already set in the process environment wins over the
-rung's knob. The resolver emits the rung's own values by default, so they
-agree; a value differing from the rung's is a person asking (a runtime
-profile, a debugging override), and the person wins.
-
-Text only. The vision path is the family packages' (P1-P3): they build the
+A published rung's `model.py` is three texts concatenated: `vq_switch.py`
+(MoE expert + PLE kernels), `vq_dense.py` on dense rungs, and a loader shim.
+Rungs differ only in the DEFAULTS of a few env flags baked into that text
+(docs/design/vq-rung-knobs.md). This module reproduces a bundle without its
+text: the two runtime files are vendored VERBATIM (PROVENANCE.md) and
+executed, concatenated, into one fresh namespace per knob set, with the
+rung's knobs in the environment while the flags are read -- the flags are
+module globals read ONCE at import, so one shared import would freeze the
+first rung's numerics into every later one. `model_classes` does the
+shim's attach step. A flag already set in the process environment wins
+over the rung's knob. Text only: the family vision packages build the
 multimodal model and call `attach_vq` on its language model.
 """
 from __future__ import annotations
@@ -313,7 +297,7 @@ def serves(path) -> bool:
 def load_model(path, knobs: dict | None = None, lazy: bool = False,
                strict: bool = True, model_config: dict | None = None):
     """mlx-lm's own `load_model`, with the bundle's `model_file` switched
-    off and our classes in its place. `knobs` defaults to the rung's
+    off and knurlogic's classes in its place. `knobs` defaults to the rung's
     (rungs.json); pass {} to run HEAD's defaults."""
     from mlx_lm.utils import load_model as _load_model
     p = Path(path)

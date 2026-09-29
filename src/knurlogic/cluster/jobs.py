@@ -2,24 +2,13 @@
 whether it is still healthy. Stdlib only: the page reads these, and the
 page never imports mlx.
 
-Stock mlx has no collective timeouts, so nothing inside a rank can
-interrupt an eval blocked on a peer that died. The failure path is out of
-band instead:
+Each rank writes ~/.cache/knurlogic/jobs/<job>/rank<r>.json (phase, step
+counter, work in flight, time) every MARK_S seconds and at every phase
+change; the page that started it tears the whole job down on a gone pid, a
+rank that never joined, or rank 0 busy with a step counter unmoved for
+STALL_S. Idle is not stalled.
 
-  each rank    writes ~/.cache/knurlogic/jobs/<job>/rank<r>.json -- its
-               phase, its step counter, whether work is in flight (rank 0
-               only knows), and the time -- every MARK_S seconds from a
-               daemon thread, and at every phase change
-  its page     watches the ranks it started (verdict()): a pid gone, a rank
-               that never joined, or rank 0 busy with a step counter that
-               has not moved for STALL_S. Idle is not stalled: a ring with
-               nothing in flight sits in its exchange forever, correctly.
-               On any of them the page tears the whole job down.
-
-With the jaccl self-heal fork (machine/deps.py), a wedged RDMA collective
-also throws inside the rank -- but only once JACCL_COLLECTIVE_TIMEOUT_MS is
-set, which happens AFTER the load (0 while loading: a cold 400 GB read is
-not a hang). The pattern follows the project's exo fork, commits d2e82f92 / 43dc7f56.
+Design: docs/design/cluster.md (jobs).
 """
 from __future__ import annotations
 

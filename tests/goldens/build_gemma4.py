@@ -1,7 +1,7 @@
-"""Build P2's (gemma4 vision) goldens in the reference interpreter
+"""Build the gemma4 vision goldens in the reference interpreter
 (mlx-vlm 0.6.17):
 
-    /opt/anaconda3/envs/exo/bin/python tests/goldens/build_gemma4.py
+    $KNURLOGIC_VLM_PYTHON tests/goldens/build_gemma4.py
 
 gemma4_vision_tower.npz   mlx-vlm's own gemma4 VisionModel, tiny random
                           weights (seed 0), on one tiny image -- holds

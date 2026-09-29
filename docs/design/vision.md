@@ -1,337 +1,466 @@
-# Vision, owned: build design (v2, the one to build from)
+# Vision
 
-*2026-09-23. v1 was produced by a read-only swarm (five mappers, a designer)
-and attacked by an adversarial reviewer, who ruled it not ready: five
-blockers. v1, the critique and the five source reports are kept in
-`vision-evidence/` as evidence. This document supersedes v1 wherever they
-differ; every blocker is resolved here, and two decisions the maintainer made after the
-critique are folded in: knurlogic owns the VQ runtime, and the stack is
-pinned.*
-
-## Goal
-
-The five released families -- qwen3_5, qwen3_5_moe, qwen4_exp (Flash-Next),
-glm5_next (GLM-5.3), gemma4 -- serve text AND images from
+The released families -- qwen3_5, qwen3_5_moe, qwen4_exp (Flash-Next),
+glm5_next (GLM-5.3), gemma4 -- serve text and images from
 `pip install knurlogic`, with code knurlogic owns rather than mlx-vlm, and
 with **images as real context**: an image is encoded once per conversation,
-the prefix cache survives it, and the image is never prefilled twice. (Turn
-5 costing only turn 5's new tokens is the aim, and is measured; for
-thinking-model templates it waits on the follow-up below.) The page gets a chat modelled on exo's.
+the prefix cache survives it, and it is never prefilled twice.
 
-Checked before designing: all 20 released rungs carry `vision_config` and
-their vision weights (a 333-tensor `model-vision-graft.safetensors` sidecar
-for the Qwen families and gemma 26b; inside the main shards for GLM (347
-keys, `vision_model.*`) and gemma e4b (661)). mlx-vlm 0.6.17 implements all
-five families (MIT) -- the source to vendor from.
+Every released rung (one published quantization level of a model) carries
+`vision_config` and its vision weights: a 333-tensor
+`model-vision-graft.safetensors` sidecar for the Qwen families and gemma
+26b; inside the main shards for GLM (347 keys, `vision_model.*`) and gemma
+e4b (661). The towers are vendored from mlx-vlm 0.6.17 (MIT), which
+implements all five families; mlx-vlm is not a dependency.
 
-## Decisions (each closes a v1 blocker or records a choice)
+Interfaces and data shapes: [vision-contracts.md](vision-contracts.md).
 
-### D1. knurlogic owns the VQ runtime (the maintainer, 2026-09-23; closes B3)
+## knurlogic owns the VQ runtime
 
-Today every released rung ships its own `model.py`: 10 distinct runtimes
-across 20 rungs, 4,229-5,194 lines each, and each deliberately builds a
-TEXT-ONLY model when mlx-lm loads it. v1 tried to graft a vision tower onto
-that and the critique showed it contradicts the bundles. Instead:
+Every released rung ships its own `model.py`, and each one deliberately
+builds a text-only model when mlx-lm loads it. A vision tower cannot be
+grafted onto that, so knurlogic carries one VQ runtime of its own
+(`engine/vq/`), vendored verbatim and pinned by commit and digest
+(`engine/vq/PROVENANCE.md`). It is family-aware and vision-aware; the
+bundled `model.py` stays in the Hub uploads for plain mlx-lm users.
 
-* **One VQ runtime in knurlogic** (`engine/vq/`), vendored from vqlab's
-  canonical `src/vqlab/vq_switch.py` (4,453 lines, pinned by commit and
-  digest), which vqlab also builds against. The runtime is family-aware and
-  vision-aware; the bundled `model.py` stays in the HF uploads for plain
-  mlx-lm users and knurlogic ignores it for any rung on its verified list.
-* **Per-rung differences become settings, not code.** Measured: within a
-  family most runtimes differ only by the DEFAULT of two numerics flags
-  (Flash-Next 2.1 vs 4.4: 4 lines; GLM 2.7 vs 3.1: 4 lines). Those move to
-  the `knobs` block of each rung's `config.json`, which
-  `Artifact.declared_knobs()` already reads and ranks above everything
-  else. Where runtimes differ by version (397B 2.2 vs 2.6: 713 lines, the
-  newer carries the D4-walk kernel), the newest is the candidate superset --
-  to be proven, not assumed.
-* **Gate per released rung (G-VQ):** knurlogic's runtime and that rung's
-  bundled runtime give the same logits on the same short prompt (atol
-  1e-5; exact greedy tokens over 40), for all 10 distinct runtimes. A rung
-  that fails stays on its bundled runtime and is listed, not silently served.
-* **Where each rung's knobs come from (answered by the vqlab session,
-  2026-09-23, checked against the PUBLISHED Hub model.py):** vendor vqlab
-  HEAD (`42df84f`; last functional change `ef4e8dc`), and set every rung's
-  knobs from that rung's PUBLISHED `model.py` (`hf download <repo>
-  model.py`), never from `~/.exo` copies -- local copies have drifted from
-  the Hub on several repos. The shipped artifact is the record of what IS
-  shipped: knurlogic reproduces its flags as they are, not a plan's intent.
-  Published reality, three generations:
-    - v2 (both bf16-I/O on): Flash-Next 2.1 (per plan); **Qwen3.6-35B-A3B
-      3.8 / 4.6 / 5.4 (drift: rebundled while v2 was the repo default,
-      before `99ef3a1`; not a decision. Leave on v2 or rebundle to v1.5 is
-      the maintainer's call -- knurlogic reproduces whatever is published.)**
-    - v1.5 (both off): the rest of the flagged rungs.
-    - arc6-era, no flags at all: GLM 3.1 / 3.6 on the Hub (the local v2
-      copies were never published), GLM 2.7 to be re-read, 397B 2.4 / 2.6 /
-      3.1 (republished 2026-09-22 with corrected weights, F168, model.py
-      unchanged). 397B 2.2 was republished with a new 4684-line bundle --
-      re-read its flags from the Hub.
-  **Running an arc6-era rung on HEAD with knobs set to reproduce arc6 is a
-  runtime change, not a no-op**: G-VQ (identity against that rung's
-  published bundle) must pass before knurlogic serves it on HEAD.
-* **Bug this closes, found while deciding:** `tuning/settings.py`
-  `RUNTIME_PROFILES["v1.5"]` forces `VQ_GEMMSEG_BF16IO=0` and
-  `VQ_DECODE_BF16IO=0` for every VQ artifact, overriding rungs whose shipped
-  default is `1` -- published: Flash-Next 2.1 and 35B-A3B 3.8/4.6/5.4.
-  These flags are numerics-active (F103/F105, up to +0.97% ppl). The fix: a
-  rung's numerics come from the rung (declared knobs set from its PUBLISHED
-  model.py, above); the profile applies only when a person asks for it.
+* **Per-rung differences are settings, not code.** Within a family the
+  published runtimes differ mostly by the defaults of a few numerics flags.
+  Each rung's flags are read from its *published* `model.py` and recorded
+  in `engine/vq/rungs.json`; knurlogic reproduces what is shipped, not what
+  was intended. The table and its findings: [vq-rung-knobs.md](vq-rung-knobs.md).
+* **A rung's numerics come from the rung.** The bf16-I/O flags are
+  numerics-active (up to +0.97% perplexity), so `tuning/resolve.numerics_for`
+  applies the rung's declared knobs, and a runtime profile applies only when
+  a person asks for it.
+* **The identity gate** (`tools/vq_gate.py`): knurlogic's runtime and the
+  rung's bundled runtime, each in its own process, give the same logits on
+  the same prompt (atol 1e-5) and 40 identical greedy tokens. A rung that
+  has not passed loads the `model.py` it ships and is listed as such, never
+  silently served on the new runtime. For an older-generation bundle,
+  reproducing its flags on the new runtime is a runtime change, not a
+  no-op, which is exactly what the gate checks.
 
-### D2. Pin the stack (the maintainer; closes B4)
+## The stack is pinned
 
-Exact versions of mlx, mlx-lm and the vendored VQ runtime, recorded in
-`pyproject.toml` and in a test that fails on drift (versions plus a digest of
-mlx-lm's `server.py`, because the seam wraps its methods). Every wrap
-resolves methods by name with an assertion, never by line number. mlx-vlm
-reference outputs for the identity gates are generated once as `.npz`
-goldens in the exo interpreter (which has mlx-vlm 0.6.17) and committed, so
-G1-G4 run anywhere without mlx-vlm installed.
+Exact versions of mlx and mlx-lm, and the VQ runtime's commit, are recorded
+in `pyproject.toml`, with a test that fails on drift (versions plus a digest
+of mlx-lm's `server.py`). mlx-vlm reference outputs for the identity gates
+are generated once as `.npz` goldens under an interpreter with mlx-vlm
+0.6.17 and committed, so G1-G4 run anywhere without mlx-vlm installed.
 
-### D3. All image work happens on the generator thread (closes B2)
+## All image work on the scheduler thread
 
-v1 encoded images on the HTTP thread while generation runs on mlx-lm's
-generator thread -- two threads on one GPU, and two uncoordinated
-allocations on a shared host. Instead, wrap `ResponseGenerator._tokenize`
-(generator thread; it has `request.messages`): pull image parts out, decode
-and hash, look up the image store, encode on a miss, replace each part with
-the family's single placeholder, call the real `_tokenize`, expand
-placeholders to the image's token count, and return the cache KEY as the
-prompt. No side table carrying images between threads. `_post` only refuses
-images sent to a model without vision (HTTP 400).
+Generation runs on one thread that owns the MLX stream; image work runs
+there too, never on an HTTP thread (two threads on one GPU are two
+uncoordinated allocations). At tokenize (`engine/vision/request.py`): pull
+the image parts out, decode and hash, look up the image store, encode on a
+miss, replace each part with the family's placeholder, tokenize, expand
+placeholders to the image's token count, and return the cache key as the
+prompt. The HTTP layer only refuses images sent to a model without vision
+(400).
 
-### D4. Positions come from the whole key, every time (closes B1)
+## The cache key
 
-For Qwen (MRoPE), a text-only turn AFTER an image still needs positions
-shifted by that image's `rope_delta`; v1 computed positions only when the
-new suffix contained an image, which degrades silently -- fluent text,
-subtly wrong grounding. So `positions(key)` is a pure function of the full
-key and runs on every prefill and decode of any row whose key contains an
-image. Text suffix prefill: `arange(hit, L) + rope_delta` on all three axes.
-New gate G7b catches exactly this.
+`key.expand()` turns token ids into a key the same length as the KV: each
+image token becomes a sentinel `("img", sha, proc_hash, k)`, with `proc_hash`
+so a processor change can never hit a stale entry. The prompt trie accepts
+any hashable. Two different images of the same size diverge at the image's
+first token; the same image hits all the way through. There is one sentinel
+per image token, so key length always equals KV length.
 
-### D5. Vision requests go through the batch engine only (closes B5)
+* **Normalise before hashing.** EXIF orientation applied, converted to RGB,
+  clamped (max pixels, and PIL's decompression-bomb limit); the hash is of
+  the normalised pixels, so one photo cannot hash two ways.
+* **The placeholder is a real special-token id**, the tokenizer's own image
+  token (Qwen 248056, GLM `<|image|>` 154854), verified present at load: a
+  string the tokenizer does not know would be spelled out as text and the
+  image would never reach the sequence.
+* **The image store** is keyed `(model_key, sha, proc_hash)`, per image (a
+  whole-list key would re-encode everything when a second image is added),
+  byte-bounded LRU, and counted in the memory budget (`tuning/resolve.py`):
+  a GLM image can be ~65 MB of features. An image is pinned from tokenize
+  through admission; image metadata (grid, token count) is never evicted.
+
+## Positions come from the whole key
+
+For Qwen (MRoPE), a text-only turn after an image still needs positions
+shifted by that image's `rope_delta`; computing positions only when the new
+suffix contains an image degrades silently (fluent text, wrong grounding).
+So `positions(key)` is a pure function of the full key and runs on every
+prefill and decode of any row whose key contains an image. A text suffix
+prefills at `arange(hit, L) + rope_delta` on all three axes. G7b guards it.
+
+## Chunk edges never split an image
 
 gemma4 attends bidirectionally within an image block, so a prefill chunk
-must never split one; mlx-lm's single-request path chunks without a hook.
-Every request with an image, seeded or not, goes through
-`MTPBatchGenerator` (with `head=None` when there is no head), whose
-`admit()` snaps chunk edges to `Family.chunk_boundaries(key)`.
+must never split one. Every request goes through the batch executor, whose
+admission snaps chunk edges to `Family.chunk_boundaries(key)`, including
+seeded requests and exact cache hits whose remainder holds image tokens.
 
-### D6. The cache key
+## Drafting and images
 
-`key.expand()` turns token ids into a key the same length as the KV:
-each image token becomes a sentinel `("img", sha, proc_hash, k)` --
-`proc_hash` so a processor change can never hit a stale entry. mlx-lm's
-prompt trie accepts any hashable. Two different images of the same size
-diverge at the image's first token; the same image hits all the way through.
-The image store is keyed `(model_key, sha, proc_hash)`, per image (exo's
-whole-list key re-encoded everything when a second image was added),
-byte-bounded LRU, and COUNTED in the memory budget (`tuning/resolve.py`) --
-a GLM image can be ~65 MB of features. Decoded pixels are clamped (max
-pixels, and PIL's decompression-bomb limit) before hashing. The segment
-split mlx-lm does on prompts is expanded too.
+A row whose uncached span contains an image does not draft; text-only
+conversations are unchanged. A cache entry with an image is kept rather
+than thrown away to draft. Drafting on the text after an image (seeding the
+head from merged embeddings) is not implemented.
 
-### D7. Drafting and images
+## Reuse across turns
 
-Phase A ships: a row whose uncached span contains an image does not draft;
-text-only conversations are unchanged. Phase B (drafting on the text that
-follows an image -- seeding the head from merged embeddings instead of
-`embed_tokens(placeholder)`, the defect exo has) is its own package AFTER
-integration, behind a flag until measured: G10 token identity and acceptance
-at least 80% of the text-only rate on the 27B and 35B.
+Every response's usage carries a cache report {prompt tokens, cached,
+expanded image spans, tower encodes}, so the cache gates can be checked from
+outside; the chat's token meter reads it.
 
-## Work packages
+Reuse depends on the chat template keeping earlier reasoning:
 
-Separate git worktrees; file ownership is exclusive. Model split per the maintainer:
-Opus for the packages where subtle correctness lives, Sonnet 5 for
-well-specified vendoring and UI against frozen contracts, a separate model for the
-final adversarial review.
-
-| | Package | Model | Depends on |
-|---|---|---|---|
-| P0 | Contracts, key codec, image store, loadlock, pins, goldens, per-family tiny fixtures | Opus | -- |
-| P-VQ | knurlogic's VQ runtime (D1) + the numerics-default fix + G-VQ per rung | Opus | P0 |
-| P1 | Qwen vision (qwen3_5, qwen3_5_moe, qwen4_exp) + MRoPE threaded through the trunks (D4) | Opus | P0 |
-| P2 | gemma4 vision (e4b, 26b) + image-block mask + chunk_boundaries | Sonnet 5 | P0 |
-| P3 | glm5_next vision + the seven mlx-vlm siblings (mlx-vlm stops being a dependency) | Sonnet 5 | P0 |
-| P4 | Serve path: `_tokenize` wrap (D3), batch-only vision (D5), embeds in admit, drafts off on image rows | Opus | P0 (builds against a stub family) |
-| P5 | Interfaces: chat panel, vision in models/state/fit, Anthropic image blocks, gate tool | Sonnet 5 | P0 |
-| -- | Integration: registry resolves real families; real-model gates, one model at a time | orchestrator | all |
-| P6 | Phase B drafting on image conversations | Opus | integration |
-| -- | Adversarial review of the whole | reviewer | all |
-
-Ownership notes from the critique: only P4 touches `engine/seam.py` and
-`engine/mtp/*`; only P1 touches the Qwen architecture files; P-VQ owns
-`engine/vq/` and `tuning/settings.py`'s numerics section; each family
-package writes its provenance to `engine/vision/<family>/PROVENANCE.md`
-(no shared-file appends); tiny fixtures are one file per family, owned by
-that family's package, with P0 providing the shared builder.
+* **Qwen3.8 / Flash-Next / 35B-A3B** (`chat_template.jinja:116`) keep
+  earlier reasoning unless `preserve_thinking` is false; **GLM-5.3**
+  (`chat_template.jinja:149`) keeps it unless `clear_thinking` is true
+  (default false). The prefix is stable provided the client sends each
+  earlier assistant turn's `reasoning_content` back. knurlogic's chat always
+  does; for other clients the metric is reported and the behaviour
+  documented ("send reasoning_content back to keep reuse").
+* **gemma4** renders earlier reasoning only for the latest turn with tool
+  calls (`chat_template.jinja:239`) and strips thinking from earlier content
+  (`:319`, `:327`), with no switch. The image is still never re-prefilled
+  (it sits in an earlier user turn, before the divergence), but each new
+  turn re-prefills the previous answer. A cache checkpoint at the end of
+  each user message would recover full reuse; it is not implemented.
 
 ## Gates
 
-Tiny random fixtures (safe in parallel, no model, no lock):
+Tiny random fixtures (no model, no load lock), in `tests/test_vision_*.py`,
+`tests/test_image_cache.py` and `tests/test_vision_batch.py`:
 
-* **G1** vendored tower == mlx-vlm golden (atol 1e-5); **G2** grid and token
-  count exact; **G3** positions exact; **G4** 40 greedy tokens identical to
-  golden, including gemma with `prefill_step_size=16` so a chunk would split
-  an image block; **G5** text path unchanged when no image is present --
-  byte-identical HTTP output against main.
-* **G6** tower called once across a two-turn conversation; **G7** warm turn 2
-  == cold turn 2 (tokens, last-prefill logits atol 1e-4); **G7b** image in
-  turn 1, text-only turn 2 warm == cold through the golden (fails if D4 is
-  missing); **G9** a different image of the same size misses and answers
-  differently; **G10** image prompt with drafting machinery == without;
-  **G11** three mixed rows each == solo.
+* **G1** vendored tower == mlx-vlm golden (atol 1e-5); **G2** grid and
+  token count exact; **G3** positions exact; **G4** 40 greedy tokens
+  identical to the golden, including gemma with `prefill_step_size=16` so a
+  chunk would split an image block; **G5** the text path is unchanged when
+  no image is present.
+* **G6** the tower is called once across a two-turn conversation; **G7**
+  warm turn 2 == cold turn 2 (tokens, last-prefill logits atol 1e-4);
+  **G7b** image in turn 1, text-only turn 2, warm == cold (fails if
+  positions are computed from the suffix only); **G8** turn 2's cached
+  prefix covers all of turn 1, prompt and reply; **G9** a different image of
+  the same size misses and answers differently; **G10** an image prompt with
+  the drafting machinery == without; **G11** three mixed rows each == solo.
 * Every gate is mutated once: break the thing it guards and confirm it goes
-  red (the practice from the placement work, where one test only proved
-  itself after it stopped reading the constant it tested).
+  red.
 
-Real models, serialized by the orchestrator, one at a time behind the
-loadlock and `ready()`, unloaded in `finally`: gemma e4b VQ -> Qwen3.8-27B
-3.9 -> Qwen3.6-35B-A3B 3.4 -> gemma 26b -> Flash-Next 2.1 (only if it fits).
-GLM and the 397B get a tower-only local check; their full gate waits for
-cluster serving. Per rung: vision tensor count bound; a text answer; an
-image answer ("red"; OCR of "42"); a five-turn conversation where the tower
-runs once, the cache covers at least through the end of the last image span
-on turns 2-5, and turn 5 recalls the image; memory back to baseline after
-unload.
+On real models, one at a time behind the load lock: vision tensor count; a
+text answer; an image answer (a colour, OCR of "42"); a five-turn
+conversation where the tower runs once, the cache covers at least through
+the end of the last image span on turns 2-5 (`prompt - cached <= new + 32`
+for templates that keep reasoning), and turn 5 recalls the image; memory
+back to baseline after unload. `tools/vision_gate.py` runs them.
 
-**Reuse through turn 5 is a gate for knurlogic's own chat.** The v1 critique
-said Qwen-style templates drop earlier thinking; the released templates say
-otherwise (read 2026-09-23). Qwen3.8 / Flash-Next / 35B-A3B
-`chat_template.jinja:116` keeps earlier reasoning unless
-`preserve_thinking` is explicitly false; GLM-5.3 `chat_template.jinja:149`
-keeps it unless `clear_thinking` is explicitly true (default false). So the
-prefix is stable by default -- PROVIDED the client sends each earlier
-assistant turn's `reasoning_content` back. Most OpenAI-style clients drop
-it, the template then renders those turns without their thinking, and the
-prefix diverges there. Therefore: knurlogic's chat always echoes
-`reasoning_content`, and for it the gate is `prompt - cached <= new + 32` on
-turns 2-5; for other clients the metric is reported and the behaviour
-documented ("send reasoning_content back to keep reuse").
+## Risks
 
-**gemma4 is the exception** (checked 2026-09-23 after the 397B's review
-flagged it): its template renders earlier reasoning only for the latest
-turn and only with tool calls (`chat_template.jinja:239`) and strips
-thinking from earlier content (`:319`, `:327`), with no switch. So on gemma
-the image is still never re-prefilled (it sits in an earlier user turn,
-before the divergence), but each new turn re-prefills the previous answer,
-whose thinking the model generated into the KV and the template then drops.
-Echoing reasoning_content cannot help. For gemma the turn-N gate is "the
-image is never re-prefilled"; full reuse needs the checkpoint below. The
-checkpoint-per-user-turn is therefore the planned fix for gemma and the
-fallback for clients that do not echo reasoning on Qwen and GLM.
+1. MRoPE threaded into mlx-lm-derived trunks, and per-row `rope_delta` in
+   batched decode -- no reference implementation. G3, G4, G7b guard it.
+2. Sentinels reaching code that assumes int tokens (stats, detokenizer,
+   cache-key append). G6-G9 run through the real serve path.
+3. Recurrent-state families take only exact or shorter prefix hits; an
+   edited turn re-prefills from the nearest snapshot.
+4. GLM's vendored tower differs from mlx-vlm 0.6.17 by design
+   (`_limited_swiglu`); G1 for GLM documents the delta.
 
-## Review by Flash-Next 4.4 (local, 2026-09-23) -- folded in
+## Module notes
 
-The design was reviewed by Qwen3.8-Flash-Next-VQ-4.4bpw through exo's
-endpoint. It ran its whole 6,000-token budget as reasoning and never wrote an
-answer; the reasoning held these, checked against the design and critique
-and new to both:
+### src/knurlogic/engine/families/gemma4/vision/__init__.py
 
-1. **Store eviction breaks "encode once".** A byte-bounded LRU can evict an
-   image a live conversation still references, and turn 5 re-encodes it.
-   The store PINS an image while any prompt-cache entry references its sha
-   (refcount on insert/evict of cache entries); only unreferenced images
-   are LRU-evictable. Image METADATA (grid, token count) is never evicted.
-2. **Normalise before hashing.** EXIF orientation applied, mode converted
-   (alpha composited on white, greyscale to RGB), first frame of animated
-   formats; the hash is of the normalised pixels. Otherwise one photo can
-   hash two ways, or two different renderings one way.
-3. **The placeholder is a real special-token id.** Each family's placeholder
-   is its tokenizer's own image token, verified present in the vocabulary
-   at load; a string the tokenizer does not know is spelled out as text and
-   the image silently never reaches the sequence. A test asserts it.
-4. **Budget the KV, not only the features.** An image's KV across all layers
-   exceeds its features; the prompt-cache bytes attributable to image spans
-   are counted in `tuning/resolve.py` alongside the store.
-5. **The goal overstated the gate** (fixed above).
+WHY THE TOWER IS STANDALONE. `load_weights` reads `vision_tower.*` and
+`embed_vision.*` straight off the model directory's safetensors (filtered
+by the index's weight_map when there is one), into a `VisionModel` +
+`MultimodalEmbedder` the module owns -- never through the text model's
+`sanitize`, which drops every non-text key (docs/design/vision-contracts.md,
+"load_weights").
 
-### Second pass, through an agent harness with tools (same day)
+WHY encode() PRE-DIVIDES BY embed_scale. mlx-vlm's `gemma4.Model
+.get_input_embeddings` scales ONLY the text embeddings (`inputs_embeds =
+embed_tokens(ids) * embed_scale`) and then scatters the (unscaled)
+projected image features in on top, replacing those rows entirely
+(mlx-vlm `gemma4.py:85-170`). knurlogic's `gemma4_text.Gemma4TextModel
+.__call__` scales whatever `input_embeddings` it is handed -- text or
+already-merged -- by `embed_scale` unconditionally
+(`../architecture/gemma4_text.py:527-528`, unedited: the vendored edit list
+does not include this scaling line, and touching it would change text
+behaviour every caller shares). So the Family divides the tower's projected
+features by `embed_scale` before they are cached (`encode`) and merges them
+into UNSCALED text embeddings (`embed`): the trunk's later `* embed_scale`
+then cancels the division on the image rows and applies correctly to the
+text rows, exactly matching the reference's order of operations. This is
+the one deviation from a byte-for-byte port and is recorded again at
+`encode`.
 
-Checked against the source before folding in:
-* CONFIRMED: `fetch_nearest_cache` returns a slice of the key it was given
-  (`mlx_lm/models/cache.py:1688,1692`), and the single path hands that slice
-  to `stream_generate` (`server.py:965-980`). D5 already routes vision to the
-  batch engine; mlx-lm sends SEEDED requests down the single path regardless
-  (`_is_batchable` is false when a seed is set), so P4 must force the route,
-  and a gate covers an exact cache hit with a remainder containing image
-  tokens, through the real ResponseGenerator.
-* CONFIRMED and it CORRECTS the v1 critique: the released Qwen templates
-  keep earlier thinking by default (see the reuse gate above).
-* NOT CONFIRMED at the pinned mlx-lm (0.31.3): a prompt-length quota that
-  image tokens would eat -- `server.py` has no `prompt_len` or
-  `max_total_tokens`; `max_tokens` bounds output only. Re-check if the pin
-  moves.
-* REFUTED: "GLM rewrites history every turn". `chat_template.jinja:149` keeps
-  reasoning unless `clear_thinking` is true, and it defaults false.
+WHY per_layer_inputs USES ZEROED IDS. mlx-vlm's merge computes gemma4's
+per-layer inputs (PLE) from `input_ids` with every multimodal placeholder
+zeroed (mlx-vlm `gemma4.py:88-100`) -- an image token must not look up a
+per-layer embedding as if it were vocabulary id 258880. `embed` builds that
+zeroed-id array from the key and calls the trunk's own
+`_get_per_layer_inputs` (unedited) on it, then passes the UNPROJECTED
+result back in as `per_layer_inputs`; `Gemma4TextModel.__call__` already
+takes a precomputed (unprojected) `per_layer_inputs` and only runs
+`_project_per_layer_inputs` on it (`gemma4_text.py:530-534`), so no trunk
+edit is needed for this half of the contract -- only the mask overlay
+needs one.
 
-The rest of the second pass (findings 3-9), executed against the files:
-* REFUTED (#4) "GLM has no image token in its vocabulary": tokenizer.json
-  registers `<|image|>` = 154854 (and begin/end_of_image 154830/154831);
-  config.json `image_token_id` = 154854; engine/families/glm5/vision reads it. Flash
-  had marked this inferred from absence.
-* REFUTED (#3, again) "GLM drops earlier thinking": chat_template.jinja:149
-  keeps reasoning unless clear_thinking; `<think></think>` is the else.
-* REFUTED by execution (#1): P4 ran tuple sentinels through mlx-lm's real
-  server objects without failure; vision is forced to the batch path and
-  the seeded case is gated (E6).
-* REFUTED (#6): the key carries one sentinel per image TOKEN, so key length
-  always equals KV length; there is no single-position placeholder.
-* REFUTED (#7) as corruption; kept as a cheap invariant: encoding the same
-  image twice yields identical features (tower determinism) -- a gate.
-* ADOPTED (#8): a per-request cache report {prompt_tokens, cached,
-  expanded image spans, tower encodes} in the response's usage, so the cache
-  gates can be checked from outside; the chat's token meter reads it.
-* Already addressed: #5 (processor config is fixed at load; a change is a
-  key miss by construction), #9 (goal restated).
+### src/knurlogic/engine/families/glm5/vision/__init__.py
 
-### Third review: Qwen3.5-397B-A17B-VQ-2.2bpw through an agent harness (same day)
+The GLM Family's tower is
+`knurlogic.engine.families.glm5.architecture.glm5_next.vision.VisionModel`,
+the SAME class the trunk's `Model.vision_tower` would build. That class does
+not need mlx-vlm installed to import, and the Family loads it STANDALONE
+(contracts: "load_weights: standalone tower, not attached to the trunk; the
+trunk's sanitize keeps dropping vision keys").
 
-Placed on the M4 Max laptop through knurlogic's own MCP. It confirmed the
-model-level claims (image tokens: Qwen 248056, GLM 154854; templates keep
-thinking on Qwen and GLM; vision weights on all released rungs), made no
-false claims, and said plainly what it could not read (the ingest client's read roots
-exclude site-packages, so it could not open mlx-lm's server). Its critical
-item -- tuple sentinels in mlx-lm -- was already settled by execution (P4 and
-the end-to-end tests ran them through the real server objects on all five
-families). `proc_hash` and the pins exist in code and contracts it was not
-pointed at. Its one new finding, the unchecked gemma template, was real and
-is above. Calibration across the three local passes: Flash found more and
-claimed more, including wrong claims from absence; the 397B found less and
-claimed nothing it had not read.
+Weight keys on disk are `vision_model.*` (347 keys, inside the main
+shards); the Family's own tower attribute is "vision_tower" so it never
+collides with anything the trunk's own `sanitize()` does with
+`vision_model.*` keys (which it drops). The remap therefore lives in
+`Family.load_weights`, not in the vendored `VisionModel`, which has its
+transformers bases removed and is otherwise unchanged.
 
-Process note for the code review: Flash reasons at length -- give it a
-larger budget or disable thinking for review passes.
+NoPE: GLM's trunk gets its positions from its own 1D rope inside
+`language.py`, unaffected by an image span -- there is no MRoPE grid to
+thread through decode the way Qwen needs. `positions()` therefore always
+answers `(None, 0)`: "the trunk's own 1D positions, no rope_delta"
+(contracts, Family protocol).
 
-## Follow-up (after the release)
+### src/knurlogic/engine/families/qwen/vision/family.py
 
-* **Thinking-model reuse.** Default: follow the model's template (earlier
-  thinking dropped) and store a cache checkpoint at the end of each USER
-  message, so a new turn reuses everything up to there and re-prefills only
-  the previous answer without its thinking -- behaviour unchanged. Opt-in
-  "keep reasoning" setting (the maintainer's "thinking max"): earlier thinking stays in
-  context, more context used, behaviour changes; measure before claiming
-  it helps long agent tasks.
-* **Local reviewers.** Flash-Next 2.1 (fits the M3) and the 397B (needs both
-  nodes, so exo's instance comes off the M4 Max laptop for it) review the
-  build through knurlogic's own Anthropic endpoint, beside the other reviewer. A
-  different model lineage, and dogfooding the endpoint at long context;
-  their findings are leads to verify, not verdicts. After the real-model
-  gates, so they never compete for memory.
+What each Qwen Family method is, and where it comes from:
 
-## Risks, ranked
+  load_weights  the tower's tensors, found through the index weight_map
+                (the 333-tensor model-vision-graft.safetensors sidecar on
+                every released Qwen rung, or main shards), in EITHER naming:
+                HF `model.visual.*` (397B, Flash-Next) or MLX `vision_tower.*`
+                (27B, 35B-A3B). Key mapping is mlx-vlm qwen3_5/qwen3_5.py
+                `sanitize_key` (:16-25), the patch-embed transpose is the
+                tower's own `sanitize`. The tower stands ALONE: the trunk's
+                sanitize keeps dropping the vision keys, so nothing about
+                loading the text model changes.
+  preprocess    processing.ImageProcessor, settings from the rung's own
+                preprocessor_config.json (mlx-vlm reads the same file)
+  encode        the tower, once; output rows = t*h*w / merge^2 = n_tokens
+  placeholder   "<|vision_start|><|image_pad|><|vision_end|>" -- the exact
+                text the Qwen chat template emits for an image part, read
+                back from the rung's tokenizer files by ID and checked to be
+                special added tokens (a string the tokenizer does not know
+                is spelled out as text and the image silently never reaches
+                the sequence)
+  embed         embed_tokens over key[start:] (sentinels back to the pad id,
+                which mlx-vlm feeds too), then scatter.merge -- mlx-vlm's
+                merge_input_ids_with_image_features by sentinel. Returns
+                input_embeddings only: see `positions`.
+  positions     rope_index over the WHOLE key, refs from the store (never
+                evicted) -- the trunk's `position_ids` for a prefill chunk
+                (slice [:, :, a:b]) and `rope_delta` for text after the last
+                image and every decode step
+  chunk_boundaries  [] -- Qwen attention is causal across an image
 
-1. MRoPE threaded into mlx-lm-derived trunks (P1), and per-row `rope_delta`
-   in batched decode -- new code with no reference. G3, G4, G7b guard it.
-2. Sentinels reaching mlx-lm code that assumes ints (stats, detokenizer,
-   cache-key append). Guarded by running G6-G9 through the real server
-   objects; fallback is negative-int sentinels.
-3. The VQ runtime superset claim (D1) -- proven per rung by G-VQ or not
-   claimed.
-4. Recurrent-state families take only exact or shorter prefix hits; an
-   edited turn re-prefills from the nearest snapshot. Acceptable; visible.
-5. GLM's reference: 0.7.1 is only knurlogic's vendored copy and differs from
-   0.6.17 by design (`_limited_swiglu`); G1 for GLM documents the delta.
+WHY embed DOES NOT RETURN position_ids. The contract lets it, but embed only
+gets a FeatureLookup, and positions depend on every image in the key --
+including ones before `start` whose features the store may have evicted.
+Refs are never evicted, so positions come from `positions(key, refs)` alone;
+one home for them. This is a clarification of the Family contract in
+docs/design/vision-contracts.md.
+
+### src/knurlogic/engine/families/qwen/vision/rope_index.py
+
+The port of mlx-vlm's `get_rope_index` covers ONE row with no attention
+mask -- the only shape the serve path asks for -- in numpy, taking each
+image's grid from its ref instead of a batch-wide `image_grid_thw`:
+
+  * images are counted the way the reference counts them: an image token
+    right after `vision_start_token_id` (:1756-1762). vision_start comes
+    from the model's config -- 248053 in every released rung, not the class
+    default 248045 -- and getting it wrong silently zeroes the image count;
+  * the k-th image is the k-th run found by `index(image_token_id, st)`
+    (:1768-1776), given the k-th grid;
+  * text before an image continues from the previous segment's max + 1; an
+    image's (t, h, w) = its grid indices (h and w after the spatial merge)
+    + text_len + st_idx (:1799-1837); trailing text likewise (:1838-1849);
+  * rope_delta = max + 1 - len (:1882-1885).
+
+WHY PURE. A text-only turn after an image still needs positions shifted by
+that image's delta; computing them only when the new suffix has an image
+gets that turn wrong. Nothing is carried between calls: the same key gives
+the same positions, cold or warm.
+
+The delta never changes as text is appended after the last image (trailing
+text is linear), so a caller may compute it once per row and add it to the
+cache offset at every decode step -- the trunk's `rope_delta` input.
+
+Held to the reference by G3 (tests/test_vision_qwen.py: positions and delta
+of a two-image prompt exact against mlx-vlm's own get_rope_index).
+
+### src/knurlogic/engine/vision/__init__.py
+
+  __init__.py   the contracts: ImageRef, EncodedImage, VisionSpec, the
+                Family protocol, the errors, served_vision()
+  key.py        the cache key: token ids with each image token replaced by
+                a sentinel ("img", sha, proc_hash, k)
+  store.py      encoded images, per image, byte-bounded LRU, counted
+  images.py     request bytes -> a clamped RGB image and its pixel hash
+  scatter.py    image features into text embeddings, by sentinel (mlx)
+  _base.py      the three helpers the vendored towers need from mlx-vlm (mlx)
+  registry.py   model_type -> the family package that serves its images
+  request.py    a chat request with images -> the cache key (generator thread)
+  cachehook.py  pins an image while a cached conversation still holds it
+  quant.py      quantizes a tower's layers to match its checkpoint (mlx)
+  (each family's tower, preprocessing and embed live in its folder under
+   engine/families/<family>/vision/, named by its manifest)
+
+WHY THE FRONT DOOR IS STDLIB ONLY. The page and the MCP (interfaces/) read
+`VisionSpec` and `served_vision()` to say whether the served model sees
+images, and they may not pay for an mlx import to ask -- the same rule
+`engine/mtp`'s front door keeps (tests/test_resolve.py). So nothing there
+imports mlx or PIL; arrays appear only as annotations. Where the module and
+the design differ, the design says why the module is right or the
+difference is a bug.
+
+### src/knurlogic/engine/vision/cachehook.py
+
+A prompt-cache entry whose key holds image sentinels (key.py) is KV computed
+from those images. While it lives, a turn that extends it may re-read the
+images -- a partial hit that cuts into an image span re-embeds the rest of
+that span from the store. So each image stays in the ImageStore while ANY
+live entry references its sha: one store pin per (entry, image run), taken
+when the entry is inserted, dropped when it leaves the cache by any path.
+
+HOW. mlx-lm's LRUPromptCache (mlx_lm/models/cache.py) removes entries on
+four paths: insert_cache's replacement of an equal key, its pop_prefixes of
+shorter keys, its size/bytes LRU pops, and trim_to. Intercepting each is
+brittle; instead the two MUTATING methods are wrapped by name (with
+assertions -- a pinned mlx-lm that renames one fails at install, loudly),
+and after either returns the hook RECONCILES: the live entries are read off
+`_lru._lrus` (the deques of (model, tokens) every path keeps in step with
+the trie), new ones are pinned, gone ones unpinned. Entries are tracked by
+the identity of their `tokens` list (the hook holds a reference, so the id
+is stable); a replacement of an equal key is a new list, so the old entry's
+pins go and the new one's come.
+
+THE ADMIT GAP. VisionServe.tokenize pins a request's images until the batch
+generator admits the row. If the scheduler raises between tokenize and
+insert (building the state machine, say), nothing admits the row and the
+pins would stay forever. `pending()` records the pins a tokenize took;
+`claim()` is called once `insert_segments` has queued the row (from then on
+the generator's admit/remove releases them); `sweep()` releases whatever
+was never claimed. The scheduler (engine/runtime/scheduler.py) sweeps
+before every tokenize -- its thread is sequential, so a pending entry still
+unclaimed then was abandoned -- and wraps tokenize-to-insert in
+`admit_guard()`, which claims on success.
+
+### src/knurlogic/engine/vision/images.py
+
+The hash is of PIXELS, not of the base64 a client sent: the same picture
+re-encoded (a client that re-compresses PNGs, a different base64 wrapping)
+still hits the store and the prompt cache. Mode and size go into the hash
+alongside `tobytes()`, so a 100x1 and a 1x100 image of the same bytes cannot
+share a name.
+
+CLAMPS, BEFORE HASHING. An image arrives from an HTTP client on a shared
+host:
+  * MAX_BYTES of encoded input, checked before decoding anything;
+  * BOMB_PIXELS: PIL's own decompression-bomb limit (Image.MAX_IMAGE_PIXELS
+    default, 89,478,485 px), checked from the header before pixels are
+    decoded; over it is refused (ImageRejected), not shrunk -- shrinking
+    would first have to decode it;
+  * MAX_DECODE_PIXELS: anything larger but legal is downscaled (aspect kept,
+    BICUBIC, deterministic) before hashing, so the hash names what the
+    processor actually sees. It is a safety bound, not a quality knob: each
+    family's processor applies its own max_pixels after this (VisionSpec).
+
+No URLs are fetched: a server that fetches client-supplied URLs is an SSRF
+hole, and reading a local path named by a remote client is worse. Paths are
+allowed only when the caller says the request is local (allow_paths).
+
+PIL is imported lazily: the module is imported by the serve path's front
+door, and a text-only server should not pay for PIL.
+
+### src/knurlogic/engine/vision/key.py
+
+WHY A SENTINEL PER TOKEN, NOT PER IMAGE. The scheduler does prefix
+arithmetic on the prompt (the cached count is `len(prompt) - len(rest)`,
+and the segment trim follows from it: engine/runtime/scheduler._insert),
+so the key must be exactly as long as the KV it names.
+
+WHY THE TRIE ACCEPTS IT. `mlx_lm.models.cache.PromptTrie` walks
+`current[tok]` dicts; any hashable works (read at mlx-lm 0.31.3, the pinned
+version -- tests/test_vision_key.py runs the real LRUPromptCache so a
+version that stops accepting it goes red).
+
+WHAT IT BUYS. Every image's run is the same pad id, so with plain ids two
+different images of the same size collide and the cache hands back KV
+computed from the wrong picture -- fluent, wrong, silent. With sentinels
+two such images diverge at the image's first token (k=0) and the same image
+hits all the way through. proc_hash is in the sentinel so a processor
+change that keeps n_tokens cannot hit stale features.
+
+WHY IT FAILS LOUD. A sentinel that reaches mx.array raises; it can never be
+read as a wrong id. Sentinels reaching mlx-lm code that assumes ints is
+guarded end to end by G6-G9, with negative-int sentinels as the fallback --
+a change confined to key.py.
+
+### src/knurlogic/engine/vision/request.py
+
+The scheduler tokenizes on its own thread (engine/runtime/scheduler.py),
+and generation runs on that same thread. Encoding images on the HTTP thread
+would mean two threads on one GPU, two uncoordinated allocations on a
+shared host. So ALL image work happens in request.py, called from the
+scheduler's tokenize:
+
+    image parts -> decode + clamp + pixel hash (images.load)
+                -> store hit, or preprocess + encode + put (the ONLY tower
+                   call; G6 counts it from outside)
+                -> each part replaced by Family.placeholder_text(ref)
+                -> the prompt stage (engine/runtime/prompt.tokenize:
+                   template, segments, thinking state)
+                -> key.expand_segments: one pad per image widened to
+                   n_tokens, each image token a sentinel
+                -> (key, segment keys, types, state) back to the server
+
+The server then does its own prefix arithmetic on the key -- it is the same
+length as the KV (key.py) -- and hands it to the batch generator, which
+turns it back into ids and embeddings (mtp/batch_generator.py). No side
+table carries images between threads; the key names them.
+
+PINS (vision-contracts.md). Between this tokenize and the batch admit,
+other requests may be tokenized and a small store could evict this one's
+images. Every image of the key is pinned and released by the generator when
+the row is admitted (or removed unadmitted). Pins are counted per image, so
+two queued requests on one image hold it twice.
+
+### src/knurlogic/engine/vision/store.py
+
+Keyed PER IMAGE by (model_key, sha, proc_hash):
+
+* per image, not per request -- keying on a hash of the whole image LIST
+  would make adding a second image to a conversation re-encode the first.
+  Here the second image is one miss and the first is still a hit;
+* model_key, because two models' features are different spaces;
+* proc_hash, so a processor change cannot serve stale features.
+
+BYTE-BOUNDED, NOT COUNT-BOUNDED. mlx-vlm's VisionFeatureCache
+(mlx_vlm/vision_cache.py, 0.6.17) bounds by count (20). Counts lie about
+memory: a GLM image at up to ~8000 tokens x 4096 hidden in bf16 is ~65 MB
+of features, a small gemma image is 280 x 2560 x 2 = 1.4 MB. On a shared
+host the bound has to be bytes, it has to default small, and
+`tuning/resolve.py` has to count it BEFORE a load -- `max_bytes` is that
+number, one home: DEFAULT_MAX_BYTES.
+
+REFS ARE NOT EVICTED. The ImageRef of every image ever put stays (a few
+hundred bytes each) after its features go: positions() for a text turn
+after an image needs the image's grid, and a prompt-cache hit can outlive
+the features. Refs die with the store -- clear() on unload, which is also
+when the prompt cache they index dies.
+
+PINNING. Between the tokenize wrap (features ensured) and the batch admit
+(features read) other requests can be tokenized; without a pin, a small
+store could evict the first request's image in between. `pinned()` holds
+entries past the bound until released.
+
+The scatter module takes rows by sentinel rather than by a global feature
+index (`cumsum(is_image) - 1` over the full prompt, which has to count the
+images before the hit), so nothing before a span's `start` is looked at.

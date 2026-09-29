@@ -1,30 +1,16 @@
 """engine/vision/ -- images as real context: the contracts every family and
-the serve path build against. Frozen by P0; docs/design/vision-contracts.md
+the serve path build against (ImageRef, EncodedImage, VisionSpec, the
+Family protocol, the errors, served_vision()). docs/design/vision-contracts.md
 is the prose home of what is written here, with the data shapes.
 
-  __init__.py   the contracts: ImageRef, EncodedImage, VisionSpec, the
-                Family protocol, the errors, served_vision()
-  key.py        the cache key: token ids with each image token replaced by
-                a sentinel ("img", sha, proc_hash, k)
-  store.py      encoded images, per image, byte-bounded LRU, counted
-  images.py     request bytes -> a clamped RGB image and its pixel hash
-  scatter.py    image features into text embeddings, by sentinel (mlx)
-  _base.py      the three helpers the vendored towers need from mlx-vlm (mlx)
-  registry.py   model_type -> the family package that serves its images
-  request.py    a chat request with images -> the cache key (generator thread)
-  cachehook.py  pins an image while a cached conversation still holds it
-  quant.py      quantizes a tower's layers to match its checkpoint (mlx)
-  (each family's tower, preprocessing and embed live in its folder under
-   engine/families/<family>/vision/, named by its manifest)
+Modules: key.py (the cache key), store.py (encoded images), images.py
+(request bytes -> RGB + pixel hash), scatter.py, _base.py, registry.py,
+request.py, cachehook.py, quant.py; each family's tower lives under
+engine/families/<family>/vision/.
 
-WHY THIS FRONT DOOR IS STDLIB ONLY. The page and the MCP (interfaces/) read
-`VisionSpec` and `served_vision()` to say whether the served model sees
-images, and they may not pay for an mlx import to ask -- the same rule
-`engine/mtp`'s front door keeps (tests/test_resolve.py). So nothing here
-imports mlx or PIL; arrays appear only as annotations.
-
-Design: docs/design/vision.md. Where this file and the design differ,
-the design says why this file is right or the difference is a bug.
+This front door is stdlib only: the page and the MCP read `VisionSpec` and
+`served_vision()` without paying for mlx or PIL (tests/test_resolve.py).
+Design: docs/design/vision.md.
 """
 from __future__ import annotations
 
@@ -101,7 +87,7 @@ class ImageRef:
     sha        images.pixel_sha(): sha256 of the normalised decoded pixels,
                so the same picture re-encoded by a client still hits
     proc_hash  VisionSpec.proc_hash at preprocess time; a processor change
-               (a max_pixels clamp) can then never hit a stale entry (D6)
+               (a max_pixels clamp) can then never hit a stale entry
     n_tokens   length of the image's run of image tokens in the prompt,
                after merge/pool -- the number of sentinels
     grid_thw   (t, h, w) in patches, before merge, for Qwen and GLM
@@ -190,7 +176,7 @@ FeatureLookup = Callable[[str, str], EncodedImage]
 
 
 class Family(Protocol):
-    """One vision family. Built by `registry.build`; the serve path (P4)
+    """One vision family. Built by `registry.build`; the serve path
     calls these and nothing else. Every method is called on the GENERATOR
     thread -- none of them may be reached from an HTTP thread.
 
@@ -236,14 +222,14 @@ class Family(Protocol):
 
     def positions(self, key: List[Any], refs: RefLookup) -> Tuple[Any, int]:
         """(position ids for the WHOLE key or None, rope_delta). Pure in the
-        key (D4): called on every prefill and decode of a row whose key
+        key: called on every prefill and decode of a row whose key
         holds an image, whether or not the new suffix does. None means the
         trunk's own 1D positions are right (gemma, GLM); Qwen returns
         mx [3, 1, len(key)] and the delta decode adds to the offset."""
 
     def chunk_boundaries(self, key: List[Any]) -> List[Tuple[int, int]]:
         """[start, end) spans a prefill chunk edge must not fall strictly
-        inside (D5). gemma: every image span (bidirectional attention within
+        inside. gemma: every image span (bidirectional attention within
         an image block). Causal families: []."""
 
 

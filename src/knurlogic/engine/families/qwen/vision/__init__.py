@@ -2,13 +2,14 @@
 
   vision.py      the tower, vendored from mlx-vlm 0.6.17 qwen3_vl
   processing.py  PIL image -> pixel_values + grid, vendored (numpy, no torch)
-  rope_index.py  MRoPE positions, a pure function of the whole prompt (D4)
+  rope_index.py  MRoPE positions, a pure function of the whole prompt
   family.py      QwenFamily: the engine.vision.Family the serve path calls
 
 The trunk half -- MRoPE threaded through attention as `position_ids`
 [3, B, L] and per-row `rope_delta` -- lives in the architecture files
-(engine/families/qwen/architecture/qwen3_5.py, qwen4_exp.py; qwen3_5_moe inherits).
-PROVENANCE.md records every vendored line. Design: docs/design/vision.md D4.
+(engine/families/qwen/architecture/qwen3_5.py, qwen4_exp.py; qwen3_5_moe
+inherits). PROVENANCE.md records every vendored line.
+Design: docs/design/vision.md.
 """
 from __future__ import annotations
 

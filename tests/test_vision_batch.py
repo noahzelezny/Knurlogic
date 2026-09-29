@@ -8,7 +8,7 @@ a head in the generator changes nothing for the image row while a text row
 beside it still drafts.
 
 G11 -- three rows, image and text mixed, admitted one per call into a batch
-already decoding: each equals its solo run. Run twice: with the P0 stub
+already decoding: each equals its solo run. Run twice: with the shared stub
 (1D positions) and with a positions family (per-row rope_delta), which is
 the batched-decode half of design risk 1.
 
@@ -17,7 +17,7 @@ never cut an image block (D5), and a vision row keeps a trunk prefix hit
 rather than dropping it to draft (G8 with a head).
 
 Tiny fixtures only: the qwen3_5 of tests/test_batch_drafting.py (float32,
-seed 0, vocab 512) and P0's StubFamily.
+seed 0, vocab 512) and the shared StubFamily.
 """
 import base64
 import sys

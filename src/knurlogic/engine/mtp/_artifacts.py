@@ -1,39 +1,16 @@
 """Multi-token prediction: what an artifact declares, and what it actually has.
 
-THE MEASUREMENT THIS MODULE EXISTS FOR (2026-09-20, all 54 artifacts on this
-machine, two independent channels -- config.json for the declaration, the
-safetensors HEADERS for the tensors, neither reading the other):
+Two independent channels -- config.json for the declaration, the
+safetensors HEADERS for the tensors. They disagree: the MLX converters drop
+`mtp.*` at CONVERSION, so most rungs declare MTP in config yet ship no head
+weights. MTP here is therefore "the head is a separate artifact": grafted
+once from the one checkpoint that carries it, quantized, and written beside
+each rung as a sidecar (`mtp-head-q6.safetensors`).
 
-    declares mtp in config .................... 40
-    ships upstream `mtp.*` graft weights ....... 1   (the 806 GB bf16 397B)
-    ships a BUILT head beside the weights ..... 11   (mtp-head-q6.safetensors)
-    declares one and has NOTHING ............... 31
-
-(40 = 31 + 8 declaring rungs with a built head + the 1 graftable one. The
-other 3 built heads sit beside GLM rungs whose config never declared one, so
-the declaration was not even a reliable signal of the head's absence.)
-
-So the previous reading of this -- "40 artifacts, 3925 GiB of downloaded MTP
-weights that mlx-lm's `sanitize()` throws away" -- was wrong, and wrong in the
-direction that matters. The weights were not downloaded. The MLX converters
-drop `mtp.*` at CONVERSION, so a rung arrives already without a head while
-still carrying the upstream config that declares one. `sanitize()` discarding
-those keys is very nearly a no-op on real artifacts: there is exactly one on
-this disk where it fires.
-
-What that changes: MTP here is not "stop discarding what you have". It is
-"the head is a separate artifact" -- grafted once from the one checkpoint that
-carries it, quantized, and written beside each rung as a sidecar. Eleven rungs
-on this disk already have that sidecar sitting there, built and unread.
-
-THE SIDECAR IS DELIBERATELY OUTSIDE `model*.safetensors`. A loader discovers
-weights by that glob, so a file named `mtp-head-q6.safetensors` costs nothing
-until something asks for it -- and an index-only scan does not see it at all.
-The first pass of the probe above missed all eleven for exactly that reason.
-Read the FILES, not the index.
-
-Nothing here imports an engine: a safetensors header is a length prefix and a
-JSON blob, and the recipe is in its metadata.
+The sidecar is deliberately outside `model*.safetensors`, so a loader's
+glob and an index-only scan never see it: read the FILES, not the index.
+Nothing here imports an engine; the recipe is in the sidecar's metadata.
+Design: docs/design/drafting.md (artifacts).
 """
 
 from __future__ import annotations

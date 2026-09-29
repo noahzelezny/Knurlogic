@@ -2,7 +2,7 @@
 
 A harness pointed at a server with ANTHROPIC_BASE_URL speaks this shape.
 mlx-lm's server answers only /v1/chat/completions, so without this
-`knurlogic serve` cannot back one -- exo can, which is the whole difference.
+`knurlogic serve` could not back one.
 
 The stub answers in the OpenAI shape with values nothing else could produce,
 so a translation that quietly invented content would fail rather than pass.

@@ -203,10 +203,10 @@ def test_ready_blocks_on_another_process_holding_the_load_lock(monkeypatch):
 
 def test_fit_reports_vision_capability(tmp_path, monkeypatch):
     """`registry.registered` is a REGISTERED-model_type-and-package-present
-    check (P0); the family packages (qwen, gemma4, glm5) are P1-P3's, not
-    yet on disk here, so this drives the registry directly rather than
-    asserting True for a real model_type that may resolve False today and
-    True once P1-P3 land -- `fit`'s job is only to pass the answer through."""
+    check; whether a family package (qwen, gemma4, glm5) is present
+    depends on the install, so this drives the registry directly rather
+    than asserting True for a real model_type that may resolve either
+    way -- `fit`'s job is only to pass the answer through."""
     d = _artifact(tmp_path / "vqwen", model_type="qwen3_5")
     monkeypatch.setattr(
         "knurlogic.machine.loaded.available_memory",

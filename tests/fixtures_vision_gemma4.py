@@ -1,5 +1,5 @@
-"""gemma4's own tiny-fixture builders (P2). Beside `tests/fixtures_vision.py`
-(shared, P0-owned) per its own convention -- one file per family
+"""gemma4's own tiny-fixture builders. Beside `tests/fixtures_vision.py`
+(shared) per its own convention -- one file per family
 .
 """
 from __future__ import annotations
