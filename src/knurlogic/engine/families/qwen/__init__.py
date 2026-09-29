@@ -12,6 +12,20 @@ the 35B-A3B (qwen3_5_moe, subclasses qwen3_5), and Qwen3.8-Flash-Next
 # prefill 8x the chunks.
 _QWEN35_PREFILL = (4096, "measured 2026-06-19 (see the comment above)")
 
+# qwen3_5_moe (the 35B-A3B and the 397B): 2048 is the measured best. M4 Max
+# 128 GB, 2026-09-29, Qwen3.6-35B-A3B VQ 3.4 (13.8 GiB), 28,727-token
+# prompt, interleaved order, n=3, prefill tok/s:
+#   512: 642.7 / 642.6 / 649.5
+#   2048: 1182.9 / 1164.5 / 1141.9
+#   4096: 1173.2 / 1166.5 / 1133.8
+# ~1.8x over 512 at 2048 and nothing more at 4096 (the 397B's 4096 was +2%
+# over 2048 on 2026-09-26 for a ~2x larger step transient). A cap, not a
+# default: the resolver takes it only where the room free at launch holds
+# its step transient.
+_QWEN35_MOE_PREFILL = (2048, "measured 2026-09-29 on M4: 35B-A3B VQ 3.4 "
+                             "at 28.7k tokens, 512 645 / 2048 1163 / 4096 "
+                             "1158 tok/s (n=3)")
+
 # The Qwen3.5/3.8 head drafts from the activation going INTO the trunk's
 # final norm (one residual stream).
 #
@@ -53,7 +67,7 @@ MANIFEST = {
         "qwen3_5_moe": {
             "depends_on": ["qwen3_5"],
             "model_types": ["qwen3_5_moe_text", "qwen3_5_moe"],
-            "prefill_chunk": _QWEN35_PREFILL,
+            "prefill_chunk": _QWEN35_MOE_PREFILL,
             "kv_quant": _QWEN35_KVQ,
             "head": dict(_QWEN35_HEAD, names=["qwen3_5_moe"]),
         },
