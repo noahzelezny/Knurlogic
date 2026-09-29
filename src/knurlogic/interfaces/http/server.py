@@ -261,7 +261,7 @@ class App:
                 try:
                     box["run"] = C.summarize(run, pending, out,
                                              self._generate)
-                except BaseException as e:      # noqa: BLE001
+                except BaseException as e:  # any end of the worker becomes the reply
                     box["error"] = e
             t = threading.Thread(target=work, daemon=True)
             t.start()
