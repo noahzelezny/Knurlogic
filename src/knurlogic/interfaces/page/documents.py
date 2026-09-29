@@ -303,7 +303,7 @@ def machine_settings():
         doc = {"knobs": [], "tunes": [], "unmanaged": [], "exports": "",
                "asked": {}, "wired": adv, "machine": wired.machine(),
                # the defaults a model launched from this page starts with
-               "compaction": compaction_document({}, running=False)}
+               "compaction": compaction_document()}
         if adv.get("known"):
             cur = adv["limit_bytes"] / GIB
             ceil_ = adv["ceiling_bytes"] / GIB
@@ -314,7 +314,8 @@ def machine_settings():
             # `ceiling_bytes` is knurlogic's RECOMMENDATION -- installed
             # memory less a reserve for macOS -- and not a wall the OS
             # enforces. So it is a soft gate, as everywhere else here: past
-            # it you get the command and a warning rather than a refusal.
+            # it you get the command (the suggestion is shown beside the
+            # field, neutrally), never a refusal.
             # The hard stop is 4 GiB from the top, where the machine stops
             # being able to run itself.
             hard = (adv["total_bytes"] - 4 * GIB) / GIB
@@ -326,15 +327,11 @@ def machine_settings():
             doc["wired_command"] = (
                 wired.command_for(int(target * GIB))
                 if abs(target - cur) >= 0.05 else "")
-            if target > ceil_ + 0.05:
-                doc["wired_warn"] = (
-                    f"above the {ceil_:.0f} GiB knurlogic recommends, which "
-                    f"leaves {adv['total_bytes'] / GIB - target:.0f} GiB for "
-                    f"macOS and everything else on the machine")
         # read here too, so a peer's tab shows it through /peek -- which
         # reads /settings.json and nothing that can change anything
         doc["allowance"] = allowance_doc()
         doc["strategy"] = strategy_doc()
+        doc["knurlogic"] = knurlogic_doc()
         return doc
     return handler
 
@@ -579,26 +576,26 @@ def knob_reach(artifact, name: str, live_knobs, restart_why=RESTART_WHY):
 
 
 def compaction_document(env=None, running: bool = True) -> dict:
-    """The Compaction tab: each operator default for server-side
-    compaction (tuning/settings.COMPACT_KNOBS), its value and what it does.
-    Read per request by a running server, so each is `live` there; for a
-    model not running, a launch setting (`restart`)."""
-    import os
+    """Compaction's operator defaults (tuning/settings.COMPACT_KNOBS), each
+    value and what it does. Knurlogic-wide (machine/preferences): one set
+    for every model, read per request by every running server, so each is
+    `live`. `env`: an environment to read instead of this process's under
+    the saved values; `running` is kept for callers and changes nothing."""
+    from knurlogic.machine import preferences
     from knurlogic.tuning import settings as S
-    env = os.environ if env is None else env
+    env = preferences.compaction_env(env)
     knobs = []
     for name, (default, values, unit, what, why) in S.COMPACT_KNOBS.items():
         knobs.append({
-            "name": name, "running": (env.get(name) or default)
-            if running else None,
+            "name": name, "running": env.get(name) or default,
             "would_be": default, "value": env.get(name) or default,
+            "default": default,
             "changed": False, "tier": "reach",
             "what": what, "why": why, "values": list(values), "unit": unit,
-            "reach": "live" if running else "restart",
-            "reach_why": ("read by this server for every request: a change "
-                          "applies to the next one" if running else
-                          "saved as a launch setting; read by the server "
-                          "from its start")})
+            "reach": "live",
+            "reach_why": ("knurlogic-wide: every model server reads it for "
+                          "every request, so a change applies to the next "
+                          "one")})
     return {"knobs": knobs,
             "effective": S.compact_settings(env),
             "about": ("Harnesses ask with context_management (Anthropic's "
@@ -608,6 +605,40 @@ def compaction_document(env=None, running: bool = True) -> dict:
                       "returns the summary for the client to resend. "
                       "Nothing is stored. usage.knurlogic.context reports "
                       "the prompt's tokens against the window.")}
+
+
+def knurlogic_doc() -> dict:
+    """The knurlogic-wide settings (machine/preferences) on this machine:
+    what is saved, identical results across chips with its trade-off, and
+    compaction."""
+    from knurlogic.machine import preferences
+    from knurlogic.tuning import settings as S
+    saved = preferences.get()
+    what, why = S.KNOB_DOC[preferences.CROSS_CHIP]
+    return {"saved": saved,
+            "cross_chip": {"name": preferences.CROSS_CHIP,
+                           "value": saved.get(preferences.CROSS_CHIP, ""),
+                           "values": S.KNOB_RANGE[preferences.CROSS_CHIP][0],
+                           "what": what, "why": why},
+            "compaction": compaction_document(),
+            "file": str(preferences.path())}
+
+
+def set_knurlogic(body) -> dict:
+    """`POST /knurlogic.json` {name: value, ...}: save knurlogic-wide
+    settings on this machine ('' clears one). Compaction applies to the
+    next request of every running server; identical results across chips
+    to the next launch."""
+    from knurlogic.machine import preferences
+    try:
+        want = json.loads(body or b"{}")
+        preferences.set(want)
+    except Exception as e:
+        return {"error": str(e) if isinstance(e, ValueError)
+                else "send {name: value}"}
+    return {**knurlogic_doc(), "applied": {
+        k: (str(v) if str(v or "").strip() else "cleared")
+        for k, v in want.items()}}
 
 
 def settings_document(artifact, live_env: dict, live_tune: str,
