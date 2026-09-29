@@ -70,8 +70,8 @@ def test_vendored_runtime_is_the_pinned_bytes():
         assert got == want, f"{f} drifted from the vendored pin"
         assert _table()["runtime"]["files"][f] == want
         assert want in prov
-    assert runtime.VQLAB_COMMIT == _table()["runtime"]["vqlab_commit"]
-    assert runtime.VQLAB_COMMIT in prov
+    assert runtime.VENDORED_COMMIT == _table()["runtime"]["vqlab_commit"]
+    assert runtime.VENDORED_COMMIT in prov
 
 
 def test_every_released_rung_is_listed_and_starts_unverified():
