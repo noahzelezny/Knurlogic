@@ -464,28 +464,18 @@ Still to prove live:
   rank 1 memory smaller, prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off.
 
 Queued work:
-- A pipeline job's non-leader rank exposes no /status.json from outside, so its memory
-  is not observable (VQLab session, 2026-09-29).
 - A cluster job's leader listens on 127.0.0.1 only: a request to 10.0.0.2:8080 from the
   other Mac fails (paper session, 2026-09-28, went over ssh). Decide: bind the leader to
   the cluster link, or document the page's router as the way in.
 - Names: `load` says link tcp/rdma, the recovery record says ring/jaccl (mlx's backend
   names). Show one vocabulary.
-- DeepSeek-V4-Flash follow-ups (it works live, see above): Fable's fix-afters --
-  resolve.py VISION_KV_DTYPE_BYTES reused as bf16 size (alias it); drop @mx.compile on
-  _ragged_prev (a compile per emit pattern); PROVENANCE edit 1 also changes decode. Watch:
-  the first prompt past ~2k tokens is the first time edits 1-2 run on real weights; compare
-  prefill vs decode there. pins.json empty until `knurlogic smoke --pin` passes.
-  Also: every rank ran as 0.1.0.dev0 on the M4 until its source copy got package metadata
-  (the version check compares metadata; a source run without it reads dev0).
+- DeepSeek-V4-Flash watch: the first prompt past ~2k tokens is the first time edits 1-2
+  run on real weights; compare prefill vs decode there. pins.json empty until
+  `knurlogic smoke --pin` passes.
 - 8-bit KV decode kernel: merged (engine/kvattn.py, KNURLOGIC_KV_KERNEL, /status.json
-  kv_kernel hits/misses). Gap: a cache restored via mlx-lm from_state comes back with the
-  kernel flag off (silent dequant path, not counted as a miss). Gemma4 KV-shared layers
-  still pay the dequantize.
+  kv_kernel hits/misses). Gemma4 KV-shared layers still pay the dequantize.
 - Gemma 4 strips earlier reasoning by design (Google's guidance): each user turn re-prefills.
   Left alone (Noah).
-- KNURLOGIC_KV_BITS in the environment is silently overridden; only --kv-bits / the page
-  apply it. At least say so.
 - Prefill cost: fewer checkpoint deep copies (share or keep only the last), and prefill
   a long prompt across several steps so the guard can act and decode rows keep going.
 - SMB loads: cold reads vary 3x because the M3 serves the SSD while loading its own
