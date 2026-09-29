@@ -459,6 +459,8 @@ Still to prove live:
   rank 1 memory smaller, prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off.
 
 Queued work:
+- A pipeline job's non-leader rank exposes no /status.json from outside, so its memory
+  is not observable (VQLab session, 2026-09-29).
 - A cluster job's leader listens on 127.0.0.1 only: a request to 192.0.2.2:8080 from the
   other Mac fails (paper session, 2026-09-28, went over ssh). Decide: bind the leader to
   the cluster link, or document the page's router as the way in.
