@@ -452,8 +452,10 @@ Queued work:
 - DeepSeek-V4-Flash: the mlx-community chat_template.jinja is a stub (no tool calls, no
   tool results, reasoning dropped) -- agents are broken on it. Port DeepSeek's official
   encoding.
-- 8-bit KV decode kernel (tools/kv8, branch kv8-kernel): fused Metal kernel reading 8-bit
-  K/V, 1.3-1.7x faster than mlx's quantized sdpa; being wired in.
+- 8-bit KV decode kernel: merged (engine/kvattn.py, KNURLOGIC_KV_KERNEL, /status.json
+  kv_kernel hits/misses). Gap: a cache restored via mlx-lm from_state comes back with the
+  kernel flag off (silent dequant path, not counted as a miss). Gemma4 KV-shared layers
+  still pay the dequantize.
 - Gemma 4 strips earlier reasoning by design (Google's guidance): each user turn re-prefills.
   Left alone (Noah).
 - KNURLOGIC_KV_BITS in the environment is silently overridden; only --kv-bits / the page
