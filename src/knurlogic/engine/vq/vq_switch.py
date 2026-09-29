@@ -2089,7 +2089,7 @@ _DENSE_DEVX = os.environ.get("VQ_DENSE_DEVX", "1") != "0"
 #
 # So this is NOT a 1-ULP change and the 2026-09-02 d8 decision did not reach
 # it: turning it on needed its own referee pass on the dense line. That pass
-# now exists and the switch is ON by default since 2026-09-19 (the maintainer's call).
+# now exists and the switch is ON by default since 2026-09-19.
 #
 # WHAT THE REFEREE PASS FOUND -- read this before flipping it back:
 #   SPEED   1.1461x (3.9, d4 packed), 1.1535x (4.5, d2 unpacked), 1.1348x
@@ -3640,7 +3640,7 @@ _SRC_GEMMSEG2 = _PACK_FETCH + r"""
 #endif
 """
 
-# PROMOTED 2026-09-07 (the maintainer): default ON at v2 after 1.43x (35B-4.6,
+# PROMOTED 2026-09-07: default ON at v2 after 1.43x (35B-4.6,
 # K512) and 1.35x (gemma-26b, K2048) measured on real 9k prefills, both
 # score-gated within the reordering-noise band. VQ_MOE_FUSED_GEMM=0
 # restores the legacy decode+padded-GEMM path; =1 selects the v1 scalar

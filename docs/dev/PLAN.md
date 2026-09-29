@@ -478,6 +478,8 @@ Still to prove live:
 - Prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off on the pair (not measured).
 
 Queued work:
+- Flaky under full-suite load: tests/test_cluster_jobs.py::test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable
+  (failed once 2026-09-29, passes alone 6/6) -- a timing assumption to find.
 - Names: `load` says link tcp/rdma, the recovery record says ring/jaccl (mlx's backend
   names). Show one vocabulary.
 - DeepSeek-V4-Flash watch: the first prompt past ~2k tokens is the first time edits 1-2
