@@ -341,6 +341,10 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # KNURLOGIC_KV_KERNEL can see which path actually ran
         if _st.SERVED.get("kv_kernel") is not None:
             snap["kv_kernel"] = dict(_st.SERVED["kv_kernel"])
+        # a split's every rank, from the per-step control exchange: the
+        # followers serve no status of their own
+        if _st.SERVED.get("ranks"):
+            snap["ranks"] = [dict(x) for x in _st.SERVED["ranks"]]
         snap["preset"] = dict(r.preset)
         # what is running and what is waiting (scheduler.requests)
         from knurlogic.interfaces import http as _http
