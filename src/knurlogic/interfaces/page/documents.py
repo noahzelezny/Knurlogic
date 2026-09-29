@@ -128,8 +128,8 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 "mtp": bool(f.extra.get("mtp_head")),
                 # A family EXISTING for model_type, not whether this
                 # particular config.json has a vision_config -- that needs
-                # `registry.build`, which only runs on load (chat-ui spec
-                # 3.5/picker "VISION tag"). Good enough for the picker.
+                # `registry.build`, which only runs on load. Good enough for the
+                # picker's VISION tag.
                 "vision": vision_registry.registered(f.model_type),
                 "serving": bool(serving) and (f.name == serving
                                               or str(f.path) == serving),
@@ -179,9 +179,8 @@ def loaded_document(ttl: float = 4.0):
                        "bytes_resident": 0, "error": str(e)}
             # What the SERVED model sees, read fresh every time regardless
             # of the survey's own cache path -- a load/unload changes this
-            # the moment it happens (P0 critique C4: P4 sets it, P5 reads
-            # it), and the chat panel's attach button gates on this exact
-            # field (chat-ui spec 3.1).
+            # the moment it happens, and the chat panel's attach button
+            # gates on this exact field.
             try:
                 spec = served_vision()
                 doc["vision"] = spec.to_json() if spec else None

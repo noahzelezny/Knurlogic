@@ -27,7 +27,7 @@ mlx-vlm's version has three call shapes: a list of differently-sized
 images (batches a turn's images through one forward pass), an
 externally-supplied `pixel_position_ids` path, and the plain
 `[B, C, H, W]` path. `Family.preprocess`/`Family.encode` (this package's
-`__init__.py`) call the tower once per image (design D1/D6 -- an image is
+`__init__.py`) call the tower once per image (an image is
 encoded once and cached by sha, never batched with another image's
 pixels), so only the plain path is kept. Padding to `max_patches` is also
 dropped for the same reason: mlx-vlm pads so a batch's images share one
@@ -99,7 +99,7 @@ release's real layout for e4b is the quantized `embed_vision
 .embedding_projection` living in the SAME shard as text weights,
 `model-00002.safetensors`; 26b's tower is its own 356-tensor sidecar --
 report-mlx-vlm-families.md section 7), never through the text model's
-`sanitize` (design critique B3 option (a)). `test_g1_load_weights_standalone_tower`
+`sanitize`. `test_g1_load_weights_standalone_tower`
 gates that the tensor count matches what was written.
 
 ## Open issues / not done here (for the integrator)

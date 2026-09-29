@@ -11,7 +11,7 @@ What each Family method is, and where it came from:
                 mapping is mlx-vlm qwen3_5/qwen3_5.py `sanitize_key` (:16-25),
                 the patch-embed transpose is the tower's own `sanitize`. The
                 tower stands ALONE: the trunk's sanitize keeps dropping the
-                vision keys (critique B3, option a), so nothing about loading
+                vision keys, so nothing about loading
                 the text model changes.
   preprocess    processing.ImageProcessor, settings from the rung's own
                 preprocessor_config.json (mlx-vlm reads the same file)
@@ -29,7 +29,7 @@ What each Family method is, and where it came from:
   positions     rope_index over the WHOLE key, refs from the store (never
                 evicted) -- the trunk's `position_ids` for a prefill chunk
                 (slice [:, :, a:b]) and `rope_delta` for text after the last
-                image and every decode step (design D4)
+                image and every decode step
   chunk_boundaries  [] -- Qwen attention is causal across an image
 
 WHY embed DOES NOT RETURN position_ids. The contract lets it, but embed only

@@ -272,7 +272,7 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
     SHIPPED (`numerics_for`). "v1.5" or "v2" forces that profile's two
     numerics-active flags, and only because someone asked -- it used to
     default to v1.5 and so silently turned off bf16 I/O on the rungs that
-    shipped it on (design D1).
+    shipped it on.
 
     `store_bytes` is a live image store's `budget_bytes()`, when one exists;
     otherwise a vision rung is budgeted at the store's default bound

@@ -1,4 +1,4 @@
-"""engine/vq -- knurlogic's own VQ runtime (design D1).
+"""engine/vq -- knurlogic's own VQ runtime.
 
   vq_switch.py   vqlab's canonical MoE/PLE kernels, VERBATIM (PROVENANCE.md)
   vq_dense.py    vqlab's dense VQLinear/VQEmbedding, VERBATIM -- the three

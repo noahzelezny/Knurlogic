@@ -3,7 +3,7 @@
 G10 (docs/design/vision.md) -- an image prompt with the drafting machinery
 equals it without. In Phase A an image row never drafts, so on the image row
 this compares plain decoding with plain decoding and passes by construction
-(critique 5): it is a SMOKE test, labelled as one. What it does pin is that
+: it is a SMOKE test, labelled as one. What it does pin is that
 a head in the generator changes nothing for the image row while a text row
 beside it still drafts.
 
