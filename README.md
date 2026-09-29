@@ -231,7 +231,7 @@ architecture vendored in `engine/families/`:
   together (`--image-store-gib`) -- each image is downscaled to what the
   model takes, never refused for size unless it is too big to decode
   safely. docs/SERVER.md has the design. Several machines are knurlogic's own (`cluster/`: peers,
-  Bonjour discovery, `--host cluster`); knurlogic does not drive exo.
+  Bonjour discovery, `--host cluster`).
 
 * **A GUI that exposes the knobs.** `/` shows what loaded, the memory split
   nothing else shows, and a Settings panel with every resolved knob, the
@@ -247,15 +247,12 @@ architecture vendored in `engine/families/`:
 
 It does not build or score models — vqlab builds, knurlogic runs what it
 built. It never sets the wired limit or deletes a model; it tells you the
-command. It does not drive exo: knurlogic replaces exo's orchestration on
-mlx's own distributed backends (docs/dev/PLAN.md). A running exo is shown as one
-more runtime holding memory, and `~/.exo/models` is one more model store.
+command.
 
-The page's look is inspired by exo's dashboard; its code is knurlogic's
-own. The server's prompt segmentation (system / conversation / thinking
+The server's prompt segmentation (system / conversation / thinking
 tail, for prompt-cache checkpoints) and the shape of its scheduling loop
 follow mlx-lm's server, rewritten here (engine/runtime/prompt.py,
-scheduler.py); the MTP drafting began in the owner's exo fork and vqlab;
+scheduler.py); the MTP drafting began in vqlab;
 image-feature caching follows mlx-vlm's idea with a byte bound instead of a
 count.
 
@@ -304,13 +301,3 @@ answers on loopback and on its link address (`load` and `state` report the
 
 `docs/dev/PLAN.md` holds what is measured and what is next; `CONTEXT.md` is the
 map.
-
----
-
-*knurl* — the crosshatch cut into metal so a human hand can grip a machined
-part. The machinery is the easy half.
-
----
-
-**Note:** this repository previously reserved the name for a personal media
-and memory pipeline. That scope has been replaced by the above.

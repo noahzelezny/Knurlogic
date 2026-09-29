@@ -1,8 +1,7 @@
 """The qwen4_exp multi-token-prediction head: build, quantize, save, load.
 
 One module so the wiring lives in exactly one place. Every detail below was
-settled by measurement (2026-08-30); see mtp_probe.py for the evidence and
-research/flash-next/LEDGER.md for the numbers.
+settled by measurement against the architecture itself.
 
 Wiring, per the llama.cpp qwen4-exp port (PR #27739) with the ambiguities
 resolved against the architecture itself:

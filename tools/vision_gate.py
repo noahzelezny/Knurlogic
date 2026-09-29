@@ -204,11 +204,14 @@ def run(artifact: str, image_path: str, host: str, port: int) -> int:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("artifact")
-    p.add_argument("image")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8099)
-    p.add_argument("--max-tokens", type=int, default=64)
+    p.add_argument("artifact", help="path to the model folder")
+    p.add_argument("image", help="a PNG/JPEG the model is asked about")
+    p.add_argument("--host", default="127.0.0.1",
+                   help="where the gate's own server listens")
+    p.add_argument("--port", type=int, default=8099,
+                   help="the gate's server port")
+    p.add_argument("--max-tokens", type=int, default=64,
+                   help="tokens per answer")
     a = p.parse_args(argv)
     global MAX_TOKENS
     MAX_TOKENS = a.max_tokens
