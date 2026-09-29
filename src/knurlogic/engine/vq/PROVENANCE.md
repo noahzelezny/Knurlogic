@@ -55,7 +55,7 @@ was the one "to be re-read", and on the Hub it is byte-identical to 3.1 / 3.6.
 ## Re-vendoring
 
 Copy the two files from a new vqlab commit, update the digests in
-`runtime.py` (`RUNTIME_FILES`, `VQLAB_COMMIT`) and here, run
+`runtime.py` (`RUNTIME_FILES`, `VENDORED_COMMIT`) and here, run
 `tools/vq_gate.py knobs <dir-of-published-bundles> --write` (knobs are
 relative to HEAD, so they change with it -- and every `verified` flag must
 be re-earned, since the runtime it described is gone), then the suite.
