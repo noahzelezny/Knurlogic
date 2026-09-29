@@ -20,7 +20,7 @@ def main():
     port, nid, name, info = (int(sys.argv[1]), sys.argv[2], sys.argv[3],
                              json.loads(sys.argv[4]))
     from knurlogic.cluster import launch as C
-    from knurlogic.interfaces.page import server as ui
+    from knurlogic.interfaces.page import server as page_server
     from knurlogic.machine import identity
     identity._ID.update(id=nid, name=name, id_source="test")
     C._resolve = lambda ident, name="": "/fake/artifact" if ident == "abc" else None
@@ -35,9 +35,9 @@ def main():
         host, pport = sys.argv[6].rsplit(":", 1)
         peer = Peer(host=host, port=int(pport), id=sys.argv[5],
                     state="answering")
-        ui.PEERS = SimpleNamespace(all=lambda: [peer],
+        page_server.PEERS = SimpleNamespace(all=lambda: [peer],
                                    introduce=lambda *a, **k: None)
-    srv = ThreadingHTTPServer(("127.0.0.1", port), ui.make_handler({}))
+    srv = ThreadingHTTPServer(("127.0.0.1", port), page_server.make_handler({}))
     print("fake page up", flush=True)
     srv.serve_forever()
 

@@ -140,19 +140,19 @@ def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,
                  quiet_s=0):
     """One registered server, with every fact the phase is read from faked."""
     import os, time
-    from knurlogic.interfaces.page import server as ui
+    from knurlogic.interfaces.page import server as page_server
     log = tmp_path / "serve.log"
     log.write_text("artifact  x\nloading weights\n")
     t = time.time() - quiet_s
     os.utime(log, (t, t))
-    monkeypatch.setattr(ui, "registry", lambda: {
+    monkeypatch.setattr(page_server, "registry", lambda: {
         9001: {"pid": 4242, "artifact": "/m/x", "log": str(log), "t": 0}})
-    monkeypatch.setattr(ui, "is_our_server", lambda pid: alive)
-    monkeypatch.setattr(ui, "_answers", lambda port: answers)
-    monkeypatch.setattr(ui, "_artifact_bytes", lambda p: size)
-    monkeypatch.setattr(ui.loaded, "memory_map",
+    monkeypatch.setattr(page_server, "is_our_server", lambda pid: alive)
+    monkeypatch.setattr(page_server, "_answers", lambda port: answers)
+    monkeypatch.setattr(page_server, "_artifact_bytes", lambda p: size)
+    monkeypatch.setattr(page_server.loaded, "memory_map",
                         lambda: {"processes": [{"pid": 4242, "bytes": held}]})
-    return ui
+    return page_server
 
 
 @pytest.mark.parametrize("alive,answers,held,quiet,want", [
@@ -167,9 +167,9 @@ def test_every_server_says_what_phase_it_is_in(monkeypatch, tmp_path, alive,
     """`alive: true` for loading, serving and hung alike is how an agent ends
     up waiting forever. Each phase is read off evidence: the port, the
     weights actually resident, and how long the log has been quiet."""
-    ui = _phase_world(monkeypatch, tmp_path, alive=alive, answers=answers,
+    page_server = _phase_world(monkeypatch, tmp_path, alive=alive, answers=answers,
                       held=held, size=int(15.5 * (1 << 30)), quiet_s=quiet)
-    (c,) = ui.children()
+    (c,) = page_server.children()
     assert c["phase"] == want
     if want == "stalled":
         assert "Stop waiting" in c["advice"]

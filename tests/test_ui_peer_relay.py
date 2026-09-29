@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from knurlogic.interfaces.page import server as ui
+from knurlogic.interfaces.page import server as page_server
 
 SSE = b": keepalive\n\ndata: {\"a\": 1}\n\ndata: [DONE]\n\n"
 PLAIN = {"id": "x", "choices": [{"message": {"content": "hi"}}]}
@@ -78,25 +78,25 @@ def two(monkeypatch):
     mbase = f"http://127.0.0.1:{mport}"
     # both pages share this process: the peer page's own servers are the
     # fake model; this page has none of its own
-    monkeypatch.setattr(ui, "local_models",
+    monkeypatch.setattr(page_server, "local_models",
                         lambda fetch=None, docs=None: {"glm-peer": mbase})
-    monkeypatch.setattr(ui, "registry", lambda: {})
-    peer_page, pport = _serve(ui.make_handler({}))
-    here, hport = _serve(ui.make_handler({}))
+    monkeypatch.setattr(page_server, "registry", lambda: {})
+    peer_page, pport = _serve(page_server.make_handler({}))
+    here, hport = _serve(page_server.make_handler({}))
     p = SimpleNamespace(name="M4", host="127.0.0.1", port=pport,
                         state="answering", key=f"127.0.0.1:{pport}",
                         id="m4", found_by={"bonjour"})
-    monkeypatch.setattr(ui, "PEERS", Peers(p))
-    ui._ROUTES.update(at=0.0, map={})
+    monkeypatch.setattr(page_server, "PEERS", Peers(p))
+    page_server._ROUTES.update(at=0.0, map={})
     # the peer reports its model where it runs: on ITS loopback
     row = {"runtime": "knurlogic", "name": "glm-peer", "state": "ready",
            "where": "http://127.0.0.1:8080"}
-    ui.peer_residency(ui.PEERS, fetch=lambda url, t: {"resident": [row]})
+    page_server.peer_residency(page_server.PEERS, fetch=lambda url, t: {"resident": [row]})
     yield f"http://127.0.0.1:{hport}", f"http://127.0.0.1:{pport}", seen
     for s in (model, peer_page, here):
         s.shutdown()
-    ui._PEER_TARGETS.clear()
-    ui._ROUTES.update(at=0.0, map={})
+    page_server._PEER_TARGETS.clear()
+    page_server._ROUTES.update(at=0.0, map={})
 
 
 def _post(url, body, headers=None):
@@ -113,8 +113,8 @@ def _post(url, body, headers=None):
 def test_peer_targets_go_through_the_peer_page(two):
     _, peer, _ = two
     key = "http://127.0.0.1:8080"
-    assert key in ui.chat_targets()
-    assert ui.upstream(key, "/v1/messages") == peer + "/peer/v1/messages"
+    assert key in page_server.chat_targets()
+    assert page_server.upstream(key, "/v1/messages") == peer + "/peer/v1/messages"
 
 
 def test_router_lists_and_reaches_the_peer_model_streaming(two):
@@ -186,15 +186,15 @@ def test_relay_refuses_transfer_encoding(two):
 
 
 @pytest.mark.parametrize("path", ["/peer/cluster/prepare",
-                                  "/peer/cluster/stop", ui.PEER_LOAD_PATH])
+                                  "/peer/cluster/stop", page_server.PEER_LOAD_PATH])
 def test_peer_cluster_and_load_refuse_transfer_encoding(two, monkeypatch,
                                                        path):
-    from knurlogic.cluster import launch as cluster_jobs
+    from knurlogic.cluster import launch
     _, peer, _ = two
     called = []
-    monkeypatch.setattr(cluster_jobs, "peer_route",
+    monkeypatch.setattr(launch, "peer_route",
                         lambda *a: called.append(a) or (200, {}))
-    monkeypatch.setattr(ui, "peer_launch",
+    monkeypatch.setattr(page_server, "peer_launch",
                         lambda *a, **k: called.append(a) or (200, {}))
     host, port = peer.removeprefix("http://").split(":")
     c = http.client.HTTPConnection(host, int(port), timeout=5)
@@ -211,35 +211,35 @@ def test_relay_gate_refuses_other_networks():
     class No:
         def allows(self, ip):
             return False
-    code, doc = ui.peer_refusal({}, "203.0.113.109", "203.0.113.102", No())
+    code, doc = page_server.peer_refusal({}, "203.0.113.109", "203.0.113.102", No())
     assert code == 403 and "Thunderbolt" in doc["error"]
-    assert ui.peer_refusal({}, "192.0.2.1", "203.0.113.102", No(),
+    assert page_server.peer_refusal({}, "192.0.2.1", "203.0.113.102", No(),
                            manual_hosts=["192.0.2.1"]) is None
 
 
 def test_relay_resolves_by_folder_name_or_the_only_model():
     t = {"org--Qwen": "http://127.0.0.1:1"}
-    assert ui._resolve(t, "/models/org--Qwen/") == "http://127.0.0.1:1"
-    assert ui._resolve(t, None) == "http://127.0.0.1:1"
-    assert ui._resolve(t, "other") is None
+    assert page_server._resolve(t, "/models/org--Qwen/") == "http://127.0.0.1:1"
+    assert page_server._resolve(t, None) == "http://127.0.0.1:1"
+    assert page_server._resolve(t, "other") is None
 
 
 def _counting_survey(monkeypatch, rows):
     """peer_residency, answering `rows` for the peer; -> the call count."""
-    real, calls = ui.peer_residency, []
+    real, calls = page_server.peer_residency, []
 
-    def survey(peers, timeout=ui.PEER_LOADED_S, fetch=None):
+    def survey(peers, timeout=page_server.PEER_LOADED_S, fetch=None):
         calls.append(1)
         return real(peers, timeout,
                     fetch=lambda url, t: {"resident": list(rows)})
-    monkeypatch.setattr(ui, "peer_residency", survey)
+    monkeypatch.setattr(page_server, "peer_residency", survey)
     return calls
 
 
 def test_a_chat_to_a_model_the_page_has_not_surveyed_yet_resurveys(
         two, monkeypatch):
     here, _, seen = two
-    ui._PEER_TARGETS.clear()            # launched since the last survey
+    page_server._PEER_TARGETS.clear()            # launched since the last survey
     calls = _counting_survey(monkeypatch, [
         {"runtime": "knurlogic", "name": "glm-peer",
          "where": "http://127.0.0.1:8080"}])
@@ -254,8 +254,8 @@ def test_a_chat_to_a_model_the_page_has_not_surveyed_yet_resurveys(
 
 def test_the_router_resurveys_once_on_a_miss(two, monkeypatch):
     here, _, seen = two
-    ui._PEER_TARGETS.clear()
-    ui._ROUTES.update(at=1e18, map={})      # a fresh, empty cached table
+    page_server._PEER_TARGETS.clear()
+    page_server._ROUTES.update(at=1e18, map={})      # a fresh, empty cached table
     calls = _counting_survey(monkeypatch, [
         {"runtime": "knurlogic", "name": "glm-peer",
          "where": "http://127.0.0.1:8080"}])
@@ -278,11 +278,11 @@ def test_the_router_resurveys_once_on_a_miss(two, monkeypatch):
 def test_a_launch_refreshes_what_the_page_can_reach(monkeypatch, req, which,
                                                     answer, refresh):
     calls = []
-    monkeypatch.setattr(ui, which, lambda *a, **k: answer)
-    monkeypatch.setattr(ui, "refresh_targets", lambda: calls.append(1))
+    monkeypatch.setattr(page_server, which, lambda *a, **k: answer)
+    monkeypatch.setattr(page_server, "refresh_targets", lambda: calls.append(1))
     from knurlogic.machine import identity
     monkeypatch.setitem(identity._ID, "id", "m3")
-    out = ui._load_fn(8080)({}, json.dumps(req).encode())
+    out = page_server._load_fn(8080)({}, json.dumps(req).encode())
     assert out == answer and bool(calls) is refresh
 
 
@@ -294,11 +294,11 @@ def test_a_peer_named_with_peer_by_hostname_is_trusted_at_its_address(
     class No:
         def allows(self, ip):
             return False
-    monkeypatch.setattr(ui, "_addresses_of",
+    monkeypatch.setattr(page_server, "_addresses_of",
                         lambda h: {"192.0.2.5"} if h == "bobs-mac.local"
                         else set())
-    assert ui.peer_refusal({}, "192.0.2.5", "203.0.113.102", No(),
+    assert page_server.peer_refusal({}, "192.0.2.5", "203.0.113.102", No(),
                            manual_hosts=["bobs-mac.local"]) is None
-    code, _ = ui.peer_refusal({}, "192.0.2.6", "203.0.113.102", No(),
+    code, _ = page_server.peer_refusal({}, "192.0.2.6", "203.0.113.102", No(),
                               manual_hosts=["bobs-mac.local"])
     assert code == 403
