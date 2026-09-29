@@ -311,7 +311,7 @@ def serves(path) -> bool:
 
 
 def load_model(path, knobs: dict | None = None, lazy: bool = False,
-               strict: bool = True):
+               strict: bool = True, model_config: dict | None = None):
     """mlx-lm's own `load_model`, with the bundle's `model_file` switched
     off and our classes in its place. `knobs` defaults to the rung's
     (rungs.json); pass {} to run HEAD's defaults."""
@@ -327,7 +327,8 @@ def load_model(path, knobs: dict | None = None, lazy: bool = False,
     # None here routes it to get_model_classes (mlx-lm 0.31.3 utils.py
     # load_model; the pin test guards that file's version).
     return _load_model(p, lazy=lazy, strict=strict,
-                       model_config={"model_file": None},
+                       model_config={**(model_config or {}),
+                                     "model_file": None},
                        get_model_classes=_classes)
 
 
