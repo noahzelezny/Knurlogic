@@ -23,7 +23,7 @@ def main():
     from knurlogic.interfaces.page import server as ui
     from knurlogic.machine import identity
     identity._ID.update(id=nid, name=name, id_source="test")
-    C._resolve = lambda ident: "/fake/artifact" if ident == "abc" else None
+    C._resolve = lambda ident, name="": "/fake/artifact" if ident == "abc" else None
     C.shape_of = lambda path, world, split: SHAPE
     C._local_info = lambda: info
     C.RANK_ARGV[0] = fake_argv

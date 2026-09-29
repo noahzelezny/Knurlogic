@@ -432,9 +432,15 @@ def _load_fn(serve_port: int):
             return _then_refresh(forward_launch(req))
         if node:
             # this machine, picked by id: the page's own load, by identity
-            from knurlogic.machine.artifact import resolve_identity
-            req = dict(req, target=req.get("target") or resolve_identity(
-                req.get("identity")) or "")
+            from knurlogic.machine.artifact import (AmbiguousIdentity,
+                                                    resolve_identity)
+            try:
+                req = dict(req, target=req.get("target") or resolve_identity(
+                    req.get("identity"),
+                    name=str(req.get("name") or "")) or "")
+            except AmbiguousIdentity as e:
+                return {"loaded": False, "refused": "ambiguous identity",
+                        "note": str(e)}
         target, where = req.get("target") or "", req.get("where") or ""
         try:
             # Through the MCP's own functions: the page refuses what an agent
@@ -533,6 +539,7 @@ def forward_launch(req: dict, post=None) -> dict:
             return {"error": f"not a launch setting knurlogic passes to "
                              f"another machine: {', '.join(bad)}"}
         doc = {"action": "load", "identity": str(req.get("identity") or ""),
+               "name": Path(str(req.get("name") or "")).name[:255],
                "tune": req.get("tune") if req.get("tune") in TUNES
                else "balanced", "sets": sets, "force": bool(req.get("force"))}
         if req.get("port"):
@@ -673,8 +680,13 @@ def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
     if bad:
         return 400, {"error": f"not a launch setting: {', '.join(bad)}"}
     tune = req.get("tune") if req.get("tune") in TUNES else _default_tune()
-    from knurlogic.machine.artifact import resolve_identity
-    path = (resolve or resolve_identity)(req.get("identity"))
+    from knurlogic.machine.artifact import AmbiguousIdentity, resolve_identity
+    try:
+        path = resolve(req.get("identity")) if resolve else resolve_identity(
+            req.get("identity"), name=str(req.get("name") or ""))
+    except AmbiguousIdentity as e:
+        return 409, {"loaded": False, "refused": "ambiguous identity",
+                     "note": str(e)}
     if not path:
         name = identity.identity().get("name") or "this machine"
         return 404, {"loaded": False, "refused": f"not on {name}",
