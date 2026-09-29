@@ -146,7 +146,7 @@ at least 80% of the text-only rate on the 27B and 35B.
 
 Separate git worktrees; file ownership is exclusive. Model split per the maintainer:
 Opus for the packages where subtle correctness lives, Sonnet 5 for
-well-specified vendoring and UI against frozen contracts, a review for the
+well-specified vendoring and UI against frozen contracts, a separate model for the
 final adversarial review.
 
 | | Package | Model | Depends on |
@@ -160,7 +160,7 @@ final adversarial review.
 | P5 | Interfaces: chat panel, vision in models/state/fit, Anthropic image blocks, gate tool | Sonnet 5 | P0 |
 | -- | Integration: registry resolves real families; real-model gates, one model at a time | orchestrator | all |
 | P6 | Phase B drafting on image conversations | Opus | integration |
-| -- | Adversarial review of the whole | a review | all |
+| -- | Adversarial review of the whole | reviewer | all |
 
 Ownership notes from the critique: only P4 touches `engine/seam.py` and
 `engine/mtp/*`; only P1 touches the Qwen architecture files; P-VQ owns
@@ -249,7 +249,7 @@ and new to both:
    are counted in `tuning/resolve.py` alongside the store.
 5. **The goal overstated the gate** (fixed above).
 
-### Second pass, through the harness with tools (same day)
+### Second pass, through an agent harness with tools (same day)
 
 Checked against the source before folding in:
 * CONFIRMED: `fetch_nearest_cache` returns a slice of the key it was given
@@ -288,12 +288,12 @@ The rest of the second pass (findings 3-9), executed against the files:
 * Already addressed: #5 (processor config is fixed at load; a change is a
   key miss by construction), #9 (goal restated).
 
-### Third review: Qwen3.5-397B-A17B-VQ-2.2bpw through the harness (same day)
+### Third review: Qwen3.5-397B-A17B-VQ-2.2bpw through an agent harness (same day)
 
-Placed on the Laptop B through knurlogic's own MCP. It confirmed the
+Placed on the M4 Max laptop through knurlogic's own MCP. It confirmed the
 model-level claims (image tokens: Qwen 248056, GLM 154854; templates keep
 thinking on Qwen and GLM; vision weights on all released rungs), made no
-false claims, and said plainly what it could not read (the harness's read roots
+false claims, and said plainly what it could not read (the ingest client's read roots
 exclude site-packages, so it could not open mlx-lm's server). Its critical
 item -- tuple sentinels in mlx-lm -- was already settled by execution (P4 and
 the end-to-end tests ran them through the real server objects on all five
@@ -316,8 +316,8 @@ larger budget or disable thinking for review passes.
   context, more context used, behaviour changes; measure before claiming
   it helps long agent tasks.
 * **Local reviewers.** Flash-Next 2.1 (fits the M3) and the 397B (needs both
-  nodes, so exo's instance comes off the Laptop B for it) review the
-  build through knurlogic's own Anthropic endpoint, beside a review. A
+  nodes, so exo's instance comes off the M4 Max laptop for it) review the
+  build through knurlogic's own Anthropic endpoint, beside the other reviewer. A
   different model lineage, and dogfooding the endpoint at long context;
   their findings are leads to verify, not verdicts. After the real-model
   gates, so they never compete for memory.

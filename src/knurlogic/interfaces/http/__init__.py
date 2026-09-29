@@ -133,7 +133,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     from knurlogic.engine.runtime.host import ModelHost
     from knurlogic.engine.runtime.scheduler import Scheduler
 
-    from . import scout
+    from . import residency as res_api
     from .server import App
 
     logging.basicConfig(level=logging.INFO,
@@ -172,15 +172,15 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     if ring:
         watch_ring(sched, mh)
 
-    served = scout.served(artifact, mh)
+    served = res_api.served(artifact, mh)
     from .server import DEFAULT_MAX_BODY
     app = App(sched, served=served, routes=routes,
               max_body=settings.get("max_body", DEFAULT_MAX_BODY),
               allow_origins=tuple(settings.get("allow_origins") or ()),
               allow_hosts=tuple(settings.get("allow_hosts") or ()),
-              concurrency=lambda: scout.concurrency(sched),
-              residency=lambda: scout.residency(mh, sched, port),
-              ensure=scout.ensure)
+              concurrency=lambda: res_api.concurrency(sched),
+              residency=lambda: res_api.residency(mh, sched, port),
+              ensure=res_api.ensure)
     if host == "cluster":
         # every address bound, only loopback and Thunderbolt answered --
         # the same rule as the page's (cluster/links.Gate)

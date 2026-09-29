@@ -548,7 +548,7 @@ def _runtime_of(cmd: str) -> str:
     # The module after `-m`, which is what names a python process -- or,
     # for an interpreter running a script, the script: a console-script
     # launch (`.../Python .../venv/bin/knurlogic serve`) names itself only
-    # there, and was counted as "everything else" (the M4, 2026-09-26).
+    # there, and was counted as "everything else" (the M4 Max, 2026-09-26).
     module = ""
     for i, tok in enumerate(parts[:-1]):
         if tok == "-m":

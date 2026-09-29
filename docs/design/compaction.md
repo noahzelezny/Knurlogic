@@ -1,6 +1,6 @@
 # Context compaction (built 2026-09-28, commit 310d1f3)
 
-Goal (the maintainer): knurlogic as universal as possible -- any harness plugs in. A swarm of
+Goal: knurlogic as universal as possible -- any harness plugs in. A swarm of
 sub-agents should not need its memory managed by hand.
 
 ## Decision: the harness asks, the server performs
@@ -15,7 +15,7 @@ sub-agents should not need its memory managed by hand.
   resending the full history and the two views drift.
 - Automatic (operator-default) compaction exists but is OFF by default.
 
-## Distill, don't clear (the maintainer)
+## Distill, don't clear
 
 A tool call usually exists to answer a question ("where is X defined?"). Outside the
 recent tail, each dropped tool result becomes a one-line finding (`T<n>: X is defined at
@@ -24,16 +24,16 @@ fallback. The recent tail stays verbatim (the agent may still be using it).
 
 ## Summary prompt
 
-the harness's (`scout/coherence/summarizer.py:175-190`) extended for coding agents: Goal,
+An earlier summarizer's prompt, extended for coding agents: Goal,
 Decisions made, Information gathered, Files and identifiers touched, Current step, Next
 step, Open errors and questions. It lives as markdown, not a Python string
 (`context_management/prompts/compact.md`, and `findings.md` for the per-call findings),
-since it is a document that asks an agent to fix its own context. No token budget (the maintainer):
+since it is a document that asks an agent to fix its own context. No token budget:
 the one rule is that a summary is never longer than what it replaces. The prompt says
 to be as short as it can while keeping everything needed to continue; the pass's
 `max_tokens` is the dropped span's tokens plus one finding line (48 tokens) per dropped
 tool call, and a summary longer than the dropped text falls back to the marker.
-the harness's invariants kept: system message, the first user message (the goal) and the last
+The earlier compactor's invariants kept: system message, the first user message (the goal) and the last
 N messages stay; the kept tail never starts on an orphaned tool result.
 
 ## API shapes (verified against platform.claude.com, 2026-09-28)
@@ -87,4 +87,4 @@ in `tuning/settings.py` (AUTO off, TRIGGER 0.8, KEEP_TURNS 6, TOOL_RESULTS disti
 - Not done: demoting the old long cache entry for early eviction.
 - Dropped by the maintainer: an advisory header, and agent self-advocacy for cache budget (it
   makes the scheduler a referee).
-- the harness adopting knurlogic's compaction instead of its own summarizer.
+- the ingest client adopting knurlogic's compaction instead of its own summarizer.

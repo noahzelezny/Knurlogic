@@ -1,4 +1,4 @@
-"""DeepSeek-V4 architecture (deepseek_v4) vendored from the maintainer's mlx-lm fork:
+"""DeepSeek-V4 architecture (deepseek_v4) vendored from an mlx-lm fork (PROVENANCE.md):
 mlx-lm 0.31.3, which knurlogic pins, has no deepseek_v4. Loaded by
 engine/register.py into mlx_lm.models, never imported from here.
 

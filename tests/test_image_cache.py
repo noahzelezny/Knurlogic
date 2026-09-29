@@ -222,7 +222,7 @@ class Harness:
                  start=True, prefill_step_size=16):
         from knurlogic.engine.runtime.scheduler import Scheduler
         from knurlogic.engine.serve import state
-        from knurlogic.interfaces.http import scout
+        from knurlogic.interfaces.http import residency as res_api
         from knurlogic.interfaces.http.server import App
         self.host = Host(model, tok or byte_tok())
         state.SERVED["provider"] = self.host
