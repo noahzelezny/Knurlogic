@@ -1262,7 +1262,7 @@ const isGlobal=n=>n==='KNURLOGIC_CROSS_CHIP'||/^KNURLOGIC_COMPACT_/.test(n);
 // (nothing of it runs: every change is a launch setting), label (how the confirm lists it) and url
 // (a setting of this page's own, POSTed there as {gib}: the allowance).
 // a launch setting's plain name, where its variable is not one
-const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Identical results across chips', KNURLOGIC_PRESET:'Launch preset'};
+const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Identical results across chips', KNURLOGIC_PRESET:'Launch preset', KNURLOGIC_LONG_CONTEXT:'Long context (YaRN, ~1M tokens)'};
 function knobHTML(k, c){
   const cur=k.running??k.would_be??k.value;
   // with no variant running, every knob waits for a launch, live or not
@@ -2563,6 +2563,9 @@ async function loadPreview(){
   // the room is counted at the KV precision it would launch with
   const kvb=launchSets(baseKey(m.name)).KNURLOGIC_KV_BITS;
   if(kvb) q.set('kv_bits', kvb);
+  // YaRN long context moves the context cap and what its KV needs
+  const lc=launchSets(baseKey(m.name)).KNURLOGIC_LONG_CONTEXT;
+  if(lc) q.set('long_context', lc);
   try{ PREVIEW=await (await fetch('/settings.json?'+q)).json(); PREVIEW.for=m.path }
   catch(e){ PREVIEW=null }
   if(SEL!==m) return;

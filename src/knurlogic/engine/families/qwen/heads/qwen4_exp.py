@@ -97,7 +97,12 @@ class MTPHead:
         self.mixer = type(core.hyper_connection_mixer)(args_t, use_combine=False)
         theta = float((getattr(args_t, "mtp", {}) or {}).get(
             "rope_theta", 10_000_000))
-        self.rope = type(core.rope)(core.rope.dim, theta)
+        # the trunk's YaRN, when KNURLOGIC_LONG_CONTEXT set it, at the
+        # head's own theta: the head ropes the same positions
+        self.rope = type(core.rope)(core.rope.dim, theta,
+                                    getattr(core.rope, "mrope_section",
+                                            (11, 11, 10)),
+                                    getattr(core.rope, "scaling", None))
         self.norm_e = None
         self.norm_h = None
         self.fc = None

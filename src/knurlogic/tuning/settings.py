@@ -420,6 +420,22 @@ KNOB_DOC = {
         "KV-shared layers always take dequantize + attention). A row with "
         "every key masked returns 0 here where mlx sdpa returns NaN. "
         "Prefill is dequantize + attention either way."),
+    "KNURLOGIC_LONG_CONTEXT": (
+        "reach past the model's trained window: off, or yarn (Qwen's "
+        "documented YaRN rope scaling, factor 4 over 262,144 -> ~1M tokens)",
+        "yarn raises this model's context cap to 1,048,576 tokens (Qwen "
+        "documents 1,010,000 for Qwen3.5/3.6, 1,000,000 for Qwen3.8), set "
+        "on the loaded config at load time, the artifact untouched. The "
+        "cost, per Qwen: static YaRN applies the same scaling to every "
+        "prompt, so short prompts may get slightly worse -- leave it off "
+        "unless you need past 262k. And every token of context holds KV "
+        "memory: at 1,048,576 tokens bf16 KV is 20 GiB on Qwen3.6-35B-A3B, "
+        "24 GiB on Qwen3.8 Flash, 30 GiB on the 397B, 64 GiB on "
+        "Qwen3.8-27B (all conversations together); 8-bit KV "
+        "(KNURLOGIC_KV_BITS=8) takes 53% of that. The load is "
+        "refused where the box cannot hold the chosen context's KV. Only "
+        "for families whose model card documents it (qwen3_5, "
+        "qwen3_5_moe, qwen4_exp)."),
     "KNURLOGIC_CROSS_CHIP": (
         "identical results across chips: a split over an M3 and an M4 "
         "gives the same tokens as a split over two of one",
@@ -500,6 +516,7 @@ KNOB_ALIASES = {
     # the 8-bit KV decode kernel (engine/kvattn): on unless "off"; A/B knob
     "kv_kernel": ("KNURLOGIC_KV_KERNEL",),
     "cross_chip": ("KNURLOGIC_CROSS_CHIP",),
+    "long_context": ("KNURLOGIC_LONG_CONTEXT",),
     "preset": ("KNURLOGIC_PRESET",),
 }
 
@@ -507,7 +524,7 @@ KNOB_ALIASES = {
 #: every rank of a split (cluster/launch passes them ring-wide)
 MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
                "KNURLOGIC_KV_KERNEL", "KNURLOGIC_CROSS_CHIP",
-               "KNURLOGIC_PRESET")
+               "KNURLOGIC_LONG_CONTEXT", "KNURLOGIC_PRESET")
 
 
 # --- which knobs the ENGINE consumes ----------------------------------------
@@ -520,7 +537,8 @@ MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "context_length", "mtp",
                                       "mtp_dynamic", "kv_bits", "kv_kernel",
-                                      "cross_chip", "preset")
+                                      "cross_chip", "long_context",
+                                      "preset")
                           for n in KNOB_ALIASES[k])
 
 
@@ -592,7 +610,9 @@ def engine_settings(env: dict) -> dict:
                                ("mtp", "mtp", on_off),
                                ("mtp_dynamic", "mtp_dynamic", on_off),
                                ("kv_bits", "kv_bits", kv_bits_of),
-                               ("cross_chip", "cross_chip", cross_chip_of)):
+                               ("cross_chip", "cross_chip", cross_chip_of),
+                               ("long_context", "long_context",
+                                long_context_of)):
         for name in KNOB_ALIASES[logical]:
             if name in env:
                 out[key] = (cast(float(env[name])) if cast in (int, float)
@@ -692,6 +712,9 @@ KNOB_RANGE = {
     "KNURLOGIC_KV_BITS": (KV_BITS_VALUES, "bits"),
     "KNURLOGIC_KV_KERNEL": (["on", "off"], ""),
     "KNURLOGIC_CROSS_CHIP": (["off", "on", "auto"], ""),
+    # narrowed per family by the resolver: ["off"] where no model card
+    # documents YaRN
+    "KNURLOGIC_LONG_CONTEXT": (["off", "yarn"], ""),
     "KNURLOGIC_PRESET": (list(PRESETS), ""),
     "VQLAB_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
                              "GiB"),
@@ -740,6 +763,95 @@ def model_window(cfg: dict) -> tuple:
     return 0, "its config does not say (no max_position_embeddings)"
 
 
+# --- running past the trained window: YaRN, where the model card says so ----
+# Qwen's model cards for the hybrid families knurlogic serves document one
+# recipe for ~1M tokens: rope_parameters gains rope_type "yarn", factor 4.0,
+# original_max_position_embeddings 262144 (mrope/partial rotary unchanged),
+# and vLLM/sglang raise their max length (VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+# --max-model-len 1010000; SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=1
+# --context-length 1010000). Static YaRN: "potentially impacting performance
+# on shorter texts". Sources (read 2026-09-29):
+#   https://huggingface.co/Qwen/Qwen3.5-397B-A17B   (1,010,000)
+#   https://huggingface.co/Qwen/Qwen3.6-35B-A3B     (1,010,000)
+#   https://huggingface.co/Qwen/Qwen3.8-27B         (1,000,000)
+#   https://huggingface.co/Qwen/Qwen3.8-Flash-Next  (1,000,000)
+# The cap here is the YaRN window itself (262144 x 4 = 1,048,576, what
+# model_window reads off a yarn config); Qwen's tested lengths are above.
+LONG_CONTEXT_VALUES = ("off", "yarn")
+#: model_type -> (factor, original_max_position_embeddings, documented tokens)
+LONG_CONTEXT_YARN = {
+    "qwen3_5": (4.0, 262144, 1_010_000),
+    "qwen3_5_moe": (4.0, 262144, 1_010_000),
+    "qwen4_exp": (4.0, 262144, 1_000_000),
+}
+
+
+def long_context_family(model_type: str) -> str | None:
+    """The LONG_CONTEXT_YARN key for a model_type (a text config's
+    `qwen3_5_text` is its wrapper's), or None where no card documents it."""
+    mt = str(model_type or "")
+    mt = mt[:-5] if mt.endswith("_text") else mt
+    return mt if mt in LONG_CONTEXT_YARN else None
+
+
+def long_context_of(v) -> str:
+    """'off' | 'yarn'; ''/None is off."""
+    s = str(v if v is not None else "").strip().lower()
+    if s in ("", "off", "0", "false", "no", "none"):
+        return "off"
+    if s not in LONG_CONTEXT_VALUES:
+        raise ValueError(f"long context {v!r}: one of "
+                         f"{list(LONG_CONTEXT_VALUES)}")
+    return s
+
+
+def long_context_refusal(model_type: str, mode) -> str | None:
+    """Why `mode` cannot be taken for this family, or None."""
+    if long_context_of(mode) == "off":
+        return None
+    if long_context_family(model_type) is None:
+        return (f"KNURLOGIC_LONG_CONTEXT=yarn is refused for "
+                f"{model_type or 'this model'}: only the Qwen families "
+                f"whose model cards document YaRN take it "
+                f"({', '.join(sorted(LONG_CONTEXT_YARN))})")
+    return None
+
+
+def long_context_config(cfg: dict, mode) -> dict:
+    """The top-level config keys to overlay at load (mlx-lm's
+    `model_config`, a shallow update) for `mode`: {} when off, else the
+    text config with rope_parameters carrying Qwen's YaRN. The artifact's
+    config.json is never written. Raises ValueError where refused."""
+    mode = long_context_of(mode)
+    if mode == "off":
+        return {}
+    cfg = cfg or {}
+    mt = str(cfg.get("model_type") or "")
+    why = long_context_refusal(mt, mode)
+    if why:
+        raise ValueError(why)
+    factor, orig, _doc = LONG_CONTEXT_YARN[long_context_family(mt)]
+    nested = isinstance(cfg.get("text_config"), dict)
+    tc = dict(cfg["text_config"]) if nested else dict(cfg)
+    key = "rope_parameters" if isinstance(tc.get("rope_parameters"), dict) \
+        or not isinstance(tc.get("rope_scaling"), dict) else "rope_scaling"
+    rp = dict(tc.get(key) or {})
+    rp.pop("type", None)
+    rp.update(rope_type="yarn", factor=factor,
+              original_max_position_embeddings=orig)
+    tc[key] = rp
+    if nested:
+        return {"text_config": tc}
+    return {key: rp}
+
+
+def with_long_context(cfg: dict, mode) -> dict:
+    """`cfg` as the model will load under `mode` (a copy)."""
+    out = dict(cfg or {})
+    out.update(long_context_config(cfg, mode))
+    return out
+
+
 #: numeric knobs: (type, lowest, highest or None, what it counts)
 KNOB_BOUNDS = {
     "KNURLOGIC_PREFILL_CHUNK": (int, 16, 4096, "tokens"),
@@ -784,6 +896,8 @@ def check_knob(name: str, value, window: int = 0):
             preset_of(s)
         elif name == "KNURLOGIC_CROSS_CHIP":
             cross_chip_of(s)
+        elif name == "KNURLOGIC_LONG_CONTEXT":
+            long_context_of(s)
     except ValueError as e:
         return f"{name}: {e}"
     return None
