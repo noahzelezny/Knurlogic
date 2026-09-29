@@ -80,7 +80,7 @@ SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
              "port", "working_set_gib", "bandwidth_gbs", "nodes", "versions",
              "jaccl_timeout_ms", "sets", "chips", "cable", "cable_note",
-             "recovery", "serve_hosts")
+             "recovery", "serve_hosts", "name")
 SPLITS = ("tensor", "pipeline")
 LINKS = ("ring", "jaccl")
 #: the link names people see (load(), state(), the page, the recovery
@@ -519,9 +519,12 @@ def shape_of(path: str, world: int, split: str) -> dict:
 
 # ------------------------------------------------------------ one page
 
-def _resolve(identity: str):
+def _resolve(identity: str, name: str = ""):
+    """The local path for this identity (the artifact called `name` when
+    several match); raises machine.artifact.AmbiguousIdentity when two
+    different artifacts match and neither is named."""
     from knurlogic.machine.artifact import resolve_identity
-    return resolve_identity(identity)
+    return resolve_identity(identity, name=name)
 
 
 def check_spec(spec) -> str:
@@ -541,6 +544,10 @@ def check_spec(spec) -> str:
         return "rank and world do not make a ring"
     if spec.get("split") not in SPLITS or spec.get("link") not in LINKS:
         return "split is tensor|pipeline, link is ring|jaccl"
+    nm = spec.get("name", "")
+    if not isinstance(nm, str) or "/" in nm or nm in (".", "..") \
+            or len(nm) > 255:
+        return "name is a directory name, never a path"
     hosts = spec.get("hosts")
     if not isinstance(hosts, list) or not all(isinstance(h, str)
                                               for h in hosts):
@@ -660,7 +667,12 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         return 400, {"error": why}
     from knurlogic.machine import identity
     me = identity.identity().get("name") or "this machine"
-    path = (resolve or _resolve)(spec.get("identity"))
+    from knurlogic.machine.artifact import AmbiguousIdentity
+    try:
+        path = resolve(spec.get("identity")) if resolve else \
+            _resolve(spec.get("identity"), str(spec.get("name") or ""))
+    except AmbiguousIdentity as e:
+        return 200, {"ok": False, "machine": me, "refused": f"on {me}: {e}"}
     if not path:
         return 200, {"ok": False, "machine": me,
                      "refused": f"not on {me}: no artifact with identity "
@@ -1383,6 +1395,9 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     ident = str(req.get("identity") or "")
     if not ident:
         return {"error": "a cluster launch names the model by identity"}
+    # what the requester called it: a directory name, never a path; each
+    # rank prefers the artifact of that name among its identity's matches
+    aname = Path(str(req.get("name") or "")).name[:255]
     by_id = {getattr(p, "id", ""): p for p in peers
              if p.state == "answering"}
     infos = []
@@ -1422,14 +1437,19 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                                  f"{rd.get('reason') or 'unknown'}"}
     # the model's shape, from this machine when it has it, else a peer
     world = len(infos)
-    path = _resolve(ident)
+    from knurlogic.machine.artifact import AmbiguousIdentity
+    try:
+        path = _resolve(ident, aname)
+    except AmbiguousIdentity as e:
+        return {"error": str(e)}
     try:
         if path:
             shape = shape_of(path, world, split)
         else:
             first = next(m for m in infos if m["page"])
             shape = post(f"http://{first['page']}{SHAPE_PATH}",
-                         {"identity": ident, "world": world, "split": split})
+                         {"identity": ident, "name": aname, "world": world,
+                          "split": split})
             if shape.get("error"):
                 return {"error": f"{first['name']}: {shape['error']}"}
     except Exception as e:
@@ -1556,7 +1576,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             chunk = int(sets[k])
             break
     base = {"job": job, "world": world, "split": split, "link": link,
-            "identity": ident, "hosts": hosts, "ibv_devices": ibv,
+            "identity": ident, "name": aname, "hosts": hosts, "ibv_devices": ibv,
             "coordinator": coord, "layers": plan["layers"],
             "prefill_chunk": chunk,
             "tune": req.get("tune") if req.get("tune") in
@@ -1756,7 +1776,11 @@ def peer_route(path: str, body: bytes) -> tuple:
             return 400, {"error": "job is a hex nonce"}
         return 200, job_state(req["job"])
     if path == SHAPE_PATH:
-        p = _resolve(req.get("identity"))
+        from knurlogic.machine.artifact import AmbiguousIdentity
+        try:
+            p = _resolve(req.get("identity"), str(req.get("name") or ""))
+        except AmbiguousIdentity as e:
+            return 409, {"error": str(e)}
         if not p:
             return 404, {"error": "no artifact with that identity here"}
         w, s = req.get("world"), req.get("split")
