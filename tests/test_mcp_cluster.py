@@ -105,7 +105,7 @@ def test_load_on_two_machines_sends_the_pages_launch(page):
                    "cable": "198.51.100", "cable_note": "fastest", "note": "x"}
     out = mcp.load(artifact="M", port=8090, machines=["A", "b"],
                    split="pipeline", link="rdma", tune="fast")
-    assert page.posts == [{"action": "load", "identity": "abc",
+    assert page.posts == [{"action": "load", "identity": "abc", "name": "M",
                            "tune": "fast", "sets": {}, "port": 8090,
                            "nodes": ["aaaa", "bbbb"], "split": "pipeline",
                            "link": "rdma"}]
@@ -196,7 +196,7 @@ def page_a(tmp_path, monkeypatch):
     monkeypatch.setitem(identity._ID, "id", "aaaa")
     monkeypatch.setitem(identity._ID, "name", "A")
     monkeypatch.setattr(C, "_resolve",
-                        lambda i: "/fake/artifact" if i == "abc" else None)
+                        lambda i, name="": "/fake/artifact" if i == "abc" else None)
     monkeypatch.setattr(C, "shape_of", lambda p, w, s: T.SHAPE)
     info_a = T.info("Apple M4 Max", "127.0.0.1")
     info_b = T.info("Apple M3 Ultra", "127.0.0.1")
@@ -290,3 +290,12 @@ def test_mcp_load_state_unload_across_two_pages(page_a, monkeypatch):
     assert gone.get("told") == ["B"], gone
     assert not T.alive(rank0["pid"])
     assert T.wait(lambda: not T.alive(rank1["pid"]), 20)
+
+
+def test_a_cluster_load_sends_the_artifacts_name_with_its_identity(page):
+    # the ranks resolve the identity to the artifact CALLED this, or refuse
+    page.answer = {"starting": True}
+    mcp.load(artifact="/Volumes/x/paperv5--q397-e112-A", machines=["A", "B"],
+             split="pipeline", link="tcp")
+    assert page.posts[0]["identity"] == "abc"
+    assert page.posts[0]["name"] == "paperv5--q397-e112-A"

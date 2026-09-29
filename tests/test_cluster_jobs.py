@@ -494,7 +494,7 @@ def two_pages(tmp_path, monkeypatch):
     monkeypatch.setitem(identity._ID, "id", "aaaa")
     monkeypatch.setitem(identity._ID, "name", "A")
     monkeypatch.setattr(C, "_resolve",
-                        lambda i: "/fake/artifact" if i == "abc" else None)
+                        lambda i, name="": "/fake/artifact" if i == "abc" else None)
     monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
     info_a = info("Apple M4 Max", "127.0.0.1")
     info_b = info("Apple M3 Ultra", "127.0.0.1")
@@ -837,7 +837,7 @@ def test_jaccl_without_an_rdma_subnet_is_refused_not_rerouted(cache,
                                                              monkeypatch):
     """RDMA up on both Macs, but on different cables: refused, with each
     Mac's active devices -- never jaccl over some other device."""
-    monkeypatch.setattr(C, "_resolve", lambda i: "/m/x")
+    monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
     monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
     rd = lambda dev: {"available": True, "reason": "", "devices": [dev],
                       "active": [dev]}
@@ -1195,7 +1195,7 @@ def test_a_failing_cable_goes_last_for_that_pair_only(monkeypatch):
 
 def jaccl_launch(monkeypatch, req, post=None, follow=None):
     a, b = two_cable_infos()
-    monkeypatch.setattr(C, "_resolve", lambda i: "/m/x")
+    monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
     monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
     peer = SimpleNamespace(id="bbbb", name="B", host="127.0.0.2",
                            key="127.0.0.2:8765", state="answering",
@@ -1309,7 +1309,7 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
     monkeypatch.setitem(identity._ID, "id", "aaaa")
     monkeypatch.setitem(identity._ID, "name", "A")
     monkeypatch.setattr(C, "_resolve",
-                        lambda i: "/fake/artifact" if i == "abc" else None)
+                        lambda i, name="": "/fake/artifact" if i == "abc" else None)
     monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
     monkeypatch.setattr(C, "BAD_CABLES", {})
     monkeypatch.setattr(C, "FAILOVER_POLL_S", 0.2)
