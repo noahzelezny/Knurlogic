@@ -454,6 +454,11 @@ GPU use again.
 - Bundled model.py over a pipeline split: works (paper session, paperv5--q397-r24-sk8,
   M3+M4, 22.6 tok/s, both ranks "WILL be executed").
 
+- DeepSeek-V4-Flash on M3+M4 (2026-09-29): M3 layers 0-17 (61.1 GiB), M4 18-42 (84.4 GiB);
+  plain answer; DSML tool call parsed to tool_calls; tool result used; next turn cached
+  398/408; compaction 3170 -> 2073 tokens, summary pass a cache hit (3474 read, 1 new).
+  Needed edits 9-10 (experts double-quantized on stock mlx-lm; transformers 5.x config).
+
 Still to prove live:
 - Cluster parity on the pair (needs the M3): images on a split, MTP drafting from rank 0,
   rank 1 memory smaller, prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off.
@@ -466,12 +471,13 @@ Queued work:
   the cluster link, or document the page's router as the way in.
 - Names: `load` says link tcp/rdma, the recovery record says ring/jaccl (mlx's backend
   names). Show one vocabulary.
-- DeepSeek-V4-Flash (144 GB, needs M3+M4): template done (bc942f7, official encoding +
-  DSML parser). Overnight 2026-09-29: vendoring the maintainer's fork's deepseek_v4.py as a family
-  (branch deepseek-v4-arch; mlx-lm 0.31.3 has no deepseek_v4). Then, once the VQLab
-  provenance session frees both Macs: pipeline load, plain answer, a DSML tool call parsed,
-  tool result used, cache reuse after tool rounds, one compaction; <= 30 min, then unload.
-- Leader bind + tcp/rdma naming: branch leader-link (paper session's two issues).
+- DeepSeek-V4-Flash follow-ups (it works live, see above): review's fix-afters --
+  resolve.py VISION_KV_DTYPE_BYTES reused as bf16 size (alias it); drop @mx.compile on
+  _ragged_prev (a compile per emit pattern); PROVENANCE edit 1 also changes decode. Watch:
+  the first prompt past ~2k tokens is the first time edits 1-2 run on real weights; compare
+  prefill vs decode there. pins.json empty until `knurlogic smoke --pin` passes.
+  Also: every rank ran as 0.1.0.dev0 on the M4 until its source copy got package metadata
+  (the version check compares metadata; a source run without it reads dev0).
 - 8-bit KV decode kernel: merged (engine/kvattn.py, KNURLOGIC_KV_KERNEL, /status.json
   kv_kernel hits/misses). Gap: a cache restored via mlx-lm from_state comes back with the
   kernel flag off (silent dequant path, not counted as a miss). Gemma4 KV-shared layers
