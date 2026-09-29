@@ -977,3 +977,10 @@ loadChats();
 document.addEventListener('DOMContentLoaded', ()=>{});
 switchTab('chat');
 renderClog();
+
+// Chat Settings -> Advanced: collapsed by default, remembered per browser.
+(()=>{ const d=document.getElementById('cadv'); if(!d) return;
+  try{ d.open=localStorage.getItem('kn.chatadv')==='1' }catch(e){}
+  d.addEventListener('toggle', ()=>{
+    try{ localStorage.setItem('kn.chatadv', d.open ? '1' : '0') }catch(e){} });
+})();

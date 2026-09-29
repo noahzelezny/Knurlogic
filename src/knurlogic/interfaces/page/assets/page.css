@@ -803,3 +803,8 @@ body.talk #clog{flex:1;height:auto;min-height:0;max-height:none}
   .flow line,.live i,.wait,.wait.on svg{animation:none}
   *,*:before,*:after{transition-duration:.01ms!important;
     animation-duration:.01ms!important;animation-iteration-count:1!important}}
+
+/* Chat Settings: sampling and the system prompt, folded by default. */
+#cadv{margin-top:10px}
+#cadv>summary{cursor:pointer;font-size:12px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--dim);margin:6px 0}
