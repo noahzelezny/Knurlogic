@@ -600,6 +600,22 @@ def _identity_of(artifact: str) -> tuple:
     return ident, None
 
 
+def _artifact_name(artifact: str) -> str:
+    """The directory name `load` was given the artifact by ("" for a bare
+    identity): the name the other machines resolve it by."""
+    import re
+    a = str(artifact or "").rstrip("/")
+    if re.fullmatch(r"[0-9a-f]{16}", a):
+        return ""
+    from pathlib import Path
+    from knurlogic.interfaces.loading import NotLoadable, resolve_name
+    try:
+        # a path (or a pin's real path) -> the store's own name for it
+        return Path(resolve_name(a, None)).name
+    except NotLoadable:
+        return Path(a).name
+
+
 def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
              cable) -> Dict[str, Any]:
     """`load` on other machines: the page's Launch request, sent to the
@@ -630,7 +646,10 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
             # this Mac, named: the same as naming none
             return load(artifact=artifact, port=port, tune=tune, sets=sets,
                         force=force, draft=draft)
-        req = {"action": "load", "identity": ident, "tune": tune,
+        # the name too: a machine holding two artifacts with one identity
+        # loads the one called this, or refuses -- never picks
+        req = {"action": "load", "identity": ident,
+               "name": _artifact_name(artifact), "tune": tune,
                "sets": dict(sets or {}), "port": int(port)}
         if len(ids) == 1:
             req.update(node=ids[0], force=bool(force))
