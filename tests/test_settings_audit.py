@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from knurlogic.interfaces.page import server as ui
-from knurlogic.interfaces.page import documents as web
+from knurlogic.interfaces.page import server as page_server
+from knurlogic.interfaces.page import documents
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning import settings as S
 from knurlogic.tuning.resolve import resolve
@@ -54,9 +54,9 @@ def test_a_context_past_the_models_window_is_refused():
     assert S.check_knob("KNURLOGIC_CONTEXT_LENGTH", "262144", 262144) is None
     assert "whole number" in S.check_knob("KNURLOGIC_CONTEXT_LENGTH", "1e6")
     a = _art(FLASH_NEXT)
-    assert "262,144" in web.refuse_sets(
+    assert "262,144" in documents.refuse_sets(
         a, {"KNURLOGIC_CONTEXT_LENGTH": "1048576"})
-    assert web.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "131072"}) is None
+    assert documents.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "131072"}) is None
 
 
 def test_the_control_stops_at_the_window_and_says_so():
@@ -65,9 +65,9 @@ def test_the_control_stops_at_the_window_and_says_so():
     assert r.env["KNURLOGIC_CONTEXT_LENGTH"] == "262144"
     steps = r.ranges["KNURLOGIC_CONTEXT_LENGTH"]
     assert steps[-1] == 262144 and 1048576 not in steps
-    lim = web.knob_limit(a, "KNURLOGIC_CONTEXT_LENGTH")
+    lim = documents.knob_limit(a, "KNURLOGIC_CONTEXT_LENGTH")
     assert lim["max"] == 262144 and "262,144" in lim["max_why"]
-    assert web.knob_limit(a, "VQ_DECODE_CHUNK") == {}
+    assert documents.knob_limit(a, "VQ_DECODE_CHUNK") == {}
 
 
 def test_the_context_length_is_the_engines_and_live(tmp_path):
@@ -77,7 +77,7 @@ def test_the_context_length_is_the_engines_and_live(tmp_path):
         '{"model_type":"x","model_file":"model.py"}')
     (tmp_path / "model.py").write_text("import os\n")
     a = Artifact.load(tmp_path)
-    assert web.knob_reach(a, "KNURLOGIC_CONTEXT_LENGTH",
+    assert documents.knob_reach(a, "KNURLOGIC_CONTEXT_LENGTH",
                           ("KNURLOGIC_CONTEXT_LENGTH",))[0] == "live"
 
 
@@ -112,7 +112,7 @@ def test_the_legacy_name_is_still_accepted_and_beats_the_resolver():
     assert sets == {"KNURLOGIC_PREFILL_CHUNK": "2048"}
     env = {**resolve(_art(), 96 * GIB).env, **sets}
     assert S.engine_settings(env)["prefill_step_size"] == 2048
-    ok, bad = ui.clean_sets({"VQLAB_PREFILL_CHUNK": "1024"})
+    ok, bad = page_server.clean_sets({"VQLAB_PREFILL_CHUNK": "1024"})
     assert ok and not bad
     both = S.canonical_sets({"VQLAB_PREFILL_CHUNK": "2048",
                              "KNURLOGIC_PREFILL_CHUNK": "1024"})
@@ -150,22 +150,22 @@ def test_prompt_concurrency_is_not_offered():
     assert "KNURLOGIC_PROMPT_CONCURRENCY" not in S.KNOB_DOC
     assert "KNURLOGIC_PROMPT_CONCURRENCY" not in S.ENGINE_KNOB_NAMES
     # a launch setting saved before still passes, so it cannot fail a launch
-    assert ui.clean_sets({"KNURLOGIC_PROMPT_CONCURRENCY": "1"})[0]
+    assert page_server.clean_sets({"KNURLOGIC_PROMPT_CONCURRENCY": "1"})[0]
 
 
 # --- a peer's model: read AND changed on the peer ---------------------------
 
 def test_a_peers_settings_go_through_its_page_by_port(monkeypatch):
-    monkeypatch.setitem(ui._PEER_TARGETS, "http://10.0.0.2:8080",
+    monkeypatch.setitem(page_server._PEER_TARGETS, "http://10.0.0.2:8080",
                         {"machine": "M4", "relay": "http://10.0.0.2:8899"})
-    assert ui.upstream("http://10.0.0.2:8080", "/settings.json") == \
+    assert page_server.upstream("http://10.0.0.2:8080", "/settings.json") == \
         "http://10.0.0.2:8899/peer/settings.json?port=8080"
     # chat still goes by model name
-    assert ui.upstream("http://10.0.0.2:8080", "/v1/models") == \
+    assert page_server.upstream("http://10.0.0.2:8080", "/v1/models") == \
         "http://10.0.0.2:8899/peer/v1/models"
     sent = []
-    monkeypatch.setattr(ui, "known_target", lambda b: True)
-    code, doc = ui.apply_settings(
+    monkeypatch.setattr(page_server, "known_target", lambda b: True)
+    code, doc = page_server.apply_settings(
         "http://10.0.0.2:8080", b'{"VQ_DECODE_CHUNK": "16"}',
         post=lambda u, d, t: sent.append(u) or (200, b'{"applied": {}}'))
     assert code == 200 and sent == [
@@ -175,22 +175,22 @@ def test_a_peers_settings_go_through_its_page_by_port(monkeypatch):
 def test_peer_settings_only_reaches_a_server_this_machine_started(
         monkeypatch):
     from knurlogic.machine import servers
-    monkeypatch.setattr(ui, "registry", lambda: {8080: {"pid": 1}})
+    monkeypatch.setattr(page_server, "registry", lambda: {8080: {"pid": 1}})
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
     calls = []
 
     def call(u, d, t):
         calls.append((u, d))
         return 200, b'{"ok": 1}'
-    assert ui.peer_settings("GET", {"port": ["9"]}, b"", call)[0] == 404
-    assert ui.peer_settings("GET", {}, b"", call)[0] == 400
-    assert ui.peer_settings("POST", {"port": ["8080"]}, b"[1]", call)[0] \
+    assert page_server.peer_settings("GET", {"port": ["9"]}, b"", call)[0] == 404
+    assert page_server.peer_settings("GET", {}, b"", call)[0] == 400
+    assert page_server.peer_settings("POST", {"port": ["8080"]}, b"[1]", call)[0] \
         == 400
-    code, doc = ui.peer_settings("GET", {"port": ["8080"],
+    code, doc = page_server.peer_settings("GET", {"port": ["8080"],
                                          "tune": ["fast"]}, b"", call)
     assert code == 200 and calls[-1] == (
         "http://127.0.0.1:8080/settings.json?tune=fast", None)
-    code, _ = ui.peer_settings("POST", {"port": ["8080"]},
+    code, _ = page_server.peer_settings("POST", {"port": ["8080"]},
                                b'{"VQ_DECODE_CHUNK": "16"}', call)
     assert code == 200 and calls[-1] == (
         "http://127.0.0.1:8080/settings.json", b'{"VQ_DECODE_CHUNK": "16"}')
@@ -228,20 +228,20 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
             self._json({"applied": {"VQ_DECODE_CHUNK": "applied"}})
 
     model, mport = _serve(M)
-    monkeypatch.setattr(ui, "registry", lambda: {mport: {"pid": 1}})
+    monkeypatch.setattr(page_server, "registry", lambda: {mport: {"pid": 1}})
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
-    peer_page, pport = _serve(ui.make_handler({}))
-    here, hport = _serve(ui.make_handler({}))
+    peer_page, pport = _serve(page_server.make_handler({}))
+    here, hport = _serve(page_server.make_handler({}))
     try:
         p = SimpleNamespace(name="M4", host="127.0.0.1", port=pport,
                             state="answering", key=f"127.0.0.1:{pport}",
                             id="m4", found_by={"bonjour"})
-        monkeypatch.setattr(ui, "PEERS", Peers(p))
+        monkeypatch.setattr(page_server, "PEERS", Peers(p))
         row = {"runtime": "knurlogic", "name": "m", "state": "ready",
                "where": f"http://127.0.0.1:{mport}"}
-        ui.peer_residency(ui.PEERS, fetch=lambda url, t: {"resident": [row]})
+        page_server.peer_residency(page_server.PEERS, fetch=lambda url, t: {"resident": [row]})
         base = f"http://127.0.0.1:{mport}"
-        assert base in ui._PEER_TARGETS
+        assert base in page_server._PEER_TARGETS
         with urllib.request.urlopen(
                 f"http://127.0.0.1:{hport}/peek?where={base}"
                 f"&path=/settings.json&tune=fast", timeout=5) as r:
@@ -258,4 +258,4 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
     finally:
         for s in (model, peer_page, here):
             s.shutdown()
-        ui._PEER_TARGETS.clear()
+        page_server._PEER_TARGETS.clear()

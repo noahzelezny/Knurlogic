@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from knurlogic.interfaces.page import server as ui
+from knurlogic.interfaces.page import server as page_server
 
 
 def _serve(handler_cls):
@@ -73,10 +73,10 @@ def cluster(monkeypatch):
     seen = []
     a, base_a = _serve(_fake_model("qwen-local", seen))
     b, base_b = _serve(_fake_model("glm-peer", seen))
-    monkeypatch.setattr(ui, "chat_targets", lambda: {base_a, base_b})
-    monkeypatch.setattr(ui, "PEERS", None)
-    ui._ROUTES.update(at=0.0, map={})
-    page, page_url = _serve(ui.make_handler({}))
+    monkeypatch.setattr(page_server, "chat_targets", lambda: {base_a, base_b})
+    monkeypatch.setattr(page_server, "PEERS", None)
+    page_server._ROUTES.update(at=0.0, map={})
+    page, page_url = _serve(page_server.make_handler({}))
     yield page_url, base_a, base_b, seen
     for s in (a, b, page):
         s.shutdown()
@@ -171,23 +171,23 @@ def test_apply_refuses_what_it_does_not_know(cluster):
     code, _, _ = _post(f"{page}/apply?where={base_a}", [1, 2])
     assert code == 400
     code, _, _ = _post(f"{page}/apply?where={base_a}",
-                       {"x": "y" * (ui.APPLY_MAX + 1)})
+                       {"x": "y" * (page_server.APPLY_MAX + 1)})
     assert code == 413
     assert not seen
 
 
 def test_apply_passes_the_servers_report_back(monkeypatch):
-    monkeypatch.setattr(ui, "chat_targets", lambda: {"http://h:1"})
+    monkeypatch.setattr(page_server, "chat_targets", lambda: {"http://h:1"})
     calls = []
 
     def post(url, data, t):
         calls.append((url, data, t))
         return 200, b'{"applied": {"K": "failed: no"}}'
-    code, doc = ui.apply_settings("http://h:1", b'{"K": "2"}', post=post)
+    code, doc = page_server.apply_settings("http://h:1", b'{"K": "2"}', post=post)
     assert code == 200 and doc == {"applied": {"K": "failed: no"}}
     assert calls == [("http://h:1/settings.json", b'{"K": "2"}',
-                      ui.APPLY_S)]
-    code, doc = ui.apply_settings("http://h:1", b"{}",
+                      page_server.APPLY_S)]
+    code, doc = page_server.apply_settings("http://h:1", b"{}",
                                   post=lambda u, d, t: (200, b"<html>"))
     assert code == 502
 

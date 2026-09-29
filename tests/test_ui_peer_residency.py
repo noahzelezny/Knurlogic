@@ -6,7 +6,7 @@ No network: peers are stand-ins and every fetch is a stub.
 import time
 from types import SimpleNamespace
 
-from knurlogic.interfaces.page import server as ui
+from knurlogic.interfaces.page import server as page_server
 
 
 def peer(name, host, state="answering", port=8899):
@@ -27,14 +27,14 @@ ROW = {"runtime": "knurlogic", "name": "Qwen", "where": "http://127.0.0.1:8097",
 
 
 def test_rows_are_labelled_by_machine_and_addressed_at_the_peer():
-    got = ui.peer_residency(Peers(peer("M4", "10.0.0.2")),
+    got = page_server.peer_residency(Peers(peer("M4", "10.0.0.2")),
                             fetch=lambda url, t: {"resident": [ROW]})
     [m] = got
     assert m["machine"] == "M4" and "error" not in m
     [r] = m["resident"]
     assert r["machine"] == "M4"
     assert r["where"] == "http://10.0.0.2:8097"
-    assert "http://10.0.0.2:8097" in ui.chat_targets()
+    assert "http://10.0.0.2:8097" in page_server.chat_targets()
 
 
 def test_a_dead_peer_is_reported_and_does_not_take_the_others_down():
@@ -42,7 +42,7 @@ def test_a_dead_peer_is_reported_and_does_not_take_the_others_down():
         if "10.0.0.3" in url:
             raise ConnectionRefusedError("refused")
         return {"resident": [ROW]}
-    got = ui.peer_residency(Peers(peer("M4", "10.0.0.2"),
+    got = page_server.peer_residency(Peers(peer("M4", "10.0.0.2"),
                                   peer("Air", "10.0.0.3")), fetch=fetch)
     by = {m["machine"]: m for m in got}
     assert by["M4"]["resident"] and "error" not in by["M4"]
@@ -54,7 +54,7 @@ def test_a_slow_peer_costs_at_most_the_deadline():
         time.sleep(2.0)
         return {"resident": [ROW]}
     t0 = time.time()
-    [m] = ui.peer_residency(Peers(peer("M4", "10.0.0.2")), timeout=0.2,
+    [m] = page_server.peer_residency(Peers(peer("M4", "10.0.0.2")), timeout=0.2,
                             fetch=fetch)
     assert time.time() - t0 < 1.0
     assert m["resident"] == [] and "did not answer" in m["error"]
@@ -62,16 +62,16 @@ def test_a_slow_peer_costs_at_most_the_deadline():
 
 def test_peers_not_answering_are_not_asked():
     asked = []
-    ui.peer_residency(Peers(peer("M4", "10.0.0.2", state="not_answering")),
+    page_server.peer_residency(Peers(peer("M4", "10.0.0.2", state="not_answering")),
                       fetch=lambda url, t: asked.append(url) or {})
     assert asked == []
 
 
 def test_peers_are_only_gathered_when_asked_for(monkeypatch):
-    monkeypatch.setattr(ui.web, "loaded_document",
+    monkeypatch.setattr(page_server.documents, "loaded_document",
                         lambda: (lambda q: {"resident": []}))
-    monkeypatch.setattr(ui, "peer_residency", lambda ps: [{"machine": "M4"}])
-    h = ui._loaded_fn()
+    monkeypatch.setattr(page_server, "peer_residency", lambda ps: [{"machine": "M4"}])
+    h = page_server._loaded_fn()
     assert "peers" not in h({})
     assert h({"peers": ["1"]})["peers"] == [{"machine": "M4"}]
 

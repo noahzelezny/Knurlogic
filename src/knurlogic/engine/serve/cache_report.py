@@ -27,8 +27,8 @@ def attach(request, report: dict) -> None:
         seen.add(id(request))
         try:
             setattr(request, ATTR, report)
-        except Exception:
-            pass
+        except (AttributeError, TypeError):
+            pass    # a request object that refuses attributes gets no report
         request = getattr(request, "_knurlogic_origin", None)
 
 

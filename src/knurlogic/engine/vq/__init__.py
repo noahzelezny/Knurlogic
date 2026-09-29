@@ -11,4 +11,4 @@
 Importing this package imports no mlx; only `runtime` does. The resolver
 asks `rungs` for a rung's numerics before anything loads.
 """
-from .rungs import knobs, repo_of, rung, verified  # noqa: F401
+from .rungs import knobs, repo_of, rung, verified  # noqa: F401 -- re-exported
