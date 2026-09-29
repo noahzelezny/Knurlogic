@@ -443,8 +443,15 @@ Parked: memory pacing / ledger (docs/design/memory-pacing.md, memory-ledger.md, 
 memory-pacing). The 4 growing agents with compaction off is not a real workload (the maintainer).
 Revisit worst-case hardening only against realistic loads (compaction on).
 
+- Images (27B): shapes, colours, positions and text read exactly; repeats hit the image
+  cache. An image sent during load now queues (was a 400).
+- MTP (Flash-Next VQ 4.4): 30.2 vs 20.0 decode tok/s on vs off (+51%), acceptance 0.66-0.78.
+
+Reverted 41dd038 (guard = startup budget): the snapshot froze a limit below the weights
+when taken while other processes were exiting. Guard is the working set minus others' live
+GPU use again.
+
 Still to prove live:
-- Images and MTP on a single Mac (M4, small model).
 - Cluster parity on the pair (needs the M3): images on a split, MTP drafting from rank 0,
   rank 1 memory smaller, prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off.
 
