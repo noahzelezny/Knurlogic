@@ -88,7 +88,7 @@ prints how to reach it. Then:
 memory split, a chat, and the Settings panel. `/status.json` and
 `/settings.json` are the same without a browser.
 
-`knurlogic ui` opens the page without loading anything: every model on the
+`knurlogic ui` opens the page (http://127.0.0.1:8899/) without loading anything: every model on the
 disk, every runtime holding memory, and a Launch button per model (served on
 `--serve-port`).
 
@@ -111,7 +111,7 @@ The same as a project's `.claude/settings.json` `env` block scopes it to one
 directory. Not the global `~/.claude/settings.json`: that routes every
 session on the machine to the local model.
 
-Anything that speaks OpenAI (Codex, Zed, Cline, Continue, OpenWebUI):
+Anything that speaks OpenAI (Zed, Cline, Continue, OpenWebUI):
 base URL `http://127.0.0.1:8080/v1`, any API key, model `local`. The server
 answers the one model it loaded whatever name is sent.
 
@@ -132,7 +132,7 @@ A cluster job needs:
 
 * the same knurlogic build, and the model, on both machines;
 * a link between them: Thunderbolt (TCP over the bridge, or RDMA on a
-  Thunderbolt 5 cable with RDMA enabled) or another TCP network;
+  Thunderbolt 5 cable with RDMA enabled);
 * the page running on each: `knurlogic ui --host cluster` (answers on the
   Thunderbolt link and loopback only). Macs find each other over Bonjour;
   `--peer HOST` names one directly. `knurlogic doctor --cluster` on each
@@ -282,13 +282,14 @@ glm5_next is vendored and unpinned.
 Proven live on real weights: MTP drafting (Qwen3.8 Flash VQ, 30.2 vs 20.0
 decode tok/s), images (Qwen 27B), compaction and 8-bit KV (Qwen3.6-35B-A3B),
 a YaRN needle at 442,578 tokens (1M not run), a pipeline split across two
-Macs, and DeepSeek-V4-Flash across two Macs with tool calls and compaction.
+Macs with images and MTP drafting (Qwen3.8 Flash), and DeepSeek-V4-Flash
+across two Macs with tool calls and compaction.
 An agent has loaded, used and unloaded a model through the MCP.
 
-Not yet proven live: images and MTP drafting on a split, and pipeline
-prefill overlap. Known limits: a cluster job's leader answers on 127.0.0.1
-only, so reach it from the other Mac through the page; a cluster job's
-placement does not count the vision tower yet.
+Not yet measured live: pipeline prefill overlap. Known limit: a cluster
+job's placement does not count the vision tower yet. A cluster job's leader
+answers on loopback and on its link address (`load` and `state` report the
+`url`).
 
 `docs/PLAN.md` holds what is measured and what is next; `CONTEXT.md` is the
 map.
