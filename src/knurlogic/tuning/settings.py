@@ -413,9 +413,9 @@ KNOB_DOC = {
         "attention (off)",
         "only with an 8-bit KV cache: decode steps read the 8-bit K/V "
         "directly instead of dequantizing the whole cache each step "
-        "(engine/kvattn.py). M4 Qwen3.6-35B decode: +4% at 6k, +15% at 16k "
-        "context over off; the needle answer is exact either way. Off is "
-        "for A/B -- check /status.json kv_kernel hits vs misses to see "
+        "(engine/kvattn.py). No trade measured: M4 Qwen3.6-35B decode is "
+        "+4% faster at 6k, +15% at 16k context than off, and the needle "
+        "answer is exact either way. Off is for A/B -- check /status.json kv_kernel hits vs misses to see "
         "which path is actually live (GLM's MLA latent and gemma4's "
         "KV-shared layers always take dequantize + attention). A row with "
         "every key masked returns 0 here where mlx sdpa returns NaN. "

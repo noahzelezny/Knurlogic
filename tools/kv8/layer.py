@@ -36,7 +36,8 @@ for N in [int(x) for x in sys.argv[1].split(",")]:
     mx.eval(q, k1)
 
     def step(kernel):
-        kvquant.KERNEL = kernel
+        for c in cs:
+            c.kv8_kernel = kernel
         out = []
         for c in cs:
             kk, vv = c.update_and_fetch(k1, k1)
