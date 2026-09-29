@@ -2,7 +2,7 @@
 
 Three layers, cheapest first:
 
-1. The record: the vendored files are the pinned vqlab d271035 bytes, and
+1. The record: the vendored files are the pinned vqlab 45782ba bytes, and
    rungs.json says what each released rung's PUBLISHED model.py ships --
    the three generations of published runtime, read off the Hub.
 2. The resolver: a rung's numerics come from the rung. The v2 rungs keep
@@ -61,7 +61,7 @@ def _table():
 # --- 1. the record -----------------------------------------------------------
 
 def test_vendored_runtime_is_the_pinned_bytes():
-    """Verbatim vqlab d271035: the pin in runtime.py, rungs.json and
+    """Verbatim vqlab 45782ba: the pin in runtime.py, rungs.json and
     PROVENANCE.md all name the same digests as the files on disk."""
     from knurlogic.engine.vq import runtime
     prov = (VQ / "PROVENANCE.md").read_text()
