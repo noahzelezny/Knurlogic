@@ -41,6 +41,7 @@ Peer routes are gated exactly like /peer/loaded.json (ui.peer_refusal).
 """
 from __future__ import annotations
 
+import logging
 import json
 import os
 import re
@@ -52,6 +53,8 @@ import time
 from pathlib import Path
 
 from knurlogic.cluster import jobs as J
+
+logger = logging.getLogger(__name__)
 
 
 def _no_status():
@@ -1068,8 +1071,8 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                 continue
             try:
                 _PROCS.pop((j, r)).wait(timeout=2)
-            except Exception:
-                pass
+            except subprocess.TimeoutExpired:
+                pass                    # not gone yet; the watcher reaps it
         reg = J.registry()
         for k, v in mine.items():
             if int(v["pid"]) not in left:
@@ -1117,7 +1120,7 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                                      {"job": job, "reason": reason})
                 told.append(n.get("name"))
             except Exception:
-                pass
+                logger.debug("could not tell %s to stop job %s", page, job, exc_info=True)
     return {"stopped": job, "ranks_here": sorted(v["rank"] for v in
                                                  mine.values()),
             "killed": killed, "exiting": left, "told": told,
@@ -1251,8 +1254,7 @@ def _ensure_watcher() -> None:
             try:
                 watch_once()
             except Exception as e:
-                print(f"cluster watch: {type(e).__name__}: {e}",
-                      file=sys.stderr)
+                logger.warning("cluster watch: %s: %s", type(e).__name__, e)
     threading.Thread(target=loop, daemon=True,
                      name="knurlogic-cluster-watch").start()
 
@@ -1320,7 +1322,7 @@ def failure_of_port(port) -> str:
         try:
             watch_once()
         except Exception:
-            pass
+            logger.debug("watch_once failed while reading job %s", job, exc_info=True)
     for j, e in sorted(ENDED.items(), key=lambda kv: -kv[1]["t"]):
         if (job and j == job) or (not job and e.get("port") == port):
             return e.get("reason") or "stopped"
@@ -1646,7 +1648,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                      "ui_port": ui_port, "serve_port": serve_port,
                      "post": post, "follow": follow}})
     if note:
-        print(f"cluster job {job}: {note}", file=sys.stderr, flush=True)
+        logger.warning("cluster job %s: %s", job, note)
     if recovering is None:
         from knurlogic.cluster import recovery
         # a relaunch is the same launch: this machine order (so the same
@@ -1709,8 +1711,8 @@ def failover(job: str, ctx: dict, reason: str):
         e["reason"] = (str(e.get("reason") or reason) + msg)[:600]
         if to:
             e["relaunched"] = to
-    print(f"cluster job {job}: cable {ctx['net']} failed link init "
-          f"({line}){msg}", file=sys.stderr, flush=True)
+    logger.warning("cluster job %s: cable %s failed link init (%s)%s",
+                   job, ctx["net"], line, msg)
     return out
 
 
@@ -1750,7 +1752,7 @@ def _abandon(job: str, order: list, post, reason: str = "refused") -> None:
                 post(f"http://{m['page']}{STOP_PATH}",
                      {"job": job, "reason": reason})
         except Exception:
-            pass
+            logger.debug("could not stop job %s on %s", job, m.get("page"), exc_info=True)
 
 
 # ------------------------------------------------------------ peer routes

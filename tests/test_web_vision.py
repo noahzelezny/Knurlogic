@@ -1,5 +1,5 @@
-"""P5's `interfaces/page/documents.py` changes: the Anthropic->OpenAI image
-shim, and the `vision` field on `/models.json` and `/loaded.json`.
+"""P5's changes: the Anthropic->OpenAI image shim (`interfaces/http/messages.py`),
+and the `vision` field on `/models.json` and `/loaded.json`.
 
 No mlx, no PIL, no real model: `interfaces/page/documents.py` reads
 `served_vision()` and `registry.registered()`, both stdlib-only per the
@@ -9,7 +9,8 @@ stays that way by never importing anything that would drag mlx in.
 import json
 from pathlib import Path
 
-from knurlogic.interfaces.page import documents as web
+from knurlogic.interfaces.http import messages
+from knurlogic.interfaces.page import documents
 
 
 # --- anthropic_images_to_openai --------------------------------------------
@@ -21,7 +22,7 @@ def test_base64_image_block_becomes_a_data_url_image_part():
                                      "data": "QUJD"}},
         {"type": "text", "text": "what is this?"},
     ]
-    out = web.anthropic_images_to_openai(content)
+    out = messages.anthropic_images_to_openai(content)
     assert out[0] == {"type": "image_url",
                       "image_url": {"url": "data:image/png;base64,QUJD"}}
     assert out[1] == {"type": "text", "text": "what is this?"}
@@ -30,18 +31,18 @@ def test_base64_image_block_becomes_a_data_url_image_part():
 def test_url_source_block_passes_the_url_through():
     content = [{"type": "image", "source": {"type": "url",
                                             "url": "https://example/x.png"}}]
-    out = web.anthropic_images_to_openai(content)
+    out = messages.anthropic_images_to_openai(content)
     assert out == [{"type": "image_url",
                     "image_url": {"url": "https://example/x.png"}}]
 
 
 def test_already_openai_shaped_content_is_unchanged():
     content = [{"type": "image_url", "image_url": {"url": "data:..."}}]
-    assert web.anthropic_images_to_openai(content) == content
+    assert messages.anthropic_images_to_openai(content) == content
 
 
 def test_plain_string_content_passes_through():
-    assert web.anthropic_images_to_openai("just text") == "just text"
+    assert messages.anthropic_images_to_openai("just text") == "just text"
 
 
 def test_unrecognised_block_passes_through_rather_than_dropping():
@@ -50,7 +51,7 @@ def test_unrecognised_block_passes_through_rather_than_dropping():
     own (clear) refusal."""
     content = [{"type": "text", "text": "hello"},
               {"type": "image", "source": {"type": "base64"}}]  # no data
-    out = web.anthropic_images_to_openai(content)
+    out = messages.anthropic_images_to_openai(content)
     assert out[0] == {"type": "text", "text": "hello"}
     assert out[1] == content[1]
 
@@ -58,7 +59,7 @@ def test_unrecognised_block_passes_through_rather_than_dropping():
 def test_default_media_type_when_missing():
     content = [{"type": "image",
                "source": {"type": "base64", "data": "AAA="}}]
-    out = web.anthropic_images_to_openai(content)
+    out = messages.anthropic_images_to_openai(content)
     assert out[0]["image_url"]["url"] == "data:image/png;base64,AAA="
 
 
@@ -76,7 +77,7 @@ def test_models_document_reports_vision_capable(monkeypatch, tmp_path):
                                model_type="qwen3_5", servable=True)])
     monkeypatch.setattr(
         "knurlogic.engine.vision.registry.registered", lambda mt: True)
-    doc = web.models_document()({})
+    doc = documents.models_document()({})
     assert doc["models"][0]["vision"] is True
 
 
@@ -92,7 +93,7 @@ def test_models_document_false_for_a_non_vision_family(monkeypatch, tmp_path):
                                model_type="llama", servable=True)])
     monkeypatch.setattr(
         "knurlogic.engine.vision.registry.registered", lambda mt: False)
-    doc = web.models_document()({})
+    doc = documents.models_document()({})
     assert doc["models"][0]["vision"] is False
 
 
@@ -100,8 +101,8 @@ def _reset_loaded_cache():
     """`web._LOADED` is a module-level TTL cache (deliberately, so a status
     poll is free) -- a test that does not clear it sees the PREVIOUS test's
     served-vision answer, not the one it just set up."""
-    web._LOADED["doc"] = None
-    web._LOADED["at"] = 0.0
+    documents._LOADED["doc"] = None
+    documents._LOADED["at"] = 0.0
 
 
 def test_loaded_document_carries_served_vision_spec(monkeypatch):
@@ -115,7 +116,7 @@ def test_loaded_document_carries_served_vision_spec(monkeypatch):
                         lambda: {"resident": [], "runtimes": []})
     monkeypatch.setattr("knurlogic.engine.vision.served_vision",
                         lambda: spec)
-    doc = web.loaded_document()({})
+    doc = documents.loaded_document()({})
     assert doc["vision"]["family"] == "gemma4"
     assert doc["vision"]["fixed_tokens"] == 256
 
@@ -126,7 +127,7 @@ def test_loaded_document_vision_none_when_nothing_served(monkeypatch):
                         lambda: {"resident": [], "runtimes": []})
     monkeypatch.setattr("knurlogic.engine.vision.served_vision",
                         lambda: None)
-    doc = web.loaded_document()({})
+    doc = documents.loaded_document()({})
     assert doc["vision"] is None
 
 
@@ -139,9 +140,9 @@ def test_web_module_never_imports_mlx_or_pil():
 
     code = (
         "import sys\n"
-        "import knurlogic.interfaces.page.documents as web\n"
-        "web.models_document()({})\n"
-        "web.loaded_document()({})\n"
+        "from knurlogic.interfaces.page import documents\n"
+        "documents.models_document()({})\n"
+        "documents.loaded_document()({})\n"
         "assert 'mlx' not in sys.modules, sorted(sys.modules)\n"
         "assert 'PIL' not in sys.modules\n"
         "print('ok')\n"
@@ -157,8 +158,8 @@ def test_the_chat_proxy_only_reaches_models_this_page_knows(monkeypatch):
     against a fixed list -- servers knurlogic started -- or the page
     would forward anything to any address."""
     import io
-    from knurlogic.interfaces.page import server as ui
-    monkeypatch.setattr(ui, "chat_targets",
+    from knurlogic.interfaces.page import server as page_server
+    monkeypatch.setattr(page_server, "chat_targets",
                         lambda: {"http://127.0.0.1:8080"})
     sent = {}
 
@@ -167,7 +168,7 @@ def test_the_chat_proxy_only_reaches_models_this_page_knows(monkeypatch):
         def send_response(self, code): sent["code"] = code
         def send_header(self, *a): pass
         def end_headers(self): pass
-    ui.proxy_chat(H(), "http://169.254.169.254", b"{}")
+    page_server.proxy_chat(H(), "http://169.254.169.254", b"{}")
     assert sent["code"] == 403
 
 
