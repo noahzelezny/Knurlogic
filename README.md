@@ -149,7 +149,7 @@ A cluster job needs:
 Then load with machines named -- the page's Launch, or the MCP `load` tool
 with `machines` (and `split`). Placement, leader and cable are chosen for
 you; a share that does not fit is refused before anything starts.
-docs/DISCOVERY.md and docs/SERVER.md have the detail.
+docs/design/discovery.md and docs/design/server.md have the detail.
 
 ## Settings
 
@@ -230,7 +230,7 @@ architecture vendored in `engine/families/`:
   capped at `--max-request-mib`; a request's images must fit the image store
   together (`--image-store-gib`) -- each image is downscaled to what the
   model takes, never refused for size unless it is too big to decode
-  safely. docs/SERVER.md has the design. Several machines are knurlogic's own (`cluster/`: peers,
+  safely. docs/design/server.md has the design. Several machines are knurlogic's own (`cluster/`: peers,
   Bonjour discovery, `--host cluster`).
 
 * **A GUI that exposes the knobs.** `/` shows what loaded, the memory split
@@ -299,5 +299,4 @@ job's placement does not count the vision tower yet. A cluster job's leader
 answers on loopback and on its link address (`load` and `state` report the
 `url`).
 
-`docs/dev/PLAN.md` holds what is measured and what is next; `CONTEXT.md` is the
-map.
+`CONTEXT.md` is the map.

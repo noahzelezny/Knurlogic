@@ -166,7 +166,7 @@ def _render_unlocked(tokenizer, kwargs: dict):
 #: kwarg: the template's own format for a turn that did not think (GLM-5.3
 #: writes `<think></think>` into every past assistant turn; its template has
 #: no off switch). Measured before it was offered: GLM 2.7, 12/12 right, 0
-#: reasoning tokens (docs/measured/2026-09-25-thinking). Never reaches the
+#: reasoning tokens. Never reaches the
 #: template -- `_Closing` strips it and appends the tokenizer's think_end
 #: to the generation prompt, so mlx-lm's own rfind sees a closed block and
 #: starts the response in its normal state.

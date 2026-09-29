@@ -73,7 +73,7 @@ knurlogic = ["interfaces/page/assets/**/*",
 # queue and response shapes) and models/cache.py (LRUPromptCache, whose
 # order the image pins read). An edited file is a drift even under the
 # same version string (a local patch, a fork installed as 0.31.3).
-# mlx-lm's server.py is not used (docs/SERVER.md).
+# mlx-lm's server.py is not used (docs/design/server.md).
 mlx = "0.31.2"
 mlx-lm = "0.31.3"
 mlx_lm_generate_sha256 = "270778ad53eaca55a8533d82e6752660fe5d2605c4aa0879b48a50a91f69345f"

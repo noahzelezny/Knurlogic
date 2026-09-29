@@ -1,4 +1,4 @@
-> **Parked (2026-09-28).** Not built on main. 41dd038 (guard = startup budget) was reverted; the guard is the working set minus other processes' live GPU use. See docs/dev/PLAN.md OPEN THREADS and memory-ledger.md.
+> **Parked (2026-09-28).** Not built on main. 41dd038 (guard = startup budget) was reverted; the guard is the working set minus other processes' live GPU use. See memory-ledger.md.
 
 # Memory pacing: a server that cannot OOM (draft 2026-09-28)
 

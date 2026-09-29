@@ -1,7 +1,7 @@
 """Bonjour: every knurlogic page on the network, found without being named.
 
 DNS-SD service type `_knurlogic._tcp`, through the `dns_sd.h` API in
-libSystem (docs/DISCOVERY.md). mDNSResponder -- the daemon every Mac
+libSystem (docs/design/discovery.md). mDNSResponder -- the daemon every Mac
 already runs -- owns the registration and the multicast; this module only
 asks it. That is why a stdlib mDNS stack would be worse: a second
 responder on port 5353, its own probing and TTLs, and stale records for an

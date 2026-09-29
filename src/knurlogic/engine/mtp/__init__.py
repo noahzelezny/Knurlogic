@@ -24,7 +24,7 @@ engine arrives.
   capture.py seed.py sampling.py   the pieces those share
 
 Drafting across machines is not here yet: it comes with the cluster
-executor (engine/runtime/executor.py, docs/SERVER.md "Cluster readiness").
+executor (engine/runtime/executor.py, docs/design/server.md "Cluster readiness").
 
 WHOSE CODE THIS IS. The drafting half was written in the project's exo fork
 and in vqlab, and upstream exo-explore/exo has none of it -- 0 files under

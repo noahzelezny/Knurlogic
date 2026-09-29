@@ -1,4 +1,4 @@
-"""What knurlogic's server must do on the wire (docs/SERVER.md). Pinned
+"""What knurlogic's server must do on the wire (docs/design/server.md). Pinned
 before the server was rewritten, against mlx-lm's patched server; the new
 one had to pass it (and the known gaps, then xfail, now pass).
 
@@ -458,7 +458,7 @@ def test_a_concurrency_hint_is_in_the_headers():
         assert r.headers["X-Knurlogic-Concurrency"]
 
 
-# --- additions from the server design review (docs/SERVER.md) ----------------
+# --- additions from the server design review (docs/design/server.md) ----------------
 
 def test_a_seeded_request_under_concurrent_load_equals_it_alone():
     """The seed addresses each token by position, so batching cannot move

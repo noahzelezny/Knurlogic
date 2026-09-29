@@ -1,5 +1,5 @@
 """Pipeline split: one model served by N ranks, each holding a contiguous
-run of layers (docs/SERVER.md, "Cluster: pipeline split").
+run of layers (docs/design/server.md, "Cluster: pipeline split").
 
     rank N-1: embed, layers [0, a)       --hidden-->
     rank r:   layers [.., ..)            --hidden-->

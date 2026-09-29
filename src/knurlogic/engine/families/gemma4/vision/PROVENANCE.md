@@ -130,6 +130,4 @@ gates that the tensor count matches what was written.
   window-size branch in the vision attention itself).
 - **`positions()` returns `(None, 0)`** per the design (gemma: plain 1D
   RoPE for the trunk); this was not re-derived from a real config, only
-  taken from `docs/design/vision-contracts.md` and
-  `docs/design/vision-evidence/report-mlx-vlm-families.md` section 6
-  ("Positions: plain 1D RoPE...").
+  taken from `docs/design/vision-contracts.md` (gemma uses plain 1D RoPE).
