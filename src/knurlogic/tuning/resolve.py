@@ -211,6 +211,52 @@ def decode_chunk_for(headroom_bytes: int, known: bool = True,
                min(S.DECODE_CHUNK_DEFAULT, int(headroom_bytes / per)))
 
 
+def prefill_chunk_by_room(artifact: Artifact, headroom, working_set_bytes: int,
+                          cache_bytes: int, kv_bits, family: int,
+                          family_why: str) -> tuple:
+    """(width, one-line why) for the prompt chunk, read from the room.
+
+    The widest ladder width, capped at the family's measured best, whose
+    predicted step transient fits in PREFILL_TRANSIENT_ROOM_SHARE of the
+    room left after the weights (already out of `headroom`), a KV allowance
+    and the reclaimable cache; else step down, floor 512. `headroom` is
+    what the load budget -- the room actually free at launch -- leaves
+    above what this box holds; None means the budget is unknown."""
+    floor = S.PREFILL_CHUNK_DEFAULT
+    if family <= floor:
+        return floor, f"prompt chunk {floor}: {family_why}"
+    if headroom is None:
+        return floor, (f"prompt chunk {floor}: the room free at launch is "
+                       f"not known, so none of the measured {family} is "
+                       f"spent")
+    cfg = artifact.raw_config or {}
+    tc = cfg.get("text_config") or cfg
+    per_tok, _ = kv_bytes_per_token(tc, kv_bits)
+    kv = per_tok * S.PREFILL_KV_ALLOWANCE_TOKENS
+    room = max(int(headroom) - step_margin(working_set_bytes) - kv
+               - int(cache_bytes), 0)
+    allowed = room * S.PREFILL_TRANSIENT_ROOM_SHARE
+    hidden = artifact.hidden_size or S.DECODE_CHUNK_ASSUMED_SHAPE[1]
+
+    def transient(w):
+        return w * hidden * S.PREFILL_TRANSIENT_BYTES_PER_TOKEN_HIDDEN
+
+    width = floor
+    for w in S.PREFILL_CHUNK_LADDER:
+        if floor < w <= family and transient(w) <= allowed:
+            width = w
+    return width, (
+        f"prompt chunk {width} (family best {family}): {room / GIB:.1f} GiB "
+        f"room after weights, step margin, {kv / GIB:.1f} GiB KV and "
+        f"{cache_bytes / GIB:.1f} GiB cache; its step transient "
+        f"~{transient(width) / GIB:.2f} GiB"
+        + (f" (next up, {min(w for w in S.PREFILL_CHUNK_LADDER if w > width)}"
+           f": ~{transient(min(w for w in S.PREFILL_CHUNK_LADDER if w > width)) / GIB:.2f})"
+           if width < family else "")
+        + f" vs the rule's {S.PREFILL_TRANSIENT_ROOM_SHARE:.0%} of room = "
+        f"{allowed / GIB:.2f} GiB -- widest that fits, floor {floor}")
+
+
 def resolve(artifact: Artifact, budget, profile: str | None = None,
             tune: str = "balanced", store_bytes: int | None = None,
             holds_bytes: int | None = None, kv_bits=None,
@@ -605,34 +651,36 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             f"headroom): bounds the dense-expert transient, which is what "
             f"caps context length on a full box")
 
-    tight = working_set_bytes > 0 and \
-        headroom < S.tight_headroom_bytes(working_set_bytes)
-    family, family_why = S.prefill_chunk_for(artifact.model_type)
-    # the small default everywhere (settings.PREFILL_CHUNK_DEFAULT says why);
-    # a family's measured width is spent only when asked for: tune=fast on
-    # a box with room for it
-    prefill = S.PREFILL_CHUNK_DEFAULT
-    if tune == "fast" and not tight:
-        prefill = max(prefill, family)
-    asked = t.get("VQLAB_PREFILL_CHUNK")
-    if asked is not None and tune == "fast":
-        asked = max(asked, family)
-    if family > S.PREFILL_CHUNK_DEFAULT and prefill < family:
-        r.notes.append(
-            f"prompt chunk {prefill}: {family} was {family_why}, and buys "
-            f"some prefill for a step transient several times "
-            f"larger -- take it with tune=fast or per base model")
-    if asked is not None and asked != prefill:
-        # A tight box wins over the axis. `fast` cannot spend headroom that
-        # is not there, and saying so is the difference between a knob and a
-        # wish.
-        if asked > prefill and tight:
+    cache = float(t.get("VQLAB_CACHE_LIMIT_GB", S.CACHE_LIMIT_GB_DEFAULT))
+    if cache > S.CACHE_LIMIT_GB_MAX:
+        r.notes.append(f"tune={tune} capped: cache limit {cache} -> "
+                       f"{S.CACHE_LIMIT_GB_MAX} GiB, above which nothing has "
+                       f"been measured to improve")
+        cache = S.CACHE_LIMIT_GB_MAX
+    # Reclaimable is not free: it is still resident. On a box with little
+    # headroom a large cache is the thing that turns a long prompt into an OOM.
+    if known and cache * GIB > max(headroom, 0) / 2:
+        room = max(round(max(headroom, 0) / 2 / GIB, 1), 1.0)
+        if room < cache:
             r.notes.append(
-                f"tune={tune} asked for a {asked}-wide prompt chunk and did "
-                f"not get it: {headroom / GIB:.1f} GiB of headroom is what "
-                f"caps it, not the profile")
-        else:
-            prefill = asked
+                f"tune={tune} asked for a {cache} GiB reclaimable cache and "
+                f"got {room}: it is reclaimable, not free, and there is only "
+                f"{headroom / GIB:.1f} GiB of headroom to hold it in")
+            cache = room
+    family, family_why = S.prefill_chunk_for(artifact.model_type)
+    asked = t.get("VQLAB_PREFILL_CHUNK")
+    if asked is not None:
+        # safe / stable / lean: narrow whatever the room
+        prefill = asked
+        if family > asked:
+            r.notes.append(
+                f"prompt chunk {asked}: tune={tune} keeps it narrow; "
+                f"{family} was {family_why}")
+    else:
+        prefill, why = prefill_chunk_by_room(
+            artifact, headroom if known else None, working_set_bytes,
+            int(cache * GIB), kv_bits, family, family_why)
+        r.notes.append(why)
     emit(r, artifact, "prefill_chunk", prefill)
     window, _ = S.model_window(
         _long_context_cfg(r, artifact, long_context, working_set_bytes,
@@ -650,22 +698,6 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             "prompt chunk narrowed: token-identical at every width, so this "
             "costs nothing but peak memory")
 
-    cache = float(t.get("VQLAB_CACHE_LIMIT_GB", S.CACHE_LIMIT_GB_DEFAULT))
-    if cache > S.CACHE_LIMIT_GB_MAX:
-        r.notes.append(f"tune={tune} capped: cache limit {cache} -> "
-                       f"{S.CACHE_LIMIT_GB_MAX} GiB, above which nothing has "
-                       f"been measured to improve")
-        cache = S.CACHE_LIMIT_GB_MAX
-    # Reclaimable is not free: it is still resident. On a box with little
-    # headroom a large cache is the thing that turns a long prompt into an OOM.
-    if known and cache * GIB > max(headroom, 0) / 2:
-        room = max(round(max(headroom, 0) / 2 / GIB, 1), 1.0)
-        if room < cache:
-            r.notes.append(
-                f"tune={tune} asked for a {cache} GiB reclaimable cache and "
-                f"got {room}: it is reclaimable, not free, and there is only "
-                f"{headroom / GIB:.1f} GiB of headroom to hold it in")
-            cache = room
     emit(r, artifact, "cache_limit_gb", cache)
     if tune != "balanced":
         r.notes.append(f"tune={tune}: {t['why']}")

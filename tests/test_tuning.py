@@ -59,7 +59,8 @@ def test_fast_on_a_tight_box_degrades_and_says_why():
     a = _art(model_type="qwen3_5")                 # measured wider than 512
     r = resolve(a, 74 * GIB, tune="fast")          # 4 GiB of headroom
     assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_TIGHT)
-    assert any("did not get it" in n for n in r.notes)
+    assert any(n.startswith("prompt chunk 512") and "room" in n
+               for n in r.notes)
     assert any("headroom to hold it in" in n for n in r.notes)
 
 
@@ -254,11 +255,10 @@ def test_the_resolved_prompt_chunk_reaches_the_scheduler():
     assert scheduler_options({})["prefill_step_size"] == 2048
 
 
-def test_a_measured_family_width_is_taken_only_with_fast_and_a_tight_box_still_wins():
-    """qwen3_5 measured 4096. It is 512 by default (small chunk, parallel
-    agents); tune=fast takes the measured width on a box with room, and a
-    tight box caps it anyway: a measured width is a width that fit where it
-    was measured."""
+def test_a_measured_family_width_is_a_cap_the_room_decides_how_much_of():
+    """qwen3_5 measured 4096. Balanced and fast both read the room free at
+    launch: a roomy box takes the widest width whose step transient fits
+    10% of the room, a tight box stays at 512."""
     from pathlib import Path
     from knurlogic.machine.artifact import Artifact
     a = Artifact(path=Path("/nonexistent"), model_type="qwen3_5",
@@ -266,22 +266,15 @@ def test_a_measured_family_width_is_taken_only_with_fast_and_a_tight_box_still_w
                  moe_intermediate_size=1024, vq_other={})
     default = S.engine_settings(resolve(a, 96 * GIB).env)
     roomy = S.engine_settings(resolve(a, 96 * GIB, tune="fast").env)
+    huge = S.engine_settings(resolve(a, 400 * GIB).env)
     tight = S.engine_settings(resolve(a, 24 * GIB, tune="fast").env)
-    assert default["prefill_step_size"] == S.PREFILL_CHUNK_DEFAULT == 512
-    assert roomy["prefill_step_size"] == 4096
+    # 7.5 GiB predicted at 4096 > 10% of ~67 GiB of room; 3.75 at 2048 fits
+    assert default["prefill_step_size"] == 2048
+    assert roomy["prefill_step_size"] == 2048
+    assert huge["prefill_step_size"] == 4096
     assert "prompt_concurrency" not in roomy   # dead: settings.py says why
     assert tight["prefill_step_size"] == S.PREFILL_CHUNK_TIGHT
     assert "prompt_concurrency" not in tight
-
-
-def test_fast_never_narrows_below_the_measured_width():
-    from pathlib import Path
-    from knurlogic.machine.artifact import Artifact
-    a = Artifact(path=Path("/nonexistent"), model_type="qwen3_5",
-                 model_file=None, bytes_on_disk=20 * GIB, hidden_size=4096,
-                 moe_intermediate_size=1024, vq_other={})
-    env = resolve(a, 96 * GIB, tune="fast").env
-    assert S.engine_settings(env)["prefill_step_size"] == 4096
 
 
 def test_with_no_bundled_runtime_it_falls_back_to_the_published_name():
@@ -474,7 +467,7 @@ def test_a_family_spelled_with_text_still_gets_its_measured_width():
     """A qwen3_5 27B reports model_type `qwen3_5_text`. Measured end to end
     through the MCP: it got the 2048 default instead of qwen3_5's 4096."""
     assert S.prefill_chunk_for("qwen3_5_text")[0] == 4096
-    assert S.prefill_chunk_for("qwen3_5_moe_text")[0] == 4096
+    assert S.prefill_chunk_for("qwen3_5_moe_text")[0] == 2048
     assert S.prefill_chunk_for("glm5_next_text")[0] == 2048
     assert S.prefill_chunk_for("somebody_else")[0] == S.PREFILL_CHUNK_DEFAULT
 
@@ -525,3 +518,74 @@ def test_tight_headroom_scales_with_the_machine():
     G = 1 << 30
     assert S.tight_headroom_bytes(120 * G) == 24 * G
     assert S.tight_headroom_bytes(48 * G) == 12 * G
+
+
+# --- the prompt chunk reads the room free at launch --------------------------
+
+def _qwen_moe(hidden=2048, size_gib=13.8):
+    """Qwen3.6-35B-A3B VQ 3.4 shape (hidden 2048; 10 of 40 layers full
+    attention, 2 KV heads of 256) -- or the 397B with hidden=4096."""
+    from pathlib import Path
+    from knurlogic.machine.artifact import Artifact
+    types = (["linear_attention"] * 3 + ["full_attention"]) * 10
+    cfg = {"text_config": {"hidden_size": hidden, "num_hidden_layers": 40,
+                           "layer_types": types, "num_attention_heads": 16,
+                           "num_key_value_heads": 2, "head_dim": 256}}
+    return Artifact(path=Path("/nonexistent"), model_type="qwen3_5_moe",
+                    model_file=None, bytes_on_disk=int(size_gib * GIB),
+                    hidden_size=hidden, moe_intermediate_size=512,
+                    vq_other={}, raw_config=cfg)
+
+
+def _chunk(r):
+    return S.engine_settings(r.env)["prefill_step_size"]
+
+
+def test_qwen3_5_moe_measured_best_is_2048():
+    assert S.prefill_chunk_for("qwen3_5_moe_text")[0] == 2048
+
+
+def test_35b_a3b_with_100_gib_free_takes_2048():
+    r = resolve(_qwen_moe(), 100 * GIB)
+    assert _chunk(r) == 2048
+    note = [n for n in r.notes if n.startswith("prompt chunk 2048")]
+    assert note and "room" in note[0] and "10%" in note[0]
+
+
+def test_35b_a3b_on_a_box_with_little_room_stays_512():
+    r = resolve(_qwen_moe(), 22 * GIB)
+    assert _chunk(r) == 512
+    assert any(n.startswith("prompt chunk 512") and "room" in n
+               for n in r.notes)
+
+
+def test_397b_with_14_gib_left_stays_512():
+    """The case that aborted Metal: 110.8 GiB on the 128 GB M4, ~14 GiB
+    above its weights (git log -S 'prompt chunk is 512')."""
+    a = _qwen_moe(hidden=4096, size_gib=110.8)
+    assert _chunk(resolve(a, int(124.8 * GIB))) == 512
+    assert _chunk(resolve(a, int(124.8 * GIB), tune="fast")) == 512
+
+
+def test_an_explicit_prompt_chunk_still_wins():
+    r = resolve(_qwen_moe(), 100 * GIB)
+    rec = apply_preset_overrides_(r, {"KNURLOGIC_PREFILL_CHUNK": "1024"})
+    assert S.engine_settings({**r.env, **rec})["prefill_step_size"] == 1024
+
+
+def apply_preset_overrides_(r, sets):
+    from knurlogic.tuning.resolve import apply_preset_overrides
+    apply_preset_overrides(r, sets)
+    return sets
+
+
+def test_safe_stays_narrow_with_room():
+    for tune in ("safe", "stable", "lean"):
+        assert _chunk(resolve(_qwen_moe(), 100 * GIB, tune=tune)) == 512
+
+
+def test_an_unmeasured_family_stays_512_with_room():
+    assert _chunk(resolve(_qwen_moe().__class__(
+        path=_qwen_moe().path, model_type="somebody_else", model_file=None,
+        bytes_on_disk=14 * GIB, hidden_size=2048, moe_intermediate_size=512,
+        vq_other={}), 100 * GIB)) == 512
