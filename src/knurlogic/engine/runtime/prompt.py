@@ -175,6 +175,8 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
                           "/v1/completions with a prompt")
     kw = dict(args.chat_template_kwargs or {})
     close = bool(kw.pop(thinking.CLOSE, False))
+    if PRESERVE not in kw and PRESERVE in _template_text(tokenizer):
+        kw[PRESERVE] = True
     messages = flatten(request.messages, tokenizer)
     # tool descriptions are rendered into the prompt too, and an MCP
     # server's are third-party text
@@ -190,6 +192,26 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
             raise PromptError(f"the chat template could not render this "
                               f"request: {type(e).__name__}: {e}") from e
         return _segment(tokenizer, messages, render, prompt)
+
+
+#: Qwen3.6's template switch that renders every assistant turn's think
+#: block, not only those after the last real user query. Without it, a
+#: user message after tool calls (the next question, the compaction
+#: summary ask) re-renders every earlier assistant turn without its
+#: `<think>\n\n</think>\n\n`, so the history diverges right after the goal
+#: and no stored checkpoint is a prefix -- a hybrid model re-prefilled the
+#: whole conversation (13.8k tokens, M4 Qwen3.6-35B, 2026-09-28). On, the
+#: rendered history only grows; the model also sees earlier turns'
+#: reasoning when a client sends it back, which Qwen3.6 is trained for.
+#: A request's own chat_template_kwargs value wins.
+PRESERVE = "preserve_thinking"
+
+
+def _template_text(tokenizer) -> str:
+    t = getattr(tokenizer, "chat_template", None)
+    if isinstance(t, dict):
+        t = " ".join(v for v in t.values() if isinstance(v, str))
+    return t if isinstance(t, str) else ""
 
 
 def _render(tokenizer, messages, render, close) -> list:
