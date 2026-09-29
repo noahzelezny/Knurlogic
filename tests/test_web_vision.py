@@ -192,16 +192,17 @@ def test_every_page_file_ships_and_every_reference_resolves():
         "tool"]["setuptools"]["package-data"]["knurlogic"]
     shipped = {p for pat in patterns for p in pkg.glob(pat) if p.is_file()}
     files = [p for p in ASSETS.rglob("*") if p.is_file()]
-    assert {"index.html", "page.css"} <= set(asset_names())
+    assert {"index.html", "page.css", "app.js"} <= set(asset_names())
     for f in files:
         assert f in shipped, f"{f} is not package data"
     html = (ASSETS / "index.html").read_text()
     refs = [(ASSETS, r) for r in re.findall(r'(?:href|src)="/([^"]+)"', html)]
-    assert {"page.css"} <= {r for _, r in refs}
+    assert {"page.css", "app.js"} <= {r for _, r in refs}
     for js in ASSETS.rglob("*.js"):
         for r in re.findall(r"^(?:import|export)\b[^;]*?from '([^']+)'|"
                             r"^import '([^']+)'", js.read_text(), re.M):
             refs.append((js.parent, r[0] or r[1]))
+    assert len(refs) > 10
     for base, r in refs:
         target = (base / r).resolve()
         assert target.is_file() and target.is_relative_to(ASSETS.resolve()), \
@@ -229,14 +230,22 @@ def _get(url):
         return e.code, e.headers, e.read()
 
 
-def test_the_page_serves_its_files_with_their_types():
+def test_the_page_serves_its_modules_with_a_module_type():
     srv, base = _page_server()
     try:
+        code, h, body = _get(base + "/app.js")
+        assert code == 200 and h["Content-Type"].startswith(
+            "application/javascript")
+        assert h["Cache-Control"] == "no-cache"
+        assert b"import" in body
+        code, h, _ = _get(base + "/views/chat.js")
+        assert code == 200 and h["Content-Type"].startswith(
+            "application/javascript")
         code, h, _ = _get(base + "/page.css")
         assert code == 200 and h["Content-Type"].startswith("text/css")
-        assert h["Cache-Control"] == "no-cache"
         code, h, body = _get(base + "/")
         assert code == 200 and h["Content-Type"].startswith("text/html")
+        assert b'type="module"' in body
     finally:
         srv.shutdown()
 
