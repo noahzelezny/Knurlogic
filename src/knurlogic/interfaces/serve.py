@@ -386,8 +386,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             draft=draft, kv_bits=kv_bits, cross_chip=cross)
         return 0
 
-    print(f"\nserving on http://{host}:{port}/v1  (ctrl-c to stop)")
-    print(f"open http://{host}:{port}/ to see what loaded and try it")
+    shown = host.split(",")[0]
+    print(f"\nserving on http://{shown}:{port}/v1  (ctrl-c to stop)")
+    print(f"open http://{shown}:{port}/ to see what loaded and try it")
     print(f"  /status (text) and /status.json for the same thing "
           f"without a browser")
     print(f"  /settings.json - every knob, what it would be at another tune, "
@@ -395,7 +396,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     from knurlogic.interfaces import connect
     print(f"\npoint a Claude-Messages harness at it:\n")
     print("  " + connect.claude_command(
-        f"http://{host}:{port}", a.path.name).replace("\n", "\n  "))
+        f"http://{shown}:{port}", a.path.name).replace("\n", "\n  "))
     print(f"\n  knurlogic connect --port {port} --model {a.path.name}"
           f"   for the other clients", flush=True)
     # The live environment, kept current as knobs are applied, so the panel
@@ -612,7 +613,9 @@ def main(argv=None) -> int:
                                description=__doc__.split("\n")[0])
     p.add_argument("artifact")
     p.add_argument("--host", default="127.0.0.1",
-                   help="an address to bind, or `cluster`: every address "
+                   help="an address to bind (comma-separated for several: a "
+                        "cluster job's leader binds loopback and its link "
+                        "address), or `cluster`: every address "
                         "bound, answered on loopback and Thunderbolt only")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--working-set-gib", type=float, default=0.0,

@@ -10,6 +10,7 @@ inference requests wait for it (they are queued, not refused).
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 #: the running server's scheduler, for the page's load/unload actions,
@@ -133,7 +134,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     from knurlogic.engine.runtime.scheduler import Scheduler
 
     from . import scout
-    from .server import App, make_server
+    from .server import App
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
@@ -185,14 +186,41 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
         # the same rule as the page's (cluster/links.Gate)
         from knurlogic.cluster import links
         app.gate, host = links.Gate(), "0.0.0.0"
-    httpd = make_server(app, host, port)
-    print(f"knurlogic's own server on http://{host}:{port}/v1 "
+    servers = bind_all(app, host, port)
+    httpd, extra = servers[0], servers[1:]
+    for srv in extra:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    where = ", ".join(f"http://{_url_host(s.server_address[0])}:{port}/v1"
+                      for s in servers)
+    print(f"knurlogic's own server on {where} "
           f"(loading {artifact.path.name})", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        httpd.server_close()
+        for srv in servers:
+            srv.server_close()
         sched.stop()
     return 0
+
+
+def _url_host(h: str) -> str:
+    return f"[{h}]" if ":" in h else h
+
+
+def bind_all(app, host: str, port: int, make=None) -> list:
+    """One server per address in `host` (comma-separated: a cluster job's
+    leader binds loopback and its link address). The first must bind;
+    a later one that cannot (the cable's address gone) is reported and
+    skipped -- the job still answers on loopback."""
+    from .server import make_server
+    make = make or make_server
+    addrs = [h.strip() for h in host.split(",") if h.strip()] or [host]
+    servers = [make(app, addrs[0], port)]
+    for h in addrs[1:]:
+        try:
+            servers.append(make(app, h, port))
+        except OSError as e:
+            print(f"not answering on {h}:{port}: {e}", flush=True)
+    return servers

@@ -324,7 +324,7 @@ def track_cluster(job: str, *, req: dict, args: dict, order: list,
             "args": dict(args), "order": list(order), "port": port,
             "leader_here": leader_here, "name": req.get("identity"),
             "machines": [m.get("name") for m in order],
-            "split": req.get("split"), "link": req.get("link"),
+            "split": req.get("split"), "link": _link_name(req.get("link")),
             "attempts": [], "state": None, "pending": False}
     _sync(key)
     save()
@@ -400,10 +400,17 @@ def not_serving() -> list:
                 continue
             out.append({"name": r.get("name"), "port": r.get("port"),
                         "machines": r.get("machines"),
-                        "split": r.get("split"), "link": r.get("link"),
+                        "split": r.get("split"),
+                        "link": _link_name(r.get("link")),
                         "job": r.get("ended_job") or r.get("job"),
                         "state": r["state"], "recovery": view(r)})
     return out
+
+
+def _link_name(link):
+    """tcp | rdma, for a record that says either (older ones: ring|jaccl)."""
+    from knurlogic.cluster.launch import link_name
+    return link_name(link)
 
 
 # ------------------------------------------------------------ the loop
