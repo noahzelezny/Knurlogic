@@ -1,0 +1,166 @@
+{#- DeepSeek-V4 chat encoding as a Jinja template.
+    A port of encoding/encoding_dsv4.py (deepseek-ai/DeepSeek-V4-Flash,
+    MIT License, Copyright (c) 2023 DeepSeek); see PROVENANCE.md here.
+    Kwargs: thinking_mode ('chat'|'thinking'; else enable_thinking picks
+    it), drop_thinking (default true), tools (OpenAI format). Deviations
+    from the Python encoder, all in PROVENANCE.md: tools passed as a kwarg
+    render on the first system message (an empty one when there is none);
+    the generation prompt after a final user turn is emitted only with
+    add_generation_prompt; a string tool-call argument that is not an
+    object renders as {"arguments": ...}; content before tool calls loses
+    trailing newlines (the parser's "\n\n" separator); the "max"
+    effort prefix is not rendered. -#}
+{%- set mode = thinking_mode if thinking_mode is defined and thinking_mode in ['chat', 'thinking'] else ('thinking' if enable_thinking is defined and enable_thinking else 'chat') -%}
+{%- set drop = drop_thinking if drop_thinking is defined else true -%}
+{%- set D = '｜DSML｜' -%}
+{%- set tool_list = tools if tools is defined and tools else [] -%}
+{%- macro render_tools(ts) -%}
+{{- '## Tools\n\nYou have access to a set of tools to help answer the user\'s question. You can invoke tools by writing a "<' + D + 'tool_calls>" block like the following:\n\n<' + D + 'tool_calls>\n<' + D + 'invoke name="$TOOL_NAME">\n<' + D + 'parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</' + D + 'parameter>\n...\n</' + D + 'invoke>\n<' + D + 'invoke name="$TOOL_NAME2">\n...\n</' + D + 'invoke>\n</' + D + 'tool_calls>\n\nString parameters should be specified as is and set `string="true"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string="false"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n' -}}
+{%- for t in ts -%}
+{{- (t.function if t.function is defined else t) | tojson -}}
+{%- if not loop.last -%}{{- '\n' -}}{%- endif -%}
+{%- endfor -%}
+{{- '\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n' -}}
+{%- endmacro -%}
+{#- ---- pass 1: tools onto a system message; tool results merged into user
+    turns as content blocks (merge_tool_messages), each tool block keyed by
+    its call's position in the last assistant tool_calls -#}
+{%- set ns = namespace(ms=[], ids=[], has_tools=(tool_list | length > 0)) -%}
+{%- set src = messages -%}
+{%- if tool_list and not (messages and messages[0].role == 'system') -%}
+{%- set src = [{'role': 'system', 'content': ''}] + messages -%}
+{%- endif -%}
+{%- for m in src -%}
+{%- if m.get('tools') -%}{%- set ns.has_tools = true -%}{%- endif -%}
+{%- if m.role == 'tool' or m.role == 'user' -%}
+{%- if m.role == 'tool' -%}
+{%- set kn = namespace(k=0) -%}
+{%- for i in ns.ids -%}{%- if i == (m.get('tool_call_id') or '') -%}{%- set kn.k = loop.index0 -%}{%- endif -%}{%- endfor -%}
+{%- set block = {'type': 'tool_result', 'text': m.content or '', 'key': kn.k} -%}
+{%- set prev = ns.ms[-1] if ns.ms else none -%}
+{%- if prev is not none and prev.role == 'user' -%}
+{%- set ns.ms = ns.ms[:-1] + [{'role': 'user', 'blocks': prev.blocks + [block], 'task': prev.task, 'wo_eos': prev.wo_eos, 'sort': prev.sort}] -%}
+{%- else -%}
+{%- set ns.ms = ns.ms + [{'role': 'user', 'blocks': [block], 'task': none, 'wo_eos': false, 'sort': (ns.ids | length > 0)}] -%}
+{%- endif -%}
+{%- else -%}
+{%- set block = {'type': 'text', 'text': m.content or ''} -%}
+{%- set prev = ns.ms[-1] if ns.ms else none -%}
+{%- if prev is not none and prev.role == 'user' and prev.task is none -%}
+{%- set ns.ms = ns.ms[:-1] + [{'role': 'user', 'blocks': prev.blocks + [block], 'task': prev.task, 'wo_eos': prev.wo_eos, 'sort': prev.sort}] -%}
+{%- else -%}
+{%- set ns.ms = ns.ms + [{'role': 'user', 'blocks': [block], 'task': m.get('task'), 'wo_eos': m.get('wo_eos', false), 'sort': (ns.ids | length > 0)}] -%}
+{%- endif -%}
+{%- endif -%}
+{%- else -%}
+{%- if m.role == 'assistant' and m.get('tool_calls') -%}
+{%- set ns.ids = [] -%}
+{%- for tc in m.tool_calls -%}
+{%- set tid = tc.get('id') or (tc.function.get('id') if tc.function is defined else '') or '' -%}
+{%- if tid -%}{%- set ns.ids = ns.ids + [tid] -%}{%- else -%}{%- set ns.ids = ns.ids + [none] -%}{%- endif -%}
+{%- endfor -%}
+{%- if not (ns.ids | select | list) -%}{%- set ns.ids = [] -%}{%- endif -%}
+{%- endif -%}
+{%- if m.role == 'system' and loop.first and tool_list -%}
+{%- set ns.ms = ns.ms + [{'role': 'system', 'content': m.content, 'tools': tool_list + (m.get('tools') or []), 'response_format': m.get('response_format')}] -%}
+{%- else -%}
+{%- set ns.ms = ns.ms + [m] -%}
+{%- endif -%}
+{%- endif -%}
+{%- endfor -%}
+{#- ---- pass 2: the last user turn; drop_thinking (off whenever any tools are
+    defined): earlier assistants lose reasoning, earlier developers go -#}
+{%- set eff_drop = drop and not ns.has_tools -%}
+{%- set un = namespace(last=-1) -%}
+{%- for m in ns.ms -%}{%- if m.role in ['user', 'developer'] -%}{%- set un.last = loop.index0 -%}{%- endif -%}{%- endfor -%}
+{%- if mode == 'thinking' and eff_drop -%}
+{%- set dn = namespace(ms=[]) -%}
+{%- for m in ns.ms -%}
+{%- if m.role in ['user', 'system', 'tool', 'latest_reminder', 'direct_search_results'] or loop.index0 >= un.last -%}
+{%- set dn.ms = dn.ms + [m] -%}
+{%- elif m.role == 'assistant' -%}
+{%- set dn.ms = dn.ms + [{'role': 'assistant', 'content': m.content, 'tool_calls': m.get('tool_calls'), 'wo_eos': m.get('wo_eos', false), 'task': m.get('task')}] -%}
+{%- endif -%}
+{%- endfor -%}
+{%- set msgs = dn.ms -%}
+{%- set un.last = -1 -%}
+{%- for m in msgs -%}{%- if m.role in ['user', 'developer'] -%}{%- set un.last = loop.index0 -%}{%- endif -%}{%- endfor -%}
+{%- else -%}
+{%- set msgs = ns.ms -%}
+{%- endif -%}
+{%- set tasks = {'action': '<｜action｜>', 'query': '<｜query｜>', 'authority': '<｜authority｜>', 'domain': '<｜domain｜>', 'title': '<｜title｜>', 'read_url': '<｜read_url｜>'} -%}
+{#- ---- pass 3: render (render_message) -#}
+{{- bos_token if bos_token is defined and bos_token else '<｜begin▁of▁sentence｜>' -}}
+{%- for m in msgs -%}
+{%- set idx = loop.index0 -%}
+{%- if m.role == 'system' -%}
+{{- m.content or '' -}}
+{%- if m.get('tools') -%}{{- '\n\n' + render_tools(m.tools) -}}{%- endif -%}
+{%- if m.get('response_format') -%}{{- '\n\n## Response Format:\n\nYou MUST strictly adhere to the following schema to reply:\n' + (m.response_format | tojson) -}}{%- endif -%}
+{%- elif m.role == 'developer' -%}
+{{- '<｜User｜>' + m.content -}}
+{%- if m.get('tools') -%}{{- '\n\n' + render_tools(m.tools) -}}{%- endif -%}
+{%- if m.get('response_format') -%}{{- '\n\n## Response Format:\n\nYou MUST strictly adhere to the following schema to reply:\n' + (m.response_format | tojson) -}}{%- endif -%}
+{%- elif m.role == 'user' -%}
+{{- '<｜User｜>' -}}
+{%- set blocks = m.blocks -%}
+{%- set tn = namespace(i=0) -%}
+{%- set trs = blocks | selectattr('type', 'equalto', 'tool_result') | list -%}
+{%- if m.sort and trs | length > 1 -%}{%- set trs = trs | sort(attribute='key') -%}{%- endif -%}
+{%- for b in blocks -%}
+{%- if b.type == 'tool_result' -%}
+{{- '<tool_result>' + trs[tn.i].text + '</tool_result>' -}}
+{%- set tn.i = tn.i + 1 -%}
+{%- else -%}
+{{- b.text -}}
+{%- endif -%}
+{%- if not loop.last -%}{{- '\n\n' -}}{%- endif -%}
+{%- endfor -%}
+{%- elif m.role == 'latest_reminder' -%}
+{{- '<｜latest_reminder｜>' + m.content -}}
+{%- elif m.role == 'assistant' -%}
+{%- set prev_task = idx > 0 and msgs[idx - 1].get('task') is not none -%}
+{%- if mode == 'thinking' and not prev_task and (not eff_drop or idx > un.last) -%}
+{{- (m.get('reasoning_content') or '') + '</think>' -}}
+{%- endif -%}
+{%- if m.get('tool_calls') -%}
+{{- (m.content or '').rstrip('\n') -}}
+{{- '\n\n<' + D + 'tool_calls>\n' -}}
+{%- for tc in m.tool_calls -%}
+{%- set f = tc.function if tc.function is defined else tc -%}
+{%- set args = f.arguments if f.arguments is mapping else {'arguments': f.arguments} -%}
+{{- '<' + D + 'invoke name="' + f.name + '">\n' -}}
+{%- for k, v in args.items() -%}
+{{- '<' + D + 'parameter name="' + k + '" string="' + ('true' if v is string else 'false') + '">' + (v if v is string else v | tojson) + '</' + D + 'parameter>' -}}
+{%- if not loop.last -%}{{- '\n' -}}{%- endif -%}
+{%- endfor -%}
+{{- '\n</' + D + 'invoke>' -}}
+{%- if not loop.last -%}{{- '\n' -}}{%- endif -%}
+{%- endfor -%}
+{{- '\n</' + D + 'tool_calls>' -}}
+{%- else -%}
+{{- m.content or '' -}}
+{%- endif -%}
+{%- if not m.get('wo_eos', false) -%}{{- '<｜end▁of▁sentence｜>' -}}{%- endif -%}
+{%- else -%}
+{{- raise_exception('DeepSeek-V4 has no role ' + m.role) -}}
+{%- endif -%}
+{#- the transition after this message -#}
+{%- set nxt = msgs[idx + 1].role if idx + 1 < msgs | length else none -%}
+{%- if (nxt is none and add_generation_prompt) or nxt in ['assistant', 'latest_reminder'] -%}
+{%- if m.get('task') is not none -%}
+{%- if m.task != 'action' -%}
+{{- tasks[m.task] -}}
+{%- else -%}
+{{- '<｜Assistant｜>' + ('<think>' if mode == 'thinking' else '</think>') + tasks[m.task] -}}
+{%- endif -%}
+{%- elif m.role in ['user', 'developer'] -%}
+{{- '<｜Assistant｜>' -}}
+{%- if mode == 'thinking' and (not eff_drop or idx >= un.last) -%}
+{{- '<think>' -}}
+{%- else -%}
+{{- '</think>' -}}
+{%- endif -%}
+{%- endif -%}
+{%- endif -%}
+{%- endfor -%}
