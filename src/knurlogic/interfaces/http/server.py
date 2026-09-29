@@ -81,7 +81,14 @@ class App:
                                               served().get("id", ""))
 
     def has_vision(self) -> bool:
+        """Whether an image request is refused up front. Until the model
+        has loaded, vision is not known yet: the request queues like a text
+        one, and the scheduler refuses it at admission if the loaded model
+        has none (M4 2026-09-28: an image sent during the 27B's load got a
+        400 "no vision" while a text request waited and was served)."""
         from knurlogic.engine.serve import state
+        if getattr(self.scheduler.host, "state", "ready") != "ready":
+            return True
         return state.VISION.get("serve") is not None
 
     def _count(self) -> None:
