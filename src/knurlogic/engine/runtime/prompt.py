@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
+from knurlogic.engine import templates as _templates
 from knurlogic.engine.serve import segments as _segments
 from knurlogic.engine.serve import thinking
 
@@ -85,8 +86,12 @@ def control_strings(tokenizer) -> Optional["re.Pattern"]:
         names.update(getattr(tokenizer, "all_special_tokens", None) or [])
     except Exception:
         pass
+    # (DeepSeek's `｜DSML｜`, the tool-call markup token, is bracketed by
+    # full-width bars: a tool result quoting DSML would open a call)
     names = sorted((n for n in names if isinstance(n, str) and len(n) >= 3
-                    and n[0] in "<[" and n[-1] in ">]"), key=len, reverse=True)
+                    and ((n[0] in "<[" and n[-1] in ">]")
+                         or (n[0] == n[-1] == "｜"))),
+                   key=len, reverse=True)
     pat = re.compile("|".join(map(re.escape, names))) if names else None
     try:
         tokenizer._knurlogic_controls = pat
@@ -173,6 +178,9 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
     if not getattr(tokenizer, "has_chat_template", True):
         raise PromptError("this model has no chat template; use "
                           "/v1/completions with a prompt")
+    # an artifact whose template is a known stub (DeepSeek-V4's mlx
+    # conversion: no tools) renders with knurlogic's (engine/templates)
+    _templates.install(tokenizer)
     kw = dict(args.chat_template_kwargs or {})
     close = bool(kw.pop(thinking.CLOSE, False))
     patched = _preserving_template(tokenizer)
