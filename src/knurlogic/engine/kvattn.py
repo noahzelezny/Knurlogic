@@ -9,7 +9,7 @@ tiny launch combines the blocks' softmax partials).
 Measured on an M4 Max (128 GB), Qwen3.6-35B-A3B VQ 3.4 (10 attention layers, 2 KV
 heads, head dim 256), end-to-end decode tok/s, bf16 / 8-bit dequantize+sdpa
 / 8-bit kernel, interleaved, median of 3: 70.0 / 63.9 / 66.3 at 6k
-context, 65.5 / 54.0 / 61.9 at 16k (tools/kv8/README.md).
+context, 65.5 / 54.0 / 61.9 at 16k.
 
 HOW IT IS WIRED, without touching a family's attention: kvquant's caches
 still return dequantized arrays from `update_and_fetch` -- lazily, so if
@@ -88,8 +88,8 @@ MAX_ROWS = 64
 #: every SG-th key of the block), and query rows per threadgroup (RC: the
 #: R rows of a KV head are split over R / RC threadgroups that each re-read
 #: the block's K/V -- fewer registers per thread, more threadgroups in
-#: flight). Tuned on an M4 Max (128 GB) with layers chained as in a model
-#: (tools/kv8/tune.py): 256/2/2 is 114 / 208 us per layer at 6k / 16k
+#: flight). Tuned on an M4 Max (128 GB) with layers chained as in a model:
+#: 256/2/2 is 114 / 208 us per layer at 6k / 16k
 #: against 230 / 503 for the research kernel's 256/8/all-8 and 146 / 291
 #: for dequantize + sdpa.
 NB = 256

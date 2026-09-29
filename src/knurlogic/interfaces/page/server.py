@@ -1,15 +1,8 @@
 """`knurlogic ui` -- the page, with nothing loaded and nothing else running.
 
-THE POINT: knurlogic must not need exo, and it must not need a model already
-loaded. It sits ON TOP of whatever is there. Open this and you see every
-model on the disk, everything resident in every runtime, and where the memory
-went -- on a machine with no exo, no ollama and no weights in RAM, all of
-which are ordinary states rather than errors.
-
-`serve` needs no exo either; nothing in knurlogic drives it. What was
-missing is a way to open the page WITHOUT loading a model, which is the
-thing "one place to see all of it" actually requires. It costs no GPU memory
-and imports no engine: this module never touches mlx.
+It needs no model loaded and no other runtime: open it and you see every
+model on the disk, everything resident in every runtime, and where the
+memory went. It costs no GPU memory and never imports mlx.
 
 Loading from here starts `knurlogic serve` as a child process, because that
 is what puts a model in memory with its settings resolved first. The child
@@ -34,10 +27,6 @@ from knurlogic.machine.servers import (is_our_server, registry,
 from knurlogic.interfaces.page import documents
 # the launch facts cluster jobs share: tuning/settings owns them
 from knurlogic.tuning.settings import PATH_KEYS, TUNES, clean_sets
-# Imported here, not inside the status handler: the page fires several
-# requests at once, and two threads importing a module for the first time
-# race -- measured as "partially initialized module 'typing'" on a restart.
-from knurlogic.cluster import exo as exo_witness
 
 logger = logging.getLogger(__name__)
 
@@ -51,51 +40,6 @@ MAX_BODY = 512 << 20
 #: The port a knurlogic on ANOTHER node is expected to answer on, which is
 #: the one this page launches models on.
 _SERVE_PORT: dict = {"n": 8080, "ui": 8899}
-
-
-#: Where to look for exo, only to ask WHO IS THERE: exo is one witness of
-#: which other machines exist (cluster/exo.py). knurlogic never drives it.
-EXO_URL = exo_witness.EXO_URL
-
-
-def _local_name(nodes) -> str:
-    """Which of exo's nodes is the box this is running on.
-
-    Matched on the product name exo reports (`modelId` is "Mac Studio", not
-    `Mac15,14`) against what this machine says it is. Getting this wrong
-    would put the local memory map on somebody else's gauge.
-    """
-    me = (wired.machine().get("model") or "").lower()
-    if not me:
-        return ""
-    for n in nodes:
-        if (n.model_id or "").lower() == me:
-            return n.name
-    return ""
-
-
-def _local_memory(n, mm) -> dict:
-    """This box's own numbers, preferring what it measured itself.
-
-    exo reports system RAM per node, which is the only thing available for a
-    peer. Locally there is something better -- vm_stat, read through
-    `loaded.memory_map` -- so use it and fall back to exo's figures when it
-    is unavailable. `render_cluster` needs the full shape, headroom included;
-    leaving a key out is a KeyError at render time and not a smaller answer.
-    """
-    total = (mm or {}).get("installed_bytes") or n.ram_total
-    used = (mm or {}).get("used_bytes")
-    if used is None:
-        used = max(n.ram_total - n.ram_available, 0)
-    return {
-        "available": True,
-        "device": "vm_stat" if mm else "exo (system RAM)",
-        "working_set_bytes": total,
-        "active_bytes": used,
-        "cache_bytes": 0,
-        "headroom_bytes": max(total - used, 0),
-        "scope": "box",
-    }
 
 
 _MM = {"doc": None, "at": 0.0}
@@ -112,15 +56,8 @@ def _status_fn(_n=0):
     the whole content of this mode. `artifact` is simply absent, and the
     page already handles that: it is the same shape `serve` emits.
 
-    If exo is up, every node it knows about is included. A machine on the
-    desk is a machine on the page whether or not this process is serving it:
-    the complaint that produced this was seeing the other box fill up in
-    exo's window and not in knurlogic's.
-
     A peer's own memory map arrives only if a knurlogic there answers on the
-    network, and `serve` binds loopback by default -- so the usual case is
-    exo's RAM figures and a plain gauge, which is still the machine and still
-    its real occupancy.
+    network.
     """
     # Reused for a few seconds, as `serve` does: the map runs `top`, which
     # takes over a second on a loaded box, and the page and every peer
@@ -135,23 +72,12 @@ def _status_fn(_n=0):
     mm = _MM["doc"]
 
     me = identity.identity()
-    exo_nodes = []
-    try:
-        exo_nodes = exo_witness.inventory(EXO_URL)
-    except Exception:
-        exo_nodes = []
-    local = _local_name(exo_nodes) if exo_nodes else ""
-    mine = next((n for n in exo_nodes if n.name == local), None)
+    # This machine, always, under its own name.
+    snaps = [status.snapshot(node=me["name"], role="local", memory_map=mm)]
 
-    # This machine, always, under its own name -- exo or no exo.
-    snaps = [status.snapshot(
-        node=me["name"], role="local", memory_map=mm,
-        memory_fn=(lambda: _local_memory(mine, mm)) if mine else None)]
-
-    # Peers first: a node that answers for itself is the best witness of
-    # itself. Then whatever only exo knows about, drawn from exo's figures.
+    # Then every peer: a node that answers for itself is the best witness
+    # of itself.
     peers = PEERS.all() if PEERS else []
-    claimed = {me["name"]}
     for p in peers:
         if p.state in ("answering", "version_mismatch") and p.node:
             snaps.append({**p.node, "role": "remote", "address": p.key,
@@ -164,14 +90,6 @@ def _status_fn(_n=0):
                 machine_fn=lambda: {}),
                 "found_by": sorted(p.found_by), "state": p.state,
                 "problem": p.problem, "address": p.key})
-        claimed |= {p.name, p.host} | {
-            k.rpartition(":")[0] for k in getattr(p, "addresses", ())}
-    for n in exo_nodes:
-        if n.name == local or n.name in claimed or n.ip in claimed:
-            continue
-        snaps.append({**exo_witness._snapshot_for(
-            n, local, peer_port=_SERVE_PORT["ui"]),
-            "found_by": ["exo"]})
     # what a coordinator page needs of this machine to place a rank on it
     try:
         from knurlogic.cluster import launch
@@ -229,7 +147,7 @@ def children() -> list:
 
     `alive` alone was the trap: loading, serving and hung all read `alive:
     true`, and an agent that cannot tell them apart either guesses or waits
-    forever -- the failure that made exo hard to drive. So each server says:
+    forever. So each server says:
 
       warming   the port answers but the weights are not resident yet
                 (mlx maps them lazily); memory is still moving
@@ -479,7 +397,7 @@ def _load_fn(serve_port: int):
 # path and never takes the peer's address from the request: the address is
 # the one its PEERS store has for an ANSWERING peer with that id, the
 # artifact is named by identity (machine/artifact.identity). Running
-# knurlogic on a machine is its consent, as with exo; the peer still decides
+# knurlogic on a machine is its consent; the peer still decides
 # where a request may come from (its network gate, no Origin) and does its
 # own fit check against its own load budget. The refusal text comes back
 # as the peer wrote it.
@@ -651,7 +569,7 @@ def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
     Refused, in this order, unless: no Origin header (a browser never
     reaches this); the connection arrived on loopback or Thunderbolt, or
     from a peer address named with --peer. Running knurlogic on a machine
-    is its consent to load for the cluster, as with exo. Then the
+    is its consent to load for the cluster. Then the
     request is a load by identity -- resolved to a path HERE, from this
     machine's own stores -- or an unload of a port this machine started."""
     refused = peer_refusal(headers, client_ip, local_ip, gate,
@@ -1942,7 +1860,7 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
               f" and http://127.0.0.1:{port}; Wi-Fi and Ethernet refused")
     else:
         print(f"knurlogic  http://{host}:{port}")
-    print(f"  nothing loaded, nothing required -- not exo, not a model.")
+    print(f"  nothing loaded, no model required.")
     print(f"  loading from the page starts `knurlogic serve` on port "
           f"{serve_port}.")
     try:

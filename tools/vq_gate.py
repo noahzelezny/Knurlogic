@@ -177,10 +177,7 @@ def markdown(doc: dict) -> str:
 
 
 def cmd_fetch(a) -> int:
-    repos = a.repos or sorted(
-        d.name.replace("--", "/", 1)
-        for d in (Path.home() / ".exo/models").iterdir()
-        if d.name.startswith("TheDrainFlorist--"))
+    repos = a.repos or sorted(json.loads(RUNGS_JSON.read_text())["rungs"])
     bad = 0
     for repo in repos:
         out = Path(a.dir) / repo.replace("/", "--", 1)
@@ -340,22 +337,32 @@ def record(repo: str, verdict: dict) -> None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    f = sub.add_parser("fetch")
-    f.add_argument("dir")
-    f.add_argument("repos", nargs="*")
-    k = sub.add_parser("knobs")
-    k.add_argument("dir")
-    k.add_argument("--write", action="store_true")
-    k.add_argument("--markdown", action="store_true")
-    k.add_argument("--date", default=None)
-    g = sub.add_parser("gate")
-    g.add_argument("artifact")
+    f = sub.add_parser("fetch", help="download each repo's model.py + "
+                       "config.json (no weights)")
+    f.add_argument("dir", help="where to put one folder per repo")
+    f.add_argument("repos", nargs="*",
+                   help="Hub repos (default: every repo in rungs.json)")
+    k = sub.add_parser("knobs", help="regenerate rungs.json from fetched "
+                       "bundles")
+    k.add_argument("dir", help="the folder `fetch` wrote")
+    k.add_argument("--write", action="store_true",
+                   help="write rungs.json (default: print only)")
+    k.add_argument("--markdown", action="store_true",
+                   help="print the table for docs/design/vq-rung-knobs.md")
+    k.add_argument("--date", default=None,
+                   help="the harvest date recorded (default: today)")
+    g = sub.add_parser("gate", help="compare knurlogic's runtime with the "
+                       "published model.py on one artifact")
+    g.add_argument("artifact", help="path to the model folder")
     g.add_argument("--bundle", default=None,
                    help="dir with the PUBLISHED model.py + config.json "
                         "(default: hf download into a temp dir)")
-    g.add_argument("--record", action="store_true")
-    g.add_argument("--n", type=int, default=N_TOKENS)
-    g.add_argument("--wait", type=float, default=0.0)
+    g.add_argument("--record", action="store_true",
+                   help="mark the rung verified in rungs.json on PASS")
+    g.add_argument("--n", type=int, default=N_TOKENS,
+                   help="greedy tokens compared")
+    g.add_argument("--wait", type=float, default=0.0,
+                   help="seconds to wait for the model-load lock")
     s = sub.add_parser("_side")
     for x in ("which", "artifact", "bundle", "out"):
         s.add_argument(x)

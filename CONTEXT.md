@@ -13,14 +13,12 @@ runs — the ones a person otherwise learns by running out of memory — says
 what is true about the machine, and drafts with multi-token-prediction heads
 that no stock runtime uses.
 
-**The direction: knurlogic replaces exo.** `pip install knurlogic` is the
-whole install -- one Mac or a cluster. knurlogic does not drive exo (it
-only reads a running exo as one more runtime); multi-machine serving is
-built on what pip already ships: mlx's ring
-and jaccl backends and launcher, and mlx-lm's `sharded_load`. What exo adds
-on top -- discovery, coordination, placement, per-node downloads -- is what
-knurlogic rebuilds. It still never rebuilds an ENGINE: mlx serves and
-shards; knurlogic orchestrates, resolves settings, and drafts.
+`pip install knurlogic` is the whole install -- one Mac or a cluster.
+Multi-machine serving is built on what pip already ships: mlx's ring and
+jaccl backends and launcher, and mlx-lm's `sharded_load`. knurlogic adds
+discovery, coordination, placement and per-node downloads. It never
+rebuilds an ENGINE: mlx serves and shards; knurlogic orchestrates, resolves
+settings, and drafts.
 
 ## If you are an agent
 
@@ -64,7 +62,7 @@ this list; nothing depends on a folder below it.
                     page (page/).
 
     tests/          tripwires are named in test docstrings, not here.
-    tools/          probes that gate work on real models: mtp_probe.py (drafting),
+    tools/          probes that gate work on real models:
                     vision_gate.py (images, cache reuse), vq_gate.py (VQ runtime
                     identity against each published rung).
     docs/PLAN.md    state, not log: what is true, what was measured so it is
