@@ -216,6 +216,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
         return 2
+    long_context = launch.get("long_context", "off")
+    why = S.long_context_refusal(a.model_type, long_context)
+    if why:
+        print(f"REFUSING: {why}", file=sys.stderr)
+        return 2
     if launch.get("mtp") is False:
         draft = False
     # identical rounding across GPU architectures (engine/crosschip.py):
@@ -239,8 +244,20 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # a rank holds its share, not the artifact: judged against the whole
     # 115 GiB, every rank of a 397B split warned it "does not fit this box"
     r = resolve(a, ws, profile=profile, tune=tune, holds_bytes=share,
-                kv_bits=kv_bits)
+                kv_bits=kv_bits, long_context=long_context)
     apply_preset_overrides(r, overrides)
+    if long_context != "off" and ws:
+        # YaRN: the KV of the chosen context must fit, or the load is
+        # refused here rather than an OOM a million tokens in
+        from knurlogic.tuning.resolve import long_context_room
+        ctx = int(overrides.get("KNURLOGIC_CONTEXT_LENGTH")
+                  or r.env.get("KNURLOGIC_CONTEXT_LENGTH") or 0)
+        why = long_context_room(a, ws, a.bytes_on_disk if share is None
+                                else share, ctx, kv_bits)
+        if why:
+            print(f"REFUSING: KNURLOGIC_LONG_CONTEXT=yarn: {why}",
+                  file=sys.stderr)
+            return 2
     print(f"preset    {tune}" + (
         f" (overridden: {', '.join(sorted(r.preset['overridden']))})"
         if r.preset.get("overridden") else ""))
@@ -280,7 +297,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
 
     def _resolve_for(ws_bytes, tune_name):
         return resolve(a, ws_bytes, profile=profile, tune=tune_name,
-                       holds_bytes=share, kv_bits=kv_bits)
+                       holds_bytes=share, kv_bits=kv_bits,
+                       long_context=long_context)
 
     # `top` plus `ps` costs about a third of a second, and the page polls
     # status every two. Cached just long enough that a poll is free and a

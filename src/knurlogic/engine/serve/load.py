@@ -127,20 +127,44 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
 
     from . import state
     p = Path(str(path))
+    overlay = long_context_overlay(p)
+    state.SERVED["long_context"] = "yarn" if overlay else "off"
     if p.is_dir() and runtime.serves(p):
-        model, config = runtime.load_model(p, lazy=lazy)
+        model, config = runtime.load_model(
+            p, lazy=lazy, **({"model_config": overlay} if overlay else {}))
         tok = load_tokenizer(p, None, eos_token_ids=config.get("eos_token_id"))
         templates.install(tok)
         state.SERVED["runtime"] = "knurlogic"
         return model, tok
     state.SERVED["runtime"] = "bundled"
     kw = {"lazy": True} if lazy else {}
+    if overlay:
+        kw["model_config"] = overlay
     if executes_artifact_code and \
             "trust_remote_code" in inspect.signature(_load).parameters:
         kw["trust_remote_code"] = True
     model, tok = _load(path, **kw)
     templates.install(tok)
     return model, tok
+
+
+def long_context_overlay(path, env=None) -> dict:
+    """The config overlay KNURLOGIC_LONG_CONTEXT asks for (settings.
+    long_context_config): {} when off. Read from the environment the
+    launch set (serve applies a model's launch settings there, on every
+    rank of a split), and applied as mlx-lm's `model_config` -- the
+    artifact's config.json is never written."""
+    import json
+    import os
+    from pathlib import Path
+
+    from knurlogic.tuning import settings as S
+    mode = S.long_context_of((os.environ if env is None else env).get(
+        "KNURLOGIC_LONG_CONTEXT"))
+    if mode == "off":
+        return {}
+    cfg = json.loads((Path(str(path)) / "config.json").read_text())
+    return S.long_context_config(cfg, mode)
 
 
 def set_cache_limit(gib: float) -> str:
