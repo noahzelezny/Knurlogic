@@ -1,0 +1,102 @@
+"""The knurlogic-wide settings: chosen once, for every model.
+
+Beside the strategy (the default launch preset), two kinds of setting are
+not a model's to vary and so are not kept per base model:
+
+  * compaction (tuning/settings.COMPACT_KNOBS) -- how a server compacts a
+    long conversation. Policy, not a property of any model. Every model
+    server on this machine reads it per request, so a change applies to the
+    next request of every running model.
+  * identical results across chips (KNURLOGIC_CROSS_CHIP) -- a property of
+    the cluster's hardware mix, not of a model. Read at launch; unset means
+    the launch preset decides (stable: on, the rest: off).
+
+Kept in ~/.config/knurlogic/settings.json (XDG_CONFIG_HOME honoured), beside
+the allowance and the strategy; the page's Knurlogic tab applies it to every
+machine, each through its own page, like the strategy. What is saved here
+beats the same name in a server's environment (a per-model launch value
+saved before compaction was knurlogic-wide is ignored rather than left to
+shadow it); an explicit --set of the cross-chip knob still beats it at that
+launch. Stdlib only.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from knurlogic.tuning.settings import COMPACT_KNOBS, check_knob
+
+CROSS_CHIP = "KNURLOGIC_CROSS_CHIP"
+#: every name kept here
+NAMES = (CROSS_CHIP,) + tuple(COMPACT_KNOBS)
+
+
+def path() -> Path:
+    import os
+    root = Path(os.environ.get("XDG_CONFIG_HOME",
+                               Path.home() / ".config")) / "knurlogic"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "settings.json"
+
+
+def get() -> dict:
+    """{name: value} as saved; a damaged file or an unknown name or value is
+    left out, never an error: a launch or a request must not fail on it."""
+    try:
+        raw = json.loads(path().read_text())
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: str(v) for k, v in raw.items()
+            if k in NAMES and str(v).strip() and check_knob(k, v) is None}
+
+
+def set(values: dict) -> dict:
+    """Merge {name: value} in ('' or None clears that name); refuses the
+    whole change (ValueError) on an unknown name or a value it may not take.
+    -> what is saved after."""
+    if not isinstance(values, dict):
+        raise ValueError("send {name: value}")
+    bad = [k for k in values if k not in NAMES]
+    if bad:
+        raise ValueError(f"not a knurlogic-wide setting: {', '.join(bad)}")
+    cur = get()
+    for k, v in values.items():
+        s = str(v if v is not None else "").strip()
+        if not s:
+            cur.pop(k, None)
+            continue
+        why = check_knob(k, s)
+        if why:
+            raise ValueError(why)
+        cur[k] = s
+    p = path()
+    if not cur:
+        p.unlink(missing_ok=True)
+        return {}
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cur, sort_keys=True) + "\n")
+    tmp.replace(p)
+    return cur
+
+
+def launch_sets(sets: dict) -> dict:
+    """A launch's explicit settings with the saved knurlogic-wide ones a
+    launch reads (identical results across chips) added where the launch
+    names none: saved beats the preset's value, an explicit set beats
+    saved."""
+    out = dict(sets or {})
+    v = get().get(CROSS_CHIP)
+    if v and CROSS_CHIP not in out:
+        out[CROSS_CHIP] = v
+    return out
+
+
+def compaction_env(env=None) -> dict:
+    """The environment compaction reads: `env` (os.environ by default) with
+    the saved knurlogic-wide values over it."""
+    import os
+    base = dict(os.environ if env is None else env)
+    base.update({k: v for k, v in get().items() if k in COMPACT_KNOBS})
+    return base

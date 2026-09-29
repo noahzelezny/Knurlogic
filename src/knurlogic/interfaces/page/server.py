@@ -809,9 +809,10 @@ def peer_machine(body: bytes) -> tuple:
     except ValueError:
         want = None
     if not isinstance(want, dict) or not want or set(want) - {
-            "allowance_gib", "strategy"}:
-        return 400, {"error": "send {\"allowance_gib\": N} and/or "
-                              "{\"strategy\": name}"}
+            "allowance_gib", "strategy", "settings"}:
+        return 400, {"error": "send {\"allowance_gib\": N}, "
+                              "{\"strategy\": name} and/or "
+                              "{\"settings\": {name: value}}"}
     applied = {}
     if "allowance_gib" in want:
         out = web.set_allowance(json.dumps({"gib": want["allowance_gib"]}))
@@ -823,8 +824,14 @@ def peer_machine(body: bytes) -> tuple:
         if "error" in out:
             return 400, out
         applied.update(out["applied"])
+    if "settings" in want:
+        out = web.set_knurlogic(json.dumps(want["settings"]))
+        if "error" in out:
+            return 400, out
+        applied.update(out["applied"])
     return 200, {"allowance": web.allowance_doc(),
-                 "strategy": web.strategy_doc(), "applied": applied,
+                 "strategy": web.strategy_doc(),
+                 "knurlogic": web.knurlogic_doc(), "applied": applied,
                  "machine": identity.identity().get("name") or ""}
 
 
@@ -1898,6 +1905,10 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
         web.set_allowance(body))
     # the knurlogic strategy: this machine's default launch preset
     routes["/strategy.json"] = lambda _q, _n=0: web._json(web.strategy_doc())
+    # the knurlogic-wide settings: compaction, identical results across chips
+    routes["/knurlogic.json"] = lambda _q, _n=0: web._json(web.knurlogic_doc())
+    routes["POST /knurlogic.json"] = lambda _q, _n=0, body=None: web._json(
+        web.set_knurlogic(body))
     routes["POST /strategy.json"] = lambda _q, _n=0, body=None: web._json(
         web.set_strategy(body))
 

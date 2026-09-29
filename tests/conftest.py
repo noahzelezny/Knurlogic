@@ -48,3 +48,8 @@ def _no_real_cache(monkeypatch, tmp_path_factory):
     own XDG_CACHE_HOME after this."""
     monkeypatch.setenv("XDG_CACHE_HOME",
                        str(tmp_path_factory.mktemp("xdg-cache")))
+    # and its own ~/.config/knurlogic: the knurlogic-wide settings
+    # (machine/preferences) are read per request and at launch, so the
+    # person's real ones must not steer a test
+    monkeypatch.setenv("XDG_CONFIG_HOME",
+                       str(tmp_path_factory.mktemp("xdg-config")))

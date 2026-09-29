@@ -62,8 +62,15 @@ class Outcome:
 
 
 def settings(env=None) -> dict:
+    """The operator's compaction settings. With no `env`: this process's
+    environment under the knurlogic-wide ones (machine/preferences), read
+    per request so a change in Settings -> Knurlogic applies to the next
+    request of every running server."""
     from knurlogic.tuning.settings import compact_settings
-    return compact_settings(os.environ if env is None else env)
+    if env is not None:
+        return compact_settings(env)
+    from knurlogic.machine import preferences
+    return compact_settings(preferences.compaction_env())
 
 
 def _trigger(edit: E.Compact, window: int, cfg: dict) -> int:
