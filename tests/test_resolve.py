@@ -66,7 +66,10 @@ def test_non_vq_artifact_gets_only_the_generic_knobs():
     r = resolve(_art(vq_modules={}), 96 * GIB)
     assert "VQ_DECODE_CHUNK" not in r.env
     assert "VQ_MOE_GEMMSEG_RTILE" not in r.env
-    assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_DEFAULT)
+    # the prompt chunk is still set -- its width is read from the room
+    # (test_tuning.py covers which width)
+    assert int(r.env["KNURLOGIC_PREFILL_CHUNK"]) in (
+        S.PREFILL_CHUNK_DEFAULT, *S.PREFILL_CHUNK_LADDER)
     assert r.env["VQLAB_CACHE_LIMIT_GB"] == str(S.CACHE_LIMIT_GB_DEFAULT)
 
 

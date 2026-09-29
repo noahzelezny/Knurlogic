@@ -26,6 +26,18 @@ _QWEN35_MOE_PREFILL = (2048, "measured 2026-09-29 on M4: 35B-A3B VQ 3.4 "
                              "at 28.7k tokens, 512 645 / 2048 1163 / 4096 "
                              "1158 tok/s (n=3)")
 
+# qwen4_exp (Qwen3.8-Flash-Next): 2048 is the measured best. M4 Max 128 GB,
+# 2026-09-29, Flash-Next VQ 4.4 (96.6 GiB), 28,727-token prompt, interleaved
+# order, n=3, prefill tok/s:
+#   512: 383.4 / 360.6 / 387.1   (peak 100.9 GiB)
+#   1024: 439.8 / 432.4 / 409.6  (peak 101.3 GiB)
+#   2048: 477.8 / 454.8 / 439.2  (peak 103.5 GiB)
+# ~+19% at 2048 for +2.6 GiB of peak; the experts dominate its prefill, so
+# width buys less than on the 35B. 4096 not measured.
+_QWEN4_EXP_PREFILL = (2048, "measured 2026-09-29 on M4: Flash-Next VQ 4.4 "
+                            "at 28.7k tokens, 512 383 / 1024 432 / 2048 "
+                            "455 tok/s (n=3)")
+
 # The Qwen3.5/3.8 head drafts from the activation going INTO the trunk's
 # final norm (one residual stream).
 #
@@ -73,6 +85,7 @@ MANIFEST = {
         },
         "qwen4_exp": {
             "model_types": ["qwen4_exp_text", "qwen4_exp"],
+            "prefill_chunk": _QWEN4_EXP_PREFILL,
             # its attention cache is its own (_AttnCache/_BatchAttnCache:
             # K/V plus the sparse indexer's keys and positions, moved
             # together); kvcache.py's subclasses store the K/V quantized and
