@@ -1,5 +1,5 @@
-"""P5's `interfaces/page/documents.py` changes: the Anthropic->OpenAI image
-shim, and the `vision` field on `/models.json` and `/loaded.json`.
+"""P5's changes: the Anthropic->OpenAI image shim (`interfaces/http/messages.py`),
+and the `vision` field on `/models.json` and `/loaded.json`.
 
 No mlx, no PIL, no real model: `interfaces/page/documents.py` reads
 `served_vision()` and `registry.registered()`, both stdlib-only per the
@@ -8,6 +8,7 @@ stays that way by never importing anything that would drag mlx in.
 """
 import json
 
+from knurlogic.interfaces.http import messages
 from knurlogic.interfaces.page import documents
 
 
@@ -20,7 +21,7 @@ def test_base64_image_block_becomes_a_data_url_image_part():
                                      "data": "QUJD"}},
         {"type": "text", "text": "what is this?"},
     ]
-    out = documents.anthropic_images_to_openai(content)
+    out = messages.anthropic_images_to_openai(content)
     assert out[0] == {"type": "image_url",
                       "image_url": {"url": "data:image/png;base64,QUJD"}}
     assert out[1] == {"type": "text", "text": "what is this?"}
@@ -29,18 +30,18 @@ def test_base64_image_block_becomes_a_data_url_image_part():
 def test_url_source_block_passes_the_url_through():
     content = [{"type": "image", "source": {"type": "url",
                                             "url": "https://example/x.png"}}]
-    out = documents.anthropic_images_to_openai(content)
+    out = messages.anthropic_images_to_openai(content)
     assert out == [{"type": "image_url",
                     "image_url": {"url": "https://example/x.png"}}]
 
 
 def test_already_openai_shaped_content_is_unchanged():
     content = [{"type": "image_url", "image_url": {"url": "data:..."}}]
-    assert documents.anthropic_images_to_openai(content) == content
+    assert messages.anthropic_images_to_openai(content) == content
 
 
 def test_plain_string_content_passes_through():
-    assert documents.anthropic_images_to_openai("just text") == "just text"
+    assert messages.anthropic_images_to_openai("just text") == "just text"
 
 
 def test_unrecognised_block_passes_through_rather_than_dropping():
@@ -49,7 +50,7 @@ def test_unrecognised_block_passes_through_rather_than_dropping():
     own (clear) refusal."""
     content = [{"type": "text", "text": "hello"},
               {"type": "image", "source": {"type": "base64"}}]  # no data
-    out = documents.anthropic_images_to_openai(content)
+    out = messages.anthropic_images_to_openai(content)
     assert out[0] == {"type": "text", "text": "hello"}
     assert out[1] == content[1]
 
@@ -57,7 +58,7 @@ def test_unrecognised_block_passes_through_rather_than_dropping():
 def test_default_media_type_when_missing():
     content = [{"type": "image",
                "source": {"type": "base64", "data": "AAA="}}]
-    out = documents.anthropic_images_to_openai(content)
+    out = messages.anthropic_images_to_openai(content)
     assert out[0]["image_url"]["url"] == "data:image/png;base64,AAA="
 
 
