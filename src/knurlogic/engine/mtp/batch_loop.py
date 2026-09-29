@@ -447,7 +447,7 @@ class MTPBatch:
         # the regime is chosen by MEASURED cost per committed token, per row
         # count (see drafting_pays). The unknown is not acceptance alone but
         # how much more a 2-wide forward costs than a 1-wide one at each
-        # width -- on the M4 with Qwen3.8-Flash-Next-VQ-4.4bpw the ratio is
+        # width -- on an M4 Max (128 GB) with Qwen3.8-Flash-Next-VQ-4.4bpw the ratio is
         # ~1.5 at one row, so only a timing can decide.
         self.draft_max_rows = (
             draft_max_rows if draft_max_rows is not None else default_draft_max_rows()
@@ -636,7 +636,7 @@ class MTPBatch:
         # Evaluated now, not at the next step: filtering is lazy, so until
         # then the full-width arrays stay referenced and nothing is freed --
         # and the scheduler's memory guard, stopping one row to get back
-        # under the limit, read no drop and stopped them all (Fable 5.1).
+        # under the limit, read no drop and stopped them all.
         mx.eval(self._arrays())
 
     def _arrays(self) -> list:

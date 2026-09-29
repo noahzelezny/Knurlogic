@@ -16,7 +16,7 @@ Written for knurlogic, no exo code. The layer slice keeps the contract of
 mlx-lm's PipelineMixin (start_idx / end_idx / pipeline_layers, which the
 vendored qwen3_5 reads) without calling its `pipeline()`, whose split is
 uniform and whose forward all_gathers; the per-family index fixups follow
-Noah's own exo fork commits (engine/runtime/PROVENANCE.md).
+commits in the project's exo fork (engine/runtime/PROVENANCE.md).
 
 Hidden states cross ranks with send / recv, each evaluated where it is
 built (a follower's step finishes its send inside the forward; rank 0's
@@ -28,7 +28,7 @@ computes, and every send has completed before the prefill's last forward. A rece
 own activation dtype and a send is cast to its receiver's (the dtypes are
 agreed when the model is split), never the dtype of a placeholder: an
 unloaded embedding is float32, and a float32 receive of bf16 bytes ran a
-whole shard in float32 on the 397B (Noah's 574a7bd7).
+whole shard in float32 on the 397B (fork commit 574a7bd7).
 
 MTP on pipeline (the head lives on rank 0, which holds the last layers and
 so the true final hidden state -- and on rank 0 ALONE: a follower never
@@ -207,7 +207,7 @@ def overlap_on() -> bool:
 @contextlib.contextmanager
 def overlapped(model):
     """Around a prompt's prefill chunks (batch_loop.admit's prefill_ctx):
-    each chunk's hidden state is sent while the next chunk computes (Noah's
+    each chunk's hidden state is sent while the next chunk computes (the
     exo fork queued its prefill sends for the same reason), and every send
     has completed on the way out -- before the prefill's last forward and
     any collective after it. Nothing but sends and receives happens
@@ -257,14 +257,14 @@ def restage(model, keep: list, start: int, end: int) -> None:
         core.fa_idx = next((i for i, l in enumerate(keep)
                             if not l.is_linear), None)
     elif fam == "glm5_next":
-        # frozen from the full list at __init__ (Noah's f3ab3a83)
+        # frozen from the full list at __init__ (fork commit f3ab3a83)
         core.ssm_idx = next((i for i, l in enumerate(keep)
                              if getattr(l, "is_linear", False)), 0)
         core.fa_idx = next((i for i, l in enumerate(keep)
                             if not getattr(l, "is_linear", True)), 0)
     elif fam == "qwen4_exp":
         # full-model indices in ple_layers and a full-length make_cache
-        # (Noah's dd946407)
+        # (fork commit dd946407)
         core.ple_layers = [i - start for i in core.ple_layers
                            if start <= i < end]
         whole = model.make_cache

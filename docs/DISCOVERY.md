@@ -36,7 +36,7 @@ a crash.
 A node is its **id**, not its name: names collide ("MacBook Pro") and get
 renamed. `id` = first 12 hex of sha256(IOPlatformUUID) -- stable across
 reboots and addresses, and not the raw hardware UUID on the wire. `name`
-is display only (`scutil --get ComputerName`, e.g. "Noah's Mac Studio").
+is display only (`scutil --get ComputerName`, e.g. "Alex's Mac Studio").
 exo's node records are matched to ours by name, then by model/chip, and
 only for showing exo's placements.
 
@@ -94,18 +94,18 @@ stays "facts about THIS box".
 ## Open questions
 
 1. `--host cluster` vs making advertise-on-Thunderbolt the default for
-   `ui` only (not `serve`). Noah's call tomorrow.
+   `ui` only (not `serve`). The maintainer's call tomorrow.
 2. The firewall: can the BLOCKED machine detect it on its own? It sees its
    own listener but not the dropped connections. Candidate: each node
    probes its own non-loopback address from itself (the firewall blocks
    that too -- observed tonight on the M4) and reports "my own address
    does not answer me: firewall". Cheap and local; needs checking that
    self-connections are filtered the same way on every macOS in use.
-3. Resending the firewall prompt when missed (Noah): re-asking needs the
+3. Resending the firewall prompt when missed: re-asking needs the
    app's firewall entry removed, which is admin. Probably: detect (2),
    then name the exact System Settings path; never touch the setting.
 
-## Fable 5.1 review (2026-09-24): build it, with these changes -- accepted
+## Design review (2026-09-24): build it, with these changes -- accepted
 
 1. **The blocked machine learns it is blocked FROM ITS PEERS.** Its
    outbound works: it fetches a peer's status, which already says "M4:
@@ -121,7 +121,7 @@ stays "facts about THIS box".
    (`getsockname()`), not one socket per address: the Thunderbolt Bridge
    re-addresses on replug. `cluster` = Thunderbolt Bridge only; wired
    Ethernet must be named, with a printed warning that POSTs are
-   unauthenticated. HELD for Noah (it changes what is exposed).
+   unauthenticated. HELD for the maintainer (it changes what is exposed).
 4. **One advertisement per machine: `ui` registers, `serve` does not**;
    `serve_port` goes in TXT. Instance name `<ComputerName> <id[:6]>` so two
    "MacBook Pro"s never autorename to "(2)". Answers open question 1.
@@ -146,13 +146,13 @@ stays "facts about THIS box".
 
 Build order: identity -> reachability + `--peer` + peers.json + the
 cross-check (fixes tonight with no Bonjour) -> register -> browse/resolve
--> `--host cluster` (Noah) -> exo demoted to `cluster/exo.py` -> doctor.
+-> `--host cluster` -> exo demoted to `cluster/exo.py` -> doctor.
 
 ## Built and measured (2026-09-25, Studio 10.0.0.1 <-> M4 10.0.0.2 over Thunderbolt)
 
 Steps 1-4 and 6 are built (`machine/identity.py`, `cluster/peers.py`,
 `cluster/discovery.py`, `cluster/exo.py`); `--host cluster` (5) waits for
-Noah, `doctor` (7) is next.
+The maintainer, `doctor` (7) is next.
 
 * With no `--peer` and no remembered peers (fresh `KNURLOGIC_HOME`) the
   Studio found the M4 by Bonjour alone, fetched its status, and the M4
@@ -167,7 +167,7 @@ Noah, `doctor` (7) is next.
 
 ## 2026-09-25, later: `--host cluster` built, and what exo taught (transcript search)
 
-Noah's call: explicit beats automatic on this network. `--host cluster`
+The maintainer's call: explicit beats automatic on this network. `--host cluster`
 binds every address, answers only on loopback and Thunderbolt (403 with the
 Thunderbolt address named, measured from Ethernet and Wi-Fi), advertises on
 Thunderbolt only, and keeps a peer reachable two ways on the cable.

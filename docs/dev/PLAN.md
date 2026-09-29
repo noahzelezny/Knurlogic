@@ -27,7 +27,7 @@ exo for clustering, and carries the work that was trapped in forks of both.
                   evidence) plus architecture/ (vendored code, PROVENANCE,
                   pins, licenses), vision/, heads/. Explicit list in
                   families/__init__.py; being listed is being tested
-                  (tests/test_families.py). Reviewed twice by Fable 5.1.
+                  (tests/test_families.py). Reviewed twice.
     machine/      64 artifacts found across every store; residency in every
                   runtime (exo's read, never driven); one load budget; which
                   build of each dependency is installed
@@ -269,7 +269,7 @@ short forwards (an unvendored module); all released rungs reported no
 vision (the `_text` model_type spelling, third time); the chat could not
 reach any running model from the control page.
 
-Real-model gates, 2026-09-23, on the M4 (NozzleBook, M4 Max) in a clean
+Real-model gates, 2026-09-23, on an M4 Max 128 GB in a clean
 `pip install` venv, tools/vision_gate.py, one rung at a time:
 
     gemma e4b VQ-PLE        PASS
@@ -340,15 +340,15 @@ Before merging to main:
      its nearest native setting and the response says what was applied.
    - "auto" (thinking by difficulty) is a classification call: the
      harness's, not knurlogic's.
-   - KEYED BY CHAT-TEMPLATE DIALECT, not by architecture (Fable 5.1's
-     review): Qwen3.6 (on/off) and Qwen3.8 (on/off + effort) are the same
+   - KEYED BY CHAT-TEMPLATE DIALECT, not by architecture (design review):
+     Qwen3.6 (on/off) and Qwen3.8 (on/off + effort) are the same
      qwen3_5 module. The dialect is detected from the artifact's template,
      as the tool-call dialect is (serve/load.py tool_support); the mapping
      ladder -> native kwargs is per dialect. New module serve/thinking.py
      is the plug point -- nothing touches chat_template_kwargs today.
    - BUILT 2026-09-24 (engine/serve/thinking.py, dialects in the family
-     manifests; tests render the released templates), then reviewed by
-     Fable 5.1 and fixed: the template text only PROPOSES a dialect -- a
+     manifests; tests render the released templates), then reviewed
+     and fixed: the template text only PROPOSES a dialect -- a
      render probe through mlx-lm's own TokenizerWrapper decides, and finds
      the served default (gemma thinks by default when served: mlx-lm
      injects enable_thinking for silent requests); a client override is
@@ -414,7 +414,7 @@ Done 2026-09-24 (CPU, tiny fixtures, all five families):
    * **GLM closed-think "off" works**: prompt at low effort with
      `<think></think>` already closed, 12/12 right, 0 reasoning, 35 tokens
      an answer vs 59 at low. Offering it as GLM's `none` needs a prompt
-     suffix rather than a template kwarg -- a design call for Noah (it is
+     suffix rather than a template kwarg -- a design call for the maintainer (it is
      the template's own format for past turns, not a budget).
    * Timing is secondary here (4 concurrent requests, run 0 includes the
      load); not a speed claim.
@@ -440,7 +440,7 @@ Proven live on the M4 (2026-09-28, Qwen3.6-35B-A3B, minutes each):
   was run order + thermal drift); decode +7% at 6k, +18% at 16k (dequantize every step).
 
 Parked: memory pacing / ledger (docs/design/memory-pacing.md, memory-ledger.md, branch
-memory-pacing). The 4 growing agents with compaction off is not a real workload (Noah).
+memory-pacing). The 4 growing agents with compaction off is not a real workload.
 Revisit worst-case hardening only against realistic loads (compaction on).
 
 - Images (27B): shapes, colours, positions and text read exactly; repeats hit the image
@@ -486,30 +486,30 @@ Queued work:
 - 8-bit KV decode kernel: merged (engine/kvattn.py, KNURLOGIC_KV_KERNEL, /status.json
   kv_kernel hits/misses). Gemma4 KV-shared layers still pay the dequantize.
 - Gemma 4 strips earlier reasoning by design (Google's guidance): each user turn re-prefills.
-  Left alone (Noah).
+  Left alone.
 - Prefill cost: fewer checkpoint deep copies (share or keep only the last), and prefill
   a long prompt across several steps so the guard can act and decode rows keep going.
 - SMB loads: cold reads vary 3x because the M3 serves the SSD while loading its own
   models; timing is now logged -- read it on the next slow load.
 - A cluster job's tensor placement does not count the vision tower yet.
 - Compaction phase 3 (dropped: advocacy/header); Scout adopting knurlogic's compaction.
-- Scout changeover list (after Noah's own review).
+- Scout changeover list (after the maintainer's own review).
 - Local-model sub-agents: two long runs failed (Flash refused by the ring memory race;
   35B timed out after 1h45 on a multi-file task). Give them short, contained jobs only.
-- Release v0.1.0: Fable's final gate said TAG (2026-09-29); nothing in this queue blocks it.
-  The tag is Noah's call.
+- Release v0.1.0: the final review gate said TAG (2026-09-29); nothing in this queue blocks it.
+  The tag is the maintainer's call.
 
 ## NEXT (set 2026-09-26, third compaction)
 
-Branches (clean as you go): vision-integration (241bc6d, Fable-reviewed,
+Branches (clean as you go): vision-integration (241bc6d, reviewed,
 pushed) <- hardening (every server fix since: memory guard, admission,
 margin floor, control-token neutralization, Host guard, sampling defaults,
-timing, context-length cap, count_tokens, audit fixes; Fable 5.1: MERGE
+timing, context-length cap, count_tokens, audit fixes; review verdict: MERGE
 after two rounds) <- gui (the page: layouts, overlays, router by model,
 /peek, /apply, Connect, Settings, test bench, metrics) <- release (0.1.0:
 version from metadata, classifiers, Trusted Publishing workflow). Worktrees:
 ../knurlogic-gui (gui), ../knurlogic-release (release); the main checkout is
-on hardening. Noah's page on :8899 runs from ../knurlogic-gui/src.
+on hardening. The maintainer's page on :8899 runs from ../knurlogic-gui/src.
 
 Multi-machine serving is IN 0.1.0 (branch `cluster`, on top of gui): the
 page launches a model across Macs (tensor or pipeline split, TCP ring or
@@ -526,7 +526,7 @@ Release 0.1.0 (tonight or next):
    rebase release on it; push; tag v0.1.0. PyPI: pending publisher added
    (noahzelezny/Knurlogic, publish.yml, env pypi); the GitHub `pypi`
    environment exists. The name is only claimed by the first upload.
-3. Flip the repo public when Noah says.
+3. Flip the repo public when the maintainer says.
 
 Open on the cluster path (not blocking the tag):
 - GLM MTP verify fast path (glm5_next: the verify forward on the decode
@@ -538,7 +538,7 @@ Open on the cluster path (not blocking the tag):
 - The 397B 3.1 and 2.6 bpw copies differ between the two Macs (identity
   mismatch), so only 2.4 bpw ran across both.
 
-Shootout (scratchpad shootout/, M4 ~/kl-test/shootout): Flash done (one-shot
+Shootout (scratchpad shootout/, the test machine): Flash done (one-shot
 24 + tool-use 8, triaged: ledger.md); 397B 2/8 tool-use audits, remaining
 running (chain7); GLM-5.3 2.7bpw produced nothing: ~6 GiB left above its
 weights on the 128 GB M4, four uncompacted 36k agents cannot fit (Scout's
@@ -558,7 +558,7 @@ formula only before a first run. Find out what GLM's cache actually holds
 
 In flight at the fourth compaction (2026-09-26 late):
 - Chunk sweep on the M4 (scratchpad shootout/chunk_bench.py -> M4
-  ~/kl-test/shootout/chunk_bench.jsonl; one server per arm, n=3, 4k/16k
+  a test directory/chunk_bench.jsonl; one server per arm, n=3, 4k/16k
   prompts, server prefill tok/s + max step spike). Flash 4.4: chunk width
   buys nothing (512 ~565 tok/s at 4k, 2048/4096 no faster at 4k, +6% at
   16k) for 0.8 -> 4.1 GiB spikes. 397B: 512 ~192/160 tok/s, 1024 ~225 at 4k
@@ -566,7 +566,7 @@ In flight at the fourth compaction (2026-09-26 late):
   aborted Metal with one agent). The June qwen manifest A/B said 4096 =
   +115% at 11k vs 512 with no peak cost (hybrid, recurrent layers) -- the
   sweep tests that. Hypothesis: the gain is VQ weight unpacking per chunk
-  (Noah recalls chunk not mattering on a non-VQ 397B).
+  (the maintainer recalls chunk not mattering on a non-VQ 397B).
 - A stash on hardening: "512 default everywhere -- pending 397B's chunk
   sweep" (settings.PREFILL_CHUNK_DEFAULT 512; family widths only with
   tune=fast). Four tests encode the old policy and need updating with it.
@@ -585,7 +585,7 @@ bugs and vqlab's packed as_linear (strict xfail).
 
 ## Requirements for knurlogic's own server: Scout's ingest (2026-09-25)
 
-Sent by the Scout session at Noah's request. scout/ingest/vlm.py is the
+Sent by the Scout session at the maintainer's request. scout/ingest/vlm.py is the
 only client and talks through a small Backend protocol, so matching these
 keeps the exo swap to one class. Today it uses exo's GET /state, GET
 /v1/models (`capabilities` incl. "vision", `storage_size_megabytes`) and
@@ -623,11 +623,11 @@ portable form). To check: 4 (multi-image, explicit limits). New: 1-3.
   a patch -- for the server build (executor step 1).
 
 * **GLM's `none` is SHIPPED** as the template's own closed-think format
-  (Noah, 2026-09-25): off 0 reasoning tokens on the served model, status
+  (2026-09-25): off 0 reasoning tokens on the served model, status
   lists off/low/high/max. It exposed a latent mlx-lm crash -- an EXACT
   prompt-cache hit leaves no segment and kills the generation thread --
   now guarded (engine/serve/cache_guard.py).
-* **"!!!!!" runs on Flash (Noah, seen in Scout).** Not the seed bug. In
+* **"!!!!!" runs on Flash (the maintainer, seen in Scout).** Not the seed bug. In
   Qwen's vocabulary token 0 is "!", and a sampler fed NaN/inf logits
   returns 0 forever: a numerical overflow upstream of sampling. Next: a
   NaN guard in the decode loop that stops the row and reports the step
@@ -680,7 +680,7 @@ multipliers derived from a seed. Three sources disagree:
     Flash-Next checkpoint buffer layer_multipliers   seed 1234's values
       (model.layers.1: [23703573157769, 20109073645365, 8052911324071])
     mlx-vlm 0.6.17 qwen4_exp/config.py:55             seed 1234
-    Noah's mlx-lm fork (vqlab's fit/score env),       seed 0, and the
+    the project's mlx-lm fork (vqlab's fit/score env),       seed 0, and the
       exo (same fork), knurlogic (vendored copy)      stored buffer unused
 
 The official configs declare no seed, so the fork uses 0 and recomputes
@@ -697,10 +697,10 @@ Before anything changes:
 1. The decisive A/B, on the bf16 TEACHER: ppl with seed 0 vs with the
    checkpoint's layer_multipliers, same text, one process per arm. If the
    checkpoint's hash wins, teacher caches rebuild and every published
-   Flash KL number moves (vqlab's instrument; Noah's call).
+   Flash KL number moves (vqlab's instrument; the maintainer's call).
 2. Record which default each shipping path hits (above) -- a downloader-
    divergence question as well as a reference-quality one.
-3. knurlogic keeps its current default until 1 has run and Noah decides.
+3. knurlogic keeps its current default until 1 has run and the maintainer decides.
    Scheduled (vqlab, 2026-09-23): the teacher A/B runs on 2026-09-24,
    after the paper handoff work; seed 0 stays until it reports.
    The fix, if confirmed: use the checkpoint's stored multipliers (the
@@ -745,7 +745,7 @@ qwen4_exp, glm5_next, gemma4.
   ids quoted in old commit messages go stale.
 * Then: HF card instructions point at knurlogic.
 
-## BIG TODO: setting up several machines must be easy (Noah, 2026-09-24)
+## BIG TODO: setting up several machines must be easy (2026-09-24)
 
 The scariest part for a new user, and the first thing to get right before
 release. Found by doing it on the M4 tonight, every step a stumble:
@@ -764,7 +764,7 @@ What "easy" should mean: install on each Mac, run one command on each, and
 the machines find each other; anything blocking (firewall, wrong address,
 different versions) is NAMED on the page, on the machine that can fix it.
 
-Open for Noah (user-facing details, 2026-09-25): **resending the firewall
+Open for the maintainer (user-facing details, 2026-09-25): **resending the firewall
 prompt when it is missed on the satellite.** macOS asks once per app; a
 dismissed or denied prompt is remembered and re-asking needs the firewall
 entry removed (admin). What knurlogic can do on its own: detect "listening

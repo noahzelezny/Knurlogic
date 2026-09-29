@@ -25,7 +25,7 @@ becomes the first user message, the summary and the tail that was kept,
 exactly as the model saw it when the summary was written, so the rewrite
 is the same every turn and its prompt a prefix-cache hit.
 
-THE INVARIANTS are Scout's (scout/tasks/agent_loop_compaction.py): the
+THE INVARIANTS (adapted from an earlier agent-loop compactor): the
 leading system message and the first user message (the goal) are kept;
 the last N messages are kept; the kept tail never starts on a tool result
 (it is widened back to the call that asked for it); nothing is done unless
@@ -210,7 +210,7 @@ class Plan:
 
 
 def plan(msgs: list, keep: int) -> Optional[Plan]:
-    """Scout's policy over OpenAI messages; None when fewer than MIN_DROP
+    """The compaction policy over OpenAI messages; None when fewer than MIN_DROP
     would go."""
     lead = 0
     while lead < len(msgs) and msgs[lead].get("role") == "system":
@@ -307,7 +307,7 @@ def tool_uses(msgs: list) -> List[ToolUse]:
 
 # ------------------------------------------------------------ the prompt
 
-# Scout's prompt (scout/coherence/summarizer.py _build_prompt), extended
+# A summarizer prompt adapted from an earlier summarizer, extended
 # for a coding agent: its four headings, plus files touched, the current and
 # next step, and open errors; tool results distilled, not dropped. Markdown
 # beside this module (prompts/), since it is a document that asks an agent
@@ -372,7 +372,7 @@ def render(summary: str, uses: List[ToolUse], found: dict,
 
 
 def fallback_summary(n_dropped: int) -> str:
-    """Scout's backstop marker: the span went, and no summary could be
+    """The backstop marker: the span went, and no summary could be
     made."""
     return (f"{n_dropped} earlier messages were removed to bound the "
             f"context; no summary could be made of them.")

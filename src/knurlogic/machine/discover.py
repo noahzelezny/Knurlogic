@@ -102,7 +102,7 @@ def _running_tool_roots() -> list:
     process that knows is right on all of them.
 
     Parsed with a boundary regex, not `split()`: the value here is
-    "/Volumes/Thunderbay SSD/Exo Models", and splitting on spaces turns one
+    a path with spaces such as "/Volumes/External SSD/Models", and splitting on spaces turns one
     real path into two paths that do not exist.
     """
     import re
@@ -343,8 +343,15 @@ def find(stores=None, extra=(), include_defaults: bool = True) -> list:
 
 def render(rows: list, working_set_bytes: int = 0) -> str:
     if not rows:
-        looked = ", ".join(str(p) for _s, p in _roots()) or "nowhere"
-        return f"no models found. Looked in: {looked}"
+        looked = ", ".join(str(p) for _s, p in _roots())
+        if not looked:
+            looked = ("no store directory exists yet (checked "
+                      + ", ".join(d for _s, _e, ds in STORES for d in ds)
+                      + ")")
+        return (f"no models found. Looked in: {looked}\n"
+                f"Put an MLX model under {MODELS_DIR} (or set "
+                "KNURLOGIC_MODELS), or download one into the Hugging Face "
+                "cache, e.g.\n  hf download mlx-community/gemma-4-e4b-it-8bit")
     L = [f"{'STORE':<12}{'NAME':<44}{'SIZE':>8}  STATE"]
     for f in rows:
         if not f.servable:

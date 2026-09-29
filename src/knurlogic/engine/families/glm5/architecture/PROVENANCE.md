@@ -5,9 +5,9 @@ artifacts were validated against -- not merely that it imports.
 
 ## glm5_next (package) -- mlx-vlm 0.6.17, re-vendored 2026-09-23
 
-- from: `/opt/anaconda3/envs/exo/lib/python3.13/site-packages/mlx_vlm/models/glm5_next`
-  (mlx-vlm 0.6.17; language.py sha256 f1c66fecf998..., byte-identical to
-  the copy in `~/mlx-vlm` and in the Thunderbay `glm5vlm` venv)
+- from: `mlx_vlm/models/glm5_next` of an installed mlx-vlm 0.6.17
+  (language.py sha256 f1c66fecf998..., byte-identical across the
+  installs checked)
 - closure: every module it imports, transitively, copied VERBATIM into
   `glm5_next/_mlx_vlm/` with mlx-vlm's own tree shape (kv_quant, turboquant,
   models/{activations, base, cache, gated_delta, mla, mlp, rope_utils,

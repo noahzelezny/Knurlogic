@@ -4,7 +4,7 @@
 and attacked by an adversarial reviewer, who ruled it not ready: five
 blockers. v1, the critique and the five source reports are kept in
 `vision-evidence/` as evidence. This document supersedes v1 wherever they
-differ; every blocker is resolved here, and two decisions Noah made after the
+differ; every blocker is resolved here, and two decisions the maintainer made after the
 critique are folded in: knurlogic owns the VQ runtime, and the stack is
 pinned.*
 
@@ -26,7 +26,7 @@ five families (MIT) -- the source to vendor from.
 
 ## Decisions (each closes a v1 blocker or records a choice)
 
-### D1. knurlogic owns the VQ runtime (Noah, 2026-09-23; closes B3)
+### D1. knurlogic owns the VQ runtime (the maintainer, 2026-09-23; closes B3)
 
 Today every released rung ships its own `model.py`: 10 distinct runtimes
 across 20 rungs, 4,229-5,194 lines each, and each deliberately builds a
@@ -61,7 +61,7 @@ that and the critique showed it contradicts the bundles. Instead:
     - v2 (both bf16-I/O on): Flash-Next 2.1 (per plan); **Qwen3.6-35B-A3B
       3.8 / 4.6 / 5.4 (drift: rebundled while v2 was the repo default,
       before `99ef3a1`; not a decision. Leave on v2 or rebundle to v1.5 is
-      Noah's call -- knurlogic reproduces whatever is published.)**
+      the maintainer's call -- knurlogic reproduces whatever is published.)**
     - v1.5 (both off): the rest of the flagged rungs.
     - arc6-era, no flags at all: GLM 3.1 / 3.6 on the Hub (the local v2
       copies were never published), GLM 2.7 to be re-read, 397B 2.4 / 2.6 /
@@ -79,7 +79,7 @@ that and the critique showed it contradicts the bundles. Instead:
   rung's numerics come from the rung (declared knobs set from its PUBLISHED
   model.py, above); the profile applies only when a person asks for it.
 
-### D2. Pin the stack (Noah; closes B4)
+### D2. Pin the stack (the maintainer; closes B4)
 
 Exact versions of mlx, mlx-lm and the vendored VQ runtime, recorded in
 `pyproject.toml` and in a test that fails on drift (versions plus a digest of
@@ -144,9 +144,9 @@ at least 80% of the text-only rate on the 27B and 35B.
 
 ## Work packages
 
-Separate git worktrees; file ownership is exclusive. Model split per Noah:
+Separate git worktrees; file ownership is exclusive. Model split per the maintainer:
 Opus for the packages where subtle correctness lives, Sonnet 5 for
-well-specified vendoring and UI against frozen contracts, Fable 5.1 for the
+well-specified vendoring and UI against frozen contracts, a separate model for the
 final adversarial review.
 
 | | Package | Model | Depends on |
@@ -160,7 +160,7 @@ final adversarial review.
 | P5 | Interfaces: chat panel, vision in models/state/fit, Anthropic image blocks, gate tool | Sonnet 5 | P0 |
 | -- | Integration: registry resolves real families; real-model gates, one model at a time | orchestrator | all |
 | P6 | Phase B drafting on image conversations | Opus | integration |
-| -- | Adversarial review of the whole | Fable 5.1 | all |
+| -- | Adversarial review of the whole | reviewer | all |
 
 Ownership notes from the critique: only P4 touches `engine/seam.py` and
 `engine/mtp/*`; only P1 touches the Qwen architecture files; P-VQ owns
@@ -249,7 +249,7 @@ and new to both:
    are counted in `tuning/resolve.py` alongside the store.
 5. **The goal overstated the gate** (fixed above).
 
-### Second pass, through Scout with tools (same day)
+### Second pass, through an agent harness with tools (same day)
 
 Checked against the source before folding in:
 * CONFIRMED: `fetch_nearest_cache` returns a slice of the key it was given
@@ -288,12 +288,12 @@ The rest of the second pass (findings 3-9), executed against the files:
 * Already addressed: #5 (processor config is fixed at load; a change is a
   key miss by construction), #9 (goal restated).
 
-### Third review: Qwen3.5-397B-A17B-VQ-2.2bpw through Scout (same day)
+### Third review: Qwen3.5-397B-A17B-VQ-2.2bpw through an agent harness (same day)
 
-Placed on the NozzleBook through knurlogic's own MCP. It confirmed the
+Placed on the M4 Max laptop through knurlogic's own MCP. It confirmed the
 model-level claims (image tokens: Qwen 248056, GLM 154854; templates keep
 thinking on Qwen and GLM; vision weights on all released rungs), made no
-false claims, and said plainly what it could not read (Scout's read roots
+false claims, and said plainly what it could not read (the ingest client's read roots
 exclude site-packages, so it could not open mlx-lm's server). Its critical
 item -- tuple sentinels in mlx-lm -- was already settled by execution (P4 and
 the end-to-end tests ran them through the real server objects on all five
@@ -312,12 +312,12 @@ larger budget or disable thinking for review passes.
   thinking dropped) and store a cache checkpoint at the end of each USER
   message, so a new turn reuses everything up to there and re-prefills only
   the previous answer without its thinking -- behaviour unchanged. Opt-in
-  "keep reasoning" setting (Noah's "thinking max"): earlier thinking stays in
+  "keep reasoning" setting (the maintainer's "thinking max"): earlier thinking stays in
   context, more context used, behaviour changes; measure before claiming
   it helps long agent tasks.
 * **Local reviewers.** Flash-Next 2.1 (fits the M3) and the 397B (needs both
-  nodes, so exo's instance comes off the NozzleBook for it) review the
-  build through knurlogic's own Anthropic endpoint, beside Fable 5.1. A
+  nodes, so exo's instance comes off the M4 Max laptop for it) review the
+  build through knurlogic's own Anthropic endpoint, beside the other reviewer. A
   different model lineage, and dogfooding the endpoint at long context;
   their findings are leads to verify, not verdicts. After the real-model
   gates, so they never compete for memory.
