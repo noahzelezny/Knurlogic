@@ -386,7 +386,7 @@ def kv_bytes_per_token(tc: dict, kv_bits=None) -> tuple:
         ratios = [int(r) for r in (ratios or [])][:layers]
         hd = int(tc.get("head_dim") or 0)
         ihd = int(tc.get("index_head_dim") or 0)
-        el = S.VISION_KV_DTYPE_BYTES
+        el = S.BF16_BYTES
         per = sum(hd / r + (ihd / r if r == 4 else 0)
                   for r in ratios if r > 0) * el
         n = sum(1 for r in ratios if r > 0)
@@ -406,7 +406,7 @@ def kv_bytes_per_token(tc: dict, kv_bits=None) -> tuple:
         exact = (int(tc.get("qk_rope_head_dim") or 0)
                  + int(tc.get("index_head_dim") or 0))
         el = S.kv_bytes_per_element(kv_bits)
-        per = int(mla * (latent * el + exact * S.VISION_KV_DTYPE_BYTES))
+        per = int(mla * (latent * el + exact * S.BF16_BYTES))
         dt = "bf16" if kv_bits is None else f"{kv_bits}-bit"
         return per, (f"{mla} MLA layers of {len(types)} x ({latent} latent "
                      f"x {dt} + {exact} rope + indexer key x bf16)")

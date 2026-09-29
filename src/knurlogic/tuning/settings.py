@@ -823,6 +823,10 @@ VISION_TOWER_PREFIXES = ("vision_tower.", "embed_vision.", "vision_model.",
 #    note on the resolution says so.
 VISION_KV_IMAGES = 4
 VISION_KV_TOKENS_PER_IMAGE = 4096
+#: Bytes per bf16 element: the size of any cache row kept in bf16 (a
+#: text model's unquantized KV, MLA rope keys, DeepSeek-V4's pools). Its
+#: own name so a change to the vision allowance cannot move these.
+BF16_BYTES = 2
 #: bf16 KV, the dtype every served rung's cache runs in.
 VISION_KV_DTYPE_BYTES = 2
 
