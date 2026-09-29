@@ -7,6 +7,7 @@ frozen contract (`docs/design/vision-contracts.md`), and this file proves it
 stays that way by never importing anything that would drag mlx in.
 """
 import json
+from pathlib import Path
 
 from knurlogic.interfaces.page import documents as web
 
@@ -175,3 +176,110 @@ def test_the_page_asset_ships_with_the_package():
     that loses it must fail here, not as a blank page."""
     from knurlogic.interfaces.page.documents import PAGE
     assert PAGE.exists(), PAGE
+
+
+def test_every_page_file_ships_and_every_reference_resolves():
+    """The page is many static files now: each one under assets/ must be
+    matched by pyproject's package-data, and every file index.html links
+    and every module imports must be there -- a missing module is a blank
+    page with one console error, not a failing request anyone sees."""
+    import re
+    import tomllib
+    from knurlogic.interfaces.page.documents import ASSETS, asset_names
+    root = Path(__file__).resolve().parents[1]
+    pkg = root / "src" / "knurlogic"
+    patterns = tomllib.loads((root / "pyproject.toml").read_text())[
+        "tool"]["setuptools"]["package-data"]["knurlogic"]
+    shipped = {p for pat in patterns for p in pkg.glob(pat) if p.is_file()}
+    files = [p for p in ASSETS.rglob("*") if p.is_file()]
+    assert {"index.html", "page.css", "app.js"} <= set(asset_names())
+    for f in files:
+        assert f in shipped, f"{f} is not package data"
+    html = (ASSETS / "index.html").read_text()
+    refs = [(ASSETS, r) for r in re.findall(r'(?:href|src)="/([^"]+)"', html)]
+    assert {"page.css", "app.js"} <= {r for _, r in refs}
+    for js in ASSETS.rglob("*.js"):
+        for r in re.findall(r"^(?:import|export)\b[^;]*?from '([^']+)'|"
+                            r"^import '([^']+)'", js.read_text(), re.M):
+            refs.append((js.parent, r[0] or r[1]))
+    assert len(refs) > 10
+    for base, r in refs:
+        target = (base / r).resolve()
+        assert target.is_file() and target.is_relative_to(ASSETS.resolve()), \
+            f"{r} (from {base}) is missing"
+
+
+def _page_server():
+    import threading
+    from http.server import ThreadingHTTPServer
+    from knurlogic.interfaces.page import documents as web
+    from knurlogic.interfaces.page import server as ui
+    srv = ThreadingHTTPServer(("127.0.0.1", 0),
+                              ui.make_handler(web.routes()))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+
+def _get(url):
+    import urllib.error
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            return r.status, r.headers, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers, e.read()
+
+
+def test_the_page_serves_its_modules_with_a_module_type():
+    srv, base = _page_server()
+    try:
+        code, h, body = _get(base + "/app.js")
+        assert code == 200 and h["Content-Type"].startswith(
+            "application/javascript")
+        assert h["Cache-Control"] == "no-cache"
+        assert b"import" in body
+        code, h, _ = _get(base + "/views/chat.js")
+        assert code == 200 and h["Content-Type"].startswith(
+            "application/javascript")
+        code, h, _ = _get(base + "/page.css")
+        assert code == 200 and h["Content-Type"].startswith("text/css")
+        code, h, body = _get(base + "/")
+        assert code == 200 and h["Content-Type"].startswith("text/html")
+        assert b'type="module"' in body
+    finally:
+        srv.shutdown()
+
+
+def test_the_static_route_refuses_traversal_and_unknown_files():
+    srv, base = _page_server()
+    try:
+        for path in ("/nope.js", "/views/nope.js", "/../documents.py",
+                     "/views/../../documents.py", "/%2e%2e/documents.py",
+                     "/documents.py", "/server.py"):
+            code, _, body = _get(base + path)
+            assert code == 404, path
+            assert b"import json" not in body
+    finally:
+        srv.shutdown()
+
+
+def test_asset_stays_inside_the_assets_directory(tmp_path, monkeypatch):
+    from knurlogic.interfaces.page import documents as web
+    assets = tmp_path / "assets"
+    (assets / "views").mkdir(parents=True)
+    (assets / "app.js").write_text("export {}")
+    (assets / "views" / "a.js").write_text("export {}")
+    (tmp_path / "secret.js").write_text("secret")
+    (assets / "out.js").symlink_to(tmp_path / "secret.js")
+    (assets / "notes.txt").write_text("not a page file")
+    monkeypatch.setattr(web, "ASSETS", assets)
+    assert web.asset("app.js") == (b"export {}",
+                                   "application/javascript; charset=utf-8")
+    assert web.asset("views/a.js")[0] == b"export {}"
+    for bad in ("../secret.js", "views/../../secret.js", "out.js",
+                "/app.js", "views//a.js", "./app.js", "views\\a.js",
+                "notes.txt", "missing.js", "views"):
+        assert web.asset(bad) is None, bad
+    assert web.asset_names() == ["app.js", "views/a.js"]
+    r = web.routes()
+    assert "/app.js" in r and "/views/a.js" in r and "/out.js" not in r
