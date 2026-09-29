@@ -282,7 +282,7 @@ def kind_from(name: str = "", model_id: str = "", product: str = "") -> dict:
     So two weak channels, in order, and neither pretends to be strong:
 
       1. the friendly name, because macOS seeds it from the product and
-         people leave it ("Studio A", "Laptop B");
+         people leave it ("Alex's Mac Studio", "Alex's MacBook Pro");
       2. the model identifier, which only says the product on pre-2022
          hardware -- see `_kind_from_identifier`.
 

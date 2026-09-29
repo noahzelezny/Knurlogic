@@ -104,7 +104,7 @@ def inventory(exo_url: str) -> list:
             ram_total=_bytes(_pick(m, "ramTotal", "ram_total")),
             ram_available=_bytes(_pick(m, "ramAvailable", "ram_available")),
             # exo's `modelId` is the PRODUCT NAME -- measured against the
-            # live daemon, which reports "Mac Studio" and "MacBook Pro", not
+            # live daemon, which reports product names ("Mac Studio", "MacBook Pro"), not
             # `Mac15,14`. That is a stronger channel than anything this end
             # can infer, so it is used directly rather than guessed at.
             model_id=who.get("modelId") or who.get("model_id") or "",

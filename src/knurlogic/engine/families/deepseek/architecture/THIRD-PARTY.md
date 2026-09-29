@@ -9,7 +9,7 @@ written into anyone's `site-packages`.
 
 | file | upstream project | license |
 |---|---|---|
-| `deepseek_v4.py` | mlx-lm (Noah Zelezny's fork of 0.31.9) | MIT — Copyright © 2023-2025 Apple Inc. |
+| `deepseek_v4.py` | mlx-lm (a fork of 0.31.9) | MIT — Copyright © 2023-2025 Apple Inc. |
 
 Some files carry no copyright header upstream; they are covered by their
 project's MIT license regardless, and are listed here so the obligation is

@@ -7,7 +7,7 @@ which is quadratic in the prompt on any head with real attention: Flash-Next's
 head carries the trunk's sparse indexer, and past its 2048-token budget one
 call over S positions materialises S x (S/4) fp32 index scores plus two
 S x S boolean masks -- ~6 bytes x S^2, or ~86 GB at a 120k-token prompt. That
-is what wedged a delegate_read on the M4 three times on 2026-09-17: no
+is what wedged a delegate_read on an M4 Max (128 GB) three times on 2026-09-17: no
 tokens for 300 s, then the auto-healer reset the cluster. Chunking the seed
 the way the trunk chunks its prefill bounds the temporaries at
 `step x kv_len`, the same shape the trunk already pays.

@@ -2122,7 +2122,7 @@ async function tick(){
       row('cpu', pc(now.cpu_pct), '', h.map(s=>s.cpu_pct), 'var(--warn)')+
       row('memory', pc(now.memory_pct), '',
         h.map(s=>s.memory_pct), '#bb9af7')+
-      // °C on a 0-100 scale, as the harness draws it: ambient near the floor,
+      // °C on a 0-100 scale, ambient near the floor,
       // a hot die near the top.
       row('thermal', (now.temp_c!=null?Math.round(now.temp_c)+'°C · ':'')+(th||'--'),
           'th', h.some(s=>s.temp_c!=null)?h.map(s=>s.temp_c):null, '#fb923c')

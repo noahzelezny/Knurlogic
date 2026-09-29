@@ -24,8 +24,8 @@ def test_old_identifiers_still_name_the_product():
 
 
 def test_a_remote_node_is_read_from_what_it_reported():
-    assert wired.kind_from("Studio A", "Mac15,14")["kind"] == "studio"
-    assert wired.kind_from("Laptop B", "Mac16,7")["kind"] == "laptop"
+    assert wired.kind_from("Alex's Mac Studio", "Mac15,14")["kind"] == "studio"
+    assert wired.kind_from("Alex's MacBook Pro", "Mac16,7")["kind"] == "laptop"
     assert wired.kind_from("kitchen mini", "")["kind"] == "mini"
 
 

@@ -4,7 +4,7 @@ one thread per connection, every model operation handed to the scheduler.
   POST /v1/chat/completions  /chat/completions  /v1/completions   openai.py
   POST /v1/messages          Anthropic, in-process over openai.py
   GET  /v1/models            the served model, capabilities and size
-  GET  /v1/residency         what is loaded, its state and memory  (the harness)
+  GET  /v1/residency         what is loaded, its state and memory
   POST /v1/ensure            load a model if it is not; optionally wait
   GET  /health
   and the page's routes (web.routes): /, /status.json, /settings.json, ...

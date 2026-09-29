@@ -6,9 +6,9 @@ artifacts were validated against -- not merely that it imports.
 ## deepseek_v4.py
 
 - taken: 2026-09-29
-- from: the M4's `exo` env, `mlx_lm/models/deepseek_v4.py` -- the maintainer's own
+- from: `mlx_lm/models/deepseek_v4.py` of the project's own
   mlx-lm fork (installed from a local `mlx_lm-0.31.9` wheel), vendored with
-  his permission. No exo code is in it.
+  its author's permission. No exo code is in it.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.31.3.
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
 - vendored sha256: `d4fc963282e1214a6f5f74b21e3874fb0fd341a77cac218600bc89393afc50b0`

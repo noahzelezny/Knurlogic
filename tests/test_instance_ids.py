@@ -111,8 +111,8 @@ def test_unload_needs_a_name(page):  # noqa: F811
     assert "instance" in out["error"]
 
 
-def test_scout_residency_reports_the_instance(monkeypatch):
-    from knurlogic.interfaces.http import scout
+def test_residency_reports_the_instance(monkeypatch):
+    from knurlogic.interfaces.http import residency as res_api
 
     monkeypatch.setattr(
         servers, "registry",
@@ -120,16 +120,16 @@ def test_scout_residency_reports_the_instance(monkeypatch):
     host = SimpleNamespace(status=lambda: {
         "state": "ready", "model": "/p/A", "memory_bytes": 1 << 30})
     sched = SimpleNamespace(width=1, requests=lambda: REQS)
-    doc = scout.residency(host, sched, port=8080)
+    doc = res_api.residency(host, sched, port=8080)
     assert doc["data"][0]["instance"] == "1111222233334444"
 
 
-def test_scout_residency_omits_instance_when_unknown(monkeypatch):
-    from knurlogic.interfaces.http import scout
+def test_residency_omits_instance_when_unknown(monkeypatch):
+    from knurlogic.interfaces.http import residency as res_api
 
     monkeypatch.setattr(servers, "registry", lambda: {})
     host = SimpleNamespace(status=lambda: {
         "state": "ready", "model": "/p/A", "memory_bytes": 1 << 30})
     sched = SimpleNamespace(width=1, requests=lambda: REQS)
-    doc = scout.residency(host, sched, port=8080)
+    doc = res_api.residency(host, sched, port=8080)
     assert "instance" not in doc["data"][0]

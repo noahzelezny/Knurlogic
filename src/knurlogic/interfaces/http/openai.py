@@ -377,7 +377,7 @@ def _data(obj: Any) -> bytes:
 def models_document(served: dict, sampling: Optional[dict] = None,
                     context_length: int = 0,
                     thinking: Optional[dict] = None) -> dict:
-    """/v1/models: the one served model, with what the harness asked for, the
+    """/v1/models: the one served model, with its capabilities and size, the
     sampling a request that says nothing gets (the model's recommendation;
     {} is greedy), its context window (0: the config does not say), and
     the thinking levels its template has (engine/serve/thinking.levels:

@@ -1337,8 +1337,8 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
         at += counts[r]
     # Cut by the real bytes, not by counting layers: layers are not alike
     # (Qwen3.8 Flash's layer 1 carries a 42 GiB n-gram embedding). Counted,
-    # the M3 took layers 0..18 -- 63.5 GiB of 110 -- and fit, but with 13 GiB
-    # left for every prompt's KV while the M4 kept 70 GiB free, and long
+    # the M3 Ultra took layers 0..18 -- 63.5 GiB of 110 -- and fit, but with 13 GiB
+    # left for every prompt's KV while the M4 Max kept 70 GiB free, and long
     # prompts were refused. The count is the fallback, not the rule.
     alt = _byte_bounds(layer_bytes, weights, cap)
     if alt is not None:
