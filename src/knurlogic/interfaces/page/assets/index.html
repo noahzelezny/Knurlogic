@@ -331,6 +331,19 @@
    align-items:flex-start}
  .runs button{padding:2px 8px;font-size:12.5px}
  .allow{margin-top:18px}
+ /* the Knurlogic tab's strategy: one native radio per preset, its three
+    plain lines under the name */
+ .strat{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+ .strat label{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;
+   border:1px solid var(--line);padding:9px 12px;cursor:pointer}
+ .strat label:has(input:checked){border-color:var(--acc)}
+ .strat input{grid-row:span 4;margin-top:3px}
+ .strat b{font-size:14px}
+ .strat b small{color:var(--faint);font-weight:400;font-size:12px;margin-left:8px}
+ .strat span{font-size:13px;color:var(--dim)}
+ .strat span i{font-style:normal;color:var(--faint);display:inline-block;min-width:5.2em}
+ .stratctl{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0 4px}
+ .wired .run{font-size:13px;color:var(--dim);margin-top:8px}
  .room{font-size:13px;color:var(--dim);margin-top:4px}
  .room.small{color:var(--warn)}
  .mfacts{font-size:13px;color:var(--dim);margin:-4px 0 14px}
@@ -1277,7 +1290,7 @@ function knobHTML(k, c){
     c.hide&&c.hide(k.name)?' hidden':''}>
     <div class="hd"><span class="k">${esc(KNOB_TITLE[k.name]||k.name)}${infoHTML(about,'down')}${tag}</span>
       <span class="kedit" data-knob="${esc(k.name)}" data-g="${esc(c.g)}"
-        ${c.where!=null?`data-where="${esc(c.where)}"`:''}${c.url?` data-url="${esc(c.url)}"`:''} data-model="${esc(c.model)}"
+        ${c.where!=null?`data-where="${esc(c.where)}"`:''}${c.url?` data-url="${esc(c.url)}"`:''}${c.ukey?` data-ukey="${esc(c.ukey)}"`:''} data-model="${esc(c.model)}"
         data-base="${esc(c.base||'')}" data-label="${esc(c.label)}" data-reach="${reach}" data-cur="${esc(cur)}"
         data-from="${esc(from)}"${next!=null?` data-next="${esc(next)}"`:''}${
         k.max?` data-max="${esc(k.max)}"`:''}${saved!=null?` data-saved="${esc(saved)}"`:''}>${ctl}${
@@ -1336,7 +1349,7 @@ document.addEventListener('change', e=>{
   if(no){ box.closest('.knob').querySelector('.kstage').innerHTML=
       `<span style="color:var(--warn)">${no} -- not staged</span>`;
     e.target.value=stagedVal(d.g,d.knob)??d.from; return }
-  stage(d.g, {label:d.label, where:d.where, model:d.model, base:d.base, url:d.url}, d.knob,
+  stage(d.g, {label:d.label, where:d.where, model:d.model, base:d.base, url:d.url, ukey:d.ukey}, d.knob,
         {from:d.from, to:e.target.value.trim(), reach:d.reach, cur:d.cur});
   const to=stagedVal(d.g,d.knob), row=box.closest('.knob');
   row.classList.toggle('staged', to!=null);
@@ -1400,7 +1413,7 @@ const STAGEPOP=(()=>{
       }
       if(live.length){
         const url=g.url || (g.where ? '/apply?'+new URLSearchParams({where:g.where}) : '/settings.json');
-        const body=g.url ? {gib:+live[0][1].to} : Object.fromEntries(live.map(([k,v])=>[k,v.to]));
+        const body=g.url ? {[g.ukey||'gib']:+live[0][1].to} : Object.fromEntries(live.map(([k,v])=>[k,v.to]));
         let r;
         try{
           const x=await fetch(url,{method:'POST', headers:{'Content-Type':'application/json'},
@@ -1424,7 +1437,8 @@ const STAGEPOP=(()=>{
     pop.querySelector('[data-s=done]').focus();
     if(SEL) SETS=launchSets(baseKey(SEL.name));
     // the allowance moves what fits and the room each model leaves
-    if(out.length){ loadSettings(ASK); loadModels() }
+    if(out.length){ loadSettings(ASK); loadModels();
+      if(SSEC==='cluster' || SSEC==='knurlogic') showSetTab() }
   }
   pop.addEventListener('click', e=>{
     const s=e.target.closest('[data-s]'); if(!s) return;
@@ -1443,39 +1457,49 @@ const STAGEPOP=(()=>{
   return {beforeClose, hide};
 })();
 // The wired limit: what the GPU may hold, which decides whether a rung
-// loads at all. knurlogic NEVER runs the sysctl -- it reads the current
-// value, works out where the ceiling is, and hands over the exact line.
-// A soft gate, like everything else here: past what it recommends you get
-// the command and a warning rather than a refusal. The same block on every
-// machine's tab; another machine's is only read here (it is changed on
-// that machine's own page), so its field is shown but not editable.
-function wiredHTML(doc, own){
+// loads at all. knurlogic NEVER runs the sysctl -- it needs sudo on the Mac
+// it changes -- so it reads the current value, works out where the ceiling
+// is, and hands over the exact line to run THERE. A soft gate, like
+// everything else here: past what it recommends you get the command and a
+// warning rather than a refusal. Every machine's field is live: this one's
+// asks its own /settings.json, a peer's asks that peer's through /peek, so
+// the command is worked out by the machine it is for.
+function wiredHTML(doc, m){
   if(!doc || doc.error) return `<div class="wired"><div class="msg">${esc(doc&&doc.error||'no answer')}</div></div>`;
-  const w=doc.wired||{};
+  const w=doc.wired||{}, own=!m||m.id==='local';
   if(!w.known) return '<div class="wired"><div class="msg">wired limit not known</div></div>';
   const cur=doc.wired_current_gib, rec=doc.wired_recommended_gib,
         inst=doc.wired_installed_gib, tgt=doc.wired_target_gib??cur;
+  const host=own?'':(m.page||'').replace(/^https?:\/\//,'').replace(/:\d+$/,'');
+  const run=own ? 'Run this in Terminal on this Mac. sudo asks for its admin password; it lasts until the Mac restarts.'
+    : `Run this in Terminal on ${esc(m.name)} (on it, or over ssh ${esc(host)}). sudo asks for that Mac's admin password; knurlogic cannot run it for you, and it lasts until that Mac restarts.`;
   return `<div class="wired">
     <div class="sidelab" style="margin-top:0">wired limit · ${esc(w.key)}</div>
     <div class="wiredbar"><i style="width:${(100*tgt/inst).toFixed(1)}%"></i>
       <u style="left:${(100*rec/inst).toFixed(1)}%" title="recommended"></u></div>
     <div class="wiredrow">
-      <label class="ro">set to <input type="number" ${own?'id="wslider"'
-        :'disabled title="changed on that machine\'s own page"'} min="8"
+      <label class="ro">set to <input type="number" class="wset" aria-label="wired limit" min="8"
         max="${Math.round(inst-4)}" step="1" value="${Math.round(tgt)}"> GiB</label>
       <span class="ro">now <b>${cur.toFixed(0)}</b> of ${inst.toFixed(0)} GiB ·
         knurlogic suggests <b>${rec.toFixed(0)}</b></span>
     </div>
     ${doc.wired_warn?`<div class="warn">${esc(doc.wired_warn)}</div>`:''}
-    ${doc.wired_command?`<pre>${esc(doc.wired_command)}</pre>`:''}
+    ${doc.wired_command?`<div class="run">${run}</div><pre>${esc(doc.wired_command)}</pre>`:''}
   </div>`;
 }
 // A number, not a slider: a slider spent the panel's width on one value.
-// Asked on change (Enter or leaving the field): the server recomputes the
-// command and the warning.
-function wireWired(){
-  const sl=$('wslider');
-  if(sl) sl.onchange=()=>loadSettings({...(ASK.tune?{tune:ASK.tune}:{}), wired_gib:sl.value});
+// Asked on change (Enter or leaving the field): the machine it is for
+// recomputes the command and the warning.
+function wireWired(box, m){
+  const sl=box&&box.querySelector('.wset'); if(!sl) return;
+  if(!m || m.id==='local'){
+    sl.onchange=()=>loadSettings({...(ASK.tune?{tune:ASK.tune}:{}), wired_gib:sl.value});
+    return;
+  }
+  sl.onchange=async()=>{
+    const doc=await getJSON(peekURL(m.page,'/settings.json',{wired_gib:sl.value}));
+    box.innerHTML=wiredHTML(doc, m); wireWired(box, m);
+  };
 }
 async function loadSettings(q){
   const qs=new URLSearchParams(q||{}).toString();
@@ -1483,7 +1507,7 @@ async function loadSettings(q){
   catch(e){ DOC={} }
   ASK=DOC.asked||{};
   const w=document.querySelector('#machbody [data-m="local"] .mwired');
-  if(w){ w.innerHTML=wiredHTML(DOC,true); wireWired() }
+  if(w){ w.innerHTML=wiredHTML(DOC,null); wireWired(w,null) }
   const al=document.querySelector('#machbody [data-m="local"] .mallow');
   if(al) al.innerHTML=allowHTML(DOC.allowance, machines()[0], true);
 }
@@ -1543,8 +1567,9 @@ let SMACH=SKEEP.mach||'local';
 function keepSet(){ try{ sessionStorage.setItem('kl.settings',
   JSON.stringify({sec:SSEC, base:SBASE, mach:SMACH})) }catch(e){} }
 function renderSetTabs(){
-  const secs=[{id:'cluster', name:'Cluster'}, {id:'models', name:'Models'},
-    {id:'compaction', name:'Compaction'}];
+  if(SSEC==='compaction') SSEC='knurlogic';     // folded into Knurlogic
+  const secs=[{id:'knurlogic', name:'Knurlogic'}, {id:'cluster', name:'Cluster'},
+    {id:'models', name:'Models'}];
   $('settabs').innerHTML=secs.map(t=>`<button data-s="${t.id}"
     class="${t.id===SSEC?'on':''}">${t.name}</button>`).join('');
   $('settabs').querySelectorAll('button').forEach(f=>f.onclick=()=>{
@@ -1606,9 +1631,9 @@ function factsHTML(n){
 }
 // The knurlogic allowance: the most memory knurlogic may use on the machine
 // -- the ceiling for a load's fit check and a model server's memory guard.
-// This machine's is staged like a knob and sent on close (POST
-// /allowance.json); a peer's is read from its /settings.json and set on
-// that peer's own page.
+// Staged like a knob and sent on close: this machine's to its own POST
+// /allowance.json, a peer's to /machine.json?where=<its page>, which asks
+// that peer's page to set its own (each Mac keeps its allowance itself).
 function allowHTML(a, m, own){
   const head='<div class="sidelab">knurlogic allowance</div>';
   if(!a) return `<div class="allow">${head}<div class="msg">${own?'not read':
@@ -1616,16 +1641,16 @@ function allowHTML(a, m, own){
   const none=!a.allowance_gib;
   const say=`${none?'none -- knurlogic takes the working set':
     'at most '+a.allowance_gib+' GiB'} · a load may have ${a.effective_gib} GiB`;
-  if(!own) return `<div class="allow">${head}<div class="msg">${esc(say)}</div>
-    <div class="msg">Set on that machine's own page.</div></div>`;
   const k={name:'knurlogic allowance', value:String(a.allowance_gib), reach:'live',
-    unit:'GiB', what:'The most memory knurlogic may use on this machine: the '+
+    unit:'GiB', what:'The most memory knurlogic may use on '+(own?'this machine':m.name)+': the '+
       'ceiling for a load\'s fit check and for the memory guard of a model '+
       'server it starts. 0 is none.',
     reach_why:'A load checks against it at once; a model already running '+
-      'keeps the working set it started with. Kept in '+a.file};
-  return `<div class="allow">${head}${knobHTML(k,{g:'allowance', where:'',
-    url:'/allowance.json', model:'', label:m.name+' · machine'})}
+      'keeps the working set it started with. Kept in '+a.file+(own?'':' on '+m.name)};
+  const c=own ? {g:'allowance', where:'', url:'/allowance.json', model:'', label:m.name+' · machine'}
+    : {g:'allowance|'+m.id, where:'', url:'/machine.json?'+new URLSearchParams({where:m.page}),
+       ukey:'allowance_gib', model:'', label:m.name+' · machine'};
+  return `<div class="allow">${head}${knobHTML(k,c)}
     <div class="msg">${esc(say)}</div></div>`;
 }
 // Cluster: the machines down the side, this one first, then each answering
@@ -1654,14 +1679,13 @@ async function showMachine(m){
     ${factsHTML(m.node||{})}
     <div class="mwired"><div class="msg">reading…</div></div>
     <div class="mallow"></div>
-    ${own?'':'<div class="msg">Its wired limit and allowance are set on that machine\'s own page.</div>'}
   </div>`;
   const doc=own ? DOC : await getJSON(peekURL(m.page,'/settings.json'));
   const row=el.querySelector(`[data-m="${CSS.escape(m.id)}"]`);
   if(seq!==SEQ || !row) return;
-  row.querySelector('.mwired').innerHTML=wiredHTML(doc, own);
+  const wb=row.querySelector('.mwired');
+  wb.innerHTML=wiredHTML(doc, m); wireWired(wb, m);
   row.querySelector('.mallow').innerHTML=allowHTML(doc&&doc.allowance, m, own);
-  if(own) wireWired();
 }
 // Every base model: the picker's groups over what is on this disk, plus any
 // running on a peer that this disk does not have; the running ones first.
@@ -1707,7 +1731,7 @@ async function showBase(b){
   const preview=async lead=>{
     const ws=fitWS(), m=b.ms.find(x=>!ws||x.size_bytes<=ws)||b.ms[0];
     // resolved at the base model's saved launch preset
-    const pre=launchSets(b.name).KNURLOGIC_PRESET||'balanced';
+    const pre=launchSets(b.name).KNURLOGIC_PRESET||window.LOADTUNE||'balanced';
     const doc=await getJSON('/settings.json?'+new URLSearchParams({artifact:m.path, tune:pre}));
     if(seq!==SEQ) return;
     el.innerHTML=modelHTML(b, null, doc, `${lead}<div class="msg" style="margin-top:0">${
@@ -1739,7 +1763,97 @@ async function showBase(b){
     SRUN[b.name]=x.dataset.run; showBase(b) });
 }
 function showSetTab(){ return SSEC==='models' ? showModels()
-  : SSEC==='compaction' ? showCompaction() : showCluster() }
+  : SSEC==='knurlogic' ? showKnurlogic() : showCluster() }
+
+// --- knurlogic: the strategy, each machine's memory, compaction ---------------
+// What a person decides once, not per model: how knurlogic trades speed
+// against memory headroom and stability (the strategy -- the launch presets,
+// explained), what each machine lets it use (the allowance, the wired
+// limit), and how a server compacts a long conversation. A base model's own
+// Launch preset (Models) still beats the strategy; it is there for the rare
+// family that needs one.
+let SKN=SKEEP.kn||'strategy';
+function keepKn(){ try{ const k=JSON.parse(sessionStorage.getItem('kl.settings')||'{}');
+  k.kn=SKN; sessionStorage.setItem('kl.settings', JSON.stringify(k)) }catch(e){} }
+function compItems(){
+  return allModels().map(r=>({id:'run|'+r.where, r}))
+    .concat(settingBases().filter(b=>!b.runs.length).map(b=>({id:'base|'+b.name, b})));
+}
+function showKnurlogic(){
+  const L=$('setlist'), ms=machines(), cs=compItems();
+  const ids=['strategy', ...ms.map(m=>'mach|'+m.id), ...cs.map(x=>'comp|'+x.id)];
+  if(!ids.includes(SKN)) SKN='strategy';
+  const it=(id,name,sub,on)=>`<div class="fam" data-k="${esc(id)}" aria-current="${id===SKN}">${esc(name)}<small${
+    on?' class="on"':''}>${esc(sub)}</small></div>`;
+  L.innerHTML=it('strategy','Strategy',(window.LOADTUNE||'balanced')+' · every machine')+
+    `<div class="sect">memory</div>`+ms.map(m=>it('mach|'+m.id, m.name,
+      m.id==='local'?'this machine':m.id+(m.error?' · not answering':''))).join('')+
+    `<div class="sect">compaction</div>`+(cs.length?cs.map(x=>x.r
+      ? it('comp|'+x.id, shortName(x.r.name), 'on '+x.r.mach.name, true)
+      : it('comp|'+x.id, x.b.name, 'next launch')).join('')
+      :'<div class="msg" style="padding:0 12px">no models</div>');
+  L.querySelectorAll('[data-k]').forEach(v=>v.onclick=()=>{
+    if(v.dataset.k===SKN) return;
+    SKN=v.dataset.k; keepKn();
+    L.querySelectorAll('[data-k]').forEach(x=>x.setAttribute('aria-current', x===v));
+    showKnOf(ms, cs);
+  });
+  keepKn(); showKnOf(ms, cs);
+}
+function showKnOf(ms, cs){
+  if(SKN==='strategy') return showStrategy(ms);
+  if(SKN.startsWith('mach|')) return showMachine(ms.find(m=>'mach|'+m.id===SKN));
+  return showCompactionOf(cs.find(x=>'comp|'+x.id===SKN));
+}
+// The strategy: one choice for every machine, like a broker asking for risk
+// tolerance. Each machine keeps its own (machine/strategy.py); Apply sends
+// the choice to this machine and every answering peer, each through its own
+// page, and says what each answered.
+let STRATOUT='';
+async function showStrategy(ms){
+  const el=$('machbody'), seq=++SEQ;
+  el.innerHTML='<div class="msg">reading…</div>';
+  const docs=await Promise.all(ms.map(m=>m.id==='local' ? getJSON('/strategy.json')
+    : getJSON(peekURL(m.page,'/settings.json')).then(d=>d.error?d:(d.strategy||{error:'its knurlogic predates the strategy'}))));
+  if(seq!==SEQ) return;
+  const me=docs[0]||{}, ps=me.presets||[], cur=me.preset||'balanced';
+  if(!ps.length){ el.innerHTML=`<div class="msg">${esc(me.error||'this page predates the strategy')}</div>`; return }
+  const over=Object.entries(launchAll()).filter(([,v])=>v&&v.KNURLOGIC_PRESET);
+  el.innerHTML=`<div class="sgrp"><div class="shd">Strategy<span class="ro">how knurlogic
+    trades speed against memory headroom and stability, on every machine</span></div>
+    <div class="msg" style="margin-top:0">One choice for the whole cluster. It is the
+    launch preset every model starts with: each bundles a prompt-chunk width, a cache
+    size, MTP and the KV cache's precision, measured together. Nothing running changes;
+    it applies to the next launch.</div>
+    <fieldset class="strat">${ps.map(p=>`<label><input type="radio" name="strategy"
+      value="${esc(p.name)}"${p.name===cur?' checked':''}>
+      <b>${esc(p.title)}${p.name===me.default?'<small>default</small>':''}</b>
+      <span><i>trades</i>${esc(p.trades)}</span>
+      <span><i>changes</i>${esc(p.changes)}</span>
+      <span><i>pick it</i>${esc(p.who)}</span></label>`).join('')}</fieldset>
+    <div class="stratctl"><button class="go" id="stratgo">Apply to every machine</button>
+      <span class="ro" id="stratout">${esc(STRATOUT)}</span></div>
+    <div class="sidelab">machines</div>
+    ${ms.map((m,i)=>`<div class="msg">${esc(m.name)} · ${docs[i].error?
+      '<span style="color:var(--warn)">'+esc(docs[i].error)+'</span>':esc(docs[i].preset)}</div>`).join('')}
+    <div class="sidelab">per model family</div>
+    <div class="msg">${over.length?'These base models launch with their own preset instead: '+
+      over.map(([b,v])=>esc(b)+' ('+esc(v.KNURLOGIC_PRESET)+')').join(', ')+
+      '. Change or clear it under Models → the model → Launch preset.'
+      :'None: every model follows the strategy. A family that needs another preset can have one under Models → the model → Launch preset.'}</div>
+  </div>`;
+  $('stratgo').onclick=async()=>{
+    const pick=(el.querySelector('input[name=strategy]:checked')||{}).value; if(!pick) return;
+    $('stratgo').disabled=true; $('stratout').textContent='applying…';
+    const res=await Promise.all(ms.map(async m=>{
+      try{ const r=await fetch('/machine.json?'+new URLSearchParams({where:m.id==='local'?'':m.page}),
+          {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({strategy:pick})});
+        const j=await r.json(); return m.name+': '+(j.error||'now '+pick) }
+      catch(e){ return m.name+': '+String(e.message||e) } }));
+    window.LOADTUNE=pick; STRATOUT=res.join(' · ');
+    if(SSEC==='knurlogic' && SKN==='strategy') showKnurlogic();
+  };
+}
 
 // --- compaction -------------------------------------------------------------
 // Server-side compaction's operator defaults, per model server: when a
@@ -1748,32 +1862,6 @@ function showSetTab(){ return SSEC==='models' ? showModels()
 // server reads them per request, so each is live there; a model not running
 // takes them as launch settings, like any knob. The rows are knobHTML's, so
 // a change is staged and applied on close with the rest.
-let SCOMP=SKEEP.comp||'';
-function showCompaction(){
-  const L=$('setlist'), runs=allModels(),
-    off=settingBases().filter(b=>!b.runs.length);
-  const items=runs.map(r=>({id:'run|'+r.where, r}))
-    .concat(off.map(b=>({id:'base|'+b.name, b})));
-  if(!items.some(x=>x.id===SCOMP)) SCOMP=items.length?items[0].id:'';
-  const row=x=>x.r
-    ? `<div class="fam" data-c="${esc(x.id)}" aria-current="${x.id===SCOMP}">${esc(shortName(x.r.name))}
-        <small class="on">on ${esc(x.r.mach.name)}</small></div>`
-    : `<div class="fam" data-c="${esc(x.id)}" aria-current="${x.id===SCOMP}">${esc(x.b.name)}
-        <small>next launch</small></div>`;
-  const on=items.filter(x=>x.r), dn=items.filter(x=>x.b);
-  L.innerHTML=`${on.length?`<div class="sect">running</div>${on.map(row).join('')}`:''}${
-    dn.length?`<div class="sect">on this disk</div>${dn.map(row).join('')}`:''}${
-    items.length?'':'<div class="msg" style="padding:0 12px">no models</div>'}`;
-  L.querySelectorAll('[data-c]').forEach(v=>v.onclick=()=>{
-    if(v.dataset.c===SCOMP) return;
-    SCOMP=v.dataset.c; keepComp();
-    L.querySelectorAll('[data-c]').forEach(x=>x.setAttribute('aria-current', x===v));
-    showCompactionOf(items.find(x=>x.id===SCOMP));
-  });
-  keepComp(); showCompactionOf(items.find(x=>x.id===SCOMP));
-}
-function keepComp(){ try{ const k=JSON.parse(sessionStorage.getItem('kl.settings')||'{}');
-  k.comp=SCOMP; sessionStorage.setItem('kl.settings', JSON.stringify(k)) }catch(e){} }
 async function showCompactionOf(x){
   const el=$('machbody'), seq=++SEQ;
   if(!x){ el.innerHTML='<div class="msg">No models on this disk, and nothing running.</div>'; return }
@@ -2645,7 +2733,10 @@ $('launch').onclick=async()=>{
         `${k}  wants ${v.wanted}, running ${v.running}`).join('\n'));
   }
 };
+// the tune a launch takes: this machine's knurlogic strategy (Settings ->
+// Knurlogic); a base model's own Launch preset still beats it
 window.LOADTUNE='balanced';
+getJSON('/strategy.json').then(d=>{ if(d&&d.preset) window.LOADTUNE=d.preset });
 
 // --- which machines, and MTP -------------------------------------------------
 const localName=()=>((LASTNODES.find(isLocal)||{}).node)||'this Mac';

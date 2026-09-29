@@ -334,6 +334,7 @@ def machine_settings():
         # read here too, so a peer's tab shows it through /peek -- which
         # reads /settings.json and nothing that can change anything
         doc["allowance"] = allowance_doc()
+        doc["strategy"] = strategy_doc()
         return doc
     return handler
 
@@ -368,6 +369,30 @@ def set_allowance(body) -> dict:
     allowance.set(int(gib * GIB))
     return {**allowance_doc(), "applied": {"knurlogic allowance":
             f"{gib:g} GiB" if gib else "none"}}
+
+
+def strategy_doc() -> dict:
+    """`GET /strategy.json`: this machine's knurlogic strategy -- the launch
+    preset a launch takes when none is named (machine/strategy.py) -- with
+    every preset explained (tuning/settings.PRESET_GUIDE)."""
+    from knurlogic.machine import strategy
+    from knurlogic.tuning.settings import PRESET_DEFAULT, PRESET_GUIDE
+    return {"preset": strategy.get(), "default": PRESET_DEFAULT,
+            "presets": [{"name": k, **v} for k, v in PRESET_GUIDE.items()]}
+
+
+def set_strategy(body) -> dict:
+    """`POST /strategy.json` {"preset": name}: remember it for this
+    machine; the next launch without a preset of its own takes it."""
+    from knurlogic.machine import strategy
+    try:
+        name = json.loads(body or b"{}").get("preset")
+        strategy.set(name)
+    except Exception as e:
+        return {"error": str(e) if isinstance(e, ValueError)
+                else "send {\"preset\": name}"}
+    return {**strategy_doc(), "applied": {"knurlogic strategy":
+                                          strategy.get()}}
 
 
 def _preview(path: str, tune: str, working_set_gib=None,
