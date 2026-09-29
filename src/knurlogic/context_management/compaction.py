@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 #: a summary pass samples cool and does not think
 SUMMARY_TEMPERATURE = 0.2
-#: room for one finding line per dropped tool call, beyond the budget
+#: room for one finding line per dropped tool call, beyond the dropped span
 TOKENS_PER_FINDING = 48
 
 
@@ -46,7 +46,6 @@ class Pending:
     view: list
     plan: E.Plan
     uses: list
-    budget: int
     dropped_tokens: int
     tokens: int                  # the view's prompt, before
 
@@ -121,8 +120,6 @@ def prepare(body: dict, *, count: Callable[[list, list], int],
             dropped = max(tokens - count(kept, tools), 0)
             pending = Pending(compact, viewed, p,
                               E.tool_uses(viewed[p.start:p.end]),
-                              E.budget(dropped, cfg["summary_min"],
-                                       cfg["summary_max"]),
                               dropped, tokens)
     run = dict(body, messages=viewed)
     run.pop("context_management", None)
@@ -133,12 +130,14 @@ def summary_body(body: dict, pending: Pending) -> dict:
     """The summary pass: the conversation as it stands, plus the ask.
     Same model, tools and template kwargs as the request, so the rendered
     history is the prefix the prompt cache holds."""
-    ask = E.prompt(pending.budget, pending.uses, pending.edit.instructions)
+    ask = E.prompt(pending.uses, pending.edit.instructions)
     b = {k: v for k, v in body.items()
          if k in ("model", "tools", "chat_template_kwargs", "role_mapping")}
     b.update(messages=list(pending.view) + [{"role": "user", "content": ask}],
-             max_tokens=pending.budget
-             + TOKENS_PER_FINDING * len(pending.uses) + 256,
+             # never longer than what it replaces: the dropped span, plus a
+             # finding line per dropped tool call
+             max_tokens=pending.dropped_tokens
+             + TOKENS_PER_FINDING * len(pending.uses),
              temperature=SUMMARY_TEMPERATURE, stream=False,
              reasoning_effort="none", reasoning={"exclude": True})
     return b
@@ -186,7 +185,6 @@ def summarize(body: dict, pending: Pending, out: Outcome,
                "cleared_input_tokens": pending.dropped_tokens,
                "distilled_tool_uses": distilled,
                "cleared_tool_uses": cleared,
-               "summary_budget": pending.budget,
                "input_tokens_before": pending.tokens}
     if pending.edit.auto:
         applied["automatic"] = True

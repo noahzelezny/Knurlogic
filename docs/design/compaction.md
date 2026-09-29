@@ -26,7 +26,13 @@ fallback. The recent tail stays verbatim (the agent may still be using it).
 
 the harness's (`scout/coherence/summarizer.py:175-190`) extended for coding agents: Goal,
 Decisions made, Information gathered, Files and identifiers touched, Current step, Next
-step, Open errors and questions. Budget about 1/10 of the dropped tokens, clamped 1k-8k.
+step, Open errors and questions. It lives as markdown, not a Python string
+(`context_management/prompts/compact.md`, and `findings.md` for the per-call findings),
+since it is a document that asks an agent to fix its own context. No token budget (the maintainer):
+the one rule is that a summary is never longer than what it replaces. The prompt says
+to be as short as it can while keeping everything needed to continue; the pass's
+`max_tokens` is the dropped span's tokens plus one finding line (48 tokens) per dropped
+tool call, and a summary longer than the dropped text falls back to the marker.
 the harness's invariants kept: system message, the first user message (the goal) and the last
 N messages stay; the kept tail never starts on an orphaned tool result.
 
@@ -63,11 +69,12 @@ can decide when to ask. No custom advisory header (no harness looks for one).
 ## Code
 
 `context_management/context_edits.py` (history surgery, no model),
-`context_management/compaction.py` (prepare / summarize) -- a top-level
+`context_management/compaction.py` (prepare / summarize),
+`context_management/prompts/*.md` (the summary and findings prompts, shipped as
+package data) -- a top-level
 package, model-agnostic, no mlx and no HTTP; `interfaces/http/server.py`
 App.chat wiring, knobs `KNURLOGIC_COMPACT_*`
-in `tuning/settings.py` (AUTO off, TRIGGER 0.8, KEEP_TURNS 6, SUMMARY_MIN 1024,
-SUMMARY_MAX 8192, TOOL_RESULTS distill), Settings "Compaction" tab. Tests:
+in `tuning/settings.py` (AUTO off, TRIGGER 0.8, KEEP_TURNS 6, TOOL_RESULTS distill), Settings "Compaction" tab. Tests:
 `tests/test_compaction.py`.
 
 ## Open
