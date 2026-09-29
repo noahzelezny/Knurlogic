@@ -464,9 +464,12 @@ Queued work:
   the cluster link, or document the page's router as the way in.
 - Names: `load` says link tcp/rdma, the recovery record says ring/jaccl (mlx's backend
   names). Show one vocabulary.
-- DeepSeek-V4-Flash: the mlx-community chat_template.jinja is a stub (no tool calls, no
-  tool results, reasoning dropped) -- agents are broken on it. Port DeepSeek's official
-  encoding.
+- DeepSeek-V4-Flash (144 GB, needs M3+M4): template done (bc942f7, official encoding +
+  DSML parser). Overnight 2026-09-29: vendoring the maintainer's fork's deepseek_v4.py as a family
+  (branch deepseek-v4-arch; mlx-lm 0.31.3 has no deepseek_v4). Then, once the VQLab
+  provenance session frees both Macs: pipeline load, plain answer, a DSML tool call parsed,
+  tool result used, cache reuse after tool rounds, one compaction; <= 30 min, then unload.
+- Leader bind + tcp/rdma naming: branch leader-link (paper session's two issues).
 - 8-bit KV decode kernel: merged (engine/kvattn.py, KNURLOGIC_KV_KERNEL, /status.json
   kv_kernel hits/misses). Gap: a cache restored via mlx-lm from_state comes back with the
   kernel flag off (silent dequant path, not counted as a miss). Gemma4 KV-shared layers
