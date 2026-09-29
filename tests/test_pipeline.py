@@ -153,7 +153,8 @@ def test_the_head_and_tower_are_not_in_the_replicated_bytes(tmp_path):
 # ------------------------------------------------------------ refusals
 
 def test_pipeline_families():
-    for mt in ("qwen3_5_moe", "qwen3_5", "glm5_next", "qwen4_exp"):
+    for mt in ("qwen3_5_moe", "qwen3_5", "glm5_next", "qwen4_exp",
+               "deepseek_v4"):
         assert R.pipeline_refusals({"model_type": mt, "text_config": {
             "num_hidden_layers": 40}}, 2) == []
     why = R.pipeline_refusals({"model_type": "gemma4", "text_config": {
@@ -224,7 +225,9 @@ def _ring(tmp_path, *args, timeout=180):
                                            ("qwen3_5_moe", "3,1"),
                                            ("qwen4_exp", "3,1"),
                                            ("glm5_next", "3,1"),
-                                           ("glm5_next", "1,3")])
+                                           ("glm5_next", "1,3"),
+                                           ("deepseek_v4", "3,1"),
+                                           ("deepseek_v4", "1,3")])
 def test_a_two_rank_pipeline_computes_the_whole_models_logits(
         tmp_path, family, counts):
     """float32, so rounding cannot hide a wrong cut: the split model's
