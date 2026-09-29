@@ -256,3 +256,16 @@ def test_bf16_rows_do_not_follow_the_vision_allowance_dtype(monkeypatch):
     monkeypatch.setattr(S, "VISION_KV_DTYPE_BYTES", 4)
     assert (kv_bytes_per_token(v4)[0], kv_bytes_per_token(mla)[0]) == before
 
+
+def test_serve_says_when_an_environment_knob_is_ignored():
+    from knurlogic.interfaces.serve import ignored_env
+    env = {"KNURLOGIC_KV_BITS": "bf16", "KNURLOGIC_MTP": "on"}
+    lines = ignored_env(env, {}, {"KNURLOGIC_KV_BITS": "8",
+                                  "KNURLOGIC_MTP": "on"})
+    assert len(lines) == 1
+    assert "KNURLOGIC_KV_BITS=8" in lines[0] and "--kv-bits" in lines[0]
+    # a --set / flag value is applied, not ignored: nothing to say
+    assert ignored_env(env, {"KNURLOGIC_KV_BITS": "8"},
+                       {"KNURLOGIC_KV_BITS": "8"}) == []
+    assert "--set KNURLOGIC_X=" in ignored_env(
+        {"KNURLOGIC_X": "1"}, {}, {"KNURLOGIC_X": "2"})[0]
