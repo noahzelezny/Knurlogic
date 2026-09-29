@@ -85,7 +85,7 @@ def control_strings(tokenizer) -> Optional["re.Pattern"]:
             names.add(getattr(t, "content", str(t)))
         names.update(getattr(tokenizer, "all_special_tokens", None) or [])
     except Exception:
-        pass
+        pass    # any tokenizer shape: an odd one just yields fewer names
     # (DeepSeek's `｜DSML｜`, the tool-call markup token, is bracketed by
     # full-width bars: a tool result quoting DSML would open a call)
     names = sorted((n for n in names if isinstance(n, str) and len(n) >= 3
@@ -95,8 +95,8 @@ def control_strings(tokenizer) -> Optional["re.Pattern"]:
     pat = re.compile("|".join(map(re.escape, names))) if names else None
     try:
         tokenizer._knurlogic_controls = pat
-    except Exception:
-        pass
+    except (AttributeError, TypeError):
+        pass    # a tokenizer that refuses attributes: recompute next time
     return pat
 
 
@@ -248,8 +248,8 @@ def _preserving_template(tokenizer) -> Optional[str]:
     out = new if n == 1 else None
     try:
         tokenizer._knurlogic_preserving = (t, out)
-    except Exception:
-        pass
+    except (AttributeError, TypeError):
+        pass    # a tokenizer that refuses attributes: recompute next time
     return out
 
 

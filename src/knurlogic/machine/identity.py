@@ -70,7 +70,7 @@ def _computer_name() -> str:
                              capture_output=True, text=True, timeout=2)
         if out.returncode == 0 and out.stdout.strip():
             return out.stdout.strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
     return socket.gethostname().removesuffix(".local")
 

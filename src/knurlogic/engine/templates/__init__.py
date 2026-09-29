@@ -106,8 +106,8 @@ def install(tokenizer) -> Optional[str]:
             enc.encode(end, add_special_tokens=False))
     try:
         tokenizer._knurlogic_template = (fam, tokenizer.chat_template)
-    except Exception:
-        pass
+    except (AttributeError, TypeError):
+        pass    # a tokenizer that refuses attributes: re-detect next time
     logger.info("%s: the artifact's chat template is a known stub; using "
                 "knurlogic's %s template", name or "tokenizer", fam)
     return fam
