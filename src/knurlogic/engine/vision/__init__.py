@@ -5,7 +5,7 @@ is the prose home of what is written here, with the data shapes.
   __init__.py   the contracts: ImageRef, EncodedImage, VisionSpec, the
                 Family protocol, the errors, served_vision()
   key.py        the cache key: token ids with each image token replaced by
-                a sentinel ("img", sha, proc_hash, k) (design D6)
+                a sentinel ("img", sha, proc_hash, k)
   store.py      encoded images, per image, byte-bounded LRU, counted
   images.py     request bytes -> a clamped RGB image and its pixel hash
   scatter.py    image features into text embeddings, by sentinel (mlx)
@@ -23,7 +23,7 @@ images, and they may not pay for an mlx import to ask -- the same rule
 `engine/mtp`'s front door keeps (tests/test_resolve.py). So nothing here
 imports mlx or PIL; arrays appear only as annotations.
 
-Design: docs/design/vision.md (v2). Where this file and the design differ,
+Design: docs/design/vision.md. Where this file and the design differ,
 the design says why this file is right or the difference is a bug.
 """
 from __future__ import annotations
@@ -93,8 +93,8 @@ class NoVision(VisionError):
 @dataclass(frozen=True)
 class ImageRef:
     """One image, as the prompt and the positions see it. Small, immutable
-    and NEVER evicted with the features (store.ref): the critique's issue 7
-    -- Qwen's positions for a text turn after an image need that image's
+    and NEVER evicted with the features (store.ref):
+    Qwen's positions for a text turn after an image need that image's
     grid, and a key restored from the prompt cache must not depend on
     features the LRU may already have dropped.
 
@@ -154,8 +154,7 @@ class VisionSpec:
     min_pixels, max_pixels   the processor's resize bounds
     fixed_tokens    tokens per image if the family always spends the same
                     count, else None. None until a family's processor was
-                    read and shows it (critique issue 5: gemma's count is
-                    aspect-dependent, so "gemma is fixed" was unverified)
+                    read and shows it (gemma's count is aspect-dependent)
     proc_hash       proc_hash() of every processor setting that changes the
                     features; part of every sentinel and store key
     """
@@ -193,7 +192,7 @@ FeatureLookup = Callable[[str, str], EncodedImage]
 class Family(Protocol):
     """One vision family. Built by `registry.build`; the serve path (P4)
     calls these and nothing else. Every method is called on the GENERATOR
-    thread (design D3) -- none of them may be reached from an HTTP thread.
+    thread -- none of them may be reached from an HTTP thread.
 
     Key and positions below mean the full cache key (key.py): token ids with
     each image token replaced by a sentinel ("img", sha, proc_hash, k).
@@ -204,7 +203,7 @@ class Family(Protocol):
     def load_weights(self, model_path: str) -> int:
         """Read the vision tensors (sidecar or main shards, filtered by the
         index weight_map) into a STANDALONE tower not attached to the trunk
-        -- critique B3 option (a): the trunk's sanitize keeps dropping
+        -- the trunk's sanitize keeps dropping
         vision keys. Returns the number of tensors loaded, for the per-rung
         tensor-count bound."""
 
@@ -223,7 +222,7 @@ class Family(Protocol):
         framing ids the family needs, e.g. Qwen's vision_start/end or
         gemma's boi/eoi, which stay ordinary ids). key.expand_pads then
         widens that one id to n_tokens -- the only expansion there is, so
-        segments expand with the same rule (critique issue 2)."""
+        segments expand with the same rule."""
 
     def embed(self, model: Any, key: List[Any], start: int,
               features: FeatureLookup) -> Dict[str, Any]:
@@ -249,9 +248,9 @@ class Family(Protocol):
 
 
 # --- what is being served ------------------------------------------------------
-# critique C4: the page and the MCP (P5) must say whether the served model
-# sees images without importing engine/serve. The serve path (P4) sets this when
-# a vision family is built and clears it on unload; P5 only reads it.
+# The page and the MCP must say whether the served model sees images
+# without importing engine/serve. The serve path sets this when a vision
+# family is built and clears it on unload; interfaces only read it.
 
 _SERVED_SPEC: Optional[VisionSpec] = None
 

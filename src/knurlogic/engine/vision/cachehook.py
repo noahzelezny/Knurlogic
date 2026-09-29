@@ -1,6 +1,6 @@
 """Images in use are never evicted: the prompt cache pins what it references.
 
-Flash-Next review point 1. A prompt-cache entry whose key holds image
+A prompt-cache entry whose key holds image
 sentinels (key.py) is KV computed from those images. While it lives, a turn
 that extends it may re-read the images -- a partial hit that cuts into an
 image span re-embeds the rest of that span from the store. So each image

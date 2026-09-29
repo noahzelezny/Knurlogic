@@ -7,7 +7,7 @@ WHY THE TOWER IS STANDALONE. `load_weights` reads `vision_tower.*` and
 `embed_vision.*` straight off the model directory's safetensors (filtered
 by the index's weight_map when there is one), into a `VisionModel` +
 `MultimodalEmbedder` this module owns -- never through the text model's
-`sanitize`, which drops every non-text key (design critique B3 option (a);
+`sanitize`, which drops every non-text key;
 `docs/design/vision-contracts.md` "load_weights").
 
 WHY encode() PRE-DIVIDES BY embed_scale. mlx-vlm's `gemma4.Model
@@ -155,7 +155,7 @@ class Gemma4Vision:
             merge=None, min_pixels=vc.patch_size * vc.patch_size,
             max_pixels=vc.default_output_length * vc.pooling_kernel_size**2
                        * vc.patch_size**2,
-            fixed_tokens=None,  # aspect-dependent (critique issue 5)
+            fixed_tokens=None,  # aspect-dependent
             proc_hash=proc_hash({
                 "family": "gemma4", "patch_size": vc.patch_size,
                 "pooling_kernel_size": vc.pooling_kernel_size,

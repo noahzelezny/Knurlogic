@@ -1,6 +1,6 @@
 """gemma4's own tiny-fixture builders (P2). Beside `tests/fixtures_vision.py`
 (shared, P0-owned) per its own convention -- one file per family
-(critique C1).
+.
 """
 from __future__ import annotations
 

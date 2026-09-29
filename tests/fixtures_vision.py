@@ -1,7 +1,5 @@
-"""The SHARED vision test builder (P0). Per-family fixtures live beside it,
-one file per family, owned by that family's package
-(tests/fixtures_vision_<family>.py) -- critique C1: four packages editing one
-fixture file would collide.
+"""The SHARED vision test builder. Per-family fixtures live beside it, one
+file per family (tests/fixtures_vision_<family>.py).
 
 Three things here:
 
@@ -15,13 +13,13 @@ Three things here:
 
 2. `StubFamily` -- a complete `Family` with an identity tower and
    `positions() -> (None, 0)`, for P4 to build the serve path against
-   without importing any real family (design P4). Its features depend on
+   without importing any real family. Its features depend on
    the pixels, so two different images give different answers (G9) and the
    same image the same (G6/G7).
 
 3. Goldens -- mlx-vlm reference outputs, made ONCE in the exo interpreter
    (mlx-vlm 0.6.17) and committed as .npz under tests/goldens/, so G1-G4 run
-   anywhere without mlx-vlm (design D2). `run_reference` runs a builder
+   anywhere without mlx-vlm. `run_reference` runs a builder
    script there; `save_golden` / `load_golden` are the format, numpy only.
 
 This file must import under BOTH interpreters (the test one, and the exo
@@ -233,8 +231,8 @@ class StubFamily:
     `max_side`; one token per patch (grid (1, gh, gw), no merge).
     encode:     identity tower -- each patch's pixels in [0, 1], zero-padded
                 or truncated to `hidden`. `tower` is a separate method so a
-                test counts calls by wrapping it FROM OUTSIDE (critique 4:
-                a counter the code under test increments proves nothing).
+                test counts calls by wrapping it FROM OUTSIDE (a
+                counter the code under test increments proves nothing).
     positions:  (None, 0) -- the trunk's own 1D positions.
     chunk_boundaries: every image span when `bidirectional` (gemma-like, so
                 P4 can test the chunk snap), else [].

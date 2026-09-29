@@ -1,10 +1,10 @@
-"""knurlogic's own VQ runtime (design D1), and the numerics-default fix.
+"""knurlogic's own VQ runtime, and the numerics-default fix.
 
 Three layers, cheapest first:
 
 1. The record: the vendored files are the pinned vqlab d271035 bytes, and
    rungs.json says what each released rung's PUBLISHED model.py ships --
-   the three generations the design names, read off the Hub 2026-09-23.
+   the three generations of published runtime, read off the Hub.
 2. The resolver: a rung's numerics come from the rung. The v2 rungs keep
    bf16 I/O on unless someone asks for a profile. (The bug: a v1.5 default
    forced them off on every VQ artifact.)
@@ -13,7 +13,7 @@ Three layers, cheapest first:
    logit-identical to a bundle built the way vqlab builds one -- and NOT
    identical when the knobs are dropped, which is the bug, and is what
    proves the identity check can fail. The real-rung version of this is
-   tools/vq_gate.py (G-VQ), run by the orchestrator; it is not run here.
+   tools/vq_gate.py, run by hand on real weights; it is not run here.
 """
 import hashlib
 import json
@@ -79,7 +79,7 @@ def test_every_released_rung_is_listed_and_starts_unverified():
     assert len(rows) == 20 and all(r.startswith(ORG + "/") for r in rows)
     ungated = [r for r, v in rows.items() if v["gate"] is None]
     assert all(not rows[r]["verified"] for r in ungated), \
-        "a rung is verified only by a recorded G-VQ pass"
+        "a rung is verified only by a recorded identity-gate pass"
     for r, v in rows.items():
         if v["verified"]:
             assert v["gate"] and v["gate"]["pass"], r
@@ -337,7 +337,7 @@ def test_runtime_attaches_every_vq_module(v2_rung):
 
 
 def test_identity_with_the_rungs_knobs_and_not_without(v2_rung, tmp_path):
-    """G-VQ in miniature, and its mutation in the same breath.
+    """The identity gate in miniature, and its mutation in the same breath.
 
     knurlogic's runtime given the v2 rung's knobs == the v2 bundle (logits
     atol 1e-5, 40 greedy tokens). Given NO knobs -- HEAD's v1.5 defaults,

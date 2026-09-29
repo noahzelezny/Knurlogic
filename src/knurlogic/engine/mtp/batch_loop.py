@@ -134,7 +134,7 @@ class Row:
     draft_row: Optional[mx.array]  # [1, V] the head's draft of t2, or None
     n_prompt: int
     drafts: bool
-    #: design D4: this row's MRoPE offset (Qwen: positions after an image
+    #: this row's MRoPE offset (Qwen: positions after an image
     #: run ahead of the token count by rope_delta). Recomputed from the key
     #: at every admission -- positions are pure in the key -- so it needs no
     #: home in the prefix cache.
@@ -255,7 +255,7 @@ def admit(
     why an admitted row always starts from a FRESH trunk cache: a reused
     prefix would shift every rotary position the head sees.
 
-    IMAGES (design D5; docs/design/vision.md). A vision row arrives with
+    IMAGES. A vision row arrives with
     `embeds` -- the trunk's `input_embeddings` for ids[start_pos:] only, as
     `Family.embed` builds them, [1, n - start_pos, D] -- and optional
     `extras`, further trunk kwargs over the same span. An extras value is an
@@ -265,13 +265,13 @@ def admit(
     them when embeddings are given, and a drafting head needs them).
     `chunk_boundaries` are [start, end) spans no chunk edge may fall
     strictly inside -- gemma attends bidirectionally within an image, so a
-    chunk that cut one would compute the first half without the second
-    (critique B5). Edges snap back to the span start, or forward past the
+    chunk that cut one would compute the first half without the second.
+    Edges snap back to the span start, or forward past the
     span when it starts the chunk (a span longer than the step is one
     chunk). The last forward, which yields the first logits, is widened the
     same way if the prompt ends inside a span. `rope_delta` / `mrope` ride
     on the Row so MTPBatch can hand the trunk this row's positions on every
-    decode step (design D4).
+    decode step.
 
     CHECKPOINTS. Positions c (the server's segment ends: after the system
     prompt, after the last user message) where prefill stops a chunk and
@@ -661,7 +661,7 @@ class MTPBatch:
         Design D4: a Qwen row whose key holds an image decodes at position
         (tokens so far + rope_delta) on all three MRoPE axes -- for EVERY
         step, not only while the image is in the new span; missing it
-        degrades silently (critique B1). So as soon as one row needs it the
+        degrades silently. So as soon as one row needs it the
         whole batch gets explicit ids, [3, B, width]; a row without MRoPE
         gets its plain count, which is what the trunk would have used. The
         count is n_prompt + tokens emitted: the row's cache length before

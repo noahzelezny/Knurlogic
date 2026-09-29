@@ -311,7 +311,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         if _vq.serves(a.path):
             print(f"\n{a.path.name} ships its own runtime ({a.model_file}); "
                   f"knurlogic's runtime serves it instead -- verified "
-                  f"bit-identical to that file (G-VQ, rungs.json).")
+                  f"bit-identical to that file (engine/vq/rungs.json).")
         else:
             print(f"\n{a.path.name} ships its own runtime ({a.model_file}) "
                   f"and it WILL be executed -- that is where its kernels "
@@ -381,7 +381,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         except Exception as e:
             snap["vision"] = {"error": f"{type(e).__name__}: {e}"}
         # `served_vision()` is the P0-frozen way to say whether the served
-        # model sees images at all (critique C4); the image store's own
+        # model sees images at all; the image store's own
         # size is P4's to expose (P4 owns the load path that creates it, and
         # the contract carries no accessor for a live store instance).
         # `engine.vision.store` is read defensively, by attribute, so this

@@ -1,5 +1,5 @@
 """The served model's vision: bind a Family at load, clear it at unload,
-and say what is served (design D3, D5, D6; docs/design/vision.md). Images
+and say what is served. Images
 reach the model through the scheduler's tokenize (engine/runtime)."""
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ def set_spec(spec) -> None:
 def served_vision():
     """The served model's VisionSpec, or None. The same answer as
     engine.vision.served_vision(), which interfaces/ reads without
-    importing this module (critique C4)."""
+    importing this module."""
     from knurlogic.engine.vision import served_vision as _sv
     return _sv()
 

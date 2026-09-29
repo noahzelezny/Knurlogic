@@ -3,7 +3,7 @@
 Design D3. The scheduler tokenizes on its own thread
 (engine/runtime/scheduler.py), and generation runs on that same thread. v1
 encoded images on the HTTP thread: two threads on one GPU, two
-uncoordinated allocations on a shared host (critique B2). So ALL image work
+uncoordinated allocations on a shared host. So ALL image work
 happens here, called from the scheduler's tokenize:
 
     image parts -> decode + clamp + pixel hash (images.load)
@@ -110,9 +110,9 @@ class VisionServe:
     loaded vision model; serve/vision.py builds it at load and drops it (and the
     store) at unload.
 
-    `encodes` counts tower runs made through here, for /status.json; G6
-    does NOT read it (critique 4: a counter the code under test increments
-    proves nothing) -- the test wraps the family's tower from outside."""
+    `encodes` counts tower runs made through here, for /status.json; the
+    tests do NOT read it (a counter the code under test increments proves
+    nothing) -- the test wraps the family's tower from outside."""
 
     def __init__(self, family: Any, store: Any, model_key: Hashable, *,
                  allow_paths: bool = False):

@@ -288,8 +288,7 @@ def test_a_launch_refreshes_what_the_page_can_reach(monkeypatch, req, which,
 
 def test_a_peer_named_with_peer_by_hostname_is_trusted_at_its_address(
         monkeypatch):
-    """Found by Qwen3.8-Flash-Next-6bit (cluster shootout 2026-09-27):
-    `--peer bobs-mac.local` compared the NAME with the connection's numeric
+    """`--peer bobs-mac.local` compared the NAME with the connection's numeric
     address, so a peer named by hostname was always refused."""
     class No:
         def allows(self, ip):

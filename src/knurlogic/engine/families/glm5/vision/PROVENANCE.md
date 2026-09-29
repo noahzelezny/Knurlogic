@@ -125,8 +125,7 @@ span needs to shift (D4 in the design is a Qwen-specific concern). So
 
 ## Deviations from the design (report to the integrator)
 
-1. **`fixed_tokens` is `None`, unverified.** The design (critique issue 5,
-   folded into contracts) requires `fixed_tokens` to stay `None` "unless
+1. **`fixed_tokens` is `None`, unverified.** The vision contract requires `fixed_tokens` to stay `None` "unless
    the family's processor was read and shows a fixed count." GLM's real
    HF processor was not read (no network fetch of the actual
    `preprocessor_config.json` for a released GLM-5.3 rung was done in this

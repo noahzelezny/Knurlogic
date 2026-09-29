@@ -27,16 +27,13 @@ classifiers = [
 
 # mlx-lm is the library underneath (model classes, tokenizer, caches,
 # BatchGenerator; knurlogic's own server is engine/runtime + interfaces/http).
-# PINNED EXACTLY, mlx with it (design D2, docs/design/vision.md): the batch
-# engine subclasses BatchGenerator and reads its internals, the vision key
-# rides mlx-lm's prompt trie, and v1 of the vision design was built on line
-# citations from a different mlx-lm than the one serving (critique B4). A
-# version is blessed by re-verifying those (tests/test_pins.py lists them),
+# PINNED EXACTLY, mlx with it: the batch
+# engine subclasses BatchGenerator and reads its internals, and the vision
+# key rides mlx-lm's prompt trie. A version is blessed by re-verifying those (tests/test_pins.py lists them),
 # then moving the pin, the digests in
 # [tool.knurlogic.pins] and tests/test_pins.py together. 0.31.3 is also the
 # oldest release measured to load a VQ artifact's bundled `model_file`.
-# The versions are the ones the 166-test suite ran green on, 2026-09-23.
-# The VQ runtime's pin (vqlab commit + digest) is P-VQ's, beside engine/vq/.
+# The VQ runtime's pin (vqlab commit + digest) is in engine/vq/PROVENANCE.md.
 dependencies = [
     "mlx==0.31.2; platform_system == 'Darwin'",
     "mlx-lm==0.31.3",

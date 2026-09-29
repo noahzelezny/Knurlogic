@@ -11,7 +11,7 @@ Normalisation matches mlx-vlm 0.6.17's `utils.load_image` exactly --
 gates (G1-G4) compare against goldens made through that function: the same
 file must reach the processor as the same pixels on both sides.
 
-CLAMPS, BEFORE HASHING (design D6, critique issue 11). An image arrives from
+CLAMPS, BEFORE HASHING. An image arrives from
 an HTTP client on a shared host:
   * MAX_BYTES of encoded input, checked before decoding anything;
   * BOMB_PIXELS: PIL's own decompression-bomb limit (Image.MAX_IMAGE_PIXELS

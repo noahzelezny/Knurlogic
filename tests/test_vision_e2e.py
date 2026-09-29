@@ -445,7 +445,7 @@ def test_e1_e2_e3_two_turns_through_the_serve_path(server, rigs, name):
     assert h.vision.pinned_count() == 0
     # ...and the cached conversation HOLDS its image: the prompt cache's
     # entries pin it in the store, so byte pressure cannot evict it while a
-    # later turn could still need it (Flash-Next review point 1). Through the
+    # later turn could still need it. Through the
     # real install path, not the unit test's.
     from knurlogic.engine.vision import cachehook
     assert cachehook.pinned_entries(h.cache) >= 1

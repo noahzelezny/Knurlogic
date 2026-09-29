@@ -72,7 +72,7 @@ def test_keyed_by_model_and_proc_hash():
 
 
 def test_refs_survive_feature_eviction():
-    """critique issue 7: positions() for a text turn after an image needs
+    """positions() for a text turn after an image needs
     its grid after the features are gone."""
     s = ImageStore(max_bytes=MB)
     s.put("m", _enc("a", MB))

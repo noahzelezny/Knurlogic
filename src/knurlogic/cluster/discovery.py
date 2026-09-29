@@ -15,7 +15,7 @@ hour after a crash. Here the registration dies with the process.
              two browse results, and resolving without the index can hand
              back the Wi-Fi address for the Thunderbolt one.
 
-ctypes rules that are load-bearing (review item 5): every CFUNCTYPE and
+ctypes rules that are load-bearing: every CFUNCTYPE and
 DNSServiceRef is owned by the Discovery object for as long as the daemon
 may call it back; a ref is never deallocated from inside its own callback
 (it is queued and freed by the loop); MoreComing and Add/remove are

@@ -1,8 +1,7 @@
 # Qwen vision: where every line came from
 
-Package P1 of docs/design/vision.md (v2). Reference: mlx-vlm 0.6.17 in
-`/opt/anaconda3/envs/exo/bin/python` (MIT, Copyright (c) 2025 Prince
-Canuma), read 2026-09-23. Held to it by committed goldens made from mlx-vlm's
+Design: docs/design/vision.md. Reference: mlx-vlm 0.6.17 (MIT, Copyright
+(c) 2025 Prince Canuma). Held to it by committed goldens made from mlx-vlm's
 own classes (`tests/goldens/build_qwen.py`), so the tests run without it.
 
 ## Vendored
@@ -21,7 +20,7 @@ own classes (`tests/goldens/build_qwen.py`), so the tests run without it.
 | file | what | from |
 |---|---|---|
 | `qwen3_5.py` `mrope_selector`, `apply_mrope`, `Attention` | interleaved MRoPE; `position_ids` [3,B,L] / `rope_delta` [B] threaded model -> text model -> layer -> attention | selector `rope_utils.py:512-517`, apply `:655-690` (sha256 `6944f69a03c41cbb9613afbd2f1b54b71c504840aaeb0eade39c6109dbfdd25b`); delta rule `qwen3_5/language.py:2022-2052` |
-| `qwen3_5_moe.py` | nothing: inherits qwen3_5's Model and layers (critique C3) | -- |
+| `qwen3_5_moe.py` | nothing: inherits qwen3_5's Model and layers | -- |
 | `qwen4_exp.py` `RotaryEmbedding` (MRoPE), `Qwen4ExpModel`/`DecoderLayer`/`Attention` threading, `QSAIndexer` positions, `_IndexerCache.pos` and every `_BatchAttnCache` column op on it | the indexer ropes its query with the MRoPE positions and each pooled block with the stored position of the block's first token | `qwen4_exp/language.py:21-63, 306-348` (sha256 `a64846ff036f3ae47c8f32cdec36433b8ad5c403503e2b350fc9b98271234544`) |
 
 With neither `position_ids` nor `rope_delta` every trunk call runs the code

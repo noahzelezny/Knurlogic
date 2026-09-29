@@ -1,4 +1,4 @@
-"""Qwen MRoPE positions as a pure function of the whole prompt (design D4).
+"""Qwen MRoPE positions as a pure function of the whole prompt.
 
 A port of mlx-vlm 0.6.17 `qwen3_5/language.py` `get_rope_index`
 (:1729-1904, sha256 4805ae90fb3bba463512cbce89c9bb7fa78d56b25bd8b541db1392ad34f18ae0,
@@ -18,9 +18,9 @@ from its ref instead of a batch-wide `image_grid_thw`:
     + text_len + st_idx (:1799-1837); trailing text likewise (:1838-1849);
   * rope_delta = max + 1 - len (:1882-1885).
 
-WHY PURE. The critique's B1: a text-only turn after an image still needs
-positions shifted by that image's delta, and v1 computed them only when the
-new suffix had an image. Here nothing is carried between calls: the same key
+WHY PURE. A text-only turn after an image still needs positions shifted by
+that image's delta; computing them only when the new suffix has an image
+gets that turn wrong. Here nothing is carried between calls: the same key
 gives the same positions, cold or warm.
 
 The delta also never changes as text is appended after the last image

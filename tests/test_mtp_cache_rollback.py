@@ -51,8 +51,7 @@ def test_batched_cachelist_rollback_can_fail():
 
 
 def test_snapshot_semantics_check_takes_batched_and_composite_caches():
-    """Found by Qwen3.8-Flash-Next-6bit (cluster shootout 2026-09-27):
-    the check copied s[2] of every non-"attn" snapshot, and "battn" /
+    """the check copied s[2] of every non-"attn" snapshot, and "battn" /
     "attn-list" snapshots carry None there -- a TypeError on exactly the
     caches the batch engine uses, instead of an answer."""
     import mlx.core as mx

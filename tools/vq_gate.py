@@ -1,4 +1,4 @@
-"""G-VQ: knurlogic's VQ runtime against a rung's PUBLISHED bundle (design D1).
+"""The identity gate: knurlogic's VQ runtime against a rung's PUBLISHED bundle.
 
     python tools/vq_gate.py fetch <dir> [repo ...]     # model.py + config.json
     python tools/vq_gate.py knobs <dir> [--write] [--markdown]
@@ -8,11 +8,11 @@
 <repo> model.py config.json`), never weights. `knobs` reads every flag
 default out of each published model.py and regenerates
 src/knurlogic/engine/vq/rungs.json (and the table in
-docs/design/vq-rung-knobs.md): the record is the shipped artifact, never an
-~/.exo copy, which has drifted from the Hub on several repos.
+docs/design/vq-rung-knobs.md): the record is the shipped artifact, never a
+local copy, which may have drifted from the Hub.
 
-`gate` is the identity gate, run by the orchestrator on real rungs, one at a
-time, behind the model-load lock. Same artifact weights, same short prompt,
+`gate` is the identity gate, run by hand on real rungs, one at a time,
+behind the model-load lock. Same artifact weights, same short prompt,
 two runtimes: the rung's PUBLISHED bundled model.py, and knurlogic's
 (vendored vqlab 42df84f + the rung's knobs from rungs.json). PASS means
 logits over the whole prompt within atol 1e-5 AND 40 greedy tokens
@@ -75,7 +75,7 @@ def rung_entry(model_py: str, cfg: dict, head: dict,
     HEAD's. For an arc6-era bundle the two numerics flags do not exist; the
     arc6 arithmetic IS bf16-I/O off, so they are set "0" and listed as
     inferred -- and running such a rung on HEAD is a runtime change that
-    only G-VQ may bless (design D1)."""
+    only this gate may bless."""
     pub = R.flag_defaults(model_py)
     gen = R.generation(pub)
     knobs, inferred = {}, []
@@ -300,7 +300,7 @@ def cmd_gate(a) -> int:
         from knurlogic.machine import loadlock
         outs = {}
         try:
-            with loadlock.model_load(str(art), purpose="G-VQ", wait_s=a.wait):
+            with loadlock.model_load(str(art), purpose="vq identity gate", wait_s=a.wait):
                 for which in ("bundle", "knurlogic"):
                     outs[which] = str(Path(td) / f"{which}.npz")
                     p = subprocess.run(

@@ -1,5 +1,5 @@
-"""gemma4's vision tower -- standalone, not attached to any trunk (design
-critique B3 option (a): the trunk's `sanitize` keeps dropping vision keys,
+"""gemma4's vision tower -- standalone, not attached to any trunk (the
+trunk's `sanitize` keeps dropping vision keys,
 so this tower loads its own tensors under `vision_tower.*` /
 `embed_vision.*` and is never part of the text `Model`).
 
@@ -14,7 +14,7 @@ below: the batched/list-of-different-sized-images branch and the
 patchified image at a time (`Family.preprocess` runs per image, per the
 Family protocol) -- the list branch existed in mlx-vlm to batch a whole
 turn's images through one forward pass, which this build does not do
-(images are encoded and cached individually, design D1/D6).
+(images are encoded and cached individually).
 """
 from __future__ import annotations
 
@@ -328,7 +328,7 @@ class VisionModel(nn.Module):
     channel-first, already resized to a multiple of `patch_size` by
     `Family.preprocess`) and returns [1, n_tokens, hidden_size], n_tokens =
     (H//patch)*(W//patch) // pooling_kernel_size**2 -- aspect-dependent, so
-    `VisionSpec.fixed_tokens` stays None (critique issue 5). This drops the
+    `VisionSpec.fixed_tokens` stays None. This drops the
     list-of-images and externally-supplied-`pixel_position_ids` branches of
     mlx-vlm's version (see module docstring)."""
 

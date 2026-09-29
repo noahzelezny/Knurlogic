@@ -2,10 +2,9 @@
 
 Every number here came off a run. The point of Knurlogic is that a downloader
 should never have to know them: the resolver turns them into defaults. Each
-constant carries the finding that established it, so a future change has to
-argue with a measurement rather than a preference.
-
-Source: vqlab docs/RUNTIME-SETTINGS.md, docs/FINDINGS-LOG.md.
+constant carries the measurement that established it, so a future change
+has to argue with a measurement rather than a preference. The VQ kernel
+numbers were measured in vqlab, where the runtime is developed.
 """
 
 from __future__ import annotations
@@ -160,27 +159,25 @@ def tight_headroom_bytes(working_set_bytes: int) -> int:
 # value -> (default, why). Anything not listed should not be set by a
 # resolver; it exists in the runtime so a finding stays reproducible.
 PERFORMANCE_DEFAULTS = {
-    # F124: device codebook beats threadgroup by 20.9% on prefill at
+    # device codebook beats threadgroup by 20.9% on prefill at
     # d4-K2048. 'auto' lets the runtime's own selector decide per module;
     # ~447 fleet modules ride on it.
-    "VQ_MOE_GEMMSEG_CBDEV": ("auto", "F124: device arm +20.9% prefill at d4-K2048"),
-    # F25/F33: RTILE=64 is SLOWER everywhere (0.75-0.97x), confirmed on both
-    # exo and local. The one 'win' was an env-ordering bug that benchmarked
-    # 32 twice. DO NOT SET 64.
-    "VQ_MOE_GEMMSEG_RTILE": ("32", "F25/F33: 64 is 0.75-0.97x, never faster"),
-    # F54 arm 1: +5.1-6.6% prefill, bit-exact.
-    "VQ_GEMMSEG_OTILE64": ("1", "F54: +5.1-6.6% prefill, bit-exact"),
-    # F56: the v2 stack reaches +11.9% over shipped.
-    "VQ_GEMMSEG_PH2V": ("1", "F56: part of the +11.9% stack"),
-    "VQ_D4_WALK": ("1", "F56: part of the +11.9% stack"),
+    "VQ_MOE_GEMMSEG_CBDEV": ("auto", "device arm +20.9% prefill at d4-K2048"),
+    # RTILE=64 is SLOWER everywhere measured (0.75-0.97x). DO NOT SET 64.
+    "VQ_MOE_GEMMSEG_RTILE": ("32", "64 is 0.75-0.97x, never faster"),
+    # +5.1-6.6% prefill, bit-exact.
+    "VQ_GEMMSEG_OTILE64": ("1", "+5.1-6.6% prefill, bit-exact"),
+    # the v2 stack reaches +11.9% over shipped.
+    "VQ_GEMMSEG_PH2V": ("1", "part of the +11.9% stack"),
+    "VQ_D4_WALK": ("1", "part of the +11.9% stack"),
     # Arm 1.5 measured NEGATIVE (-1.8-2%).
-    "VQ_GEMMSEG_PIPE": ("0", "F56 arm 1.5: measured -1.8-2%"),
+    "VQ_GEMMSEG_PIPE": ("0", "measured -1.8-2%"),
 }
 
-# Numerics-active flags (F103/F105): family-local, up to +0.97% ppl.
+# Numerics-active flags: family-local, up to +0.97% ppl.
 # v1.5 = both off (bit-exact vs the published arc6 runtime); v2 = both on.
 #
-# A RUNG'S NUMERICS ARE THE RUNG'S (design D1). What a released rung computes
+# A RUNG'S NUMERICS ARE THE RUNG'S. What a released rung computes
 # with is what its PUBLISHED model.py defaults to, and that is not uniform:
 # Flash-Next 2.1 and Qwen3.6-35B-A3B 3.8/4.6/5.4 shipped v2, the rest v1.5 or
 # the arc6-era runtime with no flags at all (docs/design/vq-rung-knobs.md,
@@ -189,7 +186,7 @@ PERFORMANCE_DEFAULTS = {
 # to 0 -- a numerics change nobody asked for, on exactly the rungs whose
 # weights were fitted under v2. So the resolver now takes a rung's numerics
 # from the rung (NUMERICS_SOURCES, in order) and applies a profile ONLY when
-# a person names one. See vqlab docs/RUNTIME-SHIP-PLAN.md for the profiles.
+# a person names one.
 NUMERICS_FLAGS = ("VQ_GEMMSEG_BF16IO", "VQ_DECODE_BF16IO")
 
 RUNTIME_PROFILES = {
@@ -202,7 +199,7 @@ RUNTIME_PROFILES = {
 #   declared   config.json `knobs` -- the artifact's own record, which
 #              Artifact.declared_knobs() already ranks above everything
 #   published  engine/vq/rungs.json -- read from the rung's PUBLISHED
-#              model.py (never an ~/.exo copy: those drifted)
+#              model.py (never a local copy: those may drift)
 #   bundled    the default in the artifact's own model.py, for a rung not
 #              in rungs.json (a local build, a new upload)
 # Nothing found means nothing is emitted: the runtime's own default stands,
@@ -221,7 +218,7 @@ NUMERICS_SOURCES = ("declared", "published", "bundled")
 #   * VQ_DECODE_CHUNK: smaller is faster AND smaller in memory (128 -> 32 is
 #     1.37x on every rung). There is no tradeoff on this knob, so "fast" must
 #     NOT raise it. It is capped at the default in both directions.
-#   * VQ_MOE_GEMMSEG_RTILE=64 is 0.75-0.97x and never faster (F25/F33), so no
+#   * VQ_MOE_GEMMSEG_RTILE=64 is 0.75-0.97x and never faster, so no
 #     setting of this axis may reach it.
 #
 # So `fast` moves only the knobs where headroom actually buys something, and
@@ -490,32 +487,32 @@ KNOB_DOC = {
         "biggest single win in the memory playbook."),
     "VQ_MOE_GEMMSEG_CBDEV": (
         "where the codebook lives during the MoE GEMM",
-        "F124: the device arm is +20.9% on prefill at d4-K2048, same "
+        "the device arm is +20.9% on prefill at d4-K2048, same "
         "output; 'auto' lets the runtime choose per module. Forcing an arm "
         "risks the slower one on modules it does not suit."),
     "VQ_MOE_GEMMSEG_RTILE": (
         "row tile width in the segmented GEMM",
-        "F25/F33: no trade -- 64 is 0.75-0.97x and NEVER faster. The one "
+        "no trade -- 64 is 0.75-0.97x and NEVER faster. The one "
         "'win' was an env-ordering bug that benchmarked 32 twice."),
     "VQ_GEMMSEG_OTILE64": (
         "64-wide output tiling in the segmented GEMM",
-        "F54: +5.1-6.6% prefill, bit-exact; no measured cost, so on."),
+        "+5.1-6.6% prefill, bit-exact; no measured cost, so on."),
     "VQ_GEMMSEG_PH2V": ("phase-2 vectorization",
-                        "F56: part of the +11.9% stack; off gives that "
+                        "part of the +11.9% stack; off gives that "
                         "speed back, no measured gain."),
     "VQ_D4_WALK": ("d4 codebook walk",
-                   "F56: part of the +11.9% stack; off gives that speed "
+                   "part of the +11.9% stack; off gives that speed "
                    "back, no measured gain."),
     "VQ_GEMMSEG_PIPE": ("software pipelining in the segmented GEMM",
-                        "F56 arm 1.5: on costs 1.8-2% and buys nothing. "
+                        "on costs 1.8-2% and buys nothing. "
                         "Off."),
     "VQ_GEMMSEG_BF16IO": ("bf16 IO in the segmented GEMM",
-                          "F103/F105 numerics-active: changing it changes "
+                          "numerics-active: changing it changes "
                           "the output, up to +0.97% ppl, on weights fitted "
                           "the other way. Each rung keeps what it shipped: "
                           "on for the v2 rungs, off for v1.5."),
     "VQ_DECODE_BF16IO": ("bf16 IO on the decode path",
-                         "F103/F105 numerics-active: changing it changes "
+                         "numerics-active: changing it changes "
                          "the output (up to +0.97% ppl). Each rung keeps "
                          "what it shipped."),
 }
@@ -934,8 +931,7 @@ def check_knob(name: str, value, window: int = 0):
 
 # --- what a VISION rung holds besides its weights ---------------------------
 # A model with a vision tower needs three things a text model does not, and
-# the resolver must count them BEFORE a load (critique issue 10, Flash-Next
-# review point 4), not discover them as an OOM on the first screenshot:
+# the resolver must count them BEFORE a load, not discover them as an OOM on the first screenshot:
 #
 # 1. The TOWER'S WEIGHTS. Read from the safetensors headers (tensor names
 #    under these prefixes), never guessed. Every family keeps them in the

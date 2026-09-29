@@ -19,7 +19,7 @@ WHAT IT BUYS. Every image's run is the same pad id, so with plain ids two
 different images of the same size collide and the cache hands back KV
 computed from the wrong picture -- fluent, wrong, silent. With sentinels two
 such images diverge at the image's first token (k=0) and the same image hits
-all the way through. proc_hash is in the sentinel (critique issue 1) so a
+all the way through. proc_hash is in the sentinel so a
 processor change that keeps n_tokens cannot hit stale features.
 
 WHY IT FAILS LOUD. A sentinel that reaches mx.array raises; it can never be
@@ -118,7 +118,7 @@ def expand_segments(segments: Sequence[Sequence[int]],
                     image_token_id: int) -> Tuple[List[Any], List[List[Any]]]:
     """The prompt stage returns (prompt, segments, ...), and the segments
     feed `insert_segments` and the checkpoints. Rewriting only the prompt
-    (v1) left the segments naming the wrong tokens -- critique issue 2.
+    would leave the segments naming the wrong tokens.
 
     Takes the UNexpanded segments (their concatenation is the template's
     prompt) and returns (key, segment keys): the same pad expansion and

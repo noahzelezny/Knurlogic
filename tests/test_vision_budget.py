@@ -1,5 +1,4 @@
-"""A vision rung is budgeted BEFORE a load (Flash-Next review point 4, P0's
-open issue): the tower's weights, the image store's bound and an allowance
+"""A vision model is budgeted BEFORE a load: the tower's weights, the image store's bound and an allowance
 for image-span KV, each a named term with its note, in `resolve` and in
 the MCP's `fit` and `settings`. Stdlib-built artifacts; nothing loads."""
 from __future__ import annotations

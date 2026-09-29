@@ -21,8 +21,8 @@ artifacts were validated against -- not merely that it imports.
   its sanitize does not map the old names, so the rungs do not load on
   0.7.1 at all. The 2026-09-18 switch to stock 0.7.1 ("upstream was
   ahead") was undone for that reason: the artifact is the authority.
-- verified: GLM-5.3-Flash 2.7 G-VQ bit-identical to its published model.py
-  (M4, mlx 0.31.2); tools/vision_gate.py PASS through `knurlogic serve`
+- verified: GLM-5.3-Flash 2.7 bit-identical to its published model.py
+  (tools/vq_gate.py; M4 Max, mlx 0.31.2); tools/vision_gate.py PASS through `knurlogic serve`
   with no mlx-vlm installed.
 - mlx-lm loads it through `engine/vq/runtime.model_classes`, which builds
   the nested configs (mlx-vlm's update_module_configs, done the same way)

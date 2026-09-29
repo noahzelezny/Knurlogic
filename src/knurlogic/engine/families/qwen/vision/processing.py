@@ -230,7 +230,7 @@ class ImageProcessor:
 
     def __call__(self, img) -> Tuple[np.ndarray, List[int]]:
         """One PIL image -> (pixel_values, [t, h, w]) (knurlogic: one image
-        per call; the store holds images one by one, design D6)."""
+        per call; the store holds images one by one)."""
         return self._process_one(_to_numpy_image(img))
 
     def num_image_tokens(
