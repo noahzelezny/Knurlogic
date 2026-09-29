@@ -9,7 +9,7 @@ cannot do, rather than assuming a particular model.
 
 Sections: catalog . chat . streaming . usage and the cache report .
 reasoning . sampling . images . Anthropic messages . limits and errors .
-concurrency . status . the harness's ingest . the server design review's
+concurrency . status . ingest clients . the server design review's
 additions.
 """
 from __future__ import annotations
@@ -200,7 +200,7 @@ def test_the_cache_report_says_what_the_prompt_cache_did():
 
 
 def test_a_shared_prefix_is_reused():
-    """the harness's ingest sends the same long schema text with a different
+    """An ingest client sends the same long schema text with a different
     tail; the second request must not prefill the shared part again."""
     prefix = ("You label media. Fields: title, people, place, mood, "
               "objects, text-in-image, date clues. " * 20)
@@ -333,7 +333,7 @@ def test_an_image_is_seen():
 
 
 def test_several_images_in_one_message():
-    """the harness sends N video frames in one message when a contact sheet is not
+    """An ingest client sends N video frames in one message when a contact sheet is not
     used."""
     if not has_vision():
         pytest.skip("the served model has no vision")
@@ -415,7 +415,7 @@ def test_status_reports_the_node_its_memory_and_the_artifact():
     assert s["artifact"]["name"] and s["memory"]
 
 
-# --- the harness's ingest (docs/PLAN.md "Requirements for knurlogic's own server")
+# --- ingest clients (/v1/residency, /v1/ensure, concurrency hints)
 
 def test_residency_is_one_flat_honest_list():
     r = get("/v1/residency")

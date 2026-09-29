@@ -186,7 +186,7 @@ def test_a_silent_request_reports_what_the_server_renders():
 
 
 def test_a_client_override_is_reported_by_what_it_renders():
-    """review's case: reasoning_effort low, but the client's own kwargs turn
+    """The case: reasoning_effort low, but the client's own kwargs turn
     thinking off. The prompt is closed-think; the report must say off."""
     _serve(_Qwen38Tok())
     kwargs, rep = T.translate({"reasoning_effort": "low"},
@@ -238,7 +238,7 @@ def _wrapper(rung):
 def test_the_probe_verifies_each_released_template_and_finds_its_default(
         rung, dialect, served_default):
     """Gemma's TEMPLATE defaults off, but mlx-lm injects enable_thinking
-    when the request is silent -- served, it thinks (a review's finding)."""
+    when the request is silent -- served, it thinks."""
     tok = _wrapper(rung)
     name, spec = T.detect(tok.chat_template)
     assert name == dialect

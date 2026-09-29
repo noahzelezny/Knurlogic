@@ -1,7 +1,7 @@
 # knurlogic's own server (design, 2026-09-25, for review)
 
-the maintainer's green light (2026-09-25): start the server, pinned first by an API
-conformance suite, with a a review design review that has the harness's ingest
+The maintainer's green light (2026-09-25): start the server, pinned first by an API
+conformance suite, with a design review that has an ingest client's
 requirements in the brief. The line drawn: **reuse mlx-lm as a library,
 own the server around it.**
 
@@ -43,7 +43,7 @@ interfaces/http/            the wire (as built)
                             browser guards (Origin / Host), --host cluster
   openai.py                 /v1/chat/completions, /v1/completions,
                             /v1/models, OpenAI error objects, SSE
-  scout.py                  /v1/residency, /v1/ensure, the concurrency hint
+  residency.py              /v1/residency, /v1/ensure, the concurrency hint
   messages.py               /v1/messages: handler_over(), in-process
   __init__.py               serve(), switch() (through interfaces/loading)
 interfaces/page/            the page: server.py (`knurlogic ui`),
@@ -74,7 +74,7 @@ report.
 sequential path; that split is where two of the bugs live. Here every
 request goes through the batch executor; a seed is a per-row key.
 
-## the harness's ingest requirements (docs/PLAN.md)
+## Ingest-client requirements (docs/dev/PLAN.md)
 
 1. `/v1/residency`: flat list -- model, capabilities, memory_bytes, nodes,
    state (loading/ready/unloading). Straight from ModelHost.
@@ -107,7 +107,7 @@ object (`Scheduler.requests()`, lock-free, cheap enough to poll):
 
 Where it appears:
 - `GET /status.json` -> `requests` (the server's own status document);
-- `GET /v1/residency` -> each `data[]` row's `requests` (the harness);
+- `GET /v1/residency` -> each `data[]` row's `requests` (for ingest clients);
 - the page's `GET /loaded.json` -> each knurlogic `resident[]` row's
   `requests` (read from that server's /status.json; `null` for other
   runtimes). A cluster's row is rank 0's server, which runs the scheduler;
@@ -128,7 +128,7 @@ id, stored in its registry record next to its pid; a cluster job's instance
 id is simply its job id (already 8-32 hex, already stable across its ranks).
 
 Where it appears, wherever known:
-- `GET /v1/residency` -> each `data[]` row's `instance` (the harness), read from
+- `GET /v1/residency` -> each `data[]` row's `instance` (for ingest clients), read from
   this box's own registry by the port it is serving on;
 - the page's `GET /loaded.json` -> each knurlogic `resident[]` row's
   `instance` (`machine/loaded.py` `_instance_of`);
@@ -218,11 +218,11 @@ unchanged). `--split pipeline`.
   Hidden states go rank N-1 -> ... -> 0 by `send`/`recv`, each in its own
   rank's dtype (the ranks' stage dtypes are gathered when the model is
   split; a send is cast to its receiver's, never read off a placeholder:
-  the maintainer's 574a7bd7). Every send is evaluated inside the forward that makes
+  fork commit 574a7bd7). Every send is evaluated inside the forward that makes
   it and every receive is waited for inside the forward that uses it, so
   point-to-point messages and the CPU collectives stay in program order on
   every rank. The one exception is a prompt's prefill chunks
-  (`pipeline.overlapped`, as the maintainer's exo fork queued its prefill sends): a
+  (`pipeline.overlapped`, as the project's exo fork queued its prefill sends): a
   follower's chunk is sent while its next chunk computes, at most two sends
   in flight, and all of them complete before the prefill's last forward --
   no collective runs between chunks. `KNURLOGIC_PIPELINE_OVERLAP=off` sends
@@ -250,12 +250,12 @@ unchanged). `--split pipeline`.
   `--layers a,b,...` (rank order) overrides it.
 - **Families**: qwen3_5 / qwen3_5_moe (PipelineMixin's start/end contract
   kept, its uniform split and all_gather not used; fa_idx/ssm_idx
-  recomputed on the slice), glm5_next (fa_idx/ssm_idx, the maintainer's f3ab3a83),
-  qwen4_exp (ple_layers and a sliced make_cache, the maintainer's dd946407). Gemma4
+  recomputed on the slice), glm5_next (fa_idx/ssm_idx, fork commit f3ab3a83),
+  qwen4_exp (ple_layers and a sliced make_cache, fork commit dd946407). Gemma4
   is refused: it shares KV across layers. Tested two ways on 127.0.0.1,
   float32, against the unsplit model: logits (every family, uneven cuts)
   equal to 1e-4 -- in fact 0.0: the same arithmetic in the same order.
-- **MTP on pipeline** (qwen3_5 families; the maintainer's exo design): the head
+- **MTP on pipeline** (qwen3_5 families; the project's exo design): the head
   lives on rank 0 ALONE, which has the true final hidden state. A follower
   never loads it (its bytes count on rank 0 only: `pipeline_leader_bytes`
   -> `pipeline_shares(leader_bytes=)`) and never runs it; it still takes
@@ -333,7 +333,7 @@ loopback, Thunderbolt, or a `--peer` address).
   SIGTERM answers every request in flight with a 503 (`cluster_failed`)
   before it exits. Unloading the job from any page is the same stop.
 - **jaccl self-heal** (fork present): JACCL_COLLECTIVE_TIMEOUT_MS=0 while
-  loading, set to 60000 after load (the maintainer's d2e82f92 / 43dc7f56).
+  loading, set to 60000 after load (fork commit d2e82f92 / 43dc7f56).
 - **Registry**: `jobs/jobs.json`, keyed `<job>/<rank>`; rank 0 also in
   `servers.json` by its port (chat, relay, residency find it there).
 - **Measured across two Macs** (2026-09-27; M4 Max 128 GB leads, M3 Ultra
@@ -373,7 +373,7 @@ second copy of `cluster/launch.launch`. Without the page, `load` and
   gives -- a share that does not fit, a machine not answering, the model
   not on a machine, RDMA without a Thunderbolt 5 cable, another load still
   in progress -- comes back as `{loaded: false, refused}` with nothing
-  started. The server never evicts: the harness unloads first.
+  started. The server never evicts: the ingest client unloads first.
 - `unload(port | model | job[, machine])`: a job with a rank on this Mac is
   `{action: unload, job}` (stopped on every machine); a peer's model or
   job is `{action: unload, node, port}` to its leader's page, which does
@@ -389,7 +389,7 @@ second copy of `cluster/launch.launch`. Without the page, `load` and
 
 A model whose server or cluster rank dies or stalls without being asked
 to stop is relaunched by the page that launched it, and says so. Strong
-endpoint behavior, bounded: eviction and model choice stay with the harness, and
+endpoint behavior, bounded: eviction and model choice stay with the ingest client, and
 recovery only brings back what was running -- the same machines, rank
 order (so the same split), link, port, tune and settings.
 `cluster/recovery.py`.
@@ -430,7 +430,7 @@ order (so the same split), link, port, tune and settings.
   each `/loaded.json` resident row and job; `/loaded.json`'s new
   `recovery` list -- tracked models with nothing serving now (waiting for
   a relaunch, or failed); each MCP `state()` model (a failed or waiting
-  model is an entry with `state` failed / recovering); and the the harness
+  model is an entry with `state` failed / recovering); and the the ingest client
   `/v1/residency` row of the server itself. The page writes the record to
   its machine's `~/.cache/knurlogic/recovery.json` under the port, and a
   cluster relaunch carries it (spec field `recovery`) to the page running
@@ -450,7 +450,7 @@ order (so the same split), link, port, tune and settings.
 2. Build behind `knurlogic serve --server knurlogic`; the old path stays
    the default.
 3. Switch the default when the new server passes the suite on every
-   family (plus the strict xfails flipped to passes: text stops, the harness's
+   family (plus the strict xfails flipped to passes: text stops, the ingest client's
    endpoints) AND is no slower on a measured decode/prefill comparison
    (n>=3 per arm, one process per arm).
 4. Remove the monkeypatches.
@@ -470,7 +470,7 @@ order (so the same split), link, port, tune and settings.
 5. Anything in the ordering above that makes the cluster executor
    harder later.
 
-## a review review (2026-09-25): build it -- accepted
+## Design review (2026-09-25): build it -- accepted
 
 1. **Executor protocol = today's BatchGenerator shapes** (insert_segments /
    next / extract_cache / remove / close); the scheduler is a port of
@@ -498,7 +498,7 @@ order (so the same split), link, port, tune and settings.
 5. **OpenAI error objects** `{"error": {message, type, param, code}}`;
    accept `max_completion_tokens`; refuse `n>1` with 400.
 6. **/v1/messages in-process** (today it self-requests over loopback).
-7. **the harness amendments**: concurrency header `X-Knurlogic-Concurrency:
+7. **the ingest client amendments**: concurrency header `X-Knurlogic-Concurrency:
    rows=3, more=?1` (RFC 8941), `more` omitted when unmeasured, also on
    /v1/residency -- and ingest is prefill/image-bound, where the hint is
    weaker; `/v1/ensure` on a one-model process is a switch (409 while rows
@@ -520,7 +520,7 @@ Build order: (1) executor protocol + MTPBatchGenerator behind it;
 model; flips the stop xfail); (3) host + scheduler + per-row sampling
 behind `--server knurlogic`, suite green on gemma e4b incl. seeds under
 load; (4) http openai / anthropic in-process / knurlogic endpoints
-(flips the harness's xfails); (5) Flash, GLM, Qwen, measured decode/prefill,
+(flips the ingest client's xfails); (5) Flash, GLM, Qwen, measured decode/prefill,
 switch the default, delete the patches.
 
 Suite additions required: seeded request under concurrent load equals it
@@ -539,7 +539,7 @@ tokens never yields U+FFFD; /v1/completions.
 | Qwen Flash-Next 2.1 | 23 passed |
 | GLM-5.3 2.7 | 22 passed; shared prefix 0 used -- fixed 2026-09-25 (CacheList offset): 23 passed |
 
-Known gaps pinned as strict xfails: text stop sequences; the harness's five.
+Known gaps pinned as strict xfails: text stop sequences; the ingest client's five.
 
 ## Build progress
 
@@ -577,12 +577,12 @@ Known gaps pinned as strict xfails: text stop sequences; the harness's five.
    `openai.py` (chat/completions/models, OpenAI error objects,
    max_completion_tokens, n>1 refused, a render failure is a 400 before
    any stream, prefill keepalives), `/v1/messages` in-process
-   (messages.handler_over), `scout.py` (/v1/residency, /v1/ensure,
+   (messages.handler_over), `residency.py` (/v1/residency, /v1/ensure,
    capabilities + size in /v1/models, 413 from the image header,
    X-Knurlogic-Concurrency from the engine's per-width timings). The
    page's load/unload go through the scheduler.
 
-a review build review (2026-09-25): no blockers; eight findings, all
+build review (2026-09-25): no blockers; eight findings, all
 fixed (20ea528) -- notably a pre-existing one: the draft step handed the
 logits processors a history without t1, so penalties differed by regime.
 

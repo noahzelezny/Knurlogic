@@ -11,7 +11,7 @@ from knurlogic.cluster.discovery import (LOCAL_ONLY, Discovery, txt_decode,
 
 
 def test_txt_round_trips_and_truncates_at_255():
-    d = {"id": "abc", "name": "Studio A", "schema": "2"}
+    d = {"id": "abc", "name": "Alex's Mac Studio", "schema": "2"}
     assert txt_decode(txt_encode(d)) == d
     assert len(txt_encode({"k": "x" * 400})) == 256
 
@@ -59,7 +59,7 @@ def test_a_ref_queued_twice_is_freed_once_and_its_callback_goes():
 
 def test_a_long_instance_name_is_cut_on_a_character_boundary():
     from knurlogic.cluster.discovery import _label
-    name = "the maintainer’s Mac Studio — " + "é" * 40
+    name = "Alex’s Mac Studio — " + "é" * 40
     b = _label(name)
     assert len(b) <= 63
     b.decode("utf-8")                      # never split mid-character

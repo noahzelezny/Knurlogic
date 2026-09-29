@@ -97,7 +97,7 @@ class Reduce(nn.Module):
     by its matmul, so the split cannot be bit-identical to the whole layer
     (which rounds once, after a reduction in another order). Summing in
     float32 rounds once after the sum; with two ranks that equals a bf16
-    add, with more it saves the intermediate roundings. Measured on the M4
+    add, with more it saves the intermediate roundings. Measured on an M4 Max (128 GB)
     (35B-A3B VQ, two ranks over the ring on 127.0.0.1): the float32 sum
     decodes at 29.6 tok/s where mlx's in-dtype bf16 all_sum made 13.6 --
     the ring backend reduces float32 far faster than bf16."""

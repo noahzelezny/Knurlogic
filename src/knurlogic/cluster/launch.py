@@ -123,7 +123,7 @@ PEER_S = 30.0
 WATCH_S = 2.0
 #: how long start waits for a stopped rank's process on this machine to be
 #: gone before it refuses: two jobs' shares in one working set is the OOM
-#: that rebooted the M3 (a 397B share loading beside the last job's 50 GiB)
+#: that rebooted the M3 Ultra (a 397B share loading beside the last job's 50 GiB)
 START_WAIT_S = 20.0
 #: how long one peer-page check may take (the watcher asks every WATCH_S)
 PEER_CHECK_S = 5.0
@@ -148,7 +148,7 @@ _STOPPING: set = set()
 _PEER_OK: dict = {}
 #: frozenset of two machine ids -> {subnet: why} -- a cable a rank's link
 #: init failed on this page session (the 192.0.2.x cable failing jaccl QP
-#: RTR with errno 96 after the M3 rebooted, while 198.51.100.x worked): tried
+#: RTR with errno 96 after the M3 Ultra rebooted, while 198.51.100.x worked): tried
 #: last from then on
 BAD_CABLES: dict = {}
 #: how long the coordinator watches a job it launched for a link-init
@@ -370,7 +370,7 @@ def _shared_subnet(a: dict, b: dict, rdma: bool = False) -> str:
     """The one Thunderbolt /24 two machines both sit on ("" if none) --
     lowest first, so every page picks the same. Two Macs joined by two
     cables share two subnets; BOTH ends of a link must be on the same one
-    (the M4's en2 at 198.51.100.2 and the M3's en4 at 192.0.2.1 are different
+    (the M4 Max's en2 at 198.51.100.2 and the M3 Ultra's en4 at 192.0.2.1 are different
     cables, and a jaccl queue pair across them fails RTR with errno 60).
     `rdma`: only a subnet whose interface has RDMA up on both ends. A
     cable that failed link init between the two this session goes last
