@@ -264,15 +264,20 @@ PRESET_DEFAULT = "balanced"
 PRESET_GUIDE = {
     "balanced": {
         "title": "Balanced",
-        "trades": "Nothing in particular -- the measured defaults.",
+        "trades": "Neither extreme: the measured defaults. Leaves speed on "
+                  "the table on a roomy machine, and more memory in use "
+                  "than lean or safe on a tight one.",
         "changes": "Each family's measured prompt chunk (512 tokens), the "
                    "default reclaimable cache, MTP as the family ships it.",
         "who": "Most people. Start here and move only for a reason.",
     },
     "fast": {
         "title": "Fast",
-        "trades": "Memory headroom for speed: faster prompts and replies, "
-                  "less room left for long contexts and parallel agents.",
+        "trades": "Memory headroom for speed: faster prompts and replies "
+                  "(wider prompt chunks: up to ~30% faster prefill on the "
+                  "397B, with a 9-23x larger memory spike), less room left "
+                  "for long contexts and parallel agents; timing varies "
+                  "as dynamic MTP switches.",
         "changes": "The family's wider measured prompt chunk where the "
                    "machine has room, a larger reclaimable cache (8 GiB), "
                    "MTP with its dynamic controller, bf16 KV cache.",
@@ -282,7 +287,10 @@ PRESET_GUIDE = {
     "stable": {
         "title": "Stable",
         "trades": "Some speed for repeatability: the same answer and "
-                  "steady timing, run after run and across machines.",
+                  "steady timing, run after run and across machines. Costs "
+                  "cross-chip padding (+2-6% on small matmuls), drafts "
+                  "even where a plain step is cheaper, and narrower "
+                  "prompt chunks.",
         "changes": "512-token prompt chunks, identical rounding across "
                    "chips, MTP drafting every step (no controller), bf16 "
                    "KV, a smaller cache and a tighter memory transient.",
@@ -292,7 +300,9 @@ PRESET_GUIDE = {
     "lean": {
         "title": "Lean",
         "trades": "Some speed and a little precision for capacity: the "
-                  "most context and the most agents at once.",
+                  "most context and the most agents at once. 8-bit KV "
+                  "decodes ~7% slower at 6k tokens of context, ~18% at "
+                  "16k (M4); with MTP off every step is a plain one.",
         "changes": "8-bit KV cache where the family takes it (bf16 where "
                    "not), 512-token prompt chunks, MTP off so its memory "
                    "is free.",
@@ -302,7 +312,9 @@ PRESET_GUIDE = {
     "safe": {
         "title": "Safe",
         "trades": "Speed for the lowest peak memory: the least likely to "
-                  "run the machine out of memory.",
+                  "run the machine out of memory, and the slowest -- a "
+                  "small cache and a tight transient give back speed "
+                  "headroom would have bought.",
         "changes": "Narrow prompt chunks, a 1 GiB reclaimable cache, and a "
                    "memory transient bounded tighter than needed.",
         "who": "A machine that also does other work, or after a load has "
@@ -346,85 +358,106 @@ CACHE_LIMIT_GB_MAX = 16.0
 # what it does, and what run says so. Anything added to the resolver should
 # be added here too, or it will appear in the UI as a bare string.
 KNOB_DOC = {
+    # (what it is, its TRADE-OFF: what a change buys and what it costs).
+    # Numbers are measurements with their run; where none exists the cost
+    # is said in words, never invented.
     "VQ_DECODE_CHUNK": (
         "experts decoded to dense fp16 per prefill chunk",
         "THE memory knob: prefill grew 3.35 MB/token where KV-cache theory "
-        "predicted 0.059. Smaller is also faster (128 -> 32 is 1.37x), so it "
-        "is capped at 32 and never raised."),
+        "predicted 0.059. No trade at the top: smaller is also faster (128 "
+        "-> 32 is 1.37x), so it is capped at 32. Lower still shrinks the "
+        "prefill memory spike further; the speed below 32 is not measured."),
     "KNURLOGIC_PREFILL_CHUNK": (
         "how many prompt tokens are processed at once",
-        "token-identical at every width, so it is purely a memory knob -- "
-        "narrowing costs nothing but peak."),
+        "wider can prefill faster -- up to ~30% on the 397B VQ, nothing on "
+        "Qwen3.8 Flash (M4, 2026-09-26) -- but each step's memory spike "
+        "grows 9-23x from 512 to 4096, which is what runs a long prompt or "
+        "parallel agents out of memory. Output is identical at every "
+        "width."),
     "KNURLOGIC_CONTEXT_LENGTH": (
         "the longest conversation (prompt + answer, in tokens) a request may "
         "use",
-        "nothing is reserved up front -- a cap, not an allocation: a longer "
-        "prompt is refused (400) and max_tokens is trimmed to fit, so no "
-        "request can take more KV memory than this allows. The default is "
-        "the model's own window."),
+        "longer lets a request run longer, and every token of it holds KV "
+        "memory while it runs, so fewer long conversations or agents fit at "
+        "once. Shorter caps that memory; a longer prompt is refused (400) "
+        "and max_tokens trimmed to fit. Nothing is reserved up front. The "
+        "default is the model's own window."),
     "KNURLOGIC_MTP": (
         "multi-token prediction: draft with the head packed beside the "
         "weights",
-        "drafting preserves the output distribution, so on is the default "
-        "wherever a head ships; off frees the head's memory and every "
-        "step is a plain one."),
+        "on: steps that draft can emit several tokens, usually faster "
+        "replies, with the same output distribution -- at the cost of "
+        "keeping the head in memory. Off frees that memory and every step "
+        "is a plain, slower one."),
     "KNURLOGIC_MTP_DYNAMIC": (
         "switch between drafting and plain steps by their measured cost",
         "on: each regime is timed per batch width and the cheaper one "
-        "taken, the loser re-tried on a backoff. Off: every step drafts "
-        "while a head is bound, whatever it costs. Only with MTP on."),
+        "taken, so it is usually faster -- but timing varies as it "
+        "switches. Off: every step drafts while a head is bound, steady "
+        "timing, paying for drafts even where a plain step would be "
+        "cheaper. Only with MTP on."),
     "KNURLOGIC_KV_BITS": (
-        "precision of the attention KV cache: bf16, or 8, 6 or 4 bits. "
-        "8 is the recommendation: every family takes it",
-        "the cache (and the prompt cache's entries) take about 53%, 41% or "
-        "28% of bf16's memory; K/V are dequantized for each step, so decode "
-        "is not faster and may be slower. Attention K/V (GLM: its MLA "
-        "latent) only -- recurrent state, sliding windows and sparse-"
-        "attention indexer keys stay bf16. GLM takes 8 only. 8-bit moves "
-        "the tiny test models' logits by ~0.3% of their range; not yet "
-        "measured on a real model."),
+        "precision of the attention KV cache: bf16, or 8, 6 or 4 bits",
+        "fewer bits hold more context and more agents: 8-bit takes about "
+        "53% of bf16's memory (6: 41%, 4: 28%). The cost is speed and a "
+        "little precision: K/V are dequantized every step, measured at "
+        "decode ~7% slower at 6k tokens of context and ~18% at 16k (8-bit, "
+        "M4), no measured prefill cost; 8-bit moves the tiny test models' "
+        "logits by ~0.3% of their range, not yet measured on a real model, "
+        "and 6/4 not measured at all. Attention K/V only (GLM: its MLA "
+        "latent; GLM takes 8 only)."),
     "KNURLOGIC_CROSS_CHIP": (
         "identical results across chips: a split over an M3 and an M4 "
-        "gives the same tokens a split over two of one",
-        "mlx picks a different quantized-matmul kernel for 9-31 rows on "
-        "each GPU generation, so they round differently; on pads those "
-        "calls to 32 rows (+2-6% on them only). Off by default: rank 0 "
-        "samples every token, so a cluster cannot desync. auto: on when the "
-        "machines of a cluster job have different GPU architectures."),
+        "gives the same tokens as a split over two of one",
+        "on costs speed: mlx picks a different quantized-matmul kernel "
+        "for 9-31 rows on each GPU generation, so on pads those calls to 32 "
+        "rows, +2-6% time on them. Off is faster, and a mixed-chip split "
+        "may then produce different (equally valid) tokens than a same-chip "
+        "one -- it cannot desync, rank 0 samples every token. auto: on only "
+        "when a cluster job's machines have different GPU architectures."),
     "KNURLOGIC_PRESET": (
-        "launch preset: balanced, fast, stable, lean (or safe)",
-        "one named bundle of the settings below. fast: the family's wider "
-        "prompt chunk where there is room, MTP + dynamic MTP. stable: "
-        "512-token chunks, identical results across chips, MTP drafting "
-        "every step, conservative memory. lean: 8-bit KV where the family "
-        "takes it, MTP off -- most context and agents. Any setting changed beside it beats the preset's value."),
+        "launch preset for this model: balanced, fast, stable, lean (or "
+        "safe) -- the knurlogic strategy unless set here",
+        "one named bundle of the settings below. fast buys speed with "
+        "memory headroom; stable buys repeatability with some speed; lean "
+        "buys context and agents with some speed and precision (8-bit KV). "
+        "Any setting changed beside it beats the preset's value."),
     "VQLAB_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
-        "biggest single win in the memory playbook, no measured speed cost at "
-        "26k-token prefill. Reclaimable, but still resident."),
+        "larger keeps more freed buffers for reuse, but they stay resident: "
+        "memory a long context or another agent cannot use. Smaller frees "
+        "it, with no measured speed cost at 26k-token prefill -- the "
+        "biggest single win in the memory playbook."),
     "VQ_MOE_GEMMSEG_CBDEV": (
         "where the codebook lives during the MoE GEMM",
-        "F124: the device arm is +20.9% on prefill at d4-K2048; 'auto' lets "
-        "the runtime choose per module."),
+        "F124: the device arm is +20.9% on prefill at d4-K2048, same "
+        "output; 'auto' lets the runtime choose per module. Forcing an arm "
+        "risks the slower one on modules it does not suit."),
     "VQ_MOE_GEMMSEG_RTILE": (
         "row tile width in the segmented GEMM",
-        "F25/F33: 64 is 0.75-0.97x and NEVER faster. The one 'win' was an "
-        "env-ordering bug that benchmarked 32 twice."),
+        "F25/F33: no trade -- 64 is 0.75-0.97x and NEVER faster. The one "
+        "'win' was an env-ordering bug that benchmarked 32 twice."),
     "VQ_GEMMSEG_OTILE64": (
         "64-wide output tiling in the segmented GEMM",
-        "F54: +5.1-6.6% prefill, bit-exact."),
+        "F54: +5.1-6.6% prefill, bit-exact; no measured cost, so on."),
     "VQ_GEMMSEG_PH2V": ("phase-2 vectorization",
-                        "F56: part of the +11.9% stack."),
-    "VQ_D4_WALK": ("d4 codebook walk", "F56: part of the +11.9% stack."),
+                        "F56: part of the +11.9% stack; off gives that "
+                        "speed back, no measured gain."),
+    "VQ_D4_WALK": ("d4 codebook walk",
+                   "F56: part of the +11.9% stack; off gives that speed "
+                   "back, no measured gain."),
     "VQ_GEMMSEG_PIPE": ("software pipelining in the segmented GEMM",
-                        "F56 arm 1.5: measured NEGATIVE, -1.8-2%. Off."),
+                        "F56 arm 1.5: on costs 1.8-2% and buys nothing. "
+                        "Off."),
     "VQ_GEMMSEG_BF16IO": ("bf16 IO in the segmented GEMM",
-                          "F103/F105 numerics-active: family-local, up to "
-                          "+0.97% ppl. Each rung keeps what it shipped: on "
-                          "for the v2 rungs, off for v1.5."),
+                          "F103/F105 numerics-active: changing it changes "
+                          "the output, up to +0.97% ppl, on weights fitted "
+                          "the other way. Each rung keeps what it shipped: "
+                          "on for the v2 rungs, off for v1.5."),
     "VQ_DECODE_BF16IO": ("bf16 IO on the decode path",
-                         "F103/F105 numerics-active. Each rung keeps what "
-                         "it shipped."),
+                         "F103/F105 numerics-active: changing it changes "
+                         "the output (up to +0.97% ppl). Each rung keeps "
+                         "what it shipped."),
 }
 
 
@@ -790,29 +823,37 @@ COMPACT_KNOBS = {
         "off", ["off", "on"], "",
         "compact a request that asks for nothing, once its prompt passes "
         "the trigger",
-        "off: the harness asks (context_management) and the server "
-        "performs. On: a request without context_management is compacted "
-        "as if it had asked, and the summary still goes back in the "
-        "response for the client to resend -- nothing is kept here."),
+        "on keeps a client that never asks inside the window, at a cost: "
+        "the request waits for a summary pass (one extra model call), and "
+        "older turns survive only as that summary -- detail is lost. Off: "
+        "only a harness that asks (context_management) is compacted; one "
+        "that does not is refused past the window. The summary goes back "
+        "in the response for the client to resend; nothing is kept here."),
     "KNURLOGIC_COMPACT_TRIGGER": (
         "0.8", ["0.5", "0.6", "0.7", "0.8", "0.9"], "of the window",
         "where compaction starts, as a share of the model's context window",
-        "used by automatic compaction, and by a compact edit that names no "
-        "trigger when the window is below the API's 150k default."),
+        "lower compacts earlier: shorter prompts, faster prefill and less "
+        "KV memory, but more summary passes and detail lost sooner. Higher "
+        "keeps more word for word, and runs closer to the window. Used by "
+        "automatic compaction, and by a compact edit that names no trigger "
+        "when the window is below the API's 150k default."),
     "KNURLOGIC_COMPACT_KEEP_TURNS": (
         "6", ["2", "4", "6", "8", "12", "16"], "messages",
         "the most recent messages kept word for word",
-        "Scout's keep_recent. The kept tail never starts on a tool result: "
-        "it is widened back to the call that asked for it. The first "
-        "message and the goal turn are always kept as well."),
+        "more keeps more recent work exact, at the cost of a longer "
+        "compacted prompt (more prefill and KV memory). Fewer shrinks it "
+        "further and leans harder on the summary, so more detail is lost. The kept tail never starts on a tool result (it is "
+        "widened back to the call that asked for it); the first message "
+        "and the goal turn are always kept."),
     "KNURLOGIC_COMPACT_TOOL_RESULTS": (
         "distill", ["distill", "clear"], "",
         "what becomes of a dropped tool result: a one-line finding, or "
         "nothing",
-        "distill: the summary pass also writes, per dropped tool call, what "
-        "it established (a Grep for X -> 'X is defined at src/foo.py:120'), "
-        "in the same model pass; a call it misses is cleared. clear: only "
-        "the call is named."),
+        "distill keeps what each dropped tool call established (a Grep for "
+        "X -> 'X is defined at src/foo.py:120'), at the cost of more output "
+        "from the same summary pass -- a slower compaction. clear is the "
+        "cheapest, and the model loses what those calls found: it may run "
+        "them again."),
 }
 
 
