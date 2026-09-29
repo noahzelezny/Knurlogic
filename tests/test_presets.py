@@ -38,7 +38,7 @@ def test_presets_are_the_tune_axis_and_balanced_is_the_default():
 def test_fast_takes_the_family_width_and_dynamic_mtp():
     r = resolve(_art(), 96 * GIB, tune="fast")
     e = S.engine_settings(r.env)
-    assert e["prefill_step_size"] == 4096
+    assert e["prefill_step_size"] == 2048    # the room rule, as balanced
     assert e["kv_bits"] is None and e["cross_chip"] == "off"
     assert preset_env(_art(), "fast") == {
         "KNURLOGIC_MTP": "on", "KNURLOGIC_MTP_DYNAMIC": "on",
