@@ -14,6 +14,7 @@ import sys
 from knurlogic.engine import arch
 from knurlogic.machine import wired
 from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning import settings as S
 from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
@@ -152,10 +153,11 @@ def main(argv=None) -> int:
                         "with (engine/vq/rungs.json). Forcing v1.5 on a v2 "
                         "rung changes its outputs.")
     p.add_argument("--tune", default="balanced",
-                   choices=("safe", "balanced", "fast"),
-                   help="safe = lowest peak memory; fast = spend headroom "
-                        "where it buys speed. Both are capped by what has "
-                        "been measured.")
+                   choices=S.PRESETS,
+                   help="the launch preset, the same five `serve --tune` "
+                        "takes: balanced (measured defaults), fast, stable, "
+                        "lean, safe (lowest peak memory). Capped by what "
+                        "has been measured.")
     p.add_argument("--exports", action="store_true",
                    help="print only `export K=V` lines, for eval")
     a = p.parse_args(argv)
