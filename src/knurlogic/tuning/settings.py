@@ -288,27 +288,22 @@ PRESET_GUIDE = {
         "trades": "Neither extreme: the measured defaults. Leaves speed on "
                   "the table on a roomy machine, and more memory in use "
                   "than lean or safe on a tight one.",
-        "changes": "The prompt chunk read from the room free at launch: "
-                   "the widest of 512/1024/2048/4096, up to the family's "
-                   "measured best, whose step spike fits in 10% of the "
-                   "room left after weights, KV and cache (512 where "
-                   "the family is unmeasured or the room is small). On "
-                   "the 35B-A3B that is 2048 on a roomy M4 -- ~1.8x "
-                   "prefill over 512 (1163 vs 645 tok/s, 28.7k tokens) "
-                   "-- and 512 for the 397B with ~14 GiB left. Default "
-                   "reclaimable cache, MTP as the family ships it.",
+        "changes": "Prompt chunk read from the room free at launch: the "
+                   "widest up to the family's measured best whose step "
+                   "spike fits 10% of the room left, else 512 (35B-A3B "
+                   "on a roomy M4: 2048, ~1.8x prefill). 4 GiB cache, "
+                   "MTP as the family ships it.",
         "who": "Most people. Start here and move only for a reason.",
     },
     "fast": {
         "title": "Fast",
-        "trades": "Memory headroom for speed: faster prompts and replies "
-                  "(the prompt chunk follows the same room rule as "
-                  "balanced), less room left for long contexts and "
-                  "parallel agents; timing varies as dynamic MTP switches.",
-        "changes": "The same room-read prompt chunk as balanced (the "
-                   "larger cache leaves slightly less room for it), a "
-                   "larger reclaimable cache (8 GiB), "
-                   "MTP with its dynamic controller, bf16 KV cache.",
+        "trades": "Memory headroom for speed: faster replies, less room "
+                  "left for long contexts and parallel agents; timing "
+                  "varies as dynamic MTP switches.",
+        "changes": "The same room-read prompt chunk as balanced (its "
+                   "larger cache leaves slightly less room for it), an "
+                   "8 GiB reclaimable cache, MTP with its dynamic "
+                   "controller, bf16 KV cache, no cross-chip padding.",
         "who": "One person, one conversation at a time, on a machine with "
                "memory to spare.",
     },
@@ -316,12 +311,12 @@ PRESET_GUIDE = {
         "title": "Stable",
         "trades": "Some speed for repeatability: the same answer and "
                   "steady timing, run after run and across machines. Costs "
-                  "cross-chip padding (+2-6% on small matmuls), drafts "
-                  "even where a plain step is cheaper, and narrower "
-                  "prompt chunks.",
-        "changes": "512-token prompt chunks, identical rounding across "
-                   "chips, MTP drafting every step (no controller), bf16 "
-                   "KV, a smaller cache and a tighter memory transient.",
+                  "cross-chip padding (+2-6% on small matmuls) and drafts "
+                  "even where a plain step is cheaper.",
+        "changes": "512-token prompt chunks whatever the room, identical "
+                   "rounding across chips, MTP drafting every step (no "
+                   "controller), bf16 KV, a 2 GiB reclaimable cache and a "
+                   "memory transient bounded tighter than needed.",
         "who": "Clusters of mixed Macs, benchmarks, and anyone debugging "
                "or comparing outputs.",
     },
@@ -332,8 +327,8 @@ PRESET_GUIDE = {
                   "decodes ~7% slower at 6k tokens of context, ~18% at "
                   "16k (M4); with MTP off every step is a plain one.",
         "changes": "8-bit KV cache where the family takes it (bf16 where "
-                   "not), 512-token prompt chunks, MTP off so its memory "
-                   "is free.",
+                   "not), 512-token prompt chunks whatever the room, the "
+                   "default 4 GiB cache, MTP off so its memory is free.",
         "who": "Long documents, many parallel agents, or a big model on a "
                "machine it only just fits.",
     },
@@ -343,8 +338,10 @@ PRESET_GUIDE = {
                   "run the machine out of memory, and the slowest -- a "
                   "small cache and a tight transient give back speed "
                   "headroom would have bought.",
-        "changes": "Narrow prompt chunks, a 1 GiB reclaimable cache, and a "
-                   "memory transient bounded tighter than needed.",
+        "changes": "512-token prompt chunks whatever the room, a 1 GiB "
+                   "reclaimable cache, and a memory transient bounded "
+                   "tighter than needed; MTP and KV as the family ships "
+                   "them.",
         "who": "A machine that also does other work, or after a load has "
                "run out of memory.",
     },
