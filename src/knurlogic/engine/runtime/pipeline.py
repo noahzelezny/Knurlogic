@@ -77,7 +77,7 @@ _DTYPES = (mx.float32, mx.bfloat16, mx.float16)
 
 def core_of(model):
     """The trunk core holding `layers` (qwen3_5 / glm5_next:
-    model.language_model.model; qwen4_exp: model.model)."""
+    model.language_model.model; qwen4_exp / deepseek_v4: model.model)."""
     return getattr(getattr(model, "language_model", model), "model")
 
 
@@ -90,8 +90,10 @@ def family_of(model) -> str:
         return "glm5_next"
     if name == "Qwen4ExpModel":
         return "qwen4_exp"
-    raise ValueError(f"a pipeline split knows qwen3_5, qwen3_5_moe, glm5_next "
-                     f"and qwen4_exp; this trunk is {name}")
+    if name == "DeepseekV4Model":
+        return "deepseek_v4"
+    raise ValueError(f"a pipeline split knows qwen3_5, qwen3_5_moe, glm5_next, "
+                     f"qwen4_exp and deepseek_v4; this trunk is {name}")
 
 
 def own_dtype(layer) -> mx.Dtype:
@@ -270,6 +272,14 @@ def restage(model, keep: list, start: int, end: int) -> None:
         def make_cache():
             return whole()[start:end]
         model.make_cache = make_cache
+    # deepseek_v4: nothing else. Each block froze its own compress ratio,
+    # hash routing and RoPE from its GLOBAL layer_id at __init__, every
+    # layer's cache is the same DeepseekV4Cache (make_cache is one per kept
+    # layer), and the stream between stages is the [B, S, hc, D]
+    # hyper-connection state, which every stage builds from its own
+    # embedding (so a Recv's placeholder has the right shape). The block
+    # takes the token ids as a third argument (hash routing); the wrappers
+    # pass it through.
 
 
 def split(model, group, bounds: Sequence[Tuple[int, int]]) -> dict:

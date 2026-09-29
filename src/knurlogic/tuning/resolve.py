@@ -376,6 +376,26 @@ def kv_bytes_per_token(tc: dict, kv_bits=None) -> tuple:
     layers = int(tc.get("num_hidden_layers") or 0)
     types = tc.get("layer_types")
     interval = tc.get("full_attention_interval")
+    ratios = tc.get("compress_ratios")
+    if tc.get("model_type") == "deepseek_v4":
+        # DeepSeek-V4: every layer keeps a fixed sliding window (bounded,
+        # not per token); what grows is a compressed pool of one head_dim
+        # row per `ratio` tokens on each layer with a ratio, plus, on the
+        # ratio-4 layers, the indexer's pool of one index_head_dim row per
+        # 4 tokens. All bf16 (DeepseekV4Cache; KV quantization refused).
+        ratios = [int(r) for r in (ratios or [])][:layers]
+        hd = int(tc.get("head_dim") or 0)
+        ihd = int(tc.get("index_head_dim") or 0)
+        el = S.VISION_KV_DTYPE_BYTES
+        per = sum(hd / r + (ihd / r if r == 4 else 0)
+                  for r in ratios if r > 0) * el
+        n = sum(1 for r in ratios if r > 0)
+        n4 = sum(1 for r in ratios if r == 4)
+        return int(round(per)), (
+            f"{n} compressed layers of {layers} ({n4} at 1/4 with the "
+            f"indexer's {ihd}-dim pool, {n - n4} at 1/{max(ratios)}) x "
+            f"{hd}-dim rows x bf16; the {tc.get('sliding_window')}-token "
+            f"window is bounded")
     if isinstance(types, list) and tc.get("kv_lora_rank"):
         # MLA (GLM-5.3's deepseek_sparse_attention): a layer caches its
         # compressed latent and the DSA indexer's key, not K and V per
@@ -1039,7 +1059,7 @@ def rank_order(machines: list, explicit: list | None = None) -> list:
 #: own index fixups there); anything else is refused with a reason
 PIPELINE_TYPES = ("qwen3_5", "qwen3_5_moe", "qwen3_5_text",
                   "qwen3_5_moe_text", "glm5_next", "qwen4_exp",
-                  "qwen4_exp_text")
+                  "qwen4_exp_text", "deepseek_v4")
 
 _PIPELINE_WHY_NOT = {
     "gemma4": "gemma4 shares KV across layers (a layer reads a cache another "
@@ -1072,7 +1092,7 @@ def pipeline_refusals(cfg: dict, n: int) -> list:
         why = next((w for k, w in _PIPELINE_WHY_NOT.items()
                     if any(str(t or "").startswith(k) for t in types)), None)
         return [f"pipeline split knows {', '.join(PIPELINE_TYPES[:2])}, "
-                f"glm5_next and qwen4_exp; this is {mt!r}"
+                f"glm5_next, qwen4_exp and deepseek_v4; this is {mt!r}"
                 + (f": {why}" if why else "")]
     L = tc.get("num_hidden_layers") or cfg.get("num_hidden_layers")
     if L is not None and int(L) < n:
