@@ -272,7 +272,10 @@ class Link:
                 c.sendall(b"w")
             self.parked = False
         n = len(payload) if (self.rank == 0 and payload) else 0
-        ctl = mx.array([P.control(over, self.step, n)], dtype=mx.int64)
+        ctl = mx.array([P.control(over, self.step, n,
+                                  int(mx.get_active_memory()),
+                                  int(mx.get_peak_memory()))],
+                       dtype=mx.int64)
         rows = mx.distributed.all_gather(ctl, group=self.group,
                                          stream=mx.cpu).tolist()
         steps = {r[P.STEP] for r in rows}
@@ -401,6 +404,19 @@ def bell_dial(host: str, port: int, nonce: int, rank: int, wait_s: float,
         return c
 
 
+def publish_ranks(rows) -> list:
+    """Every rank's memory as of this exchange, for rank 0's /status.json
+    (`ranks`): a follower serves no status of its own, so this is the one
+    place a pipeline stage's memory is visible from outside."""
+    from knurlogic.engine.serve import state
+    ranks = [{"rank": i, "active_bytes": int(r[P.ACTIVE]),
+              "peak_bytes": int(r[P.PEAK]),
+              "over_limit_bytes": int(r[P.OVER])}
+             for i, r in enumerate(rows) if len(r) >= P.CONTROL_LEN]
+    state.SERVED["ranks"] = ranks
+    return ranks
+
+
 class Journal:
     """Rank 0's ops since the last exchange, in the order they happened."""
 
@@ -440,6 +456,7 @@ class Ring:
         rows, _ = self.link.exchange(over, payload)
         self.peer_over = max(r[P.OVER] for r in rows[1:])
         self.local_then = int(mx.get_active_memory())
+        publish_ranks(rows)
 
     def peers_over_now(self) -> Optional[int]:
         """The peers' over-limit as of the last exchange. Under tensor the

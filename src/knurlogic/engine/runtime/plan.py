@@ -55,8 +55,11 @@ from __future__ import annotations
 import json
 from typing import List
 
-CONTROL_LEN = 3
-OVER, STEP, LENGTH = range(CONTROL_LEN)
+#: one row per rank per step. ACTIVE / PEAK: that rank's own mlx active
+#: and peak memory, so rank 0 can report every rank's (a follower serves
+#: no /status.json of its own)
+CONTROL_LEN = 5
+OVER, STEP, LENGTH, ACTIVE, PEAK = range(CONTROL_LEN)
 
 OPS = ("admit", "remove", "insert", "pop", "reset", "stop", "park", "set")
 _FIELDS = {
@@ -208,5 +211,6 @@ def _ints(xs, what: str) -> None:
         raise PlanError(f"{what} must be a list of ints")
 
 
-def control(over: int, step: int, length: int) -> List[int]:
-    return [int(over), int(step), int(length)]
+def control(over: int, step: int, length: int, active: int = 0,
+            peak: int = 0) -> List[int]:
+    return [int(over), int(step), int(length), int(active), int(peak)]
