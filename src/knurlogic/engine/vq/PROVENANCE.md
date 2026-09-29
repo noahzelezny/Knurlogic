@@ -44,8 +44,9 @@ The full table is `docs/design/vq-rung-knobs.md`; the machine record is
   4229-line runtime, 506 HEAD lines differ; the numerics flags do not exist
   in it (knobs set them `0`, recorded as inferred), and neither do
   `VQ_D4_WALK`, `VQ_GEMMSEG_OTILE64`, `VQ_GEMMSEG_PH2V` and four more (left at
-  HEAD: F54/F56 record them bit-exact). Serving these on HEAD is a runtime
-  change: only a G-VQ pass may mark them verified.
+  HEAD: vqlab measured them bit-exact). Serving these on HEAD is a runtime
+  change: only a pass of the identity gate (tools/vq_gate.py) may mark them
+  verified.
 
 Distinct published runtimes: **9**, not the 10 the design counted -- GLM 2.7
 was the one "to be re-read", and on the Hub it is byte-identical to 3.1 / 3.6.

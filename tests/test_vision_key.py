@@ -77,7 +77,7 @@ def test_expand_pads_then_expand():
 
 
 def test_segments_expand_with_the_prompt():
-    """critique issue 2: mlx-lm's segments feed insert_segments; they must
+    """mlx-lm's segments feed insert_segments; they must
     be keys too, and add up to the key."""
     segs = [[1, PAD, 2], [3], [PAD, 4]]
     key, seg_keys = K.expand_segments(segs, [A, C], PAD)
@@ -95,7 +95,7 @@ def test_spans_of_a_slice_start_mid_image():
 
 
 def test_proc_hash_is_in_the_sentinel():
-    """critique issue 1: a processor change with the same token count must
+    """A processor change with the same token count must
     not hit the old KV."""
     A2 = ImageRef(A.sha, "p2", A.n_tokens, A.grid_thw)
     assert K.expand(_ids(A), [A], PAD) != K.expand(_ids(A), [A2], PAD)

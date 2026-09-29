@@ -74,7 +74,7 @@ def test_a_turn_ending_in_a_tool_result_is_checkpointed_like_a_user_turn():
     prompts were one "assistant" segment -- no checkpoint -- and on a
     hybrid model (linear attention: the finished entry cannot be trimmed
     back) each turn re-prefilled everything after the first user message:
-    397B agents at 15-22k tokens reused 881 (2026-09-27, cluster shootout)."""
+    agents at 15-22k tokens reused only 881."""
     p, segs, types, _ = P.tokenize(
         None, Tok(), _req(("system", "abcd"), ("user", "hi"),
                           ("assistant", "call"), ("tool", "result")),

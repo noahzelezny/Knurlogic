@@ -61,8 +61,8 @@ class Glm5VisionFamily:
         patch = self.vision_config.patch_size
         merge = self.vision_config.spatial_merge_size
         # GLM's processor resizes to a multiple of patch*merge and has no
-        # fixed token budget (aspect-dependent, like gemma's -- critique
-        # issue 5): fixed_tokens stays None until a real processor read
+        # fixed token budget (aspect-dependent, like gemma's):
+        # fixed_tokens stays None until a real processor read
         # says otherwise (open issue, see PROVENANCE.md).
         self.spec = VisionSpec(
             family="glm5_next",

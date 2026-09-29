@@ -19,8 +19,7 @@ read. The shim's job (attach) is done by `model_classes` below.
 WHY A FRESH NAMESPACE PER KNOB SET, NOT ONE IMPORT. The flags are module
 globals read ONCE at import (`_GEMMSEG_BF16IO = os.environ.get(...)` and
 ~30 more). One shared import would freeze the first rung's numerics into
-every rung loaded after it in the process -- the v1.5-overrides-v2 bug of
-design D1 again, moved from the resolver into the import system.
+every rung loaded after it in the process.
 
 ENV PRECEDENCE: a flag already set in the process environment wins over the
 rung's knob. The resolver emits the rung's own values by default, so they
@@ -305,7 +304,7 @@ def model_classes(cfg: dict, knobs: dict | None = None):
 
 def serves(path) -> bool:
     """Does knurlogic's runtime serve this artifact? Only a rung listed as
-    VERIFIED in rungs.json (G-VQ passed against its published bundle).
+    VERIFIED in rungs.json (the identity gate passed against its published bundle).
     Every other artifact -- unlisted, or listed and not yet gated -- loads
     the model.py it ships, unchanged."""
     return _rungs.verified(path)

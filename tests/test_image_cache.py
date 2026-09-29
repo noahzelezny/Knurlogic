@@ -14,7 +14,7 @@ Fixtures, and why each is shaped the way it is:
 * a tiny random qwen3_5 (float32, seed 0, vocab 512): a HYBRID trunk, so its
   recurrent caches take only exact-prefix hits (design risk 4) -- the
   hardest case for G8, and the real target family.
-* `ByteTok`: a template that does NOT rewrite history (critique 3: Qwen's
+* `ByteTok`: a template that does NOT rewrite history (Qwen's
   real template drops earlier thinking, which would fail G8 for template
   reasons). Byte ids 0-255, every other id a private-use char, so a reply
   re-encodes to exactly the ids generated and turn 2's key extends turn 1's
@@ -22,8 +22,8 @@ Fixtures, and why each is shaped the way it is:
   placeholder is a single special id). The image and eos ids are banned by
   logit_bias so a random model cannot type them.
 * P0's `StubFamily` (identity tower, pixel-dependent features), never a
-  real family package (design P4). Tower calls are counted by wrapping
-  `fam.tower` from OUTSIDE (critique 4).
+  real family package. Tower calls are counted by wrapping
+  `fam.tower` from OUTSIDE.
 """
 import base64
 import io
@@ -514,7 +514,7 @@ def test_g7b_text_turn_after_an_image_warm_equals_cold(server, model):
     """Turn 1 has the image; turn 2 is TEXT ONLY and warm. Its positions
     must still carry the image's rope_delta -- prefill and every decode
     step. Fails if positions are computed only when the new span holds an
-    image (critique B1)."""
+    image."""
     pm = PosModel(model)
     warm = Harness(server, pm, family=pos_family(pm))
     try:

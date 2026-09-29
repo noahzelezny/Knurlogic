@@ -1,13 +1,16 @@
 """Which released rung is which, and what numerics it SHIPPED with.
 
+A rung is one published quantization level of a model (one Hub repo, e.g.
+a 3.4-bit and a 4.6-bit upload of the same model are two rungs).
+
 Stdlib only: the resolver (tuning/) asks this before anything loads, and
 asking must not import an engine.
 
 THE RECORD IS THE PUBLISHED BUNDLE. Each released rung ships a `model.py`
 whose flag defaults ARE its numerics. `rungs.json` holds, per Hub repo, the
 defaults read out of that rung's PUBLISHED model.py (`hf download <repo>
-model.py`) -- never out of an `~/.exo` copy, which has drifted from the Hub
-on several repos (design D1). `tools/vq_gate.py knobs` regenerates it from
+model.py`) -- never out of a local copy, which may have drifted from the
+Hub. `tools/vq_gate.py knobs` regenerates it from
 downloaded bundles; nothing here is typed by hand.
 
 Two facts per rung that other code acts on:
@@ -18,7 +21,7 @@ Two facts per rung that other code acts on:
     2.1's whole runtime body differs from HEAD by exactly its three flag
     defaults; the 27B's by nothing at all.
   * `verified` -- knurlogic serves a rung on its OWN runtime only after the
-    G-VQ identity gate (tools/vq_gate.py) passed on that rung against its
+    identity gate (tools/vq_gate.py) passed on that rung against its
     published bundle. Everything starts False; an unverified rung keeps
     loading the model.py it ships, exactly as before.
 """
@@ -128,7 +131,7 @@ def published_default(path_or_repo, flag: str) -> Optional[str]:
 
 
 def verified(path_or_repo) -> bool:
-    """Has G-VQ passed for this rung? Only then may knurlogic's runtime
+    """Has the identity gate passed for this rung? Only then may knurlogic's runtime
     serve it instead of its bundled model.py."""
     r = rung(path_or_repo)
     return bool(r and r.get("verified") is True)
