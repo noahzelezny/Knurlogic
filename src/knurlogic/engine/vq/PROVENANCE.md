@@ -1,8 +1,8 @@
 # engine/vq provenance
 
-Vendored from vqlab at commit **d271035** (2026-09-29: 42df84f, vendored
-2026-09-23, plus five comment-only lines that drop personal names; last functional
-change to `vq_switch.py` is `ef4e8dc`, "VQ_DENSE_SS on by default").
+Vendored from vqlab at commit **d271035** (42df84f plus five comment-only
+lines; the last functional change to `vq_switch.py` is `ef4e8dc`,
+"VQ_DENSE_SS on by default").
 
 | file | source | lines | sha256 |
 |---|---|---|---|
@@ -14,7 +14,7 @@ are not imported as modules: `runtime.py` executes the two texts, joined, into
 one fresh namespace per knob set -- the way a published `model.py` carries
 them -- so `vq_dense._resolve_kernel` finds vq_switch's kernels in its own
 globals (its first lookup), and each rung's import-time flag reads see that
-rung's knobs. That is why vendoring needed no edit to load inside knurlogic.
+rung's knobs. That is why vendoring needs no edit to load inside knurlogic.
 
 Why `vq_dense.py` too (the design names only `vq_switch.py`): the three
 Qwen3.8-27B rungs and gemma e4b are DENSE VQ (`vq_linear` / `vq_embed`); their

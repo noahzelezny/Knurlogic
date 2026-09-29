@@ -3,20 +3,15 @@
 Vendored from mlx-vlm 0.6.17 `mlx_vlm/models/qwen3_vl/vision.py`
 (sha256 0c51d19e208e5d8fa7a6751aee0a9360a5bd8783dcfcf532286d14a0f1fbc7f9,
 447 lines), MIT, Copyright (c) 2025 Prince Canuma. The three Qwen families'
-own vision.py files there are each `class VisionModel(Qwen3VLVisionModel):
-pass` (report-mlx-vlm-families.md section 1), so this one tower serves all
-three. `VisionConfig` is qwen3_vl/config.py:28-49 (sha256
-8b529cfbd568c7d202140b4d5212be7fe740310c1a80374fa7dd4e59b9763017) with
-qwen3_5/config.py's deepstack guard folded in.
+own vision.py files there each subclass Qwen3VLVisionModel with no body,
+so this one tower serves all three. `VisionConfig` is qwen3_vl/config.py
+with qwen3_5/config.py's deepstack guard folded in.
 
-Edits, and nothing else (PROVENANCE.md lists them):
-  * imports: `..base.ensure_fused_sdpa` -> knurlogic.engine.vision._base,
-    `.config.VisionConfig` -> defined below
-  * VisionConfig.__post_init__: deepstack forced empty and refused if set
-    (qwen3_5/config.py:47-58 -- Qwen3.5 disables it; every released rung
-    has deepstack_visual_indexes [])
-Held to the reference by G1 (tests/test_vision_qwen.py, golden
-tests/goldens/qwen_<family>.npz: tower output atol 1e-5).
+Edits (PROVENANCE.md lists them): imports point at
+knurlogic.engine.vision._base and the local VisionConfig; deepstack is
+forced empty and refused if set (every released rung has
+deepstack_visual_indexes []). Held to the reference by G1
+(tests/test_vision_qwen.py, goldens tests/goldens/qwen_<family>.npz).
 """
 from dataclasses import dataclass, field
 from itertools import accumulate

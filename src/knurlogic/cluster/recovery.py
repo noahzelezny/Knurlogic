@@ -1,39 +1,16 @@
 """Auto-recovery: a model that died or stalled without being asked to stop
-is brought back by the page that launched it -- bounded.
+is relaunched by the page that launched it -- bounded.
 
-Who      the page that coordinated a cluster launch (cluster_jobs.launch
-         registers the job here), and the page that started a one-Mac
-         server (ui's Launch registers the port). A relaunch is the same
-         launch again: the same identity, machines, rank order, split,
-         link, port, tune and settings, through cluster_jobs.launch (its
-         prepare checks fit, versions, links and one load at a time on
-         every page; the cable failover still follows it) or mcp.load for
-         one Mac (fit and memory-still-moving refusals).
-Never    a requested stop (an unload from any page or the MCP, a page
-         closing); a stop because the model does not fit or a machine ran
-         out of memory -- relaunching into the same memory is what rebooted
-         the M3 Ultra once -- which is `failed` at once, with the reason.
-Waits    a machine that went away or stopped answering: the relaunch waits
-         until every machine of the job answers its page again, within the
-         window; else `failed`.
-Limits   MAX_ATTEMPTS relaunches of a model within WINDOW_S, BACKOFF_S apart;
-         after that the model is `failed`, with the last reason, until
-         someone loads it again. A relaunch starts only once no rank of the
-         old job is left on any of its machines (`knurlogic serve` for that
-         job, by process), and a one-Mac server only once its old process
-         is gone.
-Switch   KNURLOGIC_RECOVER=off turns it off (on by default): failures stop
-         the job and are reported, as before.
+A relaunch is the same launch again (cluster_jobs.launch, or mcp.load for
+one Mac), at most MAX_ATTEMPTS within WINDOW_S, BACKOFF_S apart, and only
+once the old job's processes are gone. Never after a requested stop, nor
+after a stop for not fitting or running out of memory (that is `failed` at
+once). KNURLOGIC_RECOVER=off turns it off. `view()` reports {attempts,
+last_reason, last_at, next_at, state}; records persist in recovery.json
+and recovery-models.json so a restarted page resumes (restore()). Stdlib
+only.
 
-What is reported, per model: `view()` -> {attempts, last_reason, last_at,
-next_at, state}, state recovering | recovered | failed; None when there is
-nothing to report. The page writes each record also to this machine's
-recovery.json under the serving port, and a relaunch carries it to the page
-of the machine running rank 0, so that model's own /v1/residency row says
-it too. What it takes to relaunch -- each tracked model's record, its
-launch request and attempts -- is kept in recovery-models.json beside it,
-so a page restarted mid-recovery picks up where it was (restore()).
-Stdlib only: the page never imports mlx.
+Design: docs/design/cluster.md (recovery).
 """
 from __future__ import annotations
 

@@ -1,21 +1,11 @@
 """The Anthropic Messages API, as a translation over the engine's OpenAI one.
 
-WHY THIS EXISTS. A coding harness -- Claude Code among them -- speaks the
-Anthropic Messages shape and is pointed at a server with ANTHROPIC_BASE_URL.
-The gap between that and an OpenAI server is a translation, not an
-inference problem.
-
-IT IS A TRANSLATION, NOT A SECOND INFERENCE PATH. The OpenAI surface already
-owns chat templates, stop sequences, streaming and tool-call parsing, and a
-second implementation of any of that would drift from the first. So this
-converts a request into the OpenAI shape, hands it to that surface
-(`handler_over`: knurlogic's server passes its own, in-process), and
-converts what comes back.
-
-WHAT IT CANNOT PROMISE. A harness leans hard on tool-calling: whether a given
-model emits well-formed tool calls at all is a property of the model, not of
-this file. The translation being correct is necessary and nowhere near
-sufficient, and `doctor` should say that rather than this module implying it.
+A coding harness speaks the Anthropic Messages shape (ANTHROPIC_BASE_URL).
+This converts each request into the OpenAI shape, hands it to that surface
+in-process (`handler_over`), and converts what comes back; chat templates,
+stop sequences, streaming and tool-call parsing stay owned by the OpenAI
+surface. Whether a model emits well-formed tool calls is a property of the
+model, not of this translation.
 """
 
 from __future__ import annotations

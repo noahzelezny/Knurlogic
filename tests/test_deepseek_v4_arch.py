@@ -71,7 +71,7 @@ def test_it_may_be_pipelined():
                     reason="the DeepSeek-V4-Flash artifact is not mounted (set KNURLOGIC_TEST_DEEPSEEK_V4)")
 def test_the_real_artifact_splits_m3_ultra_96_and_m4_max_128_by_bytes():
     """The planner over the real headers (nothing loaded): the M3 Ultra's
-    86016 MB wired limit and the M4 Max's 122880 MB. The M4 must hold at
+    86016 MB wired limit and the M4 Max's 122880 MB. The M4 Max holds at
     most ~100 GB, whichever leads."""
     from knurlogic.cluster import launch as L
     sh = L.shape_of(str(REAL), 2, "pipeline")
@@ -114,7 +114,7 @@ def _load(model_config=None):
 
 
 def test_the_loaded_model_computes_the_forks_logits():
-    """The golden was computed by the fork itself (mlx-lm 0.31.9 on the M4)
+    """The golden was computed by the fork itself (mlx-lm 0.31.9)
     over the same weights: prefill, then six decode steps, pools growing
     on both paths and the 8-token window rotating -- with every pool row
     kept by the indexer (G.GOLDEN_CONFIG), since where it chooses the

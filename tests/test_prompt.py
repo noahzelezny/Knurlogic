@@ -108,8 +108,9 @@ def test_control_token_spellings_in_content_stay_text():
     from knurlogic.engine.runtime import prompt as P
     import glob
     import os
-    found = sorted(glob.glob(os.path.expanduser(
-        "~/.exo/models/*Qwen3*/tokenizer_config.json")))
+    models = os.environ.get("KNURLOGIC_MODELS", "~/.exo/models")
+    found = sorted(glob.glob(os.path.join(
+        os.path.expanduser(models), "*Qwen3*/tokenizer_config.json")))
     if not found:
         pytest.skip("no Qwen artifact on this machine for its tokenizer")
     hf = AutoTokenizer.from_pretrained(os.path.dirname(found[0]))
@@ -143,8 +144,9 @@ def _qwen_wrapper():
     import pytest
     from pathlib import Path
     from mlx_lm.tokenizer_utils import load
-    found = sorted(glob.glob(os.path.expanduser(
-        "~/.exo/models/*Qwen3.8*/tokenizer_config.json")))
+    models = os.environ.get("KNURLOGIC_MODELS", "~/.exo/models")
+    found = sorted(glob.glob(os.path.join(
+        os.path.expanduser(models), "*Qwen3.8*/tokenizer_config.json")))
     if not found:
         pytest.skip("no Qwen3.8 artifact on this machine for its tokenizer")
     return load(Path(os.path.dirname(found[0])))
@@ -194,7 +196,7 @@ def test_the_conversation_checkpoint_ends_before_the_generation_prompt():
     where the last message ends, not after the assistant header the
     generation prompt opens (a hybrid model cannot trim a checkpoint back,
     so one ending at <|im_start|>assistant never matched: the summary pass
-    re-prefilled 13.9k tokens, M4 Qwen3.6-35B, 2026-09-28)."""
+    re-prefilled 13.9k tokens on Qwen3.6-35B)."""
     hist = _req(("user", "goal"), ("assistant", "calling"), ("user", "why?"))
     p, segs, types, _ = P.tokenize(None, Tok(), hist, P.PromptArgs())
     assert sum(segs, []) == p
@@ -277,8 +279,8 @@ def test_a_user_turn_after_tool_calls_continues_from_the_checkpoint():
     an agent's tool calls -- the next question, or compaction's summary
     ask -- re-rendered every earlier assistant turn without its
     `<think>\\n\\n</think>\\n\\n`: the prompt diverged right after the goal
-    and the hybrid model re-prefilled 13.8k tokens (M4 Qwen3.6-35B,
-    2026-09-28). preserve_thinking keeps earlier turns as they were."""
+    and the hybrid model re-prefilled 13.8k tokens (Qwen3.6-35B).
+    preserve_thinking keeps earlier turns as they were."""
     tok = QwenTok()
     h = _agent_history()
     a, segs, _, _ = P.tokenize(None, tok, P.ChatRequest(messages=h),

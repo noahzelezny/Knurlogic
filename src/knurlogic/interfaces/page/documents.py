@@ -1,19 +1,10 @@
-"""The routes Knurlogic serves next to the engine's OpenAI surface.
+"""The routes knurlogic serves next to the engine's OpenAI surface.
 
-One place, because two servers use them -- `serve` and the page `knurlogic
-ui` opens -- and a settings page that differed between them would be worse
-than none.
-
-WHY THERE IS A SETTINGS ROUTE AT ALL. A GUI that shows a green light and no
-knobs is a status page wearing a costume; the knobs are the reason to open
-it. But this cannot pretend a slider retunes a loaded model: the runtime
-reads its environment AT IMPORT, and the import already happened. So the page
-answers three separate questions and never blurs them --
-
-    what is running now, what WOULD this setting give me, and how do I get it
-
--- which is more honest than a control that appears to work and does not, and
-more useful than no control at all.
+One place, because `serve` and the page `knurlogic ui` opens both use them.
+The runtime reads its environment at import, so the settings route never
+pretends a control retunes a loaded model; it answers three separate
+questions: what is running now, what a setting would give, and how to get
+it.
 """
 
 from __future__ import annotations

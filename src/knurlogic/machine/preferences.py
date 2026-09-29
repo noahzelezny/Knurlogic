@@ -1,23 +1,14 @@
 """The knurlogic-wide settings: chosen once, for every model.
 
-Beside the strategy (the default launch preset), two kinds of setting are
-not a model's to vary and so are not kept per base model:
+Beside the strategy (the default launch preset): compaction
+(tuning/settings.COMPACT_KNOBS, read per request by every server) and
+identical results across chips (KNURLOGIC_CROSS_CHIP, read at launch;
+unset means the preset decides). Kept in ~/.config/knurlogic/settings.json
+(XDG_CONFIG_HOME honoured). A saved value beats the same name in a
+server's environment; an explicit --set of the cross-chip knob still beats
+it at that launch. Stdlib only.
 
-  * compaction (tuning/settings.COMPACT_KNOBS) -- how a server compacts a
-    long conversation. Policy, not a property of any model. Every model
-    server on this machine reads it per request, so a change applies to the
-    next request of every running model.
-  * identical results across chips (KNURLOGIC_CROSS_CHIP) -- a property of
-    the cluster's hardware mix, not of a model. Read at launch; unset means
-    the launch preset decides (stable: on, the rest: off).
-
-Kept in ~/.config/knurlogic/settings.json (XDG_CONFIG_HOME honoured), beside
-the allowance and the strategy; the page's Knurlogic tab applies it to every
-machine, each through its own page, like the strategy. What is saved here
-beats the same name in a server's environment (a per-model launch value
-saved before compaction was knurlogic-wide is ignored rather than left to
-shadow it); an explicit --set of the cross-chip knob still beats it at that
-launch. Stdlib only.
+Design: docs/design/settings.md (preferences).
 """
 from __future__ import annotations
 
