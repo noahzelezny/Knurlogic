@@ -229,7 +229,11 @@ def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
         # the 8-bit decode kernel's switch is offered only at 8 bits
         assert "KNURLOGIC_KV_KERNEL" not in ks
         for k in S.MODEL_KNOBS:
-            if k != "KNURLOGIC_KV_KERNEL":
+            if k == "KNURLOGIC_LONG_CONTEXT" and \
+                    S.long_context_family(mt) is None:
+                # offered only where a model card documents YaRN
+                assert k not in ks
+            elif k != "KNURLOGIC_KV_KERNEL":
                 assert ks[k]["reach"] == "restart"
 
 

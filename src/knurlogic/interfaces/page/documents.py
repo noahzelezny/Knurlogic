@@ -292,7 +292,8 @@ def machine_settings():
             try:
                 return _preview(art, _one(q, "tune") or "balanced",
                                 _one(q, "working_set_gib"),
-                                kv_bits=_one(q, "kv_bits"))
+                                kv_bits=_one(q, "kv_bits"),
+                                long_context=_one(q, "long_context"))
             except Exception as e:
                 return {"knobs": [], "error": f"{type(e).__name__}: {e}"}
 
@@ -393,7 +394,7 @@ def set_strategy(body) -> dict:
 
 
 def _preview(path: str, tune: str, working_set_gib=None,
-             kv_bits=None) -> dict:
+             kv_bits=None, long_context=None) -> dict:
     """What this artifact WOULD resolve to, and which of those can still be
     chosen. Nothing is loaded and nothing is set: this only reads.
     `kv_bits`: the KV precision it would launch with ('bf16', '8', ...),
@@ -420,7 +421,13 @@ def _preview(path: str, tune: str, working_set_gib=None,
     bits = S.kv_bits_of(kv_bits)
     if resolve_kv_refusal(a, bits):
         bits = None
-    r = resolve(a, ws, tune=tune, kv_bits=bits)
+    try:
+        lc = S.long_context_of(long_context)
+    except ValueError:
+        lc = "off"
+    if S.long_context_refusal(a.model_type, lc):
+        lc = "off"
+    r = resolve(a, ws, tune=tune, kv_bits=bits, long_context=lc)
 
     knobs = []
     for name, value in sorted(r.env.items()):
@@ -539,7 +546,15 @@ def refuse_sets(artifact, sets: dict):
     model's window), else the first refusal. Used by a live apply and by a
     launch, so neither takes a value the other would refuse."""
     from knurlogic.tuning import settings as S
-    w, _ = S.model_window(getattr(artifact, "raw_config", None) or {})
+    lc = (sets or {}).get("KNURLOGIC_LONG_CONTEXT")
+    try:
+        why = S.long_context_refusal(getattr(artifact, "model_type", ""), lc)
+    except ValueError as e:
+        why = f"KNURLOGIC_LONG_CONTEXT: {e}"
+    if why:
+        return why
+    w, _ = S.model_window(S.with_long_context(
+        getattr(artifact, "raw_config", None) or {}, lc))
     for k, v in (sets or {}).items():
         why = S.check_knob(k, v, w)
         if why:
