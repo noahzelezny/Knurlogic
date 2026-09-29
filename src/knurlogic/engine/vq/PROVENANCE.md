@@ -1,15 +1,15 @@
 # engine/vq provenance
 
-Vendored from vqlab (`~/Documents/AgenicAI/vqlab`) at
-commit **42df84f** (vqlab HEAD when vendored, 2026-09-23; last functional
+Vendored from vqlab at commit **d271035** (2026-09-29: 42df84f, vendored
+2026-09-23, plus five comment-only lines that drop personal names; last functional
 change to `vq_switch.py` is `ef4e8dc`, "VQ_DENSE_SS on by default").
 
 | file | source | lines | sha256 |
 |---|---|---|---|
-| `vq_switch.py` | `src/vqlab/vq_switch.py` | 4453 | `40870875499de7cb937be412dd63f9e5cc40e0d58d5adcf4c595661d2b21b67b` |
-| `vq_dense.py` | `src/vqlab/vq_dense.py` | 513 | `ac62e4e43f4accefeb6761303d16acc3d60f154561ddab3e24ceb3850e89a235` |
+| `vq_switch.py` | `src/vqlab/vq_switch.py` | 4453 | `31e56dfb0e1c2138286a6f9cd84e90f0b6cecb0611f9cf4a3bb08fc6ddd38aeb` |
+| `vq_dense.py` | `src/vqlab/vq_dense.py` | 513 | `5066de6e71ccbacaed7b29cea031ea2977369043fcc05d7888b7eddc761b8995` |
 
-Both are **verbatim** (`git show 42df84f:<path>`); no line is changed. They
+Both are **verbatim** (`git show d271035:<path>`); no line is changed. They
 are not imported as modules: `runtime.py` executes the two texts, joined, into
 one fresh namespace per knob set -- the way a published `model.py` carries
 them -- so `vq_dense._resolve_kernel` finds vq_switch's kernels in its own
