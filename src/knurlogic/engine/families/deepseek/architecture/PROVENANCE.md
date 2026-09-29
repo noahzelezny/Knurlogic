@@ -44,8 +44,11 @@ artifacts were validated against -- not merely that it imports.
    chosen by scores that depended on the head index, and a prefilled
    prompt chose differently from the same tokens decoded one at a time.
    Now rotated with the sequence on axis -2 (as the attention's own q is).
-   Changes every choice the indexer makes once a pool holds more than
-   `index_topk` (512) rows, i.e. past ~2048 tokens on Flash.
+   This is not only prefill-vs-decode parity: a single-token decode step
+   was also rotated at `offset + h` per head, so DECODE output changes too.
+   Changes every choice the indexer makes -- prefill and decode -- once a
+   pool holds more than `index_topk` (512) rows, i.e. past ~2048 tokens on
+   Flash.
 2. **Indexer prefill visibility** (`Indexer.__call__`). A prefill query
    ranked all pool rows, its future ones included, then the attention mask
    dropped the future ones -- leaving fewer than top-k visible rows. Now
