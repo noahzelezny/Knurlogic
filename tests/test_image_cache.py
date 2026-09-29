@@ -637,3 +637,16 @@ def test_a_burst_of_image_requests_interleaves_with_decoding(server, model,
     assert len(admits) == 3
     # a step ran between each pair of admissions
     assert all("step" in order[a:b] for a, b in zip(admits, admits[1:]))
+
+
+def test_an_image_sent_while_the_model_loads_waits(monkeypatch):
+    """Vision is unknown until the model has loaded: an image request
+    queues like a text one instead of a 400 (M4 2026-09-28, the 27B)."""
+    from knurlogic.engine.serve import state
+    from knurlogic.interfaces.http.server import App
+    monkeypatch.setitem(state.VISION, "serve", None)
+    app = types.SimpleNamespace(scheduler=types.SimpleNamespace(
+        host=types.SimpleNamespace(state="loading")))
+    assert App.has_vision(app)
+    app.scheduler.host.state = "ready"
+    assert not App.has_vision(app)
