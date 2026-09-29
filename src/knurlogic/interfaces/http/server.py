@@ -422,7 +422,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._error(O.ApiError(500, f"{type(e).__name__}: {e}"))
             except Exception:
-                pass
+                pass    # the client is gone; the failure is logged above
 
     def _get(self):
         u = urlparse(self.path)
