@@ -451,11 +451,19 @@ Reverted 41dd038 (guard = startup budget): the snapshot froze a limit below the 
 when taken while other processes were exiting. Guard is the working set minus others' live
 GPU use again.
 
+- Bundled model.py over a pipeline split: works (paper session, paperv5--q397-r24-sk8,
+  M3+M4, 22.6 tok/s, both ranks "WILL be executed").
+
 Still to prove live:
 - Cluster parity on the pair (needs the M3): images on a split, MTP drafting from rank 0,
   rank 1 memory smaller, prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off.
 
 Queued work:
+- A cluster job's leader listens on 127.0.0.1 only: a request to 192.0.2.2:8080 from the
+  other Mac fails (paper session, 2026-09-28, went over ssh). Decide: bind the leader to
+  the cluster link, or document the page's router as the way in.
+- Names: `load` says link tcp/rdma, the recovery record says ring/jaccl (mlx's backend
+  names). Show one vocabulary.
 - DeepSeek-V4-Flash: the mlx-community chat_template.jinja is a stub (no tool calls, no
   tool results, reasoning dropped) -- agents are broken on it. Port DeepSeek's official
   encoding.
