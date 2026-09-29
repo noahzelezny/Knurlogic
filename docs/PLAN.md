@@ -469,9 +469,13 @@ GPU use again.
   4096 ~1158 -- the default now to be chosen from free room (branch chunk-reads-room).
   Idea parked: dynamic chunking.
 
+- Cluster parity (2026-09-29, Flash-Next VQ 4.4, M4 40 layers / M3 8): an image answered on
+  the split (rank 0 encodes; the M3 rank has no tower); MTP drafting from rank 0 (32 vs
+  54-58 ms/tok), the M3 rank only verifies; ~28 tok/s decode; ranks 59.2 / 39.8 GiB.
+- Flash-Next chunk (M4, 28.7k tokens, n=3): 512 383 / 1024 432 / 2048 455 tok/s -> 2048.
+
 Still to prove live:
-- Cluster parity on the pair (needs the M3): images on a split, MTP drafting from rank 0,
-  rank 1 memory smaller, prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off.
+- Prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off on the pair (not measured).
 
 Queued work:
 - A cluster job's leader listens on 127.0.0.1 only: a request to 10.0.0.2:8080 from the
