@@ -250,6 +250,20 @@ def _segment(tokenizer, messages, render, prompt):
         at = tokenizer.rfind_think_start(prompt, start=tail - 11)
         if at >= 0:
             tail = at
+    # The conversation checkpoint ends where the last message ends, before
+    # the generation prompt's assistant header: the next turn, and the
+    # compaction summary pass (this conversation plus a user turn), both
+    # continue from there, and a hybrid model's checkpoint cannot be
+    # trimmed back to it. Ending after `<|im_start|>assistant\n`, the
+    # summary pass re-prefilled the whole history (13.9k tokens, 40 s,
+    # M4 Qwen3.6-35B, 2026-09-28).
+    try:
+        hist = list(tokenizer.apply_chat_template(
+            messages, add_generation_prompt=False, tokenize=True, **render))
+    except Exception:
+        hist = []
+    if sys_end < len(hist) < tail and prompt[:len(hist)] == hist:
+        tail = len(hist)
     if sys_end < tail:
         segs.append(prompt[sys_end:tail])
         types.append("user")

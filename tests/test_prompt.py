@@ -80,7 +80,7 @@ def test_a_turn_ending_in_a_tool_result_is_checkpointed_like_a_user_turn():
                           ("assistant", "call"), ("tool", "result")),
         P.PromptArgs())
     assert types == ["system", "user", "assistant"]
-    assert segs[-1] == [TS] and sum(segs, []) == p
+    assert segs[-1] == [GEN, TS] and sum(segs, []) == p
     # an assistant prefill (the last message is the assistant's) stays one
     p, segs, types, _ = P.tokenize(
         None, Tok(), _req(("user", "hi"), ("assistant", "par")),
@@ -186,3 +186,25 @@ def test_tool_descriptions_are_neutralized():
     start = w.convert_tokens_to_ids("<|im_start|>")
     # the template's own turns only: system (tools), user, assistant
     assert prompt.count(start) == 3
+
+
+def test_the_conversation_checkpoint_ends_before_the_generation_prompt():
+    """The compaction summary pass is the conversation plus one user turn.
+    The request's conversation checkpoint must be a prefix of it: it ends
+    where the last message ends, not after the assistant header the
+    generation prompt opens (a hybrid model cannot trim a checkpoint back,
+    so one ending at <|im_start|>assistant never matched: the summary pass
+    re-prefilled 13.9k tokens, M4 Qwen3.6-35B, 2026-09-28)."""
+    hist = _req(("user", "goal"), ("assistant", "calling"), ("user", "why?"))
+    p, segs, types, _ = P.tokenize(None, Tok(), hist, P.PromptArgs())
+    assert sum(segs, []) == p
+    ends, at = [], 0
+    for s in segs[:-1]:
+        at += len(s)
+        ends.append(at)
+    ask = P.ChatRequest(messages=hist.messages
+                        + [{"role": "user", "content": "summarize"}])
+    q, _, _, _ = P.tokenize(None, Tok(), ask,
+                            P.PromptArgs({thinking.CLOSE: True}))
+    assert any(q[:e] == p[:e] and e == len(p) - 2 for e in ends), (ends, p)
+    assert types[-1] == "assistant" and segs[-1] == [GEN, TS]
