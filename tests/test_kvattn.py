@@ -298,3 +298,27 @@ def test_keys_transformed_after_the_fetch_fall_back_and_count_a_miss(
     assert kvattn.STATS["misses"] == 2
     from knurlogic.engine.serve import state
     assert state.SERVED["kv_kernel"] is kvattn.STATS
+
+
+def test_a_cache_restored_by_from_state_keeps_the_kernel_flag():
+    """mlx-lm's from_state skips make_cache: the flag rides in meta_state,
+    or the restored cache ran the dequantize path without a miss."""
+    from knurlogic.engine import kvquant
+    D = 128
+    k = mx.random.normal((1, 2, 5, D)).astype(mx.bfloat16)
+    for on in (True, False):
+        c = kvquant.QuantKVCache(8)
+        c.kv8_kernel = on
+        c.update_and_fetch(k, k)
+        r = kvquant.QuantKVCache.from_state(c.state, c.meta_state)
+        assert r.kv8_kernel is on and r.offset == 5 and r.group == c.group
+    # a meta_state saved before the flag rode in it still loads
+    old = kvquant.QuantKVCache.from_state(c.state, c.meta_state[:3])
+    assert old.kv8_kernel is False and old.offset == 5
+    b = kvquant.BatchQuantKVCache([0, 2], 8)
+    b.kv8_kernel = True
+    kb = mx.random.normal((2, 2, 5, D)).astype(mx.bfloat16)
+    b.update_and_fetch(kb, kb)
+    rb = kvquant.BatchQuantKVCache.from_state(b.state, b.meta_state)
+    assert rb.kv8_kernel and rb.kv_bits == 8 and rb.group == b.group
+    assert rb.dims == b.dims and rb._idx == b._idx
