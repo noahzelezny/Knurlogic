@@ -195,11 +195,11 @@ def generate(model, tokenizer, prompt: str, max_tokens: int = 8) -> str:
 #:     (`_DECODE_CHUNK = _default_decode_chunk()`) and then read inside the
 #:     expert loop as a global. Rebinding that global takes effect on the next
 #:     prefill -- no reload.
-#:   * VQLAB_CACHE_LIMIT_GB is applied through the framework's own live API.
+#:   * VQ_CACHE_LIMIT_GB (and its old names) is applied through the framework's own live API.
 #:   * the eight GEMM/numerics flags are read into module globals AT IMPORT and
 #:     baked into Metal kernel source that is compiled once. Those genuinely
 #:     need a restart, or an override module that reads them per dispatch.
-LIVE_KNOBS = ("VQ_DECODE_CHUNK", "VQLAB_CACHE_LIMIT_GB",
+LIVE_KNOBS = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB",
               "KNURLOGIC_CACHE_LIMIT_GB", "KNURLOGIC_CONTEXT_LENGTH")
 
 
@@ -236,7 +236,8 @@ def apply_live(env: dict) -> dict:
 
     done = {}
     for k, v in env.items():
-        if k in ("VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_CACHE_LIMIT_GB"):
+        if k in ("VQ_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB",
+                 "KNURLOGIC_CACHE_LIMIT_GB"):
             try:
                 said = set_cache_limit(v)
                 if said.startswith("no "):

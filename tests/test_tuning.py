@@ -49,8 +49,8 @@ def test_safe_bounds_the_transient_tighter_than_headroom_requires():
     # the prompt chunk is already the narrowest by default; safe never widens
     assert int(safe.env["KNURLOGIC_PREFILL_CHUNK"]) <= int(
         balanced.env["KNURLOGIC_PREFILL_CHUNK"]) == S.PREFILL_CHUNK_TIGHT
-    assert float(safe.env["VQLAB_CACHE_LIMIT_GB"]) < float(
-        balanced.env["VQLAB_CACHE_LIMIT_GB"])
+    assert float(safe.env["VQ_CACHE_LIMIT_GB"]) < float(
+        balanced.env["VQ_CACHE_LIMIT_GB"])
 
 
 def test_fast_on_a_tight_box_degrades_and_says_why():
@@ -75,7 +75,7 @@ def test_no_tuning_reaches_a_setting_measured_to_be_worse():
 
 def test_the_cache_cap_holds_even_with_unlimited_headroom():
     r = resolve(_art(size_gib=1), 10_000 * GIB, tune="fast")
-    assert float(r.env["VQLAB_CACHE_LIMIT_GB"]) <= S.CACHE_LIMIT_GB_MAX
+    assert float(r.env["VQ_CACHE_LIMIT_GB"]) <= S.CACHE_LIMIT_GB_MAX
 
 
 def test_an_unknown_tune_is_refused_not_ignored():
@@ -191,11 +191,9 @@ def test_an_artifact_with_no_bundled_runtime_does_not_guess():
 
 
 # --- the env NAME belongs to the artifact -----------------------------------
-# VQLAB_CACHE_LIMIT_GB is read by 24 of the 37 bundled runtimes on this
-# machine. Those files are published. Renaming it in the resolver would emit
-# a name nobody reads and silently stop bounding the cache on every artifact
-# already shipped -- the failure this package exists to end, dressed as
-# housekeeping. So the resolver emits whichever alias the target reads.
+# Published bundled runtimes read VQLAB_CACHE_LIMIT_GB, the VQ runtime's
+# old name. Emitting only the new one would silently stop bounding their
+# cache, so the resolver emits whichever alias the target reads.
 
 def _artifact_reading(tmp_path, *names):
     from knurlogic.machine.artifact import Artifact
@@ -277,17 +275,17 @@ def test_a_measured_family_width_is_a_cap_the_room_decides_how_much_of():
     assert "prompt_concurrency" not in tight
 
 
-def test_with_no_bundled_runtime_it_falls_back_to_the_published_name():
-    """A guess should fail towards the 24 artifacts that exist, not towards
-    the name that is planned."""
+def test_with_no_bundled_runtime_it_emits_the_current_name():
+    """No bundled runtime to ask: the vendored VQ runtime and the engine
+    both read the current name."""
     from pathlib import Path
     from knurlogic.machine.artifact import Artifact
     a = Artifact(path=Path("/nonexistent"), model_type="x", model_file=None,
                  bytes_on_disk=70 * GIB, hidden_size=4096,
                  moe_intermediate_size=1024, vq_other={"vq_linear": {"a": 1}})
     env = resolve(a, 96 * GIB).env
-    assert "VQLAB_CACHE_LIMIT_GB" in env
-    # ...but the prompt chunk's legacy name has no runtime behind it (only
+    assert "VQ_CACHE_LIMIT_GB" in env and "VQLAB_CACHE_LIMIT_GB" not in env
+    # ...and the prompt chunk's legacy name has no runtime behind it (only
     # the engine reads it, under either name): knurlogic's own is emitted
     assert "KNURLOGIC_PREFILL_CHUNK" in env and "VQLAB_PREFILL_CHUNK" not in env
 
@@ -297,7 +295,7 @@ def test_knobs_are_tiered_by_who_would_reach_for_one():
     kernel internals. Showing all of them equally is the busy-panel mistake --
     every knob visible, none weighted, the eye with nowhere to go."""
     assert S.knob_tier("VQ_DECODE_CHUNK") == "reach"
-    assert S.knob_tier("VQLAB_CACHE_LIMIT_GB") == "reach"
+    assert S.knob_tier("VQ_CACHE_LIMIT_GB") == "reach"
     assert S.knob_tier("VQ_MOE_GEMMSEG_RTILE") == "deeper"
     assert S.knob_tier("VQ_D8_REGBUF") == "kernel"
 
