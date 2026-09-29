@@ -1,5 +1,5 @@
 """One request's text, from the executor's token events to what the client
-reads (docs/SERVER.md, build step 2). No model and no mlx here: this is
+reads (docs/design/server.md, build step 2). No model and no mlx here: this is
 where tokens become reasoning, answer and tool calls, where a stop string
 ends the answer, and where the usage numbers are counted.
 

@@ -1,5 +1,5 @@
 """The step plan: what rank 0 tells every other rank before each step of a
-tensor-split model (docs/SERVER.md, "Cluster: tensor split").
+tensor-split model (docs/design/server.md, "Cluster: tensor split").
 
 Rank 0 owns the scheduler, HTTP and ALL sampling. Before each step every
 rank contributes one fixed-size control vector (an all_gather), and when

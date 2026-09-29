@@ -1,5 +1,5 @@
 """The executor: the seam between knurlogic's scheduler and whatever runs
-the model's steps (docs/SERVER.md, build step 1).
+the model's steps (docs/design/server.md, build step 1).
 
 A scheduler hands the executor admissions and asks it for steps; the
 executor answers with events. Today there is one executor, the local batch

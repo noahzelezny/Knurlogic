@@ -21,7 +21,7 @@ machine on ONE side is enough for both to know each other, and the side
 that cannot be reached still finds out: it asks its peers what they see,
 and a peer that lists it as `not_answering` is a measured fact -- "they
 can see me and cannot connect", which on a Mac is almost always the
-application firewall on THIS machine (docs/DISCOVERY.md, review item 1).
+application firewall on THIS machine (docs/design/discovery.md, review item 1).
 
 peers.json (~/.knurlogic/peers.json) is keyed by node id, versioned, and
 written atomically. It holds addresses, not secrets.
