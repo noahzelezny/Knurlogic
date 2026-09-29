@@ -577,8 +577,8 @@ def cluster_launch(req: dict, serve_port: int) -> dict:
     if any(k in req for k in PATH_KEYS if k != "target") or req.get("target"):
         return {"error": "a model across machines is named by its "
                          "identity, never by a path"}
-    link = {"tcp": "ring", "rdma": "jaccl"}.get(req.get("link"),
-                                                req.get("link"))
+    # tcp|rdma (older callers: ring|jaccl) -> mlx's backend, in one place
+    link = cluster_jobs.backend(req.get("link")) or req.get("link")
     snap, _ = _status_fn()
     own = next((n for n in snap.get("nodes") or []
                 if n.get("role") in ("local", "server")), {})
@@ -1002,8 +1002,9 @@ def with_jobs(doc: dict) -> dict:
         if j and j.get("recovery"):
             rec = j["recovery"]
         r = dict(r, recovery=rec)
-        rows.append(dict(r, cluster={k: j.get(k) for k in (
-            "job", "split", "link", "machines", "leader", "phase")})
+        rows.append(dict(r, cluster={**{k: j.get(k) for k in (
+            "job", "split", "link", "machines", "leader", "phase")},
+            **({"url": j["url"]} if j.get("url") else {})})
                     if j else r)
     # tracked here and not serving now: waiting to be relaunched, or failed
     return dict(doc, resident=rows, jobs=js, recovery=recovery.not_serving())

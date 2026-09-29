@@ -966,7 +966,7 @@
           <div class="opt"><div class="optlab">Sharding</div>
             <span class="seg" data-k="shard"><button data-v="tensor" aria-pressed="true">Tensor</button><button data-v="pipeline" aria-pressed="false">Pipeline</button></span></div>
           <div class="opt"><div class="optlab">Interconnect</div>
-            <span class="seg" data-k="link"><button data-v="ring" aria-pressed="true">TCP/IP</button><button data-v="jaccl" aria-pressed="false">RDMA</button></span></div>
+            <span class="seg" data-k="link"><button data-v="tcp" aria-pressed="true">TCP/IP</button><button data-v="rdma" aria-pressed="false">RDMA</button></span></div>
         </div>
         <div id="lmwhere"></div>
         <div id="mtpopts" hidden>
@@ -2634,7 +2634,7 @@ function launchBlock(ns){
       if(!n.id || n.state!=='answering') return `${n.node} is not answering`;
       if(SEL && !onNode(n, SEL)) return `not on ${n.node}`;
     }
-    if(MULTI.link==='jaccl'){ const why=rdmaWhy(ns); if(why) return why }
+    if(MULTI.link==='rdma'){ const why=rdmaWhy(ns); if(why) return why }
     return '';
   }
   if(ns.length===1 && !isLocal(ns[0])){
@@ -2699,7 +2699,7 @@ function tb5Why(a, b){
 }
 // A pick changed what "fits" means: the rail and an open picker follow.
 // Sharding and interconnect for a multi-machine launch: page state only.
-const MULTI={shard:'tensor', link:'ring'};
+const MULTI={shard:'tensor', link:'tcp'};
 $('multiopts').querySelectorAll('.seg').forEach(g=>
   g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
     if(b.disabled) return;
@@ -2712,10 +2712,10 @@ function multiState(){
   const ns=selNodes(), b=$('multiopts').querySelector('[data-v=jaccl]');
   const why=ns.length>1 ? rdmaWhy(ns) : '';
   b.disabled=!!why; b.title=why||'RDMA over Thunderbolt (jaccl)';
-  if(why && MULTI.link==='jaccl'){
-    MULTI.link='ring';
+  if(why && MULTI.link==='rdma'){
+    MULTI.link='tcp';
     b.parentNode.querySelectorAll('button').forEach(x=>
-      x.setAttribute('aria-pressed', x.dataset.v==='ring'));
+      x.setAttribute('aria-pressed', x.dataset.v==='tcp'));
   }
 }
 // What a cluster launch placed where, as the coordinator decided it
@@ -3040,7 +3040,7 @@ async function loadResident(){
         r.bytes_resident?gb(r.bytes_resident)
           :(r.state==='offered'?'':'size not reported'),
         r.cluster?`${r.cluster.split} over ${
-          r.cluster.link==='jaccl'?'RDMA':'TCP/IP'}${
+          (r.cluster.link==='rdma'||r.cluster.link==='jaccl')?'RDMA':'TCP/IP'}${
           r.cluster.phase&&r.cluster.phase!=='ready'?' · '+r.cluster.phase:''}`:'',
         r.detail, r.state==='loaded'?'':r.state,
         r.instance?`id ${r.instance.slice(0,6)}`:'']
