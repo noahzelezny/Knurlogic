@@ -462,6 +462,13 @@ GPU use again.
   the same continuation after re-prefilling the first half -- 129/129 chars identical.
   Leader /status.json ranks: M4 84.6 GiB, M3 61.2 GiB.
 
+- Qwen YaRN long context (35B-A3B, M4): off -> 177,158-token needle found (479 s, ~370
+  tok/s at chunk 512); yarn + 8-bit KV -> 442,578-token needle found (2413 s, ~180 tok/s).
+  1M not run (~2 h+ of prefill); candidate for an overnight run.
+- Prompt chunk, 35B-A3B on M4, 28.7k tokens, n=3 interleaved: 512 ~645 tok/s, 2048 ~1163,
+  4096 ~1158 -- the default now to be chosen from free room (branch chunk-reads-room).
+  Idea parked: dynamic chunking.
+
 Still to prove live:
 - Cluster parity on the pair (needs the M3): images on a split, MTP drafting from rank 0,
   rank 1 memory smaller, prefill tok/s with KNURLOGIC_PIPELINE_OVERLAP on/off.
