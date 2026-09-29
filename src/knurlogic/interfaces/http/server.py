@@ -1,4 +1,4 @@
-"""knurlogic's own HTTP server (docs/SERVER.md): stdlib ThreadingHTTPServer,
+"""knurlogic's own HTTP server (docs/design/server.md): stdlib ThreadingHTTPServer,
 one thread per connection, every model operation handed to the scheduler.
 
   POST /v1/chat/completions  /chat/completions  /v1/completions   openai.py

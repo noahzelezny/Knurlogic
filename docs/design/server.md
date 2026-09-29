@@ -74,7 +74,7 @@ report.
 sequential path; that split is where two of the bugs live. Here every
 request goes through the batch executor; a seed is a per-row key.
 
-## Ingest-client requirements (docs/dev/PLAN.md)
+## Ingest-client requirements
 
 1. `/v1/residency`: flat list -- model, capabilities, memory_bytes, nodes,
    state (loading/ready/unloading). Straight from ModelHost.

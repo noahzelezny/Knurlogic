@@ -1,5 +1,5 @@
 """Tensor split: one model served by N ranks, every layer's weights split
-N ways (docs/SERVER.md, "Cluster: tensor split").
+N ways (docs/design/server.md, "Cluster: tensor split").
 
     rank 0:   HTTP -> Scheduler -> TensorExecutor --plan--> ranks 1..N-1
     rank r:   follow(): apply the plan, run the same step, never sample

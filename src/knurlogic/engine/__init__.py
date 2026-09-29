@@ -8,7 +8,7 @@ fails the suite, so swapping the engine stays a change to this folder.
                    to the loaded model (see serve/__init__.py)
   runtime/         knurlogic's own server's engine half: the model host,
                    the scheduler, the executor, the prompt and request
-                   stages (docs/SERVER.md; HTTP is interfaces/http)
+                   stages (docs/design/server.md; HTTP is interfaces/http)
   mtp/             multi-token-prediction drafting, sequential and batched.
                    Its front door (`knurlogic.engine.mtp`) is stdlib only, so
                    asking whether an artifact has a head costs no mlx import
