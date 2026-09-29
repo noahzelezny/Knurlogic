@@ -190,6 +190,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # -> Models, carried ring-wide like every launch set) picks it over
     # --tune; its launch values are defaults every explicit set beats.
     overrides = S.canonical_sets(overrides)
+    # identical results across chips is knurlogic-wide (Settings ->
+    # Knurlogic, machine/preferences), not a model's: saved, it beats the
+    # preset's value; an explicit --set still beats it
+    from knurlogic.machine import preferences
+    overrides = preferences.launch_sets(overrides)
     why = web.refuse_sets(a, overrides)
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
@@ -407,9 +412,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         from knurlogic.tuning.settings import COMPACT_KNOBS
         # compaction's knobs are read per request by this server's HTTP
         # side (context_management/compaction): the environment is the setting
+        # -- and they are knurlogic-wide (machine/preferences): a change
+        # here is saved for every server on this machine, not this one's
+        from knurlogic.machine import preferences
+        cur = preferences.compaction_env()
         compact = {k: str(v) for k, v in want.items()
                    if k in COMPACT_KNOBS
-                   and str(v) != os.environ.get(k, COMPACT_KNOBS[k][0])}
+                   and str(v) != cur.get(k, COMPACT_KNOBS[k][0])}
         want = {k: str(v) for k, v in want.items()
                 if k in engine.LIVE_KNOBS and str(v) != live_env.get(k)}
         why = web.refuse_sets(a, {**want, **compact})
@@ -418,9 +427,12 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         if not want and not compact:
             return {"applied": {}, "note": "nothing to change on this server "
                                            "without a restart"}
-        for k, v in compact.items():
-            os.environ[k] = v
-        done = {k: f"applied now ({v}; read per request)"
+        if compact:
+            try:
+                preferences.set(compact)
+            except ValueError as e:
+                return {"error": str(e)}
+        done = {k: f"applied now ({v}; knurlogic-wide, read per request)"
                 for k, v in compact.items()}
         if not want:
             return {"applied": done, "running": dict(live_env)}
