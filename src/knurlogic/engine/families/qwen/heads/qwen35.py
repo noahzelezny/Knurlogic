@@ -55,10 +55,13 @@ drafted token, so a coarser head costs a rejection, never a wrong token.
 from __future__ import annotations
 
 import json
+import logging
 
 import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
+
+logger = logging.getLogger(__name__)
 
 SIDECAR_NAME = "mtp-head-q6.safetensors"
 
@@ -186,8 +189,8 @@ class MTPHeadQwen35:
                              f"parameter slot, e.g. {unmatched[:4]}")
         missing = sorted(slots - set(layer_w))
         if missing:
-            print(f"note: {len(missing)} module params not in graft (left "
-                  f"init), e.g. {missing[:4]}", flush=True)
+            logger.info("note: %d module params not in graft (left init), "
+                        "e.g. %s", len(missing), missing[:4])
         self.block.load_weights(list(layer_w.items()), strict=False)
 
         self.norm_e = self._norm(g["pre_fc_norm_embedding.weight"], shift)

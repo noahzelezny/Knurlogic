@@ -1254,8 +1254,7 @@ def _ensure_watcher() -> None:
             try:
                 watch_once()
             except Exception as e:
-                print(f"cluster watch: {type(e).__name__}: {e}",
-                      file=sys.stderr)
+                logger.warning("cluster watch: %s: %s", type(e).__name__, e)
     threading.Thread(target=loop, daemon=True,
                      name="knurlogic-cluster-watch").start()
 
@@ -1649,7 +1648,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                      "ui_port": ui_port, "serve_port": serve_port,
                      "post": post, "follow": follow}})
     if note:
-        print(f"cluster job {job}: {note}", file=sys.stderr, flush=True)
+        logger.warning("cluster job %s: %s", job, note)
     if recovering is None:
         from knurlogic.cluster import recovery
         # a relaunch is the same launch: this machine order (so the same
@@ -1712,8 +1711,8 @@ def failover(job: str, ctx: dict, reason: str):
         e["reason"] = (str(e.get("reason") or reason) + msg)[:600]
         if to:
             e["relaunched"] = to
-    print(f"cluster job {job}: cable {ctx['net']} failed link init "
-          f"({line}){msg}", file=sys.stderr, flush=True)
+    logger.warning("cluster job %s: cable %s failed link init (%s)%s",
+                   job, ctx["net"], line, msg)
     return out
 
 

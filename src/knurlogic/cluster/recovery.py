@@ -38,13 +38,15 @@ Stdlib only: the page never imports mlx.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 ENV = "KNURLOGIC_RECOVER"
 #: relaunches of one model allowed within this window
@@ -427,8 +429,7 @@ def ensure_thread() -> None:
             try:
                 tick()
             except Exception as e:
-                print(f"recovery: {type(e).__name__}: {e}", file=sys.stderr,
-                      flush=True)
+                logger.warning("recovery: %s: %s", type(e).__name__, e)
     threading.Thread(target=loop, daemon=True,
                      name="knurlogic-recovery").start()
 
@@ -458,9 +459,8 @@ def tick(now: float | None = None) -> list:
 
 
 def _log(rec, what):
-    print(f"recovery {rec.get('name')} "
-          f"({', '.join(rec.get('machines') or []) or 'this Mac'}): {what}",
-          file=sys.stderr, flush=True)
+    logger.warning("recovery %s (%s): %s", rec.get("name"),
+                   ", ".join(rec.get("machines") or []) or "this Mac", what)
 
 
 def _failed(rec: dict, now: float, why: str) -> str:
