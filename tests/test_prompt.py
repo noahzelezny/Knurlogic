@@ -208,3 +208,94 @@ def test_the_conversation_checkpoint_ends_before_the_generation_prompt():
                             P.PromptArgs({thinking.CLOSE: True}))
     assert any(q[:e] == p[:e] and e == len(p) - 2 for e in ends), (ends, p)
     assert types[-1] == "assistant" and segs[-1] == [GEN, TS]
+
+
+class QwenTok:
+    """Qwen3.6's real chat template (tests/goldens/qwen3_6_chat_template.jinja,
+    from Qwen/Qwen3.6-35B-A3B, Apache-2.0), rendered with jinja2 the way
+    transformers does; a token is a character."""
+    has_chat_template = True
+    has_thinking = True
+    think_start, think_end = "<think>", "</think>"
+
+    def __init__(self):
+        import jinja2
+        from jinja2.sandbox import ImmutableSandboxedEnvironment
+        self.chat_template = (Path(__file__).parent / "goldens"
+                              / "qwen3_6_chat_template.jinja").read_text()
+        env = ImmutableSandboxedEnvironment(trim_blocks=True,
+                                            lstrip_blocks=True)
+
+        def fail(msg):
+            raise jinja2.TemplateError(msg)
+        env.globals["raise_exception"] = fail
+        self._t = env.from_string(self.chat_template)
+
+    def apply_chat_template(self, messages, add_generation_prompt=False,
+                            tokenize=True, **kw):
+        s = self._t.render(messages=messages,
+                           add_generation_prompt=add_generation_prompt, **kw)
+        return [ord(c) for c in s]
+
+    def _rfind(self, p, word, start):
+        s = "".join(map(chr, p))
+        i = s.rfind(word)
+        return i if i >= start else -1
+
+    def rfind_think_start(self, p, start=0):
+        return self._rfind(p, "<think>", start)
+
+    def rfind_think_end(self, p, start=0):
+        return self._rfind(p, "</think>", start)
+
+
+def _agent_history():
+    h = [{"role": "user", "content": "Goal: read the files."}]
+    for i in range(3):
+        h.append({"role": "assistant", "content": f"Reading f{i}.",
+                  "tool_calls": [{"id": f"t{i}", "type": "function",
+                                  "function": {"name": "read_file",
+                                               "arguments": {"path": f"f{i}"}}}]})
+        h.append({"role": "tool", "tool_call_id": f"t{i}",
+                  "content": f"contents of f{i}"})
+    return h
+
+
+def _checkpoints(segs):
+    ends, n = [], 0
+    for s in segs[:-1]:
+        n += len(s)
+        ends.append(n)
+    return ends
+
+
+def test_a_user_turn_after_tool_calls_continues_from_the_checkpoint():
+    """Qwen3.5/3.6 render a think block only on assistant turns after the
+    last real user query (a tool result is not one). A user message after
+    an agent's tool calls -- the next question, or compaction's summary
+    ask -- re-rendered every earlier assistant turn without its
+    `<think>\\n\\n</think>\\n\\n`: the prompt diverged right after the goal
+    and the hybrid model re-prefilled 13.8k tokens (M4 Qwen3.6-35B,
+    2026-09-28). preserve_thinking keeps earlier turns as they were."""
+    tok = QwenTok()
+    h = _agent_history()
+    a, segs, _, _ = P.tokenize(None, tok, P.ChatRequest(messages=h),
+                               P.PromptArgs())
+    b, _, _, _ = P.tokenize(None, tok, P.ChatRequest(
+        messages=h + [{"role": "user", "content": "Summarize."}]),
+        P.PromptArgs())
+    ends = _checkpoints(segs)
+    assert ends and b[:ends[-1]] == a[:ends[-1]]
+    assert "".join(map(chr, a[:ends[-1]])).endswith("</tool_response><|im_end|>\n")
+
+
+def test_a_request_can_turn_preserve_thinking_off():
+    tok = QwenTok()
+    h = _agent_history()
+    args = P.PromptArgs({"preserve_thinking": False})
+    a, segs, _, _ = P.tokenize(None, tok, P.ChatRequest(messages=h), args)
+    b, _, _, _ = P.tokenize(None, tok, P.ChatRequest(
+        messages=h + [{"role": "user", "content": "Summarize."}]), args)
+    # the template's own behaviour: earlier turns lose their think blocks
+    assert b[:_checkpoints(segs)[-1]] != a[:_checkpoints(segs)[-1]]
+    assert "<think>" not in "".join(map(chr, b))[:-10]
