@@ -337,4 +337,6 @@ def load(path, knobs: dict | None = None):
     model, config = load_model(path, knobs)
     tok = load_tokenizer(Path(path),
                          eos_token_ids=config.get("eos_token_id", None))
+    from knurlogic.engine import templates
+    templates.install(tok)
     return model, tok
