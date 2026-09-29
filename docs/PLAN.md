@@ -458,6 +458,9 @@ GPU use again.
   plain answer; DSML tool call parsed to tool_calls; tool result used; next turn cached
   398/408; compaction 3170 -> 2073 tokens, summary pass a cache hit (3474 read, 1 new).
   Needed edits 9-10 (experts double-quantized on stock mlx-lm; transformers 5.x config).
+  Past 2k tokens (4,027-token prompt, pool > index_topk): 64 greedy tokens decoded equal
+  the same continuation after re-prefilling the first half -- 129/129 chars identical.
+  Leader /status.json ranks: M4 84.6 GiB, M3 61.2 GiB.
 
 Still to prove live:
 - Cluster parity on the pair (needs the M3): images on a split, MTP drafting from rank 0,
