@@ -186,7 +186,7 @@ def _unpack_rows(packed, nsub, bits):
 
 # PREFILL PEAK: the transient that made a 11.6 GiB model need 18.7 GiB.
 #
-# THE MEASUREMENT (the maintainer, 2026-09-03, 27B 3.9bpw, 2048-token prompt, stock
+# THE MEASUREMENT (2026-09-03, 27B 3.9bpw, 2048-token prompt, stock
 # mlx-lm): peak 18.7 G against 11.6 G active. The ~7 G is this file's
 # large-N path -- above _DENSE_FUSED_MAX_N_PACKED every VQLinear leaves the
 # fused kernel and materialises a decoded fp16 weight (17408 x 5120 x 2 B =
@@ -202,7 +202,7 @@ def _unpack_rows(packed, nsub, bits):
 # WHY PEAK IS THE BUDGET, NOT RSS. The earlier note in this file (correctly)
 # said not to quote get_peak_memory() as a RAM requirement, because a single
 # model in isolation completes under a much smaller cap. That still holds for
-# the single-model case. It does NOT hold for the maintainer's use case: several models
+# the single-model case. It does NOT hold for the multi-model use case: several models
 # resident at once, where every model's peak is charged against the same
 # machine at the same time. There, "space-saving model" has to mean
 # peak ~= resident + KV + a small BOUNDED buffer, so this path has to have a
@@ -246,7 +246,7 @@ def _unpack_rows(packed, nsub, bits):
 #
 # and the old path's transient GROWS WITH DEPTH -- 2.758 G at 16 linears,
 # 6.811 G at 48 -- exactly as the lazy-graph diagnosis predicts, while every
-# forced-eval arm is FLAT in depth. The 6.8 G at 48 linears is the ~7 G the maintainer
+# forced-eval arm is FLAT in depth. The 6.8 G at 48 linears is the ~7 G
 # measured on the real 192-linear forward.
 #
 # DEFAULTS: eval ON, row tiling OFF. The eval is free (1.054 vs 1.072 s --

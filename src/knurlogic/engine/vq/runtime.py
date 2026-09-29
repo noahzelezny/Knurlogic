@@ -43,15 +43,16 @@ from pathlib import Path
 from . import rungs as _rungs
 
 HERE = Path(__file__).parent
-#: Vendored from vqlab at this commit (HEAD 42df84f; last functional change
+#: Vendored from vqlab at this commit (d271035: 42df84f plus five comment-only
+#: lines; last functional change
 #: to vq_switch.py ef4e8dc). The digests are the pin: tests hold the files to
 #: them, so an edit here is a visible re-vendor, not drift.
-VQLAB_COMMIT = "42df84f"
+VQLAB_COMMIT = "d271035"
 RUNTIME_FILES = {
     "vq_switch.py":
-        "40870875499de7cb937be412dd63f9e5cc40e0d58d5adcf4c595661d2b21b67b",
+        "31e56dfb0e1c2138286a6f9cd84e90f0b6cecb0611f9cf4a3bb08fc6ddd38aeb",
     "vq_dense.py":
-        "ac62e4e43f4accefeb6761303d16acc3d60f154561ddab3e24ceb3850e89a235",
+        "5066de6e71ccbacaed7b29cea031ea2977369043fcc05d7888b7eddc761b8995",
 }
 
 _lock = threading.Lock()

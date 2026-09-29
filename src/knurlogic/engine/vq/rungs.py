@@ -12,7 +12,7 @@ downloaded bundles; nothing here is typed by hand.
 
 Two facts per rung that other code acts on:
 
-  * `knobs` -- the environment knurlogic's vendored runtime (vqlab 42df84f)
+  * `knobs` -- the environment knurlogic's vendored runtime (vqlab d271035)
     must be given to reproduce the published defaults: only the flags whose
     published default differs from HEAD's. Measured 2026-09-23: Flash-Next
     2.1's whole runtime body differs from HEAD by exactly its three flag
