@@ -102,10 +102,10 @@ RD = {"available": True, "reason": "", "devices": [],
 def rig(m4_tb5=True):
     """The M3/M4 rig as each page's status reports it: TB5 on 10.0.1,
     TB4 on 10.0.0; RDMA ports "active" on both cables."""
-    m3 = {"id": "m3", "name": "Mac Studio", "rdma": RD, "thunderbolt": [
+    m3 = {"id": "m3", "name": "studio", "rdma": RD, "thunderbolt": [
         {"iface": "en4", "ip": "10.0.0.1", "gbps": 40, "generation": 4},
         {"iface": "en7", "ip": "10.0.1.1", "gbps": 80, "generation": 5}]}
-    m4 = {"id": "m4", "name": "NozzleBook Pro", "rdma": RD, "thunderbolt": [
+    m4 = {"id": "m4", "name": "laptop", "rdma": RD, "thunderbolt": [
         {"iface": "en3", "ip": "10.0.0.2", "gbps": 40, "generation": 4},
         {"iface": "en2", "ip": "10.0.1.2", "gbps": 80 if m4_tb5 else 40,
          "generation": 5 if m4_tb5 else 4}]}
@@ -159,10 +159,10 @@ def test_the_cable_note_says_which_cable_and_why(monkeypatch):
         "layers": 8, "layer_bytes": [1 << 30] * 8, "other_bytes": 0,
         "kv_bytes_per_token": 0})
     monkeypatch.setattr(C, "placement", lambda infos, shape, split, order: {
-        "order": ["Mac Studio", "NozzleBook Pro"], "layers": [4, 4],
-        "leader": "Mac Studio", "shares": [], "reason": ""})
+        "order": ["studio", "laptop"], "layers": [4, 4],
+        "leader": "studio", "shares": [], "reason": ""})
     from types import SimpleNamespace
-    peer = SimpleNamespace(id="m4", name="NozzleBook Pro", host="10.0.1.2",
+    peer = SimpleNamespace(id="m4", name="laptop", host="10.0.1.2",
                            key="10.0.1.2:8899", state="answering",
                            link="thunderbolt", node={"cluster": m4})
     got = []
@@ -175,7 +175,7 @@ def test_the_cable_note_says_which_cable_and_why(monkeypatch):
         got.clear()
         C.launch({"action": "load", "identity": "abc",
                   "nodes": ["m3", "m4"], "split": "pipeline", "link": link},
-                 me={"id": "m3", "name": "Mac Studio"}, peers=[peer],
+                 me={"id": "m3", "name": "studio"}, peers=[peer],
                  local_info=m3, ui_port=1, serve_port=2, post=post,
                  follow=lambda j, c: None)
         spec = next(d for u, d in got if u.endswith(C.PREPARE_PATH))
@@ -198,7 +198,7 @@ def test_the_cable_note_says_which_cable_and_why(monkeypatch):
     out = C.launch({"action": "load", "identity": "abc",
                     "nodes": ["m3", "m4"], "split": "pipeline",
                     "link": "jaccl"},
-                   me={"id": "m3", "name": "Mac Studio"}, peers=[peer],
+                   me={"id": "m3", "name": "studio"}, peers=[peer],
                    local_info=s3, ui_port=1, serve_port=2, post=post,
                    follow=lambda j, c: None)
     assert "Thunderbolt 5" in out.get("refused", ""), out

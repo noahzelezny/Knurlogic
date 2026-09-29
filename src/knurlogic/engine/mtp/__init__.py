@@ -26,8 +26,8 @@ engine arrives.
 Drafting across machines is not here yet: it comes with the cluster
 executor (engine/runtime/executor.py, docs/SERVER.md "Cluster readiness").
 
-WHOSE CODE THIS IS. The drafting half was written by Noah in his exo fork and
-in vqlab, and upstream exo-explore/exo has none of it -- 0 files under
+WHOSE CODE THIS IS. The drafting half was written in the project's exo fork
+and in vqlab, and upstream exo-explore/exo has none of it -- 0 files under
 `engines/mlx/mtp/` on origin/main against 15 in the fork. It lived in two
 copies that had drifted apart (caches.py, registry.py and the sequential
 loop differed by 30, 63 and 296 lines), which is the argument for one copy here rather than a

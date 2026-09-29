@@ -1,8 +1,8 @@
-> **Parked (2026-09-28).** Not built on main. 41dd038 (guard = startup budget) was reverted; the guard is the working set minus other processes' live GPU use. See docs/PLAN.md OPEN THREADS and memory-ledger.md.
+> **Parked (2026-09-28).** Not built on main. 41dd038 (guard = startup budget) was reverted; the guard is the working set minus other processes' live GPU use. See docs/dev/PLAN.md OPEN THREADS and memory-ledger.md.
 
 # Memory pacing: a server that cannot OOM (draft 2026-09-28)
 
-Goal (Noah): "uncrashable" -- the server paces itself so a user never OOMs,
+Goal: "uncrashable" -- the server paces itself so a user never OOMs,
 including when they open Chrome mid-run.
 
 ## What failed (M4, Flash-Next VQ 4.4, 4 agents at 50-75k tokens)
@@ -73,7 +73,7 @@ waits and 503s are fine.
 - Whether chunk shrinking alone covers MoE decode transients at 8 rows.
 - Cost: pacing trades throughput for safety; measure tokens/s at the limit.
 
-## Fable review (2026-09-28): build with changes -- adopted
+## design review (2026-09-28): build with changes -- adopted
 
 - **A step is a whole admission.** `MTPBatchGenerator._next` runs every
   prefill chunk, checkpoint copy and `seed_head` of one admission inside one
@@ -123,7 +123,7 @@ waits and 503s are fine.
   inside one admission step. Fixed by `_reserve` / `_pending_bytes`: queued
   rows' priced KV is charged in `_room_for`, `_fits`, `_room_to_admit` and
   added to `_pace`'s prediction for the step that admits them.
-- What a pause costs (Fable review): a paused row resumes as ONE segment,
+- What a pause costs (design review): a paused row resumes as ONE segment,
   so segment checkpoints it had not yet stored are lost; its logits
   processors' penalty windows restart from the resumed prompt; the seed, if
   one was set, is folded forward by the tokens made (`seed + made`) so the

@@ -184,7 +184,7 @@ class NonFiniteLogits(RuntimeError):
 
     Sampled anyway, NaN logits give token 0 -- "!" in Qwen's vocabulary --
     and the stream fills with "!!!!!" while the server reports a normal
-    finish (seen in Scout on Flash). The number went bad upstream of
+    finish (seen from an ingest client on Flash). The number went bad upstream of
     sampling, in the forward pass; this stops the request at the token
     where it happened instead of inventing text from it."""
 

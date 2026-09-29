@@ -15,7 +15,7 @@ A request waits for the host to be ready; while nothing is running the
 loop blocks on the queue instead of spinning.
 
 Memory is guarded here too, because a step that outgrows the GPU working
-set is not an exception: Metal aborts the process (measured on the M4:
+set is not an exception: Metal aborts the process (measured on an M4 Max (128 GB):
 Flash 4.4 at 97 GiB, four long reviews and a full prompt cache climbed to
 118 of 120 GiB over two hours, then "Insufficient Memory" killed the server
 and every request in it). Before each step, when active memory is past the
@@ -713,7 +713,7 @@ class Scheduler:
         """A request that does not fit waits for the rows running when it
         was first held -- not for whatever arrives after: under a steady
         stream of small prompts those never all finish, and it waited until
-        its client gave up (Fable 5.1). Once they have all finished and it
+        its client gave up. Once they have all finished and it
         still does not fit, it is refused, as it would be on an idle box."""
         if job.waiting_on is None:
             job.waiting_on = set(self._rows)
@@ -821,7 +821,7 @@ class Scheduler:
         model is predicted to make at the context it is about to span (the
         running rows' plus `extra`, a prompt being admitted), with a
         quarter again -- but never below 5% of the working set (at least 4
-        GiB). GLM-5.3 on the M4 (2026-09-26) learned 2.6 GiB at 8k-token
+        GiB). GLM-5.3 on an M4 Max (128 GB) (2026-09-26) learned 2.6 GiB at 8k-token
         prompts, ran at 116 of a 116.8 GiB limit, and a step at 16k aborted
         Metal: the largest transient seen so far under-reads a longer
         context's."""
@@ -837,7 +837,7 @@ class Scheduler:
         """A step's transient at `ctx` tokens of context: the largest
         measured, or, past the longest context measured, that line carried
         on. A prefill chunk attends over every token before it, so its
-        temporaries grow with the context: the 27B on the M3 (2026-09-28)
+        temporaries grow with the context: the 27B on an M3 Ultra (96 GB) (2026-09-28)
         measured 1.58, 2.40 then 3.39 GiB as four agents' prompts grew to
         98k tokens, and the step that first ran past the margin those left
         aborted Metal. Until two contexts 8192 apart are known, the
@@ -880,7 +880,7 @@ class Scheduler:
         started and where it ended. What it kept (an admitted row's KV,
         checkpoint copies) is growth, not transient -- counted as spike, one
         50k-token admission ratcheted the margin up for the life of the
-        load (Fable 5.1). `ctx`: the context the step spanned."""
+        load. `ctx`: the context the step spanned."""
         import mlx.core as mx
         spike = int(mx.get_peak_memory()) - max(before, self._here())
         grew = spike > self._transient(ctx) * 1.25 and spike > GIB // 4

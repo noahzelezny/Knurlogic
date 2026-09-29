@@ -1,5 +1,5 @@
-"""What Scout's ingest asked of the server (docs/PLAN.md, "Requirements
-for knurlogic's own server"), in OpenAI's shapes and nothing custom:
+"""Endpoints for orchestration and ingest clients that manage what the
+server holds, in OpenAI's shapes and nothing custom:
 
   /v1/models         capabilities (text / vision / thinking) and size_bytes
   /v1/residency      one flat list: model, capabilities, memory_bytes,

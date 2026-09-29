@@ -248,7 +248,7 @@ architecture vendored in `engine/families/`:
 It does not build or score models — vqlab builds, knurlogic runs what it
 built. It never sets the wired limit or deletes a model; it tells you the
 command. It does not drive exo: knurlogic replaces exo's orchestration on
-mlx's own distributed backends (docs/PLAN.md). A running exo is shown as one
+mlx's own distributed backends (docs/dev/PLAN.md). A running exo is shown as one
 more runtime holding memory, and `~/.exo/models` is one more model store.
 
 The page's look is inspired by exo's dashboard; its code is knurlogic's
@@ -302,7 +302,7 @@ job's placement does not count the vision tower yet. A cluster job's leader
 answers on loopback and on its link address (`load` and `state` report the
 `url`).
 
-`docs/PLAN.md` holds what is measured and what is next; `CONTEXT.md` is the
+`docs/dev/PLAN.md` holds what is measured and what is next; `CONTEXT.md` is the
 map.
 
 ---

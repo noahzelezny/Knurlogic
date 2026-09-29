@@ -1,4 +1,4 @@
-"""DeepSeek-V4 (deepseek_v4), vendored from Noah's mlx-lm fork: a tiny
+"""DeepSeek-V4 (deepseek_v4), vendored from an mlx-lm fork: a tiny
 random-weight model (tests/goldens/build_deepseek_v4.py) loads through
 knurlogic's registration and mlx-lm's loader, computes the fork's own
 logits, splits into two pipeline stages with the unsplit logits, carries
@@ -6,6 +6,7 @@ its DeepseekV4Cache through a prompt-cache copy and a restore, and batches
 two rows as it runs them one at a time. The resolver half needs no mlx.
 (The chat template is tests/test_deepseek_v4.py.)"""
 import copy
+import os
 import hashlib
 import re
 import sys
@@ -20,8 +21,8 @@ sys.path.insert(0, str(ROOT / "tests" / "goldens"))
 from knurlogic.tuning import resolve as R  # noqa: E402
 
 ARCH = ROOT / "src/knurlogic/engine/families/deepseek/architecture"
-REAL = Path("/Volumes/Thunderbay SSD/Exo Models/"
-            "mlx-community--DeepSeek-V4-Flash")
+# A local DeepSeek-V4-Flash artifact directory (optional).
+REAL = Path(os.environ.get("KNURLOGIC_TEST_DEEPSEEK_V4") or "/nonexistent")
 
 
 # ------------------------------------------------------------ no mlx
@@ -67,7 +68,7 @@ def test_it_may_be_pipelined():
 
 
 @pytest.mark.skipif(not (REAL / "config.json").is_file(),
-                    reason="the DeepSeek-V4-Flash artifact is not mounted")
+                    reason="the DeepSeek-V4-Flash artifact is not mounted (set KNURLOGIC_TEST_DEEPSEEK_V4)")
 def test_the_real_artifact_splits_m3_ultra_96_and_m4_max_128_by_bytes():
     """The planner over the real headers (nothing loaded): the M3 Ultra's
     86016 MB wired limit and the M4 Max's 122880 MB. The M4 must hold at

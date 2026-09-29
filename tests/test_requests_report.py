@@ -71,9 +71,9 @@ def test_holding_reason():
 
 
 def test_residency_row_carries_requests():
-    from knurlogic.interfaces.http import scout
+    from knurlogic.interfaces.http import residency as res_api
     s = Scheduler(Host(), completion_batch_size=8)
-    row = scout.residency(s.host, s)["data"][0]
+    row = res_api.residency(s.host, s)["data"][0]
     assert row["requests"]["capacity"] == 8
     assert row["requests"]["pending"] == 0
 

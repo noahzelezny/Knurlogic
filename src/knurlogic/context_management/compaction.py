@@ -18,7 +18,7 @@ prompt-cache entry the client's next turn hits.
 
 Nothing is kept here: the summary goes back in the response and the client
 resends it. Where the pass fails -- an error, an empty answer, one longer
-than what it replaces -- the span is dropped behind Scout's marker and the
+than what it replaces -- the span is dropped behind a backstop marker and the
 edit says `fallback: true`; the user's turn never fails for it.
 """
 
@@ -162,7 +162,7 @@ def summarize(body: dict, pending: Pending, out: Outcome,
         msg = ((resp.get("choices") or [{}])[0].get("message") or {})
         text = msg.get("content") or ""
         usage = resp.get("usage") or {}
-    except Exception as e:                       # fail soft, as Scout does
+    except Exception as e:                       # fail soft
         why = f"{type(e).__name__}: {e}"
         logger.warning("compaction summary failed: %s", why)
     summary, found = E.parse_output(text, len(uses))

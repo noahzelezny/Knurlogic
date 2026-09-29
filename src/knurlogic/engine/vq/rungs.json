@@ -79,7 +79,7 @@
     "knobs": {
      "VQ_DENSE_SS": "0"
     },
-    "machine": "M4 Max (NozzleBook), mlx 0.31.2, mlx-lm 0.31.3; bundle side with mlx-vlm 0.6.17 --no-deps for its config helper"
+    "machine": "M4 Max 128 GB, mlx 0.31.2, mlx-lm 0.31.3; bundle side with mlx-vlm 0.6.17 --no-deps for its config helper"
    }
   },
   "TheDrainFlorist/GLM-5.3-Flash-VQ-3.1bpw": {
@@ -253,7 +253,7 @@
     "knobs": {
      "VQ_DENSE_SS": "0"
     },
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   },
   "TheDrainFlorist/Qwen3.5-397B-A17B-VQ-2.4bpw": {
@@ -481,7 +481,7 @@
     "knobs": {
      "VQ_DENSE_SS": "0"
     },
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   },
   "TheDrainFlorist/Qwen3.6-35B-A3B-VQ-3.8bpw": {
@@ -551,7 +551,7 @@
      "VQ_DENSE_SS": "0",
      "VQ_GEMMSEG_BF16IO": "1"
     },
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   },
   "TheDrainFlorist/Qwen3.6-35B-A3B-VQ-4.6bpw": {
@@ -621,7 +621,7 @@
      "VQ_DENSE_SS": "0",
      "VQ_GEMMSEG_BF16IO": "1"
     },
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   },
   "TheDrainFlorist/Qwen3.6-35B-A3B-VQ-5.4bpw": {
@@ -691,7 +691,7 @@
      "VQ_DENSE_SS": "0",
      "VQ_GEMMSEG_BF16IO": "1"
     },
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   },
   "TheDrainFlorist/Qwen3.8-27B-VQ-3.9bpw": {
@@ -757,7 +757,7 @@
     "bundle_sha256": "8f470e550dd7737a9a5eb6ebf50152755df1718f4d6ba7258a844038dc084008",
     "date": "2026-09-23T19:58:11",
     "knobs": {},
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   },
   "TheDrainFlorist/Qwen3.8-27B-VQ-4.5bpw": {
@@ -823,7 +823,7 @@
     "bundle_sha256": "8f470e550dd7737a9a5eb6ebf50152755df1718f4d6ba7258a844038dc084008",
     "date": "2026-09-23T20:02:22",
     "knobs": {},
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   },
   "TheDrainFlorist/Qwen3.8-27B-VQ-4.8bpw": {
@@ -889,7 +889,7 @@
     "bundle_sha256": "8f470e550dd7737a9a5eb6ebf50152755df1718f4d6ba7258a844038dc084008",
     "date": "2026-09-23T20:03:45",
     "knobs": {},
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   },
   "TheDrainFlorist/Qwen3.8-Flash-Next-VQ-2.1bpw": {
@@ -1113,7 +1113,7 @@
     "knobs": {
      "VQ_DENSE_SS": "0"
     },
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   },
   "TheDrainFlorist/gemma-4-26b-a4b-it-VQ-6.2bpw": {
@@ -1179,7 +1179,7 @@
     "knobs": {
      "VQ_DENSE_SS": "0"
     },
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   },
   "TheDrainFlorist/gemma-4-e4b-it-VQ-PLE": {
@@ -1249,7 +1249,7 @@
     "knobs": {
      "VQ_DENSE_SS": "0"
     },
-    "machine": "M4 Max (NozzleBook), clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
+    "machine": "M4 Max 128 GB, clean pip venv, mlx 0.31.2, mlx-lm 0.31.3"
    }
   }
  }
