@@ -11,7 +11,7 @@ artifacts were validated against -- not merely that it imports.
   its author's permission. No exo code is in it.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.31.3.
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `d4fc963282e1214a6f5f74b21e3874fb0fd341a77cac218600bc89393afc50b0`
+- vendored sha256: `a890c37b0ec8ef1e77faa0ba903e4f59f2bc20a80f82f40c7ee5fbb33c32cf90`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -102,3 +102,7 @@ index_topk no pool reaches, so it checks everything the edits leave alone.
    is a Python list, so the compiled function traced one graph per distinct emit
    pattern per layer -- at 8 rows, up to hundreds of variants x 41 layers -- to save
    a handful of slices. Arithmetic unchanged.
+
+## Edit 12 (2026-09-29)
+
+Two comments said "Scout patch"; they now say "Fork patch". No code change.
