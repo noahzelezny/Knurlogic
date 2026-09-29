@@ -4184,13 +4184,17 @@ def _prefill(xf, idx_sorted_np, codes, codebook, scales, pack_bits=0,
 # 0.0-0.2 GiB; ledger 2026-09-03). So the runtime ships with a sane
 # ceiling instead of a card footnote. A user- or host-set limit that is
 # ALREADY stricter is respected (set_cache_limit returns the previous
-# value, so we can peek without clobbering); VQLAB_CACHE_LIMIT_GB
-# overrides ours, and =0 disables entirely.
+# value, so we can peek without clobbering); VQ_CACHE_LIMIT_GB
+# overrides ours, and =0 disables entirely. (VQLAB_CACHE_LIMIT_GB, its old
+# name, is still read as a fallback for one release: every user-facing
+# runtime knob is VQ_-prefixed.)
 _DEFAULT_CACHE_LIMIT_GB = 4.0
 
 
 def _apply_default_cache_limit() -> None:
-    raw = os.environ.get("VQLAB_CACHE_LIMIT_GB")
+    raw = os.environ.get("VQ_CACHE_LIMIT_GB")
+    if raw is None:
+        raw = os.environ.get("VQLAB_CACHE_LIMIT_GB")
     if raw is not None:
         try:
             gb = float(raw)

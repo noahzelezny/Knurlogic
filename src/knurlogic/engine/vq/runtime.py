@@ -26,14 +26,13 @@ from pathlib import Path
 from . import rungs as _rungs
 
 HERE = Path(__file__).parent
-#: Vendored from vqlab at this commit (d271035: 42df84f plus five comment-only
-#: lines; last functional change
-#: to vq_switch.py ef4e8dc). The digests are the pin: tests hold the files to
+#: Vendored from vqlab at this commit (45782ba: d271035 plus the cache knob
+#: renamed VQ_CACHE_LIMIT_GB, the old name still read as a fallback). The digests are the pin: tests hold the files to
 #: them, so an edit here is a visible re-vendor, not drift.
-VENDORED_COMMIT = "d271035"
+VENDORED_COMMIT = "45782ba"
 RUNTIME_FILES = {
     "vq_switch.py":
-        "31e56dfb0e1c2138286a6f9cd84e90f0b6cecb0611f9cf4a3bb08fc6ddd38aeb",
+        "c495fe903bb838a8bd2682e799bc5562c73b494db8137adb16f1475de60fbcb5",
     "vq_dense.py":
         "5066de6e71ccbacaed7b29cea031ea2977369043fcc05d7888b7eddc761b8995",
 }
