@@ -63,17 +63,17 @@ def test_load_budget_is_capped_and_says_so(home, monkeypatch):
 
 
 def test_the_page_route_reads_and_sets_this_machine(home, monkeypatch):
-    from knurlogic.interfaces.page import documents as web
+    from knurlogic.interfaces.page import documents
     monkeypatch.setattr(wired, "detected_working_set_bytes", lambda: 100 * GIB)
     monkeypatch.setattr(wired, "advise", lambda b: {"total_bytes": 128 * GIB})
-    assert web.allowance_doc()["allowance_gib"] == 0
-    out = web.set_allowance(b'{"gib": 64}')
+    assert documents.allowance_doc()["allowance_gib"] == 0
+    out = documents.set_allowance(b'{"gib": 64}')
     assert out["allowance_gib"] == 64 and out["effective_gib"] == 64
     assert allowance.get() == 64 * GIB
-    assert "error" in web.set_allowance(b'{"gib": 500}')
-    assert "error" in web.set_allowance(b'{"gib": "x"}')
+    assert "error" in documents.set_allowance(b'{"gib": 500}')
+    assert "error" in documents.set_allowance(b'{"gib": "x"}')
     assert allowance.get() == 64 * GIB    # a refusal changes nothing
-    web.set_allowance(b'{"gib": 0}')
+    documents.set_allowance(b'{"gib": 0}')
     assert allowance.get() == 0
 
 

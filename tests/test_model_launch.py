@@ -216,12 +216,12 @@ def test_a_cluster_job_passes_the_same_sets_to_every_rank():
 def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
     """Settings -> MODELS: one row per launch knob, needs reload, and the
     KV control narrowed to what the family allows."""
-    from knurlogic.interfaces.page import documents as web
+    from knurlogic.interfaces.page import documents
     for mt, want in (("glm5_next", ["bf16", "8"]),
                      ("qwen3_5_text", ["bf16", "8", "6", "4"])):
         (tmp_path / mt).mkdir()
         a = _art(_with_head(tmp_path / mt), mt)
-        doc = web.settings_document(
+        doc = documents.settings_document(
             a, live_env={}, live_tune="balanced", live_working_set=96 * GIB,
             resolve_fn=lambda ws, t: resolve(a, ws, tune=t))({})
         ks = {k["name"]: k for k in doc["knobs"]}

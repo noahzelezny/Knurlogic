@@ -29,7 +29,7 @@ import os
 import sys
 
 from knurlogic.engine import arch, serve as engine, mtp
-from knurlogic.interfaces.page import documents as web
+from knurlogic.interfaces.page import documents
 from knurlogic.machine import status, wired
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning.resolve import resolve
@@ -99,7 +99,7 @@ def prompt_cache_policy(serving: dict, world: int, working_set: int,
 def pipeline_share_bytes(per: list, other: int, rank: int, world: int,
                          counts=None, leader: int = 0) -> int:
     """What pipeline rank `rank` holds: its layers (rank 0 the LAST
-    `counts[0]`, as cluster_jobs.prepare places them) plus what every rank
+    `counts[0]`, as launch.prepare places them) plus what every rank
     holds, plus `leader` (the head and tower) on rank 0. Counts not given
     yet (the resolver's split is made once the ring is up): an even share
     of the layers."""
@@ -217,7 +217,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # preset's value; an explicit --set still beats it
     from knurlogic.machine import preferences
     overrides = preferences.launch_sets(overrides)
-    why = web.refuse_sets(a, overrides)
+    why = documents.refuse_sets(a, overrides)
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
         return 2
@@ -472,7 +472,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                    and str(v) != cur.get(k, COMPACT_KNOBS[k][0])}
         want = {k: str(v) for k, v in want.items()
                 if k in engine.LIVE_KNOBS and str(v) != live_env.get(k)}
-        why = web.refuse_sets(a, {**want, **compact})
+        why = documents.refuse_sets(a, {**want, **compact})
         if why:
             return {"error": why}
         if not want and not compact:
@@ -502,15 +502,15 @@ def run(path: str, host: str, port: int, working_set_gib: float,
 
     # /v1/messages is served by the server itself (in-process over its
     # OpenAI surface), so it is not one of these routes.
-    routes = web.routes(
+    routes = documents.routes(
         status_fn=_status,
-        settings_fn=web.settings_document(
+        settings_fn=documents.settings_document(
             a, live_env=live_env, live_tune=tune, live_working_set=ws,
             resolve_fn=_resolve_for, wired_advice=adv,
             live_knobs=engine.LIVE_KNOBS),
-        models_fn=web.models_document(serving=a.path.name),
-        loaded_fn=web.loaded_document(),
-        load_fn=web.load_action(
+        models_fn=documents.models_document(serving=a.path.name),
+        loaded_fn=documents.loaded_document(),
+        load_fn=documents.load_action(
             artifact_for=lambda p: Artifact.load(p),
             resolve_fn=lambda art: resolve(art, ws, profile=profile, tune=tune),
             live_knobs=engine.LIVE_KNOBS,

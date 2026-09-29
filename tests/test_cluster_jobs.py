@@ -27,7 +27,7 @@ import pytest
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import links
 from knurlogic.cluster import launch as C
-from knurlogic.interfaces.page import server as ui
+from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
 from knurlogic.tuning import settings
 
@@ -334,7 +334,7 @@ def test_stop_tells_only_pages_this_page_knows(cache, monkeypatch):
     monkeypatch.setattr(identity, "identity", lambda: {"id": "me"})
     peers = [Peer(host="192.0.2.2", port=8765, id="b", name="B",
                   state="answering")]
-    monkeypatch.setattr(ui, "PEERS", SimpleNamespace(all=lambda: peers))
+    monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(all=lambda: peers))
     C.SPECS["ab12cd34ef567890"] = s
     posted = []
     out = C.stop("ab12cd34ef567890", post=lambda u, d: posted.append(u),
@@ -504,7 +504,7 @@ def two_pages(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "RANK_ARGV", [cluster_fake_page.fake_argv])
     monkeypatch.setattr(C, "_WATCHER", [1])        # A is watched by hand
     ui_a, ui_b = free_port(), free_port()
-    srv = ThreadingHTTPServer(("127.0.0.1", ui_a), ui.make_handler({}))
+    srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "B")}
     page_b = subprocess.Popen(
@@ -519,7 +519,7 @@ def two_pages(tmp_path, monkeypatch):
     from knurlogic.cluster.peers import Peer
     known = Peer(host="127.0.0.1", port=ui_b, id="bbbb", name="B",
                  state="answering")
-    monkeypatch.setattr(ui, "PEERS", SimpleNamespace(
+    monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(
         all=lambda: [known], introduce=lambda *a, **k: None))
     serve_port = free_port()
     out = C.launch({"action": "load", "identity": "abc",
@@ -581,7 +581,7 @@ def test_launch_shows_placement_and_lists_the_job_once(two_pages):
     docs = C.jobs_document()
     assert [d["job"] for d in docs] == [p.job]
     assert docs[0]["machines"] == ["A", "B"] and docs[0]["port"] == p.port
-    doc = ui.with_jobs({"resident": [
+    doc = page_server.with_jobs({"resident": [
         {"runtime": "knurlogic", "where": f"http://127.0.0.1:{p.port}"}]})
     assert doc["resident"][0]["cluster"]["machines"] == ["A", "B"]
 
@@ -637,7 +637,7 @@ def test_unload_from_the_page_stops_every_rank(two_pages):
     p = two_pages
     from knurlogic.machine import servers
     assert servers.registry()[p.port]["job"] == p.job
-    out = ui._stop(p.port)              # the Unload button on rank 0's row
+    out = page_server._stop(p.port)              # the Unload button on rank 0's row
     assert out["stopped"] and out["told"] == ["B"]
     assert not alive(p.rank0["pid"])
     assert wait(lambda: not alive(p.rank1["pid"]), 20)
@@ -677,7 +677,7 @@ def test_every_rank_syncs_the_gpu_fast():
 
 
 class _Capture:
-    """Just enough of a request handler for ui._send_json."""
+    """Just enough of a request handler for page_server._send_json."""
 
     def __init__(self):
         import io
@@ -702,14 +702,14 @@ def test_a_dead_rank_0_is_a_503_cluster_failed_with_the_reason(two_pages):
     assert wait(lambda: not alive(p.rank0["pid"]), 5)
     base = f"http://127.0.0.1:{p.port}"
     h = _Capture()
-    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_server._stream(h, base + "/v1/chat/completions", b"{}", base=base)
     assert h.code == 503, h.doc()
     err = h.doc()["error"]
     assert err["code"] == "cluster_failed" and err["type"] == "server_error"
     assert "rank 0 on A " in err["message"] and "exited" in err["message"]
     # and once the job is stopped, still that reason (not a 502)
     h = _Capture()
-    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_server._stream(h, base + "/v1/chat/completions", b"{}", base=base)
     assert h.code == 503 and "rank 0 on A " in h.doc()["error"]["message"]
 
 
@@ -717,7 +717,7 @@ def test_an_unreachable_server_that_is_no_job_is_still_a_502(cache):
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     h = _Capture()
-    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_server._stream(h, base + "/v1/chat/completions", b"{}", base=base)
     assert h.code == 502
 
 
@@ -725,21 +725,21 @@ def test_a_peers_dead_rank_0_is_a_503_with_the_peers_stop_reason(
         monkeypatch):
     base = "http://192.0.2.2:8080"
     dead = f"http://127.0.0.1:{free_port()}"
-    monkeypatch.setitem(ui._PEER_TARGETS, base, {
+    monkeypatch.setitem(page_server._PEER_TARGETS, base, {
         "machine": "M4", "relay": dead, "job": "ab12cd34ef567890"})
 
     def survey():
-        ui._PEER_JOBS["ab12cd34ef567890"] = {
+        page_server._PEER_JOBS["ab12cd34ef567890"] = {
             "job": "ab12cd34ef567890", "phase": "stopped",
             "reason": "rank 0 on M4 (pid 7) exited"}
-    monkeypatch.setattr(ui, "refresh_targets", survey)
+    monkeypatch.setattr(page_server, "refresh_targets", survey)
     h = _Capture()
-    ui._stream(h, ui.upstream(base, "/v1/chat/completions"), b"{}",
+    page_server._stream(h, page_server.upstream(base, "/v1/chat/completions"), b"{}",
                base=base)
     assert h.code == 503
     assert h.doc()["error"]["code"] == "cluster_failed"
     assert "rank 0 on M4 (pid 7) exited" in h.doc()["error"]["message"]
-    ui._PEER_JOBS.clear()
+    page_server._PEER_JOBS.clear()
 
 
 def _sse_upstream(events, done):
@@ -778,11 +778,11 @@ def _sse_upstream(events, done):
 def test_a_rank_0_dying_mid_stream_ends_the_stream_with_cluster_failed(
         monkeypatch, done):
     asked = []
-    monkeypatch.setattr(ui, "cluster_failure",
+    monkeypatch.setattr(page_server, "cluster_failure",
                         lambda b: asked.append(b) or "rank 1 on B exited")
     base = _sse_upstream([b'{"x": 1}'], done)
     h = _Capture()
-    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_server._stream(h, base + "/v1/chat/completions", b"{}", base=base)
     out = h.wfile.getvalue().decode()
     assert h.code == 200 and out.startswith('data: {"x": 1}')
     if done:
@@ -799,22 +799,22 @@ def test_a_relayed_cluster_failed_is_not_said_twice(monkeypatch):
     """A peer's rank 0 dies: the peer page's relay already ends the stream
     with its cluster_failed event; this page passes that on and adds none
     of its own (which would name whichever rank it saw exit last)."""
-    monkeypatch.setattr(ui, "cluster_failure",
+    monkeypatch.setattr(page_server, "cluster_failure",
                         lambda b: "rank 1 on B exited")
-    relayed = json.dumps(ui.cluster_failed("rank 0 on A exited")).encode()
+    relayed = json.dumps(page_server.cluster_failed("rank 0 on A exited")).encode()
     base = _sse_upstream([b'{"x": 1}', relayed], False)
     h = _Capture()
-    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_server._stream(h, base + "/v1/chat/completions", b"{}", base=base)
     out = h.wfile.getvalue().decode()
     assert out.count("cluster_failed") == 1
     assert "rank 0 on A exited" in out and "rank 1 on B" not in out
 
 
 def test_a_cut_stream_that_is_no_cluster_job_just_ends(monkeypatch):
-    monkeypatch.setattr(ui, "cluster_failure", lambda b: "")
+    monkeypatch.setattr(page_server, "cluster_failure", lambda b: "")
     base = _sse_upstream([b'{"x": 1}'], False)
     h = _Capture()
-    ui._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_server._stream(h, base + "/v1/chat/completions", b"{}", base=base)
     assert h.wfile.getvalue() == b'data: {"x": 1}\n\n'
 
 
@@ -1320,7 +1320,7 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
     monkeypatch.setattr(C, "RANK_ARGV", [cluster_fake_page.fake_argv])
     monkeypatch.setattr(C, "_WATCHER", [1])
     ui_a, ui_b = free_port(), free_port()
-    srv = ThreadingHTTPServer(("127.0.0.1", ui_a), ui.make_handler({}))
+    srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "B")}
     page_b = subprocess.Popen(
@@ -1334,7 +1334,7 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
     from knurlogic.cluster.peers import Peer
     known = Peer(host="127.0.0.1", port=ui_b, id="bbbb", name="B",
                  state="answering")
-    monkeypatch.setattr(ui, "PEERS", SimpleNamespace(
+    monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(
         all=lambda: [known], introduce=lambda *a, **k: None))
     jobs = []
     try:
@@ -1371,7 +1371,7 @@ def test_a_stopped_job_never_claims_the_port_the_next_job_serves_on(monkeypatch)
     monkeypatch.setattr(C, "jobs_document", lambda: [
         {"job": "new", "phase": "ready", "port": 8080, "split": "pipeline"},
         {"job": "old", "phase": "stopped", "port": 8080}])
-    doc = ui.with_jobs({"resident": [
+    doc = page_server.with_jobs({"resident": [
         {"runtime": "knurlogic", "where": "http://198.51.100.2:8080"}]})
     assert doc["resident"][0]["cluster"]["job"] == "new"
 
