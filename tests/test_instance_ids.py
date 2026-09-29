@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from knurlogic.interfaces import mcp
-from knurlogic.interfaces.page import server as ui
+from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import loaded, servers
 
 from test_mcp_cluster import JOB, REQS, STATUS, page, residency  # noqa: F401
@@ -25,13 +25,13 @@ def test_a_spawned_server_gets_an_instance_in_its_registry(monkeypatch,
     artifact = tmp_path / "A"
     artifact.mkdir()
     log = tmp_path / "s.log"
-    monkeypatch.setattr(ui, "serve_log", lambda port: log)
+    monkeypatch.setattr(page_server, "serve_log", lambda port: log)
 
     class FakeProc:
         pid = 4242
 
-    monkeypatch.setattr(ui.subprocess, "Popen", lambda *a, **k: FakeProc())
-    out = ui._spawn_unlocked(str(artifact), 8091)
+    monkeypatch.setattr(page_server.subprocess, "Popen", lambda *a, **k: FakeProc())
+    out = page_server._spawn_unlocked(str(artifact), 8091)
     assert len(out["instance"]) == 16
     rec = servers.registry()[8091]
     assert rec["instance"] == out["instance"]
