@@ -170,7 +170,7 @@ class ModelHost:
                 import mlx.core as mx
                 mx.clear_cache()
             except Exception:
-                pass
+                pass    # best effort: freeing Metal's cache is only an optimisation
         self._set("empty")
 
     def _split_lazily(self, path: str):
@@ -253,7 +253,7 @@ class ModelHost:
                 import mlx.core as mx
                 out["memory_bytes"] = int(mx.get_active_memory())
             except Exception:
-                pass
+                pass    # best effort: status still answers without the memory figure
         return out
 
 

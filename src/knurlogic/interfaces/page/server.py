@@ -18,6 +18,7 @@ owns the model; this page owns nothing but the view.
 
 from __future__ import annotations
 
+import logging
 import argparse
 import json
 import subprocess
@@ -31,6 +32,8 @@ from knurlogic.machine import identity, loaded, status, wired
 from knurlogic.machine.servers import (is_our_server, registry,
                                        save_registry, serve_log)
 from knurlogic.interfaces.page import documents
+
+logger = logging.getLogger(__name__)
 # Imported here, not inside the status handler: the page fires several
 # requests at once, and two threads importing a module for the first time
 # race -- measured as "partially initialized module 'typing'" on a restart.
@@ -401,7 +404,7 @@ def _stop(port: int) -> dict:
     if mine:
         try:
             mine[0].wait(timeout=5)       # reap, so it is not left a zombie
-        except Exception:
+        except subprocess.TimeoutExpired:
             pass
     reg.pop(port, None)
     save_registry(reg)
@@ -1109,7 +1112,7 @@ def refresh_targets() -> None:
         try:
             peer_residency(PEERS)
         except Exception:
-            pass
+            logger.debug("peer survey failed", exc_info=True)
 
 
 def _then_refresh(out):
@@ -1353,7 +1356,7 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
             try:
                 peer_residency(PEERS)
             except Exception:
-                pass
+                logger.debug("peer survey failed", exc_info=True)
     found: dict = {}
     docs: dict = {}
 
@@ -1365,7 +1368,7 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
                     found.setdefault(str(m["id"]), base)
                     docs.setdefault(str(m["id"]), m)
         except Exception:
-            pass
+            logger.debug("no model list from %s", base, exc_info=True)
     ts = [threading.Thread(target=one, args=(b,), daemon=True)
           for b in sorted(chat_targets())]
     for t in ts:
@@ -1447,7 +1450,7 @@ def local_models(fetch=None, docs=None) -> dict:
                     if docs is not None:
                         docs.setdefault(str(m["id"]), m)
         except Exception:
-            pass
+            logger.debug("no model list from %s", base, exc_info=True)
     ts = [threading.Thread(target=one, args=(b,), daemon=True)
           for b in bases]
     for t in ts:

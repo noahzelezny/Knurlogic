@@ -124,7 +124,7 @@ def _cache_nbytes(cache) -> int:
         try:
             n += int(getattr(c, "nbytes", 0) or 0)
         except Exception:
-            pass
+            pass    # an estimate: a layer that cannot report its size counts 0
     return n
 
 
@@ -139,7 +139,7 @@ def _fixed_nbytes(cache) -> int:
             if callable(t) and not t():
                 n += int(getattr(c, "nbytes", 0) or 0)
         except Exception:
-            pass
+            pass    # an estimate: a layer that cannot report its size counts 0
     return n
 
 
