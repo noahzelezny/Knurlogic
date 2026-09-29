@@ -2,15 +2,13 @@
 silent.
 
 Every SOURCE of "which machines exist" lives here, and none of them is the
-authority on its own (docs/DISCOVERY.md):
+authority on its own:
 
   peers.py      peers named with --peer, peers remembered from an earlier
                 run, and peers that introduced themselves by asking for our
                 status -- each with a named reachability state.
   discovery.py  Bonjour: `_knurlogic._tcp`, advertised by a page others can
                 reach, browsed by every page.
-  exo.py        what exo's /state says about each node: a witness, used
-                only for nodes nothing else answers for.
 
 And running one model across them:
 
