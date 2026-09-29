@@ -59,13 +59,16 @@ From source:
 ## Quickstart
 
 A model is a directory with a `config.json` and its weights
-(`.safetensors`) beside it, in MLX format. Get one from Hugging Face:
+(`.safetensors`) beside it, in MLX format. Get one from Hugging Face with
+the `hf` CLI (not a knurlogic dependency) -- a small Gemma 4 to start:
 
-    hf download <org>/<mlx-model> --local-dir ~/Knurlogic/Models/<mlx-model>
+    pip install -U huggingface_hub
+    hf download mlx-community/gemma-4-e4b-it-8bit \
+      --local-dir ~/Knurlogic/Models/gemma-4-e4b-it-8bit
 
-(any MLX-format repo of a supported family below, sized for your memory;
-without `--local-dir` it lands in the Hugging Face cache, which is found
-too.)
+Any MLX-format repo of a supported family below works, sized for your
+memory; without `--local-dir` it lands in the Hugging Face cache, which is
+searched too.
 `knurlogic models` finds what is already on the machine, in every tool's
 store -- `~/Knurlogic/Models` (`KNURLOGIC_MODELS`), exo's model dirs
 (`EXO_MODELS_DIR`, `EXO_MODELS_DIRS`), the Hugging Face cache
@@ -74,11 +77,14 @@ only what this engine can load. `--path DIR` scans one more directory.
 
 Check it, then serve it:
 
-    knurlogic doctor ~/Knurlogic/Models/<mlx-model>
-    knurlogic serve  ~/Knurlogic/Models/<mlx-model>
+    knurlogic doctor ~/Knurlogic/Models/gemma-4-e4b-it-8bit
+    knurlogic serve  ~/Knurlogic/Models/gemma-4-e4b-it-8bit
 
-`serve` listens on `127.0.0.1:8080` by default (`--host`, `--port`) and
-prints how to reach it. Then:
+On first run nothing is downloaded and nothing is written to
+`site-packages`: the vendored architecture is registered in-process, the
+settings are resolved and printed, then the weights load (seconds to
+minutes; the page shows the phase). `serve` listens on `127.0.0.1:8080` by
+default (`--host`, `--port`) and prints how to reach it; Ctrl-C stops it. Then:
 
     curl http://127.0.0.1:8080/v1/chat/completions \
       -H 'Content-Type: application/json' \
@@ -88,9 +94,11 @@ prints how to reach it. Then:
 memory split, a chat, and the Settings panel. `/status.json` and
 `/settings.json` are the same without a browser.
 
-`knurlogic ui` opens the page (http://127.0.0.1:8899/) without loading anything: every model on the
-disk, every runtime holding memory, and a Launch button per model (served on
-`--serve-port`).
+`knurlogic ui` serves the page at http://127.0.0.1:8899/ (open it in your
+browser) without loading anything: every model on the disk, every runtime
+holding memory, and a Launch button per model (served on `--serve-port`).
+A model launched from the page, or by the MCP `load` tool, stops with the
+page's Stop button or the MCP `unload` tool.
 
 ## Point a harness at it
 
@@ -172,10 +180,10 @@ architecture vendored in `engine/families/`:
   the artifact packs a head, 8-bit KV, YaRN.
 * **Gemma 4** -- `gemma4`, `gemma4_text`. Vision; 8-bit KV. Earlier reasoning
   is stripped by design, so each user turn re-prefills.
-* **GLM-5** -- `glm5_next`. Vendored and unpinned: no box here fits the
-  smallest one.
+* **GLM-5** -- `glm5_next`. Pinned on a VQ artifact (GLM-5.3 Flash VQ).
 * **DeepSeek-V4** -- `deepseek_v4`. Needs the pair: DeepSeek-V4-Flash has run
   split across two Macs (about 145 GiB of weights between them); no 8-bit KV.
+  Not pinned yet (`knurlogic smoke --pin` has not been run on it).
 
 ## What it is
 
@@ -188,8 +196,8 @@ architecture vendored in `engine/families/`:
   `mlx_lm/models/` inherit whatever version that install happens to be, so
   "which arithmetic am I running" has no answer. Measured across two envs on
   one machine: three of four files differed and one was absent from both —
-  the envs were on different mlx-lm versions (0.32.0 and 0.31.9), which is
-  exactly the problem. Knurlogic ships the files inside the package, loads
+  the envs were on different mlx-lm versions (0.32.0 and 0.31.9 -- neither
+  the 0.31.3 knurlogic pins), which is exactly the problem. Knurlogic ships the files inside the package, loads
   them into `sys.modules` without writing to `site-packages`, and reports
   `OK` / `UNPINNED` / `DRIFTED` / `MISSING`.
 * **A ledger of settings, encoded as defaults.** Every constant in
@@ -253,13 +261,14 @@ count.
 
 ## What it stands on
 
-    mlx, mlx-lm (0.31.3, pinned). Nothing else: every family's
-    architecture and vision tower is vendored (engine/families/), GLM-5.3
-    included -- mlx-vlm is not needed.
+    mlx 0.31.2 and mlx-lm 0.31.3 (pinned), numpy, Pillow. No mlx-vlm:
+    every family's architecture and vision tower is vendored
+    (engine/families/), GLM-5.3 included.
 
 Some of these have forks that carry fixes upstream does not, and nothing
 else says which build is installed. `knurlogic deps` reads every verdict off
-the fix itself rather than a version string:
+the fix itself rather than a version string (from a development machine
+that also has mlx-vlm installed; a fresh install shows no mlx-vlm line):
 
 ```
 $ knurlogic deps
@@ -276,8 +285,10 @@ What each fork carries, and why it is or is not ported, has one home:
 ## Status
 
 Alpha (0.1.0). The resolver, `doctor`, `smoke`, `vendor`, `serve`, `ui` and
-`mcp` work. Four architectures are pinned by actual token generation;
-glm5_next is vendored and unpinned.
+`mcp` work. Every vendored architecture is pinned
+(`pins.json` beside it: qwen3_5, qwen3_5_moe, qwen4_exp, gemma4,
+gemma4_text, glm5_next) except deepseek_v4, whose `smoke --pin` has not been
+run yet.
 
 Proven live on real weights: MTP drafting (Qwen3.8 Flash VQ, 30.2 vs 20.0
 decode tok/s), images (Qwen 27B), compaction and 8-bit KV (Qwen3.6-35B-A3B),
