@@ -185,7 +185,10 @@ def test_every_page_file_ships_and_every_reference_resolves():
     and every module imports must be there -- a missing module is a blank
     page with one console error, not a failing request anyone sees."""
     import re
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:            # 3.10: pytest depends on tomli
+        import tomli as tomllib
     from knurlogic.interfaces.page.documents import ASSETS, asset_names
     root = Path(__file__).resolve().parents[1]
     pkg = root / "src" / "knurlogic"
