@@ -377,11 +377,17 @@ def set_allowance(body) -> dict:
 def strategy_doc() -> dict:
     """`GET /strategy.json`: this machine's knurlogic strategy -- the launch
     preset a launch takes when none is named (machine/strategy.py) -- with
-    every preset explained (tuning/settings.PRESET_GUIDE)."""
+    every preset's values for the rows a custom set changes
+    (tuning/settings.PRESET_ROWS)."""
     from knurlogic.machine import strategy
-    from knurlogic.tuning.settings import PRESET_DEFAULT, PRESET_GUIDE
-    return {"preset": strategy.get(), "default": PRESET_DEFAULT,
-            "presets": [{"name": k, **v} for k, v in PRESET_GUIDE.items()]}
+    from knurlogic.tuning import settings as S
+    return {"preset": strategy.get(), "default": S.PRESET_DEFAULT,
+            "presets": [{"name": n, "title": n.capitalize(),
+                         "values": S.preset_row_values(n)}
+                        for n in S.PRESETS],
+            "rows": [{**r, "options": [{"v": v, "t": t}
+                                       for v, t in r["options"]]}
+                     for r in S.PRESET_ROWS]}
 
 
 def set_strategy(body) -> dict:
