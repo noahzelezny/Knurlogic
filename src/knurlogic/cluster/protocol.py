@@ -48,12 +48,13 @@ class Body:
     off the wire."""
     KIND: ClassVar[str] = ""
     WIRE: ClassVar[dict] = {}
+    KEEP: ClassVar[tuple] = ()      # None-valued fields that stay on the wire
 
     def to_wire(self) -> dict:
         out = {}
         for f in fields(self):
             val = getattr(self, f.name)
-            if val is None and f.default is None:
+            if val is None and f.default is None and f.name not in self.KEEP:
                 continue
             out[self.WIRE.get(f.name, f.name)] = val
         return out
@@ -176,6 +177,7 @@ class RankStatus(Body):
 @_register
 @dataclass(frozen=True)
 class JobState(Body):
+    KEEP: ClassVar[tuple] = ("phase", "ended")
     job: str
     ranks_here: list = field(default_factory=list)
     prepared: bool = False
@@ -189,6 +191,7 @@ class JobState(Body):
 @_register
 @dataclass(frozen=True)
 class Stop(Body):
+    WIRE: ClassVar[dict] = {"failure_kind": "kind"}
     job: str
     reason: str = "stopped by another machine"
     failure_kind: str | None = None
@@ -291,7 +294,7 @@ class Message:
         return out
 
     @classmethod
-    def from_wire(cls, doc: Any) -> "Message":
+    def from_wire(cls, doc: Any) -> Message:
         if not isinstance(doc, dict):
             raise ProtocolError("a message is a JSON object")
         who = str(doc.get("from") or "a peer")[:60]
