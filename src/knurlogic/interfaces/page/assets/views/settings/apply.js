@@ -40,7 +40,7 @@ document.addEventListener('change', e=>{
     const dyn=row.parentElement.querySelector('.knob[data-name="KNURLOGIC_MTP_DYNAMIC"]');
     if(dyn) dyn.hidden=e.target.value.trim()==='off';
   }
-  row.querySelector('.kstage').innerHTML=stageNote(d.reach,d.cur,to,d.next,d.saved);
+  row.querySelector('.kstage').innerHTML=stageNote(d.reach,d.cur,to,d.next,d.saved,!!d.launch);
 });
 // The pop-up: what applies NOW (live, one POST per server -- /apply to a
 // model server, or this page's own /settings.json) apart from what waits for
