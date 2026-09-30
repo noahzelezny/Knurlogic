@@ -32,8 +32,10 @@ def test_no_gui_skips(monkeypatch):
 
 
 def test_menu_titles_are_unique():
-    doc = {"resident": [{"name": "Q", "machine": "m4", "port": 8080},
-                        {"name": "Q", "machine": "m4", "port": 8081},
+    doc = {"resident": [{"name": "Q", "machine": "m4",
+                         "where": "http://127.0.0.1:8080"},
+                        {"name": "Q", "machine": "m4",
+                         "where": "http://127.0.0.1:8081"},
                         {"name": "Q", "machine": "m4"},
                         {"name": "Z", "machine": "m4"}]}
     lines = mb.menu_model(doc)["models"]
