@@ -84,6 +84,17 @@ def is_our_server(pid: int) -> bool:
 
 
 
+#: what marks a process a TEST started, never a real server: the flag the
+#: suite's fake ranks carry (tests/cluster_fake_page.fake_argv), and
+#: pytest's temp directories in its arguments. A real page leaving these
+#: out is what keeps a leaked fake rank from being listed as a model.
+TEST_MARKS = ("--knurlogic-test", "/pytest-of-")
+
+
+def is_test_process(cmd: str) -> bool:
+    return any(m in (cmd or "") for m in TEST_MARKS)
+
+
 def listening_serves() -> dict:
     """port -> pid for every `knurlogic serve` on this box that is listening,
     whoever started it. The registry holds only what the page launched; a
@@ -98,7 +109,8 @@ def listening_serves() -> dict:
     pids = []
     for line in ps.splitlines():
         pid, _, cmd = line.strip().partition(" ")
-        if "knurlogic" in cmd and "serve" in cmd.split() and pid.isdigit():
+        if "knurlogic" in cmd and "serve" in cmd.split() and pid.isdigit() \
+                and not is_test_process(cmd):
             pids.append(pid)
     if not pids:
         return {}

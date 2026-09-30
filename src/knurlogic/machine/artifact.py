@@ -221,9 +221,9 @@ def sampling_defaults(path) -> dict:
 # a path from another machine means nothing here, and a path taken from a
 # request is a way to point a loader at an arbitrary directory. The identity
 # is cheap on purpose -- no full hash of the weights: sha256 over config.json,
-# the safetensors index (when there is one) and, per shard, its name, its
-# size, its safetensors header and three sampled windows of its tensor data
-# (start, middle, end). Two artifacts with the same config and layout whose
+# the safetensors index (when there is one), per shard its name, its size,
+# its safetensors header and three sampled windows of its tensor data
+# (start, middle, end), and every *.py the artifact ships (model.py), whole. Two artifacts with the same config and layout whose
 # weights differ (a re-quantised expert set, a different pin) disagree; the
 # same artifact read on another Mac -- over SMB, say -- agrees, because
 # nothing in it is an mtime or a path. Shards that are symlinks are read
@@ -236,8 +236,8 @@ _MAX_HEADER = 64 * 1024 * 1024
 
 
 class AmbiguousIdentity(ValueError):
-    """Two different artifacts in this machine's stores share an identity,
-    and nothing named one of them: loading either would be a guess."""
+    """Kept for callers that catch it: resolve_identity no longer raises it.
+    Two paths with one identity are the same weights, and one is chosen."""
 
 
 def _shards(p: Path) -> list:
@@ -268,7 +268,8 @@ def _shard_digest(f: Path, size: int) -> bytes:
 
 def identity(path) -> str:
     """16 hex of sha256(config.json + model.safetensors.index.json + each
-    shard's name, size, header and sampled data); "" when there is no
+    shard's name, size, header and sampled data + each shipped *.py's name
+    and text); "" when there is no
     config.json. Cached per path until config.json or any shard changes
     (size or mtime -- this machine's own view, used only for the cache)."""
     import hashlib
@@ -280,9 +281,17 @@ def identity(path) -> str:
         stats = [(f.name, f.stat()) for f in shards]
     except OSError:
         return ""
+    try:
+        code = sorted((f for f in p.iterdir()
+                       if f.suffix == ".py" and f.is_file()),
+                      key=lambda f: f.name)
+        cstats = [(f.name, f.stat()) for f in code]
+    except OSError:
+        return ""
     key = str(p)
     stamp = ((st.st_mtime_ns, st.st_size),
-             tuple((n, s.st_size, s.st_mtime_ns) for n, s in stats))
+             tuple((n, s.st_size, s.st_mtime_ns) for n, s in stats),
+             tuple((n, s.st_size, s.st_mtime_ns) for n, s in cstats))
     hit = _IDENT.get(key)
     if hit and hit[0] == stamp:
         return hit[1]
@@ -297,6 +306,13 @@ def identity(path) -> str:
             h.update(b"\0shard\0" + name.encode() + b"\0"
                      + str(s.st_size).encode() + b"\0")
             h.update(_shard_digest(f, s.st_size))
+        # the runtime it ships (model.py and any other *.py): two builds
+        # whose weights agree and whose model.py differs -- a vqlab A/B
+        # pin -- are different artifacts. Hashed whole, by name and
+        # content only, so two Macs agree.
+        for f in code:
+            h.update(b"\0code\0" + f.name.encode() + b"\0"
+                     + f.read_bytes())
     except OSError:
         return ""
     out = h.hexdigest()[:16]
@@ -304,38 +320,101 @@ def identity(path) -> str:
     return out
 
 
+_MOUNTS: list = []
+
+
+def _network_mounts() -> list:
+    """Mount points of network filesystems (smbfs, nfs, afpfs, webdav),
+    longest first; read once from `mount`."""
+    if _MOUNTS:
+        return _MOUNTS[0]
+    import re
+    import subprocess
+    out = []
+    try:
+        text = subprocess.run(["mount"], capture_output=True, text=True,
+                              timeout=5).stdout
+    except Exception:
+        text = ""
+    for line in text.splitlines():
+        m = re.match(r".+? on (.+) \(([a-z0-9]+)[,)]", line)
+        if m and m.group(2) in ("smbfs", "nfs", "afpfs", "webdav", "cifs",
+                                "ftp"):
+            out.append(m.group(1))
+    out.sort(key=len, reverse=True)
+    _MOUNTS.append(out)
+    return out
+
+
+def on_network(path) -> bool:
+    """Is `path` (read through symlinks) on a network mount -- the shared
+    SMB copy rather than this Mac's own disk?"""
+    try:
+        real = str(Path(path).resolve())
+    except (OSError, RuntimeError):
+        real = str(path)
+    return any(real == m or real.startswith(m.rstrip("/") + "/")
+               for m in _network_mounts())
+
+
 def resolve_identity(ident: str, paths=None, name: str = "") -> str | None:
     """The local artifact directory with this identity, or None. `paths`
     defaults to every artifact in this machine's model stores
     (machine/discover.py); nothing outside them is ever considered.
 
-    `name` (a directory name, never a path) is what the requester called
-    it: among the matches, the one with that name wins. Two DIFFERENT
-    artifacts (by real path) with this identity and none of them named
-    raise AmbiguousIdentity naming both -- never a silent pick."""
+    Several matches are the SAME weights (that is what one identity means),
+    so one is chosen, deterministically, and logged: the one called `name`
+    (a directory name, never a path) when the requester named one, else
+    one on this Mac's own disk over one on a network mount, else the first
+    by path."""
     if not isinstance(ident, str) or not ident or len(ident) > 64:
         return None
     if paths is None:
         from knurlogic.machine import discover
         paths = [f.path for f in discover.find()]
     name = Path(str(name or "")).name
-    hits = [str(p) for p in paths if identity(p) == ident]
+    hits = sorted({str(p) for p in paths if identity(p) == ident})
     if not hits:
         return None
-    if name:
-        named = [h for h in hits if Path(h).name == name]
-        if named:
-            return named[0]
-    real = {}
-    for h in hits:
-        try:
-            real.setdefault(str(Path(h).resolve()), h)
-        except (OSError, RuntimeError):
-            real.setdefault(h, h)
-    if len(real) > 1:
-        both = ", ".join(sorted(real.values()))
-        raise AmbiguousIdentity(
-            f"identity {ident} names more than one artifact here ({both}); "
-            f"refusing to pick one. Name the artifact, or remove the copy "
-            f"that should not be loaded.")
-    return hits[0]
+    if len(hits) == 1:
+        return hits[0]
+    named = [h for h in hits if name and Path(h).name == name]
+    local = [h for h in (named or hits) if not on_network(h)]
+    pick = (local or named or hits)[0]
+    import logging
+    why = ("the one named" if named else "on this Mac's disk" if local
+           else "the first by path")
+    logging.getLogger(__name__).info(
+        "identity %s: %d copies of the same weights (%s); using %s (%s)",
+        ident, len(hits), ", ".join(hits), pick, why)
+    return pick
+
+
+def prefer_shared(ident: str, name: str, paths=None) -> tuple:
+    """(identity, alert) for a cluster job: the identity every rank should
+    load. A Mac holding its own copy of a model beside the shared (network)
+    copy, with the two DIFFERENT (another identity under the same name),
+    would split the ring across two builds: the shared copy wins, and the
+    alert says so. Identical copies, or no shared copy: (ident, "")."""
+    name = Path(str(name or "")).name
+    if not name:
+        return ident, ""
+    if paths is None:
+        from knurlogic.machine import discover
+        paths = [f.path for f in discover.find()]
+    same = [p for p in paths if Path(str(p)).name == name]
+    shared = {}
+    for p in same:
+        if on_network(p):
+            i = identity(p)
+            if i:
+                shared.setdefault(i, str(p))
+    if not shared or ident in shared or len(shared) != 1:
+        return ident, ""
+    (other, where), = shared.items()
+    mine = next((str(p) for p in same if identity(p) == ident), "")
+    return other, (f"the local copy of {name}{f' ({mine})' if mine else ''}"
+                   f" differs from the shared copy ({where}): identity "
+                   f"{ident} here, {other} shared. Every rank loads the "
+                   f"shared copy so all run the same weights; remove or "
+                   f"update the local copy to silence this.")

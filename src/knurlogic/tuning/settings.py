@@ -846,6 +846,62 @@ def long_context_refusal(model_type: str, mode) -> str | None:
     return None
 
 
+def context_ceiling(model_type: str, cfg: dict) -> int:
+    """The most context a launch of this model can ask for: its YaRN
+    window where the family documents YaRN, else its native window (0 when
+    the config does not say)."""
+    native, _ = model_window(cfg or {})
+    if long_context_family(model_type):
+        top, _ = model_window(with_long_context(
+            {"model_type": model_type, **(cfg or {})}, "yarn"))
+        return max(top, native)
+    return native
+
+
+def settle_context(model_type: str, cfg: dict, sets: dict) -> tuple:
+    """(sets, notes): a launch's KNURLOGIC_CONTEXT_LENGTH made one the model
+    can take, never a refusal -- a saved per-model value must not brick a
+    launch.
+
+    Asking for more than the model's native window IS asking for long
+    context: where the family's card documents YaRN, KNURLOGIC_LONG_CONTEXT
+    is turned on for the launch (its KV-room check still applies), and a
+    value past even the YaRN window is lowered to it. A family without YaRN
+    has the value lowered to its native window. Each change is one note."""
+    out = dict(sets or {})
+    raw = out.get("KNURLOGIC_CONTEXT_LENGTH")
+    try:
+        want = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return out, []            # check_knob says what is wrong with it
+    native, _ = model_window(cfg or {})
+    if not native or want <= native:
+        return out, []
+    notes = []
+    try:
+        mode = long_context_of(out.get("KNURLOGIC_LONG_CONTEXT"))
+    except ValueError:
+        return out, []            # refused with its own reason
+    if long_context_family(model_type):
+        if mode == "off":
+            out["KNURLOGIC_LONG_CONTEXT"] = "yarn"
+            notes.append(f"context {want:,} is past the native "
+                         f"{native:,}: long context (YaRN) is on for this "
+                         f"launch")
+        top, _ = model_window(with_long_context(
+            {"model_type": model_type, **(cfg or {})}, "yarn"))
+        if top and want > top:
+            out["KNURLOGIC_CONTEXT_LENGTH"] = str(top)
+            notes.append(f"context {want:,} lowered to {top:,}, the most "
+                         f"long context (YaRN) reaches")
+        return out, notes
+    out["KNURLOGIC_CONTEXT_LENGTH"] = str(native)
+    notes.append(f"context {want:,} lowered to {native:,}, this model's "
+                 f"maximum ({model_type or 'this family'} has no documented "
+                 f"long context)")
+    return out, notes
+
+
 def long_context_config(cfg: dict, mode) -> dict:
     """The top-level config keys to overlay at load (mlx-lm's
     `model_config`, a shallow update) for `mode`: {} when off, else the
