@@ -25,7 +25,7 @@ def test_one_machine_on_wifi_and_the_cable_is_kept_on_the_cable():
     keep, drop = sorted((wifi, cable), key=Peers._preference)
     assert keep is cable
     # but a silent cable does not win over a Wi-Fi address that answers
-    cable.state = "not_answering"
+    cable.state = "gone"
     keep, _ = sorted((wifi, cable), key=Peers._preference)
     assert keep is wifi
 
@@ -167,8 +167,8 @@ def test_the_cable_note_says_which_cable_and_why(monkeypatch):
                            link="thunderbolt", node={"cluster": m4})
     got = []
 
-    def post(url, doc):
-        got.append((url, doc))
+    def post(page, kind, doc, **kw):
+        got.append((kind, doc))
         return {"refused": "stop here"}
     monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
     for link in ("jaccl", "ring"):
@@ -178,7 +178,7 @@ def test_the_cable_note_says_which_cable_and_why(monkeypatch):
                  me={"id": "m3", "name": "studio"}, peers=[peer],
                  local_info=m3, ui_port=1, serve_port=2, post=post,
                  follow=lambda j, c: None)
-        spec = next(d for u, d in got if u.endswith(C.PREPARE_PATH))
+        spec = next(d for k, d in got if k == "Prepare")
         assert spec["cable"] == "10.0.1", spec["cable_note"]
         assert "Thunderbolt 5 (80 Gb/s)" in spec["cable_note"]
         assert "fastest" in spec["cable_note"]

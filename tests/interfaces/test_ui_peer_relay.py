@@ -185,26 +185,31 @@ def test_relay_refuses_transfer_encoding(two):
     assert not seen
 
 
-@pytest.mark.parametrize("path", ["/peer/cluster/prepare",
-                                  "/peer/cluster/stop", page_server.PEER_LOAD_PATH])
-def test_peer_cluster_and_load_refuse_transfer_encoding(two, monkeypatch,
-                                                       path):
-    from knurlogic.cluster import launch
+def test_the_peer_message_route_refuses_transfer_encoding(two, monkeypatch):
+    from knurlogic.cluster import transport
     _, peer, _ = two
     called = []
-    monkeypatch.setattr(launch, "peer_route",
-                        lambda *a: called.append(a) or (200, {}))
-    monkeypatch.setattr(page_server, "peer_launch",
+    monkeypatch.setattr(transport, "handle",
                         lambda *a, **k: called.append(a) or (200, {}))
     host, port = peer.removeprefix("http://").split(":")
     c = http.client.HTTPConnection(host, int(port), timeout=5)
-    c.putrequest("POST", path)
+    c.putrequest("POST", page_server.MSG_PATH)
     c.putheader("Content-Type", "application/json")
     c.putheader("Transfer-Encoding", "chunked")
     c.endheaders()
     c.send(b"5\r\n{\"a\":\r\n0\r\n\r\n")
     assert c.getresponse().status == 411
     assert not called
+
+
+def test_the_old_per_purpose_peer_routes_are_gone(two):
+    _, peer, _ = two
+    for path in ("/peer/loaded.json", "/peer/machine.json",
+                 "/peer/settings.json", "/peer/cluster/prepare",
+                 "/peer/cluster/start", "/peer/cluster/stop",
+                 "/peer/cluster/job", "/peer/cluster/shape"):
+        code, _, _ = _post(peer + path, {"job": "ab"})
+        assert code == 404, path
 
 
 def test_relay_gate_refuses_other_networks():

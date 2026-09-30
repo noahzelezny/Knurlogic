@@ -62,7 +62,7 @@ def test_a_slow_peer_costs_at_most_the_deadline():
 
 def test_peers_not_answering_are_not_asked():
     asked = []
-    page_server.peer_residency(Peers(peer("M4", "10.0.0.2", state="not_answering")),
+    page_server.peer_residency(Peers(peer("M4", "10.0.0.2", state="gone")),
                       fetch=lambda url, t: asked.append(url) or {})
     assert asked == []
 
