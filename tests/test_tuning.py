@@ -30,34 +30,34 @@ def _art(size_gib=70, **kw):
 
 # --- the axis ---------------------------------------------------------------
 
-def test_fast_never_raises_the_decode_chunk():
+def test_no_preset_raises_the_decode_chunk():
     """The cap that matters most. Smaller is faster AND smaller in memory
-    (128 -> 32 is 1.37x), so there is no tradeoff to offer here -- a 'fast'
-    profile that raised it would be selling a regression as a feature."""
+    (128 -> 32 is 1.37x), so there is no tradeoff to offer here -- a preset
+    that raised it would be selling a regression as a feature."""
     room = _art(size_gib=20)
-    for tune in ("safe", "balanced", "fast"):
+    for tune in S.PRESETS:
         r = resolve(room, 200 * GIB, tune=tune)
         assert int(r.env["VQ_DECODE_CHUNK"]) <= S.DECODE_CHUNK_DEFAULT
 
 
-def test_safe_bounds_the_transient_tighter_than_headroom_requires():
+def test_lean_bounds_memory_tighter_than_default():
     a = _art()
-    safe = resolve(a, 96 * GIB, tune="safe")
-    balanced = resolve(a, 96 * GIB, tune="balanced")
-    assert int(safe.env["VQ_DECODE_CHUNK"]) < int(
-        balanced.env["VQ_DECODE_CHUNK"])
-    # the prompt chunk is already the narrowest by default; safe never widens
-    assert int(safe.env["KNURLOGIC_PREFILL_CHUNK"]) <= int(
-        balanced.env["KNURLOGIC_PREFILL_CHUNK"]) == S.PREFILL_CHUNK_TIGHT
-    assert float(safe.env["VQ_CACHE_LIMIT_GB"]) < float(
-        balanced.env["VQ_CACHE_LIMIT_GB"])
+    lean = resolve(a, 96 * GIB, tune="lean")
+    default = resolve(a, 96 * GIB, tune="default")
+    # the expert chunk is auto for every preset: lean never changes it
+    assert lean.env["VQ_DECODE_CHUNK"] == default.env["VQ_DECODE_CHUNK"]
+    # the prompt chunk is already the narrowest by default; lean never widens
+    assert int(lean.env["KNURLOGIC_PREFILL_CHUNK"]) <= int(
+        default.env["KNURLOGIC_PREFILL_CHUNK"]) == S.PREFILL_CHUNK_TIGHT
+    assert float(lean.env["VQ_CACHE_LIMIT_GB"]) < float(
+        default.env["VQ_CACHE_LIMIT_GB"])
 
 
-def test_fast_on_a_tight_box_degrades_and_says_why():
-    """`fast` cannot spend headroom that is not there. The difference between
+def test_default_on_a_tight_box_degrades_and_says_why():
+    """The default cannot spend headroom that is not there. The difference between
     a knob and a wish is whether it tells you it did not happen."""
     a = _art(model_type="qwen3_5")                 # measured wider than 512
-    r = resolve(a, 74 * GIB, tune="fast")          # 4 GiB of headroom
+    r = resolve(a, 74 * GIB, tune="default")          # 4 GiB of headroom
     assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_TIGHT)
     assert any(n.startswith("prompt chunk 512") and "room" in n
                for n in r.notes)
@@ -67,14 +67,14 @@ def test_fast_on_a_tight_box_degrades_and_says_why():
 def test_no_tuning_reaches_a_setting_measured_to_be_worse():
     """F25/F33: RTILE=64 is 0.75-0.97x and never faster. No profile, at any
     box size, may reach it."""
-    for tune in ("safe", "balanced", "fast"):
+    for tune in S.PRESETS:
         for box in (74 * GIB, 96 * GIB, 400 * GIB):
             assert resolve(_art(), box, tune=tune).env[
                 "VQ_MOE_GEMMSEG_RTILE"] == "32"
 
 
 def test_the_cache_cap_holds_even_with_unlimited_headroom():
-    r = resolve(_art(size_gib=1), 10_000 * GIB, tune="fast")
+    r = resolve(_art(size_gib=1), 10_000 * GIB, tune="default")
     assert float(r.env["VQ_CACHE_LIMIT_GB"]) <= S.CACHE_LIMIT_GB_MAX
 
 
@@ -82,7 +82,7 @@ def test_an_unknown_tune_is_refused_not_ignored():
     try:
         resolve(_art(), 96 * GIB, tune="turbo")
     except ValueError as e:
-        assert "tune must be one of" in str(e)
+        assert "isn't default or lean" in str(e)
     else:
         raise AssertionError("a misspelled profile must not silently resolve")
 
@@ -264,9 +264,9 @@ def test_a_measured_family_width_is_a_cap_the_room_decides_how_much_of():
                  model_file=None, bytes_on_disk=20 * GIB, hidden_size=4096,
                  moe_intermediate_size=1024, vq_other={})
     default = S.engine_settings(resolve(a, 96 * GIB).env)
-    roomy = S.engine_settings(resolve(a, 96 * GIB, tune="fast").env)
+    roomy = S.engine_settings(resolve(a, 96 * GIB, tune="default").env)
     huge = S.engine_settings(resolve(a, 400 * GIB).env)
-    tight = S.engine_settings(resolve(a, 24 * GIB, tune="fast").env)
+    tight = S.engine_settings(resolve(a, 24 * GIB, tune="default").env)
     # 7.5 GiB predicted at 4096 > 10% of ~67 GiB of room; 3.75 at 2048 fits
     assert default["prefill_step_size"] == 2048
     assert roomy["prefill_step_size"] == 2048
@@ -346,7 +346,7 @@ def test_the_cache_dial_stops_at_what_the_box_can_hold(tmp_path):
     object.__setattr__(a, "bytes_on_disk", 70 * GIB)
 
     doc = documents.settings_document(
-        a, live_env={}, live_tune="balanced", live_working_set=76 * GIB,
+        a, live_env={}, live_tune="default", live_working_set=76 * GIB,
         resolve_fn=lambda ws, t: resolve(a, ws, tune=t),
         live_knobs=("VQLAB_CACHE_LIMIT_GB",))
     cache = next(k for k in doc({})["knobs"]
@@ -435,7 +435,7 @@ def test_preview_reads_and_sets_nothing(tmp_path, monkeypatch):
     (d / "model.safetensors").write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")
 
     before = dict(os.environ)
-    doc = documents._preview(str(d), "balanced", 84)
+    doc = documents._preview(str(d), "default", 84)
     assert doc["preview"] is True
     assert doc["artifact"]["name"] == "m"
     assert {k["name"] for k in doc["knobs"]}          # it resolved something
@@ -456,7 +456,7 @@ def test_preview_says_which_knobs_are_launch_only(tmp_path):
         "moe_intermediate_size": 768,
         "vq_modules": {"a": {"d": 2, "K": 256}}}))
     (d / "model.safetensors").write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")
-    doc = documents._preview(str(d), "balanced", 84)
+    doc = documents._preview(str(d), "default", 84)
     reach = {k["name"]: k["reach"] for k in doc["knobs"]}
     assert any(v == "restart" for v in reach.values())
     assert all(k["reach_why"] for k in doc["knobs"])
@@ -563,7 +563,7 @@ def test_397b_with_14_gib_left_stays_512():
     above its weights (git log -S 'prompt chunk is 512')."""
     a = _qwen_moe(hidden=4096, size_gib=110.8)
     assert _chunk(resolve(a, int(124.8 * GIB))) == 512
-    assert _chunk(resolve(a, int(124.8 * GIB), tune="fast")) == 512
+    assert _chunk(resolve(a, int(124.8 * GIB), tune="default")) == 512
 
 
 def test_an_explicit_prompt_chunk_still_wins():
@@ -578,8 +578,8 @@ def apply_preset_overrides_(r, sets):
     return sets
 
 
-def test_safe_stays_narrow_with_room():
-    for tune in ("safe", "stable", "lean"):
+def test_lean_stays_narrow_with_room():
+    for tune in ("safe", "lean"):     # safe is the old name for lean
         assert _chunk(resolve(_qwen_moe(), 100 * GIB, tune=tune)) == 512
 
 

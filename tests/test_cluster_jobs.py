@@ -186,7 +186,7 @@ def spec(**kw):
          "link": "ring", "identity": "abc",
          "hosts": ["10.0.0.1:47200", "10.0.0.2:47201"], "ibv_devices": None,
          "coordinator": "", "layers": [], "prefill_chunk": 512,
-         "tune": "balanced", "port": 0, "working_set_gib": 60.0,
+         "tune": "default", "port": 0, "working_set_gib": 60.0,
          "bandwidth_gbs": 0, "sets": {}, "versions": dict(VERSIONS),
          "jaccl_timeout_ms": 0,
          "nodes": [{"rank": 0, "id": "a", "name": "A", "page": "x:1"},

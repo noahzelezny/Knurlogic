@@ -34,11 +34,11 @@ def test_peek_reads_an_answering_peer_page(monkeypatch):
         seen.append(url)
         return b'{"knobs": []}'
     code, body = page_server.peek(q(where="http://10.0.0.2:8899",
-                           path="/settings.json", tune="fast",
+                           path="/settings.json", tune="lean",
                            evil="x"), fetch=fetch)
     assert code == 200 and json.loads(body) == {"knobs": []}
     # only the whitelisted query keys travel
-    assert seen == ["http://10.0.0.2:8899/settings.json?tune=fast"]
+    assert seen == ["http://10.0.0.2:8899/settings.json?tune=lean"]
 
 
 def test_peek_reads_a_running_models_sampling_defaults(monkeypatch):

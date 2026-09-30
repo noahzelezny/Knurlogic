@@ -159,7 +159,7 @@ def faked(monkeypatch):
     monkeypatch.setattr(C, "launch", launch)
     req = {"action": "load", "identity": "abc", "nodes": ["aaaa", "bbbb"],
            "split": "pipeline", "link": "jaccl", "order": ["A", "B"],
-           "port": 8080, "sets": {"kv_bits": "8"}, "tune": "fast"}
+           "port": 8080, "sets": {"kv_bits": "8"}, "tune": "lean"}
     order = [{"name": "A", "page": None}, {"name": "B", "page": "b:1"}]
     R.track_cluster("a" * 16, req=req, args={"me": {}, "peers": []},
                     order=order, port=8080, leader_here=True)
@@ -284,7 +284,7 @@ def test_a_one_mac_server_that_dies_is_relaunched_the_same_way(
         servers.save_registry(reg)
         return {"starting": "/m/qwen", "port": 8093, "pid": 424242}
     monkeypatch.setattr(mcp, "load", load)
-    out = page_server.tracked_load(artifact="/m/qwen", port=8093, tune="fast",
+    out = page_server.tracked_load(artifact="/m/qwen", port=8093, tune="lean",
                           sets={"kv_bits": "8"})
     assert out["pid"] == 424242 and R.MODELS
     monkeypatch.setattr(servers, "is_our_server", lambda pid: False)
@@ -292,7 +292,7 @@ def test_a_one_mac_server_that_dies_is_relaunched_the_same_way(
     assert "port 8093 (pid 424242) exited" in what
     assert R.tick(1)[0][1].startswith("relaunch 1")
     assert loads[-1] == {"artifact": "/m/qwen", "port": 8093,
-                         "tune": "fast", "sets": {"kv_bits": "8"},
+                         "tune": "lean", "sets": {"kv_bits": "8"},
                          "force": False, "draft": True}
     assert R.for_port(8093)["state"] == "recovering"
     assert R.read_file()["8093"]["state"] == "recovering"
@@ -364,10 +364,10 @@ def test_a_restored_model_keeps_its_attempts_and_limits(faked):
 
 def test_a_one_mac_server_is_restored_too(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    R.track_single(8093, {"artifact": "/m/qwen", "tune": "fast"}, pid=7)
+    R.track_single(8093, {"artifact": "/m/qwen", "tune": "lean"}, pid=7)
     _restart_page()
     assert R.restore() == ["single:8093"]
-    assert R.MODELS["single:8093"]["load"]["tune"] == "fast"
+    assert R.MODELS["single:8093"]["load"]["tune"] == "lean"
     R.cancel_port(8093)                          # an unload after it
     _restart_page()
     assert R.restore() == []
@@ -376,7 +376,7 @@ def test_a_one_mac_server_is_restored_too(monkeypatch, tmp_path):
 # --- a refusal at startup is deterministic: failed at once, never relaunched
 
 REFUSAL = ("REFUSING: KNURLOGIC_PRESET='bogus': preset 'bogus': one of "
-           "['balanced']")
+           "['default']")
 
 
 def test_a_rank_that_refused_to_start_fails_the_job_with_its_words(

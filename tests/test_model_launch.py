@@ -225,7 +225,7 @@ def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
         (tmp_path / mt).mkdir()
         a = _art(_with_head(tmp_path / mt), mt)
         doc = documents.settings_document(
-            a, live_env={}, live_tune="balanced", live_working_set=96 * GIB,
+            a, live_env={}, live_tune="default", live_working_set=96 * GIB,
             resolve_fn=lambda ws, t: resolve(a, ws, tune=t))({})
         ks = {k["name"]: k for k in doc["knobs"]}
         assert ks["KNURLOGIC_KV_BITS"]["values"] == want

@@ -104,9 +104,9 @@ def test_load_on_two_machines_sends_the_pages_launch(page):
                                  "layers": [4, 4]},
                    "cable": "10.0.1", "cable_note": "fastest", "note": "x"}
     out = mcp.load(artifact="M", port=8090, machines=["A", "b"],
-                   split="pipeline", link="rdma", tune="fast")
+                   split="pipeline", link="rdma", tune="lean")
     assert page.posts == [{"action": "load", "identity": "abc", "name": "M",
-                           "tune": "fast", "sets": {}, "port": 8090,
+                           "tune": "lean", "sets": {}, "port": 8090,
                            "nodes": ["aaaa", "bbbb"], "split": "pipeline",
                            "link": "rdma"}]
     assert out["job"] == "j2" and out["port"] == 8090

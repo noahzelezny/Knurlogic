@@ -35,7 +35,7 @@ def test_launch_refusal_says_what_serve_would(cache):
     why = serve.launch_refusal(a, {"KNURLOGIC_PRESET": "bogus"})
     assert why and "bogus" in why
     why = serve.launch_refusal(a, {"KNURLOGIC_KV_BITS": "3"})
-    assert why and "KNURLOGIC_KV_BITS" in why
+    assert why and "KV cache" in why
 
 
 def test_prepare_refuses_bad_settings_before_a_rank_starts(cache):
