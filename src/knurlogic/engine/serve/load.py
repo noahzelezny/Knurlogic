@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
@@ -37,7 +38,7 @@ def info(host: str = "mlx_lm") -> EngineInfo:
     try:
         m = importlib.import_module(host)
         return EngineInfo(host, getattr(m, "__version__", "unknown"), True)
-    except Exception:
+    except (ImportError, OSError):
         return EngineInfo(host, "-", False)
 
 
@@ -48,7 +49,7 @@ def describe() -> str:
 def memory() -> dict:
     try:
         import mlx.core as mx
-    except Exception:
+    except ImportError:
         return {"available": False}
     try:
         info = (mx.device_info() if hasattr(mx, "device_info")
@@ -56,7 +57,7 @@ def memory() -> dict:
         ws = int(info.get("max_recommended_working_set_size", 0))
         total = int(info.get("memory_size", ws))
         device = info.get("device_name", "unknown")
-    except Exception:
+    except (AttributeError, TypeError, ValueError, RuntimeError):
         ws = total = 0
         device = "unknown"
     active = int(mx.get_active_memory())
@@ -80,12 +81,11 @@ def gpu_in_use() -> Optional[int]:
     27B on an M3 Ultra (96 GB) aborted Metal with its own peak under
     the working set while other processes held 2.9 GiB of it."""
     import re
-    import subprocess
     try:
         out = subprocess.run(["ioreg", "-r", "-c", "IOAccelerator", "-d1",
                               "-w0"], capture_output=True, text=True,
                              timeout=2).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return None
     m = re.search(r'"In use system memory"=(\d+)', out)
     return int(m.group(1)) if m else None
@@ -258,7 +258,7 @@ def apply_live(env: dict) -> dict:
                     continue
                 os.environ[k] = str(v)
                 done[k] = f"applied now ({v} GiB)"
-            except Exception as e:
+            except (ValueError, TypeError, AttributeError, RuntimeError, OSError) as e:
                 done[k] = f"failed: {e}"
         elif k == "KNURLOGIC_CONTEXT_LENGTH":
             # the scheduler reads it at every admission
@@ -321,12 +321,12 @@ def tool_support(chat_template: str) -> dict:
         return out
     try:
         from mlx_lm.tokenizer_utils import _infer_tool_parser
-    except Exception:
+    except ImportError:
         out["parser"] = "unknown (this engine exposes no inference rule)"
         return out
     try:
         out["parser"] = _infer_tool_parser(chat_template)
-    except Exception:
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError):
         out["parser"] = None
     from knurlogic.engine import templates
     fam = templates.served_family(chat_template)
@@ -366,7 +366,7 @@ def keeps_mtp_weights(model_type: str) -> bool | None:
         if src_path is None:
             return None
         text = src_path.read_text()
-    except Exception:
+    except (ImportError, OSError, ValueError, AttributeError, TypeError):
         return None
     dropped = 'k.startswith(("mtp.", "model.mtp."))' in text or \
         ('"mtp."' in text and "continue" in text)

@@ -84,7 +84,7 @@ def control_strings(tokenizer) -> Optional[re.Pattern]:
                   or {}).values():
             names.add(getattr(t, "content", str(t)))
         names.update(getattr(tokenizer, "all_special_tokens", None) or [])
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
         pass    # any tokenizer shape: an odd one just yields fewer names
     # (DeepSeek's `｜DSML｜`, the tool-call markup token, is bracketed by
     # full-width bars: a tool result quoting DSML would open a call)
@@ -200,7 +200,7 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
     with thinking._render_lock:
         try:
             prompt = _render(tokenizer, messages, render, close)
-        except Exception as e:
+        except Exception as e:  # a chat template is third-party code; its failure is the request's refusal
             raise PromptError(f"the chat template could not render this "
                               f"request: {type(e).__name__}: {e}") from e
         return _segment(tokenizer, messages, render, prompt)
@@ -302,7 +302,7 @@ def _segment(tokenizer, messages, render, prompt):
             sys_tokens = list(tokenizer.apply_chat_template(
                 messages[:n_sys] + [{"role": "user", "content": ""}],
                 add_generation_prompt=False, tokenize=True, **render))
-        except Exception:
+        except _templates.TEMPLATE_ERRORS:
             sys_tokens = []
         # where the system render and the prompt first differ ...
         for i, (a, b) in enumerate(zip(sys_tokens, prompt)):
@@ -328,7 +328,7 @@ def _segment(tokenizer, messages, render, prompt):
     try:
         hist = list(tokenizer.apply_chat_template(
             messages, add_generation_prompt=False, tokenize=True, **render))
-    except Exception:
+    except _templates.TEMPLATE_ERRORS:
         hist = []
     if sys_end < len(hist) < tail and prompt[:len(hist)] == hist:
         tail = len(hist)
