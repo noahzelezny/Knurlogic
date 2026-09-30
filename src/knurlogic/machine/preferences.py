@@ -37,7 +37,7 @@ def get() -> dict:
     left out, never an error: a launch or a request must not fail on it."""
     try:
         raw = json.loads(path().read_text())
-    except Exception:
+    except (OSError, ValueError):
         return {}
     if not isinstance(raw, dict):
         return {}
@@ -51,7 +51,7 @@ def invalid() -> list:
     instead of running without them."""
     try:
         raw = json.loads(path().read_text())
-    except Exception:
+    except (OSError, ValueError):
         return []
     if not isinstance(raw, dict):
         return []

@@ -36,7 +36,7 @@ def get() -> int:
     than the setting not being there."""
     try:
         v = json.loads(path().read_text()).get("allowance_bytes")
-    except Exception:
+    except (OSError, ValueError, AttributeError):
         return 0
     return int(v) if isinstance(v, (int, float)) and v > 0 else 0
 
