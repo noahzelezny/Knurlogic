@@ -33,7 +33,6 @@ from pathlib import Path
 from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import protocol, transport
-from knurlogic.machine.status import SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -403,10 +402,6 @@ class Peers:
             p.mismatch = ""
         except protocol.ProtocolError:
             p.mismatch = protocol.mismatch_text(who, v)
-        if not p.mismatch and doc.get("schema") != SCHEMA:
-            p.mismatch = (f"{who} speaks status schema {doc.get('schema')}"
-                          f", this machine {SCHEMA}: update knurlogic on the "
-                          f"older one")
         self._classify(p, now)
 
     def refresh(self) -> None:

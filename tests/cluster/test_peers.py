@@ -61,8 +61,14 @@ def test_refused_says_nothing_is_listening(tmp_path):
     assert "nothing is listening" in ps.all()[0].problem
 
 
-def test_a_different_schema_is_named_not_drawn_wrong(tmp_path):
+def test_a_different_status_schema_alone_is_not_a_version_mismatch(tmp_path):
     ps = make(tmp_path, lambda url: doc("bbbbbbbbbbbb", "M4", schema=1))
+    ps.refresh()
+    assert ps.all()[0].state != "version_mismatch"
+
+
+def test_a_different_protocol_major_is_a_version_mismatch(tmp_path):
+    ps = make(tmp_path, lambda url: doc("bbbbbbbbbbbb", "M4", v=(9, 0)))
     ps.refresh()
     assert ps.all()[0].state == "version_mismatch"
 

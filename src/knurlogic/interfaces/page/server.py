@@ -598,6 +598,19 @@ def _addresses_of(host: str, ttl: float = 60.0) -> set:
     return got
 
 
+def _manual_hosts() -> list:
+    """Every address of every --peer machine: the probe moves p.host to the
+    fastest answering address, the machine may call from any other."""
+    out: list = []
+    for p in (PEERS.all() if PEERS else []):
+        if "manual" in p.found_by:
+            ks = getattr(p, "addresses", ())
+            for h in [p.host, *(k.rpartition(":")[0] for k in ks)]:
+                if h and h not in out:
+                    out.append(h)
+    return out
+
+
 def peer_refusal(headers, client_ip: str, local_ip: str, gate=None,
                  manual_hosts=(), what: str = "peer requests"):
     """The gate every /peer/ route shares: (status, doc) when refused, else
@@ -1796,8 +1809,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             started. The peer gate (peer_refusal), then a plain
             Content-Length body -- never Transfer-Encoding, the framing a
             smuggled request hides behind -- then peer_relay."""
-            manual = [p.host for p in (PEERS.all() if PEERS else [])
-                      if "manual" in p.found_by]
+            manual = _manual_hosts()
             refused = peer_refusal(
                 self.headers, self.client_address[0],
                 self.connection.getsockname()[0], manual_hosts=manual,
@@ -1860,8 +1872,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 self.close_connection = True
                 _send_json(self, 413, {"error": "a peer message is small"})
                 return
-            manual = [p.host for p in (PEERS.all() if PEERS else [])
-                      if "manual" in p.found_by]
+            manual = _manual_hosts()
             refused = peer_refusal(
                 self.headers, self.client_address[0],
                 self.connection.getsockname()[0], gate=gate_for_peers,

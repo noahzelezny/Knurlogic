@@ -25,6 +25,7 @@ ONE timeout table (`TIMEOUTS`) for every call between pages.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 import urllib.error
@@ -34,6 +35,8 @@ from typing import Callable
 from knurlogic.cluster import NET_ERRORS
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import protocol as P
+
+log = logging.getLogger(__name__)
 
 MSG_PATH = "/peer/v1/msg"
 
@@ -254,5 +257,10 @@ def handle(body: bytes, table: dict) -> tuple:
         return 400, failure_reply(str(e), re_=re_)
     if not isinstance(inner, dict):
         return 400, failure_reply("body must be an object", re_=re_)
-    code, out = table[kind](inner)
+    try:
+        code, out = table[kind](inner)
+    except Exception:                   # a handler bug is not "no answer"
+        log.exception("peer message handler %s failed", kind)
+        return 500, failure_reply("this machine's handler failed",
+                                  kind="failure", re_=re_)
     return code, reply(str(kind), code, out, re_)
