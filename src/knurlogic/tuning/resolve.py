@@ -488,6 +488,38 @@ def step_margin(working_set_bytes: int) -> int:
     return max(4 * GIB, int(working_set_bytes) // 20)
 
 
+def fit_reserve(cfg: dict, kv_bits=None) -> dict:
+    """What a rank must keep free beyond its weights, from the config
+    alone: {"transient_bytes": the first request's transient at the
+    smallest prompt chunk (max of the measured flat part and the hidden-
+    size line, settings.FIT_*), "kv_bytes": the KV of
+    FIT_MIN_CONTEXT_TOKENS tokens at `kv_bits`}. KV is charged whole to
+    every rank, not by the layers it holds: a rank's share is not known
+    until this is, and the overcharge is one minimum context."""
+    cfg = cfg or {}
+    tc = cfg.get("text_config") or cfg
+    hidden = int(tc.get("hidden_size") or S.DECODE_CHUNK_ASSUMED_SHAPE[1])
+    transient = max(S.FIT_TRANSIENT_FLOOR,
+                    S.FIT_PREFILL_CHUNK * hidden
+                    * S.PREFILL_TRANSIENT_BYTES_PER_TOKEN_HIDDEN)
+    per, _ = kv_bytes_per_token(tc, kv_bits)
+    return {"transient_bytes": int(transient),
+            "kv_bytes": int(per * S.FIT_MIN_CONTEXT_TOKENS)}
+
+
+def rank_margin(working_set_bytes: int, reserve: dict | None = None) -> int:
+    """What a rank of this working set keeps free beyond its weights: the
+    scheduler's step margin (`step_margin`, or the first request's transient
+    and a quarter again, as the scheduler's `_margin` takes the larger),
+    plus the KV of a minimum context. `reserve` (fit_reserve) None = the
+    step margin alone."""
+    m = step_margin(working_set_bytes)
+    if not reserve:
+        return m
+    return max(m, int(int(reserve.get("transient_bytes") or 0) * 1.25)) \
+        + int(reserve.get("kv_bytes") or 0)
+
+
 def context_room(working_set_bytes: int, weights_bytes: int,
                  cfg: dict, kv_bits=None) -> dict:
     """What a model that fits leaves for its conversations: the working set
@@ -1283,7 +1315,7 @@ def _byte_bounds(layer_bytes: list, weights: list, cap: list):
 
 
 def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
-                    leader_bytes: int = 0) -> dict:
+                    leader_bytes: int = 0, reserve: dict | None = None) -> dict:
     """Which layers each rank holds.
 
     `layer_bytes`: bytes of each layer, in order. `ranks`: in rank order,
@@ -1300,7 +1332,9 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
     only, and says so. What a rank can hold leaves its step margin
     (step_margin) free; the reason says what each rank leaves. Every rank holds
     at least one layer and no rank more
-    than fits; rank 0 holds the LAST run of layers, rank N-1 the first.
+    than fits; `reserve` (fit_reserve) is what each rank also keeps free:
+    the first request's transient and a minimum context's KV, so an uneven
+    split respects what the fit check does; rank 0 holds the LAST run of layers, rank N-1 the first.
 
     -> {"layers": [count per rank], "bounds": [(start, end) per rank],
         "bytes": [layer bytes per rank], "weights": [...], "reason": str}
@@ -1316,7 +1350,7 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
     # weights do (the scheduler's floor: 5%, at least 4 GiB)
     held = [int(other_bytes) + (int(leader_bytes) if i == 0 else 0)
             for i in range(n)]
-    cap = [w - held[i] - step_margin(w) for i, w in enumerate(wss)]
+    cap = [w - held[i] - rank_margin(w, reserve) for i, w in enumerate(wss)]
     for i, c in enumerate(cap):
         if c <= 0:
             raise ValueError(
@@ -1325,8 +1359,9 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
                 f"GiB it keeps besides them (embeddings, norm, lm_head"
                 + (", and on rank 0 the MTP head and vision tower"
                    if i == 0 and leader_bytes else "")
-                + f") and its {step_margin(wss[i]) / GIB:.1f} GiB step "
-                f"margin")
+                + f") and the {rank_margin(wss[i], reserve) / GIB:.1f} GiB "
+                f"it keeps free (step margin or first-request transient, "
+                f"plus a minimum context's KV)")
     bws = [r.get("memory_bandwidth_gbs") for r in ranks]
     known = all(b for b in bws)
     weights = [cap[i] * (float(bws[i]) if known else 1.0) for i in range(n)]

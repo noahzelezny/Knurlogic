@@ -457,7 +457,7 @@ def coordinate(gen, group, drafting: Optional[bool] = None) -> Coord:
 def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
           working_set: int, bandwidth_gbs: Optional[float] = None,
           counts: Optional[Sequence[int]] = None,
-          leader_bytes: int = 0) -> dict:
+          leader_bytes: int = 0, reserve: Optional[dict] = None) -> dict:
     """Every rank's working set and memory bandwidth, gathered, and the
     layer split computed from them the same way on every rank
     (tuning/resolve.pipeline_shares: same inputs, same split; rank 0's
@@ -498,7 +498,7 @@ def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
                          f"last layers and samples"}
     else:
         out = R.pipeline_shares(list(layer_bytes), ranks, int(other_bytes),
-                                int(leader_bytes))
+                                int(leader_bytes), reserve=reserve)
     out["ranks"] = ranks
     out["rank"] = rank
     return out
