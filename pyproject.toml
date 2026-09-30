@@ -70,4 +70,4 @@ mlx_lm_cache_sha256 = "819ed95dcbf755652363cfdb15a639890447abb534a06dcefd52c7fff
 
 [tool.pytest.ini_options]
 # each checkout tests its own src, whatever is installed
-pythonpath = ["src"]
+pythonpath = ["src", "tests/support"]
