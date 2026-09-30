@@ -39,4 +39,22 @@ const OVL=(()=>{
   return {open, close, is:el=>!!cur && cur.el===el};
 })();
 
+// (i) bubbles open above their icon; when that would be cut off by the
+// scroll container (or the window) they open below instead.
+function placeInfo(e){
+  const i=e.target.closest && e.target.closest('.info');
+  if(!i) return;
+  const b=i.querySelector('.bub'); if(!b) return;
+  i.classList.remove('down');
+  let top=0, p=i.parentElement;
+  while(p && p!==document.body){
+    const o=getComputedStyle(p).overflowY;
+    if(/auto|scroll|hidden/.test(o)){ top=Math.max(top, p.getBoundingClientRect().top); break }
+    p=p.parentElement;
+  }
+  if(b.getBoundingClientRect().top<top+4) i.classList.add('down');
+}
+addEventListener('mouseover',placeInfo);
+addEventListener('focusin',placeInfo);
+
 export {OVL};
