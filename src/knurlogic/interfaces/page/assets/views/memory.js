@@ -1,5 +1,5 @@
 import {$, esc, gb} from '../format.js';
-import {followLaunches, loadingLaunches} from './picker.js';
+import {dismissLaunch, failedLaunches, followLaunches, loadingLaunches} from './picker.js';
 
 // --- what is actually in memory, whoever put it there ---------------------
 // exo's models, ollama's models and ours in one list. A machine has one pool
@@ -157,7 +157,16 @@ async function loadResident(){
       ${pct!=null||L.phase==='preparing'?`<div class="lbar"><i style="width:${pct||0}%"></i></div>`:''}
       <div class="s">on ${esc(L.machines.join(' + '))}${L.per&&L.per.length?' · '
         +esc(L.per.map(p=>p.machine+': '+p.phase).join(' · ')):''}</div></div>`});
-  let h=cards.length||loading.length?loading.concat(cards).join(''):none;
+  const failed=failedLaunches().map(L=>
+    `<div class="card failed"><div class="cardhd"><span class="dot"></span>
+        <span class="rt">FAILED</span>
+        <button class="mini x" data-lx="${L.id}" title="dismiss">×</button></div>
+      <div class="n">${esc(String(L.name).split('/').pop())}</div>
+      <div class="s">on ${esc(L.machines.join(' + '))}</div>
+      ${L.alert?`<div class="why">${esc(L.alert)}</div>`:''}
+      ${L.why?`<div class="why">${esc(L.why)}</div>`:''}</div>`);
+  let h=cards.length||loading.length||failed.length
+    ?failed.concat(loading,cards).join(''):none;
   for(const m of peers) if(m.error)
     h+=`<div class="s ro peererr" title="${esc(m.error)}">${
       esc(m.machine)} not answering</div>`;
@@ -181,7 +190,10 @@ async function loadResident(){
   // same box, and letting both write produced a key that disagreed with the
   // gauge beside it. Only used when status supplied nothing at all.
   if(!RAM) ramWent(d.memory||{});
-  el.querySelectorAll('.cardhd button').forEach(x=>x.onclick=async()=>{
+  el.querySelectorAll('[data-lx]').forEach(x=>x.onclick=()=>{
+    dismissLaunch(+x.dataset.lx); loadResident();
+  });
+  el.querySelectorAll('.cardhd button[data-i]').forEach(x=>x.onclick=async()=>{
     const r=rows[+x.dataset.i];
     const how={knurlogic:'unload', ollama:'ollama-unload'};
     x.textContent='…'; x.disabled=true;

@@ -132,6 +132,11 @@ nav a:hover{color:var(--acc)}
 #resident .machine:first-child{margin-top:0}
 #resident .peererr{color:var(--faint);margin-bottom:6px}
 .card .dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ok)}
+.card.failed{border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+.card.failed .dot{background:var(--bad)}
+.card.failed .rt{color:var(--bad);letter-spacing:.08em}
+.card.failed .why{color:var(--bad);margin-top:4px;overflow-wrap:anywhere;font-size:12.5px}
+.card.failed .x{margin-left:auto;padding:0 6px}
 .card.loading .dot{background:var(--warn);animation:pulse 2s ease-in-out infinite}
 .card.offered .dot{background:var(--faint)}
 .mini.danger:hover:not([disabled]){color:var(--warn);border-color:var(--warn)}
@@ -464,21 +469,8 @@ nav a[aria-pressed=true]{text-shadow:var(--glow)}
 #lmwhere{font-size:12.5px;color:var(--dim);margin-top:8px;overflow-wrap:anywhere}
 .optrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0}
 .optrow .optlab{margin:0}
-#lmprog:empty{display:none}
-#lmprog{margin-top:10px;display:grid;gap:6px}
-.lp{border:1px solid var(--line);border-radius:var(--r);padding:7px 9px;font-size:12.5px;color:var(--dim)}
-.lp.ready{border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
-.lp.failed{border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
-.lp .lph{display:flex;align-items:center;gap:6px;color:var(--fg)}
-.lp .lph b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.lp .ph{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--warn)}
-.lp.ready .ph{color:var(--ok)}
-.lp .bar{height:4px;background:var(--line);border-radius:2px;margin:5px 0 3px;overflow:hidden}
-.lp .bar i{display:block;height:100%;background:var(--acc)}
 .lbar{height:3px;background:var(--line);border-radius:2px;margin:5px 0 3px;overflow:hidden}
 .lbar i{display:block;height:100%;background:var(--acc);transition:width .4s}
-.lp .why{color:var(--warn);margin-top:4px;overflow-wrap:anywhere}
-.lp .x{padding:0 6px}
 .unit .uhead .mk.big{width:44px;height:44px;margin:-4px 0}
 .unit .uhead .ut{text-align:left;min-width:0}
 .unit .hw{font-size:12px;letter-spacing:.08em;color:var(--faint);
