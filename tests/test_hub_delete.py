@@ -20,6 +20,7 @@ def test_delete_is_refused_while_a_server_runs_the_model(tmp_path, monkeypatch):
     snap.mkdir(parents=True)
     monkeypatch.setattr(servers, "registry",
                         lambda: {8080: {"pid": 1, "artifact": str(snap)}})
+    monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
     out = hub.delete("o/m")
     assert "error" in out and "8080" in out["error"]
     assert snap.exists()
