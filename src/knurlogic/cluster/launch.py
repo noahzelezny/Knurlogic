@@ -3,12 +3,12 @@
 The coordinator is the page Launch was pressed on with two or more
 machines picked. Every page starts only its own ranks, after checking the
 request against its own disk, memory, software and links, in two phases so
-nothing starts unless everything can: `prepare` (POST
-/peer/cluster/prepare to every page; any refusal and nothing starts) then
-`start` (POST /peer/cluster/start). Any rank dying or stalling stops the
-whole job on every page. A stop is done when the ranks' processes are
-gone, not when they were signalled. Rank 0's HTTP port is where chat goes.
-Peer routes are gated like /peer/loaded.json (ui.peer_refusal).
+nothing starts unless everything can: `prepare` (a Prepare message to
+every page; any refusal and nothing starts) then `start` (a Start message).
+Any rank dying or stalling stops the whole job on every page. A stop is
+done when the ranks' processes are gone, not when they were signalled.
+Rank 0's HTTP port is where chat goes. Every message is an envelope on
+/peer/v1/msg (cluster/transport.py), gated by ui.peer_refusal.
 
 Design: docs/design/cluster.md (launch).
 """
@@ -28,6 +28,7 @@ from pathlib import Path
 
 from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
 from knurlogic.cluster import jobs as J
+from knurlogic.cluster import transport
 from knurlogic.cluster.protocol import (FAILURE_KINDS, JobState, PrepareReply,
                                         Started, Stopped, typed)
 
@@ -48,13 +49,8 @@ status_fn: Callable = _no_status
 peers_fn: Callable[[], list] = list
 
 GIB = 1 << 30
-PREPARE_PATH = "/peer/cluster/prepare"
-START_PATH = "/peer/cluster/start"
-STOP_PATH = "/peer/cluster/stop"
-SHAPE_PATH = "/peer/cluster/shape"
-#: a page of the job asking this one whether it still runs its ranks
-JOB_PATH = "/peer/cluster/job"
-PEER_PATHS = (PREPARE_PATH, START_PATH, STOP_PATH, SHAPE_PATH, JOB_PATH)
+#: the message kinds a page answers for a job (cluster/protocol.py)
+CLUSTER_KINDS = ("Prepare", "Start", "Stop", "JobState", "Shape")
 #: a prepare's fields; nothing else is read, and a path is refused
 SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
@@ -97,8 +93,8 @@ PREFILL_CHUNK = 512
 RING_PORT = 47200
 #: a prepared job not started within this long is forgotten
 PREPARED_S = 120.0
-#: how long a peer page has to answer a cluster step
-PEER_S = 30.0
+#: how long a prepare waits for a stopping rank of an earlier job to be gone
+EXIT_WAIT_S = 30.0
 #: how often the page checks its ranks
 WATCH_S = 2.0
 #: how long start waits for a stopped rank's process on this machine to be
@@ -106,8 +102,6 @@ WATCH_S = 2.0
 #: that can reboot the machine (a 397B share loading beside the last job's
 #: 50 GiB)
 START_WAIT_S = 20.0
-#: how long one peer-page check may take (the watcher asks every WATCH_S)
-PEER_CHECK_S = 5.0
 
 #: job -> prepared spec (+ resolved path), awaiting start
 PREPARED: dict = {}
@@ -127,6 +121,8 @@ _START_LOCK = threading.Lock()
 _STOPPING: set = set()
 #: (job, peer id) -> when that peer's page last said it runs its rank
 _PEER_OK: dict = {}
+#: the boot_id a peer had when it held its rank of a job: {(job, id): id}
+_PEER_BOOT: dict = {}
 #: frozenset of two machine ids -> {subnet: why} -- a cable a rank's link
 #: init failed on while this page runs (e.g. one cable failing jaccl QP
 #: RTR with errno 96 while the other works): tried last from then on
@@ -688,7 +684,7 @@ def _loading_elsewhere(job: str, reg: dict) -> str:
 
 def prepare(spec: dict, *, resolve=None, info=None, shape=None,
             registry=None, held=None) -> tuple:
-    """POST /peer/cluster/prepare, on the page asked to run one rank:
+    """A Prepare message, on the page asked to run one rank:
     (status, doc). Checks, and remembers the job for start; starts
     nothing."""
     why = check_spec(spec)
@@ -791,7 +787,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     why = _loading_elsewhere(spec["job"], reg)
     if why:
         refusals.append(why)
-    stale = _wait_for_exit(reg, PEER_S)
+    stale = _wait_for_exit(reg, EXIT_WAIT_S)
     if stale:
         refusals.append("; ".join(
             f"rank {r} of job {j} is still exiting on {me}"
@@ -800,7 +796,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         conflict = _slot_conflict(spec, reg)
         if conflict:
             j, r, pid = conflict
-            left = J.wait_gone([pid], PEER_S, alive=lambda p: _alive(j, p))
+            left = J.wait_gone([pid], EXIT_WAIT_S, alive=lambda p: _alive(j, p))
             if left:
                 refusals.append(f"rank {r} of job {j} is still exiting on "
                                 f"{me} and holds this job's ring port; "
@@ -988,7 +984,7 @@ def _slot_conflict(spec: dict, reg: dict):
 
 
 def start(job: str | None, *, spawn=None, wait_s: float | None = None) -> tuple:
-    """POST /peer/cluster/start: spawn this page's prepared rank -- once
+    """A Start message: spawn this page's prepared rank -- once
     every stopped rank on this machine is gone (up to START_WAIT_S), and
     never beside another job's rank still loading."""
     with _LOCK:
@@ -1174,6 +1170,8 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
         _WATCH.forget(job)
         for k in [k for k in _PEER_OK if k[0] == job]:
             _PEER_OK.pop(k)
+        for k in [k for k in _PEER_BOOT if k[0] == job]:
+            _PEER_BOOT.pop(k)
         # stopped means gone: a rank still exiting keeps its record
         # (phase "stopping"), and the watcher finishes the stop
         if (mine or spec) and not left:
@@ -1204,9 +1202,9 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
             if not page:
                 continue
             try:
-                (post or _stop_post)(f"http://{page}{STOP_PATH}",
-                                     {"job": job, "reason": reason,
-                                      **({"kind": kind} if kind else {})})
+                (post or transport.send)(
+                    page, "Stop", {"job": job, "reason": reason,
+                                   **({"kind": kind} if kind else {})})
                 told.append(n.get("name"))
             except NET_ERRORS:
                 logger.debug("could not tell %s to stop job %s", page, job, exc_info=True)
@@ -1214,11 +1212,6 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                                                     mine.values()),
                          killed=killed, exiting=left, told=told,
                          reason=reason))
-
-
-def _stop_post(url: str, doc: dict) -> dict:
-    # the peer answers once its ranks are gone: its grace, then its reap
-    return _post(url, doc, timeout=J.GRACE_S + J.REAP_S + 10)
 
 
 def _peer_pages() -> dict:
@@ -1276,7 +1269,7 @@ def watch_once(now: float | None = None) -> list:
 
 
 def job_state(job: str) -> dict:
-    """JOB_PATH: whether this page still runs its ranks of `job`."""
+    """JobState: whether this page still runs its ranks of `job`."""
     recs = J.by_job().get(job, [])
     live = sorted(int(r["rank"]) for r in recs if not r.get("stopping")
                   and _alive(job, int(r["pid"])))
@@ -1295,17 +1288,26 @@ def job_state(job: str) -> dict:
 
 
 def _ask_job(page: str, job: str) -> dict:
-    return _post(f"http://{page}{JOB_PATH}", {"job": job},
-                 timeout=PEER_CHECK_S)
+    return transport.send(page, "JobState", {"job": job})
+
+
+def _record_of(nid: str):
+    """This page's peer record of machine `nid` (an answering one first)."""
+    recs = [p for p in peers_fn() if getattr(p, "id", "") == nid]
+    return sorted(recs, key=lambda p: p.state != "answering")[0] \
+        if recs else None
 
 
 def peer_verdict(job: str, recs: list, now: float | None = None,
                  ask=None, pages=None, me=None) -> str:
     """"" while every other machine of the job still runs its rank, else
-    why not: its page says the job ended there, or it has been unreachable
-    -- or answering without the rank -- for PEER_GONE_S. A rank blocked in
-    a collective on a peer that vanished never exits and never counts as
-    stalled (it is idle), so this is how its page learns."""
+    why not: its page says the job ended there, it restarted (a new
+    boot_id), or it has been unreachable -- or answering without the rank --
+    for PEER_GONE_S. Unreachable is the peer list's own clock
+    (cluster/peers.py: the status GET every peer answers), not a second
+    one. A rank blocked in a collective on a peer that vanished never exits
+    and never counts as stalled (it is idle), so this is how its page
+    learns."""
     now = time.time() if now is None else now
     nodes = next((r.get("nodes") for r in recs if r.get("nodes")), None) \
         or (SPECS.get(job) or {}).get("nodes") or []
@@ -1323,22 +1325,35 @@ def peer_verdict(job: str, recs: list, now: float | None = None,
         name = n.get("name") or nid
         key = (job, nid)
         page = pages.get(nid)
-        why = ""
+        rec = _record_of(nid)
+        seen = float(getattr(rec, "last_seen", 0) or 0)
+        boot = getattr(rec, "boot_id", "") or ""
+        why, heard = "", 0.0
         try:
             if not page:
                 raise ConnectionError("not a peer this page knows")
             doc = ask(page, job)
             if doc.get("ended"):
                 return f"{name} stopped the job: {doc['ended']}"[:300]
-            if doc.get("ranks_here") or doc.get("prepared"):
+            held = bool(doc.get("ranks_here") or doc.get("prepared"))
+            if boot and _PEER_BOOT.get(key, boot) != boot:
+                # the process that held the rank is not the one answering:
+                # it restarted, and its ranks went with it
+                return (f"{name} restarted (a new knurlogic process); "
+                        f"its rank of the job is gone")
+            if held:
                 _PEER_OK[key] = now
+                if boot:
+                    _PEER_BOOT.setdefault(key, boot)
                 continue
             why = f"{name} no longer runs its rank of the job"
         except (*NET_ERRORS, AttributeError) as e:
             why = (f"{name}'s page has not answered "
                    f"({type(e).__name__})")
+            # the peer list heard it lately though this ask failed
+            heard = seen
         # the clock starts at the last good answer, or at first sight
-        last = _PEER_OK.setdefault(key, now)
+        last = max(_PEER_OK.setdefault(key, now), min(heard, now))
         if now - last >= J.PEER_GONE_S:
             return f"{why} for {now - last:.0f} s; the job cannot run"
     return ""
@@ -1443,41 +1458,6 @@ def job_of_port(port: int) -> str:
 
 # ------------------------------------------------------------ coordinator
 
-def _post(url: str, doc: dict, timeout: float = PEER_S) -> dict:
-    import urllib.error
-    import urllib.request
-    req = urllib.request.Request(url, data=json.dumps(doc).encode(),
-                                 method="POST",
-                                 headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read()
-    except urllib.error.HTTPError as e:
-        raw = e.read()
-    out = json.loads(raw)
-    if not isinstance(out, dict):
-        raise ValueError("not a JSON object")
-    from knurlogic.cluster.peers import clean
-    return clean(out)
-
-
-def _parallel(fn, items: list) -> list:
-    out = [None] * len(items)
-
-    def one(i, x):
-        try:
-            out[i] = fn(x)
-        except Exception as e:  # one peer's failure becomes its result; the others go on
-            out[i] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
-    ts = [threading.Thread(target=one, args=(i, x), daemon=True)
-          for i, x in enumerate(items)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join(PEER_S + 5)
-    return out
-
-
 #: Carried by every launch of RDMA across more than two Macs.
 RDMA_N_NOTE = "RDMA across more than two Macs is experimental and untested"
 
@@ -1501,7 +1481,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     `recovering`: this is auto-recovery's relaunch (cluster/recovery.py),
     carrying its report to rank 0's page; any other launch that starts is
     tracked there for recovery."""
-    post = post or _post
+    post = post or transport.send
     ids = req.get("nodes")
     if not isinstance(ids, list) or len(ids) < 2 or \
             len(set(map(str, ids))) != len(ids):
@@ -1526,6 +1506,11 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             continue
         p = by_id.get(nid)
         if p is None:
+            old = next((q for q in peers if getattr(q, "id", "") == nid
+                        and q.state == "version_mismatch"), None)
+            if old is not None:
+                return {"error": old.problem or f"{old.name or old.host} "
+                        f"speaks another protocol: update knurlogic there"}
             return {"error": f"{nid!r} is not a machine answering this "
                              f"page"}
         c = (p.node or {}).get("cluster")
@@ -1576,7 +1561,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             shape = shape_of(path, world, split)
         else:
             first = next(m for m in infos if m["page"])
-            shape = post(f"http://{first['page']}{SHAPE_PATH}",
+            shape = post(first["page"], "Shape",
                          {"identity": ident, "name": aname, "world": world,
                           "split": split})
             if shape.get("error"):
@@ -1755,21 +1740,19 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                           int(m.get("working_set_bytes") or 0) / GIB, 3),
                       "bandwidth_gbs": m.get("bandwidth_gbs") or 0})
 
-    def ask(path_, r, doc):
+    def ask(kind, r, doc):
         m = order[r]
         if m["page"] is None:
-            fn = {PREPARE_PATH: lambda: prepare(doc)[1],
-                  START_PATH: lambda: start(doc["job"])[1]}[path_]
-            return fn()
-        return post(f"http://{m['page']}{path_}", doc)
+            return peer_step(kind, doc)[1]
+        return post(m["page"], kind, doc)
 
-    got = _parallel(lambda r: ask(PREPARE_PATH, r, specs[r]),
-                    list(range(world)))
+    got = transport.parallel(lambda r: ask("Prepare", r, specs[r]),
+                             list(range(world)))
     if auto_port and isinstance(got[0], dict) and got[0].get("free_port"):
         # rank 0's machine has that port taken: retry once on its suggestion
         port = int(got[0]["free_port"])
         specs[0] = dict(specs[0], port=port)
-        got[0] = ask(PREPARE_PATH, 0, specs[0])
+        got[0] = ask("Prepare", 0, specs[0])
     bad = [(order[r]["name"], g) for r, g in enumerate(got)
            if not (isinstance(g, dict) and g.get("ok"))]
     if bad:
@@ -1783,8 +1766,8 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         g["alert"] for g in got if isinstance(g, dict) and g.get("alert")]
     for a in alerts[1 if alert else 0:]:
         logger.warning("cluster job %s: %s", job, a)
-    got = _parallel(lambda r: ask(START_PATH, r, {"job": job}),
-                    list(range(world)))
+    got = transport.parallel(lambda r: ask("Start", r, {"job": job}),
+                             list(range(world)))
     bad = [(order[r]["name"], g) for r, g in enumerate(got)
            if not (isinstance(g, dict) and g.get("started"))]
     if bad:
@@ -1834,7 +1817,7 @@ def _job_end(job: str, order: list, post):
         if m.get("page") is None:
             continue
         try:
-            doc = post(f"http://{m['page']}{JOB_PATH}", {"job": job})
+            doc = post(m["page"], "JobState", {"job": job})
         except NET_ERRORS:
             continue
         if isinstance(doc, dict) and doc.get("ended"):
@@ -1909,8 +1892,7 @@ def _abandon(job: str, order: list, post, reason: str = "refused") -> None:
             if m["page"] is None:
                 stop(job, reason=reason, propagate=False)
             else:
-                post(f"http://{m['page']}{STOP_PATH}",
-                     {"job": job, "reason": reason})
+                post(m["page"], "Stop", {"job": job, "reason": reason})
         except NET_ERRORS:
             logger.debug("could not stop job %s on %s", job, m.get("page"), exc_info=True)
 
@@ -1920,26 +1902,21 @@ def _abandon(job: str, order: list, post, reason: str = "refused") -> None:
 PEER_MAX = 16 << 10
 
 
-def peer_route(path: str, body: bytes) -> tuple:
-    """A cluster step from another page, which has passed peer_refusal:
+def peer_step(kind: str, req: dict) -> tuple:
+    """A cluster message from another page (it has passed peer_refusal and
+    the envelope check) -- or this page's own step, for its own rank:
     (status, doc)."""
-    if len(body or b"") > PEER_MAX:
-        return 413, {"error": "a cluster request is small"}
-    try:
-        req = json.loads(body or b"")
-    except ValueError:
-        req = None
     if not isinstance(req, dict):
         return 400, {"error": "the body must be a JSON object"}
     from knurlogic.tuning.settings import PATH_KEYS
     if any(k in req for k in PATH_KEYS):
         return 400, {"error": "a cluster job names its model by identity, "
                               "never by a path"}
-    if path == PREPARE_PATH:
+    if kind == "Prepare":
         return prepare(req)
-    if path == START_PATH:
+    if kind == "Start":
         return start(req.get("job"))
-    if path == STOP_PATH:
+    if kind == "Stop":
         if not J.JOB_RX.fullmatch(str(req.get("job") or "")):
             return 400, {"error": "job is a hex nonce"}
         reason = str(req.get("reason") or "stopped by another machine")[:300]
@@ -1947,11 +1924,11 @@ def peer_route(path: str, body: bytes) -> tuple:
         return 200, stop(req["job"], reason=reason, propagate=False,
                          kind=k if k in (*FAILURE_KINDS, "requested")
                          else None)
-    if path == JOB_PATH:
+    if kind == "JobState":
         if not J.JOB_RX.fullmatch(str(req.get("job") or "")):
             return 400, {"error": "job is a hex nonce"}
         return 200, job_state(req["job"])
-    if path == SHAPE_PATH:
+    if kind == "Shape":
         from knurlogic.machine.artifact import AmbiguousIdentity
         try:
             p = _resolve(req.get("identity"), str(req.get("name") or ""))
@@ -1963,4 +1940,4 @@ def peer_route(path: str, body: bytes) -> tuple:
         if not isinstance(w, int) or s not in SPLITS:
             return 400, {"error": "world and split"}
         return 200, shape_of(p, w, s)
-    return 404, {"error": "not a cluster route"}
+    return 404, {"error": "not a cluster message"}

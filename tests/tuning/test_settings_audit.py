@@ -146,10 +146,10 @@ def test_a_cluster_job_runs_the_saved_prompt_chunk(cache, monkeypatch):
     monkeypatch.setattr(C, "BAD_CABLES", {})
     out, got = jaccl_launch(monkeypatch, {
         "cable": "127.0.1.x", "sets": {"KNURLOGIC_PREFILL_CHUNK": "2048"}})
-    spec = next(d for u, d in got if u.endswith(C.PREPARE_PATH))
+    spec = next(d for k, d in got if k == "Prepare")
     assert spec["prefill_chunk"] == 2048, out
     out, got = jaccl_launch(monkeypatch, {"cable": "127.0.1.x"})
-    spec = next(d for u, d in got if u.endswith(C.PREPARE_PATH))
+    spec = next(d for k, d in got if k == "Prepare")
     assert spec["prefill_chunk"] == C.PREFILL_CHUNK
     out, _ = jaccl_launch(monkeypatch, {
         "cable": "127.0.1.x", "sets": {"KNURLOGIC_PREFILL_CHUNK": "9999"}})
@@ -175,18 +175,20 @@ def test_prompt_concurrency_is_not_offered():
 def test_a_peers_settings_go_through_its_page_by_port(monkeypatch):
     monkeypatch.setitem(page_server._PEER_TARGETS, "http://192.0.2.2:8080",
                         {"machine": "M4", "relay": "http://192.0.2.2:8899"})
-    assert page_server.upstream("http://192.0.2.2:8080", "/settings.json") == \
-        "http://192.0.2.2:8899/peer/settings.json?port=8080"
-    # chat still goes by model name
+    # chat goes by model name, through the peer's relay
+
     assert page_server.upstream("http://192.0.2.2:8080", "/v1/models") == \
         "http://192.0.2.2:8899/peer/v1/models"
     sent = []
     monkeypatch.setattr(page_server, "known_target", lambda b: True)
     code, doc = page_server.apply_settings(
         "http://192.0.2.2:8080", b'{"VQ_DECODE_CHUNK": "16"}',
-        post=lambda u, d, t: sent.append(u) or (200, b'{"applied": {}}'))
+        post=lambda page, kind, d: sent.append((page, kind, d))
+        or {"applied": {}})
+    # the knobs go as a Settings message, naming the port on the peer
     assert code == 200 and sent == [
-        "http://192.0.2.2:8899/peer/settings.json?port=8080"]
+        ("192.0.2.2:8899", "Settings",
+         {"port": 8080, "values": {"VQ_DECODE_CHUNK": "16"}})]
 
 
 def test_peer_settings_only_reaches_a_server_this_machine_started(
@@ -199,23 +201,22 @@ def test_peer_settings_only_reaches_a_server_this_machine_started(
     def call(u, d, t):
         calls.append((u, d))
         return 200, b'{"ok": 1}'
-    assert page_server.peer_settings("GET", {"port": ["9"]}, b"", call)[0] == 404
-    assert page_server.peer_settings("GET", {}, b"", call)[0] == 400
-    assert page_server.peer_settings("POST", {"port": ["8080"]}, b"[1]", call)[0] \
-        == 400
-    code, doc = page_server.peer_settings("GET", {"port": ["8080"],
-                                         "tune": ["lean"]}, b"", call)
+    assert page_server.peer_settings("GET", 9, {}, call)[0] == 404
+    assert page_server.peer_settings("GET", None, {}, call)[0] == 400
+    assert page_server.peer_settings("POST", 8080, [1], call)[0] == 400
+    code, doc = page_server.peer_settings("GET", 8080, {"tune": "lean"},
+                                          call)
     assert code == 200 and calls[-1] == (
         "http://127.0.0.1:8080/settings.json?tune=lean", None)
-    code, _ = page_server.peer_settings("POST", {"port": ["8080"]},
-                               b'{"VQ_DECODE_CHUNK": "16"}', call)
+    code, _ = page_server.peer_settings("POST", 8080,
+                                        {"VQ_DECODE_CHUNK": "16"}, call)
     assert code == 200 and calls[-1] == (
         "http://127.0.0.1:8080/settings.json", b'{"VQ_DECODE_CHUNK": "16"}')
 
 
 def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
-    """This page -> the peer page's /peer/settings.json -> the model server
-    on the peer's loopback. Before, /peek and /apply went to the peer's
+    """This page -> a Read / Settings message to the peer page -> the model
+    server on the peer's loopback. Before, /peek and /apply went to the peer's
     loopback address from HERE (502) and the peer's model fell back to a
     preview, every knob a launch setting."""
     from test_ui_peer_relay import _serve, Peers
