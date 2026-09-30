@@ -389,11 +389,6 @@ select:focus{outline:none;border-color:var(--acc)}
 .cs label,.cslab{flex:1;font-size:12px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--faint)}
 .cslab{display:block;margin:12px 0 5px}
-.cs select,.cs input{width:6.5em;flex:none;padding:4px 6px;font-size:13px;
-  text-align:right}
-.cs input:placeholder-shown{border-style:dashed}
-.csh{display:flex;align-items:center;justify-content:space-between;color:var(--fg)}
-.csh .mini{padding:2px 7px;font-size:11.5px}
 /* the two text boxes grow with what is typed and never show a scrollbar
    (an empty one showed a horizontal one that vanished on the first key) */
 #csys,#cq{overflow-x:hidden;scrollbar-width:none}
@@ -804,10 +799,6 @@ body.talk #clog{flex:1;height:auto;min-height:0;max-height:none}
   *,*:before,*:after{transition-duration:.01ms!important;
     animation-duration:.01ms!important;animation-iteration-count:1!important}}
 
-/* Chat Settings: sampling and the system prompt, folded by default. */
-#cadv{margin-top:10px}
-#cadv>summary{cursor:pointer;font-size:12px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--dim);margin:6px 0}
 .vars.flat{display:block}
 .vars.flat .var{padding-left:14px}
 .mrow .mset{display:none;padding:2px 18px 14px calc(34px + 1.75em)}
