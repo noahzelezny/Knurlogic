@@ -30,7 +30,7 @@ def survey(rows) -> str:
             continue
         try:
             st = status(Artifact.load(str(f.path)))
-        except Exception:
+        except (OSError, ValueError, AttributeError):
             continue
         if st.state in groups:
             groups[st.state].append((f, st))

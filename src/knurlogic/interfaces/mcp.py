@@ -17,6 +17,7 @@ Design: docs/design/mcp.md.
 
 from __future__ import annotations
 
+import http.client
 import json
 import sys
 from typing import Any, Dict, List
@@ -269,7 +270,7 @@ def _page_call(path: str, doc=None, timeout: float = PAGE_READ_S):
             raw = r.read()
     except urllib.error.HTTPError as e:
         raw = e.read()
-    except Exception as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:
         raise PageDown(f"the page on this Mac ({url.split(path)[0]}) did "
                        f"not answer: {type(e).__name__}: {e}. Across "
                        f"machines goes through it: start `knurlogic ui` "
@@ -580,7 +581,7 @@ def load(artifact: str = "", port: int = 8080, tune: str = "default",
     try:
         why = launch_refusal(Artifact.load(artifact), dict(sets or {}),
                             tune)
-    except Exception as e:
+    except (OSError, ValueError, AttributeError, KeyError) as e:
         why = f"could not read the artifact: {type(e).__name__}: {e}"
     if why:
         return {"loaded": False, "refused": why,
@@ -948,7 +949,7 @@ def _call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 "available": sorted(TOOLS)}
     try:
         return t["fn"](**(args or {}))
-    except Exception as e:
+    except Exception as e:  # a tool's failure is the tool call's error reply, never a dead server
         return {"error": f"{type(e).__name__}: {e}", "tool": name}
 
 
@@ -966,7 +967,7 @@ def _serve_stdio() -> int:
             continue
         try:
             req = json.loads(line)
-        except Exception:
+        except ValueError:
             continue
         rid, method = req.get("id"), req.get("method")
         params = req.get("params") or {}

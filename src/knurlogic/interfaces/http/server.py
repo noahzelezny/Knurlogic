@@ -20,6 +20,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
+from knurlogic.engine.templates import TEMPLATE_ERRORS
+
 from . import openai as O
 
 logger = logging.getLogger(__name__)
@@ -184,7 +186,7 @@ class App:
                 job, reply = self.submit(dict(body, max_tokens=1,
                                               stream=False), chat=True)
                 reply.complete(reply.first())
-            except Exception as e:
+            except Exception as e:  # a daemon thread; the warm-up is best effort (logged)
                 logger.debug("warming the compacted prompt: %s", e)
         threading.Thread(target=run, daemon=True).start()
 
@@ -205,11 +207,9 @@ class App:
                                          or C.settings()["auto"]) else 0)
         except E.EditError as e:
             raise O.ApiError(400, str(e), param="context_management") from e
-        except Exception as e:
+        except ValueError:
             # a template that cannot render this history is the engine's
             # to refuse, as it would without context management
-            if not isinstance(e, ValueError):
-                raise
             run, out, pending = dict(body), C.Outcome(), None
             run.pop("context_management", None)
 
@@ -411,11 +411,11 @@ class Handler(BaseHTTPRequestHandler):
             fn()
         except (BrokenPipeError, ConnectionResetError):
             pass
-        except Exception as e:
+        except Exception as e:  # HTTP handler top level: any failure is a 500 with a body (logged)
             logger.exception("%s %s failed", self.command, self.path)
             try:
                 self._error(O.ApiError(500, f"{type(e).__name__}: {e}"))
-            except Exception:
+            except OSError:
                 pass    # the client is gone; the failure is logged above
 
     def _get(self):
@@ -428,7 +428,7 @@ class Handler(BaseHTTPRequestHandler):
             from knurlogic.engine.serve import thinking as TH
             try:
                 think = TH.levels(TH.template_of(path)) if path else None
-            except Exception:
+            except (ImportError, OSError, *TEMPLATE_ERRORS):
                 think = None
             return self._json(200, O.models_document(
                 self.app.served(),
@@ -463,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self.app.scheduler.host.path
         try:
             think = TH.levels(TH.template_of(path)) if path else None
-        except Exception:
+        except (ImportError, OSError, *TEMPLATE_ERRORS):
             think = None
         return self._json(200, ollama.show_document(
             self.app.served(), path, context_length(path) if path else 0,
