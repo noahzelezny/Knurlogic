@@ -111,6 +111,10 @@ for the Qwen families (up to 1,048,576 tokens).
 VQ-quantized models (published with their own `model.py`) are supported
 for these families.
 
+## Code
+
+How the package is laid out and who may import whom: [docs/architecture.md](docs/architecture.md).
+
 ## Status
 
 Alpha. Expect rough edges and breaking changes before 1.0; see

@@ -23,4 +23,6 @@ need real weights, a second Mac or a Thunderbolt link skip themselves.
   `src/knurlogic/engine/vq/` are recorded with their source and sha256 in
   the `PROVENANCE.md` beside them. Do not edit them in place; re-vendor
   from upstream and update the record in the same change.
+* The layout and layer rules are in `docs/architecture.md`; a test enforces
+  them. Tests live in a folder that mirrors the package they cover.
 * Design notes for the larger pieces live in `docs/design/`.
