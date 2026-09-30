@@ -102,13 +102,15 @@ function knobHTML(k, c){
       <span class="kedit" data-knob="${esc(k.name)}" data-g="${esc(c.g)}"
         ${c.where!=null?`data-where="${esc(c.where)}"`:''}${c.url?` data-url="${esc(c.url)}"`:''}${c.ukey?` data-ukey="${esc(c.ukey)}"`:''} data-model="${esc(c.model)}"
         data-base="${esc(c.base||'')}" data-label="${esc(c.label)}" data-reach="${reach}" data-cur="${esc(cur)}"
-        data-from="${esc(from)}"${next!=null?` data-next="${esc(next)}"`:''}${
+        data-from="${esc(from)}"${c.launch?' data-launch="1"':''}${next!=null?` data-next="${esc(next)}"`:''}${
         k.max?` data-max="${esc(k.max)}"`:''}${saved!=null?` data-saved="${esc(saved)}"`:''}>${ctl}${
         k.unit?`<span class="ro">${esc(k.unit)}</span>`:''}</span></div>
-    <div class="kstage">${stageNote(reach,cur,st,next,saved)||tuneNote}</div></div>`;
+    <div class="kstage">${stageNote(reach,cur,st,next,saved,c.launch)||tuneNote}</div></div>`;
 }
 // The line under a row: what is staged, else a launch setting already saved.
-function stageNote(reach, cur, to, next, saved){
+// Only for a model that runs: with none, what the row shows is what launches.
+function stageNote(reach, cur, to, next, saved, launch){
+  if(launch) return '';
   if(to!=null) return reach==='live'
     ? `changed · ${esc(cur)} → ${esc(to)}, applied on close`
     : sameVal(to,cur) ? `back to ${esc(cur)} when it launches, saved on close`
