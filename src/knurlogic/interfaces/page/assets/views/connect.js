@@ -4,8 +4,8 @@ import {getJSON} from '../api.js';
 // --- connect ----------------------------------------------------------------
 // The endpoint is worthless until something is pointed at it, and the
 // pointing is a handful of lines nobody remembers. One way in at a time, for
-// the model the chat is on (else the first one running). It was empty on the
-// control page: its text came with a model server's settings, which that
+// the model the chat is on (else the first one running). It is empty on the
+// control page: its text comes with a model server's settings, which that
 // page never has.
 let CONNDOC=null, CONNSEL='openai';
 // Claude Code names a model per tier and takes one base URL: this page's,
