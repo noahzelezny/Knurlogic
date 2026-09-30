@@ -513,6 +513,8 @@ function trackLaunch(m, ns, pn, j, t0){
     node:pn?pn.id:'', cluster:ns.length>1, phase:'starting', samples:[]};
   if(j.error||j.refused){ L.phase='failed';
     L.why=j.error||('not loaded: '+j.refused+(j.note?' -- '+j.note:'')) }
+  // said once and kept: a local copy that differs from the shared one
+  if(j.alerts&&j.alerts.length) L.alert=j.alerts.join(' · ');
   LAUNCHES.unshift(L); if(LAUNCHES.length>4) LAUNCHES.length=4;
   renderLaunches();
 }
@@ -577,6 +579,7 @@ function renderLaunches(){
       ${busy&&pct!=null?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}
       ${L.per&&L.per.length&&busy?`<div>${L.per.map(p=>esc(p.machine+': '+p.phase)).join(' · ')}</div>`:''}
       ${L.phase==='ready'?'<div>ready: pick it in the chat bar\'s Model:</div>':''}
+      ${L.alert?`<div class="why">${esc(L.alert)}</div>`:''}
       ${L.why?`<div class="why">${esc(L.why)}</div>`:''}
     </div>`}).join('');
   el.querySelectorAll('[data-lx]').forEach(b=>b.onclick=()=>{
