@@ -52,7 +52,7 @@ def registry() -> dict:
     hand-edited or half-written entry is skipped, not a KeyError later."""
     try:
         raw = json.loads(registry_path().read_text())
-    except Exception:
+    except (OSError, ValueError):
         return {}
     out = {}
     for k, v in (raw.items() if isinstance(raw, dict) else ()):
@@ -77,7 +77,7 @@ def is_our_server(pid: int) -> bool:
         out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
                              capture_output=True, text=True,
                              timeout=5).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return False
     return "knurlogic" in out and "serve" in out.split()
 
@@ -104,7 +104,7 @@ def listening_serves() -> dict:
     try:
         ps = subprocess.run(["ps", "-axo", "pid=,command="],
                             capture_output=True, text=True, timeout=5).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return {}
     pids = []
     for line in ps.splitlines():
@@ -119,7 +119,7 @@ def listening_serves() -> dict:
                               "-p", ",".join(pids), "-Fpn"],
                              capture_output=True, text=True,
                              timeout=5).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return {}
     found, pid = {}, 0
     for line in out.splitlines():

@@ -44,7 +44,7 @@ def _cpu_pct():
         if rc != 0:
             return None
         now = tuple(ticks)
-    except Exception:
+    except (OSError, AttributeError, ValueError, ctypes.ArgumentError):
         return None
     prev, _last_ticks = _last_ticks, now
     if prev is None:
@@ -63,7 +63,7 @@ def _gpu():
         out = subprocess.run(["ioreg", "-rw0", "-c", "AGXAccelerator"],
                              capture_output=True, text=True,
                              timeout=2).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return None, None
     u, m = _GPU.search(out), _GPU_MEM.search(out)
     return (int(u.group(1)) if u else None, int(m.group(1)) if m else None)
@@ -80,7 +80,7 @@ def _swap():
                              timeout=2).stdout
         m = re.search(r"used\s*=\s*([\d.]+)([KMG])", out)
         return int(float(m.group(1)) * _UNITS[m.group(2)]) if m else None
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
         return None
 
 
@@ -92,7 +92,7 @@ def _vm_pressure():
                              capture_output=True, text=True,
                              timeout=2).stdout
         return int(out.strip())
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return None
 
 
@@ -132,7 +132,7 @@ def _thermal():
         state = send(info, objc.sel_registerName(b"thermalState"))
         state = int(state or 0)
         return THERMAL[state] if 0 <= state < len(THERMAL) else None
-    except Exception:
+    except (OSError, AttributeError, ValueError, ctypes.ArgumentError):
         return None
 
 
@@ -213,7 +213,7 @@ def _temp_c():
             if 0 < t < 150 and (best is None or t > best):
                 best = t
         return round(best, 1) if best is not None else None
-    except Exception:
+    except (OSError, AttributeError, ValueError, ctypes.ArgumentError, KeyError):
         return None
 
 
