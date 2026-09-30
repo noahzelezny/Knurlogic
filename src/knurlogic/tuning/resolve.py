@@ -260,7 +260,7 @@ def prefill_chunk_by_room(artifact: Artifact, headroom, working_set_bytes: int,
 def resolve(artifact: Artifact, budget, profile: str | None = None,
             tune: str = "balanced", store_bytes: int | None = None,
             holds_bytes: int | None = None, kv_bits=None,
-            long_context=None):
+            long_context=None, decode_scale: float | None = None):
     """Resolve every knob for this artifact against a budget.
 
     `budget` is either a byte count -- one box, and the return is a
@@ -298,7 +298,8 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
             else int(holds_bytes)
         return _resolve_one(artifact, int(budget), holds,
                             profile, tune, store_bytes=store_bytes,
-                            kv_bits=kv_bits, long_context=long_context)
+                            kv_bits=kv_bits, long_context=long_context,
+                            decode_scale=decode_scale)
     return resolve_cluster(artifact, budget, profile, tune,
                            store_bytes=store_bytes)
 
@@ -587,7 +588,8 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
                  holds_bytes: int, profile: str | None,
                  tune: str = "balanced", store_bytes: int | None = None,
                  vision: bool = True, kv_bits=None,
-                 long_context=None) -> Resolution:
+                 long_context=None, decode_scale: float | None = None
+                 ) -> Resolution:
     """One box. `holds_bytes` is what this box holds of the artifact, which
     is the whole thing unless something sharded it. A vision rung also
     holds its tower, its image store and its image KV (`vision_budget`),
@@ -627,7 +629,8 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     chunk_from_headroom = chunk
 
     t = S.TUNE_PROFILES[tune]
-    scale = t.get("decode_chunk_scale", 1.0)
+    scale = (t.get("decode_chunk_scale", 1.0) if decode_scale is None
+             else decode_scale)
     if scale != 1.0 and chunk > S.DECODE_CHUNK_MIN:
         chunk = max(S.DECODE_CHUNK_MIN, int(chunk * scale))
         r.notes.append(f"tune={tune}: transient bounded tighter than headroom "

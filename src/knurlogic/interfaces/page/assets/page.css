@@ -328,15 +328,12 @@ select:focus{outline:none;border-color:var(--acc)}
   align-items:flex-start}
 .runs button{padding:2px 8px;font-size:12.5px}
 .allow{margin-top:18px}
-/* the Knurlogic tab's strategy: the five presets as one segmented row, only
-   the chosen one's three plain lines under it */
+/* the Knurlogic tab's presets: the five as one segmented row, each setting
+   they set as its own row under it */
 .strat{margin:6px 0 6px;flex-wrap:wrap}
 .strat button{padding:4px 12px;font-size:13px}
 .strat button small{font-size:11px;margin-left:5px;opacity:.75;font-weight:400}
-.sdet{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:13px;
-  color:var(--dim);border:1px solid var(--line);padding:7px 11px;line-height:1.4}
-.sdet i{font-style:normal;color:var(--faint)}
-.sdet.staged,.gk.staged{border-color:var(--acc)}
+.gk.staged{border-color:var(--acc)}
 .gks{display:flex;flex-direction:column;gap:6px;margin:8px 0 2px}
 .gk{display:flex;align-items:center;gap:10px;border-left:2px solid transparent;padding-left:6px}
 .gk b{font-size:14px;font-weight:400;flex:1}
