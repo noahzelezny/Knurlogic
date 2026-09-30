@@ -93,7 +93,8 @@ def exo_placement(inst, names: dict, local_id=None) -> dict:
     runner_node = {r: n for n, r in (sa.get("nodeToRunner") or {}).items()}
     nodes = []
     for runner, shard in (sa.get("runnerToShard") or {}).items():
-        meta = next(iter(shard.values()), {}) if isinstance(shard, dict) else {}
+        meta: dict = (next(iter(shard.values()), {})
+                      if isinstance(shard, dict) else {})
         card = meta.get("modelCard") or {}
         n_layers = int(card.get("nLayers") or 0)
         lo, hi = meta.get("startLayer"), meta.get("endLayer")
@@ -573,7 +574,8 @@ def memory_map(floor: int = 256 << 20) -> dict:
     does not say so.
     """
     (foot, phys), cmds = _footprints(), _commands()
-    rows, by_runtime = [], {}
+    rows: list = []
+    by_runtime: dict = {}
     for pid, b in foot.items():
         cmd = cmds.get(pid, "")
         rt = _runtime_of(cmd)

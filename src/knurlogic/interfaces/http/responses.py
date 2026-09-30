@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from typing import Any
 
 from .messages import TransportError
 
@@ -30,7 +31,7 @@ def _id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:24]}"
 
 
-def _parts(content, role: str):
+def _parts(content, role: str | None):
     """Responses content (string or parts) -> chat content."""
     if isinstance(content, str) or content is None:
         return content or ""
@@ -69,7 +70,7 @@ def to_chat(req: dict) -> dict:
     if req.get("store") is True:
         raise BadRequest("store is not supported: this server stores no "
                          "responses; send store: false", "store")
-    msgs = []
+    msgs: list = []
     if req.get("instructions"):
         msgs.append({"role": "system", "content": str(req["instructions"])})
     inp = req.get("input")
@@ -136,7 +137,7 @@ def to_chat(req: dict) -> dict:
     return body
 
 
-def _usage(u: dict) -> dict:
+def _usage(u: dict | None) -> dict:
     u = u or {}
     inp, out = int(u.get("prompt_tokens", 0) or 0), \
         int(u.get("completion_tokens", 0) or 0)
@@ -162,7 +163,7 @@ def _reasoning_item(text: str, item_id: str = None) -> dict:
             "summary": [{"type": "summary_text", "text": text}]}
 
 
-def _call_item(name: str, args: str, call_id: str = None,
+def _call_item(name: str | None, args: str, call_id: str = None,
                item_id: str = None, done: bool = True) -> dict:
     return {"id": item_id or _id("fc"), "type": "function_call",
             "status": "completed" if done else "in_progress",
@@ -219,7 +220,9 @@ def stream(lines, req: dict, model: str):
     each is opened, fed deltas, and closed with its `.done` events."""
     rid, created = _id("resp"), int(time.time())
     seq = [0]
-    output, usage, finish = [], {}, None
+    output: list = []
+    usage: dict = {}
+    finish = None
 
     def ev(name, **data):
         data.update(type=name, sequence_number=seq[0])
@@ -230,7 +233,7 @@ def stream(lines, req: dict, model: str):
     yield ev("response.created", response=base)
     yield ev("response.in_progress", response=base)
 
-    cur = None      # {"kind", "id", "text", "index", ...}
+    cur: Any = None      # {"kind", "id", "text", "index", ...}
 
     def open_item(kind, **kw):
         nonlocal cur

@@ -317,10 +317,11 @@ def models_across(page: dict, here: str) -> list:
     """Every resident model in a page's /loaded.json?peers=1, one entry per
     model: a cluster job ONCE (rank 0's row, which carries its `requests`;
     or the job itself while rank 0 has no row yet), never one per rank."""
-    rows = [(here, r) for r in page.get("resident") or []
+    rows: list = [(here, r) for r in page.get("resident") or []
             if isinstance(r, dict)]
-    jobs = [(here, j) for j in page.get("jobs") or [] if isinstance(j, dict)]
-    down = [(here, d) for d in page.get("recovery") or []
+    jobs: list = [(here, j) for j in page.get("jobs") or []
+                  if isinstance(j, dict)]
+    down: list = [(here, d) for d in page.get("recovery") or []
             if isinstance(d, dict)]
     for p in page.get("peers") or []:
         if not isinstance(p, dict):
@@ -346,7 +347,8 @@ def models_across(page: dict, here: str) -> list:
                 live[j["job"]] = dict(j, _on=machine)
     out, seen = [], set()
     for machine, r in rows:
-        c = r.get("cluster") if isinstance(r.get("cluster"), dict) else {}
+        c: Any = (r.get("cluster") if isinstance(r.get("cluster"), dict)
+                  else {})
         job = str(c.get("job") or "")
         # a cluster job's instance is its job id; a single-Mac server's is
         # the 16-hex id its page gave it at launch (loaded.py _instance_of)
@@ -972,7 +974,7 @@ def _serve_stdio() -> int:
         rid, method = req.get("id"), req.get("method")
         params = req.get("params") or {}
         if method == "initialize":
-            result = {"protocolVersion": "2024-11-05",
+            result: dict = {"protocolVersion": "2024-11-05",
                       "capabilities": {"tools": {}},
                       "serverInfo": {"name": SERVER_NAME,
                                      "version": SERVER_VERSION},

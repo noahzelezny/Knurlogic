@@ -35,7 +35,8 @@ def interfaces() -> list[dict]:
             cur = line.split(":", 1)[1].strip()
         elif line.startswith("Device:") and cur:
             ports[line.split(":", 1)[1].strip()] = cur
-    out, iface = [], None
+    out: list = []
+    iface = ""
     for line in _run(["ifconfig"]).splitlines():
         if line and not line[0].isspace():
             iface = line.split(":", 1)[0]

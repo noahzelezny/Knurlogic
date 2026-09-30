@@ -177,7 +177,7 @@ def thinking_keys(spec: dict) -> set:
     return {k for n in spec["native"] for k in n[2]}
 
 
-def probe(tokenizer, template: str, spec: dict) -> dict:
+def probe(tokenizer, template: str | None, spec: dict) -> dict:
     """Render once per native level and once bare, through the tokenizer the
     server uses. {verified, default, renders}. Cached per template."""
     h = hashlib.sha256((template or "").encode()).hexdigest()

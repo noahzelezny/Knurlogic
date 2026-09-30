@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import Callable
 from pathlib import Path
 
 from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
@@ -40,9 +41,9 @@ def _no_status():
 # Unset, this machine is alone: no status snapshot (node_info() answers)
 # and no peers.
 #: () -> (status snapshot, _): the page's own status document
-status_fn = _no_status
+status_fn: Callable = _no_status
 #: () -> [peer record]: the page's PEERS store
-peers_fn = list
+peers_fn: Callable[[], list] = list
 
 GIB = 1 << 30
 PREPARE_PATH = "/peer/cluster/prepare"
@@ -143,7 +144,7 @@ LINK_INIT_RX = re.compile(
 
 # ------------------------------------------------------------ this machine
 
-_INFO = {"doc": None, "at": 0.0}
+_INFO: dict = {"doc": None, "at": 0.0}
 
 
 def _chip() -> str:
@@ -497,7 +498,7 @@ def shape_of(path: str, world: int, split: str) -> dict:
 
 # ------------------------------------------------------------ one page
 
-def _resolve(identity: str, name: str = ""):
+def _resolve(identity: str | None, name: str = ""):
     """The local path for this identity: several copies of it are the same
     weights, and machine/artifact.resolve_identity picks one (the one
     called `name`, else one on this Mac's disk)."""
@@ -742,13 +743,13 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                             f"addresses ({', '.join(sorted(mine)) or 'none'})")
     else:
         rd = info.get("rdma") or {}
-        mine = [d for d in (spec.get("ibv_devices") or [[]] * world)[rank]
-                if d] if isinstance(spec.get("ibv_devices"), list) else []
+        mine_devs = [d for d in (spec.get("ibv_devices") or [[]] * world)[rank]
+                     if d] if isinstance(spec.get("ibv_devices"), list) else []
         if not rd.get("available"):
             refusals.append(f"RDMA on {me}: {rd.get('reason') or 'unknown'}")
-        elif not mine or any(d not in (rd.get("active") or [])
-                             for d in mine):
-            refusals.append(f"{', '.join(mine) or 'no device'} is not an "
+        elif not mine_devs or any(d not in (rd.get("active") or [])
+                                  for d in mine_devs):
+            refusals.append(f"{', '.join(mine_devs) or 'no device'} is not an "
                             f"active RDMA device on {me} (active: "
                             f"{', '.join(rd.get('active') or []) or 'none'})")
     reg = registry() if registry else J.registry()
@@ -939,7 +940,7 @@ def _slot_conflict(spec: dict, reg: dict):
     return None
 
 
-def start(job: str, *, spawn=None, wait_s: float | None = None) -> tuple:
+def start(job: str | None, *, spawn=None, wait_s: float | None = None) -> tuple:
     """POST /peer/cluster/start: spawn this page's prepared rank -- once
     every stopped rank on this machine is gone (up to START_WAIT_S), and
     never beside another job's rank still loading."""
@@ -1112,7 +1113,7 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
         # stopped means gone: a rank still exiting keeps its record
         # (phase "stopping"), and the watcher finishes the stop
         if (mine or spec) and not left:
-            any_rec = next(iter(mine.values()), {})
+            any_rec: dict = next(iter(mine.values()), {})
             port = next((int(v["port"]) for v in mine.values()
                          if v.get("port")), None) or (
                 int((spec or {}).get("port") or 0) or None)
@@ -1158,7 +1159,7 @@ def _peer_pages() -> dict:
     """{peer id: page address} from this page's PEERS store (an answering
     record first)."""
     out = {}
-    peers = peers_fn()
+    peers: list = peers_fn()
     for p in sorted(peers, key=lambda p: p.state == "answering"):
         if getattr(p, "id", ""):
             out[p.id] = p.key

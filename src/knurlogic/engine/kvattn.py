@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 #: {on, hits, misses, last_miss}: live counters (state.SERVED["kv_kernel"]
 #: is this same dict)
 STATS: dict = {"on": False, "hits": 0, "misses": 0, "last_miss": None}
-_LOGGED = set()
+_LOGGED: set = set()
 
 
 def reset(on: bool) -> None:
@@ -181,7 +181,7 @@ _CSRC = r"""
     out[(size_t)row * D + d] = static_cast<T>(den > 0.f ? num / den : 0.f);
 """
 
-_K = {}
+_K: dict = {}
 
 
 def _kernel(has_mask: bool, same: bool):
@@ -332,7 +332,7 @@ def patch_model(model) -> int:
     for name in names:
         mod = sys.modules.get(name)
         f = getattr(mod, "scaled_dot_product_attention", None)
-        if f is orig or f is sdpa:
-            mod.scaled_dot_product_attention = sdpa
+        if mod is not None and (f is orig or f is sdpa):
+            mod.scaled_dot_product_attention = sdpa  # type: ignore[attr-defined]  # patching a module's own attribute
             n += 1
     return n

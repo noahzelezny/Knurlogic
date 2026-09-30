@@ -20,6 +20,7 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
 from knurlogic.machine import identity, loaded, status, wired
@@ -28,6 +29,9 @@ from knurlogic.machine.servers import (is_our_server, registry,
 from knurlogic.interfaces.page import documents
 # the launch facts cluster jobs share: tuning/settings owns them
 from knurlogic.tuning.settings import (PATH_KEYS, clean_sets, preset_or)
+
+if TYPE_CHECKING:
+    from knurlogic.cluster.peers import Peers
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +51,7 @@ _MM = {"doc": None, "at": 0.0}
 
 #: The other machines this page knows (cluster/peers.py); None until the
 #: page starts, so importing this module starts nothing.
-PEERS = None
+PEERS: Peers | None = None
 
 
 def _status_fn(_n=0):
@@ -204,7 +208,7 @@ def children() -> list:
             row["last_log_line"] = lines[-1][:200] if lines else ""
             row["bytes_resident"] = pids.get(pid, 0)
             if stalled:
-                row["advice"] = (f"no log output for {round(quiet)}s while "
+                row["advice"] = (f"no log output for {round(quiet or 0)}s while "
                                  f"loading. Stop waiting; read {log}. "
                                  f"unload(port={port}) if it is hung.")
         else:
@@ -483,7 +487,8 @@ def forward_launch(req: dict, post=None) -> dict:
                              "/models.json gives one per artifact"}
     elif act == "unload":
         try:
-            doc = {"action": "unload", "port": int(req.get("port"))}
+            doc = {"action": "unload",
+               "port": int(req.get("port"))}  # type: ignore[arg-type]  # None: TypeError, answered below
         except (TypeError, ValueError):
             return {"error": "unload on another machine names the port"}
     else:
@@ -517,7 +522,7 @@ def cluster_launch(req: dict, serve_port: int) -> dict:
     # tcp|rdma (older callers: ring|jaccl) -> mlx's backend, in one place
     link = launch.backend(req.get("link")) or req.get("link")
     snap, _ = _status_fn()
-    own = next((n for n in snap.get("nodes") or []
+    own: dict = next((n for n in snap.get("nodes") or []
                 if n.get("role") in ("local", "server")), {})
     return launch.launch(
         dict(req, link=link), me=identity.identity(),

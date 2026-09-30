@@ -85,7 +85,7 @@ class Marker:
 
     def __init__(self, job: str, rank: int, probe=None):
         self.path = marker_path(job, rank)
-        self.doc = {"job": job, "rank": int(rank), "pid": os.getpid(),
+        self.doc: dict = {"job": job, "rank": int(rank), "pid": os.getpid(),
                     "phase": "joining", "step": 0, "chunk": 0, "busy": None,
                     "t": time.time(), "since": time.time()}
         self.probe = probe
@@ -121,7 +121,7 @@ class Marker:
             pass
 
     def beat(self) -> None:
-        extra = {}
+        extra: dict = {}
         if self.probe is not None:
             try:
                 extra = self.probe() or {}

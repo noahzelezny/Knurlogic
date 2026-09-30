@@ -211,11 +211,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     world = int(ring.get("world") or 1)
     share = None
     if world > 1:
-        why = _ring_refusals(a, ring, working_set_gib, overrides or {})
-        if why:
+        ring_why = _ring_refusals(a, ring, working_set_gib, overrides or {})
+        if ring_why:
             print(f"REFUSING a {world}-rank {ring.get('split')} split of "
                   f"{a.path.name}:", file=sys.stderr)
-            for w in why:
+            for w in ring_why:
                 print(f"  - {w}", file=sys.stderr)
             return REFUSED_EXIT
         if ring.get("split") == "pipeline":
