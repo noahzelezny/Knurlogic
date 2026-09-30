@@ -14,10 +14,13 @@ local snapshot now matches the Hub's sha.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 TIMEOUT = 5.0
 _SHA = re.compile(r"[0-9a-f]{40}")
@@ -55,7 +58,7 @@ def check(repos, ask=remote_sha) -> None:
     for repo in repos:
         try:
             sha = ask(repo)
-        except Exception:
+        except (OSError, ValueError, ImportError):
             continue
         if sha:
             with _LOCK:
@@ -75,7 +78,9 @@ def start(paths_fn, offline_flag: bool = False, ask=remote_sha):
     def run():
         try:
             repos = sorted({r[0] for r in map(local_ref, paths_fn()) if r})
-        except Exception:
+        except Exception:  # the update check runs once on a daemon thread; any failure means no check
+            logger.debug("update check: could not list local repos",
+                         exc_info=True)
             return
         check(repos, ask)
     t = threading.Thread(target=run, daemon=True, name="hf-update-check")

@@ -150,7 +150,7 @@ def summarize(body: dict, pending: Pending, out: Outcome,
         msg = ((resp.get("choices") or [{}])[0].get("message") or {})
         text = msg.get("content") or ""
         usage = resp.get("usage") or {}
-    except Exception as e:                       # fail soft
+    except Exception as e:                       # fail soft  # the model call fails soft, logged below
         why = f"{type(e).__name__}: {e}"
         logger.warning("compaction summary failed: %s", why)
     summary, found = E.parse_output(text, len(uses))

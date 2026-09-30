@@ -108,7 +108,7 @@ def models_document(serving: str = "", ttl: float = 60.0):
         if _MODELS["rows"] is None or now - _MODELS["at"] > ttl:
             try:
                 _MODELS["rows"] = discover.find()
-            except Exception:
+            except (OSError, ValueError, KeyError, AttributeError):
                 _MODELS["rows"] = []
             _MODELS["at"] = now
         out = []
@@ -151,7 +151,7 @@ def _room(f, ws: int):
     try:
         cfg = json.loads((Path(f.path) / "config.json").read_text())
         return room_for(f.bytes_on_disk, cfg, ws)
-    except Exception:
+    except (OSError, ValueError, KeyError, AttributeError, TypeError):
         return None
 
 
@@ -172,7 +172,7 @@ def _splits(f):
         return None
     try:
         return splits_of(json.loads((Path(f.path) / "config.json").read_text()))
-    except Exception:
+    except (OSError, ValueError, KeyError, AttributeError, TypeError):
         return None
 
 
@@ -198,7 +198,7 @@ def loaded_document(ttl: float = 4.0):
         if doc is None or now - _LOADED["at"] > ttl:
             try:
                 doc = loaded.survey()
-            except Exception as e:
+            except Exception as e:  # the survey is a page document that must still answer; the error is in it
                 doc = {"resident": [], "runtimes": [],
                        "bytes_resident": 0, "error": str(e)}
             # What the SERVED model sees, read fresh every time regardless
@@ -208,7 +208,7 @@ def loaded_document(ttl: float = 4.0):
             try:
                 spec = served_vision()
                 doc["vision"] = spec.to_json() if spec else None
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 doc["vision"] = None
             _LOADED["doc"] = doc
             _LOADED["at"] = now
@@ -236,7 +236,7 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=(),
         try:
             a = artifact_for(path)
             want = resolve_fn(a).env
-        except Exception:
+        except (OSError, ValueError, KeyError, AttributeError, TypeError):
             return {}
         import os
         stuck, applied = {}, {}
@@ -251,7 +251,7 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=(),
     def handler(_q: dict, body=None) -> dict:
         try:
             req = json.loads(body or b"{}")
-        except Exception:
+        except (ValueError, TypeError):
             req = {}
         act, target = req.get("action"), req.get("target") or ""
         where = req.get("where") or ""
@@ -270,7 +270,7 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=(),
                 return unload_fn()
             if act == "ollama-unload":
                 return L.ollama_unload(where, target)
-        except Exception as e:
+        except Exception as e:  # a load action's failure is the page's answer, not a dead handler
             return {"error": f"{type(e).__name__}: {e}"}
         return {"error": f"unknown action {act!r}"}
     return handler
@@ -311,7 +311,7 @@ def machine_settings():
                                 _one(q, "working_set_gib"),
                                 kv_bits=_one(q, "kv_bits"),
                                 long_context=_one(q, "long_context"))
-            except Exception as e:
+            except Exception as e:  # a preview that cannot be built is the page's answer; the error is in it
                 return {"knobs": [], "error": f"{type(e).__name__}: {e}"}
 
         want = q.get("wired_gib")
@@ -375,7 +375,7 @@ def set_allowance(body) -> dict:
     from knurlogic.machine import allowance, wired
     try:
         gib = float(json.loads(body or b"{}").get("gib"))
-    except Exception:
+    except (ValueError, TypeError, AttributeError):
         return {"error": "send {\"gib\": N}; 0 clears the allowance"}
     total = (wired.advise(0).get("total_bytes") or 0) / GIB
     if gib < 0 or (total and gib > total):
@@ -409,7 +409,7 @@ def set_strategy(body) -> dict:
     try:
         name = json.loads(body or b"{}").get("preset")
         strategy.set(name)
-    except Exception as e:
+    except (ValueError, TypeError, AttributeError, OSError) as e:
         return {"error": str(e) if isinstance(e, ValueError)
                 else "send {\"preset\": name}"}
     return {**strategy_doc(), "applied": {"knurlogic strategy":
@@ -692,7 +692,7 @@ def set_knurlogic(body) -> dict:
     try:
         want = json.loads(body or b"{}")
         preferences.set(want)
-    except Exception as e:
+    except (ValueError, TypeError, AttributeError, OSError) as e:
         return {"error": str(e) if isinstance(e, ValueError)
                 else "send {name: value}"}
     return {**knurlogic_doc(), "applied": {

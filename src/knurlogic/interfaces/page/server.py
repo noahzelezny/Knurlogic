@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import argparse
+import http.client
 import json
 import subprocess
 import sys
@@ -66,7 +67,7 @@ def _status_fn(_n=0):
     if _MM["doc"] is None or now - _MM["at"] > 4.0:
         try:
             _MM["doc"] = loaded.memory_map()
-        except Exception:
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, AttributeError):
             _MM["doc"] = None
         _MM["at"] = now
     mm = _MM["doc"]
@@ -95,7 +96,7 @@ def _status_fn(_n=0):
         from knurlogic.cluster import launch
         snaps[0]["cluster"] = launch.node_info(
             (snaps[0].get("memory") or {}).get("working_set_bytes") or 0)
-    except Exception as e:
+    except (OSError, ValueError, AttributeError, KeyError, TypeError) as e:
         snaps[0]["cluster"] = {"error": f"{type(e).__name__}: {e}"}
     snap = status.aggregate(snaps)
     snap["wired"] = wired.advise(0)
@@ -129,7 +130,7 @@ def _artifact_bytes(path: str) -> int:
     try:
         from knurlogic.machine.artifact import Artifact
         return int(Artifact.load(path).bytes_on_disk)
-    except Exception:
+    except (OSError, ValueError, AttributeError):
         return 0
 
 
@@ -138,7 +139,7 @@ def _answers(port: int) -> bool:
     try:
         urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=1.5)
         return True
-    except Exception:
+    except (OSError, http.client.HTTPException):
         return False
 
 
@@ -161,7 +162,7 @@ def children() -> list:
     now = time.time()
     try:
         pids = {r["pid"]: r["bytes"] for r in loaded.memory_map()["processes"]}
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         pids = {}
     out = []
     for port, rec in sorted(registry().items()):
@@ -272,7 +273,7 @@ def _spawn_unlocked(path: str, port: int, tune: str = "default",
             proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT,
                                     env={**os.environ, "PYTHONUNBUFFERED": "1"},
                                     start_new_session=True)
-    except Exception as e:
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
         return {"error": f"{type(e).__name__}: {e}"}
     _CHILDREN[port] = (proc, path)
     reg = registry()
@@ -344,7 +345,7 @@ def _load_fn(serve_port: int):
     def handler(_q: dict, body=None) -> dict:
         try:
             req = json.loads(body or b"{}")
-        except Exception:
+        except ValueError:
             req = {}
         if not isinstance(req, dict):
             req = {}
@@ -395,7 +396,7 @@ def _load_fn(serve_port: int):
                                  "where it was started"}
             if act == "ollama-unload":
                 return loaded.ollama_unload(where, target)
-        except Exception as e:
+        except Exception as e:  # a load action's failure is the page's answer, not a dead handler
             return {"error": f"{type(e).__name__}: {e}"}
         return {"error": f"unknown action {act!r}"}
     return handler
@@ -491,11 +492,11 @@ def forward_launch(req: dict, post=None) -> dict:
     try:
         code, raw = post(f"http://{p.key}{PEER_LOAD_PATH}", doc,
                          {}, PEER_LOAD_S)
-    except Exception as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:
         return {"error": f"{who} did not answer: {type(e).__name__}: {e}"}
     try:
         out = json.loads(raw)
-    except Exception:
+    except (ValueError, TypeError):
         out = None
     if not isinstance(out, dict):
         text = raw.decode(errors="replace")[:500] if isinstance(
@@ -721,7 +722,7 @@ def peer_settings(method: str, q: dict, body: bytes, call=None) -> tuple:
     try:
         code, raw = call(url, data, APPLY_S)
         return code, json.loads(raw)
-    except Exception as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:
         return 502, {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -804,7 +805,7 @@ def machine_apply(where: str, body: bytes, post=None) -> tuple:
     post = post or _post_json
     try:
         code, raw = post(base + PEER_MACHINE, want, {}, APPLY_S)
-    except Exception as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:
         return 502, {"error": f"{base} did not answer: "
                               f"{type(e).__name__}: {e}"}
     if code == 404:
@@ -868,7 +869,7 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
                           "id": getattr(p, "id", ""), "resident": rows,
                           "jobs": js, "loads": doc.get("loads") or []}
-        except Exception as e:
+        except Exception as e:  # peer survey: one peer's failure is its row's error; the others are still listed
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
                           "resident": [],
                           "error": f"{type(e).__name__}: {e}"}
@@ -912,7 +913,7 @@ def with_jobs(doc: dict) -> dict:
     try:
         from knurlogic.cluster import launch
         js = launch.jobs_document()
-    except Exception:
+    except (OSError, ValueError, KeyError, AttributeError, TypeError):
         js = []
     # a port is reused by the next job: an ended job never claims the row
     # of the one now serving there
@@ -1025,7 +1026,7 @@ def _loaded_fn():
         doc = with_jobs(local(q))
         try:
             loads = load_progress(doc)
-        except Exception:
+        except (OSError, ValueError, KeyError, AttributeError, TypeError):
             loads = []
         if loads:
             doc = dict(doc, loads=loads)
@@ -1044,7 +1045,7 @@ def refresh_targets() -> None:
     if PEERS is not None:
         try:
             peer_residency(PEERS)
-        except Exception:
+        except Exception:  # peer survey (logged)
             logger.debug("peer survey failed", exc_info=True)
 
 
@@ -1109,7 +1110,7 @@ def cluster_failure(base: str) -> str:
     try:
         from knurlogic.cluster import launch
         return launch.failure_of_port(urlparse(base).port)
-    except Exception:
+    except (OSError, ValueError, TypeError, AttributeError):
         return ""
 
 
@@ -1143,7 +1144,7 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
     except urllib.error.HTTPError as e:
         up, code = e, e.code
         ctype = e.headers.get("Content-Type", "application/json")
-    except Exception as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:
         why = cluster_failure(base) if base else ""
         if why:
             _send_json(handler, 503, cluster_failed(why))
@@ -1163,7 +1164,7 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
             try:
                 chunk = (up.read1(8192) if hasattr(up, "read1")
                          else up.read(8192))
-            except Exception:
+            except (OSError, http.client.HTTPException):
                 cut = True          # the upstream died mid-answer
                 break
             if not chunk:
@@ -1249,7 +1250,7 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
         code, raw = post(upstream(base, PEER_SETTINGS),
                          json.dumps(want).encode(), APPLY_S)
         return code, json.loads(raw)      # JSON only, never an HTML page
-    except Exception as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:
         return 502, {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -1288,7 +1289,7 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
         if PEERS is not None and now - _PEER_AT[0] > PEER_SURVEY_MAX_AGE_S:
             try:
                 peer_residency(PEERS)
-            except Exception:
+            except Exception:  # peer survey (logged)
                 logger.debug("peer survey failed", exc_info=True)
     found: dict = {}
     docs: dict = {}
@@ -1300,7 +1301,7 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
                 if isinstance(m, dict) and m.get("id"):
                     found.setdefault(str(m["id"]), base)
                     docs.setdefault(str(m["id"]), m)
-        except Exception:
+        except Exception:  # peer survey thread: one peer's silence is logged, the others are still asked
             logger.debug("no model list from %s", base, exc_info=True)
     ts = [threading.Thread(target=one, args=(b,), daemon=True)
           for b in sorted(chat_targets())]
@@ -1337,7 +1338,7 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
     to those servers -- the same allow-list the page's chat uses."""
     try:
         model = json.loads(body or b"{}").get("model")
-    except Exception:
+    except (ValueError, AttributeError):
         model = None
     table = routable(fetch)
     base = table.get(model) if isinstance(model, str) else None
@@ -1382,7 +1383,7 @@ def local_models(fetch=None, docs=None) -> dict:
                     found.setdefault(str(m["id"]), base)
                     if docs is not None:
                         docs.setdefault(str(m["id"]), m)
-        except Exception:
+        except Exception:  # peer survey thread: one server's silence is logged, the others are still asked
             logger.debug("no model list from %s", base, exc_info=True)
     ts = [threading.Thread(target=one, args=(b,), daemon=True)
           for b in bases]
@@ -1501,7 +1502,7 @@ def peek(q: dict, fetch=None) -> tuple:
         body = fetch(url, PEEK_S)
         json.loads(body)          # pass on JSON only, never an HTML page
         return 200, body.decode() if isinstance(body, bytes) else body
-    except Exception as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:
         return 502, json.dumps({"error": f"{type(e).__name__}: {e}"})
 
 
@@ -1546,7 +1547,7 @@ def _start_discovery(me: dict, host: str, port: int, reachable: bool):
             d.if_index = 0
         d.browse()
         DISCOVERY = d.start()
-    except Exception as e:
+    except Exception as e:  # Bonjour is optional; the failure is printed and peers can still be named
         print(f"bonjour unavailable ({type(e).__name__}: {e}); peers can "
               f"still be named with --peer", file=sys.stderr)
 
