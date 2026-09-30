@@ -1,5 +1,5 @@
-"""Build the G5 golden: the Qwen trunks' TEXT path as it was BEFORE P1
-threaded MRoPE through them -- run once, at the parent of P1's first trunk
+"""Build the G5 golden: the Qwen trunks' TEXT path as it was BEFORE MRoPE
+was threaded through them -- run once, at the parent of the first trunk
 edit, in the TEST interpreter (knurlogic's own architectures, no mlx-vlm):
 
     python3 tests/goldens/build_qwen_g5.py
@@ -8,8 +8,8 @@ qwen_g5_text.npz, per family: a fingerprint of the seed-0 weights, a 30-token te
 prompt, the logits of a two-chunk prefill (17 + 13, so the second chunk
 starts at a non-zero cache offset) and of 12 greedy decode steps.
 
-WHY A SNAPSHOT AND NOT "position_ids=None is the old code". The critique
-(issue 4) showed that gate is a tautology when stated about the source; a
+WHY A SNAPSHOT AND NOT "position_ids=None is the old code". That gate
+is a tautology when stated about the source; a
 snapshot of main's numbers is not -- any edit that moves the text path by one
 ulp turns it red. The comparison is exact (same MLX, pinned, same machine
 class); tests/test_vision_qwen.py says what to do if hardware changes that.

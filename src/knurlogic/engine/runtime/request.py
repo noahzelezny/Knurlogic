@@ -1,25 +1,14 @@
 """One request's text, from the executor's token events to what the client
-reads (docs/SERVER.md, build step 2). No model and no mlx here: this is
-where tokens become reasoning, answer and tool calls, where a stop string
-ends the answer, and where the usage numbers are counted.
+reads (docs/design/server.md). No model and no mlx here: this is where
+tokens become reasoning, answer and tool calls, where a stop string ends
+the answer, and where the usage numbers are counted.
 
-  control tokens   think/tool markers and end-of-turn tokens are matched as
-                   TOKEN sequences by the engine's state machine (built by
-                   `control_machine`); their text never reaches the client.
-                   A marker can be several tokens, so the last few tokens'
-                   text is held until no marker can still be completing.
-  reasoning split  a token's state says where its text goes: reasoning,
-                   tool, or the answer.
-  stop strings     the request's `stop` matches the detokenized ANSWER text
-                   -- never reasoning, never a tool call -- across token
-                   boundaries (mlx-lm matched them as token ids, so
-                   `stop: "D"` missed a token " D"). The last
-                   max(len(stop)) - 1 characters are held back, so a stop
-                   never leaks into a streamed delta before it is seen.
-  tool calls       the text between tool markers, parsed by the tokenizer's
-                   own tool parser when the call closes.
-  usage            prompt, completion (every token the engine emitted),
-                   reasoning tokens, and the engine's cache report.
+Control tokens (think/tool markers, end of turn) are matched as TOKEN
+sequences by the engine's state machine and never reach the client. Stop
+strings match the detokenized ANSWER text only, across token boundaries;
+the last max(len(stop)) - 1 characters are held back so a stop never leaks
+into a streamed delta. Tool calls are parsed by the tokenizer's own tool
+parser when the call closes.
 
 The object is fed on the scheduler's thread and read on the HTTP thread
 only through the deltas it returns, so it holds no lock.

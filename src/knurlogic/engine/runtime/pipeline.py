@@ -1,61 +1,19 @@
 """Pipeline split: one model served by N ranks, each holding a contiguous
-run of layers (docs/SERVER.md, "Cluster: pipeline split").
+run of layers (docs/design/server.md, "Cluster: pipeline split").
 
     rank N-1: embed, layers [0, a)       --hidden-->
     rank r:   layers [.., ..)            --hidden-->
     rank 0:   layers [.., L), norm, lm_head -> logits, samples, drafts
 
 Rank 0 holds the LAST layers, so the logits are born on the rank that
-samples and nothing is gathered: mlx-lm's pipeline all_gathers the final
-hidden state to every rank so every rank can compute logits; here the
-other ranks never need them (rank 0's step plan carries every token --
-engine/runtime/plan.py), so a follower's trunk returns zeros of the logits'
-shape and its lm_head never runs (`Silent`).
-
-Written for knurlogic, no exo code. The layer slice keeps the contract of
-mlx-lm's PipelineMixin (start_idx / end_idx / pipeline_layers, which the
-vendored qwen3_5 reads) without calling its `pipeline()`, whose split is
-uniform and whose forward all_gathers; the per-family index fixups follow
-commits in the project's exo fork (engine/runtime/PROVENANCE.md).
-
-Hidden states cross ranks with send / recv, each evaluated where it is
-built (a follower's step finishes its send inside the forward; rank 0's
-receive is waited for inside the forward), so the order of point-to-point
-messages and of the CPU collectives (the plan exchange, B0-B2 below) is
-the program order on every rank. A prompt's prefill chunks are the one
-exception (`overlapped`): a chunk's send runs while the next chunk
-computes, and every send has completed before the prefill's last forward. A receive is made in the RECEIVING rank's
-own activation dtype and a send is cast to its receiver's (the dtypes are
-agreed when the model is split), never the dtype of a placeholder: an
-unloaded embedding is float32, and a float32 receive of bf16 bytes ran a
-whole shard in float32 on the 397B (fork commit 574a7bd7).
-
-MTP on pipeline (the head lives on rank 0, which holds the last layers and
-so the true final hidden state -- and on rank 0 ALONE: a follower never
-loads a head and never runs one). A follower still takes part in every
-verify: its stage runs the drafted token as the second position of the
-2-wide forward, and rolls back and replays as rank 0 says. What a head
-would have decided on a follower is told to it instead (`Coord`), so the
-collective count per step is the same on every rank and never depends on
-a verdict:
-
-    BA  [ok, hit, drafts]        per admission, before its prefill: rank
-                                 0's usable prefix (a drafting row needs
-                                 an entry with an aligned head cache, which
-                                 only rank 0 can see) and whether the row
-                                 drafts (which moves its checkpoints)
-    B1  [drafting, d2 per row]   before the verify forward: whether this
-                                 step drafts (rank 0's timing decides) and
-                                 the drafted tokens the first stage embeds
-    B2  [ok per row, t2 per row] after the verify forward, only when B1
-                                 said drafting: the verdicts that drive
-                                 every rank's rollback, and the tokens that
-                                 commit
-
-and, on the step that admits a row, B0 [t1 per row]: the admitted row's
-first token is sampled inside the admission, after the step's plan was
-sent, and a follower's own sample is noise. A follower's prompt-cache
-entries carry no head cache; BA makes that invisible.
+samples and nothing is gathered; a follower's trunk returns zeros of the
+logits' shape and its lm_head never runs (`Silent`). Written for
+knurlogic; the layer slice keeps mlx-lm's PipelineMixin contract without
+calling its uniform, all-gathering `pipeline()` (PROVENANCE.md). Hidden
+states cross ranks with send / recv in program order; a receive uses the
+RECEIVING rank's activation dtype, never a placeholder's. The MTP head
+lives on rank 0 alone; followers are told drafts and verdicts through
+fixed per-step broadcasts (BA, B0, B1, B2 in `Coord`).
 """
 
 from __future__ import annotations

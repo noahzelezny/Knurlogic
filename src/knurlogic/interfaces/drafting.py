@@ -57,7 +57,7 @@ def survey(rows) -> str:
                  f"them.")
         if vq:
             L.append(f"  {len(vq)} are VQ artifacts, where packing one is "
-                     f"vqlab's job.")
+                     f"the VQ toolchain's job.")
         if len(dec) - len(vq):
             L.append(f"  {len(dec) - len(vq)} are community rungs that "
                      f"inherited the config key; no")

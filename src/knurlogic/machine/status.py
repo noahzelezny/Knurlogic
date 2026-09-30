@@ -1,32 +1,14 @@
 """What is loaded, and what it is actually using.
 
-The complaint this answers: a runtime shows up as one opaque number in
-Activity Monitor -- "python3.13, 45 GB" -- and you cannot tell weights from
-reclaimable cache from a transient peak, or see which architecture actually
-loaded. Every one of those is available; nothing surfaces it.
+A runtime appears as one opaque number in Activity Monitor; this separates
+weights, reclaimable cache and peaks. `ps` RSS and the framework's own
+accounting diverge under pressure, so both are shown; cache memory is
+reclaimable and never counted as usage. `snapshot()` answers for this
+process; `aggregate()` is the cluster shape `/status.json` always serves
+(single-node keys stay at the top level). A rollup sums memory and reports
+how many nodes answered.
 
-Two cautions, both measured and both worth printing next to the numbers:
-
-* `ps` RSS and the framework's own accounting agree on a small resident model
-  (12.09 GiB vs 11.61 on a 27B) and DIVERGE under pressure -- a probe once
-  read 11.7 GiB from `ps` while the process held ~60. Neither number alone is
-  trustworthy, so both are shown.
-* Cache memory is RECLAIMABLE. Counting it as usage is what makes a runtime
-  look like it is eating the machine when it is holding freed buffers it will
-  hand back.
-
-ONE PROCESS OR SEVERAL. `snapshot()` answers for the process it runs in and
-that is all it can honestly do -- a remote node's numbers have to come off
-that node. `aggregate()` is the shape a cluster arrives in: a list of those
-per-node snapshots plus the rollup, and it is what `/status.json` serves even
-for one node, so a client written against one box does not have to be
-rewritten when a second appears. The single-node keys stay at the top level
-for exactly the same reason.
-
-A rollup SUMS memory and does not average it: two nodes each 40 GiB active
-are 80 GiB of weights held, not 40. It also reports how many nodes answered,
-because a sum over nodes that did not reply is a smaller number that looks
-like good news.
+Design: docs/design/memory.md (status).
 """
 
 from __future__ import annotations
@@ -52,7 +34,7 @@ def _rss_bytes() -> int:
 
 def memory() -> dict:
     """Delegated: how memory is accounted is an ENGINE question, and the
-    tripwire test caught this module importing mlx to answer it."""
+    machine/ never imports mlx (a tripwire test checks)."""
     from knurlogic.engine.serve import memory as _m
 
     d = _m()
@@ -70,10 +52,9 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
              memory_fn=None, machine_fn=None, memory_map=None,
              metrics=None) -> dict:
     """One node's answer. `memory_fn` exists so a snapshot can be BUILT from
-    numbers that came off another node (exo reports them for every node in
-    the cluster) rather than only from this process.
+    numbers that came off another node rather than only from this process.
 
-    `machine` says what the box IS -- a Studio, a mini, a laptop. It is
+    `machine` says what the box IS -- a desktop, a mini, a laptop. It is
     reported per node for the same reason memory is: in a cluster the
     interesting fact is that these two are DIFFERENT machines, and a page
     that draws them as identical boxes throws that away."""
@@ -227,7 +208,7 @@ def render_cluster(d: dict) -> str:
     L.append(f"  {'in use on the box' if boxwide else 'weights + live':<16s} "
              f"{m['active_bytes'] / GIB:8.2f} GiB"
              + ("   (everything on that machine, not just this runtime -- "
-                "exo reports the box)" if boxwide else ""))
+                "the box is reported)" if boxwide else ""))
     L.append(f"  cache            {m['cache_bytes'] / GIB:8.2f} GiB   "
              f"(RECLAIMABLE -- not usage)")
     L.append(f"  headroom         {m['headroom_bytes'] / GIB:8.2f} GiB   "

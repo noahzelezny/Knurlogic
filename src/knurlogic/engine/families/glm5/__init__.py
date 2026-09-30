@@ -26,10 +26,10 @@ MANIFEST = {
                                     "kvquant:QuantKVCache"}},
             "prefill_chunk": (2048, "34 deltanet layers hold per-token "
                                     "recurrent intermediates (16.8 MB/layer) "
-                                    "across a chunk; 4096 OOMed both boxes "
-                                    "of a 224 GB pair on the 3.6bpw "
-                                    "(2026-09-01, before the per-chunk eval "
-                                    "fix); 2048 is the post-fix value"),
+                                    "across a chunk; 4096 ran out of memory "
+                                    "on both machines of a 224 GB pair "
+                                    "on the 3.6bpw without per-chunk "
+                                    "eval; 2048 is the measured value"),
             # The head is upstream `layers.45`: a plain-residual DeepSeek-
             # style block (NoPE MLA + DSA indexer + 288-expert MoE + its own
             # shared_head.norm) -- see heads/glm5.py for why it is NOT the
@@ -38,10 +38,10 @@ MANIFEST = {
             # consume. draft_cache is vestigial: the head class provides
             # make_draft_cache() (CacheList(main-KV, indexer-KV)).
             # cache_semantics="reassign": check_snapshot_semantics True on
-            # the loaded 2.7bpw trunk (M4, 2026-09-02).
-            # Measured in vqlab on one box, not on a cluster: acceptance
-            # 0.8516 pooled (12 prompts x 128 tokens, q6 head, 2.7bpw, M4,
-            # 2026-09-02); 1.05x end to end.
+            # the loaded 2.7bpw trunk (an M4 Max).
+            # Measured on one machine (an M4 Max), not on a cluster:
+            # acceptance 0.8516 pooled (12 prompts x 128 tokens, q6 head,
+            # 2.7bpw); 1.05x end to end.
             "head": dict(
                 # the VLM wrapper's config says glm5_next, the bound
                 # LanguageModel's TextConfig says glm5_next_text
@@ -56,10 +56,9 @@ MANIFEST = {
     # GLM-5.3's template: reasoning_effort in {low, high}, anything else is
     # "max" (the default). It has no off KWARG; "off" is the template's own
     # format for a turn without thinking -- the think block already closed
-    # (engine/serve/thinking.CLOSE), at low effort. Measured on 2.7 before
-    # it was offered: 12/12 right, 0 reasoning tokens.
-    # Its three levels are the ladder's low/medium/high under other names
-    # (2026-09-26): "high" is its middle, "max" its top -- and the
+    # (engine/serve/thinking.CLOSE), at low effort. Measured on the 2.7 rung: 12/12 right, 0 reasoning tokens.
+    # Its three levels are the ladder's low/medium/high under other names:
+    # "high" is its middle, "max" its top -- and the
     # default, which is why a harness that asks nothing reasons for 64k.
     # xhigh has no level of its own and goes to max, the highest there is.
     "thinking": {

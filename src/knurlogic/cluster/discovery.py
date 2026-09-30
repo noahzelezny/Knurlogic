@@ -1,30 +1,15 @@
 """Bonjour: every knurlogic page on the network, found without being named.
 
-DNS-SD service type `_knurlogic._tcp`, through the `dns_sd.h` API in
-libSystem (docs/DISCOVERY.md). mDNSResponder -- the daemon every Mac
-already runs -- owns the registration and the multicast; this module only
-asks it. That is why a stdlib mDNS stack would be worse: a second
-responder on port 5353, its own probing and TTLs, and stale records for an
-hour after a crash. Here the registration dies with the process.
+DNS-SD service type `_knurlogic._tcp` through the `dns_sd.h` API in
+libSystem; mDNSResponder owns the registration and the multicast. The page
+(`ui`) registers one advertisement per machine (TXT: id, name, ver, schema,
+role); every page browses, resolving on the interface each result was seen
+on. The ctypes callbacks and DNSServiceRefs are owned by the Discovery
+object while the daemon may call them, and a ref is never freed inside its
+own callback. A failure is "nothing found", never a crash, and `status()`
+says which.
 
-  register   one advertisement per machine, from the PAGE (`ui`), on the
-             interface it is bound to; `serve` does not advertise. TXT:
-             id, name, ver, schema, role.
-  browse     -> resolve -> addrinfo (IPv4), each step on the interface the
-             service was seen on: a Thunderbolt peer seen on Wi-Fi too is
-             two browse results, and resolving without the index can hand
-             back the Wi-Fi address for the Thunderbolt one.
-
-ctypes rules that are load-bearing (review item 5): every CFUNCTYPE and
-DNSServiceRef is owned by the Discovery object for as long as the daemon
-may call it back; a ref is never deallocated from inside its own callback
-(it is queued and freed by the loop); MoreComing and Add/remove are
-honoured.
-
-A failure anywhere is "nothing found", never a crash, and `status()` says
-which: no library, a register error, or a browse that has seen nothing --
-which on Sequoia and later is often the Local Network privacy setting of
-the app that started knurlogic, named in the message.
+Design: docs/design/discovery.md (Bonjour).
 """
 
 from __future__ import annotations

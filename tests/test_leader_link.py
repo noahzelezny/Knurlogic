@@ -73,7 +73,8 @@ def test_bind_all_really_listens_on_each_address():
 
 
 def test_the_model_server_answers_a_request_to_its_link_address():
-    # an agent on the M3 calling http://10.0.0.2:8080 (no Origin)
+    # an agent on the other machine calling http://10.0.0.2:8080
+    # (no Origin)
     assert browser_refusal({"Host": "10.0.0.2:8080"}) is None
 
 

@@ -1,26 +1,13 @@
 """Turn an artifact + a memory budget into runtime settings.
 
-The resolver owns the FINAL value of every knob. It does not write env files
-and it does not hope one wins: vqlab F33 recorded an experiment that set
-RTILE in `exo-env.sh`, which is sourced BEFORE a `ring-env.sh` that assigns
-RTILE=32 unconditionally -- so the run benchmarked 32 twice and was reported
-as "no difference." Anything that resolves settings must hand back one dict
-and be the last word on it.
+The resolver owns the final value of every knob and hands back one dict:
+it never writes env files and hopes one wins. Headroom is an input, not
+something this package detects. `resolve()` takes a byte count (one
+machine, one `Resolution`) or nodes (a `ClusterResolution`, one budget per
+node). When no placement is given, a node's shard is assumed proportional
+to its working set, and that assumption is recorded as a note.
 
-Headroom is an INPUT, not something this package detects. Machine inventory
-belongs to whatever manages the machines.
-
-ONE BOX OR SEVERAL. A cluster resolves the same knobs against a DIFFERENT
-budget per node, because the boxes differ and because each node holds only
-its shard. So `resolve()` takes either a byte count (one box, one
-`Resolution`) or nodes (a `ClusterResolution`, one `Resolution` each). The
-single-box call is the same call it always was; the cluster case was made
-cheap now because threading a second budget through later is invasive.
-
-What a node HOLDS is a placement question and placement belongs to whatever
-does the sharding. When nobody says, this assumes the shard is
-proportional to the node's working set, which is an ASSUMPTION and is
-recorded as a note on every resolution that rides on it, not a measurement.
+Design: docs/design/settings.md (resolve).
 """
 
 from __future__ import annotations
@@ -272,7 +259,7 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
     SHIPPED (`numerics_for`). "v1.5" or "v2" forces that profile's two
     numerics-active flags, and only because someone asked -- it used to
     default to v1.5 and so silently turned off bf16 I/O on the rungs that
-    shipped it on (design D1).
+    shipped it on.
 
     `store_bytes` is a live image store's `budget_bytes()`, when one exists;
     otherwise a vision rung is budgeted at the store's default bound
@@ -495,9 +482,9 @@ def context_room(working_set_bytes: int, weights_bytes: int,
     many tokens of context that is at the model's KV bytes per token --
     shared by every conversation at once, not each one's.
 
-    Why it is said at all: GLM-5.3 2.7bpw "fit" on the 128 GB M4 and left
-    about 6 GiB, and four long agent conversations could never run
-    (2026-09-26). A fit that leaves no room to talk is not much of a fit.
+    Why it is said at all: GLM-5.3 2.7bpw "fits" a 128 GB M4 Max and
+    leaves about 6 GiB, where four long agent conversations cannot run.
+    A fit that leaves no room to talk is not much of a fit.
     `small` is under a fifth of the model's own window, or under 2 GiB."""
     cfg = cfg or {}
     tc = cfg.get("text_config") or cfg
@@ -651,7 +638,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             f"headroom): bounds the dense-expert transient, which is what "
             f"caps context length on a full box")
 
-    cache = float(t.get("VQLAB_CACHE_LIMIT_GB", S.CACHE_LIMIT_GB_DEFAULT))
+    cache = float(t.get("VQ_CACHE_LIMIT_GB", S.CACHE_LIMIT_GB_DEFAULT))
     if cache > S.CACHE_LIMIT_GB_MAX:
         r.notes.append(f"tune={tune} capped: cache limit {cache} -> "
                        f"{S.CACHE_LIMIT_GB_MAX} GiB, above which nothing has "
@@ -668,7 +655,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
                 f"{headroom / GIB:.1f} GiB of headroom to hold it in")
             cache = room
     family, family_why = S.prefill_chunk_for(artifact.model_type)
-    asked = t.get("VQLAB_PREFILL_CHUNK")
+    asked = t.get("KNURLOGIC_PREFILL_CHUNK")
     if asked is not None:
         # safe / stable / lean: narrow whatever the room
         prefill = asked
@@ -728,9 +715,9 @@ def _preset_record(r: Resolution, tune: str, launch: dict) -> None:
     prompt chunk / cache limit its profile names."""
     t = S.TUNE_PROFILES[tune]
     logicals = set(launch)
-    if "VQLAB_PREFILL_CHUNK" in t:
+    if "KNURLOGIC_PREFILL_CHUNK" in t:
         logicals.add("prefill_chunk")
-    if "VQLAB_CACHE_LIMIT_GB" in t:
+    if "VQ_CACHE_LIMIT_GB" in t:
         logicals.add("cache_limit_gb")
     names = {n for lg in logicals for n in S.KNOB_ALIASES.get(lg, (lg,))}
     r.preset = {"name": tune, "why": t.get("why", ""),
@@ -1229,7 +1216,8 @@ def _largest_remainder(n: int, weights: list, floor: list, cap: list) -> list:
             want = {i: left * weights[i] / tot for i in free}
         give = {i: min(int(want[i]), cap[i] - out[i]) for i in free}
         if sum(give.values()) == 0:
-            # remainders: the largest fractional part first, lower rank on a tie
+            # remainders: the largest fractional part first, lower rank on a
+            # tie
             order = sorted(free, key=lambda i: (-(want[i] - int(want[i])), i))
             give = {i: 0 for i in free}
             for i in order[:left]:
@@ -1288,7 +1276,8 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
     reads each layer's weights once per step, so a faster rank should read
     more of them); a mix of known and unknown bandwidths weighs by capacity
     only, and says so. What a rank can hold leaves its step margin
-    (step_margin) free; the reason says what each rank leaves. Every rank holds at least one layer and no rank more
+    (step_margin) free; the reason says what each rank leaves. Every rank holds
+    at least one layer and no rank more
     than fits; rank 0 holds the LAST run of layers, rank N-1 the first.
 
     -> {"layers": [count per rank], "bounds": [(start, end) per rank],
@@ -1337,9 +1326,10 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
         at += counts[r]
     # Cut by the real bytes, not by counting layers: layers are not alike
     # (Qwen3.8 Flash's layer 1 carries a 42 GiB n-gram embedding). Counted,
-    # the M3 Ultra took layers 0..18 -- 63.5 GiB of 110 -- and fit, but with 13 GiB
-    # left for every prompt's KV while the M4 Max kept 70 GiB free, and long
-    # prompts were refused. The count is the fallback, not the rule.
+    # an M3 Ultra rank took layers 0..18 -- 63.5 GiB of 110 -- and fit, but
+    # with 13 GiB left for every prompt's KV while the M4 Max rank kept
+    # 70 GiB free, and long prompts were refused. The count is the fallback,
+    # not the rule.
     alt = _byte_bounds(layer_bytes, weights, cap)
     if alt is not None:
         bounds = alt

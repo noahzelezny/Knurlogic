@@ -1,46 +1,18 @@
 """GLM-5.3 (glm5_next) MTP drafting head.
 
-Vendored from VQLab: src/vqlab/mtp_head_glm5.py @ 9eff3f0 (2026-09-02).
-Copied rather than imported — exo never imports vqlab. Fix bugs THERE
-first, then re-vendor. Deviation from that source: none in the module
-body; only this header and the `vqlab_mtp` metadata key (kept as-is, so
-sidecars built by `vqlab mtp-pack` load here unchanged).
+Vendored from vqlab `src/vqlab/mtp_head_glm5.py` @ 9eff3f0. Copied rather
+than imported; fixes go upstream first, then re-vendor. Deviation from that
+source: none in the module body; only this header and the `vqlab_mtp`
+metadata key (kept as-is, so sidecars built by `vqlab mtp-pack` load here
+unchanged).
 
-Upstream GLM-5.3-Flash ships its MTP head as a PLAIN layer one past the
-trunk (`layers.45` on Flash: eh_proj/enorm/hnorm glue, a NoPE-MLA
-sparse-attention block with the DSA indexer, a 288-expert MoE, and its
-own `shared_head.norm`). Extract it with VQLab's `vqlab mtp-extract`
-(--key-regex '\\.layers\\.45\\.'); this module only LOADS the packed q6
-sidecar (`mtp-head-q6.safetensors`, 889 tensors).
-
-Two structural facts, both read off the graft's key set (2026-09-02),
-that make this head NOT a trunk `Glm5NextDecoderLayer`:
-
-  - NO hyper-connection weights. The trunk's layers are hc layers; the
-    MTP layer is a plain-residual DeepSeek-style block. Instantiating
-    the trunk layer class would leave randomly-initialized hc modules
-    in the path, so this module assembles the block from the attention
-    and MoE sub-modules and runs the residual wiring itself, at
-    (B, T, D) — no hc broadcast, no mean-collapse.
-  - Its OWN final norm (`shared_head.norm`), applied before the
-    trunk's shared lm_head — the DeepSeek MTP convention.
-
-The trunk is NoPE (qk_rope_head_dim=0): there are no rotary positions
-to align, so the head-cache offset question that qwen4_exp's head had
-to solve does not exist here. Cache offsets still gate the attention
-mask, so the committed-alignment scheme (one head row per COMMITTED
-token) is kept for the mask math and for parity with the other heads.
-
-The `model` bound here is the mlx_vlm glm5_next LanguageModel (the
-object with `.model` = Glm5NextModel and `.args.model_type ==
-"glm5_next"`); when holding the full VLM wrapper, pass its
-`.language_model`. `arch` is the module those classes live in
-(mlx_vlm.models.glm5_next.language), per the registry contract.
-
-MEASURED IN VQLAB, SINGLE BOX, NOT HERE: acceptance 0.8516 pooled over
-12 prompts x 128 tokens (q6 head, 2.7bpw trunk, M4, 2026-09-02) and
-1.05x end-to-end WITHOUT the absorbed-MLA shim. Nothing in exo has
-measured either number on a cluster.
+This module only LOADS the packed q6 sidecar (`mtp-head-q6.safetensors`,
+889 tensors). The head is NOT a trunk `Glm5NextDecoderLayer`: it has no
+hyper-connection weights (a plain-residual DeepSeek-style block assembled
+here from the attention and MoE sub-modules) and its OWN final norm
+(`shared_head.norm`) before the trunk's shared lm_head. `model` is the
+mlx_vlm glm5_next LanguageModel (pass a VLM wrapper's `.language_model`).
+Design: docs/design/drafting.md (GLM head).
 """
 from __future__ import annotations
 

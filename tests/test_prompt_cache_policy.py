@@ -1,6 +1,6 @@
 """The prompt cache's size (interfaces/serve.prompt_cache_policy): four
-agents on a hybrid model lost their entries to a server-wide cap of 10
-(2026-09-27). One machine: sized by bytes against its memory. A ring:
+agents on a hybrid model lose their entries to a server-wide cap of 10.
+One machine: sized by bytes against its memory. A ring:
 count-based, scaled with the concurrent agents, and said."""
 from knurlogic.interfaces.serve import (GIB, PROMPT_CACHE_AGENTS_MAX,
                                         PROMPT_CACHE_PER_AGENT,

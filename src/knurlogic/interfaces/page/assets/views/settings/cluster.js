@@ -75,7 +75,9 @@ function factsHTML(n){
 // /allowance.json, a peer's to /machine.json?where=<its page>, which asks
 // that peer's page to set its own (each Mac keeps its allowance itself).
 function allowHTML(a, m, own){
-  const head='<div class="sidelab">knurlogic allowance</div>';
+  const head='<div class="sidelab">knurlogic allowance<i class="info down" tabindex="0">i<span class="bub">'
+    +'The most memory knurlogic may use on this Mac. Models are loaded only if they fit under it; '
+    +'the rest stays free for everything else on the machine.</span></i></div>';
   if(!a) return `<div class="allow">${head}<div class="msg">${own?'not read':
     'not reported: that machine\'s knurlogic predates the allowance'}</div></div>`;
   const none=!a.allowance_gib;

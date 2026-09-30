@@ -1,43 +1,14 @@
 """gemma4 vision (e4b, 26b): the Family (engine/vision/__init__.py) built
 against the vendored tower (`vision.py`) and the trunk's bidirectional
-image-block mask (`../architecture/gemma4_text.py`, P2 edit -- see this
-package's PROVENANCE.md).
+image-block mask (`../architecture/gemma4_text.py`; the edit is recorded
+in ../architecture/PROVENANCE.md).
 
-WHY THE TOWER IS STANDALONE. `load_weights` reads `vision_tower.*` and
-`embed_vision.*` straight off the model directory's safetensors (filtered
-by the index's weight_map when there is one), into a `VisionModel` +
-`MultimodalEmbedder` this module owns -- never through the text model's
-`sanitize`, which drops every non-text key (design critique B3 option (a);
-`docs/design/vision-contracts.md` "load_weights").
-
-WHY encode() PRE-DIVIDES BY embed_scale. mlx-vlm's `gemma4.Model
-.get_input_embeddings` scales ONLY the text embeddings
-(`inputs_embeds = embed_tokens(ids) * embed_scale`) and then scatters the
-(unscaled) projected image features in on top, replacing those rows
-entirely (`gemma4.py:85-170`). knurlogic's `gemma4_text.Gemma4TextModel
-.__call__` scales whatever `input_embeddings` it is handed -- text or
-already-merged -- by `embed_scale` unconditionally
-(`../architecture/gemma4_text.py:527-528`, unedited: P2's edit list does not
-include this scaling line, and touching it would move a P1/text behaviour
-every family shares). So this Family divides the tower's projected features
-by `embed_scale` before they are cached (`encode`, below) and merges them
-into UNSCALED text embeddings (`embed`, below): the trunk's later
-`* embed_scale` then cancels the division on the image rows and applies
-correctly to the text rows, exactly matching the reference's order of
-operations. This is the one deviation from a byte-for-byte port and is
-recorded again at `encode`.
-
-WHY per_layer_inputs USES ZEROED IDS. mlx-vlm's merge computes gemma4's
-per-layer inputs (PLE) from `input_ids` with every multimodal placeholder
-zeroed (`gemma4.py:88-100`) -- an image token must not look up a per-layer
-embedding as if it were vocabulary id 258880. `embed` (below) builds that
-zeroed-id array from the key and calls the trunk's own
-`_get_per_layer_inputs` (unedited) on it, then passes the UNPROJECTED
-result back in as `per_layer_inputs`; `Gemma4TextModel.__call__` already
-takes a precomputed (unprojected) `per_layer_inputs` and only runs
-`_project_per_layer_inputs` on it (`gemma4_text.py:530-534`), so no trunk
-edit was needed for this half of the contract's edit list -- only the mask
-overlay needed one.
+The tower is standalone: `load_weights` reads `vision_tower.*` and
+`embed_vision.*` straight off the safetensors, never through the text
+model's `sanitize`. `encode` pre-divides the projected features by
+`embed_scale`, because the trunk scales whatever embeddings it is handed;
+`embed` builds per-layer inputs from ids with image placeholders zeroed.
+Design: docs/design/vision.md (gemma4).
 """
 from __future__ import annotations
 
@@ -155,7 +126,7 @@ class Gemma4Vision:
             merge=None, min_pixels=vc.patch_size * vc.patch_size,
             max_pixels=vc.default_output_length * vc.pooling_kernel_size**2
                        * vc.patch_size**2,
-            fixed_tokens=None,  # aspect-dependent (critique issue 5)
+            fixed_tokens=None,  # aspect-dependent
             proc_hash=proc_hash({
                 "family": "gemma4", "patch_size": vc.patch_size,
                 "pooling_kernel_size": vc.pooling_kernel_size,
@@ -284,7 +255,7 @@ class Gemma4Vision:
 
     def _mm_mask(self, key_slice: List[Any]) -> Optional[mx.array]:
         """[1, len(key_slice)] int32: -1 outside an image, else the index of
-        the image that token belongs to along the slice (see the P2 note in
+        the image that token belongs to along the slice (see the mask edit in
         `../architecture/PROVENANCE.md`)."""
         spans = image_spans(key_slice)
         if not spans:

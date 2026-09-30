@@ -5,38 +5,14 @@
     knurlogic mcp --list     # print the tool table
 
 Stdio JSON-RPC, stdlib only: it reads the machine and starts servers, and
-imports nothing that could load a model into this process.
+imports nothing that could load a model into this process. Every tool
+answers deterministically, reports what it looked at, and refuses rather
+than gambles: `ready` is a gate `load` checks first; `fit` counts free +
+inactive memory and refuses with the arithmetic; `settings` returns every
+knob with its measurement; `load` always spawns a fresh server; nothing
+deletes or writes an artifact.
 
-WHAT THIS IS FOR. Managing local models by hand means guessing: whether
-memory has settled, whether a model fits, what the knobs are and why they
-are set that way. An agent guesses worse than a person, and faster.
-Every tool here answers deterministically, reports what it looked at, and
-refuses rather than gambles.
-
-DESIGN RULES, each one paid for:
-
-* `ready` is a gate, not a status line. Loading while another load is still
-  moving memory is a common failure. `ready` names every
-  reason it is not, and `load` calls it first and REFUSES rather than trying
-  anyway.
-
-* `fit` refuses to be optimistic. It measures available memory as free +
-  inactive (the file cache macOS hands over on demand), because both other
-  definitions are wrong in opposite directions -- the footprint sum and
-  top's "unused" were 75.9 and 1.6 GiB on a box with 70 available. A model
-  that does not fit is a refusal with the arithmetic attached, not a warning
-  somebody scrolls past.
-
-* `settings` returns every knob WITH its measurement. A number without its
-  provenance is a number an agent will change for no reason. This is the
-  whole point of the tool: it is why a knob is what it is, not just what.
-
-* `load` never switches a model inside a running server. The settings that
-  matter are read at import and compiled into kernel source, so they can
-  only be chosen before the process starts. Loading spawns a fresh one.
-
-* Nothing here deletes an artifact or writes to one. Reading a machine's
-  state and starting a server on it are reversible; removing weights is not.
+Design: docs/design/mcp.md.
 """
 
 from __future__ import annotations
@@ -47,6 +23,26 @@ from typing import Any, Dict, List
 
 SERVER_NAME = "knurlogic"
 SERVER_VERSION = "0"
+#: sent in the initialize result: how to drive these tools, for a model
+#: that has nothing else to read
+INSTRUCTIONS = (
+    "knurlogic manages local MLX models on this Mac and the Macs its page "
+    "sees. The loop: `models` (what is on disk and whether it fits) -> "
+    "`fit` (will this artifact fit now, with the arithmetic) -> "
+    "`settings` (the resolved knobs and why) -> `ready` (is it safe to "
+    "load now) -> `load` -> `state` (poll until the phase is serving) -> "
+    "`unload` when done. Never call `load` while `ready` is false: wait "
+    "and call `ready` again, or unload something; nothing is evicted for "
+    "you. A refusal is an answer with its reason, not an error to retry "
+    "blindly. Never wait on silence: every load has a phase in `state` -- "
+    "loading, warming, serving, stalled (stop waiting and read the log "
+    "shown), or exited (exit code and log tail). Once serving, the model "
+    "answers OpenAI and Anthropic Messages requests at "
+    "http://<machine>:<port>/v1 (the port and leader `load` returned; "
+    "127.0.0.1 for this Mac). `deps` says "
+    "which mlx builds are installed. No tool deletes or modifies model "
+    "files."
+)
 GIB = 1 << 30
 
 
@@ -944,7 +940,8 @@ def _serve_stdio() -> int:
             result = {"protocolVersion": "2024-11-05",
                       "capabilities": {"tools": {}},
                       "serverInfo": {"name": SERVER_NAME,
-                                     "version": SERVER_VERSION}}
+                                     "version": SERVER_VERSION},
+                      "instructions": INSTRUCTIONS}
         elif method == "tools/list":
             result = {"tools": tool_list()}
         elif method == "tools/call":

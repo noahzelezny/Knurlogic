@@ -1,10 +1,11 @@
 """Thinking effort: OpenAI's ladder -> each chat template's own controls.
 
 The detection and the rendering tests read the RELEASED templates from
-~/.exo/models (skipped where a rung is not on this box): the claim is about
-those files, so a synthetic template would test nothing.
+~/.exo/models, or KNURLOGIC_MODELS (skipped where a rung is absent): the
+claim is about those files, so a synthetic template would test nothing.
 """
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -16,7 +17,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from knurlogic.engine.serve import thinking as T  # noqa: E402
 
-MODELS = Path.home() / ".exo" / "models"
+MODELS = Path(os.environ.get("KNURLOGIC_MODELS",
+                           Path.home() / ".exo" / "models"))
 RUNGS = {
     "TheDrainFlorist--Qwen3.8-27B-VQ-3.9bpw": "qwen_effort",
     "TheDrainFlorist--Qwen3.8-Flash-Next-VQ-4.4bpw": "qwen_effort",
@@ -314,7 +316,7 @@ def test_messages_streams_thinking_then_text():
 
 def test_probe_holds_when_requests_race_it():
     """The first requests after a load probe together. A tokenizer that
-    fails when entered twice at once (as the real one did on the M4) must
+    fails when entered twice at once (as a real one does) must
     not turn a verified template into 'not controllable'."""
     import threading
     import time

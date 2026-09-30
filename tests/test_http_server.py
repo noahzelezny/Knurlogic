@@ -435,8 +435,7 @@ def test_models_carries_the_context_window(tmp_path):
 
 def test_the_request_counter_does_not_lose_concurrent_increments(
         monkeypatch):
-    """Found by Qwen3.8-Flash-Next-6bit (cluster shootout 2026-09-27):
-    `self.requests += 1` ran unlocked on every handler thread. The count
+    """`self.requests += 1` ran unlocked on every handler thread. The count
     now goes through one locked step; many threads, no lost update."""
     import threading
     from types import SimpleNamespace

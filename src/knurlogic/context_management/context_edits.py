@@ -1,35 +1,16 @@
 """Context edits over OpenAI-shaped messages: the history surgery behind
 `context_management`, without a model.
 
-WHAT A HARNESS SENDS. Anthropic's `context_management.edits` (checked
-against platform.claude.com, 2026-09-28):
+Accepts Anthropic's `context_management.edits` (clear_thinking_20251015,
+clear_tool_uses_20250919, compact_20260112) on /v1/messages and
+/v1/chat/completions; knurlogic adds `keep: {"type": "messages", "value":
+N}` to the compact edit. Nothing is stored: a compaction goes back to the
+client, which resends it, and `view` folds the history over it the same
+way every turn. Invariants: the leading system message and first user
+message are kept, the last N messages are kept, the kept tail never starts
+on a tool result, and nothing is done unless at least two messages go.
 
-    {"type": "clear_thinking_20251015", "keep": "all" | {"type":
-     "thinking_turns", "value": N}}
-    {"type": "clear_tool_uses_20250919", "trigger": {"type": "input_tokens"
-     | "tool_uses", "value": N}, "keep": {"type": "tool_uses", "value": 3},
-     "clear_at_least": {"type": "input_tokens", "value": N},
-     "exclude_tools": [...], "clear_tool_inputs": false}
-    {"type": "compact_20260112", "trigger": {"type": "input_tokens",
-     "value": 150000}, "pause_after_compaction": false, "instructions": null}
-
-The same object is accepted on /v1/chat/completions. knurlogic adds one
-field to the compact edit, `keep: {"type": "messages", "value": N}` (the
-tail kept verbatim; the operator's default otherwise).
-
-NOTHING IS STORED. A compaction goes back to the client -- a `compaction`
-content block (Anthropic) or `message.compaction` (OpenAI) -- and the
-client resends it with the rest of its history. On input the server folds
-the history over each compaction it finds (`view`): what came before it
-becomes the first user message, the summary and the tail that was kept,
-exactly as the model saw it when the summary was written, so the rewrite
-is the same every turn and its prompt a prefix-cache hit.
-
-THE INVARIANTS (adapted from an earlier agent-loop compactor): the
-leading system message and the first user message (the goal) are kept;
-the last N messages are kept; the kept tail never starts on a tool result
-(it is widened back to the call that asked for it); nothing is done unless
-at least two messages would go.
+Design: docs/design/compaction.md (context edits).
 """
 
 from __future__ import annotations

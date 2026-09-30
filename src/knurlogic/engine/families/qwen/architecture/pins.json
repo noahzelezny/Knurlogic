@@ -2,7 +2,7 @@
   "qwen3_5": {
     "long_context_yarn": "KNURLOGIC_LONG_CONTEXT=yarn (opt-in) added YaRN to the MRoPE image path (apply_mrope takes the layer's YarnRoPE); with it off the rope is unchanged (tests/test_long_context.py); real-rung re-validation pending",
     "sha256": "0fd1d0088163ff2ae6a269d996cead96056024d91cd10b229259fc923cf53f86",
-    "text_path_held_by": "tests/goldens/qwen_g5_text.npz (vision P1 added MRoPE; text path bit-identical on the tiny models; real-rung re-validation pending)",
+    "text_path_held_by": "tests/goldens/qwen_g5_text.npz (the vision edit adds MRoPE; text path bit-identical on the tiny models; real-rung re-validation pending)",
     "text_path_of": "14c4898a03567998e825cb1817942001871e979b9e0cefd3b4383cbbb61eddf3",
     "validated_on_artifact": "TheDrainFlorist--Qwen3.6-35B-A3B-VQ-3.4bpw",
     "validated_with_mlx_lm": "0.32.0"
@@ -15,7 +15,7 @@
   "qwen4_exp": {
     "long_context_yarn": "KNURLOGIC_LONG_CONTEXT=yarn (opt-in) added YaRN to the RotaryEmbedding (yarn_inv_freq); with it off the rope is unchanged (tests/test_long_context.py); real-rung re-validation pending",
     "sha256": "a566da78827c63a98ee426086dcfc9f630856dcd4d63a2c3fdbb27888c222d63",
-    "text_path_held_by": "tests/goldens/qwen_g5_text.npz (vision P1 added MRoPE; text path bit-identical on the tiny models; real-rung re-validation pending)",
+    "text_path_held_by": "tests/goldens/qwen_g5_text.npz (the vision edit adds MRoPE; text path bit-identical on the tiny models; real-rung re-validation pending)",
     "text_path_of": "15df2080b3197db26067e1e4e23c2ce152841a8f0f60ff1fb2b2976e93dbb4b9",
     "validated_on_artifact": "TheDrainFlorist--Qwen3.8-Flash-Next-VQ-2.1bpw",
     "validated_with_mlx_lm": "0.32.0"

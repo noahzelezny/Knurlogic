@@ -1,20 +1,13 @@
 """`knurlogic smoke` -- generate a token, and prove WHERE the code came from.
 
-Every other check in this package reads bytes. None of them runs the model,
-and an artifact can pass all of them and still be unable to emit a token.
+Every other check in this package reads bytes; none runs the model, and an
+artifact can pass all of them and still be unable to emit a token.
 
-The provenance half is not decoration, and the rule is borrowed from a
-project that paid for it: three published artifacts shipped a bundle
-importing a module that existed only in the build venvs. They passed their
-smoke -- because it ran where that module happened to exist. The gate was
-testing the artifact in the AUTHOR's environment, not a downloader's.
-
-Their rule was "a downloader has exactly two things: the artifact directory,
-and a released mlx-lm." Knurlogic changes that premise to THREE -- the
-artifact, a released mlx-lm, and this package -- so the assertion is the same
-shape with one more allowed origin. What stays a failure: an architecture
-resolved from a file hand-grafted into site-packages, because a downloader
-does not have that and never will.
+The provenance half asserts that a downloader has exactly three things --
+the artifact directory, a released mlx-lm, and this package -- and that
+every architecture resolved from one of them. An architecture resolved
+from a file hand-grafted into site-packages is a failure: a smoke that
+passes only in the author's environment tests nothing a downloader has.
 
     knurlogic smoke <artifact> [--max-tokens N] [--pin]
 """
