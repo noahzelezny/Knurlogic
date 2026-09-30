@@ -58,7 +58,7 @@ def check(repos, ask=remote_sha) -> None:
     for repo in repos:
         try:
             sha = ask(repo)
-        except (OSError, ValueError, ImportError):
+        except (OSError, ValueError, ImportError, TypeError):
             continue
         if sha:
             with _LOCK:

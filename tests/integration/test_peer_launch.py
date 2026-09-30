@@ -209,3 +209,16 @@ def test_forward_refuses_a_port_that_is_not_a_number(monkeypatch):
                              "identity": "abc", "port": "x"},
                             post=lambda *a, **k: 1 / 0)
     assert "port" in doc["error"]
+
+
+def test_a_handler_exception_is_a_typed_500_not_a_dropped_connection():
+    import json
+    from knurlogic.cluster import protocol as P
+    from knurlogic.cluster import transport
+    body = json.dumps(P.message(P.Heartbeat(boot_id="b"), sender="me").to_wire()).encode()
+
+    def boom(inner):
+        raise RuntimeError("handler bug")
+    code, doc = transport.handle(body, {"Heartbeat": boom})
+    assert code == 500 and doc["kind"] == "Failure"
+    assert doc["body"]["kind"] == "failure"
