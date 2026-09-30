@@ -18,8 +18,6 @@ from typing import Any, Callable, Iterator, Optional
 from knurlogic.engine.runtime import prompt as P
 from knurlogic.engine.runtime.scheduler import Job
 
-DEFAULT_MAX_TOKENS = 512
-
 
 class ApiError(Exception):
     def __init__(self, status: int, message: str, *, type_: str = None,
@@ -71,7 +69,7 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
                             "times (each is batched)", param="n")
     max_tokens = body.get("max_completion_tokens", body.get("max_tokens"))
     if max_tokens is None:
-        max_tokens = DEFAULT_MAX_TOKENS
+        pass                # the scheduler gives the rest of the window
     elif isinstance(max_tokens, bool) or not isinstance(max_tokens, int) \
             or max_tokens < 0:
         raise ApiError(400, "max_tokens must be a non-negative integer",

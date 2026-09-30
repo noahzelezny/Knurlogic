@@ -127,7 +127,7 @@ class Job:
     """One request as the scheduler takes it."""
     request: P.ChatRequest
     args: P.PromptArgs
-    max_tokens: int = 512
+    max_tokens: Optional[int] = None    # None: the rest of the context window
     sampling: dict = field(default_factory=dict)      # temp, top_p, ..., seed
     penalties: dict = field(default_factory=dict)     # make_logits_processors
     stops: List[str] = field(default_factory=list)
@@ -735,7 +735,12 @@ class Scheduler:
                     f"this prompt is {len(prompt)} tokens; this server's "
                     f"context length is {cap} (KNURLOGIC_CONTEXT_LENGTH), "
                     f"which leaves no room for an answer")
-            if cap:
+            if job.max_tokens is None:
+                from knurlogic.machine.artifact import context_length
+                window = cap or context_length(self.host.path or "")
+                job.max_tokens = max(window - len(prompt), 1) if window \
+                    else 1 << 20
+            elif cap:
                 job.max_tokens = min(job.max_tokens, cap - len(prompt))
             hit = getattr(self.cache, "hit_length", lambda k, t: 0)(
                 self.host.model_key, prompt)

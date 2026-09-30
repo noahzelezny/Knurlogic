@@ -160,7 +160,7 @@ function newChat(modelHint, where, vision){
   CHATS.unshift({id:CCUR, title:'new chat', model:modelHint||SERVEDNAME||'',
                  where:where||'', vision:vision===undefined?null:!!vision,
                  at:Date.now(), updated:Date.now(), msgs:[]});
-  saveChats(); switchTab('chat'); renderChats(); renderClog(); showCtxNote(0);
+  saveChats(); switchTab('chat'); renderChats(); renderClog();
   clearAttachments(); chatGate(); $('cq').focus();
 }
 // Vision for a running model, from /models.json (the server's answer). exo
@@ -239,38 +239,14 @@ function useModel(r){
 window.useModel=useModel;
 window.curChatPub=()=>curChat();
 
-// --- chat settings ----------------------------------------------------------
-// What a request leaves out, the server fills from the model's own
-// generation_config.json and lists in /v1/models as sampling_defaults ({} is
-// greedy, so temperature 0). The fields show those values, and a field still
-// at the model's default sends nothing -- the server applies the same value --
-// while one the person changed is sent.
-const SAMP=[['ctemp','temperature'],['ctopp','top_p'],['ctopk','top_k']];
-let SDEFS;                      // the shown model's defaults per field; undefined unknown
-function sampDef(d,key){
-  // servers name temperature `temp` (mlx-lm's sampler); a model that says
-  // nothing gets nothing sent, never a made-up 0 (that is greedy decoding)
-  const v=d==null ? null : key==='temperature' ? (d.temperature ?? d.temp) : d[key];
-  return v!=null ? String(v) : '';
-}
-function sampling(){
-  const o={};
-  for(const [id,key] of SAMP){
-    const v=$(id).value.trim();
-    if(v==='' || !Number.isFinite(+v)) continue;
-    const d=sampDef(SDEFS,key);
-    if(d!=='' && +d===+v) continue;
-    o[key]=+v;
-  }
-  return o;
-}
-// Per target, once: a model's defaults do not change while it is loaded.
+// --- chat settings ---
+// Per target, once: a model's listing does not change while it is loaded.
 const SDEF={};
 let SDEFAT;
 async function loadSampling(where, model){
   const key=where===null ? null : where+'|'+(model||'');
   SDEFAT=key;
-  if(where===null){ showSampling(null); thinkLevels(undefined); return }
+  if(where===null){ thinkLevels(undefined); return }
   if(!(key in SDEF)){
     // A clicked model is reached through this page's read-only /peek (a
     // browser will not call another port); the page's own model directly.
@@ -286,11 +262,8 @@ async function loadSampling(where, model){
   const m=await SDEF[key];
   if(m===undefined) delete SDEF[key];      // ask again next time
   if(SDEFAT!==key) return;
-  // absent (a server older than sampling_defaults) is "unknown", not
-  // greedy: the server still applies whatever it applies
-  showSampling(m ? m.sampling_defaults : undefined);
   thinkLevels(m ? m.thinking : undefined);
-  maxSteps(m && m.context_length);
+  CTXLEN=m && m.context_length>0 ? m.context_length : 0; showCtx();
 }
 // Thinking: only the levels this model's template has, in its own names
 // (/v1/models `thinking`: native [{level, name}]), plus its default. The
@@ -314,15 +287,8 @@ function thinkLevels(t){
     : "reasoning_effort: knurlogic maps it onto this model's own controls and says what it applied";
 }
 $('ceffort').addEventListener('change',()=>{ EFFWANT=$('ceffort').value });
-// max_tokens caps the ANSWER, and the ceiling is the model's context window
-// (/v1/models context_length, from its config): steps up to it. Unknown
-// keeps the list the page always had.
-const MAXDEF=[256,512,1024,2048,4096,8192,16384,32768,65536];
-const MAXALL=MAXDEF.concat([131072,262144,524288,1048576]);
-let MAXWANT=null;               // what the person picked, kept across models
 let CTXLEN=0;                   // the served model's window; 0 is unknown
-let CTXWANT=0;                  // the person's context limit; 0 is "model max"
-// Shared with showCtx and the dropped-turns note: 1200 -> "1.2k".
+// Used by showCtx: 1200 -> "1.2k".
 const kfmt=v=>v<1000?String(v):v<1e6?(v/1000).toFixed(v<1e5?1:0).replace(/\.0$/,'')+'k'
   :(v/1e6).toFixed(1).replace(/\.0$/,'')+'M';
 // The bench's context line: what the last reply used (its prompt plus its
@@ -337,59 +303,13 @@ function showCtx(){
   el.title=used==null?'no reply yet in this chat'
     :`${used.toLocaleString()} tokens`+(CTXLEN?` of ${CTXLEN.toLocaleString()}`:'');
 }
-// "context: N oldest turns dropped to fit 32k" -- shown after a send that
-// had to trim the wire; cleared (and hidden) otherwise.
-function showCtxNote(dropped, cap){
-  const row=$('cctxnoterow'), el=$('cctxnote'); if(!row||!el) return;
-  if(!dropped){ row.hidden=true; el.textContent=''; return }
-  row.hidden=false;
-  el.textContent=`context: ${dropped} oldest turn${dropped===1?'':'s'} dropped to fit ${kfmt(cap)}`;
-}
-function maxSteps(ctx){
-  CTXLEN=ctx>0?ctx:0; showCtx();
-  const el=$('cmax'), want=+(MAXWANT??el.value)||16384;
-  const steps=ctx>0 ? MAXALL.filter(v=>v<=ctx) : MAXDEF;
-  const lab=v=>v<1024?String(v):v<1048576?(v/1024)+'k':(v/1048576)+'M';
-  el.innerHTML=steps.map(v=>`<option value="${v}">${lab(v)}</option>`).join('');
-  el.value=String(steps.filter(v=>v<=want).pop()||steps[0]);
-  // unknown (a server without context_length) stops at 64k; say why the
-  // list ends there rather than leave it looking like the model's limit
-  el.title=ctx>0?`this model's context window is ${ctx.toLocaleString()} tokens`
-    :'the model\'s context is unknown to this page, so the list stops at 64k';
-}
-$('cmax').addEventListener('change',()=>{ MAXWANT=+$('cmax').value });
-$('cctxlimit').addEventListener('change',()=>{ CTXWANT=+$('cctxlimit').value||0; showCtxNote(0) });
-// A new model's defaults move the fields still at the old model's (or
-// empty) to the new ones; a field the person changed stays as they left it.
-function showSampling(d){
-  for(const [id,key] of SAMP){
-    const el=$(id), was=sampDef(SDEFS,key), now=sampDef(d,key), v=el.value.trim();
-    if(v==='' || (was!=='' && +v===+was)) el.value=now;
-    el.placeholder='';
-    el.title = d===undefined ? 'this server does not say the model\'s defaults; empty sends nothing'
-      : d===null ? 'no model selected' : now!=='' ? `the model's default is ${now}` : '';
-  }
-  SDEFS=d;
-}
-// Every field back to the model's defaults: sampling as it recommends, the
-// max-tokens step the page starts at, no system prompt.
-$('cdefaults').onclick=()=>{
-  for(const [id,key] of SAMP) $(id).value=sampDef(SDEFS,key);
-  MAXWANT=null; $('cmax').value='16384'; maxSteps(CTXLEN); $('csys').value='';
-  CTXWANT=0; $('cctxlimit').value='0'; showCtxNote(0);
-  $('ctemp').dispatchEvent(new Event('change'));      // remembered as left
-};
-// The fields as last left, in this browser only: a convenience, not state.
-// Sampling is not kept: each model's recommended values fill in.
+// The system prompt and thinking level as last left, in this browser only: a
+// convenience, not state.
 (()=>{
-  const ids=['cmax','csys','ceffort','cctxlimit'];
+  const ids=['csys','ceffort'];
   try{
     const v=JSON.parse(localStorage.getItem('kn.copts')||'{}');
     ids.forEach(id=>{ if(v[id]!=null) $(id).value=v[id] });
-    // a step above 64k exists only once a model's context allows it
-    if(v.cmax!=null) MAXWANT=+v.cmax;
-    if(v.cctxlimit!=null) CTXWANT=+v.cctxlimit||0;
-    maxSteps(0);
   }catch(e){}
   const save=()=>{ try{ localStorage.setItem('kn.copts', JSON.stringify(
     Object.fromEntries(ids.map(id=>[id,$(id).value])))) }catch(e){} };
@@ -397,7 +317,7 @@ $('cdefaults').onclick=()=>{
 })();
 window.newChat=newChat;
 function openChat(c){
-  CCUR=c.id; HOME=false; showCtxNote(0); renderChats(); renderClog(); chatGate();
+  CCUR=c.id; HOME=false; renderChats(); renderClog(); chatGate();
 }
 
 // --- served-model / vision gating -----------------------------------------
@@ -831,29 +751,6 @@ async function runTurn(){
   const sys=$('csys').value.trim();
   const turns=[];
   for(const m of c.msgs) turns.push(await toWire(m));
-  // Context limit: the person's pick, capped by the model's own window when
-  // that's known. 0/unknown means the model's whole window -- normally
-  // nothing is dropped, since a chat this bench is used for rarely fills it.
-  const cap = CTXWANT>0 ? (CTXLEN>0?Math.min(CTXWANT,CTXLEN):CTXWANT)
-            : (CTXLEN>0?CTXLEN:0);
-  const tokOf=o=>{
-    const s=typeof o.content==='string'?o.content
-      :(Array.isArray(o.content)?o.content.map(p=>p.text||'').join(''):'');
-    return Math.ceil(s.length/4);
-  };
-  let dropped=0;
-  if(cap>0 && turns.length>1){
-    const lastMet=(c.msgs||[]).map(x=>x.met).filter(Boolean).pop();
-    // The last reply's own prompt_tokens is the truest count of everything
-    // up to (and including) that turn; chars/4 only estimates what's new
-    // since -- the latest, not-yet-answered user turn.
-    let est = lastMet ? lastMet.prompt + tokOf(turns[turns.length-1])
-      : (sys?Math.ceil(sys.length/4):0) + turns.reduce((a,o)=>a+tokOf(o),0);
-    let i=0;
-    while(est>cap && i<turns.length-1){ est-=tokOf(turns[i]); i++; dropped++ }
-    if(i) turns.splice(0,i);
-  }
-  showCtxNote(dropped, cap||CTXLEN);
   const wire=[];
   if(sys) wire.push({role:'system', content:sys});
   wire.push(...turns);
@@ -865,12 +762,11 @@ async function runTurn(){
   ABORTC=new AbortController();
   pf=null;
   // include_usage: the final chunk then carries the token counts and the
-  // server's own timing (usage.knurlogic.timing). Sampling is sent only
-  // when a field was filled in; left out, the server applies the model's
-  // recommendation and says so in usage.knurlogic.sampling.
+  // server's own timing (usage.knurlogic.timing). No sampling fields and no
+  // max_tokens: the server applies the model's own defaults.
   const body={model:c.model||undefined,
     messages:wire, stream:true, stream_options:{include_usage:true},
-    max_tokens:+$('cmax').value||16384, ...sampling()};
+    };
   const effort=$('ceffort').value;
   if(effort) body.reasoning_effort=effort;
   const t0=performance.now();
@@ -977,10 +873,3 @@ loadChats();
 document.addEventListener('DOMContentLoaded', ()=>{});
 switchTab('chat');
 renderClog();
-
-// Chat Settings -> Advanced: collapsed by default, remembered per browser.
-(()=>{ const d=document.getElementById('cadv'); if(!d) return;
-  try{ d.open=localStorage.getItem('kn.chatadv')==='1' }catch(e){}
-  d.addEventListener('toggle', ()=>{
-    try{ localStorage.setItem('kn.chatadv', d.open ? '1' : '0') }catch(e){} });
-})();

@@ -25,60 +25,13 @@
     <aside class="side">
       <button class="newchat" id="newchat">+ New chat</button>
       <div id="chats"></div>
-      <!-- Chat settings stay on screen: this chat is for testing models, and
-           what a reply was asked with is half of reading it. A floating menu
-           hid exactly that. Sampling fields show the model's own
-           recommendation (its generation_config.json); a field left at it
-           sends nothing, so the server applies that same value. -->
       <section id="csettings">
-        <div class="sidelab csh">Chat Settings<button type="button" class="mini"
-          id="cdefaults" title="set every field back to the model's defaults">defaults</button></div>
+        <div class="sidelab">Chat</div>
         <!-- How full the conversation is: the last reply's prompt + answer
-             over the served model's window. Read-only: there is no context
-             knob to turn. -->
-        <div class="cs"><span class="cslab" style="margin:0;flex:1">context<i class="info" tabindex="0">i<span class="bub">knurlogic reserves nothing up front: the model&#39;s whole context window is always available. The limit below is only about what THIS page sends once a chat grows past it.</span></i></span><span class="ro" id="cctx" style="text-transform:none">—</span></div>
-        <div class="cs">
-          <label for="cctxlimit">context limit<i class="info" tabindex="0">i<span class="bub">Caps how much of this chat is sent as it grows. Past the limit, the oldest turns are dropped from the request -- the system prompt and your latest message are always kept. Default is the model&#39;s whole window, so normally nothing is dropped.</span></i></label>
-          <select id="cctxlimit">
-            <option value="0">model max</option>
-            <option value="32768">32k</option>
-            <option value="65536">64k</option>
-            <option value="131072">128k</option>
-            <option value="262144">262k</option>
-          </select>
-        </div>
-        <div class="cs" id="cctxnoterow" hidden><span class="ro" id="cctxnote" style="text-transform:none"></span></div>
-        <div class="cs">
-          <label for="cmax">max tokens<i class="info" tabindex="0">i<span class="bub">The longest the answer may run, thinking included. It caps the reply, not the conversation: the list stops at the model&#39;s context window, which prompt and answer share.</span></i></label>
-          <!-- Steps, not a number field or a slider: nobody types 3187, and
-               a select is one click and as wide as its longest label. -->
-          <select id="cmax">
-            <option value="256">256</option><option value="512">512</option>
-            <option value="1024">1k</option><option value="2048">2k</option>
-            <option value="4096">4k</option><option value="8192">8k</option>
-            <option value="16384" selected>16k</option><option value="32768">32k</option>
-            <option value="65536">64k</option>
-          </select>
-        </div>
-        <details id="cadv">
-          <summary>Advanced</summary>
-          <div class="cs">
-            <label for="ctemp">temperature<i class="info" tabindex="0">i<span class="bub">How adventurous each word choice is. Lower is steadier and more repetitive (0 always takes the likeliest word); higher is more varied and, past about 1, more erratic. Empty uses the model&#39;s recommended value.</span></i></label>
-            <input id="ctemp" type="number" min="0" max="2" step="0.05"
-              placeholder="model">
-          </div>
-          <div class="cs">
-            <label for="ctopp">top p<i class="info" tabindex="0">i<span class="bub">Picks only among the likeliest words that together make up this share of the chance. Lower (0.5) keeps to safe choices; 1 considers everything. Empty uses the model&#39;s recommended value.</span></i></label>
-            <input id="ctopp" type="number" min="0" max="1" step="0.05"
-              placeholder="model">
-          </div>
-          <div class="cs">
-            <label for="ctopk">top k<i class="info" tabindex="0">i<span class="bub">Picks only among this many likeliest words. Lower is narrower and steadier; 0 means no limit. Empty uses the model&#39;s recommended value.</span></i></label>
-            <input id="ctopk" type="number" min="0" step="1" placeholder="model">
-          </div>
-          <label class="cslab" for="csys">system prompt</label>
-          <textarea id="csys" rows="3" placeholder="(none)"></textarea>
-        </details>
+             over the served model's window. -->
+        <div class="cs"><span class="cslab" style="margin:0;flex:1">context</span><span class="ro" id="cctx" style="text-transform:none">—</span></div>
+        <label class="cslab" for="csys">system prompt</label>
+        <textarea id="csys" rows="3" placeholder="(none)"></textarea>
       </section>
     </aside>
     <main>
