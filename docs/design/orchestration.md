@@ -25,10 +25,14 @@ on loopback, Thunderbolt, or a `--peer` address) on every `/peer/*` route.
 | `POST /peer/cluster/stop` | any rank page -> every other page of the job | `{job, reason}` -> stop result | `stop(propagate)`, `_abandon` -> `peer_route` |
 | `POST /peer/cluster/job` | any rank page -> every other page of the job | `{job}` -> `{ranks_here, prepared, stopping, phase, processes, ended}` | `_ask_job` (`peer_verdict`), `_job_end` -> `job_state` |
 | `POST /peer/cluster/shape` | coordinator -> peer | `{identity, name, world, split}` -> model shape | planner -> `shape_of` |
+| `GET /peek` | page -> peer | the page reads a peer's server state through `/peek` (page->peer read, same gate) | `peek` |
 | `POST /peer/machine.json` | page -> peer | `{allowance_gib?, strategy?}` | `/machine.json?where=` -> `peer_machine` |
 | `GET/POST /peer/settings.json?port=N` | page -> peer | a server's live knobs | `peer_settings` |
 | `GET/POST /peer/v1/*` | page -> peer | chat/models relay to a server on the peer's loopback | `peer_relay` |
 | mDNS `_knurlogic` | node <-> LAN | service + TXT (id, port) | `cluster/discovery.py` |
+
+HTTP codes that start/prepare/shape return today (404 unknown or expired job,
+409 refusal/conflict, 400 bad body) are kept as they are.
 
 Rank to page is not HTTP: each rank writes `~/.cache/knurlogic/jobs/<job>/rank<r>.json`
 (phase, step, in-flight, time, every `MARK_S`=2 s); its page reads it
@@ -82,13 +86,18 @@ required fields raise `ProtocolError` (plain message). Size cap stays
 | `Failure` | `job?, node, kind` = `refusal|memory|machine|failure` (+ `requested` for an asked stop), `reason` (plain text, <=300) | `recovery.kind(reason)` regexes; the sender now states the kind, regexes stay only for raw rank log tails |
 | `Shape`, `MachineSet`, `Settings` | as today's bodies | `/peer/cluster/shape`, `/peer/machine.json`, `/peer/settings.json` |
 
-**Versioning rule.** `v = [major, minor]`. A node that receives a higher
-major replies with `Failure(kind=refusal, reason="<name> speaks protocol 2,
+**Versioning rule.** `v = [major, minor]`. A node that receives any
+DIFFERENT major (higher or lower; symmetric) replies with `Failure(kind=refusal, reason="<name> speaks protocol 2,
 this machine 1: update knurlogic on the older one")` and treats the sender as
 `version_mismatch` (no jobs, still listed). Same major, any minor: parse what
 is known, ignore the rest; a new minor may only add optional fields or new
 kinds, and an unknown kind gets a `Failure(refusal)` reply, never a crash.
-Removing or re-typing a field is a major bump. Job-start additionally keeps
+Removing or re-typing a field is a major bump. A 404 or a non-envelope reply from a peer route also means
+`version_mismatch`, with the same "update knurlogic on <machine>" text. Nodes
+of mixed versions list each other but never run a job together (the build check
+at `Prepare` refuses). Addresses are never taken from a message: `from` is
+untrusted and never selects where a reply, stop or heartbeat goes; those go to
+the address we already know for that node. Job-start additionally keeps
 today's "every rank runs the same build" check (`prepare`): protocol
 compatibility is not build compatibility.
 
@@ -108,7 +117,10 @@ compatibility is not build compatibility.
   `answering` (heard within 3 intervals = 6 s), `stale` (6..20 s silent:
   shown, no new jobs placed), `gone` (>20 s, `PEER_GONE_S`: a job that has a
   rank there stops). `version_mismatch` is a fourth, separate state.
-  One clock now serves both `Peers` and `peer_verdict`.
+  Liveness stays on the status GET (no separate route); the status doc gains
+`boot_id` and protocol `v`. A Heartbeat handler must be cheap, and there is
+one in-flight probe per peer (the probe part is deferred with step 5).
+One clock now serves both `Peers` and `peer_verdict`.
 - Membership is a full mesh of heartbeats; at 16 nodes that is 240 tiny
   requests per 2 s, about 120 per second across the cluster, about 8 per node
   per second: fine over HTTP. No leader election, no gossip in this pass.
@@ -142,9 +154,13 @@ compatibility is not build compatibility.
   to be `answering`, relaunches the same order; `refusal` does not retry;
   `memory` after the user changes something). A stop completes when
   processes are gone, not when signalled (today's rule, kept).
-- **Idempotence.** `Prepare`, `Start`, `Stop` for a job id are idempotent:
-  re-sending after a timeout returns the same reply. `Start` for an unprepared
-  or expired (`PREPARED_S`) job is a `Failure(refusal)`.
+- **Idempotence.** `Prepare` is idempotent until `Start`. `Start` answers
+  `Started{rank, pid}` again when this machine's registry already holds a rank
+  of that job (a retry after a timeout); `Start` for an unprepared, expired
+  (`PREPARED_S`) job that is not running here is a `Failure(refusal)`. `Stop`
+  is idempotent (as today). `Stopped` carries `{killed, exiting}`: a peer may
+  answer before its processes are gone. The recovery record lives only on the
+  coordinator, which is why there is no takeover.
 
 ## 5. Transport
 
@@ -160,28 +176,31 @@ and one server-side dispatcher `handle(path, headers, body) -> (status, doc)`
 that calls the typed handler table. `launch._post`, `peers._http`,
 `peer_residency`'s fetch and `forward_launch`'s post all become `send`. Default
 timeouts live in one table (heartbeat 1.5 s, survey 3 s, prepare/start 30 s,
-stop 50 s), not scattered constants. A new `/peer/v1/msg` route accepts any
-envelope; old per-kind paths remain as aliases while step 6 lands.
+stop 50 s), not scattered constants. A new `/peer/v1/msg` route (0.1.1) accepts any
+envelope and is POST-only (GET answers 405); `Load` keeps `peer_launch`'s
+own validation.
 
 ## 6. Migration (each step leaves the suite green)
 
-1. `protocol.py`: dataclasses, envelope, version check, `ProtocolError`. Tests
-   only; nothing calls it. Round-trip test per kind.
-2. `transport.py`: `send`/`send_all`/`handle` over a fake `http` callable.
-   Swap `launch._post` and `_stop_post` to it; bodies unchanged on the wire
-   (envelope optional when absent: a legacy body is wrapped as `v=[1,0]`).
-3. Typed replies: `prepare`, `start`, `stop`, `job_state`, `peer_route`
-   build/return `PrepareReply`, `Started`, `Stopped`, `JobState`. Wire keys
-   for old fields are kept.
-4. `Failure(kind)`: stop reasons carry an explicit kind; `recovery.kind`
-   reads it first, regexes only for raw rank log lines.
-5. `Hello`/`Heartbeat`: add `boot_id`, version, states `answering/stale/gone`
-   in `Peers`; `peer_verdict` reads the same state; status poll stays for the
-   browser.
-6. Move `forward_launch`/`peer_launch`, `peer_residency`, `peer_machine`,
-   `peer_settings` to typed messages on `/peer/v1/msg`; aliases stay one minor.
-7. Remove the pair assumption in `failover`; add 3/4/8-node tests.
-8. Enforce the envelope (legacy bodies refused with the upgrade message).
+Tonight (0.1.0): step 1, step 3-lite (replies built from the typed
+dataclasses, same keys plus `v`, HTTP codes unchanged), step 4, step 7, plus
+`Start` idempotency and `boot_id` / `v` in the status doc. Steps 2, 5, 6 and 8
+are deferred to 0.1.1. There is no prior release, so there is no legacy-body
+wrapping and no alias mechanism.
+
+1. `protocol.py`: dataclasses, envelope, version check, `ProtocolError`.
+   Round-trip test per kind.
+2. (0.1.1) `transport.py`: `send`/`send_all`/`handle`; swap `launch._post`.
+3. Typed replies: `prepare`, `start`, `stop`, `job_state` build `PrepareReply`,
+   `Started`, `Stopped`, `JobState`. Wire keys for old fields are kept.
+4. `Failure(kind)`: failures carry an explicit kind; `recovery.kind` reads it
+   first, regexes only for raw rank log lines.
+5. (0.1.1) `Hello`/`Heartbeat`: states `answering/stale/gone` in `Peers`;
+   `peer_verdict` reads the same state.
+6. (0.1.1) Move `forward_launch`, `peer_residency`, `peer_machine`,
+   `peer_settings` to typed messages on `/peer/v1/msg`.
+7. Remove the pair assumption in `failover`; 3-node test.
+8. (0.1.1) Enforce the envelope.
 
 ## 7. Tests
 
