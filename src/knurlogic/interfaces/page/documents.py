@@ -125,6 +125,7 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 "serving": bool(serving) and (f.name == serving
                                               or str(f.path) == serving),
                 "room": _room(f, ws),
+                "splits": _splits(f),
             })
         return {"models": out, "serving": serving}
     return handler
@@ -139,6 +140,27 @@ def _room(f, ws: int):
     try:
         cfg = json.loads((Path(f.path) / "config.json").read_text())
         return room_for(f.bytes_on_disk, cfg, ws)
+    except Exception:
+        return None
+
+
+def splits_of(cfg: dict, n: int = 2) -> list:
+    """The cluster splits this config can take across `n` machines, in the
+    order the picker offers them: the same refusals a launch runs
+    (tuning/resolve), so the picker never offers one a launch would refuse."""
+    from knurlogic.tuning.resolve import pipeline_refusals, tensor_refusals
+    return [s for s, why in (("tensor", tensor_refusals),
+                             ("pipeline", pipeline_refusals))
+            if not why(cfg, n)]
+
+
+def _splits(f):
+    """`splits_of` a found model; None when its config cannot be read (the
+    picker then offers both and the launch answers)."""
+    if not f.servable:
+        return None
+    try:
+        return splits_of(json.loads((Path(f.path) / "config.json").read_text()))
     except Exception:
         return None
 
