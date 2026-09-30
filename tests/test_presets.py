@@ -42,16 +42,16 @@ def test_fast_takes_the_family_width_and_dynamic_mtp():
     assert e["kv_bits"] is None and e["cross_chip"] == "off"
     assert preset_env(_art(), "fast") == {
         "KNURLOGIC_MTP": "on", "KNURLOGIC_MTP_DYNAMIC": "on",
-        "KNURLOGIC_KV_BITS": "bf16", "KNURLOGIC_CROSS_CHIP": "off"}
+        "KNURLOGIC_KV_BITS": "bf16"}
     assert "KNURLOGIC_KV_BITS" in r.preset["from_preset"]
 
 
-def test_stable_is_512_cross_chip_always_draft_conservative_memory():
+def test_stable_is_512_always_draft_conservative_memory():
     r = resolve(_art(), 96 * GIB, tune="stable")
     b = resolve(_art(), 96 * GIB)
     e, eb = S.engine_settings(r.env), S.engine_settings(b.env)
     assert e["prefill_step_size"] == 512
-    assert e["cross_chip"] == "on"
+    assert e["cross_chip"] == "off"    # per-chip rounding is no preset's
     assert e["cache_limit_gb"] < eb["cache_limit_gb"]
     assert preset_env(_art(), "stable")["KNURLOGIC_MTP_DYNAMIC"] == "off"
     assert preset_env(_art(), "stable")["KNURLOGIC_MTP"] == "on"

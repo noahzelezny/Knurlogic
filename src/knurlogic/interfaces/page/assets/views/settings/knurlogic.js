@@ -1,18 +1,15 @@
 import {$, esc} from '../../format.js';
-import {launchAll} from './knobs.js';
 import {STAGED, stage, stagedVal} from './apply.js';
 import {SEQ, machines, nextSeq} from './index.js';
 import {getJSON, peekURL} from '../../api.js';
 import {SKEEP} from './keep.js';
 
-// --- knurlogic: the strategy and compaction -----------------------------------
-// What a person decides once, for every model and every machine: how
-// knurlogic trades speed against memory headroom and stability (the
-// strategy -- the launch presets, explained -- and identical results across
-// chips), and how a server compacts a long conversation. Memory (the
-// allowance, the wired limit) is each machine's, under Cluster. A base
-// model's own Launch preset (Models) still beats the strategy; it is there
-// for the rare family that needs one.
+// --- knurlogic: presets and compaction ---------------------------------------
+// Knurlogic settings, saved to every machine: the preset every model
+// launches with (and per-chip rounding beside it), and how a server
+// compacts a long conversation. Memory (the allowance, the wired limit) is
+// each machine's, under Cluster. A base model's own Preset (Models) still
+// beats this one.
 let SKN=SKEEP.kn||'strategy';
 function keepKn(){ try{ const k=JSON.parse(sessionStorage.getItem('kl.settings')||'{}');
   k.kn=SKN; sessionStorage.setItem('kl.settings', JSON.stringify(k)) }catch(e){} }
@@ -20,8 +17,8 @@ function showKnurlogic(){
   const L=$('setlist'), ms=machines();
   if(!['strategy','compaction'].includes(SKN)) SKN='strategy';
   const it=(id,name,sub)=>`<div class="fam" data-k="${id}" aria-current="${id===SKN}">${esc(name)}<small>${esc(sub)}</small></div>`;
-  L.innerHTML=it('strategy','Strategy',(window.LOADTUNE||'balanced')+' · every machine')+
-    it('compaction','Compaction','every model · every machine');
+  L.innerHTML=it('strategy','Presets',window.LOADTUNE||'balanced')+
+    it('compaction','Compaction','');
   L.querySelectorAll('[data-k]').forEach(v=>v.onclick=()=>{
     if(v.dataset.k===SKN) return;
     SKN=v.dataset.k; keepKn();
@@ -78,9 +75,6 @@ async function applyEveryGroup(key, g){
     Object.entries(g.knobs).map(([k,v])=>`<div><b>${esc(k)}</b> ${esc(v.to)}</div>`).join('')}${
     res.map(r=>`<div>${esc(r.name)}: ${r.error?`<span style="color:var(--warn)">${esc(r.error)}</span>`:'saved'}</div>`).join('')}</div>`;
 }
-// every machine's saved value on one line
-const machLines=(ms,docs,say)=>`<div class="msg">${ms.map((m,i)=>esc(m.name)+': '+(docs[i].error?
-  '<span style="color:var(--warn)">'+esc(docs[i].error)+'</span>':esc(say(docs[i])))).join(' · ')}</div>`;
 // One knurlogic-wide choice as one row: its name, an (i) with the
 // explanation and trade-off, a native select.
 function gsel(name, title, what, why, values, cur, dflt){
@@ -103,9 +97,9 @@ function wireGks(el){
     x.closest('.gk').classList.toggle('staged', stagedVal(KNG,x.name)!=null);
   });
 }
-// The strategy: one choice for every machine, like a broker asking for risk
-// tolerance, and identical results across chips beside it (a property of
-// the cluster's chips, not of a model).
+// The presets, and per-chip rounding beside them: on unless
+// KNURLOGIC_CROSS_CHIP is on (the same rounding on every chip); a saved
+// auto or off reads as on.
 async function showStrategy(ms){
   const el=$('machbody'), seq=nextSeq();
   el.innerHTML='<div class="msg">reading…</div>';
@@ -114,25 +108,14 @@ async function showStrategy(ms){
   const me=docs[0].strategy||{}, ps=me.presets||[], cur=me.preset||'balanced';
   if(!ps.length){ el.innerHTML=`<div class="msg">${esc(me.error||'this page predates the strategy')}</div>`; return }
   const kn=docs[0].knurlogic||{}, cc=kn.cross_chip;
-  const over=Object.entries(launchAll()).filter(([,v])=>v&&v.KNURLOGIC_PRESET);
   let sel=stagedVal(KNG,'strategy')??cur;
-  el.innerHTML=`<div class="sgrp"><div class="shd">Strategy<span class="ro">every machine ·
-    next launch</span></div>
-    <div class="msg" style="margin-top:0">The launch preset every model starts with:
-    speed against memory headroom and stability.</div>
-    <div class="seg strat" role="group" aria-label="strategy">${ps.map(p=>`<button type="button"
+  el.innerHTML=`<div class="sgrp"><div class="shd">Presets</div>
+    <div class="seg strat" role="group" aria-label="preset">${ps.map(p=>`<button type="button"
       data-p="${esc(p.name)}" aria-pressed="${p.name===sel}">${esc(p.title)}${
       p.name===me.default?'<small>default</small>':''}</button>`).join('')}</div>
     <div class="sdet" id="sdet"></div>
-    ${cc?`<div class="gks">${gsel(cc.name,'Same results on every chip',cc.what,cc.why,
-      [{v:'',t:"the preset's (stable: on, others: off)"},...(cc.values||[]).map(v=>({v,t:v}))],
-      cc.value||'',null)}</div>`:''}
-    <div class="sidelab">machines</div>
-    ${machLines(ms, docs.map(d=>d.strategy.error?d.strategy:{...d.strategy, cc:(d.knurlogic.saved||{}).KNURLOGIC_CROSS_CHIP}),
-      d=>d.preset+(d.cc?' (same results on every chip '+d.cc+')':''))}
-    <div class="msg">${over.length?'Own preset (Models → Launch preset): '+
-      over.map(([b,v])=>esc(b)+' ('+esc(v.KNURLOGIC_PRESET)+')').join(', ')
-      :'No model family overrides it (Models → the model → Launch preset).'}</div>
+    ${cc?`<div class="gks">${gsel(cc.name,'Per-chip rounding',cc.help||cc.what,'',
+      [{v:'',t:'on'},{v:'on',t:'off'}], cc.value==='on'?'on':'',null)}</div>`:''}
   </div>`;
   const det=()=>{
     const p=ps.find(x=>x.name===sel)||ps[0], d=$('sdet');
@@ -159,15 +142,9 @@ async function showCompaction(ms){
   const ks=cp.knobs||[];
   const TITLE={KNURLOGIC_COMPACT_AUTO:'Compact unasked', KNURLOGIC_COMPACT_TRIGGER:'Start at',
     KNURLOGIC_COMPACT_KEEP_TURNS:'Keep recent', KNURLOGIC_COMPACT_TOOL_RESULTS:'Dropped tool results'};
-  el.innerHTML=`<div class="sgrp"><div class="shd">Compaction<span class="ro">every model ·
-    every machine</span><i class="info down" tabindex="0">i<span class="bub">${esc(cp.about||'')}
-    A running server takes a change on its next request.</span></i></div>
-    <div class="gks">${ks.map(k=>gsel(k.name, TITLE[k.name]||k.name, k.what, k.why,
+  el.innerHTML=`<div class="sgrp"><div class="shd">Compaction</div>
+    <div class="gks">${ks.map(k=>gsel(k.name, TITLE[k.name]||k.name, k.help||k.what, k.help?'':k.why,
       k.values.map(v=>({v, t:v+(k.unit?' '+k.unit:'')})), k.value, k.default)).join('')}</div>
-    <div class="sidelab">machines</div>
-    ${machLines(ms, docs.map(d=>d.knurlogic), d=>{
-      const sv=Object.entries(d.saved||{}).filter(([k])=>/^KNURLOGIC_COMPACT_/.test(k));
-      return sv.length ? sv.map(([k,v])=>(TITLE[k]||k)+' '+v).join(' · ') : 'the defaults' })}
   </div>`;
   wireGks(el);
 }
