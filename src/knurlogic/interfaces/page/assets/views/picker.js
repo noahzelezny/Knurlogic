@@ -4,7 +4,7 @@ import {LASTNODES, fitWS, fitWhere, isLocal, selNodes} from '../nodes.js';
 import {launchSets, migrateLaunchSets} from './settings/knobs.js';
 import {getJSON, peekURL} from '../api.js';
 import {tick} from './home.js';
-import {act} from './memory.js';
+import {act, loadResident} from './memory.js';
 
 // --- what else is here ----------------------------------------------------
 // Shown, not offered: a loaded model is loaded, and a page that presents a
@@ -512,7 +512,7 @@ function trackLaunch(m, ns, pn, j, t0){
   // said once and kept: a local copy that differs from the shared one
   if(j.alerts&&j.alerts.length) L.alert=j.alerts.join(' · ');
   LAUNCHES.unshift(L); if(LAUNCHES.length>4) LAUNCHES.length=4;
-  renderLaunches();
+  renderLaunches(); loadResident();
 }
 // every machine's document, named: this page's and each peer's
 function machinesOf(d){
@@ -527,7 +527,11 @@ function followLaunch(L, d){
   const ld=mine.flatMap(x=>(x.doc.loads||[]).filter(e=>
     (!L.port||e.port===L.port) && e.name===nm));
   const e=ld.sort((a,b)=>a.seconds-b.seconds)[0];
-  if(e){ L.bytes=e.bytes; L.total=e.total_bytes; L.last=e.last_log_line;
+  if(L.cluster){
+    const per=mine.map(x=>(x.doc.loads||[]).filter(k=>k.name===nm)
+      .sort((a,b)=>a.seconds-b.seconds)[0]).filter(Boolean);
+    if(per.length){ L.bytes=per.reduce((s,k)=>s+k.bytes,0); L.total=per[0].total_bytes }
+  } else if(e){ L.bytes=e.bytes; L.total=e.total_bytes; L.last=e.last_log_line;
     L.samples.push([Date.now(), e.bytes]); if(L.samples.length>6) L.samples.shift() }
   if(L.cluster && L.job){
     L.per=[];
@@ -560,28 +564,24 @@ function followLaunch(L, d){
 }
 function renderLaunches(){
   const el=$('lmprog'); if(!el) return;
-  el.innerHTML=LAUNCHES.map(L=>{
-    const secs=Math.round((Date.now()-L.t0)/1000);
-    const el2=secs<90?secs+'s':Math.floor(secs/60)+'m '+(secs%60)+'s';
-    const pct=L.total?Math.min(100,Math.round(100*L.bytes/L.total)):null;
-    let rate='';
-    if(L.samples.length>1){ const [a,b]=[L.samples[0],L.samples[L.samples.length-1]];
-      const r=(b[1]-a[1])/((b[0]-a[0])/1000); if(r>0) rate=` · ${(r/1e9).toFixed(2)} GB/s` }
-    const busy=L.phase!=='ready'&&L.phase!=='failed';
-    return `<div class="lp ${L.phase==='ready'?'ready':L.phase==='failed'?'failed':''}">
-      <div class="lph"><span class="ph">${esc(L.phase)}</span><b title="${esc(L.name)}">${esc(String(L.name).split("--").pop())}</b>
+  for(let i=LAUNCHES.length-1;i>=0;i--)
+    if(LAUNCHES[i].phase==='ready') LAUNCHES.splice(i,1);
+  el.innerHTML=LAUNCHES.filter(L=>L.phase==='failed').map(L=>
+    `<div class="lp failed">
+      <div class="lph"><span class="ph">failed</span><b title="${esc(L.name)}">${esc(String(L.name).split("--").pop())}</b>
         <button class="mini x" data-lx="${L.id}" title="dismiss">✕</button></div>
-      <div>on ${esc(L.machines.join(' + '))} · ${el2}${busy&&L.total?` · ${gb(L.bytes)} of ${gb(L.total)}`:''}${busy?rate:''}</div>
-      ${busy&&pct!=null?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}
-      ${L.per&&L.per.length&&busy?`<div>${L.per.map(p=>esc(p.machine+': '+p.phase)).join(' · ')}</div>`:''}
-      ${L.phase==='ready'?'<div>ready: pick it in the chat bar\'s Model:</div>':''}
+      <div>on ${esc(L.machines.join(' + '))}</div>
       ${L.alert?`<div class="why">${esc(L.alert)}</div>`:''}
       ${L.why?`<div class="why">${esc(L.why)}</div>`:''}
-    </div>`}).join('');
+    </div>`).join('');
   el.querySelectorAll('[data-lx]').forEach(b=>b.onclick=()=>{
     const i=LAUNCHES.findIndex(L=>L.id===+b.dataset.lx);
     if(i>=0) LAUNCHES.splice(i,1); renderLaunches();
   });
+}
+// the launches still loading, as rows for the INSTANCES card
+function loadingLaunches(){
+  return LAUNCHES.filter(L=>L.phase!=='ready'&&L.phase!=='failed');
 }
 function followLaunches(d){
   if(!LAUNCHES.length) return;
@@ -590,4 +590,5 @@ function followLaunches(d){
 }
 
 export {BASEKEY, SEL, baseKey, baseOf, famOf, followLaunches, loadModels,
+        loadingLaunches,
         nodeSelChanged, published, setSets};

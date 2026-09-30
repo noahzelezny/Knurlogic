@@ -864,7 +864,7 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
                   if isinstance(j, dict)]
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
                           "id": getattr(p, "id", ""), "resident": rows,
-                          "jobs": js}
+                          "jobs": js, "loads": doc.get("loads") or []}
         except Exception as e:
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
                           "resident": [],
