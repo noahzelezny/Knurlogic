@@ -66,3 +66,66 @@ def test_mcp_load_refuses_before_spawning(cache, monkeypatch):
 
 def test_a_serve_refusal_exits_with_its_own_code():
     assert serve.REFUSED_EXIT not in (0, 1, 2)
+
+
+# --- a saved context past the model's window never bricks a launch --------
+
+from knurlogic.tuning import settings as S  # noqa: E402
+
+QWEN = {"max_position_embeddings": 262144}
+
+
+def test_past_native_turns_long_context_on_for_a_yarn_family():
+    sets, notes = S.settle_context("qwen3_5_moe", QWEN,
+                                   {"KNURLOGIC_CONTEXT_LENGTH": "1048576"})
+    assert sets["KNURLOGIC_LONG_CONTEXT"] == "yarn"
+    assert sets["KNURLOGIC_CONTEXT_LENGTH"] == "1048576"
+    assert len(notes) == 1 and "YaRN" in notes[0]
+
+
+def test_past_even_yarn_is_lowered_to_what_yarn_reaches():
+    sets, notes = S.settle_context("qwen3_5_moe", QWEN,
+                                   {"KNURLOGIC_CONTEXT_LENGTH": "4000000"})
+    assert sets["KNURLOGIC_CONTEXT_LENGTH"] == "1048576"
+    assert sets["KNURLOGIC_LONG_CONTEXT"] == "yarn"
+    assert len(notes) == 2
+
+
+def test_a_family_without_yarn_is_clamped_with_a_note():
+    sets, notes = S.settle_context("glm5_next", QWEN,
+                                   {"KNURLOGIC_CONTEXT_LENGTH": "1048576"})
+    assert sets["KNURLOGIC_CONTEXT_LENGTH"] == "262144"
+    assert "KNURLOGIC_LONG_CONTEXT" not in sets
+    assert notes and "lowered to 262,144" in notes[0]
+
+
+def test_within_the_window_nothing_changes():
+    for v in ("32768", "262144", "junk"):
+        sets, notes = S.settle_context("qwen3_5_moe", QWEN,
+                                       {"KNURLOGIC_CONTEXT_LENGTH": v})
+        assert sets == {"KNURLOGIC_CONTEXT_LENGTH": v} and notes == []
+
+
+def test_the_maintainers_saved_context_launches(cache):
+    """KNURLOGIC_CONTEXT_LENGTH=1048576 saved without long context: every
+    rank used to print REFUSING and exit."""
+    from knurlogic.machine.artifact import Artifact
+    a = Artifact.load(_model(cache))
+    assert serve.launch_refusal(
+        a, {"KNURLOGIC_CONTEXT_LENGTH": "1048576"}) is None
+    b = Artifact.load(_model(cache, model_type="glm5_next"))
+    assert serve.launch_refusal(
+        b, {"KNURLOGIC_CONTEXT_LENGTH": "1048576"}) is None
+
+
+def test_the_page_offers_up_to_the_yarn_window():
+    from knurlogic.interfaces.page.documents import knob_limit
+    from knurlogic.machine.artifact import Artifact
+    from pathlib import Path
+    a = Artifact(path=Path("/x"), model_type="qwen3_5_moe", model_file=None,
+                 bytes_on_disk=0, hidden_size=None,
+                 moe_intermediate_size=None, raw_config=dict(QWEN))
+    lim = knob_limit(a, "KNURLOGIC_CONTEXT_LENGTH")
+    assert lim["max"] == 1048576 and "YaRN" in lim["max_why"]
+    a.model_type = "glm5_next"
+    assert knob_limit(a, "KNURLOGIC_CONTEXT_LENGTH")["max"] == 262144

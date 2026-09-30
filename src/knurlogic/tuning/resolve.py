@@ -676,9 +676,16 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
         # the model's own window: the cap a person lowers, never raises past
         # (settings.check_knob refuses more), so the control stops there
         emit(r, artifact, "context_length", window)
+        # a family with documented YaRN is offered up to its YaRN window:
+        # a context past the native one turns long context on at launch
+        # (settings.settle_context)
+        top = S.context_ceiling(artifact.model_type,
+                                artifact.raw_config) or window
+        top = max(top, window)
         steps = [v for v in S.KNOB_RANGE["KNURLOGIC_CONTEXT_LENGTH"][0]
-                 if v < window]
-        r.ranges["KNURLOGIC_CONTEXT_LENGTH"] = steps + [window]
+                 if v < top and v != window]
+        r.ranges["KNURLOGIC_CONTEXT_LENGTH"] = sorted(
+            set(steps + [window, top]))
     launch, launch_notes = S.preset_launch(tune, artifact.model_type)
     if prefill < S.PREFILL_CHUNK_DEFAULT:
         r.notes.append(

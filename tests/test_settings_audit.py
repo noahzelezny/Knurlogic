@@ -60,13 +60,17 @@ def test_a_context_past_the_models_window_is_refused():
 
 
 def test_the_control_stops_at_the_window_and_says_so():
+    """A YaRN family is offered up to its YaRN window (above the native
+    one, the launch turns long context on); the resolved value stays the
+    native window."""
     a = _art(FLASH_NEXT)
     r = resolve(a, 96 * GIB)
     assert r.env["KNURLOGIC_CONTEXT_LENGTH"] == "262144"
     steps = r.ranges["KNURLOGIC_CONTEXT_LENGTH"]
-    assert steps[-1] == 262144 and 1048576 not in steps
+    assert 262144 in steps and steps[-1] == 1048576
     lim = documents.knob_limit(a, "KNURLOGIC_CONTEXT_LENGTH")
-    assert lim["max"] == 262144 and "262,144" in lim["max_why"]
+    assert lim["max"] == 1048576 and "262,144" in lim["max_why"]
+    assert "YaRN" in lim["max_why"]
     assert documents.knob_limit(a, "VQ_DECODE_CHUNK") == {}
 
 
