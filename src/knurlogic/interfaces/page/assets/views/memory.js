@@ -1,5 +1,5 @@
 import {$, esc, gb} from '../format.js';
-import {dismissLaunch, failedLaunches,
+import {cancelLaunch, dismissLaunch, failedLaunches,
   followLaunches, loadDownloads, loadingLaunches} from './picker.js';
 
 // --- what is actually in memory, whoever put it there ---------------------
@@ -154,7 +154,8 @@ async function loadResident(){
     const say=L.phase==='warming'?'warming up':pct!=null&&L.phase==='loading weights'
       ?`loading ${pct}%`:L.phase;
     return `<div class="card loading"><div class="cardhd"><span class="dot"></span>
-        <span class="rt knurlogic">${esc(say)}</span></div>
+        <span class="rt knurlogic">${esc(say)}</span><span class="grow"></span>
+        <button class="mini danger" data-lc="${L.id}">Cancel</button></div>
       <div class="n">${esc(String(L.name).split('/').pop())}</div>
       ${pct!=null||L.phase==='preparing'?`<div class="lbar"><i style="width:${pct||0}%"></i></div>`:''}
       <div class="s">on ${esc(L.machines.join(' + '))}${L.per&&L.per.length?' · '
@@ -192,6 +193,9 @@ async function loadResident(){
   // same box, and letting both write produced a key that disagreed with the
   // gauge beside it. Only used when status supplied nothing at all.
   if(!RAM) ramWent(d.memory||{});
+  el.querySelectorAll('[data-lc]').forEach(x=>x.onclick=()=>{
+    x.disabled=true; cancelLaunch(+x.dataset.lc);
+  });
   el.querySelectorAll('[data-lx]').forEach(x=>x.onclick=()=>{
     dismissLaunch(+x.dataset.lx); loadResident();
   });

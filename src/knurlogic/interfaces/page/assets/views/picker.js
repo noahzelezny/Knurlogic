@@ -454,7 +454,7 @@ $('launch').onclick=async()=>{
   // across machines: where it went (or would have), from the coordinator
   if(j.placement) $('pickinfo').insertAdjacentHTML('beforeend',
     `<div class="placement">${placementHTML(j.placement)}</div>`);
-  if(!j.error && !j.refused){
+  if(!j.error && !j.refused && !L.cancelled){
     // done with this pick: back to "choose a model"
     SEL=null; SELCLEARED=true; pickInfo();
     tick(); loadModels(); pushRecent(m.path);
@@ -635,6 +635,7 @@ function trackLaunch(m, ns, pn, t0){
 }
 function settleLaunch(L, j){
   L.port=j.port||0; L.job=j.job||'';
+  if(L.cancelled){ stopLaunch(L); return }
   if(j.error||j.refused){ L.phase='failed';
     L.why=j.error||('not loaded: '+j.refused+(j.note?' -- '+j.note:'')) }
   else L.phase='starting';
@@ -698,6 +699,26 @@ function renderLaunches(){
 }
 // the launches that failed, kept as INSTANCES cards until dismissed
 function failedLaunches(){ return LAUNCHES.filter(L=>L.phase==='failed') }
+// CANCEL on a launch that has not finished: the same unload the INSTANCES
+// card's UNLOAD sends -- a cluster job by its job id (every rank stops), a
+// single server by its port (on the peer that started it, by node). Before
+// the launch's answer there is nothing to stop yet: the card goes now and
+// settleLaunch stops what the answer names.
+async function cancelLaunch(id){
+  const L=LAUNCHES.find(x=>x.id===id); if(!L) return;
+  L.cancelled=true; dismissLaunch(id); loadResident();
+  if(L.job||L.port) await stopLaunch(L);
+}
+async function stopLaunch(L){
+  const body=L.job?{action:'unload', job:L.job}
+    :L.node?{action:'unload', node:L.node, port:L.port}
+    :{action:'unload', target:String(L.port)};
+  if(!L.job&&!L.port) return;
+  try{ await fetch('/loaded.json',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}) }
+  catch(e){}
+  loadResident();
+}
 function dismissLaunch(id){
   const i=LAUNCHES.findIndex(L=>L.id===id);
   if(i>=0) LAUNCHES.splice(i,1);
@@ -712,7 +733,7 @@ function followLaunches(d){
   renderLaunches();
 }
 
-export {allDownloads, BASEKEY, SEL, baseKey, baseOf, dismissLaunch,
+export {allDownloads, BASEKEY, SEL, baseKey, baseOf, cancelLaunch, dismissLaunch,
         failedLaunches, famOf, followLaunches, hubAct,
         loadDownloads, loadModels, loadingLaunches,
         nodeSelChanged, published, setSets};
