@@ -170,12 +170,38 @@ def detected_working_set_bytes() -> int:
     if limit:
         return limit
     # the sysctl left at its default reads 0: only the framework knows the
-    # default it applies, so it is asked -- on a box nobody has tuned
+    # default it applies, so it is asked -- on a box nobody has tuned. It is
+    # asked in a CHILD process: importing engine.serve.memory here pulled
+    # mlx into the page process on every untuned Mac (CI runners among
+    # them), which is the very thing this function exists to avoid.
+    return _framework_working_set_bytes()
+
+
+_FRAMEWORK_WS = None
+
+
+def _framework_working_set_bytes() -> int:
+    """MLX's max_recommended_working_set_size, from a child interpreter so
+    the caller never imports mlx. Cached: it is fixed for the machine."""
+    global _FRAMEWORK_WS
+    if _FRAMEWORK_WS is not None:
+        return _FRAMEWORK_WS
+    import os
+    import sys
+    from pathlib import Path
+    src = str(Path(__file__).resolve().parents[2])
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [src] + [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p])
+    code = ("from knurlogic.engine.serve import memory\n"
+            "print(int(memory().get('working_set_bytes') or 0))\n")
     try:
-        from knurlogic.engine.serve import memory
-        return int(memory().get("working_set_bytes") or 0)
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                           text=True, timeout=60, env=env)
+        _FRAMEWORK_WS = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
     except Exception:
-        return 0
+        _FRAMEWORK_WS = 0
+    return _FRAMEWORK_WS
 
 
 #: Cached: a machine does not change model while the process runs, and the

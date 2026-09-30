@@ -20,10 +20,14 @@ Goldens: tests/goldens/build_qwen.py (mlx-vlm interpreter) and
 build_qwen_g5.py (this interpreter, before the trunk edits). No mlx-vlm is
 imported here. Tiny random models, float32, seed 0.
 
-G5 compares with np.array_equal: same MLX (pinned), same machine class. If
-it goes red on NEW HARDWARE with the fingerprint check green, rebuild the
-snapshot from main's trunk files on that machine -- never from the edited
-ones.
+G5 compares with np.array_equal on the chip family the snapshot was built
+on (meta "chip"; same MLX, pinned). On another chip family the GPU kernels
+round float32 differently, so there the tokens must still match exactly
+and the logits to 1e-4: that still catches any edit that moves the text
+path, not a last ulp. The weight fingerprint is exact (fsum, CPU) and chip
+independent. If it goes red on NEW HARDWARE with the fingerprint check
+green, rebuild the snapshot from main's trunk files -- never from the
+edited ones.
 """
 import importlib
 import json
@@ -347,7 +351,8 @@ def _seed_model(fam, cfg):
     model = arch.Model(arch.ModelArgs.from_dict(cfg))
     model.set_dtype(mx.float32)
     mx.eval(model.parameters())
-    fp = np.array([float(mx.abs(v).sum().item())
+    import math
+    fp = np.array([math.fsum(np.abs(np.array(v, dtype=np.float64)).ravel())
                    for _, v in tree_flatten(model.parameters())])
     return model, fp
 
@@ -360,7 +365,11 @@ def test_g5_text_path_is_mains_to_the_bit(fam):
         "the seed-0 init moved, not the text path: rebuild nothing, look at init"
     logits, toks = _g5_run(model, meta["prompt"], meta["split"], meta["steps"])
     assert toks == arrays[f"{fam}/tokens"].tolist()
-    assert np.array_equal(logits, arrays[f"{fam}/logits"])
+    if fv.chip() == meta.get("chip"):
+        assert np.array_equal(logits, arrays[f"{fam}/logits"])
+    else:
+        np.testing.assert_allclose(logits, arrays[f"{fam}/logits"],
+                                   rtol=0, atol=1e-4)
 
 
 @pytest.mark.parametrize("fam", FAMS)
