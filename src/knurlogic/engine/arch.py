@@ -135,6 +135,21 @@ def locate(name: str) -> tuple:
     return "", None
 
 
+def supported(model_type: str) -> bool:
+    """Can an artifact of this model_type be run here: a family of ours
+    claims it, or an installed host package has a module for it. Looks at
+    files; imports no mlx."""
+    if not model_type:
+        return False
+    if model_type in ARCH_FOR_MODEL_TYPE:
+        return True
+    for host in HOST_PACKAGES:
+        d = _models_dir(host)
+        if d is not None and _module_file(d, model_type) is not None:
+            return True
+    return False
+
+
 def required_modules(model_type: str) -> list:
     """Every architecture module an artifact of this type needs present."""
     base = ARCH_FOR_MODEL_TYPE.get(model_type)

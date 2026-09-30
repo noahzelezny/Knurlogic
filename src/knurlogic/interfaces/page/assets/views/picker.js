@@ -2,7 +2,7 @@ import {OVL} from '../ui/overlay.js';
 import {$, GIB, esc, gb} from '../format.js';
 import {LASTNODES, fitWS, fitWhere, isLocal, selNodes} from '../nodes.js';
 import {launchSets, migrateLaunchSets} from './settings/knobs.js';
-import {getJSON, peekURL} from '../api.js';
+import {getJSON, httpWhy, peekURL} from '../api.js';
 import {tick} from './home.js';
 import {act, loadResident} from './memory.js';
 
@@ -140,9 +140,14 @@ function renderPicker(){
   $('pfams').innerHTML=['All',...Object.keys(mine).filter(f=>mine[f].length),
     ...Object.keys(famCount).sort()].map(f=>
     `<div class="fam" data-f="${esc(f)}" aria-current="${f===FAM}">${esc(f)}
-      <i>${n(f)}</i></div>`).join('');
+      <i>${n(f)}</i></div>`).join('')
+    +`<div class="fam" data-f="${HUB}" aria-current="${FAM===HUB}">${HUB}</div>`;
   $('pfams').querySelectorAll('.fam').forEach(e=>e.onclick=()=>{
     FAM=e.dataset.f; renderPicker() });
+  $('psearch').placeholder=FAM===HUB?'Search Hugging Face (MLX models)':'Search models';
+  $('psearch').value=FAM===HUB?HF.q:QUERY;
+  if(FAM===HUB){ $('pbudget').innerHTML=ws?`<b>${gb(ws)}</b> to fill`:'';
+    return renderHub() }
 
   const shown=mine[FAM]?[]:GROUPS.filter(g=>(FAM==='All'||g.fam===FAM) &&
     (!q || g.name.toLowerCase().includes(q) ||
@@ -416,7 +421,10 @@ $('openpick').onclick=()=>{
   renderPicker(); $('psearch').focus();
 };
 $('pclose').onclick=()=>OVL.close();
-$('psearch').oninput=e=>{ QUERY=e.target.value; renderPicker() };
+$('psearch').oninput=e=>{
+  if(FAM===HUB){ HF.q=e.target.value; clearTimeout(HF.timer);
+    HF.timer=setTimeout(hubSearch, 350) }
+  else{ QUERY=e.target.value; renderPicker() } };
 
 $('launch').onclick=async()=>{
   const m=SEL; if(!m || launchBlock(selNodes())) return;
@@ -495,6 +503,99 @@ function launchMTP(m){
     else delete sets.KNURLOGIC_MTP_DYNAMIC;
   }
   return sets;
+}
+
+// --- Hugging Face ---------------------------------------------------------
+// MLX-format models on the Hub, searched from the picker. A result opens to
+// its size, architecture and whether this machine can run it (/hub/repo.json,
+// fetched when the row opens); Download puts it in the standard cache on THIS
+// machine, and once there it is a local model like any other.
+const HUB='Hugging Face';
+const HF={q:'', res:null, err:'', open:'', detail:{}, timer:0, seq:0};
+let DLS=[];
+const dlOf=id=>DLS.find(d=>d.id===id);
+async function hubSearch(){
+  const n=++HF.seq;
+  const d=await getJSON('/hub/search.json?'+new URLSearchParams({q:HF.q}));
+  if(n!==HF.seq) return;
+  HF.res=d.results||[]; HF.err=d.error||'';
+  if(FAM===HUB) renderHub();
+}
+async function hubOpen(id){
+  HF.open=HF.open===id?'':id;
+  if(HF.open && !HF.detail[id]){
+    HF.detail[id]={loading:true}; renderHub();
+    HF.detail[id]=await getJSON('/hub/repo.json?'+new URLSearchParams({id}));
+  }
+  if(FAM===HUB) renderHub();
+}
+async function hubAct(action, id){
+  const r=await fetch('/hub/download.json',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({action,id})});
+  await loadDownloads();
+  if(!r.ok) alert(await httpWhy(r));
+  loadResident();
+}
+// what the page's server has downloading, done or failed; a finished one
+// is dropped once /models.json has been read again
+async function loadDownloads(){
+  const d=await getJSON('/hub/downloads.json');
+  if(d.error) return;
+  const was=DLS.filter(x=>x.state==='downloading').map(x=>x.id);
+  DLS=d.downloads||[];
+  const done=DLS.filter(x=>x.state==='done');
+  if(done.length){
+    for(const x of done) await fetch('/hub/download.json',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'dismiss', id:x.id})});
+    DLS=DLS.filter(x=>x.state!=='done');
+    await loadModels();
+  }
+  if(!$('picker').hidden && FAM===HUB) renderHub();
+}
+const downloadingNow=()=>DLS.filter(d=>d.state==='downloading');
+const failedDownloads=()=>DLS.filter(d=>d.state==='failed');
+function renderHub(){
+  const ws=fitWS(), ns=selNodes();
+  const many=ns.length>1||ns.some(n=>!isLocal(n));
+  const row=r=>{
+    const d=HF.detail[r.id], dl=dlOf(r.id), open=HF.open===r.id;
+    const local=MODELS.some(m=>m.name===r.id)
+      ||(window.ALLMODELS||[]).some(m=>m.name===r.id);
+    let body='';
+    if(open){
+      if(!d||d.loading) body='<div class="note">reading the repo…</div>';
+      else if(d.error) body=`<div class="warn">${esc(d.error)}</div>`;
+      else{
+        const fits=!ws||d.size_bytes<=ws;
+        const can=d.supported&&d.access&&!local&&!dl;
+        body=`<div class="note">${[d.model_type||'unknown architecture', gb(d.size_bytes),
+            d.supported?(fits?'fits '+fitWhere():'does not fit '+fitWhere()+' ('+gb(ws)+')')
+              :d.why].map(esc).join(' · ')}</div>`
+          +(!d.access?`<div class="warn">needs access: ${esc(d.hint)}</div>`:'')
+          +`<div class="hfact">${local?'<span class="note">already on this Mac</span>'
+            :dl&&dl.state==='downloading'?'<span class="note">downloading…</span>'
+            :`<button class="mini" data-dl="${esc(r.id)}"${can?'':' disabled'}>Download</button>`}
+          ${many?'<span class="note">downloads to this Mac</span>':''}</div>`;
+      }
+    }
+    const no=d&&!d.loading&&!d.error&&(!d.supported||!d.access);
+    return `<div class="hfrow${no?' no':''}"><div class="var" data-hf="${esc(r.id)}"
+        aria-current="${open}">
+        <span class="vn">${esc(r.id)}</span>
+        ${r.gated?'<span class="tag">GATED</span>':''}
+        <span class="vs">${(r.downloads||0).toLocaleString()} downloads</span></div>
+      ${body?`<div class="hfbody">${body}</div>`:''}</div>`;
+  };
+  $('prows').innerHTML=HF.err?`<div class="sect no">${esc(HF.err)}</div>`
+    :HF.res===null?'<div class="sect no">searching…</div>'
+    :HF.res.length?HF.res.map(row).join(''):'<div class="sect no">nothing matches</div>';
+  $('prows').querySelectorAll('[data-hf]').forEach(v=>v.onclick=()=>hubOpen(v.dataset.hf));
+  $('prows').querySelectorAll('[data-dl]').forEach(b=>b.onclick=async e=>{
+    e.stopPropagation(); b.disabled=true; await hubAct('download', b.dataset.dl);
+    OVL.close();
+  });
+  if(HF.res===null) hubSearch();
 }
 
 // --- a launch, followed until it is ready or has failed ----------------------
@@ -593,6 +694,7 @@ function followLaunches(d){
   renderLaunches();
 }
 
-export {BASEKEY, SEL, baseKey, baseOf, dismissLaunch, failedLaunches, famOf,
-        followLaunches, loadModels, loadingLaunches,
+export {BASEKEY, SEL, baseKey, baseOf, dismissLaunch, downloadingNow,
+        failedDownloads, failedLaunches, famOf, followLaunches, hubAct,
+        loadDownloads, loadModels, loadingLaunches,
         nodeSelChanged, published, setSets};

@@ -1864,6 +1864,16 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     routes["POST /strategy.json"] = lambda _q, _n=0, body=None: documents._json(
         documents.set_strategy(body))
 
+    from knurlogic.interfaces.page import hub
+    routes["/hub/search.json"] = lambda q, _n=0: documents._json(
+        hub.search((q.get("q") or [""])[0]))
+    routes["/hub/repo.json"] = lambda q, _n=0: documents._json(
+        hub.repo((q.get("id") or [""])[0]))
+    routes["/hub/downloads.json"] = lambda _q, _n=0: documents._json(
+        hub.downloads())
+    routes["POST /hub/download.json"] = lambda _q, _n=0, body=None: (
+        documents._json(hub.act(body)))
+
     H = make_handler(routes, gate, allow_origins, allow_hosts)
     from knurlogic.cluster import launch
     launch.start_watching_existing()
