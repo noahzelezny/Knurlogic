@@ -142,7 +142,10 @@ def settings_refusal(a, overrides) -> str | None:
     checked here."""
     from knurlogic.tuning import settings as S
     from knurlogic.machine import preferences
-    w, _ = S.model_window(getattr(a, "raw_config", None) or {})
+    # past the native window is long context where the family has YaRN
+    # (settings.settle_context turns it on), so the ceiling is the YaRN one
+    w = S.context_ceiling(getattr(a, "model_type", ""),
+                          getattr(a, "raw_config", None) or {})
     for k, v in S.canonical_sets(dict(overrides or {})).items():
         why = S.check_knob(k, v, w)
         if why:
