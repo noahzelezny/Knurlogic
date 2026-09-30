@@ -603,6 +603,7 @@ input:focus{outline:none;border-color:var(--acc)}
 .tag{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
   border:1px solid var(--line);padding:0 4px;margin-left:7px}
 .tag.live{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
+.tag[data-upd]{cursor:pointer;color:var(--acc)}
 .tag.dead{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
 .star{cursor:pointer;color:var(--faint);margin-right:2px;font-size:20px;
   line-height:1;width:1.1em;text-align:center;flex:none}

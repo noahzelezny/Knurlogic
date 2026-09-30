@@ -115,6 +115,8 @@ def models_document(serving: str = "", ttl: float = 60.0):
         from knurlogic.machine import allowance, wired
         from knurlogic.machine.artifact import identity as artifact_identity
         ws = allowance.cap(wired.detected_working_set_bytes())
+        from knurlogic.interfaces.page import updates
+        stale = updates.flagged([f.path for f in _MODELS["rows"]])
         for f in _MODELS["rows"]:
             out.append({
                 "name": f.name, "path": str(f.path), "store": f.store,
@@ -132,6 +134,9 @@ def models_document(serving: str = "", ttl: float = 60.0):
                                               or str(f.path) == serving),
                 "room": _room(f, ws),
                 "splits": _splits(f),
+                # the Hub has a newer revision of this Hugging Face model
+                # (page/updates.py); False when unchecked or not from HF
+                "update": str(f.path) in stale,
             })
         return {"models": out, "serving": serving}
     return handler
