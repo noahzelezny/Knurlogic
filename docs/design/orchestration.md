@@ -10,7 +10,10 @@ parsed by hand at each end, with the shape spread over `cluster/launch.py`,
 protocol an explicit, typed, versioned contract in one module, so a node
 could be reimplemented in another language by reading one file.
 
-## 1. Inventory: the protocol as it is
+## 1. Inventory: the protocol as it was
+
+(Done: every `/peer/*` row below except the model relay `/peer/v1/...` is
+now a message kind on the one route `POST /peer/v1/msg`, section 5.)
 
 All calls are HTTP+JSON. "Gate" is `peer_refusal` (no Origin header; arrived
 on loopback, Thunderbolt, or a `--peer` address) on every `/peer/*` route.
@@ -111,16 +114,24 @@ compatibility is not build compatibility.
   one machine with several addresses stays one node. `boot_id` (random per
   process start) in `Hello` and `Heartbeat` lets a peer see "same id, new
   process": rank records from the old boot are gone.
-- **Liveness.** Every node posts/answers `Heartbeat` to every known peer each
-  `HEARTBEAT_S = 2` s (one thread, parallel, short timeout 1.5 s; today's
-  `TIMEOUT_S=3`, `REFRESH_S=4` are replaced). States per peer:
+- **Liveness.** Every node asks every known peer for its light status each
+  2 s (one thread, parallel, timeout 1.5 s; the `Heartbeat` kind's content
+  -- `boot_id`, version -- rides the status doc, and no handler is registered
+  for `Hello`/`Heartbeat` on the message route). States per peer:
   `answering` (heard within 3 intervals = 6 s), `stale` (6..20 s silent:
   shown, no new jobs placed), `gone` (>20 s, `PEER_GONE_S`: a job that has a
   rank there stops). `version_mismatch` is a fourth, separate state.
-  Liveness stays on the status GET (no separate route); the status doc gains
-`boot_id` and protocol `v`. A Heartbeat handler must be cheap, and there is
-one in-flight probe per peer (the probe part is deferred with step 5).
-One clock now serves both `Peers` and `peer_verdict`.
+  Liveness stays on the status GET (no separate route, and not behind the
+Thunderbolt/`--peer` gate: a Wi-Fi or Ethernet Bonjour peer stays
+`answering`, it just takes no job); the status doc carries `boot_id` and
+protocol `v`. The GET is `/status.json?light=1`, a cheap document (this
+machine's node entry built once per 1.5 s however many peers ask, the memory
+map reused for 30 s), and there is one in-flight probe per peer (a probe
+still out is not overlapped; a machine's several addresses are asked at
+once). One clock serves both `Peers` and `peer_verdict`: a rank's machine is
+gone when the peer list says so, and a new `boot_id` is a restart (its ranks
+went with the old process). The interval is `peers.REFRESH_S` = 2 s, the
+status timeout 1.5 s; `answering` is `peers.ANSWERING_S` = 6 s.
 - Membership is a full mesh of heartbeats; at 16 nodes that is 240 tiny
   requests per 2 s, about 120 per second across the cluster, about 8 per node
   per second: fine over HTTP. No leader election, no gossip in this pass.
@@ -164,49 +175,72 @@ One clock now serves both `Peers` and `peer_verdict`.
 
 ## 5. Transport
 
-HTTP+JSON between pages stays, same paths, same gate (`peer_refusal`: no
-Origin, loopback/Thunderbolt/`--peer` source), same body limit. The request
-and reply bodies become the envelope above; HTTP status is only transport
-(200 for any typed reply including refusals, 400 bad envelope, 413 too big).
+HTTP+JSON between pages, ONE route: `POST /peer/v1/msg` (a GET answers
+405), behind the same gates as before (`peer_refusal`: no Origin,
+loopback/Thunderbolt/`--peer` source; a plain Content-Length body, never
+Transfer-Encoding; `PEER_MAX`). The request and reply bodies are the envelope
+above; the status code is transport (the handler's code is kept: 404 unknown
+job, 409 conflict, 400 bad body). The model relay `/peer/v1/models` and
+`/peer/v1/{chat/completions,messages,...}` stays: it streams a model's answer
+and is not control plane.
 
-One client, `knurlogic/cluster/transport.py`: `send(peer, msg, timeout) ->
-Message` (encodes, posts, decodes, raises `PeerUnreachable` / `ProtocolError`
-/ `PeerRefused`), `send_all(peers, msg, timeout)` (parallel, per-peer result),
-and one server-side dispatcher `handle(path, headers, body) -> (status, doc)`
-that calls the typed handler table. `launch._post`, `peers._http`,
-`peer_residency`'s fetch and `forward_launch`'s post all become `send`. Default
-timeouts live in one table (heartbeat 1.5 s, survey 3 s, prepare/start 30 s,
-stop 50 s), not scattered constants. A new `/peer/v1/msg` route (0.1.1) accepts any
-envelope and is POST-only (GET answers 405); `Load` keeps `peer_launch`'s
-own validation.
+One client, `knurlogic/cluster/transport.py`: `send(page, kind, body, ...)
+-> dict` (wraps the body in an envelope, posts, checks the reply's envelope
+and version, returns the reply's body in today's wire keys; a typed refusal
+comes back as `{"error": reason, "failure_kind": kind}`; raises
+`PeerUnreachable` (an OSError), `VersionMismatch` (the "update knurlogic on
+<machine>" text), `PeerRefused` (a plain gate refusal)); `parallel` and
+`send_all` (each peer's failure is its own result). `launch`,
+`recovery`, `peer_residency`, `forward_launch`, `machine_apply`,
+`apply_settings` and `/peek` all send through it, and default timeouts live in
+ONE table, `transport.TIMEOUTS` (status 1.5 s, survey 2.5 s, prepare/start
+30 s, stop 50 s, ...). The server half is `transport.handle(body, table)`:
+the page builds the kind -> handler table (`server.peer_table`): `Prepare`,
+`Start`, `Stop`, `JobState`, `Shape` (cluster/launch.peer_step), `Load` /
+`Unload` (`peer_launch`, which keeps its own validation: no path keys,
+`clean_sets`, identity only), `Survey`, `MachineSet` (allowance, strategy and
+the knurlogic-wide settings), `Settings`, `Read` (a peer page's document, or a
+model server's `/settings.json` by port: what `/peek` needs). `from` in an
+envelope never selects an address.
+
+Enforcement: a body that is not an envelope gets a plain 400; an envelope of
+a different major, an unknown kind, a kind this page does not answer
+(`Hello`, `Heartbeat`) or a body missing a required field gets a typed
+`Failure(refusal)` reply; a sender that gets a 404 or a non-envelope reply
+treats that peer as `version_mismatch`.
 
 ## 6. Migration (each step leaves the suite green)
 
-Tonight (0.1.0): step 1, step 3-lite (replies built from the typed
-dataclasses, same keys plus `v`, HTTP codes unchanged), step 4, step 7, plus
-`Start` idempotency and `boot_id` / `v` in the status doc. Steps 2, 5, 6 and 8
-are deferred to 0.1.1. There is no prior release, so there is no legacy-body
-wrapping and no alias mechanism.
+All eight steps are done for 0.1.0. There is no prior release, so there
+is no legacy-body wrapping and no alias mechanism: the old per-purpose routes
+(`/peer/loaded.json`, `/peer/machine.json`, `/peer/settings.json`,
+`/peer/cluster/{prepare,start,stop,job,shape}`) were removed, and the peer
+states are now `answering`/`stale`/`gone`/`version_mismatch` (there is no
+`not_answering`).
 
 1. `protocol.py`: dataclasses, envelope, version check, `ProtocolError`.
    Round-trip test per kind.
-2. (0.1.1) `transport.py`: `send`/`send_all`/`handle`; swap `launch._post`.
+2. `transport.py`: `send`/`send_all`/`handle`, one timeout table; `launch._post`,
+   `_parallel` and `_stop_post` are gone. (done)
 3. Typed replies: `prepare`, `start`, `stop`, `job_state` build `PrepareReply`,
    `Started`, `Stopped`, `JobState`. Wire keys for old fields are kept.
 4. `Failure(kind)`: failures carry an explicit kind; `recovery.kind` reads it
    first, regexes only for raw rank log lines.
-5. (0.1.1) `Hello`/`Heartbeat`: states `answering/stale/gone` in `Peers`;
-   `peer_verdict` reads the same state.
-6. (0.1.1) Move `forward_launch`, `peer_residency`, `peer_machine`,
-   `peer_settings` to typed messages on `/peer/v1/msg`.
+5. Liveness: states `answering/stale/gone/version_mismatch` in `Peers`
+   from the light status GET, `boot_id` and `v` read from it;
+   `peer_verdict` reads the same clock. (done)
+6. One dispatcher route `/peer/v1/msg`: `forward_launch`, `peer_residency`,
+   `peer_machine`, `peer_settings`, `/peek`'s peer reads and the cluster
+   kinds all moved onto it; the old routes removed. (done)
 7. Remove the pair assumption in `failover`; 3-node test.
-8. (0.1.1) Enforce the envelope.
+8. Enforce the envelope on `/peer/v1/msg`. (done)
 
 ## 7. Tests
 
-- **Fake nodes**: extend `tests/support/cluster_fake_page.py` (real handler,
-  own cache dir, own identity, fake artifact/shape/rank) to start N pages in
-  one test helper `fake_cluster(n)` for n in 3, 4, 8, each knowing all others;
+- **Fake nodes** (`tests/support/fake_cluster.py`, `tests/cluster/test_cluster_orchestration.py`):
+  `FakeCluster(n)` starts N real pages (`tests/support/cluster_fake_page.py`:
+  real handler, liveness, recovery; own cache dir, own identity, fake
+  artifact/shape/rank), each knowing all others, for n in 3, 4, 8;
   `cluster_fake_rank.py` writes markers and can be told to exit, stall, or
   refuse.
 - Protocol round-trip for every kind (`from_wire(to_wire(x)) == x`), unknown

@@ -77,9 +77,10 @@ Silence is the failure mode, so every peer has a state:
 
 | state | meaning |
 |---|---|
-| `answering` | status fetched |
-| `not_answering` | known but the request fails, with a `problem`; a remembered peer shows how long it has been gone ("asleep?") and is never dropped silently |
-| `version_mismatch` | schema or version differ |
+| `answering` | status heard within 6 s |
+| `stale` | silent 6..20 s: shown, no new jobs placed |
+| `gone` | silent 20 s or more (`jobs.PEER_GONE_S`, a job with a rank there stops), or never heard, with a `problem`; a remembered peer shows how long it has been gone ("asleep?") and is never dropped silently |
+| `version_mismatch` | protocol major differs (or none), or status schema differs; the `problem` says which machine to update |
 
 **A blocked machine learns it is blocked from its peers.** Its outbound
 connections work: it fetches a peer's status, which says "found, not
@@ -158,9 +159,9 @@ machine that can apply it:
 
 | state | meaning |
 |---|---|
-| `answering` | its status came back |
-| `not_answering` | known (named, remembered or introduced) but the request failed; `problem` says what the failure looked like |
-| `version_mismatch` | answering, with a status schema this one does not read |
+| `answering` | its status came back within 6 s (one light `GET /status.json?light=1`, open to every peer, Wi-Fi included) |
+| `stale` / `gone` | known (named, remembered or introduced) but silent for 6..20 s / 20 s or more; `problem` says what the failure looked like |
+| `version_mismatch` | answering, with a protocol major or status schema this one does not speak |
 
 A peer that stops answering is kept and shown with how long it has been
 gone -- machines sleep -- never dropped silently.
@@ -170,7 +171,7 @@ introduction header (`X-Knurlogic-Peer: <id> <port>`); the receiving page
 records the requester's address with that port as an `introduced` peer. So
 naming a machine on one side is enough for both to know each other, and the
 side that cannot be reached still finds out: it asks its peers what they
-see, and a peer that lists it as `not_answering` is a measured fact --
+see, and a peer that lists it as `stale` or `gone` is a measured fact --
 "they can see me and cannot connect", which on a Mac is almost always the
 application firewall on this machine.
 

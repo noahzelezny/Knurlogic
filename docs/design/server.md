@@ -300,7 +300,7 @@ the step plan is the tensor split's).
 
 Page to page, two phases (`cluster/launch.py`; files and markers
 `cluster/jobs.py`). No token: running knurlogic is consent; every
-`/peer/cluster/*` route has `/peer/loaded.json`'s gate (no Origin;
+peer message (`POST /peer/v1/msg`) has one gate (no Origin;
 loopback, Thunderbolt, or a `--peer` address).
 
 - **Launch**: `POST /loaded.json {action: load, identity, nodes: [ids],
@@ -323,7 +323,7 @@ loopback, Thunderbolt, or a `--peer` address).
   change. The page that started a rank watches it: pid gone, never joined
   (300 s), or rank 0 busy with a still step counter for 120 s (idle is not
   stalled). Any of them: that page SIGTERMs its ranks (SIGKILL after 10 s)
-  and sends `/peer/cluster/stop` to every other page of the job. Rank 0's
+  and sends a `Stop` message to every other page of the job. Rank 0's
   SIGTERM answers every request in flight with a 503 `cluster_failed`
   before it exits; a stream already under way ends with one
   `data: {"error": ... "cluster_failed"}` event. Unloading the job from any
@@ -408,7 +408,7 @@ order (so the same split), link, port, tune and settings.
   30 s and 90 s; the next failure makes the model `failed`, with the last
   reason, until someone loads it again. A relaunch starts only once no rank
   of the old job is left on any machine -- by record and by process
-  (`pgrep` for `--job <job>`, `/peer/cluster/job`'s `processes`) -- and a
+  (`pgrep` for `--job <job>`, a `JobState` message's `processes`) -- and a
   one-Mac server once no `knurlogic serve` on its port is left.
 - **Reported.** `recovery: {attempts, last_reason, last_at, next_at, state}`
   (state `recovering` | `recovered` | `failed`; epoch seconds; `next_at`

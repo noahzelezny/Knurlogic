@@ -43,7 +43,7 @@ async function knDocs(ms){
   }));
 }
 // Sent to this machine and every answering peer, each through its own page
-// (/machine.json -> that machine's /peer/machine.json); one answer per machine.
+// (/machine.json -> a MachineSet message to that machine); one answer per machine.
 async function applyEvery(ms, body){
   return Promise.all(ms.map(async m=>{
     try{ const r=await fetch('/machine.json?'+new URLSearchParams({where:m.id==='local'?'':m.page}),

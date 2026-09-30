@@ -35,20 +35,22 @@ everything can:
   and place the model (tensor: an equal share each; pipeline:
   `tuning/resolve.pipeline_shares`). Deterministic, and shown before
   anything loads.
-- **prepare** -- POST `/peer/cluster/prepare` to every page (this one
+- **prepare** -- a `Prepare` message (`POST /peer/v1/msg`, an envelope:
+  docs/design/orchestration.md) to every page (this one
   directly): the job's fixed schema. Each checks the artifact by identity,
   the fit of its share, knurlogic/mlx versions against the coordinator's,
   and its link. Any refusal: nothing starts, the prepared pages are told to
   forget it, the refusal is shown.
-- **start** -- POST `/peer/cluster/start`: each page spawns its own rank
+- **start** -- a `Start` message: each page spawns its own rank
   (`knurlogic serve` with the hidden ring flags), records it, and watches
   it.
 
 Every page that runs a rank watches it (cluster/jobs.py); any rank dying or
 stalling stops the whole job: its own ranks SIGTERM then SIGKILL, and
-`/peer/cluster/stop` to every other page of the job. It also asks the
-job's other pages (`/peer/cluster/job`) whether they still run their
-ranks: one unreachable, or answering without its rank, for `PEER_GONE_S`
+a `Stop` message to every other page of the job. It also asks the
+job's other pages (`JobState`) whether they still run their
+ranks: one unreachable (the peer list's own clock, from the status GET
+every peer answers), or answering without its rank, for `PEER_GONE_S`
 -- or saying the job ended there -- stops the job here too (a rank idle in
 a collective on a peer that vanished never exits and is never "stalled").
 
@@ -60,8 +62,7 @@ start waits (`START_WAIT_S`) for stopped ranks to be gone, else refuses.
 Unloading the job from any page does the same. Rank 0's HTTP port is where
 chat goes, through the existing relay.
 
-Peer routes are gated exactly like `/peer/loaded.json`
-(`ui.peer_refusal`).
+The one peer route, `/peer/v1/msg`, is gated by `ui.peer_refusal`.
 
 ## knurlogic/cluster/recovery.py
 
