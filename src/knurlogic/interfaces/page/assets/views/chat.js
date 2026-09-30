@@ -698,6 +698,8 @@ function sendChat(){
   if(!text && !PENDING.length) return;
   let c=curChat();
   const pend=PENDMODEL;
+  // newChat() clears PENDING, so take the attachments before it can run
+  const att=PENDING.slice();
   if(pend){
     // Differs from the model this chat already has messages with: a NEW
     // chat, with the picked model, gets the message. Empty, or the same
@@ -714,7 +716,7 @@ function sendChat(){
   PENDMODEL=null;
   HOME=false;
   if(c.msgs.length===0) c.title=text.slice(0,52)||'(image)';
-  c.msgs.push({role:'user', content:text, att:PENDING.slice()});
+  c.msgs.push({role:'user', content:text, att});
   $('cq').value=''; autoGrow(); clearAttachments(); c.updated=Date.now();
   saveChats(); renderChats(); renderClog();
   runTurn();
