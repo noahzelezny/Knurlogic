@@ -3,17 +3,15 @@
 Some conversions ship a template that cannot carry an agent: the
 mlx-community DeepSeek-V4-Flash conversion's chat_template.jinja renders no
 tool definitions, ignores assistant tool_calls and role=tool messages, and
-drops reasoning outside thinking_mode='thinking' -- an agent on it never
-sees its own tool calls or their results. DeepSeek publishes V4's encoding
-as Python (encoding/encoding_dsv4.py in deepseek-ai/DeepSeek-V4-Flash, MIT),
-not as a template; `deepseek_v4.jinja` here is a port of it, checked
-against DeepSeek's own encoder and golden outputs (tests/test_deepseek_v4.py,
-PROVENANCE.md).
+drops reasoning outside thinking_mode='thinking'. `deepseek_v4.jinja` is a
+port of DeepSeek's Python encoder (encoding/encoding_dsv4.py in
+deepseek-ai/DeepSeek-V4-Flash, MIT), checked against its golden outputs
+(tests/test_deepseek_v4.py, PROVENANCE.md).
 
 `install(tokenizer)` swaps the template in when the artifact's is a known
-stub, on the tokenizer itself, so every render (the prompt, the segment
-probes, the thinking probe) and the tool-call parser agree. It is
-idempotent and cheap; the loaders and the prompt stage both call it.
+stub, on the tokenizer itself, so every render and the tool-call parser
+agree. It is idempotent and cheap; the loaders and the prompt stage both
+call it.
 """
 
 from __future__ import annotations

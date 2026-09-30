@@ -1,31 +1,29 @@
-"""The SHARED vision test builder (P0). Per-family fixtures live beside it,
-one file per family, owned by that family's package
-(tests/fixtures_vision_<family>.py) -- critique C1: four packages editing one
-fixture file would collide.
+"""The SHARED vision test builder. Per-family fixtures live beside it, one
+file per family (tests/fixtures_vision_<family>.py).
 
 Three things here:
 
 1. `tiny_config(family, ...)` -- a real config shrunk to a tiny random model:
    STRUCTURAL keys kept (patch 14 vs 16, merge, temporal patch, model_type,
    rope/mrope sections, pooling, soft-token count), SIZES scaled
-   (report-test-plan.md section 1), special token ids remapped into a vocab
-   of 512 so embedding tables stay small (option (a) there). `REAL` below
-   embeds the structural fields read from each family's released config.json
-   (2026-09-23, config.json only -- no weights), so CI needs no artifacts.
+   so tensors stay tiny, special token ids remapped into a vocab of 512
+   so embedding tables stay small. `REAL` below embeds the structural
+   fields read from each family's released config.json (config.json only
+   -- no weights), so CI needs no artifacts.
 
 2. `StubFamily` -- a complete `Family` with an identity tower and
-   `positions() -> (None, 0)`, for P4 to build the serve path against
-   without importing any real family (design P4). Its features depend on
+   `positions() -> (None, 0)`, to build the serve path against
+   without importing any real family. Its features depend on
    the pixels, so two different images give different answers (G9) and the
    same image the same (G6/G7).
 
-3. Goldens -- mlx-vlm reference outputs, made ONCE in the exo interpreter
+3. Goldens -- mlx-vlm reference outputs, made ONCE in an interpreter with mlx-vlm
    (mlx-vlm 0.6.17) and committed as .npz under tests/goldens/, so G1-G4 run
-   anywhere without mlx-vlm (design D2). `run_reference` runs a builder
+   anywhere without mlx-vlm. `run_reference` runs a builder
    script there; `save_golden` / `load_golden` are the format, numpy only.
 
-This file must import under BOTH interpreters (the test one, and the exo
-one a golden builder runs in), so it is stdlib + numpy at module level and
+This file must import under BOTH interpreters (the test one, and the
+mlx-vlm one a golden builder runs in), so it is stdlib + numpy at module level and
 imports mlx / PIL inside functions.
 
 Tiny-fixture rules, from tests/test_batch_drafting.py: float32, seed 0,
@@ -49,18 +47,16 @@ if str(ROOT / "src") not in sys.path:
 
 GOLDENS = ROOT / "tests" / "goldens"
 #: The interpreter with mlx-vlm 0.6.17 -- the reference. Override with
-#: KNURLOGIC_VLM_PYTHON on another box.
-REFERENCE_PYTHON = os.environ.get("KNURLOGIC_VLM_PYTHON",
-                                  "/opt/anaconda3/envs/exo/bin/python")
+#: KNURLOGIC_VLM_PYTHON (default: this interpreter).
+REFERENCE_PYTHON = os.environ.get("KNURLOGIC_VLM_PYTHON", sys.executable)
 REFERENCE_VERSION = "0.6.17"
 
 TINY_VOCAB = 512
 
 # --- 1. real configs, structural fields only ----------------------------------
-# Read from config.json of the named artifact on 2026-09-23. Only what the
-# vision path or the special ids need; each family's own fixture file adds
-# the text_config its trunk needs (P1 already has one in
-# tests/test_batch_drafting.py::_tiny).
+# Read from config.json of the named artifact. Only what the vision path or
+# the special ids need; each family's own fixture file adds the text_config
+# its trunk needs (see also tests/test_batch_drafting.py::_tiny).
 
 _QWEN_VISION = dict(deepstack_visual_indexes=[], depth=27,
                     hidden_act="gelu_pytorch_tanh", hidden_size=1152,
@@ -233,11 +229,11 @@ class StubFamily:
     `max_side`; one token per patch (grid (1, gh, gw), no merge).
     encode:     identity tower -- each patch's pixels in [0, 1], zero-padded
                 or truncated to `hidden`. `tower` is a separate method so a
-                test counts calls by wrapping it FROM OUTSIDE (critique 4:
-                a counter the code under test increments proves nothing).
+                test counts calls by wrapping it FROM OUTSIDE (a
+                counter the code under test increments proves nothing).
     positions:  (None, 0) -- the trunk's own 1D positions.
     chunk_boundaries: every image span when `bidirectional` (gemma-like, so
-                P4 can test the chunk snap), else [].
+                the serve path's chunk snap is tested), else [].
     embed:      embed_fn(ids) then scatter.merge -- the real merge path.
     """
 

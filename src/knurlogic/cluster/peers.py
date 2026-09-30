@@ -1,30 +1,15 @@
 """Peers: named, remembered, or introduced -- and why each is or is not
 answering.
 
-The night this was written, a second Mac sat silent for twenty minutes
-because a firewall prompt was waiting on ITS screen, and nothing on either
-machine said so. So every peer carries a state, and a state that is not
-`answering` carries the fix, on the machine that can apply it:
+Every peer carries a state (answering, not_answering with a `problem`, or
+version_mismatch); a peer that stops answering is kept and shown with how
+long it has been gone, never dropped silently. Every status request carries
+`X-Knurlogic-Peer: <id> <port>`, so the receiving page records the
+requester as an `introduced` peer and naming a machine on one side is
+enough for both. peers.json (~/.knurlogic/peers.json) is keyed by node id,
+versioned, written atomically, and holds addresses, not secrets.
 
-  answering        its status came back
-  not_answering    known (named, remembered or introduced) but the request
-                   failed; `problem` says what the failure looked like
-  version_mismatch answering, with a status schema this one does not read
-
-A peer that stops answering is kept and shown with how long it has been
-gone -- satellites sleep -- never dropped silently.
-
-HOW A PEER LEARNS ABOUT US. Every status request carries an introduction
-header (`X-Knurlogic-Peer: <id> <port>`); the receiving page records the
-requester's address with that port as an `introduced` peer. So naming a
-machine on ONE side is enough for both to know each other, and the side
-that cannot be reached still finds out: it asks its peers what they see,
-and a peer that lists it as `not_answering` is a measured fact -- "they
-can see me and cannot connect", which on a Mac is almost always the
-application firewall on THIS machine (docs/DISCOVERY.md, review item 1).
-
-peers.json (~/.knurlogic/peers.json) is keyed by node id, versioned, and
-written atomically. It holds addresses, not secrets.
+Design: docs/design/discovery.md (peers).
 """
 
 from __future__ import annotations
@@ -395,8 +380,8 @@ class Peers:
                 self._peers.pop(drop.key, None)
                 by_id[p.id] = keep
             # an address that does not answer, and that a known machine
-            # reports as its own (the M4 Max's other cable, learned by Bonjour
-            # or an introduction), is that machine -- never a second one
+            # reports as its own (its other cable, learned by Bonjour or an
+            # introduction), is that machine -- never a second one
             for k, p in list(self._peers.items()):
                 if p.state == "answering" and p.id:
                     continue

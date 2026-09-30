@@ -44,10 +44,8 @@ function modelHTML(b, r, doc, runs){
   </div>`;
 }
 // the VQ runtime's own knobs, under their own header after the general ones
-// (VQ_ only: VQLAB_CACHE_LIMIT_GB is the engine's buffer cache under the
-// name published runtimes read, not a VQ setting; the prompt chunk, filed
-// here as VQLAB_PREFILL_CHUNK, is KNURLOGIC_PREFILL_CHUNK now)
-const isVQ=k=>/^VQ_/.test(k.name);
+// (VQ_ only, but not VQ_CACHE_LIMIT_GB: that is the engine's buffer cache)
+const isVQ=k=>/^VQ_/.test(k.name) && k.name!=='VQ_CACHE_LIMIT_GB';
 const TUNES={};
 // Every base model: the picker's groups over what is on this disk, plus any
 // running on a peer that this disk does not have; the running ones first.

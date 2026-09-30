@@ -1,20 +1,10 @@
 """How to point something at this server.
 
-exo has a panel that writes the launch line for you, and it is the single
-most useful thing in that UI: the endpoint is worthless until a client is
-actually pointed at it, and the pointing is four environment variables that
-nobody remembers.
-
-TWO SHAPES, because they have different blast radius:
-
-* a one-liner for a terminal, which affects that command and nothing else;
-* a PROJECT settings file, which affects sessions started in one directory.
-
-Deliberately not offered: writing the user's global `~/.claude/settings.json`.
-That would silently route every session on the machine -- including the ones
-they use for work that has nothing to do with a local model -- at a 3-bit
-quantisation of a 30B. A config change nobody can see is how you end up
-debugging the wrong thing for an afternoon.
+Two shapes, because they have different blast radius: a one-liner for a
+terminal (that command only) and a project settings file (sessions started
+in one directory). Writing the user's global `~/.claude/settings.json` is
+deliberately not offered: it would silently route every session on the
+machine to a local model.
 """
 
 from __future__ import annotations

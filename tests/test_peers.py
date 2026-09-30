@@ -168,7 +168,7 @@ def test_two_machines_claiming_one_id_are_both_kept_and_flagged():
     assert "both claim" in a.problem and "both claim" in b.problem
 
 
-# --- one machine on two cables (the M3/M4 rig after a replug) ---------------
+# --- one machine on two cables (after a replug) -----------------------------
 
 M4 = "002779f847e1"
 SPEED = {"198.51.100.2": ("thunderbolt", 80.0), "192.0.2.2": ("thunderbolt", 40.0)}
@@ -198,7 +198,7 @@ def rig(tmp_path, monkeypatch, answers=("192.0.2.2", "198.51.100.2"), **kw):
 
 def test_an_unanswering_address_of_a_known_machine_is_not_a_second_one(
         tmp_path, monkeypatch):
-    # the M4 answers on the TB4 cable; Bonjour then offers its TB5 address
+    # the peer answers on the TB4 cable; Bonjour then offers its TB5 address
     # (no TXT id yet) and that address does not answer: still one machine
     ps, _ = rig(tmp_path, monkeypatch, answers=("192.0.2.2",))
     ps.refresh()

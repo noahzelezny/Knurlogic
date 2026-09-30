@@ -201,7 +201,7 @@ def _stubbed(real, loads):
 
 
 def test_forward_refuses_a_port_that_is_not_a_number(monkeypatch):
-    """Found by Qwen3.8-Flash-Next-6bit (cluster shootout 2026-09-27): a
+    """A
     load's port went through int() unguarded -- a 500 -- where unload's
     answers with what is wrong."""
     peers_with(peer(), monkeypatch=monkeypatch)

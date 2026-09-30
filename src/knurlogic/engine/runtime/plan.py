@@ -1,53 +1,18 @@
 """The step plan: what rank 0 tells every other rank before each step of a
-tensor-split model (docs/SERVER.md, "Cluster: tensor split").
+tensor-split model (docs/design/server.md, "Cluster: tensor split").
 
 Rank 0 owns the scheduler, HTTP and ALL sampling. Before each step every
-rank contributes one fixed-size control vector (an all_gather), and when
-rank 0 has something to say the plan's bytes follow (an all_sum in which
-every other rank contributes zeros). Ranks >= 1 apply the plan's ops in
-order, overwrite the batch's next tokens with the ones rank 0 sampled, and
-run the same step. They never sample for a live row and never decide a
-prompt-cache hit or an eviction themselves.
+rank contributes one fixed-size control vector (an all_gather: over,
+step, length), and when rank 0 has something to say the plan's bytes
+follow (an all_sum in which every other rank contributes zeros). Ranks
+>= 1 apply the plan's ops in order (admit, remove, insert, pop, reset,
+set, stop), overwrite the batch's next tokens with the ones rank 0
+sampled, and run the same step. They never sample for a live row and
+never decide a prompt-cache hit or an eviction themselves.
 
 The plan is JSON (never pickle: bytes from another process are data), and
-this module is pure Python so the codec is tested without MLX.
-
-Control vector, one int64 per slot, one row per rank:
-
-    [0] over    this rank's active memory minus its limit (signed bytes)
-    [1] step    the step counter (every rank counts; a mismatch is desync)
-    [2] length  plan bytes that follow -- rank 0's slot only; 0 = none
-
-Ops, applied in order (every field explicit):
-
-    admit   uid, prompt (every token), segs (what is prefilled, after the
-            prompt-cache hit and the lean decision), hit (tokens the prompt
-            cache supplied: rank 0's fetch, repeated and checked), max_tokens,
-            sampling (make_distribution kwargs + an assigned seed),
-            penalties, initial (the control machine's start state),
-            images, refs (a prompt with images: `key_to_wire`; [] for text)
-    remove  uids
-    insert  uid, event ("checkpoint" | "finished"), kind: store this
-            rank's cache from that event of the last step in the prompt cache
-    pop     n: evict the n least recently used prompt-cache entries
-    reset   close the executor (rank 0 closed its own)
-    set     name, value: a live knob rank 0 applied to itself (a Settings
-            apply); every rank applies it to its own engine before the step.
-            Only SETS travel: a knob read by rank 0's scheduler alone
-            (KNURLOGIC_CONTEXT_LENGTH) changes nothing on a follower
-    stop    leave the loop
-
-`tokens` (optional): [uid, token] for every row rank 0's batch holds at
-the start of this step, in batch order.
-
-A prompt with images is a cache KEY (engine/vision/key.py): ids with a
-sentinel ("img", sha, proc_hash, k) per image token. JSON has no tuples,
-and a follower's prompt cache must be keyed exactly as rank 0's, so the
-admit op carries the key as ids (-1 at every image token), `images`
-[[start, end, ref, k0]] per image run and `refs` [[sha, proc_hash,
-n_tokens, grid_thw]] per image -- what a follower needs to rebuild the key
-and to compute positions. The image rows themselves never travel in the
-plan (they follow in the admission: pipeline.Coord.images).
+this module is pure Python so the codec is tested without MLX. Field-level
+format: docs/design/server.md (step plan).
 """
 
 from __future__ import annotations
@@ -75,7 +40,8 @@ _FIELDS = {
 }
 #: the live knobs (engine/serve/load.LIVE_KNOBS) that act on a rank's own
 #: engine, so a change on rank 0 must reach every rank
-SETS = ("VQ_DECODE_CHUNK", "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_CACHE_LIMIT_GB")
+SETS = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB",
+        "KNURLOGIC_CACHE_LIMIT_GB")
 EVENTS = ("checkpoint", "finished")
 
 
