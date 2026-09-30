@@ -99,9 +99,12 @@ function knobHTML(k, c){
   let ctl;
   if(unsettable){
     const dflt='default';
-    const all=vals.length?vals:[...new Set([k.would_be??k.value].filter(v=>v!=null&&v!==''))];
+    // the preset's default is the unset row itself; the rest by title
+    const all=(vals.length?vals:[...new Set([k.would_be??k.value].filter(v=>v!=null&&v!==''))])
+      .filter(x=>!(k.name==='KNURLOGIC_PRESET'&&x==='balanced'));
+    const title=x=>x===UNSET?dflt:x;
     ctl=`<select aria-label="${esc(k.name)}">${[UNSET,...all].map(x=>
-      `<option value="${esc(x)}"${sameVal(x,sel)?' selected':''}>${esc(x===UNSET?dflt:x)}</option>`).join('')}</select>`;
+      `<option value="${esc(x)}"${sameVal(x,sel)?' selected':''}>${esc(title(x))}</option>`).join('')}</select>`;
   }else if(vals.length){
     const opts=vals.filter((x,i)=>i<=cap||sameVal(x,cur)||sameVal(x,sel));
     [sel,cur].forEach(v=>{ if(v!=null && !opts.some(x=>sameVal(x,v))) opts.unshift(v) });

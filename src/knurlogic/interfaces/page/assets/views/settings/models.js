@@ -16,10 +16,10 @@ function modelHTML(b, r, doc, runs){
   const all=doc.knobs||[];
   // knobs these runtimes never read are not shown at all
   const ks=all.filter(k=>k.reach!=='no-effect' && !isGlobal(k.name) && !HIDDEN.test(k.name))
-    .sort((a,b)=>(a.tier==='reach'?0:1)-(b.tier==='reach'?0:1));
+    .sort((a,b)=>rank(a)-rank(b));
   const asked=doc.asked||{}, un=doc.unmanaged||[];
   const tunes=r?(doc.tunes||[]).map(t=>`<button data-tune="${esc(t.name)}"
-    title="${esc(t.why)}" aria-pressed="${t.name===asked.tune}">${esc(t.name)}</button>`).join(''):'';
+    title="${esc(t.why)}" aria-pressed="${t.name===asked.tune}">${esc(presetTitle(t.name))}</button>`).join(''):'';
   // the confirm groups by g and lists by label
   const c=r ? {g:r.where, where:r.where, model:r.name, base:b.name, label:b.name}
     : {g:'launch|'+b.name, model:(doc.artifact||{}).name||'', base:b.name,
@@ -39,6 +39,12 @@ function modelHTML(b, r, doc, runs){
       esc(un.map(u=>u.name).join('  '))}</div></details>`:''}
   </div>`;
 }
+// the model's own settings first, then the preset's rows in the Knurlogic
+// tab's order, then anything else
+const ORDER=['KNURLOGIC_CONTEXT_LENGTH','KNURLOGIC_PRESET','KNURLOGIC_PREFILL_CHUNK',
+  'KNURLOGIC_CACHE_LIMIT_GB','KNURLOGIC_MTP','KNURLOGIC_MTP_DYNAMIC','KNURLOGIC_KV_BITS'];
+const rank=k=>{ const i=ORDER.indexOf(k.name); return i<0?ORDER.length:i };
+const presetTitle=n=>n==='balanced'?'Default':n.charAt(0).toUpperCase()+n.slice(1);
 // the VQ runtime's own knobs: knurlogic ships their best values, not rows
 const isVQ=k=>/^VQ_/.test(k.name);
 // not rows: long context follows the context length (past the native window
