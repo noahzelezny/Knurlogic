@@ -510,11 +510,16 @@ class Peers:
 
     # -- reading --------------------------------------------------------
     def all(self) -> list[Peer]:
+        """The peers the gate lets in: a machine reachable only over Wi-Fi
+        and not named with --peer is not listed (no Wi-Fi cluster in 0.1.0),
+        the same rule peer_refusal applies to its requests."""
         with self._lock:
             now = self.clock()
             for p in self._peers.values():
                 self._classify(p, now)
-            return sorted(self._peers.values(), key=lambda p: p.name or p.key)
+            return sorted((p for p in self._peers.values()
+                           if p.link != "wifi" or "manual" in p.found_by),
+                          key=lambda p: p.name or p.key)
 
     def seen_by_peers(self) -> list[dict]:
         """What the peers that answer say about THIS machine. The only way
