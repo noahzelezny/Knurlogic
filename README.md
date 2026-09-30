@@ -94,7 +94,8 @@ knurlogic version and the model on both, and run on each:
 
     knurlogic ui --host cluster
 
-The Macs find each other over Bonjour (`--peer HOST` names one directly;
+The Macs find each other over Bonjour (`--peer HOST` names one directly, on each machine
+(or link them with Thunderbolt);
 `knurlogic doctor --cluster` says what is in the way). Then launch the
 model from the page with the machines selected, or with the MCP `load`
 tool's `machines` argument. The TCP ring works for any number of Macs;

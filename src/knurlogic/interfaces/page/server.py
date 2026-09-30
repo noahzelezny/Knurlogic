@@ -1998,9 +1998,11 @@ def main(argv=None) -> int:
     p.add_argument("--peer", action="append", default=[],
                    metavar="HOST[:PORT]",
                    help="another machine's knurlogic page (repeatable). "
-                        "Naming it on one side is enough: it learns this "
-                        "machine from the request. Remembered once it "
-                        "answers.")
+                        "Naming it on one side lists it (it learns this "
+                        "machine from the request), but over Ethernet or "
+                        "Wi-Fi each side's gate needs the other named: name "
+                        "each machine on the other, or link them with "
+                        "Thunderbolt. Remembered once it answers.")
     p.add_argument("--allow-origin", action="append", default=[],
                    metavar="URL", help="a web page origin allowed to call "
                    "this page's API from a browser (repeatable)")

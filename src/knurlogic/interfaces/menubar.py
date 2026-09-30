@@ -75,6 +75,12 @@ def menu_model(doc: dict | None, host: str = "") -> dict:
         where = r.get("machine") or host
         lines.append(f"{r.get('name', '?')} · {where}" if where
                      else str(r.get("name", "?")))
+    # rumps keys menu items by title and drops a repeat, so two identical
+    # lines would collapse into one: tell repeats apart by port (or a count)
+    seen = {ln: lines.count(ln) for ln in lines}
+    for k, r in enumerate(rows):
+        if seen[lines[k]] > 1:
+            lines[k] += f" :{r['port']}" if r.get("port") else f" ({k + 1})"
     return {"title": f"Knurlogic — {n} model{'s' if n != 1 else ''} loaded",
             "models": lines}
 

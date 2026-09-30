@@ -32,6 +32,8 @@ classifiers = [
 dependencies = [
     "mlx==0.31.2; platform_system == 'Darwin'",
     "mlx-lm==0.31.3",
+    # the update check (model_info(expand=, timeout=)) and model downloads
+    "huggingface_hub>=0.24",
     "numpy>=1.24",
     # images: decode, EXIF transpose, the pixel hash
     "Pillow>=10.0",
