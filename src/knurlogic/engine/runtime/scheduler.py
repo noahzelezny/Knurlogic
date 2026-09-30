@@ -66,7 +66,7 @@ def _kv_from_config(path, kv_bits=None) -> Optional[tuple]:
         cfg = Artifact.load(path).raw_config
         per, _why = kv_bytes_per_token(cfg.get("text_config", cfg), kv_bits)
         return (0.0, float(per)) if per > 0 else None
-    except Exception:
+    except (OSError, ValueError, KeyError, AttributeError, TypeError):
         return None
 
 
@@ -102,7 +102,7 @@ def _cache_nbytes(cache) -> int:
     for c in cache or ():
         try:
             n += int(getattr(c, "nbytes", 0) or 0)
-        except Exception:
+        except (AttributeError, TypeError, ValueError, RuntimeError):
             pass    # an estimate: a layer that cannot report its size counts 0
     return n
 
@@ -117,7 +117,7 @@ def _fixed_nbytes(cache) -> int:
             t = getattr(c, "is_trimmable", None)
             if callable(t) and not t():
                 n += int(getattr(c, "nbytes", 0) or 0)
-        except Exception:
+        except (AttributeError, TypeError, ValueError, RuntimeError):
             pass    # an estimate: a layer that cannot report its size counts 0
     return n
 
@@ -179,7 +179,7 @@ class PromptCache:
         safe side."""
         try:
             r = self.lru._trie.search(key, tokens)
-        except Exception:
+        except (AttributeError, TypeError, ValueError, KeyError):
             return 0
         if r.exact is not None:
             return max(len(tokens) - 1, 0)
@@ -445,7 +445,7 @@ class Scheduler:
             if self.tensor is not None:
                 try:
                     self.tensor.stop()        # the other ranks leave too
-                except Exception:
+                except Exception:  # shutdown must finish whatever the ranks do (logged)
                     logger.exception("stopping the other ranks")
             self.cache = None
             # the model too: its lazily built arrays (rope tables, caches)
@@ -459,7 +459,7 @@ class Scheduler:
     def _loop_once(self) -> None:
         try:
             self._tick()
-        except Exception:
+        except Exception:  # the scheduler thread must outlive one bad tick (logged, fails the rows)
             # Nothing here should raise; if it does, fail what is in
             # flight rather than the thread.
             logger.exception("scheduler tick failed")
@@ -640,7 +640,7 @@ class Scheduler:
         if self._ex is not None:
             try:
                 self._ex.close()
-            except Exception:
+            except Exception:  # shutdown must finish whatever close raises (logged)
                 logger.exception("closing the executor")
             self._ex = None
 
@@ -683,7 +683,7 @@ class Scheduler:
                 # the client's request, not a fault here: no traceback
                 logger.info("refused a request: %s", e)
                 self._error(job, e)
-            except Exception as e:
+            except Exception as e:  # one request's failure goes to that request; the loop goes on (logged)
                 logger.exception("could not admit a request")
                 self._error(job, e)
             if images and self._rows:
@@ -1091,7 +1091,7 @@ class Scheduler:
         before = self._reset_peak()
         try:
             events = ex.step()          # on the executor's own stream
-        except Exception as e:
+        except Exception as e:  # a failed step fails its rows; the scheduler thread lives on (logged)
             logger.exception("a step failed; failing its rows")
             self._fail_all(e)
             self._close_executor()

@@ -168,7 +168,7 @@ class ModelHost:
             try:
                 import mlx.core as mx
                 mx.clear_cache()
-            except Exception:
+            except (ImportError, AttributeError, RuntimeError):
                 pass    # best effort: freeing Metal's cache is only an optimisation
         self._set("empty")
 
@@ -227,7 +227,7 @@ class ModelHost:
         try:
             vision.bind(path, self, store_bytes=self.image_store_bytes,
                         tower=self.tower)
-        except Exception as e:
+        except Exception as e:  # a vision build must not take the text model with it (logged, on /status.json)
             # A vision build that fails must not take the text model with
             # it; it is said on /status.json and images get a 400.
             logger.exception("vision did not bind")
@@ -251,7 +251,7 @@ class ModelHost:
             try:
                 import mlx.core as mx
                 out["memory_bytes"] = int(mx.get_active_memory())
-            except Exception:
+            except (ImportError, AttributeError, RuntimeError):
                 pass    # best effort: status still answers without the memory figure
         return out
 
@@ -260,5 +260,5 @@ def _active_gib() -> float:
     try:
         import mlx.core as mx
         return mx.get_active_memory() / (1 << 30)
-    except Exception:
+    except (ImportError, AttributeError, RuntimeError):
         return 0.0
