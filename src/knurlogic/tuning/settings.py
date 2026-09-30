@@ -231,25 +231,6 @@ TUNE_PROFILES = {
         "decode_chunk_scale": 1.0,
         "why": "the measured defaults",
     },
-    "fast": {
-        "KNURLOGIC_CACHE_LIMIT_GB": 8.0,
-        "decode_chunk_scale": 1.0,   # capped: smaller is already faster
-        "launch": {"mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16"},
-        "why": "spends headroom where it actually buys speed -- a "
-               "larger reclaimable cache, MTP with its dynamic controller, "
-               "bf16 KV. It does NOT raise the decode chunk, because smaller "
-               "is faster there as well as smaller in memory",
-    },
-    "stable": {
-        "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
-        "KNURLOGIC_CACHE_LIMIT_GB": 2.0,
-        "launch": {"mtp": "on", "mtp_dynamic": "off", "kv_bits": "bf16"},
-        "why": "repeatable: 512-token prompt chunks, MTP drafting every "
-               "step (no controller "
-               "switching regimes) for steady timing, bf16 KV, and "
-               "conservative memory -- a smaller reclaimable cache and a "
-               "transient bounded tighter than headroom requires",
-    },
     "lean": {
         "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
         "KNURLOGIC_CACHE_LIMIT_GB": 1.0,
@@ -264,7 +245,7 @@ TUNE_PROFILES = {
 #: default "balanced" (the measured defaults, unchanged). A per-model
 #: KNURLOGIC_PRESET (Settings -> Models) picks one for that base model;
 #: any explicit knob set beside it beats the preset's value for that knob.
-PRESETS = ("balanced", "fast", "stable", "lean")
+PRESETS = ("balanced", "lean")
 PRESET_DEFAULT = "balanced"
 
 
@@ -272,8 +253,9 @@ def preset_of(v, default: str = PRESET_DEFAULT) -> str:
     s = str(v or "").strip().lower()
     if not s:
         return default
-    if s == "safe":  # folded into lean
-        return "lean"
+    # the presets there were once: safe is lean now, the rest the default
+    s = {"safe": "lean", "fast": "balanced", "stable": "balanced",
+         "default": "balanced"}.get(s, s)
     if s not in TUNE_PROFILES:
         raise ValueError(f"preset {v!r}: one of {list(PRESETS)}")
     return s
@@ -552,7 +534,7 @@ KNOB_HELP = {
                             "Turn off if you need identical output; "
                             "slightly slower.",
     "KNURLOGIC_COMPACT_AUTO": "Compacts the conversation automatically "
-                              "when it reaches the Start at point, even if "
+                              "when it reaches the Auto compact point, even if "
                               "the client didn't ask.",
     "KNURLOGIC_COMPACT_TRIGGER": "How full the context window gets before "
                                  "automatic compaction starts.",
@@ -1182,7 +1164,7 @@ def check_compact_knob(name: str, value):
 # The page, a forwarded load and a cluster job all check a request against
 # these; they are settings facts, so they live here.
 
-TUNES = ("balanced", "fast", "stable", "lean")  # the names of PRESETS
+TUNES = ("balanced", "lean")  # the names of PRESETS
 #: request keys that would name a place on disk; refused outright, never
 #: ignored, so a coordinator that sends one learns it is wrong
 PATH_KEYS = ("path", "target", "artifact", "where", "dir", "directory")

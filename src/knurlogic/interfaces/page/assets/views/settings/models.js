@@ -33,15 +33,13 @@ function modelHTML(b, r, doc, runs){
   return `<div class="sgrp"${r?` data-where="${esc(r.where)}"`:''}>
     ${tunes?`<span class="seg">${tunes}</span>`:''}</div>${runs}
     ${ks.filter(k=>!isVQ(k)).map(k=>knobHTML(k,c)).join('')}
-    ${ks.some(isVQ)?`<div class="ksub">VQ</div>${
-      ks.filter(isVQ).map(k=>knobHTML(k,c)).join('')}`:''}
     ${ks.length?'':'<div class="msg">no knobs</div>'}
     ${un.length?`<details class="more"><summary>${un.length} other variables this
       runtime reads; knurlogic sets none of them</summary><div class="unl">${
       esc(un.map(u=>u.name).join('  '))}</div></details>`:''}
   </div>`;
 }
-// the VQ runtime's own knobs, under their own header after the general ones
+// the VQ runtime's own knobs: knurlogic ships their best values, not rows
 const isVQ=k=>/^VQ_/.test(k.name);
 // not rows: long context follows the context length (past the native window
 // is YaRN), and the VQ runtime's cache limit is knurlogic's, passed through
