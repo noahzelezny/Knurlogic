@@ -247,7 +247,7 @@ class Reply:
             ev = self.job.outbox.get()
         choice = {"index": 0, "finish_reason": finish}
         if self.ctx["chat"]:
-            msg = {"role": "assistant", "content": content}
+            msg: dict = {"role": "assistant", "content": content}
             if reasoning and not self.ctx["exclude"]:
                 msg["reasoning"] = msg["reasoning_content"] = reasoning
             if calls:

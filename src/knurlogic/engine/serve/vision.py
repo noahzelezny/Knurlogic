@@ -65,12 +65,12 @@ def bind(model_path: str, provider, *, store_bytes: int | None = None,
         set_spec(fam.spec)
         return serve
     n = fam.load_weights(str(model_path))
-    serve = VisionServe(fam, ImageStore(store_bytes or DEFAULT_MAX_BYTES),
-                        provider.model_key)
-    serve.tensors = int(n)
-    state.VISION["serve"] = serve
+    tower_serve = VisionServe(
+        fam, ImageStore(store_bytes or DEFAULT_MAX_BYTES), provider.model_key)
+    tower_serve.tensors = int(n)
+    state.VISION["serve"] = tower_serve
     set_spec(fam.spec)
-    return serve
+    return tower_serve
 
 
 def clear() -> None:

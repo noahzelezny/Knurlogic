@@ -137,7 +137,7 @@ def aggregate(snapshots, artifact=None) -> dict:
     """
     snaps = list(snapshots)
     up = [s for s in snaps if s.get("reachable", True)]
-    mem = {k: sum(_num(s.get("memory", {}).get(k)) for s in up)
+    mem: dict = {k: sum(_num(s.get("memory", {}).get(k)) for s in up)
            for k in _SUMMED}
     mem["available"] = any(s.get("memory", {}).get("available") for s in up)
     # A rollup is only as precise as its least precise node: one box-wide

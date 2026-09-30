@@ -437,7 +437,7 @@ def kv_bytes_per_token(tc: dict, kv_bits=None) -> tuple:
         ratios = [int(r) for r in (ratios or [])][:layers]
         hd = int(tc.get("head_dim") or 0)
         ihd = int(tc.get("index_head_dim") or 0)
-        el = S.BF16_BYTES
+        el: float = S.BF16_BYTES
         per = sum(hd / r + (ihd / r if r == 4 else 0)
                   for r in ratios if r > 0) * el
         n = sum(1 for r in ratios if r > 0)
@@ -554,7 +554,7 @@ def vision_budget(artifact: Artifact, store_bytes: int | None = None,
 
     tower, outside, n = _tower_bytes(artifact)
     live = store_bytes is not None
-    store = int(store_bytes) if live else DEFAULT_MAX_BYTES
+    store = int(store_bytes) if store_bytes is not None else DEFAULT_MAX_BYTES
     tc = cfg.get("text_config") or cfg
     per_tok, kv_why = kv_bytes_per_token(tc, kv_bits)
     toks = S.VISION_KV_IMAGES * S.VISION_KV_TOKENS_PER_IMAGE
@@ -953,7 +953,7 @@ def tensor_sharded(name: str) -> bool:
 def tensor_refusals(cfg: dict, n: int) -> list:
     """Why this config cannot be split `n` ways, one line per reason with
     its arithmetic; [] when it can."""
-    out = []
+    out: list = []
     if n < 2:
         return out
     tc = cfg.get("text_config", cfg)
@@ -1258,7 +1258,7 @@ def _byte_bounds(layer_bytes: list, weights: list, cap: list):
     one layer; rank 0 takes the rest. [(start, end) per rank], or None when
     a rank would hold more than it can."""
     n, L = len(weights), len(layer_bytes)
-    bounds = [None] * n
+    bounds: list = [None] * n
     at, left = 0, float(sum(layer_bytes))
     for r in range(n - 1, 0, -1):
         wsum = sum(weights[:r + 1])
@@ -1341,7 +1341,7 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
             + f" = {sum(cap) / GIB:.1f} GiB of layers")
     counts = _largest_remainder(L, weights, [1] * n, ceil)
     # stage order: rank n-1 first ... rank 0 last
-    bounds = [None] * n
+    bounds: list = [None] * n
     at = 0
     for r in range(n - 1, -1, -1):
         bounds[r] = (at, at + counts[r])

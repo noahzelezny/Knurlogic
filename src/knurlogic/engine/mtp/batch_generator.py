@@ -575,10 +575,10 @@ class MTPBatchGenerator(BatchGenerator):
             logger.error("non-finite logits in %d row(s); failing only those "
                          "requests", len(bad))
             self._batch.remove(list(bad))
-            for u, e in bad.items():
+            for u, err in bad.items():
                 self._rows.pop(u, None)
                 self._ckpt_pending.pop(u, None)
-                self._failed[u] = e
+                self._failed[u] = err
             prompt_responses += self._failed_responses()
             row_steps = [rs for rs in row_steps if rs.uid not in bad]
 

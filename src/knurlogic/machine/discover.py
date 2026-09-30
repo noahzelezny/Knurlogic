@@ -108,7 +108,7 @@ def _running_tool_roots() -> list:
     import re
     import subprocess
 
-    out = []
+    out: list = []
     try:
         ps = subprocess.run(["ps", "-xo", "pid=,command="], capture_output=True,
                             text=True, timeout=5).stdout
@@ -291,7 +291,7 @@ def _scan_ollama(root: Path) -> list:
     Implemented from the on-disk layout; this machine's store is empty, so
     it is UNVERIFIED against a real pull and says so rather than pretending.
     """
-    out = []
+    out: list = []
     man = root / "manifests"
     if not man.is_dir():
         return out
@@ -332,10 +332,10 @@ def find(stores=None, extra=(), include_defaults: bool = True) -> list:
         found = (_scan_ollama(root) if store == "ollama"
                  else _scan_tree(root, store))
         for f in found:
-            key = str(Path(f.path).resolve())
-            if key in seen:
+            real = str(Path(f.path).resolve())
+            if real in seen:
                 continue
-            seen.add(key)
+            seen.add(real)
             out.append(f)
     return sorted(out, key=lambda f: -f.bytes_on_disk)
 

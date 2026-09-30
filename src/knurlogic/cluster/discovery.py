@@ -141,7 +141,7 @@ class Discovery:
         self._keep: dict = {}
         self._lock = threading.Lock()
         self._stop = False
-        self._thread = None
+        self._thread: threading.Thread | None = None
 
     # -- starting ---------------------------------------------------------
     def _add_ref(self, ref, cb):

@@ -18,7 +18,7 @@ import copy
 import json
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from knurlogic.engine import templates as _templates
 from knurlogic.engine.serve import segments as _segments
@@ -72,13 +72,13 @@ def control_strings(tokenizer) -> Optional[re.Pattern]:
     ended its own turn, and `<|im_start|>system` inside a user message or a
     tool result opened a system turn (measured on Qwen3.8 Flash: models
     reviewing this code stopped mid-thought when they quoted one)."""
-    cached = getattr(tokenizer, "_knurlogic_controls", False)
+    cached: Any = getattr(tokenizer, "_knurlogic_controls", False)
     if cached is not False:
         return cached
     # mlx-lm's TokenizerWrapper forwards these to the HF tokenizer (its
     # `_tokenizer`); a fast HF tokenizer's own `_tokenizer` is the Rust
     # one, which has neither -- so ask the object itself
-    names = set()
+    names: Any = set()
     try:
         for t in (getattr(tokenizer, "added_tokens_decoder", None)
                   or {}).values():
@@ -241,7 +241,7 @@ def _preserving_template(tokenizer) -> Optional[str]:
     t = getattr(tokenizer, "chat_template", None)
     if not isinstance(t, str) or PRESERVE in t:
         return None
-    cached = getattr(tokenizer, "_knurlogic_preserving", False)
+    cached: Any = getattr(tokenizer, "_knurlogic_preserving", False)
     if cached is not False and cached[0] is t:
         return cached[1]
     new, n = _DROP.subn(lambda m: f"{m[1]}{_SWITCH}({m[2]}){m[3]}", t)

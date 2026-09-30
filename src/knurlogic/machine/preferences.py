@@ -88,7 +88,7 @@ def set(values: dict) -> dict:
     return cur
 
 
-def launch_sets(sets: dict) -> dict:
+def launch_sets(sets: dict | None) -> dict:
     """A launch's explicit settings with the saved knurlogic-wide ones a
     launch reads added where the launch names none: identical results
     across chips, and the custom preset values (a launch that names its own

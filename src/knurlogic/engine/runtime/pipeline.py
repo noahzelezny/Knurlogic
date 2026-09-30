@@ -186,7 +186,7 @@ def overlapped(model):
 def bounds_of(counts: Sequence[int]) -> List[Tuple[int, int]]:
     """Layer counts per rank -> (start, end) per rank; rank N-1 first."""
     n = len(counts)
-    out = [None] * n
+    out: List[Tuple[int, int]] = [(0, 0)] * n
     at = 0
     for r in range(n - 1, -1, -1):
         out[r] = (at, at + int(counts[r]))

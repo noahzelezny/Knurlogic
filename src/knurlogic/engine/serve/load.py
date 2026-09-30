@@ -131,7 +131,7 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
     overlay = long_context_overlay(p)
     state.SERVED["long_context"] = "yarn" if overlay else "off"
     state.SERVED["runtime"] = "bundled"
-    kw = {"lazy": True} if lazy else {}
+    kw: dict = {"lazy": True} if lazy else {}
     if overlay:
         kw["model_config"] = overlay
     if executes_artifact_code and \
@@ -315,7 +315,7 @@ def tool_support(chat_template: str) -> dict:
     would drift from the parser actually used at serve time. It is a private
     function, so this is version-skew surface, which is this file's job.
     """
-    out = {"has_template": bool(chat_template), "parser": None,
+    out: dict = {"has_template": bool(chat_template), "parser": None,
            "mentions_tools": "tool" in (chat_template or "").lower()}
     if not chat_template:
         return out

@@ -115,7 +115,7 @@ def expand_segments(segments: Sequence[Sequence[int]],
     # One pass over the flat, unexpanded ids, tracking which segment each
     # id came from: simpler than per-segment arithmetic and cannot drift.
     pos = 0
-    out = [[] for _ in segments]
+    out: list = [[] for _ in segments]
     seg_of = [si for si, s in enumerate(segments) for _ in s]
     r = 0
     for idx, t in enumerate(flat):

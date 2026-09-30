@@ -274,7 +274,7 @@ class Scheduler:
         self._others: List[int] = []
         self._others_at = 0.0
         #: (fixed bytes, bytes per token) of one row's cache, measured
-        self._kv = None
+        self._kv: Optional[tuple] = None
         self._samples: dict = {}
         self.cache = self._new_cache(prompt_cache_size)
         self.stats = stats if stats is not None else {}
@@ -652,7 +652,7 @@ class Scheduler:
         # instead of stalling every running row until all are encoded.
         from knurlogic.engine.vision import VisionError
         from knurlogic.engine.vision import request as vreq
-        held = []
+        held: list = []
         try:
             self._admit_from_queue(held, VisionError, vreq)
         finally:
@@ -831,7 +831,7 @@ class Scheduler:
         transient is taken as proportional to the context -- an
         overestimate, the safe side."""
         lo, hi = self._tx.get("lo"), self._tx.get("hi")
-        if hi is None or ctx <= hi[0]:
+        if hi is None or lo is None or ctx <= hi[0]:
             return self._spike
         if hi[0] - lo[0] >= 8192 and hi[1] > lo[1]:
             slope = (hi[1] - lo[1]) / (hi[0] - lo[0])
@@ -959,6 +959,7 @@ class Scheduler:
             self._kv = (f, max(b1 - f, 0) / n1)
 
     def _cost(self, n_tokens: int, copies: int) -> int:
+        assert self._kv is not None     # _cost is asked once one is known
         fixed, per = self._kv
         return int(copies * (fixed + per * n_tokens))
 
@@ -1074,6 +1075,7 @@ class Scheduler:
         while over > 0 and self._rows:
             uid = max(self._rows)             # the newest: least work lost
             row = self._rows.pop(uid)
+            assert self._ex is not None     # there are rows, so an executor
             self._ex.remove([uid])
             self._release()
             logger.warning("memory past the limit (%.1f GiB): stopped the "
@@ -1087,13 +1089,14 @@ class Scheduler:
 
     def _step(self) -> None:
         ex = self._ex
+        assert ex is not None
         ctx = self._context()
         before = self._reset_peak()
         try:
             events = ex.step()          # on the executor's own stream
-        except Exception as e:  # a failed step fails its rows; the scheduler thread lives on (logged)
+        except Exception as exc:  # a failed step fails its rows; the scheduler thread lives on (logged)
             logger.exception("a step failed; failing its rows")
-            self._fail_all(e)
+            self._fail_all(exc)
             self._close_executor()
             return
         self._measure(before, ctx)

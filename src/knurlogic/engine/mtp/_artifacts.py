@@ -173,7 +173,7 @@ class Status:
     def render(self) -> str:
         if self.state == BUILT:
             return ("multi-token-prediction head PRESENT and built\n"
-                    f"           {self.head.describe()}\n"
+                    f"           {self.head.describe() if self.head else ''}\n"
                     "           It is outside the model glob, so nothing has "
                     "loaded it: it costs\n           no memory until a "
                     "drafting loop asks for it.")

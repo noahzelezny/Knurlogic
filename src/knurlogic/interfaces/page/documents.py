@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Callable
 
 GIB = 1 << 30
 ASSETS = Path(__file__).parent / "assets"
@@ -239,7 +240,8 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=(),
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             return {}
         import os
-        stuck, applied = {}, {}
+        stuck: dict = {}
+        applied: dict = {}
         for k, v in want.items():
             now = os.environ.get(k)
             if str(v) == str(now):
@@ -326,7 +328,8 @@ def machine_settings():
             cur = adv["limit_bytes"] / GIB
             ceil_ = adv["ceiling_bytes"] / GIB
             try:
-                target = float(want) if want not in (None, "") else cur
+                target = (float(want) if want is not None and want != ""
+                          else cur)
             except (TypeError, ValueError):
                 target = cur
             # `ceiling_bytes` is knurlogic's RECOMMENDATION -- installed
@@ -703,7 +706,7 @@ def set_knurlogic(body) -> dict:
 def settings_document(artifact, live_env: dict, live_tune: str,
                       live_working_set: int, resolve_fn, wired_advice=None,
                       tunes=None,
-                      live_knobs=(), restart_why=RESTART_WHY) -> callable:
+                      live_knobs=(), restart_why=RESTART_WHY) -> Callable:
     """Build the `/settings.json` handler.
 
     The document says, for every knob: the value RUNNING, the value this

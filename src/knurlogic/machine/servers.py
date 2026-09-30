@@ -121,12 +121,13 @@ def listening_serves() -> dict:
                              timeout=5).stdout
     except (OSError, subprocess.SubprocessError):
         return {}
-    found, pid = {}, 0
+    found: dict = {}
+    owner = 0
     for line in out.splitlines():
         if line.startswith("p") and line[1:].isdigit():
-            pid = int(line[1:])
-        elif line.startswith("n") and pid:
+            owner = int(line[1:])
+        elif line.startswith("n") and owner:
             port = line.rsplit(":", 1)[-1]
             if port.isdigit():
-                found.setdefault(int(port), pid)
+                found.setdefault(int(port), owner)
     return found

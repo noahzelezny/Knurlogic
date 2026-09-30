@@ -98,7 +98,7 @@ def watch_ring(sched, mh, exit_after: float = 1.5) -> None:
     from knurlogic.cluster import jobs
     from knurlogic.engine.runtime.scheduler import RingFailed
 
-    armed = []
+    armed: list = []
 
     def probe():
         if not armed and getattr(mh, "state", "") == "ready":
@@ -143,7 +143,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
         from knurlogic.engine.serve import set_cache_limit
         print(f"cache limit {set_cache_limit(settings['cache_limit_gb'])}")
     tensor = shard = agree = None
-    pipe = bool(ring) and ring.get("split") == "pipeline"
+    pipe = bool(ring and ring.get("split") == "pipeline")
     if ring:
         from knurlogic.engine.runtime import tensor as T
         link = T.init(ring["link"])

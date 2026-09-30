@@ -136,7 +136,7 @@ def _thermal():
         return None
 
 
-_HID = {}
+_HID: dict = {}
 
 
 def _hid():

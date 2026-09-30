@@ -109,7 +109,7 @@ class Peer:
         return f"{self.host}:{self.port}"
 
     def public(self) -> dict:
-        d = {"id": self.id, "name": self.name, "address": self.key,
+        d: dict = {"id": self.id, "name": self.name, "address": self.key,
              "found_by": sorted(self.found_by), "state": self.state,
              "link": self.link}
         if self.gbps:
@@ -162,7 +162,7 @@ class Peers:
         self._fetch = fetch or self._http
         self._lock = threading.Lock()
         self._peers: dict[str, Peer] = {}
-        self._thread = None
+        self._thread: threading.Thread | None = None
         for host, port in manual:
             self.add(host, port, "manual")
         for rec in self._load().values():
@@ -292,7 +292,7 @@ class Peers:
                 p.link, p.gbps = self._speed(h)
             break
         else:
-            p.state, p.problem = "not_answering", _describe(err, p)
+            p.state, p.problem = "not_answering", _describe(err or OSError("no address tried"), p)
             p.failing_since = p.failing_since or now
             return
         if not isinstance(doc, dict):

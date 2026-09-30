@@ -65,7 +65,7 @@ class ModelHost:
         self.error = ""
         self.model = None
         self.tokenizer = None
-        self.model_key = None
+        self.model_key: tuple | None = None
         self.loaded_at = 0.0
         self._ready = threading.Condition()
 
@@ -246,7 +246,8 @@ class ModelHost:
     # --------------------------------------------------------------- status
 
     def status(self) -> dict:
-        out = {"state": self.state, "model": self.path, "error": self.error}
+        out: dict = {"state": self.state, "model": self.path,
+                     "error": self.error}
         if self.state == "ready":
             try:
                 import mlx.core as mx

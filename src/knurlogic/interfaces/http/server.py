@@ -307,7 +307,7 @@ class App:
 
 
 class Handler(BaseHTTPRequestHandler):
-    app: App = None                    # set on the subclass by serve()
+    app: App = None  # type: ignore[assignment]  # set on the subclass by serve()
     server_version = "knurlogic"
 
     def log_message(self, fmt, *args):  # quiet, as mlx-lm's is not

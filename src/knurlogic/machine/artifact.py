@@ -356,7 +356,7 @@ def on_network(path) -> bool:
                for m in _network_mounts())
 
 
-def resolve_identity(ident: str, paths=None, name: str = "") -> str | None:
+def resolve_identity(ident: str | None, paths=None, name: str = "") -> str | None:
     """The local artifact directory with this identity, or None. `paths`
     defaults to every artifact in this machine's model stores
     (machine/discover.py); nothing outside them is ever considered.
@@ -402,7 +402,7 @@ def prefer_shared(ident: str, name: str, paths=None) -> tuple:
         from knurlogic.machine import discover
         paths = [f.path for f in discover.find()]
     same = [p for p in paths if Path(str(p)).name == name]
-    shared = {}
+    shared: dict = {}
     for p in same:
         if on_network(p):
             i = identity(p)

@@ -338,6 +338,7 @@ def admit(
                     h_c = h_all[:, c - 1 - seeded:c - seeded]
                     seeded = c - 1
                     mx.eval(h_chunks[0], h_c)
+                assert on_checkpoint is not None    # cps is empty without one
                 on_checkpoint(c, cache, dcache if drafts else None, h_c)
             if on_progress is not None:
                 on_progress(end, n)
@@ -446,9 +447,9 @@ class MTPBatch:
 
         self.cache: list = []               # batched trunk caches
         self.hcache: Any = None             # batched head cache
-        self.t1: Optional[mx.array] = None          # [B] int32
-        self.row_t1: Optional[mx.array] = None      # [B, V]
-        self.draft_row: Optional[mx.array] = None   # [B, V]
+        self.t1: Any = None          # [B] int32 (mx.array)
+        self.row_t1: Any = None      # [B, V]
+        self.draft_row: Any = None   # [B, V]
 
     def __len__(self) -> int:
         return len(self.uids)

@@ -19,7 +19,7 @@ import json
 import re
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Optional
 
 COMPACT = "compact_20260112"
 CLEAR_TOOLS = "clear_tool_uses_20250919"
@@ -64,7 +64,7 @@ class ClearTools:
 
 @dataclass
 class ClearThinking:
-    keep: object = 1                     # "all" or a number of turns
+    keep: Any = 1                        # "all" or a number of turns
 
 
 def _value(obj, name, kinds, default):
@@ -90,7 +90,7 @@ def parse(cm) -> list:
     edits = cm.get("edits") or []
     if not isinstance(edits, list):
         raise EditError("context_management.edits must be a list")
-    out = []
+    out: list = []
     for i, e in enumerate(edits):
         where = f"context_management.edits[{i}]"
         if not isinstance(e, dict):
@@ -114,7 +114,7 @@ def parse(cm) -> list:
             tr = e.get("trigger") or {"type": "input_tokens",
                                       "value": CLEAR_TOOLS_TRIGGER_DEFAULT}
             out.append(ClearTools(
-                trigger_type=(tr.get("type") if isinstance(tr, dict)
+                trigger_type=(str(tr.get("type")) if isinstance(tr, dict)
                               else "input_tokens"),
                 trigger=_value(tr, f"{where}.trigger",
                                {"input_tokens", "tool_uses"},
@@ -276,7 +276,7 @@ def tool_uses(msgs: list) -> List[ToolUse]:
     """Every tool call in `msgs`, in order, with its result."""
     results = {m.get("tool_call_id"): _text(m.get("content"))
                for m in msgs if m.get("role") == "tool"}
-    out = []
+    out: list = []
     for m in msgs:
         for c in m.get("tool_calls") or []:
             fn = c.get("function") or {}
@@ -323,7 +323,7 @@ def parse_output(text: str, n_uses: int) -> tuple:
     text = _THINK.sub("", text or "").strip()
     m = _FIND_HEAD.search(text)
     summary, tail = (text[:m.start()], text[m.end():]) if m else (text, "")
-    found = {}
+    found: dict = {}
     for f in _FIND.finditer(tail):
         n = int(f.group(1))
         if 1 <= n <= n_uses and f.group(2).strip():
