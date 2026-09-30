@@ -50,7 +50,10 @@ def fake_argv(path, spec, files):
     return [sys.executable, os.path.join(HERE, "cluster_fake_rank.py"),
             path, "knurlogic", "serve", "--rank", str(spec["rank"]),
             "--job", spec["job"], "--port", str(spec.get("port") or 0),
-            "--cable", str(spec.get("cable") or "")]
+            "--cable", str(spec.get("cable") or ""),
+            # a test's process: a real page never lists it
+            # (machine/servers.is_test_process)
+            "--knurlogic-test"]
 
 
 if __name__ == "__main__":
