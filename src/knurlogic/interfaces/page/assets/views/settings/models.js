@@ -4,16 +4,14 @@ import {isGlobal, knobHTML, launchSets} from './knobs.js';
 import {stagedVal} from './apply.js';
 import {SBASE, SEQ, SRUN, allModels, keepSet, nextSeq, setSBase, shortName} from './index.js';
 import {docURL, getJSON} from '../../api.js';
-import {BASEKEY, baseKey, baseOf, published} from '../picker.js';
+import {BASEKEY, baseKey, baseOf, famOf, published} from '../picker.js';
 
-// One base model's settings: its header, where its variants run (or which
+// One base model's settings, under its row: where its variants run (or which
 // rung the resolver was asked about), the tunes to preview, a row per knob
 // a runtime reads, and the rest folded away. `r` is the running variant
 // whose live values are shown; none, and every change is a launch setting.
 function modelHTML(b, r, doc, runs){
-  const hd=`<div class="shd">${esc(b.name)}<span class="ro">${b.ms.length||'no'}
-    variant${b.ms.length===1?'':'s'} on this disk</span>`;
-  if(doc.error) return `<div class="sgrp">${hd}</div>${runs}
+  if(doc.error) return `<div class="sgrp">${runs}
     <div class="msg">could not read its settings: ${esc(doc.error)}</div></div>`;
   const all=doc.knobs||[];
   // knobs these runtimes never read are not shown at all
@@ -33,7 +31,7 @@ function modelHTML(b, r, doc, runs){
     mk.running??mk.would_be) : 'off';
   c.hide=n=>n==='KNURLOGIC_MTP_DYNAMIC' && String(mtp)==='off';
   return `<div class="sgrp"${r?` data-where="${esc(r.where)}"`:''}>
-    ${hd}${tunes?`<span class="seg">${tunes}</span>`:''}</div>${runs}
+    ${tunes?`<span class="seg">${tunes}</span>`:''}</div>${runs}
     ${ks.filter(k=>!isVQ(k)).map(k=>knobHTML(k,c)).join('')}
     ${ks.some(isVQ)?`<div class="ksub">VQ</div>${
       ks.filter(isVQ).map(k=>knobHTML(k,c)).join('')}`:''}
@@ -59,24 +57,44 @@ function settingBases(){
     .sort((x,y)=>(y.runs.length?1:0)-(x.runs.length?1:0) || big(y)-big(x));
 }
 const runsOn=b=>[...new Set(b.runs.map(r=>r.mach.name))].join(', ');
+// the picker's families: a base model's is its biggest variant's, else the
+// running one's name
+const famOfBase=b=>famOf(b.ms[0]||{name:(b.runs[0]||{}).name||b.name});
+let SFAM='';
+// Families down the side, as the picker has them; the family's models as
+// rows, the one open showing its settings under it.
 function showModels(){
-  const bs=settingBases(), L=$('setlist');
-  if(!bs.some(b=>b.name===SBASE)) setSBase(bs.length?bs[0].name:'');
-  const row=b=>`<div class="fam" data-b="${esc(b.name)}" aria-current="${b.name===SBASE}"
-      title="${esc(b.ms.map(m=>m.name).join('\n'))}">${esc(b.name)}
-      <small${b.runs.length?' class="on"':''}>${b.runs.length?'on '+esc(runsOn(b)):
-        b.ms.length+' variant'+(b.ms.length===1?'':'s')}</small></div>`;
-  const on=bs.filter(b=>b.runs.length), off=bs.filter(b=>!b.runs.length);
-  L.innerHTML=`${on.length?`<div class="sect">running</div>${on.map(row).join('')}`:''}${
-    off.length?`<div class="sect">on this disk</div>${off.map(row).join('')}`:''}${
-    bs.length?'':'<div class="msg" style="padding:0 12px">no models</div>'}`;
-  L.querySelectorAll('[data-b]').forEach(v=>v.onclick=()=>{
-    if(v.dataset.b===SBASE) return;
-    setSBase(v.dataset.b); keepSet();
-    L.querySelectorAll('[data-b]').forEach(x=>x.setAttribute('aria-current', x===v));
-    showBase(bs.find(b=>b.name===SBASE));
+  const bs=settingBases(), L=$('setlist'), el=$('machbody');
+  const cur=bs.find(b=>b.name===SBASE);
+  const count={};
+  bs.forEach(b=>{ const f=famOfBase(b); count[f]=(count[f]||0)+1 });
+  const fams=Object.keys(count).sort();
+  if(!fams.includes(SFAM)) SFAM=cur?famOfBase(cur):fams[0]||'';
+  L.innerHTML=fams.map(f=>`<div class="fam" data-f="${esc(f)}" aria-current="${f===SFAM}">${
+    esc(f)}<i>${count[f]}</i>${bs.some(b=>b.runs.length&&famOfBase(b)===f)
+      ?'<small class="on">running</small>':''}</div>`).join('')
+    || '<div class="msg" style="padding:0 12px">no models</div>';
+  L.querySelectorAll('[data-f]').forEach(v=>v.onclick=()=>{
+    if(v.dataset.f===SFAM) return;
+    SFAM=v.dataset.f; showModels() });
+  const mine=bs.filter(b=>famOfBase(b)===SFAM);
+  if(!bs.length){ el.innerHTML='<div class="msg">No models on this disk, and nothing running.</div>'; return }
+  el.innerHTML=`<div class="msg" style="margin-top:0">A change applies at the model's next launch.</div>`+
+    mine.map(b=>`<div class="grp mrow${b.name===SBASE?' open':''}" data-b="${esc(b.name)}">
+      <div class="grphd" title="${esc(b.ms.map(m=>m.name).join('\n'))}"><span class="cv">›</span>
+        <span class="gn">${esc(b.name)}</span>
+        <span class="gv${b.runs.length?' on':''}">${b.runs.length?'on '+esc(runsOn(b)):
+          b.ms.length+' variant'+(b.ms.length===1?'':'s')}</span></div>
+      <div class="mset"></div></div>`).join('');
+  el.querySelectorAll('.mrow>.grphd').forEach(h=>h.onclick=()=>{
+    const row=h.parentElement, open=!row.classList.contains('open');
+    el.querySelectorAll('.mrow').forEach(x=>{ x.classList.remove('open');
+      x.querySelector('.mset').innerHTML='' });
+    setSBase(open?row.dataset.b:''); keepSet();
+    if(open){ row.classList.add('open'); showBase(bs.find(b=>b.name===SBASE)) }
   });
-  keepSet(); showBase(bs.find(b=>b.name===SBASE));
+  keepSet();
+  if(mine.some(b=>b.name===SBASE)) showBase(bs.find(b=>b.name===SBASE));
 }
 // A base model's settings. Running: the running variant's own settings
 // (live ones apply to it; the rest wait for a launch), and a line for each
@@ -84,8 +102,10 @@ function showModels(){
 // resolver would give the rung that fits (the preview Load model asks for),
 // every change saved for its next launch. Reads only; Apply on close sends.
 async function showBase(b){
-  const el=$('machbody'), seq=nextSeq();
-  if(!b){ el.innerHTML='<div class="msg">No models on this disk, and nothing running.</div>'; return }
+  const seq=nextSeq(), row=[...document.querySelectorAll('#machbody .mrow')]
+    .find(x=>x.dataset.b===b.name);
+  if(!row) return;
+  const el=row.querySelector('.mset');
   el.innerHTML='<div class="msg">reading…</div>';
   // what the resolver would give the rung that fits, as launch settings
   const preview=async lead=>{
@@ -95,9 +115,8 @@ async function showBase(b){
     const doc=await getJSON('/settings.json?'+new URLSearchParams({artifact:m.path, tune:pre}));
     if(seq!==SEQ) return;
     el.innerHTML=modelHTML(b, null, doc, `${lead}<div class="msg" style="margin-top:0">${
-      b.runs.length?'Its server does not answer, so nothing can change live.':'Not running.'}
-      The resolver's values for ${esc(m.name)} (${esc(pre)} preset); a change is kept
-      for whichever variant launches next.</div>`);
+      b.runs.length?'Its server does not answer.':'Not running.'}
+      Values for ${esc(m.name)} at the ${esc(pre)} preset.</div>`);
   };
   if(!b.runs.length) return preview('');
   const r=b.runs.find(x=>x.where===SRUN[b.name])||b.runs[0];
