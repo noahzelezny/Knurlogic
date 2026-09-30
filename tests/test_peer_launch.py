@@ -40,7 +40,7 @@ def call(body, headers=None, gate=Open(), **kw):
     return code, doc, loads
 
 
-LOAD = {"action": "load", "identity": "abc", "tune": "fast",
+LOAD = {"action": "load", "identity": "abc", "tune": "lean",
         "sets": {"VQ_DECODE_CHUNK": "16"}}
 
 
@@ -90,7 +90,7 @@ def test_knobs_outside_the_allow_list_are_refused():
 def test_accepted_load_resolves_identity_here():
     code, doc, [a] = call(LOAD)
     assert code == 200 and a["artifact"] == "/models/X"
-    assert a["tune"] == "fast" and a["sets"] == {"VQ_DECODE_CHUNK": "16"}
+    assert a["tune"] == "lean" and a["sets"] == {"VQ_DECODE_CHUNK": "16"}
 
 
 # --- identity ----------------------------------------------------------------
@@ -165,7 +165,7 @@ def test_forward_to_a_real_peer_page(monkeypatch):
                             key=f"127.0.0.1:{port}", found_by={"manual"})
         peers_with(p, monkeypatch=monkeypatch)
         doc = page_server.forward_launch({"action": "load", "node": "m4id",
-                                 "identity": "abc", "tune": "safe",
+                                 "identity": "abc", "tune": "lean",
                                  "sets": {"VQ_DECODE_CHUNK": "8"}})
         assert doc.get("starting") == "/models/X", doc
         assert doc["machine"] == "M4" and loads[0]["port"] == 8080
