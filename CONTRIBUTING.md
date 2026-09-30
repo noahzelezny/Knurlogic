@@ -10,6 +10,7 @@
 ## Before you commit
 
     ruff check .
+    mypy
     python -m pytest -q tests
 
 ## Run the tests
