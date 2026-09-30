@@ -231,7 +231,7 @@ async function tick(){
     const mapped=!!(mm&&mm.installed_bytes);
     const inst=(mapped?mm.installed_bytes:nm.working_set_bytes)||0;
     const used=mapped?(mm.used_bytes||mm.seen_bytes||0):(nm.active_bytes||0);
-    const off=n.reachable===false||(!nm.available&&!mapped);
+    const off=n.reachable===false||n.state==='version_mismatch'||(!nm.available&&!mapped);
     const pct=inst?Math.max(0,Math.min(100,100*used/inst)):0;
     const swap=swapToShow(n);
     const what=[hw.chip||hw.model||'', inst?gb(inst).replace(/\.\d+ /,' '):'']
