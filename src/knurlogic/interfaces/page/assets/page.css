@@ -9,7 +9,7 @@
   --fg:oklch(.9 0 0);--dim:oklch(.6 0 0);--faint:oklch(.45 0 0);
   --line:oklch(.25 0 0);--grid:oklch(.2 0 0/.3);
   --ok:oklch(.78 .15 150);--warn:oklch(.78 .15 70);--bad:oklch(.68 .19 25);
-  --acc:oklch(.82 .14 185);--accfg:oklch(.14 .02 185);
+  --acc:oklch(.82 .14 185);--accfg:oklch(.14 .02 185);--star:oklch(.86 .17 92);
   --glow:0 0 20px oklch(.82 .14 185/.3);
   --r:.375rem}
 /* Light mode is not exo's -- exo is dark only -- but a page that blinds
@@ -19,7 +19,7 @@
   --fg:oklch(.2 0 0);--dim:oklch(.45 0 0);--faint:oklch(.6 0 0);
   --line:oklch(.89 0 0);--grid:oklch(.8 0 0/.35);
   --ok:oklch(.5 .14 150);--warn:oklch(.55 .13 70);--bad:oklch(.55 .19 25);
-  --acc:oklch(.55 .11 185);--accfg:oklch(1 0 0);--glow:none}}
+  --acc:oklch(.55 .11 185);--accfg:oklch(1 0 0);--star:oklch(.72 .16 80);--glow:none}}
 *{box-sizing:border-box}
 /* This is a control surface on a desk, often on a large display, and it
    was capped at 1320px of 13px type -- which on a big screen is a small
@@ -617,6 +617,7 @@ input:focus{outline:none;border-color:var(--acc)}
 .kedit select,.kedit input{width:auto;max-width:8em;padding:2px 5px;
   font-size:13px}
 .kedit input{width:6em;text-align:right}
+.knob[data-name="KNURLOGIC_PRESET"] .kedit select{max-width:none}
 .kedit .mini{padding:2px 8px}
 .krep{font-size:12.5px;color:var(--dim);margin-top:2px;text-align:right}
 .val{font-size:14px;white-space:nowrap}
@@ -626,8 +627,10 @@ input:focus{outline:none;border-color:var(--acc)}
   border:1px solid var(--line);padding:0 4px;margin-left:7px}
 .tag.live{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
 .tag.dead{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
-.star{cursor:pointer;color:var(--faint);margin-right:6px}
-.star:hover{color:var(--acc)}
+.star{cursor:pointer;color:var(--faint);margin-right:2px;font-size:20px;
+  line-height:1;width:1.1em;text-align:center;flex:none}
+.star:hover,.star.on{color:var(--star)}
+.fam[data-f="Favorites"]::before{content:'★';color:var(--star);margin-right:6px}
 .msg{color:var(--dim);font-size:13.5px;margin-top:10px}
 .msg b{color:var(--fg)}
 code{font-size:13.5px}
@@ -810,7 +813,8 @@ body.talk #clog{flex:1;height:auto;min-height:0;max-height:none}
   text-transform:uppercase;color:var(--dim);margin:6px 0}
 .vars.flat{display:block}
 .vars.flat .var{padding-left:14px}
-.mrow .mset{display:none;padding:2px 18px 14px 34px}
+.mrow .mset{display:none;padding:2px 18px 14px calc(34px + 1.75em)}
+@media(max-width:640px){.mrow .mset{padding:2px 10px 14px calc(14px + 1.25em)}}
 .mrow.open .mset{display:block}
 .mrow.open .cv{transform:rotate(90deg)}
 .grphd .gv.on{color:var(--acc)}

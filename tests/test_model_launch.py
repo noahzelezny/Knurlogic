@@ -56,9 +56,11 @@ def test_mtp_knobs_appear_only_where_a_head_ships(tmp_path):
                                      ("qwen4_exp_text", ["8", "6", "4"]),
                                      ("glm5_next", ["8"])])
 def test_kv_bits_offered_per_family(tmp_path, mt, bits):
+    """Settings offers bf16 and 8 only; 6 and 4 are still taken where the
+    family takes them (env, --set)."""
     r = resolve(_art(tmp_path, mt), 96 * GIB)
     assert r.env["KNURLOGIC_KV_BITS"] == "bf16"
-    assert r.ranges["KNURLOGIC_KV_BITS"] == ["bf16"] + bits
+    assert r.ranges["KNURLOGIC_KV_BITS"] == ["bf16", "8"]
     assert kv_refusal(_art(tmp_path, mt), 8) is None
     for b in ("6", "4"):
         assert (kv_refusal(_art(tmp_path, mt), int(b)) is None) == (b in bits)
@@ -219,7 +221,7 @@ def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
     KV control narrowed to what the family allows."""
     from knurlogic.interfaces.page import documents
     for mt, want in (("glm5_next", ["bf16", "8"]),
-                     ("qwen3_5_text", ["bf16", "8", "6", "4"])):
+                     ("qwen3_5_text", ["bf16", "8"])):
         (tmp_path / mt).mkdir()
         a = _art(_with_head(tmp_path / mt), mt)
         doc = documents.settings_document(

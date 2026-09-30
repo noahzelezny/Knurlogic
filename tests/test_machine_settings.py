@@ -44,7 +44,7 @@ def test_every_preset_is_explained(home):
     assert [p["name"] for p in doc["presets"]] and \
         {p["name"] for p in doc["presets"]} == set(PRESETS)
     for p in doc["presets"]:
-        assert p["trades"] and p["changes"] and p["who"]
+        assert p["title"] and p["settings"]
     out = documents.set_strategy(b'{"preset": "stable"}')
     assert out["preset"] == "stable" and out["applied"]
     assert "error" in documents.set_strategy(b'{"preset": "x"}')
