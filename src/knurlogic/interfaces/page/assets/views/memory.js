@@ -3,7 +3,7 @@ import {dismissLaunch, failedLaunches,
   followLaunches, loadDownloads, loadingLaunches} from './picker.js';
 
 // --- what is actually in memory, whoever put it there ---------------------
-// exo's models, ollama's models and ours in one list. A machine has one pool
+// Every runtime's models (ollama's, others') and ours in one list. A machine has one pool
 // of memory and every runtime is spending from it, so opening another tool's
 // page to see what it is holding is a thing this should have made
 // unnecessary.
@@ -83,7 +83,7 @@ function refusalText(j){
 async function loadResident(){
   // ?peers=1: the page process also asks every answering peer what it is
   // holding, so a model on the other machine is on this page too, the way
-  // exo's topology shows it. The server bounds the wait; a dead peer comes
+  // the topology shows it. The server bounds the wait; a dead peer comes
   // back as an error line, never as a missing answer.
   let d; try{ d=await (await fetch('/loaded.json?peers=1')).json() }catch(e){ return }
   const peers=d.peers||[];

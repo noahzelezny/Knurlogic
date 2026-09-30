@@ -5,8 +5,6 @@
 // prompt prefix (no nonce -- that is what lets the server's prefix cache reuse
 // an unchanged image across turns), and multimodal content.
 //
-// The look and the chat-memory idea are inspired by exo's dashboard; the
-// code is knurlogic's own, written from what each piece must do.
 // Reasoning is never parsed out of text here: the server sends it as
 // `reasoning_content`, because only the server knows each template's
 // thinking syntax (gemma's is not <think>).
@@ -59,9 +57,8 @@ $('ptabs').querySelectorAll('button').forEach(b=>b.onclick=()=>switchTab(b.datas
 // --- IndexedDB image store ----------------------------------------------
 // Images are content-addressed by the SHA-256 of the FINAL data URL (the
 // one downscaled/re-encoded once at attach time -- §3.2/3.4). Kept out of
-// localStorage on purpose: exo's own store keeps images inline as data URLs
-// there and just logs the quota error (`app.svelte.ts:669`); a few
-// screenshots would blow past 5 MB in a couple of turns.
+// localStorage on purpose: inline data URLs would blow past its 5 MB quota
+// in a couple of turns of screenshots.
 let IDB=null, IDBFAIL=false;
 function openIDB(){
   return new Promise((res)=>{
@@ -108,7 +105,7 @@ function saveChats(){ try{ localStorage.setItem(CSTORE, JSON.stringify(CHATS.sli
   catch(e){} }
 function curChat(){ return CHATS.find(c=>c.id===CCUR)||null }
 
-// A model as the chat shows it: no path, no org. exo's directories are
+// A model as the chat shows it: no path, no org. Model directories are
 // org--name, so everything up to the last `--` is the org.
 function shortModel(name){
   const s=String(name||'').replace(/\/+$/,'');
@@ -163,8 +160,8 @@ function newChat(modelHint, where, vision){
   saveChats(); switchTab('chat'); renderChats(); renderClog();
   clearAttachments(); chatGate(); $('cq').focus();
 }
-// Vision for a running model, from /models.json (the server's answer). exo
-// names a model org/name; its directory, and so the model list, org--name.
+// Vision for a running model, from /models.json (the server's answer). A
+// model is named org/name; its directory, and so the model list, org--name.
 function visionOf(name){
   const k=String(name||'').replace('/','--');
   const m=(window.ALLMODELS||[]).find(x=>x.name===k||x.name===name);

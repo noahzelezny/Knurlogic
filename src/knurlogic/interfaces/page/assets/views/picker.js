@@ -15,15 +15,14 @@ import {act, loadResident} from './memory.js';
 // working set, and two fetches racing means the list is sorted against zero
 // about half the time.
 // --- load model -----------------------------------------------------------
-// One picker, its options, and a launch -- exo's shape. The previous version
-// listed seven models with a button on each and "+46 more", which is a
-// catalogue pretending to be a control: the answer to fifty rungs is a
-// picker, not a longer list.
+// One picker, its options, and a launch. A list with a button on each
+// model is a catalogue, not a control: the answer to fifty rungs is a
+// picker.
 let MODELS=[], GROUPS=[], FAM='All', SEL=null, QUERY='';
 // a launch that went ahead clears the pick; loadModels must not re-pick
 let SELCLEARED=false;
 // Favorites/recents: a set of starred paths and a 20-entry most-recent list,
-// both in localStorage (the idea is exo's picker; the code is ours).
+// both in localStorage (the picker's own bookkeeping).
 function loadFav(){ try{ return new Set(JSON.parse(localStorage.getItem('kn.fav')||'[]')) }
   catch(e){ return new Set() } }
 function isFav(p){ return loadFav().has(p) }
@@ -106,7 +105,7 @@ function baseKeys(ms){
 const published=m=>m.servable && /--|\//.test(m.name)
   && !/-VQ-BASE$/i.test(m.name)
   && !!m.model_type && m.model_type!=='unknown';
-// A running model's name as its runtime gives it: exo's org/name is the
+// A running model's name as its runtime gives it: org/name is the
 // directory org--name; one not on this disk is named by the same rule.
 function baseKey(name){
   const k=String(name||'').replace('/','--');
