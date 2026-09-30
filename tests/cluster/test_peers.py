@@ -5,7 +5,6 @@ what a real failure raises.
 """
 
 import json
-import socket
 
 from knurlogic.cluster.peers import HEADER, Peers
 from knurlogic.machine.status import SCHEMA
@@ -34,7 +33,7 @@ def test_an_answering_peer_is_named_by_its_own_status(tmp_path):
 
 def test_a_timeout_names_the_firewall_on_the_other_machine(tmp_path):
     def fetch(url):
-        raise socket.timeout("timed out")
+        raise TimeoutError("timed out")
     ps = make(tmp_path, fetch)
     ps.refresh()
     [p] = ps.all()
@@ -192,7 +191,7 @@ def rig(tmp_path, monkeypatch, answers=("10.0.0.2", "10.0.1.2"), **kw):
         asked.append(host)
         if host in answers:
             return rig_doc()
-        raise socket.timeout("timed out")
+        raise TimeoutError("timed out")
     return make(tmp_path, fetch, **kw), asked
 
 
@@ -247,7 +246,7 @@ def test_a_machine_is_asked_at_its_fastest_address_and_moves_there(
     # the TB5 cable pulled: it answers on the other one, still one machine
     ps._fetch = lambda url: (rig_doc() if "10.0.0.2" in url
                              else (_ for _ in ()).throw(
-                                 socket.timeout("timed out")))
+                                 TimeoutError("timed out")))
     ps.refresh()
     [p] = ps.all()
     assert p.key == "10.0.0.2:8899" and p.state == "answering"

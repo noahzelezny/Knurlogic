@@ -36,7 +36,7 @@ _DTYPES = (mx.float32, mx.bfloat16, mx.float16)
 def core_of(model):
     """The trunk core holding `layers` (qwen3_5 / glm5_next:
     model.language_model.model; qwen4_exp / deepseek_v4: model.model)."""
-    return getattr(getattr(model, "language_model", model), "model")
+    return getattr(model, "language_model", model).model
 
 
 def family_of(model) -> str:
@@ -210,16 +210,16 @@ def restage(model, keep: list, start: int, end: int) -> None:
         # PipelineMixin's contract, uniform split and all_gather not used
         core.start_idx, core.end_idx = 0, None
         core.pipeline_rank, core.pipeline_size = 0, 1
-        core.ssm_idx = next((i for i, l in enumerate(keep) if l.is_linear),
+        core.ssm_idx = next((i for i, lyr in enumerate(keep) if lyr.is_linear),
                             None)
-        core.fa_idx = next((i for i, l in enumerate(keep)
-                            if not l.is_linear), None)
+        core.fa_idx = next((i for i, lyr in enumerate(keep)
+                            if not lyr.is_linear), None)
     elif fam == "glm5_next":
         # frozen from the full list at __init__ (fork commit f3ab3a83)
-        core.ssm_idx = next((i for i, l in enumerate(keep)
-                             if getattr(l, "is_linear", False)), 0)
-        core.fa_idx = next((i for i, l in enumerate(keep)
-                            if not getattr(l, "is_linear", True)), 0)
+        core.ssm_idx = next((i for i, lyr in enumerate(keep)
+                             if getattr(lyr, "is_linear", False)), 0)
+        core.fa_idx = next((i for i, lyr in enumerate(keep)
+                            if not getattr(lyr, "is_linear", True)), 0)
     elif fam == "qwen4_exp":
         # full-model indices in ple_layers and a full-length make_cache
         # (fork commit dd946407)

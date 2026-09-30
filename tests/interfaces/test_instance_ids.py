@@ -4,7 +4,6 @@ appear on every resident knurlogic row it is known for, dedupe the same
 model reported by two pages, and let `unload` name it directly."""
 from types import SimpleNamespace
 
-import pytest
 
 from knurlogic.interfaces import mcp
 from knurlogic.interfaces.page import server as page_server

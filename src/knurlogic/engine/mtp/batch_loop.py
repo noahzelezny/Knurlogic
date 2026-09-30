@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Iterable, List, Optional
 
 import mlx.core as mx
@@ -156,7 +156,7 @@ def _finite_rows(rows: mx.array) -> mx.array:
     return mx.isfinite(rows).all(axis=-1)
 
 
-def _mark(out: List["RowStep"], fin: mx.array) -> None:
+def _mark(out: List[RowStep], fin: mx.array) -> None:
     """fin: [B, k] already evaluated; token j of row i gets fin[i][j]."""
     for rs, flags in zip(out, fin.tolist()):
         for em, good in zip(rs.tokens, flags):
@@ -520,10 +520,13 @@ class MTPBatch:
     def _note_regime(self, drafting: bool, rows: int) -> None:
         if drafting != self._regime:
             self._regime = drafting
-        
+
             d = self._cost.get((rows, True))
             p = self._cost.get((rows, False))
-            fmt = lambda c: f"{c[0] * 1000:.1f}ms/tok" if c else "unmeasured"
+
+            def fmt(c):
+                return f"{c[0] * 1000:.1f}ms/tok" if c else "unmeasured"
+
             logger.info(
                 f"MTP batch {'drafting' if drafting else 'plain steps'} at {rows} rows "
                 f"(draft {fmt(d)}, plain {fmt(p)}, acceptance est {self.acc_est:.2f})"

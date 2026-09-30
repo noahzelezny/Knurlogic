@@ -502,8 +502,8 @@ def test_a_seeded_request_under_concurrent_load_equals_it_alone():
         pytest.skip(f"batched logits differ from one-row logits on this "
                     f"model (max logprob drift {drift:.4f} before token "
                     f"{d}); the draws are the same, the numbers are not")
-    assert False, (f"token {d} differs with identical logprobs before it: "
-                   f"the seeded draw moved under load")
+    raise AssertionError(f"token {d} differs with identical logprobs before "
+                         f"it: the seeded draw moved under load")
 
 
 def test_text_completions_answer():

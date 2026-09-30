@@ -82,7 +82,12 @@ peers_fn = list
 #: port -> (Popen, artifact) | None: a server this page process started
 child_fn = {}.get
 #: port -> bool: that port's server answers
-answers_fn = (lambda port: False)
+
+def _no_answer(port):
+    return False
+
+
+answers_fn = _no_answer
 #: (**load arguments) -> dict: start a single-Mac server (mcp.load)
 load_fn = _no_load
 

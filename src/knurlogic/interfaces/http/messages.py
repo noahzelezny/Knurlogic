@@ -11,7 +11,6 @@ model, not of this translation.
 from __future__ import annotations
 
 import json
-import time
 import uuid
 
 STOP_REASON = {

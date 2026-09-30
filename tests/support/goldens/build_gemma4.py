@@ -39,7 +39,6 @@ def vision_tower():
         position_embedding_size=256, use_clipped_linears=False,
         standardize=False)
     model = VisionModel(cfg)
-    weights = dict(fv.__dict__.get("_gemma4_flat_weights", {}))  # unused, kept explicit
     params = model.parameters()
     from mlx.utils import tree_flatten, tree_unflatten
     flat = tree_flatten(params)
@@ -64,7 +63,6 @@ def vision_tower():
 def mask_overlay():
     mx.random.seed(1)
     B, N = 2, 12
-    rng = np.random.default_rng(1)
     # Two images: positions 2-4 (image 0) and 7-9 (image 1); rest is text.
     mm_type = np.zeros((B, N), dtype=np.int64)
     mm_type[:, 2:5] = 1

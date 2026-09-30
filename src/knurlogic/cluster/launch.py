@@ -367,7 +367,7 @@ def _ring_ips(infos: list, rdma: bool = False, net: str = "") -> list:
     first. Raises ValueError naming a machine with none."""
     ips = []
     n = len(infos)
-    for r, m in enumerate(infos):
+    for _r, m in enumerate(infos):
         mine = [t["ip"] for t in m.get("thunderbolt") or [] if t.get("ip")]
         if not mine:
             raise ValueError(f"{m['name']} has no Thunderbolt address: the "
@@ -1076,7 +1076,10 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     try:
         pids = [int(v["pid"]) for v in mine.values()
                 if _alive(job, int(v["pid"]))]
-        alive = (lambda p: _alive(job, p))
+
+        def alive(p):
+            return _alive(job, p)
+
         killed = J.terminate(pids, grace=grace, alive=alive,
                              reap=reap) if pids else []
         left = [p for p in pids if alive(p)]

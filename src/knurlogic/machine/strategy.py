@@ -42,7 +42,7 @@ def set(name) -> str:
     try:
         s = preset_of(name)
     except ValueError:
-        raise ValueError(f"strategy {name!r}: one of {list(PRESETS)}")
+        raise ValueError(f"strategy {name!r}: one of {list(PRESETS)}") from None
     p = path()
     if s == PRESET_DEFAULT:
         p.unlink(missing_ok=True)

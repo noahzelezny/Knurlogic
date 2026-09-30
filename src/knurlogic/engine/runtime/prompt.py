@@ -18,7 +18,7 @@ import copy
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from knurlogic.engine import templates as _templates
 from knurlogic.engine.serve import segments as _segments
@@ -62,7 +62,7 @@ MARK = _Mark()
 _ZWSP = "\u200b"
 
 
-def control_strings(tokenizer) -> Optional["re.Pattern"]:
+def control_strings(tokenizer) -> Optional[re.Pattern]:
     """The tokenizer's control tokens as they are spelled in text --
     added tokens that read as markup (`<|im_end|>`, `<start_of_turn>`,
     `<think>`, `[gMASK]`) -- as one pattern, longest first; None if none.

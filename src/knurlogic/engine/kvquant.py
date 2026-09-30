@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 import mlx.core as mx
-from mlx_lm.models.cache import (BatchKVCache, CacheList, KVCache,
+from mlx_lm.models.cache import (BatchKVCache, KVCache,
                                  dynamic_roll)
 
 #: bits a person can ask for; None (or "bf16") is the unquantized cache

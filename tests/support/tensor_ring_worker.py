@@ -44,7 +44,6 @@ def run(model, ids, then):
 
 
 def main(out_path):
-    import mlx.core as mx
     from knurlogic.engine.runtime import tensor as T
     link = T.init("ring")
     ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]

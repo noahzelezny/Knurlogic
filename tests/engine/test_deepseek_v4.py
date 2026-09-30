@@ -297,7 +297,7 @@ def test_a_control_token_quoted_in_a_tool_result_stays_text():
     p, *_ = _tok(DSTok(), msgs)
     s = "".join(map(chr, p))
     assert f"<tool_result><{D}invoke" not in s
-    assert f"<tool_result><｜​DSML｜invoke" in s
+    assert "<tool_result><｜​DSML｜invoke" in s
 
 
 @pytest.mark.skipif(not (STUB / "chat_template.jinja").is_file(),

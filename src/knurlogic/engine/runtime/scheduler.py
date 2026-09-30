@@ -25,12 +25,12 @@ from pathlib import Path
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from . import prompt as P
 from .executor import (Admission, Checkpoint, Finished, LocalExecutor,
                        Progress, RowFailure, Token)
-from .request import Delta, Request, control_machine
+from .request import Request, control_machine
 
 logger = logging.getLogger(__name__)
 GIB = 1 << 30
@@ -135,7 +135,7 @@ class Job:
     top_logprobs: int = 0
     #: filled by the scheduler: ("progress", (done, total)) / ("delta",
     #: Delta) / ("error", exc) / ("done", usage)
-    outbox: "queue.Queue" = field(default_factory=queue.Queue)
+    outbox: queue.Queue = field(default_factory=queue.Queue)
     cancelled: bool = False
     #: set once tokenized
     prompt_tokens: int = 0
@@ -278,8 +278,8 @@ class Scheduler:
         self._samples: dict = {}
         self.cache = self._new_cache(prompt_cache_size)
         self.stats = stats if stats is not None else {}
-        self._jobs: "queue.Queue" = queue.Queue()
-        self._commands: "queue.Queue" = queue.Queue()
+        self._jobs: queue.Queue = queue.Queue()
+        self._commands: queue.Queue = queue.Queue()
         self._waiting: List[Job] = []
         self._rows: Dict[int, _Row] = {}
         #: why the last tick left requests waiting (requests()), or None
@@ -293,13 +293,13 @@ class Scheduler:
         self._aborted: Optional[BaseException] = None
         self._wake = threading.Event()
         #: live knobs rank 0 applied, for the other ranks (share_live)
-        self._sets: "queue.Queue" = queue.Queue()
+        self._sets: queue.Queue = queue.Queue()
         self._thread = threading.Thread(target=self._run, daemon=True,
                                         name="knurlogic-scheduler")
 
     # ------------------------------------------------------ any thread
 
-    def start(self) -> "Scheduler":
+    def start(self) -> Scheduler:
         self._thread.start()
         return self
 
@@ -335,7 +335,7 @@ class Scheduler:
                 break
 
     def load(self, path: str, *, executes_artifact_code: bool = False,
-             force: bool = True) -> "Command":
+             force: bool = True) -> Command:
         """Queue a load. `force=False` refuses (Command.error) if requests
         are running or queued when the switch would happen -- decided on
         the scheduler thread, so it cannot race them. Wait on
@@ -346,7 +346,7 @@ class Scheduler:
         return self._command(Command("load", str(path), force,
                                      executes_artifact_code))
 
-    def unload(self, *, force: bool = True) -> "Command":
+    def unload(self, *, force: bool = True) -> Command:
         return self._command(Command("unload", None, force))
 
     def share_live(self, applied: dict) -> None:
@@ -371,7 +371,7 @@ class Scheduler:
                 return
             self.tensor.journal.add("set", name=k, value=v)
 
-    def _command(self, cmd: "Command") -> "Command":
+    def _command(self, cmd: Command) -> Command:
         self._commands.put(cmd)
         self._wake.set()
         return cmd
@@ -1156,7 +1156,7 @@ class Scheduler:
         job.outbox.put(("error", err))
 
     def _fail_all(self, err: BaseException) -> None:
-        for uid, row in list(self._rows.items()):
+        for row in list(self._rows.values()):
             self._error(row.job, err)
         self._rows.clear()
 

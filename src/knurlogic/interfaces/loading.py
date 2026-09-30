@@ -95,7 +95,7 @@ def prepare(model: str, *, served: Optional[str] = None,
         a = Artifact.load(path)
     except Exception as e:
         raise NotLoadable(422, f"{Path(path).name} could not be read as an "
-                               f"artifact: {e}", "bad_artifact")
+                               f"artifact: {e}", "bad_artifact") from e
     missing = register(a)
     if missing:
         raise NotLoadable(422, f"{a.path.name} needs {missing}, which "
@@ -116,5 +116,5 @@ def prepare(model: str, *, served: Optional[str] = None,
                     else "")
                  + (f" + {freed_bytes / GIB:.1f} from unloading the current "
                     f"model" if freed_bytes else "") + "). /loaded.json "
-                 f"shows what else is holding memory.", "insufficient_memory")
+                 "shows what else is holding memory.", "insufficient_memory")
     return a

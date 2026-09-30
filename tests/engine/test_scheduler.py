@@ -2,7 +2,6 @@
 its own thread. A stand-in tokenizer renders messages as token ids, so the
 test is about scheduling, not templates."""
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -112,7 +111,7 @@ def _job(ids, **kw):
 
 
 def _collect(job, timeout=60):
-    text, usage, end = "", None, time.time() + timeout
+    text, end = "", time.time() + timeout
     while time.time() < end:
         kind, val = job.outbox.get(timeout=timeout)
         if kind == "delta":
@@ -177,7 +176,6 @@ def test_a_cancelled_request_frees_its_row(sched):
 
 
 def test_a_shared_prefix_is_reused_from_the_prompt_cache(sched):
-    from knurlogic.engine.serve import cache_report
     p = sched.prompts[2]
     first = sched.submit(_job(p, max_tokens=4))
     _collect(first)
