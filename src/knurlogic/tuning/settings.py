@@ -227,13 +227,6 @@ NUMERICS_SOURCES = ("declared", "published", "bundled")
 TUNE_PROFILES = {
     # prefill chunk, cache limit GiB, and whether to bound the transient
     # harder than headroom requires
-    "safe": {
-        "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
-        "KNURLOGIC_CACHE_LIMIT_GB": 1.0,
-        "decode_chunk_scale": 0.5,   # bound the transient below what fits
-        "why": "lowest peak memory: narrow prompt chunks, a small reclaimable "
-               "cache, and a transient bounded tighter than headroom requires",
-    },
     "balanced": {
         "decode_chunk_scale": 1.0,
         "why": "the measured defaults",
@@ -250,7 +243,6 @@ TUNE_PROFILES = {
     "stable": {
         "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
         "KNURLOGIC_CACHE_LIMIT_GB": 2.0,
-        "decode_chunk_scale": 0.5,   # more room left for a step's spike
         "launch": {"mtp": "on", "mtp_dynamic": "off", "kv_bits": "bf16"},
         "why": "repeatable: 512-token prompt chunks, MTP drafting every "
                "step (no controller "
@@ -260,6 +252,7 @@ TUNE_PROFILES = {
     },
     "lean": {
         "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "KNURLOGIC_CACHE_LIMIT_GB": 1.0,
         "launch": {"kv_bits": "8", "mtp": "off"},
         "why": "most context and most agents: 8-bit KV where the family "
                "takes it (bf16 where it does not, and said), 512-token "
@@ -271,7 +264,7 @@ TUNE_PROFILES = {
 #: default "balanced" (the measured defaults, unchanged). A per-model
 #: KNURLOGIC_PRESET (Settings -> Models) picks one for that base model;
 #: any explicit knob set beside it beats the preset's value for that knob.
-PRESETS = ("balanced", "fast", "stable", "lean", "safe")
+PRESETS = ("balanced", "fast", "stable", "lean")
 PRESET_DEFAULT = "balanced"
 
 
@@ -279,6 +272,8 @@ def preset_of(v, default: str = PRESET_DEFAULT) -> str:
     s = str(v or "").strip().lower()
     if not s:
         return default
+    if s == "safe":  # folded into lean
+        return "lean"
     if s not in TUNE_PROFILES:
         raise ValueError(f"preset {v!r}: one of {list(PRESETS)}")
     return s
@@ -327,20 +322,18 @@ MTP_MODES = ("dynamic", "every", "off")
 PRESET_ROWS = (
     {"name": "KNURLOGIC_PREFILL_CHUNK", "title": "Prompt chunk",
      "help": "Tokens processed per step while reading a prompt; bigger is "
-             "faster but needs more memory.",
-     "options": [("", "auto (by free memory)")]
+             "faster but needs more memory. Auto uses smaller chunks when "
+             "memory is tight.",
+     "options": [("", "auto")]
                 + [(str(v), str(v)) for v in (512, 1024, 2048, 4096)]},
-    {"name": "KNURLOGIC_CACHE_LIMIT_GB", "title": "Cache",
+    {"name": "KNURLOGIC_CACHE_LIMIT_GB", "title": "Cache reuse",
      "help": "Memory MLX keeps for reuse; more is a bit faster, less "
              "leaves more free.",
      "options": [(str(v), f"{v} GiB") for v in (1, 2, 4, 8)]},
-    {"name": DECODE_SCALE, "title": "Expert chunk",
-     "help": "How much of a VQ model's experts is unpacked at once; half "
-             "uses less memory, slightly slower.",
-     "options": [("", "auto"), ("0.5", "half")]},
     {"name": MTP_MODE, "title": "MTP",
-     "help": "Drafts tokens ahead to speed up decoding; dynamic turns it "
-             "off when it doesn't help.",
+     "help": "For models with an MTP head: drafts tokens ahead to speed "
+             "up decoding, and loading the head takes more memory. Dynamic "
+             "turns drafting off when it doesn't help.",
      "options": [("dynamic", "dynamic"), ("every", "every step"),
                  ("off", "off")]},
     {"name": "KNURLOGIC_KV_BITS", "title": "KV cache",
@@ -357,7 +350,6 @@ def preset_row_values(name: str) -> dict:
     return {
         "KNURLOGIC_PREFILL_CHUNK": str(v["prefill"] or ""),
         "KNURLOGIC_CACHE_LIMIT_GB": f"{v['cache']:g}",
-        DECODE_SCALE: "0.5" if v["scale"] < 1 else "",
         MTP_MODE: ("off" if v["mtp"] == "off" else
                    "dynamic" if v["mtp_dynamic"] == "on" else "every"),
         "KNURLOGIC_KV_BITS": str(v["kv_bits"]),
@@ -395,7 +387,7 @@ KNOB_DOC = {
         "Unset, it is read from the room free at launch: the widest "
         "width up to the family's measured best whose predicted spike "
         "fits in 10% of the room left after weights, KV and cache, else "
-        "512 (safe, stable, lean: always 512). Output is identical at "
+        "512 (stable, lean: always 512). Output is identical at "
         "every width."),
     "KNURLOGIC_CONTEXT_LENGTH": (
         "the longest conversation (prompt + answer, in tokens) a request may "
@@ -469,8 +461,7 @@ KNOB_DOC = {
         "one -- it cannot desync, rank 0 samples every token. auto: on only "
         "when a cluster job's machines have different GPU architectures."),
     "KNURLOGIC_PRESET": (
-        "launch preset for this model: balanced, fast, stable, lean (or "
-        "safe) -- the knurlogic strategy unless set here",
+        "launch preset for this model: balanced, fast, stable or lean -- the knurlogic strategy unless set here",
         "one named bundle of the settings below. fast buys speed with "
         "memory headroom; stable buys repeatability with some speed; lean "
         "buys context and agents with some speed and precision (8-bit KV). "
@@ -1191,7 +1182,7 @@ def check_compact_knob(name: str, value):
 # The page, a forwarded load and a cluster job all check a request against
 # these; they are settings facts, so they live here.
 
-TUNES = ("balanced", "fast", "stable", "lean", "safe")  # the names of PRESETS
+TUNES = ("balanced", "fast", "stable", "lean")  # the names of PRESETS
 #: request keys that would name a place on disk; refused outright, never
 #: ignored, so a coordinator that sends one learns it is wrong
 PATH_KEYS = ("path", "target", "artifact", "where", "dir", "directory")
