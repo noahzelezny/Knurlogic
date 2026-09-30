@@ -12,8 +12,9 @@ text that says which machine to update. The same status doc carries its
 kept and shown with how long it has been gone, never dropped silently. One
 probe is in flight per peer. Every status request carries
 `X-Knurlogic-Peer: <id> <port>`, so the receiving page records the
-requester as an `introduced` peer and naming a machine on one side is
-enough for both. peers.json (~/.knurlogic/peers.json) is keyed by node id,
+requester as an `introduced` peer, so naming a machine on one side is
+enough for both to LIST each other; the gate is separate: over Ethernet or
+Wi-Fi name each machine on the other, or link them with Thunderbolt. peers.json (~/.knurlogic/peers.json) is keyed by node id,
 versioned, written atomically, and holds addresses, not secrets.
 
 Design: docs/design/discovery.md (peers).

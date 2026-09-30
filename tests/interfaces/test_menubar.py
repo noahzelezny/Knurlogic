@@ -29,3 +29,13 @@ def test_no_gui_skips(monkeypatch):
     called = []
     monkeypatch.setattr(mb.subprocess, "Popen", lambda *a, **k: called.append(1))
     assert not mb.spawn(1, enabled=False) and not called
+
+
+def test_menu_titles_are_unique():
+    doc = {"resident": [{"name": "Q", "machine": "m4", "port": 8080},
+                        {"name": "Q", "machine": "m4", "port": 8081},
+                        {"name": "Q", "machine": "m4"},
+                        {"name": "Z", "machine": "m4"}]}
+    lines = mb.menu_model(doc)["models"]
+    assert len(set(lines)) == 4
+    assert lines[0] == "Q · m4 :8080" and lines[3] == "Z · m4"

@@ -262,3 +262,17 @@ def test_knurlogics_own_store_is_scanned_and_movable(tmp_path, monkeypatch):
     monkeypatch.setenv("KNURLOGIC_MODELS", str(tmp_path / "Models"))
     rows = discover.find(stores=["knurlogic"])
     assert [r.name for r in rows] == ["tiny"] and rows[0].store == "knurlogic"
+
+
+def test_available_memory_counts_speculative_but_not_purgeable(monkeypatch):
+    out = """Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                               100.
+Pages active:                             500.
+Pages inactive:                           200.
+Pages speculative:                         50.
+Pages purgeable:                          300.
+"""
+    import subprocess as sp
+    monkeypatch.setattr(sp, "run", lambda *a, **k: sp.CompletedProcess(
+        a, 0, stdout=out))
+    assert loaded.available_memory()["available_bytes"] == 350 * 16384
