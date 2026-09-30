@@ -1,7 +1,8 @@
 """knurlogic's own HTTP server: stdlib ThreadingHTTPServer, one thread per
 connection, every model operation handed to the scheduler.
 
-Serves /v1/chat/completions, /v1/completions, /v1/messages, /v1/models,
+Serves /v1/chat/completions, /v1/completions, /v1/messages, /v1/responses,
+/api/* (Ollama), /v1/models,
 /v1/residency, /v1/ensure, /health and the page's routes. A failed write
 cancels the Job. A request carrying an Origin is answered only for this
 server's own origin or one allowed with --allow-origin, and the Host header
@@ -50,7 +51,7 @@ class App:
                  max_body: int = DEFAULT_MAX_BODY,
                  allow_origins: tuple = (), allow_hosts: tuple = ()):
         from knurlogic.engine.serve import thinking
-        from knurlogic.interfaces.http import messages
+        from knurlogic.interfaces.http import messages, ollama, responses
         self.scheduler = scheduler
         self.served = served
         self.routes = routes or {}
@@ -66,6 +67,12 @@ class App:
         self._count_lock = threading.Lock()
         self.messages = messages.handler_over(self._transport,
                                               served().get("id", ""))
+        self.responses = responses.handler_over(self._transport,
+                                                served().get("id", ""))
+        self.ollama_chat = ollama.handler_over(
+            self._transport, served().get("id", ""), generate=False)
+        self.ollama_generate = ollama.handler_over(
+            self._transport, served().get("id", ""), generate=True)
 
     def has_vision(self) -> bool:
         """Whether an image request is refused up front. Until the model
@@ -427,6 +434,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.app.served(),
                 sampling_defaults(path) if path else {},
                 context_length(path) if path else 0, think))
+        if path in ("/api/tags", "/api/version"):
+            return self._ollama_get(path)
         if path == "/health":
             return self._json(200, {"status": "ok", "server": "knurlogic",
                                     "model": self.app.scheduler.host.state})
@@ -438,6 +447,27 @@ class Handler(BaseHTTPRequestHandler):
                                               "type": "not_found"}})
         body, ctype = h(parse_qs(u.query), self.app.requests)
         self._send(200, body, ctype)
+
+    def _ollama_get(self, path: str) -> None:
+        from knurlogic import __version__
+        from knurlogic.interfaces.http import ollama
+        if path == "/api/version":
+            return self._json(200, {"version": __version__})
+        return self._json(200, ollama.tags_document(
+            self.app.served(), self.app.scheduler.host.path))
+
+    def _ollama_show(self) -> None:
+        from knurlogic.engine.serve import thinking as TH
+        from knurlogic.interfaces.http import ollama
+        from knurlogic.machine.artifact import context_length
+        path = self.app.scheduler.host.path
+        try:
+            think = TH.levels(TH.template_of(path)) if path else None
+        except Exception:
+            think = None
+        return self._json(200, ollama.show_document(
+            self.app.served(), path, context_length(path) if path else 0,
+            think))
 
     def _post(self):
         u = urlparse(self.path)
@@ -451,6 +481,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._inference(raw, chat=path != "/v1/completions")
         if path == "/v1/messages":
             return self._raw(self.app.messages, raw)
+        if path == "/v1/responses":
+            return self._raw(self.app.responses, raw)
+        if path == "/api/chat":
+            return self._raw(self.app.ollama_chat, raw)
+        if path == "/api/generate":
+            return self._raw(self.app.ollama_generate, raw)
+        if path == "/api/show":
+            return self._ollama_show()
         if path == "/v1/messages/count_tokens":
             return self._count_tokens(raw)
         if path == "/v1/ensure" and self.app.ensure:
