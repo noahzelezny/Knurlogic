@@ -511,7 +511,7 @@ function trackLaunch(m, ns, pn, t0){
     machines:ns.length?ns.map(n=>n.node):[localName()],
     node:pn?pn.id:'', cluster:ns.length>1, phase:'preparing', samples:[]};
   LAUNCHES.unshift(L); if(LAUNCHES.length>4) LAUNCHES.length=4;
-  renderLaunches(); loadResident();
+  loadResident();
   return L;
 }
 function settleLaunch(L, j){
@@ -521,7 +521,7 @@ function settleLaunch(L, j){
   else L.phase='starting';
   // said once and kept: a local copy that differs from the shared one
   if(j.alerts&&j.alerts.length) L.alert=j.alerts.join(' · ');
-  renderLaunches(); loadResident();
+  loadResident();
 }
 // every machine's document, named: this page's and each peer's
 function machinesOf(d){
@@ -574,21 +574,14 @@ function followLaunch(L, d){
   else if(secs>60) L.phase='starting';
 }
 function renderLaunches(){
-  const el=$('lmprog'); if(!el) return;
   for(let i=LAUNCHES.length-1;i>=0;i--)
     if(LAUNCHES[i].phase==='ready') LAUNCHES.splice(i,1);
-  el.innerHTML=LAUNCHES.filter(L=>L.phase==='failed').map(L=>
-    `<div class="lp failed">
-      <div class="lph"><span class="ph">failed</span><b title="${esc(L.name)}">${esc(String(L.name).split("--").pop())}</b>
-        <button class="mini x" data-lx="${L.id}" title="dismiss">✕</button></div>
-      <div>on ${esc(L.machines.join(' + '))}</div>
-      ${L.alert?`<div class="why">${esc(L.alert)}</div>`:''}
-      ${L.why?`<div class="why">${esc(L.why)}</div>`:''}
-    </div>`).join('');
-  el.querySelectorAll('[data-lx]').forEach(b=>b.onclick=()=>{
-    const i=LAUNCHES.findIndex(L=>L.id===+b.dataset.lx);
-    if(i>=0) LAUNCHES.splice(i,1); renderLaunches();
-  });
+}
+// the launches that failed, kept as INSTANCES cards until dismissed
+function failedLaunches(){ return LAUNCHES.filter(L=>L.phase==='failed') }
+function dismissLaunch(id){
+  const i=LAUNCHES.findIndex(L=>L.id===id);
+  if(i>=0) LAUNCHES.splice(i,1);
 }
 // the launches still loading, as rows for the INSTANCES card
 function loadingLaunches(){
@@ -600,6 +593,6 @@ function followLaunches(d){
   renderLaunches();
 }
 
-export {BASEKEY, SEL, baseKey, baseOf, famOf, followLaunches, loadModels,
-        loadingLaunches,
+export {BASEKEY, SEL, baseKey, baseOf, dismissLaunch, failedLaunches, famOf,
+        followLaunches, loadModels, loadingLaunches,
         nodeSelChanged, published, setSets};
