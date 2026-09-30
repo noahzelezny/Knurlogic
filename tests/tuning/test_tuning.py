@@ -64,13 +64,6 @@ def test_default_on_a_tight_box_degrades_and_says_why():
     assert any("headroom to hold it in" in n for n in r.notes)
 
 
-def test_no_tuning_reaches_a_setting_measured_to_be_worse():
-    """F25/F33: RTILE=64 is 0.75-0.97x and never faster. No profile, at any
-    box size, may reach it."""
-    for tune in S.PRESETS:
-        for box in (74 * GIB, 96 * GIB, 400 * GIB):
-            assert resolve(_art(), box, tune=tune).env[
-                "VQ_MOE_GEMMSEG_RTILE"] == "32"
 
 
 def test_the_cache_cap_holds_even_with_unlimited_headroom():
@@ -297,7 +290,7 @@ def test_knobs_are_tiered_by_who_would_reach_for_one():
     every knob visible, none weighted, the eye with nowhere to go."""
     assert S.knob_tier("VQ_DECODE_CHUNK") == "reach"
     assert S.knob_tier("VQ_CACHE_LIMIT_GB") == "reach"
-    assert S.knob_tier("VQ_MOE_GEMMSEG_RTILE") == "deeper"
+    assert S.knob_tier("VQ_GEMMSEG_BF16IO") == "deeper"
     assert S.knob_tier("VQ_D8_REGBUF") == "kernel"
 
 

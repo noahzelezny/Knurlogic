@@ -114,28 +114,22 @@ def load(path: str, executes_artifact_code: bool = False):
 def load_unlocked(path: str, executes_artifact_code: bool = False,
                   lazy: bool = False):
     """`load` for a caller already holding the load lock (the model host).
-    A rung rungs.json lists as VERIFIED (tools/vq_gate.py proved it
-    bit-identical to its published model.py) loads on knurlogic's own VQ
-    runtime; everything else through the artifact's loader, bundled
-    model.py and all. `state.SERVED["runtime"]` says which."""
+    A VQ model always runs its OWN bundled model.py, the runtime it ships;
+    knurlogic carries no VQ runtime of its own. `state.SERVED["runtime"]`
+    says "bundled"."""
     from pathlib import Path
 
-    from mlx_lm.utils import load as _load, load_tokenizer
+    from mlx_lm.utils import load as _load
 
     from knurlogic.engine import templates
-    from knurlogic.engine.vq import runtime
 
     from . import state
     p = Path(str(path))
+    why = vq_without_runtime(p)
+    if why:
+        raise RuntimeError(why)
     overlay = long_context_overlay(p)
     state.SERVED["long_context"] = "yarn" if overlay else "off"
-    if p.is_dir() and runtime.serves(p):
-        model, config = runtime.load_model(
-            p, lazy=lazy, **({"model_config": overlay} if overlay else {}))
-        tok = load_tokenizer(p, None, eos_token_ids=config.get("eos_token_id"))
-        templates.install(tok)
-        state.SERVED["runtime"] = "knurlogic"
-        return model, tok
     state.SERVED["runtime"] = "bundled"
     kw = {"lazy": True} if lazy else {}
     if overlay:
@@ -146,6 +140,25 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
     model, tok = _load(path, **kw)
     templates.install(tok)
     return model, tok
+
+
+def vq_without_runtime(p) -> str:
+    """Why a VQ artifact cannot load, or "": it declares VQ modules but
+    ships no model.py to run them."""
+    import json
+    from pathlib import Path
+
+    p = Path(str(p))
+    try:
+        cfg = json.loads((p / "config.json").read_text())
+    except (OSError, ValueError):
+        return ""
+    if not any(cfg.get(k) for k in ("vq_modules", "vq_linear", "vq_embed")):
+        return ""
+    if (p / str(cfg.get("model_file") or "model.py")).is_file():
+        return ""
+    return ("this VQ model does not ship its runtime (model.py); "
+            "re-download it")
 
 
 def long_context_overlay(path, env=None) -> dict:

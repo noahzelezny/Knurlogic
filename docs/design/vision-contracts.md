@@ -230,5 +230,4 @@ fixtures_vision.run_reference(script, *args)   # runs in the mlx-vlm 0.6.17 inte
 
 `pyproject.toml` pins `mlx==0.31.2`, `mlx-lm==0.31.3`; `[tool.knurlogic.pins]`
 holds those and the sha256 of `mlx_lm/server.py`. `tests/test_pins.py` fails
-on drift and lists what to re-verify. The VQ runtime is pinned by commit
-and digest in `src/knurlogic/engine/vq/PROVENANCE.md`.
+on drift and lists what to re-verify. 

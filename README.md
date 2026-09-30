@@ -119,7 +119,9 @@ for the Qwen families (up to 1,048,576 tokens).
 | DeepSeek-V4 | `deepseek_v4` | no | no | no |
 
 VQ-quantized models (published with their own `model.py`) are supported
-for these families.
+for these families; each runs the `model.py` it ships. The page tags a
+Hugging Face model "update" when the Hub has a newer revision (checked once
+at start; `knurlogic ui --offline` or `HF_HUB_OFFLINE=1` skips it).
 
 ## Code
 

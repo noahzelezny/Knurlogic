@@ -20,8 +20,13 @@ First public release (alpha).
 * An MCP server (`knurlogic mcp`) for agents: `models`, `fit`, `settings`,
   `drafting`, `ready`, `load`, `state`, `unload`, `deps`.
 * Model families: Qwen 3.5/3.6/3.8, Gemma 4, GLM-5, DeepSeek-V4, with
-  vendored, pinned architectures; VQ-quantized models on a vendored,
-  verified VQ runtime.
+  vendored, pinned architectures; VQ-quantized models, each running the
+  `model.py` it ships (knurlogic carries no VQ runtime of its own; a VQ
+  model without one is refused and should be re-downloaded).
+* An "update" tag in the model picker when the Hugging Face copy of a
+  downloaded model has a newer revision; clicking it opens the download
+  dialog. Checked once per page start; `knurlogic ui --offline` or
+  `HF_HUB_OFFLINE=1` skips it.
 * Multi-token-prediction drafting for models that ship a head; images for
   Qwen, Gemma 4 and GLM-5; 8-bit KV cache; YaRN long context for Qwen;
   context compaction.

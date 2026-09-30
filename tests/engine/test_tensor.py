@@ -309,25 +309,6 @@ def test_every_ring_row_gets_a_seed():
 E, OUT, IN, K, D, G = 4, 64, 256, 256, 4, 64
 
 
-def _vq_layer(rt, out, inn, seed):
-    mx.random.seed(seed)
-    codes = mx.random.randint(0, K, (E, out, inn // D)).astype(mx.uint8)
-    codebook = (mx.random.normal((K, D)) * 0.2).astype(mx.float16)
-    scales = mx.random.uniform(0.5, 1.5, (E, out, inn // G)).astype(mx.float16)
-    return rt.VQSwitchLinear(codes, codebook, scales)
-
-
-def _halves(layer, kind):
-    from knurlogic.engine.runtime.tensor import predicate, split_params
-    import copy
-    out = []
-    for r in range(2):
-        h = copy.copy(layer)
-        h.update(split_params(layer.parameters(), predicate(kind), r, 2))
-        out.append(h)
-    return out
-
-
 def test_the_predicate_never_splits_a_codebook():
     from knurlogic.engine.runtime.tensor import predicate
     w = mx.zeros((K, D))
@@ -335,60 +316,6 @@ def test_the_predicate_never_splits_a_codebook():
         assert predicate(kind)("mlp.switch_mlp.down_proj.codebook", w) is None
     assert predicate("all-to-sharded")("x.codes", mx.zeros((E, OUT, 8))) == 1
     assert predicate("sharded-to-all")("x.codes", mx.zeros((E, OUT, 8))) == -1
-
-
-def test_split_vq_down_proj_halves_add_up_to_the_whole():
-    """sharded-to-all: each rank takes half the input; the sum of the two
-    partial outputs (what all_sum makes) is the whole layer's output."""
-    from knurlogic.engine.vq import runtime
-    rt = runtime.runtime_module({})
-    whole = _vq_layer(rt, OUT, IN, 1)
-    x = (mx.random.normal((1, 1, IN)) * 0.5).astype(mx.float16)
-    idx = mx.array([[[0, 2]]], dtype=mx.uint32)
-    h0, h1 = _halves(whole, "sharded-to-all")
-    assert h0.codebook.shape == (K, D) and h0.codes.shape[-1] == IN // D // 2
-    y = whole(x, idx).astype(mx.float32)
-    parts = (h0(x[..., :IN // 2], idx).astype(mx.float32)
-             + h1(x[..., IN // 2:], idx).astype(mx.float32))
-    assert mx.allclose(y, parts, atol=2e-2, rtol=1e-2).item()
-
-
-def test_split_vq_gate_proj_halves_concatenate_to_the_whole():
-    from knurlogic.engine.vq import runtime
-    rt = runtime.runtime_module({})
-    whole = _vq_layer(rt, OUT, IN, 2)
-    x = (mx.random.normal((1, 1, IN)) * 0.5).astype(mx.float16)
-    idx = mx.array([[[1, 3]]], dtype=mx.uint32)
-    h0, h1 = _halves(whole, "all-to-sharded")
-    y = whole(x, idx)
-    cat = mx.concatenate([h0(x, idx), h1(x, idx)], axis=-1)
-    assert mx.array_equal(y, cat).item()
-
-
-def test_a_sliced_codebook_is_caught():
-    """mlx's default all-to-sharded predicate cuts the codebook's K axis;
-    the layer refuses to run on it, and check_codebooks names it."""
-    import copy
-
-    import mlx.nn as nn
-    from knurlogic.engine.runtime.tensor import check_codebooks, split_params
-    from knurlogic.engine.vq import runtime
-    rt = runtime.runtime_module({})
-    whole = _vq_layer(rt, OUT, IN, 3)
-    naive = lambda p, w: max(w.ndim - 2, 0)          # noqa: E731 (mlx default)
-    h = copy.copy(whole)
-    h.update(split_params(whole.parameters(), naive, 0, 2))
-    assert h.codebook.shape[0] == K // 2
-    x = mx.zeros((1, 1, IN), dtype=mx.float16)
-    with pytest.raises(RuntimeError, match="codebook was sharded"):
-        h(x, mx.array([[[0]]], dtype=mx.uint32))
-
-    class M(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.proj = h
-    with pytest.raises(RuntimeError, match="codebook was split"):
-        check_codebooks(M())
 
 
 def test_a_ring_serves_its_first_model_and_refuses_switching():

@@ -48,7 +48,7 @@ ADDING A FAMILY, the whole checklist:
      the manifest (capture point, cache semantics MEASURED with
      mtp.caches.check_snapshot_semantics).
   5. tests/test_families.py runs over every listed family; the real-model
-     gates are tools/vision_gate.py and tools/vq_gate.py.
+     gate is tools/vision_gate.py.
 
 Where a family quirk lives: code quirks in the family's own code;
 declarative ones read by generic code in the manifest, with evidence;

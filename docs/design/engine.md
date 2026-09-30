@@ -21,9 +21,6 @@ The engine folder is laid out as:
                    families/__init__.py
   vision/          images as context, family-agnostic: contracts, the cache
                    key, the image store, the request path
-  vq/              knurlogic's own VQ runtime; serves a rung only once
-                   tools/vq_gate.py proves it bit-identical to the rung's
-                   published model.py (rungs.json)
   arch.py          which architecture a model_type needs, and whether it is
                    present (the maps are built from the family manifests)
   register.py      puts vendored architectures in front of installed ones
