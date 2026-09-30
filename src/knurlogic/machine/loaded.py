@@ -559,9 +559,14 @@ def _runtime_of(cmd: str) -> str:
             and not parts[1].startswith("-"):
         places.append(parts[1])
 
+    # The module wins over the interpreter's path: `envs/exo/bin/python -m
+    # vqlab.cli` is vqlab borrowing exo's env, not exo.
     for mark, name in _RUNTIME_MARKS:
         if module == mark or module.startswith(mark + "."):
             return name
+    if module:
+        places = places[1:]
+    for mark, name in _RUNTIME_MARKS:
         for place in places:
             low = place.lower()
             if low.rsplit("/", 1)[-1].lstrip("-") == mark:

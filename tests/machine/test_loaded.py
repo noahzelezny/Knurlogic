@@ -278,3 +278,13 @@ Pages purgeable:                          300.
     monkeypatch.setattr(sp, "run", lambda *a, **k: sp.CompletedProcess(
         a, 0, stdout=out))
     assert loaded.available_memory()["available_bytes"] == 350 * 16384
+
+
+def test_a_module_in_exos_env_is_that_module_not_exo():
+    """vqlab run from exo's conda env read as exo: the env path matched
+    before the `-m` module was asked."""
+    env = "/opt/anaconda3/envs/exo/bin/python"
+    assert loaded._runtime_of(f"{env} -m vqlab.cli pin /m") == "vqlab"
+    assert loaded._runtime_of(f"{env} -m some.tool /m") == ""
+    assert loaded._runtime_of(f"{env} -m exo.main") == "exo"
+    assert loaded._runtime_of("/opt/anaconda3/envs/exo/bin/exo") == "exo"
