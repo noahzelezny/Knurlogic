@@ -169,7 +169,9 @@ gone -- machines sleep -- never dropped silently.
 **How a peer learns about this machine.** Every status request carries an
 introduction header (`X-Knurlogic-Peer: <id> <port>`); the receiving page
 records the requester's address with that port as an `introduced` peer. So
-naming a machine on one side is enough for both to know each other, and the
+naming a machine on one side is enough for both to list each other (to
+command each other over Ethernet or Wi-Fi, each side's gate needs the other
+named, or a Thunderbolt link), and the
 side that cannot be reached still finds out: it asks its peers what they
 see, and a peer that lists it as `stale` or `gone` is a measured fact --
 "they can see me and cannot connect", which on a Mac is almost always the
