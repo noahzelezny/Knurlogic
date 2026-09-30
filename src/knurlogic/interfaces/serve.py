@@ -131,19 +131,15 @@ REFUSED_EXIT = 78
 REFUSING = "REFUSING: "
 
 
-#: the launch knobs the environment can also set
-_ENV_KNOBS = ("KNURLOGIC_PRESET", "KNURLOGIC_KV_BITS", "KNURLOGIC_MTP",
-              "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_CROSS_CHIP",
-              "KNURLOGIC_LONG_CONTEXT", "KNURLOGIC_CONTEXT_LENGTH",
-              "KNURLOGIC_PREFILL_CHUNK", "KNURLOGIC_CACHE_LIMIT_GB")
 
 
 def settings_refusal(a, overrides) -> str | None:
     """The first value a launch would use that its own setting refuses,
     named in the page's words and where to fix it: this model's settings
-    (Settings -> Models), the saved knurlogic-wide ones (Settings ->
-    Knurlogic), the environment. Nothing is dropped silently."""
-    import os
+    (Settings -> Models) or the saved knurlogic-wide ones (Settings ->
+    Knurlogic). Nothing is dropped silently. Launch knobs in the
+    environment are not read at all (ignored_env says so), so they are not
+    checked here."""
     from knurlogic.tuning import settings as S
     from knurlogic.machine import preferences
     w, _ = S.model_window(getattr(a, "raw_config", None) or {})
@@ -153,12 +149,6 @@ def settings_refusal(a, overrides) -> str | None:
             return f"{why} (Settings \u2192 Models)"
     for k, why in preferences.invalid():
         return f"{why} (Settings \u2192 Knurlogic)"
-    for k in _ENV_KNOBS:
-        v = os.environ.get(k)
-        if v is not None and v.strip():
-            why = S.check_knob(k, v, w)
-            if why:
-                return f"{why} (the environment)"
     return None
 
 

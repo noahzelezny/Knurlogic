@@ -257,7 +257,7 @@ def preset_of(v, default: str = PRESET_DEFAULT) -> str:
     s = {"safe": "lean", "fast": "balanced", "stable": "balanced",
          "default": "balanced"}.get(s, s)
     if s not in TUNE_PROFILES:
-        raise ValueError(f"Preset: {v!r} isn't {' or '.join(PRESETS)}")
+        raise ValueError(f"Preset: {v!r} isn't default or lean")
     return s
 
 
