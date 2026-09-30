@@ -168,7 +168,8 @@ def test_forward_to_a_real_peer_page(monkeypatch):
                                  "identity": "abc", "tune": "lean",
                                  "sets": {"VQ_DECODE_CHUNK": "8"}})
         assert doc.get("starting") == "/models/X", doc
-        assert doc["machine"] == "M4" and loads[0]["port"] == 8080
+        # no port is forwarded: the peer picks its own free one
+        assert doc["machine"] == "M4" and loads[0]["port"] == 0
         doc = page_server.forward_launch({"action": "load", "node": "m4id",
                                  "identity": "zzz"})
         assert doc["refused"].startswith("not on")
