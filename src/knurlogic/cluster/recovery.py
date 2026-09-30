@@ -105,8 +105,11 @@ def enabled() -> bool:
         "off", "0", "false", "no")
 
 
-def kind(reason: str) -> str:
-    """requested | refusal | memory | machine | failure."""
+def kind(reason: str, known: str | None = None) -> str:
+    """requested | refusal | memory | machine | failure: `known` (set where
+    the failure was seen) first, the wording only when it is not given."""
+    if known in ("requested", "refusal", "memory", "machine", "failure"):
+        return known
     r = str(reason or "").strip()
     # a peer's page relaying its own stop: "B stopped the job: unloaded"
     r = re.sub(r"^.{0,80}? stopped the job: ", "", r)
@@ -478,9 +481,10 @@ def _failed(rec: dict, now: float, why: str) -> str:
     return f"failed: {why}"
 
 
-def _schedule(rec: dict, now: float, why: str) -> str:
+def _schedule(rec: dict, now: float, why: str,
+              known: str | None = None) -> str:
     """The model went down: plan the next relaunch, or give up."""
-    k = kind(why)
+    k = kind(why, known)
     if k == "requested":
         _drop(rec["key"])
         return f"stopped on request ({why}); not recovered"
@@ -535,7 +539,7 @@ def _tick_cluster(rec: dict, now: float) -> str:
         if C.link_init_failure(why) and job in C.FOLLOWING:
             return ""                     # the cable failover has it
         rec["ended_job"] = job
-        return _schedule(rec, now, why)
+        return _schedule(rec, now, why, e.get("kind"))
     if now < float(rec.get("next_at") or 0):
         return ""
     old = rec.get("ended_job")
