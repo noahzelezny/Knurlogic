@@ -80,7 +80,8 @@ def menu_model(doc: dict | None, host: str = "") -> dict:
     seen = {ln: lines.count(ln) for ln in lines}
     for k, r in enumerate(rows):
         if seen[lines[k]] > 1:
-            lines[k] += f" :{r['port']}" if r.get("port") else f" ({k + 1})"
+            port = str(r.get("where") or "").rpartition(":")[2]
+            lines[k] += f" :{port}" if port.isdigit() else f" ({k + 1})"
     return {"title": f"Knurlogic — {n} model{'s' if n != 1 else ''} loaded",
             "models": lines}
 
