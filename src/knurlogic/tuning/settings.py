@@ -546,14 +546,18 @@ KNOB_HELP = {
                             "chips can give different (still valid) tokens. "
                             "Turn off if you need identical output; "
                             "slightly slower.",
-    "KNURLOGIC_COMPACT_AUTO": "Summarize old turns even when the client "
-                              "does not ask.",
-    "KNURLOGIC_COMPACT_TRIGGER": "How full the conversation gets before "
-                                 "old turns are summarized.",
-    "KNURLOGIC_COMPACT_KEEP_TURNS": "How many recent messages stay word for "
-                                    "word.",
-    "KNURLOGIC_COMPACT_TOOL_RESULTS": "What is left of an old tool result: "
-                                      "a one-line summary, or nothing.",
+    "KNURLOGIC_COMPACT_AUTO": "Compacts the conversation automatically "
+                              "when it reaches the Start at point, even if "
+                              "the client didn't ask.",
+    "KNURLOGIC_COMPACT_TRIGGER": "How full the context window gets before "
+                                 "automatic compaction starts.",
+    "KNURLOGIC_COMPACT_KEEP_TURNS": "How many of the most recent messages "
+                                    "stay word-for-word when the rest is "
+                                    "summarized.",
+    "KNURLOGIC_COMPACT_TOOL_RESULTS": "Distill keeps a summary of tool "
+                                      "results, making compaction slower. "
+                                      "Clear is faster, but the model is "
+                                      "more likely to repeat calls.",
 }
 
 
