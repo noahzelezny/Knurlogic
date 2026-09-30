@@ -193,7 +193,13 @@ function renderPicker(){
   $('prows').querySelectorAll('.grphd').forEach(h=>h.onclick=()=>
     h.parentElement.classList.toggle('open'));
   $('prows').querySelectorAll('[data-fav]').forEach(s=>s.onclick=e=>{
-    e.stopPropagation(); toggleFav(s.dataset.fav); renderPicker();
+    e.stopPropagation(); toggleFav(s.dataset.fav);
+    const box=$('prows'), top=box.scrollTop;
+    const open=[...box.querySelectorAll('.grp.open')].map(g=>g.dataset.g);
+    renderPicker();
+    box.querySelectorAll('.grp').forEach(g=>{
+      if(open.includes(g.dataset.g)) g.classList.add('open') });
+    box.scrollTop=top;
   });
   // the update tag opens the Hugging Face download dialog for that repo;
   // downloading it again fetches the new revision into the same cache
@@ -279,14 +285,13 @@ function pickInfo(){
   if(!m){ el.innerHTML=''; $('launch').disabled=true; $('launch').title='choose a model';
     $('mtpopts').hidden=true; return }
   const ws=fitWS(), fits=!ws||m.size_bytes<=ws, ns=selNodes();
-  const tags=[m.is_vq?'VQ':'', m.mtp?'MTP':''].filter(Boolean).join(' · ');
   // Launch loads on THIS machine and nowhere else: the page has no way yet
   // to start a model on a peer, or across several. Picking those still
   // answers the fit question; it does not pretend to launch.
   const blocked=launchBlock(ns);
   $('launch').disabled=!!blocked;
   $('launch').title=blocked||'';
-  el.innerHTML=(tags?`<div>${tags}</div>`:'')+
+  el.innerHTML=''+
     (!fits?`<div class="warn">more space required</div>`
      : ns.length===1&&isLocal(ns[0])
        ? `<div id="pickroom">${roomHTML(m.room)}</div>` : '')+
@@ -411,14 +416,6 @@ function multiState(){
       x.setAttribute('aria-pressed', x.dataset.v==='tcp'));
   }
 }
-// What a cluster launch placed where, as the coordinator decided it
-function placementHTML(p){
-  if(!p) return '';
-  return `<div class="room">leader ${esc(p.leader)} · ${esc(p.split)}</div>`+
-    (p.shares||[]).map(s=>`<div class="note">rank ${s.rank} ${esc(s.machine)}: ${
-      s.layers!=null?`${s.layers} layers (${s.bounds[0]}..${s.bounds[1]-1}), `:''}${gb(s.bytes)}</div>`).join('')+
-    `<div class="note">${esc(p.reason)}</div>`;
-}
 function nodeSelChanged(){
   $('multiopts').hidden=selNodes().length<2;
   multiState();
@@ -451,9 +448,6 @@ $('launch').onclick=async()=>{
     : {action:'load', target:m.path, tune, sets});
   b.textContent='Launch'; b.disabled=false;
   settleLaunch(L, j);
-  // across machines: where it went (or would have), from the coordinator
-  if(j.placement) $('pickinfo').insertAdjacentHTML('beforeend',
-    `<div class="placement">${placementHTML(j.placement)}</div>`);
   if(!j.error && !j.refused && !L.cancelled){
     // done with this pick: back to "choose a model"
     SEL=null; SELCLEARED=true; pickInfo();
