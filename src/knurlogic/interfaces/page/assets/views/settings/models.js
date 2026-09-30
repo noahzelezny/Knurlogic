@@ -44,7 +44,7 @@ function modelHTML(b, r, doc, runs){
 const ORDER=['KNURLOGIC_CONTEXT_LENGTH','KNURLOGIC_PRESET','KNURLOGIC_PREFILL_CHUNK',
   'KNURLOGIC_CACHE_LIMIT_GB','KNURLOGIC_MTP','KNURLOGIC_MTP_DYNAMIC','KNURLOGIC_KV_BITS'];
 const rank=k=>{ const i=ORDER.indexOf(k.name); return i<0?ORDER.length:i };
-const presetTitle=n=>n==='balanced'?'Default':n.charAt(0).toUpperCase()+n.slice(1);
+const presetTitle=n=>n==='default'?'Default':n.charAt(0).toUpperCase()+n.slice(1);
 // the VQ runtime's own knobs: knurlogic ships their best values, not rows
 const isVQ=k=>/^VQ_/.test(k.name);
 // not rows: long context follows the context length (past the native window
@@ -117,7 +117,7 @@ async function showBase(b){
   const preview=async lead=>{
     const ws=fitWS(), m=b.ms.find(x=>!ws||x.size_bytes<=ws)||b.ms[0];
     // resolved at the base model's saved launch preset
-    const pre=launchSets(b.name).KNURLOGIC_PRESET||window.LOADTUNE||'balanced';
+    const pre=launchSets(b.name).KNURLOGIC_PRESET||window.LOADTUNE||'default';
     const doc=await getJSON('/settings.json?'+new URLSearchParams({artifact:m.path, tune:pre}));
     if(seq!==SEQ) return;
     el.innerHTML=modelHTML(b, null, doc, `${lead}${b.runs.length

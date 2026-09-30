@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 
 
-def _cache_dir() -> Path:
+def cache_dir() -> Path:
     import os
     root = Path(os.environ.get("XDG_CACHE_HOME",
                                Path.home() / ".cache")) / "knurlogic"
@@ -33,7 +33,7 @@ def serve_log(port: int) -> Path:
     """Where a server started from here writes. A child whose output went
     to /dev/null could crash on load and leave its caller holding
     'starting' forever, with no way to learn why."""
-    return _cache_dir() / f"serve-{port}.log"
+    return cache_dir() / f"serve-{port}.log"
 
 
 # --- servers outlive the session that started them --------------------------
@@ -44,7 +44,7 @@ def serve_log(port: int) -> Path:
 # record is a file, and `_CHILDREN` only keeps the Popen for exit codes.
 
 def registry_path() -> Path:
-    return _cache_dir() / "servers.json"
+    return cache_dir() / "servers.json"
 
 
 def registry() -> dict:

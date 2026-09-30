@@ -8,6 +8,7 @@ is whatever `hf auth login` left on this machine; nothing here asks for one.
 
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 
@@ -130,8 +131,8 @@ _LOADED: list = []
 
 
 def _store() -> Path:
-    from knurlogic.machine.servers import _cache_dir
-    return _cache_dir() / "downloads.json"
+    from knurlogic.machine.servers import cache_dir
+    return cache_dir() / "downloads.json"
 
 
 def _load() -> None:
@@ -162,7 +163,7 @@ def _save() -> None:
 
 def _refresh_models() -> None:
     from knurlogic.interfaces.page import documents
-    documents._MODELS["at"] = 0.0
+    documents.forget_models()
 
 
 def _run(repo_id: str, d: dict) -> None:
@@ -173,8 +174,10 @@ def _run(repo_id: str, d: dict) -> None:
     env = dict(os.environ, HF_HUB_DISABLE_PROGRESS_BARS="1")
     try:
         info = _api().model_info(repo_id, files_metadata=True)
-        d["total"] = _wanted_bytes(info.siblings or [])
-        _save()
+        total = _wanted_bytes(info.siblings or [])
+        with _LOCK:
+            d["total"] = total
+            _save()
     except Exception:
         pass
     with _LOCK:
@@ -188,7 +191,8 @@ def _run(repo_id: str, d: dict) -> None:
             text=True)
     err = p.communicate()[1] or ""
     with _LOCK:
-        _PROCS.pop(repo_id, None)
+        if _PROCS.get(repo_id) is p:
+            del _PROCS[repo_id]
         if d["stop"]:
             d["state"] = "stopped"
         elif p.returncode == 0:
@@ -225,6 +229,7 @@ def start(repo_id: str) -> dict:
 def cancel(repo_id: str) -> dict:
     """Stop a running download; its bytes stay for a resume."""
     with _LOCK:
+        _load()
         d = _DOWNLOADS.get(repo_id)
         if d and d["state"] == "downloading":
             d["stop"] = True
@@ -236,6 +241,7 @@ def cancel(repo_id: str) -> dict:
 
 def dismiss(repo_id: str) -> dict:
     with _LOCK:
+        _load()
         d = _DOWNLOADS.get(repo_id)
         if d and d["state"] != "downloading":
             del _DOWNLOADS[repo_id]
@@ -243,11 +249,32 @@ def dismiss(repo_id: str) -> dict:
     return {"id": repo_id}
 
 
+def _in_use(repo_id: str) -> str:
+    """The port of a running server whose model is in this repo's cache
+    folder, or ""."""
+    from knurlogic.machine.servers import registry
+    root = _cache_dir(repo_id)
+    for port, rec in registry().items():
+        try:
+            if Path(str(rec.get("artifact") or "")).resolve().is_relative_to(
+                    root.resolve()):
+                return str(port)
+        except (OSError, ValueError):
+            continue
+    return ""
+
+
 def delete(repo_id: str) -> dict:
-    """Remove this repo's files from the cache, and its row."""
+    """Remove this repo's files from the cache, and its row. Refused while
+    a running server has the model loaded from there."""
     import shutil
+    port = _in_use(repo_id)
+    if port:
+        return {"id": repo_id, "error": f"a server on port {port} is "
+                f"running this model; unload it first"}
     cancel(repo_id)
-    p = _PROCS.get(repo_id)
+    with _LOCK:
+        p = _PROCS.get(repo_id)
     if p:
         try:
             p.wait(10)
@@ -257,6 +284,7 @@ def delete(repo_id: str) -> dict:
     shutil.rmtree(_cache_dir(repo_id).parent / ".locks" /
                   _cache_dir(repo_id).name, ignore_errors=True)
     with _LOCK:
+        _load()
         _DOWNLOADS.pop(repo_id, None)
         _save()
     _refresh_models()
@@ -285,7 +313,7 @@ def act(body) -> dict:
         repo_id, action = str(req["id"]), req.get("action", "download")
     except (ValueError, KeyError, TypeError):
         return {"error": "send {id, action}"}
-    if "/" not in repo_id:
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo_id):
         return {"error": "a repo id is org/name"}
     fn = {"download": start, "cancel": cancel, "dismiss": dismiss,
           "delete": delete}.get(action)

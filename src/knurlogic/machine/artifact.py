@@ -223,8 +223,8 @@ def sampling_defaults(path) -> dict:
 # is cheap on purpose -- no full hash of the weights: sha256 over config.json,
 # the safetensors index (when there is one), per shard its name, its size,
 # its safetensors header and three sampled windows of its tensor data
-# (start, middle, end), and every *.py the artifact ships (model.py), whole. Two artifacts with the same config and layout whose
-# weights differ (a re-quantised expert set, a different pin) disagree; the
+# (start, middle, end), and every *.py the artifact ships (model.py), whole.
+# Two artifacts with the same config and layout whose weights differ (a re-quantised expert set, a different pin) disagree; the
 # same artifact read on another Mac -- over SMB, say -- agrees, because
 # nothing in it is an mtime or a path. Shards that are symlinks are read
 # through to the files they name.

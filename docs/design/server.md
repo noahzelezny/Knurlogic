@@ -463,7 +463,7 @@ those rows; 1-8 and >=32 rows are untouched. Measured: M3- and M4-generation
 chips bit-identical across all layers; +2-6% on the affected calls only.
 
 Off by default: rank 0 samples every token, so rounding differences cannot
-desync a cluster. `on` forces it (a "Stable" preset will); `auto` turns it
+desync a cluster. `on` forces it; `auto` turns it
 on for a cluster job whose machines have different GPU architectures.
 
 ### knurlogic/interfaces/http/residency.py

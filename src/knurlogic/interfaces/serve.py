@@ -131,8 +131,6 @@ REFUSED_EXIT = 78
 REFUSING = "REFUSING: "
 
 
-
-
 def settings_refusal(a, overrides) -> str | None:
     """The first value a launch would use that its own setting refuses,
     named in the page's words and where to fix it: this model's settings
@@ -146,33 +144,36 @@ def settings_refusal(a, overrides) -> str | None:
     # (settings.settle_context turns it on), so the ceiling is the YaRN one
     w = S.context_ceiling(getattr(a, "model_type", ""),
                           getattr(a, "raw_config", None) or {})
-    for k, v in S.canonical_sets(dict(overrides or {})).items():
-        why = S.check_knob(k, v, w)
-        if why:
-            return f"{why} (Settings \u2192 Models)"
-    for k, why in preferences.invalid():
-        return f"{why} (Settings \u2192 Knurlogic)"
-    return None
+    why = next((m for m in (S.check_knob(k, v, w) for k, v in
+                            S.canonical_sets(dict(overrides or {})).items())
+                if m), None)
+    if why:
+        return f"{why} (Settings \u2192 Models)"
+    why = next((m for _, m in preferences.invalid()), None)
+    return f"{why} (Settings \u2192 Knurlogic)" if why else None
 
 
-def launch_refusal(a, overrides) -> str | None:
-    """None when `overrides` (a launch's --set values) can start `a`, else
-    why not -- the deterministic refusals `run` makes before it loads a
-    thing, in the same words, so a page or the MCP can refuse the launch
-    BEFORE a process (or a ring of them) is started."""
+def launch_refusal(a, overrides, tune: str = "default") -> str | None:
+    """None when `overrides` (a launch's --set values) and the preset `tune`
+    can start `a`, else why not -- the deterministic refusals `run` makes
+    before it loads a thing, in the same words, so a page or the MCP can
+    refuse the launch BEFORE a process (or a ring of them) is started."""
     from knurlogic.tuning import settings as S
     from knurlogic.tuning.resolve import kv_refusal, preset_env
     from knurlogic.machine import preferences
-    why = settings_refusal(a, overrides)
+    # a context past the native window is settled (turned on / lowered)
+    # before the values are checked, as run does
+    sets, _ = S.settle_context(a.model_type, a.raw_config,
+                               S.canonical_sets(dict(overrides or {})))
+    why = settings_refusal(a, sets)
     if why:
         return why
-    sets = preferences.launch_sets(S.canonical_sets(dict(overrides or {})))
-    sets, _ = S.settle_context(a.model_type, a.raw_config, sets)
+    sets = preferences.launch_sets(sets)
     why = documents.refuse_sets(a, sets)
     if why:
         return why
     try:
-        tune = S.preset_of(sets.get("KNURLOGIC_PRESET"))
+        tune = S.preset_of(sets.get("KNURLOGIC_PRESET"), tune)
         launch = S.engine_settings({**preset_env(a, tune),
                                     **{k: v for k, v in sets.items()
                                        if k in S.MODEL_KNOBS}})
@@ -185,7 +186,7 @@ def launch_refusal(a, overrides) -> str | None:
 
 
 def run(path: str, host: str, port: int, working_set_gib: float,
-        profile: str | None, tune: str = "balanced",
+        profile: str | None, tune: str = "default",
         overrides: dict | None = None, draft: bool = True,
         serving: dict | None = None, ring: dict | None = None) -> int:
     a = Artifact.load(path)
@@ -268,18 +269,17 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # Knurlogic, machine/preferences), not a model's: saved, it beats the
     # preset's value; an explicit --set still beats it
     from knurlogic.machine import preferences
+    # a context past the native window turns long context on (or is lowered
+    # to what the model reaches): a value never refuses a launch for that
+    overrides, settled = S.settle_context(
+        a.model_type, a.raw_config, S.canonical_sets(dict(overrides or {})))
+    for n in settled:
+        print(f"  note: {n}")
     why = settings_refusal(a, overrides)
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
         return REFUSED_EXIT
-    decode_scale = preferences.decode_scale(overrides)
     overrides = preferences.launch_sets(overrides)
-    # a context past the native window turns long context on (or is lowered
-    # to what the model reaches): a saved value never refuses a launch
-    overrides, settled = S.settle_context(a.model_type, a.raw_config,
-                                          overrides)
-    for n in settled:
-        print(f"  note: {n}")
     why = documents.refuse_sets(a, overrides)
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
@@ -330,8 +330,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # 115 GiB, every rank of a 397B split would warn "does not fit this
     # box"
     r = resolve(a, ws, profile=profile, tune=tune, holds_bytes=share,
-                kv_bits=kv_bits, long_context=long_context,
-                decode_scale=decode_scale)
+                kv_bits=kv_bits, long_context=long_context)
     apply_preset_overrides(r, overrides)
     if long_context != "off" and ws:
         # YaRN: the KV of the chosen context must fit, or the load is
@@ -390,7 +389,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     def _resolve_for(ws_bytes, tune_name):
         return resolve(a, ws_bytes, profile=profile, tune=tune_name,
                        holds_bytes=share, kv_bits=kv_bits,
-                       long_context=long_context, decode_scale=decode_scale)
+                       long_context=long_context)
 
     # `top` plus `ps` costs about a third of a second, and the page polls
     # status every two. Cached just long enough that a poll is free and a
@@ -760,17 +759,13 @@ def main(argv=None) -> int:
                    help="force a setting, beating the resolver. Repeatable. "
                         "Most knobs are read at import, so this is the only "
                         "moment they can be chosen.")
-    p.add_argument("--tune", "--preset", dest="tune", default="balanced",
-                   choices=S.PRESETS,
-                   help="launch preset (default balanced, the measured "
-                        "defaults). fast = the family's wider prompt chunk "
-                        "where there is room + dynamic MTP; stable = 512 "
-                        "chunks, cross-chip on, MTP every step, "
-                        "conservative memory; lean = 8-bit KV where the "
-                        "family takes it, MTP off; "
-                        "safe = lowest peak memory. Explicit settings "
-                        "(--set, --kv-bits, a per-model KNURLOGIC_PRESET) "
-                        "beat it.")
+    p.add_argument("--tune", "--preset", dest="tune", default="default",
+                   type=S.preset_arg, metavar="{default,lean}",
+                   help="launch preset: default (the measured settings) or "
+                        "lean (8-bit KV where the family takes it, 512-token "
+                        "prompt chunks, MTP off: most context and agents). "
+                        "Explicit settings (--set, --kv-bits, a per-model "
+                        "KNURLOGIC_PRESET) beat it.")
     p.add_argument("--decode-concurrency", type=int, default=32,
                    help="most requests decoding at once (the batch width)")
     p.add_argument("--prompt-cache-size", type=int, default=0,

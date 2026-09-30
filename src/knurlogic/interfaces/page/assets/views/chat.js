@@ -764,8 +764,7 @@ async function runTurn(){
   // server's own timing (usage.knurlogic.timing). No sampling fields and no
   // max_tokens: the server applies the model's own defaults.
   const body={model:c.model||undefined,
-    messages:wire, stream:true, stream_options:{include_usage:true},
-    };
+    messages:wire, stream:true, stream_options:{include_usage:true}};
   const effort=$('ceffort').value;
   if(effort) body.reasoning_effort=effort;
   const t0=performance.now();

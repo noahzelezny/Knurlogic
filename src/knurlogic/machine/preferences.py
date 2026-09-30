@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from knurlogic.tuning.settings import (COMPACT_KNOBS, DECODE_SCALE, MTP_MODE,
+from knurlogic.tuning.settings import (COMPACT_KNOBS, MTP_MODE,
                                        PRESET_ROW_NAMES, check_knob)
 
 CROSS_CHIP = "KNURLOGIC_CROSS_CHIP"
@@ -102,7 +102,7 @@ def launch_sets(sets: dict) -> dict:
     if "KNURLOGIC_PRESET" in out:
         return out
     for k, v in saved.items():
-        if k in PRESET_ROW_NAMES and k not in (DECODE_SCALE, MTP_MODE):
+        if k in PRESET_ROW_NAMES and k != MTP_MODE:
             out.setdefault(k, v)
     mode = saved.get(MTP_MODE)
     if mode:
@@ -111,15 +111,6 @@ def launch_sets(sets: dict) -> dict:
             out.setdefault("KNURLOGIC_MTP_DYNAMIC",
                            "on" if mode == "dynamic" else "off")
     return out
-
-
-def decode_scale(sets: dict | None = None):
-    """The saved expert chunk scale (0.5), or None: the preset's own. A
-    launch that names its own preset takes none."""
-    if "KNURLOGIC_PRESET" in (sets or {}):
-        return None
-    v = get().get(DECODE_SCALE)
-    return float(v) if v else None
 
 
 def compaction_env(env=None) -> dict:

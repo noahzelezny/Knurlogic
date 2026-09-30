@@ -226,7 +226,7 @@ function setSets(v){ SETS=v }
 async function loadPreview(){
   const m=SEL; if(!m){ PREVIEW=null; return }
   const q=new URLSearchParams({artifact:m.path,
-                               tune:window.LOADTUNE||'balanced'});
+                               tune:window.LOADTUNE||'default'});
   // the room is counted at the KV precision it would launch with
   const kvb=launchSets(baseKey(m.name)).KNURLOGIC_KV_BITS;
   if(kvb) q.set('kv_bits', kvb);
@@ -429,7 +429,7 @@ $('launch').onclick=async()=>{
   const m=SEL; if(!m || launchBlock(selNodes())) return;
   const b=$('launch'); b.disabled=true; b.textContent='Launching…';
   const pn=launchPeer(), ns=selNodes();
-  const tune=window.LOADTUNE||'balanced';
+  const tune=window.LOADTUNE||'default';
   const sets=launchMTP(m);
   const t0=Date.now();
   const L=trackLaunch(m, ns, pn, t0);
@@ -456,7 +456,7 @@ $('launch').onclick=async()=>{
 };
 // the tune a launch takes: this machine's knurlogic strategy (Settings ->
 // Knurlogic); a base model's own Launch preset still beats it
-window.LOADTUNE='balanced';
+window.LOADTUNE='default';
 getJSON('/strategy.json').then(d=>{ if(d&&d.preset) window.LOADTUNE=d.preset });
 
 // --- which machines, and MTP -------------------------------------------------
