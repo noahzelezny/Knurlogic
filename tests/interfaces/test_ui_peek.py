@@ -79,7 +79,7 @@ def test_connect_json_lists_every_way_in():
     body, ctype = documents.routes()["/connect.json"]({}, 0)
     doc = json.loads(body)
     ids = [e["id"] for e in doc["endpoints"]]
-    assert ids == ["openai", "claude", "mcp", "curl"]
+    assert ids == ["openai", "ollama", "claude", "mcp", "curl"]
     by = {e["id"]: e for e in doc["endpoints"]}
     # OpenAI and curl: the router first, the model's own server second
     for k in ("openai", "curl"):
