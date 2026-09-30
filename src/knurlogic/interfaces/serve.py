@@ -122,6 +122,40 @@ def ignored_env(env: dict, forced: dict, environ) -> list:
                    f"(runs {v}); use {flag}")
     return out
 
+#: `knurlogic serve`'s exit status when it refuses to start (bad settings,
+#: a model it cannot load as asked): deterministic, so the page fails the
+#: load with the REFUSING line and never relaunches it (cluster/recovery).
+#: EX_CONFIG, distinct from a crash (1) and from argparse's usage error (2).
+REFUSED_EXIT = 78
+#: the prefix of every refusal line serve prints; the page reads it back
+REFUSING = "REFUSING: "
+
+
+def launch_refusal(a, overrides) -> str | None:
+    """None when `overrides` (a launch's --set values) can start `a`, else
+    why not -- the deterministic refusals `run` makes before it loads a
+    thing, in the same words, so a page or the MCP can refuse the launch
+    BEFORE a process (or a ring of them) is started."""
+    from knurlogic.tuning import settings as S
+    from knurlogic.tuning.resolve import kv_refusal, preset_env
+    from knurlogic.machine import preferences
+    sets = preferences.launch_sets(S.canonical_sets(dict(overrides or {})))
+    why = documents.refuse_sets(a, sets)
+    if why:
+        return why
+    try:
+        tune = S.preset_of(sets.get("KNURLOGIC_PRESET"))
+        launch = S.engine_settings({**preset_env(a, tune),
+                                    **{k: v for k, v in sets.items()
+                                       if k in S.MODEL_KNOBS}})
+    except ValueError as e:
+        return str(e)
+    return (kv_refusal(a, launch.get("kv_bits"))
+            or S.long_context_refusal(a.model_type,
+                                      launch.get("long_context", "off"))
+            or None)
+
+
 def run(path: str, host: str, port: int, working_set_gib: float,
         profile: str | None, tune: str = "balanced",
         overrides: dict | None = None, draft: bool = True,
@@ -141,7 +175,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(f"REFUSING: no implementation for {missing}. This artifact "
               f"cannot load, and starting a server that 500s on every request "
               f"helps nobody.", file=sys.stderr)
-        return 2
+        return REFUSED_EXIT
 
     ring = ring or {}
     world = int(ring.get("world") or 1)
@@ -153,7 +187,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                   f"{a.path.name}:", file=sys.stderr)
             for w in why:
                 print(f"  - {w}", file=sys.stderr)
-            return 2
+            return REFUSED_EXIT
         if ring.get("split") == "pipeline":
             from knurlogic.tuning import resolve as R
             per, other = R.pipeline_layer_bytes(a)
@@ -210,29 +244,29 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     why = documents.refuse_sets(a, overrides)
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
-        return 2
+        return REFUSED_EXIT
     try:
         tune = S.preset_of(overrides.pop("KNURLOGIC_PRESET", None), tune)
     except ValueError as e:
         print(f"REFUSING: {e}", file=sys.stderr)
-        return 2
+        return REFUSED_EXIT
     try:
         launch = S.engine_settings({**preset_env(a, tune),
                                     **{k: v for k, v in overrides.items()
                                        if k in S.MODEL_KNOBS}})
     except ValueError as e:
         print(f"REFUSING: {e}", file=sys.stderr)
-        return 2
+        return REFUSED_EXIT
     kv_bits = launch.get("kv_bits")
     why = kv_refusal(a, kv_bits)
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
-        return 2
+        return REFUSED_EXIT
     long_context = launch.get("long_context", "off")
     why = S.long_context_refusal(a.model_type, long_context)
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
-        return 2
+        return REFUSED_EXIT
     if launch.get("mtp") is False:
         draft = False
     # identical rounding across GPU architectures (engine/crosschip.py):
@@ -270,7 +304,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         if why:
             print(f"REFUSING: KNURLOGIC_LONG_CONTEXT=yarn: {why}",
                   file=sys.stderr)
-            return 2
+            return REFUSED_EXIT
     print(f"preset    {tune}" + (
         f" (overridden: {', '.join(sorted(r.preset['overridden']))})"
         if r.preset.get("overridden") else ""))

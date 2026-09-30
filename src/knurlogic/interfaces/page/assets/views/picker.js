@@ -548,7 +548,7 @@ function followLaunch(L, d){
   }
   if(e){
     if(e.phase==='exited'){ L.phase='failed';
-      L.why=(e.log_tail||[]).slice(-2).join(' / ')||'the server exited'; return }
+      L.why=e.refused||(e.log_tail||[]).slice(-2).join(' / ')||'the server exited'; return }
     L.phase={loading:'loading weights', stalled:'stalled', warming:'warming',
              ready:'ready'}[e.phase]||'starting';
     if(e.phase==='stalled') L.why=`no log output for a while; last: ${e.last_log_line||'--'}`;
