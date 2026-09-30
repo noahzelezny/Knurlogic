@@ -159,7 +159,7 @@ async function showCompaction(ms){
   const kn=docs[0].knurlogic||{}, cp=kn.compaction;
   if(!cp){ el.innerHTML=`<div class="msg">${esc(kn.error||'this page predates knurlogic-wide compaction')}</div>`; return }
   const ks=cp.knobs||[];
-  const TITLE={KNURLOGIC_COMPACT_AUTO:'Compact unasked', KNURLOGIC_COMPACT_TRIGGER:'Start at',
+  const TITLE={KNURLOGIC_COMPACT_AUTO:'Compact unasked', KNURLOGIC_COMPACT_TRIGGER:'Auto compact',
     KNURLOGIC_COMPACT_KEEP_TURNS:'Keep recent', KNURLOGIC_COMPACT_TOOL_RESULTS:'Dropped tool results'};
   el.innerHTML=`<div class="sgrp"><div class="shd">Compaction</div>
     <div class="gks">${ks.map(k=>gsel(k.name, TITLE[k.name]||k.name, k.help||k.what, k.help?'':k.why,

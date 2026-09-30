@@ -382,7 +382,7 @@ def strategy_doc() -> dict:
     from knurlogic.machine import strategy
     from knurlogic.tuning import settings as S
     return {"preset": strategy.get(), "default": S.PRESET_DEFAULT,
-            "presets": [{"name": n, "title": n.capitalize(),
+            "presets": [{"name": n, "title": "Default" if n == S.PRESET_DEFAULT else n.capitalize(),
                          "values": S.preset_row_values(n)}
                         for n in S.PRESETS],
             "rows": [{**r, "options": [{"v": v, "t": t}
