@@ -20,6 +20,7 @@ import {renderSetTabs, showSetTab} from './views/settings/index.js';
 import {showConnect} from './views/connect.js';
 import {tick} from './views/home.js';
 import {loadModels} from './views/picker.js';
+import {showDownloads, stopDownloads} from './views/downloads.js';
 import {loadResident} from './views/memory.js';
 
 // Settings and Connect: a thing you go and get, shown as an overlay. The
@@ -39,9 +40,10 @@ import {loadResident} from './views/memory.js';
     document.getElementById('sheettitle').textContent=name;
     if(name==='settings'){ renderSetTabs(); showSetTab() }
     if(name==='connect') showConnect();
+    if(name==='downloads') showDownloads();
     OVL.open(sheet, {face:sheet.querySelector('.box'),
                      opener:document.querySelector('header nav'),
-                     onclose:()=>{ mark(null); STAGEPOP.hide() },
+                     onclose:()=>{ mark(null); STAGEPOP.hide(); stopDownloads() },
                      beforeclose:()=>STAGEPOP.beforeClose()});
     mark(name);
     sheet.querySelector('.sheetbody').scrollTop=0;
