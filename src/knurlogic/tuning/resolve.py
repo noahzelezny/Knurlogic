@@ -774,7 +774,7 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
     from knurlogic.engine.mtp import find_head
     try:
         head = find_head(artifact.path)
-    except Exception:
+    except (OSError, ValueError):
         head = None
     launch, _ = S.preset_launch(tune, artifact.model_type)
     if head is not None:
