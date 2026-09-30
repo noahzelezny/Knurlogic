@@ -536,47 +536,39 @@ async function hubAct(action, id){
   if(!r.ok) alert(await httpWhy(r));
   loadResident();
 }
-// what the page's server has downloading, done or failed; a finished one
-// is dropped once /models.json has been read again
+// what the page's server has downloading, done or failed; the Downloads
+// overlay lists them, and a finished one refreshes the model list once
+const DONESEEN=new Set();
 async function loadDownloads(){
   const d=await getJSON('/hub/downloads.json');
   if(d.error) return;
-  const was=DLS.filter(x=>x.state==='downloading').map(x=>x.id);
   DLS=d.downloads||[];
-  const done=DLS.filter(x=>x.state==='done');
-  if(done.length){
-    for(const x of done) await fetch('/hub/download.json',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'dismiss', id:x.id})});
-    DLS=DLS.filter(x=>x.state!=='done');
-    await loadModels();
-  }
+  const fresh=DLS.filter(x=>x.state==='done'&&!DONESEEN.has(x.id));
+  fresh.forEach(x=>DONESEEN.add(x.id));
+  if(fresh.length) await loadModels();
   if(!$('picker').hidden && FAM===HUB) renderHub();
 }
-const downloadingNow=()=>DLS.filter(d=>d.state==='downloading');
-const failedDownloads=()=>DLS.filter(d=>d.state==='failed');
+const allDownloads=()=>DLS;
 function renderHub(){
-  const ws=fitWS(), ns=selNodes();
-  const many=ns.length>1||ns.some(n=>!isLocal(n));
+  const ws=fitWS();
   const row=r=>{
     const d=HF.detail[r.id], dl=dlOf(r.id), open=HF.open===r.id;
     const local=MODELS.some(m=>m.name===r.id)
       ||(window.ALLMODELS||[]).some(m=>m.name===r.id);
-    let body='';
+    let pop='';
     if(open){
-      if(!d||d.loading) body='<div class="note">reading the repo…</div>';
-      else if(d.error) body=`<div class="warn">${esc(d.error)}</div>`;
+      if(!d||d.loading) pop='<span class="vs">reading…</span>';
+      else if(d.error) pop=`<span class="vs">${esc(d.error)}</span>`;
       else{
-        const fits=!ws||d.size_bytes<=ws;
-        const can=d.supported&&d.access&&!local&&!dl;
-        body=`<div class="note">${[d.model_type||'unknown architecture', gb(d.size_bytes),
-            d.supported?(fits?'fits '+fitWhere():'does not fit '+fitWhere()+' ('+gb(ws)+')')
-              :d.why].map(esc).join(' · ')}</div>`
-          +(!d.access?`<div class="warn">needs access: ${esc(d.hint)}</div>`:'')
-          +`<div class="hfact">${local?'<span class="note">already on this Mac</span>'
-            :dl&&dl.state==='downloading'?'<span class="note">downloading…</span>'
-            :`<button class="mini" data-dl="${esc(r.id)}"${can?'':' disabled'}>Download</button>`}
-          ${many?'<span class="note">downloads to this Mac</span>':''}</div>`;
+        const can=d.supported&&d.access&&!local&&!(dl&&dl.state==='downloading');
+        const line=!d.supported?d.why
+          :!d.access?'needs access — run hf auth login'
+          :ws&&d.size_bytes>ws?"doesn't fit the picked machines":'';
+        pop=`<div class="hfrun"><span>${gb(d.size_bytes)}</span>
+          ${local?'<span class="vs">already on this Mac</span>'
+            :dl&&dl.state==='downloading'?'<span class="vs">downloading…</span>'
+            :`<button class="mini" data-dl="${esc(r.id)}"${can?'':' disabled'}>Download</button>`}</div>
+          ${line?`<div class="vs">${esc(line)}</div>`:''}`;
       }
     }
     const no=d&&!d.loading&&!d.error&&(!d.supported||!d.access);
@@ -585,15 +577,18 @@ function renderHub(){
         <span class="vn">${esc(r.id)}</span>
         ${r.gated?'<span class="tag">GATED</span>':''}
         <span class="vs">${(r.downloads||0).toLocaleString()} downloads</span></div>
-      ${body?`<div class="hfbody">${body}</div>`:''}</div>`;
+      ${pop?`<div class="hfpop">${pop}</div>`:''}</div>`;
   };
   $('prows').innerHTML=HF.err?`<div class="sect no">${esc(HF.err)}</div>`
     :HF.res===null?'<div class="sect no">searching…</div>'
     :HF.res.length?HF.res.map(row).join(''):'<div class="sect no">nothing matches</div>';
+  $('prows').onmousedown=e=>{
+    if(HF.open && !e.target.closest('.hfpop,[data-hf]')){ HF.open=''; renderHub() }};
   $('prows').querySelectorAll('[data-hf]').forEach(v=>v.onclick=()=>hubOpen(v.dataset.hf));
   $('prows').querySelectorAll('[data-dl]').forEach(b=>b.onclick=async e=>{
-    e.stopPropagation(); b.disabled=true; await hubAct('download', b.dataset.dl);
-    OVL.close();
+    e.stopPropagation(); b.disabled=true; HF.open='';
+    await hubAct('download', b.dataset.dl);
+    renderHub();
   });
   if(HF.res===null) hubSearch();
 }
@@ -694,7 +689,7 @@ function followLaunches(d){
   renderLaunches();
 }
 
-export {BASEKEY, SEL, baseKey, baseOf, dismissLaunch, downloadingNow,
-        failedDownloads, failedLaunches, famOf, followLaunches, hubAct,
+export {allDownloads, BASEKEY, SEL, baseKey, baseOf, dismissLaunch,
+        failedLaunches, famOf, followLaunches, hubAct,
         loadDownloads, loadModels, loadingLaunches,
         nodeSelChanged, published, setSets};

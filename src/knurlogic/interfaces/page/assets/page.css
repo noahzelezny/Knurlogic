@@ -802,6 +802,17 @@ body.talk #clog{flex:1;height:auto;min-height:0;max-height:none}
 .grphd .gv.on{color:var(--acc)}
 
 .hfrow.no .var{opacity:.55}
-.hfbody{padding:2px 14px 10px 34px;display:flex;flex-direction:column;gap:5px}
-.hfact{display:flex;align-items:center;gap:10px}
+.hfrow{position:relative}
+.hfpop{position:absolute;right:14px;top:100%;z-index:5;padding:6px 10px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  display:flex;flex-direction:column;gap:4px;max-width:70%;font-size:13.5px;color:var(--dim)}
+.hfrun{display:flex;align-items:center;gap:10px}
+.badge{margin-left:6px;padding:0 5px;border-radius:8px;background:var(--acc);
+  color:var(--accfg);font-size:11px}
+.badge[hidden]{display:none}
+.dlbody{flex:1;overflow:auto;padding:8px 14px}
+.dlrow{padding:8px 0;border-bottom:1px solid var(--line)}
+.dlhd{display:flex;align-items:center;gap:10px}
+.dlhd .vn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dlrow.failed .vs.why{color:var(--warn)}
 .card.loading .x{margin-left:auto;padding:0 6px}

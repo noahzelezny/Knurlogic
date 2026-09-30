@@ -1,6 +1,6 @@
 import {$, esc, gb} from '../format.js';
-import {dismissLaunch, downloadingNow, failedDownloads, failedLaunches,
-  followLaunches, hubAct, loadDownloads, loadingLaunches} from './picker.js';
+import {dismissLaunch, failedLaunches,
+  followLaunches, loadDownloads, loadingLaunches} from './picker.js';
 
 // --- what is actually in memory, whoever put it there ---------------------
 // exo's models, ollama's models and ours in one list. A machine has one pool
@@ -167,22 +167,6 @@ async function loadResident(){
       <div class="s">on ${esc(L.machines.join(' + '))}</div>
       ${L.alert?`<div class="why">${esc(L.alert)}</div>`:''}
       ${L.why?`<div class="why">${esc(L.why)}</div>`:''}</div>`);
-  const dls=downloadingNow().map(D=>{
-    const pct=D.total_bytes?Math.min(100,Math.round(100*D.bytes/D.total_bytes)):0;
-    return `<div class="card loading"><div class="cardhd"><span class="dot"></span>
-        <span class="rt knurlogic">${D.total_bytes?`downloading ${pct}%`:'preparing'}</span>
-        <button class="mini x" data-dc="${esc(D.id)}" title="cancel">×</button></div>
-      <div class="n">${esc(D.id)}</div>
-      <div class="lbar"><i style="width:${pct}%"></i></div>
-      <div class="s">${D.total_bytes?gb(D.bytes)+' of '+gb(D.total_bytes)+' · ':''}to this Mac</div></div>`});
-  const dlFailed=failedDownloads().map(D=>
-    `<div class="card failed"><div class="cardhd"><span class="dot"></span>
-        <span class="rt">FAILED</span>
-        <button class="mini x" data-dx="${esc(D.id)}" title="dismiss">×</button></div>
-      <div class="n">${esc(D.id)}</div>
-      <div class="s">download to this Mac</div>
-      <div class="why">${esc(D.why)}</div></div>`);
-  failed.unshift(...dlFailed); loading.unshift(...dls);
   let h=cards.length||loading.length||failed.length
     ?failed.concat(loading,cards).join(''):none;
   for(const m of peers) if(m.error)
@@ -208,8 +192,6 @@ async function loadResident(){
   // same box, and letting both write produced a key that disagreed with the
   // gauge beside it. Only used when status supplied nothing at all.
   if(!RAM) ramWent(d.memory||{});
-  el.querySelectorAll('[data-dc]').forEach(x=>x.onclick=()=>hubAct('cancel', x.dataset.dc));
-  el.querySelectorAll('[data-dx]').forEach(x=>x.onclick=()=>hubAct('dismiss', x.dataset.dx));
   el.querySelectorAll('[data-lx]').forEach(x=>x.onclick=()=>{
     dismissLaunch(+x.dataset.lx); loadResident();
   });
