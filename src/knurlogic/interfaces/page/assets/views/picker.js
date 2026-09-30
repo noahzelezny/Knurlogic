@@ -522,12 +522,49 @@ async function hubSearch(){
   if(FAM===HUB) renderHub();
 }
 async function hubOpen(id){
-  HF.open=HF.open===id?'':id;
-  if(HF.open && !HF.detail[id]){
-    HF.detail[id]={loading:true}; renderHub();
+  HF.open=id; renderHub();
+  if(!HF.detail[id]||HF.detail[id].error){
+    HF.detail[id]={loading:true};
     HF.detail[id]=await getJSON('/hub/repo.json?'+new URLSearchParams({id}));
   }
   if(FAM===HUB) renderHub();
+}
+function hubDialog(){
+  const box=$('picker').querySelector('.box');
+  box.querySelector('.hfdlg')?.remove();
+  removeEventListener('keydown',HF.esc,true);
+  const id=HF.open;
+  if(!id) return;
+  const d=HF.detail[id], dl=dlOf(id), ws=fitWS();
+  const local=MODELS.some(m=>m.name===id)
+    ||(window.ALLMODELS||[]).some(m=>m.name===id);
+  const busy=dl&&dl.state==='downloading';
+  const ready=d&&!d.loading&&!d.error;
+  const line=!d||d.loading?'':d.error?d.error
+    :local?'already on this Mac':busy?'downloading…'
+    :!d.supported?d.why:!d.access?'needs access — run hf auth login'
+    :ws&&d.size_bytes>ws?"doesn't fit the picked machines":'';
+  const can=ready&&d.supported&&d.access&&!local&&!busy;
+  const el=document.createElement('div');
+  el.className='hfdlg';
+  el.innerHTML=`<div class="hfbox"><div class="hfttl">${esc(id)}</div>
+    <div class="hfsz">${ready?gb(d.size_bytes):'…'}</div>
+    <div class="vs hfnote">${esc(line)}</div>
+    <div class="hfbtns"><button class="mini" data-c>Cancel</button>
+      <button class="mini go" data-d${can?'':' disabled'}>Download</button></div></div>`;
+  const esc_=e=>{ if(e.key==='Escape'){ e.stopPropagation(); close() } };
+  const close=()=>{
+    removeEventListener('keydown',esc_,true);
+    HF.open=''; el.remove(); renderHub() };
+  HF.esc=esc_; addEventListener('keydown',esc_,true);
+  el.onmousedown=e=>{ if(e.target===el) close() };
+  el.querySelector('[data-c]').onclick=close;
+  el.querySelector('[data-d]').onclick=async()=>{
+    close();
+    await hubAct('download', id);
+    renderHub();
+  };
+  box.appendChild(el);
 }
 async function hubAct(action, id){
   const r=await fetch('/hub/download.json',{method:'POST',
@@ -552,44 +589,20 @@ const allDownloads=()=>DLS;
 function renderHub(){
   const ws=fitWS();
   const row=r=>{
-    const d=HF.detail[r.id], dl=dlOf(r.id), open=HF.open===r.id;
-    const local=MODELS.some(m=>m.name===r.id)
-      ||(window.ALLMODELS||[]).some(m=>m.name===r.id);
-    let pop='';
-    if(open){
-      if(!d||d.loading) pop='<span class="vs">reading…</span>';
-      else if(d.error) pop=`<span class="vs">${esc(d.error)}</span>`;
-      else{
-        const can=d.supported&&d.access&&!local&&!(dl&&dl.state==='downloading');
-        const line=!d.supported?d.why
-          :!d.access?'needs access — run hf auth login'
-          :ws&&d.size_bytes>ws?"doesn't fit the picked machines":'';
-        pop=`<div class="hfrun"><span>${gb(d.size_bytes)}</span>
-          ${local?'<span class="vs">already on this Mac</span>'
-            :dl&&dl.state==='downloading'?'<span class="vs">downloading…</span>'
-            :`<button class="mini" data-dl="${esc(r.id)}"${can?'':' disabled'}>Download</button>`}</div>
-          ${line?`<div class="vs">${esc(line)}</div>`:''}`;
-      }
-    }
+    const d=HF.detail[r.id], open=HF.open===r.id;
     const no=d&&!d.loading&&!d.error&&(!d.supported||!d.access);
     return `<div class="hfrow${no?' no':''}"><div class="var" data-hf="${esc(r.id)}"
         aria-current="${open}">
         <span class="vn">${esc(r.id)}</span>
         ${r.gated?'<span class="tag">GATED</span>':''}
         <span class="vs">${(r.downloads||0).toLocaleString()} downloads</span></div>
-      ${pop?`<div class="hfpop">${pop}</div>`:''}</div>`;
+      </div>`;
   };
   $('prows').innerHTML=HF.err?`<div class="sect no">${esc(HF.err)}</div>`
     :HF.res===null?'<div class="sect no">searching…</div>'
     :HF.res.length?HF.res.map(row).join(''):'<div class="sect no">nothing matches</div>';
-  $('prows').onmousedown=e=>{
-    if(HF.open && !e.target.closest('.hfpop,[data-hf]')){ HF.open=''; renderHub() }};
   $('prows').querySelectorAll('[data-hf]').forEach(v=>v.onclick=()=>hubOpen(v.dataset.hf));
-  $('prows').querySelectorAll('[data-dl]').forEach(b=>b.onclick=async e=>{
-    e.stopPropagation(); b.disabled=true; HF.open='';
-    await hubAct('download', b.dataset.dl);
-    renderHub();
-  });
+  hubDialog();
   if(HF.res===null) hubSearch();
 }
 
