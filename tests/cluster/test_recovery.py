@@ -90,8 +90,9 @@ def test_an_unload_from_the_other_page_is_not_recovered(two_pages,
     p = two_pages
     monkeypatch.setattr(R, "BACKOFF_S", (0.0, 0.0, 0.0))
     # B's Unload: B stops its rank and tells A, reason "unloaded"
-    C._post(f"http://127.0.0.1:{p.ui_b}{C.STOP_PATH}",
-            {"job": p.job, "reason": "unloaded"})
+    from knurlogic.cluster import transport
+    transport.send(f"127.0.0.1:{p.ui_b}", "Stop",
+                   {"job": p.job, "reason": "unloaded"})
     # A's watcher asks B, and stops the job for B's reason
     assert wait(lambda: C.watch_once() or p.job in C.ENDED, 30)
     assert "unloaded" in C.ENDED[p.job]["reason"]

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Callable
 
 from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
+from knurlogic.cluster import transport
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ def _peer(d: dict):
     host, _, port = str(d.get("key") or "").rpartition(":")
     return Peer(host=host, port=int(port) if port.isdigit() else 0,
                 id=str(d.get("id") or ""), name=str(d.get("name") or ""),
-                state=str(d.get("state") or "not_answering"),
+                state=str(d.get("state") or "gone"),
                 link=str(d.get("link") or ""),
                 node=d.get("node") if isinstance(d.get("node"), dict)
                 else None)
@@ -526,7 +527,7 @@ def _tick_cluster(rec: dict, now: float) -> str:
             rec["job"] = e["relaunched"]
             return f"followed the cable failover to job {e['relaunched']}"
         why = C._job_end(job, rec["order"], rec["args"].get("post")
-                         or C._post)
+                         or transport.send)
         if why is None:
             if rec.get("state") == "recovering" and \
                     _cluster_phase(rec) == "ready":
@@ -574,18 +575,17 @@ def _tick_cluster(rec: dict, now: float) -> str:
 
 def _cluster_phase(rec: dict) -> str:
     from knurlogic.cluster import jobs as J
-    from knurlogic.cluster import launch as C
     job = rec["job"]
     phases = []
     recs = J.by_job().get(job)
     if recs:
         phases.append(J.phase_of(job, recs))
-    post = rec["args"].get("post") or C._post
+    post = rec["args"].get("post") or transport.send
     for m in rec["order"]:
         if not m.get("page"):
             continue
         try:
-            doc = post(f"http://{m['page']}{C.JOB_PATH}", {"job": job})
+            doc = post(m["page"], "JobState", {"job": job})
         except (*NET_ERRORS, AttributeError):
             return "unknown"
         phases.append(doc.get("phase") or "joining")
@@ -612,13 +612,12 @@ def _fresh_peers(rec: dict) -> list:
 def _machines_down(rec: dict) -> str:
     """"" when every machine of the job answers its page, else who does
     not."""
-    from knurlogic.cluster import launch as C
-    post = rec["args"].get("post") or C._post
+    post = rec["args"].get("post") or transport.send
     for m in rec["order"]:
         if not m.get("page"):
             continue
         try:
-            doc = post(f"http://{m['page']}{C.JOB_PATH}",
+            doc = post(m["page"], "JobState",
                        {"job": rec.get("ended_job") or rec["job"]})
             if not isinstance(doc, dict) or "ranks_here" not in doc:
                 raise ValueError("no job state")
@@ -631,18 +630,17 @@ def _leftovers(rec: dict, job: str | None) -> str:
     """"" when no rank of `job` is left on any of its machines (by record
     and by process), else which."""
     from knurlogic.cluster import jobs as J
-    from knurlogic.cluster import launch as C
     if not job:
         return ""
     here = [int(r["pid"]) for r in J.by_job().get(job, [])] \
         + J.pids_of_job(job)
     if here:
         return f"this machine: pid {', '.join(map(str, sorted(set(here))))}"
-    post = rec["args"].get("post") or C._post
+    post = rec["args"].get("post") or transport.send
     for m in rec["order"]:
         if not m.get("page"):
             continue
-        doc = post(f"http://{m['page']}{C.JOB_PATH}", {"job": job})
+        doc = post(m["page"], "JobState", {"job": job})
         if doc.get("ranks_here") or doc.get("stopping") \
                 or doc.get("processes"):
             return f"{m.get('name')}: ranks {doc.get('ranks_here')}, " \
