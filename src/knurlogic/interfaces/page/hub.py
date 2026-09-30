@@ -9,7 +9,6 @@ is whatever `hf auth login` left on this machine; nothing here asks for one.
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
 
 LIMIT = 50
@@ -19,7 +18,7 @@ WANTED = ("*.json", "*.safetensors", "*.txt", "*.model", "*.jinja",
 GATED_HINT = "run `hf auth login` on this Mac with an account that has access"
 
 _DOWNLOADS: dict = {}
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
 
 
 def _api():
@@ -108,59 +107,114 @@ def _wanted_bytes(files) -> int:
                if any(fnmatch.fnmatch(f.rfilename, p) for p in WANTED))
 
 
-class Cancelled(Exception):
-    pass
+_CHILD = ("import sys, json; from huggingface_hub import snapshot_download; "
+          "snapshot_download(sys.argv[1], allow_patterns=json.loads(sys.argv[2]))")
+_PROCS: dict = {}
+_LOADED: list = []
+
+
+def _store() -> Path:
+    from knurlogic.machine.servers import _cache_dir
+    return _cache_dir() / "downloads.json"
+
+
+def _load() -> None:
+    """The list a previous run left; what was running then is stopped now."""
+    import json
+    if _LOADED:
+        return
+    _LOADED.append(True)
+    try:
+        for d in json.loads(_store().read_text()):
+            if d["state"] == "downloading":
+                d["state"] = "stopped"
+            d["stop"] = False
+            _DOWNLOADS[d["id"]] = d
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
+
+def _save() -> None:
+    import json
+    rows = [{k: v for k, v in d.items() if k != "stop"}
+            for d in _DOWNLOADS.values()]
+    try:
+        _store().write_text(json.dumps(rows))
+    except OSError:
+        pass
+
+
+def _refresh_models() -> None:
+    from knurlogic.interfaces.page import documents
+    documents._MODELS["at"] = 0.0
 
 
 def _run(repo_id: str, d: dict) -> None:
-    from huggingface_hub import snapshot_download
-    from huggingface_hub.utils import tqdm as hf_tqdm
-
-    class Bar(hf_tqdm):
-        def update(self, n=1):
-            if d["cancel"]:
-                raise Cancelled()
-            return super().update(n)
+    import json
+    import os
+    import subprocess
+    import sys
+    env = dict(os.environ, HF_HUB_DISABLE_PROGRESS_BARS="1")
     try:
         info = _api().model_info(repo_id, files_metadata=True)
         d["total"] = _wanted_bytes(info.siblings or [])
-        snapshot_download(repo_id, allow_patterns=list(WANTED),
-                          tqdm_class=Bar)
-        d["state"] = "done"
-        from knurlogic.interfaces.page import documents
-        documents._MODELS["at"] = 0.0
-    except Exception as e:
-        if d["cancel"] or isinstance(e, Cancelled):
-            d["state"] = "cancelled"
+        _save()
+    except Exception:
+        pass
+    with _LOCK:
+        if d["stop"]:
+            d["state"] = "stopped"
+            _save()
+            return
+        p = _PROCS[repo_id] = subprocess.Popen(
+            [sys.executable, "-c", _CHILD, repo_id, json.dumps(list(WANTED))],
+            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            text=True)
+    err = p.communicate()[1] or ""
+    with _LOCK:
+        _PROCS.pop(repo_id, None)
+        if d["stop"]:
+            d["state"] = "stopped"
+        elif p.returncode == 0:
+            d["state"] = "done"
+            _refresh_models()
         else:
-            d["state"], d["why"] = "failed", _why(e)
+            d["state"], d["why"] = "failed", _why(err)
+        _save()
 
 
-def _why(e: Exception) -> str:
-    name = type(e).__name__
-    if name in ("GatedRepoError", "RepositoryNotFoundError"):
+def _why(err: str) -> str:
+    if "GatedRepoError" in err or "RepositoryNotFoundError" in err:
         return f"no access to this repo; {GATED_HINT}"
-    if "No space" in str(e):
+    if "No space" in err:
         return "the disk is full"
-    return _brief(e)
+    return (err.strip().splitlines() or ["the download failed"])[-1][:200]
 
 
 def start(repo_id: str) -> dict:
+    """Start it, or resume it: files already partway on disk carry on."""
     with _LOCK:
+        _load()
         d = _DOWNLOADS.get(repo_id)
         if d and d["state"] == "downloading":
             return {"id": repo_id, "state": "downloading"}
-        d = _DOWNLOADS[repo_id] = {"id": repo_id, "state": "downloading",
-                                   "total": 0, "cancel": False, "why": "",
-                                   "started": time.time()}
+        _DOWNLOADS[repo_id] = d = {"id": repo_id, "state": "downloading",
+                                   "total": d["total"] if d else 0,
+                                   "stop": False, "why": ""}
+        _save()
     threading.Thread(target=_run, args=(repo_id, d), daemon=True).start()
     return {"id": repo_id, "state": "downloading"}
 
 
 def cancel(repo_id: str) -> dict:
-    d = _DOWNLOADS.get(repo_id)
-    if d and d["state"] == "downloading":
-        d["cancel"] = True
+    """Stop a running download; its bytes stay for a resume."""
+    with _LOCK:
+        d = _DOWNLOADS.get(repo_id)
+        if d and d["state"] == "downloading":
+            d["stop"] = True
+            p = _PROCS.get(repo_id)
+            if p:
+                p.terminate()
     return {"id": repo_id}
 
 
@@ -169,22 +223,46 @@ def dismiss(repo_id: str) -> dict:
         d = _DOWNLOADS.get(repo_id)
         if d and d["state"] != "downloading":
             del _DOWNLOADS[repo_id]
+            _save()
+    return {"id": repo_id}
+
+
+def delete(repo_id: str) -> dict:
+    """Remove this repo's files from the cache, and its row."""
+    import shutil
+    cancel(repo_id)
+    p = _PROCS.get(repo_id)
+    if p:
+        try:
+            p.wait(10)
+        except Exception:
+            pass
+    shutil.rmtree(_cache_dir(repo_id), ignore_errors=True)
+    shutil.rmtree(_cache_dir(repo_id).parent / ".locks" /
+                  _cache_dir(repo_id).name, ignore_errors=True)
+    with _LOCK:
+        _DOWNLOADS.pop(repo_id, None)
+        _save()
+    _refresh_models()
     return {"id": repo_id}
 
 
 def downloads() -> dict:
-    """Every download of this run: bytes on disk against the total, and why
-    a failed one failed. A finished one stays listed until dismissed."""
+    """Every download this machine has made through the page: bytes on disk
+    against the total, and why a failed one failed. Finished ones stay
+    listed until cleared."""
+    with _LOCK:
+        _load()
+        rows = list(_DOWNLOADS.values())
     return {"downloads": [
         {"id": d["id"], "state": d["state"], "total_bytes": d["total"],
-         "bytes": _bytes_held(d["id"]) if d["state"] == "downloading"
-         else d["total"] if d["state"] == "done" else 0,
+         "bytes": d["total"] if d["state"] == "done" else _bytes_held(d["id"]),
          "why": d["why"]}
-        for d in list(_DOWNLOADS.values()) if d["state"] != "cancelled"]}
+        for d in rows]}
 
 
 def act(body) -> dict:
-    """POST /hub/download.json {action: download | cancel | dismiss, id}."""
+    """POST /hub/download.json {action: download | cancel | dismiss | delete, id}."""
     import json
     try:
         req = json.loads(body or b"{}")
@@ -193,5 +271,6 @@ def act(body) -> dict:
         return {"error": "send {id, action}"}
     if "/" not in repo_id:
         return {"error": "a repo id is org/name"}
-    fn = {"download": start, "cancel": cancel, "dismiss": dismiss}.get(action)
+    fn = {"download": start, "cancel": cancel, "dismiss": dismiss,
+          "delete": delete}.get(action)
     return fn(repo_id) if fn else {"error": f"unknown action {action!r}"}

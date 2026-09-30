@@ -137,11 +137,11 @@ function renderPicker(){
   const mine={Favorites:favMs, Recent:recMs};
   if(mine[FAM] && !mine[FAM].length) FAM='All';
   const n=f=>f==='All'?GROUPS.length:mine[f]?mine[f].length:famCount[f];
-  $('pfams').innerHTML=['All',...Object.keys(mine).filter(f=>mine[f].length),
+  $('pfams').innerHTML=`<div class="fam hub" data-f="${HUB}" aria-current="${FAM===HUB}">${HUB}</div>`
+    +['All',...Object.keys(mine).filter(f=>mine[f].length),
     ...Object.keys(famCount).sort()].map(f=>
     `<div class="fam" data-f="${esc(f)}" aria-current="${f===FAM}">${esc(f)}
-      <i>${n(f)}</i></div>`).join('')
-    +`<div class="fam" data-f="${HUB}" aria-current="${FAM===HUB}">${HUB}</div>`;
+      <i>${n(f)}</i></div>`).join('');
   $('pfams').querySelectorAll('.fam').forEach(e=>e.onclick=()=>{
     FAM=e.dataset.f; renderPicker() });
   $('psearch').placeholder=FAM===HUB?'Search Hugging Face (MLX models)':'Search models';
@@ -551,7 +551,7 @@ function hubDialog(){
     <div class="hfsz">${ready?gb(d.size_bytes):'…'}</div>
     <div class="vs hfnote">${esc(line)}</div>
     <div class="hfbtns"><button class="mini" data-c>Cancel</button>
-      <button class="mini go" data-d${can?'':' disabled'}>Download</button></div></div>`;
+      <button class="mini pri" data-d${can?'':' disabled'}>Download</button></div></div>`;
   const esc_=e=>{ if(e.key==='Escape'){ e.stopPropagation(); close() } };
   const close=()=>{
     removeEventListener('keydown',esc_,true);
