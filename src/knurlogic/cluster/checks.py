@@ -1,4 +1,4 @@
-"""`knurlogic doctor --cluster`: everything that stops two Macs finding each
+"""`knurlogic doctor --cluster`: everything that stops Macs finding each
 other, checked from the machine you run it on, each with the fix.
 
 Read-only by rule: the firewall is READ (`socketfilterfw --get...`) to name

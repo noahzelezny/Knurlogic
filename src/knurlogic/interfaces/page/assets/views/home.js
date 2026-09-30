@@ -257,11 +257,10 @@ async function tick(){
   // motion on the page that carries information -- it says the link is
   // live -- so it is also the only one, and it stops under reduced-motion.
   //
-  // It is drawn for TWO nodes and no more. Chaining it between three or
-  // four would draw a line, and a line is not the shape of the cluster --
-  // the nodes are not wired in series. With two, a connector is the truth;
-  // past two it is a picture of a topology that does not exist, and it also
-  // dangles off the end of every row that wraps.
+  // Two nodes: a connector between the cards, the truth. Three or more:
+  // one small ring glyph under the machines (a dot per machine, a line to
+  // the next), because the cards wrap into rows and a line chained between
+  // them would dangle off every row's end.
   const ns_=d.nodes||[];
   // The key in the rail is a key to THESE machines, so it is the sum of the
   // maps they reported. A key whose numbers are one box's while the picture
@@ -288,18 +287,25 @@ async function tick(){
     merged.swap_bytes=ns_.reduce((x,n)=>x+(swapToShow(n)||0),0);
     ramWent(merged);
   }
-  // Five machines at most: two rows of three with the key in one cell is
-  // the whole panel, and a sixth would start a third row under the chat.
-  // The rest are counted, not dropped silently. The key above still sums
-  // every machine that reported.
-  const MAXU=5, shown=ns_.slice(0,MAXU), more=ns_.length-shown.length;
+  // Up to sixteen machines (the most a cluster launch joins). Up to six
+  // keep the full cards; past six every card takes the compact form the
+  // page uses beside an open chat, so sixteen fit. The rest are counted.
+  const MAXU=16, DENSE=6, shown=ns_.slice(0,MAXU), more=ns_.length-shown.length;
+  const dense=shown.length>DENSE;
   $('memory').querySelector('.topo').className=
-    'topo n'+Math.min(Math.max(shown.length,1),3);
+    'topo n'+Math.min(Math.max(shown.length,1),3)+(dense?' dense':'');
+  const ring=k=>{ const c=30, r=22, pts=Array.from({length:k},(_,i)=>{
+      const t=2*Math.PI*i/k-Math.PI/2;
+      return [(c+r*Math.cos(t)).toFixed(1),(c+r*Math.sin(t)).toFixed(1)] });
+    return '<svg class="topolinks" viewBox="0 0 60 60" aria-hidden="true">'+
+      '<polygon points="'+pts.map(q=>q.join(',')).join(' ')+'"/>'+
+      pts.map(q=>`<circle cx="${q[0]}" cy="${q[1]}" r="2.4"/>`).join('')+
+      '</svg>' };
   $('topo').innerHTML=shown.map(unit).join(shown.length===2
     ? '<svg class="flow" viewBox="0 0 56 20" aria-hidden="true">'+
       '<line x1="2" y1="10" x2="54" y2="10"/></svg>'
-    : '')+(more>0?`<div class="topomore ro">+${more} more machine${
-      more===1?'':'s'} -- this page shows five</div>`:'');
+    : '')+(shown.length>2?ring(shown.length):'')+(more>0?`<div class="topomore ro">+${more} more machine${
+      more===1?'':'s'} -- this page shows ${MAXU}</div>`:'');
   setLastNodes(ns_);
   $('multiopts').hidden=selNodes().length<2;
   $('topo').querySelectorAll('.unit[data-node]').forEach(u=>u.onclick=()=>{

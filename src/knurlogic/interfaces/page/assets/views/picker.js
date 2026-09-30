@@ -347,13 +347,17 @@ async function loadPeerModels(){
 // RDMA (jaccl) needs it up on every picked machine: each machine's status
 // says why not (cluster/links.rdma), and the button is greyed with that
 function rdmaWhy(ns){
-  if(ns.length!==2) return 'RDMA joins exactly two machines; use TCP/IP';
   for(const n of ns){
     const r=(n.cluster||{}).rdma;
     if(!r) return `${n.node} does not report RDMA (update knurlogic there)`;
     if(!r.available) return `RDMA on ${n.node}: ${r.reason}`;
   }
-  return tb5Why(ns[0].cluster, ns[1].cluster);
+  // a full mesh: every pair needs its own Thunderbolt 5 cable
+  for(let i=0;i<ns.length;i++) for(let j=i+1;j<ns.length;j++){
+    const w=tb5Why(ns[i].cluster, ns[j].cluster);
+    if(w) return ns.length>2 ? `${ns[i].node} and ${ns[j].node}: ${w}` : w;
+  }
+  return '';
 }
 // RDMA runs only over a Thunderbolt 5 (80 Gb/s) cable: over Thunderbolt 4
 // the port still reads active and jaccl fails (cluster_jobs.rdma_pair_reason

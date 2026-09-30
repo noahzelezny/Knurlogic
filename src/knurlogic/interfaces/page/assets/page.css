@@ -156,13 +156,30 @@ nav a:hover{color:var(--acc)}
   margin-left:clamp(8px,2%,28px)}
 .topo.n3 #ramwent{justify-self:center;margin:0}
 .topo .flow{align-self:center}
+.topolinks{grid-column:1/-1;justify-self:center;width:64px;height:64px;
+  fill:none}
+.topolinks polygon{stroke:color-mix(in srgb,var(--acc) 40%,transparent);
+  stroke-width:1.5}
+.topolinks circle{fill:var(--acc);opacity:.9}
+.topo.dense{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 8px}
+.topo.dense #ramwent{grid-row:1;grid-column:1/-1;justify-self:center;margin:0}
+.topo.dense .unit{padding:0 4px}
+.topo.dense .uhead{gap:6px;margin-bottom:4px}
+.topo.dense .uhead .mk,.topo.dense .uhead .mk.big{width:22px;height:22px;margin:0}
+.topo.dense .unit .nm{font-size:12.5px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.topo.dense .unit .hw{display:none}
+.topo.dense .utemp{font-size:12px}
+.topo.dense .ucompact{padding:6px 8px;gap:4px}
+.topo.dense .ucompact .mhd{font-size:11px;gap:4px;flex-wrap:wrap}
 .topomore{grid-column:1/-1;text-align:center;color:var(--faint)}
 /* A window at half a screen: two machines keep their row and the
    key drops under them; three to five go two to a row, key still top right. */
 @media(max-width:1150px){
   .topo.n2{grid-template-columns:minmax(0,1fr) 56px minmax(0,1fr)}
   .topo.n2 #ramwent{grid-row:2;grid-column:1/-1;justify-self:center;margin:0}
-  .topo.n3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .topo.n3{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .topo.dense{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .ram{display:flex;flex-direction:column;gap:5px}
 .ramrow{display:flex;align-items:center;gap:7px;font-size:12.5px;
   letter-spacing:.04em}
@@ -500,10 +517,11 @@ nav a[aria-pressed=true]{text-shadow:var(--glow)}
   background:var(--bad);opacity:.85;z-index:2}
 /* TALK: the compact card only; HOME: the full one only */
 .ucompact,.utemp{display:none}
-body.talk .ufull,body.talk .unit .stat{display:none}
-body.talk .ucompact{display:flex;flex-direction:column;gap:6px}
-body.talk .unit .uhead{justify-content:flex-start}
-body.talk .utemp{display:block;margin-left:auto;align-self:center;
+body.talk .ufull,body.talk .unit .stat,.topo.dense .ufull,
+.topo.dense .unit .stat{display:none}
+body.talk .ucompact,.topo.dense .ucompact{display:flex;flex-direction:column;gap:6px}
+body.talk .unit .uhead,.topo.dense .unit .uhead{justify-content:flex-start}
+body.talk .utemp,.topo.dense .utemp{display:block;margin-left:auto;align-self:center;
   font-size:17px;font-weight:600;color:#fb923c}
 .mhd .swap{text-transform:none;letter-spacing:.04em}
 .ucompact .mhd b{white-space:nowrap}
