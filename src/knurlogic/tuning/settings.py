@@ -229,7 +229,7 @@ TUNE_PROFILES = {
     # harder than headroom requires
     "safe": {
         "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
-        "VQ_CACHE_LIMIT_GB": 1.0,
+        "KNURLOGIC_CACHE_LIMIT_GB": 1.0,
         "decode_chunk_scale": 0.5,   # bound the transient below what fits
         "why": "lowest peak memory: narrow prompt chunks, a small reclaimable "
                "cache, and a transient bounded tighter than headroom requires",
@@ -239,7 +239,7 @@ TUNE_PROFILES = {
         "why": "the measured defaults",
     },
     "fast": {
-        "VQ_CACHE_LIMIT_GB": 8.0,
+        "KNURLOGIC_CACHE_LIMIT_GB": 8.0,
         "decode_chunk_scale": 1.0,   # capped: smaller is already faster
         "launch": {"mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16",
                    "cross_chip": "off"},
@@ -250,7 +250,7 @@ TUNE_PROFILES = {
     },
     "stable": {
         "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
-        "VQ_CACHE_LIMIT_GB": 2.0,
+        "KNURLOGIC_CACHE_LIMIT_GB": 2.0,
         "decode_chunk_scale": 0.5,   # more room left for a step's spike
         "launch": {"cross_chip": "on", "mtp": "on", "mtp_dynamic": "off",
                    "kv_bits": "bf16"},
@@ -277,74 +277,6 @@ PRESETS = ("balanced", "fast", "stable", "lean", "safe")
 PRESET_DEFAULT = "balanced"
 
 
-#: Each preset in plain words, for the Knurlogic tab: what it trades, what
-#: it changes, and who should pick it. Order is the order shown.
-PRESET_GUIDE = {
-    "balanced": {
-        "title": "Balanced",
-        "trades": "Neither extreme: the measured defaults. Leaves speed on "
-                  "the table on a roomy machine, and more memory in use "
-                  "than lean or safe on a tight one.",
-        "changes": "Prompt chunk read from the room free at launch: the "
-                   "widest up to the family's measured best whose step "
-                   "spike fits 10% of the room left, else 512 (35B-A3B "
-                   "on a roomy M4: 2048, ~1.8x prefill). 4 GiB cache, "
-                   "MTP as the family ships it.",
-        "who": "Most people. Start here and move only for a reason.",
-    },
-    "fast": {
-        "title": "Fast",
-        "trades": "Memory headroom for speed: faster replies, less room "
-                  "left for long contexts and parallel agents; timing "
-                  "varies as dynamic MTP switches.",
-        "changes": "The same room-read prompt chunk as balanced (its "
-                   "larger cache leaves slightly less room for it), an "
-                   "8 GiB reclaimable cache, MTP with its dynamic "
-                   "controller, bf16 KV cache, no cross-chip padding.",
-        "who": "One person, one conversation at a time, on a machine with "
-               "memory to spare.",
-    },
-    "stable": {
-        "title": "Stable",
-        "trades": "Some speed for repeatability: the same answer and "
-                  "steady timing, run after run and across machines. Costs "
-                  "cross-chip padding (+2-6% on small matmuls) and drafts "
-                  "even where a plain step is cheaper.",
-        "changes": "512-token prompt chunks whatever the room, identical "
-                   "rounding across chips, MTP drafting every step (no "
-                   "controller), bf16 KV, a 2 GiB reclaimable cache and a "
-                   "memory transient bounded tighter than needed.",
-        "who": "Clusters of mixed Macs, benchmarks, and anyone debugging "
-               "or comparing outputs.",
-    },
-    "lean": {
-        "title": "Lean",
-        "trades": "Some speed and a little precision for capacity: the "
-                  "most context and the most agents at once. 8-bit KV "
-                  "decodes ~7% slower at 6k tokens of context, ~18% at "
-                  "16k (M4); with MTP off every step is a plain one.",
-        "changes": "8-bit KV cache where the family takes it (bf16 where "
-                   "not), 512-token prompt chunks whatever the room, the "
-                   "default 4 GiB cache, MTP off so its memory is free.",
-        "who": "Long documents, many parallel agents, or a big model on a "
-               "machine it only just fits.",
-    },
-    "safe": {
-        "title": "Safe",
-        "trades": "Speed for the lowest peak memory: the least likely to "
-                  "run the machine out of memory, and the slowest -- a "
-                  "small cache and a tight transient give back speed "
-                  "headroom would have bought.",
-        "changes": "512-token prompt chunks whatever the room, a 1 GiB "
-                   "reclaimable cache, and a memory transient bounded "
-                   "tighter than needed; MTP and KV as the family ships "
-                   "them.",
-        "who": "A machine that also does other work, or after a load has "
-               "run out of memory.",
-    },
-}
-
-
 def preset_of(v, default: str = PRESET_DEFAULT) -> str:
     s = str(v or "").strip().lower()
     if not s:
@@ -367,6 +299,61 @@ def preset_launch(tune: str, model_type: str = "") -> tuple:
                          f"{want['kv_bits']}-bit is not taken here ({why})")
             want["kv_bits"] = "bf16"
     return want, notes
+
+#: What a preset sets, starting from balanced's values: prompt chunk (None:
+#: read from the room free at launch), cache GiB, memory transient scale,
+#: and the model launch settings.
+PRESET_BASE = {"prefill": None, "cache": CACHE_LIMIT_GB_DEFAULT, "scale": 1.0,
+               "mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16",
+               "cross_chip": "off"}
+
+
+def preset_values(name: str) -> dict:
+    """PRESET_BASE with the preset's own values over it."""
+    t = TUNE_PROFILES[name]
+    return {**PRESET_BASE,
+            **({"prefill": t["KNURLOGIC_PREFILL_CHUNK"]}
+               if "KNURLOGIC_PREFILL_CHUNK" in t else {}),
+            **({"cache": t["KNURLOGIC_CACHE_LIMIT_GB"]}
+               if "KNURLOGIC_CACHE_LIMIT_GB" in t else {}),
+            "scale": t.get("decode_chunk_scale", 1.0),
+            **(t.get("launch") or {})}
+
+
+def preset_settings(name: str) -> list:
+    """The settings a preset sets, one short phrase each: every value for
+    balanced (the default), only those that differ from it for the rest."""
+    v, base = preset_values(name), preset_values(PRESET_DEFAULT)
+    mtp = lambda x: ("MTP off" if x["mtp"] == "off" else
+                     "MTP dynamic" if x["mtp_dynamic"] == "on" else
+                     "MTP every step")
+    say = {
+        "prefill": lambda x: (f"prompt chunk {x['prefill']}" if x["prefill"]
+                              else "prompt chunk by free memory"),
+        "cache": lambda x: f"cache {x['cache']:g} GiB",
+        "scale": lambda x: ("memory spike bounded tighter" if x["scale"] < 1
+                            else "memory spike as it fits"),
+        "mtp": mtp,
+        "kv_bits": lambda x: ("KV bf16" if x["kv_bits"] == "bf16"
+                              else f"KV {x['kv_bits']}-bit"),
+        "cross_chip": lambda x: ("same rounding across chips"
+                                 if x["cross_chip"] == "on" else
+                                 "per-chip rounding"),
+    }
+    out = []
+    for k, f in say.items():
+        differs = (mtp(v) != mtp(base)) if k == "mtp" else v[k] != base[k]
+        if name == PRESET_DEFAULT or differs:
+            out.append(f(v))
+    return out
+
+
+#: Each preset for the Knurlogic tab and the Launch preset help, in order:
+#: its title and the settings it sets.
+PRESET_GUIDE = {n: {"title": n.capitalize(),
+                    "settings": " · ".join(preset_settings(n))}
+                for n in PRESETS}
+
 
 #: Hard ceiling on the reclaimable cache, whatever the profile asks. Freed
 #: buffers are reclaimable but they are still resident, and a cache larger
@@ -485,6 +472,12 @@ KNOB_DOC = {
         "memory a long context or another agent cannot use. Smaller frees "
         "it, with no measured speed cost at 26k-token prefill -- the "
         "biggest single win in the memory playbook."),
+    "KNURLOGIC_CACHE_LIMIT_GB": (
+        "how much freed-buffer cache the runtime may hold",
+        "larger keeps more freed buffers for reuse, but they stay resident: "
+        "memory a long context or another agent cannot use. Smaller frees "
+        "it, with no measured speed cost at 26k-token prefill -- the "
+        "biggest single win in the memory playbook."),
     "VQLAB_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
         "larger keeps more freed buffers for reuse, but they stay resident: "
@@ -524,15 +517,65 @@ KNOB_DOC = {
 }
 
 
+#: The (i) beside a knob in Settings -> Models: what it does for the person
+#: choosing, short and plain. KNOB_DOC keeps the measurements behind it.
+KNOB_HELP = {
+    "VQ_DECODE_CHUNK": "How much of the model is unpacked at once while "
+                       "reading a prompt. Lower uses less memory and is "
+                       "also faster, down to 32.",
+    "KNURLOGIC_PREFILL_CHUNK": "How many prompt tokens are read at once. "
+                               "Wider reads long prompts faster but needs "
+                               "more memory for a moment. Output is the "
+                               "same either way.",
+    "KNURLOGIC_CONTEXT_LENGTH": "The longest conversation a request may "
+                                "have, in tokens. Longer uses more memory "
+                                "while it runs. Above 262,144 it uses YaRN, "
+                                "which slightly loosens attention precision "
+                                "at short range.",
+    "KNURLOGIC_MTP": "Multi-token prediction: usually faster replies with "
+                     "the same output, for a little more memory.",
+    "KNURLOGIC_MTP_DYNAMIC": "Use multi-token prediction only where it is "
+                             "measured to be faster. Usually faster; off "
+                             "gives steadier timing.",
+    "KNURLOGIC_KV_BITS": "8-bit holds about twice the context in the same "
+                         "memory; decode ~5% slower and a slight loss of "
+                         "precision.",
+    "KNURLOGIC_KV_KERNEL": "With 8-bit KV: a faster way to read it while "
+                           "writing a reply. Leave on.",
+    "KNURLOGIC_CACHE_LIMIT_GB": "Memory kept for reuse after it is freed. "
+                                "Larger can be a little faster; smaller "
+                                "leaves more room for context and other "
+                                "models.",
+    "VQ_MOE_GEMMSEG_CBDEV": "Where the compressed weights' lookup table "
+                            "lives. auto is fastest.",
+    "VQ_MOE_GEMMSEG_RTILE": "Leave at 32: 64 is never faster.",
+    "VQ_GEMMSEG_OTILE64": "Faster prompt reading, same output. Leave on.",
+    "VQ_GEMMSEG_PH2V": "Part of a faster path, same output. Leave on.",
+    "VQ_D4_WALK": "Part of a faster path, same output. Leave on.",
+    "VQ_GEMMSEG_PIPE": "Slightly slower, no gain. Leave off.",
+    "VQ_GEMMSEG_BF16IO": "Changes the output slightly. Keep what the model "
+                         "shipped with.",
+    "VQ_DECODE_BF16IO": "Changes the output slightly. Keep what the model "
+                        "shipped with.",
+    "KNURLOGIC_PRESET": "A named set of settings for this model. Knurlogic "
+                        "default follows the strategy on the Knurlogic "
+                        "tab; a setting changed here beats the preset's.\n" +
+                        "\n".join(f"{g['title']}: {g['settings']}"
+                                   for g in PRESET_GUIDE.values()),
+}
+
+
 # --- the names are the ARTIFACT'S, not ours --------------------------------
 # A knob has a LOGICAL name here and a list of env names, preferred first.
 # The resolver emits whichever one the target artifact's bundled runtime
-# actually reads: published runtimes read `VQLAB_CACHE_LIMIT_GB` (the VQ
-# runtime's old name, now `VQ_CACHE_LIMIT_GB`), and renaming it for them
-# would silently stop bounding their cache. Every other case gets the first
-# name. The old names are still accepted from a saved setting or `--set`.
+# actually reads. The old names are still accepted from a saved setting or
+# `--set`. The cache limit is one value, knurlogic's (mlx's free-buffer
+# cache ceiling, which the engine sets): a VQ bundle's runtime sets the same
+# ceiling from VQ_CACHE_LIMIT_GB (published ones: VQLAB_CACHE_LIMIT_GB), so
+# the resolver passes knurlogic's value through under that name as well
+# (resolve.emit_cache_limit).
 KNOB_ALIASES = {
-    "cache_limit_gb": ("VQ_CACHE_LIMIT_GB", "KNURLOGIC_CACHE_LIMIT_GB",
+    "cache_limit_gb": ("KNURLOGIC_CACHE_LIMIT_GB", "VQ_CACHE_LIMIT_GB",
                        "VQLAB_CACHE_LIMIT_GB"),
     "prefill_chunk": ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"),
     "decode_chunk": ("VQ_DECODE_CHUNK",),
@@ -584,6 +627,9 @@ def on_off(v, default: bool = True) -> bool:
 
 #: what KNURLOGIC_KV_BITS may be; "bf16" is the unquantized cache
 KV_BITS_VALUES = ["bf16", "8", "6", "4"]
+#: what Settings offers: 6 and 4 have no fused decode kernel and were never
+#: measured on a real model, so they are taken from env / --set only
+KV_BITS_OFFERED = ("bf16", "8")
 
 
 def kv_bits_of(v):
@@ -651,7 +697,7 @@ def engine_settings(env: dict) -> dict:
 def canonical_sets(sets: dict) -> dict:
     """Explicit settings with an accepted old name moved to the name the
     resolver emits first (VQLAB_PREFILL_CHUNK -> KNURLOGIC_PREFILL_CHUNK,
-    VQLAB_CACHE_LIMIT_GB -> VQ_CACHE_LIMIT_GB), so an explicit value cannot
+    VQ_CACHE_LIMIT_GB -> KNURLOGIC_CACHE_LIMIT_GB), so an explicit value cannot
     lose to the resolver's under another alias. Where both are given, the
     current name wins."""
     out = dict(sets or {})
