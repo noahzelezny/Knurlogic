@@ -31,6 +31,14 @@ function toggleFav(p){ const s=loadFav();
   try{ localStorage.setItem('kn.fav', JSON.stringify([...s])) }catch(e){} }
 function loadRecents(){ try{ return JSON.parse(localStorage.getItem('kn.recent')||'[]') }
   catch(e){ return [] } }
+// The model the last Launch was for: what the Load Model panel pre-selects.
+// Written when Launch is pressed, read when the page loads; never whatever
+// the picker's ordering would put first (the largest model that "fits" is
+// often a 178 GiB one nobody is about to launch).
+function lastLaunched(){ try{ return localStorage.getItem('kn.lastLaunched')||'' }
+  catch(e){ return '' } }
+function saveLastLaunched(path){
+  try{ localStorage.setItem('kn.lastLaunched', path) }catch(e){} }
 function pushRecent(path){
   let r=loadRecents().filter(x=>x.path!==path);
   r.unshift({path, at:Date.now()});
@@ -227,7 +235,11 @@ async function loadModels(){
   migrateLaunchSets();
   regroup();
   const ws=fitWS();
-  if(!SEL && !SELCLEARED) SEL=MODELS.find(m=>!ws||m.size_bytes<=ws)||null;
+  if(!SEL && !SELCLEARED){
+    const last=lastLaunched();
+    SEL=(last && MODELS.find(m=>m.path===last))
+      || MODELS.find(m=>!ws||m.size_bytes<=ws)||null;
+  }
   pickInfo();
 }
 // What this artifact WOULD resolve to, fetched when the selection changes.
@@ -440,6 +452,7 @@ $('launch').onclick=async()=>{
   const tune=window.LOADTUNE||'default';
   const sets=launchMTP(m);
   const t0=Date.now();
+  saveLastLaunched(m.path);
   const L=trackLaunch(m, ns, pn, t0);
   const j=await act(ns.length>1
     ? {action:'load', identity:m.identity, nodes:ns.map(n=>n.id),

@@ -101,6 +101,34 @@ PREFILL_TRANSIENT_ROOM_SHARE = 0.10
 #: KV held back before the rule sizes a chunk: one long conversation.
 PREFILL_KV_ALLOWANCE_TOKENS = 32768
 
+# What a rank must keep free AFTER its weights for a model to be "placed"
+# there (resolve.fit_reserve): the first request's transient at the
+# smallest prompt chunk, plus the KV of a minimum context. A share that
+# fills the working set to its step margin fits on paper and then dies on
+# the first prompt.
+#
+# MEASURED on an M3 Ultra (96 GB), mlx 0.31.2, by loading each model,
+# evaluating all its parameters, then serving one prompt (peak memory
+# above the weights, mx.get_peak_memory):
+#   Qwen3.6-35B-A3B VQ 3.4bpw (12.96 GiB, hidden 2048):
+#     evaluating every weight at once      +0.00 GiB (peak == active: no
+#                                          mmap copy, no second copy)
+#     binding the vision tower             +0.83 GiB (rank 0 only, counted
+#                                          as leader_bytes)
+#     64-token first request               +0.22 GiB
+#     4096-token prompt, chunk  512        +0.93 GiB
+#     4096-token prompt, chunk 4096        +3.45 GiB
+# and, from the sweep above, Qwen3.8 Flash 4.4bpw: 512 0.79 GiB. So the
+# transient at the smallest chunk is about 1 GiB whatever the model, and
+# PREFILL_TRANSIENT_BYTES_PER_TOKEN_HIDDEN under-reads it there (0.47 GiB
+# predicted for the 35B against 0.93 measured): FIT_TRANSIENT_FLOOR is the
+# measured flat part.
+FIT_TRANSIENT_FLOOR = 1 << 30
+#: the chunk the fit is asked at: the smallest the room rule can fall to
+FIT_PREFILL_CHUNK = PREFILL_CHUNK_DEFAULT
+#: the context every rank must be able to hold beyond its weights
+FIT_MIN_CONTEXT_TOKENS = 8192
+
 # Per-ARCHITECTURE prompt chunk: a measurement with its run, kept in each
 # family's manifest (engine/families/<family>/__init__.py, `prefill_chunk`)
 # beside the rest of what that family is.
