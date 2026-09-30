@@ -1834,7 +1834,8 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
 
 
 def serve_ui(host: str, port: int, serve_port: int, peers=(),
-             allow_origins=(), allow_hosts=(), offline: bool = False) -> int:
+             allow_origins=(), allow_hosts=(), offline: bool = False,
+             menubar: bool = False) -> int:
     global PEERS
     from knurlogic.interfaces.page import updates
     updates.start_for_page(offline)
@@ -1897,6 +1898,13 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     print("  nothing loaded, no model required.")
     print(f"  loading from the page starts `knurlogic serve` on port "
           f"{serve_port}.")
+    if menubar:
+        import signal
+        from knurlogic.interfaces import menubar as _mb
+        # the menu's Quit sends SIGINT; a page started in the background
+        # inherits SIGINT ignored, which would make that Quit do nothing
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        _mb.spawn(port)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -1943,6 +1951,8 @@ def main(argv=None) -> int:
                    help="skip the once-per-start check that asks Hugging "
                         "Face whether a downloaded model has an update "
                         "(HF_HUB_OFFLINE=1 does the same)")
+    p.add_argument("--no-menubar", action="store_true",
+                   help="do not show the macOS menu-bar icon")
     a = p.parse_args(argv)
     peers = []
     for spec in a.peer:
@@ -1950,7 +1960,7 @@ def main(argv=None) -> int:
         peers.append((host, int(port) if port.isdigit() else a.port))
     return serve_ui(a.host, a.port, a.serve_port, peers,
                     allow_origins=a.allow_origin, allow_hosts=a.allow_host,
-                    offline=a.offline)
+                    offline=a.offline, menubar=not a.no_menubar)
 
 
 def _wire() -> None:
