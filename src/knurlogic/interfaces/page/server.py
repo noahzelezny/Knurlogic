@@ -171,8 +171,11 @@ def children() -> list:
         alive = code is None and is_our_server(pid)
         log = Path(rec.get("log", ""))
         try:
-            lines = [l for l in log.read_text(errors="replace").splitlines()
-                     if l.strip()]
+            with log.open("rb") as f:
+                f.seek(0, 2)
+                f.seek(max(0, f.tell() - 65536))
+                lines = [l for l in f.read().decode(errors="replace")
+                         .splitlines() if l.strip()]
             quiet = now - log.stat().st_mtime
         except OSError:
             lines, quiet = [], None
@@ -982,8 +985,11 @@ def load_progress(doc: dict) -> list:
             _SIZES[path] = _artifact_bytes(path)
         log = Path(rec.get("log", ""))
         try:
-            lines = [l for l in log.read_text(errors="replace").splitlines()
-                     if l.strip()]
+            with log.open("rb") as f:
+                f.seek(0, 2)
+                f.seek(max(0, f.tell() - 65536))
+                lines = [l for l in f.read().decode(errors="replace")
+                         .splitlines() if l.strip()]
             quiet = now - log.stat().st_mtime
         except OSError:
             lines, quiet = [], None
