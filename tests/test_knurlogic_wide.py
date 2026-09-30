@@ -29,7 +29,7 @@ def test_round_trip_clear_and_refusals(home):
     preferences.set({"KNURLOGIC_CROSS_CHIP": ""})
     assert preferences.get() == {"KNURLOGIC_COMPACT_KEEP_TURNS": "4"}
     with pytest.raises(ValueError):
-        preferences.set({"KNURLOGIC_KV_BITS": "8"})      # a model's
+        preferences.set({"KNURLOGIC_KV_KERNEL": "off"})  # a model's
     with pytest.raises(ValueError):
         preferences.set({"KNURLOGIC_COMPACT_TOOL_RESULTS": "burn"})
     assert preferences.get() == {"KNURLOGIC_COMPACT_KEEP_TURNS": "4"}
@@ -73,7 +73,7 @@ def test_peer_machine_saves_knurlogic_wide_settings(home):
                                          "KNURLOGIC_COMPACT_AUTO": "on"}
     assert doc["knurlogic"]["cross_chip"]["value"] == "auto"
     code, doc = page_server.peer_machine(
-        b'{"settings": {"KNURLOGIC_PREFILL_CHUNK": "512"}}')
+        b'{"settings": {"KNURLOGIC_CONTEXT_LENGTH": "512"}}')
     assert code == 400
     assert preferences.get()["KNURLOGIC_CROSS_CHIP"] == "auto"
 
@@ -94,12 +94,6 @@ def test_every_setting_says_what_it_costs():
         assert any(w in why.lower() for w in words), name
     for name, spec in S.COMPACT_KNOBS.items():
         assert any(w in spec[4].lower() for w in words), name
-    # a preset is the settings it sets: balanced all of them, the rest
-    # only what differs from balanced
-    assert S.PRESET_GUIDE["balanced"]["settings"].count(" · ") >= 4
-    assert S.PRESET_GUIDE["fast"]["settings"] == "cache 8 GiB"
-    assert S.PRESET_GUIDE["lean"]["settings"] == \
-        "prompt chunk 512 · MTP off · KV 8-bit"
     assert "+2-6%" in S.KNOB_DOC["KNURLOGIC_CROSS_CHIP"][1]
 
 
@@ -116,6 +110,28 @@ def test_a_launch_reads_cross_chip_from_knurlogic_wide(home):
     launch = S.engine_settings({"KNURLOGIC_CROSS_CHIP": "off",
                                 **preferences.launch_sets({})})
     assert launch["cross_chip"] == "on"
+
+
+def test_a_custom_preset_is_saved_rows_the_launch_reads(home):
+    assert S.preset_row_values("lean") == {
+        "KNURLOGIC_PREFILL_CHUNK": "512", "KNURLOGIC_CACHE_LIMIT_GB": "4",
+        S.DECODE_SCALE: "", S.MTP_MODE: "off", "KNURLOGIC_KV_BITS": "8"}
+    assert S.preset_row_values("stable")[S.MTP_MODE] == "every"
+    preferences.set({S.MTP_MODE: "every", "KNURLOGIC_KV_BITS": "8",
+                     "KNURLOGIC_CACHE_LIMIT_GB": "2", S.DECODE_SCALE: "0.5"})
+    assert preferences.launch_sets({}) == {
+        "KNURLOGIC_MTP": "on", "KNURLOGIC_MTP_DYNAMIC": "off",
+        "KNURLOGIC_KV_BITS": "8", "KNURLOGIC_CACHE_LIMIT_GB": "2"}
+    assert preferences.decode_scale({}) == 0.5
+    # a model's own knob, or its own preset, wins
+    assert preferences.launch_sets({"KNURLOGIC_KV_BITS": "bf16"})[
+        "KNURLOGIC_KV_BITS"] == "bf16"
+    assert preferences.launch_sets({"KNURLOGIC_PRESET": "fast"}) == \
+        {"KNURLOGIC_PRESET": "fast"}
+    assert preferences.decode_scale({"KNURLOGIC_PRESET": "fast"}) is None
+    assert "error" in documents.set_knurlogic(b'{"KNURLOGIC_MTP_MODE": "x"}')
+    preferences.set({S.MTP_MODE: "", S.DECODE_SCALE: ""})
+    assert S.MTP_MODE not in preferences.get()
 
 
 def test_serve_takes_knurlogic_wide_before_the_preset():

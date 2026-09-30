@@ -87,7 +87,7 @@ function gsel(name, title, what, why, values, cur, dflt){
         dflt!=null&&String(v.v)===String(dflt)?' (default)':''}</option>`).join('')}</select></label>`;
 }
 function wireGks(el){
-  el.querySelectorAll('.gks select').forEach(x=>x.onchange=()=>{
+  el.querySelectorAll('.gks:not(.prow) select').forEach(x=>x.onchange=()=>{
     const d=x.dataset;
     // an unset knob reads '' -- choosing a value equal to it clears the stage
     if(x.value===d.from || (d.from==='' && d.dflt!=='' && x.value===d.dflt))
@@ -97,37 +97,56 @@ function wireGks(el){
     x.closest('.gk').classList.toggle('staged', stagedVal(KNG,x.name)!=null);
   });
 }
-// The presets, and per-chip rounding beside them: on unless
-// KNURLOGIC_CROSS_CHIP is on (the same rounding on every chip); a saved
-// auto or off reads as on.
+// The presets, every setting a preset sets as its own row, and per-chip
+// rounding last (it is no part of a preset): on unless KNURLOGIC_CROSS_CHIP
+// is on (the same rounding on every chip); a saved auto or off reads as on.
+// A preset button sets the rows; a row changed by hand leaves no preset
+// pressed, unless the rows come to equal one. Saved: the preset when the
+// rows equal it, otherwise balanced plus each row that differs from it.
 async function showStrategy(ms){
   const el=$('machbody'), seq=nextSeq();
   el.innerHTML='<div class="msg">reading…</div>';
   const docs=await knDocs(ms);
   if(seq!==SEQ) return;
-  const me=docs[0].strategy||{}, ps=me.presets||[], cur=me.preset||'balanced';
-  if(!ps.length){ el.innerHTML=`<div class="msg">${esc(me.error||'this page predates the strategy')}</div>`; return }
-  const kn=docs[0].knurlogic||{}, cc=kn.cross_chip;
-  let sel=stagedVal(KNG,'strategy')??cur;
+  const me=docs[0].strategy||{}, ps=me.presets||[], rows=me.rows||[], cur=me.preset||'balanced';
+  if(!ps.length||!rows.length){ el.innerHTML=`<div class="msg">${esc(me.error||'this page predates the strategy')}</div>`; return }
+  const kn=docs[0].knurlogic||{}, cc=kn.cross_chip, saved=kn.saved||{};
+  const names=rows.map(r=>r.name), pv=n=>ps.find(p=>p.name===n).values;
+  const ov=n=>{ const t=stagedVal(KNG,n); return t==null?saved[n]||'':t==='(unset)'?'':t };
+  const V0={...pv(stagedVal(KNG,'strategy')??cur)};
+  names.forEach(n=>{ if(ov(n)!=='') V0[n]=ov(n) });
+  const V={...V0};
+  const same=(a,b)=>names.every(n=>a[n]===b[n]);
+  const match=()=>ps.find(p=>same(pv(p.name),V));
   el.innerHTML=`<div class="sgrp"><div class="shd">Presets</div>
     <div class="seg strat" role="group" aria-label="preset">${ps.map(p=>`<button type="button"
-      data-p="${esc(p.name)}" aria-pressed="${p.name===sel}">${esc(p.title)}${
+      data-p="${esc(p.name)}">${esc(p.title)}${
       p.name===me.default?'<small>default</small>':''}</button>`).join('')}</div>
-    <div class="sdet" id="sdet"></div>
+    <div class="gks prow">${rows.map(r=>`<label class="gk"><b>${esc(r.title)}<i class="info" tabindex="0">i<span
+      class="bub">${esc(r.help)}</span></i></b><select name="${esc(r.name)}"
+      aria-label="${esc(r.title)}">${r.options.map(o=>
+      `<option value="${esc(o.v)}">${esc(o.t)}</option>`).join('')}</select></label>`).join('')}</div>
     ${cc?`<div class="gks">${gsel(cc.name,'Per-chip rounding',cc.help||cc.what,'',
       [{v:'',t:'on'},{v:'on',t:'off'}], cc.value==='on'?'on':'',null)}</div>`:''}
   </div>`;
-  const det=()=>{
-    const p=ps.find(x=>x.name===sel)||ps[0], d=$('sdet');
-    d.classList.toggle('staged', sel!==cur);
-    d.innerHTML=`<i>${p.name===me.default?'sets':'differs'}</i><span>${esc(p.settings)}</span>`;
+  const show=()=>{
+    const m=match();
+    el.querySelectorAll('.strat button').forEach(b=>b.setAttribute('aria-pressed', !!m&&b.dataset.p===m.name));
+    el.querySelectorAll('.prow select').forEach(x=>{
+      x.value=V[x.name]; x.closest('.gk').classList.toggle('staged', V[x.name]!==V0[x.name]) });
+  };
+  const put=()=>{
+    const m=match(), base=pv(me.default), to=m?{strategy:m.name, ov:{}}
+      : {strategy:me.default, ov:Object.fromEntries(names.map(n=>[n, V[n]!==base[n]?V[n]:'']))};
+    const one=(n,from,t)=>from===t?stage(KNG,{},n,{from:'',to:''}):stageKn(n, from, t||'(unset)');
+    one('strategy', cur, to.strategy);
+    names.forEach(n=>one(n, saved[n]||'', to.ov[n]||''));
+    show();
   };
   el.querySelectorAll('.strat button').forEach(b=>b.onclick=()=>{
-    sel=b.dataset.p;
-    el.querySelectorAll('.strat button').forEach(x=>x.setAttribute('aria-pressed', x===b));
-    stageKn('strategy', cur, sel); det();
-  });
-  wireGks(el); det();
+    Object.assign(V, pv(b.dataset.p)); put() });
+  el.querySelectorAll('.prow select').forEach(x=>x.onchange=()=>{ V[x.name]=x.value; put() });
+  wireGks(el); show();
 }
 // Compaction: one set for every model on every machine. Every model server
 // reads it per request, so a change applies to the next request of every

@@ -317,36 +317,51 @@ def preset_values(name: str) -> dict:
             **(t.get("launch") or {})}
 
 
-def preset_settings(name: str) -> list:
-    """The settings a preset sets, one short phrase each: every value for
-    balanced (the default), only those that differ from it for the rest."""
-    v, base = preset_values(name), preset_values(PRESET_DEFAULT)
-    mtp = lambda x: ("MTP off" if x["mtp"] == "off" else
-                     "MTP dynamic" if x["mtp_dynamic"] == "on" else
-                     "MTP every step")
-    say = {
-        "prefill": lambda x: (f"prompt chunk {x['prefill']}" if x["prefill"]
-                              else "prompt chunk by free memory"),
-        "cache": lambda x: f"cache {x['cache']:g} GiB",
-        "scale": lambda x: ("expert chunk halved" if x["scale"] < 1
-                            else "expert chunk by free memory"),
-        "mtp": mtp,
-        "kv_bits": lambda x: ("KV bf16" if x["kv_bits"] == "bf16"
-                              else f"KV {x['kv_bits']}-bit"),
+#: The knurlogic-wide settings a preset sets, as rows: what is saved beside
+#: the strategy to make a custom set (machine/preferences). Each has its
+#: saved name, its title, one plain sentence, and the values it takes as
+#: (saved value, label); "" is the resolver's own choice.
+DECODE_SCALE = "KNURLOGIC_DECODE_CHUNK_SCALE"
+MTP_MODE = "KNURLOGIC_MTP_MODE"
+MTP_MODES = ("dynamic", "every", "off")
+PRESET_ROWS = (
+    {"name": "KNURLOGIC_PREFILL_CHUNK", "title": "Prompt chunk",
+     "help": "Tokens processed per step while reading a prompt; bigger is "
+             "faster but needs more memory.",
+     "options": [("", "auto (by free memory)")]
+                + [(str(v), str(v)) for v in (512, 1024, 2048, 4096)]},
+    {"name": "KNURLOGIC_CACHE_LIMIT_GB", "title": "Cache",
+     "help": "Memory MLX keeps for reuse; more is a bit faster, less "
+             "leaves more free.",
+     "options": [(str(v), f"{v} GiB") for v in (1, 2, 4, 8)]},
+    {"name": DECODE_SCALE, "title": "Expert chunk",
+     "help": "How much of a VQ model's experts is unpacked at once; half "
+             "uses less memory, slightly slower.",
+     "options": [("", "auto"), ("0.5", "half")]},
+    {"name": MTP_MODE, "title": "MTP",
+     "help": "Drafts tokens ahead to speed up decoding; dynamic turns it "
+             "off when it doesn't help.",
+     "options": [("dynamic", "dynamic"), ("every", "every step"),
+                 ("off", "off")]},
+    {"name": "KNURLOGIC_KV_BITS", "title": "KV cache",
+     "help": "8-bit holds about twice the context in the same memory; ~5% "
+             "slower decode and slightly less precise.",
+     "options": [("bf16", "bf16"), ("8", "8-bit")]},
+)
+PRESET_ROW_NAMES = tuple(r["name"] for r in PRESET_ROWS)
+
+
+def preset_row_values(name: str) -> dict:
+    """What a preset sets on each PRESET_ROWS row, as saved strings."""
+    v = preset_values(name)
+    return {
+        "KNURLOGIC_PREFILL_CHUNK": str(v["prefill"] or ""),
+        "KNURLOGIC_CACHE_LIMIT_GB": f"{v['cache']:g}",
+        DECODE_SCALE: "0.5" if v["scale"] < 1 else "",
+        MTP_MODE: ("off" if v["mtp"] == "off" else
+                   "dynamic" if v["mtp_dynamic"] == "on" else "every"),
+        "KNURLOGIC_KV_BITS": str(v["kv_bits"]),
     }
-    out = []
-    for k, f in say.items():
-        differs = (mtp(v) != mtp(base)) if k == "mtp" else v[k] != base[k]
-        if name == PRESET_DEFAULT or differs:
-            out.append(f(v))
-    return out
-
-
-#: Each preset for the Knurlogic tab and the Launch preset help, in order:
-#: its title and the settings it sets.
-PRESET_GUIDE = {n: {"title": n.capitalize(),
-                    "settings": " · ".join(preset_settings(n))}
-                for n in PRESETS}
 
 
 #: Hard ceiling on the reclaimable cache, whatever the profile asks. Freed
@@ -540,8 +555,7 @@ KNOB_HELP = {
                          "shipped with.",
     "VQ_DECODE_BF16IO": "Changes the output slightly; keep what the model "
                         "shipped with.",
-    "KNURLOGIC_PRESET": "A named set of settings for this model; default "
-                        "follows Settings -> Knurlogic -> Presets.",
+    "KNURLOGIC_PRESET": "Default follows the Knurlogic presets.",
     "KNURLOGIC_CROSS_CHIP": "On: faster, but a split across different "
                             "chips can give different (still valid) tokens. "
                             "Turn off if you need identical output; "
@@ -1022,6 +1036,10 @@ def check_knob(name: str, value, window: int = 0):
             kv_bits_of(s)
         elif name == "KNURLOGIC_PRESET":
             preset_of(s)
+        elif name == MTP_MODE and s not in MTP_MODES:
+            raise ValueError(f"one of {list(MTP_MODES)}")
+        elif name == DECODE_SCALE and s not in ("1", "1.0", "0.5"):
+            raise ValueError("one of 1, 0.5")
         elif name == "KNURLOGIC_CROSS_CHIP":
             cross_chip_of(s)
         elif name == "KNURLOGIC_LONG_CONTEXT":

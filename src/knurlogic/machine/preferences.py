@@ -1,6 +1,7 @@
 """The knurlogic-wide settings: chosen once, for every model.
 
-Beside the strategy (the default launch preset): compaction
+Beside the strategy (the default launch preset): a custom set is that preset
+plus explicit values for its rows (tuning/settings.PRESET_ROWS), and compaction
 (tuning/settings.COMPACT_KNOBS, read per request by every server) and
 identical results across chips (KNURLOGIC_CROSS_CHIP, read at launch;
 unset means the preset decides). Kept in ~/.config/knurlogic/settings.json
@@ -15,11 +16,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from knurlogic.tuning.settings import COMPACT_KNOBS, check_knob
+from knurlogic.tuning.settings import (COMPACT_KNOBS, DECODE_SCALE, MTP_MODE,
+                                       PRESET_ROW_NAMES, check_knob)
 
 CROSS_CHIP = "KNURLOGIC_CROSS_CHIP"
 #: every name kept here
-NAMES = (CROSS_CHIP,) + tuple(COMPACT_KNOBS)
+NAMES = (CROSS_CHIP,) + PRESET_ROW_NAMES + tuple(COMPACT_KNOBS)
 
 
 def path() -> Path:
@@ -74,14 +76,36 @@ def set(values: dict) -> dict:
 
 def launch_sets(sets: dict) -> dict:
     """A launch's explicit settings with the saved knurlogic-wide ones a
-    launch reads (identical results across chips) added where the launch
-    names none: saved beats the preset's value, an explicit set beats
-    saved."""
+    launch reads added where the launch names none: identical results
+    across chips, and the custom preset values (a launch that names its own
+    preset takes none of those). Saved beats the preset's value, an
+    explicit set beats saved."""
     out = dict(sets or {})
-    v = get().get(CROSS_CHIP)
+    saved = get()
+    v = saved.get(CROSS_CHIP)
     if v and CROSS_CHIP not in out:
         out[CROSS_CHIP] = v
+    if "KNURLOGIC_PRESET" in out:
+        return out
+    for k, v in saved.items():
+        if k in PRESET_ROW_NAMES and k not in (DECODE_SCALE, MTP_MODE):
+            out.setdefault(k, v)
+    mode = saved.get(MTP_MODE)
+    if mode:
+        out.setdefault("KNURLOGIC_MTP", "off" if mode == "off" else "on")
+        if mode != "off":
+            out.setdefault("KNURLOGIC_MTP_DYNAMIC",
+                           "on" if mode == "dynamic" else "off")
     return out
+
+
+def decode_scale(sets: dict | None = None):
+    """The saved expert chunk scale (0.5), or None: the preset's own. A
+    launch that names its own preset takes none."""
+    if "KNURLOGIC_PRESET" in (sets or {}):
+        return None
+    v = get().get(DECODE_SCALE)
+    return float(v) if v else None
 
 
 def compaction_env(env=None) -> dict:
