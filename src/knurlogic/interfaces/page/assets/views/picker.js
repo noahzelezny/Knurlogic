@@ -551,12 +551,14 @@ function followLaunch(L, d){
     }
     const lead=ms.flatMap(x=>x.doc.resident||[]).find(r=>r.cluster&&r.cluster.job===L.job);
     const ph=L.per.map(p=>p.phase);
-    if(lead && lead.state==='loaded' && ph.length && ph.every(p=>p==='ready')
-       && (!e || e.phase==='ready')) L.phase='ready';
+    if(lead && lead.state==='loaded' && ph.length && ph.every(p=>p==='ready')) L.phase='ready';
     else L.phase=ph.includes('joining')?'joining ring':ph.includes('loading')?'loading weights'
       :e&&e.phase==='warming'?'warming':'starting';
     return;
   }
+  const row=mine.flatMap(x=>x.doc.resident||[]).find(r=>r.runtime==='knurlogic'
+    && r.name===nm && (!L.port||(r.where||'').replace(/\/$/,'').endsWith(':'+L.port)));
+  if(row && row.state==='loaded' && !(e&&e.phase==='exited')){ L.phase='ready'; return }
   if(e){
     if(e.phase==='exited'){ L.phase='failed';
       L.why=e.refused||(e.log_tail||[]).slice(-2).join(' / ')||'the server exited'; return }
