@@ -1,6 +1,7 @@
 """Artifact identity: two artifacts with byte-identical config.json and the
-same total size, differing only in shard contents, must not collapse to one
-identity, and resolution must never silently pick the other one."""
+same total size, differing only in shard contents (or in the model.py they
+ship), must not collapse to one identity; two paths WITH one identity are
+the same weights, and one of them is chosen, never refused."""
 import json
 import os
 import struct
@@ -52,16 +53,28 @@ def test_symlinked_pins_read_through(tmp_path):
     assert A.resolve_identity(A.identity(a), [b, a]) == str(a)
 
 
-def test_ambiguous_refused_unless_named(tmp_path):
+def test_same_identity_is_the_same_weights_one_is_chosen(tmp_path,
+                                                          monkeypatch):
+    monkeypatch.setattr(A, "_network_mounts", lambda: [])
     a = _art(tmp_path / "s1", "one", b"a")
     b = _art(tmp_path / "s2", "two", b"a")
     ident = A.identity(a)
     assert A.identity(b) == ident
-    with pytest.raises(A.AmbiguousIdentity) as e:
-        A.resolve_identity(ident, [a, b])
-    assert str(a) in str(e.value) and str(b) in str(e.value)
+    assert A.resolve_identity(ident, [b, a]) == str(a)      # first by path
     assert A.resolve_identity(ident, [a, b], name="two") == str(b)
     assert A.resolve_identity(ident, [a, b], name="/x/y/one") == str(a)
+    # a name that matches none of them: still the same weights
+    assert A.resolve_identity(ident, [a, b], name="three") == str(a)
+
+
+def test_a_local_copy_beats_the_network_one(tmp_path, monkeypatch):
+    smb = tmp_path / "Volumes" / "shared"
+    a = _art(smb, "m", b"a")
+    b = _art(tmp_path / "local", "m", b"a")
+    monkeypatch.setattr(A, "_network_mounts", lambda: [str(smb.resolve())])
+    assert A.on_network(a) and not A.on_network(b)
+    assert A.resolve_identity(A.identity(a), [a, b]) == str(b)
+    assert A.resolve_identity(A.identity(a), [a, b], name="m") == str(b)
 
 
 def test_same_real_dir_twice_is_not_ambiguous(tmp_path):
@@ -70,26 +83,62 @@ def test_same_real_dir_twice_is_not_ambiguous(tmp_path):
     assert A.resolve_identity(A.identity(a), [a, tmp_path / "alias"])
 
 
-def test_rank_prepare_refuses_ambiguity(tmp_path, monkeypatch):
+def test_rank_prepare_takes_either_copy_of_the_same_weights(tmp_path,
+                                                            monkeypatch):
     a = _art(tmp_path / "s1", "one", b"a")
     b = _art(tmp_path / "s2", "two", b"a")
     monkeypatch.setattr(A, "resolve_identity",
                         lambda i, paths=None, name="", _r=A.resolve_identity:
                         _r(i, [a, b], name=name))
-    spec = {"job": "ab12cd34ef567890", "rank": 1, "world": 2,
-            "split": "tensor", "link": "ring", "identity": A.identity(a),
-            "hosts": ["10.0.0.1:47200", "10.0.0.2:47201"],
-            "ibv_devices": None, "coordinator": "", "layers": [],
-            "prefill_chunk": 512, "tune": "balanced", "port": 0,
-            "working_set_gib": 60.0, "bandwidth_gbs": 0, "sets": {},
-            "versions": {}, "jaccl_timeout_ms": 0,
-            "nodes": [{"rank": 0, "id": "a", "name": "A", "page": "x:1"},
-                      {"rank": 1, "id": "b", "name": "B", "page": "y:1"}]}
-    assert launch.check_spec(spec) == ""
-    code, doc = launch.prepare(spec)
-    assert code == 200 and doc["ok"] is False
-    assert "one" in doc["refused"] and "two" in doc["refused"]
     assert launch._resolve(A.identity(a), "two") == str(b)
+    assert launch._resolve(A.identity(a), "") == str(a)
+
+
+def test_model_py_is_part_of_the_identity(tmp_path):
+    a = _art(tmp_path / "p1", "m", b"a")
+    b = _art(tmp_path / "p2", "m", b"a")
+    assert A.identity(a) == A.identity(b)
+    (a / "model.py").write_text("X = 1\n")
+    (b / "model.py").write_text("X = 2\n")
+    assert A.identity(a) != A.identity(b)
+    (b / "model.py").write_text("X = 1\n")
+    assert A.identity(a) == A.identity(b)          # content, never mtime
+    (b / "kernels.py").write_text("")
+    assert A.identity(a) != A.identity(b)
+
+
+def test_a_differing_local_copy_yields_to_the_shared_one(tmp_path,
+                                                         monkeypatch):
+    smb = tmp_path / "smb"
+    shared = _art(smb, "m", b"s")
+    local = _art(tmp_path / "local", "m", b"l")
+    monkeypatch.setattr(A, "_network_mounts", lambda: [str(smb.resolve())])
+    paths = [shared, local]
+    got, alert = A.prefer_shared(A.identity(local), "m", paths)
+    assert got == A.identity(shared)
+    assert "differs from the shared copy" in alert and str(local) in alert
+    # identical copies, or the shared one asked for: nothing to say
+    assert A.prefer_shared(A.identity(shared), "m", paths) == \
+        (A.identity(shared), "")
+    same = _art(tmp_path / "local2", "m", b"s")
+    assert A.prefer_shared(A.identity(same), "m", [shared, same]) == \
+        (A.identity(same), "")
+    # no shared copy at all
+    monkeypatch.setattr(A, "_network_mounts", lambda: [])
+    assert A.prefer_shared(A.identity(local), "m", paths) == \
+        (A.identity(local), "")
+
+
+def test_network_mounts_are_read_from_mount(monkeypatch):
+    import subprocess
+
+    class R:
+        stdout = ("/dev/disk3s1 on / (apfs, local, journaled)\n"
+                  "//noah@m3._smb._tcp.local/Models on /Volumes/Models "
+                  "(smbfs, nodev, nosuid, mounted by noah)\n")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R)
+    monkeypatch.setattr(A, "_MOUNTS", [])
+    assert A._network_mounts() == ["/Volumes/Models"]
 
 
 def test_spec_name_is_never_a_path():

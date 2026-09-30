@@ -497,11 +497,27 @@ def shape_of(path: str, world: int, split: str) -> dict:
 # ------------------------------------------------------------ one page
 
 def _resolve(identity: str, name: str = ""):
-    """The local path for this identity (the artifact called `name` when
-    several match); raises machine.artifact.AmbiguousIdentity when two
-    different artifacts match and neither is named."""
+    """The local path for this identity: several copies of it are the same
+    weights, and machine/artifact.resolve_identity picks one (the one
+    called `name`, else one on this Mac's disk)."""
     from knurlogic.machine.artifact import resolve_identity
     return resolve_identity(identity, name=name)
+
+
+def sets_refusal(path, sets: dict) -> str:
+    """"" when a rank of `path` would start with these launch settings,
+    else why not -- serve's own deterministic refusals (bad settings, a
+    context past the model's maximum, a preset or KV precision it cannot
+    take), asked BEFORE a rank starts: a refusal at startup would only be
+    seen in a rank's log."""
+    from knurlogic.interfaces.serve import launch_refusal
+    from knurlogic.machine.artifact import Artifact
+    try:
+        a = Artifact.load(path)
+    except Exception:
+        return ""           # shape_of says why it cannot be read
+    why = launch_refusal(a, sets or {})
+    return f"its launch settings are refused: {why}" if why else ""
 
 
 def check_spec(spec) -> str:
@@ -644,12 +660,8 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         return 400, {"error": why}
     from knurlogic.machine import identity
     me = identity.identity().get("name") or "this machine"
-    from knurlogic.machine.artifact import AmbiguousIdentity
-    try:
-        path = resolve(spec.get("identity")) if resolve else \
-            _resolve(spec.get("identity"), str(spec.get("name") or ""))
-    except AmbiguousIdentity as e:
-        return 200, {"ok": False, "machine": me, "refused": f"on {me}: {e}"}
+    path = resolve(spec.get("identity")) if resolve else \
+        _resolve(spec.get("identity"), str(spec.get("name") or ""))
     if not path:
         return 200, {"ok": False, "machine": me,
                      "refused": f"not on {me}: no artifact with identity "
@@ -678,6 +690,9 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         refusals.append(f"settings a rank does not take: "
                         f"{', '.join(bad_sets)}")
     spec = dict(spec, sets=ok_sets)
+    why = sets_refusal(path, ok_sets)
+    if why:
+        refusals.append(why)
     rank, world = spec["rank"], spec["world"]
     try:
         sh = (shape or shape_of)(path, world, spec["split"])
@@ -770,12 +785,38 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
             PREPARED.pop(j)
         PREPARED[spec["job"]] = {"spec": dict(spec), "path": path, "t": now}
     doc = {"ok": True, "machine": me, "rank": rank}
+    differs = _local_copy_differs(path, spec)
+    if differs:
+        doc["alert"] = f"on {me}: {differs}"
     if want.get("knurlogic") != have.get("knurlogic"):
         doc["note"] = (f"same build, but knurlogic says "
                        f"{have.get('knurlogic') or 'missing'} here and "
                        f"{want.get('knurlogic') or 'missing'} on the "
                        f"coordinator")
     return 200, doc
+
+
+def _local_copy_differs(path, spec: dict) -> str:
+    """"" unless this Mac also holds its own copy of the job's model (same
+    name) that is NOT the weights the job runs -- then what to tell the
+    person: the rank runs the job's copy, the local one differs."""
+    from knurlogic.machine import artifact as A
+    name = str(spec.get("name") or "")
+    if not name:
+        return ""
+    try:
+        from knurlogic.machine import discover
+        for f in discover.find():
+            p = str(f.path)
+            if Path(p).name == name and p != str(path) \
+                    and not A.on_network(p) \
+                    and A.identity(p) not in ("", spec.get("identity")):
+                return (f"the local copy of {name} ({p}) differs from the "
+                        f"shared copy this job runs ({path}); this rank "
+                        f"loads the shared one")
+    except Exception:
+        return ""
+    return ""
 
 
 def _local_info() -> dict:
@@ -1137,10 +1178,15 @@ def watch_once(now: float | None = None) -> list:
             if line:
                 why = f"{why}: link init failed: {line}"[:300]
             else:
-                from knurlogic.cluster.recovery import memory_line
-                mem = next((x for x in (memory_line(_log_tail(
-                    r.get("log"))) for r in recs) if x), "")
-                if mem:
+                from knurlogic.cluster.recovery import (memory_line,
+                                                        refusal_line)
+                tails = [_log_tail(r.get("log")) for r in recs]
+                ref = next((x for x in map(refusal_line, tails) if x), "")
+                mem = next((x for x in map(memory_line, tails) if x), "")
+                if ref:
+                    # a rank refused to start: the job fails with its words
+                    why = f"{why}: {ref}"[:700]
+                elif mem:
                     why = f"{why}: out of memory: {mem}"[:300]
         if why:
             stop(job, reason=why)
@@ -1424,11 +1470,25 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                                  f"{rd.get('reason') or 'unknown'}"}
     # the model's shape, from this machine when it has it, else a peer
     world = len(infos)
-    from knurlogic.machine.artifact import AmbiguousIdentity
+    # a local copy beside a DIFFERENT shared (network) copy of the same
+    # name: every rank loads the shared one, and the launch says so
+    from knurlogic.machine.artifact import prefer_shared
     try:
-        path = _resolve(ident, aname)
-    except AmbiguousIdentity as e:
-        return {"error": str(e)}
+        ident, alert = prefer_shared(ident, aname)
+    except Exception:
+        alert = ""
+    if alert:
+        logger.warning("cluster launch: %s", alert)
+        req = dict(req, identity=ident)
+    path = _resolve(ident, aname)
+    from knurlogic.tuning.settings import clean_sets, TUNES
+    sets, bad = clean_sets(req.get("sets") or {})
+    if bad:
+        return {"error": f"not a launch setting: {', '.join(bad)}"}
+    if path:
+        why = sets_refusal(path, sets)
+        if why:
+            return {"refused": f"nothing started: {why}"}
     try:
         if path:
             shape = shape_of(path, world, split)
@@ -1545,10 +1605,6 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     port = req.get("port")
     port = port if isinstance(port, int) and 1024 <= port < 65536 \
         else serve_port
-    from knurlogic.tuning.settings import clean_sets, TUNES
-    sets, bad = clean_sets(req.get("sets") or {})
-    if bad:
-        return {"error": f"not a launch setting: {', '.join(bad)}"}
     # the base model's saved prompt chunk (Settings -> Models) is the
     # ring's, like every launch set; unset, the ring runs PREFILL_CHUNK.
     # serve puts the ring's value over any --set, so the saved one must be
@@ -1605,6 +1661,10 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                     (g or {}).get("refused") or (g or {}).get("error")
                     or f"{nm} did not answer" for nm, g in bad),
                 "placement": plan}
+    alerts = ([alert] if alert else []) + [
+        g["alert"] for g in got if isinstance(g, dict) and g.get("alert")]
+    for a in alerts[1 if alert else 0:]:
+        logger.warning("cluster job %s: %s", job, a)
     got = _parallel(lambda r: ask(START_PATH, r, {"job": job}),
                     list(range(world)))
     bad = [(order[r]["name"], g) for r, g in enumerate(got)
@@ -1639,6 +1699,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "leader": plan["leader"], "port": port,
             "link": link_name(link), "url": leader_url(base | {"port": port}),
             "machines": plan["order"], "cable": net, "cable_note": note,
+            **({"alerts": alerts} if alerts else {}),
             "note": f"rank 0 on {plan['leader']} serves on port {port} "
                     f"(loopback there, {leader_url(base | {'port': port})} "
                     f"from the job's machines) once every rank has loaded; "

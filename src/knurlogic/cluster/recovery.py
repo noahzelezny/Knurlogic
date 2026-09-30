@@ -44,6 +44,15 @@ MEMORY_RX = re.compile(
     r"out of memory|outofmemory|insufficient memory|does not fit|"
     r"will not fit|resource limit|unable to allocate|failed to allocate|"
     r"memoryerror|\boom\b|held now by", re.I)
+#: a process that REFUSED to start (`knurlogic serve` printed "REFUSING"
+#: and exited REFUSED_EXIT): bad settings, a context past the model's
+#: maximum, a model it cannot load as asked. Deterministic -- the same
+#: launch refuses the same way -- so never relaunched: failed at once.
+REFUSAL_RX = re.compile(
+    r"\bREFUSING\b|refused at startup|launch settings are refused")
+#: a refusal's lines in a serve log: the REFUSING line and any "  - why"
+#: lines under it
+REFUSAL_LINE_RX = re.compile(r"REFUSING[^\n]*(?:\n  - [^\n]*)*")
 #: a machine that went away or stopped answering: wait for it
 MACHINE_RX = re.compile(
     r"has not answered|not a peer this page knows|is not a machine "
@@ -85,18 +94,29 @@ def enabled() -> bool:
 
 
 def kind(reason: str) -> str:
-    """requested | memory | machine | failure."""
+    """requested | refusal | memory | machine | failure."""
     r = str(reason or "").strip()
     # a peer's page relaying its own stop: "B stopped the job: unloaded"
     r = re.sub(r"^.{0,80}? stopped the job: ", "", r)
     if any(r == q or r.startswith(q + ";") or r.startswith(q + ":")
            for q in REQUESTED):
         return "requested"
+    if REFUSAL_RX.search(r):
+        return "refusal"
     if MEMORY_RX.search(r):
         return "memory"
     if MACHINE_RX.search(r):
         return "machine"
     return "failure"
+
+
+def refusal_line(text: str) -> str:
+    """The last refusal a serve log holds, its "  - why" lines joined in,
+    or "" when it holds none."""
+    got = REFUSAL_LINE_RX.findall(text or "")
+    if not got:
+        return ""
+    return " ".join(x.strip() for x in got[-1].splitlines())[:600]
 
 
 def memory_line(text: str) -> str:
@@ -452,7 +472,9 @@ def _schedule(rec: dict, now: float, why: str) -> str:
     if k == "requested":
         _drop(rec["key"])
         return f"stopped on request ({why}); not recovered"
-    if k == "memory":
+    if k in ("memory", "refusal"):
+        # deterministic: the same launch fails the same way, so the reason
+        # is shown now instead of after three relaunches
         return _failed(rec, now, why)
     n = len(_window(rec, now))
     if n >= MAX_ATTEMPTS:
@@ -648,9 +670,12 @@ def _tick_single(rec: dict, now: float) -> str:
                 tail = f.read().decode("utf-8", "replace")
         except OSError:
             pass
-        line = memory_line(tail)
+        from knurlogic.interfaces.serve import REFUSED_EXIT
+        line = refusal_line(tail) or memory_line(tail)
         if line:
             why += f": {line}"
+        elif code == REFUSED_EXIT:
+            why += ": refused at startup (see its log)"
         rec["old_pid"] = pid
         return _schedule(rec, now, why)
     if now < float(rec.get("next_at") or 0):
@@ -677,7 +702,7 @@ def _tick_single(rec: dict, now: float) -> str:
     if out.get("refused") == "memory is about to move":
         return _defer(rec, now, why)
     rec["pending"] = False
-    if kind(why) == "memory":
+    if kind(why) in ("memory", "refusal"):
         return _failed(rec, now, f"relaunch refused: {why}")
     rec["attempts"].append(now)
     return _schedule(rec, now, f"relaunch {n} refused: {why}")
