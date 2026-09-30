@@ -700,6 +700,7 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
             "url": out.get("url"),
             "leader": out.get("leader"), "machines": out.get("machines"),
             "split": split, "link": _link_name(out.get("link") or link), "placement": plan,
+            **({"alerts": out["alerts"]} if out.get("alerts") else {}),
             "note": out.get("note", "") + " -- or `state`: the job is one "
                     "entry in `models`, with its phase."}
 
@@ -898,11 +899,12 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                        "split, same share each) | pipeline (layers in "
                        "runs, sized to each machine)"),
             "link": S("with two or more machines: tcp (the ring, any "
-                      "link) | rdma (jaccl over Thunderbolt 5, exactly "
-                      "two machines)"),
+                      "link) | rdma (jaccl over Thunderbolt 5, every pair "
+                      "cabled; beyond two machines experimental)"),
             "cable": S("optional, two machines: the Thunderbolt subnet to "
                        "use (e.g. 198.51.100); by default the fastest shared "
-                       "one, moving to the next if link init fails"),
+                       "one, moving to the next if link init fails; "
+                       "ignored with three or more (each pair picks its own)"),
         }, ["artifact"]),
     },
     "deps": {

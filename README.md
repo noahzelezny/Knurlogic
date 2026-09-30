@@ -4,7 +4,7 @@ Knurlogic serves local language models on Apple Silicon. It works out the
 settings a model needs and whether it fits in memory before loading it,
 then runs it behind an OpenAI- and Anthropic-compatible server. People use
 it through a web page; agents use it through an MCP server. One model can
-also be split across two Macs.
+also be split across two or more Macs.
 
 ## Requirements
 
@@ -85,17 +85,20 @@ Its tools are `models`, `fit`, `settings`, `drafting`, `ready`, `load`,
 `state`, `unload` and `deps`; `knurlogic mcp --list` describes each.
 `load` refuses a model that does not fit.
 
-## Two Macs
+## Two or more Macs
 
-To split one model across two Macs joined by Thunderbolt, install the same
+To split one model across two or more Macs (up to 16) joined by Thunderbolt,
+install the same
 knurlogic version and the model on both, and run on each:
 
     knurlogic ui --host cluster
 
 The Macs find each other over Bonjour (`--peer HOST` names one directly;
 `knurlogic doctor --cluster` says what is in the way). Then launch the
-model from the page with both machines selected, or with the MCP `load`
-tool's `machines` argument.
+model from the page with the machines selected, or with the MCP `load`
+tool's `machines` argument. The TCP ring works for any number of Macs;
+RDMA (jaccl) needs every pair cabled with Thunderbolt 5, and beyond two
+Macs it is experimental and untested.
 
 ## Settings
 
