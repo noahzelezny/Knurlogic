@@ -25,7 +25,7 @@ def _art(**kw):
 def test_single_box_call_is_unchanged():
     """Everything that existed took one budget and got one Resolution back."""
     r = resolve(_art(bytes_on_disk=70 * GIB), 96 * GIB)
-    assert r.env["VQ_MOE_GEMMSEG_RTILE"] == "32"
+    assert r.env["VQ_DECODE_CHUNK"]
     assert hasattr(r, "as_exports") and not hasattr(r, "nodes")
 
 

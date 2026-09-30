@@ -53,7 +53,6 @@ where = ["src"]
 knurlogic = ["interfaces/page/assets/**/*",
              "engine/families/*/architecture/*.md",
              "engine/families/*/architecture/*.json",
-             "engine/vq/*.json", "engine/vq/*.md",
              "engine/families/*/vision/PROVENANCE.md",
              "engine/runtime/PROVENANCE.md",
              "engine/templates/*.jinja", "engine/templates/PROVENANCE.md",

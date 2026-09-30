@@ -34,7 +34,6 @@ DeepSeek-V4 chat encoding
 
 vqlab (https://github.com/noahzelezny/VQLab)
   Apache License 2.0, Copyright 2026 Noah Zelezny
-  src/knurlogic/engine/vq/vq_switch.py and vq_dense.py (verbatim), and
   src/knurlogic/engine/families/glm5/heads/glm5.py and the snapshot caches
   in src/knurlogic/engine/mtp/caches.py.
 
