@@ -70,7 +70,8 @@ def test_non_vq_artifact_gets_only_the_generic_knobs():
     # (test_tuning.py covers which width)
     assert int(r.env["KNURLOGIC_PREFILL_CHUNK"]) in (
         S.PREFILL_CHUNK_DEFAULT, *S.PREFILL_CHUNK_LADDER)
-    assert r.env["VQ_CACHE_LIMIT_GB"] == str(S.CACHE_LIMIT_GB_DEFAULT)
+    assert r.env["KNURLOGIC_CACHE_LIMIT_GB"] == str(S.CACHE_LIMIT_GB_DEFAULT)
+    assert "VQ_CACHE_LIMIT_GB" not in r.env
 
 
 def test_vendored_architecture_wins_over_site_packages():

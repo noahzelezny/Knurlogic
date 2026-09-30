@@ -50,6 +50,10 @@ function migrateLaunchSets(){
   // beat the one choice at its launch, so it is dropped
   Object.values(all).forEach(v=>{ if(v) Object.keys(v).forEach(k=>{
     if(isGlobal(k)){ delete v[k]; moved++ } }) });
+  // long context is the context length's now (past the native window is
+  // YaRN): a saved switch would be one no row shows
+  Object.values(all).forEach(v=>{ if(v && 'KNURLOGIC_LONG_CONTEXT' in v){
+    delete v.KNURLOGIC_LONG_CONTEXT; moved++ } });
   if(moved) try{ localStorage.setItem(LSKEY, JSON.stringify(all)) }catch(e){}
 }
 // set once for every model (machine/preferences), never per model
@@ -62,9 +66,12 @@ const isGlobal=n=>n==='KNURLOGIC_CROSS_CHIP'||/^KNURLOGIC_COMPACT_/.test(n);
 // (nothing of it runs: every change is a launch setting), label (how the confirm lists it) and url
 // (a setting of this page's own, POSTed there as {gib}: the allowance).
 // a launch setting's plain name, where its variable is not one
-const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Identical results across chips', KNURLOGIC_PRESET:'Launch preset', KNURLOGIC_LONG_CONTEXT:'Long context (YaRN, ~1M tokens)'};
+const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Identical results across chips', KNURLOGIC_PRESET:'Launch preset'};
+// the launch preset may be left unset: the Knurlogic tab's strategy then
+const UNSET='(unset)';
 function knobHTML(k, c){
-  const cur=k.running??k.would_be??k.value;
+  const unsettable=k.name==='KNURLOGIC_PRESET';
+  const cur=unsettable ? UNSET : k.running??k.would_be??k.value;
   // with no variant running, every knob waits for a launch, live or not
   const reach=c.launch ? 'restart' : k.reach;
   const next=reach==='restart' ? launchSets(c.base)[k.name] : undefined;
@@ -78,14 +85,18 @@ function knobHTML(k, c){
   const tag=c.launch ? ''
     : reach==='live' ? `<span class="kw live" title="${esc(REACH.live)}">live</span>`
     : `<span class="kw rst" title="${esc(REACH.restart)}">next launch</span>`;
-  const about=(KNOB_TITLE[k.name]?[k.what]:[k.what,k.why]).filter(Boolean).map(esc).join(' — ')+
-    (k.max_why?`<br><b>${esc(k.max_why)}</b>`:'')+
-    (k.reach_why&&!c.launch?`<br><span style="color:var(--faint)">${esc(k.reach_why)}</span>`:'');
+  const about=(k.help ? esc(k.help).replace(/\n/g,'<br>')
+    : (KNOB_TITLE[k.name]?[k.what]:[k.what,k.why]).filter(Boolean).map(esc).join(' — '))+
+    (k.max_why?`<br><b>${esc(k.max_why)}</b>`:'');
   // the measured steps, stopping where the headroom does; else a field
   const vals=k.values||[], ci=vals.findIndex(x=>sameVal(x,k.cap));
   const cap=k.cap==null||ci<0?vals.length-1:ci;
   let ctl;
-  if(vals.length){
+  if(unsettable){
+    const dflt=`Knurlogic default (${window.LOADTUNE||'balanced'})`;
+    ctl=`<select aria-label="${esc(k.name)}">${[UNSET,...vals].map(x=>
+      `<option value="${esc(x)}"${sameVal(x,sel)?' selected':''}>${esc(x===UNSET?dflt:x)}</option>`).join('')}</select>`;
+  }else if(vals.length){
     const opts=vals.filter((x,i)=>i<=cap||sameVal(x,cur)||sameVal(x,sel));
     [sel,cur].forEach(v=>{ if(v!=null && !opts.some(x=>sameVal(x,v))) opts.unshift(v) });
     ctl=`<select aria-label="${esc(k.name)}">${opts.map(x=>
