@@ -35,6 +35,8 @@ dependencies = [
     "numpy>=1.24",
     # images: decode, EXIF transpose, the pixel hash
     "Pillow>=10.0",
+    # the menu-bar icon (`knurlogic ui --no-menubar` opts out)
+    "rumps>=0.4; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
@@ -53,7 +55,7 @@ Changelog = "https://github.com/noahzelezny/Knurlogic/blob/main/CHANGELOG.md"
 where = ["src"]
 
 [tool.setuptools.package-data]
-knurlogic = ["interfaces/page/assets/**/*",
+knurlogic = ["interfaces/page/assets/**/*", "interfaces/menubar_assets/*.png",
              "engine/families/*/architecture/*.md",
              "engine/families/*/architecture/*.json",
              "engine/families/*/vision/PROVENANCE.md",

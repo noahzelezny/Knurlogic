@@ -48,7 +48,8 @@ Then ask it something:
 The page is at http://127.0.0.1:8080/: what is loaded, where the memory
 went, a chat and the settings. `knurlogic ui` opens the page at
 http://127.0.0.1:8899/ without loading anything, with a Launch button for
-every model on the disk.
+every model on the disk, and a gear in the macOS menu bar (`--no-menubar`
+skips it) that shows what is loaded and opens or quits the page.
 
 ## Connect a harness
 
