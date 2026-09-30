@@ -140,6 +140,7 @@ def launch_refusal(a, overrides) -> str | None:
     from knurlogic.tuning.resolve import kv_refusal, preset_env
     from knurlogic.machine import preferences
     sets = preferences.launch_sets(S.canonical_sets(dict(overrides or {})))
+    sets, _ = S.settle_context(a.model_type, a.raw_config, sets)
     why = documents.refuse_sets(a, sets)
     if why:
         return why
@@ -241,6 +242,12 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # preset's value; an explicit --set still beats it
     from knurlogic.machine import preferences
     overrides = preferences.launch_sets(overrides)
+    # a context past the native window turns long context on (or is lowered
+    # to what the model reaches): a saved value never refuses a launch
+    overrides, settled = S.settle_context(a.model_type, a.raw_config,
+                                          overrides)
+    for n in settled:
+        print(f"  note: {n}")
     why = documents.refuse_sets(a, overrides)
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
