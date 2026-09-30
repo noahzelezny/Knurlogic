@@ -35,6 +35,13 @@ def main():
         print("ValueError: [jaccl] Changing queue pair to RTR failed with "
               "errno 96", flush=True)
         sys.exit(1)
+    if bad and flag("--cable") == bad:
+        # link init is collective: with rank 1's queue pair failed, no
+        # other rank gets past it -- it waits here until the job is torn
+        # down. (Walking on to "ready" raced the coordinator's failover,
+        # which reads a job whose rank 0 is ready as serving.)
+        while True:
+            time.sleep(0.3)
     jobs.progress(phase="loading")
     if rank != 0:
         jobs.after_load()
