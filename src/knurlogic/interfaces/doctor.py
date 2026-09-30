@@ -148,10 +148,10 @@ def main(argv=None) -> int:
                    help="usable GPU working set. 0 = ask the framework what "
                         "it may use; pass a number to override it.")
     p.add_argument("--profile", default=None, choices=("v1.5", "v2"),
-                   help="force a VQ numerics profile on every rung. Default: "
-                        "none -- each rung runs the numerics it was PUBLISHED "
-                        "with (engine/vq/rungs.json). Forcing v1.5 on a v2 "
-                        "rung changes its outputs.")
+                   help="force a VQ numerics profile. Default: none -- "
+                        "each model runs the numerics its own model.py "
+                        "ships with. Forcing v1.5 on a v2 model changes "
+                        "its outputs.")
     p.add_argument("--tune", default="default", type=S.preset_arg,
                    metavar="{default,lean}",
                    help="the launch preset, the same two `serve --tune` "

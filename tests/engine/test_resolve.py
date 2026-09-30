@@ -41,10 +41,6 @@ def test_chunk_never_exceeds_default():
     assert decode_chunk_for(10_000 * GIB) == S.DECODE_CHUNK_DEFAULT
 
 
-def test_rtile_is_never_64():
-    """F25/F33: RTILE=64 measured 0.75-0.97x and never faster."""
-    r = resolve(_art(), 96 * GIB)
-    assert r.env["VQ_MOE_GEMMSEG_RTILE"] == "32"
 
 
 def test_profile_selects_numerics_flags():
@@ -65,7 +61,6 @@ def test_non_vq_artifact_gets_only_the_generic_knobs():
     decode buffer, so VQ_DECODE_CHUNK would be cargo cult."""
     r = resolve(_art(vq_modules={}), 96 * GIB)
     assert "VQ_DECODE_CHUNK" not in r.env
-    assert "VQ_MOE_GEMMSEG_RTILE" not in r.env
     # the prompt chunk is still set -- its width is read from the room
     # (test_tuning.py covers which width)
     assert int(r.env["KNURLOGIC_PREFILL_CHUNK"]) in (
@@ -199,9 +194,9 @@ def test_dense_vq_artifacts_are_recognised_as_vq():
     dense = _art(vq_modules={}, vq_other={"vq_linear": {"some": "module"}})
     assert dense.is_vq
     r = resolve(dense, 96 * GIB)
-    assert r.env.get("VQ_MOE_GEMMSEG_RTILE") == "32"
+    assert r.env.get("VQ_DECODE_CHUNK")
     assert not resolve(_art(vq_modules={}), 96 * GIB).env.get(
-        "VQ_MOE_GEMMSEG_RTILE")
+        "VQ_DECODE_CHUNK")
 
 
 # --- the spike is a FAMILY effect, not a box effect -------------------------

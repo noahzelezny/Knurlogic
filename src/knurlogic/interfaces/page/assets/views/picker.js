@@ -171,6 +171,8 @@ function renderPicker(){
           ${m.is_vq?'<span class="tag">VQ</span>':''}
           ${m.mtp?'<span class="tag">MTP</span>':''}
           ${isVision(m)?'<span class="tag">VISION</span>':''}
+          ${m.update?`<span class="tag" data-upd="${esc(m.name)}"
+            title="a newer version is on Hugging Face">update</span>`:''}
           <span class="vs${m.room&&m.room.small?' tight':''}"${m.room?` title="${
             esc(m.room.text)}"`:''}>${gb(m.size_bytes)}</span></div>`}).join('')}</div>
     </div>`;
@@ -192,6 +194,11 @@ function renderPicker(){
     h.parentElement.classList.toggle('open'));
   $('prows').querySelectorAll('[data-fav]').forEach(s=>s.onclick=e=>{
     e.stopPropagation(); toggleFav(s.dataset.fav); renderPicker();
+  });
+  // the update tag opens the Hugging Face download dialog for that repo;
+  // downloading it again fetches the new revision into the same cache
+  $('prows').querySelectorAll('[data-upd]').forEach(t=>t.onclick=e=>{
+    e.stopPropagation(); FAM=HUB; renderPicker(); hubOpen(t.dataset.upd);
   });
   $('prows').querySelectorAll('.var').forEach(v=>v.onclick=()=>{
     SEL=MODELS.find(m=>m.path===v.dataset.p); SELCLEARED=false;
@@ -535,8 +542,8 @@ function hubDialog(){
   const id=HF.open;
   if(!id) return;
   const d=HF.detail[id], dl=dlOf(id), ws=fitWS();
-  const local=MODELS.some(m=>m.name===id)
-    ||(window.ALLMODELS||[]).some(m=>m.name===id);
+  const has=m=>m.name===id && !m.update;   // an update is not "already here"
+  const local=MODELS.some(has)||(window.ALLMODELS||[]).some(has);
   const busy=dl&&dl.state==='downloading';
   const ready=d&&!d.loading&&!d.error;
   const line=!d||d.loading?'':d.error?d.error

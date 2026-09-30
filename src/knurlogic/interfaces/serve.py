@@ -374,15 +374,14 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(f"  WARNING: {w}", file=sys.stderr)
 
     if a.model_file:
-        from knurlogic.engine.vq import runtime as _vq
-        if _vq.serves(a.path):
-            print(f"\n{a.path.name} ships its own runtime ({a.model_file}); "
-                  f"knurlogic's runtime serves it instead -- verified "
-                  f"bit-identical to that file (engine/vq/rungs.json).")
-        else:
-            print(f"\n{a.path.name} ships its own runtime ({a.model_file}) "
-                  f"and it WILL be executed -- that is where its kernels "
-                  f"live (not yet verified against knurlogic's runtime).")
+        print(f"\n{a.path.name} ships its own runtime ({a.model_file}) "
+              f"and it WILL be executed -- that is where its kernels live.")
+    else:
+        from knurlogic.engine.serve.load import vq_without_runtime
+        why = vq_without_runtime(a.path)
+        if why:
+            print(f"\nREFUSING: {why}", file=sys.stderr)
+            return REFUSED_EXIT
 
     rows = arch.check(a.model_type)
 
@@ -566,6 +565,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         return {"applied": done, "running": dict(live_env)}
 
     from knurlogic.interfaces import http
+    from knurlogic.interfaces.page import updates
+    updates.start_for_page()
 
     # /v1/messages is served by the server itself (in-process over its
     # OpenAI surface), so it is not one of these routes.
@@ -735,10 +736,10 @@ def main(argv=None) -> int:
                    help="usable GPU working set; 0 asks the framework what "
                         "it may use")
     p.add_argument("--profile", default=None, choices=("v1.5", "v2"),
-                   help="force a VQ numerics profile on every rung. Default: "
-                        "none -- each rung runs the numerics it was PUBLISHED "
-                        "with (engine/vq/rungs.json). Forcing v1.5 on a v2 "
-                        "rung changes its outputs.")
+                   help="force a VQ numerics profile. Default: none -- "
+                        "each model runs the numerics its own model.py "
+                        "ships with. Forcing v1.5 on a v2 model changes "
+                        "its outputs.")
     p.add_argument("--no-draft", action="store_true",
                    help="do not use a multi-token-prediction head even if "
                         "one is packed beside the weights (the same as "

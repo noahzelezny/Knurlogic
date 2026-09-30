@@ -1828,8 +1828,10 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
 
 
 def serve_ui(host: str, port: int, serve_port: int, peers=(),
-             allow_origins=(), allow_hosts=()) -> int:
+             allow_origins=(), allow_hosts=(), offline: bool = False) -> int:
     global PEERS
+    from knurlogic.interfaces.page import updates
+    updates.start_for_page(offline)
     _SERVE_PORT["n"] = serve_port
     _SERVE_PORT["ui"] = port
     from knurlogic.cluster import links
@@ -1931,13 +1933,18 @@ def main(argv=None) -> int:
     p.add_argument("--allow-host", action="append", default=[],
                    metavar="NAME", help="a DNS name this machine is reached "
                    "by, beyond localhost, IPs, .local and its hostname")
+    p.add_argument("--offline", action="store_true",
+                   help="skip the once-per-start check that asks Hugging "
+                        "Face whether a downloaded model has an update "
+                        "(HF_HUB_OFFLINE=1 does the same)")
     a = p.parse_args(argv)
     peers = []
     for spec in a.peer:
         host, _, port = spec.rpartition(":") if ":" in spec else (spec, "", "")
         peers.append((host, int(port) if port.isdigit() else a.port))
     return serve_ui(a.host, a.port, a.serve_port, peers,
-                    allow_origins=a.allow_origin, allow_hosts=a.allow_host)
+                    allow_origins=a.allow_origin, allow_hosts=a.allow_host,
+                    offline=a.offline)
 
 
 def _wire() -> None:
