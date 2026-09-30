@@ -241,6 +241,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # Knurlogic, machine/preferences), not a model's: saved, it beats the
     # preset's value; an explicit --set still beats it
     from knurlogic.machine import preferences
+    decode_scale = preferences.decode_scale(overrides)
     overrides = preferences.launch_sets(overrides)
     # a context past the native window turns long context on (or is lowered
     # to what the model reaches): a saved value never refuses a launch
@@ -298,7 +299,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # 115 GiB, every rank of a 397B split would warn "does not fit this
     # box"
     r = resolve(a, ws, profile=profile, tune=tune, holds_bytes=share,
-                kv_bits=kv_bits, long_context=long_context)
+                kv_bits=kv_bits, long_context=long_context,
+                decode_scale=decode_scale)
     apply_preset_overrides(r, overrides)
     if long_context != "off" and ws:
         # YaRN: the KV of the chosen context must fit, or the load is
@@ -357,7 +359,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     def _resolve_for(ws_bytes, tune_name):
         return resolve(a, ws_bytes, profile=profile, tune=tune_name,
                        holds_bytes=share, kv_bits=kv_bits,
-                       long_context=long_context)
+                       long_context=long_context, decode_scale=decode_scale)
 
     # `top` plus `ps` costs about a third of a second, and the page polls
     # status every two. Cached just long enough that a poll is free and a
