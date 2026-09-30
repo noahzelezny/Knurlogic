@@ -527,6 +527,9 @@ def _runtime_of(cmd: str) -> str:
     """
     if not cmd:
         return ""
+    from knurlogic.machine.servers import is_test_process
+    if is_test_process(cmd):
+        return ""             # a test's fake rank is no runtime of this Mac
     parts = cmd.split()
     exe = parts[0]
     base = exe.rsplit("/", 1)[-1].lstrip("-").lower()

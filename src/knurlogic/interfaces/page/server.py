@@ -208,6 +208,12 @@ def children() -> list:
             if code is not None:
                 row["exit_code"] = code
             row["log_tail"] = lines[-15:]
+            # a server that refused to start says why in its log: carried
+            # up as `refused`, the page's and state()'s reason
+            from knurlogic.cluster.recovery import refusal_line
+            why = refusal_line("\n".join(lines[-60:]))
+            if why:
+                row["refused"] = why
         out.append(row)
     return out
 
@@ -988,6 +994,10 @@ def load_progress(doc: dict) -> list:
         r = rows.get(port)
         if not is_our_server(pid):
             e.update(phase="exited", log_tail=[l[:200] for l in lines[-4:]])
+            from knurlogic.cluster.recovery import refusal_line
+            why = refusal_line("\n".join(lines[-60:]))
+            if why:
+                e["refused"] = why
         elif r is None or r.get("state") == "loading":
             e["phase"] = ("stalled" if quiet is not None
                           and quiet > STALL_QUIET_S else "loading")
