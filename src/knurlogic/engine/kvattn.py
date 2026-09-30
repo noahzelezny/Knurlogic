@@ -1,46 +1,16 @@
 """Decode attention read straight from an 8-bit KV cache (engine/kvquant).
 
-A decode step over kvquant's cache used to dequantize the whole cache to
-bf16 and run mx.fast sdpa: every step read the 8-bit cache AND wrote and
-read a bf16 copy of it. The Metal kernel here reads the packed K/V, their
-scales and biases directly (split-K over key blocks, one launch; a second
-tiny launch combines the blocks' softmax partials).
+A Metal kernel reads the packed K/V, their scales and biases directly
+(split-K over key blocks, one launch; a second tiny launch combines the
+blocks' softmax partials) instead of dequantizing the whole cache to bf16
+every decode step. `install` rebinds `scaled_dot_product_attention` in the
+model's own modules to `sdpa` below, which takes the kernel when handed
+exactly the keys kvquant's cache just returned, and otherwise is mlx-lm's
+function unchanged. Prefill stays dequantize+sdpa.
 
-Measured on an M4 Max (128 GB), Qwen3.6-35B-A3B VQ 3.4 (10 attention layers, 2 KV
-heads, head dim 256), end-to-end decode tok/s, bf16 / 8-bit dequantize+sdpa
-/ 8-bit kernel, interleaved, median of 3: 70.0 / 63.9 / 66.3 at 6k
-context, 65.5 / 54.0 / 61.9 at 16k (tools/kv8/README.md).
-
-HOW IT IS WIRED, without touching a family's attention: kvquant's caches
-still return dequantized arrays from `update_and_fetch` -- lazily, so if
-nothing reads them they are never computed (gemma4's KV-shared layers do
-read them: they attend over the owner's returned keys with cache=None, so
-those layers still pay the dequantize) -- and, for a decode step,
-remember (returned keys, packed K, packed V). `install` rebinds the
-`scaled_dot_product_attention` name in the model's own modules to `sdpa`
-below, which takes the kernel when it is handed exactly the keys that cache
-just returned, and otherwise is mlx-lm's function unchanged. Prefill (long
-queries) stays dequantize+sdpa: 8-bit costs it nothing measurable.
-
-Routed here: decode steps (kvquant.KERNEL_MAX_QUERY; an MTP verify of
-2-4 rows measured slower than dequantize+sdpa and stays there). The kernel
-itself takes: 8 bits, K and V the same head dim (128, 256 or 512: a
-multiple of 128, so each lane reads whole 32-bit words), any GQA ratio, up
-to `MAX_ROWS` query rows per KV head, no mask / "causal" / a boolean mask
-shared across heads (a batch's left padding, ragged rows). Anything else --
-sinks, an additive or per-head mask, head dim 64, GLM's MLA latent (its
-own attention function, not rebound) -- takes the old path.
-
-One difference from mlx sdpa: a query row with EVERY key masked returns
-0 here, where mlx sdpa returns NaN.
-
-`KNURLOGIC_KV_KERNEL=off` turns it off (tuning/settings.py), for A/B.
-Whether it is actually live is counted, not assumed: `STATS` (hits: decode
-attentions it served; misses: a decode step the cache offered it that took
-dequantize + sdpa -- keys transformed after the fetch, as GLM's MLA does,
-an unsupported shape, or an attention that calls mx.fast directly) is
-state.SERVED["kv_kernel"] and /status.json's kv_kernel, and the first
-hit and first miss are each logged once.
+A query row with EVERY key masked returns 0 here, where mlx sdpa returns
+NaN. `KNURLOGIC_KV_KERNEL=off` turns it off; `STATS` counts hits and
+misses. Design: docs/design/kv-cache.md (decode kernel).
 """
 from __future__ import annotations
 
@@ -88,8 +58,8 @@ MAX_ROWS = 64
 #: every SG-th key of the block), and query rows per threadgroup (RC: the
 #: R rows of a KV head are split over R / RC threadgroups that each re-read
 #: the block's K/V -- fewer registers per thread, more threadgroups in
-#: flight). Tuned on an M4 Max (128 GB) with layers chained as in a model
-#: (tools/kv8/tune.py): 256/2/2 is 114 / 208 us per layer at 6k / 16k
+#: flight). Tuned on an M4 Max (128 GB) with layers chained as in a model:
+#: 256/2/2 is 114 / 208 us per layer at 6k / 16k
 #: against 230 / 503 for the research kernel's 256/8/all-8 and 146 / 291
 #: for dequantize + sdpa.
 NB = 256

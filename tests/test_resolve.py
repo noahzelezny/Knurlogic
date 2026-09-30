@@ -70,7 +70,7 @@ def test_non_vq_artifact_gets_only_the_generic_knobs():
     # (test_tuning.py covers which width)
     assert int(r.env["KNURLOGIC_PREFILL_CHUNK"]) in (
         S.PREFILL_CHUNK_DEFAULT, *S.PREFILL_CHUNK_LADDER)
-    assert r.env["VQLAB_CACHE_LIMIT_GB"] == str(S.CACHE_LIMIT_GB_DEFAULT)
+    assert r.env["VQ_CACHE_LIMIT_GB"] == str(S.CACHE_LIMIT_GB_DEFAULT)
 
 
 def test_vendored_architecture_wins_over_site_packages():
@@ -111,7 +111,7 @@ def test_pins_are_loaded_and_make_doctor_say_ok():
 def test_package_architectures_are_found_and_hosted_correctly():
     """glm5_next is a PACKAGE (vendored with its import closure), not a flat
     file; it registers under mlx_lm's name like every other architecture
-    (mlx-vlm is not needed: 2026-09-25)."""
+    (mlx-vlm is not needed)."""
     from knurlogic.engine import arch
     from knurlogic.engine.register import available, source_for
     if "glm5_next" not in available():

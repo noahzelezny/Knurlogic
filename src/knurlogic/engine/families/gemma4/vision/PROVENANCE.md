@@ -1,10 +1,9 @@
 # gemma4 vision -- provenance
 
-*P2 (docs/design/vision.md v2), 2026-09-23.*
+Design: docs/design/vision.md.
 
 ## Vendored from mlx-vlm 0.6.17
 
-- interpreter: `/opt/anaconda3/envs/exo/bin/python`
 - host package: `mlx_vlm` 0.6.17, MIT, Copyright (c) 2025 Prince Canuma
 
 | this file | from | lines |
@@ -15,7 +14,7 @@
 | `__init__.py::RMSNormNoScale` | `mlx_vlm/models/gemma4/language.py::RMSNormNoScale` | verbatim (duplicated from `vision.VisionRMSNormNoScale` rather than shared, because it sits on `embed_vision` in the weight tree, not the tower) |
 | `../architecture/gemma4_text.py::_make_masks` overlay | `mlx_vlm/models/gemma4/language.py:455-515` (`Gemma4TextModel._block_sequence_ids_for_mask`, `_apply_blockwise_bidirectional_overlay`, the `use_bidirectional_vision` gate) | ported, not copied verbatim -- see the deviation below and `../architecture/PROVENANCE.md` |
 
-`scatter.merge` (image features into text embeddings) is P0's, already
+`scatter.merge` (image features into text embeddings) is shared,
 vendored at `engine/vision/scatter.py` (mlx-vlm's `masked_scatter`,
 `gemma4/gemma4.py:13-20`) and held to a golden there
 (`tests/goldens/p0_masked_scatter.npz`); this package reuses it rather than
@@ -27,7 +26,7 @@ mlx-vlm's version has three call shapes: a list of differently-sized
 images (batches a turn's images through one forward pass), an
 externally-supplied `pixel_position_ids` path, and the plain
 `[B, C, H, W]` path. `Family.preprocess`/`Family.encode` (this package's
-`__init__.py`) call the tower once per image (design D1/D6 -- an image is
+`__init__.py`) call the tower once per image (an image is
 encoded once and cached by sha, never batched with another image's
 pixels), so only the plain path is kept. Padding to `max_patches` is also
 dropped for the same reason: mlx-vlm pads so a batch's images share one
@@ -65,8 +64,8 @@ scales ONLY the text embeddings before scattering in the (unscaled)
 projected image features (`gemma4.py:85-170`); knurlogic's
 `../architecture/gemma4_text.py::Gemma4TextModel.__call__` scales whatever
 `input_embeddings` it receives, always
-(`h = input_embeddings; h = h * self.embed_scale`, unedited by P2 -- every
-family shares this line). `Gemma4Vision.encode` divides the tower's
+(`h = input_embeddings; h = h * self.embed_scale`, unedited -- every
+caller shares this line). `Gemma4Vision.encode` divides the tower's
 projected features by `embed_scale` before caching them
 (`EncodedImage.feats`), so the trunk's later multiply cancels the division
 on exactly the image rows and leaves the text rows scaled as it always
@@ -97,28 +96,27 @@ straight off the model directory (a shard index's `weight_map` when there
 is one, or every `*.safetensors` file in the directory otherwise -- a
 release's real layout for e4b is the quantized `embed_vision
 .embedding_projection` living in the SAME shard as text weights,
-`model-00002.safetensors`; 26b's tower is its own 356-tensor sidecar --
-report-mlx-vlm-families.md section 7), never through the text model's
-`sanitize` (design critique B3 option (a)). `test_g1_load_weights_standalone_tower`
+`model-00002.safetensors`; 26b's tower is its own 356-tensor sidecar),
+never through the text model's
+`sanitize`. `test_g1_load_weights_standalone_tower`
 gates that the tensor count matches what was written.
 
-## Open issues / not done here (for the integrator)
+## Open issues
 
 - **Quantization (e4b's `embed_vision.embedding_projection` -> `QuantizedLinear`,
   and `ClippableLinear`'s clip params).** `load_weights` reads whatever
   tensors are under the two prefixes and applies them via `tree_unflatten`;
   it has NOT been exercised against a quantized `nn.Linear` (the module tree
   would need `nn.QuantizedLinear` swapped in before `update`, the way
-  mlx-lm's own quantized loading does it). Untested here per the hard rules
-  (no real model may be loaded); flagged for the integration pass's real-model
-  gate.
+  mlx-lm's own quantized loading does it). The unit tests load no real
+  model; the real-model gate (tools/vision_gate.py) is what covers it.
 - **`use_clipped_linears` per-tensor clip bounds.** `ClippableLinear` loads
   `input_min`/`input_max`/`output_min`/`output_max` as ordinary buffers when
   `use_clipping=True`; not exercised against a real e4b checkpoint's actual
   clip values, only against random tiny-fixture ones (which are finite but
   not representative of the reference's `±inf`-until-loaded default).
-- **26b's standalone sidecar path is not integration-tested** (no real
-  weights loaded, per the hard rules); `load_weights`' "no shard index"
+- **26b's standalone sidecar path is not integration-tested** (the unit
+  tests load no real weights); `load_weights`' "no shard index"
   branch (a single `*.safetensors` in the directory) is the one path this
   package's own tests exercise for a full tower, and it is also what a
   26b-style single-shard sidecar looks like structurally.
@@ -130,6 +128,4 @@ gates that the tensor count matches what was written.
   window-size branch in the vision attention itself).
 - **`positions()` returns `(None, 0)`** per the design (gemma: plain 1D
   RoPE for the trunk); this was not re-derived from a real config, only
-  taken from `docs/design/vision-contracts.md` and
-  `docs/design/vision-evidence/report-mlx-vlm-families.md` section 6
-  ("Positions: plain 1D RoPE...").
+  taken from `docs/design/vision-contracts.md` (gemma uses plain 1D RoPE).

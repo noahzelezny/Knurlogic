@@ -129,7 +129,7 @@ def test_models_lists_every_routable_model(cluster):
 def test_models_carry_each_servers_own_entry(cluster):
     """The page's chat reads a model's recommended sampling and thinking
     levels from /v1/models; the router listed only ids, so a cluster job
-    reached through the M3 page had neither (2026-09-27)."""
+    reached through another machine's page had neither."""
     page, _, _, _ = cluster
     with urllib.request.urlopen(page + "/v1/models", timeout=5) as r:
         doc = json.loads(r.read())

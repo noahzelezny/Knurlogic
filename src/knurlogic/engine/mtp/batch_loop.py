@@ -1,49 +1,19 @@
 """MTP speculative decoding over a BATCH of sequences.
 
-loop.py runs one sequence: draft one token with the head, verify it inside a
-2-token trunk forward, roll back and replay on rejection. This module runs
-that same step over B rows at once, which is what lets the batch engine keep
-drafting when several requests are in flight instead of trading the head
-away for batching.
+Draft one token with the head, verify it inside a 2-token trunk forward,
+for B rows at once. It is batchable because with a 1-token draft EVERY row
+advances by exactly two positions per step, accepted or not, so the
+batched caches (one offset per row, shared write index) never need per-row
+trimming: rejection is ONE whole-batch trim(2) and ONE replay forward with
+the tokens that actually committed. Expected forwards per step are
+1 + (1 - a^B) for 2B tokens -- a decaying win; measure before assuming it
+beats plain batching at a given B.
 
-What makes it batchable at all is a property of the 1-token draft: EVERY row
-advances by exactly two positions per step, accepted or not.
-
-  accepted -> the verify forward committed [t1, d2]; the caches are right.
-  rejected -> the caches hold [t1, d2] with the wrong second token; the
-              trunk's own t2 came out of the same forward, so the step still
-              emits two tokens, but position offset-1 has to be rewritten.
-
-Because the row count in the KV cache is lockstep, the batched caches
-(mlx-lm's BatchKVCache, one offset per row, shared write index) never need
-per-row trimming. Rejection is handled as ONE whole-batch trim(2) and ONE
-whole-batch replay forward with the tokens that actually committed — for a
-row that accepted, the replay writes back exactly what was there. That costs
-an extra forward whenever ANY row rejects, i.e. with acceptance a and B rows
-the expected forwards per step are 1 + (1 - a^B) for 2B tokens, against B
-tokens per forward without drafting. It is a decaying win, not a free one:
-measure it (see the numbers in the runner's engine_mode.py) before assuming
-it beats plain batching at a given B.
-
-A row that cannot draft (a request carrying images, whose head seeding the
-vision embedding patch would corrupt) rides along: it pays the replay every
-step and gets the trunk's own tokens, never a drafted one.
-
-Sampling is per row — temperature, top-p, processors, and the acceptance
-test are the row's own — so a batch may mix greedy and sampled requests. At
-temperature the verdict is the same exact rejection sampling loop.py uses
-(sampling.rejection_correct); at temperature 0 it is `draft == argmax`. One
-deliberate difference from the old sequential loop: a row's logits
-processors (repetition penalty, eos ban) are applied to the TRUNK row that
-verifies the draft, not only to the draft and to t1 — otherwise a penalised token could be committed
-through the verify path that sampling would have refused.
-
-Across machines (a pipeline split, engine/runtime/pipeline.py) every rank
-runs this same loop; `coord` carries rank 0's regime and drafts (B1) and
-its verdicts (B2) to the others, one fixed broadcast each per step. Only
-rank 0 holds the head: a follower's batch has `head=None` and mirrors
-rank 0's drafting rows (RowParams.mirror), running the verify and replay
-forwards with the tokens B1 and B2 hand it.
+Sampling is per row (exact rejection sampling, sampling.rejection_correct;
+`draft == argmax` at temperature 0); a row's logits processors apply to the
+TRUNK row that verifies the draft. Across a pipeline split every rank runs
+this loop; only rank 0 holds the head and `coord` broadcasts its drafts and
+verdicts. Design: docs/design/drafting.md (batched loop).
 """
 from __future__ import annotations
 
@@ -67,8 +37,7 @@ __all__ = ["RowParams", "Row", "Emitted", "RowStep", "MTPBatch", "admit",
 
 import time
 
-#: exo takes this from its runner bootstrap; a module
-#: logger is the stdlib answer and nothing downstream cares.
+#: A module logger; nothing downstream configures it.
 logger = logging.getLogger(__name__)
 
 
@@ -134,7 +103,7 @@ class Row:
     draft_row: Optional[mx.array]  # [1, V] the head's draft of t2, or None
     n_prompt: int
     drafts: bool
-    #: design D4: this row's MRoPE offset (Qwen: positions after an image
+    #: this row's MRoPE offset (Qwen: positions after an image
     #: run ahead of the token count by rope_delta). Recomputed from the key
     #: at every admission -- positions are pure in the key -- so it needs no
     #: home in the prefix cache.
@@ -255,7 +224,7 @@ def admit(
     why an admitted row always starts from a FRESH trunk cache: a reused
     prefix would shift every rotary position the head sees.
 
-    IMAGES (design D5; docs/design/vision.md). A vision row arrives with
+    IMAGES. A vision row arrives with
     `embeds` -- the trunk's `input_embeddings` for ids[start_pos:] only, as
     `Family.embed` builds them, [1, n - start_pos, D] -- and optional
     `extras`, further trunk kwargs over the same span. An extras value is an
@@ -265,13 +234,13 @@ def admit(
     them when embeddings are given, and a drafting head needs them).
     `chunk_boundaries` are [start, end) spans no chunk edge may fall
     strictly inside -- gemma attends bidirectionally within an image, so a
-    chunk that cut one would compute the first half without the second
-    (critique B5). Edges snap back to the span start, or forward past the
+    chunk that cut one would compute the first half without the second.
+    Edges snap back to the span start, or forward past the
     span when it starts the chunk (a span longer than the step is one
     chunk). The last forward, which yields the first logits, is widened the
     same way if the prompt ends inside a span. `rope_delta` / `mrope` ride
     on the Row so MTPBatch can hand the trunk this row's positions on every
-    decode step (design D4).
+    decode step.
 
     CHECKPOINTS. Positions c (the server's segment ends: after the system
     prompt, after the last user message) where prefill stops a chunk and
@@ -658,10 +627,10 @@ class MTPBatch:
     def _pos_kw(self, width: int) -> dict:
         """`position_ids` for a decode forward `width` tokens wide, or {}.
 
-        Design D4: a Qwen row whose key holds an image decodes at position
+        A Qwen row whose key holds an image decodes at position
         (tokens so far + rope_delta) on all three MRoPE axes -- for EVERY
         step, not only while the image is in the new span; missing it
-        degrades silently (critique B1). So as soon as one row needs it the
+        degrades silently. So as soon as one row needs it the
         whole batch gets explicit ids, [3, B, width]; a row without MRoPE
         gets its plain count, which is what the trunk would have used. The
         count is n_prompt + tokens emitted: the row's cache length before

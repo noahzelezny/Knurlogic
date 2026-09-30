@@ -1,37 +1,18 @@
 """Images in use are never evicted: the prompt cache pins what it references.
 
-Flash-Next review point 1. A prompt-cache entry whose key holds image
-sentinels (key.py) is KV computed from those images. While it lives, a turn
-that extends it may re-read the images -- a partial hit that cuts into an
-image span re-embeds the rest of that span from the store. So each image
-stays in the ImageStore while ANY live entry references its sha: one store
-pin per (entry, image run), taken when the entry is inserted, dropped when
-it leaves the cache by any path.
+A prompt-cache entry whose key holds image sentinels (key.py) is KV
+computed from those images, and a turn that extends it may re-read them.
+So each image stays in the ImageStore while ANY live entry references its
+sha: one store pin per (entry, image run). The two MUTATING methods of
+mlx-lm's LRUPromptCache are wrapped by name (asserted, so a rename fails
+loudly at install) and after either returns the hook RECONCILES the live
+entries against its pins.
 
-HOW. mlx-lm's LRUPromptCache (mlx_lm/models/cache.py) removes entries on
-four paths: insert_cache's replacement of an equal key, its pop_prefixes of
-shorter keys, its size/bytes LRU pops, and trim_to. Intercepting each is
-brittle; instead the two MUTATING methods are wrapped by name (with
-assertions -- a pinned mlx-lm that renames one fails at install, loudly),
-and after either returns the hook RECONCILES: the live entries are read off
-`_lru._lrus` (the deques of (model, tokens) every path keeps in step with the
-trie), new ones are pinned, gone ones unpinned. Entries are tracked by the
-identity of their `tokens` list (the hook holds a reference, so the id is
-stable); a replacement of an equal key is a new list, so the old entry's pins
-go and the new one's come.
-
-THE ADMIT GAP (P4's leak). VisionServe.tokenize pins a request's images
-until the batch generator admits the row. If the scheduler raises between
-tokenize and insert (building the state machine, say),
-nothing admits the row and the pins stay forever. `pending()` records the
-pins a tokenize took; `claim()` is called once `insert_segments` has queued
-the row (from then on the generator's admit/remove releases them);
-`sweep()` releases whatever was never claimed. The scheduler
-(engine/runtime/scheduler.py) sweeps before every tokenize -- its thread is
-sequential, so a pending entry still unclaimed then was abandoned -- and
-wraps tokenize-to-insert in `admit_guard()`, which claims on success.
-
-Stdlib only; no mlx import (the wrapped objects are mlx-lm's, passed in).
+The admit gap: tokenize pins a request's images until the batch generator
+admits the row. `pending()` records those pins, `claim()` hands them to the
+generator, and `sweep()` releases any a failed admission abandoned; the
+scheduler wraps tokenize-to-insert in `admit_guard()`. Stdlib only.
+Design: docs/design/vision.md (cache pins).
 """
 from __future__ import annotations
 

@@ -1,42 +1,15 @@
 """The Qwen vision family: qwen3_5, qwen3_5_moe and qwen4_exp (one tower,
-one processor, one position rule -- report-mlx-vlm-families.md sections 1-4).
+one processor, one position rule).
 
-What each Family method is, and where it came from:
-
-  load_weights  the tower's tensors, found through the index weight_map
-                (the 333-tensor model-vision-graft.safetensors sidecar on
-                every released Qwen rung, or main shards), in EITHER naming:
-                HF `model.visual.*` (397B, Flash-Next) or MLX `vision_tower.*`
-                (27B, 35B-A3B) -- report-mlx-vlm-families.md section 6. Key
-                mapping is mlx-vlm qwen3_5/qwen3_5.py `sanitize_key` (:16-25),
-                the patch-embed transpose is the tower's own `sanitize`. The
-                tower stands ALONE: the trunk's sanitize keeps dropping the
-                vision keys (critique B3, option a), so nothing about loading
-                the text model changes.
-  preprocess    processing.ImageProcessor, settings from the rung's own
-                preprocessor_config.json (mlx-vlm reads the same file)
-  encode        the tower, once; output rows = t*h*w / merge^2 = n_tokens
-  placeholder   "<|vision_start|><|image_pad|><|vision_end|>" -- the exact
-                text the Qwen chat template emits for an image part, read
-                back from the rung's tokenizer files by ID and checked to be
-                special added tokens (the Flash-Next 4.4 review, item 3: a
-                string the tokenizer does not know is spelled out as text
-                and the image silently never reaches the sequence)
-  embed         embed_tokens over key[start:] (sentinels back to the pad id,
-                which mlx-vlm feeds too), then scatter.merge -- mlx-vlm's
-                merge_input_ids_with_image_features by sentinel. Returns
-                input_embeddings only: see `positions`.
-  positions     rope_index over the WHOLE key, refs from the store (never
-                evicted) -- the trunk's `position_ids` for a prefill chunk
-                (slice [:, :, a:b]) and `rope_delta` for text after the last
-                image and every decode step (design D4)
-  chunk_boundaries  [] -- Qwen attention is causal across an image
-
-WHY embed DOES NOT RETURN position_ids. The contract lets it, but embed only
-gets a FeatureLookup, and positions depend on every image in the key --
-including ones before `start` whose features the store may have evicted.
-Refs are never evicted, so positions come from `positions(key, refs)` alone;
-one home for them. (Reported to the integrator as a contract clarification.)
+The tower's tensors load STANDALONE through the index weight_map, in either
+naming (HF `model.visual.*` or MLX `vision_tower.*`); the trunk's sanitize
+keeps dropping vision keys. The placeholder is read back from the rung's
+tokenizer by ID and checked to be special added tokens -- a string the
+tokenizer does not know is spelled out as text and the image silently
+never reaches the sequence. `embed` returns input_embeddings only:
+positions depend on every image in the key, including ones the store may
+have evicted, so they come from `positions(key, refs)` alone.
+Design: docs/design/vision.md (Qwen).
 """
 from __future__ import annotations
 

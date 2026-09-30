@@ -3,7 +3,7 @@
 Each entry is a claim that this file is the arithmetic the
 artifacts were validated against -- not merely that it imports.
 
-## glm5_next (package) -- mlx-vlm 0.6.17, re-vendored 2026-09-23
+## glm5_next (package) -- mlx-vlm 0.6.17
 
 - from: `mlx_vlm/models/glm5_next` of an installed mlx-vlm 0.6.17
   (language.py sha256 f1c66fecf998..., byte-identical across the
@@ -19,11 +19,10 @@ artifacts were validated against -- not merely that it imports.
   `b_proj`, `g_a_proj`; 0.7.1 renamed and restructured them (gated_delta
   144 changed lines, switch_layers 199, mla 37, hyper_connection 56) and
   its sanitize does not map the old names, so the rungs do not load on
-  0.7.1 at all. The 2026-09-18 switch to stock 0.7.1 ("upstream was
-  ahead") was undone for that reason: the artifact is the authority.
-- verified: GLM-5.3-Flash 2.7 G-VQ bit-identical to its published model.py
-  (M4, mlx 0.31.2); tools/vision_gate.py PASS through `knurlogic serve`
-  with no mlx-vlm installed.
+  0.7.1 at all. The artifact is the authority, not the newest upstream.
+- verified: GLM-5.3-Flash 2.7 bit-identical to its published model.py
+  (tools/vq_gate.py; M4 Max, mlx 0.31.2); tools/vision_gate.py PASS
+  through `knurlogic serve` with no mlx-vlm installed.
 - mlx-lm loads it through `engine/vq/runtime.model_classes`, which builds
   the nested configs (mlx-vlm's update_module_configs, done the same way)
   and returns logits from the language model.

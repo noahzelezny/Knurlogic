@@ -1,21 +1,15 @@
 """What knurlogic stands on, and whether each piece is stock.
 
-`knurlogic deps` and the MCP `deps` tool both answer from here. The question
-is never "is mlx installed" -- it is WHICH mlx, and whether it carries the
-fixes knurlogic relies on.
+`knurlogic deps` and the MCP `deps` tool answer from here. Every verdict is
+read off an artifact of the fix, never off a version string:
 
-Every verdict is read off an ARTIFACT of the fix, never off a version string.
-A version names a build; it does not say what is in it. So:
-
-  jaccl self-heal   the string JACCL_COLLECTIVE_TIMEOUT_MS inside the
-                    installed libjaccl.dylib -- the fix's own env read,
-                    compiled in (noahzelezny/mlx, branch jaccl-selfheal)
+  jaccl self-heal   JACCL_COLLECTIVE_TIMEOUT_MS inside the installed
+                    libjaccl.dylib (mlx fork, branch jaccl-selfheal)
   mlx-lm fork       mlx_lm/models/qwen4_exp.py in the installed package
-                    (noahzelezny/mlx-lm, exo-qwen4-exp)
 
-The interpreter is asked in a SUBPROCESS running only the stdlib: a probe
-that imports what it measures measures its own import, and machine/ may not
-import mlx.
+The interpreter is asked in a subprocess running only the stdlib: a probe
+that imports what it measures measures its own import, and machine/ may
+not import mlx.
 """
 from __future__ import annotations
 
@@ -25,7 +19,7 @@ import sys
 from pathlib import Path
 
 #: What each piece is, where the fork lives, and what it carries that
-#: upstream does not. One home for this; the README and CONTEXT.md point here.
+#: upstream does not. One home for this; the README points here.
 PIECES = {
     "mlx": {
         "role": "array framework and Metal kernels; jaccl is its RDMA ring",

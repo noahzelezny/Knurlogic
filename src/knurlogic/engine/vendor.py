@@ -5,8 +5,8 @@ came from and WHAT was true about the env when it was taken, because the
 alternative -- trusting whatever happens to be installed -- is exactly how
 three architecture files drifted on one machine without anyone editing them.
 
-Deliberately NOT automatic. Vendoring says "this is the arithmetic we
-measured," which is a claim a person makes, not a script.
+Deliberately NOT automatic. Vendoring says "this is the arithmetic
+that was measured," which is a claim a person makes, not a script.
 """
 
 from __future__ import annotations

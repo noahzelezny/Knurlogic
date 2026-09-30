@@ -6,22 +6,13 @@ mlx-lm resolves a model class with
 
 and `import_module` consults `sys.modules` first. So registering a module
 object under that name BEFORE the first load makes mlx-lm use ours, and
-`site-packages` is never written to.
+`site-packages` is never written to. A file grafted into someone else's
+install inherits that install's mlx-lm version; a file vendored inside a
+versioned package does not.
 
-That matters more than the convenience. Measured across one machine's two
-envs, three of four grafted architecture files differed and a fourth was
-absent from both -- and the envs turned out to be on DIFFERENT mlx-lm
-versions (0.32.0 and 0.31.9), which explains most of the difference. That is
-the point, not a weaker version of it: a file grafted into someone else's
-install inherits that install's version, so "which arithmetic am I running"
-has no answer. A file vendored inside a versioned package does.
-
-Reversible by construction: `unregister()` drops the entries, and an env that
-never imported knurlogic is byte-identical to one that did.
-
-The vendored file must still be validated against a known mlx-lm -- pinning
-the file does not pin the library it calls into. PROVENANCE.md records which
-mlx-lm each file was taken from.
+Reversible: `unregister()` drops the entries. The vendored file must still
+be validated against a known mlx-lm -- PROVENANCE.md records which mlx-lm
+each file was taken from. Design: docs/design/engine.md (architecture layer).
 """
 
 from __future__ import annotations
@@ -67,12 +58,11 @@ def is_vendored_path(path) -> bool:
 def _with_dependencies(names: list) -> list:
     """Expand each name to [its bases..., itself], in load order.
 
-    THE BUG THIS EXISTS FOR (caught 2026-09-18): qwen3_5_moe subclasses
-    qwen3_5. Registering the subclass alone produced a VENDORED subclass
-    sitting on a SITE-PACKAGES base -- two versions of the arithmetic silently
-    mixed, which is the precise failure this package is meant to end. It
-    passed the first time only because `sorted()` happens to put qwen3_5
-    before qwen3_5_moe.
+    Why: qwen3_5_moe subclasses qwen3_5. Registering the subclass alone
+    leaves a VENDORED subclass sitting on a SITE-PACKAGES base -- two
+    versions of the arithmetic silently mixed, the precise failure this
+    package exists to end. `sorted()` happening to put qwen3_5 before
+    qwen3_5_moe must not be what makes it work.
     """
     from knurlogic.engine.arch import ARCH_DEPENDS_ON
 

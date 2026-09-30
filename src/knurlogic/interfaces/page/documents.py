@@ -1,19 +1,10 @@
-"""The routes Knurlogic serves next to the engine's OpenAI surface.
+"""The routes knurlogic serves next to the engine's OpenAI surface.
 
-One place, because two servers use them -- `serve` and the page `knurlogic
-ui` opens -- and a settings page that differed between them would be worse
-than none.
-
-WHY THERE IS A SETTINGS ROUTE AT ALL. A GUI that shows a green light and no
-knobs is a status page wearing a costume; the knobs are the reason to open
-it. But this cannot pretend a slider retunes a loaded model: the runtime
-reads its environment AT IMPORT, and the import already happened. So the page
-answers three separate questions and never blurs them --
-
-    what is running now, what WOULD this setting give me, and how do I get it
-
--- which is more honest than a control that appears to work and does not, and
-more useful than no control at all.
+One place, because `serve` and the page `knurlogic ui` opens both use them.
+The runtime reads its environment at import, so the settings route never
+pretends a control retunes a loaded model; it answers three separate
+questions: what is running now, what a setting would give, and how to get
+it.
 """
 
 from __future__ import annotations
@@ -128,8 +119,8 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 "mtp": bool(f.extra.get("mtp_head")),
                 # A family EXISTING for model_type, not whether this
                 # particular config.json has a vision_config -- that needs
-                # `registry.build`, which only runs on load (chat-ui spec
-                # 3.5/picker "VISION tag"). Good enough for the picker.
+                # `registry.build`, which only runs on load. Good enough for the
+                # picker's VISION tag.
                 "vision": vision_registry.registered(f.model_type),
                 "serving": bool(serving) and (f.name == serving
                                               or str(f.path) == serving),
@@ -179,9 +170,8 @@ def loaded_document(ttl: float = 4.0):
                        "bytes_resident": 0, "error": str(e)}
             # What the SERVED model sees, read fresh every time regardless
             # of the survey's own cache path -- a load/unload changes this
-            # the moment it happens (P0 critique C4: P4 sets it, P5 reads
-            # it), and the chat panel's attach button gates on this exact
-            # field (chat-ui spec 3.1).
+            # the moment it happens, and the chat panel's attach button
+            # gates on this exact field.
             try:
                 spec = served_vision()
                 doc["vision"] = spec.to_json() if spec else None

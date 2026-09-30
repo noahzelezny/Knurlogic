@@ -1,4 +1,4 @@
-"""The model-load lock (machine/loadlock.py): report-test-plan.md section 4.
+"""The model-load lock (machine/loadlock.py).
 
 The holder is a separate PROCESS, because flock's whole value is what the
 kernel does across processes -- including releasing the lock of one that
@@ -125,8 +125,8 @@ def test_ring_ranks_on_one_machine_do_not_deadlock_on_the_lock(
         tmp_path, monkeypatch):
     """Two ranks of one ring on one box: the split's collective and the
     head agreement are rendezvous both ranks must reach, so neither may
-    run while one rank holds the machine's load lock (the pipeline hang
-    of 2026-09-27: rank 0 in the dtype all_gather holding the lock, rank 1
+    run while one rank holds the machine's load lock (else a pipeline
+    hangs: rank 0 in the dtype all_gather holding the lock, rank 1
     waiting for it)."""
     import threading
     import mlx.nn as nn

@@ -1,32 +1,12 @@
-"""The real-model vision gate (design v2, "Gates", real-models paragraph).
-
-RUN LATER, BY THE ORCHESTRATOR -- serialized, one rung at a time, behind
-the load lock and `ready()`. This script is never invoked from the test
-suite: `tests/` only ever loads tiny random-weight fixtures (the hard rule
-for this package), and the real gate needs an actual artifact, an actual
-image, and real memory.
+"""The real-model vision gate: one artifact, one image, a live server.
 
     python tools/vision_gate.py <artifact> <image.png> [--port 8099]
 
-Per rung, checks the five things the design asks for:
-
-* a vision tensor count bound (the tower loaded SOME weights, and not the
-  whole checkpoint again -- `load_weights` returns a count per P0's
-  `Family` protocol; this script only has the artifact's own report of
-  tensors loaded via the server it starts, not a live handle, so it reads
-  the count `serve`'s stdout prints and checks it is > 0 and < the
-  artifact's total tensor count);
-* a text-only answer (sanity: the server still answers without an image);
-* an image answer -- a red square, and OCR-style recall of a rendered "42";
-* a five-turn conversation where turn 2-5's `usage.prompt_tokens_details
-  .cached_tokens` shows the image span was NOT re-prefilled (`prompt -
-  cached` on turn N ~= turn N's own new text, not the whole image + text
-  again) and turn 5 still answers a question about the turn-1 image;
-* memory back to baseline after `POST /loaded.json {"action": "unload"}`.
-
-Uses the load lock (`machine/loadlock.model_load`) for the duration, and
-exits `loadlock.EXIT_BUSY` if another load is already in progress rather
-than racing it -- the same rule `ready()` enforces for every other loader.
+Checks the vision tensor count, a text-only answer, image answers (a red
+square and a rendered "42"), a five-turn conversation that does not
+re-prefill the image, and memory back to baseline after unload. Runs
+behind the model-load lock and exits loadlock.EXIT_BUSY if another load is
+in progress. Never run from tests/, which load only tiny fixtures.
 """
 from __future__ import annotations
 
@@ -204,11 +184,14 @@ def run(artifact: str, image_path: str, host: str, port: int) -> int:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("artifact")
-    p.add_argument("image")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8099)
-    p.add_argument("--max-tokens", type=int, default=64)
+    p.add_argument("artifact", help="path to the model folder")
+    p.add_argument("image", help="a PNG/JPEG the model is asked about")
+    p.add_argument("--host", default="127.0.0.1",
+                   help="where the gate's own server listens")
+    p.add_argument("--port", type=int, default=8099,
+                   help="the gate's server port")
+    p.add_argument("--max-tokens", type=int, default=64,
+                   help="tokens per answer")
     a = p.parse_args(argv)
     global MAX_TOKENS
     MAX_TOKENS = a.max_tokens

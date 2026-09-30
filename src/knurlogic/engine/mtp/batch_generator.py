@@ -3,67 +3,15 @@ by batch_loop.MTPBatch instead of GenerationBatch -- drafting with an MTP
 head when there is one, and the same engine without. knurlogic's server
 drives it through engine/runtime/executor.LocalExecutor.
 
-Ported from the exo fork's `generator/mtp_batch_generate.py`. The engine
-underneath is the same one -- `admit` prefills a row and seeds the head,
-`MTPBatch.step` advances every row with a verified draft -- and so are the
-three decisions that fork paid for:
-
-  - capture is installed for the generator's LIFETIME, not per request;
-    `close` removes it.
-  - the head's cache rides in the prefix-cache entry BESIDE the trunk's
-    (entry = trunk caches + [head cache]). mlx-lm's prompt cache trims every
-    cache in an entry by the same amount, so a restored prefix hands back a
-    head exactly as far along as the trunk; `split_pool_entry` refuses one
-    that is not, and the row prefills from scratch instead of drafting off
-    the wrong history.
-  - the row count moves in lockstep, so rejection is one whole-batch trim and
-    replay (see batch_loop's docstring for what that costs and when).
-
-What differs is only the contract on the outside. exo's runner calls
-`submit / step / cancel`; the executor calls `insert_segments / next /
-remove / extract_cache / close / prompt_cache_nbytes`. So this SUBCLASSES
-mlx-lm's BatchGenerator: queueing, uid allocation and the wired-limit
-handling are inherited unchanged, and only where a row is prefilled and
-where tokens come from are replaced.
-
-TWO THINGS THE CONSUMER ALLOWS THAT ARE WORTH SAYING OUT LOUD, because they
-were checked in the consumer's loop rather than assumed:
-
-  - `next()` may return more than one generation response for a uid. The
-    server feeds each to that request's detokenizer in order, and only a
-    response AFTER a finish would be an error. A drafting step commits two
-    tokens, so both go out on the same call rather than one being held back.
-  - `all_tokens` on a finished response must be exactly the tokens whose KV
-    is in the returned cache -- the prompt cache is keyed by it. Every token
-    a step commits was fed through the trunk, including one a stop sequence
-    then hid, so the list is prompt + everything committed.
-
-IMAGES (design D5, D7 Phase A; docs/design/vision.md; on a split model,
-engine/runtime/tensor.py: rank 0 encodes and ships the rows, every rank
-embeds with its own family). Every request with
-an image comes here, head or no head (`head=None` is a plain batch engine
-with the same admission), because only `admit` snaps prefill chunks to the
-family's image spans. The prompt the server hands over is the cache KEY
-(engine/vision/key.py): ids with a sentinel per image token. `_admit_one`
-turns it back into ids for the trunk, asks the family for the embeddings of
-the uncached span and for positions over the whole key (D4), and keeps the
-key -- not the ids -- as the row's `all_tokens`, so the prefix cache is
-keyed by it. A row whose uncached span holds an image does not draft
-(Phase A): the head would be seeded from embed_tokens(pad) where the trunk
-saw image features, the defect exo has. Text-only keys take exactly the
-path they took before this existed.
-
-Costs, inherited and stated: a row is prefilled whole inside one `next()`
-call (other rows wait for it, as they did in the fork).
-
-Segment checkpoints: the server splits a chat prompt into segments (system,
-user, the assistant header's thinking tail) and stores a prompt cache at
-each segment end. Prefill stops at those ends (`admit`'s checkpoints) and
-the snapshots are handed to the server one per `next()` call as
-end-of-segment responses, which it stores through `extract_cache`. For a
-model whose caches cannot be trimmed this is the only reuse a new turn gets
-when the template re-renders the previous assistant turn (Qwen3.6 drops the
-empty think block it generated with).
+It SUBCLASSES mlx-lm's BatchGenerator: queueing, uid allocation and the
+wired-limit handling are inherited; only where a row is prefilled and where
+tokens come from are replaced. Capture is installed for the generator's
+lifetime; the head's cache rides in the prefix-cache entry beside the
+trunk's; the row count moves in lockstep. Every request with an image comes
+here (head or not), keyed by the vision cache KEY; segment checkpoints are
+handed back one per `next()` call as end-of-segment responses.
+Ported from the maintainer's own code in github.com/noahzelezny/exo
+(Apache-2.0). Design: docs/design/drafting.md (batch engine).
 """
 from __future__ import annotations
 
@@ -117,7 +65,7 @@ class HeadCarry:
 def split_pool_entry(entry: list, n_trunk: int, *, drafts: bool,
                      hit_len: int, replay=None) -> tuple:
     """(trunk caches, head cache or None, usable prefix length) from a pool
-    entry restored at `hit_len`. From the fork, unchanged.
+    entry restored at `hit_len`.
 
     A drafting row needs a head cache sitting at exactly hit_len; an entry
     without one (stored by a non-drafting row, or before drafting was on) or
@@ -206,7 +154,7 @@ def logits_trunk(model):
 class MTPBatchGenerator(BatchGenerator):
     """mlx-lm's BatchGenerator, drafting every row with an MTP head -- or,
     with `head=None`, the same engine without drafting, which is how a
-    vision model with no head serves images (design D5).
+    vision model with no head serves images.
 
     `vision` is the served model's `engine.vision.request.VisionServe` (or
     None): the family, the image store and the pins taken at tokenize."""
@@ -253,7 +201,7 @@ class MTPBatchGenerator(BatchGenerator):
         #: wraps a row's prefill chunks (admit's prefill_ctx): a pipeline
         #: follower's overlapped sends (pipeline.silence), else None
         self._prefill_ctx = None
-        # uid -> what the server gave us for that row, and what it has seen.
+        # uid -> what the server sent for that row, and what it has seen.
         self._rows: dict = {}
         # uid -> [(key, entry)] checkpoints not yet reported to the server;
         # uid -> (entry, key) for the one reported in this next() call.
@@ -397,9 +345,9 @@ class MTPBatchGenerator(BatchGenerator):
         try:
             if vis is None:
                 # A model with no head has nothing to align: asking for a
-                # head cache discarded EVERY prefix hit on gemma (a
+                # head cache discards EVERY prefix hit on gemma (a
                 # 509-token shared system prompt re-prefilled on each
-                # request, 2026-09-25).
+                # request).
                 drafts = self._head is not None
                 trunk, hcache, hit = split_pool_entry(
                     entry, self._n_trunk, drafts=drafts, hit_len=hit_len,
@@ -430,7 +378,7 @@ class MTPBatchGenerator(BatchGenerator):
     def _vision_entry(self, entry: list, key: list, hit_len: int,
                       replay=None):
         """(trunk, head cache, hit, drafts) for a row whose key holds an
-        image. Phase A (D7): no drafting if the uncached span holds an
+        image. No drafting if the uncached span holds an
         image. Otherwise it drafts only off an entry with an aligned head --
         and where there is none (every entry an image row stored, since
         image rows never seed the head) the row keeps the TRUNK hit and does
@@ -458,8 +406,8 @@ class MTPBatchGenerator(BatchGenerator):
 
     def _vision_inputs(self, vis, key: list, hit: int):
         """(ids, admit kwargs) for a vision row: embeddings for the uncached
-        span, position ids over the whole key (D4 -- even when the new span
-        is text only), the family's chunk boundaries (D5)."""
+        span, position ids over the whole key (even when the new span
+        is text only), the family's chunk boundaries."""
         fam = vis.family
         feats, refs = vis.lookup()
         ids = mx.array(K.to_ids(key, fam.spec.image_token_id))
@@ -490,7 +438,7 @@ class MTPBatchGenerator(BatchGenerator):
         it sits at the same offset (otherwise a restore could not draft)."""
         trunk = [c.extract(i) for c in self._batch.cache]
         h = self._batch.hcache
-        # A row that never drafted (an image row, Phase A) never advanced
+        # A row that never drafted (an image row) never advanced
         # its head cache, so it has no head to store -- and in a batch where
         # NO row drafted the batched head cache holds no keys at all, which
         # `extract` does not survive (found by G10).

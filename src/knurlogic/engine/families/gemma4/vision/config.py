@@ -3,8 +3,8 @@
 Vendored from mlx-vlm 0.6.17 `mlx_vlm/models/gemma4/config.py::VisionConfig`
 (MIT, Copyright (c) 2025 Prince Canuma), trimmed to the fields
 `vision.py` actually uses (audio/video fields on the sibling `AudioConfig`
-and `ModelConfig` dataclasses are out of scope -- P2 is vision only, per the
-package's OWNS list). `layer_types`/`rope_parameters` post-init defaults are
+and `ModelConfig` dataclasses are out of scope: this package is vision
+only). `layer_types`/`rope_parameters` post-init defaults are
 kept because `vision.py` reads `rope_parameters["rope_theta"]`.
 """
 from __future__ import annotations

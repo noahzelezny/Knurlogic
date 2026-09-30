@@ -2,8 +2,8 @@
 
 glm5_next's full-attention layers keep a CacheList (main KV + indexer KV).
 Batched, its members are mlx-lm BatchKVCaches, whose offset is one per row;
-rollback must use their shared write index. Found serving GLM-5.3-Flash 2.7
-through knurlogic on the M4: the first drafting step raised TypeError.
+rollback must use their shared write index. Without it, serving
+GLM-5.3-Flash 2.7 raises TypeError on the first drafting step.
 """
 import sys
 from pathlib import Path
@@ -51,8 +51,7 @@ def test_batched_cachelist_rollback_can_fail():
 
 
 def test_snapshot_semantics_check_takes_batched_and_composite_caches():
-    """Found by Qwen3.8-Flash-Next-6bit (cluster shootout 2026-09-27):
-    the check copied s[2] of every non-"attn" snapshot, and "battn" /
+    """the check copied s[2] of every non-"attn" snapshot, and "battn" /
     "attn-list" snapshots carry None there -- a TypeError on exactly the
     caches the batch engine uses, instead of an answer."""
     import mlx.core as mx

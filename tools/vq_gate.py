@@ -1,31 +1,16 @@
-"""G-VQ: knurlogic's VQ runtime against a rung's PUBLISHED bundle (design D1).
+"""The identity gate: knurlogic's VQ runtime against a rung's published bundle.
 
     python tools/vq_gate.py fetch <dir> [repo ...]     # model.py + config.json
     python tools/vq_gate.py knobs <dir> [--write] [--markdown]
     python tools/vq_gate.py gate <artifact> [--bundle <dir>] [--record]
 
-`fetch` downloads ONLY the two small text files per repo (`hf download
-<repo> model.py config.json`), never weights. `knobs` reads every flag
-default out of each published model.py and regenerates
-src/knurlogic/engine/vq/rungs.json (and the table in
-docs/design/vq-rung-knobs.md): the record is the shipped artifact, never an
-~/.exo copy, which has drifted from the Hub on several repos.
-
-`gate` is the identity gate, run by the orchestrator on real rungs, one at a
-time, behind the model-load lock. Same artifact weights, same short prompt,
-two runtimes: the rung's PUBLISHED bundled model.py, and knurlogic's
-(vendored vqlab 42df84f + the rung's knobs from rungs.json). PASS means
-logits over the whole prompt within atol 1e-5 AND 40 greedy tokens
-identical. `--record` then marks the rung verified in rungs.json -- the
-only thing that lets knurlogic serve it on its own runtime.
-
-WHY EACH SIDE IS ITS OWN PROCESS. Both runtimes read their flags ONCE at
-import, into module globals, and both size the mlx buffer cache at import.
-Two sides in one process would share whatever the first import froze and
-whatever memory the first model left; a gate that can pass by sharing state
-is not a gate. Each side also runs with every VQ_*/VQLAB_* variable removed
-from its environment, so each reads its OWN defaults -- the bundle its baked
-text, knurlogic its knobs -- which is exactly the claim under test.
+`fetch` downloads only model.py and config.json per repo, never weights.
+`knobs` reads each published model.py's flag defaults and regenerates
+src/knurlogic/engine/vq/rungs.json and docs/design/vq-rung-knobs.md.
+`gate` runs the same weights and prompt through the published model.py and
+knurlogic's runtime, each in its own clean process behind the load lock:
+PASS is logits within atol 1e-5 and 40 identical greedy tokens; `--record`
+marks the rung verified in rungs.json.
 """
 from __future__ import annotations
 
@@ -75,7 +60,7 @@ def rung_entry(model_py: str, cfg: dict, head: dict,
     HEAD's. For an arc6-era bundle the two numerics flags do not exist; the
     arc6 arithmetic IS bf16-I/O off, so they are set "0" and listed as
     inferred -- and running such a rung on HEAD is a runtime change that
-    only G-VQ may bless (design D1)."""
+    only this gate may bless."""
     pub = R.flag_defaults(model_py)
     gen = R.generation(pub)
     knobs, inferred = {}, []
@@ -177,10 +162,7 @@ def markdown(doc: dict) -> str:
 
 
 def cmd_fetch(a) -> int:
-    repos = a.repos or sorted(
-        d.name.replace("--", "/", 1)
-        for d in (Path.home() / ".exo/models").iterdir()
-        if d.name.startswith("TheDrainFlorist--"))
+    repos = a.repos or sorted(json.loads(RUNGS_JSON.read_text())["rungs"])
     bad = 0
     for repo in repos:
         out = Path(a.dir) / repo.replace("/", "--", 1)
@@ -303,7 +285,7 @@ def cmd_gate(a) -> int:
         from knurlogic.machine import loadlock
         outs = {}
         try:
-            with loadlock.model_load(str(art), purpose="G-VQ", wait_s=a.wait):
+            with loadlock.model_load(str(art), purpose="vq identity gate", wait_s=a.wait):
                 for which in ("bundle", "knurlogic"):
                     outs[which] = str(Path(td) / f"{which}.npz")
                     p = subprocess.run(
@@ -340,22 +322,32 @@ def record(repo: str, verdict: dict) -> None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    f = sub.add_parser("fetch")
-    f.add_argument("dir")
-    f.add_argument("repos", nargs="*")
-    k = sub.add_parser("knobs")
-    k.add_argument("dir")
-    k.add_argument("--write", action="store_true")
-    k.add_argument("--markdown", action="store_true")
-    k.add_argument("--date", default=None)
-    g = sub.add_parser("gate")
-    g.add_argument("artifact")
+    f = sub.add_parser("fetch", help="download each repo's model.py + "
+                       "config.json (no weights)")
+    f.add_argument("dir", help="where to put one folder per repo")
+    f.add_argument("repos", nargs="*",
+                   help="Hub repos (default: every repo in rungs.json)")
+    k = sub.add_parser("knobs", help="regenerate rungs.json from fetched "
+                       "bundles")
+    k.add_argument("dir", help="the folder `fetch` wrote")
+    k.add_argument("--write", action="store_true",
+                   help="write rungs.json (default: print only)")
+    k.add_argument("--markdown", action="store_true",
+                   help="print the table for docs/design/vq-rung-knobs.md")
+    k.add_argument("--date", default=None,
+                   help="the harvest date recorded (default: today)")
+    g = sub.add_parser("gate", help="compare knurlogic's runtime with the "
+                       "published model.py on one artifact")
+    g.add_argument("artifact", help="path to the model folder")
     g.add_argument("--bundle", default=None,
                    help="dir with the PUBLISHED model.py + config.json "
                         "(default: hf download into a temp dir)")
-    g.add_argument("--record", action="store_true")
-    g.add_argument("--n", type=int, default=N_TOKENS)
-    g.add_argument("--wait", type=float, default=0.0)
+    g.add_argument("--record", action="store_true",
+                   help="mark the rung verified in rungs.json on PASS")
+    g.add_argument("--n", type=int, default=N_TOKENS,
+                   help="greedy tokens compared")
+    g.add_argument("--wait", type=float, default=0.0,
+                   help="seconds to wait for the model-load lock")
     s = sub.add_parser("_side")
     for x in ("which", "artifact", "bundle", "out"):
         s.add_argument(x)

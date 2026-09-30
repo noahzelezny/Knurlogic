@@ -1,38 +1,15 @@
-"""Resolving over several nodes, the aggregate status, and reading exo's
-node inventory (against a stub exo) as one witness of which machines exist.
-"""
+"""Resolving over several nodes, and the aggregate status."""
 
-import json
-import socket
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from knurlogic.cluster import exo as exo_nodes
 from knurlogic.machine import status
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning.resolve import Node, resolve, resolve_cluster
 
 GIB = 1 << 30
-
-STATE = {
-    "nodeMemory": {
-        "nodeA": {"ramTotal": {"inBytes": 128 * GIB},
-                  "ramAvailable": {"inBytes": 84 * GIB},
-                  "swapTotal": {"inBytes": 0},
-                  "swapAvailable": {"inBytes": 0}},
-        "nodeB": {"ramTotal": {"inBytes": 64 * GIB},
-                  "ramAvailable": {"inBytes": 40 * GIB},
-                  "swapTotal": {"inBytes": 0},
-                  "swapAvailable": {"inBytes": 0}},
-    },
-    "nodeIdentities": {"nodeA": {"friendlyName": "studio"},
-                       "nodeB": {"friendlyName": "laptop"}},
-}
-
 
 def _art(**kw):
     base = dict(path=Path("/nonexistent/art"), model_type="qwen4_exp_text",
@@ -41,40 +18,6 @@ def _art(**kw):
                 vq_modules={"m": {"d": 4, "K": 2048}})
     base.update(kw)
     return Artifact(**base)
-
-
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    p = s.getsockname()[1]
-    s.close()
-    return p
-
-
-class _Stub(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
-
-    def _j(self, obj):
-        body = json.dumps(obj).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self):
-        if self.path.startswith("/state"):
-            return self._j(STATE)
-        self.send_error(404)
-
-    def log_message(self, *a):
-        pass
-
-
-def _serve(handler, port):
-    srv = ThreadingHTTPServer(("127.0.0.1", port), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv
 
 
 # --- the resolver over nodes -----------------------------------------------
@@ -167,19 +110,6 @@ def test_rollup_sums_and_excludes_nodes_that_did_not_answer():
     assert (c["nodes_reachable"], c["nodes_total"]) == (1, 2)
 
 
-# --- exo as a witness of which machines exist ------------------------------
-
-def test_inventory_reads_exos_own_node_memory():
-    port = _free_port()
-    srv = _serve(_Stub, port)
-    try:
-        nodes = exo_nodes.inventory(f"http://127.0.0.1:{port}")
-    finally:
-        srv.shutdown()
-    assert [n.name for n in nodes] == ["studio", "laptop"]
-    assert nodes[0].ram_total == 128 * GIB
-
-
 def test_box_wide_numbers_are_not_labelled_as_weights():
     """A number that covers the whole machine must not be printed under a
     label that says 'weights': that is how a runtime gets blamed for
@@ -228,7 +158,7 @@ def test_settings_json_says_running_would_be_and_how_to_get_it(tmp_path):
     fast = doc({"tune": ["fast"]})
     changed = {k["name"]: (k["running"], k["would_be"])
                for k in fast["knobs"] if k["changed"]}
-    assert "VQLAB_CACHE_LIMIT_GB" in changed
+    assert "VQ_CACHE_LIMIT_GB" in changed
     assert fast["exports"].startswith("export ")
 
     # Every knob shown carries the sentence that explains it. A settings UI

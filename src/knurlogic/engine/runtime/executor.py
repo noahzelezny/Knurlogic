@@ -1,21 +1,16 @@
 """The executor: the seam between knurlogic's scheduler and whatever runs
-the model's steps (docs/SERVER.md, build step 1).
+the model's steps (docs/design/server.md).
 
 A scheduler hands the executor admissions and asks it for steps; the
-executor answers with events. Today there is one executor, the local batch
-engine (MTPBatchGenerator, drafting or not, with vision). A
-tensor split (engine/runtime/tensor.py) runs the same executor on every
-rank, rank 0's journaling each admission for the others; a pipeline
-executor comes later behind the same protocol: nothing here
-assumes the layers run in this process.
-
-Rules the protocol keeps:
+executor answers with events. The local batch engine (MTPBatchGenerator,
+drafting or not, with vision) is the executor; a tensor split runs the
+same executor on every rank. Nothing here assumes the layers run in this
+process. Rules the protocol keeps:
 
   * A token event carries the token and ITS logprob (plus top-k when
-    asked), never a [V] row: what crosses a process boundary stays small
-    (every rank of a ring computes the logits; only rank 0 samples).
-  * A failure is a `RowFailure` event for that row, not an exception passed
-    along as progress; the executor has already dropped the row.
+    asked), never a [V] row: what crosses a process boundary stays small.
+  * A failure is a `RowFailure` event for that row, not an exception; the
+    executor has already dropped the row.
   * Admission carries the request's sampling parameters and the object
     that receives its cache report -- no thread-local, no tagged sampler.
 """

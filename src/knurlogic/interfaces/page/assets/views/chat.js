@@ -6,8 +6,8 @@
 // an unchanged image across turns), and multimodal content.
 //
 // The look and the chat-memory idea are inspired by exo's dashboard; the
-// code is knurlogic's own (rewritten 2026-09-24 from what each piece must
-// do). Reasoning is never parsed out of text here: the server sends it as
+// code is knurlogic's own, written from what each piece must do.
+// Reasoning is never parsed out of text here: the server sends it as
 // `reasoning_content`, because only the server knows each template's
 // thinking syntax (gemma's is not <think>).
 
@@ -480,10 +480,8 @@ async function handleFiles(files){
     try{
       if(f.type.startsWith('image/')) await attachImage(f);
       else if(f.type==='application/pdf' || /\.pdf$/i.test(f.name)){
-        // PDFs left out (per the task's instruction): rendering them to page
-        // images needs pdf.js, and a quick check of a simple lazy import
-        // from jsdelivr did not fit this session's time budget cleanly
-        // alongside everything else this file owns -- see build report.
+        // PDFs are not supported: rendering them to page images needs
+        // pdf.js, which the page does not bundle.
         alert(`${f.name}: PDF attachments are not supported yet. `+
           `Convert it to images first, or paste its text.`);
       } else await attachText(f);
@@ -979,3 +977,10 @@ loadChats();
 document.addEventListener('DOMContentLoaded', ()=>{});
 switchTab('chat');
 renderClog();
+
+// Chat Settings -> Advanced: collapsed by default, remembered per browser.
+(()=>{ const d=document.getElementById('cadv'); if(!d) return;
+  try{ d.open=localStorage.getItem('kn.chatadv')==='1' }catch(e){}
+  d.addEventListener('toggle', ()=>{
+    try{ localStorage.setItem('kn.chatadv', d.open ? '1' : '0') }catch(e){} });
+})();

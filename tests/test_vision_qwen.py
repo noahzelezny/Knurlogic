@@ -208,7 +208,7 @@ def test_g2_grid_count_and_pixels_match_reference(fam, tmp_path):
 
 
 def test_placeholder_refused_when_the_tokenizer_does_not_know_it(tmp_path):
-    """Flash-Next 4.4 review item 3: an image token id the tokenizer does not
+    """An image token id the tokenizer does not
     carry as a special added token would be spelled out as text -- the build
     must refuse, not serve a model that silently never sees the image."""
     from knurlogic.engine.vision import VisionError, registry
@@ -222,7 +222,7 @@ def test_placeholder_refused_when_the_tokenizer_does_not_know_it(tmp_path):
 def test_load_weights_takes_only_vision_tensors_named_by_the_index(tmp_path):
     """The index names a trunk shard that does not exist: load_weights must
     read only the vision tensors' file (the trunk's sanitize keeps dropping
-    them, critique B3 option a), and a missing vision tensor is an error."""
+    them), and a missing vision tensor is an error."""
     from knurlogic.engine.vision import registry
     arrays, meta = _golden("qwen3_5")
     path, n = _model_dir(tmp_path, "qwen3_5", meta, "hf")
@@ -316,7 +316,7 @@ def test_g4_and_g7b_match_reference(fam, tmp_path):
                        rope_delta=delta)
     assert [first] + toks2 == arrays["t2_gen"].tolist()
 
-    # the same warm turn WITHOUT the delta (v1's bug, critique B1) diverges:
+    # the same warm turn WITHOUT the delta diverges:
     # this gate can fail
     lg_bad = model(suffix, cache=base_cache)[0, -1]
     assert not np.allclose(np.array(lg_bad), arrays["t2_logits"], atol=1e-4)

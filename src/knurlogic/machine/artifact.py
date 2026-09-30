@@ -1,6 +1,6 @@
 """Read what an artifact declares about itself.
 
-AUTHORITY RULE (inherited from vqlab AGENTS.md): the artifact's own
+AUTHORITY RULE: the artifact's own
 config.json is the record of what shipped. Never characterize an artifact
 from a card, a ledger, or an experiment entry -- read the config.
 """
@@ -39,8 +39,7 @@ class Artifact:
     def is_vq(self) -> bool:
         """MoE artifacts declare `vq_modules`; DENSE ones declare `vq_linear`
         / `vq_embed` instead. Keying on vq_modules alone called every dense
-        rung "not a VQ artifact" and skipped its kernel settings -- caught
-        2026-09-18 when `serve` printed exactly that for a VQ 27B."""
+        rung "not a VQ artifact" and skips its kernel settings."""
         return bool(self.vq_modules or self.vq_other)
 
     @property

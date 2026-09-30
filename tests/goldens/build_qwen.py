@@ -1,6 +1,6 @@
-"""Build P1's Qwen goldens in the reference interpreter (mlx-vlm 0.6.17):
+"""Build the Qwen vision goldens in the reference interpreter (mlx-vlm 0.6.17):
 
-    /opt/anaconda3/envs/exo/bin/python tests/goldens/build_qwen.py
+    $KNURLOGIC_VLM_PYTHON tests/goldens/build_qwen.py
 
 One file per family, qwen_<family>.npz, from mlx-vlm's OWN model classes
 (`mlx_vlm.models.<family>.Model`, its tower, its `get_rope_index`, its

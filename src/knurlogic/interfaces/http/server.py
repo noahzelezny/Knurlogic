@@ -1,26 +1,13 @@
-"""knurlogic's own HTTP server (docs/SERVER.md): stdlib ThreadingHTTPServer,
-one thread per connection, every model operation handed to the scheduler.
+"""knurlogic's own HTTP server: stdlib ThreadingHTTPServer, one thread per
+connection, every model operation handed to the scheduler.
 
-  POST /v1/chat/completions  /chat/completions  /v1/completions   openai.py
-  POST /v1/messages          Anthropic, in-process over openai.py
-  GET  /v1/models            the served model, capabilities and size
-  GET  /v1/residency         what is loaded, its state and memory
-  POST /v1/ensure            load a model if it is not; optionally wait
-  GET  /health
-  and the page's routes (web.routes): /, /status.json, /settings.json, ...
+Serves /v1/chat/completions, /v1/completions, /v1/messages, /v1/models,
+/v1/residency, /v1/ensure, /health and the page's routes. A failed write
+cancels the Job. A request carrying an Origin is answered only for this
+server's own origin or one allowed with --allow-origin, and the Host header
+must name this machine (stops DNS rebinding).
 
-A write that fails (the client went away) cancels the Job, so the
-scheduler frees its row on the next step.
-
-BROWSERS. A web page open in the user's browser can send requests to
-localhost; without care, any site could make this server load a model.
-Browsers mark their requests with `Origin`, and ordinary clients (SDKs,
-curl, harnesses) send none. So a request carrying an Origin is answered
-only when that origin is this server itself (the page it serves) or one
-the operator allowed (`--allow-origin`), and only those get CORS headers.
-The Host header must name this machine (a hostname, `.local` name or IP
-literal), which stops DNS rebinding -- a foreign domain re-pointed at
-127.0.0.1 to look same-origin.
+Design: docs/design/server.md.
 """
 
 from __future__ import annotations
@@ -84,8 +71,8 @@ class App:
         """Whether an image request is refused up front. Until the model
         has loaded, vision is not known yet: the request queues like a text
         one, and the scheduler refuses it at admission if the loaded model
-        has none (M4 2026-09-28: an image sent during the 27B's load got a
-        400 "no vision" while a text request waited and was served)."""
+        has none (otherwise an image sent during a load gets a 400 "no
+        vision" while a text request waits and is served)."""
         from knurlogic.engine.serve import state
         if getattr(self.scheduler.host, "state", "ready") != "ready":
             return True
@@ -645,7 +632,7 @@ def host_is_local(host_header: str, allow_hosts=()) -> bool:
     except ValueError:
         pass
     # This machine's own name, exactly. Never "the first label matches":
-    # noahs-mac.attacker.example would pass that, and a name an attacker
+    # my-mac.attacker.example would pass that, and a name an attacker
     # controls can be pointed at 127.0.0.1 (DNS rebinding) -- the Origin
     # check compares against this same Host, so it would pass too. A name
     # this machine is reached by (a tailnet, a LAN domain) is --allow-host.

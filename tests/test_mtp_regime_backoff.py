@@ -20,7 +20,7 @@ def _run(b, n, draft_s, plain_s):
 
 def test_a_much_dearer_draft_is_rarely_retried():
     b = _batch()
-    drafted = _run(b, 20000, 0.72, 0.055)       # the M4 GLM numbers
+    drafted = _run(b, 20000, 0.72, 0.055)       # measured GLM numbers
     # old rule: 6 draft steps every ~96 -> ~1200; now a handful of probes
     assert drafted <= 6 * 6
 

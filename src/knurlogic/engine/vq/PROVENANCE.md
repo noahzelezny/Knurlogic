@@ -1,20 +1,21 @@
 # engine/vq provenance
 
-Vendored from vqlab at commit **d271035** (2026-09-29: 42df84f, vendored
-2026-09-23, plus five comment-only lines that drop personal names; last functional
-change to `vq_switch.py` is `ef4e8dc`, "VQ_DENSE_SS on by default").
+Vendored from vqlab at commit **45782ba**: d271035 plus the cache knob
+renamed VQ_CACHE_LIMIT_GB (VQLAB_CACHE_LIMIT_GB still read as a fallback for
+one release). d271035 is 42df84f plus five comment-only lines; the last
+change to the kernels is `ef4e8dc`, "VQ_DENSE_SS on by default".
 
 | file | source | lines | sha256 |
 |---|---|---|---|
-| `vq_switch.py` | `src/vqlab/vq_switch.py` | 4453 | `31e56dfb0e1c2138286a6f9cd84e90f0b6cecb0611f9cf4a3bb08fc6ddd38aeb` |
+| `vq_switch.py` | `src/vqlab/vq_switch.py` | 4457 | `c495fe903bb838a8bd2682e799bc5562c73b494db8137adb16f1475de60fbcb5` |
 | `vq_dense.py` | `src/vqlab/vq_dense.py` | 513 | `5066de6e71ccbacaed7b29cea031ea2977369043fcc05d7888b7eddc761b8995` |
 
-Both are **verbatim** (`git show d271035:<path>`); no line is changed. They
+Both are **verbatim** (`git show 45782ba:<path>`); no line is changed. They
 are not imported as modules: `runtime.py` executes the two texts, joined, into
 one fresh namespace per knob set -- the way a published `model.py` carries
 them -- so `vq_dense._resolve_kernel` finds vq_switch's kernels in its own
 globals (its first lookup), and each rung's import-time flag reads see that
-rung's knobs. That is why vendoring needed no edit to load inside knurlogic.
+rung's knobs. That is why vendoring needs no edit to load inside knurlogic.
 
 Why `vq_dense.py` too (the design names only `vq_switch.py`): the three
 Qwen3.8-27B rungs and gemma e4b are DENSE VQ (`vq_linear` / `vq_embed`); their
@@ -44,8 +45,9 @@ The full table is `docs/design/vq-rung-knobs.md`; the machine record is
   4229-line runtime, 506 HEAD lines differ; the numerics flags do not exist
   in it (knobs set them `0`, recorded as inferred), and neither do
   `VQ_D4_WALK`, `VQ_GEMMSEG_OTILE64`, `VQ_GEMMSEG_PH2V` and four more (left at
-  HEAD: F54/F56 record them bit-exact). Serving these on HEAD is a runtime
-  change: only a G-VQ pass may mark them verified.
+  HEAD: vqlab measured them bit-exact). Serving these on HEAD is a runtime
+  change: only a pass of the identity gate (tools/vq_gate.py) may mark them
+  verified.
 
 Distinct published runtimes: **9**, not the 10 the design counted -- GLM 2.7
 was the one "to be re-read", and on the Hub it is byte-identical to 3.1 / 3.6.
@@ -54,7 +56,7 @@ was the one "to be re-read", and on the Hub it is byte-identical to 3.1 / 3.6.
 ## Re-vendoring
 
 Copy the two files from a new vqlab commit, update the digests in
-`runtime.py` (`RUNTIME_FILES`, `VQLAB_COMMIT`) and here, run
+`runtime.py` (`RUNTIME_FILES`, `VENDORED_COMMIT`) and here, run
 `tools/vq_gate.py knobs <dir-of-published-bundles> --write` (knobs are
 relative to HEAD, so they change with it -- and every `verified` flag must
 be re-earned, since the runtime it described is gone), then the suite.

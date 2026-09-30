@@ -1,10 +1,9 @@
-"""Tiny glm5_next fixture (P3), owned by this package (contracts:
-"tiny fixtures are one file per family, owned by that family's package").
+"""Tiny glm5_next fixture (tiny fixtures are one file per family).
 
 Builds a config small enough to construct a real `VisionModel` +
 `Glm5VisionFamily` with float32, seed-0 random weights, no artifact on
 disk -- `fixtures_vision.tiny_config("glm5_next")` already scales the
-structural fields (`REAL["glm5_next"]` in `tests/fixtures_vision.py`, P0);
+structural fields (`REAL["glm5_next"]` in `tests/fixtures_vision.py`);
 this file only adds what the family package itself needs to drive it.
 """
 from __future__ import annotations
@@ -22,7 +21,7 @@ from fixtures_vision import REAL, tiny_config, tiny_ids, tiny_image  # noqa: E40
 
 def glm5_tiny_config(**overrides: Any) -> Dict[str, Any]:
     """A tiny glm5_next config: real structure (patch 14, merge 2, silu,
-    swiglu_limit 10.0), tiny sizes (P0's `_SCALE_VISION` / `_SCALE_TEXT`)."""
+    swiglu_limit 10.0), tiny sizes (`_SCALE_VISION` / `_SCALE_TEXT`)."""
     return tiny_config("glm5_next", **overrides)
 
 

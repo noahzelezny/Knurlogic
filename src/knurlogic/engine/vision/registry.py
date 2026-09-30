@@ -1,9 +1,10 @@
 """model_type -> the family package that serves its images.
 
 NO PACKAGE EDITS THIS FILE: the table is built from the family manifests
-(engine/families/), and names "module:attr" strings that may not exist yet; P1-P3 each create theirs and it starts resolving. A
-module that is not there means the capability is off (`build` -> None), so
-the packages land independently and a text-only install is the default.
+(engine/families/), and names "module:attr" strings that may not exist
+yet; a family that creates its module makes it resolve. A module that
+is not there means the capability is off (`build` -> None), so the
+packages land independently and a text-only install is the default.
 
 What is NOT swallowed: an ImportError raised from INSIDE a family module
 that does exist (a bad vendored import, a missing dependency). That is a

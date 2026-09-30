@@ -1,4 +1,4 @@
-"""The stack is pinned (design D2): the installed mlx and mlx-lm are the
+"""The stack is pinned: the installed mlx and mlx-lm are the
 versions pyproject.toml pins, and the mlx-lm files knurlogic builds on are
 the files it was verified against.
 

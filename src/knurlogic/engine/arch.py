@@ -1,27 +1,11 @@
-"""The architecture layer -- the part that is actually missing.
+"""The architecture layer: which architecture module a model_type needs.
 
-A VQ artifact ships its own kernels: config.json names a bundled `model.py`
-(the VQ runtime), so that half is correct as downloaded. What it does NOT
-ship is the ARCHITECTURE model file -- qwen4_exp, qwen3_5, gemma4_text,
-glm5_next -- which is a graft into mlx_lm/models/. Those are unversioned,
-unpinned, and in practice they DRIFT.
-
-Measured 2026-09-18 across one lab's two envs -- which turned out to be on
-DIFFERENT mlx-lm versions (0.32.0 and 0.31.9), and that is the point rather
-than a caveat: a grafted file inherits its install's version, so nothing
-answers "which arithmetic is this":
-
-    qwen4_exp    1136 vs 1138 lines   cosmetic predicate-arity shim, safe
-    qwen3_5       574 vs  535 lines   QK-norm rewrite: algebraically identical,
-                                      but 1.2e-02 max rel in bf16; and
-                                      PipelineMixin present in only one
-    gemma4_text   688 vs  675 lines   different parameter set loaded
-    glm5_next    MISSING in both      3 artifacts load in neither env
-
-Comparing a number measured in one env against the other on the qwen3_5
-family (11 artifacts, since qwen3_5_moe subclasses it) is a one-harness
-violation. That is the whole reason this module exists: the fix is to treat
-these files as versioned source and verify them, not to graft them by hand.
+A VQ artifact ships its own kernels (a bundled `model.py`), but not the
+ARCHITECTURE model file -- qwen4_exp, qwen3_5, gemma4_text, glm5_next --
+which otherwise has to be grafted into mlx_lm/models/, unversioned and
+unpinned. Those grafted files drift with the install's mlx-lm version, so
+this module treats them as versioned source and verifies them instead.
+Design: docs/design/engine.md (architecture layer).
 """
 
 from __future__ import annotations
@@ -30,7 +14,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-#: TWO HOST PACKAGES, and this was not obvious (2026-09-18). mlx_lm.models
+#: TWO HOST PACKAGES. mlx_lm.models
 #: holds flat text-model files (qwen4_exp.py is 1136 lines -- the real
 #: language model). mlx_vlm.models holds PACKAGES of the same names
 #: (`<arch>/{__init__,config,language,vision,<arch>}.py`, ~1400 lines) where
@@ -39,9 +23,9 @@ from pathlib import Path
 #: when only mlx_lm was searched.
 #:
 #: Which host actually loads a given artifact depends on the loader, not only
-#: on the config: Flash-Next declares `language_model_only: false` yet vqlab
-#: scores it through mlx_lm. So `host` here records where a module LIVES;
-#: choosing the host per artifact is still an open question.
+#: on the config: Flash-Next declares `language_model_only: false` yet its
+#: quantizer scores it through mlx_lm. So `host` here records where a
+#: module LIVES; choosing the host per artifact is still an open question.
 from knurlogic.engine.serve import HOST_PACKAGES
 
 # THE FAMILY MAPS are built from each family's manifest (engine/families/),
@@ -167,8 +151,8 @@ def required_modules(model_type: str) -> list:
 def modules_for_artifact(a) -> list:
     """required_modules for the text model AND the top-level config type.
     A multimodal rung's config says `gemma4` on the outside and
-    `gemma4_text` inside; the runtime loads the OUTER one, so a wrapper we
-    vendor is only used if it is registered too."""
+    `gemma4_text` inside; the runtime loads the OUTER one, so a vendored
+    wrapper is only used if it is registered too."""
     out = list(required_modules(a.model_type))
     outer = (getattr(a, "raw_config", None) or {}).get("model_type")
     for m in required_modules(outer) if outer else []:

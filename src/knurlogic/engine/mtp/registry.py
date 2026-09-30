@@ -2,42 +2,19 @@
 
 Adding a family's head is a `head` entry in its manifest
 (engine/families/<family>/__init__.py) plus the head module in its heads/.
-Nothing in this package names an architecture; the loop, the caches and the sampler are all
-family-agnostic.
+Nothing in this package names an architecture. A `FamilySpec` says:
 
-A `FamilySpec` says four things, and every one of them is a place where
-architectures genuinely differ:
+  head             "module:Class"; exposes `from_sidecar(model, arch, path)`
+                   and `draft_logits(h_row, next_ids, cache)`.
+  capture          dotted path of the submodule whose INPUT is the
+                   pre-lm_head activation (wrapped for the generation's
+                   duration, capture.py).
+  draft_cache      the attribute that builds the head's own KV cache.
+  cache_semantics  "reassign" or "copy" (caches.py); new families start at
+                   "copy" until `caches.check_snapshot_semantics` passes.
 
-  head             where the drafting head lives ("module:Class"). The class
-                   must expose `from_sidecar(model, arch, path)` and
-                   `draft_logits(h_row, next_ids, cache)`.
-  capture          dotted path, relative to the trunk core, of the submodule
-                   whose INPUT is the pre-lm_head activation the head drafts
-                   from. There is no public mlx-lm hook for this, so we wrap
-                   that one module for the duration of the generation (see
-                   capture.py) rather than monkeypatching the class.
-  draft_cache      the attribute on the architecture module that builds the
-                   head's own KV cache.
-  cache_semantics  "reassign" or "copy" — see caches.py. qwen4_exp reassigns
-                   its recurrent cache slots rather than mutating them, which
-                   makes snapshots free; that is an implementation accident of
-                   that arch, NOT a contract, so new families start at "copy"
-                   and only move to "reassign" once
-                   `caches.check_snapshot_semantics` has been run against them.
-
-Families that ship an MTP head upstream but are NOT registered here, because
-nothing in this repo can test them today:
-
-  deepseek_v3 DeepSeek's MTP module is a different shape again (its own
-              embed/norm/head rather than a shared lm_head).
-
-(glm5_next graduated 2026-09-03, vendored from VQLab: the old blocker was
-"mlx-lm has no glm5_next class", but the trunk runs under mlx_vlm's class —
-which exo also uses — so the head binds to THAT arch module.)
-
-Registering either means writing its head module and running
-`caches.check_snapshot_semantics` plus the acceptance probe first. A table
-entry without a measured acceptance number is not evidence of anything.
+A family without a measured acceptance number is not registered.
+Design: docs/design/drafting.md (registry).
 """
 from __future__ import annotations
 

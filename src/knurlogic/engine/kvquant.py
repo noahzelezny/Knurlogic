@@ -1,53 +1,17 @@
 """KV-cache precision: attention K/V stored at 8, 6 or 4 bits.
 
-WHAT MLX 0.31.2 / MLX-LM 0.31.3 GIVE US, and what they do not:
+mlx-lm 0.31.3 has no batched quantized cache, and its quantized SDPA path
+only serves attention written against mlx_lm.models.base. So knurlogic
+keeps its own pair here: a single-row cache (prefill, prompt cache) and a
+batched one (the decode loop), both STORING the quantized triple and
+handing attention code back dequantized arrays of the input dtype, so every
+family's attention is untouched. Neither class has a `bits` attribute (it
+is `kv_bits`), so mlx-lm's base SDPA does not mistake them for quantized.
 
-  mx.quantize / mx.dequantize   affine, per-group scale + bias, bits 2-8
-                                including 6 (and 3, 5); groups of 32/64/128
-                                along the last axis.
-  mlx_lm QuantizedKVCache       ONE sequence. There is no batched quantized
-                                cache in mlx-lm 0.31.3 -- BatchKVCache and
-                                BatchRotatingKVCache are bf16 only, and
-                                `_make_cache` refuses anything else.
-  quantized SDPA                mlx_lm.models.base routes to
-                                `quantized_scaled_dot_product_attention`
-                                (two mx.quantized_matmul) when the cache has
-                                a `bits` attribute; mx.fast.scaled_dot_
-                                product_attention itself takes no quantized
-                                K/V. Only attention written against
-                                mlx_lm.models.base takes that path; the
-                                vendored families each have their own.
-
-So knurlogic keeps its own pair here: a single-row cache (what a prefill
-and the prompt cache hold) and a batched one (what the decode loop holds),
-both STORING the quantized triple and handing the attention code back
-dequantized arrays of the input dtype. Every family's attention is then
-untouched -- including gemma4's KV-shared layers, which reuse the returned
-arrays -- and neither class has a `bits` attribute, so mlx-lm's base SDPA
-does not mistake the dequantized arrays for quantized ones (the attribute
-is `kv_bits`).
-
-The cost of that choice, stated: memory is what shrinks (the stored cache,
-the prompt cache's entries). Dequantizing per layer per step is MORE
-memory traffic than bf16, so at 8 bits a decode step (query length 1)
-instead goes through engine/kvattn's Metal kernel, which reads the packed
-K/V directly. The dequantized arrays still returned beside it are lazy:
-computed only if something reads them -- which gemma4's KV-shared layers
-do (they attend over the owner layer's returned keys with cache=None), so
-there the copy is still made for those layers. M4, Qwen3.6-35B-A3B, decode tok/s bf16 / dequantize / kernel:
-70.0 / 63.9 / 66.3 at 6k context, 65.5 / 54.0 / 61.9 at 16k. Prefill and
-6/4 bits stay dequantize + sdpa.
-
-What is quantized: mlx-lm's plain `KVCache` (exact type) in the list
-`model.make_cache()` returns, and inside a CacheList; and a family's own
-cache class its manifest names (`kv_quant.caches`): qwen4_exp's
-attention cache (K/V quantized, the sparse indexer's keys kept exact) and
-GLM's MLA latent (quantized; the DSA indexer's cache kept exact). Not:
-recurrent state (ArraysCache: deltanet/SSM), sliding windows
-(RotatingKVCache, bounded by their window), or the MTP head's draft cache
-(one layer; the draft stays bf16). Rollback and prompt-cache
-trims move the write index only, exactly as for bf16: the stale tail is
-overwritten by the next update.
+Memory is what shrinks; at 8 bits a decode step goes through
+engine/kvattn's kernel instead of dequantizing. Quantized: plain
+`KVCache` and a family's own caches named in its manifest. Not: recurrent
+state, sliding windows, the MTP draft cache. Design: docs/design/kv-cache.md.
 """
 from __future__ import annotations
 
@@ -113,7 +77,7 @@ def _cat(xs, ys):
 #: query lengths up to this remember their packed K/V for the 8-bit
 #: decode kernel (engine/kvattn). 1: decode steps only -- an MTP verify
 #: (2-4 rows per sequence) measured 1.2-1.7x SLOWER through the kernel than
-#: dequantize+sdpa on an M4 Max (128 GB) (tools/kv8/tune.py, L=2/4), so it stays there.
+#: dequantize+sdpa on an M4 Max (128 GB), so it stays there.
 KERNEL_MAX_QUERY = 1
 
 

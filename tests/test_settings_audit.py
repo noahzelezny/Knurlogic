@@ -1,4 +1,4 @@
-"""The Settings audit (2026-09-28): what each knob claims against what the
+"""The settings audit: what each knob claims against what the
 code does -- the context length's cap, the prompt chunk's one name, the
 dead prompt concurrency, and a peer's model's settings reaching the peer."""
 
@@ -96,10 +96,10 @@ def test_other_knobs_are_checked_for_type_and_range():
 
 def test_the_prompt_chunk_is_emitted_under_knurlogics_own_name():
     """VQLAB_PREFILL_CHUNK is read by no bundled runtime -- only the engine,
-    under either name -- so it was the general prompt chunk filed under
-    VQ. The cache limit keeps its legacy name: runtimes read that one."""
+    under either name -- so it is emitted under knurlogic's own name. The
+    cache limit is the VQ runtime's VQ_CACHE_LIMIT_GB."""
     assert S.default_alias("prefill_chunk") == "KNURLOGIC_PREFILL_CHUNK"
-    assert S.default_alias("cache_limit_gb") == "VQLAB_CACHE_LIMIT_GB"
+    assert S.default_alias("cache_limit_gb") == "VQ_CACHE_LIMIT_GB"
     env = resolve(_art(), 96 * GIB).env
     assert "KNURLOGIC_PREFILL_CHUNK" in env
     assert "VQLAB_PREFILL_CHUNK" not in env
@@ -117,6 +117,17 @@ def test_the_legacy_name_is_still_accepted_and_beats_the_resolver():
     both = S.canonical_sets({"VQLAB_PREFILL_CHUNK": "2048",
                              "KNURLOGIC_PREFILL_CHUNK": "1024"})
     assert both == {"KNURLOGIC_PREFILL_CHUNK": "1024"}
+
+
+def test_the_old_cache_limit_name_is_accepted_and_reaches_an_old_runtime():
+    """VQLAB_CACHE_LIMIT_GB (saved settings, --set) becomes
+    VQ_CACHE_LIMIT_GB; an artifact whose bundled runtime reads only the old
+    name still gets the explicit value under it."""
+    sets = S.canonical_sets({"VQLAB_CACHE_LIMIT_GB": "2.0"})
+    assert sets == {"VQ_CACHE_LIMIT_GB": "2.0"}
+    env = {"VQLAB_CACHE_LIMIT_GB": "4.0"}      # what the resolver emitted
+    assert S.legacy_mirror(env, sets) == {"VQLAB_CACHE_LIMIT_GB": "2.0"}
+    assert S.engine_settings({**env, **sets})["cache_limit_gb"] == 2.0
 
 
 from test_cluster_jobs import cache  # noqa: E402,F401 (a fixture)

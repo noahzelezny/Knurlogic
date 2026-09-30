@@ -1,35 +1,17 @@
 """Encoded images, kept so an image is encoded once per conversation.
 
-Design D6. Keyed PER IMAGE by (model_key, sha, proc_hash):
+Keyed PER IMAGE by (model_key, sha, proc_hash): adding a second image to a
+conversation is one miss, not a re-encode of the first; two models'
+features are different spaces; a processor change cannot serve stale
+features. BYTE-bounded, not count-bounded (a GLM image can be ~65 MB of
+features, a small gemma one 1.4 MB); `tuning/resolve.py` counts
+DEFAULT_MAX_BYTES before a load.
 
-* per image, not per request -- exo keys its feature cache on a hash of the
-  whole image LIST (exo vision.py:749-754), so adding a second image to a
-  conversation re-encoded the first. Here the second image is one miss and
-  the first is still a hit;
-* model_key, because two models' features are different spaces;
-* proc_hash, so a processor change cannot serve stale features.
-
-BYTE-BOUNDED, NOT COUNT-BOUNDED. mlx-vlm's VisionFeatureCache (vendored idea,
-mlx_vlm/vision_cache.py, 0.6.17) bounds by count (20). Counts lie about
-memory: a GLM image at up to ~8000 tokens x 4096 hidden in bf16 is ~65 MB of
-features, a small gemma image is 280 x 2560 x 2 = 1.4 MB. On a shared host
-the bound has to be bytes, it has to default small (critique issue 10), and
-`tuning/resolve.py` has to count it BEFORE a load -- `max_bytes` is that
-number, one home: DEFAULT_MAX_BYTES below.
-
-REFS ARE NOT EVICTED. The ImageRef of every image ever put stays (a few
-hundred bytes each) after its features go: positions() for a text turn after
-an image needs the image's grid, and a prompt-cache hit can outlive the
-features (critique issue 7). Refs die with the store -- clear() on unload,
-which is also when the prompt cache they index dies.
-
-PINNING. Between the tokenize wrap (features ensured) and the batch admit
-(features read) other requests can be tokenized; without a pin, a small
-store could evict the first request's image in between. `pinned()` holds
-entries past the bound until released; the overshoot is visible in stats().
-
-Stdlib only; arrays are opaque here (their nbytes is read, never guessed).
-Thread-safe: the generator thread writes, /status.json reads.
+Refs are never evicted (positions for a later text turn need the grid);
+they die with the store on unload. `pinned()` holds entries past the bound
+between tokenize and admit; the overshoot is visible in stats(). Stdlib
+only; thread-safe (the generator thread writes, /status.json reads).
+Design: docs/design/vision.md (image store).
 """
 from __future__ import annotations
 
@@ -40,7 +22,7 @@ from typing import Any, Dict, Hashable, Iterable, Iterator, Optional, Tuple
 
 from . import EncodedImage, ImageEvicted, ImageRef
 
-#: Default bound for encoded features, bytes. 256 MiB: the critique's figure,
+#: Default bound for encoded features, bytes. 256 MiB:
 #: ~4 of the largest GLM images or ~180 gemma images -- a conversation's worth
 #: on any family, small next to a model on a 128 GB box. Also the number the
 #: memory budget adds per served vision model (`budget_bytes`).

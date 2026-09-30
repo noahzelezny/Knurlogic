@@ -1,12 +1,9 @@
 """Image features into text embeddings, for the uncached span only.
 
-exo re-embeds the WHOLE prompt every turn and then looks up the prefix cache
-(exo vision.py:659-693, measured O(prompt) per turn); v1 fixed the order but
-kept exo's global feature index (`cumsum(is_image) - 1` over the full
-prompt), which has to count the images before the hit. The sentinel makes
-that unnecessary: ("img", sha, proc_hash, k) says WHICH image and WHICH row,
-so a span the prefix hit cut into takes rows k..n-1 of its own image and
-nothing before `start` is looked at.
+The sentinel ("img", sha, proc_hash, k) says WHICH image and WHICH row, so
+a span the prefix hit cut into takes rows k..n-1 of its own image and
+nothing before `start` is looked at -- no global feature index over the
+full prompt, no re-embedding of the whole prompt every turn.
 
 `masked_scatter` is vendored verbatim from mlx-vlm 0.6.17
 (`mlx_vlm/models/gemma4/gemma4.py:13-20`, MIT, Copyright (c) 2025 Prince

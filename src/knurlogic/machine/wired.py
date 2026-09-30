@@ -1,27 +1,15 @@
-"""The wired limit -- the knob that decides how much of the box a model may use.
+"""The wired limit -- the knob that decides how much of the machine a model
+may use.
 
 On Apple Silicon `iogpu.wired_limit_mb` caps how much memory the GPU may
-wire, and it is what the framework's "recommended working set" follows.
-Measured on this box, which is the whole reason this module states it as a
-fact rather than folklore:
+wire, and the framework's recommended working set follows it (measured:
+86016 MB -> 84.0 GiB working set of 96 GiB installed). This module never
+sets it: it needs root and is system-wide, so knurlogic works out the
+number, prints the command and what it costs, and a person runs it. The
+reserve left for macOS is a judgement, not a measurement, and is labelled
+as one wherever it is used.
 
-    iogpu.wired_limit_mb: 86016        -> 84.0 GiB
-    framework working set:                84.0 GiB   of 96 GiB installed
-
-So an artifact that "does not fit" often fits perfectly well -- the machine
-was simply never told it could use its own memory. That is the single most
-common way somebody concludes local inference does not work on their Mac.
-
-WHAT THIS MODULE WILL NOT DO. It does not set the value. Changing it needs
-root, it is a system-wide setting, and a package that quietly raises how much
-memory the GPU may wire out from under someone is not a package anyone should
-install. Knurlogic works out the number, prints the command, says what it
-costs, and the human runs it.
-
-THE RESERVE IS A JUDGEMENT, NOT A MEASUREMENT, and is labelled as one
-everywhere it is used. macOS still has to run: window server, browser, the
-editor you are reading this in. Leaving too little does not OOM the model,
-it wedges the machine.
+Design: docs/design/memory.md (wired limit).
 """
 
 from __future__ import annotations
@@ -171,8 +159,8 @@ def detected_working_set_bytes() -> int:
 
     The number is the wired limit, and this module already reads it from
     sysctl: MLX's `max_recommended_working_set_size` is exactly
-    `iogpu.wired_limit_mb` in bytes (this module's docstring measured the
-    two agreeing on this box), and the engine's `memory()` asks the same
+    `iogpu.wired_limit_mb` in bytes (measured agreeing; see
+    the module docstring), and the engine's `memory()` asks the same
     sysctl through mlx. Reading it here instead keeps callers OUT of engine/
     -- the page process must never import mlx to report a number, and
     `memory()` would drag the whole framework in for one integer. Same
@@ -222,7 +210,7 @@ def machine() -> dict:
     `system_profiler SPHardwareDataType` is the channel that actually knows
     -- it prints "Model Name: Mac Studio" -- and it answers in about 0.13s,
     once per process. Deriving the product from `hw.model` cannot work on
-    current hardware (this box is `Mac15,14` and is a Studio), so the
+    current hardware (`Mac15,14` is a Mac Studio), so the
     identifier is a fallback for when the lookup fails, not the primary.
     """
     global _MACHINE
