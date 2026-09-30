@@ -1,31 +1,17 @@
-"""What is RESIDENT on this machine right now, across every runtime.
+"""What is resident on this machine right now, across every runtime.
 
-`discover` answers what is on the disk. This answers what is in memory, and
-they are different questions with different answers: forty artifacts on a
-volume, none of them loaded, is the normal state of an afternoon.
+`discover` answers what is on disk; this answers what is in memory. One
+machine has one pool of memory, so one page shows every runtime's models:
 
-Nobody should have to open exo to see exo's models, or run `ollama ps` in a
-terminal to see ollama's. A machine has one pool of memory and every runtime
-is spending from it, so one page should show all of them.
+  knurlogic   `/status.json`: the artifact and its resolved settings
+  exo         `GET /state` -> `instances` and `runners` (both matter)
+  ollama      `GET /api/ps` (resident), not `/api/tags` (downloaded)
+  mlx-lm/vlm  `GET /v1/models`: what a port offers, marked as such
 
-FOUR RUNTIMES, THREE DIFFERENT CHANNELS, and none of them is a guess:
+Every read is HTTP with a short timeout; a runtime that is not running
+reports as absent, not as an error.
 
-  knurlogic   our own `/status.json`, which names the artifact and its
-              resolved settings.
-  exo         `GET /state` -> `instances` (what was asked for) and `runners`
-              (what is actually up). Both matter: an instance with every
-              runner in `RunnerShuttingDown` is not loaded, and reading only
-              the instance list would report it as though it were.
-  ollama      `GET /api/ps`, which is precisely "what is resident", as
-              distinct from `/api/tags` which is what is downloaded. Using
-              tags here would list a disk again.
-  mlx-lm      `GET /v1/models` on a port that answers it. mlx-lm's server has
-  mlx-vlm     no "what is loaded" endpoint at all -- `/v1/models` lists what
-              it COULD serve -- so what is reported is the port and what it
-              offers, marked as such rather than dressed up as residency.
-
-Everything here is an HTTP read with a short timeout. A runtime that is not
-running is not an error; it is the ordinary case and it reports as absent.
+Design: docs/design/memory.md (loaded).
 """
 
 from __future__ import annotations
@@ -427,7 +413,8 @@ def available_memory() -> dict:
 
     Then: top's PhysMem "unused", which read 1.6 GiB on a machine with ~70
     GiB available. That figure counts only pages that are free RIGHT NOW.
-    On this box 66.7 GiB was file-backed cache -- memory macOS hands over
+    In that measurement 66.7 GiB was file-backed cache -- memory macOS hands
+    over
     the moment something asks for it. Calling that "used" tells someone
     their machine is full when it is two-thirds empty.
 
@@ -518,7 +505,7 @@ def _commands() -> dict:
 
 
 #: Never a model runtime, however the command line reads. A shell sitting in
-#: a directory called vqlab matched on the first pass, and so did the `tail`
+#: a directory named after a runtime would match, and so would a `tail`
 #: watching an exo log -- both reported as runtimes holding memory.
 _NOT_A_RUNTIME = {
     "zsh", "bash", "sh", "fish", "tail", "head", "less", "more", "grep",
@@ -531,9 +518,10 @@ def _runtime_of(cmd: str) -> str:
     """Which runtime a process belongs to, from its EXECUTABLE and its
     `-m module`, never from the command line as a whole.
 
-    Matching anywhere in the line over-attributes badly: it caught a shell
-    whose working directory was named after a project and a `tail` following
-    a log, and reported both as runtimes holding memory. The executable path
+    Matching anywhere in the line over-attributes badly: it catches a
+    shell whose working directory is named after a project and a `tail`
+    following a log, and reports both as runtimes holding memory. The
+    executable path
     and the module being run are the two places that actually say what the
     process IS.
     """
@@ -548,7 +536,7 @@ def _runtime_of(cmd: str) -> str:
     # The module after `-m`, which is what names a python process -- or,
     # for an interpreter running a script, the script: a console-script
     # launch (`.../Python .../venv/bin/knurlogic serve`) names itself only
-    # there, and was counted as "everything else" (the M4 Max, 2026-09-26).
+    # there, and would otherwise count as "everything else".
     module = ""
     for i, tok in enumerate(parts[:-1]):
         if tok == "-m":
@@ -567,8 +555,7 @@ def _runtime_of(cmd: str) -> str:
             if low.rsplit("/", 1)[-1].lstrip("-") == mark:
                 return name
             # A path component, i.e. an env or install directory belonging
-            # to it -- `/opt/anaconda3/envs/exo/bin/python3.13` is exo's
-            # interpreter.
+            # to it -- `.../envs/exo/bin/python3.13` is exo's interpreter.
             if f"/{mark}/" in low:
                 return name
     return ""

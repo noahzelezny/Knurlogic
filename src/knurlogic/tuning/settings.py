@@ -2,10 +2,9 @@
 
 Every number here came off a run. The point of Knurlogic is that a downloader
 should never have to know them: the resolver turns them into defaults. Each
-constant carries the finding that established it, so a future change has to
-argue with a measurement rather than a preference.
-
-Source: vqlab docs/RUNTIME-SETTINGS.md, docs/FINDINGS-LOG.md.
+constant carries the measurement that established it, so a future change
+has to argue with a measurement rather than a preference. The VQ kernel
+numbers were measured in the VQ runtime's upstream project.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from __future__ import annotations
 # --- the two knobs that decide runnable-vs-not ------------------------------
 
 # Experts decoded to dense fp16 per prefill chunk. THIS IS THE MEMORY KNOB,
-# not the KV cache: measured 2026-08-15 on a 128 GB M4 Max running the
+# not the KV cache: measured on a 128 GB M4 Max running the
 # 110.8 GiB 397B, prefill grew 3.35 MB/token where KV-cache theory predicts
 # 0.059 -- a 57x gap owned entirely by these buffers.
 #   transient = chunk * out * in * 2 bytes
@@ -58,8 +57,8 @@ DECODE_CHUNK_SHAPE_MAY_LOOSEN = False
 # keep the largest transient under this fraction of remaining headroom
 DECODE_CHUNK_HEADROOM_DIVISOR = 8
 
-# Prompt chunk width. Token-identical at every value (vqlab
-# tests/test_mtp_prefill.py gates this) -- purely a memory knob. mlx-lm's
+# Prompt chunk width. Token-identical at every value (gated upstream by
+# the VQ runtime's prefill tests) -- purely a memory knob. mlx-lm's
 # server does not expose it, which is why it must be resolved here.
 #
 # Chosen from the room ACTUALLY free at launch (the load budget: the
@@ -71,15 +70,16 @@ DECODE_CHUNK_HEADROOM_DIVISOR = 8
 # allowance and the reclaimable (prompt) cache; else step down, floor 512.
 # A family with no measurement stays 512.
 #
-# M4 sweep 2026-09-26, prefill tok/s at 4k/16k-token prompts (median of 3,
+# M4 Max 128 GB sweep, prefill tok/s at 4k/16k-token prompts (median of 3,
 # one server per arm), then the step transient:
 #   Qwen3.8 Flash 4.4bpw:  512 565/484 0.79 GiB | 1024 528/490 0.99
 #                          2048 552/524 2.11    | 4096 551/499 4.05
 #   Qwen3.5-397B VQ 2.2:   512 194/155 0.33 GiB | 1024 224/186 1.15-1.54
 #                          2048 244/205 2.95    | 4096 249/206 5.6-7.5
-# M4 Max 128 GB 2026-09-29, Qwen3.6-35B-A3B VQ 3.4 (13.8 GiB), 28,727-token
+# M4 Max 128 GB, Qwen3.6-35B-A3B VQ 3.4 (13.8 GiB), 28,727-token
 # prompt, interleaved, n=3, prefill tok/s:
-#   512 642.7/642.6/649.5 | 2048 1182.9/1164.5/1141.9 | 4096 1173.2/1166.5/1133.8
+#   512 642.7/642.6/649.5 | 2048 1182.9/1164.5/1141.9
+#   4096 1173.2/1166.5/1133.8
 # So width is worth ~1.8x on the 35B-A3B up to 2048 and nothing past it;
 # ~30% on the 397B VQ for a 9-23x larger transient -- 4096 aborted Metal
 # with one agent at 25k tokens on a box with ~14 GiB left, which is what
@@ -101,8 +101,7 @@ PREFILL_KV_ALLOWANCE_TOKENS = 32768
 
 # Per-ARCHITECTURE prompt chunk: a measurement with its run, kept in each
 # family's manifest (engine/families/<family>/__init__.py, `prefill_chunk`)
-# beside the rest of what that family is. Carried from the exo fork
-# (PREFILL_STEP_SIZE_BY_FAMILY), where it was keyed by a model-id substring.
+# beside the rest of what that family is.
 # Not measured means PREFILL_CHUNK_DEFAULT. A measured width is a CAP, not
 # a default: the room rule (above) decides how much of it this launch takes.
 def _measured_widths() -> dict:
@@ -137,17 +136,17 @@ def prefill_chunk_for(model_type: str) -> tuple:
 # launch setting saved before cannot fail a launch; it does nothing.
 
 # Freed MLX buffers pile up invisibly -- they do not appear in "active
-# memory." Biggest single win in vqlab's memory playbook, zero measured speed
+# memory." The biggest single memory win measured, zero measured speed
 # cost at 26k-token prefill.
 CACHE_LIMIT_GB_DEFAULT = 4.0
 
 # Below this much free headroom after the weights, treat the box as tight and
 # resolve the memory knobs down rather than leaving performance defaults:
-# the larger of a floor and a fraction of the working set. A fixed 12 GiB let
-# 397B on the 128 GB M4 (~14 GiB above its weights) take the measured
+# the larger of a floor and a fraction of the working set. A fixed 12 GiB
+# lets the 397B on a 128 GB M4 Max (~14 GiB above its weights) take the
 # 4096-token prefill chunk; its first step alone measured 8.1 GiB of
-# transient, and one agent at a 25k-token context aborted Metal
-# (2026-09-26). A share of the working set scales with the machine.
+# transient, and one agent at a 25k-token context aborted Metal. A share of the
+# working set scales with the machine.
 TIGHT_HEADROOM_GIB = 12.0
 TIGHT_HEADROOM_SHARE = 0.20
 
@@ -160,36 +159,34 @@ def tight_headroom_bytes(working_set_bytes: int) -> int:
 # value -> (default, why). Anything not listed should not be set by a
 # resolver; it exists in the runtime so a finding stays reproducible.
 PERFORMANCE_DEFAULTS = {
-    # F124: device codebook beats threadgroup by 20.9% on prefill at
+    # device codebook beats threadgroup by 20.9% on prefill at
     # d4-K2048. 'auto' lets the runtime's own selector decide per module;
     # ~447 fleet modules ride on it.
-    "VQ_MOE_GEMMSEG_CBDEV": ("auto", "F124: device arm +20.9% prefill at d4-K2048"),
-    # F25/F33: RTILE=64 is SLOWER everywhere (0.75-0.97x), confirmed on both
-    # exo and local. The one 'win' was an env-ordering bug that benchmarked
-    # 32 twice. DO NOT SET 64.
-    "VQ_MOE_GEMMSEG_RTILE": ("32", "F25/F33: 64 is 0.75-0.97x, never faster"),
-    # F54 arm 1: +5.1-6.6% prefill, bit-exact.
-    "VQ_GEMMSEG_OTILE64": ("1", "F54: +5.1-6.6% prefill, bit-exact"),
-    # F56: the v2 stack reaches +11.9% over shipped.
-    "VQ_GEMMSEG_PH2V": ("1", "F56: part of the +11.9% stack"),
-    "VQ_D4_WALK": ("1", "F56: part of the +11.9% stack"),
+    "VQ_MOE_GEMMSEG_CBDEV": ("auto", "device arm +20.9% prefill at d4-K2048"),
+    # RTILE=64 is SLOWER everywhere measured (0.75-0.97x). DO NOT SET 64.
+    "VQ_MOE_GEMMSEG_RTILE": ("32", "64 is 0.75-0.97x, never faster"),
+    # +5.1-6.6% prefill, bit-exact.
+    "VQ_GEMMSEG_OTILE64": ("1", "+5.1-6.6% prefill, bit-exact"),
+    # the v2 stack reaches +11.9% over shipped.
+    "VQ_GEMMSEG_PH2V": ("1", "part of the +11.9% stack"),
+    "VQ_D4_WALK": ("1", "part of the +11.9% stack"),
     # Arm 1.5 measured NEGATIVE (-1.8-2%).
-    "VQ_GEMMSEG_PIPE": ("0", "F56 arm 1.5: measured -1.8-2%"),
+    "VQ_GEMMSEG_PIPE": ("0", "measured -1.8-2%"),
 }
 
-# Numerics-active flags (F103/F105): family-local, up to +0.97% ppl.
+# Numerics-active flags: family-local, up to +0.97% ppl.
 # v1.5 = both off (bit-exact vs the published arc6 runtime); v2 = both on.
 #
-# A RUNG'S NUMERICS ARE THE RUNG'S (design D1). What a released rung computes
+# A RUNG'S NUMERICS ARE THE RUNG'S. What a released rung computes
 # with is what its PUBLISHED model.py defaults to, and that is not uniform:
 # Flash-Next 2.1 and Qwen3.6-35B-A3B 3.8/4.6/5.4 shipped v2, the rest v1.5 or
 # the arc6-era runtime with no flags at all (docs/design/vq-rung-knobs.md,
-# read off the Hub 2026-09-23). This table used to be applied to EVERY VQ
-# artifact with v1.5 as the default, which forced the v2 rungs' two flags
-# to 0 -- a numerics change nobody asked for, on exactly the rungs whose
-# weights were fitted under v2. So the resolver now takes a rung's numerics
-# from the rung (NUMERICS_SOURCES, in order) and applies a profile ONLY when
-# a person names one. See vqlab docs/RUNTIME-SHIP-PLAN.md for the profiles.
+# read off the Hub). Applying one table to every VQ artifact with v1.5 as
+# the default would force the v2 rungs' two flags to 0 -- a numerics change
+# nobody asked for, on exactly the rungs whose weights were fitted under
+# v2. So the resolver takes a rung's numerics from the rung (NUMERICS_SOURCES,
+# in order) and applies a profile ONLY when
+# a person names one.
 NUMERICS_FLAGS = ("VQ_GEMMSEG_BF16IO", "VQ_DECODE_BF16IO")
 
 RUNTIME_PROFILES = {
@@ -202,7 +199,7 @@ RUNTIME_PROFILES = {
 #   declared   config.json `knobs` -- the artifact's own record, which
 #              Artifact.declared_knobs() already ranks above everything
 #   published  engine/vq/rungs.json -- read from the rung's PUBLISHED
-#              model.py (never an ~/.exo copy: those drifted)
+#              model.py (never a local copy: those may drift)
 #   bundled    the default in the artifact's own model.py, for a rung not
 #              in rungs.json (a local build, a new upload)
 # Nothing found means nothing is emitted: the runtime's own default stands,
@@ -221,7 +218,7 @@ NUMERICS_SOURCES = ("declared", "published", "bundled")
 #   * VQ_DECODE_CHUNK: smaller is faster AND smaller in memory (128 -> 32 is
 #     1.37x on every rung). There is no tradeoff on this knob, so "fast" must
 #     NOT raise it. It is capped at the default in both directions.
-#   * VQ_MOE_GEMMSEG_RTILE=64 is 0.75-0.97x and never faster (F25/F33), so no
+#   * VQ_MOE_GEMMSEG_RTILE=64 is 0.75-0.97x and never faster, so no
 #     setting of this axis may reach it.
 #
 # So `fast` moves only the knobs where headroom actually buys something, and
@@ -231,8 +228,8 @@ TUNE_PROFILES = {
     # prefill chunk, cache limit GiB, and whether to bound the transient
     # harder than headroom requires
     "safe": {
-        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
-        "VQLAB_CACHE_LIMIT_GB": 1.0,
+        "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "VQ_CACHE_LIMIT_GB": 1.0,
         "decode_chunk_scale": 0.5,   # bound the transient below what fits
         "why": "lowest peak memory: narrow prompt chunks, a small reclaimable "
                "cache, and a transient bounded tighter than headroom requires",
@@ -242,7 +239,7 @@ TUNE_PROFILES = {
         "why": "the measured defaults",
     },
     "fast": {
-        "VQLAB_CACHE_LIMIT_GB": 8.0,
+        "VQ_CACHE_LIMIT_GB": 8.0,
         "decode_chunk_scale": 1.0,   # capped: smaller is already faster
         "launch": {"mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16",
                    "cross_chip": "off"},
@@ -252,8 +249,8 @@ TUNE_PROFILES = {
                "is faster there as well as smaller in memory",
     },
     "stable": {
-        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
-        "VQLAB_CACHE_LIMIT_GB": 2.0,
+        "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "VQ_CACHE_LIMIT_GB": 2.0,
         "decode_chunk_scale": 0.5,   # more room left for a step's spike
         "launch": {"cross_chip": "on", "mtp": "on", "mtp_dynamic": "off",
                    "kv_bits": "bf16"},
@@ -264,7 +261,7 @@ TUNE_PROFILES = {
                "transient bounded tighter than headroom requires",
     },
     "lean": {
-        "VQLAB_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
         "launch": {"kv_bits": "8", "mtp": "off"},
         "why": "most context and most agents: 8-bit KV where the family "
                "takes it (bf16 where it does not, and said), 512-token "
@@ -482,6 +479,12 @@ KNOB_DOC = {
         "memory headroom; stable buys repeatability with some speed; lean "
         "buys context and agents with some speed and precision (8-bit KV). "
         "Any setting changed beside it beats the preset's value."),
+    "VQ_CACHE_LIMIT_GB": (
+        "how much freed-buffer cache the runtime may hold",
+        "larger keeps more freed buffers for reuse, but they stay resident: "
+        "memory a long context or another agent cannot use. Smaller frees "
+        "it, with no measured speed cost at 26k-token prefill -- the "
+        "biggest single win in the memory playbook."),
     "VQLAB_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
         "larger keeps more freed buffers for reuse, but they stay resident: "
@@ -490,52 +493,47 @@ KNOB_DOC = {
         "biggest single win in the memory playbook."),
     "VQ_MOE_GEMMSEG_CBDEV": (
         "where the codebook lives during the MoE GEMM",
-        "F124: the device arm is +20.9% on prefill at d4-K2048, same "
+        "the device arm is +20.9% on prefill at d4-K2048, same "
         "output; 'auto' lets the runtime choose per module. Forcing an arm "
         "risks the slower one on modules it does not suit."),
     "VQ_MOE_GEMMSEG_RTILE": (
         "row tile width in the segmented GEMM",
-        "F25/F33: no trade -- 64 is 0.75-0.97x and NEVER faster. The one "
+        "no trade -- 64 is 0.75-0.97x and NEVER faster. The one "
         "'win' was an env-ordering bug that benchmarked 32 twice."),
     "VQ_GEMMSEG_OTILE64": (
         "64-wide output tiling in the segmented GEMM",
-        "F54: +5.1-6.6% prefill, bit-exact; no measured cost, so on."),
+        "+5.1-6.6% prefill, bit-exact; no measured cost, so on."),
     "VQ_GEMMSEG_PH2V": ("phase-2 vectorization",
-                        "F56: part of the +11.9% stack; off gives that "
+                        "part of the +11.9% stack; off gives that "
                         "speed back, no measured gain."),
     "VQ_D4_WALK": ("d4 codebook walk",
-                   "F56: part of the +11.9% stack; off gives that speed "
+                   "part of the +11.9% stack; off gives that speed "
                    "back, no measured gain."),
     "VQ_GEMMSEG_PIPE": ("software pipelining in the segmented GEMM",
-                        "F56 arm 1.5: on costs 1.8-2% and buys nothing. "
+                        "on costs 1.8-2% and buys nothing. "
                         "Off."),
     "VQ_GEMMSEG_BF16IO": ("bf16 IO in the segmented GEMM",
-                          "F103/F105 numerics-active: changing it changes "
+                          "numerics-active: changing it changes "
                           "the output, up to +0.97% ppl, on weights fitted "
                           "the other way. Each rung keeps what it shipped: "
                           "on for the v2 rungs, off for v1.5."),
     "VQ_DECODE_BF16IO": ("bf16 IO on the decode path",
-                         "F103/F105 numerics-active: changing it changes "
+                         "numerics-active: changing it changes "
                          "the output (up to +0.97% ppl). Each rung keeps "
                          "what it shipped."),
 }
 
 
 # --- the names are the ARTIFACT'S, not ours --------------------------------
-# `VQLAB_CACHE_LIMIT_GB` is a knurlogic-shaped name for something read by 24
-# of the 37 bundled runtimes on this machine. Those files are published. A
-# tidy-up rename in the resolver would not tidy anything -- it would emit a
-# name nobody reads and silently stop bounding the cache on every artifact
-# already shipped, which is precisely the failure mode this package exists to
-# end, dressed as housekeeping.
-#
-# So a knob has a LOGICAL name here and a list of env names, preferred first.
-# The resolver emits whichever one the target artifact actually reads. A new
-# rung can bundle a runtime reading the new name and every published rung
-# keeps the one it shipped with -- the same per-artifact boundary `model_file`
-# already establishes, used for the interface rather than the engine.
+# A knob has a LOGICAL name here and a list of env names, preferred first.
+# The resolver emits whichever one the target artifact's bundled runtime
+# actually reads: published runtimes read `VQLAB_CACHE_LIMIT_GB` (the VQ
+# runtime's old name, now `VQ_CACHE_LIMIT_GB`), and renaming it for them
+# would silently stop bounding their cache. Every other case gets the first
+# name. The old names are still accepted from a saved setting or `--set`.
 KNOB_ALIASES = {
-    "cache_limit_gb": ("KNURLOGIC_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB"),
+    "cache_limit_gb": ("VQ_CACHE_LIMIT_GB", "KNURLOGIC_CACHE_LIMIT_GB",
+                       "VQLAB_CACHE_LIMIT_GB"),
     "prefill_chunk": ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"),
     "decode_chunk": ("VQ_DECODE_CHUNK",),
     "prompt_concurrency": ("KNURLOGIC_PROMPT_CONCURRENCY",),
@@ -650,25 +648,14 @@ def engine_settings(env: dict) -> dict:
                 break
     return out
 
-#: Logical knobs whose LEGACY name is read by published bundled runtimes
-#: (VQLAB_CACHE_LIMIT_GB: 24 of the 37). The prompt chunk is not one of
-#: them: no bundled runtime reads VQLAB_PREFILL_CHUNK -- only the engine
-#: does (engine_settings, under either name) -- so it is emitted under
-#: knurlogic's own name, and the legacy one is only still ACCEPTED (a saved
-#: launch setting, a --set, a ring spec may carry it).
-LEGACY_EMITTED = ("cache_limit_gb",)
-
-
 def canonical_sets(sets: dict) -> dict:
-    """Explicit settings with an accepted legacy name moved to the name
-    the resolver emits (VQLAB_PREFILL_CHUNK -> KNURLOGIC_PREFILL_CHUNK),
-    so an explicit value cannot lose to the resolver's under the other
-    alias (engine_settings takes the first alias present). Where both are
-    given, knurlogic's own name wins."""
+    """Explicit settings with an accepted old name moved to the name the
+    resolver emits first (VQLAB_PREFILL_CHUNK -> KNURLOGIC_PREFILL_CHUNK,
+    VQLAB_CACHE_LIMIT_GB -> VQ_CACHE_LIMIT_GB), so an explicit value cannot
+    lose to the resolver's under another alias. Where both are given, the
+    current name wins."""
     out = dict(sets or {})
     for logical, names in KNOB_ALIASES.items():
-        if logical in LEGACY_EMITTED:
-            continue
         for old in names[1:]:
             if old in out:
                 v = out.pop(old)
@@ -676,13 +663,22 @@ def canonical_sets(sets: dict) -> dict:
     return out
 
 
-#: When no bundled runtime can be asked, emit this one. For a knob in
-#: LEGACY_EMITTED, the LAST alias: the legacy name is the one with artifacts
-#: behind it, and a guess should fail towards what exists rather than
-#: towards what is planned. Otherwise knurlogic's own (first) name.
+def legacy_mirror(env: dict, forced: dict) -> dict:
+    """An explicit value set under a knob's current name, copied to the old
+    name the resolver emitted for this artifact's bundled runtime (which
+    reads only that one). Returns the extra {name: value} to set."""
+    out = {}
+    for logical, names in KNOB_ALIASES.items():
+        if names[0] in forced:
+            for old in names[1:]:
+                if old in env and old not in forced:
+                    out[old] = forced[names[0]]
+    return out
+
+
+#: The env name for a logical knob when no bundled runtime can be asked.
 def default_alias(logical: str) -> str:
-    names = KNOB_ALIASES[logical]
-    return names[-1] if logical in LEGACY_EMITTED else names[0]
+    return KNOB_ALIASES[logical][0]
 
 
 # --- who is a knob FOR ------------------------------------------------------
@@ -702,7 +698,8 @@ def default_alias(logical: str) -> str:
 #             NOT hidden: listed if someone digs, labelled as the runtime's
 #             own business. Inventing defaults for unmeasured knobs is how
 #             the frozen 2048*4096*2 constant happened.
-KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "KNURLOGIC_CACHE_LIMIT_GB",
+KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB",
+                   "KNURLOGIC_CACHE_LIMIT_GB",
                    "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_PREFILL_CHUNK",
                    "VQLAB_PREFILL_CHUNK",
                    "KNURLOGIC_CONTEXT_LENGTH") + MODEL_KNOBS
@@ -746,6 +743,8 @@ KNOB_RANGE = {
     # documents YaRN
     "KNURLOGIC_LONG_CONTEXT": (["off", "yarn"], ""),
     "KNURLOGIC_PRESET": (list(PRESETS), ""),
+    "VQ_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
+                          "GiB"),
     "VQLAB_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
                              "GiB"),
     "KNURLOGIC_CACHE_LIMIT_GB": ([0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0],
@@ -800,7 +799,7 @@ def model_window(cfg: dict) -> tuple:
 # and vLLM/sglang raise their max length (VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 # --max-model-len 1010000; SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=1
 # --context-length 1010000). Static YaRN: "potentially impacting performance
-# on shorter texts". Sources (read 2026-09-29):
+# on shorter texts". Sources:
 #   https://huggingface.co/Qwen/Qwen3.5-397B-A17B   (1,010,000)
 #   https://huggingface.co/Qwen/Qwen3.6-35B-A3B     (1,010,000)
 #   https://huggingface.co/Qwen/Qwen3.8-27B         (1,000,000)
@@ -888,6 +887,7 @@ KNOB_BOUNDS = {
     "VQLAB_PREFILL_CHUNK": (int, 16, 4096, "tokens"),
     "KNURLOGIC_CONTEXT_LENGTH": (int, 256, None, "tokens"),
     "VQ_DECODE_CHUNK": (int, DECODE_CHUNK_MIN, DECODE_CHUNK_DEFAULT, ""),
+    "VQ_CACHE_LIMIT_GB": (float, 0.0, CACHE_LIMIT_GB_MAX, "GiB"),
     "VQLAB_CACHE_LIMIT_GB": (float, 0.0, CACHE_LIMIT_GB_MAX, "GiB"),
     "KNURLOGIC_CACHE_LIMIT_GB": (float, 0.0, CACHE_LIMIT_GB_MAX, "GiB"),
 }
@@ -934,8 +934,8 @@ def check_knob(name: str, value, window: int = 0):
 
 # --- what a VISION rung holds besides its weights ---------------------------
 # A model with a vision tower needs three things a text model does not, and
-# the resolver must count them BEFORE a load (critique issue 10, Flash-Next
-# review point 4), not discover them as an OOM on the first screenshot:
+# the resolver must count them BEFORE a load, not discover them as an OOM on
+# the first screenshot:
 #
 # 1. The TOWER'S WEIGHTS. Read from the safetensors headers (tensor names
 #    under these prefixes), never guessed. Every family keeps them in the

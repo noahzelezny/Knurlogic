@@ -147,10 +147,9 @@ def exo_model_dirs(env=None, platform=None, home=None) -> list:
     (exo/shared/constants.py), so this answers without exo running.
 
     The default is `<data home>/models`, and on anything but Linux the data
-    home is `~/.exo` -- not the XDG path. Missing that is how a machine whose
-    `~/.exo/models` is a symlink to a 37-artifact external volume showed 13
-    artifacts: the store was only found while exo happened to be started by
-    a script that also exported a directory variable.
+    home is `~/.exo` -- not the XDG path. Missing it hides the store (often
+    a symlink to an external volume) unless exo happens to be started by a
+    script that also exports a directory variable.
     """
     import sys
     env = os.environ if env is None else env

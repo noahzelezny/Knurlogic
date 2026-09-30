@@ -1,41 +1,20 @@
-"""The scheduler: ONE thread that owns the MLX stream (docs/SERVER.md).
+"""The scheduler: ONE thread that owns the MLX stream (docs/design/server.md).
 
     HTTP threads --submit(Job)--> queue --> tokenize --> prompt cache
       --> executor.insert --> executor.step --> events --> per-request text
       (runtime/request.py) --> the Job's outbox --> HTTP threads
 
-Everything that touches the model happens here, in order: loads and
-unloads (commands), tokenizing (vision's image work included -- its pins
-are thread-local), prompt-cache lookups and inserts, admission and steps.
-A failure is per request: an exception while tokenizing or admitting fails
-that request, a failed row (RowFailure) fails its own, and a step that
-raises fails the rows in it and rebuilds the executor. The thread lives.
+Everything that touches the model happens here, in order. A failure is per
+request (a failed tokenize/admit, a RowFailure, or a raising step fails
+only its rows; the executor is rebuilt); the thread lives.
 
-A request waits for the host to be ready; while nothing is running the
-loop blocks on the queue instead of spinning.
-
-Memory is guarded here too, because a step that outgrows the GPU working
-set is not an exception: Metal aborts the process (measured on an M4 Max (128 GB):
-Flash 4.4 at 97 GiB, four long reviews and a full prompt cache climbed to
-118 of 120 GiB over two hours, then "Insufficient Memory" killed the server
-and every request in it). Before each step, when active memory is past the
-limit (the working set less a margin for one step's temporaries), the
-prompt cache gives up entries first -- they are a convenience -- and then
-the newest rows are stopped with `OutOfMemory` (a 503: retry), the least
-work lost. While memory is past the admission mark, new requests wait.
-
-A step cannot be interrupted, and admitting a row prefills its whole
-prompt inside one step (plus a deep copy per segment checkpoint), so the
-per-step check alone lets one long prompt jump past the limit (measured:
-an agent's 50k-token turn took the same server from 114 to 118 GiB within
-a minute, no step between). So admission estimates too, from what this
-model's caches measured (fixed state per row plus bytes per token: hybrid
-models carry linear-attention state whatever the length). A prompt wants
-its KV twice -- the row, and the checkpoint copies the prompt cache keeps;
-the prompt cache gives way for it; if only one copy fits, the row is
-admitted LEAN, without checkpoints (the request beats the cache); failing
-that it waits for running rows, or with none running is refused -- never
-admitted to abort the process.
+Memory is guarded here, because outgrowing the GPU working set is not an
+exception: Metal aborts the process. Before each step, past the limit, the
+prompt cache gives up entries first and then the newest rows are stopped
+with `OutOfMemory` (a 503). Admission estimates too, from what this model's
+caches measured: a row is admitted with checkpoints, LEAN without them,
+waits, or with nothing running is refused -- never admitted to abort.
+Design: docs/design/server.md (memory guard).
 """
 
 from __future__ import annotations
@@ -173,8 +152,9 @@ class Job:
 class PromptCache:
     """mlx-lm's LRUPromptCache, with the one rule it lacks: an exact hit is
     returned one token short (trimmed; a cache that cannot trim is a miss),
-    so there is always a token to process -- an exact hit otherwise left
-    nothing and killed the generation thread (GLM none-then-low, M4)."""
+    so there is always a token to process -- an exact hit otherwise leaves
+    nothing and kills the generation thread (seen with GLM, none then
+    low effort)."""
 
     def __init__(self, max_size: int = 10, max_bytes: Optional[int] = None):
         from mlx_lm.models.cache import LRUPromptCache
@@ -821,7 +801,7 @@ class Scheduler:
         model is predicted to make at the context it is about to span (the
         running rows' plus `extra`, a prompt being admitted), with a
         quarter again -- but never below 5% of the working set (at least 4
-        GiB). GLM-5.3 on an M4 Max (128 GB) (2026-09-26) learned 2.6 GiB at 8k-token
+        GiB). GLM-5.3 on an M4 Max (128 GB) learned 2.6 GiB at 8k-token
         prompts, ran at 116 of a 116.8 GiB limit, and a step at 16k aborted
         Metal: the largest transient seen so far under-reads a longer
         context's."""
@@ -837,7 +817,7 @@ class Scheduler:
         """A step's transient at `ctx` tokens of context: the largest
         measured, or, past the longest context measured, that line carried
         on. A prefill chunk attends over every token before it, so its
-        temporaries grow with the context: the 27B on an M3 Ultra (96 GB) (2026-09-28)
+        temporaries grow with the context: the 27B on an M3 Ultra (96 GB)
         measured 1.58, 2.40 then 3.39 GiB as four agents' prompts grew to
         98k tokens, and the step that first ran past the margin those left
         aborted Metal. Until two contexts 8192 apart are known, the
@@ -966,8 +946,8 @@ class Scheduler:
         else:
             # one length: what cannot grow (a hybrid's recurrent state) is
             # fixed, the rest per token. Charging a Flash's 34 deltanet
-            # layers to every token of short runs priced a 24k prompt at
-            # 3.4 GiB (0.85 measured) and refused it (M4, 2026-09-27)
+            # layers to every token of short runs prices a 24k prompt at
+            # 3.4 GiB (0.85 measured) and refuses it
             f = float(s.get("fixed", 0))
             self._kv = (f, max(b1 - f, 0) / n1)
 
@@ -977,7 +957,7 @@ class Scheduler:
 
     def _need(self, n_tokens: int, checkpoints) -> int:
         """Bytes admitting a prompt of n_tokens adds, measured on the 27B
-        (M3, 2026-09-28) to within 2%: the row's cache; a copy of it at
+        (an M3 Ultra) to within 2%: the row's cache; a copy of it at
         each checkpoint (a segment boundary past the prompt cache's hit --
         a chat's trailing one-token segments are two nearly whole copies);
         and, with rows running, the copy the running batch concatenates

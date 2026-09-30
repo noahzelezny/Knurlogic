@@ -1,9 +1,8 @@
 """Which link a peer is reached over, and which links a page answers on.
 
 Bonjour will happily hand back a peer's Wi-Fi address when a Thunderbolt
-cable joins the two machines -- the owner's experience with exo: peers
-preferred Wi-Fi and were "rediscovered" after connecting, which destabilised
-the ring, until addresses were pinned by hand. So knurlogic is explicit:
+cable joins the two machines, and a ring built over Wi-Fi is slow and
+drops when a peer is "rediscovered". So knurlogic is explicit:
 
   --host cluster   bind every address, ANSWER only on loopback and the
                    Thunderbolt links (checked per connection against the
@@ -52,11 +51,11 @@ def thunderbolt() -> list[dict]:
 #
 # Two Macs can be joined by two cables of different kinds; only a
 # Thunderbolt 5 (80 Gb/s) one carries RDMA -- over the 40 Gb/s Thunderbolt 4
-# cable of the M3/M4 rig, ibv_devinfo still says PORT_ACTIVE and jaccl
+# cable, ibv_devinfo still says PORT_ACTIVE and jaccl
 # fails RTR with errno 96. networksetup names each interface's hardware
 # port "Thunderbolt N"; system_profiler reports receptacle N's current
-# speed. The two numbers agree (M3: Thunderbolt 6 = en7 = receptacle 6 at
-# 80 Gb/s; M4: Thunderbolt 2 = en2 = receptacle 2 at 80 Gb/s).
+# speed. The two numbers agree (e.g. Thunderbolt 6 = en7 = receptacle 6
+# at 80 Gb/s).
 
 TB5_GBPS = 80
 

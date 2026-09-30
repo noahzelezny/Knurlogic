@@ -1,9 +1,10 @@
-"""Real outputs from the M3 Ultra / M4 Max rig (2026-09-27), trimmed to
-the fields cluster/links reads. Two cables join them: Thunderbolt 5 at
-80 Gb/s (M3 en7 "Thunderbolt 6", receptacle 6, 10.0.1.1 <-> M4 en2
-"Thunderbolt 2", receptacle 2, 10.0.1.2) and Thunderbolt 4 at 40 Gb/s
-(M3 en4 "Thunderbolt 3" through a ThunderBay dock, 10.0.0.1 <-> M4 en3
-"Thunderbolt 3", 10.0.0.2). RDMA works only over the 80 Gb/s one."""
+"""Outputs captured from two Macs joined by Thunderbolt (an M3 Ultra and
+an M4 Max), trimmed to the fields cluster/links reads. Two cables join
+them: Thunderbolt 5 at 80 Gb/s (M3 Ultra en7 "Thunderbolt 6", receptacle
+6, 10.0.1.1 <-> M4 Max en2 "Thunderbolt 2", receptacle 2, 10.0.1.2) and
+Thunderbolt 4 at 40 Gb/s (M3 Ultra en4 "Thunderbolt 3" through a dock,
+10.0.0.1 <-> M4 Max en3 "Thunderbolt 3", 10.0.0.2). RDMA works only over
+the 80 Gb/s one."""
 
 SP_THUNDERBOLT_M3 = {'SPThunderboltDataType': [{'_items': [{'_name': 'MacBook Pro',
                                         'device_name_key': 'Mac16,5',

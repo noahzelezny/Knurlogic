@@ -1,26 +1,19 @@
 """Snapshot and rollback for a speculative decode step.
 
-Two cache kinds appear in one `model.make_cache()` list and they roll back
-completely differently:
+Two cache kinds appear in one `model.make_cache()` list and roll back
+differently:
 
   attention caches   expose keys/values and a `trim(n)`. They MUST be trimmed
-                     by the offset DELTA, not by a fixed count. Trimming a
-                     hardcoded 1 leaves a stale key behind while the recurrent
-                     caches roll back 2, and the two streams then drift
-                     silently — correct-looking text that is not what the
-                     trunk would have produced. This bug was hit once already.
-
+                     by the offset DELTA, not by a fixed count: trimming a
+                     hardcoded 1 leaves a stale key while the recurrent caches
+                     roll back 2, and the streams drift silently.
   recurrent caches   expose a `cache` list of state arrays. Rollback is
                      whatever the snapshot held.
 
-For the recurrent kind there is a real hazard behind an implementation
-accident. qwen4_exp REASSIGNS its slots (`cache[0] = ...`) and mlx arrays are
-immutable, so keeping the old references is a free, correct snapshot. An
-architecture that instead writes in place (`cache[0][..., i] = k`, which mlx
-does support) would corrupt the snapshot through the very reference we saved.
-So the copying policy is a per-family field, defaulting to "copy", and
-`check_snapshot_semantics` is the measurement that earns a family the cheap
-"reassign" path.
+Keeping old references is a free snapshot only for an architecture that
+REASSIGNS its slots (mlx arrays are immutable); one that writes in place
+would corrupt the saved reference. So the policy is a per-family field,
+default "copy", and `check_snapshot_semantics` earns the "reassign" path.
 """
 from __future__ import annotations
 
@@ -47,7 +40,8 @@ def is_attention_composite(c) -> bool:
     the composite rolls back like one: trim each member by its offset
     delta. A CacheList holding anything non-attention falls through to
     the TypeError — its rollback is unproven.
-    (Vendored from vqlab/mtp/caches.py, same provenance as families/glm5/heads/glm5.py.)"""
+    (Vendored from vqlab's mtp/caches.py, same provenance as
+    families/glm5/heads/glm5.py.)"""
     subs = getattr(c, "caches", None)
     return (subs is not None and len(subs) > 0
             and all(is_attention(s) or is_batch_attention(s) for s in subs))

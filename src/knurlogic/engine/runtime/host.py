@@ -3,16 +3,15 @@
     empty -> loading -> ready -> unloading -> empty
                      -> failed (error kept, the next load may try again)
 
-Requests wait for `ready`; they never race a load (mlx-lm answered HTTP
-before its model was loaded, and early requests were mis-translated). A
-load runs on the scheduler's thread -- the one that owns the MLX stream --
-and binds, in order: the weights (knurlogic's VQ runtime for a verified
-rung, the artifact's own loader otherwise), vision, the drafting head.
+Requests wait for `ready`; they never race a load. A load runs on the
+scheduler's thread -- the one that owns the MLX stream -- and binds, in
+order: the weights (knurlogic's VQ runtime for a verified rung, the
+artifact's own loader otherwise), vision, the drafting head.
 
-The host answers to the same attribute names as mlx-lm's ModelProvider
-(`model`, `tokenizer`, `model_key`, `is_batchable`), and registers itself
-as `state.SERVED["provider"]`, so the status, thinking, vision and drafting
-code written against the old server reads it unchanged.
+The host answers to mlx-lm's ModelProvider attribute names (`model`,
+`tokenizer`, `model_key`, `is_batchable`) and registers itself as
+`state.SERVED["provider"]`, so status, thinking, vision and drafting code
+reads it unchanged.
 """
 
 from __future__ import annotations

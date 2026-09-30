@@ -1,43 +1,16 @@
 """One model across several machines, launched page to page.
 
-The coordinator is the page someone pressed Launch on with two or more
-machines picked. It never starts a rank on another machine itself: every
-page starts its own ranks, after checking the request against its own
-disk, memory, software and links. Two phases, so nothing starts unless
-everything can:
+The coordinator is the page Launch was pressed on with two or more
+machines picked. Every page starts only its own ranks, after checking the
+request against its own disk, memory, software and links, in two phases so
+nothing starts unless everything can: `prepare` (POST
+/peer/cluster/prepare to every page; any refusal and nothing starts) then
+`start` (POST /peer/cluster/start). Any rank dying or stalling stops the
+whole job on every page. A stop is done when the ranks' processes are
+gone, not when they were signalled. Rank 0's HTTP port is where chat goes.
+Peer routes are gated like /peer/loaded.json (ui.peer_refusal).
 
-  plan      gather each machine's facts (its status' `cluster` block:
-            chip, working set under its allowance, memory bandwidth,
-            Thunderbolt addresses, RDMA, versions), order the ranks
-            (tuning/resolve.rank_order) and place the model (tensor: an
-            equal share each; pipeline: tuning/resolve.pipeline_shares).
-            Deterministic, and shown before anything loads.
-  prepare   POST /peer/cluster/prepare to every page (this one directly):
-            the job's fixed schema. Each checks the artifact by identity,
-            the fit of ITS share, knurlogic/mlx versions against the
-            coordinator's, and its link. Any refusal: nothing starts, the
-            prepared pages are told to forget it, the refusal is shown.
-  start     POST /peer/cluster/start: each page spawns its own rank
-            (`knurlogic serve` with the hidden ring flags), records it,
-            and watches it.
-
-Every page that runs a rank watches it (cluster/jobs.py); any rank dying
-or stalling stops the whole job: its own ranks SIGTERM then SIGKILL, and
-/peer/cluster/stop to every other page of the job. It also asks the job's
-other pages (/peer/cluster/job) whether they still run their ranks: one
-unreachable, or answering without its rank, for PEER_GONE_S -- or saying
-the job ended there -- stops the job here too (a rank idle in a
-collective on a peer that vanished never exits and is never "stalled").
-
-A stop is done when the ranks' processes are gone, not when they were
-signalled: until then their records stay, marked stopping. A prepare
-refuses a share that does not fit beside what this machine's other ranks
-and servers hold now, or while another job's rank is still loading here;
-a start waits (START_WAIT_S) for stopped ranks to be gone, else refuses. Unloading the job from
-any page does the same. Rank 0's HTTP port is where chat goes, through the
-existing relay.
-
-Peer routes are gated exactly like /peer/loaded.json (ui.peer_refusal).
+Design: docs/design/cluster.md (launch).
 """
 from __future__ import annotations
 
@@ -125,8 +98,9 @@ PEER_S = 30.0
 #: how often the page checks its ranks
 WATCH_S = 2.0
 #: how long start waits for a stopped rank's process on this machine to be
-#: gone before it refuses: two jobs' shares in one working set is the OOM
-#: that rebooted the M3 Ultra (a 397B share loading beside the last job's 50 GiB)
+#: gone before it refuses: two jobs' shares in one working set is an OOM
+#: that can reboot the machine (a 397B share loading beside the last job's
+#: 50 GiB)
 START_WAIT_S = 20.0
 #: how long one peer-page check may take (the watcher asks every WATCH_S)
 PEER_CHECK_S = 5.0
@@ -150,9 +124,8 @@ _STOPPING: set = set()
 #: (job, peer id) -> when that peer's page last said it runs its rank
 _PEER_OK: dict = {}
 #: frozenset of two machine ids -> {subnet: why} -- a cable a rank's link
-#: init failed on this page session (the 10.0.0.x cable failing jaccl QP
-#: RTR with errno 96 after the M3 Ultra rebooted, while 10.0.1.x worked): tried
-#: last from then on
+#: init failed on while this page runs (e.g. one cable failing jaccl QP
+#: RTR with errno 96 while the other works): tried last from then on
 BAD_CABLES: dict = {}
 #: how long the coordinator watches a job it launched for a link-init
 #: failure to move to the next cable on
@@ -373,8 +346,8 @@ def _shared_subnet(a: dict, b: dict, rdma: bool = False) -> str:
     """The one Thunderbolt /24 two machines both sit on ("" if none) --
     lowest first, so every page picks the same. Two Macs joined by two
     cables share two subnets; BOTH ends of a link must be on the same one
-    (the M4 Max's en2 at 10.0.1.2 and the M3 Ultra's en4 at 10.0.0.1 are different
-    cables, and a jaccl queue pair across them fails RTR with errno 60).
+    (en2 on one /24 and en4 on another are different cables, and a jaccl queue
+    pair across them fails RTR with errno 60).
     `rdma`: only a subnet whose interface has RDMA up on both ends. A
     cable that failed link init between the two this session goes last
     (`_shared_subnets`)."""
@@ -414,8 +387,8 @@ def _ring_ips(infos: list, rdma: bool = False, net: str = "") -> list:
 
 def _rdma_device(m: dict, peer: dict, net: str = ""):
     """The rdma_<iface> device on `m` that reaches `peer`: the one on the
-    Thunderbolt subnet both share with RDMA up at both ends (en4 at
-    10.0.0.1 reaches 10.0.0.2) -- the same subnet from either side --,
+    Thunderbolt subnet both share with RDMA up at both ends -- the same
+    subnet from either side --,
     else None: a device on another subnet is another cable, never a
     fallback."""
     net = net or _shared_subnet(m, peer, rdma=True)
@@ -455,7 +428,8 @@ def placement(machines: list, shape: dict, split: str,
     """Rank order and each rank's share. `machines`: [{"name", "chip",
     "p_core_ghz", "working_set_bytes", "bandwidth_gbs", "links"}];
     `shape`: the artifact's {"layer_bytes", "other_bytes", "leader_bytes"
-    (rank 0's alone: the MTP head and the vision tower), "tensor_per_rank_bytes", "refusals"}. Pure: the same inputs give the
+    (rank 0's alone: the MTP head and the vision tower),
+    "tensor_per_rank_bytes", "refusals"}. Pure: the same inputs give the
     same answer on every page.
     -> {"order": [names], "leader", "split", "shares": [{"rank", "machine",
         "bytes", "layers"?, "bounds"?}], "layers": [counts] | [],
@@ -1577,8 +1551,8 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         return {"error": f"not a launch setting: {', '.join(bad)}"}
     # the base model's saved prompt chunk (Settings -> Models) is the
     # ring's, like every launch set; unset, the ring runs PREFILL_CHUNK.
-    # It used to be PREFILL_CHUNK whatever was saved: serve puts the ring's
-    # value over any --set, so the saved one was shown and never ran.
+    # serve puts the ring's value over any --set, so the saved one must be
+    # resolved here or it is shown and never runs.
     chunk = PREFILL_CHUNK
     for k in ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"):
         if k in sets:

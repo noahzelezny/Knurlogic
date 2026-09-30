@@ -211,8 +211,8 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
 #: user message after tool calls (the next question, the compaction
 #: summary ask) re-renders every earlier assistant turn without its
 #: `<think>\n\n</think>\n\n`, so the history diverges right after the goal
-#: and no stored checkpoint is a prefix -- a hybrid model re-prefilled the
-#: whole conversation (13.8k tokens, M4 Qwen3.6-35B, 2026-09-28). On, the
+#: and no stored checkpoint is a prefix -- a hybrid model re-prefills the
+#: whole conversation (13.8k tokens, Qwen3.6-35B on an M4 Max). On, the
 #: rendered history only grows; the model also sees earlier turns'
 #: reasoning when a client sends it back, which Qwen3.6 is trained for.
 #: A request's own chat_template_kwargs value wins.
@@ -323,8 +323,8 @@ def _segment(tokenizer, messages, render, prompt):
     # compaction summary pass (this conversation plus a user turn), both
     # continue from there, and a hybrid model's checkpoint cannot be
     # trimmed back to it. Ending after `<|im_start|>assistant\n`, the
-    # summary pass re-prefilled the whole history (13.9k tokens, 40 s,
-    # M4 Qwen3.6-35B, 2026-09-28).
+    # summary pass re-prefills the whole history (13.9k tokens, 40 s,
+    # Qwen3.6-35B on an M4 Max).
     try:
         hist = list(tokenizer.apply_chat_template(
             messages, add_generation_prompt=False, tokenize=True, **render))

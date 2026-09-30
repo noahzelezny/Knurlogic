@@ -1,28 +1,16 @@
-"""GLM-5.3 (glm5_next) vision, owned by P3.
+"""GLM-5.3 (glm5_next) vision.
 
 The Family that `registry.build("glm5_next", ...)` resolves to
-(`docs/design/vision-contracts.md`). Its tower is
-`knurlogic.engine.families.glm5.architecture.glm5_next.vision.VisionModel`, the SAME
-class the trunk's `Model.vision_tower` would build -- the whole point of
-package P3 (`docs/design/vision.md` v2, work package table) is that
-class no longer needs mlx-vlm installed to import, and this Family loads it
-STANDALONE (contracts: "load_weights: standalone tower, not attached to
-the trunk; the trunk's sanitize keeps dropping vision keys").
+(`docs/design/vision-contracts.md`). Its tower is the vendored
+`knurlogic.engine.families.glm5.architecture.glm5_next.vision.VisionModel`,
+the SAME class the trunk's `Model.vision_tower` would build, importable
+without mlx-vlm and loaded STANDALONE (the trunk's sanitize drops vision
+keys). On-disk keys are `vision_model.*`; the remap to this Family's
+"vision_tower" lives in `load_weights`, not in the vendored model.
 
-Weight keys on disk are `vision_model.*` (design v2, Goal section: "347
-keys, inside the main shards"); this Family's own tower attribute is
-"vision_tower" so it never collides with anything the trunk's own
-`sanitize()` does with `vision_model.*` keys (which it drops, per B3). The
-remap therefore lives HERE, in `load_weights`, not in the vendored
-`VisionModel` -- exactly the design's instruction ("Remove the transformers
-bases; the vision_model.* -> vision_tower.* remap ... lives in
-Family.load_weights, not the vendored model").
-
-NoPE: GLM's trunk gets its positions from its own 1D rope inside
-`language.py`, unaffected by an image span -- there is no MRoPE grid to
-thread through decode the way Qwen needs (D4 is a Qwen concern).
-`positions()` therefore always answers `(None, 0)`: "the trunk's own 1D
-positions, no rope_delta" (contracts, Family protocol).
+NoPE: GLM's trunk takes its positions from its own 1D rope, unaffected by
+an image span, so `positions()` always answers `(None, 0)`.
+Design: docs/design/vision.md (GLM).
 """
 from __future__ import annotations
 
@@ -61,8 +49,8 @@ class Glm5VisionFamily:
         patch = self.vision_config.patch_size
         merge = self.vision_config.spatial_merge_size
         # GLM's processor resizes to a multiple of patch*merge and has no
-        # fixed token budget (aspect-dependent, like gemma's -- critique
-        # issue 5): fixed_tokens stays None until a real processor read
+        # fixed token budget (aspect-dependent, like gemma's):
+        # fixed_tokens stays None until a real processor read
         # says otherwise (open issue, see PROVENANCE.md).
         self.spec = VisionSpec(
             family="glm5_next",
@@ -130,10 +118,10 @@ class Glm5VisionFamily:
 
     def preprocess(self, img, sha: str):
         """Resize to a multiple of `patch * merge` on each side (GLM has no
-        fixed token budget, contracts issue 5) and lay pixels out the way
+        fixed token budget) and lay pixels out the way
         `VisionPatchEmbed.__call__` reshapes them: `[-1, in_channels,
-        temporal_patch, patch, patch]` before its own `moveaxis`, so here we
-        hand it `[n_patches, temporal_patch * patch * patch * in_channels]`
+        temporal_patch, patch, patch]` before its own `moveaxis`, so this
+        hands it `[n_patches, temporal_patch * patch * patch * in_channels]`
         with the temporal axis repeated (`temporal_patch_size`, a still
         image has no time axis to sample)."""
         import numpy as np
@@ -217,12 +205,12 @@ class Glm5VisionFamily:
 
     def positions(self, key, refs) -> Tuple[Optional[Any], int]:
         # NoPE: the trunk computes its own 1D positions; no MRoPE grid, no
-        # rope_delta (D4 does not apply to GLM -- see module docstring).
+        # rope_delta (see module docstring).
         return None, 0
 
     def chunk_boundaries(self, key):
         # GLM's attention is causal (unlike gemma's bidirectional image
-        # block, D5); no chunk edge needs protecting.
+        # block); no chunk edge needs protecting.
         return []
 
 

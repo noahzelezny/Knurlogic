@@ -1,23 +1,14 @@
 """Endpoints for orchestration and ingest clients that manage what the
-server holds, in OpenAI's shapes and nothing custom:
+server holds, in OpenAI's shapes:
 
-  /v1/models         capabilities (text / vision / thinking) and size_bytes
-  /v1/residency      one flat list: model, capabilities, memory_bytes,
-                     nodes, state (loading / ready / unloading / failed)
-  /v1/ensure         {model, wait}: idempotent; a different model is a
-                     switch -- only to an artifact this machine's stores
-                     hold, through the same checks as startup
-                     (interfaces/loading.py); 409 while requests are
-                     running, unless force
-  413                an image over the decode limit (judged from its
-                     header before decoding: engine/vision/images.py), or
-                     a request whose images together exceed the image
-                     store's memory budget
-  X-Knurlogic-Concurrency: rows=N, more=?1|?0  (RFC 8941) -- the batch's
-                     width now, and whether one more row measured faster
-                     per token; `more` is left out until both widths have
-                     been timed. Ingest is prefill- and image-bound, where
-                     the hint says less than it does for decoding.
+  /v1/models     capabilities (text / vision / thinking) and size_bytes
+  /v1/residency  model, capabilities, memory_bytes, nodes, state
+  /v1/ensure     {model, wait}: idempotent load or switch; 409 while
+                 requests run, unless force
+  413            an image over the decode limit or the image store budget
+  X-Knurlogic-Concurrency: rows=N, more=?1|?0  (RFC 8941)
+
+Design: docs/design/server.md (residency).
 """
 
 from __future__ import annotations

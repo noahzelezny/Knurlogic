@@ -4,7 +4,7 @@
 Held here: off is today's rope exactly; on, every rope the Qwen families
 apply (mlx-lm's YarnRoPE on qwen3_5/qwen3_5_moe's text path, the MRoPE
 image path, qwen4_exp's own RotaryEmbedding) matches an independent YaRN
-reference (arXiv 2309.00071 as transformers' _compute_yarn_parameters
+reference (the YaRN formula as transformers' _compute_yarn_parameters
 computes it); the context cap moves to the YaRN window; a box that cannot
 hold that much KV is told so."""
 from __future__ import annotations

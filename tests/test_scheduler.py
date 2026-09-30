@@ -388,7 +388,7 @@ def _rows_of(s, *contexts):
 
 
 def test_the_margin_follows_the_context_the_step_will_span():
-    """The 27B on the M3, 2026-09-28: the transient grew 1.58 -> 3.39 GiB as
+    """The 27B on an M3 Ultra: the transient grew 1.58 -> 3.39 GiB as
     four agents' prompts grew, and the first step at a longer context than
     any measured ran past a margin the shorter ones had set."""
     from knurlogic.engine.runtime.scheduler import GIB, Scheduler
@@ -460,7 +460,7 @@ def test_mlx_buffer_cache_is_cleared_before_a_step_it_would_crowd():
 
 
 def test_an_admission_is_priced_as_the_copies_the_engine_makes():
-    """Measured on the 27B (M3, 2026-09-28; mlx active memory around each
+    """Measured on the 27B (M3 Ultra; mlx active memory around each
     admission): 24.6k tokens segmented [8223, 16357, 1, 1] beside a running
     row grew memory 7.27 GiB; 41.0k tokens with a 24.6k hit, 7.96 alone
     and 10.65 beside a row. Priced as a row and one checkpoint they were
@@ -491,7 +491,7 @@ def test_a_hit_inside_a_segment_keeps_that_segments_checkpoint():
 
 
 def test_397b_on_the_m4_admits_the_prompts_it_refused():
-    """The M4, 2026-09-26: 397B at 106.9 GiB active, a 5.2 GiB measured
+    """An M4 Max: 397B at 106.9 GiB active, a 5.2 GiB measured
     spike, and 31k/20k-token prompts needing ~1 GiB each were refused with
     nothing else running -- the margin was held back twice."""
     from knurlogic.engine.runtime import scheduler as S

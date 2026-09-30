@@ -1,4 +1,4 @@
-"""The executor protocol over the local batch engine (docs/SERVER.md step 1):
+"""The executor protocol over the local batch engine (docs/design/server.md step 1):
 same tokens as the engine driven directly, typed events, failures as
 RowFailure, checkpoints and finished caches as events, the cache report
 delivered to the object admission names."""
@@ -231,7 +231,7 @@ def test_seeded_draws_are_addressed_by_position_and_couple_draft_to_target():
 def test_the_draft_step_hands_processors_the_same_history_as_a_plain_one(
         monkeypatch):
     """Position n+1's processors see t1 at the end of the history, drafting
-    or not (build review item 1). The probe boosts token id 10 + len(history),
+    or not. The probe boosts token id 10 + len(history),
     so the output counts up 10, 11, 12, ... only if every position's
     history has exactly the tokens before it."""
     from knurlogic.engine.runtime.executor import Admission
@@ -281,9 +281,9 @@ def test_removing_a_row_frees_its_memory_now_not_at_the_next_step():
 def test_a_headless_engine_says_why_and_names_vision_only_for_vision(
         caplog, vision):
     """A pipeline rank that dropped its head logged 'without a drafting
-    head (vision)' with no image anywhere (the M4 segfault of 2026-09-27
-    was first read as an image switching engines on one rank): the line
-    says why there is no head, and 'vision' only when it serves images."""
+    head (vision)' with no image anywhere, which misleads (it reads as an
+    image switching engines on one rank): the line says why there is no
+    head, and 'vision' only when it serves images."""
     import logging
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     model, _head, _ = _tiny(512)

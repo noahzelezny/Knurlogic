@@ -1,5 +1,5 @@
-"""Images in use are never evicted (Flash-Next review point 1), and a pin
-taken at tokenize cannot leak when the server raises before insert (P4).
+"""Images in use are never evicted, and a pin taken at tokenize cannot
+leak when the server raises before insert.
 
 The prompt cache is mlx-lm's real LRUPromptCache (the pinned install), with
 stand-in KV entries: the cache only reads `.nbytes` off them. No model runs.
