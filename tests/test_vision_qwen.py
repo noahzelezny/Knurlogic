@@ -24,8 +24,9 @@ G5 compares with np.array_equal on the chip family the snapshot was built
 on (meta "chip"; same MLX, pinned). On another chip family the GPU kernels
 round float32 differently, so there the tokens must still match exactly
 and the logits to 1e-4: that still catches any edit that moves the text
-path, not a last ulp. The weight fingerprint is exact (fsum, CPU) and chip
-independent. If it goes red on NEW HARDWARE with the fingerprint check
+path, not a last ulp. The weight fingerprint is summed exactly (fsum,
+CPU); the seed-0 init itself runs on the GPU, so off-chip it is held to
+rtol 1e-6. If it goes red on NEW HARDWARE with the fingerprint check
 green, rebuild the snapshot from main's trunk files -- never from the
 edited ones.
 """
@@ -361,11 +362,18 @@ def _seed_model(fam, cfg):
 def test_g5_text_path_is_mains_to_the_bit(fam):
     arrays, meta = fv.load_golden("qwen_g5_text")
     model, fp = _seed_model(fam, meta[f"{fam}/config"])
-    assert np.array_equal(fp, arrays[f"{fam}/w_fingerprint"]), \
-        "the seed-0 init moved, not the text path: rebuild nothing, look at init"
+    # the init runs on the GPU (mx.random + transcendentals), so off the
+    # snapshot's chip family even the seed-0 weights differ in last ulps
+    same_chip = fv.chip() == meta.get("chip")
+    want_fp = arrays[f"{fam}/w_fingerprint"]
+    moved = (not np.array_equal(fp, want_fp) if same_chip
+             else not np.allclose(fp, want_fp, rtol=1e-6, atol=0))
+    assert not moved, (
+        "the seed-0 init moved, not the text path: rebuild nothing, look at "
+        f"init (max rel diff {np.max(np.abs(fp - want_fp) / want_fp.clip(1e-30)):.3g})")
     logits, toks = _g5_run(model, meta["prompt"], meta["split"], meta["steps"])
     assert toks == arrays[f"{fam}/tokens"].tolist()
-    if fv.chip() == meta.get("chip"):
+    if same_chip:
         assert np.array_equal(logits, arrays[f"{fam}/logits"])
     else:
         np.testing.assert_allclose(logits, arrays[f"{fam}/logits"],
