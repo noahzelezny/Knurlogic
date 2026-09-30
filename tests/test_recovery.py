@@ -428,3 +428,11 @@ def test_refusal_line_reads_the_reason_and_its_bullets():
                                    "- and another")
     assert R.refusal_line("all fine\n") == ""
     assert R.kind("refusing to guess") != "refusal"    # REFUSING is serve's
+
+
+def test_a_missing_module_is_a_refusal_never_relaunched():
+    log = ('Traceback (most recent call last):\n  File "model.py", line 4084\n'
+           "ModuleNotFoundError: No module named 'mlx_vlm'\n")
+    line = R.refusal_line(log)
+    assert line == "ModuleNotFoundError: No module named 'mlx_vlm'"
+    assert R.kind(f"rank 1 exited with code 1: {line}") == "refusal"

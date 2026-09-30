@@ -46,13 +46,17 @@ MEMORY_RX = re.compile(
     r"memoryerror|\boom\b|held now by", re.I)
 #: a process that REFUSED to start (`knurlogic serve` printed "REFUSING"
 #: and exited REFUSED_EXIT): bad settings, a context past the model's
-#: maximum, a model it cannot load as asked. Deterministic -- the same
-#: launch refuses the same way -- so never relaunched: failed at once.
+#: maximum, a model it cannot load as asked. A missing Python module (a
+#: bundled model.py importing a package the rank's env lacks) is the same.
+#: Deterministic -- the same launch refuses the same way -- so never
+#: relaunched: failed at once.
 REFUSAL_RX = re.compile(
-    r"\bREFUSING\b|refused at startup|launch settings are refused")
+    r"\bREFUSING\b|refused at startup|launch settings are refused|"
+    r"ModuleNotFoundError|ImportError")
 #: a refusal's lines in a serve log: the REFUSING line and any "  - why"
-#: lines under it
-REFUSAL_LINE_RX = re.compile(r"REFUSING[^\n]*(?:\n  - [^\n]*)*")
+#: lines under it, or the import error
+REFUSAL_LINE_RX = re.compile(r"REFUSING[^\n]*(?:\n  - [^\n]*)*|"
+                             r"(?:ModuleNotFoundError|ImportError): [^\n]*")
 #: a machine that went away or stopped answering: wait for it
 MACHINE_RX = re.compile(
     r"has not answered|not a peer this page knows|is not a machine "
