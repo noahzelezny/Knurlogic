@@ -120,8 +120,7 @@ async function showStrategy(ms){
   const match=()=>ps.find(p=>same(pv(p.name),V));
   el.innerHTML=`<div class="sgrp"><div class="shd">Presets</div>
     <div class="seg strat" role="group" aria-label="preset">${ps.map(p=>`<button type="button"
-      data-p="${esc(p.name)}">${esc(p.title)}${
-      p.name===me.default?'<small>default</small>':''}</button>`).join('')}</div>
+      data-p="${esc(p.name)}">${esc(p.title)}</button>`).join('')}</div>
     <div class="gks prow">${rows.map(r=>`<label class="gk"><b>${esc(r.title)}<i class="info" tabindex="0">i<span
       class="bub">${esc(r.help)}</span></i></b><select name="${esc(r.name)}"
       aria-label="${esc(r.title)}">${r.options.map(o=>
