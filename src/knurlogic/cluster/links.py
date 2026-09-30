@@ -1,7 +1,7 @@
 """Which link a peer is reached over, and which links a page answers on.
 
 Bonjour will happily hand back a peer's Wi-Fi address when a Thunderbolt
-cable joins the two machines, and a ring built over Wi-Fi is slow and
+cable joins the machines, and a ring built over Wi-Fi is slow and
 drops when a peer is "rediscovered". So knurlogic is explicit:
 
   --host cluster   bind every address, ANSWER only on loopback and the
