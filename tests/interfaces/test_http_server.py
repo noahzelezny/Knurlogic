@@ -449,3 +449,45 @@ def test_the_request_counter_does_not_lose_concurrent_increments(
     for t in ts:
         t.join()
     assert app.requests == 40000
+
+
+def test_responses_is_served_in_process_both_ways(url):
+    u, prompts = url
+    body = {"model": "tiny", "max_output_tokens": 4,
+            "input": " ".join(map(str, prompts[0]))}
+    code, _, raw = post(u, "/v1/responses", body)
+    r = json.loads(raw)
+    assert code == 200 and r["object"] == "response"
+    assert r["output"][-1]["type"] == "message"
+    assert r["usage"]["output_tokens"] == 4
+    code, _, raw = post(u, "/v1/responses", dict(body, stream=True))
+    kinds = [e["type"] for e in sse(raw)]
+    assert kinds[0] == "response.created" and kinds[-1] in (
+        "response.completed", "response.incomplete") and "response.output_text.delta" in kinds
+    code, _, raw = post(u, "/v1/responses", dict(body, store=True))
+    assert code == 400
+
+
+def test_ollama_is_served_in_process(url):
+    u, prompts = url
+    with urllib.request.urlopen(u + "/api/version") as r:
+        assert json.loads(r.read())["version"]
+    with urllib.request.urlopen(u + "/api/tags") as r:
+        assert json.loads(r.read())["models"][0]["name"] == "tiny"
+    code, _, raw = post(u, "/api/show", {"model": "tiny"})
+    assert code == 200 and "completion" in json.loads(raw)["capabilities"]
+    msgs = [{"role": "user", "content": " ".join(map(str, prompts[0]))}]
+    code, _, raw = post(u, "/api/chat", {"model": "tiny", "messages": msgs,
+                                         "stream": False,
+                                         "options": {"num_predict": 4}})
+    r = json.loads(raw)
+    assert code == 200 and r["done"] and r["eval_count"] == 4
+    code, _, raw = post(u, "/api/chat", {"model": "tiny", "messages": msgs,
+                                         "options": {"num_predict": 4}})
+    lines = [json.loads(x) for x in raw.decode().splitlines()]
+    assert lines[-1]["done"] and lines[-1]["eval_count"] == 4
+    code, _, raw = post(u, "/api/generate", {"model": "tiny",
+                                             "prompt": msgs[0]["content"],
+                                             "stream": False,
+                                             "options": {"num_predict": 4}})
+    assert json.loads(raw)["response"]
