@@ -308,9 +308,10 @@ PRESET_ROWS = (
              "memory is tight.",
      "options": [("", "auto")]
                 + [(str(v), str(v)) for v in (512, 1024, 2048, 4096)]},
-    {"name": "KNURLOGIC_CACHE_LIMIT_GB", "title": "Cache reuse",
-     "help": "Memory MLX keeps for reuse; more is a bit faster, less "
-             "leaves more free.",
+    {"name": "KNURLOGIC_CACHE_LIMIT_GB", "title": "Cache reserve",
+     "help": "Freed memory held back for reuse instead of returned to the "
+             "system. No measured speed difference; less leaves more memory "
+             "free.",
      "options": [(str(v), f"{v} GiB") for v in (1, 2, 4, 8)]},
     {"name": MTP_MODE, "title": "MTP",
      "help": "For models with an MTP head: drafts tokens ahead to speed "
@@ -516,8 +517,9 @@ KNOB_HELP = {
     "KNURLOGIC_KV_BITS": "8-bit holds about twice the conversation in the "
                          "same memory, slightly slower.",
     "KNURLOGIC_KV_KERNEL": "A faster way to read an 8-bit cache; leave on.",
-    "KNURLOGIC_CACHE_LIMIT_GB": "Memory MLX keeps for reuse; more is a bit "
-                                "faster, less leaves more free.",
+    "KNURLOGIC_CACHE_LIMIT_GB": "Freed memory held back for reuse instead of "
+                                "returned to the system. No measured speed "
+                                "difference; less leaves more memory free.",
     "VQ_MOE_GEMMSEG_CBDEV": "Where a lookup table lives; auto is fastest.",
     "VQ_MOE_GEMMSEG_RTILE": "Leave at 32; 64 is never faster.",
     "VQ_GEMMSEG_OTILE64": "Faster, same output; leave on.",
