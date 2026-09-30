@@ -1532,3 +1532,9 @@ body.talk #clog{flex:1;height:auto;min-height:0;max-height:none}
 .dlhd .vn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dlrow.failed .vs.why{color:var(--warn)}
 .card.loading .x{margin-left:auto;padding:0 6px}
+.fam.hub{white-space:nowrap;padding-left:8px;padding-right:4px;letter-spacing:.02em}
+.mini.pri{color:var(--acc);border-color:var(--acc)}
+.dlhd .mini{padding:2px 8px}
+.dlhd .mini svg{width:13px;height:13px;display:block}
+.dlconf{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--warn)}
+.dlrow.stopped .vs.why{color:var(--dim)}
