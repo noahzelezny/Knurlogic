@@ -272,20 +272,17 @@ function pickInfo(){
   if(!m){ el.innerHTML=''; $('launch').disabled=true; $('launch').title='choose a model';
     $('mtpopts').hidden=true; return }
   const ws=fitWS(), fits=!ws||m.size_bytes<=ws, ns=selNodes();
-  const tags=[m.is_vq?'VQ':'', m.mtp?'MTP':'', m.model_type]
-    .filter(Boolean).map(esc).join(' · ');
+  const tags=[m.is_vq?'VQ':'', m.mtp?'MTP':''].filter(Boolean).join(' · ');
   // Launch loads on THIS machine and nowhere else: the page has no way yet
   // to start a model on a peer, or across several. Picking those still
   // answers the fit question; it does not pretend to launch.
   const blocked=launchBlock(ns);
   $('launch').disabled=!!blocked;
   $('launch').title=blocked||'';
-  el.innerHTML=`<div>${tags}</div>`+
-    (!fits?`<div class="warn">${gb(m.size_bytes)} against ${gb(ws)} of
-      working set in ${esc(fitWhere())} — it will not fit</div>`
-     : !ns.length || !(ns.length===1&&isLocal(ns[0]))
-       ? `<div class="room">${gb(ws-m.size_bytes)} left in ${esc(fitWhere())}</div>`
-       : `<div id="pickroom">${roomHTML(m.room)}</div>`)+
+  el.innerHTML=(tags?`<div>${tags}</div>`:'')+
+    (!fits?`<div class="warn">more space required</div>`
+     : ns.length===1&&isLocal(ns[0])
+       ? `<div id="pickroom">${roomHTML(m.room)}</div>` : '')+
     (blocked && !/does not fit/.test(blocked)?`<div class="note">${esc(blocked)}</div>`:'');
   SETS=launchSets(baseKey(m.name)); mtpState(); loadPreview();
 }
