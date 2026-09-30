@@ -800,3 +800,8 @@ body.talk #clog{flex:1;height:auto;min-height:0;max-height:none}
 .mrow.open .mset{display:block}
 .mrow.open .cv{transform:rotate(90deg)}
 .grphd .gv.on{color:var(--acc)}
+
+.hfrow.no .var{opacity:.55}
+.hfbody{padding:2px 14px 10px 34px;display:flex;flex-direction:column;gap:5px}
+.hfact{display:flex;align-items:center;gap:10px}
+.card.loading .x{margin-left:auto;padding:0 6px}
