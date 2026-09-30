@@ -15,31 +15,20 @@ implements all five families; mlx-vlm is not a dependency.
 
 Interfaces and data shapes: [vision-contracts.md](vision-contracts.md).
 
-## knurlogic owns the VQ runtime
+## A VQ model runs its own runtime
 
-Every released rung ships its own `model.py`, and each one deliberately
-builds a text-only model when mlx-lm loads it. A vision tower cannot be
-grafted onto that, so knurlogic carries one VQ runtime of its own
-(`engine/vq/`), vendored verbatim and pinned by commit and digest
-(`engine/vq/PROVENANCE.md`). It is family-aware and vision-aware; the
-bundled `model.py` stays in the Hub uploads for plain mlx-lm users.
+A VQ model ships its own `model.py`, and that file is what runs it.
+knurlogic carries no VQ runtime of its own: it loads the artifact through
+mlx-lm with the bundled runtime and says that the file WILL be executed. A
+VQ artifact with no `model.py` is refused plainly ("this VQ model does not
+ship its runtime (model.py); re-download it"). When VQLab publishes a newer
+runtime the model is re-published on Hugging Face, and the picker shows an
+"update" tag on the downloaded copy (`interfaces/page/updates.py`).
 
-* **Per-rung differences are settings, not code.** Within a family the
-  published runtimes differ mostly by the defaults of a few numerics flags.
-  Each rung's flags are read from its *published* `model.py` and recorded
-  in `engine/vq/rungs.json`; knurlogic reproduces what is shipped, not what
-  was intended. The table and its findings: [vq-rung-knobs.md](vq-rung-knobs.md).
-* **A rung's numerics come from the rung.** The bf16-I/O flags are
-  numerics-active (up to +0.97% perplexity), so `tuning/resolve.numerics_for`
-  applies the rung's declared knobs, and a runtime profile applies only when
-  a person asks for it.
-* **The identity gate** (`tools/vq_gate.py`): knurlogic's runtime and the
-  rung's bundled runtime, each in its own process, give the same logits on
-  the same prompt (atol 1e-5) and 40 identical greedy tokens. A rung that
-  has not passed loads the `model.py` it ships and is listed as such, never
-  silently served on the new runtime. For an older-generation bundle,
-  reproducing its flags on the new runtime is a runtime change, not a
-  no-op, which is exactly what the gate checks.
+* **Numerics are the model's own.** The bf16-I/O flags are numerics-active
+  (up to +0.97% perplexity), so `tuning/resolve.numerics_for` applies only
+  what the artifact declares or its own `model.py` defaults to, and a
+  runtime profile applies only when a person asks for it.
 
 ## The stack is pinned
 

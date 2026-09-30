@@ -88,7 +88,7 @@ Start with `engine.md` and `server.md` for the shape of a server.
 
 - Engine and models: [engine](design/engine.md),
   [families](design/families.md), [drafting](design/drafting.md),
-  [kv-cache](design/kv-cache.md), [vq-rung-knobs](design/vq-rung-knobs.md)
+  [kv-cache](design/kv-cache.md)
 - Vision: [vision](design/vision.md),
   [vision-contracts](design/vision-contracts.md)
 - Server and interfaces: [server](design/server.md), [mcp](design/mcp.md)

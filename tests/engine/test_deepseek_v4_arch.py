@@ -100,12 +100,10 @@ def _load(model_config=None):
     """The tiny artifact the way `knurlogic serve` loads one: Artifact,
     loading.register (the vendored set), then mlx-lm's loader."""
     from mlx_lm.utils import load_model
-    from knurlogic.engine.vq import runtime
     from knurlogic.interfaces import loading
     from knurlogic.machine.artifact import Artifact
     a = Artifact.load(str(G.TINY))
     assert loading.register(a) == []
-    assert not runtime.serves(G.TINY)
     model, _ = load_model(G.TINY, model_config=model_config)
     mod = sys.modules[type(model).__module__]
     assert mod.__name__ == "mlx_lm.models.deepseek_v4"

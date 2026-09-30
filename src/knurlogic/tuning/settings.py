@@ -155,38 +155,14 @@ def tight_headroom_bytes(working_set_bytes: int) -> int:
     return int(max(TIGHT_HEADROOM_GIB * (1 << 30),
                    TIGHT_HEADROOM_SHARE * working_set_bytes))
 
-# --- performance knobs with a measured basis --------------------------------
-# value -> (default, why). Anything not listed should not be set by a
-# resolver; it exists in the runtime so a finding stays reproducible.
-PERFORMANCE_DEFAULTS = {
-    # device codebook beats threadgroup by 20.9% on prefill at
-    # d4-K2048. 'auto' lets the runtime's own selector decide per module;
-    # ~447 fleet modules ride on it.
-    "VQ_MOE_GEMMSEG_CBDEV": ("auto", "device arm +20.9% prefill at d4-K2048"),
-    # RTILE=64 is SLOWER everywhere measured (0.75-0.97x). DO NOT SET 64.
-    "VQ_MOE_GEMMSEG_RTILE": ("32", "64 is 0.75-0.97x, never faster"),
-    # +5.1-6.6% prefill, bit-exact.
-    "VQ_GEMMSEG_OTILE64": ("1", "+5.1-6.6% prefill, bit-exact"),
-    # the v2 stack reaches +11.9% over shipped.
-    "VQ_GEMMSEG_PH2V": ("1", "part of the +11.9% stack"),
-    "VQ_D4_WALK": ("1", "part of the +11.9% stack"),
-    # Arm 1.5 measured NEGATIVE (-1.8-2%).
-    "VQ_GEMMSEG_PIPE": ("0", "measured -1.8-2%"),
-}
-
 # Numerics-active flags: family-local, up to +0.97% ppl.
 # v1.5 = both off (bit-exact vs the published arc6 runtime); v2 = both on.
 #
-# A RUNG'S NUMERICS ARE THE RUNG'S. What a released rung computes
-# with is what its PUBLISHED model.py defaults to, and that is not uniform:
-# Flash-Next 2.1 and Qwen3.6-35B-A3B 3.8/4.6/5.4 shipped v2, the rest v1.5 or
-# the arc6-era runtime with no flags at all (docs/design/vq-rung-knobs.md,
-# read off the Hub). Applying one table to every VQ artifact with v1.5 as
-# the default would force the v2 rungs' two flags to 0 -- a numerics change
-# nobody asked for, on exactly the rungs whose weights were fitted under
-# v2. So the resolver takes a rung's numerics from the rung (NUMERICS_SOURCES,
-# in order) and applies a profile ONLY when
-# a person names one.
+# A VQ MODEL'S NUMERICS ARE ITS OWN. It runs the model.py it ships, whose
+# defaults are what its weights were fitted under, and that is not uniform
+# across releases. So the resolver takes the numerics from the artifact
+# (NUMERICS_SOURCES, in order) and applies a profile ONLY when a person
+# names one.
 NUMERICS_FLAGS = ("VQ_GEMMSEG_BF16IO", "VQ_DECODE_BF16IO")
 
 RUNTIME_PROFILES = {
@@ -194,17 +170,12 @@ RUNTIME_PROFILES = {
     "v2": {f: "1" for f in NUMERICS_FLAGS},
 }
 
-# Where a rung's numerics come from when no profile is asked for, first
+# Where a model's numerics come from when no profile is asked for, first
 # match wins, per flag:
-#   declared   config.json `knobs` -- the artifact's own record, which
-#              Artifact.declared_knobs() already ranks above everything
-#   published  engine/vq/rungs.json -- read from the rung's PUBLISHED
-#              model.py (never a local copy: those may drift)
-#   bundled    the default in the artifact's own model.py, for a rung not
-#              in rungs.json (a local build, a new upload)
-# Nothing found means nothing is emitted: the runtime's own default stands,
-# and the note says so rather than inventing one.
-NUMERICS_SOURCES = ("declared", "published", "bundled")
+#   declared   config.json `knobs` -- the artifact's own record
+#   bundled    the default in the artifact's own model.py
+# Nothing found means nothing is emitted: the runtime's own default stands.
+NUMERICS_SOURCES = ("declared", "bundled")
 
 
 # --- the tuning axis, and what it is NOT allowed to do ----------------------
@@ -218,8 +189,6 @@ NUMERICS_SOURCES = ("declared", "published", "bundled")
 #   * VQ_DECODE_CHUNK: smaller is faster AND smaller in memory (128 -> 32 is
 #     1.37x on every rung). There is no tradeoff on this knob, so no preset
 #     may raise it. It is capped at the default in both directions.
-#   * VQ_MOE_GEMMSEG_RTILE=64 is 0.75-0.97x and never faster, so no
-#     setting of this axis may reach it.
 #
 # So a preset moves only the knobs where headroom actually buys something, or
 # tightens the ones that bound peak memory. Anything a profile asks for
@@ -504,35 +473,13 @@ KNOB_DOC = {
         "memory a long context or another agent cannot use. Smaller frees "
         "it, with no measured speed cost at 26k-token prefill -- the "
         "biggest single win in the memory playbook."),
-    "VQ_MOE_GEMMSEG_CBDEV": (
-        "where the codebook lives during the MoE GEMM",
-        "the device arm is +20.9% on prefill at d4-K2048, same "
-        "output; 'auto' lets the runtime choose per module. Forcing an arm "
-        "risks the slower one on modules it does not suit."),
-    "VQ_MOE_GEMMSEG_RTILE": (
-        "row tile width in the segmented GEMM",
-        "no trade -- 64 is 0.75-0.97x and NEVER faster. The one "
-        "'win' was an env-ordering bug that benchmarked 32 twice."),
-    "VQ_GEMMSEG_OTILE64": (
-        "64-wide output tiling in the segmented GEMM",
-        "+5.1-6.6% prefill, bit-exact; no measured cost, so on."),
-    "VQ_GEMMSEG_PH2V": ("phase-2 vectorization",
-                        "part of the +11.9% stack; off gives that "
-                        "speed back, no measured gain."),
-    "VQ_D4_WALK": ("d4 codebook walk",
-                   "part of the +11.9% stack; off gives that speed "
-                   "back, no measured gain."),
-    "VQ_GEMMSEG_PIPE": ("software pipelining in the segmented GEMM",
-                        "on costs 1.8-2% and buys nothing. "
-                        "Off."),
     "VQ_GEMMSEG_BF16IO": ("bf16 IO in the segmented GEMM",
                           "numerics-active: changing it changes "
                           "the output, up to +0.97% ppl, on weights fitted "
-                          "the other way. Each rung keeps what it shipped: "
-                          "on for the v2 rungs, off for v1.5."),
+                          "the other way. Each model keeps what it shipped."),
     "VQ_DECODE_BF16IO": ("bf16 IO on the decode path",
                          "numerics-active: changing it changes "
-                         "the output (up to +0.97% ppl). Each rung keeps "
+                         "the output (up to +0.97% ppl). Each model keeps "
                          "what it shipped."),
 }
 
@@ -557,12 +504,6 @@ KNOB_HELP = {
     "KNURLOGIC_CACHE_LIMIT_GB": "Freed memory held back for reuse instead of "
                                 "returned to the system. No measured speed "
                                 "difference; less leaves more memory free.",
-    "VQ_MOE_GEMMSEG_CBDEV": "Where a lookup table lives; auto is fastest.",
-    "VQ_MOE_GEMMSEG_RTILE": "Leave at 32; 64 is never faster.",
-    "VQ_GEMMSEG_OTILE64": "Faster, same output; leave on.",
-    "VQ_GEMMSEG_PH2V": "Faster, same output; leave on.",
-    "VQ_D4_WALK": "Faster, same output; leave on.",
-    "VQ_GEMMSEG_PIPE": "Slower, no gain; leave off.",
     "VQ_GEMMSEG_BF16IO": "Changes the output slightly; keep what the model "
                          "shipped with.",
     "VQ_DECODE_BF16IO": "Changes the output slightly; keep what the model "
@@ -777,7 +718,7 @@ KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB",
 def knob_tier(name: str) -> str:
     if name in KNOB_TIER_REACH:
         return "reach"
-    if name in PERFORMANCE_DEFAULTS or name in NUMERICS_FLAGS:
+    if name in NUMERICS_FLAGS:
         return "deeper"
     return "kernel"
 

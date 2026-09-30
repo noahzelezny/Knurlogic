@@ -12,6 +12,7 @@ Design: docs/design/settings.md (resolve).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from knurlogic.tuning import settings as S
@@ -268,7 +269,7 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
     of them, or {name: working_set_bytes}), in which case the return is a
     `ClusterResolution` carrying one `Resolution` per node.
 
-    `profile` is None (the default): each rung keeps the numerics it
+    `profile` is None (the default): each model keeps the numerics it
     SHIPPED (`numerics_for`). "v1.5" or "v2" forces that profile's two
     numerics-active flags, and only because someone asked -- it used to
     default to v1.5 and so silently turned off bf16 I/O on the rungs that
@@ -718,10 +719,8 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             f"this box. No setting fixes that; it needs a bigger box or more "
             f"than one.")
 
-    # --- performance knobs, each with a finding behind it -------------------
+    # --- numerics: the model's own, from what it ships ----------------------
     if artifact.is_vq:
-        for k, (v, why) in S.PERFORMANCE_DEFAULTS.items():
-            r.env[k] = v
         env, note = numerics_for(artifact, profile)
         r.env.update(env)
         r.notes.append(note)
@@ -863,25 +862,28 @@ def kv_refusal(artifact: Artifact, kv_bits) -> str | None:
     return None
 
 
+#: How a runtime spells an env flag and its default in source.
+_FLAG_DEFAULT = re.compile(
+    r'os\.environ\.get\(\s*"([A-Z][A-Z0-9_]+)"\s*,\s*\n?\s*("?[^")\s]*"?)\s*\)')
+
+
+def _flag_defaults(src: str) -> dict:
+    """{flag: default string} for every `os.environ.get("X", d)` in a
+    runtime's source; the first occurrence wins."""
+    out: dict = {}
+    for m in _FLAG_DEFAULT.finditer(src):
+        out.setdefault(m.group(1), m.group(2).strip('"'))
+    return out
+
+
 def _numerics_source(artifact: Artifact, flag: str, source: str):
     if source == "declared":
         d = artifact.declared_knobs().get(flag)
         if isinstance(d, dict) and d.get("default") is not None:
             return str(d["default"])
         return None
-    if source == "published":
-        from knurlogic.engine.vq import rungs
-        row = rungs.rung(artifact.path)
-        if not row:
-            return None
-        # an arc6-era bundle has no such flag; its arithmetic is the flag
-        # off, which rungs.json records as an inferred knob
-        return (row.get("published_defaults", {}).get(flag)
-                or row.get("knobs", {}).get(flag)
-                or ("0" if flag in row.get("inferred_knobs", ()) else None))
     if source == "bundled":
-        from knurlogic.engine.vq import rungs
-        return rungs.flag_defaults(artifact.runtime_source()).get(flag)
+        return _flag_defaults(artifact.runtime_source()).get(flag)
     raise ValueError(source)
 
 
@@ -889,7 +891,7 @@ def numerics_for(artifact: Artifact, profile: str | None = None):
     """(env, note): the numerics-active flags for this artifact.
 
     A profile someone ASKED for wins, and the note names what it overrode.
-    Otherwise every flag comes from the rung itself, first source in
+    Otherwise every flag comes from the artifact itself, first source in
     S.NUMERICS_SOURCES that answers. The bug this replaces: a v1.5 default
     applied to every VQ artifact, forcing Flash-Next 2.1 and Qwen3.6-35B-A3B
     3.8/4.6/5.4 -- published with both flags ON -- to run off (F103/F105:
