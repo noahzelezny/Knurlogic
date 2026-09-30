@@ -27,15 +27,18 @@ def home(tmp_path, monkeypatch):
 
 
 def test_strategy_round_trips_and_defaults(home):
-    assert strategy.get() == "balanced"
+    assert strategy.get() == "default"
     assert strategy.set("lean") == "lean" and strategy.get() == "lean"
     assert json.loads(strategy.path().read_text()) == {"preset": "lean"}
-    strategy.set("balanced")
-    assert not strategy.path().exists() and strategy.get() == "balanced"
+    strategy.set("default")
+    assert not strategy.path().exists() and strategy.get() == "default"
+    # the names presets once had: fast and stable are default, safe is lean
+    assert strategy.set("fast") == "default" and not strategy.path().exists()
+    assert strategy.set("safe") == "lean" and strategy.get() == "lean"
     with pytest.raises(ValueError):
         strategy.set("reckless")
     strategy.path().write_text("{not json")
-    assert strategy.get() == "balanced"
+    assert strategy.get() == "default"
 
 
 def test_every_preset_is_explained(home):
@@ -47,24 +50,24 @@ def test_every_preset_is_explained(home):
         assert p["title"] and set(p["values"]) == {
             r["name"] for r in doc["rows"]}
     assert all(r["help"] and r["options"] for r in doc["rows"])
-    out = documents.set_strategy(b'{"preset": "stable"}')
-    assert out["preset"] == "stable" and out["applied"]
+    out = documents.set_strategy(b'{"preset": "lean"}')
+    assert out["preset"] == "lean" and out["applied"]
     assert "error" in documents.set_strategy(b'{"preset": "x"}')
-    assert strategy.get() == "stable"
+    assert strategy.get() == "lean"
 
 
 def test_a_launch_without_a_tune_takes_the_strategy(home):
-    assert page_server._default_tune() == "balanced"
-    strategy.set("safe")
-    assert page_server._default_tune() == "safe"
+    assert page_server._default_tune() == "default"
+    strategy.set("lean")
+    assert page_server._default_tune() == "lean"
 
 
 def test_peer_machine_applies_to_this_machine(home):
-    code, doc = page_server.peer_machine(b'{"allowance_gib": 64, "strategy": "fast"}')
+    code, doc = page_server.peer_machine(b'{"allowance_gib": 64, "strategy": "lean"}')
     assert code == 200
-    assert allowance.get() == 64 * GIB and strategy.get() == "fast"
+    assert allowance.get() == 64 * GIB and strategy.get() == "lean"
     assert doc["allowance"]["allowance_gib"] == 64
-    assert doc["strategy"]["preset"] == "fast"
+    assert doc["strategy"]["preset"] == "lean"
     assert set(doc["applied"]) == {"knurlogic allowance",
                                    "knurlogic strategy"}
     assert page_server.peer_machine(b'{"allowance_gib": 500}')[0] == 400
@@ -136,15 +139,15 @@ def test_one_page_sets_a_peers_allowance_through_the_peers_page(
         _peers(monkeypatch, f"127.0.0.1:{pport}")
         code, doc = _post(f"http://127.0.0.1:{hport}/machine.json?where="
                           f"http://127.0.0.1:{pport}",
-                          {"allowance_gib": 48, "strategy": "stable"})
+                          {"allowance_gib": 48, "strategy": "lean"})
         assert code == 200, doc
         assert doc["allowance"]["allowance_gib"] == 48
-        assert allowance.get() == 48 * GIB and strategy.get() == "stable"
+        assert allowance.get() == 48 * GIB and strategy.get() == "lean"
         # a browser never reaches the peer route itself
         code, doc = _post(f"http://127.0.0.1:{pport}/peer/machine.json",
-                          {"strategy": "fast"},
+                          {"strategy": "default"},
                           {"Origin": "http://evil.example"})
-        assert code == 403 and strategy.get() == "stable"
+        assert code == 403 and strategy.get() == "lean"
     finally:
         peer.shutdown()
         here.shutdown()

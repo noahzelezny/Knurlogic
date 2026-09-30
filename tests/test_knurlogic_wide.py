@@ -65,7 +65,7 @@ def test_compaction_document_is_one_live_set(home):
 
 def test_peer_machine_saves_knurlogic_wide_settings(home):
     code, doc = page_server.peer_machine(json.dumps(
-        {"strategy": "stable",
+        {"strategy": "lean",
          "settings": {"KNURLOGIC_CROSS_CHIP": "auto",
                       "KNURLOGIC_COMPACT_AUTO": "on"}}).encode())
     assert code == 200
@@ -114,23 +114,21 @@ def test_a_launch_reads_cross_chip_from_knurlogic_wide(home):
 
 def test_a_custom_preset_is_saved_rows_the_launch_reads(home):
     assert S.preset_row_values("lean") == {
-        "KNURLOGIC_PREFILL_CHUNK": "512", "KNURLOGIC_CACHE_LIMIT_GB": "4",
-        S.DECODE_SCALE: "", S.MTP_MODE: "off", "KNURLOGIC_KV_BITS": "8"}
-    assert S.preset_row_values("stable")[S.MTP_MODE] == "every"
+        "KNURLOGIC_PREFILL_CHUNK": "512", "KNURLOGIC_CACHE_LIMIT_GB": "1",
+        S.MTP_MODE: "off", "KNURLOGIC_KV_BITS": "8"}
+    assert S.preset_row_values("default")[S.MTP_MODE] == "dynamic"
     preferences.set({S.MTP_MODE: "every", "KNURLOGIC_KV_BITS": "8",
-                     "KNURLOGIC_CACHE_LIMIT_GB": "2", S.DECODE_SCALE: "0.5"})
+                     "KNURLOGIC_CACHE_LIMIT_GB": "2"})
     assert preferences.launch_sets({}) == {
         "KNURLOGIC_MTP": "on", "KNURLOGIC_MTP_DYNAMIC": "off",
         "KNURLOGIC_KV_BITS": "8", "KNURLOGIC_CACHE_LIMIT_GB": "2"}
-    assert preferences.decode_scale({}) == 0.5
     # a model's own knob, or its own preset, wins
     assert preferences.launch_sets({"KNURLOGIC_KV_BITS": "bf16"})[
         "KNURLOGIC_KV_BITS"] == "bf16"
-    assert preferences.launch_sets({"KNURLOGIC_PRESET": "fast"}) == \
-        {"KNURLOGIC_PRESET": "fast"}
-    assert preferences.decode_scale({"KNURLOGIC_PRESET": "fast"}) is None
+    assert preferences.launch_sets({"KNURLOGIC_PRESET": "lean"}) == \
+        {"KNURLOGIC_PRESET": "lean"}
     assert "error" in documents.set_knurlogic(b'{"KNURLOGIC_MTP_MODE": "x"}')
-    preferences.set({S.MTP_MODE: "", S.DECODE_SCALE: ""})
+    preferences.set({S.MTP_MODE: ""})
     assert S.MTP_MODE not in preferences.get()
 
 

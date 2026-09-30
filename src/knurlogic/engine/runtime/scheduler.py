@@ -731,7 +731,8 @@ class Scheduler:
             job.prompt_tokens = len(prompt)
             from knurlogic.machine.artifact import context_length
             cap = _context_cap()
-            window = cap or context_length(self.host.path or "")
+            window = cap or context_length(
+                getattr(self.host, "path", "") or "")
             if window and len(prompt) >= window:
                 whose = ("this server's context length is "
                          f"{cap} (KNURLOGIC_CONTEXT_LENGTH)" if cap else

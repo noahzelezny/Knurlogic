@@ -205,9 +205,9 @@ def test_peer_settings_only_reaches_a_server_this_machine_started(
     assert page_server.peer_settings("POST", {"port": ["8080"]}, b"[1]", call)[0] \
         == 400
     code, doc = page_server.peer_settings("GET", {"port": ["8080"],
-                                         "tune": ["fast"]}, b"", call)
+                                         "tune": ["lean"]}, b"", call)
     assert code == 200 and calls[-1] == (
-        "http://127.0.0.1:8080/settings.json?tune=fast", None)
+        "http://127.0.0.1:8080/settings.json?tune=lean", None)
     code, _ = page_server.peer_settings("POST", {"port": ["8080"]},
                                b'{"VQ_DECODE_CHUNK": "16"}', call)
     assert code == 200 and calls[-1] == (
@@ -238,7 +238,7 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
 
         def do_GET(self):
             seen.append(("GET", self.path))
-            self._json({"knobs": [], "live": {"tune": "balanced"}})
+            self._json({"knobs": [], "live": {"tune": "default"}})
 
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
@@ -262,9 +262,9 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
         assert base in page_server._PEER_TARGETS
         with urllib.request.urlopen(
                 f"http://127.0.0.1:{hport}/peek?where={base}"
-                f"&path=/settings.json&tune=fast", timeout=5) as r:
-            assert json.loads(r.read())["live"]["tune"] == "balanced"
-        assert seen[-1] == ("GET", "/settings.json?tune=fast")
+                f"&path=/settings.json&tune=lean", timeout=5) as r:
+            assert json.loads(r.read())["live"]["tune"] == "default"
+        assert seen[-1] == ("GET", "/settings.json?tune=lean")
         req = urllib.request.Request(
             f"http://127.0.0.1:{hport}/apply?where={base}",
             data=b'{"VQ_DECODE_CHUNK": "16"}', method="POST",

@@ -47,14 +47,14 @@ def test_the_prompt_chunk_is_one_value_on_every_rank():
     pipeline ring (GLM-5.3 at 2048 on one rank, 4096 on the other). The tightest
     node's chunk is everyone's, and the big node is told why. Every rank is
     512 by default, so the ring rule is exercised where widths can differ:
-    tune=fast on a measured-wide family, one roomy rank and one tight."""
+    tune=default on a measured-wide family, one roomy rank and one tight."""
     c = resolve(_art(), [Node("big", 128 * GIB, holds_bytes=90 * GIB),
                          Node("small", 64 * GIB, holds_bytes=62 * GIB)])
     assert c.nodes["big"].env["KNURLOGIC_PREFILL_CHUNK"] == \
         c.nodes["small"].env["KNURLOGIC_PREFILL_CHUNK"] == "512"
     c = resolve(_art(model_type="qwen3_5"),
                 [Node("big", 128 * GIB, holds_bytes=48 * GIB),
-                 Node("small", 64 * GIB, holds_bytes=62 * GIB)], tune="fast")
+                 Node("small", 64 * GIB, holds_bytes=62 * GIB)], tune="default")
     big, small = c.nodes["big"].env, c.nodes["small"].env
     assert big["KNURLOGIC_PREFILL_CHUNK"] == small["KNURLOGIC_PREFILL_CHUNK"] == "512"
     assert any("every rank must match" in n for n in c.nodes["big"].notes)
@@ -141,9 +141,9 @@ def test_settings_json_says_running_would_be_and_how_to_get_it(tmp_path):
     from knurlogic.tuning.resolve import resolve
 
     a = _art(bytes_on_disk=72 * GIB)
-    live = resolve(a, 84 * GIB, tune="balanced")
+    live = resolve(a, 84 * GIB, tune="default")
     doc = documents.settings_document(
-        a, live_env=dict(live.env), live_tune="balanced",
+        a, live_env=dict(live.env), live_tune="default",
         live_working_set=84 * GIB,
         resolve_fn=lambda ws, t: resolve(a, ws, tune=t))
 
@@ -155,7 +155,7 @@ def test_settings_json_says_running_would_be_and_how_to_get_it(tmp_path):
     assert {k["reach"] for k in same["knobs"]} <= {"live", "restart",
                                                    "no-effect"}
 
-    fast = doc({"tune": ["fast"]})
+    fast = doc({"tune": ["lean"]})
     changed = {k["name"]: (k["running"], k["would_be"])
                for k in fast["knobs"] if k["changed"]}
     assert "VQ_CACHE_LIMIT_GB" in changed
@@ -172,9 +172,9 @@ def test_a_misspelled_tune_from_a_url_falls_back_instead_of_500ing():
     from knurlogic.interfaces.page import documents
     from knurlogic.tuning.resolve import resolve
     a = _art(bytes_on_disk=72 * GIB)
-    doc = documents.settings_document(a, live_env={}, live_tune="balanced",
+    doc = documents.settings_document(a, live_env={}, live_tune="default",
                                 live_working_set=84 * GIB,
                                 resolve_fn=lambda ws, t: resolve(a, ws, tune=t))
-    assert doc({"tune": ["turbo"]})["asked"]["tune"] == "balanced"
+    assert doc({"tune": ["turbo"]})["asked"]["tune"] == "default"
     assert doc({"working_set_gib": ["not-a-number"]})[
         "asked"]["working_set_bytes"] == 84 * GIB
