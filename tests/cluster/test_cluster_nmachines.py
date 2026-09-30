@@ -116,3 +116,63 @@ def test_ring_ips_take_an_address_a_neighbour_shares(n):
         near = {C._subnet(t["ip"]) for k in ((r - 1) % n, (r + 1) % n)
                 for t in ms[k]["thunderbolt"]}
         assert C._subnet(ip) in near
+
+
+def _busy_leader(busy, free):
+    """Rank 0's prepare (the coordinator is rank 0 here) refuses `busy`
+    ports the way a machine serving there does, suggesting `free`."""
+    seen = []
+
+    def prepare(spec):
+        seen.append(spec["port"])
+        if spec["port"] in busy:
+            return 200, {"ok": False, "free_port": free,
+                         "refused": f"port {spec['port']} is taken"}
+        return 200, {"ok": True}
+    return seen, prepare
+
+
+def _port_launch(monkeypatch, prep, req=None):
+    from knurlogic.machine import servers
+    monkeypatch.setattr(servers, "free_port", lambda start, taken=(): start)
+    monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
+    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(C, "prepare", prep)
+    monkeypatch.setattr(C, "start", lambda job: (200, {"started": job}))
+    infos = mesh_infos(2)
+    peers = [SimpleNamespace(id="m1", name="M1", host="127.0.0.1",
+                             key="127.0.0.1:8765", state="answering",
+                             link="thunderbolt", node={"cluster": infos[1]})]
+    return C.launch({"action": "load", "identity": "abc",
+                     "nodes": ["m0", "m1"], "split": "pipeline",
+                     "link": "tcp", **(req or {})},
+                    me={"id": "m0", "name": "M0"}, peers=peers,
+                    local_info=infos[0], ui_port=1, serve_port=8080,
+                    post=lambda u, d: {"ok": True, "started": d.get("job")},
+                    follow=lambda j, c: None)
+
+
+def test_unnamed_port_retries_once_on_the_suggested_free_one(monkeypatch):
+    seen, prep = _busy_leader({8080}, 8083)
+    out = _port_launch(monkeypatch, prep)
+    assert seen == [8080, 8083] and out["port"] == 8083
+
+
+def test_named_port_that_is_taken_stays_refused(monkeypatch):
+    seen, prep = _busy_leader({8080}, 8083)
+    out = _port_launch(monkeypatch, prep, {"port": 8080})
+    assert seen == [8080] and out["refused"].startswith("nothing started")
+
+
+def test_free_port_skips_served_and_bound_ports(monkeypatch):
+    import socket
+    from knurlogic.machine import servers
+    monkeypatch.setattr(servers, "registry",
+                        lambda: {8080: {"pid": 1, "artifact": "x"}})
+    monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        bound = s.getsockname()[1]
+        assert servers.free_port(bound) != bound
+    assert servers.free_port(8080) != 8080
