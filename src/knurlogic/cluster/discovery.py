@@ -20,6 +20,8 @@ import socket
 import threading
 import time
 
+from knurlogic.cluster import PROC_ERRORS
+
 SERVICE = "_knurlogic._tcp"
 LOCAL_ONLY = 0xFFFFFFFF          # kDNSServiceInterfaceIndexLocalOnly
 F_MORE, F_ADD = 0x1, 0x2          # kDNSServiceFlagsMoreComing / Add
@@ -100,7 +102,7 @@ def interface_of(ip: str) -> int:
     try:
         out = subprocess.run(["ifconfig"], capture_output=True, text=True,
                              timeout=3).stdout
-    except Exception:
+    except PROC_ERRORS:
         return 0
     iface = None
     for line in out.splitlines():
