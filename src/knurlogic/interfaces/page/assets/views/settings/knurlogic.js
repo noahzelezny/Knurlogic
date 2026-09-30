@@ -17,7 +17,7 @@ function showKnurlogic(){
   const L=$('setlist'), ms=machines();
   if(!['strategy','compaction'].includes(SKN)) SKN='strategy';
   const it=(id,name,sub)=>`<div class="fam" data-k="${id}" aria-current="${id===SKN}">${esc(name)}<small>${esc(sub)}</small></div>`;
-  L.innerHTML=it('strategy','Presets',window.LOADTUNE||'balanced')+
+  L.innerHTML=it('strategy','Presets','')+
     it('compaction','Compaction','');
   L.querySelectorAll('[data-k]').forEach(v=>v.onclick=()=>{
     if(v.dataset.k===SKN) return;
