@@ -100,10 +100,10 @@ def test_other_knobs_are_checked_for_type_and_range():
 
 def test_the_prompt_chunk_is_emitted_under_knurlogics_own_name():
     """VQLAB_PREFILL_CHUNK is read by no bundled runtime -- only the engine,
-    under either name -- so it is emitted under knurlogic's own name. The
-    cache limit is the VQ runtime's VQ_CACHE_LIMIT_GB."""
+    under either name -- so it is emitted under knurlogic's own name. So is
+    the cache limit (the VQ runtime's name is passed the same value)."""
     assert S.default_alias("prefill_chunk") == "KNURLOGIC_PREFILL_CHUNK"
-    assert S.default_alias("cache_limit_gb") == "VQ_CACHE_LIMIT_GB"
+    assert S.default_alias("cache_limit_gb") == "KNURLOGIC_CACHE_LIMIT_GB"
     env = resolve(_art(), 96 * GIB).env
     assert "KNURLOGIC_PREFILL_CHUNK" in env
     assert "VQLAB_PREFILL_CHUNK" not in env
@@ -124,12 +124,15 @@ def test_the_legacy_name_is_still_accepted_and_beats_the_resolver():
 
 
 def test_the_old_cache_limit_name_is_accepted_and_reaches_an_old_runtime():
-    """VQLAB_CACHE_LIMIT_GB (saved settings, --set) becomes
-    VQ_CACHE_LIMIT_GB; an artifact whose bundled runtime reads only the old
-    name still gets the explicit value under it."""
+    """VQLAB_CACHE_LIMIT_GB and VQ_CACHE_LIMIT_GB (saved settings, --set)
+    become KNURLOGIC_CACHE_LIMIT_GB; an artifact whose bundled runtime reads
+    an old name still gets the explicit value under it."""
+    assert S.canonical_sets({"VQ_CACHE_LIMIT_GB": "3.0"}) == \
+        {"KNURLOGIC_CACHE_LIMIT_GB": "3.0"}
     sets = S.canonical_sets({"VQLAB_CACHE_LIMIT_GB": "2.0"})
-    assert sets == {"VQ_CACHE_LIMIT_GB": "2.0"}
-    env = {"VQLAB_CACHE_LIMIT_GB": "4.0"}      # what the resolver emitted
+    assert sets == {"KNURLOGIC_CACHE_LIMIT_GB": "2.0"}
+    env = {"KNURLOGIC_CACHE_LIMIT_GB": "4.0",   # what the resolver emitted
+           "VQLAB_CACHE_LIMIT_GB": "4.0"}
     assert S.legacy_mirror(env, sets) == {"VQLAB_CACHE_LIMIT_GB": "2.0"}
     assert S.engine_settings({**env, **sets})["cache_limit_gb"] == 2.0
 

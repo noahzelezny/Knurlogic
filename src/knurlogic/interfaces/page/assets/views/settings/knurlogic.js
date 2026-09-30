@@ -137,8 +137,7 @@ async function showStrategy(ms){
   const det=()=>{
     const p=ps.find(x=>x.name===sel)||ps[0], d=$('sdet');
     d.classList.toggle('staged', sel!==cur);
-    d.innerHTML=`<i>trades</i><span>${esc(p.trades)}</span><i>changes</i><span>${
-      esc(p.changes)}</span><i>pick it</i><span>${esc(p.who)}</span>`;
+    d.innerHTML=`<i>${p.name===me.default?'sets':'differs'}</i><span>${esc(p.settings)}</span>`;
   };
   el.querySelectorAll('.strat button').forEach(b=>b.onclick=()=>{
     sel=b.dataset.p;
