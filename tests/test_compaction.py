@@ -202,7 +202,10 @@ def test_the_summary_prompt_is_extended_and_lists_the_calls():
 
 
 def test_the_prompts_ship_as_markdown_beside_the_module():
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:            # 3.10: pytest depends on tomli
+        import tomli as tomllib
     from pathlib import Path
     here = Path(E.__file__).with_name("prompts")
     for name in ("compact.md", "findings.md"):
