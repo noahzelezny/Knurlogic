@@ -26,7 +26,7 @@ from knurlogic.machine.servers import (is_our_server, registry,
                                        save_registry, serve_log)
 from knurlogic.interfaces.page import documents
 # the launch facts cluster jobs share: tuning/settings owns them
-from knurlogic.tuning.settings import PATH_KEYS, TUNES, clean_sets
+from knurlogic.tuning.settings import (PATH_KEYS, clean_sets, preset_or)
 
 logger = logging.getLogger(__name__)
 
@@ -235,7 +235,7 @@ def _spawn(*a, **k):
         return _spawn_unlocked(*a, **k)
 
 
-def _spawn_unlocked(path: str, port: int, tune: str = "balanced",
+def _spawn_unlocked(path: str, port: int, tune: str = "default",
            sets: dict | None = None, draft: bool = True) -> dict:
     """Start `knurlogic serve` for one artifact, on its own port.
 
@@ -382,7 +382,7 @@ def _load_fn(serve_port: int):
             if act == "load":
                 return _then_refresh(tracked_load(artifact=target,
                                 port=int(req.get("port") or serve_port),
-                                tune=req.get("tune") or _default_tune(),
+                                tune=preset_or(req.get("tune"), _default_tune()),
                                 sets=req.get("sets") or {},
                                 force=bool(req.get("force"))))
             if act == "unload":
@@ -421,7 +421,7 @@ PEER_LOAD_S = 60.0
 
 def _default_tune() -> str:
     """The tune a launch takes when none is named: this machine's knurlogic
-    strategy (machine/strategy.py), balanced unless one was chosen."""
+    strategy (machine/strategy.py), default unless one was chosen."""
     from knurlogic.machine import strategy
     return strategy.get()
 
@@ -469,8 +469,8 @@ def forward_launch(req: dict, post=None) -> dict:
                              f"another machine: {', '.join(bad)}"}
         doc = {"action": "load", "identity": str(req.get("identity") or ""),
                "name": Path(str(req.get("name") or "")).name[:255],
-               "tune": req.get("tune") if req.get("tune") in TUNES
-               else "balanced", "sets": sets, "force": bool(req.get("force"))}
+               "tune": preset_or(req.get("tune"), "default"),
+               "sets": sets, "force": bool(req.get("force"))}
         if req.get("port"):
             try:
                 doc["port"] = int(req["port"])
@@ -608,7 +608,7 @@ def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         return 400, {"error": f"not a launch setting: {', '.join(bad)}"}
-    tune = req.get("tune") if req.get("tune") in TUNES else _default_tune()
+    tune = preset_or(req.get("tune"), _default_tune())
     from knurlogic.machine.artifact import AmbiguousIdentity, resolve_identity
     try:
         path = resolve(req.get("identity")) if resolve else resolve_identity(

@@ -81,6 +81,12 @@ def raw(fn):
 _MODELS: dict = {"at": 0.0, "rows": None}
 
 
+def forget_models() -> None:
+    """Drop the cached model scan: the next /models.json reads the stores
+    again (a download finished, or a model was deleted)."""
+    _MODELS["at"] = 0.0
+
+
 def models_document(serving: str = "", ttl: float = 60.0):
     """`/models.json` -- what else is on this machine, and what is loaded.
 
@@ -295,7 +301,7 @@ def machine_settings():
         art = _one(q, "artifact")
         if art:
             try:
-                return _preview(art, _one(q, "tune") or "balanced",
+                return _preview(art, S.preset_or(_one(q, "tune"), "default"),
                                 _one(q, "working_set_gib"),
                                 kv_bits=_one(q, "kv_bits"),
                                 long_context=_one(q, "long_context"))
@@ -382,7 +388,7 @@ def strategy_doc() -> dict:
     from knurlogic.machine import strategy
     from knurlogic.tuning import settings as S
     return {"preset": strategy.get(), "default": S.PRESET_DEFAULT,
-            "presets": [{"name": n, "title": "Default" if n == S.PRESET_DEFAULT else n.capitalize(),
+            "presets": [{"name": n, "title": n.capitalize(),
                          "values": S.preset_row_values(n)}
                         for n in S.PRESETS],
             "rows": [{**r, "options": [{"v": v, "t": t}
@@ -426,7 +432,8 @@ def _preview(path: str, tune: str, working_set_gib=None,
     if not ws:
         budget = wired.load_budget()
         ws = budget["bytes"]
-    if not kv_bits and tune in S.TUNE_PROFILES:
+    tune = S.preset_or(tune, "default")
+    if not kv_bits:
         # the room is counted at the preset's KV precision (lean: 8-bit)
         kv_bits = S.preset_launch(tune, a.model_type)[0].get("kv_bits")
     bits = S.kv_bits_of(kv_bits)
@@ -703,9 +710,7 @@ def settings_document(artifact, live_env: dict, live_tune: str,
     tunes = tunes or S.PRESETS
 
     def handler(q: dict) -> dict:
-        tune = (q.get("tune") or [live_tune])[0]
-        if tune not in S.TUNE_PROFILES:
-            tune = live_tune
+        tune = S.preset_or((q.get("tune") or [live_tune])[0], live_tune)
         try:
             ws = int(float((q.get("working_set_gib") or [0])[0]) * (1 << 30))
         except (TypeError, ValueError):

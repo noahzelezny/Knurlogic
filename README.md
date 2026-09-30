@@ -89,7 +89,7 @@ tool's `machines` argument.
 
 Every setting is resolved from the model's `config.json` and the memory
 available, and shown with the measurement behind it in the page's Settings
-panel and at `/settings.json`. `serve --tune balanced|fast|stable|lean|safe`
+panel and at `/settings.json`. `serve --tune default|lean`
 picks a bundle, `--kv-bits 8` halves the KV cache, and `--set KEY=VALUE`
 overrides any single setting.
 

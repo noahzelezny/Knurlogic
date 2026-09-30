@@ -486,13 +486,18 @@ def models(fits_only: bool = False, **_) -> Dict[str, Any]:
             "count": len(out)}
 
 
-def settings(artifact: str = "", tune: str = "balanced", **_) -> Dict[str, Any]:
+def settings(artifact: str = "", tune: str = "default", **_) -> Dict[str, Any]:
     """The knobs for this artifact, each with the measurement behind it.
 
     The `why` is the point. A knob without its provenance is one an agent
     changes for no reason, and these were expensive to establish.
     """
     from knurlogic.interfaces.page import documents
+    from knurlogic.tuning.settings import preset_of
+    try:
+        tune = preset_of(tune)
+    except ValueError as e:
+        return {"error": str(e)}
     doc = documents._preview(artifact, tune)
     from knurlogic.machine.artifact import Artifact
     from knurlogic.tuning.resolve import vision_budget
@@ -526,7 +531,7 @@ def drafting(artifact: str = "", **_) -> Dict[str, Any]:
                     "the output distribution, so off is for troubleshooting."}
 
 
-def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
+def load(artifact: str = "", port: int = 8080, tune: str = "default",
          sets: Dict[str, str] | None = None, force: bool = False,
          draft: bool = True, machines: List[str] | None = None,
          split: str = "", link: str = "", cable: str = "",
@@ -540,6 +545,12 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
     `machines` names where: empty is this Mac. Another Mac, or several,
     go through the page on this Mac -- its Launch, the same request.
     """
+    from knurlogic.tuning.settings import preset_of
+    try:
+        tune = preset_of(tune)
+    except ValueError as e:
+        return {"loaded": False, "refused": str(e),
+                "note": "the tune is default or lean; nothing was started"}
     names = [str(m) for m in (machines or []) if str(m)]
     if names:
         return _load_on(names, artifact, port, tune, sets, force, draft,
@@ -560,7 +571,8 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
     from knurlogic.interfaces.serve import launch_refusal
     from knurlogic.machine.artifact import Artifact
     try:
-        why = launch_refusal(Artifact.load(artifact), dict(sets or {}))
+        why = launch_refusal(Artifact.load(artifact), dict(sets or {}),
+                            tune)
     except Exception as e:
         why = f"could not read the artifact: {type(e).__name__}: {e}"
     if why:
@@ -827,7 +839,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                        "measurement behind it and whether it can be changed "
                        "at runtime or only at launch.",
         "schema": _schema({"artifact": S("path to the artifact"),
-                           "tune": S("safe | balanced | fast")},
+                           "tune": S("default | lean")},
                           ["artifact"]),
     },
     "drafting": {
@@ -863,7 +875,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                           "not this Mac, its 16-hex identity)"),
             "port": S("port to serve on (a cluster job: rank 0's port on "
                       "the leader)", "integer"),
-            "tune": S("safe | balanced | fast"),
+            "tune": S("default | lean"),
             "sets": {"type": "object",
                      "description": "launch-only knob overrides, KEY: VALUE"},
             "force": {"type": "boolean",
