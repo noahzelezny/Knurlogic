@@ -9,6 +9,7 @@ is whatever `hf auth login` left on this machine; nothing here asks for one.
 from __future__ import annotations
 
 import re
+import subprocess
 import threading
 from pathlib import Path
 
@@ -74,7 +75,7 @@ def search(q: str) -> dict:
                         "likes": m.likes or 0, "gated": bool(m.gated)})
             if len(out) >= LIMIT:
                 break
-    except Exception as e:
+    except (OSError, ValueError, ImportError) as e:
         return {"error": f"Hugging Face did not answer: {_brief(e)}",
                 "results": []}
     return {"results": out}
@@ -91,7 +92,7 @@ def repo(repo_id: str) -> dict:
     from knurlogic.machine.discover import NON_CHAT_MODEL_TYPES
     try:
         info = _api().model_info(repo_id, files_metadata=True)
-    except Exception as e:
+    except (OSError, ValueError, ImportError) as e:
         return {"id": repo_id, "error": _brief(e)}
     files = [s for s in info.siblings or []]
     size = _wanted_bytes(files)
@@ -102,7 +103,7 @@ def repo(repo_id: str) -> dict:
     if gated:
         try:
             _api().auth_check(repo_id)
-        except Exception:
+        except (OSError, ValueError):
             doc["access"] = False
             doc["hint"] = GATED_HINT
     if not any(f.rfilename.endswith(".safetensors") for f in files):
@@ -169,7 +170,6 @@ def _refresh_models() -> None:
 def _run(repo_id: str, d: dict) -> None:
     import json
     import os
-    import subprocess
     import sys
     env = dict(os.environ, HF_HUB_DISABLE_PROGRESS_BARS="1")
     try:
@@ -178,7 +178,7 @@ def _run(repo_id: str, d: dict) -> None:
         with _LOCK:
             d["total"] = total
             _save()
-    except Exception:
+    except (OSError, ValueError, ImportError):
         pass
     with _LOCK:
         if d["stop"]:
@@ -280,7 +280,7 @@ def delete(repo_id: str) -> dict:
     if p:
         try:
             p.wait(10)
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             pass
     shutil.rmtree(_cache_dir(repo_id), ignore_errors=True)
     shutil.rmtree(_cache_dir(repo_id).parent / ".locks" /

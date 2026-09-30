@@ -21,7 +21,7 @@ import logging
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +42,11 @@ def control_machine(tokenizer, initial: str = "normal"):
         "mlx_lm.generate").SequenceStateMachine
 
     seqs: Dict[Tuple[int, ...], str] = {}
-    ends = []
+    ends: list = []
     for t in tokenizer.eos_token_ids:
         seqs[(t,)] = tokenizer.convert_ids_to_tokens(t)
         ends.append(((t,), None))
-    edges = {"normal": list(ends)}
+    edges: Dict[str, list] = {"normal": list(ends)}
     if getattr(tokenizer, "has_thinking", False):
         ts, te = (tuple(tokenizer.think_start_tokens),
                   tuple(tokenizer.think_end_tokens))
@@ -90,7 +90,7 @@ class Request:
     when the engine is done with the row (or the request is stopped)."""
 
     def __init__(self, detokenizer, *, sequences: Dict[tuple, str],
-                 stops: List[str] = (), tool_parser: Callable = None,
+                 stops: Sequence[str] = (), tool_parser: Callable = None,
                  tools: Any = None, logprobs: bool = False,
                  prompt_tokens: int = 0):
         self.detok = detokenizer
@@ -253,7 +253,7 @@ class Request:
     # ----------------------------------------------------------------- usage
 
     def usage(self, cache_report: Optional[dict] = None) -> dict:
-        u = {"prompt_tokens": self.prompt_tokens,
+        u: dict = {"prompt_tokens": self.prompt_tokens,
              "completion_tokens": self.completion_tokens,
              "total_tokens": self.prompt_tokens + self.completion_tokens}
         if self.reasoning_tokens:

@@ -22,6 +22,9 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import Callable
+
+from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +81,9 @@ def _no_load(**_):
 # Unset, there is nothing to relaunch with and nothing of the page's to
 # look at.
 #: () -> [peer record]: the page's PEERS store
-peers_fn = list
+peers_fn: Callable[[], list] = list
 #: port -> (Popen, artifact) | None: a server this page process started
-child_fn = {}.get
+child_fn: Callable = {}.get
 #: port -> bool: that port's server answers
 
 def _no_answer(port):
@@ -310,7 +313,7 @@ def _window(rec: dict, now: float) -> list:
     return [t for t in rec.get("attempts") or [] if now - t <= WINDOW_S]
 
 
-def cluster_key(identity: str, nodes) -> str:
+def cluster_key(identity: str | None, nodes) -> str:
     return f"cluster:{identity}:{','.join(sorted(map(str, nodes or [])))}"
 
 
@@ -434,7 +437,7 @@ def ensure_thread() -> None:
             time.sleep(TICK_S)
             try:
                 tick()
-            except Exception as e:
+            except Exception as e:  # the recovery thread must survive one bad tick (logged)
                 logger.warning("recovery: %s: %s", type(e).__name__, e)
     threading.Thread(target=loop, daemon=True,
                      name="knurlogic-recovery").start()
@@ -453,7 +456,7 @@ def tick(now: float | None = None) -> list:
             what = (_tick_cluster if rec["kind"] == "cluster"
                     else _tick_single)(rec, time.time() if now is None
                                        else now)
-        except Exception as e:
+        except Exception as e:  # one model's failed tick is reported; the others still tick
             what = f"error: {type(e).__name__}: {e}"
         if what:
             out.append((key, what))
@@ -553,7 +556,7 @@ def _tick_cluster(rec: dict, now: float) -> str:
     args = dict(rec["args"], peers=_fresh_peers(rec))
     try:
         out = C.launch(dict(rec["req"]), recovering=view_now, **args)
-    except Exception as ex:
+    except Exception as ex:  # a failed relaunch is recorded as the attempt's error
         out = {"error": f"{type(ex).__name__}: {ex}"}
     if out.get("job"):
         rec.update(job=out["job"], pending=False, ended_job=None,
@@ -579,7 +582,7 @@ def _cluster_phase(rec: dict) -> str:
             continue
         try:
             doc = post(f"http://{m['page']}{C.JOB_PATH}", {"job": job})
-        except Exception:
+        except (*NET_ERRORS, AttributeError):
             return "unknown"
         phases.append(doc.get("phase") or "joining")
     return "ready" if phases and all(p == "ready" for p in phases) \
@@ -592,7 +595,7 @@ def _fresh_peers(rec: dict) -> list:
     stored = {getattr(p, "id", ""): p for p in rec["args"].get("peers") or []}
     try:
         now = {getattr(p, "id", ""): p for p in peers_fn()}
-    except Exception:
+    except (OSError, ValueError, AttributeError):
         now = {}
     out = []
     for pid, p in stored.items():
@@ -615,12 +618,12 @@ def _machines_down(rec: dict) -> str:
                        {"job": rec.get("ended_job") or rec["job"]})
             if not isinstance(doc, dict) or "ranks_here" not in doc:
                 raise ValueError("no job state")
-        except Exception as e:
+        except (*NET_ERRORS, AttributeError) as e:
             return f"{m.get('name')} is not answering ({type(e).__name__})"
     return ""
 
 
-def _leftovers(rec: dict, job: str) -> str:
+def _leftovers(rec: dict, job: str | None) -> str:
     """"" when no rank of `job` is left on any of its machines (by record
     and by process), else which."""
     from knurlogic.cluster import jobs as J
@@ -701,7 +704,7 @@ def _tick_single(rec: dict, now: float) -> str:
                           tune=ld.get("tune") or "default",
                           sets=ld.get("sets") or {}, force=False,
                           draft=ld.get("draft", True))
-    except Exception as ex:
+    except Exception as ex:  # a failed relaunch is recorded as the attempt's error
         out = {"error": f"{type(ex).__name__}: {ex}"}
     if out.get("pid"):
         rec.update(pid=out["pid"], pending=False, last_at=now, next_at=None)
@@ -724,7 +727,7 @@ def _serve_pids(port: int) -> list:
                               f"knurlogic serve .*--port {port}( |$)"],
                              capture_output=True, text=True,
                              timeout=5).stdout
-    except Exception:
+    except PROC_ERRORS:
         return []
     return [int(x) for x in out.split() if x.isdigit()
             and int(x) != os.getpid()]

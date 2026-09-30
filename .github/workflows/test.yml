@@ -21,6 +21,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e '.[dev]'
       - run: ruff check .
+      - run: mypy
       # Tests that need real weights, a second Mac or a Thunderbolt link
       # skip themselves.
       - run: python -m pytest -q tests

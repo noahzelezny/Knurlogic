@@ -21,7 +21,7 @@ import mlx.core as mx
 from knurlogic.engine.kvquant import BatchQuantKVCache, QuantKVCache
 
 _ARCH = "mlx_lm.models.qwen4_exp"
-_CLASSES = {}
+_CLASSES: dict = {}
 
 
 def _classes():

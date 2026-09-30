@@ -74,7 +74,7 @@ def _pos(c):
 
 
 def snapshot(caches, *, copy: bool = True) -> list:
-    snaps = []
+    snaps: list = []
     for c in caches:
         if is_attention(c):
             snaps.append(("attn", c.offset, None))

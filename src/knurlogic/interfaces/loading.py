@@ -41,7 +41,7 @@ def known_artifacts(ttl: float = 60.0) -> list:
             _KNOWN["rows"] = [f for f in discover.find()
                               if f.servable and f.format == "mlx"]
             _KNOWN["at"], _KNOWN["error"] = now, ""
-        except Exception as e:
+        except (OSError, ValueError, KeyError, AttributeError) as e:
             # not cached: a store on a volume that was briefly away is
             # scanned again on the next request, and until then the
             # refusal names the scan, not the model
@@ -93,7 +93,7 @@ def prepare(model: str, *, served: Optional[str] = None,
     path = resolve_name(model, served)
     try:
         a = Artifact.load(path)
-    except Exception as e:
+    except (OSError, ValueError, AttributeError) as e:
         raise NotLoadable(422, f"{Path(path).name} could not be read as an "
                                f"artifact: {e}", "bad_artifact") from e
     missing = register(a)

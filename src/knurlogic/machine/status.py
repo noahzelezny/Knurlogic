@@ -13,6 +13,7 @@ Design: docs/design/memory.md (status).
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import time
@@ -28,7 +29,7 @@ def _rss_bytes() -> int:
         out = subprocess.run(["ps", "-o", "rss=", "-p", str(os.getpid())],
                              capture_output=True, text=True, timeout=5)
         return int(out.stdout.strip()) * 1024
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return 0
 
 
@@ -88,7 +89,8 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
     if metrics is None and machine_fn is None:
         try:
             metrics = _metrics.metrics(memory_map)
-        except Exception:
+        except Exception:  # the status document must still answer without metrics
+            logging.getLogger(__name__).debug("metrics failed", exc_info=True)
             metrics = None
     if metrics:
         d["metrics"] = metrics
@@ -135,7 +137,7 @@ def aggregate(snapshots, artifact=None) -> dict:
     """
     snaps = list(snapshots)
     up = [s for s in snaps if s.get("reachable", True)]
-    mem = {k: sum(_num(s.get("memory", {}).get(k)) for s in up)
+    mem: dict = {k: sum(_num(s.get("memory", {}).get(k)) for s in up)
            for k in _SUMMED}
     mem["available"] = any(s.get("memory", {}).get("available") for s in up)
     # A rollup is only as precise as its least precise node: one box-wide

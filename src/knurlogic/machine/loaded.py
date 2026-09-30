@@ -16,6 +16,7 @@ Design: docs/design/memory.md (loaded).
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -68,7 +69,7 @@ def _get(url: str, timeout: float = 1.5):
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             return json.loads(r.read().decode() or "null")
-    except Exception:
+    except (OSError, ValueError, http.client.HTTPException):
         return None
 
 
@@ -92,7 +93,8 @@ def exo_placement(inst, names: dict, local_id=None) -> dict:
     runner_node = {r: n for n, r in (sa.get("nodeToRunner") or {}).items()}
     nodes = []
     for runner, shard in (sa.get("runnerToShard") or {}).items():
-        meta = next(iter(shard.values()), {}) if isinstance(shard, dict) else {}
+        meta: dict = (next(iter(shard.values()), {})
+                      if isinstance(shard, dict) else {})
         card = meta.get("modelCard") or {}
         n_layers = int(card.get("nLayers") or 0)
         lo, hi = meta.get("startLayer"), meta.get("endLayer")
@@ -293,7 +295,7 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
     # exactly the situation that is hard to get to the bottom of.
     try:
         doc["memory"] = memory_map()
-    except Exception as e:
+    except Exception as e:  # the status document must still answer; the error is in it
         doc["memory"] = {"error": str(e)}
     return doc
 
@@ -432,7 +434,7 @@ def available_memory() -> dict:
     try:
         out = subprocess.run(["vm_stat"], capture_output=True, text=True,
                              timeout=10).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return {}
     m = re.search(r"page size of (\d+)", out)
     if not m:
@@ -473,7 +475,7 @@ def _footprints() -> tuple:
             # because nothing is loaded" is an answer, not noise.
             ["top", "-l", "1", "-o", "mem", "-stats", "pid,mem"],
             capture_output=True, text=True, timeout=15).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return {}, {}
     found, phys = {}, available_memory()
     for line in out.splitlines():
@@ -493,7 +495,7 @@ def _commands() -> dict:
         out = subprocess.run(["ps", "-Ao", "pid=,command="],
                              capture_output=True, text=True,
                              timeout=10).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return {}
     cmds = {}
     for line in out.splitlines():
@@ -572,7 +574,8 @@ def memory_map(floor: int = 256 << 20) -> dict:
     does not say so.
     """
     (foot, phys), cmds = _footprints(), _commands()
-    rows, by_runtime = [], {}
+    rows: list = []
+    by_runtime: dict = {}
     for pid, b in foot.items():
         cmd = cmds.get(pid, "")
         rt = _runtime_of(cmd)

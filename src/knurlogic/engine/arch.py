@@ -66,7 +66,7 @@ def _load_pins() -> dict:
             continue
         try:
             rows = json.loads(f.read_text())
-        except Exception:
+        except (OSError, ValueError):
             continue
         for k, v in (rows.items() if isinstance(rows, dict) else ()):
             if isinstance(v, dict) and isinstance(v.get("sha256"), str):
@@ -107,7 +107,7 @@ def _models_dir(host: str = "mlx_lm") -> Path | None:
     from knurlogic.engine.serve import models_module
     try:
         return Path(models_module(host).__file__).parent
-    except Exception:
+    except (ImportError, AttributeError, TypeError, OSError):
         return None
 
 

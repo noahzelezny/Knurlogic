@@ -9,6 +9,8 @@ numbers were measured in the VQ runtime's upstream project.
 
 from __future__ import annotations
 
+from typing import Any
+
 # --- the two knobs that decide runnable-vs-not ------------------------------
 
 # Experts decoded to dense fp16 per prefill chunk. THIS IS THE MEMORY KNOB,
@@ -193,7 +195,7 @@ NUMERICS_SOURCES = ("declared", "bundled")
 # So a preset moves only the knobs where headroom actually buys something, or
 # tightens the ones that bound peak memory. Anything a profile asks for
 # beyond a cap is refused and the refusal is printed, never silently clamped.
-TUNE_PROFILES = {
+TUNE_PROFILES: dict = {
     # prefill chunk, cache limit GiB, and whether to bound the transient
     # harder than headroom requires
     "default": {
@@ -314,7 +316,7 @@ PRESET_ROW_NAMES = tuple(r["name"] for r in PRESET_ROWS)
 
 #: the page's name for each launch setting (Settings -> Models / Knurlogic;
 #: views/settings/knobs.js KNOB_TITLE): what every refusal calls it
-KNOB_TITLES = {
+KNOB_TITLES: dict = {
     **{r["name"]: r["title"] for r in PRESET_ROWS},
     "KNURLOGIC_PRESET": "Preset",
     "KNURLOGIC_CONTEXT_LENGTH": "Context length",
@@ -658,7 +660,7 @@ def engine_settings(env: dict) -> dict:
                 break
     return out
 
-def canonical_sets(sets: dict) -> dict:
+def canonical_sets(sets: dict | None) -> dict:
     """Explicit settings with an accepted old name moved to the name the
     resolver emits first (VQLAB_PREFILL_CHUNK -> KNURLOGIC_PREFILL_CHUNK,
     VQ_CACHE_LIMIT_GB -> KNURLOGIC_CACHE_LIMIT_GB), so an explicit value cannot
@@ -732,7 +734,7 @@ def knob_tier(name: str) -> str:
 # The maximum is a MEASUREMENT, not a taste. VQ_DECODE_CHUNK stops at 32
 # because 128 -> 32 is 1.37x on every rung measured and nothing above it was
 # ever better; the control should stop where the evidence stops.
-KNOB_RANGE = {
+KNOB_RANGE: dict = {
     # 4096 is the widest ever measured (qwen3_5); the table is where a wider
     # one would have to be earned first.
     "VQLAB_PREFILL_CHUNK": ([512, 1024, 2048, 4096], "tokens"),
@@ -776,11 +778,11 @@ def model_window(cfg: dict) -> tuple:
     """(tokens, why) for an artifact's config.json; (0, why) when it does
     not say."""
     cfg = cfg or {}
-    text = cfg.get("text_config") if isinstance(
+    text: Any = cfg.get("text_config") if isinstance(
         cfg.get("text_config"), dict) else {}
     mpe = int(text.get("max_position_embeddings")
               or cfg.get("max_position_embeddings") or 0)
-    rope = None
+    rope: Any = None
     for c in (text, cfg):
         for key in ("rope_scaling", "rope_parameters"):
             if isinstance(c.get(key), dict):
@@ -925,7 +927,7 @@ def long_context_config(cfg: dict, mode) -> dict:
     why = long_context_refusal(mt, mode)
     if why:
         raise ValueError(why)
-    factor, orig, _doc = LONG_CONTEXT_YARN[long_context_family(mt)]
+    factor, orig, _doc = LONG_CONTEXT_YARN[long_context_family(mt) or ""]
     nested = isinstance(cfg.get("text_config"), dict)
     tc = dict(cfg["text_config"]) if nested else dict(cfg)
     key = "rope_parameters" if isinstance(tc.get("rope_parameters"), dict) \
