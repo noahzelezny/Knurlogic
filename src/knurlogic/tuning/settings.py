@@ -241,8 +241,7 @@ TUNE_PROFILES = {
     "fast": {
         "KNURLOGIC_CACHE_LIMIT_GB": 8.0,
         "decode_chunk_scale": 1.0,   # capped: smaller is already faster
-        "launch": {"mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16",
-                   "cross_chip": "off"},
+        "launch": {"mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16"},
         "why": "spends headroom where it actually buys speed -- a "
                "larger reclaimable cache, MTP with its dynamic controller, "
                "bf16 KV. It does NOT raise the decode chunk, because smaller "
@@ -252,10 +251,9 @@ TUNE_PROFILES = {
         "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
         "KNURLOGIC_CACHE_LIMIT_GB": 2.0,
         "decode_chunk_scale": 0.5,   # more room left for a step's spike
-        "launch": {"cross_chip": "on", "mtp": "on", "mtp_dynamic": "off",
-                   "kv_bits": "bf16"},
-        "why": "repeatable: 512-token prompt chunks, identical rounding "
-               "across chips, MTP drafting every step (no controller "
+        "launch": {"mtp": "on", "mtp_dynamic": "off", "kv_bits": "bf16"},
+        "why": "repeatable: 512-token prompt chunks, MTP drafting every "
+               "step (no controller "
                "switching regimes) for steady timing, bf16 KV, and "
                "conservative memory -- a smaller reclaimable cache and a "
                "transient bounded tighter than headroom requires",
@@ -304,8 +302,7 @@ def preset_launch(tune: str, model_type: str = "") -> tuple:
 #: read from the room free at launch), cache GiB, memory transient scale,
 #: and the model launch settings.
 PRESET_BASE = {"prefill": None, "cache": CACHE_LIMIT_GB_DEFAULT, "scale": 1.0,
-               "mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16",
-               "cross_chip": "off"}
+               "mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16"}
 
 
 def preset_values(name: str) -> dict:
@@ -331,14 +328,11 @@ def preset_settings(name: str) -> list:
         "prefill": lambda x: (f"prompt chunk {x['prefill']}" if x["prefill"]
                               else "prompt chunk by free memory"),
         "cache": lambda x: f"cache {x['cache']:g} GiB",
-        "scale": lambda x: ("memory spike bounded tighter" if x["scale"] < 1
-                            else "memory spike as it fits"),
+        "scale": lambda x: ("expert chunk halved" if x["scale"] < 1
+                            else "expert chunk by free memory"),
         "mtp": mtp,
         "kv_bits": lambda x: ("KV bf16" if x["kv_bits"] == "bf16"
                               else f"KV {x['kv_bits']}-bit"),
-        "cross_chip": lambda x: ("same rounding across chips"
-                                 if x["cross_chip"] == "on" else
-                                 "per-chip rounding"),
     }
     out = []
     for k, f in say.items():
@@ -520,48 +514,46 @@ KNOB_DOC = {
 #: The (i) beside a knob in Settings -> Models: what it does for the person
 #: choosing, short and plain. KNOB_DOC keeps the measurements behind it.
 KNOB_HELP = {
-    "VQ_DECODE_CHUNK": "How much of the model is unpacked at once while "
-                       "reading a prompt. Lower uses less memory and is "
-                       "also faster, down to 32.",
-    "KNURLOGIC_PREFILL_CHUNK": "How many prompt tokens are read at once. "
-                               "Wider reads long prompts faster but needs "
-                               "more memory for a moment. Output is the "
-                               "same either way.",
+    "VQ_DECODE_CHUNK": "How much of the model is unpacked at once; lower "
+                       "uses less memory and is also faster.",
+    "KNURLOGIC_PREFILL_CHUNK": "How many prompt tokens are read at once; "
+                               "wider is faster on long prompts but needs "
+                               "more memory.",
     "KNURLOGIC_CONTEXT_LENGTH": "The longest conversation a request may "
-                                "have, in tokens. Longer uses more memory "
-                                "while it runs. Above 262,144 it uses YaRN, "
-                                "which slightly loosens attention precision "
-                                "at short range.",
-    "KNURLOGIC_MTP": "Multi-token prediction: usually faster replies with "
-                     "the same output, for a little more memory.",
-    "KNURLOGIC_MTP_DYNAMIC": "Use multi-token prediction only where it is "
-                             "measured to be faster. Usually faster; off "
+                                "have; longer uses more memory.",
+    "KNURLOGIC_MTP": "Guesses several tokens per step: usually faster, for "
+                     "a little more memory.",
+    "KNURLOGIC_MTP_DYNAMIC": "Guesses ahead only where that is faster; off "
                              "gives steadier timing.",
-    "KNURLOGIC_KV_BITS": "8-bit holds about twice the context in the same "
-                         "memory; decode ~5% slower and a slight loss of "
-                         "precision.",
-    "KNURLOGIC_KV_KERNEL": "With 8-bit KV: a faster way to read it while "
-                           "writing a reply. Leave on.",
-    "KNURLOGIC_CACHE_LIMIT_GB": "Memory kept for reuse after it is freed. "
-                                "Larger can be a little faster; smaller "
-                                "leaves more room for context and other "
-                                "models.",
-    "VQ_MOE_GEMMSEG_CBDEV": "Where the compressed weights' lookup table "
-                            "lives. auto is fastest.",
-    "VQ_MOE_GEMMSEG_RTILE": "Leave at 32: 64 is never faster.",
-    "VQ_GEMMSEG_OTILE64": "Faster prompt reading, same output. Leave on.",
-    "VQ_GEMMSEG_PH2V": "Part of a faster path, same output. Leave on.",
-    "VQ_D4_WALK": "Part of a faster path, same output. Leave on.",
-    "VQ_GEMMSEG_PIPE": "Slightly slower, no gain. Leave off.",
-    "VQ_GEMMSEG_BF16IO": "Changes the output slightly. Keep what the model "
+    "KNURLOGIC_KV_BITS": "8-bit holds about twice the conversation in the "
+                         "same memory, slightly slower.",
+    "KNURLOGIC_KV_KERNEL": "A faster way to read an 8-bit cache; leave on.",
+    "KNURLOGIC_CACHE_LIMIT_GB": "Freed memory kept for reuse; smaller leaves "
+                                "more room for everything else.",
+    "VQ_MOE_GEMMSEG_CBDEV": "Where a lookup table lives; auto is fastest.",
+    "VQ_MOE_GEMMSEG_RTILE": "Leave at 32; 64 is never faster.",
+    "VQ_GEMMSEG_OTILE64": "Faster, same output; leave on.",
+    "VQ_GEMMSEG_PH2V": "Faster, same output; leave on.",
+    "VQ_D4_WALK": "Faster, same output; leave on.",
+    "VQ_GEMMSEG_PIPE": "Slower, no gain; leave off.",
+    "VQ_GEMMSEG_BF16IO": "Changes the output slightly; keep what the model "
                          "shipped with.",
-    "VQ_DECODE_BF16IO": "Changes the output slightly. Keep what the model "
+    "VQ_DECODE_BF16IO": "Changes the output slightly; keep what the model "
                         "shipped with.",
-    "KNURLOGIC_PRESET": "A named set of settings for this model. Knurlogic "
-                        "default follows the strategy on the Knurlogic "
-                        "tab; a setting changed here beats the preset's.\n" +
-                        "\n".join(f"{g['title']}: {g['settings']}"
-                                   for g in PRESET_GUIDE.values()),
+    "KNURLOGIC_PRESET": "A named set of settings for this model; default "
+                        "follows Settings -> Knurlogic -> Presets.",
+    "KNURLOGIC_CROSS_CHIP": "On: faster, but a split across different "
+                            "chips can give different (still valid) tokens. "
+                            "Turn off if you need identical output; "
+                            "slightly slower.",
+    "KNURLOGIC_COMPACT_AUTO": "Summarize old turns even when the client "
+                              "does not ask.",
+    "KNURLOGIC_COMPACT_TRIGGER": "How full the conversation gets before "
+                                 "old turns are summarized.",
+    "KNURLOGIC_COMPACT_KEEP_TURNS": "How many recent messages stay word for "
+                                    "word.",
+    "KNURLOGIC_COMPACT_TOOL_RESULTS": "What is left of an old tool result: "
+                                      "a one-line summary, or nothing.",
 }
 
 
