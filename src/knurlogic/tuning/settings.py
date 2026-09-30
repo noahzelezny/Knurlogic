@@ -525,8 +525,8 @@ KNOB_HELP = {
     "KNURLOGIC_PREFILL_CHUNK": "How many prompt tokens are read at once; "
                                "wider is faster on long prompts but needs "
                                "more memory.",
-    "KNURLOGIC_CONTEXT_LENGTH": "The longest conversation a request may "
-                                "have; longer uses more memory.",
+    "KNURLOGIC_CONTEXT_LENGTH": "How many tokens the model can hold in "
+                                "memory; more uses more memory.",
     "KNURLOGIC_MTP": "Guesses several tokens per step: usually faster, for "
                      "a little more memory.",
     "KNURLOGIC_MTP_DYNAMIC": "Guesses ahead only where that is faster; off "
@@ -534,8 +534,8 @@ KNOB_HELP = {
     "KNURLOGIC_KV_BITS": "8-bit holds about twice the conversation in the "
                          "same memory, slightly slower.",
     "KNURLOGIC_KV_KERNEL": "A faster way to read an 8-bit cache; leave on.",
-    "KNURLOGIC_CACHE_LIMIT_GB": "Freed memory kept for reuse; smaller leaves "
-                                "more room for everything else.",
+    "KNURLOGIC_CACHE_LIMIT_GB": "Memory MLX keeps for reuse; more is a bit "
+                                "faster, less leaves more free.",
     "VQ_MOE_GEMMSEG_CBDEV": "Where a lookup table lives; auto is fastest.",
     "VQ_MOE_GEMMSEG_RTILE": "Leave at 32; 64 is never faster.",
     "VQ_GEMMSEG_OTILE64": "Faster, same output; leave on.",

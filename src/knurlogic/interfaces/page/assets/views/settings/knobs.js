@@ -66,11 +66,16 @@ const isGlobal=n=>n==='KNURLOGIC_CROSS_CHIP'||/^KNURLOGIC_COMPACT_/.test(n);
 // (nothing of it runs: every change is a launch setting), label (how the confirm lists it) and url
 // (a setting of this page's own, POSTed there as {gib}: the allowance).
 // a launch setting's plain name, where its variable is not one
-const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Per-chip rounding', KNURLOGIC_PRESET:'Preset'};
+const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Per-chip rounding', KNURLOGIC_PRESET:'Preset',
+  KNURLOGIC_CONTEXT_LENGTH:'Context length', KNURLOGIC_KV_BITS:'KV cache',
+  KNURLOGIC_PREFILL_CHUNK:'Prompt chunk', KNURLOGIC_CACHE_LIMIT_GB:'Cache reuse',
+  KNURLOGIC_MTP:'MTP', KNURLOGIC_MTP_DYNAMIC:'MTP dynamic', KNURLOGIC_KV_KERNEL:'KV kernel'};
 // the preset may be left unset: the Knurlogic tab's preset then applies
 const UNSET='(unset)';
 function knobHTML(k, c){
-  const unsettable=k.name==='KNURLOGIC_PRESET';
+  // a model not running follows the Knurlogic presets until a value is set
+  // here: every knob of it offers "default", the preset's value
+  const unsettable=k.name==='KNURLOGIC_PRESET' || !!c.launch;
   const cur=unsettable ? UNSET : k.running??k.would_be??k.value;
   // with no variant running, every knob waits for a launch, live or not
   const reach=c.launch ? 'restart' : k.reach;
@@ -87,14 +92,15 @@ function knobHTML(k, c){
     : `<span class="kw rst" title="${esc(REACH.restart)}">next launch</span>`;
   const about=(k.help ? esc(k.help).replace(/\n/g,'<br>')
     : (KNOB_TITLE[k.name]?[k.what]:[k.what,k.why]).filter(Boolean).map(esc).join(' — '))+
-    (k.max_why?`<br><b>${esc(k.max_why)}</b>`:'');
+    (k.max_why?' '+esc(k.max_why):'');
   // the measured steps, stopping where the headroom does; else a field
   const vals=k.values||[], ci=vals.findIndex(x=>sameVal(x,k.cap));
   const cap=k.cap==null||ci<0?vals.length-1:ci;
   let ctl;
   if(unsettable){
     const dflt='default';
-    ctl=`<select aria-label="${esc(k.name)}">${[UNSET,...vals].map(x=>
+    const all=vals.length?vals:[...new Set([k.would_be??k.value].filter(v=>v!=null&&v!==''))];
+    ctl=`<select aria-label="${esc(k.name)}">${[UNSET,...all].map(x=>
       `<option value="${esc(x)}"${sameVal(x,sel)?' selected':''}>${esc(x===UNSET?dflt:x)}</option>`).join('')}</select>`;
   }else if(vals.length){
     const opts=vals.filter((x,i)=>i<=cap||sameVal(x,cur)||sameVal(x,sel));
