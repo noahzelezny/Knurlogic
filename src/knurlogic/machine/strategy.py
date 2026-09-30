@@ -29,7 +29,7 @@ def get() -> str:
     is the default, never an error: a launch must not fail on it."""
     try:
         v = json.loads(path().read_text()).get("preset")
-    except Exception:
+    except (OSError, ValueError, AttributeError):
         return PRESET_DEFAULT
     try:
         return preset_of(v)
