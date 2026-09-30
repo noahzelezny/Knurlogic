@@ -67,6 +67,16 @@ every model on the disk.
 **OpenAI-compatible clients** (Zed, Cline, Continue, Open WebUI): base URL
 `http://127.0.0.1:8080/v1`, any API key, model `local`.
 
+**Responses-API clients** (the OpenAI SDK's `client.responses`, Codex-style
+tools): the same base URL; `POST /v1/responses` with function tools,
+streaming and reasoning summaries. `previous_response_id` and `store: true`
+are refused: the server keeps no conversation, so resend the input.
+
+**Ollama clients** (Open WebUI's Ollama mode, Continue, the `ollama`
+libraries): `OLLAMA_HOST=http://127.0.0.1:8080`. `/api/chat`, `/api/generate`
+(streaming NDJSON by default), `/api/tags`, `/api/show` and `/api/version`
+are served, with images in chat messages on a vision model.
+
 **MCP**, for an agent that should manage models rather than talk to one:
 
     claude mcp add knurlogic -- knurlogic mcp
