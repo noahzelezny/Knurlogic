@@ -1406,3 +1406,69 @@ def test_same_build_different_version_string_is_accepted_with_a_note(cache):
     assert code == 200 and doc["ok"], doc
     assert "0.1.0.dev0" in doc["note"]
     C.PREPARED.clear()
+
+
+# --- control-plane contract (docs/design/orchestration.md) --------------------
+
+def test_a_retried_start_answers_started_again(cache, monkeypatch):
+    monkeypatch.setattr(C, "_local_info",
+                        lambda: info("Apple M3 Ultra", "192.0.2.2"))
+    monkeypatch.setattr(C, "_ensure_watcher", lambda: None)
+    job = "db0cb292aefeba55"
+    code, got = prep(spec(job=job))
+    assert got["ok"] and got["v"] == [1, 0], got
+    procs = []
+
+    def spawn(cmd, **kw):
+        procs.append(subprocess.Popen(["sleep", "30"]))
+        return procs[0]
+    try:
+        code, first = C.start(job, spawn=spawn, wait_s=0.5)
+        assert code == 200 and first["started"] == job, first
+        code, again = C.start(job, spawn=spawn, wait_s=0.5)
+        assert code == 200 and len(procs) == 1
+        assert (again["rank"], again["pid"]) == (first["rank"], first["pid"])
+        assert again["v"] == [1, 0]
+        # an unknown job is still the same 404
+        assert C.start("ffffffffffffffff", spawn=spawn)[0] == 404
+    finally:
+        for p in procs:
+            p.kill()
+            p.wait()
+        C._PROCS.clear()
+        J.save_registry({})
+
+
+def test_failure_kind_is_read_before_the_wording():
+    from knurlogic.cluster import recovery
+    assert recovery.kind("something odd", "machine") == "machine"
+    assert recovery.kind("unloaded", "memory") == "memory"
+    assert recovery.kind("unloaded") == "requested"      # the regex fallback
+    assert recovery.kind("x", "nonsense") == "failure"
+
+
+def test_stop_carries_its_kind_to_the_ended_record_and_the_peers(
+        cache, monkeypatch):
+    monkeypatch.setattr(C, "_peer_pages", lambda: {"b": "y:1"})
+    job = "41648583878fcdfc"
+    C.SPECS[job] = spec(job=job)
+    told = []
+    out = C.stop(job, reason="B went away", kind="machine",
+                 post=lambda url, doc, **k: told.append(doc) or {})
+    assert out["v"] == [1, 0] and out["exiting"] == []
+    assert told[0]["kind"] == "machine"
+    assert C.ENDED[job]["kind"] == "machine"
+    assert C.job_state(job)["ended_kind"] == "machine"
+    C.ENDED.clear()
+
+
+def test_failover_beyond_two_machines_is_a_logged_no_op(monkeypatch, caplog):
+    monkeypatch.setattr(C, "BAD_CABLES", {})
+    order = [{"id": c, "name": c.upper()} for c in "abc"]
+    ctx = {"order": order, "net": "127.0.0", "tried": ("127.0.0",),
+           "req": {}, "args": {}}
+    why = ("rank 1 on B (pid 9) exited: link init failed: ValueError: "
+           "[jaccl] Changing queue pair to RTR failed with errno 96")
+    assert C.failover("ab12cd34ef567890", ctx, why) is None
+    assert C.BAD_CABLES == {}
+    assert "no cable failover beyond two" in caplog.text

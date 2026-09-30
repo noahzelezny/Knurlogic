@@ -28,6 +28,8 @@ from pathlib import Path
 
 from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
 from knurlogic.cluster import jobs as J
+from knurlogic.cluster.protocol import (FAILURE_KINDS, JobState, PrepareReply,
+                                        Started, Stopped, typed)
 
 logger = logging.getLogger(__name__)
 
@@ -787,31 +789,31 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
             # a port nobody asked for: say which one is free instead
             from knurlogic.machine.servers import free_port
             try:
-                return 200, {"ok": False, "machine": me, "free_port":
-                             free_port(port + 1),
-                             "refused": f"{me} refuses rank {rank}: "
-                                        + "; ".join(refusals)}
+                return 200, typed(PrepareReply(
+                    ok=False, machine=me, free_port=free_port(port + 1),
+                    refused=f"{me} refuses rank {rank}: "
+                    + "; ".join(refusals)))
             except OSError:
                 pass
     if refusals:
-        return 200, {"ok": False, "machine": me,
-                     "refused": f"{me} refuses rank {rank}: "
-                                + "; ".join(refusals)}
+        return 200, typed(PrepareReply(
+            ok=False, machine=me, refused=f"{me} refuses rank {rank}: "
+            + "; ".join(refusals)))
     with _LOCK:
         now = time.time()
         for j in [j for j, p in PREPARED.items() if now - p["t"] > PREPARED_S]:
             PREPARED.pop(j)
         PREPARED[spec["job"]] = {"spec": dict(spec), "path": path, "t": now}
-    doc = {"ok": True, "machine": me, "rank": rank}
     differs = _local_copy_differs(path, spec)
-    if differs:
-        doc["alert"] = f"on {me}: {differs}"
+    note = None
     if want.get("knurlogic") != have.get("knurlogic"):
-        doc["note"] = (f"same build, but knurlogic says "
-                       f"{have.get('knurlogic') or 'missing'} here and "
-                       f"{want.get('knurlogic') or 'missing'} on the "
-                       f"coordinator")
-    return 200, doc
+        note = (f"same build, but knurlogic says "
+                f"{have.get('knurlogic') or 'missing'} here and "
+                f"{want.get('knurlogic') or 'missing'} on the "
+                f"coordinator")
+    return 200, typed(PrepareReply(
+        ok=True, machine=me, rank=rank,
+        alert=f"on {me}: {differs}" if differs else None, note=note))
 
 
 def _local_copy_differs(path, spec: dict) -> str:
@@ -960,10 +962,27 @@ def start(job: str | None, *, spawn=None, wait_s: float | None = None) -> tuple:
     with _LOCK:
         prep = PREPARED.pop(str(job or ""), None)
     if prep is None:
+        # a retried Start (the answer was lost): the rank is already here
+        again = _running_here(str(job or ""))
+        if again:
+            return 200, typed(Started(job=str(job), rank=again[0],
+                                      pid=again[1], log=again[2]))
         return 404, {"error": f"no prepared job {str(job)[:40]!r} here"}
     with _START_LOCK:
         return _start(prep, spawn, START_WAIT_S if wait_s is None
                       else wait_s)
+
+
+def _running_here(job: str):
+    """(rank, pid, log) of this machine's live, not-stopping rank of `job`,
+    or None."""
+    for rec in J.by_job().get(job, []):
+        try:
+            if not rec.get("stopping") and _alive(job, int(rec["pid"])):
+                return int(rec["rank"]), int(rec["pid"]), rec.get("log")
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
 
 
 def _start(prep: dict, spawn, wait_s: float) -> tuple:
@@ -1052,8 +1071,8 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
         from knurlogic.cluster import recovery
         recovery.write_port(rec["port"], spec.get("recovery"))
     _ensure_watcher()
-    return 200, {"started": spec["job"], "rank": spec["rank"],
-                 "pid": proc.pid, "log": str(log)}
+    return 200, typed(Started(job=spec["job"], rank=spec["rank"],
+                              pid=proc.pid, log=str(log)))
 
 
 def _alive(job: str, pid: int) -> bool:
@@ -1066,13 +1085,13 @@ def _alive(job: str, pid: int) -> bool:
 
 def stop(job: str, reason: str = "unloaded", propagate: bool = True,
          post=None, grace: float = J.GRACE_S,
-         reap: float = J.REAP_S) -> dict:
+         reap: float = J.REAP_S, kind: str | None = None) -> dict:
     """Stop every rank of `job` on this machine (SIGTERM, then SIGKILL
     after `grace`), forget it, and -- when `propagate` -- tell every other
     page of the job to do the same."""
     job = str(job or "")
     from knurlogic.cluster import recovery
-    if recovery.kind(reason) == "requested":
+    if recovery.kind(reason, kind) == "requested":
         recovery.cancel_job(job)          # asked for: never recovered
     with _LOCK:
         PREPARED.pop(job, None)
@@ -1130,7 +1149,8 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
             port = next((int(v["port"]) for v in mine.values()
                          if v.get("port")), None) or (
                 int((spec or {}).get("port") or 0) or None)
-            ENDED[job] = {"reason": reason, "t": time.time(), "port": port,
+            ENDED[job] = {"reason": reason, "kind": kind or None,
+                          "t": time.time(), "port": port,
                           "machines": any_rec.get("machines")
                           or [n.get("name") for n in (spec or {}).get(
                               "nodes") or []]}
@@ -1153,14 +1173,15 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                 continue
             try:
                 (post or _stop_post)(f"http://{page}{STOP_PATH}",
-                                     {"job": job, "reason": reason})
+                                     {"job": job, "reason": reason,
+                                      **({"kind": kind} if kind else {})})
                 told.append(n.get("name"))
             except NET_ERRORS:
                 logger.debug("could not tell %s to stop job %s", page, job, exc_info=True)
-    return {"stopped": job, "ranks_here": sorted(v["rank"] for v in
-                                                 mine.values()),
-            "killed": killed, "exiting": left, "told": told,
-            "reason": reason}
+    return typed(Stopped(job=job, ranks_here=sorted(v["rank"] for v in
+                                                    mine.values()),
+                         killed=killed, exiting=left, told=told,
+                         reason=reason))
 
 
 def _stop_post(url: str, doc: dict) -> dict:
@@ -1192,7 +1213,12 @@ def watch_once(now: float | None = None) -> list:
                  propagate=False)
             continue
         why = _WATCH.verdict(job, recs, lambda pid, j=job: _alive(j, pid),
-                             now=now) or peer_verdict(job, recs, now=now)
+                             now=now)
+        fkind = None
+        if not why:
+            why = peer_verdict(job, recs, now=now)
+            if why and "stopped the job:" not in why:
+                fkind = "machine"     # a page gone, or its rank gone
         if why and " exited" in why:
             line = next((x for x in (link_init_failure(_log_tail(
                 r.get("log"))) for r in recs) if x), "")
@@ -1207,10 +1233,12 @@ def watch_once(now: float | None = None) -> list:
                 if ref:
                     # a rank refused to start: the job fails with its words
                     why = f"{why}: {ref}"[:700]
+                    fkind = "refusal"
                 elif mem:
                     why = f"{why}: out of memory: {mem}"[:300]
+                    fkind = "memory"
         if why:
-            stop(job, reason=why)
+            stop(job, reason=why, kind=fkind)
             out.append((job, why))
     return out
 
@@ -1222,15 +1250,16 @@ def job_state(job: str) -> dict:
                   and _alive(job, int(r["pid"])))
     ended = ENDED.get(job) or {}
     stopping = [r for r in recs if r.get("stopping")]
-    return {"job": job, "ranks_here": live, "prepared": job in PREPARED,
-            "stopping": bool(stopping),
-            "phase": J.phase_of(job, [r for r in recs
-                                      if not r.get("stopping")])
-            if live else None,
-            # by process, records or not: a relaunch waits for none left
-            "processes": J.pids_of_job(job),
-            "ended": ended.get("reason") or (
-                stopping[0].get("stop_reason") if stopping else None)}
+    return typed(JobState(
+        job=job, ranks_here=live, prepared=job in PREPARED,
+        stopping=bool(stopping),
+        phase=J.phase_of(job, [r for r in recs if not r.get("stopping")])
+        if live else None,
+        # by process, records or not: a relaunch waits for none left
+        processes=J.pids_of_job(job),
+        ended=ended.get("reason") or (
+            stopping[0].get("stop_reason") if stopping else None),
+        ended_kind=ended.get("kind")))
 
 
 def _ask_job(page: str, job: str) -> dict:
@@ -1555,7 +1584,8 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                                f"init: {', '.join(tried)}",
                     "placement": plan}
         net = left[0]
-        bad = BAD_CABLES.get(_pair(order[0], order[1])) or {}
+        bad = (BAD_CABLES.get(_pair(order[0], order[1])) or {}) \
+            if len(order) == 2 else {}
         if moved:
             note = (f"cable {net}: moved from {moved['from']}, whose link "
                     f"init failed ({moved['why']})")
@@ -1787,8 +1817,15 @@ def failover(job: str, ctx: dict, reason: str):
     line = link_init_failure(reason)
     if not line:
         return None
-    a, b = ctx["order"]
-    BAD_CABLES.setdefault(_pair(a, b), {})[ctx["net"]] = line
+    order = ctx["order"]
+    if len(order) != 2:
+        # a cable is only chosen for two machines; at more, the ring names
+        # its own addresses and there is no cable to move
+        logger.warning("cluster job %s: link init failed on %d machines "
+                       "(%s); no cable failover beyond two", job,
+                       len(order), line)
+        return None
+    BAD_CABLES.setdefault(_pair(order[0], order[1]), {})[ctx["net"]] = line
     out = launch(ctx["req"], tried=ctx["tried"],
                  moved={"from": ctx["net"], "why": line, "job": job},
                  **ctx["args"])
@@ -1874,7 +1911,10 @@ def peer_route(path: str, body: bytes) -> tuple:
         if not J.JOB_RX.fullmatch(str(req.get("job") or "")):
             return 400, {"error": "job is a hex nonce"}
         reason = str(req.get("reason") or "stopped by another machine")[:300]
-        return 200, stop(req["job"], reason=reason, propagate=False)
+        k = req.get("kind")
+        return 200, stop(req["job"], reason=reason, propagate=False,
+                         kind=k if k in (*FAILURE_KINDS, "requested")
+                         else None)
     if path == JOB_PATH:
         if not J.JOB_RX.fullmatch(str(req.get("job") or "")):
             return 400, {"error": "job is a hex nonce"}
