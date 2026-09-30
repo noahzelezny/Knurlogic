@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 
 import pytest
-from fake_cluster import FakeCluster, VERSIONS, alive, wait
+from fake_cluster import VERSIONS, FakeCluster, alive, wait
 
 from knurlogic.cluster import protocol, transport
 
@@ -53,7 +53,7 @@ def test_a_pipeline_launch_over_tcp_runs_a_rank_on_every_page(tmp_path, n):
 
 
 @pytest.mark.parametrize("n", [3, 8])
-def test_the_coordinators_page_dying_stops_the_job_everywhere_and_the_record_relaunches_it(
+def test_the_coordinators_page_dying_stops_the_job_everywhere_and_relaunches(
         tmp_path, n):
     with FakeCluster(n, tmp_path) as c:
         assert c.wait_peers()

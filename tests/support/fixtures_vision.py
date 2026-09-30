@@ -37,7 +37,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -68,7 +68,7 @@ _QWEN_TOP = dict(image_token_id=248056, video_token_id=248057,
 _QWEN_ROPE = dict(mrope_interleaved=True, mrope_section=[11, 11, 10],
                   partial_rotary_factor=0.25, rope_theta=10000000)
 
-REAL: Dict[str, Dict[str, Any]] = {
+REAL: dict[str, dict[str, Any]] = {
     "qwen3_5": dict(
         src="Qwen3.8-27B-VQ-3.9bpw", model_type="qwen3_5", **_QWEN_TOP,
         vision_config=dict(_QWEN_VISION, model_type="qwen3_5",
@@ -144,7 +144,7 @@ _SCALE_TEXT = {"hidden_size": 128, "intermediate_size": 256,
                "hidden_size_per_layer_input": 16}
 
 
-def tiny_ids(family: str) -> Dict[str, int]:
+def tiny_ids(family: str) -> dict[str, int]:
     """The family's special token ids remapped into the tiny vocab: sorted
     by real id and packed at the top (511, 510, ...), so their ORDER is the
     real one and the ordinary ids 0..~500 stay free for text."""
@@ -155,7 +155,7 @@ def tiny_ids(family: str) -> Dict[str, int]:
     return {k: base + i for i, (k, _) in enumerate(ordered)}
 
 
-def _scale(d: Dict[str, Any], table: Dict[str, int]) -> Dict[str, Any]:
+def _scale(d: dict[str, Any], table: dict[str, int]) -> dict[str, Any]:
     out = copy.deepcopy(d)
     layers_before = out.get("num_hidden_layers")
     for k, v in table.items():
@@ -170,9 +170,9 @@ def _scale(d: Dict[str, Any], table: Dict[str, int]) -> Dict[str, Any]:
     return out
 
 
-def tiny_config(family: str, real: Optional[Dict[str, Any]] = None,
-                text_config: Optional[Dict[str, Any]] = None,
-                **overrides: Any) -> Dict[str, Any]:
+def tiny_config(family: str, real: dict[str, Any] | None = None,
+                text_config: dict[str, Any] | None = None,
+                **overrides: Any) -> dict[str, Any]:
     """A tiny config for `family`: `real` (a full config.json, default the
     embedded REAL[family]) with sizes scaled, special ids remapped into
     TINY_VOCAB, vision out_hidden_size set to the tiny text hidden, and
@@ -257,6 +257,7 @@ class StubFamily:
 
     def preprocess(self, img, sha: str):
         from PIL import Image
+
         from knurlogic.engine.vision import ImageRef
         p, m = self.patch, self.max_side
         w, h = img.size
@@ -282,6 +283,7 @@ class StubFamily:
 
     def encode(self, pixels, ref):
         import mlx.core as mx
+
         from knurlogic.engine.vision import EncodedImage
         feats = self.tower(pixels["pixel_values"])
         mx.eval(feats)
@@ -307,6 +309,7 @@ class StubFamily:
 
     def embed(self, model, key, start, features):
         import mlx.core as mx
+
         from knurlogic.engine.vision import key as K
         from knurlogic.engine.vision.scatter import merge
         sl = list(key[start:])
@@ -324,7 +327,7 @@ class StubFamily:
         return [(s.start, s.end) for s in image_spans(key)]
 
 
-def stub_build(model_path: str, text_model, config: Dict[str, Any]):
+def stub_build(model_path: str, text_model, config: dict[str, Any]):
     """Registry-shaped builder for the stub: point a monkeypatched
     registry.FAMILIES entry at a module exposing this to route a tiny model
     through `registry.build` exactly as a real family is."""
@@ -350,8 +353,8 @@ def golden_path(name: str) -> Path:
     return GOLDENS / f"{name}.npz"
 
 
-def save_golden(name: str, arrays: Dict[str, Any],
-                meta: Optional[Dict[str, Any]] = None) -> Path:
+def save_golden(name: str, arrays: dict[str, Any],
+                meta: dict[str, Any] | None = None) -> Path:
     """Write tests/support/goldens/<name>.npz: the arrays as float32/int numpy plus a
     `__meta__` JSON string (reference version, seed, config, command) so a
     golden says how it was made. Called by a builder running in the
@@ -372,7 +375,7 @@ def save_golden(name: str, arrays: Dict[str, Any],
     return p
 
 
-def load_golden(name: str) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+def load_golden(name: str) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     """(arrays, meta). A missing golden is a FAILURE with the command that
     makes it, not a skip: a gate that skips when its reference is missing
     is a gate nobody notices is off."""

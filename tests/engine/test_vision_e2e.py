@@ -29,8 +29,8 @@ Tiny random models only (float32, seed 0, vocab 512). No real model, no
 server socket, no exo.
 """
 import json
-import types
 import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -42,8 +42,13 @@ sys.path.insert(0, str(ROOT / "src"))
 mx = pytest.importorskip("mlx.core")
 
 import fixtures_vision as fv  # noqa: E402
-from test_image_cache import (Harness, cached, data_url, first_top,  # noqa: E402,F401
-                              server)
+from test_image_cache import (  # noqa: E402,F401
+    Harness,
+    cached,
+    data_url,
+    first_top,
+    server,
+)
 
 from knurlogic.engine.vision import key as K  # noqa: E402
 
@@ -153,8 +158,8 @@ class Rig:
 
 
 def _qwen_rig(fam, tmp):
-    import test_vision_qwen as tq
     import fixtures_vision_qwen as fq
+    import test_vision_qwen as tq
     _, meta = tq._golden(fam)
     model = tq._trunk(fam, meta)
     d = tmp / fam
@@ -242,11 +247,13 @@ def _glm_call(model, ids, cache, input_embeddings=None, **kw):
 
 def _glm_rig(tmp):
     from fixtures_vision_glm5 import glm5_family, glm5_tiny_config
+
     from knurlogic.engine import register
     register.register("glm5_next")
     from knurlogic.engine.families.glm5.architecture.glm5_next.config import TextConfig
-    from knurlogic.engine.families.glm5.architecture.glm5_next.language import \
-        LanguageModel
+    from knurlogic.engine.families.glm5.architecture.glm5_next.language import (
+        LanguageModel,
+    )
     cfg = glm5_tiny_config()
     mx.random.seed(0)
     model = LanguageModel(TextConfig.from_dict(dict(cfg["text_config"],
@@ -662,6 +669,7 @@ def test_encoding_the_same_image_twice_is_bit_identical(rigs, name):
     from scratch, and the features must be equal bit for bit (design v2,
     review #7, kept as a cheap invariant)."""
     import hashlib
+
     from PIL import Image
     rig = rigs(name)
     fam = rig.make_family()

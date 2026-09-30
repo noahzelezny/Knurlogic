@@ -7,9 +7,8 @@ import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
-
-from knurlogic.interfaces.page import server as page_server
 from knurlogic.interfaces.page import documents
+from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning import settings as S
 from knurlogic.tuning.resolve import resolve
@@ -142,7 +141,7 @@ from test_cluster_jobs import cache  # noqa: E402,F401 (a fixture)
 def test_a_cluster_job_runs_the_saved_prompt_chunk(cache, monkeypatch):
     """The ring's chunk was 512 whatever was saved, and serve puts the
     ring's over any --set: a saved launch setting shown, never run."""
-    from test_cluster_jobs import jaccl_launch, C
+    from test_cluster_jobs import C, jaccl_launch
     monkeypatch.setattr(C, "BAD_CABLES", {})
     out, got = jaccl_launch(monkeypatch, {
         "cable": "127.0.1.x", "sets": {"KNURLOGIC_PREFILL_CHUNK": "2048"}})
@@ -219,8 +218,10 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
     server on the peer's loopback. Before, /peek and /apply went to the peer's
     loopback address from HERE (502) and the peer's model fell back to a
     preview, every knob a launch setting."""
-    from test_ui_peer_relay import _serve, Peers
     from http.server import BaseHTTPRequestHandler
+
+    from test_ui_peer_relay import Peers, _serve
+
     from knurlogic.machine import servers
     seen = []
 
@@ -257,7 +258,8 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
         monkeypatch.setattr(page_server, "PEERS", Peers(p))
         row = {"runtime": "knurlogic", "name": "m", "state": "ready",
                "where": f"http://127.0.0.1:{mport}"}
-        page_server.peer_residency(page_server.PEERS, fetch=lambda url, t: {"resident": [row]})
+        page_server.peer_residency(
+            page_server.PEERS, fetch=lambda url, t: {"resident": [row]})
         base = f"http://127.0.0.1:{mport}"
         assert base in page_server._PEER_TARGETS
         with urllib.request.urlopen(

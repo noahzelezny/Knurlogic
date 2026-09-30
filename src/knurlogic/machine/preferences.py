@@ -16,8 +16,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from knurlogic.tuning.settings import (COMPACT_KNOBS, MTP_MODE,
-                                       PRESET_ROW_NAMES, check_knob)
+from knurlogic.tuning.settings import (
+    COMPACT_KNOBS,
+    MTP_MODE,
+    PRESET_ROW_NAMES,
+    check_knob,
+)
 
 CROSS_CHIP = "KNURLOGIC_CROSS_CHIP"
 #: every name kept here

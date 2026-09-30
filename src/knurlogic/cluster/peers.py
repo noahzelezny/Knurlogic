@@ -14,16 +14,17 @@ probe is in flight per peer. Every status request carries
 `X-Knurlogic-Peer: <id> <port>`, so the receiving page records the
 requester as an `introduced` peer, so naming a machine on one side is
 enough for both to LIST each other; the gate is separate: over Ethernet or
-Wi-Fi name each machine on the other, or link them with Thunderbolt. peers.json (~/.knurlogic/peers.json) is keyed by node id,
-versioned, written atomically, and holds addresses, not secrets.
+Wi-Fi name each machine on the other, or link them with Thunderbolt.
+peers.json (~/.knurlogic/peers.json) is keyed by node id, versioned,
+written atomically, and holds addresses, not secrets.
 
 Design: docs/design/discovery.md (peers).
 """
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import os
 import threading
 import time
@@ -31,9 +32,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
+from knurlogic.cluster import NET_ERRORS, PROC_ERRORS, protocol, transport
 from knurlogic.cluster import jobs as J
-from knurlogic.cluster import protocol, transport
 
 logger = logging.getLogger(__name__)
 
@@ -496,8 +496,10 @@ class Peers:
                 while True:
                     try:
                         self.refresh()
-                    except Exception:  # the peer poll thread must survive one bad round (logged)
-                        logger.debug("peer refresh failed; retrying in %ss", REFRESH_S, exc_info=True)
+                    # the peer poll thread must survive one bad round (logged)
+                    except Exception:
+                        logger.debug("peer refresh failed; retrying in %ss",
+                                     REFRESH_S, exc_info=True)
                     time.sleep(REFRESH_S)
             self._thread = threading.Thread(target=loop, daemon=True,
                                             name="knurlogic-peers")

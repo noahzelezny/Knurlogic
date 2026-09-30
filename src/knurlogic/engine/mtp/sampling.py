@@ -15,8 +15,8 @@ exactly as p for ANY q, so a bad draft costs speed, never quality;
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, List, Optional
 
 import mlx.core as mx
 from mlx_lm.sample_utils import (
@@ -75,7 +75,7 @@ class Distribution:
     probs: mx.array          # [B, V], sums to 1
     logits: mx.array         # [B, V], scaled + masked
 
-    def sample(self, key: Optional[mx.array] = None) -> mx.array:
+    def sample(self, key: mx.array | None = None) -> mx.array:
         return mx.random.categorical(self.logits, key=key)
 
     def argmax(self) -> mx.array:
@@ -90,8 +90,8 @@ def make_distribution(
     top_k: int = 0,
     xtc_probability: float = 0.0,
     xtc_threshold: float = 0.0,
-    xtc_special_tokens: Optional[List[int]] = None,
-) -> Optional[Callable[[mx.array], Distribution]]:
+    xtc_special_tokens: list[int] | None = None,
+) -> Callable[[mx.array], Distribution] | None:
     """logits [B, V] -> Distribution, or None for greedy (temp == 0).
 
     None is not a fallback: at temp 0 the target is a point mass, rejection

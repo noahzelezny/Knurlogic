@@ -14,11 +14,20 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import fixtures_vision as fv  # noqa: E402
-from knurlogic.engine.vision import (EncodedImage, ImageEvicted, ImageTooLarge,  # noqa: E402
-                                     ImageRef, ImageRejected)
-from knurlogic.engine.vision import images  # noqa: E402
-from knurlogic.engine.vision.store import (DEFAULT_MAX_BYTES,  # noqa: E402
-                                           ImageStore, estimate_nbytes)
+
+from knurlogic.engine.vision import (  # noqa: E402
+    EncodedImage,
+    ImageEvicted,
+    ImageRef,
+    ImageRejected,
+    ImageTooLarge,
+    images,  # noqa: E402
+)
+from knurlogic.engine.vision.store import (  # noqa: E402
+    DEFAULT_MAX_BYTES,
+    ImageStore,
+    estimate_nbytes,
+)
 
 MB = 1 << 20
 
@@ -155,12 +164,14 @@ def test_normalisation_matches_mlx_vlm_load_image():
 
 
 def test_decompression_bomb_is_refused_before_decoding():
-    from PIL import Image
     import io
+
+    from PIL import Image
     big = Image.new("1", (10_000, 9_000))          # 90 Mpx > 89,478,485
     buf = io.BytesIO()
     big.save(buf, format="PNG")
-    with pytest.raises(ImageTooLarge, match="maximum for its format is 89478485 pixels"):
+    with pytest.raises(ImageTooLarge,
+                       match="maximum for its format is 89478485 pixels"):
         images.decode(buf.getvalue())
 
 
@@ -191,11 +202,13 @@ def test_garbage_and_oversize_are_rejected(monkeypatch):
         images.decode(fv.png_bytes(fv.tiny_image()))
 
 
-# --- the stub family, through images, the store and the key ----------------------------
+# --- the stub family, through images, the store and the key
+# ----------------------------
 
 def test_stub_family_end_to_end():
     mx = pytest.importorskip("mlx.core")
     import mlx.nn as nn
+
     from knurlogic.engine.vision import key as K
     D, PAD = 64, 500
     fam = fv.StubFamily(PAD, D)
@@ -257,6 +270,7 @@ def test_a_huge_jpeg_is_decoded_reduced_not_refused():
     is fine; the same pixel count as a PNG is refused (it must be unpacked
     whole)."""
     import io
+
     from PIL import Image
     w, h = 10000, 9500                       # 95 Mpx: over BOMB_PIXELS
     b = io.BytesIO()

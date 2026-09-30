@@ -449,7 +449,8 @@ KNOB_DOC = {
         "directly instead of dequantizing the whole cache each step "
         "(engine/kvattn.py). No trade measured: M4 Qwen3.6-35B decode is "
         "+4% faster at 6k, +15% at 16k context than off, and the needle "
-        "answer is exact either way. Off is for A/B -- check /status.json kv_kernel hits vs misses to see "
+        "answer is exact either way. Off is for A/B -- check /status.json "
+        "kv_kernel hits vs misses to see "
         "which path is actually live (GLM's MLA latent and gemma4's "
         "KV-shared layers always take dequantize + attention). A row with "
         "every key masked returns 0 here where mlx sdpa returns NaN. "
@@ -480,7 +481,8 @@ KNOB_DOC = {
         "one -- it cannot desync, rank 0 samples every token. auto: on only "
         "when a cluster job's machines have different GPU architectures."),
     "KNURLOGIC_PRESET": (
-        "launch preset for this model: default or lean -- the knurlogic strategy unless set here",
+        "launch preset for this model: default or lean -- the knurlogic "
+        "strategy unless set here",
         "one named bundle of the settings below. default is the measured "
         "settings; lean buys context and agents with some speed and "
         "precision (8-bit KV, 512-token prompt chunks, MTP off). Any "
@@ -1110,7 +1112,8 @@ COMPACT_KNOBS = {
         "the most recent messages kept word for word",
         "more keeps more recent work exact, at the cost of a longer "
         "compacted prompt (more prefill and KV memory). Fewer shrinks it "
-        "further and leans harder on the summary, so more detail is lost. The kept tail never starts on a tool result (it is "
+        "further and leans harder on the summary, so more detail is lost. "
+        "The kept tail never starts on a tool result (it is "
         "widened back to the call that asked for it); the first message "
         "and the goal turn are always kept."),
     "KNURLOGIC_COMPACT_TOOL_RESULTS": (

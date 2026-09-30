@@ -16,8 +16,10 @@ mx = pytest.importorskip("mlx.core")
 
 def _batched_list(rows=2, steps=5):
     from mlx_lm.models.cache import BatchKVCache
-    from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.cache \
-        import CacheList
+
+    from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.cache import (  # noqa: E501
+        CacheList,
+    )
     cl = CacheList(BatchKVCache([0] * rows), BatchKVCache([0] * rows))
     for _ in range(steps):
         for c in cl.caches:
@@ -43,9 +45,11 @@ def test_a_batched_cachelist_rolls_back_to_the_snapshot():
 def test_batched_cachelist_rollback_can_fail():
     """Holding anything that is not an attention cache, the composite is
     refused, not guessed at."""
+    from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.cache import (  # noqa: E501
+        ArraysCache,
+        CacheList,
+    )
     from knurlogic.engine.mtp import caches
-    from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.cache \
-        import ArraysCache, CacheList
     with pytest.raises(TypeError):
         caches.snapshot([CacheList(ArraysCache(size=2))])
 
@@ -54,8 +58,10 @@ def test_snapshot_semantics_check_takes_batched_and_composite_caches():
     """the check copied s[2] of every non-"attn" snapshot, and "battn" /
     "attn-list" snapshots carry None there -- a TypeError on exactly the
     caches the batch engine uses, instead of an answer."""
-    import mlx.core as mx
     from types import SimpleNamespace
+
+    import mlx.core as mx
+
     from knurlogic.engine.mtp import caches as C
 
     class Batched:                       # keys + trim, per-row offsets

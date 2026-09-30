@@ -2,9 +2,12 @@
 agents on a hybrid model lose their entries to a server-wide cap of 10.
 One machine: sized by bytes against its memory. A ring:
 count-based, scaled with the concurrent agents, and said."""
-from knurlogic.interfaces.serve import (GIB, PROMPT_CACHE_AGENTS_MAX,
-                                        PROMPT_CACHE_PER_AGENT,
-                                        prompt_cache_policy)
+from knurlogic.interfaces.serve import (
+    GIB,
+    PROMPT_CACHE_AGENTS_MAX,
+    PROMPT_CACHE_PER_AGENT,
+    prompt_cache_policy,
+)
 
 
 def test_one_machine_is_sized_by_bytes_against_the_headroom():

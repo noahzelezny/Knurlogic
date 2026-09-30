@@ -89,8 +89,8 @@ def test_an_unsupported_architecture_is_a_422(machine, monkeypatch):
 def test_a_switch_under_running_requests_is_refused_on_the_scheduler():
     """force=False is decided on the scheduler thread when the command
     runs, so it cannot race the requests it would fail."""
-    from knurlogic.engine.runtime.scheduler import Command, Job, Scheduler
     from knurlogic.engine.runtime import prompt as P
+    from knurlogic.engine.runtime.scheduler import Command, Job, Scheduler
 
     class Host:
         state, path, error = "ready", "/m/a", ""

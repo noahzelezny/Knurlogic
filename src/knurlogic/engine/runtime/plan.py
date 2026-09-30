@@ -18,7 +18,6 @@ format: docs/design/server.md (step plan).
 from __future__ import annotations
 
 import json
-from typing import List
 
 #: one row per rank per step. ACTIVE / PEAK: that rank's own mlx active
 #: and peak memory, so rank 0 can report every rank's (a follower serves
@@ -143,7 +142,7 @@ def key_to_wire(key: list, ref_of) -> tuple:
     if not spans:
         return list(key), [], []
     ids = [-1 if is_sentinel(x) else int(x) for x in key]
-    refs: List[list] = []
+    refs: list[list] = []
     at: dict = {}
     images = []
     for sp in spans:
@@ -178,5 +177,5 @@ def _ints(xs, what: str) -> None:
 
 
 def control(over: int, step: int, length: int, active: int = 0,
-            peak: int = 0) -> List[int]:
+            peak: int = 0) -> list[int]:
     return [int(over), int(step), int(length), int(active), int(peak)]

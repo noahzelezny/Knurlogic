@@ -14,8 +14,8 @@ Design: docs/design/cluster.md (launch).
 """
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import os
 import re
 import secrets
@@ -23,14 +23,19 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
+from knurlogic.cluster import NET_ERRORS, PROC_ERRORS, transport
 from knurlogic.cluster import jobs as J
-from knurlogic.cluster import transport
-from knurlogic.cluster.protocol import (FAILURE_KINDS, JobState, PrepareReply,
-                                        Started, Stopped, typed)
+from knurlogic.cluster.protocol import (
+    FAILURE_KINDS,
+    JobState,
+    PrepareReply,
+    Started,
+    Stopped,
+    typed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1207,7 +1212,8 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                                    **({"kind": kind} if kind else {})})
                 told.append(n.get("name"))
             except NET_ERRORS:
-                logger.debug("could not tell %s to stop job %s", page, job, exc_info=True)
+                logger.debug("could not tell %s to stop job %s", page, job,
+                             exc_info=True)
     return typed(Stopped(job=job, ranks_here=sorted(v["rank"] for v in
                                                     mine.values()),
                          killed=killed, exiting=left, told=told,
@@ -1250,8 +1256,7 @@ def watch_once(now: float | None = None) -> list:
             if line:
                 why = f"{why}: link init failed: {line}"[:300]
             else:
-                from knurlogic.cluster.recovery import (memory_line,
-                                                        refusal_line)
+                from knurlogic.cluster.recovery import memory_line, refusal_line
                 tails = [_log_tail(r.get("log")) for r in recs]
                 ref = next((x for x in map(refusal_line, tails) if x), "")
                 mem = next((x for x in map(memory_line, tails) if x), "")
@@ -1370,7 +1375,8 @@ def _ensure_watcher() -> None:
             time.sleep(WATCH_S)
             try:
                 watch_once()
-            except Exception as e:  # a watcher thread must survive any one failed pass (logged)
+            # a watcher thread must survive any one failed pass (logged)
+            except Exception as e:
                 logger.warning("cluster watch: %s: %s", type(e).__name__, e)
     threading.Thread(target=loop, daemon=True,
                      name="knurlogic-cluster-watch").start()
@@ -1686,7 +1692,8 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             if d is None:
                 return {"refused": f"{m['name']} has RDMA up on "
                                    f"{', '.join(m['rdma'].get('active') or [])}"
-                                   f" and none of them is on {order[1 - order.index(m)]['name']}'s "
+                                   f" and none of them is on "
+                                   f"{order[1 - order.index(m)]['name']}'s "
                                    f"Thunderbolt subnet", "placement": plan}
         ibv = [[None, a0], [a1, None]]
         coord = f"{ips[0]}:{RING_PORT + slot * 20 + 19}"
@@ -1894,7 +1901,8 @@ def _abandon(job: str, order: list, post, reason: str = "refused") -> None:
             else:
                 post(m["page"], "Stop", {"job": job, "reason": reason})
         except NET_ERRORS:
-            logger.debug("could not stop job %s on %s", job, m.get("page"), exc_info=True)
+            logger.debug("could not stop job %s on %s", job, m.get("page"),
+                     exc_info=True)
 
 
 # ------------------------------------------------------------ peer routes

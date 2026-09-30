@@ -207,6 +207,7 @@ def test_required_modules_follow_dependencies_of_dependencies(monkeypatch):
 
 def test_one_malformed_pin_costs_only_itself(tmp_path, monkeypatch):
     import json
+
     from knurlogic.engine import arch
     (tmp_path / "pins.json").write_text(json.dumps(
         {"good": {"sha256": "ab"}, "bad": "TODO"}))

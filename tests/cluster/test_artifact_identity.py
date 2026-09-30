@@ -6,7 +6,6 @@ import json
 import os
 import struct
 
-
 from knurlogic.cluster import launch
 from knurlogic.machine import artifact as A
 

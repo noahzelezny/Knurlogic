@@ -86,8 +86,8 @@ def sched():
     model, and arrays the scheduler thread made inside it (rope tables,
     caches) must not be freed after that thread has ended -- MLX segfaults.
     A real server's stop() unloads on the thread instead."""
-    from knurlogic.engine.serve import state
     from knurlogic.engine.runtime.scheduler import Scheduler
+    from knurlogic.engine.serve import state
     model, head, prompts = _tiny(512)
     # everything evaluated here: MLX streams are per thread, and a lazy
     # array made on this one cannot be evaluated on the scheduler's
@@ -191,8 +191,13 @@ def test_memory_past_the_limit_empties_the_prompt_cache_then_stops_the_newest():
     the scheduler gives up the prompt cache first, then the newest rows,
     each with an OutOfMemory -- and keeps new requests waiting."""
     from knurlogic.engine.runtime import prompt as P
-    from knurlogic.engine.runtime.scheduler import (GIB, Job, OutOfMemory,
-                                                    Scheduler, _Row)
+    from knurlogic.engine.runtime.scheduler import (
+        GIB,
+        Job,
+        OutOfMemory,
+        Scheduler,
+        _Row,
+    )
 
     class Cache:
         nbytes = 6 * GIB
@@ -264,6 +269,7 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
     its cache fits it goes in lean (no checkpoints); else it waits for
     running rows, or with none running it is refused."""
     import pytest
+
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime import scheduler as S
     GIB = S.GIB
@@ -413,6 +419,7 @@ def test_one_context_measured_scales_the_transient_in_proportion():
 
 def test_measure_records_the_transient_against_its_context():
     import mlx.core as mx
+
     from knurlogic.engine.runtime.scheduler import GIB, Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._active = lambda: 100 * GIB
@@ -526,6 +533,7 @@ def test_the_spike_is_what_the_step_did_not_keep():
     """An admission's KV is growth; only the peak above where the step
     ENDED is transient."""
     import mlx.core as mx
+
     from knurlogic.engine.runtime.scheduler import GIB, Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._active = lambda: int(101.5 * GIB)

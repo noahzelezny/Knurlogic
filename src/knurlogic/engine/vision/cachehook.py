@@ -17,8 +17,9 @@ Design: docs/design/vision.md (cache pins).
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable, Hashable, Iterator
 from contextlib import ExitStack, contextmanager
-from typing import Any, Callable, Dict, Hashable, Iterator, List, Optional, Tuple
+from typing import Any
 
 from . import key as K
 
@@ -26,7 +27,7 @@ from . import key as K
 MUTATORS = ("insert_cache", "trim_to")
 
 StoreLike = Any
-StoreGetter = Callable[[], Optional[StoreLike]]
+StoreGetter = Callable[[], StoreLike | None]
 
 _STATE_ATTR = "_knurlogic_cachehook"
 
@@ -37,11 +38,11 @@ class _Refs:
     def __init__(self, store: StoreGetter):
         self.store = store
         self.lock = threading.Lock()
-        self.entries: Dict[int, Tuple[Any, ExitStack]] = {}
+        self.entries: dict[int, tuple[Any, ExitStack]] = {}
 
     def reconcile(self, cache: Any) -> None:
         lrus = cache._lru._lrus
-        live: Dict[int, Tuple[Hashable, Any]] = {}
+        live: dict[int, tuple[Hashable, Any]] = {}
         for dq in lrus.values():
             for model, tokens in dq:
                 live[id(tokens)] = (model, tokens)
@@ -83,7 +84,7 @@ def _cache_class(target: Any):
     return cls
 
 
-def _refs(cache: Any) -> Optional[_Refs]:
+def _refs(cache: Any) -> _Refs | None:
     return cache.__dict__.get(_STATE_ATTR)
 
 
@@ -152,14 +153,14 @@ def release(cache: Any) -> None:
 _PENDING = threading.local()
 
 
-def _pending_list() -> List[Tuple[Any, List[Tuple[str, str]]]]:
+def _pending_list() -> list[tuple[Any, list[tuple[str, str]]]]:
     lst = getattr(_PENDING, "items", None)
     if lst is None:
         lst = _PENDING.items = []
     return lst
 
 
-def pending(serve: Any, images: List[Tuple[str, str]]) -> None:
+def pending(serve: Any, images: list[tuple[str, str]]) -> None:
     """Record that a tokenize on this thread left these images pinned on
     `serve` (a VisionServe: its release() drops one pin per image), to be
     claimed by the admit or swept."""

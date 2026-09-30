@@ -12,9 +12,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.engine.vision import ImageRef, KeyMismatch  # noqa: E402
+from knurlogic.engine.vision import (  # noqa: E402
+    ImageRef,
+    KeyMismatch,
+    registry,  # noqa: E402
+)
 from knurlogic.engine.vision import key as K  # noqa: E402
-from knurlogic.engine.vision import registry  # noqa: E402
 
 PAD = 99
 A = ImageRef("a" * 64, "p1", 3, (1, 2, 6))
@@ -232,8 +235,9 @@ def test_proc_hash_is_canonical():
 
 def test_masked_scatter_matches_the_mlx_vlm_golden():
     mx = pytest.importorskip("mlx.core")
-    import numpy as np
     import fixtures_vision as fv
+    import numpy as np
+
     from knurlogic.engine.vision.scatter import masked_scatter
     g, meta = fv.load_golden("p0_masked_scatter")
     assert meta["mlx_vlm"] == fv.REFERENCE_VERSION
@@ -248,6 +252,7 @@ def test_merge_takes_rows_by_sentinel_across_a_prefix_cut():
     feature index."""
     mx = pytest.importorskip("mlx.core")
     import numpy as np
+
     from knurlogic.engine.vision import EncodedImage
     from knurlogic.engine.vision.scatter import merge
     D = 4

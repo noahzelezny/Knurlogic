@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -143,7 +143,7 @@ class Send(_Wrap):
             self._pending.clear()
 
 
-def sends_of(model) -> List[Send]:
+def sends_of(model) -> list[Send]:
     """This stage's Send (none on rank 0), seen through its wrappers."""
     out = []
     for layer in core_of(model).layers:
@@ -183,10 +183,10 @@ def overlapped(model):
             sd.flush()
 
 
-def bounds_of(counts: Sequence[int]) -> List[Tuple[int, int]]:
+def bounds_of(counts: Sequence[int]) -> list[tuple[int, int]]:
     """Layer counts per rank -> (start, end) per rank; rank N-1 first."""
     n = len(counts)
-    out: List[Tuple[int, int]] = [(0, 0)] * n
+    out: list[tuple[int, int]] = [(0, 0)] * n
     at = 0
     for r in range(n - 1, -1, -1):
         out[r] = (at, at + int(counts[r]))
@@ -240,7 +240,7 @@ def restage(model, keep: list, start: int, end: int) -> None:
     # pass it through.
 
 
-def split(model, group, bounds: Sequence[Tuple[int, int]]) -> dict:
+def split(model, group, bounds: Sequence[tuple[int, int]]) -> dict:
     """Keep this rank's layers of `model` (bounds[rank]) and wire its stage
     ends, in place, before the weights are read. -> what was done."""
     rank, n = group.rank(), group.size()
@@ -329,13 +329,13 @@ class Coord:
         #: plan removes the row
         self.diverged = False
 
-    def _bcast(self, vals: List[int]) -> List[int]:
+    def _bcast(self, vals: list[int]) -> list[int]:
         n = len(vals)
         v = mx.array(vals if self.leader else [0] * n, dtype=mx.int32)
         out = mx.distributed.all_gather(v, group=self.group, stream=mx.cpu)
         return out[:n].tolist()           # rank 0's block is the first
 
-    def b0(self, t1: Optional[mx.array]) -> Optional[mx.array]:
+    def b0(self, t1: mx.array | None) -> mx.array | None:
         """After every admission attempt (and a failed decode step): every
         row's next token, rank 0's. Made even when the admission failed on
         one rank, so the ranks' collective counts stay equal; the row counts
@@ -360,7 +360,7 @@ class Coord:
             return t1
         return mx.array(got[:ns[0]], dtype=mx.int32)
 
-    def ba(self, ok: bool, hit: int, drafts: bool) -> Tuple[int, bool]:
+    def ba(self, ok: bool, hit: int, drafts: bool) -> tuple[int, bool]:
         """Before an admission's prefill, on a drafting pipeline: -> rank
         0's (hit, drafts). Every rank says whether it got this far; if any
         did not, every rank's admission fails here (RuntimeError), before
@@ -398,7 +398,8 @@ class Coord:
                          for (sha, ph), n in zip(imgs, ns)]
                 rows = mx.concatenate(parts, axis=0).astype(mx.float32)
                 dim, ok = int(rows.shape[1]), 1
-            except Exception:  # rank 0 must still tell the other ranks it failed (logged)
+            # rank 0 must still tell the other ranks it failed (logged)
+            except Exception:
                 logger.exception("rank 0 could not read an image's rows")
         ok, dim = self._bcast([ok, dim])
         if not ok:
@@ -420,7 +421,7 @@ class Coord:
             return table[(sha, ph)]
         return lookup
 
-    def b1(self, drafting: bool, d2: Optional[mx.array], B: int):
+    def b1(self, drafting: bool, d2: mx.array | None, B: int):
         """-> (drafting, d2 [B] int32 or None)."""
         self.calls["b1"] += 1
         vals = [int(bool(drafting))] + (
@@ -431,7 +432,7 @@ class Coord:
             return False, None
         return True, mx.array(got[1:], dtype=mx.int32)
 
-    def b2(self, ok: List[bool], t2: mx.array, B: int):
+    def b2(self, ok: list[bool], t2: mx.array, B: int):
         """-> (ok flags, t2 [B] int32)."""
         self.calls["b2"] += 1
         vals = ([int(bool(o)) for o in ok] + [int(t) for t in t2.tolist()]
@@ -440,7 +441,7 @@ class Coord:
         return [bool(o) for o in got[:B]], mx.array(got[B:], dtype=mx.int32)
 
 
-def coordinate(gen, group, drafting: Optional[bool] = None) -> Coord:
+def coordinate(gen, group, drafting: bool | None = None) -> Coord:
     """Install a Coord on a batch engine (every rank of a pipeline).
     `drafting`: rank 0 drafts; default, whether this engine holds a head
     (rank 0's own answer)."""
@@ -455,9 +456,9 @@ def coordinate(gen, group, drafting: Optional[bool] = None) -> Coord:
 # ---------------------------------------------------------------- bring-up
 
 def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
-          working_set: int, bandwidth_gbs: Optional[float] = None,
-          counts: Optional[Sequence[int]] = None,
-          leader_bytes: int = 0, reserve: Optional[dict] = None) -> dict:
+          working_set: int, bandwidth_gbs: float | None = None,
+          counts: Sequence[int] | None = None,
+          leader_bytes: int = 0, reserve: dict | None = None) -> dict:
     """Every rank's working set and memory bandwidth, gathered, and the
     layer split computed from them the same way on every rank
     (tuning/resolve.pipeline_shares: same inputs, same split; rank 0's

@@ -17,9 +17,10 @@ import json
 import os
 import socket
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
+from typing import Any
 
 #: Exit code for a gate tool that found the lock busy (EX_TEMPFAIL): "try
 #: again later", distinct from a failed gate.
@@ -30,7 +31,7 @@ class Busy(RuntimeError):
     """The lock is held by someone else. `.holder` is their record (or {}
     if they had not written it yet)."""
 
-    def __init__(self, holder: Dict[str, Any]):
+    def __init__(self, holder: dict[str, Any]):
         self.holder = holder or {}
         who = ", ".join(f"{k}={v}" for k, v in self.holder.items()
                         if k in ("pid", "artifact", "purpose", "agent"))
@@ -53,7 +54,7 @@ def _open(path: Path) -> int:
     return os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
 
 
-def _read_record(fd: int) -> Dict[str, Any]:
+def _read_record(fd: int) -> dict[str, Any]:
     try:
         os.lseek(fd, 0, os.SEEK_SET)
         raw = os.read(fd, 65536)
@@ -72,7 +73,7 @@ def _try_lock(fd: int) -> bool:
         raise
 
 
-def holder(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+def holder(path: Path | None = None) -> dict[str, Any] | None:
     """The holder's record if the lock is held (by anyone, this process
     included), else None. For `ready()`: a held lock is a blocker.
 
@@ -94,8 +95,8 @@ def holder(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
 
 @contextmanager
 def model_load(artifact: str, purpose: str, wait_s: float = 0.0,
-               agent: Optional[str] = None,
-               path: Optional[Path] = None) -> Iterator[Dict[str, Any]]:
+               agent: str | None = None,
+               path: Path | None = None) -> Iterator[dict[str, Any]]:
     """Hold the load lock for the block; yields the record written.
 
     wait_s=0 (the default, and what gate tools use) fails at once with Busy

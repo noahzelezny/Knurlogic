@@ -18,7 +18,7 @@ import copy
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any
 
 from knurlogic.engine import templates as _templates
 from knurlogic.engine.serve import segments as _segments
@@ -31,15 +31,15 @@ class ChatRequest:
     completion of `prompt`; "chat" renders `messages` (and `tools`)."""
     request_type: str = "chat"
     prompt: str = ""
-    messages: List[dict] = field(default_factory=list)
-    tools: Optional[list] = None
-    role_mapping: Optional[dict] = None
+    messages: list[dict] = field(default_factory=list)
+    tools: list | None = None
+    role_mapping: dict | None = None
 
 
 @dataclass
 class PromptArgs:
     """The rendering arguments: the server's defaults, then the request's."""
-    chat_template_kwargs: Optional[dict] = None
+    chat_template_kwargs: dict | None = None
 
 
 class PromptError(ValueError):
@@ -62,7 +62,7 @@ MARK = _Mark()
 _ZWSP = "\u200b"
 
 
-def control_strings(tokenizer) -> Optional[re.Pattern]:
+def control_strings(tokenizer) -> re.Pattern | None:
     """The tokenizer's control tokens as they are spelled in text --
     added tokens that read as markup (`<|im_end|>`, `<start_of_turn>`,
     `<think>`, `[gMASK]`) -- as one pattern, longest first; None if none.
@@ -121,7 +121,7 @@ def _neutralize_values(v, pattern):
     return v
 
 
-def flatten(messages: List[dict], tokenizer=None) -> List[dict]:
+def flatten(messages: list[dict], tokenizer=None) -> list[dict]:
     """A copy with list-of-parts content joined into one string (images are
     already placeholders by now) and tool-call arguments decoded, which is
     what chat templates expect. Content and tool-call arguments are
@@ -200,7 +200,8 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
     with thinking._render_lock:
         try:
             prompt = _render(tokenizer, messages, render, close)
-        except Exception as e:  # a chat template is third-party code; its failure is the request's refusal
+        # a chat template is third-party code; its failure is the request's refusal
+        except Exception as e:
             raise PromptError(f"the chat template could not render this "
                               f"request: {type(e).__name__}: {e}") from e
         return _segment(tokenizer, messages, render, prompt)
@@ -235,7 +236,7 @@ _DROP = re.compile(r"(\{%-?\s*if\s+)(loop\.index0\s*>\s*ns\.last_query_index)"
 _SWITCH = "(preserve_thinking is defined and preserve_thinking is true) or "
 
 
-def _preserving_template(tokenizer) -> Optional[str]:
+def _preserving_template(tokenizer) -> str | None:
     """The template with Qwen3.6's preserve_thinking switch added, for a
     template that has Qwen3.5's think-drop and no switch; else None."""
     t = getattr(tokenizer, "chat_template", None)
@@ -289,8 +290,8 @@ def _segment(tokenizer, messages, render, prompt):
     if not messages or messages[-1].get("role") not in ANSWERED:
         return prompt, [prompt], ["assistant"], state
 
-    segs: List[List[int]] = []
-    types: List[str] = []
+    segs: list[list[int]] = []
+    types: list[str] = []
     sys_end = 0
     n_sys = 0
     for m in messages:

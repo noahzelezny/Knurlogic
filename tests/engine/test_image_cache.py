@@ -229,8 +229,9 @@ class Harness:
             from knurlogic.engine.vision import set_served_vision
             from knurlogic.engine.vision.request import VisionServe
             from knurlogic.engine.vision.store import ImageStore
-            self.vision = VisionServe(family, store if store is not None else ImageStore(),
-                                      self.host.model_key)
+            self.vision = VisionServe(
+                family, store if store is not None else ImageStore(),
+                self.host.model_key)
             state.VISION.update(serve=self.vision, model=model)
             set_served_vision(family.spec)
         self.sched = Scheduler(self.host, prefill_step_size=prefill_step_size)

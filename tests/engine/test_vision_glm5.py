@@ -122,7 +122,9 @@ def test_vendor_siblings_import_standalone():
 def test_glm5_siblings_now_empty():
     """`deps.glm5_siblings()` regexes glm5_next's OWN source for `from
     ..X import` lines -- the exact mlx_vlm-relative pattern this package
-    rewrote to absolute `knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.X` imports.
+    rewrote to absolute
+    `knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.X`
+    imports.
     Before vendoring: {base, cache,
     deepseek_v4.hyper_connection, gated_delta, linear, mla,
     qwen3_vl.processing_qwen3_vl, sparse_attention, switch_layers} -- 9
@@ -140,7 +142,8 @@ def test_glm5_siblings_now_empty():
 def test_glm5_siblings_now_empty_MUTATED():
     """Mutation check for the gate above: reverting ONE import in
     `engine/families/glm5/architecture/glm5_next/language.py` from the absolute
-    `knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.mla` back to a relative
+    `knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.mla`
+    back to a relative
     `from ..mla import MultiLinear` (confirmed) turns
     `glm5_siblings()` non-empty again -- `test_glm5_siblings_now_empty`
     goes red as expected. Reverted after confirming."""
@@ -214,8 +217,8 @@ def test_family_chunk_boundaries_empty_causal():
 
 def test_family_embed_merges_features():
     import mlx.core as mx
-
     from fixtures_vision_glm5 import glm5_tiny_image
+
     from knurlogic.engine.vision.images import pixel_sha
     from knurlogic.engine.vision.key import sentinel
 
@@ -250,9 +253,11 @@ def test_preprocess_normalizes_like_the_reference_processor(tmp_path):
     CLIP's mean/std (or the artifact's). Found on GLM-5.3-Flash 2.7: without
     the normalize step a pure red square was read as "salmon/coral"."""
     import json
+
     import numpy as np
-    from PIL import Image
     from fixtures_vision_glm5 import glm5_tiny_config
+    from PIL import Image
+
     from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
     fam = Glm5VisionFamily(glm5_tiny_config())
     px, _ = fam.preprocess(Image.new("RGB", (56, 56), (255, 0, 0)), "x")

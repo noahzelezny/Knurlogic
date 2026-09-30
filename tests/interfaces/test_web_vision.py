@@ -11,7 +11,6 @@ from pathlib import Path
 from knurlogic.interfaces.http import messages
 from knurlogic.interfaces.page import documents
 
-
 # --- anthropic_images_to_openai --------------------------------------------
 
 def test_base64_image_block_becomes_a_data_url_image_part():
@@ -157,6 +156,7 @@ def test_the_chat_proxy_only_reaches_models_this_page_knows(monkeypatch):
     against a fixed list -- servers knurlogic started -- or the page
     would forward anything to any address."""
     import io
+
     from knurlogic.interfaces.page import server as page_server
     monkeypatch.setattr(page_server, "chat_targets",
                         lambda: {"http://127.0.0.1:8080"})
@@ -215,6 +215,7 @@ def test_every_page_file_ships_and_every_reference_resolves():
 def _page_server():
     import threading
     from http.server import ThreadingHTTPServer
+
     from knurlogic.interfaces.page import documents as web
     from knurlogic.interfaces.page import server as ui
     srv = ThreadingHTTPServer(("127.0.0.1", 0),

@@ -16,14 +16,15 @@ Stdlib only. Design: docs/design/vision.md (cache key).
 """
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Sequence, Tuple
+from typing import Any
 
 from . import ImageRef, KeyMismatch
 
 TAG = "img"
 
-Sentinel = Tuple[str, str, str, int]
+Sentinel = tuple[str, str, str, int]
 
 
 def sentinel(ref: ImageRef, k: int) -> Sentinel:
@@ -42,12 +43,12 @@ def has_image(key: Iterable[Any]) -> bool:
 
 
 def expand_pads(ids: Sequence[int], refs: Sequence[ImageRef],
-                image_token_id: int) -> List[int]:
+                image_token_id: int) -> list[int]:
     """The template's output -> the model's ids: each single image_token_id
     (one per image, Family.placeholder_text's contract) becomes ref.n_tokens
     copies, refs taken in order. Raises KeyMismatch if the count of pads is
     not the count of refs -- a user who typed the pad token as text."""
-    out: List[int] = []
+    out: list[int] = []
     i = 0
     for t in ids:
         if t == image_token_id:
@@ -66,14 +67,14 @@ def expand_pads(ids: Sequence[int], refs: Sequence[ImageRef],
 
 
 def expand(ids: Sequence[int], refs: Sequence[ImageRef],
-           image_token_id: int) -> List[Any]:
+           image_token_id: int) -> list[Any]:
     """Expanded ids (every image already n_tokens long) -> the key.
 
     Refs are consumed in order; each takes exactly its n_tokens consecutive
     image tokens, so two images back to back with no separator still split
     right. Anything else -- a run too short, a stray image token after the
     last ref, a ref left over -- raises KeyMismatch."""
-    key: List[Any] = []
+    key: list[Any] = []
     i, n = 0, len(ids)
     r = 0
     while i < n:
@@ -100,7 +101,7 @@ def expand(ids: Sequence[int], refs: Sequence[ImageRef],
 
 def expand_segments(segments: Sequence[Sequence[int]],
                     refs: Sequence[ImageRef],
-                    image_token_id: int) -> Tuple[List[Any], List[List[Any]]]:
+                    image_token_id: int) -> tuple[list[Any], list[list[Any]]]:
     """The prompt stage returns (prompt, segments, ...), and the segments
     feed `insert_segments` and the checkpoints. Rewriting only the prompt
     would leave the segments naming the wrong tokens.
@@ -133,7 +134,7 @@ def expand_segments(segments: Sequence[Sequence[int]],
     return key, out
 
 
-def to_ids(key: Iterable[Any], image_token_id: int) -> List[int]:
+def to_ids(key: Iterable[Any], image_token_id: int) -> list[int]:
     """The key -> what the model is fed: every sentinel back to the pad."""
     return [image_token_id if type(x) is tuple else x for x in key]
 
@@ -150,11 +151,11 @@ class Span:
     k0: int
 
 
-def image_spans(key: Sequence[Any]) -> List[Span]:
+def image_spans(key: Sequence[Any]) -> list[Span]:
     """Every image run in the key, in order. A new span starts where the
     image changes or k does not follow on -- so the same image twice in a
     row is two spans, as it is two images."""
-    spans: List[Span] = []
+    spans: list[Span] = []
     s = None
     for i, x in enumerate(key):
         if type(x) is tuple:
@@ -173,7 +174,7 @@ def image_spans(key: Sequence[Any]) -> List[Span]:
     return spans
 
 
-def images_in(key: Sequence[Any]) -> List[Tuple[str, str]]:
+def images_in(key: Sequence[Any]) -> list[tuple[str, str]]:
     """(sha, proc_hash) of each image run in the key, in order, including a
     run the slice cuts into -- what a store pin must hold for embed, and,
     over a full key, the refs positions() needs."""

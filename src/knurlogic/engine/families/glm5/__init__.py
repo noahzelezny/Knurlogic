@@ -56,7 +56,8 @@ MANIFEST = {
     # GLM-5.3's template: reasoning_effort in {low, high}, anything else is
     # "max" (the default). It has no off KWARG; "off" is the template's own
     # format for a turn without thinking -- the think block already closed
-    # (engine/serve/thinking.CLOSE), at low effort. Measured on the 2.7 rung: 12/12 right, 0 reasoning tokens.
+    # (engine/serve/thinking.CLOSE), at low effort. Measured on the 2.7 rung: 12/12
+    # right, 0 reasoning tokens.
     # Its three levels are the ladder's low/medium/high under other names:
     # "high" is its middle, "max" its top -- and the
     # default, which is why a harness that asks nothing reasons for 64k.

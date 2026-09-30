@@ -24,6 +24,7 @@ def _kv(shape, seed=0, dtype=None):
                                         (4, 0.5625 / 2)])
 def test_stored_bytes_shrink_by_the_bits(bits, ratio):
     from mlx_lm.models.cache import KVCache
+
     from knurlogic.engine.kvquant import QuantKVCache
     k, v = _kv((1, 4, 512, 128)), _kv((1, 4, 512, 128), 1)
     plain, q = KVCache(), QuantKVCache(bits)
@@ -73,6 +74,7 @@ def test_a_batched_rollback_rewrites_like_a_fresh_cache():
 
 def test_merge_extract_filter_extend_keep_each_row():
     from mlx_lm.models.cache import BatchKVCache, KVCache
+
     from knurlogic.engine.kvquant import QuantKVCache
     rows = [(_kv((1, 2, n, 32), n), _kv((1, 2, n, 32), n + 50))
             for n in (5, 12, 3)]
@@ -127,6 +129,7 @@ def test_install_quantizes_attention_only_and_greedy_logits_stay_close():
     """qwen3_5 at full_attention_interval 2: two of four layers are
     attention (KVCache); the two deltanet layers keep their state."""
     from mlx_lm.models.cache import ArraysCache
+
     from knurlogic.engine.kvquant import QuantKVCache, install
     model, _, prompts = _tiny(512)
     ref = _logits(model, prompts[0])
@@ -177,7 +180,9 @@ def test_a_quantized_checkpoint_restores_like_a_fresh_prefill():
     from one emits what a fresh prefill of the whole prompt emits, and
     prefills only the new tokens."""
     import copy
+
     from test_batch_drafting import _drive, _turns
+
     from knurlogic.engine.kvquant import QuantKVCache, install
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     model, head, sys_, user, tail_a, next_b = _turns()
@@ -199,6 +204,7 @@ def test_a_quantized_checkpoint_restores_like_a_fresh_prefill():
 def test_a_quantized_prefix_trims_back_for_reuse():
     """The prompt cache trims an entry to a shorter shared prefix."""
     from mlx_lm.models.cache import trim_prompt_cache
+
     from knurlogic.engine.kvquant import QuantKVCache
     a, b = QuantKVCache(8), QuantKVCache(8)
     x = _kv((1, 2, 20, 32))
@@ -217,8 +223,9 @@ def test_gemma4_quantizes_its_full_attention_and_keeps_the_windows():
     forced: this random tiny gemma is so sensitive that merely storing its
     K/V in bf16 moves logits by ~1% of their range, and greedy decode
     flips near-ties either way."""
-    from mlx_lm.models.cache import RotatingKVCache
     from fixtures_vision_gemma4 import tiny_gemma4_config, tiny_text_model
+    from mlx_lm.models.cache import RotatingKVCache
+
     from knurlogic.engine.kvquant import QuantKVCache, install
     tc = dict(tiny_gemma4_config()["text_config"], num_hidden_layers=6,
               num_attention_heads=4, num_key_value_heads=2, head_dim=64,
@@ -291,6 +298,7 @@ def _prompt(n=90, m=8, seed=3):
 
 def test_flash_next_quantizes_its_attention_and_keeps_the_indexer():
     import importlib
+
     from knurlogic.engine.kvquant import install
     model = _family("qwen4_exp")
     Q = importlib.import_module(type(model).__module__)
@@ -310,7 +318,9 @@ def test_flash_next_quantizes_its_attention_and_keeps_the_indexer():
 
 def test_flash_next_quantized_cache_trims_and_restores_its_indexer():
     import copy
+
     from mlx_lm.models.cache import trim_prompt_cache
+
     from knurlogic.engine.kvquant import install
     model = _family("qwen4_exp")
     install(model, 8)
