@@ -18,6 +18,7 @@ import json
 import subprocess
 import sys
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -52,6 +53,10 @@ _MM = {"doc": None, "at": 0.0}
 #: The other machines this page knows (cluster/peers.py); None until the
 #: page starts, so importing this module starts nothing.
 PEERS: Peers | None = None
+
+
+#: one per process start
+_BOOT_ID = uuid.uuid4().hex
 
 
 def _status_fn(_n=0):
@@ -104,6 +109,11 @@ def _status_fn(_n=0):
         snaps[0]["cluster"] = {"error": f"{type(e).__name__}: {e}"}
     snap = status.aggregate(snaps)
     snap["wired"] = wired.advise(0)
+    # liveness rides this GET: which process answered, and the control-plane
+    # protocol it speaks (a peer that changed boot_id lost its ranks)
+    from knurlogic.cluster import protocol
+    snap["boot_id"] = _BOOT_ID
+    snap["v"] = list(protocol.VERSION)
     # Who this machine is, and -- measured by the peers, since this machine
     # cannot see connections its own firewall drops -- whether they can
     # reach it.
