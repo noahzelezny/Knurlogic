@@ -12,6 +12,8 @@ import threading
 from pathlib import Path
 
 LIMIT = 50
+#: how many listing rows are read to find LIMIT runnable ones
+SCAN = 200
 #: what a runnable repo needs; the rest (READMEs, images) is left behind
 WANTED = ("*.json", "*.safetensors", "*.txt", "*.model", "*.jinja",
           "*.tiktoken")
@@ -45,18 +47,32 @@ def _bytes_held(repo: str) -> int:
 
 
 def search(q: str) -> dict:
-    """MLX-format models matching `q`, most downloaded first."""
+    """MLX-format models matching `q` that Knurlogic can run, most downloaded
+    first. The listing carries each repo's config and safetensors info, so
+    support is decided per result without a request per repo; a wider page
+    is read and filtered so the list still comes back full."""
+    from knurlogic.engine import arch
+    from knurlogic.machine.discover import NON_CHAT_MODEL_TYPES
     # the Hub matches one substring; further words narrow what it sent back
     words = [w for w in (q or "").lower().split() if w != "mlx"]
     try:
         rows = _api().list_models(search=words[0] if words else None,
                                   filter="mlx", sort="downloads",
-                                  limit=LIMIT * 4 if words[1:] else LIMIT,
-                                  expand=["downloads", "gated", "likes"])
-        out = [{"id": m.id, "downloads": m.downloads or 0,
-                "likes": m.likes or 0, "gated": bool(m.gated)}
-               for m in rows if all(w in m.id.lower() for w in words[1:])]
-        out = out[:LIMIT]
+                                  limit=SCAN,
+                                  expand=["downloads", "gated", "likes",
+                                          "config", "safetensors"])
+        out = []
+        for m in rows:
+            mtype = (m.config or {}).get("model_type") or ""
+            if (m.safetensors is None or not mtype
+                    or mtype in NON_CHAT_MODEL_TYPES
+                    or not arch.supported(mtype)
+                    or not all(w in m.id.lower() for w in words[1:])):
+                continue
+            out.append({"id": m.id, "downloads": m.downloads or 0,
+                        "likes": m.likes or 0, "gated": bool(m.gated)})
+            if len(out) >= LIMIT:
+                break
     except Exception as e:
         return {"error": f"Hugging Face did not answer: {_brief(e)}",
                 "results": []}
