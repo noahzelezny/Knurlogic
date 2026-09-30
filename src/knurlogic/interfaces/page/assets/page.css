@@ -475,6 +475,8 @@ nav a[aria-pressed=true]{text-shadow:var(--glow)}
 .lp.ready .ph{color:var(--ok)}
 .lp .bar{height:4px;background:var(--line);border-radius:2px;margin:5px 0 3px;overflow:hidden}
 .lp .bar i{display:block;height:100%;background:var(--acc)}
+.lbar{height:3px;background:var(--line);border-radius:2px;margin:5px 0 3px;overflow:hidden}
+.lbar i{display:block;height:100%;background:var(--acc);transition:width .4s}
 .lp .why{color:var(--warn);margin-top:4px;overflow-wrap:anywhere}
 .lp .x{padding:0 6px}
 .unit .uhead .mk.big{width:44px;height:44px;margin:-4px 0}

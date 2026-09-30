@@ -1,5 +1,5 @@
 import {$, esc, gb} from '../format.js';
-import {followLaunches} from './picker.js';
+import {followLaunches, loadingLaunches} from './picker.js';
 
 // --- what is actually in memory, whoever put it there ---------------------
 // exo's models, ollama's models and ours in one list. A machine has one pool
@@ -139,7 +139,23 @@ async function loadResident(){
     if(!inst) return true;
     if(seen.has(inst)) return false;
     seen.add(inst); return true });
-  let h=shown.length?shown.map(([r,i])=>card(r,i)).join(''):none;
+  const busy=loadingLaunches();
+  const mine=([r])=>busy.some(L=>r.runtime==='knurlogic' && r.state!=='loaded'
+    && (r.name===String(L.name).split('/').pop())
+    && (L.job ? (r.cluster&&r.cluster.job)===L.job
+              : (r.where||'').replace(/\/$/,'').endsWith(':'+L.port)));
+  const cards=shown.filter(x=>!mine(x)).map(([r,i])=>card(r,i));
+  const loading=busy.map(L=>{
+    const pct=L.total?Math.min(100,Math.round(100*L.bytes/L.total)):null;
+    const say=L.phase==='warming'?'warming up':pct!=null&&L.phase==='loading weights'
+      ?`loading ${pct}%`:L.phase;
+    return `<div class="card loading"><div class="cardhd"><span class="dot"></span>
+        <span class="rt knurlogic">${esc(say)}</span></div>
+      <div class="n">${esc(String(L.name).split('/').pop())}</div>
+      ${pct!=null?`<div class="lbar"><i style="width:${pct}%"></i></div>`:''}
+      <div class="s">on ${esc(L.machines.join(' + '))}${L.per&&L.per.length?' · '
+        +esc(L.per.map(p=>p.machine+': '+p.phase).join(' · ')):''}</div></div>`});
+  let h=cards.length||loading.length?loading.concat(cards).join(''):none;
   for(const m of peers) if(m.error)
     h+=`<div class="s ro peererr" title="${esc(m.error)}">${
       esc(m.machine)} not answering</div>`;
