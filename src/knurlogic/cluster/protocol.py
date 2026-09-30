@@ -29,6 +29,17 @@ def version_refusal(who: str, theirs, ours=VERSION) -> str:
             f"update knurlogic on the older one")
 
 
+def mismatch_text(name: str, theirs, ours=VERSION) -> str:
+    """What the peer list says of a machine whose protocol major differs,
+    or that speaks none (an older knurlogic): which machine to update."""
+    if not isinstance(theirs, (list, tuple)) or not theirs:
+        return (f"{name} speaks no protocol this machine knows, "
+                f"this machine {ours[0]}: update knurlogic on {name}")
+    older = theirs[0] < ours[0]
+    return (f"{name} speaks protocol {theirs[0]}, this machine {ours[0]}: "
+            f"update knurlogic on {name if older else 'this machine'}")
+
+
 def check_version(v: Any, who: str = "a peer") -> tuple:
     """(major, minor) of a wire `v`; raises VersionMismatch when the major
     differs from ours (either way), ProtocolError when it is no version."""
@@ -258,8 +269,22 @@ class Shape(Body):
 @_register
 @dataclass(frozen=True)
 class MachineSet(Body):
+    """A machine's own settings: the allowance, the strategy, and the
+    knurlogic-wide settings (`settings`)."""
     allowance_gib: float | None = None
     strategy: str | None = None
+    settings: dict | None = None
+
+
+@_register
+@dataclass(frozen=True)
+class Read(Body):
+    """A page's read of a peer's document: a fixed list of paths (the
+    receiver's own allow-list), or -- with `port` -- a model server's
+    /settings.json on that peer. Reads only."""
+    path: str
+    query: dict = field(default_factory=dict)
+    port: int | None = None
 
 
 @_register
@@ -315,10 +340,14 @@ class Message:
 _SEQ = [0]
 
 
+def next_seq() -> int:
+    _SEQ[0] += 1
+    return _SEQ[0]
+
+
 def message(body: Body, sender: str = "", job: str | None = None,
             re: int | None = None) -> Message:
-    _SEQ[0] += 1
-    return Message(body=body, sender=sender, job=job, seq=_SEQ[0],
+    return Message(body=body, sender=sender, job=job, seq=next_seq(),
                    ts=time.time(), re=re)
 
 
