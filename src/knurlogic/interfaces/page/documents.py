@@ -548,9 +548,19 @@ def knob_limit(artifact, name: str) -> dict:
     from knurlogic.tuning import settings as S
     if name != "KNURLOGIC_CONTEXT_LENGTH":
         return {}
-    w, why = S.model_window(getattr(artifact, "raw_config", None) or {})
+    cfg = getattr(artifact, "raw_config", None) or {}
+    w, why = S.model_window(cfg)
     if not w:
         return {}
+    top = S.context_ceiling(getattr(artifact, "model_type", ""), cfg)
+    if top > w:
+        # past the native window is long context: offered, and turned on
+        # at launch (settings.settle_context)
+        return {"max": top, "max_why":
+                f"up to {w:,} tokens natively ({why}); above {w:,} the "
+                f"launch uses long context (YaRN, to {top:,}), turned on "
+                f"for you -- it needs the KV room, and static YaRN may cost "
+                f"a little quality on short prompts"}
     return {"max": w, "max_why": f"this model's maximum is {w:,} tokens: "
                                  f"{why}"}
 
