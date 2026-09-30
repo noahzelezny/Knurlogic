@@ -742,8 +742,8 @@ class Scheduler:
                     f"which leaves no room for an answer")
             if job.max_tokens is None:
                 job.max_tokens = window - len(prompt) if window else 1 << 20
-            elif cap:
-                job.max_tokens = min(job.max_tokens, cap - len(prompt))
+            elif window:
+                job.max_tokens = min(job.max_tokens, window - len(prompt))
             hit = getattr(self.cache, "hit_length", lambda k, t: 0)(
                 self.host.model_key, prompt)
             lean = self._make_room(len(prompt),

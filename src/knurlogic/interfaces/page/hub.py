@@ -252,9 +252,11 @@ def dismiss(repo_id: str) -> dict:
 def _in_use(repo_id: str) -> str:
     """The port of a running server whose model is in this repo's cache
     folder, or ""."""
-    from knurlogic.machine.servers import registry
+    from knurlogic.machine.servers import is_our_server, registry
     root = _cache_dir(repo_id)
     for port, rec in registry().items():
+        if not is_our_server(int(rec.get("pid") or 0)):
+            continue
         try:
             if Path(str(rec.get("artifact") or "")).resolve().is_relative_to(
                     root.resolve()):
