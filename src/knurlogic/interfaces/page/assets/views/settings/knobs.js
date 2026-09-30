@@ -66,8 +66,8 @@ const isGlobal=n=>n==='KNURLOGIC_CROSS_CHIP'||/^KNURLOGIC_COMPACT_/.test(n);
 // (nothing of it runs: every change is a launch setting), label (how the confirm lists it) and url
 // (a setting of this page's own, POSTed there as {gib}: the allowance).
 // a launch setting's plain name, where its variable is not one
-const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Identical results across chips', KNURLOGIC_PRESET:'Launch preset'};
-// the launch preset may be left unset: the Knurlogic tab's strategy then
+const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Per-chip rounding', KNURLOGIC_PRESET:'Preset'};
+// the preset may be left unset: the Knurlogic tab's preset then applies
 const UNSET='(unset)';
 function knobHTML(k, c){
   const unsettable=k.name==='KNURLOGIC_PRESET';
@@ -93,7 +93,7 @@ function knobHTML(k, c){
   const cap=k.cap==null||ci<0?vals.length-1:ci;
   let ctl;
   if(unsettable){
-    const dflt=`Knurlogic default (${window.LOADTUNE||'balanced'})`;
+    const dflt='default';
     ctl=`<select aria-label="${esc(k.name)}">${[UNSET,...vals].map(x=>
       `<option value="${esc(x)}"${sameVal(x,sel)?' selected':''}>${esc(x===UNSET?dflt:x)}</option>`).join('')}</select>`;
   }else if(vals.length){

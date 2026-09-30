@@ -9,9 +9,11 @@ not a model's to vary and so are not kept per base model:
   a long conversation. Policy, not a property of any model. Every model
   server on the machine reads it per request, so a change applies to the
   next request of every running model.
-- **identical results across chips** (`KNURLOGIC_CROSS_CHIP`) -- a property
-  of the cluster's hardware mix, not of a model. Read at launch; unset
-  means the launch preset decides (stable: on, the rest: off).
+- **per-chip rounding** (`KNURLOGIC_CROSS_CHIP`; on means the same rounding
+  on every chip, i.e. per-chip rounding off) -- a property of the cluster's
+  hardware mix, not of a model and not of any preset. Read at launch;
+  unset is off (per-chip rounding on). The page offers on/off only; `auto`
+  is still taken from env / `--set`.
 
 Kept in `~/.config/knurlogic/settings.json` (`XDG_CONFIG_HOME` honoured),
 beside the allowance and the strategy; the page's Knurlogic tab applies it

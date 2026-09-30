@@ -632,7 +632,8 @@ def compaction_document(env=None, running: bool = True) -> dict:
             "would_be": default, "value": env.get(name) or default,
             "default": default,
             "changed": False, "tier": "reach",
-            "what": what, "why": why, "values": list(values), "unit": unit,
+            "what": what, "why": why, "help": S.KNOB_HELP.get(name, ""),
+            "values": list(values), "unit": unit,
             "reach": "live",
             "reach_why": ("knurlogic-wide: every model server reads it for "
                           "every request, so a change applies to the next "
@@ -660,7 +661,8 @@ def knurlogic_doc() -> dict:
             "cross_chip": {"name": preferences.CROSS_CHIP,
                            "value": saved.get(preferences.CROSS_CHIP, ""),
                            "values": S.KNOB_RANGE[preferences.CROSS_CHIP][0],
-                           "what": what, "why": why},
+                           "what": what, "why": why,
+                           "help": S.KNOB_HELP[preferences.CROSS_CHIP]},
             "compaction": compaction_document(),
             "file": str(preferences.path())}
 
