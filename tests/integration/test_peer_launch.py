@@ -3,7 +3,6 @@ peer refuses anything off its gate, with an Origin, or naming a path. No model l
 peer's loader and resolver are stubs, and the "peer" in the happy path is a
 local http server running the real handler."""
 
-import json
 import threading
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
@@ -28,11 +27,10 @@ def hdr(**kw):
     return {k.replace("_", "-"): v for k, v in kw.items()}
 
 
-def call(body, headers=None, gate=Open(), **kw):
+def call(body, **kw):
     loads = []
     code, doc = page_server.peer_launch(
-        {} if headers is None else headers, "192.0.2.1", "192.0.2.2",
-        json.dumps(body).encode(), gate=gate,
+        body,
         load=lambda **a: loads.append(a) or {"starting": a["artifact"]},
         resolve=kw.get("resolve", lambda i: "/models/X" if i == "abc"
                        else None),
@@ -47,18 +45,18 @@ LOAD = {"action": "load", "identity": "abc", "tune": "lean",
 # --- the peer's side ---------------------------------------------------------
 
 def test_refused_with_any_origin_header():
-    code, doc, loads = call(LOAD, headers={"Origin": "http://192.0.2.2:8899"})
-    assert code == 403 and not loads
+    code, doc = page_server.peer_refusal(
+        {"Origin": "http://192.0.2.2:8899"}, "192.0.2.1", "192.0.2.2", Open())
+    assert code == 403 and "web page" in doc["error"]
 
 
 def test_refused_off_the_gate_unless_a_named_peer():
-    code, _, loads = call(LOAD, gate=Shut())
-    assert code == 403 and not loads
-    code, _ = page_server.peer_launch({}, "192.0.2.1",
-                                "203.0.113.105", json.dumps(LOAD).encode(),
-                                gate=Shut(), manual_hosts=["192.0.2.1"],
-                                load=lambda **a: {}, resolve=lambda i: "/m")
-    assert code == 200
+    code, _ = page_server.peer_refusal({}, "192.0.2.1", "192.0.2.2", Shut())
+    assert code == 403
+    assert page_server.peer_refusal({}, "192.0.2.1", "203.0.113.105", Shut(),
+                                    manual_hosts=["192.0.2.1"]) is None
+    assert page_server.peer_refusal({}, "192.0.2.1", "192.0.2.2",
+                                    Open()) is None
 
 
 @pytest.mark.parametrize("key", ["path", "target", "artifact", "where"])
@@ -67,12 +65,12 @@ def test_refused_when_a_path_is_in_the_payload(key):
     assert code == 400 and "identity" in doc["error"] and not loads
 
 
-def test_a_body_that_is_not_json_says_why():
-    code, doc = page_server.peer_launch({}, "192.0.2.1", "192.0.2.2", b'{"action": ',
-                               gate=Open(), load=lambda **a: {},
-                               resolve=lambda i: "/m")
-    assert code == 400 and "JSON" in doc["error"]
-    assert "line 1" in doc["error"]          # the parser's own message
+def test_a_body_that_is_not_an_envelope_says_why():
+    from knurlogic.cluster import transport
+    code, doc = transport.handle(b'{"action": ', {})
+    assert code == 400 and "envelope" in doc["error"]
+    code, doc = transport.handle(b'{"action": "load", "identity": "abc"}', {})
+    assert code == 400 and "envelope" in doc["error"]
 
 
 def test_unknown_identity_is_a_plain_refusal():
@@ -130,15 +128,15 @@ def peer(state="answering"):
 
 
 def test_forward_refuses_unknown_or_silent_peer(monkeypatch):
-    peers_with(peer("not_answering"), monkeypatch=monkeypatch)
+    peers_with(peer("gone"), monkeypatch=monkeypatch)
     sent = []
     doc = page_server.forward_launch({"action": "load", "node": "m4id",
                              "identity": "abc"},
-                            post=lambda *a: sent.append(a))
+                            post=lambda *a, **k: sent.append(a))
     assert "not a machine that is answering" in doc["error"] and not sent
     doc = page_server.forward_launch({"action": "load", "node": "other",
                              "identity": "abc"},
-                            post=lambda *a: sent.append(a))
+                            post=lambda *a, **k: sent.append(a))
     assert "error" in doc and not sent
 
 
@@ -147,7 +145,7 @@ def test_forward_never_sends_a_path(monkeypatch):
     for extra in ({"target": "/x"}, {"path": "/x"}, {"artifact": "/x"}):
         doc = page_server.forward_launch({"action": "load", "node": "m4id",
                                  "identity": "abc", **extra},
-                                post=lambda *a: 1 / 0)
+                                post=lambda *a, **k: 1 / 0)
         assert "identity" in doc["error"]
 
 
@@ -179,10 +177,11 @@ def test_forward_to_a_real_peer_page(monkeypatch):
         # a browser page cannot reach the peer route
         import urllib.error
         import urllib.request
+        from knurlogic.cluster import transport
+        body, _ = transport.encode("Load", {"identity": "abc"})
         req = urllib.request.Request(
-            f"http://127.0.0.1:{port}{page_server.PEER_LOAD_PATH}", method="POST",
-            data=json.dumps({"action": "load", "identity": "abc"}).encode(),
-            headers={"Origin": "http://evil.example"})
+            f"http://127.0.0.1:{port}{transport.MSG_PATH}", method="POST",
+            data=body, headers={"Origin": "http://evil.example"})
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(req, timeout=5)
         assert e.value.code == 403
@@ -192,8 +191,8 @@ def test_forward_to_a_real_peer_page(monkeypatch):
 
 
 def _stubbed(real, loads):
-    def f(headers, client_ip, local_ip, body, **kw):
-        return real(headers, client_ip, local_ip, body,
+    def f(req, **kw):
+        return real(req,
                     load=lambda **a: loads.append(a) or
                     {"starting": a["artifact"]},
                     resolve=lambda i: "/models/X" if i == "abc" else None,
@@ -208,5 +207,5 @@ def test_forward_refuses_a_port_that_is_not_a_number(monkeypatch):
     peers_with(peer(), monkeypatch=monkeypatch)
     doc = page_server.forward_launch({"action": "load", "node": "m4id",
                              "identity": "abc", "port": "x"},
-                            post=lambda *a: 1 / 0)
+                            post=lambda *a, **k: 1 / 0)
     assert "port" in doc["error"]

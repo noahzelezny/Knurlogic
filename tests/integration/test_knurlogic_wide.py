@@ -1,7 +1,6 @@
 """Knurlogic-wide settings (machine/preferences): compaction and identical
 results across chips are set once for every model, not per model -- read
 per request (compaction) and at launch (cross-chip)."""
-import json
 
 import pytest
 
@@ -64,16 +63,16 @@ def test_compaction_document_is_one_live_set(home):
 
 
 def test_peer_machine_saves_knurlogic_wide_settings(home):
-    code, doc = page_server.peer_machine(json.dumps(
+    code, doc = page_server.peer_machine(
         {"strategy": "lean",
          "settings": {"KNURLOGIC_CROSS_CHIP": "auto",
-                      "KNURLOGIC_COMPACT_AUTO": "on"}}).encode())
+                      "KNURLOGIC_COMPACT_AUTO": "on"}})
     assert code == 200
     assert doc["knurlogic"]["saved"] == {"KNURLOGIC_CROSS_CHIP": "auto",
                                          "KNURLOGIC_COMPACT_AUTO": "on"}
     assert doc["knurlogic"]["cross_chip"]["value"] == "auto"
     code, doc = page_server.peer_machine(
-        b'{"settings": {"KNURLOGIC_CONTEXT_LENGTH": "512"}}')
+        {"settings": {"KNURLOGIC_CONTEXT_LENGTH": "512"}})
     assert code == 400
     assert preferences.get()["KNURLOGIC_CROSS_CHIP"] == "auto"
 
