@@ -285,6 +285,7 @@ class Link:
         if not length:
             return rows, None
         if self.rank == 0:
+            assert payload is not None      # rank 0 is the one that sends
             buf = mx.array(np.frombuffer(payload, dtype=np.uint8))
         else:
             buf = mx.zeros((length,), dtype=mx.uint8)
@@ -799,7 +800,7 @@ def init(link_kind: str) -> Link:
     backend = {"ring": "ring", "jaccl": "jaccl"}[link_kind]
     join_ms = os.environ.get("KNURLOGIC_JACCL_TIMEOUT_MS")
     armed = bool(join_ms and join_ms.isdigit())
-    if armed:
+    if armed and join_ms:
         os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = join_ms
     try:
         group = mx.distributed.init(backend=backend, strict=True)

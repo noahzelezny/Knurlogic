@@ -52,7 +52,7 @@ def load_head(model_path: str):
     try:
         from knurlogic.engine.mtp.registry import load_head
         head, spec = load_head(model, sidecar=found.path)
-    except Exception as e:
+    except Exception as e:  # a head that will not bind is reported, not a crash; the model serves without one
         # A head that will not bind is a fact worth printing, not a crash:
         # the model serves perfectly well without one.
         state.DRAFT.update(on=False, why=f"{type(e).__name__}: {e}")

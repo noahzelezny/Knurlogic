@@ -23,7 +23,15 @@ import re
 from pathlib import Path
 from typing import Optional
 
+import jinja2
+
 logger = logging.getLogger(__name__)
+
+#: What rendering a third-party chat template can raise: Jinja's own errors
+#: (including the template's raise_exception) and the plain ones a template
+#: meets in an odd message shape.
+TEMPLATE_ERRORS = (jinja2.TemplateError, ValueError, TypeError, KeyError,
+                   IndexError, AttributeError)
 
 _HERE = Path(__file__).resolve().parent
 
@@ -87,7 +95,7 @@ def install(tokenizer) -> Optional[str]:
     new = text(fam)
     try:
         tokenizer.chat_template = new
-    except Exception:
+    except (AttributeError, TypeError):
         logger.warning("could not replace the chat template on %r", name)
         return None
     parser = PARSERS.get(fam)

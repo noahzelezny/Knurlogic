@@ -96,8 +96,12 @@ def install(target: Any, store: StoreGetter | StoreLike) -> None:
     ImageStore, or a zero-argument callable returning the current one (or
     None when nothing with vision is served) -- serve/vision.py passes a getter,
     since the store changes with every load."""
-    getter: StoreGetter = store if callable(store) and not hasattr(
-        store, "pinned") else (lambda s=store: s)
+    getter: StoreGetter
+    if callable(store) and not hasattr(store, "pinned"):
+        getter = store
+    else:
+        def getter(s=store):
+            return s
     cls = _cache_class(target)
     cls._knurlogic_store_getter = staticmethod(getter)
     if not isinstance(target, type) and hasattr(target, "_lru") and (

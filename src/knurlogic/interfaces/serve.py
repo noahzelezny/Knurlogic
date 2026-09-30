@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 
 from knurlogic.engine import arch, serve as engine, mtp
@@ -210,11 +211,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     world = int(ring.get("world") or 1)
     share = None
     if world > 1:
-        why = _ring_refusals(a, ring, working_set_gib, overrides or {})
-        if why:
+        ring_why = _ring_refusals(a, ring, working_set_gib, overrides or {})
+        if ring_why:
             print(f"REFUSING a {world}-rank {ring.get('split')} split of "
                   f"{a.path.name}:", file=sys.stderr)
-            for w in why:
+            for w in ring_why:
                 print(f"  - {w}", file=sys.stderr)
             return REFUSED_EXIT
         if ring.get("split") == "pipeline":
@@ -403,7 +404,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         if _mm["doc"] is None or now - _mm["at"] > 4.0:
             try:
                 _mm["doc"] = loaded.memory_map()
-            except Exception:
+            except (OSError, subprocess.SubprocessError, ValueError, KeyError, AttributeError):
                 _mm["doc"] = None
             _mm["at"] = now
         return _mm["doc"]
@@ -437,14 +438,14 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # `models` answer plus the default the server actually renders
         try:
             snap["thinking"] = engine.thinking_status()
-        except Exception as e:
+        except Exception as e:  # the status document must still answer; the error is in it
             snap["thinking"] = {"error": f"{type(e).__name__}: {e}"}
         # Vision on the same contract page as drafting: spec, image store
         # size, encodes and pins -- the numbers that say whether images are
         # being reused or re-encoded.
         try:
             snap["vision"] = engine.vision_status()
-        except Exception as e:
+        except Exception as e:  # the status document must still answer; the error is in it
             snap["vision"] = {"error": f"{type(e).__name__}: {e}"}
         # `served_vision()` is the P0-frozen way to say whether the served
         # model sees images at all; the image store's own
@@ -462,7 +463,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                 store = get_store()
                 if store is not None:
                     image_store = store.stats()
-            except Exception:
+            except (AttributeError, TypeError, OSError, ValueError, RuntimeError):
                 image_store = None
         snap["vision"] = {"served": spec.to_json() if spec else None,
                           "image_store": image_store}
@@ -679,7 +680,7 @@ def _chip() -> str:
         return subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
                               capture_output=True, text=True,
                               timeout=5).stdout.strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return ""
 
 

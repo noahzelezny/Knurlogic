@@ -144,13 +144,14 @@ def summarize(body: dict, pending: Pending, out: Outcome,
     `out`, and return the body to run on the compacted prompt."""
     cfg = settings(env)
     p, uses = pending.plan, pending.uses
-    text, usage, why = "", {}, None
+    text, why = "", None
+    usage: dict = {}
     try:
         resp = generate(summary_body(body, pending))
         msg = ((resp.get("choices") or [{}])[0].get("message") or {})
         text = msg.get("content") or ""
         usage = resp.get("usage") or {}
-    except Exception as e:                       # fail soft
+    except Exception as e:                       # fail soft  # the model call fails soft, logged below
         why = f"{type(e).__name__}: {e}"
         logger.warning("compaction summary failed: %s", why)
     summary, found = E.parse_output(text, len(uses))
@@ -210,8 +211,9 @@ def paused(out: Outcome, *, id_: str, created: int, model: str,
            context: Optional[dict] = None) -> dict:
     """The whole response when the edit said pause_after_compaction: the
     summary alone, finish_reason "compaction"."""
-    usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
-             "knurlogic": {"compaction": out.iteration}}
+    usage: dict = {"prompt_tokens": 0, "completion_tokens": 0,
+                   "total_tokens": 0,
+                   "knurlogic": {"compaction": out.iteration}}
     if context:
         usage["knurlogic"]["context"] = context
     return attach({"id": id_, "object": "chat.completion", "created": created,

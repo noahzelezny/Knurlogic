@@ -104,6 +104,8 @@ def register(*names: str, override: bool = False) -> list:
         spec = importlib.util.spec_from_file_location(
             target, src,
             submodule_search_locations=[str(src.parent)] if is_pkg else None)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load {src}")
         mod = importlib.util.module_from_spec(spec)
         # Register BEFORE exec so intra-package relative imports
         # (`from .base import ...`) resolve against real mlx_lm.models.

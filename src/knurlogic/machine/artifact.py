@@ -61,7 +61,7 @@ class Artifact:
         f = self.path / self.model_file
         try:
             return f.read_text() if f.is_file() else ""
-        except Exception:
+        except (OSError, ValueError):
             return ""
 
     @property
@@ -93,7 +93,7 @@ class Artifact:
         if cfg.is_file():
             try:
                 return json.loads(cfg.read_text()).get("chat_template") or ""
-            except Exception:
+            except (OSError, ValueError, AttributeError):
                 return ""
         return ""
 
@@ -183,7 +183,7 @@ def context_length(path) -> int:
     0 when the config does not say. The page offers max_tokens up to it."""
     try:
         cfg = json.loads((Path(path) / "config.json").read_text())
-    except Exception:
+    except (OSError, ValueError):
         return 0
     for c in (cfg, cfg.get("text_config") if isinstance(cfg, dict) else None):
         v = c.get("max_position_embeddings") if isinstance(c, dict) else None
@@ -203,7 +203,7 @@ def sampling_defaults(path) -> dict:
     do_sample false (greedy is then what they meant)."""
     try:
         g = json.loads((Path(path) / "generation_config.json").read_text())
-    except Exception:
+    except (OSError, ValueError):
         return {}
     if not isinstance(g, dict) or g.get("do_sample") is False:
         return {}
@@ -333,7 +333,7 @@ def _network_mounts() -> list:
     try:
         text = subprocess.run(["mount"], capture_output=True, text=True,
                               timeout=5).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         text = ""
     for line in text.splitlines():
         m = re.match(r".+? on (.+) \(([a-z0-9]+)[,)]", line)
@@ -356,7 +356,7 @@ def on_network(path) -> bool:
                for m in _network_mounts())
 
 
-def resolve_identity(ident: str, paths=None, name: str = "") -> str | None:
+def resolve_identity(ident: str | None, paths=None, name: str = "") -> str | None:
     """The local artifact directory with this identity, or None. `paths`
     defaults to every artifact in this machine's model stores
     (machine/discover.py); nothing outside them is ever considered.
@@ -402,7 +402,7 @@ def prefer_shared(ident: str, name: str, paths=None) -> tuple:
         from knurlogic.machine import discover
         paths = [f.path for f in discover.find()]
     same = [p for p in paths if Path(str(p)).name == name]
-    shared = {}
+    shared: dict = {}
     for p in same:
         if on_network(p):
             i = identity(p)

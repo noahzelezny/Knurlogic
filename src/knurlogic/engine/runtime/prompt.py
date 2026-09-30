@@ -18,7 +18,7 @@ import copy
 import json
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from knurlogic.engine import templates as _templates
 from knurlogic.engine.serve import segments as _segments
@@ -72,19 +72,19 @@ def control_strings(tokenizer) -> Optional[re.Pattern]:
     ended its own turn, and `<|im_start|>system` inside a user message or a
     tool result opened a system turn (measured on Qwen3.8 Flash: models
     reviewing this code stopped mid-thought when they quoted one)."""
-    cached = getattr(tokenizer, "_knurlogic_controls", False)
+    cached: Any = getattr(tokenizer, "_knurlogic_controls", False)
     if cached is not False:
         return cached
     # mlx-lm's TokenizerWrapper forwards these to the HF tokenizer (its
     # `_tokenizer`); a fast HF tokenizer's own `_tokenizer` is the Rust
     # one, which has neither -- so ask the object itself
-    names = set()
+    names: Any = set()
     try:
         for t in (getattr(tokenizer, "added_tokens_decoder", None)
                   or {}).values():
             names.add(getattr(t, "content", str(t)))
         names.update(getattr(tokenizer, "all_special_tokens", None) or [])
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
         pass    # any tokenizer shape: an odd one just yields fewer names
     # (DeepSeek's `｜DSML｜`, the tool-call markup token, is bracketed by
     # full-width bars: a tool result quoting DSML would open a call)
@@ -200,7 +200,7 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
     with thinking._render_lock:
         try:
             prompt = _render(tokenizer, messages, render, close)
-        except Exception as e:
+        except Exception as e:  # a chat template is third-party code; its failure is the request's refusal
             raise PromptError(f"the chat template could not render this "
                               f"request: {type(e).__name__}: {e}") from e
         return _segment(tokenizer, messages, render, prompt)
@@ -241,7 +241,7 @@ def _preserving_template(tokenizer) -> Optional[str]:
     t = getattr(tokenizer, "chat_template", None)
     if not isinstance(t, str) or PRESERVE in t:
         return None
-    cached = getattr(tokenizer, "_knurlogic_preserving", False)
+    cached: Any = getattr(tokenizer, "_knurlogic_preserving", False)
     if cached is not False and cached[0] is t:
         return cached[1]
     new, n = _DROP.subn(lambda m: f"{m[1]}{_SWITCH}({m[2]}){m[3]}", t)
@@ -302,7 +302,7 @@ def _segment(tokenizer, messages, render, prompt):
             sys_tokens = list(tokenizer.apply_chat_template(
                 messages[:n_sys] + [{"role": "user", "content": ""}],
                 add_generation_prompt=False, tokenize=True, **render))
-        except Exception:
+        except _templates.TEMPLATE_ERRORS:
             sys_tokens = []
         # where the system render and the prompt first differ ...
         for i, (a, b) in enumerate(zip(sys_tokens, prompt)):
@@ -328,7 +328,7 @@ def _segment(tokenizer, messages, render, prompt):
     try:
         hist = list(tokenizer.apply_chat_template(
             messages, add_generation_prompt=False, tokenize=True, **render))
-    except Exception:
+    except _templates.TEMPLATE_ERRORS:
         hist = []
     if sys_end < len(hist) < tail and prompt[:len(hist)] == hist:
         tail = len(hist)

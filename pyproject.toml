@@ -38,7 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "mypy"]
 
 [project.scripts]
 knurlogic = "knurlogic.interfaces.cli:main"
@@ -105,3 +105,40 @@ ignore = [
 [tool.pytest.ini_options]
 # each checkout tests its own src, whatever is installed
 pythonpath = ["src", "tests/support"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src/knurlogic"]
+ignore_missing_imports = true
+# `def f(x: str = None)` is read as Optional[str], as it was before PEP 484
+# banned it; spelling out ~30 of these is style churn, not a bug fix.
+implicit_optional = true
+# mlx ships .pyi stubs; the per-module follow_imports below must reach them.
+follow_imports_for_stubs = true
+# Vendored from mlx-lm / mlx-vlm (see NOTICE): kept as upstream wrote it.
+exclude = [
+    "src/knurlogic/engine/families/[^/]+/architecture",
+    "src/knurlogic/engine/families/qwen/vision",
+    "src/knurlogic/engine/families/gemma4/vision",
+]
+
+# Excluded files are still checked when something imports them; silence them.
+[[tool.mypy.overrides]]
+module = [
+    "knurlogic.engine.families.*.architecture",
+    "knurlogic.engine.families.*.architecture.*",
+    "knurlogic.engine.families.qwen.vision",
+    "knurlogic.engine.families.qwen.vision.*",
+    "knurlogic.engine.families.gemma4.vision",
+    "knurlogic.engine.families.gemma4.vision.*",
+]
+ignore_errors = true
+
+# mlx and its satellites are typed loosely (mx.array arithmetic, Stream vs
+# Device) and each release moves it: see them as Any rather than chase them.
+[[tool.mypy.overrides]]
+module = ["mlx", "mlx.*", "mlx_lm", "mlx_lm.*", "mlx_vlm", "mlx_vlm.*",
+          "huggingface_hub", "huggingface_hub.*", "transformers",
+          "transformers.*", "PIL", "PIL.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
