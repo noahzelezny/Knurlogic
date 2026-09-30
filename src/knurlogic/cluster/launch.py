@@ -1399,6 +1399,9 @@ def _parallel(fn, items: list) -> list:
     return out
 
 
+#: Carried by every launch of RDMA across more than two Macs.
+RDMA_N_NOTE = "RDMA across more than two Macs is experimental and untested"
+
 CABLE_RX = re.compile(r"(\d{1,3}\.\d{1,3}\.\d{1,3})(?:\.(?:\d{1,3}|x|0/24))?")
 
 
@@ -1463,9 +1466,6 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             mine["links"][m["name"]] = k
             m["links"][mine["name"]] = k
     if link == "jaccl":
-        if len(infos) != 2:
-            return {"error": "link rdma here joins exactly two machines; "
-                             "use tcp for more"}
         for m in infos:
             rd = m.get("rdma") or {}
             if not rd.get("available"):
@@ -1513,19 +1513,23 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     job = secrets.token_hex(8)
     cable = req.get("cable")
     net, note, nets = "", "", []
+    cable_ignored = False
     if world == 2:
         nets = _shared_subnets(order[0], order[1], rdma=link == "jaccl")
     if cable not in (None, ""):
         c = CABLE_RX.fullmatch(str(cable).strip()) if isinstance(
             cable, str) else None
-        if world != 2 or not c or c.group(1) not in nets:
+        if world > 2:
+            cable_ignored = True
+        elif not c or c.group(1) not in nets:
             return {"refused": f"cable {str(cable)[:40]!r}: a launch names "
                                f"the Thunderbolt subnet both machines share"
                                + (" with RDMA up at both ends"
                                   if link == "jaccl" else "")
                                + f" ({', '.join(nets) or 'none here'})",
                     "placement": plan}
-        net, note = c.group(1), f"cable {c.group(1)}: named by the launch"
+        else:
+            net, note = c.group(1), f"cable {c.group(1)}: named by the launch"
     elif nets:
         left = [n for n in nets if n not in tried]
         if not left:
@@ -1563,7 +1567,20 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         rest = [n for n in left[1:]]
         if rest:
             note += f"; {rest[0]} next if link init fails"
-    if link == "jaccl" and not net:
+    if link == "jaccl" and world > 2:
+        for i in range(world):
+            for j in range(i + 1, world):
+                why = rdma_pair_reason(order[i], order[j]) or (
+                    "" if _shared_subnets(order[i], order[j], rdma=True)
+                    else "no Thunderbolt cable with RDMA up at both ends")
+                if why:
+                    return {"refused": f"RDMA across {world} Macs needs "
+                                       f"every pair joined by a Thunderbolt 5"
+                                       f" cable: {order[i]['name']} and "
+                                       f"{order[j]['name']}: {why}. Use the "
+                                       f"TCP ring, or cable that pair.",
+                            "placement": plan}
+    if link == "jaccl" and not net and world == 2:
         why = rdma_pair_reason(order[0], order[1])
         if why:
             return {"refused": why + ". Use the TCP ring, or join them "
@@ -1588,15 +1605,23 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     except ValueError as e:
         return {"refused": str(e), "placement": plan}
     hosts = [f"{ip}:{RING_PORT + slot * 20 + r}" for r, ip in enumerate(ips)]
+    if cable_ignored:
+        note = (note + "; " if note else "") + (
+            "cable ignored: with more than two Macs each pair picks its own "
+            "Thunderbolt link")
     ibv, coord = None, ""
-    if link == "jaccl":
+    if link == "jaccl" and world > 2:
+        ibv = [[None if i == j else _rdma_device(order[i], order[j])
+                for j in range(world)] for i in range(world)]
+        coord = f"{ips[0]}:{RING_PORT + slot * 20 + 19}"
+    elif link == "jaccl":
         a0 = _rdma_device(order[0], order[1], net)
         a1 = _rdma_device(order[1], order[0], net)
         for m, d in ((order[0], a0), (order[1], a1)):
             if d is None:
                 return {"refused": f"{m['name']} has RDMA up on "
                                    f"{', '.join(m['rdma'].get('active') or [])}"
-                                   f" and none of them is on the other Mac's "
+                                   f" and none of them is on {order[1 - order.index(m)]['name']}'s "
                                    f"Thunderbolt subnet", "placement": plan}
         ibv = [[None, a0], [a1, None]]
         coord = f"{ips[0]}:{RING_PORT + slot * 20 + 19}"
@@ -1663,7 +1688,8 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                     (g or {}).get("refused") or (g or {}).get("error")
                     or f"{nm} did not answer" for nm, g in bad),
                 "placement": plan}
-    alerts = ([alert] if alert else []) + [
+    alerts = ([alert] if alert else []) + (
+        [RDMA_N_NOTE] if link == "jaccl" and world > 2 else []) + [
         g["alert"] for g in got if isinstance(g, dict) and g.get("alert")]
     for a in alerts[1 if alert else 0:]:
         logger.warning("cluster job %s: %s", job, a)
