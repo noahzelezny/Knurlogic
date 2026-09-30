@@ -29,7 +29,7 @@ def _capabilities() -> list:
     try:
         if thinking.status().get("dialect"):
             caps.append("thinking")
-    except Exception:
+    except Exception:  # the model list must still answer without the thinking status (logged)
         logger.debug("thinking status unavailable", exc_info=True)
     return caps
 
@@ -45,7 +45,7 @@ def served(artifact, host):
         if path != memo["path"]:
             try:
                 memo.update(path=path, art=Artifact.load(path))
-            except Exception:
+            except (OSError, ValueError, AttributeError):
                 memo.update(path=path, art=None)
         art = memo["art"]
         return {"id": Path(path).name, "path": path,
@@ -85,7 +85,7 @@ def residency(host, sched, port: int = 0) -> dict:
     try:
         rec = recovery.served_view(port, st["state"] == "ready") \
             if port else None
-    except Exception:
+    except (KeyError, AttributeError, TypeError, ValueError, OSError):
         rec = None
     row = {"model": Path(st["model"] or "").name,
            "capabilities": _capabilities() if st["state"] == "ready"
@@ -105,7 +105,7 @@ def residency(host, sched, port: int = 0) -> dict:
         try:
             srec = servers.registry().get(int(port)) or {}
             inst = str(srec.get("job") or srec.get("instance") or "")
-        except Exception:
+        except (OSError, ValueError, TypeError, AttributeError):
             inst = ""
         if inst:
             row["instance"] = inst

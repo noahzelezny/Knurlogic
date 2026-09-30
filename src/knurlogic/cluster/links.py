@@ -18,6 +18,8 @@ from __future__ import annotations
 import subprocess
 import time
 
+from knurlogic.cluster import PROC_ERRORS
+
 _CACHE: dict = {}
 
 
@@ -41,7 +43,7 @@ def thunderbolt() -> list[dict]:
     None for a bridge or when system_profiler does not say)."""
     try:
         speeds = _cached("tbspeed", 30.0, receptacle_speeds)
-    except Exception:
+    except (*PROC_ERRORS, ValueError, KeyError):
         speeds = {}
     return [with_speed(i, speeds) for i in local_interfaces()
             if "Thunderbolt" in i["kind"]]
@@ -131,7 +133,7 @@ def link_of(ip: str) -> str:
             out = subprocess.run(["route", "-n", "get", ip],
                                  capture_output=True, text=True,
                                  timeout=3).stdout
-        except Exception:
+        except PROC_ERRORS:
             return "other"
         for line in out.splitlines():
             if line.strip().startswith("interface:"):
@@ -185,7 +187,7 @@ def _out(cmd) -> str | None:
     """stdout, or None when the tool is not there or fails to run."""
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-    except Exception:
+    except PROC_ERRORS:
         return None
     return r.stdout if r.returncode == 0 else None
 

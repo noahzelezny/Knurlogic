@@ -13,3 +13,11 @@ launch.py and recovery.py never import interfaces/: the page injects its
 status, peers, children and load at startup (interfaces/page/server.py
 _wire). Nothing here imports mlx.
 """
+
+import http.client  # noqa: E402
+import subprocess  # noqa: E402
+
+# What a call to another machine's page, or to a system tool, can raise.
+# Callers catch these (plus whatever their own parsing adds), not Exception.
+NET_ERRORS = (OSError, ValueError, http.client.HTTPException)
+PROC_ERRORS = (OSError, subprocess.SubprocessError)

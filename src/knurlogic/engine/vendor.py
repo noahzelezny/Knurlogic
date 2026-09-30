@@ -32,7 +32,7 @@ def _mlx_lm_version(python: str) -> str:
             [python, "-c", "import mlx_lm;print(mlx_lm.__version__)"],
             capture_output=True, text=True, check=True)
         return out.stdout.strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return "unknown"
 
 
@@ -50,7 +50,7 @@ def _host_version(python: str, host: str) -> str:
             [python, "-c", f"import {host};print({host}.__version__)"],
             capture_output=True, text=True, check=True)
         return out.stdout.strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return "unknown"
 
 

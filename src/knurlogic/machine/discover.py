@@ -108,11 +108,11 @@ def _running_tool_roots() -> list:
     import re
     import subprocess
 
-    out = []
+    out: list = []
     try:
         ps = subprocess.run(["ps", "-xo", "pid=,command="], capture_output=True,
                             text=True, timeout=5).stdout
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return out
     pids = [ln.split(None, 1)[0] for ln in ps.splitlines()
             if re.search(r"/(exo|ollama)(\s|$)", ln.split(None, 1)[-1])]
@@ -121,7 +121,7 @@ def _running_tool_roots() -> list:
             env = subprocess.run(["ps", "eww", "-o", "command=", pid],
                                  capture_output=True, text=True,
                                  timeout=5).stdout
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             continue
         for var in _ENV_OF_INTEREST:
             m = re.search(rf"\b{var}=(.*?)(?=\s+[A-Z_]{{3,}}=|$)", env)
@@ -220,7 +220,7 @@ def _from_config_dir(d: Path, store: str) -> Found | None:
     from knurlogic.machine.artifact import Artifact
     try:
         a = Artifact.load(d)
-    except Exception:
+    except (OSError, ValueError, AttributeError):
         return None
     size = a.bytes_on_disk or _weights_bytes(d)
     name = d.name
@@ -291,7 +291,7 @@ def _scan_ollama(root: Path) -> list:
     Implemented from the on-disk layout; this machine's store is empty, so
     it is UNVERIFIED against a real pull and says so rather than pretending.
     """
-    out = []
+    out: list = []
     man = root / "manifests"
     if not man.is_dir():
         return out
@@ -300,7 +300,7 @@ def _scan_ollama(root: Path) -> list:
             continue
         try:
             d = json.loads(f.read_text())
-        except Exception:
+        except (OSError, ValueError):
             continue
         layers = d.get("layers") or []
         if not layers:
@@ -332,10 +332,10 @@ def find(stores=None, extra=(), include_defaults: bool = True) -> list:
         found = (_scan_ollama(root) if store == "ollama"
                  else _scan_tree(root, store))
         for f in found:
-            key = str(Path(f.path).resolve())
-            if key in seen:
+            real = str(Path(f.path).resolve())
+            if real in seen:
                 continue
-            seen.add(key)
+            seen.add(real)
             out.append(f)
     return sorted(out, key=lambda f: -f.bytes_on_disk)
 

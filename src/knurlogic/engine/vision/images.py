@@ -126,7 +126,7 @@ def decode(src: Union[str, bytes], *, allow_paths: bool = False) -> Any:
             img = img.convert("RGB")
     except ImageRejected:
         raise
-    except Exception as e:  # PIL raises a zoo: UnidentifiedImageError, OSError...
+    except Exception as e:  # PIL raises a zoo: UnidentifiedImageError, OSError...  # decoding untrusted bytes raises a zoo; any failure is a rejection
         raise ImageRejected(f"image could not be decoded: {e}") from None
     return clamp(img)
 

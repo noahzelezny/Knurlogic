@@ -108,7 +108,7 @@ def probe(python: str) -> dict:
         r = subprocess.run([python, "-c", _PROBE],
                            capture_output=True, text=True, timeout=30)
         return json.loads(r.stdout.strip().splitlines()[-1])
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError) as e:
         return {"executable": python, "error": f"{type(e).__name__}: {e}"}
 
 

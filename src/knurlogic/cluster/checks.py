@@ -14,6 +14,8 @@ import subprocess
 import sys
 import time
 
+from knurlogic.cluster import PROC_ERRORS
+
 FW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 
 
@@ -21,7 +23,7 @@ def _run(cmd, timeout=5) -> str:
     try:
         return subprocess.run(cmd, capture_output=True, text=True,
                               timeout=timeout).stdout.strip()
-    except Exception:
+    except PROC_ERRORS:
         return ""
 
 
@@ -33,7 +35,8 @@ def interfaces() -> list[dict]:
             cur = line.split(":", 1)[1].strip()
         elif line.startswith("Device:") and cur:
             ports[line.split(":", 1)[1].strip()] = cur
-    out, iface = [], None
+    out: list = []
+    iface = ""
     for line in _run(["ifconfig"]).splitlines():
         if line and not line[0].isspace():
             iface = line.split(":", 1)[0]
@@ -100,7 +103,7 @@ def browse(seconds: float = 4.0, me_id: str = "") -> list[dict]:
         time.sleep(seconds)
         return [s for s in d.snapshot()
                 if (s.get("txt") or {}).get("id") != me_id]
-    except Exception:
+    except (OSError, ImportError, ValueError, RuntimeError):
         return []
     finally:
         d.stop()

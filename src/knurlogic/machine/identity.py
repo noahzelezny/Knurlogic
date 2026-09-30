@@ -81,7 +81,7 @@ def identity() -> dict:
         return dict(_ID)
     try:
         uuid, source = _platform_uuid(), "IOPlatformUUID"
-    except Exception:
+    except (OSError, AttributeError, ValueError, ctypes.ArgumentError):
         uuid = ""
     if not uuid:
         uuid, source = socket.gethostname(), "hostname"

@@ -186,7 +186,7 @@ def overlapped(model):
 def bounds_of(counts: Sequence[int]) -> List[Tuple[int, int]]:
     """Layer counts per rank -> (start, end) per rank; rank N-1 first."""
     n = len(counts)
-    out = [None] * n
+    out: List[Tuple[int, int]] = [(0, 0)] * n
     at = 0
     for r in range(n - 1, -1, -1):
         out[r] = (at, at + int(counts[r]))
@@ -398,7 +398,7 @@ class Coord:
                          for (sha, ph), n in zip(imgs, ns)]
                 rows = mx.concatenate(parts, axis=0).astype(mx.float32)
                 dim, ok = int(rows.shape[1]), 1
-            except Exception:
+            except Exception:  # rank 0 must still tell the other ranks it failed (logged)
                 logger.exception("rank 0 could not read an image's rows")
         ok, dim = self._bcast([ok, dim])
         if not ok:

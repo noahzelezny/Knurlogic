@@ -30,7 +30,7 @@ def survey(rows) -> str:
             continue
         try:
             st = status(Artifact.load(str(f.path)))
-        except Exception:
+        except (OSError, ValueError, AttributeError):
             continue
         if st.state in groups:
             groups[st.state].append((f, st))
@@ -41,8 +41,11 @@ def survey(rows) -> str:
         L.append(f"{len(built)} artifacts have a BUILT drafting head beside "
                  f"the weights:")
         for f, st in built:
-            L.append(f"  {f.name[:44]:<46}{st.head.gib:>6.2f} GiB  "
-                     f"{st.head.family or '?'}  {st.head.bits or '?'}-bit")
+            h = st.head
+            if h is None:
+                continue
+            L.append(f"  {f.name[:44]:<46}{h.gib:>6.2f} GiB  "
+                     f"{h.family or '?'}  {h.bits or '?'}-bit")
         L.append("")
     if groups[GRAFTABLE]:
         L.append(f"{len(groups[GRAFTABLE])} carry raw `mtp.*` weights a head "

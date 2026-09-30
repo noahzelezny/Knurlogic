@@ -23,6 +23,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
 from knurlogic.machine.status import SCHEMA
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ class Peer:
         return f"{self.host}:{self.port}"
 
     def public(self) -> dict:
-        d = {"id": self.id, "name": self.name, "address": self.key,
+        d: dict = {"id": self.id, "name": self.name, "address": self.key,
              "found_by": sorted(self.found_by), "state": self.state,
              "link": self.link}
         if self.gbps:
@@ -161,7 +162,7 @@ class Peers:
         self._fetch = fetch or self._http
         self._lock = threading.Lock()
         self._peers: dict[str, Peer] = {}
-        self._thread = None
+        self._thread: threading.Thread | None = None
         for host, port in manual:
             self.add(host, port, "manual")
         for rec in self._load().values():
@@ -263,7 +264,7 @@ class Peers:
             kind = link_of(host)
             return kind, float((gbps_of(host) if kind == "thunderbolt"
                                 else 0) or 0)
-        except Exception:
+        except (*PROC_ERRORS, ValueError, KeyError):
             return "other", 0.0
 
     def _one(self, p: Peer) -> None:
@@ -282,7 +283,7 @@ class Peers:
         for k in tries[:3]:
             try:
                 doc = self._fetch(f"http://{k}/status.json")
-            except Exception as e:
+            except NET_ERRORS as e:
                 err = err or e
                 continue
             if k != p.key:
@@ -291,7 +292,7 @@ class Peers:
                 p.link, p.gbps = self._speed(h)
             break
         else:
-            p.state, p.problem = "not_answering", _describe(err, p)
+            p.state, p.problem = "not_answering", _describe(err or OSError("no address tried"), p)
             p.failing_since = p.failing_since or now
             return
         if not isinstance(doc, dict):
@@ -412,7 +413,7 @@ class Peers:
                 while True:
                     try:
                         self.refresh()
-                    except Exception:
+                    except Exception:  # the peer poll thread must survive one bad round (logged)
                         logger.debug("peer refresh failed; retrying in %ss", REFRESH_S, exc_info=True)
                     time.sleep(REFRESH_S)
             self._thread = threading.Thread(target=loop, daemon=True,
@@ -457,7 +458,7 @@ class Peers:
             d = json.loads(self.store.read_text())
             return d.get("peers", {}) if d.get("schema") == STORE_SCHEMA \
                 else {}
-        except Exception:
+        except (OSError, ValueError, AttributeError):
             return {}
 
     def _save(self) -> None:

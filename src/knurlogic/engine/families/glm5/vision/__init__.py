@@ -134,7 +134,7 @@ class Glm5VisionFamily:
         gw = max(merge, round(w / step) * merge)
         gh = max(merge, round(h / step) * merge)
         im = img.convert("RGB").resize((gw * p, gh * p), Image.BICUBIC)
-        arr = np.asarray(im, dtype=np.float32) / 255.0            # [H, W, 3]
+        arr: Any = np.asarray(im, dtype=np.float32) / 255.0       # [H, W, 3]
         # Normalized as Glm5NextImageProcessor does (do_normalize defaults
         # on). Found on GLM-5.3-Flash 2.7: without it a pure red square was
         # seen as "salmon/coral" -- every colour shifted.

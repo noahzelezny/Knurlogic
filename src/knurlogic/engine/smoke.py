@@ -78,7 +78,7 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
         try:
             m = importlib.import_module(f"{arch.host_for(mod)}.models.{mod}")
             where = _origin(getattr(m, "__file__", None), a.path)
-        except Exception:
+        except (ImportError, ValueError, OSError):
             where, m = "unknown", None
         print(f"  {mod:14s} {where}")
         if where in ("site-packages", "checkout", "unknown"):

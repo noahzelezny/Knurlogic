@@ -100,7 +100,7 @@ def find_head(path) -> Head | None:
     for f in sorted(d.glob(SIDECAR_GLOB)):
         try:
             hdr = _header(f)
-        except Exception:
+        except (OSError, ValueError, struct.error):
             continue
         meta = hdr.pop("__metadata__", {}) or {}
         if not hdr:
@@ -110,7 +110,7 @@ def find_head(path) -> Head | None:
             if key in meta:
                 try:
                     recipe = json.loads(meta[key])
-                except Exception:
+                except (ValueError, TypeError):
                     recipe = {}
                 break
         return Head(f, f.stat().st_size, len(hdr),
@@ -130,13 +130,13 @@ def graft_weights(path) -> int:
     if idx.is_file():
         try:
             keys = set(json.loads(idx.read_text()).get("weight_map", {}))
-        except Exception:
+        except (OSError, ValueError, AttributeError):
             keys = set()
     if not keys:
         for f in sorted(d.glob("model*.safetensors")):
             try:
                 keys |= set(_header(f))
-            except Exception:
+            except (OSError, ValueError, struct.error):
                 continue
     keys.discard("__metadata__")
     return sum(1 for k in keys if k.startswith("mtp.") or ".mtp." in k)
@@ -173,7 +173,7 @@ class Status:
     def render(self) -> str:
         if self.state == BUILT:
             return ("multi-token-prediction head PRESENT and built\n"
-                    f"           {self.head.describe()}\n"
+                    f"           {self.head.describe() if self.head else ''}\n"
                     "           It is outside the model glob, so nothing has "
                     "loaded it: it costs\n           no memory until a "
                     "drafting loop asks for it.")

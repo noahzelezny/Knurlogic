@@ -39,7 +39,7 @@ def _sysctl(key: str) -> int | None:
         if out.returncode != 0:
             return None
         return int(out.stdout.strip())
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return None
 
 
@@ -199,7 +199,7 @@ def _framework_working_set_bytes() -> int:
         r = subprocess.run([sys.executable, "-c", code], capture_output=True,
                            text=True, timeout=60, env=env)
         _FRAMEWORK_WS = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         _FRAMEWORK_WS = 0
     return _FRAMEWORK_WS
 
@@ -339,7 +339,7 @@ def load_budget() -> dict:
     ws = detected_working_set_bytes()
     try:
         avail = int(available_memory().get("available_bytes") or 0)
-    except Exception:
+    except (OSError, ValueError, TypeError, AttributeError):
         avail = 0
     # the knurlogic allowance (machine/allowance.py) caps both: the most
     # this machine's owner lets knurlogic have, whatever the GPU could hold
