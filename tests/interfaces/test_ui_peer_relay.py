@@ -306,3 +306,17 @@ def test_a_peer_named_with_peer_by_hostname_is_trusted_at_its_address(
     code, _ = page_server.peer_refusal({}, "10.0.0.6", "192.168.1.2", No(),
                               manual_hosts=["bobs-mac.local"])
     assert code == 403
+
+
+def test_manual_hosts_cover_every_address_of_a_named_peer(monkeypatch):
+    p = SimpleNamespace(name="M4", host="10.0.0.2", port=8899, id="m4",
+                        found_by={"manual"}, state="answering",
+                        key="10.0.0.2:8899",
+                        addresses={"10.0.0.2:8899", "192.168.1.5:8899"})
+    q = SimpleNamespace(name="X", host="10.9.9.9", port=8899, id="x",
+                        found_by={"bonjour"}, state="answering",
+                        key="10.9.9.9:8899", addresses={"10.9.9.9:8899"})
+    monkeypatch.setattr(page_server, "PEERS", Peers(p, q))
+    hosts = page_server._manual_hosts()
+    assert {"10.0.0.2", "192.168.1.5"} <= set(hosts)
+    assert "10.9.9.9" not in hosts
