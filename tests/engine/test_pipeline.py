@@ -349,8 +349,6 @@ def test_a_heavy_first_layer_is_balanced_by_bytes_not_count():
 # ------------------------------------------ a stage's wrapped layers, one process
 
 def _tiny(family):
-    import os
-    import sys
     import pipeline_ring_worker as W
     return W.build(family)
 

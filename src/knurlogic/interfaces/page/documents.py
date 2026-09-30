@@ -297,6 +297,7 @@ def machine_settings():
 
     def handler(q: dict) -> dict:
         from knurlogic.machine import wired
+        from knurlogic.tuning import settings as S
 
         # A PREVIEW for an artifact nobody has loaded. This is the point of
         # showing settings before a launch rather than after: nearly every

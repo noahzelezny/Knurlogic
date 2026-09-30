@@ -66,14 +66,14 @@ def ensure(body: dict) -> dict:
         timeout = float(body.get("timeout", 3600))
     except (TypeError, ValueError):
         raise ApiError(400, "timeout must be a number of seconds",
-                       param="timeout")
+                       param="timeout") from None
     try:
         return http.switch(str(body.get("model") or ""),
                            force=bool(body.get("force")),
                            wait=bool(body.get("wait", False)),
                            timeout=timeout)
     except NotLoadable as e:
-        raise ApiError(e.status, str(e), param="model", code=e.code or None)
+        raise ApiError(e.status, str(e), param="model", code=e.code or None) from e
 
 
 def residency(host, sched, port: int = 0) -> dict:

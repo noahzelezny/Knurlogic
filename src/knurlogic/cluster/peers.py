@@ -361,7 +361,7 @@ class Peers:
                         q.found_by |= p.found_by
                         q.addresses |= p.addresses
             by_id: dict[str, Peer] = {}
-            for k, p in list(self._peers.items()):
+            for _k, p in list(self._peers.items()):
                 if not p.id:
                     continue
                 q = by_id.get(p.id)
@@ -406,7 +406,7 @@ class Peers:
                 "wifi": 4}.get(p.link, 3)
         return (p.state != "answering", rank, -(p.gbps or 0), -p.last_seen)
 
-    def start(self) -> "Peers":
+    def start(self) -> Peers:
         if self._thread is None:
             def loop():
                 while True:

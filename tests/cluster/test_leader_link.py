@@ -79,7 +79,6 @@ def test_the_model_server_answers_a_request_to_its_link_address():
 
 
 def test_single_mac_serve_still_defaults_to_loopback():
-    import argparse
     from knurlogic.interfaces import serve as S
     seen = {}
 

@@ -309,7 +309,7 @@ def _scan_ollama(root: Path) -> list:
         name = f"{rel[-2]}:{rel[-1]}" if len(rel) >= 2 else f.name
         out.append(Found(
             name=name, path=f, store="ollama", format="gguf",
-            bytes_on_disk=sum(int(l.get("size") or 0) for l in layers),
+            bytes_on_disk=sum(int(lay.get("size") or 0) for lay in layers),
             servable=False,
             why="GGUF; this engine loads safetensors, so knurlogic cannot "
                 "serve this one",

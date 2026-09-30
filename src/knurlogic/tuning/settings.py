@@ -245,7 +245,7 @@ def preset_arg(v) -> str:
     try:
         return preset_of(v)
     except ValueError as e:
-        raise argparse.ArgumentTypeError(str(e))
+        raise argparse.ArgumentTypeError(str(e)) from e
 
 
 def preset_launch(tune: str, model_type: str = "") -> tuple:
@@ -665,7 +665,7 @@ def canonical_sets(sets: dict) -> dict:
     lose to the resolver's under another alias. Where both are given, the
     current name wins."""
     out = dict(sets or {})
-    for logical, names in KNOB_ALIASES.items():
+    for names in KNOB_ALIASES.values():
         for old in names[1:]:
             if old in out:
                 v = out.pop(old)
@@ -678,7 +678,7 @@ def legacy_mirror(env: dict, forced: dict) -> dict:
     name the resolver emitted for this artifact's bundled runtime (which
     reads only that one). Returns the extra {name: value} to set."""
     out = {}
-    for logical, names in KNOB_ALIASES.items():
+    for names in KNOB_ALIASES.values():
         if names[0] in forced:
             for old in names[1:]:
                 if old in env and old not in forced:

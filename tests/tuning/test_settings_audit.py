@@ -7,7 +7,6 @@ import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.interfaces.page import documents

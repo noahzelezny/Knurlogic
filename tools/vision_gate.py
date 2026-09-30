@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import io
 import json
 import subprocess
 import sys
@@ -38,7 +37,7 @@ def _post(url: str, body: dict, timeout: float = 60.0) -> dict:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
-        raise SystemExit(f"HTTP {e.code} from {url}: {e.read().decode()[:500]}")
+        raise SystemExit(f"HTTP {e.code} from {url}: {e.read().decode()[:500]}") from e
 
 
 def _get(url: str, timeout: float = 10.0) -> dict:

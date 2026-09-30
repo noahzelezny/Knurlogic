@@ -186,7 +186,6 @@ def check(model_type: str, models_dir: Path | None = None) -> list:
     """
     from knurlogic.engine.register import source_for
 
-    d = models_dir or _models_dir()
     rows = []
     for mod in required_modules(model_type):
         vsrc, is_pkg = source_for(mod)
@@ -201,7 +200,8 @@ def check(model_type: str, models_dir: Path | None = None) -> list:
         elif p.is_dir():
             h = hashlib.sha256()
             for f in sorted(p.rglob("*.py")):
-                h.update(str(f.relative_to(p)).encode()); h.update(f.read_bytes())
+                h.update(str(f.relative_to(p)).encode())
+                h.update(f.read_bytes())
             sha = h.hexdigest()
         else:
             sha = hashlib.sha256(p.read_bytes()).hexdigest()

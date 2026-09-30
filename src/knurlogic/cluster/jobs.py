@@ -128,7 +128,7 @@ class Marker:
             self.doc.update({k: v for k, v in extra.items() if v is not None})
             self._flush(time.time())
 
-    def start(self) -> "Marker":
+    def start(self) -> Marker:
         self.beat()
 
         def loop():

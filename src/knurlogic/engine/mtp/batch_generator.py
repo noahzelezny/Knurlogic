@@ -18,7 +18,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import logging
-from typing import Any, List, Optional
+from typing import List, Optional
 
 import mlx.core as mx
 from mlx_lm.generate import (BatchGenerator, GenerationBatch,

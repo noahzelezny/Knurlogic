@@ -165,7 +165,10 @@ def _hid():
             (io.IOHIDEventGetFloatValue, C.c_double, [vp, C.c_int32])):
         fn.restype, fn.argtypes = res, args
     utf8 = 0x08000100
-    cfs = lambda t: cf.CFStringCreateWithCString(None, t.encode(), utf8)
+
+    def cfs(t):
+        return cf.CFStringCreateWithCString(None, t.encode(), utf8)
+
 
     def num(v):
         i = C.c_int32(v)

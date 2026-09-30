@@ -440,7 +440,8 @@ def test_per_row_rope_delta_in_a_batch_equals_each_row_alone(fam, tmp_path):
     for _ in range(6):
         la = model(mx.array([[a]]), cache=c1, rope_delta=delta)[0, -1]
         lb = model(mx.array([[b]]), cache=c2)[0, -1]
-        ref_i.append(np.array(la)); ref_t.append(np.array(lb))
+        ref_i.append(np.array(la))
+        ref_t.append(np.array(lb))
         a, b = int(mx.argmax(la).item()), int(mx.argmax(lb).item())
 
     batch = _merge_caches([ci, ct])
@@ -452,7 +453,8 @@ def test_per_row_rope_delta_in_a_batch_equals_each_row_alone(fam, tmp_path):
         np.testing.assert_allclose(np.array(lg[0]), ref_i[step], atol=1e-4)
         np.testing.assert_allclose(np.array(lg[1]), ref_t[step], atol=1e-4)
         a, b = int(mx.argmax(lg[0]).item()), int(mx.argmax(lg[1]).item())
-        got_i.append(a); got_t.append(b)
+        got_i.append(a)
+        got_t.append(b)
     assert got_i == solo_i and got_t == solo_t
 
 

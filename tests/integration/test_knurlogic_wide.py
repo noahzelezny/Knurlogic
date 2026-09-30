@@ -90,7 +90,7 @@ def test_every_setting_says_what_it_costs():
     """Each explanation names a trade-off, not only what the knob does."""
     words = ("cost", "slower", "faster", "memory", "loses", "lost",
              "no trade", "changes the output", "speed")
-    for name, (what, why) in S.KNOB_DOC.items():
+    for name, (_what, why) in S.KNOB_DOC.items():
         assert any(w in why.lower() for w in words), name
     for name, spec in S.COMPACT_KNOBS.items():
         assert any(w in spec[4].lower() for w in words), name

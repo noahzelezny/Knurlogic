@@ -557,7 +557,6 @@ def test_a_rank_that_cannot_reach_rank_0_says_where_it_dialed():
 def test_rank_0_publishes_every_ranks_memory(monkeypatch):
     """A pipeline follower serves no /status.json: its memory comes back
     in the control rows and rank 0 publishes it (`ranks`)."""
-    import mlx.core as mx
     from types import SimpleNamespace
     from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.serve import state

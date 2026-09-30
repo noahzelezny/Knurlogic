@@ -24,7 +24,7 @@ def ticks_until(pred, t=40.0):
     """tick() until one of its reports satisfies `pred`; -> that report."""
     end = time.time() + t
     while time.time() < end:
-        for key, what in R.tick():
+        for _key, what in R.tick():
             if pred(what):
                 return what
         time.sleep(0.2)
@@ -200,7 +200,7 @@ def test_backoff_then_three_relaunches_then_failed(faked):
 
 def test_attempts_outside_the_window_do_not_count(faked):
     t = 0.0
-    for n in range(3):
+    for _n in range(3):
         faked["ended"] = "rank 1 exited"
         R.tick(t)
         t += 100

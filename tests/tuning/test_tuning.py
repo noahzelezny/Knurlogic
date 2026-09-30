@@ -468,7 +468,6 @@ def test_the_command_line_no_longer_forces_a_numerics_profile():
     """serve and doctor defaulted --profile to v1.5, which forced both
     bf16-I/O flags off on every VQ rung -- including the v2 rungs published
     with them on. The default is now None: each rung runs what it shipped."""
-    import argparse
     from knurlogic.interfaces import doctor, serve
     for mod in (serve, doctor):
         src = open(mod.__file__).read()

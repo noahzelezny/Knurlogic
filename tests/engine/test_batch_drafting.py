@@ -163,7 +163,7 @@ def _drive(gen, segments, max_tokens, cache=None, prefix=()):
     for _ in range(10_000):
         prs, grs = gen.next()
         eos = [r.uid for r in prs if r.end_of_segment and not r.end_of_prompt]
-        for u, (entry, key) in gen.extract_cache(eos).items():
+        for _u, (entry, key) in gen.extract_cache(eos).items():
             ckpts.append((list(key), entry))
         done = False
         for r in grs:
@@ -184,7 +184,6 @@ def _turns(vocab=512):
 
 
 def test_prefill_stores_a_checkpoint_at_each_segment_end():
-    import copy
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     model, head, sys_, user, tail_a, _ = _turns()
     _, ckpts = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),

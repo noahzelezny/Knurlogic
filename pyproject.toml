@@ -37,6 +37,9 @@ dependencies = [
     "Pillow>=10.0",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
 [project.scripts]
 knurlogic = "knurlogic.interfaces.cli:main"
 
@@ -66,6 +69,38 @@ mlx = "0.31.2"
 mlx-lm = "0.31.3"
 mlx_lm_generate_sha256 = "270778ad53eaca55a8533d82e6752660fe5d2605c4aa0879b48a50a91f69345f"
 mlx_lm_cache_sha256 = "819ed95dcbf755652363cfdb15a639890447abb534a06dcefd52c7fff5055750"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+# Vendored from mlx-lm / mlx-vlm (see NOTICE): kept as upstream wrote it.
+extend-exclude = [
+    "src/knurlogic/engine/families/*/architecture",
+    "src/knurlogic/engine/families/qwen/vision",
+    "src/knurlogic/engine/families/gemma4/vision",
+    "tests/support/fixtures_deepseek_v4",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP"]
+ignore = [
+    "E501",   # the code wraps near 79 but is not reflowed to a hard limit
+    "B905",   # zip(strict=) would change behaviour on uneven inputs
+    "UP006",  # List[...] -> list[...]: style churn across every module
+    "UP007",
+    "UP035",
+    "UP045",  # Optional[X] -> X | None: same
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "F811",  # a fixture used as a parameter shadows its own import
+    "E731",  # one-line lambda fakes
+    "E402",  # imports after sys.path / environment setup
+]
+"tests/integration/test_peer_launch.py" = [
+    "B008",  # Open() is a stateless gate used as a shared default
+]
 
 [tool.pytest.ini_options]
 # each checkout tests its own src, whatever is installed

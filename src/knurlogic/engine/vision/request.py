@@ -288,7 +288,7 @@ def tagged(args: Any) -> bool:
 
 
 def tag(args: Any) -> None:
-    setattr(args, "_knurlogic_images", True)
+    args._knurlogic_images = True
 
 
 __all__ = ["IMAGE_TYPES", "image_parts", "image_source", "has_images",

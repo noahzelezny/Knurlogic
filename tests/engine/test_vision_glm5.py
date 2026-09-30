@@ -253,7 +253,7 @@ def test_preprocess_normalizes_like_the_reference_processor(tmp_path):
     import numpy as np
     from PIL import Image
     from fixtures_vision_glm5 import glm5_tiny_config
-    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily, build
+    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
     fam = Glm5VisionFamily(glm5_tiny_config())
     px, _ = fam.preprocess(Image.new("RGB", (56, 56), (255, 0, 0)), "x")
     v = px["pixel_values"].reshape(px["pixel_values"].shape[0], 3, -1)

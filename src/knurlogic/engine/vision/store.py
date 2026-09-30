@@ -42,7 +42,7 @@ def estimate_nbytes(n_tokens: int, text_hidden: int,
 class ImageStore:
     def __init__(self, max_bytes: int = DEFAULT_MAX_BYTES):
         self._lock = threading.RLock()
-        self._lru: "OrderedDict[Key, Tuple[EncodedImage, int]]" = OrderedDict()
+        self._lru: OrderedDict[Key, Tuple[EncodedImage, int]] = OrderedDict()
         self._refs: Dict[Key, ImageRef] = {}
         self._pins: Dict[Key, int] = {}
         self._max = int(max_bytes)

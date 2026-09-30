@@ -43,7 +43,7 @@ def _num(body, name, kind, lo=None, hi=None, default=None):
         return None
     if isinstance(v, bool) or not isinstance(v, kind):
         raise ApiError(400, f"{name} must be a number"
-                       if kind != int else f"{name} must be an integer",
+                       if kind is not int else f"{name} must be an integer",
                        param=name)
     if (lo is not None and v < lo) or (hi is not None and v > hi):
         rng = f"between {lo} and {hi}" if hi is not None else f"at least {lo}"
@@ -113,7 +113,7 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
                                        body["logit_bias"].items()}
         except (AttributeError, TypeError, ValueError):
             raise ApiError(400, "logit_bias must map token ids to numbers",
-                           param="logit_bias")
+                           param="logit_bias") from None
     stops = body.get("stop") or []
     if isinstance(stops, str):
         stops = [stops]
@@ -164,7 +164,7 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
             try:
                 kwargs, ctx["thinking"] = translate(body, kwargs)
             except ValueError as e:
-                raise ApiError(400, str(e), param="reasoning_effort")
+                raise ApiError(400, str(e), param="reasoning_effort") from e
             ctx["exclude"] = thinking.excluded(body)
         req = P.ChatRequest("chat", "", msgs, body.get("tools") or None,
                             body.get("role_mapping"))

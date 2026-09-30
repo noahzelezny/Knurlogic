@@ -195,7 +195,6 @@ def test_a_held_space_flushed_with_a_marker_stays_in_the_answer():
 
 
 def test_an_engine_error_mid_stream_is_an_anthropic_error_event():
-    import json as _j
     from knurlogic.interfaces.http import messages
     lines = [b'data: {"choices": [{"delta": {"content": "par"}}]}\n\n',
              b'data: {"error": {"message": "non-finite logits"}}\n\n',

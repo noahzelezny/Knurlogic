@@ -639,10 +639,10 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             r.notes.append(f"expert transient sized from {shape_why}")
         if loosened and not S.DECODE_CHUNK_SHAPE_MAY_LOOSEN:
             r.notes.append(
-                f"this artifact's experts are small enough to justify a "
-                f"larger chunk, and it was NOT taken: sizing from the model "
-                f"may only tighten until a run measures the loosening "
-                f"direction, because being wrong there is an OOM")
+                "this artifact's experts are small enough to justify a "
+                "larger chunk, and it was NOT taken: sizing from the model "
+                "may only tighten until a run measures the loosening "
+                "direction, because being wrong there is an OOM")
     fits = working_set_bytes <= 0 or headroom > 0
     if (artifact.is_vq and chunk_from_headroom < S.DECODE_CHUNK_DEFAULT
             and fits):

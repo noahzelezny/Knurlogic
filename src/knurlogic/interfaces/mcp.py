@@ -167,7 +167,10 @@ def _vision_terms(vb) -> Dict[str, Any] | None:
     each with its note; None for a text-only artifact."""
     if not vb:
         return None
-    g = lambda n: round(n / GIB, 2)
+
+    def g(n):
+        return round(n / GIB, 2)
+
     return {"tower_gib": g(vb["tower_bytes"]),
             "tower_added_gib": g(vb["tower_outside_bytes"]),
             "image_store_gib": g(vb["store_bytes"]),
@@ -270,12 +273,12 @@ def _page_call(path: str, doc=None, timeout: float = PAGE_READ_S):
         raise PageDown(f"the page on this Mac ({url.split(path)[0]}) did "
                        f"not answer: {type(e).__name__}: {e}. Across "
                        f"machines goes through it: start `knurlogic ui` "
-                       f"(set {PAGE_ENV}=host:port if it is not on 8899)")
+                       f"(set {PAGE_ENV}=host:port if it is not on 8899)") from e
     try:
         out = json.loads(raw)
     except ValueError:
         raise PageDown(f"the page at {url} answered with something other "
-                       f"than JSON: {raw[:200]!r}")
+                       f"than JSON: {raw[:200]!r}") from None
     if not isinstance(out, dict):
         raise PageDown(f"the page at {url} answered {str(out)[:200]}")
     return out
@@ -463,9 +466,6 @@ def _refusal(out: dict) -> Dict[str, Any] | None:
 def models(fits_only: bool = False, **_) -> Dict[str, Any]:
     """Every model on this machine, with what can actually run."""
     from knurlogic.machine import discover
-    from knurlogic.engine import mtp
-    from knurlogic.machine.artifact import Artifact
-    from knurlogic.machine.loaded import available_memory
 
     from knurlogic.machine import wired
     from knurlogic.engine.vision import registry as vision_registry

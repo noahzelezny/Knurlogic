@@ -437,7 +437,6 @@ def test_the_request_counter_does_not_lose_concurrent_increments(
     """`self.requests += 1` ran unlocked on every handler thread. The count
     now goes through one locked step; many threads, no lost update."""
     import threading
-    from types import SimpleNamespace
     from knurlogic.interfaces.http import server as S
     app = S.App.__new__(S.App)
     app.requests = 0

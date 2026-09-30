@@ -5,7 +5,12 @@
     git clone https://github.com/noahzelezny/Knurlogic
     cd Knurlogic
     python -m venv .venv && . .venv/bin/activate
-    pip install -e . pytest
+    pip install -e '.[dev]'
+
+## Before you commit
+
+    ruff check .
+    python -m pytest -q tests
 
 ## Run the tests
 

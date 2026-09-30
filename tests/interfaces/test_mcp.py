@@ -110,7 +110,9 @@ def test_a_failing_tool_reports_rather_than_raises():
 def test_deps_reads_the_fix_not_the_version(tmp_path):
     """A version names a build; it does not say what is in it. The jaccl
     verdict comes from the fix's own env read compiled into libjaccl."""
-    import json, subprocess, sys as _s
+    import json
+    import subprocess
+    import sys as _s
     from knurlogic.machine import deps
     pkg = tmp_path / "site" / "mlx"
     (pkg / "lib").mkdir(parents=True)
@@ -139,7 +141,8 @@ def test_glm5_needs_nothing_from_mlx_vlm_any_more():
 def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,
                  quiet_s=0):
     """One registered server, with every fact the phase is read from faked."""
-    import os, time
+    import os
+    import time
     from knurlogic.interfaces.page import server as page_server
     log = tmp_path / "serve.log"
     log.write_text("artifact  x\nloading weights\n")

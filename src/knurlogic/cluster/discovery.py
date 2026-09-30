@@ -288,7 +288,7 @@ class Discovery:
             if live:
                 lib.DNSServiceRefDeallocate(r)
 
-    def start(self) -> "Discovery":
+    def start(self) -> Discovery:
         if self._thread is None:
             self.started = time.time()
             self._thread = threading.Thread(target=self._loop, daemon=True,

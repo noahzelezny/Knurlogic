@@ -314,7 +314,6 @@ def bell_answer(srv, host: str, nonce: int, size: int, wait_s: float):
     (closed on return), each presenting the ring's nonce and its rank, in
     order by rank. Past `wait_s`, a TimeoutError naming the address and the
     ranks that never connected."""
-    import socket
     import struct
     import time
     port = srv.getsockname()[1]
@@ -335,7 +334,7 @@ def bell_answer(srv, host: str, nonce: int, size: int, wait_s: float):
             srv.settimeout(left)
             try:
                 c, addr = srv.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             c.settimeout(min(10.0, max(left, 0.1)))
             try:
@@ -845,9 +844,11 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
         from . import pipeline as PL
         shares = PL.agree(link.group, **(pipeline or {}))
         logger.info("pipeline  rank %s: %s", link.rank, shares["reason"])
-        cut = (lambda m: PL.split(m, link.group, shares["bounds"]))
+        def cut(m):
+            return PL.split(m, link.group, shares["bounds"])
     else:
-        cut = (lambda m: shard(m, link.group))
+        def cut(m):
+            return shard(m, link.group)
     # a follower never loads the MTP head: rank 0 drafts, and tells this
     # rank whether it does (agree_head)
     heads = agree_head(link) if split == "pipeline" else None

@@ -31,8 +31,6 @@ server socket, no exo.
 import json
 import types
 import sys
-import threading
-import time
 from pathlib import Path
 
 import numpy as np
@@ -680,7 +678,6 @@ def test_encoding_the_same_image_twice_is_bit_identical(rigs, name):
 
 def test_encode_twice_can_fail(rigs):
     """The comparison sees a one-pixel change."""
-    import hashlib
     from PIL import Image
     rig = rigs(FAMILIES[0])
     fam = rig.make_family()

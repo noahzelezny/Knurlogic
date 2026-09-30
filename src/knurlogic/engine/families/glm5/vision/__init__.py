@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
-from knurlogic.engine.vision.key import image_spans
 
 _PATCH_PREFIX = "vision_model."
 _TOWER_PREFIX = "vision_tower."
@@ -127,7 +126,6 @@ class Glm5VisionFamily:
         import numpy as np
         from PIL import Image
 
-        from knurlogic.engine.vision import ImageRef
 
         vc = self.vision_config
         p, merge = vc.patch_size, vc.spatial_merge_size
@@ -153,7 +151,7 @@ class Glm5VisionFamily:
                        n_tokens=n_tokens, grid_thw=(1, gh, gw))
         return {"pixel_values": arr, "grid_thw": (1, gh, gw)}, ref
 
-    def encode(self, pixels: Dict[str, Any], ref) -> "EncodedImage":
+    def encode(self, pixels: Dict[str, Any], ref) -> EncodedImage:
         import mlx.core as mx
 
         from knurlogic.engine.vision import EncodedImage

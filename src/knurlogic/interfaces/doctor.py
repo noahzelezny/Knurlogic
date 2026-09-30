@@ -103,11 +103,11 @@ def run(path: str, working_set_gib: float, profile: str | None,
             print(f"\ntools      {ts['parser']} dialect, read from the chat "
                   f"template")
         else:
-            print(f"\ntools      TEMPLATE ASKS FOR TOOL CALLS AND THE ENGINE "
-                  f"INFERRED NO PARSER.\n           Calls will come back as "
-                  f"prose, so a harness sees a model that describes the "
-                  f"function\n           it would call instead of calling "
-                  f"it.")
+            print("\ntools      TEMPLATE ASKS FOR TOOL CALLS AND THE ENGINE "
+                  "INFERRED NO PARSER.\n           Calls will come back as "
+                  "prose, so a harness sees a model that describes the "
+                  "function\n           it would call instead of calling "
+                  "it.")
     elif ts["has_template"]:
         print("\ntools      this artifact's chat template does not mention "
               "tools")

@@ -283,7 +283,7 @@ def apply_live(env: dict) -> dict:
                 os.environ[k] = str(v)
                 done[k] = "set for the next prefill (runtime not resolved yet)"
                 continue
-            for name, mod in mods:
+            for _name, mod in mods:
                 mod._DECODE_CHUNK = int(v)
             os.environ[k] = str(v)
             done[k] = (f"applied to {len(mods)} loaded runtime"
@@ -351,7 +351,6 @@ def keeps_mtp_weights(model_type: str) -> bool | None:
     and the weights were still downloaded. None means the module could not be
     located, which is not the same as "it keeps them".
     """
-    import inspect
 
     from knurlogic.engine.arch import required_modules
 

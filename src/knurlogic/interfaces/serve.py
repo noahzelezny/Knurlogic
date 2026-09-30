@@ -501,12 +501,12 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     shown = host.split(",")[0]
     print(f"\nserving on http://{shown}:{port}/v1  (ctrl-c to stop)")
     print(f"open http://{shown}:{port}/ to see what loaded and try it")
-    print(f"  /status (text) and /status.json for the same thing "
-          f"without a browser")
-    print(f"  /settings.json - every knob, what it would be at another tune, "
-          f"and why it exists")
+    print("  /status (text) and /status.json for the same thing "
+          "without a browser")
+    print("  /settings.json - every knob, what it would be at another tune, "
+          "and why it exists")
     from knurlogic.interfaces import connect
-    print(f"\npoint a Claude-Messages harness at it:\n")
+    print("\npoint a Claude-Messages harness at it:\n")
     print("  " + connect.claude_command(
         f"http://{shown}:{port}", a.path.name).replace("\n", "\n  "))
     print(f"\n  knurlogic connect --port {port} --model {a.path.name}"

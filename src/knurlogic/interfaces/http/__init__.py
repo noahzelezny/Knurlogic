@@ -152,10 +152,12 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
             from knurlogic.engine.runtime import pipeline as PL
             shares = PL.agree(link.group, **ring["pipeline"])
             print(f"pipeline  rank 0: {shares['reason']}", flush=True)
-            shard = (lambda m: PL.split(m, link.group, shares["bounds"]))
+            def shard(m):
+                return PL.split(m, link.group, shares["bounds"])
             agree = T.agree_head(link)
         else:
-            shard = (lambda m: T.shard(m, link.group))
+            def shard(m):
+                return T.shard(m, link.group)
     mh = ModelHost(draft=draft and (not ring or pipe), head_agree=agree,
                    executes_artifact_code=bool(artifact.model_file),
                    image_store_bytes=settings.get("image_store_bytes"),
