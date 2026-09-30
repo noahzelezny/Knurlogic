@@ -63,16 +63,16 @@ def test_a_launch_without_a_tune_takes_the_strategy(home):
 
 
 def test_peer_machine_applies_to_this_machine(home):
-    code, doc = page_server.peer_machine(b'{"allowance_gib": 64, "strategy": "lean"}')
+    code, doc = page_server.peer_machine({"allowance_gib": 64, "strategy": "lean"})
     assert code == 200
     assert allowance.get() == 64 * GIB and strategy.get() == "lean"
     assert doc["allowance"]["allowance_gib"] == 64
     assert doc["strategy"]["preset"] == "lean"
     assert set(doc["applied"]) == {"knurlogic allowance",
                                    "knurlogic strategy"}
-    assert page_server.peer_machine(b'{"allowance_gib": 500}')[0] == 400
-    assert page_server.peer_machine(b'{"wired_mb": 1}')[0] == 400
-    assert page_server.peer_machine(b'[]')[0] == 400
+    assert page_server.peer_machine({"allowance_gib": 500})[0] == 400
+    assert page_server.peer_machine({"wired_mb": 1})[0] == 400
+    assert page_server.peer_machine([])[0] == 400
     assert allowance.get() == 64 * GIB      # refusals change nothing
 
 
@@ -86,23 +86,25 @@ def test_machine_apply_forwards_only_to_an_answering_peer(home, monkeypatch):
     _peers(monkeypatch, "10.0.0.2:8899")
     sent = []
 
-    def post(url, doc, headers, t):
-        sent.append((url, doc))
-        return 200, json.dumps({"applied": {"knurlogic allowance": "80 GiB"}}
-                               ).encode()
+    def post(page, kind, doc):
+        sent.append((page, kind, doc))
+        return {"applied": {"knurlogic allowance": "80 GiB"}}
     code, doc = page_server.machine_apply("http://10.0.0.2:8899",
                                  b'{"allowance_gib": 80}', post=post)
     assert code == 200 and doc["applied"]
-    assert sent == [("http://10.0.0.2:8899/peer/machine.json",
-                     {"allowance_gib": 80})]
+    assert sent == [("10.0.0.2:8899", "MachineSet", {"allowance_gib": 80})]
     # nothing of this machine's changed: the peer sets its own
     assert allowance.get() == 0
     assert page_server.machine_apply("http://10.9.9.9:8899", b"{}", post=post)[0] \
         == 403
+    from knurlogic.cluster.protocol import VersionMismatch
+
+    def old(*a):
+        raise VersionMismatch("M4 does not speak this protocol: update "
+                              "knurlogic on M4")
     code, doc = page_server.machine_apply(
-        "http://10.0.0.2:8899", b'{"strategy": "lean"}',
-        post=lambda *a: (404, b"not found"))
-    assert code == 502 and "predates" in doc["error"]
+        "http://10.0.0.2:8899", b'{"strategy": "lean"}', post=old)
+    assert code == 502 and "update knurlogic on M4" in doc["error"]
 
 
 def test_machine_apply_with_no_peer_is_this_machine(home, monkeypatch):
@@ -132,7 +134,7 @@ def _post(url, doc, headers=None):
 def test_one_page_sets_a_peers_allowance_through_the_peers_page(
         home, monkeypatch):
     """Two pages on loopback: the local page relays to the 'peer' page,
-    whose /peer/machine.json applies the setting to itself."""
+    which applies the setting (a MachineSet message) to itself."""
     peer, pport = _serve(page_server.make_handler({}))
     here, hport = _serve(page_server.make_handler({}))
     try:
@@ -144,9 +146,11 @@ def test_one_page_sets_a_peers_allowance_through_the_peers_page(
         assert doc["allowance"]["allowance_gib"] == 48
         assert allowance.get() == 48 * GIB and strategy.get() == "lean"
         # a browser never reaches the peer route itself
-        code, doc = _post(f"http://127.0.0.1:{pport}/peer/machine.json",
-                          {"strategy": "default"},
-                          {"Origin": "http://evil.example"})
+        from knurlogic.cluster import transport
+        env = json.loads(transport.encode("MachineSet",
+                                          {"strategy": "default"})[0])
+        code, doc = _post(f"http://127.0.0.1:{pport}{transport.MSG_PATH}",
+                          env, {"Origin": "http://evil.example"})
         assert code == 403 and strategy.get() == "lean"
     finally:
         peer.shutdown()
