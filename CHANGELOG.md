@@ -24,6 +24,30 @@ First public release (alpha).
   context compaction.
 * Two Macs: one model split by tensor or pipeline over Thunderbolt, with
   Bonjour discovery and `--host cluster`.
+* Launch presets are `default` and `lean` (`--tune`, the page, the MCP);
+  `fast` and `stable` name `default`, `safe` names `lean`. The Knurlogic
+  settings tab has a row for each thing a preset sets, so a custom set is
+  the preset plus the rows that differ; per-chip rounding is its own
+  setting.
+* A load that would be refused is refused before anything starts, from the
+  page, the MCP and a cluster job, in the page's words. `serve` exits 78
+  with a `REFUSING:` line and is never relaunched; a missing module is a
+  refusal too.
+* A context past a model's native window turns on YaRN where the family
+  has it, and is lowered to what the model reaches otherwise.
+* One cache limit, `KNURLOGIC_CACHE_LIMIT_GB`, mirrored to the VQ runtime's
+  names. The page offers KV bf16 and 8-bit; 6 and 4 are `--set`.
+* An omitted `max_tokens` on `/v1/chat/completions` and `/v1/completions`
+  is the rest of the context window (it was 512); the page's chat sends no
+  sampling settings.
+* Hugging Face in the picker: search MLX models, see whether one runs here,
+  download it, and manage downloads in the Downloads overlay (stop, resume,
+  delete).
+* A model's identity includes the `*.py` files it ships: identical copies
+  are one model, and a local copy that differs from a shared one yields to
+  the shared one, with an alert.
+* The settings page is redesigned; models that are loading, preparing or
+  failed have their own cards.
 
 ### Renamed settings
 

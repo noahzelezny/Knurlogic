@@ -216,18 +216,18 @@ NUMERICS_SOURCES = ("declared", "published", "bundled")
 # happily walk into settings that are measured to be WORSE at both ends:
 #
 #   * VQ_DECODE_CHUNK: smaller is faster AND smaller in memory (128 -> 32 is
-#     1.37x on every rung). There is no tradeoff on this knob, so "fast" must
-#     NOT raise it. It is capped at the default in both directions.
+#     1.37x on every rung). There is no tradeoff on this knob, so no preset
+#     may raise it. It is capped at the default in both directions.
 #   * VQ_MOE_GEMMSEG_RTILE=64 is 0.75-0.97x and never faster, so no
 #     setting of this axis may reach it.
 #
-# So `fast` moves only the knobs where headroom actually buys something, and
-# `safe` tightens the ones that bound peak memory. Anything a profile asks for
+# So a preset moves only the knobs where headroom actually buys something, or
+# tightens the ones that bound peak memory. Anything a profile asks for
 # beyond a cap is refused and the refusal is printed, never silently clamped.
 TUNE_PROFILES = {
     # prefill chunk, cache limit GiB, and whether to bound the transient
     # harder than headroom requires
-    "balanced": {
+    "default": {
         "decode_chunk_scale": 1.0,
         "why": "the measured defaults",
     },
@@ -242,23 +242,41 @@ TUNE_PROFILES = {
 }
 
 #: The launch presets ARE the tune axis: one named bundle per value, the
-#: default "balanced" (the measured defaults, unchanged). A per-model
+#: default "default" (the measured defaults, unchanged). A per-model
 #: KNURLOGIC_PRESET (Settings -> Models) picks one for that base model;
 #: any explicit knob set beside it beats the preset's value for that knob.
-PRESETS = ("balanced", "lean")
-PRESET_DEFAULT = "balanced"
+PRESETS = ("default", "lean")
+PRESET_DEFAULT = "default"
 
 
 def preset_of(v, default: str = PRESET_DEFAULT) -> str:
     s = str(v or "").strip().lower()
     if not s:
         return default
-    # the presets there were once: safe is lean now, the rest the default
-    s = {"safe": "lean", "fast": "balanced", "stable": "balanced",
-         "default": "balanced"}.get(s, s)
+    # the names the presets once had: safe is lean now, the rest the default
+    s = {"safe": "lean", "fast": "default", "stable": "default",
+         "balanced": "default"}.get(s, s)
     if s not in TUNE_PROFILES:
         raise ValueError(f"Preset: {v!r} isn't default or lean")
     return s
+
+
+def preset_or(v, default: str) -> str:
+    """The preset `v` names, or `default` when it names none."""
+    try:
+        return preset_of(v, default)
+    except ValueError:
+        return default
+
+
+def preset_arg(v) -> str:
+    """argparse `type` for a --tune value: default or lean, or a name a
+    preset once had."""
+    import argparse
+    try:
+        return preset_of(v)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
 
 
 def preset_launch(tune: str, model_type: str = "") -> tuple:
@@ -275,7 +293,7 @@ def preset_launch(tune: str, model_type: str = "") -> tuple:
             want["kv_bits"] = "bf16"
     return want, notes
 
-#: What a preset sets, starting from balanced's values: prompt chunk (None:
+#: What a preset sets, starting from the default's values: prompt chunk (None:
 #: read from the room free at launch), cache GiB, memory transient scale,
 #: and the model launch settings.
 PRESET_BASE = {"prefill": None, "cache": CACHE_LIMIT_GB_DEFAULT, "scale": 1.0,
@@ -298,7 +316,6 @@ def preset_values(name: str) -> dict:
 #: the strategy to make a custom set (machine/preferences). Each has its
 #: saved name, its title, one plain sentence, and the values it takes as
 #: (saved value, label); "" is the resolver's own choice.
-DECODE_SCALE = "KNURLOGIC_DECODE_CHUNK_SCALE"
 MTP_MODE = "KNURLOGIC_MTP_MODE"
 MTP_MODES = ("dynamic", "every", "off")
 PRESET_ROWS = (
@@ -337,7 +354,6 @@ KNOB_TITLES = {
     "KNURLOGIC_MTP_DYNAMIC": "MTP dynamic",
     "KNURLOGIC_KV_KERNEL": "KV kernel",
     "KNURLOGIC_LONG_CONTEXT": "Long context",
-    "KNURLOGIC_DECODE_CHUNK_SCALE": "Expert chunk scale",
 }
 KNOB_TITLES["VQLAB_PREFILL_CHUNK"] = KNOB_TITLES["KNURLOGIC_PREFILL_CHUNK"]
 KNOB_TITLES["VQ_CACHE_LIMIT_GB"] = KNOB_TITLES["KNURLOGIC_CACHE_LIMIT_GB"]
@@ -391,7 +407,7 @@ KNOB_DOC = {
         "Unset, it is read from the room free at launch: the widest "
         "width up to the family's measured best whose predicted spike "
         "fits in 10% of the room left after weights, KV and cache, else "
-        "512 (stable, lean: always 512). Output is identical at "
+        "512 (lean: always 512). Output is identical at "
         "every width."),
     "KNURLOGIC_CONTEXT_LENGTH": (
         "the longest conversation (prompt + answer, in tokens) a request may "
@@ -465,11 +481,11 @@ KNOB_DOC = {
         "one -- it cannot desync, rank 0 samples every token. auto: on only "
         "when a cluster job's machines have different GPU architectures."),
     "KNURLOGIC_PRESET": (
-        "launch preset for this model: balanced, fast, stable or lean -- the knurlogic strategy unless set here",
-        "one named bundle of the settings below. fast buys speed with "
-        "memory headroom; stable buys repeatability with some speed; lean "
-        "buys context and agents with some speed and precision (8-bit KV). "
-        "Any setting changed beside it beats the preset's value."),
+        "launch preset for this model: default or lean -- the knurlogic strategy unless set here",
+        "one named bundle of the settings below. default is the measured "
+        "settings; lean buys context and agents with some speed and "
+        "precision (8-bit KV, 512-token prompt chunks, MTP off). Any "
+        "setting changed beside it beats the preset's value."),
     "VQ_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
         "larger keeps more freed buffers for reuse, but they stay resident: "
@@ -1037,8 +1053,6 @@ def check_knob(name: str, value, window: int = 0):
             preset_of(s)
         elif name == MTP_MODE and s not in MTP_MODES:
             raise ValueError(f"{s!r} isn't {', '.join(MTP_MODES)}")
-        elif name == DECODE_SCALE and s not in ("1", "1.0", "0.5"):
-            raise ValueError(f"{s!r} isn't 1 or 0.5")
         elif name == "KNURLOGIC_CROSS_CHIP":
             cross_chip_of(s)
         elif name == "KNURLOGIC_LONG_CONTEXT":
@@ -1192,7 +1206,6 @@ def check_compact_knob(name: str, value):
 # The page, a forwarded load and a cluster job all check a request against
 # these; they are settings facts, so they live here.
 
-TUNES = ("balanced", "lean")  # the names of PRESETS
 #: request keys that would name a place on disk; refused outright, never
 #: ignored, so a coordinator that sends one learns it is wrong
 PATH_KEYS = ("path", "target", "artifact", "where", "dir", "directory")

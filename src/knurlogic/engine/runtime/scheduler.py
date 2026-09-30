@@ -729,17 +729,18 @@ class Scheduler:
                 prompt, segs, types, initial = P.tokenize(
                     self, tok, job.request, job.args)
             job.prompt_tokens = len(prompt)
+            from knurlogic.machine.artifact import context_length
             cap = _context_cap()
-            if cap and len(prompt) >= cap:
+            window = cap or context_length(self.host.path or "")
+            if window and len(prompt) >= window:
+                whose = ("this server's context length is "
+                         f"{cap} (KNURLOGIC_CONTEXT_LENGTH)" if cap else
+                         f"this model's context length is {window}")
                 raise P.PromptError(
-                    f"this prompt is {len(prompt)} tokens; this server's "
-                    f"context length is {cap} (KNURLOGIC_CONTEXT_LENGTH), "
+                    f"this prompt is {len(prompt)} tokens; {whose}, "
                     f"which leaves no room for an answer")
             if job.max_tokens is None:
-                from knurlogic.machine.artifact import context_length
-                window = cap or context_length(self.host.path or "")
-                job.max_tokens = max(window - len(prompt), 1) if window \
-                    else 1 << 20
+                job.max_tokens = window - len(prompt) if window else 1 << 20
             elif cap:
                 job.max_tokens = min(job.max_tokens, cap - len(prompt))
             hit = getattr(self.cache, "hit_length", lambda k, t: 0)(

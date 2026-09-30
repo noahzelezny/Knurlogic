@@ -693,7 +693,7 @@ def _tick_single(rec: dict, now: float) -> str:
     ld = rec["load"]
     try:
         out = load_fn(artifact=ld.get("artifact") or "", port=port,
-                          tune=ld.get("tune") or "balanced",
+                          tune=ld.get("tune") or "default",
                           sets=ld.get("sets") or {}, force=False,
                           draft=ld.get("draft", True))
     except Exception as ex:

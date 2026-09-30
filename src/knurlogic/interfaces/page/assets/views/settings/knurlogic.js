@@ -102,13 +102,13 @@ function wireGks(el){
 // is on (the same rounding on every chip); a saved auto or off reads as on.
 // A preset button sets the rows; a row changed by hand leaves no preset
 // pressed, unless the rows come to equal one. Saved: the preset when the
-// rows equal it, otherwise balanced plus each row that differs from it.
+// rows equal it, otherwise default plus each row that differs from it.
 async function showStrategy(ms){
   const el=$('machbody'), seq=nextSeq();
   el.innerHTML='<div class="msg">reading…</div>';
   const docs=await knDocs(ms);
   if(seq!==SEQ) return;
-  const me=docs[0].strategy||{}, ps=me.presets||[], rows=me.rows||[], cur=me.preset||'balanced';
+  const me=docs[0].strategy||{}, ps=me.presets||[], rows=me.rows||[], cur=me.preset||'default';
   if(!ps.length||!rows.length){ el.innerHTML=`<div class="msg">${esc(me.error||'this page predates the strategy')}</div>`; return }
   const kn=docs[0].knurlogic||{}, cc=kn.cross_chip, saved=kn.saved||{};
   const names=rows.map(r=>r.name), pv=n=>ps.find(p=>p.name===n).values;

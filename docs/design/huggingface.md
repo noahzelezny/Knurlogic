@@ -17,9 +17,11 @@ Code: `interfaces/page/hub.py` (the page's server side),
 - `GET /hub/repo.json?id=org/name` fetched when a row opens: size of the
   weights, `model_type` from its config.json, `supported` and `why`,
   `gated` and `access`.
-- `GET /hub/downloads.json` downloads of this run: state, bytes on disk,
-  total, and why a failed one failed.
-- `POST /hub/download.json {action: download | cancel | dismiss, id}`.
+- `GET /hub/downloads.json` downloads: state, bytes on disk, total, and why
+  a failed one failed. The list is kept in `downloads.json` in Knurlogic's
+  cache folder, so it survives a restart of the page.
+- `POST /hub/download.json {action: download | cancel | dismiss | delete, id}`.
+  `id` is `org/name` and nothing else.
 
 ## How it decides
 
@@ -42,8 +44,23 @@ cache folder against the total. INSTANCES shows a card with a bar and a
 cancel; a failure stays as a FAILED card with the reason until dismissed. A
 second download of the same repo while one runs does nothing. Cancelling
 stops at the next chunk and keeps the partial files so a retry resumes.
-Done: the server forgets its model scan and the page reads /models.json
+A download that was running when the page stopped comes back as stopped.
+Stopped is not failed: downloading it again resumes from the files already
+on disk. Done: the server forgets its model scan and the page reads /models.json
 again.
+
+## Downloads overlay
+
+The nav has a Downloads button with a badge counting the downloads running.
+It opens an overlay listing every download in the file above: a bar and a
+stop for a running one; resume and delete for a stopped or failed one; clear
+for a finished one (the files stay). Delete asks first, with the size it
+frees. The list refreshes every two seconds while the overlay is open.
+
+Delete removes the repo's folder from the Hugging Face cache and its row, and
+the model leaves the picker. It is refused while a running server has the
+model loaded from that folder (the servers registry says which): unload it
+first. A download still running is stopped first.
 
 ## Out of scope
 

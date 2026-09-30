@@ -504,7 +504,7 @@ def _resolve(identity: str, name: str = ""):
     return resolve_identity(identity, name=name)
 
 
-def sets_refusal(path, sets: dict) -> str:
+def sets_refusal(path, sets: dict, tune: str = "default") -> str:
     """"" when a rank of `path` would start with these launch settings,
     else why not -- serve's own deterministic refusals (bad settings, a
     context past the model's maximum, a preset or KV precision it cannot
@@ -516,7 +516,7 @@ def sets_refusal(path, sets: dict) -> str:
         a = Artifact.load(path)
     except Exception:
         return ""           # shape_of says why it cannot be read
-    why = launch_refusal(a, sets or {})
+    why = launch_refusal(a, sets or {}, tune)
     return f"its launch settings are refused: {why}" if why else ""
 
 
@@ -584,9 +584,12 @@ def check_spec(spec) -> str:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
             return f"{k} is a number >= 0"
     tune = spec.get("tune")
-    from knurlogic.tuning.settings import PRESETS
-    if tune is not None and tune not in PRESETS:
-        return f"tune is {'|'.join(PRESETS)}"
+    if tune is not None:
+        from knurlogic.tuning.settings import preset_of
+        try:
+            preset_of(tune)
+        except ValueError as e:
+            return str(e)
     sets = spec.get("sets")
     if sets is not None and not isinstance(sets, dict):
         return "sets is an object"
@@ -690,7 +693,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         refusals.append(f"settings a rank does not take: "
                         f"{', '.join(bad_sets)}")
     spec = dict(spec, sets=ok_sets)
-    why = sets_refusal(path, ok_sets)
+    why = sets_refusal(path, ok_sets, spec.get("tune") or "default")
     if why:
         refusals.append(why)
     rank, world = spec["rank"], spec["world"]
@@ -838,7 +841,7 @@ def rank_argv(path: str, spec: dict, files: dict) -> list:
            "--job", spec["job"],
            "--prefill-chunk", str(spec["prefill_chunk"]),
            "--working-set-gib", f"{float(spec.get('working_set_gib') or 0):.3f}",
-           "--tune", spec.get("tune") or "balanced"]
+           "--tune", spec.get("tune") or "default"]
     if spec.get("port"):
         cmd += ["--port", str(int(spec["port"]))]
     if spec.get("serve_hosts") and spec["rank"] == 0:
@@ -1481,12 +1484,12 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         logger.warning("cluster launch: %s", alert)
         req = dict(req, identity=ident)
     path = _resolve(ident, aname)
-    from knurlogic.tuning.settings import clean_sets, TUNES
+    from knurlogic.tuning.settings import clean_sets, preset_or
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         return {"error": f"not a launch setting: {', '.join(bad)}"}
     if path:
-        why = sets_refusal(path, sets)
+        why = sets_refusal(path, sets, preset_or(req.get("tune"), "default"))
         if why:
             return {"refused": f"nothing started: {why}"}
     try:
@@ -1622,8 +1625,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "identity": ident, "name": aname, "hosts": hosts, "ibv_devices": ibv,
             "coordinator": coord, "layers": plan["layers"],
             "prefill_chunk": chunk,
-            "tune": req.get("tune") if req.get("tune") in
-            TUNES else "balanced",
+            "tune": preset_or(req.get("tune"), "default"),
             "nodes": nodes, "versions": local_info.get("versions") or {},
             "jaccl_timeout_ms": J.JACCL_TIMEOUT_MS if link == "jaccl" else 0,
             "sets": sets, "cable": net, "cable_note": note[:400],

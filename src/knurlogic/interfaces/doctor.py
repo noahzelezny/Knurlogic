@@ -21,7 +21,7 @@ GIB = 1 << 30
 
 
 def run(path: str, working_set_gib: float, profile: str | None,
-        exports: bool, tune: str = "balanced") -> int:
+        exports: bool, tune: str = "default") -> int:
     try:
         a = Artifact.load(path)
     except FileNotFoundError as e:
@@ -152,11 +152,11 @@ def main(argv=None) -> int:
                         "none -- each rung runs the numerics it was PUBLISHED "
                         "with (engine/vq/rungs.json). Forcing v1.5 on a v2 "
                         "rung changes its outputs.")
-    p.add_argument("--tune", default="balanced",
-                   choices=S.PRESETS,
-                   help="the launch preset, the same five `serve --tune` "
-                        "takes: balanced (measured defaults), fast, stable, "
-                        "lean, safe (lowest peak memory). Capped by what "
+    p.add_argument("--tune", default="default", type=S.preset_arg,
+                   metavar="{default,lean}",
+                   help="the launch preset, the same two `serve --tune` "
+                        "takes: default (the measured settings) or lean "
+                        "(lowest peak memory, most context). Capped by what "
                         "has been measured.")
     p.add_argument("--exports", action="store_true",
                    help="print only `export K=V` lines, for eval")

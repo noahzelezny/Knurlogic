@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from knurlogic.tuning.settings import PRESET_DEFAULT, PRESETS
+from knurlogic.tuning.settings import PRESET_DEFAULT, PRESETS, preset_of
 
 
 def path() -> Path:
@@ -31,13 +31,17 @@ def get() -> str:
         v = json.loads(path().read_text()).get("preset")
     except Exception:
         return PRESET_DEFAULT
-    return v if v in PRESETS else PRESET_DEFAULT
+    try:
+        return preset_of(v)
+    except ValueError:
+        return PRESET_DEFAULT
 
 
 def set(name) -> str:
     """Remember `name` (the default, or empty, clears the file)."""
-    s = str(name or "").strip().lower() or PRESET_DEFAULT
-    if s not in PRESETS:
+    try:
+        s = preset_of(name)
+    except ValueError:
         raise ValueError(f"strategy {name!r}: one of {list(PRESETS)}")
     p = path()
     if s == PRESET_DEFAULT:

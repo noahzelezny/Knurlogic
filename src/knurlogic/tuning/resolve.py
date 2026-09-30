@@ -258,9 +258,9 @@ def prefill_chunk_by_room(artifact: Artifact, headroom, working_set_bytes: int,
 
 
 def resolve(artifact: Artifact, budget, profile: str | None = None,
-            tune: str = "balanced", store_bytes: int | None = None,
+            tune: str = "default", store_bytes: int | None = None,
             holds_bytes: int | None = None, kv_bits=None,
-            long_context=None, decode_scale: float | None = None):
+            long_context=None):
     """Resolve every knob for this artifact against a budget.
 
     `budget` is either a byte count -- one box, and the return is a
@@ -288,24 +288,22 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
     the context cap to the YaRN window and is checked against the room the
     KV of that context needs (`long_context_room`).
     """
+    tune = S.preset_of(tune)
     if profile is not None and profile not in S.RUNTIME_PROFILES:
         raise ValueError(f"profile must be one of {sorted(S.RUNTIME_PROFILES)}")
 
-    if tune not in S.TUNE_PROFILES:
-        raise ValueError(f"tune must be one of {sorted(S.TUNE_PROFILES)}")
     if isinstance(budget, (int, float)):
         holds = artifact.bytes_on_disk if holds_bytes is None \
             else int(holds_bytes)
         return _resolve_one(artifact, int(budget), holds,
                             profile, tune, store_bytes=store_bytes,
-                            kv_bits=kv_bits, long_context=long_context,
-                            decode_scale=decode_scale)
+                            kv_bits=kv_bits, long_context=long_context)
     return resolve_cluster(artifact, budget, profile, tune,
                            store_bytes=store_bytes)
 
 
 def resolve_cluster(artifact: Artifact, budget, profile: str | None = None,
-                    tune: str = "balanced",
+                    tune: str = "default",
                     store_bytes: int | None = None) -> ClusterResolution:
     """Resolve per node, and say what is only true of the whole cluster."""
     nodes = _as_nodes(budget)
@@ -586,10 +584,9 @@ def vision_budget(artifact: Artifact, store_bytes: int | None = None,
 
 def _resolve_one(artifact: Artifact, working_set_bytes: int,
                  holds_bytes: int, profile: str | None,
-                 tune: str = "balanced", store_bytes: int | None = None,
+                 tune: str = "default", store_bytes: int | None = None,
                  vision: bool = True, kv_bits=None,
-                 long_context=None, decode_scale: float | None = None
-                 ) -> Resolution:
+                 long_context=None) -> Resolution:
     """One box. `holds_bytes` is what this box holds of the artifact, which
     is the whole thing unless something sharded it. A vision rung also
     holds its tower, its image store and its image KV (`vision_budget`),
@@ -629,8 +626,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     chunk_from_headroom = chunk
 
     t = S.TUNE_PROFILES[tune]
-    scale = (t.get("decode_chunk_scale", 1.0) if decode_scale is None
-             else decode_scale)
+    scale = t.get("decode_chunk_scale", 1.0)
     if scale != 1.0 and chunk > S.DECODE_CHUNK_MIN:
         chunk = max(S.DECODE_CHUNK_MIN, int(chunk * scale))
         r.notes.append(f"tune={tune}: transient bounded tighter than headroom "
@@ -673,7 +669,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     family, family_why = S.prefill_chunk_for(artifact.model_type)
     asked = t.get("KNURLOGIC_PREFILL_CHUNK")
     if asked is not None:
-        # safe / stable / lean: narrow whatever the room
+        # lean: narrow whatever the room
         prefill = asked
         if family > asked:
             r.notes.append(
@@ -709,7 +705,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             "costs nothing but peak memory")
 
     emit_cache_limit(r, artifact, cache)
-    if tune != "balanced":
+    if tune != "default":
         r.notes.append(f"tune={tune}: {t['why']}")
     model_launch(r, artifact, kv_bits, tune)
     r.notes.extend(launch_notes)
