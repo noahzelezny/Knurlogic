@@ -94,8 +94,12 @@ def test_every_setting_says_what_it_costs():
         assert any(w in why.lower() for w in words), name
     for name, spec in S.COMPACT_KNOBS.items():
         assert any(w in spec[4].lower() for w in words), name
-    for name, p in S.PRESET_GUIDE.items():
-        assert "nothing in particular" not in p["trades"].lower(), name
+    # a preset is the settings it sets: balanced all of them, the rest
+    # only what differs from balanced
+    assert S.PRESET_GUIDE["balanced"]["settings"].count(" · ") >= 4
+    assert S.PRESET_GUIDE["fast"]["settings"] == "cache 8 GiB"
+    assert S.PRESET_GUIDE["lean"]["settings"] == \
+        "prompt chunk 512 · MTP off · KV 8-bit"
     assert "+2-6%" in S.KNOB_DOC["KNURLOGIC_CROSS_CHIP"][1]
 
 

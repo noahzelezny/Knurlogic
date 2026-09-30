@@ -15,7 +15,7 @@ function modelHTML(b, r, doc, runs){
     <div class="msg">could not read its settings: ${esc(doc.error)}</div></div>`;
   const all=doc.knobs||[];
   // knobs these runtimes never read are not shown at all
-  const ks=all.filter(k=>k.reach!=='no-effect' && !isGlobal(k.name))
+  const ks=all.filter(k=>k.reach!=='no-effect' && !isGlobal(k.name) && !HIDDEN.test(k.name))
     .sort((a,b)=>(a.tier==='reach'?0:1)-(b.tier==='reach'?0:1));
   const asked=doc.asked||{}, un=doc.unmanaged||[];
   const tunes=r?(doc.tunes||[]).map(t=>`<button data-tune="${esc(t.name)}"
@@ -42,8 +42,10 @@ function modelHTML(b, r, doc, runs){
   </div>`;
 }
 // the VQ runtime's own knobs, under their own header after the general ones
-// (VQ_ only, but not VQ_CACHE_LIMIT_GB: that is the engine's buffer cache)
-const isVQ=k=>/^VQ_/.test(k.name) && k.name!=='VQ_CACHE_LIMIT_GB';
+const isVQ=k=>/^VQ_/.test(k.name);
+// not rows: long context follows the context length (past the native window
+// is YaRN), and the VQ runtime's cache limit is knurlogic's, passed through
+const HIDDEN=/^(KNURLOGIC_LONG_CONTEXT|VQ_CACHE_LIMIT_GB|VQLAB_CACHE_LIMIT_GB)$/;
 const TUNES={};
 // Every base model: the picker's groups over what is on this disk, plus any
 // running on a peer that this disk does not have; the running ones first.
@@ -114,9 +116,8 @@ async function showBase(b){
     const pre=launchSets(b.name).KNURLOGIC_PRESET||window.LOADTUNE||'balanced';
     const doc=await getJSON('/settings.json?'+new URLSearchParams({artifact:m.path, tune:pre}));
     if(seq!==SEQ) return;
-    el.innerHTML=modelHTML(b, null, doc, `${lead}<div class="msg" style="margin-top:0">${
-      b.runs.length?'Its server does not answer.':'Not running.'}
-      Values for ${esc(m.name)} at the ${esc(pre)} preset.</div>`);
+    el.innerHTML=modelHTML(b, null, doc, `${lead}${b.runs.length
+      ?'<div class="msg" style="margin-top:0">Its server does not answer.</div>':''}`);
   };
   if(!b.runs.length) return preview('');
   const r=b.runs.find(x=>x.where===SRUN[b.name])||b.runs[0];

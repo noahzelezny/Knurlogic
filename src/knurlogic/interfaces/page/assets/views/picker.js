@@ -160,7 +160,7 @@ function renderPicker(){
         const ok=okm(m);
         return `<div class="var ${ok?'':'no'}" data-p="${esc(m.path)}"
           aria-current="${SEL&&SEL.path===m.path}">
-          <span class="star" data-fav="${esc(m.path)}"
+          <span class="star${isFav(m.path)?' on':''}" data-fav="${esc(m.path)}"
             title="favorite">${isFav(m.path)?'★':'☆'}</span>
           <span class="vn">${esc(m.name)}</span>
           ${onPeer(m)?'':`<span class="tag">not on ${esc(selNodes().filter(n=>!isLocal(n)&&!onNode(n,m)).map(n=>n.node).join(' + '))}</span>`}
@@ -173,7 +173,7 @@ function renderPicker(){
   const a=shown.filter(fits), b=shown.filter(g=>!fits(g));
   const oneRow=m=>`<div class="var" data-p="${esc(m.path)}"
       aria-current="${SEL&&SEL.path===m.path}">
-      <span class="star" data-fav="${esc(m.path)}">${isFav(m.path)?'★':'☆'}</span>
+      <span class="star${isFav(m.path)?' on':''}" data-fav="${esc(m.path)}">${isFav(m.path)?'★':'☆'}</span>
       <span class="vn">${esc(m.name)}</span>
       ${isVision(m)?'<span class="tag">VISION</span>':''}
       <span class="vs">${gb(m.size_bytes)}</span></div>`;

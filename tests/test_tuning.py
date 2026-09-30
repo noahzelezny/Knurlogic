@@ -208,8 +208,9 @@ def _artifact_reading(tmp_path, *names):
 def test_a_legacy_artifact_keeps_the_name_it_was_published_with(tmp_path):
     a = _artifact_reading(tmp_path, "VQLAB_CACHE_LIMIT_GB", "VQ_DECODE_CHUNK")
     env = resolve(a, 96 * GIB).env
-    assert "VQLAB_CACHE_LIMIT_GB" in env
-    assert "KNURLOGIC_CACHE_LIMIT_GB" not in env
+    # knurlogic's cache limit, passed through under the name it reads
+    assert env["VQLAB_CACHE_LIMIT_GB"] == env["KNURLOGIC_CACHE_LIMIT_GB"]
+    assert "VQ_CACHE_LIMIT_GB" not in env
 
 
 def test_a_new_artifact_gets_the_new_name(tmp_path):

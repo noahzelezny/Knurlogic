@@ -90,7 +90,7 @@ const STAGEPOP=(()=>{
       const lines=[];
       if(later.length){
         const sets=launchSets(g.base);
-        later.forEach(([k,v])=>{ if(sameVal(v.to,v.cur)) delete sets[k]; else sets[k]=v.to;
+        later.forEach(([k,v])=>{ if(sameVal(v.to,v.cur)||v.to==='(unset)') delete sets[k]; else sets[k]=v.to;
           delete g.knobs[k] });
         saveLaunchSets(g.base, sets);
         lines.push(...later.map(([k,v])=>`<div><b>${esc(k)}</b> ${esc(v.to)} on next launch</div>`));

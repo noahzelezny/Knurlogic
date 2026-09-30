@@ -154,6 +154,19 @@ def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
     return None
 
 
+def emit_cache_limit(r: Resolution, artifact: Artifact, gib) -> None:
+    """The cache limit, one value: knurlogic's own (the engine sets mlx's
+    free-buffer cache ceiling from it), and the same value under the name
+    a VQ bundle's runtime reads, which sets that ceiling again at load."""
+    r.env["KNURLOGIC_CACHE_LIMIT_GB"] = str(gib)
+    src = artifact.runtime_source()
+    old = S.KNOB_ALIASES["cache_limit_gb"][1:]
+    name = next((n for n in old if n in src), None) if src else \
+        (old[0] if artifact.is_vq else None)
+    if name:
+        r.env[name] = str(gib)
+
+
 def expert_transient_bytes_per_unit(artifact: Artifact):
     """(bytes per unit of decode chunk, why) -- from the ARTIFACT'S shape.
 
@@ -638,7 +651,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             f"headroom): bounds the dense-expert transient, which is what "
             f"caps context length on a full box")
 
-    cache = float(t.get("VQ_CACHE_LIMIT_GB", S.CACHE_LIMIT_GB_DEFAULT))
+    cache = float(t.get("KNURLOGIC_CACHE_LIMIT_GB", S.CACHE_LIMIT_GB_DEFAULT))
     if cache > S.CACHE_LIMIT_GB_MAX:
         r.notes.append(f"tune={tune} capped: cache limit {cache} -> "
                        f"{S.CACHE_LIMIT_GB_MAX} GiB, above which nothing has "
@@ -692,7 +705,7 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
             "prompt chunk narrowed: token-identical at every width, so this "
             "costs nothing but peak memory")
 
-    emit(r, artifact, "cache_limit_gb", cache)
+    emit_cache_limit(r, artifact, cache)
     if tune != "balanced":
         r.notes.append(f"tune={tune}: {t['why']}")
     model_launch(r, artifact, kv_bits, tune)
@@ -724,7 +737,7 @@ def _preset_record(r: Resolution, tune: str, launch: dict) -> None:
     logicals = set(launch)
     if "KNURLOGIC_PREFILL_CHUNK" in t:
         logicals.add("prefill_chunk")
-    if "VQ_CACHE_LIMIT_GB" in t:
+    if "KNURLOGIC_CACHE_LIMIT_GB" in t:
         logicals.add("cache_limit_gb")
     names = {n for lg in logicals for n in S.KNOB_ALIASES.get(lg, (lg,))}
     r.preset = {"name": tune, "why": t.get("why", ""),
@@ -777,7 +790,8 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
         emit(r, artifact, "kv_kernel", launch.get("kv_kernel", "on"))
     emit(r, artifact, "cross_chip", launch.get("cross_chip", "off"))
     emit(r, artifact, "preset", tune)
-    r.ranges["KNURLOGIC_KV_BITS"] = ["bf16"] + [str(b) for b in bits]
+    r.ranges["KNURLOGIC_KV_BITS"] = ["bf16"] + [
+        str(b) for b in bits if str(b) in S.KV_BITS_OFFERED]
     if not bits:
         r.notes.append(f"KV cache stays bf16: {why}")
     elif kv_bits is not None:
