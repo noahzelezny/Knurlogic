@@ -13,11 +13,14 @@ Design: docs/design/cluster.md (jobs).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
 import time
 from pathlib import Path
+
+from knurlogic.cluster import PROC_ERRORS
 
 #: how often a rank rewrites its marker
 MARK_S = 2.0
@@ -122,7 +125,9 @@ class Marker:
         if self.probe is not None:
             try:
                 extra = self.probe() or {}
-            except Exception:
+            except Exception:  # the heartbeat thread must go on without a probe
+                logging.getLogger(__name__).debug(
+                    "rank probe failed", exc_info=True)
                 extra = {}
         with self._lock:
             self.doc.update({k: v for k, v in extra.items() if v is not None})
@@ -275,7 +280,7 @@ def is_rank(pid: int, job: str) -> bool:
         out = subprocess.run(["ps", "-o", "command=", "-p", str(int(pid))],
                              capture_output=True, text=True,
                              timeout=5).stdout
-    except Exception:
+    except (*PROC_ERRORS, ValueError):
         return False
     return f"--job {job}" in out or f"--job={job}" in out
 
@@ -290,7 +295,7 @@ def pids_of_job(job: str) -> list:
         out = subprocess.run(["pgrep", "-f", f"[-]-job[ =]{job}( |$)"],
                              capture_output=True, text=True,
                              timeout=5).stdout
-    except Exception:
+    except PROC_ERRORS:
         return []
     return sorted(int(x) for x in out.split() if x.isdigit()
                   and int(x) != os.getpid())
@@ -346,7 +351,7 @@ def rss_bytes(pid: int) -> int:
                              capture_output=True, text=True,
                              timeout=5).stdout.strip()
         return int(out) * 1024 if out.isdigit() else 0
-    except Exception:
+    except (*PROC_ERRORS, ValueError):
         return 0
 
 

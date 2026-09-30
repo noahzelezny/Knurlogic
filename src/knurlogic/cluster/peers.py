@@ -23,6 +23,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
 from knurlogic.machine.status import SCHEMA
 
 logger = logging.getLogger(__name__)
@@ -263,7 +264,7 @@ class Peers:
             kind = link_of(host)
             return kind, float((gbps_of(host) if kind == "thunderbolt"
                                 else 0) or 0)
-        except Exception:
+        except (*PROC_ERRORS, ValueError, KeyError):
             return "other", 0.0
 
     def _one(self, p: Peer) -> None:
@@ -282,7 +283,7 @@ class Peers:
         for k in tries[:3]:
             try:
                 doc = self._fetch(f"http://{k}/status.json")
-            except Exception as e:
+            except NET_ERRORS as e:
                 err = err or e
                 continue
             if k != p.key:
@@ -412,7 +413,7 @@ class Peers:
                 while True:
                     try:
                         self.refresh()
-                    except Exception:
+                    except Exception:  # the peer poll thread must survive one bad round (logged)
                         logger.debug("peer refresh failed; retrying in %ss", REFRESH_S, exc_info=True)
                     time.sleep(REFRESH_S)
             self._thread = threading.Thread(target=loop, daemon=True,
@@ -457,7 +458,7 @@ class Peers:
             d = json.loads(self.store.read_text())
             return d.get("peers", {}) if d.get("schema") == STORE_SCHEMA \
                 else {}
-        except Exception:
+        except (OSError, ValueError, AttributeError):
             return {}
 
     def _save(self) -> None:

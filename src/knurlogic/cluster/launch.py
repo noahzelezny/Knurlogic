@@ -25,6 +25,7 @@ import threading
 import time
 from pathlib import Path
 
+from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
 from knurlogic.cluster import jobs as J
 
 logger = logging.getLogger(__name__)
@@ -150,7 +151,7 @@ def _chip() -> str:
         return subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
                               capture_output=True, text=True,
                               timeout=5).stdout.strip()
-    except Exception:
+    except PROC_ERRORS:
         return ""
 
 
@@ -214,11 +215,11 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
             tb = [{"iface": i["iface"], "ip": i["ip"],
                    "gbps": i.get("gbps"), "generation": i.get("generation")}
                   for i in links.thunderbolt()]
-        except Exception:
+        except (*PROC_ERRORS, ValueError, KeyError):
             tb = []
         try:
             heal = _selfheal()
-        except Exception:
+        except (*PROC_ERRORS, ValueError):
             heal = False
         from knurlogic.engine.crosschip import gpu_architecture
         doc = {"chip": chip, "gpu_architecture": gpu_architecture(),
@@ -514,7 +515,7 @@ def sets_refusal(path, sets: dict, tune: str = "default") -> str:
     from knurlogic.machine.artifact import Artifact
     try:
         a = Artifact.load(path)
-    except Exception:
+    except (OSError, ValueError, AttributeError):
         return ""           # shape_of says why it cannot be read
     why = launch_refusal(a, sets or {}, tune)
     return f"its launch settings are refused: {why}" if why else ""
@@ -699,7 +700,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     rank, world = spec["rank"], spec["world"]
     try:
         sh = (shape or shape_of)(path, world, spec["split"])
-    except Exception as e:
+    except Exception as e:  # a failed read is reported as the launch's refusal
         sh = {"refusals": [f"could not read the artifact: "
                            f"{type(e).__name__}: {e}"]}
     refusals += sh.get("refusals") or []
@@ -817,7 +818,7 @@ def _local_copy_differs(path, spec: dict) -> str:
                 return (f"the local copy of {name} ({p}) differs from the "
                         f"shared copy this job runs ({path}); this rank "
                         f"loads the shared one")
-    except Exception:
+    except (OSError, ValueError):
         return ""
     return ""
 
@@ -829,7 +830,7 @@ def _local_info() -> dict:
         own = next(n for n in snap.get("nodes") or []
                    if n.get("role") in ("local", "server"))
         return own.get("cluster") or node_info()
-    except Exception:
+    except (LookupError, StopIteration, AttributeError, TypeError, OSError, ValueError):
         return node_info()
 
 
@@ -987,7 +988,7 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
     log = d / f"rank{spec['rank']}.log"
     try:
         heal = bool(_local_info().get("jaccl_selfheal"))
-    except Exception:
+    except (OSError, ValueError, AttributeError, TypeError):
         heal = False
     cmd = RANK_ARGV[0](path, spec, files)
     env = {**os.environ, **rank_env(spec, files, heal)}
@@ -996,7 +997,7 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
             proc = (spawn or subprocess.Popen)(
                 cmd, stdout=fh, stderr=subprocess.STDOUT, env=env,
                 start_new_session=True)
-    except Exception as e:
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
         return 500, {"error": f"{type(e).__name__}: {e}"}
     rec = {"job": spec["job"], "rank": spec["rank"], "world": spec["world"],
            "pid": proc.pid, "artifact": path, "log": str(log),
@@ -1140,7 +1141,7 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                 (post or _stop_post)(f"http://{page}{STOP_PATH}",
                                      {"job": job, "reason": reason})
                 told.append(n.get("name"))
-            except Exception:
+            except NET_ERRORS:
                 logger.debug("could not tell %s to stop job %s", page, job, exc_info=True)
     return {"stopped": job, "ranks_here": sorted(v["rank"] for v in
                                                  mine.values()),
@@ -1258,7 +1259,7 @@ def peer_verdict(job: str, recs: list, now: float | None = None,
                 _PEER_OK[key] = now
                 continue
             why = f"{name} no longer runs its rank of the job"
-        except Exception as e:
+        except (*NET_ERRORS, AttributeError) as e:
             why = (f"{name}'s page has not answered "
                    f"({type(e).__name__})")
         # the clock starts at the last good answer, or at first sight
@@ -1279,7 +1280,7 @@ def _ensure_watcher() -> None:
             time.sleep(WATCH_S)
             try:
                 watch_once()
-            except Exception as e:
+            except Exception as e:  # a watcher thread must survive any one failed pass (logged)
                 logger.warning("cluster watch: %s: %s", type(e).__name__, e)
     threading.Thread(target=loop, daemon=True,
                      name="knurlogic-cluster-watch").start()
@@ -1347,7 +1348,7 @@ def failure_of_port(port) -> str:
     if job:
         try:
             watch_once()
-        except Exception:
+        except Exception:  # an HTTP request must still answer; logged
             logger.debug("watch_once failed while reading job %s", job, exc_info=True)
     for j, e in sorted(ENDED.items(), key=lambda kv: -kv[1]["t"]):
         if (job and j == job) or (not job and e.get("port") == port):
@@ -1391,7 +1392,7 @@ def _parallel(fn, items: list) -> list:
     def one(i, x):
         try:
             out[i] = fn(x)
-        except Exception as e:
+        except Exception as e:  # one peer's failure becomes its result; the others go on
             out[i] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     ts = [threading.Thread(target=one, args=(i, x), daemon=True)
           for i, x in enumerate(items)]
@@ -1481,7 +1482,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     from knurlogic.machine.artifact import prefer_shared
     try:
         ident, alert = prefer_shared(ident, aname)
-    except Exception:
+    except (OSError, ValueError):
         alert = ""
     if alert:
         logger.warning("cluster launch: %s", alert)
@@ -1505,7 +1506,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                           "split": split})
             if shape.get("error"):
                 return {"error": f"{first['name']}: {shape['error']}"}
-    except Exception as e:
+    except (*NET_ERRORS, LookupError, StopIteration, AttributeError) as e:
         return {"error": f"could not read the model's shape: "
                          f"{type(e).__name__}: {e}"}
     try:
@@ -1748,7 +1749,7 @@ def _job_end(job: str, order: list, post):
             continue
         try:
             doc = post(f"http://{m['page']}{JOB_PATH}", {"job": job})
-        except Exception:
+        except NET_ERRORS:
             continue
         if isinstance(doc, dict) and doc.get("ended"):
             return str(doc["ended"])
@@ -1817,7 +1818,7 @@ def _abandon(job: str, order: list, post, reason: str = "refused") -> None:
             else:
                 post(f"http://{m['page']}{STOP_PATH}",
                      {"job": job, "reason": reason})
-        except Exception:
+        except NET_ERRORS:
             logger.debug("could not stop job %s on %s", job, m.get("page"), exc_info=True)
 
 
