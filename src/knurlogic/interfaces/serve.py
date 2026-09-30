@@ -228,6 +228,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             ring["pipeline"] = {
                 "layer_bytes": per, "other_bytes": other,
                 "leader_bytes": lead,
+                "reserve": R.fit_reserve(a.raw_config),
                 "working_set": int(working_set_gib * GIB),
                 "bandwidth_gbs": bw, "counts": ring.get("layers") or None}
             share = pipeline_share_bytes(per, other, int(ring["rank"]),
