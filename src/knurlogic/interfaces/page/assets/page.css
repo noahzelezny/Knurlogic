@@ -659,7 +659,7 @@ pre{margin:8px 0 0;font-size:13px;color:var(--dim);white-space:pre-wrap;
 .wait{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--dim);
   letter-spacing:.05em;text-transform:uppercase;line-height:1}
 .wait svg{width:16px;height:16px;display:block;flex:none}
-.wait:not(.on){animation:waitfade 2.4s ease-in-out infinite}
+div.wait:not(.on){animation:waitfade 2.4s ease-in-out infinite}
 .wait.on svg{animation:gear 1.6s linear infinite}
 @keyframes gear{to{transform:rotate(360deg)}}
 @keyframes waitfade{50%{opacity:.3}}

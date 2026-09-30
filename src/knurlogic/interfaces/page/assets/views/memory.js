@@ -111,6 +111,7 @@ async function loadResident(){
           r.runtime!=='knurlogic' ? esc(r.runtime)
           : r.recovery&&r.recovery.state==='recovering' ? 'recovering'
           : r.state!=='loaded' ? esc(r.state)
+          : r.cluster&&r.cluster.phase&&r.cluster.phase!=='ready' ? esc(r.cluster.phase)
           : r.requests&&(r.requests.in_flight||r.requests.pending) ? 'running' : 'ready'}</span>
         <span class="grow"></span>
         ${r.can_unload?`<button class="mini danger" data-i="${i}"
@@ -140,10 +141,11 @@ async function loadResident(){
     if(seen.has(inst)) return false;
     seen.add(inst); return true });
   const busy=loadingLaunches();
-  const mine=([r])=>busy.some(L=>r.runtime==='knurlogic' && r.state!=='loaded'
+  const mine=([r])=>busy.some(L=>r.runtime==='knurlogic'
     && (r.name===String(L.name).split('/').pop())
-    && (L.job ? (r.cluster&&r.cluster.job)===L.job
-              : (r.where||'').replace(/\/$/,'').endsWith(':'+L.port)));
+    && (r.cluster ? (L.job ? r.cluster.job===L.job : L.cluster)
+        : r.state!=='loaded' && !L.cluster && L.port
+          && (r.where||'').replace(/\/$/,'').endsWith(':'+L.port)));
   const cards=shown.filter(x=>!mine(x)).map(([r,i])=>card(r,i));
   const loading=busy.map(L=>{
     const pct=L.total?Math.min(100,Math.round(100*L.bytes/L.total)):null;
@@ -152,7 +154,7 @@ async function loadResident(){
     return `<div class="card loading"><div class="cardhd"><span class="dot"></span>
         <span class="rt knurlogic">${esc(say)}</span></div>
       <div class="n">${esc(String(L.name).split('/').pop())}</div>
-      ${pct!=null?`<div class="lbar"><i style="width:${pct}%"></i></div>`:''}
+      ${pct!=null||L.phase==='preparing'?`<div class="lbar"><i style="width:${pct||0}%"></i></div>`:''}
       <div class="s">on ${esc(L.machines.join(' + '))}${L.per&&L.per.length?' · '
         +esc(L.per.map(p=>p.machine+': '+p.phase).join(' · ')):''}</div></div>`});
   let h=cards.length||loading.length?loading.concat(cards).join(''):none;
