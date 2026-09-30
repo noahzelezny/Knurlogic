@@ -381,3 +381,23 @@ def test_a_plain_answer_carries_the_liveness_document_not_the_heavy_one(tmp_path
     assert set(doc_) == {"schema", "nodes", "boot_id", "v", "peers"}
     assert doc_["v"] == [1, 0] and doc_["nodes"][0]["role"] == "local"
     assert "cluster" in doc_["nodes"][0]
+
+
+def test_a_wifi_only_peer_is_not_listed_unless_named_with_peer(tmp_path,
+                                                               monkeypatch):
+    monkeypatch.setattr(Peers, "_speed", staticmethod(lambda h: ("wifi", 0.0)))
+    ps = make(tmp_path, lambda url: doc("bbbbbbbbbbbb", "M4"), manual=())
+    ps.add("10.0.0.9", 8899, "bonjour")
+    ps.refresh()
+    assert ps.all() == []
+    ps.add("10.0.0.9", 8899, "manual")
+    assert [p.name for p in ps.all()] == ["M4"]
+
+
+def test_a_thunderbolt_bonjour_peer_is_listed(tmp_path, monkeypatch):
+    monkeypatch.setattr(Peers, "_speed",
+                        staticmethod(lambda h: ("thunderbolt", 40.0)))
+    ps = make(tmp_path, lambda url: doc("bbbbbbbbbbbb", "M4"), manual=())
+    ps.add("10.0.0.9", 8899, "bonjour")
+    ps.refresh()
+    assert [p.name for p in ps.all()] == ["M4"]
