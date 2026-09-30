@@ -202,6 +202,29 @@ def _selfheal() -> bool:
     return bool(m.get("jaccl_selfheal"))
 
 
+def available_now() -> int:
+    """Bytes of memory macOS would hand this machine's next allocation now
+    (free plus inactive/file cache: machine/loaded.available_memory), 0 when
+    it cannot be read. Read fresh each time, never cached: it is the
+    difference between a working set the GPU is ALLOWED and memory that is
+    actually there (a 96 GiB Mac's 84 GiB working set leaves the OS and
+    every other program 12 GiB; a share that fills the working set swaps)."""
+    from knurlogic.machine.loaded import available_memory
+    try:
+        return int(available_memory().get("available_bytes") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0
+
+
+def budget_of(m: dict) -> int:
+    """What a rank on machine `m` may hold: its working set (under its
+    allowance), lowered to the memory available now when the machine says
+    it (`available_bytes`; a peer that predates it says nothing)."""
+    ws = int(m.get("working_set_bytes") or 0)
+    av = int(m.get("available_bytes") or 0)
+    return min(ws, av) if ws and av else ws
+
+
 def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
     """What a coordinator needs to know of THIS machine, for its status'
     `cluster` block. Cached: it runs a few subprocesses."""
@@ -234,7 +257,8 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
         _INFO.update(doc=doc, at=now)
     from knurlogic.machine import allowance
     return dict(doc, working_set_bytes=allowance.cap(
-        gpu_working_set(int(working_set_bytes or 0))))
+        gpu_working_set(int(working_set_bytes or 0))),
+        available_bytes=available_now())
 
 
 def gpu_working_set(installed: int, wired_limit=None) -> int:
@@ -447,13 +471,15 @@ def placement(machines: list, shape: dict, split: str,
         per = int(shape["tensor_per_rank_bytes"])
         shares, left = [], []
         for r, nm in enumerate(names):
-            ws = int(by[nm].get("working_set_bytes") or 0)
-            margin = R.step_margin(ws)
+            ws = budget_of(by[nm])
+            margin = R.rank_margin(ws, shape.get("reserve"))
             if per > ws - margin:
                 raise ValueError(f"{nm}: its tensor share {per / GIB:.1f} "
                                  f"GiB does not fit its working set "
-                                 f"{ws / GIB:.1f} GiB less its "
-                                 f"{margin / GIB:.1f} GiB step margin")
+                                 f"{ws / GIB:.1f} GiB less the "
+                                 f"{margin / GIB:.1f} GiB step margin "
+                                 f"(first-request transient, a minimum "
+                                 f"context's KV): more space required")
             shares.append({"rank": r, "machine": nm, "bytes": per})
             left.append(f"{nm} leaves {(ws - per) / GIB:.1f} GiB")
         reason = (f"tensor split {n} ways: every rank holds "
@@ -463,12 +489,13 @@ def placement(machines: list, shape: dict, split: str,
         return {"order": names, "leader": names[0], "split": split,
                 "shares": shares, "layers": [], "reason": reason}
     ranks = [{"name": nm,
-              "working_set_bytes": int(by[nm].get("working_set_bytes") or 0),
+              "working_set_bytes": budget_of(by[nm]),
               "memory_bandwidth_gbs": by[nm].get("bandwidth_gbs")}
              for nm in names]
     lead = int(shape.get("leader_bytes") or 0)
     sh = R.pipeline_shares(list(shape["layer_bytes"]), ranks,
-                           int(shape.get("other_bytes") or 0), lead)
+                           int(shape.get("other_bytes") or 0), lead,
+                           reserve=shape.get("reserve"))
     shares = [{"rank": r, "machine": nm,
                "bytes": sh["bytes"][r] + int(shape.get("other_bytes") or 0)
                + (lead if r == 0 else 0),
@@ -489,8 +516,10 @@ def shape_of(path: str, world: int, split: str) -> dict:
         refusals = R.pipeline_refusals(a.raw_config, world)
         return {"layer_bytes": per, "other_bytes": other,
                 "leader_bytes": R.pipeline_leader_bytes(a),
+                "reserve": R.fit_reserve(a.raw_config),
                 "tensor_per_rank_bytes": 0, "refusals": refusals}
     return {"layer_bytes": [], "other_bytes": 0,
+            "reserve": R.fit_reserve(a.raw_config),
             "tensor_per_rank_bytes":
                 R.tensor_placement(a, world)["per_rank_bytes"],
             "refusals": R.tensor_refusals(a.raw_config, world)}
@@ -705,7 +734,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         sh = {"refusals": [f"could not read the artifact: "
                            f"{type(e).__name__}: {e}"]}
     refusals += sh.get("refusals") or []
-    ws = int(info.get("working_set_bytes") or 0)
+    ws = budget_of(info)
     if not refusals:
         if spec["split"] == "tensor":
             need = int(sh["tensor_per_rank_bytes"])
@@ -716,15 +745,17 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                 + int(sh.get("other_bytes") or 0) \
                 + (int(sh.get("leader_bytes") or 0) if rank == 0 else 0) \
                 if counts else 0
-        from knurlogic.tuning.resolve import step_margin
-        margin = step_margin(ws)
+        from knurlogic.tuning.resolve import rank_margin
+        margin = rank_margin(ws, sh.get("reserve"))
         busy = (held or held_here)(spec["job"]) if need and ws else []
         hold = sum(b for _, _, b in busy)
         if need and ws and need > ws - margin and not hold:
             refusals.append(f"rank {rank}'s share is {need / GIB:.1f} GiB "
                             f"and {me}'s working set (under its allowance) "
-                            f"is {ws / GIB:.1f} GiB, which must leave its "
-                            f"{margin / GIB:.1f} GiB step margin")
+                            f"is {ws / GIB:.1f} GiB, which must leave the "
+                            f"{margin / GIB:.1f} GiB step margin "
+                            f"(first-request transient, a minimum "
+                            f"context's KV): more space required")
         elif need and ws and need > ws - hold - margin:
             refusals.append(
                 f"rank {rank}'s share is {need / GIB:.1f} GiB and {me}'s "
@@ -733,7 +764,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                 + ", ".join(f"{w} (pid {p}, {b / GIB:.1f} GiB)"
                             for w, p, b in busy if b)
                 + f"; the {(ws - hold) / GIB:.1f} GiB left must also leave "
-                  f"its {margin / GIB:.1f} GiB step margin. Unload that "
+                  f"the {margin / GIB:.1f} GiB step margin. Unload that "
                   f"first")
     if spec["link"] == "ring":
         ip = spec["hosts"][rank].rsplit(":", 1)[0]
@@ -843,7 +874,8 @@ def _local_info() -> dict:
         snap, _ = status_fn()
         own = next(n for n in snap.get("nodes") or []
                    if n.get("role") in ("local", "server"))
-        return own.get("cluster") or node_info()
+        return dict(own.get("cluster") or node_info(),
+                    available_bytes=available_now())
     except (LookupError, StopIteration, AttributeError, TypeError, OSError, ValueError):
         return node_info()
 
