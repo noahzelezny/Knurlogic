@@ -41,7 +41,14 @@ INSTRUCTIONS = (
     "http://<machine>:<port>/v1 (the port and leader `load` returned; "
     "127.0.0.1 for this Mac). `deps` says "
     "which mlx builds are installed. No tool deletes or modifies model "
-    "files."
+    "files. The levers, when a load does not fit or runs short of memory: "
+    "`load`'s tune (`default`, fastest; `lean`, 512-token prompt chunks, MTP "
+    "off, 8-bit KV -- the most context in the least memory), or single "
+    "settings in `load`'s sets: KNURLOGIC_CONTEXT_LENGTH (less context, "
+    "less KV memory; past the native window the Qwen families use YaRN, "
+    "up to 1,048,576), KNURLOGIC_KV_BITS=8, KNURLOGIC_MTP=off (frees the "
+    "draft head's memory), KNURLOGIC_PREFILL_CHUNK=512 (a smaller spike "
+    "while reading a prompt). `settings` shows what each resolves to."
 )
 GIB = 1 << 30
 
