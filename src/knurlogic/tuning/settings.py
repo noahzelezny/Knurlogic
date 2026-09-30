@@ -257,7 +257,7 @@ def preset_of(v, default: str = PRESET_DEFAULT) -> str:
     s = {"safe": "lean", "fast": "balanced", "stable": "balanced",
          "default": "balanced"}.get(s, s)
     if s not in TUNE_PROFILES:
-        raise ValueError(f"preset {v!r}: one of {list(PRESETS)}")
+        raise ValueError(f"Preset: {v!r} isn't {' or '.join(PRESETS)}")
     return s
 
 
@@ -325,6 +325,27 @@ PRESET_ROWS = (
      "options": [("bf16", "bf16"), ("8", "8-bit")]},
 )
 PRESET_ROW_NAMES = tuple(r["name"] for r in PRESET_ROWS)
+
+#: the page's name for each launch setting (Settings -> Models / Knurlogic;
+#: views/settings/knobs.js KNOB_TITLE): what every refusal calls it
+KNOB_TITLES = {
+    **{r["name"]: r["title"] for r in PRESET_ROWS},
+    "KNURLOGIC_PRESET": "Preset",
+    "KNURLOGIC_CONTEXT_LENGTH": "Context length",
+    "KNURLOGIC_CROSS_CHIP": "Per-chip rounding",
+    "KNURLOGIC_MTP": "MTP",
+    "KNURLOGIC_MTP_DYNAMIC": "MTP dynamic",
+    "KNURLOGIC_KV_KERNEL": "KV kernel",
+    "KNURLOGIC_LONG_CONTEXT": "Long context",
+    "KNURLOGIC_DECODE_CHUNK_SCALE": "Expert chunk scale",
+}
+KNOB_TITLES["VQLAB_PREFILL_CHUNK"] = KNOB_TITLES["KNURLOGIC_PREFILL_CHUNK"]
+KNOB_TITLES["VQ_CACHE_LIMIT_GB"] = KNOB_TITLES["KNURLOGIC_CACHE_LIMIT_GB"]
+KNOB_TITLES["VQLAB_CACHE_LIMIT_GB"] = KNOB_TITLES["KNURLOGIC_CACHE_LIMIT_GB"]
+
+
+def knob_title(name: str) -> str:
+    return KNOB_TITLES.get(name, name)
 
 
 def preset_row_values(name: str) -> dict:
@@ -624,7 +645,8 @@ def kv_bits_of(v):
     if s in ("", "bf16", "16", "none", "off"):
         return None
     if s not in KV_BITS_VALUES:
-        raise ValueError(f"KV bits {v!r}: one of {KV_BITS_VALUES}")
+        n = f"{s}-bit" if s.isdigit() else repr(s)
+        raise ValueError(f"KV cache: {n} isn't supported; use bf16 or 8-bit")
     return int(s)
 
 
@@ -860,8 +882,8 @@ def long_context_of(v) -> str:
     if s in ("", "off", "0", "false", "no", "none"):
         return "off"
     if s not in LONG_CONTEXT_VALUES:
-        raise ValueError(f"long context {v!r}: one of "
-                         f"{list(LONG_CONTEXT_VALUES)}")
+        raise ValueError(f"Long context: {v!r} isn't "
+                         f"{' or '.join(LONG_CONTEXT_VALUES)}")
     return s
 
 
@@ -991,7 +1013,7 @@ def check_knob(name: str, value, window: int = 0):
         try:
             v = cast(s)
         except ValueError:
-            return (f"{name}={s!r}: not a "
+            return (f"{knob_title(name)}: {s!r} isn't a "
                     f"{'whole number' if cast is int else 'number'}")
         if name == "KNURLOGIC_CONTEXT_LENGTH" and window:
             hi = window
@@ -1000,27 +1022,31 @@ def check_knob(name: str, value, window: int = 0):
                      name == "KNURLOGIC_CONTEXT_LENGTH" and window else
                      f"between {lo:g} and {hi:g}{' ' + unit if unit else ''}"
                      if hi is not None else f"at least {lo:g}")
-            return f"{name}={s}: {where}"
+            return f"{knob_title(name)}: {s} isn't allowed; {where}"
         return None
     if name in COMPACT_KNOBS:
         return check_compact_knob(name, value)
     try:
         if name in ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC"):
-            on_off(s)
+            if s.lower() not in ("", "on", "off", "1", "0", "true", "false",
+                                 "yes", "no"):
+                raise ValueError(f"{s!r} isn't on or off")
         elif name == "KNURLOGIC_KV_BITS":
             kv_bits_of(s)
         elif name == "KNURLOGIC_PRESET":
             preset_of(s)
         elif name == MTP_MODE and s not in MTP_MODES:
-            raise ValueError(f"one of {list(MTP_MODES)}")
+            raise ValueError(f"{s!r} isn't {', '.join(MTP_MODES)}")
         elif name == DECODE_SCALE and s not in ("1", "1.0", "0.5"):
-            raise ValueError("one of 1, 0.5")
+            raise ValueError(f"{s!r} isn't 1 or 0.5")
         elif name == "KNURLOGIC_CROSS_CHIP":
             cross_chip_of(s)
         elif name == "KNURLOGIC_LONG_CONTEXT":
             long_context_of(s)
     except ValueError as e:
-        return f"{name}: {e}"
+        m = str(e)
+        return m if m.startswith(knob_title(name) + ":") \
+            else f"{knob_title(name)}: {m}"
     return None
 
 # --- what a VISION rung holds besides its weights ---------------------------
