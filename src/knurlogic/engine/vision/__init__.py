@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Protocol
 
 __all__ = [
     "ImageRef", "EncodedImage", "VisionSpec", "Family", "RefLookup",
@@ -96,7 +97,7 @@ class ImageRef:
     sha: str
     proc_hash: str
     n_tokens: int
-    grid_thw: Optional[Tuple[int, int, int]] = None
+    grid_thw: tuple[int, int, int] | None = None
 
 
 @dataclass
@@ -116,7 +117,7 @@ class EncodedImage:
     """
     ref: ImageRef
     feats: Any
-    extras: Dict[str, Any] = field(default_factory=dict)
+    extras: dict[str, Any] = field(default_factory=dict)
 
     @property
     def nbytes(self) -> int:
@@ -147,17 +148,17 @@ class VisionSpec:
     family: str
     image_token_id: int
     patch: int
-    merge: Optional[int]
+    merge: int | None
     min_pixels: int
     max_pixels: int
-    fixed_tokens: Optional[int]
+    fixed_tokens: int | None
     proc_hash: str
 
-    def to_json(self) -> Dict[str, Any]:
+    def to_json(self) -> dict[str, Any]:
         return dict(self.__dict__)
 
 
-def proc_hash(settings: Dict[str, Any]) -> str:
+def proc_hash(settings: dict[str, Any]) -> str:
     """The hash that goes into VisionSpec.proc_hash: every processor setting
     that changes an image's features, canonical JSON, sha256, 16 hex.
 
@@ -193,12 +194,12 @@ class Family(Protocol):
         vision keys. Returns the number of tensors loaded, for the per-rung
         tensor-count bound."""
 
-    def preprocess(self, img: Any, sha: str) -> Tuple[Dict[str, Any], ImageRef]:
+    def preprocess(self, img: Any, sha: str) -> tuple[dict[str, Any], ImageRef]:
         """PIL image (already clamped and RGB, images.decode) -> the tower's
         inputs and the image's ref. `sha` is images.pixel_sha(img); the ref
         carries it and spec.proc_hash."""
 
-    def encode(self, pixels: Dict[str, Any], ref: ImageRef) -> EncodedImage:
+    def encode(self, pixels: dict[str, Any], ref: ImageRef) -> EncodedImage:
         """Run the tower once. feats has exactly ref.n_tokens rows. The only
         place the tower runs, so wrapping it from outside counts G6."""
 
@@ -210,8 +211,8 @@ class Family(Protocol):
         widens that one id to n_tokens -- the only expansion there is, so
         segments expand with the same rule."""
 
-    def embed(self, model: Any, key: List[Any], start: int,
-              features: FeatureLookup) -> Dict[str, Any]:
+    def embed(self, model: Any, key: list[Any], start: int,
+              features: FeatureLookup) -> dict[str, Any]:
         """Inputs for the trunk over key[start:] -- the uncached span only.
 
         Returns {"input_embeddings": mx [1, len(key)-start, D], **extras},
@@ -220,14 +221,14 @@ class Family(Protocol):
         sentinel (scatter.merge), so an image cut by the prefix hit takes
         rows k..n-1 with no global feature index to recompute."""
 
-    def positions(self, key: List[Any], refs: RefLookup) -> Tuple[Any, int]:
+    def positions(self, key: list[Any], refs: RefLookup) -> tuple[Any, int]:
         """(position ids for the WHOLE key or None, rope_delta). Pure in the
         key: called on every prefill and decode of a row whose key
         holds an image, whether or not the new suffix does. None means the
         trunk's own 1D positions are right (gemma, GLM); Qwen returns
         mx [3, 1, len(key)] and the delta decode adds to the offset."""
 
-    def chunk_boundaries(self, key: List[Any]) -> List[Tuple[int, int]]:
+    def chunk_boundaries(self, key: list[Any]) -> list[tuple[int, int]]:
         """[start, end) spans a prefill chunk edge must not fall strictly
         inside. gemma: every image span (bidirectional attention within
         an image block). Causal families: []."""
@@ -238,16 +239,16 @@ class Family(Protocol):
 # without importing engine/serve. The serve path sets this when a vision
 # family is built and clears it on unload; interfaces only read it.
 
-_SERVED_SPEC: Optional[VisionSpec] = None
+_SERVED_SPEC: VisionSpec | None = None
 
 
-def served_vision() -> Optional[VisionSpec]:
+def served_vision() -> VisionSpec | None:
     """The served model's VisionSpec, or None when it has no vision (or
     nothing is served)."""
     return _SERVED_SPEC
 
 
-def set_served_vision(spec: Optional[VisionSpec]) -> None:
+def set_served_vision(spec: VisionSpec | None) -> None:
     """Serve path only: record (or clear, with None) what is served."""
     global _SERVED_SPEC
     _SERVED_SPEC = spec

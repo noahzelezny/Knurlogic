@@ -13,11 +13,11 @@ import numpy as np
 def build(seed=0, dtype="float32"):
     import importlib
 
+    import fixtures_vision_qwen as FQ
     import mlx.core as mx
     from mlx.utils import tree_flatten, tree_unflatten
 
     from knurlogic.engine import register
-    import fixtures_vision_qwen as FQ
     register.register("qwen3_5_moe", override=True)
     m = importlib.import_module("mlx_lm.models.qwen3_5_moe")
     cfg = dict(FQ.TEXT["qwen3_5_moe"], model_type="qwen3_5_moe")
@@ -49,6 +49,7 @@ def main(out_path):
     ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]
     then = [31, 104, 331, 32, 439, 214]
     import os
+
     from knurlogic.engine import kvquant
     bits = kvquant.parse_bits(os.environ.get("KNURLOGIC_KV_BITS"))
 
@@ -64,6 +65,7 @@ def main(out_path):
     link.barrier()
     # idle: rank 0 parks rank 1 on the bell, then the next exchange wakes it
     import time
+
     from knurlogic.engine.runtime import plan as P
     if link.rank == 0:
         T.Ring(link).park()

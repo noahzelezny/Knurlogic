@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import threading
 from collections import OrderedDict
+from collections.abc import Hashable, Iterable, Iterator
 from contextlib import contextmanager
-from typing import Any, Dict, Hashable, Iterable, Iterator, Optional, Tuple
+from typing import Any
 
 from . import EncodedImage, ImageEvicted, ImageRef
 
@@ -28,7 +29,7 @@ from . import EncodedImage, ImageEvicted, ImageRef
 #: memory budget adds per served vision model (`budget_bytes`).
 DEFAULT_MAX_BYTES = 256 * 1024 * 1024
 
-Key = Tuple[Hashable, str, str]
+Key = tuple[Hashable, str, str]
 
 
 def estimate_nbytes(n_tokens: int, text_hidden: int,
@@ -42,9 +43,9 @@ def estimate_nbytes(n_tokens: int, text_hidden: int,
 class ImageStore:
     def __init__(self, max_bytes: int = DEFAULT_MAX_BYTES):
         self._lock = threading.RLock()
-        self._lru: OrderedDict[Key, Tuple[EncodedImage, int]] = OrderedDict()
-        self._refs: Dict[Key, ImageRef] = {}
-        self._pins: Dict[Key, int] = {}
+        self._lru: OrderedDict[Key, tuple[EncodedImage, int]] = OrderedDict()
+        self._refs: dict[Key, ImageRef] = {}
+        self._pins: dict[Key, int] = {}
         self._max = int(max_bytes)
         self._nbytes = 0
         self.hits = self.misses = self.evictions = 0
@@ -76,7 +77,7 @@ class ImageStore:
     # --- lookups -------------------------------------------------------------
 
     def get(self, model_key: Hashable, sha: str,
-            proc_hash: str) -> Optional[EncodedImage]:
+            proc_hash: str) -> EncodedImage | None:
         """The encoded image, or None. A hit moves it to the fresh end."""
         k = (model_key, sha, proc_hash)
         with self._lock:
@@ -99,7 +100,7 @@ class ImageStore:
         return v
 
     def ref(self, model_key: Hashable, sha: str,
-            proc_hash: str) -> Optional[ImageRef]:
+            proc_hash: str) -> ImageRef | None:
         """The image's ref, even after its features were evicted."""
         return self._refs.get((model_key, sha, proc_hash))
 
@@ -164,7 +165,7 @@ class ImageStore:
 
     @contextmanager
     def pinned(self, model_key: Hashable,
-               images: Iterable[Tuple[str, str]]) -> Iterator[None]:
+               images: Iterable[tuple[str, str]]) -> Iterator[None]:
         """Hold these (sha, proc_hash) entries past the bound for the block.
         Pinning an image not yet put is allowed (pin, encode, put): the pin
         is what keeps it once it arrives. Reentrant (counted)."""
@@ -184,7 +185,7 @@ class ImageStore:
                         self._pins.pop(k, None)
                 self._evict()
 
-    def clear(self, model_key: Optional[Hashable] = None) -> None:
+    def clear(self, model_key: Hashable | None = None) -> None:
         """Forget everything (or one model's entries), refs included. Call on
         unload -- the prompt cache whose keys the refs serve dies with it."""
         with self._lock:
@@ -197,7 +198,7 @@ class ImageStore:
 
     # --- what /status.json and the page show ---------------------------------
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         with self._lock:
             return {"entries": len(self._lru), "nbytes": self._nbytes,
                     "max_bytes": self._max,

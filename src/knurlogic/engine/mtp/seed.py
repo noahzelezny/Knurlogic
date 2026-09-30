@@ -14,14 +14,14 @@ the way the trunk chunks its prefill bounds the temporaries at
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any
 
 import mlx.core as mx
 
 
-def _cache_state(cache: Any) -> List[mx.array]:
+def _cache_state(cache: Any) -> list[mx.array]:
     """The arrays to force after a chunk so the graph never spans chunks."""
-    out: List[mx.array] = []
+    out: list[mx.array] = []
     caches = cache if isinstance(cache, (list, tuple)) else [cache]
     for c in caches:
         st = getattr(c, "state", None)
@@ -34,7 +34,7 @@ def _cache_state(cache: Any) -> List[mx.array]:
     return out
 
 
-def seed_head(head: Any, h_chunks: List[mx.array], ids: mx.array, n: int,
+def seed_head(head: Any, h_chunks: list[mx.array], ids: mx.array, n: int,
               cache: Any, step: int, start: int = 0) -> None:
     """Advance `head` over positions start..n-2 -- input (h_t, x_{t+1}) -- in
     chunks of at most `step` positions.

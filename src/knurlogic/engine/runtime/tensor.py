@@ -16,10 +16,10 @@ ranks goes through `Link.exchange`, on the scheduler's thread.
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 import random
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -28,7 +28,7 @@ from mlx.utils import tree_map, tree_map_with_path
 from knurlogic.cluster.jobs import progress
 
 from . import plan as P
-from .executor import (Admission, Checkpoint, Finished, LocalExecutor)
+from .executor import Admission, Checkpoint, Finished, LocalExecutor
 
 logger = logging.getLogger(__name__)
 GIB = 1 << 30
@@ -262,7 +262,7 @@ class Link:
         if self.socks[0].recv(1) != b"w":
             raise ConnectionError("rank 0 left while this rank was parked")
 
-    def exchange(self, over: int, payload: Optional[bytes] = None):
+    def exchange(self, over: int, payload: bytes | None = None):
         """-> (control rows, one per rank; the plan bytes or None)."""
         import numpy as np
         if self.parked:
@@ -419,12 +419,12 @@ class Journal:
     """Rank 0's ops since the last exchange, in the order they happened."""
 
     def __init__(self):
-        self.ops: List[dict] = []
+        self.ops: list[dict] = []
 
     def add(self, op: str, **fields) -> None:
         self.ops.append({"op": op, **fields})
 
-    def take(self) -> List[dict]:
+    def take(self) -> list[dict]:
         ops, self.ops = self.ops, []
         return ops
 
@@ -441,7 +441,7 @@ class Ring:
         self.journal = Journal()
         #: max over ranks >= 1 of (active - limit) at the last exchange, and
         #: rank 0's own active memory then
-        self.peer_over: Optional[int] = None
+        self.peer_over: int | None = None
         self.local_then = 0
         self.mismatches = 0
 
@@ -456,7 +456,7 @@ class Ring:
         self.local_then = int(mx.get_active_memory())
         publish_ranks(rows)
 
-    def peers_over_now(self) -> Optional[int]:
+    def peers_over_now(self) -> int | None:
         """The peers' over-limit as of the last exchange. Under tensor the
         ranks hold equal shards and apply the same ops, so what rank 0 has
         TAKEN since is added; what it has freed is not subtracted -- a free
@@ -585,7 +585,7 @@ class TensorExecutor(LocalExecutor):
         r = vis.lookup()[1](sha, ph)
         return r.n_tokens, r.grid_thw
 
-    def remove(self, uids: List[int]) -> None:
+    def remove(self, uids: list[int]) -> None:
         super().remove(uids)
         if uids:
             self.ring.journal.add("remove", uids=[int(u) for u in uids])
@@ -661,13 +661,14 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     vision (rank 0 encodes; the admit op carries each image's ref and the
     admission its rows), else None."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+
     from .request import control_machine
     from .scheduler import PromptCache
 
     stream = mx.default_stream(mx.default_device())
     cache = PromptCache(prompt_cache_size)
     mark = Mark(working_set)
-    ex: Optional[LocalExecutor] = None
+    ex: LocalExecutor | None = None
     last: dict = {}
     steps = mismatches = 0
 
@@ -831,9 +832,9 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                    prompt_cache_size: int, completion_batch_size: int,
                    prefill_step_size: int,
                    executes_artifact_code: bool = False,
-                   split: str = "tensor", pipeline: Optional[dict] = None,
-                   draft: bool = True, kv_bits: Optional[int] = None,
-                   cross_chip: Optional[dict] = None) -> int:
+                   split: str = "tensor", pipeline: dict | None = None,
+                   draft: bool = True, kv_bits: int | None = None,
+                   cross_chip: dict | None = None) -> int:
     """A rank >= 1 from start to stop: join, load its shard, follow.
     `pipeline`: agree()'s keyword arguments for a pipeline split.
     `cross_chip`: engine/crosschip.resolve(...) for this job."""

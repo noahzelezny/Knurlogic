@@ -21,15 +21,21 @@ from __future__ import annotations
 
 import logging
 import queue
-from pathlib import Path
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from pathlib import Path
 
 from . import prompt as P
-from .executor import (Admission, Checkpoint, Finished, LocalExecutor,
-                       Progress, RowFailure, Token)
+from .executor import (
+    Admission,
+    Checkpoint,
+    Finished,
+    LocalExecutor,
+    Progress,
+    RowFailure,
+    Token,
+)
 from .request import Request, control_machine
 
 logger = logging.getLogger(__name__)
@@ -55,7 +61,7 @@ def _context_cap() -> int:
         return 0
 
 
-def _kv_from_config(path, kv_bits=None) -> Optional[tuple]:
+def _kv_from_config(path, kv_bits=None) -> tuple | None:
     """(0, bytes per token) from the artifact's config -- its full-attention
     layers' K and V -- so the first prompt after a load is costed before a
     cache has been measured; the measurements replace it. None if the
@@ -127,10 +133,10 @@ class Job:
     """One request as the scheduler takes it."""
     request: P.ChatRequest
     args: P.PromptArgs
-    max_tokens: Optional[int] = None    # None: the rest of the context window
+    max_tokens: int | None = None    # None: the rest of the context window
     sampling: dict = field(default_factory=dict)      # temp, top_p, ..., seed
     penalties: dict = field(default_factory=dict)     # make_logits_processors
-    stops: List[str] = field(default_factory=list)
+    stops: list[str] = field(default_factory=list)
     logprobs: bool = False
     top_logprobs: int = 0
     #: filled by the scheduler: ("progress", (done, total)) / ("delta",
@@ -140,7 +146,7 @@ class Job:
     #: set once tokenized
     prompt_tokens: int = 0
     #: the rows it waits for, once it has had to wait for memory
-    waiting_on: Optional[set] = None
+    waiting_on: set | None = None
     #: perf_counter at submit, for usage.knurlogic.timing
     submitted: float = 0.0
 
@@ -156,7 +162,7 @@ class PromptCache:
     nothing and kills the generation thread (seen with GLM, none then
     low effort)."""
 
-    def __init__(self, max_size: int = 10, max_bytes: Optional[int] = None):
+    def __init__(self, max_size: int = 10, max_bytes: int | None = None):
         from mlx_lm.models.cache import LRUPromptCache
         self.lru = LRUPromptCache(max_size=max_size,
                                   **({"max_bytes": max_bytes}
@@ -206,7 +212,7 @@ class Command:
     """A load or unload for the scheduler thread; `done` is set when it has
     run (or was refused: `error`)."""
     kind: str
-    path: Optional[str] = None
+    path: str | None = None
     force: bool = True
     executes: bool = False
     #: set when the scheduler has taken it on (or refused it: then `done`)
@@ -215,7 +221,7 @@ class Command:
     error: str = ""
 
 
-def _checkpoints(segs, n: int, hit: int) -> List[int]:
+def _checkpoints(segs, n: int, hit: int) -> list[int]:
     """The lengths the engine copies the row's cache at: every segment's
     end but the last (the prompt's own end is stored when the row
     finishes), past the prompt cache's hit."""
@@ -231,7 +237,7 @@ def _checkpoints(segs, n: int, hit: int) -> List[int]:
 class _Row:
     job: Job
     text: Request
-    types: List[str]          # segment types still to label checkpoints
+    types: list[str]          # segment types still to label checkpoints
     admitted: float = 0.0     # perf_counter when its prefill was queued
     first: float = 0.0        # ... when its first token came out
     made: int = 0             # tokens it has generated (its context grows)
@@ -240,9 +246,9 @@ class _Row:
 class Scheduler:
     def __init__(self, host, *, completion_batch_size: int = 32,
                  prefill_step_size: int = 2048, prompt_cache_size: int = 10,
-                 prompt_cache_bytes: Optional[int] = None,
-                 working_set_bytes: Optional[int] = None,
-                 stats: Optional[dict] = None, tensor=None,
+                 prompt_cache_bytes: int | None = None,
+                 working_set_bytes: int | None = None,
+                 stats: dict | None = None, tensor=None,
                  gpu_in_use=None):
         """`tensor`: rank 0's engine/runtime/tensor.Ring when this model is
         split across ranks; the prompt cache is then count-based only.
@@ -271,26 +277,26 @@ class Scheduler:
         self._tx: dict = {}
         self._gpu_in_use = gpu_in_use
         #: other processes' GPU bytes, the largest of the recent readings
-        self._others: List[int] = []
+        self._others: list[int] = []
         self._others_at = 0.0
         #: (fixed bytes, bytes per token) of one row's cache, measured
-        self._kv: Optional[tuple] = None
+        self._kv: tuple | None = None
         self._samples: dict = {}
         self.cache = self._new_cache(prompt_cache_size)
         self.stats = stats if stats is not None else {}
         self._jobs: queue.Queue = queue.Queue()
         self._commands: queue.Queue = queue.Queue()
-        self._waiting: List[Job] = []
-        self._rows: Dict[int, _Row] = {}
+        self._waiting: list[Job] = []
+        self._rows: dict[int, _Row] = {}
         #: why the last tick left requests waiting (requests()), or None
-        self._holding: Optional[str] = None
+        self._holding: str | None = None
         #: the prompt cache gave way on a ring and the peers have not yet
         #: said what that freed there (_make_room)
         self._ring_trimmed = False
-        self._ex: Optional[LocalExecutor] = None
+        self._ex: LocalExecutor | None = None
         self._stop = False
         #: set by abort(): every request from then on gets this error
-        self._aborted: Optional[BaseException] = None
+        self._aborted: BaseException | None = None
         self._wake = threading.Event()
         #: live knobs rank 0 applied, for the other ranks (share_live)
         self._sets: queue.Queue = queue.Queue()
@@ -459,7 +465,8 @@ class Scheduler:
     def _loop_once(self) -> None:
         try:
             self._tick()
-        except Exception:  # the scheduler thread must outlive one bad tick (logged, fails the rows)
+        # the scheduler thread must outlive one bad tick (logged, fails the rows)
+        except Exception:
             # Nothing here should raise; if it does, fail what is in
             # flight rather than the thread.
             logger.exception("scheduler tick failed")
@@ -494,7 +501,7 @@ class Scheduler:
         self._wake.wait(0.5 if self._waiting else None)
         self._wake.clear()
 
-    def _why_waiting(self, room: bool) -> Optional[str]:
+    def _why_waiting(self, room: bool) -> str | None:
         if not self._waiting:
             return None
         if self.host.state != "ready":
@@ -581,6 +588,7 @@ class Scheduler:
             return self._executor_local()
         from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
         from knurlogic.engine.serve import state
+
         from .tensor import TensorExecutor
         # a drafting head on a pipeline only (rank 0 holds the last layers,
         # so the true final hidden state); vision on either split: rank 0
@@ -683,7 +691,8 @@ class Scheduler:
                 # the client's request, not a fault here: no traceback
                 logger.info("refused a request: %s", e)
                 self._error(job, e)
-            except Exception as e:  # one request's failure goes to that request; the loop goes on (logged)
+            # one request's failure goes to that request; the loop goes on (logged)
+            except Exception as e:
                 logger.exception("could not admit a request")
                 self._error(job, e)
             if images and self._rows:
@@ -707,9 +716,9 @@ class Scheduler:
             f"shorter conversation, or serve a smaller model"))
 
     def _insert(self, job: Job) -> None:
+        from knurlogic.engine.serve import state
         from knurlogic.engine.vision import cachehook
         from knurlogic.engine.vision import request as vreq
-        from knurlogic.engine.serve import state
         tok = self.host.tokenizer
         ex = self._executor()
         cachehook.sweep()
@@ -797,7 +806,7 @@ class Scheduler:
 
     def _working_set(self) -> int:
         if self.working_set is None:
-            import importlib   # engine.serve exports a load() function
+            import importlib  # engine.serve exports a load() function
             load = importlib.import_module("knurlogic.engine.serve.load")
             self.working_set = int(load.memory().get("working_set_bytes")
                                    or 0)
@@ -1094,7 +1103,8 @@ class Scheduler:
         before = self._reset_peak()
         try:
             events = ex.step()          # on the executor's own stream
-        except Exception as exc:  # a failed step fails its rows; the scheduler thread lives on (logged)
+        # a failed step fails its rows; the scheduler thread lives on (logged)
+        except Exception as exc:
             logger.exception("a step failed; failing its rows")
             self._fail_all(exc)
             self._close_executor()

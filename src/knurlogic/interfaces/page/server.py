@@ -11,10 +11,10 @@ owns the model; this page owns nothing but the view.
 
 from __future__ import annotations
 
-import logging
 import argparse
 import http.client
 import json
+import logging
 import subprocess
 import sys
 import time
@@ -24,12 +24,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
-from knurlogic.machine import identity, loaded, status, wired
-from knurlogic.machine.servers import (is_our_server, registry,
-                                       save_registry, serve_log)
 from knurlogic.interfaces.page import documents
+from knurlogic.machine import identity, loaded, status, wired
+from knurlogic.machine.servers import is_our_server, registry, save_registry, serve_log
+
 # the launch facts cluster jobs share: tuning/settings owns them
-from knurlogic.tuning.settings import (PATH_KEYS, clean_sets, preset_or)
+from knurlogic.tuning.settings import PATH_KEYS, clean_sets, preset_or
 
 if TYPE_CHECKING:
     from knurlogic.cluster.peers import Peers
@@ -76,7 +76,8 @@ def _status_fn(_n=0):
     if _MM["doc"] is None or now - _MM["at"] > 4.0:
         try:
             _MM["doc"] = loaded.memory_map()
-        except (OSError, subprocess.SubprocessError, ValueError, KeyError, AttributeError):
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError,
+                AttributeError):
             _MM["doc"] = None
         _MM["at"] = now
     mm = _MM["doc"]
@@ -359,8 +360,8 @@ def _spawn_unlocked(path: str, port: int, tune: str = "default",
 def tracked_load(**kw) -> dict:
     """mcp.load, for a load this page was asked for: a server it starts is
     relaunched if it dies unasked (cluster/recovery.py)."""
-    from knurlogic.interfaces import mcp
     from knurlogic.cluster import recovery
+    from knurlogic.interfaces import mcp
     out = mcp.load(**kw)
     if isinstance(out, dict) and out.get("pid") and out.get("port"):
         recovery.track_single(int(out["port"]), {
@@ -373,6 +374,7 @@ def tracked_load(**kw) -> dict:
 def _stop(port: int) -> dict:
     import os
     import signal
+
     from knurlogic.cluster import recovery
     recovery.cancel_port(port)          # asked for: never recovered
     reg = registry()
@@ -434,8 +436,7 @@ def _load_fn(serve_port: int):
             return _then_refresh(forward_launch(req))
         if node:
             # this machine, picked by id: the page's own load, by identity
-            from knurlogic.machine.artifact import (AmbiguousIdentity,
-                                                    resolve_identity)
+            from knurlogic.machine.artifact import AmbiguousIdentity, resolve_identity
             try:
                 req = dict(req, target=req.get("target") or resolve_identity(
                     req.get("identity"),
@@ -465,7 +466,8 @@ def _load_fn(serve_port: int):
                                  "where it was started"}
             if act == "ollama-unload":
                 return loaded.ollama_unload(where, target)
-        except Exception as e:  # a load action's failure is the page's answer, not a dead handler
+        # a load action's failure is the page's answer, not a dead handler
+        except Exception as e:
             return {"error": f"{type(e).__name__}: {e}"}
         return {"error": f"unknown action {act!r}"}
     return handler
@@ -728,6 +730,7 @@ def peer_settings(method: str, port, data, call=None) -> tuple:
     import urllib.error
     import urllib.parse
     import urllib.request
+
     from knurlogic.machine.servers import is_our_server
     if not isinstance(port, int) or isinstance(port, bool):
         return 400, {"error": "name the model server by its port"}
@@ -872,9 +875,11 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
     Asked in parallel with one shared deadline, so a slow or dead peer costs
     at most `timeout` and never the local answer. Peers are asked plain
     a Survey message (what its own /loaded.json says, never ?peers=1), so
-    two pages asking each other cannot recurse. Each row is labelled with its machine and its address rewritten
-    from the peer's loopback to the peer's address."""
+    two pages asking each other cannot recurse. Each row is labelled with
+    its machine and its address rewritten from the peer's loopback to the
+    peer's address."""
     import threading
+
     from knurlogic.cluster import transport
     if fetch is None:
         def fetch(page, t):
@@ -897,7 +902,9 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
                           "id": getattr(p, "id", ""), "resident": rows,
                           "jobs": js, "loads": doc.get("loads") or []}
-        except Exception as e:  # peer survey: one peer's failure is its row's error; the others are still listed
+        # peer survey: one peer's failure is its row's error; the others are still
+        # listed
+        except Exception as e:
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
                           "resident": [],
                           "error": f"{type(e).__name__}: {e}"}
@@ -1340,7 +1347,8 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
                 if isinstance(m, dict) and m.get("id"):
                     found.setdefault(str(m["id"]), base)
                     docs.setdefault(str(m["id"]), m)
-        except Exception:  # peer survey thread: one peer's silence is logged, the others are still asked
+        # peer survey thread: one peer's silence is logged, the others are still asked
+        except Exception:
             logger.debug("no model list from %s", base, exc_info=True)
     ts = [threading.Thread(target=one, args=(b,), daemon=True)
           for b in sorted(chat_targets())]
@@ -1406,6 +1414,7 @@ def local_models(fetch=None, docs=None) -> dict:
     (sampling_defaults, context_length) for the relay's GET."""
     import threading
     import urllib.request
+
     from knurlogic.machine.servers import is_our_server
     if fetch is None:
         def fetch(url, t):
@@ -1422,7 +1431,8 @@ def local_models(fetch=None, docs=None) -> dict:
                     found.setdefault(str(m["id"]), base)
                     if docs is not None:
                         docs.setdefault(str(m["id"]), m)
-        except Exception:  # peer survey thread: one server's silence is logged, the others are still asked
+        # peer survey thread: one server's silence is logged, the others are still asked
+        except Exception:
             logger.debug("no model list from %s", base, exc_info=True)
     ts = [threading.Thread(target=one, args=(b,), daemon=True)
           for b in bases]
@@ -1602,6 +1612,7 @@ def _start_discovery(me: dict, host: str, port: int, reachable: bool):
             # Advertised on the Thunderbolt links only: a peer that can
             # only see us over the cable cannot pick Wi-Fi.
             import socket as _s
+
             from knurlogic.cluster import links
             for i in links.thunderbolt():
                 d.if_index = _s.if_nametoindex(i["iface"])
@@ -1613,7 +1624,8 @@ def _start_discovery(me: dict, host: str, port: int, reachable: bool):
             d.if_index = 0
         d.browse()
         DISCOVERY = d.start()
-    except Exception as e:  # Bonjour is optional; the failure is printed and peers can still be named
+    # Bonjour is optional; the failure is printed and peers can still be named
+    except Exception as e:
         print(f"bonjour unavailable ({type(e).__name__}: {e}); peers can "
               f"still be named with --peer", file=sys.stderr)
 
@@ -1925,9 +1937,11 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     routes["POST /allowance.json"] = lambda _q, _n=0, body=None: documents._json(
         documents.set_allowance(body))
     # the knurlogic strategy: this machine's default launch preset
-    routes["/strategy.json"] = lambda _q, _n=0: documents._json(documents.strategy_doc())
+    routes["/strategy.json"] = lambda _q, _n=0: documents._json(
+        documents.strategy_doc())
     # the knurlogic-wide settings: compaction, identical results across chips
-    routes["/knurlogic.json"] = lambda _q, _n=0: documents._json(documents.knurlogic_doc())
+    routes["/knurlogic.json"] = lambda _q, _n=0: documents._json(
+        documents.knurlogic_doc())
     routes["POST /knurlogic.json"] = lambda _q, _n=0, body=None: documents._json(
         documents.set_knurlogic(body))
     routes["POST /strategy.json"] = lambda _q, _n=0, body=None: documents._json(
@@ -1950,8 +1964,9 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     srv = ThreadingHTTPServer((bind, port), H)
     if gate:
         tb = [i["ip"] for i in links.thunderbolt()]
+        urls = ", ".join(f"http://{ip}:{port}" for ip in tb)
         print(f"knurlogic  cluster mode: answering on "
-              f"{', '.join(f'http://{ip}:{port}' for ip in tb) or 'no Thunderbolt link yet'}"
+              f"{urls or 'no Thunderbolt link yet'}"
               f" and http://127.0.0.1:{port}; Wi-Fi and Ethernet refused")
     else:
         print(f"knurlogic  http://{host}:{port}")
@@ -1960,6 +1975,7 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
           f"{serve_port}.")
     if menubar:
         import signal
+
         from knurlogic.interfaces import menubar as _mb
         # the menu's Quit sends SIGINT; a page started in the background
         # inherits SIGINT ignored, which would make that Quit do nothing
@@ -2028,9 +2044,8 @@ def main(argv=None) -> int:
 def _wire() -> None:
     """Give launch and recovery what they need of this page. Each is
     a late-bound lambda, so a swapped PEERS or mcp.load is what they see."""
+    from knurlogic.cluster import launch, recovery
     from knurlogic.interfaces import mcp
-    from knurlogic.cluster import launch
-    from knurlogic.cluster import recovery
     launch.status_fn = lambda: _status_fn()
     launch.peers_fn = lambda: PEERS.all() if PEERS else []
     recovery.peers_fn = lambda: PEERS.all() if PEERS else []

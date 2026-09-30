@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Optional
 
 GIB = 1 << 30
 _KNOWN: dict = {"at": 0.0, "rows": None, "error": ""}
@@ -50,7 +49,7 @@ def known_artifacts(ttl: float = 60.0) -> list:
     return _KNOWN["rows"]
 
 
-def resolve_name(model: str, served: Optional[str]) -> str:
+def resolve_name(model: str, served: str | None) -> str:
     """A model id (directory name) or path -> the artifact directory, if it
     is the served one or a known one. NotLoadable(404) otherwise."""
     model = (model or "").strip()
@@ -77,7 +76,8 @@ def resolve_name(model: str, served: Optional[str]) -> str:
 def register(artifact) -> list:
     """Register the artifact's vendored architecture modules; the names of
     any it still lacks (empty when it can load)."""
-    from knurlogic.engine import arch, register as reg
+    from knurlogic.engine import arch
+    from knurlogic.engine import register as reg
     needed = arch.modules_for_artifact(artifact)
     if needed:
         reg.register(*needed)
@@ -85,7 +85,7 @@ def register(artifact) -> list:
             if not r.present]
 
 
-def prepare(model: str, *, served: Optional[str] = None,
+def prepare(model: str, *, served: str | None = None,
             freed_bytes: int = 0):
     """-> the Artifact to load, or NotLoadable saying why not."""
     from knurlogic.machine import wired

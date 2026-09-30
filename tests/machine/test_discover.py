@@ -38,7 +38,8 @@ def _gguf_model(d: Path, size=2048):
 def test_it_reads_a_flat_store_and_an_hf_cache(tmp_path):
     _mlx_model(tmp_path / "store" / "SomeOrg--Some-Model")
     _mlx_model(tmp_path / "hub" / "models--Qwen--Qwen3-8B" / "snapshots" / "abc")
-    rows = discover.find(include_defaults=False, extra=[tmp_path / "store", tmp_path / "hub"])
+    rows = discover.find(include_defaults=False,
+                         extra=[tmp_path / "store", tmp_path / "hub"])
     names = {r.name for r in rows}
     assert "SomeOrg--Some-Model" in names
     # An HF cache entry's real name lives in the models--org--repo directory.
@@ -90,7 +91,8 @@ def test_it_does_not_descend_into_an_artifact(tmp_path):
 
 def test_the_same_path_reached_twice_is_reported_once(tmp_path):
     _mlx_model(tmp_path / "store" / "Model-A")
-    rows = discover.find(include_defaults=False, extra=[tmp_path / "store", tmp_path / "store"])
+    rows = discover.find(include_defaults=False,
+                         extra=[tmp_path / "store", tmp_path / "store"])
     assert len(rows) == 1
 
 

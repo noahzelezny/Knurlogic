@@ -5,8 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.tuning import settings as S
 from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning import settings as S
 from knurlogic.tuning.resolve import decode_chunk_for, resolve
 
 GIB = 1 << 30
@@ -242,7 +242,10 @@ def test_the_model_shape_may_tighten_but_not_loosen_yet():
     """Sizing from the model loosens the knob for small-expert families. That
     direction has not been measured, and being wrong there is an OOM -- so it
     is refused, and the refusal is said out loud rather than hidden."""
-    from knurlogic.tuning.resolve import decode_chunk_for, expert_transient_bytes_per_unit
+    from knurlogic.tuning.resolve import (
+        decode_chunk_for,
+        expert_transient_bytes_per_unit,
+    )
     small = _family(2560, 640)
     headroom = 2 * GIB
     per, _ = expert_transient_bytes_per_unit(small)

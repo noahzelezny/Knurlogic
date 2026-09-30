@@ -31,7 +31,7 @@ stdlib + numpy at module level.
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict
+from typing import Any
 
 import fixtures_vision as FV
 
@@ -50,7 +50,7 @@ _COMMON = dict(hidden_size=128, num_hidden_layers=4, num_attention_heads=4,
                                     partial_rotary_factor=0.5,
                                     rope_theta=10000000, type="default"))
 
-TEXT: Dict[str, Dict[str, Any]] = {
+TEXT: dict[str, dict[str, Any]] = {
     "qwen3_5": dict(_COMMON, model_type="qwen3_5_text",
                     intermediate_size=256),
     "qwen3_5_moe": dict(_COMMON, model_type="qwen3_5_moe_text",
@@ -82,7 +82,7 @@ PREPROCESSOR = {"size": {"longest_edge": 16777216, "shortest_edge": 65536},
                 "image_mean": [0.5, 0.5, 0.5], "image_std": [0.5, 0.5, 0.5]}
 
 
-def config(family: str) -> Dict[str, Any]:
+def config(family: str) -> dict[str, Any]:
     """The tiny full config (vision + text + remapped ids) for `family`."""
     cfg = FV.tiny_config(family, text_config=copy.deepcopy(TEXT[family]))
     tc = cfg["text_config"]
@@ -103,7 +103,7 @@ _BUFFERS = ("layer_multipliers", "ngram_heads_vocab_sizes",
             "ngram_heads_offsets")
 
 
-def init_weights(shapes: Dict[str, tuple], seed: int = 0):
+def init_weights(shapes: dict[str, tuple], seed: int = 0):
     """Deterministic float32 weights from numpy alone, keyed by mlx-vlm's
     parameter names -- so the golden builder (mlx-vlm interpreter) and the
     test (knurlogic, no mlx-vlm) put the SAME numbers in two different
@@ -114,6 +114,7 @@ def init_weights(shapes: Dict[str, tuple], seed: int = 0):
     Names are walked sorted, each from its own seeded stream, so adding a
     parameter never shifts another's values."""
     import zlib
+
     import numpy as np
     out = {}
     for name in sorted(shapes):
@@ -147,7 +148,7 @@ def trunk_name(family: str, name: str) -> str:
                   r".ngram_embedding.shard_\1.", name)
 
 
-def ids(family: str) -> Dict[str, int]:
+def ids(family: str) -> dict[str, int]:
     return FV.tiny_ids(family)
 
 

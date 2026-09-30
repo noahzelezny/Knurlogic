@@ -93,9 +93,9 @@ def logits_of(model, cache=None):
 
 
 def golden(path: str, out: str) -> None:
+    import mlx_lm
     import numpy as np
     from mlx_lm.utils import load_model
-    import mlx_lm
     model, _ = load_model(Path(path), model_config=dict(GOLDEN_CONFIG))
     np.savez(out, logits=logits_of(model), mlx_lm=mlx_lm.__version__)
 

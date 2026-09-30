@@ -28,6 +28,7 @@ class DTok(Tok):
 def url():
     """One server for the module, never stopped (see test_scheduler)."""
     import mlx.nn as nn
+
     from knurlogic.engine.runtime.scheduler import Scheduler
     from knurlogic.engine.serve import state
     from knurlogic.interfaces.http import residency as res_api
@@ -374,6 +375,7 @@ def test_a_silent_request_samples_as_the_model_recommends(tmp_path):
     to loop under; the model's generation_config fills what the request
     leaves out, and the answer says which."""
     import json
+
     from knurlogic.interfaces.http import openai as O
     from knurlogic.machine.artifact import sampling_defaults
     (tmp_path / "generation_config.json").write_text(json.dumps(
@@ -416,6 +418,7 @@ def test_models_carries_the_context_window(tmp_path):
     config (text_config's for a multimodal wrapper); the page offers
     max_tokens up to it. 0 when the config does not say."""
     import json
+
     from knurlogic.interfaces.http import openai as O
     from knurlogic.machine.artifact import context_length
     assert context_length(tmp_path) == 0
@@ -437,6 +440,7 @@ def test_the_request_counter_does_not_lose_concurrent_increments(
     """`self.requests += 1` ran unlocked on every handler thread. The count
     now goes through one locked step; many threads, no lost update."""
     import threading
+
     from knurlogic.interfaces.http import server as S
     app = S.App.__new__(S.App)
     app.requests = 0
@@ -462,7 +466,8 @@ def test_responses_is_served_in_process_both_ways(url):
     code, _, raw = post(u, "/v1/responses", dict(body, stream=True))
     kinds = [e["type"] for e in sse(raw)]
     assert kinds[0] == "response.created" and kinds[-1] in (
-        "response.completed", "response.incomplete") and "response.output_text.delta" in kinds
+        "response.completed", "response.incomplete"
+    ) and "response.output_text.delta" in kinds
     code, _, raw = post(u, "/v1/responses", dict(body, store=True))
     assert code == 400
 

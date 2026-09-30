@@ -113,6 +113,7 @@ def test_deps_reads_the_fix_not_the_version(tmp_path):
     import json
     import subprocess
     import sys as _s
+
     from knurlogic.machine import deps
     pkg = tmp_path / "site" / "mlx"
     (pkg / "lib").mkdir(parents=True)
@@ -143,6 +144,7 @@ def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,
     """One registered server, with every fact the phase is read from faked."""
     import os
     import time
+
     from knurlogic.interfaces.page import server as page_server
     log = tmp_path / "serve.log"
     log.write_text("artifact  x\nloading weights\n")

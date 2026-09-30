@@ -88,7 +88,8 @@ def run(path: str, working_set_gib: float, profile: str | None,
     for w in r.warnings:
         print(f"\n  WARNING: {w}")
 
-    from knurlogic.engine import serve as engine, mtp
+    from knurlogic.engine import mtp
+    from knurlogic.engine import serve as engine
     m = mtp.status(a)
     if m.state != mtp.NONE:
         print("\nmtp        " + m.render())

@@ -18,20 +18,18 @@ from __future__ import annotations
 import contextlib
 import copy
 import logging
-from typing import List, Optional
 
 import mlx.core as mx
-from mlx_lm.generate import (BatchGenerator, GenerationBatch,
-                             PromptProcessingBatch)
+from mlx_lm.generate import BatchGenerator, GenerationBatch, PromptProcessingBatch
 
-from .batch_loop import MTPBatch, RowParams, admit
 from knurlogic.engine.serve import cache_report as cachereport
+
+from ..vision import key as K
+from .batch_loop import MTPBatch, RowParams, admit
+from .caches import position
 from .capture import capture_input
 from .registry import resolve
-from .caches import position
-from .sampling import (Keys, NonFiniteLogits, make_distribution,
-                       nonfinite_message)
-from ..vision import key as K
+from .sampling import Keys, NonFiniteLogits, make_distribution, nonfinite_message
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +86,7 @@ def split_pool_entry(entry: list, n_trunk: int, *, drafts: bool,
     return [], None, 0
 
 
-def trunk_offset(trunk: list) -> Optional[int]:
+def trunk_offset(trunk: list) -> int | None:
     """The position a trunk's caches sit at: the first one with a position.
     Recurrent layers carry state, not a position, so they cannot answer."""
     for c in trunk:
@@ -98,7 +96,7 @@ def trunk_offset(trunk: list) -> Optional[int]:
     return None
 
 
-def sampling_of(sampler) -> Optional[dict]:
+def sampling_of(sampler) -> dict | None:
     """A row's sampling parameters: the executor passes them as a dict
     (make_distribution's kwargs, plus `seed`). Verification is rejection
     sampling against the target distribution, so the drafting loop needs
@@ -224,7 +222,7 @@ class MTPBatchGenerator(BatchGenerator):
 
     # ------------------------------------------------------------ admission
 
-    def _admit_one(self) -> Optional[PromptProcessingBatch.Response]:
+    def _admit_one(self) -> PromptProcessingBatch.Response | None:
         (uid, segments, max_tokens, cache, all_tokens, sampler, procs,
          sm) = self._unprocessed_sequences.popleft()
         prefix = list(all_tokens or [])
@@ -355,7 +353,8 @@ class MTPBatchGenerator(BatchGenerator):
             else:
                 trunk, hcache, hit, drafts = self._vision_entry(
                     entry, prompt, hit_len, replay=replay)
-        except Exception:  # any admission failure is first reported to the other ranks, then re-raised
+        # any admission failure is first reported to the other ranks, then re-raised
+        except Exception:
             if coord is not None:
                 try:
                     coord.ba(False, 0, False)
@@ -464,7 +463,7 @@ class MTPBatchGenerator(BatchGenerator):
                 self._requests[u] = r
         return uids
 
-    def _report_checkpoint(self) -> List[PromptProcessingBatch.Response]:
+    def _report_checkpoint(self) -> list[PromptProcessingBatch.Response]:
         """One stored checkpoint per row per call, oldest first: the server
         collects end-of-segment caches with ONE extract_cache per call,
         keyed by uid, and labels each with the next of that row's segment
@@ -484,7 +483,7 @@ class MTPBatchGenerator(BatchGenerator):
                                                       False))
         return out
 
-    def _failed_responses(self) -> List[PromptProcessingBatch.Response]:
+    def _failed_responses(self) -> list[PromptProcessingBatch.Response]:
         """A row whose admission raised must fail ITS request, not the
         engine: the exception goes out once as that row's progress (the
         executor turns it into a RowFailure and removes the row); a plain
@@ -505,7 +504,9 @@ class MTPBatchGenerator(BatchGenerator):
             uid = self._unprocessed_sequences[0][0]
             try:
                 admitted = self._admit_one()
-            except Exception as e:  # one request's failure goes to that request; the generation thread lives (logged)
+            # one request's failure goes to that request; the generation thread lives
+            # (logged)
+            except Exception as e:
                 logger.exception("admission of request %s failed; failing "
                                  "that request only", uid)
                 self._rows.pop(uid, None)
@@ -542,7 +543,8 @@ class MTPBatchGenerator(BatchGenerator):
         try:
             with mx.stream(self._stream):
                 row_steps = self._batch.step()
-        except Exception as e:  # a failed decode step fails its rows; the generation thread lives (logged)
+        # a failed decode step fails its rows; the generation thread lives (logged)
+        except Exception as e:
             # Same rule as a failed admission: the rows in this step fail
             # their own requests; the generation thread lives on.
             logger.exception("a decode step failed; failing its %d rows",
@@ -582,7 +584,7 @@ class MTPBatchGenerator(BatchGenerator):
             prompt_responses += self._failed_responses()
             row_steps = [rs for rs in row_steps if rs.uid not in bad]
 
-        out: List[GenerationBatch.Response] = []
+        out: list[GenerationBatch.Response] = []
         finished = []
         for rs in row_steps:
             st = self._rows.get(rs.uid)

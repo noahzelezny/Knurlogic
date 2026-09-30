@@ -6,8 +6,8 @@ its DeepseekV4Cache through a prompt-cache copy and a restore, and batches
 two rows as it runs them one at a time. The resolver half needs no mlx.
 (The chat template is tests/test_deepseek_v4.py.)"""
 import copy
-import os
 import hashlib
+import os
 import re
 import sys
 from pathlib import Path
@@ -68,7 +68,8 @@ def test_it_may_be_pipelined():
 
 
 @pytest.mark.skipif(not (REAL / "config.json").is_file(),
-                    reason="the DeepSeek-V4-Flash artifact is not mounted (set KNURLOGIC_TEST_DEEPSEEK_V4)")
+                    reason="the DeepSeek-V4-Flash artifact is not mounted"
+                           " (set KNURLOGIC_TEST_DEEPSEEK_V4)")
 def test_the_real_artifact_splits_m3_ultra_96_and_m4_max_128_by_bytes():
     """The planner over the real headers (nothing loaded): the M3 Ultra's
     86016 MB wired limit and the M4 Max's 122880 MB. The M4 Max holds at
@@ -100,6 +101,7 @@ def _load(model_config=None):
     """The tiny artifact the way `knurlogic serve` loads one: Artifact,
     loading.register (the vendored set), then mlx-lm's loader."""
     from mlx_lm.utils import load_model
+
     from knurlogic.interfaces import loading
     from knurlogic.machine.artifact import Artifact
     a = Artifact.load(str(G.TINY))
@@ -158,6 +160,7 @@ def test_two_stages_in_one_process_are_the_whole_model(cut):
     and hand the hidden state across as the ring would; the logits over a
     prefill and six decode steps are the unsplit model's."""
     import numpy as np
+
     from knurlogic.engine.runtime import pipeline as PL
     whole = G.logits_of(_load())
     first, last = _load(), _load()

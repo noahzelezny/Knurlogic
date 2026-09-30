@@ -217,6 +217,7 @@ def template_of(path) -> str | None:
     """An artifact's chat template, read off disk (chat_template.jinja, else
     tokenizer_config.json) -- what `levels` needs without loading anything."""
     from pathlib import Path
+
     from knurlogic.engine import templates
     d = Path(str(path))
     j = d / "chat_template.jinja"
@@ -263,7 +264,9 @@ def _served_tokenizer():
         if _disk_tok.get("path") != path:
             try:
                 from pathlib import Path
+
                 from mlx_lm.utils import load_tokenizer
+
                 from knurlogic.engine import templates
                 tok = load_tokenizer(Path(path))
                 templates.install(tok)

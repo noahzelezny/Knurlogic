@@ -6,7 +6,8 @@ MCP for agents) and resolves what stands between a downloaded model and a
 working one: the environment, the settings, and whether it fits.
 """
 
-from importlib.metadata import PackageNotFoundError, version as _version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _version
 
 
 def _source_version(here=None):
@@ -44,5 +45,6 @@ if __version__ is None:
     except PackageNotFoundError:       # neither a source tree nor installed
         __version__ = "0+unknown"
 
-from knurlogic.machine.artifact import Artifact  # noqa: E402,F401  public API, after __version__
-from knurlogic.tuning.resolve import Resolution, resolve  # noqa: E402,F401  public API
+# public API, after __version__
+from knurlogic.machine.artifact import Artifact  # noqa: E402,F401
+from knurlogic.tuning.resolve import Resolution, resolve  # noqa: E402,F401

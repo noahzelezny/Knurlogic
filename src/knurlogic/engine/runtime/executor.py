@@ -18,7 +18,7 @@ process. Rules the protocol keeps:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Protocol, Union
+from typing import Any, Protocol
 
 
 @dataclass
@@ -27,12 +27,12 @@ class Admission:
 
     #: prompt tokens by segment (system / user / ...); the prompt cache
     #: stores a checkpoint at the end of each segment but the last
-    segments: List[List[int]]
+    segments: list[list[int]]
     max_tokens: int
     #: the prompt cache entry restored for this request and the tokens it
     #: covers (a prefix of the prompt); empty for a fresh prefill
-    cache: Optional[list] = None
-    prefix: List[int] = field(default_factory=list)
+    cache: list | None = None
+    prefix: list[int] = field(default_factory=list)
     #: engine/mtp/sampling.make_distribution's kwargs (temp, top_p,
     #: top_k, min_p); empty = greedy
     sampling: dict = field(default_factory=dict)
@@ -46,7 +46,7 @@ class Admission:
     #: on a tensor ring, what the other ranks need to rebuild what is not
     #: data here (processors, the state machine): {"penalties": the
     #: make_logits_processors kwargs, "initial": the machine's start state}
-    wire: Optional[dict] = None
+    wire: dict | None = None
 
 
 @dataclass
@@ -60,7 +60,7 @@ class Progress:
 class Checkpoint:
     """A segment ended inside the prompt: its cache, for the prompt cache."""
     uid: int
-    tokens: List[int]
+    tokens: list[int]
     cache: list
 
 
@@ -69,11 +69,11 @@ class Token:
     uid: int
     token: int
     logprob: float
-    finish: Optional[str] = None
+    finish: str | None = None
     #: the control-token state machine's state and any sequence it matched
-    state: Optional[str] = None
-    match: Optional[List[int]] = None
-    top_logprobs: Optional[List[tuple]] = None
+    state: str | None = None
+    match: list[int] | None = None
+    top_logprobs: list[tuple] | None = None
 
 
 @dataclass
@@ -81,7 +81,7 @@ class Finished:
     """After a row's finishing Token: its cache, keyed by every token it
     holds, for the prompt cache."""
     uid: int
-    tokens: List[int]
+    tokens: list[int]
     cache: list
 
 
@@ -91,22 +91,22 @@ class RowFailure:
     error: BaseException
 
 
-Event = Union[Progress, Checkpoint, Token, Finished, RowFailure]
+Event = Progress | Checkpoint | Token | Finished | RowFailure
 
 
 class Executor(Protocol):
     def insert(self, admission: Admission) -> int: ...
 
-    def step(self) -> List[Event]:
+    def step(self) -> list[Event]:
         """One admission and/or one decode step; [] when idle."""
         ...
 
-    def remove(self, uids: List[int]) -> None: ...
+    def remove(self, uids: list[int]) -> None: ...
 
     @property
     def cache_nbytes(self) -> int: ...
 
-    def cost_per_token(self, rows: int) -> Optional[float]:
+    def cost_per_token(self, rows: int) -> float | None:
         """Measured seconds per token at this batch width, or None."""
         ...
 
@@ -131,9 +131,9 @@ class LocalExecutor:
             self._top[uid] = a.top_logprobs
         return uid
 
-    def step(self) -> List[Event]:
+    def step(self) -> list[Event]:
         prompt, gen = self.gen.next()
-        out: List[Event] = []
+        out: list[Event] = []
         failed, ends = [], []
         for r in prompt:
             if isinstance(r.progress, BaseException):
@@ -160,7 +160,7 @@ class LocalExecutor:
                 self._top.pop(r.uid, None)
         return out
 
-    def remove(self, uids: List[int]) -> None:
+    def remove(self, uids: list[int]) -> None:
         for u in uids:
             self._top.pop(u, None)
         self.gen.remove(list(uids))
@@ -176,7 +176,7 @@ class LocalExecutor:
         self.gen.close()
 
 
-def _top(logprobs, k: int) -> Optional[List[tuple]]:
+def _top(logprobs, k: int) -> list[tuple] | None:
     if not k:
         return None
     import mlx.core as mx

@@ -15,7 +15,6 @@ import importlib
 import inspect
 import subprocess
 from dataclasses import dataclass
-from typing import Optional
 
 #: Packages that can host a model architecture, in lookup order.
 #: Where an architecture module is looked up. Only mlx_lm's namespace: every
@@ -74,7 +73,7 @@ def memory() -> dict:
     }
 
 
-def gpu_in_use() -> Optional[int]:
+def gpu_in_use() -> int | None:
     """Bytes of GPU memory in use on this Mac by EVERY process (the IOGPU
     driver's "In use system memory"), or None where it cannot be read.
     iogpu.wired_limit_mb caps this total, not one process's share: the
@@ -208,7 +207,8 @@ def generate(model, tokenizer, prompt: str, max_tokens: int = 8) -> str:
 #:     (`_DECODE_CHUNK = _default_decode_chunk()`) and then read inside the
 #:     expert loop as a global. Rebinding that global takes effect on the next
 #:     prefill -- no reload.
-#:   * VQ_CACHE_LIMIT_GB (and its old names) is applied through the framework's own live API.
+#:   * VQ_CACHE_LIMIT_GB (and its old names) is applied through the framework's own live
+#: API.
 #:   * the eight GEMM/numerics flags are read into module globals AT IMPORT and
 #:     baked into Metal kernel source that is compiled once. Those genuinely
 #:     need a restart, or an override module that reads them per dispatch.

@@ -1,5 +1,6 @@
 """Server-side compaction (context_management/context_edits and
-context_management/compaction): the request's shapes on both APIs, the history surgery and its invariants,
+context_management/compaction): the request's shapes on both APIs, the
+history surgery and its invariants,
 distillation and its fallback, the response shapes -- and one round trip
 on the tiny model over real sockets."""
 import json
@@ -389,9 +390,11 @@ def server():
     global mx
     mx = pytest.importorskip("mlx.core")
     import threading
+
     import mlx.nn as nn
     from test_batch_drafting import _tiny
     from test_scheduler import Host, Tok
+
     from knurlogic.engine.runtime.scheduler import Scheduler
     from knurlogic.engine.serve import state
     from knurlogic.interfaces.http.server import App, make_server

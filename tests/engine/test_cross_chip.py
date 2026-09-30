@@ -1,4 +1,5 @@
-"""KNURLOGIC_CROSS_CHIP (off by default): 9-31-row quantized matmuls padded to 32 rows so
+"""KNURLOGIC_CROSS_CHIP (off by default): 9-31-row quantized matmuls padded
+to 32 rows so
 M3 and M4 round alike; auto on for a job across GPU architectures, and
 the setting and every rank's chip passed ring-wide."""
 import json
@@ -137,15 +138,16 @@ def test_every_rank_gets_the_setting_and_the_chips():
         assert "KNURLOGIC_CROSS_CHIP=auto" in a
         assert json.loads(a[a.index("--ring-chips") + 1]) == chips
     assert "chips is" in check_spec({**spec, "job": "0123456789abcdef",
-                                    "nodes": [{"name": "a", "id": "a"}, {"name": "b", "id": "b"}],
+                                    "nodes": [{"name": "a", "id": "a"},
+                                              {"name": "b", "id": "b"}],
                                     "chips": "x"})
 
 
 def test_each_rank_resolves_auto_from_the_ring_chips(monkeypatch):
     """A rank's argv -> serve.main -> run(ring=...) carries the chips and
     the setting; every rank resolves them to the same answer."""
-    from knurlogic.interfaces import serve
     from knurlogic.cluster.launch import rank_argv
+    from knurlogic.interfaces import serve
     got = []
     monkeypatch.setattr(serve, "run", lambda *a, **k: got.append((a, k)) or 0)
     for r in (0, 1):

@@ -30,8 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
 import fixtures_vision as fv  # noqa: E402
-from test_image_cache import (IMG, PosFamily, PosModel,  # noqa: E402
-                              tiny_model)
+from test_image_cache import IMG, PosFamily, PosModel, tiny_model  # noqa: E402
 
 from knurlogic.engine.vision import key as K  # noqa: E402
 

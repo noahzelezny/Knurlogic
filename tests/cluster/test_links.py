@@ -34,8 +34,13 @@ def test_one_machine_on_wifi_and_the_cable_is_kept_on_the_cable():
 
 import json
 
-from fixtures_thunderbolt import (PORTS_M3, PORTS_M4, SP_THUNDERBOLT_M3,
-                                  SP_THUNDERBOLT_M4)
+from fixtures_thunderbolt import (
+    PORTS_M3,
+    PORTS_M4,
+    SP_THUNDERBOLT_M3,
+    SP_THUNDERBOLT_M4,
+)
+
 from knurlogic.cluster import launch as C
 
 

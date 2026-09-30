@@ -5,11 +5,10 @@ own words; a server that refuses anyway exits REFUSED_EXIT and says why."""
 import json
 
 import pytest
-
-from knurlogic.interfaces import serve
-from knurlogic.cluster import launch as C
-
 from test_cluster_jobs import SHAPE, info, spec  # noqa: F401
+
+from knurlogic.cluster import launch as C
+from knurlogic.interfaces import serve
 
 
 def _model(tmp_path, **cfg):
@@ -119,9 +118,10 @@ def test_the_maintainers_saved_context_launches(cache):
 
 
 def test_the_page_offers_up_to_the_yarn_window():
+    from pathlib import Path
+
     from knurlogic.interfaces.page.documents import knob_limit
     from knurlogic.machine.artifact import Artifact
-    from pathlib import Path
     a = Artifact(path=Path("/x"), model_type="qwen3_5_moe", model_file=None,
                  bytes_on_disk=0, hidden_size=None,
                  moe_intermediate_size=None, raw_config=dict(QWEN))

@@ -13,7 +13,8 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Any, Callable, Iterator, Optional
+from collections.abc import Callable, Iterator
+from typing import Any
 
 from knurlogic.engine.runtime import prompt as P
 from knurlogic.engine.runtime.scheduler import Job
@@ -53,7 +54,7 @@ def _num(body, name, kind, lo=None, hi=None, default=None):
 
 def build_job(body: dict, *, chat: bool, translate: Callable = None,
               has_vision: Callable[[], bool] = lambda: False,
-              sampling_defaults: Optional[dict] = None) -> tuple:
+              sampling_defaults: dict | None = None) -> tuple:
     """(Job, context) from a request body; ApiError to refuse.
 
     `sampling_defaults`: the served model's recommended sampling
@@ -216,7 +217,7 @@ class Reply:
         self.created = int(time.time())
         self.model = served or ctx["model"]
 
-    def first(self, timeout: Optional[float] = None):
+    def first(self, timeout: float | None = None):
         """The Job's first event, which decides the status: a refusal at
         tokenize or render (before prefill starts) is an HTTP error, not a
         200 carrying one. Prefill progress counts as a first event, so a
@@ -372,9 +373,9 @@ def _data(obj: Any) -> bytes:
     return f"data: {json.dumps(obj)}\n\n".encode()
 
 
-def models_document(served: dict, sampling: Optional[dict] = None,
+def models_document(served: dict, sampling: dict | None = None,
                     context_length: int = 0,
-                    thinking: Optional[dict] = None) -> dict:
+                    thinking: dict | None = None) -> dict:
     """/v1/models: the one served model, with its capabilities and size, the
     sampling a request that says nothing gets (the model's recommendation;
     {} is greedy), its context window (0: the config does not say), and

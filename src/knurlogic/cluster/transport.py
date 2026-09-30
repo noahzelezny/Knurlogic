@@ -30,7 +30,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Callable
+from collections.abc import Callable
 
 from knurlogic.cluster import NET_ERRORS
 from knurlogic.cluster import jobs as J

@@ -14,6 +14,10 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
+# THE FAMILY MAPS are built from each family's manifest (engine/families/),
+# the one home for what a family is; nothing here is hand-kept.
+from knurlogic.engine import families as _families
+
 #: TWO HOST PACKAGES. mlx_lm.models
 #: holds flat text-model files (qwen4_exp.py is 1136 lines -- the real
 #: language model). mlx_vlm.models holds PACKAGES of the same names
@@ -27,10 +31,6 @@ from pathlib import Path
 #: quantizer scores it through mlx_lm. So `host` here records where a
 #: module LIVES; choosing the host per artifact is still an open question.
 from knurlogic.engine.serve import HOST_PACKAGES
-
-# THE FAMILY MAPS are built from each family's manifest (engine/families/),
-# the one home for what a family is; nothing here is hand-kept.
-from knurlogic.engine import families as _families
 
 _MAPS = _families.build_maps()
 

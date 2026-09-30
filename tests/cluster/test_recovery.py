@@ -11,13 +11,12 @@ import os
 import time
 
 import pytest
+from test_cluster_jobs import alive, two_pages, wait  # noqa: F401
 
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import launch as C
 from knurlogic.cluster import recovery as R
 from knurlogic.interfaces.page import server as page_server
-
-from test_cluster_jobs import alive, two_pages, wait  # noqa: F401
 
 
 def ticks_until(pred, t=40.0):

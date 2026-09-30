@@ -62,7 +62,9 @@ def dist(n):
     return {"version": d.version, "source": json.loads(du) if du else None}
 def pkgdir(mod):
     s = u.find_spec(mod)
-    return list(s.submodule_search_locations)[0] if s and s.submodule_search_locations else None
+    if s and s.submodule_search_locations:
+        return list(s.submodule_search_locations)[0]
+    return None
 def contains(path, needle):
     try:
         with open(path, "rb") as f:
@@ -77,7 +79,8 @@ for n, mod in (("mlx", "mlx"), ("mlx-lm", "mlx_lm")):
 m = out.get("mlx")
 if m and m["dir"]:
     lib = os.path.join(m["dir"], "lib", "libjaccl.dylib")
-    m["jaccl_selfheal"] = contains(lib, b"JACCL_COLLECTIVE_TIMEOUT_MS") if os.path.exists(lib) else None
+    m["jaccl_selfheal"] = (contains(lib, b"JACCL_COLLECTIVE_TIMEOUT_MS")
+                           if os.path.exists(lib) else None)
 l = out.get("mlx-lm")
 if l and l["dir"]:
     l["fork"] = os.path.exists(os.path.join(l["dir"], "models", "qwen4_exp.py"))

@@ -102,8 +102,8 @@ def _running_tool_roots() -> list:
     process that knows is right on all of them.
 
     Parsed with a boundary regex, not `split()`: the value here is
-    a path with spaces such as "/Volumes/External SSD/Models", and splitting on spaces turns one
-    real path into two paths that do not exist.
+    a path with spaces such as "/Volumes/External SSD/Models", and splitting
+    on spaces turns one real path into two paths that do not exist.
     """
     import re
     import subprocess

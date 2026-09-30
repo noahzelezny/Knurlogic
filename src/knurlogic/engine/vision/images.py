@@ -20,7 +20,7 @@ import hashlib
 import io
 import warnings
 from pathlib import Path
-from typing import Any, Optional, Tuple, Union
+from typing import Any
 
 from . import ImageRejected, ImageTooLarge
 
@@ -34,7 +34,7 @@ BOMB_PIXELS = 89_478_485
 MAX_DECODE_PIXELS = 4096 * 4096
 
 
-def _bytes_of(src: Union[str, bytes], allow_paths: bool) -> bytes:
+def _bytes_of(src: str | bytes, allow_paths: bool) -> bytes:
     if isinstance(src, (bytes, bytearray)):
         data = bytes(src)
     elif isinstance(src, str):
@@ -97,7 +97,7 @@ def _bomb_message(size, limit: int = BOMB_PIXELS) -> str:
             f"the model takes, not refused.")
 
 
-def decode(src: Union[str, bytes], *, allow_paths: bool = False) -> Any:
+def decode(src: str | bytes, *, allow_paths: bool = False) -> Any:
     """base64 / data URL / bytes (/ a local path if allow_paths) -> a PIL
     RGB image, clamped. Raises ImageRejected for anything unusable."""
     from PIL import Image, ImageOps
@@ -126,12 +126,14 @@ def decode(src: Union[str, bytes], *, allow_paths: bool = False) -> Any:
             img = img.convert("RGB")
     except ImageRejected:
         raise
-    except Exception as e:  # PIL raises a zoo: UnidentifiedImageError, OSError...  # decoding untrusted bytes raises a zoo; any failure is a rejection
+    # PIL raises a zoo: UnidentifiedImageError, OSError...  # decoding untrusted bytes
+    # raises a zoo; any failure is a rejection
+    except Exception as e:
         raise ImageRejected(f"image could not be decoded: {e}") from None
     return clamp(img)
 
 
-def clamp(img: Any, max_pixels: Optional[int] = None) -> Any:
+def clamp(img: Any, max_pixels: int | None = None) -> Any:
     """Downscale to at most max_pixels (default MAX_DECODE_PIXELS, read at
     call time), aspect kept; identity when under."""
     from PIL import Image
@@ -153,8 +155,8 @@ def pixel_sha(img: Any) -> str:
     return h.hexdigest()
 
 
-def load(src: Union[str, bytes], *,
-         allow_paths: bool = False) -> Tuple[Any, str]:
+def load(src: str | bytes, *,
+         allow_paths: bool = False) -> tuple[Any, str]:
     """decode() and pixel_sha() in one: (image, sha)."""
     img = decode(src, allow_paths=allow_paths)
     return img, pixel_sha(img)

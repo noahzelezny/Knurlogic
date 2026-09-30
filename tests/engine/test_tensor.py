@@ -7,7 +7,6 @@ import pytest
 from knurlogic.engine.runtime import plan as P
 from knurlogic.tuning import resolve as R
 
-
 # ------------------------------------------------------------------ plan
 
 def _admit(**kw):
@@ -403,8 +402,10 @@ def test_rank_0s_frees_never_lower_the_peers_estimate(monkeypatch):
     """Tensor: what rank 0 took since the exchange raises the peers'
     over-limit, what it freed does not lower it. Pipeline (unequal
     stages): the peers' own number, untouched by rank 0's memory."""
-    import mlx.core as mx
     from types import SimpleNamespace
+
+    import mlx.core as mx
+
     from knurlogic.engine.runtime import tensor as T
     mem = {"a": 50}
     monkeypatch.setattr(mx, "get_active_memory", lambda: mem["a"])
@@ -432,6 +433,7 @@ class _FakeLink:
 
 def test_a_follower_applies_a_set_even_while_parked(monkeypatch):
     import importlib
+
     from knurlogic.engine.runtime import tensor as T
     load = importlib.import_module("knurlogic.engine.serve.load")
     got = []
@@ -494,6 +496,7 @@ def test_a_rank_dialing_before_rank_0_listens_keeps_trying(caplog):
     import socket
     import threading
     import time
+
     from knurlogic.engine.runtime import tensor as T
     port = _bell_server()
     got = {}
@@ -522,7 +525,9 @@ def test_rank_0s_bell_names_the_ranks_that_never_came():
     rank 1, and not rank 2."""
     import socket
     import threading
+
     import pytest
+
     from knurlogic.engine.runtime import tensor as T
     srv = socket.create_server(("127.0.0.1", 0))
     port = srv.getsockname()[1]
@@ -547,6 +552,7 @@ def test_rank_0s_bell_names_the_ranks_that_never_came():
 
 def test_a_rank_that_cannot_reach_rank_0_says_where_it_dialed():
     import pytest
+
     from knurlogic.engine.runtime import tensor as T
     port = _bell_server()
     with pytest.raises(ConnectionError, match=f"rank 1 could not reach rank "
@@ -558,6 +564,7 @@ def test_rank_0_publishes_every_ranks_memory(monkeypatch):
     """A pipeline follower serves no /status.json: its memory comes back
     in the control rows and rank 0 publishes it (`ranks`)."""
     from types import SimpleNamespace
+
     from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.serve import state
     monkeypatch.setitem(state.SERVED, "ranks", None)

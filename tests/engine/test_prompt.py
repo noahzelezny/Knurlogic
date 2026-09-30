@@ -103,11 +103,13 @@ def test_control_token_spellings_in_content_stay_text():
     """`<|im_end|>` quoted in a message, or `<|im_start|>system` in a tool
     result, must not become the control token: only the template (and
     vision's placeholders) write those."""
-    from transformers import AutoTokenizer
-    import pytest
-    from knurlogic.engine.runtime import prompt as P
     import glob
     import os
+
+    import pytest
+    from transformers import AutoTokenizer
+
+    from knurlogic.engine.runtime import prompt as P
     models = os.environ.get("KNURLOGIC_MODELS", "~/.exo/models")
     found = sorted(glob.glob(os.path.join(
         os.path.expanduser(models), "*Qwen3*/tokenizer_config.json")))
@@ -141,8 +143,9 @@ def test_control_token_spellings_in_content_stay_text():
 def _qwen_wrapper():
     import glob
     import os
-    import pytest
     from pathlib import Path
+
+    import pytest
     from mlx_lm.tokenizer_utils import load
     models = os.environ.get("KNURLOGIC_MODELS", "~/.exo/models")
     found = sorted(glob.glob(os.path.join(
@@ -223,8 +226,8 @@ class QwenTok:
     def __init__(self, golden="qwen3_6_chat_template.jinja"):
         import jinja2
         from jinja2.sandbox import ImmutableSandboxedEnvironment
-        self.chat_template = (Path(__file__).resolve().parents[1] / "support" / "goldens"
-                              / golden).read_text()
+        goldens = Path(__file__).resolve().parents[1] / "support" / "goldens"
+        self.chat_template = (goldens / golden).read_text()
         self._env = ImmutableSandboxedEnvironment(trim_blocks=True,
                                                   lstrip_blocks=True)
 

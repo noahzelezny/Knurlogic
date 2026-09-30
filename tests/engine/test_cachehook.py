@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from knurlogic.engine.vision import EncodedImage, ImageRef
-from knurlogic.engine.vision import cachehook
+from knurlogic.engine.vision import EncodedImage, ImageRef, cachehook
 from knurlogic.engine.vision import key as K
 from knurlogic.engine.vision.request import VisionServe
 from knurlogic.engine.vision.store import ImageStore

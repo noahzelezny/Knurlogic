@@ -86,17 +86,18 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "B", "UP"]
+select = ["E", "F", "W", "B", "UP", "I"]
 ignore = [
-    "E501",   # the code wraps near 79 but is not reflowed to a hard limit
     "B905",   # zip(strict=) would change behaviour on uneven inputs
-    "UP006",  # List[...] -> list[...]: style churn across every module
-    "UP007",
-    "UP035",
-    "UP045",  # Optional[X] -> X | None: same
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"src/knurlogic/engine/kvattn.py" = [
+    "E501",   # Metal kernel source in a string: C++ lines, not wrapped here
+]
+"tests/support/fixtures_thunderbolt.py" = [
+    "E501",   # captured system_profiler output, kept verbatim
+]
 "tests/**" = [
     "F811",  # a fixture used as a parameter shadows its own import
     "E731",  # one-line lambda fakes

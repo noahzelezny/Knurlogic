@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import mlx.nn as nn
 
 
-def artifact_quantization(model_path: str) -> Dict[str, Any]:
+def artifact_quantization(model_path: str) -> dict[str, Any]:
     p = Path(model_path) / "config.json"
     if not p.is_file():
         return {}
@@ -27,8 +27,8 @@ def artifact_quantization(model_path: str) -> Dict[str, Any]:
     return cfg.get("quantization") or cfg.get("quantization_config") or {}
 
 
-def quantize_like(module: nn.Module, weights: Dict[str, Any],
-                  quant: Dict[str, Any], prefix: str = "") -> int:
+def quantize_like(module: nn.Module, weights: dict[str, Any],
+                  quant: dict[str, Any], prefix: str = "") -> int:
     """Quantize the layers of `module` whose `<path>.scales` is in `weights`
     (keys relative to `module`). `prefix` is the module's path in the
     artifact, used to find per-layer overrides in `quant`. Returns how many

@@ -12,8 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 pytest.importorskip("mlx_lm")
 
 from knurlogic.engine.runtime.executor import Token  # noqa: E402
-from knurlogic.engine.runtime.request import (Request,  # noqa: E402
-                                              control_machine)
+from knurlogic.engine.runtime.request import Request, control_machine  # noqa: E402
 
 # A toy vocabulary: one string per id. 90 = end of turn.
 VOCAB = {1: "<think>", 2: "</think>", 3: "<tool_call>", 4: "</tool_call>",

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from . import state
 
-
 # An artifact that ships a multi-token-prediction head carries weights mlx-lm
 # will never run: it has no MTP path at all, and neither does upstream exo.
 # knurlogic does, so a head beside the weights is simply used -- no flag, no
@@ -52,7 +51,8 @@ def load_head(model_path: str):
     try:
         from knurlogic.engine.mtp.registry import load_head
         head, spec = load_head(model, sidecar=found.path)
-    except Exception as e:  # a head that will not bind is reported, not a crash; the model serves without one
+    # a head that will not bind is reported, not a crash; the model serves without one
+    except Exception as e:
         # A head that will not bind is a fact worth printing, not a crash:
         # the model serves perfectly well without one.
         state.DRAFT.update(on=False, why=f"{type(e).__name__}: {e}")

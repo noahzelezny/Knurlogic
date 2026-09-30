@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 import conftest
+
 from knurlogic.machine import loaded, servers
 
 FAKE = ("/opt/python /Users/x/knurlogic/tests/support/cluster_fake_rank.py "

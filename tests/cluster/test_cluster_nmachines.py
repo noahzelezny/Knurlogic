@@ -167,6 +167,7 @@ def test_named_port_that_is_taken_stays_refused(monkeypatch):
 
 def test_free_port_skips_served_and_bound_ports(monkeypatch):
     import socket
+
     from knurlogic.machine import servers
     monkeypatch.setattr(servers, "registry",
                         lambda: {8080: {"pid": 1, "artifact": "x"}})

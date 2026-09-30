@@ -20,7 +20,6 @@ import gc
 import logging
 import threading
 import time
-from typing import Optional
 
 from knurlogic.engine.serve import state
 
@@ -32,10 +31,10 @@ class ModelHost:
 
     def __init__(self, *, draft: bool = True,
                  executes_artifact_code: bool = False,
-                 image_store_bytes: Optional[int] = None,
+                 image_store_bytes: int | None = None,
                  shard=None, vision: bool = True, load_wait_s: float = 0.0,
-                 head_agree=None, kv_bits: Optional[int] = None,
-                 cross_chip: Optional[dict] = None, tower: bool = True):
+                 head_agree=None, kv_bits: int | None = None,
+                 cross_chip: dict | None = None, tower: bool = True):
         """`shard(model)`: split the weights in place before they are read
         (a tensor ring: loaded lazily, split, then evaluated, so a rank
         never holds the whole model). `vision=False` binds no tower;
@@ -61,7 +60,7 @@ class ModelHost:
         self.image_store_bytes = image_store_bytes
         self.executes_artifact_code = executes_artifact_code
         self.state = "empty"
-        self.path: Optional[str] = None
+        self.path: str | None = None
         self.error = ""
         self.model = None
         self.tokenizer = None
@@ -76,7 +75,7 @@ class ModelHost:
             self.state, self.error = st, error
             self._ready.notify_all()
 
-    def wait_ready(self, timeout: Optional[float] = None) -> bool:
+    def wait_ready(self, timeout: float | None = None) -> bool:
         """Block until ready (True) or failed/empty (False) or timeout."""
         end = None if timeout is None else time.time() + timeout
         with self._ready:
@@ -227,7 +226,8 @@ class ModelHost:
         try:
             vision.bind(path, self, store_bytes=self.image_store_bytes,
                         tower=self.tower)
-        except Exception as e:  # a vision build must not take the text model with it (logged, on /status.json)
+        # a vision build must not take the text model with it (logged, on /status.json)
+        except Exception as e:
             # A vision build that fails must not take the text model with
             # it; it is said on /status.json and images get a 400.
             logger.exception("vision did not bind")

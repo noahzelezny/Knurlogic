@@ -91,7 +91,8 @@ def two(monkeypatch):
     # the peer reports its model where it runs: on ITS loopback
     row = {"runtime": "knurlogic", "name": "glm-peer", "state": "ready",
            "where": "http://127.0.0.1:8080"}
-    page_server.peer_residency(page_server.PEERS, fetch=lambda url, t: {"resident": [row]})
+    page_server.peer_residency(
+        page_server.PEERS, fetch=lambda url, t: {"resident": [row]})
     yield f"http://127.0.0.1:{hport}", f"http://127.0.0.1:{pport}", seen
     for s in (model, peer_page, here):
         s.shutdown()

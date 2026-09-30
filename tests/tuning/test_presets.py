@@ -8,8 +8,7 @@ import pytest
 
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning import settings as S
-from knurlogic.tuning.resolve import (apply_preset_overrides, preset_env,
-                                      resolve)
+from knurlogic.tuning.resolve import apply_preset_overrides, preset_env, resolve
 
 GIB = 1 << 30
 

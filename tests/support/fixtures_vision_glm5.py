@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "src") not in sys.path:
@@ -19,13 +19,13 @@ if str(ROOT / "src") not in sys.path:
 from fixtures_vision import tiny_config, tiny_image  # noqa: E402
 
 
-def glm5_tiny_config(**overrides: Any) -> Dict[str, Any]:
+def glm5_tiny_config(**overrides: Any) -> dict[str, Any]:
     """A tiny glm5_next config: real structure (patch 14, merge 2, silu,
     swiglu_limit 10.0), tiny sizes (`_SCALE_VISION` / `_SCALE_TEXT`)."""
     return tiny_config("glm5_next", **overrides)
 
 
-def glm5_family(config: Dict[str, Any] | None = None):
+def glm5_family(config: dict[str, Any] | None = None):
     """A `Glm5VisionFamily` built from a tiny config, with random float32
     tower weights (never loaded from disk -- `load_weights` is not called;
     `mx.nn.Module.__init__`'s own default init stands in for it, which is

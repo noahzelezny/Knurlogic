@@ -23,8 +23,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from knurlogic.machine.artifact import Artifact  # noqa: E402
 from knurlogic.tuning import settings as S  # noqa: E402
-from knurlogic.tuning.resolve import (GIB, long_context_room,  # noqa: E402
-                                      resolve)
+from knurlogic.tuning.resolve import GIB, long_context_room, resolve  # noqa: E402
 
 FACTOR, ORIG = 4.0, 262144
 
@@ -167,6 +166,7 @@ mx = pytest.importorskip("mlx.core")
 
 def _tiny(fam, mode):
     import fixtures_vision as fv
+
     from knurlogic.engine import register
     register.register("qwen3_5", "qwen3_5_moe", "qwen4_exp", override=True)
     arch = importlib.import_module(f"mlx_lm.models.{fam}")

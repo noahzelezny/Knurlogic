@@ -13,7 +13,8 @@ holds it to the reference.
 """
 from __future__ import annotations
 
-from typing import Any, List, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import mlx.core as mx
 
@@ -30,7 +31,7 @@ def masked_scatter(input_tensor, mask, source):
     )
 
 
-def image_mask(key_slice: Sequence[Any]) -> List[bool]:
+def image_mask(key_slice: Sequence[Any]) -> list[bool]:
     """True at every sentinel -- where features replace text embeddings."""
     return [type(x) is tuple for x in key_slice]
 

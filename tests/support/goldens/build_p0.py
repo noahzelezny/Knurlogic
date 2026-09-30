@@ -22,7 +22,6 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import fixtures_vision as fv  # noqa: E402
-
 import mlx.core as mx  # noqa: E402
 from mlx_vlm.models.gemma4.gemma4 import masked_scatter  # noqa: E402
 from mlx_vlm.utils import load_image  # noqa: E402

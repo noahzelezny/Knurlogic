@@ -20,7 +20,7 @@ from __future__ import annotations
 import http.client
 import json
 import sys
-from typing import Any, Dict, List
+from typing import Any
 
 SERVER_NAME = "knurlogic"
 SERVER_VERSION = "0"
@@ -54,18 +54,18 @@ INSTRUCTIONS = (
 GIB = 1 << 30
 
 
-def S(desc: str, typ: str = "string") -> Dict[str, Any]:
+def S(desc: str, typ: str = "string") -> dict[str, Any]:
     return {"type": typ, "description": desc}
 
 
-def _schema(props: Dict[str, Any], required: List[str] | None = None):
+def _schema(props: dict[str, Any], required: list[str] | None = None):
     return {"type": "object", "properties": props,
             "required": required or []}
 
 
 # --- the answers ------------------------------------------------------------
 
-def ready(**_) -> Dict[str, Any]:
+def ready(**_) -> dict[str, Any]:
     """Is this machine in a state where loading will work?
 
     Every reason it is not, named: a load still reading weights moves memory,
@@ -98,18 +98,17 @@ def ready(**_) -> Dict[str, Any]:
             "checked": ["servers this MCP started", "the model-load lock"]}
 
 
-def fit(artifact: str = "", **_) -> Dict[str, Any]:
+def fit(artifact: str = "", **_) -> dict[str, Any]:
     """Will this artifact fit, with the arithmetic shown.
 
     Against `wired.load_budget()` -- the same number `settings` resolves
     against and `load` starts a server with, so the three cannot disagree.
     """
+    from knurlogic.engine.vision import registry as vision_registry
+    from knurlogic.machine import wired
     from knurlogic.machine.artifact import Artifact
     from knurlogic.machine.loaded import available_memory
     from knurlogic.tuning import settings as S
-    from knurlogic.machine import wired
-
-    from knurlogic.engine.vision import registry as vision_registry
 
     a = Artifact.load(artifact)
     mem = available_memory()
@@ -163,7 +162,7 @@ def fit(artifact: str = "", **_) -> Dict[str, Any]:
     }
 
 
-def _vision_terms(vb) -> Dict[str, Any] | None:
+def _vision_terms(vb) -> dict[str, Any] | None:
     """The resolver's vision terms (tuning.resolve.vision_budget) in GiB,
     each with its note; None for a text-only artifact."""
     if not vb:
@@ -180,15 +179,15 @@ def _vision_terms(vb) -> Dict[str, Any] | None:
             "notes": list(vb["notes"])}
 
 
-def state(**_) -> Dict[str, Any]:
+def state(**_) -> dict[str, Any]:
     """What is loaded on this machine, in every runtime, and where the RAM
     went -- plus `models`: every model resident on this Mac and the peers
     answering its page, a cluster job once."""
     from knurlogic.machine import loaded
     doc = loaded.survey()
     m = doc.get("memory") or {}
-    from knurlogic.interfaces.page import server as page_server
     from knurlogic.engine.vision import served_vision
+    from knurlogic.interfaces.page import server as page_server
     spec = served_vision()
     # across machines: what the page on this Mac sees (its own residency and
     # each answering peer's). Without the page, this Mac's survey alone.
@@ -430,7 +429,7 @@ def _port_of(where):
         return None
 
 
-def _node_ids(names: List[str]) -> tuple:
+def _node_ids(names: list[str]) -> tuple:
     """([page node ids], refusal or None): machine names as this Mac's page
     knows them -- itself and the peers answering it. An id is accepted too."""
     st = _page_get("/status.json")
@@ -456,7 +455,7 @@ def _node_ids(names: List[str]) -> tuple:
     return ids, None
 
 
-def _refusal(out: dict) -> Dict[str, Any] | None:
+def _refusal(out: dict) -> dict[str, Any] | None:
     """The page's refusal, as a refusal: an answer, never a crash."""
     why = out.get("refused") or out.get("error")
     if not why:
@@ -466,13 +465,11 @@ def _refusal(out: dict) -> Dict[str, Any] | None:
                if k in out}}
 
 
-def models(fits_only: bool = False, **_) -> Dict[str, Any]:
+def models(fits_only: bool = False, **_) -> dict[str, Any]:
     """Every model on this machine, with what can actually run."""
-    from knurlogic.machine import discover
-
-    from knurlogic.machine import wired
-    from knurlogic.engine.vision import registry as vision_registry
     from knurlogic.engine.serve import thinking
+    from knurlogic.engine.vision import registry as vision_registry
+    from knurlogic.machine import discover, wired
     avail = wired.load_budget()["bytes"]
     out = []
     for f in discover.find():
@@ -496,7 +493,7 @@ def models(fits_only: bool = False, **_) -> Dict[str, Any]:
             "count": len(out)}
 
 
-def settings(artifact: str = "", tune: str = "default", **_) -> Dict[str, Any]:
+def settings(artifact: str = "", tune: str = "default", **_) -> dict[str, Any]:
     """The knobs for this artifact, each with the measurement behind it.
 
     The `why` is the point. A knob without its provenance is one an agent
@@ -525,7 +522,7 @@ def settings(artifact: str = "", tune: str = "default", **_) -> Dict[str, Any]:
     return doc
 
 
-def drafting(artifact: str = "", **_) -> Dict[str, Any]:
+def drafting(artifact: str = "", **_) -> dict[str, Any]:
     """Does this artifact have a multi-token-prediction head, and will it run?"""
     from knurlogic.engine import mtp
     from knurlogic.machine.artifact import Artifact
@@ -535,17 +532,18 @@ def drafting(artifact: str = "", **_) -> Dict[str, Any]:
             "head": (st.head.describe() if st.head else ""),
             "family": (st.head.family if st.head else ""),
             "explanation": st.render(),
-            "note": "mlx-lm has no MTP path. knurlogic drafts with a packed head by default, on "
+            "note": "mlx-lm has no MTP path. knurlogic drafts with a "
+                    "packed head by default, on "
                     "single requests and batches alike: load(draft=false) "
                     "or `serve --no-draft` turns it off. Drafting preserves "
                     "the output distribution, so off is for troubleshooting."}
 
 
 def load(artifact: str = "", port: int = 0, tune: str = "default",
-         sets: Dict[str, str] | None = None, force: bool = False,
-         draft: bool = True, machines: List[str] | None = None,
+         sets: dict[str, str] | None = None, force: bool = False,
+         draft: bool = True, machines: list[str] | None = None,
          split: str = "", link: str = "", cable: str = "",
-         **_) -> Dict[str, Any]:
+         **_) -> dict[str, Any]:
     """Start a server for this artifact, after checking it can work.
 
     REFUSES rather than gambles: memory still moving or a model that does
@@ -565,8 +563,8 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
     if names:
         return _load_on(names, artifact, port, tune, sets, force, draft,
                         split, link, cable)
-    from knurlogic.interfaces.page import server as page_server
     from knurlogic.interfaces.loading import NotLoadable, resolve_name
+    from knurlogic.interfaces.page import server as page_server
 
     # a model named, never a directory (interfaces/loading.py): the same
     # rule a switch on a running server follows
@@ -618,6 +616,7 @@ def _identity_of(artifact: str) -> tuple:
     (machine/artifact.identity), read from this Mac's copy; a 16-hex
     identity is taken as given, for a model this Mac does not hold."""
     import re
+
     from knurlogic.interfaces.loading import NotLoadable, resolve_name
     from knurlogic.machine.artifact import identity
     try:
@@ -643,6 +642,7 @@ def _artifact_name(artifact: str) -> str:
     if re.fullmatch(r"[0-9a-f]{16}", a):
         return ""
     from pathlib import Path
+
     from knurlogic.interfaces.loading import NotLoadable, resolve_name
     try:
         # a path (or a pin's real path) -> the store's own name for it
@@ -652,7 +652,7 @@ def _artifact_name(artifact: str) -> str:
 
 
 def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
-             cable) -> Dict[str, Any]:
+             cable) -> dict[str, Any]:
     """`load` on other machines: the page's Launch request, sent to the
     page on this Mac (page_server._load_fn), which forwards a one-peer load and
     coordinates a cluster (cluster/launch.launch)."""
@@ -708,14 +708,15 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
             "job": out.get("job"), "port": out.get("port"),
             "url": out.get("url"),
             "leader": out.get("leader"), "machines": out.get("machines"),
-            "split": split, "link": _link_name(out.get("link") or link), "placement": plan,
+            "split": split, "link": _link_name(out.get("link") or link),
+            "placement": plan,
             **({"alerts": out["alerts"]} if out.get("alerts") else {}),
             "note": out.get("note", "") + " -- or `state`: the job is one "
                     "entry in `models`, with its phase."}
 
 
 def unload(port: int | None = None, model: str = "", job: str = "",
-           instance: str = "", machine: str = "", **_) -> Dict[str, Any]:
+           instance: str = "", machine: str = "", **_) -> dict[str, Any]:
     """Stop a model knurlogic started: by port on this Mac (as before), or
     by model name, job id or instance id on any machine this Mac's page
     sees. A cluster job stops on every machine -- the page's Unload, the
@@ -793,14 +794,14 @@ def unload(port: int | None = None, model: str = "", job: str = "",
 
 # --- the table --------------------------------------------------------------
 
-def deps() -> Dict[str, Any]:
+def deps() -> dict[str, Any]:
     """Which build of each piece is installed, read off the fix itself
     rather than a version string."""
     from knurlogic.machine import deps as D
     return D.survey()
 
 
-TOOLS: Dict[str, Dict[str, Any]] = {
+TOOLS: dict[str, dict[str, Any]] = {
     "ready": {
         "fn": ready,
         "description": "Is it safe to load now? Not while another load "
@@ -946,19 +947,20 @@ TOOLS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def tool_list() -> List[Dict[str, Any]]:
+def tool_list() -> list[dict[str, Any]]:
     return [{"name": n, "description": t["description"],
              "inputSchema": t["schema"]} for n, t in TOOLS.items()]
 
 
-def _call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     t = TOOLS.get(name)
     if t is None:
         return {"error": f"unknown tool {name!r}",
                 "available": sorted(TOOLS)}
     try:
         return t["fn"](**(args or {}))
-    except Exception as e:  # a tool's failure is the tool call's error reply, never a dead server
+    # a tool's failure is the tool call's error reply, never a dead server
+    except Exception as e:
         return {"error": f"{type(e).__name__}: {e}", "tool": name}
 
 

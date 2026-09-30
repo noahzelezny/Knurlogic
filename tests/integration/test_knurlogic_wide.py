@@ -133,6 +133,7 @@ def test_a_custom_preset_is_saved_rows_the_launch_reads(home):
 
 def test_serve_takes_knurlogic_wide_before_the_preset():
     import inspect
+
     from knurlogic.interfaces import serve
     src = inspect.getsource(serve)
     assert src.index("preferences.launch_sets(overrides)") < \

@@ -13,15 +13,13 @@ from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
 
 import pytest
+import test_cluster_jobs as T
 
 from knurlogic.cluster import launch as C
 from knurlogic.interfaces import mcp
-from knurlogic.interfaces.page import server as page_server
 from knurlogic.interfaces.page import documents
+from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
-
-import test_cluster_jobs as T
-
 
 STATUS = {"me": {"id": "aaaa", "name": "A"},
           "peers": [{"id": "bbbb", "name": "B", "state": "answering"},
@@ -234,7 +232,8 @@ def page_a(tmp_path, monkeypatch):
     monkeypatch.setattr(documents, "loaded_document", local_residency)
     monkeypatch.setattr("knurlogic.machine.loaded.survey", lambda: {})
     serve_port = T.free_port()
-    routes = documents.routes(status_fn=page_server._status_fn, loaded_fn=page_server._loaded_fn(),
+    routes = documents.routes(status_fn=page_server._status_fn,
+                        loaded_fn=page_server._loaded_fn(),
                         load_fn=page_server._load_fn(serve_port))
     srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler(routes))
     threading.Thread(target=srv.serve_forever, daemon=True).start()

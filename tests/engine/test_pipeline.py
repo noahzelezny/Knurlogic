@@ -368,6 +368,7 @@ def _stage(model, start, end, *, recv, send):
 
 def test_unwrap_sees_through_both_ends_of_a_one_layer_stage():
     import mlx.nn as nn
+
     from knurlogic.engine.runtime import pipeline as PL
     lin = nn.Linear(2, 2)
     both = PL.Send(PL.Recv(lin, 1, None, mx.float32), 0, None, mx.float32)
@@ -381,7 +382,9 @@ def test_overlap_finds_a_stages_send_and_is_undone_on_the_way_out(
     stage's Recv) for the prefill chunks only, and KNURLOGIC_PIPELINE_
     OVERLAP=off leaves every send synchronous (the A/B)."""
     import types
+
     import mlx.nn as nn
+
     from knurlogic.engine.runtime import pipeline as PL
     send = PL.Send(PL.Recv(nn.Linear(2, 2), 1, None, mx.float32), 0, None,
                    mx.float32)
@@ -407,6 +410,7 @@ def test_the_flash_next_head_binds_on_any_stage(start, end, recv, send):
     a Recv, then an IndexError / a linear-attention block -- the head did
     not bind and MTP was off on every rank of the pipeline."""
     import importlib
+
     from knurlogic.engine.families.qwen.heads.qwen4_exp import MTPHead
     from knurlogic.engine.runtime import pipeline as PL
     model = _stage(_tiny("qwen4_exp"), start, end, recv=recv, send=send)

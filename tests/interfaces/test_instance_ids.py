@@ -4,12 +4,11 @@ appear on every resident knurlogic row it is known for, dedupe the same
 model reported by two pages, and let `unload` name it directly."""
 from types import SimpleNamespace
 
+from test_mcp_cluster import JOB, REQS, STATUS, page, residency  # noqa: F401
 
 from knurlogic.interfaces import mcp
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import loaded, servers
-
-from test_mcp_cluster import JOB, REQS, STATUS, page, residency  # noqa: F401
 
 
 def test_new_instance_is_16_hex_and_not_reused():

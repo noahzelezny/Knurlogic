@@ -26,6 +26,7 @@ def _tiny(vocab):
     from knurlogic.engine import register
     register.register("qwen3_5")
     from mlx_lm.models import qwen3_5 as arch
+
     from knurlogic.engine.families.qwen.heads.qwen35 import MTPHeadQwen35
 
     mx.random.seed(0)
@@ -70,6 +71,7 @@ def _run(gen, prompts, max_tokens, on_finish=None):
 def test_drafting_batch_is_token_identical_to_mlx_lm(vocab, always,
                                                      monkeypatch):
     from mlx_lm.generate import BatchGenerator
+
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator, trunk_offset
 
     if always:
@@ -120,8 +122,9 @@ def _cachelist_at(n):
 
 
 def test_a_composite_cache_has_its_members_position():
-    from knurlogic.engine.mtp.caches import position
     from mlx_lm.models.cache import ArraysCache
+
+    from knurlogic.engine.mtp.caches import position
     assert position(_cachelist_at(7)) == 7
     assert position(ArraysCache(size=2)) is None
 
@@ -201,7 +204,9 @@ def test_a_new_turn_restored_from_the_checkpoint_matches_a_fresh_prefill():
     the new tokens (the channel: without the replay the head is misaligned
     and the row falls back to a full prefill)."""
     import copy
+
     from mlx_lm.generate import BatchGenerator
+
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     model, head, sys_, user, tail_a, next_b = _turns()
     _, ckpts = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
@@ -226,6 +231,7 @@ def test_checkpoint_restore_can_fail(monkeypatch):
     """Drop the carried h and the same restore can no longer draft from the
     checkpoint: the row prefills everything again."""
     import copy
+
     from knurlogic.engine.mtp import batch_generator as bg
     model, head, sys_, user, tail_a, next_b = _turns()
     _, ckpts = _drive(bg.MTPBatchGenerator(model, head, prefill_step_size=16),
@@ -364,6 +370,7 @@ def test_a_headless_model_reuses_a_shared_prefix():
     gemma re-prefilled a 509-token shared system prompt on every request
     because admission asked for a head cache the model cannot have."""
     import copy
+
     from knurlogic.engine.mtp import batch_generator as bg
     model, _, sys_, user, tail_a, next_b = _turns()
     gen = bg.MTPBatchGenerator(model, None, prefill_step_size=16)
@@ -378,8 +385,8 @@ def test_every_prefill_chunk_is_reported_to_the_job_marker(monkeypatch):
     """A long prompt is admitted in ONE engine step; the cluster watcher
     judges a stall by progress, so each prefill chunk says it finished
     (cluster/jobs.chunk_done). 70 tokens at 16 a chunk: 5 chunks."""
-    from knurlogic.engine.mtp import batch_loop as bl
     from knurlogic.engine.mtp import batch_generator as bg
+    from knurlogic.engine.mtp import batch_loop as bl
     model, head, prompts = _tiny(512)
     n = {"c": 0}
     monkeypatch.setattr(bl, "chunk_done", lambda: n.__setitem__("c", n["c"] + 1))

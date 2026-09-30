@@ -20,8 +20,9 @@ import json
 import logging
 import uuid
 from collections import deque
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,12 @@ def control_machine(tokenizer, initial: str = "normal"):
     SequenceStateMachine = importlib.import_module(
         "mlx_lm.generate").SequenceStateMachine
 
-    seqs: Dict[Tuple[int, ...], str] = {}
+    seqs: dict[tuple[int, ...], str] = {}
     ends: list = []
     for t in tokenizer.eos_token_ids:
         seqs[(t,)] = tokenizer.convert_ids_to_tokens(t)
         ends.append(((t,), None))
-    edges: Dict[str, list] = {"normal": list(ends)}
+    edges: dict[str, list] = {"normal": list(ends)}
     if getattr(tokenizer, "has_thinking", False):
         ts, te = (tuple(tokenizer.think_start_tokens),
                   tuple(tokenizer.think_end_tokens))
@@ -73,12 +74,12 @@ class Delta:
     """What one feed produced, for the wire."""
     reasoning: str = ""
     content: str = ""
-    tool_calls: List[dict] = field(default_factory=list)
+    tool_calls: list[dict] = field(default_factory=list)
     #: set once, on the delta that ends the request
-    finish: Optional[str] = None
+    finish: str | None = None
     #: (token, logprob, top) for each token whose text is in this delta,
     #: when the request asked for logprobs
-    logprobs: List[tuple] = field(default_factory=list)
+    logprobs: list[tuple] = field(default_factory=list)
 
     def __bool__(self):
         return bool(self.reasoning or self.content or self.tool_calls
@@ -89,7 +90,7 @@ class Request:
     """One request's text state. `feed(token event)` -> Delta; `finish()`
     when the engine is done with the row (or the request is stopped)."""
 
-    def __init__(self, detokenizer, *, sequences: Dict[tuple, str],
+    def __init__(self, detokenizer, *, sequences: dict[tuple, str],
                  stops: Sequence[str] = (), tool_parser: Callable = None,
                  tools: Any = None, logprobs: bool = False,
                  prompt_tokens: int = 0):
@@ -106,7 +107,7 @@ class Request:
         self.completion_tokens = 0
         self.reasoning_tokens = 0
         self.made_tool_call = False
-        self.finished: Optional[str] = None
+        self.finished: str | None = None
         #: the answer text withheld while a stop string could be starting
         self._pending = ""
         self._tool_text = ""
@@ -203,7 +204,7 @@ class Request:
         self.made_tool_call = True
         out.tool_calls += self._parse_tool(text)
 
-    def _parse_tool(self, text: str) -> List[dict]:
+    def _parse_tool(self, text: str) -> list[dict]:
         if self.tool_parser is None:
             return []
         try:
@@ -252,7 +253,7 @@ class Request:
 
     # ----------------------------------------------------------------- usage
 
-    def usage(self, cache_report: Optional[dict] = None) -> dict:
+    def usage(self, cache_report: dict | None = None) -> dict:
         u: dict = {"prompt_tokens": self.prompt_tokens,
              "completion_tokens": self.completion_tokens,
              "total_tokens": self.prompt_tokens + self.completion_tokens}

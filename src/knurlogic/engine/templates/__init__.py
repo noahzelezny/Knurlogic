@@ -21,7 +21,6 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Optional
 
 import jinja2
 
@@ -47,7 +46,7 @@ def text(family: str) -> str:
     return (_HERE / f"{family}.jinja").read_text(encoding="utf-8")
 
 
-def family_for(template, name: str = "") -> Optional[str]:
+def family_for(template, name: str = "") -> str | None:
     """The family whose template should replace `template`, or None.
     A known stub by hash; or, for an artifact named DeepSeek-V4, any
     template with no tool handling at all."""
@@ -62,7 +61,7 @@ def family_for(template, name: str = "") -> Optional[str]:
     return None
 
 
-def served_family(template, name: str = "") -> Optional[str]:
+def served_family(template, name: str = "") -> str | None:
     """The family knurlogic serves for `template`: a stub it replaces, or
     one of its own templates already in place; else None."""
     fam = family_for(template, name)
@@ -74,13 +73,13 @@ def served_family(template, name: str = "") -> Optional[str]:
     return None
 
 
-def override(template, name: str = "") -> Optional[str]:
+def override(template, name: str = "") -> str | None:
     """The replacement template text, or None to keep the artifact's."""
     fam = family_for(template, name)
     return text(fam) if fam else None
 
 
-def install(tokenizer) -> Optional[str]:
+def install(tokenizer) -> str | None:
     """Replace a stub template on `tokenizer` (an mlx-lm TokenizerWrapper or
     an HF tokenizer) and give it the family's tool-call parser when it has
     none. Returns the family installed, or None."""

@@ -10,8 +10,8 @@ it.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 GIB = 1 << 30
 ASSETS = Path(__file__).parent / "assets"
@@ -103,8 +103,8 @@ def models_document(serving: str = "", ttl: float = 60.0):
     def handler(_q: dict) -> dict:
         import time
 
-        from knurlogic.machine import discover
         from knurlogic.engine.vision import registry as vision_registry
+        from knurlogic.machine import discover
         now = time.time()
         if _MODELS["rows"] is None or now - _MODELS["at"] > ttl:
             try:
@@ -192,14 +192,15 @@ def loaded_document(ttl: float = 4.0):
     def handler(_q: dict) -> dict:
         import time
 
-        from knurlogic.machine import loaded
         from knurlogic.engine.vision import served_vision
+        from knurlogic.machine import loaded
         now = time.time()
         doc = _LOADED["doc"]   # read once: a POST may clear it meanwhile
         if doc is None or now - _LOADED["at"] > ttl:
             try:
                 doc = loaded.survey()
-            except Exception as e:  # the survey is a page document that must still answer; the error is in it
+            # the survey is a page document that must still answer; the error is in it
+            except Exception as e:
                 doc = {"resident": [], "runtimes": [],
                        "bytes_resident": 0, "error": str(e)}
             # What the SERVED model sees, read fresh every time regardless
@@ -272,7 +273,8 @@ def load_action(artifact_for, resolve_fn=None, live_knobs=(),
                 return unload_fn()
             if act == "ollama-unload":
                 return L.ollama_unload(where, target)
-        except Exception as e:  # a load action's failure is the page's answer, not a dead handler
+        # a load action's failure is the page's answer, not a dead handler
+        except Exception as e:
             return {"error": f"{type(e).__name__}: {e}"}
         return {"error": f"unknown action {act!r}"}
     return handler
@@ -313,7 +315,8 @@ def machine_settings():
                                 _one(q, "working_set_gib"),
                                 kv_bits=_one(q, "kv_bits"),
                                 long_context=_one(q, "long_context"))
-            except Exception as e:  # a preview that cannot be built is the page's answer; the error is in it
+            # a preview that cannot be built is the page's answer; the error is in it
+            except Exception as e:
                 return {"knobs": [], "error": f"{type(e).__name__}: {e}"}
 
         want = q.get("wired_gib")
@@ -426,9 +429,9 @@ def _preview(path: str, tune: str, working_set_gib=None,
     `kv_bits`: the KV precision it would launch with ('bf16', '8', ...),
     for the room its context is counted in."""
     from knurlogic.engine import serve as engine
-    from knurlogic.tuning import settings as S
     from knurlogic.machine import wired
     from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning import settings as S
     from knurlogic.tuning.resolve import kv_refusal as resolve_kv_refusal
     from knurlogic.tuning.resolve import resolve, room_for
 

@@ -10,18 +10,20 @@ from knurlogic import __version__
 #: routing: interfaces.* talk to people and agents, machine.* read this box,
 #: engine.* touch what runs a model.
 COMMANDS = {
-    "ui": ("interfaces.page.server", "open the page without loading anything: every model, every "
-                 "runtime, and where the memory went"),
+    "ui": ("interfaces.page.server", "open the page without loading "
+           "anything: every model, every runtime, and where the memory "
+           "went"),
     "serve": ("interfaces.serve", "run an OpenAI-compatible endpoint for an artifact"),
     "doctor": ("interfaces.doctor", "say whether an artifact will run, and why not"),
     "smoke": ("engine.smoke", "generate a token and prove where the code came from"),
     "vendor": ("engine.vendor", "take an architecture file under version control"),
-    "connect": ("interfaces.connect", "print how to point a client at a running server"),
+    "connect": ("interfaces.connect",
+                "print how to point a client at a running server"),
     "mcp": ("interfaces.mcp", "serve the agent-facing tool interface on stdio"),
     "loaded": ("machine.loaded", "what is in memory right now, in every runtime on "
                          "this machine"),
-    "mtp": ("interfaces.drafting", "which artifacts have a drafting head, and which only "
-                   "declare one"),
+    "mtp": ("interfaces.drafting", "which artifacts have a drafting head, "
+            "and which only declare one"),
     "models": ("machine.discover", "find the models already on this machine, in "
                            "every tool's store"),
     "deps": ("machine.deps", "what this stack stands on, and which pieces are "

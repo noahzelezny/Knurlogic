@@ -29,7 +29,8 @@ def _capabilities() -> list:
     try:
         if thinking.status().get("dialect"):
             caps.append("thinking")
-    except Exception:  # the model list must still answer without the thinking status (logged)
+    # the model list must still answer without the thinking status (logged)
+    except Exception:
         logger.debug("thinking status unavailable", exc_info=True)
     return caps
 
