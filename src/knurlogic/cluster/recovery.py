@@ -22,6 +22,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
 
@@ -80,9 +81,9 @@ def _no_load(**_):
 # Unset, there is nothing to relaunch with and nothing of the page's to
 # look at.
 #: () -> [peer record]: the page's PEERS store
-peers_fn = list
+peers_fn: Callable[[], list] = list
 #: port -> (Popen, artifact) | None: a server this page process started
-child_fn = {}.get
+child_fn: Callable = {}.get
 #: port -> bool: that port's server answers
 
 def _no_answer(port):
@@ -312,7 +313,7 @@ def _window(rec: dict, now: float) -> list:
     return [t for t in rec.get("attempts") or [] if now - t <= WINDOW_S]
 
 
-def cluster_key(identity: str, nodes) -> str:
+def cluster_key(identity: str | None, nodes) -> str:
     return f"cluster:{identity}:{','.join(sorted(map(str, nodes or [])))}"
 
 
@@ -622,7 +623,7 @@ def _machines_down(rec: dict) -> str:
     return ""
 
 
-def _leftovers(rec: dict, job: str) -> str:
+def _leftovers(rec: dict, job: str | None) -> str:
     """"" when no rank of `job` is left on any of its machines (by record
     and by process), else which."""
     from knurlogic.cluster import jobs as J

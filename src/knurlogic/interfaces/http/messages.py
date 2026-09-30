@@ -75,7 +75,7 @@ def _text_of(content) -> str:
 
 def to_openai(req: dict) -> dict:
     """Anthropic Messages request -> OpenAI chat request."""
-    out_msgs = []
+    out_msgs: list = []
 
     system = req.get("system")
     if system:
@@ -236,7 +236,7 @@ def _usage(usage: dict) -> dict:
     cached = int((usage.get("prompt_tokens_details") or {})
                  .get("cached_tokens", 0) or 0)
     prompt = int(usage.get("prompt_tokens", 0) or 0)
-    out = {"input_tokens": max(prompt - cached, 0),
+    out: dict = {"input_tokens": max(prompt - cached, 0),
            "cache_creation_input_tokens": 0,
            "cache_read_input_tokens": cached,
            "output_tokens": int(usage.get("completion_tokens", 0) or 0)}

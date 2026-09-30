@@ -16,6 +16,7 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from .messages import TransportError
 
@@ -39,7 +40,7 @@ def _now() -> str:
 def _content(text: str, images) -> object:
     if not images:
         return text
-    parts = [{"type": "text", "text": text}] if text else []
+    parts: list = [{"type": "text", "text": text}] if text else []
     for img in images:
         if not isinstance(img, str):
             raise BadRequest("images must be base64 strings")
@@ -60,7 +61,9 @@ def _tool_calls(calls: list, n: int) -> list:
 def _messages(msgs) -> list:
     if not isinstance(msgs, list):
         raise BadRequest("messages must be a list")
-    out, pending, n = [], [], 0
+    out: list = []
+    pending: list = []
+    n = 0
     for i, m in enumerate(msgs):
         if not isinstance(m, dict) or not isinstance(m.get("role"), str):
             raise BadRequest(f"messages[{i}] must be an object with a "
@@ -164,13 +167,13 @@ def _ollama_calls(calls: list) -> list:
 
 def _piece(content: str, thinking: str, calls: list, generate: bool,
            model: str, done=None, usage=None, started=0.0) -> dict:
-    out = {"model": model, "created_at": _now()}
+    out: dict = {"model": model, "created_at": _now()}
     if generate:
         out["response"] = content
         if thinking:
             out["thinking"] = thinking
     else:
-        msg = {"role": "assistant", "content": content}
+        msg: dict = {"role": "assistant", "content": content}
         if thinking:
             msg["thinking"] = thinking
         if calls:
@@ -196,7 +199,9 @@ def from_chat(resp: dict, model: str, generate: bool, started: float) -> dict:
 
 def stream(lines, model: str, generate: bool, started: float):
     """OpenAI SSE chunks -> Ollama NDJSON lines, ending in the done one."""
-    usage, finish, calls = {}, "stop", {}
+    usage: dict = {}
+    calls: dict = {}
+    finish = "stop"
     for line in lines:
         if isinstance(line, bytes):
             line = line.decode("utf-8", "replace")
@@ -282,8 +287,8 @@ def _config(path) -> dict:
 
 def details(path) -> dict:
     cfg = _config(path)
-    text = cfg.get("text_config") if isinstance(cfg.get("text_config"),
-                                                dict) else cfg
+    text: Any = cfg.get("text_config") if isinstance(cfg.get("text_config"),
+                                                     dict) else cfg
     q = cfg.get("quantization") or text.get("quantization") or {}
     bits = q.get("bits") if isinstance(q, dict) else None
     family = cfg.get("model_type") or text.get("model_type") or ""

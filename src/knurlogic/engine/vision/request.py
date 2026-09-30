@@ -103,6 +103,7 @@ class VisionServe:
         self.model_key = model_key
         self.allow_paths = allow_paths
         self.encodes = 0
+        self.tensors = 0            # vision weights loaded (serve/vision.py)
         self._lock = threading.Lock()
         self._pins: Dict[Tuple[str, str], List[ExitStack]] = {}
 
