@@ -564,12 +564,9 @@ def knob_limit(artifact, name: str) -> dict:
         # past the native window is long context: offered, and turned on
         # at launch (settings.settle_context)
         return {"max": top, "max_why":
-                f"up to {w:,} tokens natively ({why}); above {w:,} the "
-                f"launch uses long context (YaRN, to {top:,}), turned on "
-                f"for you -- it needs the KV room, and static YaRN may cost "
-                f"a little quality on short prompts"}
-    return {"max": w, "max_why": f"this model's maximum is {w:,} tokens: "
-                                 f"{why}"}
+                f"Above {w:,} it uses YaRN scaling to reach up to "
+                f"{top:,}, at a slight cost of quality."}
+    return {"max": w, "max_why": f"This model's maximum is {w:,} tokens."}
 
 
 def refuse_sets(artifact, sets: dict):
