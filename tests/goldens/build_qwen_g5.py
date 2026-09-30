@@ -39,7 +39,12 @@ STEPS = 12
 
 
 def fingerprint(model):
-    return np.array([float(mx.abs(v).sum().item())
+    """Per parameter, sum |w| in exact arithmetic (math.fsum over float64)
+    on the CPU: a property of the seed-0 init alone. A GPU float32 sum
+    rounds in an order the chip picks, so it moved one ulp between an M3
+    and CI's M1 with the init identical."""
+    import math
+    return np.array([math.fsum(np.abs(np.array(v, dtype=np.float64)).ravel())
                      for _, v in tree_flatten(model.parameters())])
 
 
@@ -63,7 +68,8 @@ def run(model, prompt):
 def main():
     register.register(*fq.FAMILIES, override=True)
     arrays, meta = {}, {"what": "Qwen trunk text path before P1", "seed": 0,
-                        "prompt": PROMPT, "split": SPLIT, "steps": STEPS}
+                        "prompt": PROMPT, "split": SPLIT, "steps": STEPS,
+                        "chip": fv.chip()}
     for fam in fq.FAMILIES:
         arch = importlib.import_module(f"mlx_lm.models.{fam}")
         cfg = fq.config(fam)
