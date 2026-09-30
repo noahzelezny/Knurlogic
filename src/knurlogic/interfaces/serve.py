@@ -131,6 +131,37 @@ REFUSED_EXIT = 78
 REFUSING = "REFUSING: "
 
 
+#: the launch knobs the environment can also set
+_ENV_KNOBS = ("KNURLOGIC_PRESET", "KNURLOGIC_KV_BITS", "KNURLOGIC_MTP",
+              "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_CROSS_CHIP",
+              "KNURLOGIC_LONG_CONTEXT", "KNURLOGIC_CONTEXT_LENGTH",
+              "KNURLOGIC_PREFILL_CHUNK", "KNURLOGIC_CACHE_LIMIT_GB")
+
+
+def settings_refusal(a, overrides) -> str | None:
+    """The first value a launch would use that its own setting refuses,
+    named in the page's words and where to fix it: this model's settings
+    (Settings -> Models), the saved knurlogic-wide ones (Settings ->
+    Knurlogic), the environment. Nothing is dropped silently."""
+    import os
+    from knurlogic.tuning import settings as S
+    from knurlogic.machine import preferences
+    w, _ = S.model_window(getattr(a, "raw_config", None) or {})
+    for k, v in S.canonical_sets(dict(overrides or {})).items():
+        why = S.check_knob(k, v, w)
+        if why:
+            return f"{why} (Settings \u2192 Models)"
+    for k, why in preferences.invalid():
+        return f"{why} (Settings \u2192 Knurlogic)"
+    for k in _ENV_KNOBS:
+        v = os.environ.get(k)
+        if v is not None and v.strip():
+            why = S.check_knob(k, v, w)
+            if why:
+                return f"{why} (the environment)"
+    return None
+
+
 def launch_refusal(a, overrides) -> str | None:
     """None when `overrides` (a launch's --set values) can start `a`, else
     why not -- the deterministic refusals `run` makes before it loads a
@@ -139,6 +170,9 @@ def launch_refusal(a, overrides) -> str | None:
     from knurlogic.tuning import settings as S
     from knurlogic.tuning.resolve import kv_refusal, preset_env
     from knurlogic.machine import preferences
+    why = settings_refusal(a, overrides)
+    if why:
+        return why
     sets = preferences.launch_sets(S.canonical_sets(dict(overrides or {})))
     sets, _ = S.settle_context(a.model_type, a.raw_config, sets)
     why = documents.refuse_sets(a, sets)
@@ -241,6 +275,10 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # Knurlogic, machine/preferences), not a model's: saved, it beats the
     # preset's value; an explicit --set still beats it
     from knurlogic.machine import preferences
+    why = settings_refusal(a, overrides)
+    if why:
+        print(f"REFUSING: {why}", file=sys.stderr)
+        return REFUSED_EXIT
     decode_scale = preferences.decode_scale(overrides)
     overrides = preferences.launch_sets(overrides)
     # a context past the native window turns long context on (or is lowered
