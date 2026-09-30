@@ -4,6 +4,8 @@
 
 First public release (alpha).
 
+* `knurlogic ui` shows a gear in the macOS menu bar (models loaded, Open,
+  Quit); `--no-menubar` opts out, and it is skipped without a GUI session.
 * `knurlogic serve`: an OpenAI-compatible server (`/v1/chat/completions`,
   `/v1/completions`, `/v1/models`) with an Anthropic Messages endpoint
   (`/v1/messages`) for Claude Code and similar harnesses, the OpenAI
