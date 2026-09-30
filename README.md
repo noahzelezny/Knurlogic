@@ -23,7 +23,9 @@ From source:
 
 ## Quickstart
 
-Get a model in MLX format (the `hf` CLI comes with `huggingface_hub`):
+Get a model in MLX format: search and download it from the page's model
+picker (Hugging Face), or with the `hf` CLI that comes with
+`huggingface_hub`:
 
     pip install -U huggingface_hub
     hf download mlx-community/gemma-4-e4b-it-8bit \
@@ -88,10 +90,13 @@ tool's `machines` argument.
 ## Settings
 
 Every setting is resolved from the model's `config.json` and the memory
-available, and shown with the measurement behind it in the page's Settings
-panel and at `/settings.json`. `serve --tune default|lean`
-picks a bundle, `--kv-bits 8` halves the KV cache, and `--set KEY=VALUE`
-overrides any single setting.
+available, and shown in the page's Settings panel and at `/settings.json`.
+Two presets cover most needs: `default` (fastest) and `lean` (more
+context in less memory: 512-token prompt chunks, MTP off, 8-bit KV).
+`serve --tune default|lean` picks one, `--kv-bits 8` stores the KV cache
+in about half the memory, and `--set KEY=VALUE` overrides any single
+setting. A context length past the model's native window turns on YaRN
+for the Qwen families (up to 1,048,576 tokens).
 
 ## Supported models
 
