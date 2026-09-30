@@ -116,5 +116,5 @@ def gpu_architecture() -> str:
         info = (mx.device_info() if hasattr(mx, "device_info")
                 else mx.metal.device_info())
         return str(info.get("architecture") or "")
-    except Exception:
+    except (ImportError, AttributeError, RuntimeError, ValueError):
         return ""

@@ -398,7 +398,7 @@ class Coord:
                          for (sha, ph), n in zip(imgs, ns)]
                 rows = mx.concatenate(parts, axis=0).astype(mx.float32)
                 dim, ok = int(rows.shape[1]), 1
-            except Exception:
+            except Exception:  # rank 0 must still tell the other ranks it failed (logged)
                 logger.exception("rank 0 could not read an image's rows")
         ok, dim = self._bcast([ok, dim])
         if not ok:

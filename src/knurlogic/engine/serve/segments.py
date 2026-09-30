@@ -16,6 +16,8 @@ prompt, the system segment ends where it ends.
 
 from __future__ import annotations
 
+from knurlogic.engine.templates import TEMPLATE_ERRORS
+
 
 def split_system(tokenizer, messages, prompt, segments, types, kwargs):
     """(segments, types) with a leading system segment added when mlx-lm
@@ -33,7 +35,7 @@ def split_system(tokenizer, messages, prompt, segments, types, kwargs):
         sys_tokens = list(tokenizer.apply_chat_template(
             list(messages[:n_sys]) + [{"role": "user", "content": ""}],
             add_generation_prompt=False, tokenize=True, **kwargs))
-    except Exception:
+    except TEMPLATE_ERRORS:
         return segments, types
     k = len(sys_tokens)
     first = list(segments[0])

@@ -19,6 +19,8 @@ import hashlib
 import json
 import threading
 
+from knurlogic.engine.templates import TEMPLATE_ERRORS
+
 from . import state
 
 LADDER = ("none", "minimal", "low", "medium", "high", "xhigh")
@@ -132,7 +134,7 @@ def _render_unlocked(tokenizer, kwargs: dict):
         return _Closing(tokenizer).apply_chat_template(
             _PROBE_MSGS, add_generation_prompt=True, tokenize=False,
             **kwargs)
-    except Exception:
+    except TEMPLATE_ERRORS:
         return None
 
 
@@ -266,7 +268,7 @@ def _served_tokenizer():
                 tok = load_tokenizer(Path(path))
                 templates.install(tok)
                 _disk_tok.update(path=path, tok=tok)
-            except Exception:
+            except (ImportError, OSError, *TEMPLATE_ERRORS):
                 _disk_tok.update(path=path, tok=None)
         return _disk_tok.get("tok")
 

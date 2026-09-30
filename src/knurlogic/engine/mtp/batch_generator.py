@@ -355,7 +355,7 @@ class MTPBatchGenerator(BatchGenerator):
             else:
                 trunk, hcache, hit, drafts = self._vision_entry(
                     entry, prompt, hit_len, replay=replay)
-        except Exception:
+        except Exception:  # any admission failure is first reported to the other ranks, then re-raised
             if coord is not None:
                 try:
                     coord.ba(False, 0, False)
@@ -505,7 +505,7 @@ class MTPBatchGenerator(BatchGenerator):
             uid = self._unprocessed_sequences[0][0]
             try:
                 admitted = self._admit_one()
-            except Exception as e:
+            except Exception as e:  # one request's failure goes to that request; the generation thread lives (logged)
                 logger.exception("admission of request %s failed; failing "
                                  "that request only", uid)
                 self._rows.pop(uid, None)
@@ -542,7 +542,7 @@ class MTPBatchGenerator(BatchGenerator):
         try:
             with mx.stream(self._stream):
                 row_steps = self._batch.step()
-        except Exception as e:
+        except Exception as e:  # a failed decode step fails its rows; the generation thread lives (logged)
             # Same rule as a failed admission: the rows in this step fail
             # their own requests; the generation thread lives on.
             logger.exception("a decode step failed; failing its %d rows",

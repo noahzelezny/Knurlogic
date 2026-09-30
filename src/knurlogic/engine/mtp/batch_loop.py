@@ -619,7 +619,7 @@ class MTPBatch:
             try:
                 out += [a for _, a in tree_flatten(c.state)
                         if isinstance(a, mx.array)]
-            except Exception:
+            except (AttributeError, TypeError, ValueError, RuntimeError):
                 pass            # a cache with no state to read yet
         return out
 
