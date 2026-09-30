@@ -272,10 +272,10 @@ def engine(link, out_path, fail="", split_kind="pipeline"):
     model, head, prompts = _tiny_with_head(512)
     PL.split(model, link.group, PL.bounds_of([1, 3]))
     if link.rank > 0:
-        steps = T.follow(model, tok, ("tiny", None, None), link,
-                         prompt_cache_size=4, completion_batch_size=32,
-                         prefill_step_size=16, working_set=0,
-                         split="pipeline", drafting=True)
+        T.follow(model, tok, ("tiny", None, None), link,
+                 prompt_cache_size=4, completion_batch_size=32,
+                 prefill_step_size=16, working_set=0,
+                 split="pipeline", drafting=True)
         return
     gen = MTPBatchGenerator(model, head, stats={}, prefill_step_size=16,
                             completion_batch_size=32)
@@ -399,7 +399,6 @@ def image(link, out_path, split_kind="pipeline"):
     so the follower's key must be rank 0's for its trie to hit, and its
     positions must come from the refs alone. Both prompts' tokens are the
     unsplit engine's."""
-    import mlx.core as mx
     sys.path.insert(0, os.path.dirname(__file__))
     import test_vision_qwen as tq
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator

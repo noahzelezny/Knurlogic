@@ -19,7 +19,7 @@ mx = pytest.importorskip("mlx.core")
 import fixtures_vision as fv  # noqa: E402
 import fixtures_vision_gemma4 as g4fv  # noqa: E402
 from knurlogic.engine.families.gemma4.vision import Gemma4Vision  # noqa: E402
-from knurlogic.engine.vision.key import expand, sentinel  # noqa: E402
+from knurlogic.engine.vision.key import expand  # noqa: E402
 from knurlogic.engine.vision import ImageRef  # noqa: E402
 
 
@@ -113,7 +113,6 @@ def test_placeholder_is_framed_with_the_artifacts_own_tokens(tmp_path):
 
 def test_g2_encode_matches_reference_tower_golden():
     arrays, meta = fv.load_golden("gemma4_vision_tower")
-    H, W = int(meta["H"]), int(meta["W"])
     pixel_values = arrays["pixel_values"]
 
     cfg = g4fv.tiny_gemma4_config()
@@ -142,7 +141,7 @@ def test_g2_encode_can_fail(monkeypatch):
     fam = g4fv.build_gemma4_family(cfg)
     tower = fam.vision_tower
     tower.pooling_kernel_size = 1  # break: reference used 3
-    from mlx.utils import tree_flatten, tree_unflatten
+    from mlx.utils import tree_unflatten
     seeded = {k[2:]: mx.array(v) for k, v in arrays.items() if k.startswith("w.")}
     tower.update(tree_unflatten(list(seeded.items())))
     mx.eval(tower.parameters())
@@ -180,7 +179,6 @@ def test_g3_chunk_boundaries_can_fail():
 def test_g4_mask_overlay_matches_reference():
     arrays, _ = fv.load_golden("gemma4_mask_overlay")
     block_ids = mx.array(arrays["block_ids"])
-    causal = mx.array(arrays["causal"])
 
     from knurlogic.engine import register
     register.register("gemma4_text")
@@ -266,7 +264,6 @@ def test_g5_per_layer_inputs_zero_image_positions():
 def test_g5_embed_can_fail():
     """Break the merge (skip scatter) and confirm image rows are no longer
     the feature rows, then the passing test above shows it restored."""
-    from knurlogic.engine.vision import EncodedImage
     fam, model, key, out, f = _embed_end_to_end()
     unmerged_text = model.model.embed_tokens(
         mx.array([[1, 2, fam.image_token_id, fam.image_token_id,

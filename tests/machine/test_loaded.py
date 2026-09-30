@@ -4,7 +4,6 @@ The failure these pin is a page that says a model is loaded when it is not.
 Every runtime here reports something slightly different, and flattening them
 into "has a model" loses the only fact anybody opened the page for.
 """
-import json
 
 import pytest
 

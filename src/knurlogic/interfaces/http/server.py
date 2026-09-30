@@ -204,7 +204,7 @@ class App:
                 window=self.window() if (body.get("context_management")
                                          or C.settings()["auto"]) else 0)
         except E.EditError as e:
-            raise O.ApiError(400, str(e), param="context_management")
+            raise O.ApiError(400, str(e), param="context_management") from e
         except Exception as e:
             # a template that cannot render this history is the engine's
             # to refuse, as it would without context management
@@ -373,7 +373,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             n = int(cl)
         except ValueError:
-            raise BodyError(400, f"Content-Length {cl!r} is not a number")
+            raise BodyError(400, f"Content-Length {cl!r} is not a number") from None
         if n < 0:
             raise BodyError(400, "Content-Length is negative")
         if n > self.app.max_body:

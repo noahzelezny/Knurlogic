@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from fixtures_vision import REAL, tiny_config, tiny_ids, tiny_image  # noqa: E402
+from fixtures_vision import tiny_config, tiny_image  # noqa: E402
 
 
 def glm5_tiny_config(**overrides: Any) -> Dict[str, Any]:

@@ -90,7 +90,7 @@ def make_distribution(
     top_k: int = 0,
     xtc_probability: float = 0.0,
     xtc_threshold: float = 0.0,
-    xtc_special_tokens: List[int] = [],
+    xtc_special_tokens: Optional[List[int]] = None,
 ) -> Optional[Callable[[mx.array], Distribution]]:
     """logits [B, V] -> Distribution, or None for greedy (temp == 0).
 
@@ -108,7 +108,7 @@ def make_distribution(
         methods.append(lambda x: apply_min_p(x, min_p, min_tokens_to_keep))
     if xtc_probability > 0.0:
         methods.append(lambda x: apply_xtc(x, xtc_probability, xtc_threshold,
-                                           xtc_special_tokens))
+                                           xtc_special_tokens or []))
     if top_k > 0:
         methods.append(lambda x: apply_top_k(x, top_k))
 

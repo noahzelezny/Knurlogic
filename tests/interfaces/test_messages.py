@@ -135,16 +135,16 @@ def test_streaming_emits_the_event_order_a_harness_parses():
                                     "messages": [{"role": "user",
                                                   "content": "hi"}]})
     assert started["ctype"] == "text/event-stream"
-    events = [l[7:] for l in body.decode().splitlines()
-              if l.startswith("event: ")]
+    events = [ln[7:] for ln in body.decode().splitlines()
+              if ln.startswith("event: ")]
     assert events[0] == "message_start"
     assert events[-1] == "message_stop"
     assert events[-2] == "message_delta"
     assert events.count("content_block_start") == 2      # text, then tool_use
     assert events.count("content_block_stop") == 2
 
-    data = [json.loads(l[6:]) for l in body.decode().splitlines()
-            if l.startswith("data: ")]
+    data = [json.loads(ln[6:]) for ln in body.decode().splitlines()
+            if ln.startswith("data: ")]
     text = "".join(d["delta"]["text"] for d in data
                    if d.get("delta", {}).get("type") == "text_delta")
     assert text == MARKER

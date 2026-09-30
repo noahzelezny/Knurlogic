@@ -174,8 +174,8 @@ def children() -> list:
             with log.open("rb") as f:
                 f.seek(0, 2)
                 f.seek(max(0, f.tell() - 65536))
-                lines = [l for l in f.read().decode(errors="replace")
-                         .splitlines() if l.strip()]
+                lines = [ln for ln in f.read().decode(errors="replace")
+                         .splitlines() if ln.strip()]
             quiet = now - log.stat().st_mtime
         except OSError:
             lines, quiet = [], None
@@ -988,8 +988,8 @@ def load_progress(doc: dict) -> list:
             with log.open("rb") as f:
                 f.seek(0, 2)
                 f.seek(max(0, f.tell() - 65536))
-                lines = [l for l in f.read().decode(errors="replace")
-                         .splitlines() if l.strip()]
+                lines = [ln for ln in f.read().decode(errors="replace")
+                         .splitlines() if ln.strip()]
             quiet = now - log.stat().st_mtime
         except OSError:
             lines, quiet = [], None
@@ -999,7 +999,7 @@ def load_progress(doc: dict) -> list:
              "last_log_line": lines[-1][:200] if lines else ""}
         r = rows.get(port)
         if not is_our_server(pid):
-            e.update(phase="exited", log_tail=[l[:200] for l in lines[-4:]])
+            e.update(phase="exited", log_tail=[ln[:200] for ln in lines[-4:]])
             from knurlogic.cluster.recovery import refusal_line
             why = refusal_line("\n".join(lines[-60:]))
             if why:
@@ -1888,7 +1888,7 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
               f" and http://127.0.0.1:{port}; Wi-Fi and Ethernet refused")
     else:
         print(f"knurlogic  http://{host}:{port}")
-    print(f"  nothing loaded, no model required.")
+    print("  nothing loaded, no model required.")
     print(f"  loading from the page starts `knurlogic serve` on port "
           f"{serve_port}.")
     try:

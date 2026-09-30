@@ -44,5 +44,5 @@ if __version__ is None:
     except PackageNotFoundError:       # neither a source tree nor installed
         __version__ = "0+unknown"
 
-from knurlogic.machine.artifact import Artifact
-from knurlogic.tuning.resolve import Resolution, resolve
+from knurlogic.machine.artifact import Artifact  # noqa: E402,F401  public API, after __version__
+from knurlogic.tuning.resolve import Resolution, resolve  # noqa: E402,F401  public API

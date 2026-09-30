@@ -6,7 +6,6 @@ No mlx, no PIL, no real model: `interfaces/page/documents.py` reads
 frozen contract (`docs/design/vision-contracts.md`), and this file proves it
 stays that way by never importing anything that would drag mlx in.
 """
-import json
 from pathlib import Path
 
 from knurlogic.interfaces.http import messages
