@@ -6,14 +6,25 @@ what a real failure raises.
 
 import json
 
+import pytest
+
 from knurlogic.cluster.peers import HEADER, Peers
 from knurlogic.machine.status import SCHEMA
 
 ME = {"id": "aaaaaaaaaaaa", "name": "Studio"}
 
 
-def doc(pid, name, peers=(), schema=SCHEMA):
-    return {"schema": schema, "peers": list(peers),
+@pytest.fixture(autouse=True)
+def _no_route_lookups(monkeypatch):
+    """Which link reaches an address is a subprocess; liveness is tested
+    without it (the rig below sets its own speeds)."""
+    monkeypatch.setattr(Peers, "_speed", staticmethod(
+        lambda h: ("other", 0.0)))
+
+
+def doc(pid, name, peers=(), schema=SCHEMA, v=(1, 0), boot="boot1"):
+    return {"schema": schema, "peers": list(peers), "v": list(v),
+            "boot_id": boot,
             "nodes": [{"node": name, "role": "local", "id": pid,
                        "reachable": True}]}
 
@@ -37,7 +48,7 @@ def test_a_timeout_names_the_firewall_on_the_other_machine(tmp_path):
     ps = make(tmp_path, fetch)
     ps.refresh()
     [p] = ps.all()
-    assert p.state == "not_answering"
+    assert p.state == "gone"            # never heard from: not answering
     assert "firewall" in p.problem and "10.0.0.2" in p.problem
     assert p.failing_since
 
@@ -59,7 +70,7 @@ def test_a_different_schema_is_named_not_drawn_wrong(tmp_path):
 def test_the_blocked_machine_learns_it_from_its_peers(tmp_path):
     # The M4 lists THIS machine as not answering: that is a measurement of
     # our firewall, and the only one this machine can get.
-    seen = [{"id": ME["id"], "state": "not_answering",
+    seen = [{"id": ME["id"], "state": "gone",
              "address": "10.0.0.1:8899"}]
     ps = make(tmp_path, lambda url: doc("bbbbbbbbbbbb", "M4", peers=seen))
     ps.refresh()
@@ -241,7 +252,7 @@ def test_a_machine_is_asked_at_its_fastest_address_and_moves_there(
     asked.clear()
     ps.refresh()
     [p] = ps.all()
-    assert asked == ["10.0.1.2"]
+    assert "10.0.1.2" in asked          # every address is asked at once
     assert p.key == "10.0.1.2:8899" and p.state == "answering"
     # the TB5 cable pulled: it answers on the other one, still one machine
     ps._fetch = lambda url: (rig_doc() if "10.0.0.2" in url
@@ -263,3 +274,110 @@ def test_introductions_and_bonjour_instances_fold_into_the_machine(
     # a stranger at an unknown address is still its own peer
     ps.add("10.0.9.9", 8899, "bonjour")
     assert len(ps.all()) == 2
+
+
+# --- liveness: one clock, from the status GET ----------------------------
+
+class Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+def live(tmp_path, answers, **kw):
+    clock = Clock()
+    box = {"doc": doc("bbbbbbbbbbbb", "M4")}
+
+    def fetch(url):
+        assert url.endswith("/status.json?light=1")     # the light document
+        if not answers["up"]:
+            raise TimeoutError("timed out")
+        return box["doc"]
+    ps = make(tmp_path, fetch, clock=clock, **kw)
+    return ps, clock, box
+
+
+def test_a_silent_peer_goes_answering_stale_gone_and_comes_back(tmp_path):
+    from knurlogic.cluster import jobs
+    up = {"up": True}
+    ps, clock, _ = live(tmp_path, up)
+    ps.refresh()
+    [p] = ps.all()
+    assert p.state == "answering"
+    up["up"] = False
+    for dt, want in ((2, "answering"), (5, "answering"), (6, "stale"),
+                     (19, "stale"), (jobs.PEER_GONE_S, "gone"), (60, "gone")):
+        clock.t = 1000.0 + dt
+        ps.refresh()
+        assert ps.all()[0].state == want, dt
+    up["up"] = True
+    ps.refresh()
+    assert ps.all()[0].state == "answering"
+    assert ps.all()[0].problem == ""
+
+
+def test_a_new_boot_id_is_a_restarted_peer(tmp_path):
+    ps, clock, box = live(tmp_path, {"up": True})
+    ps.refresh()
+    assert ps.all()[0].boot_id == "boot1" and ps.all()[0].restarts == 0
+    box["doc"] = doc("bbbbbbbbbbbb", "M4", boot="boot2")
+    clock.t += 2
+    ps.refresh()
+    p = ps.all()[0]
+    assert (p.boot_id, p.restarts) == ("boot2", 1)
+    assert p.public()["restarts"] == 1
+
+
+def test_a_different_protocol_major_or_none_is_version_mismatch_with_its_text(
+        tmp_path):
+    ps, clock, box = live(tmp_path, {"up": True})
+    box["doc"] = doc("bbbbbbbbbbbb", "M4", v=(2, 0))
+    ps.refresh()
+    p = ps.all()[0]
+    assert p.state == "version_mismatch"
+    assert p.problem == ("M4 speaks protocol 2, this machine 1: update "
+                         "knurlogic on this machine")
+    box["doc"] = doc("bbbbbbbbbbbb", "M4", v=(0, 9))
+    ps.refresh()
+    assert ps.all()[0].problem.endswith("update knurlogic on M4")
+    d = doc("bbbbbbbbbbbb", "M4")
+    del d["v"]                                  # an older knurlogic: no v
+    box["doc"] = d
+    ps.refresh()
+    assert ps.all()[0].state == "version_mismatch"
+    assert "update knurlogic on M4" in ps.all()[0].problem
+    box["doc"] = doc("bbbbbbbbbbbb", "M4", v=(1, 7))     # a higher minor is fine
+    ps.refresh()
+    assert ps.all()[0].state == "answering"
+
+
+def test_one_probe_is_in_flight_per_peer(tmp_path):
+    import threading
+    gate, calls = threading.Event(), []
+
+    def fetch(url):
+        calls.append(url)
+        gate.wait(5)
+        return doc("bbbbbbbbbbbb", "M4")
+    ps = make(tmp_path, fetch)
+    [p] = ps.all()
+    t = threading.Thread(target=ps._one, args=(p,), daemon=True)
+    t.start()
+    while not calls:
+        pass
+    ps._one(p)                      # a second round while the first is out
+    assert len(calls) == 1
+    gate.set()
+    t.join(5)
+    ps._one(p)
+    assert len(calls) == 2
+
+
+def test_a_plain_answer_carries_the_liveness_document_not_the_heavy_one(tmp_path):
+    from knurlogic.interfaces.page import server as page_server
+    doc_ = page_server._status_light()
+    assert set(doc_) == {"schema", "nodes", "boot_id", "v", "peers"}
+    assert doc_["v"] == [1, 0] and doc_["nodes"][0]["role"] == "local"
+    assert "cluster" in doc_["nodes"][0]
