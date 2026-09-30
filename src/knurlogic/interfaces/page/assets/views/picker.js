@@ -131,13 +131,20 @@ function renderPicker(){
   const q=QUERY.trim().toLowerCase();
   const famCount={};
   GROUPS.forEach(g=>famCount[g.fam]=(famCount[g.fam]||0)+1);
-  $('pfams').innerHTML=['All',...Object.keys(famCount).sort()].map(f=>
+  // favorites and recents are families of their own, first after All
+  const favMs=MODELS.filter(m=>isFav(m.path));
+  const recMs=loadRecents().map(r=>MODELS.find(m=>m.path===r.path)).filter(Boolean);
+  const mine={Favorites:favMs, Recent:recMs};
+  if(mine[FAM] && !mine[FAM].length) FAM='All';
+  const n=f=>f==='All'?GROUPS.length:mine[f]?mine[f].length:famCount[f];
+  $('pfams').innerHTML=['All',...Object.keys(mine).filter(f=>mine[f].length),
+    ...Object.keys(famCount).sort()].map(f=>
     `<div class="fam" data-f="${esc(f)}" aria-current="${f===FAM}">${esc(f)}
-      <i>${f==='All'?GROUPS.length:famCount[f]}</i></div>`).join('');
+      <i>${n(f)}</i></div>`).join('');
   $('pfams').querySelectorAll('.fam').forEach(e=>e.onclick=()=>{
     FAM=e.dataset.f; renderPicker() });
 
-  const shown=GROUPS.filter(g=>(FAM==='All'||g.fam===FAM) &&
+  const shown=mine[FAM]?[]:GROUPS.filter(g=>(FAM==='All'||g.fam===FAM) &&
     (!q || g.name.toLowerCase().includes(q) ||
      g.ms.some(m=>m.name.toLowerCase().includes(q))));
   const okm=m=>(!ws||m.size_bytes<=ws) && onPeer(m);
@@ -164,26 +171,15 @@ function renderPicker(){
             esc(m.room.text)}"`:''}>${gb(m.size_bytes)}</span></div>`}).join('')}</div>
     </div>`;
   const a=shown.filter(fits), b=shown.filter(g=>!fits(g));
-  // Favorites and recents, shown only on the unfiltered "All" view so they
-  // never fight the search/family filters.
-  let favHTML='';
-  if(FAM==='All' && !q){
-    const favMs=MODELS.filter(m=>isFav(m.path));
-    const recMs=loadRecents().map(r=>MODELS.find(m=>m.path===r.path)).filter(Boolean);
-    const oneRow=m=>`<div class="var" data-p="${esc(m.path)}"
-        aria-current="${SEL&&SEL.path===m.path}">
-        <span class="star" data-fav="${esc(m.path)}">${isFav(m.path)?'★':'☆'}</span>
-        <span class="vn">${esc(m.name)}</span>
-        ${isVision(m)?'<span class="tag">VISION</span>':''}
-        <span class="vs">${gb(m.size_bytes)}</span></div>`;
-    if(favMs.length) favHTML+=`<div class="sect">favorites</div>
-      <div class="vars">${favMs.map(oneRow).join('')}</div>`;
-    if(recMs.length) favHTML+=`<div class="sect">recent</div>
-      <div class="vars">${recMs.map(oneRow).join('')}</div>`;
-  }
-  $('prows').innerHTML=favHTML+
-    (a.length?`<div class="sect">for ${esc(fitWhere())}</div>`
-      +a.map(grp).join(''):'')
+  const oneRow=m=>`<div class="var" data-p="${esc(m.path)}"
+      aria-current="${SEL&&SEL.path===m.path}">
+      <span class="star" data-fav="${esc(m.path)}">${isFav(m.path)?'★':'☆'}</span>
+      <span class="vn">${esc(m.name)}</span>
+      ${isVision(m)?'<span class="tag">VISION</span>':''}
+      <span class="vs">${gb(m.size_bytes)}</span></div>`;
+  const favHTML=mine[FAM]?`<div class="vars flat">${mine[FAM].filter(m=>
+    !q||m.name.toLowerCase().includes(q)).map(oneRow).join('')}</div>`:'';
+  $('prows').innerHTML=favHTML+a.map(grp).join('')
     +(b.length?`<div class="sect no">${pn?`not on ${esc(pn.node)}, or `:``}needs more than ${gb(ws)}</div>`
       +b.map(grp).join(''):'')
     || '<div class="sect no">nothing matches</div>';
@@ -593,5 +589,5 @@ function followLaunches(d){
   renderLaunches();
 }
 
-export {BASEKEY, SEL, baseKey, baseOf, followLaunches, loadModels,
+export {BASEKEY, SEL, baseKey, baseOf, famOf, followLaunches, loadModels,
         nodeSelChanged, published, setSets};
