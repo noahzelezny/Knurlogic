@@ -337,9 +337,9 @@ def test_stop_tells_only_pages_this_page_knows(cache, monkeypatch):
     monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(all=lambda: peers))
     C.SPECS["ab12cd34ef567890"] = s
     posted = []
-    out = C.stop("ab12cd34ef567890", post=lambda u, d: posted.append(u),
+    out = C.stop("ab12cd34ef567890", post=lambda page, kind, d: posted.append((page, kind)),
                  grace=0)
-    assert posted == ["http://192.0.2.2:8765" + C.STOP_PATH]
+    assert posted == [("192.0.2.2:8765", "Stop")]
     assert out["told"] == ["B"]
     C.ENDED.pop("ab12cd34ef567890", None)
 
@@ -646,17 +646,18 @@ def test_unload_from_the_page_stops_every_rank(two_pages):
 
 def test_peer_cluster_routes_are_gated_like_peer_loaded(two_pages):
     p = two_pages
+    from knurlogic.cluster import transport
+    body, _ = transport.encode("Stop", {"job": p.job})
     req = urllib.request.Request(
-        f"http://127.0.0.1:{p.ui_b}{C.STOP_PATH}",
-        data=json.dumps({"job": p.job}).encode(), method="POST",
+        f"http://127.0.0.1:{p.ui_b}{transport.MSG_PATH}",
+        data=body, method="POST",
         headers={"Content-Type": "application/json",
                  "Origin": f"http://127.0.0.1:{p.ui_b}"})
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req, timeout=10)
     assert e.value.code == 403
     assert alive(p.rank1["pid"])
-    code, doc = C.peer_route(C.PREPARE_PATH, json.dumps(
-        {**spec(), "path": "/etc"}).encode())
+    code, doc = C.peer_step("Prepare", {**spec(), "path": "/etc"})
     assert code == 400 and "identity" in doc["error"]
 
 
@@ -984,7 +985,7 @@ def test_prepare_waits_for_a_stopping_rank_then_goes(cache, monkeypatch):
     is still exiting: it waits, bounded, instead of granting the new job a
     share -- and a ring port -- the old rank still holds, then goes once
     the old rank is gone."""
-    monkeypatch.setattr(C, "PEER_S", 3.0)
+    monkeypatch.setattr(C, "EXIT_WAIT_S", 3.0)
     old, new = "41648583878fcdfc", "db0cb292aefeba55"
     p = slow_rank(old, 1, 0.3)
     reg = J.registry()
@@ -1002,7 +1003,7 @@ def test_prepare_waits_for_a_stopping_rank_then_goes(cache, monkeypatch):
 
 
 def test_prepare_names_a_stuck_old_rank_in_its_refusal(cache, monkeypatch):
-    monkeypatch.setattr(C, "PEER_S", 0.3)
+    monkeypatch.setattr(C, "EXIT_WAIT_S", 0.3)
     old, new = "41648583878fcdfc", "db0cb292aefeba55"
     p = slow_rank(old, 1, 60)
     reg = J.registry()
@@ -1114,11 +1115,45 @@ def test_peer_verdict_counts_an_unreachable_page_for_peer_gone_s(
                                   pages={}, me="a")
 
 
+def test_peer_verdict_reads_the_peer_lists_clock_and_boot_id(monkeypatch):
+    """One clock: a page the peer list heard lately is not gone however the
+    JobState ask fails; a new boot_id is a restart, at once."""
+    from knurlogic.cluster.peers import Peer
+    monkeypatch.setattr(C, "_PEER_OK", {})
+    monkeypatch.setattr(C, "_PEER_BOOT", {})
+    rec = Peer(host="192.0.2.1", port=8765, id="b", name="M3",
+               state="answering", last_seen=100.0, boot_id="one")
+    monkeypatch.setattr(C, "peers_fn", lambda: [rec])
+    job = "ab12cd34ef567890"
+    recs = [{"job": job, "rank": 0, "pid": 1, "t": 0.0,
+             "nodes": [{"rank": 0, "id": "a", "name": "M4"},
+                       {"rank": 1, "id": "b", "name": "M3"}]}]
+    kw = dict(pages={"b": "192.0.2.1:8765"}, me="a")
+
+    def down(page, j):
+        raise OSError("timed out")
+    up = (lambda page, j: {"ranks_here": [1]})
+    assert C.peer_verdict(job, recs, now=100, ask=up, **kw) == ""
+    # JobState fails, but the status GET was heard at 130: still not gone
+    rec.last_seen = 130.0
+    assert C.peer_verdict(job, recs, now=140, ask=down, **kw) == ""
+    # the status GET goes quiet too: gone PEER_GONE_S after the last word
+    assert "has not answered" in C.peer_verdict(
+        job, recs, now=130 + J.PEER_GONE_S, ask=down, **kw)
+    # a new process answering: its rank went with the old one
+    monkeypatch.setattr(C, "_PEER_OK", {})
+    assert C.peer_verdict(job, recs, now=200, ask=up, **kw) == ""
+    rec.boot_id = "two"
+    why = C.peer_verdict(job, recs, now=201, ask=(
+        lambda page, j: {"ranks_here": [], "prepared": False}), **kw)
+    assert "M3 restarted" in why
+
+
 def test_the_job_route_says_what_this_page_runs(two_pages):
     p = two_pages
-    code, doc = C.peer_route(C.JOB_PATH, json.dumps({"job": p.job}).encode())
+    code, doc = C.peer_step("JobState", {"job": p.job})
     assert code == 200 and doc["ranks_here"] == [0] and not doc["ended"]
-    code, doc = C.peer_route(C.JOB_PATH, b'{"job": "../x"}')
+    code, doc = C.peer_step("JobState", {"job": "../x"})
     assert code == 400
 
 
@@ -1201,11 +1236,11 @@ def jaccl_launch(monkeypatch, req, post=None, follow=None):
                            link="thunderbolt", node={"cluster": b})
     got = []
 
-    def fake_post(url, doc):
-        got.append((url, doc))
-        if url.endswith(C.PREPARE_PATH):
+    def fake_post(page, kind, doc, **kw):
+        got.append((kind, doc))
+        if kind == "Prepare":
             return {"ok": True}
-        if url.endswith(C.START_PATH):
+        if kind == "Start":
             return {"started": doc["job"]}
         return {}
     monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
@@ -1227,7 +1262,7 @@ def test_a_launch_can_name_its_cable(cache, monkeypatch):
                             follow=lambda j, c: followed.append(j))
     assert out.get("job") and out["cable"] == "127.0.1", out
     assert "named by the launch" in out["cable_note"]
-    spec = next(d for u, d in got if u.endswith(C.PREPARE_PATH))
+    spec = next(d for k, d in got if k == "Prepare")
     assert spec["cable"] == "127.0.1"
     assert spec["ibv_devices"] == [[None, "rdma_en7"], ["rdma_en7", None]]
     assert spec["coordinator"].startswith("127.0.1.")
@@ -1286,12 +1321,12 @@ def test_the_follower_stops_at_a_failure_or_gives_up(cache, monkeypatch):
     seen = []
     monkeypatch.setattr(C, "failover",
                         lambda j, c, why: seen.append(why) or "moved")
-    ctx = dict(ctx, post=lambda url, doc: {"ended": "rank 1 exited: "
+    ctx = dict(ctx, post=lambda page, kind, doc: {"ended": "rank 1 exited: "
                                            "[jaccl] RTR failed"})
     assert C._follow(job, ctx, sleep=lambda s: None) == "moved"
     assert seen == ["rank 1 exited: [jaccl] RTR failed"]
     t = iter(range(0, 10 ** 6, 100))
-    ctx = dict(ctx, post=lambda url, doc: {"ranks_here": [1]})
+    ctx = dict(ctx, post=lambda page, kind, doc: {"ranks_here": [1]})
     assert C._follow(job, ctx, clock=lambda: next(t),
                      sleep=lambda s: None) is None
 
@@ -1454,7 +1489,7 @@ def test_stop_carries_its_kind_to_the_ended_record_and_the_peers(
     C.SPECS[job] = spec(job=job)
     told = []
     out = C.stop(job, reason="B went away", kind="machine",
-                 post=lambda url, doc, **k: told.append(doc) or {})
+                 post=lambda page, kind, doc, **k: told.append(doc) or {})
     assert out["v"] == [1, 0] and out["exiting"] == []
     assert told[0]["kind"] == "machine"
     assert C.ENDED[job]["kind"] == "machine"

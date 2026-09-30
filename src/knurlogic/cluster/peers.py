@@ -1,9 +1,16 @@
 """Peers: named, remembered, or introduced -- and why each is or is not
 answering.
 
-Every peer carries a state (answering, not_answering with a `problem`, or
-version_mismatch); a peer that stops answering is kept and shown with how
-long it has been gone, never dropped silently. Every status request carries
+Every peer carries a state, computed from when it last answered the status
+GET every peer can reach (Wi-Fi and Ethernet Bonjour peers too -- liveness
+is not behind the Thunderbolt/--peer gate): `answering` (heard within 6 s),
+`stale` (6..20 s silent: shown, no new jobs placed), `gone` (20 s or more,
+jobs.PEER_GONE_S: a job with a rank there stops) and, apart from those,
+`version_mismatch` (its protocol major differs, or it speaks none), with the
+text that says which machine to update. The same status doc carries its
+`boot_id`: a new one is a restarted process. A peer that stops answering is
+kept and shown with how long it has been gone, never dropped silently. One
+probe is in flight per peer. Every status request carries
 `X-Knurlogic-Peer: <id> <port>`, so the receiving page records the
 requester as an `introduced` peer and naming a machine on one side is
 enough for both. peers.json (~/.knurlogic/peers.json) is keyed by node id,
@@ -24,14 +31,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
+from knurlogic.cluster import jobs as J
+from knurlogic.cluster import protocol, transport
 from knurlogic.machine.status import SCHEMA
 
 logger = logging.getLogger(__name__)
 
 HEADER = "X-Knurlogic-Peer"
 STORE_SCHEMA = 1
-TIMEOUT_S = 3.0          # a busy peer was measured at 1.4 s
-REFRESH_S = 4.0
+REFRESH_S = 2.0          # one light status GET per peer per round
+#: heard within this long: answering (three rounds); past it, stale until
+#: jobs.PEER_GONE_S, then gone
+ANSWERING_S = 6.0
 #: Peers known ONLY because they introduced themselves: any client can send
 #: the header, so they are capped, and forgotten after an hour of silence.
 MAX_INTRODUCED = 32
@@ -92,10 +103,17 @@ class Peer:
     found_by: set = field(default_factory=set)
     id: str = ""
     name: str = ""
-    state: str = "not_answering"
+    state: str = "gone"
     problem: str = ""
     last_seen: float = 0.0          # last time it answered
     failing_since: float = 0.0
+    boot_id: str = ""               # which process of that machine answered
+    restarts: int = 0               # boot_id changes seen since this page began
+    proto: list | None = None       # the protocol [major, minor] it speaks
+    mismatch: str = ""              # non-empty: why its protocol is refused
+    #: one probe in flight per peer (a slow round is not overlapped)
+    busy: threading.Lock = field(default_factory=threading.Lock,
+                                 repr=False, compare=False)
     link: str = ""                  # thunderbolt / wifi / ethernet / ...
     gbps: float = 0.0               # the link's speed, when Thunderbolt says
     #: every host:port this machine was seen at (its other cable, Wi-Fi):
@@ -117,6 +135,8 @@ class Peer:
         other = sorted(self.addresses - {self.key})
         if other:
             d["other_addresses"] = other
+        if self.restarts:
+            d["restarts"] = self.restarts
         if self.problem:
             d["problem"] = self.problem
         if self.last_seen:
@@ -131,11 +151,12 @@ def _describe(exc: Exception, peer: Peer) -> str:
     s = f"{type(exc).__name__}: {exc}"
     where = peer.name or peer.host
     if "timed out" in s or isinstance(exc, TimeoutError):
-        return (f"{where} did not answer in {TIMEOUT_S:.0f} s. If knurlogic "
+        t = transport.timeout_for("status")
+        return (f"{where} did not answer in {t:g} s. If knurlogic "
                 f"is running there, the macOS firewall on {where} is the "
                 f"usual cause: allow incoming connections for its Python "
                 f"(System Settings -> Network -> Firewall -> Options). "
-                f"Asleep, or busy past {TIMEOUT_S:.0f} s, look the same.")
+                f"Asleep, or busy past {t:g} s, look the same.")
     if "refused" in s.lower():
         return (f"{where} refused the connection on port {peer.port}: "
                 f"nothing is listening there. Start `knurlogic ui --host "
@@ -151,8 +172,9 @@ class Peers:
     or absent peer never makes the page's own status slow."""
 
     def __init__(self, me: dict, my_port: int, manual=(), store=None,
-                 fetch=None, reachable=True, persist=True):
+                 fetch=None, reachable=True, persist=True, clock=time.time):
         self.me, self.my_port = me, my_port
+        self.clock = clock               # the liveness clock (tests inject)
         self.persist = persist           # doctor reads the store, never writes
         # A page bound to loopback does not introduce itself: the peer
         # would try the address, fail, and report a firewall problem this
@@ -253,7 +275,8 @@ class Peers:
         hdr = ({HEADER: f"{self.me.get('id', '')} {self.my_port}"}
                if self.reachable else {})
         req = urllib.request.Request(url, headers=hdr)
-        with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
+        with urllib.request.urlopen(
+                req, timeout=transport.timeout_for("status")) as r:
             return json.loads(r.read())
 
     @staticmethod
@@ -267,49 +290,98 @@ class Peers:
         except (*PROC_ERRORS, ValueError, KeyError):
             return "other", 0.0
 
+    def _classify(self, p: Peer, now: float) -> None:
+        """Its state, from how long ago it last answered."""
+        age = now - p.last_seen if p.last_seen else float("inf")
+        if p.mismatch and age < J.PEER_GONE_S:
+            p.state, p.problem = "version_mismatch", p.mismatch
+        elif age < ANSWERING_S:
+            p.state = "answering"
+            p.problem = ""
+        elif age < J.PEER_GONE_S:
+            p.state = "stale"
+            p.problem = p.problem or (f"{p.name or p.host} has not answered "
+                                      f"for {age:.0f} s")
+        else:
+            p.state = "gone"
+
+    def _probe(self, p: Peer, tries: list):
+        """(address, doc, error): the status of the machine at its first
+        address that answers (the fastest link first). Several addresses
+        are asked at once, so a dead cable costs no more than a live one."""
+        def get(k):
+            return self._fetch(f"http://{k}/status.json?light=1")
+        if len(tries) == 1:
+            try:
+                return tries[0], get(tries[0]), None
+            except NET_ERRORS as e:
+                return None, None, e
+        got: dict = {}
+
+        def one(k):
+            try:
+                got[k] = (get(k), None)
+            except NET_ERRORS as e:
+                got[k] = (None, e)
+        ts = [threading.Thread(target=one, args=(k,), daemon=True)
+              for k in tries]
+        for t in ts:
+            t.start()
+        end = time.time() + transport.timeout_for("status") + 0.5
+        for t in ts:
+            t.join(max(end - time.time(), 0))
+        for k in tries:
+            if k in got and got[k][1] is None:
+                return k, got[k][0], None
+        return None, None, next((got[k][1] for k in tries
+                                 if k in got), None)
+
     def _one(self, p: Peer) -> None:
-        """Ask the machine for its status: at the fastest of its addresses
-        first, then the others, so a machine answering on its other cable
-        stays one answering machine."""
-        now = time.time()
+        """Ask the machine for its (light) status: at the fastest of its
+        addresses first, then the others, so a machine answering on its
+        other cable stays one answering machine. One probe per peer at a
+        time: a probe still out when the next round starts is left alone."""
+        if not p.busy.acquire(blocking=False):
+            return
+        try:
+            self._probe_one(p)
+        finally:
+            p.busy.release()
+
+    def _probe_one(self, p: Peer) -> None:
+        now = self.clock()
         if not p.link:
             p.link, p.gbps = self._speed(p.host)
         p.addresses.add(p.key)
         speed = {k: self._speed(k.rpartition(":")[0])[1]
                  for k in p.addresses if k != p.key}
         speed[p.key] = p.gbps
-        tries = sorted(speed, key=lambda k: (-speed[k], k != p.key))
-        doc, err = None, None
-        for k in tries[:3]:
-            try:
-                doc = self._fetch(f"http://{k}/status.json")
-            except NET_ERRORS as e:
-                err = err or e
-                continue
-            if k != p.key:
-                h, _, port = k.rpartition(":")
-                p.host, p.port = h, int(port)
-                p.link, p.gbps = self._speed(h)
-            break
-        else:
-            p.state, p.problem = "not_answering", _describe(err or OSError("no address tried"), p)
+        tries = sorted(speed, key=lambda k: (-speed[k], k != p.key))[:3]
+        k, doc, err = self._probe(p, tries)
+        if k is None:
+            p.problem = _describe(err or OSError("no address tried"), p)
             p.failing_since = p.failing_since or now
+            self._classify(p, now)
             return
+        if k != p.key:
+            h, _, port = k.rpartition(":")
+            p.host, p.port = h, int(port)
+            p.link, p.gbps = self._speed(h)
         if not isinstance(doc, dict):
             # a peer's word is checked for shape before it is read: a list
             # or null here raised in the refresh and left the peer's old
             # "answering" in place
-            p.state = "not_answering"
             p.problem = f"{p.key} answered with something not a status"
+            self._classify(p, now)
             return
         own = next((n for n in doc.get("nodes") or []
                     if isinstance(n, dict)
                     and n.get("role") in ("local", "server")), None)
         if own is None or own.get("id") == self.me.get("id"):
             # Answered, but as someone else -- or as us, through a loop.
-            p.state = "not_answering"
             p.problem = (f"{p.key} answered, but not as a knurlogic node"
                          if own is None else f"{p.key} is this machine")
+            self._classify(p, now)
             return
         own = clean_node(own)
         p.id, p.name = own.get("id") or p.id, own.get("node") or p.name
@@ -318,18 +390,29 @@ class Peers:
         p.doc_peers = [q for q in (clean(peers) if isinstance(peers, list)
                                    else []) if isinstance(q, dict)]
         p.last_seen, p.failing_since = now, 0.0
-        if doc.get("schema") != SCHEMA:
-            p.state = "version_mismatch"
-            p.problem = (f"{p.name} speaks status schema {doc.get('schema')}"
-                         f", this machine {SCHEMA}: update knurlogic on the "
-                         f"older one")
-        else:
-            p.state, p.problem = "answering", ""
+        boot = doc.get("boot_id")
+        boot = boot if isinstance(boot, str) else ""
+        if p.boot_id and boot and boot != p.boot_id:
+            p.restarts += 1     # same machine, a new process: its ranks are gone
+        p.boot_id = boot or p.boot_id
+        v = doc.get("v")
+        p.proto = v if isinstance(v, list) else None
+        who = p.name or p.host
+        try:
+            protocol.check_version(v, who)
+            p.mismatch = ""
+        except protocol.ProtocolError:
+            p.mismatch = protocol.mismatch_text(who, v)
+        if not p.mismatch and doc.get("schema") != SCHEMA:
+            p.mismatch = (f"{who} speaks status schema {doc.get('schema')}"
+                          f", this machine {SCHEMA}: update knurlogic on the "
+                          f"older one")
+        self._classify(p, now)
 
     def refresh(self) -> None:
         with self._lock:
             # introduced-only peers silent for an hour are forgotten
-            now = time.time()
+            now = self.clock()
             for k, p in list(self._peers.items()):
                 if p.found_by == {"introduced"} and p.failing_since and \
                         now - p.failing_since > FORGET_INTRODUCED_S:
@@ -340,7 +423,11 @@ class Peers:
         for t in ts:
             t.start()
         for t in ts:
-            t.join(TIMEOUT_S + 1)
+            t.join(transport.timeout_for("status") + 1)
+        with self._lock:
+            now = self.clock()
+            for p in self._peers.values():
+                self._classify(p, now)
         self._dedupe()
         self._save()
 
@@ -424,6 +511,9 @@ class Peers:
     # -- reading --------------------------------------------------------
     def all(self) -> list[Peer]:
         with self._lock:
+            now = self.clock()
+            for p in self._peers.values():
+                self._classify(p, now)
             return sorted(self._peers.values(), key=lambda p: p.name or p.key)
 
     def seen_by_peers(self) -> list[dict]:
@@ -443,7 +533,7 @@ class Peers:
 
     def self_problem(self) -> str:
         blocked = [s for s in self.seen_by_peers()
-                   if s["state"] == "not_answering"]
+                   if s["state"] in ("stale", "gone")]
         if not blocked:
             return ""
         who = ", ".join(s["peer"] for s in blocked)

@@ -55,9 +55,9 @@ def n_launch(monkeypatch, infos, link, split="pipeline", req=None):
              for i, m in enumerate(infos) if i]
     got = []
 
-    def post(url, doc):
-        got.append((url, doc))
-        return {"ok": True} if url.endswith(C.PREPARE_PATH) \
+    def post(page, kind, doc, **kw):
+        got.append((kind, doc))
+        return {"ok": True} if kind == "Prepare" \
             else {"started": doc["job"]}
     out = C.launch({"action": "load", "identity": "abc",
                     "nodes": [f"m{i}" for i in range(len(infos))],
@@ -75,7 +75,7 @@ def test_jaccl_joins_every_pair_and_says_it_is_experimental(
     assert out.get("job"), out
     assert C.RDMA_N_NOTE in out["alerts"]
     assert "experimental and untested" in C.RDMA_N_NOTE
-    specs = [d for u, d in got if u.endswith(C.PREPARE_PATH)]
+    specs = [d for k, d in got if k == "Prepare"]
     assert len(specs) == n - 1            # this page's rank runs locally
     ids = [x["id"] for x in specs[0]["nodes"]]
     ibv = specs[0]["ibv_devices"]
@@ -101,10 +101,10 @@ def test_a_tcp_ring_launches_ignores_a_cable_and_has_no_rdma_note(
     assert out.get("job"), out
     assert "alerts" not in out and out["cable"] == ""
     assert "cable ignored" in out["cable_note"]
-    spec = next(d for u, d in got if u.endswith(C.PREPARE_PATH))
+    spec = next(d for k, d in got if k == "Prepare")
     assert spec["ibv_devices"] is None and len(spec["hosts"]) == n
     assert len(out["machines"]) == n
-    assert len([1 for u, d in got if u.endswith(C.START_PATH)]) == n - 1
+    assert len([1 for k, d in got if k == "Start"]) == n - 1
 
 
 @pytest.mark.parametrize("n", [3, 4])
@@ -149,7 +149,7 @@ def _port_launch(monkeypatch, prep, req=None):
                      "link": "tcp", **(req or {})},
                     me={"id": "m0", "name": "M0"}, peers=peers,
                     local_info=infos[0], ui_port=1, serve_port=8080,
-                    post=lambda u, d: {"ok": True, "started": d.get("job")},
+                    post=lambda page, kind, d: {"ok": True, "started": d.get("job")},
                     follow=lambda j, c: None)
 
 
