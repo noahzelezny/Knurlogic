@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional
+from pathlib import Path
+from typing import Any
 
 COMPACT = "compact_20260112"
 CLEAR_TOOLS = "clear_tool_uses_20250919"
@@ -45,10 +46,10 @@ class EditError(ValueError):
 
 @dataclass
 class Compact:
-    trigger: Optional[int] = None        # input tokens; None: the default
+    trigger: int | None = None        # input tokens; None: the default
     pause: bool = False
-    instructions: Optional[str] = None
-    keep: Optional[int] = None           # messages; None: the operator's
+    instructions: str | None = None
+    keep: int | None = None           # messages; None: the operator's
     auto: bool = False                   # the server's default, unasked
 
 
@@ -139,7 +140,7 @@ def parse(cm) -> list:
 
 # ------------------------------------------------------------ cut points
 
-def cut_of(m: dict) -> Optional[str]:
+def cut_of(m: dict) -> str | None:
     """The summary a message carries, or None: an assistant message's
     `compaction`, or a system message that is exactly WRAP-wrapped."""
     if not isinstance(m, dict):
@@ -155,7 +156,7 @@ def cut_of(m: dict) -> Optional[str]:
     return None
 
 
-def _rest_of_cut(m: dict) -> Optional[dict]:
+def _rest_of_cut(m: dict) -> dict | None:
     """What a cut message says besides its summary, as a message; None
     when nothing."""
     if m.get("role") == "system":
@@ -181,7 +182,7 @@ class Plan:
     """Which messages of a history go: `lead` system messages and the goal
     at `goal` stay, [start, end) is dropped, [end:] is the kept tail."""
     lead: int
-    goal: Optional[int]
+    goal: int | None
     start: int
     end: int
 
@@ -190,7 +191,7 @@ class Plan:
         return self.end - self.start
 
 
-def plan(msgs: list, keep: int) -> Optional[Plan]:
+def plan(msgs: list, keep: int) -> Plan | None:
     """The compaction policy over OpenAI messages; None when fewer than MIN_DROP
     would go."""
     lead = 0
@@ -251,7 +252,7 @@ class ToolUse:
     id: str
     name: str
     args: str
-    result: Optional[str]      # None: no result in the span
+    result: str | None      # None: no result in the span
 
 
 def _args(fn: dict, width: int = 160) -> str:
@@ -272,7 +273,7 @@ def _text(c) -> str:
     return ""
 
 
-def tool_uses(msgs: list) -> List[ToolUse]:
+def tool_uses(msgs: list) -> list[ToolUse]:
     """Every tool call in `msgs`, in order, with its result."""
     results = {m.get("tool_call_id"): _text(m.get("content"))
                for m in msgs if m.get("role") == "tool"}
@@ -299,7 +300,7 @@ SUMMARY_PROMPT = (_PROMPTS / "compact.md").read_text().rstrip("\n")
 FINDINGS_PROMPT = (_PROMPTS / "findings.md").read_text().rstrip("\n")
 
 
-def prompt(uses: List[ToolUse], instructions: Optional[str] = None) -> str:
+def prompt(uses: list[ToolUse], instructions: str | None = None) -> str:
     """The user turn that asks for the summary, appended to the
     conversation as it stands (so the history is a prefix-cache hit).
     `instructions` replace the summary prompt, as the API documents; the
@@ -331,7 +332,7 @@ def parse_output(text: str, n_uses: int) -> tuple:
     return summary.strip(), found
 
 
-def render(summary: str, uses: List[ToolUse], found: dict,
+def render(summary: str, uses: list[ToolUse], found: dict,
            distill: bool = True) -> tuple:
     """(the compaction's text, distilled, cleared): the summary, then one
     line per dropped tool call -- its finding, or a clear where

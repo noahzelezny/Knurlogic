@@ -10,8 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning import settings as S
-from knurlogic.tuning.resolve import (context_room, kv_bytes_per_token,
-                                      kv_refusal, resolve)
+from knurlogic.tuning.resolve import (
+    context_room,
+    kv_bytes_per_token,
+    kv_refusal,
+    resolve,
+)
 
 GIB = 1 << 30
 TC = {"num_hidden_layers": 8, "full_attention_interval": 4,
@@ -120,6 +124,7 @@ def test_an_mla_latent_is_counted_at_the_bits_and_its_keys_are_not():
 
 def test_the_scheduler_costs_the_first_prompt_at_the_bits(tmp_path):
     import json
+
     from knurlogic.engine.runtime.scheduler import _kv_from_config
     (tmp_path / "config.json").write_text(json.dumps(
         {"model_type": "qwen3_5_moe", "text_config": TC}))
@@ -132,8 +137,7 @@ def test_the_scheduler_costs_the_first_prompt_at_the_bits(tmp_path):
 
 def test_dynamic_off_drafts_every_step(monkeypatch):
     pytest.importorskip("mlx.core")
-    from knurlogic.engine.mtp.batch_loop import (ALWAYS_DRAFT,
-                                                 default_draft_max_rows)
+    from knurlogic.engine.mtp.batch_loop import ALWAYS_DRAFT, default_draft_max_rows
     monkeypatch.delenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", raising=False)
     monkeypatch.delenv("KNURLOGIC_MTP_DYNAMIC", raising=False)
     assert default_draft_max_rows() is None

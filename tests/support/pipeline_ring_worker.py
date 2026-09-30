@@ -21,14 +21,15 @@ import numpy as np
 
 def build_glm():
     import mlx.core as mx
-    from test_vision_e2e import GLM_TEXT
     from fixtures_vision_glm5 import glm5_tiny_config
+    from test_vision_e2e import GLM_TEXT
+
     from knurlogic.engine import register
     register.register("glm5_next")
-    from knurlogic.engine.families.glm5.architecture.glm5_next.config import \
-        TextConfig
-    from knurlogic.engine.families.glm5.architecture.glm5_next.language \
-        import LanguageModel
+    from knurlogic.engine.families.glm5.architecture.glm5_next.config import TextConfig
+    from knurlogic.engine.families.glm5.architecture.glm5_next.language import (
+        LanguageModel,
+    )
     mx.random.seed(0)
     model = LanguageModel(TextConfig.from_dict(dict(
         glm5_tiny_config()["text_config"], **GLM_TEXT)))
@@ -41,7 +42,9 @@ def build_deepseek_v4():
     """The tiny random DeepSeek-V4 golden (float32), through mlx-lm's
     loader over knurlogic's vendored module."""
     from pathlib import Path
+
     from mlx_lm.utils import load_model
+
     from knurlogic.engine import register
     register.register("deepseek_v4")
     here = Path(__file__).parent / "goldens" / "deepseek_v4_tiny"
@@ -55,11 +58,11 @@ def build(family, seed=0, dtype="float32"):
     if family == "deepseek_v4":
         return build_deepseek_v4()
 
+    import fixtures_vision_qwen as FQ
     import mlx.core as mx
     from mlx.utils import tree_flatten, tree_unflatten
 
     from knurlogic.engine import register
-    import fixtures_vision_qwen as FQ
     register.register(family, override=True)
     m = importlib.import_module(f"mlx_lm.models.{family}")
     # qwen4_exp's defaults are full size; its tiny config is the fixture's
@@ -121,6 +124,7 @@ def _tiny_with_head(vocab):
 
 def mtp(link, out_path, always):
     import mlx.core as mx
+
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.runtime import pipeline as PL
     if always:
@@ -232,8 +236,7 @@ def engine(link, out_path, fail="", split_kind="pipeline"):
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.runtime import pipeline as PL
     from knurlogic.engine.runtime import tensor as T
-    from knurlogic.engine.runtime.executor import (Admission, LocalExecutor,
-                                                   Token)
+    from knurlogic.engine.runtime.executor import Admission, LocalExecutor, Token
     from knurlogic.engine.runtime.request import control_machine
     tok = FakeTok()
 
@@ -289,9 +292,10 @@ def engine(link, out_path, fail="", split_kind="pipeline"):
 
 
 def _tensor_engine(link, out_path, fail, admissions, drain, tok):
+    from tensor_ring_worker import build
+
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.runtime import tensor as T
-    from tensor_ring_worker import build
     prompts = [[5, 17, 3, 99, 42, 7, 64, 11], [23, 31, 104, 33, 9, 8, 7, 6],
                [1, 4, 9, 16, 25, 36, 49, 64]]
     model = build()
@@ -322,8 +326,12 @@ def hit(link, out_path):
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.runtime import pipeline as PL
     from knurlogic.engine.runtime import tensor as T
-    from knurlogic.engine.runtime.executor import (Admission, Checkpoint,
-                                                   LocalExecutor, Token)
+    from knurlogic.engine.runtime.executor import (
+        Admission,
+        Checkpoint,
+        LocalExecutor,
+        Token,
+    )
     from knurlogic.engine.runtime.request import control_machine
     from knurlogic.engine.runtime.scheduler import PromptCache
     tok = FakeTok()
@@ -400,19 +408,25 @@ def image(link, out_path, split_kind="pipeline"):
     positions must come from the refs alone. Both prompts' tokens are the
     unsplit engine's."""
     sys.path.insert(0, os.path.dirname(__file__))
+    from pathlib import Path
+
     import test_vision_qwen as tq
+
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.runtime import pipeline as PL
     from knurlogic.engine.runtime import tensor as T
-    from knurlogic.engine.runtime.executor import (Admission, Checkpoint,
-                                                   LocalExecutor, Token)
+    from knurlogic.engine.runtime.executor import (
+        Admission,
+        Checkpoint,
+        LocalExecutor,
+        Token,
+    )
     from knurlogic.engine.runtime.request import control_machine
     from knurlogic.engine.runtime.scheduler import PromptCache
     from knurlogic.engine.vision import key as K
     from knurlogic.engine.vision import registry
     from knurlogic.engine.vision.request import MirrorVision, VisionServe
     from knurlogic.engine.vision.store import ImageStore
-    from pathlib import Path
     tok = FakeTok()
     fam = "qwen3_5"
     mkey = ("tiny-vl", None, None)

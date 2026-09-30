@@ -23,7 +23,6 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import fixtures_vision as fv  # noqa: E402
-
 import mlx.core as mx  # noqa: E402
 from mlx_vlm.models.gemma4.config import VisionConfig  # noqa: E402
 from mlx_vlm.models.gemma4.language import Gemma4TextModel  # noqa: E402

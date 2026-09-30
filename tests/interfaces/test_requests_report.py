@@ -7,7 +7,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.engine.runtime.scheduler import Job, OutOfMemory, RingFailed, Scheduler  # noqa: E402,E501
+from knurlogic.engine.runtime.scheduler import (  # noqa: E402,E501
+    Job,
+    OutOfMemory,
+    RingFailed,
+    Scheduler,
+)
 
 
 class Host:

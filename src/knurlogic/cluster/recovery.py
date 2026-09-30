@@ -21,11 +21,10 @@ import re
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
-from knurlogic.cluster import NET_ERRORS, PROC_ERRORS
-from knurlogic.cluster import transport
+from knurlogic.cluster import NET_ERRORS, PROC_ERRORS, transport
 
 logger = logging.getLogger(__name__)
 
@@ -441,7 +440,8 @@ def ensure_thread() -> None:
             time.sleep(TICK_S)
             try:
                 tick()
-            except Exception as e:  # the recovery thread must survive one bad tick (logged)
+            # the recovery thread must survive one bad tick (logged)
+            except Exception as e:
                 logger.warning("recovery: %s: %s", type(e).__name__, e)
     threading.Thread(target=loop, daemon=True,
                      name="knurlogic-recovery").start()
@@ -460,7 +460,8 @@ def tick(now: float | None = None) -> list:
             what = (_tick_cluster if rec["kind"] == "cluster"
                     else _tick_single)(rec, time.time() if now is None
                                        else now)
-        except Exception as e:  # one model's failed tick is reported; the others still tick
+        # one model's failed tick is reported; the others still tick
+        except Exception as e:
             what = f"error: {type(e).__name__}: {e}"
         if what:
             out.append((key, what))

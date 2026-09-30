@@ -24,8 +24,8 @@ import json
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx_lm.models.base import create_attention_mask
 from mlx.utils import tree_flatten, tree_unflatten
+from mlx_lm.models.base import create_attention_mask
 
 from knurlogic.engine.runtime.pipeline import unwrap
 

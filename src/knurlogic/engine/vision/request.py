@@ -18,14 +18,17 @@ from __future__ import annotations
 import copy
 import dataclasses
 import threading
+from collections.abc import Callable, Hashable
 from contextlib import ExitStack
-from typing import Any, Callable, Dict, Hashable, List, Tuple
+from typing import Any
 
-from . import ImageRejected, key as K
+from . import ImageRejected
+from . import key as K
 
 #: OpenAI chat content part types that carry an image. `image_url` is the
 #: Chat Completions form; `input_image` the Responses form; `image` what
-#: several clients (and the Anthropic translation) send. A part of any other non-text type is left for mlx-lm to refuse, as
+#: several clients (and the Anthropic translation) send. A part of any other non-text
+#: type is left for mlx-lm to refuse, as
 #: it does today.
 IMAGE_TYPES = ("image_url", "input_image", "image")
 
@@ -34,7 +37,7 @@ def _is_image_part(part: Any) -> bool:
     return isinstance(part, dict) and part.get("type") in IMAGE_TYPES
 
 
-def image_source(part: Dict[str, Any]) -> Any:
+def image_source(part: dict[str, Any]) -> Any:
     """The bytes-or-URL string of one image part, as images.decode takes it.
     Raises ImageRejected (a 400) for a part that names no image."""
     for k in ("image_url", "url", "image", "data"):
@@ -47,9 +50,9 @@ def image_source(part: Dict[str, Any]) -> Any:
                         f"no url or data")
 
 
-def image_parts(messages: Any) -> List[Dict[str, Any]]:
+def image_parts(messages: Any) -> list[dict[str, Any]]:
     """Every image part of every message, in prompt order."""
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for m in messages or ():
         c = m.get("content") if isinstance(m, dict) else None
         if isinstance(c, list):
@@ -63,8 +66,8 @@ def has_images(messages: Any) -> bool:
     return bool(image_parts(messages))
 
 
-def with_placeholders(messages: List[Dict[str, Any]],
-                      texts: List[str]) -> List[Dict[str, Any]]:
+def with_placeholders(messages: list[dict[str, Any]],
+                      texts: list[str]) -> list[dict[str, Any]]:
     """A copy of the messages with the i-th image part replaced by a text
     part holding texts[i]. mlx-lm then joins a message's text parts with ""
     (server.process_message_content), so the placeholder lands exactly
@@ -105,7 +108,7 @@ class VisionServe:
         self.encodes = 0
         self.tensors = 0            # vision weights loaded (serve/vision.py)
         self._lock = threading.Lock()
-        self._pins: Dict[Tuple[str, str], List[ExitStack]] = {}
+        self._pins: dict[tuple[str, str], list[ExitStack]] = {}
 
     @property
     def spec(self):
@@ -117,14 +120,14 @@ class VisionServe:
 
     # --- pins ------------------------------------------------------------------
 
-    def _pin(self, images: List[Tuple[str, str]]) -> None:
+    def _pin(self, images: list[tuple[str, str]]) -> None:
         for im in images:
             st = ExitStack()
             st.enter_context(self.store.pinned(self.model_key, [im]))
             with self._lock:
                 self._pins.setdefault(im, []).append(st)
 
-    def release(self, images: List[Tuple[str, str]]) -> None:
+    def release(self, images: list[tuple[str, str]]) -> None:
         """Drop one pin per image (as taken by one tokenize). Unknown images
         are ignored: a row restored wholly from the cache pinned nothing
         extra, and a double release must not unpin someone else's."""
@@ -186,9 +189,9 @@ class VisionServe:
         are dropped before the exception reaches the server."""
         from . import ImagesOverBudget
         parts = image_parts(request.messages)
-        refs: List[Any] = []
+        refs: list[Any] = []
         before = self.encodes      # tokenize runs on the one generator thread
-        seen: Dict[Tuple[str, str], int] = {}
+        seen: dict[tuple[str, str], int] = {}
         try:
             for p in parts:
                 r = self.ensure(image_source(p))
@@ -249,13 +252,13 @@ class MirrorVision:
 
     def __init__(self, family: Any):
         self.family = family
-        self._refs: Dict[Tuple[str, str], Any] = {}
+        self._refs: dict[tuple[str, str], Any] = {}
 
     @property
     def spec(self):
         return self.family.spec
 
-    def add_refs(self, refs: List[List[Any]]) -> None:
+    def add_refs(self, refs: list[list[Any]]) -> None:
         """The admit op's refs: [sha, proc_hash, n_tokens, grid_thw]."""
         from . import ImageRef
         for sha, ph, n, grid in refs:

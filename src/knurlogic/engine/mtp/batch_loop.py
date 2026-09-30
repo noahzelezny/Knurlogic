@@ -18,10 +18,10 @@ verdicts. Design: docs/design/drafting.md (batched loop).
 from __future__ import annotations
 
 import logging
-
 import os
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, List, Optional
+from typing import Any
 
 import mlx.core as mx
 from mlx_lm.generate import _extend_cache, _merge_caches
@@ -29,8 +29,8 @@ from mlx_lm.generate import _extend_cache, _merge_caches
 from knurlogic.cluster.jobs import chunk_done
 
 from .caches import position, restore, snapshot
-from .seed import seed_head
 from .sampling import Distribution, Keys, rejection_correct
+from .seed import seed_head
 
 __all__ = ["RowParams", "Row", "Emitted", "RowStep", "MTPBatch", "admit",
            "default_draft_max_rows"]
@@ -76,13 +76,13 @@ class RowParams:
 
     max_tokens: int
     #: None = greedy (temperature 0). Otherwise logits [1, V] -> Distribution.
-    dist: Optional[Callable[[mx.array], Distribution]]
-    processors: List[Callable[[mx.array, mx.array], mx.array]]
+    dist: Callable[[mx.array], Distribution] | None
+    processors: list[Callable[[mx.array, mx.array], mx.array]]
     eos: set
     #: False for a row the head must not draft for; it still decodes correctly.
     drafts: bool = True
     #: the request's own random stream (a seed), or None for the global one
-    keys: Optional[Keys] = None
+    keys: Keys | None = None
     #: a pipeline follower's drafting row: rank 0 drafts it with the head
     #: this rank does not hold. The row is prefilled and batched as a
     #: drafting row (same checkpoints, same verify steps); nothing here
@@ -100,7 +100,7 @@ class Row:
     hcache: Any                    # head cache (an EMPTY one when not drafting)
     t1: mx.array                   # [1] int32, the first token to commit
     row_t1: mx.array               # [1, V] the logits t1 was sampled from
-    draft_row: Optional[mx.array]  # [1, V] the head's draft of t2, or None
+    draft_row: mx.array | None  # [1, V] the head's draft of t2, or None
     n_prompt: int
     drafts: bool
     #: this row's MRoPE offset (Qwen: positions after an image
@@ -117,7 +117,7 @@ class Row:
 class Emitted:
     token: int
     from_draft: bool
-    finish: Optional[str]
+    finish: str | None
     logits: mx.array               # [V] the trunk row that produced it
     #: every value of `logits` finite -- computed inside the step's own
     #: final eval, so the NaN guard adds no sync of its own
@@ -127,7 +127,7 @@ class Emitted:
 @dataclass
 class RowStep:
     uid: int
-    tokens: List[Emitted]
+    tokens: list[Emitted]
     #: running per-row acceptance: (accepted drafts, speculative steps)
     accepted: int
     steps: int
@@ -145,7 +145,7 @@ def _apply(row: mx.array, procs, emitted) -> mx.array:
     return row
 
 
-def _with(emitted: List[int], t1: mx.array) -> mx.array:
+def _with(emitted: list[int], t1: mx.array) -> mx.array:
     """The history for the position after t1: what was emitted, then t1."""
     return mx.concatenate([mx.array(emitted, dtype=mx.int32),
                            t1.astype(mx.int32)])
@@ -156,14 +156,14 @@ def _finite_rows(rows: mx.array) -> mx.array:
     return mx.isfinite(rows).all(axis=-1)
 
 
-def _mark(out: List[RowStep], fin: mx.array) -> None:
+def _mark(out: list[RowStep], fin: mx.array) -> None:
     """fin: [B, k] already evaluated; token j of row i gets fin[i][j]."""
     for rs, flags in zip(out, fin.tolist()):
         for em, good in zip(rs.tokens, flags):
             em.finite = bool(good)
 
 
-def _pick(row: mx.array, p: RowParams, emitted: List[int]) -> mx.array:
+def _pick(row: mx.array, p: RowParams, emitted: list[int]) -> mx.array:
     """row: [1, V] -> token [1]."""
     row = _apply(row, p.processors, emitted)
     if p.dist is None:
@@ -187,19 +187,18 @@ def admit(
     make_draft_cache: Callable[[], Any],
     prefill_step_size: int = 2048,
     prefill_ctx=None,
-    on_progress: Optional[Callable[[int, int], None]] = None,
-    cache: Optional[list] = None,
+    on_progress: Callable[[int, int], None] | None = None,
+    cache: list | None = None,
     hcache: Any = None,
     start_pos: int = 0,
-    on_chunk: Optional[Callable[[list, Any], None]] = None,
-    embeds: Optional[mx.array] = None,
-    extras: Optional[dict] = None,
-    chunk_boundaries: Optional[List[tuple]] = None,
+    on_chunk: Callable[[list, Any], None] | None = None,
+    embeds: mx.array | None = None,
+    extras: dict | None = None,
+    chunk_boundaries: list[tuple] | None = None,
     rope_delta: int = 0,
     mrope: bool = False,
     checkpoints: Iterable[int] = (),
-    on_checkpoint: Optional[Callable[[int, list, Any, Optional[mx.array]],
-                                     None]] = None,
+    on_checkpoint: Callable[[int, list, Any, mx.array | None], None] | None = None,
 ) -> Row:
     """Prefill one prompt and seed the head for it: loop.py's prefill, kept
     as a standalone so the batch can admit rows between steps.
@@ -292,7 +291,7 @@ def admit(
             kw[name] = arr[tuple(sl)]
         return kw
 
-    h_chunks: List[mx.array] = []
+    h_chunks: list[mx.array] = []
     seeded = start_pos          # the head is seeded over [start_pos, seeded)
     cps = sorted(c for c in set(checkpoints or ())
                  if start_pos < c <= last and _inside(c, spans) is None
@@ -372,7 +371,7 @@ def admit(
     )
 
 
-def _inside(p: int, spans) -> Optional[tuple]:
+def _inside(p: int, spans) -> tuple | None:
     """The span p falls strictly inside (s < p < e), if any."""
     for s, e in spans:
         if s < p < e:
@@ -426,24 +425,24 @@ class MTPBatch:
         self.acc_est = 0.8                   # EMA of the head's hit rate (logging)
         # (rows, drafting) -> (EMA seconds per token, steps measured)
         self._cost: dict = {}
-        self._regime: Optional[bool] = None  # last step drafted? (for the log)
+        self._regime: bool | None = None  # last step drafted? (for the log)
         self._since_recheck = 0
         # rows -> (backoff multiplier, winner when the last recheck began)
         self._backoff: dict = {}
-        self._explore: Optional[tuple] = None   # (rows, drafting, steps left)
+        self._explore: tuple | None = None   # (rows, drafting, steps left)
         #: engine/runtime/pipeline.Coord on a pipeline split: rank 0's regime,
         #: drafts and verdicts reach every rank through it (B1, B2)
         self.coord = None
 
-        self.uids: List[int] = []
-        self.params: List[RowParams] = []
-        self.emitted: List[List[int]] = []
-        self.drafts: List[bool] = []
-        self.accepted: List[int] = []
-        self.steps: List[int] = []
-        self.n_prompt: List[int] = []
-        self.rope_delta: List[int] = []
-        self.mrope: List[bool] = []
+        self.uids: list[int] = []
+        self.params: list[RowParams] = []
+        self.emitted: list[list[int]] = []
+        self.drafts: list[bool] = []
+        self.accepted: list[int] = []
+        self.steps: list[int] = []
+        self.n_prompt: list[int] = []
+        self.rope_delta: list[int] = []
+        self.mrope: list[bool] = []
 
         self.cache: list = []               # batched trunk caches
         self.hcache: Any = None             # batched head cache
@@ -500,14 +499,15 @@ class MTPBatch:
             return not best
         return best
 
-    def cost_per_token(self, rows: int) -> Optional[float]:
+    def cost_per_token(self, rows: int) -> float | None:
         """The measured seconds per committed token at this width, in the
         cheaper regime; None until a regime has been timed there."""
         got = [c[0] for c in (self._cost.get((rows, True)),
                               self._cost.get((rows, False))) if c]
         return min(got) if got else None
 
-    def _record_cost(self, rows: int, drafting: bool, seconds: float, tokens: int) -> None:
+    def _record_cost(self, rows: int, drafting: bool, seconds: float,
+                     tokens: int) -> None:
         if tokens <= 0:
             return
         per_tok = seconds / tokens
@@ -579,7 +579,7 @@ class MTPBatch:
         # A row's arrays are consumed by the first step; nothing to eval here
         # that the step will not force anyway.
 
-    def filter(self, keep: List[int]) -> None:
+    def filter(self, keep: list[int]) -> None:
         """Keep only these row indices, in this order."""
         if keep == list(range(len(self.uids))):
             return
@@ -650,7 +650,7 @@ class MTPBatch:
 
     # ------------------------------------------------------------------ step
 
-    def step(self) -> List[RowStep]:
+    def step(self) -> list[RowStep]:
         """One speculative step: every live row commits two tokens.
 
         Returns one RowStep per row in batch order (rows that finish are
@@ -679,7 +679,7 @@ class MTPBatch:
                           sum(len(rs.tokens) for rs in out))
         return out
 
-    def _live(self, B: int) -> List[bool]:
+    def _live(self, B: int) -> list[bool]:
         # A row drafts this step iff it is a drafting row AND the head has
         # produced a draft for it (the batch may hold only non-drafting rows).
         # A follower has no head and no drafts of its own: its drafting rows
@@ -693,8 +693,8 @@ class MTPBatch:
         live = self._live(B)
 
         # --- draft d2 per row -------------------------------------------
-        d2_rows: List[mx.array] = []
-        qs: List[Optional[Distribution]] = []
+        d2_rows: list[mx.array] = []
+        qs: list[Distribution | None] = []
         for i in range(B):
             p = self.params[i]
             if not live[i]:
@@ -718,7 +718,7 @@ class MTPBatch:
         d2 = mx.concatenate(d2_rows).astype(mx.int32)
         return live, d2, qs
 
-    def _draft_step(self, B: int, pre=None) -> List[RowStep]:
+    def _draft_step(self, B: int, pre=None) -> list[RowStep]:
         """One speculative step: every row commits t1 and a verified t2.
         `pre`: (live, d2, qs) already drawn (a pipeline's B1)."""
         assert self.t1 is not None and self.row_t1 is not None
@@ -731,9 +731,9 @@ class MTPBatch:
                          **pos2)
 
         # --- verdicts ----------------------------------------------------
-        oks: List[Any] = [False] * B
-        t2_rows: List[Any] = [self.t1[i:i + 1] for i in range(B)]
-        lazy: List[mx.array] = []
+        oks: list[Any] = [False] * B
+        t2_rows: list[Any] = [self.t1[i:i + 1] for i in range(B)]
+        lazy: list[mx.array] = []
         # a pipeline follower's logits are zeros: its verdicts come in B2
         judge = self.coord is None or self.coord.leader
         for i in (range(B) if judge else ()):
@@ -801,13 +801,13 @@ class MTPBatch:
         # --- emit --------------------------------------------------------
         t1_list = self.t1.tolist()
         t2_list = t2.tolist()
-        out: List[RowStep] = []
-        keep: List[int] = []
+        out: list[RowStep] = []
+        keep: list[int] = []
         for i in range(B):
             p = self.params[i]
             em = self.emitted[i]
-            toks: List[Emitted] = []
-            finish: Optional[str] = None
+            toks: list[Emitted] = []
+            finish: str | None = None
             for tok, from_draft, row in (
                 (t1_list[i], False, self.row_t1[i]),
                 (t2_list[i], ok_flags[i], lg2[i, 0]),
@@ -848,7 +848,8 @@ class MTPBatch:
             # surviving row: (h_i, x_{i+1}) and (h_{i+1}, x_{i+2}). The
             # second output drafts x_{i+3}, next step's speculative token.
             pair_ids = mx.stack([t2k, t_next], axis=1)
-            self.draft_row = self.head.draft_logits(h_pair[idx], pair_ids, self.hcache)[:, -1]
+            self.draft_row = self.head.draft_logits(
+                h_pair[idx], pair_ids, self.hcache)[:, -1]
             mx.eval(t_next, self.draft_row, fin)
         else:
             self.draft_row = None if self.head is None else self.draft_row
@@ -858,7 +859,7 @@ class MTPBatch:
         self.row_t1 = row_t1
         return out
 
-    def _plain_step(self) -> List[RowStep]:
+    def _plain_step(self) -> list[RowStep]:
         """One stock decode step: every row commits t1 and samples the next.
 
         Taken when the batch is too wide for drafting to pay (draft_max_rows).
@@ -876,14 +877,14 @@ class MTPBatch:
         # is about to choose it too, so score the head at no cost and keep
         # the acceptance estimate live while not drafting.
         standing = self.draft_row if self.any_drafting else None
-        out: List[RowStep] = []
-        keep: List[int] = []
+        out: list[RowStep] = []
+        keep: list[int] = []
         for i in range(B):
             p = self.params[i]
             em = self.emitted[i]
             tok = t1_list[i]
             em.append(tok)
-            finish: Optional[str] = None
+            finish: str | None = None
             if tok in p.eos:
                 finish = "stop"
             elif len(em) >= p.max_tokens:
@@ -902,7 +903,8 @@ class MTPBatch:
             _pick(row_t1[i:i + 1], self.params[i], self.emitted[i]) for i in keep
         ]
         if standing is not None and keep:
-            hits = mx.argmax(standing, axis=-1)[mx.array(keep)] == mx.concatenate(t_next_rows)
+            hits = (mx.argmax(standing, axis=-1)[mx.array(keep)]
+                    == mx.concatenate(t_next_rows))
             frac = float(mx.mean(hits.astype(mx.float32)).item())
             self.acc_est = 0.9 * self.acc_est + 0.1 * frac
         self.filter(keep)

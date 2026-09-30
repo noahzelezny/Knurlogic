@@ -168,6 +168,7 @@ def _serve(tok):
     """The served tokenizer the translation reads (as the model host
     registers it)."""
     import types
+
     from knurlogic.engine.serve import state
     T._probe_cache.clear()
     state.SERVED["provider"] = types.SimpleNamespace(tokenizer=tok)
@@ -320,6 +321,7 @@ def test_probe_holds_when_requests_race_it():
     not turn a verified template into 'not controllable'."""
     import threading
     import time
+
     from knurlogic.engine.serve import thinking as T
 
     class Tok:
@@ -354,6 +356,7 @@ def test_a_request_during_load_still_gets_its_level(monkeypatch):
     tokenizer yet; it is translated from the artifact's own tokenizer on
     disk, not served the model's default."""
     import mlx_lm.utils
+
     from knurlogic.engine.serve import state
     state.SERVED["provider"] = types.SimpleNamespace(tokenizer=None)
     state.SERVED["path"] = "/artifact/still-loading"

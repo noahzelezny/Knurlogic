@@ -25,8 +25,8 @@ from types import SimpleNamespace
 import pytest
 
 from knurlogic.cluster import jobs as J
-from knurlogic.cluster import links
 from knurlogic.cluster import launch as C
+from knurlogic.cluster import links
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
 from knurlogic.tuning import settings
@@ -337,7 +337,8 @@ def test_stop_tells_only_pages_this_page_knows(cache, monkeypatch):
     monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(all=lambda: peers))
     C.SPECS["ab12cd34ef567890"] = s
     posted = []
-    out = C.stop("ab12cd34ef567890", post=lambda page, kind, d: posted.append((page, kind)),
+    out = C.stop("ab12cd34ef567890",
+                 post=lambda page, kind, d: posted.append((page, kind)),
                  grace=0)
     assert posted == [("10.0.0.2:8765", "Stop")]
     assert out["told"] == ["B"]

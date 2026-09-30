@@ -11,9 +11,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.tuning import settings as S
 from knurlogic.machine import wired
 from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning import settings as S
 from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
@@ -128,6 +128,7 @@ def test_a_live_knob_lands_on_the_loaded_runtime(monkeypatch):
     """Rebinding the module global is what makes 'no reload' true."""
     import sys
     import types
+
     from knurlogic.engine import serve as engine
 
     fake = types.ModuleType("_fake_vq_runtime")
@@ -160,8 +161,8 @@ def test_a_knob_the_bundled_runtime_never_reads_is_called_out(tmp_path):
     """Knurlogic emitted VQLAB_PREFILL_CHUNK for every artifact and not one
     bundled runtime on this machine reads it. A resolved setting that does
     nothing is the exact failure this package exists to prevent."""
-    from knurlogic.machine.artifact import Artifact
     from knurlogic.interfaces.page.documents import knob_reach
+    from knurlogic.machine.artifact import Artifact
     (tmp_path / "config.json").write_text('{"model_type":"x","model_file":"model.py"}')
     (tmp_path / "model.py").write_text(
         'import os\nC = os.environ.get("VQ_DECODE_CHUNK", "32")\n')
@@ -176,8 +177,9 @@ def test_a_knob_the_bundled_runtime_never_reads_is_called_out(tmp_path):
 
 def test_an_artifact_with_no_bundled_runtime_does_not_guess():
     """No runtime to ask is not the same as 'the knob does nothing'."""
-    from knurlogic.machine.artifact import Artifact
     from pathlib import Path
+
+    from knurlogic.machine.artifact import Artifact
     a = Artifact(path=Path("/nonexistent"), model_type="x", model_file=None,
                  bytes_on_disk=0, hidden_size=None, moe_intermediate_size=None)
     assert a.reads_knob("VQ_DECODE_CHUNK") is None
@@ -252,6 +254,7 @@ def test_a_measured_family_width_is_a_cap_the_room_decides_how_much_of():
     launch: a roomy box takes the widest width whose step transient fits
     10% of the room, a tight box stays at 512."""
     from pathlib import Path
+
     from knurlogic.machine.artifact import Artifact
     a = Artifact(path=Path("/nonexistent"), model_type="qwen3_5",
                  model_file=None, bytes_on_disk=20 * GIB, hidden_size=4096,
@@ -273,6 +276,7 @@ def test_with_no_bundled_runtime_it_emits_the_current_name():
     """No bundled runtime to ask: the vendored VQ runtime and the engine
     both read the current name."""
     from pathlib import Path
+
     from knurlogic.machine.artifact import Artifact
     a = Artifact(path=Path("/nonexistent"), model_type="x", model_file=None,
                  bytes_on_disk=70 * GIB, hidden_size=4096,
@@ -517,6 +521,7 @@ def _qwen_moe(hidden=2048, size_gib=13.8):
     """Qwen3.6-35B-A3B VQ 3.4 shape (hidden 2048; 10 of 40 layers full
     attention, 2 KV heads of 256) -- or the 397B with hidden=4096."""
     from pathlib import Path
+
     from knurlogic.machine.artifact import Artifact
     types = (["linear_attention"] * 3 + ["full_attention"]) * 10
     cfg = {"text_config": {"hidden_size": hidden, "num_hidden_layers": 40,

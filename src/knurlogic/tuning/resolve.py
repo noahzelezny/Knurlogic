@@ -15,8 +15,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from knurlogic.tuning import settings as S
 from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning import settings as S
 
 GIB = 1 << 30
 
@@ -121,8 +121,9 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 
 #: Knobs `engine.serve` turns into argv or an mlx call, so they are real
 #: whether or not an artifact's bundled runtime reads them.
-ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp", "mtp_dynamic", "kv_bits", "kv_kernel",
-                   "cross_chip", "long_context", "preset")
+ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp",
+                   "mtp_dynamic", "kv_bits", "kv_kernel", "cross_chip",
+                   "long_context", "preset")
 
 
 def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
@@ -246,13 +247,13 @@ def prefill_chunk_by_room(artifact: Artifact, headroom, working_set_bytes: int,
     for w in S.PREFILL_CHUNK_LADDER:
         if floor < w <= family and transient(w) <= allowed:
             width = w
+    nxt = min((w for w in S.PREFILL_CHUNK_LADDER if w > width), default=0)
     return width, (
         f"prompt chunk {width} (family best {family}): {room / GIB:.1f} GiB "
         f"room after weights, step margin, {kv / GIB:.1f} GiB KV and "
         f"{cache_bytes / GIB:.1f} GiB cache; its step transient "
         f"~{transient(width) / GIB:.2f} GiB"
-        + (f" (next up, {min(w for w in S.PREFILL_CHUNK_LADDER if w > width)}"
-           f": ~{transient(min(w for w in S.PREFILL_CHUNK_LADDER if w > width)) / GIB:.2f})"
+        + (f" (next up, {nxt}: ~{transient(nxt) / GIB:.2f})"
            if width < family else "")
         + f" vs the rule's {S.PREFILL_TRANSIENT_ROOM_SHARE:.0%} of room = "
         f"{allowed / GIB:.2f} GiB -- widest that fits, floor {floor}")
@@ -1334,7 +1335,8 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
     at least one layer and no rank more
     than fits; `reserve` (fit_reserve) is what each rank also keeps free:
     the first request's transient and a minimum context's KV, so an uneven
-    split respects what the fit check does; rank 0 holds the LAST run of layers, rank N-1 the first.
+    split respects what the fit check does; rank 0 holds the LAST run of
+    layers, rank N-1 the first.
 
     -> {"layers": [count per rank], "bounds": [(start, end) per rank],
         "bytes": [layer bytes per rank], "weights": [...], "reason": str}

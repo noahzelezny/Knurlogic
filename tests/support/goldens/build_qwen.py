@@ -33,11 +33,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests"))
 import fixtures_vision as fv  # noqa: E402
 import fixtures_vision_qwen as fq  # noqa: E402
-
 import mlx.core as mx  # noqa: E402
 from mlx.utils import tree_flatten, tree_unflatten  # noqa: E402
 from mlx_vlm.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
-    Qwen3VLImageProcessor)
+    Qwen3VLImageProcessor,
+)
 
 N_GEN = 40
 N_T2 = 12

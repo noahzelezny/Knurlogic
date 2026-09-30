@@ -128,10 +128,12 @@ def test_ring_ranks_on_one_machine_do_not_deadlock_on_the_lock(
     run while one rank holds the machine's load lock (else a pipeline
     hangs: rank 0 in the dtype all_gather holding the lock, rank 1
     waiting for it)."""
-    import threading
-    import mlx.nn as nn
-    from knurlogic.engine.runtime import host as H
     import importlib
+    import threading
+
+    import mlx.nn as nn
+
+    from knurlogic.engine.runtime import host as H
     L = importlib.import_module("knurlogic.engine.serve.load")
     monkeypatch.setenv("KNURLOGIC_LOADLOCK", str(tmp_path / "load.lock"))
     monkeypatch.setattr(L, "load_unlocked",

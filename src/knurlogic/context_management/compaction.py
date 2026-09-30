@@ -14,8 +14,8 @@ Design: docs/design/compaction.md.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
 
 from knurlogic.context_management import context_edits as E
 
@@ -42,11 +42,11 @@ class Pending:
 class Outcome:
     """What the response says about context management."""
     applied: list = field(default_factory=list)
-    compaction: Optional[str] = None
+    compaction: str | None = None
     pause: bool = False
     #: the summary pass's usage: {input_tokens, output_tokens,
     #: cache_read_input_tokens}
-    iteration: Optional[dict] = None
+    iteration: dict | None = None
 
 
 def settings(env=None) -> dict:
@@ -151,7 +151,8 @@ def summarize(body: dict, pending: Pending, out: Outcome,
         msg = ((resp.get("choices") or [{}])[0].get("message") or {})
         text = msg.get("content") or ""
         usage = resp.get("usage") or {}
-    except Exception as e:                       # fail soft  # the model call fails soft, logged below
+    # fail soft  # the model call fails soft, logged below
+    except Exception as e:
         why = f"{type(e).__name__}: {e}"
         logger.warning("compaction summary failed: %s", why)
     summary, found = E.parse_output(text, len(uses))
@@ -208,7 +209,7 @@ def attach(resp: dict, out: Outcome) -> dict:
 
 
 def paused(out: Outcome, *, id_: str, created: int, model: str,
-           context: Optional[dict] = None) -> dict:
+           context: dict | None = None) -> dict:
     """The whole response when the edit said pause_after_compaction: the
     summary alone, finish_reason "compaction"."""
     usage: dict = {"prompt_tokens": 0, "completion_tokens": 0,

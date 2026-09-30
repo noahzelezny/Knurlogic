@@ -15,17 +15,14 @@ state, sliding windows, the MTP draft cache. Design: docs/design/kv-cache.md.
 """
 from __future__ import annotations
 
-from typing import List, Optional
-
 import mlx.core as mx
-from mlx_lm.models.cache import (BatchKVCache, KVCache,
-                                 dynamic_roll)
+from mlx_lm.models.cache import BatchKVCache, KVCache, dynamic_roll
 
 #: bits a person can ask for; None (or "bf16") is the unquantized cache
 BITS = (8, 6, 4)
 
 
-def parse_bits(v) -> Optional[int]:
+def parse_bits(v) -> int | None:
     """'bf16'/''/None/16 -> None; '8'/'6'/'4' -> int. Anything else raises."""
     if v is None:
         return None
@@ -201,7 +198,7 @@ class BatchQuantKVCache(BatchKVCache):
     kv8_kernel = False
     kv8_fetch = None
 
-    def __init__(self, left_padding: List[int], kv_bits: int = 8):
+    def __init__(self, left_padding: list[int], kv_bits: int = 8):
         super().__init__(left_padding)
         self.kv_bits = int(kv_bits)
         self.group = None
@@ -432,7 +429,7 @@ def quantize_cache_list(caches: list, bits: int, table=None) -> tuple:
     return out, n
 
 
-def install(model, bits: Optional[int]) -> int:
+def install(model, bits: int | None) -> int:
     """Wrap `model.make_cache` so every new cache list stores attention
     K/V at `bits`. Returns how many layers are quantized (0: none of this
     model's caches are the kind this can quantize -- the caller refuses)."""

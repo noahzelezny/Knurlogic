@@ -19,7 +19,8 @@ import os
 import subprocess
 import sys
 
-from knurlogic.engine import arch, serve as engine, mtp
+from knurlogic.engine import arch, mtp
+from knurlogic.engine import serve as engine
 from knurlogic.interfaces.page import documents
 from knurlogic.machine import status, wired
 from knurlogic.machine.artifact import Artifact
@@ -139,8 +140,8 @@ def settings_refusal(a, overrides) -> str | None:
     Knurlogic). Nothing is dropped silently. Launch knobs in the
     environment are not read at all (ignored_env says so), so they are not
     checked here."""
-    from knurlogic.tuning import settings as S
     from knurlogic.machine import preferences
+    from knurlogic.tuning import settings as S
     # past the native window is long context where the family has YaRN
     # (settings.settle_context turns it on), so the ceiling is the YaRN one
     w = S.context_ceiling(getattr(a, "model_type", ""),
@@ -159,9 +160,9 @@ def launch_refusal(a, overrides, tune: str = "default") -> str | None:
     can start `a`, else why not -- the deterministic refusals `run` makes
     before it loads a thing, in the same words, so a page or the MCP can
     refuse the launch BEFORE a process (or a ring of them) is started."""
+    from knurlogic.machine import preferences
     from knurlogic.tuning import settings as S
     from knurlogic.tuning.resolve import kv_refusal, preset_env
-    from knurlogic.machine import preferences
     # a context past the native window is settled (turned on / lowered)
     # before the values are checked, as run does
     sets, _ = S.settle_context(a.model_type, a.raw_config,
@@ -261,8 +262,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # read before the resolver, since the KV bits change what the context
     # costs, and refused here with the reason rather than at load.
     from knurlogic.tuning import settings as S
-    from knurlogic.tuning.resolve import (kv_refusal, preset_env,
-                                          apply_preset_overrides)
+    from knurlogic.tuning.resolve import apply_preset_overrides, kv_refusal, preset_env
     # A launch preset IS the tune: a per-model KNURLOGIC_PRESET (Settings
     # -> Models, carried ring-wide like every launch set) picks it over
     # --tune; its launch values are defaults every explicit set beats.
@@ -405,7 +405,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         if _mm["doc"] is None or now - _mm["at"] > 4.0:
             try:
                 _mm["doc"] = loaded.memory_map()
-            except (OSError, subprocess.SubprocessError, ValueError, KeyError, AttributeError):
+            except (OSError, subprocess.SubprocessError, ValueError, KeyError,
+                    AttributeError):
                 _mm["doc"] = None
             _mm["at"] = now
         return _mm["doc"]
@@ -439,14 +440,16 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # `models` answer plus the default the server actually renders
         try:
             snap["thinking"] = engine.thinking_status()
-        except Exception as e:  # the status document must still answer; the error is in it
+        # the status document must still answer; the error is in it
+        except Exception as e:
             snap["thinking"] = {"error": f"{type(e).__name__}: {e}"}
         # Vision on the same contract page as drafting: spec, image store
         # size, encodes and pins -- the numbers that say whether images are
         # being reused or re-encoded.
         try:
             snap["vision"] = engine.vision_status()
-        except Exception as e:  # the status document must still answer; the error is in it
+        # the status document must still answer; the error is in it
+        except Exception as e:
             snap["vision"] = {"error": f"{type(e).__name__}: {e}"}
         # `served_vision()` is the P0-frozen way to say whether the served
         # model sees images at all; the image store's own
@@ -528,12 +531,12 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         tune_name = want.get("tune")
         if tune_name:
             want = {k: v for k, v in _resolve_for(ws, tune_name).env.items()}
-        from knurlogic.tuning.settings import COMPACT_KNOBS
         # compaction's knobs are read per request by this server's HTTP
         # side (context_management/compaction): the environment is the setting
         # -- and they are knurlogic-wide (machine/preferences): a change
         # here is saved for every server on this machine, not this one's
         from knurlogic.machine import preferences
+        from knurlogic.tuning.settings import COMPACT_KNOBS
         cur = preferences.compaction_env()
         compact = {k: str(v) for k, v in want.items()
                    if k in COMPACT_KNOBS

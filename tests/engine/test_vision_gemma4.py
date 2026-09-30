@@ -18,9 +18,10 @@ mx = pytest.importorskip("mlx.core")
 
 import fixtures_vision as fv  # noqa: E402
 import fixtures_vision_gemma4 as g4fv  # noqa: E402
+
 from knurlogic.engine.families.gemma4.vision import Gemma4Vision  # noqa: E402
-from knurlogic.engine.vision.key import expand  # noqa: E402
 from knurlogic.engine.vision import ImageRef  # noqa: E402
+from knurlogic.engine.vision.key import expand  # noqa: E402
 
 
 def _tiny_family() -> Gemma4Vision:
@@ -57,8 +58,9 @@ def _write_quantized_embed(tmp_path):
     """An artifact whose embed_vision projection is stored 8-bit affine and
     whose tower is plain -- the layout gemma e4b VQ ships."""
     import json
-    from mlx.utils import tree_flatten
+
     import mlx.nn as nn
+    from mlx.utils import tree_flatten
     fam = _tiny_family()
     gs = 32
     nn.quantize(fam.embed_vision, group_size=gs, bits=8)
@@ -97,6 +99,7 @@ def test_placeholder_is_framed_with_the_artifacts_own_tokens(tmp_path):
     boi / image / eoi, or the prompt carries no image token at all (the
     e4b gate failure: 1 image, 0 placeholders)."""
     import json
+
     from knurlogic.engine.families.gemma4.vision import build
     t = fv.tiny_ids("gemma4")
     (tmp_path / "tokenizer.json").write_text(json.dumps({"added_tokens": [
@@ -188,7 +191,8 @@ def test_g4_mask_overlay_matches_reference():
     tc["num_hidden_layers"] = 1
     tc["num_kv_shared_layers"] = 0
     tc["layer_types"] = ["full_attention"]
-    model = arch.Gemma4TextModel(arch.ModelArgs.from_dict(dict(tc, model_type="gemma4_text")))
+    model = arch.Gemma4TextModel(
+        arch.ModelArgs.from_dict(dict(tc, model_type="gemma4_text")))
 
     B, N = block_ids.shape
     h = mx.zeros((B, N, tc["hidden_size"]))

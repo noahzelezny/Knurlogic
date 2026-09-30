@@ -113,7 +113,8 @@ def repo(repo_id: str) -> dict:
     elif mtype in NON_CHAT_MODEL_TYPES:
         doc["supported"], doc["why"] = False, f"{mtype} is not a chat model"
     elif not arch.supported(mtype):
-        doc["supported"], doc["why"] = False, f"{mtype} is not an architecture Knurlogic runs"
+        doc["supported"] = False
+        doc["why"] = f"{mtype} is not an architecture Knurlogic runs"
     else:
         doc["supported"], doc["why"] = True, ""
     return doc

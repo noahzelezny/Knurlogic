@@ -1,5 +1,6 @@
 """Load/unload on ONE peer: the coordinator forwards by identity; the
-peer refuses anything off its gate, with an Origin, or naming a path. No model loads: the
+peer refuses anything off its gate, with an Origin, or naming a path. No
+model loads: the
 peer's loader and resolver are stubs, and the "peer" in the happy path is a
 local http server running the real handler."""
 
@@ -153,7 +154,8 @@ def test_forward_to_a_real_peer_page(monkeypatch):
     """The coordinator's forward_launch against the real handler on a local
     port: identity resolution, refusal text passed back."""
     loads = []
-    monkeypatch.setattr(page_server, "peer_launch", _stubbed(page_server.peer_launch, loads))
+    monkeypatch.setattr(page_server, "peer_launch",
+                        _stubbed(page_server.peer_launch, loads))
     srv = ThreadingHTTPServer(("127.0.0.1", 0), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
@@ -177,6 +179,7 @@ def test_forward_to_a_real_peer_page(monkeypatch):
         # a browser page cannot reach the peer route
         import urllib.error
         import urllib.request
+
         from knurlogic.cluster import transport
         body, _ = transport.encode("Load", {"identity": "abc"})
         req = urllib.request.Request(
@@ -213,9 +216,11 @@ def test_forward_refuses_a_port_that_is_not_a_number(monkeypatch):
 
 def test_a_handler_exception_is_a_typed_500_not_a_dropped_connection():
     import json
+
     from knurlogic.cluster import protocol as P
     from knurlogic.cluster import transport
-    body = json.dumps(P.message(P.Heartbeat(boot_id="b"), sender="me").to_wire()).encode()
+    msg = P.message(P.Heartbeat(boot_id="b"), sender="me")
+    body = json.dumps(msg.to_wire()).encode()
 
     def boom(inner):
         raise RuntimeError("handler bug")

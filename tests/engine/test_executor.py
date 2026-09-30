@@ -114,8 +114,7 @@ def test_top_logprobs_only_when_asked_and_sorted():
 
 def test_a_failing_admission_is_a_row_failure_beside_a_working_row(
         monkeypatch):
-    from knurlogic.engine.runtime.executor import (Admission, Progress,
-                                                   RowFailure, Token)
+    from knurlogic.engine.runtime.executor import Admission, Progress, RowFailure, Token
     model, head, prompts = _tiny(512)
     ex = _executor(model, head)
     real = ex.gen._admit_one
@@ -258,7 +257,9 @@ def test_removing_a_row_frees_its_memory_now_not_at_the_next_step():
     stopping one row to get back under the limit -- saw no drop and
     stopped every row."""
     import gc
+
     import mlx.core as mx
+
     from knurlogic.engine.runtime.executor import Admission
     model, head, prompts = _tiny(512)
     ex = _executor(model, head)
@@ -284,6 +285,7 @@ def test_a_headless_engine_says_why_and_names_vision_only_for_vision(
     image switching engines on one rank): the line says why there is no
     head, and 'vision' only when it serves images."""
     import logging
+
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     model, _head, _ = _tiny(512)
     why = "not every rank of the pipeline bound a drafting head"

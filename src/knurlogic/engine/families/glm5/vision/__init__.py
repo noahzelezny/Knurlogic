@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
 
@@ -32,9 +32,11 @@ class Glm5VisionFamily:
     IMAGE_MEAN = (0.48145466, 0.4578275, 0.40821073)
     IMAGE_STD = (0.26862954, 0.26130258, 0.27577711)
 
-    def __init__(self, config: Dict[str, Any], image_mean=None,
+    def __init__(self, config: dict[str, Any], image_mean=None,
                  image_std=None):
-        from knurlogic.engine.families.glm5.architecture.glm5_next.config import VisionConfig
+        from knurlogic.engine.families.glm5.architecture.glm5_next.config import (
+            VisionConfig,
+        )
 
         self.image_mean = tuple(image_mean or self.IMAGE_MEAN)
         self.image_std = tuple(image_std or self.IMAGE_STD)
@@ -72,7 +74,9 @@ class Glm5VisionFamily:
 
     def _build_tower(self):
         if self.tower_model is None:
-            from knurlogic.engine.families.glm5.architecture.glm5_next.vision import VisionModel
+            from knurlogic.engine.families.glm5.architecture.glm5_next.vision import (
+                VisionModel,
+            )
             self.tower_model = VisionModel(self.vision_config)
         return self.tower_model
 
@@ -87,7 +91,7 @@ class Glm5VisionFamily:
         from mlx.utils import tree_unflatten
 
         tower = self._build_tower()
-        weights: Dict[str, Any] = {}
+        weights: dict[str, Any] = {}
         root = Path(model_path)
         index = root / "model.safetensors.index.json"
         if index.is_file():
@@ -151,7 +155,7 @@ class Glm5VisionFamily:
                        n_tokens=n_tokens, grid_thw=(1, gh, gw))
         return {"pixel_values": arr, "grid_thw": (1, gh, gw)}, ref
 
-    def encode(self, pixels: Dict[str, Any], ref) -> EncodedImage:
+    def encode(self, pixels: dict[str, Any], ref) -> EncodedImage:
         import mlx.core as mx
 
         from knurlogic.engine.vision import EncodedImage
@@ -190,7 +194,7 @@ class Glm5VisionFamily:
                 continue
         raise AttributeError("no embed_tokens found on the glm5_next model")
 
-    def embed(self, model, key, start, features) -> Dict[str, Any]:
+    def embed(self, model, key, start, features) -> dict[str, Any]:
         import mlx.core as mx
 
         from knurlogic.engine.vision import key as K
@@ -201,7 +205,7 @@ class Glm5VisionFamily:
         text = self._embed_tokens(model)(ids)
         return {"input_embeddings": merge(text, sl, features)}
 
-    def positions(self, key, refs) -> Tuple[Optional[Any], int]:
+    def positions(self, key, refs) -> tuple[Any | None, int]:
         # NoPE: the trunk computes its own 1D positions; no MRoPE grid, no
         # rope_delta (see module docstring).
         return None, 0
@@ -212,7 +216,7 @@ class Glm5VisionFamily:
         return []
 
 
-def build(model_path: str, text_model: Any, config: Dict[str, Any]):
+def build(model_path: str, text_model: Any, config: dict[str, Any]):
     if not config.get("vision_config"):
         return None
     mean = std = None

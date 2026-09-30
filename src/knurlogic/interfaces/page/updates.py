@@ -78,7 +78,8 @@ def start(paths_fn, offline_flag: bool = False, ask=remote_sha):
     def run():
         try:
             repos = sorted({r[0] for r in map(local_ref, paths_fn()) if r})
-        except Exception:  # the update check runs once on a daemon thread; any failure means no check
+        # the update check runs once on a daemon thread; any failure means no check
+        except Exception:
             logger.debug("update check: could not list local repos",
                          exc_info=True)
             return

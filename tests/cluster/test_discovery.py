@@ -6,8 +6,7 @@ import time
 
 import pytest
 
-from knurlogic.cluster.discovery import (LOCAL_ONLY, Discovery, txt_decode,
-                                         txt_encode)
+from knurlogic.cluster.discovery import LOCAL_ONLY, Discovery, txt_decode, txt_encode
 
 
 def test_txt_round_trips_and_truncates_at_255():
@@ -44,6 +43,7 @@ def test_a_ref_queued_twice_is_freed_once_and_its_callback_goes():
     would hand mDNSResponder a dead pointer (segfault-capable)."""
     import ctypes
     import types
+
     from knurlogic.cluster.discovery import Discovery
     d = Discovery()
     a, b = ctypes.c_void_p(1), ctypes.c_void_p(2)

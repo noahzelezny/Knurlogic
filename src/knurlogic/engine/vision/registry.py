@@ -16,20 +16,22 @@ Stdlib only; the family module is imported only when `build` is called.
 from __future__ import annotations
 
 import importlib
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
+
 
 #: architecture module -> "module:attr", from each family's manifest
 #: (engine/families/). The attr is
 #: `build(model_path: str, text_model, config: dict) -> Family | None`.
-def _families() -> Dict[str, str]:
+def _families() -> dict[str, str]:
     from knurlogic.engine import families
     return families.build_maps()["vision"]
 
 
-FAMILIES: Dict[str, str] = _families()
+FAMILIES: dict[str, str] = _families()
 
 
-def resolve(target: str) -> Optional[Callable[..., Any]]:
+def resolve(target: str) -> Callable[..., Any] | None:
     """"module:attr" -> the callable, or None when the module is absent.
     Only a ModuleNotFoundError naming the target module itself (or a parent
     package) counts as absent; any other import failure propagates."""
@@ -78,7 +80,7 @@ def has_family(model_type: str) -> bool:
 
 
 def build(model_type: str, model_path: str, text_model: Any,
-          config: Optional[dict] = None):
+          config: dict | None = None):
     """The Family for a loaded model, or None when it has no vision here:
     an unregistered model_type, a family package not present, a config with
     no vision_config, or the family's own build declining."""

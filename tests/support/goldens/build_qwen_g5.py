@@ -27,7 +27,6 @@ sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "src"))
 import fixtures_vision as fv  # noqa: E402
 import fixtures_vision_qwen as fq  # noqa: E402
-
 import mlx.core as mx  # noqa: E402
 from mlx.utils import tree_flatten  # noqa: E402
 

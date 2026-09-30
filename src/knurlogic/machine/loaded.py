@@ -229,6 +229,7 @@ def _instance_of(base: str) -> str:
     writes `instance` into), read from THIS box's own registry -- a peer's
     row already carries whatever its own survey put there."""
     from urllib.parse import urlparse
+
     from knurlogic.machine import servers
     port = urlparse(base).port
     if not port:

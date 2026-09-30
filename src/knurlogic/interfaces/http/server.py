@@ -16,8 +16,8 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
 from knurlogic.engine.templates import TEMPLATE_ERRORS
@@ -45,7 +45,7 @@ class App:
     routes and a few hooks the caller fills in."""
 
     def __init__(self, scheduler, *, served: Callable[[], dict],
-                 routes: Optional[dict] = None,
+                 routes: dict | None = None,
                  gate=None,
                  concurrency: Callable[[], str] = None,
                  residency: Callable[[], dict] = None,
@@ -186,7 +186,8 @@ class App:
                 job, reply = self.submit(dict(body, max_tokens=1,
                                               stream=False), chat=True)
                 reply.complete(reply.first())
-            except Exception as e:  # a daemon thread; the warm-up is best effort (logged)
+            # a daemon thread; the warm-up is best effort (logged)
+            except Exception as e:
                 logger.debug("warming the compacted prompt: %s", e)
         threading.Thread(target=run, daemon=True).start()
 
@@ -316,7 +317,7 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------ helpers
 
     def _send(self, code: int, body: bytes, ctype="application/json",
-              headers: Optional[dict] = None) -> None:
+              headers: dict | None = None) -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -411,7 +412,8 @@ class Handler(BaseHTTPRequestHandler):
             fn()
         except (BrokenPipeError, ConnectionResetError):
             pass
-        except Exception as e:  # HTTP handler top level: any failure is a 500 with a body (logged)
+        # HTTP handler top level: any failure is a 500 with a body (logged)
+        except Exception as e:
             logger.exception("%s %s failed", self.command, self.path)
             try:
                 self._error(O.ApiError(500, f"{type(e).__name__}: {e}"))
@@ -422,8 +424,7 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         if path == "/v1/models":
-            from knurlogic.machine.artifact import (context_length,
-                                                    sampling_defaults)
+            from knurlogic.machine.artifact import context_length, sampling_defaults
             path = self.app.scheduler.host.path
             from knurlogic.engine.serve import thinking as TH
             try:

@@ -417,6 +417,7 @@ def test_per_row_rope_delta_in_a_batch_equals_each_row_alone(fam, tmp_path):
     row's does not -- the merge must give it text positions, and the sparse
     indexer (budget 32) runs on both."""
     import copy
+
     from mlx_lm.generate import _merge_caches
     arrays, meta = _golden(fam)
     f = _family(tmp_path, fam, meta)
