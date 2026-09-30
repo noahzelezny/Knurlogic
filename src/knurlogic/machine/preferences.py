@@ -45,6 +45,20 @@ def get() -> dict:
             if k in NAMES and str(v).strip() and check_knob(k, v) is None}
 
 
+def invalid() -> list:
+    """[(name, why)] for each saved knurlogic-wide value a launch would
+    drop as unreadable (get() leaves it out): the launch refuses on these
+    instead of running without them."""
+    try:
+        raw = json.loads(path().read_text())
+    except Exception:
+        return []
+    if not isinstance(raw, dict):
+        return []
+    return [(k, check_knob(k, v)) for k, v in raw.items()
+            if k in NAMES and str(v).strip() and check_knob(k, v)]
+
+
 def set(values: dict) -> dict:
     """Merge {name: value} in ('' or None clears that name); refuses the
     whole change (ValueError) on an unknown name or a value it may not take.
