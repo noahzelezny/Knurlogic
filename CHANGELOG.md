@@ -6,7 +6,10 @@ First public release (alpha).
 
 * `knurlogic serve`: an OpenAI-compatible server (`/v1/chat/completions`,
   `/v1/completions`, `/v1/models`) with an Anthropic Messages endpoint
-  (`/v1/messages`) for Claude Code and similar harnesses.
+  (`/v1/messages`) for Claude Code and similar harnesses, the OpenAI
+  Responses API (`/v1/responses`), and the Ollama API (`/api/chat`,
+  `/api/generate`, `/api/tags`, `/api/show`, `/api/version`; set
+  `OLLAMA_HOST=http://127.0.0.1:8080`).
 * Settings resolved from each model's `config.json` and the memory
   available, with launch bundles (`--tune`) and per-setting overrides.
 * `doctor`, `models`, `loaded`, `deps`, `smoke`: whether a model fits and

@@ -105,8 +105,9 @@ def endpoints(base_url: str, model: str, router_url: str = "__ROUTER__",
         # the router block (one address for every model) comes first; the
         # `direct` block is that model's own server, secondary.
         {"id": "openai", "name": "OpenAI-compatible",
-         "what": "anything that speaks OpenAI: Zed, Cline, Continue, "
-                 "OpenWebUI, the openai SDKs",
+         "what": "anything that speaks OpenAI (chat, completions or "
+                 "Responses): Zed, Cline, Continue, OpenWebUI, the "
+                 "openai SDKs",
          "needs_model": True, "pick_model": True,
          "blocks": [{"label": "settings, through this page, which routes "
                               "by `model` to every running model",
@@ -166,6 +167,11 @@ def render(base_url: str, model: str) -> str:
         "anything that speaks OpenAI (Zed, Cline, Continue, OpenWebUI):",
         "",
         "  " + openai_snippet(base_url, model).replace("\n", "\n  "),
+        "",
+        "the same base URL also answers the OpenAI Responses API",
+        "(/v1/responses) and the Ollama API; for an Ollama client:",
+        "",
+        f"  OLLAMA_HOST={base_url}",
     ])
 
 
