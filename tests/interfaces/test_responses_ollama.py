@@ -252,3 +252,36 @@ def test_ollama_model_documents(tmp_path):
     s = OL.show_document(served, tmp_path, 4096, {"dialect": "x"})
     assert s["capabilities"] == ["completion", "tools", "vision", "thinking"]
     assert s["model_info"]["gemma4.context_length"] == 4096
+
+
+def test_responses_stream_interleaved_calls_never_delta_after_done():
+    from knurlogic.interfaces.http import responses
+
+    def tc(i, **fn):
+        return json.dumps({"choices": [{"delta": {"tool_calls": [
+            {"index": i, "id": f"c{i}", "function": fn}]}}]})
+    lines = ["data: " + x for x in (
+        tc(0, name="a", arguments="{"), tc(1, name="b", arguments="{"),
+        tc(0, arguments="}"), tc(1, arguments="}"))] + ["data: [DONE]"]
+    ev = [json.loads(b.decode().split("data: ", 1)[1]) for b in
+          responses.stream(lines, {}, "m")]
+    done_at = {}
+    for n, e in enumerate(ev):
+        if e["type"] == "response.function_call_arguments.done":
+            done_at[e["item_id"]] = n
+        if e["type"] == "response.function_call_arguments.delta":
+            assert e["item_id"] not in done_at
+    assert len(done_at) == 2
+    out = ev[-1]["response"]["output"]
+    assert [o["arguments"] for o in out] == ["{}", "{}"]
+
+
+def test_responses_failed_envelope_has_no_null_output():
+    from knurlogic.interfaces.http import responses
+    lines = ["data: " + json.dumps({"choices": [{"delta": {"tool_calls": [
+        {"index": 0, "id": "c", "function": {"name": "a"}}]}}]}),
+        "data: " + json.dumps({"error": {"message": "boom"}})]
+    ev = [json.loads(b.decode().split("data: ", 1)[1]) for b in
+          responses.stream(lines, {}, "m")]
+    assert ev[-1]["type"] == "response.failed"
+    assert None not in ev[-1]["response"]["output"]

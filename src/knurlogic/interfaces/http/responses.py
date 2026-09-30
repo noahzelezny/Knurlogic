@@ -261,11 +261,14 @@ def stream(lines, req: dict, model: str):
                      item=_call_item(kw["name"], "", kw["call_id"], item_id,
                                      done=False))
 
-    def close_item():
+    def close_item(c=None):
         nonlocal cur
-        if cur is None:
+        c = c or cur
+        if c is None or (c is cur and c["kind"] == "call"):
+            if c is cur:
+                cur = None        # a call stays open until the stream ends
             return
-        k, i, idx, text = cur["kind"], cur["id"], cur["index"], cur["text"]
+        k, i, idx, text = c["kind"], c["id"], c["index"], c["text"]
         if k == "reasoning":
             part = {"type": "summary_text", "text": text}
             yield ev("response.reasoning_summary_text.done", item_id=i,
@@ -283,10 +286,11 @@ def stream(lines, req: dict, model: str):
         else:
             yield ev("response.function_call_arguments.done", item_id=i,
                      output_index=idx, arguments=text)
-            item = _call_item(cur["name"], text, cur["call_id"], i)
+            item = _call_item(c["name"], text, c["call_id"], i)
         output[idx] = item
         yield ev("response.output_item.done", output_index=idx, item=item)
-        cur = None
+        if c is cur:
+            cur = None
 
     tool_open = {}
     for line in lines:
@@ -305,7 +309,8 @@ def stream(lines, req: dict, model: str):
         if isinstance(chunk.get("error"), dict):
             err = chunk["error"]
             msg = err.get("message") or "the engine failed"
-            failed = _envelope(rid, model, created, req, "failed", output)
+            failed = _envelope(rid, model, created, req, "failed",
+                              [o for o in output if o is not None])
             failed["error"] = {"code": "server_error", "message": msg}
             yield ev("error", code="server_error", message=msg, param=None)
             yield ev("response.failed", response=failed)
@@ -348,6 +353,8 @@ def stream(lines, req: dict, model: str):
         if choice.get("finish_reason"):
             finish = choice["finish_reason"]
     yield from close_item()
+    for i in sorted(tool_open):       # every call stays open until the end
+        yield from close_item(tool_open[i])
     status, inc = _finish(finish)
     final = _envelope(rid, model, created, req, status, output,
                       _usage(usage), inc)

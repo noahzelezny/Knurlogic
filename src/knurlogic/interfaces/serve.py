@@ -567,8 +567,6 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         return {"applied": done, "running": dict(live_env)}
 
     from knurlogic.interfaces import http
-    from knurlogic.interfaces.page import updates
-    updates.start_for_page()
 
     # /v1/messages is served by the server itself (in-process over its
     # OpenAI surface), so it is not one of these routes.

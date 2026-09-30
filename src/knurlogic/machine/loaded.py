@@ -448,6 +448,12 @@ def available_memory() -> dict:
 
     free = st.get("Pages free", 0)
     inactive = st.get("Pages inactive", 0)
+    # vm_stat's "free" leaves out speculative pages (read-ahead the kernel
+    # drops on demand), so they are reclaimable and counted here. Purgeable
+    # pages are NOT added: they are already inside active/inactive, so
+    # adding them would count the same memory twice.
+    speculative = st.get("Pages speculative", 0)
+    inactive += speculative           # both are cache: "cached_bytes"
     avail = free + inactive
     return {
         "available_bytes": avail,
