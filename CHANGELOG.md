@@ -32,8 +32,13 @@ First public release (alpha).
 * Multi-token-prediction drafting for models that ship a head; images for
   Qwen, Gemma 4 and GLM-5; 8-bit KV cache; YaRN long context for Qwen;
   context compaction.
-* Two Macs: one model split by tensor or pipeline over Thunderbolt, with
-  Bonjour discovery and `--host cluster`.
+* Clusters of 2 to 16 Macs: one model split by tensor or pipeline over
+  Thunderbolt (TCP, or RDMA; RDMA beyond two Macs is experimental), with
+  Bonjour discovery and `--host cluster`. Macs on Ethernet or Wi-Fi join
+  only when named with `--peer` on each side. A versioned control protocol
+  between machines: a Mac on an older knurlogic is named and refused, a
+  restarted or lost machine stops the job, and launches are refused before
+  loading when any Mac lacks the free memory for its share.
 * Launch presets are `default` and `lean` (`--tune`, the page, the MCP);
   `fast` and `stable` name `default`, `safe` names `lean`. The Knurlogic
   settings tab has a row for each thing a preset sets, so a custom set is
