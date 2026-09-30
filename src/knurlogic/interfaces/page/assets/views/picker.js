@@ -425,13 +425,14 @@ $('launch').onclick=async()=>{
   const tune=window.LOADTUNE||'balanced';
   const sets=launchMTP(m);
   const t0=Date.now();
+  const L=trackLaunch(m, ns, pn, t0);
   const j=await act(ns.length>1
     ? {action:'load', identity:m.identity, nodes:ns.map(n=>n.id),
        split:MULTI.shard, link:MULTI.link, tune, sets}
     : pn ? {action:'load', node:pn.id, identity:m.identity, tune, sets}
     : {action:'load', target:m.path, tune, sets});
   b.textContent='Launch'; b.disabled=false;
-  trackLaunch(m, ns, pn, j, t0);
+  settleLaunch(L, j);
   // across machines: where it went (or would have), from the coordinator
   if(j.placement) $('pickinfo').insertAdjacentHTML('beforeend',
     `<div class="placement">${placementHTML(j.placement)}</div>`);
@@ -503,15 +504,23 @@ function launchMTP(m){
 // cluster job's phase per machine, and its stop reason).
 const LAUNCHES=[];
 let LSEQ=0;
-function trackLaunch(m, ns, pn, j, t0){
-  const L={id:++LSEQ, name:m.name, t0, port:j.port||0, job:j.job||'',
+// The card exists from the click, 'preparing' while the server checks and
+// prepares every rank; the answer to the launch settles it.
+function trackLaunch(m, ns, pn, t0){
+  const L={id:++LSEQ, name:m.name, t0, port:0, job:'',
     machines:ns.length?ns.map(n=>n.node):[localName()],
-    node:pn?pn.id:'', cluster:ns.length>1, phase:'starting', samples:[]};
+    node:pn?pn.id:'', cluster:ns.length>1, phase:'preparing', samples:[]};
+  LAUNCHES.unshift(L); if(LAUNCHES.length>4) LAUNCHES.length=4;
+  renderLaunches(); loadResident();
+  return L;
+}
+function settleLaunch(L, j){
+  L.port=j.port||0; L.job=j.job||'';
   if(j.error||j.refused){ L.phase='failed';
     L.why=j.error||('not loaded: '+j.refused+(j.note?' -- '+j.note:'')) }
+  else L.phase='starting';
   // said once and kept: a local copy that differs from the shared one
   if(j.alerts&&j.alerts.length) L.alert=j.alerts.join(' · ');
-  LAUNCHES.unshift(L); if(LAUNCHES.length>4) LAUNCHES.length=4;
   renderLaunches(); loadResident();
 }
 // every machine's document, named: this page's and each peer's
@@ -520,7 +529,7 @@ function machinesOf(d){
     ({name:p.machine, id:p.id, doc:p})));
 }
 function followLaunch(L, d){
-  if(L.phase==='ready'||L.phase==='failed') return;
+  if(L.phase==='ready'||L.phase==='failed'||L.phase==='preparing') return;
   const ms=machinesOf(d), secs=(Date.now()-L.t0)/1000;
   const mine=ms.filter(x=>L.cluster ? true : L.node ? x.id===L.node : x.id==='');
   const nm=L.name.split('/').pop();
