@@ -497,9 +497,9 @@ def shape_of(path: str, world: int, split: str) -> dict:
 # ------------------------------------------------------------ one page
 
 def _resolve(identity: str, name: str = ""):
-    """The local path for this identity (the artifact called `name` when
-    several match); raises machine.artifact.AmbiguousIdentity when two
-    different artifacts match and neither is named."""
+    """The local path for this identity: several copies of it are the same
+    weights, and machine/artifact.resolve_identity picks one (the one
+    called `name`, else one on this Mac's disk)."""
     from knurlogic.machine.artifact import resolve_identity
     return resolve_identity(identity, name=name)
 
@@ -660,12 +660,8 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         return 400, {"error": why}
     from knurlogic.machine import identity
     me = identity.identity().get("name") or "this machine"
-    from knurlogic.machine.artifact import AmbiguousIdentity
-    try:
-        path = resolve(spec.get("identity")) if resolve else \
-            _resolve(spec.get("identity"), str(spec.get("name") or ""))
-    except AmbiguousIdentity as e:
-        return 200, {"ok": False, "machine": me, "refused": f"on {me}: {e}"}
+    path = resolve(spec.get("identity")) if resolve else \
+        _resolve(spec.get("identity"), str(spec.get("name") or ""))
     if not path:
         return 200, {"ok": False, "machine": me,
                      "refused": f"not on {me}: no artifact with identity "
@@ -789,12 +785,38 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
             PREPARED.pop(j)
         PREPARED[spec["job"]] = {"spec": dict(spec), "path": path, "t": now}
     doc = {"ok": True, "machine": me, "rank": rank}
+    differs = _local_copy_differs(path, spec)
+    if differs:
+        doc["alert"] = f"on {me}: {differs}"
     if want.get("knurlogic") != have.get("knurlogic"):
         doc["note"] = (f"same build, but knurlogic says "
                        f"{have.get('knurlogic') or 'missing'} here and "
                        f"{want.get('knurlogic') or 'missing'} on the "
                        f"coordinator")
     return 200, doc
+
+
+def _local_copy_differs(path, spec: dict) -> str:
+    """"" unless this Mac also holds its own copy of the job's model (same
+    name) that is NOT the weights the job runs -- then what to tell the
+    person: the rank runs the job's copy, the local one differs."""
+    from knurlogic.machine import artifact as A
+    name = str(spec.get("name") or "")
+    if not name:
+        return ""
+    try:
+        from knurlogic.machine import discover
+        for f in discover.find():
+            p = str(f.path)
+            if Path(p).name == name and p != str(path) \
+                    and not A.on_network(p) \
+                    and A.identity(p) not in ("", spec.get("identity")):
+                return (f"the local copy of {name} ({p}) differs from the "
+                        f"shared copy this job runs ({path}); this rank "
+                        f"loads the shared one")
+    except Exception:
+        return ""
+    return ""
 
 
 def _local_info() -> dict:
@@ -1448,11 +1470,17 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                                  f"{rd.get('reason') or 'unknown'}"}
     # the model's shape, from this machine when it has it, else a peer
     world = len(infos)
-    from knurlogic.machine.artifact import AmbiguousIdentity
+    # a local copy beside a DIFFERENT shared (network) copy of the same
+    # name: every rank loads the shared one, and the launch says so
+    from knurlogic.machine.artifact import prefer_shared
     try:
-        path = _resolve(ident, aname)
-    except AmbiguousIdentity as e:
-        return {"error": str(e)}
+        ident, alert = prefer_shared(ident, aname)
+    except Exception:
+        alert = ""
+    if alert:
+        logger.warning("cluster launch: %s", alert)
+        req = dict(req, identity=ident)
+    path = _resolve(ident, aname)
     from knurlogic.tuning.settings import clean_sets, TUNES
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
@@ -1633,6 +1661,10 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                     (g or {}).get("refused") or (g or {}).get("error")
                     or f"{nm} did not answer" for nm, g in bad),
                 "placement": plan}
+    alerts = ([alert] if alert else []) + [
+        g["alert"] for g in got if isinstance(g, dict) and g.get("alert")]
+    for a in alerts[1 if alert else 0:]:
+        logger.warning("cluster job %s: %s", job, a)
     got = _parallel(lambda r: ask(START_PATH, r, {"job": job}),
                     list(range(world)))
     bad = [(order[r]["name"], g) for r, g in enumerate(got)
@@ -1667,6 +1699,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "leader": plan["leader"], "port": port,
             "link": link_name(link), "url": leader_url(base | {"port": port}),
             "machines": plan["order"], "cable": net, "cable_note": note,
+            **({"alerts": alerts} if alerts else {}),
             "note": f"rank 0 on {plan['leader']} serves on port {port} "
                     f"(loopback there, {leader_url(base | {'port': port})} "
                     f"from the job's machines) once every rank has loaded; "
