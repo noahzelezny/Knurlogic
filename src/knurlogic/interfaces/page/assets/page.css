@@ -808,3 +808,9 @@ body.talk #clog{flex:1;height:auto;min-height:0;max-height:none}
 #cadv{margin-top:10px}
 #cadv>summary{cursor:pointer;font-size:12px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--dim);margin:6px 0}
+.vars.flat{display:block}
+.vars.flat .var{padding-left:14px}
+.mrow .mset{display:none;padding:2px 18px 14px 34px}
+.mrow.open .mset{display:block}
+.mrow.open .cv{transform:rotate(90deg)}
+.grphd .gv.on{color:var(--acc)}
