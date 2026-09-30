@@ -554,6 +554,19 @@ def load(artifact: str = "", port: int = 8080, tune: str = "balanced",
     except NotLoadable as e:
         return {"loaded": False, "refused": "not a known artifact",
                 "note": str(e)}
+    # serve's deterministic refusals (bad settings, a context past the
+    # model's maximum, ...), asked before a process is started: a server
+    # that prints REFUSING and exits is a reason nobody sees
+    from knurlogic.interfaces.serve import launch_refusal
+    from knurlogic.machine.artifact import Artifact
+    try:
+        why = launch_refusal(Artifact.load(artifact), dict(sets or {}))
+    except Exception as e:
+        why = f"could not read the artifact: {type(e).__name__}: {e}"
+    if why:
+        return {"loaded": False, "refused": why,
+                "note": "the launch settings (Settings -> Models) or the "
+                        "artifact; nothing was started"}
     f = fit(artifact=artifact)
     if not f["fits"]:
         return {"loaded": False, "refused": "will not fit",

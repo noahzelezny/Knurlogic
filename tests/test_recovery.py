@@ -371,3 +371,60 @@ def test_a_one_mac_server_is_restored_too(monkeypatch, tmp_path):
     R.cancel_port(8093)                          # an unload after it
     _restart_page()
     assert R.restore() == []
+
+
+# --- a refusal at startup is deterministic: failed at once, never relaunched
+
+REFUSAL = ("REFUSING: KNURLOGIC_PRESET='bogus': preset 'bogus': one of "
+           "['balanced']")
+
+
+def test_a_rank_that_refused_to_start_fails_the_job_with_its_words(
+        two_pages, monkeypatch):
+    p = two_pages
+    monkeypatch.setattr(R, "BACKOFF_S", (0.0, 0.0, 0.0))
+    launched = []
+    monkeypatch.setattr(C, "launch", lambda *a, **k: launched.append(k)
+                        or {"job": "f" * 16})
+    with open(p.rank0["log"], "a") as fh:
+        fh.write("artifact  x\n" + REFUSAL + "\n")
+    os.kill(p.rank0["pid"], 9)
+    assert wait(lambda: not alive(p.rank0["pid"]), 5)
+    stopped = C.watch_once()
+    assert stopped and REFUSAL in stopped[0][1]
+    assert R.kind(stopped[0][1]) == "refusal"
+    what = ticks_until(lambda w: w.startswith("failed"), 10)
+    assert what and REFUSAL in what
+    for _ in range(3):
+        R.tick()
+    assert launched == []
+    v = R.for_job(p.job)
+    assert v["state"] == "failed" and v["attempts"] == 0
+    assert REFUSAL in v["last_reason"]
+
+
+def test_a_refusal_is_its_own_kind_and_never_relaunched(faked):
+    faked["ended"] = "rank 0 on A (pid 9) exited: " + REFUSAL
+    what = R.tick(0)[0][1]
+    assert what.startswith("failed") and "REFUSING" in what
+    assert R.tick(100) == [] and faked["launches"] == []
+
+
+def test_a_relaunch_whose_settings_are_refused_is_failed(faked, monkeypatch):
+    faked["ended"] = "rank 1 exited"
+    R.tick(0)
+    monkeypatch.setattr(C, "launch", lambda req, **k: {
+        "refused": "nothing started: its launch settings are refused: x"})
+    what = R.tick(20)[0][1]
+    assert what.startswith("failed") and "launch settings are refused" in what
+
+
+def test_refusal_line_reads_the_reason_and_its_bullets():
+    log = ("artifact  m\nREFUSING a 2-rank tensor split of m:\n"
+           "  - 8 KV heads do not split 3 ways\n  - and another\n"
+           "Traceback (most recent call last):\n")
+    assert R.refusal_line(log) == ("REFUSING a 2-rank tensor split of m: "
+                                   "- 8 KV heads do not split 3 ways "
+                                   "- and another")
+    assert R.refusal_line("all fine\n") == ""
+    assert R.kind("refusing to guess") != "refusal"    # REFUSING is serve's

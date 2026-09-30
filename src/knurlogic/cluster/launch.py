@@ -504,6 +504,22 @@ def _resolve(identity: str, name: str = ""):
     return resolve_identity(identity, name=name)
 
 
+def sets_refusal(path, sets: dict) -> str:
+    """"" when a rank of `path` would start with these launch settings,
+    else why not -- serve's own deterministic refusals (bad settings, a
+    context past the model's maximum, a preset or KV precision it cannot
+    take), asked BEFORE a rank starts: a refusal at startup would only be
+    seen in a rank's log."""
+    from knurlogic.interfaces.serve import launch_refusal
+    from knurlogic.machine.artifact import Artifact
+    try:
+        a = Artifact.load(path)
+    except Exception:
+        return ""           # shape_of says why it cannot be read
+    why = launch_refusal(a, sets or {})
+    return f"its launch settings are refused: {why}" if why else ""
+
+
 def check_spec(spec) -> str:
     """"" when `spec` has the prepare schema's shape, else why not."""
     if not isinstance(spec, dict):
@@ -678,6 +694,9 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         refusals.append(f"settings a rank does not take: "
                         f"{', '.join(bad_sets)}")
     spec = dict(spec, sets=ok_sets)
+    why = sets_refusal(path, ok_sets)
+    if why:
+        refusals.append(why)
     rank, world = spec["rank"], spec["world"]
     try:
         sh = (shape or shape_of)(path, world, spec["split"])
@@ -1137,10 +1156,15 @@ def watch_once(now: float | None = None) -> list:
             if line:
                 why = f"{why}: link init failed: {line}"[:300]
             else:
-                from knurlogic.cluster.recovery import memory_line
-                mem = next((x for x in (memory_line(_log_tail(
-                    r.get("log"))) for r in recs) if x), "")
-                if mem:
+                from knurlogic.cluster.recovery import (memory_line,
+                                                        refusal_line)
+                tails = [_log_tail(r.get("log")) for r in recs]
+                ref = next((x for x in map(refusal_line, tails) if x), "")
+                mem = next((x for x in map(memory_line, tails) if x), "")
+                if ref:
+                    # a rank refused to start: the job fails with its words
+                    why = f"{why}: {ref}"[:700]
+                elif mem:
                     why = f"{why}: out of memory: {mem}"[:300]
         if why:
             stop(job, reason=why)
@@ -1429,6 +1453,14 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         path = _resolve(ident, aname)
     except AmbiguousIdentity as e:
         return {"error": str(e)}
+    from knurlogic.tuning.settings import clean_sets, TUNES
+    sets, bad = clean_sets(req.get("sets") or {})
+    if bad:
+        return {"error": f"not a launch setting: {', '.join(bad)}"}
+    if path:
+        why = sets_refusal(path, sets)
+        if why:
+            return {"refused": f"nothing started: {why}"}
     try:
         if path:
             shape = shape_of(path, world, split)
@@ -1545,10 +1577,6 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     port = req.get("port")
     port = port if isinstance(port, int) and 1024 <= port < 65536 \
         else serve_port
-    from knurlogic.tuning.settings import clean_sets, TUNES
-    sets, bad = clean_sets(req.get("sets") or {})
-    if bad:
-        return {"error": f"not a launch setting: {', '.join(bad)}"}
     # the base model's saved prompt chunk (Settings -> Models) is the
     # ring's, like every launch set; unset, the ring runs PREFILL_CHUNK.
     # serve puts the ring's value over any --set, so the saved one must be

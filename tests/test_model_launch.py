@@ -189,7 +189,8 @@ def test_serve_refuses_kv_bits_for_a_family_that_cannot(tmp_path,
     art = _art(tmp_path, "glm5_next")
     rc, seen = _serve_until_resolve(monkeypatch, art,
                                     [str(tmp_path), "--kv-bits", "4"])
-    assert rc == 2 and not seen
+    from knurlogic.interfaces.serve import REFUSED_EXIT
+    assert rc == REFUSED_EXIT and not seen
     assert "MLA latent" in capsys.readouterr().err
 
 
