@@ -160,7 +160,7 @@ function renderPicker(){
           ${m.is_vq?'<span class="tag">VQ</span>':''}
           ${m.mtp?'<span class="tag">MTP</span>':''}
           ${isVision(m)?'<span class="tag">VISION</span>':''}
-          <span class="vs${m.room&&m.room.small?' tight':''}"${m.room?` title="fits · ${
+          <span class="vs${m.room&&m.room.small?' tight':''}"${m.room?` title="${
             esc(m.room.text)}"`:''}>${gb(m.size_bytes)}</span></div>`}).join('')}</div>
     </div>`;
   const a=shown.filter(fits), b=shown.filter(g=>!fits(g));
@@ -182,7 +182,7 @@ function renderPicker(){
       <div class="vars">${recMs.map(oneRow).join('')}</div>`;
   }
   $('prows').innerHTML=favHTML+
-    (a.length?`<div class="sect">fits in ${esc(fitWhere())}</div>`
+    (a.length?`<div class="sect">for ${esc(fitWhere())}</div>`
       +a.map(grp).join(''):'')
     +(b.length?`<div class="sect no">${pn?`not on ${esc(pn.node)}, or `:``}needs more than ${gb(ws)}</div>`
       +b.map(grp).join(''):'')
@@ -261,14 +261,14 @@ function roomHTML(r){
   return `<div class="room${r.small?' small':''}" title="${esc(
     `working set ${gb(r.working_set_bytes)} − weights ${gb(r.weights_bytes)} − `+
     `step margin ${gb(r.margin_bytes)}`+(r.kv_why?` · KV ${r.kv_why}`:'')+
-    (r.window?` · its window is ${r.window.toLocaleString()} tokens`:''))}">fits · ${esc(r.text)}${
+    (r.window?` · its window is ${r.window.toLocaleString()} tokens`:''))}">${esc(r.text)}${
     r.small?' — little room for long conversations':''}</div>`;
 }
 function pickInfo(){
   const m=SEL, el=$('pickinfo');
   $('pickname').textContent=m?m.name:'choose a model';
   $('picksize').textContent=m?gb(m.size_bytes):'';
-  whereLine();
+  whereLine(); splitState();
   if(!m){ el.innerHTML=''; $('launch').disabled=true; $('launch').title='choose a model';
     $('mtpopts').hidden=true; return }
   const ws=fitWS(), fits=!ws||m.size_bytes<=ws, ns=selNodes();
@@ -284,7 +284,7 @@ function pickInfo(){
     (!fits?`<div class="warn">${gb(m.size_bytes)} against ${gb(ws)} of
       working set in ${esc(fitWhere())} — it will not fit</div>`
      : !ns.length || !(ns.length===1&&isLocal(ns[0]))
-       ? `<div class="room">fits · ${gb(ws-m.size_bytes)} left in ${esc(fitWhere())}</div>`
+       ? `<div class="room">${gb(ws-m.size_bytes)} left in ${esc(fitWhere())}</div>`
        : `<div id="pickroom">${roomHTML(m.room)}</div>`)+
     (blocked && !/does not fit/.test(blocked)?`<div class="note">${esc(blocked)}</div>`:'');
   SETS=launchSets(baseKey(m.name)); mtpState(); loadPreview();
@@ -304,6 +304,8 @@ function launchBlock(ns){
       if(!n.id || n.state!=='answering') return `${n.node} is not answering`;
       if(SEL && !onNode(n, SEL)) return `not on ${n.node}`;
     }
+    if(SEL && Array.isArray(SEL.splits) && !SEL.splits.length)
+      return `${SEL.model_type||'this model'} cannot be split across machines`;
     if(MULTI.link==='rdma'){ const why=rdmaWhy(ns); if(why) return why }
     return '';
   }
@@ -378,8 +380,21 @@ $('multiopts').querySelectorAll('.seg').forEach(g=>
     pickInfo();
   }));
 // RDMA greyed, with the reason on hover, when a picked machine cannot
+// Only the splits this model can take (the server runs the launch's own
+// refusals, /models.json `splits`); one left is a fixed choice, none hides it
+function splitState(){
+  const ok=SEL && Array.isArray(SEL.splits) ? SEL.splits : ['tensor','pipeline'];
+  const g=$('multiopts').querySelector('[data-k=shard]');
+  if(!ok.includes(MULTI.shard) && ok.length) MULTI.shard=ok[0];
+  g.querySelectorAll('button').forEach(b=>{
+    b.hidden=!ok.includes(b.dataset.v);
+    b.disabled=ok.length<2;
+    b.setAttribute('aria-pressed', b.dataset.v===MULTI.shard);
+  });
+  g.closest('.opt').hidden=!ok.length;
+}
 function multiState(){
-  const ns=selNodes(), b=$('multiopts').querySelector('[data-v=jaccl]');
+  const ns=selNodes(), b=$('multiopts').querySelector('[data-v=rdma]');
   const why=ns.length>1 ? rdmaWhy(ns) : '';
   b.disabled=!!why; b.title=why||'RDMA over Thunderbolt (jaccl)';
   if(why && MULTI.link==='rdma'){
