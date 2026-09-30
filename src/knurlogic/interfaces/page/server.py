@@ -381,7 +381,7 @@ def _load_fn(serve_port: int):
             # a capability on one side only.
             if act == "load":
                 return _then_refresh(tracked_load(artifact=target,
-                                port=int(req.get("port") or serve_port),
+                                port=int(req.get("port") or 0),
                                 tune=preset_or(req.get("tune"), _default_tune()),
                                 sets=req.get("sets") or {},
                                 force=bool(req.get("force"))))
@@ -624,7 +624,7 @@ def peer_launch(headers, client_ip: str, local_ip: str, body: bytes,
                              f"model stores. Copy it there first."}
     port = req.get("port")
     port = port if isinstance(port, int) and not isinstance(port, bool) \
-        and 1024 <= port < 65536 else _SERVE_PORT["n"]
+        and 1024 <= port < 65536 else 0
     if load is None:
         load = tracked_load
     # the fit check is this machine's, against its own load budget

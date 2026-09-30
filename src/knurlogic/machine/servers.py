@@ -130,3 +130,26 @@ def listening_serves() -> dict:
             if port.isdigit():
                 found.setdefault(int(port), pid)
     return found
+
+
+def port_free(port: int) -> bool:
+    """Bindable here, and not held by a live knurlogic server of ours."""
+    import socket
+    rec = registry().get(port)
+    if rec and is_our_server(int(rec["pid"])):
+        return False
+    for host in ("127.0.0.1", "0.0.0.0"):
+        with socket.socket() as s:
+            try:
+                s.bind((host, int(port)))
+            except OSError:
+                return False
+    return True
+
+
+def free_port(start: int = 8080, taken=()) -> int:
+    """The first port from `start` up that this machine can serve on."""
+    for p in range(max(1024, int(start)), 65536):
+        if p not in taken and port_free(p):
+            return p
+    raise OSError("no free port")

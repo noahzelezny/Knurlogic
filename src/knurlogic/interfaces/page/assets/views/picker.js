@@ -445,10 +445,10 @@ $('launch').onclick=async()=>{
     ? {action:'load', identity:m.identity, nodes:ns.map(n=>n.id),
        split:MULTI.shard, link:MULTI.link, tune, sets}
     : pn ? {action:'load', node:pn.id, identity:m.identity, tune, sets}
-    : {action:'load', target:m.path, tune, sets});
+    : {action:'load', target:m.path, tune, sets}, true);
   b.textContent='Launch'; b.disabled=false;
   settleLaunch(L, j);
-  if(!j.error && !j.refused && !L.cancelled){
+  if(L.phase!=='failed' && !L.cancelled){
     // done with this pick: back to "choose a model"
     SEL=null; SELCLEARED=true; pickInfo();
     tick(); loadModels(); pushRecent(m.path);
@@ -630,8 +630,8 @@ function trackLaunch(m, ns, pn, t0){
 function settleLaunch(L, j){
   L.port=j.port||0; L.job=j.job||'';
   if(L.cancelled){ stopLaunch(L); return }
-  if(j.error||j.refused){ L.phase='failed';
-    L.why=j.error||('not loaded: '+j.refused+(j.note?' -- '+j.note:'')) }
+  if(j.error||j.refused||j.loaded===false||j.ok===false){ L.phase='failed';
+    L.why=j.error||('not loaded: '+(j.refused||'the server declined')+(j.note?' -- '+j.note:'')) }
   else L.phase='starting';
   // said once and kept: a local copy that differs from the shared one
   if(j.alerts&&j.alerts.length) L.alert=j.alerts.join(' · ');

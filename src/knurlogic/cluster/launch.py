@@ -56,7 +56,7 @@ SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
              "port", "working_set_gib", "bandwidth_gbs", "nodes", "versions",
              "jaccl_timeout_ms", "sets", "chips", "cable", "cable_note",
-             "recovery", "serve_hosts", "name")
+             "recovery", "serve_hosts", "name", "auto_port")
 SPLITS = ("tensor", "pipeline")
 LINKS = ("ring", "jaccl")
 #: the link names people see (load(), state(), the page, the recovery
@@ -775,9 +775,22 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         from knurlogic.machine.servers import registry as sreg
         port = int(spec.get("port") or 0)
         rec = sreg().get(port)
+        from knurlogic.machine.servers import port_free
         if rec and is_our_server(int(rec["pid"])):
             refusals.append(f"port {port} on {me} already serves "
                             f"{rec.get('artifact')}")
+        elif port and not port_free(port):
+            refusals.append(f"port {port} on {me} is in use")
+        if refusals and spec.get("auto_port"):
+            # a port nobody asked for: say which one is free instead
+            from knurlogic.machine.servers import free_port
+            try:
+                return 200, {"ok": False, "machine": me, "free_port":
+                             free_port(port + 1),
+                             "refused": f"{me} refuses rank {rank}: "
+                                        + "; ".join(refusals)}
+            except OSError:
+                pass
     if refusals:
         return 200, {"ok": False, "machine": me,
                      "refused": f"{me} refuses rank {rank}: "
@@ -1634,8 +1647,12 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
               "page": m["page"] or (f"{my_tb}:{ui_port}" if my_tb else "")}
              for r, m in enumerate(order)]
     port = req.get("port")
-    port = port if isinstance(port, int) and 1024 <= port < 65536 \
-        else serve_port
+    auto_port = not (isinstance(port, int) and 1024 <= port < 65536)
+    if auto_port:
+        # nobody named one: the first free port from the default up (the
+        # other machines answer for theirs at prepare, below)
+        from knurlogic.machine.servers import free_port
+        port = free_port(serve_port)
     # the base model's saved prompt chunk (Settings -> Models) is the
     # ring's, like every launch set; unset, the ring runs PREFILL_CHUNK.
     # serve puts the ring's value over any --set, so the saved one must be
@@ -1669,6 +1686,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     for r, m in enumerate(order):
         specs.append({**base, "rank": r,
                       "port": port if r == 0 else 0,
+                      "auto_port": auto_port,
                       "working_set_gib": round(
                           int(m.get("working_set_bytes") or 0) / GIB, 3),
                       "bandwidth_gbs": m.get("bandwidth_gbs") or 0})
@@ -1683,6 +1701,11 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
 
     got = _parallel(lambda r: ask(PREPARE_PATH, r, specs[r]),
                     list(range(world)))
+    if auto_port and isinstance(got[0], dict) and got[0].get("free_port"):
+        # rank 0's machine has that port taken: retry once on its suggestion
+        port = int(got[0]["free_port"])
+        specs[0] = dict(specs[0], port=port)
+        got[0] = ask(PREPARE_PATH, 0, specs[0])
     bad = [(order[r]["name"], g) for r, g in enumerate(got)
            if not (isinstance(g, dict) and g.get("ok"))]
     if bad:

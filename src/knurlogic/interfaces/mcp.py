@@ -538,7 +538,7 @@ def drafting(artifact: str = "", **_) -> Dict[str, Any]:
                     "the output distribution, so off is for troubleshooting."}
 
 
-def load(artifact: str = "", port: int = 8080, tune: str = "default",
+def load(artifact: str = "", port: int = 0, tune: str = "default",
          sets: Dict[str, str] | None = None, force: bool = False,
          draft: bool = True, machines: List[str] | None = None,
          split: str = "", link: str = "", cable: str = "",
@@ -599,6 +599,10 @@ def load(artifact: str = "", port: int = 8080, tune: str = "default",
                         "the fit above is stale. Poll `state` -- each server "
                         "says loading, serving or stalled -- then call "
                         "`ready` again. force=true loads anyway."}
+    if not port:
+        # none asked for: the first free one from the serve default up
+        from knurlogic.machine.servers import free_port
+        port = free_port(page_server._SERVE_PORT["n"])
     out = page_server._spawn(artifact, int(port), tune, dict(sets or {}),
                     draft=bool(draft))
     out["fit"] = f
@@ -678,7 +682,9 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
         # loads the one called this, or refuses -- never picks
         req = {"action": "load", "identity": ident,
                "name": _artifact_name(artifact), "tune": tune,
-               "sets": dict(sets or {}), "port": int(port)}
+               "sets": dict(sets or {})}
+        if port:
+            req["port"] = int(port)
         if len(ids) == 1:
             req.update(node=ids[0], force=bool(force))
         else:
@@ -882,7 +888,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "artifact": S("the model's name (or, for machines that are "
                           "not this Mac, its 16-hex identity)"),
             "port": S("port to serve on (a cluster job: rank 0's port on "
-                      "the leader)", "integer"),
+                      "the leader); omitted: the first free port from "
+                      "8080 up", "integer"),
             "tune": S("default | lean"),
             "sets": {"type": "object",
                      "description": "launch-only knob overrides, KEY: VALUE"},

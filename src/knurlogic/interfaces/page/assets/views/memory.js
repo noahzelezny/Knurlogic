@@ -49,7 +49,7 @@ function ramWent(m){
     ${row('unused',free,'')}
     ${m.swap_bytes>0?row('swap',m.swap_bytes,'var(--bad)'):''}</div>`;
 }
-async function act(payload){
+async function act(payload, quiet){
   // A server that is down or answers with something other than JSON is an
   // answer too: said, and the buttons that awaited this get theirs back.
   let j;
@@ -61,7 +61,9 @@ async function act(payload){
   // A refusal is an answer, and the page has to say it the way the MCP does
   // -- a Launch button that quietly resets is the page's version of an agent
   // waiting on silence.
-  if(j.error) alert(j.error);
+  // `quiet`: the caller shows the failure itself (a launch's FAILED card)
+  if(quiet){}
+  else if(j.error) alert(j.error);
   else if(j.refused) alert(refusalText(j));
   await loadResident();
   return j;
