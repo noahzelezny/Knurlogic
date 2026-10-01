@@ -82,7 +82,8 @@ PREFILL_MIN_TOKENS = 256
 PREFILL_MIN_S = 0.05
 
 
-def _timing(row, done: float, completion: int, prefilled) -> dict:
+def _timing(row, done: float, completion: int, prefilled,
+            cached: int | None = 0, chunk: int | None = None) -> dict:
     """What the request took, measured here where the steps run: time in
     the queue, time to first token (from submit, as a client feels it), and
     the rates of the two phases. Prefill is from admission to the first
@@ -90,7 +91,13 @@ def _timing(row, done: float, completion: int, prefilled) -> dict:
     cache supplied); decode is over the tokens after the first."""
     first = row.first or done
     out = {"queue_s": round(max(row.admitted - row.job.submitted, 0), 4),
-           "ttft_s": round(max(first - row.job.submitted, 0), 4)}
+           "ttft_s": round(max(first - row.job.submitted, 0), 4),
+           "prompt_cached_tokens": int(cached or 0),
+           "prompt_computed_tokens": int(prefilled or 0)}
+    if chunk:
+        out["prefill_chunk"] = int(chunk)
+    if cached and not prefilled:
+        out["prefill"] = "cached"    # nothing was computed: no rate exists
     # the compute only: from the step that began the prefill, not from the
     # admission (which also counts waiting for the scheduler's turn)
     pre = first - (getattr(row, "began", 0.0) or row.admitted)
@@ -1216,7 +1223,8 @@ class Scheduler:
         usage = row.text.usage(report)
         usage.setdefault("knurlogic", {})["timing"] = _timing(
             row, time.perf_counter(), usage.get("completion_tokens", 0),
-            (report or {}).get("prefilled"))
+            (report or {}).get("prefilled"),
+            (report or {}).get("used"), self.prefill_step_size)
         row.job.outbox.put(("done", usage))
 
     def _error(self, job: Job, err: BaseException) -> None:

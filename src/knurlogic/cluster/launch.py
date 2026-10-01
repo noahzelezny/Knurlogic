@@ -1563,7 +1563,8 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         return {"error": "a cluster launch names two or more machines"}
     split = req.get("split") if req.get("split") in SPLITS else None
     link = backend(req.get("link"))
-    if not split or not link:
+    unnamed = req.get("link") in (None, "")
+    if not split or not (link or unnamed):
         return {"error": "split is tensor|pipeline, link is tcp|rdma"}
     ident = str(req.get("identity") or "")
     if not ident:
@@ -1604,6 +1605,20 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             k = kinds.get(getattr(p, "link", ""), "")
             mine["links"][m["name"]] = k
             m["links"][mine["name"]] = k
+    if unnamed:
+        # no link named: tcp, over the one cable the machines share
+        shared: set | None = None
+        for i, a_ in enumerate(infos):
+            for b_ in infos[i + 1:]:
+                n_ = set(_shared_subnets(a_, b_))
+                shared = n_ if shared is None else shared & n_
+        if shared and len(shared) > 1:
+            kinds_ = sorted({_cable_name(_link_gbps(infos[0], infos[1], n))
+                             .split(" (")[0] for n in shared})
+            return {"refused": "link is tcp | rdma; the machines share "
+                               + ", ".join(sorted(shared)) + " over "
+                               + " and ".join(kinds_) + ": name one"}
+        link = LINK_NAMES["tcp"]
     if link == "jaccl":
         for m in infos:
             rd = m.get("rdma") or {}

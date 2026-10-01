@@ -700,7 +700,7 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
         if split not in SPLITS:
             return {"loaded": False,
                     "refused": f"split is tensor | pipeline, not {split!r}"}
-        if link not in LINKS:
+        if link and link not in LINKS:
             return {"loaded": False,
                     "refused": f"link is tcp | rdma, not {link!r}"}
         if not draft:

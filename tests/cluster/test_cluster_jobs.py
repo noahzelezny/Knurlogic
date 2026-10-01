@@ -1525,3 +1525,20 @@ def test_failover_beyond_two_machines_is_a_logged_no_op(monkeypatch, caplog):
     assert C.failover("ab12cd34ef567890", ctx, why) is None
     assert C.BAD_CABLES == {}
     assert "no cable failover beyond two" in caplog.text
+
+
+def test_no_link_refuses_naming_the_shared_cables(cache, monkeypatch):
+    monkeypatch.setattr(C, "BAD_CABLES", {})
+    out, got = jaccl_launch(monkeypatch, {"link": ""})
+    assert out["refused"].startswith("link is tcp | rdma; the machines "
+                                     "share 127.0.0, 127.0.1")
+    assert not got
+
+
+def test_no_link_is_tcp_over_the_one_shared_cable(cache, monkeypatch):
+    monkeypatch.setattr(C, "BAD_CABLES", {})
+    real = C._shared_subnets
+    monkeypatch.setattr(C, "_shared_subnets",
+                        lambda a, b, rdma=False: real(a, b, rdma)[:1])
+    out, got = jaccl_launch(monkeypatch, {"link": ""})
+    assert "refused" not in out and "error" not in out

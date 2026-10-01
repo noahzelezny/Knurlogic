@@ -129,3 +129,10 @@ def test_the_page_offers_up_to_the_yarn_window():
     assert lim["max"] == 1048576 and "YaRN" in lim["max_why"]
     a.model_type = "glm5_next"
     assert knob_limit(a, "KNURLOGIC_CONTEXT_LENGTH")["max"] == 262144
+
+
+def test_stock_runtime_line_says_so_positively():
+    from knurlogic.interfaces.serve import stock_runtime_line
+    line = stock_runtime_line()
+    assert line.startswith("runtime   stock mlx-lm ")
+    assert line.endswith("(no bundled model.py)")
