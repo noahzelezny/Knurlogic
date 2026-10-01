@@ -504,13 +504,15 @@ function whereLine(){
     : 'on: none picked (click machines in Memory)';
 }
 // MTP and vision for this launch: each shown only for a model that has
-// that part, labelled with what it costs (/models.json mtp_bytes,
-// vision_bytes). The default is its saved launch settings (Settings ->
+// that part (/models.json mtp, vision), labelled with what it costs once
+// the picked model's preview has it (/settings.json mtp_bytes,
+// vision_bytes; 0 there hides the row). The default is its saved launch settings (Settings ->
 // Models), else what the preset resolves to (the preview), else on; a
 // click here is for this launch.
 const LMTP={for:null, mtp:null, dyn:null, vis:null};
-const hasMTP=m=>!!(m&&m.mtp);
-const hasVis=m=>!!(m&&m.vision_bytes>0);
+const partBytes=(m,k)=>(PREVIEW&&m&&PREVIEW.for===m.path&&k in PREVIEW)?PREVIEW[k]:null;
+const hasMTP=m=>!!(m&&m.mtp)&&partBytes(m,'mtp_bytes')!==0;
+const hasVis=m=>!!(m&&m.vision)&&partBytes(m,'vision_bytes')!==0;
 function mtpDefault(name){
   const saved=SETS[name]; if(saved) return String(saved);
   const k=((PREVIEW&&SEL&&PREVIEW.for===SEL.path&&PREVIEW.knobs)||[]).find(k=>k.name===name);
@@ -531,8 +533,9 @@ function mtpState(){
   $('mtprow').hidden=!hasMTP(m);
   $('mtpdynrow').hidden=!hasMTP(m)||mtp==='off';
   $('visrow').hidden=!hasVis(m);
-  $('mtplab').textContent='MTP'+(m.mtp_bytes>0?` (${gb(m.mtp_bytes)})`:'');
-  $('vislab').textContent='Vision'+(hasVis(m)?` (${gb(m.vision_bytes)})`:'');
+  const mb=partBytes(m,'mtp_bytes'), vb=partBytes(m,'vision_bytes');
+  $('mtplab').textContent='MTP'+(mb>0?` (${gb(mb)})`:'');
+  $('vislab').textContent='Vision'+(vb>0?` (${gb(vb)})`:'');
 }
 $('mtpopts').querySelectorAll('.seg').forEach(g=>
   g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
