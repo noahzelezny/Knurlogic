@@ -160,7 +160,7 @@ def test_the_cable_note_says_which_cable_and_why(monkeypatch):
     monkeypatch.setattr(C, "BAD_CABLES", {})
     m3, m4 = rig()
     monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s: {
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True: {
         "layers": 8, "layer_bytes": [1 << 30] * 8, "other_bytes": 0,
         "kv_bytes_per_token": 0})
     monkeypatch.setattr(C, "placement", lambda infos, shape, split, order: {
