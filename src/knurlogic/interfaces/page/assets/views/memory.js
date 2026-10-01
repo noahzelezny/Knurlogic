@@ -125,7 +125,7 @@ async function loadResident(){
       <div class="s">${[
         r.bytes_resident?gb(r.bytes_resident)
           :(r.state==='offered'?'':'size not reported'),
-        r.cluster?`${r.cluster.split} over ${
+        r.cluster&&r.cluster.split?`${r.cluster.split} over ${
           (r.cluster.link==='rdma'||r.cluster.link==='jaccl')?'RDMA':'TCP/IP'}${
           r.cluster.phase&&r.cluster.phase!=='ready'?' · '+r.cluster.phase:''}`:'',
         r.detail, r.state==='loaded'?'':r.state,

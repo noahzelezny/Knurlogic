@@ -1186,6 +1186,10 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                 int((spec or {}).get("port") or 0) or None)
             ENDED[job] = {"reason": reason, "kind": kind or None,
                           "t": time.time(), "port": port,
+                          "split": any_rec.get("split")
+                          or (spec or {}).get("split"),
+                          "link": link_name(any_rec.get("link")
+                                            or (spec or {}).get("link")),
                           "machines": any_rec.get("machines")
                           or [n.get("name") for n in (spec or {}).get(
                               "nodes") or []]}
@@ -1399,6 +1403,8 @@ def jobs_document() -> list:
         r0 = min(recs, key=lambda r: r["rank"])
         if all(r.get("stopping") for r in recs):
             out.append({"job": job, "phase": "stopping",
+                        "split": r0.get("split"),
+                        "link": link_name(r0.get("link")),
                         "reason": r0.get("stop_reason"),
                         "machines": r0.get("machines"),
                         "port": next((r.get("port") for r in recs
