@@ -364,7 +364,7 @@ def _ring_consistent(c: ClusterResolution) -> None:
     """One prompt chunk on every rank: the smallest any node needs.
 
     Per-node resolution is right for per-node memory and wrong for this. A
-    pipeline's ranks process the same chunks, so a tight node's narrow chunk
+    pipeline's ranks process the same chunks, so a low-headroom node's narrow chunk
     has to be everyone's -- and a rank that disagrees is a desync, not a
     tuning difference.
     """
