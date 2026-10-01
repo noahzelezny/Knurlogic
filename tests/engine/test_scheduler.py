@@ -634,3 +634,24 @@ def test_timing_prefill_rate_is_compute_only_and_floored():
     short = NS(job=job, admitted=1.0, began=1.0, first=1.04)
     assert "prefill_tok_s" not in _timing(short, 2.0, 10, 1000)
     assert "prefill_tok_s" not in _timing(row, 9.0, 10, None)
+
+
+def test_nothing_running_nothing_cached_and_no_room_says_restart():
+    """Memory held where the server cannot reach it (a pipeline peer's
+    stale over-limit, a leak) leaves no room with nothing to free: the
+    refusal says to restart, not to send a shorter conversation."""
+    import pytest
+
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+
+    class Cache:
+        nbytes = 0
+
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
+    s._spike = 4 * GIB
+    s.cache = Cache()
+    s._active = lambda: 100 * GIB       # the whole limit, nothing running
+    s._kv = (0.0, float(2**20))
+    with pytest.raises(S.OutOfMemory, match="needs a restart"):
+        s._make_room(16)
