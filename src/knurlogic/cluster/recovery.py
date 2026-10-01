@@ -55,11 +55,14 @@ MEMORY_RX = re.compile(
 #: relaunched: failed at once.
 REFUSAL_RX = re.compile(
     r"\bREFUSING\b|refused at startup|launch settings are refused|"
-    r"ModuleNotFoundError|ImportError")
+    r"ModuleNotFoundError|ImportError|rank \d+ could not load")
 #: a refusal's lines in a serve log: the REFUSING line and any "  - why"
 #: lines under it, or the import error
 REFUSAL_LINE_RX = re.compile(r"REFUSING[^\n]*(?:\n  - [^\n]*)*|"
-                             r"(?:ModuleNotFoundError|ImportError): [^\n]*")
+                             r"(?:ModuleNotFoundError|ImportError): [^\n]*|"
+                             # a rank that cannot build the model: the same
+                             # launch fails the same way, so never relaunched
+                             r"rank \d+ could not load [^\n]*")
 #: a machine that went away or stopped answering: wait for it
 MACHINE_RX = re.compile(
     r"has not answered|not a peer this page knows|is not a machine "
