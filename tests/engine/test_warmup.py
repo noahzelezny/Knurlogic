@@ -82,3 +82,35 @@ def test_the_walker_finds_arrays_parameters_does_not_see():
     m = M()
     assert len(H.held_arrays(m)) == 5
     assert H.evaluate_everything(m) == 5
+
+
+def _warm_prompt(monkeypatch, chunk, cap, native=0):
+    """The prompt _warm_up hands _insert for this chunk and window."""
+    from types import SimpleNamespace
+    from knurlogic.engine.runtime import scheduler as S
+    from knurlogic.machine import artifact as A
+    monkeypatch.setenv("KNURLOGIC_CONTEXT_LENGTH", str(cap))
+    monkeypatch.setattr(A, "context_length", lambda path: native)
+    s = object.__new__(S.Scheduler)
+    s.prefill_step_size = chunk
+    s.host = SimpleNamespace(path="/m")
+    s._rows = []
+    seen = []
+    s._insert = lambda job: seen.append(job.request.prompt)
+    s._warm_up()
+    return seen[0]
+
+
+def test_warm_up_prompt_fits_a_small_context_cap(monkeypatch):
+    """chunk/3 repeats of "Hello, world. " is ~1.33 chunks of tokens: at
+    a 4096 chunk with a 4k cap it raised PromptError every launch."""
+    for cap, native in ((4096, 0), (0, 4096), (512, 0), (100, 0)):
+        p = _warm_prompt(monkeypatch, 4096, cap, native)
+        n = p.count("Hello")
+        assert n >= 1
+        assert n * 5 + 128 <= max(cap or native, 133)
+
+
+def test_warm_up_prompt_stays_chunk_wide_in_a_large_window(monkeypatch):
+    assert _warm_prompt(monkeypatch, 4096, 0, 262144).count("Hello") == 1366
+    assert _warm_prompt(monkeypatch, 4096, 0, 0).count("Hello") == 1366

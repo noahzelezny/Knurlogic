@@ -212,3 +212,78 @@ def test_flush_prunes_gone_paths(tmp_path):
     A._DISK["data"]["/no/such/path"] = [[], "x"]
     A._flush()
     assert list(json.loads(A._disk_file().read_text())) == [str(a)]
+
+
+def _counting(monkeypatch):
+    calls = []
+    real = A._shard_digest
+    monkeypatch.setattr(A, "_shard_digest",
+                        lambda f, n: calls.append(f) or real(f, n))
+    return calls
+
+
+def test_same_size_same_mtime_rewrite_recomputes(tmp_path, monkeypatch):
+    """cp -p / rsync -a keep mtime and a rebuilt shard keeps its size: the
+    ctime still moves, so the stamp must see it (memory and disk)."""
+    import time
+    a = _art(tmp_path, "m", b"a")
+    first = A.identity(a)
+    shard = a / "model-00001-of-00001.safetensors"
+    st = shard.stat()
+    time.sleep(0.01)
+    _shard(shard, b"b")
+    os.utime(shard, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert shard.stat().st_mtime_ns == st.st_mtime_ns
+    calls = _counting(monkeypatch)
+    assert A.identity(a) != first and calls
+    second = A.identity(a)
+    _fresh_process()
+    calls.clear()
+    assert A.identity(a) == second and not calls
+
+
+def test_index_change_recomputes(tmp_path, monkeypatch):
+    a = _art(tmp_path, "m", b"a")
+    first = A.identity(a)
+    _fresh_process()
+    (a / "model.safetensors.index.json").write_text('{"weight_map": {"x": 1}}')
+    calls = _counting(monkeypatch)
+    assert A.identity(a) != first and calls
+
+
+def test_flush_races_writers_without_losing_entries(tmp_path, monkeypatch):
+    import threading
+    a = _art(tmp_path, "m", b"a")
+    A.identity(a)
+    keys = [str(tmp_path / f"k{i}") for i in range(4000)]
+    for k in keys:
+        os.mkdir(k)
+    errors = []
+
+    def writer(part):
+        try:
+            for k in part:
+                with A._DISK_LOCK:
+                    A._disk()[k] = [[], "v"]
+                    A._schedule_flush()
+        except Exception as e:      # noqa: BLE001
+            errors.append(e)
+
+    def flusher():
+        try:
+            for _ in range(50):
+                A._flush()
+        except Exception as e:      # noqa: BLE001
+            errors.append(e)
+
+    ts = [threading.Thread(target=writer, args=(keys[i::4],))
+          for i in range(4)] + [threading.Thread(target=flusher)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not errors
+    A._flush()
+    on_disk = json.loads(A._disk_file().read_text())
+    assert set(keys) <= set(on_disk) and str(a) in on_disk
+    assert not A._DISK["dirty"]
