@@ -38,4 +38,18 @@
   }
   window.GEAR=`<svg viewBox="0 0 120 120" aria-hidden="true">${gear}<circle
     cx="${cx}" cy="${cy}" r="${r0}" fill="none" stroke="var(--acc)" stroke-width="10"/></svg>`;
+  // A coarser one for an instance card's 12px mark: twelve teeth blur
+  // together that small, six read as a turning gear.
+  const m=6, mh=(180/m)*0.5;
+  let small='';
+  for(let i=0;i<m;i++){
+    const a=(360/m)*i, p=[];
+    for(const [rad,off] of [[34,-mh*1.5],[58,-mh],[58,mh],[34,mh*1.5]]){
+      const t=(a+off)*Math.PI/180;
+      p.push(`${(cx+rad*Math.sin(t)).toFixed(2)},${(cy-rad*Math.cos(t)).toFixed(2)}`);
+    }
+    small+=`<polygon points="${p.join(' ')}" fill="var(--acc)"/>`;
+  }
+  window.GEAR6=`<svg viewBox="0 0 120 120" aria-hidden="true">${small}<circle
+    cx="${cx}" cy="${cy}" r="30" fill="none" stroke="var(--acc)" stroke-width="16"/></svg>`;
 })();
