@@ -306,6 +306,7 @@ async function tick(){
       '<line x1="2" y1="10" x2="54" y2="10"/></svg>'
     : '')+(shown.length>2?ring(shown.length):'')+(more>0?`<div class="topomore ro">+${more} more machine${
       more===1?'':'s'} -- this page shows ${MAXU}</div>`:'');
+  fit();
   setLastNodes(ns_);
   $('multiopts').hidden=selNodes().length<2;
   $('topo').querySelectorAll('.unit[data-node]').forEach(u=>u.onclick=()=>{
@@ -340,3 +341,20 @@ async function tick(){
 }
 
 export {tick};
+
+// A full card needs about FULL px; the window's width says nothing about
+// what the memory panel has (zoom, side panels), so measure the panel: the
+// key goes below the machines when beside them the cards would be short of
+// FULL, and the cards go compact when even that is not enough.
+const FULL=250;
+function fit(){
+  const t=document.querySelector('#memory .topo'); if(!t) return;
+  const n=t.querySelectorAll('.unit').length; if(!n||n>2) {
+    t.classList.remove('keybelow','tight'); return }
+  const w=t.clientWidth, key=($('ramwent')||{}).offsetWidth||0;
+  const flow=n===2?56:0, gap=12*(n===2?3:1);
+  const beside=(w-flow-key-gap)/n, below=(w-(n===2?40:0)-12*(n-1))/n;
+  t.classList.toggle('keybelow', beside<FULL);
+  t.classList.toggle('tight', beside<FULL && below<FULL);
+}
+try{ new ResizeObserver(()=>fit()).observe(document.getElementById('memory')) }catch(e){}
