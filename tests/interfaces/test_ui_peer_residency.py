@@ -50,6 +50,7 @@ def test_a_dead_peer_is_reported_and_does_not_take_the_others_down():
 
 
 def test_a_slow_peer_costs_at_most_the_deadline():
+    page_server._PEER_LAST.clear()
     def fetch(url, t):
         time.sleep(2.0)
         return {"resident": [ROW]}
@@ -57,7 +58,21 @@ def test_a_slow_peer_costs_at_most_the_deadline():
     [m] = page_server.peer_residency(Peers(peer("M4", "10.0.0.2")), timeout=0.2,
                             fetch=fetch)
     assert time.time() - t0 < 1.0
-    assert m["resident"] == [] and "did not answer" in m["error"]
+    # late is not a failure: nothing heard yet, no "not answering" error
+    assert m["resident"] == [] and m["late"] and "error" not in m
+
+
+def test_a_late_reply_shows_what_the_peer_last_said_and_its_age():
+    page_server._PEER_LAST.clear()
+    p = peer("M4", "10.0.0.2")
+    page_server.peer_residency(Peers(p), fetch=lambda url, t: {
+        "resident": [ROW]})
+
+    def slow(url, t):
+        time.sleep(2.0)
+        return {"resident": []}
+    [m] = page_server.peer_residency(Peers(p), timeout=0.2, fetch=slow)
+    assert m["resident"] and "error" not in m and m["heard_ago"] >= 0
 
 
 def test_peers_not_answering_are_not_asked():
