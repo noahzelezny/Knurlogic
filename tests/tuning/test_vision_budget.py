@@ -232,16 +232,45 @@ def test_mcp_fit_with_vision_off(tmp_path, monkeypatch):
     assert f["headroom_gib"] == round((b - need + _freed()) / GIB, 1)
 
 
-def test_the_models_listing_carries_the_part_sizes(tmp_path):
+def test_the_picked_models_preview_carries_the_part_sizes(tmp_path):
+    from knurlogic.interfaces.page import documents
+    d = _with_head(_rung(tmp_path / "v"), 3 << 20)
+    p = documents._preview(str(d), "default", 64)
+    assert (p["mtp_bytes"], p["vision_bytes"]) == (3 << 20, _freed())
+    t = documents._preview(str(_rung(tmp_path / "t", vision=False)),
+                           "default", 64)
+    assert (t["mtp_bytes"], t["vision_bytes"]) == (0, 0)
+
+
+def test_the_models_listing_loads_no_artifact(tmp_path, monkeypatch):
+    # /models.json lists ~80 models off a network store: counting part sizes
+    # there (Artifact.load per row) took it from ~7 s to ~40 s cold
+    import time
     from types import SimpleNamespace
 
     from knurlogic.interfaces.page import documents
     d = _with_head(_rung(tmp_path / "v"), 3 << 20)
-    assert documents._part_bytes(SimpleNamespace(path=d, servable=True)) \
-        == {"mtp_bytes": 3 << 20, "vision_bytes": _freed()}
-    t = _rung(tmp_path / "t", vision=False)
-    assert documents._part_bytes(SimpleNamespace(path=t, servable=True)) \
-        == {"mtp_bytes": 0, "vision_bytes": 0}
+    rows = [SimpleNamespace(name=f"m{i}", path=d, store="t", bytes_on_disk=1,
+                            model_type="qwen3_5", is_vq=False, servable=True,
+                            why="", extra={"mtp_head": True})
+            for i in range(80)]
+
+    def boom(*a, **k):
+        raise AssertionError("the listing loaded an artifact")
+    monkeypatch.setattr("knurlogic.machine.artifact.Artifact.load", boom)
+    monkeypatch.setattr("knurlogic.machine.discover.find", lambda: rows)
+    monkeypatch.setattr("knurlogic.interfaces.page.updates.flagged",
+                        lambda paths: set())
+    documents.forget_models()
+    try:
+        t0 = time.perf_counter()
+        out = documents.models_document(ttl=0)({})["models"]
+        took = time.perf_counter() - t0
+    finally:
+        documents.forget_models()
+    assert len(out) == 80 and out[0]["mtp"] is True
+    assert "mtp_bytes" not in out[0] and "vision_bytes" not in out[0]
+    assert took < 5, took
 
 
 def test_an_image_with_vision_off_is_a_clear_400(monkeypatch):
