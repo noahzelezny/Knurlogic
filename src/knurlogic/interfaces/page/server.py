@@ -1119,6 +1119,7 @@ def load_progress(doc: dict) -> list:
             lines, quiet = [], None
         e = {"port": port, "name": Path(path).name,
              **({"job": rec["job"]} if rec.get("job") else {}),
+             **({"identity": rec["identity"]} if rec.get("identity") else {}),
              **({"rank": rec["rank"]} if "rank" in rec else {}),
              "seconds": round(now - t), "bytes": procs.get(pid, 0),
              "total_bytes": _SIZES[path],

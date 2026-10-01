@@ -1149,6 +1149,8 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
         return 500, {"error": f"{type(e).__name__}: {e}"}
     rec = {"job": spec["job"], "rank": spec["rank"], "world": spec["world"],
            "pid": proc.pid, "artifact": path, "log": str(log),
+           # the model by identity: each rank's folder name may differ
+           "identity": spec.get("identity") or "",
            "split": spec["split"], "link": spec["link"],
            "machines": [n.get("name") for n in spec["nodes"]],
            # the machine THIS rank runs on, so a stop reason names it --
@@ -1501,6 +1503,7 @@ def jobs_document() -> list:
                     "port": next((r.get("port") for r in recs
                                   if r.get("port")), None),
                     "artifact": Path(r0.get("artifact") or "").name,
+                    "identity": r0.get("identity") or "",
                     "phase": J.phase_of(job, recs),
                     **{k: (SPECS.get(job) or {}).get(k) for k in
                        ("cable", "cable_note")

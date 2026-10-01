@@ -464,9 +464,9 @@ $('launch').onclick=async()=>{
   const t0=Date.now();
   saveLastLaunched(m.path);
   const body=ns.length>1
-    ? {action:'load', identity:m.identity, nodes:ns.map(n=>n.id),
+    ? {action:'load', identity:m.identity, name:pickedName(m), nodes:ns.map(n=>n.id),
        split:MULTI.shard, link:MULTI.link, tune, sets}
-    : pn ? {action:'load', node:pn.id, identity:m.identity, tune, sets}
+    : pn ? {action:'load', node:pn.id, identity:m.identity, name:pickedName(m), tune, sets}
     : {action:'load', target:m.path, tune, sets};
   let L=trackLaunch(m, ns, pn, t0), j=await act(body, true);
   // a tight answer is a question, not a failure: the card goes while the
@@ -654,8 +654,15 @@ const LAUNCHES=[];
 let LSEQ=0;
 // The card exists from the click, 'preparing' while the server checks and
 // prepares every rank; the answer to the launch settles it.
+// the folder name the user picked: each machine prefers its copy of that
+// name among the folders holding the same identity (names differ per machine)
+function pickedName(m){ return String(m.path||m.name||'').replace(/\/$/,'').split('/').pop() }
+// the same model: by identity when both know it, else by folder name
+function sameModel(a, b){
+  if(a.identity&&b.identity) return a.identity===b.identity;
+  return String(a.name||'').split('/').pop()===String(b.name||'').split('/').pop() }
 function trackLaunch(m, ns, pn, t0){
-  const L={id:++LSEQ, name:m.name, t0, port:0, job:'',
+  const L={id:++LSEQ, name:m.name, identity:m.identity||'', t0, port:0, job:'',
     machines:ns.length?ns.map(n=>n.node):[localName()],
     node:pn?pn.id:'', cluster:ns.length>1, phase:'preparing', samples:[]};
   LAUNCHES.unshift(L); if(LAUNCHES.length>4) LAUNCHES.length=4;
@@ -669,8 +676,7 @@ function settleLaunch(L, j){
     if(A!==L&&A.adopted&&((L.job&&A.job===L.job)||(!L.job&&L.port&&A.port===L.port
        &&(A.node||'')===(L.node||''))
        // a refused launch answers with no job: its twin goes by model name
-       ||(!L.job&&!L.port&&A.cluster===L.cluster
-          &&String(A.name).split('/').pop()===String(L.name).split('/').pop())))
+       ||(!L.job&&!L.port&&A.cluster===L.cluster&&sameModel(A, L))))
       LAUNCHES.splice(i,1) }
   if(L.cancelled){ stopLaunch(L); return }
   if(j.error||j.refused||j.loaded===false||j.ok===false){ L.phase='failed';
@@ -698,8 +704,9 @@ function followLaunch(L, d){
     // every rank this machine started (followers carry no port): all of
     // the job's when the launch has one, else the newest per machine
     const per=mine.flatMap(x=>{
-      const ks=(x.doc.loads||[]).filter(k=>k.name===nm
-        && (!L.job||!k.job||k.job===L.job));
+      // by job id once known: each rank's folder name may differ
+      const ks=(x.doc.loads||[]).filter(k=>L.job&&k.job ? k.job===L.job
+        : sameModel(k, {name:nm, identity:L.identity}));
       return L.job ? ks : ks.sort((a,b)=>a.seconds-b.seconds).slice(0,1)});
     if(per.length){ L.bytes=per.reduce((s,k)=>s+k.bytes,0); L.total=per[0].total_bytes }
   } else if(e){ L.bytes=e.bytes; L.total=e.total_bytes; L.last=e.last_log_line;
@@ -782,22 +789,25 @@ function adoptLaunches(d){
   // back: a server-reported load of the same model meanwhile is that one
   const base=n=>String(n||'').split('/').pop();
   // (a job whose model is not named yet counts as any waiting cluster launch)
-  const waiting=(n,cl)=>LAUNCHES.some(L=>!L.adopted&&!L.job&&!L.port
-    &&L.phase==='preparing'&&(n?base(L.name)===base(n):!!cl===L.cluster));
+  // (matched by identity when both know it: a peer's folder name may differ)
+  const waiting=(n,cl,id)=>LAUNCHES.some(L=>!L.adopted&&!L.job&&!L.port
+    &&L.phase==='preparing'&&(id&&L.identity ? (id===L.identity&&!!cl===L.cluster)
+      : n?base(L.name)===base(n):!!cl===L.cluster));
   for(const x of ms){
     for(const jb of (x.doc.jobs||[])){
       if(!jb.job||!act.includes(jb.phase)||ADOPT_SKIP.has('j'+jb.job)
          ||LAUNCHES.some(L=>L.job===jb.job)) continue;
       const ld=ms.flatMap(y=>y.doc.loads||[]).find(e=>e.job===jb.job);
-      if(waiting(jb.artifact||(ld&&ld.name), true)) continue;
+      if(waiting(jb.artifact||(ld&&ld.name), true, jb.identity)) continue;
       LAUNCHES.push({id:++LSEQ, name:jb.artifact||(ld&&ld.name)||jb.job,
+        identity:jb.identity||'',
         t0:Date.now()-((ld&&ld.seconds)||0)*1000, port:jb.port||0, job:jb.job,
         machines:jb.machines||[x.name], node:'', cluster:true,
         phase:'starting', samples:[], adopted:true});
     }
     for(const e of (x.doc.loads||[])){
       if(e.job||!['loading','stalled','warming'].includes(e.phase)
-         ||waiting(e.name)) continue;
+         ||waiting(e.name, false, e.identity)) continue;
       const k='p'+x.id+':'+e.port;
       if(ADOPT_SKIP.has(k)||LAUNCHES.some(L=>!L.cluster&&L.port===e.port
          &&(L.node||'')===x.id&&L.name.split('/').pop()===e.name)) continue;
@@ -815,6 +825,6 @@ function followLaunches(d){
 }
 
 export {allDownloads, BASEKEY, SEL, baseKey, baseOf, cancelLaunch, dismissLaunch,
-        failedLaunches, famOf, followLaunches, hubAct,
+        failedLaunches, famOf, sameModel, followLaunches, hubAct,
         loadDownloads, loadModels, loadingLaunches,
         nodeSelChanged, published, setSets};

@@ -388,10 +388,15 @@ def resolve_identity(ident: str | None, paths=None, name: str = "") -> str | Non
         return hits[0]
     named = [h for h in hits if name and Path(h).name == name]
     local = [h for h in (named or hits) if not on_network(h)]
-    pick = (local or named or hits)[0]
+    pool = local or named or hits
+    # no copy of the name asked for: the plain name over a prefixed copy
+    # of it (`X` over `sp190--X`), so every machine tends to the same name
+    plain = [h for h in pool if not any(
+        Path(h).name.endswith("--" + Path(o).name) for o in pool if o != h)]
+    pick = (plain or pool)[0]
     import logging
-    why = ("the one named" if named else "on this Mac's disk" if local
-           else "the first by path")
+    why = ("the one named" if named else "on this Mac's disk, the plain name"
+           if local else "the plain name, first by path")
     logging.getLogger(__name__).info(
         "identity %s: %d copies of the same weights (%s); using %s (%s)",
         ident, len(hits), ", ".join(hits), pick, why)

@@ -144,3 +144,15 @@ def test_spec_name_is_never_a_path():
                                         "rank": 0, "world": 2, "prefill_chunk": 0,
                                         "split": "pipeline", "link": "ring",
                                         "hosts": []})
+
+
+def test_the_plain_name_beats_a_prefixed_copy(tmp_path, monkeypatch):
+    # sp190--X sorts before X on some paths; without a picked name every
+    # machine should still land on X, so the ranks name the same folder
+    monkeypatch.setattr(A, "_network_mounts", lambda: [])
+    a = _art(tmp_path / "a", "sp190--Qwen--M", b"a")
+    b = _art(tmp_path / "b", "Qwen--M", b"a")
+    ident = A.identity(a)
+    assert A.resolve_identity(ident, [a, b]) == str(b)
+    assert A.resolve_identity(ident, [a, b], name="sp190--Qwen--M") == str(a)
+    assert A.resolve_identity(ident, [a, b], name="Qwen--M") == str(b)
