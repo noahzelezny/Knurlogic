@@ -161,7 +161,7 @@ def _status_light(_n=0):
 def _build_light(now: float) -> None:
     if _LIGHT["doc"] is not None and now - _LIGHT["at"] <= LIGHT_TTL_S:
         return                      # built while this request waited
-    if _MM["doc"] is None or now - _MM["at"] > LIGHT_MAP_S:
+    if _MM["doc"] is None or now - _MM["at"] > _map_age_limit(now):
         try:
             _MM["doc"] = loaded.memory_map()
         except (OSError, subprocess.SubprocessError, ValueError, KeyError,
@@ -184,8 +184,35 @@ _LIGHT_LOCK = __import__("threading").Lock()
 #: the light node entry, and how long one build of it serves
 _LIGHT: dict = {"doc": None, "at": 0.0}
 LIGHT_TTL_S = 1.5
-#: the liveness document reuses the memory map up to this old
+#: the liveness document reuses the memory map up to this old while the
+#: machine is quiet, and only HOT_MAP_S old for HOT_S after anything that
+#: moves memory (a load, an unload, a request, a message from a peer) or
+#: while a model here is answering one -- a card that trails a load by half
+#: a minute reads as the machine not reporting
 LIGHT_MAP_S = 30.0
+HOT_MAP_S = 3.0
+HOT_S = 30.0
+_HOT: dict = {"until": 0.0}
+
+
+def hot() -> None:
+    """Memory is about to move here: read it often for a while."""
+    _HOT["until"] = time.time() + HOT_S
+
+
+def _answering() -> bool:
+    """A model on this machine has a request in flight or queued, by the
+    residency document the page already keeps (never a fresh survey)."""
+    doc = documents._LOADED.get("doc") or {}
+    for r in doc.get("resident") or []:
+        q = r.get("requests") or {}
+        if q.get("in_flight") or q.get("pending"):
+            return True
+    return False
+
+
+def _map_age_limit(now: float) -> float:
+    return HOT_MAP_S if now < _HOT["until"] or _answering() else LIGHT_MAP_S
 
 #: A loading server whose log has said nothing for this long is reported as
 #: stalled. Not killed -- a 400 GB rung read cold can be slow and silent --
@@ -1797,6 +1824,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             self._send(body, ctype)
 
         def do_POST(self):
+            hot()               # a load, a chat, a peer's message: memory moves
             u = urlparse(self.path)
             if u.path.rstrip("/") == MSG_PATH:
                 self._peer_msg("POST")
