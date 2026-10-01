@@ -61,7 +61,7 @@ SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
              "port", "working_set_gib", "bandwidth_gbs", "nodes", "versions",
              "jaccl_timeout_ms", "sets", "chips", "cable", "cable_note",
-             "recovery", "serve_hosts", "name", "auto_port")
+             "recovery", "serve_hosts", "name", "auto_port", "anyway")
 SPLITS = ("tensor", "pipeline")
 LINKS = ("ring", "jaccl")
 #: the link names people see (load(), state(), the page, the recovery
@@ -454,7 +454,7 @@ def _used_slots() -> set:
 
 
 def placement(machines: list, shape: dict, split: str,
-              order: list | None = None) -> dict:
+              order: list | None = None, anyway: bool = False) -> dict:
     """Rank order and each rank's share. `machines`: [{"name", "chip",
     "p_core_ghz", "working_set_bytes", "bandwidth_gbs", "links"}];
     `shape`: the artifact's {"layer_bytes", "other_bytes", "leader_bytes"
@@ -474,18 +474,23 @@ def placement(machines: list, shape: dict, split: str,
     if split == "tensor":
         per = int(shape["tensor_per_rank_bytes"])
         shares, left = [], []
+        tight = 0
         for r, nm in enumerate(names):
             ws = budget_of(by[nm])
             margin = R.rank_margin(ws, shape.get("reserve"))
-            if per > ws - margin:
+            floor = R.step_margin(ws)
+            if per > ws - floor:
                 raise ValueError(f"{nm}: its tensor share {per / GIB:.1f} "
                                  f"GiB does not fit its working set "
                                  f"{ws / GIB:.1f} GiB less the "
-                                 f"{margin / GIB:.1f} GiB step margin "
-                                 f"(first-request transient, a minimum "
-                                 f"context's KV): more space required")
+                                 f"{floor / GIB:.1f} GiB step margin: "
+                                 f"more space required")
+            if per > ws - margin:
+                tight = max(tight, per - (ws - margin))
             shares.append({"rank": r, "machine": nm, "bytes": per})
             left.append(f"{nm} leaves {(ws - per) / GIB:.1f} GiB")
+        if tight and not anyway:
+            raise R.TightFit(tight)
         reason = (f"tensor split {n} ways: every rank holds "
                   f"~{per / GIB:.1f} GiB ({', '.join(left)}); rank 0 "
                   f"{names[0]} leads (newest chip, then P-core clock, then "
@@ -497,9 +502,23 @@ def placement(machines: list, shape: dict, split: str,
               "memory_bandwidth_gbs": by[nm].get("bandwidth_gbs")}
              for nm in names]
     lead = int(shape.get("leader_bytes") or 0)
-    sh = R.pipeline_shares(list(shape["layer_bytes"]), ranks,
-                           int(shape.get("other_bytes") or 0), lead,
-                           reserve=shape.get("reserve"))
+    layers, other = list(shape["layer_bytes"]), int(shape.get("other_bytes") or 0)
+    try:
+        sh = R.pipeline_shares(layers, ranks, other, lead,
+                               reserve=shape.get("reserve"))
+    except ValueError:
+        if not shape.get("reserve"):
+            raise
+        # the layers fit with only the step margin kept free: tight, a
+        # warning the user may accept, not a refusal
+        sh = R.pipeline_shares(layers, ranks, other, lead, reserve=None)
+        short = max(
+            sh["bytes"][r] + other + (lead if r == 0 else 0)
+            - (rk["working_set_bytes"]
+               - R.rank_margin(rk["working_set_bytes"], shape["reserve"]))
+            for r, rk in enumerate(ranks))
+        if not anyway:
+            raise R.TightFit(max(short, 1)) from None
     shares = [{"rank": r, "machine": nm,
                "bytes": sh["bytes"][r] + int(shape.get("other_bytes") or 0)
                + (lead if r == 0 else 0),
@@ -749,18 +768,29 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                 + int(sh.get("other_bytes") or 0) \
                 + (int(sh.get("leader_bytes") or 0) if rank == 0 else 0) \
                 if counts else 0
-        from knurlogic.tuning.resolve import rank_margin
+        from knurlogic.tuning.resolve import rank_margin, step_margin
         margin = rank_margin(ws, sh.get("reserve"))
+        floor = step_margin(ws)
+        anyway = bool(spec.get("anyway"))
+        # the weights and the minimum step margin are the refusal; the rest
+        # of the reserve is a warning the coordinator already put to the user
+        keep = floor if anyway else margin
         busy = (held or held_here)(spec["job"]) if need and ws else []
         hold = sum(b for _, _, b in busy)
-        if need and ws and need > ws - margin and not hold:
+        if need and ws and need > ws - floor and not hold:
             refusals.append(f"rank {rank}'s share is {need / GIB:.1f} GiB "
                             f"and {me}'s working set (under its allowance) "
                             f"is {ws / GIB:.1f} GiB, which must leave the "
-                            f"{margin / GIB:.1f} GiB step margin "
-                            f"(first-request transient, a minimum "
-                            f"context's KV): more space required")
-        elif need and ws and need > ws - hold - margin:
+                            f"{floor / GIB:.1f} GiB step margin: more space "
+                            f"required")
+        elif need and ws and need > ws - keep and not hold:
+            refusals.append(f"Tight fit on {me}: rank {rank}'s share is "
+                            f"{need / GIB:.1f} GiB and its working set "
+                            f"{ws / GIB:.1f} GiB is about "
+                            f"{(need - (ws - margin)) / GIB:.1f} GiB short "
+                            f"of a safe margin, so expect swap under long "
+                            f"conversations (launch with anyway to accept)")
+        elif need and ws and need > ws - hold - keep:
             refusals.append(
                 f"rank {rank}'s share is {need / GIB:.1f} GiB and {me}'s "
                 f"working set (under its allowance) is {ws / GIB:.1f} GiB, "
@@ -768,7 +798,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                 + ", ".join(f"{w} (pid {p}, {b / GIB:.1f} GiB)"
                             for w, p, b in busy if b)
                 + f"; the {(ws - hold) / GIB:.1f} GiB left must also leave "
-                  f"the {margin / GIB:.1f} GiB step margin. Unload that "
+                  f"the {keep / GIB:.1f} GiB step margin. Unload that "
                   f"first")
     if spec["link"] == "ring":
         ip = spec["hosts"][rank].rsplit(":", 1)[0]
@@ -1582,8 +1612,16 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     except (*NET_ERRORS, LookupError, StopIteration, AttributeError) as e:
         return {"error": f"could not read the model's shape: "
                          f"{type(e).__name__}: {e}"}
+    from knurlogic.tuning.resolve import TightFit
     try:
-        plan = placement(infos, shape, split, req.get("order"))
+        plan = placement(infos, shape, split, req.get("order"),
+                         **({"anyway": True} if req.get("anyway") else {}))
+    except TightFit as e:
+        return {"loaded": False, "tight": True,
+                "short_gib": round(e.short_bytes / GIB, 1),
+                "reason": e.reason, "mtp_off_fits": False,
+                "note": "the weights fit but not the safety margin; "
+                        "launch again with anyway=true to accept the risk"}
     except ValueError as e:
         return {"refused": f"cannot place it: {e}"}
     order = [next(m for m in infos if m["name"] == nm) for nm in plan["order"]]
@@ -1737,6 +1775,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "nodes": nodes, "versions": local_info.get("versions") or {},
             "jaccl_timeout_ms": J.JACCL_TIMEOUT_MS if link == "jaccl" else 0,
             "sets": sets, "cable": net, "cable_note": note[:400],
+            "anyway": bool(req.get("anyway")),
             # each machine's chip and GPU architecture, rank order: the
             # ranks resolve KNURLOGIC_CROSS_CHIP=auto from it
             "chips": [{"name": m.get("chip") or m.get("name") or "",
