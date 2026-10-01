@@ -67,9 +67,14 @@ DECODE_CHUNK_HEADROOM_DIVISOR = 8
 # smaller of the working set and what macOS would hand over now), never
 # from installed RAM. "No reason to leave headroom unused, but read the
 # room": take the widest width on the ladder, capped at the family's
-# measured best, whose predicted step transient fits in
-# PREFILL_TRANSIENT_ROOM_SHARE of the room left after the weights, a KV
-# allowance and the reclaimable (prompt) cache; else step down, floor 512.
+# measured best, whose predicted step transient fits in the memory the
+# launch RESERVES for transients (the step margin, or 1.25x the first
+# request's transient when larger -- the reserve the fit already holds
+# free); else step down, floor 512. (It used to be 10% of the room left
+# after weights, KV and cache: 0.00 GiB on a tight-but-fitting box, which
+# pinned 512 and cost 2.4x prefill -- GLM-5.3 Flash 2.7bpw on 128 GB:
+# 93-98 tok/s at 512 against 220-236 at 2048, step transient 1.39 GiB
+# measured at 512 over 3018 tokens, 480*hidden*512 predicts ~1.4 GiB.)
 # A family with no measurement stays 512.
 #
 # M4 Max 128 GB sweep, prefill tok/s at 4k/16k-token prompts (median of 3,
@@ -96,8 +101,6 @@ PREFILL_CHUNK_LADDER = (512, 1024, 2048, 4096)
 #: (4096 * 4096) = 480 bytes. It over-predicts the milder rungs (0.94 vs
 #: 0.33 GiB at 512 on the 397B), which is the safe direction.
 PREFILL_TRANSIENT_BYTES_PER_TOKEN_HIDDEN = 480
-#: The transient may take at most this share of the room left.
-PREFILL_TRANSIENT_ROOM_SHARE = 0.10
 #: KV held back before the rule sizes a chunk: one long conversation.
 PREFILL_KV_ALLOWANCE_TOKENS = 32768
 
