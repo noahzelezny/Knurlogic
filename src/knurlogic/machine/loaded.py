@@ -611,9 +611,11 @@ def _runtime_of(cmd: str) -> str:
             return name
     if module:
         places = places[1:]
-    for mark, name in _RUNTIME_MARKS:
-        for place in places:
-            low = place.lower()
+    # The script before the interpreter, as the module is: `envs/exo/bin/
+    # python .../vqlab/bench/speed_pair.py` is vqlab borrowing exo's env.
+    for place in reversed(places):
+        low = place.lower()
+        for mark, name in _RUNTIME_MARKS:
             if low.rsplit("/", 1)[-1].lstrip("-") == mark:
                 return name
             # A path component, i.e. an env or install directory belonging

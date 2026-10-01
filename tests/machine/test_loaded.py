@@ -159,6 +159,14 @@ def test_a_runtime_is_read_from_its_executable_or_its_module():
     assert loaded._runtime_of("/usr/bin/python3 other.py") == ""
 
 
+def test_a_script_names_its_process_over_the_interpreters_env():
+    # vqlab's benchmark run with exo's python read as exo on the page's
+    # legend (M3, 2026-10-01)
+    assert loaded._runtime_of(
+        "/opt/anaconda3/envs/exo/bin/python /Users/x/.vqlab/queues/q/tree/"
+        "src/vqlab/bench/speed_pair.py /Volumes/S/pin_Qwen") == "vqlab"
+
+
 def test_an_idle_runtime_is_reported_below_the_floor(monkeypatch):
     """An idle exo holding 163 MiB is an ANSWER -- nothing is loaded. Dropped
     under a floor it looks identical to exo not running at all, which is the
