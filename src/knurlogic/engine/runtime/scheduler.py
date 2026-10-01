@@ -76,6 +76,12 @@ def _kv_from_config(path, kv_bits=None) -> tuple | None:
         return None
 
 
+# Under this much fresh prefill a rate is noise (the page's own floor):
+# nothing is sent, so nothing is shown.
+PREFILL_MIN_TOKENS = 256
+PREFILL_MIN_S = 0.05
+
+
 def _timing(row, done: float, completion: int, prefilled) -> dict:
     """What the request took, measured here where the steps run: time in
     the queue, time to first token (from submit, as a client feels it), and
@@ -85,8 +91,10 @@ def _timing(row, done: float, completion: int, prefilled) -> dict:
     first = row.first or done
     out = {"queue_s": round(max(row.admitted - row.job.submitted, 0), 4),
            "ttft_s": round(max(first - row.job.submitted, 0), 4)}
-    pre = first - row.admitted
-    if prefilled and pre > 0:
+    # the compute only: from the step that began the prefill, not from the
+    # admission (which also counts waiting for the scheduler's turn)
+    pre = first - (getattr(row, "began", 0.0) or row.admitted)
+    if (prefilled or 0) >= PREFILL_MIN_TOKENS and pre >= PREFILL_MIN_S:
         out["prefill_tok_s"] = round(prefilled / pre, 1)
     dec = done - first
     if completion > 1 and dec > 0:
@@ -240,6 +248,7 @@ class _Row:
     types: list[str]          # segment types still to label checkpoints
     admitted: float = 0.0     # perf_counter when its prefill was queued
     first: float = 0.0        # ... when its first token came out
+    began: float = 0.0        # ... when the first step that computes it began
     made: int = 0             # tokens it has generated (its context grows)
 
 
@@ -1101,6 +1110,10 @@ class Scheduler:
         assert ex is not None
         ctx = self._context()
         before = self._reset_peak()
+        now = time.perf_counter()
+        for r in self._rows.values():
+            if not r.began:
+                r.began = now
         try:
             events = ex.step()          # on the executor's own stream
         # a failed step fails its rows; the scheduler thread lives on (logged)
