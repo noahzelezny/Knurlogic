@@ -129,3 +129,11 @@ def test_messages_refusal_sends_retry_after():
     h = M.handler_over(transport, "m")
     h(b"{}", lambda b: None, lambda *a: sent.append(a))
     assert sent == [(503, "application/json", {"Retry-After": "5"})]
+
+
+def test_the_warm_up_row_is_not_a_request():
+    s = Scheduler(Host(), completion_batch_size=4)
+    s._rows[0] = _row(_job())
+    assert s.requests()["in_flight"] == 1
+    s._warming = True
+    assert s.requests()["in_flight"] == 0

@@ -24,6 +24,17 @@ def requests_now():
     return sched.requests() if sched is not None else None
 
 
+def load_now():
+    """The running server's host state ({state, error}: loading, warming,
+    ready, failed, empty), or None before it runs. /status.json carries it
+    so a page does not call a model ready because its port answers."""
+    sched = _CURRENT.get("scheduler")
+    if sched is None:
+        return None
+    st = sched.host.status()
+    return {"state": st.get("state"), "error": st.get("error") or ""}
+
+
 def switch(model: str, *, force: bool = False, wait: bool = True,
            timeout: float = 3600.0) -> dict:
     """Serve `model` (an id from /models.json, or the served one): the

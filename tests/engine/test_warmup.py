@@ -45,3 +45,16 @@ def test_a_failed_warm_up_still_serves(host):
     h.warm = boom
     h.load(str(path))
     assert h.state == "ready"
+
+
+def test_every_parameter_is_evaluated_inside_the_load(host, monkeypatch):
+    """A model run from its own bundled model.py may skip mlx-lm's own
+    evaluation; weights left lazy were then read by the first request, with
+    the page already saying ready."""
+    import mlx.core as mx
+    h, path = host
+    seen = []
+    real = mx.eval
+    monkeypatch.setattr(mx, "eval", lambda *a: seen.append(a) or real(*a))
+    h._weights(str(path))
+    assert seen
