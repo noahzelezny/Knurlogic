@@ -58,3 +58,27 @@ def test_every_parameter_is_evaluated_inside_the_load(host, monkeypatch):
     monkeypatch.setattr(mx, "eval", lambda *a: seen.append(a) or real(*a))
     h._weights(str(path))
     assert seen
+
+
+def test_the_walker_finds_arrays_parameters_does_not_see():
+    """A bundled model.py may keep codebooks in "_"-named attributes or on
+    plain helper objects: nn.Module.parameters() skips them, so they stayed
+    lazy until the first request."""
+    import mlx.core as mx
+
+    class Helper:
+        def __init__(self):
+            self.table = mx.zeros((2,))
+            self.more = [mx.ones((1,)), {"k": mx.ones((3,))}]
+
+    class M(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.w = mx.ones((2,))
+            self._codebook = mx.ones((4,))
+            self.helper = Helper()
+            self.loop = self          # a cycle must not hang
+
+    m = M()
+    assert len(H.held_arrays(m)) == 5
+    assert H.evaluate_everything(m) == 5

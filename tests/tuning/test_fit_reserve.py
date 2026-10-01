@@ -147,3 +147,38 @@ def test_placement_reserve_short_is_tight_and_anyway_places_it():
     big = dict(tensor, tensor_per_rank_bytes=80 * GIB)
     with pytest.raises(ValueError, match="more space required"):
         L.placement(ms, big, "tensor", anyway=True)
+
+
+def _chunk(weights_gib, box_gib, hidden=4096):
+    from pathlib import Path
+
+    from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning import settings as S
+    a = Artifact(path=Path("/nonexistent"), model_type="qwen3_5",
+                 model_file=None, bytes_on_disk=int(weights_gib * GIB),
+                 hidden_size=hidden, moe_intermediate_size=1024, vq_other={})
+    r = R.resolve(a, int(box_gib * GIB))
+    return int(r.env["KNURLOGIC_PREFILL_CHUNK"]), r.notes, S
+
+
+def test_a_tight_but_fitting_box_gets_the_family_best_the_reserve_covers():
+    """118 GiB of weights on 128: 0% of the leftover room, but the step
+    margin (6.4 GiB) is reserved for transients and 2048's ~3.75 GiB fits it;
+    4096 (~7.5) does not, and is not taken."""
+    width, notes, _ = _chunk(118, 128)
+    assert width == 2048
+    assert any("reserved for transients" in n for n in notes)
+
+
+def test_a_box_whose_reserve_cannot_cover_the_chunk_steps_down():
+    width, _, S = _chunk(126.5, 128)       # ~1.5 GiB of headroom at all
+    assert width == S.PREFILL_CHUNK_DEFAULT
+    mid, _, _ = _chunk(124, 128)           # ~4 GiB: 1024 (1.9) yes, 4096 no
+    assert 512 <= mid <= 2048
+
+
+def test_the_transient_line_is_not_below_what_was_measured():
+    """GLM-5.3 Flash VQ (hidden 6144): 1.39 GiB measured at chunk 512."""
+    from knurlogic.tuning import settings as S
+    predicted = 512 * 6144 * S.PREFILL_TRANSIENT_BYTES_PER_TOKEN_HIDDEN
+    assert predicted / GIB >= 1.39
