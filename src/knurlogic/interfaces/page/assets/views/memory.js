@@ -54,6 +54,30 @@ function ramWent(m){
     ${row('unused',free,'')}
     ${m.swap_bytes>=SWAP_FLOOR?row('swap',m.swap_bytes,'var(--bad)'):''}</div>`;
 }
+// A tight launch (the weights fit, the safety margin does not) is a warning
+// the user answers, in the page's own style: -> 'mtp' (turn MTP off and
+// launch), 'anyway', or null (cancel).
+function tightConfirm(j){
+  return new Promise(res=>{
+    const o=document.createElement('div'); o.className='modal tightask';
+    o.innerHTML=`<div class="box tightbox" role="dialog" aria-modal="true">
+      <div class="tighthd">Tight fit</div>
+      <div class="tightwhy">${esc(j.reason||'The weights fit but not the safety margin; expect swap.')}</div>
+      <div class="tightbtns">
+        ${j.mtp_off_fits?'<button class="mini pri" data-t="mtp">Turn MTP off and launch</button>':''}
+        <button class="mini" data-t="anyway">Launch anyway</button>
+        <button class="mini" data-t="cancel">Cancel</button></div></div>`;
+    const done=v=>{ document.removeEventListener('keydown',key); o.remove(); res(v) };
+    const key=e=>{ if(e.key==='Escape') done(null) };
+    o.onclick=e=>{ const t=e.target.dataset&&e.target.dataset.t;
+      if(t) done(t==='cancel'?null:t); else if(e.target===o) done(null) };
+    document.addEventListener('keydown',key);
+    document.body.appendChild(o);
+    const f=o.querySelector('button'); if(f) f.focus();
+  });
+}
+// what a tight answer's choice adds to the same launch request
+const tightFlags=c=>c==='mtp'?{draft:false}:{anyway:true};
 async function act(payload, quiet){
   // A server that is down or answers with something other than JSON is an
   // answer too: said, and the buttons that awaited this get theirs back.
@@ -67,6 +91,12 @@ async function act(payload, quiet){
   // -- a Launch button that quietly resets is the page's version of an agent
   // waiting on silence.
   // `quiet`: the caller shows the failure itself (a launch's FAILED card)
+  if(j.tight&&!quiet){
+    const c=await tightConfirm(j);
+    if(c) return act({...payload,...tightFlags(c)}, quiet);
+    await loadResident();
+    return {...j, cancelled:true};
+  }
   if(quiet){}
   else if(j.error) alert(j.error);
   else if(j.refused) alert(refusalText(j));
@@ -231,4 +261,5 @@ async function loadResident(){
   });
 }
 
-export {SWAP_FLOOR, RAM, RAMCOL, act, loadResident, ramWent};
+export {SWAP_FLOOR, RAM, RAMCOL, act, loadResident, ramWent, tightConfirm,
+  tightFlags};

@@ -4,7 +4,7 @@ import {LASTNODES, fitWS, fitWhere, isLocal, selNodes} from '../nodes.js';
 import {launchSets, migrateLaunchSets} from './settings/knobs.js';
 import {getJSON, httpWhy, peekURL} from '../api.js';
 import {tick} from './home.js';
-import {act, loadResident} from './memory.js';
+import {act, loadResident, tightConfirm, tightFlags} from './memory.js';
 
 // --- what else is here ----------------------------------------------------
 // Shown, not offered: a loaded model is loaded, and a page that presents a
@@ -463,13 +463,25 @@ $('launch').onclick=async()=>{
   const sets=launchMTP(m);
   const t0=Date.now();
   saveLastLaunched(m.path);
-  const L=trackLaunch(m, ns, pn, t0);
-  const j=await act(ns.length>1
+  const body=ns.length>1
     ? {action:'load', identity:m.identity, nodes:ns.map(n=>n.id),
        split:MULTI.shard, link:MULTI.link, tune, sets}
     : pn ? {action:'load', node:pn.id, identity:m.identity, tune, sets}
-    : {action:'load', target:m.path, tune, sets}, true);
+    : {action:'load', target:m.path, tune, sets};
+  let L=trackLaunch(m, ns, pn, t0), j=await act(body, true);
+  // a tight answer is a question, not a failure: the card goes while the
+  // user chooses, and comes back for the launch they confirm
+  let more={};
+  while(j.tight && !L.cancelled){
+    dismissLaunch(L.id); loadResident();
+    const c=await tightConfirm(j);
+    if(!c){ L.cancelled=true; break }
+    more={...more,...tightFlags(c)};
+    L=trackLaunch(m, ns, pn, Date.now());
+    j=await act({...body,...more}, true);
+  }
   b.textContent='Launch'; b.disabled=false;
+  if(L.cancelled&&j.tight){ loadResident(); return }
   settleLaunch(L, j);
   if(L.phase!=='failed' && !L.cancelled){
     // done with this pick: back to "choose a model"

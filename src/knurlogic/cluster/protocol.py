@@ -232,6 +232,8 @@ class Load(Body):
     tune: str | None = None
     sets: dict = field(default_factory=dict)
     force: bool = False
+    draft: bool = True
+    anyway: bool = False
 
 
 @_register
