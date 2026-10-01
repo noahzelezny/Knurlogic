@@ -293,7 +293,8 @@ const kfmt=v=>v<1000?String(v):v<1e6?(v/1000).toFixed(v<1e5?1:0).replace(/\.0$/,
 // the count, since a made-up denominator would read as a limit.
 function showCtx(){
   const el=$('cctx'); if(!el) return;
-  const c=curChat(), m=c&&(c.msgs||[]).map(x=>x.met).filter(Boolean).pop();
+  // home (no chat open) reads as none, not the last chat left behind
+  const c=HOME?null:curChat(), m=c&&(c.msgs||[]).map(x=>x.met).filter(Boolean).pop();
   const used=m?(m.prompt||0)+(m.completion||0):null;
   el.textContent=used==null ? '—'
     : CTXLEN ? `${kfmt(used)} / ${kfmt(CTXLEN)}` : kfmt(used);
