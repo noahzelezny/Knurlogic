@@ -20,7 +20,7 @@ def _stale_launch(monkeypatch, fresh, exiting=()):
     its Survey answers now (GiB, one per call); `exiting`: its exiting count
     per call."""
     monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True: SHAPE)
     monkeypatch.setattr(C, "BAD_CABLES", {})
     monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
     monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
