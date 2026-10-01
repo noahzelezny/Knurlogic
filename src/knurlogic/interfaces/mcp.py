@@ -179,6 +179,39 @@ def _tight_doc(chk: dict) -> dict[str, Any] | None:
                              if chk["mtp_off_fits"] else "") + "."}
 
 
+def _mtp_off_doc(artifact: str, sets: dict, tune: str,
+                 draft: bool) -> dict[str, Any] | None:
+    """The refusal of a launch that cannot fit with MTP on but fits with it
+    off, as a doc the page's tightConfirm shows (turn MTP off, or cancel --
+    never "launch anyway": it cannot fit as asked) and an agent reads as
+    "retry with draft=false"; None when that is not the case."""
+    if not draft:
+        return None
+    from knurlogic.interfaces.serve import launch_fit
+    from knurlogic.machine.artifact import Artifact
+    try:
+        a = Artifact.load(artifact)
+        chk = launch_fit(a, sets, tune, True)
+        if chk["state"] != "cannot" or not chk.get("head_bytes"):
+            return None
+        if launch_fit(a, sets, tune, False)["state"] == "cannot":
+            return None
+    except (OSError, ValueError, AttributeError, KeyError):
+        return None
+    why = chk["why"].split("; turn MTP off")[0]
+    reason = (f"{why}. It will not fit with MTP on; with MTP off the "
+              f"{chk['head_bytes'] / GIB:.1f} GiB head is not loaded and "
+              f"it fits.")
+    return {"loaded": False, "refused": "will not fit", "tight": True,
+            "no_anyway": True, "mtp_off_fits": True, "reason": reason,
+            "short_gib": 0,
+            "text": f"{reason} Nothing was started. Retry `load` with "
+                    f"draft=false (MTP off); anyway=true cannot override "
+                    f"this, it is arithmetic.",
+            "what_to_do": "Tell the user, then retry `load` with "
+                          "draft=false (MTP off), which fits."}
+
+
 def _vision_terms(vb) -> dict[str, Any] | None:
     """The resolver's vision terms (tuning.resolve.vision_budget) in GiB,
     each with its note; None for a text-only artifact."""
@@ -607,6 +640,11 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
         return {"loaded": False, "refused": why,
                 "note": "the launch settings (Settings -> Models) or the "
                         "artifact; nothing was started"}
+    # before fit(), whose own "will not fit" would hide the way out: a
+    # launch that cannot fit with MTP on but does with it off
+    off = _mtp_off_doc(artifact, dict(sets or {}), tune, bool(draft))
+    if off:
+        return off
     f = fit(artifact=artifact, draft=bool(draft))
     if not f["fits"]:
         return {"loaded": False, "refused": "will not fit",
