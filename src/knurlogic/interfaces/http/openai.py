@@ -375,14 +375,22 @@ def _data(obj: Any) -> bytes:
 
 def models_document(served: dict, sampling: dict | None = None,
                     context_length: int = 0,
-                    thinking: dict | None = None) -> dict:
+                    thinking: dict | None = None,
+                    load_state: str = "ready") -> dict:
     """/v1/models: the one served model, with its capabilities and size, the
     sampling a request that says nothing gets (the model's recommendation;
     {} is greedy), its context window (0: the config does not say), and
     the thinking levels its template has (engine/serve/thinking.levels:
     dialect, default, native [{level on the reasoning_effort ladder, the
-    template's own name}]) when known."""
-    m = {"id": served["id"], "object": "model",
+    template's own name}]) when known.
+
+    `status` is "loading" until the host's warm-up is done ("ready"), or
+    "failed": requests queue while it loads, so a client that polls
+    /v1/models and then times its first request would time the load. The
+    answer stays 200 -- the page's liveness probe and router read this
+    endpoint while a model loads -- and OpenAI clients ignore the field."""
+    status = {"ready": "ready", "failed": "failed"}.get(load_state, "loading")
+    m = {"id": served["id"], "object": "model", "status": status,
          "created": int(served.get("created") or 0),
          "owned_by": "knurlogic",
          "capabilities": served.get("capabilities") or ["text"],

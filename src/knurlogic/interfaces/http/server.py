@@ -307,6 +307,18 @@ class App:
         return "stream", summarized()
 
 
+def _load_state(host) -> str:
+    """The host's load state for /v1/models (loading, warming, ready,
+    failed, empty); "ready" for a host that does not say (a test's fake)."""
+    status = getattr(host, "status", None)
+    if not callable(status):
+        return "ready"
+    try:
+        return str(status().get("state") or "ready")
+    except Exception:       # a status that fails must not fail /v1/models
+        return "ready"
+
+
 class Handler(BaseHTTPRequestHandler):
     app: App = None  # type: ignore[assignment]  # set on the subclass by serve()
     server_version = "knurlogic"
@@ -434,7 +446,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, O.models_document(
                 self.app.served(),
                 sampling_defaults(path) if path else {},
-                context_length(path) if path else 0, think))
+                context_length(path) if path else 0, think,
+                load_state=_load_state(self.app.scheduler.host)))
         if path in ("/api/tags", "/api/version"):
             return self._ollama_get(path)
         if path == "/health":

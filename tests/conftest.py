@@ -81,12 +81,8 @@ def _ours() -> list:
     """[(pid, command)] of live processes carrying this session's token,
     this pytest process excluded."""
     mark = f"{TEST_ENV}={_os.environ.get(TEST_ENV, '')}"
-    try:
-        out = _subprocess.run(["ps", "-E", "-ww", "-ax", "-o",
-                               "pid=,stat=,command="],
-                              capture_output=True, text=True,
-                              timeout=10).stdout
-    except Exception:
+    out = _ps()
+    if out is None:
         return []
     me, got = _os.getpid(), []
     for line in out.splitlines():
@@ -95,10 +91,46 @@ def _ours() -> list:
             continue
         pid, stat, cmd = int(parts[0]), parts[1], parts[2]
         if pid == me or stat.startswith("Z") or mark not in cmd \
-                or cmd.startswith("ps -E -ww -ax "):
+                or cmd.startswith(("ps -E -ww -ax ", "/bin/ps -E -ww -ax ")):
             continue
         got.append((pid, cmd[:160]))
     return got
+
+
+PS_FAILED: list = []
+# the real Popen, bound now: a test may monkeypatch subprocess.run or
+# subprocess.Popen (the module is shared, and run looks Popen up when
+# called), and the sweep after it must still look
+_POPEN = _subprocess.Popen
+
+
+def _ps():
+    """`ps` with every process's environment, or None when it failed three
+    times (a loaded box can time it out). A failure is recorded: it used to
+    read as "nothing left", so a sweep that could not look passed."""
+    why = ""
+    for _ in range(3):
+        try:
+            p = _POPEN(["/bin/ps", "-E", "-ww", "-ax", "-o",
+                        "pid=,stat=,command="],
+                       stdout=_subprocess.PIPE, stderr=_subprocess.PIPE,
+                       text=True, errors="replace")
+            try:
+                out, err = p.communicate(timeout=30)
+            except _subprocess.TimeoutExpired:
+                p.kill()
+                p.communicate()
+                raise
+            # a process that exits mid-scan makes ps exit non-zero with
+            # the rest of the list printed: that list still answers
+            if out.strip():
+                return out
+            why = f"rc {p.returncode}, no output: {err.strip()[:200]}"
+        except Exception as e:
+            why = f"{type(e).__name__}: {e}"
+        _time.sleep(0.5)
+    PS_FAILED.append(why)
+    return None
 
 
 def _kill(procs: list) -> None:
@@ -111,6 +143,18 @@ def _kill(procs: list) -> None:
     end = _time.time() + 5
     while _time.time() < end and _ours():
         _time.sleep(0.05)
+
+
+@pytest.fixture
+def owned_procs():
+    """Register a Popen as it is made -- `p = owned_procs(Popen(...))` --
+    and it is killed and waited on however the test or fixture ends,
+    setup failure included (this finalizer runs even when the requesting
+    fixture raised before its yield)."""
+    from procs import Owned
+    owner = Owned()
+    yield owner
+    owner.reap()
 
 
 @pytest.fixture(autouse=True)
@@ -131,9 +175,18 @@ def pytest_sessionfinish(session, exitstatus):
         LEFT.extend(left)
         _kill(left)
         session.exitstatus = 1
+    if PS_FAILED:
+        # the sweep could not look: say so, rather than pass blind
+        session.exitstatus = 1
 
 
 def pytest_terminal_summary(terminalreporter):
+    if PS_FAILED:
+        terminalreporter.write_line(
+            f"FAILED: the leftover-process sweep could not run ps "
+            f"{len(PS_FAILED)} time(s); a leaked process may be running "
+            f"({PS_FAILED[-1]})",
+            red=True)
     if LEFT:
         terminalreporter.write_line(
             f"FAILED: {len(LEFT)} process(es) outlived the test session "

@@ -30,6 +30,7 @@ from knurlogic.cluster import links
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
 from knurlogic.tuning import settings
+from procs import reap_registries
 
 GIB = 1 << 30
 HERE = Path(__file__).resolve().parents[1] / "support"
@@ -502,7 +503,7 @@ def alive(pid):
 
 
 @pytest.fixture
-def two_pages(tmp_path, monkeypatch):
+def two_pages(tmp_path, monkeypatch, owned_procs):
     """Page A (here) and page B (a process), each with its own cache."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "A"))
     monkeypatch.setenv("PYTHONPATH", SRC + os.pathsep
@@ -522,49 +523,50 @@ def two_pages(tmp_path, monkeypatch):
     ui_a, ui_b = free_port(), free_port()
     srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "B")}
-    page_b = subprocess.Popen(
-        [sys.executable, str(HERE / "cluster_fake_page.py"), str(ui_b),
-         "bbbb", "B", json.dumps(info_b), "aaaa", f"127.0.0.1:{ui_a}"],
-        env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    assert "up" in page_b.stdout.readline()
-    peer = SimpleNamespace(id="bbbb", name="B", host="127.0.0.1",
-                           key=f"127.0.0.1:{ui_b}", state="answering",
-                           link="thunderbolt", node={"cluster": info_b})
-    from knurlogic.cluster.peers import Peer
-    known = Peer(host="127.0.0.1", port=ui_b, id="bbbb", name="B",
-                 state="answering")
-    monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(
-        all=lambda: [known], introduce=lambda *a, **k: None))
-    serve_port = free_port()
-    out = C.launch({"action": "load", "identity": "abc",
-                    "nodes": ["aaaa", "bbbb"], "split": "tensor",
-                    "link": "ring"},
-                   me={"id": "aaaa", "name": "A"}, peers=[peer],
-                   local_info=info_a, ui_port=ui_a, serve_port=serve_port)
-    assert out.get("job"), out
-    job = out["job"]
-    # rank 0 is A (the newer chip) and answers on serve_port
-    assert out["leader"] == "A" and out["port"] == serve_port
-    b_dir = tmp_path / "B" / "knurlogic" / "jobs"
-    rank1 = wait(lambda: (json.loads((b_dir / "jobs.json").read_text())
-                          .get(f"{job}/1") if (b_dir / "jobs.json").exists()
-                          else None))
-    rank0 = J.registry()[f"{job}/0"]
-    wait(lambda: (J.read_marker(job, 0) or {}).get("phase") == "ready")
-    yield SimpleNamespace(job=job, out=out, rank0=rank0, rank1=rank1,
-                          port=serve_port, page_b=page_b, b_dir=b_dir,
-                          ui_b=ui_b)
-    C.stop(job, propagate=False, grace=1)
-    for pid in (rank0["pid"], rank1["pid"]):
-        try:
-            os.kill(pid, 9)
-        except OSError:
-            pass
-    page_b.kill()
-    srv.shutdown()
-    C.ENDED.clear()
+    # page B, both ranks and the server are reaped however setup or the
+    # test ends: a failed assert before the yield used to skip the
+    # teardown and leave rank 0 (its own session) running
+    try:
+        env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "B")}
+        page_b = owned_procs(subprocess.Popen(
+            [sys.executable, str(HERE / "cluster_fake_page.py"), str(ui_b),
+             "bbbb", "B", json.dumps(info_b), "aaaa", f"127.0.0.1:{ui_a}"],
+            env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True))
+        assert "up" in page_b.stdout.readline()
+        peer = SimpleNamespace(id="bbbb", name="B", host="127.0.0.1",
+                               key=f"127.0.0.1:{ui_b}", state="answering",
+                               link="thunderbolt", node={"cluster": info_b})
+        from knurlogic.cluster.peers import Peer
+        known = Peer(host="127.0.0.1", port=ui_b, id="bbbb", name="B",
+                     state="answering")
+        monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(
+            all=lambda: [known], introduce=lambda *a, **k: None))
+        serve_port = free_port()
+        out = C.launch({"action": "load", "identity": "abc",
+                        "nodes": ["aaaa", "bbbb"], "split": "tensor",
+                        "link": "ring"},
+                       me={"id": "aaaa", "name": "A"}, peers=[peer],
+                       local_info=info_a, ui_port=ui_a, serve_port=serve_port)
+        assert out.get("job"), out
+        job = out["job"]
+        # rank 0 is A (the newer chip) and answers on serve_port
+        assert out["leader"] == "A" and out["port"] == serve_port
+        b_dir = tmp_path / "B" / "knurlogic" / "jobs"
+        rank1 = wait(lambda: (json.loads((b_dir / "jobs.json").read_text())
+                              .get(f"{job}/1") if (b_dir / "jobs.json").exists()
+                              else None))
+        rank0 = J.registry()[f"{job}/0"]
+        wait(lambda: (J.read_marker(job, 0) or {}).get("phase") == "ready")
+        yield SimpleNamespace(job=job, out=out, rank0=rank0, rank1=rank1,
+                              port=serve_port, page_b=page_b, b_dir=b_dir,
+                              ui_b=ui_b)
+    finally:
+        for job in list(C.SPECS):
+            C.stop(job, propagate=False, grace=1)
+        reap_registries(tmp_path / "A", tmp_path / "B")
+        srv.shutdown()
+        C.ENDED.clear()
 
 
 def in_flight(port):
@@ -1350,7 +1352,7 @@ def test_the_follower_stops_at_a_failure_or_gives_up(cache, monkeypatch):
 
 
 def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, owned_procs):
     """Two real pages and fake ranks: rank 1 on B fails link init on the
     first cable; B's page stops the job naming the jaccl line, and A (the
     coordinator) relaunches on the second cable, where it runs."""
@@ -1375,10 +1377,10 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
     srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "B")}
-    page_b = subprocess.Popen(
+    page_b = owned_procs(subprocess.Popen(
         [sys.executable, str(HERE / "cluster_fake_page.py"), str(ui_b),
          "bbbb", "B", json.dumps(info_b), "aaaa", f"127.0.0.1:{ui_a}"],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True))
     assert "up" in page_b.stdout.readline()
     peer = SimpleNamespace(id="bbbb", name="B", host="127.0.0.1",
                            key=f"127.0.0.1:{ui_b}", state="answering",
@@ -1413,7 +1415,7 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
     finally:
         for j in jobs:
             C.stop(j, grace=1)
-        page_b.kill()
+        reap_registries(tmp_path / "A", tmp_path / "B")
         srv.shutdown()
         C.ENDED.clear()
 
