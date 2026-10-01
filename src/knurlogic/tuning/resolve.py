@@ -521,6 +521,40 @@ def rank_margin(working_set_bytes: int, reserve: dict | None = None) -> int:
         + int(reserve.get("kv_bytes") or 0)
 
 
+def single_fit(artifact: Artifact, budget_bytes: int, draft: bool = True,
+               kv_bits=None) -> str:
+    """"" when a single-machine load fits `budget_bytes`, else why not.
+
+    Counts what will really be bound: the artifact's weights, the MTP head
+    only when drafting is on (its sidecar is inside the artifact's size,
+    so it is taken OUT when off), and a vision rung's extra bytes -- plus
+    the same reserve a cluster rank keeps (`rank_margin` of `fit_reserve`:
+    the first request's transient and the KV of a minimum context). A load
+    that fills the budget to the byte swaps on its first request."""
+    ws = int(budget_bytes or 0)
+    if ws <= 0:
+        return ""
+    head = sum(f.stat().st_size for f in artifact.path.glob(
+        "mtp-head*.safetensors") if f.is_file())
+    vb = vision_budget(artifact, kv_bits=kv_bits)
+    vision = int((vb or {}).get("extra_bytes") or 0)
+    base = int(artifact.bytes_on_disk) + vision
+    need = base - (0 if draft else head)
+    reserve = rank_margin(ws, fit_reserve(artifact.raw_config, kv_bits))
+    if need + reserve <= ws:
+        return ""
+    why = (f"{artifact.path.name} needs {need / GIB:.1f} GiB (weights"
+           + (f" incl. the {head / GIB:.1f} GiB MTP head" if draft and head
+              else "")
+           + (f", {vision / GIB:.1f} GiB vision" if vision else "")
+           + f") plus {reserve / GIB:.1f} GiB kept free for the first "
+           f"request and a minimum context; the budget is "
+           f"{ws / GIB:.1f} GiB")
+    if draft and head and base - head + reserve <= ws:
+        why += ("; turn MTP off (Settings \u2192 Presets) to fit")
+    return why
+
+
 def context_room(working_set_bytes: int, weights_bytes: int,
                  cfg: dict, kv_bits=None) -> dict:
     """What a model that fits leaves for its conversations: the working set
@@ -542,7 +576,9 @@ def context_room(working_set_bytes: int, weights_bytes: int,
     left = max(ws - int(weights_bytes) - margin, 0)
     tokens = left // per if per else 0
     small = left < 2 * GIB or bool(per and window and tokens < window / 5)
-    return {"fits": bool(ws) and int(weights_bytes) <= ws,
+    # the step margin is kept free like a rank's (rank_margin): weights that
+    # fill the budget "fit" only until the first request swaps
+    return {"fits": bool(ws) and int(weights_bytes) + margin <= ws,
             "working_set_bytes": ws, "weights_bytes": int(weights_bytes),
             "margin_bytes": margin, "left_bytes": left,
             "kv_bytes_per_token": per, "kv_why": why,

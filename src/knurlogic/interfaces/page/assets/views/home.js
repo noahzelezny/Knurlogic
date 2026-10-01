@@ -2,7 +2,7 @@ import {$, GIB, esc, gb, gb0} from '../format.js';
 import {NODESEL, isLocal, nodeWS, saveNodeSel, selNodes, setLastNodes,
         setLastWS} from '../nodes.js';
 import {nodeSelChanged} from './picker.js';
-import {RAM, RAMCOL, ramWent} from './memory.js';
+import {RAM, RAMCOL, ramWent, SWAP_FLOOR} from './memory.js';
 
 // --- status ---------------------------------------------------------------
 function setState(ok, text){
@@ -142,13 +142,14 @@ async function tick(){
       <div class="mrow"><div class="mhd"><span>memory</span><b>${
         Math.round(used/GIB)} / ${Math.round(inst/GIB)} GiB</b></div>${hbar(n, mm, off, swap)}</div>`}</div>`;
   }
-  // Swap only means something while pressure is pushing into it -- macOS
-  // keeps pages it swapped out long after the pressure has passed. The
-  // server says when (machine/metrics.py: warn/critical pressure, or swap
-  // grown in the last minute); a node that does not say shows no band.
+  // Swap is the OS's own figure (sysctl vm.swapusage), shown whenever it is
+  // above a small floor: macOS keeps swapped pages long after pressure
+  // passes, but they are still not in RAM, and a model that was swapped out
+  // reads slowly until they come back. Hiding the band once pressure eased
+  // dropped it while a Mac still held 5.5 GB there.
   function swapToShow(n){
     const now=((n.metrics||{}).now)||{}, s=now.swap_bytes;
-    return s!=null && now.swapping ? s : null;
+    return s!=null && (s>=SWAP_FLOOR || (now.swapping && s>0)) ? s : null;
   }
   function ttemp(n, off){
     const now=((n.metrics||{}).now)||{};
@@ -285,6 +286,9 @@ async function tick(){
         .by_runtime?.knurlogic ? (q.cache_bytes||0) : 0)},0);
     // The swap band's key row, only while some machine draws the band.
     merged.swap_bytes=ns_.reduce((x,n)=>x+(swapToShow(n)||0),0);
+    merged.swapped_by_runtime={};
+    for(const m of maps) for(const [k,v] of Object.entries(m.swapped_by_runtime||{}))
+      merged.swapped_by_runtime[k]=(merged.swapped_by_runtime[k]||0)+v;
     ramWent(merged);
   }
   // Up to sixteen machines (the most a cluster launch joins). Up to six

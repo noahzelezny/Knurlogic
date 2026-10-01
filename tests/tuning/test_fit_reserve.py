@@ -67,3 +67,36 @@ def test_placement_refuses_more_space_required_when_a_rank_cannot_keep_it():
               "tensor_per_rank_bytes": 80 * GIB, "reserve": res}
     with pytest.raises(ValueError, match="more space required"):
         L.placement(ms, tensor, "tensor")
+
+
+def _single(tmp_path, weights, head=0):
+    import json
+
+    from knurlogic.machine.artifact import Artifact
+    (tmp_path / "config.json").write_text(json.dumps(
+        {"model_type": "qwen3_5", "text_config": {"hidden_size": 4096}}))
+    with open(tmp_path / "model.safetensors", "wb") as f:
+        f.truncate(weights)
+    if head:
+        with open(tmp_path / "mtp-head.safetensors", "wb") as f:
+            f.truncate(head)
+    return Artifact.load(tmp_path)
+
+
+def test_single_machine_keeps_the_cluster_reserve(tmp_path):
+    from knurlogic.tuning import resolve as R
+    gib = 1 << 30
+    a = _single(tmp_path, 108 * gib)
+    # 108 into 109.5 left "0.0 room after weights" and swapped
+    assert "plus" in R.single_fit(a, int(109.5 * gib))
+    assert R.single_fit(a, 130 * gib) == ""
+
+
+def test_single_machine_counts_the_head_and_says_to_turn_mtp_off(tmp_path):
+    from knurlogic.tuning import resolve as R
+    gib = 1 << 30
+    a = _single(tmp_path, 100 * gib, head=6 * gib)   # disk counts both
+    ws = 108 * gib
+    why = R.single_fit(a, ws, draft=True)
+    assert "turn MTP off (Settings" in why and "MTP head" in why
+    assert R.single_fit(a, ws, draft=False) == ""
