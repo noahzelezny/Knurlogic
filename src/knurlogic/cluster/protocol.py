@@ -238,7 +238,6 @@ class Load(Body):
     sets: dict = field(default_factory=dict)
     force: bool = False
     draft: bool = True
-    anyway: bool = False
 
 
 @_register

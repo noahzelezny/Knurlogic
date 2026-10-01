@@ -709,8 +709,7 @@ def _tick_single(rec: dict, now: float) -> str:
         out = load_fn(artifact=ld.get("artifact") or "", port=port,
                           tune=ld.get("tune") or "default",
                           sets=ld.get("sets") or {}, force=False,
-                          draft=ld.get("draft", True),
-                          **({"anyway": True} if ld.get("anyway") else {}))
+                          draft=ld.get("draft", True))
     except Exception as ex:  # a failed relaunch is recorded as the attempt's error
         out = {"error": f"{type(ex).__name__}: {ex}"}
     if out.get("pid"):

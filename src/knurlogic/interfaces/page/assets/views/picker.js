@@ -4,7 +4,7 @@ import {LASTNODES, fitWS, fitWhere, isLocal, selNodes} from '../nodes.js';
 import {launchSets, migrateLaunchSets} from './settings/knobs.js';
 import {getJSON, httpWhy, peekURL} from '../api.js';
 import {tick} from './home.js';
-import {act, loadResident, tightConfirm, tightFlags} from './memory.js';
+import {act, loadResident, mtpOffConfirm} from './memory.js';
 
 // --- what else is here ----------------------------------------------------
 // Shown, not offered: a loaded model is loaded, and a page that presents a
@@ -469,19 +469,16 @@ $('launch').onclick=async()=>{
     : pn ? {action:'load', node:pn.id, identity:m.identity, name:pickedName(m), tune, sets}
     : {action:'load', target:m.path, tune, sets};
   let L=trackLaunch(m, ns, pn, t0), j=await act(body, true);
-  // a tight answer is a question, not a failure: the card goes while the
-  // user chooses, and comes back for the launch they confirm
-  let more={};
-  while(j.tight && !L.cancelled){
+  // "fits with MTP off" is a question, not a failure: the card goes while
+  // the user chooses, and comes back for the launch they confirm
+  if(j.mtp_off_fits && !L.cancelled){
     dismissLaunch(L.id); loadResident();
-    const c=await tightConfirm(j);
-    if(!c){ L.cancelled=true; break }
-    more={...more,...tightFlags(c)};
+    if(!await mtpOffConfirm(j)){
+      b.textContent='Launch'; b.disabled=false; loadResident(); return }
     L=trackLaunch(m, ns, pn, Date.now());
-    j=await act({...body,...more}, true);
+    j=await act({...body, draft:false}, true);
   }
   b.textContent='Launch'; b.disabled=false;
-  if(L.cancelled&&j.tight){ loadResident(); return }
   settleLaunch(L, j);
   if(L.phase!=='failed' && !L.cancelled){
     // done with this pick: back to "choose a model"

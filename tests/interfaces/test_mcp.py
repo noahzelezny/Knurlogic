@@ -84,10 +84,10 @@ def test_load_refuses_while_memory_moves_but_force_overrides(tmp_path,
     assert spawned and "refused" not in r
 
 
-def _tight_setup(tmp_path, monkeypatch, budget_gib=10):
+def _fit_setup(tmp_path, monkeypatch, budget_gib=10):
     from knurlogic.interfaces import loading
     monkeypatch.setattr(loading, "resolve_name", lambda m, served: m)
-    d = _artifact(tmp_path / "tight", gib=1)
+    d = _artifact(tmp_path / "m", gib=1)
     b = budget_gib << 30
     monkeypatch.setattr("knurlogic.machine.wired.load_budget",
                         lambda: {"bytes": b, "limited_by": "working set",
@@ -103,29 +103,20 @@ def _tight_setup(tmp_path, monkeypatch, budget_gib=10):
     return d, spawned
 
 
-def test_load_tight_returns_the_warning_and_anyway_launches(tmp_path,
-                                                            monkeypatch):
-    d, spawned = _tight_setup(tmp_path, monkeypatch)
+def test_load_short_of_the_reserve_but_not_the_step_margin_launches(
+        tmp_path, monkeypatch):
+    """10 GiB budget, 1 GiB weights, an 11+ GiB reserve: once a tight-fit
+    warning, now simply a fit."""
+    d, spawned = _fit_setup(tmp_path, monkeypatch)
     r = mcp.load(artifact=str(d))
-    assert r["loaded"] is False and r["tight"] is True and not spawned
-    assert r["short_gib"] > 0 and r["mtp_off_fits"] is False
-    assert r["reason"].startswith("Tight fit: about ")
-    assert "swap" in r["text"] and "anyway=true" in r["text"]
-    assert mcp.fit(artifact=str(d))["tight_fit"]["tight"] is True
-    r = mcp.load(artifact=str(d), anyway=True)
     assert spawned and "refused" not in r and "tight" not in r
-    assert spawned[0][1]["anyway"] is True
+    assert "anyway" not in spawned[0][1]
 
 
-def test_load_cannot_fit_is_still_refused_even_anyway(tmp_path, monkeypatch):
-    d, spawned = _tight_setup(tmp_path, monkeypatch, budget_gib=3)
-    r = mcp.load(artifact=str(d), anyway=True)
+def test_load_cannot_fit_is_refused(tmp_path, monkeypatch):
+    d, spawned = _fit_setup(tmp_path, monkeypatch, budget_gib=3)
+    r = mcp.load(artifact=str(d))
     assert r["refused"] == "will not fit" and not spawned
-
-
-def test_load_schema_documents_anyway():
-    props = mcp.TOOLS["load"]["schema"]["properties"]
-    assert "anyway" in props and "swap" in props["anyway"]["description"]
 
 
 def test_settings_carries_the_measurement_not_just_the_value(tmp_path):
@@ -309,26 +300,24 @@ def test_state_vision_is_none_when_nothing_served(monkeypatch):
 
 def test_load_cannot_fit_with_mtp_but_fits_without_offers_mtp_off(tmp_path,
                                                                   monkeypatch):
-    """The refusal MTP-off fixes is a doc the page's tightConfirm shows (turn
-    MTP off / cancel, never launch anyway), ahead of fit()'s own refusal."""
-    d, spawned = _tight_setup(tmp_path, monkeypatch)
+    """The refusal MTP-off fixes is a doc the page's mtpOffConfirm shows
+    (turn MTP off / cancel), ahead of fit()'s own refusal."""
+    d, spawned = _fit_setup(tmp_path, monkeypatch)
     calls = []
 
     def fake(a, sets, tune, draft, budget=None):
         calls.append(draft)
         if draft:
             return {"state": "cannot", "head_bytes": 6 << 30,
-                    "mtp_off_fits": False, "short_bytes": 0,
                     "why": "m needs 108.5 GiB (weights incl. the 6.1 GiB MTP "
                            "head) plus 5.5 GiB step margin; the budget is "
                            "110.8 GiB; turn MTP off (Settings) to fit"}
-        return {"state": "fits", "head_bytes": 0, "mtp_off_fits": False,
-                "short_bytes": 0, "why": ""}
+        return {"state": "fits", "head_bytes": 0, "why": ""}
     monkeypatch.setattr("knurlogic.interfaces.serve.launch_fit", fake)
     monkeypatch.setattr(mcp, "fit", lambda **k: pytest.fail("fit hid it"))
     r = mcp.load(artifact=str(d))
-    assert r["loaded"] is False and r["tight"] is True and not spawned
-    assert r["no_anyway"] is True and r["mtp_off_fits"] is True
+    assert r["loaded"] is False and r["refused"] == "will not fit"
+    assert r["mtp_off_fits"] is True and not spawned
     assert "108.5 GiB" in r["reason"] and "fits" in r["reason"]
     assert "draft=false" in r["text"]
     # asked with MTP off already, the same numbers are a plain refusal

@@ -124,12 +124,10 @@ def fit(artifact: str = "", draft: bool = True, **_) -> dict[str, Any]:
     from knurlogic.interfaces.serve import launch_fit
     chk = launch_fit(a, {}, "default", draft, budget)
     fits = bool(budget) and headroom > 0 and chk["state"] != "cannot"
-    tight = fits and (headroom < S.tight_headroom_bytes(budget)
-                      or chk["state"] == "tight")
+    tight = fits and headroom < S.tight_headroom_bytes(budget)
     verdict = ("will not fit" if not fits else
                "tight" if tight else "fits")
     return {
-        "tight_fit": _tight_doc(chk),
         "artifact": a.path.name,
         "verdict": verdict,
         "fits": fits,
@@ -166,24 +164,11 @@ def fit(artifact: str = "", draft: bool = True, **_) -> dict[str, Any]:
     }
 
 
-def _tight_doc(chk: dict) -> dict[str, Any] | None:
-    """The tight-fit warning (weights fit, the safety reserve does not) as
-    the agent reads it; None when it is not tight."""
-    if chk.get("state") != "tight":
-        return None
-    return {"tight": True, "short_gib": round(chk["short_bytes"] / GIB, 1),
-            "reason": chk["why"], "mtp_off_fits": bool(chk["mtp_off_fits"]),
-            "what_to_do": "Tell the user. Retry `load` with anyway=true "
-                          "ONLY if they accept the risk of swap"
-                          + (", or with draft=false (MTP off), which fits"
-                             if chk["mtp_off_fits"] else "") + "."}
-
-
 def _mtp_off_doc(artifact: str, sets: dict, tune: str,
                  draft: bool) -> dict[str, Any] | None:
     """The refusal of a launch that cannot fit with MTP on but fits with it
-    off, as a doc the page's tightConfirm shows (turn MTP off, or cancel --
-    never "launch anyway": it cannot fit as asked) and an agent reads as
+    off, as a doc the page's mtpOffConfirm shows (turn MTP off, or cancel:
+    it cannot fit as asked) and an agent reads as
     "retry with draft=false"; None when that is not the case."""
     if not draft:
         return None
@@ -202,11 +187,10 @@ def _mtp_off_doc(artifact: str, sets: dict, tune: str,
     reason = (f"{why}. It will not fit with MTP on; with MTP off the "
               f"{chk['head_bytes'] / GIB:.1f} GiB head is not loaded and "
               f"it fits.")
-    return {"loaded": False, "refused": "will not fit", "tight": True,
-            "no_anyway": True, "mtp_off_fits": True, "reason": reason,
-            "short_gib": 0,
+    return {"loaded": False, "refused": "will not fit",
+            "mtp_off_fits": True, "reason": reason,
             "text": f"{reason} Nothing was started. Retry `load` with "
-                    f"draft=false (MTP off); anyway=true cannot override "
+                    f"draft=false (MTP off); nothing else overrides "
                     f"this, it is arithmetic.",
             "what_to_do": "Tell the user, then retry `load` with "
                           "draft=false (MTP off), which fits."}
@@ -593,15 +577,13 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
          sets: dict[str, str] | None = None, force: bool = False,
          draft: bool = True, machines: list[str] | None = None,
          split: str = "", link: str = "", cable: str = "",
-         anyway: bool = False, **_) -> dict[str, Any]:
+         **_) -> dict[str, Any]:
     """Start a server for this artifact, after checking it can work.
 
     REFUSES rather than gambles: memory still moving or a model whose
     weights do not fit is a refusal with the reason attached. `force`
-    overrides the moving-memory check only -- it will not make a model fit.
-    A TIGHT fit (the weights fit, the safety margin does not) is not
-    refused but returned as a warning, nothing started; `anyway` launches
-    it regardless, `draft=false` (MTP off) may make it fit.
+    overrides the moving-memory check only -- it will not make a model fit;
+    `draft=false` (MTP off) may.
 
     `machines` names where: empty is this Mac. Another Mac, or several,
     go through the page on this Mac -- its Launch, the same request.
@@ -615,7 +597,7 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
     names = [str(m) for m in (machines or []) if str(m)]
     if names:
         return _load_on(names, artifact, port, tune, sets, force, draft,
-                        split, link, cable, anyway)
+                        split, link, cable)
     from knurlogic.interfaces.loading import NotLoadable, resolve_name
     from knurlogic.interfaces.page import server as page_server
 
@@ -661,15 +643,6 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
         return {"loaded": False, "refused": "will not fit",
                 "detail": f,
                 "note": "no flag overrides this; it is arithmetic."}
-    if chk["state"] == "tight" and not anyway:
-        doc = _tight_doc(chk) or {}
-        return {"loaded": False, **doc,
-                "text": f"{doc.get('reason', '')} Nothing was started. "
-                        f"Ask the user: retry with anyway=true only if "
-                        f"they accept the risk of swap"
-                        + (", or retry with draft=false (MTP off), which "
-                           "fits" if doc.get("mtp_off_fits") else "")
-                        + "."}
     r = ready()
     if not r["ready"] and not force:
         return {"loaded": False, "refused": "memory is about to move",
@@ -683,7 +656,7 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
         from knurlogic.machine.servers import free_port
         port = free_port(page_server._SERVE_PORT["n"])
     out = page_server._spawn(artifact, int(port), tune, dict(sets or {}),
-                    draft=bool(draft), anyway=bool(anyway))
+                    draft=bool(draft))
     out["fit"] = f
     out["ready"] = r
     return out
@@ -730,7 +703,7 @@ def _artifact_name(artifact: str) -> str:
 
 
 def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
-             cable, anyway=False) -> dict[str, Any]:
+             cable) -> dict[str, Any]:
     """`load` on other machines: the page's Launch request, sent to the
     page on this Mac (page_server._load_fn), which forwards a one-peer load and
     coordinates a cluster (cluster/launch.launch)."""
@@ -758,14 +731,12 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
         if len(ids) == 1 and ids[0] == identity.identity().get("id"):
             # this Mac, named: the same as naming none
             return load(artifact=artifact, port=port, tune=tune, sets=sets,
-                        force=force, draft=draft, anyway=anyway)
+                        force=force, draft=draft)
         # the name too: a machine holding two artifacts with one identity
         # loads the one called this, or refuses -- never picks
         req = {"action": "load", "identity": ident,
                "name": _artifact_name(artifact), "tune": tune,
                "sets": dict(sets or {})}
-        if anyway:
-            req["anyway"] = True
         if len(ids) == 1 and not draft:
             req["draft"] = False
         if port:
@@ -782,12 +753,6 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
     no = _refusal(out)
     if no:
         return no
-    if out.get("tight") and not out.get("job") and not out.get("pid"):
-        return dict(out, loaded=False, text=out.get("text") or (
-            f"{out.get('reason', '')} Nothing was started. Ask the user: "
-            f"retry with anyway=true only if they accept the risk of swap"
-            + (", or retry with draft=false (MTP off), which fits"
-               if out.get("mtp_off_fits") else "") + "."))
     if len(ids) == 1:
         return dict(out, machines=names)
     plan = dict(out.get("placement") or {})
@@ -934,13 +899,9 @@ TOOLS: dict[str, dict[str, Any]] = {
         "fn": fit,
         "description": "Will this artifact fit NOW: verdict fits | tight "
                        "| will not fit, with headroom and what tight "
-                       "changes. Uses the same budget `settings` and `load` "
-                       "use. When the weights fit but the safety margin "
-                       "does not, `tight_fit` says how short (short_gib), "
-                       "why, and whether MTP off (draft=false) would fit; "
-                       "`load` then warns and starts nothing unless "
-                       "anyway=true, which only the user's acceptance of "
-                       "swap risk justifies.",
+                       "changes (a tight box still loads, with a narrower "
+                       "prompt chunk). Uses the same budget `settings` and "
+                       "`load` use.",
         "schema": _schema({"artifact": S("path to the artifact"),
                            "draft": {"type": "boolean",
                                      "description": "count the MTP head "
@@ -997,17 +958,6 @@ TOOLS: dict[str, dict[str, Any]] = {
             "force": {"type": "boolean",
                       "description": "load while another load is still "
                                      "moving memory (one machine only)"},
-            "anyway": {"type": "boolean",
-                       "description": "launch a TIGHT fit regardless: the "
-                                      "weights fit but the safety margin "
-                                      "does not, so expect swap under long "
-                                      "conversations. Without it a tight "
-                                      "load returns a warning (tight, "
-                                      "short_gib, reason, mtp_off_fits) "
-                                      "and starts nothing. Set it only "
-                                      "after the user accepts the risk. "
-                                      "Weights that cannot fit are still "
-                                      "refused."},
             "draft": {"type": "boolean",
                       "description": "use a packed drafting head "
                                      "(default true; one machine only)"},

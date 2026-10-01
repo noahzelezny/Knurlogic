@@ -334,8 +334,7 @@ def _spawn(*a, **k):
 
 
 def _spawn_unlocked(path: str, port: int, tune: str = "default",
-           sets: dict | None = None, draft: bool = True,
-           anyway: bool = False) -> dict:
+           sets: dict | None = None, draft: bool = True) -> dict:
     """Start `knurlogic serve` for one artifact, on its own port.
 
     Deliberately a child process rather than an in-process load: the
@@ -361,8 +360,6 @@ def _spawn_unlocked(path: str, port: int, tune: str = "default",
         cmd += ["--set", f"{k}={v}"]
     if not draft:
         cmd.append("--no-draft")
-    if anyway:
-        cmd.append("--anyway")
     log = serve_log(port)
     from knurlogic.machine.servers import new_instance
     instance = new_instance()
@@ -397,8 +394,7 @@ def tracked_load(**kw) -> dict:
         recovery.track_single(int(out["port"]), {
             "artifact": out.get("starting") or kw.get("artifact"),
             "tune": kw.get("tune"), "sets": kw.get("sets") or {},
-            "draft": kw.get("draft", True),
-            **({"anyway": True} if kw.get("anyway") else {})},
+            "draft": kw.get("draft", True)},
             pid=int(out["pid"]))
     return out
 
@@ -511,8 +507,7 @@ def _load_fn(serve_port: int):
                                 tune=preset_or(req.get("tune"), _default_tune()),
                                 sets=req.get("sets") or {},
                                 force=bool(req.get("force")),
-                                draft=req.get("draft") is not False,
-                                anyway=bool(req.get("anyway"))))
+                                draft=req.get("draft") is not False))
             if act == "unload":
                 # Ours to stop only if we started it. Anything else is
                 # somebody's server and not this page's to kill.
@@ -582,8 +577,7 @@ def forward_launch(req: dict, post=None) -> dict:
                "name": Path(str(req.get("name") or "")).name[:255],
                "tune": preset_or(req.get("tune"), "default"),
                "sets": sets, "force": bool(req.get("force")),
-               "draft": req.get("draft") is not False,
-               "anyway": bool(req.get("anyway"))}
+               "draft": req.get("draft") is not False}
         if req.get("port"):
             try:
                 doc["port"] = int(req["port"])
@@ -737,8 +731,7 @@ def peer_launch(req: dict, load=None, stop=None, resolve=None) -> tuple:
     # the fit check is this machine's, against its own load budget
     return 200, load(artifact=path, port=port, tune=tune, sets=sets,
                      force=bool(req.get("force")),
-                     draft=req.get("draft") is not False,
-                     anyway=bool(req.get("anyway")))
+                     draft=req.get("draft") is not False)
 
 
 #: How long the page waits for all peers together. A peer's /loaded.json
