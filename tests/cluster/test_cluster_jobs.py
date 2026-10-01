@@ -612,6 +612,8 @@ def test_kill_rank_0_and_its_page_has_rank_1_killed(two_pages):
     assert wait(lambda: not alive(p.rank1["pid"]), 20)
     ended = [d for d in C.jobs_document() if d["job"] == p.job]
     assert ended and ended[0]["phase"] == "stopped"
+    # an ended job still says how it was split (a card must never read "null")
+    assert ended[0]["split"] == "tensor" and ended[0]["link"]
 
 
 def test_the_verdict_names_a_ranks_machine_from_the_job_when_unrecorded():
