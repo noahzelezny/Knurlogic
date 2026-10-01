@@ -51,6 +51,11 @@ class RingFailed(RuntimeError):
     down, and every request in flight is answered with a 503."""
 
 
+#: tokens of a context window the warm-up prompt leaves free (chat
+#: template, the 2-token answer, slack)
+_WARM_MARGIN = 128
+
+
 def _context_cap() -> int:
     """KNURLOGIC_CONTEXT_LENGTH: the longest prompt + answer a request may
     use, read at every admission so the setting applies live. 0 = none."""
@@ -592,6 +597,14 @@ class Scheduler:
             finally:
                 c.done.set()
 
+    def _window(self) -> tuple:
+        """(KNURLOGIC_CONTEXT_LENGTH or 0, the context window _insert
+        checks a prompt against: that cap, else the model's own; 0 = none)."""
+        from knurlogic.machine.artifact import context_length
+        cap = _context_cap()
+        return cap, cap or context_length(
+            getattr(self.host, "path", "") or "")
+
     def _warm_up(self) -> None:
         """One tiny generation through the real path -- the same insert and
         step a request takes, on every rank of a ring (the other ranks
@@ -604,6 +617,12 @@ class Scheduler:
         # worth of rows; a "Hello, world." warm-up left both to the first
         # request (100+ s on a 108 GiB model). Bounded at ~4300 tokens.
         n = min(max(int(self.prefill_step_size) // 3, 1), 1400) + 1
+        # ...but under the context window _insert checks, or it raises
+        # PromptError and the warm-up never runs: each repeat is at most
+        # ~5 tokens, with room kept for the chat template and the answer.
+        _, window = self._window()
+        if window:
+            n = max(min(n, (window - _WARM_MARGIN) // 5), 1)
         job = Job(request=P.ChatRequest(request_type="text",
                                         prompt="Hello, world. " * n),
                   args=P.PromptArgs(), max_tokens=2,
@@ -787,10 +806,7 @@ class Scheduler:
                 prompt, segs, types, initial = P.tokenize(
                     self, tok, job.request, job.args)
             job.prompt_tokens = len(prompt)
-            from knurlogic.machine.artifact import context_length
-            cap = _context_cap()
-            window = cap or context_length(
-                getattr(self.host, "path", "") or "")
+            cap, window = self._window()
             if window and len(prompt) >= window:
                 whose = ("this server's context length is "
                          f"{cap} (KNURLOGIC_CONTEXT_LENGTH)" if cap else
