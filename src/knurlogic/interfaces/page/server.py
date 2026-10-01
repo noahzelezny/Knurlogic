@@ -433,15 +433,38 @@ def _stop(port: int) -> dict:
             break
     else:
         os.kill(pid, signal.SIGKILL)
-    mine = _CHILDREN.pop(port, None)
-    if mine:
-        try:
-            mine[0].wait(timeout=5)       # reap, so it is not left a zombie
-        except subprocess.TimeoutExpired:
-            pass
+    mine = _CHILDREN.get(port)
+    # answer when the process is gone and its memory is back, not when the
+    # signal was sent: a caller that loads next must see the memory free
+    gone = _wait_exit(pid, mine[0] if mine else None)
+    if not gone:
+        return {"stopped": rec.get("artifact"), "port": port, "pid": pid,
+                "exiting": [pid],
+                "note": f"pid {pid} is still exiting after "
+                        f"{EXIT_WAIT_S:.0f} s; its memory is not free yet"}
+    _CHILDREN.pop(port, None)
     reg.pop(port, None)
     save_registry(reg)
     return {"stopped": rec.get("artifact"), "port": port, "pid": pid}
+
+
+#: how long an unload waits for the server process to be gone
+EXIT_WAIT_S = 60.0
+
+
+def _wait_exit(pid: int, proc=None, wait_s: float | None = None) -> bool:
+    """True once `pid` has exited (reaped when `proc` is ours), polling up
+    to `wait_s` (EXIT_WAIT_S)."""
+    end = time.time() + (EXIT_WAIT_S if wait_s is None else wait_s)
+    while True:
+        if proc is not None:
+            if proc.poll() is not None:
+                return True
+        elif not is_our_server(pid):
+            return True
+        if time.time() >= end:
+            return False
+        time.sleep(0.1)
 
 
 def _load_fn(serve_port: int):
@@ -1707,7 +1730,14 @@ def survey_here(routes: dict) -> tuple:
     if h is None:
         return 404, {"error": "this page lists nothing resident"}
     body, _ctype = h({}, 0)
-    return 200, json.loads(body)
+    doc = json.loads(body)
+    if isinstance(doc, dict):
+        # fresh memory and ranks still exiting: what a coordinator placing
+        # a launch right after an unload needs, not the last status
+        from knurlogic.cluster import launch
+        doc["available_bytes"] = launch.available_now()
+        doc["exiting"] = len(launch._exiting(launch.J.registry()))
+    return 200, doc
 
 
 #: the documents a Read may fetch from a page, by path (the allow-list;
