@@ -47,10 +47,12 @@ class Resident:
     runtime: str
     name: str
     where: str                      # the URL it was read from
-    state: str = "loaded"           # loaded | loading | offered
+    state: str = "loaded"           # loaded | loading | warming | failed | offered
     bytes_resident: int = 0         # 0 when the runtime does not say
     detail: str = ""
     can_unload: bool = False
+    #: knurlogic only: the part of bytes_resident the OS has swapped out
+    swapped_bytes: int = 0
     ident: str = ""                 # what an unload would name
     #: knurlogic only: the 16-hex id given at launch (a single-Mac server),
     #: or a cluster job's id (its instance is its job id); "" elsewhere
@@ -213,9 +215,19 @@ def _knurlogic(base: str) -> list:
     detail = a.get("model_type") or ""
     if bool((d.get("vision") or {}).get("served")):
         detail = f"{detail} · VISION" if detail else "VISION"
+    held = _held(d, m)
+    # The artifact is in /status.json from the moment the server starts, so
+    # an answering port is not a loaded model: the host's own state is.
+    host = str((d.get("load") or {}).get("state") or "")
+    state = host if host in ("loading", "warming", "failed") else "loaded"
+    if state == "loading":
+        size = int(a.get("size_bytes") or 0)
+        if size and held:
+            detail += (" · " if detail else "") + \
+                f"loading {min(100 * held // size, 99)}%"
     return [Resident(
         runtime="knurlogic", name=a.get("name") or "?", where=base,
-        bytes_resident=_held(d, m),
+        state=state, bytes_resident=held,
         detail=detail, can_unload=True,
         ident=a.get("path") or a.get("name") or "",
         instance=_instance_of(base),
@@ -245,6 +257,32 @@ def _instance_of(base: str) -> str:
         return ""
     rec = servers.registry().get(port) or {}
     return str(rec.get("job") or rec.get("instance") or "")
+
+
+def _from_the_map(out: list, ours: dict, mm: dict) -> None:
+    """Put a single-Mac knurlogic instance's bytes on the SAME footing as
+    the memory map beside it: its process footprint from that one sample,
+    not the allocator's own count (a different measure, taken at a
+    different moment: the card read 109.2 GiB beside a machine that was
+    105.8 used). Where the footprint exceeds what is resident, the
+    swapped part is said (`swapped_bytes`) instead of dropped."""
+    procs = {r["pid"]: r["bytes"] for r in mm.get("processes") or []}
+    foot = mm.get("footprint_by_runtime") or {}
+    swapped = (mm.get("swapped_by_runtime") or {}).get("knurlogic", 0)
+    total = foot.get("knurlogic", 0)
+    for r in out:
+        if r.runtime != "knurlogic":
+            continue
+        from urllib.parse import urlparse
+        rec = ours.get(urlparse(r.where).port) or {}
+        if rec.get("job") or not str(rec.get("pid", "")).isdigit():
+            continue
+        b = procs.get(int(rec["pid"]))
+        if not b:
+            continue
+        r.bytes_resident = b
+        if swapped and total:
+            r.swapped_bytes = int(swapped * b / total)
 
 
 def survey(ports: dict | None = None, self_url: str = "") -> dict:
@@ -307,6 +345,9 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
         doc["memory"] = memory_map()
     except Exception as e:  # the status document must still answer; the error is in it
         doc["memory"] = {"error": str(e)}
+    _from_the_map(out, ours, doc["memory"])
+    doc["resident"] = [r.__dict__ for r in out]
+    doc["bytes_resident"] = sum(r.bytes_resident for r in out)
     return doc
 
 
@@ -416,28 +457,19 @@ _UNIT = {"B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
 def available_memory() -> dict:
     """How much memory a model could actually have, from `vm_stat`.
 
-    THIS TOOK TWO WRONG ANSWERS TO GET RIGHT, in opposite directions.
+    Used is what cannot be handed back without swapping: anonymous pages
+    (a model's weights, active OR inactive -- an MoE's idle experts sit in
+    inactive anonymous pages), wired pages and what the compressor
+    occupies. Available is what can: free, speculative, file-backed pages
+    (cache, droppable) and purgeable ones.
 
-    First: installed memory minus the sum of process footprints. Footprints
-    miss the kernel, wired pages and the file cache, so this was arithmetic
-    on the wrong quantity -- it happened to land near the truth here and
-    would not anywhere else.
-
-    Then: top's PhysMem "unused", which read 1.6 GiB on a machine with ~70
-    GiB available. That figure counts only pages that are free RIGHT NOW.
-    In that measurement 66.7 GiB was file-backed cache -- memory macOS hands
-    over
-    the moment something asks for it. Calling that "used" tells someone
-    their machine is full when it is two-thirds empty.
-
-    Measured against exo, which reports the same box as 27.8 GB used:
-
-        free only                       1.7 GiB available   -> 94.3 used
-        free + inactive                69.9 GiB available   -> 26.1 used  <-
-        free + speculative + purgeable  2.1 GiB available   -> 93.9 used
-
-    `free + inactive` is what psutil reports as available on macOS, which is
-    where exo's number comes from, and 26.1 GiB is 28.0 GB. That is the one.
+    Earlier versions counted `inactive` as available because psutil does.
+    On a 128 GiB Mac holding a 109 GiB model that read 66.9 GiB used when
+    real use was ~125: inactive anonymous pages are reclaimable only by
+    swapping, and the fit check then admitted a model that did not fit.
+    File-backed pages (active or inactive) are ONE bucket here, so nothing
+    is counted twice; purgeable pages are anonymous and are moved from used
+    to available.
     """
     import re
     import subprocess
@@ -457,21 +489,25 @@ def available_memory() -> dict:
             st[g.group(1).strip()] = int(g.group(2)) * page
 
     free = st.get("Pages free", 0)
-    inactive = st.get("Pages inactive", 0)
     # vm_stat's "free" leaves out speculative pages (read-ahead the kernel
-    # drops on demand), so they are reclaimable and counted here. Purgeable
-    # pages are NOT added: they are already inside active/inactive, so
-    # adding them would count the same memory twice.
+    # drops on demand), so they are counted separately.
     speculative = st.get("Pages speculative", 0)
-    inactive += speculative           # both are cache: "cached_bytes"
-    avail = free + inactive
-    return {
-        "available_bytes": avail,
+    cache = st.get("File-backed pages", 0) + speculative
+    purgeable = st.get("Pages purgeable", 0)
+    wired = st.get("Pages wired down", 0)
+    comp = st.get("Pages occupied by compressor", 0)
+    res = {
+        "available_bytes": free + cache + purgeable,
         "free_bytes": free,
-        "cached_bytes": inactive,
-        "wired_bytes": st.get("Pages wired down", 0),
-        "compressed_bytes": st.get("Pages occupied by compressor", 0),
+        "cached_bytes": cache,
+        "purgeable_bytes": purgeable,
+        "wired_bytes": wired,
+        "compressed_bytes": comp,
     }
+    if "Anonymous pages" in st:
+        res["used_bytes"] = max(
+            st["Anonymous pages"] - purgeable, 0) + wired + comp
+    return res
 
 
 def _footprints() -> tuple:
@@ -623,9 +659,25 @@ def memory_map(floor: int = 256 << 20) -> dict:
     except (OSError, subprocess.SubprocessError, ValueError):
         pass
     seen = sum(r["bytes"] for r in rows)
-    rt = sum(by_runtime.values())
     avail = phys.get("available_bytes")
-    used = (total - avail) if (total and avail is not None) else seen
+    used = phys.get("used_bytes")
+    if used is None:
+        used = (total - avail) if (total and avail is not None) else seen
+    # A footprint counts pages that were swapped out; `used` does not. What
+    # the footprints add up to beyond `used` is therefore in swap (at most
+    # what the OS says is swapped), shared among the runtimes by size.
+    # Each runtime's row is then its RESIDENT part, so the rows add up to
+    # the machine from this one sample.
+    from knurlogic.machine import metrics as _metrics
+    swap = _metrics._swap() or 0
+    foot_rt = dict(by_runtime)
+    fp = sum(foot_rt.values())
+    in_swap = min(swap, max(sum(foot.values()) - used, 0), fp) \
+        if phys.get("used_bytes") is not None else 0
+    swapped = {k: int(in_swap * v / fp) for k, v in foot_rt.items()} \
+        if fp and in_swap else {}
+    by_runtime = {k: v - swapped.get(k, 0) for k, v in foot_rt.items()}
+    rt = sum(by_runtime.values())
     # "Everything else" is what the OS says is spent MINUS what we could put
     # a name to -- the kernel, the file cache, compressed pages and every
     # process under the floor. Deriving it from the footprints instead made
@@ -641,7 +693,12 @@ def memory_map(floor: int = 256 << 20) -> dict:
         "truly_free_bytes": phys.get("free_bytes", 0),
         "cached_bytes": phys.get("cached_bytes", 0),
         "wired_bytes": phys.get("wired_bytes", 0),
+        # RESIDENT bytes per runtime (footprint minus what is swapped out);
+        # the footprints themselves and the swapped part ride beside it
         "by_runtime": by_runtime,
+        "footprint_by_runtime": foot_rt,
+        "swapped_by_runtime": swapped,
+        "swap_bytes": swap,
         "runtime_bytes": rt,
         "other_bytes": max(used - rt, 0),
         "processes": rows[:25],

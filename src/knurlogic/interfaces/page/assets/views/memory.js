@@ -11,6 +11,8 @@ import {cancelLaunch, dismissLaunch, failedLaunches,
 // processes cost are different numbers, and the gap is the thing that is
 // hard to chase down by hand. Both are shown; neither is derived from the
 // other.
+// Swap is shown from the OS's own figure once it is above this floor.
+const SWAP_FLOOR=256*1048576;
 let RAM=null;   // the memory map, shared with the topology's gauges
 const RAMCOL={knurlogic:'var(--acc)', exo:'var(--warn)',
               ollama:'var(--ok)', 'mlx-lm':'#7aa2f7', 'mlx-vlm':'#bb9af7',
@@ -32,22 +34,25 @@ function ramWent(m){
   const named=by.reduce((x,[,v])=>x+v,0);
   const other=Math.max(used-named,0);
   const free=Math.max(inst-used,0);
-  const row=(k,b,c)=>`<div class="ramrow">${
+  // A runtime's row is its RESIDENT part (the map takes its swapped part
+  // out); the swapped part is said beside it, never dropped.
+  const sw=m.swapped_by_runtime||{};
+  const row=(k,b,c,x)=>`<div class="ramrow">${
     c?`<em style="background:${c}"></em>`
      :'<em style="border:1px solid var(--line)"></em>'}<span>${k}</span>
-    <b>${gb(b)}</b></div>`;
+    <b>${gb(b)}${x>0?` · ${gb(x)} in swap`:''}</b></div>`;
   // No bar. The machines in the topology are already gauges and now fill
   // in these colours, so a second full-width chart of the same split would
   // be the free-space bar's mistake again. This is the key to that picture,
   // and the key carries the numbers.
   el.innerHTML=`<div class="ram">
-    ${by.map(([k,b])=>row(k,b,RAMCOL[k]||'var(--dim)')+
+    ${by.map(([k,b])=>row(k,b,RAMCOL[k]||'var(--dim)',sw[k])+
       (k==='knurlogic'&&m.knurlogic_cache>0
         ? `<div class="ramrow sub"><em class="hatch" style="--c:${RAMCOL.knurlogic}"></em>
             <span>of which cache</span><b>${gb(m.knurlogic_cache)}</b></div>`:'')).join('')}
     ${row('everything else',other,'var(--faint)')}
     ${row('unused',free,'')}
-    ${m.swap_bytes>0?row('swap',m.swap_bytes,'var(--bad)'):''}</div>`;
+    ${m.swap_bytes>=SWAP_FLOOR?row('swap',m.swap_bytes,'var(--bad)'):''}</div>`;
 }
 async function act(payload, quiet){
   // A server that is down or answers with something other than JSON is an
@@ -130,7 +135,8 @@ async function loadResident(){
       </div>
       <div class="n">${esc(r.name)}</div>
       <div class="s">${[
-        r.bytes_resident?gb(r.bytes_resident)
+        r.bytes_resident?gb(r.bytes_resident)+(r.swapped_bytes>0
+          ?` · ${gb(r.swapped_bytes)} in swap`:'')
           :(r.state==='offered'?'':'size not reported'),
         r.cluster&&r.cluster.split?`${r.cluster.split} over ${
           (r.cluster.link==='rdma'||r.cluster.link==='jaccl')?'RDMA':'TCP/IP'}${
@@ -225,4 +231,4 @@ async function loadResident(){
   });
 }
 
-export {RAM, RAMCOL, act, loadResident, ramWent};
+export {SWAP_FLOOR, RAM, RAMCOL, act, loadResident, ramWent};

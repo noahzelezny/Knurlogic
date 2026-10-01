@@ -8,7 +8,7 @@ Stdio JSON-RPC, stdlib only: it reads the machine and starts servers, and
 imports nothing that could load a model into this process. Every tool
 answers deterministically, reports what it looked at, and refuses rather
 than gambles: `ready` is a gate `load` checks first; `fit` counts free +
-inactive memory and refuses with the arithmetic; `settings` returns every
+file-cache memory and refuses with the arithmetic; `settings` returns every
 knob with its measurement; `load` always spawns a fresh server; nothing
 deletes or writes an artifact.
 
@@ -157,8 +157,8 @@ def fit(artifact: str = "", **_) -> dict[str, Any]:
         "wired_action": adv.get("action"),
         "wired_note": adv.get("note", ""),
         "how": "budget = the smaller of the GPU working set and memory "
-               "available now (free + inactive: what macOS hands over on "
-               "demand).",
+               "available now (free + file cache + purgeable: what macOS hands "
+               "over without swapping).",
     }
 
 

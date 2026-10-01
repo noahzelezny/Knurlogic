@@ -207,7 +207,8 @@ def _selfheal() -> bool:
 
 def available_now() -> int:
     """Bytes of memory macOS would hand this machine's next allocation now
-    (free plus inactive/file cache: machine/loaded.available_memory), 0 when
+    (free plus file cache and purgeable pages, not inactive
+    anonymous ones: machine/loaded.available_memory), 0 when
     it cannot be read. Read fresh each time, never cached: it is the
     difference between a working set the GPU is ALLOWED and memory that is
     actually there (a 96 GiB Mac's 84 GiB working set leaves the OS and
