@@ -130,3 +130,140 @@ def test_tuning_and_interfaces_stay_free_of_mlx():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True,
                          text=True, check=True).stdout.strip()
     assert out == "[]"
+
+
+# --- KNURLOGIC_VISION=off: nothing of vision is held -------------------------
+
+def _freed():
+    return TOWER + DEFAULT_MAX_BYTES + _kv_expected()
+
+
+def _with_head(d, nbytes):
+    with open(d / "mtp-head.safetensors", "wb") as fh:   # sparse: size only
+        fh.truncate(nbytes)
+    return d
+
+
+def test_vision_off_frees_the_tower_store_and_image_kv(tmp_path):
+    v = Artifact.load(_rung(tmp_path / "v"))
+    assert R.vision_freed_bytes(v) == _freed()
+    assert R.vision_freed_bytes(
+        Artifact.load(_rung(tmp_path / "t", vision=False))) == 0
+    on, off = R.resolve(v, 64 * GIB), R.resolve(v, 64 * GIB, vision=False)
+    assert off.vision is None and on.vision is not None
+    assert on.env["KNURLOGIC_VISION"] == "on"
+    assert off.env["KNURLOGIC_VISION"] == "off"
+    assert any("vision off" in n for n in off.notes)
+    # the same budget: short with vision on, room to spare with it off
+    need = v.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected() - (1 << 20)
+    assert any("does not fit" in w for w in R.resolve(v, need).warnings)
+    assert not any("does not fit" in w
+                   for w in R.resolve(v, need, vision=False).warnings)
+
+
+def test_single_fit_check_subtracts_vision_when_off_and_says_so(tmp_path):
+    v = Artifact.load(_rung(tmp_path / "v"))
+    on_need = v.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected()
+    margin = R.step_margin(8 * GIB)             # the 4 GiB floor
+    budget = on_need + margin - (1 << 20)       # just short with vision on
+    c = R.single_fit_check(v, budget)
+    assert c["state"] == "cannot" and c["vision_bytes"] == _freed()
+    assert "turn vision off" in c["why"] and "MTP" not in c["why"]
+    assert R.single_fit_check(v, budget, vision=False)["state"] == "fits"
+    # off, the tower inside the artifact's size is out of the weights too
+    off_line = on_need - _freed() + margin
+    assert R.single_fit_check(v, off_line, vision=False)["state"] == "fits"
+    assert R.single_fit_check(v, off_line - 1,
+                              vision=False)["state"] == "cannot"
+
+
+def test_mtp_and_vision_off_together_is_named_when_only_both_fit(tmp_path):
+    head = 2 << 20
+    v = Artifact.load(_with_head(_rung(tmp_path / "v"), head))
+    assert R.mtp_head_bytes(v) == head
+    need = v.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected()
+    budget = need - head - _freed() + R.step_margin(8 * GIB)
+    c = R.single_fit_check(v, budget)
+    assert c["state"] == "cannot"
+    assert "turn MTP off (Settings → Presets) and vision off" in c["why"]
+    assert R.single_fit_check(v, budget, draft=False,
+                              vision=False)["state"] == "fits"
+    # either alone fits: both are offered
+    roomy = need - min(head, _freed()) + R.step_margin(8 * GIB)
+    assert "or vision off" in R.single_fit_check(v, roomy)["why"]
+
+
+def test_the_launch_setting_is_parsed_and_applied(tmp_path, monkeypatch):
+    assert S.engine_settings({"KNURLOGIC_VISION": "off"}) == {"vision": False}
+    assert S.engine_settings({"KNURLOGIC_VISION": "on"}) == {"vision": True}
+    assert S.vision_of({}) is True
+    assert S.vision_of({"KNURLOGIC_VISION": "off"}) is False
+    assert "KNURLOGIC_VISION" in S.MODEL_KNOBS
+    assert "KNURLOGIC_VISION" in S.launch_knobs()
+    assert S.check_knob("KNURLOGIC_VISION", "off") is None
+    assert S.check_knob("KNURLOGIC_VISION", "maybe")
+    from knurlogic.interfaces.serve import launch_fit
+    from knurlogic.machine import preferences
+    monkeypatch.setattr(preferences, "launch_sets", lambda s: dict(s))
+    v = Artifact.load(_rung(tmp_path / "v"))
+    budget = (v.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected()
+              + R.step_margin(8 * GIB) - (1 << 20))
+    assert launch_fit(v, {}, "default", True, budget)["state"] == "cannot"
+    assert launch_fit(v, {"KNURLOGIC_VISION": "off"}, "default", True,
+                      budget)["state"] == "fits"
+
+
+def test_mcp_fit_with_vision_off(tmp_path, monkeypatch):
+    from knurlogic.interfaces import mcp
+    from knurlogic.machine import preferences
+    monkeypatch.setattr(preferences, "launch_sets", lambda s: dict(s))
+    d = _rung(tmp_path / "m")
+    a = Artifact.load(d)
+    need = a.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected()
+    b = need + R.step_margin(8 * GIB) - (1 << 20)
+    monkeypatch.setattr(
+        "knurlogic.machine.wired.load_budget",
+        lambda: {"bytes": b, "working_set_bytes": b,
+                 "available_bytes": b, "limited_by": "test"})
+    assert mcp.fit(artifact=str(d))["fits"] is False
+    f = mcp.fit(artifact=str(d), vision=False)
+    assert f["fits"] is True and f["vision"] is False
+    assert f["vision_budget"] is None
+    assert f["headroom_gib"] == round((b - need + _freed()) / GIB, 1)
+
+
+def test_the_models_listing_carries_the_part_sizes(tmp_path):
+    from types import SimpleNamespace
+
+    from knurlogic.interfaces.page import documents
+    d = _with_head(_rung(tmp_path / "v"), 3 << 20)
+    assert documents._part_bytes(SimpleNamespace(path=d, servable=True)) \
+        == {"mtp_bytes": 3 << 20, "vision_bytes": _freed()}
+    t = _rung(tmp_path / "t", vision=False)
+    assert documents._part_bytes(SimpleNamespace(path=t, servable=True)) \
+        == {"mtp_bytes": 0, "vision_bytes": 0}
+
+
+def test_an_image_with_vision_off_is_a_clear_400(monkeypatch):
+    from knurlogic.engine.serve import state
+    from knurlogic.engine.serve import vision as SV
+    from knurlogic.interfaces.http import openai as O
+    body = {"messages": [{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": "data:image/png;"
+                                            "base64,AAAA"}},
+        {"type": "text", "text": "hi"}]}]}
+    monkeypatch.setitem(state.VISION, "error", SV.VISION_OFF)
+    with pytest.raises(O.ApiError) as e:
+        O.build_job(body, chat=True, has_vision=lambda: False)
+    assert e.value.status == 400
+    assert "vision is off for this launch" in str(e.value)
+    monkeypatch.setitem(state.VISION, "error", "")
+    with pytest.raises(O.ApiError) as e:
+        O.build_job(body, chat=True, has_vision=lambda: False)
+    assert e.value.status == 400 and "has no vision" in str(e.value)
+
+
+def test_pipeline_rank_0_holds_no_tower_with_vision_off(tmp_path):
+    v = Artifact.load(_rung(tmp_path / "v"))
+    assert R.pipeline_leader_bytes(v) - R.pipeline_leader_bytes(
+        v, vision=False) == TOWER

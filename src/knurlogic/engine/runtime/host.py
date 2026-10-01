@@ -294,7 +294,7 @@ class ModelHost:
         from knurlogic.engine.serve import vision
         if not self.vision:
             state.VISION.update(serve=None, model=self.model,
-                                error="vision is off for this instance")
+                                error=vision.VISION_OFF)
             vision.set_spec(None)
             return
         try:

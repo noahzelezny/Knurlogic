@@ -131,6 +131,10 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 # `registry.build`, which only runs on load. Good enough for the
                 # picker's VISION tag.
                 "vision": vision_registry.registered(f.model_type),
+                # what the Load model toggles free: the MTP head, and
+                # vision's tower + image store + image KV allowance (0:
+                # no such part, and no toggle)
+                **_part_bytes(f),
                 "serving": bool(serving) and (f.name == serving
                                               or str(f.path) == serving),
                 "room": _room(f, ws),
@@ -141,6 +145,24 @@ def models_document(serving: str = "", ttl: float = 60.0):
             })
         return {"models": out, "serving": serving}
     return handler
+
+
+def _part_bytes(f) -> dict:
+    """{"mtp_bytes", "vision_bytes"} of a found model: what MTP off and
+    vision off would free (tuning/resolve.mtp_head_bytes,
+    vision_freed_bytes); 0 when it has no such part or cannot be read."""
+    from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning.resolve import mtp_head_bytes, vision_freed_bytes
+    out = {"mtp_bytes": 0, "vision_bytes": 0}
+    if not f.servable:
+        return out
+    try:
+        a = Artifact.load(str(f.path))
+        out["mtp_bytes"] = mtp_head_bytes(a)
+        out["vision_bytes"] = vision_freed_bytes(a)
+    except (OSError, ValueError, KeyError, AttributeError, TypeError):
+        pass
+    return out
 
 
 def _room(f, ws: int):

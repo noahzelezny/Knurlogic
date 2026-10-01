@@ -775,8 +775,8 @@ class Scheduler:
             if vreq.has_images(job.request.messages):
                 v = state.VISION.get("serve")
                 if v is None:
-                    raise P.PromptError("this request has images but the "
-                                        "served model has no vision")
+                    from knurlogic.engine.serve.vision import no_vision_why
+                    raise P.PromptError(no_vision_why())
                 prompt, segs, types, initial = v.tokenize(
                     P.tokenize, self, tok, job.request, job.args)
                 # the pins tokenize took belong to the guard until the row

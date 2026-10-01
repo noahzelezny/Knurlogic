@@ -520,8 +520,10 @@ def placement(machines: list, shape: dict, split: str,
             "reason": f"rank 0 {names[0]} leads; " + sh["reason"]}
 
 
-def shape_of(path: str, world: int, split: str) -> dict:
-    """What placement needs of an artifact, read off its headers."""
+def shape_of(path: str, world: int, split: str,
+             vision: bool = True) -> dict:
+    """What placement needs of an artifact, read off its headers.
+    `vision`: KNURLOGIC_VISION; off, rank 0 holds no tower."""
     from knurlogic.machine.artifact import Artifact
     from knurlogic.tuning import resolve as R
     a = Artifact.load(path)
@@ -529,7 +531,7 @@ def shape_of(path: str, world: int, split: str) -> dict:
         per, other = R.pipeline_layer_bytes(a)
         refusals = R.pipeline_refusals(a.raw_config, world)
         return {"layer_bytes": per, "other_bytes": other,
-                "leader_bytes": R.pipeline_leader_bytes(a),
+                "leader_bytes": R.pipeline_leader_bytes(a, vision=vision),
                 "reserve": R.fit_reserve(a.raw_config),
                 "tensor_per_rank_bytes": 0, "refusals": refusals}
     return {"layer_bytes": [], "other_bytes": 0,
@@ -537,6 +539,13 @@ def shape_of(path: str, world: int, split: str) -> dict:
             "tensor_per_rank_bytes":
                 R.tensor_placement(a, world)["per_rank_bytes"],
             "refusals": R.tensor_refusals(a.raw_config, world)}
+
+
+def _shape(fn, path, world: int, split: str, vision: bool) -> dict:
+    """`shape_of` (or a stand-in for it), told about vision only when it
+    is off: on is its default."""
+    return fn(path, world, split) if vision else \
+        fn(path, world, split, vision=False)
 
 
 # ------------------------------------------------------------ one page
@@ -714,7 +723,8 @@ def rank_room_chunk(path, spec: dict, ws: int, share: int):
                                        if k in S.MODEL_KNOBS}})
         r = resolve(a, int(ws), tune=tune, holds_bytes=int(share),
                     kv_bits=launch.get("kv_bits"),
-                    long_context=launch.get("long_context", "off"))
+                    long_context=launch.get("long_context", "off"),
+                    vision=launch.get("vision", True))
         v = S.engine_settings(r.env).get("prefill_step_size")
         return int(v) if v else None
     except Exception:  # a rank that cannot say leaves the ring on the floor
@@ -779,7 +789,9 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         refusals.append(why)
     rank, world = spec["rank"], spec["world"]
     try:
-        sh = (shape or shape_of)(path, world, spec["split"])
+        from knurlogic.tuning.settings import vision_of
+        sh = _shape(shape or shape_of, path, world, spec["split"],
+                    vision_of(ok_sets))
     except Exception as e:  # a failed read is reported as the launch's refusal
         sh = {"refusals": [f"could not read the artifact: "
                            f"{type(e).__name__}: {e}"]}
@@ -1668,7 +1680,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         logger.warning("cluster launch: %s", alert)
         req = dict(req, identity=ident)
     path = _resolve(ident, aname)
-    from knurlogic.tuning.settings import clean_sets, preset_or
+    from knurlogic.tuning.settings import clean_sets, preset_or, vision_of
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         return {"error": f"not a launch setting: {', '.join(bad)}"}
@@ -1678,12 +1690,12 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             return {"refused": f"nothing started: {why}"}
     try:
         if path:
-            shape = shape_of(path, world, split)
+            shape = _shape(shape_of, path, world, split, vision_of(sets))
         else:
             first = next(m for m in infos if m["page"])
             shape = post(first["page"], "Shape",
                          {"identity": ident, "name": aname, "world": world,
-                          "split": split})
+                          "split": split, "vision": vision_of(sets)})
             if shape.get("error"):
                 return {"error": f"{first['name']}: {shape['error']}"}
     except (*NET_ERRORS, LookupError, StopIteration, AttributeError) as e:
@@ -2078,5 +2090,5 @@ def peer_step(kind: str, req: dict) -> tuple:
         w, s = req.get("world"), req.get("split")
         if not isinstance(w, int) or s not in SPLITS:
             return 400, {"error": "world and split"}
-        return 200, shape_of(p, w, s)
+        return 200, shape_of(p, w, s, req.get("vision") is not False)
     return 404, {"error": "not a cluster message"}

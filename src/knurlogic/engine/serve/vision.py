@@ -6,6 +6,11 @@ from __future__ import annotations
 
 from . import state
 
+#: what /status.json says, and an image request's 400, when a launch set
+#: KNURLOGIC_VISION=off (runtime/host.py binds no vision with it)
+VISION_OFF = ("vision is off for this launch (KNURLOGIC_VISION=off); "
+              "relaunch with vision on to send images")
+
 
 def set_spec(spec) -> None:
     from knurlogic.engine.vision import set_served_vision
@@ -18,6 +23,16 @@ def served_vision():
     importing this module."""
     from knurlogic.engine.vision import served_vision as _sv
     return _sv()
+
+
+def no_vision_why() -> str:
+    """An image request's 400 when nothing encodes images: vision turned
+    off for this launch (KNURLOGIC_VISION=off) says so; otherwise the
+    served model has none."""
+    if state.VISION.get("error") == VISION_OFF:
+        return f"this request has images, but {VISION_OFF}"
+    return ("this request has images but the served model has no vision; "
+            "send text only")
 
 
 def vision_status() -> dict:

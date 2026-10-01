@@ -98,7 +98,8 @@ def ready(**_) -> dict[str, Any]:
             "checked": ["servers this MCP started", "the model-load lock"]}
 
 
-def fit(artifact: str = "", draft: bool = True, **_) -> dict[str, Any]:
+def fit(artifact: str = "", draft: bool = True, vision: bool = True,
+        **_) -> dict[str, Any]:
     """Will this artifact fit, with the arithmetic shown.
 
     Against `wired.load_budget()` -- the same number `settings` resolves
@@ -120,9 +121,16 @@ def fit(artifact: str = "", draft: bool = True, **_) -> dict[str, Any]:
     # KV -- the resolver's terms, so `fit` and `settings` agree.
     vb = vision_budget(a)
     extra = vb["extra_bytes"] if vb else 0
-    headroom = budget - a.bytes_on_disk - extra
+    from knurlogic.tuning.resolve import mtp_head_bytes, vision_freed_bytes
+    # what the load will really hold: MTP off takes the head out, vision
+    # off the tower, image store and image KV (single_fit_check's terms)
+    holds = (a.bytes_on_disk + extra
+             - (0 if draft else mtp_head_bytes(a))
+             - (0 if vision else vision_freed_bytes(a)))
+    headroom = budget - holds
     from knurlogic.interfaces.serve import launch_fit
-    chk = launch_fit(a, {}, "default", draft, budget)
+    chk = launch_fit(a, {} if vision else {"KNURLOGIC_VISION": "off"},
+                     "default", draft, budget)
     fits = bool(budget) and headroom > 0 and chk["state"] != "cannot"
     low_headroom = fits and headroom < S.low_headroom_bytes(budget)
     verdict = ("will not fit" if not fits else
@@ -136,7 +144,8 @@ def fit(artifact: str = "", draft: bool = True, **_) -> dict[str, Any]:
         # step -- registry.build -- which does not run before a load). Good
         # enough for "would this be worth attaching an image to".
         "vision_capable": vision_registry.registered(a.model_type),
-        "vision_budget": _vision_terms(vb),
+        "vision_budget": _vision_terms(vb) if vision else None,
+        "vision": bool(vision),
         "size_gib": round(a.gib, 1),
         "budget_gib": round(budget / GIB, 1),
         "headroom_gib": round(headroom / GIB, 1),
@@ -149,7 +158,7 @@ def fit(artifact: str = "", draft: bool = True, **_) -> dict[str, Any]:
             f"time. It loads; long prompts are slower to start."
             if low_headroom else ""),
         # what a fit leaves to talk in (tuning/resolve.context_room)
-        "room": room_for(a.bytes_on_disk + extra, a.raw_config),
+        "room": room_for(holds, a.raw_config),
         "available_now_gib": round(b["available_bytes"] / GIB, 1),
         "working_set_gib": round(b["working_set_bytes"] / GIB, 1),
         "allowance_gib": round(b.get("allowance_bytes", 0) / GIB, 1),
@@ -183,10 +192,17 @@ def _mtp_off_doc(artifact: str, sets: dict, tune: str,
             return None
     except (OSError, ValueError, AttributeError, KeyError):
         return None
-    why = chk["why"].split("; turn MTP off")[0]
+    why = chk["why"].split("; turn ")[0]
     reason = (f"{why}. It will not fit with MTP on; with MTP off the "
               f"{chk['head_bytes'] / GIB:.1f} GiB head is not loaded and "
               f"it fits.")
+    if chk.get("vision_bytes"):
+        alone = launch_fit(a, {**sets, "KNURLOGIC_VISION": "off"}, tune,
+                           True)["state"] != "cannot"
+        reason += (f" Vision off (VISION in Load model) frees "
+                   f"{chk['vision_bytes'] / GIB:.1f} GiB"
+                   + (" and fits with MTP on, if you will not send images."
+                      if alone else " more."))
     return {"loaded": False, "refused": "will not fit",
             "mtp_off_fits": True, "reason": reason,
             "text": f"{reason} Nothing was started. Retry `load` with "
@@ -577,7 +593,7 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
          sets: dict[str, str] | None = None, force: bool = False,
          draft: bool = True, machines: list[str] | None = None,
          split: str = "", link: str = "", cable: str = "",
-         **_) -> dict[str, Any]:
+         vision: bool = True, **_) -> dict[str, Any]:
     """Start a server for this artifact, after checking it can work.
 
     REFUSES rather than gambles: memory still moving or a model whose
@@ -587,8 +603,13 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
 
     `machines` names where: empty is this Mac. Another Mac, or several,
     go through the page on this Mac -- its Launch, the same request.
+
+    `vision=false` launches without the vision tower, image store and
+    image KV (KNURLOGIC_VISION=off): more headroom, and images get a 400.
     """
     from knurlogic.tuning.settings import preset_of
+    if not vision:
+        sets = {**dict(sets or {}), "KNURLOGIC_VISION": "off"}
     try:
         tune = preset_of(tune)
     except ValueError as e:
@@ -638,7 +659,9 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
         return {"loaded": False, "refused": "will not fit",
                 "detail": chk["why"],
                 "note": "no flag overrides this; it is arithmetic."}
-    f = fit(artifact=artifact, draft=bool(draft))
+    from knurlogic.tuning.settings import vision_of
+    f = fit(artifact=artifact, draft=bool(draft),
+            vision=vision_of(dict(sets or {})))
     if not f["fits"]:
         return {"loaded": False, "refused": "will not fit",
                 "detail": f,
@@ -906,7 +929,13 @@ TOOLS: dict[str, dict[str, Any]] = {
                            "draft": {"type": "boolean",
                                      "description": "count the MTP head "
                                                     "(default true); false "
-                                                    "asks about MTP off"}},
+                                                    "asks about MTP off"},
+                           "vision": {"type": "boolean",
+                                      "description": "count the vision "
+                                                     "tower, image store "
+                                                     "and image KV (default "
+                                                     "true); false asks "
+                                                     "about vision off"}},
                           ["artifact"]),
     },
     "settings": {
@@ -961,6 +990,11 @@ TOOLS: dict[str, dict[str, Any]] = {
             "draft": {"type": "boolean",
                       "description": "use a packed drafting head "
                                      "(default true; one machine only)"},
+            "vision": {"type": "boolean",
+                       "description": "load the vision tower (default "
+                                      "true); false frees its memory "
+                                      "(tower, image store, image KV) and "
+                                      "image requests get a 400"},
             "machines": {"type": "array", "items": {"type": "string"},
                          "description": "machine names, as `state` lists "
                                         "them; empty: this Mac only"},
