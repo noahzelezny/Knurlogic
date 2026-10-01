@@ -664,8 +664,12 @@ function followLaunch(L, d){
     (!L.port||e.port===L.port) && e.name===nm));
   const e=ld.sort((a,b)=>a.seconds-b.seconds)[0];
   if(L.cluster){
-    const per=mine.map(x=>(x.doc.loads||[]).filter(k=>k.name===nm)
-      .sort((a,b)=>a.seconds-b.seconds)[0]).filter(Boolean);
+    // every rank this machine started (followers carry no port): all of
+    // the job's when the launch has one, else the newest per machine
+    const per=mine.flatMap(x=>{
+      const ks=(x.doc.loads||[]).filter(k=>k.name===nm
+        && (!L.job||!k.job||k.job===L.job));
+      return L.job ? ks : ks.sort((a,b)=>a.seconds-b.seconds).slice(0,1)});
     if(per.length){ L.bytes=per.reduce((s,k)=>s+k.bytes,0); L.total=per[0].total_bytes }
   } else if(e){ L.bytes=e.bytes; L.total=e.total_bytes; L.last=e.last_log_line;
     L.samples.push([Date.now(), e.bytes]); if(L.samples.length>6) L.samples.shift() }

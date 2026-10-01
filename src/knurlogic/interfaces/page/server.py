@@ -1012,7 +1012,22 @@ def load_progress(doc: dict) -> list:
             for r in doc.get("resident") or []
             if isinstance(r, dict) and r.get("runtime") == "knurlogic"}
     out = []
-    for port, rec in sorted(registry().items()):
+    entries = [(port, rec) for port, rec in sorted(registry().items())]
+    # a follower rank binds no port, so only jobs.json holds it; rank 0 is in
+    # both registries, counted once (by pid)
+    from knurlogic.cluster import jobs as J
+    seen = {int(rec.get("pid") or 0) for _, rec in entries}
+    jreg = J.registry()
+    ranks = {v["pid"]: v.get("rank") for v in jreg.values()}
+    entries = [(port, dict(rec, rank=ranks[rec["pid"]])
+                if ranks.get(rec.get("pid")) is not None else rec)
+               for port, rec in entries]
+    for key, rec in sorted(jreg.items()):
+        if rec["pid"] not in seen:
+            seen.add(rec["pid"])
+            entries.append((rec.get("port") or 0, dict(rec, rank=rec.get(
+                "rank", int(key.rsplit("/", 1)[-1]) if "/" in key else 0))))
+    for port, rec in entries:
         t = rec.get("t")
         if not t or now - t > LOAD_REPORT_S:
             continue
@@ -1030,11 +1045,14 @@ def load_progress(doc: dict) -> list:
         except OSError:
             lines, quiet = [], None
         e = {"port": port, "name": Path(path).name,
+             **({"job": rec["job"]} if rec.get("job") else {}),
+             **({"rank": rec["rank"]} if "rank" in rec else {}),
              "seconds": round(now - t), "bytes": procs.get(pid, 0),
              "total_bytes": _SIZES[path],
              "last_log_line": lines[-1][:200] if lines else ""}
-        r = rows.get(port)
-        if not is_our_server(pid):
+        r = rows.get(port) if port else None
+        if not is_our_server(pid) and not (
+                rec.get("job") and J.is_rank(pid, rec["job"])):
             e.update(phase="exited", log_tail=[ln[:200] for ln in lines[-4:]])
             from knurlogic.cluster.recovery import refusal_line
             why = refusal_line("\n".join(lines[-60:]))
