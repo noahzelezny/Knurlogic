@@ -125,3 +125,14 @@ class ModelConfig(BaseModelConfig):
     def __post_init__(self):
         if self.eos_token_id is None:
             self.eos_token_id = [154820, 154827, 154829]
+
+    @classmethod
+    def from_dict(cls, params):
+        """config.json's whole dict, its text and vision halves nested: what
+        mlx-lm's loader hands the architecture's `ModelArgs`."""
+        p = dict(params)
+        for key, half in (("text_config", TextConfig),
+                          ("vision_config", VisionConfig)):
+            if isinstance(p.get(key), dict):
+                p[key] = half.from_dict(p[key])
+        return super().from_dict(p)
