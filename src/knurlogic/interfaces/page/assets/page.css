@@ -839,18 +839,12 @@ body.talk #clog{flex:1;height:auto;min-height:0;max-height:none}
 .dlconf{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--warn)}
 .dlrow.stopped .vs.why{color:var(--dim)}
 
-/* The diagram follows ITS OWN width, not the window's: zoom in, or open a
-   side panel, and the memory panel narrows while the window does not. Too
-   narrow for machines and key on one row, the key drops below the machines;
-   too narrow for full cards side by side, they take the compact form. */
-#memory{container-type:inline-size}
-@container (max-width: 860px){
-  .topo.n1{grid-template-columns:minmax(0,380px)}
-  .topo.n2{grid-template-columns:minmax(0,1fr) 40px minmax(0,1fr)}
-  .topo.n1 #ramwent,.topo.n2 #ramwent{grid-row:2;grid-column:1/-1;
-    justify-self:center;margin:0}
-}
-@container (max-width: 520px){
-  .topo .ufull,.topo .unit .stat{display:none}
-  .topo .ucompact{display:flex;flex-direction:column;gap:6px}
-}
+/* The diagram follows the room the CARDS get, measured (home.js fit()):
+   zoom in, or open a side panel, and the memory panel narrows while the
+   window does not. .keybelow: the key drops below the machines; .tight:
+   the cards take the compact form, rather than crushing. */
+.topo.n1.keybelow{grid-template-columns:minmax(0,380px)}
+.topo.n2.keybelow{grid-template-columns:minmax(0,1fr) 40px minmax(0,1fr)}
+.topo.keybelow #ramwent{grid-row:2;grid-column:1/-1;justify-self:center;margin:0}
+.topo.tight .ufull,.topo.tight .unit .stat{display:none}
+.topo.tight .ucompact{display:flex;flex-direction:column;gap:6px}
