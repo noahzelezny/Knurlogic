@@ -288,3 +288,10 @@ def test_a_module_in_exos_env_is_that_module_not_exo():
     assert loaded._runtime_of(f"{env} -m some.tool /m") == ""
     assert loaded._runtime_of(f"{env} -m exo.main") == "exo"
     assert loaded._runtime_of("/opt/anaconda3/envs/exo/bin/exo") == "exo"
+
+
+def test_a_cluster_row_holds_every_ranks_bytes():
+    d = {"ranks": [{"rank": 0, "active_bytes": 104 << 30},
+                   {"rank": 1, "active_bytes": 75 << 30}]}
+    assert loaded._held(d, {"active_bytes": 104 << 30}) == 179 << 30
+    assert loaded._held({}, {"active_bytes": 5}) == 5
