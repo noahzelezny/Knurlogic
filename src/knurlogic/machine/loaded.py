@@ -215,12 +215,21 @@ def _knurlogic(base: str) -> list:
         detail = f"{detail} · VISION" if detail else "VISION"
     return [Resident(
         runtime="knurlogic", name=a.get("name") or "?", where=base,
-        bytes_resident=int(m.get("active_bytes") or 0),
+        bytes_resident=_held(d, m),
         detail=detail, can_unload=True,
         ident=a.get("path") or a.get("name") or "",
         instance=_instance_of(base),
         requests=d.get("requests") if isinstance(d.get("requests"), dict)
         else None)]
+
+
+def _held(d: dict, m: dict) -> int:
+    """What the model holds: a cluster's rank 0 reports every rank, so the
+    sum of them (rank 0 alone read 104 GiB of a 178 GiB model)."""
+    ranks = [r for r in d.get("ranks") or [] if isinstance(r, dict)]
+    if len(ranks) > 1:
+        return sum(int(r.get("active_bytes") or 0) for r in ranks)
+    return int(m.get("active_bytes") or 0)
 
 
 def _instance_of(base: str) -> str:
