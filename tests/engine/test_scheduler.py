@@ -655,3 +655,17 @@ def test_nothing_running_nothing_cached_and_no_room_says_restart():
     s._kv = (0.0, float(2**20))
     with pytest.raises(S.OutOfMemory, match="needs a restart"):
         s._make_room(16)
+
+
+def test_timing_reports_cached_vs_computed_and_the_chunk():
+    from types import SimpleNamespace as NS
+
+    from knurlogic.engine.runtime.scheduler import _timing
+    row = NS(job=NS(submitted=0.0), admitted=1.0, began=1.0, first=1.17)
+    t = _timing(row, 2.0, 10, 0, 296, 2048)
+    assert t["prefill"] == "cached" and "prefill_tok_s" not in t
+    assert (t["prompt_cached_tokens"], t["prompt_computed_tokens"],
+            t["prefill_chunk"]) == (296, 0, 2048)
+    mixed = NS(job=NS(submitted=0.0), admitted=1.0, began=1.0, first=3.0)
+    t = _timing(mixed, 4.0, 10, 1000, 500, 2048)
+    assert t["prefill_tok_s"] == 500.0 and "prefill" not in t

@@ -109,6 +109,16 @@ _FLAG_FOR = {"KNURLOGIC_KV_BITS": "--kv-bits",
              "KNURLOGIC_MTP_DYNAMIC": "--mtp-dynamic"}
 
 
+def stock_runtime_line() -> str:
+    """The positive statement for a model that ships no model.py."""
+    try:
+        from importlib.metadata import version
+        v = version("mlx-lm")
+    except Exception:    # an mlx-lm without metadata still runs the model
+        v = "unknown"
+    return f"runtime   stock mlx-lm {v} (no bundled model.py)"
+
+
 def ignored_env(env: dict, forced: dict, environ) -> list:
     """One line per knob set in the environment that the resolver's value
     replaces. Serve takes knobs from its flags and --set, not from the
@@ -420,6 +430,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(f"\n{a.path.name} ships its own runtime ({a.model_file}) "
               f"and it WILL be executed -- that is where its kernels live.")
     else:
+        print(stock_runtime_line())
         from knurlogic.engine.serve.load import vq_without_runtime
         why = vq_without_runtime(a.path)
         if why:
