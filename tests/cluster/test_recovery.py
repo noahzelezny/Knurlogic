@@ -436,3 +436,11 @@ def test_a_missing_module_is_a_refusal_never_relaunched():
     line = R.refusal_line(log)
     assert line == "ModuleNotFoundError: No module named 'mlx_vlm'"
     assert R.kind(f"rank 1 exited with code 1: {line}") == "refusal"
+
+
+def test_a_rank_that_cannot_build_the_model_is_a_refusal():
+    from knurlogic.cluster import recovery
+    tail = ("RuntimeError: rank 1 could not load /m/GLM: AttributeError: "
+            "module 'mlx_lm.models.glm5_next' has no attribute 'ModelArgs'")
+    assert recovery.refusal_line(tail).startswith("rank 1 could not load")
+    assert recovery.kind("rank 1 exited: " + tail) == "refusal"
