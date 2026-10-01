@@ -235,6 +235,79 @@ _SAMPLE = 64 * 1024
 _MAX_HEADER = 64 * 1024 * 1024
 
 
+# The cache persists in <cache_dir>/identities.json, keyed by path and the
+# same stamp, so a page or serve start does not rehash every shard. Loaded
+# once per process (per cache dir); new entries are written once, after a
+# short quiet spell (a /models.json build writes once, not per model), by
+# temp file + rename -- page and serve may both write, last writer wins and
+# the entries are idempotent. A corrupt or unreadable file is ignored.
+_DISK: dict = {"file": None, "data": {}, "timer": None}
+#: seconds of quiet before new identities are written
+_DISK_DELAY = 1.0
+
+
+def _disk_file() -> Path | None:
+    try:
+        from knurlogic.machine.servers import cache_dir
+        return cache_dir() / "identities.json"
+    except OSError:
+        return None
+
+
+def _disk() -> dict:
+    f = _disk_file()
+    if _DISK["file"] != f:
+        data = {}
+        if f is not None:
+            try:
+                raw = json.loads(f.read_text())
+                if isinstance(raw, dict):
+                    data = {k: v for k, v in raw.items()
+                            if isinstance(v, list) and len(v) == 2
+                            and isinstance(v[1], str)}
+            except (OSError, ValueError):
+                data = {}
+        _DISK["file"], _DISK["data"] = f, data
+    return _DISK["data"]
+
+
+def _flush() -> None:
+    """Write the on-disk identity cache now (pruning gone paths)."""
+    import os
+    import tempfile
+    t, _DISK["timer"] = _DISK["timer"], None
+    if t is not None:
+        t.cancel()
+    f = _DISK["file"]
+    if f is None:
+        return
+    data = {k: v for k, v in _DISK["data"].items() if os.path.exists(k)}
+    _DISK["data"] = data
+    try:
+        fd, tmp = tempfile.mkstemp(dir=f.parent, prefix=".identities.")
+        with os.fdopen(fd, "w") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, f)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except (OSError, NameError):
+            pass
+
+
+def _schedule_flush() -> None:
+    import atexit
+    import threading
+    if _DISK["timer"] is not None:
+        _DISK["timer"].cancel()
+    else:
+        atexit.register(lambda: _DISK["timer"] is not None and _flush())
+    t = threading.Timer(_DISK_DELAY, _flush)
+    t.daemon = True
+    _DISK["timer"] = t
+    t.start()
+
+
 class AmbiguousIdentity(ValueError):
     """Kept for callers that catch it: resolve_identity no longer raises it.
     Two paths with one identity are the same weights, and one is chosen."""
@@ -295,6 +368,12 @@ def identity(path) -> str:
     hit = _IDENT.get(key)
     if hit and hit[0] == stamp:
         return hit[1]
+    jstamp = json.loads(json.dumps(stamp))
+    disk = _disk()
+    dhit = disk.get(key)
+    if dhit and dhit[0] == jstamp:
+        _IDENT[key] = (stamp, dhit[1])
+        return dhit[1]
     h = hashlib.sha256()
     try:
         h.update(cfg.read_bytes())
@@ -317,6 +396,8 @@ def identity(path) -> str:
         return ""
     out = h.hexdigest()[:16]
     _IDENT[key] = (stamp, out)
+    disk[key] = [jstamp, out]
+    _schedule_flush()
     return out
 
 

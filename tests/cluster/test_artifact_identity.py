@@ -156,3 +156,59 @@ def test_the_plain_name_beats_a_prefixed_copy(tmp_path, monkeypatch):
     assert A.resolve_identity(ident, [a, b]) == str(b)
     assert A.resolve_identity(ident, [a, b], name="sp190--Qwen--M") == str(a)
     assert A.resolve_identity(ident, [a, b], name="Qwen--M") == str(b)
+
+
+def _fresh_process():
+    A._flush()
+    A._IDENT.clear()
+    A._DISK["file"] = None
+    A._DISK["data"] = {}
+
+
+def _boom(*a, **k):
+    raise AssertionError("rehashed")
+
+
+def test_disk_cache_survives_a_new_process(tmp_path, monkeypatch):
+    a = _art(tmp_path, "m", b"a")
+    first = A.identity(a)
+    _fresh_process()
+    monkeypatch.setattr(A, "_shard_digest", _boom)
+    assert A.identity(a) == first
+
+
+def test_disk_cache_recomputes_on_changed_shard(tmp_path, monkeypatch):
+    a = _art(tmp_path, "m", b"a")
+    first = A.identity(a)
+    _fresh_process()
+    shard = a / "model-00001-of-00001.safetensors"
+    st = shard.stat()
+    os.utime(shard, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    calls = []
+    real = A._shard_digest
+    monkeypatch.setattr(A, "_shard_digest",
+                        lambda f, n: calls.append(f) or real(f, n))
+    assert A.identity(a) == first and calls
+    _fresh_process()
+    _shard(shard, b"b", size=300_001)       # size changes too
+    calls.clear()
+    assert A.identity(a) != first and calls
+
+
+def test_corrupt_disk_cache_is_ignored(tmp_path):
+    a = _art(tmp_path, "m", b"a")
+    first = A.identity(a)
+    _fresh_process()
+    f = A._disk_file()
+    f.write_text("{not json")
+    assert A.identity(a) == first
+    A._flush()
+    assert json.loads(f.read_text())
+
+
+def test_flush_prunes_gone_paths(tmp_path):
+    a = _art(tmp_path, "m", b"a")
+    A.identity(a)
+    A._DISK["data"]["/no/such/path"] = [[], "x"]
+    A._flush()
+    assert list(json.loads(A._disk_file().read_text())) == [str(a)]
