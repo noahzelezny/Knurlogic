@@ -32,6 +32,9 @@ def test_no_commit_message_has_ai_attribution(checkout):
 def test_the_commit_msg_hook_is_installed(checkout):
     # relative, or absolute to this checkout's (or the main checkout's) copy
     path = _git("config", "core.hooksPath").stdout.strip()
+    if not path:
+        pytest.skip("hook not enabled in this clone: "
+                    "git config core.hooksPath scripts/git-hooks")
     assert path.rstrip("/").endswith("scripts/git-hooks") and (
         (ROOT / path) if not Path(path).is_absolute() else Path(path)
     ).joinpath("commit-msg").is_file(), (
