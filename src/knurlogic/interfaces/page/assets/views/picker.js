@@ -674,7 +674,8 @@ function settleLaunch(L, j){
       LAUNCHES.splice(i,1) }
   if(L.cancelled){ stopLaunch(L); return }
   if(j.error||j.refused||j.loaded===false||j.ok===false){ L.phase='failed';
-    L.why=j.error||('not loaded: '+(j.refused||'the server declined')+(j.note?' -- '+j.note:'')) }
+    L.why=j.error||('not loaded: '+(j.refused||'the server declined')
+      +(typeof j.detail==='string'?': '+j.detail:'')+(j.note?' -- '+j.note:'')) }
   else L.phase='starting';
   // said once and kept: a local copy that differs from the shared one
   if(j.alerts&&j.alerts.length) L.alert=j.alerts.join(' · ');
