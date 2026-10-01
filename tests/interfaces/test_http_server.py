@@ -222,6 +222,7 @@ def test_models_and_health(url):
     assert d["object"] == "list" and d["data"][0]["id"] == "tiny"
     assert d["data"][0]["capabilities"] == ["text"]
     assert isinstance(d["data"][0]["context_length"], int)
+    assert d["data"][0]["status"] == "ready"      # warmed before it serves
     with urllib.request.urlopen(u + "/health") as r:
         assert json.loads(r.read())["status"] == "ok"
 
@@ -340,7 +341,7 @@ def test_a_route_that_raises_answers_500_with_a_body(url, monkeypatch):
     u, _ = url
     from knurlogic.interfaces.http import openai as O
     monkeypatch.setattr(O, "models_document",
-                        lambda *a: 1 / 0)
+                        lambda *a, **k: 1 / 0)
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(u + "/v1/models", timeout=30)
     assert e.value.code == 500
@@ -497,3 +498,24 @@ def test_ollama_is_served_in_process(url):
                                              "stream": False,
                                              "options": {"num_predict": 4}})
     assert json.loads(raw)["response"]
+
+
+def test_models_say_loading_until_the_warm_up_is_done():
+    """A client polling /v1/models before timing its first request must
+    not time the load: the entry says "loading" until the host is ready.
+    Still a 200 -- the page's liveness probe and router read it."""
+    from types import SimpleNamespace
+
+    from knurlogic.interfaces.http import openai as O
+    from knurlogic.interfaces.http import server as S
+
+    def host(state):
+        return SimpleNamespace(status=lambda: {"state": state})
+    for state, want in (("loading", "loading"), ("warming", "loading"),
+                        ("empty", "loading"), ("ready", "ready"),
+                        ("failed", "failed")):
+        got = O.models_document({"id": "m"},
+                                load_state=S._load_state(host(state)))
+        assert got["data"][0]["status"] == want, state
+    assert S._load_state(SimpleNamespace()) == "ready"   # says nothing
+    assert O.models_document({"id": "m"})["data"][0]["status"] == "ready"

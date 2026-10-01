@@ -185,7 +185,7 @@ def test_unload_by_port_is_this_macs(page):
 # --- end to end: the real page handler, a fake peer page, fake ranks -------
 
 @pytest.fixture
-def page_a(tmp_path, monkeypatch):
+def page_a(tmp_path, monkeypatch, owned_procs):
     """Page A served over HTTP with its real /loaded.json routes, page B a
     process; nothing launched yet."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "A"))
@@ -203,11 +203,11 @@ def page_a(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "RANK_ARGV", [cluster_fake_page.fake_argv])
     ui_a, ui_b = T.free_port(), T.free_port()
     env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "B")}
-    page_b = subprocess.Popen(
+    page_b = owned_procs(subprocess.Popen(
         [sys.executable, str(T.HERE / "cluster_fake_page.py"), str(ui_b),
          "bbbb", "B", json.dumps(info_b), "aaaa", f"127.0.0.1:{ui_a}"],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True)
+        text=True))
     assert "up" in page_b.stdout.readline()
     peer = SimpleNamespace(id="bbbb", name="B", host="127.0.0.1",
                            key=f"127.0.0.1:{ui_b}", state="answering",
