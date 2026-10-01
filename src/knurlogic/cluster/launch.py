@@ -61,7 +61,8 @@ SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
              "port", "working_set_gib", "bandwidth_gbs", "nodes", "versions",
              "jaccl_timeout_ms", "sets", "chips", "cable", "cable_note",
-             "recovery", "serve_hosts", "name", "auto_port", "anyway")
+             "recovery", "serve_hosts", "name", "auto_port", "anyway",
+             "prefill_why")
 SPLITS = ("tensor", "pipeline")
 LINKS = ("ring", "jaccl")
 #: the link names people see (load(), state(), the page, the recovery
@@ -91,8 +92,11 @@ def leader_url(spec: dict) -> str:
     port = spec.get("port")
     return f"http://{hs[0]}:{int(port)}/v1" if hs and port else ""
 
-#: the prompt chunk every rank runs (ring-wide): 512, as everywhere
+#: the prompt chunk a ring runs when a rank cannot work out its own room's:
+#: the floor. Otherwise it is the smallest of the ranks' room-based chunks
+#: (each rank answers Prepare with its own; see ring_chunk)
 PREFILL_CHUNK = 512
+RING_CHUNK_WHY = "ring: the smallest rank's room"
 #: first ring port; a job's ranks take RING_PORT + slot*20 + rank, and
 #: the jaccl coordinator slot*20 + 19
 RING_PORT = 47200
@@ -707,6 +711,42 @@ def _loading_elsewhere(job: str, reg: dict) -> str:
     return ""
 
 
+def rank_room_chunk(path, spec: dict, ws: int, share: int):
+    """The prompt chunk this rank's own room allows -- its share of the
+    weights against its own budget, the resolver's rule -- or None when it
+    cannot be worked out (the ring then runs PREFILL_CHUNK)."""
+    try:
+        from knurlogic.machine.artifact import Artifact
+        from knurlogic.tuning import settings as S
+        from knurlogic.tuning.resolve import preset_env, resolve
+        a = Artifact.load(path)
+        tune = spec.get("tune") or "default"
+        sets = S.canonical_sets(dict(spec.get("sets") or {}))
+        launch = S.engine_settings({**preset_env(a, tune),
+                                    **{k: v for k, v in sets.items()
+                                       if k in S.MODEL_KNOBS}})
+        r = resolve(a, int(ws), tune=tune, holds_bytes=int(share),
+                    kv_bits=launch.get("kv_bits"),
+                    long_context=launch.get("long_context", "off"))
+        v = S.engine_settings(r.env).get("prefill_step_size")
+        return int(v) if v else None
+    except Exception:  # a rank that cannot say leaves the ring on the floor
+        logger.exception("could not work out this rank's prompt chunk")
+        return None
+
+
+def ring_chunk(sets: dict, got: list) -> tuple:
+    """(chunk, why) for the ring: an explicit set wins; else the smallest
+    of the ranks' room-based chunks, or the floor when one cannot say."""
+    for k in ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"):
+        if k in sets:
+            return int(sets[k]), "set"
+    rooms = [(g or {}).get("prefill_chunk") for g in got]
+    if rooms and all(isinstance(x, int) and x > 0 for x in rooms):
+        return min(rooms), RING_CHUNK_WHY
+    return PREFILL_CHUNK, "ring: a rank could not work out its room"
+
+
 def prepare(spec: dict, *, resolve=None, info=None, shape=None,
             registry=None, held=None) -> tuple:
     """A Prepare message, on the page asked to run one rank:
@@ -800,6 +840,9 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                 + f"; the {(ws - hold) / GIB:.1f} GiB left must also leave "
                   f"the {keep / GIB:.1f} GiB step margin. Unload that "
                   f"first")
+    room_chunk = None
+    if not refusals and need and ws:
+        room_chunk = rank_room_chunk(path, spec, ws, need)
     if spec["link"] == "ring":
         ip = spec["hosts"][rank].rsplit(":", 1)[0]
         mine = {t.get("ip") for t in info.get("thunderbolt") or []}
@@ -875,7 +918,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                 f"{want.get('knurlogic') or 'missing'} on the "
                 f"coordinator")
     return 200, typed(PrepareReply(
-        ok=True, machine=me, rank=rank,
+        ok=True, machine=me, rank=rank, prefill_chunk=room_chunk,
         alert=f"on {me}: {differs}" if differs else None, note=note))
 
 
@@ -921,6 +964,7 @@ def rank_argv(path: str, spec: dict, files: dict) -> list:
            "--split", spec["split"], "--link", spec["link"],
            "--job", spec["job"],
            "--prefill-chunk", str(spec["prefill_chunk"]),
+           "--prefill-why", str(spec.get("prefill_why") or ""),
            "--working-set-gib", f"{float(spec.get('working_set_gib') or 0):.3f}",
            "--tune", spec.get("tune") or "default"]
     if spec.get("port"):
@@ -1019,12 +1063,19 @@ def _slot_conflict(spec: dict, reg: dict):
     return None
 
 
-def start(job: str | None, *, spawn=None, wait_s: float | None = None) -> tuple:
+def start(job: str | None, *, spawn=None, wait_s: float | None = None,
+          ring: dict | None = None) -> tuple:
     """A Start message: spawn this page's prepared rank -- once
     every stopped rank on this machine is gone (up to START_WAIT_S), and
     never beside another job's rank still loading."""
     with _LOCK:
         prep = PREPARED.pop(str(job or ""), None)
+    c = (ring or {}).get("prefill_chunk")
+    if prep is not None and isinstance(c, int) and not isinstance(c, bool) \
+            and c > 0:
+        # the ring's chunk, known only once every rank answered Prepare
+        prep["spec"] = dict(prep["spec"], prefill_chunk=c,
+                            prefill_why=str(ring.get("prefill_why") or "")[:120])
     if prep is None:
         # a retried Start (the answer was lost): the rank is already here
         again = _running_here(str(job or ""))
@@ -1813,9 +1864,11 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         from knurlogic.machine.servers import free_port
         port = free_port(serve_port)
     # the base model's saved prompt chunk (Settings -> Models) is the
-    # ring's, like every launch set; unset, the ring runs PREFILL_CHUNK.
-    # serve puts the ring's value over any --set, so the saved one must be
-    # resolved here or it is shown and never runs.
+    # ring's, like every launch set; unset, the ring runs the smallest of
+    # its ranks' room-based chunks (ring_chunk, once Prepare has answered;
+    # PREFILL_CHUNK until then). serve puts the ring's value over any
+    # --set, so the saved one must be resolved here or it is shown and
+    # never runs.
     chunk = PREFILL_CHUNK
     for k in ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"):
         if k in sets:
@@ -1877,7 +1930,12 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         g["alert"] for g in got if isinstance(g, dict) and g.get("alert")]
     for a in alerts[1 if alert else 0:]:
         logger.warning("cluster job %s: %s", job, a)
-    got = transport.parallel(lambda r: ask("Start", r, {"job": job}),
+    chunk, chunk_why = ring_chunk(sets, got)
+    base["prefill_chunk"] = chunk
+    start_doc = {"job": job, "prefill_chunk": chunk}
+    if chunk_why != "set":
+        start_doc["prefill_why"] = chunk_why
+    got = transport.parallel(lambda r: ask("Start", r, start_doc),
                              list(range(world)))
     bad = [(order[r]["name"], g) for r, g in enumerate(got)
            if not (isinstance(g, dict) and g.get("started"))]
@@ -2027,7 +2085,7 @@ def peer_step(kind: str, req: dict) -> tuple:
     if kind == "Prepare":
         return prepare(req)
     if kind == "Start":
-        return start(req.get("job"))
+        return start(req.get("job"), ring=req)
     if kind == "Stop":
         if not J.JOB_RX.fullmatch(str(req.get("job") or "")):
             return 400, {"error": "job is a hex nonce"}

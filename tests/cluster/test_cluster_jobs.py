@@ -1262,7 +1262,7 @@ def jaccl_launch(monkeypatch, req, post=None, follow=None):
             return {"started": doc["job"]}
         return {}
     monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
-    monkeypatch.setattr(C, "start", lambda job: (200, {"started": job}))
+    monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
     out = C.launch({"action": "load", "identity": "abc",
                     "nodes": ["aaaa", "bbbb"], "split": "pipeline",
                     "link": "jaccl", **req},
@@ -1542,3 +1542,30 @@ def test_no_link_is_tcp_over_the_one_shared_cable(cache, monkeypatch):
                         lambda a, b, rdma=False: real(a, b, rdma)[:1])
     out, got = jaccl_launch(monkeypatch, {"link": ""})
     assert "refused" not in out and "error" not in out
+
+
+def test_ring_chunk_is_the_smallest_ranks_room_and_a_set_wins():
+    got = [{"ok": True, "prefill_chunk": 2048},
+           {"ok": True, "prefill_chunk": 1024}]
+    assert C.ring_chunk({}, got) == (1024, C.RING_CHUNK_WHY)
+    assert C.ring_chunk({"KNURLOGIC_PREFILL_CHUNK": "256"}, got) == (256, "set")
+    assert C.ring_chunk({}, got + [{"ok": True}])[0] == C.PREFILL_CHUNK
+
+
+def test_start_runs_the_rings_chunk_and_says_why(cache, monkeypatch):
+    monkeypatch.setattr(C, "_local_info",
+                        lambda: info("Apple M3 Ultra", "192.0.2.2"))
+    code, got = prep(spec())
+    assert got["ok"], got
+    cmds = []
+
+    def spawn(cmd, **k):
+        cmds.append(cmd)
+        raise OSError("not really")
+    C.start("ab12cd34ef567890", spawn=spawn, wait_s=0.5,
+            ring={"prefill_chunk": 1024, "prefill_why": C.RING_CHUNK_WHY})
+    cmd = cmds[0]
+    assert cmd[cmd.index("--prefill-chunk") + 1] == "1024"
+    assert cmd[cmd.index("--prefill-why") + 1] == C.RING_CHUNK_WHY
+    C.PREPARED.clear()
+    C._PROCS.clear()

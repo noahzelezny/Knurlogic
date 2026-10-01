@@ -421,7 +421,15 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         os.environ[k] = v
         print(f"  {k}={v}   (overridden"
               + (f", resolver said {was}" if was is not None else "") + ")")
-    for n in r.notes:
+    notes = r.notes
+    if world > 1:
+        # the ring's chunk is the one this rank runs: its own room's note
+        # would state a chunk it will not use
+        notes = [n for n in notes if not n.startswith("prompt chunk")]
+        notes.insert(0, f"prompt chunk {int(ring['prefill_chunk'])}"
+                     + (f" ({ring['prefill_why']})"
+                        if ring.get("prefill_why") else " (ring-wide)"))
+    for n in notes:
         print(f"  note: {n}")
     for w in r.warnings:
         print(f"  WARNING: {w}", file=sys.stderr)
@@ -875,6 +883,7 @@ def main(argv=None) -> int:
     p.add_argument("--ibv-devices", default="", help=hide)
     p.add_argument("--coordinator", default="", help=hide)
     p.add_argument("--prefill-chunk", type=int, default=0, help=hide)
+    p.add_argument("--prefill-why", default="", help=hide)
     p.add_argument("--decode-chunk", type=int, default=0, help=hide)
     # pipeline only: layers per rank (rank order; default: the resolver's
     # shares from every rank's working set and bandwidth), and this
@@ -892,6 +901,7 @@ def main(argv=None) -> int:
                 "job": a.job or f"tensor-{a.port}",
                 "ibv_devices": a.ibv_devices, "coordinator": a.coordinator,
                 "prefill_chunk": a.prefill_chunk,
+                "prefill_why": a.prefill_why,
                 "decode_chunk": a.decode_chunk,
                 "layers": [int(x) for x in a.layers.split(",") if x],
                 "bandwidth_gbs": a.bandwidth_gbs or None,

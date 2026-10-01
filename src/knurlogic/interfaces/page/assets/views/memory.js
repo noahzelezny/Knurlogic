@@ -61,11 +61,11 @@ function tightConfirm(j){
   return new Promise(res=>{
     const o=document.createElement('div'); o.className='modal tightask';
     o.innerHTML=`<div class="box tightbox" role="dialog" aria-modal="true">
-      <div class="tighthd">Tight fit</div>
+      <div class="tighthd">${j.no_anyway?'Will not fit with MTP on':'Tight fit'}</div>
       <div class="tightwhy">${esc(j.reason||'The weights fit but not the safety margin; expect swap.')}</div>
       <div class="tightbtns">
         ${j.mtp_off_fits?'<button class="mini pri" data-t="mtp">Turn MTP off and launch</button>':''}
-        <button class="mini" data-t="anyway">Launch anyway</button>
+        ${j.no_anyway?'':'<button class="mini" data-t="anyway">Launch anyway</button>'}
         <button class="mini" data-t="cancel">Cancel</button></div></div>`;
     const done=v=>{ document.removeEventListener('keydown',key); o.remove(); res(v) };
     const key=e=>{ if(e.key==='Escape') done(null) };

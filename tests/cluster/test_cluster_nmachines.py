@@ -48,7 +48,7 @@ def n_launch(monkeypatch, infos, link, split="pipeline", req=None):
     monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
     monkeypatch.setattr(C, "BAD_CABLES", {})
     monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
-    monkeypatch.setattr(C, "start", lambda job: (200, {"started": job}))
+    monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
     peers = [SimpleNamespace(id=f"m{i}", name=f"M{i}", host=f"127.0.0.{i}",
                              key=f"127.0.0.{i}:8765", state="answering",
                              link="thunderbolt", node={"cluster": m})
@@ -139,7 +139,7 @@ def _port_launch(monkeypatch, prep, req=None):
     monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
     monkeypatch.setattr(C, "BAD_CABLES", {})
     monkeypatch.setattr(C, "prepare", prep)
-    monkeypatch.setattr(C, "start", lambda job: (200, {"started": job}))
+    monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
     infos = mesh_infos(2)
     peers = [SimpleNamespace(id="m1", name="M1", host="127.0.0.1",
                              key="127.0.0.1:8765", state="answering",

@@ -23,7 +23,7 @@ def _stale_launch(monkeypatch, fresh, exiting=()):
     monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
     monkeypatch.setattr(C, "BAD_CABLES", {})
     monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
-    monkeypatch.setattr(C, "start", lambda job: (200, {"started": job}))
+    monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
     monkeypatch.setattr(C, "available_now", lambda: 64 * GIB)
     monkeypatch.setattr(C.time, "sleep", lambda s: None)
     infos = mesh_infos(2)

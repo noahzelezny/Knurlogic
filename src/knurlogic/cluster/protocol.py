@@ -156,12 +156,17 @@ class PrepareReply(Body):
     free_port: int | None = None
     alert: str | None = None
     note: str | None = None
+    #: the prompt chunk this rank's own room allows (None: not worked out)
+    prefill_chunk: int | None = None
 
 
 @_register
 @dataclass(frozen=True)
 class Start(Body):
     job: str
+    #: the ring's prompt chunk once every rank has answered Prepare, and why
+    prefill_chunk: int | None = None
+    prefill_why: str | None = None
 
 
 @_register

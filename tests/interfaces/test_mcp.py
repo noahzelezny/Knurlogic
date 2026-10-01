@@ -305,3 +305,32 @@ def test_state_vision_is_none_when_nothing_served(monkeypatch):
                         lambda: {"resident": [], "runtimes": []})
     r = mcp.state()
     assert r["vision"] is None
+
+
+def test_load_cannot_fit_with_mtp_but_fits_without_offers_mtp_off(tmp_path,
+                                                                  monkeypatch):
+    """The refusal MTP-off fixes is a doc the page's tightConfirm shows (turn
+    MTP off / cancel, never launch anyway), ahead of fit()'s own refusal."""
+    d, spawned = _tight_setup(tmp_path, monkeypatch)
+    calls = []
+
+    def fake(a, sets, tune, draft, budget=None):
+        calls.append(draft)
+        if draft:
+            return {"state": "cannot", "head_bytes": 6 << 30,
+                    "mtp_off_fits": False, "short_bytes": 0,
+                    "why": "m needs 108.5 GiB (weights incl. the 6.1 GiB MTP "
+                           "head) plus 5.5 GiB step margin; the budget is "
+                           "110.8 GiB; turn MTP off (Settings) to fit"}
+        return {"state": "fits", "head_bytes": 0, "mtp_off_fits": False,
+                "short_bytes": 0, "why": ""}
+    monkeypatch.setattr("knurlogic.interfaces.serve.launch_fit", fake)
+    monkeypatch.setattr(mcp, "fit", lambda **k: pytest.fail("fit hid it"))
+    r = mcp.load(artifact=str(d))
+    assert r["loaded"] is False and r["tight"] is True and not spawned
+    assert r["no_anyway"] is True and r["mtp_off_fits"] is True
+    assert "108.5 GiB" in r["reason"] and "fits" in r["reason"]
+    assert "draft=false" in r["text"]
+    # asked with MTP off already, the same numbers are a plain refusal
+    calls.clear()
+    assert mcp._mtp_off_doc(str(d), {}, "default", False) is None and not calls
