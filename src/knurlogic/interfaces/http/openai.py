@@ -156,9 +156,8 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
         from knurlogic.engine.vision import request as vreq
         if vreq.has_images(msgs):
             if not has_vision():
-                raise ApiError(400, "this request has images but the "
-                                    "served model has no vision; send text "
-                                    "only", param="messages")
+                from knurlogic.engine.serve.vision import no_vision_why
+                raise ApiError(400, no_vision_why(), param="messages")
         kwargs = body.get("chat_template_kwargs")
         if translate is not None:
             from knurlogic.engine.serve import thinking

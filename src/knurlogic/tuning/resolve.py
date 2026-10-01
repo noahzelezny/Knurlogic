@@ -123,7 +123,7 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 #: whether or not an artifact's bundled runtime reads them.
 ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp",
                    "mtp_dynamic", "kv_bits", "kv_kernel", "cross_chip",
-                   "long_context", "preset")
+                   "long_context", "preset", "vision")
 
 
 def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
@@ -273,7 +273,7 @@ def prefill_chunk_by_room(artifact: Artifact, headroom, working_set_bytes: int,
 def resolve(artifact: Artifact, budget, profile: str | None = None,
             tune: str = "default", store_bytes: int | None = None,
             holds_bytes: int | None = None, kv_bits=None,
-            long_context=None):
+            long_context=None, vision: bool = True):
     """Resolve every knob for this artifact against a budget.
 
     `budget` is either a byte count -- one box, and the return is a
@@ -300,6 +300,10 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
     `long_context`: KNURLOGIC_LONG_CONTEXT ('off' | 'yarn'), which moves
     the context cap to the YaRN window and is checked against the room the
     KV of that context needs (`long_context_room`).
+
+    `vision`: KNURLOGIC_VISION. Off, a vision rung holds no tower, image
+    store or image KV: none is counted, and a whole artifact's tower bytes
+    are taken out of what the box holds (`vision_freed_bytes`).
     """
     tune = S.preset_of(tune)
     if profile is not None and profile not in S.RUNTIME_PROFILES:
@@ -308,16 +312,30 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
     if isinstance(budget, (int, float)):
         holds = artifact.bytes_on_disk if holds_bytes is None \
             else int(holds_bytes)
-        return _resolve_one(artifact, int(budget), holds,
-                            profile, tune, store_bytes=store_bytes,
-                            kv_bits=kv_bits, long_context=long_context)
+        r = _resolve_one(artifact, int(budget),
+                         holds - (_vision_off_tower(artifact)
+                                  if not vision and holds_bytes is None
+                                  else 0),
+                         profile, tune, store_bytes=store_bytes,
+                         vision=vision, kv_bits=kv_bits,
+                         long_context=long_context)
+        if vision_budget(artifact) is not None:
+            # a launch setting of a vision rung only (Settings -> Models)
+            emit(r, artifact, "vision", "on" if vision else "off")
+        if not vision and vision_budget(artifact) is not None:
+            r.notes.append(
+                f"vision off (KNURLOGIC_VISION=off): "
+                f"{vision_freed_bytes(artifact, kv_bits) / GIB:.2f} GiB of "
+                f"tower, image store and image KV not held")
+        return r
     return resolve_cluster(artifact, budget, profile, tune,
-                           store_bytes=store_bytes)
+                           store_bytes=store_bytes, vision=vision)
 
 
 def resolve_cluster(artifact: Artifact, budget, profile: str | None = None,
                     tune: str = "default",
-                    store_bytes: int | None = None) -> ClusterResolution:
+                    store_bytes: int | None = None,
+                    vision: bool = True) -> ClusterResolution:
     """Resolve per node, and say what is only true of the whole cluster."""
     nodes = _as_nodes(budget)
     if not nodes:
@@ -331,7 +349,7 @@ def resolve_cluster(artifact: Artifact, budget, profile: str | None = None,
         # the request enters -- the first node -- not spread with the shard.
         r = _resolve_one(artifact, n.working_set_bytes, shares[n.name],
                          profile, tune, store_bytes=store_bytes,
-                         vision=(i == 0))
+                         vision=(i == 0 and vision))
         if n.holds_bytes is None:
             r.notes.append(
                 f"shard size ASSUMED {shares[n.name]/GIB:.1f} GiB "
@@ -532,8 +550,36 @@ def rank_margin(working_set_bytes: int, reserve: dict | None = None) -> int:
         + int(reserve.get("kv_bytes") or 0)
 
 
+def _vision_off_tower(artifact: Artifact) -> int:
+    """The tower bytes inside the artifact's size: what vision off takes
+    out of the weights (the text load never reads them; `vision.bind`
+    does). 0 for an artifact with no vision_config."""
+    if vision_budget(artifact) is None:
+        return 0
+    tower, outside, _ = _tower_bytes(artifact)
+    return max(int(tower) - int(outside), 0)
+
+
+def vision_freed_bytes(artifact: Artifact, kv_bits=None) -> int:
+    """What KNURLOGIC_VISION=off frees on one machine: the tower, the image
+    store's bound and the image KV allowance. 0 without a vision_config."""
+    vb = vision_budget(artifact, kv_bits=kv_bits)
+    if vb is None:
+        return 0
+    return int(vb["tower_bytes"] + vb["store_bytes"]
+               + vb["kv_allowance_bytes"])
+
+
+def mtp_head_bytes(artifact: Artifact) -> int:
+    """The packed MTP head's bytes (its mtp-head*.safetensors sidecars):
+    what MTP off frees. 0 without one."""
+    return sum(f.stat().st_size for f in artifact.path.glob(
+        "mtp-head*.safetensors") if f.is_file())
+
+
 def single_fit_check(artifact: Artifact, budget_bytes: int,
-                     draft: bool = True, kv_bits=None) -> dict:
+                     draft: bool = True, kv_bits=None,
+                     vision: bool = True) -> dict:
     """How a single-machine load sits in `budget_bytes`:
     {"state": "fits" | "cannot", "why": str, "head_bytes"}.
 
@@ -548,34 +594,49 @@ def single_fit_check(artifact: Artifact, budget_bytes: int,
     out: dict = {"state": "fits", "why": "", "head_bytes": 0}
     if ws <= 0:
         return out
-    head = sum(f.stat().st_size for f in artifact.path.glob(
-        "mtp-head*.safetensors") if f.is_file())
+    head = mtp_head_bytes(artifact)
     vb = vision_budget(artifact, kv_bits=kv_bits)
-    vision = int((vb or {}).get("extra_bytes") or 0)
-    base = int(artifact.bytes_on_disk) + vision
-    need = base - (0 if draft else head)
+    extra = int((vb or {}).get("extra_bytes") or 0)
+    freed = vision_freed_bytes(artifact, kv_bits)
+    base = int(artifact.bytes_on_disk) + extra
+    need = base - (0 if draft else head) - (0 if vision else freed)
     floor = step_margin(ws)
     if need + floor <= ws:
         return out
     out["head_bytes"] = head if draft else 0
+    out["vision_bytes"] = freed if vision else 0
     out["state"] = "cannot"
     out["why"] = (
         f"{artifact.path.name} needs {need / GIB:.1f} GiB (weights"
         + (f" incl. the {head / GIB:.1f} GiB MTP head" if draft and head
            else "")
-        + (f", {vision / GIB:.1f} GiB vision" if vision else "")
+        + (f", {freed / GIB:.1f} GiB vision" if vision and freed else "")
         + f") plus {floor / GIB:.1f} GiB step margin; the budget is "
         f"{ws / GIB:.1f} GiB")
-    if draft and head and base - head + floor <= ws:
+    # what turning parts off would free, smallest change first
+    mtp_off = draft and head and need - head + floor <= ws
+    vis_off = vision and freed and need - freed + floor <= ws
+    both = (draft and head and vision and freed
+            and need - head - freed + floor <= ws)
+    if mtp_off and vis_off:
+        out["why"] += ("; turn MTP off (Settings \u2192 Presets) or vision "
+                       "off (VISION in Load model) to fit")
+    elif mtp_off:
         out["why"] += "; turn MTP off (Settings \u2192 Presets) to fit"
+    elif vis_off:
+        out["why"] += ("; turn vision off (VISION in Load model, "
+                       "KNURLOGIC_VISION=off) to fit")
+    elif both:
+        out["why"] += ("; turn MTP off (Settings \u2192 Presets) and vision "
+                       "off (VISION in Load model) to fit")
     return out
 
 
 def single_fit(artifact: Artifact, budget_bytes: int, draft: bool = True,
-               kv_bits=None) -> str:
+               kv_bits=None, vision: bool = True) -> str:
     """"" unless a single-machine load cannot fit at all (the weights and the
     minimum step margin), else why not: see `single_fit_check`."""
-    c = single_fit_check(artifact, budget_bytes, draft, kv_bits)
+    c = single_fit_check(artifact, budget_bytes, draft, kv_bits, vision)
     return c["why"] if c["state"] == "cannot" else ""
 
 
@@ -1508,7 +1569,7 @@ def pipeline_layer_bytes(artifact: Artifact) -> tuple:
     return layer_bytes_of(sizes, L)
 
 
-def pipeline_leader_bytes(artifact: Artifact) -> int:
+def pipeline_leader_bytes(artifact: Artifact, vision: bool = True) -> int:
     """What rank 0 of a pipeline holds and no other rank does: the MTP
     head (it drafts where the last layers are; the followers only run the
     verify rows) and the vision tower (it encodes at tokenize and ships the
@@ -1533,4 +1594,4 @@ def pipeline_leader_bytes(artifact: Artifact) -> int:
             if f.name.startswith("mtp") or k.split(".")[0] == "mtp":
                 a, b = v.get("data_offsets", (0, 0))
                 total += int(b) - int(a)
-    return total + _tower_bytes(artifact)[0]
+    return total + (_tower_bytes(artifact)[0] if vision else 0)

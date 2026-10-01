@@ -117,10 +117,12 @@
         </div>
         <div id="lmwhere"></div>
         <div id="mtpopts" hidden>
-          <div class="optrow"><div class="optlab">MTP</div>
+          <div class="optrow" id="mtprow"><div class="optlab" id="mtplab">MTP</div>
             <span class="seg" data-k="mtp" title="multi-token prediction: draft with the head the model ships (KNURLOGIC_MTP)"><button data-v="on" aria-pressed="true">On</button><button data-v="off" aria-pressed="false">Off</button></span></div>
           <div class="optrow" id="mtpdynrow"><div class="optlab">Dynamic MTP</div>
             <span class="seg" data-k="dyn" title="switch between drafting and plain steps by their measured cost (KNURLOGIC_MTP_DYNAMIC)"><button data-v="on" aria-pressed="true">On</button><button data-v="off" aria-pressed="false">Off</button></span></div>
+          <div class="optrow" id="visrow"><div class="optlab" id="vislab">Vision</div>
+            <span class="seg" data-k="vis" title="load the vision tower, its image store and image KV (KNURLOGIC_VISION); off frees that memory and images get a 400"><button data-v="on" aria-pressed="true">On</button><button data-v="off" aria-pressed="false">Off</button></span></div>
         </div>
         <div id="pickinfo"></div>
         <button class="go" id="launch" style="width:100%;margin-top:10px">

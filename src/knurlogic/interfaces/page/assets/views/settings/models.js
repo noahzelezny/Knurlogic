@@ -42,7 +42,8 @@ function modelHTML(b, r, doc, runs){
 // the model's own settings first, then the preset's rows in the Knurlogic
 // tab's order, then anything else
 const ORDER=['KNURLOGIC_CONTEXT_LENGTH','KNURLOGIC_PRESET','KNURLOGIC_PREFILL_CHUNK',
-  'KNURLOGIC_CACHE_LIMIT_GB','KNURLOGIC_MTP','KNURLOGIC_MTP_DYNAMIC','KNURLOGIC_KV_BITS'];
+  'KNURLOGIC_CACHE_LIMIT_GB','KNURLOGIC_MTP','KNURLOGIC_MTP_DYNAMIC','KNURLOGIC_VISION',
+  'KNURLOGIC_KV_BITS'];
 const rank=k=>{ const i=ORDER.indexOf(k.name); return i<0?ORDER.length:i };
 const presetTitle=n=>n==='default'?'Default':n.charAt(0).toUpperCase()+n.slice(1);
 // the VQ runtime's own knobs: knurlogic ships their best values, not rows
