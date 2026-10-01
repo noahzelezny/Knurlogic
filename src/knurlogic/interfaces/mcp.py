@@ -645,11 +645,8 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
     off = _mtp_off_doc(artifact, dict(sets or {}), tune, bool(draft))
     if off:
         return off
-    f = fit(artifact=artifact, draft=bool(draft))
-    if not f["fits"]:
-        return {"loaded": False, "refused": "will not fit",
-                "detail": f,
-                "note": "no flag overrides this; it is arithmetic."}
+    # the launch's own check first: its refusal says the numbers, which
+    # fit()'s verdict does not
     try:
         chk = launch_fit(Artifact.load(artifact), dict(sets or {}), tune,
                          bool(draft))
@@ -658,6 +655,11 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
     if chk["state"] == "cannot":
         return {"loaded": False, "refused": "will not fit",
                 "detail": chk["why"],
+                "note": "no flag overrides this; it is arithmetic."}
+    f = fit(artifact=artifact, draft=bool(draft))
+    if not f["fits"]:
+        return {"loaded": False, "refused": "will not fit",
+                "detail": f,
                 "note": "no flag overrides this; it is arithmetic."}
     if chk["state"] == "tight" and not anyway:
         doc = _tight_doc(chk) or {}
