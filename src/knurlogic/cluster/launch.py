@@ -1507,6 +1507,38 @@ RDMA_N_NOTE = "RDMA across more than two Macs is experimental and untested"
 CABLE_RX = re.compile(r"(\d{1,3}\.\d{1,3}\.\d{1,3})(?:\.(?:\d{1,3}|x|0/24))?")
 
 
+def refresh_memory(infos: list, post, wait_s: float = EXIT_WAIT_S,
+                   sleep=time.sleep) -> bool:
+    """Re-read every machine's memory now (a Survey to each peer, this
+    machine directly), first waiting up to `wait_s` for ranks still exiting
+    on any of them. Updates `infos` in place. -> True when any machine's
+    available memory changed (a second placement may now differ)."""
+    end = time.time() + wait_s
+    changed = False
+    while True:
+        busy = False
+        for m in infos:
+            if m.get("page") is None:
+                av, going = available_now(), len(_exiting(J.registry()))
+            else:
+                try:
+                    doc = post(m["page"], "Survey", {})
+                except (*NET_ERRORS, transport.P.ProtocolError):
+                    continue
+                if not isinstance(doc, dict):
+                    continue
+                av = int(doc.get("available_bytes") or 0)
+                going = int(doc.get("exiting") or 0)
+            if going:
+                busy = True
+            if av and av != int(m.get("available_bytes") or 0):
+                m["available_bytes"] = av
+                changed = True
+        if not busy or time.time() >= end:
+            return changed
+        sleep(1.0)
+
+
 def launch(req: dict, *, me: dict, peers: list, local_info: dict,
            ui_port: int, serve_port: int, post=None, follow=None,
            tried: tuple = (), moved: dict | None = None,
@@ -1613,9 +1645,20 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         return {"error": f"could not read the model's shape: "
                          f"{type(e).__name__}: {e}"}
     from knurlogic.tuning.resolve import TightFit
-    try:
-        plan = placement(infos, shape, split, req.get("order"),
+
+    def plan_once():
+        return placement(infos, shape, split, req.get("order"),
                          **({"anyway": True} if req.get("anyway") else {}))
+    try:
+        try:
+            plan = plan_once()
+        except (ValueError, TightFit):
+            # a peer's memory in its last status is stale right after an
+            # unload: wait out any rank still exiting, read every machine's
+            # memory fresh, and place once more before refusing
+            if not refresh_memory(infos, post):
+                raise
+            plan = plan_once()
     except TightFit as e:
         return {"loaded": False, "tight": True,
                 "short_gib": round(e.short_bytes / GIB, 1),
