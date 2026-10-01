@@ -131,8 +131,11 @@ nav a:hover{color:var(--acc)}
 #resident .machine:first-child{margin-top:0}
 #resident .peererr{color:var(--faint);margin-bottom:6px}
 .card .dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ok)}
-.card .dot.gearmark{width:14px;height:14px;border-radius:0;background:none;color:var(--ok)}
-.card .gearmark svg{width:14px;height:14px;display:block;animation:gear 3s linear infinite}
+/* the box turns, not the svg: an svg's own transform origin is its viewBox
+   corner in some engines, which swings the gear around instead of in place */
+.card .dot.gearmark{width:14px;height:14px;border-radius:0;background:none;color:var(--ok);
+  display:block;transform-origin:50% 50%;will-change:transform;animation:gear 3s linear infinite}
+.card .gearmark svg{width:14px;height:14px;display:block}
 .card.failed{border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
 .card.failed .dot{background:var(--bad)}
 .card.failed .rt{color:var(--bad);letter-spacing:.08em}
