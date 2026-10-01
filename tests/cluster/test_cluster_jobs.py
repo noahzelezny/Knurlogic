@@ -599,6 +599,9 @@ def test_launch_shows_placement_and_lists_the_job_once(two_pages):
     docs = C.jobs_document()
     assert [d["job"] for d in docs] == [p.job]
     assert docs[0]["machines"] == ["A", "B"] and docs[0]["port"] == p.port
+    # the page merges its launch card with the job card by job id, else by
+    # identity -- never by folder name, which may differ per machine
+    assert docs[0]["identity"] and docs[0]["identity"] == p.out["starting"]
     doc = page_server.with_jobs({"resident": [
         {"runtime": "knurlogic", "where": f"http://127.0.0.1:{p.port}"}]})
     assert doc["resident"][0]["cluster"]["machines"] == ["A", "B"]

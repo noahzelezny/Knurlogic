@@ -1,6 +1,6 @@
 import {$, esc, gb} from '../format.js';
 import {cancelLaunch, dismissLaunch, failedLaunches,
-  followLaunches, loadDownloads, loadingLaunches} from './picker.js';
+  followLaunches, loadDownloads, loadingLaunches, sameModel} from './picker.js';
 
 // --- what is actually in memory, whoever put it there ---------------------
 // Every runtime's models (ollama's, others') and ours in one list. A machine has one pool
@@ -187,10 +187,12 @@ async function loadResident(){
     if(seen.has(inst)) return false;
     seen.add(inst); return true });
   const busy=loadingLaunches();
+  // a cluster job's row is its launch's by job id -- the row's folder name
+  // is rank 0's and may differ from the one picked -- else by identity/name
   const mine=([r])=>busy.some(L=>r.runtime==='knurlogic'
-    && (r.name===String(L.name).split('/').pop())
-    && (r.cluster ? (L.job ? r.cluster.job===L.job : L.cluster)
-        : r.state!=='loaded' && !L.cluster && L.port
+    && (r.cluster ? (L.job ? r.cluster.job===L.job : L.cluster&&sameModel(r, L))
+        : r.name===String(L.name).split('/').pop()
+          && r.state!=='loaded' && !L.cluster && L.port
           && (r.where||'').replace(/\/$/,'').endsWith(':'+L.port)));
   const cards=shown.filter(x=>!mine(x)).map(([r,i])=>card(r,i));
   const loading=busy.map(L=>{
