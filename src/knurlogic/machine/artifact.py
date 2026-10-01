@@ -369,11 +369,19 @@ def resolve_identity(ident: str | None, paths=None, name: str = "") -> str | Non
     by path."""
     if not isinstance(ident, str) or not ident or len(ident) > 64:
         return None
+    name = Path(str(name or "")).name
+    hits: list = []
     if paths is None:
         from knurlogic.machine import discover
-        paths = [f.path for f in discover.find()]
-    name = Path(str(name or "")).name
-    hits = sorted({str(p) for p in paths if identity(p) == ident})
+        if name:
+            # the requester knows the name: look there first, confirm the
+            # identity, and scan every store only when that misses
+            hits = sorted({str(f.path) for f in discover.find_named(name)
+                           if identity(f.path) == ident})
+        if not hits:
+            paths = [f.path for f in discover.find()]
+    if not hits:
+        hits = sorted({str(p) for p in paths if identity(p) == ident})
     if not hits:
         return None
     if len(hits) == 1:

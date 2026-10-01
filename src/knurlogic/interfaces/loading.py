@@ -59,6 +59,14 @@ def resolve_name(model: str, served: str | None) -> str:
         want = str(Path(model).expanduser().resolve())
     except (OSError, RuntimeError):
         want = model
+    from knurlogic.machine import discover
+    try:
+        direct = [f for f in discover.find_named(model)
+                  if f.servable and f.format == "mlx"]
+    except (OSError, ValueError, KeyError, AttributeError):
+        direct = []
+    if direct:
+        return str(direct[0].path)
     for f in known_artifacts():
         p = str(Path(f.path).resolve())
         if model in (f.name, Path(f.path).name) or want == p:
