@@ -89,8 +89,9 @@ DECODE_CHUNK_HEADROOM_DIVISOR = 8
 #   4096 1173.2/1166.5/1133.8
 # So width is worth ~1.8x on the 35B-A3B up to 2048 and nothing past it;
 # ~30% on the 397B VQ for a 9-23x larger transient -- 4096 aborted Metal
-# with one agent at 25k tokens on a box with ~14 GiB left, which is what
-# the room rule keeps at 512.
+# with one agent at 25k tokens on a box with ~14 GiB left. A chunk is
+# now allowed only when its predicted transient fits the memory reserved
+# for transients (tuning/resolve.prefill_chunk_by_room).
 PREFILL_CHUNK_DEFAULT = 512
 PREFILL_CHUNK_LOW_HEADROOM = 512
 #: The widths the room rule may choose from (and the knob's native range).
