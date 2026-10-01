@@ -1,0 +1,14 @@
+#!/bin/sh
+# Strips AI attribution from every commit message: no Co-Authored-By
+# trailer naming Claude or Anthropic, no "Generated with Claude Code".
+# Agents are told to add one by their harness; this repo never takes it.
+# Installed by: git config core.hooksPath scripts/git-hooks
+f="$1"
+if grep -qiE '^co-authored-by:.*(claude|anthropic)|generated with \[?claude' "$f"; then
+    grep -viE '^co-authored-by:.*(claude|anthropic)|generated with \[?claude' "$f" > "$f.tmp"
+    # drop the blank lines the trailer leaves at the end
+    awk '{l[NR]=$0} END{n=NR; while(n>0 && l[n] ~ /^[[:space:]]*$/) n--; for(i=1;i<=n;i++) print l[i]}' "$f.tmp" > "$f"
+    rm -f "$f.tmp"
+    echo "commit-msg: removed AI attribution from the message" >&2
+fi
+exit 0
