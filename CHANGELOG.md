@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.1.1
+
+Bug fixes from the first day of real use, and simpler launch decisions.
+
+Launching
+* A launch either fits or is refused with the numbers (weights, MTP head,
+  vision, margin, budget). When turning MTP off would make it fit, the page
+  offers "Turn MTP off and launch"; an agent is told to retry with
+  `draft=false`.
+* Vision can be turned off at launch, like MTP, and the page shows what
+  each costs (e.g. "MTP 6.1 GiB", "Vision 1.5 GiB"). Off frees that memory
+  for headroom and a wider prompt chunk; an image sent to it is refused
+  with a clear message.
+* A model is found by its own folder in each store instead of a scan of
+  every store: launching on a Mac whose models are on a network share went
+  from about a minute to seconds.
+* The model picker lists models in under a second after the page starts
+  (was up to 40 s): each model's identity is remembered on disk and only
+  recomputed when its files change.
+* Unloading waits for the server to exit, and a launch re-reads every
+  machine's memory first, so a load right after an unload is no longer
+  refused for memory still being freed.
+* A model reads "ready" only once its weights are in memory, and
+  `/v1/models` carries `status: "loading"` until then, so a client timing
+  its first request no longer times the load.
+
+Speed
+* Prompts are processed in the widest chunk the model's memory reserve
+  allows (was often 512): prefill up to ~2x faster on large models, on one
+  Mac and across a cluster (a cluster uses the smallest rank's chunk).
+* Responses report the prompt chunk and how many prompt tokens came from
+  the cache versus were computed (`usage.knurlogic.timing`).
+
+Clusters
+* A pipeline follower that sat idle no longer reads as over its memory
+  limit and refuses every prompt.
+* With one Thunderbolt cable, a cluster launch with no link chosen uses
+  TCP over it; with several, it names them and asks.
+* A cluster launch shows one card, even when the Macs hold the model under
+  different folder names, and every Mac loads the folder that was picked.
+* Each rank prints which runtime it runs (stock mlx-lm and its version, or
+  the model's own `model.py`).
+
+Memory display
+* "Used" counts what macOS really cannot hand out (inactive anonymous
+  pages are not free); swap is shown when present.
+* The legend's catch-all row is "other".
+* The memory map refreshes every 3 s around loads and requests.
+
+Page
+* A model answering a request shows a turning gear on its card.
+* The memory diagram fits narrow windows and browser zoom without
+  crushing; the context counter resets on a new chat.
+
 ## 0.1.0
 
 First public release (alpha).
