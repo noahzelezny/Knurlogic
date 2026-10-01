@@ -59,6 +59,11 @@ class ModelHost:
         self.draft = draft
         self.image_store_bytes = image_store_bytes
         self.executes_artifact_code = executes_artifact_code
+        #: () -> None, run on the scheduler's thread between the weights
+        #: loading and `ready`: one tiny generation through the real
+        #: request path (Scheduler._warm_up), so the first user request
+        #: does not pay for compiling kernels and filling buffers
+        self.warm = None
         self.state = "empty"
         self.path: str | None = None
         self.error = ""
@@ -79,7 +84,7 @@ class ModelHost:
         """Block until ready (True) or failed/empty (False) or timeout."""
         end = None if timeout is None else time.time() + timeout
         with self._ready:
-            while self.state in ("loading", "unloading"):
+            while self.state in ("loading", "warming", "unloading"):
                 left = None if end is None else end - time.time()
                 if left is not None and left <= 0:
                     return False
@@ -151,8 +156,27 @@ class ModelHost:
             if not isinstance(e, Exception):
                 raise
             return
+        self._warm_up()
         self.loaded_at = time.time()
         self._set("ready")
+
+    def _warm_up(self) -> None:
+        """Run `warm` once, in state "warming" (the page shows it so);
+        KNURLOGIC_WARMUP=off skips it. A warm-up that fails is logged and
+        the model is served anyway: it only makes the first request fast."""
+        import os
+        if self.warm is None or os.environ.get(
+                "KNURLOGIC_WARMUP", "").strip().lower() in (
+                "off", "0", "no", "false"):
+            return
+        self._set("warming")
+        t0 = time.monotonic()
+        try:
+            self.warm()
+        except Exception:
+            logger.exception("warm-up failed; serving without it")
+        else:
+            logger.info("warm-up done in %.1fs", time.monotonic() - t0)
 
     def unload(self) -> None:
         had = self.model is not None

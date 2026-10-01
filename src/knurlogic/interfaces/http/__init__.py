@@ -35,14 +35,14 @@ def switch(model: str, *, force: bool = False, wait: bool = True,
     host = sched.host
     st = host.status()
     if not (model in ("", Path(host.path or "").name, host.path)
-            and st["state"] in ("ready", "loading")):
+            and st["state"] in ("ready", "loading", "warming")):
         freed = int(st.get("memory_bytes") or 0)
         a = prepare(model, served=host.path, freed_bytes=freed)
         # compared resolved: the served model named through a symlink or
         # another store's path is the same model, not a switch
         same = host.path and Path(a.path).resolve() == \
             Path(host.path).resolve()
-        if not same or st["state"] not in ("ready", "loading"):
+        if not same or st["state"] not in ("ready", "loading", "warming"):
             cmd = sched.load(str(a.path),
                              executes_artifact_code=bool(a.model_file),
                              force=force)

@@ -271,6 +271,8 @@ class Scheduler:
                              "the prompt cache byte cap")
         self.tensor = tensor
         self.host = host
+        if hasattr(host, "warm"):
+            host.warm = self._warm_up
         self.completion_batch_size = completion_batch_size
         self.prefill_step_size = prefill_step_size
         self.cache_bytes = prompt_cache_bytes
@@ -577,6 +579,22 @@ class Scheduler:
                     self._waiting.clear()
             finally:
                 c.done.set()
+
+    def _warm_up(self) -> None:
+        """One tiny generation through the real path -- the same insert and
+        step a request takes, on every rank of a ring (the other ranks
+        follow rank 0's admission) -- run on this thread while the host is
+        "warming", so the first user request finds kernels compiled and
+        buffers filled. The answer is discarded."""
+        job = Job(request=P.ChatRequest(request_type="text",
+                                        prompt="Hello, world."),
+                  args=P.PromptArgs(), max_tokens=2,
+                  sampling={"temp": 0.0}, submitted=time.perf_counter())
+        self._insert(job)
+        for _ in range(16):         # 2 tokens: a few steps; never unbounded
+            if not self._rows:
+                break
+            self._step()
 
     def _take_jobs(self) -> None:
         while True:
