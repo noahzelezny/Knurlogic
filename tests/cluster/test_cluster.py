@@ -35,7 +35,7 @@ def test_cluster_resolves_each_node_against_its_own_box():
     c = resolve(_art(), [Node("big", 128 * GIB, holds_bytes=90 * GIB),
                          Node("small", 64 * GIB, holds_bytes=62 * GIB)])
     assert set(c.nodes) == {"big", "small"}
-    # 38 GiB of headroom against 2 GiB: the tight box gets its PER-NODE
+    # 38 GiB of headroom against 2 GiB: the low-headroom box gets its PER-NODE
     # memory knobs resolved down and the roomy one keeps its own.
     assert int(c.nodes["small"].env["VQ_DECODE_CHUNK"]) < \
         int(c.nodes["big"].env["VQ_DECODE_CHUNK"])
@@ -47,7 +47,7 @@ def test_the_prompt_chunk_is_one_value_on_every_rank():
     pipeline ring (GLM-5.3 at 2048 on one rank, 4096 on the other). The tightest
     node's chunk is everyone's, and the big node is told why. Every rank is
     512 by default, so the ring rule is exercised where widths can differ:
-    tune=default on a measured-wide family, one roomy rank and one tight."""
+    tune=default on a measured-wide family, one roomy rank and one low on headroom."""
     c = resolve(_art(), [Node("big", 128 * GIB, holds_bytes=90 * GIB),
                          Node("small", 64 * GIB, holds_bytes=62 * GIB)])
     assert c.nodes["big"].env["KNURLOGIC_PREFILL_CHUNK"] == \
@@ -82,7 +82,7 @@ def test_declared_placement_beats_the_assumption():
     assert not any("ASSUMED" in n for n in c.nodes["a"].notes)
     assert int(c.nodes["a"].env["VQ_DECODE_CHUNK"]) < \
         int(c.nodes["b"].env["VQ_DECODE_CHUNK"]), (
-        "the node holding 94 of 100 GiB is the tight one, and declared "
+        "the node holding 94 of 100 GiB is the low-headroom one, and declared "
         "placement is what makes that visible")
 
 
