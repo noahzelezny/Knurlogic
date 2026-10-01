@@ -45,7 +45,7 @@ def mesh_infos(n, missing=()):
 
 def n_launch(monkeypatch, infos, link, split="pipeline", req=None):
     monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True: SHAPE)
     monkeypatch.setattr(C, "BAD_CABLES", {})
     monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
     monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
@@ -136,7 +136,7 @@ def _port_launch(monkeypatch, prep, req=None):
     from knurlogic.machine import servers
     monkeypatch.setattr(servers, "free_port", lambda start, taken=(): start)
     monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s: SHAPE)
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True: SHAPE)
     monkeypatch.setattr(C, "BAD_CABLES", {})
     monkeypatch.setattr(C, "prepare", prep)
     monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))

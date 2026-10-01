@@ -195,7 +195,7 @@ def page_a(tmp_path, monkeypatch, owned_procs):
     monkeypatch.setitem(identity._ID, "name", "A")
     monkeypatch.setattr(C, "_resolve",
                         lambda i, name="": "/fake/artifact" if i == "abc" else None)
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s: T.SHAPE)
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True: T.SHAPE)
     info_a = T.info("Apple M4 Max", "127.0.0.1")
     info_b = T.info("Apple M3 Ultra", "127.0.0.1")
     monkeypatch.setattr(C, "_local_info", lambda: info_a)

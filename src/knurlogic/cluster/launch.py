@@ -541,13 +541,6 @@ def shape_of(path: str, world: int, split: str,
             "refusals": R.tensor_refusals(a.raw_config, world)}
 
 
-def _shape(fn, path, world: int, split: str, vision: bool) -> dict:
-    """`shape_of` (or a stand-in for it), told about vision only when it
-    is off: on is its default."""
-    return fn(path, world, split) if vision else \
-        fn(path, world, split, vision=False)
-
-
 # ------------------------------------------------------------ one page
 
 def _resolve(identity: str | None, name: str = ""):
@@ -790,8 +783,8 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     rank, world = spec["rank"], spec["world"]
     try:
         from knurlogic.tuning.settings import vision_of
-        sh = _shape(shape or shape_of, path, world, spec["split"],
-                    vision_of(ok_sets))
+        sh = (shape or shape_of)(path, world, spec["split"],
+                                 vision=vision_of(ok_sets))
     except Exception as e:  # a failed read is reported as the launch's refusal
         sh = {"refusals": [f"could not read the artifact: "
                            f"{type(e).__name__}: {e}"]}
@@ -1690,7 +1683,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             return {"refused": f"nothing started: {why}"}
     try:
         if path:
-            shape = _shape(shape_of, path, world, split, vision_of(sets))
+            shape = shape_of(path, world, split, vision=vision_of(sets))
         else:
             first = next(m for m in infos if m["page"])
             shape = post(first["page"], "Shape",
