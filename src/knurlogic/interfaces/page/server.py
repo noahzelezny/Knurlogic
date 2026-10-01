@@ -987,7 +987,7 @@ def with_jobs(doc: dict) -> dict:
         if u.port and r.get("runtime") == "knurlogic" and \
                 u.hostname in ("127.0.0.1", "localhost", None):
             rec = recovery.for_port(u.port) or recovery.served_view(
-                u.port, r.get("state") not in ("loading",))
+                u.port, r.get("state") not in ("loading", "warming"))
         if j and j.get("recovery"):
             rec = j["recovery"]
         r = dict(r, recovery=rec)
@@ -1070,6 +1070,8 @@ def load_progress(doc: dict) -> list:
             why = refusal_line("\n".join(lines[-60:]))
             if why:
                 e["refused"] = why
+        elif r is not None and r.get("state") == "warming":
+            e["phase"] = "warming"       # weights in; the first-request warm-up
         elif r is None or r.get("state") == "loading":
             e["phase"] = ("stalled" if quiet is not None
                           and quiet > STALL_QUIET_S else "loading")
