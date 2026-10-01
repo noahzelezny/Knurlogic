@@ -177,7 +177,7 @@ async function tick(){
     }
     const used=Number.isFinite(mm.used_bytes)?mm.used_bytes:(mm.seen_bytes||0);
     const named=by.reduce((x,[,v])=>x+v,0);
-    out.push(['everything else', Math.max(used-named,0), 'var(--faint)', '']);
+    out.push(['other', Math.max(used-named,0), 'var(--faint)', '']);
     const tot=out.reduce((x,s)=>x+s[1],0);
     // Footprints can overrun the OS's own used figure; scale to fit rather
     // than draw past the top of the machine.
