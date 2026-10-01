@@ -617,3 +617,20 @@ def test_the_context_length_caps_a_request_live(sched, monkeypatch):
     monkeypatch.setenv("KNURLOGIC_CONTEXT_LENGTH", str(len(p) + 3))
     _text, usage = _collect(sched.submit(_job(p, max_tokens=12)))
     assert usage["completion_tokens"] <= 3
+
+
+def test_timing_prefill_rate_is_compute_only_and_floored():
+    from types import SimpleNamespace as NS
+
+    from knurlogic.engine.runtime.scheduler import _timing
+    job = NS(submitted=0.0)
+    # waited 5 s for its turn, then 1000 fresh tokens in 2 s of compute
+    row = NS(job=job, admitted=1.0, began=6.0, first=8.0)
+    t = _timing(row, 9.0, 10, 1000)
+    assert t["prefill_tok_s"] == 500.0
+    assert t["queue_s"] == 1.0
+    # too few fresh tokens, or too short a time: no rate is sent
+    assert "prefill_tok_s" not in _timing(row, 9.0, 10, 255)
+    short = NS(job=job, admitted=1.0, began=1.0, first=1.04)
+    assert "prefill_tok_s" not in _timing(short, 2.0, 10, 1000)
+    assert "prefill_tok_s" not in _timing(row, 9.0, 10, None)
