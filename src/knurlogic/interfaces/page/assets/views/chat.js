@@ -548,7 +548,7 @@ function replyMetHTML(m){
                                            :`${(m.ttft_ms/1000).toFixed(2)} s`);
   // a short turn (under 256 new tokens) is too thin to time: a dash, not a gap
   if(m.ttft_ms) bit('Prefill', m.prefill_tps ? `${m.prefill_tps<10
-    ? m.prefill_tps.toFixed(1) : Math.round(m.prefill_tps)} tok/s` : '–');
+    ? m.prefill_tps.toFixed(1) : Math.round(m.prefill_tps)} tok/s` : (m.server?.prefill==='cached' ? 'cached' : '–'));
   if(m.decode_tps) bit('Decode', `${m.decode_tps.toFixed(1)} tok/s`);
   if(!bits.length) return '';
   return `<div class="rmet" title="${m.server?'measured by the server':
