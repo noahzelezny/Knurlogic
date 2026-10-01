@@ -2,9 +2,14 @@
 launch, a cluster job's instance id is simply its job id. `instance` should
 appear on every resident knurlogic row it is known for, dedupe the same
 model reported by two pages, and let `unload` name it directly."""
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
-from test_mcp_cluster import JOB, REQS, STATUS, page, residency  # noqa: F401
+# the MCP cluster fixtures live beside the cluster tests
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cluster"))
+
+from test_mcp_cluster import JOB, REQS, STATUS, page, residency  # noqa: E402, F401
 
 from knurlogic.interfaces import mcp
 from knurlogic.interfaces.page import server as page_server
