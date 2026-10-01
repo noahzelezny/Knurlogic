@@ -46,9 +46,9 @@ def test_lean_bounds_memory_tighter_than_default():
     default = resolve(a, 96 * GIB, tune="default")
     # the expert chunk is auto for every preset: lean never changes it
     assert lean.env["VQ_DECODE_CHUNK"] == default.env["VQ_DECODE_CHUNK"]
-    # the prompt chunk is already the narrowest by default; lean never widens
+    # lean never widens the prompt chunk past the default's
     assert int(lean.env["KNURLOGIC_PREFILL_CHUNK"]) <= int(
-        default.env["KNURLOGIC_PREFILL_CHUNK"]) == S.PREFILL_CHUNK_TIGHT
+        default.env["KNURLOGIC_PREFILL_CHUNK"])
     assert float(lean.env["VQ_CACHE_LIMIT_GB"]) < float(
         default.env["VQ_CACHE_LIMIT_GB"])
 
@@ -57,9 +57,9 @@ def test_default_on_a_tight_box_degrades_and_says_why():
     """The default cannot spend headroom that is not there. The difference between
     a knob and a wish is whether it tells you it did not happen."""
     a = _art(model_type="qwen3_5")                 # measured wider than 512
-    r = resolve(a, 74 * GIB, tune="default")          # 4 GiB of headroom
+    r = resolve(a, 71 * GIB, tune="default")   # ~1 GiB: under 1024's ~1.9
     assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_TIGHT)
-    assert any(n.startswith("prompt chunk 512") and "room" in n
+    assert any(n.startswith("prompt chunk 512") and "reserved" in n
                for n in r.notes)
     assert any("headroom to hold it in" in n for n in r.notes)
 
@@ -262,8 +262,8 @@ def test_a_measured_family_width_is_a_cap_the_room_decides_how_much_of():
     default = S.engine_settings(resolve(a, 96 * GIB).env)
     roomy = S.engine_settings(resolve(a, 96 * GIB, tune="default").env)
     huge = S.engine_settings(resolve(a, 400 * GIB).env)
-    tight = S.engine_settings(resolve(a, 24 * GIB, tune="default").env)
-    # 7.5 GiB predicted at 4096 > 10% of ~67 GiB of room; 3.75 at 2048 fits
+    tight = S.engine_settings(resolve(a, 21 * GIB, tune="default").env)
+    # 7.5 GiB predicted at 4096 > the ~4.8 GiB reserved; 3.75 at 2048 fits
     assert default["prefill_step_size"] == 2048
     assert roomy["prefill_step_size"] == 2048
     assert huge["prefill_step_size"] == 4096
@@ -545,22 +545,23 @@ def test_35b_a3b_with_100_gib_free_takes_2048():
     r = resolve(_qwen_moe(), 100 * GIB)
     assert _chunk(r) == 2048
     note = [n for n in r.notes if n.startswith("prompt chunk 2048")]
-    assert note and "room" in note[0] and "10%" in note[0]
+    assert note and "reserved for transients" in note[0]
 
 
 def test_35b_a3b_on_a_box_with_little_room_stays_512():
-    r = resolve(_qwen_moe(), 22 * GIB)
+    r = resolve(_qwen_moe(), 14.5 * GIB)       # ~0.7 GiB of headroom
     assert _chunk(r) == 512
-    assert any(n.startswith("prompt chunk 512") and "room" in n
+    assert any(n.startswith("prompt chunk 512") and "reserved" in n
                for n in r.notes)
 
 
-def test_397b_with_14_gib_left_stays_512():
-    """The case that aborted Metal: 110.8 GiB on the 128 GB M4, ~14 GiB
-    above its weights (git log -S 'prompt chunk is 512')."""
+def test_397b_with_14_gib_left_never_takes_4096():
+    """The case that aborted Metal AT 4096: 110.8 GiB on the 128 GB M4, ~14
+    GiB above its weights. The reserve (~6.2 GiB) covers 2048's ~3.75, never
+    4096's ~7.5."""
     a = _qwen_moe(hidden=4096, size_gib=110.8)
-    assert _chunk(resolve(a, int(124.8 * GIB))) == 512
-    assert _chunk(resolve(a, int(124.8 * GIB), tune="default")) == 512
+    assert _chunk(resolve(a, int(124.8 * GIB))) == 2048
+    assert _chunk(resolve(a, int(124.8 * GIB), tune="default")) == 2048
 
 
 def test_an_explicit_prompt_chunk_still_wins():

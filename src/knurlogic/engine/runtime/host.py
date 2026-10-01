@@ -26,6 +26,46 @@ from knurlogic.engine.serve import state
 logger = logging.getLogger(__name__)
 
 
+def held_arrays(root, limit: int = 2_000_000) -> list:
+    """Every mx.array reachable from `root`: the module tree's parameters
+    AND arrays in "_"-named attributes, plain objects, lists, dicts and
+    tuples that nn.Module.parameters() skips (a bundled model.py's VQ
+    codebooks, expert tables kept on helper objects). Cycle-safe; `limit`
+    bounds the objects visited."""
+    import mlx.core as mx
+    seen: set = set()
+    found: list = []
+    stack = [root]
+    while stack and len(seen) < limit:
+        o = stack.pop()
+        if isinstance(o, mx.array):
+            if id(o) not in seen:
+                seen.add(id(o))
+                found.append(o)
+            continue
+        if isinstance(o, (str, bytes, int, float, bool, type(None),
+                          type, bytearray)) or id(o) in seen:
+            continue
+        seen.add(id(o))
+        if isinstance(o, dict):
+            stack.extend(o.values())      # an nn.Module is a dict too...
+        if isinstance(o, (list, tuple, set, frozenset)):
+            stack.extend(o)
+        if hasattr(o, "__dict__"):        # ...with plain attributes beside
+            stack.extend(vars(o).values())
+    return found
+
+
+def evaluate_everything(model) -> int:
+    """mx.eval every array the model holds (held_arrays), in one call;
+    returns how many. The load pays for the whole read, so the first
+    request does not."""
+    import mlx.core as mx
+    arrays = held_arrays(model)
+    mx.eval(arrays)
+    return len(arrays)
+
+
 class ModelHost:
     is_batchable = True        # every request goes through the batch engine
 
@@ -206,7 +246,6 @@ class ModelHost:
 
     def _weights(self, path: str, lazy=None):
         """`lazy`: _split_lazily's (model, tokenizer), evaluated here."""
-        import mlx.core as mx
 
         from knurlogic.engine.serve.load import load_unlocked
         if lazy is None:
@@ -215,11 +254,14 @@ class ModelHost:
             # runs its own bundled model.py need not take mlx-lm's own
             # evaluation, and weights left lazy are read by the first
             # request instead (the page showed "ready" at 70% resident).
-            # Already-evaluated arrays cost nothing.
-            mx.eval(model.parameters())
+            # Already-evaluated arrays cost nothing. model.parameters()
+            # is NOT everything a bundled model holds: it skips arrays in
+            # "_"-named attributes and in plain (non-Module) containers, and
+            # those are read from disk by the first request.
+            evaluate_everything(model)
             return model, tok
         model, tok = lazy
-        mx.eval(model.parameters())
+        evaluate_everything(model)
         return model, tok
 
     def _cross_chip(self) -> None:

@@ -591,14 +591,20 @@ class Scheduler:
         follow rank 0's admission) -- run on this thread while the host is
         "warming", so the first user request finds kernels compiled and
         buffers filled. The answer is discarded."""
+        # A prompt a little wider than one prompt chunk, so the prefill
+        # kernels for the chunk's real shape are compiled here and an MoE
+        # model's experts are routed to (and read) by more than a token's
+        # worth of rows; a "Hello, world." warm-up left both to the first
+        # request (100+ s on a 108 GiB model). Bounded at ~4300 tokens.
+        n = min(max(int(self.prefill_step_size) // 3, 1), 1400) + 1
         job = Job(request=P.ChatRequest(request_type="text",
-                                        prompt="Hello, world."),
+                                        prompt="Hello, world. " * n),
                   args=P.PromptArgs(), max_tokens=2,
                   sampling={"temp": 0.0}, submitted=time.perf_counter())
         self._warming = True
         try:
             self._insert(job)
-            for _ in range(16):     # 2 tokens: a few steps; never unbounded
+            for _ in range(64):     # prefill chunks + 2 tokens; bounded
                 if not self._rows:
                     break
                 self._step()

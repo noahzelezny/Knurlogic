@@ -219,9 +219,9 @@ def prefill_chunk_by_room(artifact: Artifact, headroom, working_set_bytes: int,
     """(width, one-line why) for the prompt chunk, read from the room.
 
     The widest ladder width, capped at the family's measured best, whose
-    predicted step transient fits in PREFILL_TRANSIENT_ROOM_SHARE of the
-    room left after the weights (already out of `headroom`), a KV allowance
-    and the reclaimable cache; else step down, floor 512. `headroom` is
+    predicted step transient fits in the memory reserved for transients
+    (the step margin / first-request reserve, capped by `headroom`); else
+    step down, floor 512. `headroom` is
     what the load budget -- the room actually free at launch -- leaves
     above what this box holds; None means the budget is unknown."""
     floor = S.PREFILL_CHUNK_DEFAULT
@@ -235,13 +235,23 @@ def prefill_chunk_by_room(artifact: Artifact, headroom, working_set_bytes: int,
     tc = cfg.get("text_config") or cfg
     per_tok, _ = kv_bytes_per_token(tc, kv_bits)
     kv = per_tok * S.PREFILL_KV_ALLOWANCE_TOKENS
-    room = max(int(headroom) - step_margin(working_set_bytes) - kv
-               - int(cache_bytes), 0)
-    allowed = room * S.PREFILL_TRANSIENT_ROOM_SHARE
     hidden = artifact.hidden_size or S.DECODE_CHUNK_ASSUMED_SHAPE[1]
 
     def transient(w):
         return w * hidden * S.PREFILL_TRANSIENT_BYTES_PER_TOKEN_HIDDEN
+
+    # The memory the launch RESERVES for transients: the step margin, or
+    # the first request's transient and a quarter again when larger (the
+    # same reserve the fit holds free, rank_margin). A chunk whose
+    # predicted transient fits in it is already paid for; the room left
+    # after weights, KV and cache is not what a transient is charged to.
+    # It is never more than the headroom actually there.
+    reserve = max(step_margin(working_set_bytes),
+                  int(1.25 * max(S.FIT_TRANSIENT_FLOOR,
+                                 transient(S.FIT_PREFILL_CHUNK))))
+    allowed = min(reserve, max(int(headroom), 0))
+    room = max(int(headroom) - step_margin(working_set_bytes) - kv
+               - int(cache_bytes), 0)
 
     width = floor
     for w in S.PREFILL_CHUNK_LADDER:
@@ -249,14 +259,15 @@ def prefill_chunk_by_room(artifact: Artifact, headroom, working_set_bytes: int,
             width = w
     nxt = min((w for w in S.PREFILL_CHUNK_LADDER if w > width), default=0)
     return width, (
-        f"prompt chunk {width} (family best {family}): {room / GIB:.1f} GiB "
-        f"room after weights, step margin, {kv / GIB:.1f} GiB KV and "
-        f"{cache_bytes / GIB:.1f} GiB cache; its step transient "
+        f"prompt chunk {width} (family best {family}): its step transient "
         f"~{transient(width) / GIB:.2f} GiB"
         + (f" (next up, {nxt}: ~{transient(nxt) / GIB:.2f})"
            if width < family else "")
-        + f" vs the rule's {S.PREFILL_TRANSIENT_ROOM_SHARE:.0%} of room = "
-        f"{allowed / GIB:.2f} GiB -- widest that fits, floor {floor}")
+        + f" vs {allowed / GIB:.2f} GiB reserved for transients (step "
+        f"margin / first-request reserve; {room / GIB:.1f} GiB more room "
+        f"after weights, {kv / GIB:.1f} GiB KV and {cache_bytes / GIB:.1f} "
+        f"GiB cache) -- the family best when its transient fits the "
+        f"reserve, else the widest that does, floor {floor}")
 
 
 def resolve(artifact: Artifact, budget, profile: str | None = None,
