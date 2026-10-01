@@ -268,6 +268,21 @@ def test_the_cluster_block_carries_the_build(monkeypatch):
     assert v["build"].endswith("+mlx" + (v["mlx"] or "none"))
 
 
+def test_prepare_reserve_short_is_tight_and_anyway_accepts(cache):
+    shape = dict(SHAPE, reserve={"transient_bytes": 6 * GIB,
+                                 "kv_bytes": GIB})        # 8.5 GiB margin
+    i = info("Apple M3 Ultra", "192.0.2.2", ws=10 * GIB)  # 4 + 8.5 > 10 > 4 + 4
+    code, doc = prep(spec(), info=i, shape=shape)
+    assert not doc["ok"] and doc["refused"].count("Tight fit") == 1
+    assert "more space required" not in doc["refused"]
+    code, doc = prep(spec(anyway=True), info=i, shape=shape)
+    assert doc["ok"], doc
+    # the weights past the minimum step margin stay refused
+    code, doc = prep(spec(anyway=True), shape=shape,
+                     info=info("Apple M3 Ultra", "192.0.2.2", ws=7 * GIB))
+    assert not doc["ok"] and "more space required" in doc["refused"]
+
+
 def test_prepare_refuses_a_share_that_does_not_fit_here(cache):
     code, doc = prep(spec(), info=info("Apple M3 Ultra", "192.0.2.2",
                                        ws=2 * GIB))

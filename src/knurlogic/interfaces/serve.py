@@ -187,10 +187,36 @@ def launch_refusal(a, overrides, tune: str = "default") -> str | None:
             or None)
 
 
+def launch_fit(a, overrides, tune: str = "default", draft: bool = True,
+               budget_bytes: int | None = None) -> dict:
+    """`tuning.resolve.single_fit_check` for a launch's settings against
+    `budget_bytes` (default: the load budget): the same check `run` makes,
+    so the MCP and the page can say "tight" before a process starts."""
+    from knurlogic.machine import preferences, wired
+    from knurlogic.tuning import settings as S
+    from knurlogic.tuning.resolve import preset_env, single_fit_check
+    if budget_bytes is None:
+        budget_bytes = wired.load_budget()["bytes"]
+    try:
+        sets, _ = S.settle_context(a.model_type, a.raw_config,
+                                   S.canonical_sets(dict(overrides or {})))
+        sets = preferences.launch_sets(sets)
+        tune = S.preset_of(sets.get("KNURLOGIC_PRESET"), tune)
+        launch = S.engine_settings({**preset_env(a, tune),
+                                    **{k: v for k, v in sets.items()
+                                       if k in S.MODEL_KNOBS}})
+    except ValueError:
+        launch = {}
+    if launch.get("mtp") is False:
+        draft = False
+    return single_fit_check(a, budget_bytes, draft, launch.get("kv_bits"))
+
+
 def run(path: str, host: str, port: int, working_set_gib: float,
         profile: str | None, tune: str = "default",
         overrides: dict | None = None, draft: bool = True,
-        serving: dict | None = None, ring: dict | None = None) -> int:
+        serving: dict | None = None, ring: dict | None = None,
+        anyway: bool = False) -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
@@ -329,11 +355,17 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # The same reserve a cluster rank keeps, and the MTP head and vision
         # bytes that will be bound: a load that fills the budget swaps
         # on its first request instead of failing here.
-        from knurlogic.tuning.resolve import single_fit
-        why = single_fit(a, ws, draft, kv_bits)
-        if why:
-            print(f"REFUSING: {why}", file=sys.stderr)
+        from knurlogic.tuning.resolve import single_fit_check
+        chk = single_fit_check(a, ws, draft, kv_bits)
+        if chk["state"] == "cannot":
+            print(f"REFUSING: {chk['why']}", file=sys.stderr)
             return REFUSED_EXIT
+        if chk["state"] == "tight":
+            if not anyway:
+                print(f"REFUSING: {chk['why']} Launch with --anyway to "
+                      f"accept the risk.", file=sys.stderr)
+                return REFUSED_EXIT
+            print(f"  WARNING: {chk['why']}", file=sys.stderr)
     adv = wired.advise(a.bytes_on_disk)
     if adv.get("action") == "raise":
         print("\n" + wired.render(adv) + "\n")
@@ -760,6 +792,12 @@ def main(argv=None) -> int:
                         "one is packed beside the weights (the same as "
                         "--set KNURLOGIC_MTP=off). Drafting preserves the "
                         "output distribution.")
+    p.add_argument("--anyway", action="store_true",
+                   help="launch even when the weights fit but the safety "
+                        "margin does not (a tight fit: expect swap under "
+                        "long conversations). Without it a tight fit is "
+                        "refused with the shortfall; weights that cannot "
+                        "fit are refused regardless.")
     p.add_argument("--mtp-dynamic", choices=("on", "off"), default=None,
                    help="on: switch between drafting and plain steps by "
                         "their measured cost (default); off: draft every "
@@ -865,7 +903,7 @@ def main(argv=None) -> int:
         sets["KNURLOGIC_KV_BITS"] = a.kv_bits
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile,
                a.tune, sets, draft=not a.no_draft, serving=serving,
-               ring=ring)
+               ring=ring, anyway=a.anyway)
 
 
 if __name__ == "__main__":

@@ -205,6 +205,13 @@ nav a:hover{color:var(--acc)}
 .modal{position:fixed;inset:0;z-index:50;background:oklch(0 0 0/.6);
   display:flex;align-items:center;justify-content:center;padding:40px 24px}
 .modal[hidden]{display:none}
+.modal .tightbox{width:min(460px,100%);height:auto;padding:16px 18px;gap:10px;
+  overflow:visible}
+.tighthd{font-size:12px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--warn)}
+.tightwhy{font-size:13.5px;line-height:1.5;color:var(--fg)}
+.tightbtns{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;
+  margin-top:6px}
 /* A FIXED frame: the box keeps its size whatever the filter leaves in the
    list, and the list scrolls inside it. */
 .modal .box{width:min(980px,100%);height:min(720px,82vh);display:flex;

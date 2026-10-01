@@ -84,6 +84,50 @@ def test_load_refuses_while_memory_moves_but_force_overrides(tmp_path,
     assert spawned and "refused" not in r
 
 
+def _tight_setup(tmp_path, monkeypatch, budget_gib=10):
+    from knurlogic.interfaces import loading
+    monkeypatch.setattr(loading, "resolve_name", lambda m, served: m)
+    d = _artifact(tmp_path / "tight", gib=1)
+    b = budget_gib << 30
+    monkeypatch.setattr("knurlogic.machine.wired.load_budget",
+                        lambda: {"bytes": b, "limited_by": "working set",
+                                 "available_bytes": b,
+                                 "working_set_bytes": b})
+    monkeypatch.setattr("knurlogic.tuning.resolve.fit_reserve",
+                        lambda cfg, kv_bits=None: {
+                            "transient_bytes": 8 << 30, "kv_bytes": 1 << 30})
+    spawned = []
+    monkeypatch.setattr("knurlogic.interfaces.page.server._spawn",
+                        lambda *a, **k: spawned.append((a, k))
+                        or {"starting": a[0], "pid": 1, "port": a[1]})
+    return d, spawned
+
+
+def test_load_tight_returns_the_warning_and_anyway_launches(tmp_path,
+                                                            monkeypatch):
+    d, spawned = _tight_setup(tmp_path, monkeypatch)
+    r = mcp.load(artifact=str(d))
+    assert r["loaded"] is False and r["tight"] is True and not spawned
+    assert r["short_gib"] > 0 and r["mtp_off_fits"] is False
+    assert r["reason"].startswith("Tight fit: about ")
+    assert "swap" in r["text"] and "anyway=true" in r["text"]
+    assert mcp.fit(artifact=str(d))["tight_fit"]["tight"] is True
+    r = mcp.load(artifact=str(d), anyway=True)
+    assert spawned and "refused" not in r and "tight" not in r
+    assert spawned[0][1]["anyway"] is True
+
+
+def test_load_cannot_fit_is_still_refused_even_anyway(tmp_path, monkeypatch):
+    d, spawned = _tight_setup(tmp_path, monkeypatch, budget_gib=3)
+    r = mcp.load(artifact=str(d), anyway=True)
+    assert r["refused"] == "will not fit" and not spawned
+
+
+def test_load_schema_documents_anyway():
+    props = mcp.TOOLS["load"]["schema"]["properties"]
+    assert "anyway" in props and "swap" in props["anyway"]["description"]
+
+
 def test_settings_carries_the_measurement_not_just_the_value(tmp_path):
     """A number without its provenance is one an agent changes for no
     reason, and these were expensive to establish."""
