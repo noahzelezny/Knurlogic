@@ -34,23 +34,22 @@ function ramWent(m){
   const named=by.reduce((x,[,v])=>x+v,0);
   const other=Math.max(used-named,0);
   const free=Math.max(inst-used,0);
-  // A runtime's row is its RESIDENT part (the map takes its swapped part
-  // out); the swapped part is said beside it, never dropped.
-  const sw=m.swapped_by_runtime||{};
-  const row=(k,b,c,x)=>`<div class="ramrow">${
+  // A runtime's row is its RESIDENT part; what it has in swap is in the
+  // swap row (and on its instance card).
+  const row=(k,b,c)=>`<div class="ramrow">${
     c?`<em style="background:${c}"></em>`
      :'<em style="border:1px solid var(--line)"></em>'}<span>${k}</span>
-    <b>${gb(b)}${x>0?` · ${gb(x)} in swap`:''}</b></div>`;
+    <b>${gb(b)}</b></div>`;
   // No bar. The machines in the topology are already gauges and now fill
   // in these colours, so a second full-width chart of the same split would
   // be the free-space bar's mistake again. This is the key to that picture,
   // and the key carries the numbers.
   el.innerHTML=`<div class="ram">
-    ${by.map(([k,b])=>row(k,b,RAMCOL[k]||'var(--dim)',sw[k])+
+    ${by.map(([k,b])=>row(k,b,RAMCOL[k]||'var(--dim)')+
       (k==='knurlogic'&&m.knurlogic_cache>0
         ? `<div class="ramrow sub"><em class="hatch" style="--c:${RAMCOL.knurlogic}"></em>
             <span>of which cache</span><b>${gb(m.knurlogic_cache)}</b></div>`:'')).join('')}
-    ${row('everything else',other,'var(--faint)')}
+    ${row('other',other,'var(--faint)')}
     ${row('unused',free,'')}
     ${m.swap_bytes>=SWAP_FLOOR?row('swap',m.swap_bytes,'var(--bad)'):''}</div>`;
 }
