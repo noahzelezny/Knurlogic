@@ -131,6 +131,8 @@ nav a:hover{color:var(--acc)}
 #resident .machine:first-child{margin-top:0}
 #resident .peererr{color:var(--faint);margin-bottom:6px}
 .card .dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--ok)}
+.card .dot.gearmark{width:12px;height:12px;border-radius:0;background:none;color:var(--ok)}
+.card .gearmark svg{width:12px;height:12px;display:block;animation:gear 1.6s linear infinite}
 .card.failed{border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
 .card.failed .dot{background:var(--bad)}
 .card.failed .rt{color:var(--bad);letter-spacing:.08em}

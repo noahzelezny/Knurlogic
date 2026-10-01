@@ -106,11 +106,15 @@ async function loadResident(){
   // named once with the machines it runs on. The whole card opens a chat.
   const on=r=>r.cluster?(r.cluster.machines||[]).join(' + ')
     :(r.machine||((window.NODES||[]).find(n=>n.role==='local')||{}).node||'this machine');
+  // answering a request right now: the dot becomes the chat's turning gear
+  const working=r=>r.runtime==='knurlogic'&&r.state==='loaded'&&!!r.requests&&
+    !!(r.requests.in_flight||r.requests.pending);
   const card=(r,i)=>`<div class="card ${esc(r.state)}"${r.runtime==='exo'?
       ' title="exo\'s model: shown, not driven by knurlogic"'
       :` title="click to chat with it" data-chatn="${i}" style="cursor:pointer"`}>
       <div class="cardhd">
-        <span class="dot"></span>
+        ${working(r)?`<span class="dot gearmark" title="working">${window.GEAR||''}</span>`
+          :'<span class="dot"></span>'}
         <span class="rt ${esc(r.runtime)}"${r.runtime==='knurlogic'?` title="knurlogic"`:''}>${
           r.runtime!=='knurlogic' ? esc(r.runtime)
           : r.recovery&&r.recovery.state==='recovering' ? 'recovering'
