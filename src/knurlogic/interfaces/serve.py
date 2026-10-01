@@ -325,6 +325,15 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                   f"(working set {b['working_set_bytes'] / GIB:.1f}, "
                   f"available now {b['available_bytes'] / GIB:.1f}; "
                   f"--working-set-gib overrides)")
+    if world == 1 and ws:
+        # The same reserve a cluster rank keeps, and the MTP head and vision
+        # bytes that will be bound: a load that fills the budget swaps
+        # on its first request instead of failing here.
+        from knurlogic.tuning.resolve import single_fit
+        why = single_fit(a, ws, draft, kv_bits)
+        if why:
+            print(f"REFUSING: {why}", file=sys.stderr)
+            return REFUSED_EXIT
     adv = wired.advise(a.bytes_on_disk)
     if adv.get("action") == "raise":
         print("\n" + wired.render(adv) + "\n")
@@ -436,6 +445,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # what is running and what is waiting (scheduler.requests)
         from knurlogic.interfaces import http as _http
         snap["requests"] = _http.requests_now()
+        # the host's own state: /status.json answers (with the artifact)
+        # from the moment the server starts, long before the weights are in
+        snap["load"] = _http.load_now()
         # what reasoning_effort does on the served model -- the MCP's
         # `models` answer plus the default the server actually renders
         try:

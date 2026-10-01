@@ -271,6 +271,8 @@ class Scheduler:
                              "the prompt cache byte cap")
         self.tensor = tensor
         self.host = host
+        # the load-time warm-up row is not a user's request (requests())
+        self._warming = False
         if hasattr(host, "warm"):
             host.warm = self._warm_up
         self.completion_batch_size = completion_batch_size
@@ -411,6 +413,9 @@ class Scheduler:
         holding    why they wait: loading | memory | batch_full | None"""
         cap = int(self.completion_batch_size)
         rows = [r for _, r in sorted(dict(self._rows).items())]
+        if self._warming:
+            rows = []   # the warm-up is the server's, not a request: the
+            # page showed it as one while the model was still arriving
         waiting = list(self._waiting) + list(self._jobs.queue)
         waiting = [j for j in waiting if not j.cancelled]
         past = [r.job for r in rows[cap:]]
@@ -590,11 +595,15 @@ class Scheduler:
                                         prompt="Hello, world."),
                   args=P.PromptArgs(), max_tokens=2,
                   sampling={"temp": 0.0}, submitted=time.perf_counter())
-        self._insert(job)
-        for _ in range(16):         # 2 tokens: a few steps; never unbounded
-            if not self._rows:
-                break
-            self._step()
+        self._warming = True
+        try:
+            self._insert(job)
+            for _ in range(16):     # 2 tokens: a few steps; never unbounded
+                if not self._rows:
+                    break
+                self._step()
+        finally:
+            self._warming = False
 
     def _take_jobs(self) -> None:
         while True:

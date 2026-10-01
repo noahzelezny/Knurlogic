@@ -206,10 +206,18 @@ class ModelHost:
 
     def _weights(self, path: str, lazy=None):
         """`lazy`: _split_lazily's (model, tokenizer), evaluated here."""
+        import mlx.core as mx
+
         from knurlogic.engine.serve.load import load_unlocked
         if lazy is None:
-            return load_unlocked(path, self.executes_artifact_code)
-        import mlx.core as mx
+            model, tok = load_unlocked(path, self.executes_artifact_code)
+            # Evaluate EVERY parameter here, inside the load. A model that
+            # runs its own bundled model.py need not take mlx-lm's own
+            # evaluation, and weights left lazy are read by the first
+            # request instead (the page showed "ready" at 70% resident).
+            # Already-evaluated arrays cost nothing.
+            mx.eval(model.parameters())
+            return model, tok
         model, tok = lazy
         mx.eval(model.parameters())
         return model, tok
