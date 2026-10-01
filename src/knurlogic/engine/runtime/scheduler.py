@@ -1081,6 +1081,14 @@ class Scheduler:
                 self._ring_trimmed:
             self._ring_trimmed = False
             raise _RingWait()
+        if room <= 0 and not (self.cache is not None and self.cache.nbytes):
+            # nothing runs and nothing is left to give up, yet no memory is
+            # free: whatever holds it is out of this server's reach
+            raise OutOfMemory(
+                f"no memory is free under the server's limit "
+                f"({limit / GIB:.1f} GiB) with nothing running and nothing "
+                f"cached; it is holding memory it cannot release, so this "
+                f"server needs a restart")
         raise OutOfMemory(
             f"this prompt ({n_tokens} tokens) needs about {need / GIB:.1f} "
             f"GiB for its cache; {max(room, 0) / GIB:.1f} GiB is free under "

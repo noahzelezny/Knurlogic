@@ -670,6 +670,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     mark = Mark(working_set)
     ex: LocalExecutor | None = None
     last: dict = {}
+    events: list = []
     steps = mismatches = 0
 
     def executor() -> LocalExecutor:
@@ -753,8 +754,15 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                             "(%d token mismatches)", link.rank, steps,
                             mismatches)
                 return steps
-        last = {}
+        # the last step's events hold its checkpoint and finished caches:
+        # not kept through a removal or a park, which nothing steps past
+        last, events = {}, []
         if park:
+            # nothing runs: a transient measured under load is not the
+            # margin an idle rank holds back (it pinned a pipeline's
+            # over-limit above zero after one long prefill, refusing every
+            # request, 16 tokens or 40k)
+            mark.spike = 0
             link.sleep()
         if halt:
             continue

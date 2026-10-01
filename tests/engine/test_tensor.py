@@ -578,3 +578,36 @@ def test_rank_0_publishes_every_ranks_memory(monkeypatch):
         {"rank": 1, "active_bytes": 200, "peak_bytes": 260,
          "over_limit_bytes": -4}]
     assert r.peer_over == -4
+
+
+def test_a_parked_follower_holds_no_margin_a_long_prefill_measured(
+        monkeypatch):
+    """A pipeline follower's limit leaves the largest transient it ever
+    measured. One 41k-token prefill's put it past its own active memory for
+    good: its over-limit stayed positive, rank 0 read the pipeline as over
+    its limit with nothing running, and refused every prompt. Parked, a
+    rank holds no row to step: it reports against the floor margin."""
+    import mlx.core as mx
+
+    from knurlogic.engine.runtime import tensor as T
+    GIB = T.GIB
+    monkeypatch.setattr(mx, "get_active_memory", lambda: 60 * GIB)
+    seen = []
+
+    class Mark(T.Mark):
+        def __init__(self, ws):
+            super().__init__(ws)
+            self.spike = 40 * GIB       # measured by the long prefill
+
+    class Link(_FakeLink):
+        def exchange(self, over, payload):
+            seen.append(over)
+            return super().exchange(over, payload)
+
+    monkeypatch.setattr(T, "Mark", Mark)
+    link = Link([{"ops": [{"op": "park"}]}, {"ops": [{"op": "stop"}]}])
+    T.follow(None, None, "m", link, prompt_cache_size=2,
+             completion_batch_size=1, prefill_step_size=512,
+             working_set=96 * GIB)
+    assert seen[0] > 0                  # 60 held, limit 96 - 50 = 46
+    assert seen[1] < 0                  # parked: limit 96 - 5 = 91
