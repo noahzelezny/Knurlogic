@@ -655,7 +655,11 @@ function settleLaunch(L, j){
   // a card adopted for this same job before the answer came: one card
   for(let i=LAUNCHES.length-1;i>=0;i--){ const A=LAUNCHES[i];
     if(A!==L&&A.adopted&&((L.job&&A.job===L.job)||(!L.job&&L.port&&A.port===L.port
-       &&(A.node||'')===(L.node||'')))) LAUNCHES.splice(i,1) }
+       &&(A.node||'')===(L.node||''))
+       // a refused launch answers with no job: its twin goes by model name
+       ||(!L.job&&!L.port&&A.cluster===L.cluster
+          &&String(A.name).split('/').pop()===String(L.name).split('/').pop())))
+      LAUNCHES.splice(i,1) }
   if(L.cancelled){ stopLaunch(L); return }
   if(j.error||j.refused||j.loaded===false||j.ok===false){ L.phase='failed';
     L.why=j.error||('not loaded: '+(j.refused||'the server declined')+(j.note?' -- '+j.note:'')) }
@@ -764,14 +768,15 @@ function adoptLaunches(d){
   // a launch this tab clicked has no job or port until its answer comes
   // back: a server-reported load of the same model meanwhile is that one
   const base=n=>String(n||'').split('/').pop();
-  const waiting=n=>LAUNCHES.some(L=>!L.adopted&&!L.job&&!L.port
-    &&L.phase==='preparing'&&base(L.name)===base(n));
+  // (a job whose model is not named yet counts as any waiting cluster launch)
+  const waiting=(n,cl)=>LAUNCHES.some(L=>!L.adopted&&!L.job&&!L.port
+    &&L.phase==='preparing'&&(n?base(L.name)===base(n):!!cl===L.cluster));
   for(const x of ms){
     for(const jb of (x.doc.jobs||[])){
       if(!jb.job||!act.includes(jb.phase)||ADOPT_SKIP.has('j'+jb.job)
          ||LAUNCHES.some(L=>L.job===jb.job)) continue;
       const ld=ms.flatMap(y=>y.doc.loads||[]).find(e=>e.job===jb.job);
-      if(waiting(jb.artifact||(ld&&ld.name))) continue;
+      if(waiting(jb.artifact||(ld&&ld.name), true)) continue;
       LAUNCHES.push({id:++LSEQ, name:jb.artifact||(ld&&ld.name)||jb.job,
         t0:Date.now()-((ld&&ld.seconds)||0)*1000, port:jb.port||0, job:jb.job,
         machines:jb.machines||[x.name], node:'', cluster:true,
