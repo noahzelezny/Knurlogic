@@ -113,7 +113,7 @@ async function loadResident(){
       ' title="exo\'s model: shown, not driven by knurlogic"'
       :` title="click to chat with it" data-chatn="${i}" style="cursor:pointer"`}>
       <div class="cardhd">
-        ${working(r)?`<span class="dot gearmark" title="working">${window.GEAR6||window.GEAR||''}</span>`
+        ${working(r)?`<span class="dot gearmark" title="working">${window.GEARLOGO||window.GEAR||''}</span>`
           :'<span class="dot"></span>'}
         <span class="rt ${esc(r.runtime)}"${r.runtime==='knurlogic'?` title="knurlogic"`:''}>${
           r.runtime!=='knurlogic' ? esc(r.runtime)
