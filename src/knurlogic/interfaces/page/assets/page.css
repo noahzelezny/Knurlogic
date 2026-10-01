@@ -76,7 +76,7 @@ nav a:hover{color:var(--acc)}
    screen. Below that the page scrolls sideways like any desktop app.
    Three columns need 190 + 400 + 280 + gaps + padding = 990, so the drop
    is at 1010px, and the middle column squeezes before the rail moves. */
-.app{display:grid;grid-template-columns:15em minmax(26em,1fr) 21em;
+.app{display:grid;grid-template-columns:15em minmax(0,1fr) 21em;
   gap:1.7em;align-items:start}
 @media(max-width:1010px){.app{grid-template-columns:15em minmax(0,1fr)}
   .right{grid-column:1/-1;order:3}
@@ -848,3 +848,7 @@ body.talk #clog{flex:1;height:auto;min-height:0;max-height:none}
 .topo.keybelow #ramwent{grid-row:2;grid-column:1/-1;justify-self:center;margin:0}
 .topo.tight .ufull,.topo.tight .unit .stat{display:none}
 .topo.tight .ucompact{display:flex;flex-direction:column;gap:6px}
+/* Machines side by side keep their cards level: a name that wraps to two
+   lines grows its header, not the offset of its card. */
+.topo.n2 .unit{align-self:stretch;display:flex;flex-direction:column}
+.topo.n2 .unit .uhead{flex:1;align-items:flex-start}
