@@ -51,7 +51,7 @@ def test_an_uneven_split_respects_the_per_rank_reserve():
 
 def test_placement_refuses_more_space_required_when_a_rank_cannot_keep_it():
     res = {"transient_bytes": 10 * GIB, "kv_bytes": 2 * GIB}
-    shape = {"layer_bytes": [GIB] * 190, "other_bytes": 0, "leader_bytes": 0,
+    shape = {"layer_bytes": [GIB] * 196, "other_bytes": 0, "leader_bytes": 0,
              "tensor_per_rank_bytes": 0, "refusals": [], "reserve": res}
     ms = [{"name": "a", "working_set_bytes": 120 * GIB},
           {"name": "b", "working_set_bytes": 84 * GIB}]
@@ -104,49 +104,45 @@ def test_single_machine_counts_the_head_and_says_to_turn_mtp_off(
     gib = 1 << 30
     a = _single(tmp_path, 92 * gib, head=6 * gib)   # disk counts both
     ws = 106 * gib
-    # the weights fit with the step margin: tight, not refused
+    # the weights fit with the step margin: short of the full reserve, it
+    # fits all the same (the old tight band)
     assert R.single_fit(a, ws, draft=True) == ""
-    c = R.single_fit_check(a, ws, draft=True)
-    assert c["state"] == "tight" and c["mtp_off_fits"]
-    assert "Turning MTP off frees 6.0 GiB." in c["why"]
-    assert c["why"].startswith("Tight fit: about ")
-    assert R.single_fit_check(a, ws, draft=False)["state"] == "fits"
+    assert R.single_fit_check(a, ws, draft=True)["state"] == "fits"
+    # past the step margin with the head, inside it without: say so
+    c = R.single_fit_check(a, 98 * gib, draft=True)
+    assert c["state"] == "cannot" and c["head_bytes"] == 6 * gib
+    assert "turn MTP off" in c["why"]
+    assert R.single_fit_check(a, 98 * gib, draft=False)["state"] == "fits"
 
 
-def test_single_machine_tight_is_a_warning_cannot_is_a_refusal(
+def test_single_machine_former_tight_band_fits_cannot_is_a_refusal(
         tmp_path, monkeypatch):
     from knurlogic.tuning import resolve as R
     _res(monkeypatch)
     gib = 1 << 30
     a = _single(tmp_path, 108 * gib)
     c = R.single_fit_check(a, int(115 * gib))        # 5.7 step margin fits
-    assert c["state"] == "tight" and not c["mtp_off_fits"]
-    assert c["short_bytes"] > 0 and "swap" in c["why"]
+    assert c == {"state": "fits", "why": "", "head_bytes": 0}
     assert R.single_fit(a, int(115 * gib)) == ""
     c = R.single_fit_check(a, 110 * gib)             # weights + step margin
     assert c["state"] == "cannot" and R.single_fit(a, 110 * gib)
 
 
-def test_placement_reserve_short_is_tight_and_anyway_places_it():
+def test_placement_short_of_the_reserve_places_it():
     res = {"transient_bytes": 10 * GIB, "kv_bytes": 2 * GIB}
     shape = {"layer_bytes": [GIB] * 190, "other_bytes": 0, "leader_bytes": 0,
              "tensor_per_rank_bytes": 0, "refusals": [], "reserve": res}
     ms = [{"name": "a", "working_set_bytes": 120 * GIB},
           {"name": "b", "working_set_bytes": 84 * GIB}]
-    with pytest.raises(R.TightFit) as e:
-        L.placement(ms, shape, "pipeline")
-    assert "Tight fit" in e.value.reason and e.value.short_bytes > 0
-    plan = L.placement(ms, shape, "pipeline", anyway=True)
+    plan = L.placement(ms, shape, "pipeline")
     assert sum(plan["layers"]) == 190
     tensor = {"layer_bytes": [], "other_bytes": 0, "refusals": [],
               "tensor_per_rank_bytes": 75 * GIB, "reserve": res}
-    with pytest.raises(R.TightFit):
-        L.placement(ms, tensor, "tensor")
-    assert L.placement(ms, tensor, "tensor", anyway=True)["split"] == "tensor"
-    # weights past the step margin stay refused, anyway or not
+    assert L.placement(ms, tensor, "tensor")["split"] == "tensor"
+    # weights past the step margin stay refused
     big = dict(tensor, tensor_per_rank_bytes=80 * GIB)
     with pytest.raises(ValueError, match="more space required"):
-        L.placement(ms, big, "tensor", anyway=True)
+        L.placement(ms, big, "tensor")
 
 
 def _chunk(weights_gib, box_gib, hidden=4096):

@@ -201,7 +201,7 @@ def launch_fit(a, overrides, tune: str = "default", draft: bool = True,
                budget_bytes: int | None = None) -> dict:
     """`tuning.resolve.single_fit_check` for a launch's settings against
     `budget_bytes` (default: the load budget): the same check `run` makes,
-    so the MCP and the page can say "tight" before a process starts."""
+    so the MCP and the page can refuse before a process starts."""
     from knurlogic.machine import preferences, wired
     from knurlogic.tuning import settings as S
     from knurlogic.tuning.resolve import preset_env, single_fit_check
@@ -225,8 +225,7 @@ def launch_fit(a, overrides, tune: str = "default", draft: bool = True,
 def run(path: str, host: str, port: int, working_set_gib: float,
         profile: str | None, tune: str = "default",
         overrides: dict | None = None, draft: bool = True,
-        serving: dict | None = None, ring: dict | None = None,
-        anyway: bool = False) -> int:
+        serving: dict | None = None, ring: dict | None = None) -> int:
     a = Artifact.load(path)
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
@@ -362,20 +361,14 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                   f"available now {b['available_bytes'] / GIB:.1f}; "
                   f"--working-set-gib overrides)")
     if world == 1 and ws:
-        # The same reserve a cluster rank keeps, and the MTP head and vision
-        # bytes that will be bound: a load that fills the budget swaps
+        # The weights, the MTP head and vision bytes that will be bound,
+        # and the step margin: a load that fills the budget swaps
         # on its first request instead of failing here.
         from knurlogic.tuning.resolve import single_fit_check
         chk = single_fit_check(a, ws, draft, kv_bits)
         if chk["state"] == "cannot":
             print(f"REFUSING: {chk['why']}", file=sys.stderr)
             return REFUSED_EXIT
-        if chk["state"] == "tight":
-            if not anyway:
-                print(f"REFUSING: {chk['why']} Launch with --anyway to "
-                      f"accept the risk.", file=sys.stderr)
-                return REFUSED_EXIT
-            print(f"  WARNING: {chk['why']}", file=sys.stderr)
     adv = wired.advise(a.bytes_on_disk)
     if adv.get("action") == "raise":
         print("\n" + wired.render(adv) + "\n")
@@ -811,12 +804,6 @@ def main(argv=None) -> int:
                         "one is packed beside the weights (the same as "
                         "--set KNURLOGIC_MTP=off). Drafting preserves the "
                         "output distribution.")
-    p.add_argument("--anyway", action="store_true",
-                   help="launch even when the weights fit but the safety "
-                        "margin does not (a tight fit: expect swap under "
-                        "long conversations). Without it a tight fit is "
-                        "refused with the shortfall; weights that cannot "
-                        "fit are refused regardless.")
     p.add_argument("--mtp-dynamic", choices=("on", "off"), default=None,
                    help="on: switch between drafting and plain steps by "
                         "their measured cost (default); off: draft every "
@@ -924,7 +911,7 @@ def main(argv=None) -> int:
         sets["KNURLOGIC_KV_BITS"] = a.kv_bits
     return run(a.artifact, a.host, a.port, a.working_set_gib, a.profile,
                a.tune, sets, draft=not a.no_draft, serving=serving,
-               ring=ring, anyway=a.anyway)
+               ring=ring)
 
 
 if __name__ == "__main__":

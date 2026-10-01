@@ -269,17 +269,15 @@ def test_the_cluster_block_carries_the_build(monkeypatch):
     assert v["build"].endswith("+mlx" + (v["mlx"] or "none"))
 
 
-def test_prepare_reserve_short_is_tight_and_anyway_accepts(cache):
+def test_prepare_reserve_short_but_step_margin_kept_fits(cache):
+    """Short of the full reserve but clear of the step margin: it fits (the
+    old tight band); past the step margin it is refused."""
     shape = dict(SHAPE, reserve={"transient_bytes": 6 * GIB,
                                  "kv_bytes": GIB})        # 8.5 GiB margin
     i = info("Apple M3 Ultra", "10.0.0.2", ws=10 * GIB)  # 4 + 8.5 > 10 > 4 + 4
     code, doc = prep(spec(), info=i, shape=shape)
-    assert not doc["ok"] and doc["refused"].count("Tight fit") == 1
-    assert "more space required" not in doc["refused"]
-    code, doc = prep(spec(anyway=True), info=i, shape=shape)
     assert doc["ok"], doc
-    # the weights past the minimum step margin stay refused
-    code, doc = prep(spec(anyway=True), shape=shape,
+    code, doc = prep(spec(), shape=shape,
                      info=info("Apple M3 Ultra", "10.0.0.2", ws=7 * GIB))
     assert not doc["ok"] and "more space required" in doc["refused"]
 

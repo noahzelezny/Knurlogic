@@ -532,43 +532,20 @@ def rank_margin(working_set_bytes: int, reserve: dict | None = None) -> int:
         + int(reserve.get("kv_bytes") or 0)
 
 
-class TightFit(ValueError):
-    """The weights fit but the safety reserve does not: a warning the user
-    may accept (`anyway`), not a refusal. `short_bytes` is how far under the
-    reserve the launch falls."""
-
-    def __init__(self, short_bytes: int, reason: str = ""):
-        self.short_bytes = int(short_bytes)
-        self.reason = reason or tight_text(short_bytes)
-        super().__init__(self.reason)
-
-
-def tight_text(short_bytes: int, mtp_off_bytes: int = 0) -> str:
-    """The plain-English tight-fit warning; `mtp_off_bytes` (the head, when
-    turning MTP off would make it fit) adds the way out."""
-    t = (f"Tight fit: about {short_bytes / GIB:.1f} GiB short of a safe "
-         f"margin, so expect swap under long conversations.")
-    if mtp_off_bytes:
-        t += f" Turning MTP off frees {mtp_off_bytes / GIB:.1f} GiB."
-    return t
-
-
 def single_fit_check(artifact: Artifact, budget_bytes: int,
                      draft: bool = True, kv_bits=None) -> dict:
     """How a single-machine load sits in `budget_bytes`:
-    {"state": "fits" | "tight" | "cannot", "why": str, "short_bytes",
-    "mtp_off_fits", "head_bytes"}.
+    {"state": "fits" | "cannot", "why": str, "head_bytes"}.
 
     Counts what will really be bound: the artifact's weights, the MTP head
     only when drafting is on (its sidecar is inside the artifact's size,
-    so it is taken OUT when off), and a vision rung's extra bytes. "cannot"
-    is the weights plus the minimum step margin not fitting; "tight" is the
-    weights fitting but not the full reserve a cluster rank keeps
-    (`rank_margin` of `fit_reserve`: the first request's transient and the
-    KV of a minimum context) -- a warning, the user may launch anyway."""
+    so it is taken OUT when off), and a vision rung's extra bytes. The fit
+    line is the weights plus the minimum step margin (`step_margin`), not
+    the fuller reserve a cluster rank plans its shares around (`rank_margin`
+    of `fit_reserve`): for real models the two differ by ~0.1 GiB, too thin
+    a band to be worth a third answer."""
     ws = int(budget_bytes or 0)
-    out: dict = {"state": "fits", "why": "", "short_bytes": 0,
-           "mtp_off_fits": False, "head_bytes": 0}
+    out: dict = {"state": "fits", "why": "", "head_bytes": 0}
     if ws <= 0:
         return out
     head = sum(f.stat().st_size for f in artifact.path.glob(
@@ -577,36 +554,27 @@ def single_fit_check(artifact: Artifact, budget_bytes: int,
     vision = int((vb or {}).get("extra_bytes") or 0)
     base = int(artifact.bytes_on_disk) + vision
     need = base - (0 if draft else head)
-    full = rank_margin(ws, fit_reserve(artifact.raw_config, kv_bits))
     floor = step_margin(ws)
-    if need + full <= ws:
+    if need + floor <= ws:
         return out
-    off = bool(draft and head and base - head + full <= ws)
     out["head_bytes"] = head if draft else 0
-    if need + floor > ws:
-        out["state"] = "cannot"
-        out["why"] = (
-            f"{artifact.path.name} needs {need / GIB:.1f} GiB (weights"
-            + (f" incl. the {head / GIB:.1f} GiB MTP head" if draft and head
-               else "")
-            + (f", {vision / GIB:.1f} GiB vision" if vision else "")
-            + f") plus {floor / GIB:.1f} GiB step margin; the budget is "
-            f"{ws / GIB:.1f} GiB")
-        if draft and head and base - head + floor <= ws:
-            out["why"] += "; turn MTP off (Settings \u2192 Presets) to fit"
-        return out
-    out["state"] = "tight"
-    out["short_bytes"] = need + full - ws
-    out["mtp_off_fits"] = off
-    out["why"] = tight_text(out["short_bytes"], head if off else 0)
+    out["state"] = "cannot"
+    out["why"] = (
+        f"{artifact.path.name} needs {need / GIB:.1f} GiB (weights"
+        + (f" incl. the {head / GIB:.1f} GiB MTP head" if draft and head
+           else "")
+        + (f", {vision / GIB:.1f} GiB vision" if vision else "")
+        + f") plus {floor / GIB:.1f} GiB step margin; the budget is "
+        f"{ws / GIB:.1f} GiB")
+    if draft and head and base - head + floor <= ws:
+        out["why"] += "; turn MTP off (Settings \u2192 Presets) to fit"
     return out
 
 
 def single_fit(artifact: Artifact, budget_bytes: int, draft: bool = True,
                kv_bits=None) -> str:
     """"" unless a single-machine load cannot fit at all (the weights and the
-    minimum step margin), else why not. A tight fit is not a refusal: see
-    `single_fit_check`."""
+    minimum step margin), else why not: see `single_fit_check`."""
     c = single_fit_check(artifact, budget_bytes, draft, kv_bits)
     return c["why"] if c["state"] == "cannot" else ""
 
