@@ -545,7 +545,7 @@ function replyMetHTML(m){
   const bit=(k,v)=>bits.push(`<span class="k">${k}</span> <b>${v}</b>`);
   if(m.ttft_ms) bit('TTFT', m.ttft_ms<1000?`${Math.round(m.ttft_ms)} ms`
                                            :`${(m.ttft_ms/1000).toFixed(2)} s`);
-  if(m.prefill_tps) bit('Prefill', `${Math.round(m.prefill_tps)} tok/s`);
+  if(m.prefill_tps) bit('Prefill', `${m.prefill_tps<10?m.prefill_tps.toFixed(1):Math.round(m.prefill_tps)} tok/s`);
   if(m.decode_tps) bit('Decode', `${m.decode_tps.toFixed(1)} tok/s`);
   if(!bits.length) return '';
   return `<div class="rmet" title="${m.server?'measured by the server':
