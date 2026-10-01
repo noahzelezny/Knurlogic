@@ -317,6 +317,63 @@ def _scan_ollama(root: Path) -> list:
     return out
 
 
+def find_named(name: str, extra=(), include_defaults: bool = True) -> list:
+    """The artifacts called `name` (a directory name, `org/name`, or an
+    absolute path inside a store), looked up by direct path in each store
+    root instead of walking every store: a handful of stats, not a scan of
+    a network volume. The same per-directory rules as find() (_from_config_dir).
+    Empty when nothing is found directly; the caller may then scan."""
+    name = (name or "").strip()
+    if not name or "\0" in name:
+        return []
+    out, seen = [], set()
+
+    def add(d: Path, store: str):
+        try:
+            real = str(d.resolve())
+            if real in seen or not (d / "config.json").is_file():
+                return
+            f = _from_config_dir(d, store)
+        except OSError:
+            return
+        if f:
+            seen.add(real)
+            out.append(f)
+
+    rel = None if name.startswith(("/", "~")) else Path(name)
+    if rel is not None and (".." in rel.parts or len(rel.parts) > 3):
+        return []
+    abs_path = Path(name).expanduser() if rel is None else None
+    done = set()
+    for store, root in _roots(extra, include_defaults):
+        try:
+            key = (store, str(root.resolve()))
+        except OSError:
+            continue
+        if key in done or store == "ollama":
+            continue
+        done.add(key)
+        if abs_path is not None:
+            try:
+                parts = abs_path.resolve().relative_to(key[1]).parts
+            except (OSError, ValueError, RuntimeError):
+                continue
+            if 0 < len(parts) <= 4:
+                add(abs_path.resolve(), store)
+            continue
+        add(root / rel, store)
+        if len(rel.parts) == 2:                  # org/name as org--name
+            add(root / "--".join(rel.parts), store)
+        hub = root / ("models--" + "--".join(rel.parts))
+        snaps = hub / "snapshots"                # HF cache entry
+        try:
+            for snap in sorted(snaps.iterdir()) if snaps.is_dir() else ():
+                add(snap, store)
+        except OSError:
+            pass
+    return out
+
+
 def find(stores=None, extra=(), include_defaults: bool = True) -> list:
     """Everything on this machine, deduped by real path, biggest first."""
     out, seen = [], set()

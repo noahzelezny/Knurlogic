@@ -140,3 +140,42 @@ def test_the_knurlogic_allowance_caps_what_a_load_may_have(machine):
     assert e.value.status == 507 and "allowance 50.0" in str(e.value)
     machine.mem["allowance_bytes"] = 0
     assert L.prepare("big-model").path == machine.big
+
+
+def test_a_named_hit_does_not_scan_the_stores(machine, monkeypatch):
+    from knurlogic.machine import discover
+    monkeypatch.setattr(discover, "_roots",
+                        lambda *a, **k: [("given", machine.a.parent)])
+
+    def boom(*a, **k):
+        raise AssertionError("discover.find() scanned every store")
+    monkeypatch.setattr(discover, "find", boom)
+    assert L.resolve_name("known-model", None) == str(machine.a)
+    assert L.resolve_name(str(machine.a), None) == str(machine.a)
+    # a miss may fall back to the scan, which still refuses a stray path
+    monkeypatch.setattr(discover, "find", lambda *a, **k: [])
+    L._KNOWN.update(at=0.0, rows=None)
+    with pytest.raises(L.NotLoadable):          # outside the stores
+        L.resolve_name(str(machine.stray), None)
+    with pytest.raises(L.NotLoadable):          # outside the stores
+        L.resolve_name(str(machine.stray), None)
+
+
+def test_a_named_miss_still_refuses(machine, monkeypatch):
+    from knurlogic.machine import discover
+    monkeypatch.setattr(discover, "_roots",
+                        lambda *a, **k: [("given", machine.a.parent)])
+    for bad in ("nope", "../stray-model", str(machine.stray)):
+        with pytest.raises(L.NotLoadable) as e:
+            L.resolve_name(bad, None)
+        assert e.value.status == 404
+
+
+def test_identity_by_name_hit_does_not_scan(machine, monkeypatch):
+    from knurlogic.machine import artifact, discover
+    monkeypatch.setattr(discover, "_roots",
+                        lambda *a, **k: [("given", machine.a.parent)])
+    monkeypatch.setattr(discover, "find", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("scanned")))
+    ident = artifact.identity(machine.a)
+    assert artifact.resolve_identity(ident, name="known-model") == str(machine.a)
