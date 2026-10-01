@@ -310,6 +310,16 @@ function pickInfo(){
     (blocked && !/does not fit/.test(blocked)?`<div class="note">${esc(blocked)}</div>`:'');
   SETS=launchSets(baseKey(m.name)); mtpState(); loadPreview();
 }
+// Why a peer cannot be launched on, by what the peers module classified:
+// stale is only "last heard Ns ago" (this page may be the late one), gone
+// and a failed probe are "not answering".
+function quietWhy(n){
+  if(n.state==='version_mismatch') return `${n.node} ${n.problem||'runs another version'}`;
+  if(n.state==='stale'&&n.last_seen)
+    return `${n.node}: last heard ${Math.max(0,Math.round(Date.now()/1000-n.last_seen))} s ago`;
+  if(n.state==='stale') return `${n.node}: not heard from lately`;
+  return `${n.node} is not answering`;
+}
 function launchBlock(ns){
   if(!ns.length) return 'pick the machines to run it on: click them in Memory';
   // the info pane's "it will not fit" is a reason Launch cannot go
@@ -322,7 +332,7 @@ function launchBlock(ns){
   if(ns.length>1){
     for(const n of ns){
       if(isLocal(n)) continue;
-      if(!n.id || n.state!=='answering') return `${n.node} is not answering`;
+      if(!n.id || n.state!=='answering') return quietWhy(n);
       if(SEL && !onNode(n, SEL)) return `not on ${n.node}`;
     }
     if(SEL && Array.isArray(SEL.splits) && !SEL.splits.length)
@@ -332,7 +342,7 @@ function launchBlock(ns){
   }
   if(ns.length===1 && !isLocal(ns[0])){
     const n=ns[0];
-    if(!n.id || n.state!=='answering') return `${n.node} is not answering`;
+    if(!n.id || n.state!=='answering') return quietWhy(n);
     if(SEL && !onPeer(SEL)) return `not on ${n.node}`;
   }
   return '';
@@ -684,7 +694,7 @@ function followLaunch(L, d){
     const ph=L.per.map(p=>p.phase);
     if(lead && lead.state==='loaded' && ph.length && ph.every(p=>p==='ready')) L.phase='ready';
     else L.phase=ph.includes('joining')?'joining ring':ph.includes('loading')?'loading weights'
-      :e&&e.phase==='warming'?'warming':'starting';
+      :ph.includes('warming')||(e&&e.phase==='warming')?'warming':'starting';
     return;
   }
   const row=mine.flatMap(x=>x.doc.resident||[]).find(r=>r.runtime==='knurlogic'
@@ -732,13 +742,44 @@ async function stopLaunch(L){
 }
 function dismissLaunch(id){
   const i=LAUNCHES.findIndex(L=>L.id===id);
-  if(i>=0) LAUNCHES.splice(i,1);
+  if(i>=0){
+    const L=LAUNCHES[i];
+    if(L.adopted) ADOPT_SKIP.add(L.job?'j'+L.job:L.key);
+    LAUNCHES.splice(i,1) }
 }
 // the launches still loading, as rows for the INSTANCES card
 function loadingLaunches(){
   return LAUNCHES.filter(L=>L.phase!=='ready'&&L.phase!=='failed');
 }
+// What the servers say is loading but this tab never clicked (a recovery
+// relaunch, the MCP, another tab): each such cluster job and single server
+// gets a launch of its own, so it has the same card, percent and Cancel.
+const ADOPT_SKIP=new Set();
+function adoptLaunches(d){
+  const ms=machinesOf(d), act=['preparing','joining','loading','warming'];
+  for(const x of ms){
+    for(const jb of (x.doc.jobs||[])){
+      if(!jb.job||!act.includes(jb.phase)||ADOPT_SKIP.has('j'+jb.job)
+         ||LAUNCHES.some(L=>L.job===jb.job)) continue;
+      const ld=ms.flatMap(y=>y.doc.loads||[]).find(e=>e.job===jb.job);
+      LAUNCHES.push({id:++LSEQ, name:jb.artifact||(ld&&ld.name)||jb.job,
+        t0:Date.now()-((ld&&ld.seconds)||0)*1000, port:jb.port||0, job:jb.job,
+        machines:jb.machines||[x.name], node:'', cluster:true,
+        phase:'starting', samples:[], adopted:true});
+    }
+    for(const e of (x.doc.loads||[])){
+      if(e.job||!['loading','stalled','warming'].includes(e.phase)) continue;
+      const k='p'+x.id+':'+e.port;
+      if(ADOPT_SKIP.has(k)||LAUNCHES.some(L=>!L.cluster&&L.port===e.port
+         &&(L.node||'')===x.id&&L.name.split('/').pop()===e.name)) continue;
+      LAUNCHES.push({id:++LSEQ, name:e.name, t0:Date.now()-e.seconds*1000,
+        port:e.port, job:'', machines:[x.name], node:x.id, cluster:false,
+        phase:'starting', samples:[], adopted:true, key:k});
+    }
+  }
+}
 function followLaunches(d){
+  adoptLaunches(d);
   if(!LAUNCHES.length) return;
   for(const L of LAUNCHES) followLaunch(L, d);
   renderLaunches();
