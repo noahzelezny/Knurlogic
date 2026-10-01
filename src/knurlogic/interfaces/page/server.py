@@ -692,6 +692,8 @@ PEER_LOADED_S = 2.5
 #: goes to the peer's page relay (PEER_RELAY) instead. Refilled by every
 #: peer survey.
 _PEER_TARGETS: dict = {}
+#: each peer's last good survey, {address: (time, entry)}
+_PEER_LAST: dict = {}
 #: the cluster jobs peers last reported, {job: doc} (running, and the ones
 #: that ended lately with why): what a dropped connection is explained by
 _PEER_JOBS: dict = {}
@@ -916,10 +918,20 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
         t.join(max(end - time.time(), 0))
     res = []
     for p in todo:
-        # a thread still running past the deadline has written nothing yet
-        res.append(out.get(p.key) or {
-            "machine": p.name or p.host, "address": p.key, "resident": [],
-            "error": f"did not answer in {timeout:.1f} s"})
+        got = out.get(p.key)
+        if got and "error" not in got:
+            _PEER_LAST[p.key] = (time.time(), got)
+        if got is None:
+            # Nothing came back in OUR deadline: the peer's status probe
+            # may be answering fine (this page's threads starve when the
+            # box swaps). Not an error: show what it last said, labelled
+            # with its age, or "no reply yet" when it never did.
+            was = _PEER_LAST.get(p.key)
+            got = (dict(was[1], heard_ago=round(time.time() - was[0]))
+                   if was else {
+                       "machine": p.name or p.host, "address": p.key,
+                       "resident": [], "late": True})
+        res.append(got)
     targets, pjobs = {}, {}
     for m in res:
         for r in m["resident"]:

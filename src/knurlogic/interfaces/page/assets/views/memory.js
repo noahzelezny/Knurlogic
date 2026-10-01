@@ -172,9 +172,16 @@ async function loadResident(){
       ${L.why?`<div class="why">${esc(L.why)}</div>`:''}</div>`);
   let h=cards.length||loading.length||failed.length
     ?failed.concat(loading,cards).join(''):none;
-  for(const m of peers) if(m.error)
-    h+=`<div class="s ro peererr" title="${esc(m.error)}">${
-      esc(m.machine)} not answering</div>`;
+  // "not answering" only when its answer actually failed; a reply that did
+  // not arrive within THIS page's wait (the box may be swapping) is "last
+  // heard Ns ago", never a verdict on the peer
+  for(const m of peers){
+    const say=m.error?'not answering'
+      :m.heard_ago!=null?`last heard ${m.heard_ago} s ago`
+      :m.late?'no reply yet':'';
+    if(say) h+=`<div class="s ro peererr" title="${esc(m.error||'')}">${
+      esc(m.machine)} ${say}</div>`;
+  }
   el.innerHTML=h;
   // What can be chatted with right now, for the chat bar's label: a chat
   // whose model has gone away no longer has a selection to name.
