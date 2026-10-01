@@ -124,9 +124,9 @@ def fit(artifact: str = "", draft: bool = True, **_) -> dict[str, Any]:
     from knurlogic.interfaces.serve import launch_fit
     chk = launch_fit(a, {}, "default", draft, budget)
     fits = bool(budget) and headroom > 0 and chk["state"] != "cannot"
-    tight = fits and headroom < S.tight_headroom_bytes(budget)
+    low_headroom = fits and headroom < S.low_headroom_bytes(budget)
     verdict = ("will not fit" if not fits else
-               "tight" if tight else "fits")
+               "fits, low headroom" if low_headroom else "fits")
     return {
         "artifact": a.path.name,
         "verdict": verdict,
@@ -141,13 +141,13 @@ def fit(artifact: str = "", draft: bool = True, **_) -> dict[str, Any]:
         "budget_gib": round(budget / GIB, 1),
         "headroom_gib": round(headroom / GIB, 1),
         "limited_by": b["limited_by"],
-        "what_tight_means": (
-            f"under {S.tight_headroom_bytes(budget) / GIB:.0f} GiB left "
+        "what_low_headroom_means": (
+            f"under {S.low_headroom_bytes(budget) / GIB:.0f} GiB left "
             f"after the weights, "
             f"so a load now narrows the prompt chunk to "
-            f"{S.PREFILL_CHUNK_TIGHT} tokens and prefills one prompt at a "
+            f"{S.PREFILL_CHUNK_LOW_HEADROOM} tokens and prefills one prompt at a "
             f"time. It loads; long prompts are slower to start."
-            if tight else ""),
+            if low_headroom else ""),
         # what a fit leaves to talk in (tuning/resolve.context_room)
         "room": room_for(a.bytes_on_disk + extra, a.raw_config),
         "available_now_gib": round(b["available_bytes"] / GIB, 1),
@@ -523,7 +523,7 @@ def models(fits_only: bool = False, **_) -> dict[str, Any]:
     out.sort(key=lambda r: -r["size_gib"])
     return {"models": out, "budget_gib": round(avail / GIB, 1),
             "fits_means": "fits the load budget -- see `fit` for headroom "
-                          "and whether it is tight",
+                          "and whether its headroom is low",
             "count": len(out)}
 
 
@@ -897,9 +897,9 @@ TOOLS: dict[str, dict[str, Any]] = {
     },
     "fit": {
         "fn": fit,
-        "description": "Will this artifact fit NOW: verdict fits | tight "
-                       "| will not fit, with headroom and what tight "
-                       "changes (a tight box still loads, with a narrower "
+        "description": "Will this artifact fit NOW: verdict fits | fits, low "
+                       "headroom | will not fit, with headroom and what low "
+                       "headroom changes (it still loads, with a narrower "
                        "prompt chunk). Uses the same budget `settings` and "
                        "`load` use.",
         "schema": _schema({"artifact": S("path to the artifact"),

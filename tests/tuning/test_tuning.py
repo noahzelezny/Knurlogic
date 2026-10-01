@@ -53,12 +53,12 @@ def test_lean_bounds_memory_tighter_than_default():
         default.env["VQ_CACHE_LIMIT_GB"])
 
 
-def test_default_on_a_tight_box_degrades_and_says_why():
+def test_default_on_a_low_headroom_box_degrades_and_says_why():
     """The default cannot spend headroom that is not there. The difference between
     a knob and a wish is whether it tells you it did not happen."""
     a = _art(model_type="qwen3_5")                 # measured wider than 512
     r = resolve(a, 71 * GIB, tune="default")   # ~1 GiB: under 1024's ~1.9
-    assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_TIGHT)
+    assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_LOW_HEADROOM)
     assert any(n.startswith("prompt chunk 512") and "reserved" in n
                for n in r.notes)
     assert any("headroom to hold it in" in n for n in r.notes)
@@ -252,7 +252,7 @@ def test_the_resolved_prompt_chunk_reaches_the_scheduler():
 def test_a_measured_family_width_is_a_cap_the_room_decides_how_much_of():
     """qwen3_5 measured 4096. Balanced and fast both read the room free at
     launch: a roomy box takes the widest width whose step transient fits
-    10% of the room, a tight box stays at 512."""
+    10% of the room, a low-headroom box stays at 512."""
     from pathlib import Path
 
     from knurlogic.machine.artifact import Artifact
@@ -262,14 +262,14 @@ def test_a_measured_family_width_is_a_cap_the_room_decides_how_much_of():
     default = S.engine_settings(resolve(a, 96 * GIB).env)
     roomy = S.engine_settings(resolve(a, 96 * GIB, tune="default").env)
     huge = S.engine_settings(resolve(a, 400 * GIB).env)
-    tight = S.engine_settings(resolve(a, 21 * GIB, tune="default").env)
+    low = S.engine_settings(resolve(a, 21 * GIB, tune="default").env)
     # 7.5 GiB predicted at 4096 > the ~4.8 GiB reserved; 3.75 at 2048 fits
     assert default["prefill_step_size"] == 2048
     assert roomy["prefill_step_size"] == 2048
     assert huge["prefill_step_size"] == 4096
     assert "prompt_concurrency" not in roomy   # dead: settings.py says why
-    assert tight["prefill_step_size"] == S.PREFILL_CHUNK_TIGHT
-    assert "prompt_concurrency" not in tight
+    assert low["prefill_step_size"] == S.PREFILL_CHUNK_LOW_HEADROOM
+    assert "prompt_concurrency" not in low
 
 
 def test_with_no_bundled_runtime_it_emits_the_current_name():
@@ -505,14 +505,14 @@ def test_the_context_length_applies_live(monkeypatch):
         "KNURLOGIC_CONTEXT_LENGTH"].startswith("failed")
 
 
-def test_tight_headroom_scales_with_the_machine():
-    """12 GiB was tight for a 96 GiB box and not for a 120 GiB one: 397B
+def test_low_headroom_scales_with_the_machine():
+    """12 GiB was low headroom for a 96 GiB box and not for a 120 GiB one: 397B
     on an M4 Max kept ~14 GiB, took the 4096 prompt chunk, and one agent at
     25k tokens aborted Metal. A fifth of the working set, at least 12."""
     from knurlogic.tuning import settings as S
     G = 1 << 30
-    assert S.tight_headroom_bytes(120 * G) == 24 * G
-    assert S.tight_headroom_bytes(48 * G) == 12 * G
+    assert S.low_headroom_bytes(120 * G) == 24 * G
+    assert S.low_headroom_bytes(48 * G) == 12 * G
 
 
 # --- the prompt chunk reads the room free at launch --------------------------

@@ -71,7 +71,7 @@ DECODE_CHUNK_HEADROOM_DIVISOR = 8
 # launch RESERVES for transients (the step margin, or 1.25x the first
 # request's transient when larger -- the reserve the fit already holds
 # free); else step down, floor 512. (It used to be 10% of the room left
-# after weights, KV and cache: 0.00 GiB on a tight-but-fitting box, which
+# after weights, KV and cache: 0.00 GiB on a fitting box with low headroom, which
 # pinned 512 and cost 2.4x prefill -- GLM-5.3 Flash 2.7bpw on 128 GB:
 # 93-98 tok/s at 512 against 220-236 at 2048, step transient 1.39 GiB
 # measured at 512 over 3018 tokens, 480*hidden*512 predicts ~1.4 GiB.)
@@ -92,7 +92,7 @@ DECODE_CHUNK_HEADROOM_DIVISOR = 8
 # with one agent at 25k tokens on a box with ~14 GiB left, which is what
 # the room rule keeps at 512.
 PREFILL_CHUNK_DEFAULT = 512
-PREFILL_CHUNK_TIGHT = 512
+PREFILL_CHUNK_LOW_HEADROOM = 512
 #: The widths the room rule may choose from (and the knob's native range).
 PREFILL_CHUNK_LADDER = (512, 1024, 2048, 4096)
 #: Predicted step transient per prompt token per unit of hidden size:
@@ -173,20 +173,20 @@ def prefill_chunk_for(model_type: str) -> tuple:
 # cost at 26k-token prefill.
 CACHE_LIMIT_GB_DEFAULT = 4.0
 
-# Below this much free headroom after the weights, treat the box as tight and
+# Below this much free headroom after the weights, treat the box as low on headroom and
 # resolve the memory knobs down rather than leaving performance defaults:
 # the larger of a floor and a fraction of the working set. A fixed 12 GiB
 # lets the 397B on a 128 GB M4 Max (~14 GiB above its weights) take the
 # 4096-token prefill chunk; its first step alone measured 8.1 GiB of
 # transient, and one agent at a 25k-token context aborted Metal. A share of the
 # working set scales with the machine.
-TIGHT_HEADROOM_GIB = 12.0
-TIGHT_HEADROOM_SHARE = 0.20
+LOW_HEADROOM_GIB = 12.0
+LOW_HEADROOM_SHARE = 0.20
 
 
-def tight_headroom_bytes(working_set_bytes: int) -> int:
-    return int(max(TIGHT_HEADROOM_GIB * (1 << 30),
-                   TIGHT_HEADROOM_SHARE * working_set_bytes))
+def low_headroom_bytes(working_set_bytes: int) -> int:
+    return int(max(LOW_HEADROOM_GIB * (1 << 30),
+                   LOW_HEADROOM_SHARE * working_set_bytes))
 
 # Numerics-active flags: family-local, up to +0.97% ppl.
 # v1.5 = both off (bit-exact vs the published arc6 runtime); v2 = both on.
@@ -234,7 +234,7 @@ TUNE_PROFILES: dict = {
         "why": "the measured defaults",
     },
     "lean": {
-        "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_TIGHT,
+        "KNURLOGIC_PREFILL_CHUNK": PREFILL_CHUNK_LOW_HEADROOM,
         "KNURLOGIC_CACHE_LIMIT_GB": 1.0,
         "launch": {"kv_bits": "8", "mtp": "off"},
         "why": "most context and most agents: 8-bit KV where the family "
@@ -324,7 +324,7 @@ PRESET_ROWS = (
     {"name": "KNURLOGIC_PREFILL_CHUNK", "title": "Prompt chunk",
      "help": "Tokens processed per step while reading a prompt; bigger is "
              "faster but needs more memory. Auto uses smaller chunks when "
-             "memory is tight.",
+             "headroom is low.",
      "options": [("", "auto")]
                 + [(str(v), str(v)) for v in (512, 1024, 2048, 4096)]},
     {"name": "KNURLOGIC_CACHE_LIMIT_GB", "title": "Cache reserve",

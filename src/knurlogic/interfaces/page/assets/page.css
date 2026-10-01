@@ -257,7 +257,7 @@ nav a:hover{color:var(--acc)}
 .var .vs{color:var(--faint);font-size:12.5px;white-space:nowrap}
 .var .tag{margin:0}
 .var.no{opacity:.45}
-.var .vs.tight{color:var(--warn)}
+.var .vs.low-headroom{color:var(--warn)}
 .var[aria-current=true]{color:var(--acc)}
 /* The rail is a WORKFLOW -- instances, then a picker with its options and
    a launch -- not a list of the disk. */

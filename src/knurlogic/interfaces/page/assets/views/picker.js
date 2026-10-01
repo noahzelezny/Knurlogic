@@ -181,7 +181,7 @@ function renderPicker(){
           ${isVision(m)?'<span class="tag">VISION</span>':''}
           ${m.update?`<span class="tag" data-upd="${esc(m.name)}"
             title="a newer version is on Hugging Face">update</span>`:''}
-          <span class="vs${m.room&&m.room.small?' tight':''}"${m.room?` title="${
+          <span class="vs${m.room&&m.room.small?' low-headroom':''}"${m.room?` title="${
             esc(m.room.text)}"`:''}>${gb(m.size_bytes)}</span></div>`}).join('')}</div>
     </div>`;
   const a=shown.filter(fits), b=shown.filter(g=>!fits(g));

@@ -109,7 +109,7 @@ def test_load_short_of_the_reserve_but_not_the_step_margin_launches(
     warning, now simply a fit."""
     d, spawned = _fit_setup(tmp_path, monkeypatch)
     r = mcp.load(artifact=str(d))
-    assert spawned and "refused" not in r and "tight" not in r
+    assert spawned and "refused" not in r and "low headroom" not in r
     assert "anyway" not in spawned[0][1]
 
 

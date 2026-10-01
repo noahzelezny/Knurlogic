@@ -157,7 +157,7 @@ def _chunk(weights_gib, box_gib, hidden=4096):
     return int(r.env["KNURLOGIC_PREFILL_CHUNK"]), r.notes, S
 
 
-def test_a_tight_but_fitting_box_gets_the_family_best_the_reserve_covers():
+def test_a_low_headroom_box_gets_the_family_best_the_reserve_covers():
     """118 GiB of weights on 128: 0% of the leftover room, but the step
     margin (6.4 GiB) is reserved for transients and 2048's ~3.75 GiB fits it;
     4096 (~7.5) does not, and is not taken."""
