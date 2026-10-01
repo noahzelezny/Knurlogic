@@ -219,7 +219,8 @@ def launch_fit(a, overrides, tune: str = "default", draft: bool = True,
         launch = {}
     if launch.get("mtp") is False:
         draft = False
-    return single_fit_check(a, budget_bytes, draft, launch.get("kv_bits"))
+    return single_fit_check(a, budget_bytes, draft, launch.get("kv_bits"),
+                            launch.get("vision", True))
 
 
 def run(path: str, host: str, port: int, working_set_gib: float,
@@ -257,7 +258,10 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         if ring.get("split") == "pipeline":
             from knurlogic.tuning import resolve as R
             per, other = R.pipeline_layer_bytes(a)
-            lead = R.pipeline_leader_bytes(a)
+            # rank 0 holds the tower only with vision on (ring-wide sets)
+            from knurlogic.tuning.settings import canonical_sets, vision_of
+            lead = R.pipeline_leader_bytes(
+                a, vision=vision_of(canonical_sets(dict(overrides or {}))))
             bw = ring.get("bandwidth_gbs") or R.chip_bandwidth_gbs(_chip())
             # every rank's working set and bandwidth are gathered once the
             # ring is up; the split is computed the same way on every rank
@@ -345,6 +349,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         return REFUSED_EXIT
     if launch.get("mtp") is False:
         draft = False
+    vision = launch.get("vision", True)
     # identical rounding across GPU architectures (engine/crosschip.py):
     # off by default; auto is on when this job's machines differ
     from knurlogic.engine import crosschip
@@ -365,7 +370,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # and the step margin: a load that fills the budget swaps
         # on its first request instead of failing here.
         from knurlogic.tuning.resolve import single_fit_check
-        chk = single_fit_check(a, ws, draft, kv_bits)
+        chk = single_fit_check(a, ws, draft, kv_bits, vision)
         if chk["state"] == "cannot":
             print(f"REFUSING: {chk['why']}", file=sys.stderr)
             return REFUSED_EXIT
@@ -376,7 +381,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # 115 GiB, every rank of a 397B split would warn "does not fit this
     # box"
     r = resolve(a, ws, profile=profile, tune=tune, holds_bytes=share,
-                kv_bits=kv_bits, long_context=long_context)
+                kv_bits=kv_bits, long_context=long_context, vision=vision)
     apply_preset_overrides(r, overrides)
     if long_context != "off" and ws:
         # YaRN: the KV of the chosen context must fit, or the load is
@@ -443,7 +448,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     def _resolve_for(ws_bytes, tune_name):
         return resolve(a, ws_bytes, profile=profile, tune=tune_name,
                        holds_bytes=share, kv_bits=kv_bits,
-                       long_context=long_context)
+                       long_context=long_context, vision=vision)
 
     # `top` plus `ps` costs about a third of a second, and the page polls
     # status every two. Cached just long enough that a poll is free and a
@@ -658,6 +663,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
               "--no-draft)")
     if kv_bits is not None:
         print(f"kv cache   attention K/V stored at {kv_bits} bits")
+    if not vision:
+        from knurlogic.tuning.resolve import vision_freed_bytes
+        freed = vision_freed_bytes(a, kv_bits)
+        if freed:
+            print(f"vision     off (KNURLOGIC_VISION=off): no tower, image "
+                  f"store or image KV, {freed / GIB:.1f} GiB not held; "
+                  f"image requests get a 400")
     print(f"cross-chip: {crosschip.describe(cross)}")
 
     # The knobs the ENGINE reads -- argv and a process-global mlx call --

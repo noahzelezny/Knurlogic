@@ -354,6 +354,7 @@ KNOB_TITLES: dict = {
     "KNURLOGIC_CROSS_CHIP": "Per-chip rounding",
     "KNURLOGIC_MTP": "MTP",
     "KNURLOGIC_MTP_DYNAMIC": "MTP dynamic",
+    "KNURLOGIC_VISION": "Vision",
     "KNURLOGIC_KV_KERNEL": "KV kernel",
     "KNURLOGIC_LONG_CONTEXT": "Long context",
 }
@@ -426,6 +427,13 @@ KNOB_DOC = {
         "replies, with the same output distribution -- at the cost of "
         "keeping the head in memory. Off frees that memory and every step "
         "is a plain, slower one."),
+    "KNURLOGIC_VISION": (
+        "load the vision tower, its image store and the image KV allowance",
+        "on (the default): a model with a vision tower takes images. Off: "
+        "the tower is not loaded and no image store or image KV is held, "
+        "so that memory goes to headroom (a wider prompt chunk, or a fit "
+        "that would not otherwise); a request with an image gets a 400 "
+        "saying vision is off for this launch."),
     "KNURLOGIC_MTP_DYNAMIC": (
         "switch between drafting and plain steps by their measured cost",
         "on: each regime is timed per batch width and the cheaper one "
@@ -531,6 +539,8 @@ KNOB_HELP = {
                                 "memory; more uses more memory.",
     "KNURLOGIC_MTP": "Guesses several tokens per step: usually faster, for "
                      "a little more memory.",
+    "KNURLOGIC_VISION": "Reads images. Off frees the vision tower's "
+                        "memory for a model you only send text.",
     "KNURLOGIC_MTP_DYNAMIC": "Guesses ahead only where that is faster; off "
                              "gives steadier timing.",
     "KNURLOGIC_KV_BITS": "8-bit holds about twice the conversation in the "
@@ -581,6 +591,7 @@ KNOB_ALIASES = {
     "context_length": ("KNURLOGIC_CONTEXT_LENGTH",),
     "mtp": ("KNURLOGIC_MTP",),
     "mtp_dynamic": ("KNURLOGIC_MTP_DYNAMIC",),
+    "vision": ("KNURLOGIC_VISION",),
     "kv_bits": ("KNURLOGIC_KV_BITS",),
     # the 8-bit KV decode kernel (engine/kvattn): on unless "off"; A/B knob
     "kv_kernel": ("KNURLOGIC_KV_KERNEL",),
@@ -591,7 +602,8 @@ KNOB_ALIASES = {
 
 #: launch settings of the model itself, read when it loads: the same on
 #: every rank of a split (cluster/launch passes them ring-wide)
-MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
+MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_VISION",
+               "KNURLOGIC_KV_BITS",
                "KNURLOGIC_KV_KERNEL", "KNURLOGIC_CROSS_CHIP",
                "KNURLOGIC_LONG_CONTEXT", "KNURLOGIC_PRESET")
 
@@ -605,10 +617,20 @@ MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_KV_BITS",
 # the server never saw.
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "context_length", "mtp",
-                                      "mtp_dynamic", "kv_bits", "kv_kernel",
+                                      "mtp_dynamic", "vision", "kv_bits",
+                                      "kv_kernel",
                                       "cross_chip", "long_context",
                                       "preset")
                           for n in KNOB_ALIASES[k])
+
+
+def vision_of(sets: dict | None) -> bool:
+    """KNURLOGIC_VISION from launch settings: True (the default) unless
+    set off; a bad value is the default here (serve refuses it)."""
+    try:
+        return on_off((sets or {}).get("KNURLOGIC_VISION"), True)
+    except ValueError:
+        return True
 
 
 def on_off(v, default: bool = True) -> bool:
@@ -682,6 +704,7 @@ def engine_settings(env: dict) -> dict:
                                ("cache_limit_gb", "cache_limit_gb", float),
                                ("mtp", "mtp", on_off),
                                ("mtp_dynamic", "mtp_dynamic", on_off),
+                               ("vision", "vision", on_off),
                                ("kv_bits", "kv_bits", kv_bits_of),
                                ("cross_chip", "cross_chip", cross_chip_of),
                                ("long_context", "long_context",
@@ -779,6 +802,7 @@ KNOB_RANGE: dict = {
     "VQ_DECODE_CHUNK": ([4, 8, 16, 32], ""),
     "KNURLOGIC_MTP": (["on", "off"], ""),
     "KNURLOGIC_MTP_DYNAMIC": (["on", "off"], ""),
+    "KNURLOGIC_VISION": (["on", "off"], ""),
     # narrowed per family by the resolver (Resolution.ranges): a family
     # that refuses quantized KV offers bf16 alone
     "KNURLOGIC_KV_BITS": (KV_BITS_VALUES, "bits"),
@@ -1019,7 +1043,8 @@ def check_knob(name: str, value, window: int = 0):
     if name in COMPACT_KNOBS:
         return check_compact_knob(name, value)
     try:
-        if name in ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC"):
+        if name in ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC",
+                    "KNURLOGIC_VISION"):
             if s.lower() not in ("", "on", "off", "1", "0", "true", "false",
                                  "yes", "no"):
                 raise ValueError(f"{s!r} isn't on or off")

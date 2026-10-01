@@ -503,10 +503,14 @@ function whereLine(){
   $('lmwhere').textContent=ns.length ? 'on: '+ns.map(n=>n.node).join(' + ')
     : 'on: none picked (click machines in Memory)';
 }
-// MTP for this launch: shown only for a model that ships a draft head. The
-// default is its saved launch settings (Settings -> Models), else what the
-// preset resolves to (the preview), else on; a click here is for this launch.
-const LMTP={for:null, mtp:null, dyn:null};
+// MTP and vision for this launch: each shown only for a model that has
+// that part, labelled with what it costs (/models.json mtp_bytes,
+// vision_bytes). The default is its saved launch settings (Settings ->
+// Models), else what the preset resolves to (the preview), else on; a
+// click here is for this launch.
+const LMTP={for:null, mtp:null, dyn:null, vis:null};
+const hasMTP=m=>!!(m&&m.mtp);
+const hasVis=m=>!!(m&&m.vision_bytes>0);
 function mtpDefault(name){
   const saved=SETS[name]; if(saved) return String(saved);
   const k=((PREVIEW&&SEL&&PREVIEW.for===SEL.path&&PREVIEW.knobs)||[]).find(k=>k.name===name);
@@ -515,15 +519,20 @@ function mtpDefault(name){
 }
 function mtpState(){
   const m=SEL, box=$('mtpopts');
-  if(!m || !m.mtp){ box.hidden=true; return }
-  if(LMTP.for!==m.path){ LMTP.for=m.path; LMTP.mtp=LMTP.dyn=null }
+  if(!hasMTP(m) && !hasVis(m)){ box.hidden=true; return }
+  if(LMTP.for!==m.path){ LMTP.for=m.path; LMTP.mtp=LMTP.dyn=LMTP.vis=null }
   const mtp=LMTP.mtp||mtpDefault('KNURLOGIC_MTP');
   const dyn=LMTP.dyn||mtpDefault('KNURLOGIC_MTP_DYNAMIC');
+  const vis=LMTP.vis||mtpDefault('KNURLOGIC_VISION');
   box.hidden=false;
   const set=(k,v)=>box.querySelectorAll(`[data-k=${k}] button`).forEach(b=>
     b.setAttribute('aria-pressed', b.dataset.v===v));
-  set('mtp',mtp); set('dyn',dyn);
-  $('mtpdynrow').hidden=mtp==='off';
+  set('mtp',mtp); set('dyn',dyn); set('vis',vis);
+  $('mtprow').hidden=!hasMTP(m);
+  $('mtpdynrow').hidden=!hasMTP(m)||mtp==='off';
+  $('visrow').hidden=!hasVis(m);
+  $('mtplab').textContent='MTP'+(m.mtp_bytes>0?` (${gb(m.mtp_bytes)})`:'');
+  $('vislab').textContent='Vision'+(hasVis(m)?` (${gb(m.vision_bytes)})`:'');
 }
 $('mtpopts').querySelectorAll('.seg').forEach(g=>
   g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
@@ -538,6 +547,8 @@ function launchMTP(m){
       sets.KNURLOGIC_MTP_DYNAMIC=LMTP.dyn||mtpDefault('KNURLOGIC_MTP_DYNAMIC');
     else delete sets.KNURLOGIC_MTP_DYNAMIC;
   }
+  if(hasVis(m)) sets.KNURLOGIC_VISION=LMTP.vis||mtpDefault('KNURLOGIC_VISION');
+  else delete sets.KNURLOGIC_VISION;
   return sets;
 }
 

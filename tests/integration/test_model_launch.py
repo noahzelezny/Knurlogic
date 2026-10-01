@@ -239,6 +239,10 @@ def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
                     S.long_context_family(mt) is None:
                 # offered only where a model card documents YaRN
                 assert k not in ks
+            elif k == "KNURLOGIC_VISION" and \
+                    not isinstance(a.raw_config.get("vision_config"), dict):
+                # offered only on a rung with a vision tower
+                assert k not in ks
             elif k != "KNURLOGIC_KV_KERNEL":
                 assert ks[k]["reach"] == "restart"
 
