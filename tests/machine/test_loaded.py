@@ -275,7 +275,7 @@ def test_knurlogics_own_store_is_scanned_and_movable(tmp_path, monkeypatch):
     assert [r.name for r in rows] == ["tiny"] and rows[0].store == "knurlogic"
 
 
-def test_available_memory_counts_speculative_and_purgeable(monkeypatch):
+def test_available_memory_counts_file_backed_and_purgeable_once(monkeypatch):
     out = """Mach Virtual Memory Statistics: (page size of 16384 bytes)
 Pages free:                               100.
 Pages active:                             500.
@@ -287,8 +287,10 @@ File-backed pages:                        150.
     import subprocess as sp
     monkeypatch.setattr(sp, "run", lambda *a, **k: sp.CompletedProcess(
         a, 0, stdout=out))
-    # free + file-backed + speculative + purgeable; inactive is not added
-    assert loaded.available_memory()["available_bytes"] == 600 * 16384
+    # free + file-backed + purgeable; speculative is already inside
+    # file-backed (vm_stat: active+inactive+speculative == file+anonymous)
+    # and inactive is not added
+    assert loaded.available_memory()["available_bytes"] == 550 * 16384
 
 
 def test_a_module_in_exos_env_is_that_module_not_exo():
@@ -346,9 +348,10 @@ def test_purgeable_and_speculative_are_available_once(monkeypatch):
     _m4_vm_stat(monkeypatch, spec=0.5, purg=2)
     d = loaded.available_memory()
     gib = 1 << 30
-    # free + file-backed + speculative + purgeable; purgeable leaves used
+    # free + file-backed + purgeable (speculative is inside file-backed,
+    # counted once); purgeable leaves used
     assert d["available_bytes"] == pytest.approx(
-        (1.1 + 1.8 + 0.5 + 2) * gib, abs=gib / 100)
+        (1.1 + 1.8 + 2) * gib, abs=gib / 100)
     assert d["used_bytes"] == pytest.approx(
         (116.7 + 4.5 + 1.0) * gib, abs=gib / 100)
 

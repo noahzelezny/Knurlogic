@@ -460,8 +460,8 @@ def available_memory() -> dict:
     Used is what cannot be handed back without swapping: anonymous pages
     (a model's weights, active OR inactive -- an MoE's idle experts sit in
     inactive anonymous pages), wired pages and what the compressor
-    occupies. Available is what can: free, speculative, file-backed pages
-    (cache, droppable) and purgeable ones.
+    occupies. Available is what can: free, file-backed pages (cache,
+    droppable; speculative read-ahead is among them) and purgeable ones.
 
     Earlier versions counted `inactive` as available because psutil does.
     On a 128 GiB Mac holding a 109 GiB model that read 66.9 GiB used when
@@ -489,10 +489,10 @@ def available_memory() -> dict:
             st[g.group(1).strip()] = int(g.group(2)) * page
 
     free = st.get("Pages free", 0)
-    # vm_stat's "free" leaves out speculative pages (read-ahead the kernel
-    # drops on demand), so they are counted separately.
-    speculative = st.get("Pages speculative", 0)
-    cache = st.get("File-backed pages", 0) + speculative
+    # Speculative pages (read-ahead) are already inside "File-backed pages":
+    # active + inactive + speculative == file-backed + anonymous. Adding
+    # them again overstated what a launch could have.
+    cache = st.get("File-backed pages", 0)
     purgeable = st.get("Pages purgeable", 0)
     wired = st.get("Pages wired down", 0)
     comp = st.get("Pages occupied by compressor", 0)
