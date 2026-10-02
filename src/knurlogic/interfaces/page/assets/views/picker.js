@@ -409,7 +409,7 @@ function tb5Why(a, b){
 const MULTI={shard:'tensor', link:'tcp'};
 $('multiopts').querySelectorAll('.seg').forEach(g=>
   g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
-    if(b.disabled) return;
+    if(b.disabled || launching()) return;
     MULTI[g.dataset.k]=b.dataset.v;
     g.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed', x===b));
     pickInfo();
@@ -417,21 +417,25 @@ $('multiopts').querySelectorAll('.seg').forEach(g=>
 // RDMA greyed, with the reason on hover, when a picked machine cannot
 // Only the splits this model can take (the server runs the launch's own
 // refusals, /models.json `splits`); one left is a fixed choice, none hides it
+// A launch in flight holds its split and link: the choices grey with Launch
+const launching=()=>$('launch').textContent.trim()!=='Launch';
 function splitState(){
   const ok=SEL && Array.isArray(SEL.splits) ? SEL.splits : ['tensor','pipeline'];
   const g=$('multiopts').querySelector('[data-k=shard]');
   if(!ok.includes(MULTI.shard) && ok.length) MULTI.shard=ok[0];
   g.querySelectorAll('button').forEach(b=>{
     b.hidden=!ok.includes(b.dataset.v);
-    b.disabled=ok.length<2;
+    b.disabled=!SEL || ok.length<2 || launching();
     b.setAttribute('aria-pressed', b.dataset.v===MULTI.shard);
   });
   g.closest('.opt').hidden=!ok.length;
+  multiState();
 }
 function multiState(){
   const ns=selNodes(), b=$('multiopts').querySelector('[data-v=rdma]');
   const why=ns.length>1 ? rdmaWhy(ns) : '';
-  b.disabled=!!why; b.title=why||'RDMA over Thunderbolt (jaccl)';
+  b.disabled=!!why || launching(); b.title=why||'RDMA over Thunderbolt (jaccl)';
+  $('multiopts').querySelector('[data-v=tcp]').disabled=launching();
   if(why && MULTI.link==='rdma'){
     MULTI.link='tcp';
     b.parentNode.querySelectorAll('button').forEach(x=>
@@ -457,7 +461,7 @@ $('psearch').oninput=e=>{
 
 $('launch').onclick=async()=>{
   const m=SEL; if(!m || launchBlock(selNodes())) return;
-  const b=$('launch'); b.disabled=true; b.textContent='Launching…';
+  const b=$('launch'); b.disabled=true; b.textContent='Launching…'; splitState();
   const pn=launchPeer(), ns=selNodes();
   const tune=window.LOADTUNE||'default';
   const sets=launchMTP(m);
@@ -474,11 +478,11 @@ $('launch').onclick=async()=>{
   if(j.mtp_off_fits && !L.cancelled){
     dismissLaunch(L.id); loadResident();
     if(!await mtpOffConfirm(j)){
-      b.textContent='Launch'; b.disabled=false; loadResident(); return }
+      b.textContent='Launch'; b.disabled=false; splitState(); loadResident(); return }
     L=trackLaunch(m, ns, pn, Date.now());
     j=await act({...body, draft:false}, true);
   }
-  b.textContent='Launch'; b.disabled=false;
+  b.textContent='Launch'; b.disabled=false; splitState();
   settleLaunch(L, j);
   if(L.phase!=='failed' && !L.cancelled){
     // done with this pick: back to "choose a model"
