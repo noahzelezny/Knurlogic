@@ -199,16 +199,37 @@ def _splits(f):
     if not f.servable:
         return None
     key, ident = str(f.path), identity(f.path)
-    hit = _SPLITS.get(key, ident) if ident else None
+    # the answer is the model's AND this build's rules: either changing
+    # asks again (a reverted rule kept offering tensor from the cache)
+    stamp = [ident, _rules_stamp()] if ident else None
+    hit = _SPLITS.get(key, stamp) if stamp else None
     if hit is not None:
         return hit
     try:
         out = splits_of(f.path)
     except (OSError, ValueError, KeyError, AttributeError, TypeError):
         return None
-    if ident:
-        _SPLITS.put(key, ident, out)
+    if stamp:
+        _SPLITS.put(key, stamp, out)
     return out
+
+
+_RULES: list = []
+
+
+def _rules_stamp() -> str:
+    """sha256 of the source that decides a model's splits (tuning/resolve,
+    engine/runtime/tensor_rules, pipeline's refusals live in resolve)."""
+    if not _RULES:
+        import hashlib
+
+        import knurlogic.engine.runtime.tensor_rules as tr
+        import knurlogic.tuning.resolve as rs
+        h = hashlib.sha256()
+        for m in (rs, tr):
+            h.update(Path(m.__file__).read_bytes())
+        _RULES.append(h.hexdigest()[:16])
+    return _RULES[0]
 
 
 _LOADED: dict = {"at": 0.0, "doc": None}

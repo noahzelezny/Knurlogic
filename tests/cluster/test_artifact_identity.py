@@ -307,3 +307,7 @@ def test_the_pickers_splits_are_kept_on_disk_under_the_identity(
     assert D._splits(f) == ["pipeline"] and len(calls) == 1
     (a / "config.json").write_text('{"model_type": "other"}')
     assert D._splits(f) == ["pipeline"] and len(calls) == 2
+    # a build whose split rules differ asks again (a reverted rule kept
+    # offering tensor from the cache)
+    monkeypatch.setattr(D, "_RULES", ["other-build"])
+    assert D._splits(f) == ["pipeline"] and len(calls) == 3
