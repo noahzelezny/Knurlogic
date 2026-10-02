@@ -260,7 +260,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             per, other = R.pipeline_layer_bytes(a)
             # rank 0 holds the tower only with vision on (ring-wide sets)
             from knurlogic.tuning.settings import canonical_sets, vision_of
-            lead = R.pipeline_leader_bytes(
+            lead = R.leader_bytes(
                 a, vision=vision_of(canonical_sets(dict(overrides or {}))))
             bw = ring.get("bandwidth_gbs") or R.chip_bandwidth_gbs(_chip())
             # every rank's working set and bandwidth are gathered once the
@@ -281,8 +281,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                   + (f"{bw:g} GB/s" if bw else "unknown here"))
         else:
             from knurlogic.tuning.resolve import tensor_placement
+            from knurlogic.tuning.resolve import leader_bytes
+            from knurlogic.tuning.settings import canonical_sets, vision_of
             pl = tensor_placement(a, world)
-            share = int(pl["per_rank_bytes"])
+            # rank 0 alone holds the head and, with vision on, the tower
+            share = int(pl["per_rank_bytes"]) + (leader_bytes(
+                a, vision=vision_of(canonical_sets(dict(overrides or {}))))
+                if int(ring["rank"]) == 0 else 0)
             print(f"tensor    rank {ring['rank']} of {world} over "
                   f"{ring['link']}: holds ~{pl['per_rank_bytes'] / GIB:.1f} "
                   f"GiB ({pl['sharded_bytes'] / GIB:.1f} split {world} ways "
