@@ -397,3 +397,14 @@ def test_a_port_that_answers_before_the_weights_are_in_is_loading(monkeypatch):
     assert loaded._knurlogic("http://127.0.0.1:1")[0].state == "loaded"
     doc["load"] = {"state": "warming"}
     assert loaded._knurlogic("http://127.0.0.1:1")[0].state == "warming"
+
+
+def test_the_row_says_mtp_and_vision_only_when_they_run(fake):
+    base = {"schema": 2, "artifact": {"name": "A", "model_type": "qwen3_5",
+                                      "path": "/p/A"}, "memory": {}}
+    fake({"/status.json": {**base, "drafting": {"drafts_now": True},
+                           "vision": {"served": True}}})
+    assert loaded._knurlogic("http://x")[0].detail == "qwen3_5 · VISION · MTP"
+    fake({"/status.json": {**base, "drafting": {"drafts_now": False},
+                           "vision": {"served": False}}})
+    assert loaded._knurlogic("http://x")[0].detail == "qwen3_5"
