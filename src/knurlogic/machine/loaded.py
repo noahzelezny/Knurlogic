@@ -215,6 +215,9 @@ def _knurlogic(base: str) -> list:
     detail = a.get("model_type") or ""
     if bool((d.get("vision") or {}).get("served")):
         detail = f"{detail} · VISION" if detail else "VISION"
+    # MTP likewise: only when a head is bound and drafting
+    if bool((d.get("drafting") or {}).get("drafts_now")):
+        detail = f"{detail} · MTP" if detail else "MTP"
     held = _held(d, m)
     # The artifact is in /status.json from the moment the server starts, so
     # an answering port is not a loaded model: the host's own state is.
