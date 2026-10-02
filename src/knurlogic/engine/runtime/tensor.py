@@ -530,17 +530,6 @@ class JournalPromptCache:
         return self.inner.nbytes
 
 
-def _admission_coord(gen, group) -> None:
-    """Under tensor the batch engine carries a Coord for B0 alone (not the
-    batch loop's B1/B2: every rank samples the same tokens): its admission
-    broadcast tells every rank when one rank's admission failed, so all of
-    them skip that call's decode step instead of all_summing different row
-    counts (pipeline.Coord.diverged)."""
-    if getattr(gen, "_coord", None) is None:
-        from .pipeline import Coord
-        gen._coord = Coord(group)
-
-
 class TensorExecutor(LocalExecutor):
     """Rank 0's executor on a ring: the local batch engine, with every
     admission and removal journaled and the plan sent before each step."""
@@ -549,7 +538,15 @@ class TensorExecutor(LocalExecutor):
         super().__init__(generator)
         self.ring = ring
         self._over = over
-        _admission_coord(generator, ring.link.group)
+        # every rank's batch engine carries a Coord (pipeline.coordinate):
+        # B0 after each admission tells every rank when one rank's failed,
+        # so all skip that decode step instead of all_summing different row
+        # counts (Coord.diverged); with a head on rank 0, BA / B1 / B2 carry
+        # its drafts and verdicts. The scheduler installs it first when it
+        # knows whether rank 0 drafts.
+        if generator._coord is None:
+            from .pipeline import coordinate
+            coordinate(generator, ring.link.group)
 
     def insert(self, a: Admission) -> int:
         if a.wire is None:
@@ -672,12 +669,12 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                 model, None, stats={}, vision=vision, why=why,
                 completion_batch_size=completion_batch_size,
                 prefill_step_size=prefill_step_size, stream=stream)
+            from . import pipeline as PL
             if split == "pipeline":
-                from . import pipeline as PL
                 PL.silence(gen)
-                PL.coordinate(gen, link.group, drafting=drafting)
-            else:
-                _admission_coord(gen, link.group)
+            elif drafting:
+                gen.mirror_hidden()
+            PL.coordinate(gen, link.group, drafting=drafting)
             ex = LocalExecutor(gen)
         return ex
 
@@ -857,7 +854,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
             return load_config(p, link.group)
     # a follower never loads the MTP head: rank 0 drafts, and tells this
     # rank whether it does (agree_head)
-    heads = agree_head(link) if split == "pipeline" else None
+    heads = agree_head(link)
     # nor the vision tower: rank 0 encodes; this rank embeds its rows with
     # the family's own code (engine.vision.request.MirrorVision)
     host = ModelHost(draft=False,
@@ -887,7 +884,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
 
 
 class agree_head:
-    """ModelHost's `head_agree` on a pipeline, on every rank after its
+    """ModelHost's `head_agree` on a split model, on every rank after its
     load: rank 0's answer (it bound a head, or not) told to every rank.
     Only rank 0 holds one; `leader` is what a follower's Coord needs
     (every rank makes B1 / BA, or none does)."""

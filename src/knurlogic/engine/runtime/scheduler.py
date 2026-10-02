@@ -658,12 +658,12 @@ class Scheduler:
         from knurlogic.engine.serve import state
 
         from .tensor import TensorExecutor
-        # a drafting head on a pipeline only (rank 0 holds the last layers,
-        # so the true final hidden state); vision on either split: rank 0
-        # encodes, and every rank embeds the rows it ships (tensor.py)
-        pipe = getattr(self.tensor, "split", "tensor") == "pipeline"
-        head = state.DRAFT.get("head") if (pipe and state.DRAFT.get("on")) \
-            else None
+        # a drafting head on either split: rank 0 has the true final hidden
+        # state (a pipeline's last layers; a tensor split's all_sums make
+        # every layer's output whole on every rank) and drafts; vision on
+        # either split: rank 0 encodes, and every rank embeds the rows it
+        # ships (tensor.py)
+        head = state.DRAFT.get("head") if state.DRAFT.get("on") else None
         vision = state.VISION.get("serve")
         gen = MTPBatchGenerator(
             self.host.model, head,
@@ -671,11 +671,10 @@ class Scheduler:
             vision=vision, why=str(state.DRAFT.get("why") or ""),
             completion_batch_size=self.completion_batch_size,
             prefill_step_size=self.prefill_step_size, stream=self._stream)
-        if pipe:
-            from .pipeline import coordinate
-            coordinate(gen, self.tensor.link.group)
-            if head is not None:
-                state.DRAFT["batch_installed"] = True
+        from .pipeline import coordinate
+        coordinate(gen, self.tensor.link.group)
+        if head is not None:
+            state.DRAFT["batch_installed"] = True
         self._ex = TensorExecutor(gen, self.tensor, over=self._over_local)
         if vision is not None:
             from knurlogic.engine.vision import cachehook

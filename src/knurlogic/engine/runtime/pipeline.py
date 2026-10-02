@@ -311,8 +311,11 @@ def silence(gen) -> None:
 # ------------------------------------------------------------ coordinator
 
 class Coord:
-    """The per-step control broadcasts of a pipeline (module docstring):
-    rank 0's values on every rank, one all_gather on the CPU each.
+    """The per-step control broadcasts of a split model, pipeline (module
+    docstring) or tensor: rank 0's values on every rank, one all_gather on
+    the CPU each. Under tensor every rank's logits are real, but only rank
+    0's verdicts count: fp32-reduced logits need not be bit-equal across
+    ranks, and a different verdict is a different replay -- a hang.
 
     `head`: rank 0 drafts (it bound a head; `tensor.agree_head` told every
     rank). The same on every rank, so BA / B1 are made on every rank or on
@@ -442,7 +445,7 @@ class Coord:
 
 
 def coordinate(gen, group, drafting: bool | None = None) -> Coord:
-    """Install a Coord on a batch engine (every rank of a pipeline).
+    """Install a Coord on a batch engine (every rank of a split model).
     `drafting`: rank 0 drafts; default, whether this engine holds a head
     (rank 0's own answer)."""
     if drafting is None:
