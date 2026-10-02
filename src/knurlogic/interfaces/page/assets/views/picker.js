@@ -738,6 +738,12 @@ function followLaunch(L, d){
     if(lead && lead.state==='loaded' && ph.length && ph.every(p=>p==='ready')) L.phase='ready';
     else L.phase=ph.includes('joining')?'joining ring':ph.includes('loading')?'loading weights'
       :ph.includes('warming')||(e&&e.phase==='warming')?'warming':'starting';
+    // a machine whose half has gone quiet loading: said, as on one machine
+    const st=ms.flatMap(x=>(x.doc.loads||[]).filter(k=>k.job===L.job&&k.phase==='stalled')
+      .map(k=>({machine:x.name, k})));
+    if(L.phase!=='ready' && st.length){ L.phase='stalled';
+      L.why=st.map(s=>`${s.machine}: no log output for a while; last: ${s.k.last_log_line||'--'}`).join(' · ') }
+    else if(L.phase!=='failed') L.why='';
     return;
   }
   const row=mine.flatMap(x=>x.doc.resident||[]).find(r=>r.runtime==='knurlogic'
