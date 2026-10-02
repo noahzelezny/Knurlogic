@@ -586,7 +586,9 @@ def drafting(artifact: str = "", **_) -> dict[str, Any]:
                     "packed head by default, on "
                     "single requests and batches alike: load(draft=false) "
                     "or `serve --no-draft` turns it off. Drafting preserves "
-                    "the output distribution, so off is for troubleshooting."}
+                    "the output distribution (not bit-identical to plain "
+                    "decoding: a near-tie can go either way), so off is for "
+                    "troubleshooting."}
 
 
 def load(artifact: str = "", port: int = 0, tune: str = "default",

@@ -37,3 +37,14 @@ def test_a_close_race_still_rechecks_at_the_base_rate():
     b = _batch()
     drafted = _run(b, 400, 0.05, 0.05)
     assert drafted > 6
+
+
+def test_a_seeded_row_drafts_every_step_whatever_the_timing():
+    from knurlogic.engine.mtp.sampling import Keys
+    b = _batch()
+    b.params = [bl.RowParams(max_tokens=1, dist=None, processors=[], eos=set(),
+                             keys=Keys(1234))]
+    b.drafts = [True]
+    assert _run(b, 400, 0.72, 0.055) == 400     # plain is far cheaper
+    b.drafts = [False]                          # a row the head can't draft
+    assert _run(b, 400, 0.72, 0.055) < 400
