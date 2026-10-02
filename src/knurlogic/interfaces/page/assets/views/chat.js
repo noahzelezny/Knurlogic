@@ -770,6 +770,13 @@ async function runTurn(){
     messages:wire, stream:true, stream_options:{include_usage:true}};
   const effort=$('ceffort').value;
   if(effort) body.reasoning_effort=effort;
+  // The date and language, for a template that takes them (DeepSeek-V4's
+  // latest_reminder: without a language it reasons in Chinese); other
+  // templates ignore an unused kwarg.
+  const now=new Date(), pad=n=>String(n).padStart(2,'0');
+  body.chat_template_kwargs={latest_reminder:
+    `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())},`+
+    `${now.toLocaleDateString('en-US',{weekday:'long'})},${navigator.language}`};
   const t0=performance.now();
   let first=0, last=0, ka=0, usage=null, finishReason=null, streamErr=null, aborted=false;
   try{
