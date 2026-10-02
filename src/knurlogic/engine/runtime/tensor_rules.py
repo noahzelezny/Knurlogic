@@ -24,7 +24,16 @@ A2S, S2A, ROWS = "all-to-sharded", "sharded-to-all", "rows"
 #: quant (weight, scales, biases), VQ (codes, vq_scales, codebook -- the
 #: codebook is replicated)
 LAYOUTS = frozenset({"weight", "bias", "scales", "biases",
-                     "codes", "vq_scales", "codebook"})
+                     "codes", "vq_scales", "codebook", "row_table"})
+#: kept whole on every rank: the VQ codebook (a lookup table the codes
+#: index) and a SKIPZERO row table (rows stay whole under an input cut)
+_WHOLE = ("codebook", "row_table")
+
+#: a SKIPZERO module on disk -> the loaded module's names (the bundled
+#: runtime's skipzero_weights); the mask and shape become its row_table
+_SZ = {"sz_codes": "codes", "sz_scales": "vq_scales",
+       "sz_rowmask": "row_table", "sz_shape": "row_table"}
+_SZ_SPLIT = re.compile(r"^SKIPZERO_SHARD\s*=\s*1\b", re.M)
 
 
 class Rule(NamedTuple):
@@ -84,7 +93,7 @@ def predicate(kind: str) -> Callable:
         raise ValueError(kind)
 
     def pred(path: str, w):
-        if path.endswith("codebook"):
+        if path.endswith(_WHOLE):
             return None
         if kind == ROWS:
             return 0
@@ -161,18 +170,47 @@ def modules_of(shapes: dict) -> dict:
     return out
 
 
-def unverified(shapes: dict) -> dict:
+def skipzero_split(path) -> bool:
+    """The artifact's bundled runtime splits its own SKIPZERO gate/up rows
+    per rank (vqlab's skipzero_shard: model.py declares SKIPZERO_SHARD = 1
+    and takes {"vq_skipzero": {..., "shard": {"rank", "n"}}} at load)."""
+    from pathlib import Path
+    try:
+        return bool(_SZ_SPLIT.search((Path(path) / "model.py").read_text()))
+    except OSError:
+        return False
+
+
+def _runtime_view(mods: dict, sz_split: bool) -> dict:
+    """modules_of as the split meets them after a load whose runtime splits
+    SKIPZERO itself: its gate/up arrive already per rank (not cut here);
+    down_proj's compact codes/scales are cut on the input axis like any VQ
+    module, its row table kept whole."""
+    if not sz_split:
+        return mods
+    out = {}
+    for key, leaves in mods.items():
+        if not any(k in _SZ for k in leaves):
+            out[key] = leaves
+        elif RULES[key[1]].kind == S2A:
+            out[key] = {_SZ.get(k, k): v for k, v in leaves.items()}
+    return out
+
+
+def unverified(shapes: dict, sz_split: bool = False) -> dict:
     """{(rule path, unknown leaves): first layer} -- one module per
     distinct layout no rule knows, for the launch to run."""
     out: dict = {}
-    for (layer, path), leaves in sorted(modules_of(shapes).items()):
+    for (layer, path), leaves in sorted(
+            _runtime_view(modules_of(shapes), sz_split).items()):
         u = tuple(unknown(leaves))
         if u and (path, u) not in out:
             out[(path, u)] = layer
     return out
 
 
-def refusals(shapes: dict, n: int, key_dim: int, kv_heads: int) -> list:
+def refusals(shapes: dict, n: int, key_dim: int, kv_heads: int,
+             sz_split: bool = False) -> list:
     """{safetensors name: shape} -> why these arrays cannot be cut `n` ways
     by RULES, one line per (module, reason) with its numbers and how many
     layers repeat it; [] when they can. An unknown layout is not refused
@@ -185,7 +223,8 @@ def refusals(shapes: dict, n: int, key_dim: int, kv_heads: int) -> list:
         else:
             seen[key] = [line, 0]
 
-    for (layer, path), leaves in sorted(modules_of(shapes).items()):
+    for (layer, path), leaves in sorted(
+            _runtime_view(modules_of(shapes), sz_split).items()):
         rule = RULES[path]
         where = f"layers.{layer}.{path}"
         why = module_refusal(where, rule, {k for k in leaves if k})
