@@ -300,14 +300,14 @@ def test_the_pickers_splits_are_kept_on_disk_under_the_identity(
     monkeypatch.setattr(D, "splits_of",
                         lambda p, n=2: calls.append(p) or ["pipeline"])
     f = SimpleNamespace(path=a, servable=True)
-    assert D._splits(f) == ["pipeline"]
+    assert D._splits(f) == {"splits": ["pipeline"]}
     D._SPLITS.flush()
     D._SPLITS.file = None                    # a fresh process
     D._SPLITS.data = {}
-    assert D._splits(f) == ["pipeline"] and len(calls) == 1
+    assert D._splits(f) == {"splits": ["pipeline"]} and len(calls) == 1
     (a / "config.json").write_text('{"model_type": "other"}')
-    assert D._splits(f) == ["pipeline"] and len(calls) == 2
+    assert D._splits(f) == {"splits": ["pipeline"]} and len(calls) == 2
     # a build whose split rules differ asks again (a reverted rule kept
     # offering tensor from the cache)
     monkeypatch.setattr(D, "_RULES", ["other-build"])
-    assert D._splits(f) == ["pipeline"] and len(calls) == 3
+    assert D._splits(f) == {"splits": ["pipeline"]} and len(calls) == 3
