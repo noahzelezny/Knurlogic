@@ -72,15 +72,12 @@ class ModelHost:
     def __init__(self, *, draft: bool = True,
                  executes_artifact_code: bool = False,
                  image_store_bytes: int | None = None,
-                 shard=None, shard_config=None, vision: bool = True,
-                 load_wait_s: float = 0.0,
+                 shard=None, vision: bool = True, load_wait_s: float = 0.0,
                  head_agree=None, kv_bits: int | None = None,
                  cross_chip: dict | None = None, tower: bool = True):
         """`shard(model)`: split the weights in place before they are read
         (a tensor ring: loaded lazily, split, then evaluated, so a rank
-        never holds the whole model); `shard_config(path)`: config the
-        split's load adds (a runtime that builds its own rank's rows), or
-        None. `vision=False` binds no tower;
+        never holds the whole model). `vision=False` binds no tower;
         `tower=False` binds the vision family without one (a follower rank
         of a split model: rank 0 encodes and ships the image rows).
         `load_wait_s`: how long to wait for the machine's load lock (ranks
@@ -91,7 +88,6 @@ class ModelHost:
         #: engine/crosschip.resolve(...) for this job, None = off
         self.cross_chip = cross_chip
         self.shard = shard
-        self.shard_config = shard_config
         #: head_agree(bound: bool) -> bool, called after the head binds (or
         #: does not) on every load of a pipeline rank: rank 0's answer,
         #: told to every rank -- only rank 0 holds a head, and the others
@@ -243,9 +239,8 @@ class ModelHost:
         """A ring's model, loaded lazily and split in place: nothing read
         yet, and the split's collectives done."""
         from knurlogic.engine.serve.load import load_unlocked
-        extra = self.shard_config(path) if self.shard_config else None
         model, tok = load_unlocked(path, self.executes_artifact_code,
-                                   lazy=True, model_config=extra)
+                                   lazy=True)
         self.shard(model)
         return model, tok
 

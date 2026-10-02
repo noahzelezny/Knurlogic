@@ -111,7 +111,7 @@ def load(path: str, executes_artifact_code: bool = False):
 
 
 def load_unlocked(path: str, executes_artifact_code: bool = False,
-                  lazy: bool = False, model_config: dict | None = None):
+                  lazy: bool = False):
     """`load` for a caller already holding the load lock (the model host).
     A VQ model always runs its OWN bundled model.py, the runtime it ships;
     knurlogic carries no VQ runtime of its own. `state.SERVED["runtime"]`
@@ -131,9 +131,8 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
     state.SERVED["long_context"] = "yarn" if overlay else "off"
     state.SERVED["runtime"] = "bundled"
     kw: dict = {"lazy": True} if lazy else {}
-    if overlay or model_config:
-        # mlx-lm merges it over config.json before the model is built
-        kw["model_config"] = {**(overlay or {}), **(model_config or {})}
+    if overlay:
+        kw["model_config"] = overlay
     if executes_artifact_code and \
             "trust_remote_code" in inspect.signature(_load).parameters:
         kw["trust_remote_code"] = True
