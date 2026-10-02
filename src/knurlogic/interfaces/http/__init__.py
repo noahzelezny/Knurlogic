@@ -153,7 +153,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     if "cache_limit_gb" in settings:
         from knurlogic.engine.serve import set_cache_limit
         print(f"cache limit {set_cache_limit(settings['cache_limit_gb'])}")
-    tensor = shard = agree = None
+    tensor = shard = shard_config = agree = None
     pipe = bool(ring and ring.get("split") == "pipeline")
     if ring:
         from knurlogic.engine.runtime import tensor as T
@@ -169,10 +169,14 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
         else:
             def shard(m):
                 return T.shard(m, link.group)
+
+            def shard_config(p):
+                return T.load_config(p, link.group)
     mh = ModelHost(draft=draft and (not ring or pipe), head_agree=agree,
                    executes_artifact_code=bool(artifact.model_file),
                    image_store_bytes=settings.get("image_store_bytes"),
-                   shard=shard, vision=settings.get("vision", True),
+                   shard=shard, shard_config=shard_config,
+                   vision=settings.get("vision", True),
                    load_wait_s=3600.0 if ring else 0.0,
                    kv_bits=settings.get("kv_bits"),
                    cross_chip=settings.get("cross_chip"))
