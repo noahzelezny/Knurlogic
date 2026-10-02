@@ -213,8 +213,9 @@ async function loadResident(){
   const loading=busy.map(L=>{
     const pct=L.total?Math.min(100,Math.round(100*L.bytes/L.total)):null;
     const say=L.phase==='warming'?'warming up':pct!=null&&L.phase==='loading weights'
-      ?`loading ${pct}%`:L.phase;
-    return `<div class="card loading"><div class="cardhd"><span class="dot"></span>
+      ?'loading':L.phase;
+    return `<div class="card loading"><div class="cardhd"><span class="dot"></span>${
+        pct!=null&&L.phase==='loading weights'?`<span class="lpct">${pct}%</span>`:''}
         <span class="rt knurlogic">${esc(say)}</span><span class="grow"></span>
         <button class="mini danger" data-lc="${L.id}">Cancel</button></div>
       <div class="n">${esc(String(L.name).split('/').pop())}</div>
