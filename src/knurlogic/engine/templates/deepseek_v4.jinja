@@ -2,7 +2,7 @@
     A port of encoding/encoding_dsv4.py (deepseek-ai/DeepSeek-V4-Flash,
     MIT License, Copyright (c) 2023 DeepSeek); see PROVENANCE.md here.
     Kwargs: thinking_mode ('chat'|'thinking'; else enable_thinking picks
-    it), drop_thinking (default true), tools (OpenAI format). Deviations
+    it), drop_thinking (default true), tools (OpenAI format), latest_reminder (e.g. "2026-10-02,Friday,en-US"; the page sends it). Deviations
     from the Python encoder, all in PROVENANCE.md: tools passed as a kwarg
     render on the first system message (an empty one when there is none);
     the generation prompt after a final user turn is emitted only with
@@ -87,6 +87,13 @@
 {%- for m in msgs -%}{%- if m.role in ['user', 'developer'] -%}{%- set un.last = loop.index0 -%}{%- endif -%}{%- endfor -%}
 {%- else -%}
 {%- set msgs = ns.ms -%}
+{%- endif -%}
+{#- latest_reminder kwarg (date, locale...: the official reminder's content)
+    becomes that message before the last user turn when the request carries
+    none: without a language the model reasons in Chinese -#}
+{%- if latest_reminder is defined and latest_reminder and un.last >= 0 and not (msgs | selectattr('role', 'equalto', 'latest_reminder') | list) -%}
+{%- set msgs = msgs[:un.last] + [{'role': 'latest_reminder', 'content': latest_reminder}] + msgs[un.last:] -%}
+{%- set un.last = un.last + 1 -%}
 {%- endif -%}
 {%- set tasks = {'action': '<｜action｜>', 'query': '<｜query｜>', 'authority': '<｜authority｜>', 'domain': '<｜domain｜>', 'title': '<｜title｜>', 'read_url': '<｜read_url｜>'} -%}
 {#- ---- pass 3: render (render_message) -#}
