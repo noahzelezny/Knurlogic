@@ -427,10 +427,6 @@ function splitState(){
     b.hidden=!ok.includes(b.dataset.v);
     b.disabled=!SEL || ok.length<2 || launching();
     b.setAttribute('aria-pressed', b.dataset.v===MULTI.shard);
-    // a layout no split rule knows: offered, checked by running it at launch
-    const unv=b.dataset.v==='tensor' && SEL && SEL.tensor_unverified || [];
-    b.textContent=b.dataset.v==='tensor' ? (unv.length ? 'Tensor?' : 'Tensor') : b.textContent;
-    b.title=unv.length ? 'unverified until launch runs it: '+unv.join('; ') : '';
   });
   g.closest('.opt').hidden=!ok.length;
   multiState();
