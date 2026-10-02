@@ -352,7 +352,10 @@ function launchBlock(ns){
 // identity -- never by path; a model it does not have is greyed "not on".
 // The load itself goes to this page's POST /loaded.json with `node`, which
 // forwards it by identity; the peer runs its own checks.
-const PEERMODELS={};   // node id -> Set of identities, once read
+// node id -> Set of identities, read again each time the picker opens: a
+// model rebuilt on disk (a new model.py) changes its identity, and a list
+// read once kept saying "not on <peer>" for models the peer holds
+const PEERMODELS={};
 const launchPeer=()=>{ const ns=selNodes();
   return ns.length===1 && !isLocal(ns[0]) ? ns[0] : null };
 function onNode(n, m){
@@ -451,6 +454,8 @@ function nodeSelChanged(){
 }
 $('openpick').onclick=()=>{
   OVL.open($('picker'), {face:$('picker').querySelector('.box')});
+  for(const k of Object.keys(PEERMODELS)) delete PEERMODELS[k];
+  loadPeerModels();
   renderPicker(); $('psearch').focus();
 };
 $('pclose').onclick=()=>OVL.close();
