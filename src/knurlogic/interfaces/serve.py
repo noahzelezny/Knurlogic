@@ -287,7 +287,6 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                   f"{ring['link']}: holds ~{pl['per_rank_bytes'] / GIB:.1f} "
                   f"GiB ({pl['sharded_bytes'] / GIB:.1f} split {world} ways "
                   f"+ {pl['replicated_bytes'] / GIB:.1f} replicated)")
-            draft = False
         _ring_env(ring)
         _ring_marker(ring)
         # the ring-wide knobs beat the resolver like any --set

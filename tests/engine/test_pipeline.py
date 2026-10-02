@@ -315,13 +315,23 @@ def test_the_serving_path_follows_rank_0s_plan_on_a_pipeline(tmp_path):
     assert d["split"] == d["whole"] and all(len(t) == 30 for t in d["whole"])
 
 
-def test_a_prefix_only_the_follower_could_use_is_prefilled_on_every_rank(
+def test_the_serving_path_follows_rank_0s_plan_on_a_drafting_tensor_split(
         tmp_path):
+    """The same serving path on a tensor split, rank 0 alone holding the
+    head and the follower's tensor.follow drafting: rank 0 streams exactly
+    the unsplit executor's tokens with the head."""
+    d = _ring(tmp_path, "engine", "", "tensor", "1")
+    assert d["split"] == d["whole"] and all(len(t) == 30 for t in d["whole"])
+
+
+@pytest.mark.parametrize("split", ["pipeline", "tensor"])
+def test_a_prefix_only_the_follower_could_use_is_prefilled_on_every_rank(
+        tmp_path, split):
     """Rank 0 alone holds the head, so only rank 0 can tell whether a
     prompt-cache entry is usable for a drafting row: the follower takes
     rank 0's answer (BA) and prefills from scratch with it -- the second
     prompt's tokens are the unsplit engine's, and the ring stays in step."""
-    d = _ring(tmp_path, "hit")
+    d = _ring(tmp_path, "hit", split)
     assert d["hit"] == 5
     assert d["split"] == d["whole"]
     assert all(len(t) == 20 for t in d["whole"])
@@ -341,17 +351,20 @@ def test_images_on_a_split_model_are_the_unsplit_engines(tmp_path, split):
     assert all(len(t) == 10 for t in d["whole"])
 
 
-@pytest.mark.parametrize("split,fail", [("pipeline", "nan"),
-                                        ("pipeline", "admit"),
-                                        ("tensor", "nan"),
-                                        ("tensor", "admit")])
-def test_a_row_failing_on_rank_0_only_fails_that_row(tmp_path, split, fail):
+@pytest.mark.parametrize("split,fail,drafting", [("pipeline", "nan", "1"),
+                                                 ("pipeline", "admit", "1"),
+                                                 ("tensor", "nan", ""),
+                                                 ("tensor", "admit", ""),
+                                                 ("tensor", "nan", "1"),
+                                                 ("tensor", "admit", "1")])
+def test_a_row_failing_on_rank_0_only_fails_that_row(tmp_path, split, fail,
+                                                     drafting):
     """Rank 0 alone fails one row (non-finite logits mid-decode, or an
     admission that raised after its forward): that row ends, the others
     stream every token, and the follower -- which still held the row --
     drops it from the next plan's remove instead of raising Desync (both
     processes exit 0; _ring asserts it)."""
-    d = _ring(tmp_path, "engine", fail, split)
+    d = _ring(tmp_path, "engine", fail, split, drafting)
     lens = [len(t) for t in d["split"]]
     assert lens[0] == lens[2] == 30, lens
     assert lens[1] < 30, lens
