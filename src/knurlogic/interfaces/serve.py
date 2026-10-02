@@ -828,7 +828,8 @@ def main(argv=None) -> int:
                    help="do not use a multi-token-prediction head even if "
                         "one is packed beside the weights (the same as "
                         "--set KNURLOGIC_MTP=off). Drafting preserves the "
-                        "output distribution.")
+                        "output distribution but is not bit-identical to "
+                        "plain decoding: a near-tie can go either way.")
     p.add_argument("--mtp-dynamic", choices=("on", "off"), default=None,
                    help="on: switch between drafting and plain steps by "
                         "their measured cost (default); off: draft every "
