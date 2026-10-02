@@ -159,10 +159,10 @@ def test_the_plain_name_beats_a_prefixed_copy(tmp_path, monkeypatch):
 
 
 def _fresh_process():
-    A._flush()
+    A._DISK.flush()
     A._IDENT.clear()
-    A._DISK["file"] = None
-    A._DISK["data"] = {}
+    A._DISK.file = None
+    A._DISK.data = {}
 
 
 def _boom(*a, **k):
@@ -199,19 +199,19 @@ def test_corrupt_disk_cache_is_ignored(tmp_path):
     a = _art(tmp_path, "m", b"a")
     first = A.identity(a)
     _fresh_process()
-    f = A._disk_file()
+    f = A._DISK.path()
     f.write_text("{not json")
     assert A.identity(a) == first
-    A._flush()
+    A._DISK.flush()
     assert json.loads(f.read_text())
 
 
 def test_flush_prunes_gone_paths(tmp_path):
     a = _art(tmp_path, "m", b"a")
     A.identity(a)
-    A._DISK["data"]["/no/such/path"] = [[], "x"]
-    A._flush()
-    assert list(json.loads(A._disk_file().read_text())) == [str(a)]
+    A._DISK.data["/no/such/path"] = [[], "x"]
+    A._DISK.flush()
+    assert list(json.loads(A._DISK.path().read_text())) == [str(a)]
 
 
 def _counting(monkeypatch):
@@ -263,16 +263,16 @@ def test_flush_races_writers_without_losing_entries(tmp_path, monkeypatch):
     def writer(part):
         try:
             for k in part:
-                with A._DISK_LOCK:
-                    A._disk()[k] = [[], "v"]
-                    A._schedule_flush()
+                with A._DISK.lock:
+                    A._DISK._live()[k] = [[], "v"]
+                    A._DISK._schedule()
         except Exception as e:      # noqa: BLE001
             errors.append(e)
 
     def flusher():
         try:
             for _ in range(50):
-                A._flush()
+                A._DISK.flush()
         except Exception as e:      # noqa: BLE001
             errors.append(e)
 
@@ -283,7 +283,27 @@ def test_flush_races_writers_without_losing_entries(tmp_path, monkeypatch):
     for t in ts:
         t.join()
     assert not errors
-    A._flush()
-    on_disk = json.loads(A._disk_file().read_text())
+    A._DISK.flush()
+    on_disk = json.loads(A._DISK.path().read_text())
     assert set(keys) <= set(on_disk) and str(a) in on_disk
-    assert not A._DISK["dirty"]
+    assert not A._DISK.dirty
+
+
+def test_the_pickers_splits_are_kept_on_disk_under_the_identity(
+        tmp_path, monkeypatch):
+    # after a page restart the picker read every model's shard headers
+    # again (~8 s over the library); the answer is kept under the identity
+    from types import SimpleNamespace
+    from knurlogic.interfaces.page import documents as D
+    a = _art(tmp_path, "m", b"a")
+    calls = []
+    monkeypatch.setattr(D, "splits_of",
+                        lambda p, n=2: calls.append(p) or ["pipeline"])
+    f = SimpleNamespace(path=a, servable=True)
+    assert D._splits(f) == ["pipeline"]
+    D._SPLITS.flush()
+    D._SPLITS.file = None                    # a fresh process
+    D._SPLITS.data = {}
+    assert D._splits(f) == ["pipeline"] and len(calls) == 1
+    (a / "config.json").write_text('{"model_type": "other"}')
+    assert D._splits(f) == ["pipeline"] and len(calls) == 2

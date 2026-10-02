@@ -235,104 +235,12 @@ _SAMPLE = 64 * 1024
 _MAX_HEADER = 64 * 1024 * 1024
 
 
-# The cache persists in <cache_dir>/identities.json, keyed by path and the
-# same stamp, so a page or serve start does not rehash every shard. Loaded
-# once per process (per cache dir); new entries are written once, after a
-# short quiet spell (a /models.json build writes once, not per model), by
-# temp file + rename -- page and serve may both write, last writer wins and
-# the entries are idempotent. A corrupt or unreadable file is ignored.
-_DISK: dict = {"file": None, "data": {}, "timer": None, "dirty": False,
-               "atexit": False}
-#: guards every read and write of _DISK (page handler threads and the
-#: flush timer share it)
-_DISK_LOCK = __import__("threading").Lock()
-#: seconds of quiet before new identities are written
-_DISK_DELAY = 1.0
+# The cache persists in <cache_dir>/identities.json (machine/disk_cache),
+# keyed by path and the same stamp, so a page or serve start does not
+# rehash every shard.
+from knurlogic.machine.disk_cache import DiskCache  # noqa: E402
 
-
-def _disk_file() -> Path | None:
-    try:
-        from knurlogic.machine.servers import cache_dir
-        return cache_dir() / "identities.json"
-    except OSError:
-        return None
-
-
-def _disk() -> dict:
-    """The live on-disk cache dict; call with _DISK_LOCK held."""
-    f = _disk_file()
-    if _DISK["file"] != f:
-        data = {}
-        if f is not None:
-            try:
-                raw = json.loads(f.read_text())
-                if isinstance(raw, dict):
-                    data = {k: v for k, v in raw.items()
-                            if isinstance(v, list) and len(v) == 2
-                            and isinstance(v[1], str)}
-            except (OSError, ValueError):
-                data = {}
-        _DISK["file"], _DISK["data"] = f, data
-    return _DISK["data"]
-
-
-def _flush() -> None:
-    """Write the on-disk identity cache now (pruning gone paths). Page
-    handler threads keep writing while it runs: the dict is copied under
-    the lock, pruned outside it, and only the pruned keys are dropped from
-    the live dict, so a concurrent write is kept (and lands next flush)."""
-    import os
-    import tempfile
-    with _DISK_LOCK:
-        t, _DISK["timer"] = _DISK["timer"], None
-        _DISK["dirty"] = False
-        f = _DISK["file"]
-        snap = dict(_DISK["data"])
-    if t is not None:
-        t.cancel()
-    if f is None:
-        return
-    gone = [k for k in snap if not os.path.exists(k)]
-    with _DISK_LOCK:
-        for k in gone:
-            if _DISK["data"].get(k) is snap[k]:
-                del _DISK["data"][k]
-            del snap[k]
-    tmp = None
-    try:
-        fd, tmp = tempfile.mkstemp(dir=f.parent, prefix=".identities.")
-        with os.fdopen(fd, "w") as fh:
-            json.dump(snap, fh)
-        os.replace(tmp, f)
-    except OSError:
-        with _DISK_LOCK:
-            _DISK["dirty"] = True       # atexit tries again
-        if tmp is not None:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-
-
-def _atexit_flush() -> None:
-    if _DISK["dirty"]:
-        _flush()
-
-
-def _schedule_flush() -> None:
-    """Call with _DISK_LOCK held."""
-    import atexit
-    import threading
-    if _DISK["timer"] is not None:
-        _DISK["timer"].cancel()
-    if not _DISK["atexit"]:
-        atexit.register(_atexit_flush)
-        _DISK["atexit"] = True
-    _DISK["dirty"] = True
-    t = threading.Timer(_DISK_DELAY, _flush)
-    t.daemon = True
-    _DISK["timer"] = t
-    t.start()
+_DISK = DiskCache("identities.json", valid=lambda v: isinstance(v, str))
 
 
 class AmbiguousIdentity(ValueError):
@@ -405,11 +313,10 @@ def identity(path) -> str:
     if hit and hit[0] == stamp:
         return hit[1]
     jstamp = json.loads(json.dumps(stamp))
-    with _DISK_LOCK:
-        dhit = _disk().get(key)
-    if dhit and dhit[0] == jstamp:
-        _IDENT[key] = (stamp, dhit[1])
-        return dhit[1]
+    dhit = _DISK.get(key, jstamp)
+    if dhit is not None:
+        _IDENT[key] = (stamp, dhit)
+        return dhit
     h = hashlib.sha256()
     try:
         h.update(cfg.read_bytes())
@@ -432,9 +339,7 @@ def identity(path) -> str:
         return ""
     out = h.hexdigest()[:16]
     _IDENT[key] = (stamp, out)
-    with _DISK_LOCK:
-        _disk()[key] = [jstamp, out]
-        _schedule_flush()
+    _DISK.put(key, jstamp, out)
     return out
 
 

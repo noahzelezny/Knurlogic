@@ -13,6 +13,8 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+from knurlogic.machine.disk_cache import DiskCache
+
 GIB = 1 << 30
 ASSETS = Path(__file__).parent / "assets"
 PAGE = ASSETS / "index.html"
@@ -184,15 +186,29 @@ def splits_of(path, n: int = 2) -> list:
         ("pipeline", lambda: pipeline_refusals(cfg, n))) if not why()]
 
 
+#: {path: [identity, splits]} in <cache_dir>/splits.json: the answer reads
+#: every shard's header, ~8 s for the whole library after a page restart
+_SPLITS = DiskCache("splits.json", valid=lambda v: isinstance(v, list))
+
+
 def _splits(f):
-    """`splits_of` a found model; None when it cannot be read (the picker
-    then offers both and the launch answers)."""
+    """`splits_of` a found model, kept on disk under its identity (which
+    changes with any shard, config or *.py); None when it cannot be read
+    (the picker then offers both and the launch answers)."""
+    from knurlogic.machine.artifact import identity
     if not f.servable:
         return None
+    key, ident = str(f.path), identity(f.path)
+    hit = _SPLITS.get(key, ident) if ident else None
+    if hit is not None:
+        return hit
     try:
-        return splits_of(f.path)
+        out = splits_of(f.path)
     except (OSError, ValueError, KeyError, AttributeError, TypeError):
         return None
+    if ident:
+        _SPLITS.put(key, ident, out)
+    return out
 
 
 _LOADED: dict = {"at": 0.0, "doc": None}
