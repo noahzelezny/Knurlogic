@@ -1,6 +1,7 @@
 """One rank of tests/test_tensor.py's two-process ring (not a test module).
 
-Builds the tiny qwen3_5_moe text model, splits it with
+Builds the tiny text model of a family (qwen3_5_moe unless named: the
+second argument), splits it with
 engine/runtime/tensor.shard, and prefills + decodes a few tokens; rank 0
 also runs the unsplit model and writes both logits for the test to
 compare. Run with MLX_RANK and MLX_HOSTFILE set."""
@@ -10,7 +11,7 @@ import sys
 import numpy as np
 
 
-def build(seed=0, dtype="float32"):
+def build(family="qwen3_5_moe", seed=0, dtype="float32"):
     import importlib
 
     import fixtures_vision_qwen as FQ
@@ -18,9 +19,11 @@ def build(seed=0, dtype="float32"):
     from mlx.utils import tree_flatten, tree_unflatten
 
     from knurlogic.engine import register
-    register.register("qwen3_5_moe", override=True)
-    m = importlib.import_module("mlx_lm.models.qwen3_5_moe")
-    cfg = dict(FQ.TEXT["qwen3_5_moe"], model_type="qwen3_5_moe")
+    register.register(family, override=True)
+    m = importlib.import_module(f"mlx_lm.models.{family}")
+    # qwen4_exp's defaults are full size; its tiny config is the fixture's
+    cfg = FQ.config(family) if family == "qwen4_exp" else \
+        dict(FQ.TEXT[family], model_type=family)
     model = m.Model(m.ModelArgs.from_dict(cfg))
     shapes = {k: v.shape for k, v in tree_flatten(model.parameters())}
     w = FQ.init_weights(shapes, seed)
@@ -43,7 +46,7 @@ def run(model, ids, then):
     return np.array(y)
 
 
-def main(out_path):
+def main(out_path, family="qwen3_5_moe"):
     from knurlogic.engine.runtime import tensor as T
     link = T.init("ring")
     ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]
@@ -54,7 +57,7 @@ def main(out_path):
     bits = kvquant.parse_bits(os.environ.get("KNURLOGIC_KV_BITS"))
 
     def built():
-        m = build()
+        m = build(family)
         if bits:
             assert kvquant.install(m, bits) > 0
         return m
@@ -87,4 +90,4 @@ def main(out_path):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1]))
+    sys.exit(main(*sys.argv[1:]))

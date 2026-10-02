@@ -1,5 +1,5 @@
-"""The tensor split's rules: which arrays of a qwen3_5 layer are cut, on
-which axis, in which segments -- one table that engine/runtime/tensor.py
+"""The tensor split's rules: which arrays of a qwen3_5 / qwen4_exp layer
+are cut, on which axis, in which segments -- one table that engine/runtime/tensor.py
 `shard` applies to loaded arrays and tuning/resolve checks against the
 safetensors headers before anything loads, so the refusal and the loader
 cannot disagree. No mlx here: the picker asks this of ~80 models.
@@ -19,6 +19,11 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 A2S, S2A, ROWS = "all-to-sharded", "sharded-to-all", "rows"
+#: a table stored in parts (`shard_0` .. `shard_{P-1}`): each rank keeps a
+#: contiguous P/n of the parts whole and reads the others' rows as zeros;
+#: the table's output is summed across the ranks (exact: one rank's rows
+#: are non-zero). No axis of a part is cut, so any layout in it holds.
+PARTS = "parts"
 
 #: the parameter layouts the split knows: bf16 (weight, bias), mlx affine
 #: quant (weight, scales, biases), VQ (codes, vq_scales, codebook -- the
@@ -37,7 +42,8 @@ _SZ_SPLIT = re.compile(r"^SKIPZERO_SHARD\s*=\s*1\b", re.M)
 
 
 class Rule(NamedTuple):
-    kind: str               # A2S: output axis; S2A: input axis; ROWS: axis 0
+    #: A2S: output axis; S2A: input axis; ROWS: axis 0; PARTS: whole parts
+    kind: str
     #: "qkv": cut at [key_dim, 2 * key_dim] first (q, k, v each split);
     #: an int k: k equal parts
     segments: str | int = 1
@@ -69,6 +75,10 @@ RULES = {
     "mlp.gate_proj": Rule(A2S),
     "mlp.up_proj": Rule(A2S),
     "mlp.down_proj": Rule(S2A),
+    # qwen4_exp's n-gram table (layer 1 of Flash-Next, 128 parts, 30-42
+    # GiB): too big to hold whole on every rank, and its quantization
+    # groups / VQ rows run along the 160-wide axis, which no cut respects
+    "ple.ple_embedding.ngram_embedding": Rule(PARTS),
 }
 
 #: Hugging Face spellings the qwen3_5_moe sanitize renames before shard
@@ -80,8 +90,15 @@ _HF = {
     "mlp.experts.down_proj": ("mlp.switch_mlp.down_proj", "weight", None),
 }
 _HF_EXPERT = re.compile(r"mlp\.experts\.\d+\.(gate|up|down)_proj\.(\w+)$")
+#: an array of one part of a PARTS table: (table path, part, leaf)
+_PART = re.compile(r"^(.+)\.shard_(\d+)\.(\w+)$")
 #: a decoder layer of the trunk (not mtp.layers, not the tower's blocks)
 _LAYER = re.compile(r"^(?:model\.|language_model\.)*layers\.(\d+)\.(.+)$")
+
+
+def owner(part: int, parts: int, n: int) -> int:
+    """The rank holding part `part` of a PARTS table of `parts`."""
+    return part * n // parts
 
 
 def predicate(kind: str) -> Callable:
@@ -126,7 +143,7 @@ def module_refusal(path: str, rule: Rule, leaves) -> str | None:
 def locate(name: str):
     """A safetensors name -> (layer, rule path, leaf, extra segments) when
     it is under a rule, else None (replicated). `leaf` is None for a bare
-    array (dt_bias, A_log)."""
+    array (dt_bias, A_log); "shard_<i>.<leaf>" under a PARTS table."""
     m = _LAYER.match(name)
     if not m:
         return None
@@ -139,6 +156,9 @@ def locate(name: str):
         return layer, f"mlp.switch_mlp.{e.group(1)}_proj", e.group(2), None
     if tail in RULES:
         return layer, tail, None, None
+    p = _PART.match(tail)
+    if p and p.group(1) in RULES and RULES[p.group(1)].kind == PARTS:
+        return layer, p.group(1), f"shard_{p.group(2)}.{p.group(3)}", None
     path, _, leaf = tail.rpartition(".")
     if path in RULES:
         return layer, path, leaf, None
@@ -151,6 +171,8 @@ def sharded(name: str) -> bool:
     if at is None:
         return False
     _, path, leaf, _ = at
+    if RULES[path].kind == PARTS:
+        return True
     return predicate(RULES[path].kind)(leaf or path, _Nd(2)) is not None
 
 
@@ -199,10 +221,13 @@ def _runtime_view(mods: dict, sz_split: bool) -> dict:
 
 def unverified(shapes: dict, sz_split: bool = False) -> dict:
     """{(rule path, unknown leaves): first layer} -- one module per
-    distinct layout no rule knows, for the launch to run."""
+    distinct layout no rule knows, for the launch to run. A PARTS table
+    has none: its parts are never cut."""
     out: dict = {}
     for (layer, path), leaves in sorted(
             _runtime_view(modules_of(shapes), sz_split).items()):
+        if RULES[path].kind == PARTS:
+            continue
         u = tuple(unknown(leaves))
         if u and (path, u) not in out:
             out[(path, u)] = layer
@@ -227,6 +252,12 @@ def refusals(shapes: dict, n: int, key_dim: int, kv_heads: int,
             _runtime_view(modules_of(shapes), sz_split).items()):
         rule = RULES[path]
         where = f"layers.{layer}.{path}"
+        if rule.kind == PARTS:
+            parts = len({k.split(".")[0] for k in leaves})
+            if parts % n:
+                say((path, "parts"), f"{where}: {parts} parts do not "
+                    f"divide by {n}")
+            continue
         why = module_refusal(where, rule, {k for k in leaves if k})
         if why:
             say((path, "bias"), why)

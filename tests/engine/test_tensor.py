@@ -345,12 +345,16 @@ def test_a_ring_serves_its_first_model_and_refuses_switching():
         Scheduler(H(), tensor=R(), prompt_cache_bytes=1 << 30)
 
 
-@pytest.mark.parametrize("kv_bits", ["bf16", "8"])
-def test_a_two_rank_split_computes_the_whole_models_logits(tmp_path,
+@pytest.mark.parametrize("family,kv_bits", [("qwen3_5_moe", "bf16"),
+                                            ("qwen3_5_moe", "8"),
+                                            ("qwen4_exp", "bf16"),
+                                            ("qwen4_exp", "8")])
+def test_a_two_rank_split_computes_the_whole_models_logits(tmp_path, family,
                                                            kv_bits):
-    """Two processes on 127.0.0.1, the tiny qwen3_5_moe split in two
-    (float32, so rounding cannot hide a wrong split): the split model's
-    logits over a prefill and six decode steps are the unsplit model's.
+    """Two processes on 127.0.0.1, the tiny model split in two (float32,
+    so rounding cannot hide a wrong split): the split model's logits over a
+    prefill and six decode steps are the unsplit model's. qwen4_exp deals
+    its n-gram table's parts between the ranks and sums the lookup.
     At 8-bit KV too: groups run along a head's dims, so a rank's half of
     the heads quantizes as it does in the whole cache (up to a last-bit
     difference in the sharded projections that feed it)."""
@@ -376,7 +380,8 @@ def test_a_two_rank_split_computes_the_whole_models_logits(tmp_path,
                PYTHONPATH=os.pathsep.join(
                    [str(here.parents[1] / "src"), str(here)] + sys.path))
     procs = [subprocess.Popen(
-        [sys.executable, str(here / "tensor_ring_worker.py"), str(out)],
+        [sys.executable, str(here / "tensor_ring_worker.py"), str(out),
+         family],
         env=dict(env, MLX_RANK=str(r)), stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT) for r in range(2)]
     try:
@@ -792,6 +797,63 @@ def test_a_module_the_runtime_split_is_not_cut_again():
     with pytest.raises(ValueError, match="rank 1 of 2, not 0 of 2"):
         T._apply(layer, "mlp.switch_mlp.gate_proj",
                  RULES["mlp.switch_mlp.gate_proj"], 0, 2)
+
+
+#: Flash-Next VQ's text config and its layer 1 (linear attention, MoE, the
+#: n-gram table) cut down to 4 parts of 8 rows
+FLASH_NEXT = {"model_type": "qwen4_exp", "text_config": {
+    "model_type": "qwen4_exp_text", "num_attention_heads": 24,
+    "num_key_value_heads": 2, "linear_num_key_heads": 16,
+    "linear_key_head_dim": 128, "linear_num_value_heads": 48}}
+
+
+def _flash_next_layer1(parts=4):
+    pre = "model.layers.1."
+    out = {pre + "linear_attn.in_proj_qkv.weight": (10240, 640),
+           pre + "linear_attn.in_proj_qkv.scales": (10240, 40),
+           pre + "linear_attn.conv1d.weight": (10240, 4, 1),
+           pre + "linear_attn.out_proj.weight": (2560, 1536),
+           pre + "attn_hyper_connection.input_mix_weight_up.weight":
+               (10240, 40),
+           pre + "ple.key_proj.weight": (10240, 640),
+           pre + "ple.ple_embedding.layer_multipliers": (3,),
+           pre + "mlp.switch_mlp.down_proj.codes": (512, 2560, 100),
+           pre + "mlp.switch_mlp.down_proj.codebook": (1024, 2)}
+    for i in range(parts):
+        t = f"{pre}ple.ple_embedding.ngram_embedding.shard_{i}."
+        out.update({t + "codes": (8, 80), t + "vq_scales": (8, 5),
+                    t + "codebook": (256, 2)})
+    return out
+
+
+def test_flash_next_deals_its_ngram_parts_whole(tmp_path):
+    """The n-gram table's parts go whole to one rank each (codebook and
+    all: no axis of a part is cut), so they count as split bytes and no
+    layout in them is unverified; the hyper-connections and the rest of
+    the PLE are replicated."""
+    from knurlogic.engine.runtime import tensor_rules as TR
+    a = _artifact(tmp_path, FLASH_NEXT, _flash_next_layer1())
+    assert R.tensor_split_refusals(a, 2) == []
+    assert R.tensor_unverified(a) == {}
+    t = "model.layers.1.ple.ple_embedding.ngram_embedding.shard_3."
+    assert TR.locate(t + "codes") == (
+        1, "ple.ple_embedding.ngram_embedding", "shard_3.codes", None)
+    assert R.tensor_sharded(t + "codebook")
+    assert not R.tensor_sharded("model.layers.1.ple.key_proj.weight")
+    assert not R.tensor_sharded(
+        "model.layers.1.attn_hyper_connection.input_mix_weight_up.weight")
+    assert [TR.owner(i, 4, 2) for i in range(4)] == [0, 0, 1, 1]
+    p = R.tensor_placement(type("A", (), {"path": a}), 2)
+    # replicated: the hyper-connection, key_proj, the hash multipliers and
+    # down_proj's codebook
+    assert p["replicated_bytes"] == 10240 * 40 + 10240 * 640 + 3 + 1024 * 2
+
+
+def test_ngram_parts_that_do_not_divide_are_refused(tmp_path):
+    a = _artifact(tmp_path, FLASH_NEXT, _flash_next_layer1(parts=3))
+    assert R.tensor_header_refusals(a, FLASH_NEXT, 2) == [
+        "layers.1.ple.ple_embedding.ngram_embedding: 3 parts do not "
+        "divide by 2"]
 
 
 def test_hf_bf16_names_map_to_the_rules_sanitize_feeds_shard():
