@@ -1216,22 +1216,35 @@ def tensor_placement(artifact: Artifact, n: int) -> dict:
 def tensor_header_refusals(path, cfg: dict, n: int) -> list:
     """Why the arrays on disk cannot be cut `n` ways by the split's own
     rules (engine/runtime/tensor_rules), each with its numbers."""
-    from knurlogic.engine.runtime.tensor_rules import refusals
+    from knurlogic.engine.runtime.tensor_rules import refusals, skipzero_split
     if n < 2:
         return []
     tc = cfg.get("text_config", cfg)
     kd = (tc.get("linear_num_key_heads") or 0) * \
         (tc.get("linear_key_head_dim") or 0)
     shapes = {k: s for k, (s, _) in trunk_headers(path).items()}
-    return refusals(shapes, n, kd, int(tc.get("num_key_value_heads") or 0))
+    sz = skipzero_split(path)
+    out = []
+    if sz:
+        # the runtime cuts these by output row, per expert: the rows must
+        # divide (it refuses at load; said here before any rank starts)
+        for p, m in sorted(((cfg.get("vq_skipzero") or {}).get("modules")
+                            or {}).items()):
+            OUT = int(m.get("out") or ((cfg.get("vq_modules") or {})
+                                         .get(p) or {}).get("out") or 0)
+            if p.endswith(("gate_proj", "up_proj")) and OUT % n:
+                out.append(f"{p}: {OUT} output rows do not divide by {n}")
+    return out + refusals(shapes, n, kd, int(tc.get("num_key_value_heads")
+                                            or 0), sz)
 
 
 def tensor_unverified(path) -> dict:
     """{(rule path, unknown parameters): a layer holding them} -- the
     modules whose layout no split rule knows, for a launch to run
     (engine/runtime/viability)."""
-    from knurlogic.engine.runtime.tensor_rules import unverified
-    return unverified({k: s for k, (s, _) in trunk_headers(path).items()})
+    from knurlogic.engine.runtime.tensor_rules import skipzero_split, unverified
+    return unverified({k: s for k, (s, _) in trunk_headers(path).items()},
+                      skipzero_split(path))
 
 
 def tensor_split_refusals(path, n: int, cfg: dict | None = None) -> list:
