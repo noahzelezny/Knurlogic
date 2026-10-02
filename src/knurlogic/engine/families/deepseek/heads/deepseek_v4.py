@@ -32,6 +32,15 @@ Any linear may be quantized; the recipe is read off the tensors, so no
 metadata is required: `<m>.scales` beside `<m>.weight` quantizes `<m>`,
 with `<m>.biases` affine, without them mxfp4 (4-bit) or mxfp8 (8-bit);
 bits and group size follow from the packed shapes.
+
+Routed experts may instead be VQ: `<m>.codes` / `<m>.codebook` /
+`<m>.vq_scales` in place of `<m>.weight` / `<m>.scales`, the format the
+trunk's own VQ experts use. They run on the trunk's bundled runtime's
+VQSwitchLinear (the class the artifact's model.py defines, found through
+the loaded model's class); knurlogic carries no VQ runtime of its own.
+Codebook [K, dim]; group = in / vq_scales' last axis; codes are packed
+uint32 words of ceil(log2 K)-bit fields (ceil(in/dim/32) * bits wide per
+row) or, when a row is in/dim wide, one code per entry.
 """
 from __future__ import annotations
 
@@ -39,7 +48,7 @@ import dataclasses
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx.utils import tree_flatten
+from mlx.utils import tree_flatten, tree_unflatten
 
 from knurlogic.engine.runtime.pipeline import unwrap
 
@@ -97,6 +106,61 @@ def _recipe(w: dict, path: str, mod) -> dict | None:
     return {"group_size": gs, "bits": bits, "mode": mode}
 
 
+def _vq_class(model):
+    """VQSwitchLinear from the bundled runtime `model` was loaded with:
+    the module globals its class's own methods run in (mlx-lm executes a
+    model_file without registering it in sys.modules)."""
+    for cls in type(model).__mro__:
+        for v in vars(cls).values():
+            g = getattr(v, "__globals__", None)
+            if g is not None and "VQSwitchLinear" in g:
+                return g["VQSwitchLinear"]
+    raise ValueError(
+        "deepseek_v4 head: its routed experts are VQ (.codes/.vq_scales) "
+        "but the trunk was not loaded through a bundled VQ runtime "
+        "(no VQSwitchLinear beside its Model class)")
+
+
+def _vq_module(w: dict, path: str, mod, vq_cls):
+    """A VQSwitchLinear shaped for the packed `path`, or None when `path`
+    is not VQ. Its shapes come from the dense skeleton `mod` (experts,
+    out, in) and the codebook (K, dim), so a sidecar tensor of any other
+    shape fails bind's shape check."""
+    codes, vs = w.get(f"{path}.codes"), w.get(f"{path}.vq_scales")
+    if codes is None and vs is None:
+        return None
+    cb = w.get(f"{path}.codebook")
+    if codes is None or vs is None or cb is None:
+        raise ValueError(f"{path}: VQ needs .codes, .codebook and "
+                         f".vq_scales together")
+    shape = getattr(getattr(mod, "weight", None), "shape", ())
+    if len(shape) != 3:
+        raise ValueError(f"{path}: VQ tensors on a module that is not a "
+                         f"switch (expert) linear")
+    E, OUT, IN = (int(n) for n in shape)
+    K, dim = (int(n) for n in cb.shape)
+    ngrp = int(vs.shape[-1])
+    if ngrp <= 0 or IN % ngrp or IN % dim:
+        raise ValueError(f"{path}: in={IN} does not divide into "
+                         f"{ngrp} scale groups of dim-{dim} codes")
+    nsub = IN // dim
+    bits = (K - 1).bit_length()
+    width = int(codes.shape[-1])
+    if width == (nsub + 31) // 32 * bits:
+        pb, ct = bits, mx.uint32
+    elif width == nsub:
+        pb, ct = 0, (mx.uint8 if K <= 256 else mx.uint16)
+    else:
+        raise ValueError(f"{path}: codes rows are {width} wide; in={IN} at "
+                         f"dim {dim} is {(nsub + 31) // 32 * bits} packed "
+                         f"{bits}-bit words or {nsub} codes")
+    return vq_cls(mx.zeros((E, OUT, width), dtype=ct),
+                  mx.zeros((K, dim), dtype=mx.float16),
+                  mx.zeros((E, OUT, ngrp), dtype=mx.float16),
+                  group_size=IN // ngrp, pack_bits=pb,
+                  in_features=IN if pb else None)
+
+
 class MTPHead:
     """One drafting head bound to a loaded deepseek_v4 trunk."""
 
@@ -135,6 +199,14 @@ class MTPHead:
             raise ValueError(f"deepseek_v4 head: {len(bad)} tensors outside "
                              f"{PREFIX!r}, e.g. {bad[:3]}")
         mw = {_to_module(k[len(PREFIX):]): v for k, v in w.items()}
+
+        vq = {path: mod for path, mod in self.m.named_modules()
+              if any(f"{path}.{t}" in mw
+                     for t in ("codes", "codebook", "vq_scales"))}
+        if vq:
+            cls = _vq_class(self.model)
+            vq = {p: _vq_module(mw, p, m, cls) for p, m in vq.items()}
+            self.m.update_modules(tree_unflatten(list(vq.items())))
 
         def pred(path, mod):
             return _recipe(mw, path, mod) or False
