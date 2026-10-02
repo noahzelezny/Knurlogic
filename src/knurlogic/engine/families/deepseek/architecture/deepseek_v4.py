@@ -2236,6 +2236,17 @@ class V4Attention(nn.Module):
         # models take it.
         ragged = S == 1 and isinstance(win_cache, BatchRotatingKVCache)
         ragged_win_mask = win_cache.make_mask(1) if ragged else None
+        # knurlogic edit 13: the same for a multi-token step continuing a
+        # merged batch (MTP's 2-wide verify): _build_window_mask assumes
+        # every row's window ends at the buffer's end, which a left-padded
+        # row's does not. A right-padded prefill (`_lengths`) keeps it.
+        ragged_multi = (
+            S > 1 and isinstance(win_cache, BatchRotatingKVCache)
+            and win_cache.keys is not None
+            and getattr(win_cache, "_lengths", None) is None
+        )
+        if ragged_multi:
+            ragged_win_mask = win_cache.make_mask(S, window_size=self.window)
 
         # Fused: partial-RoPE on q + kv in one compiled call.
         q, kv = _attn_qkv_partial_rope(q, kv, offset, rd, self.rope.freqs)
@@ -2317,7 +2328,10 @@ class V4Attention(nn.Module):
             mask = mx.concatenate(parts, axis=-1) if len(parts) > 1 \
                 else parts[0]
         else:
-            win_mask = _build_window_mask(B, S, offset, self.window, window_len)
+            win_mask = (
+                ragged_win_mask if ragged_multi
+                else _build_window_mask(B, S, offset, self.window, window_len)
+            )
             if compressed_len > 0:
                 comp_mask = _compressed_visibility(
                     B, S, offset, compressed_len, self.compress_ratio

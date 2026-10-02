@@ -10,6 +10,12 @@ differently:
   recurrent caches   expose a `cache` list of state arrays. Rollback is
                      whatever the snapshot held.
 
+A third kind rolls back by state though it looks like attention: a cache
+that answers `is_trimmable() == False` (deepseek_v4's DeepseekV4Cache, whose
+compressed pools cannot be trimmed; its `trim` is a no-op). Trimming it
+would silently keep the rejected positions, so its whole object state is
+held instead (`_grab` / `_put`).
+
 Keeping old references is a free snapshot only for an architecture that
 REASSIGNS its slots (mlx arrays are immutable); one that writes in place
 would corrupt the saved reference. So the policy is a per-family field,
@@ -18,6 +24,63 @@ default "copy", and `check_snapshot_semantics` earns the "reassign" path.
 from __future__ import annotations
 
 import mlx.core as mx
+
+
+def is_untrimmable(c) -> bool:
+    f = getattr(c, "is_trimmable", None)
+    return callable(f) and hasattr(c, "keys") and not f()
+
+
+class _Obj:
+    """A held object's attributes (see _grab)."""
+    __slots__ = ("obj", "attrs")
+
+    def __init__(self, obj, attrs):
+        self.obj, self.attrs = obj, attrs
+
+
+def _fields(o) -> list:
+    names = list(getattr(o, "__dict__", {}))
+    for klass in type(o).__mro__:
+        names += [n for n in getattr(klass, "__slots__", ())
+                  if n not in names and hasattr(o, n)]
+    return names
+
+
+def _grab(o):
+    """Everything `o` holds, arrays as new handles: mlx's `a[i] = v`
+    rebinds the handle it is called on, so a held handle keeps the old
+    value (and nothing is copied)."""
+    if isinstance(o, mx.array):
+        return mx.array(o)
+    if isinstance(o, list):
+        return [_grab(x) for x in o]
+    if isinstance(o, tuple):
+        return tuple(_grab(x) for x in o)
+    if isinstance(o, dict):
+        return {k: _grab(v) for k, v in o.items()}
+    if o is None or isinstance(o, (bool, int, float, str, mx.Dtype)):
+        return o
+    if hasattr(o, "__dict__") or hasattr(type(o), "__slots__"):
+        return _Obj(o, {n: _grab(getattr(o, n)) for n in _fields(o)})
+    return o
+
+
+def _put(s):
+    """Back to what `_grab` held: the same objects, their old attributes."""
+    if isinstance(s, _Obj):
+        for n, v in s.attrs.items():
+            setattr(s.obj, n, _put(v))
+        return s.obj
+    if isinstance(s, mx.array):
+        return mx.array(s)
+    if isinstance(s, list):
+        return [_put(x) for x in s]
+    if isinstance(s, tuple):
+        return tuple(_put(x) for x in s)
+    if isinstance(s, dict):
+        return {k: _put(v) for k, v in s.items()}
+    return s
 
 
 def is_attention(c) -> bool:
@@ -76,7 +139,9 @@ def _pos(c):
 def snapshot(caches, *, copy: bool = True) -> list:
     snaps: list = []
     for c in caches:
-        if is_attention(c):
+        if is_untrimmable(c):
+            snaps.append(("whole", None, _grab(c)))
+        elif is_attention(c):
             snaps.append(("attn", c.offset, None))
         elif is_batch_attention(c):
             snaps.append(("battn", c.size(), None))
@@ -100,7 +165,10 @@ def restore(caches, snaps) -> None:
     """Back to exactly where the snapshot was taken."""
     for c, s in zip(caches, snaps):
         kind, offset, state = s
-        if kind == "attn":
+        if kind == "whole":
+            # a rollback may run twice from one snapshot (the replay)
+            _put(state)
+        elif kind == "attn":
             n = c.offset - offset
             if n > 0:
                 c.trim(n)

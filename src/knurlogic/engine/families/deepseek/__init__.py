@@ -1,7 +1,8 @@
 """DeepSeek-V4 (deepseek_v4): MLA-style shared-KV attention over a
 128-token sliding window plus learned compressed pools (Compressor, and a
 top-k Indexer on the ratio-4 layers), hash-routed first layers, mHC
-hyper-connections. No MTP head (sanitize drops `mtp.*`), no vision.
+hyper-connections. One MTP head (heads/deepseek_v4.py, a sidecar beside
+the trunk; the trunk's sanitize still drops `mtp.*`), no vision.
 
 The chat template is engine/templates/deepseek_v4.jinja (the conversion
 ships a stub); its thinking control (thinking_mode / enable_thinking) is
@@ -21,6 +22,19 @@ MANIFEST = {
                 "deepseek_v4 caches through its own DeepseekV4Cache (a "
                 "128-token bf16 window plus compressed pools); knurlogic's "
                 "KV quantization does not apply to it")},
+            "head": dict(
+                names=["deepseek_v4"],
+                head="knurlogic.engine.families.deepseek.heads."
+                     "deepseek_v4:MTPHead",
+                # the [B, S, hc, D] streams INTO the trunk's hc_head: the
+                # official MTPBlock takes all hc streams, not the collapse
+                capture="hc_head", draft_cache="DeepseekV4Cache",
+                sidecar_name="mtp-head-mxfp4.safetensors",
+                # DeepseekV4Cache cannot trim (its pools); caches.py rolls an
+                # untrimmable cache back by its whole state
+                cache_semantics="copy",
+                # every sidecar key is under mtp.0. (the official names)
+                layout=("mtp",)),
         },
     },
     "vision": None,
