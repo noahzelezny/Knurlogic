@@ -84,13 +84,6 @@ def _apply(layer, path: str, rule, rank: int, n: int) -> None:
         setattr(parent, leaf, split_params({leaf: obj}, pred, rank, n,
                                            seg)[leaf])
         return
-    done = getattr(obj, "_vq_sharded", None)
-    if done is not None:
-        # the bundled runtime built this rank's rows itself (load_config)
-        if tuple(done) != (rank, n):
-            raise ValueError(f"{path} was split as rank {done[0]} of "
-                             f"{done[1]}, not {rank} of {n}")
-        return
     why = module_refusal(path, rule, set(obj.parameters()))
     if why:
         raise ValueError(why)
@@ -133,21 +126,6 @@ class Reduce(nn.Module):
             if "inner" not in self:
                 raise
             return getattr(self["inner"], name)
-
-
-def load_config(path, group) -> dict | None:
-    """The config a tensor rank loads with: a SKIPZERO build whose runtime
-    splits its own gate/up rows (tensor_rules.skipzero_split) is told this
-    rank, so it builds only its rows; None otherwise."""
-    import json
-    from pathlib import Path
-
-    from .tensor_rules import skipzero_split
-    cfg = json.loads((Path(path) / "config.json").read_text())
-    if not (cfg.get("vq_skipzero") and skipzero_split(path)):
-        return None
-    return {"vq_skipzero": {**cfg["vq_skipzero"], "shard": {
-        "rank": group.rank(), "n": group.size()}}}
 
 
 def shard(model, group) -> None:
@@ -848,13 +826,9 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
         logger.info("pipeline  rank %s: %s", link.rank, shares["reason"])
         def cut(m):
             return PL.split(m, link.group, shares["bounds"])
-        cut_config = None
     else:
         def cut(m):
             return shard(m, link.group)
-
-        def cut_config(p):
-            return load_config(p, link.group)
     # a follower never loads the MTP head: rank 0 drafts, and tells this
     # rank whether it does (agree_head)
     heads = agree_head(link) if split == "pipeline" else None
@@ -862,8 +836,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
     # the family's own code (engine.vision.request.MirrorVision)
     host = ModelHost(draft=False,
                      executes_artifact_code=executes_artifact_code,
-                     shard=cut, shard_config=cut_config, vision=True,
-                     tower=False, load_wait_s=3600.0,
+                     shard=cut, vision=True, tower=False, load_wait_s=3600.0,
                      head_agree=heads, kv_bits=kv_bits,
                      cross_chip=cross_chip)
     host.load(path)
