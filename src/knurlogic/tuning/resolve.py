@@ -1601,17 +1601,18 @@ def pipeline_layer_bytes(artifact: Artifact) -> tuple:
     return layer_bytes_of(sizes, L)
 
 
-def leader_bytes(artifact: Artifact, vision: bool = True) -> int:
+def leader_bytes(artifact: Artifact, vision: bool = True,
+                 mtp: bool = True) -> int:
     """What rank 0 of a split model (pipeline or tensor) holds and no other
-    rank does: the MTP head (it drafts; the followers only run the verify
-    rows) and the vision tower (it encodes at tokenize and ships the image
-    rows; a follower binds the family without one). Read off the
-    safetensors headers."""
+    rank does: the MTP head when it drafts (`mtp`; the followers only run
+    the verify rows) and the vision tower when it serves images (`vision`;
+    it encodes at tokenize and ships the image rows, a follower binds the
+    family without one). Read off the safetensors headers."""
     import json
     import struct
 
     total = 0
-    for f in sorted(artifact.path.glob("*.safetensors")):
+    for f in sorted(artifact.path.glob("*.safetensors")) if mtp else ():
         try:
             with open(f, "rb") as fh:
                 (hn,) = struct.unpack("<Q", fh.read(8))

@@ -65,7 +65,7 @@ def main():
     if os.environ.get("FAKE_PROTOCOL_MAJOR"):
         protocol.VERSION = (int(os.environ["FAKE_PROTOCOL_MAJOR"]), 0)
     C._resolve = lambda ident, name="": "/fake/artifact" if ident == "abc" else None
-    C.shape_of = lambda path, world, split, vision=True: SHAPE
+    C.shape_of = lambda path, world, split, vision=True, mtp=True: SHAPE
     C._local_info = lambda: info
     C.node_info = lambda working_set_bytes=0, ttl=30.0: info
     C.RANK_ARGV[0] = fake_argv

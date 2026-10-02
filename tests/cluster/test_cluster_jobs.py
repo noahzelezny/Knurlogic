@@ -199,7 +199,7 @@ def spec(**kw):
 def prep(s, **kw):
     return C.prepare(s, resolve=kw.get("resolve", lambda i: "/m/x"),
                      info=kw.get("info", info("Apple M3 Ultra", "10.0.0.2")),
-                     shape=lambda p, w, sp, vision=True: kw.get("shape", SHAPE),
+                     shape=lambda p, w, sp, vision=True, mtp=True: kw.get("shape", SHAPE),
                      registry=lambda: {})
 
 
@@ -510,7 +510,7 @@ def two_pages(tmp_path, monkeypatch, owned_procs):
     monkeypatch.setitem(identity._ID, "name", "A")
     monkeypatch.setattr(C, "_resolve",
                         lambda i, name="": "/fake/artifact" if i == "abc" else None)
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True: SHAPE)
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     info_a = info("Apple M4 Max", "127.0.0.1")
     info_b = info("Apple M3 Ultra", "127.0.0.1")
     monkeypatch.setattr(C, "_local_info", lambda: info_a)
@@ -860,7 +860,7 @@ def test_jaccl_without_an_rdma_subnet_is_refused_not_rerouted(cache,
     """RDMA up on both Macs, but on different cables: refused, with each
     Mac's active devices -- never jaccl over some other device."""
     monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True: SHAPE)
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     rd = lambda dev: {"available": True, "reason": "", "devices": [dev],
                       "active": [dev]}
     ia = {**info("Apple M4 Max", "10.0.0.1", rdma=rd("rdma_en4")),
@@ -893,14 +893,14 @@ def test_prepare_refuses_a_share_beside_what_another_job_holds(cache):
     ws = info("Apple M3 Ultra", "10.0.0.2", ws=84 * GIB)
     held = [("job 41648583878fcdfc rank 1", 54699, int(49.5 * GIB))]
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
-                          shape=lambda p, w, s, vision=True: big, registry=lambda: {},
+                          shape=lambda p, w, s, vision=True, mtp=True: big, registry=lambda: {},
                           held=lambda job: held)
     assert not doc["ok"], doc
     r = doc["refused"]
     assert "50.0 GiB" in r and "84.0 GiB" in r and "49.5 GiB of it held now" in r
     assert "pid 54699" in r and "41648583878fcdfc" in r
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
-                          shape=lambda p, w, s, vision=True: big, registry=lambda: {},
+                          shape=lambda p, w, s, vision=True, mtp=True: big, registry=lambda: {},
                           held=lambda job: [])
     assert doc["ok"], doc
     C.PREPARED.clear()
@@ -929,13 +929,13 @@ def test_prepare_refuses_while_another_jobs_rank_is_loading(cache):
     J._write(J.marker_path(other, 1), {"phase": "loading"})
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x",
                           info=info("Apple M3 Ultra", "10.0.0.2"),
-                          shape=lambda p, w, s, vision=True: SHAPE, registry=lambda: reg,
+                          shape=lambda p, w, s, vision=True, mtp=True: SHAPE, registry=lambda: reg,
                           held=lambda job: [])
     assert not doc["ok"] and "one load at a time" in doc["refused"]
     J._write(J.marker_path(other, 1), {"phase": "ready"})
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x",
                           info=info("Apple M3 Ultra", "10.0.0.2"),
-                          shape=lambda p, w, s, vision=True: SHAPE, registry=lambda: reg,
+                          shape=lambda p, w, s, vision=True, mtp=True: SHAPE, registry=lambda: reg,
                           held=lambda job: [])
     assert doc["ok"], doc
     C.PREPARED.clear()
@@ -1015,7 +1015,7 @@ def test_prepare_waits_for_a_stopping_rank_then_goes(cache, monkeypatch):
     p.send_signal(signal.SIGTERM)          # its bye handler exits in 0.3s
     code, doc = C.prepare(spec(job=new), resolve=lambda i: "/m/x",
                          info=info("Apple M3 Ultra", "10.0.0.2"),
-                         shape=lambda p, w, s, vision=True: SHAPE, held=lambda job: [])
+                         shape=lambda p, w, s, vision=True, mtp=True: SHAPE, held=lambda job: [])
     assert doc["ok"], doc
     p.wait(timeout=5)
     C._PROCS.clear()
@@ -1032,7 +1032,7 @@ def test_prepare_names_a_stuck_old_rank_in_its_refusal(cache, monkeypatch):
     J.save_registry(reg)
     code, doc = C.prepare(spec(job=new), resolve=lambda i: "/m/x",
                          info=info("Apple M3 Ultra", "10.0.0.2"),
-                         shape=lambda p, w, s, vision=True: SHAPE, held=lambda job: [])
+                         shape=lambda p, w, s, vision=True, mtp=True: SHAPE, held=lambda job: [])
     assert not doc["ok"], doc
     assert old in doc["refused"] and "still exiting" in doc["refused"]
     p.kill()
@@ -1251,7 +1251,7 @@ def test_a_failing_cable_goes_last_for_that_pair_only(monkeypatch):
 def jaccl_launch(monkeypatch, req, post=None, follow=None):
     a, b = two_cable_infos()
     monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True: SHAPE)
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     peer = SimpleNamespace(id="bbbb", name="B", host="127.0.0.2",
                            key="127.0.0.2:8765", state="answering",
                            link="thunderbolt", node={"cluster": b})
@@ -1365,7 +1365,7 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
     monkeypatch.setitem(identity._ID, "name", "A")
     monkeypatch.setattr(C, "_resolve",
                         lambda i, name="": "/fake/artifact" if i == "abc" else None)
-    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True: SHAPE)
+    monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
     monkeypatch.setattr(C, "BAD_CABLES", {})
     monkeypatch.setattr(C, "FAILOVER_POLL_S", 0.2)
     info_a, info_b = two_cable_infos()
