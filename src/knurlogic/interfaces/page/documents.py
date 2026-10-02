@@ -136,7 +136,7 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 "serving": bool(serving) and (f.name == serving
                                               or str(f.path) == serving),
                 "room": _room(f, ws),
-                "splits": _splits(f),
+                **_splits(f),
                 # the Hub has a newer revision of this Hugging Face model
                 # (page/updates.py); False when unchecked or not from HF
                 "update": str(f.path) in stale,
@@ -188,16 +188,17 @@ def splits_of(path, n: int = 2) -> list:
 
 #: {path: [identity, splits]} in <cache_dir>/splits.json: the answer reads
 #: every shard's header, ~8 s for the whole library after a page restart
-_SPLITS = DiskCache("splits.json", valid=lambda v: isinstance(v, list))
+_SPLITS = DiskCache("splits.json", valid=lambda v: isinstance(v, dict))
 
 
-def _splits(f):
-    """`splits_of` a found model, kept on disk under its identity (which
-    changes with any shard, config or *.py); None when it cannot be read
-    (the picker then offers both and the launch answers)."""
+def _splits(f) -> dict:
+    """{"splits": `splits_of` a found model, "tensor_bytes": what a tensor
+    rank holds (tensor_bytes_of)}, kept on disk under its identity (which
+    changes with any shard, config or *.py); splits None when it cannot be
+    read (the picker then offers both and the launch answers)."""
     from knurlogic.machine.artifact import identity
     if not f.servable:
-        return None
+        return {"splits": None}
     key, ident = str(f.path), identity(f.path)
     # the answer is the model's AND this build's rules: either changing
     # asks again (a reverted rule kept offering tensor from the cache)
@@ -206,12 +207,28 @@ def _splits(f):
     if hit is not None:
         return hit
     try:
-        out = splits_of(f.path)
+        out = {"splits": splits_of(f.path)}
+        if "tensor" in out["splits"]:
+            out["tensor_bytes"] = tensor_bytes_of(f.path)
     except (OSError, ValueError, KeyError, AttributeError, TypeError):
-        return None
+        return {"splits": None}
     if stamp:
         _SPLITS.put(key, stamp, out)
     return out
+
+
+def tensor_bytes_of(path) -> dict:
+    """What a tensor rank holds, for the picker to fit each picked machine:
+    the split weights (divided by the ranks), the replicated ones, and what
+    rank 0 alone adds -- the MTP head and the vision tower, apart, since
+    each counts only when that launch has it on."""
+    from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning import resolve as R
+    a = Artifact.load(path)
+    pl = R.tensor_placement(a, 1)
+    head = R.leader_bytes(a, vision=False)
+    return {"sharded": pl["sharded_bytes"], "replicated": pl["replicated_bytes"],
+            "head": head, "tower": R.leader_bytes(a, mtp=False)}
 
 
 _RULES: list = []
