@@ -309,7 +309,7 @@ E, OUT, IN, K, D, G = 4, 64, 256, 256, 4, 64
 
 
 def test_the_predicate_never_splits_a_codebook():
-    from knurlogic.engine.runtime.tensor import predicate
+    from knurlogic.engine.runtime.tensor_rules import predicate
     w = mx.zeros((K, D))
     for kind in ("all-to-sharded", "sharded-to-all"):
         assert predicate(kind)("mlp.switch_mlp.down_proj.codebook", w) is None
@@ -613,11 +613,196 @@ def test_a_parked_follower_holds_no_margin_a_long_prefill_measured(
     assert seen[1] < 0                  # parked: limit 96 - 5 = 91
 
 
-def test_a_skipzero_vq_model_is_refused_a_tensor_split():
-    # Qwen3.5-397B 2.4bpw: its live expert rows are packed (70095 of them),
-    # so a tensor launch failed loading on rank 1; pipeline still offered
-    cfg = dict(QWEN36, vq_skipzero={"format": "vq-skipzero", "version": 1})
-    why = R.tensor_refusals(cfg, 2)
-    assert why and "vq_skipzero" in why[0]
+# ------------------------------------------------- the headers, one rule set
+
+def _artifact(tmp_path, cfg, shapes):
+    """A config.json and one header-only safetensors file: the refusals
+    read 8 bytes and the JSON, never the data."""
+    import json
+    import struct
+    head, off = {}, 0
+    for k, shp in shapes.items():
+        n = 1
+        for d in shp:
+            n *= d
+        head[k] = {"dtype": "U8", "shape": list(shp),
+                   "data_offsets": [off, off + n]}
+        off += n
+    raw = json.dumps(head).encode()
+    (tmp_path / "model.safetensors").write_bytes(
+        struct.pack("<Q", len(raw)) + raw)
+    (tmp_path / "config.json").write_text(json.dumps(cfg))
+    return tmp_path
+
+
+def _layer0(proj: dict) -> dict:
+    """QWEN36's layer 0 (linear attention, MoE), switch_mlp per `proj`."""
+    pre = "language_model.model.layers.0."
+    out = {pre + "linear_attn.conv1d.weight": (8192, 4, 1),
+           pre + "linear_attn.in_proj_qkv.weight": (8192, 256),
+           pre + "linear_attn.in_proj_qkv.scales": (8192, 32),
+           pre + "linear_attn.in_proj_qkv.biases": (8192, 32),
+           pre + "linear_attn.dt_bias": (32,),
+           pre + "linear_attn.out_proj.weight": (2048, 768),
+           pre + "linear_attn.out_proj.scales": (2048, 64),
+           pre + "linear_attn.out_proj.biases": (2048, 64),
+           pre + "mlp.gate.weight": (256, 2048),
+           pre + "mlp.shared_expert.down_proj.weight": (2048, 96),
+           pre + "mlp.shared_expert.down_proj.scales": (2048, 8)}
+    for k, shp in proj.items():
+        out[pre + "mlp.switch_mlp." + k] = shp
+    return out
+
+
+VQ_SWITCH = {"gate_proj.codes": (256, 512, 176),
+             "gate_proj.vq_scales": (256, 512, 32),
+             "gate_proj.codebook": (2048, 4),
+             "down_proj.codes": (256, 2048, 44),
+             "down_proj.vq_scales": (256, 2048, 8),
+             "down_proj.codebook": (2048, 4)}
+
+
+def test_a_vq_moe_header_set_splits_two_ways(tmp_path):
+    a = _artifact(tmp_path, QWEN36, _layer0(VQ_SWITCH))
+    assert R.tensor_split_refusals(a, 2) == []
+    assert R.tensor_unverified(a) == {}
     from knurlogic.interfaces.page.documents import splits_of
-    assert "tensor" not in splits_of(cfg)
+    assert splits_of(a) == ["tensor", "pipeline"]
+
+
+def test_an_affine_quant_header_set_splits_two_ways(tmp_path):
+    a = _artifact(tmp_path, QWEN36, _layer0({
+        "gate_proj.weight": (256, 512, 256),
+        "gate_proj.scales": (256, 512, 32),
+        "gate_proj.biases": (256, 512, 32),
+        "down_proj.weight": (256, 2048, 64),
+        "down_proj.scales": (256, 2048, 8),
+        "down_proj.biases": (256, 2048, 8)}))
+    assert R.tensor_split_refusals(a, 2) == []
+
+
+def test_an_array_that_does_not_divide_is_refused_with_its_numbers(tmp_path):
+    a = _artifact(tmp_path, QWEN36, _layer0(dict(
+        VQ_SWITCH, **{"down_proj.vq_scales": (256, 2048, 7)})))
+    why = R.tensor_split_refusals(a, 2)
+    assert why == ["layers.0.mlp.switch_mlp.down_proj.vq_scales: 7 on axis "
+                   "-1 do not divide by 2"]
+    # a fused qkv divides per segment: q, k, v each cut n ways, so a whole
+    # that divides is not enough (8192 rows, but q and k 127 each)
+    import copy
+    cfg = copy.deepcopy(QWEN36)
+    cfg["text_config"].update(linear_num_key_heads=1, linear_key_head_dim=127)
+    why = R.tensor_header_refusals(a, cfg, 2)
+    assert "layers.0.linear_attn.conv1d.weight: 8192 rows (in segments " \
+        "[127, 127, 7938]) do not divide by 2" in why
+
+
+def _skipzero(nlive):
+    return {"gate_proj.sz_codes": (nlive, 1024),
+            "gate_proj.sz_scales": (nlive, 64),
+            "gate_proj.sz_rowmask": (512, 128),
+            "gate_proj.sz_shape": (4,),
+            "gate_proj.codebook": (256, 4)}
+
+
+def test_a_skipzero_module_odd_rows_are_refused_by_its_headers(tmp_path):
+    # Qwen3.5-397B 2.4bpw: a tensor launch died loading on rank 1 at
+    # "Array split ... (70095, 1024)" -- the headers say it first
+    a = _artifact(tmp_path, QWEN36, _layer0(_skipzero(70095)))
+    why = R.tensor_split_refusals(a, 2)
+    assert "layers.0.mlp.switch_mlp.gate_proj.sz_codes: 70095 rows do not " \
+        "divide by 2" in why
+    from knurlogic.interfaces.page.documents import splits_of
+    assert "tensor" not in splits_of(a)
+
+
+def test_a_skipzero_module_even_rows_is_unverified_not_refused(tmp_path):
+    # even rows divide, but the layout is none a rule knows: offered, and
+    # run whole and split at launch (engine/runtime/viability)
+    a = _artifact(tmp_path, QWEN36, _layer0(_skipzero(70096)))
+    assert R.tensor_split_refusals(a, 2) == []
+    assert R.tensor_unverified(a) == {
+        ("mlp.switch_mlp.gate_proj",
+         ("sz_codes", "sz_rowmask", "sz_scales", "sz_shape")): 0}
+
+
+def test_hf_bf16_names_map_to_the_rules_sanitize_feeds_shard():
+    from knurlogic.engine.runtime.tensor_rules import locate
+    pre = "model.language_model.layers.3."
+    assert locate(pre + "mlp.experts.gate_up_proj") == (
+        3, "mlp.switch_mlp.gate_proj", "weight", 2)
+    assert locate(pre + "mlp.experts.down_proj")[1] == \
+        "mlp.switch_mlp.down_proj"
+    assert locate(pre + "linear_attn.A_log") == (
+        3, "linear_attn.A_log", None, None)
+    assert locate("mtp.layers.0.self_attn.q_proj.weight") is None
+    assert locate(pre + "mlp.shared_expert_gate.weight") is None
+
+
+# --------------------------------------------- viability of an unknown layout
+
+def _probe_module(perm=None, experts=None):
+    """y = x @ W.T with W stored under a parameter name no rule knows;
+    `perm` stores the output rows out of order (read back through it),
+    `experts` adds a per-expert axis the module indexes."""
+    import mlx.nn as nn
+
+    class Probe(nn.Module):
+        def __init__(self):
+            super().__init__()
+            IN, OUT = 64, 32
+            w = mx.random.normal((OUT, IN), key=mx.random.key(1))
+            self.order = mx.arange(OUT) if perm is None else perm
+            self.packed_w = w[mx.argsort(self.order)] if perm is not None \
+                else w
+
+        @property
+        def input_dims(self):
+            return self.packed_w.shape[1]
+
+        @property
+        def output_dims(self):
+            return self.packed_w.shape[0]
+
+        def __call__(self, x):
+            w = self.packed_w if perm is None else self.packed_w[self.order]
+            return (x.astype(mx.float32) @ w.T).astype(x.dtype)
+    return Probe()
+
+
+def test_a_layout_that_splits_like_the_rule_holds():
+    from knurlogic.engine.runtime.tensor_rules import A2S, S2A, Rule
+    from knurlogic.engine.runtime.viability import check_module
+    assert check_module(_probe_module(), Rule(A2S), 2) is None
+    assert check_module(_probe_module(), Rule(S2A), 2) is None
+
+
+def test_a_layout_whose_rows_are_not_in_order_fails_with_its_error():
+    from knurlogic.engine.runtime.tensor_rules import A2S, Rule
+    from knurlogic.engine.runtime.viability import check_module
+    # rows stored by a table (as SKIPZERO's are): a row cut takes the
+    # wrong rows, and the table itself is cut too
+    perm = mx.array([(i * 7) % 32 for i in range(32)])
+    why = check_module(_probe_module(perm), Rule(A2S), 2)
+    assert why and "differs from whole by" in why
+
+
+def test_skipzero_cut_by_rows_mixes_experts():
+    # the real module's geometry: codes [NLIVE, W] and row_table [E, OUT];
+    # a row cut halves the expert axis, so the part is refused unrun
+    import mlx.nn as nn
+
+    from knurlogic.engine.runtime.tensor_rules import A2S, Rule
+    from knurlogic.engine.runtime.viability import check_module
+
+    class SZ(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.codes = mx.zeros((6, 8), dtype=mx.uint8)
+            self.row_table = mx.zeros((4, 2), dtype=mx.int32)
+
+        num_experts = property(lambda s: s.row_table.shape[0])
+        output_dims = property(lambda s: s.row_table.shape[1])
+        input_dims = property(lambda s: s.codes.shape[1] * 4)
+    why = check_module(SZ(), Rule(A2S), 2)
+    assert "num_experts 4 -> 2" in why and "output_dims 2 -> 2" in why
