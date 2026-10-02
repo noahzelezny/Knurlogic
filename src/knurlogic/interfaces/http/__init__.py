@@ -165,14 +165,15 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
             print(f"pipeline  rank 0: {shares['reason']}", flush=True)
             def shard(m):
                 return PL.split(m, link.group, shares["bounds"])
-            agree = T.agree_head(link)
         else:
             def shard(m):
                 return T.shard(m, link.group)
 
             def shard_config(p):
                 return T.load_config(p, link.group)
-    mh = ModelHost(draft=draft and (not ring or pipe), head_agree=agree,
+        # rank 0 drafts on either split and tells the others (agree_head)
+        agree = T.agree_head(link)
+    mh = ModelHost(draft=draft, head_agree=agree,
                    executes_artifact_code=bool(artifact.model_file),
                    image_store_bytes=settings.get("image_store_bytes"),
                    shard=shard, shard_config=shard_config,

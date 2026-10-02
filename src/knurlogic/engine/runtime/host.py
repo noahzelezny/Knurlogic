@@ -93,7 +93,7 @@ class ModelHost:
         self.shard = shard
         self.shard_config = shard_config
         #: head_agree(bound: bool) -> bool, called after the head binds (or
-        #: does not) on every load of a pipeline rank: rank 0's answer,
+        #: does not) on every load of a split model's rank: rank 0's answer,
         #: told to every rank -- only rank 0 holds a head, and the others
         #: follow its drafting steps (engine/runtime/tensor.agree_head)
         self.head_agree = head_agree

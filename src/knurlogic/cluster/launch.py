@@ -477,20 +477,29 @@ def placement(machines: list, shape: dict, split: str,
     n = len(names)
     if split == "tensor":
         per = int(shape["tensor_per_rank_bytes"])
+        # the ranks' shares are equal; rank 0 alone adds the head and tower
+        lead = int(shape.get("leader_bytes") or 0)
         shares, left = [], []
         for r, nm in enumerate(names):
             ws = budget_of(by[nm])
             floor = R.step_margin(ws)
-            if per > ws - floor:
+            own = per + (lead if r == 0 else 0)
+            if own > ws - floor:
+                plus = (f" + {lead / GIB:.1f} GiB rank 0 alone holds (the "
+                        f"MTP head and vision tower)" if r == 0 and lead
+                        else "")
                 raise ValueError(f"{nm}: its tensor share {per / GIB:.1f} "
-                                 f"GiB does not fit its working set "
+                                 f"GiB{plus} does not fit its working set "
                                  f"{ws / GIB:.1f} GiB less the "
                                  f"{floor / GIB:.1f} GiB step margin: "
                                  f"more space required")
-            shares.append({"rank": r, "machine": nm, "bytes": per})
-            left.append(f"{nm} leaves {(ws - per) / GIB:.1f} GiB")
+            shares.append({"rank": r, "machine": nm, "bytes": own})
+            left.append(f"{nm} leaves {(ws - own) / GIB:.1f} GiB")
         reason = (f"tensor split {n} ways: every rank holds "
-                  f"~{per / GIB:.1f} GiB ({', '.join(left)}); rank 0 "
+                  f"~{per / GIB:.1f} GiB"
+                  + (f", rank 0 {lead / GIB:.1f} GiB more (the MTP head and "
+                     f"vision tower)" if lead else "")
+                  + f" ({', '.join(left)}); rank 0 "
                   f"{names[0]} leads (newest chip, then P-core clock, then "
                   f"free memory) and samples")
         return {"order": names, "leader": names[0], "split": split,
@@ -531,10 +540,11 @@ def shape_of(path: str, world: int, split: str,
         per, other = R.pipeline_layer_bytes(a)
         refusals = R.pipeline_refusals(a.raw_config, world)
         return {"layer_bytes": per, "other_bytes": other,
-                "leader_bytes": R.pipeline_leader_bytes(a, vision=vision),
+                "leader_bytes": R.leader_bytes(a, vision=vision),
                 "reserve": R.fit_reserve(a.raw_config),
                 "tensor_per_rank_bytes": 0, "refusals": refusals}
     return {"layer_bytes": [], "other_bytes": 0,
+            "leader_bytes": R.leader_bytes(a, vision=vision),
             "reserve": R.fit_reserve(a.raw_config),
             "tensor_per_rank_bytes":
                 R.tensor_placement(a, world)["per_rank_bytes"],
@@ -813,7 +823,8 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     ws = budget_of(info)
     if not refusals:
         if spec["split"] == "tensor":
-            need = int(sh["tensor_per_rank_bytes"])
+            need = int(sh["tensor_per_rank_bytes"]) \
+                + (int(sh.get("leader_bytes") or 0) if rank == 0 else 0)
         else:
             counts = spec.get("layers") or []
             start = sum(counts[rank + 1:])
