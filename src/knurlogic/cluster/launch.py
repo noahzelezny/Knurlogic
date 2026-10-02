@@ -530,9 +530,10 @@ def placement(machines: list, shape: dict, split: str,
 
 
 def shape_of(path: str, world: int, split: str,
-             vision: bool = True) -> dict:
+             vision: bool = True, mtp: bool = True) -> dict:
     """What placement needs of an artifact, read off its headers.
-    `vision`: KNURLOGIC_VISION; off, rank 0 holds no tower."""
+    `vision`: KNURLOGIC_VISION; off, rank 0 holds no tower. `mtp`:
+    KNURLOGIC_MTP; off, rank 0 holds no head."""
     from knurlogic.machine.artifact import Artifact
     from knurlogic.tuning import resolve as R
     a = Artifact.load(path)
@@ -540,11 +541,11 @@ def shape_of(path: str, world: int, split: str,
         per, other = R.pipeline_layer_bytes(a)
         refusals = R.pipeline_refusals(a.raw_config, world)
         return {"layer_bytes": per, "other_bytes": other,
-                "leader_bytes": R.leader_bytes(a, vision=vision),
+                "leader_bytes": R.leader_bytes(a, vision=vision, mtp=mtp),
                 "reserve": R.fit_reserve(a.raw_config),
                 "tensor_per_rank_bytes": 0, "refusals": refusals}
     return {"layer_bytes": [], "other_bytes": 0,
-            "leader_bytes": R.leader_bytes(a, vision=vision),
+            "leader_bytes": R.leader_bytes(a, vision=vision, mtp=mtp),
             "reserve": R.fit_reserve(a.raw_config),
             "tensor_per_rank_bytes":
                 R.tensor_placement(a, world)["per_rank_bytes"],
@@ -811,9 +812,10 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         refusals.append(why)
     rank, world = spec["rank"], spec["world"]
     try:
-        from knurlogic.tuning.settings import vision_of
+        from knurlogic.tuning.settings import mtp_of, vision_of
         sh = (shape or shape_of)(path, world, spec["split"],
-                                 vision=vision_of(ok_sets))
+                                 vision=vision_of(ok_sets),
+                                 mtp=mtp_of(ok_sets))
     except Exception as e:  # a failed read is reported as the launch's refusal
         sh = {"refusals": [f"could not read the artifact: "
                            f"{type(e).__name__}: {e}"]}
@@ -1705,22 +1707,28 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         logger.warning("cluster launch: %s", alert)
         req = dict(req, identity=ident)
     path = _resolve(ident, aname)
-    from knurlogic.tuning.settings import clean_sets, preset_or, vision_of
+    from knurlogic.tuning.settings import (clean_sets, mtp_of, preset_or,
+                                           vision_of)
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         return {"error": f"not a launch setting: {', '.join(bad)}"}
+    if req.get("draft") is False:
+        # "turn MTP off and launch": every rank's settings say so
+        sets = dict(sets, KNURLOGIC_MTP="off")
     if path:
         why = sets_refusal(path, sets, preset_or(req.get("tune"), "default"))
         if why:
             return {"refused": f"nothing started: {why}"}
     try:
         if path:
-            shape = shape_of(path, world, split, vision=vision_of(sets))
+            shape = shape_of(path, world, split, vision=vision_of(sets),
+                             mtp=mtp_of(sets))
         else:
             first = next(m for m in infos if m["page"])
             shape = post(first["page"], "Shape",
                          {"identity": ident, "name": aname, "world": world,
-                          "split": split, "vision": vision_of(sets)})
+                          "split": split, "vision": vision_of(sets),
+                          "mtp": mtp_of(sets)})
             if shape.get("error"):
                 return {"error": f"{first['name']}: {shape['error']}"}
     except (*NET_ERRORS, LookupError, StopIteration, AttributeError) as e:
@@ -2115,5 +2123,6 @@ def peer_step(kind: str, req: dict) -> tuple:
         w, s = req.get("world"), req.get("split")
         if not isinstance(w, int) or s not in SPLITS:
             return 400, {"error": "world and split"}
-        return 200, shape_of(p, w, s, req.get("vision") is not False)
+        return 200, shape_of(p, w, s, req.get("vision") is not False,
+                             req.get("mtp") is not False)
     return 404, {"error": "not a cluster message"}
