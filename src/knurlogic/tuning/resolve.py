@@ -1117,6 +1117,14 @@ def tensor_refusals(cfg: dict, n: int) -> list:
                    f"is {cfg.get('model_type')!r}")
         return out
 
+    if cfg.get("vq_skipzero"):
+        # SKIPZERO keeps only the live expert rows, packed together
+        # ([NLIVE, W], a row table maps them): no per-expert axis to cut, and
+        # NLIVE need not divide (Qwen3.5-397B 2.4bpw: 70095 rows)
+        out.append("vq_skipzero packs the live expert rows together: they "
+                   "cannot be cut by rank (pipeline splits by layer)")
+        return out
+
     def div(what, v, why=""):
         if v is None:
             return
