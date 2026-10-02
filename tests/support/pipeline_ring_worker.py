@@ -10,6 +10,9 @@
                                no head (it runs the verify rows); rank 0 also
                                runs the unsplit engine and writes both token
                                streams and every rank's broadcast counts
+    mtp <always> tensor        the same, the model sharded across both ranks
+                               (the follower's logits real, not silenced);
+                               also the same split with no head anywhere
 
 Run with MLX_RANK and MLX_HOSTFILE set."""
 import json
@@ -122,11 +125,12 @@ def _tiny_with_head(vocab):
     return _tiny(vocab)
 
 
-def mtp(link, out_path, always):
+def mtp(link, out_path, always, split_kind="pipeline"):
     import mlx.core as mx
 
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.runtime import tensor as T
     if always:
         os.environ["KNURLOGIC_MTP_BATCH_MAX_ROWS"] = "8"
     vocab, max_tokens = (8, 40) if always else (512, 40)
@@ -162,13 +166,29 @@ def mtp(link, out_path, always):
         model, head, prompts = _tiny_with_head(vocab)
         whole, _ = drive(MTPBatchGenerator(model, head, stats={},
                                            prefill_step_size=16), prompts)
+    tensor = split_kind == "tensor"
+    baseline = None
+    if tensor:
+        # the same split with no head on either rank: what drafting must
+        # not change
+        model, _, prompts = _tiny_with_head(vocab)
+        T.shard(model, link.group)
+        gen = MTPBatchGenerator(model, None, stats={}, prefill_step_size=16)
+        baseline, _ = drive(gen, prompts,
+                            PL.coordinate(gen, link.group, drafting=False))
     model, head, prompts = _tiny_with_head(vocab)
-    PL.split(model, link.group, PL.bounds_of([1, 3]))
+    if tensor:
+        T.shard(model, link.group)
+    else:
+        PL.split(model, link.group, PL.bounds_of([1, 3]))
     stats = {}
     gen = MTPBatchGenerator(model, head if link.rank == 0 else None,
                             stats=stats, prefill_step_size=16)
     if link.rank > 0:
-        PL.silence(gen)
+        if tensor:
+            gen.mirror_hidden()
+        else:
+            PL.silence(gen)
     coord = PL.coordinate(gen, link.group, drafting=True)
     split, steps = drive(gen, prompts, coord)
     counts = mx.distributed.all_gather(
@@ -180,7 +200,7 @@ def mtp(link, out_path, always):
         group=link.group, stream=mx.cpu).tolist()
     link.barrier()
     if link.rank == 0:
-        json.dump({"whole": whole, "split": split,
+        json.dump({"whole": whole, "split": split, "baseline": baseline,
                    "calls": [counts[:5], counts[5:]], "overlapped": sent,
                    "accepted": stats.get("accepted", 0),
                    "drafted": stats.get("steps", 0)}, open(out_path, "w"))
@@ -531,7 +551,7 @@ def main(argv):
     elif mode == "logits":
         logits(link, out_path, argv[2], [int(x) for x in argv[3].split(",")])
     else:
-        mtp(link, out_path, argv[2] == "1")
+        mtp(link, out_path, argv[2] == "1", *argv[3:])
     return 0
 
 

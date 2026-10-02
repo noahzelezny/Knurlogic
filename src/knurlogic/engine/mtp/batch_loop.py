@@ -325,6 +325,11 @@ def admit(
                     h = get_h()
                     h_chunks.append(h)
                     want.append(h)
+                elif row_drafts and (h := get_h()) is not None:
+                    # a tensor follower of a drafting rank 0: the final
+                    # hidden state holds the last layer's all_sum, which
+                    # rank 0 runs here for its head (mirror_hidden)
+                    want.append(h)
                 mx.eval(want)
             except Exception as e:
                 raise ForwardFailed(str(e)) from e
@@ -782,6 +787,12 @@ class MTPBatch:
                 lazy += [acc, t2]
         if lazy:
             mx.eval(*lazy)
+        elif not judge:
+            # a tensor follower's verify holds every layer's all_sum, which
+            # rank 0 has just run: they go before B2's all_gather, or the
+            # ranks meet in different collectives (a pipeline follower's
+            # zeros cost nothing)
+            mx.eval(lg2)
         ok_flags = [bool(o.item()) if isinstance(o, mx.array) else bool(o) for o in oks]
         t2 = mx.concatenate(t2_rows).astype(mx.int32)
         if self.coord is not None:
