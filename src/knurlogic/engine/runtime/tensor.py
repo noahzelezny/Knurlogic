@@ -854,7 +854,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
             return load_config(p, link.group)
     # a follower never loads the MTP head: rank 0 drafts, and tells this
     # rank whether it does (agree_head)
-    heads = agree_head(link) if split == "pipeline" else None
+    heads = agree_head(link)
     # nor the vision tower: rank 0 encodes; this rank embeds its rows with
     # the family's own code (engine.vision.request.MirrorVision)
     host = ModelHost(draft=False,

@@ -246,13 +246,14 @@ def _fail_on_rank_0(gen, fail):
         gen._admit_one = admit
 
 
-def engine(link, out_path, fail="", split_kind="pipeline"):
+def engine(link, out_path, fail="", split_kind="pipeline", drafting=""):
     """The serving path: rank 0's TensorExecutor journals a step plan, the
     follower runs tensor.follow (split="pipeline"), MTP on both.
 
     `fail`: rank 0 alone fails one row (_fail_on_rank_0); the other rows
     stream to the end and the follower drops the row from the next plan.
-    `split_kind="tensor"`: the tiny qwen3_5_moe sharded, no head."""
+    `split_kind="tensor"`: the tiny qwen3_5_moe sharded, no head; with
+    `drafting`, the tiny qwen3_5 sharded, rank 0 holding the head."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.runtime import pipeline as PL
     from knurlogic.engine.runtime import tensor as T
@@ -284,7 +285,8 @@ def engine(link, out_path, fail="", split_kind="pipeline"):
         return [toks[u] for u in uids]
 
     if split_kind == "tensor":
-        return _tensor_engine(link, out_path, fail, admissions, drain, tok)
+        return _tensor_engine(link, out_path, fail, admissions, drain, tok,
+                              bool(drafting))
     whole = None
     if link.rank == 0 and not fail:
         model, head, prompts = _tiny_with_head(512)
@@ -311,31 +313,47 @@ def engine(link, out_path, fail="", split_kind="pipeline"):
     json.dump({"whole": whole, "split": split}, open(out_path, "w"))
 
 
-def _tensor_engine(link, out_path, fail, admissions, drain, tok):
+def _tensor_engine(link, out_path, fail, admissions, drain, tok,
+                   drafting=False):
     from tensor_ring_worker import build
 
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime import pipeline as PL
     from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.runtime.executor import LocalExecutor
     prompts = [[5, 17, 3, 99, 42, 7, 64, 11], [23, 31, 104, 33, 9, 8, 7, 6],
                [1, 4, 9, 16, 25, 36, 49, 64]]
-    model = build()
+    whole, head = None, None
+    if drafting:
+        if link.rank == 0 and not fail:
+            model, head, prompts = _tiny_with_head(512)
+            ex = LocalExecutor(MTPBatchGenerator(
+                model, head, prefill_step_size=16, completion_batch_size=32))
+            whole = drain(ex, [ex.insert(a) for a in admissions(prompts)])
+            ex.close()
+        model, head, prompts = _tiny_with_head(512)
+    else:
+        model = build()
     T.shard(model, link.group)
     if link.rank > 0:
         T.follow(model, tok, ("tiny", None, None), link,
                  prompt_cache_size=4, completion_batch_size=32,
-                 prefill_step_size=16, working_set=0, split="tensor")
+                 prefill_step_size=16, working_set=0, split="tensor",
+                 drafting=drafting)
         return
-    gen = MTPBatchGenerator(model, None, stats={}, prefill_step_size=16,
+    gen = MTPBatchGenerator(model, head, stats={}, prefill_step_size=16,
                             completion_batch_size=32)
+    if drafting:
+        PL.coordinate(gen, link.group)          # as the scheduler does
     _fail_on_rank_0(gen, fail)
     ring = T.Ring(link)
     ex = T.TensorExecutor(gen, ring, over=lambda: 0)
     split = drain(ex, [ex.insert(a) for a in admissions(prompts)])
     ring.stop()
-    json.dump({"whole": None, "split": split}, open(out_path, "w"))
+    json.dump({"whole": whole, "split": split}, open(out_path, "w"))
 
 
-def hit(link, out_path):
+def hit(link, out_path, split_kind="pipeline"):
     """A prompt-cache hit only the follower could use: rank 0 stores the
     first prompt's checkpoint (at 5 tokens) WITHOUT its head cache, as a
     non-drafting row would; the follower stores its own (which never has
@@ -390,16 +408,19 @@ def hit(link, out_path):
         whole = [drain(ex, ex.insert(admission(p))) for p in (a, b)]
         ex.close()
     model, head, _ = _tiny_with_head(512)
-    PL.split(model, link.group, PL.bounds_of([1, 3]))
+    if split_kind == "tensor":
+        T.shard(model, link.group)
+    else:
+        PL.split(model, link.group, PL.bounds_of([1, 3]))
     if link.rank > 0:
         T.follow(model, tok, key, link, prompt_cache_size=4,
                  completion_batch_size=8, prefill_step_size=4,
-                 working_set=0, split="pipeline", drafting=True)
+                 working_set=0, split=split_kind, drafting=True)
         return
     gen = MTPBatchGenerator(model, head, stats={}, prefill_step_size=4,
                             completion_batch_size=8)
     PL.coordinate(gen, link.group)
-    ring = T.Ring(link, split="pipeline")
+    ring = T.Ring(link, split=split_kind)
     ex = T.TensorExecutor(gen, ring, over=lambda: 0)
     pc = T.JournalPromptCache(PromptCache(4), ring.journal)
     n_trunk = gen._n_trunk
@@ -547,7 +568,7 @@ def main(argv):
     elif mode == "image":
         image(link, out_path, *argv[2:])
     elif mode == "hit":
-        hit(link, out_path)
+        hit(link, out_path, *argv[2:])
     elif mode == "logits":
         logits(link, out_path, argv[2], [int(x) for x in argv[3].split(",")])
     else:
