@@ -728,7 +728,10 @@ function followLaunch(L, d){
       const ks=(x.doc.loads||[]).filter(k=>L.job&&k.job ? k.job===L.job
         : sameModel(k, {name:nm, identity:L.identity}));
       return L.job ? ks : ks.sort((a,b)=>a.seconds-b.seconds).slice(0,1)});
-    if(per.length){ L.bytes=per.reduce((s,k)=>s+k.bytes,0); L.total=per[0].total_bytes }
+    // each rank against its own share (rank 0's holds the head and tower),
+    // capped there: a rank past its share is done, not more than done
+    if(per.length){ L.bytes=per.reduce((s,k)=>s+Math.min(k.bytes,k.total_bytes||k.bytes),0);
+      L.total=per.reduce((s,k)=>s+(k.total_bytes||0),0) }
   } else if(e){ L.bytes=e.bytes; L.total=e.total_bytes; L.last=e.last_log_line;
     L.samples.push([Date.now(), e.bytes]); if(L.samples.length>6) L.samples.shift() }
   if(L.cluster && L.job){

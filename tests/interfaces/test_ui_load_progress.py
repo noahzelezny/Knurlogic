@@ -30,3 +30,28 @@ def test_follower_ranks_counted_once(monkeypatch, tmp_path):
     assert sorted((e["job"], e["rank"], e["bytes"]) for e in loads) == [
         ("j1", 0, 10), ("j1", 1, 600)]
     assert [e["port"] for e in loads if e["rank"] == 1] == [0]
+
+
+def test_each_rank_is_measured_against_its_own_share(monkeypatch, tmp_path):
+    # a tensor job's rank 0 holds its half plus the 5.4 GiB MTP head: against
+    # the artifact the two ranks summed past 100% while rank 0 still loaded
+    art = tmp_path / "397B"
+    art.mkdir()
+    log = tmp_path / "r.log"
+    log.write_text("loading\n")
+    now = time.time()
+    rank0 = {"pid": 100, "artifact": str(art), "log": str(log), "t": now,
+             "job": "j1"}
+    jobs = {"j1/0": {"job": "j1", "rank": 0, "pid": 100, "port": 8000,
+                     "artifact": str(art), "log": str(log), "t": now,
+                     "share_bytes": 560},
+            "j1/1": {"job": "j1", "rank": 1, "pid": 101, "share_bytes": 500,
+                     "artifact": str(art), "log": str(log), "t": now}}
+    monkeypatch.setattr(server, "registry", lambda: {8000: rank0})
+    monkeypatch.setattr(J, "registry", lambda: jobs)
+    monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
+    monkeypatch.setattr(server, "_artifact_bytes", lambda p: 1000)
+    doc = {"memory": {"processes": [{"pid": 100, "bytes": 300},
+                                    {"pid": 101, "bytes": 500}]}}
+    got = {e["rank"]: e["total_bytes"] for e in server.load_progress(doc)}
+    assert got == {0: 560, 1: 500}
