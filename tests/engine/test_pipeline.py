@@ -147,7 +147,7 @@ def test_the_head_and_tower_are_not_in_the_replicated_bytes(tmp_path):
         raw_config = {"text_config": {"num_hidden_layers": 2}}
     per, other = R.pipeline_layer_bytes(A)
     assert per == [10, 10] and other == 100
-    assert R.pipeline_leader_bytes(A) == 50 + 30     # head + tower
+    assert R.leader_bytes(A) == 50 + 30     # head + tower
 
 
 # ------------------------------------------------------------ refusals
