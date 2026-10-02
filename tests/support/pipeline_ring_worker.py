@@ -13,6 +13,8 @@
     mtp <always> tensor        the same, the model sharded across both ranks
                                (the follower's logits real, not silenced);
                                also the same split with no head anywhere
+    mtp <always> tensor qwen4_exp
+                               the same on the tiny qwen4_exp and its head
 
 Run with MLX_RANK and MLX_HOSTFILE set."""
 import json
@@ -119,13 +121,45 @@ def logits(link, out_path, family, counts):
                    "info": info}, open(out_path, "w"))
 
 
-def _tiny_with_head(vocab):
+def _tiny_with_head(vocab, family="qwen3_5"):
+    if family == "qwen4_exp":
+        return _tiny_flash_next_with_head(vocab)
     sys.path.insert(0, os.path.dirname(__file__))
     from test_batch_drafting import _tiny
     return _tiny(vocab)
 
 
-def mtp(link, out_path, always, split_kind="pipeline"):
+def _tiny_flash_next_with_head(vocab):
+    """The tiny qwen4_exp (its fixture config at `vocab`, mlx's own random
+    init, float32) and a random MTP head: the block's own init, random
+    glue."""
+    import fixtures_vision_qwen as FQ
+    import mlx.core as mx
+
+    from knurlogic.engine import register
+    register.register("qwen4_exp", override=True)
+    from mlx_lm.models import qwen4_exp as arch
+
+    from knurlogic.engine.families.qwen.heads.qwen4_exp import MTPHead
+    mx.random.seed(0)
+    cfg = FQ.config("qwen4_exp")
+    cfg["text_config"]["vocab_size"] = vocab
+    model = arch.Model(arch.ModelArgs.from_dict(cfg))
+    model.set_dtype(mx.float32)
+    head = MTPHead(model, arch)
+    D, hc = head.D, head.hc
+    head.norm_e = head._norm(D, mx.zeros((D,)))
+    head.norm_h = head._norm(hc * D, mx.zeros((hc * D,)), group_size=D)
+    head.fc = mx.random.normal((D, 2 * D)) * 0.05
+    head.block.set_dtype(mx.float32)
+    head.mixer.set_dtype(mx.float32)
+    mx.eval(model.parameters(), head.block.parameters(),
+            head.mixer.parameters(), head.fc)
+    prompts = [mx.random.randint(0, vocab, (n,)).tolist() for n in (37, 9, 70)]
+    return model, head, prompts
+
+
+def mtp(link, out_path, always, split_kind="pipeline", family="qwen3_5"):
     import mlx.core as mx
 
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
@@ -163,7 +197,7 @@ def mtp(link, out_path, always, split_kind="pipeline"):
 
     whole = None
     if link.rank == 0:
-        model, head, prompts = _tiny_with_head(vocab)
+        model, head, prompts = _tiny_with_head(vocab, family)
         whole, _ = drive(MTPBatchGenerator(model, head, stats={},
                                            prefill_step_size=16), prompts)
     tensor = split_kind == "tensor"
@@ -171,12 +205,12 @@ def mtp(link, out_path, always, split_kind="pipeline"):
     if tensor:
         # the same split with no head on either rank: what drafting must
         # not change
-        model, _, prompts = _tiny_with_head(vocab)
+        model, _, prompts = _tiny_with_head(vocab, family)
         T.shard(model, link.group)
         gen = MTPBatchGenerator(model, None, stats={}, prefill_step_size=16)
         baseline, _ = drive(gen, prompts,
                             PL.coordinate(gen, link.group, drafting=False))
-    model, head, prompts = _tiny_with_head(vocab)
+    model, head, prompts = _tiny_with_head(vocab, family)
     if tensor:
         T.shard(model, link.group)
     else:

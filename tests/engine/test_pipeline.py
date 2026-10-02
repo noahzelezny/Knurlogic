@@ -306,6 +306,25 @@ def test_mtp_drafting_on_a_tensor_split_is_the_undrafted_split(tmp_path,
         assert b2 == b1 and d["accepted"] > 0
 
 
+@pytest.mark.parametrize("always", [False, True])
+def test_mtp_drafting_on_a_flash_next_tensor_split_is_the_undrafted_split(
+        tmp_path, always):
+    """The same on the tiny qwen4_exp with its head (one full-attention
+    block, its own mixer; no PLE): the n-gram table dealt between the ranks
+    and summed, the hidden state the head reads is the hyper-connection
+    streams before the mixer, whole on rank 0."""
+    d = _ring(tmp_path, "mtp", "1" if always else "0", "tensor", "qwen4_exp")
+    assert d["split"] == d["baseline"]
+    assert d["split"] == d["whole"]
+    (b0, b1, b2, steps, ba), follower = d["calls"]
+    assert follower == [b0, b1, b2, steps, ba]
+    assert b0 == ba == 3
+    assert 0 < b2 <= b1 <= steps
+    assert d["drafted"] > 0
+    if always:
+        assert b2 == b1 and d["accepted"] > 0
+
+
 def test_the_serving_path_follows_rank_0s_plan_on_a_pipeline(tmp_path):
     """Rank 0's TensorExecutor (the step plan) and the follower's
     tensor.follow(split="pipeline"), drafting, two segments per prompt (a
