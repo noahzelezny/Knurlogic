@@ -113,6 +113,15 @@ def test_load_on_two_machines_sends_the_pages_launch(page):
                                 "cable_note": "fastest"}
 
 
+def test_a_cluster_load_with_draft_false_sends_it_to_the_launch(page):
+    """The page's launch turns draft:false into KNURLOGIC_MTP=off on every
+    rank; the tool refused it as one-machine-only."""
+    page.answer = {"job": "j3", "starting": "abc", "port": 8090}
+    out = mcp.load(artifact="M", machines=["A", "B"], split="tensor",
+                   link="tcp", draft=False)
+    assert page.posts[0]["draft"] is False and "refused" not in out
+
+
 def test_load_on_one_peer_is_the_pages_single_peer_load(page):
     page.answer = {"starting": "/x/M", "port": 8080, "machine": "B"}
     out = mcp.load(artifact="M", machines=["B"])
