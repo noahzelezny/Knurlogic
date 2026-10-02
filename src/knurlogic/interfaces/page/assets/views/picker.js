@@ -1,6 +1,6 @@
 import {OVL} from '../ui/overlay.js';
 import {$, GIB, esc, gb} from '../format.js';
-import {LASTNODES, fitWS, fitWhere, isLocal, selNodes} from '../nodes.js';
+import {LASTNODES, fitWS, fitWhere, isLocal, nodeWS, selNodes} from '../nodes.js';
 import {launchSets, migrateLaunchSets} from './settings/knobs.js';
 import {getJSON, httpWhy, peekURL} from '../api.js';
 import {tick} from './home.js';
@@ -422,13 +422,32 @@ $('multiopts').querySelectorAll('.seg').forEach(g=>
 // refusals, /models.json `splits`); one left is a fixed choice, none hides it
 // A launch in flight holds its split and link: the choices grey with Launch
 const launching=()=>$('launch').textContent.trim()!=='Launch';
+// A tensor split puts the same share on every picked machine, plus the
+// MTP head and tower on one: greyed when a machine cannot hold it (the
+// launch refuses the same, with the arithmetic). The step margin is
+// tuning/resolve.step_margin's: 5% of the working set, at least 4 GiB.
+function tensorWhy(ns){
+  const t=SEL&&SEL.tensor_bytes; if(!t||ns.length<2) return '';
+  const on=k=>(launchMTP(SEL)[k]||'on')!=='off';
+  const per=t.sharded/ns.length+t.replicated;
+  const lead=(on('KNURLOGIC_MTP')?t.head:0)+(on('KNURLOGIC_VISION')?t.tower:0);
+  const room=ns.map(n=>{ const ws=nodeWS(n); return ws?ws-Math.max(4*GIB,ws/20):null });
+  for(let i=0;i<ns.length;i++) if(room[i]!=null&&room[i]<per)
+    return `tensor puts ${gb(per)} on every machine; ${ns[i].node} has ${gb(room[i])}`;
+  if(lead&&room.every(r=>r!=null&&r<per+lead))
+    return `tensor puts ${gb(per+lead)} on one machine (its share, the MTP head and tower); none has room`;
+  return '';
+}
 function splitState(){
   const ok=SEL && Array.isArray(SEL.splits) ? SEL.splits : ['tensor','pipeline'];
   const g=$('multiopts').querySelector('[data-k=shard]');
+  const tw=ok.includes('tensor') ? tensorWhy(selNodes()) : '';
+  if(tw && MULTI.shard==='tensor' && ok.includes('pipeline')) MULTI.shard='pipeline';
   if(!ok.includes(MULTI.shard) && ok.length) MULTI.shard=ok[0];
   g.querySelectorAll('button').forEach(b=>{
     b.hidden=!ok.includes(b.dataset.v);
-    b.disabled=!SEL || ok.length<2 || launching();
+    b.disabled=!SEL || ok.length<2 || launching() || (b.dataset.v==='tensor'&&!!tw);
+    b.title=b.dataset.v==='tensor'&&tw ? tw : '';
     b.setAttribute('aria-pressed', b.dataset.v===MULTI.shard);
   });
   g.closest('.opt').hidden=!ok.length;

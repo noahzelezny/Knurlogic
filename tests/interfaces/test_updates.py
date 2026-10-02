@@ -86,7 +86,7 @@ def test_models_json_carries_update(tmp_path, monkeypatch):
     monkeypatch.setitem(documents._MODELS, "rows", [f])
     monkeypatch.setitem(documents._MODELS, "at", 1e18)
     monkeypatch.setattr(documents, "_room", lambda *a: None)
-    monkeypatch.setattr(documents, "_splits", lambda *a: None)
+    monkeypatch.setattr(documents, "_splits", lambda *a: {"splits": None})
     updates.check(["org/m"], ask=lambda r: NEW)
     rows = documents.models_document()({})["models"]
     assert rows[0]["update"] is True
