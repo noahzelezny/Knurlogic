@@ -741,10 +741,6 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
         if link and link not in LINKS:
             return {"loaded": False,
                     "refused": f"link is tcp | rdma, not {link!r}"}
-        if not draft:
-            return {"loaded": False,
-                    "refused": "draft=false is a one-machine option; a "
-                               "cluster job's ranks take no --no-draft"}
     ident, no = _identity_of(artifact)
     if no:
         return no
@@ -762,7 +758,9 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
         req = {"action": "load", "identity": ident,
                "name": _artifact_name(artifact), "tune": tune,
                "sets": dict(sets or {})}
-        if len(ids) == 1 and not draft:
+        if not draft:
+            # one machine: its --no-draft; a cluster: KNURLOGIC_MTP=off on
+            # every rank (cluster/launch)
             req["draft"] = False
         if port:
             req["port"] = int(port)
