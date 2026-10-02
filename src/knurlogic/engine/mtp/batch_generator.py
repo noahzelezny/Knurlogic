@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import logging
+import os
 
 import mlx.core as mx
 from mlx_lm.generate import BatchGenerator, GenerationBatch, PromptProcessingBatch
@@ -25,7 +26,7 @@ from mlx_lm.generate import BatchGenerator, GenerationBatch, PromptProcessingBat
 from knurlogic.engine.serve import cache_report as cachereport
 
 from ..vision import key as K
-from .batch_loop import MTPBatch, RowParams, admit
+from .batch_loop import ForwardFailed, MTPBatch, RowParams, admit
 from .caches import position
 from .capture import capture_input
 from .registry import resolve
@@ -507,6 +508,16 @@ class MTPBatchGenerator(BatchGenerator):
             # one request's failure goes to that request; the generation thread lives
             # (logged)
             except Exception as e:
+                if self._coord is not None and isinstance(e, ForwardFailed):
+                    # A rank that fails mid-forward never sends its half: the
+                    # other ranks wait on it forever (a pipeline load sat at
+                    # 100% while rank 1 had raised). The rank dies instead, so
+                    # the job stops and its card says why (recovery). A
+                    # failure after the forward keeps the ranks in step.
+                    logger.exception("admission of request %s failed on a "
+                                     "cluster rank; stopping this rank", uid)
+                    logging.shutdown()
+                    os._exit(1)
                 logger.exception("admission of request %s failed; failing "
                                  "that request only", uid)
                 self._rows.pop(uid, None)
