@@ -42,7 +42,7 @@ def test_prepare_refuses_bad_settings_before_a_rank_starts(cache):
     code, doc = C.prepare(spec(sets={"KNURLOGIC_PRESET": "bogus"}),
                           resolve=lambda i: str(d),
                           info=info("Apple M3 Ultra", "192.0.2.2"),
-                          shape=lambda p, w, sp, vision=True: SHAPE,
+                          shape=lambda p, w, sp, vision=True, mtp=True: SHAPE,
                           registry=lambda: {})
     assert code == 200 and not doc["ok"]
     assert "launch settings are refused" in doc["refused"]

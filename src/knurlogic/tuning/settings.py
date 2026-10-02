@@ -634,6 +634,15 @@ def vision_of(sets: dict | None) -> bool:
         return True
 
 
+def mtp_of(sets: dict | None) -> bool:
+    """KNURLOGIC_MTP from launch settings: True (the default) unless set
+    off; a bad value is the default here (serve refuses it)."""
+    try:
+        return on_off((sets or {}).get("KNURLOGIC_MTP"), True)
+    except ValueError:
+        return True
+
+
 def on_off(v, default: bool = True) -> bool:
     """'on'/'off' (and 1/0, true/false); None or '' is `default`."""
     s = str(v if v is not None else "").strip().lower()

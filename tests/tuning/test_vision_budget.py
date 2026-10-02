@@ -296,3 +296,26 @@ def test_pipeline_rank_0_holds_no_tower_with_vision_off(tmp_path):
     v = Artifact.load(_rung(tmp_path / "v"))
     assert R.leader_bytes(v) - R.leader_bytes(
         v, vision=False) == TOWER
+
+
+def test_rank_0_holds_no_head_with_mtp_off(tmp_path):
+    # the head counted against rank 0 with MTP off made a split refuse, or
+    # take fewer layers on rank 0, for memory it never uses
+    d = _rung(tmp_path / "m", vision=False)
+    _safetensors(d / "mtp-head-q6.safetensors", {"mtp.fc.weight": TEXT})
+    a = Artifact.load(d)
+    on, off = R.leader_bytes(a, vision=False), R.leader_bytes(
+        a, vision=False, mtp=False)
+    assert on > 0 and off == 0
+    assert S.mtp_of({"KNURLOGIC_MTP": "off"}) is False
+    assert S.mtp_of({}) is True
+
+
+def test_a_cluster_launchs_mtp_off_reaches_its_shape(tmp_path, monkeypatch):
+    from knurlogic.cluster import launch as C
+    d = _rung(tmp_path / "m", vision=False)
+    _safetensors(d / "mtp-head-q6.safetensors", {"mtp.fc.weight": TEXT})
+    for split in ("pipeline", "tensor"):
+        assert C.shape_of(str(d), 2, split, vision=False,
+                          mtp=False)["leader_bytes"] == 0
+        assert C.shape_of(str(d), 2, split, vision=False)["leader_bytes"] > 0
