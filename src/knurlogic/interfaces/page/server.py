@@ -1100,9 +1100,13 @@ def load_progress(doc: dict) -> list:
     from knurlogic.cluster import jobs as J
     seen = {int(rec.get("pid") or 0) for _, rec in entries}
     jreg = J.registry()
-    ranks = {v["pid"]: v.get("rank") for v in jreg.values()}
-    entries = [(port, dict(rec, rank=ranks[rec["pid"]])
-                if ranks.get(rec.get("pid")) is not None else rec)
+    ranks = {v["pid"]: v for v in jreg.values()}
+    # rank 0's server record, with what its job record adds (rank, share)
+    entries = [(port, dict(rec, rank=ranks[rec["pid"]].get("rank"),
+                           **({"share_bytes": ranks[rec["pid"]]["share_bytes"]}
+                              if ranks[rec["pid"]].get("share_bytes") else {}))
+                if ranks.get(rec.get("pid"), {}).get("rank") is not None
+                else rec)
                for port, rec in entries]
     for key, rec in sorted(jreg.items()):
         if rec["pid"] not in seen:
@@ -1131,7 +1135,8 @@ def load_progress(doc: dict) -> list:
              **({"identity": rec["identity"]} if rec.get("identity") else {}),
              **({"rank": rec["rank"]} if "rank" in rec else {}),
              "seconds": round(now - t), "bytes": procs.get(pid, 0),
-             "total_bytes": _SIZES[path],
+             # a rank of a split job holds its share, not the artifact
+             "total_bytes": int(rec.get("share_bytes") or _SIZES[path]),
              "last_log_line": lines[-1][:200] if lines else ""}
         r = rows.get(port) if port else None
         if not is_our_server(pid) and not (
