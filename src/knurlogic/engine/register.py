@@ -13,6 +13,12 @@ versioned package does not.
 Reversible: `unregister()` drops the entries. The vendored file must still
 be validated against a known mlx-lm -- PROVENANCE.md records which mlx-lm
 each file was taken from. Design: docs/design/engine.md (architecture layer).
+
+PUBLIC: `register(*names)` and `unregister()` are called from outside
+knurlogic (vqlab's check-release runs `register("deepseek_v4")` before
+loading a deepseek_v4 tokenizer). Their names, signatures, and effect --
+`mlx_lm.models.<name>` importable, its HF config registered -- are pinned by
+tests/engine/test_register_public.py; change them only with the callers.
 """
 
 from __future__ import annotations
@@ -20,6 +26,8 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+
+__all__ = ["register", "unregister", "available"]
 
 _installed: list = []
 
