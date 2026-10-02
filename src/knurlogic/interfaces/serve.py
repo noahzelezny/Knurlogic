@@ -298,6 +298,10 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                   f"+ {pl['replicated_bytes'] / GIB:.1f} replicated)")
         _ring_env(ring)
         _ring_marker(ring)
+        # what this rank holds once loaded (rank 0: its share plus the MTP
+        # head and tower it alone holds): the page's load % is against it
+        from knurlogic.cluster import jobs as _J
+        _J.progress(share_bytes=int(share or 0) or None)
         # the ring-wide knobs beat the resolver like any --set
         overrides = dict(overrides or {})
         overrides.pop("VQLAB_PREFILL_CHUNK", None)
