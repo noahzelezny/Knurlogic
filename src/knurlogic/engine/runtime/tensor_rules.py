@@ -75,8 +75,8 @@ RULES = {
     "mlp.gate_proj": Rule(A2S),
     "mlp.up_proj": Rule(A2S),
     "mlp.down_proj": Rule(S2A),
-    # qwen4_exp's n-gram table (layer 1 of Flash-Next, 128 parts, 30-42
-    # GiB): too big to hold whole on every rank, and its quantization
+    # qwen4_exp's n-gram table (layer 1 of Flash-Next, 128 parts, 9-54 GiB
+    # by build): too big to hold whole on every rank, and its quantization
     # groups / VQ rows run along the 160-wide axis, which no cut respects
     "ple.ple_embedding.ngram_embedding": Rule(PARTS),
 }
