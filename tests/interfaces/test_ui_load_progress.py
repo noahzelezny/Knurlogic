@@ -43,10 +43,14 @@ def test_each_rank_is_measured_against_its_own_share(monkeypatch, tmp_path):
     rank0 = {"pid": 100, "artifact": str(art), "log": str(log), "t": now,
              "job": "j1"}
     jobs = {"j1/0": {"job": "j1", "rank": 0, "pid": 100, "port": 8000,
-                     "artifact": str(art), "log": str(log), "t": now,
-                     "share_bytes": 560},
-            "j1/1": {"job": "j1", "rank": 1, "pid": 101, "share_bytes": 500,
+                     "artifact": str(art), "log": str(log), "t": now},
+            "j1/1": {"job": "j1", "rank": 1, "pid": 101,
                      "artifact": str(art), "log": str(log), "t": now}}
+    # each rank writes its share to its own marker (jobs.progress), not to
+    # the registry: the test that put it there passed while no page saw it
+    monkeypatch.setattr(J, "read_marker", lambda job, rank: {
+        ("j1", 0): {"share_bytes": 560}, ("j1", 1): {"share_bytes": 500}}
+        .get((job, rank)))
     monkeypatch.setattr(server, "registry", lambda: {8000: rank0})
     monkeypatch.setattr(J, "registry", lambda: jobs)
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)

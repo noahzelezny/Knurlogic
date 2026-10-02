@@ -1076,6 +1076,19 @@ LOAD_REPORT_S = 1800
 _SIZES: dict = {}
 
 
+def _share_of(rec: dict) -> int:
+    """What a cluster rank holds once loaded, from its marker; 0 when it is
+    not a rank or has not said yet."""
+    if not rec.get("job") or rec.get("rank") is None:
+        return 0
+    from knurlogic.cluster import jobs as J
+    try:
+        m = J.read_marker(rec["job"], int(rec["rank"])) or {}
+    except ValueError:
+        return 0
+    return int(m.get("share_bytes") or 0)
+
+
 def load_progress(doc: dict) -> list:
     """What this machine's recent launches are doing, for the page's load
     indicator -- from what /loaded.json already gathered (the resident rows
@@ -1101,10 +1114,8 @@ def load_progress(doc: dict) -> list:
     seen = {int(rec.get("pid") or 0) for _, rec in entries}
     jreg = J.registry()
     ranks = {v["pid"]: v for v in jreg.values()}
-    # rank 0's server record, with what its job record adds (rank, share)
-    entries = [(port, dict(rec, rank=ranks[rec["pid"]].get("rank"),
-                           **({"share_bytes": ranks[rec["pid"]]["share_bytes"]}
-                              if ranks[rec["pid"]].get("share_bytes") else {}))
+    # rank 0's server record, with the rank its job record adds
+    entries = [(port, dict(rec, rank=ranks[rec["pid"]].get("rank"))
                 if ranks.get(rec.get("pid"), {}).get("rank") is not None
                 else rec)
                for port, rec in entries]
@@ -1135,8 +1146,9 @@ def load_progress(doc: dict) -> list:
              **({"identity": rec["identity"]} if rec.get("identity") else {}),
              **({"rank": rec["rank"]} if "rank" in rec else {}),
              "seconds": round(now - t), "bytes": procs.get(pid, 0),
-             # a rank of a split job holds its share, not the artifact
-             "total_bytes": int(rec.get("share_bytes") or _SIZES[path]),
+             # a rank of a split job holds its share, not the artifact:
+             # the rank writes it to its marker (cluster/jobs.progress)
+             "total_bytes": int(_share_of(rec) or _SIZES[path]),
              "last_log_line": lines[-1][:200] if lines else ""}
         r = rows.get(port) if port else None
         if not is_our_server(pid) and not (
