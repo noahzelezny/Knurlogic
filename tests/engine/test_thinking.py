@@ -411,3 +411,44 @@ def test_every_way_of_saying_no_thinking_is_none():
     assert requested({"reasoning": {"enabled": False}}) == "none"
     # enabled without a level leaves the model's own default
     assert requested({"reasoning": {"enabled": True}}) is None
+
+
+QWEN35_DEFAULTS = {"temp": 0.6, "top_p": 0.95, "top_k": 20,
+                   "non_thinking": {"temp": 0.7, "top_p": 0.8, "top_k": 20,
+                                    "min_p": 0.0, "presence_penalty": 1.5}}
+
+
+def test_thinking_off_takes_the_makers_non_thinking_sampling():
+    # Qwen3.5's card: thinking 0.6/0.95/20, off 0.7/0.8/20 + presence 1.5;
+    # generation_config carries only the thinking set (exo's cards do both)
+    from knurlogic.interfaces.http import openai as O
+    _serve(_Qwen38Tok())
+    msgs = [{"role": "user", "content": "hi"}]
+    off = {"messages": msgs, "chat_template_kwargs": {"enable_thinking": False}}
+    job, ctx = O.build_job(off, chat=True, translate=T.translate,
+                           sampling_defaults=QWEN35_DEFAULTS)
+    assert ctx["thinking"]["applied"] == "off"
+    assert job.sampling["temp"] == 0.7 and job.sampling["top_p"] == 0.8
+    assert job.penalties["presence_penalty"] == 1.5
+    # the request's own values still win
+    job, _ = O.build_job(dict(off, temperature=0.2, presence_penalty=0.5),
+                         chat=True, translate=T.translate,
+                         sampling_defaults=QWEN35_DEFAULTS)
+    assert job.sampling["temp"] == 0.2 and job.penalties["presence_penalty"] == 0.5
+    # thinking on keeps generation_config's set and no penalty
+    job, _ = O.build_job({"messages": msgs}, chat=True, translate=T.translate,
+                         sampling_defaults=QWEN35_DEFAULTS)
+    assert job.sampling["temp"] == 0.6 and "presence_penalty" not in job.penalties
+
+
+def test_sampling_defaults_carry_qwen35s_non_thinking_set(tmp_path):
+    import json
+
+    from knurlogic.machine.artifact import sampling_defaults
+    (tmp_path / "generation_config.json").write_text(json.dumps(
+        {"do_sample": True, "temperature": 0.6, "top_p": 0.95, "top_k": 20}))
+    (tmp_path / "config.json").write_text('{"model_type": "qwen3_5_moe"}')
+    d = sampling_defaults(tmp_path)
+    assert d["temp"] == 0.6 and d["non_thinking"]["presence_penalty"] == 1.5
+    (tmp_path / "config.json").write_text('{"model_type": "qwen3_next"}')
+    assert "non_thinking" not in sampling_defaults(tmp_path)

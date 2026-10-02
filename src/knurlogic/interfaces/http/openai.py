@@ -52,6 +52,29 @@ def _num(body, name, kind, lo=None, hi=None, default=None):
     return v
 
 
+def _non_thinking(body: dict, nt: dict, sampling: dict, penalties: dict,
+                  ctx: dict) -> None:
+    """Thinking is off: each parameter the request left to the model takes
+    the makers' thinking-off value (Qwen3.5: 0.7 / 0.8 / top_k 20 /
+    presence 1.5) instead of generation_config's thinking set."""
+    filled = ctx["sampling"]["from_model"]
+    for name, key in (("temperature", "temp"), ("top_p", "top_p"),
+                      ("top_k", "top_k"), ("min_p", "min_p")):
+        if key in nt and (name in filled or name not in body):
+            sampling[key] = float(nt[key]) if key == "temp" else nt[key]
+            if name not in filled:
+                filled.append(name)
+    if "presence_penalty" in nt and "presence_penalty" not in body:
+        penalties["presence_penalty"] = nt["presence_penalty"]
+        filled.append("presence_penalty")
+    ctx["sampling"]["applied"] = {k: v for k, v in sampling.items()
+                                  if k != "seed"}
+    if "presence_penalty" in penalties:
+        ctx["sampling"]["applied"]["presence_penalty"] = \
+            penalties["presence_penalty"]
+    ctx["sampling"]["mode"] = "non-thinking"
+
+
 def build_job(body: dict, *, chat: bool, translate: Callable = None,
               has_vision: Callable[[], bool] = lambda: False,
               sampling_defaults: dict | None = None) -> tuple:
@@ -76,6 +99,7 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
         raise ApiError(400, "max_tokens must be a non-negative integer",
                        param="max_tokens")
     model = dict(sampling_defaults or {})
+    non_thinking = model.pop("non_thinking", None)
     temp = _num(body, "temperature", (int, float), lo=0)
     filled = []
     if temp is None:
@@ -166,6 +190,8 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
             except ValueError as e:
                 raise ApiError(400, str(e), param="reasoning_effort") from e
             ctx["exclude"] = thinking.excluded(body)
+            if non_thinking and (ctx["thinking"] or {}).get("applied") == "off":
+                _non_thinking(body, non_thinking, sampling, penalties, ctx)
         req = P.ChatRequest("chat", "", msgs, body.get("tools") or None,
                             body.get("role_mapping"))
         args = P.PromptArgs(kwargs)
