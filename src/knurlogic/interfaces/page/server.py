@@ -1018,12 +1018,12 @@ def with_jobs(doc: dict) -> dict:
         js = launch.jobs_document()
     except (OSError, ValueError, KeyError, AttributeError, TypeError):
         js = []
-    # a port is reused by the next job: an ended job never claims the row
-    # of the one now serving there
+    # a port is reused by the next server: an ended job never claims the
+    # row of the one now serving there (a single-Mac load on 8080 after a
+    # stopped cluster job there was shown as that job, "stopped", twice)
     ports = {}
     for j in js:
-        if j.get("port") and (j.get("phase") != "stopped"
-                              or j["port"] not in ports):
+        if j.get("port") and j.get("phase") != "stopped":
             ports[j["port"]] = j
     from knurlogic.cluster import jobs as J
     from knurlogic.cluster import recovery
