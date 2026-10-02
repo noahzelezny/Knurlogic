@@ -1025,7 +1025,21 @@ def with_jobs(doc: dict) -> dict:
         if j.get("port") and (j.get("phase") != "stopped"
                               or j["port"] not in ports):
             ports[j["port"]] = j
+    from knurlogic.cluster import jobs as J
     from knurlogic.cluster import recovery
+    # what this machine's ranks of each job hold: a job's card sums every
+    # machine's (rank 0's row alone showed its own share, or nothing)
+    procs = {int(p.get("pid", 0)): int(p.get("bytes", 0)) for p in
+             ((doc.get("memory") or {}).get("processes") or [])
+             if isinstance(p, dict)}
+    try:
+        reg = J.registry()
+    except (OSError, ValueError):
+        reg = {}
+    for j in js:
+        j["bytes"] = sum(procs.get(int(v.get("pid") or 0), 0)
+                         for v in reg.values()
+                         if isinstance(v, dict) and v.get("job") == j.get("job"))
     for j in js:
         j["recovery"] = (recovery.for_job(j["job"]) if j.get("job")
                          else None) or (recovery.served_view(
