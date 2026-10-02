@@ -726,6 +726,74 @@ def test_a_skipzero_module_even_rows_is_unverified_not_refused(tmp_path):
          ("sz_codes", "sz_rowmask", "sz_scales", "sz_shape")): 0}
 
 
+def _sz_runtime(a, out=1024):
+    # a bundled runtime that splits its own SKIPZERO rows (vqlab 65a9024)
+    import copy
+    import json
+    (a / "model.py").write_text("SKIPZERO_SHARD = 1\n")
+    cfg = copy.deepcopy(QWEN36)
+    mods = {f"language_model.model.layers.0.mlp.switch_mlp.{p}":
+            {"experts": 512, "out": out} for p in ("gate_proj", "down_proj")}
+    cfg["vq_skipzero"] = {"format": "vq-skipzero", "version": 1,
+                          "modules": mods}
+    (a / "config.json").write_text(json.dumps(cfg))
+    return cfg
+
+
+def test_a_runtime_that_splits_skipzero_itself_is_offered_tensor(tmp_path):
+    # odd packed rows (70095) are the runtime's to split per expert; down's
+    # compact codes are cut on the input axis like any VQ module
+    a = _artifact(tmp_path, QWEN36, _layer0(dict(_skipzero(70095), **{
+        "down_proj.sz_codes": (2080653, 256),
+        "down_proj.sz_scales": (2080653, 16),
+        "down_proj.sz_rowmask": (512, 512),
+        "down_proj.sz_shape": (4,),
+        "down_proj.codebook": (256, 4)})))
+    _sz_runtime(a)
+    assert R.tensor_split_refusals(a, 2) == []
+    assert R.tensor_unverified(a) == {}
+    from knurlogic.interfaces.page.documents import splits_of
+    assert "tensor" in splits_of(a)
+    import types
+    g = types.SimpleNamespace(rank=lambda: 1, size=lambda: 2)
+    from knurlogic.engine.runtime.tensor import load_config
+    assert load_config(a, g)["vq_skipzero"]["shard"] == {"rank": 1, "n": 2}
+
+
+def test_a_runtime_split_needs_output_rows_that_divide(tmp_path):
+    a = _artifact(tmp_path, QWEN36, _layer0(_skipzero(70095)))
+    _sz_runtime(a, out=1023)
+    why = R.tensor_split_refusals(a, 2)
+    assert any("1023 output rows do not divide by 2" in w for w in why)
+
+
+def test_without_the_runtime_split_load_config_adds_nothing(tmp_path):
+    import types
+    from knurlogic.engine.runtime.tensor import load_config
+    a = _artifact(tmp_path, QWEN36, _layer0(_skipzero(70095)))
+    g = types.SimpleNamespace(rank=lambda: 0, size=lambda: 2)
+    assert load_config(a, g) is None
+
+
+def test_a_module_the_runtime_split_is_not_cut_again():
+    import types
+
+    import mlx.nn as nn
+
+    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.runtime.tensor_rules import RULES
+    lin = nn.Linear(8, 8)
+    object.__setattr__(lin, "_vq_sharded", (1, 2))
+    layer = types.SimpleNamespace(mlp=types.SimpleNamespace(
+        switch_mlp=types.SimpleNamespace(gate_proj=lin)))
+    T._apply(layer, "mlp.switch_mlp.gate_proj",
+             RULES["mlp.switch_mlp.gate_proj"], 1, 2)
+    assert lin.weight.shape == (8, 8)
+    with pytest.raises(ValueError, match="rank 1 of 2, not 0 of 2"):
+        T._apply(layer, "mlp.switch_mlp.gate_proj",
+                 RULES["mlp.switch_mlp.gate_proj"], 0, 2)
+
+
 def test_hf_bf16_names_map_to_the_rules_sanitize_feeds_shard():
     from knurlogic.engine.runtime.tensor_rules import locate
     pre = "model.language_model.layers.3."
@@ -789,7 +857,8 @@ def test_a_layout_whose_rows_are_not_in_order_fails_with_its_error():
 
 def test_skipzero_cut_by_rows_mixes_experts():
     # the real module's geometry: codes [NLIVE, W] and row_table [E, OUT];
-    # a row cut halves the expert axis, so the part is refused unrun
+    # a row cut of the packed codes leaves the (whole) table's rows
+    # unhalved, so the part is refused unrun
     import mlx.nn as nn
 
     from knurlogic.engine.runtime.tensor_rules import A2S, Rule
@@ -805,4 +874,4 @@ def test_skipzero_cut_by_rows_mixes_experts():
         output_dims = property(lambda s: s.row_table.shape[1])
         input_dims = property(lambda s: s.codes.shape[1] * 4)
     why = check_module(SZ(), Rule(A2S), 2)
-    assert "num_experts 4 -> 2" in why and "output_dims 2 -> 2" in why
+    assert "output_dims 2 -> 2 (want 1)" in why
