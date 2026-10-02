@@ -1169,7 +1169,8 @@ _HEADERS: dict = {}
 def trunk_headers(path) -> dict:
     """{name: (shape, bytes)} from the artifact's top-level safetensors
     headers -- 8 bytes and a JSON each, no weights -- minus the tower and a
-    packed MTP head (neither loads under tensor). Cached on each shard's
+    packed MTP head (neither is split: rank 0 alone holds them,
+    `leader_bytes`). Cached on each shard's
     (size, mtime_ns, ctime_ns)."""
     import json
     import struct
@@ -1476,7 +1477,7 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
     `other_bytes`: what every rank holds besides its layers (embeddings,
     final norm, lm_head -- replicated). `leader_bytes`: what rank 0 alone
     holds besides (the MTP head and the vision tower:
-    `pipeline_leader_bytes`), so rank 0 takes fewer layers for them.
+    `leader_bytes`), so rank 0 takes fewer layers for them.
 
     A rank's weight is what it can hold (working set less the replicated
     bytes), times its memory bandwidth when EVERY rank's is known (decode
@@ -1569,7 +1570,7 @@ def pipeline_shares(layer_bytes: list, ranks: list, other_bytes: int = 0,
 def pipeline_layer_bytes(artifact: Artifact) -> tuple:
     """layer_bytes_of over the artifact's top-level safetensors headers.
     Neither the tower nor an MTP head is the trunk, and neither is on every
-    rank: rank 0 alone holds them (`pipeline_leader_bytes`)."""
+    rank: rank 0 alone holds them (`leader_bytes`)."""
     import json
     import struct
 
@@ -1600,11 +1601,11 @@ def pipeline_layer_bytes(artifact: Artifact) -> tuple:
     return layer_bytes_of(sizes, L)
 
 
-def pipeline_leader_bytes(artifact: Artifact, vision: bool = True) -> int:
-    """What rank 0 of a pipeline holds and no other rank does: the MTP
-    head (it drafts where the last layers are; the followers only run the
-    verify rows) and the vision tower (it encodes at tokenize and ships the
-    image rows; a follower binds the family without one). Read off the
+def leader_bytes(artifact: Artifact, vision: bool = True) -> int:
+    """What rank 0 of a split model (pipeline or tensor) holds and no other
+    rank does: the MTP head (it drafts; the followers only run the verify
+    rows) and the vision tower (it encodes at tokenize and ships the image
+    rows; a follower binds the family without one). Read off the
     safetensors headers."""
     import json
     import struct
