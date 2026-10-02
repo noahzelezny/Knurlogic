@@ -13,6 +13,7 @@ flipped -- a near-tie, not a logic fault (which would diverge at once, at
 every vocab). A test that fails on numerics trains people to ignore it.
 """
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -290,6 +291,31 @@ def test_failed_admission_can_fail(monkeypatch):
     gen.insert(prompts[:1], max_tokens=[5])
     prs, _ = gen.next()
     assert not any(isinstance(r.progress, Exception) for r in prs)
+
+
+def test_a_cluster_rank_whose_forward_fails_stops_instead_of_hanging(
+        monkeypatch):
+    """Rank 1 of a pipeline load raised inside its prefill forward and
+    carried on; rank 0 waited on its half forever (the card sat at 100%).
+    A mid-forward failure on a rank exits the rank; one after the forward
+    still fails just its row (the ranks stay in step)."""
+    from knurlogic.engine.mtp import batch_generator as bg
+    from knurlogic.engine.mtp.batch_loop import ForwardFailed
+    model, head, prompts = _tiny(512)
+    gen = bg.MTPBatchGenerator(model, head, prefill_step_size=16)
+    gen._coord = types.SimpleNamespace(head=False, diverged=False,
+                                       b0=lambda t1: t1)
+    monkeypatch.setattr(bg, "admit", lambda *a, **k: (_ for _ in ()).throw(
+        ForwardFailed("kernel missing")))
+
+    def exit_(code):
+        raise SystemExit(code)
+    monkeypatch.setattr(bg.os, "_exit", exit_)
+    monkeypatch.setattr(bg.logging, "shutdown", lambda: None)
+    gen.insert(prompts[:1], max_tokens=[5])
+    with pytest.raises(SystemExit) as ex:
+        gen.next()
+    assert ex.value.code == 1
 
 
 def test_a_failed_decode_step_fails_its_rows_not_the_server(monkeypatch):

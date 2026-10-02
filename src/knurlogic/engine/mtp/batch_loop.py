@@ -176,6 +176,11 @@ def _key(p: RowParams, position: int):
     return p.keys.at(position) if p.keys is not None else None
 
 
+class ForwardFailed(RuntimeError):
+    """A prefill forward raised part-way: on a cluster rank the other ranks
+    are inside the same forward, waiting on this one's half."""
+
+
 def admit(
     model,
     head,
@@ -309,17 +314,21 @@ def admit(
             chunk = ids[:, i:end]
             if not chunk.shape[1]:
                 break
-            model(chunk, cache=cache, **_kw(i, end))
+            try:
+                model(chunk, cache=cache, **_kw(i, end))
+                # Evaluate the cache and the captured hidden state, never
+                # the logits: forcing them would materialise the lm_head
+                # projection for every prompt position (loop.py says the
+                # same).
+                want = [c.state for c in cache if hasattr(c, "state")]
+                if drafts:
+                    h = get_h()
+                    h_chunks.append(h)
+                    want.append(h)
+                mx.eval(want)
+            except Exception as e:
+                raise ForwardFailed(str(e)) from e
             i = end
-            # Evaluate the cache and the captured hidden state, never the
-            # logits: forcing them would materialise the lm_head projection
-            # for every prompt position (loop.py says the same).
-            want = [c.state for c in cache if hasattr(c, "state")]
-            if drafts:
-                h = get_h()
-                h_chunks.append(h)
-                want.append(h)
-            mx.eval(want)
             mx.clear_cache()
             chunk_done()
             if on_chunk is not None:
