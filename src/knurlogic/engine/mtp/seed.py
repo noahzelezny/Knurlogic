@@ -21,16 +21,15 @@ import mlx.core as mx
 
 def _cache_state(cache: Any) -> list[mx.array]:
     """The arrays to force after a chunk so the graph never spans chunks."""
+    from mlx.utils import tree_flatten
     out: list[mx.array] = []
     caches = cache if isinstance(cache, (list, tuple)) else [cache]
     for c in caches:
         st = getattr(c, "state", None)
         if st is None:
             continue
-        if isinstance(st, (list, tuple)):
-            out.extend(a for a in st if isinstance(a, mx.array))
-        elif isinstance(st, mx.array):
-            out.append(st)
+        # nested: deepseek_v4's state is (window, compressor, indexer) tuples
+        out.extend(a for _, a in tree_flatten(st) if isinstance(a, mx.array))
     return out
 
 

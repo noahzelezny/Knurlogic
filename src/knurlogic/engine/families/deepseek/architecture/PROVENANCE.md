@@ -11,7 +11,7 @@ artifacts were validated against -- not merely that it imports.
   its author's permission. No exo code is in it.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.31.3.
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `a890c37b0ec8ef1e77faa0ba903e4f59f2bc20a80f82f40c7ee5fbb33c32cf90`
+- vendored sha256: `48d84d4f3367569cd4c57da162e47f023888ef0b5e4cdc784a5e8b33d8e34b62`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -104,3 +104,14 @@ index_topk no pool reaches, so it checks everything the edits leave alone.
    unchanged.
 12. Comment-only: two comments say "Fork patch" instead of naming another
    project. No code change.
+
+### Edit 13, needed by MTP drafting
+
+13. **Ragged multi-token mask** (`V4Attention.__call__`). Edit 3's case
+   for a step S > 1 wide that continues a merged batch (MTP's 2-wide
+   verify): `_build_window_mask` assumes every row's window ends at the
+   buffer's end, which a left-padded row's does not, so a short row beside
+   a longer one read the wrong window (tests/test_deepseek_v4_mtp.py,
+   three rows). Now the batch cache's own `make_mask(S)` there. A
+   right-padded prefill (`_lengths` set), a fresh cache and a single row
+   keep the fork's mask.
