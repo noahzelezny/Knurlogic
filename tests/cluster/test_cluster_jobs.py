@@ -1572,3 +1572,15 @@ def test_start_runs_the_rings_chunk_and_says_why(cache, monkeypatch):
     assert cmd[cmd.index("--prefill-why") + 1] == C.RING_CHUNK_WHY
     C.PREPARED.clear()
     C._PROCS.clear()
+
+
+def test_a_stopped_job_does_not_claim_the_next_server_on_its_port(monkeypatch):
+    # a single-Mac load on 8080 after a stopped cluster job there showed as
+    # that job ("pipeline over RDMA · stopped"), beside its own launch card
+    monkeypatch.setattr(C, "jobs_document", lambda: [
+        {"job": "77865d0000000000", "phase": "stopped", "port": 8080,
+         "split": "pipeline", "link": "rdma", "machines": ["A", "B"]}])
+    doc = page_server.with_jobs({"resident": [
+        {"runtime": "knurlogic", "where": "http://127.0.0.1:8080",
+         "state": "loading"}]})
+    assert not (doc["resident"][0].get("cluster") or {}).get("job")
