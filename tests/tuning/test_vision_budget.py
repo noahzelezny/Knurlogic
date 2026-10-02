@@ -294,5 +294,5 @@ def test_an_image_with_vision_off_is_a_clear_400(monkeypatch):
 
 def test_pipeline_rank_0_holds_no_tower_with_vision_off(tmp_path):
     v = Artifact.load(_rung(tmp_path / "v"))
-    assert R.pipeline_leader_bytes(v) - R.pipeline_leader_bytes(
+    assert R.leader_bytes(v) - R.leader_bytes(
         v, vision=False) == TOWER
