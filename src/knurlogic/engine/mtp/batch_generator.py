@@ -221,6 +221,16 @@ class MTPBatchGenerator(BatchGenerator):
                         " (vision model)" if vision is not None else "",
                         f": {why}" if why else "")
 
+    def mirror_hidden(self) -> None:
+        """A tensor follower of a drafting rank 0, holding no head: capture
+        the trunk's final hidden state too. Rank 0 evaluates it after every
+        prefill chunk of a drafting row, and under tensor it holds the last
+        layer's all_sum; left lazy here, the ranks' collectives part."""
+        spec = resolve(self.model)
+        core = getattr(self.model, "language_model", self.model).model
+        self._batch.get_h = self._stack.enter_context(
+            capture_input(core, spec.capture))
+
     # ------------------------------------------------------------ admission
 
     def _admit_one(self) -> PromptProcessingBatch.Response | None:
