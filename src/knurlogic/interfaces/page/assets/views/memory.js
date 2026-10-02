@@ -127,14 +127,33 @@ async function loadResident(){
   // what its own machine started.
   // A peer's knurlogic model is unloaded through that peer (forwarded
   // by port; the peer stops only what it started).
-  const rows=(d.resident||[]).concat(...peers.map(m=>(m.resident||[])
+  const all=(d.resident||[]).concat(...peers.map(m=>(m.resident||[])
       .map(r=>({...r, node:m.id}))))
     .map(r=>r.machine?{...r, can_unload:r.runtime==='knurlogic' && !!r.node
       && /:\d+\/?$/.test(r.where||'')}:r);
+  // exo's instance spread over machines is reported by each machine's exo,
+  // each row holding that machine's share: one card, its shares summed and
+  // the machines it spans named (from exo's own placement)
+  // a cluster job's size: every machine's ranks of it (each page's jobs)
+  const jobBytes={};
+  for(const x of [d].concat(peers)) for(const j of (x.jobs||[]))
+    if(j.job) jobBytes[j.job]=(jobBytes[j.job]||0)+(j.bytes||0);
+  const rows=[], exoAt={};
+  for(const r0 of all){
+    const r=r0.cluster&&r0.cluster.job&&jobBytes[r0.cluster.job]
+      ?{...r0, bytes_resident:jobBytes[r0.cluster.job]}:r0;
+    if(r.runtime!=='exo'||!r.ident){ rows.push(r); continue }
+    const k=exoAt[r.ident];
+    const spans=((r.extra||{}).placement||[]).map(p=>p.node).filter(Boolean);
+    if(k===undefined){ exoAt[r.ident]=rows.length;
+      rows.push({...r, spans:spans.length>1?spans:null}); continue }
+    rows[k]={...rows[k], bytes_resident:(rows[k].bytes_resident||0)+(r.bytes_resident||0)};
+  }
   const el=$('resident');
   // One card per instance, not per machine: a cluster job is one instance,
   // named once with the machines it runs on. The whole card opens a chat.
   const on=r=>r.cluster?(r.cluster.machines||[]).join(' + ')
+    :r.spans?r.spans.join(' + ')
     :(r.machine||((window.NODES||[]).find(n=>n.role==='local')||{}).node||'this machine');
   // answering a request right now: the dot becomes the chat's turning gear.
   // The cards are redrawn every refresh, so each new gear starts where the
