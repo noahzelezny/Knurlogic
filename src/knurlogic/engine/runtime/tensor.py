@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 from collections.abc import Callable
 
 import mlx.core as mx
@@ -29,7 +30,14 @@ from knurlogic.cluster.jobs import progress
 
 from . import plan as P
 from .executor import Admission, Checkpoint, Finished, LocalExecutor
-from .tensor_rules import RULES, module_refusal, predicate, segment_points
+from .tensor_rules import (
+    PARTS,
+    RULES,
+    module_refusal,
+    owner,
+    predicate,
+    segment_points,
+)
 
 logger = logging.getLogger(__name__)
 GIB = 1 << 30
@@ -78,6 +86,9 @@ def _apply(layer, path: str, rule, rank: int, n: int) -> None:
     obj = getattr(parent, leaf, None)
     if obj is None:
         return
+    if rule.kind == PARTS:
+        _deal(obj, path, rank, n)
+        return
     pred = predicate(rule.kind)
     seg = segment_points(rule, getattr(parent, "key_dim", 0))
     if isinstance(obj, mx.array):
@@ -94,7 +105,8 @@ def _apply(layer, path: str, rule, rank: int, n: int) -> None:
     why = module_refusal(path, rule, set(obj.parameters()))
     if why:
         raise ValueError(why)
-    h = getattr(parent, "num_key_value_heads", n)
+    kv = _name(parent, _KV_HEADS)
+    h = getattr(parent, kv) if kv else n
     if rule.repeat_kv and n > h:
         def rep(p):
             s = p.shape
@@ -102,6 +114,43 @@ def _apply(layer, path: str, rule, rank: int, n: int) -> None:
             return mx.repeat(p, n // h, axis=0).reshape(-1, *s[1:])
         obj.update(tree_map(rep, obj.parameters()))
     _split_inplace(obj, pred, rank, n, seg)
+
+
+class _Elsewhere(nn.Module):
+    """A part of a PARTS table another rank holds: its rows read as zeros
+    here, and the table's Reduce sums the owner's in."""
+
+    def __init__(self, dim: int):
+        super().__init__()
+        self._dim = dim
+
+    def __call__(self, ids):
+        return mx.zeros((*ids.shape, self._dim), dtype=mx.float32)
+
+
+def _deal(table, path: str, rank: int, n: int) -> None:
+    """Keep this rank's parts of `table` (tensor_rules.owner) and put an
+    _Elsewhere in place of every other: their weights are never read."""
+    parts = sorted((k for k in table if re.fullmatch(r"shard_\d+", k)),
+                   key=lambda k: int(k[6:]))
+    if len(parts) % n:
+        raise ValueError(f"{path}: {len(parts)} parts do not divide by {n}")
+    for k in parts:
+        if owner(int(k[6:]), len(parts), n) != rank:
+            setattr(table, k, _Elsewhere(table.dim))
+
+
+#: the per-instance sizes each family's modules reshape by, divided by n on
+#: every rank: qwen3_5's names, then qwen4_exp's
+_LINEAR_SIZES = ("num_k_heads", "num_v_heads", "n_k", "n_v", "key_dim",
+                 "value_dim", "conv_dim")
+_HEADS = ("num_attention_heads", "n_heads")
+_KV_HEADS = ("num_key_value_heads", "n_kv_heads")
+
+
+def _name(module, names) -> str | None:
+    """The first of `names` that `module` has."""
+    return next((k for k in names if hasattr(module, k)), None)
 
 
 class Reduce(nn.Module):
@@ -151,29 +200,35 @@ def load_config(path, group) -> dict | None:
 
 
 def shard(model, group) -> None:
-    """Split a qwen3_5 / qwen3_5_moe model across `group` in place.
+    """Split a qwen3_5 / qwen3_5_moe / qwen4_exp model across `group` in
+    place.
 
     Every cut is a RULES entry (tensor_rules); tuning/resolve checks the
-    same rules against the headers before a rank starts."""
+    same rules against the headers before a rank starts. qwen4_exp's
+    hyper-connections, QSA indexer and the rest of its PLE run whole on
+    every rank, on the whole hidden state the Reduces leave."""
     n, rank = group.size(), group.rank()
     for layer in model.layers:
         for path, rule in RULES.items():
             _apply(layer, path, rule, rank, n)
-        if layer.is_linear:
+        if "linear_attn" in layer:
             la = layer.linear_attn
             la.conv1d.groups //= n
-            la.num_k_heads //= n
-            la.num_v_heads //= n
-            la.key_dim //= n
-            la.value_dim //= n
-            la.conv_dim //= n
+            for k in _LINEAR_SIZES:
+                if hasattr(la, k):
+                    setattr(la, k, getattr(la, k) // n)
             la.sharding_group = None            # Reduce sums it, in fp32
             layer.linear_attn = Reduce(la, group)
         else:
             at = layer.self_attn
-            at.num_attention_heads //= n
-            at.num_key_value_heads = max(1, at.num_key_value_heads // n)
+            h, kv = _name(at, _HEADS), _name(at, _KV_HEADS)
+            setattr(at, h, getattr(at, h) // n)
+            setattr(at, kv, max(1, getattr(at, kv) // n))
             layer.self_attn = Reduce(at, group)
+        ple = getattr(layer, "ple", None)
+        if ple is not None:
+            e = ple.ple_embedding
+            e.ngram_embedding = Reduce(e.ngram_embedding, group)
         mlp = layer.mlp
         if hasattr(mlp, "switch_mlp"):
             mlp.sharding_group = None

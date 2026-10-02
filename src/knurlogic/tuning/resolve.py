@@ -1077,12 +1077,13 @@ def numerics_for(artifact: Artifact, profile: str | None = None):
 # ------------------------------------------------------------ tensor split
 #
 # One model served by N ranks, every layer's weights split N ways (the
-# qwen3_5 families: engine/runtime/tensor.py does the split). Pure
-# arithmetic over the config and the safetensors headers, so a refusal is
+# qwen3_5 families and qwen4_exp: engine/runtime/tensor.py does the split).
+# Pure arithmetic over the config and the safetensors headers, so a refusal is
 # said -- with its numbers -- before anything loads.
 
 #: the model types engine/runtime/tensor.py knows how to split
-TENSOR_TYPES = ("qwen3_5", "qwen3_5_moe", "qwen3_5_text", "qwen3_5_moe_text")
+TENSOR_TYPES = ("qwen3_5", "qwen3_5_moe", "qwen4_exp", "qwen3_5_text",
+                "qwen3_5_moe_text", "qwen4_exp_text")
 
 
 def tensor_sharded(name: str) -> bool:
@@ -1101,7 +1102,7 @@ def tensor_refusals(cfg: dict, n: int) -> list:
     tc = cfg.get("text_config", cfg)
     types = {cfg.get("model_type"), tc.get("model_type")}
     if not types & set(TENSOR_TYPES):
-        out.append(f"tensor split knows {', '.join(TENSOR_TYPES[:2])}; this "
+        out.append(f"tensor split knows {', '.join(TENSOR_TYPES[:3])}; this "
                    f"is {cfg.get('model_type')!r}")
         return out
 
