@@ -200,8 +200,8 @@ def load_config(path, group) -> dict | None:
 
 
 def shard(model, group) -> None:
-    """Split a qwen3_5 / qwen3_5_moe / qwen4_exp model across `group` in
-    place.
+    """Split a qwen3_5 / qwen3_5_moe / qwen4_exp / deepseek_v4 model across
+    `group` in place.
 
     Every cut is a RULES entry (tensor_rules); tuning/resolve checks the
     same rules against the headers before a rank starts. qwen4_exp's
@@ -211,6 +211,17 @@ def shard(model, group) -> None:
     for layer in model.layers:
         for path, rule in RULES.items():
             _apply(layer, path, rule, rank, n)
+        if "attn" in layer:
+            # deepseek_v4: a rank holds n_heads / n heads in o_groups / n
+            # whole groups; its compressor, indexer and the one shared kv
+            # head are whole, and so are the hyper-connections around them
+            at = layer.attn
+            at.n_heads //= n
+            at.n_groups //= n
+            at._sink_cache = None               # cast lazily from the cut
+            layer.attn = Reduce(at, group)
+            layer.ffn = Reduce(layer.ffn, group)
+            continue
         if "linear_attn" in layer:
             la = layer.linear_attn
             la.conv1d.groups //= n

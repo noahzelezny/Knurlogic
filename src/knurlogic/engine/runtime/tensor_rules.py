@@ -1,5 +1,5 @@
-"""The tensor split's rules: which arrays of a qwen3_5 / qwen4_exp layer
-are cut, on which axis, in which segments -- one table that engine/runtime/tensor.py
+"""The tensor split's rules: which arrays of a qwen3_5 / qwen4_exp /
+deepseek_v4 layer are cut, on which axis, in which segments -- one table that engine/runtime/tensor.py
 `shard` applies to loaded arrays and tuning/resolve checks against the
 safetensors headers before anything loads, so the refusal and the loader
 cannot disagree. No mlx here: the picker asks this of ~80 models.
@@ -79,6 +79,24 @@ RULES = {
     # by build): too big to hold whole on every rank, and its quantization
     # groups / VQ rows run along the 160-wide axis, which no cut respects
     "ple.ple_embedding.ngram_embedding": Rule(PARTS),
+    # deepseek_v4 (DeepSeek-V4-Flash): the attention heads are cut --
+    # wq_b's output, the per-head sink, wo_a's output (its o_groups each
+    # read n_heads / o_groups whole heads, so a rank keeps whole groups:
+    # tuning/resolve refuses o_groups that do not divide) and wo_b's input.
+    # wqkv_a (the low-rank q and the ONE kv head every query head shares),
+    # the norms, the compressor and the indexer run whole on every rank.
+    "attn.wq_b": Rule(A2S),
+    "attn.attn_sink": Rule(ROWS),               # a bare array
+    "attn.wo_a": Rule(A2S),
+    "attn.wo_b": Rule(S2A),
+    # its routed experts and shared expert by intermediate size; the router
+    # (ffn.gate, the hash layers' tid2eid too) is replicated
+    "ffn.switch_mlp.gate_proj": Rule(A2S),
+    "ffn.switch_mlp.up_proj": Rule(A2S),
+    "ffn.switch_mlp.down_proj": Rule(S2A),
+    "ffn.shared_experts.gate_proj": Rule(A2S),
+    "ffn.shared_experts.up_proj": Rule(A2S),
+    "ffn.shared_experts.down_proj": Rule(S2A),
 }
 
 #: Hugging Face spellings the qwen3_5_moe sanitize renames before shard
