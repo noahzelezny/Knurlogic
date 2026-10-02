@@ -348,13 +348,16 @@ def test_a_ring_serves_its_first_model_and_refuses_switching():
 @pytest.mark.parametrize("family,kv_bits", [("qwen3_5_moe", "bf16"),
                                             ("qwen3_5_moe", "8"),
                                             ("qwen4_exp", "bf16"),
-                                            ("qwen4_exp", "8")])
+                                            ("qwen4_exp", "8"),
+                                            ("deepseek_v4", "bf16")])
 def test_a_two_rank_split_computes_the_whole_models_logits(tmp_path, family,
                                                            kv_bits):
     """Two processes on 127.0.0.1, the tiny model split in two (float32,
     so rounding cannot hide a wrong split): the split model's logits over a
     prefill and six decode steps are the unsplit model's. qwen4_exp deals
-    its n-gram table's parts between the ranks and sums the lookup.
+    its n-gram table's parts between the ranks and sums the lookup;
+    deepseek_v4 cuts its heads (whole o_groups) and experts and runs its
+    shared kv, compressors, indexers and hyper-connections whole.
     At 8-bit KV too: groups run along a head's dims, so a rank's half of
     the heads quantizes as it does in the whole cache (up to a last-bit
     difference in the sharded projections that feed it)."""
@@ -854,6 +857,82 @@ def test_ngram_parts_that_do_not_divide_are_refused(tmp_path):
     assert R.tensor_header_refusals(a, FLASH_NEXT, 2) == [
         "layers.1.ple.ple_embedding.ngram_embedding: 3 parts do not "
         "divide by 2"]
+
+
+#: DeepSeek-V4-Flash's config (the tensor-relevant keys) and its layer 2
+#: (ratio 4: compressor and indexer) as the VQ-3.2 build's headers hold it
+DSV4 = {"model_type": "deepseek_v4", "num_attention_heads": 64,
+        "num_key_value_heads": 1, "o_groups": 8, "head_dim": 512,
+        "q_lora_rank": 1024, "o_lora_rank": 1024, "n_routed_experts": 256,
+        "moe_intermediate_size": 2048, "index_n_heads": 64}
+
+
+def _dsv4_layer2(sink=64):
+    pre = "model.layers.2."
+    out = {}
+    for name, o, i in (("attn.wq_a", 1024, 4096), ("attn.wkv", 512, 4096),
+                       ("attn.wq_b", 32768, 1024), ("attn.wo_a", 8192, 4096),
+                       ("attn.wo_b", 4096, 8192),
+                       ("attn.compressor.wkv", 1024, 4096),
+                       ("attn.compressor.wgate", 1024, 4096),
+                       ("attn.indexer.wq_b", 8192, 1024),
+                       ("attn.indexer.weights_proj", 64, 4096),
+                       ("attn.indexer.compressor.wkv", 256, 4096),
+                       ("attn.indexer.compressor.wgate", 256, 4096),
+                       ("ffn.shared_experts.gate_proj", 2048, 4096),
+                       ("ffn.shared_experts.up_proj", 2048, 4096),
+                       ("ffn.shared_experts.down_proj", 4096, 2048)):
+        # affine 8-bit in groups of 64
+        out[pre + name + ".weight"] = (o, i // 4)
+        out[pre + name + ".scales"] = (o, i // 64)
+        out[pre + name + ".biases"] = (o, i // 64)
+    out.update({pre + "attn.attn_sink": (sink,),
+                pre + "attn.q_norm.weight": (1024,),
+                pre + "attn.kv_norm.weight": (512,),
+                pre + "attn.compressor.ape": (4, 1024),
+                pre + "attn_hc.fn": (24, 16384),
+                pre + "ffn.gate.weight": (256, 4096),
+                pre + "ffn.gate.e_score_correction_bias": (256,)})
+    for p, rows, words, groups in (("gate_proj", 2048, 352, 64),
+                                   ("up_proj", 2048, 352, 64),
+                                   ("down_proj", 4096, 176, 32)):
+        t = pre + "ffn.switch_mlp." + p
+        out.update({t + ".codes": (256, rows, words),
+                    t + ".vq_scales": (256, rows, groups),
+                    t + ".codebook": (2048, 4)})
+    return out
+
+
+def test_deepseek_v4_cuts_heads_and_experts_and_keeps_the_kv_whole(tmp_path):
+    """The heads (wq_b, the sink, wo_a by whole o_groups, wo_b's input),
+    the routed experts and the shared expert are cut; the low-rank q and
+    the one shared kv head (wq_a, wkv), the compressor, the indexer, the
+    router and the hyper-connections are replicated."""
+    a = _artifact(tmp_path, DSV4, _dsv4_layer2())
+    assert R.tensor_split_refusals(a, 2) == []
+    assert R.tensor_split_refusals(a, 4) == []
+    assert R.tensor_unverified(a) == {}
+    pre = "model.layers.2."
+    for k in ("attn.wq_b.weight", "attn.attn_sink", "attn.wo_a.scales",
+              "attn.wo_b.weight", "ffn.switch_mlp.down_proj.codes",
+              "ffn.shared_experts.up_proj.biases"):
+        assert R.tensor_sharded(pre + k), k
+    for k in ("attn.wq_a.weight", "attn.wkv.weight", "attn.kv_norm.weight",
+              "attn.compressor.wkv.weight", "attn.indexer.wq_b.weight",
+              "attn.indexer.weights_proj.weight", "attn_hc.fn",
+              "ffn.gate.weight", "ffn.switch_mlp.gate_proj.codebook"):
+        assert not R.tensor_sharded(pre + k), k
+
+
+def test_deepseek_v4_refuses_groups_and_shapes_that_do_not_divide(tmp_path):
+    # 16 ranks: 64 heads and wo_a's 8192 rows divide, 8 o_groups do not --
+    # a rank would hold half a group
+    assert R.tensor_refusals(DSV4, 16) == [
+        "o_groups = 8 is not divisible by 16 ranks (8 / 16 = 0.5)"]
+    assert len(R.tensor_refusals(DSV4, 3)) == 2         # heads and groups
+    a = _artifact(tmp_path, DSV4, _dsv4_layer2(sink=63))
+    assert R.tensor_header_refusals(a, DSV4, 2) == [
+        "layers.2.attn.attn_sink: 63 rows do not divide by 2"]
 
 
 def test_hf_bf16_names_map_to_the_rules_sanitize_feeds_shard():
