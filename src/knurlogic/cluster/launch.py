@@ -538,7 +538,26 @@ def shape_of(path: str, world: int, split: str,
             "reserve": R.fit_reserve(a.raw_config),
             "tensor_per_rank_bytes":
                 R.tensor_placement(a, world)["per_rank_bytes"],
-            "refusals": R.tensor_refusals(a.raw_config, world)}
+            "refusals": R.tensor_split_refusals(a.path, world, a.raw_config)}
+
+
+def viability_refusals(path: str, world: int) -> list:
+    """A tensor split of a module whose layout no split rule knows is run
+    whole and split on this machine (engine/runtime/viability) before any
+    rank starts; rank 0's page asks, once."""
+    from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning import resolve as R
+    todo = R.tensor_unverified(path)
+    if not todo:
+        return []
+    from knurlogic.engine.runtime import viability
+    a = Artifact.load(path)
+    try:
+        return viability.refusals(path, world, todo, a.raw_config,
+                                  bool(a.model_file))
+    except Exception as e:  # a module that cannot be built is not verified
+        return [f"the tensor split of {len(todo)} module layout(s) no rule "
+                f"knows could not be checked: {type(e).__name__}: {e}"]
 
 
 # ------------------------------------------------------------ one page
@@ -789,6 +808,8 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         sh = {"refusals": [f"could not read the artifact: "
                            f"{type(e).__name__}: {e}"]}
     refusals += sh.get("refusals") or []
+    if not refusals and spec["split"] == "tensor" and rank == 0:
+        refusals += viability_refusals(path, world)
     ws = budget_of(info)
     if not refusals:
         if spec["split"] == "tensor":

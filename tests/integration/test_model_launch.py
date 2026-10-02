@@ -285,16 +285,23 @@ def test_serve_says_when_an_environment_knob_is_ignored():
         {"KNURLOGIC_X": "1"}, {}, {"KNURLOGIC_X": "2"})[0]
 
 
-def test_the_picker_offers_only_the_splits_a_launch_takes():
+def test_the_picker_offers_only_the_splits_a_launch_takes(tmp_path):
+    import json
+
     from knurlogic.interfaces.page.documents import splits_of
     tc = {"model_type": "qwen3_5_moe_text", "num_hidden_layers": 40,
           "num_attention_heads": 32, "num_key_value_heads": 4,
           "num_experts": 8, "moe_intermediate_size": 512,
           "shared_expert_intermediate_size": 512}
-    assert splits_of({"model_type": "qwen3_5_moe", "text_config": tc}) == [
-        "tensor", "pipeline"]
+
+    def at(cfg):
+        (tmp_path / "config.json").write_text(json.dumps(cfg))
+        return tmp_path
+    assert splits_of(at({"model_type": "qwen3_5_moe", "text_config": tc})) \
+        == ["tensor", "pipeline"]
     # a family only the pipeline knows: no Tensor offered
-    assert splits_of({"model_type": "glm5_next",
-                      "num_hidden_layers": 40}) == ["pipeline"]
+    assert splits_of(at({"model_type": "glm5_next",
+                         "num_hidden_layers": 40})) == ["pipeline"]
     # neither knows it: nothing to offer across machines
-    assert splits_of({"model_type": "llama", "num_hidden_layers": 40}) == []
+    assert splits_of(at({"model_type": "llama",
+                         "num_hidden_layers": 40})) == []

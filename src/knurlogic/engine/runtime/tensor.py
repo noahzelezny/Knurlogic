@@ -29,6 +29,7 @@ from knurlogic.cluster.jobs import progress
 
 from . import plan as P
 from .executor import Admission, Checkpoint, Finished, LocalExecutor
+from .tensor_rules import RULES, module_refusal, predicate, segment_points
 
 logger = logging.getLogger(__name__)
 GIB = 1 << 30
@@ -37,26 +38,8 @@ GIB = 1 << 30
 class Desync(RuntimeError):
     """The ranks no longer agree on what they are doing."""
 
-
 # ------------------------------------------------------------------ split
 
-def predicate(kind: str) -> Callable:
-    """The split axis for a parameter of a layer split `kind`
-    ("all-to-sharded": output axis; "sharded-to-all": input axis), or None
-    to keep it whole. A path ending in `codebook` is ALWAYS None."""
-    if kind not in ("all-to-sharded", "sharded-to-all"):
-        raise ValueError(kind)
-
-    def pred(path: str, w):
-        if path.endswith("codebook"):
-            return None
-        if kind == "all-to-sharded":
-            return -1 if path.endswith("bias") else max(w.ndim - 2, 0)
-        return None if path.endswith("bias") else -1
-    return pred
-
-
-_S2A = predicate("sharded-to-all")
 
 
 def split_params(params, pred, rank: int, n: int, segments=1):
@@ -80,12 +63,38 @@ def split_params(params, pred, rank: int, n: int, segments=1):
 
 
 def _split_inplace(module, pred, rank, n, segments=1) -> None:
-    if pred is _S2A and "bias" in module:
-        # a split input axis gives each rank a partial sum; a bias added on
-        # every rank would be summed N times
-        raise ValueError(f"{type(module).__name__} has a bias; a "
-                         f"sharded-to-all split of it is not built")
     module.update(split_params(module.parameters(), pred, rank, n, segments))
+
+
+def _apply(layer, path: str, rule, rank: int, n: int) -> None:
+    """Cut the array or module at `path` under `layer` by `rule` (a path
+    the layer lacks -- the other attention, the other mlp -- is skipped)."""
+    *up, leaf = path.split(".")
+    parent = layer
+    for p in up:
+        parent = getattr(parent, p, None)
+        if parent is None:
+            return
+    obj = getattr(parent, leaf, None)
+    if obj is None:
+        return
+    pred = predicate(rule.kind)
+    seg = segment_points(rule, getattr(parent, "key_dim", 0))
+    if isinstance(obj, mx.array):
+        setattr(parent, leaf, split_params({leaf: obj}, pred, rank, n,
+                                           seg)[leaf])
+        return
+    why = module_refusal(path, rule, set(obj.parameters()))
+    if why:
+        raise ValueError(why)
+    h = getattr(parent, "num_key_value_heads", n)
+    if rule.repeat_kv and n > h:
+        def rep(p):
+            s = p.shape
+            p = p.reshape(h, s[0] // h, *s[1:])
+            return mx.repeat(p, n // h, axis=0).reshape(-1, *s[1:])
+        obj.update(tree_map(rep, obj.parameters()))
+    _split_inplace(obj, pred, rank, n, seg)
 
 
 class Reduce(nn.Module):
@@ -122,35 +131,15 @@ class Reduce(nn.Module):
 def shard(model, group) -> None:
     """Split a qwen3_5 / qwen3_5_moe model across `group` in place.
 
-    Refuse first (tuning/resolve.tensor_refusals) -- this assumes the
-    arithmetic was checked."""
+    Every cut is a RULES entry (tensor_rules); tuning/resolve checks the
+    same rules against the headers before a rank starts."""
     n, rank = group.size(), group.rank()
-    a2s, s2a = predicate("all-to-sharded"), _S2A
-
-    def repeat_kv(layer, h):
-        # fewer KV heads than ranks: each rank gets a copy of its head
-        if n <= h:
-            return
-
-        def rep(p):
-            s = p.shape
-            p = p.reshape(h, s[0] // h, *s[1:])
-            return mx.repeat(p, n // h, axis=0).reshape(-1, *s[1:])
-        layer.update(tree_map(rep, layer.parameters()))
-
     for layer in model.layers:
+        for path, rule in RULES.items():
+            _apply(layer, path, rule, rank, n)
         if layer.is_linear:
             la = layer.linear_attn
-            kd = la.key_dim
-            _split_inplace(la.conv1d, lambda p, w: 0, rank, n,
-                           segments=[kd, 2 * kd])
             la.conv1d.groups //= n
-            _split_inplace(la.in_proj_qkv, a2s, rank, n, segments=[kd, 2 * kd])
-            for m in (la.in_proj_z, la.in_proj_b, la.in_proj_a):
-                _split_inplace(m, a2s, rank, n)
-            la.dt_bias = mx.contiguous(mx.split(la.dt_bias, n)[rank])
-            la.A_log = mx.contiguous(mx.split(la.A_log, n)[rank])
-            _split_inplace(la.out_proj, s2a, rank, n)
             la.num_k_heads //= n
             la.num_v_heads //= n
             la.key_dim //= n
@@ -160,31 +149,12 @@ def shard(model, group) -> None:
             layer.linear_attn = Reduce(la, group)
         else:
             at = layer.self_attn
-            _split_inplace(at.q_proj, a2s, rank, n)
-            repeat_kv(at.k_proj, at.num_key_value_heads)
-            repeat_kv(at.v_proj, at.num_key_value_heads)
-            _split_inplace(at.k_proj, a2s, rank, n)
-            _split_inplace(at.v_proj, a2s, rank, n)
-            _split_inplace(at.o_proj, s2a, rank, n)
             at.num_attention_heads //= n
             at.num_key_value_heads = max(1, at.num_key_value_heads // n)
             layer.self_attn = Reduce(at, group)
-
         mlp = layer.mlp
         if hasattr(mlp, "switch_mlp"):
-            se = mlp.shared_expert
-            _split_inplace(se.gate_proj, a2s, rank, n)
-            _split_inplace(se.up_proj, a2s, rank, n)
-            _split_inplace(se.down_proj, s2a, rank, n)
-            sw = mlp.switch_mlp
-            _split_inplace(sw.gate_proj, a2s, rank, n)
-            _split_inplace(sw.up_proj, a2s, rank, n)
-            _split_inplace(sw.down_proj, s2a, rank, n)
             mlp.sharding_group = None
-        else:
-            _split_inplace(mlp.gate_proj, a2s, rank, n)
-            _split_inplace(mlp.up_proj, a2s, rank, n)
-            _split_inplace(mlp.down_proj, s2a, rank, n)
         layer.mlp = Reduce(mlp, group)
     check_codebooks(model)
 

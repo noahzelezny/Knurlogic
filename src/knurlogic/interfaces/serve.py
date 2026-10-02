@@ -708,7 +708,7 @@ def _ring_chips(text: str) -> list | None:
 def _ring_refusals(a: Artifact, ring: dict, working_set_gib: float,
                    overrides: dict) -> list:
     """Why this rank cannot join a tensor split, with the numbers."""
-    from knurlogic.tuning.resolve import tensor_refusals
+    from knurlogic.tuning.resolve import tensor_split_refusals
     why = []
     if ring.get("split") not in ("tensor", "pipeline"):
         why.append(f"--split {ring.get('split')!r}: this build splits "
@@ -739,7 +739,8 @@ def _ring_refusals(a: Artifact, ring: dict, working_set_gib: float,
             why.append(f"--layers names {len(n)} ranks for a world of "
                        f"{ring['world']}")
     else:
-        why += tensor_refusals(a.raw_config, int(ring["world"]))
+        why += tensor_split_refusals(a.path, int(ring["world"]),
+                                     a.raw_config)
     return why
 
 

@@ -1084,24 +1084,12 @@ def numerics_for(artifact: Artifact, profile: str | None = None):
 #: the model types engine/runtime/tensor.py knows how to split
 TENSOR_TYPES = ("qwen3_5", "qwen3_5_moe", "qwen3_5_text", "qwen3_5_moe_text")
 
-#: layer weights split N ways under tensor; everything else is replicated
-_TENSOR_SHARDED = (
-    ".linear_attn.conv1d.", ".linear_attn.in_proj_", ".linear_attn.dt_bias",
-    ".linear_attn.A_log", ".linear_attn.out_proj.",
-    ".self_attn.q_proj.", ".self_attn.k_proj.", ".self_attn.v_proj.",
-    ".self_attn.o_proj.",
-    ".mlp.gate_proj.", ".mlp.up_proj.", ".mlp.down_proj.",
-    ".mlp.shared_expert.", ".mlp.switch_mlp.",
-    ".mlp.experts.",
-)
-
 
 def tensor_sharded(name: str) -> bool:
-    """Is this weight split across ranks under tensor? A VQ codebook never
-    is: it is a lookup table the codes index, replicated whole."""
-    if name.endswith("codebook"):
-        return False
-    return ".layers." in name and any(s in name for s in _TENSOR_SHARDED)
+    """Is this weight split across ranks under tensor? (tensor_rules: a VQ
+    codebook never is.)"""
+    from knurlogic.engine.runtime.tensor_rules import sharded
+    return sharded(name)
 
 
 def tensor_refusals(cfg: dict, n: int) -> list:
@@ -1115,14 +1103,6 @@ def tensor_refusals(cfg: dict, n: int) -> list:
     if not types & set(TENSOR_TYPES):
         out.append(f"tensor split knows {', '.join(TENSOR_TYPES[:2])}; this "
                    f"is {cfg.get('model_type')!r}")
-        return out
-
-    if cfg.get("vq_skipzero"):
-        # SKIPZERO keeps only the live expert rows, packed together
-        # ([NLIVE, W], a row table maps them): no per-expert axis to cut, and
-        # NLIVE need not divide (Qwen3.5-397B 2.4bpw: 70095 rows)
-        out.append("vq_skipzero packs the live expert rows together: they "
-                   "cannot be cut by rank (pipeline splits by layer)")
         return out
 
     def div(what, v, why=""):
@@ -1143,30 +1123,8 @@ def tensor_refusals(cfg: dict, n: int) -> list:
                        f"the heads cannot be repeated evenly")
     div("linear_num_key_heads", tc.get("linear_num_key_heads"))
     div("linear_num_value_heads", tc.get("linear_num_value_heads"))
-    if tc.get("num_experts"):
-        div("moe_intermediate_size", tc.get("moe_intermediate_size"))
-        div("shared_expert_intermediate_size",
-            tc.get("shared_expert_intermediate_size"))
-    else:
-        div("intermediate_size", tc.get("intermediate_size"))
-
-    # sharded-to-all layers split their INPUT axis: each rank's slice must
-    # start on a quantization group
-    q = cfg.get("quantization") or {}
-    g = q.get("group_size") if isinstance(q, dict) else None
-    if g:
-        hd = tc.get("head_dim") or (tc.get("hidden_size", 0)
-                                    // max(tc.get("num_attention_heads") or 1, 1))
-        ins = {"self_attn.o_proj": (tc.get("num_attention_heads") or 0) * hd,
-               "linear_attn.out_proj": (tc.get("linear_num_value_heads") or 0)
-               * (tc.get("linear_value_head_dim") or 0),
-               "shared_expert.down_proj":
-                   tc.get("shared_expert_intermediate_size") or 0}
-        for what, IN in ins.items():
-            if IN and (IN // n) % g:
-                out.append(f"{what}: input {IN} / {n} = {IN // n} is not a "
-                           f"multiple of the quantization group {g}")
-
+    # the arrays' own axes (intermediate sizes, quantization groups, VQ
+    # code rows) are tensor_header_refusals': the headers answer them
     if cfg.get("vq_linear"):
         out.append(f"{len(cfg['vq_linear'])} VQ dense linear(s) (vq_linear): "
                    f"not split by tensor in this build")
@@ -1174,24 +1132,19 @@ def tensor_refusals(cfg: dict, n: int) -> list:
         out.append(f"{len(cfg['vq_embed'])} VQ embedding(s) (vq_embed): not "
                    f"split by tensor in this build")
     for path, m in sorted((cfg.get("vq_modules") or {}).items()):
-        IN, OUT = int(m.get("in", 0)), int(m.get("out", 0))
+        IN = int(m.get("in", 0))
         G, D = int(m.get("group", 64)), int(m.get("dim", 1))
-        packed = bool(m.get("pack_bits"))
-        if path.endswith("down_proj"):
+        if path.endswith("down_proj") and m.get("pack_bits"):
             # sharded-to-all: codes split on their input axis. Packed codes
             # are uint32 words holding 32 codes per BITS words, so a slice
-            # must hold whole 32-code blocks -- 32*dim inputs -- and whole
-            # scale groups.
-            unit = max(G, 32 * D) if packed else max(G, D)
+            # must hold whole 32-code blocks -- 32*dim inputs (the headers
+            # see words, not codes: this one the config answers)
+            unit = max(G, 32 * D)
             if IN % n or (IN // n) % unit:
                 out.append(
                     f"{path}: input {IN} / {n} = {IN / n:g}, not a multiple "
-                    f"of {unit} (max(group {G}, "
-                    + (f"32 x dim {D}" if packed else f"dim {D}")
-                    + ")): a rank's slice would cut a "
-                    + ("packed code word" if packed else "scale group"))
-        elif OUT % n:
-            out.append(f"{path}: output {OUT} / {n} = {OUT / n:g}")
+                    f"of {unit} (max(group {G}, 32 x dim {D})): a rank's "
+                    f"slice would cut a packed code word")
         if len(out) > 12:
             out.append("... (and more)")
             break
@@ -1208,17 +1161,32 @@ def tensor_placement_of(tensors: dict, n: int) -> dict:
             "per_rank_bytes": -(-sharded // max(n, 1)) + replicated}
 
 
-def tensor_placement(artifact: Artifact, n: int) -> dict:
-    """tensor_placement_of over the artifact's top-level safetensors
-    headers (the tower and a packed MTP head are not the trunk: neither
-    loads under tensor)."""
+#: path -> (stat stamp of its shards, trunk headers): the picker asks
+#: every model's headers on each listing, ~80 of them, many over SMB
+_HEADERS: dict = {}
+
+
+def trunk_headers(path) -> dict:
+    """{name: (shape, bytes)} from the artifact's top-level safetensors
+    headers -- 8 bytes and a JSON each, no weights -- minus the tower and a
+    packed MTP head (neither loads under tensor). Cached on each shard's
+    (size, mtime_ns, ctime_ns)."""
     import json
     import struct
+    from pathlib import Path
 
-    sizes = {}
-    for f in sorted(artifact.path.glob("*.safetensors")):
-        if f.name.startswith(("mtp", "model-vision")):
-            continue
+    files = sorted(f for f in Path(path).glob("*.safetensors")
+                   if not f.name.startswith(("mtp", "model-vision")))
+    try:
+        stamp = tuple((f.name, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+                      for f in files for st in (f.stat(),))
+    except OSError:
+        stamp = None
+    hit = _HEADERS.get(str(path))
+    if stamp is not None and hit and hit[0] == stamp:
+        return hit[1]
+    out = {}
+    for f in files:
         try:
             with open(f, "rb") as fh:
                 (hn,) = struct.unpack("<Q", fh.read(8))
@@ -1233,8 +1201,50 @@ def tensor_placement(artifact: Artifact, n: int) -> dict:
             if k.startswith(S.VISION_TOWER_PREFIXES):
                 continue
             a, b = v.get("data_offsets", (0, 0))
-            sizes[k] = int(b) - int(a)
-    return tensor_placement_of(sizes, n)
+            out[k] = (tuple(v.get("shape") or ()), int(b) - int(a))
+    if stamp is not None:
+        _HEADERS[str(path)] = (stamp, out)
+    return out
+
+
+def tensor_placement(artifact: Artifact, n: int) -> dict:
+    """tensor_placement_of over the artifact's trunk headers."""
+    return tensor_placement_of(
+        {k: b for k, (_, b) in trunk_headers(artifact.path).items()}, n)
+
+
+def tensor_header_refusals(path, cfg: dict, n: int) -> list:
+    """Why the arrays on disk cannot be cut `n` ways by the split's own
+    rules (engine/runtime/tensor_rules), each with its numbers."""
+    from knurlogic.engine.runtime.tensor_rules import refusals
+    if n < 2:
+        return []
+    tc = cfg.get("text_config", cfg)
+    kd = (tc.get("linear_num_key_heads") or 0) * \
+        (tc.get("linear_key_head_dim") or 0)
+    shapes = {k: s for k, (s, _) in trunk_headers(path).items()}
+    return refusals(shapes, n, kd, int(tc.get("num_key_value_heads") or 0))
+
+
+def tensor_unverified(path) -> dict:
+    """{(rule path, unknown parameters): a layer holding them} -- the
+    modules whose layout no split rule knows, for a launch to run
+    (engine/runtime/viability)."""
+    from knurlogic.engine.runtime.tensor_rules import unverified
+    return unverified({k: s for k, (s, _) in trunk_headers(path).items()})
+
+
+def tensor_split_refusals(path, n: int, cfg: dict | None = None) -> list:
+    """Everything the config and the headers say against splitting the
+    artifact at `path` `n` ways; [] when nothing does."""
+    import json
+    from pathlib import Path
+    if cfg is None:
+        cfg = json.loads((Path(path) / "config.json").read_text())
+    why = tensor_refusals(cfg, n)
+    if why or n < 2:
+        return why
+    return tensor_header_refusals(path, cfg, n)
 
 
 # ------------------------------------------------------------- rank order
