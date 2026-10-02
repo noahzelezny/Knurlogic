@@ -38,6 +38,7 @@ def test_rows_are_labelled_by_machine_and_addressed_at_the_peer():
 
 
 def test_a_dead_peer_is_reported_and_does_not_take_the_others_down():
+    page_server._PEER_LAST.clear()
     def fetch(url, t):
         if "10.0.0.3" in url:
             raise ConnectionRefusedError("refused")
@@ -73,6 +74,21 @@ def test_a_late_reply_shows_what_the_peer_last_said_and_its_age():
         return {"resident": []}
     [m] = page_server.peer_residency(Peers(p), timeout=0.2, fetch=slow)
     assert m["resident"] and "error" not in m and m["heard_ago"] >= 0
+
+
+def test_a_peer_whose_survey_fails_mid_load_keeps_its_load_row():
+    # a busy peer's Survey timed out while it loaded its half of a cluster
+    # job: dropping its loads made the job's % fall to this machine's share
+    page_server._PEER_LAST.clear()
+    p = peer("M4", "10.0.0.2")
+    load = {"job": "j", "rank": 0, "bytes": 15 << 30, "total_bytes": 101 << 30}
+    page_server.peer_residency(Peers(p), fetch=lambda url, t: {
+        "resident": [], "loads": [load]})
+
+    def fails(url, t):
+        raise TimeoutError("timed out")
+    [m] = page_server.peer_residency(Peers(p), fetch=fails)
+    assert m["loads"] == [load] and "error" not in m and m["heard_ago"] >= 0
 
 
 def test_peers_not_answering_are_not_asked():

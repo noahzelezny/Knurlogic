@@ -975,12 +975,14 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
         got = out.get(p.key)
         if got and "error" not in got:
             _PEER_LAST[p.key] = (time.time(), got)
-        if got is None:
-            # Nothing came back in OUR deadline: the peer's status probe
-            # may be answering fine (this page's threads starve when the
-            # box swaps). Not an error: show what it last said, labelled
-            # with its age, or "no reply yet" when it never did.
-            was = _PEER_LAST.get(p.key)
+        was = _PEER_LAST.get(p.key)
+        if got is None or ("error" in got and was):
+            # Nothing came back in OUR deadline, or the Survey itself timed
+            # out on a peer busy loading (a 101 GiB pipeline load did): its
+            # status probe still answers, so it is a slow peer, not a gone
+            # one. Show what it last said, labelled with its age -- dropping
+            # it made a cluster load's % fall to this machine's share alone
+            # and jump back (54 -> 38 -> 54). "no reply yet" when it never did.
             got = (dict(was[1], heard_ago=round(time.time() - was[0]))
                    if was else {
                        "machine": p.name or p.host, "address": p.key,
