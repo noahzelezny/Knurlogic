@@ -285,6 +285,27 @@ def test_mtp_drafting_on_a_pipeline_is_the_unsplit_engine(tmp_path, always):
         assert b2 == b1 and d["accepted"] > 0
 
 
+@pytest.mark.parametrize("always", [False, True])
+def test_mtp_drafting_on_a_tensor_split_is_the_undrafted_split(tmp_path,
+                                                               always):
+    """The tiny qwen3_5 sharded across both ranks, rank 0 alone holding the
+    head: every rank's all_sums make the final hidden state whole on rank 0,
+    so its drafts are the unsplit engine's. Greedy output is the same split
+    without a head, token for token, and every rank made the same
+    broadcasts -- the follower's logits are real but only rank 0 judges
+    (B2)."""
+    d = _ring(tmp_path, "mtp", "1" if always else "0", "tensor")
+    assert d["split"] == d["baseline"]
+    assert d["split"] == d["whole"]
+    (b0, b1, b2, steps, ba), follower = d["calls"]
+    assert follower == [b0, b1, b2, steps, ba]
+    assert b0 == ba == 3
+    assert 0 < b2 <= b1 <= steps
+    assert d["drafted"] > 0
+    if always:
+        assert b2 == b1 and d["accepted"] > 0
+
+
 def test_the_serving_path_follows_rank_0s_plan_on_a_pipeline(tmp_path):
     """Rank 0's TensorExecutor (the step plan) and the follower's
     tensor.follow(split="pipeline"), drafting, two segments per prompt (a
