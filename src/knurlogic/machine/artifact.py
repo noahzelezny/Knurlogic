@@ -197,10 +197,21 @@ _SAMPLING_KEYS = (("temperature", "temp"), ("top_p", "top_p"),
                   ("top_k", "top_k"), ("min_p", "min_p"))
 
 
+#: model_type -> the sampling its makers publish for thinking OFF, which
+#: generation_config.json (one set, the thinking one) cannot carry.
+#: Qwen3.5: https://huggingface.co/Qwen/Qwen3.5-397B-A17B#best-practices
+#: (exo's cards for these builds carry the same set)
+_NON_THINKING = {
+    t: {"temp": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0,
+        "presence_penalty": 1.5}
+    for t in ("qwen3_5", "qwen3_5_moe")}
+
+
 def sampling_defaults(path) -> dict:
     """The sampling a model's makers recommend (its generation_config.json),
-    as the sampler names it: {} when there is none, or when it says
-    do_sample false (greedy is then what they meant)."""
+    as the sampler names it, plus "non_thinking": their set for thinking
+    off where they publish one (_NON_THINKING); {} when there is none, or
+    when it says do_sample false (greedy is then what they meant)."""
     try:
         g = json.loads((Path(path) / "generation_config.json").read_text())
     except (OSError, ValueError):
@@ -212,6 +223,14 @@ def sampling_defaults(path) -> dict:
         v = g.get(key)
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             out[name] = v
+    try:
+        cfg = json.loads((Path(path) / "config.json").read_text())
+        mt = cfg.get("model_type") or (cfg.get("text_config") or {}).get(
+            "model_type")
+    except (OSError, ValueError, AttributeError):
+        mt = None
+    if out and mt in _NON_THINKING:
+        out["non_thinking"] = dict(_NON_THINKING[mt])
     return out
 
 

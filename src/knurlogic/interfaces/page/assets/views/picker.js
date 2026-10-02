@@ -741,8 +741,12 @@ function followLaunch(L, d){
     const lead=ms.flatMap(x=>x.doc.resident||[]).find(r=>r.cluster&&r.cluster.job===L.job);
     const ph=L.per.map(p=>p.phase);
     if(lead && lead.state==='loaded' && ph.length && ph.every(p=>p==='ready')) L.phase='ready';
-    else L.phase=ph.includes('joining')?'joining ring':ph.includes('loading')?'loading weights'
-      :ph.includes('warming')||(e&&e.phase==='warming')?'warming':'starting';
+    // rank 0's own row says it is warming (the first-request warm-up) while
+    // the job's phase still reads loading: warming wins over loading then
+    else L.phase=ph.includes('joining')?'joining ring'
+      :(lead&&lead.state==='warming')||ph.includes('warming')
+       ||ms.some(x=>(x.doc.loads||[]).some(k=>k.job===L.job&&k.phase==='warming'))?'warming'
+      :ph.includes('loading')?'loading weights':'starting';
     // a machine whose half has gone quiet loading: said, as on one machine
     const st=ms.flatMap(x=>(x.doc.loads||[]).filter(k=>k.job===L.job&&k.phase==='stalled')
       .map(k=>({machine:x.name, k})));
