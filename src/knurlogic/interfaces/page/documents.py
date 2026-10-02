@@ -135,6 +135,9 @@ def models_document(serving: str = "", ttl: float = 60.0):
                                               or str(f.path) == serving),
                 "room": _room(f, ws),
                 "splits": _splits(f),
+                # module layouts no tensor rule knows: offered, and run
+                # whole and split at launch (engine/runtime/viability)
+                "tensor_unverified": _unverified(f),
                 # the Hub has a newer revision of this Hugging Face model
                 # (page/updates.py); False when unchecked or not from HF
                 "update": str(f.path) in stale,
@@ -172,25 +175,41 @@ def _room(f, ws: int):
         return None
 
 
-def splits_of(cfg: dict, n: int = 2) -> list:
-    """The cluster splits this config can take across `n` machines, in the
-    order the picker offers them: the same refusals a launch runs
-    (tuning/resolve), so the picker never offers one a launch would refuse."""
-    from knurlogic.tuning.resolve import pipeline_refusals, tensor_refusals
-    return [s for s, why in (("tensor", tensor_refusals),
-                             ("pipeline", pipeline_refusals))
-            if not why(cfg, n)]
+def splits_of(path, n: int = 2) -> list:
+    """The cluster splits the artifact at `path` can take across `n`
+    machines, in the order the picker offers them: the same refusals a
+    launch runs (tuning/resolve, its config and its headers), so the picker
+    never offers one a launch would refuse."""
+    from knurlogic.tuning.resolve import pipeline_refusals, tensor_split_refusals
+    cfg = json.loads((Path(path) / "config.json").read_text())
+    return [s for s, why in (
+        ("tensor", lambda: tensor_split_refusals(path, n, cfg)),
+        ("pipeline", lambda: pipeline_refusals(cfg, n))) if not why()]
 
 
 def _splits(f):
-    """`splits_of` a found model; None when its config cannot be read (the
-    picker then offers both and the launch answers)."""
+    """`splits_of` a found model; None when it cannot be read (the picker
+    then offers both and the launch answers)."""
     if not f.servable:
         return None
     try:
-        return splits_of(json.loads((Path(f.path) / "config.json").read_text()))
+        return splits_of(f.path)
     except (OSError, ValueError, KeyError, AttributeError, TypeError):
         return None
+
+
+def _unverified(f) -> list:
+    """"layers.N.<module> (<parameters>)" for each module layout no tensor
+    rule knows; [] when none or unreadable."""
+    from knurlogic.tuning.resolve import tensor_unverified
+    if not f.servable:
+        return []
+    try:
+        return [f"layers.{layer}.{path} ({', '.join(leaves)})"
+                for (path, leaves), layer in
+                sorted(tensor_unverified(f.path).items())]
+    except (OSError, ValueError):
+        return []
 
 
 _LOADED: dict = {"at": 0.0, "doc": None}
