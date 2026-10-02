@@ -611,3 +611,13 @@ def test_a_parked_follower_holds_no_margin_a_long_prefill_measured(
              working_set=96 * GIB)
     assert seen[0] > 0                  # 60 held, limit 96 - 50 = 46
     assert seen[1] < 0                  # parked: limit 96 - 5 = 91
+
+
+def test_a_skipzero_vq_model_is_refused_a_tensor_split():
+    # Qwen3.5-397B 2.4bpw: its live expert rows are packed (70095 of them),
+    # so a tensor launch failed loading on rank 1; pipeline still offered
+    cfg = dict(QWEN36, vq_skipzero={"format": "vq-skipzero", "version": 1})
+    why = R.tensor_refusals(cfg, 2)
+    assert why and "vq_skipzero" in why[0]
+    from knurlogic.interfaces.page.documents import splits_of
+    assert "tensor" not in splits_of(cfg)
