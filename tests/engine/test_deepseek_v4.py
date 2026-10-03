@@ -394,6 +394,29 @@ def test_a_shipped_copy_of_the_template_gets_ours_and_the_parser():
     assert w.chat_template == TEMPLATE
     assert w._tool_parser is templates.parse_deepseek_v4
 
+
+def test_a_deepseek_v4_with_no_template_gets_ours_and_can_chat():
+    """deepseek-ai's own MLX conversion ships no chat template: chat was
+    refused ("no chat template"). Named DeepSeek-V4, it gets ours, the
+    parser, and the wrapper's has_chat_template."""
+    class Enc:
+        def encode(self, s, add_special_tokens=False):
+            return [ord(c) for c in s]
+
+    class Wrapper(DSTok):
+        _tool_parser = None
+        _tokenizer = Enc()
+        has_chat_template = False
+        name_or_path = "/m/deepseek-ai--DeepSeek-V4-Flash-mlx"
+
+    w = Wrapper(None)
+    assert templates.install(w) == "deepseek_v4"
+    assert w.chat_template == TEMPLATE and w.has_chat_template is True
+    assert w._tool_parser is templates.parse_deepseek_v4
+    nameless = Wrapper(None)
+    nameless.name_or_path = "/m/some-other-model"
+    assert templates.install(nameless) is None
+
 _REAL = STUB / "tokenizer.json"
 
 
