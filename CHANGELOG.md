@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.1.2
+
+DeepSeek-V4-Flash in full, MTP on a tensor split, and a cluster that stops
+cleanly.
+
+DeepSeek-V4-Flash
+* Tool calls work: a release that ships a copy of knurlogic's DeepSeek
+  template now gets the DSML tool-call parser (on 0.1.1 the calls came back
+  as text, so agent harnesses could not use it).
+* MTP drafting with its head beside the weights, exact (mxfp4) or VQ
+  experts: about 1.4x faster decode on one Mac at ~0.95 acceptance.
+* Tensor split across machines (2 or 4), with or without MTP.
+* Thinking levels are DeepSeek's own: off, high, max (the official Think
+  Max prompt).
+* It reasons in the user's language: the chat page sends the date and
+  browser language as DeepSeek's own reminder message.
+
+Clusters
+* Stopping a cluster job no longer leaves the GPUs reading 100% until a
+  reboot -- while it generated, holding the job's memory too: rank 0 stops
+  the ring between steps, and a load cancelled mid-read stops between
+  batches, so every machine exits cleanly (unload, cancel and warm-up,
+  tensor and pipeline).
+* MTP drafting on a tensor split (the 397B VQ-2.4 runs ~37-40 tok/s on two
+  Macs over RDMA). Flash-Next (qwen4_exp) splits tensor too.
+* Tensor is offered from the model's own weight shapes, one rule table for
+  the picker and the loader, and greys out (with the reason) when a
+  machine cannot hold its share.
+* The MTP head counts toward rank 0's share only when MTP is on.
+* A cluster load's % measures each machine against its own share; the
+  card shows warming up and stalled (naming the machine).
+* `load(draft=false)` works on a cluster.
+* A rank whose prompt processing fails ends the job with the reason
+  instead of leaving the other machines waiting.
+
+Requests
+* A seeded request reproduces with MTP on.
+* Thinking off uses the maker's thinking-off sampling (Qwen3.5).
+
+Page
+* Split and link choices grey out while a launch is in flight.
+* Instance cards show MTP when drafting, the load % in teal, one card per
+  exo instance, and the GiB of every machine in a cluster job.
+* The picker remembers each model's split answers across restarts and
+  re-reads the other machines' model lists when it opens.
+
+For tools
+* `knurlogic.engine.register.register()` / `unregister()` are public API.
+
 ## 0.1.1
 
 Bug fixes from the first day of real use, and simpler launch decisions.
