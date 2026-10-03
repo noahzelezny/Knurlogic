@@ -321,3 +321,26 @@ def test_ragged_prev_is_not_compiled():
     src = (ARCH / "deepseek_v4.py").read_text()
     i = src.index("def _ragged_prev(")
     assert "@mx.compile" not in src[max(0, i - 40):i]
+
+
+def test_the_shared_expert_clamps_as_deepseeks_does():
+    """DeepSeek's reference builds the shared expert with swiglu_limit, as
+    its routed experts (vendored edit 18): gate capped at the limit, up
+    clipped to [-limit, limit]."""
+    import numpy as np
+
+    from knurlogic.engine import register
+    register.register("deepseek_v4")
+    import mlx_lm.models.deepseek_v4 as M
+    args = M.ModelArgs.from_dict(dict(
+        model_type="deepseek_v4", vocab_size=256, hidden_size=64,
+        moe_intermediate_size=64, n_routed_experts=8, num_experts_per_tok=2,
+        num_hash_layers=0, compress_ratios=[0, 0], num_hidden_layers=2))
+    mlp = M.DeepseekV4MoE(args, 1).shared_experts
+    assert mlp.swiglu_limit == args.swiglu_limit > 0
+    x = mx.array(np.random.default_rng(0).standard_normal((3, 64)) * 50,
+                 dtype=mx.float32)
+    g, u = mlp.gate_proj(x), mlp.up_proj(x)
+    lim = args.swiglu_limit
+    want = mlp.down_proj(nn.silu(mx.minimum(g, lim)) * mx.clip(u, -lim, lim))
+    assert mx.allclose(mlp(x), want, atol=1e-4)

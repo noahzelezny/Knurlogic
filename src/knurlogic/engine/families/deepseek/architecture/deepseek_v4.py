@@ -2477,8 +2477,8 @@ def _limited_swiglu(gate: mx.array, up: mx.array, limit: float) -> mx.array:
 class _DSV4SwiGLU(nn.Module):
     """SwiGLU with optional clipping of ``gate`` / ``up`` to ``limit``, wrapped
     in ``mx.compile`` so the silu+clip+min+mul stack runs as a single fused
-    kernel. Used for routed experts (limit = args.swiglu_limit = 10.0) and
-    shared experts (limit = 0 — no clip, still benefits from fusion)."""
+    kernel. Used for routed experts (limit = args.swiglu_limit = 10.0); the
+    shared expert clamps at the same limit (edit 18)."""
 
     def __init__(self, limit: float):
         super().__init__()
@@ -2607,10 +2607,12 @@ class DeepseekV4MoE(nn.Module):
                 )
         self.gate = MoEGate(args, layer_id)
         if args.n_shared_experts:
+            # knurlogic edit 18: clamped like the routed experts, as
+            # DeepSeek's reference builds its shared expert (Flash's too)
             self.shared_experts = DeepseekV4MLP(
                 args.hidden_size,
                 args.moe_intermediate_size * args.n_shared_experts,
-                swiglu_limit=0.0,
+                swiglu_limit=args.swiglu_limit,
             )
 
     def __call__(self, x: mx.array, input_ids: mx.array) -> mx.array:
