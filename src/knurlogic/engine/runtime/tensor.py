@@ -550,12 +550,18 @@ class Ring:
         self.link.parked = True
 
 
+#: sampling's mark for a seed assign_seed drew (popped before sampling)
+RING_SEED = "ring_seed"
+
+
 def assign_seed(sampling: dict) -> dict:
     """Every row gets a seed on a ring: rank 0's draw is then the draw any
     rank would make from the same logits."""
     s = dict(sampling or {})
     if s.get("seed") is None:
         s["seed"] = random.SystemRandom().randrange(1 << 31)
+        # not the client's: it must not pin the drafting regime (Keys.pins)
+        s[RING_SEED] = True
     return s
 
 

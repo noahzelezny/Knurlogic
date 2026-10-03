@@ -52,8 +52,13 @@ class Keys:
     one-row forward on every kernel (GLM 2.7: up to 0.3 in logprob), so
     under concurrent load a near-tie can go the other way."""
 
-    def __init__(self, seed: int):
+    def __init__(self, seed: int, pins: bool = True):
         self.seed = int(seed) & 0xFFFFFFFFFFFFFFFF
+        #: a seed the client asked for: its row must reproduce, so the
+        #: drafting regime and verify width stay fixed (batch_loop,
+        #: block_loop). A ring's own seed (tensor.assign_seed: every rank
+        #: draws alike) promises nothing to anyone and pins nothing.
+        self.pins = bool(pins)
 
     def at(self, position: int) -> mx.array:
         # splitmix64 of (seed, position): neighbouring positions and seeds

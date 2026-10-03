@@ -48,3 +48,37 @@ def test_a_seeded_row_drafts_every_step_whatever_the_timing():
     assert _run(b, 400, 0.72, 0.055) == 400     # plain is far cheaper
     b.drafts = [False]                          # a row the head can't draft
     assert _run(b, 400, 0.72, 0.055) < 400
+
+
+def test_a_rings_own_seed_does_not_pin_drafting():
+    """A split seeds every row so its ranks draw alike (tensor.assign_seed);
+    that seed is not the client's and must not force drafting -- it did,
+    so a split drafted (and DSpark verified all K) whatever the timing."""
+    from knurlogic.engine.mtp.sampling import Keys
+    from knurlogic.engine.runtime.tensor import RING_SEED, assign_seed
+    s = assign_seed({"temp": 0.0})
+    assert s[RING_SEED] is True and assign_seed({"seed": 7}).get(RING_SEED) is None
+    b = _batch()
+    b.params = [bl.RowParams(max_tokens=1, dist=None, processors=[], eos=set(),
+                             keys=Keys(1234, pins=False))]
+    b.drafts = [True]
+    assert _run(b, 400, 0.72, 0.055) < 400      # plain is far cheaper
+
+
+def test_a_rings_own_seed_does_not_pin_the_verify_width(monkeypatch):
+    from knurlogic.engine.mtp import block_loop as BL
+    from knurlogic.engine.mtp.sampling import Keys
+    monkeypatch.delenv("KNURLOGIC_MTP_VERIFY", raising=False)
+    b = BL.BlockBatch(None, None, lambda: None, copy_caches=True,
+                      block_size=5)
+    b.params = [bl.RowParams(max_tokens=1, dist=None, processors=[], eos=set(),
+                             keys=Keys(1234, pins=False))]
+    b.drafts = [True]
+    for k in range(1, 6):
+        b._vcost[(1, k)] = (0.060 + 0.010 * k, 99)
+        b._vwarm.add((1, k))
+    b._vacc[1] = [0.8, 0.4, 0.2, 0.1, 0.05]
+    assert b._width(1, None) < 5
+    b.params[0] = bl.RowParams(max_tokens=1, dist=None, processors=[],
+                               eos=set(), keys=Keys(1234))
+    assert b._width(1, None) == 5               # the client's seed pins K

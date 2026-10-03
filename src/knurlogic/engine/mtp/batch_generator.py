@@ -339,11 +339,13 @@ class MTPBatchGenerator(BatchGenerator):
                         "head cache; prefilling from scratch", len(prefix), n)
         sampling = dict(sampling_of(sampler) or {})
         seed = sampling.pop("seed", None)
+        # a ring's own seed does not pin drafting (Keys.pins)
+        pins = not sampling.pop("ring_seed", False)
         params = RowParams(max_tokens=_NEVER,
                            dist=make_distribution(**sampling),
                            processors=list(procs or []), eos=set(),
                            drafts=drafts, mirror=self._head is None,
-                           keys=Keys(seed) if seed is not None else None)
+                           keys=Keys(seed, pins) if seed is not None else None)
         try:
             with mx.stream(self._stream):
                 if vis is None:
