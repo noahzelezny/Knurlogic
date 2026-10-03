@@ -113,6 +113,9 @@ class BlockBatch(MTPBatch):
         self._vacc: dict = {}
         self._wexplore: tuple | None = None   # (rows, k, steps left)
         self._wsince = 0
+        self._wturn = 0
+        #: (rows, k) whose first, compiling step has been left out
+        self._vwarm: set = set()
         #: per position j: [sum of predicted P(batch accepts >= j), sum of
         #: hits, steps] -- the confidence scores' calibration check
         self._cal = [[0.0, 0.0, 0] for _ in range(self.block_size)]
@@ -185,8 +188,9 @@ class BlockBatch(MTPBatch):
         (this step's confidence scores) while calibrated(), else the
         measured acceptance.
         Every k is timed EXPLORE_STEPS steps first (K first: its steps
-        measure every position's acceptance), and K is re-measured every
-        RECHECK_EVERY steps, as acceptance moves with the text."""
+        measure every position's acceptance), and every RECHECK_EVERY
+        steps one width other than the best is re-measured, in turn (K
+        first), as acceptance and costs move with the text."""
         K = self.block_size
         fixed = _fixed_width()
         if fixed is not None:
@@ -208,10 +212,17 @@ class BlockBatch(MTPBatch):
         use = pred if pred is not None and self.calibrated() else None
         best = max(range(1, K + 1), key=lambda k: self._rate(B, k, use))
         self._wsince += 1
-        if best != K and self._wsince >= RECHECK_EVERY:
+        if self._wsince >= RECHECK_EVERY:
+            # every loser in turn, K first (its steps measure every
+            # position's acceptance): a width timed once and then never
+            # again kept whatever it read then
             self._wsince = 0
-            self._wexplore = (B, K, EXPLORE_STEPS)
-            return K
+            others = [k for k in range(K, 0, -1) if k != best]
+            if others:
+                k = others[self._wturn % len(others)]
+                self._wturn += 1
+                self._wexplore = (B, k, EXPLORE_STEPS)
+                return k
         return best
 
     def _rate(self, B: int, k: int, pred=None) -> float:
@@ -221,6 +232,12 @@ class BlockBatch(MTPBatch):
         return tokens / max(self._vcost[(B, k)][0], 1e-9)
 
     def _record_width(self, B: int, k: int, seconds: float) -> None:
+        if (B, k) not in self._vwarm:
+            # a width's first step compiles its verify shape: hundreds of
+            # ms that are not its cost, and an EMA seeded with them kept a
+            # narrow width "dearer" than K for its whole exploration
+            self._vwarm.add((B, k))
+            return
         ema, n = self._vcost.get((B, k), (seconds, 0))
         self._vcost[(B, k)] = (0.8 * ema + 0.2 * seconds, n + 1)
         ex = self._wexplore

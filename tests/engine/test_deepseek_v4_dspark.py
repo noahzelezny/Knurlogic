@@ -503,3 +503,29 @@ def test_badly_calibrated_confidence_falls_back_to_measured_acceptance(
     # measured acceptance high again: the measured width is all 5
     _feed(b, [0.99] * 5, 5, 40)
     assert b._width(1, None) == 5
+
+
+def test_a_widths_compiling_first_step_does_not_decide_it(monkeypatch):
+    """Each width's first step compiles its verify shape (live: hundreds of
+    ms). Left in, it kept every narrow width dearer than K, which alone is
+    re-measured, so K won forever. The first step is left out, and every
+    losing width is re-measured in turn."""
+    from knurlogic.engine.mtp import block_loop as BL
+    monkeypatch.delenv("KNURLOGIC_MTP_VERIFY", raising=False)
+    b = BL.BlockBatch(None, None, lambda: None, copy_caches=True,
+                      block_size=5)
+    cost = {1: 0.070, 2: 0.077, 3: 0.085, 4: 0.096, 5: 0.107}
+    seen = set()
+    picks = []
+    for _ in range(400):
+        k = b._width(1, None)
+        # live acceptance: P(>= j) falls fast after the first draft
+        b._record_accept(1, k, min(k, 1 if len(picks) % 3 else 2))
+        b._record_width(1, k, cost[k] + (0.8 if k not in seen else 0.0))
+        seen.add(k)
+        picks.append(k)
+    settled = picks[-50:]
+    assert max(set(settled), key=settled.count) in (1, 2)
+    # the rechecks reach widths other than K
+    late = picks[60:]
+    assert {3, 4} & set(late)
