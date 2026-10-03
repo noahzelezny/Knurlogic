@@ -2,10 +2,23 @@
 
 ## Unreleased
 
+* DeepSeek-V4-Flash-Vision-Exp: images (one or several per message, kept
+  in the prompt cache), its four thinking levels (off, low, high, max), tool
+  calls, and DSpark drafting (5 tokens per step) on one Mac or a split.
+  Needs an artifact that carries its tower; a text-only conversion is not
+  tagged VISION.
+* A drafting request that ends partway through a step stores only the
+  tokens it returned, so the next turn reuses its cache exactly.
 * Runs on mlx 0.32.3 and mlx-lm 0.32.0 (was 0.31.2 / 0.31.3), so it
   computes what current mlx computes. Logits move by float rounding
   (mlx 0.32's kernels); greedy tokens on the test models are unchanged.
 * Python 3.11 or newer (mlx-lm 0.32 needs it).
+* The page shows "Update x.y.z" in its top bar when PyPI has a newer
+  knurlogic; clicking it copies `pip install -U knurlogic`. Asked once per
+  page start; `--offline` skips it.
+* DeepSeek-V4: the shared expert clamps its SwiGLU at 10 as DeepSeek's
+  reference does; it ran unclamped before, about 2% off the shared expert's
+  output on average.
 
 ## 0.1.2
 
