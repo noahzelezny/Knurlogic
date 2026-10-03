@@ -190,16 +190,22 @@ def test_g4_mask_overlay_matches_reference():
     tc = g4fv.tiny_gemma4_config()["text_config"]
     tc["num_hidden_layers"] = 1
     tc["num_kv_shared_layers"] = 0
-    tc["layer_types"] = ["full_attention"]
+    # the maker's placement (architecture PROVENANCE.md, vendored edit 1):
+    # sliding layers only, on a "vision" config; a window wider than the
+    # golden leaves the overlay's own logic to compare
+    B, N = block_ids.shape
+    tc["layer_types"] = ["sliding_attention", "full_attention"]
+    tc["num_hidden_layers"] = 2
+    tc["sliding_window"] = N + 1
+    tc["use_bidirectional_attention"] = "vision"
     model = arch.Gemma4TextModel(
         arch.ModelArgs.from_dict(dict(tc, model_type="gemma4_text")))
 
-    B, N = block_ids.shape
     h = mx.zeros((B, N, tc["hidden_size"]))
-    masks = model._make_masks(h, [None], mm_mask=block_ids)
-    got = masks[0]
+    masks = model._make_masks(h, [None, None], mm_mask=block_ids)
     want = arrays["overlaid"][:, 0]  # golden has a head axis of size 1
-    np.testing.assert_array_equal(np.array(got), want.astype(bool))
+    np.testing.assert_array_equal(np.array(masks[0]), want.astype(bool))
+    assert masks[1] == "causal"  # full layers stay causal
 
 
 def test_g4_mask_overlay_can_fail():

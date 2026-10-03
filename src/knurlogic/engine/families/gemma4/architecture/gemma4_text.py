@@ -46,6 +46,10 @@ class ModelArgs(BaseModelArgs):
     moe_intermediate_size: Optional[int] = None
     layer_types: Optional[List[str]] = None
     tie_word_embeddings: bool = True
+    # knurlogic (vendored edit 1): "vision" (26B-A4B, 31B) overlays
+    # bidirectional image blocks on the sliding layers; None (e2b/e4b)
+    # keeps every layer causal
+    use_bidirectional_attention: Optional[str] = None
 
     def __post_init__(self):
         if self.rope_parameters is None:
@@ -502,7 +506,7 @@ class Gemma4TextModel(nn.Module):
 
     def _make_masks(self, h, cache, mm_mask: Optional[mx.array] = None):
         """Per-layer-type masks, with gemma4's bidirectional image-block
-        overlay on the full-attention layers only.
+        overlay where the maker puts it.
 
         `mm_mask` is [B, L]: -1 outside every image, and for image tokens the
         index (0, 1, 2, ...) of the image that token belongs to along the
@@ -510,41 +514,46 @@ class Gemma4TextModel(nn.Module):
         `knurlogic.engine.vision.key.image_spans` already gives that
         grouping exactly (it knows sha/proc_hash, not just "is an image
         token"), so this is the block-id array directly rather than a
-        recomputation from a token-type array
-        (mlx-vlm 0.6.17 `gemma4/language.py:455-469`,
-        `_block_sequence_ids_for_mask`, folds image AND audio ids into one
-        array and infers blocks from run boundaries -- unneeded here since
-        the vision-only family passes exact block ids and there is no audio
-        token in this build. `Family.chunk_boundaries` (design D5) keeps
-        every such block inside one prefill chunk, so the overlay below
-        never needs to reach across a chunk boundary).
+        recomputation from a token-type array. `Family.chunk_boundaries`
+        (design D5) keeps every such block inside one prefill chunk, so the
+        overlay never needs to reach across a chunk boundary.
 
-        Overlay ported from mlx-vlm 0.6.17
-        `gemma4/language.py:486-515` (`_apply_blockwise_bidirectional_overlay`
-        plus the `use_bidirectional_vision` gate), MIT, Copyright (c) 2025
-        Prince Canuma. Sliding-attention layers are left causal: the source
-        only widens `full_attention`, and `RotatingKVCache`'s window already
-        bounds those layers' prefix reuse (docs/design/vision-contracts.md,
-        gemma4 positions note)."""
-        has_visual = mm_mask is not None and bool(
-            (mm_mask >= 0).sum().item()
+        Vendored edit 1 (PROVENANCE.md): the overlay goes on the SLIDING
+        layers only, as AND(window, OR(causal, same block)), and only when
+        the config says `use_bidirectional_attention == "vision"` (26B-A4B,
+        31B); full-attention layers stay causal, and e2b/e4b (None) are
+        causal everywhere. That is Google's reference
+        (google-deepmind/gemma `gm/nn/gemma4/_config.py`: "bidirectional
+        for image tokens in sliding layers only, causal for global layers")
+        and HF transformers 5.16.1 `modeling_gemma4.py:2101-2145`
+        (`create_causal_mask_mapping`). The overlay was first ported from
+        mlx-vlm 0.6.17 `gemma4/language.py:486-515`
+        (`_apply_blockwise_bidirectional_overlay`), MIT, Copyright (c) 2025
+        Prince Canuma, which put it on the full layers, ungated."""
+        use_bidirectional = (
+            self.config.use_bidirectional_attention == "vision"
+            and mm_mask is not None
+            and h.shape[1] > 1
+            and bool((mm_mask >= 0).sum().item())
         )
-        use_bidirectional = has_visual and h.shape[1] > 1
         mask = {}
         masks = []
         for l, c in zip(self.layers, cache):
             if l.layer_type not in mask:
                 if l.layer_type == "full_attention":
+                    mask["full_attention"] = create_attention_mask(h, c)
+                elif l.layer_type == "sliding_attention":
                     m = create_attention_mask(
-                        h, c, return_array=use_bidirectional
-                    )
+                        h, c, window_size=self.window_size,
+                        return_array=use_bidirectional)
                     if use_bidirectional and not isinstance(m, str):
                         # m is [L, S]: S - L tokens already in the cache
                         # come first. A prefill chunk may start after
                         # them (the serve path chunks, snapping edges to
                         # image blocks, so a block never reaches back into
                         # the cache): they belong to no block here.
-                        ctx = m.shape[-1] - mm_mask.shape[-1]
+                        L = mm_mask.shape[-1]
+                        ctx = m.shape[-1] - L
                         kid = mm_mask
                         if ctx > 0:
                             kid = mx.concatenate(
@@ -554,14 +563,16 @@ class Gemma4TextModel(nn.Module):
                         q = mx.expand_dims(mm_mask, -1)
                         k = mx.expand_dims(kid, -2)
                         same_block = (q >= 0) & (q == k)       # [B, L, S]
+                        # ...still inside the window: a key more than
+                        # window-1 behind the query stays out
+                        qpos = mx.arange(L)[:, None]
+                        kpos = mx.arange(m.shape[-1])[None] - ctx
+                        same_block = same_block & (
+                            qpos - kpos < self.window_size)
                         if m.ndim == 4:                        # [B, 1, L, S]
                             same_block = same_block[:, None]
                         m = m | same_block
-                    mask["full_attention"] = m
-                elif l.layer_type == "sliding_attention":
-                    mask["sliding_attention"] = create_attention_mask(
-                        h, c, window_size=self.window_size
-                    )
+                    mask["sliding_attention"] = m
             masks.append(mask[l.layer_type])
         return masks
 
