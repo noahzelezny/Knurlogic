@@ -52,16 +52,18 @@ def family_for(template, name: str = "") -> str | None:
     copy of knurlogic's own, shipped in a release, or an older one: ours,
     current, replaces it and its parser is installed -- a copy kept as it
     was had no parser, and its tool calls came back as text); or, for an
-    artifact named DeepSeek-V4, any template with no tool handling at all."""
+    artifact named DeepSeek-V4, no template or one with no tool handling."""
+    named = "deepseek-v4" in (name or "").lower()
     if not isinstance(template, str) or not template:
-        return None
+        # no template at all (deepseek-ai's own MLX conversion ships none):
+        # chat was refused outright
+        return "deepseek_v4" if named else None
     fam = STUBS.get(hashlib.sha256(template.encode()).hexdigest())
     if fam:
         return fam
     if "｜DSML｜" in template:
         return "deepseek_v4"
-    if "deepseek-v4" in (name or "").lower() and \
-            "tool" not in template.lower():
+    if named and "tool" not in template.lower():
         return "deepseek_v4"
     return None
 
@@ -102,6 +104,10 @@ def install(tokenizer) -> str | None:
     except (AttributeError, TypeError):
         logger.warning("could not replace the chat template on %r", name)
         return None
+    # mlx-lm's wrapper fixes this at construction: an artifact with no
+    # template read "no chat template" and chat was refused after this
+    if getattr(tokenizer, "has_chat_template", True) is False:
+        tokenizer.has_chat_template = True
     parser = PARSERS.get(fam)
     if parser is not None and hasattr(tokenizer, "_tool_parser") and \
             getattr(tokenizer, "_tool_parser", None) is None:
@@ -118,8 +124,9 @@ def install(tokenizer) -> str | None:
         tokenizer._knurlogic_template = (fam, tokenizer.chat_template)
     except (AttributeError, TypeError):
         pass    # a tokenizer that refuses attributes: re-detect next time
-    logger.info("%s: the artifact's chat template is a known stub; using "
-                "knurlogic's %s template", name or "tokenizer", fam)
+    logger.info("%s: the artifact's chat template is a known stub, a copy or "
+                "missing; using knurlogic's %s template", name or "tokenizer",
+                fam)
     return fam
 
 
