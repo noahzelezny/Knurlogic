@@ -699,6 +699,23 @@ def apply_set(op: dict, rank: int) -> str:
     return said
 
 
+def _defer_sigterm(rank: int) -> None:
+    """A following rank leaves on rank 0's `stop`, between steps, not on the
+    page's SIGTERM: killed mid-step, it would leave rank 0's GPU waiting on
+    a collective that never completes (pinned at 100%, holding the job's
+    memory past every exit, until a reboot). Rank 0 stops the ring within
+    seconds (http.watch_ring); if it is gone, the page's SIGKILL follows."""
+    import signal
+
+    def deferred(_sig, _frame):
+        logger.info("rank %d: SIGTERM -- leaving on rank 0's stop, between "
+                    "steps", rank)
+    try:
+        signal.signal(signal.SIGTERM, deferred)
+    except ValueError:              # not the main thread (a test's ring)
+        pass
+
+
 def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
            completion_batch_size: int, prefill_step_size: int,
            working_set: int, split: str = "tensor", drafting: bool = False,
@@ -721,6 +738,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     from .scheduler import PromptCache
 
     stream = mx.default_stream(mx.default_device())
+    _defer_sigterm(link.rank)
     cache = PromptCache(prompt_cache_size)
     mark = Mark(working_set)
     ex: LocalExecutor | None = None

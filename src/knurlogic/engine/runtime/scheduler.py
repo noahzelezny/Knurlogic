@@ -339,6 +339,19 @@ class Scheduler:
         self._wake.set()
         self._thread.join(10)
 
+    def stop_ring(self, timeout: float) -> bool:
+        """From any thread: stop at the next step boundary (the scheduler
+        thread's own exit sends the other ranks `stop`). True when it got
+        there within `timeout`; False when a step never ended -- a peer is
+        gone and its collective will not return -- and the caller fails
+        what is in flight and exits regardless."""
+        self._stop = True
+        self._wake.set()
+        if self._thread.ident is None:   # never ran: nothing answers its rows
+            return False
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
+
     def submit(self, job: Job) -> Job:
         job.submitted = time.perf_counter()
         if self._aborted is not None:

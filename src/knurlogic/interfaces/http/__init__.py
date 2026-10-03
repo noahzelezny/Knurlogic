@@ -95,7 +95,8 @@ def scheduler_options(settings: dict) -> dict:
             "working_set_bytes": settings.get("working_set_bytes")}
 
 
-def watch_ring(sched, mh, exit_after: float = 1.5) -> None:
+def watch_ring(sched, mh, exit_after: float = 1.5,
+               stop_within: float = 6.0) -> None:
     """Rank 0 of a split model: its progress marker says whether work is
     in flight (the page tells idle from stalled by it), and a SIGTERM --
     the page tearing the job down because another rank died or stalled --
@@ -120,18 +121,36 @@ def watch_ring(sched, mh, exit_after: float = 1.5) -> None:
     if m is not None:
         m.probe = probe
 
-    def on_term(_sig, _frame):
+    def fail_and_leave():
         sched.abort(RingFailed(
             "this model is split across machines and the cluster job is "
             "stopping (a rank exited or stalled, or it was unloaded); "
             "retry once it is loaded again"))
-        jobs.progress(phase="stopping")
+        import time
+        time.sleep(exit_after)          # the 503s go out first
+        os._exit(0)
 
-        def leave():
-            import time
-            time.sleep(exit_after)      # the 503s go out first
-            os._exit(0)
-        threading.Thread(target=leave, daemon=True).start()
+    def on_term(_sig, _frame):
+        jobs.progress(phase="stopping")
+        if getattr(mh, "state", "") == "ready":
+            # An unload with the ring alive: stop at a step boundary. The
+            # scheduler finishes the step it is in, fails what is in
+            # flight, and sends the other ranks `stop`, so every rank
+            # leaves between steps. Killed mid-step, a rank left its
+            # peer's GPU waiting on a collective that never completed: the
+            # stuck queue held that GPU at 100% and pinned the job's memory
+            # past every process's exit, until a reboot (measured on M3 +
+            # M4, tensor over TCP and RDMA, 4 requests in flight).
+            # A step that never ends means a peer is gone: fail what is in
+            # flight as before and leave.
+            def stop_then_leave():
+                if sched.stop_ring(timeout=stop_within):
+                    os._exit(0)
+                else:
+                    fail_and_leave()
+            threading.Thread(target=stop_then_leave, daemon=True).start()
+            return
+        threading.Thread(target=fail_and_leave, daemon=True).start()
     signal.signal(signal.SIGTERM, on_term)
 
 
