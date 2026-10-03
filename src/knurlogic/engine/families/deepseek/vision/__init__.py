@@ -91,11 +91,6 @@ def _image_token_id(model_path: str) -> int:
 class DeepseekVisionFamily:
     """`Family` (vision-contracts.md) for DeepSeek-V4-Flash-Vision-Exp."""
 
-    #: DeepSeek's encoder joins a user message's parts with "\n\n"
-    #: (encoding_dsv4.py, render_message); engine/vision/request.py puts it
-    #: between the parts of a message with an image
-    part_separator = "\n\n"
-
     def __init__(self, config: dict[str, Any], image_token_id: int):
         self.args = VisionArgs.from_config(config)
         a = self.args
