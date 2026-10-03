@@ -256,6 +256,12 @@ def admit(
     c-1 is (h_{c-1}, x_c) and x_c is the token the next turn may change --
     so `h` is h_{c-1}, for the restore to replay that one step with the
     new x_c. A non-drafting row passes head_cache and h as None.
+
+    A BLOCK head (`head.block_size`, block_loop.BlockBatch) is advanced
+    over every prompt position, the last one included, chunk by chunk as
+    the trunk prefills: its cache holds the trunk's own positions (no
+    one-step lag), so a checkpoint's head cache is at c and `h` is None.
+    The row enters decoding with no draft; the first step drafts.
     """
     import contextlib
 
@@ -267,6 +273,7 @@ def admit(
         cache = model.make_cache()
         start_pos = 0
     drafts = params.drafts and head is not None
+    block = drafts and getattr(head, "block_size", 0) > 0
     # a drafting row on this rank's side of the batch: with a head, or
     # mirrored for rank 0's (a pipeline follower). Its checkpoints move
     # with it, so they must be the same on every rank.
@@ -321,7 +328,10 @@ def admit(
                 # projection for every prompt position (loop.py says the
                 # same).
                 want = [c.state for c in cache if hasattr(c, "state")]
-                if drafts:
+                if block:
+                    head.advance(get_h(), dcache)
+                    want += dcache.state
+                elif drafts:
                     h = get_h()
                     h_chunks.append(h)
                     want.append(h)
@@ -341,7 +351,7 @@ def admit(
             if cps and end == cps[0]:
                 c = cps.pop(0)
                 h_c = None
-                if drafts:
+                if drafts and not block:
                     # Seed [seeded, c-1), keep h from c-1 on for the rest.
                     h_all = (mx.concatenate(h_chunks, axis=1)
                              if len(h_chunks) > 1 else h_chunks[0])
@@ -361,7 +371,10 @@ def admit(
     t1 = _pick(row_t1, params, []).astype(mx.int32)
 
     draft_row = None
-    if drafts:
+    if block:
+        head.advance(get_h(), dcache)
+        mx.eval(t1, dcache.state)
+    elif drafts:
         h_chunks.append(get_h())
         h_last = h_chunks[-1][:, -1:]
         mx.eval(t1, h_last)
@@ -418,6 +431,10 @@ class MTPBatch:
     finishes them or through `remove`. Row order is `uids`; every per-row
     structure below is indexed the same way and filtered together.
     """
+
+    #: the head's next draft rides between steps (`draft_row`); a block
+    #: head drafts at the start of its step instead (block_loop.BlockBatch)
+    carries_draft = True
 
     def __init__(self, model, head, get_h: Callable[[], mx.array], *,
                  copy_caches: bool, draft_max_rows: int | None = None,
@@ -576,7 +593,8 @@ class MTPBatch:
             else mx.zeros((1, V), dtype=row_t1.dtype)
             for r in rows
         ]
-        draft_row = mx.concatenate(drafts, axis=0) if self.head is not None else None
+        draft_row = (mx.concatenate(drafts, axis=0)
+                     if self.head is not None and self.carries_draft else None)
 
         if self.t1 is None:
             self.t1, self.row_t1, self.draft_row = t1, row_t1, draft_row

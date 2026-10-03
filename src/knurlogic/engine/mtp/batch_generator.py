@@ -27,6 +27,7 @@ from knurlogic.engine.serve import cache_report as cachereport
 
 from ..vision import key as K
 from .batch_loop import ForwardFailed, MTPBatch, RowParams, admit
+from .block_loop import BlockBatch
 from .caches import position
 from .capture import capture_input
 from .registry import resolve
@@ -174,8 +175,17 @@ class MTPBatchGenerator(BatchGenerator):
                     f"{type(model).__name__} exposes neither `.model` nor "
                     f"`.language_model.model`; no capture point for the MTP "
                     f"head")
-            get_h = self._stack.enter_context(capture_input(core,
-                                                            spec.capture))
+            if getattr(head, "block_size", 0):
+                # a block head (DSpark) drafts from several layers' outputs
+                # and says which; get_h hands it what it reads
+                gets = [self._stack.enter_context(capture_input(core, p))
+                        for p in head.capture_paths()]
+
+                def get_h():
+                    return head.main_hidden([g() for g in gets])
+            else:
+                get_h = self._stack.enter_context(capture_input(core,
+                                                                spec.capture))
             self._make_draft_cache = (
                 head.make_draft_cache if hasattr(head, "make_draft_cache")
                 else (lambda: spec.make_draft_cache(arch)))
@@ -193,7 +203,8 @@ class MTPBatchGenerator(BatchGenerator):
         #: what admit and the decode steps call (self.model stays the
         #: server's object: families embed with it, the server compares it)
         self._trunk = logits_trunk(model)
-        self._batch = MTPBatch(self._trunk, head, get_h, copy_caches=copy)
+        batch = BlockBatch if getattr(head, "block_size", 0) else MTPBatch
+        self._batch = batch(self._trunk, head, get_h, copy_caches=copy)
         self._n_trunk = len(self._make_new_cache())
         #: engine/runtime/pipeline.Coord on a pipeline split, else None
         self._coord = None
@@ -293,7 +304,10 @@ class MTPBatchGenerator(BatchGenerator):
                 def on_checkpoint(c, trunk, hc, h):
                     entry = copy.deepcopy(list(trunk))
                     if hc is not None:
-                        entry += [copy.deepcopy(hc), HeadCarry(mx.array(h))]
+                        entry += [copy.deepcopy(hc)]
+                        # a block head's cache is at c already (admit)
+                        if h is not None:
+                            entry += [HeadCarry(mx.array(h))]
                     stash.append((list(prompt[:c]), entry))
 
                 row = admit(self._trunk, self._head, self._batch.get_h,

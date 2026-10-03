@@ -69,12 +69,37 @@ Flash one our `deepseek_v4.jinja` ports; image parts become
 `IMAGE_START ... IMAGE_END` id runs that the template cannot emit, so they
 are spliced at tokenization like other families' image placeholders.
 
-### DSpark (later)
-Not our MTP head: 3 layers, `main_proj` over the HC-mean of trunk layers
-40-42, a draft block of 5 noise tokens (128799) decoded in one pass, a
-Markov head (rank 256) adding logits per position, and a confidence head.
-A different drafting loop from `engine/mtp`. Separate phase, after images
-work; the trunk exposes the layer 40-42 hidden states for it.
+### DSpark
+Not our MTP head: 3 stages, `main_proj` over the HC-mean of the outputs of
+trunk layers 40-42, a draft block of 5 (the committed token, then noise
+tokens 128799) decoded in one pass, a Markov head (rank 256) adding logits
+per position, and a confidence head.
+
+In code (2026-10-02):
+- `families/deepseek/heads/deepseek_v4_dspark.py`: the stages (each a
+  trunk-style block whose attention keys are a 128-position window of
+  main kvs plus the whole block), their window cache (`DSparkCache`: only
+  committed positions, never rolled back) and the sidecar binding. The
+  layer outputs are captured as the inputs of layers 41, 42 and the
+  trunk's hc_head (`engine/mtp/capture.py`, list members now). Trunk
+  edit 16 reads the dspark_* config fields.
+- `families/deepseek/heads/dspark_pack.py`: packs `mtp.*` from the HF
+  checkpoint into `mtp-head-dspark-mxfp4.safetensors` (FP8 -> bf16 exact,
+  FP4 experts -> mxfp4 bits), streaming. The registry picks DSpark when
+  the config has `dspark_block_size > 0` and that sidecar is the one found;
+  launch's MTP on/off and the fit count it like any `mtp-head*` sidecar.
+- `engine/mtp/block_loop.py`: the drafting step. One (K+1)-wide verify;
+  every row of a batch commits the batch's fewest accepted drafts plus one
+  (one shared cache write index); greedy, seeded and sampled verdicts as
+  the 1-token loop's. The confidence score is computed and unused, as in
+  the reference's generate.py.
+- One machine only: a split model binds no DSpark head (its Coord carries
+  one draft per row). Image rows do not draft (as with every head).
+- Held to the reference's own forward / forward_spec on a tiny checkpoint
+  (`tests/engine/test_deepseek_v4_dspark.py`); greedy and seeded output
+  identical with drafting on and off. Edit 17 (a ragged mask after a
+  1-wide step) was found here.
+- Not measured: acceptance and speed on the real weights.
 
 ## Memory and placement
 Trunk ~150 GB at mxfp4 experts: over either Mac alone (96 / 128 GB), so it
@@ -102,3 +127,4 @@ Phases 1-2 in code (2026-10-02): the trunk's edits 14-15
 (`families/deepseek/vision/`, its PROVENANCE.md says what is verified and
 what waits for a conversion), and the Vision-Exp template variant
 (`engine/templates/PROVENANCE.md`). Not yet run on a converted artifact.
+Phase 4 in code (2026-10-02): see DSpark above.

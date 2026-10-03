@@ -2,9 +2,10 @@
 128-token sliding window plus learned compressed pools (Compressor, and a
 top-k Indexer on the ratio-4 layers), hash-routed first layers, mHC
 hyper-connections. One MTP head (heads/deepseek_v4.py, a sidecar beside
-the trunk; the trunk's sanitize still drops `mtp.*`). Images: the
-DeepSeek-V4-Flash-Vision-Exp artifact (vision_n_layers > 0), its tower in
-vision/ (docs/design/deepseek-vision.md).
+the trunk; the trunk's sanitize still drops `mtp.*`); Vision-Exp's DSpark
+block drafter instead (heads/deepseek_v4_dspark.py, its own sidecar).
+Images: the DeepSeek-V4-Flash-Vision-Exp artifact (vision_n_layers > 0),
+its tower in vision/ (docs/design/deepseek-vision.md).
 
 The chat template is engine/templates/deepseek_v4.jinja (the conversion
 ships a stub); its thinking levels are DeepSeek's three modes: Non-think,
@@ -37,7 +38,15 @@ MANIFEST = {
                 # untrimmable cache back by its whole state
                 cache_semantics="copy",
                 # every sidecar key is under mtp.0. (the official names)
-                layout=("mtp",)),
+                layout=("mtp",),
+                # Vision-Exp's DSpark (3 stages under mtp.*, block 5):
+                # drafted by engine/mtp/block_loop, captured at the outputs
+                # of dspark_target_layer_ids (docs/design/deepseek-vision.md)
+                block=dict(
+                    head="knurlogic.engine.families.deepseek.heads."
+                         "deepseek_v4_dspark:DSparkHead",
+                    sidecar_name="mtp-head-dspark-mxfp4.safetensors",
+                    config="dspark_block_size")),
         },
     },
     "thinking": {
