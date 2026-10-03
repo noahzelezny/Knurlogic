@@ -113,9 +113,9 @@ def test_the_drafts_are_the_references():
     """Trunk logits, the HC-mean main hidden state of layers 1-3, and at
     each decode step forward_spec's 5 draft ids (exact), their logits with
     the Markov term, and the confidence scores, against the torch
-    reference on the same checkpoint. The tiny trunk runs float32; the
-    DSpark linears are bf16 (FP8 dequantized exactly), so the head's
-    tolerance is bf16's."""
+    reference on the same checkpoint. Everything runs float32 on weights
+    both sides hold exactly (FP8 and FP4 values times powers of two), so
+    only summation order differs (measured: under 1e-5)."""
     model = _load()
     head, _ = _head(model)
     got = _trace(model, head)
@@ -123,12 +123,8 @@ def test_the_drafts_are_the_references():
            for k in ("logits", "prefill_main_hidden", "main_hidden",
                      "draft_logits", "confidence")}
     print("max abs err", err)
-    assert err["logits"] < 1e-4
-    assert err["prefill_main_hidden"] < 1e-4 and err["main_hidden"] < 1e-4
+    assert max(err.values()) < 1e-4
     assert (got["draft_ids"].astype(np.int32) == GOLD["draft_ids"]).all()
-    scale = np.abs(GOLD["draft_logits"]).max()
-    assert err["draft_logits"] < 1e-3 * scale
-    assert err["confidence"] < 1e-3 * max(1.0, np.abs(GOLD["confidence"]).max())
 
 
 def _run(gen, prompts, max_tokens, sampler=None, caches=None,
@@ -223,6 +219,52 @@ def test_plain_steps_and_block_steps_interleave_exactly(monkeypatch):
     draft, _ = _run(MTPBatchGenerator(model, head, stats=stats,
                                       prefill_step_size=4), prompts, 24)
     assert 0 < stats["steps"] and draft == plain
+
+
+def _steps(batch, rows, n):
+    from knurlogic.engine.mtp.batch_loop import RowParams, admit
+    out = {}
+    for uid, (ids, drafts) in enumerate(rows):
+        p = RowParams(max_tokens=n, dist=None, processors=[], eos=set(),
+                      drafts=drafts)
+        batch.extend([admit(batch.model, batch.head, batch.get_h,
+                            mx.array(ids), p, uid=uid,
+                            make_draft_cache=(batch.head.make_draft_cache
+                                              if batch.head else
+                                              lambda: None),
+                            prefill_step_size=4)])
+        out[uid] = []
+    while len(batch):
+        for rs in batch.step():
+            out[rs.uid] += [e.token for e in rs.tokens]
+    return [out[u] for u in sorted(out)]
+
+
+def test_a_row_that_does_not_draft_rides_along(monkeypatch):
+    """A row that may not draft (an image request's, when its image is in
+    the uncached span) beside one that does: the batch commits t1 alone
+    each step, both rows exact."""
+    from contextlib import ExitStack
+
+    from knurlogic.engine.mtp.batch_loop import MTPBatch
+    from knurlogic.engine.mtp.block_loop import BlockBatch
+    from knurlogic.engine.mtp.capture import capture_input
+    monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
+    model = _load()
+    head, _ = _head(model)
+    rows = [(G.PROMPT, True), (G.PROMPT[2:9], False)]
+    plain = _steps(MTPBatch(model, None, lambda: None, copy_caches=True),
+                   rows, 16)
+    _guess(head, [r[0] + o for r, o in zip(rows, plain)])
+    with ExitStack() as st:
+        gets = [st.enter_context(capture_input(model.model, p))
+                for p in head.capture_paths()]
+        b = BlockBatch(model, head,
+                       lambda: head.main_hidden([g() for g in gets]),
+                       copy_caches=True)
+        got = _steps(b, rows, 16)
+    assert (2, True) in b._cost       # block steps with both rows
+    assert got == plain
 
 
 def test_a_seeded_row_reproduces_with_drafting(monkeypatch):

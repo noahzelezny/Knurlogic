@@ -99,6 +99,12 @@ In code (2026-10-02):
   (`tests/engine/test_deepseek_v4_dspark.py`); greedy and seeded output
   identical with drafting on and off. Edit 17 (a ragged mask after a
   1-wide step) was found here.
+- The real checkpoint packs to 10.53 GiB (45 s, 2.8 GB peak RSS); the
+  packed sidecar binds by its header against the real config, and stage
+  0 from it matches the reference's DSparkBlock on the HF weights on
+  random inputs (main_x, the window kvs and the stage output, relative
+  error 5e-6; scratch check, not a test: the reference side needs torch
+  and ~3.6 GB).
 - Not measured: acceptance and speed on the real weights.
 
 ## Memory and placement
