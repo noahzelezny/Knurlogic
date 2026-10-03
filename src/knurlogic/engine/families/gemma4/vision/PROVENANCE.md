@@ -54,7 +54,10 @@ built from mlx-vlm's own `Gemma4TextModel._block_sequence_ids_for_mask` /
 `_apply_blockwise_bidirectional_overlay`
 (`tests/goldens/build_gemma4.py`, `gemma4_mask_overlay.npz`), so the boolean
 arithmetic is checked against the reference even though the block-id input
-is produced a different way.
+is produced a different way. WHERE the overlay applies follows the maker,
+not mlx-vlm: sliding layers only, cut by the window, and only on configs
+with `use_bidirectional_attention: "vision"` (26B-A4B, 31B); e2b/e4b stay
+causal (`../architecture/PROVENANCE.md`, vendored edit 1).
 
 ## Deviation: `encode()` pre-divides by `embed_scale`
 

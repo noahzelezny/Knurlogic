@@ -337,10 +337,13 @@ def test_flash_next_quantized_cache_trims_and_restores_its_indexer():
 def test_glm_quantizes_the_mla_latent_and_keeps_the_indexer():
     """90 tokens: past index_topk (64), so the DSA picks a sparse set; the
     prefill takes the expanded path, single steps and widths 2-4 the
-    absorbed SMALL_L one -- both read the dequantized latent."""
+    absorbed SMALL_L one -- both read the dequantized latent. Seed 4: on
+    seed 3 the reference-exact trunk (glm5 PROVENANCE edits 1-5) has a
+    near tie (top two logits 4e-4 apart) that 8-bit drift flips; seed 4's
+    closest top two are 0.036 apart, 20x the drift."""
     from knurlogic.engine.kvquant import QuantKVCache, install
     model = _family("glm5_next")
-    prompt, toks = _prompt(90, 9)
+    prompt, toks = _prompt(90, 9, seed=4)
     for widths in ((1,), (2, 3, 4)):
         ref, _ = _forced(model, prompt, toks, widths)
         m = _family("glm5_next")
