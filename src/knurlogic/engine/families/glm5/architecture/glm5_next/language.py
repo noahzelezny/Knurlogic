@@ -10,7 +10,7 @@ from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.base 
     scaled_dot_product_attention,
 )
 from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.cache import ArraysCache, CacheList, KVCache
-from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.deepseek_v32.language import DeepseekV32MoE
+from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.deepseek_v32.language import DeepseekV32MoE, MoEGate, group_expert_select
 from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.deepseek_v32.language import Model as DSV32Model
 from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.deepseek_v4.hyper_connection import HyperConnection, hc_expand
 from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.gated_delta import gated_delta_update
@@ -34,6 +34,64 @@ class Glm5NextRMSNormGated(nn.Module):
         x = self.weight.astype(mx.float32) * x
         x = x * mx.sigmoid(gate.astype(mx.float32))
         return x.astype(dt)
+
+
+def _clamped_swiglu(gate: mx.array, up: mx.array, limit: float) -> mx.array:
+    # The reference's SwiGLU (Glm5NextTextMLP / Glm5NextTextExperts._apply_gate):
+    # gate clamped above at swiglu_limit, up clamped to +-swiglu_limit.
+    return nn.silu(mx.minimum(gate, limit)) * mx.clip(up, -limit, limit)
+
+
+class _ClampedSwiGLU(nn.Module):
+    # SwitchGLU's activation slot: called as activation(x_up, x_gate).
+    def __init__(self, limit: float):
+        super().__init__()
+        self.limit = limit
+
+    def __call__(self, x, gate):
+        return _clamped_swiglu(gate, x, self.limit)
+
+
+class Glm5NextMLP(DeepseekMLP):
+    """Dense MLP and shared expert, SwiGLU clamped at swiglu_limit (edit 1)."""
+
+    def __call__(self, x):
+        return self.down_proj(
+            _clamped_swiglu(self.gate_proj(x), self.up_proj(x),
+                            self.config.swiglu_limit)
+        )
+
+
+class Glm5NextMoEGate(MoEGate):
+    """Router logits in float32, as the reference (moe_router_dtype) computes
+    them: F.linear(x.float(), weight.float()) (edit 2)."""
+
+    def __call__(self, x):
+        return group_expert_select(
+            x.astype(mx.float32) @ self.weight.astype(mx.float32).T,
+            self.e_score_correction_bias,
+            self.top_k,
+            self.n_group,
+            self.topk_group,
+            self.routed_scaling_factor,
+            self.norm_topk_prob,
+        )
+
+
+class Glm5NextMoE(DeepseekV32MoE):
+    """Routed experts and shared expert SwiGLU-clamped (edit 1), router in
+    float32 (edit 2)."""
+
+    def __init__(self, config: TextConfig):
+        super().__init__(config)
+        self.switch_mlp.activation = _ClampedSwiGLU(config.swiglu_limit)
+        self.gate = Glm5NextMoEGate(config)
+        if config.n_shared_experts is not None:
+            self.shared_experts = Glm5NextMLP(
+                config=config,
+                intermediate_size=config.moe_intermediate_size
+                * config.n_shared_experts,
+            )
 
 
 class Glm5NextForgetGate(nn.Module):
@@ -253,7 +311,8 @@ class Glm5NextIndexer(nn.Module):
             self.q_lora_rank, self.n_heads * self.head_dim, bias=False
         )
         self.wk = nn.Linear(self.dim, self.head_dim, bias=False)
-        self.k_norm = nn.LayerNorm(self.head_dim)
+        # eps 1e-6 as the reference's indexer k_norm (edit 4)
+        self.k_norm = nn.LayerNorm(self.head_dim, eps=1e-6)
         self.weights_proj = nn.Linear(self.dim, self.n_heads, bias=False)
         self.softmax_scale = self.head_dim**-0.5
         self.index_kpool_compress_ape = mx.zeros((self.index_kpool, self.head_dim))
@@ -283,10 +342,13 @@ class Glm5NextIndexer(nn.Module):
         grouped_valid = grouped_valid & (pool_indices < S)
         pool_valid = mx.all(grouped_valid, axis=-1)
         pool_indices = mx.where(grouped_valid, pool_indices, -1)
-        logits = grouped_gate + self.index_kpool_compress_ape[None, None]
+        # pool weights in float32, cast to the keys' dtype (edit 5)
+        logits = grouped_gate.astype(mx.float32) + self.index_kpool_compress_ape[
+            None, None
+        ].astype(mx.float32)
         logits = mx.where(grouped_valid[..., None], logits, -1e30)
         probs = mx.softmax(logits, axis=2)
-        probs = mx.where(mx.isnan(probs), 0.0, probs)
+        probs = mx.where(mx.isnan(probs), 0.0, probs).astype(grouped_keys.dtype)
         pool_keys = mx.sum(probs * grouped_keys, axis=2)
         return pool_keys, pool_indices, pool_valid
 
@@ -392,7 +454,8 @@ class Glm5NextIndexer(nn.Module):
         P = pool_keys.shape[1]
         select_k = min(self.index_topk // self.index_kpool, P)
         pool_end = mx.clip(pool_indices[..., -1], 0, kv_len - 1)
-        pool_keys_t = pool_keys[:, None].swapaxes(-1, -2)
+        # scores in float32, as the reference's indexer (edit 5)
+        pool_keys_t = pool_keys[:, None].swapaxes(-1, -2).astype(mx.float32)
         tail_on = self.index_kpool_always_select_tail and self.index_kpool > 1
         output_width = self.index_topk + (self.index_kpool - 1 if tail_on else 0)
 
@@ -406,9 +469,11 @@ class Glm5NextIndexer(nn.Module):
             cs = c1 - c0
             q_pos = offset + mx.arange(c0, c1)
             visible = (kv_pos[None, None, :] <= q_pos[None, :, None]) & valid[:, None, :]
-            scores = q[:, c0:c1] @ pool_keys_t
+            scores = q[:, c0:c1].astype(mx.float32) @ pool_keys_t
             scores = mx.maximum(scores * self.softmax_scale, 0.0)
-            weights = self.weights_proj(x[:, c0:c1]) * (self.n_heads**-0.5)
+            weights = self.weights_proj(x[:, c0:c1]).astype(mx.float32) * (
+                self.n_heads**-0.5
+            )
             index_scores = mx.sum(weights[..., None] * scores, axis=2)
             pool_visible = mx.take_along_axis(
                 visible, mx.broadcast_to(pool_end[:, None, :], (B, cs, P)), axis=-1
@@ -521,14 +586,15 @@ class Glm5NextSparseAttention(nn.Module):
         self.q_a_proj = nn.Linear(
             self.hidden_size, self.q_lora_rank, bias=config.attention_bias
         )
-        self.q_a_layernorm = nn.RMSNorm(self.q_lora_rank, eps=1e-6)
+        # eps rms_norm_eps (1e-5), as the reference's q_a / kv_a norms (edit 3)
+        self.q_a_layernorm = nn.RMSNorm(self.q_lora_rank, eps=config.rms_norm_eps)
         self.q_b_proj = nn.Linear(
             self.q_lora_rank, self.num_heads * self.q_head_dim, bias=False
         )
         self.kv_a_proj_with_mqa = nn.Linear(
             self.hidden_size, self.kv_lora_rank, bias=config.attention_bias
         )
-        self.kv_a_layernorm = nn.RMSNorm(self.kv_lora_rank, eps=1e-6)
+        self.kv_a_layernorm = nn.RMSNorm(self.kv_lora_rank, eps=config.rms_norm_eps)
         self.embed_q = MultiLinear(
             self.qk_nope_head_dim, self.kv_lora_rank, self.num_heads
         )
@@ -630,7 +696,7 @@ class Glm5NextDecoderLayer(nn.Module):
             and layer_idx >= config.first_k_dense_replace
             and config.mlp_layer_types[layer_idx] == "sparse"
         )
-        self.mlp = DeepseekV32MoE(config) if is_sparse else DeepseekMLP(config)
+        self.mlp = Glm5NextMoE(config) if is_sparse else Glm5NextMLP(config)
 
         self.input_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = nn.RMSNorm(
