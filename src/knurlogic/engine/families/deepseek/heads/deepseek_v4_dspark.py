@@ -25,8 +25,9 @@ deepseek-ai/DeepSeek-V4-Flash-Vision-Exp, MIT):
              per drafted position. The reference returns it and its
              generate.py never reads it; nothing here acts on it either.
 
-The reference's FP8 simulation of the kv's non-rope dims (`act_quant`) is
-not done, as the trunk's V4Attention does not do it.
+The kv's non-rope dims are rounded through FP8 (the reference's
+`act_quant(kv[..., :-rd], 64, ...)` on main_kv and the block's kv), as the
+trunk's V4Attention does (architecture edit 20).
 
 THE SIDECAR (`mtp-head-dspark-mxfp4.safetensors` beside the trunk,
 outside its index; heads/dspark_pack.py packs it from the HF
@@ -80,14 +81,19 @@ def _to_sidecar(k: str) -> str:
     return f"mtp.{i}.{rest}"
 
 
-def _rope(x, rope, pos, inverse=False):
-    """RoPE on the last rope dims of x ([..., S, head_dim]); `pos` is the
+def _rope_pe(x, rope, pos, inverse=False):
+    """The last rope dims of x ([..., S, head_dim]) roped; `pos` is the
     first position, an int or one per row ([B])."""
     rd = rope.dims
-    pe = mx.fast.rope(x[..., -rd:], rd, traditional=True, base=None,
-                      scale=-1.0 if inverse else 1.0, offset=pos,
-                      freqs=rope.freqs)
-    return mx.concatenate([x[..., :-rd], pe], axis=-1)
+    return mx.fast.rope(x[..., -rd:], rd, traditional=True, base=None,
+                        scale=-1.0 if inverse else 1.0, offset=pos,
+                        freqs=rope.freqs)
+
+
+def _rope(x, rope, pos, inverse=False):
+    """x with RoPE on its last rope dims."""
+    pe = _rope_pe(x, rope, pos, inverse)
+    return mx.concatenate([x[..., :-rope.dims], pe], axis=-1)
 
 
 class _Attention(nn.Module):
@@ -116,11 +122,17 @@ class _Attention(nn.Module):
         self.rope = arch.DeepseekV4RoPE(args.qk_rope_head_dim,
                                         args.rope_theta, None)
         self._project = arch.V4Attention._grouped_output_projection
+        self._fp8 = arch.fp8_simulate_nope
         self._sdpa = arch.scaled_dot_product_attention
 
     def main_kv(self, main_x, pos):
         """[B, S, D] at positions pos.. -> the window's kvs [B, S, hd]."""
-        return _rope(self.kv_norm(self.wkv(main_x)), self.rope, pos)
+        return self._kv(main_x, pos)
+
+    def _kv(self, x, pos):
+        """kv_norm(wkv(x)) roped, its non-rope dims rounded through FP8."""
+        kv = self.kv_norm(self.wkv(x))
+        return self._fp8(kv, self.rope.dims, _rope_pe(kv, self.rope, pos))
 
     def __call__(self, x, window, mask, pos):
         """x [B, K, D] (the block at pos..pos+K-1), window [B, W, hd]."""
@@ -128,7 +140,7 @@ class _Attention(nn.Module):
         q = self.wq_b(self.q_norm(self.wq_a(x)))
         q = q.reshape(B, K, self.n_heads, self.head_dim).transpose(0, 2, 1, 3)
         q = _rope(mx.fast.rms_norm(q, None, self.eps), self.rope, pos)
-        kv = _rope(self.kv_norm(self.wkv(x)), self.rope, pos)
+        kv = self._kv(x, pos)
         keys = mx.concatenate([window.astype(kv.dtype), kv], axis=1)[:, None]
         o = self._sdpa(q, keys, keys, cache=None, scale=self.scale,
                        mask=mask, sinks=self.attn_sink.astype(q.dtype))

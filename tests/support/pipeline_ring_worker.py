@@ -256,7 +256,11 @@ def _dspark_tensor_tiny():
     config with 64-wide experts and random weights (as
     tensor_ring_worker.build_deepseek_v4 draws them), and the
     checkpoint's head moved onto it (its stages read the trunk's embedding
-    and lm_head, which have the same shapes)."""
+    and lm_head, which have the same shapes). Its indexer keeps every
+    pool row: it runs whole on each rank on the all-summed hidden state,
+    whose last bits differ from the unsplit run's, and its FP4-rounded
+    scores (architecture edit 20) can then rank a near-tie the other way
+    -- as the reference's would between tensor-parallel degrees."""
     import mlx.core as mx
     from mlx.utils import tree_flatten, tree_unflatten
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..",
@@ -267,8 +271,8 @@ def _dspark_tensor_tiny():
     register.register("deepseek_v4")
     import mlx_lm.models.deepseek_v4 as M
     cfg = json.loads((D.G.TINY / "config.json").read_text())
-    model = M.Model(M.ModelArgs.from_dict(dict(cfg,
-                                               moe_intermediate_size=64)))
+    model = M.Model(M.ModelArgs.from_dict(dict(
+        cfg, moe_intermediate_size=64, index_topk=64)))
     rng = np.random.default_rng(0)
     w = []
     for k, v in tree_flatten(model.parameters()):

@@ -191,6 +191,227 @@ class DeepseekV4RoPE(nn.Module):
 
 
 # --------------------------------------------------------------------------- #
+# Low-precision activation simulation (knurlogic edit 20)                     #
+# --------------------------------------------------------------------------- #
+#
+# DeepSeek's reference inference rounds some activations through FP8 / FP4
+# and back ("FP8-simulate non-rope dims to match QAT"), with kernel.py's
+# act_quant / fp4_act_quant (inplace=True) and model.py's rotate_activation.
+# Both released configs run act_quant with power-of-two (ue8m0) scales:
+# model.py sets scale_fmt = "ue8m0" whenever scale_dtype is "fp8", its
+# default. The reference asserts the last dim is a whole number of blocks;
+# a dim that is not (only tiny test configs) is left as it is.
+
+_FP8_MAX = 448.0
+_FP4_MAX = 6.0
+_FP8_BLOCK = 64     # act_quant(kv[..., :-rd], 64, ...)
+_FP4_BLOCK = 32     # model.py's fp4_block_size
+
+
+def _pow2_ceil(t: mx.array) -> mx.array:
+    """kernel.py's fast_round_scale: 2 ** ceil(log2 t) from t's float32
+    bits (exponent, plus one when any mantissa bit is set)."""
+    b = t.view(mx.uint32)
+    e = ((b >> 23) & 0xFF).astype(mx.int32) - 127 + (
+        (b & 0x7FFFFF) != 0).astype(mx.int32)
+    return ((e + 127).astype(mx.uint32) << 23).view(mx.float32)
+
+
+def fp8_simulate(x: mx.array, block: int = _FP8_BLOCK) -> mx.array:
+    """act_quant(x, block, "ue8m0", inplace=True): per block of the last
+    dim, s = 2 ** ceil(log2(max(amax, 1e-4) / 448)), x -> e4m3(x / s) * s,
+    in float32, back in x's dtype."""
+    N = x.shape[-1]
+    if N == 0 or N % block:
+        return x
+    xf = x.astype(mx.float32).reshape(*x.shape[:-1], N // block, block)
+    amax = mx.maximum(mx.abs(xf).max(axis=-1, keepdims=True), 1e-4)
+    s = _pow2_ceil(amax * (1 / _FP8_MAX))
+    q = mx.to_fp8(mx.clip(xf / s, -_FP8_MAX, _FP8_MAX))
+    y = mx.from_fp8(q, dtype=mx.float32) * s
+    return y.reshape(x.shape).astype(x.dtype)
+
+
+def _e2m1_round(v: mx.array) -> mx.array:
+    """float32 in [-6, 6] -> the nearest e2m1 value, ties to even mantissa
+    (CUDA's round-to-nearest float -> e2m1 conversion)."""
+    a = mx.abs(v)
+    q = mx.where(a <= 0.25, 0.0,
+        mx.where(a < 0.75, 0.5,
+        mx.where(a <= 1.25, 1.0,
+        mx.where(a < 1.75, 1.5,
+        mx.where(a <= 2.5, 2.0,
+        mx.where(a < 3.5, 3.0,
+        mx.where(a <= 5.0, 4.0, 6.0)))))))
+    return mx.where(v < 0, -q, q)
+
+
+def fp4_simulate(x: mx.array, block: int = _FP4_BLOCK) -> mx.array:
+    """fp4_act_quant(x, block, inplace=True): per block of the last dim,
+    s = 2 ** ceil(log2(max(amax, 6 * 2**-126) / 6)), x -> e2m1(x / s) * s,
+    in float32, back in x's dtype."""
+    N = x.shape[-1]
+    if N == 0 or N % block:
+        return x
+    xf = x.astype(mx.float32).reshape(*x.shape[:-1], N // block, block)
+    amax = mx.maximum(mx.abs(xf).max(axis=-1, keepdims=True),
+                      _FP4_MAX * 2.0 ** -126)
+    # amax / 6 can be float32-subnormal; a GPU that flushes it to zero
+    # would give s = 0, where the reference's bit trick gives 2**-126
+    s = mx.maximum(_pow2_ceil(amax * (1 / _FP4_MAX)), 2.0 ** -126)
+    q = _e2m1_round(mx.clip(xf / s, -_FP4_MAX, _FP4_MAX))
+    return (q * s).reshape(x.shape).astype(x.dtype)
+
+
+def rotate_activation(x: mx.array) -> mx.array:
+    """model.py's rotate_activation: the Sylvester Hadamard transform of
+    the last dim scaled by dim ** -0.5, computed in float32 as
+    fast_hadamard_transform does (mx.hadamard_transform on bf16 would
+    accumulate in bf16)."""
+    return mx.hadamard_transform(
+        x.astype(mx.float32), scale=x.shape[-1] ** -0.5).astype(x.dtype)
+
+
+# The hot paths run the same arithmetic as one Metal dispatch each (the op
+# graphs above cost a reduction, several elementwise kernels and a concat
+# per site): e4m3 / e2m1 rounding as rint(v / step) * step with step the
+# format's spacing at |v| (exact: every factor is a power of two), and the
+# Hadamard butterflies in the order mx.hadamard_transform runs them.
+_QAT_HEADER = """
+inline float dsv4_pow2(int e) {
+    return as_type<float>(uint(e + 127) << 23);
+}
+inline int dsv4_log2_ceil(float t) {
+    uint b = as_type<uint>(t);
+    return int((b >> 23) & 0xFFu) - 127 + ((b & 0x7FFFFFu) != 0u ? 1 : 0);
+}
+// v (|v| within the format's range) to the nearest value with man_bits
+// mantissa bits and exponent >= min_e, ties to even
+inline float dsv4_round_to(float v, int min_e, int man_bits) {
+    int e = metal::max(int(as_type<uint>(fabs(v)) >> 23) - 127, min_e) - man_bits;
+    return rint(v * dsv4_pow2(-e)) * dsv4_pow2(e);
+}
+"""
+
+
+def _make_fp8_nope_kernel():
+    """y = [act_quant(kv[..., :N]), pe]: one simdgroup per 64-wide block
+    of the non-rope dims (two values a lane), and simdgroups copying the
+    rope dims `pe` after them."""
+    if mx.default_device() != mx.gpu or not mx.metal.is_available():
+        return None
+    src = """
+        uint g = thread_position_in_grid.x / 32;
+        uint lane = thread_position_in_grid.x % 32;
+        const uint NB = N / 64, NT = (RD + 63) / 64;
+        uint r = g / (NB + NT), c = g % (NB + NT);
+        if (r >= ROWS) return;
+        auto out = y + r * (N + RD);
+        if (c < NB) {
+            auto src = kv + r * KV_STRIDE + c * 64;
+            float a = static_cast<float>(src[lane]);
+            float b = static_cast<float>(src[lane + 32]);
+            float amax = metal::max(simd_max(metal::max(fabs(a), fabs(b))), 1e-4f);
+            int se = dsv4_log2_ceil(amax * (1.0f / 448.0f));
+            float s = dsv4_pow2(se), inv = dsv4_pow2(-se);
+            float qa = dsv4_round_to(metal::clamp(a * inv, -448.0f, 448.0f), -6, 3);
+            float qb = dsv4_round_to(metal::clamp(b * inv, -448.0f, 448.0f), -6, 3);
+            out[c * 64 + lane] = static_cast<T>(qa * s);
+            out[c * 64 + lane + 32] = static_cast<T>(qb * s);
+        } else {
+            for (uint j = (c - NB) * 64 + lane; j < metal::min((c - NB + 1) * 64, uint(RD)); j += 32)
+                out[N + j] = pe[r * RD + j];
+        }
+    """
+    return mx.fast.metal_kernel(
+        name="dsv4_fp8_simulate_nope", input_names=["kv", "pe"],
+        output_names=["y"], source=src, header=_QAT_HEADER)
+
+
+def _make_rotate_fp4_kernel():
+    """y = fp4_act_quant(rotate_activation(x)) per row of D (a power of
+    two, 32..1024): one thread a value; butterflies within a simdgroup by
+    shuffle, wider ones through threadgroup memory; then each simdgroup is
+    one 32-wide FP4 block."""
+    if mx.default_device() != mx.gpu or not mx.metal.is_available():
+        return None
+    src = """
+        threadgroup float buf[D];
+        uint i = thread_position_in_threadgroup.x;
+        uint r = threadgroup_position_in_grid.x;
+        float v = static_cast<float>(x[r * D + i]);
+        for (uint h = 1; h < D; h <<= 1) {
+            float p;
+            if (h < 32) {
+                p = simd_shuffle_xor(v, h);
+            } else {
+                buf[i] = v;
+                threadgroup_barrier(mem_flags::mem_threadgroup);
+                p = buf[i ^ h];
+                threadgroup_barrier(mem_flags::mem_threadgroup);
+            }
+            v = (i & h) ? (p - v) : (v + p);
+        }
+        v = static_cast<float>(static_cast<T>(v * scale[0]));
+        float amax = metal::max(simd_max(fabs(v)), as_type<float>(0x01C00000u));
+        int se = metal::max(dsv4_log2_ceil(amax * (1.0f / 6.0f)), -126);
+        float s = dsv4_pow2(se), inv = dsv4_pow2(-se);
+        float q = dsv4_round_to(metal::clamp(v * inv, -6.0f, 6.0f), 0, 1);
+        y[r * D + i] = static_cast<T>(q * s);
+    """
+    return mx.fast.metal_kernel(
+        name="dsv4_rotate_fp4_simulate", input_names=["x", "scale"],
+        output_names=["y"], source=src, header=_QAT_HEADER)
+
+
+_fp8_nope_kernel = _make_fp8_nope_kernel()
+_rotate_fp4_kernel = _make_rotate_fp4_kernel()
+
+
+def fp8_simulate_nope(
+    kv: mx.array, rd: int, pe: Optional[mx.array] = None
+) -> mx.array:
+    """act_quant(kv[..., :-rd], 64, ...): the non-rope dims rounded through
+    FP8, the rope dims as they are -- or `pe` in their place (the roped
+    ones, saving the caller's concatenate)."""
+    D = kv.shape[-1]
+    N = D - rd
+    if pe is None:
+        pe = kv[..., N:]
+    if N % _FP8_BLOCK or kv.size == 0:
+        nope = kv[..., :N] if N % _FP8_BLOCK else fp8_simulate(kv[..., :N])
+        return mx.concatenate([nope, pe], axis=-1)
+    if _fp8_nope_kernel is None:
+        return mx.concatenate([fp8_simulate(kv[..., :N]), pe], axis=-1)
+    rows = kv.size // D
+    groups = rows * (N // _FP8_BLOCK + -(-rd // _FP8_BLOCK))
+    return _fp8_nope_kernel(
+        inputs=[kv, pe.astype(kv.dtype)],
+        template=[("T", kv.dtype), ("N", N), ("RD", rd), ("KV_STRIDE", D),
+                  ("ROWS", rows)],
+        grid=(groups * 32, 1, 1), threadgroup=(32, 1, 1),
+        output_shapes=[kv.shape], output_dtypes=[kv.dtype],
+    )[0]
+
+
+def fp4_simulate_rotated(x: mx.array) -> mx.array:
+    """rotate_activation then fp4_act_quant, as the indexer does to its
+    query and its compressor to the pooled rows. Neither, when the dim is
+    not whole FP4 blocks: the rotation alone cancels in q . k."""
+    d = x.shape[-1]
+    if d % _FP4_BLOCK or x.size == 0:
+        return x
+    if _rotate_fp4_kernel is None or d & (d - 1) or d > 1024:
+        return fp4_simulate(rotate_activation(x))
+    return _rotate_fp4_kernel(
+        inputs=[x, mx.array([d ** -0.5], dtype=mx.float32)],
+        template=[("T", x.dtype), ("D", d)],
+        grid=(x.size, 1, 1), threadgroup=(d, 1, 1),
+        output_shapes=[x.shape], output_dtypes=[x.dtype],
+    )[0]
+
+
+# --------------------------------------------------------------------------- #
 # Sinkhorn-based mHC (Manifold-constrained Hyper-Connections)                 #
 # --------------------------------------------------------------------------- #
 
@@ -1674,14 +1895,32 @@ def _ragged_prev(old, win, lens, fill):
     return mx.stack(rows)
 
 
-def _compressor_norm_strided_rope(c, norm_w, norm_eps, offset, rd, scale, freqs):
-    """Fused: RMSNorm + strided rope on the last rd dims."""
+def _compressor_norm_strided_rope(
+        c, norm_w, norm_eps, offset, rd, scale, freqs, rotate):
+    """Fused: RMSNorm + strided rope on the last rd dims, then the
+    reference's low-precision simulation of the row (_compressor_qat)."""
     c = mx.fast.rms_norm(c, norm_w, norm_eps)
     rotated = mx.fast.rope(
         c[..., -rd:], rd, traditional=True, base=None,
         scale=scale, offset=offset, freqs=freqs,
     )
-    return mx.concatenate([c[..., :-rd], rotated], axis=-1)
+    return _compressor_qat(c, rd, rotate, rotated)
+
+
+def _compressor_qat(c, rd, rotate, pe=None):
+    """knurlogic edit 20: the reference Compressor's last step before it
+    stores a pooled row: the indexer's compressor (rotate=True) Hadamard-
+    rotates the row and rounds it through FP4; the attention's rounds the
+    non-rope dims through FP8. `pe`: the roped last rd dims, in place of
+    c's."""
+    if rotate:
+        if pe is not None:
+            c = mx.concatenate([c[..., :-rd], pe], axis=-1)
+        return fp4_simulate_rotated(c)
+    return fp8_simulate_nope(c, rd, pe)
+
+
+_compressor_qat_compiled = mx.compile(_compressor_qat)
 
 
 class Compressor(nn.Module):
@@ -1704,10 +1943,14 @@ class Compressor(nn.Module):
         rope_head_dim: int,
         rms_norm_eps: float,
         rope: "DeepseekV4RoPE",
+        rotate: bool = False,
     ):
         super().__init__()
         self.dim = dim
         self.head_dim = head_dim
+        #: knurlogic edit 20: the reference's Compressor(rotate=True), the
+        #: indexer's: its rows are Hadamard-rotated and FP4-rounded
+        self.rotate = rotate
         self.rope_head_dim = rope_head_dim
         self.compress_ratio = compress_ratio
         self.overlap = compress_ratio == 4
@@ -1898,6 +2141,8 @@ class Compressor(nn.Module):
             # scalar offset). Fall through to manual norm + per-row rope.
             new_pooled = self.norm(new_pooled)
             new_pooled = self._apply_compressor_rope_per_row(new_pooled, pool_base)
+            new_pooled = _compressor_qat_compiled(
+                new_pooled, self.rope_head_dim, self.rotate)
         else:
             # Hot uniform path — fused RMSNorm + strided rope.
             new_pooled = _compressor_norm_strided_rope(
@@ -1908,6 +2153,7 @@ class Compressor(nn.Module):
                 self.rope_head_dim,
                 float(ratio),
                 self.rope.freqs,
+                self.rotate,
             )
         return cache.update_pool(new_pooled, key)
 
@@ -1956,6 +2202,9 @@ class Compressor(nn.Module):
 # --------------------------------------------------------------------------- #
 
 
+_indexer_q_qat = mx.compile(fp4_simulate_rotated)
+
+
 class Indexer(nn.Module):
     """Scores per-query visibility over the main compressed KV buffer and
     returns the top-k compressed-row indices per query. V4Attention turns
@@ -1989,6 +2238,7 @@ class Indexer(nn.Module):
             rope_head_dim=args.qk_rope_head_dim,
             rms_norm_eps=args.rms_norm_eps,
             rope=rope,
+            rotate=True,
         )
 
     def __call__(
@@ -2023,6 +2273,9 @@ class Indexer(nn.Module):
         q = mx.concatenate(
             [q[..., :-rd], q_pe.transpose(0, 2, 1, 3)], axis=-1
         )
+        # knurlogic edit 20: "use fp4 simulation for q and kv in indexer"
+        # (the reference's Indexer.forward): Hadamard-rotated, FP4-rounded
+        q = _indexer_q_qat(q)
         per_head_weights = self.weights_proj(x) * (
             self.softmax_scale * (self.n_heads ** -0.5)
         )
@@ -2230,7 +2483,11 @@ def _attn_q_proj_norm(q_flat, n_heads, head_dim, eps):
 @mx.compile
 def _attn_qkv_partial_rope(q, kv, offset, rd, freqs):
     """Fused partial-RoPE on the trailing rd dims of q [B,H,S,D] and kv [B,S,D].
-    Slice + rope + concat × 2 → 2 dispatches collapse to 2 compiled kernels."""
+    Slice + rope + concat × 2 → 2 dispatches collapse to 2 compiled kernels.
+
+    knurlogic edit 20: and kv's non-rope dims rounded through FP8, as the
+    reference's Attention.forward does to the window kv ("FP8-simulate
+    non-rope dims to match QAT; rope dims stay bf16")."""
     q_pe = mx.fast.rope(
         q[..., -rd:], rd, traditional=True, base=None,
         scale=1.0, offset=offset, freqs=freqs,
@@ -2240,8 +2497,7 @@ def _attn_qkv_partial_rope(q, kv, offset, rd, freqs):
         kv[..., -rd:], rd, traditional=True, base=None,
         scale=1.0, offset=offset, freqs=freqs,
     )
-    kv = mx.concatenate([kv[..., :-rd], kv_pe], axis=-1)
-    return q, kv
+    return q, fp8_simulate_nope(kv, rd, kv_pe)
 
 
 @mx.compile
