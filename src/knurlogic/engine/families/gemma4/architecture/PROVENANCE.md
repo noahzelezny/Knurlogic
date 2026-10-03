@@ -25,6 +25,43 @@ artifacts were validated against -- not merely that it imports.
   just "is a vision token"), so recomputing block ids from a token-type
   array is unneeded here (no audio token in this build). See
   `src/knurlogic/engine/families/gemma4/vision/PROVENANCE.md`.
+  Superseded in placement and gate by vendored edit 1 below.
+
+### Audit against the maker's reference (2026-10-03)
+
+Held to HF transformers 5.16.1 `models/gemma4/modeling_gemma4.py` (Google's
+port; 5.5.0 agrees) and Google's own `google-deepmind/gemma`
+`gemma/gm/nn/gemma4/` (`_config.py`, `_transformer.py`). Golden:
+`tests/support/goldens/build_gemma4_text.py` -> `gemma4_text.npz`, held by
+`tests/engine/test_gemma4_text_parity.py` (dense e-style with PLE, KV
+sharing, double-wide MLP, sliding/full mix, proportional partial RoPE;
+26B-A4B-style MoE with K=V full layers; float32; 11-token prefill past a
+6-token window, 5 decode steps through make_cache). Text path: max abs
+logit diff 9.3e-6 (dense) and 3.3e-6 (moe) before any edit -- norms
+(plain w, fp32 inside), v_norm without scale, layer_scalar, attention
+scale 1.0, no attention softcap, final softcap, window boundary, rope
+thetas and proportional partial rope, KV-sharing source layers, PLE
+scales, embed scale, router (softmax over the top-k == renormalized full
+softmax), per-expert scale, double-wide MLP all match. One difference,
+in the image mask:
+
+- **vendored edit 1 (image-block mask placement):** `_make_masks` put the
+  bidirectional image-block overlay on the FULL-attention layers, for
+  every config with an image (as mlx-vlm 0.6.17 does). The maker puts it
+  on the SLIDING layers only, as AND(window, OR(causal, same block)), and
+  only when `use_bidirectional_attention == "vision"` (26B-A4B, 31B);
+  full layers stay causal and e2b/e4b (`None`) are causal everywhere.
+  Refs: Google `gm/nn/gemma4/_config.py` (`use_bidirectional_attention`
+  comment: sliding layers only, causal for global) and `_transformer.py`
+  (`sliding_attention_mask` used for LOCAL_SLIDING only, window still
+  applied); HF 5.16.1 `modeling_gemma4.py:2093-2145`
+  (`create_masks_for_vision_model`) and `:2398-2409` (the gate). Ours
+  before: `gemma4_text.py` `_make_masks` (full_attention branch).
+  `ModelArgs` gains `use_bidirectional_attention` (default None, read from
+  text_config). Severity: every image prompt, every image token and every
+  token after it (prefill logits off by up to 3.26 on the 26B-style
+  golden, 1.27 on the e-style one); text-only requests unaffected.
+  After: 1.2e-5 / 9.3e-6.
 
 ## gemma4.py
 
