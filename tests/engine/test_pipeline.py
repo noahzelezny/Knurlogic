@@ -148,6 +148,12 @@ def test_the_head_and_tower_are_not_in_the_replicated_bytes(tmp_path):
     per, other = R.pipeline_layer_bytes(A)
     assert per == [10, 10] and other == 100
     assert R.leader_bytes(A) == 50 + 30     # head + tower
+    # a DSpark sidecar drafts on a split too: rank 0's, like any head
+    shard(tmp_path / "mtp-head-dspark-mxfp4.safetensors",
+          {"mtp.0.attn.wkv.weight": 70})
+    assert R.leader_bytes(A) == 50 + 70 + 30
+    assert R.leader_bytes(A, vision=False) == 50 + 70
+    assert R.leader_bytes(A, mtp=False) == 30
 
 
 # ------------------------------------------------------------ refusals
@@ -323,6 +329,52 @@ def test_mtp_drafting_on_a_flash_next_tensor_split_is_the_undrafted_split(
     assert d["drafted"] > 0
     if always:
         assert b2 == b1 and d["accepted"] > 0
+
+
+@pytest.mark.parametrize("split,counts", [("pipeline", "1,3"),
+                                          ("pipeline", "2,2"),
+                                          ("pipeline", "3,1"),
+                                          ("tensor", "")])
+@pytest.mark.parametrize("seeded", ["", "1"], ids=["greedy", "seeded"])
+def test_dspark_drafting_on_a_split_is_the_undrafted_engine(tmp_path, split,
+                                                            counts, seeded):
+    """The tiny DSpark checkpoint (4 layers, its head reading layers 1-3's
+    outputs, blocks of 5 partly right so steps commit 1 to 6 tokens and
+    rows accept different counts), rank 0 alone holding the head. On a
+    pipeline rank 0 holds the last layers: 1,3 has layer 1's output
+    carried from the follower and layer 2's arrive as the stream; 2,2 has
+    layer 1's as the stream; 3,1 holds all three. Every row's tokens are
+    the unsplit engine's without a head (on a tensor split: the same split
+    without one), greedy and seeded, every rank made the same
+    broadcasts, and the head took the unsplit engine's main hidden states
+    (the target layers' outputs: the drafts are steered, so the tokens
+    alone would not show a wrong capture)."""
+    d = _ring(tmp_path, "dspark", split, counts or "-", seeded)
+    assert d["whole_draft"] == d["whole"]
+    assert d["split"] == (d["baseline"] if split == "tensor" else d["whole"])
+    if split == "tensor":
+        assert d["split"] == d["whole"]
+    (b0, b1, b2, ba), follower = d["calls"]
+    assert follower == [b0, b1, b2, ba]
+    assert b0 == ba == 3
+    assert 0 < b2 == b1
+    assert d["accepted"] > d["drafted"] > 0       # > 1 token a step
+    n_whole, n_split, err = d["hidden"]
+    assert n_whole == n_split > 0
+    assert err < 1e-4, err
+
+
+@pytest.mark.parametrize("split,counts", [("pipeline", "1,3"),
+                                          ("tensor", "")])
+def test_dspark_on_a_split_through_the_serving_path(tmp_path, split, counts):
+    """Rank 0's TensorExecutor drafting with DSpark, the follower's
+    tensor.follow told the block size and target layers (agree_head):
+    seeded and greedy rows stream the unsplit executor's tokens, and each
+    finished row's entry is at its key's length."""
+    d = _ring(tmp_path, "dspark", split, counts or "-", "1", "engine")
+    assert d["split"] == d["served"]
+    assert all(d["keyed"]) and len(d["keyed"]) == 3
+    assert d["drafted"] > 0
 
 
 def test_the_serving_path_follows_rank_0s_plan_on_a_pipeline(tmp_path):
