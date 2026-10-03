@@ -96,7 +96,7 @@ def scheduler_options(settings: dict) -> dict:
 
 
 def watch_ring(sched, mh, exit_after: float = 1.5,
-               stop_within: float = 6.0) -> None:
+               stop_within: float = 15.0) -> None:
     """Rank 0 of a split model: its progress marker says whether work is
     in flight (the page tells idle from stalled by it), and a SIGTERM --
     the page tearing the job down because another rank died or stalled --
@@ -132,8 +132,9 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
 
     def on_term(_sig, _frame):
         jobs.progress(phase="stopping")
-        if getattr(mh, "state", "") == "ready":
-            # An unload with the ring alive: stop at a step boundary. The
+        if getattr(mh, "state", "") in ("warming", "ready"):
+            # An unload with the ring alive: stop at a step boundary (while
+            # warming, once the warm-up's forwards are done). The
             # scheduler finishes the step it is in, fails what is in
             # flight, and sends the other ranks `stop`, so every rank
             # leaves between steps. Killed mid-step, a rank left its
