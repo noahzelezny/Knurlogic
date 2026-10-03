@@ -8,8 +8,8 @@
     the generation prompt after a final user turn is emitted only with
     add_generation_prompt; a string tool-call argument that is not an
     object renders as {"arguments": ...}; content before tool calls loses
-    trailing newlines (the parser's "\n\n" separator); the "max"
-    effort prefix is not rendered. -#}
+    trailing newlines (the parser's "\n\n" separator). reasoning_effort
+    "max" renders the official Think Max prefix. -#}
 {%- set mode = thinking_mode if thinking_mode is defined and thinking_mode in ['chat', 'thinking'] else ('thinking' if enable_thinking is defined and enable_thinking else 'chat') -%}
 {%- set drop = drop_thinking if drop_thinking is defined else true -%}
 {%- set D = '｜DSML｜' -%}
@@ -98,6 +98,10 @@
 {%- set tasks = {'action': '<｜action｜>', 'query': '<｜query｜>', 'authority': '<｜authority｜>', 'domain': '<｜domain｜>', 'title': '<｜title｜>', 'read_url': '<｜read_url｜>'} -%}
 {#- ---- pass 3: render (render_message) -#}
 {{- bos_token if bos_token is defined and bos_token else '<｜begin▁of▁sentence｜>' -}}
+{#- Think Max: the official prefix, thinking mode only -#}
+{%- if mode == 'thinking' and reasoning_effort is defined and reasoning_effort == 'max' -%}
+{{- 'Reasoning Effort: Absolute maximum with no shortcuts permitted.\nYou MUST be very thorough in your thinking and comprehensively decompose the problem to resolve the root cause, rigorously stress-testing your logic against all potential paths, edge cases, and adversarial scenarios.\nExplicitly write out your entire deliberation process, documenting every intermediate step, considered alternative, and rejected hypothesis to ensure absolutely no assumption is left unchecked.\n\n' -}}
+{%- endif -%}
 {%- for m in msgs -%}
 {%- set idx = loop.index0 -%}
 {%- if m.role == 'system' -%}
