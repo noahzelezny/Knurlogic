@@ -70,7 +70,10 @@ header>nav{justify-self:end}
 nav{display:flex;gap:20px;font-size:13px;letter-spacing:.16em;
   text-transform:uppercase;color:var(--dim)}
 nav a:hover{color:var(--acc)}
-.wrap{max-width:2000px;margin:0 auto;padding:22px 28px 24px}
+/* The whole window, however wide (zoomed out included): the chats keep
+   the left edge, the model rail the right, and the middle -- the
+   machines -- takes the rest, which a big cluster needs. */
+.wrap{padding:22px 28px 24px}
 /* Two layouts, both desktop: three columns (chat memory, main, model rail),
    and the same with the rail dropped underneath for a window at half a
    screen. Below that the page scrolls sideways like any desktop app.
