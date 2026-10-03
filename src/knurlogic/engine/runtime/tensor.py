@@ -699,6 +699,25 @@ def apply_set(op: dict, rank: int) -> str:
     return said
 
 
+def _stop_load_on_sigterm(rank: int) -> None:
+    """Until it follows: a SIGTERM stops this rank's weight read at its next
+    batch boundary (host.LOAD_STOP; the load raises LoadCancelled and the
+    rank exits) instead of killing it inside one, which left the GPU's
+    utilization counter stuck at 100% until a reboot. follow() replaces it
+    with _defer_sigterm."""
+    import signal
+
+    from .host import LOAD_STOP
+
+    def stop(_sig, _frame):
+        logger.info("SIGTERM while loading: stopping at the next batch")
+        LOAD_STOP.set()
+    try:
+        signal.signal(signal.SIGTERM, stop)
+    except ValueError:              # not the main thread (a test's ring)
+        pass
+
+
 def _defer_sigterm(rank: int) -> None:
     """A following rank leaves on rank 0's `stop`, between steps, not on the
     page's SIGTERM: killed mid-step, it would leave rank 0's GPU waiting on
@@ -922,6 +941,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
     from .host import ModelHost
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
+    _stop_load_on_sigterm(0)
     link = init(link_kind)
     if split == "pipeline":
         from . import pipeline as PL
