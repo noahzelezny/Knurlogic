@@ -331,13 +331,50 @@ def test_mtp_drafting_on_a_flash_next_tensor_split_is_the_undrafted_split(
         assert b2 == b1 and d["accepted"] > 0
 
 
+#: the inputs of the rounding a tensor split and the whole model see, up to
+#: the first block that rounds differently: float32 summation noise, at
+#: most this relative to each input's largest magnitude (measured 7.2e-7,
+#: ~6 ulps, over the 708 calls before the first flip)
+ROUNDING_INPUT_NOISE = 2e-6
+
+
+def _same_but_ties(ref, got, margin, what):
+    """Every row of `got` is `ref`'s up to its first difference (if any);
+    the reference's decision margin there is printed (the gap between its
+    top two candidates: logits, or a seeded row's scaled log-probabilities
+    plus its Gumbel noise), not bounded: one FP8 block rounding the other
+    way moves this tiny random model's logits by 0.1-0.7. -> the margins
+    at the differences."""
+    seen = []
+    for r, (a, b) in enumerate(zip(ref, got)):
+        n = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y),
+                 None if len(a) == len(b) else min(len(a), len(b)))
+        if n is None:
+            continue
+        m = margin[r][0][n]
+        seen.append(m)
+        print(f"{what}: row {r} parts at token {n}, reference margin {m:.3g}"
+              f" (median {sorted(margin[r][0])[len(margin[r][0]) // 2]:.3g})")
+    return seen
+
+
+def _ring_exact(tmp_path, monkeypatch, *args):
+    """The same ring with edits 20-21's rounding stubbed out: every stream
+    the rounded run let part at a tie is the reference's exactly."""
+    monkeypatch.setenv("KNURLOGIC_TEST_NO_ROUNDING", "1")
+    try:
+        return _ring(tmp_path / "exact", *args)
+    finally:
+        monkeypatch.delenv("KNURLOGIC_TEST_NO_ROUNDING")
+
+
 @pytest.mark.parametrize("split,counts", [("pipeline", "1,3"),
                                           ("pipeline", "2,2"),
                                           ("pipeline", "3,1"),
                                           ("tensor", "")])
 @pytest.mark.parametrize("seeded", ["", "1"], ids=["greedy", "seeded"])
-def test_dspark_drafting_on_a_split_is_the_undrafted_engine(tmp_path, split,
-                                                            counts, seeded):
+def test_dspark_drafting_on_a_split_is_the_undrafted_engine(
+        tmp_path, monkeypatch, split, counts, seeded):
     """The tiny DSpark checkpoint (4 layers, its head reading layers 1-3's
     outputs, blocks of 5 partly right so steps commit 1 to 6 tokens and
     rows accept different counts), rank 0 alone holding the head. On a
@@ -348,12 +385,40 @@ def test_dspark_drafting_on_a_split_is_the_undrafted_engine(tmp_path, split,
     without one), greedy and seeded, every rank made the same
     broadcasts, and the head took the unsplit engine's main hidden states
     (the target layers' outputs: the drafts are steered, so the tokens
-    alone would not show a wrong capture)."""
+    alone would not show a wrong capture). The drafting run and a tensor
+    split sum in another order than the reference: with the FP8 rounding,
+    they may part from it at a tie only (_same_but_ties), and without it
+    they are exactly the reference."""
     d = _ring(tmp_path, "dspark", split, counts or "-", seeded)
-    assert d["whole_draft"] == d["whole"]
-    assert d["split"] == (d["baseline"] if split == "tensor" else d["whole"])
+    parts = _same_but_ties(d["whole"], d["whole_draft"], d["margin"],
+                           "drafting")
     if split == "tensor":
+        assert d["split"] == d["baseline"]
+        parts += _same_but_ties(d["whole"], d["split"], d["margin"],
+                                "tensor split")
+    else:
         assert d["split"] == d["whole"]
+    if parts and split == "tensor":
+        # why the split parts: the rounding's inputs equal the whole
+        # model's to float32 summation noise until one block lands on the
+        # other side of an FP8 boundary (KNURLOGIC_TEST_RECORD: the whole
+        # and the headless split, every rounding call recorded)
+        monkeypatch.setenv("KNURLOGIC_TEST_RECORD", "1")
+        (tmp_path / "rec").mkdir()
+        p = _ring(tmp_path / "rec", "dspark", split, "-", seeded)["proof"]
+        monkeypatch.delenv("KNURLOGIC_TEST_RECORD")
+        print("first flip", p)
+        assert p["step"] is not None and p["flip_step"] is not None
+        assert p["flip_step"] <= p["step"] and p["flip_blocks"] >= 1
+        assert p["rel"] <= ROUNDING_INPUT_NOISE, p
+    if parts:
+        (tmp_path / "exact").mkdir()
+        e = _ring_exact(tmp_path, monkeypatch, "dspark", split,
+                        counts or "-", seeded)
+        assert e["whole_draft"] == e["whole"]
+        assert e["split"] == e["whole"]
+        # the hidden states line up only where the streams do
+        d = dict(d, hidden=e["hidden"])
     (b0, b1, b2, ba), follower = d["calls"]
     assert follower == [b0, b1, b2, ba]
     assert b0 == ba == 3
@@ -366,13 +431,18 @@ def test_dspark_drafting_on_a_split_is_the_undrafted_engine(tmp_path, split,
 
 @pytest.mark.parametrize("split,counts", [("pipeline", "1,3"),
                                           ("tensor", "")])
-def test_dspark_on_a_split_through_the_serving_path(tmp_path, split, counts):
+def test_dspark_on_a_split_through_the_serving_path(tmp_path, monkeypatch,
+                                                   split, counts):
     """Rank 0's TensorExecutor drafting with DSpark, the follower's
     tensor.follow told the block size and target layers (agree_head):
     seeded and greedy rows stream the unsplit executor's tokens, and each
     finished row's entry is at its key's length."""
     d = _ring(tmp_path, "dspark", split, counts or "-", "1", "engine")
-    assert d["split"] == d["served"]
+    if _same_but_ties(d["served"], d["split"], d["served_margin"], "served"):
+        (tmp_path / "exact").mkdir()
+        e = _ring_exact(tmp_path, monkeypatch, "dspark", split,
+                        counts or "-", "1", "engine")
+        assert e["split"] == e["served"]
     assert all(d["keyed"]) and len(d["keyed"]) == 3
     assert d["drafted"] > 0
 

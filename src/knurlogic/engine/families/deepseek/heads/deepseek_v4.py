@@ -256,7 +256,11 @@ class MTPHead:
         window mask, as the trunk's layers do."""
         m = self.m
         e = m.enorm(self.core.embed_tokens(nxt_id))
-        x = m.e_proj(e)[:, :, None, :] + m.h_proj(m.hnorm(h_row))
+        # knurlogic edit 21: e_proj and h_proj are FP8 linears; their
+        # inputs through act_quant, as the reference's MTPBlock
+        act = self.arch.fp8_act
+        x = (m.e_proj(act(e))[:, :, None, :]
+             + m.h_proj(act(m.hnorm(h_row))))
         x = m.block(x.astype(h_row.dtype), cache, nxt_id)
         return m.norm(m.hc_head(x))
 

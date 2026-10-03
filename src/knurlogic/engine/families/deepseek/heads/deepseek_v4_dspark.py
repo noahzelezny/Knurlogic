@@ -123,30 +123,38 @@ class _Attention(nn.Module):
                                         args.rope_theta, None)
         self._project = arch.V4Attention._grouped_output_projection
         self._fp8 = arch.fp8_simulate_nope
+        self._act = arch.fp8_act
+        self._norm_act = arch.rms_norm_act
         self._sdpa = arch.scaled_dot_product_attention
 
     def main_kv(self, main_x, pos):
         """[B, S, D] at positions pos.. -> the window's kvs [B, S, hd]."""
-        return self._kv(main_x, pos)
+        return self._kv(self._act(main_x), pos)
 
     def _kv(self, x, pos):
-        """kv_norm(wkv(x)) roped, its non-rope dims rounded through FP8."""
+        """kv_norm(wkv(x)) roped, its non-rope dims rounded through FP8
+        (x through act_quant already, edit 21)."""
         kv = self.kv_norm(self.wkv(x))
         return self._fp8(kv, self.rope.dims, _rope_pe(kv, self.rope, pos))
 
-    def __call__(self, x, window, mask, pos):
-        """x [B, K, D] (the block at pos..pos+K-1), window [B, W, hd]."""
+    def __call__(self, x, window, mask, pos, xq=None):
+        """x [B, K, D] (the block at pos..pos+K-1), window [B, W, hd]; xq
+        x through act_quant (edit 21: every FP8 linear's input is), when
+        the caller has it."""
         B, K, _ = x.shape
-        q = self.wq_b(self.q_norm(self.wq_a(x)))
+        if xq is None:
+            xq = self._act(x)
+        q = self.wq_b(self._norm_act(self.wq_a(xq), self.q_norm.weight,
+                                     self.eps, keep=False))
         q = q.reshape(B, K, self.n_heads, self.head_dim).transpose(0, 2, 1, 3)
         q = _rope(mx.fast.rms_norm(q, None, self.eps), self.rope, pos)
-        kv = self._kv(x, pos)
+        kv = self._kv(xq, pos)
         keys = mx.concatenate([window.astype(kv.dtype), kv], axis=1)[:, None]
         o = self._sdpa(q, keys, keys, cache=None, scale=self.scale,
                        mask=mask, sinks=self.attn_sink.astype(q.dtype))
         o = _rope(o, self.rope, pos, inverse=True)
         o = o.transpose(0, 2, 1, 3).reshape(B, K, self.n_heads * self.head_dim)
-        return self.wo_b(self._project(self, o))
+        return self.wo_b(self._act(self._project(self, o)))
 
 
 class _Markov(nn.Module):
@@ -173,6 +181,7 @@ class _Stage(nn.Module):
         self.attn = _Attention(arch, args)
         self.attn_norm = nn.RMSNorm(D, eps=eps)
         self.ffn_norm = nn.RMSNorm(D, eps=eps)
+        self._norm_act = arch.rms_norm_act
         # the official layer id: never hash-routed, bias_vl with vision
         self.ffn = arch.DeepseekV4MoE(skel, args.num_hidden_layers + stage)
         self.hc_attn = arch.HyperConnection(*hc)
@@ -191,11 +200,14 @@ class _Stage(nn.Module):
     def __call__(self, h, window, mask, pos, ids):
         residual = h
         y, post, comb = self.hc_attn.hc_pre(h)
-        y = self.attn(self.attn_norm(y), window, mask, pos)
+        # knurlogic edit 21: the norms' outputs also through act_quant
+        y, yq = self._norm_act(y, self.attn_norm.weight, self.attn_norm.eps)
+        y = self.attn(y, window, mask, pos, xq=yq)
         h = self.hc_attn.hc_post(y, residual, post, comb)
         residual = h
         y, post, comb = self.hc_ffn.hc_pre(h)
-        y = self.ffn(self.ffn_norm(y), ids)
+        y, yq = self._norm_act(y, self.ffn_norm.weight, self.ffn_norm.eps)
+        y = self.ffn(y, ids, xq=yq)
         return self.hc_ffn.hc_post(y, residual, post, comb)
 
 
@@ -416,7 +428,7 @@ class DSparkHead:
         """Commit positions: main_h [B, S, n * D] at the cache's next
         positions enter every stage's window."""
         s0 = self.m.stages[0]
-        main_x = s0.main_norm(s0.main_proj(main_h))
+        main_x = s0.main_norm(s0.main_proj(self.arch.fp8_act(main_h)))
         pos = cache.positions()
         cache.append([st.attn.main_kv(main_x, pos) for st in self.m.stages],
                      int(main_h.shape[1]))

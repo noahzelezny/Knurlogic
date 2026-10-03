@@ -118,8 +118,9 @@ def test_the_drafts_are_the_references():
     only summation order differs (measured: under 1e-5). The trunk has
     compressed layers (ratio 4 with the indexer choosing 8 of 31 rows,
     ratio 128) and both sides round the kv, pooled rows and indexer query
-    through FP8 / FP4 as the reference does (measured without that:
-    0.8 on the logits)."""
+    through FP8 / FP4 as the reference does, and every FP8 / FP4 linear's
+    input through act_quant (measured without the latter: 1.6 on the
+    logits, 5.6 on the draft logits, other draft ids)."""
     model = _load()
     head, _ = _head(model)
     got = _trace(model, head)
@@ -132,7 +133,7 @@ def test_the_drafts_are_the_references():
 
 
 def test_the_low_precision_simulation_is_the_reference_kernels():
-    """act_quant (ue8m0 scales, block 64), fp4_act_quant (block 32) and
+    """act_quant (ue8m0 scales, block 64 and 128), fp4_act_quant (block 32) and
     rotate_activation, as op graphs and as the fused Metal kernels the
     model runs, each against the torch port of its CUDA kernel
     (the golden's `qat_*`), bit for bit: float32 inputs over 2**-20..2**12,
@@ -160,6 +161,10 @@ def test_the_low_precision_simulation_is_the_reference_kernels():
         got = np.array(A.fp4_simulate_rotated(x.reshape(-1, 128))
                        .astype(mx.float32)).reshape(x.shape)
         assert (got == GOLD[f"qat_{name}_rotfp4"]).all(), name
+        # a linear's input (edit 21): act_quant in blocks of 128
+        for fn in (lambda v: A.fp8_simulate(v, 128), A.fp8_act):
+            got = np.array(fn(x).astype(mx.float32))
+            assert (got == GOLD[f"qat_{name}_fp8_128"]).all(), name
 
 
 def _run(gen, prompts, max_tokens, sampler=None, caches=None,
