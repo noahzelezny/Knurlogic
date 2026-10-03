@@ -193,6 +193,7 @@ HC head and the final norm); tested, not changed.
    fork built the shared expert with `swiglu_limit=0.0` (no clamp);
    DeepSeek's reference builds it with `args.swiglu_limit` (10), as its
    routed experts, in Flash's inference/model.py and Vision-Exp's alike.
-   Changes a token's output only where the shared expert's gate exceeds
-   10 or its up projection leaves [-10, 10]
-   (tests/engine/test_vision_deepseek.py, the shared-expert clamp test).
+   Measured on the Vision-Exp teacher (VQ Lab, 3 corpora x 12288 tokens):
+   ~0.026% of shared-expert activations leave +-10, changing the shared
+   output by ~2% on average and up to 58% in a chunk
+   (tests/engine/test_deepseek_v4_arch.py, the shared-expert clamp test).
