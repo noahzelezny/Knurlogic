@@ -991,6 +991,12 @@ class MTPBatch:
                 keep.append(i)
 
         row_t1 = lg[:, 0]
+        if then is not None:
+            # the next tokens are not this forward's: nothing below would
+            # evaluate it on a tensor follower (no head, no draft), and its
+            # layers' all_sums would meet rank 0's next exchange (Desync).
+            # Every rank runs it here, before anything else crosses.
+            mx.eval(lg)
         h = self.get_h() if self.any_drafting else None
         t_next_rows = [
             then[i:i + 1] if then is not None
