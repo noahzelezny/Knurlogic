@@ -696,13 +696,15 @@ def room_text(left: int, tokens: int, per: int) -> str:
 def vision_budget(artifact: Artifact, store_bytes: int | None = None,
                   kv_bits=None) -> dict | None:
     """What a vision rung holds besides its text weights, term by term,
-    or None for an artifact with no `vision_config`.
+    or None for an artifact with no vision tower (a `vision_config`, or
+    DeepSeek-V4's flat `vision_n_layers` with its `vision.*` tensors).
 
     Stdlib only (no mlx, no family import): tuning/ must not import mlx,
     and this has to answer BEFORE a load. `extra_bytes` is what the
     resolver adds to what the box holds; each term has its note."""
+    from knurlogic.engine.vision.registry import has_vision_config
     cfg = artifact.raw_config or {}
-    if not isinstance(cfg.get("vision_config"), dict):
+    if not has_vision_config(cfg, artifact.path):
         return None
     from knurlogic.engine.vision.store import DEFAULT_MAX_BYTES
 
