@@ -48,13 +48,18 @@ def text(family: str) -> str:
 
 def family_for(template, name: str = "") -> str | None:
     """The family whose template should replace `template`, or None.
-    A known stub by hash; or, for an artifact named DeepSeek-V4, any
-    template with no tool handling at all."""
+    A known stub by hash; any template that speaks DeepSeek-V4's DSML (a
+    copy of knurlogic's own, shipped in a release, or an older one: ours,
+    current, replaces it and its parser is installed -- a copy kept as it
+    was had no parser, and its tool calls came back as text); or, for an
+    artifact named DeepSeek-V4, any template with no tool handling at all."""
     if not isinstance(template, str) or not template:
         return None
     fam = STUBS.get(hashlib.sha256(template.encode()).hexdigest())
     if fam:
         return fam
+    if "｜DSML｜" in template:
+        return "deepseek_v4"
     if "deepseek-v4" in (name or "").lower() and \
             "tool" not in template.lower():
         return "deepseek_v4"
