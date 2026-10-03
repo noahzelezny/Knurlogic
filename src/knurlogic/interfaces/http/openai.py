@@ -278,6 +278,10 @@ class Reply:
                 msg["reasoning"] = msg["reasoning_content"] = reasoning
             if calls:
                 msg["tool_calls"] = [_call(c) for c in calls]
+                if not content.strip():
+                    # the separator a model writes before its tool block
+                    # (DeepSeek-V4's "\n\n") is not text to show
+                    msg["content"] = ""
             if self.ctx.get("compaction") is not None:
                 msg["compaction"] = self.ctx["compaction"]
             choice["message"] = msg
@@ -316,6 +320,10 @@ class Reply:
                              "choices": [], "context_management": {
                                  "applied_edits": self.ctx["applied"]}})
         ev = first
+        # whitespace-only text is held until real text follows, and dropped
+        # when a tool call comes first: the separator a model writes before
+        # its tool block (DeepSeek-V4's "\n\n") is not text to show
+        held = ""
         while True:
             kind, val = ev
             if kind == "progress":
@@ -323,8 +331,15 @@ class Reply:
             elif kind == "delta":
                 d = {}
                 if self.ctx["chat"]:
-                    if val.content:
-                        d["content"] = val.content
+                    text = val.content
+                    if val.tool_calls:
+                        held, text = "", text if text.strip() else ""
+                    elif text and not text.strip():
+                        held, text = held + text, ""
+                    elif text or val.finish:
+                        held, text = "", held + text
+                    if text:
+                        d["content"] = text
                     if val.reasoning and not self.ctx["exclude"]:
                         d["reasoning"] = d["reasoning_content"] = \
                             val.reasoning

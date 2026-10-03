@@ -8,7 +8,9 @@ cleanly.
 DeepSeek-V4-Flash
 * Tool calls work: a release that ships a copy of knurlogic's DeepSeek
   template now gets the DSML tool-call parser (on 0.1.1 the calls came back
-  as text, so agent harnesses could not use it).
+  as text, so agent harnesses could not use it). A reply that is only a
+  tool call carries no blank text part. A DeepSeek-V4 shipped with no chat
+  template at all gets knurlogic's instead of refusing chat.
 * MTP drafting with its head beside the weights, exact (mxfp4) or VQ
   experts: about 1.4x faster decode on one Mac at ~0.95 acceptance.
 * Tensor split across machines (2 or 4), with or without MTP.
@@ -40,6 +42,9 @@ Requests
 * Thinking off uses the maker's thinking-off sampling (Qwen3.5).
 
 Page
+* The page fills the window however wide (zoomed out too): chats on the
+  left edge, the model panel on the right, the chat bar at the bottom, and
+  the machines across the middle.
 * Split and link choices grey out while a launch is in flight.
 * Instance cards show MTP when drafting, the load % in teal, one card per
   exo instance, and the GiB of every machine in a cluster job.
