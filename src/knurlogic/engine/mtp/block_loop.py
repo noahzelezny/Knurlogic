@@ -114,6 +114,7 @@ class BlockBatch(MTPBatch):
         self._wexplore: tuple | None = None   # (rows, k, steps left)
         self._wsince = 0
         self._wturn = 0
+        self._wpicks: dict = {}               # KNURLOGIC_MTP_PROFILE only
         #: (rows, k) whose first, compiling step has been left out
         self._vwarm: set = set()
         #: per position j: [sum of predicted P(batch accepts >= j), sum of
@@ -142,6 +143,8 @@ class BlockBatch(MTPBatch):
             self._prof("draft", d)
             self._pred = self._predicted(conf, live)
             k = self._width(B, self._pred)
+            if PROFILE:
+                self._wpicks[k] = self._wpicks.get(k, 0) + 1
             pre = (d[:, :k], [q[:k] for q in qs])
         if c is not None and (self.head is not None or c.head):
             # B1, every step while rank 0 holds a head: its regime, k and
@@ -299,6 +302,19 @@ class BlockBatch(MTPBatch):
             logger.info(f"MTP profile {'block' if drafting else 'plain'}: "
                         f"{st} steps, {tk / st:.2f} tok/step, "
                         f"{total / tk * 1000:.1f} ms/tok; per step ms: {parts}")
+            if drafting:
+                B = len(self.uids) or 1
+                cost = {k: round(v[0] * 1000, 1)
+                        for (b, k), v in sorted(self._vcost.items()) if b == B}
+                va = [None if a is None else round(a, 2)
+                      for a in (self._vacc.get(B) or [])]
+                cal = [None if c[2] == 0 else
+                       (round(c[0] / c[2], 2), round(c[1] / c[2], 2), c[2])
+                       for c in self._cal]
+                logger.info(f"MTP width: picks {self._wpicks} cost ms {cost} "
+                            f"acc {va} calibrated {self.calibrated()} "
+                            f"(pred, hit, n) {cal}")
+                self._wpicks = {}
             acc[drafting] = {"steps": 0, "tokens": 0}
 
     # ------------------------------------------------------------- draft
