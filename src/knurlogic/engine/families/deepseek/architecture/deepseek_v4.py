@@ -96,6 +96,14 @@ class ModelArgs(BaseModelArgs):
     rope_scaling: Optional[Dict] = None
     rms_norm_eps: float = 1e-6
 
+    # knurlogic edit 14: DeepSeek-V4-Flash-Vision-Exp. vision_n_layers > 0
+    # gives every gate a `bias_vl` (and the hash layers a `bias`) and the
+    # model its four learned image rows; a position whose id is >=
+    # vocab_size is an image token. The tower is not here
+    # (families/deepseek/vision loads it standalone).
+    vision_n_layers: int = 0
+    vision_max_n_token: int = 384
+
 
 # --------------------------------------------------------------------------- #
 # RoPE (traditional pair-wise, YaRN-aware, supports inverse rotation)         #
@@ -1947,6 +1955,67 @@ def _build_window_mask(
     return win_visible[:, None, :, :]
 
 
+#: image token types, as ids = vocab_size + type (the reference's
+#: image_processor.py: IMAGE_START, IMAGE_PAD, IMAGE, IMAGE_NEW_LINE,
+#: IMAGE_END)
+_IMAGE_START, _IMAGE_END = 0, 4
+
+
+def image_visible(ids: mx.array, vocab_size: int, max_image_tokens: int):
+    """knurlogic edit 15: the reference's `get_image_visible`. Per token of
+    ``ids [B, S]``, how far it sees left and right inside its
+    [IMAGE_START, IMAGE_END] span (0 and 0 outside one). Over one prefill
+    chunk: knurlogic never cuts a span between chunks (the family's
+    chunk_boundaries), as the reference prefills a span in one call."""
+    B, S = ids.shape
+    idx = mx.broadcast_to(mx.arange(S, dtype=mx.int32)[None], (B, S))
+    is_start = ids == vocab_size + _IMAGE_START
+    is_end = ids == vocab_size + _IMAGE_END
+    valid = (mx.cumsum(is_start.astype(mx.int32), axis=1)
+             > mx.cumsum(is_end.astype(mx.int32), axis=1)) | is_end
+    valid = valid.astype(mx.int32)
+    starts = mx.cummax(mx.where(is_start, idx, 0), axis=1)
+    left = (idx - starts) * valid
+    ends = mx.cummin(mx.where(is_end, idx, S), axis=1, reverse=True)
+    right = (ends - idx) * valid
+    return (mx.minimum(left, max_image_tokens - 1),
+            mx.minimum(right, max_image_tokens))
+
+
+def _build_window_mask_visible(
+    B: int,
+    S: int,
+    offset,
+    window: int,
+    window_len: int,
+    left: mx.array,
+    right: mx.array,
+    max_image_tokens: int,
+) -> mx.array:
+    """knurlogic edit 15: `_build_window_mask` as the reference's
+    `get_window_topk_idxs_visible`: inside an image span a query also sees
+    back to the span's start and forward to its end. Query p sees raw
+    position j iff lo <= j <= hi, lo = p - (window-1) - max(0, left -
+    (window-1)), hi = min(p + right, lo + window + max_image_tokens - 1).
+    Outside a span (left = right = 0) that is the plain causal window."""
+    if isinstance(offset, mx.array):
+        off = offset.astype(mx.int32).reshape(-1)
+        q_pos = off[:, None] + mx.arange(S, dtype=mx.int32)
+        end = off + S
+        raw = end[:, None] - window_len + mx.arange(window_len, dtype=mx.int32)
+        raw = raw[:, None, :]
+    else:
+        q_pos = mx.broadcast_to(
+            offset + mx.arange(S, dtype=mx.int32)[None, :], (B, S)
+        )
+        raw = (offset + S) - window_len + mx.arange(window_len, dtype=mx.int32)
+        raw = raw[None, None, :]
+    lo = q_pos - (window - 1) - mx.maximum(left - (window - 1), 0)
+    hi = mx.minimum(q_pos + right, lo + window + max_image_tokens - 1)
+    win_visible = (raw >= lo[:, :, None]) & (raw <= hi[:, :, None])
+    return win_visible[:, None, :, :]
+
+
 def _compressed_visibility(
     B: int,
     S: int,
@@ -2087,6 +2156,7 @@ class V4Attention(nn.Module):
         self.o_lora_rank = args.o_lora_rank
         self.window = args.sliding_window
         self.eps = args.rms_norm_eps
+        self.max_image_tokens = args.vision_max_n_token
         self.scale = self.head_dim ** -0.5
 
         ratios = args.compress_ratios or []
@@ -2182,6 +2252,7 @@ class V4Attention(nn.Module):
         self,
         x: mx.array,
         cache: Optional[Any] = None,
+        visible: Optional[tuple] = None,
     ) -> mx.array:
         B, S, _ = x.shape
         rd = self.rope_head_dim
@@ -2328,10 +2399,16 @@ class V4Attention(nn.Module):
             mask = mx.concatenate(parts, axis=-1) if len(parts) > 1 \
                 else parts[0]
         else:
-            win_mask = (
-                ragged_win_mask if ragged_multi
-                else _build_window_mask(B, S, offset, self.window, window_len)
-            )
+            if ragged_multi:
+                win_mask = ragged_win_mask
+            elif visible is not None:
+                # knurlogic edit 15: a prefill chunk holding image spans
+                win_mask = _build_window_mask_visible(
+                    B, S, offset, self.window, window_len,
+                    visible[0], visible[1], self.max_image_tokens)
+            else:
+                win_mask = _build_window_mask(
+                    B, S, offset, self.window, window_len)
             if compressed_len > 0:
                 comp_mask = _compressed_visibility(
                     B, S, offset, compressed_len, self.compress_ratio
@@ -2507,12 +2584,20 @@ class MoEGate(nn.Module):
             self.tid2eid = mx.zeros(
                 (args.vocab_size, self.top_k), dtype=mx.int32
             )
-        else:
+        # knurlogic edit 14: with vision, every layer has `bias` (a hash
+        # layer's goes unused, as in the reference) and `bias_vl`
+        vl = args.vision_n_layers > 0
+        if not self.hash or vl:
             self.e_score_correction_bias = mx.zeros(
                 (self.n_routed,), dtype=mx.float32
             )
+        if vl:
+            self.bias_vl = mx.zeros((self.n_routed,), dtype=mx.float32)
 
-    def __call__(self, x: mx.array, input_ids: Optional[mx.array] = None):
+    def __call__(self, x: mx.array, input_ids: Optional[mx.array] = None,
+                 image_mask: Optional[mx.array] = None):
+        if image_mask is not None:
+            return self._route_vl(x, input_ids, image_mask)
         if (
             _moe_gate_kernel is not None
             and not self.hash
@@ -2555,6 +2640,39 @@ class MoEGate(nn.Module):
             inds = self.tid2eid[ids]
             inds = inds.reshape(*x.shape[:-1], self.top_k)
 
+        weights = mx.take_along_axis(orig, inds, axis=-1)
+        if self.score_func != "softmax" and self.norm_topk_prob:
+            weights = weights / (weights.sum(axis=-1, keepdims=True) + 1e-20)
+        weights = (weights * self.route_scale).astype(x.dtype)
+        return inds, weights
+
+    def _route_vl(self, x: mx.array, input_ids: mx.array,
+                  image_mask: mx.array):
+        """knurlogic edit 14: the reference's Gate with `bias_vl`, for a
+        call whose ids hold image tokens (``image_mask [B, S]``: id >=
+        vocab_size). Score layers take the top-k of ``scores + bias_vl``
+        for an image token and of ``scores + bias`` for text; hash layers
+        the top-k of ``scores + bias_vl`` for an image token and
+        ``tid2eid`` for text (an image id looked up as 0). The weights
+        come from the unbiased scores either way."""
+        scores = x.astype(mx.float32) @ self.weight.T.astype(mx.float32)
+        scores = _score_func(scores, self.score_func)
+        orig = scores
+        m = image_mask[..., None]
+
+        def topk(s):
+            return mx.stop_gradient(
+                mx.argpartition(-s, kth=self.top_k - 1, axis=-1)[..., : self.top_k]
+            )
+
+        if self.hash:
+            ids = mx.where(image_mask, 0, input_ids).reshape(-1)
+            txt = self.tid2eid[ids].reshape(*x.shape[:-1], self.top_k)
+            inds = mx.where(m, topk(scores + self.bias_vl), txt)
+        else:
+            inds = topk(scores + mx.where(m, self.bias_vl,
+                                          self.e_score_correction_bias))
+        inds = inds.astype(mx.int32)
         weights = mx.take_along_axis(orig, inds, axis=-1)
         if self.score_func != "softmax" and self.norm_topk_prob:
             weights = weights / (weights.sum(axis=-1, keepdims=True) + 1e-20)
@@ -2613,8 +2731,10 @@ class DeepseekV4MoE(nn.Module):
                 swiglu_limit=0.0,
             )
 
-    def __call__(self, x: mx.array, input_ids: mx.array) -> mx.array:
-        inds, weights = self.gate(x, input_ids)
+    def __call__(self, x: mx.array, input_ids: mx.array,
+                 image_mask: Optional[mx.array] = None) -> mx.array:
+        # knurlogic edit 14: image_mask (ids >= vocab_size) -> bias_vl routing
+        inds, weights = self.gate(x, input_ids, image_mask)
         # Use upstream SwitchGLU.__call__ — its sort_threshold=64 path gates
         # ``sorted_indices=True`` on gather_qmm during prefill (indices.size
         # = S * top_k >> 64), which dispatches to a much faster Metal kernel
@@ -2660,18 +2780,21 @@ class DeepseekV4Block(nn.Module):
         h: mx.array,
         cache: Optional[Any],
         input_ids: mx.array,
+        image: Optional[tuple] = None,
     ) -> mx.array:
-        # h: [B, S, hc, D]
+        # h: [B, S, hc, D]. `image` (knurlogic edits 14-15): (left, right,
+        # image_mask) for a prefill chunk holding image tokens, else None.
         residual = h
         y, post, comb = self.hc_attn.hc_pre(h)
         y = self.attn_norm(y)
-        y = self.attn(y, cache=cache)
+        y = self.attn(y, cache=cache,
+                      visible=image[:2] if image is not None else None)
         h = self.hc_attn.hc_post(y, residual, post, comb)
 
         residual = h
         y, post, comb = self.hc_ffn.hc_pre(h)
         y = self.ffn_norm(y)
-        y = self.ffn(y, input_ids)
+        y = self.ffn(y, input_ids, image[2] if image is not None else None)
         h = self.hc_ffn.hc_post(y, residual, post, comb)
         return h
 
@@ -2694,10 +2817,59 @@ class DeepseekV4Model(nn.Module):
         self.hc_head = HyperHead(
             args.hidden_size, args.hc_mult, args.rms_norm_eps, args.hc_eps
         )
+        # knurlogic edit 14: the learned rows of an image block's
+        # non-picture tokens (the reference's merge_image_embeddings)
+        if args.vision_n_layers > 0:
+            for name in ("image_start", "image_end", "image_newline",
+                         "image_pad"):
+                setattr(self, name, mx.zeros((args.hidden_size,)))
 
-    def __call__(self, inputs: mx.array, cache: Optional[List[Any]] = None) -> mx.array:
+    def image_rows(self) -> mx.array:
+        """[5, D]: the row of each image token type (START, PAD, IMAGE,
+        NEW_LINE, END). IMAGE takes `image_pad` until the tower's rows
+        replace it, as in the reference."""
+        return mx.stack([self.image_start, self.image_pad, self.image_pad,
+                         self.image_newline, self.image_end])
+
+    def embed(self, ids: mx.array) -> mx.array:
+        """knurlogic edit 14: the embedding of ``ids``. An id >= vocab_size
+        (an image token) never indexes the table: it is looked up as 0 and
+        its row replaced by its type's learned row."""
+        if self.args.vision_n_layers <= 0:
+            return self.embed_tokens(ids)
+        V = self.vocab_size
+        img = ids >= V
+        h = self.embed_tokens(mx.where(img, 0, ids))
+        rows = self.image_rows().astype(h.dtype)[mx.clip(ids - V, 0, 4)]
+        return mx.where(img[..., None], rows, h)
+
+    def __call__(
+        self,
+        inputs: mx.array,
+        cache: Optional[List[Any]] = None,
+        input_embeddings: Optional[mx.array] = None,
+        vl_ids: Optional[mx.array] = None,
+    ) -> mx.array:
+        """knurlogic edit 14: `input_embeddings` and `vl_ids` come from
+        engine/vision (families/deepseek/vision) for a prefill with images:
+        `vl_ids` are the ids routing and image-span attention read (an
+        image token as vocab_size + its type) while `inputs` carries the
+        prompt's placeholder ids. Without them, an id >= vocab_size in
+        `inputs` is an image token."""
         B, S = inputs.shape
-        h = self.embed_tokens(inputs)  # [B, S, D]
+        ids = vl_ids if vl_ids is not None else inputs
+        image = None
+        # (a decode step never holds an image token: no sync for it)
+        if self.args.vision_n_layers > 0 and (
+                vl_ids is not None
+                or (S > 1 and bool((inputs >= self.vocab_size).any()))):
+            left, right = image_visible(ids, self.vocab_size,
+                                        self.args.vision_max_n_token)
+            image = (left, right, ids >= self.vocab_size)
+        if input_embeddings is not None:
+            h = input_embeddings
+        else:
+            h = self.embed(inputs)  # [B, S, D]
         h = mx.broadcast_to(
             h[:, :, None, :],
             (B, S, self.args.hc_mult, h.shape[-1]),
@@ -2708,7 +2880,7 @@ class DeepseekV4Model(nn.Module):
             cache = [None] * len(self.layers)
 
         for i, layer in enumerate(self.layers):
-            h = layer(h, cache[i], inputs)
+            h = layer(h, cache[i], ids, image)
 
         h = self.hc_head(h)
         return self.norm(h)
@@ -2723,9 +2895,13 @@ class Model(nn.Module):
         self.lm_head = nn.Linear(args.hidden_size, args.vocab_size, bias=False)
 
     def __call__(
-        self, inputs: mx.array, cache: Optional[List[Any]] = None
+        self,
+        inputs: mx.array,
+        cache: Optional[List[Any]] = None,
+        input_embeddings: Optional[mx.array] = None,
+        vl_ids: Optional[mx.array] = None,
     ) -> mx.array:
-        h = self.model(inputs, cache)
+        h = self.model(inputs, cache, input_embeddings, vl_ids)
         return self.lm_head(h)
 
     @property
@@ -2741,6 +2917,7 @@ class Model(nn.Module):
                 or ".hc_ffn." in k
                 or ".hc_head." in k
                 or "e_score_correction_bias" in k
+                or "bias_vl" in k  # knurlogic edit 14
                 or "attn_sink" in k
             )
             return not keep_fp32
@@ -2770,10 +2947,13 @@ class Model(nn.Module):
         """
         n_layers = self.args.num_hidden_layers
 
-        # 1) Drop MTP blocks and layers past num_hidden_layers
+        # 1) Drop MTP blocks and layers past num_hidden_layers. knurlogic
+        # edit 14: and the vision tower and aligner, which
+        # families/deepseek/vision loads standalone (the image rows and
+        # every gate's bias_vl stay: the trunk reads them)
         filtered = {}
         for k, v in weights.items():
-            if k.startswith("mtp."):
+            if k.startswith(("mtp.", "vision.", "aligner.")):
                 continue
             parts = k.split(".")
             if len(parts) >= 2 and parts[0] == "layers":
@@ -2852,6 +3032,10 @@ class Model(nn.Module):
             "hc_head_fn":     "model.hc_head.fn",
             "hc_head_base":   "model.hc_head.base",
             "hc_head_scale":  "model.hc_head.scale",
+            "image_start":    "model.image_start",
+            "image_end":      "model.image_end",
+            "image_newline":  "model.image_newline",
+            "image_pad":      "model.image_pad",
         }
         for src, dst in top_remap.items():
             if src in weights:
@@ -2863,7 +3047,10 @@ class Model(nn.Module):
             nk = k
             if nk.startswith("layers."):
                 nk = "model." + nk
-            nk = nk.replace(".ffn.gate.bias", ".ffn.gate.e_score_correction_bias")
+            # knurlogic edit 14: the suffix only; `.ffn.gate.bias_vl`
+            # keeps its name
+            if nk.endswith(".ffn.gate.bias"):
+                nk = nk[: -len("bias")] + "e_score_correction_bias"
             # Checkpoint ships hyper-connection submodules as `attn_hc` / `ffn_hc`
             # (suffix form) but the model class declares them as `hc_attn` /
             # `hc_ffn` (prefix form). Fork-level naming inconsistency.

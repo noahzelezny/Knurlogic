@@ -42,7 +42,15 @@ STUBS = {
 }
 
 
+#: DeepSeek-V4-Flash-Vision-Exp's encoder is Flash's with other reasoning
+#: effort prefixes: its "high" is Flash's "max", its "max" a new one. Its
+#: template is Flash's with this line first.
+DSV4_VISION = "{%- set dsv4_vision = true -%}\n"
+
+
 def text(family: str) -> str:
+    if family == "deepseek_v4_vision":
+        return DSV4_VISION + text("deepseek_v4")
     return (_HERE / f"{family}.jinja").read_text(encoding="utf-8")
 
 
@@ -52,19 +60,24 @@ def family_for(template, name: str = "") -> str | None:
     copy of knurlogic's own, shipped in a release, or an older one: ours,
     current, replaces it and its parser is installed -- a copy kept as it
     was had no parser, and its tool calls came back as text); or, for an
-    artifact named DeepSeek-V4, no template or one with no tool handling."""
-    named = "deepseek-v4" in (name or "").lower()
+    artifact named DeepSeek-V4, no template or one with no tool handling.
+    An artifact named DeepSeek-V4 and Vision gets the Vision-Exp variant."""
+    low = (name or "").lower()
+    named = "deepseek-v4" in low
+    ours = "deepseek_v4_vision" if named and "vision" in low else "deepseek_v4"
     if not isinstance(template, str) or not template:
         # no template at all (deepseek-ai's own MLX conversion ships none):
         # chat was refused outright
-        return "deepseek_v4" if named else None
+        return ours if named else None
     fam = STUBS.get(hashlib.sha256(template.encode()).hexdigest())
     if fam:
         return fam
+    if template.startswith(DSV4_VISION):
+        return "deepseek_v4_vision"
     if "｜DSML｜" in template:
-        return "deepseek_v4"
+        return ours
     if named and "tool" not in template.lower():
-        return "deepseek_v4"
+        return ours
     return None
 
 
@@ -170,4 +183,5 @@ def parse_deepseek_v4(text: str, tools=None):
 
 
 #: family -> (tool block start, end, parser(text, tools))
-PARSERS = {"deepseek_v4": (DSV4_START, DSV4_END, parse_deepseek_v4)}
+PARSERS = {"deepseek_v4": (DSV4_START, DSV4_END, parse_deepseek_v4),
+           "deepseek_v4_vision": (DSV4_START, DSV4_END, parse_deepseek_v4)}

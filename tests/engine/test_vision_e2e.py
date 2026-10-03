@@ -274,7 +274,34 @@ def _glm_rig(tmp):
                call=_glm_call, img_size=(56, 56))
 
 
-FAMILIES = ("qwen3_5", "qwen3_5_moe", "qwen4_exp", "gemma4", "glm5_next")
+def _deepseek_rig(tmp):
+    """DeepSeek-V4-Flash-Vision-Exp at test_vision_deepseek's tiny size, on
+    this file's vocab: image tokens are ids 512..516, past the vocab."""
+    import test_vision_deepseek as td
+
+    from knurlogic.engine.families.deepseek.vision import DeepseekVisionFamily
+    M = td._arch()
+    cfg = dict(td.TINY, vocab_size=VOCAB)
+    model = M.Model(M.ModelArgs.from_dict(cfg))
+    td._random(model, np.random.default_rng(0))
+    mx.eval(model.parameters())
+    image_id = 501
+
+    def make():
+        f = DeepseekVisionFamily(cfg, image_id)
+        td._random(f._build_tower(), np.random.default_rng(1))
+        core = model.model
+        f.set_rows({k: getattr(core, k) for k in
+                    ("image_start", "image_pad", "image_newline",
+                     "image_end")})
+        mx.eval(f.tower.parameters(), f.rows)
+        return f
+    return Rig("deepseek_v4", model, make,
+               {"<｜deepseek_image｜>": image_id}, image_id)
+
+
+FAMILIES = ("qwen3_5", "qwen3_5_moe", "qwen4_exp", "gemma4", "glm5_next",
+            "deepseek_v4")
 _RIGS = {}
 
 
@@ -287,6 +314,7 @@ def rigs(tmp_path_factory):
             tmp = tmp_path_factory.mktemp("e2e")
             _RIGS[name] = (_gemma_rig(tmp) if name == "gemma4"
                            else _glm_rig(tmp) if name == "glm5_next"
+                           else _deepseek_rig(tmp) if name == "deepseek_v4"
                            else _qwen_rig(name, tmp))
         return _RIGS[name]
     return get
@@ -337,11 +365,15 @@ def reference(rig, fam, messages, n=MAX_TOKENS):
     tok = SpecTok(rig.specials)
     feats, refs_by = {}, {}
     text, refs = "", []
+    # DeepSeek-V4 joins an image message's parts with "\n\n"
+    sep = getattr(fam, "part_separator", "")
     for m in messages:
         c = m["content"]
         if isinstance(c, list):
             s = ""
-            for p in c:
+            for i, p in enumerate(c):
+                if i and sep and any(q["type"] != "text" for q in c):
+                    s += sep
                 if p["type"] == "text":
                     s += p["text"]
                 else:
@@ -358,6 +390,8 @@ def reference(rig, fam, messages, n=MAX_TOKENS):
     iid = fam.spec.image_token_id
     ids = tok.encode(text)
     key = K.expand(K.expand_pads(ids, refs, iid), refs, iid)
+    if hasattr(fam, "frame_key"):           # DeepSeek-V4's alignment pads
+        key, _ = fam.frame_key(key, [key])
     emb = dict(fam.embed(rig.model, key, 0,
                          lambda s, p: feats[(s, p)]))
     pos, delta = fam.positions(key, lambda s, p: refs_by[(s, p)])

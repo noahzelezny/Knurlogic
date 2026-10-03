@@ -41,3 +41,24 @@
 - after `parse_tool_calls` in the same file (MIT, as above), rewritten as
   two regular expressions over the block the engine's state machine cuts
   out (start `<｜DSML｜tool_calls`, end `</｜DSML｜tool_calls>`).
+
+## deepseek_v4_vision (`text("deepseek_v4_vision")`)
+
+- source: `encoding/encoding_dsv4.py` of
+  deepseek-ai/DeepSeek-V4-Flash-Vision-Exp (MIT, as above; vendored in
+  tests/support/fixtures_deepseek_v4_vision/). Against Flash's it differs
+  in the reasoning-effort prefixes -- "low" (the default) none, "high"
+  Flash's Think Max prompt, "max" a new one -- and in image blocks: a
+  message's parts joined with "\n\n", an image as `<｜deepseek_image｜>`.
+- the template is deepseek_v4.jinja with `{%- set dsv4_vision = true -%}`
+  first; the jinja picks the prefixes by it. The image parts are not the
+  template's: engine/vision splices the placeholder and the separator
+  (families/deepseek/vision, `part_separator`).
+- chosen for an artifact named DeepSeek-V4 ... Vision with no template
+  (or a stub), or a template that is this one.
+- proven: tests/engine/test_vision_deepseek.py renders the artifact's
+  two-image example equal to its encoder, chat and thinking at each
+  effort.
+- the dialect is Flash's (off / high / max -> chat / thinking /
+  reasoning_effort "max"), so on Vision-Exp "high" is its "low" and its
+  middle "high" is not offered.

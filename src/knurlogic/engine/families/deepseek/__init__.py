@@ -2,7 +2,9 @@
 128-token sliding window plus learned compressed pools (Compressor, and a
 top-k Indexer on the ratio-4 layers), hash-routed first layers, mHC
 hyper-connections. One MTP head (heads/deepseek_v4.py, a sidecar beside
-the trunk; the trunk's sanitize still drops `mtp.*`), no vision.
+the trunk; the trunk's sanitize still drops `mtp.*`). Images: the
+DeepSeek-V4-Flash-Vision-Exp artifact (vision_n_layers > 0), its tower in
+vision/ (docs/design/deepseek-vision.md).
 
 The chat template is engine/templates/deepseek_v4.jinja (the conversion
 ships a stub); its thinking levels are DeepSeek's three modes: Non-think,
@@ -48,5 +50,6 @@ MANIFEST = {
                                          "reasoning_effort": "max"}]],
         },
     },
-    "vision": None,
+    "vision": {"build": "knurlogic.engine.families.deepseek.vision:build",
+               "architectures": ["deepseek_v4"]},
 }
