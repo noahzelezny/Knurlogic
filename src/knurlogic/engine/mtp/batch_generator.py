@@ -205,6 +205,7 @@ class MTPBatchGenerator(BatchGenerator):
         self._trunk = logits_trunk(model)
         batch = BlockBatch if getattr(head, "block_size", 0) else MTPBatch
         self._batch = batch(self._trunk, head, get_h, copy_caches=copy)
+        self._batch.finish_at = self._finish_at
         self._n_trunk = len(self._make_new_cache())
         #: engine/runtime/pipeline.Coord on a pipeline split, else None
         self._coord = None
@@ -231,6 +232,24 @@ class MTPBatchGenerator(BatchGenerator):
             logger.info("batch engine without a drafting head%s%s",
                         " (vision model)" if vision is not None else "",
                         f": {why}" if why else "")
+
+    def _finish_at(self, uid: int, toks: list[int]) -> int | None:
+        """The index in `toks` (row `uid`'s next tokens) of the one that
+        would finish it here (`_next`'s rules, its state left as it is),
+        or None. The drafting loops commit nothing past it, so the entry
+        stored for a finished row holds exactly its `fed` tokens."""
+        st = self._rows.get(uid)
+        if st is None:
+            return None
+        n, state = st["n"], st["state"]
+        for j, t in enumerate(toks):
+            n += 1
+            if n >= st["max"]:
+                return j
+            state, match, cur = st["sm"].match(state, t)
+            if match is not None and cur is None:
+                return j
+        return None
 
     def mirror_hidden(self) -> None:
         """A tensor follower of a drafting rank 0, holding no head: capture

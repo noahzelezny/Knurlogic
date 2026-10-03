@@ -170,6 +170,13 @@ class BlockBatch(MTPBatch):
                     a += 1
             acc.append(a)
         m = min(acc)
+        # no row commits past the token that ends one (MTPBatch._ends)
+        t1_list = self.t1.tolist()
+        d_all = d.tolist()
+        for i in range(B):
+            end = self._ends(i, [t1_list[i]] + d_all[i][:m])
+            if end is not None:
+                m = min(m, end)
 
         n_live = sum(live)
         if n_live:
@@ -194,8 +201,7 @@ class BlockBatch(MTPBatch):
                        + [_finite_rows(lg[:, k]) for k in range(m)], axis=1)
 
         # --- emit --------------------------------------------------------
-        t1_list = self.t1.tolist()
-        d_list = d[:, :m].tolist()
+        d_list = [r[:m] for r in d_all]
         out: list[RowStep] = []
         keep: list[int] = []
         for i in range(B):

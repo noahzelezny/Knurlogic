@@ -39,17 +39,12 @@ def _executor(model, head, **kw):
 
 
 def _assert_key_holds_stream(f, prompt, streamed):
-    """Finished.tokens keys the cache: the prompt, every streamed token, and
-    at most ONE more -- a drafting step commits two tokens to the cache, and
-    when the row finishes on the first the second is in the cache (and so in
-    the key) but never streamed. Whether the last step drafted depends on the
-    timed draft/plain choice (drafting_pays), so the key's tail is not the
-    stream's tail; the cache's length is the key's, always."""
+    """Finished.tokens keys the cache: the prompt and every streamed token,
+    nothing more -- a drafting step whose first token finishes the row
+    commits that one alone (batch_loop.MTPBatch._ends). The cache's length
+    is the key's, always."""
     from knurlogic.engine.mtp.batch_generator import trunk_offset
-    n = len(prompt)
-    assert f.tokens[:n] == prompt
-    assert f.tokens[n:n + len(streamed)] == streamed
-    assert len(f.tokens) - n - len(streamed) in (0, 1)
+    assert f.tokens == prompt + streamed
     assert f.cache and trunk_offset(f.cache) == len(f.tokens)
 
 
@@ -75,10 +70,10 @@ def test_the_executor_emits_the_engines_own_tokens():
 @pytest.mark.parametrize("always", [False, True])
 def test_a_row_finishing_mid_draft_streams_exactly_max_tokens(always,
                                                               monkeypatch):
-    """Drafting forced (every step commits two) and max_tokens=1: the row
-    finishes on the first, so the second is in its cache and key but must
-    not be streamed. Without the force the timed choice decides; the
-    stream is the same either way."""
+    """Drafting forced (every step would commit two) and max_tokens=1: the
+    row finishes on the first, so the step commits that one alone -- the
+    second is neither streamed nor in the row's cache and key. Without the
+    force the timed choice decides; the stream is the same either way."""
     from knurlogic.engine.runtime.executor import Admission, Finished
     if always:
         monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
@@ -90,8 +85,7 @@ def test_a_row_finishing_mid_draft_streams_exactly_max_tokens(always,
         p = prompts[uids.index(f.uid)]
         assert len(toks[f.uid]) == 1
         _assert_key_holds_stream(f, p, toks[f.uid])
-        if always:
-            assert len(f.tokens) == len(p) + 2
+        assert len(f.tokens) == len(p) + 1
     ex.close()
 
 
