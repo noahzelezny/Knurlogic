@@ -373,6 +373,27 @@ def test_install_gives_a_wrapper_the_dsml_parser():
     assert templates.install(w) == "deepseek_v4"      # idempotent
 
 
+
+def test_a_shipped_copy_of_the_template_gets_ours_and_the_parser():
+    """A release ships (an older) copy of knurlogic's template: it speaks
+    DSML and handles tools, so it is no stub -- and was kept with no
+    parser, the calls coming back as text. It is replaced by ours, current,
+    with the parser."""
+    class Enc:
+        def encode(self, s, add_special_tokens=False):
+            return [ord(c) for c in s]
+
+    class Wrapper(DSTok):
+        _tool_parser = None
+        _tokenizer = Enc()
+
+    older = TEMPLATE.replace("Think Max", "an older copy")
+    assert older != TEMPLATE
+    w = Wrapper(older)
+    assert templates.install(w) == "deepseek_v4"
+    assert w.chat_template == TEMPLATE
+    assert w._tool_parser is templates.parse_deepseek_v4
+
 _REAL = STUB / "tokenizer.json"
 
 
