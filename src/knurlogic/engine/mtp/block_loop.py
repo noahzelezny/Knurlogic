@@ -21,8 +21,9 @@ The head drafts all K in its one pass, but a step verifies only the first
 k (1..K): a wider MoE forward reads more experts, and drafts the head
 rarely gets right cost more to verify than they return. k maximizes
 (1 + sum of the chances that the batch accepts j drafts, j <= k) over the
-measured seconds of a step at that width (_width); every width is timed,
-none assumed. The chances are this step's own, from the head's confidence
+seconds of a step at that width (_width): the median of its last timed
+steps, or for a width timed too few times the line through the widths
+that have been (_wcost). The chances are this step's own, from the head's confidence
 scores (sigmoid of each position's score, read as the chance that draft
 stands given the ones before it; the batch accepts j only if every row
 does, so the rows' products multiply) while those stay calibrated against
@@ -48,14 +49,16 @@ pipeline.carry. Design: docs/design/deepseek-vision.md (DSpark).
 """
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 import logging
 import os
+import statistics
 
 import mlx.core as mx
 
-from .batch_loop import EXPLORE_STEPS, RECHECK_EVERY, Emitted, MTPBatch, \
+from .batch_loop import EXPLORE_STEPS, Emitted, MTPBatch, \
     RowStep, _apply, _finite_rows, _key, _mark, _pick
 from .caches import release, rollback, snapshot
 from .sampling import rejection_correct
@@ -73,6 +76,23 @@ PROFILE_EVERY = 32
 CAL_MIN = 32
 CAL_TOL = 0.1
 CAL_WINDOW = 256
+#: a width's cost is the median of its last COST_SAMPLES timed steps: one
+#: slow step (a compile, a stall) moves a median one rank, where it held
+#: an EMA up for many steps -- live, width 2 read 113 ms against a clean
+#: 77 for as long as it went unmeasured. A width with fewer than COST_MIN
+#: takes the line cost(k) = a + b k fitted through the widths that have
+#: them (b >= 0: a wider verify is never cheaper)
+COST_SAMPLES = 9
+COST_MIN = 3
+#: every RECHECK_STEP steps one step verifies a losing width -- the one
+#: timed longest ago -- so each estimate stays fresh for about one step
+#: in RECHECK_STEP at a worse width
+RECHECK_STEP = 16
+#: a position's measured acceptance is its hit rate over its last
+#: ACC_SAMPLES verdicts. An EMA updated only when a step verified that far
+#: kept a losing width's deep positions at whatever a few misses left
+#: them, and the width kept losing
+ACC_SAMPLES = 64
 
 
 def _fixed_width() -> int | None:
@@ -106,14 +126,18 @@ class BlockBatch(MTPBatch):
         #: rank 0's (tensor.agree_head)
         self.block_size = int(block_size
                               or getattr(self.head, "block_size", 0))
-        #: (rows, k) -> (EMA seconds per drafting step verifying k, steps)
+        #: (rows, k) -> (seconds per drafting step verifying k: the median
+        #: of _vsamp, steps timed)
         self._vcost: dict = {}
-        #: rows -> [EMA chance the batch accepts >= j drafts, j = 1..K]
-        #: (None until a step verified j)
+        self._vsamp: dict = {}                # (rows, k) -> recent seconds
+        self._vseen: dict = {}                # (rows, k) -> _vn at its last
+        self._vn = 0
+        #: rows -> [chance the batch accepts >= j drafts, j = 1..K: the hit
+        #: rate of _vhits; None until a step verified j]
         self._vacc: dict = {}
+        self._vhits: dict = {}                # rows -> per position verdicts
         self._wexplore: tuple | None = None   # (rows, k, steps left)
         self._wsince = 0
-        self._wturn = 0
         self._wpicks: dict = {}               # KNURLOGIC_MTP_PROFILE only
         #: (rows, k) whose first, compiling step has been left out
         self._vwarm: set = set()
@@ -189,11 +213,12 @@ class BlockBatch(MTPBatch):
         expected tokens per second, (1 + sum_{j<=k} P(batch accepts >= j))
         / (seconds of a step verifying k at this row count). P is `pred`
         (this step's confidence scores) while calibrated(), else the
-        measured acceptance.
-        Every k is timed EXPLORE_STEPS steps first (K first: its steps
-        measure every position's acceptance), and every RECHECK_EVERY
-        steps one width other than the best is re-measured, in turn (K
-        first), as acceptance and costs move with the text."""
+        measured acceptance; the seconds are _wcost's.
+        K and 1 are timed EXPLORE_STEPS steps first (K first: its steps
+        measure every position's acceptance; the two fix the cost line the
+        others start from), and every RECHECK_STEP steps one step verifies
+        the losing width timed longest ago, as acceptance and costs move
+        with the text."""
         K = self.block_size
         fixed = _fixed_width()
         if fixed is not None:
@@ -207,7 +232,7 @@ class BlockBatch(MTPBatch):
         if ex is not None and ex[0] == B and ex[2] > 0:
             return ex[1]
         self._wexplore = None
-        for k in range(K, 0, -1):
+        for k in sorted({K, 1}, reverse=True):
             got = self._vcost.get((B, k))
             if got is None or got[1] < EXPLORE_STEPS:
                 self._wexplore = (B, k, EXPLORE_STEPS - (got[1] if got else 0))
@@ -215,34 +240,56 @@ class BlockBatch(MTPBatch):
         use = pred if pred is not None and self.calibrated() else None
         best = max(range(1, K + 1), key=lambda k: self._rate(B, k, use))
         self._wsince += 1
-        if self._wsince >= RECHECK_EVERY:
-            # every loser in turn, K first (its steps measure every
-            # position's acceptance): a width timed once and then never
-            # again kept whatever it read then
+        if self._wsince >= RECHECK_STEP:
+            # one step of the loser timed longest ago (never: first; K
+            # first on a tie, its steps measuring every position's
+            # acceptance): a width timed once and then never again kept
+            # whatever it read then
             self._wsince = 0
             others = [k for k in range(K, 0, -1) if k != best]
             if others:
-                k = others[self._wturn % len(others)]
-                self._wturn += 1
-                self._wexplore = (B, k, EXPLORE_STEPS)
+                k = min(others, key=lambda k: self._vseen.get((B, k), -1))
+                self._wexplore = (B, k, 1)
                 return k
         return best
+
+    def _wcost(self, B: int, k: int) -> float | None:
+        """Seconds of a step verifying k at B rows: its median when timed
+        COST_MIN times, else the line through the widths that are (None
+        with neither)."""
+        got = self._vcost.get((B, k))
+        if got is not None and got[1] >= COST_MIN:
+            return got[0]
+        pts = [(w, v[0]) for (b, w), v in self._vcost.items()
+               if b == B and v[1] >= COST_MIN]
+        if len(pts) >= 2:
+            mk = sum(w for w, _ in pts) / len(pts)
+            mc = sum(c for _, c in pts) / len(pts)
+            var = sum((w - mk) ** 2 for w, _ in pts)
+            slope = max(sum((w - mk) * (c - mc) for w, c in pts) / var, 0.0)
+            return mc + slope * (k - mk)
+        return got[0] if got is not None else None
 
     def _rate(self, B: int, k: int, pred=None) -> float:
         """Expected committed tokens per second verifying k drafts."""
         acc = pred if pred is not None else (self._vacc.get(B) or [])
         tokens = 1.0 + sum(a for a in acc[:k] if a is not None)
-        return tokens / max(self._vcost[(B, k)][0], 1e-9)
+        cost = self._wcost(B, k)
+        return 0.0 if cost is None else tokens / max(cost, 1e-9)
 
     def _record_width(self, B: int, k: int, seconds: float) -> None:
         if (B, k) not in self._vwarm:
             # a width's first step compiles its verify shape: hundreds of
-            # ms that are not its cost, and an EMA seeded with them kept a
-            # narrow width "dearer" than K for its whole exploration
+            # ms that are not its cost (left in, every narrow width read
+            # "dearer" than K for its whole exploration)
             self._vwarm.add((B, k))
             return
-        ema, n = self._vcost.get((B, k), (seconds, 0))
-        self._vcost[(B, k)] = (0.8 * ema + 0.2 * seconds, n + 1)
+        s = self._vsamp.setdefault((B, k), deque(maxlen=COST_SAMPLES))
+        s.append(seconds)
+        n = self._vcost.get((B, k), (0.0, 0))[1]
+        self._vcost[(B, k)] = (statistics.median(s), n + 1)
+        self._vn += 1
+        self._vseen[(B, k)] = self._vn
         ex = self._wexplore
         if ex is not None and ex[0] == B and ex[1] == k:
             self._wexplore = (B, k, ex[2] - 1)
@@ -250,10 +297,13 @@ class BlockBatch(MTPBatch):
     def _record_accept(self, B: int, k: int, m: int) -> None:
         """The batch accepted m of k verified drafts: P(>= j) for j <= k."""
         acc = self._vacc.setdefault(B, [None] * self.block_size)
+        hits = self._vhits.setdefault(
+            B, [deque(maxlen=ACC_SAMPLES) for _ in range(self.block_size)])
         pred, self._pred = self._pred, None
         for j in range(k):
             hit = 1.0 if m > j else 0.0
-            acc[j] = hit if acc[j] is None else 0.9 * acc[j] + 0.1 * hit
+            hits[j].append(hit)
+            acc[j] = sum(hits[j]) / len(hits[j])
             if pred is not None:
                 c = self._cal[j]
                 if c[2] >= CAL_WINDOW:
