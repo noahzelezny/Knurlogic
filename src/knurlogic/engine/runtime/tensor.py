@@ -46,6 +46,28 @@ GIB = 1 << 30
 class Desync(RuntimeError):
     """The ranks no longer agree on what they are doing."""
 
+
+class PeerGone(RuntimeError):
+    """A rank of this ring failed or vanished (it said so on the bell, or
+    its bell connection closed), or this rank failed itself: no collective
+    is entered past this point -- one would wait on a rank that will never
+    join it (jaccl's have no timeout), and a rank killed inside one leaves
+    its GPU pinned at 100% until a reboot."""
+
+
+#: this process's Link once its bell is up (one ring per process): what
+#: check_peers() reads, so the per-step broadcasts outside Link
+#: (pipeline.Coord) refuse a collective on a gone peer too
+_LINK: Link | None = None
+
+
+def check_peers() -> None:
+    """Raise PeerGone if this process's ring has lost a rank. Called before
+    each control collective, so a rank that learns of a failure between
+    collectives never enters the next one."""
+    if _LINK is not None:
+        _LINK.check()
+
 # ------------------------------------------------------------------ split
 
 
@@ -264,9 +286,27 @@ def check_codebooks(model) -> None:
 class Link:
     """The control exchange between ranks: one all_gather of a fixed-size
     vector per step, then the plan's bytes (all_sum; only rank 0's are
-    non-zero) when rank 0 has any."""
+    non-zero) when rank 0 has any.
+
+    Beside it, the bell (bell()): a plain TCP connection from each rank to
+    rank 0 that never depends on the collectives. Rank 0 rings it to wake
+    parked ranks (WAKE), and any rank says on it that it is failing (ABORT)
+    before it leaves -- the collective link may be the thing that broke, and
+    a rank that just exits leaves the others inside the next collective
+    forever. A daemon thread on each rank reads its bell connections (watch):
+    an ABORT or a closed connection marks the ring `down`; rank 0 relays it
+    to every other rank. Every control collective checks `down` first
+    (check), so a rank that has heard never enters another one. A
+    collective already in flight cannot be interrupted from here: over TCP
+    (mlx's ring backend) a peer's exit fails it ("connection to a peer was
+    lost"); over jaccl only the self-heal fork's deadline
+    (JACCL_COLLECTIVE_TIMEOUT_MS, armed after the load) ends it."""
+
+    #: bell bytes: rank 0 wakes a parked rank; any rank says it is leaving
+    WAKE, ABORT = b"w", b"x"
 
     def __init__(self, group):
+        import threading
         self.group = group
         self.rank = group.rank()
         self.size = group.size()
@@ -274,8 +314,19 @@ class Link:
         #: the side channel a parked rank sleeps on (bell()); None until set
         self.socks: list = []
         self.parked = False
+        #: set when a rank failed or vanished, or this one failed: why
+        self.down = threading.Event()
+        self.why = ""
+        #: an orderly stop is under way: a bell closing is expected
+        self.closing = False
+        self._woken = threading.Event()
+        self._said = False
+        self._lock = threading.Lock()
+        #: called (from the bell thread) when the ring goes down
+        self.on_down: list = []
 
     def barrier(self) -> None:
+        self.check()
         mx.eval(mx.distributed.all_sum(mx.array(1), group=self.group,
                                        stream=mx.cpu))
 
@@ -284,10 +335,11 @@ class Link:
         jaccl's collectives busy-poll the Thunderbolt completion queue: a
         rank waiting in one for an idle rank 0 burns a whole core (and an
         M3 Ultra shows ~50% GPU) for as long as nothing is asked. So an idle
-        rank 0 parks the others (the `park` op) and they sleep in a recv
-        here until it rings. Rank 0 listens on the address the ring
-        already uses; a connection must present the nonce shared over the
-        ring, so nothing else can take a rank's place."""
+        rank 0 parks the others (the `park` op) and they sleep until it
+        rings. The same connections carry a failing rank's ABORT (class
+        docstring). Rank 0 listens on the address the ring already uses; a
+        connection must present the nonce shared over the ring, so nothing
+        else can take a rank's place."""
         import secrets
         import socket
         host = _rank0_host()
@@ -312,20 +364,90 @@ class Link:
             self.socks = [bell_dial(host, port, nonce, self.rank, BELL_S)]
         for c in self.socks:
             c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.watch()
+
+    def watch(self) -> None:
+        """One daemon thread per bell connection: WAKE wakes sleep(); ABORT
+        or the connection closing marks the ring down."""
+        import threading
+        global _LINK
+        _LINK = self
+        for i, c in enumerate(self.socks):
+            peer = i + 1 if self.rank == 0 else 0
+            threading.Thread(target=self._read, args=(c, peer), daemon=True,
+                             name=f"bell-{self.rank}-{peer}").start()
+
+    def _read(self, c, peer: int) -> None:
+        while True:
+            try:
+                b = c.recv(1)
+            except OSError as e:
+                b, err = b"", e
+            else:
+                err = None
+            if b == self.WAKE:
+                self._woken.set()
+                continue
+            if self._said and not b:
+                return                    # our own abort closed it
+            if b == self.ABORT:
+                why = f"rank {peer} failed and left the ring"
+            elif self.closing:
+                return                    # an orderly stop: expected
+            else:
+                why = (f"rank {peer}'s bell connection closed"
+                       + (f" ({err})" if err else "")
+                       + ": it exited or its machine is unreachable")
+            self.fail(why)
+            return
+
+    def fail(self, why: str) -> None:
+        """This ring is down (a peer said so or vanished, or this rank
+        failed): every other rank is told on the bell (rank 0 relays to
+        all; a follower tells rank 0), and no collective is entered here
+        again. Safe from any thread; the first reason is kept."""
+        with self._lock:
+            first = not self.down.is_set()
+            if first:
+                self.why = why
+                self.down.set()
+            said, self._said = self._said, True
+        if first:
+            logger.warning("rank %d: ring down: %s", self.rank, why)
+        if not said:
+            for c in self.socks:
+                try:
+                    c.sendall(self.ABORT)
+                except OSError:
+                    pass              # that one is gone already
+        self._woken.set()             # a parked rank leaves its sleep
+        if first:
+            for fn in list(self.on_down):
+                try:
+                    fn()
+                except Exception:  # a hook must not stop the others (logged)
+                    logger.exception("ring-down hook")
+
+    def check(self) -> None:
+        if self.down.is_set():
+            raise PeerGone(self.why)
 
     def sleep(self) -> None:
         """A parked rank >= 1: wait, without spinning, for rank 0's bell."""
         if not self.socks:
             return
-        if self.socks[0].recv(1) != b"w":
-            raise ConnectionError("rank 0 left while this rank was parked")
+        self._woken.wait()
+        self._woken.clear()
+        if self.down.is_set():
+            raise PeerGone(self.why)
 
     def exchange(self, over: int, payload: bytes | None = None):
         """-> (control rows, one per rank; the plan bytes or None)."""
         import numpy as np
+        self.check()
         if self.parked:
             for c in self.socks:
-                c.sendall(b"w")
+                c.sendall(self.WAKE)
             self.parked = False
         n = len(payload) if (self.rank == 0 and payload) else 0
         ctl = mx.array([P.control(over, self.step, n,
@@ -342,6 +464,7 @@ class Link:
         length = rows[0][P.LENGTH]
         if not length:
             return rows, None
+        self.check()
         if self.rank == 0:
             assert payload is not None      # rank 0 is the one that sends
             buf = mx.array(np.frombuffer(payload, dtype=np.uint8))
@@ -530,15 +653,23 @@ class Ring:
             0, int(mx.get_active_memory()) - self.local_then)
 
     def stop(self) -> None:
-        ops = self.journal.take() + [{"op": "stop"}]
-        self.link.exchange(0, P.encode({"ops": ops}))
+        """Every rank leaves between steps. On a ring that is down (a rank
+        failed or vanished) there is no one to tell over a collective:
+        they were told on the bell (Link.fail)."""
         self.stopped = True
+        if self.link.down.is_set():
+            logger.info("ring down (%s): no stop exchange", self.link.why)
+            return
+        ops = self.journal.take() + [{"op": "stop"}]
+        self.link.closing = True
+        self.link.exchange(0, P.encode({"ops": ops}))
 
     def park(self) -> None:
         """Rank 0 has nothing to run: the other ranks sleep on the bell
         instead of spinning in the next collective (Link.bell). The next
         exchange rings it first."""
-        if not self.link.socks or getattr(self, "stopped", False):
+        if not self.link.socks or getattr(self, "stopped", False) or \
+                self.link.down.is_set():
             return
         # parked with nothing new: stay asleep. Ops taken while idle (the
         # prompt cache's pops as it makes room) ring the others to apply
@@ -657,13 +788,23 @@ class TensorExecutor(LocalExecutor):
         if len(b):
             plan["tokens"] = [[int(u), int(t)]
                               for u, t in zip(b.uids, b.t1.tolist())]
-        self.ring.exchange(self._over(), plan)
-        return super().step()
+        try:
+            self.ring.exchange(self._over(), plan)
+            return super().step()
+        except BaseException as e:
+            # a step that fails on rank 0 -- a Desync, a collective that
+            # failed, its own error mid-forward -- leaves the ranks at
+            # different points: no collective is safe after it. The others
+            # are told on the bell and leave; the scheduler ends the ring.
+            self.ring.link.fail(f"rank 0's step failed: "
+                                f"{type(e).__name__}: {e}")
+            raise
 
     def close(self) -> None:
         try:
-            ops = self.ring.journal.take() + [{"op": "reset"}]
-            self.ring.link.exchange(0, P.encode({"ops": ops}))
+            if not self.ring.link.down.is_set():
+                ops = self.ring.journal.take() + [{"op": "reset"}]
+                self.ring.link.exchange(0, P.encode({"ops": ops}))
         finally:
             super().close()
 
@@ -793,107 +934,126 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
             ex = LocalExecutor(gen)
         return ex
 
-    while True:
-        _, data = link.exchange(mark.over(), None)
-        plan = P.decode(data) if data else {"ops": []}
-        halt = park = False
-        for op in plan.get("ops", []):
-            kind = op["op"]
-            if kind == "park":
-                park = halt = True
-            elif kind == "admit":
-                prompt = op["prompt"]
-                if op["images"]:
-                    if vision is None:
-                        raise Desync("rank 0 admitted a prompt with images; "
-                                     "this rank bound no vision family")
-                    vision.add_refs(op["refs"])
-                    prompt = P.key_from_wire(prompt, op["images"],
-                                             op["refs"])
-                    at, segs = op["hit"], []
-                    for sg in op["segs"]:
-                        segs.append(prompt[at:at + len(sg)])
-                        at += len(sg)
-                    op = dict(op, segs=segs)
-                c, rest = cache.fetch(model_key, prompt)
-                if len(prompt) - len(rest) != op["hit"]:
-                    raise Desync(f"prompt cache hit {len(prompt) - len(rest)} "
-                                 f"here, {op['hit']} on rank 0")
-                procs = []
-                if op["penalties"]:
-                    from mlx_lm.sample_utils import make_logits_processors
-                    procs = make_logits_processors(**op["penalties"])
-                sm, _ = control_machine(tokenizer, op["initial"])
-                uid = executor().insert(Admission(
-                    segments=op["segs"], max_tokens=op["max_tokens"],
-                    cache=c, prefix=prompt[:op["hit"]],
-                    sampling=op["sampling"], processors=procs,
-                    state_machine=sm))
-                if uid != op["uid"]:
-                    raise Desync(f"admitted as {uid}, rank 0 has {op['uid']}")
-            elif kind == "remove":
-                if ex is not None:
-                    ex.remove(op["uids"])
-            elif kind == "insert":
-                got = last.get((op["event"], op["uid"]))
-                if got is None:
-                    raise Desync(f"no {op['event']} for row {op['uid']} in "
-                                 f"the last step")
-                cache.insert(model_key, got[0], got[1], op["kind"])
-            elif kind == "pop":
-                cache.lru.trim_to(n_sequences=len(cache.lru) - op["n"])
-            elif kind == "set":
-                apply_set(op, link.rank)
-            elif kind == "reset":
-                if ex is not None:
-                    ex.close()
-                ex = None
-                if vision is not None:
-                    vision.clear()
-                halt = True
-            elif kind == "stop":
-                if ex is not None:
-                    ex.close()
-                logger.info("rank %d: stopped by rank 0 after %d steps "
-                            "(%d token mismatches)", link.rank, steps,
-                            mismatches)
-                return steps
-        # the last step's events hold its checkpoint and finished caches:
-        # not kept through a removal or a park, which nothing steps past
-        last, events = {}, []
-        if park:
-            # nothing runs: a transient measured under load is not the
-            # margin an idle rank holds back (it pinned a pipeline's
-            # over-limit above zero after one long prefill, refusing every
-            # request, 16 tokens or 40k)
-            mark.spike = 0
-            link.sleep()
-        if halt:
-            continue
-        e = executor()
-        b = e.gen._batch
-        toks = plan.get("tokens") or []
-        if [int(u) for u in b.uids] != [u for u, _ in toks]:
-            raise Desync(f"batch rows {list(b.uids)} here, "
-                         f"{[u for u, _ in toks]} on rank 0")
-        if toks and split == "pipeline":
-            b.t1 = mx.array([t for _, t in toks], dtype=mx.int32)
-        elif toks:
-            mine = b.t1.tolist()
-            theirs = [t for _, t in toks]
-            if mine != theirs:
-                mismatches += sum(a != c for a, c in zip(mine, theirs))
-                logger.warning("rank %d: %d token(s) differ from rank 0's; "
-                               "rank 0's are used", link.rank,
-                               sum(a != c for a, c in zip(mine, theirs)))
-            b.t1 = mx.array(theirs, dtype=mx.int32)
-        events = mark.around(e.step)
-        steps += 1
-        for ev in events:
-            if isinstance(ev, Checkpoint):
-                last[("checkpoint", ev.uid)] = (ev.tokens, ev.cache)
-            elif isinstance(ev, Finished):
-                last[("finished", ev.uid)] = (ev.tokens, ev.cache)
+    try:
+        while True:
+            _, data = link.exchange(mark.over(), None)
+            plan = P.decode(data) if data else {"ops": []}
+            halt = park = False
+            for op in plan.get("ops", []):
+                kind = op["op"]
+                if kind == "park":
+                    park = halt = True
+                elif kind == "admit":
+                    prompt = op["prompt"]
+                    if op["images"]:
+                        if vision is None:
+                            raise Desync("rank 0 admitted a prompt with images; "
+                                         "this rank bound no vision family")
+                        vision.add_refs(op["refs"])
+                        prompt = P.key_from_wire(prompt, op["images"],
+                                                 op["refs"])
+                        at, segs = op["hit"], []
+                        for sg in op["segs"]:
+                            segs.append(prompt[at:at + len(sg)])
+                            at += len(sg)
+                        op = dict(op, segs=segs)
+                    c, rest = cache.fetch(model_key, prompt)
+                    if len(prompt) - len(rest) != op["hit"]:
+                        raise Desync(f"prompt cache hit {len(prompt) - len(rest)} "
+                                     f"here, {op['hit']} on rank 0")
+                    procs = []
+                    if op["penalties"]:
+                        from mlx_lm.sample_utils import make_logits_processors
+                        procs = make_logits_processors(**op["penalties"])
+                    sm, _ = control_machine(tokenizer, op["initial"])
+                    uid = executor().insert(Admission(
+                        segments=op["segs"], max_tokens=op["max_tokens"],
+                        cache=c, prefix=prompt[:op["hit"]],
+                        sampling=op["sampling"], processors=procs,
+                        state_machine=sm))
+                    if uid != op["uid"]:
+                        raise Desync(f"admitted as {uid}, rank 0 has {op['uid']}")
+                elif kind == "remove":
+                    if ex is not None:
+                        ex.remove(op["uids"])
+                elif kind == "insert":
+                    got = last.get((op["event"], op["uid"]))
+                    if got is None:
+                        raise Desync(f"no {op['event']} for row {op['uid']} in "
+                                     f"the last step")
+                    cache.insert(model_key, got[0], got[1], op["kind"])
+                elif kind == "pop":
+                    cache.lru.trim_to(n_sequences=len(cache.lru) - op["n"])
+                elif kind == "set":
+                    apply_set(op, link.rank)
+                elif kind == "reset":
+                    if ex is not None:
+                        ex.close()
+                    ex = None
+                    if vision is not None:
+                        vision.clear()
+                    halt = True
+                elif kind == "stop":
+                    link.closing = True     # rank 0 exits next: not a failure
+                    if ex is not None:
+                        ex.close()
+                    logger.info("rank %d: stopped by rank 0 after %d steps "
+                                "(%d token mismatches)", link.rank, steps,
+                                mismatches)
+                    return steps
+            # the last step's events hold its checkpoint and finished caches:
+            # not kept through a removal or a park, which nothing steps past
+            last, events = {}, []
+            if park:
+                # nothing runs: a transient measured under load is not the
+                # margin an idle rank holds back (it pinned a pipeline's
+                # over-limit above zero after one long prefill, refusing every
+                # request, 16 tokens or 40k)
+                mark.spike = 0
+                link.sleep()
+            if halt:
+                continue
+            e = executor()
+            b = e.gen._batch
+            toks = plan.get("tokens") or []
+            if [int(u) for u in b.uids] != [u for u, _ in toks]:
+                raise Desync(f"batch rows {list(b.uids)} here, "
+                             f"{[u for u, _ in toks]} on rank 0")
+            if toks and split == "pipeline":
+                b.t1 = mx.array([t for _, t in toks], dtype=mx.int32)
+            elif toks:
+                mine = b.t1.tolist()
+                theirs = [t for _, t in toks]
+                if mine != theirs:
+                    mismatches += sum(a != c for a, c in zip(mine, theirs))
+                    logger.warning("rank %d: %d token(s) differ from rank 0's; "
+                                   "rank 0's are used", link.rank,
+                                   sum(a != c for a, c in zip(mine, theirs)))
+                b.t1 = mx.array(theirs, dtype=mx.int32)
+            events = mark.around(e.step)
+            steps += 1
+            for ev in events:
+                if isinstance(ev, Checkpoint):
+                    last[("checkpoint", ev.uid)] = (ev.tokens, ev.cache)
+                elif isinstance(ev, Finished):
+                    last[("finished", ev.uid)] = (ev.tokens, ev.cache)
+    except PeerGone as e:
+        # another rank failed or vanished and said so (or its bell
+        # closed): leave between collectives, not killed inside one
+        logger.warning("rank %d: leaving after %d steps: %s", link.rank,
+                       steps, e)
+        return steps
+    except BaseException as e:
+        if link.down.is_set():
+            # a peer left first and a collective failed under it (over TCP
+            # mlx fails it: "connection to a peer was lost")
+            logger.warning("rank %d: leaving after %d steps: %s (%s: %s)",
+                           link.rank, steps, link.why, type(e).__name__, e)
+            return steps
+        # this rank fails: say so on the bell before leaving, so the
+        # others never enter a collective this rank will not join
+        link.fail(f"rank {link.rank} failed: {type(e).__name__}: {e}")
+        raise
 
 
 # ------------------------------------------------------------ bring-up
@@ -989,7 +1149,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
     after_load()
     drafting = bool(heads and heads.leader)
     from knurlogic.engine.serve import state
-    return follow(host.model, host.tokenizer, host.model_key, link,
+    steps = follow(host.model, host.tokenizer, host.model_key, link,
                   vision=state.VISION.get("serve"),
                   prompt_cache_size=prompt_cache_size,
                   completion_batch_size=completion_batch_size,
@@ -999,6 +1159,25 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                   outputs=tuple(heads.outputs) if drafting else (),
                   why=("rank 0 drafts; this rank runs its verify steps"
                        if drafting else "rank 0 does not draft"))
+    leave_if_down(link)
+    return steps
+
+
+def leave_if_down(link: Link, code: int = 0) -> None:
+    """A rank leaving a ring that went down exits here, now. After a
+    collective has failed on a lost peer, mlx's own teardown at interpreter
+    exit segfaults (measured: mlx 0.32.3, ring backend, every time), so the
+    exit skips it -- as rank 0's does (http.watch_ring, os._exit)."""
+    if not link.down.is_set():
+        return
+    import sys
+    logging.shutdown()
+    for f in (sys.stdout, sys.stderr):
+        try:
+            f.flush()
+        except (OSError, ValueError):
+            pass
+    os._exit(code)
 
 
 class agree_head:
