@@ -59,6 +59,6 @@
 - proven: tests/engine/test_vision_deepseek.py renders the artifact's
   two-image example equal to its encoder, chat and thinking at each
   effort.
-- the dialect is Flash's (off / high / max -> chat / thinking /
-  reasoning_effort "max"), so on Vision-Exp "high" is its "low" and its
-  middle "high" is not offered.
+- its thinking levels are its own four, the "deepseek_vision_effort"
+  dialect (families/deepseek): off / low (the default) / high / max ->
+  chat / thinking with reasoning_effort low / high / max.
