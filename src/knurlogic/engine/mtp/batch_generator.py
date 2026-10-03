@@ -18,7 +18,6 @@ from __future__ import annotations
 import contextlib
 import copy
 import logging
-import os
 import time
 from dataclasses import dataclass
 
@@ -612,13 +611,14 @@ class MTPBatchGenerator(BatchGenerator):
                 if self._coord is not None and isinstance(e, ForwardFailed):
                     # A rank that fails mid-forward never sends its half: the
                     # other ranks wait on it forever (a pipeline load sat at
-                    # 100% while rank 1 had raised). The rank dies instead, so
-                    # the job stops and its card says why (recovery). A
+                    # 100% while rank 1 had raised). The ring ends instead:
+                    # raised to tensor.follow / TensorExecutor.step, which
+                    # tell the other ranks on the bell before this rank
+                    # leaves, so the job stops and its card says why. A
                     # failure after the forward keeps the ranks in step.
                     logger.exception("admission of request %s failed on a "
-                                     "cluster rank; stopping this rank", uid)
-                    logging.shutdown()
-                    os._exit(1)
+                                     "cluster rank; ending the ring", uid)
+                    raise
                 logger.exception("admission of request %s failed; failing "
                                  "that request only", uid)
                 self._rows.pop(uid, None)
@@ -658,6 +658,14 @@ class MTPBatchGenerator(BatchGenerator):
                 row_steps = self._batch.step()
         # a failed decode step fails its rows; the generation thread lives (logged)
         except Exception as e:
+            if self._coord is not None:
+                # On a split model a step that raised left the ranks at
+                # different collectives (one inside a forward or a drafting
+                # broadcast, the other here): no further collective lines
+                # up -- the b0 below met a peer's b2 and both waited
+                # forever. The ring ends instead: the caller (tensor.follow,
+                # TensorExecutor.step) tells the other ranks on the bell.
+                raise
             # Same rule as a failed admission: the rows in this step fail
             # their own requests; the generation thread lives on.
             logger.exception("a decode step failed; failing its %d rows",
@@ -668,9 +676,6 @@ class MTPBatchGenerator(BatchGenerator):
                 self._rows.pop(u, None)
                 self._ckpt_pending.pop(u, None)
                 self._failed[u] = e
-            if self._coord is not None:
-                # the same broadcast count as a failed admission's
-                self._batch.t1 = self._coord.b0(self._batch.t1)
             return prompt_responses + self._failed_responses(), []
 
         # NaN guard: a row whose logits went non-finite this step is failed

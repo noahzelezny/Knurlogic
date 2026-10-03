@@ -435,6 +435,13 @@ def silence(gen) -> None:
 
 # ------------------------------------------------------------ coordinator
 
+def _gate() -> None:
+    """Before a control broadcast: a ring that has lost a rank enters no
+    collective (tensor.check_peers)."""
+    from .tensor import check_peers
+    check_peers()
+
+
 class Coord:
     """The per-step control broadcasts of a split model, pipeline (module
     docstring) or tensor: rank 0's values on every rank, one all_gather on
@@ -458,13 +465,14 @@ class Coord:
         self.diverged = False
 
     def _bcast(self, vals: list[int]) -> list[int]:
+        _gate()
         n = len(vals)
         v = mx.array(vals if self.leader else [0] * n, dtype=mx.int32)
         out = mx.distributed.all_gather(v, group=self.group, stream=mx.cpu)
         return out[:n].tolist()           # rank 0's block is the first
 
     def b0(self, t1: mx.array | None) -> mx.array | None:
-        """After every admission attempt (and a failed decode step): every
+        """After every admission attempt: every
         row's next token, rank 0's. Made even when the admission failed on
         one rank, so the ranks' collective counts stay equal; the row counts
         may then differ (rank 0 dropped a row the follower still holds, or
@@ -472,6 +480,7 @@ class Coord:
         t1 -- the follower's rows and tokens are set from the next plan --
         and `diverged` is set."""
         self.calls["b0"] += 1
+        _gate()
         mine = [] if t1 is None else [int(t) for t in t1.tolist()]
         ns = mx.distributed.all_gather(
             mx.array([len(mine)], dtype=mx.int32), group=self.group,
@@ -494,6 +503,7 @@ class Coord:
         did not, every rank's admission fails here (RuntimeError), before
         a prefill whose sends one rank would never make."""
         self.calls["ba"] += 1
+        _gate()
         got = mx.distributed.all_gather(
             mx.array([int(bool(ok)), int(hit), int(bool(drafts))],
                      dtype=mx.int64), group=self.group,

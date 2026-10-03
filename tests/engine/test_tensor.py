@@ -2,6 +2,9 @@
 order, the ring's prompt-cache journal, and the VQ codebook rule (a split
 VQ layer's halves add up to the whole; a sliced codebook is caught)."""
 
+import threading
+from types import SimpleNamespace
+
 import pytest
 
 from knurlogic.engine.runtime import plan as P
@@ -364,6 +367,7 @@ def test_a_ring_serves_its_first_model_and_refuses_switching():
 
     class R:
         world, journal = 2, None
+        link = SimpleNamespace(on_down=[], down=threading.Event())
     s = Scheduler(H(), tensor=R())
     s.host.expect("/m/a")                   # what Scheduler.load does first
     first = Command("load", "/m/a")
@@ -501,6 +505,7 @@ def test_a_set_journaled_while_parked_rings_the_ring():
 
     class L:
         size, socks, parked = 2, [object()], True
+        on_down, down = [], threading.Event()
 
         def exchange(self, over, payload):
             sent.append(P.decode(payload))
