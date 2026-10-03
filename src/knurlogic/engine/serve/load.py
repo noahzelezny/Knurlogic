@@ -296,6 +296,19 @@ def apply_live(env: dict) -> dict:
     return done
 
 
+class _TemplateOnly:
+    """What mlx-lm 0.32's `_infer_tool_parser(tokenizer)` reads, for a
+    caller holding only the template (doctor reads the artifact, it loads
+    no tokenizer): the template, and no vocab for its vocab fallback. 0.31
+    took the template string itself."""
+
+    def __init__(self, chat_template: str):
+        self.chat_template = chat_template
+
+    def get_vocab(self) -> dict:
+        return {}
+
+
 def tool_support(chat_template: str) -> dict:
     """Which tool-call dialect an artifact speaks, and whether knurlogic can read it.
 
@@ -326,7 +339,7 @@ def tool_support(chat_template: str) -> dict:
         out["parser"] = "unknown (this engine exposes no inference rule)"
         return out
     try:
-        out["parser"] = _infer_tool_parser(chat_template)
+        out["parser"] = _infer_tool_parser(_TemplateOnly(chat_template))
     except (ValueError, TypeError, KeyError, AttributeError, RuntimeError):
         out["parser"] = None
     from knurlogic.engine import templates

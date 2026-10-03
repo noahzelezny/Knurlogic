@@ -30,7 +30,7 @@ _MACHINES: dict = {}
 
 
 def control_machine(tokenizer, initial: str = "normal"):
-    """(SequenceStateMachine, {token sequence: its text}) for the tokenizer's
+    """(ControlMachine, {token sequence: its text}) for the tokenizer's
     control tokens: end-of-turn, think markers, tool markers. The user's
     stop strings are NOT here -- they are text, matched by `Request`.
     Cached per tokenizer and initial state."""
@@ -38,9 +38,7 @@ def control_machine(tokenizer, initial: str = "normal"):
     hit = _MACHINES.get(key)
     if hit is not None and hit[0] is tokenizer:
         return hit[1], hit[2]
-    import importlib
-    SequenceStateMachine = importlib.import_module(
-        "mlx_lm.generate").SequenceStateMachine
+    from .control import ControlMachine
 
     seqs: dict[tuple[int, ...], str] = {}
     ends: list = []
@@ -62,7 +60,7 @@ def control_machine(tokenizer, initial: str = "normal"):
         seqs[ts] = tokenizer.tool_call_start
         if te:
             seqs[te] = tokenizer.tool_call_end
-    sm = SequenceStateMachine(edges, initial=initial)
+    sm = ControlMachine(edges, initial=initial)
     if len(_MACHINES) > 64:
         _MACHINES.clear()
     _MACHINES[key] = (tokenizer, sm, seqs)

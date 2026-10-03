@@ -196,7 +196,7 @@ def _load_bundled(tmp_path):
     cfg = json.loads((d / "config.json").read_text())
     (d / "config.json").write_text(json.dumps(dict(cfg, model_file="model.py")))
     assert loading.register(Artifact.load(str(d))) == []
-    model, _ = load_model(d)
+    model, _ = load_model(d, trust_remote_code=True)
     assert type(model).__module__ != type(model.model).__module__
     return model
 

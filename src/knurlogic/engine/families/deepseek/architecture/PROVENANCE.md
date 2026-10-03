@@ -9,7 +9,8 @@ artifacts were validated against -- not merely that it imports.
 - from: `mlx_lm/models/deepseek_v4.py` of the project's own
   mlx-lm fork (installed from a local `mlx_lm-0.31.9` wheel), vendored with
   its author's permission. No exo code is in it.
-- mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.31.3.
+- mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.32.0 (0.31.3
+  until 2026-10-02).
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
 - vendored sha256: `9bc8fe59372f332c82272cccd646ad22b5bf376cab8838b4795023ebc4ffcb81`
   (the fork's file plus the edits below; every one is marked
@@ -23,7 +24,12 @@ artifacts were validated against -- not merely that it imports.
   byte-identical between 0.31.3 and the fork's 0.31.9, and `cache.py`
   differs only in ArraysCache extract/merge None-slot handling and a
   BatchKVCache `mx.depends` -- neither class is used by this module. So no
-  fork-only helper is vendored.
+  fork-only helper is vendored. On 0.32.0: `base.py` adds a mask
+  expand_dims in the quantized SDPA (n_repeats > 1, 4-D mask) and
+  `switch_layers.py` always stop_gradients the expert indices (no forward
+  change); `cache.py` folds meta_state into `state` (from_state takes one
+  argument) -- RotatingKVCache's state now carries its scalars. The tiny
+  golden still matches the fork to 2.0e-06 (1.7e-06 on mlx 0.31.2).
 - not taken: the fork's `utils.py` F8_E8M0 loader shim. It only matters
   for a raw DeepSeek FP8 checkpoint; the mlx-community conversion is
   already MLX-quantized (8-bit affine g64, routed experts mxfp4 g32) and

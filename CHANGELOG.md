@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+* Runs on mlx 0.32.3 and mlx-lm 0.32.0 (was 0.31.2 / 0.31.3), so it
+  computes what current mlx computes. Logits move by float rounding
+  (mlx 0.32's kernels); greedy tokens on the test models are unchanged.
+* Python 3.11 or newer (mlx-lm 0.32 needs it).
+
 ## 0.1.2
 
 DeepSeek-V4-Flash in full, MTP on a tensor split, and a cluster that stops
