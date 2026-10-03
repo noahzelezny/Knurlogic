@@ -1092,7 +1092,9 @@ VISION_TOWER_PREFIXES = ("vision_tower.", "embed_vision.", "vision_model.",
                          "visual.", "model.visual.",
                          "model.language_model.visual.",
                          "model.vision_tower.", "model.embed_vision.",
-                         "multi_modal_projector.")
+                         "multi_modal_projector.",
+                         # DeepSeek-V4-Flash-Vision-Exp: its ViT and aligner
+                         "vision.", "aligner.")
 #
 # 2. The IMAGE STORE'S bound. The number is engine/vision/store.py's
 #    DEFAULT_MAX_BYTES (one home), or a live store's budget_bytes() when a

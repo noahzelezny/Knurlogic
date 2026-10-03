@@ -75,7 +75,7 @@ def registered(model_type: str, path=None) -> bool:
             config = json.loads((Path(path) / "config.json").read_text())
         except (OSError, ValueError):
             return False
-        if not has_vision_config(config):
+        if not has_vision_config(config, path):
             return False
     try:
         return importlib.util.find_spec(t.split(":")[0]) is not None
@@ -90,16 +90,42 @@ def has_family(model_type: str) -> bool:
     return t is not None and resolve(t) is not None
 
 
-def has_vision_config(config: dict) -> bool:
+def has_vision_config(config: dict, path=None) -> bool:
     """Does this config.json describe a vision tower? A `vision_config`
     (every mlx-vlm family), or DeepSeek-V4's flat `vision_n_layers > 0`
-    (DeepSeek-V4-Flash-Vision-Exp keeps its vision fields at the top)."""
+    (DeepSeek-V4-Flash-Vision-Exp keeps its vision fields at the top).
+    With `path`, the flat form also needs the tower's `vision.*` tensors
+    in the artifact: a text-only conversion keeps the config fields but
+    not the tower."""
     if config.get("vision_config"):
         return True
     try:
-        return int(config.get("vision_n_layers") or 0) > 0
+        if int(config.get("vision_n_layers") or 0) <= 0:
+            return False
     except (TypeError, ValueError):
         return False
+    return path is None or _names_tower(path)
+
+
+def _names_tower(path) -> bool:
+    """Does the artifact's weight index (or, without one, a shard header)
+    name a `vision.*` tensor?"""
+    import struct
+    from pathlib import Path
+    root = Path(path)
+    try:
+        index = root / "model.safetensors.index.json"
+        if index.is_file():
+            names = json.loads(index.read_text()).get("weight_map", {})
+            return any(k.startswith("vision.") for k in names)
+        for f in sorted(root.glob("*.safetensors")):
+            with open(f, "rb") as fh:
+                (n,) = struct.unpack("<Q", fh.read(8))
+                if any(k.startswith("vision.") for k in json.loads(fh.read(n))):
+                    return True
+    except (OSError, ValueError, struct.error):
+        return False
+    return False
 
 
 def build(model_type: str, model_path: str, text_model: Any,
@@ -115,7 +141,7 @@ def build(model_type: str, model_path: str, text_model: Any,
         from pathlib import Path
         p = Path(model_path) / "config.json"
         config = json.loads(p.read_text()) if p.is_file() else {}
-    if not has_vision_config(config):
+    if not has_vision_config(config, model_path):
         return None
     fn = resolve(t)
     if fn is None:
