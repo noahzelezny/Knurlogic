@@ -13,6 +13,7 @@ import './views/settings/models.js';
 import './views/settings/knurlogic.js';
 import './views/bench.js';
 import './views/chat.js';
+import './views/release.js';
 import {OVL} from './ui/overlay.js';
 import {loadSettings} from './views/settings/cluster.js';
 import {STAGEPOP, stagedCount} from './views/settings/apply.js';
