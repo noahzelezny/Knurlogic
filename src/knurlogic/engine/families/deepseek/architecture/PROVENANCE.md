@@ -12,7 +12,7 @@ artifacts were validated against -- not merely that it imports.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.32.0 (0.31.3
   until 2026-10-02).
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `9bc8fe59372f332c82272cccd646ad22b5bf376cab8838b4795023ebc4ffcb81`
+- vendored sha256: `60370f32592140b8b9de5b8b527a05a1b4ec5ba25a05ea94c6694b93d7da8374`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -203,3 +203,28 @@ HC head and the final norm); tested, not changed.
    ~0.026% of shared-expert activations leave +-10, changing the shared
    output by ~2% on average and up to 58% in a chunk
    (tests/engine/test_deepseek_v4_arch.py, the shared-expert clamp test).
+
+### Edit 19, for speculative decoding (DSpark and MTP)
+
+19. **Rolling a verify forward back without a replay**
+   (`DeepseekV4Cache.spec_begin` / `spec_can_rollback` / `spec_rollback`
+   / `spec_end`, recording hooks in `accumulate_windows`, `update_pool` and
+   `Compressor.__call__`). The cache could not be trimmed, so a rejected
+   draft cost a restore and a replay forward of the committed tokens
+   (~55 ms of a ~163 ms DSpark step on Vision-Exp). `spec_begin` holds the
+   cache's state (new array handles, nothing copied) and records what the
+   next forward feeds each branch (raw kv / gate rows, start position,
+   the pooled rows it emits, the compressor's `ape`); `spec_rollback(p)`
+   restores the held state and re-runs the bookkeeping on the first p
+   tokens: the window ring takes their keys (the forward appended them in
+   order), each branch's `accumulate_windows` runs on their rows, the
+   overlap carry is redone from them, and `update_pool` takes the pooled
+   rows the forward computed for the windows they complete (a window's
+   row depends only on its own tokens and the window before it). Falls
+   back (False from `spec_can_rollback`) after more than one forward, a
+   1-wide one, or a right-padded prefill. Nothing changes when unused.
+   Proven against a cache fed only the p tokens, every state array and the
+   following steps' logits within 1e-4 float32 (measured ~1e-6: the pooled
+   rows come from sums of another width), across ratio-4 / 128 / 0 layers,
+   pool boundaries, the decode hot path's buffer and a merged batch of
+   rows of different lengths (tests/engine/test_deepseek_v4_rollback.py).

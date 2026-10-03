@@ -11,8 +11,23 @@ token its verdict put at position m (its accepted draft there, its
 correction, or with m = K the bonus from the last verify row) -- every one
 a token of the target's distribution, so nothing is resampled. One row
 loses nothing; at B rows the rows that accepted more give back the excess
-(the batch's acceptance is its worst row's). When m < K the trunk is
-restored and replays [t1, d_1..d_m] (caches.py), as MTPBatch replays.
+(the batch's acceptance is its worst row's). When m < k the trunk rolls
+back to the m + 1 committed positions (caches.rollback: deepseek_v4's
+cache by its own bookkeeping, architecture edit 19), and the head takes
+the verify's hidden states of those positions; a cache that cannot roll
+forward is restored and [t1, d_1..d_m] replayed, as MTPBatch replays.
+
+The head drafts all K in its one pass, but a step verifies only the first
+k (1..K): a wider MoE forward reads more experts, and drafts the head
+rarely gets right cost more to verify than they return. k maximizes
+(1 + sum of the chances that the batch accepts j drafts, j <= k) over the
+measured seconds of a step at that width (_width); every width is timed,
+none assumed. The chances are this step's own, from the head's confidence
+scores (sigmoid of each position's score, read as the chance that draft
+stands given the ones before it; the batch accepts j only if every row
+does, so the rows' products multiply) while those stay calibrated against
+the verdicts; otherwise the measured per-position acceptance. The emitted
+tokens are the same for every k.
 
 Verdicts are MTPBatch's per position: greedy `draft == argmax`, a seeded
 row the target's own draw under the draft's key (sampling.Keys; positions
@@ -21,8 +36,8 @@ the distribution each draft was drawn from. A row's logits processors see
 the history up to each position, on the draft rows and the verify rows
 both. The head's cache only ever takes committed positions (the trunk's
 captured main hidden states of the forward that committed them), so it is
-never rolled back. The confidence head's score is not used: the
-reference's generate.py does not use it either.
+never rolled back. The confidence head's score only chooses the verify
+width (the reference's generate.py does not use it).
 
 Across a split (pipeline or tensor) every rank runs this loop; only rank
 0 holds the head, drafts and judges. Coord.bk carries its regime and the
@@ -40,9 +55,9 @@ import os
 
 import mlx.core as mx
 
-from .batch_loop import Emitted, MTPBatch, RowStep, _apply, _finite_rows, \
-    _key, _mark, _pick
-from .caches import restore, snapshot
+from .batch_loop import EXPLORE_STEPS, RECHECK_EVERY, Emitted, MTPBatch, \
+    RowStep, _apply, _finite_rows, _key, _mark, _pick
+from .caches import release, rollback, snapshot
 from .sampling import rejection_correct
 
 
@@ -52,6 +67,22 @@ logger = logging.getLogger(__name__)
 PROFILE = os.environ.get("KNURLOGIC_MTP_PROFILE", "").strip().lower() in (
     "1", "on", "true", "yes")
 PROFILE_EVERY = 32
+#: the confidence scores' calibration check (BlockBatch.calibrated):
+#: verdicts at a position before it counts, the largest |mean predicted -
+#: hit rate|, and the window it slides over
+CAL_MIN = 32
+CAL_TOL = 0.1
+CAL_WINDOW = 256
+
+
+def _fixed_width() -> int | None:
+    """KNURLOGIC_MTP_VERIFY=k: verify the first k drafts every step
+    (clamped to 1..K); unset, k is chosen by measurement (_width)."""
+    v = os.environ.get("KNURLOGIC_MTP_VERIFY", "").strip()
+    try:
+        return int(v) if v else None
+    except ValueError:
+        return None
 
 
 def _hist(emitted: list[int], tail: list) -> Any:
@@ -75,6 +106,17 @@ class BlockBatch(MTPBatch):
         #: rank 0's (tensor.agree_head)
         self.block_size = int(block_size
                               or getattr(self.head, "block_size", 0))
+        #: (rows, k) -> (EMA seconds per drafting step verifying k, steps)
+        self._vcost: dict = {}
+        #: rows -> [EMA chance the batch accepts >= j drafts, j = 1..K]
+        #: (None until a step verified j)
+        self._vacc: dict = {}
+        self._wexplore: tuple | None = None   # (rows, k, steps left)
+        self._wsince = 0
+        #: per position j: [sum of predicted P(batch accepts >= j), sum of
+        #: hits, steps] -- the confidence scores' calibration check
+        self._cal = [[0.0, 0.0, 0] for _ in range(self.block_size)]
+        self._pred: list | None = None
 
     def _live(self, B: int) -> list[bool]:
         return [bool(self.drafts[i]) for i in range(B)]
@@ -91,12 +133,16 @@ class BlockBatch(MTPBatch):
         self._prof_start()
         pre = None
         c = self.coord
+        if drafting and (c is None or c.leader):
+            # the head drafts its whole block; the step verifies k of it
+            d, qs, conf = self._draft_block(B, live)
+            self._prof("draft", d)
+            self._pred = self._predicted(conf, live)
+            k = self._width(B, self._pred)
+            pre = (d[:, :k], [q[:k] for q in qs])
         if c is not None and (self.head is not None or c.head):
-            # B1, every step while rank 0 holds a head: its regime and
+            # B1, every step while rank 0 holds a head: its regime, k and
             # drafts (a follower holds none and asks)
-            if c.leader and drafting:
-                pre = self._draft_block(B, live)
-                self._prof("draft", pre[0])
             drafting, d = c.bk(drafting, pre[0] if pre else None, B,
                                self.block_size)
             self._prof("b1")
@@ -105,9 +151,99 @@ class BlockBatch(MTPBatch):
         self._note_regime(drafting, B)
         out = self._block_step(B, pre) if drafting else self._plain_step()
         n = sum(len(rs.tokens) for rs in out)
-        self._record_cost(B, drafting, self._clock() - t0, n)
+        sec = self._clock() - t0
+        self._record_cost(B, drafting, sec, n)
+        if drafting:
+            self._record_width(B, int(pre[0].shape[1]), sec)
         self._prof_end(drafting, n)
         return out
+
+    # ------------------------------------------------------------ width
+    def _predicted(self, conf, live) -> list[float] | None:
+        """P(the batch accepts >= j drafts), j = 1..K, from the confidence
+        scores [B, K]: per row the running product of sigmoid(score), over
+        the drafting rows the product of those (None without scores)."""
+        rows = [i for i, x in enumerate(live) if x]
+        if conf is None or not rows:
+            return None
+        p = mx.cumprod(mx.sigmoid(conf.astype(mx.float32)), axis=1)
+        return mx.prod(p[mx.array(rows)], axis=0).tolist()
+
+    def calibrated(self) -> bool:
+        """Do the confidence predictions match the verdicts? Position 1 and
+        every position verified CAL_MIN times must have its mean prediction
+        within CAL_TOL of its hit rate."""
+        if self._cal[0][2] < CAL_MIN:
+            return False
+        return all(abs(c[0] - c[1]) / c[2] <= CAL_TOL
+                   for c in self._cal if c[2] >= CAL_MIN)
+
+    def _width(self, B: int, pred: list[float] | None = None) -> int:
+        """How many of the K drafts this step verifies: the k with the most
+        expected tokens per second, (1 + sum_{j<=k} P(batch accepts >= j))
+        / (seconds of a step verifying k at this row count). P is `pred`
+        (this step's confidence scores) while calibrated(), else the
+        measured acceptance.
+        Every k is timed EXPLORE_STEPS steps first (K first: its steps
+        measure every position's acceptance), and K is re-measured every
+        RECHECK_EVERY steps, as acceptance moves with the text."""
+        K = self.block_size
+        fixed = _fixed_width()
+        if fixed is not None:
+            return min(max(fixed, 1), K)
+        # a seeded row: one width always (a verify of another width rounds
+        # differently, and a near-tie would not reproduce; drafting_pays)
+        if any(p.keys is not None and d
+               for p, d in zip(self.params, self.drafts)):
+            return K
+        ex = self._wexplore
+        if ex is not None and ex[0] == B and ex[2] > 0:
+            return ex[1]
+        self._wexplore = None
+        for k in range(K, 0, -1):
+            got = self._vcost.get((B, k))
+            if got is None or got[1] < EXPLORE_STEPS:
+                self._wexplore = (B, k, EXPLORE_STEPS - (got[1] if got else 0))
+                return k
+        use = pred if pred is not None and self.calibrated() else None
+        best = max(range(1, K + 1), key=lambda k: self._rate(B, k, use))
+        self._wsince += 1
+        if best != K and self._wsince >= RECHECK_EVERY:
+            self._wsince = 0
+            self._wexplore = (B, K, EXPLORE_STEPS)
+            return K
+        return best
+
+    def _rate(self, B: int, k: int, pred=None) -> float:
+        """Expected committed tokens per second verifying k drafts."""
+        acc = pred if pred is not None else (self._vacc.get(B) or [])
+        tokens = 1.0 + sum(a for a in acc[:k] if a is not None)
+        return tokens / max(self._vcost[(B, k)][0], 1e-9)
+
+    def _record_width(self, B: int, k: int, seconds: float) -> None:
+        ema, n = self._vcost.get((B, k), (seconds, 0))
+        self._vcost[(B, k)] = (0.8 * ema + 0.2 * seconds, n + 1)
+        ex = self._wexplore
+        if ex is not None and ex[0] == B and ex[1] == k:
+            self._wexplore = (B, k, ex[2] - 1)
+
+    def _record_accept(self, B: int, k: int, m: int) -> None:
+        """The batch accepted m of k verified drafts: P(>= j) for j <= k."""
+        acc = self._vacc.setdefault(B, [None] * self.block_size)
+        pred, self._pred = self._pred, None
+        for j in range(k):
+            hit = 1.0 if m > j else 0.0
+            acc[j] = hit if acc[j] is None else 0.9 * acc[j] + 0.1 * hit
+            if pred is not None:
+                c = self._cal[j]
+                if c[2] >= CAL_WINDOW:
+                    # a sliding record: calibration can be lost and regained
+                    c[0] -= c[0] / c[2]
+                    c[1] -= c[1] / c[2]
+                    c[2] -= 1
+                c[0] += pred[j]
+                c[1] += hit
+                c[2] += 1
 
     # ---------------------------------------------------------- profile
     # KNURLOGIC_MTP_PROFILE=1: each phase of a step timed behind an
@@ -150,16 +286,18 @@ class BlockBatch(MTPBatch):
 
     # ------------------------------------------------------------- draft
     def _draft_block(self, B: int, live: list[bool]):
-        """(d [B, K] int32, the draft distributions per row and position)."""
+        """(d [B, K] int32, the draft distributions per row and position,
+        the confidence scores [B, K] float32 or None)."""
         head = self.head
         K = self.block_size
         x, base = head.block(self.t1, self.hcache)
         prev = self.t1.astype(mx.int32)
         qs: list[list] = [[None] * K for _ in range(B)]
         plain = all(p.dist is None and not p.processors for p in self.params)
-        cols = []
+        cols, embeds = [], []
         for k in range(K):
-            bias, _ = head.markov(prev)
+            bias, e = head.markov(prev)
+            embeds.append(e)
             rows = base[:, k].astype(mx.float32) + bias
             if plain:
                 prev = mx.argmax(rows, axis=-1).astype(mx.int32)
@@ -182,17 +320,17 @@ class BlockBatch(MTPBatch):
                     qs[i][k] = q
             prev = mx.concatenate(picks).astype(mx.int32)
             cols.append(prev)
-        return mx.stack(cols, axis=1), qs
+        conf = (head.confidence(x, mx.stack(embeds, axis=1))
+                if hasattr(head, "confidence") else None)
+        return mx.stack(cols, axis=1), qs, conf
 
     # -------------------------------------------------------------- step
-    def _block_step(self, B: int, pre=None) -> list[RowStep]:
-        """`pre`: (d, qs) already drawn (a split's B1; qs None on a
-        follower, which never judges)."""
-        K = self.block_size
+    def _block_step(self, B: int, pre) -> list[RowStep]:
+        """`pre`: (d [B, K'], qs), the K' drafts this step verifies (qs
+        None on a follower, which never judges)."""
         live = self._live(B)
-        d, qs = pre if pre is not None else self._draft_block(B, live)
-        if pre is None:
-            self._prof("draft", d)
+        d, qs = pre
+        K = int(d.shape[1])
         # rank 0 judges; a follower's verdicts come in B2
         judge = self.coord is None or self.coord.leader
 
@@ -256,6 +394,7 @@ class BlockBatch(MTPBatch):
                         a += 1
                 acc.append(a)
             m = min(acc)
+            self._record_accept(B, K, m)
             # no row commits past the token that ends one (MTPBatch._ends)
             for i in range(B):
                 end = self._ends(i, [t1_list[i]] + d_all[i][:m])
@@ -284,14 +423,20 @@ class BlockBatch(MTPBatch):
             m, nxt = self.coord.bm(m, nxt, B)
             self._prof("b2")
 
-        # --- rollback + replay to the m + 1 committed positions ----------
-        if m < K:
-            restore(self.cache, csnap)
+        # --- rollback to the m + 1 committed positions --------------------
+        if m == K:
+            release(self.cache, csnap)
+            h_c = h_v
+        elif rollback(self.cache, csnap, m + 1):
+            # the head takes the committed positions' hidden states from
+            # the verify: a causal forward's first m + 1 are theirs
+            h_c = None if h_v is None else h_v[:, :m + 1]
+            self._prof("rollback")
+        else:
+            # restored: replay the committed tokens
             self.model(inp[:, :m + 1], cache=self.cache, **self._pos_kw(m + 1))
             h_c = self.get_h()
             self._prof("replay", h_c)
-        else:
-            h_c = h_v
 
         fin = mx.stack([_finite_rows(self.row_t1)]
                        + [_finite_rows(lg[:, k]) for k in range(m)], axis=1)

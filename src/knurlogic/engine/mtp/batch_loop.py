@@ -4,8 +4,10 @@ Draft one token with the head, verify it inside a 2-token trunk forward,
 for B rows at once. It is batchable because with a 1-token draft EVERY row
 advances by exactly two positions per step, accepted or not, so the
 batched caches (one offset per row, shared write index) never need per-row
-trimming: rejection is ONE whole-batch trim(2) and ONE replay forward with
-the tokens that actually committed. Expected forwards per step are
+trimming: rejection is ONE whole-batch rollback to t1 (caches.rollback)
+and ONE 1-wide forward of the committed t2 -- or, for caches that cannot
+roll forward (recurrent state), a restore and a 2-wide replay of [t1, t2].
+Expected forwards per step are
 1 + (1 - a^B) for 2B tokens -- a decaying win; measure before assuming it
 beats plain batching at a given B.
 
@@ -28,7 +30,7 @@ from mlx_lm.generate import _extend_cache, _merge_caches
 
 from knurlogic.cluster.jobs import chunk_done
 
-from .caches import position, restore, snapshot
+from .caches import position, release, restore, rollback, snapshot
 from .sampling import Distribution, Keys, rejection_correct
 from .seed import seed_head
 
@@ -685,7 +687,7 @@ class MTPBatch:
         drop = set(uids)
         self.filter([i for i, u in enumerate(self.uids) if u not in drop])
 
-    def _pos_kw(self, width: int) -> dict:
+    def _pos_kw(self, width: int, start: int = 0) -> dict:
         """`position_ids` for a decode forward `width` tokens wide, or {}.
 
         A Qwen row whose key holds an image decodes at position
@@ -701,7 +703,7 @@ class MTPBatch:
         if not any(self.mrope):
             return {}
         base = [self.n_prompt[i] + len(self.emitted[i]) + self.rope_delta[i]
-                for i in range(len(self.uids))]
+                + start for i in range(len(self.uids))]
         p = mx.array(base)[:, None] + mx.arange(width)[None, :]
         return {"position_ids": mx.broadcast_to(p[None], (3, *p.shape))}
 
@@ -864,11 +866,23 @@ class MTPBatch:
             restore(self.cache, csnap)
             return self._plain_step(then=t2)
 
-        # --- rollback + replay if anyone rejected ------------------------
-        if not all(ok_flags):
-            restore(self.cache, csnap)
-            lg2 = self.model(mx.stack([self.t1, t2], axis=1), cache=self.cache,
-                             **pos2)
+        # --- rollback if anyone rejected: t1 stays, t2 is fed ------------
+        h_pair = None
+        if all(ok_flags):
+            release(self.cache, csnap)
+        else:
+            h_v = self.get_h() if self.any_drafting else None
+            if rollback(self.cache, csnap, 1):
+                # the verify's first position is t1's: only t2 is new
+                lg1 = self.model(t2[:, None], cache=self.cache,
+                                 **self._pos_kw(1, start=1))
+                lg2 = mx.concatenate([lg2[:, :1], lg1], axis=1)
+                if h_v is not None:
+                    h_pair = mx.concatenate([h_v[:, :1], self.get_h()],
+                                            axis=1)
+            else:
+                lg2 = self.model(mx.stack([self.t1, t2], axis=1),
+                                 cache=self.cache, **pos2)
 
         # NaN guard, lazy: joins the eval at the end of the step.
         fin = mx.stack([_finite_rows(self.row_t1), _finite_rows(lg2[:, 0])],
@@ -904,7 +918,8 @@ class MTPBatch:
 
         # --- next-step state for the survivors ---------------------------
         row_t1 = lg2[:, 1]
-        h_pair = self.get_h() if self.any_drafting else None
+        if h_pair is None and self.any_drafting:
+            h_pair = self.get_h()
         t_next_rows = [
             _pick(row_t1[i:i + 1], self.params[i], self.emitted[i]) for i in keep
         ]

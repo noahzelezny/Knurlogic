@@ -571,15 +571,23 @@ class Coord:
 
 
     def bk(self, drafting: bool, d: mx.array | None, B: int, K: int):
-        """B1 of a block drafter: -> (drafting, d [B, K] int32 or None)."""
+        """B1 of a block drafter: -> (drafting, d [B, k] int32 or None),
+        the k <= K drafts rank 0 verifies this step (the word's first slot
+        says k, 0 for a plain step; the drafts ride padded to K)."""
         self.calls["b1"] += 1
-        vals = [int(bool(drafting))] + (
-            [int(t) for t in d.reshape(-1).tolist()]
-            if (self.leader and d is not None) else [0] * (B * K))
+        if self.leader and d is not None:
+            k = int(d.shape[1])
+            flat = [int(t) for t in d.reshape(-1).tolist()]
+            vals = [k if drafting else 0] + [
+                flat[i * k + j] if j < k else 0
+                for i in range(B) for j in range(K)]
+        else:
+            vals = [int(bool(drafting))] + [0] * (B * K)
         got = self._bcast(vals)
         if not got[0]:
             return False, None
-        return True, mx.array(got[1:], dtype=mx.int32).reshape(B, K)
+        k = got[0]
+        return True, mx.array(got[1:], dtype=mx.int32).reshape(B, K)[:, :k]
 
     def bm(self, m: int, nxt: list[int], B: int):
         """B2 of a block drafter: -> (m, the committed count less one;
