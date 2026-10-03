@@ -12,7 +12,7 @@ artifacts were validated against -- not merely that it imports.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.32.0 (0.31.3
   until 2026-10-02).
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `60370f32592140b8b9de5b8b527a05a1b4ec5ba25a05ea94c6694b93d7da8374`
+- vendored sha256: `c91f2bef59fd3d19ff3dfa070ad3ad7b8aca35ac491984ef52dd7638a5573a85`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -228,3 +228,74 @@ HC head and the final norm); tested, not changed.
    rows come from sums of another width), across ratio-4 / 128 / 0 layers,
    pool boundaries, the decode hot path's buffer and a merged batch of
    rows of different lengths (tests/engine/test_deepseek_v4_rollback.py).
+
+### Edit 20, a fix (Flash and Vision-Exp)
+
+20. **The reference's low-precision activation simulation** (new
+   `fp8_simulate`, `fp4_simulate`, `rotate_activation`,
+   `fp8_simulate_nope`, `fp4_simulate_rotated`; applied in
+   `_attn_qkv_partial_rope`, `_compressor_norm_strided_rope` /
+   `_compressor_qat`, `Compressor.__init__` / `__call__`, `Indexer`).
+   DeepSeek's reference inference rounds some activations through FP8 /
+   FP4 and back to match its quantization-aware training; the fork did
+   none of it. The sites, identical in Flash's and Vision-Exp's
+   inference/model.py (line numbers Flash / Vision-Exp):
+   - the attention's window kv, non-rope dims: `act_quant(kv[..., :-rd],
+     64, scale_fmt, scale_dtype, True)` (506 / 547), so every token's
+     window key and the attention's own value;
+   - the attention's compressor, each pooled row's non-rope dims, after
+     its norm and rope, before it is stored: `act_quant(kv[..., :-rd],
+     64, ...)` (372 / 412);
+   - the indexer's compressor (`Compressor(..., rotate=True)`), the whole
+     row: `rotate_activation(kv)` then `fp4_act_quant(kv, 32, True)`
+     (369-370 / 409-410);
+   - the indexer's query after its rope: `rotate_activation(q)` then
+     `fp4_act_quant(q, 32, True)` (414-416 / 454-456).
+   The math is kernel.py's: act_quant_kernel per block of 64, amax
+   floored at 1e-4, scale `fast_round_scale(amax * (1/448))` (2 to the
+   ceiling of log2, from the float32 bits; both configs run ue8m0, as
+   model.py sets scale_fmt = "ue8m0" whenever scale_dtype is "fp8", its
+   default), clamp to +-448, e4m3 round-to-nearest-even (`mx.to_fp8`,
+   equal to torch's float8_e4m3fn cast on every bf16 value and 1M float32
+   ones), times the scale; fp4_quant_kernel per block of 32, amax floored
+   at 6 * 2**-126, scale the power-of-two ceiling of amax / 6, clamp to
+   +-6, e2m1 round-to-nearest-even; rotate_activation the Sylvester
+   Hadamard transform scaled by dim**-0.5 in float32
+   (`mx.hadamard_transform` on a float32 copy: on bf16 it accumulates in
+   bf16). A last dim that is not whole blocks (only tiny test configs;
+   the reference asserts) is left as it is. The model runs the same
+   arithmetic as two Metal kernels, one dispatch a site
+   (`_fp8_nope_kernel`: a simdgroup per 64-block, writing the roped dims
+   after it, so it replaces the concatenate that was there;
+   `_rotate_fp4_kernel`: one thread a value, the butterflies in
+   mx.hadamard_transform's order, a simdgroup per 32-block), with e4m3 /
+   e2m1 rounding as rint(v * 2**-e) * 2**e at the format's spacing:
+   equal to `mx.to_fp8` on every bf16 value in range and 2M float32 ones,
+   and to the op graphs (on the CPU, the op graphs run). Added decode
+   cost, measured on a random 8-layer config with Flash's attention
+   shapes (head_dim 512, rope 64, indexer 64 x 128): within noise of
+   none per step (~4.0 ms); per site ~0.5 us over the concatenate it
+   replaces and ~6 us for the indexer query's kernel (the op graphs: ~25
+   and ~40 us). Estimated on Flash: ~0.2 ms a token (43 window sites, 21
+   indexer queries, pooled rows every 4 / 128 tokens). Pooled rows are rounded before
+   `update_pool`, so edit 19's recorded rows are the rounded ones; the
+   rounding is per row, so a rolled-back cache holds what a narrower
+   forward would. Flash's MTP block uses the trunk's V4Attention and so
+   rounds its kv too, as the reference's MTPBlock (an Attention) does. The DSpark head (heads/deepseek_v4_dspark.py) rounds its
+   main_kv and block kv the same way (Vision-Exp 811 / 830).
+   Proven against the reference itself under torch (kernels ported in
+   tests/support/goldens/build_deepseek_v4_dspark.py): the three kernels
+   bit for bit on float32 and bf16 inputs; a tiny trunk with ratio 0 / 4
+   (indexer keeping 8 of 31 rows) / 128 / 4 layers plus three DSpark
+   stages, 126-token prefill and 5 decode steps: max abs difference on
+   the logits 1.7e-6 (0.81 without this edit), main hidden 3.6e-6 (1.7),
+   draft logits 2.1e-6 (2.2), confidence 9.5e-6 (2.1), draft ids equal
+   (not without) (tests/engine/test_deepseek_v4_dspark.py).
+   Not simulated, a known remaining difference: the reference also
+   rounds every FP8 / FP4 linear's input through `act_quant` (block 128,
+   ue8m0) before its fp8_gemm / fp4_gemm (model.py's `linear`, 110-118 /
+   127-133), where the vendored file runs mxfp4 matmuls on bf16
+   activations. Measured on random activations, that rounding moves each
+   linear's output by ~2.7% RMS relative (bf16's own rounding is ~0.2%);
+   the model was trained with it, so it is a difference from the
+   reference, not a known loss.
