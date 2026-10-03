@@ -26,13 +26,14 @@ class Sched:
         self.calls.append(("abort",))
 
 
-def _term(monkeypatch, state, ends=True):
+def _term(monkeypatch, state, ends=True, within=15.0):
     exited = threading.Event()
     monkeypatch.setattr(os, "_exit", lambda code: exited.set())
     old = signal.getsignal(signal.SIGTERM)
     s = Sched(ends)
     try:
-        H.watch_ring(s, SimpleNamespace(state=state), exit_after=0.01)
+        H.watch_ring(s, SimpleNamespace(state=state), exit_after=0.01,
+                     stop_within=within)
         signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
         assert exited.wait(2)
     finally:
@@ -42,10 +43,6 @@ def _term(monkeypatch, state, ends=True):
 
 def test_a_ready_ring_stops_between_steps_not_by_abort(monkeypatch):
     assert _term(monkeypatch, "ready") == [("stop_ring", 15.0)]
-
-
-def test_a_ring_still_loading_aborts_as_before(monkeypatch):
-    assert _term(monkeypatch, "loading") == [("abort",)]
 
 
 def test_stop_ring_waits_for_the_step_then_says_whether_it_ended():
@@ -81,3 +78,39 @@ def test_a_warming_ring_also_stops_between_steps(monkeypatch):
     # the warm-up runs real forwards with the ring's collectives: a rank
     # killed in one pinned its peer's GPU like one killed mid-generation
     assert _term(monkeypatch, "warming") == [("stop_ring", 15.0)]
+
+
+def test_a_loading_rank_0_stops_its_read_between_batches(monkeypatch):
+    from knurlogic.engine.runtime import host as Hst
+    Hst.LOAD_STOP.clear()
+    try:
+        # the read never stops here (no load runs): the wait runs out and
+        # the requests are failed as before
+        assert _term(monkeypatch, "loading", within=0.1) == [("abort",)]
+        assert Hst.LOAD_STOP.is_set()
+    finally:
+        Hst.LOAD_STOP.clear()
+
+
+def test_the_weight_read_stops_at_a_batch_boundary(monkeypatch):
+    import mlx.core as mx
+    import pytest
+    from knurlogic.engine.runtime import host as Hst
+    m = {"a": [mx.zeros((256,)) + i for i in range(8)]}
+    monkeypatch.setattr(Hst, "LOAD_BATCH_BYTES", 2048)    # two per batch
+    evals = []
+    real = mx.eval
+
+    def counting(x):
+        evals.append(len(x))
+        if len(evals) == 2:
+            Hst.LOAD_STOP.set()          # a SIGTERM mid-load
+        return real(x)
+    monkeypatch.setattr(mx, "eval", counting)
+    try:
+        with pytest.raises(Hst.LoadCancelled):
+            Hst.evaluate_everything(m)
+        assert evals == [2, 2]           # whole batches, then the stop
+    finally:
+        Hst.LOAD_STOP.clear()
+    assert Hst.evaluate_everything(m) == 8
