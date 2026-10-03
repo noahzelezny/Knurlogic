@@ -25,6 +25,14 @@
                                greedy. `engine`: through rank 0's
                                TensorExecutor and the follower's
                                tensor.follow instead of a hand-driven loop
+    ends <split> <loop>        rows that end inside a drafting step, on the
+                               serving path (TensorExecutor / tensor.follow),
+                               the tiny DeepSeek-V4 split (`split`: tensor or
+                               pipeline), rank 0 holding its 1-token MTP head
+                               (`loop` mtp) or DSpark block head (dspark),
+                               the regime timing-chosen: rows end on
+                               max_tokens and on the end token, together and
+                               alone; rank 0 also runs them unsplit, no head
 
 Run with MLX_RANK and MLX_HOSTFILE set."""
 import json
@@ -495,6 +503,182 @@ def _dspark_engine(link, out_path, model, head, prompts, samp, max_tokens,
                    drafted=stats.get("steps", 0)), open(out_path, "w"))
 
 
+def _v4_mtp_tiny(tmp):
+    """(model, head): the tiny DeepSeek-V4 with 64-wide experts (shards on
+    a tensor split) and a random 1-token MTP head packed beside it, whose
+    drafts are steered to "the last token again" (the tiny model's greedy
+    loops accept some)."""
+    import mlx.core as mx
+    import mlx.nn as nn
+    from mlx.utils import tree_flatten, tree_unflatten
+    from tensor_ring_worker import build_deepseek_v4
+
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import MTPHead
+    from knurlogic.engine.mtp import registry
+    model = build_deepseek_v4()
+    arch = sys.modules[type(model.model).__module__]
+    mx.random.seed(7)
+    h = MTPHead(model, arch)
+    h.m.update(tree_unflatten([
+        (k, mx.ones(v.shape) if k.endswith("norm.weight")
+         else 0.15 * mx.random.normal(v.shape))
+        for k, v in tree_flatten(h.m.parameters())]))
+    nn.quantize(h.m, class_predicate=lambda p, m: (
+        "switch_mlp" in p and hasattr(m, "to_quantized")
+        and {"group_size": 32, "bits": 4, "mode": "mxfp4"}))
+    path = os.path.join(tmp, "mtp-head-mxfp4.safetensors")
+    h.save(path)
+    head, _ = registry.load_head(model, sidecar=path, family="deepseek_v4")
+    real = head.draft_logits
+
+    def draft_logits(hh, ids, cache=None):
+        out = real(hh, ids, cache)
+        return out + 100.0 * (mx.arange(out.shape[-1])
+                              == ids[:, :, None]).astype(out.dtype)
+    head.draft_logits = draft_logits
+    return model, head
+
+
+def ends(link, out_path, split_kind="tensor", loop="mtp"):
+    """Rows ending inside a drafting step on the serving path. Every rank
+    first finds the end token the same way (the unsplit plain run's 9th
+    token of the last prompt, whose cap is 12), so the follower's control machine is rank
+    0's. Then, through rank 0's TensorExecutor and the follower's
+    tensor.follow: eight rows in one batch ending on max_tokens 3, 6..12 or
+    the end token, then each of them alone. Rank 0 counts the steps that
+    ended a row before their last position (`_ends` hit inside a drafting
+    step) and the regimes taken."""
+    import tempfile
+
+    import mlx.core as mx
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "goldens"))
+    import build_deepseek_v4 as G
+
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.runtime.executor import (
+        Admission,
+        Finished,
+        LocalExecutor,
+        Token,
+    )
+    from knurlogic.engine.runtime.request import control_machine
+    tmp = tempfile.mkdtemp()
+
+    def load():
+        if loop == "dspark":
+            model, head = _dspark_tensor_tiny()
+            return model, head
+        return _v4_mtp_tiny(tmp)
+
+    # past the sliding window (8): a headless batch extending a cache
+    # shorter than its window fails the row (DeepseekV4Cache.extend)
+    base = 2 * (G.PROMPT + G.DECODE)
+    prompts = [base[i:i + 9 + i % 4] for i in range(8)]
+    # the first row's first block step commits 5 under DSpark (_guess):
+    # a cap of 3 ends it inside
+    caps = [3] + list(range(6, 13))
+    seeds = [T.assign_seed({}) for _ in prompts]   # as a ring admits
+
+    class Tok:
+        eos_token_ids = [1 << 20]                  # none, until found
+
+        def convert_ids_to_tokens(self, t):
+            return f"<{t}>"
+    tok = Tok()
+
+    def drain(ex, rows):
+        uids = []
+        for p, cap, sp in rows:
+            sm, _ = control_machine(tok, "normal")
+            uids.append(ex.insert(Admission(
+                segments=[p], max_tokens=cap, sampling=dict(sp),
+                state_machine=sm,
+                wire={"penalties": {}, "initial": "normal"})))
+        toks, done = {u: [] for u in uids}, set()
+        for _ in range(10_000):
+            for e in ex.step():
+                if isinstance(e, Token):
+                    toks[e.uid].append(e.token)
+                if isinstance(e, Finished):
+                    done.add(e.uid)
+            if done >= set(uids):
+                break
+        return [toks[u] for u in uids]
+
+    def phases(ex):
+        rows = list(zip(prompts, caps, seeds))
+        return [drain(ex, rows)] + [drain(ex, [r]) for r in rows]
+
+    # the end token, found alike on every rank
+    plain, _ = load()
+    ex = LocalExecutor(MTPBatchGenerator(plain, None, prefill_step_size=4))
+    end = drain(ex, [(prompts[-1], 16, {})])[0][8]
+    tok = Tok()                    # control_machine caches per tokenizer
+    tok.eos_token_ids = [end]
+    ex.close()
+    served = None
+    if link.rank == 0:
+        ex = LocalExecutor(MTPBatchGenerator(plain, None, prefill_step_size=4,
+                                             completion_batch_size=8))
+        served = phases(ex)
+        # each row's own tokens past its cap: what _guess steers toward
+        longer = [drain(ex, [(p, 16, sp)])[0]
+                  for p, sp in zip(prompts, seeds)]
+        ex.close()
+    del plain
+    model, head = load()
+    if split_kind == "tensor":
+        T.shard(model, link.group)
+    else:
+        PL.split(model, link.group, PL.bounds_of([1, 3]))
+    block = head.block_size if loop == "dspark" else 0
+    outs = (tuple(model.args.dspark_target_layer_ids) if block else ())
+    if link.rank > 0:
+        T.follow(model, tok, ("tiny", None, None), link,
+                 prompt_cache_size=4, completion_batch_size=8,
+                 prefill_step_size=4, working_set=0, split=split_kind,
+                 drafting=True, block=block, outputs=outs)
+        return
+    if block:
+        # blocks partly right (the rows alone, unsplit): steps commit
+        # several tokens, so a row can end before a block's last
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..",
+                                        "engine"))
+        import test_deepseek_v4_dspark as D
+        D._guess(head, [p + o for p, o in zip(prompts, longer)])
+    stats = {}
+    gen = MTPBatchGenerator(model, head, stats=stats, prefill_step_size=4,
+                            completion_batch_size=8)
+    PL.coordinate(gen, link.group)
+    b = gen._batch
+    regimes, inside = [], [0]
+    real_note, real_ends = b._note_regime, b._ends
+
+    def note(drafting, rows):
+        regimes.append(bool(drafting))
+        return real_note(drafting, rows)
+
+    def ends_(i, toks):
+        j = real_ends(i, toks)
+        if (regimes and regimes[-1] and j is not None
+                and (j < len(toks) - 1 if block else True)):
+            inside[0] += 1
+        return j
+    b._note_regime, b._ends = note, ends_
+    ring = T.Ring(link, split=split_kind)
+    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    split = phases(ex)
+    ring.stop()
+    json.dump({"served": served, "split": split, "inside": inside[0],
+               "drafting": sum(regimes),
+               "plain": len(regimes) - sum(regimes),
+               "eos": tok.eos_token_ids[0], "caps": caps,
+               "drafted": stats.get("steps", 0),
+               "accepted": stats.get("accepted", 0)}, open(out_path, "w"))
+
+
 class FakeTok:
     """What control_machine reads of a tokenizer: token 2 ends a turn."""
     eos_token_ids = [2]
@@ -860,6 +1044,8 @@ def main(argv):
         hit(link, out_path, *argv[2:])
     elif mode == "dspark":
         dspark(link, out_path, *argv[2:])
+    elif mode == "ends":
+        ends(link, out_path, *argv[2:])
     elif mode == "logits":
         logits(link, out_path, argv[2], [int(x) for x in argv[3].split(",")])
     else:

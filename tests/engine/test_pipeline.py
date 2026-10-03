@@ -377,6 +377,35 @@ def test_dspark_on_a_split_through_the_serving_path(tmp_path, split, counts):
     assert d["drafted"] > 0
 
 
+@pytest.mark.parametrize("loop", ["mtp", "dspark"])
+@pytest.mark.parametrize("split", ["tensor", "pipeline"])
+def test_rows_ending_inside_a_drafting_step_keep_the_ranks_in_step(
+        tmp_path, split, loop):
+    """The tiny DeepSeek-V4 split two ways, rank 0 drafting with its
+    1-token MTP head or DSpark's block head, the regime timing-chosen and
+    every row seeded by the ring (assign_seed): rows ending on max_tokens
+    and on the end token, eight in a batch and each alone, through rank
+    0's TensorExecutor and the follower's tensor.follow. Some end before a
+    drafting step's last position (the step is cut there), both regimes
+    run, every rank finishes, and each row alone streams the unsplit
+    executor's tokens -- live, a 1-token step cut to t1 left the tensor
+    follower's forward unevaluated, and its all_sums met rank 0's next
+    exchange: Desync."""
+    d = _ring(tmp_path, "ends", split, loop, timeout=300)
+    # each row alone: the unsplit executor's tokens exactly
+    assert d["split"][1:] == d["served"][1:]
+    # eight together: a row's batch-mates change with the regime (a
+    # drafting row commits two tokens a step), and so do the last bits of
+    # a batched forward; each row still ends where its rules say
+    for toks, cap in zip(d["split"][0], d["caps"]):
+        assert len(toks) == cap or (toks[-1] == d["eos"]
+                                    and d["eos"] not in toks[:-1])
+    lens = [len(r[0]) for r in d["served"][1:]]
+    assert lens != d["caps"] and any(n == c for n, c in zip(lens, d["caps"]))
+    assert d["inside"] > 0 and d["drafted"] > 0
+    assert d["drafting"] > 0 and d["plain"] > 0
+
+
 def test_the_serving_path_follows_rank_0s_plan_on_a_pipeline(tmp_path):
     """Rank 0's TensorExecutor (the step plan) and the follower's
     tensor.follow(split="pipeline"), drafting, two segments per prompt (a
