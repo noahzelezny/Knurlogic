@@ -529,16 +529,25 @@ def test_frame_key_pads_each_image_to_its_alignment(tiny):
         assert sk[1][:s - lead] == [64 + 1] * (s - lead)
 
 
-def test_vision_tag_needs_a_tower_in_the_config(tmp_path):
-    """DeepSeek-V4-Flash and its Vision-Exp share model_type deepseek_v4:
-    only the one whose config.json has vision_n_layers gets the tag."""
+def test_vision_tag_needs_a_tower_in_the_artifact(tmp_path):
+    """DeepSeek-V4-Flash and its Vision-Exp share model_type deepseek_v4,
+    and a text-only conversion of Vision-Exp keeps vision_n_layers: only
+    the artifact whose index names the tower's tensors is a vision one."""
     import json
     from knurlogic.engine.vision import registry
-    flash, vis = tmp_path / "flash", tmp_path / "vision"
-    flash.mkdir(); vis.mkdir()
-    (flash / "config.json").write_text(json.dumps({"model_type": "deepseek_v4"}))
-    (vis / "config.json").write_text(json.dumps(
-        {"model_type": "deepseek_v4", "vision_n_layers": 32}))
+    vcfg = {"model_type": "deepseek_v4", "vision_n_layers": 32}
+    rigs = {"flash": ({"model_type": "deepseek_v4"}, ["model.norm.weight"]),
+            "teacher": (vcfg, ["model.norm.weight"]),
+            "vision": (vcfg, ["model.norm.weight", "vision.norm.weight"])}
+    for name, (cfg, keys) in rigs.items():
+        d = tmp_path / name
+        d.mkdir()
+        (d / "config.json").write_text(json.dumps(cfg))
+        (d / "model.safetensors.index.json").write_text(json.dumps(
+            {"weight_map": {k: "model.safetensors" for k in keys}}))
     assert registry.registered("deepseek_v4")
-    assert not registry.registered("deepseek_v4", flash)
-    assert registry.registered("deepseek_v4", vis)
+    assert not registry.registered("deepseek_v4", tmp_path / "flash")
+    assert not registry.registered("deepseek_v4", tmp_path / "teacher")
+    assert registry.registered("deepseek_v4", tmp_path / "vision")
+    assert registry.build("deepseek_v4", str(tmp_path / "teacher"), None) \
+        is None

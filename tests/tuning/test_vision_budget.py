@@ -329,3 +329,24 @@ def test_the_picked_models_preview_carries_its_tensor_bytes(tmp_path):
                            "default", 64)
     tb = t["tensor_bytes"]
     assert {"sharded", "replicated", "head", "tower"} <= set(tb)
+
+
+def test_deepseek_vision_exp_is_budgeted_only_with_its_tower(tmp_path):
+    """Vision-Exp's vision fields are flat in config.json and its tower is
+    `vision.*` / `aligner.*`: counted from the headers. A text-only
+    conversion that kept the fields but not the tower has no budget."""
+    cfg = {"model_type": "deepseek_v4", "vision_n_layers": 32,
+           "num_hidden_layers": 2, "compress_ratios": [0, 0],
+           "head_dim": 64, "sliding_window": 128}
+    for name, tower in (("vision", True), ("teacher", False)):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "config.json").write_text(json.dumps(cfg))
+        t = {"model.norm.weight": TEXT}
+        if tower:
+            t.update({"vision.norm.weight": TOWER, "aligner.w1.weight": TOWER})
+        _safetensors(d / "model.safetensors", t)
+    vb = R.vision_budget(Artifact.load(tmp_path / "vision"))
+    assert vb["tower_bytes"] == 2 * TOWER and vb["tower_tensors"] == 2
+    assert vb["store_bytes"] == DEFAULT_MAX_BYTES
+    assert R.vision_budget(Artifact.load(tmp_path / "teacher")) is None
