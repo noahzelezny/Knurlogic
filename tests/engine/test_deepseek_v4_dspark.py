@@ -531,6 +531,87 @@ def test_a_widths_compiling_first_step_does_not_decide_it(monkeypatch):
     assert {3, 4} & set(late)
 
 
+def _stream(b, cost, acc, steps, rng, spikes=True):
+    """`steps` steps of the picker against a synthetic stream: a step
+    verifying k costs cost[k] seconds plus 2 ms of noise; with `spikes`,
+    each width's first step compiles (+0.8 s), one step in 20 stalls
+    (+40..150 ms) and one in 100 recompiles (+0.5 s). The batch accepts
+    >= j drafts with chance acc[j - 1]. -> the picks."""
+    picks = []
+    for _ in range(steps):
+        k = b._width(1, None)
+        u = rng.random()
+        b._record_accept(1, k, sum(u < a for a in acc[:k]))
+        t = cost[k] + rng.gauss(0, 0.002)
+        if spikes:
+            if (1, k) not in b._vwarm:
+                t += 0.8
+            elif rng.random() < 0.05:
+                t += rng.uniform(0.040, 0.150)
+            elif rng.random() < 0.01:
+                t += 0.5
+        b._record_width(1, k, t)
+        picks.append(k)
+    return picks
+
+
+def _best(cost, acc):
+    return max(cost, key=lambda k: (1 + sum(acc[:k])) / cost[k])
+
+
+@pytest.mark.parametrize("acc", [
+    [0.9, 0.75, 0.4, 0.2, 0.1],         # 3 wins, 2 within 4%
+    [0.6, 0.35, 0.1, 0.05, 0.02],       # 2, 1 and 3 within 11%
+    [0.98, 0.95, 0.9, 0.85, 0.8],       # all 5
+])
+def test_the_verify_width_converges_through_outliers_and_spikes(
+        monkeypatch, acc):
+    """Costs as live (whole steps of ~70, 77, 85, 97, 107 ms at widths
+    1-5) under noise, stalls and recompiles: each width's cost is the
+    median of its recent steps, so no outlier holds a width dear (live,
+    an EMA read width 2 at 113 ms for as long as it went unmeasured), and
+    the picker settles on the width that is truly best."""
+    import random
+    from knurlogic.engine.mtp import block_loop as BL
+    monkeypatch.delenv("KNURLOGIC_MTP_VERIFY", raising=False)
+    cost = {1: 0.070, 2: 0.077, 3: 0.085, 4: 0.097, 5: 0.107}
+    b = BL.BlockBatch(None, None, lambda: None, copy_caches=True,
+                      block_size=5)
+    picks = _stream(b, cost, acc, 1500, random.Random(3))
+    best = _best(cost, acc)
+    late = picks[-400:]
+    assert max(set(late), key=late.count) == best
+    # the rechecks: about one step in RECHECK_STEP away from the best
+    assert late.count(best) >= len(late) * (1 - 2 / BL.RECHECK_STEP)
+    for k in cost:          # every estimate within a few ms of the truth
+        assert abs(b._wcost(1, k) - cost[k]) < 0.004, (k, b._wcost(1, k))
+
+
+def test_a_width_timed_too_few_times_takes_the_fitted_line(monkeypatch):
+    """Widths with fewer than COST_MIN timed steps are priced on the line
+    through the widths that have them; before any are, the picker times
+    K and 1 only, and the rest come from the line until timed."""
+    import random
+    from knurlogic.engine.mtp import block_loop as BL
+    monkeypatch.delenv("KNURLOGIC_MTP_VERIFY", raising=False)
+    b = BL.BlockBatch(None, None, lambda: None, copy_caches=True,
+                      block_size=5)
+    cost = {1: 0.070, 2: 0.077, 3: 0.085, 4: 0.097, 5: 0.107}
+    picks = _stream(b, cost, [0.9, 0.8, 0.7, 0.6, 0.5],
+                    2 * (BL.EXPLORE_STEPS + 1), random.Random(0),
+                    spikes=False)
+    assert set(picks) == {1, 5}
+    for k in (2, 3, 4):
+        assert (1, k) not in b._vcost
+        line = cost[1] + (cost[5] - cost[1]) * (k - 1) / 4
+        assert abs(b._wcost(1, k) - line) < 0.003
+    # one outlier among a width's samples does not move its cost (the
+    # first step, compiling, is left out)
+    for t in (0.900, 0.077, 0.078, 0.200, 0.076):
+        b._record_width(1, 2, t)
+    assert abs(b._wcost(1, 2) - 0.0775) < 0.001
+
+
 def test_the_profile_logs_past_its_window(monkeypatch):
     """KNURLOGIC_MTP_PROFILE=1 through more than one logging window: the
     phase and width lines print and the engine keeps stepping (a name
