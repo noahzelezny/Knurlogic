@@ -1,6 +1,6 @@
 """KV-cache precision: attention K/V stored at 8, 6 or 4 bits.
 
-mlx-lm 0.31.3 has no batched quantized cache, and its quantized SDPA path
+mlx-lm 0.32.0 has no batched quantized cache, and its quantized SDPA path
 only serves attention written against mlx_lm.models.base. So knurlogic
 keeps its own pair here: a single-row cache (prefill, prompt cache) and a
 batched one (the decode loop), both STORING the quantized triple and
@@ -65,6 +65,14 @@ def _alloc(B, H, L, dim, bits, g, dtype):
 
 def _slice(parts, a, b):
     return tuple(p[..., a:b, :] for p in parts)
+
+
+def _parts(v):
+    return None if v is None else tuple(v)
+
+
+def _sliced(parts, n):
+    return None if parts is None else _slice(parts, 0, n)
 
 
 def _cat(xs, ys):
@@ -148,30 +156,25 @@ class QuantKVCache(KVCache):
                 d[..., prev:self.offset, :] = s
         return _fetch(self, self.offset, S, keys.dtype, values.dtype)
 
+    # Everything from_state needs, as mlx-lm 0.32's caches carry it (its
+    # meta_state is gone): the arrays, then the scalars. The kernel flag
+    # rides here too: a cache rebuilt by from_state (cls.__new__, no
+    # make_cache) came back with it off -- the silent dequantize path, not
+    # even counted as a kernel miss.
     @property
     def state(self):
-        return (_slice(self.keys, 0, self.offset),
-                _slice(self.values, 0, self.offset))
+        return (_sliced(self.keys, self.offset),
+                _sliced(self.values, self.offset), self.offset,
+                self.kv_bits, self.group or 0, bool(self.kv8_kernel))
 
     @state.setter
     def state(self, v):
-        self.keys, self.values = (tuple(x) for x in v)
-        self.offset = self.keys[0].shape[2]
-
-    # the kernel flag rides in meta_state: a cache rebuilt by mlx-lm's
-    # from_state (cls.__new__, no make_cache) came back with it off -- the
-    # silent dequantize path, not even counted as a kernel miss
-    @property
-    def meta_state(self):
-        return tuple(map(str, (self.offset, self.kv_bits, self.group or 0,
-                               int(bool(self.kv8_kernel)))))
-
-    @meta_state.setter
-    def meta_state(self, v):
-        v = tuple(map(int, v))
-        self.offset, self.kv_bits, g = v[:3]
-        self.group = g or None
-        self.kv8_kernel = bool(v[3]) if len(v) > 3 else False
+        k, vv, self.offset, bits, g, kernel = v
+        self.keys, self.values = _parts(k), _parts(vv)
+        self.kv_bits, self.group = int(bits), (int(g) or None)
+        self.kv8_kernel = bool(kernel)
+        if not hasattr(self, "dims"):
+            self.dims = None               # from_state skips __init__
 
     def to_quantized(self, *a, **k):
         raise TypeError("already quantized")
@@ -244,30 +247,21 @@ class BatchQuantKVCache(BatchKVCache):
 
     @property
     def state(self):
-        return (_slice(self.keys, 0, self._idx),
-                _slice(self.values, 0, self._idx),
-                self.offset, self.left_padding)
+        # as QuantKVCache's: arrays, then what from_state needs beyond
+        # them, the kernel flag included
+        dk, dv = self.dims or (0, 0)
+        return (_sliced(self.keys, self._idx), _sliced(self.values, self._idx),
+                self.offset, self.left_padding, self._idx, self.kv_bits,
+                self.group or 0, dk, dv, bool(self.kv8_kernel))
 
     @state.setter
     def state(self, v):
-        k, vv, self.offset, self.left_padding = v
-        self.keys, self.values = tuple(k), tuple(vv)
-        self._idx = self.keys[0].shape[2]
-
-    @property
-    def meta_state(self):
-        # as QuantKVCache's: what from_state needs beyond the arrays,
-        # the kernel flag included
-        dk, dv = self.dims or (0, 0)
-        return tuple(map(str, (self.kv_bits, self.group or 0, dk, dv,
-                               int(bool(self.kv8_kernel)))))
-
-    @meta_state.setter
-    def meta_state(self, v):
-        bits, g, dk, dv, k = (tuple(map(int, v)) + (0,) * 5)[:5]
-        self.kv_bits, self.group = bits or 8, g or None
-        self.dims = (dk, dv) if dk else None
-        self.kv8_kernel = bool(k)
+        (k, vv, self.offset, self.left_padding, self._idx, bits, g, dk, dv,
+         kernel) = v
+        self.keys, self.values = _parts(k), _parts(vv)
+        self.kv_bits, self.group = int(bits) or 8, (int(g) or None)
+        self.dims = (int(dk), int(dv)) if dk else None
+        self.kv8_kernel = bool(kernel)
         if not hasattr(self, "_right_padding"):
             self._right_padding = None     # from_state skips __init__
 

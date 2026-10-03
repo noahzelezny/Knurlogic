@@ -72,7 +72,7 @@ key.has_image(key) -> bool;  key.is_sentinel(x) -> bool;  key.sentinel(ref, k)
 
 * Any mismatch between pads and refs raises `KeyMismatch` (a user who typed
   the pad token): the serve path answers 400.
-* mlx-lm 0.31.3's `LRUPromptCache` accepts the key as is (tested on the real
+* mlx-lm 0.32.0's `LRUPromptCache` accepts the key as is (tested on the real
   class): two same-size images diverge at k=0; the same image hits through.
 
 ## Family protocol
@@ -236,6 +236,6 @@ fixtures_vision.run_reference(script, *args)   # runs in the mlx-vlm 0.6.17 inte
 
 ## Pins
 
-`pyproject.toml` pins `mlx==0.31.2`, `mlx-lm==0.31.3`; `[tool.knurlogic.pins]`
-holds those and the sha256 of `mlx_lm/server.py`. `tests/test_pins.py` fails
+`pyproject.toml` pins `mlx==0.32.3`, `mlx-lm==0.32.0`; `[tool.knurlogic.pins]`
+holds those and the sha256 of `mlx_lm/generate.py` and `mlx_lm/models/cache.py`. `tests/test_pins.py` fails
 on drift and lists what to re-verify. 

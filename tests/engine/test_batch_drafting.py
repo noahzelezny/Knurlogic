@@ -218,7 +218,7 @@ def test_a_new_turn_restored_from_the_checkpoint_matches_a_fresh_prefill():
     gen = MTPBatchGenerator(model, head, prefill_step_size=16)
     restored, _ = _drive(gen, [next_b], 30, cache=copy.deepcopy(entry),
                          prefix=key)
-    assert gen._prompt_tokens_counter == len(next_b)
+    assert gen._counters.prompt_tokens == len(next_b)
     gen.close()
 
     fresh, _ = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
@@ -241,7 +241,7 @@ def test_checkpoint_restore_can_fail(monkeypatch):
     entry = [e for e in entry if not isinstance(e, bg.HeadCarry)]
     gen = bg.MTPBatchGenerator(model, head, prefill_step_size=16)
     _drive(gen, [next_b], 5, cache=copy.deepcopy(entry), prefix=key)
-    assert gen._prompt_tokens_counter == len(sys_ + user + next_b)
+    assert gen._counters.prompt_tokens == len(sys_ + user + next_b)
 
 
 # --- a failed admission fails its request, not the server ----------------------
@@ -404,7 +404,7 @@ def test_a_headless_model_reuses_a_shared_prefix():
     key, entry = next((k, e) for k, e in ckpts if k == sys_)
     gen2 = bg.MTPBatchGenerator(model, None, prefill_step_size=16)
     _drive(gen2, [next_b], 3, cache=copy.deepcopy(entry), prefix=key)
-    assert gen2._prompt_tokens_counter == len(next_b)
+    assert gen2._counters.prompt_tokens == len(next_b)
 
 
 def test_every_prefill_chunk_is_reported_to_the_job_marker(monkeypatch):
@@ -452,7 +452,7 @@ def test_a_row_ending_mid_step_stores_only_what_it_committed(monkeypatch):
     gen = MTPBatchGenerator(model, head, prefill_step_size=16)
     restored, _ = _drive(gen, [nxt], 12, cache=copy.deepcopy(entry),
                          prefix=fed)
-    assert gen._prompt_tokens_counter == len(nxt)
+    assert gen._counters.prompt_tokens == len(nxt)
     gen.close()
     fresh, _ = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
                       [fed + nxt], 12)

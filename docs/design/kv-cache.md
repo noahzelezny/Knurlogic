@@ -46,13 +46,13 @@ and first miss are each logged once.
 
 ## src/knurlogic/engine/kvquant.py
 
-What mlx 0.31.2 / mlx-lm 0.31.3 provide, and what they do not:
+What mlx 0.32.3 / mlx-lm 0.32.0 provide, and what they do not:
 
   mx.quantize / mx.dequantize   affine, per-group scale + bias, bits 2-8
                                 including 6 (and 3, 5); groups of 32/64/128
                                 along the last axis.
   mlx_lm QuantizedKVCache       ONE sequence. There is no batched quantized
-                                cache in mlx-lm 0.31.3 -- BatchKVCache and
+                                cache in mlx-lm 0.32.0 -- BatchKVCache and
                                 BatchRotatingKVCache are bf16 only, and
                                 `_make_cache` refuses anything else.
   quantized SDPA                mlx_lm.models.base routes to

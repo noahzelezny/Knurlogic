@@ -363,12 +363,15 @@ def save_golden(name: str, arrays: dict[str, Any],
     out = {k: np.asarray(v) for k, v in arrays.items()}
     m = dict(meta or {})
     m.setdefault("reference_python", sys.executable)
-    try:
-        import importlib.metadata as md
-        m.setdefault("mlx_vlm", md.version("mlx-vlm"))
-        m.setdefault("mlx", md.version("mlx"))
-    except Exception:
-        pass
+    import importlib.metadata as md
+    # each on its own: a builder in the test interpreter has no mlx-vlm,
+    # and its golden must still say which mlx made it
+    for key, dist in (("mlx_vlm", "mlx-vlm"), ("mlx", "mlx"),
+                      ("mlx_lm", "mlx-lm")):
+        try:
+            m.setdefault(key, md.version(dist))
+        except md.PackageNotFoundError:
+            pass
     out["__meta__"] = np.array(json.dumps(m, sort_keys=True, default=str))
     p = golden_path(name)
     np.savez_compressed(p, **out)

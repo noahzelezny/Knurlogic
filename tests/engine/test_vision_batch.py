@@ -157,9 +157,9 @@ def test_a_vision_row_keeps_its_trunk_hit_with_a_head():
     g = _gen(model, head, vis)
     g.insert_segments([[turn2[len(toks):]]], max_tokens=[4], caches=[entry],
                       all_tokens=[list(toks)])
-    before = g._prompt_tokens_counter
+    before = g._counters.prompt_tokens
     g.next()
-    assert g._prompt_tokens_counter - before == 3            # suffix only
+    assert g._counters.prompt_tokens - before == 3            # suffix only
     assert g._batch.drafts == [False]
     g.close()
 

@@ -220,7 +220,7 @@ class Harness:
         from knurlogic.engine.runtime.scheduler import Scheduler
         from knurlogic.engine.serve import state
         from knurlogic.interfaces.http.server import App
-        self.host = Host(model, tok or byte_tok())
+        self.host = Host(model, tok if tok is not None else byte_tok())
         state.SERVED["provider"] = self.host
         self.vision = None
         materialize(model)
@@ -262,7 +262,7 @@ class Harness:
     def prefilled(self) -> int:
         """Prompt tokens the engine actually prefilled, so far."""
         ex = self.sched._ex
-        return ex.gen._prompt_tokens_counter if ex is not None else 0
+        return ex.gen._counters.prompt_tokens if ex is not None else 0
 
     def post(self, body, path="/v1/chat/completions"):
         """(status, [], body bytes)."""
