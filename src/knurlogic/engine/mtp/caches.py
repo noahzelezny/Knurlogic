@@ -16,6 +16,12 @@ compressed pools cannot be trimmed; its `trim` is a no-op). Trimming it
 would silently keep the rejected positions, so its whole object state is
 held instead (`_grab` / `_put`).
 
+A cache that records its speculative forward (`spec_begin`, deepseek_v4's
+DeepseekV4Cache, architecture edit 19) rolls back FORWARD too: `rollback`
+leaves a list of them at the first `keep` positions the forward fed
+without running the model again. Any other list is restored instead, and
+the caller replays.
+
 Keeping old references is a free snapshot only for an architecture that
 REASSIGNS its slots (mlx arrays are immutable); one that writes in place
 would corrupt the saved reference. So the policy is a per-family field,
@@ -136,10 +142,19 @@ def _pos(c):
     return c.size() if is_batch_attention(c) else c.offset
 
 
+def can_record(c) -> bool:
+    """A cache that records a speculative forward and rolls back to any
+    position inside it (architecture edit 19)."""
+    return callable(getattr(c, "spec_begin", None))
+
+
 def snapshot(caches, *, copy: bool = True) -> list:
     snaps: list = []
     for c in caches:
-        if is_untrimmable(c):
+        if can_record(c):
+            c.spec_begin()
+            snaps.append(("spec", None, None))
+        elif is_untrimmable(c):
             snaps.append(("whole", None, _grab(c)))
         elif is_attention(c):
             snaps.append(("attn", c.offset, None))
@@ -165,7 +180,9 @@ def restore(caches, snaps) -> None:
     """Back to exactly where the snapshot was taken."""
     for c, s in zip(caches, snaps):
         kind, offset, state = s
-        if kind == "whole":
+        if kind == "spec":
+            c.spec_rollback(0)
+        elif kind == "whole":
             # a rollback may run twice from one snapshot (the replay)
             _put(state)
         elif kind == "attn":
@@ -199,6 +216,36 @@ def restore(caches, snaps) -> None:
                 c.offset = offset
 
 
+def rollback(caches, snaps, keep: int) -> bool:
+    """Leave every cache at `keep` positions past its snapshot -- the first
+    `keep` tokens of the forward run since -- without running the model,
+    by the recording caches' own bookkeeping (`can_record`). True when
+    done; False when the list holds any other kind of cache, or a forward
+    a recording cache cannot roll back: then every cache is restored to
+    the snapshot and the caller replays the `keep` tokens.
+
+    Only a list of recording caches rolls forward, never a mix with
+    trimmed attention caches: a pipeline's stages hold different layers,
+    and every rank must take the same path (the replay is a forward every
+    rank runs), so the answer has to follow the family, not the stage."""
+    ok = bool(snaps) and all(s[0] == "spec" for s in snaps) and all(
+        c.spec_can_rollback(keep) for c in caches)
+    if not ok:
+        restore(caches, snaps)
+        return False
+    for c in caches:
+        c.spec_rollback(keep)
+    return True
+
+
+def release(caches, snaps) -> None:
+    """Keep everything fed since the snapshot (every draft accepted): a
+    recording cache stops recording."""
+    for c, s in zip(caches, snaps):
+        if s[0] == "spec":
+            c.spec_end()
+
+
 def check_snapshot_semantics(caches, advance) -> bool:
     """Does `copy=False` snapshotting actually hold for these caches?
 
@@ -220,6 +267,7 @@ def check_snapshot_semantics(caches, advance) -> bool:
     for w in witness:
         mx.eval(*[x for x in w if isinstance(x, mx.array)])
     advance()
+    release(caches, snaps)
     held = [s[2] for s in snaps if s[0] == "state"]
     for kept, ref in zip(held, witness):
         for a, b in zip(kept, ref):

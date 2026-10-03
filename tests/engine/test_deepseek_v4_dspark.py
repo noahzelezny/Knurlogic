@@ -388,3 +388,83 @@ def test_a_row_ending_mid_block_stores_only_what_it_committed(monkeypatch):
         fresh, _ = _run(MTPBatchGenerator(model, head, prefill_step_size=4),
                         [fed + G.DECODE], 8)
         assert stats["steps"] > 0 and cont == fresh, n
+
+
+@pytest.mark.parametrize("k", [1, 2, 3, 4, 5])
+def test_every_verify_width_is_the_plain_steps_token_for_token(k,
+                                                               monkeypatch):
+    """KNURLOGIC_MTP_VERIFY=k: each step verifies only the first k of the
+    head's K drafts (three rows, partly right drafts); greedy output is the
+    plain run's at every k, and the rows still accept."""
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
+    monkeypatch.setenv("KNURLOGIC_MTP_VERIFY", str(k))
+    model = _load()
+    head, _ = _head(model)
+    prompts = PROMPTS["three-rows"]
+    plain, _ = _run(MTPBatchGenerator(model, None, prefill_step_size=4),
+                    prompts, 24)
+    _guess(head, [p + o for p, o in zip(prompts, plain)])
+    stats = {}
+    gen = MTPBatchGenerator(model, head, stats=stats, prefill_step_size=4)
+    draft, _ = _run(gen, prompts, 24)
+    assert stats["accepted"] > 0
+    assert draft == plain
+
+
+def _width_batch(K=5):
+    from knurlogic.engine.mtp.block_loop import BlockBatch
+    b = BlockBatch(None, None, lambda: None, copy_caches=True, block_size=K)
+    # every width timed: a step costs 100 ms + 10 ms per verified draft
+    for k in range(1, K + 1):
+        b._vcost[(1, k)] = (0.100 + 0.010 * k, 99)
+    return b
+
+
+def _feed(b, pred, hits, n):
+    """n verified-at-K steps whose confidence said `pred` and whose batch
+    accepted `hits` drafts."""
+    for _ in range(n):
+        b._pred = list(pred)
+        b._record_accept(1, b.block_size, hits)
+
+
+def test_the_verify_width_follows_calibrated_confidence(monkeypatch):
+    """Confidence maps to k by expected tokens per second: per position
+    P(batch accepts >= j) = the product over drafting rows of the running
+    product of sigmoid(score); k = argmax (1 + sum_{j<=k} P_j) / T(k) with
+    T timed per width. Calibrated (the predictions matched the verdicts),
+    each step's own scores choose: a confident step verifies all 5, a
+    doubtful one 1."""
+    monkeypatch.delenv("KNURLOGIC_MTP_VERIFY", raising=False)
+    import mlx.core as mx
+    b = _width_batch()
+    # history: the scores said ~2 of 5 and 2 were accepted -- calibrated
+    _feed(b, [0.97, 0.95, 0.05, 0.03, 0.01], 2, 40)
+    assert b.calibrated()
+    sure = b._predicted(mx.full((1, 5), 8.0), [True])        # P ~ 1
+    assert b._width(1, sure) == 5
+    unsure = b._predicted(mx.array([[0.5, -6.0, -6.0, -6.0, -6.0]]), [True])
+    assert b._width(1, unsure) == 1
+    # two rows: the batch accepts j only if both do
+    two = b._predicted(mx.array([[8.0] * 5, [8.0, 8.0, -8.0, -8.0, -8.0]]),
+                       [True, True])
+    assert two[1] > 0.99 and two[2] < 0.01
+    assert b._width(1, two) == 2
+
+
+def test_badly_calibrated_confidence_falls_back_to_measured_acceptance(
+        monkeypatch):
+    """The scores promised every draft and the batch accepted none: not
+    calibrated, so the width is the measured acceptance's (k = 1 here),
+    whatever this step's scores say."""
+    monkeypatch.delenv("KNURLOGIC_MTP_VERIFY", raising=False)
+    import mlx.core as mx
+    b = _width_batch()
+    _feed(b, [0.99] * 5, 0, 40)
+    assert not b.calibrated()
+    sure = b._predicted(mx.full((1, 5), 8.0), [True])
+    assert b._width(1, sure) == 1
+    # measured acceptance high again: the measured width is all 5
+    _feed(b, [0.99] * 5, 5, 40)
+    assert b._width(1, None) == 5

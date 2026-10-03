@@ -679,6 +679,24 @@ def _fill_of(name):
     return float("-inf") if name == "prev_gate" else 0.0
 
 
+def _hold(v):
+    """knurlogic edit 19: a value held across a forward. An array as a new
+    handle (an in-place slot write rebinds the handle it is made on, so a
+    held one keeps the old value; nothing is copied), a list copied."""
+    if isinstance(v, mx.array):
+        return mx.array(v)
+    if isinstance(v, list):
+        return list(v)
+    return v
+
+
+def _local_pos(loc) -> int:
+    """knurlogic edit 19: tokens a window cache has taken, one count for
+    every row (a batch cache's shared write position)."""
+    return int(loc._offset if isinstance(loc, BatchRotatingKVCache)
+               else loc.offset)
+
+
 class _CompressorBranch:
     """Per-state-key (compressor or indexer) state held by DeepseekV4Cache.
 
@@ -736,6 +754,8 @@ class DeepseekV4Cache:
         # Per-step right-padding info captured by ``prepare`` and consumed
         # by the very next call to ``accumulate_windows``.
         self._pending_lengths: Optional[List[int]] = None
+        # knurlogic edit 19: a speculative forward's record (spec_begin)
+        self._spec: Optional[dict] = None
 
     # ------------------------------------------------------------------ #
     # Pass-through API expected by V4Attention and the generator runtime  #
@@ -1060,6 +1080,104 @@ class DeepseekV4Cache:
         return out
 
     # ------------------------------------------------------------------ #
+    # knurlogic edit 19: roll a speculative forward back without a replay #
+    # ------------------------------------------------------------------ #
+
+    def spec_begin(self):
+        """Hold this cache's state before a speculative multi-token forward
+        and record what that forward feeds it, so ``spec_rollback(p)`` can
+        leave it exactly as feeding only the forward's first p tokens would
+        -- the window ring, each branch's carry buffer, overlap carry and
+        pool -- without running the model again. Held arrays are new
+        handles: an in-place slot write rebinds the handle it is made on."""
+        loc = self.local
+        self._spec = {
+            "local": loc,
+            "local_attrs": {n: _hold(v) for n, v in vars(loc).items()},
+            "pos": _local_pos(loc),
+            "branches": {
+                k: {n: _hold(getattr(b, n)) for n in _CompressorBranch.__slots__}
+                for k, b in self._branches.items()},
+            "pending": self._pending_lengths,
+            "acc": {}, "pool": {}, "comp": {}, "bad": False,
+        }
+
+    def spec_end(self):
+        """Keep everything the forward fed (nothing to roll back)."""
+        self._spec = None
+
+    def spec_can_rollback(self, keep: int) -> bool:
+        """Can ``spec_rollback(keep)`` leave this cache at ``keep`` of the
+        recorded forward's tokens by bookkeeping alone? Only after exactly
+        one multi-token forward that appended to the window in order (no
+        right-padded prefill in it)."""
+        s = self._spec
+        if s is None or s["bad"] or s["pending"] is not None:
+            return False
+        loc = self.local
+        if loc is not s["local"] or loc.keys is None:
+            return False
+        if getattr(loc, "_lengths", None) is not None:
+            return False
+        n = _local_pos(loc) - s["pos"]
+        if keep == n:
+            return True
+        # a multi-token update leaves the window in temporal order, the
+        # forward's keys last (both rotating caches' _update_concat)
+        return (n > 1 and 0 <= keep < n and loc._idx == loc.keys.shape[2]
+                and not getattr(loc, "rotated", False)
+                and all(a[0].shape[1] == n for a in s["acc"].values()))
+
+    def spec_rollback(self, keep: int) -> None:
+        """Leave the cache as if the recorded forward had fed only its first
+        ``keep`` tokens (``spec_can_rollback(keep)`` must hold). The window
+        takes those tokens' keys and each branch re-runs its bookkeeping
+        (accumulate_windows, the overlap carry, update_pool) on their raw
+        rows, with the pool rows the forward computed for the windows they
+        complete: a window's pooled row depends only on its own tokens and
+        the window before it, so it is the row a ``keep``-wide forward
+        computes (up to the forward's width in the float sums)."""
+        s = self._spec
+        loc = self.local
+        n = _local_pos(loc) - s["pos"]
+        self._spec = None
+        if keep == n:
+            return
+        new_k = loc.keys[..., loc._idx - n:loc._idx, :]
+        new_v = loc.values[..., loc._idx - n:loc._idx, :]
+        for name, v in s["local_attrs"].items():
+            setattr(loc, name, _hold(v))
+        for key, attrs in s["branches"].items():
+            b = self._branches[key]
+            for name, v in attrs.items():
+                setattr(b, name, _hold(v))
+        self._pending_lengths = None
+        if keep == 0:
+            return
+        if keep > 1 and isinstance(loc, BatchRotatingKVCache):
+            # what V4Attention does before a multi-token batch update
+            loc._temporal_order()
+        loc.update_and_fetch(new_k[..., :keep, :], new_v[..., :keep, :])
+        for key, (kv, gate, start_pos, ratio) in s["acc"].items():
+            ready_kv, ready_gate, _ = self.accumulate_windows(
+                kv[:, :keep], gate[:, :keep], key, ratio, start_pos)
+            if ready_kv.shape[1] == 0:
+                continue
+            B = ready_kv.shape[0]
+            W = ready_kv.shape[1] // ratio
+            b = self._branches[key]
+            ape, overlap = s["comp"][key]
+            if overlap:
+                lens = b._new_pool_lengths
+                kv_win = ready_kv.reshape(B, W, ratio, -1)
+                score_win = ready_gate.reshape(B, W, ratio, -1) + ape.astype(
+                    ready_gate.dtype)
+                b.prev_kv = _ragged_prev(b.prev_kv, kv_win, lens, 0.0)
+                b.prev_gate = _ragged_prev(
+                    b.prev_gate, score_win, lens, float("-inf"))
+            self.update_pool(s["pool"][key][:, :W], key)
+
+    # ------------------------------------------------------------------ #
     # The two methods Compressor calls during forward                    #
     # ------------------------------------------------------------------ #
 
@@ -1079,6 +1197,12 @@ class DeepseekV4Cache:
         records a pending ``_new_pool_lengths`` list to be consumed by
         ``update_pool``.
         """
+        spec = self._spec
+        if spec is not None:
+            # knurlogic edit 19: what this forward feeds the branch
+            if key in spec["acc"]:
+                spec["bad"] = True
+            spec["acc"][key] = (kv, gate, start_pos, ratio)
         branch = self._branches[key]
         buf_kv = branch.buffer_kv
         buf_gate = branch.buffer_gate
@@ -1223,6 +1347,10 @@ class DeepseekV4Cache:
         on the ``_new_pool_lengths`` set by the matching ``accumulate_windows``
         call (or fall through to uniform if there was none).
         """
+        spec = self._spec
+        if spec is not None:
+            # knurlogic edit 19: the rows this forward pooled
+            spec["pool"][key] = new_pooled
         branch = self._branches[key]
         new_lengths = branch._new_pool_lengths
         branch._new_pool_lengths = None
@@ -1700,6 +1828,11 @@ class Compressor(nn.Module):
         ready_kv, ready_score, pool_base = cache.accumulate_windows(
             kv, score, key, ratio, offset
         )
+        spec = getattr(cache, "_spec", None)
+        if spec is not None:
+            # knurlogic edit 19: what spec_rollback needs to redo the
+            # overlap carry
+            spec["comp"][key] = (self.ape, self.overlap)
 
         # Always run the emit path (with shape-stable empty tensors) so the
         # graph stays consistent. For overlap layers we additionally need the
