@@ -200,8 +200,8 @@ class BlockBatch(MTPBatch):
             return min(max(fixed, 1), K)
         # a seeded row: one width always (a verify of another width rounds
         # differently, and a near-tie would not reproduce; drafting_pays)
-        if any(p.keys is not None and d
-               for p, d in zip(self.params, self.drafts)):
+        if any(p.keys is not None and p.keys.pins
+               and d for p, d in zip(self.params, self.drafts)):
             return K
         ex = self._wexplore
         if ex is not None and ex[0] == B and ex[2] > 0:

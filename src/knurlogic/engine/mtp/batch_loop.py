@@ -511,8 +511,8 @@ class MTPBatch:
         # A seeded row drafts every step: the timing-chosen regime differs
         # run to run, and a 2-wide verify and a plain step round differently,
         # so a near-tie would flip and the seed would not reproduce.
-        if any(p.keys is not None and d
-               for p, d in zip(self.params, self.drafts)):
+        if any(p.keys is not None and p.keys.pins
+               and d for p, d in zip(self.params, self.drafts)):
             return True
         ex = self._explore
         if ex is not None and ex[0] == rows and ex[2] > 0:
