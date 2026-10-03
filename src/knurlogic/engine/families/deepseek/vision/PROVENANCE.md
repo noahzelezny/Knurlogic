@@ -29,8 +29,8 @@ edits 14-15 (`../architecture/PROVENANCE.md`).
 ## How an image reaches the trunk
 
 - The prompt: `<｜deepseek_image｜>` (id 129264, read from tokenizer.json)
-  is the placeholder; a message with an image has its parts joined with
-  "\n\n" (`part_separator`), as `encoding_dsv4.py` joins content blocks.
+  is the placeholder; a message's parts are joined with "\n\n", as
+  `encoding_dsv4.py` joins content blocks (runtime/prompt.part_separator).
 - The key: the generic expansion widens the placeholder to the block's
   length; `frame_key` then puts `vocab_size + IMAGE_PAD` ids before each
   block so its IMAGE_START sits at a position == 3 (mod 4), counted in the

@@ -89,7 +89,6 @@ class Family(Protocol):
     def positions(self, key: list, refs: RefLookup) -> tuple[mx.array | None, int]
     def chunk_boundaries(self, key: list) -> list[tuple[int, int]]
     # optional, read with getattr by engine/vision/request.py:
-    part_separator: str            # between a message's parts when it has an image
     def frame_key(self, key, segment_keys) -> (key, segment_keys)
 
 FeatureLookup = Callable[[sha, proc_hash], EncodedImage]     # raises ImageEvicted
@@ -109,8 +108,6 @@ RefLookup     = Callable[[sha, proc_hash], ImageRef]         # never evicted
   positions (gemma, GLM). Qwen: `[3, 1, len(key)]` and `rope_delta`.
 * `chunk_boundaries(key)`: `[start, end)` spans no prefill chunk edge may
   fall strictly inside. gemma: every image span. Causal: `[]`.
-* `part_separator` (optional, default ""): DeepSeek-V4 joins a message's
-  parts with "\n\n"; mlx-lm joins them with "".
 * `frame_key` (optional): after the expansion, the family may add plain
   ids around its runs that depend on the position (DeepSeek-V4's
   alignment pads, ids >= vocab_size). Pure in the key; segments stay the

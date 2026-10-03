@@ -365,14 +365,16 @@ def reference(rig, fam, messages, n=MAX_TOKENS):
     tok = SpecTok(rig.specials)
     feats, refs_by = {}, {}
     text, refs = "", []
-    # DeepSeek-V4 joins an image message's parts with "\n\n"
-    sep = getattr(fam, "part_separator", "")
+    # as the serve path joins a message's parts: by the template
+    # (runtime/prompt.part_separator; this file's template joins with "")
+    from knurlogic.engine.runtime.prompt import part_separator
+    sep = part_separator(tok)
     for m in messages:
         c = m["content"]
         if isinstance(c, list):
             s = ""
             for i, p in enumerate(c):
-                if i and sep and any(q["type"] != "text" for q in c):
+                if i:
                     s += sep
                 if p["type"] == "text":
                     s += p["text"]

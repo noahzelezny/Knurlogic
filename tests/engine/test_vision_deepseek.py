@@ -74,7 +74,7 @@ def test_a_deepseek_v4_config_with_vision_layers_has_vision():
         "knurlogic.engine.families.deepseek.vision:build"
 
 
-def test_an_image_messages_parts_are_joined_as_deepseeks_encoder_joins_them():
+def test_a_messages_parts_are_joined_as_deepseeks_encoder_joins_them():
     from knurlogic.engine.runtime.prompt import flatten
     from knurlogic.engine.vision.request import with_placeholders
     img = {"type": "image_url", "image_url": {"url": "data:,x"}}
@@ -83,8 +83,9 @@ def test_an_image_messages_parts_are_joined_as_deepseeks_encoder_joins_them():
           {"role": "user", "content": [img, {"type": "text", "text": "c"}]},
           {"role": "user", "content": [{"type": "text", "text": "d"},
                                        {"type": "text", "text": "e"}]}]
-    out = flatten(with_placeholders(ms, ["<I>", "<I>"], "\n\n"))
-    assert [m["content"] for m in out] == ["a\n\n<I>\n\nb", "<I>\n\nc", "de"]
+    out = flatten(with_placeholders(ms, ["<I>", "<I>"]), sep="\n\n")
+    assert [m["content"] for m in out] == ["a\n\n<I>\n\nb", "<I>\n\nc",
+                                           "d\n\ne"]
     out = flatten(with_placeholders(ms, ["<I>", "<I>"]))
     assert [m["content"] for m in out] == ["a<I>b", "<I>c", "de"]
 
@@ -123,8 +124,7 @@ def test_the_vision_template_is_the_vision_exp_encoder(mode, effort):
         return_multi_modal_data=True)
     assert len(media["images"]) == 2
     flat = flatten(with_placeholders(copy.deepcopy(msgs),
-                                     [IMAGE_PLACEHOLDER] * 2,
-                                     DeepseekVisionFamily.part_separator))
+                                     [IMAGE_PLACEHOLDER] * 2), sep="\n\n")
     kw = {"reasoning_effort": effort} if effort else {}
     out, _ = cu.render_jinja_template(
         conversations=[flat], chat_template=templates.text(
@@ -150,6 +150,30 @@ def test_a_deepseek_v4_vision_artifact_gets_the_vision_template():
     assert thinking.levels(vt)["default"] == "low"
     assert thinking.detect(templates.text("deepseek_v4"))[0] == \
         "deepseek_effort"
+
+
+def test_text_parts_are_joined_as_the_vision_encoder_joins_them():
+    """Vision-Exp's encoder joins every list of content parts with "\n\n"
+    (a text-only one too); Flash's template keeps mlx-lm's ""."""
+    from types import SimpleNamespace
+    from knurlogic.engine import templates
+    from knurlogic.engine.runtime.prompt import flatten, part_separator
+    cu = pytest.importorskip("transformers.utils.chat_template_utils")
+    vis = SimpleNamespace(chat_template=templates.text("deepseek_v4_vision"),
+                          name_or_path="/m/DeepSeek-V4-Flash-Vision-Exp")
+    flash = SimpleNamespace(chat_template=templates.text("deepseek_v4"),
+                            name_or_path="/m/DeepSeek-V4-Flash")
+    assert part_separator(vis) == "\n\n"
+    assert part_separator(flash) == ""
+    msgs = [{"role": "user", "content": [{"type": "text", "text": "one"},
+                                         {"type": "text", "text": "two"}]}]
+    want = _vision_encoder().encode_messages(copy.deepcopy(msgs),
+                                             thinking_mode="chat")
+    out, _ = cu.render_jinja_template(
+        conversations=[flatten(msgs, sep=part_separator(vis))],
+        chat_template=vis.chat_template, add_generation_prompt=True,
+        bos_token=_vision_encoder().bos_token, thinking_mode="chat")
+    assert out[0] == want
 
 
 # ------------------------------------------------------------ mlx
