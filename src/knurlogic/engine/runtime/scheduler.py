@@ -327,6 +327,10 @@ class Scheduler:
         self._sets: queue.Queue = queue.Queue()
         self._thread = threading.Thread(target=self._run, daemon=True,
                                         name="knurlogic-scheduler")
+        if tensor is not None:
+            # a rank that failed or vanished wakes an idle scheduler, which
+            # ends the ring between steps (_end_ring)
+            tensor.link.on_down.append(self._wake.set)
 
     # ------------------------------------------------------ any thread
 
@@ -507,15 +511,35 @@ class Scheduler:
         try:
             self._tick()
         # the scheduler thread must outlive one bad tick (logged, fails the rows)
-        except Exception:
+        except Exception as e:
             # Nothing here should raise; if it does, fail what is in
             # flight rather than the thread.
             logger.exception("scheduler tick failed")
+            if self.tensor is not None:
+                # on a ring the ranks may now be at different points: the
+                # others are told on the bell, and no collective follows
+                self.tensor.link.fail(f"rank 0's scheduler failed: "
+                                      f"{type(e).__name__}: {e}")
             self._fail_all(RuntimeError("the scheduler hit an internal "
                                         "error; see the server log"))
             self._close_executor()
 
+    def _end_ring(self) -> None:
+        """The ring is down: every request in flight, waiting and to come
+        is answered with RingFailed, and the scheduler thread ends without
+        another collective (its finally's stop sees the ring down)."""
+        why = self.tensor.link.why
+        logger.error("ring down: %s; the scheduler stops", why)
+        self.abort(RingFailed(
+            f"this model is split across machines and a rank left the "
+            f"ring ({why}); retry once it is loaded again"))
+        self._close_executor()
+        self._stop = True
+
     def _tick(self) -> None:
+        if self.tensor is not None and self.tensor.link.down.is_set():
+            self._end_ring()
+            return
         self._do_commands()
         if self.tensor is not None:
             self._journal_sets()
