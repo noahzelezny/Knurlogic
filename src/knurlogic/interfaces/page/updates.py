@@ -1,4 +1,8 @@
-"""Is a model from Hugging Face out of date? Asked once per page start.
+"""Is a model from Hugging Face, or knurlogic itself, out of date? Asked
+once per page start.
+
+knurlogic: PyPI's JSON for the package names its latest release; when it is
+newer than the one running, the page says so (`release_doc`).
 
 A model in the Hugging Face cache sits at models--org--repo/snapshots/<sha>:
 the directory name IS the commit it was downloaded at. Once, in a background
@@ -90,9 +94,55 @@ def start(paths_fn, offline_flag: bool = False, ask=remote_sha):
 
 
 def start_for_page(offline_flag: bool = False):
-    """`start` over every model `discover` finds: what a page start calls."""
+    """`start` over every model `discover` finds, and the release check:
+    what a page start calls."""
     from knurlogic.machine import discover
+    if not offline(offline_flag):
+        threading.Thread(target=check_release, daemon=True,
+                         name="release-check").start()
     return start(lambda: [f.path for f in discover.find()], offline_flag)
+
+
+# ------------------------------------------------------------ knurlogic
+
+PYPI = "https://pypi.org/pypi/knurlogic/json"
+_RELEASE: dict = {"latest": None}
+
+
+def pypi_latest() -> str:
+    """PyPI's latest release of knurlogic (it skips pre-releases)."""
+    import json
+    import urllib.request
+    with urllib.request.urlopen(PYPI, timeout=TIMEOUT) as r:
+        return str(json.load(r)["info"]["version"])
+
+
+def check_release(ask=pypi_latest) -> None:
+    """Ask PyPI once; a failure leaves the latest release unknown."""
+    try:
+        v = ask()
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    with _LOCK:
+        _RELEASE["latest"] = v
+
+
+def _key(v: str) -> tuple:
+    """A release's order: its leading numbers (0.1.10 after 0.1.9); a
+    version with none sorts first."""
+    nums = re.match(r"\d+(?:\.\d+)*", v.strip())
+    return tuple(int(x) for x in nums.group(0).split(".")) if nums else ()
+
+
+def release_doc() -> dict:
+    """{"current", "latest", "update"}: `latest` None until PyPI answered,
+    `update` True only when it is newer than the running knurlogic."""
+    from knurlogic import __version__
+    with _LOCK:
+        latest = _RELEASE["latest"]
+    return {"current": __version__, "latest": latest,
+            "update": bool(latest) and _key(latest) > _key(__version__),
+            "command": "pip install -U knurlogic"}
 
 
 def flagged(paths) -> set:
@@ -116,3 +166,4 @@ def reset() -> None:
     with _LOCK:
         _REMOTE.clear()
         _STATE["started"] = False
+        _RELEASE["latest"] = None
