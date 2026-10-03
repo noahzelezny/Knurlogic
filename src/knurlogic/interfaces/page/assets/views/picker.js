@@ -263,7 +263,7 @@ async function loadPreview(){
   if(SEL!==m) return;
   // the preview's room is asked against the tune picked, and fresher
   const pr=$('pickroom'); if(pr && PREVIEW && PREVIEW.room) pr.innerHTML=roomHTML(PREVIEW.room);
-  mtpState(); launchGate();
+  mtpState(); splitState(); launchGate();
 }
 function launchGate(){
   const why=SEL ? launchBlock(selNodes()) : 'choose a model';
@@ -427,7 +427,9 @@ const launching=()=>$('launch').textContent.trim()!=='Launch';
 // launch refuses the same, with the arithmetic). The step margin is
 // tuning/resolve.step_margin's: 5% of the working set, at least 4 GiB.
 function tensorWhy(ns){
-  const t=SEL&&SEL.tensor_bytes; if(!t||ns.length<2) return '';
+  // the picked model's preview carries it (the listing loads no artifact)
+  const t=SEL&&PREVIEW&&PREVIEW.for===SEL.path&&PREVIEW.tensor_bytes;
+  if(!t||ns.length<2) return '';
   const on=k=>(launchMTP(SEL)[k]||'on')!=='off';
   const per=t.sharded/ns.length+t.replicated;
   const lead=(on('KNURLOGIC_MTP')?t.head:0)+(on('KNURLOGIC_VISION')?t.tower:0);

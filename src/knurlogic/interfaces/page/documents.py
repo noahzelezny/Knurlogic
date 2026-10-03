@@ -192,8 +192,7 @@ _SPLITS = DiskCache("splits.json", valid=lambda v: isinstance(v, dict))
 
 
 def _splits(f) -> dict:
-    """{"splits": `splits_of` a found model, "tensor_bytes": what a tensor
-    rank holds (tensor_bytes_of)}, kept on disk under its identity (which
+    """{"splits": `splits_of` a found model}, kept on disk under its identity (which
     changes with any shard, config or *.py); splits None when it cannot be
     read (the picker then offers both and the launch answers)."""
     from knurlogic.machine.artifact import identity
@@ -208,8 +207,6 @@ def _splits(f) -> dict:
         return hit
     try:
         out = {"splits": splits_of(f.path)}
-        if "tensor" in out["splits"]:
-            out["tensor_bytes"] = tensor_bytes_of(f.path)
     except (OSError, ValueError, KeyError, AttributeError, TypeError):
         return {"splits": None}
     if stamp:
@@ -217,15 +214,19 @@ def _splits(f) -> dict:
     return out
 
 
-def tensor_bytes_of(path) -> dict:
-    """What a tensor rank holds, for the picker to fit each picked machine:
-    the split weights (divided by the ranks), the replicated ones, and what
-    rank 0 alone adds -- the MTP head and the vision tower, apart, since
-    each counts only when that launch has it on."""
-    from knurlogic.machine.artifact import Artifact
+def tensor_bytes_of(a) -> dict | None:
+    """What a tensor rank holds, for the picker to fit each picked machine
+    (the picked model's preview: the listing loads no artifact): the split
+    weights (divided by the ranks), the replicated ones, and what rank 0
+    alone adds -- the MTP head and the vision tower, apart, since each
+    counts only when that launch has it on. None: no tensor split."""
     from knurlogic.tuning import resolve as R
-    a = Artifact.load(path)
-    pl = R.tensor_placement(a, 1)
+    if R.tensor_refusals(a.raw_config, 2):
+        return None
+    try:
+        pl = R.tensor_placement(a, 1)
+    except (OSError, ValueError, KeyError):
+        return None
     head = R.leader_bytes(a, vision=False)
     return {"sharded": pl["sharded_bytes"], "replicated": pl["replicated_bytes"],
             "head": head, "tower": R.leader_bytes(a, mtp=False)}
@@ -571,6 +572,7 @@ def _preview(path: str, tune: str, working_set_gib=None,
         # what the Load model toggles free: the MTP head, and vision's
         # tower + image store + image KV allowance (0: no such part)
         **_part_bytes(a),
+        "tensor_bytes": tensor_bytes_of(a),
     }
 
 

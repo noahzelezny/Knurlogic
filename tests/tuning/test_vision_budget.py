@@ -319,3 +319,13 @@ def test_a_cluster_launchs_mtp_off_reaches_its_shape(tmp_path, monkeypatch):
         assert C.shape_of(str(d), 2, split, vision=False,
                           mtp=False)["leader_bytes"] == 0
         assert C.shape_of(str(d), 2, split, vision=False)["leader_bytes"] > 0
+
+
+def test_the_picked_models_preview_carries_its_tensor_bytes(tmp_path):
+    # the picker fits a tensor split from the picked model's preview (the
+    # listing loads no artifact, so it no longer carries them)
+    from knurlogic.interfaces.page import documents
+    t = documents._preview(str(_with_head(_rung(tmp_path / "t"), 3 << 20)),
+                           "default", 64)
+    tb = t["tensor_bytes"]
+    assert {"sharded", "replicated", "head", "tower"} <= set(tb)
