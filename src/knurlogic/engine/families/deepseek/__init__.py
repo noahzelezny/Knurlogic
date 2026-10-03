@@ -9,6 +9,7 @@ vision/ (docs/design/deepseek-vision.md).
 The chat template is engine/templates/deepseek_v4.jinja (the conversion
 ships a stub); its thinking levels are DeepSeek's three modes: Non-think,
 Think High, Think Max (the official prefix), the "deepseek_effort" dialect.
+Vision-Exp's variant has four (off, low, high, max): "deepseek_vision_effort".
 """
 
 MANIFEST = {
@@ -46,6 +47,21 @@ MANIFEST = {
             "default": "high",
             "native": [["none", "off", {"thinking_mode": "chat"}],
                        ["high", "high", {"thinking_mode": "thinking"}],
+                       ["xhigh", "max", {"thinking_mode": "thinking",
+                                         "reasoning_effort": "max"}]],
+        },
+        # DeepSeek-V4-Flash-Vision-Exp: four levels, its encoder's
+        # REASONING_EFFORT_PROMPTS ("low", its default, adds no prefix);
+        # its variant's first line sets dsv4_vision, so it is detected first
+        "deepseek_vision_effort": {
+            "detect": {"all": ["set dsv4_vision = true", "thinking_mode",
+                               "Reasoning Effort", "enable_thinking"]},
+            "default": "low",
+            "native": [["none", "off", {"thinking_mode": "chat"}],
+                       ["low", "low", {"thinking_mode": "thinking",
+                                       "reasoning_effort": "low"}],
+                       ["high", "high", {"thinking_mode": "thinking",
+                                         "reasoning_effort": "high"}],
                        ["xhigh", "max", {"thinking_mode": "thinking",
                                          "reasoning_effort": "max"}]],
         },

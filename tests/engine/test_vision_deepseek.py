@@ -144,7 +144,12 @@ def test_a_deepseek_v4_vision_artifact_gets_the_vision_template():
     assert templates.served_family(templates.text("deepseek_v4")) == \
         "deepseek_v4"
     from knurlogic.engine.serve import thinking
-    assert thinking.detect(vt)[0] == "deepseek_effort"
+    assert thinking.detect(vt)[0] == "deepseek_vision_effort"
+    assert [n["name"] for n in thinking.levels(vt)["native"]] == \
+        ["off", "low", "high", "max"]
+    assert thinking.levels(vt)["default"] == "low"
+    assert thinking.detect(templates.text("deepseek_v4"))[0] == \
+        "deepseek_effort"
 
 
 # ------------------------------------------------------------ mlx
