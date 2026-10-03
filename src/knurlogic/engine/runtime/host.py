@@ -119,8 +119,8 @@ class ModelHost:
         self.cross_chip = cross_chip
         self.shard = shard
         self.shard_config = shard_config
-        #: head_agree(bound: bool) -> bool, called after the head binds (or
-        #: does not) on every load of a split model's rank: rank 0's answer,
+        #: head_agree(bound: bool, head) -> bool, called after the head binds
+        #: (or does not) on every load of a split model's rank: rank 0's answer,
         #: told to every rank -- only rank 0 holds a head, and the others
         #: follow its drafting steps (engine/runtime/tensor.agree_head)
         self.head_agree = head_agree
@@ -215,14 +215,9 @@ class ModelHost:
                         "lock + split %.1fs, vision + head %.1fs", path, gib,
                         t2 - t1, gib / max(t2 - t1, 1e-3), t1 - t0, t3 - t2)
             if self.head_agree is not None:
-                if getattr(state.DRAFT.get("head"), "block_size", 0):
-                    # a block drafter's steps are not in the split's
-                    # broadcasts (engine/mtp/block_loop.py)
-                    state.DRAFT.update(head=None, on=False,
-                                       why="a block drafter (DSpark) runs "
-                                           "on one machine only")
                 bound = bool(state.DRAFT.get("on"))
-                if not self.head_agree(bound) and bound:
+                if not self.head_agree(bound, state.DRAFT.get("head")) \
+                        and bound:
                     state.DRAFT.update(head=None, on=False,
                                        why="not every rank of the pipeline "
                                            "bound a drafting head")

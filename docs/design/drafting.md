@@ -277,6 +277,14 @@ not pay) advance it one position. m is also capped at the token that
 ends any row (`_ends`, as above), so a finished row's caches end at its
 last streamed token.
 
+On a split every rank runs BlockBatch; only rank 0 holds the head. B1
+(`Coord.bk`) carries the regime and the [B, K] drafts, B2 (`Coord.bm`)
+the committed count m and every row's token at position m; a follower
+never judges (a tensor follower evaluates its verify's logits before B2,
+so the ranks' all_sums line up). On a pipeline the target layers'
+outputs reach rank 0 through `pipeline.carry`
+(docs/design/deepseek-vision.md, DSpark).
+
 ## src/knurlogic/engine/mtp/registry.py
 
 A `FamilySpec` says four things, and every one is a place where

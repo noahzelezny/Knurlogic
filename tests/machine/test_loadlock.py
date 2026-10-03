@@ -143,7 +143,7 @@ def test_ring_ranks_on_one_machine_do_not_deadlock_on_the_lock(
     meet = threading.Barrier(2, timeout=10)
     hosts = [H.ModelHost(shard=lambda m: meet.wait(), vision=False,
                          load_wait_s=10.0,
-                         head_agree=lambda bound: meet.wait() >= 0)
+                         head_agree=lambda bound, head: meet.wait() >= 0)
              for _ in range(2)]
     ts = [threading.Thread(target=h.load, args=(str(tmp_path),))
           for h in hosts]
