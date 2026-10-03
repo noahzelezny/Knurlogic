@@ -464,6 +464,11 @@ class MTPBatch:
         #: engine/runtime/pipeline.Coord on a pipeline split: rank 0's regime,
         #: drafts and verdicts reach every rank through it (B1, B2)
         self.coord = None
+        #: finish_at(uid, tokens) -> the index of the token in `tokens` (a
+        #: row's next ones, in order) that ends the row, or None: the batch
+        #: engine's stop rules, which this loop's own params leave out. A
+        #: step commits no position past it (`_ends`)
+        self.finish_at: Callable[[int, list[int]], int | None] | None = None
 
         self.uids: list[int] = []
         self.params: list[RowParams] = []
@@ -662,6 +667,20 @@ class MTPBatch:
                 pass            # a cache with no state to read yet
         return out
 
+    def _ends(self, i: int, toks: list[int]) -> int | None:
+        """The index in `toks` (row i's tokens this step, in order) of the
+        one that ends the row, or None. A step never commits past it: the
+        row's entry is stored at its last token, and a trunk cache that
+        took a position more could not be trimmed back to it."""
+        p = self.params[i]
+        n = len(self.emitted[i])
+        own = next((j for j, t in enumerate(toks)
+                    if t in p.eos or n + j + 1 >= p.max_tokens), None)
+        hook = (self.finish_at(self.uids[i], toks)
+                if self.finish_at is not None else None)
+        got = [j for j in (own, hook) if j is not None]
+        return min(got) if got else None
+
     def remove(self, uids: Iterable[int]) -> None:
         drop = set(uids)
         self.filter([i for i, u in enumerate(self.uids) if u not in drop])
@@ -819,9 +838,12 @@ class MTPBatch:
             mx.eval(lg2)
         ok_flags = [bool(o.item()) if isinstance(o, mx.array) else bool(o) for o in oks]
         t2 = mx.concatenate(t2_rows).astype(mx.int32)
+        # a row that t1 ends: no row commits t2 this step (`_ends`)
+        cut = judge and any(self._ends(i, [t]) == 0
+                            for i, t in enumerate(self.t1.tolist()))
         if self.coord is not None:
             # B2: rank 0's verdicts drive every rank's rollback and replay
-            ok_flags, t2 = self.coord.b2(ok_flags, t2, B)
+            ok_flags, t2, cut = self.coord.b2(ok_flags, t2, B, cut)
 
         n_live = sum(live)
         if n_live:
@@ -831,6 +853,13 @@ class MTPBatch:
             if live[i]:
                 self.steps[i] += 1
                 self.accepted[i] += int(ok_flags[i])
+
+        if cut:
+            # t1 alone commits: back to before the verify, and a plain
+            # step whose next tokens are the t2s (each the target's token
+            # at that position: accepted, corrected or its own)
+            restore(self.cache, csnap)
+            return self._plain_step(then=t2)
 
         # --- rollback + replay if anyone rejected ------------------------
         if not all(ok_flags):
@@ -903,13 +932,14 @@ class MTPBatch:
         self.row_t1 = row_t1
         return out
 
-    def _plain_step(self) -> list[RowStep]:
+    def _plain_step(self, then: mx.array | None = None) -> list[RowStep]:
         """One stock decode step: every row commits t1 and samples the next.
 
         Taken when the batch is too wide for drafting to pay (draft_max_rows).
         The head still advances one position per row so its cache stays one
         row per committed token, and the next draft is ready the moment the
-        batch shrinks back under the ceiling.
+        batch shrinks back under the ceiling. `then` ([B]): the next tokens,
+        already drawn (a drafting step cut to t1, `_draft_step`).
         """
         B = len(self.uids)
         assert self.t1 is not None and self.row_t1 is not None
@@ -920,7 +950,8 @@ class MTPBatch:
         # The head already drafted the token after t1 (draft_row); the trunk
         # is about to choose it too, so score the head at no cost and keep
         # the acceptance estimate live while not drafting.
-        standing = self.draft_row if self.any_drafting else None
+        standing = (self.draft_row if self.any_drafting and then is None
+                    else None)
         out: list[RowStep] = []
         keep: list[int] = []
         for i in range(B):
@@ -944,7 +975,9 @@ class MTPBatch:
         row_t1 = lg[:, 0]
         h = self.get_h() if self.any_drafting else None
         t_next_rows = [
-            _pick(row_t1[i:i + 1], self.params[i], self.emitted[i]) for i in keep
+            then[i:i + 1] if then is not None
+            else _pick(row_t1[i:i + 1], self.params[i], self.emitted[i])
+            for i in keep
         ]
         if standing is not None and keep:
             hits = (mx.argmax(standing, axis=-1)[mx.array(keep)]

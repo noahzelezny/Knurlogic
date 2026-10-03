@@ -419,3 +419,39 @@ def test_every_prefill_chunk_is_reported_to_the_job_marker(monkeypatch):
     _run(bg.MTPBatchGenerator(model, head, prefill_step_size=16),
          [prompts[2]], 2)
     assert n["c"] == 5
+
+
+def test_a_row_ending_mid_step_stores_only_what_it_committed(monkeypatch):
+    """Drafting every step, each step commits two tokens, so max_tokens 7
+    ends the row on the first of its fourth step's pair -- after the trunk
+    and the head had already taken the second. The entry stored for it is
+    at the 7 tokens the client saw (all_tokens is its key), and the next
+    turn restored from it drafts exactly what a fresh prefill does."""
+    import copy
+
+    from knurlogic.engine.mtp.batch_generator import (MTPBatchGenerator,
+                                                      trunk_offset)
+    from knurlogic.engine.mtp.caches import position
+    monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
+    model, head, prompts = _tiny(512)
+    n_trunk = len(model.make_cache())
+    prompt = prompts[1]
+    got = {}
+    (toks,) = _run(MTPBatchGenerator(model, head, prefill_step_size=16),
+                   [prompt], 7, on_finish=lambda r: got.update(
+                       entry=r.prompt_cache, fed=r.all_tokens))
+    entry, fed = got["entry"], got["fed"]
+    assert len(toks) == 7
+    assert fed == prompt + toks
+    assert trunk_offset(entry[:n_trunk]) == len(fed)
+    assert len(entry) == n_trunk + 1 and position(entry[-1]) == len(fed)
+
+    nxt = [3, 1, 4, 1, 5, 9, 2, 6]
+    gen = MTPBatchGenerator(model, head, prefill_step_size=16)
+    restored, _ = _drive(gen, [nxt], 12, cache=copy.deepcopy(entry),
+                         prefix=fed)
+    assert gen._prompt_tokens_counter == len(nxt)
+    gen.close()
+    fresh, _ = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
+                      [fed + nxt], 12)
+    assert restored == fresh

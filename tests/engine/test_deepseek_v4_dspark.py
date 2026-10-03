@@ -351,3 +351,38 @@ def test_the_real_sidecar_binds_by_its_header_alone():
     assert len(st) == 3 and st[0].ffn.switch_mlp.gate_proj.mode == "mxfp4"
     assert hasattr(st[0].ffn.gate, "bias_vl")
     assert head.capture_paths() == ["layers.41", "layers.42", "hc_head"]
+
+
+def test_a_row_ending_mid_block_stores_only_what_it_committed(monkeypatch):
+    """A row that ends partway through a step's accepted drafts (max_tokens
+    anywhere from 4 to 13, steps committing 1 to 6 tokens): its entry is at
+    exactly the tokens the client saw, its DSpark cache beside it, and
+    the next turn restored from it is a fresh prefill's, token for
+    token."""
+    import copy
+
+    from knurlogic.engine.mtp.batch_generator import (MTPBatchGenerator,
+                                                      trunk_offset)
+    from knurlogic.engine.mtp.caches import position
+    monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
+    model = _load()
+    head, _ = _head(model)
+    (gold,), _ = _run(MTPBatchGenerator(model, None, prefill_step_size=4),
+                      [G.PROMPT], 30)
+    _guess(head, [G.PROMPT + gold])
+    for n in range(4, 14):
+        (toks,), ((entry, fed),) = _run(
+            MTPBatchGenerator(model, head, prefill_step_size=4),
+            [G.PROMPT], n)
+        assert toks == gold[:n]
+        assert fed == G.PROMPT + toks, n
+        assert trunk_offset(entry[:-1]) == len(fed)
+        assert position(entry[-1]) == len(fed)
+        stats = {}
+        cont, _ = _run(MTPBatchGenerator(model, head, stats=stats,
+                                         prefill_step_size=4),
+                       [G.DECODE], 8, caches=[copy.deepcopy(entry)],
+                       prefixes=[fed])
+        fresh, _ = _run(MTPBatchGenerator(model, head, prefill_step_size=4),
+                        [fed + G.DECODE], 8)
+        assert stats["steps"] > 0 and cont == fresh, n
