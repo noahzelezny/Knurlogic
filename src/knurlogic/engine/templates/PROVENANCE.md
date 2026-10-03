@@ -52,8 +52,9 @@
   message's parts joined with "\n\n", an image as `<｜deepseek_image｜>`.
 - the template is deepseek_v4.jinja with `{%- set dsv4_vision = true -%}`
   first; the jinja picks the prefixes by it. The image parts are not the
-  template's: engine/vision splices the placeholder and the separator
-  (families/deepseek/vision, `part_separator`).
+  template's: engine/vision splices the placeholder, and
+  runtime/prompt.flatten joins every message's parts with "\n\n" for this
+  template (`part_separator`), text-only ones too.
 - chosen for an artifact named DeepSeek-V4 ... Vision with no template
   (or a stub), or a template that is this one.
 - proven: tests/engine/test_vision_deepseek.py renders the artifact's
