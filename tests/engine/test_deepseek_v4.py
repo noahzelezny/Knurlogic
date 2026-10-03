@@ -309,12 +309,13 @@ def test_the_mlx_community_stub_is_known_by_hash():
     assert templates.family_for(t) == "deepseek_v4"
 
 
-def test_thinking_reads_the_template_as_an_on_off_switch():
-    """The served template must not look like GLM's effort dialect (it has
-    no "reasoning_effort"): on/off through enable_thinking."""
+def test_thinking_reads_the_template_as_deepseeks_own_dialect():
+    """The template carries GLM's and Qwen's effort words too (Think Max
+    says "Reasoning Effort", the kwarg is reasoning_effort): its own,
+    more specific dialect must win, not their on/off or effort ladders."""
     from knurlogic.engine.serve import thinking
     from knurlogic.engine.serve.load import tool_support
-    assert thinking.detect(TEMPLATE)[0] == "qwen_toggle"
+    assert thinking.detect(TEMPLATE)[0] == "deepseek_effort"
     assert tool_support(TEMPLATE)["parser"] == "deepseek_v4 (knurlogic)"
 
 
@@ -446,3 +447,19 @@ def test_the_latest_reminder_kwarg_is_deepseeks_reminder_before_the_last_user_tu
         assert render(own, thinking_mode=mode, latest_reminder=r) == \
             encode(own, mode=mode)
     assert render(h, thinking_mode=mode) == encode(h, mode=mode)
+
+
+def test_think_max_is_deepseeks_prefix_and_the_three_modes_are_the_dialect():
+    """reasoning_effort max renders the official Think Max prefix (thinking
+    mode only); the dialect offers off / high / max."""
+    h = [{"role": "system", "content": "Be brief."},
+         {"role": "user", "content": "hi"}]
+    want = official.encode_messages(copy.deepcopy(h), thinking_mode="thinking",
+                                    reasoning_effort="max")
+    assert render(h, thinking_mode="thinking", reasoning_effort="max") == want
+    assert render(h, thinking_mode="chat", reasoning_effort="max") == \
+        encode(h)                           # chat mode: no prefix
+    from knurlogic.engine.serve import thinking
+    name, spec = thinking.detect(TEMPLATE)
+    assert name == "deepseek_effort"
+    assert [n[1] for n in spec["native"]] == ["off", "high", "max"]
