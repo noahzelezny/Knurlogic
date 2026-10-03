@@ -250,6 +250,20 @@ holds the head: a follower's batch has `head=None` and mirrors rank 0's
 drafting rows (RowParams.mirror), running the verify and replay forwards
 with the tokens B1 and B2 hand it.
 
+## src/knurlogic/engine/mtp/block_loop.py
+
+A head that drafts K tokens in one pass (deepseek_v4's DSpark) does not
+fit the 1-token loop's invariant that every row advances two positions.
+BlockBatch keeps the invariant that matters -- every row of the batch
+advances by the SAME count -- by committing m + 1 tokens per row, m the
+fewest drafts any row accepted. A row that accepted more keeps its token
+at position m (its accepted draft: already a sample of the target), so
+nothing is resampled and the verdicts stay exact; one row loses nothing.
+When m < K the trunk is restored and replays the m + 1 committed tokens.
+The head's cache takes only committed positions, from the forward that
+committed them, so it never rolls back. Plain steps (when drafting does
+not pay) advance it one position.
+
 ## src/knurlogic/engine/mtp/registry.py
 
 A `FamilySpec` says four things, and every one is a place where

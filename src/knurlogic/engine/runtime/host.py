@@ -215,6 +215,12 @@ class ModelHost:
                         "lock + split %.1fs, vision + head %.1fs", path, gib,
                         t2 - t1, gib / max(t2 - t1, 1e-3), t1 - t0, t3 - t2)
             if self.head_agree is not None:
+                if getattr(state.DRAFT.get("head"), "block_size", 0):
+                    # a block drafter's steps are not in the split's
+                    # broadcasts (engine/mtp/block_loop.py)
+                    state.DRAFT.update(head=None, on=False,
+                                       why="a block drafter (DSpark) runs "
+                                           "on one machine only")
                 bound = bool(state.DRAFT.get("on"))
                 if not self.head_agree(bound) and bound:
                     state.DRAFT.update(head=None, on=False,
