@@ -1200,11 +1200,17 @@ class DeepseekV4Cache:
         elif (
             not isinstance(other.local, BatchRotatingKVCache)
             and self.local.offset == other.local.offset
-            and self.local._idx == other.local._idx
         ):
+            # knurlogic edit 22: concatenate each window as its tokens, not
+            # its raw ring buffer (see _window); the fork concatenated the
+            # buffers when the offsets and _idx agreed, and a row that had
+            # decoded in place holds a buffer longer than its tokens.
             if self.local.keys is not None or other.local.keys is not None:
-                self.local.keys = self._concat_optional(self.local.keys, other.local.keys)
-                self.local.values = self._concat_optional(self.local.values, other.local.values)
+                ka, va = self._window(self.local)
+                kb, vb = self._window(other.local)
+                self.local.keys = self._concat_optional(ka, kb)
+                self.local.values = self._concat_optional(va, vb)
+                self.local._idx = self.local.keys.shape[2]
         else:
             self.local = self._batch_rotating_from(self.local)
             other_local = (
@@ -1680,14 +1686,29 @@ class DeepseekV4Cache:
         out.offset = offsets[0]
         if sizes[0] == 0:
             return out
-        out.keys = mx.concatenate(
-            [l._temporal_order(l.keys) for l in locals_], axis=0
-        )
-        out.values = mx.concatenate(
-            [l._temporal_order(l.values) for l in locals_], axis=0
-        )
+        # knurlogic edit 22: each window as its tokens (see _window)
+        kvs = [cls._window(l) for l in locals_]
+        out.keys = mx.concatenate([k for k, _ in kvs], axis=0)
+        out.values = mx.concatenate([v for _, v in kvs], axis=0)
         out._idx = out.keys.shape[2]
         return out
+
+    @staticmethod
+    def _window(local):
+        """knurlogic edit 22: a RotatingKVCache's window as its last
+        size() tokens in temporal order, (None, None) when it is empty. The
+        raw buffer is not that: a row that decoded in place holds a buffer
+        grown past its tokens (a 6-token prefill then a step: 8 slots, 7
+        tokens), and a multi-token update leaves up to max_size + S - 1
+        (a 9-token prefill: 9 keys for an 8-wide window), so two rows at
+        the same offset can hold buffers of different lengths. Keys older
+        than the last size() are dropped by the next update either way."""
+        n = local.size()
+        if local.keys is None or n == 0:
+            return None, None
+        k = local._temporal_order(local.keys)[..., -n:, :]
+        v = local._temporal_order(local.values)[..., -n:, :]
+        return k, v
 
     @staticmethod
     def _concat_batch_state(a, b, a_batch, b_batch, fill=0.0):
