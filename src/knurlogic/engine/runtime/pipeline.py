@@ -435,13 +435,14 @@ class Coord:
             return False, None
         return True, mx.array(got[1:], dtype=mx.int32)
 
-    def b2(self, ok: list[bool], t2: mx.array, B: int):
-        """-> (ok flags, t2 [B] int32)."""
+    def b2(self, ok: list[bool], t2: mx.array, B: int, cut: bool = False):
+        """-> (ok flags, t2 [B] int32, cut: t1 alone commits)."""
         self.calls["b2"] += 1
         vals = ([int(bool(o)) for o in ok] + [int(t) for t in t2.tolist()]
-                if self.leader else [0] * (2 * B))
+                + [int(bool(cut))] if self.leader else [0] * (2 * B + 1))
         got = self._bcast(vals)
-        return [bool(o) for o in got[:B]], mx.array(got[B:], dtype=mx.int32)
+        return ([bool(o) for o in got[:B]],
+                mx.array(got[B:2 * B], dtype=mx.int32), bool(got[2 * B]))
 
 
 def coordinate(gen, group, drafting: bool | None = None) -> Coord:

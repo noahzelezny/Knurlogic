@@ -250,6 +250,17 @@ holds the head: a follower's batch has `head=None` and mirrors rank 0's
 drafting rows (RowParams.mirror), running the verify and replay forwards
 with the tokens B1 and B2 hand it.
 
+A row that finishes mid-step (its t1 is an end token, or its last under
+max_tokens) must not leave a position past it in its caches: the entry
+stored for it is keyed by the tokens it streamed, and neither the
+DeepSeek-V4 cache nor a linear-attention one can be trimmed back. So a
+step commits nothing past the token that ends a row (`MTPBatch._ends`:
+the loop's own rules and the batch engine's `finish_at`, its stop
+sequences and max_tokens, read without moving its state). In this loop
+that is t1 alone: the trunk is restored and steps t1 as a plain step
+does, every row's t2 becoming its next token. Rank 0 decides it and B2
+carries it.
+
 ## src/knurlogic/engine/mtp/block_loop.py
 
 A head that drafts K tokens in one pass (deepseek_v4's DSpark) does not
@@ -262,7 +273,9 @@ nothing is resampled and the verdicts stay exact; one row loses nothing.
 When m < K the trunk is restored and replays the m + 1 committed tokens.
 The head's cache takes only committed positions, from the forward that
 committed them, so it never rolls back. Plain steps (when drafting does
-not pay) advance it one position.
+not pay) advance it one position. m is also capped at the token that
+ends any row (`_ends`, as above), so a finished row's caches end at its
+last streamed token.
 
 ## src/knurlogic/engine/mtp/registry.py
 
