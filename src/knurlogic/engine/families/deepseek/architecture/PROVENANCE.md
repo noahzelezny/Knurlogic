@@ -11,7 +11,7 @@ artifacts were validated against -- not merely that it imports.
   its author's permission. No exo code is in it.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.31.3.
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `d9f42ca3e6906b4f618c316e99bbfa5198b6a1ac96ebaffd70741300f7bae14f`
+- vendored sha256: `9bc8fe59372f332c82272cccd646ad22b5bf376cab8838b4795023ebc4ffcb81`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -186,3 +186,13 @@ HC head and the final norm); tested, not changed.
    verify forward follows 1-wide replays (tests/test_deepseek_v4_dspark.py,
    three rows). The same mask serves an MTP batch's 2-wide verify and
    replay after plain steps.
+
+### Edit 18, a fix (Flash and Vision-Exp)
+
+18. **The shared expert's SwiGLU clamp** (`DeepseekV4MoE.__init__`). The
+   fork built the shared expert with `swiglu_limit=0.0` (no clamp);
+   DeepSeek's reference builds it with `args.swiglu_limit` (10), as its
+   routed experts, in Flash's inference/model.py and Vision-Exp's alike.
+   Changes a token's output only where the shared expert's gate exceeds
+   10 or its up projection leaves [-10, 10]
+   (tests/engine/test_vision_deepseek.py, the shared-expert clamp test).
