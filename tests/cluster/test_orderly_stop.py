@@ -41,7 +41,7 @@ def _term(monkeypatch, state, ends=True):
 
 
 def test_a_ready_ring_stops_between_steps_not_by_abort(monkeypatch):
-    assert _term(monkeypatch, "ready") == [("stop_ring", 6.0)]
+    assert _term(monkeypatch, "ready") == [("stop_ring", 15.0)]
 
 
 def test_a_ring_still_loading_aborts_as_before(monkeypatch):
@@ -73,5 +73,11 @@ def test_stop_ring_waits_for_the_step_then_says_whether_it_ended():
 
 def test_a_step_that_never_ends_fails_the_requests_then_leaves(monkeypatch):
     # a peer is gone: the old path, so in-flight requests get their 503
-    assert _term(monkeypatch, "ready", ends=False) == [("stop_ring", 6.0),
+    assert _term(monkeypatch, "ready", ends=False) == [("stop_ring", 15.0),
                                                        ("abort",)]
+
+
+def test_a_warming_ring_also_stops_between_steps(monkeypatch):
+    # the warm-up runs real forwards with the ring's collectives: a rank
+    # killed in one pinned its peer's GPU like one killed mid-generation
+    assert _term(monkeypatch, "warming") == [("stop_ring", 15.0)]
