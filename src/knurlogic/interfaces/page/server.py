@@ -2067,6 +2067,9 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     # the knurlogic strategy: this machine's default launch preset
     routes["/strategy.json"] = lambda _q, _n=0: documents._json(
         documents.strategy_doc())
+    # a newer knurlogic on PyPI (asked once at page start, page/updates.py)
+    routes["/release.json"] = lambda _q, _n=0: documents._json(
+        updates.release_doc())
     # the knurlogic-wide settings: compaction, identical results across chips
     routes["/knurlogic.json"] = lambda _q, _n=0: documents._json(
         documents.knurlogic_doc())

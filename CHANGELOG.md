@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+* The page shows "Update x.y.z" in its top bar when PyPI has a newer
+  knurlogic; clicking it copies `pip install -U knurlogic`. Asked once per
+  page start; `--offline` skips it.
+* DeepSeek-V4: the shared expert clamps its SwiGLU at 10 as DeepSeek's
+  reference does; it ran unclamped before, about 2% off the shared expert's
+  output on average.
+
 ## 0.1.2
 
 DeepSeek-V4-Flash in full, MTP on a tensor split, and a cluster that stops
