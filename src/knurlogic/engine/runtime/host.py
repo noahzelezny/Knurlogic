@@ -56,13 +56,40 @@ def held_arrays(root, limit: int = 2_000_000) -> list:
     return found
 
 
+#: set from a signal handler to stop a load at the next batch boundary
+LOAD_STOP = threading.Event()
+#: bytes evaluated per mx.eval during a load: the stop is checked between
+#: batches, so a cancelled load leaves no GPU work half-done
+LOAD_BATCH_BYTES = 1 << 30
+
+
+class LoadCancelled(RuntimeError):
+    """The load was stopped between batches (LOAD_STOP)."""
+
+
 def evaluate_everything(model) -> int:
-    """mx.eval every array the model holds (held_arrays), in one call;
-    returns how many. The load pays for the whole read, so the first
-    request does not."""
+    """mx.eval every array the model holds (held_arrays), in ~1 GiB batches
+    in the model's own order (a layer's arrays together); returns how many.
+    The load pays for the whole read, so the first request does not.
+
+    One mx.eval of everything could not be stopped: a rank killed inside it
+    (a cluster load cancelled mid-read) left the GPU's utilization counter
+    stuck at 100% until a reboot. Between batches LOAD_STOP is checked and
+    the load raises LoadCancelled with nothing in flight."""
     import mlx.core as mx
     arrays = held_arrays(model)
-    mx.eval(arrays)
+    batch, size = [], 0
+    for a in arrays:
+        batch.append(a)
+        size += int(getattr(a, "nbytes", 0) or 0)
+        if size >= LOAD_BATCH_BYTES:
+            if LOAD_STOP.is_set():
+                raise LoadCancelled("the load was stopped")
+            mx.eval(batch)
+            batch, size = [], 0
+    if LOAD_STOP.is_set():
+        raise LoadCancelled("the load was stopped")
+    mx.eval(batch)
     return len(arrays)
 
 

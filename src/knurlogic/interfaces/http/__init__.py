@@ -151,7 +151,25 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
                     fail_and_leave()
             threading.Thread(target=stop_then_leave, daemon=True).start()
             return
-        threading.Thread(target=fail_and_leave, daemon=True).start()
+        # Loading: the read stops at its next batch boundary (host.LOAD_STOP)
+        # rather than dying inside one, which left the GPU's utilization
+        # counter stuck at 100% until a reboot.
+        from knurlogic.engine.runtime import host as H
+        H.LOAD_STOP.set()
+
+        def after_load_stops():
+            import time
+            end = time.monotonic() + stop_within
+            while getattr(mh, "state", "") == "loading" and \
+                    time.monotonic() < end:
+                time.sleep(0.05)
+            # read past the flag into its warm-up: stop the ring as ready
+            if getattr(mh, "state", "") in ("warming", "ready") and \
+                    sched.stop_ring(timeout=stop_within):
+                os._exit(0)
+            else:
+                fail_and_leave()
+        threading.Thread(target=after_load_stops, daemon=True).start()
     signal.signal(signal.SIGTERM, on_term)
 
 
