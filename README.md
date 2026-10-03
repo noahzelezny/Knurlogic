@@ -9,8 +9,8 @@ also be split across two or more Macs.
 ## Requirements
 
 * A Mac with Apple Silicon and enough unified memory for the model.
-* Python 3.10 or newer.
-* mlx 0.31.2 and mlx-lm 0.31.3, pinned exactly (pip installs them).
+* Python 3.11 or newer.
+* mlx 0.32.3 and mlx-lm 0.32.0, pinned exactly (pip installs them).
 
 ## Install
 

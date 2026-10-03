@@ -194,7 +194,7 @@ def test_a_quantized_checkpoint_restores_like_a_fresh_prefill():
     gen = MTPBatchGenerator(model, head, prefill_step_size=16)
     restored, _ = _drive(gen, [next_b], 20, cache=copy.deepcopy(entry),
                          prefix=key)
-    assert gen._prompt_tokens_counter == len(next_b)
+    assert gen._counters.prompt_tokens == len(next_b)
     gen.close()
     fresh, _ = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
                       [sys_ + user + next_b], 20)
@@ -329,7 +329,6 @@ def test_flash_next_quantized_cache_trims_and_restores_its_indexer():
     a = [c for c in cache if hasattr(c, "indexer")][0]
     b = copy.deepcopy(a)
     b.state = a.state
-    b.meta_state = a.meta_state
     assert b.offset == a.offset and b.indexer.keys.shape == a.indexer.keys.shape
     assert trim_prompt_cache([a], 4) == 4
     assert a.offset == a.indexer.keys.shape[1] == len(prompt)

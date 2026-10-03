@@ -8,7 +8,7 @@ name = "knurlogic"
 version = "0.1.2"
 description = "Serve local language models on Apple Silicon, for people and agents."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Noah Zelezny" }]
@@ -20,7 +20,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -30,8 +29,8 @@ classifiers = [
 # BatchGenerator and reads its internals. Move the pin together with the
 # digests in [tool.knurlogic.pins] (tests/test_pins.py checks them).
 dependencies = [
-    "mlx==0.31.2; platform_system == 'Darwin'",
-    "mlx-lm==0.31.3",
+    "mlx==0.32.3; platform_system == 'Darwin'",
+    "mlx-lm==0.32.0",
     # the update check (model_info(expand=, timeout=)) and model downloads
     "huggingface_hub>=0.24",
     "numpy>=1.24",
@@ -69,10 +68,10 @@ knurlogic = ["interfaces/page/assets/**/*", "interfaces/menubar_assets/*.png",
 # What tests/test_pins.py holds the installed stack to: the versions, and
 # sha256 of the two mlx-lm files knurlogic builds on (an edited file is a
 # drift even under the same version string).
-mlx = "0.31.2"
-mlx-lm = "0.31.3"
-mlx_lm_generate_sha256 = "270778ad53eaca55a8533d82e6752660fe5d2605c4aa0879b48a50a91f69345f"
-mlx_lm_cache_sha256 = "819ed95dcbf755652363cfdb15a639890447abb534a06dcefd52c7fff5055750"
+mlx = "0.32.3"
+mlx-lm = "0.32.0"
+mlx_lm_generate_sha256 = "4a3bf57f5679dac73791f069268866ab5b9336e58582d436b31133984e4b6971"
+mlx_lm_cache_sha256 = "c96cb169fd5e0ec4584a162dd61dc62ab08ccdca03a9850f8a491ce6809145e6"
 
 [tool.ruff]
 target-version = "py310"

@@ -291,3 +291,19 @@ def test_a_headless_engine_says_why_and_names_vision_only_for_vision(
                 if "drafting head" in r.getMessage())
     assert why in line
     assert ("vision" in line) == vision
+
+
+def test_max_tokens_zero_ends_on_the_first_token_as_one_does():
+    """The API accepts max_tokens 0 and the engine has always ended such a
+    row on its first token; mlx-lm 0.32's insert refuses 0, so the batch
+    engine sends it as 1 -- the same stream."""
+    from knurlogic.engine.runtime.executor import Admission
+    model, head, prompts = _tiny(512)
+    out = []
+    for m in (0, 1):
+        ex = _executor(model, head)
+        uid = ex.insert(Admission(segments=[prompts[0]], max_tokens=m))
+        toks, _ = _drain(ex, [uid])
+        out.append(toks[uid])
+        ex.close()
+    assert out[0] == out[1] and len(out[0]) == 1

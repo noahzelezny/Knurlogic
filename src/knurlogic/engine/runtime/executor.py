@@ -37,7 +37,7 @@ class Admission:
     #: top_k, min_p); empty = greedy
     sampling: dict = field(default_factory=dict)
     processors: list = field(default_factory=list)
-    #: mlx-lm's SequenceStateMachine for the control-token stops, or None
+    #: the control-token machine (runtime/control.ControlMachine), or None
     #: for the engine's default
     state_machine: Any = None
     top_logprobs: int = 0
@@ -125,7 +125,7 @@ class LocalExecutor:
             segments=[a.segments], max_tokens=[a.max_tokens],
             caches=[a.cache], all_tokens=[list(a.prefix)],
             samplers=[dict(a.sampling)], logits_processors=[list(a.processors)],
-            state_machines=[a.state_machine] if a.state_machine else None,
+            control=[a.state_machine] if a.state_machine else None,
             reports=[a.report])
         if a.top_logprobs:
             self._top[uid] = a.top_logprobs

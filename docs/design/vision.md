@@ -376,7 +376,7 @@ and the segment trim follows from it: engine/runtime/scheduler._insert),
 so the key must be exactly as long as the KV it names.
 
 WHY THE TRIE ACCEPTS IT. `mlx_lm.models.cache.PromptTrie` walks
-`current[tok]` dicts; any hashable works (read at mlx-lm 0.31.3, the pinned
+`current[tok]` dicts; any hashable works (read at mlx-lm 0.32.0, the pinned
 version -- tests/test_vision_key.py runs the real LRUPromptCache so a
 version that stops accepting it goes red).
 

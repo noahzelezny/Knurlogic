@@ -19,10 +19,14 @@ import contextlib
 import copy
 import logging
 import os
+import time
+from dataclasses import dataclass
 
 import mlx.core as mx
 from mlx_lm.generate import BatchGenerator, GenerationBatch, PromptProcessingBatch
+from mlx_lm.models.cache import make_prompt_cache
 
+from knurlogic.engine.runtime.control import stop_machine
 from knurlogic.engine.serve import cache_report as cachereport
 
 from ..vision import key as K
@@ -39,6 +43,16 @@ logger = logging.getLogger(__name__)
 #: here, where the row's cache can still be extracted before it is dropped --
 #: batch_loop removes a row it finishes before returning.
 _NEVER = 1 << 62
+
+
+@dataclass
+class TokenResponse(GenerationBatch.Response):
+    """mlx-lm's per-token response plus the control machine's reading of
+    the token (runtime/control.py): the state it left the row in and the
+    marker sequence it completed. mlx-lm 0.32's Response dropped both when
+    its generator stopped tracking state; request.py needs them."""
+    current_state: str | None = None
+    match_sequence: tuple | None = None
 
 
 class HeadCarry:
@@ -162,6 +176,9 @@ class MTPBatchGenerator(BatchGenerator):
     def __init__(self, model, head, *, stats: dict | None = None,
                  vision=None, why: str = "", **kw):
         super().__init__(model, **kw)
+        #: the control machine of a row admitted without one: end on the
+        #: generator's stop tokens, as mlx-lm's own default did
+        self._default_control = stop_machine(kw.get("stop_tokens"))
         self._stack = contextlib.ExitStack()
         self._head = head
         self._vision = vision
@@ -212,7 +229,7 @@ class MTPBatchGenerator(BatchGenerator):
         batch = BlockBatch if getattr(head, "block_size", 0) else MTPBatch
         self._batch = batch(self._trunk, head, get_h, copy_caches=copy)
         self._batch.finish_at = self._finish_at
-        self._n_trunk = len(self._make_new_cache())
+        self._n_trunk = len(make_prompt_cache(self.model))
         #: engine/runtime/pipeline.Coord on a pipeline split, else None
         self._coord = None
         #: wraps a row's prefill chunks (admit's prefill_ctx): a pipeline
@@ -372,7 +389,7 @@ class MTPBatchGenerator(BatchGenerator):
                 vis.release(K.images_in(prompt))
         self._rows[uid] = {"sm": sm, "state": sm.make_state(),
                            "max": max_tokens, "n": 0, "fed": list(prompt)}
-        self._prompt_tokens_counter += n - hit
+        self._counters.prompt_tokens += n - hit
         self._stats["requests"] = self._stats.get("requests", 0) + 1
         return PromptProcessingBatch.Response(uid, (n, n), True, True)
 
@@ -520,10 +537,27 @@ class MTPBatchGenerator(BatchGenerator):
                 return trunk + [head]
         return trunk
 
-    def insert_segments(self, *a, reports=None, **kw):
+    def insert_segments(self, segments, max_tokens=None, caches=None,
+                        all_tokens=None, samplers=None,
+                        logits_processors=None, stop_sequences=None, *,
+                        reports=None, control=None):
         """`reports`: one object per row to receive its cache report (the
-        executor passes them; engine/serve/cache_report.attach)."""
-        uids = super().insert_segments(*a, **kw)
+        executor passes them; engine/serve/cache_report.attach).
+        `control`: one runtime/control.ControlMachine per row (None: the
+        generator's stop tokens). It rides in the queue entry's last slot,
+        which mlx-lm names stop_sequences: this generator never hands rows
+        to mlx-lm's GenerationBatch, so the slot is only read back here."""
+        # mlx-lm's own insert() passes stop_sequences (None) positionally
+        control = control or stop_sequences or (
+            [self._default_control] * len(segments))
+        # mlx-lm 0.32 refuses max_tokens 0; here a row ends on its first
+        # token at 0 and at 1 alike (_next's `n >= max`), and the API
+        # accepts 0, so 0 is sent as 1
+        if max_tokens is not None:
+            max_tokens = [max(1, m) for m in max_tokens]
+        uids = super().insert_segments(segments, max_tokens, caches,
+                                       all_tokens, samplers,
+                                       logits_processors, control)
         for u, r in zip(uids, reports or []):
             if r is not None:
                 self._requests[u] = r
@@ -616,6 +650,7 @@ class MTPBatchGenerator(BatchGenerator):
         if not len(self._batch):
             return prompt_responses, []
 
+        tic = time.perf_counter()
         try:
             with mx.stream(self._stream):
                 row_steps = self._batch.step()
@@ -660,7 +695,8 @@ class MTPBatchGenerator(BatchGenerator):
             prompt_responses += self._failed_responses()
             row_steps = [rs for rs in row_steps if rs.uid not in bad]
 
-        out: list[GenerationBatch.Response] = []
+        self._counters.decode_time += time.perf_counter() - tic
+        out: list[TokenResponse] = []
         finished = []
         for rs in row_steps:
             st = self._rows.get(rs.uid)
@@ -678,10 +714,10 @@ class MTPBatchGenerator(BatchGenerator):
                     finish = "stop"
                 r32 = em.logits.astype(mx.float32)
                 lp = r32 - mx.logsumexp(r32, axis=-1, keepdims=True)
-                out.append(GenerationBatch.Response(
+                out.append(TokenResponse(
                     uid=rs.uid, token=em.token, logprobs=lp,
-                    finish_reason=finish, current_state=cur,
-                    match_sequence=match, prompt_cache=None, all_tokens=None))
+                    finish_reason=finish, prompt_cache=None, all_tokens=None,
+                    current_state=cur, match_sequence=match))
                 if finish is not None:
                     finished.append((rs.uid, len(out) - 1, rs))
                     break                  # nothing after a finish, ever
@@ -699,9 +735,9 @@ class MTPBatchGenerator(BatchGenerator):
                                            + rs.accepted)
             self._batch.remove([u for u, _, _ in finished])
 
-        self._gen_tokens_counter += len(out)
-        self._steps_counter += 1
-        if self._steps_counter % 512 == 0:
+        self._counters.generation_tokens += len(out)
+        self._counters.generation_steps += 1
+        if self._counters.generation_steps % 512 == 0:
             mx.clear_cache()
         return prompt_responses, out
 

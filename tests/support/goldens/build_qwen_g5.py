@@ -2,7 +2,7 @@
 was threaded through them -- run once, at the parent of the first trunk
 edit, in the TEST interpreter (knurlogic's own architectures, no mlx-vlm):
 
-    python3 tests/goldens/build_qwen_g5.py
+    python3 tests/support/goldens/build_qwen_g5.py
 
 qwen_g5_text.npz, per family: a fingerprint of the seed-0 weights, a 30-token text
 prompt, the logits of a two-chunk prefill (17 + 13, so the second chunk
@@ -22,8 +22,8 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tests"))
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "tests" / "support"))
 sys.path.insert(0, str(ROOT / "src"))
 import fixtures_vision as fv  # noqa: E402
 import fixtures_vision_qwen as fq  # noqa: E402

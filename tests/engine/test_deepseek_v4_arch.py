@@ -262,7 +262,7 @@ def test_a_restored_prompt_cache_is_a_fresh_prefill():
     gen = MTPBatchGenerator(model, None)
     restored = _drive(gen, [tail], 8, caches=[copy.deepcopy(cache)],
                       prefixes=[list(head)])
-    assert gen._prompt_tokens_counter == len(tail)
+    assert gen._counters.prompt_tokens == len(tail)
     fresh = _drive(MTPBatchGenerator(model, None), [G.PROMPT], 8)
     assert restored == fresh
 
