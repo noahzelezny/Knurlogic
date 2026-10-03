@@ -344,3 +344,114 @@ def test_the_shared_expert_clamps_as_deepseeks_does():
     lim = args.swiglu_limit
     want = mlp.down_proj(nn.silu(mx.minimum(g, lim)) * mx.clip(u, -lim, lim))
     assert mx.allclose(mlp(x), want, atol=1e-4)
+
+
+# A row's history before it is batched: (prefill tokens, then single-token
+# decode steps). Same lengths, different histories, leave rotating windows
+# of different buffer lengths: a 7-token prefill holds 7 keys, 6 + 1 step
+# holds a ring grown to 8 slots, 9 tokens prefilled hold 9 keys for an
+# 8-wide window. Totals 3..16 run below, at and past the window (8) and
+# fill the ratio-4 / ratio-8 pools to different levels.
+_HISTORIES = [(3, 0), (6, 1), (7, 0), (5, 2), (8, 0), (7, 1), (9, 0),
+              (6, 3), (12, 0), (11, 5)]
+
+
+def _row(model, hist, chunk=None):
+    n, d = hist
+    p = (G.PROMPT * 3)[:n]
+    c = model.make_cache()
+    step = chunk or n
+    for i in range(0, n, step):
+        model(mx.array([p[i:i + step]]), cache=c)
+    for t in G.DECODE[:d]:
+        model(mx.array([[t]]), cache=c)
+    return c
+
+
+def _check_batch(model, batch, lone, steps=10):
+    """Every later step, each batch row's logits are its lone run's."""
+    for s in range(steps):
+        ids = [[(G.DECODE[s % 6] + 3 * j) % 64] for j in range(len(lone))]
+        out = model(mx.array(ids), cache=batch)[:, -1]
+        for j, c in enumerate(lone):
+            want = model(mx.array([ids[j]]), cache=c)[0, -1]
+            got = out[j]
+            assert mx.abs(got - want).max().item() < 1e-4, (j, s)
+
+
+@pytest.mark.parametrize("chunk", [None, 4], ids=["whole", "chunked"])
+def test_rows_merged_in_any_order_run_as_alone(chunk):
+    """mlx-lm's _merge_caches over rows whose windows hold different
+    buffer lengths at the same or different offsets, every ordered pair:
+    each row's logits are its lone run's (float32). The fork concatenated
+    two rows' raw window buffers when their offsets agreed, and a 7-token
+    row met a 6-token one that had decoded a step with a broadcast /
+    concatenate shape error (vendored edit 22)."""
+    import itertools
+
+    from mlx_lm.generate import _merge_caches
+    model = _load()
+    model.set_dtype(mx.float32)
+    for ha, hb in itertools.permutations(_HISTORIES, 2):
+        batch = _merge_caches([_row(model, ha, chunk), _row(model, hb, chunk)])
+        _check_batch(model, batch,
+                     [_row(model, ha, chunk), _row(model, hb, chunk)], 4)
+
+
+@pytest.mark.parametrize("ha,hb", [
+    ((7, 0), (6, 1)), ((6, 1), (7, 0)), ((8, 0), (7, 1)), ((7, 1), (8, 0)),
+    ((9, 0), (8, 1)), ((3, 0), (12, 0)), ((12, 0), (3, 0)),
+    ((6, 3), (9, 0)), ((5, 2), (7, 0))])
+@pytest.mark.parametrize("steps", [0, 1, 3])
+def test_a_row_joining_mid_decode_runs_as_alone(ha, hb, steps):
+    """The batch engine's extend: a batch of row a decodes `steps` steps,
+    then row b joins (one row each side, so both windows can be plain
+    rotating caches at one offset); then a third row joins the two. Every
+    later step, each row's logits are its lone run's."""
+    from mlx_lm.generate import _extend_cache, _merge_caches
+    model = _load()
+    model.set_dtype(mx.float32)
+    batch, ra = _merge_caches([_row(model, ha)]), _row(model, ha)
+    for t in G.DECODE[:steps]:
+        model(mx.array([[t]]), cache=batch)
+        model(mx.array([[t]]), cache=ra)
+    batch = _extend_cache(batch, _merge_caches([_row(model, hb)]))
+    lone = [ra, _row(model, hb)]
+    _check_batch(model, batch, lone, 3)
+    batch = _extend_cache(batch, _merge_caches([_row(model, (7, 0))]))
+    _check_batch(model, batch, lone + [_row(model, (7, 0))], 6)
+
+
+def test_the_batch_engine_admits_short_rows_beside_any_row():
+    """Through the batch engine, rows shorter than, at and past the window
+    admitted while others decode all finish (an admission that raised
+    failed only that request, so this is what a live short chat saw)."""
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    model = _load()
+    P = G.PROMPT * 3
+    for first, later in [(7, 6), (6, 7), (8, 7), (9, 3), (3, 9), (16, 5)]:
+        for wait in (0, 1, 2, 4):
+            gen = MTPBatchGenerator(model, None, prefill_step_size=4)
+            uids = gen.insert_segments(
+                segments=[[P[:first]]], max_tokens=[16], caches=[None],
+                all_tokens=[[]])
+            got = {uids[0]: 0}
+            done = set()
+
+            def step():
+                for r in gen.next()[1]:
+                    got[r.uid] = got.get(r.uid, 0) + 1
+                    if r.finish_reason is not None:
+                        done.add(r.uid)
+            for _ in range(wait):
+                step()
+            uids += gen.insert_segments(
+                segments=[[P[2:2 + later]]], max_tokens=[8], caches=[None],
+                all_tokens=[[]])
+            for _ in range(40):
+                step()
+                if len(done) == 2:
+                    break
+            gen.close()
+            assert got.get(uids[1]) == 8 and got[uids[0]] == 16, \
+                (first, later, wait, got)
