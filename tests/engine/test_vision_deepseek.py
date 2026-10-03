@@ -522,3 +522,18 @@ def test_frame_key_pads_each_image_to_its_alignment(tiny):
         assert s % 4 == 3 and len(key) == lead + (3 - lead % 4) + 5 + 1
         assert sk[0] == [1] * lead
         assert sk[1][:s - lead] == [64 + 1] * (s - lead)
+
+
+def test_vision_tag_needs_a_tower_in_the_config(tmp_path):
+    """DeepSeek-V4-Flash and its Vision-Exp share model_type deepseek_v4:
+    only the one whose config.json has vision_n_layers gets the tag."""
+    import json
+    from knurlogic.engine.vision import registry
+    flash, vis = tmp_path / "flash", tmp_path / "vision"
+    flash.mkdir(); vis.mkdir()
+    (flash / "config.json").write_text(json.dumps({"model_type": "deepseek_v4"}))
+    (vis / "config.json").write_text(json.dumps(
+        {"model_type": "deepseek_v4", "vision_n_layers": 32}))
+    assert registry.registered("deepseek_v4")
+    assert not registry.registered("deepseek_v4", flash)
+    assert registry.registered("deepseek_v4", vis)
