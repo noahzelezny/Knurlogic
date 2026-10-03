@@ -16,6 +16,7 @@ Stdlib only; the family module is imported only when `build` is called.
 from __future__ import annotations
 
 import importlib
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -58,14 +59,24 @@ def family_of(model_type: str) -> str:
     return ARCH_FOR_MODEL_TYPE.get(model_type, model_type)
 
 
-def registered(model_type: str) -> bool:
+def registered(model_type: str, path=None) -> bool:
     """Has this model_type a registered vision family whose module is
     installed? Finds the module without running it, so interfaces/ can ask
-    without importing mlx (the family modules do)."""
+    without importing mlx (the family modules do). With `path`, the
+    artifact's config.json must also describe a tower: DeepSeek-V4-Flash
+    and its Vision-Exp share a model_type."""
     import importlib.util
     t = FAMILIES.get(family_of(model_type))
     if t is None:
         return False
+    if path is not None:
+        from pathlib import Path
+        try:
+            config = json.loads((Path(path) / "config.json").read_text())
+        except (OSError, ValueError):
+            return False
+        if not has_vision_config(config):
+            return False
     try:
         return importlib.util.find_spec(t.split(":")[0]) is not None
     except (ImportError, ValueError):

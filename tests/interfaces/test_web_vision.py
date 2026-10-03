@@ -74,7 +74,7 @@ def test_models_document_reports_vision_capable(monkeypatch, tmp_path):
                                format="mlx", bytes_on_disk=1 << 20,
                                model_type="qwen3_5", servable=True)])
     monkeypatch.setattr(
-        "knurlogic.engine.vision.registry.registered", lambda mt: True)
+        "knurlogic.engine.vision.registry.registered", lambda mt, path=None: True)
     doc = documents.models_document()({})
     assert doc["models"][0]["vision"] is True
 
@@ -90,7 +90,7 @@ def test_models_document_false_for_a_non_vision_family(monkeypatch, tmp_path):
                                format="mlx", bytes_on_disk=1 << 20,
                                model_type="llama", servable=True)])
     monkeypatch.setattr(
-        "knurlogic.engine.vision.registry.registered", lambda mt: False)
+        "knurlogic.engine.vision.registry.registered", lambda mt, path=None: False)
     doc = documents.models_document()({})
     assert doc["models"][0]["vision"] is False
 

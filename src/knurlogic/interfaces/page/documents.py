@@ -128,11 +128,8 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 "size_bytes": f.bytes_on_disk, "model_type": f.model_type,
                 "is_vq": f.is_vq, "servable": f.servable, "why": f.why,
                 "mtp": bool(f.extra.get("mtp_head")),
-                # A family EXISTING for model_type, not whether this
-                # particular config.json has a vision_config -- that needs
-                # `registry.build`, which only runs on load. Good enough for the
-                # picker's VISION tag.
-                "vision": vision_registry.registered(f.model_type),
+                # a family for model_type and a tower in this config.json
+                "vision": vision_registry.registered(f.model_type, f.path),
                 "serving": bool(serving) and (f.name == serving
                                               or str(f.path) == serving),
                 "room": _room(f, ws),

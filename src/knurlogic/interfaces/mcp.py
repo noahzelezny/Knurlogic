@@ -139,11 +139,8 @@ def fit(artifact: str = "", draft: bool = True, vision: bool = True,
         "artifact": a.path.name,
         "verdict": verdict,
         "fits": fits,
-        # Static: whether a family for this model_type exists at all, not
-        # whether THIS config.json has a vision_config (that needs the build
-        # step -- registry.build -- which does not run before a load). Good
-        # enough for "would this be worth attaching an image to".
-        "vision_capable": vision_registry.registered(a.model_type),
+        # a family for this model_type and a tower in this config.json
+        "vision_capable": vision_registry.registered(a.model_type, a.path),
         "vision_budget": _vision_terms(vb) if vision else None,
         "vision": bool(vision),
         "size_gib": round(a.gib, 1),
@@ -529,7 +526,7 @@ def models(fits_only: bool = False, **_) -> dict[str, Any]:
                "servable": f.servable, "why_not": f.why,
                "fits": bool(avail) and f.bytes_on_disk <= avail,
                "drafting_head": bool(f.extra.get("mtp_head")),
-               "vision_capable": vision_registry.registered(f.model_type),
+               "vision_capable": vision_registry.registered(f.model_type, f.path),
                # what reasoning_effort does on this model: its template's
                # dialect, native levels and default (engine/serve/thinking)
                "thinking": thinking.levels(thinking.template_of(f.path))}
