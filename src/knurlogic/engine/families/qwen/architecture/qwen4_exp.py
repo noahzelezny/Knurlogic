@@ -40,13 +40,16 @@ class TextArgs(BaseModelArgs):
     num_experts_per_tok: int = 10
     moe_intermediate_size: int = 640
     shared_expert_intermediate_size: int = 640
+    norm_topk_prob: bool = True  # knurlogic vendored edit 3
     # gated deltanet
     linear_num_key_heads: int = 16
     linear_num_value_heads: int = 48
     linear_key_head_dim: int = 128
     linear_value_head_dim: int = 128
     linear_conv_kernel_dim: int = 4
-    output_gate_type: str = "sigmoid"
+    # knurlogic vendored edit 3: unset means hidden_act (silu), as the reference
+    output_gate_type: Optional[str] = None
+    hidden_act: str = "silu"
     # hyper-connections
     hc_count: int = 4
     hc_lowrank: int = 320
@@ -65,7 +68,9 @@ class TextArgs(BaseModelArgs):
     ple_embed_dim: int = 2560
     ple_layer_ids: list = field(default_factory=lambda: [2])
     ple_conv_kernel_size: int = 4
-    seed: int = 0
+    # knurlogic vendored edit 2: the reference config's default (Qwen4ExpTextConfig.seed);
+    # no released config.json names a seed, and the checkpoints' layer_multipliers are 1234's
+    seed: int = 1234
     eos_token_id: Any = 248044
     partial_rotary_factor: float = 0.25
     rope_parameters: dict = field(default_factory=dict)
@@ -560,7 +565,8 @@ class GatedDeltaNet(nn.Module):
         self.dt_bias = mx.ones(self.n_v)
         self.A_log = mx.zeros(self.n_v)
         self.norm = RMSNormGated(
-            self.dv, eps=args.rms_norm_eps, activation=args.output_gate_type
+            self.dv, eps=args.rms_norm_eps,
+            activation=args.output_gate_type or args.hidden_act,
         )
         self.out_proj = nn.Linear(self.value_dim, d, bias=False)
 
@@ -596,8 +602,12 @@ class GatedDeltaNet(nn.Module):
         v = v.reshape(B, S, self.n_v, self.dv)
 
         inv_scale = self.dk**-0.5
-        q = (inv_scale**2) * mx.fast.rms_norm(q, None, 1e-6)
-        k = inv_scale * mx.fast.rms_norm(k, None, 1e-6)
+        # knurlogic vendored edit 1: the reference's l2norm adds its eps
+        # (1e-6) to sum(x^2); rms_norm adds it to mean(x^2), so scale it
+        # by 1/dk (mlx-lm's own normalize_qk does the same).
+        l2_eps = 1e-6 * inv_scale**2
+        q = (inv_scale**2) * mx.fast.rms_norm(q, None, l2_eps)
+        k = inv_scale * mx.fast.rms_norm(k, None, l2_eps)
 
         state = cache[1] if cache is not None else None
         out, state = gated_delta_update(
@@ -625,6 +635,7 @@ class SparseMoeBlock(nn.Module):
     def __init__(self, args: TextArgs):
         super().__init__()
         self.top_k = args.num_experts_per_tok
+        self.norm_topk_prob = args.norm_topk_prob
         self.gate = nn.Linear(args.hidden_size, args.num_experts, bias=False)
         self.switch_mlp = SwitchGLU(
             args.hidden_size, args.moe_intermediate_size, args.num_experts
@@ -635,7 +646,12 @@ class SparseMoeBlock(nn.Module):
     def __call__(self, x: mx.array) -> mx.array:
         logits = self.gate(x.astype(mx.float32))
         idx = mx.argpartition(-logits, self.top_k - 1, axis=-1)[..., : self.top_k]
-        w = mx.softmax(mx.take_along_axis(logits, idx, axis=-1), axis=-1, precise=True)
+        if self.norm_topk_prob:
+            w = mx.softmax(mx.take_along_axis(logits, idx, axis=-1), axis=-1, precise=True)
+        else:
+            # knurlogic vendored edit 3: the reference's un-renormalized top-k
+            # probabilities (softmax over every expert)
+            w = mx.take_along_axis(mx.softmax(logits, axis=-1, precise=True), idx, axis=-1)
         out = (self.switch_mlp(x, idx) * w[..., None]).sum(axis=-2).astype(x.dtype)
         return out + mx.sigmoid(self.shared_expert_gate(x)) * self.shared_expert(x)
 
