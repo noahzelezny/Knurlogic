@@ -17,8 +17,9 @@ two fits bf16's mantissa), routed experts reinterpreted as mxfp4 (the
 same bits, stacked per projection), names in the trunk's post-sanitize
 layout (heads/deepseek_v4_dspark.py lists them). The file is written as
 it is read -- a stacked expert projection is the concatenation of its
-experts' bytes -- so memory stays at one tensor (~64 MiB), not the
-~10 GiB written.
+experts' bytes -- so memory holds one source tensor at a time, not the
+~10.5 GiB written (measured on the real checkpoint: 45 s from the HDD,
+2.8 GB peak RSS).
 """
 from __future__ import annotations
 
