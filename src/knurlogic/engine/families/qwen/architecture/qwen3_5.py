@@ -297,8 +297,12 @@ class GatedDeltaNet(nn.Module):
 
         state = cache[1] if cache else None
         inv_scale = k.shape[-1] ** -0.5
-        q = (inv_scale**2) * mx.fast.rms_norm(q, None, 1e-6)
-        k = inv_scale * mx.fast.rms_norm(k, None, 1e-6)
+        # knurlogic vendored edit 1: the reference's l2norm adds its eps
+        # (1e-6) to sum(x^2); rms_norm adds it to mean(x^2), so scale it
+        # by 1/dk (mlx-lm's own normalize_qk does the same).
+        l2_eps = 1e-6 * inv_scale**2
+        q = (inv_scale**2) * mx.fast.rms_norm(q, None, l2_eps)
+        k = inv_scale * mx.fast.rms_norm(k, None, l2_eps)
 
         out, state = gated_delta_update(
             q,
