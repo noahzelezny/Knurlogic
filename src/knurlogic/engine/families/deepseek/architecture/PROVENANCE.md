@@ -12,7 +12,7 @@ artifacts were validated against -- not merely that it imports.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.32.0 (0.31.3
   until 2026-10-02).
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `c91f2bef59fd3d19ff3dfa070ad3ad7b8aca35ac491984ef52dd7638a5573a85`
+- vendored sha256: `14f6b33ec69a68ff7af6ab3d170e7f5f08358a461e9a9317bccfa619f6a3b682`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -299,3 +299,28 @@ HC head and the final norm); tested, not changed.
    linear's output by ~2.7% RMS relative (bf16's own rounding is ~0.2%);
    the model was trained with it, so it is a difference from the
    reference, not a known loss.
+
+### Edit 22, a fix (batching)
+
+(Edit 21 is left to another change in flight.)
+
+22. **A merged window is each row's tokens, not its ring buffer**
+   (`DeepseekV4Cache._window`, used by `_merge_local` and `extend`'s
+   one-offset path). Rows whose windows are plain RotatingKVCaches at one
+   offset were merged by concatenating their raw key / value buffers
+   (`_temporal_order` cut only to `_idx`). Two rows at one offset can hold
+   buffers of different lengths: a 7-token prefill holds 7 keys, a 6-token
+   prefill that then decoded a step holds a ring grown to 8 slots, a
+   9-token prefill holds 9 keys for an 8-wide window. The concatenate
+   raised (8 against 7 on the tiny model, window 8), and the batch engine
+   failed that request's admission: on the real model (window 128) any
+   two rows at one offset under 128 tokens whose histories differ, a
+   common short chat. `_window` takes the last `size()` tokens in
+   temporal order; keys older than those are dropped by the next update
+   either way, so nothing a row attends to changes. Proven on the tiny
+   model in float32: every ordered pair of ten histories (3 to 16 tokens,
+   prefilled whole or in chunks of 4, some decoded in place) merged, and
+   rows joining a decoding batch, each row's logits within 1e-4 of its
+   lone run's for every later step; and the batch engine admits rows
+   shorter than, at and past the window beside a decoding row
+   (tests/engine/test_deepseek_v4_arch.py).
