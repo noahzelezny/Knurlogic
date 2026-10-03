@@ -291,6 +291,18 @@ inline float dsv4_round_to(float v, int min_e, int man_bits) {
     int e = metal::max(int(as_type<uint>(fabs(v)) >> 23) - 127, min_e) - man_bits;
     return rint(v * dsv4_pow2(-e)) * dsv4_pow2(e);
 }
+// act_quant (ue8m0) of one 128-block held by a simdgroup, 4 values a lane
+// (v[k] the block's element lane + 32 k): v rounded in place
+inline void dsv4_fp8_block128(thread float* v) {
+    float m = metal::max(metal::max(fabs(v[0]), fabs(v[1])),
+                         metal::max(fabs(v[2]), fabs(v[3])));
+    float amax = metal::max(simd_max(m), 1e-4f);
+    int se = dsv4_log2_ceil(amax * (1.0f / 448.0f));
+    float s = dsv4_pow2(se), inv = dsv4_pow2(-se);
+    for (uint k = 0; k < 4; ++k)
+        v[k] = dsv4_round_to(
+            metal::clamp(v[k] * inv, -448.0f, 448.0f), -6, 3) * s;
+}
 """
 
 
@@ -364,8 +376,198 @@ def _make_rotate_fp4_kernel():
         output_names=["y"], source=src, header=_QAT_HEADER)
 
 
+def _make_fp8_act_kernel():
+    """y = act_quant(x, 128, "ue8m0", inplace=True) over x's last dim
+    (whole blocks, row-contiguous): one simdgroup a block, 4 values a
+    lane."""
+    if mx.default_device() != mx.gpu or not mx.metal.is_available():
+        return None
+    src = """
+        uint g = thread_position_in_grid.x / 32;
+        uint lane = thread_position_in_grid.x % 32;
+        auto src = x + g * 128;
+        float v[4];
+        for (uint k = 0; k < 4; ++k)
+            v[k] = static_cast<float>(src[lane + 32 * k]);
+        dsv4_fp8_block128(v);
+        for (uint k = 0; k < 4; ++k)
+            y[g * 128 + lane + 32 * k] = static_cast<T>(v[k]);
+    """
+    return mx.fast.metal_kernel(
+        name="dsv4_fp8_act", input_names=["x"], output_names=["y"],
+        source=src, header=_QAT_HEADER)
+
+
+def _make_swiglu_act_kernel():
+    """y = act_quant(T(silu(min(g, L)) * clip(u, +-L) * w)) per 128-block of
+    the expert width: the clamped SwiGLU in float32 times the row's
+    routing weight (HAS_W), as the reference's Expert.forward, then
+    rounded for w2 -- one dispatch where the SwiGLU alone took one."""
+    if mx.default_device() != mx.gpu or not mx.metal.is_available():
+        return None
+    src = """
+        uint g = thread_position_in_grid.x / 32;
+        uint lane = thread_position_in_grid.x % 32;
+        uint row = g / (I / 128);
+        float lim = limit[0];
+        float v[4];
+        for (uint k = 0; k < 4; ++k) {
+            uint j = g * 128 + lane + 32 * k;
+            float a = static_cast<float>(gate[j]);
+            float b = static_cast<float>(up[j]);
+            if (lim > 0.0f) {
+                a = metal::min(a, lim);
+                b = metal::clamp(b, -lim, lim);
+            }
+            float h = a / (1.0f + metal::exp(-a)) * b;
+            if (HAS_W) h *= static_cast<float>(w[row]);
+            v[k] = static_cast<float>(static_cast<T>(h));
+        }
+        dsv4_fp8_block128(v);
+        for (uint k = 0; k < 4; ++k)
+            y[g * 128 + lane + 32 * k] = static_cast<T>(v[k]);
+    """
+    return mx.fast.metal_kernel(
+        name="dsv4_swiglu_act", input_names=["gate", "up", "w", "limit"],
+        output_names=["y"], source=src, header=_QAT_HEADER)
+
+
+def _make_rms_norm_act_kernel():
+    """(y, yq) = (rms_norm(x, w), act_quant(y)) per row of D (whole
+    128-blocks, at most 4096; the first D of rows STRIDE apart): one
+    threadgroup a row, a simdgroup a block.
+    y is mx.fast.rms_norm's arithmetic (w * T(x * rsqrt(mean(x^2) + eps)),
+    float32 accumulation); OUT_Y = false writes yq alone."""
+    if mx.default_device() != mx.gpu or not mx.metal.is_available():
+        return None
+    src = """
+        threadgroup float part[32];
+        uint sg = simdgroup_index_in_threadgroup;
+        uint lane = thread_index_in_simdgroup;
+        uint r = threadgroup_position_in_grid.x;
+        const uint NB = D / 128;
+        auto src = x + r * STRIDE + sg * 128;
+        float v[4];
+        float ss = 0.0f;
+        for (uint k = 0; k < 4; ++k) {
+            v[k] = static_cast<float>(src[lane + 32 * k]);
+            ss += v[k] * v[k];
+        }
+        ss = simd_sum(ss);
+        if (lane == 0) part[sg] = ss;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        float tot = 0.0f;
+        for (uint i = 0; i < NB; ++i) tot += part[i];
+        float n = metal::precise::rsqrt(tot / D + eps[0]);
+        for (uint k = 0; k < 4; ++k) {
+            uint j = sg * 128 + lane + 32 * k;
+            T t = static_cast<T>(static_cast<T>(v[k] * n) * w[j]);
+            if (OUT_Y) y[r * D + j] = t;
+            v[k] = static_cast<float>(t);
+        }
+        dsv4_fp8_block128(v);
+        for (uint k = 0; k < 4; ++k)
+            yq[r * D + sg * 128 + lane + 32 * k] = static_cast<T>(v[k]);
+    """
+    return mx.fast.metal_kernel(
+        name="dsv4_rms_norm_act", input_names=["x", "w", "eps"],
+        output_names=["y", "yq"], source=src, header=_QAT_HEADER)
+
+
 _fp8_nope_kernel = _make_fp8_nope_kernel()
 _rotate_fp4_kernel = _make_rotate_fp4_kernel()
+_fp8_act_kernel = _make_fp8_act_kernel()
+_swiglu_act_kernel = _make_swiglu_act_kernel()
+_rms_norm_act_kernel = _make_rms_norm_act_kernel()
+
+#: model.py's block_size: linear() quantizes a GEMM's input in blocks of it
+_ACT_BLOCK = 128
+
+
+_SCALARS: dict = {}
+
+
+def _scalar(v: float) -> mx.array:
+    """A [1] float32 kernel argument, made once per value (a fresh array
+    every call cost each dispatch a few microseconds)."""
+    a = _SCALARS.get(v)
+    if a is None:
+        a = _SCALARS[v] = mx.array([v], dtype=mx.float32)
+    return a
+
+
+_NO_W = mx.zeros((1,), dtype=mx.float32)
+
+
+def swiglu_act(gate: mx.array, up: mx.array, limit: float,
+               w: Optional[mx.array] = None) -> mx.array:
+    """knurlogic edit 21: an expert's w2 input as the reference's
+    Expert.forward makes it -- the clamped SwiGLU (and the routing weight
+    w, one per row of the expert width) in float32, back in the
+    activations' dtype -- then through act_quant (w2 is an FP8 / FP4
+    linear)."""
+    I = gate.shape[-1]
+    if _swiglu_act_kernel is None or I % _ACT_BLOCK or gate.size == 0:
+        h = gate.astype(mx.float32)
+        u = up.astype(mx.float32)
+        if limit and limit > 0:
+            h = mx.minimum(h, limit)
+            u = mx.clip(u, -limit, limit)
+        h = nn.silu(h) * u
+        if w is not None:
+            h = h * w.astype(mx.float32).reshape(*gate.shape[:-1], 1)
+        return fp8_act(h.astype(gate.dtype))
+    has_w = w is not None
+    return _swiglu_act_kernel(
+        inputs=[gate, up, w if has_w else _NO_W, _scalar(limit or 0.0)],
+        template=[("T", gate.dtype), ("I", I), ("HAS_W", has_w)],
+        grid=(gate.size // _ACT_BLOCK * 32, 1, 1), threadgroup=(256, 1, 1),
+        output_shapes=[gate.shape], output_dtypes=[gate.dtype],
+    )[0]
+
+
+def rms_norm_act(x: mx.array, w: mx.array, eps: float, keep: bool = True,
+                 width: Optional[int] = None):
+    """knurlogic edit 21: rms_norm(x, w, eps) and the same through
+    act_quant, in one dispatch -- the norm's output feeds FP8 / FP4
+    linears (rounded) and others (as it is). keep=False: the rounded one
+    alone. width: x[..., :width] (read in place, not copied)."""
+    W = x.shape[-1]
+    D = W if width is None else width
+    shape = (*x.shape[:-1], D)
+    if (_rms_norm_act_kernel is None or D % _ACT_BLOCK or D > 4096
+            or x.size == 0):
+        y = mx.fast.rms_norm(x[..., :D], w, eps)
+        return (y, fp8_act(y)) if keep else fp8_act(y)
+    y, yq = _rms_norm_act_kernel(
+        inputs=[x, w, _scalar(eps)],
+        template=[("T", x.dtype), ("D", D), ("STRIDE", W), ("OUT_Y", keep)],
+        grid=(x.size // W * (D // 4), 1, 1), threadgroup=(D // 4, 1, 1),
+        output_shapes=[shape if keep else (1,), shape],
+        output_dtypes=[x.dtype, x.dtype],
+    )
+    return (y, yq) if keep else yq
+
+
+def fp8_act(x: mx.array) -> mx.array:
+    """knurlogic edit 21: the input of an FP8 / FP4 linear, as model.py's
+    linear() hands it to fp8_gemm / fp4_gemm: act_quant(x, 128, "ue8m0")
+    -- per 128 of the last dim, x -> e4m3(x / s) * s with s a power of
+    two. Our weights are MLX-quantized, but the reference's activations
+    are rounded whatever its weights' format; e4m3 times a power of two
+    is exact in bf16, so the dequantized values feed the matmul. A dim
+    that is not whole blocks (only tiny test configs) is left as it is."""
+    N = x.shape[-1]
+    if N == 0 or N % _ACT_BLOCK or x.size == 0:
+        return x
+    if _fp8_act_kernel is None:
+        return fp8_simulate(x, _ACT_BLOCK)
+    # a grid of whole simdgroups; the last threadgroup may be partial
+    return _fp8_act_kernel(
+        inputs=[x], template=[("T", x.dtype)],
+        grid=(x.size // _ACT_BLOCK * 32, 1, 1), threadgroup=(256, 1, 1),
+        output_shapes=[x.shape], output_dtypes=[x.dtype],
+    )[0]
 
 
 def fp8_simulate_nope(
@@ -2441,20 +2643,25 @@ def _compressed_visibility(
 
 @mx.compile
 def _attn_wqkv_quant_split_norm(x, w, s, group_size, bits, q_w, kv_w, q_lora, eps):
-    """Fused mxfp4 wqkv_a matmul + slice + 2 RMSNorms (q half + kv half)."""
+    """Fused mxfp4 wqkv_a matmul + slice + 2 RMSNorms (q half + kv half).
+
+    knurlogic edit 21: x through act_quant already (the reference's wq_a
+    and wkv are FP8 linears), and qr returned through it too: its only
+    readers are wq_b and the indexer's wq_b, FP8 linears both."""
     qkv_a = mx.quantized_matmul(
         x, w, scales=s, transpose=True,
         group_size=group_size, bits=bits, mode="mxfp4",
     )
-    qr = mx.fast.rms_norm(qkv_a[..., :q_lora], q_w, eps)
+    qr = rms_norm_act(qkv_a, q_w, eps, keep=False, width=q_lora)
     kv = mx.fast.rms_norm(qkv_a[..., q_lora:], kv_w, eps)
     return qr, kv
 
 
 @mx.compile
 def _attn_qkv_split_norm(qkv_a, q_w, kv_w, q_lora, eps):
-    """Non-quant variant: slice + 2 RMSNorms."""
-    qr = mx.fast.rms_norm(qkv_a[..., :q_lora], q_w, eps)
+    """Non-quant variant: slice + 2 RMSNorms (qr through act_quant, edit
+    21)."""
+    qr = rms_norm_act(qkv_a, q_w, eps, keep=False, width=q_lora)
     kv = mx.fast.rms_norm(qkv_a[..., q_lora:], kv_w, eps)
     return qr, kv
 
@@ -2521,6 +2728,8 @@ def _attn_wo_chain_quant(
     """Fused: grouped wo_a mxfp4 matmul + transpose-reshape + wo_b mxfp4 matmul.
     Replaces the separate _grouped_output_projection + self.wo_b(...) calls
     with a single compile graph (one fewer dispatch per layer per call).
+    knurlogic edit 21: wo_b's input through act_quant (wo_a is bf16 in the
+    reference, its input as it is).
     """
     B, S, F = o.shape
     group_feat = F // n_groups
@@ -2533,7 +2742,7 @@ def _attn_wo_chain_quant(
     )
     y = y.transpose(1, 2, 0, 3).reshape(B, S, n_groups * o_lora_rank)
     return mx.quantized_matmul(
-        y, wob_w, scales=wob_s, transpose=True,
+        fp8_act(y), wob_w, scales=wob_s, transpose=True,
         group_size=wob_group_size, bits=wob_bits, mode="mxfp4",
     )
 
@@ -2650,20 +2859,26 @@ class V4Attention(nn.Module):
         x: mx.array,
         cache: Optional[Any] = None,
         visible: Optional[tuple] = None,
+        xq: Optional[mx.array] = None,
     ) -> mx.array:
         B, S, _ = x.shape
         rd = self.rope_head_dim
+        # knurlogic edit 21: wqkv_a's input through act_quant (xq: rounded
+        # already, by the block's fused norm); the compressor and the
+        # indexer's weights_proj read x as it is
+        if xq is None:
+            xq = fp8_act(x)
 
         # Fused: wqkv_a matmul + slice + 2 RMSNorms (q half + kv half).
         wqkv = self.wqkv_a
         if isinstance(wqkv, nn.QuantizedLinear) and wqkv.mode == "mxfp4":
             qr, kv = _attn_wqkv_quant_split_norm(
-                x, wqkv.weight, wqkv.scales, wqkv.group_size, wqkv.bits,
+                xq, wqkv.weight, wqkv.scales, wqkv.group_size, wqkv.bits,
                 self.q_norm.weight, self.kv_norm.weight,
                 self.q_lora_rank, self.eps,
             )
         else:
-            qkv_a = wqkv(x)
+            qkv_a = wqkv(xq)
             qr, kv = _attn_qkv_split_norm(
                 qkv_a, self.q_norm.weight, self.kv_norm.weight,
                 self.q_lora_rank, self.eps,
@@ -2852,7 +3067,7 @@ class V4Attention(nn.Module):
                 self.wo_b.group_size, self.wo_b.bits,
             )
         o = self._grouped_output_projection(o)
-        return self.wo_b(o)
+        return self.wo_b(fp8_act(o))
 
 
 # --------------------------------------------------------------------------- #
@@ -2954,6 +3169,22 @@ def _limited_swiglu(gate: mx.array, up: mx.array, limit: float) -> mx.array:
     return nn.silu(gate) * up
 
 
+@mx.compile
+def _moe_sum(y: mx.array, shared: Optional[mx.array] = None) -> mx.array:
+    """knurlogic edit 21: the experts' outputs ([..., top_k, 1, D]) and
+    the shared expert's summed in float32, as the reference's MoE.forward
+    accumulates them."""
+    # one fused elementwise kernel (a reduction over top_k is a dispatch
+    # of its own, ~3 us more a layer at decode)
+    z = y.squeeze(-2).astype(mx.float32)
+    out = z[..., 0, :]
+    for i in range(1, z.shape[-2]):
+        out = out + z[..., i, :]
+    if shared is not None:
+        out = out + shared.astype(mx.float32)
+    return out.astype(y.dtype)
+
+
 class _DSV4SwiGLU(nn.Module):
     """SwiGLU with optional clipping of ``gate`` / ``up`` to ``limit``, wrapped
     in ``mx.compile`` so the silu+clip+min+mul stack runs as a single fused
@@ -3013,6 +3244,8 @@ class MoEGate(nn.Module):
             tg = 32
             grid = ((total + tg - 1) // tg) * tg
             rscale = self._route_scale_arr
+            # knurlogic edit 21: the weights in float32, as the reference's
+            # Gate returns them (the MoE scales each expert's w2 input)
             inds, weights = _moe_gate_kernel(
                 inputs=[scores_bf, self.e_score_correction_bias, rscale],
                 template=[
@@ -3020,12 +3253,12 @@ class MoEGate(nn.Module):
                     ("S", S),
                     ("N_ROUTED", self.n_routed),
                     ("TOP_K", self.top_k),
-                    ("OUT_T", x.dtype),
+                    ("OUT_T", mx.float32),
                 ],
                 grid=(grid, 1, 1),
                 threadgroup=(tg, 1, 1),
                 output_shapes=[(B, S, self.top_k), (B, S, self.top_k)],
-                output_dtypes=[mx.int32, x.dtype],
+                output_dtypes=[mx.int32, mx.float32],
             )
             return inds, weights
 
@@ -3046,7 +3279,7 @@ class MoEGate(nn.Module):
         weights = mx.take_along_axis(orig, inds, axis=-1)
         if self.score_func != "softmax" and self.norm_topk_prob:
             weights = weights / (weights.sum(axis=-1, keepdims=True) + 1e-20)
-        weights = (weights * self.route_scale).astype(x.dtype)
+        weights = (weights * self.route_scale).astype(mx.float32)
         return inds, weights
 
     def _route_vl(self, x: mx.array, input_ids: mx.array,
@@ -3079,7 +3312,7 @@ class MoEGate(nn.Module):
         weights = mx.take_along_axis(orig, inds, axis=-1)
         if self.score_func != "softmax" and self.norm_topk_prob:
             weights = weights / (weights.sum(axis=-1, keepdims=True) + 1e-20)
-        weights = (weights * self.route_scale).astype(x.dtype)
+        weights = (weights * self.route_scale).astype(mx.float32)
         return inds, weights
 
 
@@ -3092,9 +3325,10 @@ class DeepseekV4MLP(nn.Module):
         self.swiglu_limit = swiglu_limit
 
     def __call__(self, x: mx.array) -> mx.array:
-        return self.down_proj(
-            _limited_swiglu(self.gate_proj(x), self.up_proj(x), self.swiglu_limit)
-        )
+        """knurlogic edit 21: x already through act_quant (the MoE rounds
+        it once for both kinds of expert); the hidden state rounded here."""
+        return self.down_proj(swiglu_act(
+            self.gate_proj(x), self.up_proj(x), self.swiglu_limit))
 
 
 class DeepseekV4MoE(nn.Module):
@@ -3137,20 +3371,43 @@ class DeepseekV4MoE(nn.Module):
             )
 
     def __call__(self, x: mx.array, input_ids: mx.array,
-                 image_mask: Optional[mx.array] = None) -> mx.array:
+                 image_mask: Optional[mx.array] = None,
+                 xq: Optional[mx.array] = None) -> mx.array:
         # knurlogic edit 14: image_mask (ids >= vocab_size) -> bias_vl routing
         inds, weights = self.gate(x, input_ids, image_mask)
-        # Use upstream SwitchGLU.__call__ — its sort_threshold=64 path gates
-        # ``sorted_indices=True`` on gather_qmm during prefill (indices.size
-        # = S * top_k >> 64), which dispatches to a much faster Metal kernel
-        # than the unsorted path. A custom @mx.compile fuse here bypasses
-        # that and tanks prefill (Optimizations 7→8 regression).
-        y = self.switch_mlp(x, inds)
-        # Combine as matmul [B,S,1,top_k] @ [B,S,top_k,hidden] → [B,S,hidden].
-        y = (weights[:, :, None, :] @ y).squeeze(2).astype(y.dtype)
+        # knurlogic edit 21: the experts' input through act_quant (the
+        # router reads x as it is), the routing weight applied before w2
+        # and its input rounded too, summed in float32 -- the reference's
+        # MoE.forward. Upstream SwitchGLU.__call__'s steps otherwise, with
+        # its sort past 64 indices: ``sorted_indices=True`` gives gather_qmm
+        # a much faster prefill kernel (Optimizations 7→8 regression when a
+        # fuse bypassed it).
+        # (xq: x rounded already, by the block's fused norm)
+        if xq is None:
+            xq = fp8_act(x)
+        sm = self.switch_mlp
+        M = inds.shape[-1]
+        xe = mx.expand_dims(xq, (-2, -3))
+        do_sort = inds.size >= 64
+        if do_sort:
+            flat = inds.flatten()
+            order = mx.argsort(flat)
+            inv_order = mx.argsort(order)
+            xe = xe.flatten(0, -3)[order // M]
+            idx = flat[order]
+            w = weights.flatten()[order]
+        else:
+            idx = inds
+            w = weights
+        h = swiglu_act(sm.gate_proj(xe, idx, sorted_indices=do_sort),
+                       sm.up_proj(xe, idx, sorted_indices=do_sort),
+                       sm.activation.limit, w)
+        y = sm.down_proj(h, idx, sorted_indices=do_sort)
+        if do_sort:
+            y = mx.unflatten(y[inv_order], 0, inds.shape)
         if hasattr(self, "shared_experts"):
-            y = y + self.shared_experts(x)
-        return y
+            return _moe_sum(y, self.shared_experts(xq))
+        return _moe_sum(y)
 
 
 # --------------------------------------------------------------------------- #
@@ -3190,16 +3447,20 @@ class DeepseekV4Block(nn.Module):
         # h: [B, S, hc, D]. `image` (knurlogic edits 14-15): (left, right,
         # image_mask) for a prefill chunk holding image tokens, else None.
         residual = h
+        # knurlogic edit 21: each norm's output also through act_quant in
+        # the same dispatch, for the FP8 / FP4 linears that read it
         y, post, comb = self.hc_attn.hc_pre(h)
-        y = self.attn_norm(y)
+        y, yq = rms_norm_act(y, self.attn_norm.weight, self.attn_norm.eps)
         y = self.attn(y, cache=cache,
-                      visible=image[:2] if image is not None else None)
+                      visible=image[:2] if image is not None else None,
+                      xq=yq)
         h = self.hc_attn.hc_post(y, residual, post, comb)
 
         residual = h
         y, post, comb = self.hc_ffn.hc_pre(h)
-        y = self.ffn_norm(y)
-        y = self.ffn(y, input_ids, image[2] if image is not None else None)
+        y, yq = rms_norm_act(y, self.ffn_norm.weight, self.ffn_norm.eps)
+        y = self.ffn(y, input_ids, image[2] if image is not None else None,
+                     xq=yq)
         h = self.hc_ffn.hc_post(y, residual, post, comb)
         return h
 

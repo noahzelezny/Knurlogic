@@ -1130,6 +1130,34 @@ def tensor_refusals(cfg: dict, n: int) -> list:
     # deepseek_v4's wo_a is grouped over whole heads: a rank keeps whole
     # groups (its arrays alone would also divide at 16 ranks, 8 groups)
     div("o_groups", tc.get("o_groups"))
+    if "deepseek_v4" in types:
+        # deepseek_v4 (architecture edit 21) rounds every FP8 / FP4 linear's
+        # input through act_quant in blocks of 128 along it, as DeepSeek's
+        # reference does. A split cuts three of those inputs -- wo_b's
+        # (o_groups x o_lora_rank) and both experts' down_proj (their
+        # widths) -- so a rank's slice must hold whole blocks, or the split
+        # model rounds other blocks than the whole one. (Edit 20's blocks
+        # -- the kv, the pooled rows, the indexer -- run whole on every rank.)
+        inter = tc.get("moe_intermediate_size")
+        for what, v in (
+                ("o_groups x o_lora_rank (wo_b's input)",
+                 None if tc.get("o_groups") is None
+                 or tc.get("o_lora_rank") is None
+                 else int(tc["o_groups"]) * int(tc["o_lora_rank"])),
+                ("moe_intermediate_size (routed experts' down_proj input)",
+                 inter),
+                ("moe_intermediate_size x n_shared_experts (the shared "
+                 "expert's down_proj input)",
+                 None if inter is None
+                 else int(inter) * int(tc.get("n_shared_experts") or 1))):
+            if v is None or int(v) % n:
+                continue
+            if (int(v) // n) % 128:
+                out.append(
+                    f"{what} = {v}: a rank's {int(v) // n} is not whole "
+                    f"128-blocks ({int(v) // n} % 128 = {int(v) // n % 128})"
+                    f": its activation rounding (act_quant, block 128) "
+                    f"would differ from the whole model's")
     # the arrays' own axes (intermediate sizes, quantization groups, VQ
     # code rows) are tensor_header_refusals': the headers answer them
     if cfg.get("vq_linear"):

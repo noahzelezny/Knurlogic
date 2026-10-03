@@ -259,9 +259,8 @@ def mtp(link, out_path, always, split_kind="pipeline", family="qwen3_5"):
 
 
 def _dspark_tensor_tiny():
-    """(model, head) for a tensor split: the checkpoint's experts are 32
-    wide, one mxfp4 group, which no rank can halve -- so the tiny DSpark
-    config with 64-wide experts and random weights (as
+    """(model, head) for a tensor split: the tiny DSpark config with
+    random weights (as
     tensor_ring_worker.build_deepseek_v4 draws them), and the
     checkpoint's head moved onto it (its stages read the trunk's embedding
     and lm_head, which have the same shapes). Its indexer keeps every
@@ -279,8 +278,10 @@ def _dspark_tensor_tiny():
     register.register("deepseek_v4")
     import mlx_lm.models.deepseek_v4 as M
     cfg = json.loads((D.G.TINY / "config.json").read_text())
-    model = M.Model(M.ModelArgs.from_dict(dict(
-        cfg, moe_intermediate_size=64, index_topk=64)))
+    # (its experts 256 wide and wo_b's input 256: a rank's half is whole
+    # 128-blocks, so both runs round the same blocks -- architecture edit
+    # 21; tuning/resolve refuses a split that would cut one)
+    model = M.Model(M.ModelArgs.from_dict(dict(cfg, index_topk=64)))
     rng = np.random.default_rng(0)
     w = []
     for k, v in tree_flatten(model.parameters()):
@@ -304,6 +305,173 @@ def _dspark_tensor_tiny():
     return model, head
 
 
+def _no_rounding():
+    """KNURLOGIC_TEST_NO_ROUNDING=1: architecture edits 20 and 21's
+    activation rounding as identities, so a run differing from another only
+    in summation order is the same token for token (the rounding turns a
+    float32 ulp at an FP8 boundary into a different block value, and on a
+    random tiny model a near-tie into another token)."""
+    import mlx.core as mx
+
+    from knurlogic.engine import register
+    register.register("deepseek_v4")
+    import mlx_lm.models.deepseek_v4 as A
+
+    def nope(kv, rd, pe=None):
+        if pe is None:
+            return kv
+        return mx.concatenate([kv[..., :kv.shape[-1] - rd],
+                               pe.astype(kv.dtype)], axis=-1)
+
+    def swiglu(gate, up, limit, w=None):
+        h, u = gate.astype(mx.float32), up.astype(mx.float32)
+        if limit and limit > 0:
+            h, u = mx.minimum(h, limit), mx.clip(u, -limit, limit)
+        h = h * mx.sigmoid(h) * u
+        if w is not None:
+            h = h * w.astype(mx.float32).reshape(*gate.shape[:-1], 1)
+        return h.astype(gate.dtype)
+
+    def norm(x, w, eps, keep=True, width=None):
+        y = mx.fast.rms_norm(x if width is None else x[..., :width], w, eps)
+        return (y, y) if keep else y
+    A.fp8_act = A.fp4_simulate_rotated = A._indexer_q_qat = lambda x: x
+    A.fp8_simulate = A.fp4_simulate = lambda x, block=0: x
+    A.fp8_simulate_nope, A.swiglu_act, A.rms_norm_act = nope, swiglu, norm
+
+
+class _Rounding:
+    """KNURLOGIC_TEST_RECORD=1: every call of edits 20-21's rounding on
+    this rank, as (step, site, input before rounding, output), float32
+    (compile off, so each call is seen). `step` counts the driver's
+    gen.next() calls; `on` gates recording to the runs compared."""
+
+    def __init__(self):
+        import mlx.core as mx
+
+        from knurlogic.engine import register
+        register.register("deepseek_v4")
+        import mlx_lm.models.deepseek_v4 as A
+        mx.disable_compile()
+        self.calls, self.step, self.on, self.emits = [], 0, False, {}
+        orig = {k: getattr(A, k) for k in (
+            "fp8_act", "rms_norm_act", "swiglu_act", "fp8_simulate_nope",
+            "fp4_simulate_rotated")}
+
+        def keep(site, pre, post):
+            if self.on:
+                self.calls.append((self.step, site,
+                                   np.array(pre.astype(mx.float32)),
+                                   np.array(post.astype(mx.float32))))
+
+        def fp8_act(x):
+            y = orig["fp8_act"](x)
+            keep("fp8_act", x, y)
+            return y
+
+        def rms_norm_act(x, w, eps, keep_=True, width=None, **kw):
+            k = kw.get("keep", keep_)
+            y, yq = orig["rms_norm_act"](x, w, eps, True, width)
+            keep("rms_norm_act", y, yq)
+            return (y, yq) if k else yq
+
+        def swiglu_act(gate, up, limit, w=None):
+            h, u = gate.astype(mx.float32), up.astype(mx.float32)
+            if limit and limit > 0:
+                h, u = mx.minimum(h, limit), mx.clip(u, -limit, limit)
+            h = h * mx.sigmoid(h) * u
+            if w is not None:
+                h = h * w.astype(mx.float32).reshape(*gate.shape[:-1], 1)
+            y = orig["swiglu_act"](gate, up, limit, w)
+            keep("swiglu_act", h.astype(gate.dtype), y)
+            return y
+
+        def nope(kv, rd, pe=None):
+            y = orig["fp8_simulate_nope"](kv, rd, pe)
+            keep("fp8_simulate_nope", kv[..., :kv.shape[-1] - rd],
+                 y[..., :kv.shape[-1] - rd])
+            return y
+
+        def rot(x):
+            y = orig["fp4_simulate_rotated"](x)
+            keep("fp4_simulate_rotated", x, y)
+            return y
+        A.fp8_act, A.rms_norm_act, A.swiglu_act = fp8_act, rms_norm_act, \
+            swiglu_act
+        A.fp8_simulate_nope = nope
+        A.fp4_simulate_rotated = A._indexer_q_qat = rot
+
+    def take(self):
+        out = (self.calls, self.emits)
+        self.calls, self.step, self.emits = [], 0, {}
+        return out
+
+
+def flip_proof(whole, split, whole_rec, split_rec, emits):
+    """Where the streams part, why: walking both runs' rounding calls in
+    order (a sharded input -- wo_b's, an expert's width -- is this rank's
+    leading part of the whole's), the first call whose rounded output
+    differs in some block (128 wide; 64 for the kv, 32 for FP4), and the
+    largest difference of the inputs before rounding over every call up to
+    and including it, relative to each input's largest magnitude. After
+    that first flip the runs carry a real difference forward, so later
+    inputs are not compared."""
+    k = None
+    for r, (a, b) in enumerate(zip(whole, split)):
+        n = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), None)
+        if n is not None:       # the step that emitted it (the same in both)
+            k = emits[r][n] if k is None else min(k, emits[r][n])
+    if k is None:
+        return {"step": None}
+    rel, calls = 0.0, 0
+    for (s1, n1, p1, o1), (s2, n2, p2, o2) in zip(whole_rec, split_rec):
+        assert s1 == s2 and n1 == n2, (s1, n1, s2, n2)
+        w = p2.shape[-1]
+        p1, o1 = p1[..., :w], o1[..., :w]
+        assert p1.shape == p2.shape, (n1, p1.shape, p2.shape)
+        rel = max(rel, float(np.abs(p1 - p2).max()
+                             / max(np.abs(p1).max(), 1e-30)))
+        calls += 1
+        b = 32 if n1 == "fp4_simulate_rotated" else (
+            64 if n1 == "fp8_simulate_nope" else 128)
+        if w % b == 0:
+            diff = (o1 != o2).reshape(*o1.shape[:-1], w // b, b).any(-1)
+            if diff.any():
+                return {"step": k, "flip_step": s1, "flip_site": n1,
+                        "flip_blocks": int(diff.sum()), "rel": rel,
+                        "calls": calls}
+    return {"step": k, "flip_step": None, "rel": rel, "calls": calls}
+
+
+def margins(model, prompts, outs, samp):
+    """The reference run's decision margin at each of its tokens: the gap
+    between the top two of what picks the token -- a greedy row's logits;
+    a seeded row's scaled log-probabilities plus its key's Gumbel noise at
+    that position (Keys, Gumbel-max) -- from one teacher-forced forward of
+    the unsplit model; and whether that forward picks the reference's
+    token there."""
+    import mlx.core as mx
+
+    from knurlogic.engine.mtp.sampling import Keys
+    out = []
+    for p, o, sp in zip(prompts, outs, samp):
+        if not o:
+            out.append(([], []))
+            continue
+        lg = model(mx.array([p + o]))[0, len(p) - 1:len(p) - 1 + len(o)]
+        s = lg.astype(mx.float32)
+        if sp:
+            s = (s - mx.logsumexp(s, axis=-1, keepdims=True)) / sp["temp"]
+            keys = Keys(sp["seed"])
+            s = s + mx.concatenate([
+                mx.random.gumbel(shape=(1, s.shape[-1]), key=keys.at(i))
+                for i in range(len(o))])
+        top = mx.sort(s, axis=-1)[:, -2:]
+        out.append(((top[:, 1] - top[:, 0]).tolist(),
+                    (mx.argmax(s, axis=-1) == mx.array(o)).tolist()))
+    return out
+
+
 def dspark(link, out_path, split_kind="pipeline", counts="1,3", seeded="",
            engine=""):
     import mlx.core as mx
@@ -315,6 +483,10 @@ def dspark(link, out_path, split_kind="pipeline", counts="1,3", seeded="",
     from knurlogic.engine.runtime import pipeline as PL
     from knurlogic.engine.runtime import tensor as T
     os.environ["KNURLOGIC_MTP_BATCH_MAX_ROWS"] = "8"      # draft always
+    if os.environ.get("KNURLOGIC_TEST_NO_ROUNDING"):
+        _no_rounding()
+    rec = _Rounding() if os.environ.get("KNURLOGIC_TEST_RECORD") else None
+    recs = {}
     G = D.G
     prompts = [G.PROMPT, G.PROMPT[:3], G.PROMPT[2:9] + G.DECODE]
     samp = ([{"temp": 0.8, "seed": 1234}, None, {"temp": 0.8, "seed": 99}]
@@ -367,9 +539,14 @@ def dspark(link, out_path, split_kind="pipeline", counts="1,3", seeded="",
                 b.t1 = mx.array(t, dtype=mx.int32)
             _, rs = gen.next()
             for r in rs:
+                if rec is not None:
+                    rec.emits.setdefault(uids.index(r.uid), []).append(
+                        rec.step)
                 out[r.uid].append(r.token)
                 if r.finish_reason is not None:
                     done.add(r.uid)
+            if rec is not None:
+                rec.step += 1
         gen.close()
         return [out[u] for u in uids]
 
@@ -380,10 +557,16 @@ def dspark(link, out_path, split_kind="pipeline", counts="1,3", seeded="",
             PL.split(model, link.group,
                      PL.bounds_of([int(c) for c in counts.split(",")]))
 
-    whole = whole_draft = baseline = None
+    whole = whole_draft = baseline = margin = None
     if link.rank == 0:
         model, head = load()
+        if rec is not None:
+            rec.take()
+            rec.on = True
         whole = drive(MTPBatchGenerator(model, None, prefill_step_size=4))
+        if rec is not None:
+            rec.on, recs["whole"] = False, rec.take()
+        margin = margins(model, prompts, whole, samp)
         head = bind(model, head)
         D._guess(head, [p + o for p, o in zip(prompts, whole)])
         record(head, seen_whole)
@@ -394,7 +577,21 @@ def dspark(link, out_path, split_kind="pipeline", counts="1,3", seeded="",
         model, _ = load()
         cut(model)
         gen = MTPBatchGenerator(model, None, prefill_step_size=4)
+        if rec is not None:
+            rec.take()
+            rec.on = True
         baseline = drive(gen, PL.coordinate(gen, link.group, drafting=False))
+        if rec is not None:
+            rec.on, recs["split"] = False, rec.take()
+            if link.rank == 0:
+                json.dump({"whole": whole, "baseline": baseline,
+                           "proof": flip_proof(whole, baseline,
+                                               recs["whole"][0],
+                                               recs["split"][0],
+                                               recs["whole"][1])},
+                          open(out_path, "w"))
+            link.barrier()
+            return
     model, head = load()
     cut(model)
     if link.rank == 0:
@@ -408,7 +605,7 @@ def dspark(link, out_path, split_kind="pipeline", counts="1,3", seeded="",
         return _dspark_engine(link, out_path, model, head, prompts, samp,
                               max_tokens, split_kind, K, outs, load,
                               {"whole": whole, "whole_draft": whole_draft,
-                               "baseline": baseline})
+                               "baseline": baseline, "margin": margin})
     stats = {}
     gen = MTPBatchGenerator(model, head, stats=stats, prefill_step_size=4)
     if link.rank > 0:
@@ -425,7 +622,7 @@ def dspark(link, out_path, split_kind="pipeline", counts="1,3", seeded="",
     link.barrier()
     if link.rank == 0:
         json.dump({"whole": whole, "whole_draft": whole_draft,
-                   "baseline": baseline, "split": split,
+                   "baseline": baseline, "split": split, "margin": margin,
                    "calls": [counts_[:4], counts_[4:]],
                    "accepted": stats.get("accepted", 0),
                    "drafted": stats.get("steps", 0),
@@ -490,6 +687,7 @@ def _dspark_engine(link, out_path, model, head, prompts, samp, max_tokens,
                                          completion_batch_size=8))
     served, _ = drain(ex, len(plain.make_cache()))
     ex.close()
+    ref = dict(ref, served_margin=margins(plain, prompts, served, samp))
     stats = {}
     gen = MTPBatchGenerator(model, head, stats=stats, prefill_step_size=4,
                             completion_batch_size=8)

@@ -182,6 +182,39 @@ def test_a_packed_down_proj_that_would_cut_a_word_is_refused():
                 if "switch_mlp.down_proj" in w]
 
 
+def test_a_deepseek_v4_split_must_keep_whole_rounding_blocks():
+    """deepseek_v4 rounds each FP8 / FP4 linear's input in blocks of 128
+    (architecture edit 21); a split whose slice of wo_b's input or an
+    expert's width cuts a block is refused, with its numbers. Flash's and
+    Vision-Exp's shapes split 2, 4 and 8 ways."""
+    import json
+    from pathlib import Path
+    flash = {"model_type": "deepseek_v4", "num_attention_heads": 64,
+             "num_key_value_heads": 1, "o_groups": 8, "o_lora_rank": 1024,
+             "moe_intermediate_size": 2048, "n_shared_experts": 1}
+    for n in (2, 4, 8):
+        assert R.tensor_refusals(flash, n) == [], n
+    real = Path("/Volumes/Models/Teacher Models/"
+                "deepseek-ai--DeepSeek-V4-Flash-Vision-Exp/config.json")
+    if real.exists():
+        cfg = json.loads(real.read_text())
+        for n in (2, 4, 8):
+            assert R.tensor_refusals(cfg, n) == [], n
+    tiny = dict(flash, num_attention_heads=4, o_groups=2, o_lora_rank=64,
+                moe_intermediate_size=128)
+    why = "\n".join(R.tensor_refusals(tiny, 2))
+    assert "wo_b's input" in why and "a rank's 64 is not whole 128-blocks" \
+        in why
+    assert "routed experts' down_proj input" in why
+    assert "act_quant" in why
+    # the DSpark goldens' shapes: whole blocks on two ranks
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support"
+                           / "goldens"))
+    from build_deepseek_v4_dspark import CONFIG
+    assert R.tensor_refusals(CONFIG, 2) == []
+
+
 def test_vq_dense_and_other_families_are_refused():
     cfg = dict(QWEN36, vq_linear={"a.self_attn.q_proj": {}})
     assert any("vq_linear" in w for w in R.tensor_refusals(cfg, 2))

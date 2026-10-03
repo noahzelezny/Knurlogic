@@ -13,22 +13,28 @@ MIT) computes from it under torch.
         golden "$REF"
 
 The HF checkpoint (deepseek_v4_dspark_hf/) carries what the real one does:
-FP8 linears with 128x128 E8M0 block scales in the DSpark stages, FP4
-routed experts with per-32 E8M0 scales everywhere, bf16 norms and Markov
+FP8 linears with 128x128 E8M0 block scales, FP4 routed experts with
+per-32 E8M0 scales, bf16 norms and Markov
 head, fp32 hyper-connection and gate tensors. The trunk's layers are
 compress ratios 0 / 4 / 128 / 4 (the ratio-4 ones with their indexer,
 YaRN on the compressed layers as Flash's), the DSpark stages ratio 0 as
 in the real model; head_dim 80 leaves 64 non-rope dims and the indexer
-has 128 dims (the real model's), whole FP8 / FP4 blocks, so the
-reference's low-precision simulation runs everywhere it does on the real
-model. The indexer has 16 heads: with 4, its FP4-rounded scores tie at
+has 128 dims (the real model's), whole FP8 / FP4 blocks, and every FP8 /
+FP4 linear's input is whole 128-blocks (dim, q_lora_rank, the expert
+width 256 and o_groups * o_lora_rank 256, so a two-rank tensor
+split holds whole blocks too), so the reference's low-precision
+simulation and its linear()'s act_quant run everywhere they do on the
+real model. The indexer has 16 heads: with 4, its FP4-rounded scores tie at
 the top-k boundary for some queries, where either choice is the
 reference's and the two runs part ways. The prompt is one whose run has
 no such tie, and no FP8 rounding that a float32 ulp of summation order
-flips. The reference runs
+flips (of the prompts default_rng(1..12) makes, 7 and 11 have none). The
+reference runs
 float32 on the CPU with its CUDA kernels written out in torch (`kernels`:
-`sparse_attn`, `hc_split_sinkhorn`, `act_quant` and `fp4_act_quant` with
-inplace=True, and fast_hadamard_transform's `hadamard_transform`);
+`sparse_attn`, `hc_split_sinkhorn`, `act_quant` and `fp4_act_quant`,
+`fp8_gemm` and `fp4_gemm` on the dequantized operands, and
+fast_hadamard_transform's `hadamard_transform`), its config's dtype fp8
+and expert_dtype fp4 as Flash's;
 model.py's rotate_activation is the same call without its bf16 assert.
 
 Writes deepseek_v4_dspark.npz: the trunk's logits (prefill, then each
@@ -49,14 +55,14 @@ TINY = HERE / "deepseek_v4_dspark_tiny"
 HF = HERE / "deepseek_v4_dspark_hf"
 OUT = HERE / "deepseek_v4_dspark.npz"
 
-V, D, L, E, I = 64, 64, 4, 4, 32
+V, D, L, E, I = 64, 128, 4, 4, 256
 K, NOISE, R, STAGES, TARGETS = 5, 63, 8, 3, [1, 2, 3]
 HD, RD, IH, IHD = 80, 16, 16, 128
 RATIOS = [0, 4, 128, 4]
 CONFIG = dict(
     model_type="deepseek_v4", vocab_size=V, hidden_size=D,
     num_hidden_layers=L, num_attention_heads=4, num_key_value_heads=1,
-    q_lora_rank=32, o_lora_rank=16, o_groups=2, head_dim=HD,
+    q_lora_rank=128, o_lora_rank=128, o_groups=2, head_dim=HD,
     qk_rope_head_dim=RD, sliding_window=8, compress_ratios=RATIOS,
     compress_rope_theta=160000.0,
     rope_scaling={"type": "yarn", "factor": 4,
@@ -75,7 +81,7 @@ CONFIG = dict(
 #: which the indexer keeps 8) and 5 decode tokens (the first ratio-128 row
 #: is pooled by the second)
 PROMPT = [3, 17, 42, 5, 9, 60, 33, 2, 11, 48, 27] + [
-    int(t) for t in np.random.default_rng(1).integers(2, 62, 115)]
+    int(t) for t in np.random.default_rng(7).integers(2, 62, 115)]
 DECODE = [7, 55, 21, 36, 4]
 
 
@@ -83,7 +89,7 @@ DECODE = [7, 55, 21, 36, 4]
 def _tensors(rng) -> dict:
     """name -> (safetensors dtype, numpy array of its bytes / values)."""
     import mlx.core as mx
-    H, hd, ql, ol, G = 4, HD, 32, 16, 2
+    H, hd, ql, ol, G = 4, HD, 128, 128, 2
     mix = (2 + 4) * 4
     t: dict = {}
 
@@ -154,12 +160,9 @@ def _tensors(rng) -> dict:
             f32(f"{pre}.hc_{hc}_base", (mix,))
             f32(f"{pre}.hc_{hc}_scale", (3,), 0.5)
 
-    def plain(name, shape):
-        f32(name, shape)
-
     f32("embed.weight", (V, D), 1.0)
     for i in range(L):
-        block(f"layers.{i}", plain, i < 1, RATIOS[i])
+        block(f"layers.{i}", fp8, i < 1, RATIOS[i])
     bf16("norm.weight", (D,), one=True)
     f32("head.weight", (V, D))
     f32("hc_head_fn", (4, 4 * D))
@@ -263,16 +266,19 @@ def kernels():
                   scale_dtype=torch.float32, inplace=False):
         # act_quant_kernel: amax per block floored at 1e-4; s = amax / 448
         # or (scale_fmt set: round_scale) its power-of-two ceiling;
-        # clamp(x / s) -> e4m3 -> * s, back in x's dtype
-        assert inplace, "the golden runs every GEMM dequantized"
+        # clamp(x / s) -> e4m3 -> * s, back in x's dtype; not inplace,
+        # the e4m3 values and their float32 scales (linear()'s GEMM input)
         N = x.size(-1)
         assert N % block_size == 0
         xf = x.float().unflatten(-1, (N // block_size, block_size))
         amax = xf.abs().amax(-1, keepdim=True).clamp(min=1e-4)
         inv = torch.tensor(1 / 448.0, dtype=torch.float32)
         s = _pow2_ceil(amax * inv) if scale_fmt is not None else amax * inv
-        y = (xf / s).clamp(-448.0, 448.0).to(torch.float8_e4m3fn).float() * s
-        x.copy_(y.flatten(-2).to(x.dtype))
+        q = (xf / s).clamp(-448.0, 448.0).to(torch.float8_e4m3fn)
+        if not inplace:
+            assert scale_dtype == torch.float32
+            return q.flatten(-2), s.squeeze(-1)
+        x.copy_((q.float() * s).flatten(-2).to(x.dtype))
         return x
 
     def fp4_act_quant(x, block_size=32, inplace=False):
@@ -317,8 +323,23 @@ def kernels():
             comb = comb / (comb.sum(-2, keepdim=True) + eps)
         return pre, post, comb
 
-    def refused(*a, **k):
-        raise RuntimeError("a quantized gemm: the golden runs dequantized")
+    def _gemm(a, a_s, w):
+        # the kernels' float32 accumulation of the dequantized operands
+        a = a.float() * a_s.repeat_interleave(128, -1)
+        return (a @ w.T).to(torch.get_default_dtype())
+
+    def fp8_gemm(a, a_s, b, b_s, scale_dtype=torch.float32):
+        # b [N, K] e4m3 with an E8M0 scale per 128x128 block
+        s = b_s.float().repeat_interleave(128, 0).repeat_interleave(128, 1)
+        return _gemm(a, a_s, b.float() * s[:b.size(0), :b.size(1)])
+
+    def fp4_gemm(a, a_s, b, b_s, scale_dtype=torch.float32):
+        # b [N, K / 2] e2m1 pairs (low nibble first), an E8M0 scale per 32
+        u = b.view(torch.uint8)
+        t = torch.from_numpy(_FP4)
+        w = torch.stack([t[(u & 0xF).long()], t[(u >> 4).long()]], -1)
+        w = w.flatten(-2) * b_s.float().repeat_interleave(32, 1)
+        return _gemm(a, a_s, w)
 
     def hadamard_transform(x, scale=1.0):
         # the Sylvester transform as radix-2 butterflies, lowest stride
@@ -337,8 +358,8 @@ def kernels():
         return hadamard_transform(x, scale=x.size(-1) ** -0.5)
 
     return types.SimpleNamespace(
-        act_quant=act_quant, fp4_act_quant=fp4_act_quant, fp8_gemm=refused,
-        fp4_gemm=refused, sparse_attn=sparse_attn,
+        act_quant=act_quant, fp4_act_quant=fp4_act_quant, fp8_gemm=fp8_gemm,
+        fp4_gemm=fp4_gemm, sparse_attn=sparse_attn,
         hc_split_sinkhorn=hc_split_sinkhorn,
         hadamard_transform=hadamard_transform,
         rotate_activation=rotate_activation)
@@ -374,6 +395,8 @@ def qat_golden(cases: dict) -> dict:
         out[f"qat_{name}"] = a
         out[f"qat_{name}_fp8"] = k.act_quant(
             t.clone(), 64, "ue8m0", inplace=True).float().numpy()
+        out[f"qat_{name}_fp8_128"] = k.act_quant(
+            t.clone(), 128, "ue8m0", inplace=True).float().numpy()
         out[f"qat_{name}_fp4"] = k.fp4_act_quant(
             t.clone(), 32, inplace=True).float().numpy()
         for d in (64, 128):
@@ -437,8 +460,8 @@ def golden(ref: str) -> None:
     torch.manual_seed(0)
     c = CONFIG
     args = M.ModelArgs(
-        max_batch_size=1, max_seq_len=256, temperature=0, dtype="bf16",
-        scale_fmt="ue8m0", expert_dtype=None, scale_dtype="fp32",
+        max_batch_size=1, max_seq_len=256, temperature=0, dtype="fp8",
+        scale_fmt="ue8m0", expert_dtype="fp4", scale_dtype="fp32",
         vocab_size=V, dim=D, moe_inter_dim=I, n_layers=L,
         n_hash_layers=c["num_hash_layers"], n_mtp_layers=STAGES,
         n_heads=c["num_attention_heads"], n_routed_experts=E,
@@ -455,11 +478,19 @@ def golden(ref: str) -> None:
         hc_mult=4, hc_sinkhorn_iters=c["hc_sinkhorn_iters"], hc_eps=1e-6,
         dspark_block_size=K, dspark_noise_token_id=NOISE,
         dspark_target_layer_ids=tuple(TARGETS), dspark_markov_rank=R)
-    model = M.Transformer(args).float()
-    w = _dequant(load_file(str(HF / "model.safetensors")))
+    # its FP8 / FP4 linears as the checkpoint holds them (linear() runs
+    # act_quant and the GEMM on them); the rest float32 -- wo_a as
+    # convert.py leaves it, dequantized
+    model = M.Transformer(args)
+    model._apply(lambda t: t.float() if t.dtype == torch.bfloat16 else t)
+    st = load_file(str(HF / "model.safetensors"))
+    deq = _dequant(st)
     for s in range(STAGES):        # the shared table and head, as tied
-        w[f"mtp.{s}.embed.weight"] = w["embed.weight"]
-        w[f"mtp.{s}.head.weight"] = w["head.weight"]
+        deq[f"mtp.{s}.embed.weight"] = deq["embed.weight"]
+        deq[f"mtp.{s}.head.weight"] = deq["head.weight"]
+    low = (torch.float8_e4m3fn, torch.float4_e2m1fn_x2, torch.float8_e8m0fnu)
+    w = {k: st[k].view(p.dtype) if p.dtype in low else deq[k]
+         for k, p in model.state_dict().items()}
     model.load_state_dict(w, strict=True)
 
     x = torch.tensor([PROMPT + DECODE])

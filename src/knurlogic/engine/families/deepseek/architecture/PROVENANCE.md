@@ -12,7 +12,7 @@ artifacts were validated against -- not merely that it imports.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.32.0 (0.31.3
   until 2026-10-02).
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `c91f2bef59fd3d19ff3dfa070ad3ad7b8aca35ac491984ef52dd7638a5573a85`
+- vendored sha256: `df74fb26f9a87ca1ebcc3ffac8b3b03a944dcf832de2f0dc50947f319f5c7785`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -291,11 +291,69 @@ HC head and the final norm); tested, not changed.
    the logits 1.7e-6 (0.81 without this edit), main hidden 3.6e-6 (1.7),
    draft logits 2.1e-6 (2.2), confidence 9.5e-6 (2.1), draft ids equal
    (not without) (tests/engine/test_deepseek_v4_dspark.py).
-   Not simulated, a known remaining difference: the reference also
-   rounds every FP8 / FP4 linear's input through `act_quant` (block 128,
-   ue8m0) before its fp8_gemm / fp4_gemm (model.py's `linear`, 110-118 /
-   127-133), where the vendored file runs mxfp4 matmuls on bf16
-   activations. Measured on random activations, that rounding moves each
-   linear's output by ~2.7% RMS relative (bf16's own rounding is ~0.2%);
-   the model was trained with it, so it is a difference from the
-   reference, not a known loss.
+   Edit 21 adds the remaining site, every FP8 / FP4 linear's input.
+
+### Edit 21, a fix (Flash and Vision-Exp)
+
+21. **The linears' activation rounding** (new `fp8_act`, `swiglu_act`,
+   `rms_norm_act`, `_moe_sum`; applied in `DeepseekV4Block.__call__`,
+   `V4Attention.__call__`, `_attn_wqkv_quant_split_norm` /
+   `_attn_qkv_split_norm`, `_attn_wo_chain_quant`, `DeepseekV4MLP`,
+   `DeepseekV4MoE.__call__`, `MoEGate`). The reference's `linear()`
+   (Flash 108-120 / Vision-Exp 123-135) quantizes x with `act_quant(x,
+   128, scale_fmt, scale_dtype)` (ue8m0 scales: model.py sets scale_fmt
+   = "ue8m0" whenever scale_dtype is "fp8") before fp8_gemm / fp4_gemm,
+   whenever the weight is FP8 or FP4, whatever our weights' format.
+   Which linears are: `Linear`'s dtype defaults to `default_dtype`,
+   float8_e4m3fn under the config's dtype "fp8" (Transformer.__init__,
+   776 / 934), and routed experts are FP4 (expert_dtype "fp4"); the
+   checkpoint agrees (F8_E4M3 + F8_E8M0 scales, I8 experts). Rounded:
+   attention wq_a and wkv (one x; our fused wqkv_a), wq_b, wo_b, the
+   indexer's wq_b (all FP8, 457-463 / 498-504, 393 / 433), the shared
+   expert's w1 / w3 / w2 (FP8, its Expert built with dtype None, 627 /
+   682), the routed experts' w1 / w3 / w2 (FP4, 591-593 / 646-648),
+   Flash's MTP e_proj / h_proj (742-743) and Vision-Exp's DSpark
+   main_proj (882). Not rounded: wo_a (FP8 in the checkpoint, but
+   convert.py dequantizes it to bf16 and the model declares it bf16,
+   462 / 503), the compressors' wkv / wgate (fp32, 297-298 / 337-338),
+   the indexer's weights_proj (bf16, 394 / 434), the gate (F.linear in
+   float32), the head, the hyper-connections, the confidence head (fp32).
+   An expert's w2 input is the reference's: SwiGLU in float32, times the
+   routing weight (now float32 out of the gate, as the reference's Gate
+   returns it) before w2, back in the activation dtype, rounded; the
+   experts' outputs and the shared expert's summed in float32 (its
+   MoE.forward); the trunk previously weighted after w2. The block's
+   norms (attn_norm, ffn_norm) and q_norm return the rounded copy from
+   the same dispatch (`rms_norm_act`), and the SwiGLU, weight and
+   rounding are one dispatch (`swiglu_act`); wo_b's input is `fp8_act`
+   (a simdgroup per 128-block) inside the compiled wo chain. The heads
+   (heads/deepseek_v4.py, heads/deepseek_v4_dspark.py) round the same
+   way. A dim that is not whole 128-blocks (tiny test configs) is left
+   as it is.
+   Proven against the reference under torch: the DSpark golden now runs
+   the reference with dtype fp8 / expert_dtype fp4 (its fp8_gemm /
+   fp4_gemm ported to torch on the dequantized operands), with every
+   linear's input whole 128-blocks (on two tensor ranks too): max abs
+   difference on the logits 9.5e-7 (1.61 without this edit), main hidden
+   1.1e-5 (13.4), draft logits 2.1e-6 (5.6), confidence 1.5e-5 (24.7),
+   draft ids equal (not without); `fp8_act` bit for bit against
+   act_quant block 128 on float32 and bf16. Of 12 prompts, 10 hit an
+   FP8 rounding a float32 ulp of summation order flips and part ways
+   (0.07-0.74 on the logits); the golden's prompt is one that does not.
+   A tensor split cuts three rounded inputs (wo_b's, both experts'
+   down_proj); tuning/resolve's tensor_refusals refuses a split whose
+   slice of one is not whole 128-blocks (Flash and Vision-Exp split 2, 4
+   and 8 ways). Edit 20's rounded tensors are never cut. A tensor split
+   still sums in another order than the whole model (per-rank partials),
+   so the rounding's inputs differ by float32 noise and an input on an
+   FP8 boundary can round to the other value: on the tiny DSpark model the
+   split's tokens part from the whole model's (tests/engine/
+   test_pipeline.py records it: 708 rounding calls' inputs within 7.2e-7
+   relative, then one 64-block of the window kv rounding differently in
+   the prefill, the tokens parting 4-5 steps later); with the rounding
+   stubbed out the two are equal token for token.
+   Added decode cost, measured on Flash's shapes (dim 4096, q_lora 1024,
+   wo_b input 8192, expert width 2048, top 6), the ops it changes in a
+   43-layer chain: ~0.7 ms a token of evaluation (2.7 -> 3.4 ms in the
+   chain), ~1.2 ms with graph building; whole random 24-layer configs
+   within noise of +0.5 ms.
