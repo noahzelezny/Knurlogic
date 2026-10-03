@@ -5,8 +5,8 @@ hyper-connections. One MTP head (heads/deepseek_v4.py, a sidecar beside
 the trunk; the trunk's sanitize still drops `mtp.*`), no vision.
 
 The chat template is engine/templates/deepseek_v4.jinja (the conversion
-ships a stub); its thinking control (thinking_mode / enable_thinking) is
-not declared here as a dialect yet.
+ships a stub); its thinking levels are DeepSeek's three modes: Non-think,
+Think High, Think Max (the official prefix), the "deepseek_effort" dialect.
 """
 
 MANIFEST = {
@@ -35,6 +35,17 @@ MANIFEST = {
                 cache_semantics="copy",
                 # every sidecar key is under mtp.0. (the official names)
                 layout=("mtp",)),
+        },
+    },
+    "thinking": {
+        "deepseek_effort": {
+            "detect": {"all": ["thinking_mode", "Reasoning Effort",
+                               "enable_thinking"]},
+            "default": "high",
+            "native": [["none", "off", {"thinking_mode": "chat"}],
+                       ["high", "high", {"thinking_mode": "thinking"}],
+                       ["xhigh", "max", {"thinking_mode": "thinking",
+                                         "reasoning_effort": "max"}]],
         },
     },
     "vision": None,
