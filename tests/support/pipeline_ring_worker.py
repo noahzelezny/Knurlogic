@@ -15,6 +15,16 @@
                                also the same split with no head anywhere
     mtp <always> tensor qwen4_exp
                                the same on the tiny qwen4_exp and its head
+    dspark <split> <counts> <seeded> <engine>
+                               the tiny DeepSeek-V4 DSpark checkpoint, rank
+                               0 alone holding the block head (drafts partly
+                               right: _guess), split by layer runs `counts`
+                               (pipeline) or sharded (tensor); rank 0 also
+                               runs it unsplit and, sharded, the same split
+                               with no head. `seeded`: two rows seeded, one
+                               greedy. `engine`: through rank 0's
+                               TensorExecutor and the follower's
+                               tensor.follow instead of a hand-driven loop
 
 Run with MLX_RANK and MLX_HOSTFILE set."""
 import json
@@ -238,6 +248,247 @@ def mtp(link, out_path, always, split_kind="pipeline", family="qwen3_5"):
                    "calls": [counts[:5], counts[5:]], "overlapped": sent,
                    "accepted": stats.get("accepted", 0),
                    "drafted": stats.get("steps", 0)}, open(out_path, "w"))
+
+
+def _dspark_tensor_tiny():
+    """(model, head) for a tensor split: the checkpoint's experts are 32
+    wide, one mxfp4 group, which no rank can halve -- so the tiny DSpark
+    config with 64-wide experts and random weights (as
+    tensor_ring_worker.build_deepseek_v4 draws them), and the
+    checkpoint's head moved onto it (its stages read the trunk's embedding
+    and lm_head, which have the same shapes)."""
+    import mlx.core as mx
+    from mlx.utils import tree_flatten, tree_unflatten
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..",
+                                    "engine"))
+    import test_deepseek_v4_dspark as D
+
+    from knurlogic.engine import register
+    register.register("deepseek_v4")
+    import mlx_lm.models.deepseek_v4 as M
+    cfg = json.loads((D.G.TINY / "config.json").read_text())
+    model = M.Model(M.ModelArgs.from_dict(dict(cfg,
+                                               moe_intermediate_size=64)))
+    rng = np.random.default_rng(0)
+    w = []
+    for k, v in tree_flatten(model.parameters()):
+        if k.endswith("tid2eid"):
+            a = rng.integers(0, cfg["n_routed_experts"],
+                             size=v.shape).astype(np.int32)
+        elif "switch_mlp" in k and v.dtype == mx.uint8:   # E8M0 scales
+            a = rng.integers(118, 124, size=v.shape).astype(np.uint8)
+        elif "switch_mlp" in k:                           # packed mxfp4
+            a = rng.integers(0, 2 ** 32, size=v.shape,
+                             dtype=np.uint64).astype(np.uint32)
+        elif k.endswith("norm.weight"):
+            a = (1 + 0.1 * rng.standard_normal(v.shape)).astype(np.float32)
+        else:
+            a = (0.15 * rng.standard_normal(v.shape)).astype(np.float32)
+        w.append((k, mx.array(a)))
+    model.update(tree_unflatten(w))
+    mx.eval(model.parameters())
+    head, _ = D._head(D._load())
+    head.model, head.core = model, model.model
+    return model, head
+
+
+def dspark(link, out_path, split_kind="pipeline", counts="1,3", seeded="",
+           engine=""):
+    import mlx.core as mx
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..",
+                                    "engine"))
+    import test_deepseek_v4_dspark as D
+
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.runtime import tensor as T
+    os.environ["KNURLOGIC_MTP_BATCH_MAX_ROWS"] = "8"      # draft always
+    G = D.G
+    prompts = [G.PROMPT, G.PROMPT[:3], G.PROMPT[2:9] + G.DECODE]
+    samp = ([{"temp": 0.8, "seed": 1234}, None, {"temp": 0.8, "seed": 99}]
+            if seeded else [None] * 3)
+    max_tokens = 24
+    tensor = split_kind == "tensor"
+
+    def load():
+        if tensor:
+            return _dspark_tensor_tiny()
+        # float32 (its bf16 norms and projections), so a stage's stream
+        # crosses ranks unrounded and the split is the unsplit model's
+        # arithmetic exactly
+        model = D._load()
+        model.set_dtype(mx.float32)
+        return model, None
+
+    def bind(model, head):
+        if head is None:
+            head, _ = D._head(model)
+        return head
+
+    def record(head, sink):
+        """Keep every main hidden state the head takes (the target layers'
+        outputs, HC-meaned): the drafts are _guess's, so the tokens alone
+        would not show a wrong capture."""
+        real = head.advance
+
+        def advance(main_h, cache):
+            sink.append(np.array(main_h.astype(mx.float32)))
+            return real(main_h, cache)
+        head.advance = advance
+    seen_whole, seen_split = [], []
+
+    def drive(gen, coord=None):
+        uids = gen.insert_segments(
+            segments=[[p] for p in prompts], max_tokens=[max_tokens] * 3,
+            caches=[None] * 3, all_tokens=[[] for _ in prompts],
+            samplers=samp)
+        out, done = {u: [] for u in uids}, set()
+        while True:
+            go = len(done) < len(uids)
+            if coord is not None:
+                go = bool(coord._bcast([int(go)])[0])
+            if not go:
+                break
+            b = gen._batch
+            if coord is not None and len(b):
+                t = coord._bcast([int(x) for x in b.t1.tolist()])
+                b.t1 = mx.array(t, dtype=mx.int32)
+            _, rs = gen.next()
+            for r in rs:
+                out[r.uid].append(r.token)
+                if r.finish_reason is not None:
+                    done.add(r.uid)
+        gen.close()
+        return [out[u] for u in uids]
+
+    def cut(model):
+        if tensor:
+            T.shard(model, link.group)
+        else:
+            PL.split(model, link.group,
+                     PL.bounds_of([int(c) for c in counts.split(",")]))
+
+    whole = whole_draft = baseline = None
+    if link.rank == 0:
+        model, head = load()
+        whole = drive(MTPBatchGenerator(model, None, prefill_step_size=4))
+        head = bind(model, head)
+        D._guess(head, [p + o for p, o in zip(prompts, whole)])
+        record(head, seen_whole)
+        whole_draft = drive(MTPBatchGenerator(model, head,
+                                              prefill_step_size=4))
+    if tensor:
+        # the same split with no head on either rank
+        model, _ = load()
+        cut(model)
+        gen = MTPBatchGenerator(model, None, prefill_step_size=4)
+        baseline = drive(gen, PL.coordinate(gen, link.group, drafting=False))
+    model, head = load()
+    cut(model)
+    if link.rank == 0:
+        head = bind(model, head)
+        D._guess(head, [p + o for p, o in zip(prompts, whole)])
+        record(head, seen_split)
+    else:
+        head = None
+    K, outs = G.K, list(model.args.dspark_target_layer_ids)
+    if engine:
+        return _dspark_engine(link, out_path, model, head, prompts, samp,
+                              max_tokens, split_kind, K, outs, load,
+                              {"whole": whole, "whole_draft": whole_draft,
+                               "baseline": baseline})
+    stats = {}
+    gen = MTPBatchGenerator(model, head, stats=stats, prefill_step_size=4)
+    if link.rank > 0:
+        gen.follow_block(K, outs)
+        if tensor:
+            gen.mirror_hidden()
+        else:
+            PL.silence(gen)
+    coord = PL.coordinate(gen, link.group, drafting=True)
+    split = drive(gen, coord)
+    counts_ = mx.distributed.all_gather(
+        mx.array([coord.calls[k] for k in ("b0", "b1", "b2", "ba")]),
+        group=link.group, stream=mx.cpu).tolist()
+    link.barrier()
+    if link.rank == 0:
+        json.dump({"whole": whole, "whole_draft": whole_draft,
+                   "baseline": baseline, "split": split,
+                   "calls": [counts_[:4], counts_[4:]],
+                   "accepted": stats.get("accepted", 0),
+                   "drafted": stats.get("steps", 0),
+                   "hidden": [len(seen_whole), len(seen_split),
+                              max((float(np.abs(a - b).max()) if a.shape ==
+                                   b.shape else float("inf"))
+                                  for a, b in zip(seen_whole, seen_split))]},
+                  open(out_path, "w"))
+
+
+def _dspark_engine(link, out_path, model, head, prompts, samp, max_tokens,
+                   split_kind, K, outs, load, ref):
+    """The serving path for `dspark ... engine`: rank 0's TensorExecutor
+    and the follower's tensor.follow with rank 0's block size and target
+    layers (as agree_head tells it), against rank 0's unsplit executor
+    with no head (FakeTok's end token on both). `keyed`: every Finished
+    entry is at exactly its key's length."""
+    from knurlogic.engine.mtp.batch_generator import (
+        MTPBatchGenerator,
+        trunk_offset,
+    )
+    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.runtime.executor import (
+        Admission,
+        Finished,
+        LocalExecutor,
+        Token,
+    )
+    from knurlogic.engine.runtime.request import control_machine
+    tok = FakeTok()
+    if link.rank > 0:
+        T.follow(model, tok, ("tiny", None, None), link,
+                 prompt_cache_size=4, completion_batch_size=8,
+                 prefill_step_size=4, working_set=0, split=split_kind,
+                 drafting=True, block=K, outputs=tuple(outs))
+        return
+
+    def drain(ex, n_trunk):
+        uids = []
+        for p, sp in zip(prompts, samp):
+            sm, _ = control_machine(tok, "normal")
+            uids.append(ex.insert(Admission(
+                segments=[p], max_tokens=max_tokens, sampling=sp or {},
+                state_machine=sm,
+                wire={"penalties": {}, "initial": "normal"})))
+        toks, done, keyed = {u: [] for u in uids}, set(), []
+        for _ in range(10_000):
+            for e in ex.step():
+                if isinstance(e, Token):
+                    toks[e.uid].append(e.token)
+                if isinstance(e, Finished):
+                    done.add(e.uid)
+                    keyed.append(trunk_offset(e.cache[:n_trunk])
+                                 == len(e.tokens))
+            if done >= set(uids):
+                break
+        return [toks[u] for u in uids], keyed
+
+    plain, _ = load()
+    ex = LocalExecutor(MTPBatchGenerator(plain, None, prefill_step_size=4,
+                                         completion_batch_size=8))
+    served, _ = drain(ex, len(plain.make_cache()))
+    ex.close()
+    stats = {}
+    gen = MTPBatchGenerator(model, head, stats=stats, prefill_step_size=4,
+                            completion_batch_size=8)
+    PL.coordinate(gen, link.group)
+    ring = T.Ring(link, split=split_kind)
+    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    split, keyed = drain(ex, gen._n_trunk)
+    ring.stop()
+    json.dump(dict(ref, served=served, split=split, keyed=keyed,
+                   accepted=stats.get("accepted", 0),
+                   drafted=stats.get("steps", 0)), open(out_path, "w"))
 
 
 class FakeTok:
@@ -603,6 +854,8 @@ def main(argv):
         image(link, out_path, *argv[2:])
     elif mode == "hit":
         hit(link, out_path, *argv[2:])
+    elif mode == "dspark":
+        dspark(link, out_path, *argv[2:])
     elif mode == "logits":
         logits(link, out_path, argv[2], [int(x) for x in argv[3].split(",")])
     else:

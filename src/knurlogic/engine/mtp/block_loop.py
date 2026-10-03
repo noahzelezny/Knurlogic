@@ -24,9 +24,12 @@ captured main hidden states of the forward that committed them), so it is
 never rolled back. The confidence head's score is not used: the
 reference's generate.py does not use it either.
 
-One machine only: a split model's Coord carries one draft per row
-(B1/B2), so ModelHost does not bind a block head on a split.
-Design: docs/design/deepseek-vision.md (DSpark).
+Across a split (pipeline or tensor) every rank runs this loop; only rank
+0 holds the head, drafts and judges. Coord.bk carries its regime and the
+[B, K] drafts (B1), Coord.bm the committed count and every row's next
+token (B2); a follower runs the verify and the replay with them. The
+target layers' outputs reach rank 0's head on a pipeline through
+pipeline.carry. Design: docs/design/deepseek-vision.md (DSpark).
 """
 from __future__ import annotations
 
@@ -55,6 +58,13 @@ class BlockBatch(MTPBatch):
 
     carries_draft = False
 
+    def __init__(self, *a, block_size: int = 0, **kw):
+        super().__init__(*a, **kw)
+        #: K: the head's, or on a split's follower (which holds none)
+        #: rank 0's (tensor.agree_head)
+        self.block_size = int(block_size
+                              or getattr(self.head, "block_size", 0))
+
     def _live(self, B: int) -> list[bool]:
         return [bool(self.drafts[i]) for i in range(B)]
 
@@ -62,13 +72,22 @@ class BlockBatch(MTPBatch):
         B = len(self.uids)
         if B == 0:
             return []
-        if self.coord is not None:
-            raise RuntimeError("a block drafter runs on one machine; a "
-                               "split model binds none (ModelHost)")
-        drafting = self.drafting_pays(B) and any(self._live(B))
+        live = self._live(B)
+        drafting = self.drafting_pays(B) and any(live)
+        pre = None
+        c = self.coord
+        if c is not None and (self.head is not None or c.head):
+            # B1, every step while rank 0 holds a head: its regime and
+            # drafts (a follower holds none and asks)
+            if c.leader and drafting:
+                pre = self._draft_block(B, live)
+            drafting, d = c.bk(drafting, pre[0] if pre else None, B,
+                               self.block_size)
+            if drafting and pre is None:
+                pre = (d, None)
         self._note_regime(drafting, B)
         t0 = self._clock()
-        out = self._block_step(B) if drafting else self._plain_step()
+        out = self._block_step(B, pre) if drafting else self._plain_step()
         self._record_cost(B, drafting, self._clock() - t0,
                           sum(len(rs.tokens) for rs in out))
         return out
@@ -77,7 +96,7 @@ class BlockBatch(MTPBatch):
     def _draft_block(self, B: int, live: list[bool]):
         """(d [B, K] int32, the draft distributions per row and position)."""
         head = self.head
-        K = head.block_size
+        K = self.block_size
         x, base = head.block(self.t1, self.hcache)
         prev = self.t1.astype(mx.int32)
         qs: list[list] = [[None] * K for _ in range(B)]
@@ -110,10 +129,14 @@ class BlockBatch(MTPBatch):
         return mx.stack(cols, axis=1), qs
 
     # -------------------------------------------------------------- step
-    def _block_step(self, B: int) -> list[RowStep]:
-        K = self.head.block_size
+    def _block_step(self, B: int, pre=None) -> list[RowStep]:
+        """`pre`: (d, qs) already drawn (a split's B1; qs None on a
+        follower, which never judges)."""
+        K = self.block_size
         live = self._live(B)
-        d, qs = self._draft_block(B, live)
+        d, qs = pre if pre is not None else self._draft_block(B, live)
+        # rank 0 judges; a follower's verdicts come in B2
+        judge = self.coord is None or self.coord.leader
 
         # --- verify: one (K + 1)-wide forward ----------------------------
         csnap = snapshot(self.cache, copy=self.copy_caches)
@@ -125,7 +148,7 @@ class BlockBatch(MTPBatch):
         # --- verdicts, every position at once: oks[i][k] says whether d_k
         # stands, tt[i][k] is the target's token at that position ---------
         oks, tt, lazy = [], [], []
-        for i in range(B):
+        for i in (range(B) if judge else ()):
             p = self.params[i]
             em = self.emitted[i]
             n = len(em)
@@ -161,31 +184,44 @@ class BlockBatch(MTPBatch):
                 lazy += [ok, t]
             oks.append(ok_i)
             tt.append(tt_i)
-        mx.eval(*lazy)
-        acc = []
-        for i in range(B):
-            a = 0
-            if live[i]:
-                while a < K and bool(oks[i][a].item()):
-                    a += 1
-            acc.append(a)
-        m = min(acc)
-        # no row commits past the token that ends one (MTPBatch._ends)
         t1_list = self.t1.tolist()
         d_all = d.tolist()
-        for i in range(B):
-            end = self._ends(i, [t1_list[i]] + d_all[i][:m])
-            if end is not None:
-                m = min(m, end)
+        m, nxt = 0, [0] * B
+        if judge:
+            mx.eval(*lazy)
+            acc = []
+            for i in range(B):
+                a = 0
+                if live[i]:
+                    while a < K and bool(oks[i][a].item()):
+                        a += 1
+                acc.append(a)
+            m = min(acc)
+            # no row commits past the token that ends one (MTPBatch._ends)
+            for i in range(B):
+                end = self._ends(i, [t1_list[i]] + d_all[i][:m])
+                if end is not None:
+                    m = min(m, end)
+            # the token each row puts at position m (module docstring)
+            nxt = [d_all[i][m] if acc[i] > m else int(tt[i][m].item())
+                   for i in range(B)]
 
-        n_live = sum(live)
-        if n_live:
-            frac = sum(acc[i] for i in range(B) if live[i]) / (n_live * K)
-            self.acc_est = 0.9 * self.acc_est + 0.1 * frac
-        for i in range(B):
-            if live[i]:
-                self.steps[i] += 1
-                self.accepted[i] += acc[i]
+            n_live = sum(live)
+            if n_live:
+                frac = sum(acc[i] for i in range(B) if live[i]) / (n_live * K)
+                self.acc_est = 0.9 * self.acc_est + 0.1 * frac
+            for i in range(B):
+                if live[i]:
+                    self.steps[i] += 1
+                    self.accepted[i] += acc[i]
+        else:
+            # a tensor follower's verify holds every layer's all_sum, which
+            # rank 0 has just run for its verdicts: they go before B2's
+            # all_gather (a pipeline follower's zeros cost nothing)
+            mx.eval(lg)
+        if self.coord is not None:
+            # B2: rank 0's count and next tokens drive every rank's replay
+            m, nxt = self.coord.bm(m, nxt, B)
 
         # --- rollback + replay to the m + 1 committed positions ----------
         if m < K:
@@ -194,8 +230,6 @@ class BlockBatch(MTPBatch):
             h_c = self.get_h()
         else:
             h_c = h_v
-        # the token each row puts at position m (module docstring)
-        nxt = [d[i:i + 1, m] if acc[i] > m else tt[i][m] for i in range(B)]
 
         fin = mx.stack([_finite_rows(self.row_t1)]
                        + [_finite_rows(lg[:, k]) for k in range(m)], axis=1)
@@ -233,9 +267,14 @@ class BlockBatch(MTPBatch):
             _mark(out, fin)
             return out
         idx = mx.array(keep)
-        t_next = mx.concatenate([nxt[i] for i in keep]).astype(mx.int32)
-        self.head.advance(h_c[idx], self.hcache)
-        mx.eval(t_next, fin, self.hcache.state)
+        t_next = mx.array([nxt[i] for i in keep], dtype=mx.int32)
+        if self.head is not None:
+            self.head.advance(h_c[idx], self.hcache)
+            mx.eval(t_next, fin, self.hcache.state)
+        else:
+            # a tensor follower: the replay's all_sums, as rank 0's head
+            # cache runs them (its captured hidden state, mirror_hidden)
+            mx.eval(t_next, fin, *([h_c] if h_c is not None else []))
         _mark(out, fin)
         self.t1 = t_next
         self.row_t1 = row_next[idx]

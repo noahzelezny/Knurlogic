@@ -177,9 +177,15 @@ class MTPBatchGenerator(BatchGenerator):
                     f"head")
             if getattr(head, "block_size", 0):
                 # a block head (DSpark) drafts from several layers' outputs
-                # and says which; get_h hands it what it reads
-                gets = [self._stack.enter_context(capture_input(core, p))
-                        for p in head.capture_paths()]
+                # and says which; get_h hands it what it reads. On a
+                # pipeline stage some may be another rank's (carried here)
+                from knurlogic.engine.runtime import pipeline as PL
+                if PL.run_of(core) is not None:
+                    gets = self._stack.enter_context(PL.carry(
+                        core, head.targets, head.capture_paths()))
+                else:
+                    gets = [self._stack.enter_context(capture_input(core, p))
+                            for p in head.capture_paths()]
 
                 def get_h():
                     return head.main_hidden([g() for g in gets])
@@ -250,6 +256,22 @@ class MTPBatchGenerator(BatchGenerator):
             if match is not None and cur is None:
                 return j
         return None
+
+    def follow_block(self, block_size: int, outputs) -> None:
+        """A split's follower of a rank 0 drafting with a block head
+        (tensor.agree_head: its K and the layers whose outputs it reads):
+        the block loop's steps with no head here, and on a pipeline stage
+        those outputs carried on to rank 0 (pipeline.carry). Before
+        silence / mirror_hidden / coordinate, which set the batch's parts."""
+        from knurlogic.engine.runtime import pipeline as PL
+        b = self._batch
+        self._batch = BlockBatch(self._trunk, None, b.get_h,
+                                 copy_caches=b.copy_caches,
+                                 block_size=block_size)
+        self._batch.finish_at = self._finish_at
+        core = PL.core_of(self.model)
+        if PL.run_of(core) is not None and outputs:
+            self._stack.enter_context(PL.carry(core, outputs))
 
     def mirror_hidden(self) -> None:
         """A tensor follower of a drafting rank 0, holding no head: capture

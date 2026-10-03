@@ -88,6 +88,21 @@ def unwrap(layer):
     return layer
 
 
+class Carried:
+    """What a stage's Recv takes beside its stream (`carry`). A plain
+    object, so the arrays it holds never join the module's parameters."""
+
+    def __init__(self):
+        #: layer outputs the previous stage sends after the stream, and
+        #: the last forward's
+        self.n = 0
+        self.arrays: list = []
+        #: keep the last forward's stream (a layer output the head reads
+        #: that is this stage's input)
+        self.keep = False
+        self.stream = None
+
+
 class Recv(_Wrap):
     """The first layer of a stage that is not the first: its input is the
     previous stage's output, received in this rank's own dtype."""
@@ -95,11 +110,24 @@ class Recv(_Wrap):
     def __init__(self, inner, src: int, group, dtype):
         super().__init__(inner)
         self._src, self._group, self._dtype = src, group, dtype
+        self.carried = Carried()
 
     def __call__(self, x, *a, **kw):
-        x = mx.distributed.recv(x.shape, self._dtype, self._src,
-                                group=self._group)
-        mx.eval(x)
+        c = self.carried
+        if c.n:
+            # one message, the stream first: separate sends could arrive
+            # in any order, and they all have the stream's shape
+            got = mx.distributed.recv((1 + c.n, *x.shape), self._dtype,
+                                      self._src, group=self._group)
+            mx.eval(got)
+            x = got[0]
+            c.arrays = [got[i] for i in range(1, 1 + c.n)]
+        else:
+            x = mx.distributed.recv(x.shape, self._dtype, self._src,
+                                    group=self._group)
+            mx.eval(x)
+        if c.keep:
+            c.stream = x
         return self.inner(x, *a, **kw)
 
 
@@ -118,10 +146,15 @@ class Send(_Wrap):
         self._pending: list = []
         #: sends made asynchronously (the tests read it)
         self.overlapped = 0
+        #: () -> the layer outputs sent after the stream, in one message
+        #: (`carry`), or None
+        self.carry = None
 
     def __call__(self, x, *a, **kw):
         y = self.inner(x, *a, **kw)
-        s = mx.distributed.send(y.astype(self._dtype), self._dst,
+        extra = self.carry() if self.carry is not None else []
+        out = mx.stack([y] + extra) if extra else y
+        s = mx.distributed.send(out.astype(self._dtype), self._dst,
                                 group=self._group)
         if not self.overlap:
             mx.eval(s)
@@ -147,7 +180,8 @@ def sends_of(model) -> list[Send]:
     """This stage's Send (none on rank 0), seen through its wrappers."""
     out = []
     for layer in core_of(model).layers:
-        while isinstance(layer, _Wrap):
+        # through a capture's spy too (carry: a stage's last layer's input)
+        while isinstance(layer, nn.Module) and "inner" in layer:
             if isinstance(layer, Send):
                 out.append(layer)
             layer = layer["inner"]
@@ -271,11 +305,102 @@ def split(model, group, bounds: Sequence[tuple[int, int]]) -> dict:
         keep[-1] = Send(keep[-1], rank - 1, group, dts[rank - 1])
 
     restage(model, keep, start, end)
+    # what `carry` reads: this stage's run of the whole model's layers
+    core.run_start, core.run_end, core.run_layers = start, end, len(full)
     logger.info("pipeline rank %d of %d (%s): layers [%d, %d) of %d, "
                 "stage dtype %s", rank, n, fam, start, end, len(full),
                 dts[rank])
     return {"family": fam, "start": start, "end": end, "layers": len(full),
             "dtypes": [str(d) for d in dts]}
+
+
+def run_of(core) -> tuple[int, int, int] | None:
+    """(start, end, layers) of a pipeline stage's core (`split`), or None
+    for a whole model."""
+    start = getattr(core, "run_start", None)
+    if start is None:
+        return None
+    return int(start), int(core.run_end), int(core.run_layers)
+
+
+def _ends(layers):
+    """(the stage's Recv or None, its Send or None): a one-layer stage's
+    layer is both, Send outermost."""
+    recv = send = None
+    first, last = layers[0], layers[-1]
+    if isinstance(last, Send):
+        send = last
+        if len(layers) == 1:
+            first = last["inner"]
+    if isinstance(first, Recv):
+        recv = first
+    return recv, send
+
+
+@contextlib.contextmanager
+def carry(core, outputs: Sequence[int], paths: Sequence[str] | None = None):
+    """Make the outputs of the whole model's layers `outputs` reach rank 0
+    on a pipeline stage (every rank, the same `outputs`): a block head
+    there reads them (DSpark: layers 40-42's), and a stage before rank 0's
+    may hold some.
+
+    Each stage sends, after its stream and in the same message, every
+    output in `outputs` that is not its own last layer's and that it
+    holds or was carried: what its Recv took after the stream (outputs
+    before its first layer's input), the stream itself when it is one
+    (the output of the layer before its first), and the inputs of its
+    own layers after the first (the outputs of the ones before them).
+    The stage's last layer's output IS the stream. Each rank counts what
+    reaches it from its own run alone, so nothing more is agreed.
+
+    `paths` (rank 0): the head's capture path per output (`layers.<i +
+    1>`, whole-model indices, or a module after the layers) -> yields one
+    getter per output, in order. A follower passes none and yields None.
+    Undone on exit."""
+    from knurlogic.engine.mtp.capture import capture_input
+    run = run_of(core)
+    if run is None:
+        raise ValueError("carry: not a pipeline stage")
+    start, end, L = run
+    outs = sorted(set(int(i) for i in outputs))
+    recv, send = _ends(list(core.layers))
+    up = [i for i in outs if i < start - 1]        # carried to this stage
+    if (up or (start - 1) in outs) and recv is None:
+        raise ValueError(f"carry: layers {up} are before this stage's "
+                         f"first and it receives nothing")
+    with contextlib.ExitStack() as st:
+        if recv is not None:
+            c = recv.carried
+            c.n, c.keep = len(up), (start - 1) in outs
+            st.callback(c.__init__)
+        own = {i: st.enter_context(capture_input(core,
+                                                 f"layers.{i + 1 - start}"))
+               for i in outs if start <= i < end - 1}
+
+        def get(i):
+            if i < start - 1:
+                return lambda: recv.carried.arrays[up.index(i)]
+            if i == start - 1:
+                return lambda: recv.carried.stream
+            return own[i]
+        if send is not None:
+            # a stage before rank 0's: everything up to its own last layer
+            fwd = [get(i) for i in outs if i < end - 1]
+            if fwd:
+                send.carry = lambda: [g() for g in fwd]
+                st.callback(setattr, send, "carry", None)
+        if paths is None:
+            yield None
+            return
+        gets = []
+        for i, path in zip(outputs, paths):
+            if i < end - 1:
+                gets.append(get(int(i)))
+            else:
+                # after this stage's layers (rank 0's last layer is the
+                # model's): the head's own path, read as the whole model's
+                gets.append(st.enter_context(capture_input(core, path)))
+        yield gets
 
 
 # --------------------------------------------------------------- followers
@@ -443,6 +568,26 @@ class Coord:
         got = self._bcast(vals)
         return ([bool(o) for o in got[:B]],
                 mx.array(got[B:2 * B], dtype=mx.int32), bool(got[2 * B]))
+
+
+    def bk(self, drafting: bool, d: mx.array | None, B: int, K: int):
+        """B1 of a block drafter: -> (drafting, d [B, K] int32 or None)."""
+        self.calls["b1"] += 1
+        vals = [int(bool(drafting))] + (
+            [int(t) for t in d.reshape(-1).tolist()]
+            if (self.leader and d is not None) else [0] * (B * K))
+        got = self._bcast(vals)
+        if not got[0]:
+            return False, None
+        return True, mx.array(got[1:], dtype=mx.int32).reshape(B, K)
+
+    def bm(self, m: int, nxt: list[int], B: int):
+        """B2 of a block drafter: -> (m, the committed count less one;
+        every row's next token, [B] ints)."""
+        self.calls["b2"] += 1
+        got = self._bcast([int(m)] + [int(t) for t in nxt]
+                          if self.leader else [0] * (B + 1))
+        return got[0], got[1:]
 
 
 def coordinate(gen, group, drafting: bool | None = None) -> Coord:

@@ -93,8 +93,29 @@ In code (2026-10-02):
   (one shared cache write index); greedy, seeded and sampled verdicts as
   the 1-token loop's. The confidence score is computed and unused, as in
   the reference's generate.py.
-- One machine only: a split model binds no DSpark head (its Coord carries
-  one draft per row). Image rows do not draft (as with every head).
+- On a split (pipeline or tensor, 2026-10-03) rank 0 alone holds the head,
+  drafts and judges, as with the 1-token head: `Coord.bk` carries its
+  regime and the [B, 5] drafts (B1), `Coord.bm` the committed count and
+  every row's next token (B2); a follower (`MTPBatchGenerator.follow_block`,
+  told the block size and the target layers by `tensor.agree_head`) runs
+  the 6-wide verify and the replay with them. The sidecar counts in rank
+  0's share (`leader_bytes`). Image rows do not draft (as with every head).
+- Captures on a pipeline split (`pipeline.carry`). Rank 0 holds the LAST
+  layers, so with any real split (rank 0 holds far more than 3 of 43) the
+  outputs of 40-42 are rank 0's own: the inputs of its layers 41 and 42
+  and of hc_head, rebased to its local layer indices. When a stage
+  boundary falls among them, a target layer's output is either the
+  stream rank 0 receives (the output of the layer before its first: its
+  Recv keeps it) or an output further up, which each stage sends on
+  AFTER its stream in the same message ([1 + n, B, S, hc, D], so the
+  order cannot be mixed up), relaying what it received; every rank counts
+  what it gets from its own layer run, so nothing more is agreed. The
+  full [B, S, hc, D] streams travel, not their HC-means, so rank 0's
+  mean is the one-machine arithmetic. Tested on the tiny checkpoint at
+  1,3 (layer 1 carried, layer 2 the stream), 2,2 and 3,1, and sharded:
+  every rank's tokens are the undrafted engine's (greedy and seeded) and
+  the head's main hidden states are the unsplit engine's
+  (`tests/engine/test_pipeline.py`).
 - Held to the reference's own forward / forward_spec on a tiny checkpoint
   (`tests/engine/test_deepseek_v4_dspark.py`); greedy and seeded output
   identical with drafting on and off. Edit 17 (a ragged mask after a

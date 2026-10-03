@@ -738,7 +738,8 @@ def _defer_sigterm(rank: int) -> None:
 def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
            completion_batch_size: int, prefill_step_size: int,
            working_set: int, split: str = "tensor", drafting: bool = False,
-           why: str = "", vision=None) -> int:
+           why: str = "", vision=None, block: int = 0,
+           outputs: tuple = ()) -> int:
     """Rank >= 1: apply rank 0's plans and step until told to stop. The
     return value is the number of steps taken.
 
@@ -748,9 +749,12 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     `drafting`: rank 0 drafts with an MTP head (agree_head). This rank
     holds none; it runs rank 0's drafting steps -- the verify forward with
     the drafted tokens, the rollback and replay -- as the Coord broadcasts
-    say. `vision`: engine.vision.request.MirrorVision for a model with
-    vision (rank 0 encodes; the admit op carries each image's ref and the
-    admission its rows), else None."""
+    say. `block`: rank 0's head drafts that many tokens a pass (DSpark),
+    reading the outputs of the layers `outputs`: this rank runs the block
+    loop's steps (MTPBatchGenerator.follow_block). `vision`:
+    engine.vision.request.MirrorVision for a model with vision (rank 0
+    encodes; the admit op carries each image's ref and the admission its
+    rows), else None."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
 
     from .request import control_machine
@@ -773,6 +777,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                 completion_batch_size=completion_batch_size,
                 prefill_step_size=prefill_step_size, stream=stream)
             from . import pipeline as PL
+            if drafting and block:
+                gen.follow_block(block, outputs)
             if split == "pipeline":
                 PL.silence(gen)
             elif drafting:
@@ -983,6 +989,8 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                   completion_batch_size=completion_batch_size,
                   prefill_step_size=prefill_step_size,
                   working_set=working_set, split=split, drafting=drafting,
+                  block=heads.block if drafting else 0,
+                  outputs=tuple(heads.outputs) if drafting else (),
                   why=("rank 0 drafts; this rank runs its verify steps"
                        if drafting else "rank 0 does not draft"))
 
@@ -991,15 +999,35 @@ class agree_head:
     """ModelHost's `head_agree` on a split model, on every rank after its
     load: rank 0's answer (it bound a head, or not) told to every rank.
     Only rank 0 holds one; `leader` is what a follower's Coord needs
-    (every rank makes B1 / BA, or none does)."""
+    (every rank makes B1 / BA, or none does). A block head (DSpark) also
+    tells its `block` size and the layers whose outputs it reads
+    (`outputs`): a follower runs the block loop's steps, and on a
+    pipeline carries those outputs on to rank 0 (pipeline.carry)."""
+
+    #: the most layer outputs a block head may read (a fixed broadcast)
+    MAX_OUTPUTS = 16
 
     def __init__(self, link: Link):
         self.link = link
         self.leader = False
+        self.block = 0
+        self.outputs: list[int] = []
 
-    def __call__(self, has: bool) -> bool:
-        got = mx.distributed.all_gather(mx.array([int(bool(has))]),
-                                        group=self.link.group,
+    def __call__(self, has: bool, head=None) -> bool:
+        k = int(getattr(head, "block_size", 0) or 0) if has else 0
+        outs = [int(i) for i in getattr(head, "targets", ())] if k else []
+        if len(outs) > self.MAX_OUTPUTS:
+            # told as no head (raising here would leave the other ranks
+            # in the all_gather)
+            logger.warning("a block head reading %d layer outputs; the "
+                           "broadcast holds %d: not drafting on this split",
+                           len(outs), self.MAX_OUTPUTS)
+            has, k, outs = False, 0, []
+        row = [int(bool(has)), k, len(outs)] + outs + \
+            [0] * (self.MAX_OUTPUTS - len(outs))
+        got = mx.distributed.all_gather(mx.array(row), group=self.link.group,
                                         stream=mx.cpu).tolist()
         self.leader = bool(got[0])
+        self.block = int(got[1])
+        self.outputs = [int(i) for i in got[3:3 + int(got[2])]]
         return self.leader

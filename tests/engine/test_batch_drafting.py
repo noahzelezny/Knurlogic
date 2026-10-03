@@ -429,8 +429,10 @@ def test_a_row_ending_mid_step_stores_only_what_it_committed(monkeypatch):
     turn restored from it drafts exactly what a fresh prefill does."""
     import copy
 
-    from knurlogic.engine.mtp.batch_generator import (MTPBatchGenerator,
-                                                      trunk_offset)
+    from knurlogic.engine.mtp.batch_generator import (
+        MTPBatchGenerator,
+        trunk_offset,
+    )
     from knurlogic.engine.mtp.caches import position
     monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
     model, head, prompts = _tiny(512)
