@@ -12,12 +12,18 @@ Nothing in this package names an architecture. A `FamilySpec` says:
   draft_cache      the attribute that builds the head's own KV cache.
   cache_semantics  "reassign" or "copy" (caches.py); new families start at
                    "copy" until `caches.check_snapshot_semantics` passes.
+  block            a block drafter the family also ships (deepseek_v4's
+                   DSpark): {"head", "sidecar_name", "config"}. Chosen
+                   when the model's config field `config` is > 0 and the
+                   sidecar is `sidecar_name`; the head names its own
+                   capture points and cache (block_loop.BlockBatch).
 
 A family without a measured acceptance number is not registered.
 Design: docs/design/drafting.md (registry).
 """
 from __future__ import annotations
 
+import dataclasses
 import importlib
 from dataclasses import dataclass
 
@@ -32,6 +38,8 @@ class FamilySpec:
     cache_semantics: str = "copy"
     #: the sidecar's top-level tensor prefixes (engine/mtp/_artifacts)
     layout: tuple = ()
+    #: a block drafter beside the one-token head, or None (see above)
+    block: dict | None = None
 
     def head_cls(self):
         mod, _, attr = self.head.partition(":")
@@ -79,17 +87,36 @@ def load_head(model, sidecar=None, family: str | None = None,
     import pathlib
 
     spec = resolve(model, family)
+    blk = spec.block if spec.block and _block_on(model, spec.block) else None
     if sidecar is None:
         if model_path is None:
             raise ValueError("pass either sidecar= or model_path=")
-        sidecar = pathlib.Path(model_path) / spec.sidecar_name
+        name = spec.sidecar_name
+        if blk and (pathlib.Path(model_path) / blk["sidecar_name"]).exists():
+            name = blk["sidecar_name"]
+        sidecar = pathlib.Path(model_path) / name
     sidecar = pathlib.Path(sidecar)
+    if spec.block and sidecar.name == spec.block["sidecar_name"]:
+        if blk is None:
+            raise ValueError(
+                f"{sidecar.name} is a block drafter's sidecar, and this "
+                f"model's config has no {spec.block['config']}")
+        spec = dataclasses.replace(spec, head=blk["head"],
+                                   sidecar_name=blk["sidecar_name"])
     if not sidecar.exists():
         raise FileNotFoundError(
             f"no MTP sidecar at {sidecar}; build one with `vqlab mtp-pack`. "
             f"The head is optional -- without it the model decodes normally.")
     arch = spec.arch_module(model)
     return spec.head_cls().from_sidecar(model, arch, sidecar), spec
+
+
+def _block_on(model, block: dict) -> bool:
+    """Does the model's config switch the family's block drafter on?"""
+    text = getattr(model, "language_model", model)
+    args = getattr(getattr(text, "model", None), "args", None) \
+        or getattr(text, "args", None)
+    return int(getattr(args, block["config"], 0) or 0) > 0
 
 
 def register(spec: FamilySpec, *, replace: bool = False) -> FamilySpec:

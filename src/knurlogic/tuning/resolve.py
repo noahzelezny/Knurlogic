@@ -1620,6 +1620,8 @@ def leader_bytes(artifact: Artifact, vision: bool = True,
 
     total = 0
     for f in sorted(artifact.path.glob("*.safetensors")) if mtp else ():
+        if f.name.startswith("mtp-head-dspark"):
+            continue    # a block drafter is not bound on a split (ModelHost)
         try:
             with open(f, "rb") as fh:
                 (hn,) = struct.unpack("<Q", fh.read(8))

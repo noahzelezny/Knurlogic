@@ -48,9 +48,17 @@ def capture_input(core, path: str):
     failure for a registry entry that names the wrong module: a silently stale
     hidden state would show up only as degraded acceptance."""
     owner, attr = _resolve(core, path)
-    inner = getattr(owner, attr)
+    # a list member (`layers.41`: DSpark's target layers) is an item
+    if attr.isdigit():
+        def put(v, i=int(attr)):
+            owner[i] = v
+        inner = owner[int(attr)]
+    else:
+        def put(v):
+            setattr(owner, attr, v)
+        inner = getattr(owner, attr)
     sink: list = []
-    setattr(owner, attr, _spy(inner, sink))
+    put(_spy(inner, sink))
     try:
         def get():
             if not sink:
@@ -62,4 +70,4 @@ def capture_input(core, path: str):
 
         yield get
     finally:
-        setattr(owner, attr, inner)
+        put(inner)

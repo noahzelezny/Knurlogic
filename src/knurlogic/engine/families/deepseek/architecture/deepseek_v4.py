@@ -104,6 +104,14 @@ class ModelArgs(BaseModelArgs):
     vision_n_layers: int = 0
     vision_max_n_token: int = 384
 
+    # knurlogic edit 16: Vision-Exp's DSpark drafter (num_nextn_predict_layers
+    # stages under mtp.*), read so its head (heads/deepseek_v4_dspark.py)
+    # finds them on model.args; the trunk itself never reads them.
+    dspark_block_size: int = 0
+    dspark_noise_token_id: int = 0
+    dspark_target_layer_ids: List[int] = field(default_factory=list)
+    dspark_markov_rank: int = 256
+
 
 # --------------------------------------------------------------------------- #
 # RoPE (traditional pair-wise, YaRN-aware, supports inverse rotation)         #
@@ -2317,6 +2325,12 @@ class V4Attention(nn.Module):
             and getattr(win_cache, "_lengths", None) is None
         )
         if ragged_multi:
+            # knurlogic edit 17: after a 1-wide step the buffer is a rotated
+            # ring, and make_mask reads the ring's write index where the
+            # concat update (which puts it in temporal order first) trims by
+            # the buffer's length: a row shorter than the window lost its
+            # oldest key. Ordered first, the mask and the update agree.
+            win_cache._temporal_order()
             ragged_win_mask = win_cache.make_mask(S, window_size=self.window)
 
         # Fused: partial-RoPE on q + kv in one compiled call.

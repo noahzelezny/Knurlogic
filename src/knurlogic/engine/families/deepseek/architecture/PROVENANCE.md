@@ -11,7 +11,7 @@ artifacts were validated against -- not merely that it imports.
   its author's permission. No exo code is in it.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.31.3.
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `67b006651f79f7415932a38a27948e97e949fd21fc21cfb4a85e0753037f18ff`
+- vendored sha256: `d9f42ca3e6906b4f618c316e99bbfa5198b6a1ac96ebaffd70741300f7bae14f`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -162,3 +162,27 @@ itself computes (`tests/support/goldens/build_deepseek_v4_vision.py`).
 every norm the reference builds from `norm_eps` (block norms, q/kv norms,
 the per-head q norm, both compressors, hyper-connection pre-norms, the
 HC head and the final norm); tested, not changed.
+
+### Edit 16, DeepSeek-V4-Flash-Vision-Exp (DSpark drafting)
+
+16. **DSpark config** (`ModelArgs`). `dspark_block_size`,
+   `dspark_noise_token_id`, `dspark_target_layer_ids` and
+   `dspark_markov_rank` read from the config (defaults: no DSpark), so
+   the DSpark head (`heads/deepseek_v4_dspark.py`) finds them on
+   `model.args`. Nothing in the trunk reads them; `sanitize` still drops
+   `mtp.*` (the head is a sidecar). Design:
+   `docs/design/deepseek-vision.md` (DSpark).
+
+### Edit 17, needed by block drafting
+
+17. **Ragged multi-token mask after a 1-wide step**
+   (`V4Attention.__call__`, edit 13's case). After a 1-wide decode step
+   the batch window cache is a rotated ring; `make_mask(S)` computed its
+   left-padding trim from the ring's write index, while the S-wide update
+   first puts the ring in temporal order and trims by the buffer length,
+   so a row shorter than the window had its oldest key masked. The cache
+   is put in temporal order (`_temporal_order`, what the update does
+   first) before the mask is made. Found by DSpark's block verify, whose
+   verify forward follows 1-wide replays (tests/test_deepseek_v4_dspark.py,
+   three rows). The same mask serves an MTP batch's 2-wide verify and
+   replay after plain steps.
