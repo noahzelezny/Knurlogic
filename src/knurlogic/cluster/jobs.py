@@ -28,8 +28,9 @@ MARK_S = 2.0
 STALL_S = 120.0
 #: a rank still joining the ring after this long never will
 JOIN_S = 300.0
-#: SIGTERM, then this long, then SIGKILL
-GRACE_S = 10.0
+#: SIGTERM, then this long, then SIGKILL: past rank 0's own 15 s to stop
+#: the ring between steps (http.watch_ring), warm-up included
+GRACE_S = 25.0
 #: after the SIGKILL, this long for the process to be gone: a rank holding
 #: 50 GiB of Metal memory takes seconds to give it back, and a job is not
 #: stopped -- nor its memory free -- until its pid is
