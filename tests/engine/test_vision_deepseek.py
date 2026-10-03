@@ -575,3 +575,23 @@ def test_vision_tag_needs_a_tower_in_the_artifact(tmp_path):
     assert registry.registered("deepseek_v4", tmp_path / "vision")
     assert registry.build("deepseek_v4", str(tmp_path / "teacher"), None) \
         is None
+
+
+def test_the_shared_expert_clamps_as_deepseeks_does():
+    """DeepSeek's reference builds the shared expert with swiglu_limit, as
+    its routed experts (vendored edit 18): gate capped at the limit, up
+    clipped to [-limit, limit]."""
+    M = _arch()
+    args = M.ModelArgs.from_dict(dict(
+        model_type="deepseek_v4", vocab_size=G.V, hidden_size=64,
+        moe_intermediate_size=64, n_routed_experts=8, num_experts_per_tok=2,
+        num_hash_layers=0, compress_ratios=[0, 0], num_hidden_layers=2))
+    moe = M.DeepseekV4MoE(args, 1)
+    mlp = moe.shared_experts
+    assert mlp.swiglu_limit == args.swiglu_limit > 0
+    x = mx.array(np.random.default_rng(0).standard_normal((3, 64)) * 50,
+                 dtype=mx.float32)
+    g, u = mlp.gate_proj(x), mlp.up_proj(x)
+    lim = args.swiglu_limit
+    want = mlp.down_proj(M.nn.silu(mx.minimum(g, lim)) * mx.clip(u, -lim, lim))
+    assert mx.allclose(mlp(x), want, atol=1e-4)
