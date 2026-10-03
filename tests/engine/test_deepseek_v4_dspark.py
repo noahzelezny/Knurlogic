@@ -529,3 +529,34 @@ def test_a_widths_compiling_first_step_does_not_decide_it(monkeypatch):
     # the rechecks reach widths other than K
     late = picks[60:]
     assert {3, 4} & set(late)
+
+
+def test_the_profile_logs_past_its_window(monkeypatch):
+    """KNURLOGIC_MTP_PROFILE=1 through more than one logging window: the
+    phase and width lines print and the engine keeps stepping (a name
+    reused in the width line once broke the second window, live)."""
+    from knurlogic.engine.mtp import block_loop as BL
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    monkeypatch.setattr(BL, "PROFILE", True)
+    monkeypatch.setattr(BL, "PROFILE_EVERY", 4)
+    monkeypatch.delenv("KNURLOGIC_MTP_VERIFY", raising=False)
+    model = _load()
+    head, _ = _head(model)
+    gen = MTPBatchGenerator(model, head, stats={}, prefill_step_size=4)
+    out, _ = _run(gen, PROMPTS["three-rows"][:1], 40)
+    assert len(out[0]) == 40
+
+
+def test_the_profile_window_on_a_rank_that_records_no_acceptance(monkeypatch):
+    """A split's follower drafts nothing and records no acceptance: its
+    width line must still print (live, an empty list there was indexed and
+    the follower died, desyncing the ring)."""
+    from knurlogic.engine.mtp import block_loop as BL
+    monkeypatch.setattr(BL, "PROFILE", True)
+    monkeypatch.setattr(BL, "PROFILE_EVERY", 1)
+    b = BL.BlockBatch(None, None, lambda: None, copy_caches=True,
+                      block_size=5)
+    b._clock = lambda: 0.0
+    for _ in range(3):
+        b._prof_start()
+        b._prof_end(True, 2)
