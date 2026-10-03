@@ -67,11 +67,13 @@ def has_images(messages: Any) -> bool:
 
 
 def with_placeholders(messages: list[dict[str, Any]],
-                      texts: list[str]) -> list[dict[str, Any]]:
+                      texts: list[str], sep: str = "") -> list[dict[str, Any]]:
     """A copy of the messages with the i-th image part replaced by a text
     part holding texts[i]. mlx-lm then joins a message's text parts with ""
     (server.process_message_content), so the placeholder lands exactly
-    where the image was. The caller's messages are not touched: mlx-lm
+    where the image was. `sep`: a family whose encoder joins a message's
+    parts with it (DeepSeek's "\n\n") gets it between the parts of a
+    message with an image. The caller's messages are not touched: mlx-lm
     rewrites content in place, and the request may be read again."""
     from knurlogic.engine.runtime.prompt import MARK, PLACEHOLDER
     it = iter(texts)
@@ -80,9 +82,13 @@ def with_placeholders(messages: list[dict[str, Any]],
         m = copy.copy(m)
         c = m.get("content")
         if isinstance(c, list):
-            m["content"] = [{"type": "text", "text": next(it),
-                             PLACEHOLDER: MARK}
-                            if _is_image_part(p) else p for p in c]
+            parts = [{"type": "text", "text": next(it), PLACEHOLDER: MARK}
+                     if _is_image_part(p) else p for p in c]
+            if sep and any(_is_image_part(p) for p in c):
+                parts = [x for i, p in enumerate(parts)
+                         for x in ([{"type": "text", "text": sep,
+                                     PLACEHOLDER: MARK}] if i else []) + [p]]
+            m["content"] = parts
         out.append(m)
     rest = list(it)
     assert not rest, f"{len(rest)} placeholder texts left over"
@@ -214,7 +220,9 @@ class VisionServe:
                         f"or raise the store with --image-store-gib.")
             texts = [self.family.placeholder_text(r) for r in refs]
             req = dataclasses.replace(
-                request, messages=with_placeholders(request.messages, texts))
+                request, messages=with_placeholders(
+                    request.messages, texts,
+                    getattr(self.family, "part_separator", "")))
             # The handler holds the ORIGINAL request; the cache report for
             # this one must reach it (engine/cachereport.attach).
             req._knurlogic_origin = request
@@ -227,6 +235,11 @@ class VisionServe:
             prompt, segments, types, state = real(gen, tokenizer, req, args)
             key, seg_keys = K.expand_segments(segments, refs,
                                               self.spec.image_token_id)
+            # a family whose image blocks depend on where they sit
+            # (DeepSeek-V4's alignment pads) frames them in the full key
+            frame = getattr(self.family, "frame_key", None)
+            if frame is not None:
+                key, seg_keys = frame(key, seg_keys)
         except BaseException:
             self.release([(r.sha, r.proc_hash) for r in refs])
             raise

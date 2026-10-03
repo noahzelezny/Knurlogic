@@ -67,7 +67,8 @@ def test_the_spellings_that_have_bitten_before_resolve():
     w, why = settings.prefill_chunk_for("qwen3_5_text")
     assert w == 4096 and why.startswith("measured for qwen3_5: ")
     assert set(vreg.FAMILIES) == {"qwen3_5", "qwen3_5_moe", "qwen4_exp",
-                                  "gemma4", "gemma4_text", "glm5_next"}
+                                  "gemma4", "gemma4_text", "glm5_next",
+                                  "deepseek_v4"}
     assert vreg.family_of("gemma4_text") == "gemma4_text"
     assert vreg.FAMILIES["gemma4_text"] == vreg.FAMILIES["gemma4"]
     assert {"glm5_next", "glm5_next_text", "qwen4_exp", "qwen3_5",

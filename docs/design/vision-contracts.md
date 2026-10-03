@@ -88,6 +88,9 @@ class Family(Protocol):
               features: FeatureLookup) -> dict                # over key[start:]
     def positions(self, key: list, refs: RefLookup) -> tuple[mx.array | None, int]
     def chunk_boundaries(self, key: list) -> list[tuple[int, int]]
+    # optional, read with getattr by engine/vision/request.py:
+    part_separator: str            # between a message's parts when it has an image
+    def frame_key(self, key, segment_keys) -> (key, segment_keys)
 
 FeatureLookup = Callable[[sha, proc_hash], EncodedImage]     # raises ImageEvicted
 RefLookup     = Callable[[sha, proc_hash], ImageRef]         # never evicted
@@ -106,6 +109,12 @@ RefLookup     = Callable[[sha, proc_hash], ImageRef]         # never evicted
   positions (gemma, GLM). Qwen: `[3, 1, len(key)]` and `rope_delta`.
 * `chunk_boundaries(key)`: `[start, end)` spans no prefill chunk edge may
   fall strictly inside. gemma: every image span. Causal: `[]`.
+* `part_separator` (optional, default ""): DeepSeek-V4 joins a message's
+  parts with "\n\n"; mlx-lm joins them with "".
+* `frame_key` (optional): after the expansion, the family may add plain
+  ids around its runs that depend on the position (DeepSeek-V4's
+  alignment pads, ids >= vocab_size). Pure in the key; segments stay the
+  key's partition.
 
 Family `build` (the registry target):
 `build(model_path: str, text_model, config: dict) -> Family | None`.
@@ -119,12 +128,14 @@ registry.FAMILIES = {
   "qwen4_exp":   "knurlogic.engine.families.qwen.vision:build",
   "gemma4":      "knurlogic.engine.families.gemma4.vision:build",
   "glm5_next":   "knurlogic.engine.families.glm5.vision:build",
+  "deepseek_v4": "knurlogic.engine.families.deepseek.vision:build",
 }
 registry.build(model_type, model_path, text_model, config=None) -> Family | None
 registry.has_family(model_type) -> bool
 ```
 
-`None` when: model_type unregistered, config has no `vision_config`, the
+`None` when: model_type unregistered, config has no `vision_config` (nor
+DeepSeek-V4's `vision_n_layers > 0`: `registry.has_vision_config`), the
 family module is absent, or its build declines. An ImportError raised INSIDE
 a present family module propagates (a broken build is not "no vision").
 
