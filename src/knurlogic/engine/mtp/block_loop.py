@@ -35,12 +35,23 @@ from __future__ import annotations
 
 from typing import Any
 
+import logging
+import os
+
 import mlx.core as mx
 
 from .batch_loop import Emitted, MTPBatch, RowStep, _apply, _finite_rows, \
     _key, _mark, _pick
 from .caches import restore, snapshot
 from .sampling import rejection_correct
+
+
+logger = logging.getLogger(__name__)
+
+#: KNURLOGIC_MTP_PROFILE=1: time each phase of a step (BlockBatch._prof)
+PROFILE = os.environ.get("KNURLOGIC_MTP_PROFILE", "").strip().lower() in (
+    "1", "on", "true", "yes")
+PROFILE_EVERY = 32
 
 
 def _hist(emitted: list[int], tail: list) -> Any:
@@ -74,6 +85,10 @@ class BlockBatch(MTPBatch):
             return []
         live = self._live(B)
         drafting = self.drafting_pays(B) and any(live)
+        # timed from here: on a split, rank 0's block and the B1 broadcast
+        # are this step's cost too (MTPBatch.step)
+        t0 = self._clock()
+        self._prof_start()
         pre = None
         c = self.coord
         if c is not None and (self.head is not None or c.head):
@@ -81,16 +96,57 @@ class BlockBatch(MTPBatch):
             # drafts (a follower holds none and asks)
             if c.leader and drafting:
                 pre = self._draft_block(B, live)
+                self._prof("draft", pre[0])
             drafting, d = c.bk(drafting, pre[0] if pre else None, B,
                                self.block_size)
+            self._prof("b1")
             if drafting and pre is None:
                 pre = (d, None)
         self._note_regime(drafting, B)
-        t0 = self._clock()
         out = self._block_step(B, pre) if drafting else self._plain_step()
-        self._record_cost(B, drafting, self._clock() - t0,
-                          sum(len(rs.tokens) for rs in out))
+        n = sum(len(rs.tokens) for rs in out)
+        self._record_cost(B, drafting, self._clock() - t0, n)
+        self._prof_end(drafting, n)
         return out
+
+    # ---------------------------------------------------------- profile
+    # KNURLOGIC_MTP_PROFILE=1: each phase of a step timed behind an
+    # mx.eval barrier, means logged every PROFILE_EVERY steps per regime.
+    # The barriers cost a little; off, nothing here runs.
+    def _prof_start(self) -> None:
+        if not PROFILE:
+            return
+        self._pt = self._clock()
+        self._pcur: dict = {}
+
+    def _prof(self, phase: str, *arrays) -> None:
+        if not PROFILE:
+            return
+        if arrays:
+            mx.eval(*[a for a in arrays if a is not None])
+        now = self._clock()
+        self._pcur[phase] = self._pcur.get(phase, 0.0) + now - self._pt
+        self._pt = now
+
+    def _prof_end(self, drafting: bool, tokens: int) -> None:
+        if not PROFILE:
+            return
+        self._prof("emit")
+        acc = self.__dict__.setdefault("_pacc", {})
+        a = acc.setdefault(drafting, {"steps": 0, "tokens": 0})
+        a["steps"] += 1
+        a["tokens"] += tokens
+        for k, v in self._pcur.items():
+            a[k] = a.get(k, 0.0) + v
+        if a["steps"] % PROFILE_EVERY == 0:
+            st, tk = a["steps"], max(a["tokens"], 1)
+            parts = "  ".join(f"{k} {a[k] / st * 1000:.1f}" for k in a
+                              if k not in ("steps", "tokens"))
+            total = sum(v for k, v in a.items() if k not in ("steps", "tokens"))
+            logger.info(f"MTP profile {'block' if drafting else 'plain'}: "
+                        f"{st} steps, {tk / st:.2f} tok/step, "
+                        f"{total / tk * 1000:.1f} ms/tok; per step ms: {parts}")
+            acc[drafting] = {"steps": 0, "tokens": 0}
 
     # ------------------------------------------------------------- draft
     def _draft_block(self, B: int, live: list[bool]):
@@ -135,6 +191,8 @@ class BlockBatch(MTPBatch):
         K = self.block_size
         live = self._live(B)
         d, qs = pre if pre is not None else self._draft_block(B, live)
+        if pre is None:
+            self._prof("draft", d)
         # rank 0 judges; a follower's verdicts come in B2
         judge = self.coord is None or self.coord.leader
 
@@ -144,6 +202,7 @@ class BlockBatch(MTPBatch):
         pos_v = self._pos_kw(K + 1)
         lg = self.model(inp, cache=self.cache, **pos_v)       # [B, K+1, V]
         h_v = self.get_h()
+        self._prof("verify", lg)
 
         # --- verdicts, every position at once: oks[i][k] says whether d_k
         # stands, tt[i][k] is the target's token at that position ---------
@@ -219,15 +278,18 @@ class BlockBatch(MTPBatch):
             # rank 0 has just run for its verdicts: they go before B2's
             # all_gather (a pipeline follower's zeros cost nothing)
             mx.eval(lg)
+        self._prof("verdict")
         if self.coord is not None:
             # B2: rank 0's count and next tokens drive every rank's replay
             m, nxt = self.coord.bm(m, nxt, B)
+            self._prof("b2")
 
         # --- rollback + replay to the m + 1 committed positions ----------
         if m < K:
             restore(self.cache, csnap)
             self.model(inp[:, :m + 1], cache=self.cache, **self._pos_kw(m + 1))
             h_c = self.get_h()
+            self._prof("replay", h_c)
         else:
             h_c = h_v
 
@@ -271,6 +333,7 @@ class BlockBatch(MTPBatch):
         if self.head is not None:
             self.head.advance(h_c[idx], self.hcache)
             mx.eval(t_next, fin, self.hcache.state)
+            self._prof("advance")
         else:
             # a tensor follower: the replay's all_sums, as rank 0's head
             # cache runs them (its captured hidden state, mirror_hidden)

@@ -719,6 +719,10 @@ class MTPBatch:
             return []
         assert self.t1 is not None and self.row_t1 is not None
         drafting = self.drafting_pays(B)
+        # timed from here: on a split, rank 0's drafts and the B1 broadcast
+        # are this step's cost too (timed after them, drafting read cheaper
+        # than it was)
+        t0 = self._clock()
         pre = None
         if self.coord is not None and (self.head is not None
                                        or self.coord.head):
@@ -730,7 +734,6 @@ class MTPBatch:
             if drafting and pre is None:
                 pre = (self._live(B), d2, [None] * B)
         self._note_regime(drafting, B)
-        t0 = self._clock()
         out = self._plain_step() if not drafting else self._draft_step(B, pre)
         self._record_cost(B, drafting, self._clock() - t0,
                           sum(len(rs.tokens) for rs in out))
