@@ -79,11 +79,23 @@ def has_family(model_type: str) -> bool:
     return t is not None and resolve(t) is not None
 
 
+def has_vision_config(config: dict) -> bool:
+    """Does this config.json describe a vision tower? A `vision_config`
+    (every mlx-vlm family), or DeepSeek-V4's flat `vision_n_layers > 0`
+    (DeepSeek-V4-Flash-Vision-Exp keeps its vision fields at the top)."""
+    if config.get("vision_config"):
+        return True
+    try:
+        return int(config.get("vision_n_layers") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def build(model_type: str, model_path: str, text_model: Any,
           config: dict | None = None):
     """The Family for a loaded model, or None when it has no vision here:
     an unregistered model_type, a family package not present, a config with
-    no vision_config, or the family's own build declining."""
+    no vision config, or the family's own build declining."""
     t = FAMILIES.get(family_of(model_type))
     if t is None:
         return None
@@ -92,7 +104,7 @@ def build(model_type: str, model_path: str, text_model: Any,
         from pathlib import Path
         p = Path(model_path) / "config.json"
         config = json.loads(p.read_text()) if p.is_file() else {}
-    if not config.get("vision_config"):
+    if not has_vision_config(config):
         return None
     fn = resolve(t)
     if fn is None:

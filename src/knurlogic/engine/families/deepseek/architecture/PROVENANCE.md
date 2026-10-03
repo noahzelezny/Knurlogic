@@ -11,7 +11,7 @@ artifacts were validated against -- not merely that it imports.
   its author's permission. No exo code is in it.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.31.3.
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `48d84d4f3367569cd4c57da162e47f023888ef0b5e4cdc784a5e8b33d8e34b62`
+- vendored sha256: `67b006651f79f7415932a38a27948e97e949fd21fc21cfb4a85e0753037f18ff`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -115,3 +115,50 @@ index_topk no pool reaches, so it checks everything the edits leave alone.
    three rows). Now the batch cache's own `make_mask(S)` there. A
    right-padded prefill (`_lengths` set), a fresh cache and a single row
    keep the fork's mask.
+
+### Edits 14-15, DeepSeek-V4-Flash-Vision-Exp (images)
+
+Both follow the artifact's own reference, `inference/model.py` of
+deepseek-ai/DeepSeek-V4-Flash-Vision-Exp (MIT); config-driven, so a
+config without `vision_n_layers` (Flash) builds and runs as before.
+Design: `docs/design/deepseek-vision.md`. Tests:
+`tests/engine/test_vision_deepseek.py` against goldens the reference
+itself computes (`tests/support/goldens/build_deepseek_v4_vision.py`).
+
+14. **Image tokens** (`ModelArgs`, `MoEGate`, `DeepseekV4MoE`,
+   `DeepseekV4Block`, `DeepseekV4Model`, `Model`, `sanitize`,
+   `cast_predicate`). `vision_n_layers` / `vision_max_n_token` read from
+   the config. With vision, every gate has `bias_vl` and the hash layers
+   a `bias` too (unused, as in the reference); `MoEGate._route_vl` is the
+   reference Gate for a call holding image ids (id >= vocab_size): score
+   layers take the top-k of `scores + bias_vl` for an image token and of
+   `scores + bias` for text, hash layers the top-k of `scores + bias_vl`
+   for an image token and `tid2eid` for text (an image id looked up as
+   0); weights from the unbiased scores. The model keeps the four learned
+   image rows (`image_start/end/newline/pad`), and `DeepseekV4Model.embed`
+   never indexes the table with an id >= vocab_size (looked up as 0, the
+   row replaced by its type's). `Model.__call__` takes `input_embeddings`
+   (the family's merged rows) and `vl_ids` (the ids routing and the
+   image-span window read, while `inputs` carries the placeholder ids);
+   the image path runs only for a vision config's prefill whose ids hold
+   image tokens, so text and every decode step take the fork's path
+   (fused gate kernel included). `sanitize` drops `vision.*` /
+   `aligner.*` (the family loads them standalone), maps the image rows to
+   `model.image_*`, and renames only a `.ffn.gate.bias` suffix (it had
+   turned `bias_vl` into `e_score_correction_bias_vl`). `bias_vl` stays
+   float32 (`cast_predicate`).
+15. **Image-span window** (`image_visible`, `_build_window_mask_visible`,
+   `V4Attention.__call__`). The reference's `get_image_visible` +
+   `get_window_topk_idxs_visible`: inside an [IMAGE_START, IMAGE_END]
+   span a query also sees back to the span's start and forward to its
+   end (left clamped to 383, right to 384, at most window + 384 keys), in
+   a prefill only; the compressor and the indexer are unchanged. Computed
+   per prefill chunk from that chunk's ids: the family's
+   `chunk_boundaries` never let a chunk edge fall inside a span (the
+   reference prefills a span in one call), so the whole span, and every
+   key it reaches, is in the chunk's window.
+
+`rms_norm_eps` (1e-20 on Vision-Exp) was already read from the config by
+every norm the reference builds from `norm_eps` (block norms, q/kv norms,
+the per-head q norm, both compressors, hyper-connection pre-norms, the
+HC head and the final norm); tested, not changed.
