@@ -11,7 +11,7 @@ artifacts were validated against -- not merely that it imports.
   its author's permission. No exo code is in it.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.31.3.
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `48d84d4f3367569cd4c57da162e47f023888ef0b5e4cdc784a5e8b33d8e34b62`
+- vendored sha256: `84d9e265e171b05c2f452ae05b8f79731943fee56ad116f914167344ec15c61f`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -115,3 +115,14 @@ index_topk no pool reaches, so it checks everything the edits leave alone.
    three rows). Now the batch cache's own `make_mask(S)` there. A
    right-padded prefill (`_lengths` set), a fresh cache and a single row
    keep the fork's mask.
+
+### Edit 18, a fix (numbered as on the Vision-Exp branch, whose 14-17 follow)
+
+18. **The shared expert's SwiGLU clamp** (`DeepseekV4MoE.__init__`). The
+   fork built the shared expert with `swiglu_limit=0.0` (no clamp);
+   DeepSeek's reference builds it with `args.swiglu_limit` (10), as its
+   routed experts, in Flash's inference/model.py and Vision-Exp's alike.
+   Measured on the Vision-Exp teacher (VQ Lab, 3 corpora x 12288 tokens):
+   ~0.026% of shared-expert activations leave +-10, changing the shared
+   output by ~2% on average and up to 58% in a chunk
+   (tests/engine/test_deepseek_v4_arch.py, the shared-expert clamp test).
