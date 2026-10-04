@@ -34,6 +34,7 @@ def build_maps() -> dict:
     arch_for_type, host, depends, prefill = {}, {}, {}, {}
     vision, heads, thinking, kvq = {}, {}, {}, {}
     templates, signatures, sampling, stages, blocks = {}, [], {}, {}, {}
+    tensor, tensor_archs = {}, []
     for m in manifests():
         for mod, a in m["architectures"].items():
             for t in a["model_types"]:
@@ -42,6 +43,10 @@ def build_maps() -> dict:
                 arch_for_type[t] = mod
                 if a.get("tensor_split"):
                     blocks[t] = a["tensor_split"]
+                if "tensor" in a:
+                    tensor[t] = a["tensor"]
+            if "tensor" in a:
+                tensor_archs.append(mod)
             p = a.get("pipeline")
             if p:
                 if p["core"] in stages:
@@ -87,7 +92,8 @@ def build_maps() -> dict:
             "vision_tower_prefixes": tuple(
                 p for s in signatures for p in s.get("tower_prefixes", ())),
             "non_thinking_sampling": sampling, "pipeline": stages,
-            "tensor_split": blocks}
+            "tensor_split": blocks, "tensor": tensor,
+            "tensor_archs": tuple(tensor_archs)}
 
 
 def architecture_dir(family: str) -> Path:
