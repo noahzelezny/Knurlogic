@@ -29,7 +29,8 @@ mlx-vlm (https://github.com/Blaizzy/mlx-vlm)
 DeepSeek-V4 chat encoding
 (https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash)
   MIT License, Copyright (c) 2023 DeepSeek
-  src/knurlogic/engine/templates/deepseek_v4.jinja (a Jinja port) and
+  src/knurlogic/engine/families/deepseek/templates/deepseek_v4.jinja
+  (a Jinja port) and
   tests/fixtures_deepseek_v4/ (the encoder and its golden outputs).
 
 vqlab (https://github.com/noahzelezny/VQLab)

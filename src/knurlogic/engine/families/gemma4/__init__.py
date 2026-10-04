@@ -35,5 +35,14 @@ MANIFEST = {
     # A text-config artifact reports gemma4_text; its images are the same
     # family's, so both modules name the builder.
     "vision": {"build": "knurlogic.engine.families.gemma4.vision:build",
-               "architectures": ["gemma4", "gemma4_text"]},
+               "architectures": ["gemma4", "gemma4_text"],
+               # a nested vision_config; the tower's tensors as vision/
+               # loads them (vision_tower., embed_vision.) and as
+               # transformers spells them (model.-prefixed, and the
+               # multi_modal_projector a converted checkpoint can carry)
+               "signature": {"config": "vision_config",
+                             "tower_prefixes": [
+                                 "vision_tower.", "embed_vision.",
+                                 "model.vision_tower.", "model.embed_vision.",
+                                 "multi_modal_projector."]}},
 }

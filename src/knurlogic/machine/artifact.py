@@ -197,15 +197,15 @@ _SAMPLING_KEYS = (("temperature", "temp"), ("top_p", "top_p"),
                   ("top_k", "top_k"), ("min_p", "min_p"))
 
 
+def _non_thinking() -> dict:
+    from knurlogic.engine import families
+    return families.build_maps()["non_thinking_sampling"]
+
+
 #: model_type -> the sampling its makers publish for thinking OFF, which
-#: generation_config.json (one set, the thinking one) cannot carry.
-#: Qwen3.5: https://huggingface.co/Qwen/Qwen3.5-397B-A17B#best-practices
-#: (exo's cards for these builds carry the same set); Qwen3.8-Flash-Next
-#: (qwen4_exp) publishes the same set in its README
-_NON_THINKING = {
-    t: {"temp": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0,
-        "presence_penalty": 1.5}
-    for t in ("qwen3_5", "qwen3_5_moe", "qwen4_exp")}
+#: generation_config.json (one set, the thinking one) cannot carry: each
+#: family's manifest (`sampling`, with its sources), engine/families/
+_NON_THINKING = _non_thinking()
 
 
 def sampling_defaults(path) -> dict:

@@ -42,6 +42,9 @@ MANIFEST = {
             # Measured on one machine (an M4 Max), not on a cluster:
             # acceptance 0.8516 pooled (12 prompts x 128 tokens, q6 head,
             # 2.7bpw); 1.05x end to end.
+            "pipeline": {"core": "Glm5NextModel",
+                         "restage": "knurlogic.engine.families.glm5."
+                                    "pipeline_stage:restage"},
             "head": dict(
                 # the VLM wrapper's config says glm5_next, the bound
                 # LanguageModel's TextConfig says glm5_next_text
@@ -74,5 +77,8 @@ MANIFEST = {
         },
     },
     "vision": {"build": "knurlogic.engine.families.glm5.vision:build",
-               "architectures": ["glm5_next"]},
+               "architectures": ["glm5_next"],
+               "signature": {"config": "vision_config",
+                             "tower_prefixes": ["vision_model.",
+                                                "vision_tower."]}},
 }

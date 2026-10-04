@@ -159,6 +159,6 @@ Phases 1-2 in code (2026-10-02): the trunk's edits 14-15
 (`families/deepseek/architecture/PROVENANCE.md`), the family
 (`families/deepseek/vision/`, its PROVENANCE.md says what is verified and
 what waits for a conversion), and the Vision-Exp template variant
-(`engine/templates/PROVENANCE.md`). Run live on the converted artifact
+(`families/deepseek/templates/PROVENANCE.md`; chosen by config.json). Run live on the converted artifact
 (`...-mlx-vision`) since 2026-10-03.
 Phase 4 in code (2026-10-02): see DSpark above.

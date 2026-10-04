@@ -68,6 +68,15 @@ _QWEN35_KVQ = {"bits": [8, 6, 4],
                       "layers); the deltanet state is not KV and stays "
                       "bf16. 8 is the recommendation"}
 
+# The sampling Qwen publishes for thinking OFF, which generation_config.json
+# (one set, the thinking one) cannot carry; machine/artifact.py's
+# sampling_defaults reports it as "non_thinking". Sources:
+# Qwen3.5: https://huggingface.co/Qwen/Qwen3.5-397B-A17B#best-practices
+# (exo's cards for these builds carry the same set); Qwen3.8-Flash-Next
+# (qwen4_exp) publishes the same set in its README.
+_NON_THINKING = {"temp": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0,
+                 "presence_penalty": 1.5}
+
 MANIFEST = {
     "name": "qwen",
     "architectures": {
@@ -76,6 +85,11 @@ MANIFEST = {
             "prefill_chunk": _QWEN35_PREFILL,
             "kv_quant": _QWEN35_KVQ,
             "head": dict(_QWEN35_HEAD, names=["qwen3_5"]),
+            # a pipeline split: the trunk core's class (qwen3_5_moe's trunk
+            # is this one's), and what re-indexes it to a stage's layers
+            "pipeline": {"core": "Qwen3_5TextModel",
+                         "restage": "knurlogic.engine.families.qwen."
+                                    "pipeline_stage:restage_qwen3_5"},
         },
         "qwen3_5_moe": {
             "depends_on": ["qwen3_5"],
@@ -87,6 +101,9 @@ MANIFEST = {
         "qwen4_exp": {
             "model_types": ["qwen4_exp_text", "qwen4_exp"],
             "prefill_chunk": _QWEN4_EXP_PREFILL,
+            "pipeline": {"core": "Qwen4ExpModel",
+                         "restage": "knurlogic.engine.families.qwen."
+                                    "pipeline_stage:restage_qwen4_exp"},
             # its attention cache is its own (_AttnCache/_BatchAttnCache:
             # K/V plus the sparse indexer's keys and positions, moved
             # together); kvcache.py's subclasses store the K/V quantized and
@@ -134,5 +151,15 @@ MANIFEST = {
         },
     },
     "vision": {"build": "knurlogic.engine.families.qwen.vision:build",
-               "architectures": ["qwen3_5", "qwen3_5_moe", "qwen4_exp"]},
+               "architectures": ["qwen3_5", "qwen3_5_moe", "qwen4_exp"],
+               # how an artifact shows it has a tower: a nested
+               # vision_config; the tower's tensors under these prefixes
+               # (the loader's namings, vision/)
+               "signature": {"config": "vision_config",
+                             "tower_prefixes": [
+                                 "visual.", "model.visual.",
+                                 "model.language_model.visual.",
+                                 "vision_tower."]}},
+    "sampling": {"non_thinking": {
+        t: _NON_THINKING for t in ("qwen3_5", "qwen3_5_moe", "qwen4_exp")}},
 }
