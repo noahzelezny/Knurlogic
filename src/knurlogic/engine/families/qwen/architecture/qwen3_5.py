@@ -15,12 +15,119 @@ from .base import (
     scaled_dot_product_attention,
 )
 from .cache import ArraysCache, KVCache
-from .gated_delta import gated_delta_update
+from .gated_delta import compute_g, gated_delta_kernel, gated_delta_ops
 from .pipeline import PipelineMixin
 from .qwen3_next import Qwen3NextAttention
-from .qwen3_next import Qwen3NextMLP as MLP
+from .qwen3_next import Qwen3NextMLP
 from .qwen3_next import Qwen3NextRMSNormGated as RMSNormGated
-from .qwen3_next import Qwen3NextSparseMoeBlock as SparseMoeBlock
+from .qwen3_next import Qwen3NextSparseMoeBlock
+
+
+# --- knurlogic vendored edit 8: the reference's rounding order ----------------
+# In bfloat16 torch computes sigmoid / silu in float32 and rounds the result
+# once; MLX's bf16 kernels round inside (silu is x * sigmoid(x), two
+# roundings), a bf16 step off on ~1/3 of the elements. These take the
+# reference's order; on float32 inputs the casts are no-ops.
+
+
+def _sigmoid(x: mx.array) -> mx.array:
+    return mx.sigmoid(x.astype(mx.float32)).astype(x.dtype)
+
+
+def _silu(x: mx.array) -> mx.array:
+    return nn.silu(x.astype(mx.float32)).astype(x.dtype)
+
+
+class _SwiGLU(nn.Module):
+    """act_fn(gate) * up, the activation rounded once (SwitchGLU's call order)."""
+
+    def __call__(self, x, gate):
+        return _silu(gate) * x
+
+
+class MLP(Qwen3NextMLP):
+    def __call__(self, x) -> mx.array:
+        return self.down_proj(_silu(self.gate_proj(x)) * self.up_proj(x))
+
+
+class RMSNorm(nn.RMSNorm):
+    """The reference norms in float32 times (1 + weight) in float32
+    (Qwen3_5RMSNorm), rounding once. sanitize keeps a checkpoint's
+    zero-centred weight + 1 in float32 so this can; a weight already folded
+    in bf16 (an artifact converted before edit 8) runs as before."""
+
+    def __call__(self, x):
+        if self.weight.dtype == mx.float32 and x.dtype != mx.float32:
+            return mx.fast.rms_norm(x.astype(mx.float32), self.weight,
+                                    self.eps).astype(x.dtype)
+        return mx.fast.rms_norm(x, self.weight, self.eps)
+
+
+def gated_delta(q, k, v, a, b, A_log, dt_bias, state=None, mask=None, *,
+                use_kernel=True):
+    """mlx-lm's gated_delta_update with the reference's rounding
+    (modeling_qwen3_5 Qwen3_5GatedDeltaNet.forward): beta = sigmoid(b)
+    rounded once to b's dtype, g from `a.float() + dt_bias` in float32
+    (mlx-lm added a + dt_bias in bf16 before softplus)."""
+    beta = _sigmoid(b)
+    g = compute_g(A_log, a.astype(mx.float32), dt_bias)
+    if state is None:
+        B, _, Hk, Dk = q.shape
+        Hv, Dv = v.shape[-2:]
+        state = mx.zeros((B, Hv, Dv, Dk), dtype=mx.float32)
+    if (
+        not use_kernel
+        or mx.default_device() != mx.gpu
+        or not mx.metal.is_available()
+        or k.shape[-1] < 32
+        or k.shape[-1] % 32 != 0
+    ):
+        return gated_delta_ops(q, k, v, g, beta, state, mask)
+    return gated_delta_kernel(q, k, v, g, beta, state, mask)
+
+
+class SparseMoeBlock(Qwen3NextSparseMoeBlock):
+    """knurlogic vendored edit 7: Qwen3.5-MoE's reference router
+    (modeling_qwen3_5_moe Qwen3_5MoeTopKRouter) always renormalizes the
+    top-k probabilities; it has no norm_topk_prob and ignores the key.
+    mlx-lm's Qwen3-Next block honours it, so a config saying false gave
+    un-renormalized expert weights here only.
+
+    knurlogic vendored edit 8: and in the reference's order: softmax of the
+    logits in float32, top-k and renormalize in float32, then the weights
+    rounded to the logits' dtype (mlx-lm rounded the probabilities to bf16
+    first, and picked the top-k among the rounded values: a tie there can
+    pick another expert); the experts' and the shared expert's activations
+    rounded once."""
+
+    def __init__(self, args):
+        super().__init__(args)
+        self.norm_topk_prob = True
+        self.switch_mlp.activation = _SwiGLU()
+
+    def __call__(self, x: mx.array) -> mx.array:
+        if self.sharding_group is not None:
+            x = sum_gradients(self.sharding_group)(x)
+
+        logits = self.gate(x)
+        probs = mx.softmax(logits.astype(mx.float32), axis=-1)
+        k = self.top_k
+        inds = mx.stop_gradient(mx.argpartition(probs, kth=-k, axis=-1)[..., -k:])
+        scores = mx.take_along_axis(probs, inds, axis=-1)
+        scores = (scores / scores.sum(axis=-1, keepdims=True)).astype(logits.dtype)
+
+        y = self.switch_mlp(x, inds)
+        y = (y * scores[..., None]).sum(axis=-2)
+
+        se = self.shared_expert  # mlx-lm's MLP, its activation rounded once
+        shared_y = se.down_proj(_silu(se.gate_proj(x)) * se.up_proj(x))
+        shared_y = _sigmoid(self.shared_expert_gate(x)) * shared_y
+        y = y + shared_y
+
+        if self.sharding_group is not None:
+            y = mx.distributed.all_sum(y, group=self.sharding_group)
+
+        return y
 
 
 @dataclass
@@ -43,6 +150,10 @@ class TextModelArgs(BaseModelArgs):
     attention_bias: bool = False
     head_dim: Optional[int] = None
     full_attention_interval: int = 4
+    # knurlogic vendored edit 6: the layer types are the config's
+    # layer_types when it has them (the reference reads nothing else);
+    # full_attention_interval only derives them when it has not
+    layer_types: Optional[List[str]] = None
 
     # MoE fields (optional, for Qwen3_5MoeForConditionalGeneration)
     num_experts: int = 0
@@ -53,18 +164,16 @@ class TextModelArgs(BaseModelArgs):
     norm_topk_prob: bool = True
 
     # Rope parameters
-    rope_parameters: Optional[Dict[str, Union[float, str, bool, List[int]]]] = field(
-        default_factory=lambda: {
-            "type": "default",
-            "mrope_section": [11, 11, 10],
-            "rope_theta": 100000,
-            "partial_rotary_factor": 0.25,
-        }
-    )
+    # knurlogic vendored edit 6: absent, as the reference config: no
+    # rope_parameters is rope_theta 10000.0 (default_theta), partial 0.25,
+    # mrope_section [11, 11, 10] (the rotary embedding's default); a
+    # top-level rope_theta / partial_rotary_factor fills a rope_parameters
+    # that lacks it. The taken file defaulted to theta 100000.
+    rope_parameters: Optional[Dict[str, Union[float, str, bool, List[int]]]] = None
 
     # Derived from rope_parameters (set in __post_init__)
     partial_rotary_factor: float = 0.25
-    rope_theta: float = 100000.0
+    rope_theta: float = 10000.0
     rope_scaling: Optional[Dict[str, Union[float, str]]] = None
 
     def __post_init__(self):
@@ -79,10 +188,60 @@ class TextModelArgs(BaseModelArgs):
                 self.rope_parameters["type"] = self.rope_parameters.pop("rope_type")
 
             self.partial_rotary_factor = self.rope_parameters.get(
-                "partial_rotary_factor", 0.25
+                "partial_rotary_factor", self.partial_rotary_factor
             )
-            self.rope_theta = self.rope_parameters.get("rope_theta", 100000.0)
+            self.rope_theta = self.rope_parameters.get("rope_theta", self.rope_theta)
             self.rope_scaling = self.rope_parameters
+
+        # knurlogic vendored edit 6 (Qwen3_5TextConfig.__post_init__)
+        if self.layer_types is None:
+            k = self.full_attention_interval
+            self.layer_types = [
+                "linear_attention" if (i + 1) % k else "full_attention"
+                for i in range(self.num_hidden_layers)
+            ]
+        else:
+            legacy = {"mamba": "linear_attention", "conv": "linear_attention",
+                      "attention": "full_attention"}
+            self.layer_types = [legacy.get(t, t) for t in self.layer_types]
+        bad = sorted(set(self.layer_types) - {"linear_attention", "full_attention"})
+        if bad:
+            raise ValueError(f"unsupported qwen3_5 layer types: {bad}")
+        if len(self.layer_types) != self.num_hidden_layers:
+            raise ValueError(
+                f"qwen3_5 config has {len(self.layer_types)} layer_types for "
+                f"{self.num_hidden_layers} layers"
+            )
+
+
+# knurlogic vendored edit 6: a key a config leaves out means the reference
+# config's default (transformers 5.16.1 Qwen3_5TextConfig /
+# Qwen3_5MoeTextConfig), which differ between the two, so they are filled
+# per family before TextModelArgs sees the config. The taken file's
+# dataclass defaults were neither (vocab 151936, head_dim hidden/heads, ...).
+_LINEAR = dict(
+    vocab_size=248320, max_position_embeddings=32768, rms_norm_eps=1e-6,
+    head_dim=256, linear_conv_kernel_dim=4, linear_key_head_dim=128,
+    linear_value_head_dim=128, linear_num_key_heads=16,
+    linear_num_value_heads=32, tie_word_embeddings=False, attention_bias=False,
+)
+REFERENCE_DEFAULTS = {
+    "qwen3_5": dict(
+        _LINEAR, hidden_size=4096, intermediate_size=12288,
+        num_hidden_layers=32, num_attention_heads=16, num_key_value_heads=4,
+    ),
+    "qwen3_5_moe": dict(
+        _LINEAR, hidden_size=2048, num_hidden_layers=40,
+        num_attention_heads=16, num_key_value_heads=2, num_experts=256,
+        num_experts_per_tok=8, moe_intermediate_size=512,
+        shared_expert_intermediate_size=512,
+    ),
+}
+
+
+def with_reference_defaults(text_config: dict, model_type: str) -> dict:
+    family = (text_config.get("model_type") or model_type or "").removesuffix("_text")
+    return {**REFERENCE_DEFAULTS.get(family, {}), **text_config}
 
 
 # --- MRoPE (knurlogic, vision P1) ---------------------------------------------
@@ -145,8 +304,10 @@ def apply_mrope(x: mx.array, position_ids: mx.array, dims: int, base: float,
 
 
 class Attention(Qwen3NextAttention):
-    """mlx-lm's Qwen3NextAttention plus the two optional position inputs;
-    with neither, the parent's __call__ runs untouched."""
+    """mlx-lm's Qwen3NextAttention plus the two optional position inputs.
+    knurlogic vendored edit 8: the text path runs this __call__ too (with
+    neither input it ropes at the cache offset, as the parent), for the
+    reference's rounding of the output gate and the q/k norms."""
 
     def __init__(self, args):
         super().__init__(args)
@@ -154,6 +315,8 @@ class Attention(Qwen3NextAttention):
         self.mrope_section = list(rp.get("mrope_section", [11, 11, 10]))
         self.rotary_dims = int(self.head_dim * args.partial_rotary_factor)
         self.rope_base = args.rope_theta
+        self.q_norm = RMSNorm(self.head_dim, eps=args.rms_norm_eps)
+        self.k_norm = RMSNorm(self.head_dim, eps=args.rms_norm_eps)
 
     def __call__(
         self,
@@ -163,8 +326,6 @@ class Attention(Qwen3NextAttention):
         position_ids: Optional[mx.array] = None,
         rope_delta: Optional[Any] = None,
     ) -> mx.array:
-        if position_ids is None and rope_delta is None:
-            return super().__call__(x, mask, cache)
         B, L, D = x.shape
 
         q_proj_output = self.q_proj(x)
@@ -189,10 +350,16 @@ class Attention(Qwen3NextAttention):
                                   self.rope)
             keys = apply_mrope(keys, position_ids, self.rotary_dims,
                                self.rope_base, self.mrope_section, self.rope)
-        else:
+        elif rope_delta is not None:
             shifted = (cache.offset if cache is not None else 0) + rope_delta
             queries = self.rope(queries, offset=shifted)
             keys = self.rope(keys, offset=shifted)
+        elif cache is not None:
+            queries = self.rope(queries, offset=cache.offset)
+            keys = self.rope(keys, offset=cache.offset)
+        else:
+            queries = self.rope(queries)
+            keys = self.rope(keys)
         if cache is not None:
             keys, values = cache.update_and_fetch(keys, values)
 
@@ -200,7 +367,7 @@ class Attention(Qwen3NextAttention):
             queries, keys, values, cache=cache, scale=self.scale, mask=mask
         )
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
-        return self.o_proj(output * mx.sigmoid(gate))
+        return self.o_proj(output * _sigmoid(gate))
 
 
 class GatedDeltaNet(nn.Module):
@@ -284,7 +451,7 @@ class GatedDeltaNet(nn.Module):
                 cache[0] = mx.take_along_axis(conv_input, positions, axis=1)
             else:
                 cache[0] = mx.contiguous(conv_input[:, -n_keep:, :])
-        conv_out = nn.silu(self.conv1d(conv_input))
+        conv_out = _silu(self.conv1d(conv_input))  # knurlogic vendored edit 8
 
         q, k, v = [
             t.reshape(B, S, h, d)
@@ -304,7 +471,8 @@ class GatedDeltaNet(nn.Module):
         q = (inv_scale**2) * mx.fast.rms_norm(q, None, l2_eps)
         k = inv_scale * mx.fast.rms_norm(k, None, l2_eps)
 
-        out, state = gated_delta_update(
+        # knurlogic vendored edit 8: beta and g in the reference's precision
+        out, state = gated_delta(
             q,
             k,
             v,
@@ -333,14 +501,15 @@ class GatedDeltaNet(nn.Module):
 class DecoderLayer(nn.Module):
     def __init__(self, args: TextModelArgs, layer_idx: int):
         super().__init__()
-        self.is_linear = (layer_idx + 1) % args.full_attention_interval != 0
+        # knurlogic vendored edit 6: the config's layer_types
+        self.is_linear = args.layer_types[layer_idx] == "linear_attention"
         if self.is_linear:
             self.linear_attn = GatedDeltaNet(args)
         else:
             self.self_attn = Attention(args)
 
-        self.input_layernorm = nn.RMSNorm(args.hidden_size, eps=args.rms_norm_eps)
-        self.post_attention_layernorm = nn.RMSNorm(
+        self.input_layernorm = RMSNorm(args.hidden_size, eps=args.rms_norm_eps)
+        self.post_attention_layernorm = RMSNorm(
             args.hidden_size, eps=args.rms_norm_eps
         )
 
@@ -377,9 +546,11 @@ class Qwen3_5TextModel(PipelineMixin, nn.Module):
         self.layers = [
             DecoderLayer(args=args, layer_idx=i) for i in range(args.num_hidden_layers)
         ]
-        self.norm = nn.RMSNorm(args.hidden_size, eps=args.rms_norm_eps)
-        self.ssm_idx = 0
-        self.fa_idx = args.full_attention_interval - 1
+        self.norm = RMSNorm(args.hidden_size, eps=args.rms_norm_eps)
+        # knurlogic vendored edit 6: the first layer of each kind
+        lt = args.layer_types
+        self.ssm_idx = lt.index("linear_attention") if "linear_attention" in lt else None
+        self.fa_idx = lt.index("full_attention") if "full_attention" in lt else None
 
     def pipeline(self, group):
         super().pipeline(group)
@@ -510,7 +681,10 @@ class TextModel(nn.Module):
                 weights[k] = v.moveaxis(2, 1)
             if has_unsanitized_conv1d and any(k.endswith(sfx) for sfx in norm_keys):
                 if v.ndim == 1:
-                    weights[k] = v + 1.0
+                    # knurlogic vendored edit 8: 1 + weight in float32, as
+                    # the reference (Qwen3_5RMSNorm); in bf16 the sum
+                    # rounded every scale (see RMSNorm above)
+                    weights[k] = v.astype(mx.float32) + 1.0
         return weights
 
     @property
@@ -529,6 +703,10 @@ class TextModel(nn.Module):
     def cast_predicate(self):
         def predicate(path: str):
             if path.endswith("A_log"):
+                return False
+            # knurlogic vendored edit 8: the folded 1 + weight stays float32
+            if path.endswith(("layernorm.weight", "model.norm.weight",
+                              "q_norm.weight", "k_norm.weight")):
                 return False
             return True
 
@@ -552,7 +730,9 @@ class Model(nn.Module):
         super().__init__()
         self.args = args
         self.model_type = args.model_type
-        self.language_model = TextModel(TextModelArgs.from_dict(args.text_config))
+        # knurlogic vendored edit 6: absent keys mean the reference's defaults
+        self.language_model = TextModel(TextModelArgs.from_dict(
+            with_reference_defaults(args.text_config, args.model_type)))
 
     def __call__(
         self,

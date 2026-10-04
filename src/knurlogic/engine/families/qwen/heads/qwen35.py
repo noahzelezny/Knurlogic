@@ -82,9 +82,9 @@ class MTPHeadQwen35:
         self.lm_head = None if self.tie else text.lm_head
         self.D = args.hidden_size
         self.eps = getattr(args, "rms_norm_eps", 1e-6)
-        # A full-attention layer index: DecoderLayer derives is_linear from
-        # (idx + 1) % full_attention_interval, so this is the head's block.
-        self.fa_idx = args.full_attention_interval - 1
+        # A full-attention layer index: DecoderLayer reads is_linear from
+        # args.layer_types[idx] (vendored edit 6), so this is the head's block.
+        self.fa_idx = args.layer_types.index("full_attention")
         self.block = arch.DecoderLayer(args, self.fa_idx)
         if self.block.is_linear:      # cheap, but the whole head hangs on it
             raise RuntimeError(
