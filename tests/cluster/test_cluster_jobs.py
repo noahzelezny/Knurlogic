@@ -227,6 +227,15 @@ def test_prepare_refuses_with_its_reason(cache, change, why):
     assert code == 200 and not doc["ok"] and why in doc["refused"]
 
 
+def test_an_unreadable_spec_from_another_build_names_the_build(cache):
+    """A newer coordinator's spec carries a key this page does not know:
+    the refusal says the builds differ, the cause, not only the key."""
+    other = dict(VERSIONS, build="ba9876543210+mlx0.31.2")
+    code, doc = prep(spec(versions=other, some_new_key=1))
+    assert code == 400 and "same build" in doc["error"]
+    assert "ba9876543210" in doc["error"]
+
+
 def test_prepare_refuses_another_build_of_the_same_version(cache):
     other = dict(VERSIONS, build="ba9876543210+mlx0.31.2")
     code, doc = prep(spec(versions=other))
@@ -1533,6 +1542,22 @@ def test_an_unload_is_recorded_as_requested(cache, monkeypatch):
            post=lambda *a, **k: {})
     assert C.ENDED[job2]["kind"] is None          # a failure stays one
     C.ENDED.clear()
+
+
+def test_a_job_being_unloaded_is_requested_while_its_ranks_exit(
+        cache, monkeypatch):
+    """Between the stop's start and the ended record (up to the 25 s
+    terminate), the page lists the job as stopping: an unload must read
+    as requested there too, or the card shows FAILED for good."""
+    job = "71648583878fcdfc"
+    J.save_registry({f"{job}/1": {"job": job, "rank": 1, "pid": 999999,
+                                  "split": "tensor", "link": "ring",
+                                  "stopping": 1.0, "stop_reason": "unloaded",
+                                  "stop_kind": "requested"}})
+    row = next(r for r in C.jobs_document() if r["job"] == job)
+    assert row["phase"] == "stopping" and row["kind"] == "requested"
+    assert C.job_state(job)["ended_kind"] == "requested"
+    J.save_registry({})
 
 
 def test_failover_beyond_two_machines_is_a_logged_no_op(monkeypatch, caplog):

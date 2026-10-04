@@ -774,6 +774,21 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     nothing."""
     why = check_spec(spec)
     if why:
+        # a spec this page cannot read is most often a newer page's (a key
+        # added since): say the versions differ, which is the cause
+        theirs = (spec.get("versions") or {}) if isinstance(
+            spec.get("versions"), dict) else {}
+        try:
+            ours = (info if info is not None else _local_info()).get(
+                "versions") or {}
+        except (OSError, ValueError, AttributeError, TypeError):
+            ours = {}
+        k = "build" if theirs.get("build") and ours.get("build") \
+            else "knurlogic"
+        if theirs.get(k) and theirs.get(k) != ours.get(k):
+            why = (f"{why} -- the coordinator runs {k} {theirs.get(k)}, "
+                   f"this machine {ours.get(k) or 'missing'}: every rank "
+                   f"runs the same build")
         return 400, {"error": why}
     from knurlogic.machine import identity
     me = identity.identity().get("name") or "this machine"
@@ -1259,6 +1274,10 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     cleared: list = []
     if recovery.kind(reason, kind) == "requested":
         cleared = recovery.cancel_job(job)   # asked for: never recovered
+    # an unload carries no kind of its own: say "requested" from the start,
+    # so a page polling while the ranks exit never shows it as a failure
+    stop_kind = kind or ("requested" if recovery.kind(reason) == "requested"
+                         else None)
     with _LOCK:
         PREPARED.pop(job, None)
         spec = SPECS.pop(job, None)
@@ -1270,7 +1289,8 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
         for k in mine:
             reg[k] = dict(reg[k], stopping=reg[k].get("stopping")
                           or time.time(),
-                          stop_reason=reg[k].get("stop_reason") or reason)
+                          stop_reason=reg[k].get("stop_reason") or reason,
+                          stop_kind=reg[k].get("stop_kind") or stop_kind)
         if mine:
             J.save_registry(reg)
     try:
@@ -1319,9 +1339,7 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                 int((spec or {}).get("port") or 0) or None)
             # an unload says so, so the page drops its card instead of
             # showing "failed" (picker.js followLaunch)
-            ENDED[job] = {"reason": reason, "kind": kind or (
-                              "requested" if recovery.kind(reason) ==
-                              "requested" else None),
+            ENDED[job] = {"reason": reason, "kind": stop_kind,
                           "t": time.time(), "port": port,
                           "split": any_rec.get("split")
                           or (spec or {}).get("split"),
@@ -1440,7 +1458,8 @@ def job_state(job: str) -> dict:
         processes=J.pids_of_job(job),
         ended=ended.get("reason") or (
             stopping[0].get("stop_reason") if stopping else None),
-        ended_kind=ended.get("kind")))
+        ended_kind=ended.get("kind") or (
+            stopping[0].get("stop_kind") if stopping else None)))
 
 
 def _ask_job(page: str, job: str) -> dict:
@@ -1553,6 +1572,7 @@ def jobs_document() -> list:
                         "split": r0.get("split"),
                         "link": link_name(r0.get("link")),
                         "reason": r0.get("stop_reason"),
+                        "kind": r0.get("stop_kind"),
                         "machines": r0.get("machines"),
                         "port": next((r.get("port") for r in recs
                                       if r.get("port")), None),

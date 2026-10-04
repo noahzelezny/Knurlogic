@@ -265,6 +265,21 @@ def test_a_relaunch_refused_while_the_old_rank_holds_the_port_is_not_an_attempt(
     assert len(rec["attempts"]) == 1      # only the one that started
 
 
+def test_a_port_held_past_the_wait_is_a_refused_attempt(faked, monkeypatch):
+    """Another program on the port (not an exiting rank): after
+    LEAVING_WAIT_S it counts as an attempt rather than waiting 15 min."""
+    faked["ended"] = "rank 1 exited"
+    R.tick(0)
+    monkeypatch.setattr(C, "launch", lambda req, **k: {
+        "refused": "nothing started: A refuses rank 0: port 8080 on A is "
+                   "in use"})
+    rec = next(iter(R.MODELS.values()))
+    R.tick(R.BACKOFF_S[0] + 1)
+    assert rec["attempts"] == []          # deferred, not spent
+    what = R.tick(R.LEAVING_WAIT_S + R.BACKOFF_S[0] + 5)
+    assert rec["attempts"] and "relaunch 2 in" in what[0][1]
+
+
 def test_the_switch_turns_it_off(faked, monkeypatch):
     monkeypatch.setenv("KNURLOGIC_RECOVER", "off")
     faked["ended"] = "rank 1 exited"

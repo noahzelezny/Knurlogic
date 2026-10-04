@@ -536,6 +536,10 @@ def _schedule(rec: dict, now: float, why: str,
     return f"down ({why}); relaunch {n + 1} in {wait:.0f} s"
 
 
+#: how long a relaunch waits for the last job to free its port before a
+#: "port in use" counts as a refused attempt (an exiting rank frees it in
+#: seconds; another program holding it does not)
+LEAVING_WAIT_S = 60.0
 #: refusals that mean the last job's processes are still on their way out
 _LEAVING_RX = re.compile(r"port \d+ on .+ is in use|is still exiting")
 
@@ -618,9 +622,11 @@ def _tick_cluster(rec: dict, now: float) -> str:
         rec.update(pending=False, ended_job=None, last_at=now, next_at=None)
         return f"relaunch {n}: job {out['job']} (from {old})"
     why = str(out.get("refused") or out.get("error") or "no answer")
-    if _still_leaving(why):
+    if _still_leaving(why) and \
+            now - float(rec.get("down_at", now)) < LEAVING_WAIT_S:
         # the job that went down has not let go of its port yet (a rank
-        # still exiting): not an attempt, look again shortly
+        # still exiting): not an attempt, look again shortly. Past
+        # LEAVING_WAIT_S something else holds it: an attempt like any
         rec["attempts"].pop()
         return _defer(rec, now, why)
     rec["pending"] = False

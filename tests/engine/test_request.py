@@ -271,3 +271,28 @@ def test_the_real_qwen_tokenizers_close_tag_sequences_are_matched():
     enc = lambda s: tuple(tok.encode(s, add_special_tokens=False))
     assert enc("</thinking>") in seqs and enc(" </thinking>") in seqs
     assert enc("</thinking>\n\n") in seqs
+
+
+def test_a_reply_after_the_think_block_is_not_held_for_the_longer_close():
+    """The alternative close tags are 3-4 tokens: they may hold tokens back
+    only while reasoning, not in the answer that follows."""
+    from knurlogic.engine.runtime.request import Request
+
+    class Detok:
+        last_segment = ""
+
+        def reset(self):
+            pass
+
+        def add_token(self, t):
+            self.last_segment = f"<{t}>"
+
+    class Tok:
+        def __init__(self, t, state):
+            self.token, self.state = t, state
+            self.logprob = self.top_logprobs = self.match = self.finish = None
+    r = Request(Detok(), sequences={(1,): "<think>", (2,): "</think>",
+                                    (3, 4, 5): "</thinking>"})
+    assert r.hold_n == 3 and r.hold_out == 1
+    d = r.feed(Tok(9, "normal"))
+    assert d.content == "<9>"            # streamed at once
