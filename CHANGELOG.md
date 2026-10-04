@@ -7,7 +7,8 @@ drafting; every model held to its maker's reference; GLM-5.3 images.
 
 * DeepSeek-V4-Flash-Vision-Exp: images (one or several per message, kept
   in the prompt cache), its four thinking levels (off, low, high, max), tool
-  calls, and DSpark drafting (5 tokens per step) on one Mac or a split.
+  calls, and DSpark drafting (5 tokens per step) on one Mac or a split,
+  pipeline or tensor, images included.
   Needs an artifact that carries its tower; a text-only conversion is not
   tagged VISION.
 * A drafting request that ends partway through a step stores only the

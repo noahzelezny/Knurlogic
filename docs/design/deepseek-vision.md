@@ -130,9 +130,11 @@ In code (2026-10-02):
 
 ## Memory and placement
 Trunk ~150 GB at mxfp4 experts: over either Mac alone (96 / 128 GB), so it
-runs as a two-Mac split. Pipeline keeps images (cluster scope for 0.1.0);
-the tower and aligner sit on rank 0 with the embedding. Tensor with images
-is not in scope.
+runs as a two-Mac split, pipeline or tensor, both with images (cluster
+scope for 0.1.0: images on every split); the tower and aligner sit on rank
+0, which encodes and hands every rank the image rows. Live 2026-10-03,
+release 0.1.3: tensor over RDMA, four thinking levels, a tool call, one and
+two images, DSpark drafting; pipeline over TCP the same.
 A lower-bit conversion (VQ Lab's) may bring it under 128 GB later; the
 `bias_vl` and image keys must survive that conversion too.
 
