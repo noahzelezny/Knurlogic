@@ -5,6 +5,10 @@
 DeepSeek-V4-Flash-Vision-Exp with images, its thinking levels and DSpark
 drafting; every model held to its maker's reference; GLM-5.3 images.
 
+* A model that ends its thinking with `</thinking>` instead of `</think>`
+  (seen on Qwen3.6) now has the block closed the same way: the text after it
+  is the reply and its tool calls are parsed, streamed or not; before,
+  everything came back as reasoning with no content and no tool calls.
 * DeepSeek-V4-Flash-Vision-Exp: images (one or several per message, kept
   in the prompt cache), its four thinking levels (off, low, high, max), tool
   calls, and DSpark drafting (5 tokens per step), on one Mac or a split,
