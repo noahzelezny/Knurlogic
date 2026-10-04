@@ -144,7 +144,12 @@ class Glm5VisionFamily:
         # seen as "salmon/coral" -- every colour shifted.
         arr = (arr - np.asarray(self.image_mean, np.float32)) \
             / np.asarray(self.image_std, np.float32)
-        arr = arr.reshape(gh, p, gw, p, 3).transpose(0, 2, 1, 3, 4)
+        # Patches in merge-window order, as Glm5NextImageProcessor.patchify
+        # lays them out: each merge x merge window's patches consecutive,
+        # windows row-major. The tower's rope (rot_pos_emb) and downsample
+        # both assume it; raster order scrambled every image's layout.
+        arr = arr.reshape(gh // merge, merge, p, gw // merge, merge, p, 3)
+        arr = arr.transpose(0, 3, 1, 4, 2, 5, 6)
         arr = arr.reshape(gh * gw, p, p, 3)
         tp = vc.temporal_patch_size
         arr = np.repeat(arr[:, None], tp, axis=1)                  # [-, tp, p, p, 3]
