@@ -353,3 +353,16 @@ def test_tower_matches_reference_on_same_weights():
     px, ref = fam.preprocess(Image.fromarray(g["image"]), "sha")
     feats = np.array(fam.encode(px, ref).feats)
     assert np.abs(feats - g["pooler_output"]).max() < 1e-3
+
+
+def test_an_image_is_framed_as_the_makers_template_frames_it():
+    """GLM's template emits <|begin_of_image|><|image|><|end_of_image|> for
+    an image part (its emit_image macro); knurlogic's placeholder reaches
+    the template as text, so it must carry that frame itself. The image
+    token is the one expand_pads widens; the frame ids stay one each."""
+    from fixtures_vision_glm5 import glm5_tiny_config
+
+    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
+    fam = Glm5VisionFamily(glm5_tiny_config())
+    assert fam.placeholder_text(None) == \
+        "<|begin_of_image|><|image|><|end_of_image|>"

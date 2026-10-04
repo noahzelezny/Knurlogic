@@ -450,5 +450,9 @@ def test_sampling_defaults_carry_qwen35s_non_thinking_set(tmp_path):
     (tmp_path / "config.json").write_text('{"model_type": "qwen3_5_moe"}')
     d = sampling_defaults(tmp_path)
     assert d["temp"] == 0.6 and d["non_thinking"]["presence_penalty"] == 1.5
+    (tmp_path / "config.json").write_text('{"model_type": "qwen4_exp"}')
+    assert sampling_defaults(tmp_path)["non_thinking"] == {
+        "temp": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0,
+        "presence_penalty": 1.5}   # Qwen3.8-Flash-Next's README
     (tmp_path / "config.json").write_text('{"model_type": "qwen3_next"}')
     assert "non_thinking" not in sampling_defaults(tmp_path)
