@@ -7,8 +7,9 @@ drafting; every model held to its maker's reference; GLM-5.3 images.
 
 * DeepSeek-V4-Flash-Vision-Exp: images (one or several per message, kept
   in the prompt cache), its four thinking levels (off, low, high, max), tool
-  calls, and DSpark drafting (5 tokens per step) on one Mac or a split,
-  pipeline or tensor, images included.
+  calls, and DSpark drafting (5 tokens per step), on one Mac or a split,
+  pipeline or tensor; images work on both splits (a request with an image
+  runs undrafted).
   Needs an artifact that carries its tower; a text-only conversion is not
   tagged VISION.
 * A drafting request that ends partway through a step stores only the
@@ -17,8 +18,8 @@ drafting; every model held to its maker's reference; GLM-5.3 images.
   computes what current mlx computes. Logits move by float rounding
   (mlx 0.32's kernels); greedy tokens on the test models are unchanged.
 * Python 3.11 or newer (mlx-lm 0.32 needs it).
-* The page shows "Update x.y.z" in its top bar when PyPI has a newer
-  knurlogic; clicking it copies `pip install -U knurlogic`. Asked once per
+* The page shows "Update available" beside Settings when PyPI has a newer
+  knurlogic (the version in its tooltip); clicking it copies `pip install -U knurlogic`. Asked once per
   page start; `--offline` skips it.
 
 Models compute what their makers' references compute

@@ -270,7 +270,12 @@ advances by the SAME count -- by committing m + 1 tokens per row, m the
 fewest drafts any row accepted. A row that accepted more keeps its token
 at position m (its accepted draft: already a sample of the target), so
 nothing is resampled and the verdicts stay exact; one row loses nothing.
-When m < K the trunk is restored and replays the m + 1 committed tokens.
+When m < K the trunk rolls back to the m + 1 committed tokens by its own
+cache bookkeeping (DeepSeek-V4 edit 19, `caches.rollback`), with no second
+forward; a replay is only the fallback for a cache that cannot roll back.
+A step verifies only the first k of its K drafts, k chosen from the head's
+confidence (or measured per-position acceptance) over each width's timed
+cost (`block_loop._width`; KNURLOGIC_MTP_VERIFY=k fixes it).
 The head's cache takes only committed positions, from the forward that
 committed them, so it never rolls back. Plain steps (when drafting does
 not pay) advance it one position. m is also capped at the token that

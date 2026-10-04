@@ -237,5 +237,5 @@ fixtures_vision.run_reference(script, *args)   # runs in the mlx-vlm 0.6.17 inte
 ## Pins
 
 `pyproject.toml` pins `mlx==0.32.3`, `mlx-lm==0.32.0`; `[tool.knurlogic.pins]`
-holds those and the sha256 of `mlx_lm/generate.py` and `mlx_lm/models/cache.py`. `tests/test_pins.py` fails
+holds those and the sha256 of `mlx_lm/generate.py` and `mlx_lm/models/cache.py`. `tests/engine/test_pins.py` fails
 on drift and lists what to re-verify. 

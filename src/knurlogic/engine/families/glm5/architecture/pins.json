@@ -3,7 +3,8 @@
     "host": "mlx_lm",
     "sha256": "8b83fe99085659d1f9d713719cf563528feaf184ec612c06c206ce5b288fccbd",
     "validated_on_artifact": "TheDrainFlorist--GLM-5.3-Flash-VQ-2.7bpw",
-    "validated_with_mlx_lm": "0.31.3",
-    "validated_with_mlx_vlm": "0.6.17"
+    "validated_with_mlx_lm": "0.32.0",
+    "validated_with_mlx_vlm": "0.6.17",
+    "validated_live": "2026-10-03, mlx 0.32.3 / mlx-lm 0.32.0, two-Mac pipeline: text, tool call, one and two images"
   }
 }
