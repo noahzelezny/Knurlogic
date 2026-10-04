@@ -8,7 +8,7 @@ Design: docs/design/vision.md.
 
 | this file | from | lines |
 |---|---|---|
-| `vision.py` | `mlx_vlm/models/gemma4/vision.py` | full file (562), one import changed (`from .._base import ensure_fused_sdpa`, see `engine/vision/_base.py`), one structural trim (below) |
+| `vision.py` | `mlx_vlm/models/gemma4/vision.py` | full file (562), one import changed (`from .._base import ensure_fused_sdpa`, see `engine/vision/_base.py`), one structural trim (below), knurlogic edits 6 and 7 (below) |
 | `config.py` | `mlx_vlm/models/gemma4/config.py::VisionConfig` | trimmed to the fields `vision.py` reads (audio/video-only fields dropped: out of scope, vision-only package) |
 | `__init__.py::MultimodalEmbedder` | `mlx_vlm/models/gemma4/gemma4.py:22-35` | verbatim |
 | `__init__.py::RMSNormNoScale` | `mlx_vlm/models/gemma4/language.py::RMSNormNoScale` | verbatim (duplicated from `vision.VisionRMSNormNoScale` rather than shared, because it sits on `embed_vision` in the weight tree, not the tower) |
@@ -49,15 +49,66 @@ back with no separator. So `Gemma4Vision._mm_mask` (this package's
 array as `mm_mask` and applies
 `_apply_blockwise_bidirectional_overlay`'s boolean-or logic verbatim,
 skipping `_block_sequence_ids_for_mask` entirely. `test_g4_mask_overlay_matches_reference`
-(`tests/test_vision_gemma4.py`) holds the OVERLAY logic itself to a golden
-built from mlx-vlm's own `Gemma4TextModel._block_sequence_ids_for_mask` /
-`_apply_blockwise_bidirectional_overlay`
-(`tests/goldens/build_gemma4.py`, `gemma4_mask_overlay.npz`), so the boolean
-arithmetic is checked against the reference even though the block-id input
-is produced a different way. WHERE the overlay applies follows the maker,
+(`tests/engine/test_vision_gemma4.py`) holds the OVERLAY logic itself to a
+golden built from HF transformers' own mask functions
+(`masking_utils.causal_mask_function` OR `blockwise_overlay`, block ids
+from `modeling_gemma4.get_block_sequence_ids_for_mask`;
+`tests/support/goldens/build_gemma4.py`, `gemma4_mask_overlay.npz`), so
+the boolean arithmetic is checked against the maker's reference even though
+the block-id input is produced a different way. WHERE the overlay applies follows the maker,
 not mlx-vlm: sliding layers only, cut by the window, and only on configs
 with `use_bidirectional_attention: "vision"` (26B-A4B, 31B); e2b/e4b stay
 causal (`../architecture/PROVENANCE.md`, vendored edit 1).
+
+## The reference is HF transformers, not mlx-vlm
+
+The goldens (`tests/support/goldens/build_gemma4.py`) are built from HF
+transformers 5.16.1 `models/gemma4/` -- Google's port: `Gemma4VisionModel`
+and `Gemma4MultimodalEmbedder` on two tiny random towers (e4b-style
+clipped linears; 26B-style standardize with a 24-wide head), fed the image
+as the processor patchifies it (`convert_image_to_patches`), plus the
+processor's `get_aspect_ratio_preserving_size` over 24 sizes. float32:
+max abs diff 2e-6 (e4b) / 4e-6 (26B-style), tower and projection. The
+`__meta__` of each npz records the versions and interpreter.
+
+- **knurlogic edit 6 (pooler scale and standardize in float32):** the
+  pooler multiplied by `sqrt(hidden)` in the working dtype and
+  `VisionModel` standardized in it. HF's `Gemma4VisionPooler.forward`
+  (`modeling_gemma4.py:681-688`) scales in float32 and returns float32,
+  and `Gemma4VisionModel.forward` (`:2056-2060`) standardizes in float32
+  (`std_bias.float()`, `std_scale.float()`) and only then casts back to
+  the working dtype. In bf16 the scale itself rounded (sqrt(1152) =
+  33.94 -> 34.0 on the 26B tower, sqrt(768) = 27.71 -> 27.75 on e4b's)
+  and the standardized values were computed from the rounded product; in
+  float16 large pooled activations overflowed to inf. Now as HF. Held by
+  `test_the_pooler_scales_and_standardizes_in_float32` (HF's own forward
+  with its patch embedder and encoder stubbed, float16 and bfloat16):
+  before, float16 inf and 78% of the bf16 outputs more than a bf16 step
+  from HF's (std_bias cancels most of the magnitude, so the scale's
+  rounding shows); after, finite and within a step but for 0.3% (a 3x3
+  average summed in another float32 order rounding to the neighbouring
+  value before the scale).
+- **knurlogic edit 7 (encoder norms and MLP activation rounding):** the
+  encoder layers' four norms were `mx.fast.rms_norm` (rounds x * rsqrt to
+  the working dtype, then again after the weight; a quarter of bf16
+  elements a step from HF's `Gemma4RMSNorm`, which is float32 inside with
+  one rounding), and the MLP's `gelu_approx` on bf16 rounded after every
+  step (torch's gelu_pytorch_tanh computes in float32, rounds once).
+  `RMSNorm` now casts to float32 around the fused kernel and `gelu_mul`
+  computes the gelu in float32. The tower runs once per image, so the
+  unfused norm's cost (measured +6-9% on text decode, where it is not
+  taken: ../architecture/PROVENANCE.md) does not matter here. Held by
+  `test_the_encoder_norm_rounds_where_the_reference_does` and
+  `test_the_encoder_mlp_activation_rounds_where_the_reference_does`
+  (HF's ops in bf16, `gemma4_text.npz` `ops/*`).
+- **Kept, measured:** `encode()` pre-divides the projected features by
+  `embed_scale` so the trunk's multiply cancels it (next section); in
+  bf16 both are the bf16-rounded scale, so the image rows come back
+  within a bf16 step or two of HF's (which scatters them unscaled into the
+  already-scaled text embeddings). Exact would need the trunk to skip the
+  scale on image rows -- a change to every caller of the embedding path,
+  not taken for a one-step difference. The per-layer inputs zero image
+  positions to id 0, HF to `pad_token_id` -- 0 in every released config.
 
 ## Deviation: `encode()` pre-divides by `embed_scale`
 

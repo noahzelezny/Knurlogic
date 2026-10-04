@@ -1,14 +1,14 @@
 {
   "gemma4": {
-    "sha256": "086fb0e4c06df6cf8ad14efbf7956fff744c9835d169e064887863df551e549d",
-    "text_path_held_by": "tools/vision_gate.py on an M4 Max: text answer, image answer (red, 42), five-turn cache reuse, recall -- all PASS. The only edit forwards mm_mask; with mm_mask=None the call is upstream's.",
+    "sha256": "6ee7d87b29dff17acbc8370dc2be936af54b79b03a5f472a29bcc9c3dd0d9c37",
+    "text_path_held_by": "tools/vision_gate.py on an M4 Max: text answer, image answer (red, 42), five-turn cache reuse, recall -- all PASS. Edits: forwards mm_mask (with mm_mask=None the call is upstream's), and knurlogic edit 3 passes text_config through as HF's Gemma4Config does (no vocab_size overwrite, no kv-head fill-in); the released configs carry those keys, so they build as before (tests/engine/test_gemma4_text_parity.py resolve/*).",
     "validated_on_artifact": "mlx-community--gemma-4-e4b-it-8bit, TheDrainFlorist--gemma-4-26b-a4b-it-VQ-6.2bpw",
     "validated_with_mlx_lm": "0.32.0",
-    "validated_live": "2026-10-03, mlx 0.32.3 / mlx-lm 0.32.0, one Mac: text, tool call, one and two images (earlier: e4b VQ-PLE on mlx-lm 0.31.3, tools/vision_gate.py)"
+    "validated_live": "2026-10-03 on the code before edits 2-7 (text, tool call, one and two images); re-validated in the 0.1.3 live pass after them"
   },
   "gemma4_text": {
-    "sha256": "44ee1846b3d3f4cacf77c43b11380c077511641bcc15215f202708a58fac1668",
-    "text_path_held_by": "tests/engine/test_gemma4_text_parity.py: HF transformers 5.16.1 modeling_gemma4.py on tiny random dense (PLE, KV sharing, double-wide MLP, sliding/full) and MoE (K=V) configs, float32, prefill past the window + 5 cached decode steps, max abs logit diff ~1e-5. Vendored edit 1 moves the image-block overlay to the sliding layers of 'vision' configs only; with mm_mask=None every text request takes the upstream path unchanged. Real-rung re-validation pending",
+    "sha256": "e2316bb62a860e0b67dc86c66462d2d5c5c6af872a223aa134f2ebe8b02e8b4d",
+    "text_path_held_by": "tests/engine/test_gemma4_text_parity.py: HF transformers 5.16.1 modeling_gemma4.py / configuration_gemma4.py on tiny random dense (PLE, KV sharing, double-wide MLP, sliding/full), MoE (K=V), defaults-only and use_bidirectional_attention 'all' configs, float32, prefill past the window + 5 cached decode steps, max abs logit diff ~1e-5; bf16 within twice HF's own eager/sdpa spread; config resolution of both released artifacts identical to HF's. Edits 1-5 (PROVENANCE.md): image-block mask placement, HF's config defaults, 'all', gelu rounding. Real-rung re-validation pending",
     "text_path_of": "f3f8c047c2ac31306267e8de61bb06d2952f2bf3fd4adbbb8ce25b952ccac01f",
     "validated_on_artifact": "TheDrainFlorist--gemma-4-e4b-it-VQ-PLE",
     "validated_with_mlx_lm": "0.32.0"

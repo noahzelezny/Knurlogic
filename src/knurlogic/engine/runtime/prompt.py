@@ -134,6 +134,18 @@ def part_separator(tokenizer, role: str | None = None) -> str:
     return templates.part_separator(fam, role)
 
 
+def _unreadable_part() -> str:
+    """The refusal for a message part the served model cannot read. Image
+    parts are placeholders by the time the prompt is built when the model
+    reads images, so what is left there is audio, video or the like; say
+    what the model does read."""
+    from knurlogic.engine.vision import served_vision
+    if served_vision() is not None:
+        return ("a message part is neither text nor an image, and this "
+                "model reads text and images")
+    return "a message part is not text, and this model reads text only"
+
+
 def flatten(messages: list[dict], tokenizer=None,
             sep: str | None = None) -> list[dict]:
     """A copy with list-of-parts content joined into one string (images are
@@ -168,8 +180,7 @@ def flatten(messages: list[dict], tokenizer=None,
                      else neutralize(p.get("text", ""), pat, keep) for p in c
                      if isinstance(p, dict) and p.get("type") == "text"]
             if len(texts) != len(c):
-                raise PromptError("a message part is not text, and this "
-                                  "model reads text only")
+                raise PromptError(_unreadable_part())
             m["content"] = (sep if sep is not None
                             else seps[m.get("role")]).join(texts)
         elif c is None:
