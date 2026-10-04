@@ -130,6 +130,27 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
         time.sleep(exit_after)          # the 503s go out first
         os._exit(0)
 
+    def leave_after_ring_failure(_exc):
+        # The scheduler stopped at a step boundary on a failed collective
+        # and answered everything with RingFailed: let it finish its
+        # cleanup (the executor, the model, mx.synchronize) so nothing is
+        # left on the GPU, then leave non-zero so the page's recovery
+        # relaunches the job. A cleanup stuck behind a collective is not
+        # waited for past stop_within.
+        jobs.progress(phase="stopping")
+
+        def go():
+            import time
+            if not sched.wait_stopped(stop_within):
+                logging.getLogger(__name__).error(
+                    "the scheduler did not finish its cleanup within %.0f s "
+                    "after the ring failed; leaving anyway", stop_within)
+            time.sleep(exit_after)          # the 503s go out first
+            logging.shutdown()
+            os._exit(1)
+        threading.Thread(target=go, daemon=True).start()
+    sched.on_ring_failed = leave_after_ring_failure
+
     def on_term(_sig, _frame):
         jobs.progress(phase="stopping")
         if getattr(mh, "state", "") in ("warming", "ready"):

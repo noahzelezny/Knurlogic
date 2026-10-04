@@ -51,6 +51,21 @@ class RingFailed(RuntimeError):
     down, and every request in flight is answered with a 503."""
 
 
+def ring_error(exc: BaseException) -> bool:
+    """A failure of the link between the ranks, not of one request: the
+    ranks out of step (tensor.Desync), a forward a rank could not finish
+    (mtp ForwardFailed), or a collective MLX's distributed backends
+    raised ("[jaccl] Send failed with error code -12", "[ring] ...")."""
+    from .tensor import Desync
+    if isinstance(exc, Desync):
+        return True
+    if type(exc).__name__ == "ForwardFailed":
+        return True
+    msg = str(exc)
+    return isinstance(exc, RuntimeError) and (
+        "[jaccl]" in msg or "[ring]" in msg)
+
+
 #: tokens of a context window the warm-up prompt leaves free (chat
 #: template, the 2-token answer, slack)
 _WARM_MARGIN = 128
@@ -322,6 +337,11 @@ class Scheduler:
         self._stop = False
         #: set by abort(): every request from then on gets this error
         self._aborted: BaseException | None = None
+        #: rank 0 of a split model: the collective error that ended the
+        #: ring (_ring_fatal), and who is told so the process can leave
+        #: and the job be relaunched (interfaces/http watch_ring)
+        self.ring_failed: BaseException | None = None
+        self.on_ring_failed = None
         self._wake = threading.Event()
         #: live knobs rank 0 applied, for the other ranks (share_live)
         self._sets: queue.Queue = queue.Queue()
@@ -349,6 +369,14 @@ class Scheduler:
         self._wake.set()
         if self._thread.ident is None:   # never ran: nothing answers its rows
             return False
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
+
+    def wait_stopped(self, timeout: float) -> bool:
+        """From another thread: True once the scheduler thread has finished
+        its cleanup, False when it is still in it after `timeout`."""
+        if self._thread.ident is None:
+            return True
         self._thread.join(timeout)
         return not self._thread.is_alive()
 
@@ -489,7 +517,9 @@ class Scheduler:
             self._fail_all(RuntimeError("the server is stopping"))
             self._fail_queued(RuntimeError("the server is stopping"))
             self._close_executor()
-            if self.tensor is not None:
+            # a broken ring takes no `stop`: it is a collective, and one
+            # with a gone peer never returns
+            if self.tensor is not None and self.ring_failed is None:
                 try:
                     self.tensor.stop()        # the other ranks leave too
                 except Exception:  # shutdown must finish whatever the ranks do (logged)
@@ -507,7 +537,12 @@ class Scheduler:
         try:
             self._tick()
         # the scheduler thread must outlive one bad tick (logged, fails the rows)
-        except Exception:
+        except Exception as exc:
+            if self.tensor is not None:
+                # on a ring, a tick that raised (a Desync in park, a
+                # collective) leaves the ranks out of step for good
+                self._ring_fatal(exc)
+                return
             # Nothing here should raise; if it does, fail what is in
             # flight rather than the thread.
             logger.exception("scheduler tick failed")
@@ -723,6 +758,30 @@ class Scheduler:
                     state.VISION["serve"].store
                     if state.VISION.get("serve") else None))
         return self._ex
+
+    def _ring_fatal(self, exc: BaseException) -> None:
+        """Rank 0 of a split model, on the scheduler thread: a collective
+        failed or the ranks fell out of step, and no later step can put
+        them back. Answer everything with RingFailed, stop at this step
+        boundary (no `stop` to the others: _run), and tell whoever leaves
+        the process so the page's recovery relaunches the job. Once."""
+        if self.ring_failed is not None:
+            return
+        logger.error("the ring between the ranks failed; the job stops "
+                     "here so it can be relaunched", exc_info=exc)
+        self.ring_failed = exc
+        self.abort(RingFailed(
+            "this model is split across machines and the link between "
+            f"them failed ({exc}); the job is restarting -- retry once "
+            "it is loaded again"))
+        self._stop = True
+        self._wake.set()
+        cb = self.on_ring_failed
+        if cb is not None:
+            try:
+                cb(exc)
+            except Exception:  # leaving must not depend on the callback (logged)
+                logger.exception("on_ring_failed")
 
     def _close_executor(self) -> None:
         if self._ex is not None:
@@ -1194,6 +1253,9 @@ class Scheduler:
             events = ex.step()          # on the executor's own stream
         # a failed step fails its rows; the scheduler thread lives on (logged)
         except Exception as exc:
+            if self.tensor is not None and ring_error(exc):
+                self._ring_fatal(exc)
+                return
             logger.exception("a step failed; failing its rows")
             self._fail_all(exc)
             self._close_executor()

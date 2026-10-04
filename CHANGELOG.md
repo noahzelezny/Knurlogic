@@ -78,6 +78,9 @@ Clusters
 * A job that failed after relaunching shows as one card, not one per
   attempt; its x (and the MCP's unload, by the id its load answered)
   clears it on every Mac.
+* When the link between the machines fails mid-request (an RDMA send or
+  receive error, the ranks out of step), the first Mac answers what is in
+  flight and restarts the job instead of staying up answering errors.
 
 MCP
 * fit, settings and drafting take a model name as load does; an unknown
