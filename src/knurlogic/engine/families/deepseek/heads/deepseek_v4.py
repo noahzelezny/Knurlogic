@@ -77,14 +77,15 @@ def _to_sidecar(k: str) -> str:
 
 
 class _Head(nn.Module):
-    def __init__(self, block, hc_head, D, eps):
+    def __init__(self, block, hc_head, D, eps, norm_cls):
         super().__init__()
         self.block = block
         self.e_proj = nn.Linear(D, D, bias=False)
         self.h_proj = nn.Linear(D, D, bias=False)
-        self.enorm = nn.RMSNorm(D, eps=eps)
-        self.hnorm = nn.RMSNorm(D, eps=eps)
-        self.norm = nn.RMSNorm(D, eps=eps)
+        # the trunk's RMSNorm: the reference's, one rounding (edit 26)
+        self.enorm = norm_cls(D, eps=eps)
+        self.hnorm = norm_cls(D, eps=eps)
+        self.norm = norm_cls(D, eps=eps)
         self.hc_head = hc_head
 
 
@@ -182,7 +183,7 @@ class MTPHead:
         block = type(unwrap(core.layers[0]))(skel, args.num_hidden_layers)
         hc_head = arch.HyperHead(D, args.hc_mult, args.rms_norm_eps,
                                  args.hc_eps)
-        self.m = _Head(block, hc_head, D, args.rms_norm_eps)
+        self.m = _Head(block, hc_head, D, args.rms_norm_eps, arch.RMSNorm)
 
     def make_draft_cache(self):
         return self.arch.DeepseekV4Cache(self.args.sliding_window)
@@ -265,8 +266,10 @@ class MTPHead:
         return m.norm(m.hc_head(x))
 
     def draft_logits(self, h_row, nxt_id, cache=None):
-        """(trunk streams at t, token t+1) -> logits for token t+2."""
-        return self.model.lm_head(self._trunk(h_row, nxt_id, cache))
+        """(trunk streams at t, token t+1) -> logits for token t+2, float32
+        as the reference's head (trunk edit 24)."""
+        return self.arch.head_logits(self.model.lm_head,
+                                     self._trunk(h_row, nxt_id, cache))
 
     def advance(self, h_row, nxt_id, cache):
         """Fill the head's cache for these positions without the lm_head

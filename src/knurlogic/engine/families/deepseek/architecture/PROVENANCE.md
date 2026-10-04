@@ -12,7 +12,7 @@ artifacts were validated against -- not merely that it imports.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.32.0 (0.31.3
   until 2026-10-02).
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `8b0636622c4cf2498764f2a34bf4af73b15a980d839e928b5af32c763423bca5`
+- vendored sha256: `8063335e8834320d7bcad4673e6dc91f9dd84361f26355cc9482d9bd85453a8c`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -389,3 +389,165 @@ HC head and the final norm); tested, not changed.
    lone run's for every later step; and the batch engine admits rows
    shorter than, at and past the window beside a decoding row
    (tests/engine/test_deepseek_v4_arch.py).
+
+### Edits 23-29, the reference's bf16 arithmetic (Flash and Vision-Exp)
+
+DeepSeek's inference runs in bf16 (`torch.set_default_dtype(torch.
+bfloat16)`, generate.py 115) and keeps some steps in float32 inside it. Every
+golden above runs float32, where none of this shows. A pre-release audit
+against model.py / kernel.py found seven places where the vendored file
+computed in another precision. tests/engine/test_deepseek_v4_bf16.py
+holds each to the reference run in bf16
+(tests/support/goldens/build_deepseek_v4_bf16.py: model.py's own
+modules under torch on the CPU, kernel.py's CUDA kernels as the DSpark
+golden's torch ports, at Flash's shapes on fixed bf16 inputs; and again
+on the GPU (torch MPS) for the reference's own CPU-vs-GPU spread, which
+each tolerance is read against). Every one of those tests fails without
+its edit (the numbers below), and the bf16 forward end to end (the DSpark
+golden's tiny checkpoint with its bf16 tensors bf16) is about as far from
+the reference's CPU run as the reference's own GPU run is.
+
+23. **The gate's scores in float32** (`MoEGate._scores`,
+   `_make_moe_gate_kernel`, `f32_linear`). Gate.forward (Flash 565 /
+   Vision-Exp 612) is `linear(x.float(), self.weight.float())`; the
+   kernel path took `x @ self.weight.T`, a bf16 matmul, then the kernel
+   (the hash and bias_vl paths cast both to float32, copying the weight
+   every call). Now `f32_linear` (below) reads the bf16 weight as float32
+   on every path, no copy. The kernel's softplus is torch's (threshold 20,
+   log1p(exp(v)) accurate) and its sqrt and normalization the reference's
+   (`weights /= sum; weights *= route_scale`, no 1e-20). Measured at
+   Flash's shapes (256 experts of 4096, top 6), 256 bf16 rows: 12 rows
+   routed to another top 6 and the weights 4.7e-4 off before; now the
+   same experts for every row, weights within 2.1e-7 (the reference's own
+   CPU-GPU spread: 6e-8; the hash / bias_vl paths were float32 already:
+   0 rows, 4.9e-7). Cost: ~2 us a layer a decode step.
+
+24. **The logits in float32** (`head_logits`, `linear_f32`,
+   `Model.__call__`; the MTP head's `draft_logits` and the DSpark head's
+   `block`). ParallelHead holds its weight float32 ("for easier
+   computation of logits") and computes `F.linear(x.float(), weight)`
+   (Flash 711-716, Vision-Exp 785); ours returned bf16 logits (a
+   logit of 5 off by up to 0.02). The final norm before it stays the
+   reference's (edit 26). `f32_linear` is a Metal kernel: the bf16
+   weight read once for up to 16 rows and converted exactly, the bf16
+   activations exactly, float32 fma accumulation, float32 out -- a
+   simdgroup per 2-4 outputs over the whole K for wide outputs (the
+   head), K split 8 ways across a threadgroup for up to 8192 outputs
+   (the gate, the compressors); the summation order depends on the
+   shapes of w alone, so a row's logits are the same bits in any batch
+   (drafting's verify forward and the plain steps agree). Up to 64 rows
+   it runs in 16-row dispatches; past that (a prefill's unused rows) a
+   float32 matmul over the weight cast 64M elements at a time. Measured
+   on the real head (129280 x 4096, M3 shared with another workload):
+   1 row 1.89 ms (bf16 matmul 1.84; five in one evaluation 1.65 vs
+   1.66), 6 rows 2.07 ms (2.31; 2.04 vs 3.96), 16 rows 2.41 (3.69).
+   Accuracy, 1 / 6 / 20 rows: 1.3e-7 / 3.8e-6 / 4.5e-6 from the exact
+   (float64) product of the bf16 operands, where the reference's own
+   CPU run is 1.2e-7 / 4.4e-5 / 6.1e-5 from it. An MLX-quantized head
+   (third-party conversions: mlx-community's and VQ's affine 8-bit) is
+   quantized_matmul on float32 activations: float32 logits over the
+   dequantized weight in float32; MLX's affine kernel is 1.5e-3 of the
+   logits' scale off the exact product (any bits; mxfp4 is exact), under
+   8-bit quantization's own error -- the reference has no quantized head.
+   ~0.2 ms slower than its bf16 call on the real shape.
+
+25. **The compressor's pooling in float32** (`Compressor.__call__`,
+   `_overlap_emit` and its kernel). Compressor.forward (Flash 316-349,
+   Vision-Exp 356-389, "compression need fp32") runs x.float() through
+   its float32 wkv / wgate, adds the float32 ape, softmaxes and sums in
+   float32 and rounds once (`kv.to(dtype)`) before its norm. Ours were
+   bf16 matmuls, a bf16 ape, the softmax weights cast to bf16 and a bf16
+   sum, on the prefill path and in the decode emit kernel alike. Now kv
+   and score are `linear_f32(wkv_gate, x)` (the f32 kernel up to 64 rows,
+   or quantized_matmul on float32 for a quantized wkv_gate), the carry
+   buffers float32, and both paths sum in float32 and round once to the
+   activations' dtype (the emit kernel's output dtype is the
+   activations'). The emit kernel keeps mx.softmax's arithmetic (fast
+   exp, times 1 / sum), the prefill path's, so a window pooled by a
+   decode step and by a multi-token step is the same bits. Measured on
+   a bf16 prefill then one token at a time, against the reference's rows
+   (its CPU and GPU runs agree bit for bit): ratio 4 (overlap, 512 dims)
+   755 of 6144 elements differed before, by up to 2432 ulps (FP8 blocks
+   rounding the other way), now 0; ratio 128: 197 of 1024 (1792 ulps),
+   now 1 by 1 ulp; the indexer's (ratio 4, 128 dims, Hadamard + FP4): 15
+   of 1536 (128 ulps), now 0. Cost: ~3 us a compressor a decode step;
+   prefill, one 2048 x 4096 wkv_gate at 2048 tokens 2.13 ms (bf16 1.88).
+
+26. **Every weighted norm rounds once** (new `rms_norm`, `RMSNorm`,
+   `_rms_norm_ops`; `_make_rms_norm_act_kernel`; used for attn_norm,
+   ffn_norm, q_norm, kv_norm, the compressors' norm, the final norm, the
+   MTP head's enorm / hnorm / norm and the DSpark head's q_norm /
+   kv_norm / attn_norm / ffn_norm / main_norm / norm). model.py's
+   RMSNorm (Flash 191-196 / Vision-Exp 206-211) computes `x * rsqrt(
+   mean(x^2) + eps)` in float32 and `(self.weight * x).to(dtype)` with
+   the weight float32: one rounding. mx.fast.rms_norm with a weight
+   (and our fused rms_norm_act) rounded x * rsqrt to bf16 first and the
+   product again: 26% of bf16 outputs an ulp off (33988 of 131072 at
+   4096; 8477 / 32768 at 1024; 4129 / 16384 at 512; 1156 / 4096 at 128).
+   Now 2 of 131072, 0, 0, 0 (a float32 mean summed in another order).
+   The fused kernel computes float(w) * (x * n) and rounds once; it also
+   takes a column offset (kv_norm reads its half of wqkv_a in place) and
+   can skip the act_quant copy; widths it does not take (not whole
+   128-blocks, past 4096) run the same arithmetic as compiled ops. The
+   `RMSNorm` module keeps nn.RMSNorm's `weight` and `eps`, so every
+   checkpoint loads unchanged. Cost: a custom-kernel dispatch where
+   mx.fast.rms_norm was (~4-7 us in a dependent chain, the existing
+   rms_norm_act's cost; the op form was ~9 us).
+
+27. **The fused sinkhorn takes eps where kernel.py does**
+   (`_make_hc_sinkhorn_collapse_kernel`, `_make_hc_split_sinkhorn_kernel`).
+   kernel.py's hc_split_sinkhorn (409) makes `comb.softmax(-1) + eps`:
+   exp / row_sum + eps. The fused sinkhorn + collapse kernel computed
+   `e * (1 / (row_sum + eps)) + eps`. Both kernels' exp is now accurate
+   (it was metal::fast::exp) and the softmax a division; the iterations
+   keep their reciprocals (divisions made the fused kernel ~1.5x slower
+   for an ulp). At the real eps (1e-6) and 20 iterations the eps' place
+   moves comb by ~1e-11 of itself, under float32's noise, so the test
+   runs the reference port at eps 0.25 and 3 iterations: comb was 0.235
+   (relative) off, now 5.9e-7 (the reference's CPU-GPU spread 3.4e-7);
+   at the real eps post and comb are no farther from exact (float64)
+   than the reference's own float32 run (post 3.9e-7 vs 5.0e-7, comb
+   2.9e-6 vs 3.1e-6; post was 8.5e-7 with the fast exp).
+
+28. **attn_sink stays a recorded limit** (`V4Attention._sink_for`,
+   comment only). The reference adds exp(attn_sink - max) with attn_sink
+   float32 (sparse_attn, kernel.py 346). MLX's fused attention (mlx
+   0.32.3) refuses float32 sinks beside bf16 queries (ValueError;
+   test_mlx_attention_takes_no_float32_sinks_with_bf16_queries fails the
+   day it takes them), so they go in rounded to bf16. Measured on
+   Flash's 44 sink vectors (43 layers and the MTP block): at most 0.0077
+   off (0.38% relative), which moves an attention output by at most
+   0.77% of the sink's share of the softmax mass; on random scores with
+   each layer's real sinks (shares up to 1.6%) at most 1.3e-4 of the
+   row's largest output, against bf16's own output rounding of 3.5e-3.
+   A float32 attention (q and the keys cast, float32 sinks) would remove
+   it at twice the key bytes and part from the reference elsewhere: its
+   kernel rounds the softmax weights to bf16 before P @ V (kernel.py
+   340-343), which a float32 attention would not.
+
+29. **The per-head q norm in bf16 arithmetic** (new `q_head_norm` and its
+   kernel; `_attn_q_proj_norm`, `_attn_q_proj_quant_norm`, the DSpark
+   head's attention). The reference normalizes each head of the bf16 q
+   in place, `q *= torch.rsqrt(q.square().mean(-1, keepdim=True) + eps)`
+   (Flash 498 / Vision-Exp 539, and DSparkAttention 826): every op rounded to bf16 (the square,
+   the float32-accumulated mean, the + eps, the rsqrt, the product).
+   mx.fast.rms_norm did it in float32 with one rounding. A kernel now does
+   torch's ops one rounding each, a simdgroup a head in a fixed order (so
+   a head's result does not depend on how many rows the call has). Note:
+   the reference's own CPU run differs from its GPU (MPS) run on 38% of
+   the outputs, by up to 3 ulps, because torch's CPU bf16 rsqrt is an
+   estimate on arm64 (rsqrt(0.0659) = 3.906 where the nearest bf16 to the
+   true 3.895 is 3.891); CUDA's rsqrtf, MPS's and Metal's are accurate,
+   so the golden is the GPU run (the same ops with the rsqrt rounded from
+   float64, which the MPS run is bit for bit). 25.7% of the outputs were
+   1-2 ulps off it before; now 0 of 262144. Cost: ~1 us a layer.
+
+End to end, decode on 24 Flash-shaped layers (16 experts) with the real
+head, random weights, M3 shared with another workload: 25.1-25.5 ms a
+step against 24.6-24.9 before (~+2.5%); a 6-wide verify step about equal
+(36.8-37.3 against 36.8-37.9: the head kernel is faster at 6 rows). The
+DSpark drafting tests' one-row prompt changed (test_deepseek_v4_dspark.py
+`DRAFT_PROMPT`): with the rounding of edits 20-21, a float32 ulp of a
+6-wide verify's summation order at an FP8 boundary parts it from the
+plain steps on the golden's prompt now (exact with the rounding stubbed
+out, as test_pipeline.py records for tensor splits).
