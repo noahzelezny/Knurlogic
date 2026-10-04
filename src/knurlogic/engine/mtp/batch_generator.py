@@ -132,16 +132,25 @@ class LogitsTrunk:
     through the serve path (tests/test_vision_e2e.py): admit's
     `logits[:, -1]` raised on the output object, and the image embeddings
     would have gone in under a name the trunk silently drops into
-    **kwargs. Everything else (make_cache, layers, ...) passes through."""
+    **kwargs. Everything else (make_cache, layers, ...) passes through.
 
-    def __init__(self, model, rename: bool):
+    `call`: what runs the forward, when not `model` itself. The artifact
+    loads as glm5_next's multimodal `Model`, whose `__call__` takes no
+    embeddings at all (it embeds `input_ids` itself, and an `inputs_embeds`
+    falls into its **kwargs): the forward goes to its `language_model`,
+    which takes them -- the same forward for text, and the image rows
+    reach the trunk (found on GLM-5.3-Flash: images silently ignored, one
+    Mac and split alike)."""
+
+    def __init__(self, model, rename: bool, call=None):
         self.__dict__["_model"] = model
         self.__dict__["_rename"] = rename
+        self.__dict__["_call"] = model if call is None else call
 
     def __call__(self, inputs, cache=None, **kw):
         if self._rename and "input_embeddings" in kw:
             kw["inputs_embeds"] = kw.pop("input_embeddings")
-        out = self._model(inputs, cache=cache, **kw)
+        out = self._call(inputs, cache=cache, **kw)
         return out if isinstance(out, mx.array) else out.logits
 
     def __getattr__(self, name):
@@ -158,11 +167,23 @@ def logits_trunk(model):
     except (TypeError, ValueError):
         return model
     names = sig.parameters
+    call = model
+    lm = getattr(model, "language_model", None)
+    if "input_embeddings" not in names and "inputs_embeds" not in names \
+            and lm is not None:
+        try:
+            lsig = inspect.signature(lm.__call__)
+        except (TypeError, ValueError):
+            lsig = None
+        if lsig is not None and "inputs_embeds" in lsig.parameters:
+            call, sig, names = lm, lsig, lsig.parameters
     rename = "input_embeddings" not in names and "inputs_embeds" in names
     ret = sig.return_annotation
     wraps_output = ret is not inspect.Signature.empty and ret is not mx.array \
         and "array" not in str(ret)
-    return LogitsTrunk(model, rename) if (rename or wraps_output) else model
+    if rename or wraps_output:
+        return LogitsTrunk(model, rename, call)
+    return model
 
 
 class MTPBatchGenerator(BatchGenerator):

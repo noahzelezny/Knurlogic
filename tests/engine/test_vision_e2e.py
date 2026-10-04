@@ -731,3 +731,37 @@ def test_encode_twice_can_fail(rigs):
     a = fam.encode(*fam.preprocess(img, "a"))
     b = fam.encode(*fam.preprocess(other, "b"))
     assert not mx.array_equal(a.feats, b.feats).item()
+
+
+def test_glm_multimodal_model_takes_the_image_embeddings():
+    """The artifact loads as glm5_next's multimodal `Model` (mlx-lm asks
+    the architecture for `Model`), not the bare LanguageModel the rig
+    above builds: its `__call__` embeds `input_ids` itself and drops any
+    embeddings into **kwargs. The batch engine's trunk must reach the
+    language model with them -- before, GLM-5.3-Flash ignored every image,
+    one Mac and split alike -- and its text forward stays the Model's."""
+    from fixtures_vision_glm5 import glm5_tiny_config
+
+    from knurlogic.engine import register
+    from knurlogic.engine.mtp.batch_generator import logits_trunk
+    register.register("glm5_next")
+    from knurlogic.engine.families.glm5.architecture.glm5_next import (
+        Model,
+        ModelConfig,
+    )
+    cfg = glm5_tiny_config()
+    cfg["text_config"] = dict(cfg["text_config"], **GLM_TEXT)
+    mx.random.seed(0)
+    model = Model(ModelConfig.from_dict(cfg))
+    model.set_dtype(mx.float32)
+    mx.eval(model.parameters())
+    trunk = logits_trunk(model)
+    ids = mx.array([[1, 2, 3, 4]])
+    text = trunk(ids, cache=model.make_cache())
+    assert isinstance(text, mx.array)
+    assert mx.array_equal(text, model(ids, cache=model.make_cache()).logits)
+    rows = model.language_model.model.embed_tokens(ids)
+    rows[:, 1:3] = mx.random.normal((1, 2, rows.shape[-1]))
+    seen = trunk(ids, cache=model.make_cache(), input_embeddings=rows)
+    assert not mx.allclose(seen, text).item()
+    assert trunk.make_cache is not None
