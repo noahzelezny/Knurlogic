@@ -16,9 +16,44 @@
 * The page shows "Update x.y.z" in its top bar when PyPI has a newer
   knurlogic; clicking it copies `pip install -U knurlogic`. Asked once per
   page start; `--offline` skips it.
-* DeepSeek-V4: the shared expert clamps its SwiGLU at 10 as DeepSeek's
-  reference does; it ran unclamped before, about 2% off the shared expert's
-  output on average.
+
+Models compute what their makers' references compute
+
+Every vendored architecture was checked against its maker's reference
+code on small test models; each now matches it to about 1e-5. Outputs of
+every model below change, for the better.
+* DeepSeek-V4 (Flash and Vision-Exp): the shared expert's SwiGLU clamp at
+  10; the FP8 / FP4 rounding DeepSeek's inference applies to the attention
+  cache, the compressor, the indexer and every quantized linear's input;
+  the MoE's routing weights and sums in float32.
+* Qwen3.8-Flash-Next: its n-gram embedding hashes with seed 1234, the
+  reference's (it used 0, so every token read the wrong rows; about 3%
+  lower perplexity now).
+* Qwen3.5 / 3.6 / 3.8: the linear-attention q/k normalization epsilon
+  (it was 128 times too large).
+* GLM-5.3: the SwiGLU clamp at 10 in every MLP, router logits in float32,
+  two norm epsilons, and the indexer's scores in float32.
+* Gemma 4: an image's bidirectional attention applies on the sliding
+  layers only, and only for the models that use it (26B-A4B, 31B).
+
+DeepSeek-V4
+* DSpark drafting is faster: no second forward to roll back a step, and it
+  verifies only as many drafts as are likely to stand (from the head's own
+  confidence). About 25-35% over plain decoding on a two-Mac split.
+* A short prompt (under the 128-token window) beside other requests no
+  longer fails its admission.
+* A tensor split that would cut one of the model's 128-wide rounding
+  blocks is refused, with the reason.
+
+Clusters
+* A machine that fails or exits tells the others, and they leave the job
+  cleanly instead of waiting; stopping a job is never read as a failure.
+  A machine that dies in the middle of a GPU exchange over RDMA can still
+  pin its peer's GPU until a reboot (stock mlx has no RDMA timeout).
+* A tool call (any request ending partway through a drafting step) on a
+  tensor split no longer desynchronizes the machines.
+* A split's own per-request seed no longer forces drafting on, or the
+  widest verify, whatever the measured cost.
 
 ## 0.1.2
 
