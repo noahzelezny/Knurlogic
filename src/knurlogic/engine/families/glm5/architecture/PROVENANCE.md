@@ -74,3 +74,54 @@ reuse -- every GLM-5.3-Flash layer is "full". Padding-only difference
 left as is: the reference zeroes padded rows of the linear-attention
 input before every projection (apply_mask_to_padding_states); the port
 masks the q/k/v stream only.
+
+### Edits 6+, a second reference audit (GLM-5.3-Flash, bf16 and memory)
+
+6. **The MLA latent is stored once** (`Glm5NextSparseAttention`,
+   `_LatentCache`). K = V = the normed latent; the port passed it as both
+   keys and values, so every cache (bf16 KVCache, 8-bit QuantKVCache, the
+   batch caches merged from them) held two copies. The values are now a
+   zero-width array, as the DSA indexer's cache already does, so trim,
+   state, merge, extract and kvquant work unchanged on one copy. The
+   reference (DynamicCache) stores the latent once too. Per token on
+   GLM-5.3-Flash (11 MLA layers): 28182 -> 16918 bytes bf16, 17622 ->
+   11638 at 8 bits (tests/engine/test_glm5_cache_bytes.py; tuning's
+   kv_bytes_per_token now equals what the cache stores). No logit change.
+7. **KDA in float32 where the reference keeps it** (`Glm5NextLinearAttention`,
+   `cast_predicate`). q and k are l2-normed and scaled in float32 and stay
+   float32 into the recurrence (the port cast them back to bf16 first);
+   the forget gate's a + dt_bias is taken in float32; the short conv runs
+   in float32 with silu before the cast (the reference keeps conv1d in
+   float32, `_keep_in_fp32_modules_strict`); the recurrence output is cast
+   to the model dtype before the gated norm, as `core_attn_out.to(
+   initial_dtype)`. A conversion now keeps conv1d, dt_bias and A_log float32
+   beside e_score_correction_bias. bf16 only.
+8. **mHC expand in the model dtype** (`_hc_expand`, replacing mlx-vlm's
+   `hc_expand` in the decoder layer). The reference rounds post and comb to
+   bf16 and forms post*x + comb^T@residual in bf16 (modeling 1316-1317,
+   1325-1326); the port kept both float32. bf16 only.
+
+Measured on the bf16 golden (tests/support/goldens/build_glm5_next_bf16.py,
+transformers 5.16.1 grouped_mm, keep-in-fp32 modules float32), median over
+rows of the max |logit diff|: prefill 0.055 before, 0.051 with edit 7,
+0.031 with 7+8 (bf16 itself moves the reference 0.046); decode 0.063 ->
+0.067, at bf16 noise either way. Checked and left as is, with evidence:
+- MoE combine: transformers' default experts path (grouped_mm, and
+  batched_mm) sums the top-k weighted outputs in float32 and casts once --
+  what the port does. Only the eager debug loop index_adds in bf16.
+- Router denominator + 1e-20: a float32 sum of top-k sigmoids; 1e-20 is
+  below its ulp unless every chosen score is < ~1e-12. No result changes.
+- Padding mask before every KDA projection: knurlogic's batch path pads on
+  the left only (ArraysCache.prepare(lengths) is never called by
+  MTPBatchGenerator, checked by instrumenting a 3-row batch); a left-padded
+  row's recurrent state is zero through its pads and k = 0 there, so the
+  gate and beta of a padded row cannot reach a kept result.
+9. **Cached arrays are concrete** (`_mlx_vlm/turboquant.py`,
+   `_rotation_matrix`, `_rht_sign_vector`, `_projection_matrix`,
+   `_codebook`, `_polar_angle_codebook`). Their degenerate branches
+   (dim <= 1, bits <= 0) returned a lazy mx.zeros / mx.ones into an
+   lru_cache; a lazy array belongs to the thread that built it, and on mlx
+   0.32.3 another thread evaluating it raises "There is no Stream(gpu, 0)
+   in current thread". They are built from numpy now, as the other
+   branches already were. A scan of the whole glm5 folder found no other
+   cached or module-level lazy array. No result changes.
