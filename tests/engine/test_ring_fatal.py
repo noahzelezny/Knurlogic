@@ -49,6 +49,9 @@ def test_what_is_a_ring_error():
     class ForwardFailed(RuntimeError):
         pass
     assert ring_error(ForwardFailed("[jaccl] Send failed with error code -12"))
+    assert ring_error(BrokenPipeError("bell"))       # the bell broke
+    assert ring_error(ConnectionError("a rank did not line up"))
+    assert not ring_error(FileNotFoundError("an image path"))
     assert not ring_error(RuntimeError("the prompt is too long"))
     assert not ring_error(ValueError("[jaccl] in a value error"))
 
@@ -118,6 +121,47 @@ def test_the_stopped_scheduler_sends_no_stop_over_a_broken_ring():
     assert done.wait(10)
     assert s.wait_stopped(10)
     assert ring.stopped == 0 and s.host.unloaded
+
+
+def test_a_request_error_in_a_tick_on_a_ring_is_not_fatal():
+    s = _sched(_Ring())
+    s._tick = lambda: (_ for _ in ()).throw(ValueError("bad image"))
+    s.on_ring_failed = lambda e: pytest.fail("not a ring failure")
+    s._loop_once()
+    assert s.ring_failed is None and not s._stop
+
+
+def test_the_executors_closing_reset_does_not_wait_on_a_dead_ring():
+    """RingExecutor.close() sends the others a `reset` (an exchange): after
+    the ring failed it must raise at once, or the cleanup hangs in a
+    collective and the process leaves with a thread stuck in it."""
+    class Link:
+        dead = False
+        sent = 0
+
+        def exchange(self, over, payload):
+            if self.dead:
+                raise T.Desync("the ring between the ranks failed")
+            self.sent += 1
+            raise AssertionError("waited on the dead ring")
+    ring = _Ring(park_raises=T.Desync("ranks at different steps: [1, 0]"))
+    ring.link = Link()
+    s = _sched(ring)
+
+    class Ex:
+        closed = False
+
+        def close(self):
+            try:
+                ring.link.exchange(0, b"reset")
+            finally:
+                self.closed = True
+    ex = s._ex = Ex()
+    done = threading.Event()
+    s.on_ring_failed = lambda e: done.set()
+    s.start()
+    assert done.wait(10) and s.wait_stopped(10)
+    assert ring.link.dead and ring.link.sent == 0 and ex.closed
 
 
 def test_without_a_ring_a_bad_tick_is_logged_and_survived():

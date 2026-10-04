@@ -57,7 +57,9 @@ def ring_error(exc: BaseException) -> bool:
     (mtp ForwardFailed), or a collective MLX's distributed backends
     raised ("[jaccl] Send failed with error code -12", "[ring] ...")."""
     from .tensor import Desync
-    if isinstance(exc, Desync):
+    if isinstance(exc, (Desync, ConnectionError)):
+        # ConnectionError: the bell (TCP) between the ranks closed, broke or
+        # timed out lining up (Link.align)
         return True
     if type(exc).__name__ == "ForwardFailed":
         return True
@@ -538,9 +540,9 @@ class Scheduler:
             self._tick()
         # the scheduler thread must outlive one bad tick (logged, fails the rows)
         except Exception as exc:
-            if self.tensor is not None:
-                # on a ring, a tick that raised (a Desync in park, a
-                # collective) leaves the ranks out of step for good
+            if self.tensor is not None and ring_error(exc):
+                # on a ring, a tick whose collective or bell failed (a Desync
+                # in park, a gone peer) leaves the ranks out of step for good
                 self._ring_fatal(exc)
                 return
             # Nothing here should raise; if it does, fail what is in
@@ -770,6 +772,9 @@ class Scheduler:
         logger.error("the ring between the ranks failed; the job stops "
                      "here so it can be relaunched", exc_info=exc)
         self.ring_failed = exc
+        link = getattr(self.tensor, "link", None)
+        if link is not None:
+            link.dead = True    # the executor's closing reset must not wait
         self.abort(RingFailed(
             "this model is split across machines and the link between "
             f"them failed ({exc}); the job is restarting -- retry once "

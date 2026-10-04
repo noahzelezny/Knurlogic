@@ -55,6 +55,9 @@ GLM-5.3
   by <|begin_of_image|> / <|end_of_image|> as its template frames it.
 * The MTP draft head computes its layer as the model does (the SwiGLU
   clamp and float32 router): drafts closer to the model's own tokens.
+* Its attention cache stores the compressed latent once (it was kept
+  twice): 16918 bytes a token instead of 28182 in bf16, so a longer
+  context fits.
 
 Qwen3.8-Flash-Next
 * With thinking off it samples with the set Qwen publishes for that mode
@@ -64,7 +67,8 @@ Qwen3.8-Flash-Next
 DeepSeek-V4
 * DSpark drafting is faster: no second forward to roll back a step, and it
   verifies only as many drafts as are likely to stand (from the head's own
-  confidence). About 25-35% over plain decoding on a two-Mac split.
+  confidence). About a third faster than plain decoding (about 25 against
+  18.6 tok/s, sampled, on one two-Mac split).
 * A short prompt (under the 128-token window) beside other requests no
   longer fails its admission.
 * A tensor split that would cut one of the model's 128-wide rounding
@@ -81,6 +85,13 @@ Clusters
 * When the link between the machines fails mid-request (an RDMA send or
   receive error, the ranks out of step), the first Mac answers what is in
   flight and restarts the job instead of staying up answering errors.
+* The Macs of a split line up over the network before the steps where one
+  can lag behind (joining, after the load, waking from idle), so a slower
+  Mac no longer loses the faster one's first RDMA message.
+
+Drafting
+* KNURLOGIC_MTP_VERIFY set to anything but a whole number is refused when
+  the server starts, instead of being ignored.
 
 MCP
 * fit, settings and drafting take a model name as load does; an unknown

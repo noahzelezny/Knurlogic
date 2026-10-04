@@ -128,7 +128,8 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
             "retry once it is loaded again"))
         import time
         time.sleep(exit_after)          # the 503s go out first
-        os._exit(0)
+        # a failed ring leaves non-zero: the page relaunches it
+        os._exit(1 if getattr(sched, "ring_failed", None) else 0)
 
     def leave_after_ring_failure(_exc):
         # The scheduler stopped at a step boundary on a failed collective

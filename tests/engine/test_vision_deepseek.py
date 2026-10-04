@@ -691,16 +691,33 @@ def test_a_vision_config_with_no_vision_weights_loads_text_only(
         state.VISION.update(error="")
 
 
+def test_a_conversion_without_the_tower_but_with_the_trunks_vision_tensors_loads_text_only(
+        tmp_path, monkeypatch):
+    """Every vision-only trunk tensor kept (bias_vl, the image rows, the
+    hash layers' bias) but no tower: built as the config says, so those
+    load (text never reads them), and images are refused. Before the
+    text-only change such a conversion loaded as text; refusing it as
+    'partial' would have broken it."""
+    from knurlogic.engine.vision import registry
+    d = _checkpoint(tmp_path, "no-tower", trunk_vision=True)
+    v = registry.vision_weights(TINY, d)
+    assert v["state"] == "text_only" and v["text_config"] == {}
+    model = _load(monkeypatch, d)
+    assert model.args.vision_n_layers == TINY["vision_n_layers"]
+    assert hasattr(model.layers[0].ffn.gate, "bias_vl")
+    assert registry.unavailable_why("deepseek_v4", d) == \
+        registry.NO_VISION_WEIGHTS
+    assert not registry.registered("deepseek_v4", d)
+
+
 def test_a_conversion_with_part_of_its_vision_weights_is_refused(
         tmp_path, monkeypatch):
-    """The trunk's vision tensors without the tower (or the tower without
-    them) is neither model: refused, saying what is missing."""
+    """The tower without the trunk's vision tensors is neither model:
+    refused, saying what is missing."""
     from knurlogic.engine.vision import registry
-    no_tower = _checkpoint(tmp_path, "no-tower", trunk_vision=True)
     no_trunk = _checkpoint(tmp_path, "no-trunk", trunk_vision=False,
                            extra=["vision.norm.weight"])
-    for d, missing in ((no_tower, "the vision tower (vision.)"),
-                       (no_trunk, "gate.bias_vl")):
+    for d, missing in ((no_trunk, "gate.bias_vl"),):
         v = registry.vision_weights(TINY, d)
         assert v["state"] == "partial" and missing in v["why"]
         with pytest.raises(RuntimeError, match="only part of its vision"):

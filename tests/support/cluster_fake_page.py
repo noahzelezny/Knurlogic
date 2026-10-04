@@ -60,8 +60,10 @@ def main():
         fast()
     if os.environ.get("FAKE_JOB_ID"):
         from types import SimpleNamespace
+        import secrets
         C.secrets = SimpleNamespace(
-            token_hex=lambda n: os.environ["FAKE_JOB_ID"])
+            token_hex=lambda n: os.environ["FAKE_JOB_ID"],
+            randbits=secrets.randbits)
     if os.environ.get("FAKE_PROTOCOL_MAJOR"):
         protocol.VERSION = (int(os.environ["FAKE_PROTOCOL_MAJOR"]), 0)
     C._resolve = lambda ident, name="": "/fake/artifact" if ident == "abc" else None

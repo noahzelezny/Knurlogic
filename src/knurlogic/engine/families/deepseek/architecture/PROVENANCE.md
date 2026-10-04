@@ -436,8 +436,14 @@ the reference's CPU run as the reference's own GPU run is.
    (the gate, the compressors); the summation order depends on the
    shapes of w alone, so a row's logits are the same bits in any batch
    (drafting's verify forward and the plain steps agree). Up to 64 rows
-   it runs in 16-row dispatches; past that (a prefill's unused rows) a
-   float32 matmul over the weight cast 64M elements at a time. Measured
+   it runs in 16-row dispatches; past that a float32 matmul over the
+   weight cast 64M elements at a time. That bound covers the gate and
+   the compressors too (edits 23, 25): a prefill chunk of more than 64
+   rows sums in the matmul's order, not the kernel's, so its float32
+   scores can differ from a decode step's in the last bits, and a token
+   at a near-tie can route to another top 6 in prefill than in decode.
+   Same precision both ways (exact products, float32 sums), as the
+   reference's own results differ across its batch shapes. Measured
    on the real head (129280 x 4096, M3 shared with another workload):
    1 row 1.89 ms (bf16 matmul 1.84; five in one evaluation 1.65 vs
    1.66), 6 rows 2.07 ms (2.31; 2.04 vs 3.96), 16 rows 2.41 (3.69).
@@ -499,9 +505,10 @@ the reference's CPU run as the reference's own GPU run is.
    kernel.py's hc_split_sinkhorn (409) makes `comb.softmax(-1) + eps`:
    exp / row_sum + eps. The fused sinkhorn + collapse kernel computed
    `e * (1 / (row_sum + eps)) + eps`. Both kernels' exp is now accurate
-   (it was metal::fast::exp) and the softmax a division; the iterations
-   keep their reciprocals (divisions made the fused kernel ~1.5x slower
-   for an ulp). At the real eps (1e-6) and 20 iterations the eps' place
+   (it was metal::fast::exp) and the row softmax divides by the row sum;
+   the column normalizations, the first one and those of the iterations,
+   still multiply by a reciprocal (divisions made the fused kernel ~1.5x
+   slower for an ulp). At the real eps (1e-6) and 20 iterations the eps' place
    moves comb by ~1e-11 of itself, under float32's noise, so the test
    runs the reference port at eps 0.25 and 3 iterations: comb was 0.235
    (relative) off, now 5.9e-7 (the reference's CPU-GPU spread 3.4e-7);

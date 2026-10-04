@@ -144,6 +144,10 @@ on the files before these edits and passes after.
    so a config saying false gave un-renormalized weights here only.
    Qwen4-Exp's router does honour it (modeling_qwen4_exp.py:898-917, edit
    3, kept). Test: [qwen3_5_moe/norm_topk_false] (4.8e-2 -> 1e-5).
+   The experts' outputs are combined by MLX's sum over the top-k, which
+   accumulates in float32 and rounds once: transformers' default (fused)
+   experts path does the same; its eager path adds each expert into a
+   bf16 buffer with index_add_ and so rounds k times.
 
 ### Edit 8, bfloat16 rounding order (qwen3_5.py, qwen4_exp.py)
 
