@@ -1010,6 +1010,28 @@ def rank_argv(path: str, spec: dict, files: dict) -> list:
 RANK_ARGV = [rank_argv]
 
 
+#: the bell's port: rank 0's ring port + this (a slot's ranks take +0..+17
+#: of it here, the jaccl coordinator +19)
+BELL_OFFSET = 18
+
+
+def bell_address(spec: dict) -> str:
+    """"host:port:nonce:world" of rank 0's bell (engine/runtime/tensor.init):
+    every rank connects to it over TCP BEFORE the ring is joined, so the
+    ranks enter jaccl's first collectives together -- a rank that arrives
+    seconds late (a slower chip, a longer start) can have rank 0's first
+    RDMA message dropped. "" when the job has no ring hosts or more ranks
+    than a slot leaves room for (the bell's port then comes over the ring,
+    as before)."""
+    hosts = spec.get("hosts") or []
+    world = int(spec.get("world") or len(hosts))
+    if not hosts or world < 2 or world > BELL_OFFSET:
+        return ""
+    host, port = hosts[0].rsplit(":", 1)
+    nonce = int(str(spec["job"])[:15], 16)
+    return f"{host}:{int(port) + BELL_OFFSET}:{nonce}:{world}"
+
+
 def rank_env(spec: dict, files: dict, selfheal: bool) -> dict:
     # MLX_METAL_FAST_SYNCH: the GPU hands each collective to the CPU (and
     # takes it back) by a spinning shared event, not a command-buffer
@@ -1018,6 +1040,9 @@ def rank_env(spec: dict, files: dict, selfheal: bool) -> dict:
     # 94 -> 25 ms. exo sets it for every runner.
     env = {"PYTHONUNBUFFERED": "1", "MLX_RANK": str(spec["rank"]),
            "MLX_METAL_FAST_SYNCH": "1"}
+    bell = bell_address(spec)
+    if bell:
+        env["KNURLOGIC_BELL"] = bell
     if spec["link"] == "ring":
         env["MLX_HOSTFILE"] = files["hostfile"]
     else:
