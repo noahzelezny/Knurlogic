@@ -263,7 +263,15 @@ class Glm5NextLinearAttention(nn.Module):
         conv_input = mx.concatenate([conv_state, mixed], axis=1)
         if cache is not None:
             cache[0] = mx.contiguous(conv_input[:, -(self.conv_kernel_size - 1) :, :])
-        conv_out = nn.silu(self.conv1d(conv_input))
+        # The conv in float32, silu, then the model dtype: the reference
+        # keeps conv1d in float32 (_keep_in_fp32_modules_strict) and casts
+        # only causal_conv1d_fn's output (edit 7)
+        in_dtype = conv_input.dtype
+        conv_out = nn.silu(
+            mx.conv1d(conv_input.astype(mx.float32),
+                      self.conv1d.weight.astype(mx.float32),
+                      groups=self.conv_dim)
+        ).astype(in_dtype)
 
         q, k, v = mx.split(conv_out, [self.qkv_dim, 2 * self.qkv_dim], axis=-1)
         q = q.reshape(B, S, self.num_heads, self.head_dim)
@@ -272,22 +280,28 @@ class Glm5NextLinearAttention(nn.Module):
 
         fg = self.forget_gate
         a = fg.f_b_proj(fa_o).reshape(B, S, self.num_heads, self.head_dim)
-        in_dtype = q.dtype
-        q = (_l2norm(q.astype(mx.float32)) * (self.head_dim**-0.5)).astype(in_dtype)
-        k = _l2norm(k.astype(mx.float32)).astype(in_dtype)
+        # q and k l2-normed and scaled in float32 and kept float32 into the
+        # recurrence, as the reference's KDA (it casts q, k, v, g, beta to
+        # float32 first); the forget gate's a + dt_bias in float32 (its
+        # forget_gate.float() + dt_bias.float()); the output back to the
+        # model dtype before the gated norm (core_attn_out.to(initial_dtype))
+        # (edit 7)
+        q = _l2norm(q.astype(mx.float32)) * (self.head_dim**-0.5)
+        k = _l2norm(k.astype(mx.float32))
 
         state = cache[1] if cache is not None else None
         out, state = gated_delta_update(
             q,
             k,
             v,
-            a,
+            a.astype(mx.float32),
             b_o,
             fg.A_log.reshape(self.num_heads, 1),
-            fg.dt_bias.reshape(self.num_heads, self.head_dim),
+            fg.dt_bias.astype(mx.float32).reshape(self.num_heads, self.head_dim),
             state=state,
             lower_bound=fg.safe_gate_lower_bound,
         )
+        out = out.astype(in_dtype)
         if cache is not None:
             cache[1] = state
             cache.advance(S)
@@ -688,6 +702,19 @@ class Glm5NextSparseAttention(nn.Module):
         return self.o_proj(output)
 
 
+@mx.compile
+def _hc_expand(x, residual, post, comb):
+    """The mHC expand in the model dtype, as the reference's decoder layer
+    (`post.to(dtype)`, `comb.to(dtype)`, then bf16 products and sum,
+    modeling 1316-1317 / 1325-1326): post and comb are rounded to the
+    model dtype first. mlx-vlm's hc_expand kept them float32 throughout
+    (edit 8). Exact in float32."""
+    dt = x.dtype
+    return post.astype(dt)[..., None] * x[:, :, None, :] + mx.matmul(
+        comb.astype(dt).swapaxes(-1, -2), residual
+    )
+
+
 class Glm5NextDecoderLayer(nn.Module):
     def __init__(self, config: TextConfig, layer_idx: int):
         super().__init__()
@@ -723,7 +750,7 @@ class Glm5NextDecoderLayer(nn.Module):
         residual = x
         xc, post, comb = self.attn_hc(x)
         r = self.self_attn(self.input_layernorm(xc), mask, cache)
-        x = hc_expand(r, residual, post, comb)
+        x = _hc_expand(r, residual, post, comb)
         # Compile the FFN block only for single-stream decode (B=1, S=1) -- the shape it
         # was validated on and where its win lives. Compiling the 288-expert MoE at a
         # batched or prefill shape spikes memory (it can OOM alongside the resident
@@ -739,7 +766,7 @@ class Glm5NextDecoderLayer(nn.Module):
         residual = x
         xc, post, comb = self.ffn_hc(x)
         m = self.mlp(self.post_attention_layernorm(xc))
-        return hc_expand(m, residual, post, comb)
+        return _hc_expand(m, residual, post, comb)
 
 
 class Glm5NextModel(nn.Module):
@@ -868,8 +895,12 @@ class LanguageModel(nn.Module):
 
     @property
     def cast_predicate(self):
+        # the reference's _keep_in_fp32_modules_strict stay float32 when a
+        # checkpoint is converted (edit 7)
+        keep = ("e_score_correction_bias", "conv1d", "dt_bias", "A_log")
+
         def predicate(k):
-            return "e_score_correction_bias" not in k
+            return not any(n in k for n in keep)
 
         return predicate
 
