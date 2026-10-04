@@ -108,10 +108,11 @@ class _Attention(nn.Module):
         self.eps = args.rms_norm_eps
         self.scale = hd ** -0.5
         self.wq_a = nn.Linear(D, args.q_lora_rank, bias=False)
-        self.q_norm = nn.RMSNorm(args.q_lora_rank, eps=self.eps)
+        # the trunk's norms: the reference's, one rounding (edit 26)
+        self.q_norm = arch.RMSNorm(args.q_lora_rank, eps=self.eps)
         self.wq_b = nn.Linear(args.q_lora_rank, H * hd, bias=False)
         self.wkv = nn.Linear(D, hd, bias=False)
-        self.kv_norm = nn.RMSNorm(hd, eps=self.eps)
+        self.kv_norm = arch.RMSNorm(hd, eps=self.eps)
         self.attn_sink = mx.zeros((H,), dtype=mx.float32)
         self.wo_a = nn.Linear(H * hd // self.n_groups,
                               self.n_groups * self.o_lora_rank, bias=False)
@@ -125,6 +126,7 @@ class _Attention(nn.Module):
         self._fp8 = arch.fp8_simulate_nope
         self._act = arch.fp8_act
         self._norm_act = arch.rms_norm_act
+        self._q_norm = arch.q_head_norm
         self._sdpa = arch.scaled_dot_product_attention
 
     def main_kv(self, main_x, pos):
@@ -147,7 +149,8 @@ class _Attention(nn.Module):
         q = self.wq_b(self._norm_act(self.wq_a(xq), self.q_norm.weight,
                                      self.eps, keep=False))
         q = q.reshape(B, K, self.n_heads, self.head_dim).transpose(0, 2, 1, 3)
-        q = _rope(mx.fast.rms_norm(q, None, self.eps), self.rope, pos)
+        # the per-head q norm in q's dtype op for op (trunk edit 29)
+        q = _rope(self._q_norm(q, self.eps), self.rope, pos)
         kv = self._kv(xq, pos)
         keys = mx.concatenate([window.astype(kv.dtype), kv], axis=1)[:, None]
         o = self._sdpa(q, keys, keys, cache=None, scale=self.scale,
@@ -179,8 +182,8 @@ class _Stage(nn.Module):
         D, eps = args.hidden_size, args.rms_norm_eps
         hc = (D, args.hc_mult, eps, args.hc_sinkhorn_iters, args.hc_eps)
         self.attn = _Attention(arch, args)
-        self.attn_norm = nn.RMSNorm(D, eps=eps)
-        self.ffn_norm = nn.RMSNorm(D, eps=eps)
+        self.attn_norm = arch.RMSNorm(D, eps=eps)
+        self.ffn_norm = arch.RMSNorm(D, eps=eps)
         self._norm_act = arch.rms_norm_act
         # the official layer id: never hash-routed, bias_vl with vision
         self.ffn = arch.DeepseekV4MoE(skel, args.num_hidden_layers + stage)
@@ -189,10 +192,10 @@ class _Stage(nn.Module):
         if stage == 0:
             n = len(args.dspark_target_layer_ids)
             self.main_proj = nn.Linear(n * D, D, bias=False)
-            self.main_norm = nn.RMSNorm(D, eps=eps)
+            self.main_norm = arch.RMSNorm(D, eps=eps)
         if stage == n_stages - 1:
             R = args.dspark_markov_rank
-            self.norm = nn.RMSNorm(D, eps=eps)
+            self.norm = arch.RMSNorm(D, eps=eps)
             self.hc_head = arch.HyperHead(D, args.hc_mult, eps, args.hc_eps)
             self.markov_head = _Markov(args.vocab_size, R)
             self.confidence_head = _Confidence(D + R)
@@ -452,7 +455,8 @@ class DSparkHead:
             h = st(h, win, mask, pos, ids)
         last = self.m.stages[-1]
         x = last.hc_head(h)
-        return x, self.model.lm_head(last.norm(x))
+        # float32 logits, as the reference's head (trunk edit 24)
+        return x, self.arch.head_logits(self.model.lm_head, last.norm(x))
 
     def markov(self, prev):
         """prev [B] -> (logit bias [B, V] float32, embedding [B, R])."""
