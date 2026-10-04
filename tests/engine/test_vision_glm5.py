@@ -270,3 +270,86 @@ def test_preprocess_normalizes_like_the_reference_processor(tmp_path):
         {"image_processor": {"image_mean": [0.5] * 3, "image_std": [0.5] * 3}}))
     other = Glm5VisionFamily(glm5_tiny_config(), [0.5] * 3, [0.5] * 3)
     assert other.spec.proc_hash != fam.spec.proc_hash
+
+
+def _vision_golden():
+    """tests/support/goldens/build_glm5_next_vision.py: HF transformers
+    5.16.1's Glm5NextImageProcessor + Glm5NextVisionModel on a 168x112
+    four-colour-quadrant image, tiny random float32 tower."""
+    import json
+
+    import numpy as np
+
+    g = np.load(ROOT / "tests/support/goldens/glm5_next_vision.npz")
+    cfg = {"vision_config": json.loads(str(g["config"])),
+           "image_token_id": 7}
+    return g, cfg
+
+
+def test_preprocess_matches_reference_processor_patch_order():
+    """Glm5NextImageProcessor lays patches out in merge-window order (each
+    2x2 window's four patches consecutive), the order the tower's rope and
+    downsample assume. Raster order scrambled every image's layout on
+    GLM-5.3-Flash (one centred circle read as two ovals)."""
+    import numpy as np
+    from PIL import Image
+
+    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
+
+    g, cfg = _vision_golden()
+    fam = Glm5VisionFamily(cfg)
+    px, ref = fam.preprocess(Image.fromarray(g["image"]), "sha")
+    assert tuple(px["grid_thw"]) == tuple(g["image_grid_thw"][0])
+    assert ref.n_tokens == 24
+    assert np.abs(px["pixel_values"] - g["pixel_values"]).max() < 1e-4
+
+
+@pytest.mark.parametrize("i", range(4))
+def test_preprocess_resizes_like_the_reference_processor(i, tmp_path):
+    """Glm5NextImageProcessor keeps the aspect ratio, pads to a multiple of
+    28 and holds an image to min..max_image_tokens (read here from a
+    processor_config.json, as `build` does): a padded 500x300, a 20x30
+    under the minimum, and two over a 64-token maximum. Grid, token count
+    and pixels match the PIL processor to float rounding and the default
+    torchvision one to within its antialiased-bicubic rounding."""
+    import json
+
+    import numpy as np
+    from PIL import Image
+
+    from knurlogic.engine.families.glm5 import vision as glm5_vision
+
+    g, cfg = _vision_golden()
+    sys.path.insert(0, str(ROOT / "tests/support/goldens"))
+    from build_glm5_next_vision import gradient
+
+    w, h, max_tok = (int(v) for v in g["sizes"][i])
+    (tmp_path / "processor_config.json").write_text(json.dumps(
+        {"image_processor": {"max_image_tokens": max_tok,
+                             "min_image_tokens": 16}}))
+    fam = glm5_vision.build(str(tmp_path), None, cfg)
+    px, ref = fam.preprocess(Image.fromarray(gradient(w, h)), "sha")
+    grid = tuple(int(v) for v in g[f"size_{i}_grid"])
+    assert tuple(px["grid_thw"]) == grid
+    assert ref.n_tokens == grid[1] * grid[2] // 4 <= max_tok
+    assert np.abs(px["pixel_values"] - g[f"size_{i}_pil"]).max() < 1e-4
+    assert np.abs(px["pixel_values"] - g[f"size_{i}_tv"]).max() < 0.1
+
+
+def test_tower_matches_reference_on_same_weights():
+    """preprocess + tower + merger vs HF's Glm5NextVisionModel, float32."""
+    import mlx.core as mx
+    import numpy as np
+    from mlx.utils import tree_unflatten
+    from PIL import Image
+
+    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
+
+    g, cfg = _vision_golden()
+    fam = Glm5VisionFamily(cfg)
+    tower = fam._build_tower()
+    w = {k[3:]: mx.array(g[k]) for k in g.files if k.startswith("w::")}
+    tower.update(tree_unflatten(list(tower.sanitize(w).items())))
+    px, ref = fam.preprocess(Image.fromarray(g["image"]), "sha")
+    feats = np.array(fam.encode(px, ref).feats)
+    assert np.abs(feats - g["pooler_output"]).max() < 1e-3
