@@ -419,3 +419,20 @@ def test_drafting_over_a_quantized_family_cache_matches_plain_steps(
                                    prefill_step_size=16), prompts, 30)
     assert stats["steps"] > 0
     assert draft == plain
+
+
+def test_the_glm_head_builds_the_trunks_moe():
+    """The head's layer (45) has a trunk MoE layer's weight names and
+    shapes, and is built as one: Glm5NextMoE, with the clamped SwiGLU and
+    float32 router of glm5_next edits 1-2 (it was mlx-vlm's unclamped
+    DeepseekV32MoE)."""
+    import importlib
+
+    from knurlogic.engine.families.glm5.heads.glm5 import MTPHeadGlm5
+    model = _family("glm5_next")
+    arch = importlib.import_module(type(model).__module__)
+    h = MTPHeadGlm5(model, arch)
+    assert type(h.mlp).__name__ == "Glm5NextMoE"
+    assert type(h.mlp) is type(next(
+        l.mlp for l in model.model.layers
+        if type(l.mlp).__name__ == "Glm5NextMoE"))

@@ -46,7 +46,15 @@ GLM-5.3
 * Images work: they were silently ignored (the image rows never reached
   the model, one Mac or split), their patches are laid out as the model
   expects (one circle read as two ovals before), and an image is sized as
-  GLM's own processor sizes it (aspect kept, 16 to 8000 tokens).
+  GLM's own processor sizes it (aspect kept, 16 to 8000 tokens), framed
+  by <|begin_of_image|> / <|end_of_image|> as its template frames it.
+* The MTP draft head computes its layer as the model does (the SwiGLU
+  clamp and float32 router): drafts closer to the model's own tokens.
+
+Qwen3.8-Flash-Next
+* With thinking off it samples with the set Qwen publishes for that mode
+  (temperature 0.7, top_p 0.8, top_k 20, presence penalty 1.5), as
+  Qwen3.5 / 3.6 already did.
 
 DeepSeek-V4
 * DSpark drafting is faster: no second forward to roll back a step, and it

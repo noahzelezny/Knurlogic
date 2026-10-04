@@ -207,7 +207,12 @@ class Glm5VisionFamily:
         return EncodedImage(ref=ref, feats=feats)
 
     def placeholder_text(self, ref) -> str:
-        return "<|image|>"
+        # What the maker's template emits for an image part (its emit_image
+        # macro): <|begin_of_image|>, ONE <|image|> (key.expand_pads widens
+        # it to n_tokens), <|end_of_image|>. The placeholder reaches the
+        # template as text, which bypasses that macro, so the framing is
+        # ours to add, as gemma4's is.
+        return "<|begin_of_image|><|image|><|end_of_image|>"
 
     # -- embed / positions / chunking -------------------------------------
 
