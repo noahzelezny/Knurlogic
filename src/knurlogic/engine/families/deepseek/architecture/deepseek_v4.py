@@ -434,10 +434,12 @@ def _make_swiglu_act_kernel():
 
 def _make_rms_norm_act_kernel():
     """(y, yq) = (rms_norm(x, w), act_quant(y)) per row of D (whole
-    128-blocks, at most 4096; the first D of rows STRIDE apart): one
+    128-blocks, at most 4096; D columns from OFF of rows STRIDE apart): one
     threadgroup a row, a simdgroup a block.
-    y is mx.fast.rms_norm's arithmetic (w * T(x * rsqrt(mean(x^2) + eps)),
-    float32 accumulation); OUT_Y = false writes yq alone."""
+    knurlogic edit 26: y is the reference RMSNorm's arithmetic,
+    T(float(w) * (x * rsqrt(mean(x^2) + eps))) in float32 rounded once
+    (it was mx.fast.rms_norm's T(T(x * rsqrt(..)) * w), two roundings);
+    OUT_Y = false writes yq alone, OUT_Q = false y alone."""
     if mx.default_device() != mx.gpu or not mx.metal.is_available():
         return None
     src = """
@@ -446,7 +448,7 @@ def _make_rms_norm_act_kernel():
         uint lane = thread_index_in_simdgroup;
         uint r = threadgroup_position_in_grid.x;
         const uint NB = D / 128;
-        auto src = x + r * STRIDE + sg * 128;
+        auto src = x + r * STRIDE + OFF + sg * 128;
         float v[4];
         float ss = 0.0f;
         for (uint k = 0; k < 4; ++k) {
@@ -461,13 +463,15 @@ def _make_rms_norm_act_kernel():
         float n = metal::precise::rsqrt(tot / D + eps[0]);
         for (uint k = 0; k < 4; ++k) {
             uint j = sg * 128 + lane + 32 * k;
-            T t = static_cast<T>(static_cast<T>(v[k] * n) * w[j]);
+            T t = static_cast<T>(static_cast<float>(w[j]) * (v[k] * n));
             if (OUT_Y) y[r * D + j] = t;
             v[k] = static_cast<float>(t);
         }
-        dsv4_fp8_block128(v);
-        for (uint k = 0; k < 4; ++k)
-            yq[r * D + sg * 128 + lane + 32 * k] = static_cast<T>(v[k]);
+        if (OUT_Q) {
+            dsv4_fp8_block128(v);
+            for (uint k = 0; k < 4; ++k)
+                yq[r * D + sg * 128 + lane + 32 * k] = static_cast<T>(v[k]);
+        }
     """
     return mx.fast.metal_kernel(
         name="dsv4_rms_norm_act", input_names=["x", "w", "eps"],
@@ -530,22 +534,73 @@ def swiglu_act(gate: mx.array, up: mx.array, limit: float,
     )[0]
 
 
+@mx.compile
+def _rms_norm_ops(x: mx.array, w: mx.array, eps: float) -> mx.array:
+    """rms_norm's op graph (no Metal, or a width the kernel does not
+    take): float32 throughout, rounded once."""
+    y = mx.fast.rms_norm(x.astype(mx.float32), None, eps)
+    return (w.astype(mx.float32) * y).astype(x.dtype)
+
+
+def _rms_norm_kernel_takes(x: mx.array, D: int) -> bool:
+    return not (_rms_norm_act_kernel is None or D % _ACT_BLOCK or D > 4096
+                or x.size == 0)
+
+
+def rms_norm(x: mx.array, w: mx.array, eps: float,
+             width: Optional[int] = None, offset: int = 0) -> mx.array:
+    """knurlogic edit 26: model.py's RMSNorm (Flash 191-196 / Vision-Exp
+    206-211): x in float32, x * rsqrt(mean(x^2) + eps), times the weight
+    in float32 (the reference holds it float32), back in x's dtype -- ONE
+    rounding. mx.fast.rms_norm with a weight rounds x * rsqrt to x's
+    dtype first and the product again (two roundings: a quarter of bf16
+    outputs an ulp off). width / offset: x[..., offset:offset + width],
+    read in place."""
+    W = x.shape[-1]
+    D = W - offset if width is None else width
+    if not _rms_norm_kernel_takes(x, D):
+        return _rms_norm_ops(x[..., offset:offset + D], w, eps)
+    return _rms_norm_act_kernel(
+        inputs=[x, w, _scalar(eps)],
+        template=[("T", x.dtype), ("D", D), ("STRIDE", W), ("OFF", offset),
+                  ("OUT_Y", True), ("OUT_Q", False)],
+        grid=(x.size // W * (D // 4), 1, 1), threadgroup=(D // 4, 1, 1),
+        output_shapes=[(*x.shape[:-1], D), (1,)],
+        output_dtypes=[x.dtype, x.dtype],
+    )[0]
+
+
+class RMSNorm(nn.Module):
+    """knurlogic edit 26: the reference's RMSNorm (`rms_norm`, one
+    rounding) in place of nn.RMSNorm wherever a norm has a weight; the
+    same parameter (`weight`) and `eps`."""
+
+    def __init__(self, dims: int, eps: float = 1e-6):
+        super().__init__()
+        self.weight = mx.ones((dims,))
+        self.eps = eps
+
+    def __call__(self, x: mx.array) -> mx.array:
+        return rms_norm(x, self.weight, self.eps)
+
+
 def rms_norm_act(x: mx.array, w: mx.array, eps: float, keep: bool = True,
                  width: Optional[int] = None):
     """knurlogic edit 21: rms_norm(x, w, eps) and the same through
     act_quant, in one dispatch -- the norm's output feeds FP8 / FP4
     linears (rounded) and others (as it is). keep=False: the rounded one
-    alone. width: x[..., :width] (read in place, not copied)."""
+    alone. width: x[..., :width] (read in place, not copied). The norm
+    rounds once (edit 26)."""
     W = x.shape[-1]
     D = W if width is None else width
     shape = (*x.shape[:-1], D)
-    if (_rms_norm_act_kernel is None or D % _ACT_BLOCK or D > 4096
-            or x.size == 0):
-        y = mx.fast.rms_norm(x[..., :D], w, eps)
+    if not _rms_norm_kernel_takes(x, D):
+        y = _rms_norm_ops(x[..., :D], w, eps)
         return (y, fp8_act(y)) if keep else fp8_act(y)
     y, yq = _rms_norm_act_kernel(
         inputs=[x, w, _scalar(eps)],
-        template=[("T", x.dtype), ("D", D), ("STRIDE", W), ("OUT_Y", keep)],
+        template=[("T", x.dtype), ("D", D), ("STRIDE", W), ("OFF", 0),
+                  ("OUT_Y", keep), ("OUT_Q", True)],
         grid=(x.size // W * (D // 4), 1, 1), threadgroup=(D // 4, 1, 1),
         output_shapes=[shape if keep else (1,), shape],
         output_dtypes=[x.dtype, x.dtype],
@@ -618,6 +673,179 @@ def fp4_simulate_rotated(x: mx.array) -> mx.array:
 
 
 # --------------------------------------------------------------------------- #
+# Float32 linears over bf16 weights (knurlogic edits 23-25)                   #
+# --------------------------------------------------------------------------- #
+#
+# The reference computes three linears in float32 from weights the
+# checkpoint stores bf16: the gate (`linear(x.float(), weight.float())`),
+# the head (ParallelHead holds its weight float32: `F.linear(x.float(),
+# weight)`) and the compressors' wkv / wgate (float32 Linears). A bf16
+# weight read as float32 is exact, as is a bf16 x: the products are exact
+# in float32 and only the float32 sum is rounding. MLX has no bf16 x bf16
+# -> float32 matmul and a float32 matmul would cast the weight every call
+# (the head's 1 GB to 2 GB), so a kernel reads the bf16 weight and
+# accumulates in float32 for the few rows a step has.
+
+
+def _make_f32_linear_kernel():
+    """y [M, N] float32 = x [M, K] @ w [N, K].T, w read as its own dtype
+    (bf16) and converted exactly, x as float, float32 fma accumulation:
+    C consecutive outputs for all M rows (w read once for every row), a
+    lane 8 contiguous weights a 256-wide step, then simd_sum. KS = 1: a
+    threadgroup's SG simdgroups each own C outputs and the whole K (the
+    head: 129280 outputs); KS = SG > 1: they split K into KS slices of
+    the same C outputs, summed in slice order through threadgroup memory
+    (the gate's 256 and the compressors' 512-2048 outputs: one simdgroup
+    an output over 4096 would leave the GPU idle). The order depends on
+    (N, K) alone, never on M: a row's result is the same in any batch.
+    Memory-bound like a GEMV."""
+    if mx.default_device() != mx.gpu or not mx.metal.is_available():
+        return None
+    src = """
+        uint sg = simdgroup_index_in_threadgroup;
+        uint lane = thread_index_in_simdgroup;
+        const uint ks = (KS > 1) ? sg : 0;
+        const uint KL = K / KS;
+        uint n0 = (KS > 1) ? threadgroup_position_in_grid.x * C
+                           : (threadgroup_position_in_grid.x * SG + sg) * C;
+        if (n0 >= N) return;
+        float acc[M][C];
+        for (uint m = 0; m < M; ++m)
+            for (uint c = 0; c < C; ++c) acc[m][c] = 0.0f;
+        for (uint k = ks * KL + lane * 8; k < (ks + 1) * KL; k += 256) {
+            float wv[C][8];
+            for (uint c = 0; c < C; ++c) {
+                auto p = w + metal::min(n0 + c, uint(N - 1)) * K + k;
+                for (uint j = 0; j < 8; ++j) wv[c][j] = static_cast<float>(p[j]);
+            }
+            for (uint m = 0; m < M; ++m) {
+                auto q = x + m * K + k;
+                float xv[8];
+                for (uint j = 0; j < 8; ++j) xv[j] = static_cast<float>(q[j]);
+                for (uint c = 0; c < C; ++c) {
+                    float a = acc[m][c];
+                    for (uint j = 0; j < 8; ++j) a = metal::fma(xv[j], wv[c][j], a);
+                    acc[m][c] = a;
+                }
+            }
+        }
+        if (KS == 1) {
+            for (uint m = 0; m < M; ++m)
+                for (uint c = 0; c < C; ++c) {
+                    float s = simd_sum(acc[m][c]);
+                    if (lane == 0 && n0 + c < N) y[m * N + n0 + c] = s;
+                }
+        } else {
+            threadgroup float part[KS][M * C];
+            for (uint m = 0; m < M; ++m)
+                for (uint c = 0; c < C; ++c) {
+                    float s = simd_sum(acc[m][c]);
+                    if (lane == 0) part[ks][m * C + c] = s;
+                }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            if (sg == 0) {
+                for (uint i = lane; i < M * C; i += 32) {
+                    float s = part[0][i];
+                    for (uint j = 1; j < KS; ++j) s += part[j][i];
+                    uint m = i / C, c = i % C;
+                    if (n0 + c < N) y[m * N + n0 + c] = s;
+                }
+            }
+        }
+    """
+    return mx.fast.metal_kernel(
+        name="dsv4_f32_linear", input_names=["x", "w"], output_names=["y"],
+        source=src)
+
+
+_f32_linear_kernel = _make_f32_linear_kernel()
+#: rows one kernel dispatch takes (its accumulators are registers)
+_F32_ROWS = 16
+#: past this many rows the kernel's re-reads of w cost more than a float32
+#: matmul over a cast weight
+_F32_KERNEL_MAX_ROWS = 64
+#: weight elements cast to float32 at a time on the op path (256 MB)
+_F32_CAST_CHUNK = 1 << 26
+
+
+#: up to this many outputs the kernel splits K across a threadgroup
+_F32_SPLIT_N = 8192
+
+
+def _f32_linear_rows(x2: mx.array, w: mx.array) -> mx.array:
+    M, K = x2.shape
+    N = w.shape[0]
+    if N <= _F32_SPLIT_N and K % (8 * 256) == 0:
+        # one output a threadgroup of 8 K-slices
+        C, SG, KS = 1, 8, 8
+        groups = -(-N // C)
+    else:
+        C, SG = (2, 8) if M <= 8 else (4, 4)
+        KS = 1
+        groups = -(-N // (C * SG))
+    return _f32_linear_kernel(
+        inputs=[x2, w],
+        template=[("M", M), ("K", K), ("N", N), ("C", C), ("SG", SG),
+                  ("KS", KS)],
+        grid=(groups * SG * 32, 1, 1), threadgroup=(SG * 32, 1, 1),
+        output_shapes=[(M, N)], output_dtypes=[mx.float32])[0]
+
+
+def f32_linear(x: mx.array, w: mx.array) -> mx.array:
+    """knurlogic edits 23-25: x [..., K] @ w [N, K].T in float32, w (bf16)
+    read as float32 -- the reference's F.linear(x.float(), w.float()).
+    The kernel for up to _F32_KERNEL_MAX_ROWS rows on the GPU; otherwise
+    a float32 matmul over the weight cast a chunk of rows at a time."""
+    K = x.shape[-1]
+    N = w.shape[0]
+    lead = x.shape[:-1]
+    M = 1
+    for n in lead:
+        M *= n
+    if w.dtype == mx.float32:
+        return x.astype(mx.float32) @ w.T
+    if (_f32_linear_kernel is not None and 0 < M <= _F32_KERNEL_MAX_ROWS
+            and K % 8 == 0 and w.dtype in (mx.bfloat16, mx.float16)):
+        x2 = x.reshape(M, K)
+        parts = [_f32_linear_rows(x2[i:i + _F32_ROWS], w)
+                 for i in range(0, M, _F32_ROWS)]
+        y = parts[0] if len(parts) == 1 else mx.concatenate(parts, axis=0)
+        return y.reshape(*lead, N)
+    xf = x.astype(mx.float32)
+    step = max(1, _F32_CAST_CHUNK // K)
+    if N <= step:
+        return xf @ w.astype(mx.float32).T
+    return mx.concatenate(
+        [xf @ w[i:i + step].astype(mx.float32).T for i in range(0, N, step)],
+        axis=-1)
+
+
+def linear_f32(layer, x: mx.array) -> mx.array:
+    """knurlogic edits 24-25: a Linear (dense or MLX-quantized) applied in
+    float32: x as float32 into quantized_matmul for a quantized one (its
+    dequantized weight in float32, not rounded to bf16), f32_linear for a
+    dense one."""
+    if isinstance(layer, nn.QuantizedLinear):
+        y = mx.quantized_matmul(
+            x.astype(mx.float32), layer.weight, scales=layer.scales,
+            biases=layer.biases, transpose=True,
+            group_size=layer.group_size, bits=layer.bits, mode=layer.mode)
+    else:
+        y = f32_linear(x, layer.weight)
+    if "bias" in layer:
+        y = y + layer["bias"].astype(mx.float32)
+    return y
+
+
+def head_logits(lm_head, h: mx.array) -> mx.array:
+    """knurlogic edit 24: the logits as the reference's ParallelHead
+    computes them (Flash 711-716, Vision-Exp 779-785): its weight held in
+    float32, `F.linear(x.float(), weight)`, float32 logits. The trunk's,
+    the MTP head's and the DSpark head's."""
+    return linear_f32(lm_head, h)
+
+
+# --------------------------------------------------------------------------- #
 # Sinkhorn-based mHC (Manifold-constrained Hyper-Connections)                 #
 # --------------------------------------------------------------------------- #
 
@@ -659,6 +887,8 @@ def _make_hc_split_sinkhorn_kernel():
     # Single Metal kernel doing sigmoid+softmax+N Sinkhorn iters in registers.
     # Unrolls on HC and ITERS as template params, so each layer's HC call is
     # one dispatch instead of ~40 from the compiled-op path.
+    # knurlogic edit 27: the softmax's exp accurate and its normalization
+    # a division, as the fused kernel below.
     if mx.default_device() != mx.gpu or not mx.metal.is_available():
         return None
 
@@ -679,13 +909,13 @@ def _make_hc_split_sinkhorn_kernel():
         for (int i = 0; i < HC; ++i) {
             float z = static_cast<float>(mix[i]) * pre_scale
                 + static_cast<float>(base[i]);
-            pre_out[i] = 1.0f / (1.0f + metal::fast::exp(-z)) + epsv;
+            pre_out[i] = 1.0f / (1.0f + metal::precise::exp(-z)) + epsv;
         }
         for (int i = 0; i < HC; ++i) {
             int off = HC + i;
             float z = static_cast<float>(mix[off]) * post_scale
                 + static_cast<float>(base[off]);
-            post_out[i] = 2.0f / (1.0f + metal::fast::exp(-z));
+            post_out[i] = 2.0f / (1.0f + metal::precise::exp(-z));
         }
 
         float c[HC * HC];
@@ -702,14 +932,13 @@ def _make_hc_split_sinkhorn_kernel():
             float row_sum = 0.0f;
             for (int j = 0; j < HC; ++j) {
                 int cidx = i * HC + j;
-                float v = metal::fast::exp(c[cidx] - row_max);
+                float v = metal::precise::exp(c[cidx] - row_max);
                 c[cidx] = v;
                 row_sum += v;
             }
-            float inv_sum = 1.0f / row_sum;
             for (int j = 0; j < HC; ++j) {
                 int cidx = i * HC + j;
-                c[cidx] = c[cidx] * inv_sum + epsv;
+                c[cidx] = c[cidx] / row_sum + epsv;
             }
         }
         for (int j = 0; j < HC; ++j) {
@@ -849,8 +1078,8 @@ def _make_hc_sinkhorn_collapse_kernel():
 
             float pre_z  = mix[llane]      * pre_scale  + base[llane];
             float post_z = mix[HC + llane] * post_scale + base[HC + llane];
-            float pre_v  = 1.0f / (1.0f + metal::fast::exp(-pre_z)) + epsv;
-            float post_v = 2.0f / (1.0f + metal::fast::exp(-post_z));
+            float pre_v  = 1.0f / (1.0f + metal::precise::exp(-pre_z)) + epsv;
+            float post_v = 2.0f / (1.0f + metal::precise::exp(-post_z));
 
             if (lane < (uint)HC) {
                 pre_shared[lane] = pre_v;
@@ -864,23 +1093,24 @@ def _make_hc_sinkhorn_collapse_kernel():
 
             float row_max = metal::max(metal::max(v.x, v.y),
                                        metal::max(v.z, v.w));
-            float4 e = metal::fast::exp(v - row_max) * active;
-            float4 r = e * (1.0f / (e.x + e.y + e.z + e.w + epsv))
-                     + epsv * active;
+            // knurlogic edit 27: kernel.py's `comb.softmax(-1) + eps`,
+            // i.e. comb / row_sum + eps (the eps was inside the softmax's
+            // denominator); the exp accurate. The iterations keep their
+            // reciprocals (divisions there made the kernel ~1.5x slower
+            // for an ulp). A lane past HC holds zeros.
+            float4 e = metal::precise::exp(v - row_max) * active;
+            float row = e.x + e.y + e.z + e.w;
+            float4 r = (lane < (uint)HC) ? e / row + epsv : float4(0.0f);
 
-            float4 col_inv = 1.0f / (float4(
-                simd_sum(r.x), simd_sum(r.y),
-                simd_sum(r.z), simd_sum(r.w)
-            ) + epsv);
-            r *= col_inv;
+            float4 col = float4(simd_sum(r.x), simd_sum(r.y),
+                                simd_sum(r.z), simd_sum(r.w)) + epsv;
+            r *= 1.0f / col;
 
             for (int iter = 1; iter < ITERS; ++iter) {
-                r *= (1.0f / (r.x + r.y + r.z + r.w + epsv)) * active;
-                col_inv = 1.0f / (float4(
-                    simd_sum(r.x), simd_sum(r.y),
-                    simd_sum(r.z), simd_sum(r.w)
-                ) + epsv);
-                r *= col_inv;
+                r *= 1.0f / (r.x + r.y + r.z + r.w + epsv);
+                col = float4(simd_sum(r.x), simd_sum(r.y),
+                             simd_sum(r.z), simd_sum(r.w)) + epsv;
+                r *= 1.0f / col;
             }
 
             if (lane < (uint)HC) {
@@ -1996,9 +2226,15 @@ def _make_overlap_emit_kernel():
     """Single-dispatch overlap emit. Reads state_kv / state_score in the slot
     layout [B, 2*ratio, 2*head_dim] (prev window in [0..ratio), current window
     in [ratio..2*ratio)) and runs softmax-weighted-sum entirely in fp32
-    registers, casting to the input dtype only at the end. Used by the decode
-    emit path (S=1) so its output is bit-identical to the pre-refactor code,
-    which used this same kernel.
+    registers, casting to OUT_T only at the end. Used by the decode emit
+    path (S=1).
+    knurlogic edit 25: the state is float32 (the compressor's kv and score
+    are) and OUT_T the activations' dtype: the reference's `(kv_state *
+    score_state.softmax(dim=1)).sum(dim=1)` then `.to(dtype)`, one
+    rounding. Its arithmetic is mx.softmax's (fast exp, times 1 / sum)
+    and the prefill path's, so a token pooled by a decode step and by a
+    multi-token step is the same bits (the verify forwards of drafting
+    commit what plain steps would).
     """
     if mx.default_device() != mx.gpu or not mx.metal.is_available():
         return None
@@ -2049,11 +2285,12 @@ def _make_overlap_emit_kernel():
 _overlap_emit_kernel = _make_overlap_emit_kernel()
 
 
-def _overlap_emit(state_kv: mx.array, state_score: mx.array, ratio: int) -> mx.array:
-    """Single overlap-emit pool row. Falls back to a pure-MLX equivalent if the
-    Metal kernel isn't available — the fallback's accumulation order differs by
-    a single bf16 ULP, so the kernel path is required for byte-identical
-    parity with the pre-refactor decode code."""
+def _overlap_emit(state_kv: mx.array, state_score: mx.array, ratio: int,
+                  out_dtype=None) -> mx.array:
+    """Single overlap-emit pool row, in out_dtype (default the state's).
+    Falls back to a pure-MLX equivalent if the Metal kernel isn't
+    available (float32 throughout too, edit 25; its sum order differs)."""
+    out_dtype = out_dtype or state_kv.dtype
     if _overlap_emit_kernel is None:
         B, _, coff_d = state_kv.shape
         d = coff_d // 2
@@ -2064,9 +2301,9 @@ def _overlap_emit(state_kv: mx.array, state_score: mx.array, ratio: int) -> mx.a
         second_s = state_score[:, ratio:, d:]
         merged_score = mx.concatenate([first_s, second_s], axis=1)
         weights = mx.softmax(
-            merged_score.astype(mx.float32), axis=1, precise=True
-        ).astype(merged_kv.dtype)
-        return (merged_kv * weights).sum(axis=1)
+            merged_score.astype(mx.float32), axis=1, precise=True)
+        return (merged_kv.astype(mx.float32) * weights).sum(
+            axis=1).astype(out_dtype)
 
     B = state_kv.shape[0]
     D = state_kv.shape[-1] // 2
@@ -2075,22 +2312,12 @@ def _overlap_emit(state_kv: mx.array, state_score: mx.array, ratio: int) -> mx.a
     grid = ((total + tg - 1) // tg) * tg
     return _overlap_emit_kernel(
         inputs=[state_kv, state_score],
-        template=[("B", B), ("RATIO", ratio), ("D", D), ("OUT_T", state_kv.dtype)],
+        template=[("B", B), ("RATIO", ratio), ("D", D), ("OUT_T", out_dtype)],
         grid=(grid, 1, 1),
         threadgroup=(tg, 1, 1),
         output_shapes=[(B, D)],
-        output_dtypes=[state_kv.dtype],
+        output_dtypes=[out_dtype],
     )[0]
-
-
-@mx.compile
-def _compressor_wkv_gate_split_quant(x, w, s, group_size, bits, split):
-    """Fused mxfp4 wkv_gate matmul + slice into kv/score halves."""
-    kv_gate = mx.quantized_matmul(
-        x, w, scales=s, transpose=True,
-        group_size=group_size, bits=bits, mode="mxfp4",
-    )
-    return kv_gate[..., :split], kv_gate[..., split:]
 
 
 @mx.compile
@@ -2125,8 +2352,9 @@ def _ragged_prev(old, win, lens, fill):
 def _compressor_norm_strided_rope(
         c, norm_w, norm_eps, offset, rd, scale, freqs, rotate):
     """Fused: RMSNorm + strided rope on the last rd dims, then the
-    reference's low-precision simulation of the row (_compressor_qat)."""
-    c = mx.fast.rms_norm(c, norm_w, norm_eps)
+    reference's low-precision simulation of the row (_compressor_qat).
+    The norm rounds once (edit 26)."""
+    c = rms_norm(c, norm_w, norm_eps)
     rotated = mx.fast.rope(
         c[..., -rd:], rd, traditional=True, base=None,
         scale=scale, offset=offset, freqs=freqs,
@@ -2188,7 +2416,7 @@ class Compressor(nn.Module):
         self._wkv_gate_split = coff * head_dim
         self.wkv_gate = nn.Linear(dim, 2 * coff * head_dim, bias=False)
         self.ape = mx.zeros((compress_ratio, coff * head_dim), dtype=mx.float32)
-        self.norm = nn.RMSNorm(head_dim, eps=rms_norm_eps)
+        self.norm = RMSNorm(head_dim, eps=rms_norm_eps)  # edit 26
         self.rope = rope  # shared with attention, applies compress_rope_theta + YaRN
 
     def _overlap_transform_kv(self, kv: mx.array) -> mx.array:
@@ -2279,17 +2507,14 @@ class Compressor(nn.Module):
         d = self.head_dim
         coff_d = self._coff * d
 
-        # Single fused matmul + slice into kv/score halves. Quantized mxfp4
-        # path collapses the two ops into one dispatch; everything else
-        # (bf16, affine-quantized, etc.) goes through the layer's normal
-        # __call__ and the slice fuses into the downstream graph.
-        wg = self.wkv_gate
-        if isinstance(wg, nn.QuantizedLinear) and wg.mode == "mxfp4":
-            kv, score = _compressor_wkv_gate_split_quant(
-                x, wg.weight, wg.scales, wg.group_size, wg.bits, self._wkv_gate_split,
-            )
-        else:
-            kv, score = _compressor_split(wg(x), self._wkv_gate_split)
+        # knurlogic edit 25: kv and score in float32 from here to the
+        # weighted sum, rounded once to x's dtype -- the reference's
+        # Compressor.forward ("compression need fp32": x.float() into its
+        # float32 wkv / wgate, + ape, softmax, sum, then .to(dtype); Flash
+        # 316-349, Vision-Exp 356-389). They were bf16 matmuls with bf16
+        # ape, softmax weights and sum. One fused wkv_gate matmul, sliced.
+        kv, score = _compressor_split(
+            linear_f32(self.wkv_gate, x), self._wkv_gate_split)
 
         # Append to the carry buffer; pull out the slice that's ready to be
         # folded into ratio-sized windows. ``pool_base`` is the raw-token
@@ -2341,7 +2566,8 @@ class Compressor(nn.Module):
                 prev_gate = mx.full(cur_kv.shape, float("-inf"), dtype=cur_kv.dtype)
             state_kv = mx.concatenate([prev_kv, cur_kv], axis=1)
             state_score = mx.concatenate([prev_gate, buf_score_with_ape], axis=1)
-            new_pooled = _overlap_emit(state_kv, state_score, ratio)[:, None, :]
+            new_pooled = _overlap_emit(
+                state_kv, state_score, ratio, x.dtype)[:, None, :]
             branch.prev_kv = _ragged_prev(branch.prev_kv, kv_win, lens, 0.0)
             branch.prev_gate = _ragged_prev(
                 branch.prev_gate, score_win, lens, float("-inf"))
@@ -2351,17 +2577,16 @@ class Compressor(nn.Module):
             kv_trans = self._overlap_transform_kv_runtime(kv_win, prev_kv)
             score_trans = self._overlap_transform_score_runtime(score_win, prev_score)
             weights = mx.softmax(
-                score_trans.astype(mx.float32), axis=2, precise=True
-            ).astype(kv_trans.dtype)
-            new_pooled = (kv_trans * weights).sum(axis=2)
+                score_trans.astype(mx.float32), axis=2, precise=True)
+            new_pooled = (kv_trans * weights).sum(axis=2).astype(x.dtype)
             branch.prev_kv = _ragged_prev(branch.prev_kv, kv_win, lens, 0.0)
             branch.prev_gate = _ragged_prev(
                 branch.prev_gate, score_win, lens, float("-inf"))
         else:
             weights = mx.softmax(
-                score_win.astype(mx.float32), axis=2, precise=True
-            ).astype(kv_win.dtype)
-            new_pooled = (kv_win * weights).sum(axis=2)[..., :d]
+                score_win.astype(mx.float32), axis=2, precise=True)
+            new_pooled = (kv_win * weights).sum(axis=2)[..., :d].astype(
+                x.dtype)
 
         if isinstance(pool_base, mx.array) and pool_base.ndim:
             # Per-row positions — can't use mx.fast.rope (it only takes a
@@ -2678,7 +2903,7 @@ def _attn_wqkv_quant_split_norm(x, w, s, group_size, bits, q_w, kv_w, q_lora, ep
         group_size=group_size, bits=bits, mode="mxfp4",
     )
     qr = rms_norm_act(qkv_a, q_w, eps, keep=False, width=q_lora)
-    kv = mx.fast.rms_norm(qkv_a[..., q_lora:], kv_w, eps)
+    kv = rms_norm(qkv_a, kv_w, eps, offset=q_lora)  # edit 26
     return qr, kv
 
 
@@ -2687,29 +2912,83 @@ def _attn_qkv_split_norm(qkv_a, q_w, kv_w, q_lora, eps):
     """Non-quant variant: slice + 2 RMSNorms (qr through act_quant, edit
     21)."""
     qr = rms_norm_act(qkv_a, q_w, eps, keep=False, width=q_lora)
-    kv = mx.fast.rms_norm(qkv_a[..., q_lora:], kv_w, eps)
+    kv = rms_norm(qkv_a, kv_w, eps, offset=q_lora)  # edit 26
     return qr, kv
+
+
+def _make_q_head_norm_kernel():
+    """y = q * rsqrt(mean(q^2) + eps) per row of D (a multiple of 32), each
+    op rounded to T as torch computes it on T tensors: one simdgroup a
+    row, a lane D / 32 elements in a fixed order (so a row's result does
+    not depend on how many rows a call has)."""
+    if mx.default_device() != mx.gpu or not mx.metal.is_available():
+        return None
+    src = """
+        uint lane = thread_index_in_simdgroup;
+        uint r = threadgroup_position_in_grid.x;
+        auto row = q + r * D;
+        float ss = 0.0f;
+        for (uint j = lane; j < D; j += 32) {
+            float v = static_cast<float>(row[j]);
+            ss += static_cast<float>(static_cast<T>(v * v));
+        }
+        ss = simd_sum(ss);
+        float m = static_cast<float>(static_cast<T>(ss / D));
+        float e = static_cast<float>(static_cast<T>(m + eps[0]));
+        float rr = static_cast<float>(
+            static_cast<T>(metal::precise::rsqrt(e)));
+        for (uint j = lane; j < D; j += 32)
+            y[r * D + j] = static_cast<T>(static_cast<float>(row[j]) * rr);
+    """
+    return mx.fast.metal_kernel(
+        name="dsv4_q_head_norm", input_names=["q", "eps"],
+        output_names=["y"], source=src)
+
+
+_q_head_norm_kernel = _make_q_head_norm_kernel()
+
+
+def q_head_norm(q: mx.array, eps: float) -> mx.array:
+    """knurlogic edit 29: the reference's per-head q norm, `q *=
+    torch.rsqrt(q.square().mean(-1, keepdim=True) + eps)` (Flash 498 /
+    Vision-Exp 539), in q's dtype op for op as torch computes it: each
+    op in float32 and rounded to q's dtype (the square, the mean --
+    accumulated in float32 --, the + eps, the rsqrt, the product).
+    mx.fast.rms_norm did it all in float32 and rounded once. In float32
+    the two are the same arithmetic."""
+    D = q.shape[-1]
+    if _q_head_norm_kernel is not None and D % 32 == 0 and q.size:
+        return _q_head_norm_kernel(
+            inputs=[q, _scalar(eps)], template=[("T", q.dtype), ("D", D)],
+            grid=(q.size // D * 32, 1, 1), threadgroup=(32, 1, 1),
+            output_shapes=[q.shape], output_dtypes=[q.dtype])[0]
+    f32 = mx.float32
+    dt = q.dtype
+    m = mx.mean(mx.square(q).astype(f32), axis=-1, keepdims=True).astype(dt)
+    r = mx.rsqrt((m.astype(f32) + eps).astype(dt).astype(f32)).astype(dt)
+    return q * r
 
 
 @mx.compile
 def _attn_q_proj_quant_norm(qr, w, s, group_size, bits, n_heads, head_dim, eps):
     """Fused mxfp4 wq_b matmul + reshape/transpose to [B, n_heads, S, head_dim]
-    + per-head RMSNorm (no learned weight)."""
+    + per-head RMSNorm (no learned weight; the reference's bf16
+    arithmetic, edit 29)."""
     q = mx.quantized_matmul(
         qr, w, scales=s, transpose=True,
         group_size=group_size, bits=bits, mode="mxfp4",
     )
     B, S = q.shape[0], q.shape[1]
-    q = q.reshape(B, S, n_heads, head_dim).transpose(0, 2, 1, 3)
-    return mx.fast.rms_norm(q, None, eps)
+    q = q_head_norm(q.reshape(B, S, n_heads, head_dim), eps)
+    return q.transpose(0, 2, 1, 3)
 
 
 @mx.compile
 def _attn_q_proj_norm(q_flat, n_heads, head_dim, eps):
-    """Non-quant variant: reshape/transpose + per-head RMSNorm."""
+    """Non-quant variant: reshape/transpose + per-head RMSNorm (edit 29)."""
     B, S = q_flat.shape[0], q_flat.shape[1]
-    q = q_flat.reshape(B, S, n_heads, head_dim).transpose(0, 2, 1, 3)
-    return mx.fast.rms_norm(q, None, eps)
+    q = q_head_norm(q_flat.reshape(B, S, n_heads, head_dim), eps)
+    return q.transpose(0, 2, 1, 3)
 
 
 @mx.compile
@@ -2799,9 +3078,9 @@ class V4Attention(nn.Module):
         self.wqkv_a = nn.Linear(
             self.dim, self.q_lora_rank + self.head_dim, bias=False
         )
-        self.q_norm = nn.RMSNorm(self.q_lora_rank, eps=self.eps)
+        self.q_norm = RMSNorm(self.q_lora_rank, eps=self.eps)  # edit 26
         self.wq_b = nn.Linear(self.q_lora_rank, self.n_heads * self.head_dim, bias=False)
-        self.kv_norm = nn.RMSNorm(self.head_dim, eps=self.eps)
+        self.kv_norm = RMSNorm(self.head_dim, eps=self.eps)
 
         self.attn_sink = mx.zeros((self.n_heads,), dtype=mx.float32)
 
@@ -2836,6 +3115,11 @@ class V4Attention(nn.Module):
         self._sink_cache = None
 
     def _sink_for(self, dtype) -> mx.array:
+        # knurlogic edit 28 (a recorded limit): the reference adds
+        # exp(attn_sink - max) with attn_sink float32; MLX's fused
+        # attention refuses float32 sinks beside bf16 queries, so they go
+        # in rounded to q's dtype (at most 0.0077 off on Flash's, moving an
+        # output by at most 0.77% of the sink's share; PROVENANCE.md)
         if self._sink_cache is None or self._sink_cache_dtype is not dtype:
             self._sink_cache = self.attn_sink.astype(dtype)
             self._sink_cache_dtype = dtype
@@ -3102,9 +3386,9 @@ class V4Attention(nn.Module):
 
 def _make_moe_gate_kernel():
     """Fused MoE gate post-matmul kernel. Takes pre-matmul ``scores [B,S,N_ROUTED]``
-    (bf16) and ``bias [N_ROUTED]`` (fp32) and returns ``(inds [B,S,TOP_K] int32,
-    weights [B,S,TOP_K] bf16)``. Does sqrtsoftplus + bias-add + top-k partial
-    sort + gather + renormalize in one dispatch.
+    (float32 since knurlogic edit 23) and ``bias [N_ROUTED]`` (fp32) and returns
+    ``(inds [B,S,TOP_K] int32, weights [B,S,TOP_K] OUT_T)``. Does sqrtsoftplus +
+    bias-add + top-k partial sort + gather + renormalize in one dispatch.
 
     Scoped to the ``sqrtsoftplus`` + no-hash case (the common DSV4 path); other
     score funcs fall back to the multi-op Python path.
@@ -3125,9 +3409,17 @@ def _make_moe_gate_kernel():
         float biased[N_ROUTED];
 
         for (int i = 0; i < N_ROUTED; ++i) {
+            // knurlogic edit 23: torch's softplus (threshold 20,
+            // log1p(exp(v)): log1p as log(u) * e / (u - 1)) and sqrt,
+            // accurate, on the float32 scores
             float v = static_cast<float>(s_ptr[i]);
-            float sp = (v > 20.0f) ? v : metal::fast::log(1.0f + metal::fast::exp(v));
-            activated[i] = metal::sqrt(sp);
+            float sp = v;
+            if (v <= 20.0f) {
+                float e = metal::precise::exp(v);
+                float u = 1.0f + e;
+                sp = (u == 1.0f) ? e : metal::precise::log(u) * (e / (u - 1.0f));
+            }
+            activated[i] = metal::precise::sqrt(sp);
             biased[i] = activated[i] + static_cast<float>(bias[i]);
         }
 
@@ -3159,10 +3451,9 @@ def _make_moe_gate_kernel():
             w[k] = activated[topk_idx[k]];
             sum += w[k];
         }
-        float scale_factor = rscale / (sum + 1e-20f);
-
         for (int k = 0; k < TOP_K; ++k) {
-            w_ptr[k] = static_cast<OUT_T>(w[k] * scale_factor);
+            // the reference's weights /= weights.sum(); weights *= scale
+            w_ptr[k] = static_cast<OUT_T>((w[k] / sum) * rscale);
             i_ptr[k] = topk_idx[k];
         }
     """
@@ -3253,6 +3544,14 @@ class MoEGate(nn.Module):
         if vl:
             self.bias_vl = mx.zeros((self.n_routed,), dtype=mx.float32)
 
+    def _scores(self, x: mx.array) -> mx.array:
+        """knurlogic edit 23: the reference's `linear(x.float(),
+        self.weight.float())` (Flash 565 / Vision-Exp 612): float32
+        scores from the bf16 weight read as float32 (f32_linear). They
+        were a bf16 matmul's on the kernel path: an expert's score off by
+        a bf16 ulp picks another top 6 for some tokens."""
+        return f32_linear(x, self.weight)
+
     def __call__(self, x: mx.array, input_ids: Optional[mx.array] = None,
                  image_mask: Optional[mx.array] = None):
         if image_mask is not None:
@@ -3263,7 +3562,7 @@ class MoEGate(nn.Module):
             and self.score_func == "sqrtsoftplus"
             and self.norm_topk_prob
         ):
-            scores_bf = x @ self.weight.T
+            scores = self._scores(x)
             B, S, _ = x.shape
             total = B * S
             tg = 32
@@ -3272,7 +3571,7 @@ class MoEGate(nn.Module):
             # knurlogic edit 21: the weights in float32, as the reference's
             # Gate returns them (the MoE scales each expert's w2 input)
             inds, weights = _moe_gate_kernel(
-                inputs=[scores_bf, self.e_score_correction_bias, rscale],
+                inputs=[scores, self.e_score_correction_bias, rscale],
                 template=[
                     ("B", B),
                     ("S", S),
@@ -3288,7 +3587,7 @@ class MoEGate(nn.Module):
             return inds, weights
 
         # Fallback: general path (hash-routed layers, or non-sqrtsoftplus configs).
-        scores = x.astype(mx.float32) @ self.weight.T.astype(mx.float32)
+        scores = self._scores(x)
         scores = _score_func(scores, self.score_func)
         orig = scores
         if not self.hash:
@@ -3303,7 +3602,7 @@ class MoEGate(nn.Module):
 
         weights = mx.take_along_axis(orig, inds, axis=-1)
         if self.score_func != "softmax" and self.norm_topk_prob:
-            weights = weights / (weights.sum(axis=-1, keepdims=True) + 1e-20)
+            weights = weights / weights.sum(axis=-1, keepdims=True)
         weights = (weights * self.route_scale).astype(mx.float32)
         return inds, weights
 
@@ -3316,8 +3615,7 @@ class MoEGate(nn.Module):
         the top-k of ``scores + bias_vl`` for an image token and
         ``tid2eid`` for text (an image id looked up as 0). The weights
         come from the unbiased scores either way."""
-        scores = x.astype(mx.float32) @ self.weight.T.astype(mx.float32)
-        scores = _score_func(scores, self.score_func)
+        scores = _score_func(self._scores(x), self.score_func)
         orig = scores
         m = image_mask[..., None]
 
@@ -3336,7 +3634,7 @@ class MoEGate(nn.Module):
         inds = inds.astype(mx.int32)
         weights = mx.take_along_axis(orig, inds, axis=-1)
         if self.score_func != "softmax" and self.norm_topk_prob:
-            weights = weights / (weights.sum(axis=-1, keepdims=True) + 1e-20)
+            weights = weights / weights.sum(axis=-1, keepdims=True)
         weights = (weights * self.route_scale).astype(mx.float32)
         return inds, weights
 
@@ -3443,7 +3741,7 @@ class DeepseekV4MoE(nn.Module):
 class DeepseekV4Block(nn.Module):
     def __init__(self, args: ModelArgs, layer_id: int):
         super().__init__()
-        self.attn_norm = nn.RMSNorm(args.hidden_size, eps=args.rms_norm_eps)
+        self.attn_norm = RMSNorm(args.hidden_size, eps=args.rms_norm_eps)
         self.attn = V4Attention(args, layer_id)
         self.hc_attn = HyperConnection(
             args.hidden_size,
@@ -3452,7 +3750,7 @@ class DeepseekV4Block(nn.Module):
             args.hc_sinkhorn_iters,
             args.hc_eps,
         )
-        self.ffn_norm = nn.RMSNorm(args.hidden_size, eps=args.rms_norm_eps)
+        self.ffn_norm = RMSNorm(args.hidden_size, eps=args.rms_norm_eps)
         self.ffn = DeepseekV4MoE(args, layer_id)
         self.hc_ffn = HyperConnection(
             args.hidden_size,
@@ -3504,7 +3802,8 @@ class DeepseekV4Model(nn.Module):
         self.layers = [
             DeepseekV4Block(args, i) for i in range(args.num_hidden_layers)
         ]
-        self.norm = nn.RMSNorm(args.hidden_size, eps=args.rms_norm_eps)
+        # knurlogic edit 26: every weighted norm rounds once
+        self.norm = RMSNorm(args.hidden_size, eps=args.rms_norm_eps)
         self.hc_head = HyperHead(
             args.hidden_size, args.hc_mult, args.rms_norm_eps, args.hc_eps
         )
@@ -3593,7 +3892,8 @@ class Model(nn.Module):
         vl_ids: Optional[mx.array] = None,
     ) -> mx.array:
         h = self.model(inputs, cache, input_embeddings, vl_ids)
-        return self.lm_head(h)
+        # knurlogic edit 24: float32 logits, as the reference's head
+        return head_logits(self.lm_head, h)
 
     @property
     def layers(self):
