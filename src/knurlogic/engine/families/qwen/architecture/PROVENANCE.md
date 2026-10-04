@@ -77,3 +77,12 @@ logit diff to the reference, before -> after edits 1-3: qwen3_5 3.6e-01 ->
    The released configs set `output_gate_type: sigmoid` and leave
    `norm_topk_prob` at True, so neither changes a released model (measured
    on a config with neither set and norm_topk_prob false: 1.47 -> 8e-7).
+
+### Edit 4, a guard (qwen4_exp.py)
+
+4. **The checkpoint's own n-gram multipliers win.** `sanitize` puts a
+   checkpoint's int64 `ple_embedding.layer_multipliers` into the module's
+   `_mults`, the values hashed with; the seed rebuild (edit 2) is only the
+   fallback for a checkpoint without them or with a non-integer copy. A wrong or missing seed in a config cannot give
+   wrong n-gram rows again (all released and VQ checkpoints store them as
+   I64). Test: test_qwen_reference.py::test_qwen4_exp_uses_the_checkpoints_own_ngram_multipliers.

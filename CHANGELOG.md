@@ -28,7 +28,8 @@ every model below change, for the better.
   the MoE's routing weights and sums in float32.
 * Qwen3.8-Flash-Next: its n-gram embedding hashes with seed 1234, the
   reference's (it used 0, so every token read the wrong rows; about 3%
-  lower perplexity now).
+  lower perplexity now), and it now takes the multipliers the checkpoint
+  stores rather than rebuilding them.
 * Qwen3.5 / 3.6 / 3.8: the linear-attention q/k normalization epsilon
   (it was 128 times too large).
 * GLM-5.3: the SwiGLU clamp at 10 in every MLP, router logits in float32,

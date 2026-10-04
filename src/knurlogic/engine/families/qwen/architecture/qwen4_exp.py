@@ -1377,6 +1377,15 @@ class Model(nn.Module):
             if k.endswith("conv1d.weight") and v.ndim == 3 and v.shape[1] == 1:
                 v = v.transpose(0, 2, 1)
 
+            # knurlogic vendored edit 4: the checkpoint's own int64 n-gram
+            # multipliers are the ones used; the seed rebuild is only the
+            # fallback for a checkpoint without them (or with them cast).
+            if k.endswith("ple_embedding.layer_multipliers") and v.dtype == mx.int64:
+                mod = self
+                for part in k.split(".")[:-1]:
+                    mod = mod[int(part)] if part.isdigit() else getattr(mod, part)
+                mod._mults = v
+
             out[k] = v
         return out
 

@@ -14,9 +14,9 @@
   },
   "qwen4_exp": {
     "long_context_yarn": "KNURLOGIC_LONG_CONTEXT=yarn (opt-in) added YaRN to the RotaryEmbedding (yarn_inv_freq); with it off the rope is unchanged (tests/test_long_context.py); real-rung re-validation pending",
-    "sha256": "e18b1665b559d82c35b36a05238557c348faef5182959f6649a56e73fc9204d3",
-    "text_path_held_by": "tests/engine/test_qwen_reference.py (HF transformers 5.16.1 modeling_qwen4_exp on a tiny random config, float32, 21-token prefill + 4 cached decode steps, max abs logit diff ~2e-6) and tests/support/goldens/qwen_g5_text.npz (rebuilt after vendored edits 1-3; the vision edit adds MRoPE, text path bit-identical on the tiny models); real-rung re-validation pending",
-    "text_path_of": "e18b1665b559d82c35b36a05238557c348faef5182959f6649a56e73fc9204d3",
+    "sha256": "ce4e3130e8ee2b7630841b63a76f2ce0f5bc0b0396bf1531e0b8610b1b83cbb6",
+    "text_path_held_by": "tests/engine/test_qwen_reference.py (HF transformers 5.16.1 modeling_qwen4_exp on a tiny random config, float32, 21-token prefill + 4 cached decode steps, max abs logit diff ~2e-6) and tests/support/goldens/qwen_g5_text.npz (rebuilt after vendored edits 1-3; edit 4 takes the checkpoint's int64 layer_multipliers, test_qwen4_exp_uses_the_checkpoints_own_ngram_multipliers; the vision edit adds MRoPE, text path bit-identical on the tiny models); real-rung re-validation pending",
+    "text_path_of": "ce4e3130e8ee2b7630841b63a76f2ce0f5bc0b0396bf1531e0b8610b1b83cbb6",
     "validated_on_artifact": "TheDrainFlorist--Qwen3.8-Flash-Next-VQ-2.1bpw",
     "validated_with_mlx_lm": "0.32.0"
   }

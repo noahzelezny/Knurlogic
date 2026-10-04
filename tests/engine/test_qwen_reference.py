@@ -92,3 +92,20 @@ def test_the_trunk_computes_the_reference_logits(family):
     assert got.shape == ref.shape
     diff = float(np.abs(got - ref).max())
     assert diff < TOL, f"{family}: max |logit diff| {diff:.3e} vs reference"
+
+
+def test_qwen4_exp_uses_the_checkpoints_own_ngram_multipliers():
+    """A checkpoint's stored int64 layer_multipliers are the ones hashed with,
+    not a rebuild from the config's seed (vendored edit 4): a wrong seed in
+    a config can no longer give wrong n-gram rows."""
+    _, meta = _golden()
+    model = _model("qwen4_exp", meta)
+    k, ple = next((k, m) for k, m in model.named_modules()
+                  if k.endswith("ple_embedding"))
+    stored = mx.array([3, 5, 7][:ple._mults.shape[0]], dtype=mx.int64)
+    model.sanitize({f"{k}.layer_multipliers": stored})
+    assert ple._mults.tolist() == stored.tolist()
+    # a cast (non-integer) copy is not trusted: the rebuild stays
+    before = ple._mults.tolist()
+    model.sanitize({f"{k}.layer_multipliers": stored.astype(mx.float32)})
+    assert ple._mults.tolist() == before
