@@ -167,6 +167,13 @@ def vision_weights(config: dict, path=None) -> dict:
         # keeps it); a nested vision_config is taken at its word
         return full if sig.get("config") else text_only
     prefixes = tuple(sig.get("tower_prefixes") or ())
+    if sig.get("config"):
+        # a nested vision_config says nothing of WHICH family it is (Qwen's
+        # and GLM's are both `vision_config`, and the first signature
+        # matched is Qwen's): any family's tower names under it count
+        prefixes = tuple(dict.fromkeys(
+            p for s in SIGNATURES if s.get("config") == sig["config"]
+            for p in s.get("tower_prefixes") or ()))
     need = sig.get("tower_in_weights")
     under = any(k.startswith(prefixes) for k in names) if prefixes else False
     tower = any(k.startswith(need) for k in names) if need else under

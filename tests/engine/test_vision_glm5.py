@@ -452,3 +452,24 @@ def test_processor_settings_preprocess_does_not_implement_are_refused(
     else:
         with pytest.raises(ValueError):
             build(str(tmp_path), None, glm5_tiny_config())
+
+
+@pytest.mark.parametrize("names, state", [
+    (["vision_model.patch_embed.proj.weight",
+      "language_model.model.embed_tokens.weight"], "full"),
+    (["language_model.model.embed_tokens.weight"], "text_only"),
+])
+def test_glm_vision_weights_are_read_under_glms_own_tower_names(
+        tmp_path, names, state):
+    """GLM-5.3-Flash's tower is `vision_model.*`. Its config is a nested
+    `vision_config` like Qwen's, and Qwen's signature (whose tower is
+    `visual.*`) is the one matched first: read under Qwen's names alone,
+    every GLM conversion (zai-org's 3/4/6-bit, the VQ builds) came out
+    'no vision weights'."""
+    import json
+
+    from knurlogic.engine.vision import registry as R
+    (tmp_path / "model.safetensors.index.json").write_text(json.dumps(
+        {"weight_map": {n: "model.safetensors" for n in names}}))
+    cfg = {"model_type": "glm5_next", "vision_config": {"depth": 2}}
+    assert R.vision_weights(cfg, tmp_path)["state"] == state
