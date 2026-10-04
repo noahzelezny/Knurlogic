@@ -1,9 +1,9 @@
 {
   "qwen3_5": {
     "long_context_yarn": "KNURLOGIC_LONG_CONTEXT=yarn (opt-in) added YaRN to the MRoPE image path (apply_mrope takes the layer's YarnRoPE); with it off the rope is unchanged (tests/test_long_context.py); real-rung re-validation pending",
-    "sha256": "2595f9705e77339254a9180daaf2ecfe9840b87b275df9c851af449fc6a52915",
-    "text_path_held_by": "tests/engine/test_qwen_reference.py (HF transformers 5.16.1 modeling_qwen3_5 / qwen3_5_moe on a tiny random config, float32, 21-token prefill + 4 cached decode steps, max abs logit diff ~1e-5) and tests/support/goldens/qwen_g5_text.npz (rebuilt after vendored edits 1-3; the vision edit adds MRoPE, text path bit-identical on the tiny models); real-rung re-validation pending",
-    "text_path_of": "2595f9705e77339254a9180daaf2ecfe9840b87b275df9c851af449fc6a52915",
+    "sha256": "01392a3f8a072ea9fdb774cf58ec84385c7ac1fb1c272cfc36bee8d03eeddfe4",
+    "text_path_held_by": "tests/engine/test_qwen_reference.py (HF transformers 5.16.1 modeling_qwen3_5 / qwen3_5_moe on a tiny random config, float32, 21-token prefill + 4 cached decode steps, max abs logit diff ~1e-5; config variants for vendored edits 6-7 (keys left out, layer_types, norm_topk_prob false) at the same bar; bfloat16 for edit 8: norms and MLP/MoE bit for bit, the deltanet within one bf16 step, the trunk's logits within 0.6 of the reference's own bf16-vs-f32 rms) and tests/support/goldens/qwen_g5_text.npz (rebuilt after vendored edits 1-3; the vision edit adds MRoPE, text path bit-identical on the tiny models; edits 5-8 keep it so in float32); real-rung re-validation pending",
+    "text_path_of": "01392a3f8a072ea9fdb774cf58ec84385c7ac1fb1c272cfc36bee8d03eeddfe4",
     "validated_on_artifact": "TheDrainFlorist--Qwen3.6-35B-A3B-VQ-3.4bpw",
     "validated_with_mlx_lm": "0.32.0"
   },
@@ -14,9 +14,9 @@
   },
   "qwen4_exp": {
     "long_context_yarn": "KNURLOGIC_LONG_CONTEXT=yarn (opt-in) added YaRN to the RotaryEmbedding (yarn_inv_freq); with it off the rope is unchanged (tests/test_long_context.py); real-rung re-validation pending",
-    "sha256": "ce4e3130e8ee2b7630841b63a76f2ce0f5bc0b0396bf1531e0b8610b1b83cbb6",
-    "text_path_held_by": "tests/engine/test_qwen_reference.py (HF transformers 5.16.1 modeling_qwen4_exp on a tiny random config, float32, 21-token prefill + 4 cached decode steps, max abs logit diff ~2e-6) and tests/support/goldens/qwen_g5_text.npz (rebuilt after vendored edits 1-3; edit 4 takes the checkpoint's int64 layer_multipliers, test_qwen4_exp_uses_the_checkpoints_own_ngram_multipliers; the vision edit adds MRoPE, text path bit-identical on the tiny models); real-rung re-validation pending",
-    "text_path_of": "ce4e3130e8ee2b7630841b63a76f2ce0f5bc0b0396bf1531e0b8610b1b83cbb6",
+    "sha256": "7d02b435f6f1d563fb720f8169cd3479e7186dce4462cb215149260a76d8a108",
+    "text_path_held_by": "tests/engine/test_qwen_reference.py (HF transformers 5.16.1 modeling_qwen4_exp on a tiny random config, float32, 21-token prefill + 4 cached decode steps, max abs logit diff ~2e-6; config variants for vendored edit 5 (reference defaults, refusals, qwen_sparse_attention layer_types) at the same bar; bfloat16 for edit 8 as qwen3_5's) and tests/support/goldens/qwen_g5_text.npz (rebuilt after vendored edits 1-3; edit 4 takes the checkpoint's int64 layer_multipliers, test_qwen4_exp_uses_the_checkpoints_own_ngram_multipliers; the vision edit adds MRoPE, text path bit-identical on the tiny models; edits 5-8 keep it so in float32); real-rung re-validation pending",
+    "text_path_of": "7d02b435f6f1d563fb720f8169cd3479e7186dce4462cb215149260a76d8a108",
     "validated_on_artifact": "TheDrainFlorist--Qwen3.8-Flash-Next-VQ-2.1bpw",
     "validated_with_mlx_lm": "0.32.0"
   }
