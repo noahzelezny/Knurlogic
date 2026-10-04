@@ -131,9 +131,12 @@ registry.build(model_type, model_path, text_model, config=None) -> Family | None
 registry.has_family(model_type) -> bool
 ```
 
-`None` when: model_type unregistered, config has no `vision_config` (nor
-DeepSeek-V4's `vision_n_layers > 0`: `registry.has_vision_config`), the
-family module is absent, or its build declines. An ImportError raised INSIDE
+`None` when: model_type unregistered, config matches no family's vision
+`signature` (`registry.has_vision_config`: a nested `vision_config`, or
+DeepSeek-V4's flat `vision_n_layers > 0` with its `vision.*` tensors in the
+artifact), the family module is absent, or its build declines. The
+signatures, and the tower tensor prefixes tuning/ counts
+(`settings.VISION_TOWER_PREFIXES`), are the manifests' (families.md). An ImportError raised INSIDE
 a present family module propagates (a broken build is not "no vision").
 
 ## Store
