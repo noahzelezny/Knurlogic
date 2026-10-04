@@ -28,6 +28,36 @@ logger = logging.getLogger(__name__)
 
 _MACHINES: dict = {}
 
+#: The tags that close a think block. A model may end its thinking with
+#: `</thinking>` where its template says `</think>` (seen on Qwen3.6); both
+#: close the block, in the streamed and the non-streamed path alike. The
+#: tokenizer's own think_end is one of these; the others are matched as the
+#: token sequences their text encodes to.
+THINK_CLOSE_TAGS = ("</think>", "</thinking>")
+#: what may directly follow a close tag and merge with its last token
+#: (">\n\n" is one token in some vocabularies)
+_CLOSE_TAILS = ("", "\n", "\n\n")
+
+
+def _extra_think_closes(tokenizer) -> dict:
+    """{token sequence: its text} for the alternative close tags, as the
+    tokenizer encodes them bare and with a newline tail."""
+    if getattr(tokenizer, "think_end", None) not in THINK_CLOSE_TAGS:
+        return {}
+    out: dict = {}
+    for tag in THINK_CLOSE_TAGS:
+        if tag == tokenizer.think_end:
+            continue
+        for tail in _CLOSE_TAILS:
+            try:
+                ids = tuple(tokenizer.encode(tag + tail,
+                                             add_special_tokens=False))
+            except (AttributeError, TypeError, ValueError):
+                break
+            if ids:
+                out[ids] = tag + tail
+    return out
+
 
 def control_machine(tokenizer, initial: str = "normal"):
     """(ControlMachine, {token sequence: its text}) for the tokenizer's
@@ -50,8 +80,11 @@ def control_machine(tokenizer, initial: str = "normal"):
         ts, te = (tuple(tokenizer.think_start_tokens),
                   tuple(tokenizer.think_end_tokens))
         edges["normal"].append((ts, "reasoning"))
-        edges["reasoning"] = [(te, "normal"), *ends]
+        extra = _extra_think_closes(tokenizer)
+        edges["reasoning"] = [(te, "normal"),
+                              *((q, "normal") for q in extra), *ends]
         seqs[ts], seqs[te] = tokenizer.think_start, tokenizer.think_end
+        seqs.update(extra)
     if getattr(tokenizer, "has_tool_calling", False):
         ts = tuple(tokenizer.tool_call_start_tokens)
         te = tuple(tokenizer.tool_call_end_tokens or ())
