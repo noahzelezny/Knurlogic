@@ -278,6 +278,9 @@ class Link:
         #: line the ranks up over the bell before the next exchange (align):
         #: after joining, and after a parked rank wakes
         self.need_align = True
+        #: the ring failed (scheduler._ring_fatal): every later exchange or
+        #: align raises at once instead of waiting on a gone peer
+        self.dead = False
 
     def barrier(self) -> None:
         mx.eval(mx.distributed.all_sum(mx.array(1), group=self.group,
@@ -325,7 +328,7 @@ class Link:
             raise ConnectionError("rank 0 left while this rank was parked")
         self.need_align = True
 
-    def align(self) -> None:
+    def align(self, timeout: float | None = None) -> None:
         """Every rank reaches the next collective together, over the bell.
 
         Ranks finish a load, a warm-up or a wake-up at different times (an
@@ -337,11 +340,21 @@ class Link:
         exchange 10 s late and never got rank 0's half). So: each rank >= 1
         says it is here; rank 0, once all have, says go. A dead peer is a
         ConnectionError (its socket closes)."""
+        if self.dead:
+            raise Desync("the ring between the ranks failed")
         if not self.socks:
             return
         if self.rank == 0:
             for c in self.socks:
-                if _recv_exact(c, 1) != b"r":
+                c.settimeout(timeout)
+                try:
+                    got = _recv_exact(c, 1)
+                except TimeoutError as e:
+                    raise ConnectionError(
+                        f"a rank did not line up within {timeout:.0f} s") from e
+                finally:
+                    c.settimeout(None)
+                if got != b"r":
                     raise ConnectionError("a rank left while the ranks were "
                                           "lining up")
             for c in self.socks:
@@ -357,13 +370,17 @@ class Link:
     def exchange(self, over: int, payload: bytes | None = None):
         """-> (control rows, one per rank; the plan bytes or None)."""
         import numpy as np
+        if self.dead:
+            raise Desync("the ring between the ranks failed")
         if self.parked:
             for c in self.socks:
                 c.sendall(b"w")
             self.parked = False
             self.need_align = True
         if self.need_align:
-            self.align()
+            # a wake-up or the first step: the others are milliseconds
+            # away, or a load apart (rank 0's own load is done by now)
+            self.align(timeout=ALIGN_S)
         n = len(payload) if (self.rank == 0 and payload) else 0
         ctl = mx.array([P.control(over, self.step, n,
                                   int(mx.get_active_memory()),
@@ -405,7 +422,8 @@ def _recv_exact(c, n: int) -> bytes:
     return buf
 
 
-def bell_answer(srv, host: str, nonce: int, size: int, wait_s: float):
+def bell_answer(srv, host: str, nonce: int, size: int, wait_s: float,
+                stop=None):
     """Rank 0: accept one bell connection per rank 1..size-1 on `srv`
     (closed on return), each presenting the ring's nonce and its rank, in
     order by rank. Past `wait_s`, a TimeoutError naming the address and the
@@ -418,6 +436,9 @@ def bell_answer(srv, host: str, nonce: int, size: int, wait_s: float):
     deadline = time.monotonic() + wait_s
     try:
         while want - set(got):
+            if stop is not None and stop():
+                raise ConnectionError("bell: stopped while waiting for the "
+                                      "other ranks")
             left = deadline - time.monotonic()
             if left <= 0:
                 missing = sorted(want - set(got))
@@ -427,7 +448,7 @@ def bell_answer(srv, host: str, nonce: int, size: int, wait_s: float):
                     f"{sorted(got) or 'none'}); see those ranks' logs -- a "
                     f"rank that never logged 'dialing rank 0' is stuck "
                     f"before it, in the ring's port exchange")
-            srv.settimeout(left)
+            srv.settimeout(min(left, 1.0))
             try:
                 c, addr = srv.accept()
             except TimeoutError:
@@ -460,7 +481,7 @@ def bell_answer(srv, host: str, nonce: int, size: int, wait_s: float):
 
 
 def bell_dial(host: str, port: int, nonce: int, rank: int, wait_s: float,
-              pause_s: float = 0.5):
+              pause_s: float = 0.5, stop=None):
     """Rank >= 1: connect to rank 0's bell and say who it is, retrying a
     refused or unanswered connect until `wait_s`; then a ConnectionError
     naming the address and the last error."""
@@ -470,6 +491,9 @@ def bell_dial(host: str, port: int, nonce: int, rank: int, wait_s: float,
     deadline = time.monotonic() + wait_s
     tries, last = 0, None
     while True:
+        if stop is not None and stop():
+            raise ConnectionError(f"bell: rank {rank} stopped while dialing "
+                                  "rank 0")
         left = deadline - time.monotonic()
         if left <= 0:
             raise ConnectionError(
@@ -979,8 +1003,13 @@ def init(link_kind: str) -> Link:
 
 #: how long ranks wait for each other on the bell before joining the ring
 #: (process starts differ by seconds; a cold Python import on a slow disk
-#: by more)
-BELL_EARLY_S = 300.0
+#: by more); under the page's own JOIN_S (cluster/jobs) so the bell's error
+#: is the one reported
+BELL_EARLY_S = 240.0
+#: how long rank 0 waits for the others to line up at an exchange: a wake
+#: is milliseconds, the first step after a load as long as the slowest
+#: rank's remaining load (the page's stall watch covers longer)
+ALIGN_S = 600.0
 
 
 def bell_early():
@@ -994,12 +1023,15 @@ def bell_early():
     host, port, nonce, world = spec.rsplit(":", 3)
     port, nonce, world = int(port), int(nonce), int(world)
     rank = int(os.environ.get("MLX_RANK", "0"))
+    from .host import LOAD_STOP
     if rank == 0:
         srv = socket.create_server((host, port))
         logger.info("bell: rank 0 listening on %s:%d for ranks 1..%d before "
                     "joining the ring", host, port, world - 1)
-        return bell_answer(srv, host, nonce, world, BELL_EARLY_S)
-    return [bell_dial(host, port, nonce, rank, BELL_EARLY_S)]
+        return bell_answer(srv, host, nonce, world, BELL_EARLY_S,
+                           stop=LOAD_STOP.is_set)
+    return [bell_dial(host, port, nonce, rank, BELL_EARLY_S,
+                      stop=LOAD_STOP.is_set)]
 
 
 def _rank0_host() -> str:

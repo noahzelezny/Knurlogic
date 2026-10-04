@@ -17,10 +17,13 @@ from knurlogic.engine.runtime import tensor as T
 
 
 def test_the_launcher_says_where_the_bell_is():
-    spec = {"job": "1001be732c9d0cde", "world": 2,
+    spec = {"job": "1001be732c9d0cde", "world": 2, "bell_nonce": 4242,
             "hosts": ["198.51.100.2:47460", "198.51.100.1:47461"]}
-    assert launch.bell_address(spec) == \
-        f"198.51.100.2:47478:{int('1001be732c9d0cd', 16)}:2"
+    assert launch.bell_address(spec) == "198.51.100.2:47478:4242:2"
+    # the nonce is random per job, not read off the job id (shown on the
+    # page); a spec without one (an older page) keeps the old way
+    assert "bell_nonce" in launch.SPEC_KEYS
+    assert launch.bell_address({**spec, "bell_nonce": None}) == ""
     env = launch.rank_env({**spec, "rank": 1, "link": "ring"},
                           {"hostfile": "/x"}, False)
     assert env["KNURLOGIC_BELL"] == launch.bell_address(spec)
@@ -115,3 +118,20 @@ def test_the_early_bell_connects_every_rank_before_the_ring(monkeypatch):
         c.close()
     monkeypatch.delenv("KNURLOGIC_BELL")
     assert T.bell_early() is None
+
+
+def test_a_lining_up_rank_that_never_comes_is_a_connection_error():
+    r0, r1 = _pair()
+    t0 = time.monotonic()
+    with pytest.raises(ConnectionError, match="did not line up"):
+        r0.align(timeout=0.5)
+    assert time.monotonic() - t0 < 3
+
+
+def test_a_dead_link_raises_at_once():
+    r0, _ = _pair()
+    r0.dead = True
+    with pytest.raises(T.Desync):
+        r0.align()
+    with pytest.raises(T.Desync):
+        r0.exchange(0, None)

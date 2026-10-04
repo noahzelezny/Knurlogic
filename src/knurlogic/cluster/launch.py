@@ -61,7 +61,7 @@ SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "ibv_devices", "coordinator", "layers", "prefill_chunk", "tune",
              "port", "working_set_gib", "bandwidth_gbs", "nodes", "versions",
              "jaccl_timeout_ms", "sets", "chips", "cable", "cable_note",
-             "recovery", "serve_hosts", "name", "auto_port",
+             "recovery", "serve_hosts", "name", "auto_port", "bell_nonce",
              "prefill_why")
 SPLITS = ("tensor", "pipeline")
 LINKS = ("ring", "jaccl")
@@ -1015,6 +1015,12 @@ RANK_ARGV = [rank_argv]
 BELL_OFFSET = 18
 
 
+def _bell_nonce() -> int:
+    """A job's bell nonce (bell_address): random, never derived from the
+    job id the page shows."""
+    return secrets.randbits(62)
+
+
 def bell_address(spec: dict) -> str:
     """"host:port:nonce:world" of rank 0's bell (engine/runtime/tensor.init):
     every rank connects to it over TCP BEFORE the ring is joined, so the
@@ -1027,8 +1033,10 @@ def bell_address(spec: dict) -> str:
     world = int(spec.get("world") or len(hosts))
     if not hosts or world < 2 or world > BELL_OFFSET:
         return ""
+    nonce = spec.get("bell_nonce")
+    if not isinstance(nonce, int) or nonce <= 0:
+        return ""                 # a spec from a page without it: as before
     host, port = hosts[0].rsplit(":", 1)
-    nonce = int(str(spec["job"])[:15], 16)
     return f"{host}:{int(port) + BELL_OFFSET}:{nonce}:{world}"
 
 
@@ -1931,6 +1939,9 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             break
     base = {"job": job, "world": world, "split": split, "link": link,
             "identity": ident, "name": aname, "hosts": hosts, "ibv_devices": ibv,
+            # the bell's nonce: random, in the spec the pages share, never
+            # shown (the job id is on the page)
+            "bell_nonce": _bell_nonce(),
             "coordinator": coord, "layers": plan["layers"],
             "prefill_chunk": chunk,
             "tune": preset_or(req.get("tune"), "default"),

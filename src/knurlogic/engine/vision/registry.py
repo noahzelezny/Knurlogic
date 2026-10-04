@@ -183,6 +183,11 @@ def vision_weights(config: dict, path=None) -> dict:
         return full
     if not (tower or under or any(trunk.values())):
         return text_only
+    if not (tower or under) and trunk and all(trunk.values()):
+        # no tower, but every vision-only trunk tensor kept (a conversion
+        # that dropped the tower alone): the trunk is built as the config
+        # says, so those load, and text never reads them; images refused
+        return {**text_only, "text_config": {}}
     missing = ([f"the vision tower ({need or ', '.join(prefixes)})"]
                if not tower else [])
     missing += [s.lstrip(".") for s, ok in trunk.items() if not ok]
