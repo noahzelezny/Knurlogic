@@ -15,10 +15,16 @@ from .switch_layers import SwitchGLU
 
 @dataclass
 class ModelArgs(BaseModelArgs):
+    # knurlogic edit 2: every default is HF transformers 5.16.1
+    # configuration_gemma4.py Gemma4TextConfig's (the maker's port), so a
+    # config that leaves a key out builds the model the reference builds.
+    # mlx-lm 0.32.0 defaulted to an e2b-like shape (hidden 1536, 35 layers,
+    # 1 kv head, 20 KV-shared layers, double-wide MLP, softcap 30, a 4:1
+    # sliding pattern) -- see PROVENANCE.md.
     model_type: str = "gemma4_text"
-    hidden_size: int = 1536
-    num_hidden_layers: int = 35
-    intermediate_size: int = 6144
+    hidden_size: int = 2304
+    num_hidden_layers: int = 30
+    intermediate_size: int = 9216
     num_attention_heads: int = 8
     head_dim: int = 256
     global_head_dim: int = 512
@@ -26,20 +32,19 @@ class ModelArgs(BaseModelArgs):
     rms_norm_eps: float = 1e-6
     vocab_size: int = 262144
     vocab_size_per_layer_input: int = 262144
-    num_key_value_heads: int = 1
+    num_key_value_heads: int = 4
     num_global_key_value_heads: Optional[int] = None
-    num_kv_shared_layers: int = 20
+    num_kv_shared_layers: int = 0
     pad_token_id: int = 0
     hidden_size_per_layer_input: int = 256
     rope_traditional: bool = False
     partial_rotary_factor: float = 1.0
     rope_parameters: Optional[Dict] = None
     sliding_window: int = 512
-    sliding_window_pattern: int = 5
     max_position_embeddings: int = 131072
     attention_k_eq_v: bool = False
-    final_logit_softcapping: float = 30.0
-    use_double_wide_mlp: bool = True
+    final_logit_softcapping: Optional[float] = None
+    use_double_wide_mlp: bool = False
     enable_moe_block: bool = False
     num_experts: Optional[int] = None
     top_k_experts: Optional[int] = None
@@ -50,28 +55,55 @@ class ModelArgs(BaseModelArgs):
     # bidirectional image blocks on the sliding layers; None (e2b/e4b)
     # keeps every layer causal
     use_bidirectional_attention: Optional[str] = None
+    # knurlogic edit 2: read so a config this file cannot run is refused,
+    # not run as another model (the MLP is gelu_pytorch_tanh, no biases)
+    hidden_activation: str = "gelu_pytorch_tanh"
+    attention_bias: bool = False
 
     def __post_init__(self):
+        if self.hidden_activation != "gelu_pytorch_tanh":
+            raise ValueError(
+                f"gemma4_text: hidden_activation {self.hidden_activation!r} "
+                "is not supported (this build runs gelu_pytorch_tanh, the "
+                "released models' activation)")
+        if self.attention_bias:
+            raise ValueError(
+                "gemma4_text: attention_bias true is not supported (this "
+                "build's attention projections have no biases, as the "
+                "released models')")
+        if self.use_bidirectional_attention not in (None, "vision", "all"):
+            raise ValueError(
+                "gemma4_text: use_bidirectional_attention must be None, "
+                f"'vision' or 'all', not {self.use_bidirectional_attention!r}")
+        if self.use_bidirectional_attention == "all":
+            # knurlogic edit 4: HF's config halves the window for "all"
+            # (configuration_gemma4.py: `sliding_window // 2 + 1`); the
+            # sliding layers then attend |q - k| <= that window both ways
+            self.sliding_window = self.sliding_window // 2 + 1
         if self.rope_parameters is None:
             self.rope_parameters = {
+                "sliding_attention": {
+                    "rope_type": "default",
+                    "rope_theta": 10000.0,
+                },
                 "full_attention": {
+                    "rope_type": "proportional",
                     "partial_rotary_factor": 0.25,
                     "rope_theta": 1000000.0,
-                    "rope_type": "proportional",
-                },
-                "sliding_attention": {
-                    "partial_rotary_factor": 1.0,
-                    "rope_theta": 10000.0,
-                    "rope_type": "default",
                 },
             }
         if self.layer_types is None:
-            pattern = ["sliding_attention"] * (self.sliding_window_pattern - 1) + [
-                "full_attention"
+            # HF: 5 sliding : 1 full
+            self.layer_types = [
+                "sliding_attention" if (i + 1) % 6 else "full_attention"
+                for i in range(self.num_hidden_layers)
             ]
-            self.layer_types = (pattern * (self.num_hidden_layers // len(pattern) + 1))[
-                : self.num_hidden_layers
-            ]
+        else:
+            self.layer_types = list(self.layer_types)
+        # HF forces the last layer to full attention, whatever the config
+        # says
+        if self.layer_types:
+            self.layer_types[-1] = "full_attention"
 
 
 class RMSNormNoScale(nn.Module):
@@ -97,7 +129,10 @@ def _complete_square(x2, y2, xy):
 
 @partial(mx.compile, shapeless=True)
 def geglu(gate, x):
-    return nn.gelu_approx(gate) * x
+    # knurlogic edit 5: the gelu in float32, rounded once, as torch's
+    # gelu_pytorch_tanh does on a bf16 tensor (HF's act_fn); mlx's
+    # gelu_approx on bf16 rounds after every step. Fused, so free.
+    return nn.gelu_approx(gate.astype(mx.float32)).astype(x.dtype) * x
 
 
 class MLP(nn.Module):
@@ -381,8 +416,9 @@ class DecoderLayer(nn.Module):
         ):
             residual = h
             gate = self.per_layer_input_gate(h)
-            gate = nn.gelu_approx(gate)
-            gate = mx.multiply(gate, per_layer_input)
+            # knurlogic edit 5: act_fn(gate) * per_layer_input, rounded
+            # where HF rounds (geglu)
+            gate = geglu(gate, per_layer_input)
             gate = self.per_layer_projection(gate)
             gate = self.post_per_layer_input_norm(gate)
             h = residual + gate
@@ -399,7 +435,6 @@ class Gemma4TextModel(nn.Module):
         self.config = config
         self.vocab_size = config.vocab_size
         self.window_size = config.sliding_window
-        self.sliding_window_pattern = config.sliding_window_pattern
         self.num_hidden_layers = config.num_hidden_layers
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
@@ -530,6 +565,8 @@ class Gemma4TextModel(nn.Module):
         mlx-vlm 0.6.17 `gemma4/language.py:486-515`
         (`_apply_blockwise_bidirectional_overlay`), MIT, Copyright (c) 2025
         Prince Canuma, which put it on the full layers, ungated."""
+        if self.config.use_bidirectional_attention == "all":
+            return self._make_masks_all(h, cache)
         use_bidirectional = (
             self.config.use_bidirectional_attention == "vision"
             and mm_mask is not None
@@ -574,6 +611,51 @@ class Gemma4TextModel(nn.Module):
                         m = m | same_block
                     mask["sliding_attention"] = m
             masks.append(mask[l.layer_type])
+        return masks
+
+    def _make_masks_all(self, h, cache):
+        """knurlogic edit 4: use_bidirectional_attention "all" -- no layer
+        is causal. HF transformers 5.16.1: the config sets is_causal False
+        (configuration_gemma4.py `__post_init__`), so `create_causal_mask`
+        builds a bidirectional mask for the full layers and
+        `create_sliding_window_causal_mask` a bidirectional sliding one,
+        `abs(q - k) <= sliding_window` (masking_utils.py
+        `sliding_window_bidirectional_overlay`), the window already halved
+        by ModelArgs.
+
+        Built as the causal mask (which carries the cache's context and any
+        batch padding) OR the keys after the query in this chunk -- within
+        the window on the sliding layers. The cache keeps what the
+        reference's keeps (the sliding layers' RotatingKVCache holds window
+        - 1 earlier tokens at a prefill, the window at a decode step, as
+        HF's DynamicSlidingWindowLayer), so a chunked prefill and the
+        cached decode see what the reference's cache lets them see. A
+        decode step has no later key: the plain causal mask is the
+        bidirectional one."""
+        L = h.shape[1]
+        w = self.window_size
+        mask = {}
+        masks = []
+        for l, c in zip(self.layers, cache):
+            t = l.layer_type
+            if t not in mask:
+                sliding = t == "sliding_attention"
+                if L == 1:
+                    mask[t] = create_attention_mask(
+                        h, c, window_size=w if sliding else None)
+                else:
+                    # causal part: q - k <= w on the sliding layers
+                    m = create_attention_mask(
+                        h, c, window_size=w + 1 if sliding else None,
+                        return_array=True)
+                    ctx = m.shape[-1] - L
+                    qpos = mx.arange(L)[:, None]
+                    kpos = mx.arange(m.shape[-1])[None] - ctx
+                    later = kpos > qpos
+                    if sliding:
+                        later = later & (kpos - qpos <= w)
+                    mask[t] = m | later
+            masks.append(mask[t])
         return masks
 
     def __call__(

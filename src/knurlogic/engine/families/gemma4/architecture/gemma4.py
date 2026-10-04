@@ -18,15 +18,13 @@ class ModelArgs(BaseModelArgs):
     vocab_size: int = 262144
 
     def __post_init__(self):
+        # knurlogic edit 3: text_config is the text model's whole config, as
+        # in HF's Gemma4Config: a key it leaves out takes gemma4_text's
+        # (HF's) default. Upstream overwrote its vocab_size with the
+        # top-level one (which HF never reads) and filled in 1 kv head
+        # where HF's default is 4.
         if self.text_config is None:
             self.text_config = {}
-        self.text_config["vocab_size"] = self.vocab_size
-        self.text_config["num_attention_heads"] = self.text_config.get(
-            "num_attention_heads", 8
-        )
-        self.text_config["num_key_value_heads"] = self.text_config.get(
-            "num_key_value_heads", 1
-        )
 
 
 class Model(nn.Module):
