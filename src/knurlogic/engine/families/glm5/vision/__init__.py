@@ -47,8 +47,13 @@ class Glm5VisionFamily:
 
         self.image_mean = tuple(image_mean or self.IMAGE_MEAN)
         self.image_std = tuple(image_std or self.IMAGE_STD)
-        self.min_image_tokens = int(min_image_tokens or self.MIN_IMAGE_TOKENS)
-        self.max_image_tokens = int(max_image_tokens or self.MAX_IMAGE_TOKENS)
+        # `is None`, not `or`: a configured 0 is a value, not "unset"
+        self.min_image_tokens = int(self.MIN_IMAGE_TOKENS
+                                    if min_image_tokens is None
+                                    else min_image_tokens)
+        self.max_image_tokens = int(self.MAX_IMAGE_TOKENS
+                                    if max_image_tokens is None
+                                    else max_image_tokens)
 
         vc = config.get("vision_config") or {}
         self.vision_config = VisionConfig.from_dict(vc)
@@ -302,6 +307,27 @@ def smart_resize(num_frames: int, height: int, width: int,
     return aligned_height, aligned_width
 
 
+#: PILImageResampling.BICUBIC, Glm5NextImageProcessor's default and the
+#: only resample `preprocess` implements
+_BICUBIC = 3
+
+
+def _refuse_unimplemented(ip: dict) -> None:
+    """An artifact whose processor asks for a resample filter or a patch
+    expansion `preprocess` does not implement is refused at load, not
+    served with silently different pixels or token counts."""
+    r = ip.get("resample")
+    if r is not None and r != _BICUBIC and str(r).lower() != "bicubic":
+        raise ValueError(
+            f"glm5_next processor_config.json asks for resample {r!r}; "
+            f"knurlogic implements bicubic ({_BICUBIC}) only")
+    f = ip.get("patch_expand_factor")
+    if f is not None and int(f) != 1:
+        raise ValueError(
+            f"glm5_next processor_config.json asks for patch_expand_factor "
+            f"{f}; knurlogic implements 1 only")
+
+
 def build(model_path: str, text_model: Any, config: dict[str, Any]):
     if not config.get("vision_config"):
         return None
@@ -313,6 +339,7 @@ def build(model_path: str, text_model: Any, config: dict[str, Any]):
         if ip.get("do_normalize", True) is not False:
             mean, std = ip.get("image_mean"), ip.get("image_std")
         lo, hi = ip.get("min_image_tokens"), ip.get("max_image_tokens")
+        _refuse_unimplemented(ip)
     # the tower is read by serve/vision.bind (fam.load_weights), not here:
     # it was read twice per load, and a follower rank builds the family
     # without one
