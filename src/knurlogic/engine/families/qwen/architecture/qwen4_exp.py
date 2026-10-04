@@ -19,31 +19,82 @@ from .base import (
     scaled_dot_product_attention,
 )
 from .cache import ArraysCache, BatchKVCache, KVCache, _BaseCache, dynamic_roll
-from .gated_delta import gated_delta_update
+from .gated_delta import compute_g, gated_delta_kernel, gated_delta_ops
 from .switch_layers import SwitchGLU
+
+
+# --- knurlogic vendored edit 8: the reference's rounding order ----------------
+# (the same helpers as qwen3_5.py's; this file may not import it, see the
+# MRoPE note there) torch computes a bf16 sigmoid / silu in float32 and
+# rounds once; MLX's bf16 kernels round inside, a bf16 step off on ~1/3 of
+# the elements. On float32 inputs the casts are no-ops.
+
+
+def _sigmoid(x: mx.array) -> mx.array:
+    return mx.sigmoid(x.astype(mx.float32)).astype(x.dtype)
+
+
+def _silu(x: mx.array) -> mx.array:
+    return nn.silu(x.astype(mx.float32)).astype(x.dtype)
+
+
+class _SwiGLU(nn.Module):
+    """act_fn(gate) * up, the activation rounded once (SwitchGLU's call order)."""
+
+    def __call__(self, x, gate):
+        return _silu(gate) * x
+
+
+def gated_delta(q, k, v, a, b, A_log, dt_bias, state=None, mask=None, *,
+                use_kernel=True):
+    """mlx-lm's gated_delta_update with the reference's rounding
+    (modeling_qwen4_exp Qwen4ExpTextGatedDeltaNet.forward): beta =
+    sigmoid(b) rounded once to b's dtype, g from `a.float() + dt_bias` in
+    float32 (mlx-lm added a + dt_bias in bf16 before softplus)."""
+    beta = _sigmoid(b)
+    g = compute_g(A_log, a.astype(mx.float32), dt_bias)
+    if state is None:
+        B, _, Hk, Dk = q.shape
+        Hv, Dv = v.shape[-2:]
+        state = mx.zeros((B, Hv, Dv, Dk), dtype=mx.float32)
+    if (
+        not use_kernel
+        or mx.default_device() != mx.gpu
+        or not mx.metal.is_available()
+        or k.shape[-1] < 32
+        or k.shape[-1] % 32 != 0
+    ):
+        return gated_delta_ops(q, k, v, g, beta, state, mask)
+    return gated_delta_kernel(q, k, v, g, beta, state, mask)
 
 
 @dataclass
 class TextArgs(BaseModelArgs):
+    # knurlogic vendored edit 5: every default is Qwen4ExpTextConfig's
+    # (transformers 5.16.1 configuration_qwen4_exp.py), so a key a config
+    # leaves out means what it means to the reference; where the reference
+    # cannot build without a key (QSA's indexer_*, eos_token_id with PLE)
+    # __post_init__ refuses the config. The taken file defaulted to the
+    # released Flash-Next's values (hidden 2560, 48 layers, 24 heads, ...).
     model_type: str = "qwen4_exp_text"
-    hidden_size: int = 2560
-    num_hidden_layers: int = 48
-    num_attention_heads: int = 24
+    hidden_size: int = 2048
+    num_hidden_layers: int = 40
+    num_attention_heads: int = 16
     num_key_value_heads: int = 2
     head_dim: int = 256
     vocab_size: int = 248320
     rms_norm_eps: float = 1e-6
-    layer_types: list = field(default_factory=list)
+    layer_types: Optional[list] = None
     full_attention_interval: int = 4
     # MoE
     num_experts: int = 512
     num_experts_per_tok: int = 10
-    moe_intermediate_size: int = 640
-    shared_expert_intermediate_size: int = 640
+    moe_intermediate_size: int = 512
+    shared_expert_intermediate_size: int = 512
     norm_topk_prob: bool = True  # knurlogic vendored edit 3
     # gated deltanet
     linear_num_key_heads: int = 16
-    linear_num_value_heads: int = 48
+    linear_num_value_heads: int = 32
     linear_key_head_dim: int = 128
     linear_value_head_dim: int = 128
     linear_conv_kernel_dim: int = 4
@@ -53,29 +104,76 @@ class TextArgs(BaseModelArgs):
     # hyper-connections
     hc_count: int = 4
     hc_lowrank: int = 320
-    # QSA
-    indexer_n_heads: int = 4
-    indexer_kv_heads: int = 1
-    indexer_head_dim: int = 128
-    indexer_budget: int = 2048
-    indexer_compress_ratio: int = 4
+    # QSA: the reference has no default, and cannot build without them
+    indexer_n_heads: Optional[int] = None
+    indexer_kv_heads: Optional[int] = None
+    indexer_head_dim: Optional[int] = None
+    indexer_budget: Optional[int] = None
+    indexer_compress_ratio: Optional[int] = None
     # n-gram / PLE
     ngram_size: int = 3
     heads_per_ngram: int = 8
     ngram_vocab_size_base: int = 20_000_000
     make_ngram_vocab_size_divisible_by: int = 128
-    split_ngram_parts: int = 128
-    ple_embed_dim: int = 2560
-    ple_layer_ids: list = field(default_factory=lambda: [2])
+    split_ngram_parts: int = 512
+    ple_embed_dim: Optional[int] = None  # None: hidden_size
+    ple_layer_ids: Optional[list] = None  # None: no PLE layer
     ple_conv_kernel_size: int = 4
     # knurlogic vendored edit 2: the reference config's default (Qwen4ExpTextConfig.seed);
     # no released config.json names a seed, and the checkpoints' layer_multipliers are 1234's
     seed: int = 1234
-    eos_token_id: Any = 248044
-    partial_rotary_factor: float = 0.25
+    eos_token_id: Any = None
+    # with neither in rope_parameters: the reference's default_theta and a
+    # full rotary dim (modeling_rope_utils)
+    partial_rotary_factor: float = 1.0
     rope_parameters: dict = field(default_factory=dict)
-    rope_theta: float = 10_000_000.0
+    rope_theta: float = 10_000.0
     tie_word_embeddings: bool = False
+
+    def __post_init__(self):
+        # knurlogic vendored edit 5: Qwen4ExpTextConfig.__post_init__ and
+        # validate_architecture
+        self.ple_layer_ids = sorted(set(self.ple_layer_ids or []))
+        if self.ple_embed_dim is None:
+            self.ple_embed_dim = self.hidden_size
+        if self.layer_types is None:
+            k = self.full_attention_interval
+            self.layer_types = [
+                "full_attention" if (i + 1) % k == 0 else "linear_attention"
+                for i in range(self.num_hidden_layers)
+            ]
+        else:
+            # the reference calls a QSA layer "qwen_sparse_attention" and
+            # reads a checkpoint's "full_attention" as one; this file calls
+            # it "full_attention" (its Attention always runs the indexer)
+            self.layer_types = [
+                "full_attention" if t == "qwen_sparse_attention" else t
+                for t in self.layer_types
+            ]
+        bad = sorted(set(self.layer_types)
+                     - {"linear_attention", "full_attention"})
+        if bad:
+            raise ValueError(f"unsupported qwen4_exp layer types: {bad}")
+        if len(self.layer_types) != self.num_hidden_layers:
+            raise ValueError(
+                f"qwen4_exp config has {len(self.layer_types)} layer_types "
+                f"for {self.num_hidden_layers} layers")
+        missing = [k for k in ("indexer_n_heads", "indexer_kv_heads",
+                               "indexer_head_dim", "indexer_budget",
+                               "indexer_compress_ratio")
+                   if getattr(self, k) is None]
+        if missing and "full_attention" in self.layer_types:
+            raise ValueError(
+                f"qwen4_exp config has attention layers but no {missing}: "
+                "the reference has no default for them and cannot build its "
+                "QSA indexer without them")
+        if self.ple_layer_ids and self.eos_token_id in (None, []):
+            raise ValueError(
+                "qwen4_exp config has ple_layer_ids but no eos_token_id: the "
+                "reference requires one (the n-gram context resets on it)")
+        gate = self.output_gate_type or self.hidden_act
+        if gate not in ("sigmoid", "silu"):
+            raise ValueError(f"unsupported qwen4_exp output gate {gate!r}")
 
 
 @dataclass
@@ -92,12 +190,6 @@ class ModelArgs(BaseModelArgs):
         self.text.partial_rotary_factor = float(
             rp.get("partial_rotary_factor", self.text.partial_rotary_factor)
         )
-        if not self.text.layer_types:
-            n, k = self.text.num_hidden_layers, self.text.full_attention_interval
-            self.text.layer_types = [
-                "full_attention" if (i + 1) % k == 0 else "linear_attention"
-                for i in range(n)
-            ]
 
 
 # --------------------------------------------------------------------------- norms
@@ -124,12 +216,17 @@ class RMSNorm(nn.Module):
             raise ValueError(f"dim {dim} is not divisible by group_size {group_size}")
 
     def __call__(self, x: mx.array) -> mx.array:
+        # knurlogic vendored edit 8: norm and `1 + weight` in float32,
+        # rounded once (Qwen4ExpTextRMSNorm); `1.0 + weight` in bf16
+        # rounded every scale first
+        scale = 1.0 + self.weight.astype(mx.float32)
+        xf = x.astype(mx.float32)
         if self.group_size is None:
-            return mx.fast.rms_norm(x, 1.0 + self.weight, self.eps)
+            return mx.fast.rms_norm(xf, scale, self.eps).astype(x.dtype)
         shape = x.shape
-        x = x.reshape(*shape[:-1], -1, self.group_size)
-        x = mx.fast.rms_norm(x, None, self.eps).reshape(shape)
-        return x * (1.0 + self.weight)
+        xf = xf.reshape(*shape[:-1], -1, self.group_size)
+        xf = mx.fast.rms_norm(xf, None, self.eps).reshape(shape)
+        return (xf * scale).astype(x.dtype)
 
 
 class RMSNormGated(nn.Module):
@@ -530,7 +627,7 @@ class Attention(nn.Module):
             q, k, v, cache=cache, scale=self.scale, mask=mask
         )
         out = out.transpose(0, 2, 1, 3).reshape(B, S, -1)
-        return self.o_proj(out * mx.sigmoid(gate))
+        return self.o_proj(out * _sigmoid(gate))
 
 
 # ------------------------------------------------------------------- gated deltanet
@@ -594,7 +691,7 @@ class GatedDeltaNet(nn.Module):
                 cache[0] = mx.take_along_axis(conv_input, positions, axis=1)
             else:
                 cache[0] = mx.contiguous(conv_input[:, -n_keep:, :])
-        conv_out = nn.silu(self.conv1d(conv_input))
+        conv_out = _silu(self.conv1d(conv_input))
 
         q, k, v = mx.split(conv_out, [self.key_dim, 2 * self.key_dim], axis=-1)
         q = q.reshape(B, S, self.n_k, self.dk)
@@ -610,7 +707,7 @@ class GatedDeltaNet(nn.Module):
         k = inv_scale * mx.fast.rms_norm(k, None, l2_eps)
 
         state = cache[1] if cache is not None else None
-        out, state = gated_delta_update(
+        out, state = gated_delta(  # knurlogic vendored edit 8
             q,
             k,
             v,
@@ -642,18 +739,27 @@ class SparseMoeBlock(nn.Module):
         )
         self.shared_expert = MLP(args.hidden_size, args.shared_expert_intermediate_size)
         self.shared_expert_gate = nn.Linear(args.hidden_size, 1, bias=False)
+        self.switch_mlp.activation = _SwiGLU()  # knurlogic vendored edit 8
 
     def __call__(self, x: mx.array) -> mx.array:
-        logits = self.gate(x.astype(mx.float32))
-        idx = mx.argpartition(-logits, self.top_k - 1, axis=-1)[..., : self.top_k]
+        # knurlogic vendored edit 8: the reference router's order
+        # (Qwen4ExpTextTopKRouter): logits in x's dtype, softmax over every
+        # expert in float32, top-k, renormalized (edit 3: when
+        # norm_topk_prob) in float32, then rounded to the logits' dtype.
+        # The taken file took float32 logits of a float32 copy of x. (The
+        # softmax over the top-k logits is the renormalized top-k.)
+        logits = self.gate(x)
+        lf = logits.astype(mx.float32)
+        idx = mx.argpartition(-lf, self.top_k - 1, axis=-1)[..., : self.top_k]
         if self.norm_topk_prob:
-            w = mx.softmax(mx.take_along_axis(logits, idx, axis=-1), axis=-1, precise=True)
+            w = mx.softmax(mx.take_along_axis(lf, idx, axis=-1), axis=-1, precise=True)
         else:
             # knurlogic vendored edit 3: the reference's un-renormalized top-k
             # probabilities (softmax over every expert)
-            w = mx.take_along_axis(mx.softmax(logits, axis=-1, precise=True), idx, axis=-1)
-        out = (self.switch_mlp(x, idx) * w[..., None]).sum(axis=-2).astype(x.dtype)
-        return out + mx.sigmoid(self.shared_expert_gate(x)) * self.shared_expert(x)
+            w = mx.take_along_axis(mx.softmax(lf, axis=-1, precise=True), idx, axis=-1)
+        w = w.astype(logits.dtype)
+        out = (self.switch_mlp(x, idx) * w[..., None]).sum(axis=-2)
+        return out + _sigmoid(self.shared_expert_gate(x)) * self.shared_expert(x)
 
 
 class MLP(nn.Module):
@@ -664,7 +770,7 @@ class MLP(nn.Module):
         self.down_proj = nn.Linear(hidden, dim, bias=False)
 
     def __call__(self, x):
-        return self.down_proj(nn.silu(self.gate_proj(x)) * self.up_proj(x))
+        return self.down_proj(_silu(self.gate_proj(x)) * self.up_proj(x))
 
 
 # ------------------------------------------------------ hyper-connections (residual)
@@ -685,13 +791,13 @@ class GatedResidual(nn.Module):
 
     def __call__(self, hyper: mx.array):
         normed = self.hc_norm(hyper)
-        w = nn.silu(self.input_mix_weight_down(normed) / self.hc)
-        w = mx.sigmoid(self.input_mix_weight_up(w))
+        w = _silu(self.input_mix_weight_down(normed) / self.hc)
+        w = _sigmoid(self.input_mix_weight_up(w))
         w = w.reshape(*w.shape[:-1], self.hc, self.d)
         mixed = (w * normed.reshape(*normed.shape[:-1], self.hc, self.d)).mean(axis=-2)
         if self.block_inject_weight is None:
             return mixed
-        inject = 2 * mx.sigmoid(self.block_inject_weight(normed) / self.hc)
+        inject = 2 * _sigmoid(self.block_inject_weight(normed) / self.hc)
         return mixed, hyper, inject
 
 
@@ -890,7 +996,7 @@ class PLELayer(nn.Module):
                 cache[2] = mx.take_along_axis(full, positions, axis=1)
             else:
                 cache[2] = mx.contiguous(full[:, -n:, :])
-        return nn.silu(self.conv1d(full[:, -(n + S) :, :]))
+        return _silu(self.conv1d(full[:, -(n + S) :, :]))
 
     def __call__(
         self, hidden: mx.array, ids: mx.array, prev_ctx: mx.array, cache
@@ -904,7 +1010,7 @@ class PLELayer(nn.Module):
 
         gate = (key * query).sum(axis=-1, keepdims=True) / math.sqrt(self.d)
         gate = mx.sqrt(mx.maximum(mx.abs(gate), 1e-6)) * mx.sign(gate)
-        gated = mx.sigmoid(gate) * value[..., None, :]
+        gated = _sigmoid(gate) * value[..., None, :]
         gated = gated.reshape(*gated.shape[:-2], -1)
         return gated + self._short_conv(self.norm_conv(gated), cache)
 

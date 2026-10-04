@@ -193,6 +193,7 @@ def context_length(path) -> int:
 
 
 #: generation_config.json key -> the sampler's name for it
+# Thinking follows the shipped generation_config (no presence_penalty; Qwen3.6's card lists 1.5).
 _SAMPLING_KEYS = (("temperature", "temp"), ("top_p", "top_p"),
                   ("top_k", "top_k"), ("min_p", "min_p"))
 
