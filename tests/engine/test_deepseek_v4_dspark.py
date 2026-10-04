@@ -510,6 +510,34 @@ def test_badly_calibrated_confidence_falls_back_to_measured_acceptance(
     assert b._width(1, None) == 5
 
 
+def test_the_confidence_is_read_back_with_the_verdicts(monkeypatch):
+    """No GPU sync for the prediction before the verify: _predicted stays
+    lazy, the step's single eval after the verify carries it, and
+    _record_accept keeps it as the next step's width input."""
+    import mlx.core as mx
+
+    from knurlogic.engine.mtp.block_loop import BlockBatch
+    b = _width_batch()
+    pred = b._predicted(mx.full((1, 5), 8.0), [True])
+    assert isinstance(pred, mx.array)
+    b._pred = pred
+    b._record_accept(1, 5, 5)
+    assert b._pred is None and isinstance(b._last_pred, list)
+    assert b._last_pred[4] > 0.99
+    seen = []
+    monkeypatch.setattr(BlockBatch, "_width",
+                        lambda self, B, p=None: seen.append(p) or 1)
+    monkeypatch.setattr(BlockBatch, "_draft_block", lambda self, B, live: (
+        mx.zeros((B, 5), dtype=mx.int32), [[None] * 5] * B,
+        mx.zeros((B, 5))))
+    monkeypatch.setattr(BlockBatch, "_block_step", lambda self, B, pre: [])
+    monkeypatch.setattr(BlockBatch, "drafting_pays", lambda self, B: True)
+    b.uids, b.drafts, b.coord = [7], [True], None
+    b.step()
+    assert seen == [b._last_pred]        # the last step's, a list
+    assert isinstance(b._pred, mx.array)  # this step's, not read yet
+
+
 def test_a_widths_compiling_first_step_does_not_decide_it(monkeypatch):
     """Each width's first step compiles its verify shape (live: hundreds of
     ms). Left in, it kept every narrow width dearer than K, which alone is

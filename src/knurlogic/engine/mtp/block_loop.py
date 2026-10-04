@@ -144,7 +144,10 @@ class BlockBatch(MTPBatch):
         #: per position j: [sum of predicted P(batch accepts >= j), sum of
         #: hits, steps] -- the confidence scores' calibration check
         self._cal = [[0.0, 0.0, 0] for _ in range(self.block_size)]
-        self._pred: list | None = None
+        #: this step's prediction, lazy until its verdicts are in (an
+        #: mx.array, or a list); the last step's, materialized then
+        self._pred = None
+        self._last_pred: list | None = None
 
     def _live(self, B: int) -> list[bool]:
         return [bool(self.drafts[i]) for i in range(B)]
@@ -165,8 +168,11 @@ class BlockBatch(MTPBatch):
             # the head drafts its whole block; the step verifies k of it
             d, qs, conf = self._draft_block(B, live)
             self._prof("draft", d)
+            # lazy: read back with the verdicts (_record_accept), not
+            # here -- a .tolist() before the verify is built is one more
+            # GPU sync per step. The width reads the last step's.
             self._pred = self._predicted(conf, live)
-            k = self._width(B, self._pred)
+            k = self._width(B, self._last_pred)
             if PROFILE:
                 self._wpicks[k] = self._wpicks.get(k, 0) + 1
             pre = (d[:, :k], [q[:k] for q in qs])
@@ -189,15 +195,16 @@ class BlockBatch(MTPBatch):
         return out
 
     # ------------------------------------------------------------ width
-    def _predicted(self, conf, live) -> list[float] | None:
+    def _predicted(self, conf, live) -> "mx.array | None":
         """P(the batch accepts >= j drafts), j = 1..K, from the confidence
         scores [B, K]: per row the running product of sigmoid(score), over
-        the drafting rows the product of those (None without scores)."""
+        the drafting rows the product of those (None without scores). An
+        mx.array [K], not evaluated here."""
         rows = [i for i, x in enumerate(live) if x]
         if conf is None or not rows:
             return None
         p = mx.cumprod(mx.sigmoid(conf.astype(mx.float32)), axis=1)
-        return mx.prod(p[mx.array(rows)], axis=0).tolist()
+        return mx.prod(p[mx.array(rows)], axis=0)
 
     def calibrated(self) -> bool:
         """Do the confidence predictions match the verdicts? Position 1 and
@@ -212,7 +219,9 @@ class BlockBatch(MTPBatch):
         """How many of the K drafts this step verifies: the k with the most
         expected tokens per second, (1 + sum_{j<=k} P(batch accepts >= j))
         / (seconds of a step verifying k at this row count). P is `pred`
-        (this step's confidence scores) while calibrated(), else the
+        (step() passes the last step's confidence prediction, read back
+        with its verdicts: this step's would cost a GPU sync before the
+        verify) while calibrated(), else the
         measured acceptance; the seconds are _wcost's.
         K and 1 are timed EXPLORE_STEPS steps first (K first: its steps
         measure every position's acceptance; the two fix the cost line the
@@ -238,6 +247,8 @@ class BlockBatch(MTPBatch):
                 self._wexplore = (B, k, EXPLORE_STEPS - (got[1] if got else 0))
                 return k
         use = pred if pred is not None and self.calibrated() else None
+        if use is not None and not isinstance(use, list):
+            use = use.tolist()
         best = max(range(1, K + 1), key=lambda k: self._rate(B, k, use))
         self._wsince += 1
         if self._wsince >= RECHECK_STEP:
@@ -300,6 +311,10 @@ class BlockBatch(MTPBatch):
         hits = self._vhits.setdefault(
             B, [deque(maxlen=ACC_SAMPLES) for _ in range(self.block_size)])
         pred, self._pred = self._pred, None
+        if pred is not None and not isinstance(pred, list):
+            pred = pred.tolist()        # the verify has synced already
+        if pred is not None:
+            self._last_pred = pred
         for j in range(k):
             hit = 1.0 if m > j else 0.0
             hits[j].append(hit)
@@ -464,11 +479,16 @@ class BlockBatch(MTPBatch):
                 lazy += [ok, t]
             oks.append(ok_i)
             tt.append(tt_i)
+        if judge:
+            # one sync for the verify, its verdicts, the drafts and the
+            # confidence prediction (_record_accept reads it back)
+            if isinstance(self._pred, mx.array):
+                lazy.append(self._pred)
+            mx.eval(*lazy)
         t1_list = self.t1.tolist()
         d_all = d.tolist()
         m, nxt = 0, [0] * B
         if judge:
-            mx.eval(*lazy)
             acc = []
             for i in range(B):
                 a = 0
