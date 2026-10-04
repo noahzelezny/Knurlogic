@@ -33,12 +33,20 @@ def build_maps() -> dict:
     """The tables the generic engine reads, built from the manifests."""
     arch_for_type, host, depends, prefill = {}, {}, {}, {}
     vision, heads, thinking, kvq = {}, {}, {}, {}
+    templates, signatures, sampling, stages, blocks = {}, [], {}, {}, {}
     for m in manifests():
         for mod, a in m["architectures"].items():
             for t in a["model_types"]:
                 if t in arch_for_type:
                     raise ValueError(f"model_type {t!r} claimed twice")
                 arch_for_type[t] = mod
+                if a.get("tensor_split"):
+                    blocks[t] = a["tensor_split"]
+            p = a.get("pipeline")
+            if p:
+                if p["core"] in stages:
+                    raise ValueError(f"trunk core {p['core']!r} claimed twice")
+                stages[p["core"]] = {"name": mod, "restage": p.get("restage")}
             if a.get("host", "mlx_lm") != "mlx_lm":
                 host[mod] = a["host"]
             if a.get("depends_on"):
@@ -62,10 +70,24 @@ def build_maps() -> dict:
         if v:
             for mod in v["architectures"]:
                 vision[mod] = v["build"]
+            if v.get("signature"):
+                signatures.append(dict(v["signature"], family=m["name"]))
+        for name, spec in (m.get("chat_templates") or {}).items():
+            if name in templates:
+                raise ValueError(f"chat template {name!r} claimed twice")
+            templates[name] = dict(spec, family=m["name"])
+        for t, spec in ((m.get("sampling") or {}).get("non_thinking")
+                        or {}).items():
+            sampling[t] = spec
     return {"arch_for_model_type": arch_for_type, "arch_host": host,
             "arch_depends_on": depends, "prefill_chunk": prefill,
             "vision": vision, "heads": heads, "thinking": thinking,
-            "kv_quant": kvq}
+            "kv_quant": kvq, "chat_templates": templates,
+            "vision_signatures": signatures,
+            "vision_tower_prefixes": tuple(
+                p for s in signatures for p in s.get("tower_prefixes", ())),
+            "non_thinking_sampling": sampling, "pipeline": stages,
+            "tensor_split": blocks}
 
 
 def architecture_dir(family: str) -> Path:

@@ -39,19 +39,25 @@ def core_of(model):
     return getattr(model, "language_model", model).model
 
 
+def _stages() -> dict:
+    """trunk core class name -> {"name": architecture, "restage":
+    "module:attr" or None}: each family manifest's `pipeline` entries."""
+    from knurlogic.engine import families
+    return families.build_maps()["pipeline"]
+
+
+def _stage(model) -> dict:
+    name = type(core_of(model)).__name__
+    st = _stages()
+    if name not in st:
+        raise ValueError(f"a pipeline split knows "
+                         f"{', '.join(s['name'] for s in st.values())}; "
+                         f"this trunk is {name}")
+    return st[name]
+
+
 def family_of(model) -> str:
-    core = core_of(model)
-    name = type(core).__name__
-    if name == "Qwen3_5TextModel":
-        return "qwen3_5"
-    if name == "Glm5NextModel":
-        return "glm5_next"
-    if name == "Qwen4ExpModel":
-        return "qwen4_exp"
-    if name == "DeepseekV4Model":
-        return "deepseek_v4"
-    raise ValueError(f"a pipeline split knows qwen3_5, qwen3_5_moe, glm5_next, "
-                     f"qwen4_exp and deepseek_v4; this trunk is {name}")
+    return _stage(model)["name"]
 
 
 def own_dtype(layer) -> mx.Dtype:
@@ -235,43 +241,18 @@ def _dtype_code(dt) -> int:
 def restage(model, keep: list, start: int, end: int) -> None:
     """Make `model` a stage holding `keep` = its layers [start, end), stage
     ends already wrapped: the layer list, and the per-family indices the
-    trunk froze from the whole list. Every layer is read through its
+    trunk froze from the whole list: the family's own `restage` (its
+    manifest's `pipeline` entry; engine/families/<family>/pipeline_stage.py),
+    none for a trunk that froze nothing. Every layer is read through its
     wrapper (attribute reads see through `Recv` / `Send`)."""
-    fam = family_of(model)
+    target = _stage(model).get("restage")
     core = core_of(model)
     core.layers = keep
-    if fam == "qwen3_5":
-        # PipelineMixin's contract, uniform split and all_gather not used
-        core.start_idx, core.end_idx = 0, None
-        core.pipeline_rank, core.pipeline_size = 0, 1
-        core.ssm_idx = next((i for i, lyr in enumerate(keep) if lyr.is_linear),
-                            None)
-        core.fa_idx = next((i for i, lyr in enumerate(keep)
-                            if not lyr.is_linear), None)
-    elif fam == "glm5_next":
-        # frozen from the full list at __init__ (fork commit f3ab3a83)
-        core.ssm_idx = next((i for i, lyr in enumerate(keep)
-                             if getattr(lyr, "is_linear", False)), 0)
-        core.fa_idx = next((i for i, lyr in enumerate(keep)
-                            if not getattr(lyr, "is_linear", True)), 0)
-    elif fam == "qwen4_exp":
-        # full-model indices in ple_layers and a full-length make_cache
-        # (fork commit dd946407)
-        core.ple_layers = [i - start for i in core.ple_layers
-                           if start <= i < end]
-        whole = model.make_cache
-
-        def make_cache():
-            return whole()[start:end]
-        model.make_cache = make_cache
-    # deepseek_v4: nothing else. Each block froze its own compress ratio,
-    # hash routing and RoPE from its GLOBAL layer_id at __init__, every
-    # layer's cache is the same DeepseekV4Cache (make_cache is one per kept
-    # layer), and the stream between stages is the [B, S, hc, D]
-    # hyper-connection state, which every stage builds from its own
-    # embedding (so a Recv's placeholder has the right shape). The block
-    # takes the token ids as a third argument (hash routing); the wrappers
-    # pass it through.
+    if target:
+        import importlib
+        mod, _, attr = target.partition(":")
+        getattr(importlib.import_module(mod), attr)(model, core, keep,
+                                                    start, end)
 
 
 def split(model, group, bounds: Sequence[tuple[int, int]]) -> dict:

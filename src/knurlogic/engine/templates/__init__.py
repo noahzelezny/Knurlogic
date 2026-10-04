@@ -3,10 +3,13 @@
 Some conversions ship a template that cannot carry an agent: the
 mlx-community DeepSeek-V4-Flash conversion's chat_template.jinja renders no
 tool definitions, ignores assistant tool_calls and role=tool messages, and
-drops reasoning outside thinking_mode='thinking'. `deepseek_v4.jinja` is a
-port of DeepSeek's Python encoder (encoding/encoding_dsv4.py in
-deepseek-ai/DeepSeek-V4-Flash, MIT), checked against its golden outputs
-(tests/test_deepseek_v4.py, PROVENANCE.md).
+drops reasoning outside thinking_mode='thinking'.
+
+The templates, their variants, what selects them and their tool-call
+parsers are the families' (`chat_templates` in a family's MANIFEST,
+engine/families/; DeepSeek-V4's port and its provenance are
+families/deepseek/templates/). This module is the generic half: which
+one an artifact gets, its text, and putting it on a tokenizer.
 
 `install(tokenizer)` swaps the template in when the artifact's is a known
 stub, on the tokenizer itself, so every render and the tool-call parser
@@ -17,12 +20,14 @@ call it.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import logging
-import re
 from pathlib import Path
 
 import jinja2
+
+from knurlogic.engine import families as _families
 
 logger = logging.getLogger(__name__)
 
@@ -32,62 +37,115 @@ logger = logging.getLogger(__name__)
 TEMPLATE_ERRORS = (jinja2.TemplateError, ValueError, TypeError, KeyError,
                    IndexError, AttributeError)
 
-_HERE = Path(__file__).resolve().parent
-
-#: sha256 of an artifact template -> the family whose template replaces it
-STUBS = {
-    # mlx-community/DeepSeek-V4-Flash(-8bit) chat_template.jinja, 2026-09
-    "718a756ad62609c2539a4a4c0fa4279306773e47df105674c01f10fcb0f18c6e":
-        "deepseek_v4",
-}
+#: template name -> its manifest entry (with "family"), every family's
+SPECS: dict = _families.build_maps()["chat_templates"]
 
 
-#: DeepSeek-V4-Flash-Vision-Exp's encoder is Flash's with other reasoning
-#: effort prefixes: its "high" is Flash's "max", its "max" a new one. Its
-#: template is Flash's with this line first.
-DSV4_VISION = "{%- set dsv4_vision = true -%}\n"
+def _base(name: str) -> str:
+    return SPECS[name].get("base", name)
 
 
-def text(family: str) -> str:
-    if family == "deepseek_v4_vision":
-        return DSV4_VISION + text("deepseek_v4")
-    return (_HERE / f"{family}.jinja").read_text(encoding="utf-8")
+#: sha256 of an artifact template -> the template that replaces it
+STUBS = {h: n for n, s in SPECS.items() for h in s.get("stubs", ())}
+
+
+def _resolve(target: str):
+    mod, _, attr = target.partition(":")
+    return getattr(importlib.import_module(mod), attr)
+
+
+#: template -> (tool block start, end, parser(text, tools)); a variant
+#: takes its base's
+PARSERS = {n: _resolve(SPECS[_base(n)]["parser"]) for n in SPECS
+           if SPECS[_base(n)].get("parser")}
+
+
+def text(name: str) -> str:
+    s = SPECS[name]
+    if "base" in s:
+        return s.get("prefix", "") + text(s["base"])
+    return (_families.HERE / s["family"] / s["file"]).read_text(
+        encoding="utf-8")
+
+
+def part_separator(name: str | None, role: str | None = None) -> str:
+    """What a message's list of text parts is joined with under template
+    `name`, for a message of `role`: its maker's encoder's joiner; ""
+    (mlx-lm's) where the manifest says nothing."""
+    seps = (SPECS.get(name) or {}).get("part_separator") or {}
+    return seps.get(role, seps.get("default", "")) if role \
+        else seps.get("default", "")
+
+
+def _config(name: str) -> dict | None:
+    """The artifact's config.json, `name` being its folder; else None."""
+    if not name:
+        return None
+    try:
+        c = json.loads((Path(name) / "config.json").read_text())
+    except (OSError, ValueError):
+        return None
+    return c if isinstance(c, dict) else None
+
+
+def _positive(v) -> bool:
+    try:
+        return v is not None and not isinstance(v, bool) and float(v) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _for_config(base: str, config: dict | None) -> str:
+    """`base` or the variant of it the artifact's config.json selects."""
+    if config:
+        for n, s in SPECS.items():
+            if s.get("base") == base and any(
+                    _positive(config.get(k)) for k in s.get("when_config", ())):
+                return n
+    return base
 
 
 def family_for(template, name: str = "") -> str | None:
-    """The family whose template should replace `template`, or None.
-    A known stub by hash; any template that speaks DeepSeek-V4's DSML (a
-    copy of knurlogic's own, shipped in a release, or an older one: ours,
-    current, replaces it and its parser is installed -- a copy kept as it
-    was had no parser, and its tool calls came back as text); or, for an
-    artifact named DeepSeek-V4, no template or one with no tool handling.
-    An artifact named DeepSeek-V4 and Vision gets the Vision-Exp variant."""
-    low = (name or "").lower()
-    named = "deepseek-v4" in low
-    ours = "deepseek_v4_vision" if named and "vision" in low else "deepseek_v4"
+    """The template that should replace `template`, or None. `name` is the
+    artifact's folder: its config.json (model_type, and the fields a
+    variant is chosen by) says which family's template and which variant,
+    never the folder's name. Replaced: a known stub by hash; any template
+    carrying a family's marker (a copy of knurlogic's own, shipped in a
+    release, or an older one: ours, current, replaces it and its parser is
+    installed -- a copy kept as it was had no parser, and its tool calls
+    came back as text); or, for an artifact of a model_type a family
+    serves a template for, no template or one with no tool handling."""
+    config = _config(name)
+    mt = (config or {}).get("model_type")
+    bases = [n for n, s in SPECS.items() if "base" not in s]
+    ours = next((_for_config(n, config) for n in bases
+                 if mt and mt in SPECS[n].get("model_types", ())), None)
     if not isinstance(template, str) or not template:
         # no template at all (deepseek-ai's own MLX conversion ships none):
         # chat was refused outright
-        return ours if named else None
-    fam = STUBS.get(hashlib.sha256(template.encode()).hexdigest())
-    if fam:
-        return fam
-    if template.startswith(DSV4_VISION):
-        return "deepseek_v4_vision"
-    if "｜DSML｜" in template:
         return ours
-    if named and "tool" not in template.lower():
+    stub = STUBS.get(hashlib.sha256(template.encode()).hexdigest())
+    if stub:
+        return _for_config(stub, config)
+    for n, s in SPECS.items():
+        if s.get("prefix") and template.startswith(s["prefix"]):
+            return n
+    for n in bases:
+        marker = SPECS[n].get("marker")
+        if marker and marker in template:
+            return _for_config(n, config)
+    if ours and "tool" not in template.lower():
         return ours
     return None
 
 
 def served_family(template, name: str = "") -> str | None:
-    """The family knurlogic serves for `template`: a stub it replaces, or
+    """The template knurlogic serves for `template`: a stub it replaces, or
     one of its own templates already in place; else None."""
     fam = family_for(template, name)
     if fam:
         return fam
-    for f in PARSERS:
+    for f in SPECS:
         if template == text(f):
             return f
     return None
@@ -102,7 +160,7 @@ def override(template, name: str = "") -> str | None:
 def install(tokenizer) -> str | None:
     """Replace a stub template on `tokenizer` (an mlx-lm TokenizerWrapper or
     an HF tokenizer) and give it the family's tool-call parser when it has
-    none. Returns the family installed, or None."""
+    none. Returns the template installed, or None."""
     t = getattr(tokenizer, "chat_template", None)
     done = getattr(tokenizer, "_knurlogic_template", None)
     if done is not None and t is done[1]:
@@ -141,47 +199,3 @@ def install(tokenizer) -> str | None:
                 "missing; using knurlogic's %s template", name or "tokenizer",
                 fam)
     return fam
-
-
-# ------------------------------------------------------ DeepSeek-V4 (DSML)
-
-_D = "｜DSML｜"
-#: The tool block's start and end as the state machine matches them.
-#: The start stops before its ">": the model writes ">\n" there, one token
-#: (">Ċ"), so the string with ">" never matches the generated tokens. The
-#: end keeps it: end-of-sentence follows, and ">" stands alone.
-DSV4_START = f"<{_D}tool_calls"
-DSV4_END = f"</{_D}tool_calls>"
-_INVOKE = re.compile(rf'<{_D}invoke\s+name="(.*?)">\n?(.*?)</{_D}invoke>',
-                     re.S)
-_PARAM = re.compile(rf'<{_D}parameter\s+name="(.*?)"\s+string="(true|false)">'
-                    rf'(.*?)</{_D}parameter>', re.S)
-
-
-def parse_deepseek_v4(text: str, tools=None):
-    """The calls in a DSML tool block (the text between DSV4_START and
-    DSV4_END) -> [{"name", "arguments": dict}], after DeepSeek's
-    parse_tool_calls: string="true" values are raw strings, the rest JSON.
-    Raises ValueError when there is no call in it."""
-    calls = []
-    for name, body in _INVOKE.findall(text):
-        args = {}
-        for key, is_str, val in _PARAM.findall(body):
-            if key in args:
-                raise ValueError(f"duplicate parameter {key!r}")
-            if is_str == "true":
-                args[key] = val
-            else:
-                try:
-                    args[key] = json.loads(val)
-                except ValueError:
-                    args[key] = val
-        calls.append({"name": name, "arguments": args})
-    if not calls:
-        raise ValueError("no DSML invoke in the tool block")
-    return calls
-
-
-#: family -> (tool block start, end, parser(text, tools))
-PARSERS = {"deepseek_v4": (DSV4_START, DSV4_END, parse_deepseek_v4),
-           "deepseek_v4_vision": (DSV4_START, DSV4_END, parse_deepseek_v4)}

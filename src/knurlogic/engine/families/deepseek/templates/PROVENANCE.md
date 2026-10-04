@@ -1,4 +1,8 @@
-# engine/templates provenance
+# families/deepseek/templates provenance
+
+The manifest's `chat_templates` (families/deepseek/__init__.py) names these
+templates, what they replace, what selects the variant and how their
+message parts are joined; engine/templates is the generic code reading it.
 
 ## deepseek_v4.jinja
 
@@ -13,7 +17,7 @@
   developer, user, latest_reminder, assistant; DSML tool calls; tasks;
   response_format) rendered in one template.
 - replaces: the mlx-community conversion's `chat_template.jinja` (sha256
-  718a756a...c6e, `STUBS` in `__init__.py`), which renders no tools, no
+  718a756a...c6e, `stubs` in the manifest), which renders no tools, no
   tool calls and no tool results, and reasoning only under
   thinking_mode='thinking'.
 - proven: `tests/test_deepseek_v4.py` renders DeepSeek's four golden
@@ -36,7 +40,7 @@
   - `reasoning_effort="max"`'s prefix is not rendered (the name would make
     knurlogic's thinking detection read the template as GLM's).
 
-## parse_deepseek_v4 (`__init__.py`)
+## parse_deepseek_v4 (`../chat_template.py`)
 
 - after `parse_tool_calls` in the same file (MIT, as above), rewritten as
   two regular expressions over the block the engine's state machine cuts
@@ -54,9 +58,20 @@
   first; the jinja picks the prefixes by it. The image parts are not the
   template's: engine/vision splices the placeholder, and
   runtime/prompt.flatten joins every message's parts with "\n\n" for this
-  template (`part_separator`), text-only ones too.
-- chosen for an artifact named DeepSeek-V4 ... Vision with no template
-  (or a stub), or a template that is this one.
+  template (`part_separator` in the manifest), text-only ones too.
+- chosen by the artifact's config.json, not its folder name: model_type
+  deepseek_v4 with vision_n_layers > 0 or dspark_block_size > 0 (Flash has
+  neither), when it has no template, a stub, or a DSML template; or a
+  template that is this one.
+
+## message parts (`part_separator` in the manifest)
+
+- encoding_dsv4.py (Flash's and Vision-Exp's alike, render_message ~305)
+  joins a tool_result's list of text parts with "\n\n": Flash's template
+  gets `{"tool": "\n\n"}`. Flash's encoder takes no list content on a user
+  message (merge_tool_messages copies it as one text block); mlx-lm's ""
+  stays there. Vision-Exp's (_process_image_blocks ~740) joins every
+  message's blocks with "\n\n": `{"default": "\n\n"}`.
 - proven: tests/engine/test_vision_deepseek.py renders the artifact's
   two-image example equal to its encoder, chat and thinking at each
   effort.

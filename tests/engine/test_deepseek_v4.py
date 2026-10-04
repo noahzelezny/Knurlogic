@@ -25,6 +25,7 @@ cu = pytest.importorskip("transformers.utils.chat_template_utils")
 import encoding_dsv4 as official  # noqa: E402
 
 from knurlogic.engine import templates  # noqa: E402
+from knurlogic.engine.families.deepseek import chat_template as dsml  # noqa: E402
 from knurlogic.engine.runtime import prompt as P  # noqa: E402
 
 TEMPLATE = templates.text("deepseek_v4")
@@ -210,6 +211,22 @@ def test_content_before_tool_calls_loses_the_parsers_separator():
 
 # ----------------------------------------------------- the prompt stage
 
+def _artifact(folder: str, **config) -> str:
+    """A folder named `folder` holding only a config.json: what a
+    tokenizer's name_or_path points at. The template is chosen by the
+    config, never the folder's name."""
+    import tempfile
+    d = Path(tempfile.mkdtemp()) / folder
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps(config))
+    return str(d)
+
+
+#: a DeepSeek-V4-Flash artifact, and some other model's
+FLASH = _artifact("DeepSeek-V4-Flash", model_type="deepseek_v4")
+OTHER = _artifact("Other", model_type="qwen3_5")
+
+
 class DSTok:
     """A tokenizer carrying a template, rendered as transformers renders
     it; a token is a character."""
@@ -218,7 +235,7 @@ class DSTok:
     added_tokens_decoder = {i: t for i, t in enumerate(
         [BOS, EOS, "<｜User｜>", "<｜Assistant｜>", "<think>", "</think>", D])}
 
-    def __init__(self, template=TEMPLATE, name="x/DeepSeek-V4-Flash"):
+    def __init__(self, template=TEMPLATE, name=FLASH):
         self.chat_template = template
         self.name_or_path = name
 
@@ -283,10 +300,10 @@ def test_the_stub_is_replaced_on_the_tokenizer():
     s = "".join(map(chr, p))
     assert "## Tools" in s and tok.chat_template == TEMPLATE
     # a template with tool handling is the artifact's own business
-    other = DSTok("{% if tools %}tool{% endif %}", name="x/DeepSeek-V4-Flash")
+    other = DSTok("{% if tools %}tool{% endif %}", name=FLASH)
     assert templates.install(other) is None
     # nor is a stub-shaped template on some other model
-    assert templates.install(DSTok(stub, name="x/Other")) is None
+    assert templates.install(DSTok(stub, name=OTHER)) is None
 
 
 def test_a_control_token_quoted_in_a_tool_result_stays_text():
@@ -325,15 +342,15 @@ def _block(s):
     """The text the engine hands the parser: between the start and end
     sequences (in the last assistant turn: the system prompt shows one)."""
     i = max(s.rfind("<｜Assistant｜>"), 0)
-    i = s.index(templates.DSV4_START, i) + len(templates.DSV4_START)
-    return s[i:s.index(templates.DSV4_END, i)]
+    i = s.index(dsml.DSV4_START, i) + len(dsml.DSV4_START)
+    return s[i:s.index(dsml.DSV4_END, i)]
 
 
 def test_the_parser_reads_back_what_the_template_renders():
     h = agent()
     for a in (m for m in h if m.get("tool_calls")):
         s = render([h[1], a], TOOLS, gen=False)
-        got = templates.parse_deepseek_v4(_block(s))
+        got = dsml.parse_deepseek_v4(_block(s))
         assert got == [{"name": tc["function"]["name"],
                         "arguments": tc["function"]["arguments"]}
                        for tc in a["tool_calls"]]
@@ -343,7 +360,7 @@ def test_the_parser_agrees_with_deepseeks():
     s = render(agent()[:3], TOOLS, gen=False, thinking_mode="thinking")
     text = s[s.index("<｜Assistant｜><think>") + 20:]
     ref = official.parse_message_from_completion_text(text, "thinking")
-    ours = templates.parse_deepseek_v4(_block(text))
+    ours = dsml.parse_deepseek_v4(_block(text))
     assert [(c["function"]["name"], json.loads(c["function"]["arguments"]))
             for c in ref["tool_calls"]] == \
         [(c["name"], c["arguments"]) for c in ours]
@@ -352,7 +369,7 @@ def test_the_parser_agrees_with_deepseeks():
 
 def test_the_parser_refuses_a_block_with_no_call():
     with pytest.raises(ValueError):
-        templates.parse_deepseek_v4(">\nnothing here\n")
+        dsml.parse_deepseek_v4(">\nnothing here\n")
 
 
 def test_install_gives_a_wrapper_the_dsml_parser():
@@ -367,9 +384,9 @@ def test_install_gives_a_wrapper_the_dsml_parser():
     stub = "{{ bos_token }}{% for m in messages %}{{ m.content }}{% endfor %}"
     w = Wrapper(stub)
     assert templates.install(w) == "deepseek_v4"
-    assert w._tool_parser is templates.parse_deepseek_v4
-    assert w._tool_call_start == templates.DSV4_START
-    assert w._tool_call_start_tokens == tuple(map(ord, templates.DSV4_START))
+    assert w._tool_parser is dsml.parse_deepseek_v4
+    assert w._tool_call_start == dsml.DSV4_START
+    assert w._tool_call_start_tokens == tuple(map(ord, dsml.DSV4_START))
     assert templates.install(w) == "deepseek_v4"      # idempotent
 
 
@@ -392,12 +409,12 @@ def test_a_shipped_copy_of_the_template_gets_ours_and_the_parser():
     w = Wrapper(older)
     assert templates.install(w) == "deepseek_v4"
     assert w.chat_template == TEMPLATE
-    assert w._tool_parser is templates.parse_deepseek_v4
+    assert w._tool_parser is dsml.parse_deepseek_v4
 
 
 def test_a_deepseek_v4_with_no_template_gets_ours_and_can_chat():
     """deepseek-ai's own MLX conversion ships no chat template: chat was
-    refused ("no chat template"). Named DeepSeek-V4, it gets ours, the
+    refused ("no chat template"). A deepseek_v4 config.json gets ours, the
     parser, and the wrapper's has_chat_template."""
     class Enc:
         def encode(self, s, add_special_tokens=False):
@@ -407,14 +424,14 @@ def test_a_deepseek_v4_with_no_template_gets_ours_and_can_chat():
         _tool_parser = None
         _tokenizer = Enc()
         has_chat_template = False
-        name_or_path = "/m/deepseek-ai--DeepSeek-V4-Flash-mlx"
+        name_or_path = FLASH
 
     w = Wrapper(None)
     assert templates.install(w) == "deepseek_v4"
     assert w.chat_template == TEMPLATE and w.has_chat_template is True
-    assert w._tool_parser is templates.parse_deepseek_v4
+    assert w._tool_parser is dsml.parse_deepseek_v4
     nameless = Wrapper(None)
-    nameless.name_or_path = "/m/some-other-model"
+    nameless.name_or_path = OTHER
     assert templates.install(nameless) is None
 
 _REAL = STUB / "tokenizer.json"
@@ -507,3 +524,20 @@ def test_think_max_is_deepseeks_prefix_and_the_three_modes_are_the_dialect():
     name, spec = thinking.detect(TEMPLATE)
     assert name == "deepseek_effort"
     assert [n[1] for n in spec["native"]] == ["off", "high", "max"]
+
+
+def test_a_tool_results_text_parts_are_joined_as_flashs_encoder_joins_them():
+    """A role=tool message whose content is a list of text parts: DeepSeek's
+    encoder (render_message, a tool_result block) joins them with "\\n\\n";
+    the prompt stage joined them with "", so the model read "line aline b"
+    where its encoder writes "line a\\n\\nline b". A user message's parts
+    keep mlx-lm's ""."""
+    msgs = agent(rounds=1)[:4]
+    assert msgs[3]["role"] == "tool"
+    msgs[3]["content"] = [{"type": "text", "text": "line a"},
+                          {"type": "text", "text": "line b"}]
+    flat = P.flatten(msgs, DSTok())
+    assert flat[3]["content"] == "line a\n\nline b"
+    assert P.part_separator(DSTok(), "user") == ""
+    # DeepSeek's encoder, given the list itself
+    assert render(flat, TOOLS) == encode(msgs, TOOLS)

@@ -1086,15 +1086,14 @@ def check_knob(name: str, value, window: int = 0):
 #    includes them; the term is shown so nobody has to take that on faith,
 #    and is added only if the scan finds tower tensors outside what
 #    bytes_on_disk counted. The prefixes are the union of the families'
-#    loaders (gemma4 vision_tower./embed_vision., glm5 vision_model./
-#    vision_tower., qwen's four namings).
-VISION_TOWER_PREFIXES = ("vision_tower.", "embed_vision.", "vision_model.",
-                         "visual.", "model.visual.",
-                         "model.language_model.visual.",
-                         "model.vision_tower.", "model.embed_vision.",
-                         "multi_modal_projector.",
-                         # DeepSeek-V4-Flash-Vision-Exp: its ViT and aligner
-                         "vision.", "aligner.")
+#    (each manifest's vision `signature`, engine/families/; plain data,
+#    importing them imports no mlx).
+def _tower_prefixes() -> tuple:
+    from knurlogic.engine import families
+    return families.build_maps()["vision_tower_prefixes"]
+
+
+VISION_TOWER_PREFIXES = _tower_prefixes()
 #
 # 2. The IMAGE STORE'S bound. The number is engine/vision/store.py's
 #    DEFAULT_MAX_BYTES (one home), or a live store's budget_bytes() when a

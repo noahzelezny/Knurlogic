@@ -121,17 +121,17 @@ def _neutralize_values(v, pattern):
     return v
 
 
-def part_separator(tokenizer) -> str:
-    """What a message's text parts are joined with: DeepSeek-V4-Flash-
-    Vision-Exp's encoder joins content blocks with "\n\n" (images
-    included); everything else, mlx-lm's ""."""
+def part_separator(tokenizer, role: str | None = None) -> str:
+    """What a `role` message's text parts are joined with: what the served
+    template's maker's encoder joins them with (its family's manifest,
+    `part_separator`); mlx-lm's "" where it says nothing."""
     if tokenizer is None:
         return ""
     from knurlogic.engine import templates
     fam = templates.served_family(getattr(tokenizer, "chat_template", None),
                                   str(getattr(tokenizer, "name_or_path", "")
                                       or ""))
-    return "\n\n" if fam == "deepseek_v4_vision" else ""
+    return templates.part_separator(fam, role)
 
 
 def flatten(messages: list[dict], tokenizer=None,
@@ -139,7 +139,8 @@ def flatten(messages: list[dict], tokenizer=None,
     """A copy with list-of-parts content joined into one string (images are
     already placeholders by now) and tool-call arguments decoded, which is
     what chat templates expect. Parts are joined with "", or with what the
-    template's maker joins them with (`part_separator`, or `sep`). Content
+    template's maker joins them with for the message's role
+    (`part_separator`), or with `sep`. Content
     and tool-call arguments are neutralized (control_strings): only the
     template and vision's placeholders write control tokens."""
     pat = control_strings(tokenizer) if tokenizer is not None else None
@@ -152,8 +153,9 @@ def flatten(messages: list[dict], tokenizer=None,
                          getattr(tokenizer, "think_end", None))
              if isinstance(t, str) and t]
     think = set(pat.findall(" ".join(marks))) if pat is not None else set()
-    if sep is None:
-        sep = part_separator(tokenizer)
+    seps = {} if sep is not None else \
+        {r: part_separator(tokenizer, r) for r in
+         {m.get("role") for m in messages}}
     out = copy.deepcopy(messages)
     for m in out:
         keep = think if m.get("role") == "assistant" else ()
@@ -168,7 +170,8 @@ def flatten(messages: list[dict], tokenizer=None,
             if len(texts) != len(c):
                 raise PromptError("a message part is not text, and this "
                                   "model reads text only")
-            m["content"] = sep.join(texts)
+            m["content"] = (sep if sep is not None
+                            else seps[m.get("role")]).join(texts)
         elif c is None:
             m["content"] = ""
         else:
