@@ -29,8 +29,12 @@ def no_vision_why() -> str:
     """An image request's 400 when nothing encodes images: vision turned
     off for this launch (KNURLOGIC_VISION=off) says so; otherwise the
     served model has none."""
+    from knurlogic.engine.vision.registry import NO_VISION_WEIGHTS
     if state.VISION.get("error") == VISION_OFF:
         return f"this request has images, but {VISION_OFF}"
+    if state.VISION.get("error") == NO_VISION_WEIGHTS:
+        return ("this request has images but the served model reads text "
+                f"only ({NO_VISION_WEIGHTS}); send text only")
     return ("this request has images but the served model has no vision; "
             "send text only")
 
@@ -70,7 +74,12 @@ def bind(model_path: str, provider, *, store_bytes: int | None = None,
     config = json.loads(cfg_path.read_text()) if cfg_path.is_file() else {}
     fam = registry.build(config.get("model_type", ""), str(model_path),
                          provider.model, config)
-    state.VISION.update(model=provider.model, error="")
+    # a vision family's conversion without its vision weights loads as
+    # its text model: /status.json says why there is no vision
+    state.VISION.update(model=provider.model,
+                        error="" if fam is not None else
+                        registry.unavailable_why(
+                            config.get("model_type", ""), model_path))
     if fam is None:
         return None
     if not tower:

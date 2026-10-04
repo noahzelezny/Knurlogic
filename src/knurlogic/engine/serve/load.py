@@ -129,6 +129,9 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
         raise RuntimeError(why)
     overlay = long_context_overlay(p)
     state.SERVED["long_context"] = "yarn" if overlay else "off"
+    text = text_only_overlay(p)
+    if text:
+        overlay = {**(overlay or {}), **text}
     state.SERVED["runtime"] = "bundled"
     kw: dict = {"lazy": True} if lazy else {}
     if overlay or model_config:
@@ -140,6 +143,26 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
     model, tok = _load(path, **kw)
     templates.install(tok)
     return model, tok
+
+
+def text_only_overlay(p) -> dict:
+    """The config overlay that builds a vision model's TEXT model when its
+    weights carry none of the vision tensors its config.json describes
+    (engine/vision/registry.vision_weights decides; e.g. DeepSeek-V4-Flash-
+    Vision-Exp converted without its tower: vision_n_layers built as 0),
+    or {}. Raises for a conversion with only part of them."""
+    import json
+    from pathlib import Path
+
+    from knurlogic.engine.vision import registry
+    try:
+        cfg = json.loads((Path(str(p)) / "config.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    v = registry.vision_weights(cfg, p)
+    if v["state"] == "partial":
+        raise RuntimeError(v["why"])
+    return v["text_config"] if v["state"] == "text_only" else {}
 
 
 def vq_without_runtime(p) -> str:

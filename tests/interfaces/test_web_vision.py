@@ -95,6 +95,40 @@ def test_models_document_false_for_a_non_vision_family(monkeypatch, tmp_path):
     assert doc["models"][0]["vision"] is False
 
 
+def test_models_document_says_why_a_conversion_has_no_vision(monkeypatch,
+                                                              tmp_path):
+    """A vision family's conversion without its vision weights: `vision`
+    false and `vision_why` the reason, which the picker grays its vision
+    switch with; a model that is not a vision model has no reason (its
+    switch stays hidden)."""
+    import json
+
+    from knurlogic.machine.discover import Found
+    rows = []
+    for name, cfg in (("text", {"model_type": "deepseek_v4",
+                                "vision_n_layers": 32}),
+                      ("flash", {"model_type": "deepseek_v4"})):
+        p = tmp_path / name
+        p.mkdir()
+        (p / "config.json").write_text(json.dumps(cfg))
+        (p / "model.safetensors.index.json").write_text(json.dumps(
+            {"weight_map": {"model.norm.weight": "model.safetensors"}}))
+        rows.append(Found(name=name, path=p, store="given", format="mlx",
+                          bytes_on_disk=1 << 20, model_type="deepseek_v4",
+                          servable=True))
+    monkeypatch.setattr("knurlogic.machine.discover.find",
+                        lambda *a, **k: rows)
+    documents.forget_models()
+    doc = {m["name"]: m for m in documents.models_document()({})["models"]}
+    assert doc["text"]["vision"] is False
+    assert doc["text"]["vision_why"] == "this conversion has no vision weights"
+    assert doc["flash"]["vision"] is False and doc["flash"]["vision_why"] == ""
+    # the picker shows that row's switch disabled, off, with the reason
+    js = (Path(documents.__file__).parent / "assets" / "views"
+          / "picker.js").read_text()
+    assert "m.vision_why" in js and "b.disabled=off" in js
+
+
 def _reset_loaded_cache():
     """`web._LOADED` is a module-level TTL cache (deliberately, so a status
     poll is free) -- a test that does not clear it sees the PREVIOUS test's

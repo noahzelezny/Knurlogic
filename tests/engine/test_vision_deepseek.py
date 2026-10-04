@@ -603,7 +603,10 @@ def test_vision_tag_needs_a_tower_in_the_artifact(tmp_path):
     vcfg = {"model_type": "deepseek_v4", "vision_n_layers": 32}
     rigs = {"flash": ({"model_type": "deepseek_v4"}, ["model.norm.weight"]),
             "teacher": (vcfg, ["model.norm.weight"]),
-            "vision": (vcfg, ["model.norm.weight", "vision.norm.weight"])}
+            "vision": (vcfg, ["model.norm.weight", "vision.norm.weight",
+                              "model.layers.0.ffn.gate.bias_vl",
+                              "model.image_start", "model.image_end",
+                              "model.image_newline", "model.image_pad"])}
     for name, (cfg, keys) in rigs.items():
         d = tmp_path / name
         d.mkdir()
@@ -617,3 +620,102 @@ def test_vision_tag_needs_a_tower_in_the_artifact(tmp_path):
     assert registry.build("deepseek_v4", str(tmp_path / "teacher"), None) \
         is None
 
+
+
+# ------------------------------------- a conversion without vision weights
+
+def _checkpoint(root, name, *, trunk_vision, extra=()):
+    """A tiny Vision-Exp checkpoint on disk: config.json says
+    vision_n_layers=2 always; the weights are the trunk built with
+    (`trunk_vision`) or without its vision tensors, plus `extra` names."""
+    from mlx.utils import tree_flatten
+    M = _arch()
+    cfg = dict(TINY, vision_n_layers=TINY["vision_n_layers"]
+               if trunk_vision else 0)
+    model = M.Model(M.ModelArgs.from_dict(cfg))
+    _random(model, np.random.default_rng(1))
+    w = dict(tree_flatten(model.parameters()))
+    for k in extra:
+        w[k] = mx.ones((8,))
+    d = root / name
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps(TINY))
+    mx.save_safetensors(str(d / "model.safetensors"), w)
+    return d
+
+
+def _load(monkeypatch, path):
+    """engine/serve/load.load_unlocked with mlx-lm's load_model under it
+    (the tiny checkpoint has no tokenizer)."""
+    import mlx_lm.utils as U
+    from knurlogic.engine import templates
+    from knurlogic.engine.serve.load import load_unlocked
+
+    def load(p, model_config=None, **kw):
+        return U.load_model(Path(p), model_config=model_config)[0], object()
+    monkeypatch.setattr(U, "load", load)
+    monkeypatch.setattr(templates, "install", lambda tok: None)
+    return load_unlocked(str(path))[0]
+
+
+def test_a_vision_config_with_no_vision_weights_loads_text_only(
+        tmp_path, monkeypatch):
+    """vision_n_layers in config.json but no tower, no bias_vl, no image
+    rows and no hash-layer bias in the weights (the -mlx conversion of
+    Vision-Exp): it loads as the text model and refuses images."""
+    from knurlogic.engine.serve import state, vision
+    from knurlogic.engine.vision import registry
+    d = _checkpoint(tmp_path, "text", trunk_vision=False)
+    v = registry.vision_weights(TINY, d)
+    assert v["state"] == "text_only"
+    assert v["text_config"] == {"vision_n_layers": 0}
+    model = _load(monkeypatch, d)
+    assert model.args.vision_n_layers == 0
+    assert not hasattr(model.layers[0].ffn.gate, "bias_vl")
+    assert registry.unavailable_why("deepseek_v4", d) == \
+        registry.NO_VISION_WEIGHTS
+    assert not registry.registered("deepseek_v4", d)
+
+    class Provider:
+        pass
+    p = Provider()
+    p.model = model
+    try:
+        assert vision.bind(str(d), p) is None
+        assert vision.vision_status() == {
+            "on": False, "error": registry.NO_VISION_WEIGHTS}
+        why = vision.no_vision_why()
+        assert "reads text only" in why and registry.NO_VISION_WEIGHTS in why
+    finally:
+        vision.clear()
+        state.VISION.update(error="")
+
+
+def test_a_conversion_with_part_of_its_vision_weights_is_refused(
+        tmp_path, monkeypatch):
+    """The trunk's vision tensors without the tower (or the tower without
+    them) is neither model: refused, saying what is missing."""
+    from knurlogic.engine.vision import registry
+    no_tower = _checkpoint(tmp_path, "no-tower", trunk_vision=True)
+    no_trunk = _checkpoint(tmp_path, "no-trunk", trunk_vision=False,
+                           extra=["vision.norm.weight"])
+    for d, missing in ((no_tower, "the vision tower (vision.)"),
+                       (no_trunk, "gate.bias_vl")):
+        v = registry.vision_weights(TINY, d)
+        assert v["state"] == "partial" and missing in v["why"]
+        with pytest.raises(RuntimeError, match="only part of its vision"):
+            _load(monkeypatch, d)
+        assert registry.unavailable_why("deepseek_v4", d) == v["why"]
+
+
+def test_the_full_conversion_still_has_vision(tmp_path, monkeypatch):
+    from knurlogic.engine.vision import registry
+    d = _checkpoint(tmp_path, "full", trunk_vision=True,
+                    extra=["vision.norm.weight", "aligner.w1.bias"])
+    assert registry.vision_weights(TINY, d)["state"] == "full"
+    model = _load(monkeypatch, d)
+    assert model.args.vision_n_layers == TINY["vision_n_layers"]
+    assert hasattr(model.layers[0].ffn.gate, "bias_vl")
+    assert hasattr(model.model, "image_pad")
+    assert registry.unavailable_why("deepseek_v4", d) == ""
+    assert registry.registered("deepseek_v4", d)

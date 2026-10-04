@@ -10,8 +10,10 @@ drafting; every model held to its maker's reference; GLM-5.3 images.
   calls, and DSpark drafting (5 tokens per step), on one Mac or a split,
   pipeline or tensor; images work on both splits (a request with an image
   runs undrafted).
-  Needs an artifact that carries its tower; a text-only conversion is not
-  tagged VISION.
+  Needs an artifact that carries its tower; a conversion without its
+  vision weights loads as the text model (the page grays its Vision switch:
+  "this conversion has no vision weights", and images are refused), and
+  one with only part of them is refused.
 * A drafting request that ends partway through a step stores only the
   tokens it returned, so the next turn reuses its cache exactly.
 * Runs on mlx 0.32.3 and mlx-lm 0.32.0 (was 0.31.2 / 0.31.3), so it

@@ -344,7 +344,10 @@ def test_deepseek_vision_exp_is_budgeted_only_with_its_tower(tmp_path):
         (d / "config.json").write_text(json.dumps(cfg))
         t = {"model.norm.weight": TEXT}
         if tower:
-            t.update({"vision.norm.weight": TOWER, "aligner.w1.weight": TOWER})
+            t.update({"vision.norm.weight": TOWER, "aligner.w1.weight": TOWER,
+                      "model.layers.0.ffn.gate.bias_vl": 1024,
+                      **{f"model.image_{r}": 1024 for r in
+                         ("start", "end", "newline", "pad")}})
         _safetensors(d / "model.safetensors", t)
     vb = R.vision_budget(Artifact.load(tmp_path / "vision"))
     assert vb["tower_bytes"] == 2 * TOWER and vb["tower_tensors"] == 2

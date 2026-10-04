@@ -540,9 +540,13 @@ function whereLine(){
 // Models), else what the preset resolves to (the preview), else on; a
 // click here is for this launch.
 const LMTP={for:null, mtp:null, dyn:null, vis:null};
+const VISTITLE=$('visrow').querySelector('.seg').title;
 const partBytes=(m,k)=>(PREVIEW&&m&&PREVIEW.for===m.path&&k in PREVIEW)?PREVIEW[k]:null;
 const hasMTP=m=>!!(m&&m.mtp)&&partBytes(m,'mtp_bytes')!==0;
 const hasVis=m=>!!(m&&m.vision)&&partBytes(m,'vision_bytes')!==0;
+// a vision family's conversion without its vision weights: the switch is
+// shown grayed out, off, with the server's reason (/models.json vision_why)
+const noVis=m=>!!(m&&!m.vision&&m.vision_why);
 function mtpDefault(name){
   const saved=SETS[name]; if(saved) return String(saved);
   const k=((PREVIEW&&SEL&&PREVIEW.for===SEL.path&&PREVIEW.knobs)||[]).find(k=>k.name===name);
@@ -551,21 +555,26 @@ function mtpDefault(name){
 }
 function mtpState(){
   const m=SEL, box=$('mtpopts');
-  if(!hasMTP(m) && !hasVis(m)){ box.hidden=true; return }
+  if(!hasMTP(m) && !hasVis(m) && !noVis(m)){ box.hidden=true; return }
   if(LMTP.for!==m.path){ LMTP.for=m.path; LMTP.mtp=LMTP.dyn=LMTP.vis=null }
   const mtp=LMTP.mtp||mtpDefault('KNURLOGIC_MTP');
   const dyn=LMTP.dyn||mtpDefault('KNURLOGIC_MTP_DYNAMIC');
-  const vis=LMTP.vis||mtpDefault('KNURLOGIC_VISION');
+  const vis=noVis(m) ? 'off' : LMTP.vis||mtpDefault('KNURLOGIC_VISION');
   box.hidden=false;
   const set=(k,v)=>box.querySelectorAll(`[data-k=${k}] button`).forEach(b=>
     b.setAttribute('aria-pressed', b.dataset.v===v));
   set('mtp',mtp); set('dyn',dyn); set('vis',vis);
   $('mtprow').hidden=!hasMTP(m);
   $('mtpdynrow').hidden=!hasMTP(m)||mtp==='off';
-  $('visrow').hidden=!hasVis(m);
+  $('visrow').hidden=!hasVis(m)&&!noVis(m);
+  const off=noVis(m), seg=$('visrow').querySelector('.seg');
+  seg.querySelectorAll('button').forEach(b=>b.disabled=off);
+  seg.title=off ? m.vision_why : VISTITLE;
+  $('visrow').classList.toggle('dis', off);
   const mb=partBytes(m,'mtp_bytes'), vb=partBytes(m,'vision_bytes');
   $('mtplab').textContent='MTP'+(mb>0?` (${gb(mb)})`:'');
-  $('vislab').textContent='Vision'+(vb>0?` (${gb(vb)})`:'');
+  $('vislab').textContent='Vision'+(off?` (${m.vision_why})`
+                                       :vb>0?` (${gb(vb)})`:'');
 }
 $('mtpopts').querySelectorAll('.seg').forEach(g=>
   g.querySelectorAll('button').forEach(b=>b.onclick=()=>{

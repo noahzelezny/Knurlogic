@@ -162,8 +162,16 @@ MANIFEST = {
                # config.json: vision_n_layers > 0. A text-only conversion
                # keeps the fields but not the tower, so the tower's own
                # tensors (`tower_in_weights`) must be in the artifact too.
-               # Its ViT and aligner live under these prefixes.
+               # Its ViT and aligner live under these prefixes. The trunk's
+               # own vision tensors (`trunk_keys`, name suffixes): every
+               # gate's bias_vl and the four image rows. A conversion with
+               # none of them loads text-only (vision_n_layers built as 0,
+               # engine/vision/registry.vision_weights); with some, it is
+               # refused.
                "signature": {"config_layers": "vision_n_layers",
                              "tower_in_weights": "vision.",
-                             "tower_prefixes": ["vision.", "aligner."]}},
+                             "tower_prefixes": ["vision.", "aligner."],
+                             "trunk_keys": [".gate.bias_vl", "image_start",
+                                            "image_end", "image_newline",
+                                            "image_pad"]}},
 }
