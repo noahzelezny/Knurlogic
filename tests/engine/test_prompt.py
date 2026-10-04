@@ -95,8 +95,25 @@ def test_list_content_is_joined_and_non_text_refused():
     p, *_ = P.tokenize(None, Tok(), r, P.PromptArgs())
     assert p.count(7) == 3
     r.messages[0]["content"].append({"type": "image_url"})
-    with pytest.raises(P.PromptError):
+    with pytest.raises(P.PromptError, match="reads text only"):
         P.tokenize(None, Tok(), r, P.PromptArgs())
+
+
+def test_a_part_an_image_model_cannot_read_is_refused_saying_what_it_reads(
+        monkeypatch):
+    """On a model that reads images, an image part is a placeholder by the
+    time the prompt is built; what is left (audio, video) is refused with
+    what the model does read -- text and images, not "text only"."""
+    import pytest
+
+    import knurlogic.engine.vision as V
+    monkeypatch.setattr(V, "_SERVED_SPEC", object())
+    r = P.ChatRequest(messages=[{"role": "user", "content": [
+        {"type": "text", "text": "ab"}, {"type": "input_audio"}]}])
+    with pytest.raises(P.PromptError) as e:
+        P.tokenize(None, Tok(), r, P.PromptArgs())
+    assert "reads text and images" in str(e.value)
+    assert "text only" not in str(e.value)
 
 
 def test_control_token_spellings_in_content_stay_text():
