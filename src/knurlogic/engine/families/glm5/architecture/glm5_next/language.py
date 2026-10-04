@@ -508,7 +508,8 @@ class Glm5NextIndexer(nn.Module):
 
 
 class _LatentCache(KVCache):
-    """The MLA layer's latent cache (K = V = the normed compressed latent).
+    """The MLA layer's latent cache (K = V = the normed compressed latent),
+    stored once as `keys`; `values` is zero-width (edit 6).
     A plain KVCache until engine/kvquant.install swaps it (the manifest's
     `kv_quant.caches`): then the latent is stored quantized
     (kvquant.QuantKVCache) and fetched dequantized, so the absorbed
@@ -625,7 +626,13 @@ class Glm5NextSparseAttention(nn.Module):
         kv_latent = mx.expand_dims(kv_latent, axis=1)
 
         if cache is not None:
-            kv_latent, _ = cache[0].update_and_fetch(kv_latent, kv_latent)
+            # K = V = the latent: stored ONCE, as the keys, beside a
+            # zero-width values array (edit 6; it was stored as both, twice
+            # the bytes). Every cache op -- trim, state, merge, extract,
+            # kvquant -- handles the zero-width side as the indexer's.
+            kv_latent, _ = cache[0].update_and_fetch(
+                kv_latent, mx.zeros((B, 1, L, 0), dtype=kv_latent.dtype)
+            )
         else:
             cache = [None] * 2
 
