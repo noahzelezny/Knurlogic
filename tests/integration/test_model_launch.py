@@ -118,8 +118,11 @@ def test_an_mla_latent_is_counted_at_the_bits_and_its_keys_are_not():
     tc = {"num_hidden_layers": 2, "kv_lora_rank": 512,
           "qk_rope_head_dim": 64, "index_head_dim": 128,
           "layer_types": ["linear_attention", "deepseek_sparse_attention"]}
-    assert kv_bytes_per_token(tc)[0] == (512 + 192) * 2
-    assert kv_bytes_per_token(tc, 8)[0] == int(512 * 1.0625 + 192 * 2)
+    # the latent once; rope 64 + the indexer's key, gate scores (128 each)
+    # and valid flag stay bf16
+    exact = 64 + 2 * 128 + 1
+    assert kv_bytes_per_token(tc)[0] == (512 + exact) * 2
+    assert kv_bytes_per_token(tc, 8)[0] == round(512 * 1.0625 + exact * 2)
 
 
 def test_the_scheduler_costs_the_first_prompt_at_the_bits(tmp_path):

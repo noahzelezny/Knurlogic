@@ -3553,9 +3553,9 @@ def _polar_level_bits(dim: int, bits: int) -> tuple[int, ...]:
 @lru_cache(maxsize=None)
 def _rotation_matrix(dim: int, seed: int) -> mx.array:
     if dim <= 0:
-        return mx.zeros((0, 0), dtype=mx.float32)
+        return mx.array(np.zeros((0, 0), np.float32))  # knurlogic edit 9
     if dim == 1:
-        return mx.ones((1, 1), dtype=mx.float32)
+        return mx.array(np.ones((1, 1), np.float32))  # knurlogic edit 9
 
     rng = np.random.default_rng(seed + dim * 7919)
     matrix = rng.standard_normal((dim, dim), dtype=np.float32)
@@ -3577,7 +3577,7 @@ def _rht_padded_dim(dim: int) -> int:
 def _rht_sign_vector(dim: int, seed: int) -> mx.array:
     """Deterministic random sign vector for Randomized Hadamard Transform."""
     if dim <= 0:
-        return mx.zeros((0,), dtype=mx.float32)
+        return mx.array(np.zeros((0,), np.float32))  # knurlogic edit 9
     rng = np.random.default_rng(seed + dim * 7919)
     signs = rng.choice([-1.0, 1.0], size=dim).astype(np.float32)
     return mx.array(signs)
@@ -3614,7 +3614,7 @@ def _rht_inverse(x: mx.array, signs: mx.array) -> mx.array:
 @lru_cache(maxsize=None)
 def _projection_matrix(dim: int, seed: int) -> mx.array:
     if dim <= 0:
-        return mx.zeros((0, 0), dtype=mx.float32)
+        return mx.array(np.zeros((0, 0), np.float32))  # knurlogic edit 9
     rng = np.random.default_rng(seed + dim * 2971 + 17)
     matrix = rng.standard_normal((dim, dim), dtype=np.float32)
     return mx.array(matrix.astype(np.float32))
@@ -3641,7 +3641,7 @@ def _beta_pdf(grid: np.ndarray, dim: int) -> np.ndarray:
 @lru_cache(maxsize=None)
 def _codebook(dim: int, bits: int) -> mx.array:
     if bits <= 0:
-        return mx.zeros((0,), dtype=mx.float32)
+        return mx.array(np.zeros((0,), np.float32))  # knurlogic edit 9
     levels = 1 << bits
     if dim <= 1:
         centroids = np.linspace(-1.0, 1.0, levels, dtype=np.float32)
@@ -3693,7 +3693,7 @@ def _polar_angle_pdf(grid: np.ndarray, level: int) -> np.ndarray:
 @lru_cache(maxsize=None)
 def _polar_angle_codebook(level: int, bits: int) -> mx.array:
     if bits <= 0:
-        return mx.zeros((0,), dtype=mx.float32)
+        return mx.array(np.zeros((0,), np.float32))  # knurlogic edit 9
 
     level_count = 1 << bits
     if level <= 1:

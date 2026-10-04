@@ -490,7 +490,7 @@ def test_mla_caches_are_costed_as_their_latent():
           "layer_types": ["linear_attention", "deepseek_sparse_attention",
                           "linear_attention", "deepseek_sparse_attention"]}
     per, why = kv_bytes_per_token(tc)
-    assert per == 2 * 640 * 2 and "MLA" in why
+    assert per == 2 * (512 + 2 * 128 + 1) * 2 and "MLA" in why
 
 
 def test_the_context_length_applies_live(monkeypatch):
