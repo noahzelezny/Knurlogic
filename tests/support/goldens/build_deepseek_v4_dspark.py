@@ -305,7 +305,10 @@ def kernels():
         mx_ = torch.maximum(s.amax(-1), attn_sink.float()[None, None])
         p = torch.exp(s - mx_[..., None])
         den = p.sum(-1) + torch.exp(attn_sink.float()[None, None] - mx_)
-        o = torch.einsum("bmhk,bmkd->bmhd", p, g.float()) / den[..., None]
+        # the kernel's P @ V takes P in q's dtype (acc_s_cast, BF16 for a
+        # bf16 run; a no-op in float32), its sum the float32 P
+        o = torch.einsum("bmhk,bmkd->bmhd", p.to(q.dtype).float(),
+                         g.float()) / den[..., None]
         return o.to(q.dtype)
 
     def hc_split_sinkhorn(mixes, hc_scale, hc_base, hc_mult=4,

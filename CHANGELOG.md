@@ -30,7 +30,10 @@ every model below change, for the better.
 * DeepSeek-V4 (Flash and Vision-Exp): the shared expert's SwiGLU clamp at
   10; the FP8 / FP4 rounding DeepSeek's inference applies to the attention
   cache, the compressor, the indexer and every quantized linear's input;
-  the MoE's routing weights and sums in float32.
+  the MoE's routing weights and sums in float32. And in bf16, the dtype
+  it serves in: the router's scores, the logits (also the drafting
+  heads') and the compressor's pooling in float32, every norm rounded
+  once, the per-head query norm in bf16 as DeepSeek's.
 * Qwen3.8-Flash-Next: its n-gram embedding hashes with seed 1234, the
   reference's (it used 0, so every token read the wrong rows; about 3%
   lower perplexity now), and it now takes the multipliers the checkpoint
