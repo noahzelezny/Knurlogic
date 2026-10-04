@@ -1317,7 +1317,11 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
             port = next((int(v["port"]) for v in mine.values()
                          if v.get("port")), None) or (
                 int((spec or {}).get("port") or 0) or None)
-            ENDED[job] = {"reason": reason, "kind": kind or None,
+            # an unload says so, so the page drops its card instead of
+            # showing "failed" (picker.js followLaunch)
+            ENDED[job] = {"reason": reason, "kind": kind or (
+                              "requested" if recovery.kind(reason) ==
+                              "requested" else None),
                           "t": time.time(), "port": port,
                           "split": any_rec.get("split")
                           or (spec or {}).get("split"),

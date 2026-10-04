@@ -240,6 +240,31 @@ def test_a_relaunch_refused_for_memory_is_failed(faked, monkeypatch):
     assert what.startswith("failed") and "held now by" in what
 
 
+def test_a_relaunch_refused_while_the_old_rank_holds_the_port_is_not_an_attempt(
+        faked, monkeypatch):
+    """Live (2026-10-04): every first relaunch, 10 s after a failure, was
+    refused "port 8080 on A is in use" -- the old rank 0 was still exiting
+    -- and spent one of the three attempts. It waits instead."""
+    faked["ended"] = "rank 1 exited"
+    R.tick(0)
+    tries = []
+
+    def launch(req, **k):
+        tries.append(1)
+        if len(tries) < 3:
+            return {"refused": "nothing started: A refuses rank 0: port "
+                               "8080 on A is in use"}
+        return {"job": "c0ffee0000000001"}
+    monkeypatch.setattr(C, "launch", launch)
+    t = R.BACKOFF_S[0] + 1
+    for _ in range(3):
+        R.tick(t)
+        t += R.TICK_S + 1
+    rec = next(iter(R.MODELS.values()))
+    assert len(tries) == 3 and rec["job"] == "c0ffee0000000001"
+    assert len(rec["attempts"]) == 1      # only the one that started
+
+
 def test_the_switch_turns_it_off(faked, monkeypatch):
     monkeypatch.setenv("KNURLOGIC_RECOVER", "off")
     faked["ended"] = "rank 1 exited"

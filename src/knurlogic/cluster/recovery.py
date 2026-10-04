@@ -536,6 +536,14 @@ def _schedule(rec: dict, now: float, why: str,
     return f"down ({why}); relaunch {n + 1} in {wait:.0f} s"
 
 
+#: refusals that mean the last job's processes are still on their way out
+_LEAVING_RX = re.compile(r"port \d+ on .+ is in use|is still exiting")
+
+
+def _still_leaving(why: str) -> bool:
+    return bool(_LEAVING_RX.search(why or ""))
+
+
 def _defer(rec: dict, now: float, why: str) -> str:
     """Not yet (a machine not answering, an old rank not gone): look again
     shortly -- within the window since it went down."""
@@ -610,6 +618,11 @@ def _tick_cluster(rec: dict, now: float) -> str:
         rec.update(pending=False, ended_job=None, last_at=now, next_at=None)
         return f"relaunch {n}: job {out['job']} (from {old})"
     why = str(out.get("refused") or out.get("error") or "no answer")
+    if _still_leaving(why):
+        # the job that went down has not let go of its port yet (a rank
+        # still exiting): not an attempt, look again shortly
+        rec["attempts"].pop()
+        return _defer(rec, now, why)
     rec["pending"] = False
     msg = _schedule(rec, now, f"relaunch {n} refused: {why}")
     return msg
