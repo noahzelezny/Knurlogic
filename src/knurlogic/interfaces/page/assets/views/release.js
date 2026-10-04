@@ -8,13 +8,13 @@ async function checkRelease(){
   const d=await getJSON('/release.json'), a=document.getElementById('relnote');
   if(!a || d.error || !d.update) return !!d.latest;
   a.hidden=false;
-  a.textContent=`Update ${d.latest}`;
+  a.textContent='Update available';
   a.title=`knurlogic ${d.latest} is out (this is ${d.current}). `
     +`Click to copy: ${d.command} -- then restart knurlogic ui`;
   a.onclick=async()=>{
     try{ await navigator.clipboard.writeText(d.command); a.textContent='Copied' }
     catch(e){ a.textContent=d.command }
-    setTimeout(()=>{ a.textContent=`Update ${d.latest}` },2000);
+    setTimeout(()=>{ a.textContent='Update available' },2000);
   };
   return true;
 }
