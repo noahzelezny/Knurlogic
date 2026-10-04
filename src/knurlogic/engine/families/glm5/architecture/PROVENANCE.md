@@ -116,3 +116,12 @@ rows of the max |logit diff|: prefill 0.055 before, 0.051 with edit 7,
   MTPBatchGenerator, checked by instrumenting a 3-row batch); a left-padded
   row's recurrent state is zero through its pads and k = 0 there, so the
   gate and beta of a padded row cannot reach a kept result.
+9. **Cached arrays are concrete** (`_mlx_vlm/turboquant.py`,
+   `_rotation_matrix`, `_rht_sign_vector`, `_projection_matrix`,
+   `_codebook`, `_polar_angle_codebook`). Their degenerate branches
+   (dim <= 1, bits <= 0) returned a lazy mx.zeros / mx.ones into an
+   lru_cache; a lazy array belongs to the thread that built it, and on mlx
+   0.32.3 another thread evaluating it raises "There is no Stream(gpu, 0)
+   in current thread". They are built from numpy now, as the other
+   branches already were. A scan of the whole glm5 folder found no other
+   cached or module-level lazy array. No result changes.
