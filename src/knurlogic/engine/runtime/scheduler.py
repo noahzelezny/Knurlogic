@@ -511,16 +511,15 @@ class Scheduler:
         try:
             self._tick()
         # the scheduler thread must outlive one bad tick (logged, fails the rows)
-        except Exception:
+        except Exception as e:
             # Nothing here should raise; if it does, fail what is in
-            # flight rather than the thread. On a ring, a fault that may
-            # have left the ranks at different collectives (a step, an
-            # exchange) already marked the ring down where it happened
-            # (TensorExecutor.step, Link.exchange): the reset below then
-            # sends nothing and the next tick ends the ring. Any other
-            # fault (a command, the journal, the memory guard, events
-            # after a step) left the ranks in step: reset and keep serving.
+            # flight rather than the thread.
             logger.exception("scheduler tick failed")
+            if self.tensor is not None:
+                # on a ring the ranks may now be at different points: the
+                # others are told on the bell, and no collective follows
+                self.tensor.link.fail(f"rank 0's scheduler failed: "
+                                      f"{type(e).__name__}: {e}")
             self._fail_all(RuntimeError("the scheduler hit an internal "
                                         "error; see the server log"))
             self._close_executor()
