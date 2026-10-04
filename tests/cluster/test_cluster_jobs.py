@@ -1518,6 +1518,23 @@ def test_stop_carries_its_kind_to_the_ended_record_and_the_peers(
     C.ENDED.clear()
 
 
+def test_an_unload_is_recorded_as_requested(cache, monkeypatch):
+    """The page drops a launch's card for a requested stop and shows a
+    failure otherwise (picker.js followLaunch reads the ended kind): an
+    unload, which carries no kind of its own, is recorded as requested."""
+    monkeypatch.setattr(C, "_peer_pages", lambda: {})
+    job = "51648583878fcdfc"
+    C.SPECS[job] = spec(job=job)
+    C.stop(job, reason="unloaded", post=lambda *a, **k: {})
+    assert C.ENDED[job]["kind"] == "requested"
+    job2 = "61648583878fcdfc"
+    C.SPECS[job2] = spec(job=job2)
+    C.stop(job2, reason="rank 1 on B (pid 3) exited",
+           post=lambda *a, **k: {})
+    assert C.ENDED[job2]["kind"] is None          # a failure stays one
+    C.ENDED.clear()
+
+
 def test_failover_beyond_two_machines_is_a_logged_no_op(monkeypatch, caplog):
     monkeypatch.setattr(C, "BAD_CABLES", {})
     order = [{"id": c, "name": c.upper()} for c in "abc"]

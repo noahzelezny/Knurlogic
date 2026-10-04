@@ -769,6 +769,8 @@ function followLaunch(L, d){
     for(const x of ms) for(const jb of (x.doc.jobs||[])) if(jb.job===L.job){
       L.per.push({machine:x.name, phase:jb.phase});
       if(jb.phase==='stopped'||jb.phase==='stopping'){
+        // unloaded on purpose (here, on a peer, or by the MCP): no card
+        if(jb.kind==='requested'){ dismissLaunch(L.id); return }
         L.phase='failed'; L.why=jb.reason||'the cluster job stopped'; return }
     }
     const lead=ms.flatMap(x=>x.doc.resident||[]).find(r=>r.cluster&&r.cluster.job===L.job);
