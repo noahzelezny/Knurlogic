@@ -130,6 +130,10 @@ def models_document(serving: str = "", ttl: float = 60.0):
                 "mtp": bool(f.extra.get("mtp_head")),
                 # a family for model_type and a tower in this config.json
                 "vision": vision_registry.registered(f.model_type, f.path),
+                # a vision family's conversion without its vision weights:
+                # why the picker grays its vision switch ("" otherwise)
+                "vision_why": vision_registry.unavailable_why(
+                    f.model_type, f.path),
                 "serving": bool(serving) and (f.name == serving
                                               or str(f.path) == serving),
                 "room": _room(f, ws),

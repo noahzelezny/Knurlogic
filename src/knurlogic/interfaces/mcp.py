@@ -158,6 +158,9 @@ def fit(artifact: str = "", draft: bool = True, vision: bool = True,
         "fits": fits,
         # a family for this model_type and a tower in this config.json
         "vision_capable": vision_registry.registered(a.model_type, a.path),
+        # why a vision family's conversion has no vision ("" otherwise)
+        "vision_unavailable": vision_registry.unavailable_why(
+            a.model_type, a.path),
         "vision_budget": _vision_terms(vb) if vision else None,
         "vision": bool(vision),
         "size_gib": round(a.gib, 1),
@@ -544,6 +547,8 @@ def models(fits_only: bool = False, **_) -> dict[str, Any]:
                "fits": bool(avail) and f.bytes_on_disk <= avail,
                "drafting_head": bool(f.extra.get("mtp_head")),
                "vision_capable": vision_registry.registered(f.model_type, f.path),
+               "vision_unavailable": vision_registry.unavailable_why(
+                   f.model_type, f.path),
                # what reasoning_effort does on this model: its template's
                # dialect, native levels and default (engine/serve/thinking)
                "thinking": thinking.levels(thinking.template_of(f.path))}

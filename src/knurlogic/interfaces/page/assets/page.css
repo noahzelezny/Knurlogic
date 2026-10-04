@@ -567,6 +567,8 @@ body.talk .utemp,.topo.dense .utemp{display:block;margin-left:auto;align-self:ce
   padding:7px 14px;font:inherit;font-size:13.5px;letter-spacing:.1em;
   text-transform:uppercase;cursor:pointer}
 .seg button[aria-pressed=true]{background:var(--acc);color:var(--accfg);font-weight:700}
+.seg button:disabled{cursor:not-allowed;opacity:.45}
+.optrow.dis .optlab{color:var(--faint)}
 .ctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .ctl label{color:var(--faint);font-size:13px;letter-spacing:.06em}
 input,button{font:inherit;border:1px solid var(--line);padding:6px 10px;
