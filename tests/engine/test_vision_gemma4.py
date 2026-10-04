@@ -1,6 +1,7 @@
 """gemma4 vision (e4b, 26b): gates G1-G5 plus the chunk-snap identity
-check. Runs WITHOUT mlx-vlm (goldens are pre-built .npz,
-`tests/support/goldens/build_gemma4.py` in an interpreter that has it).
+check, held to HF transformers' own Gemma 4 vision code. Runs without torch:
+the goldens are pre-built .npz (`tests/support/goldens/build_gemma4.py`,
+run in an interpreter with torch and transformers).
 """
 from __future__ import annotations
 
@@ -113,47 +114,135 @@ def test_placeholder_is_framed_with_the_artifacts_own_tokens(tmp_path):
 
 
 # --- G2: encode() matches the reference tower, on the SAME weights --------
+# The golden is HF transformers' own Gemma4VisionModel +
+# Gemma4MultimodalEmbedder (tests/support/goldens/build_gemma4.py), fed the
+# image as HF's processor patchifies it.
 
-def test_g2_encode_matches_reference_tower_golden():
-    arrays, meta = fv.load_golden("gemma4_vision_tower")
-    pixel_values = arrays["pixel_values"]
+def _hf_family(name):
+    """A Gemma4Vision built from the golden's tower config, carrying HF's
+    weights for that tower and embedder."""
+    import json
 
-    cfg = g4fv.tiny_gemma4_config()
-    cfg["vision_config"]["use_clipped_linears"] = False  # matches the golden
-    fam = g4fv.build_gemma4_family(cfg)
-    tower = fam.vision_tower
     from mlx.utils import tree_flatten, tree_unflatten
-    have = {k for k, _ in tree_flatten(tower.parameters())}
-    seeded = {k[2:]: mx.array(v) for k, v in arrays.items() if k.startswith("w.")}
-    missing = have - set(seeded)
-    assert not missing, f"tower param tree drifted from the reference: {missing}"
-    tower.update(tree_unflatten(list(seeded.items())))
-    mx.eval(tower.parameters())
+    arrays, _ = fv.load_golden("gemma4_vision_tower")
+    pre = f"tower/{name}/"
+    vcfg = json.loads(str(arrays[pre + "vcfg"]))
+    fam = Gemma4Vision(vcfg, int(arrays[pre + "text_hidden"]), 258880,
+                       255999, 258882)
+    w = {k[len(pre + "w/"):]: mx.array(v) for k, v in arrays.items()
+         if k.startswith(pre + "w/")}
+    tw = {k[len("vision_tower."):]: v for k, v in w.items()
+          if k.startswith("vision_tower.")}
+    ew = {k[len("embed_vision."):]: v for k, v in w.items()
+          if k.startswith("embed_vision.")}
+    have = {k for k, _ in tree_flatten(fam.vision_tower.parameters())}
+    assert have == set(tw), f"tower param tree differs from HF's: {have ^ set(tw)}"
+    fam.vision_tower.update(tree_unflatten(list(tw.items())))
+    fam.embed_vision.update(tree_unflatten(list(ew.items())))
+    mx.eval(fam.vision_tower.parameters(), fam.embed_vision.parameters())
+    return fam, arrays, pre
 
-    out = tower(mx.array(pixel_values))
-    mx.eval(out)
-    np.testing.assert_allclose(np.array(out), arrays["out"], atol=1e-3, rtol=1e-3)
+
+@pytest.mark.parametrize("name", ["e4b", "g26"])
+def test_g2_encode_matches_reference_tower_golden(name):
+    """e4b-style (clipped linears) and 26B-style (standardize; a 24-wide
+    head, 12 per rope axis) towers, float32, against HF."""
+    fam, arrays, pre = _hf_family(name)
+    tower = fam.vision_tower(mx.array(arrays[pre + "img"])[None])
+    proj = fam.embed_vision(tower)
+    np.testing.assert_allclose(np.array(tower[0]), arrays[pre + "tower"],
+                               atol=1e-4, rtol=1e-4)
+    np.testing.assert_allclose(np.array(proj[0]), arrays[pre + "proj"],
+                               atol=1e-4, rtol=1e-4)
 
 
-def test_g2_encode_can_fail(monkeypatch):
-    """Break the tower (patch_size lied about) and confirm the reference
-    comparison goes red, then restore."""
-    arrays, meta = fv.load_golden("gemma4_vision_tower")
-    cfg = g4fv.tiny_gemma4_config()
-    cfg["vision_config"]["use_clipped_linears"] = False  # matches the golden
-    fam = g4fv.build_gemma4_family(cfg)
-    tower = fam.vision_tower
-    tower.pooling_kernel_size = 1  # break: reference used 3
-    from mlx.utils import tree_unflatten
-    seeded = {k[2:]: mx.array(v) for k, v in arrays.items() if k.startswith("w.")}
-    tower.update(tree_unflatten(list(seeded.items())))
-    mx.eval(tower.parameters())
-    out = tower(mx.array(arrays["pixel_values"]))
-    mx.eval(out)
-    with pytest.raises(AssertionError):
-        np.testing.assert_allclose(np.array(out), arrays["out"], atol=1e-3,
-                                   rtol=1e-3)
-    # restored: pooling_kernel_size is a local var here, nothing persists.
+def test_g2_encode_can_fail():
+    """Break the tower (pooling kernel lied about) and confirm the
+    reference comparison goes red."""
+    fam, arrays, pre = _hf_family("e4b")
+    fam.vision_tower.pooling_kernel_size = 1  # break: reference used 3
+    out = fam.vision_tower(mx.array(arrays[pre + "img"])[None])
+    assert out.shape[1:] != arrays[pre + "tower"].shape or not np.allclose(
+        np.array(out[0]), arrays[pre + "tower"], atol=1e-4)
+
+
+def _pooled(dtype_name):
+    """Our VisionModel's tail (pool, sqrt(hidden), strip, standardize,
+    cast) on the golden's hidden states: the patch embedder and encoder
+    are stubbed to hand them over, as the golden stubs HF's."""
+    from knurlogic.engine.families.gemma4.vision.vision import VisionModel
+    from knurlogic.engine.families.gemma4.vision.config import VisionConfig
+    arrays, _ = fv.load_golden("gemma4_vision_tower")
+    pre = f"pool/{dtype_name}/"
+    dtype = getattr(mx, dtype_name)
+    hidden = mx.array(arrays[pre + "hidden"]).astype(dtype)
+    ph, pw = arrays[pre + "grid"].tolist()
+    vc = VisionConfig(hidden_size=hidden.shape[-1], intermediate_size=16,
+                      num_hidden_layers=0, num_attention_heads=1,
+                      num_key_value_heads=1, head_dim=8, patch_size=16,
+                      pooling_kernel_size=3, standardize=True)
+    tower = VisionModel(vc)
+    tower.std_bias = mx.array(arrays[pre + "std_bias"]).astype(dtype)
+    tower.std_scale = mx.array(arrays[pre + "std_scale"]).astype(dtype)
+    tower.patch_embedder = lambda pv, pos, pad: hidden
+    tower.encoder = lambda h, pos, mask: h
+    out = tower(mx.zeros((1, 3, ph * 16, pw * 16), dtype=dtype))
+    return out[0], arrays[pre + "out"]
+
+
+@pytest.mark.parametrize("dtype_name", ["float16", "bfloat16"])
+def test_the_pooler_scales_and_standardizes_in_float32(dtype_name):
+    """HF scales the pooled features by sqrt(hidden) in float32 and
+    standardizes in float32 before casting back (modeling_gemma4.py
+    Gemma4VisionPooler.forward, Gemma4VisionModel.forward). On these
+    activations float16 overflows if the scale is done in float16, and
+    bf16 rounds sqrt(768) to 27.75 (knurlogic edit 6)."""
+    got, want = _pooled(dtype_name)
+    assert got.dtype == getattr(mx, dtype_name)
+    got = np.array(got.astype(mx.float32))
+    assert np.isfinite(got).all()
+    # Within a step of the working dtype of HF's output, but for the few
+    # (<1%) whose 3x3 average, summed in float32 in another order, rounds
+    # to the neighbouring value before the scale -- std_bias then cancels
+    # most of the magnitude and leaves that step large.
+    off = np.abs(got - want) > 2 ** -7 * np.abs(want)
+    assert off.mean() < 0.01, off.mean()
+
+
+def _ops():
+    gold = np.load(ROOT / "tests/support/goldens/gemma4_text.npz")
+
+    def bf16(key):
+        bits = gold[key].astype(np.uint32) << 16
+        return mx.array(bits.view(np.float32)).astype(mx.bfloat16)
+    return bf16
+
+
+def test_the_encoder_norm_rounds_where_the_reference_does():
+    """HF's Gemma4RMSNorm in bf16: float32 inside, one rounding (knurlogic
+    edit 7; mx.fast.rms_norm on bf16 left a quarter of these a step
+    off)."""
+    from knurlogic.engine.families.gemma4.vision.vision import RMSNorm
+    bf16 = _ops()
+    norm = RMSNorm(1024, eps=1e-6)
+    norm.weight = bf16("ops/w")
+    got = np.array(norm(bf16("ops/x")).astype(mx.float32))
+    want = np.array(bf16("ops/norm").astype(mx.float32))
+    assert (got != want).mean() < 1e-3, (got != want).mean()
+
+
+def test_the_encoder_mlp_activation_rounds_where_the_reference_does():
+    """gelu_pytorch_tanh(gate) * up in bf16, as torch rounds it (knurlogic
+    edit 7): within two bf16 steps everywhere but the saturated tail,
+    where mlx's tanh reaches -1 first (0 against ~1e-6)."""
+    from knurlogic.engine.families.gemma4.vision.vision import gelu_mul
+    bf16 = _ops()
+    got = gelu_mul(bf16("ops/gate"), bf16("ops/up")).astype(mx.float32)
+    want = bf16("ops/act").astype(mx.float32)
+    diff = np.abs(np.array(got - want))
+    step = np.abs(np.array(want)) * 2 ** -7
+    assert (diff > 0).mean() < 0.01
+    assert ((diff <= 2 * step) | (diff < 1e-5)).all()
 
 
 # --- G3: chunk_boundaries is exactly the image spans ------------------------
@@ -319,26 +408,39 @@ def test_chunk_snap_gives_identical_tokens_across_the_split():
             assert not (bs < e < be) and not (bs < s < be)
 
 
-#: (w, h) -> ((resized w, h), soft tokens), read off mlx-vlm 0.6.17's
-#: Gemma4ImageProcessor with the e4b artifact's
-#: processor settings: patch 16, pool 3, max_soft_tokens 280.
-REFERENCE = {
-    (896, 896): ((768, 768), 256), (448, 448): ((768, 768), 256),
-    (1000, 300): ((1440, 432), 270), (300, 1000): ((432, 1440), 270),
-    (20, 2000): ((48, 8016), 167), (2000, 20): ((8016, 48), 167),
-    (64, 64): ((768, 768), 256), (1920, 1080): ((1056, 576), 264),
-    (5, 5): ((768, 768), 256)}
-
-
 def test_resize_and_token_count_match_the_reference_processor():
+    """HF transformers 5.16.1 `image_processing_gemma4.py`
+    `get_aspect_ratio_preserving_size(height, width, patch_size,
+    max_patches, pooling_kernel_size)`, with max_patches = max_soft_tokens
+    * pooling_kernel_size**2 (`_preprocess`):
+
+        factor = sqrt(max_patches * patch_size**2 / (height * width))
+        side   = pooling_kernel_size * patch_size
+        target = floor(factor * height / side) * side,
+                 floor(factor * width / side) * side
+        both 0           -> ValueError
+        height 0 (wide)  -> side, min(floor(width / height) * side,
+                                      max_patches // pool**2 * side)
+        width 0 (tall)   -> the same, transposed
+        over budget      -> ValueError
+
+    The golden is that function's own output at the released processor
+    settings (patch 16, pool 3, max_soft_tokens 280); -1s are its
+    ValueErrors."""
     from PIL import Image
+    arrays, _ = fv.load_golden("gemma4_vision_tower")
     fam = _tiny_family()
     fam.patch_size, fam.pool, fam.max_soft_tokens = 16, 3, 280
-    for (w, h), (size, n) in REFERENCE.items():
-        assert fam.target_size(w, h) == size, (w, h)
-        px, ref = fam.preprocess(Image.new("RGB", (w, h)), "s")
-        assert ref.n_tokens == n, (w, h)
-        assert px["pixel_values"].shape[-2:] == (size[1], size[0])
+    for w, h, tw, th, n in arrays["resize"].tolist():
+        if tw < 0:
+            with pytest.raises(ValueError):
+                fam.target_size(w, h)
+            continue
+        assert fam.target_size(w, h) == (tw, th), (w, h)
+        if w * h <= 4096 * 4096 and max(w, h) <= 5000:
+            px, ref = fam.preprocess(Image.new("RGB", (w, h)), "s")
+            assert ref.n_tokens == n, (w, h)
+            assert px["pixel_values"].shape[-2:] == (th, tw)
 
 
 def test_the_tower_produces_exactly_the_predicted_count_off_square():
