@@ -81,8 +81,7 @@ MCP
 Known issue
 * On an RDMA (jaccl) split, a rank that dies in the middle of a step can
   leave the other Mac's GPU waiting in that step until it restarts: mlx
-  0.32.3's jaccl has no timeout. A normal unload is unaffected; TCP splits
-  are not affected the same way.
+  0.32.3's jaccl has no timeout. A normal unload is unaffected.
 
 ## 0.1.2
 
