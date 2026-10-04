@@ -98,6 +98,20 @@ def ready(**_) -> dict[str, Any]:
             "checked": ["servers this MCP started", "the model-load lock"]}
 
 
+def _named(artifact: str):
+    """(path, None) for a model name or path `load` would accept, else
+    (None, the refusal): fit, settings and drafting resolve a name the way
+    load does, instead of raising on a bare name. A path stays a path
+    (these tools read one; load does not)."""
+    from knurlogic.interfaces.loading import NotLoadable, resolve_name
+    try:
+        return resolve_name(artifact, None), None
+    except NotLoadable as e:
+        if "/" in artifact:
+            return artifact, None
+        return None, {"refused": "not a known artifact", "note": str(e)}
+
+
 def fit(artifact: str = "", draft: bool = True, vision: bool = True,
         **_) -> dict[str, Any]:
     """Will this artifact fit, with the arithmetic shown.
@@ -111,6 +125,9 @@ def fit(artifact: str = "", draft: bool = True, vision: bool = True,
     from knurlogic.machine.loaded import available_memory
     from knurlogic.tuning import settings as S
 
+    artifact, refused = _named(artifact)
+    if refused:
+        return refused
     a = Artifact.load(artifact)
     mem = available_memory()
     b = wired.load_budget()
@@ -548,6 +565,9 @@ def settings(artifact: str = "", tune: str = "default", **_) -> dict[str, Any]:
     """
     from knurlogic.interfaces.page import documents
     from knurlogic.tuning.settings import preset_of
+    artifact, refused = _named(artifact)
+    if refused:
+        return refused
     try:
         tune = preset_of(tune)
     except ValueError as e:
@@ -573,6 +593,9 @@ def drafting(artifact: str = "", **_) -> dict[str, Any]:
     """Does this artifact have a multi-token-prediction head, and will it run?"""
     from knurlogic.engine import mtp
     from knurlogic.machine.artifact import Artifact
+    artifact, refused = _named(artifact)
+    if refused:
+        return refused
     a = Artifact.load(artifact)
     st = mtp.status(a)
     return {"artifact": a.path.name, "state": st.state,

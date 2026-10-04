@@ -323,3 +323,18 @@ def test_load_cannot_fit_with_mtp_but_fits_without_offers_mtp_off(tmp_path,
     # asked with MTP off already, the same numbers are a plain refusal
     calls.clear()
     assert mcp._mtp_off_doc(str(d), {}, "default", False) is None and not calls
+
+
+def test_fit_settings_and_drafting_refuse_an_unknown_name(monkeypatch):
+    """They resolve a model name as load does: an unknown one is a
+    refusal with its reason, not a FileNotFoundError (live: fit raised on
+    a bare model name load accepted)."""
+    from knurlogic.interfaces import loading
+    from knurlogic.interfaces import mcp as M
+
+    def nope(m, served):
+        raise loading.NotLoadable(404, f"{m!r} is not an artifact")
+    monkeypatch.setattr(loading, "resolve_name", nope)
+    for tool in (M.fit, M.settings, M.drafting):
+        out = tool(artifact="no-such-model")
+        assert out["refused"] == "not a known artifact", (tool, out)
