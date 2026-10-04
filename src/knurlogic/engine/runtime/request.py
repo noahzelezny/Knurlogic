@@ -37,6 +37,9 @@ THINK_CLOSE_TAGS = ("</think>", "</thinking>")
 #: what may directly follow a close tag and merge with its last token
 #: (">\n\n" is one token in some vocabularies)
 _CLOSE_TAILS = ("", "\n", "\n\n")
+#: what may directly precede it and merge with its first token (Qwen3.6
+#: encodes " </" as one token, "</" as another)
+_CLOSE_HEADS = ("", " ")
 
 
 def _extra_think_closes(tokenizer) -> dict:
@@ -48,14 +51,15 @@ def _extra_think_closes(tokenizer) -> dict:
     for tag in THINK_CLOSE_TAGS:
         if tag == tokenizer.think_end:
             continue
-        for tail in _CLOSE_TAILS:
-            try:
-                ids = tuple(tokenizer.encode(tag + tail,
-                                             add_special_tokens=False))
-            except (AttributeError, TypeError, ValueError):
-                break
-            if ids:
-                out[ids] = tag + tail
+        for head in _CLOSE_HEADS:
+            for tail in _CLOSE_TAILS:
+                try:
+                    ids = tuple(tokenizer.encode(head + tag + tail,
+                                                 add_special_tokens=False))
+                except (AttributeError, TypeError, ValueError, KeyError):
+                    continue        # a vocabulary that cannot encode it
+                if ids:
+                    out[ids] = head + tag + tail
     return out
 
 
