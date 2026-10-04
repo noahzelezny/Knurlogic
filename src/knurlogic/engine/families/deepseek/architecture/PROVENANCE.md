@@ -12,7 +12,7 @@ artifacts were validated against -- not merely that it imports.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.32.0 (0.31.3
   until 2026-10-02).
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `d03bbf2c55c5ef9ddba57c56ee06ea602e4963e3d1158454b81eed4e4e9cad7f`
+- vendored sha256: `8b0636622c4cf2498764f2a34bf4af73b15a980d839e928b5af32c763423bca5`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -358,9 +358,16 @@ HC head and the final norm); tested, not changed.
    chain), ~1.2 ms with graph building; whole random 24-layer configs
    within noise of +0.5 ms.
 
-### Edit 22, a fix (batching)
+   Fixed after the first live run (2026-10-03): the expert kernel's
+   no-weight argument `_NO_W` was a lazy `mx.zeros` made at import, which
+   on mlx 0.32.3 belongs to the importing thread's stream; the engine
+   thread evaluating it first raised "There is no Stream(gpu, 0) in
+   current thread" on a Vision-Exp split's first admission. It is made
+   from Python data now (holds its value). Tests:
+   test_deepseek_v4_arch.py::test_module_arrays_evaluate_first_in_another_thread
+   and ::test_no_module_makes_a_lazy_array_at_import (every family).
 
-(Edit 21 is left to another change in flight.)
+### Edit 22, a fix (batching)
 
 22. **A merged window is each row's tokens, not its ring buffer**
    (`DeepseekV4Cache._window`, used by `_merge_local` and `extend`'s

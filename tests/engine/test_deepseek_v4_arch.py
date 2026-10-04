@@ -455,3 +455,63 @@ def test_the_batch_engine_admits_short_rows_beside_any_row():
             gen.close()
             assert got.get(uids[1]) == 8 and got[uids[0]] == 16, \
                 (first, later, wait, got)
+
+
+def test_module_arrays_evaluate_first_in_another_thread():
+    """The engine evaluates on its own thread. A lazy array made when a
+    module was imported belongs to the importing thread's stream: live, a
+    DeepSeek split's first admission raised "There is no Stream(gpu, 0) in
+    current thread" on deepseek_v4's _NO_W (mlx 0.32.3). A fresh
+    interpreter imports every vendored architecture on the main thread, so
+    nothing evaluated them there first; a second thread evaluates every
+    module-level array."""
+    import subprocess
+    import sys
+    code = (
+        "import importlib, threading, mlx.core as mx\n"
+        "from knurlogic.engine import register\n"
+        "import sys\n"
+        "from knurlogic.engine import families\n"
+        "register.register(override=True)\n"
+        "for name in register.available():\n"
+        "    from knurlogic.engine.arch import host_for\n"
+        "    importlib.import_module(f'{host_for(name)}.models.{name}')\n"
+        "dirs = [str(d.resolve()) for d in families.architecture_dirs()]\n"
+        "mods = [m for m in list(sys.modules.values())\n"
+        "        if any(str(getattr(m, '__file__', '') or '').startswith(d) for d in dirs)]\n"
+        "arrs = [(m.__name__, k, v) for m in mods for k, v in vars(m).items()\n"
+        "        if isinstance(v, mx.array)]\n"
+        "bad = []\n"
+        "def run():\n"
+        "    for m, k, v in arrs:\n"
+        "        try:\n"
+        "            mx.eval(v + 0)\n"
+        "        except Exception as e:\n"
+        "            bad.append(f'{m}.{k}: {e}')\n"
+        "t = threading.Thread(target=run); t.start(); t.join()\n"
+        "print(len(mods), 'modules', len(arrs), 'arrays', bad)\n"
+        "raise SystemExit(1 if bad or not mods else 0)\n")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                       text=True, timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_no_module_makes_a_lazy_array_at_import():
+    """The same failure for any family: a module-level mx.zeros / ones /
+    arange / ... is lazy and bound to the importing thread. Arrays made
+    from Python data (mx.array([...])) hold their values and are fine."""
+    import ast
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[2] / "src" / "knurlogic"
+    lazy = {"zeros", "ones", "full", "arange", "eye", "linspace", "tri",
+            "concatenate", "stack", "broadcast_to", "zeros_like", "ones_like"}
+    found = []
+    for f in src.rglob("*.py"):
+        for node in ast.parse(f.read_text()).body:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and \
+                    isinstance(node.value, ast.Call):
+                fn = node.value.func
+                if isinstance(fn, ast.Attribute) and fn.attr in lazy and \
+                        isinstance(fn.value, ast.Name) and fn.value.id == "mx":
+                    found.append(f"{f.relative_to(src)}:{node.lineno}")
+    assert not found, found
