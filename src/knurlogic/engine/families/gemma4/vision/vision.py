@@ -13,6 +13,7 @@ since `Family.encode` calls the tower with ONE patchified image at a time
 """
 from __future__ import annotations
 
+from functools import partial
 from typing import Optional
 
 import mlx.core as mx
@@ -77,13 +78,28 @@ class VisionRMSNormNoScale(nn.Module):
 
 
 class RMSNorm(nn.Module):
+    """The encoder layers' norms. knurlogic edit 7: HF's Gemma4RMSNorm --
+    (x * rsqrt(mean(x^2) + eps)) * w in float32, rounded once to the
+    working dtype; mx.fast.rms_norm rounds x * rsqrt first and again after
+    the weight (a quarter of bf16 elements a step off). The tower runs once
+    per image, so the unfused form costs nothing that matters."""
+
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
         self.weight = mx.ones((dim,))
         self.eps = eps
 
     def __call__(self, x: mx.array) -> mx.array:
-        return mx.fast.rms_norm(x, self.weight, self.eps)
+        return mx.fast.rms_norm(x.astype(mx.float32),
+                                self.weight.astype(mx.float32),
+                                self.eps).astype(x.dtype)
+
+
+@partial(mx.compile, shapeless=True)
+def gelu_mul(gate: mx.array, up: mx.array) -> mx.array:
+    """knurlogic edit 7: gelu_pytorch_tanh(gate) * up as torch rounds it on
+    bf16 -- the gelu in float32, rounded once, then the product."""
+    return nn.gelu_approx(gate.astype(mx.float32)).astype(up.dtype) * up
 
 
 def _rotate_half(x):
@@ -197,7 +213,7 @@ class VisionMLP(nn.Module):
                                          bias=False, use_clipping=clip)
 
     def __call__(self, x: mx.array) -> mx.array:
-        return self.down_proj(nn.gelu_approx(self.gate_proj(x)) * self.up_proj(x))
+        return self.down_proj(gelu_mul(self.gate_proj(x), self.up_proj(x)))
 
 
 class VisionTransformerBlock(nn.Module):
@@ -296,7 +312,12 @@ class VisionPooler(nn.Module):
         else:
             hidden_states, mask = self._avg_pool_by_positions(
                 hidden_states, patch_positions, length)
-        hidden_states = hidden_states * self.root_hidden_size
+        # knurlogic edit 6: scale in float32 and return float32, as HF's
+        # Gemma4VisionPooler (modeling_gemma4.py:681-688): sqrt(hidden) can
+        # push the activations past float16's range, and in bf16 the scale
+        # itself rounds (sqrt(1152) = 33.94 -> 34.0); VisionModel
+        # standardizes in float32 and casts back
+        hidden_states = hidden_states.astype(mx.float32) * self.root_hidden_size
         return hidden_states, mask
 
 
@@ -385,10 +406,14 @@ class VisionModel(nn.Module):
             all_real.append(pooled[i, :n_valid])
         hidden_states = mx.concatenate(all_real, axis=0)[None]
 
+        # knurlogic edit 6: standardize in float32 (the std_bias subtraction
+        # cancels large values) and cast back to the working dtype, as HF's
+        # Gemma4VisionModel.forward (modeling_gemma4.py:2056-2060)
         if self.config.standardize:
-            hidden_states = (hidden_states - self.std_bias) * self.std_scale
-
-        return hidden_states
+            hidden_states = (
+                (hidden_states - self.std_bias.astype(mx.float32))
+                * self.std_scale.astype(mx.float32))
+        return hidden_states.astype(inputs_embeds.dtype)
 
     @staticmethod
     def sanitize(weights):
