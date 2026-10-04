@@ -2,8 +2,9 @@
   "gemma4": {
     "sha256": "086fb0e4c06df6cf8ad14efbf7956fff744c9835d169e064887863df551e549d",
     "text_path_held_by": "tools/vision_gate.py on an M4 Max: text answer, image answer (red, 42), five-turn cache reuse, recall -- all PASS. The only edit forwards mm_mask; with mm_mask=None the call is upstream's.",
-    "validated_on_artifact": "TheDrainFlorist--gemma-4-e4b-it-VQ-PLE",
-    "validated_with_mlx_lm": "0.31.3"
+    "validated_on_artifact": "mlx-community--gemma-4-e4b-it-8bit, TheDrainFlorist--gemma-4-26b-a4b-it-VQ-6.2bpw",
+    "validated_with_mlx_lm": "0.32.0",
+    "validated_live": "2026-10-03, mlx 0.32.3 / mlx-lm 0.32.0, one Mac: text, tool call, one and two images (earlier: e4b VQ-PLE on mlx-lm 0.31.3, tools/vision_gate.py)"
   },
   "gemma4_text": {
     "sha256": "44ee1846b3d3f4cacf77c43b11380c077511641bcc15215f202708a58fac1668",

@@ -48,9 +48,9 @@ changes; the compressor and indexer are as before.
 Constraint from the reference: an image span must be prefilled in one
 chunk. knurlogic's prefill chunking must not split a span (bump the chunk
 boundary past `IMAGE_END`).
-This is the riskiest piece: our vendored attention builds its window mask
-in its own (Metal) path, so the visible-right extension has to be added
-there and checked against the reference on a prompt with two images.
+Our vendored attention builds its window mask in its own (Metal) path; the
+visible-right extension is there (architecture edit 15) and was checked
+against the reference on a prompt with two images.
 
 ### Vision tower (vision.py, 118 lines)
 ViT: patch 14, dim 1024, 16 heads, 32 blocks, 2D RoPE (theta 1e4), RMSNorm,
@@ -91,8 +91,11 @@ In code (2026-10-02):
 - `engine/mtp/block_loop.py`: the drafting step. One (K+1)-wide verify;
   every row of a batch commits the batch's fewest accepted drafts plus one
   (one shared cache write index); greedy, seeded and sampled verdicts as
-  the 1-token loop's. The confidence score is computed and unused, as in
-  the reference's generate.py.
+  the 1-token loop's. The confidence head's score picks how many of the
+  K drafts a step verifies (block_loop._width, while it stays calibrated
+  against the verdicts; else measured per-position acceptance), over each
+  width's timed cost; the reference's generate.py computes it and does not
+  use it.
 - On a split (pipeline or tensor, 2026-10-03) rank 0 alone holds the head,
   drafts and judges, as with the 1-token head: `Coord.bk` carries its
   regime and the [B, 5] drafts (B1), `Coord.bm` the committed count and
@@ -126,7 +129,8 @@ In code (2026-10-02):
   random inputs (main_x, the window kvs and the stage output, relative
   error 5e-6; scratch check, not a test: the reference side needs torch
   and ~3.6 GB).
-- Not measured: acceptance and speed on the real weights.
+- Measured on the real weights (2026-10-03, two-Mac TCP split, greedy):
+  25.8 tok/s with DSpark against ~19 plain; first-draft acceptance ~0.70.
 
 ## Memory and placement
 Trunk ~150 GB at mxfp4 experts: over either Mac alone (96 / 128 GB), so it
@@ -155,5 +159,6 @@ Phases 1-2 in code (2026-10-02): the trunk's edits 14-15
 (`families/deepseek/architecture/PROVENANCE.md`), the family
 (`families/deepseek/vision/`, its PROVENANCE.md says what is verified and
 what waits for a conversion), and the Vision-Exp template variant
-(`engine/templates/PROVENANCE.md`). Not yet run on a converted artifact.
+(`engine/templates/PROVENANCE.md`). Run live on the converted artifact
+(`...-mlx-vision`) since 2026-10-03.
 Phase 4 in code (2026-10-02): see DSpark above.
