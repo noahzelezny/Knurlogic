@@ -68,6 +68,15 @@ def check_peers() -> None:
     if _LINK is not None:
         _LINK.check()
 
+
+def fail_peers(why: str) -> None:
+    """Mark this process's ring down (Link.fail): the other ranks are told
+    on the bell and no collective is entered here again. For a failure
+    raised below the executor, before it reaches tensor.follow's or
+    TensorExecutor.step's own handler."""
+    if _LINK is not None:
+        _LINK.fail(why, own=True)
+
 # ------------------------------------------------------------------ split
 
 
@@ -302,8 +311,10 @@ class Link:
     lost"); over jaccl only the self-heal fork's deadline
     (JACCL_COLLECTIVE_TIMEOUT_MS, armed after the load) ends it."""
 
-    #: bell bytes: rank 0 wakes a parked rank; any rank says it is leaving
-    WAKE, ABORT = b"w", b"x"
+    #: bell bytes: rank 0 wakes a parked rank; any rank says it is leaving;
+    #: rank 0 says an orderly stop follows (its bell closing is then not a
+    #: failure, even if it closes before the stop op is applied here)
+    WAKE, ABORT, STOP = b"w", b"x", b"s"
 
     def __init__(self, group):
         import threading
@@ -319,6 +330,9 @@ class Link:
         self.why = ""
         #: an orderly stop is under way: a bell closing is expected
         self.closing = False
+        #: this rank's own failure put the ring down (fail(own=True)), not
+        #: a peer's word
+        self.own = False
         self._woken = threading.Event()
         self._said = False
         self._lock = threading.Lock()
@@ -388,6 +402,9 @@ class Link:
             if b == self.WAKE:
                 self._woken.set()
                 continue
+            if b == self.STOP:
+                self.closing = True
+                continue
             if self._said and not b:
                 return                    # our own abort closed it
             if b == self.ABORT:
@@ -401,7 +418,7 @@ class Link:
             self.fail(why)
             return
 
-    def fail(self, why: str) -> None:
+    def fail(self, why: str, own: bool = False) -> None:
         """This ring is down (a peer said so or vanished, or this rank
         failed): every other rank is told on the bell (rank 0 relays to
         all; a follower tells rank 0), and no collective is entered here
@@ -410,6 +427,7 @@ class Link:
             first = not self.down.is_set()
             if first:
                 self.why = why
+                self.own = own
                 self.down.set()
             said, self._said = self._said, True
         if first:
@@ -442,9 +460,23 @@ class Link:
             raise PeerGone(self.why)
 
     def exchange(self, over: int, payload: bytes | None = None):
-        """-> (control rows, one per rank; the plan bytes or None)."""
-        import numpy as np
+        """-> (control rows, one per rank; the plan bytes or None).
+
+        On rank 0, an exchange that fails (a Desync, a collective that
+        failed) leaves the ranks at different points: the ring is marked
+        down here, so its callers (park, stop, the executor's reset, the
+        scheduler) need not tell a collective fault from any other."""
         self.check()
+        try:
+            return self._exchange(over, payload)
+        except BaseException as e:
+            if self.rank == 0 and not self.down.is_set():
+                self.fail(f"rank 0's control exchange failed: "
+                          f"{type(e).__name__}: {e}", own=True)
+            raise
+
+    def _exchange(self, over: int, payload: bytes | None):
+        import numpy as np
         if self.parked:
             for c in self.socks:
                 c.sendall(self.WAKE)
@@ -662,6 +694,13 @@ class Ring:
             return
         ops = self.journal.take() + [{"op": "stop"}]
         self.link.closing = True
+        # said on the bell first: a follower's bell thread can see this
+        # rank's connection close before its main thread applies `stop`
+        for c in self.link.socks:
+            try:
+                c.sendall(Link.STOP)
+            except OSError:
+                pass                  # that rank is gone; the exchange says
         self.link.exchange(0, P.encode({"ops": ops}))
 
     def park(self) -> None:
@@ -1044,7 +1083,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                        steps, e)
         return steps
     except BaseException as e:
-        if link.down.is_set():
+        if link.down.is_set() and not link.own:
             # a peer left first and a collective failed under it (over TCP
             # mlx fails it: "connection to a peer was lost")
             logger.warning("rank %d: leaving after %d steps: %s (%s: %s)",
