@@ -172,42 +172,6 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
         threading.Thread(target=after_load_stops, daemon=True).start()
     signal.signal(signal.SIGTERM, on_term)
 
-    ring = getattr(sched, "tensor", None)
-    if ring is not None:
-        def on_down():
-            # a rank failed or vanished (tensor.Link.fail): the scheduler
-            # ends the ring between steps and this rank leaves. A step in
-            # flight ends when its collective fails -- at once over TCP;
-            # over jaccl only by the self-heal deadline (in_flight_s) --
-            # and only then does the process exit, never inside one if it
-            # can be helped.
-            jobs.progress(phase="stopping")
-
-            def leave():
-                if sched.stop_ring(timeout=in_flight_s(stop_within)):
-                    import time
-                    time.sleep(exit_after)      # the 503s go out first
-                    os._exit(0)
-                logging.getLogger(__name__).error(
-                    "ring down and a collective in flight never returned: "
-                    "leaving inside it (stock jaccl has no timeout; set "
-                    "KNURLOGIC_JACCL_TIMEOUT_MS with the self-heal fork)")
-                fail_and_leave()
-            threading.Thread(target=leave, daemon=True).start()
-        ring.link.on_down.append(on_down)
-
-
-def in_flight_s(stop_within: float) -> float:
-    """How long a ring that went down waits for its scheduler's step to end:
-    `stop_within`, or past the jaccl self-heal deadline when one is armed
-    (a collective on a vanished peer throws then, not before)."""
-    import os
-    try:
-        ms = int(os.environ.get("JACCL_COLLECTIVE_TIMEOUT_MS") or 0)
-    except ValueError:
-        ms = 0
-    return max(stop_within, ms / 1000 + 5) if ms > 0 else stop_within
-
 
 def serve(artifact, host: str, port: int, *, routes: dict | None = None,
           settings: dict | None = None, draft: bool = True,

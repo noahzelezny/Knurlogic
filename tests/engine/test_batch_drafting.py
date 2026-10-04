@@ -297,10 +297,8 @@ def test_a_cluster_rank_whose_forward_fails_stops_instead_of_hanging(
         monkeypatch):
     """Rank 1 of a pipeline load raised inside its prefill forward and
     carried on; rank 0 waited on its half forever (the card sat at 100%).
-    A mid-forward failure on a rank raises out of the engine, to the ring
-    (tensor.follow / TensorExecutor.step tell the other ranks and leave);
-    one after the forward still fails just its row (the ranks stay in
-    step)."""
+    A mid-forward failure on a rank exits the rank; one after the forward
+    still fails just its row (the ranks stay in step)."""
     from knurlogic.engine.mtp import batch_generator as bg
     from knurlogic.engine.mtp.batch_loop import ForwardFailed
     model, head, prompts = _tiny(512)
@@ -309,30 +307,15 @@ def test_a_cluster_rank_whose_forward_fails_stops_instead_of_hanging(
                                        b0=lambda t1: t1)
     monkeypatch.setattr(bg, "admit", lambda *a, **k: (_ for _ in ()).throw(
         ForwardFailed("kernel missing")))
-    gen.insert(prompts[:1], max_tokens=[5])
-    with pytest.raises(ForwardFailed):
-        gen.next()
 
-
-def test_a_failed_decode_step_on_a_ring_raises_to_the_ring(monkeypatch):
-    """On a split model a step that raised left the ranks at different
-    collectives; failing its rows and broadcasting b0 met a peer's b2 and
-    both ranks waited forever. It raises to the ring instead."""
-    from knurlogic.engine.mtp import batch_generator as bg
-    model, head, prompts = _tiny(512)
-    gen = bg.MTPBatchGenerator(model, head, prefill_step_size=16)
-    b0 = []
-    gen._coord = types.SimpleNamespace(head=False, diverged=False,
-                                       b0=lambda t1: b0.append(1) or t1)
+    def exit_(code):
+        raise SystemExit(code)
+    monkeypatch.setattr(bg.os, "_exit", exit_)
+    monkeypatch.setattr(bg.logging, "shutdown", lambda: None)
     gen.insert(prompts[:1], max_tokens=[5])
-    while not len(gen._batch):
+    with pytest.raises(SystemExit) as ex:
         gen.next()
-    monkeypatch.setattr(gen._batch, "step", lambda: (_ for _ in ()).throw(
-        RuntimeError("decode boom")))
-    n = len(b0)
-    with pytest.raises(RuntimeError, match="decode boom"):
-        gen.next()
-    assert len(b0) == n                  # no broadcast after the failure
+    assert ex.value.code == 1
 
 
 def test_a_failed_decode_step_fails_its_rows_not_the_server(monkeypatch):
