@@ -61,7 +61,8 @@ knurlogic = ["interfaces/page/assets/**/*", "interfaces/menubar_assets/*.png",
              "engine/families/*/architecture/*.json",
              "engine/families/*/vision/PROVENANCE.md",
              "engine/runtime/PROVENANCE.md",
-             "engine/templates/*.jinja", "engine/templates/PROVENANCE.md",
+             "engine/families/*/templates/*.jinja",
+             "engine/families/*/templates/PROVENANCE.md",
              "context_management/prompts/*.md"]
 
 [tool.knurlogic.pins]

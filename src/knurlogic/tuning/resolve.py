@@ -1096,6 +1096,51 @@ def tensor_sharded(name: str) -> bool:
     return sharded(name)
 
 
+def _block_width(tc: dict, inp: dict):
+    """An input's width: the product of its config keys; None when one is
+    absent and has no default."""
+    w = 1
+    for k in inp["keys"]:
+        v = tc.get(k)
+        if v is None:
+            v = (inp.get("defaults") or {}).get(k)
+        elif not v and k in (inp.get("defaults") or {}):
+            v = inp["defaults"][k]
+        if v is None:
+            return None
+        w *= int(v)
+    return w
+
+
+def _block_refusals(types: set, tc: dict, n: int) -> list:
+    """A family whose activations are rounded in blocks along a linear's
+    input (its manifest's `tensor_split`: DeepSeek-V4's act_quant, block
+    128, architecture edit 21): a split that cuts such an input must leave
+    each rank whole blocks, or the split model rounds other blocks than
+    the whole one."""
+    from knurlogic.engine import families
+    rules = families.build_maps()["tensor_split"]
+    out: list = []
+    seen: set = set()
+    for t in sorted(t for t in types if t in rules):
+        rule = rules[t]
+        b = int(rule["act_quant_block"])
+        for inp in rule["inputs"]:
+            if inp["what"] in seen:
+                continue
+            seen.add(inp["what"])
+            v = _block_width(tc, inp)
+            if v is None or v % n:
+                continue
+            if (v // n) % b:
+                out.append(
+                    f"{inp['what']} = {v}: a rank's {v // n} is not whole "
+                    f"{b}-blocks ({v // n} % {b} = {v // n % b})"
+                    f": its activation rounding (act_quant, block {b}) "
+                    f"would differ from the whole model's")
+    return out
+
+
 def tensor_refusals(cfg: dict, n: int) -> list:
     """Why this config cannot be split `n` ways, one line per reason with
     its arithmetic; [] when it can."""
@@ -1130,34 +1175,7 @@ def tensor_refusals(cfg: dict, n: int) -> list:
     # deepseek_v4's wo_a is grouped over whole heads: a rank keeps whole
     # groups (its arrays alone would also divide at 16 ranks, 8 groups)
     div("o_groups", tc.get("o_groups"))
-    if "deepseek_v4" in types:
-        # deepseek_v4 (architecture edit 21) rounds every FP8 / FP4 linear's
-        # input through act_quant in blocks of 128 along it, as DeepSeek's
-        # reference does. A split cuts three of those inputs -- wo_b's
-        # (o_groups x o_lora_rank) and both experts' down_proj (their
-        # widths) -- so a rank's slice must hold whole blocks, or the split
-        # model rounds other blocks than the whole one. (Edit 20's blocks
-        # -- the kv, the pooled rows, the indexer -- run whole on every rank.)
-        inter = tc.get("moe_intermediate_size")
-        for what, v in (
-                ("o_groups x o_lora_rank (wo_b's input)",
-                 None if tc.get("o_groups") is None
-                 or tc.get("o_lora_rank") is None
-                 else int(tc["o_groups"]) * int(tc["o_lora_rank"])),
-                ("moe_intermediate_size (routed experts' down_proj input)",
-                 inter),
-                ("moe_intermediate_size x n_shared_experts (the shared "
-                 "expert's down_proj input)",
-                 None if inter is None
-                 else int(inter) * int(tc.get("n_shared_experts") or 1))):
-            if v is None or int(v) % n:
-                continue
-            if (int(v) // n) % 128:
-                out.append(
-                    f"{what} = {v}: a rank's {int(v) // n} is not whole "
-                    f"128-blocks ({int(v) // n} % 128 = {int(v) // n % 128})"
-                    f": its activation rounding (act_quant, block 128) "
-                    f"would differ from the whole model's")
+    out += _block_refusals(types, tc, n)
     # the arrays' own axes (intermediate sizes, quantization groups, VQ
     # code rows) are tensor_header_refusals': the headers answer them
     if cfg.get("vq_linear"):

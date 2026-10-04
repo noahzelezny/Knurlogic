@@ -134,11 +134,24 @@ def test_the_vision_template_is_the_vision_exp_encoder(mode, effort):
     assert out[0] == want
 
 
-def test_a_deepseek_v4_vision_artifact_gets_the_vision_template():
+def _artifact(root, folder, **config):
+    d = root / folder
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps(config))
+    return str(d)
+
+
+_VISION_EXP = dict(model_type="deepseek_v4", vision_n_layers=32,
+                   dspark_block_size=5)
+
+
+def test_a_deepseek_v4_vision_artifact_gets_the_vision_template(tmp_path):
     from knurlogic.engine import templates
-    name = "/models/deepseek-ai--DeepSeek-V4-Flash-Vision-Exp-mlx"
+    name = _artifact(tmp_path, "deepseek-ai--DeepSeek-V4-Flash-Vision-Exp-mlx",
+                     **_VISION_EXP)
     assert templates.family_for(None, name) == "deepseek_v4_vision"
-    assert templates.family_for(None, "/m/DeepSeek-V4-Flash") == "deepseek_v4"
+    flash = _artifact(tmp_path, "DeepSeek-V4-Flash", model_type="deepseek_v4")
+    assert templates.family_for(None, flash) == "deepseek_v4"
     vt = templates.text("deepseek_v4_vision")
     assert templates.served_family(vt) == "deepseek_v4_vision"
     assert templates.served_family(templates.text("deepseek_v4")) == \
@@ -150,6 +163,34 @@ def test_a_deepseek_v4_vision_artifact_gets_the_vision_template():
     assert thinking.levels(vt)["default"] == "low"
     assert thinking.detect(templates.text("deepseek_v4"))[0] == \
         "deepseek_effort"
+
+
+def test_the_template_is_chosen_by_the_config_not_the_folder_name(tmp_path):
+    """A Vision-Exp artifact in a folder without "vision" in its name gets
+    the Vision-Exp template and its four effort levels (the folder name
+    chose it before: such a folder got Flash's template and Flash's three
+    levels); a text-only conversion that keeps only the DSpark fields is
+    still Vision-Exp's encoder; a Flash artifact in a folder named
+    "vision" stays Flash."""
+    from types import SimpleNamespace
+
+    from knurlogic.engine import templates
+    from knurlogic.engine.serve import thinking
+    plain = _artifact(tmp_path, "DeepSeek-V4-Flash-mlx-4bit", **_VISION_EXP)
+    assert templates.family_for(None, plain) == "deepseek_v4_vision"
+    tok = SimpleNamespace(chat_template=None, name_or_path=plain)
+    assert templates.install(tok) == "deepseek_v4_vision"
+    assert [n["name"] for n in thinking.levels(tok.chat_template)["native"]] \
+        == ["off", "low", "high", "max"]
+    # a copy of knurlogic's Flash template (a DSML marker) in that folder
+    assert templates.family_for(templates.text("deepseek_v4"), plain) == \
+        "deepseek_v4_vision"
+    dspark = _artifact(tmp_path, "ds-text-only", model_type="deepseek_v4",
+                       vision_n_layers=0, dspark_block_size=5)
+    assert templates.family_for(None, dspark) == "deepseek_v4_vision"
+    flash = _artifact(tmp_path, "my-vision-models", model_type="deepseek_v4")
+    assert templates.family_for(None, flash) == "deepseek_v4"
+    assert templates.family_for(None, str(tmp_path / "missing")) is None
 
 
 def test_text_parts_are_joined_as_the_vision_encoder_joins_them():

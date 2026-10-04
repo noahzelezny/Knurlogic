@@ -90,26 +90,45 @@ def has_family(model_type: str) -> bool:
     return t is not None and resolve(t) is not None
 
 
+def _signatures() -> list[dict]:
+    from knurlogic.engine import families
+    return families.build_maps()["vision_signatures"]
+
+
+#: each family's vision signature: how its config.json shows a tower
+#: ("config": a nested key; "config_layers": a flat layer count > 0) and
+#: where its tower's tensors live (engine/families/<family>, `vision`)
+SIGNATURES: list[dict] = _signatures()
+
+
 def has_vision_config(config: dict, path=None) -> bool:
-    """Does this config.json describe a vision tower? A `vision_config`
-    (every mlx-vlm family), or DeepSeek-V4's flat `vision_n_layers > 0`
-    (DeepSeek-V4-Flash-Vision-Exp keeps its vision fields at the top).
-    With `path`, the flat form also needs the tower's `vision.*` tensors
-    in the artifact: a text-only conversion keeps the config fields but
-    not the tower."""
-    if config.get("vision_config"):
-        return True
-    try:
-        if int(config.get("vision_n_layers") or 0) <= 0:
-            return False
-    except (TypeError, ValueError):
-        return False
-    return path is None or _names_tower(path)
+    """Does this config.json describe a vision tower, by any family's
+    signature? A nested config (`vision_config`, every mlx-vlm family) is
+    enough; a flat layer count (DeepSeek-V4-Flash-Vision-Exp's
+    `vision_n_layers > 0`) needs, with `path`, the tower's own tensors
+    (`tower_in_weights`) in the artifact too: a text-only conversion keeps
+    the config fields but not the tower."""
+    for sig in SIGNATURES:
+        if sig.get("config") and config.get(sig["config"]):
+            return True
+    for sig in SIGNATURES:
+        key = sig.get("config_layers")
+        if not key:
+            continue
+        try:
+            if int(config.get(key) or 0) <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        if path is None or not sig.get("tower_in_weights") or \
+                _names_tower(path, sig["tower_in_weights"]):
+            return True
+    return False
 
 
-def _names_tower(path) -> bool:
+def _names_tower(path, prefix: str) -> bool:
     """Does the artifact's weight index (or, without one, a shard header)
-    name a `vision.*` tensor?"""
+    name a tensor under `prefix`?"""
     import struct
     from pathlib import Path
     root = Path(path)
@@ -117,11 +136,11 @@ def _names_tower(path) -> bool:
         index = root / "model.safetensors.index.json"
         if index.is_file():
             names = json.loads(index.read_text()).get("weight_map", {})
-            return any(k.startswith("vision.") for k in names)
+            return any(k.startswith(prefix) for k in names)
         for f in sorted(root.glob("*.safetensors")):
             with open(f, "rb") as fh:
                 (n,) = struct.unpack("<Q", fh.read(8))
-                if any(k.startswith("vision.") for k in json.loads(fh.read(n))):
+                if any(k.startswith(prefix) for k in json.loads(fh.read(n))):
                     return True
     except (OSError, ValueError, struct.error):
         return False
