@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
+
+DeepSeek-V4-Flash-Vision-Exp with images, its thinking levels and DSpark
+drafting; every model held to its maker's reference; GLM-5.3 images.
 
 * DeepSeek-V4-Flash-Vision-Exp: images (one or several per message, kept
   in the prompt cache), its four thinking levels (off, low, high, max), tool
