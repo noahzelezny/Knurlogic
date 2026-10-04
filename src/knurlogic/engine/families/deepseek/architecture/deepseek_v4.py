@@ -496,7 +496,11 @@ def _scalar(v: float) -> mx.array:
     return a
 
 
-_NO_W = mx.zeros((1,), dtype=mx.float32)
+# Made from Python data, so it holds its value already: a lazy mx.zeros made
+# at import belongs to the importing thread's stream, and the engine thread
+# evaluating it first raised "There is no Stream(gpu, 0) in current thread"
+# (live, a DeepSeek split's first admission on mlx 0.32.3).
+_NO_W = mx.array([0.0], dtype=mx.float32)
 
 
 def swiglu_act(gate: mx.array, up: mx.array, limit: float,
