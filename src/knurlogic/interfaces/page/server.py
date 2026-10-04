@@ -480,8 +480,12 @@ def _load_fn(serve_port: int):
                    if k not in ("nodes", "split", "link")}
             req["node"] = nodes[0]
         if act == "unload" and req.get("job"):
-            from knurlogic.cluster import launch
-            return launch.stop(str(req["job"]), reason="unloaded")
+            from knurlogic.cluster import launch, recovery
+            # what recovery held of it, said: a failed job has no ranks
+            # left, and clearing its record is the whole of the unload
+            cleared = recovery.cancel_job(str(req["job"]))
+            out = launch.stop(str(req["job"]), reason="unloaded")
+            return dict(out, cleared=cleared) if cleared else out
         node = req.get("node")
         if node and node != identity.identity().get("id"):
             return _then_refresh(forward_launch(req))

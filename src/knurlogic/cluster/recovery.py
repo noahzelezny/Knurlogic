@@ -312,7 +312,8 @@ def view(rec: dict | None, now: float | None = None) -> dict | None:
             "last_reason": rec.get("last_reason"),
             "last_at": rec.get("last_at"),
             "next_at": rec.get("next_at") if rec.get("pending") else None,
-            "state": rec["state"]}
+            "state": rec["state"],
+            **({"jobs": list(rec["jobs"])} if rec.get("jobs") else {})}
 
 
 def _window(rec: dict, now: float) -> list:
@@ -331,13 +332,14 @@ def track_cluster(job: str, *, req: dict, args: dict, order: list,
     key = cluster_key(req.get("identity"), req.get("nodes"))
     with _LOCK:
         rec = MODELS.get(key)
-        if previous and rec and previous in (rec.get("job"),
-                                             rec.get("ended_job")):
-            rec.update(job=job, pending=False, ended_job=None)
+        if previous and rec and _is(rec, previous):
+            _set_job(rec, job)
+            rec.update(pending=False, ended_job=None)
             save()
             return
         MODELS[key] = {
-            "key": key, "kind": "cluster", "job": job, "req": dict(req),
+            "key": key, "kind": "cluster", "job": job, "jobs": [job],
+            "req": dict(req),
             "args": dict(args), "order": list(order), "port": port,
             "leader_here": leader_here, "name": req.get("identity"),
             "machines": [m.get("name") for m in order],
@@ -362,12 +364,33 @@ def track_single(port: int, load: dict, pid: int | None = None) -> None:
     ensure_thread()
 
 
-def cancel_job(job: str) -> None:
-    """An unload of `job`: never recovered."""
+def _is(rec: dict, job) -> bool:
+    """`job` is this cluster record's: its current job, the one that just
+    ended, or any it had before a relaunch (the id the load answered)."""
+    return bool(job) and (job in (rec.get("job"), rec.get("ended_job"))
+                          or job in (rec.get("jobs") or ()))
+
+
+def _set_job(rec: dict, job: str) -> None:
+    """A relaunch's new job id: the record keeps every id it had, so a
+    caller holding the first one still finds it."""
+    rec["job"] = job
+    ids = rec.setdefault("jobs", [])
+    if job not in ids:
+        ids.append(job)
+
+
+def cancel_job(job: str) -> list:
+    """An unload of `job` (or of any job it relaunched as): never
+    recovered. The jobs of the records it cleared."""
     with _LOCK:
-        for k in [k for k, r in MODELS.items() if r["kind"] == "cluster"
-                  and job in (r.get("job"), r.get("ended_job"))]:
+        keys = [k for k, r in MODELS.items() if r["kind"] == "cluster"
+                and _is(r, job)]
+        cleared = [(MODELS[k].get("jobs") or [MODELS[k].get("job")])[0]
+                   for k in keys]
+        for k in keys:
             _drop(k)
+    return cleared
 
 
 def cancel_port(port) -> None:
@@ -394,7 +417,7 @@ def _sync(key: str) -> None:
 def for_job(job: str):
     with _LOCK:
         rec = next((r for r in MODELS.values() if r["kind"] == "cluster"
-                    and job in (r.get("job"), r.get("ended_job"))), None)
+                    and _is(r, job)), None)
         return view(rec)
 
 
@@ -419,7 +442,10 @@ def not_serving() -> list:
                         "machines": r.get("machines"),
                         "split": r.get("split"),
                         "link": _link_name(r.get("link")),
-                        "job": r.get("ended_job") or r.get("job"),
+                        # the id the load answered: a caller holding it
+                        # sees how its job ended, relaunches and all
+                        "job": (r.get("jobs") or [None])[0]
+                        or r.get("ended_job") or r.get("job"),
                         "state": r["state"], "recovery": view(r)})
     return out
 
@@ -528,7 +554,7 @@ def _tick_cluster(rec: dict, now: float) -> str:
         job = rec["job"]
         e = C.ENDED.get(job) or {}
         if e.get("relaunched"):           # the cable failover moved it
-            rec["job"] = e["relaunched"]
+            _set_job(rec, e["relaunched"])
             return f"followed the cable failover to job {e['relaunched']}"
         why = C._job_end(job, rec["order"], rec["args"].get("post")
                          or transport.send)
@@ -550,7 +576,8 @@ def _tick_cluster(rec: dict, now: float) -> str:
     old = rec.get("ended_job")
     e = C.ENDED.get(old) or {}
     if e.get("relaunched"):
-        rec.update(job=e["relaunched"], pending=False, ended_job=None)
+        _set_job(rec, e["relaunched"])
+        rec.update(pending=False, ended_job=None)
         return f"followed the cable failover to job {e['relaunched']}"
     why = _machines_down(rec)
     if why:
@@ -568,8 +595,8 @@ def _tick_cluster(rec: dict, now: float) -> str:
     except Exception as ex:  # a failed relaunch is recorded as the attempt's error
         out = {"error": f"{type(ex).__name__}: {ex}"}
     if out.get("job"):
-        rec.update(job=out["job"], pending=False, ended_job=None,
-                   last_at=now, next_at=None)
+        _set_job(rec, out["job"])
+        rec.update(pending=False, ended_job=None, last_at=now, next_at=None)
         return f"relaunch {n}: job {out['job']} (from {old})"
     why = str(out.get("refused") or out.get("error") or "no answer")
     rec["pending"] = False
