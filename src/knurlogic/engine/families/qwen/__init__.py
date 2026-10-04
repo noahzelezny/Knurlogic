@@ -81,6 +81,8 @@ MANIFEST = {
     "name": "qwen",
     "architectures": {
         "qwen3_5": {
+            # a tensor split (engine/runtime/tensor.py) knows this trunk
+            "tensor": {},
             "model_types": ["qwen3_5_text", "qwen3_5"],
             "prefill_chunk": _QWEN35_PREFILL,
             "kv_quant": _QWEN35_KVQ,
@@ -92,6 +94,8 @@ MANIFEST = {
                                     "pipeline_stage:restage_qwen3_5"},
         },
         "qwen3_5_moe": {
+            # a tensor split (engine/runtime/tensor.py) knows this trunk
+            "tensor": {},
             "depends_on": ["qwen3_5"],
             "model_types": ["qwen3_5_moe_text", "qwen3_5_moe"],
             "prefill_chunk": _QWEN35_MOE_PREFILL,
@@ -99,6 +103,8 @@ MANIFEST = {
             "head": dict(_QWEN35_HEAD, names=["qwen3_5_moe"]),
         },
         "qwen4_exp": {
+            # a tensor split (engine/runtime/tensor.py) knows this trunk
+            "tensor": {},
             "model_types": ["qwen4_exp_text", "qwen4_exp"],
             "prefill_chunk": _QWEN4_EXP_PREFILL,
             "pipeline": {"core": "Qwen4ExpModel",
