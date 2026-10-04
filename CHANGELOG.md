@@ -37,6 +37,12 @@ every model below change, for the better.
 * Gemma 4: an image's bidirectional attention applies on the sliding
   layers only, and only for the models that use it (26B-A4B, 31B).
 
+GLM-5.3
+* Images work: they were silently ignored (the image rows never reached
+  the model, one Mac or split), their patches are laid out as the model
+  expects (one circle read as two ovals before), and an image is sized as
+  GLM's own processor sizes it (aspect kept, 16 to 8000 tokens).
+
 DeepSeek-V4
 * DSpark drafting is faster: no second forward to roll back a step, and it
   verifies only as many drafts as are likely to stand (from the head's own
@@ -51,6 +57,13 @@ Clusters
   tensor split no longer desynchronizes the machines.
 * A split's own per-request seed no longer forces drafting on, or the
   widest verify, whatever the measured cost.
+* A job that failed after relaunching shows as one card, not one per
+  attempt; its x (and the MCP's unload, by the id its load answered)
+  clears it on every Mac.
+
+MCP
+* fit, settings and drafting take a model name as load does; an unknown
+  name is a refusal, not an error.
 
 ## 0.1.2
 
