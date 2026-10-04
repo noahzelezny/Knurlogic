@@ -444,3 +444,42 @@ def test_a_rank_that_cannot_build_the_model_is_a_refusal():
             "module 'mlx_lm.models.glm5_next' has no attribute 'ModelArgs'")
     assert recovery.refusal_line(tail).startswith("rank 1 could not load")
     assert recovery.kind("rank 1 exited: " + tail) == "refusal"
+
+
+def test_a_relaunched_job_is_one_record_found_by_the_id_its_load_answered(
+        faked):
+    """Each relaunch is a new job id; the record keeps the first (the id
+    the load answered, the one a caller polls) and every one after it, and
+    an unload by any of them clears it -- the page showed one FAILED card
+    per relaunch, and mcp.unload(job=<the first id>) found nothing."""
+    t = 1000.0
+    for n, wait_s in enumerate(R.BACKOFF_S, 1):
+        faked["ended"] = f"rank 0 on A (pid {n}) exited"
+        R.tick(t)
+        t += wait_s
+        R.tick(t)
+        t += 1
+    faked["ended"] = "rank 0 on A (pid 48653) exited"
+    R.tick(t)
+    first = "a" * 16
+    ids = [first] + [f"{n:016x}" for n in (1, 2, 3)]
+    for job in ids:
+        v = R.for_job(job)
+        assert v["state"] == "failed" and v["jobs"] == ids
+        assert "pid 48653" in v["last_reason"]
+    down = R.not_serving()
+    assert len(down) == 1 and down[0]["job"] == first
+    assert R.cancel_job(ids[-1]) == [first]
+    assert R.MODELS == {} and R.not_serving() == []
+    assert R.cancel_job(first) == []
+
+
+def test_an_unload_of_a_job_with_nothing_here_tells_every_peer(monkeypatch):
+    """A failed job's ranks are gone and recovery's record may be on the
+    other Mac: the stop goes to every peer page, so it is cleared there."""
+    told = []
+    monkeypatch.setattr(C, "_peer_pages", lambda: {"bbbb": "b:1"})
+    out = C.stop("f" * 16, reason="unloaded",
+                 post=lambda page, kind, doc: told.append((page, kind, doc)))
+    assert told == [("b:1", "Stop", {"job": "f" * 16, "reason": "unloaded"})]
+    assert out["told"] == ["bbbb"]

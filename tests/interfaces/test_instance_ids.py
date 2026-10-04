@@ -136,3 +136,26 @@ def test_residency_omits_instance_when_unknown(monkeypatch):
     sched = SimpleNamespace(width=1, requests=lambda: REQS)
     doc = res_api.residency(host, sched, port=8080)
     assert "instance" not in doc["data"][0]
+
+
+def test_unload_of_a_failed_job_clears_its_record_by_its_first_id(page):  # noqa: F811
+    """A failed cluster job runs nowhere: its unload is an unload by job
+    (the page clears recovery's record on every Mac and says so), never a
+    stop of a port nobody serves; the id its load answered finds it, and
+    so does a relaunch's."""
+    doc = dict(page.docs["/loaded.json?peers=1"])
+    doc["recovery"] = [{"name": "V", "port": 8090, "machines": ["A", "B"],
+                        "job": "4edaa9ea5df6e73e", "state": "failed",
+                        "recovery": {"state": "failed", "attempts": 3,
+                                     "jobs": ["4edaa9ea5df6e73e",
+                                              "3b69684fcca5268f"]}}]
+    page.docs["/loaded.json?peers=1"] = doc
+    page.answer = {"stopped": "4edaa9ea5df6e73e",
+                   "cleared": ["4edaa9ea5df6e73e"]}
+    for job in ("4edaa9ea5df6e73e", "3b69684fcca5268f"):
+        page.posts.clear()
+        out = mcp.unload(job=job)
+        assert page.posts == [{"action": "unload", "job": "4edaa9ea5df6e73e"}]
+        assert out["cleared"] == ["4edaa9ea5df6e73e"]
+    assert len([m for m in mcp.models_across(doc, "A")
+                if m["job"] == "4edaa9ea5df6e73e"]) == 1

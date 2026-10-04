@@ -812,7 +812,9 @@ def unload(port: int | None = None, model: str = "", job: str = "",
     if instance:
         hit = [r for r in rows if r.get("instance") == str(instance)]
     elif job:
-        hit = [r for r in rows if r.get("job") == str(job)]
+        # a relaunched job is found by the id its load answered too
+        hit = [r for r in rows if r.get("job") == str(job)
+               or str(job) in ((r.get("recovery") or {}).get("jobs") or ())]
     else:
         hit = rows
         if model:
@@ -840,10 +842,16 @@ def unload(port: int | None = None, model: str = "", job: str = "",
                              ("name", "machine", "port", "job", "instance")}
                             for r in hit]}
     r = hit[0]
+    running = [j for d in [page] + list(page.get("peers") or [])
+               if isinstance(d, dict) for j in d.get("jobs") or []
+               if isinstance(j, dict) and j.get("job") == r.get("job")
+               and j.get("phase") != "stopped"]
     try:
-        if r.get("job") and any(j.get("job") == r["job"]
-                                for j in page.get("jobs") or []):
-            # a rank of it runs here: this page stops it everywhere
+        if r.get("job") and (not running or any(
+                j.get("job") == r["job"] for j in page.get("jobs") or [])):
+            # a rank of it runs here: this page stops it everywhere; or
+            # it runs nowhere (failed, waiting to relaunch): the unload
+            # clears its record on every Mac, and says what it cleared
             out = _page_post({"action": "unload", "job": r["job"]}, 60)
         elif r.get("machine") == here:
             out = _page_post({"action": "unload",

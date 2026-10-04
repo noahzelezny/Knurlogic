@@ -827,7 +827,10 @@ function dismissLaunch(id){
   if(i>=0){
     const L=LAUNCHES[i];
     if(L.adopted) ADOPT_SKIP.add(L.job?'j'+L.job:L.key);
-    LAUNCHES.splice(i,1) }
+    LAUNCHES.splice(i,1);
+    // a failed job's record (recovery's, on whichever Mac holds it) goes
+    // with its card: the unload of a job that runs nowhere clears it
+    if(L.phase==='failed'&&L.job) stopLaunch(L) }
 }
 // the launches still loading, as rows for the INSTANCES card
 function loadingLaunches(){
@@ -837,6 +840,9 @@ function loadingLaunches(){
 // relaunch, the MCP, another tab): each such cluster job and single server
 // gets a launch of its own, so it has the same card, percent and Cancel.
 const ADOPT_SKIP=new Set();
+// `jb` is a relaunch of `job`: its recovery record names every id it had
+function relaunchOf(jb, job){
+  return jb.job!==job&&((jb.recovery||{}).jobs||[]).includes(job) }
 function adoptLaunches(d){
   const ms=machinesOf(d), act=['preparing','joining','loading','warming'];
   // a launch this tab clicked has no job or port until its answer comes
@@ -851,6 +857,10 @@ function adoptLaunches(d){
     for(const jb of (x.doc.jobs||[])){
       if(!jb.job||!act.includes(jb.phase)||ADOPT_SKIP.has('j'+jb.job)
          ||LAUNCHES.some(L=>L.job===jb.job)) continue;
+      // recovery's relaunch of a job a card already follows: that card
+      // follows the new job (one card per job, its last state and reason)
+      const was=LAUNCHES.find(L=>L.cluster&&L.job&&relaunchOf(jb, L.job));
+      if(was){ was.job=jb.job; was.phase='starting'; was.why=''; continue }
       const ld=ms.flatMap(y=>y.doc.loads||[]).find(e=>e.job===jb.job);
       if(waiting(jb.artifact||(ld&&ld.name), true, jb.identity)) continue;
       LAUNCHES.push({id:++LSEQ, name:jb.artifact||(ld&&ld.name)||jb.job,
