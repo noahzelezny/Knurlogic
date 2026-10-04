@@ -1089,9 +1089,17 @@ def numerics_for(artifact: Artifact, profile: str | None = None):
 # Pure arithmetic over the config and the safetensors headers, so a refusal is
 # said -- with its numbers -- before anything loads.
 
-#: the model types engine/runtime/tensor.py knows how to split
-TENSOR_TYPES = ("qwen3_5", "qwen3_5_moe", "qwen4_exp", "deepseek_v4",
-                "qwen3_5_text", "qwen3_5_moe_text", "qwen4_exp_text")
+def _tensor_maps() -> tuple:
+    from knurlogic.engine import families
+    m = families.build_maps()
+    return m["tensor"], m["tensor_archs"]
+
+
+#: model type -> its family's `tensor` entry (engine/families/<family>):
+#: the model types engine/runtime/tensor.py knows how to split, and the
+#: config keys each needs divisible by the ranks; and those architectures
+_TENSOR, _TENSOR_ARCHS = _tensor_maps()
+TENSOR_TYPES = tuple(_TENSOR)
 
 
 def tensor_sharded(name: str) -> bool:
@@ -1155,7 +1163,7 @@ def tensor_refusals(cfg: dict, n: int) -> list:
     tc = cfg.get("text_config", cfg)
     types = {cfg.get("model_type"), tc.get("model_type")}
     if not types & set(TENSOR_TYPES):
-        out.append(f"tensor split knows {', '.join(TENSOR_TYPES[:4])}; this "
+        out.append(f"tensor split knows {', '.join(_TENSOR_ARCHS)}; this "
                    f"is {cfg.get('model_type')!r}")
         return out
 
@@ -1177,9 +1185,11 @@ def tensor_refusals(cfg: dict, n: int) -> list:
                        f"the heads cannot be repeated evenly")
     div("linear_num_key_heads", tc.get("linear_num_key_heads"))
     div("linear_num_value_heads", tc.get("linear_num_value_heads"))
-    # deepseek_v4's wo_a is grouped over whole heads: a rank keeps whole
-    # groups (its arrays alone would also divide at 16 ranks, 8 groups)
-    div("o_groups", tc.get("o_groups"))
+    # a family's own axes a rank must hold whole (its manifest's
+    # `tensor.divisible`, with why)
+    for k in dict.fromkeys(k for t in sorted(types & set(_TENSOR))
+                           for k in _TENSOR[t].get("divisible", ())):
+        div(k, tc.get(k))
     out += _block_refusals(types, tc, n)
     # the arrays' own axes (intermediate sizes, quantization groups, VQ
     # code rows) are tensor_header_refusals': the headers answer them
