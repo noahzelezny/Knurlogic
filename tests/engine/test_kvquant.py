@@ -175,30 +175,44 @@ def test_drafting_on_a_quantized_cache_matches_plain_steps(bits, monkeypatch):
     assert any(type(c) is QuantKVCache for c in kept[0])
 
 
-def test_a_quantized_checkpoint_restores_like_a_fresh_prefill():
+@pytest.mark.parametrize("bits", [None, 8])
+def test_a_quantized_checkpoint_restores_like_a_fresh_prefill(bits,
+                                                               monkeypatch):
     """Segment checkpoints hold the quantized cache; a new turn restored
     from one emits what a fresh prefill of the whole prompt emits, and
-    prefills only the new tokens."""
+    prefills only the new tokens.
+
+    The generator that stored the checkpoint closes AFTER the restoring one
+    has opened, as a server's collected executor does: its hidden-state
+    capture used to put back the module it found, cutting the live
+    generator's capture out of the trunk, so the first drafting step read
+    the last prefill chunk's hidden state ((1, 16, D) against two ids).
+    Drafting every step (KNURLOGIC_MTP_BATCH_MAX_ROWS) so that step runs."""
     import copy
 
     from test_batch_drafting import _drive, _turns
 
     from knurlogic.engine.kvquant import QuantKVCache, install
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
     model, head, sys_, user, tail_a, next_b = _turns()
-    install(model, 8)
-    _, ckpts = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
-                      [sys_, user, tail_a], 4)
+    install(model, bits)
+    first = MTPBatchGenerator(model, head, prefill_step_size=16)
+    _, ckpts = _drive(first, [sys_, user, tail_a], 4)
     key, entry = ckpts[-1]
-    assert any(type(c) is QuantKVCache for c in entry)
+    if bits:
+        assert any(type(c) is QuantKVCache for c in entry)
     gen = MTPBatchGenerator(model, head, prefill_step_size=16)
+    first.close()
+    stats = {}
+    gen._stats = stats if getattr(gen, "_stats", None) is None else gen._stats
     restored, _ = _drive(gen, [next_b], 20, cache=copy.deepcopy(entry),
                          prefix=key)
     assert gen._counters.prompt_tokens == len(next_b)
     gen.close()
     fresh, _ = _drive(MTPBatchGenerator(model, head, prefill_step_size=16),
                       [sys_ + user + next_b], 20)
-    assert restored == fresh
+    assert len(restored) == 20 and restored == fresh
 
 
 def test_a_quantized_prefix_trims_back_for_reuse():
