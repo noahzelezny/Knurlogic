@@ -4,12 +4,13 @@ published reference; zai-org's GLM-5 repo ships no model code) in float32,
 with its weights exported in the checkpoint's names so the test loads them
 through knurlogic's vendored sanitize.
 
-    /opt/anaconda3/envs/exo/bin/python tests/support/goldens/build_glm5_next.py
+    <venv with torch + transformers 5.16.1>/bin/python \
+        tests/support/goldens/build_glm5_next.py
 
 Reference: transformers 5.16.1, models/glm5_next/modeling_glm5_next.py.
 glm5_next.npz holds: the config, the weights (float16 values, read as
 float32 on both sides so they are exact), a 21-token prompt and 4 decode
-tokens, and the reference's logits for the prefill and each decode step
+tokens, `meta` (what built it), and the reference's logits for the prefill and each decode step
 through its DynamicCache. index_topk (8) is below the sequence, so the
 DSA indexer really selects (pools of 4, tail appended); weights are scaled
 so some SwiGLU inputs leave +-swiglu_limit. Seed 0; no model files read.
@@ -74,6 +75,50 @@ def checkpoint_names(sd, cfg):
     return out
 
 
+def draw(name, p, r):
+    """One weight's random value from its unit normal draw `r`."""
+    if name.endswith("norm.weight") or "layernorm" in name:
+        val = 1.0 + 0.1 * r
+    elif name.endswith("k_norm.bias"):
+        val = 0.1 * r
+    elif name.endswith(("A_log",)):
+        val = 0.3 * r
+    elif name.endswith("dt_bias"):
+        val = 0.5 * r
+    elif name.endswith(("hc.base",)) or name.endswith("_hc.base"):
+        val = 0.5 * r
+    elif name.endswith("_hc.scale"):
+        val = 1.0 + 0.2 * r
+    elif name.endswith("_hc.fn"):
+        val = 0.1 * r
+    elif "e_score_correction_bias" in name:
+        val = 0.1 * r
+    elif "embed_tokens" in name:
+        val = r
+    elif "mlp" in name and ("gate_up" in name or "gate_proj" in name
+                            or "up_proj" in name):
+        val = 5.0 * r / p.shape[-1] ** 0.5   # some |x| > 10
+    elif "index_kpool_compress_ape" in name:
+        val = 0.5 * r
+    else:
+        val = r / p.shape[-1] ** 0.5
+    return val
+
+
+def _meta():
+    """What built the golden: the reference's versions and paths."""
+    import datetime
+
+    import torch
+    import transformers
+    return {"torch": torch.__version__,
+            "transformers": transformers.__version__,
+            "numpy": np.__version__, "dtype": "float32",
+            "experts_implementation": "eager",
+            "attn_implementation": "eager", "device": "cpu",
+            "built": datetime.date.today().isoformat()}
+
+
 def main():
     import torch
     from transformers.models.glm5_next.configuration_glm5_next import \
@@ -95,31 +140,7 @@ def main():
         for name, p in list(model.named_parameters()) + [
                 ("lm_head.weight", lm_head.weight)]:
             r = torch.randn(p.shape, generator=g)
-            if name.endswith("norm.weight") or "layernorm" in name:
-                val = 1.0 + 0.1 * r
-            elif name.endswith("k_norm.bias"):
-                val = 0.1 * r
-            elif name.endswith(("A_log",)):
-                val = 0.3 * r
-            elif name.endswith("dt_bias"):
-                val = 0.5 * r
-            elif name.endswith(("hc.base",)) or name.endswith("_hc.base"):
-                val = 0.5 * r
-            elif name.endswith("_hc.scale"):
-                val = 1.0 + 0.2 * r
-            elif name.endswith("_hc.fn"):
-                val = 0.1 * r
-            elif "e_score_correction_bias" in name:
-                val = 0.1 * r
-            elif "embed_tokens" in name:
-                val = r
-            elif "mlp" in name and ("gate_up" in name or "gate_proj" in name
-                                    or "up_proj" in name):
-                val = 5.0 * r / p.shape[-1] ** 0.5   # some |x| > 10
-            elif "index_kpool_compress_ape" in name:
-                val = 0.5 * r
-            else:
-                val = r / p.shape[-1] ** 0.5
+            val = draw(name, p, r)
             p.copy_(val.to(torch.float16).float())
 
         sd = {k: v.detach().clone() for k, v in model.state_dict().items()}
@@ -138,6 +159,7 @@ def main():
     arrays = {"w/" + k: v.numpy().astype(np.float16) for k, v in w.items()}
     np.savez_compressed(
         OUT, config=np.array(json.dumps(CONFIG)),
+        meta=np.array(json.dumps(_meta())),
         prompt=np.array(PROMPT, np.int32), decode=np.array(DECODE, np.int32),
         prefill_logits=logits[0].astype(np.float32),
         decode_logits=np.stack([l[-1] for l in logits[1:]]).astype(np.float32),
