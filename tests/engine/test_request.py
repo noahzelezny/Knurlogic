@@ -19,6 +19,7 @@ VOCAB = {1: "<think>", 2: "</think>", 3: "<tool_call>", 4: "</tool_call>",
          10: "The", 11: " answer", 12: " is", 13: " D", 14: ".", 15: " Hmm",
          16: " so", 17: "{\"name\": \"f\", \"arguments\": {\"x\": 1}}",
          18: " STO", 19: "P", 20: " more", 21: "<", 22: "end>",
+         31: "</", 32: "thin", 33: "king", 34: ">", 35: "\n\n", 36: ">\n\n",
          90: "<eot>"}
 
 
@@ -204,3 +205,51 @@ def test_an_engine_error_mid_stream_is_an_anthropic_error_event():
     assert not any(b"end_turn" in e for e in evs)
     err = [e for e in evs if e.startswith(b"event: error")][0]
     assert b"non-finite" in err
+
+
+# --- "</thinking>" closes the think block like "</think>" ----------------
+_ENC = {"</thinking>": [31, 32, 33, 34], "</thinking>\n": [31, 32, 33, 36],
+        "</thinking>\n\n": [31, 32, 33, 36]}
+
+
+class ThinkingTok(Tok):
+    def encode(self, text, add_special_tokens=False):
+        return _ENC[text]
+
+
+def _run_thinking(ids, **kw):
+    return run(ids, tok=ThinkingTok(), **kw)
+
+
+def test_thinking_close_splits_reasoning_from_content():
+    got, _ = _run_thinking([1, 15, 16, 31, 32, 33, 34, 10, 11, 90])
+    assert got["reasoning"] == " Hmm so"
+    assert got["content"] == "The answer"
+
+
+def test_thinking_close_with_a_merged_newline_tail():
+    got, _ = _run_thinking([1, 15, 31, 32, 33, 36, 10, 90])
+    assert got["reasoning"] == " Hmm" and got["content"] == "The"
+
+
+def test_thinking_close_cut_at_every_boundary_never_leaks_a_partial_tag():
+    got, _ = _run_thinking([15, 16, 31, 32, 33, 34, 10, 90],
+                           initial="reasoning")
+    assert got["reasoning"] == " Hmm so" and got["content"] == "The"
+    for d in got["deltas"]:
+        for part in (d.reasoning, d.content):
+            assert "<" not in part and "thin" not in part and ">" not in part
+
+
+def test_tool_calls_after_thinking_close_are_parsed():
+    parse = lambda text, tools: json.loads(text)  # noqa: E731
+    got, _ = _run_thinking([1, 15, 31, 32, 33, 34, 10, 3, 17, 4, 90],
+                           tool_parser=parse)
+    assert got["reasoning"] == " Hmm" and got["content"] == "The"
+    [tc] = got["tool_calls"]
+    assert tc["function"]["name"] == "f" and got["finish"] == "tool_calls"
+
+
+def test_thinking_tag_in_content_after_the_close_is_kept():
+    got, _ = _run_thinking([1, 15, 2, 10, 31, 32, 33, 34, 11, 90])
+    assert got["content"] == "The</thinking> answer"
