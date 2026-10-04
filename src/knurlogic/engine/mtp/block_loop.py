@@ -99,10 +99,16 @@ def _fixed_width() -> int | None:
     """KNURLOGIC_MTP_VERIFY=k: verify the first k drafts every step
     (clamped to 1..K); unset, k is chosen by measurement (_width)."""
     v = os.environ.get("KNURLOGIC_MTP_VERIFY", "").strip()
-    try:
-        return int(v) if v else None
-    except ValueError:
+    if not v:
         return None
+    try:
+        return int(v)
+    except ValueError:
+        raise ValueError(f"KNURLOGIC_MTP_VERIFY={v!r}: a whole number of "
+                         "drafts to verify (1..K), or unset") from None
+
+
+_fixed_width()   # a bad value refuses at import (serve start), not mid-request
 
 
 def _hist(emitted: list[int], tail: list) -> Any:

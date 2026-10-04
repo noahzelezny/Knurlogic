@@ -485,6 +485,16 @@ def test_an_unload_of_a_job_with_nothing_here_tells_every_peer(monkeypatch):
     assert out["told"] == ["bbbb"]
 
 
+def test_an_unload_says_what_a_peer_cleared(monkeypatch):
+    """The record of a failed job lives on the page that started it: the
+    answer carries what the peer's stop cleared, not only this Mac's."""
+    monkeypatch.setattr(C, "_peer_pages", lambda: {"bbbb": "b:1"})
+    out = C.stop("f" * 16, reason="unloaded",
+                 post=lambda page, kind, doc: {"stopped": doc["job"],
+                                               "cleared": ["e" * 16]})
+    assert out["cleared"] == ["e" * 16]
+
+
 def test_an_unload_during_a_relaunch_stops_the_new_job(faked, monkeypatch):
     """The relaunch runs without the lock: an unload landing meanwhile
     drops the record, so the job the relaunch then answers is stopped,

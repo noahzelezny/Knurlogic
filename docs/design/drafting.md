@@ -276,6 +276,11 @@ forward; a replay is only the fallback for a cache that cannot roll back.
 A step verifies only the first k of its K drafts, k chosen from the head's
 confidence (or measured per-position acceptance) over each width's timed
 cost (`block_loop._width`; KNURLOGIC_MTP_VERIFY=k fixes it).
+Two diagnostic switches, read at serve start: KNURLOGIC_MTP_VERIFY=k
+verifies the first k drafts every step (a whole number, else the server
+refuses to start); KNURLOGIC_MTP_PROFILE=1 times a DSpark step's phases
+behind eval barriers and logs their means and the width's picks every 32
+steps (slower: for measurement only).
 The head's cache takes only committed positions, from the forward that
 committed them, so it never rolls back. Plain steps (when drafting does
 not pay) advance it one position. m is also capped at the token that
