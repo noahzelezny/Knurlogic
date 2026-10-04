@@ -46,10 +46,6 @@ DeepSeek-V4
   blocks is refused, with the reason.
 
 Clusters
-* A machine that fails or exits tells the others, and they leave the job
-  cleanly instead of waiting; stopping a job is never read as a failure.
-  A machine that dies in the middle of a GPU exchange over RDMA can still
-  pin its peer's GPU until a reboot (stock mlx has no RDMA timeout).
 * A tool call (any request ending partway through a drafting step) on a
   tensor split no longer desynchronizes the machines.
 * A split's own per-request seed no longer forces drafting on, or the
