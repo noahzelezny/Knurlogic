@@ -78,6 +78,12 @@ MCP
 * fit, settings and drafting take a model name as load does; an unknown
   name is a refusal, not an error.
 
+Known issue
+* On an RDMA (jaccl) split, a rank that dies in the middle of a step can
+  leave the other Mac's GPU waiting in that step until it restarts: mlx
+  0.32.3's jaccl has no timeout. A normal unload is unaffected; TCP splits
+  are not affected the same way.
+
 ## 0.1.2
 
 DeepSeek-V4-Flash in full, MTP on a tensor split, and a cluster that stops
