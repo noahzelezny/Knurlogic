@@ -27,17 +27,21 @@ def _resolve(root, path: str):
     return obj, parts[-1]
 
 
-def _spy(inner, sink):
-    class _Capture(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.inner = inner
+class _Capture(nn.Module):
+    """A spy: forwards to `inner` (which may itself be a spy)."""
 
+    def __init__(self, inner):
+        super().__init__()
+        self.inner = inner
+
+
+def _spy(inner, sink):
+    class _Spy(_Capture):
         def __call__(self, x, *args, **kwargs):
             sink[:] = [x]
             return self.inner(x, *args, **kwargs)
 
-    return _Capture()
+    return _Spy(inner)
 
 
 @contextmanager
@@ -58,7 +62,8 @@ def capture_input(core, path: str):
             setattr(owner, attr, v)
         inner = getattr(owner, attr)
     sink: list = []
-    put(_spy(inner, sink))
+    spy = _spy(inner, sink)
+    put(spy)
     try:
         def get():
             if not sink:
@@ -70,4 +75,24 @@ def capture_input(core, path: str):
 
         yield get
     finally:
-        put(inner)
+        _unwrap(owner, attr, spy, put)
+
+
+def _unwrap(owner, attr: str, spy, put) -> None:
+    """Take `spy` out of the slot's chain of captures, leaving the others.
+
+    Two generators on one model nest their spies (the second wraps the
+    first), and they need not close in reverse order: an abandoned one is
+    closed whenever it is collected. Putting back the module found at entry
+    would then cut a live generator's spy out of the trunk, and its getter
+    would hand back a stale hidden state (the last prefill chunk's) to the
+    next decode step."""
+    cur = owner[int(attr)] if attr.isdigit() else getattr(owner, attr)
+    if cur is spy:
+        put(spy.inner)
+        return
+    while isinstance(cur, _Capture):
+        if cur.inner is spy:
+            cur.inner = spy.inner
+            return
+        cur = cur.inner
