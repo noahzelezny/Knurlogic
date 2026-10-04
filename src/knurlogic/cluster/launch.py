@@ -1297,6 +1297,11 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     # in memory -- the ids its rank records here keep
     nodes = (spec or {}).get("nodes") or next(
         (v["nodes"] for v in mine.values() if v.get("nodes")), [])
+    if propagate and not nodes and not mine and not spec:
+        # nothing of it here (a failed job, its ranks gone and recovery's
+        # record all that is left): every peer page hears the stop, so the
+        # record goes on whichever Mac holds it
+        nodes = [{"id": i} for i in _peer_pages()]
     if propagate and nodes:
         from knurlogic.machine import identity
         me = identity.identity().get("id")
@@ -1313,7 +1318,7 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                 (post or transport.send)(
                     page, "Stop", {"job": job, "reason": reason,
                                    **({"kind": kind} if kind else {})})
-                told.append(n.get("name"))
+                told.append(n.get("name") or n.get("id"))
             except NET_ERRORS:
                 logger.debug("could not tell %s to stop job %s", page, job,
                              exc_info=True)
