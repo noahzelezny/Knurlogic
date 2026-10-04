@@ -482,15 +482,20 @@ def kv_bytes_per_token(tc: dict, kv_bits=None) -> tuple:
         # compressed latent and the DSA indexer's key, not K and V per
         # head -- counted as full attention it read 0 layers (GLM's are
         # not named full_attention), and as K,V per head it would be ~10x
+        # head. The latent is stored once (K = V); the indexer's row is
+        # its key, its pool gate scores (both index_head_dim) and a valid
+        # flag, bf16 at every kv_bits (glm5_next language.py).
         mla = sum(1 for t in types if t != "linear_attention")
         latent = int(tc.get("kv_lora_rank") or 0)
+        ihd = int(tc.get("index_head_dim") or 0)
         exact = (int(tc.get("qk_rope_head_dim") or 0)
-                 + int(tc.get("index_head_dim") or 0))
+                 + (2 * ihd + 1 if ihd else 0))
         el = S.kv_bytes_per_element(kv_bits)
-        per = int(mla * (latent * el + exact * S.BF16_BYTES))
+        per = int(round(mla * (latent * el + exact * S.BF16_BYTES)))
         dt = "bf16" if kv_bits is None else f"{kv_bits}-bit"
         return per, (f"{mla} MLA layers of {len(types)} x ({latent} latent "
-                     f"x {dt} + {exact} rope + indexer key x bf16)")
+                     f"once x {dt} + {exact} rope, indexer key, gate and valid "
+                     f"x bf16)")
     if isinstance(types, list) and types:
         full = sum(1 for t in types if t == "full_attention")
         how = f"{full} full-attention of {len(types)} layers"

@@ -74,3 +74,16 @@ reuse -- every GLM-5.3-Flash layer is "full". Padding-only difference
 left as is: the reference zeroes padded rows of the linear-attention
 input before every projection (apply_mask_to_padding_states); the port
 masks the q/k/v stream only.
+
+### Edits 6+, a second reference audit (GLM-5.3-Flash, bf16 and memory)
+
+6. **The MLA latent is stored once** (`Glm5NextSparseAttention`,
+   `_LatentCache`). K = V = the normed latent; the port passed it as both
+   keys and values, so every cache (bf16 KVCache, 8-bit QuantKVCache, the
+   batch caches merged from them) held two copies. The values are now a
+   zero-width array, as the DSA indexer's cache already does, so trim,
+   state, merge, extract and kvquant work unchanged on one copy. The
+   reference (DynamicCache) stores the latent once too. Per token on
+   GLM-5.3-Flash (11 MLA layers): 28182 -> 16918 bytes bf16, 17622 ->
+   11638 at 8 bits (tests/engine/test_glm5_cache_bytes.py; tuning's
+   kv_bytes_per_token now equals what the cache stores). No logit change.
