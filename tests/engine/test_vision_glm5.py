@@ -366,3 +366,89 @@ def test_an_image_is_framed_as_the_makers_template_frames_it():
     fam = Glm5VisionFamily(glm5_tiny_config())
     assert fam.placeholder_text(None) == \
         "<|begin_of_image|><|image|><|end_of_image|>"
+
+
+# --- the maker's own template and tokenizer --------------------------------
+
+GLM_TEMPLATE = Path(__file__).resolve().parents[1] / "support" / "glm5_template"
+#: tokenizer.json (20 MB) is not copied into the repo: read from the BF16
+#: source checkpoint when this machine has it
+GLM_SOURCE = Path("/Volumes/Models/Teacher Models/"
+                  "zai-org--GLM-5.3-Flash-BF16")
+
+
+def _glm_tokenizer():
+    import json
+    import os
+    src = Path(os.environ.get("KNURLOGIC_GLM5_SOURCE", GLM_SOURCE))
+    if not (src / "tokenizer.json").is_file():
+        pytest.skip(f"GLM-5.3-Flash's tokenizer.json is not at {src}")
+    transformers = pytest.importorskip("transformers")
+    cfg = json.loads((GLM_TEMPLATE / "tokenizer_config.json").read_text())
+    tok = transformers.PreTrainedTokenizerFast(
+        tokenizer_file=str(src / "tokenizer.json"),
+        eos_token=cfg["eos_token"], pad_token=cfg["pad_token"])
+    tok.chat_template = (GLM_TEMPLATE / "chat_template.jinja").read_text()
+    return tok
+
+
+def test_a_one_image_request_tokenizes_as_the_maker_frames_it():
+    """A user turn of text + one image, through knurlogic's own path
+    (with_placeholders -> flatten -> the REAL template -> the REAL
+    tokenizer -> expand_pads): <|begin_of_image|> (154830), N x <|image|>
+    (154854), <|end_of_image|> (154831), consecutive and once."""
+    from fixtures_vision_glm5 import glm5_tiny_config
+
+    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
+    from knurlogic.engine.runtime.prompt import flatten
+    from knurlogic.engine.vision import ImageRef
+    from knurlogic.engine.vision.key import expand_pads
+    from knurlogic.engine.vision.request import with_placeholders
+    tok = _glm_tokenizer()
+    assert tok.convert_tokens_to_ids(
+        ["<|begin_of_image|>", "<|image|>", "<|end_of_image|>"]) == \
+        [154830, 154854, 154831]
+    fam = Glm5VisionFamily(dict(glm5_tiny_config(), image_token_id=154854))
+    n = 6
+    ref = ImageRef(sha="x", proc_hash=fam.spec.proc_hash, n_tokens=n,
+                   grid_thw=(1, 6, 4))
+    msgs = [{"role": "user", "content": [
+        {"type": "text", "text": "What is this?"},
+        {"type": "image_url", "image_url": {"url": "data:,"}}]}]
+    msgs = flatten(with_placeholders(msgs, [fam.placeholder_text(ref)]), tok)
+    ids = tok.apply_chat_template(msgs, add_generation_prompt=True,
+                                  tokenize=True)
+    ids = list(ids["input_ids"] if hasattr(ids, "keys") else ids)
+    ids = expand_pads(ids, [ref], 154854)
+    i = ids.index(154830)
+    assert ids[i:i + n + 2] == [154830] + [154854] * n + [154831]
+    assert ids.count(154830) == ids.count(154831) == 1
+    assert ids.count(154854) == n
+
+
+def test_a_configured_min_image_tokens_of_zero_is_kept():
+    """0 is a value: `int(x or DEFAULT)` turned it into the default 16."""
+    from fixtures_vision_glm5 import glm5_tiny_config
+
+    from knurlogic.engine.families.glm5.vision import Glm5VisionFamily
+    fam = Glm5VisionFamily(glm5_tiny_config(), min_image_tokens=0)
+    assert fam.min_image_tokens == 0
+
+
+@pytest.mark.parametrize("ip,ok", [
+    ({}, True), ({"resample": 3, "patch_expand_factor": 1}, True),
+    ({"resample": 2}, False), ({"patch_expand_factor": 2}, False)])
+def test_processor_settings_preprocess_does_not_implement_are_refused(
+        tmp_path, ip, ok):
+    import json
+
+    from fixtures_vision_glm5 import glm5_tiny_config
+
+    from knurlogic.engine.families.glm5.vision import build
+    (tmp_path / "processor_config.json").write_text(
+        json.dumps({"image_processor": ip}))
+    if ok:
+        assert build(str(tmp_path), None, glm5_tiny_config()) is not None
+    else:
+        with pytest.raises(ValueError):
+            build(str(tmp_path), None, glm5_tiny_config())
