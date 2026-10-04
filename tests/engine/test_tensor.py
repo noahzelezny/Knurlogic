@@ -194,12 +194,12 @@ def test_a_deepseek_v4_split_must_keep_whole_rounding_blocks():
              "moe_intermediate_size": 2048, "n_shared_experts": 1}
     for n in (2, 4, 8):
         assert R.tensor_refusals(flash, n) == [], n
-    real = Path("/Volumes/Models/Teacher Models/"
-                "deepseek-ai--DeepSeek-V4-Flash-Vision-Exp/config.json")
-    if real.exists():
-        cfg = json.loads(real.read_text())
-        for n in (2, 4, 8):
-            assert R.tensor_refusals(cfg, n) == [], n
+    # the released Vision-Exp config.json (deepseek-ai, MIT), copied in
+    real = Path(__file__).resolve().parents[1] / "support" \
+        / "fixtures_deepseek_v4_vision" / "config.json"
+    cfg = json.loads(real.read_text())
+    for n in (2, 4, 8):
+        assert R.tensor_refusals(cfg, n) == [], n
     tiny = dict(flash, num_attention_heads=4, o_groups=2, o_lora_rank=64,
                 moe_intermediate_size=128)
     why = "\n".join(R.tensor_refusals(tiny, 2))

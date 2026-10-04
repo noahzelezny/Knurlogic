@@ -282,8 +282,8 @@ def _steps(batch, rows, n):
 
 def test_a_row_that_does_not_draft_rides_along(monkeypatch):
     """A row that may not draft (an image request's, when its image is in
-    the uncached span) beside one that does: the batch commits t1 alone
-    each step, both rows exact."""
+    the uncached span) beside one that does: a drafting step could commit
+    only t1, so the batch takes plain steps, both rows exact."""
     from contextlib import ExitStack
 
     from knurlogic.engine.mtp.batch_loop import MTPBatch
@@ -303,7 +303,7 @@ def test_a_row_that_does_not_draft_rides_along(monkeypatch):
                        lambda: head.main_hidden([g() for g in gets]),
                        copy_caches=True)
         got = _steps(b, rows, 16)
-    assert (2, True) in b._cost       # block steps with both rows
+    assert (2, True) not in b._cost   # no (k+1)-wide verify for one token
     assert got == plain
 
 

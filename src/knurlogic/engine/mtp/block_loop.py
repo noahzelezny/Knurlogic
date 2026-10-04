@@ -163,7 +163,14 @@ class BlockBatch(MTPBatch):
         if B == 0:
             return []
         live = self._live(B)
-        drafting = self.drafting_pays(B) and any(live)
+        # a row that may not draft (an image request's) holds every step's
+        # commit to t1, so a drafting step would pay a (k+1)-wide verify
+        # for one token: plain instead -- unless a client's seed pins
+        # drafting, which must hold for the seed to reproduce
+        pinned = any(p.keys is not None and p.keys.pins and d
+                     for p, d in zip(self.params, self.drafts))
+        drafting = self.drafting_pays(B) and any(live) \
+            and (all(live) or pinned)
         # timed from here: on a split, rank 0's block and the B1 broadcast
         # are this step's cost too (MTPBatch.step)
         t0 = self._clock()
