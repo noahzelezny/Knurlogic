@@ -36,7 +36,7 @@ _MACHINES: dict = {}
 THINK_CLOSE_TAGS = ("</think>", "</thinking>")
 #: what may directly follow a close tag and merge with its last token
 #: (">\n\n" is one token in some vocabularies)
-_CLOSE_TAILS = ("", "\n", "\n\n")
+_CLOSE_TAILS = ("", "\n", "\n\n", "\n\n\n", "\r\n")
 #: what may directly precede it and merge with its first token (Qwen3.6
 #: encodes " </" as one token, "</" as another)
 _CLOSE_HEADS = ("", " ")
@@ -133,6 +133,13 @@ class Request:
         self.detok.reset()
         self.seqs = dict(sequences)
         self.hold_n = max((len(s) for s in sequences), default=1)
+        # a think close only matches while reasoning (control_machine), so
+        # past the think block the answer is held only as long as the
+        # other sequences need: "</thinking>"'s 3-4 tokens would otherwise
+        # delay every streamed token of the reply
+        self.hold_out = max((len(s) for s, t in sequences.items()
+                             if t.strip() not in THINK_CLOSE_TAGS),
+                            default=1)
         self.stops = [s for s in (stops or []) if s]
         self.stop_hold = max((len(s) for s in self.stops), default=1) - 1
         self.tool_parser = tool_parser
@@ -183,7 +190,8 @@ class Request:
                 ents[0][0] = buf[n - 1][0] if n > 0 else \
                     (self._prev_state or "normal")
                 ents[0][1] = keep
-        while len(self._buf) >= self.hold_n:
+        hold = self.hold_n if tok.state == "reasoning" else self.hold_out
+        while len(self._buf) >= hold:
             self._route(self._buf.popleft(), out)
             if self.finished:
                 return out
