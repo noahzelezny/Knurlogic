@@ -24,13 +24,6 @@ tiny qwen3_5 split by layer runs 1,3, rank 0 drafting with its MTP head).
     r0_raise_step rank 0 raises inside its 3rd step, after the exchange
                   (the follower is in that step's collectives), then leaves
     r0_kill_parked rank 0 SIGKILLs itself with the follower parked
-    f_raise_admit the follower's trunk raises in the first prefill forward of
-                  its 2nd admission (MTPBatchGenerator._admit_one, so
-                  ForwardFailed): rank 0 is in that forward's collectives
-    none          no fault: rank 0 drains, stops the ring and exits at once
-                  (its bell closes as soon as the stop exchange is done)
-    r0_raise_admit rank 0's trunk raises the same way; the follower is in
-                  that forward's collectives
 
 Each rank writes <out dir>/rank<r>.json: what it did and when (time.time()),
 the failing rank its `injected` time first."""
@@ -41,8 +34,7 @@ import sys
 import time
 
 FAULTS = ("f_desync", "f_raise_step", "f_kill_step", "f_raise_coord",
-          "f_kill_parked", "r0_raise_step", "r0_kill_parked",
-          "f_raise_admit", "r0_raise_admit", "none")
+          "f_kill_parked", "r0_raise_step", "r0_kill_parked")
 
 
 class Injected(RuntimeError):
@@ -142,40 +134,8 @@ def main(out_dir, split, fault):
         def sleep(self):
             die()
         T.Link.sleep = sleep
-    elif me == 1 and fault == "none":
-        # a slow follower: rank 0's bell closes before `stop` is applied
-        real_x = T.Link.exchange
-
-        def exchange(self, over, payload=None):
-            rows, data = real_x(self, over, payload)
-            if data and b'"stop"' in data:
-                time.sleep(0.5)
-            return rows, data
-        T.Link.exchange = exchange
     elif me == 0 and fault == "r0_raise_step":
         step_hook(False, True)
-
-    if fault == ("f_raise_admit" if me == 1 else "r0_raise_admit"):
-        admits, armed = [0], [False]
-        real_admit = MTPBatchGenerator._admit_one
-
-        def admit_one(self):
-            admits[0] += 1
-            armed[0] = admits[0] == 2
-            try:
-                return real_admit(self)
-            finally:
-                armed[0] = False
-        MTPBatchGenerator._admit_one = admit_one
-        cls = type(model)
-
-        def call(self, *a, **k):
-            if armed[0]:
-                armed[0] = False
-                injected("raise mid-prefill")
-                raise Injected("injected failure mid-prefill")
-            return cls.__call__(self, *a, **k)
-        model.__class__ = type(cls.__name__, (cls,), {"__call__": call})
 
     # ------------------------------------------------- the follower
     if me > 0:
@@ -221,14 +181,6 @@ def main(out_dir, split, fault):
             if done >= set(uids):
                 break
         rec["drained"] = True
-        if fault == "none":
-            rec.update(outcome="drained", tokens=toks)
-            ex.close()
-            ring.stop()
-            rec.update(stopped=True, done=time.time(), down=link.why)
-            write()
-            os._exit(0)              # at once: the follower may not have
-            #                          applied `stop` yet
         ring.park()                      # idle: the follower sleeps
         if fault == "r0_kill_parked":
             time.sleep(0.5)

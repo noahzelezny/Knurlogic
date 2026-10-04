@@ -603,7 +603,6 @@ class MTPBatchGenerator(BatchGenerator):
             # One admission per call, so rows already decoding are not held
             # for a queue of prefills.
             uid = self._unprocessed_sequences[0][0]
-            ring_failed = False
             try:
                 admitted = self._admit_one()
             # one request's failure goes to that request; the generation thread lives
@@ -619,12 +618,6 @@ class MTPBatchGenerator(BatchGenerator):
                     # failure after the forward keeps the ranks in step.
                     logger.exception("admission of request %s failed on a "
                                      "cluster rank; ending the ring", uid)
-                    # down BEFORE the finally: its b0 is a collective the
-                    # other rank (still in the forward's) never joins
-                    ring_failed = True
-                    from ..runtime.tensor import fail_peers
-                    fail_peers(f"admission of request {uid} failed "
-                               f"mid-forward: {type(e).__name__}: {e}")
                     raise
                 logger.exception("admission of request %s failed; failing "
                                  "that request only", uid)
@@ -635,7 +628,7 @@ class MTPBatchGenerator(BatchGenerator):
                 prompt_responses += self._failed_responses()
                 return prompt_responses, []
             finally:
-                if self._coord is not None and not ring_failed:
+                if self._coord is not None:
                     # B0, after every admission attempt (a failed one too:
                     # the ranks make the same broadcasts; rank 0's plan
                     # removes the row the follower still holds): the

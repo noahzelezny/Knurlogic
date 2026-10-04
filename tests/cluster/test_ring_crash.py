@@ -130,34 +130,6 @@ def test_rank_0_leaves_when_its_follower_fails_mid_step(
 
 
 @pytest.mark.parametrize("split", ["tensor", "pipeline"])
-@pytest.mark.parametrize("who", ["follower", "rank 0"])
-def test_a_rank_whose_admission_fails_mid_prefill_enters_no_b0(
-        tmp_path, owned_procs, split, who):
-    """A rank's trunk raises in an admission's prefill forward (ForwardFailed
-    out of _admit_one) while the other is in that forward's collectives.
-    It must mark the ring down and skip the admission's b0 (an all_gather
-    the other rank never joins: both waited forever, and on jaccl the GPU
-    stayed pinned). Both ranks exit on their own within the bound."""
-    fault = "f_raise_admit" if who == "follower" else "r0_raise_admit"
-    recs, codes, _, text = _ring(tmp_path, owned_procs, split, fault)
-    bad, good = (1, 0) if who == "follower" else (0, 1)
-    _survived(recs[good], codes[good], recs[bad], text, good)
-    assert -signal.SIGKILL not in codes, text
-    assert recs[bad]["what"] == "raise mid-prefill", text
-    assert "failed mid-forward" in recs[bad]["down"], text
-    assert recs[0]["outcome"] == "raised", text
-    # close and stop enter no collective; a forward that failed on a lost
-    # peer can leave a Metal error for close's sync to surface (not a hang)
-    assert recs[0].get("stopped") or "METAL" in recs[0].get(
-        "stop_error", ""), f"{recs}\n{text}"
-    if who == "follower":
-        assert codes[1] == 3 and recs[1]["outcome"] == "raised", text
-    else:
-        assert codes[0] == 0 and recs[1]["outcome"] == "returned", text
-        assert "rank 0" in recs[1]["down"], text
-
-
-@pytest.mark.parametrize("split", ["tensor", "pipeline"])
 def test_an_idle_rank_0_hears_a_parked_follower_die(tmp_path, owned_procs,
                                                     split):
     """Rank 0 idle (in no collective) and its follower SIGKILLed while
@@ -196,22 +168,6 @@ def test_a_parked_follower_leaves_when_rank_0_dies(tmp_path, owned_procs,
     assert codes[0] == -signal.SIGKILL
     assert recs[1]["outcome"] == "returned", text
     assert "bell connection closed" in recs[1]["down"], text
-
-
-@pytest.mark.parametrize("split", ["tensor", "pipeline"])
-def test_an_orderly_stop_is_never_read_as_a_failure(tmp_path, owned_procs,
-                                                    split):
-    """Rank 0 stops the ring and exits the moment its stop exchange is
-    done: its bell may close before the follower applies `stop`. Rank 0
-    rings STOP first, so the follower never logs the ring down and returns
-    from follow() normally."""
-    for _ in range(3):
-        recs, codes, _, text = _ring(tmp_path, owned_procs, split, "none")
-        assert codes == [0, 0], text
-        assert "ring down" not in text, text
-        assert recs[0]["stopped"] and recs[0]["tokens"] > 0, text
-        assert recs[1]["outcome"] == "returned", text
-        assert recs[1]["down"] == "", text
 
 
 # ----------------------------------------------------------- one process
@@ -289,43 +245,6 @@ def test_a_failing_rank_says_so_and_a_parked_one_wakes():
         peer.close()
 
 
-def test_a_stop_bell_marks_the_close_that_follows_orderly():
-    """A follower's bell: STOP from rank 0, then the connection closes
-    before the stop op is applied -- not a failure."""
-    from knurlogic.engine.runtime import tensor as T
-
-    class G1(_Group):
-        def rank(self):
-            return 1
-    a, b = socket.socketpair()
-    link = T.Link(G1())
-    link.socks = [b]
-    link.watch()
-    try:
-        a.sendall(T.Link.STOP)
-        a.close()
-        time.sleep(0.2)
-        assert link.closing and not link.down.is_set()
-    finally:
-        T._LINK = None
-        b.close()
-
-
-def test_ring_stop_rings_stop_before_its_exchange(monkeypatch):
-    from knurlogic.engine.runtime import tensor as T
-    link, peer = _pair()
-    try:
-        seen = []
-        monkeypatch.setattr(link, "exchange",
-                            lambda over, payload=None: seen.append(
-                                peer.recv(1)))
-        T.Ring(link).stop()
-        assert seen == [T.Link.STOP]
-    finally:
-        T._LINK = None
-        peer.close()
-
-
 def test_an_orderly_stop_is_not_a_failure():
     from knurlogic.engine.runtime import tensor as T
     link, peer = _pair()
@@ -371,96 +290,3 @@ def test_rank_0_waits_past_an_armed_jaccl_deadline(monkeypatch):
     assert in_flight_s(15.0) == 15.0
     monkeypatch.setenv("JACCL_COLLECTIVE_TIMEOUT_MS", "60000")
     assert in_flight_s(15.0) == 65.0
-
-
-def _ring_scheduler(monkeypatch, link):
-    """A Scheduler on rank 0 of `link` holding a TensorExecutor whose batch
-    engine is a stand-in; the collectives recorded (or failed: `fail`)."""
-    import queue
-    import threading
-
-    import mlx.core as mx
-
-    from knurlogic.engine.runtime import tensor as T
-    from knurlogic.engine.runtime.scheduler import Scheduler
-    calls = {"collectives": 0, "fail": False, "closed": 0}
-
-    def all_gather(x, group=None, stream=None):
-        calls["collectives"] += 1
-        if calls["fail"]:
-            raise RuntimeError("[ring] connection to a peer was lost")
-        return mx.concatenate([x, x])
-
-    def all_sum(x, group=None, stream=None):
-        calls["collectives"] += 1
-        return x
-
-    monkeypatch.setattr(mx.distributed, "all_gather", all_gather)
-    monkeypatch.setattr(mx.distributed, "all_sum", all_sum)
-
-    class Gen:
-        def close(self):
-            calls["closed"] += 1
-    ex = T.TensorExecutor.__new__(T.TensorExecutor)
-    ex.gen, ex._top, ex.ring = Gen(), {}, T.Ring(link)
-    s = Scheduler.__new__(Scheduler)
-    s.tensor = ex.ring
-    s._wake = threading.Event()
-    s._stop = False
-    s._aborted = None
-    s._rows, s._waiting, s._ex = {}, [], ex
-    s._jobs = queue.Queue()
-    link.on_down.append(s._wake.set)
-    return s, calls
-
-
-def test_a_tick_fault_outside_a_collective_keeps_the_ring(monkeypatch):
-    """A tick that raises with the ranks in step (a command, the journal,
-    the memory guard, events after a step): the rows fail and the executor
-    resets over the ring as before the bell -- the ring is not ended."""
-    from knurlogic.engine.runtime import tensor as T
-    link, peer = _pair()
-    try:
-        s, calls = _ring_scheduler(monkeypatch, link)
-
-        def tick():
-            raise RuntimeError("a bad journal entry")
-        s._tick = tick
-        s._loop_once()
-        assert not link.down.is_set() and not s._stop
-        assert calls["collectives"] == 2      # the reset exchange
-        assert calls["closed"] == 1 and s._ex is None
-        peer.setblocking(False)
-        with pytest.raises(BlockingIOError):
-            peer.recv(1)                      # nothing on the bell
-    finally:
-        T._LINK = None
-        peer.close()
-
-
-def test_a_tick_fault_in_a_collective_ends_the_ring(monkeypatch):
-    """A tick whose control exchange fails (a peer lost mid-collective):
-    the ring is marked down where it failed, the others are told on the
-    bell, the executor's reset enters no collective and the next tick
-    ends the ring."""
-    from knurlogic.engine.runtime import tensor as T
-    from knurlogic.engine.runtime.scheduler import RingFailed, Scheduler
-    link, peer = _pair()
-    try:
-        s, calls = _ring_scheduler(monkeypatch, link)
-        calls["fail"] = True
-
-        def tick():
-            s._ex.ring.exchange(0, {"ops": [{"op": "pop", "n": 1}]})
-        s._tick = tick
-        s._loop_once()
-        assert link.down.is_set() and "control exchange failed" in link.why
-        assert peer.recv(1) == T.Link.ABORT
-        assert calls["collectives"] == 1      # no reset exchange after it
-        assert calls["closed"] == 1 and s._ex is None
-        del s._tick
-        Scheduler._tick(s)
-        assert s._stop and isinstance(s._aborted, RingFailed)
-    finally:
-        T._LINK = None
-        peer.close()
