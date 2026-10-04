@@ -20,6 +20,7 @@ import logging
 import os
 import random
 import re
+import socket
 from collections.abc import Callable
 
 import mlx.core as mx
@@ -274,6 +275,9 @@ class Link:
         #: the side channel a parked rank sleeps on (bell()); None until set
         self.socks: list = []
         self.parked = False
+        #: line the ranks up over the bell before the next exchange (align):
+        #: after joining, and after a parked rank wakes
+        self.need_align = True
 
     def barrier(self) -> None:
         mx.eval(mx.distributed.all_sum(mx.array(1), group=self.group,
@@ -319,6 +323,36 @@ class Link:
             return
         if self.socks[0].recv(1) != b"w":
             raise ConnectionError("rank 0 left while this rank was parked")
+        self.need_align = True
+
+    def align(self) -> None:
+        """Every rank reaches the next collective together, over the bell.
+
+        Ranks finish a load, a warm-up or a wake-up at different times (an
+        M3 and an M4 at different clocks: seconds apart). On jaccl, rank
+        0's first message of a collective reaching a rank that has not yet
+        posted its receive can be dropped -- stock mlx sets no
+        receive-not-ready retries and does not check the completion -- and
+        that rank then waits forever (live: rank 1 entered the join's
+        exchange 10 s late and never got rank 0's half). So: each rank >= 1
+        says it is here; rank 0, once all have, says go. A dead peer is a
+        ConnectionError (its socket closes)."""
+        if not self.socks:
+            return
+        if self.rank == 0:
+            for c in self.socks:
+                if _recv_exact(c, 1) != b"r":
+                    raise ConnectionError("a rank left while the ranks were "
+                                          "lining up")
+            for c in self.socks:
+                c.sendall(b"g")
+        else:
+            c = self.socks[0]
+            c.sendall(b"r")
+            if _recv_exact(c, 1) != b"g":
+                raise ConnectionError("rank 0 left while the ranks were "
+                                      "lining up")
+        self.need_align = False
 
     def exchange(self, over: int, payload: bytes | None = None):
         """-> (control rows, one per rank; the plan bytes or None)."""
@@ -327,6 +361,9 @@ class Link:
             for c in self.socks:
                 c.sendall(b"w")
             self.parked = False
+            self.need_align = True
+        if self.need_align:
+            self.align()
         n = len(payload) if (self.rank == 0 and payload) else 0
         ctl = mx.array([P.control(over, self.step, n,
                                   int(mx.get_active_memory()),
@@ -916,17 +953,53 @@ def init(link_kind: str) -> Link:
     if armed and join_ms:
         os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = join_ms
     try:
+        # the bell first, over TCP (the launcher said where): the ranks then
+        # join and run the first collectives together (Link.align)
+        early = bell_early()
         group = mx.distributed.init(backend=backend, strict=True)
         link = Link(group)
         logger.info("rank %d of %d joined the %s ring", link.rank,
                     link.size, backend)
-        link.barrier()
-        link.bell()
+        if early is not None:
+            link.socks = early
+            for c in link.socks:
+                c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            link.align()
+            link.need_align = True
+            link.barrier()
+        else:
+            link.barrier()
+            link.bell()
     finally:
         if armed:
             os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = "0"
     progress(phase="loading")
     return link
+
+
+#: how long ranks wait for each other on the bell before joining the ring
+#: (process starts differ by seconds; a cold Python import on a slow disk
+#: by more)
+BELL_EARLY_S = 300.0
+
+
+def bell_early():
+    """KNURLOGIC_BELL ("host:port:nonce:world", cluster/launch.bell_address)
+    set: connect the bell before the ring exists -- rank 0 listens on
+    host:port, the others dial it -- and return this rank's sockets. None
+    without it (the port then comes over the ring: Link.bell)."""
+    spec = os.environ.get("KNURLOGIC_BELL")
+    if not spec:
+        return None
+    host, port, nonce, world = spec.rsplit(":", 3)
+    port, nonce, world = int(port), int(nonce), int(world)
+    rank = int(os.environ.get("MLX_RANK", "0"))
+    if rank == 0:
+        srv = socket.create_server((host, port))
+        logger.info("bell: rank 0 listening on %s:%d for ranks 1..%d before "
+                    "joining the ring", host, port, world - 1)
+        return bell_answer(srv, host, nonce, world, BELL_EARLY_S)
+    return [bell_dial(host, port, nonce, rank, BELL_EARLY_S)]
 
 
 def _rank0_host() -> str:
@@ -1031,6 +1104,8 @@ class agree_head:
             has, k, outs = False, 0, []
         row = [int(bool(has)), k, len(outs)] + outs + \
             [0] * (self.MAX_OUTPUTS - len(outs))
+        # each rank gets here when ITS load is done: line them up first
+        self.link.align()
         got = mx.distributed.all_gather(mx.array(row), group=self.link.group,
                                         stream=mx.cpu).tolist()
         self.leader = bool(got[0])
