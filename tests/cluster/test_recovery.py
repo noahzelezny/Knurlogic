@@ -483,3 +483,25 @@ def test_an_unload_of_a_job_with_nothing_here_tells_every_peer(monkeypatch):
                  post=lambda page, kind, doc: told.append((page, kind, doc)))
     assert told == [("b:1", "Stop", {"job": "f" * 16, "reason": "unloaded"})]
     assert out["told"] == ["bbbb"]
+
+
+def test_an_unload_during_a_relaunch_stops_the_new_job(faked, monkeypatch):
+    """The relaunch runs without the lock: an unload landing meanwhile
+    drops the record, so the job the relaunch then answers is stopped,
+    not left running untracked."""
+    stopped = []
+    monkeypatch.setattr(C, "stop", lambda job, reason="unloaded", **k:
+                        stopped.append((job, reason)) or {})
+
+    def launch(req, **k):
+        R.cancel_job("a" * 16)            # the user unloads it mid-launch
+        faked["launches"].append((req, k))
+        return {"job": "f" * 16}
+    monkeypatch.setattr(C, "launch", launch)
+    faked["ended"] = "rank 1 on B (pid 1) exited"
+    R.tick(1000.0)
+    R.tick(1000.0 + R.BACKOFF_S[0])
+    assert len(faked["launches"]) == 1
+    assert stopped == [("f" * 16, "unloaded")]
+    assert R.MODELS == {} and R.for_job("f" * 16) is None
+    assert R.tick(1e6) == [] and len(faked["launches"]) == 1
