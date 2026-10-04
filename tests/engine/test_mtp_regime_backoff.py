@@ -82,3 +82,15 @@ def test_a_rings_own_seed_does_not_pin_the_verify_width(monkeypatch):
     b.params[0] = bl.RowParams(max_tokens=1, dist=None, processors=[],
                                eos=set(), keys=Keys(1234))
     assert b._width(1, None) == 5               # the client's seed pins K
+
+
+def test_a_bad_verify_width_refuses():
+    """KNURLOGIC_MTP_VERIFY is a whole number or unset: anything else is
+    refused with the reason, not silently ignored."""
+    import subprocess
+    import sys
+    r = subprocess.run(
+        [sys.executable, "-c", "import knurlogic.engine.mtp.block_loop"],
+        env={**__import__("os").environ, "KNURLOGIC_MTP_VERIFY": "five"},
+        capture_output=True, text=True, timeout=120)
+    assert r.returncode != 0 and "KNURLOGIC_MTP_VERIFY='five'" in r.stderr

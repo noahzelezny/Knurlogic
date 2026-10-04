@@ -226,6 +226,8 @@ class Stopped(Body):
     exiting: list = field(default_factory=list)
     told: list = field(default_factory=list)
     reason: str = ""
+    #: recovery records the stop cleared, here and on the pages it told
+    cleared: list = field(default_factory=list)
 
 
 @_register

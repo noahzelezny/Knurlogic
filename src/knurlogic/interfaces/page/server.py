@@ -485,7 +485,9 @@ def _load_fn(serve_port: int):
             # left, and clearing its record is the whole of the unload
             cleared = recovery.cancel_job(str(req["job"]))
             out = launch.stop(str(req["job"]), reason="unloaded")
-            return dict(out, cleared=cleared) if cleared else out
+            both = cleared + [c for c in out.get("cleared") or []
+                              if c not in cleared]
+            return dict(out, cleared=both)
         node = req.get("node")
         if node and node != identity.identity().get("id"):
             return _then_refresh(forward_launch(req))

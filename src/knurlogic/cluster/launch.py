@@ -1223,8 +1223,9 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     page of the job to do the same."""
     job = str(job or "")
     from knurlogic.cluster import recovery
+    cleared: list = []
     if recovery.kind(reason, kind) == "requested":
-        recovery.cancel_job(job)          # asked for: never recovered
+        cleared = recovery.cancel_job(job)   # asked for: never recovered
     with _LOCK:
         PREPARED.pop(job, None)
         spec = SPECS.pop(job, None)
@@ -1315,17 +1316,22 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
             if not page:
                 continue
             try:
-                (post or transport.send)(
+                ans = (post or transport.send)(
                     page, "Stop", {"job": job, "reason": reason,
                                    **({"kind": kind} if kind else {})})
                 told.append(n.get("name") or n.get("id"))
+                # what that Mac's recovery cleared (a failed job's record
+                # lives on whichever page started it)
+                if isinstance(ans, dict):
+                    cleared += [c for c in ans.get("cleared") or []
+                                if c not in cleared]
             except NET_ERRORS:
                 logger.debug("could not tell %s to stop job %s", page, job,
                              exc_info=True)
     return typed(Stopped(job=job, ranks_here=sorted(v["rank"] for v in
                                                     mine.values()),
                          killed=killed, exiting=left, told=told,
-                         reason=reason))
+                         reason=reason, cleared=cleared))
 
 
 def _peer_pages() -> dict:
