@@ -389,6 +389,8 @@ def cancel_job(job: str) -> list:
         cleared = [(MODELS[k].get("jobs") or [MODELS[k].get("job")])[0]
                    for k in keys]
         for k in keys:
+            # a relaunch running without the lock sees this when it returns
+            MODELS[k]["cancelled"] = True
             _drop(k)
     return cleared
 
@@ -548,7 +550,7 @@ def _defer(rec: dict, now: float, why: str) -> str:
 
 def _tick_cluster(rec: dict, now: float) -> str:
     from knurlogic.cluster import launch as C
-    if rec.get("state") == "failed":
+    if rec.get("state") == "failed" or rec.get("cancelled"):
         return ""
     if not rec.get("pending"):
         job = rec["job"]
@@ -594,6 +596,15 @@ def _tick_cluster(rec: dict, now: float) -> str:
         out = C.launch(dict(rec["req"]), recovering=view_now, **args)
     except Exception as ex:  # a failed relaunch is recorded as the attempt's error
         out = {"error": f"{type(ex).__name__}: {ex}"}
+    with _LOCK:
+        gone = rec.get("cancelled") or MODELS.get(rec["key"]) is not rec
+        if gone:
+            rec["cancelled"] = True
+    if gone:
+        # unloaded while it launched: its job is stopped, never tracked
+        if out.get("job"):
+            C.stop(out["job"], reason="unloaded")
+        return f"unloaded during relaunch {n}; job {out.get('job')} stopped"
     if out.get("job"):
         _set_job(rec, out["job"])
         rec.update(pending=False, ended_job=None, last_at=now, next_at=None)
