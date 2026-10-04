@@ -23,7 +23,24 @@ used, so asking what a family supports imports no mlx. Its shape:
                       {"refused": reason}; absent reads as refused
       head            the MTP head, or absent: {names, head, capture,
                       draft_cache, cache_semantics, sidecar_name}
-  vision          {"build": "module:attr", "architectures": [...]}, or None
+      pipeline        {"core": trunk core class name, "restage":
+                      "module:attr" or absent}: a pipeline split's trunk,
+                      and what re-takes the indices it froze from the whole
+                      layer list over a stage's layers (pipeline_stage.py)
+      tensor_split    {"act_quant_block": n, "inputs": [{what, keys,
+                      defaults}]}: linear inputs rounded in blocks a tensor
+                      split must not cut (tuning/resolve.tensor_refusals)
+  vision          {"build": "module:attr", "architectures": [...],
+                   "signature": {"config": nested key | "config_layers":
+                   flat count key, "tower_in_weights": prefix,
+                   "tower_prefixes": [...]}}, or None
+  chat_templates  {name: {file | base + prefix, model_types, stubs, marker,
+                  when_config, parser, part_separator}}: templates
+                  knurlogic serves in place of an artifact's own, their
+                  variants and what selects them (engine/templates)
+  sampling        {"non_thinking": {model_type: sampler set}}: the maker's
+                  published sampling where generation_config.json cannot
+                  carry it (machine/artifact.sampling_defaults)
   thinking        {dialect: {detect: {all: [...], none: [...]}, default,
                   native: [[ladder level, native name, template kwargs]]}}
                   -- keyed by CHAT-TEMPLATE DIALECT, not architecture: one
@@ -53,3 +70,31 @@ ADDING A FAMILY, the whole checklist:
 Where a family quirk lives: code quirks in the family's own code;
 declarative ones read by generic code in the manifest, with evidence;
 facts readable from the artifact itself (tool-call dialect) nowhere here.
+
+## Checking a family against its maker's spec
+
+Every maker-specific fact knurlogic holds about a family is in
+engine/families/<family>/, so a reviewer checks one folder against the
+maker's model card, config.json, reference code and encoder. Generic code
+(engine/runtime, engine/templates, engine/vision/registry, tuning/,
+machine/) holds no family names; a `if fam == ...` or a family's spelling
+there is a finding. The checklist, per family:
+
+  [ ] architectures: every config.json `model_type` spelling; the vendored
+      module's PROVENANCE.md names the maker's revision and each edit
+  [ ] thinking: each dialect's levels and kwargs as the maker's template
+      or encoder defines them, its default as served
+  [ ] chat_templates (if knurlogic supplies one): the port's PROVENANCE.md
+      against the maker's encoder; `stubs` / `marker` / `model_types` /
+      `when_config` select it from the artifact's config.json, never its
+      folder name; `part_separator` per role as the encoder joins a
+      message's list of parts (DeepSeek: a tool result's "\n\n")
+  [ ] sampling: the maker's published sets, with the source cited
+  [ ] vision: `signature` names the config key the maker's config uses and
+      every tensor prefix of the tower in the maker's checkpoint and its
+      conversions; the processor matches the maker's (vision/PROVENANCE.md)
+  [ ] head: capture point and cache semantics measured; the sidecar's
+      tensor layout
+  [ ] pipeline / tensor_split: what the trunk freezes from the whole layer
+      list; any block-wise activation rounding a split must respect
+  [ ] prefill_chunk / kv_quant: measured, with the numbers
