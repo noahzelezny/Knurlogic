@@ -120,6 +120,18 @@ def _alive(pid: int) -> bool:
     return True
 
 
+def _dock_icon(path: Path) -> None:
+    """The Dock shows this process as Python's rocket unless told otherwise:
+    show the knurlogic wheel instead (macOS draws the SVG itself)."""
+    try:
+        from AppKit import NSApplication, NSImage
+        img = NSImage.alloc().initWithContentsOfFile_(str(path))
+        if img is not None:
+            NSApplication.sharedApplication().setApplicationIconImage_(img)
+    except Exception:
+        pass
+
+
 def run(port: int, parent: int) -> int:
     lock = acquire_lock()
     if lock is None:
@@ -134,6 +146,7 @@ def run(port: int, parent: int) -> int:
     app = rumps.App("Knurlogic", title=None if icon.exists() else "⚙",
                     icon=str(icon) if icon.exists() else None, template=True,
                     quit_button=None)
+    _dock_icon(ASSETS / "app.svg")
     state = {"models": 0}
 
     def open_page(_):
