@@ -36,7 +36,8 @@ def _row(job):
 def test_idle():
     s = Scheduler(Host(), completion_batch_size=4)
     assert s.requests() == {"in_flight": 0, "pending": 0, "capacity": 4,
-                            "oldest_pending_s": 0.0, "holding": None}
+                            "oldest_pending_s": 0.0, "holding": None,
+                            "memory_short": None}
 
 
 def test_counts_queued_waiting_and_past_the_batch():
@@ -99,7 +100,8 @@ def test_mcp_state_lists_requests_per_model(monkeypatch):
     from knurlogic.interfaces.page import server as page_server
     from knurlogic.machine import loaded
     req = {"in_flight": 1, "pending": 0, "capacity": 4,
-           "oldest_pending_s": 0.0, "holding": None}
+           "oldest_pending_s": 0.0, "holding": None,
+                            "memory_short": None}
     monkeypatch.setattr(loaded, "survey", lambda: {"resident": [
         {"name": "m", "where": "http://127.0.0.1:9", "requests": req},
         {"name": "x", "where": "http://127.0.0.1:11434", "requests": None}],

@@ -172,7 +172,8 @@ async function loadResident(){
           : r.recovery&&r.recovery.state==='recovering' ? 'recovering'
           : r.state!=='loaded' ? esc(r.state)
           : r.cluster&&r.cluster.phase&&r.cluster.phase!=='ready' ? esc(r.cluster.phase)
-          : r.requests&&(r.requests.in_flight||r.requests.pending) ? 'running' : 'ready'}</span>
+          : r.requests&&(r.requests.in_flight||r.requests.pending) ? 'running'
+          : r.requests&&r.requests.memory_short ? esc(r.requests.memory_short) : 'ready'}</span>
         <span class="grow"></span>
         ${r.can_unload?`<button class="mini danger" data-i="${i}"
           >Unload</button>`:''}

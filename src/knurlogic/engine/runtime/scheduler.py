@@ -43,7 +43,33 @@ GIB = 1 << 30
 
 
 class OutOfMemory(RuntimeError):
-    """This row was stopped so the server and the other rows keep running."""
+    """This row was stopped so the server and the other rows keep running.
+    `memory`: the guard's terms when it refused (Scheduler._memory), for
+    the 503's body, or None."""
+
+    def __init__(self, message: str = "", memory: dict | None = None):
+        super().__init__(message)
+        self.memory = memory
+
+
+def _terms(mem: dict) -> str:
+    """Scheduler._memory on one log line, in GiB."""
+    def g(v):
+        return "-" if v is None else f"{v / GIB:.1f}"
+    ranks = mem.get("ranks")
+    per = (f" per rank {[(r.get('rank'), g(r.get('over_limit_bytes')))
+                          for r in ranks]}" if ranks else "")
+    return (f"rank {mem['rank']} working_set {g(mem['working_set'])} "
+            f"others {g(mem['others'])} (readings "
+            f"{[g(x) for x in mem['others_readings']]}) margin "
+            f"{g(mem['margin'])} (spike {g(mem['spike'])}, transient "
+            f"samples {mem['transient_samples']}, context "
+            f"{mem['context']}+{mem['tokens']}) local_active "
+            f"{g(mem['local_active'])} active {g(mem['active'])} cached "
+            f"{g(mem['cached'])} prompt_cache {g(mem['prompt_cache'])} "
+            f"peers_over {g(mem['peers_over'])}{per} limit "
+            f"{g(mem['limit'])} room {g(mem.get('room'))} need "
+            f"{g(mem.get('need'))}")
 
 
 class RingFailed(RuntimeError):
@@ -465,7 +491,9 @@ class Scheduler:
                    past the batch and waiting for a slot in it
         capacity   the most rows decoded together (decode_concurrency)
         oldest_pending_s  how long the oldest pending one has waited
-        holding    why they wait: loading | memory | batch_full | None"""
+        holding    why they wait: loading | memory | batch_full | None
+        memory_short  why a minimal prompt would be refused now, or None
+                   (memory_short())"""
         cap = int(self.completion_batch_size)
         rows = [r for _, r in sorted(dict(self._rows).items())]
         if self._warming:
@@ -483,7 +511,9 @@ class Scheduler:
             holding = "batch_full" if past else "queued"
         return {"in_flight": min(len(rows), cap), "pending": len(pend),
                 "capacity": cap, "oldest_pending_s": round(oldest, 1),
-                "holding": holding}
+                "holding": holding,
+                "memory_short": None if self._warming
+                else self.memory_short()}
 
     def more_helps(self, rows: int):
         """Would one more concurrent row raise throughput? True/False from
@@ -945,6 +975,70 @@ class Scheduler:
 
     # ------------------------------------------------------------- memory
 
+    def _memory(self, n_tokens: int = 0, need: int | None = None,
+                room: int | None = None) -> dict:
+        """The guard's terms for a prompt of n_tokens, in bytes: limit =
+        working_set - others - margin; room = limit - active, where on a
+        ring active is max(local, limit() + peers_over). Which term made a
+        refusal is read off this (the log line, the 503's `memory`)."""
+        peers = self.tensor.peers_over_now() if self.tensor is not None \
+            else None
+        out = {"rank": int(getattr(getattr(self.tensor, "link", None),
+                                   "rank", 0) or 0),
+               "tokens": int(n_tokens),
+               "working_set": self._working_set(),
+               "others": self._others_bytes(),
+               "others_readings": list(self._others),
+               "margin": self._margin(n_tokens),
+               "spike": self._spike,
+               "transient_samples": {k: list(v) for k, v in self._tx.items()},
+               "context": self._context(),
+               "local_active": self._local_active(),
+               "active": self._active(),
+               "cached": self._cached(),
+               "prompt_cache": (self.cache.nbytes
+                                if self.cache is not None else 0),
+               "peers_over": peers,
+               "limit": self._limit(n_tokens)}
+        if peers is not None:
+            from knurlogic.engine.serve import state
+            out["ranks"] = [dict(r) for r in
+                            state.SERVED.get("ranks") or []]
+        if need is not None:
+            out["need"] = int(need)
+        if room is not None:
+            out["room"] = int(room)
+        return out
+
+    def memory_short(self, n_tokens: int = 1024) -> str | None:
+        """Why a minimal prompt would be refused now, or None: a loaded
+        server that cannot admit one is not ready (/v1/models, the page's
+        instance card). Only with nothing running -- then a refusal is
+        final, not a wait. Side-effect free (_fits)."""
+        try:
+            if self._rows or not self._kv or not self._limit() or \
+                    self._fits(n_tokens):
+                return None
+            m = self._memory(n_tokens)
+        except Exception:   # a status read must never fail the server
+            return None
+        peers = m["peers_over"]
+        if peers is not None and peers > 0 and \
+                m["local_active"] <= m["limit"]:
+            over = [r for r in m.get("ranks", [])
+                    if r.get("rank") and r.get("over_limit_bytes", 0) > 0]
+            who = (f"rank {over[0]['rank']}" if len(over) == 1
+                   else "a peer rank")
+            why = f"{peers / GIB:.1f} GiB over its limit"
+        else:
+            who = f"rank {m['rank']}"
+            why = (f"limit {m['limit'] / GIB:.1f} GiB (working set "
+                   f"{m['working_set'] / GIB:.1f} - others "
+                   f"{m['others'] / GIB:.1f} - margin "
+                   f"{m['margin'] / GIB:.1f}), active "
+                   f"{m['local_active'] / GIB:.1f}")
+        return f"loaded, no memory for requests: {who}, {why}"
+
     def _working_set(self) -> int:
         if self.working_set is None:
             import importlib  # engine.serve exports a load() function
@@ -1180,8 +1274,9 @@ class Scheduler:
         fits, need, room = self._room_for(n_tokens)
         if fits:
             logger.info("a %d-token prompt admitted without checkpoints: "
-                        "%.1f GiB free, with them it would take %.1f",
-                        n_tokens, room / GIB, full / GIB)
+                        "%.1f GiB free, with them it would take %.1f; %s",
+                        n_tokens, room / GIB, full / GIB,
+                        _terms(self._memory(n_tokens, need, room)))
             return "lean"
         limit = self._limit(n_tokens)
         if self._rows:
@@ -1195,6 +1290,8 @@ class Scheduler:
                 self._ring_trimmed:
             self._ring_trimmed = False
             raise _RingWait()
+        mem = self._memory(n_tokens, need, room)
+        logger.warning("refused a %d-token prompt: %s", n_tokens, _terms(mem))
         if room <= 0 and not (self.cache is not None and self.cache.nbytes):
             # nothing runs and nothing is left to give up, yet no memory is
             # free: whatever holds it is out of this server's reach
@@ -1202,12 +1299,12 @@ class Scheduler:
                 f"no memory is free under the server's limit "
                 f"({limit / GIB:.1f} GiB) with nothing running and nothing "
                 f"cached; it is holding memory it cannot release, so this "
-                f"server needs a restart")
+                f"server needs a restart", mem)
         raise OutOfMemory(
             f"this prompt ({n_tokens} tokens) needs about {need / GIB:.1f} "
             f"GiB for its cache; {max(room, 0) / GIB:.1f} GiB is free under "
             f"the server's limit ({limit / GIB:.1f} GiB). Send a shorter "
-            f"conversation, or serve a smaller model")
+            f"conversation, or serve a smaller model", mem)
 
     def _guard_memory(self) -> None:
         limit = self._limit()
