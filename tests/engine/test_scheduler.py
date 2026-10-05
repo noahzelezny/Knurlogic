@@ -669,3 +669,59 @@ def test_timing_reports_cached_vs_computed_and_the_chunk():
     mixed = NS(job=NS(submitted=0.0), admitted=1.0, began=1.0, first=3.0)
     t = _timing(mixed, 4.0, 10, 1000, 500, 2048)
     assert t["prefill_tok_s"] == 500.0 and "prefill" not in t
+
+
+def test_a_refusal_names_every_term_of_the_limit():
+    """GLM-5.3-Flash pipeline rank 0, 2026-10-05: working set 120 GiB,
+    weights 75.6, others 1.6. A step's transient measured only at ~1.1k
+    tokens of context is carried on in proportion to the context, so a 33k
+    prompt's margin is tens of GiB and the limit falls below the weights:
+    refused with 0.0 GiB free. The 503 says which term did it; the status
+    says when the server cannot admit even a 1k-token prompt."""
+    from knurlogic.engine.runtime import scheduler as S
+    from knurlogic.interfaces.http.openai import _status_of, models_document
+    GIB = S.GIB
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
+    s._local_active = lambda: int(75.6 * GIB)
+    s._cached = lambda: 0
+    s._gpu_in_use = lambda: None       # keep the one reading below
+    s._others = [int(1.6 * GIB)]
+    s._spike = int(1.6 * GIB)
+    s._tx = {"lo": (1100, int(1.6 * GIB)), "hi": (1100, int(1.6 * GIB))}
+    s._kv = (0.0, 12 * 2**10)           # ~0.4 GiB at 33k tokens
+    with pytest.raises(S.OutOfMemory) as e:
+        s._make_room(32994)
+    m = e.value.memory
+    assert m["working_set"] == 120 * GIB and m["others"] == int(1.6 * GIB)
+    assert m["margin"] > 40 * GIB               # the term that refuses
+    assert m["limit"] == m["working_set"] - m["others"] - m["margin"]
+    assert m["room"] < 0 and m["need"] > 0
+    body = _status_of(e.value).body()
+    assert body["error"]["memory"]["margin"] == m["margin"]
+    # a 1k prompt's margin is the 6 GiB floor: 120-1.6-6 > 75.6, it fits
+    assert s.memory_short() is None
+    # with the weights past that limit, the status says so
+    s._local_active = lambda: 114 * GIB
+    why = s.memory_short()
+    assert why.startswith("loaded, no memory for requests: rank 0, limit")
+    doc = models_document({"id": "m"}, memory_short=why)
+    assert doc["data"][0]["status"] == why
+    assert s.requests()["memory_short"] == why
+
+
+def test_status_names_a_peer_rank_over_its_limit():
+    from knurlogic.engine.runtime import scheduler as S
+    from knurlogic.engine.serve import state
+    GIB = S.GIB
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
+    s._local_active = lambda: 76 * GIB
+    s._cached = lambda: 0
+    s._kv = (0.0, 12 * 2**10)
+    s.tensor = type("T", (), {"peers_over_now": lambda self: 2 * GIB})()
+    state.SERVED["ranks"] = [{"rank": 0, "over_limit_bytes": 0},
+                             {"rank": 1, "over_limit_bytes": 2 * GIB}]
+    try:
+        assert s.memory_short() == ("loaded, no memory for requests: "
+                                    "rank 1, 2.0 GiB over its limit")
+    finally:
+        state.SERVED.pop("ranks", None)

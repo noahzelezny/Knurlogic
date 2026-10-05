@@ -23,8 +23,10 @@ from knurlogic.engine.runtime.scheduler import Job
 class ApiError(Exception):
     def __init__(self, status: int, message: str, *, type_: str = None,
                  param: str = None, code: str = None,
-                 retry_after: int = None):
+                 retry_after: int = None, memory: dict = None):
         super().__init__(message)
+        #: the scheduler's memory terms behind a 503 (Scheduler._memory)
+        self.memory = memory
         self.status = status
         #: seconds, sent as Retry-After (the 503s: busy memory, no model,
         #: a cluster stopping); None sends none
@@ -34,8 +36,11 @@ class ApiError(Exception):
         self.param, self.code = param, code
 
     def body(self) -> dict:
-        return {"error": {"message": str(self), "type": self.type,
-                          "param": self.param, "code": self.code}}
+        err = {"message": str(self), "type": self.type,
+               "param": self.param, "code": self.code}
+        if self.memory is not None:
+            err["memory"] = self.memory
+        return {"error": err}
 
 
 def _num(body, name, kind, lo=None, hi=None, default=None):
@@ -224,7 +229,8 @@ def _status_of(err: BaseException) -> ApiError:
                         code="cluster_failed", retry_after=30)
     if isinstance(err, OutOfMemory):
         return ApiError(503, str(err), type_="server_error",
-                        code="insufficient_memory", retry_after=10)
+                        code="insufficient_memory", retry_after=10,
+                        memory=getattr(err, "memory", None))
     if "no model" in str(err):
         return ApiError(503, str(err), type_="server_error", retry_after=5)
     return ApiError(500, f"{name}: {err}")
@@ -416,7 +422,8 @@ def _data(obj: Any) -> bytes:
 def models_document(served: dict, sampling: dict | None = None,
                     context_length: int = 0,
                     thinking: dict | None = None,
-                    load_state: str = "ready") -> dict:
+                    load_state: str = "ready",
+                    memory_short: str | None = None) -> dict:
     """/v1/models: the one served model, with its capabilities and size, the
     sampling a request that says nothing gets (the model's recommendation;
     {} is greedy), its context window (0: the config does not say), and
@@ -428,8 +435,12 @@ def models_document(served: dict, sampling: dict | None = None,
     "failed": requests queue while it loads, so a client that polls
     /v1/models and then times its first request would time the load. The
     answer stays 200 -- the page's liveness probe and router read this
-    endpoint while a model loads -- and OpenAI clients ignore the field."""
+    endpoint while a model loads -- and OpenAI clients ignore the field.
+    A ready model whose scheduler could not admit a minimal prompt
+    (Scheduler.memory_short) is not ready: its status is that reason."""
     status = {"ready": "ready", "failed": "failed"}.get(load_state, "loading")
+    if status == "ready" and memory_short:
+        status = memory_short
     m = {"id": served["id"], "object": "model", "status": status,
          "created": int(served.get("created") or 0),
          "owned_by": "knurlogic",

@@ -3,6 +3,7 @@
 ## 0.1.4
 
 Long generations hold up; `knurlogic` starts the page.
+* A prompt refused for memory logs, and returns in its 503 (`error.memory`), every term of the limit per rank (working set, others and their readings, margin and the transients behind it, active, cache, peers' over-limit, room, need); a loaded server that could not admit a 1k-token prompt says why in /v1/models `status` and on its instance card instead of "ready".
 * A peer page that is slow to answer no longer stops a cluster job whose ranks run: a job stops only when a rank dies, the ring fails, or the peer machine stops accepting connections at all; the liveness status, /loaded.json and /models.json refresh off the request (a stalling SMB model share or a busy rank 0 held them past the peers' timeouts), and a peer that gives up mid-answer prints no traceback.
 * The page reads model folders only when you act -- opening the model picker (this Mac's and the picked peers'), launching, a download finishing, or a CLI/MCP call -- never on a timer: /models.json answers from its last read unless asked with `rescan=1`, a load rescans once only for a model the last read lacked, and the load indicator and server phases take a model's size from its launch record instead of reading its shards on every poll.
 - Chat: scrolling up while a reply streams keeps the view where you are; it follows the reply again once you scroll back to the bottom.

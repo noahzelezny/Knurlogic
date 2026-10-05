@@ -358,6 +358,12 @@ def _load_state(host) -> str:
         return "ready"
 
 
+def _memory_short(sched) -> str | None:
+    """Why the scheduler could not admit a minimal prompt now, or None."""
+    f = getattr(sched, "memory_short", None)
+    return f() if callable(f) else None
+
+
 class Handler(BaseHTTPRequestHandler):
     app: App = None  # type: ignore[assignment]  # set on the subclass by serve()
     server_version = "knurlogic"
@@ -486,7 +492,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.app.served(),
                 sampling_defaults(path) if path else {},
                 context_length(path) if path else 0, think,
-                load_state=_load_state(self.app.scheduler.host)))
+                load_state=_load_state(self.app.scheduler.host),
+                memory_short=_memory_short(self.app.scheduler)))
         if path in ("/api/tags", "/api/version"):
             return self._ollama_get(path)
         if path == "/health":
