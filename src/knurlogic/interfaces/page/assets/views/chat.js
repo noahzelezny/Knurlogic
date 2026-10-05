@@ -30,6 +30,7 @@ function switchTab(t){
 // with messages, unless the dashboard was asked for; opening a chat or
 // sending one asks for the conversation again.
 let HOME=false;
+let ATTVISION=false;              // the chat's model takes images
 function layout(){
   const c=typeof curChat==='function' ? curChat() : null;
   const has=!!(c && c.msgs && c.msgs.length);
@@ -200,7 +201,10 @@ function chatGate(){
                          : 'Type away; click a running model to send it';
   $('csend').disabled=!on || BUSYC;
   $('csend').title=gone ? goneMsg : on ? '' : 'click a running model to chat with it';
-  $('cattach').disabled=!on || !vision;
+  // text and PDFs go to any model; images only to one that sees them
+  $('cattach').disabled=!on;
+  $('cattach').title=vision ? 'attach images, PDFs or text' : 'attach PDFs or text (this model takes no images)';
+  ATTVISION=vision;
   const opts=window.CHATTABLE||[], el=$('cmodel');
   const sig=opts.map(r=>r.where+'|'+r.name).join('\n');
   if(el.dataset.sig!==sig){
@@ -343,10 +347,11 @@ function renderChips(){
   el.innerHTML=PENDING.map((a,i)=>{
     if(a.kind==='image'){
       return `<div class="chip"><img src="${a.thumb}"><span>${esc(a.name)}</span>
-        <span class="ctok">≈${estTokens(a)} tok</span>
+        <span class="ctok">≈${estTokens(a)} tok${a.note?' · '+esc(a.note):''}</span>
         <span class="cx" data-rm="${i}">×</span></div>`;
     }
     return `<div class="chip"><span>📄 ${esc(a.name)}</span>
+      ${a.note?`<span class="ctok">${esc(a.note)}</span>`:''}
       <span class="cx" data-rm="${i}">×</span></div>`;
   }).join('');
   el.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{
@@ -375,7 +380,10 @@ async function attachImage(file){
   const w=Math.max(1,Math.round(im.width*scale)), h=Math.max(1,Math.round(im.height*scale));
   const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
   cv.getContext('2d').drawImage(im, 0, 0, w, h);
-  const mime = file.type==='image/png' ? 'image/png' : 'image/jpeg';
+  await attachCanvas(cv, file.name, file.type==='image/png' ? 'image/png' : 'image/jpeg');
+}
+async function attachCanvas(cv, name, mime){
+  const w=cv.width, h=cv.height;
   const dataURL=cv.toDataURL(mime, 0.85);
   const hash=await sha256(dataURL);
   const tcv=document.createElement('canvas');
@@ -384,7 +392,7 @@ async function attachImage(file){
   tcv.getContext('2d').drawImage(cv, 0, 0, tcv.width, tcv.height);
   const thumb=tcv.toDataURL('image/jpeg', 0.7);
   await idbPut({hash, dataURL, thumbDataURL:thumb, w, h, bytes:dataURL.length});
-  PENDING.push({kind:'image', name:file.name, hash, mime, w, h,
+  PENDING.push({kind:'image', name, hash, mime, w, h,
                 bytes:dataURL.length, thumb});
   renderChips();
 }
@@ -393,16 +401,68 @@ async function attachText(file){
   PENDING.push({kind:'text', name:file.name, text:text.slice(0,100000)});
   renderChips();
 }
+// PDFs: the text of every page goes in as one text attachment; with a
+// vision model the first PDFPAGES pages also go in as images (a scanned PDF
+// has no text, only the images). pdf.js loads on the first PDF only.
+const PDFPAGES=8;
+let PDFJS=null;
+async function pdfjs(){
+  if(!PDFJS){
+    PDFJS=await import('../vendor/pdfjs/pdf.min.mjs');
+    PDFJS.GlobalWorkerOptions.workerSrc=
+      new URL('../vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).href;
+  }
+  return PDFJS;
+}
+async function attachPdf(file){
+  const lib=await pdfjs();
+  const doc=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+  try{
+    const n=doc.numPages, parts=[];
+    for(let i=1;i<=n;i++){
+      const tc=await (await doc.getPage(i)).getTextContent();
+      const t=tc.items.map(it=>(it.str||'')+(it.hasEOL?'\n':'')).join('').trim();
+      parts.push(`--- page ${i} ---\n${t}`);
+    }
+    const hasText=/\S/.test(parts.map(p=>p.replace(/^--- page \d+ ---/,'')).join(''));
+    if(!hasText && !ATTVISION){
+      alert(`${file.name}: this PDF has no text, and the model can't see images.`);
+      return;
+    }
+    const notes=[], first=PENDING.length;
+    if(ATTVISION){
+      const k=Math.min(n, PDFPAGES);
+      for(let i=1;i<=k;i++){
+        const page=await doc.getPage(i);
+        const v1=page.getViewport({scale:1});
+        const vp=page.getViewport({scale:Math.min(4, MAXEDGE/Math.max(v1.width, v1.height))});
+        const cv=document.createElement('canvas');
+        cv.width=Math.max(1,Math.floor(vp.width)); cv.height=Math.max(1,Math.floor(vp.height));
+        const ctx=cv.getContext('2d');
+        ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);  // JPEG has no alpha
+        await page.render({canvasContext:ctx, canvas:cv, viewport:vp}).promise;
+        await attachCanvas(cv, `${file.name} p${i}`, 'image/jpeg');
+      }
+      notes.push(k<n ? `first ${k} of ${n} pages as images` : `${n} pages as images`);
+    }
+    if(hasText){
+      const text=parts.join('\n\n');
+      if(text.length>100000) notes.push('text truncated');
+      PENDING.push({kind:'text', name:file.name, text:text.slice(0,100000),
+                    note:notes.join(', ')});
+    } else PENDING[first].note=`no text; ${notes[0]}`;  // a scan: the images say it
+    renderChips();
+  } finally { doc.destroy() }
+}
 async function handleFiles(files){
   for(const f of files){
     try{
-      if(f.type.startsWith('image/')) await attachImage(f);
-      else if(f.type==='application/pdf' || /\.pdf$/i.test(f.name)){
-        // PDFs are not supported: rendering them to page images needs
-        // pdf.js, which the page does not bundle.
-        alert(`${f.name}: PDF attachments are not supported yet. `+
-          `Convert it to images first, or paste its text.`);
-      } else await attachText(f);
+      if(f.type.startsWith('image/')){
+        if(!ATTVISION){ alert(`${f.name}: this model can't see images.`); continue }
+        await attachImage(f);
+      }
+      else if(f.type==='application/pdf' || /\.pdf$/i.test(f.name)) await attachPdf(f);
+      else await attachText(f);
     }catch(e){ alert(`Could not attach ${f.name}: ${e}`) }
   }
 }
@@ -417,7 +477,7 @@ $('chat').addEventListener('drop', e=>{
 $('cq').addEventListener('paste', e=>{
   const items=[...(e.clipboardData?.items||[])];
   const imgs=items.filter(i=>i.type.startsWith('image/'));
-  if(imgs.length && !$('cattach').disabled){
+  if(imgs.length && ATTVISION && !$('cattach').disabled){
     e.preventDefault();
     imgs.forEach(i=>attachImage(i.getAsFile()));
     return;

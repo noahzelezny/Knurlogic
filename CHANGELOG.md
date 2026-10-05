@@ -28,6 +28,8 @@ Long generations hold up; `knurlogic` starts the page.
 * A Mac started with `EXO_MODELS_DIRS`, `EXO_MODELS_READ_ONLY_DIRS` or
   `KNURLOGIC_MODELS` remembers those folders on its first start (while none
   are saved), so the variable is not needed after that.
+* The chat takes PDF attachments: the text of every page, and with a vision
+  model the first 8 pages as images too (pdf.js 5.7.284 ships with the page).
 
 ## 0.1.3
 
