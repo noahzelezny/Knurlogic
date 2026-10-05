@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import threading
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -236,7 +237,13 @@ class App:
             pending = None
         if pending is None:
             job, reply = self.submit(run2[0], chat=True, extra=extra())
-            first = reply.first()
+            if reply.ctx["stream"]:
+                try:
+                    first = reply.first(timeout=QUEUED_KEEPALIVE_S)
+                except queue.Empty:
+                    return "stream", _queued(job, reply)
+            else:
+                first = reply.first()
             if first[0] == "error":
                 raise O._status_of(first[1])
             if not reply.ctx["stream"]:
@@ -305,6 +312,38 @@ class App:
             finally:
                 job.cancel()
         return "stream", summarized()
+
+
+#: How long a streamed request may wait for its first event (it is queued
+#: behind other rows, or waiting for memory) before the reply goes out as a
+#: 200 kept alive by comments. Until something is written, a client that hung
+#: up or timed out cannot be noticed, and its job would hold its place in the
+#: queue and then prefill for nobody (2026-10-05: a dead caller's 55k-token
+#: prompt prefilled for ~7 min ahead of a live one, which got no bytes for
+#: 600 s, timed out, and retried behind its own ghost).
+QUEUED_KEEPALIVE_S = 5.0
+
+
+def _queued(job, reply):
+    """SSE for a streamed request still waiting for its first event: a
+    keepalive comment every QUEUED_KEEPALIVE_S until it starts, then the
+    reply as usual. A refusal that arrives after the 200 is an error event.
+    A failed write (the client is gone) closes this generator, and the job
+    is cancelled: the scheduler drops a cancelled job from the queue."""
+    try:
+        while True:
+            try:
+                first = reply.first(timeout=QUEUED_KEEPALIVE_S)
+                break
+            except queue.Empty:
+                yield b": keepalive queued\n\n"
+        if first[0] == "error":
+            yield O._data(O._status_of(first[1]).body())
+            yield b"data: [DONE]\n\n"
+            return
+        yield from reply.events(first)
+    finally:
+        job.cancel()
 
 
 def _load_state(host) -> str:
