@@ -25,11 +25,17 @@ import json
 CONTROL_LEN = 5
 OVER, STEP, LENGTH, ACTIVE, PEAK = range(CONTROL_LEN)
 
-OPS = ("admit", "remove", "insert", "pop", "reset", "stop", "park", "set")
+OPS = ("admit", "remove", "chunk", "insert", "pop", "reset", "stop", "park",
+       "set")
+#: admit's `chunk` is the prefill chunk rank 0 fitted the row at (memory:
+#: scheduler._make_room); `chunk` (uid, chunk) refits a row not yet
+#: prefilled (scheduler._fit_next). Ranks prefilling one row in different
+#: chunk counts run different collectives and deadlock.
 _FIELDS = {
     "admit": ("uid", "prompt", "segs", "hit", "max_tokens", "sampling",
-              "penalties", "initial", "images", "refs"),
+              "penalties", "initial", "images", "refs", "chunk"),
     "remove": ("uids",),
+    "chunk": ("uid", "chunk"),
     "insert": ("uid", "event", "kind"),
     "pop": ("n",),
     "reset": (),
@@ -92,6 +98,11 @@ def check(plan) -> None:
                                   or not isinstance(op["value"], str)):
             raise PlanError(f"set takes a knob of {list(SETS)} and a string "
                             f"value, got {op['name']!r}={op['value']!r}")
+        if op["op"] in ("admit", "chunk") and (
+                not isinstance(op["chunk"], int)
+                or isinstance(op["chunk"], bool) or op["chunk"] < 1):
+            raise PlanError(f"{op['op']} chunk must be a positive int, got "
+                            f"{op['chunk']!r}")
         if op["op"] == "admit":
             _ints(op["prompt"], "admit prompt")
             if not isinstance(op["segs"], list):

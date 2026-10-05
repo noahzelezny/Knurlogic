@@ -14,7 +14,7 @@ def _admit(**kw):
           "segs": [[4], [5]], "hit": 3, "max_tokens": 16,
           "sampling": {"temp": 0.7, "seed": 11},
           "penalties": {"repetition_penalty": 1.1}, "initial": "normal",
-          "images": [], "refs": []}
+          "images": [], "refs": [], "chunk": 512}
     op.update(kw)
     return op
 
@@ -1115,3 +1115,92 @@ def test_tensor_shape_carries_rank_0s_head_bytes(tmp_path, monkeypatch):
     assert C.shape_of(str(tmp_path), 2, "tensor")["leader_bytes"] == 50 + 30
     assert C.shape_of(str(tmp_path), 2, "tensor",
                       vision=False)["leader_bytes"] == 50
+
+
+def test_a_follower_prefills_each_row_at_the_chunk_rank_0_fitted(
+        monkeypatch):
+    """The chunk rides the admit op, and a refit (the `chunk` op) follows
+    it: every rank sets it on its engine before the step that prefills
+    that row -- ranks prefilling in different chunk counts deadlock. A
+    prefilling step's transient is not held as the follower's margin."""
+    from types import SimpleNamespace as NS
+
+    from knurlogic.engine.mtp import batch_generator as BG
+    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.runtime import request as RQ
+    from knurlogic.engine.runtime import tensor as T
+    chunks, marks = [], []
+
+    class Ex:
+        def __init__(self, gen):
+            self.gen, self.q, self.n = gen, [], 0
+
+        def insert(self, a):
+            self.q.append(self.n)
+            self.n += 1
+            return self.n - 1
+
+        def next_admission(self):
+            return self.q[0] if self.q else None
+
+        def set_chunk(self, n):
+            chunks.append((self.q[0], n))
+
+        def step(self):
+            self.q.pop(0)
+            return []
+
+        def close(self):
+            pass
+
+    class Mark(T.Mark):
+        def around(self, fn, prefill=False):
+            marks.append(prefill)
+            return fn()
+
+    monkeypatch.setattr(BG, "MTPBatchGenerator", lambda *a, **k: NS(
+        _batch=NS(uids=[], t1=None)))
+    monkeypatch.setattr(PL, "coordinate", lambda *a, **k: None)
+    monkeypatch.setattr(RQ, "control_machine", lambda tok, init: (None, []))
+    monkeypatch.setattr(T, "LocalExecutor", Ex)
+    monkeypatch.setattr(T, "Mark", Mark)
+
+    def admit(uid, c):
+        return _admit(uid=uid, prompt=[1, 2, 3], segs=[[1, 2, 3]], hit=0,
+                      chunk=c)
+    link = _FakeLink([
+        {"ops": [admit(0, 256), admit(1, 2048)]},
+        {"ops": [{"op": "chunk", "uid": 1, "chunk": 512}]},
+        {"ops": [{"op": "stop"}]}])
+    link.group = None
+    T.follow(None, None, "m", link, prompt_cache_size=2,
+             completion_batch_size=4, prefill_step_size=2048,
+             working_set=0)
+    assert chunks == [(0, 256), (1, 512)] and marks == [True, True]
+
+
+def test_a_prefill_steps_transient_is_not_a_followers_margin(monkeypatch):
+    import mlx.core as mx
+
+    from knurlogic.engine.runtime import tensor as T
+    GIB = T.GIB
+    mem = {"active": 60 * GIB, "peak": 77 * GIB}
+    monkeypatch.setattr(mx, "get_active_memory", lambda: mem["active"])
+    monkeypatch.setattr(mx, "get_peak_memory", lambda: mem["peak"])
+    monkeypatch.setattr(mx, "reset_peak_memory", lambda: None)
+    m = T.Mark(84 * GIB)
+    m.around(lambda: None, prefill=True)         # a 59k prefill: 17 GiB
+    assert m.limit() == 84 * GIB - int(4.2 * GIB)
+    mem["peak"] = 61 * GIB
+    m.around(lambda: None)                       # a decode step: 1 GiB
+    assert m.spike == GIB
+
+
+def test_a_plan_chunk_is_a_positive_int():
+    assert P.decode(P.encode({"ops": [{"op": "chunk", "uid": 1,
+                                       "chunk": 256}]}))
+    for bad in (0, -1, True, "256"):
+        with pytest.raises(P.PlanError):
+            P.encode({"ops": [{"op": "chunk", "uid": 1, "chunk": bad}]})
+    with pytest.raises(P.PlanError):
+        P.encode({"ops": [_admit(chunk=0)]})

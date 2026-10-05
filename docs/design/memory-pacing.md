@@ -1,6 +1,6 @@
 # Memory pacing: a server that cannot OOM (draft 2026-09-28)
 
-> **Parked (2026-09-28).** Kept for the reasoning; the code lived on the deleted `memory-pacing` branch (last commit a94a8df) and is not in knurlogic. Revisit only against realistic loads (compaction on).
+> **Chunk pacing in main (2026-10-05); the rest parked (2026-09-28).** The prefill-chunk part is built in `engine/runtime/scheduler.py` (see "Chunk pacing in main" at the end). Pausing, `RamRoom`, the allowance and pending-KV reservations stay parked: that code lived on the deleted `memory-pacing` branch (last commit a94a8df). Revisit those only against realistic loads (compaction on).
 
 Goal (the maintainer): "uncrashable" -- the server paces itself so a user never OOMs,
 including when they open Chrome mid-run.
@@ -155,3 +155,39 @@ waits and 503s are fine.
   growth against its price raises the scale (`_learn_growth`, never down,
   capped at 3) -- a lean admission stores no checkpoint, so `_learn` never
   measured those rows.
+
+## Chunk pacing in main (2026-10-05)
+
+GLM-5.3-Flash pipeline (M4 rank 0, M3 rank 1, launch chunk 2048):
+prefill transients 3.2 GiB at 2.7k tokens, 10.4 at 33k, 17.0 at 59k (the
+DSA indexer scores chunk x context). After one 59k prompt every request
+was refused, 14k too, with 30-60 GiB unused: the margin was the largest
+transient ever seen (21.2 GiB) on every rank, idle included, and the M3's
+`Mark` held its own 17 GiB the same way.
+
+- Margin = the step about to run's predicted transient x 1.25 (floor 5% /
+  4 GiB): idle holds the floor; a decode step reads `_tx["decode"]` at the
+  rows' context; an admission reads `_tx["prefill"]` at x = (context +
+  prompt) x chunk / 512. `_line` interpolates between samples (one per
+  eighth of a doubling of x), carries the shortest-longest line on past
+  the longest, and with one sample is proportional (no guessed slope; the
+  chunk shrinks instead).
+- `_make_room` tries the launch chunk, halving to 128, full before lean;
+  picks the largest chunk whose step fits here and on every peer
+  (`_peer_room`: the peer's reported over less the transient past its 4
+  GiB floor); else `_Wait` with rows running, else 503 at chunk 128. One
+  INFO line names a smaller chunk, its predicted transient and the room.
+- The chunk rides the `admit` op; a `chunk` op refits a row not yet
+  prefilled. Every rank sets it on its engine (`LocalExecutor.set_chunk`)
+  before the step that prefills that row (`next_admission`).
+- Before each step `_fit_next` refits the next admission to the room then;
+  if not even 128 fits, it goes back to the queue (others running) or is
+  stopped (alone). The guard re-queues a not-yet-prefilled newest row
+  instead of failing it. A row mid-prefill cannot be shrunk: the whole
+  admission is one engine step (phase 2's resumable admission would).
+- Followers' `Mark` keeps only decode steps' transients; rank 0 prices
+  prefills per admission. The peer's transient is assumed equal to rank
+  0's (one line, measured on rank 0).
+- Live numbers (fitted on the two logged samples): 14k -> chunk 2048,
+  ~6.0 GiB transient, 7.5 margin; 53k on the M3 (~15.6 GiB under its
+  floor-only limit) -> 2048 needs ~15.5 GiB, 1024 ~9.0 -> chunk 1024.
