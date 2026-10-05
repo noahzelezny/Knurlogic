@@ -865,6 +865,9 @@ async function runTurn(){
       if(fr) finishReason=fr;
       const delta=j.choices?.[0]?.delta||{};
       const thought=delta.reasoning_content||delta.reasoning;
+      // follow the reply only while the reader is at the bottom; scrolled
+      // up, they are reading, so the view stays put
+      const lg=$('clog'), follow=lg.scrollHeight-lg.scrollTop-lg.clientHeight<40;
       if(thought){
         last=performance.now(); if(!first) first=last;
         assistant.thinking+=thought; pfHide();
@@ -882,7 +885,7 @@ async function runTurn(){
         const md=$('clog').lastElementChild.querySelector('.md');
         if(md) md.innerHTML=mdRender(assistant.content);
       }
-      $('clog').scrollTop=1e9;
+      if(follow) lg.scrollTop=1e9;
     }
   }catch(err){
     if(err.name!=='AbortError'){ assistant.content=(assistant.content||'')+`\n\n[error: ${err.message||err}]`;
