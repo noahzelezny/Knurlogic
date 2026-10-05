@@ -689,16 +689,26 @@ def test_a_refusal_names_every_term_of_the_limit():
     s._spike = int(1.6 * GIB)
     s._tx = {"lo": (1100, int(1.6 * GIB)), "hi": (1100, int(1.6 * GIB))}
     s._kv = (0.0, 12 * 2**10)           # ~0.4 GiB at 33k tokens
+    # one sample no longer carried on in proportion: the live refusal
+    # (15:07, 3.1 GiB at 2733 tokens, margin 47.4 GiB) now fits
+    s._spike = int(3.14 * GIB)
+    s._tx = {"lo": (2733, 3368886056), "hi": (2733, 3368886056)}
+    s._others = [int(0.7 * GIB)]
+    s._local_active = lambda: int(75.1 * GIB)
+    assert s._margin(33002) < 10 * GIB
+    assert s._make_room(33002) in ("full", "lean")
+    # a server whose weights leave no room still refuses, naming every term
+    s._local_active = lambda: int(114 * GIB)
     with pytest.raises(S.OutOfMemory) as e:
         s._make_room(32994)
     m = e.value.memory
-    assert m["working_set"] == 120 * GIB and m["others"] == int(1.6 * GIB)
-    assert m["margin"] > 40 * GIB               # the term that refuses
+    assert m["working_set"] == 120 * GIB and m["others"] == int(0.7 * GIB)
     assert m["limit"] == m["working_set"] - m["others"] - m["margin"]
     assert m["room"] < 0 and m["need"] > 0
     body = _status_of(e.value).body()
     assert body["error"]["memory"]["margin"] == m["margin"]
-    # a 1k prompt's margin is the 6 GiB floor: 120-1.6-6 > 75.6, it fits
+    # a 1k prompt fits beside the 75.1 GiB of weights
+    s._local_active = lambda: int(75.1 * GIB)
     assert s.memory_short() is None
     # with the weights past that limit, the status says so
     s._local_active = lambda: 114 * GIB
