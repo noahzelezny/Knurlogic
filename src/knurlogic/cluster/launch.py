@@ -1473,8 +1473,28 @@ def _record_of(nid: str):
         if recs else None
 
 
+def _page_up(page: str, timeout: float = 2.0) -> bool:
+    """Whether the machine at `page` (host:port) still accepts a TCP
+    connection on its page port. The kernel accepts into the listen backlog
+    while the page's Python is busy, so a slow page connects and a machine
+    that is off, asleep or unplugged (or a page process that died) does
+    not."""
+    import socket
+    host, _, port = page.rpartition(":")
+    try:
+        socket.create_connection((host.strip("[]"), int(port)),
+                                 timeout=timeout).close()
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+#: (job, peer id) pages slow but up, warned once per episode
+_PEER_SLOW: set = set()
+
+
 def peer_verdict(job: str, recs: list, now: float | None = None,
-                 ask=None, pages=None, me=None) -> str:
+                 ask=None, pages=None, me=None, reach=None) -> str:
     """"" while every other machine of the job still runs its rank, else
     why not: its page says the job ended there, it restarted (a new
     boot_id), or it has been unreachable -- or answering without the rank --
@@ -1482,8 +1502,15 @@ def peer_verdict(job: str, recs: list, now: float | None = None,
     (cluster/peers.py: the status GET every peer answers), not a second
     one. A rank blocked in a collective on a peer that vanished never exits
     and never counts as stalled (it is idle), so this is how its page
-    learns."""
+    learns.
+
+    A page that does not answer while its machine still accepts a
+    connection on the page port is slow (a blocked handler), not gone: the
+    job is kept and a warning logged. Only a page this machine cannot reach
+    at all counts toward PEER_GONE_S. A peer that powers off fails that
+    probe too, and its rank's death fails the ring on this side as well."""
     now = time.time() if now is None else now
+    reach = reach or _page_up
     nodes = next((r.get("nodes") for r in recs if r.get("nodes")), None) \
         or (SPECS.get(job) or {}).get("nodes") or []
     if not nodes:
@@ -1517,6 +1544,7 @@ def peer_verdict(job: str, recs: list, now: float | None = None,
                 return (f"{name} restarted (a new knurlogic process); "
                         f"its rank of the job is gone")
             if held:
+                _PEER_SLOW.discard(key)
                 _PEER_OK[key] = now
                 if boot:
                     _PEER_BOOT.setdefault(key, boot)
@@ -1525,6 +1553,15 @@ def peer_verdict(job: str, recs: list, now: float | None = None,
         except (*NET_ERRORS, AttributeError) as e:
             why = (f"{name}'s page has not answered "
                    f"({type(e).__name__})")
+            if page and reach(page):
+                # the machine is there; its page is only slow to answer
+                if key not in _PEER_SLOW:
+                    _PEER_SLOW.add(key)
+                    logger.warning("cluster job %s: %s, but its machine "
+                                   "accepts connections; the job is kept",
+                                   job, why)
+                _PEER_OK[key] = now
+                continue
             # the peer list heard it lately though this ask failed
             heard = seen
         # the clock starts at the last good answer, or at first sight

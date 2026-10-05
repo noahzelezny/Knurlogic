@@ -147,11 +147,24 @@ def _status_light(_n=0):
     if _LIGHT["doc"] is None or now - _LIGHT["at"] > LIGHT_TTL_S:
         # the first build is waited for; a refresh is done by whoever
         # gets there first, the rest are served the last entry
-        if _LIGHT_LOCK.acquire(blocking=_LIGHT["doc"] is None):
-            try:
+        if _LIGHT["doc"] is None:
+            with _LIGHT_LOCK:
                 _build_light(now)
-            finally:
-                _LIGHT_LOCK.release()
+        elif _LIGHT_LOCK.acquire(blocking=False):
+            # a refresh runs off the request: the memory map walks every
+            # process (seconds while a rank maps tens of GiB), and the
+            # peers ask with a 1.5 s timeout -- the liveness answer must
+            # never wait on it
+            def refresh():
+                try:
+                    _build_light(time.time())
+                except Exception:
+                    logger.debug("light status refresh", exc_info=True)
+                finally:
+                    _LIGHT_LOCK.release()
+            __import__("threading").Thread(
+                target=refresh, daemon=True,
+                name="knurlogic-light-status").start()
     from knurlogic.cluster import protocol
     return {"schema": status.SCHEMA, "nodes": [_LIGHT["doc"]],
             "boot_id": _BOOT_ID, "v": list(protocol.VERSION),
@@ -1082,6 +1095,19 @@ LOAD_REPORT_S = 1800
 _SIZES: dict = {}
 
 
+def _size_later(path: str) -> None:
+    """Measure an artifact's size on a thread of its own, once: it stats
+    every shard, and a model folder on a share that stalls (SMB under a
+    67 GiB load) held the Survey a peer asked for past its timeout. Until
+    it is known the progress row says 0 (unknown)."""
+    _SIZES[path] = 0
+
+    def run():
+        _SIZES[path] = _artifact_bytes(path)
+    __import__("threading").Thread(target=run, daemon=True,
+                                   name="knurlogic-artifact-size").start()
+
+
 def _share_of(rec: dict) -> int:
     """What a cluster rank holds once loaded, from its marker; 0 when it is
     not a rank or has not said yet."""
@@ -1136,7 +1162,7 @@ def load_progress(doc: dict) -> list:
             continue
         path, pid = rec.get("artifact") or "", int(rec.get("pid") or 0)
         if path not in _SIZES:
-            _SIZES[path] = _artifact_bytes(path)
+            _size_later(path)
         log = Path(rec.get("log", ""))
         try:
             with log.open("rb") as f:
@@ -1154,7 +1180,7 @@ def load_progress(doc: dict) -> list:
              "seconds": round(now - t), "bytes": procs.get(pid, 0),
              # a rank of a split job holds its share, not the artifact:
              # the rank writes it to its marker (cluster/jobs.progress)
-             "total_bytes": int(_share_of(rec) or _SIZES[path]),
+             "total_bytes": int(_share_of(rec) or _SIZES.get(path) or 0),
              "last_log_line": lines[-1][:200] if lines else ""}
         r = rows.get(port) if port else None
         if not is_our_server(pid) and not (
@@ -1248,8 +1274,12 @@ def _send_json(handler, code: int, doc) -> None:
     handler.send_response(code)
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(out)))
-    handler.end_headers()
-    handler.wfile.write(out)
+    try:
+        handler.end_headers()
+        handler.wfile.write(out)
+    except (BrokenPipeError, ConnectionResetError):
+        # the asker gave up (its timeout) before the answer: nothing to do
+        handler.close_connection = True
 
 
 def cluster_failure(base: str) -> str:
