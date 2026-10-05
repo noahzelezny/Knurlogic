@@ -42,6 +42,11 @@ logger = logging.getLogger(__name__)
 GIB = 1 << 30
 
 
+#: a step's transient growth per token of context while only one context
+#: is measured: 0.1 GiB per 1k tokens, above the steepest real model seen
+ONE_SAMPLE_SLOPE = int(0.1 * (1 << 30) / 1000)
+
+
 class OutOfMemory(RuntimeError):
     """This row was stopped so the server and the other rows keep running.
     `memory`: the guard's terms when it refused (Scheduler._memory), for
@@ -1071,16 +1076,20 @@ class Scheduler:
         temporaries grow with the context: the 27B on an M3 Ultra (96 GB)
         measured 1.58, 2.40 then 3.39 GiB as four agents' prompts grew to
         98k tokens, and the step that first ran past the margin those left
-        aborted Metal. Until two contexts 8192 apart are known, the
-        transient is taken as proportional to the context -- an
-        overestimate, the safe side."""
+        aborted Metal. Until two contexts 8192 apart are known, the line
+        runs from the one measurement at the steepest slope seen on a real
+        model, not proportional to the context: a 3.1 GiB spike at 2.7k
+        tokens taken as proportional asked 47 GiB of margin for a 33k
+        prompt (GLM-5.3-Flash, 2026-10-05) and refused it with 40 GiB
+        unused. Measured slopes: DeepSeek-V4-Flash 0.066 GiB per 1k tokens
+        (1.0 at 685, 1.89 at 14k), the 27B 0.02 (1.58 to 3.39 by 98k)."""
         lo, hi = self._tx.get("lo"), self._tx.get("hi")
         if hi is None or lo is None or ctx <= hi[0]:
             return self._spike
         if hi[0] - lo[0] >= 8192 and hi[1] > lo[1]:
             slope = (hi[1] - lo[1]) / (hi[0] - lo[0])
         else:
-            slope = hi[1] / hi[0]
+            slope = min(hi[1] / hi[0], ONE_SAMPLE_SLOPE)
         return max(self._spike, int(hi[1] + slope * (ctx - hi[0])))
 
     def _limit(self, extra: int = 0) -> int:
