@@ -321,3 +321,23 @@ def test_asset_stays_inside_the_assets_directory(tmp_path, monkeypatch):
     assert web.asset_names() == ["app.js", "views/a.js"]
     r = web.routes()
     assert "/app.js" in r and "/views/a.js" in r and "/out.js" not in r
+
+
+def test_vendored_pdfjs_ships_and_is_served():
+    """The chat's PDF attachments load pdf.js from the page itself (the page
+    works offline): both modules must be there and served as JavaScript."""
+    from knurlogic.interfaces.page import documents as web
+    for name in ("vendor/pdfjs/pdf.min.mjs", "vendor/pdfjs/pdf.worker.min.mjs"):
+        assert name in web.asset_names(), name
+    assert (web.ASSETS / "vendor/pdfjs/LICENSE").is_file()
+    srv, base = _page_server()
+    try:
+        for name in ("pdf.min.mjs", "pdf.worker.min.mjs"):
+            code, h, body = _get(f"{base}/vendor/pdfjs/{name}")
+            assert code == 200 and h["Content-Type"].startswith(
+                "application/javascript") and len(body) > 100_000
+    finally:
+        srv.shutdown()
+    js = (web.ASSETS / "views" / "chat.js").read_text()
+    assert "import('../vendor/pdfjs/pdf.min.mjs')" in js
+    assert "not supported yet" not in js
