@@ -181,6 +181,7 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def pytest_terminal_summary(terminalreporter):
+    _log_run(terminalreporter)
     if PS_FAILED:
         terminalreporter.write_line(
             f"FAILED: the leftover-process sweep could not run ps "
@@ -193,3 +194,43 @@ def pytest_terminal_summary(terminalreporter):
             f"(killed now):", red=True)
         for pid, cmd in LEFT:
             terminalreporter.write_line(f"  pid {pid}: {cmd}")
+
+
+_STARTED = __import__("time").time()
+
+
+def _log_run(tr) -> None:
+    """One record per run in ~/.cache/knurlogic/test-runs.log: when, the
+    commit, what ran, the counts, and every failing test by name, so a break
+    shows against the last run that passed."""
+    import subprocess
+    import sys
+    import time
+    from pathlib import Path
+    try:
+        head = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                              capture_output=True, text=True,
+                              cwd=Path(__file__).parent).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "-uno"],
+                               capture_output=True, text=True,
+                               cwd=Path(__file__).parent).stdout.strip()
+    except OSError:
+        head, dirty = "?", ""
+    counts = {k: len(tr.stats.get(k, [])) for k in
+              ("passed", "failed", "error", "skipped")}
+    took = time.time() - _STARTED
+    args = " ".join(sys.argv[1:]) or "(all)"
+    lines = [f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {head}"
+             f"{'+dirty' if dirty else ''}  {took:.0f}s  "
+             + "  ".join(f"{k} {v}" for k, v in counts.items() if v)
+             + f"  [{args}]"]
+    for k in ("failed", "error"):
+        for r in tr.stats.get(k, []):
+            lines.append(f"    {k.upper()} {r.nodeid}")
+    try:
+        log = Path.home() / ".cache" / "knurlogic" / "test-runs.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
