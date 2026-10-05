@@ -296,7 +296,8 @@ def children() -> list:
                                        else None)}
         if alive and _answers(port):
             held = pids.get(pid, 0)
-            size = _artifact_bytes(rec.get("artifact", ""))
+            # the size the launch measured: a poll reads no model folder
+            size = int(rec.get("bytes") or 0)
             row["bytes_resident"] = held
             # Answering is not loaded. mlx maps weights lazily: measured, a
             # 15.5 GiB model answered with 3 GiB resident and reached 15.0
@@ -388,6 +389,9 @@ def _spawn_unlocked(path: str, port: int, tune: str = "default",
     _CHILDREN[port] = (proc, path)
     reg = registry()
     reg[port] = {"pid": proc.pid, "artifact": path, "log": str(log),
+                 # measured once here (a launch is the user acting); the
+                 # polls read it from this record, never the model folder
+                 "bytes": _artifact_bytes(path),
                  "started": time.strftime("%Y-%m-%d %H:%M:%S"),
                  "t": time.time(), "instance": instance}
     save_registry(reg)
@@ -1092,22 +1096,6 @@ def with_jobs(doc: dict) -> dict:
 #: long enough for a cold 400 GB read, short enough that an old failure
 #: does not linger on the page.
 LOAD_REPORT_S = 1800
-_SIZES: dict = {}
-
-
-def _size_later(path: str) -> None:
-    """Measure an artifact's size on a thread of its own, once: it stats
-    every shard, and a model folder on a share that stalls (SMB under a
-    67 GiB load) held the Survey a peer asked for past its timeout. Until
-    it is known the progress row says 0 (unknown)."""
-    _SIZES[path] = 0
-
-    def run():
-        _SIZES[path] = _artifact_bytes(path)
-    __import__("threading").Thread(target=run, daemon=True,
-                                   name="knurlogic-artifact-size").start()
-
-
 def _share_of(rec: dict) -> int:
     """What a cluster rank holds once loaded, from its marker; 0 when it is
     not a rank or has not said yet."""
@@ -1161,8 +1149,6 @@ def load_progress(doc: dict) -> list:
         if not t or now - t > LOAD_REPORT_S:
             continue
         path, pid = rec.get("artifact") or "", int(rec.get("pid") or 0)
-        if path not in _SIZES:
-            _size_later(path)
         log = Path(rec.get("log", ""))
         try:
             with log.open("rb") as f:
@@ -1180,7 +1166,7 @@ def load_progress(doc: dict) -> list:
              "seconds": round(now - t), "bytes": procs.get(pid, 0),
              # a rank of a split job holds its share, not the artifact:
              # the rank writes it to its marker (cluster/jobs.progress)
-             "total_bytes": int(_share_of(rec) or _SIZES.get(path) or 0),
+             "total_bytes": int(_share_of(rec) or rec.get("bytes") or 0),
              "last_log_line": lines[-1][:200] if lines else ""}
         r = rows.get(port) if port else None
         if not is_our_server(pid) and not (
@@ -1665,6 +1651,13 @@ def peer_relay(handler, method: str, path: str, body: bytes,
 #: settings. Nothing that changes anything is reachable through it.
 PEEK_PATHS = ("/settings.json", "/v1/models", "/models.json")
 PEEK_KEYS = ("tune", "working_set_gib", "wired_gib")
+#: keys passed along for one path only: `rescan=1` reads a peer's model
+#: folders again -- its picker was opened, never a poll
+PEEK_PATH_KEYS = {"/models.json": ("rescan",)}
+
+
+def _peek_keys(path: str) -> tuple:
+    return PEEK_KEYS + PEEK_PATH_KEYS.get(path, ())
 PEEK_S = 3.0
 
 
@@ -1718,7 +1711,7 @@ def peek(q: dict, fetch=None) -> tuple:
     if where not in peek_targets():
         return 403, json.dumps({"error": f"not a server this page knows: "
                                          f"{where or '(none)'}"})
-    fwd = {k: q[k][0] for k in PEEK_KEYS if q.get(k)}
+    fwd = {k: q[k][0] for k in _peek_keys(path) if q.get(k)}
     if fetch is None:
         peer = _peek_peer(where, path, fwd)
         if peer is not None:
@@ -1826,7 +1819,7 @@ def read_here(routes: dict, req: dict) -> tuple:
     if h is None:
         return 404, {"error": "no such document here"}
     body, _ctype = h({k: [str(v)] for k, v in q.items()
-                      if k in PEEK_KEYS}, 0)
+                      if k in _peek_keys(path)}, 0)
     try:
         return 200, json.loads(body)
     except ValueError:

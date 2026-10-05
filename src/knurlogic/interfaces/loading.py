@@ -30,20 +30,21 @@ class NotLoadable(Exception):
         self.status, self.code = status, code
 
 
-def known_artifacts(ttl: float = 60.0) -> list:
-    """The servable artifacts in this machine's stores (cached: a scan
-    walks every store and takes about a second)."""
-    now = time.time()
-    if _KNOWN["rows"] is None or now - _KNOWN["at"] > ttl:
+def known_artifacts(rescan: bool = False) -> list:
+    """The servable artifacts in this machine's stores. Read once and kept:
+    the stores are read again only on `rescan` (a load asked for a model
+    the last read did not have) -- never on a timer."""
+    if _KNOWN["rows"] is None or rescan:
         from knurlogic.machine import discover
         try:
             _KNOWN["rows"] = [f for f in discover.find()
                               if f.servable and f.format == "mlx"]
-            _KNOWN["at"], _KNOWN["error"] = now, ""
+            _KNOWN["at"], _KNOWN["error"] = time.time(), ""
         except (OSError, ValueError, KeyError, AttributeError) as e:
             # not cached: a store on a volume that was briefly away is
             # scanned again on the next request, and until then the
             # refusal names the scan, not the model
+            _KNOWN["rows"] = None
             _KNOWN["error"] = f"{type(e).__name__}: {e}"
             return []
     return _KNOWN["rows"]
@@ -67,10 +68,14 @@ def resolve_name(model: str, served: str | None) -> str:
         direct = []
     if direct:
         return str(direct[0].path)
-    for f in known_artifacts():
-        p = str(Path(f.path).resolve())
-        if model in (f.name, Path(f.path).name) or want == p:
-            return str(f.path)
+    fresh = _KNOWN["rows"] is None
+    for again in (False, True):
+        if again and fresh:
+            break       # just read: reading again finds nothing new
+        for f in known_artifacts(rescan=again):
+            p = str(Path(f.path).resolve())
+            if model in (f.name, Path(f.path).name) or want == p:
+                return str(f.path)
     if _KNOWN.get("error"):
         raise NotLoadable(503, f"the model stores could not be scanned "
                                f"({_KNOWN['error']}); is a volume holding "

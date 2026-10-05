@@ -186,10 +186,10 @@ def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,
     t = time.time() - quiet_s
     os.utime(log, (t, t))
     monkeypatch.setattr(page_server, "registry", lambda: {
-        9001: {"pid": 4242, "artifact": "/m/x", "log": str(log), "t": 0}})
+        9001: {"pid": 4242, "artifact": "/m/x", "log": str(log), "t": 0,
+               "bytes": size}})
     monkeypatch.setattr(page_server, "is_our_server", lambda pid: alive)
     monkeypatch.setattr(page_server, "_answers", lambda port: answers)
-    monkeypatch.setattr(page_server, "_artifact_bytes", lambda p: size)
     monkeypatch.setattr(page_server.loaded, "memory_map",
                         lambda: {"processes": [{"pid": 4242, "bytes": held}]})
     return page_server

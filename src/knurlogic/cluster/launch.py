@@ -1163,6 +1163,15 @@ def _running_here(job: str):
     return None
 
 
+def _launch_bytes(path: str) -> int:
+    """The artifact's size, read once when a rank starts (0 if unreadable)."""
+    try:
+        from knurlogic.machine.artifact import Artifact
+        return int(Artifact.load(path).bytes_on_disk)
+    except (OSError, ValueError, AttributeError, TypeError):
+        return 0
+
+
 def _start(prep: dict, spawn, wait_s: float) -> tuple:
     spec, path = prep["spec"], prep["path"]
     from knurlogic.machine import identity
@@ -1225,6 +1234,9 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
            # pages -- after a page restart too (SPECS is in memory)
            "nodes": [{"rank": n.get("rank"), "id": n.get("id"),
                       "name": n.get("name")} for n in spec["nodes"]],
+           # measured once at launch: the page's polls read this, not
+           # the model folder
+           "bytes": _launch_bytes(path),
            "started": time.strftime("%Y-%m-%d %H:%M:%S"), "t": time.time()}
     if spec.get("port") and spec["rank"] == 0:
         rec["port"] = int(spec["port"])
@@ -1243,6 +1255,7 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
             sreg = servers.registry()
             sreg[rec["port"]] = {"pid": proc.pid, "artifact": path,
                                  "log": str(log), "job": spec["job"],
+                                 "bytes": rec["bytes"],
                                  "started": rec["started"], "t": rec["t"]}
             servers.save_registry(sreg)
     if "port" in rec:

@@ -75,7 +75,7 @@ def test_models_document_reports_vision_capable(monkeypatch, tmp_path):
                                model_type="qwen3_5", servable=True)])
     monkeypatch.setattr(
         "knurlogic.engine.vision.registry.registered", lambda mt, path=None: True)
-    doc = documents.models_document()({})
+    doc = documents.models_document()({"rescan": ["1"]})
     assert doc["models"][0]["vision"] is True
 
 
@@ -91,7 +91,7 @@ def test_models_document_false_for_a_non_vision_family(monkeypatch, tmp_path):
                                model_type="llama", servable=True)])
     monkeypatch.setattr(
         "knurlogic.engine.vision.registry.registered", lambda mt, path=None: False)
-    doc = documents.models_document()({})
+    doc = documents.models_document()({"rescan": ["1"]})
     assert doc["models"][0]["vision"] is False
 
 
@@ -119,7 +119,7 @@ def test_models_document_says_why_a_conversion_has_no_vision(monkeypatch,
     monkeypatch.setattr("knurlogic.machine.discover.find",
                         lambda *a, **k: rows)
     documents.forget_models()
-    doc = {m["name"]: m for m in documents.models_document()({})["models"]}
+    doc = {m["name"]: m for m in documents.models_document()({"rescan": ["1"]})["models"]}
     assert doc["text"]["vision"] is False
     assert doc["text"]["vision_why"] == "this conversion has no vision weights"
     assert doc["flash"]["vision"] is False and doc["flash"]["vision_why"] == ""
@@ -173,7 +173,7 @@ def test_web_module_never_imports_mlx_or_pil():
     code = (
         "import sys\n"
         "from knurlogic.interfaces.page import documents\n"
-        "documents.models_document()({})\n"
+        "documents.models_document()({'rescan': ['1']})\n"
         "documents.loaded_document()({})\n"
         "assert 'mlx' not in sys.modules, sorted(sys.modules)\n"
         "assert 'PIL' not in sys.modules\n"

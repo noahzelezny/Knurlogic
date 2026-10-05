@@ -84,7 +84,6 @@ def test_models_json_carries_update(tmp_path, monkeypatch):
                         bytes_on_disk=10, model_type="qwen3_5", is_vq=False,
                         servable=True, why="", extra={})
     monkeypatch.setitem(documents._MODELS, "rows", [f])
-    monkeypatch.setitem(documents._MODELS, "at", 1e18)
     monkeypatch.setattr(documents, "_room", lambda *a: None)
     monkeypatch.setattr(documents, "_splits", lambda *a: {"splits": None})
     updates.check(["org/m"], ask=lambda r: NEW)
