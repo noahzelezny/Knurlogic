@@ -1372,7 +1372,8 @@ class _CompressorBranch:
         "buffer_gate",
         "prev_kv",
         "prev_gate",
-        "pool",
+        "_pool_buf",
+        "_pool_n",
         "buffer_lengths",
         "pool_lengths",
         "buffer_count",
@@ -1384,13 +1385,63 @@ class _CompressorBranch:
         self.buffer_gate = None
         self.prev_kv = None
         self.prev_gate = None
-        self.pool = None
+        self._pool_buf = None
+        self._pool_n = 0
         self.buffer_lengths = None
         self.pool_lengths = None
         # In-place fast path: buffer_kv has shape [B, ratio, coff*d] and
         # buffer_count tracks the number of valid leading positions.
         self.buffer_count = 0
         self._new_pool_lengths = None
+
+    # knurlogic edit 30: the pool lives in a buffer with spare rows (grown
+    # POOL_STEP at a time, like mlx-lm's KVCache) and `pool` is its filled
+    # part. Grown by concatenate, every emitted window copied the whole
+    # pool into a new buffer of a size never reused: copies quadratic in
+    # the context, and mlx's buffer cache filling with dead sizes until the
+    # machine stuttered on long generations.
+    @property
+    def pool(self):
+        buf = self._pool_buf
+        if buf is None or buf.shape[1] == self._pool_n:
+            return buf
+        return buf[:, : self._pool_n]
+
+    @pool.setter
+    def pool(self, value):
+        self._pool_buf = value
+        self._pool_n = 0 if value is None else value.shape[1]
+
+    def append_pool(self, new, lengths=None, counts=None):
+        """Append ``new`` [B, k, d] in place: uniformly after the pool, or
+        (``lengths``: each row's valid rows now) ``counts[i]`` rows after
+        row i's own, the rest of a row left zero as before. The buffer grows
+        by whole POOL_STEPs, and only when it is full."""
+        B, k, d = new.shape
+        n = self._pool_n
+        if lengths is None:
+            need = n + k
+        else:
+            need = max((c + m for c, m in zip(lengths, counts)), default=0)
+        buf = self._pool_buf
+        if buf is None or buf.shape[0] != B or need > buf.shape[1]:
+            cap = -(-max(need, 1) // POOL_STEP) * POOL_STEP
+            grown = mx.zeros((B, cap, d), dtype=new.dtype)
+            if buf is not None and n:
+                grown[:, :n] = buf[:, :n]
+            buf = grown
+        if lengths is None:
+            buf[:, n:need] = new
+        else:
+            for i, (c, m) in enumerate(zip(lengths, counts)):
+                if m:
+                    buf[i : i + 1, c : c + m] = new[i : i + 1, :m]
+        self._pool_buf = buf
+        self._pool_n = need
+
+
+#: rows a compressed pool grows by when its buffer is full
+POOL_STEP = 256
 
 
 class DeepseekV4Cache:
@@ -2031,28 +2082,15 @@ class DeepseekV4Cache:
             cur_lengths = _as_lengths_list(
                 branch.pool_lengths, B, 0 if pool is None else pool.shape[1]
             )
-            total_lengths = [c + n for c, n in zip(cur_lengths, new_lengths)]
-            max_total = max(total_lengths, default=0)
-            merged = mx.zeros(
-                (B, max_total, new_pooled.shape[-1]), dtype=new_pooled.dtype
-            )
-            for i, (c, n) in enumerate(zip(cur_lengths, new_lengths)):
-                if pool is not None and c:
-                    merged[i : i + 1, :c] = pool[i : i + 1, :c]
-                if n:
-                    merged[i : i + 1, c : c + n] = new_pooled[i : i + 1, :n]
-            branch.pool = merged
-            branch.pool_lengths = total_lengths
-            return merged
+            # knurlogic edit 30: in place, not a new zeroed buffer per emit
+            branch.append_pool(new_pooled, cur_lengths, new_lengths)
+            branch.pool_lengths = [c + n for c, n in zip(cur_lengths, new_lengths)]
+            return branch.pool
 
         if new_pooled.shape[1] > 0:
-            pool = (
-                new_pooled
-                if pool is None
-                else mx.concatenate([pool, new_pooled], axis=1)
-            )
-            branch.pool = pool
+            branch.append_pool(new_pooled)
             branch.pool_lengths = None
+            pool = branch.pool
         if pool is None:
             pool = mx.zeros(
                 (new_pooled.shape[0], 0, new_pooled.shape[-1]), dtype=new_pooled.dtype

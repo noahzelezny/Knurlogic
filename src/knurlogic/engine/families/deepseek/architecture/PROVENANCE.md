@@ -12,7 +12,7 @@ artifacts were validated against -- not merely that it imports.
 - mlx-lm base: 0.31.9 (the fork); runs here on the pinned 0.32.0 (0.31.3
   until 2026-10-02).
 - fork file sha256: `78bf144caae1e1067f2910d070e3a71fe6f2d11704691cb2a272c9aebf0a13ef`
-- vendored sha256: `8063335e8834320d7bcad4673e6dc91f9dd84361f26355cc9482d9bd85453a8c`
+- vendored sha256: `fb791c1f73962c7909b3178694448ed73ac3fe314e1270c6bce4256243cf6d98`
   (the fork's file plus the edits below; every one is marked
   `knurlogic edit` in the source)
 - the env also holds `deepseek_v4.py.bak` (byte-identical to the file
@@ -548,6 +548,20 @@ the reference's CPU run as the reference's own GPU run is.
    so the golden is the GPU run (the same ops with the rsqrt rounded from
    float64, which the MPS run is bit for bit). 25.7% of the outputs were
    1-2 ulps off it before; now 0 of 262144. Cost: ~1 us a layer.
+
+30. **The compressed pools grow in place** (`_CompressorBranch.pool`,
+   new `append_pool` and `POOL_STEP`; `update_pool`). The fork grew a pool
+   by `mx.concatenate([pool, new])` (and, for ragged rows, a fresh zeroed
+   buffer every row was copied into) every time a window completed: every
+   4 tokens on a ratio-4 layer, so a long generation copied each pool
+   whole again and again -- quadratic in the context -- and left mlx's
+   buffer cache full of freed buffers of sizes never asked for again,
+   until the machine stuttered and the page tore the job down. The pool
+   now lives in a buffer with spare rows, grown POOL_STEP (256) rows at a
+   time like mlx-lm's KVCache, written in place; `pool` is a property
+   returning its filled part, so every reader sees the array it did
+   (identical bytes, uniform and ragged: test_deepseek_v4_pool.py), and
+   assigning `pool` replaces the buffer as before.
 
 End to end, decode on 24 Flash-shaped layers (16 experts) with the real
 head, random weights, M3 shared with another workload: 25.1-25.5 ms a
