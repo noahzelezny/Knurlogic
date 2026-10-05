@@ -29,6 +29,18 @@ From source:
 
 ## Quickstart
 
+    pip install knurlogic
+    knurlogic
+
+`knurlogic` opens the page at http://127.0.0.1:8899/: every model on the
+disk with a Launch button, what is loaded and where the memory went. Run
+the same on each Mac; Macs joined by Thunderbolt find each other.
+
+Models on an external drive: `knurlogic models add "/Volumes/My SSD/Models"`
+once. The folder is remembered; while the drive is not mounted it is
+skipped. `knurlogic models folders` lists the saved folders and
+`knurlogic models remove <folder>` forgets one.
+
 Get a model in MLX format: search and download it from the page's model
 picker (Hugging Face), or with the `hf` CLI that comes with
 `huggingface_hub`:
@@ -38,7 +50,8 @@ picker (Hugging Face), or with the `hf` CLI that comes with
       --local-dir ~/Knurlogic/Models/gemma-4-e4b-it-8bit
 
 `knurlogic models` lists the models already on this Mac (Knurlogic's own
-folder, the Hugging Face cache, LM Studio, Ollama and exo folders).
+folder, the saved folders, the Hugging Face cache, LM Studio, Ollama and exo
+folders).
 
 Check it and serve it:
 
@@ -52,9 +65,9 @@ Then ask it something:
       -d '{"model": "local", "messages": [{"role": "user", "content": "Hello"}]}'
 
 The page is at http://127.0.0.1:8080/: what is loaded, where the memory
-went, a chat and the settings. `knurlogic ui` opens the page at
-http://127.0.0.1:8899/ without loading anything, with a Launch button for
-every model on the disk, and a gear in the macOS menu bar (`--no-menubar`
+went, a chat and the settings. `knurlogic` (or `knurlogic ui`) opens the
+page at http://127.0.0.1:8899/ without loading anything, with a Launch
+button for every model on the disk, and a gear in the macOS menu bar (`--no-menubar`
 skips it) that shows what is loaded and opens or quits the page.
 
 ## Connect a harness
@@ -88,8 +101,8 @@ are served, with images in chat messages on a vision model.
 
     claude mcp add knurlogic -- knurlogic mcp
 
-Its tools are `models`, `fit`, `settings`, `drafting`, `ready`, `load`,
-`state`, `unload` and `deps`; `knurlogic mcp --list` describes each.
+Its tools are `models`, `model_folders`, `fit`, `settings`, `drafting`,
+`ready`, `load`, `state`, `unload` and `deps`; `knurlogic mcp --list` describes each.
 `load` refuses a model that does not fit.
 
 ## Two or more Macs
@@ -98,7 +111,11 @@ To split one model across two or more Macs (up to 16) joined by Thunderbolt,
 install the same
 knurlogic version and the model on both, and run on each:
 
-    knurlogic ui --host cluster
+    knurlogic
+
+The page answers on the Thunderbolt link(s) and on 127.0.0.1 only, never
+on Wi-Fi or Ethernet (a Mac with no Thunderbolt link answers on 127.0.0.1).
+`knurlogic --host 127.0.0.1` keeps it to this Mac.
 
 The Macs find each other over Bonjour (`--peer HOST` names one directly, on each machine
 (or link them with Thunderbolt);

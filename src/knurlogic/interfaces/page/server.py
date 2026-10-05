@@ -2144,11 +2144,12 @@ def main(argv=None) -> int:
         description="the page, without loading anything: every model on the "
                     "disk, everything resident in every runtime, and where "
                     "the memory went")
-    p.add_argument("--host", default="127.0.0.1",
-                   help="127.0.0.1 (default: this machine only), an "
-                        "address, or `cluster`: answer on the Thunderbolt "
+    p.add_argument("--host", default="cluster",
+                   help="`cluster` (default): answer on the Thunderbolt "
                         "link(s) and loopback only, advertise there, refuse "
-                        "Wi-Fi and Ethernet")
+                        "Wi-Fi and Ethernet; a Mac with no Thunderbolt link "
+                        "answers on loopback. 127.0.0.1: this machine only. "
+                        "Or an address.")
     p.add_argument("--port", type=int, default=8899)
     p.add_argument("--serve-port", type=int, default=8080,
                    help="the port a model loaded from this page is served on")
@@ -2176,6 +2177,12 @@ def main(argv=None) -> int:
                    help="open the page in the default browser once it is "
                         "up (not over SSH)")
     a = p.parse_args(argv)
+    from knurlogic.machine import folders
+    # once: a folder the old variables name is remembered, so the next
+    # start needs no variable
+    for f in folders.adopt_from_env():
+        print(f"knurlogic  remembered model folder {f} "
+              f"(knurlogic models folders)")
     peers = []
     for spec in a.peer:
         host, _, port = spec.rpartition(":") if ":" in spec else (spec, "", "")

@@ -159,8 +159,8 @@ def _describe(exc: Exception, peer: Peer) -> str:
                 f"Asleep, or busy past {t:g} s, look the same.")
     if "refused" in s.lower():
         return (f"{where} refused the connection on port {peer.port}: "
-                f"nothing is listening there. Start `knurlogic ui --host "
-                f"<its address> --port {peer.port}` on {where}.")
+                f"nothing is listening there. Start `knurlogic "
+                f"--port {peer.port}` on {where}.")
     if "No route" in s or "unreachable" in s.lower():
         return (f"no route to {peer.host}: the cable, the network, or the "
                 f"address changed.")

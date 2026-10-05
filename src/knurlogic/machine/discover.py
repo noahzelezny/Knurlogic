@@ -177,6 +177,10 @@ def _roots(extra=(), include_defaults: bool = True):
     if not include_defaults:
         return out
     out += _running_tool_roots()
+    # the folders this Mac remembers (`knurlogic models add`); an
+    # unmounted one is left out by folders.roots()
+    from knurlogic.machine import folders
+    out += [("saved", d) for d in folders.roots()]
     out += [("exo", d) for d in exo_model_dirs() if d.is_dir()]
     for store, envs, defaults in STORES:
         seen = []
@@ -449,11 +453,20 @@ def render(rows: list, working_set_bytes: int = 0) -> str:
 
 def main(argv=None) -> int:
     import argparse
+    import sys
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in ("add", "remove", "folders"):
+        from knurlogic.machine import folders
+        return folders.main(argv)
 
     p = argparse.ArgumentParser(
         prog="knurlogic models",
         description="find the models already on this machine, in every "
-                    "store, and say which ones can actually run here")
+                    "store, and say which ones can actually run here. "
+                    "`knurlogic models add <folder>` remembers a folder "
+                    "(e.g. on an external drive), `remove <folder>` forgets "
+                    "it, `folders` lists them.")
     p.add_argument("--store", action="append", default=[],
                    help="limit to one store (exo, huggingface, ollama, "
                         "'lm studio')")
