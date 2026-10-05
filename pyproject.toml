@@ -56,7 +56,7 @@ Changelog = "https://github.com/noahzelezny/Knurlogic/blob/main/CHANGELOG.md"
 where = ["src"]
 
 [tool.setuptools.package-data]
-knurlogic = ["interfaces/page/assets/**/*", "interfaces/menubar_assets/*.png",
+knurlogic = ["interfaces/page/assets/**/*", "interfaces/menubar_assets/*.png", "interfaces/menubar_assets/*.svg",
              "engine/families/*/architecture/*.md",
              "engine/families/*/architecture/*.json",
              "engine/families/*/vision/PROVENANCE.md",
