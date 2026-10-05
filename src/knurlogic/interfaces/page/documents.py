@@ -82,49 +82,35 @@ def raw(fn):
     return fn
 
 
-_MODELS: dict = {"at": 0.0, "rows": None}
+_MODELS: dict = {"rows": None}
 
 
 def forget_models() -> None:
     """Drop the cached model scan: the next /models.json reads the stores
     again (a download finished, or a model was deleted)."""
-    _MODELS.update(at=0.0, rows=None)
+    _MODELS.update(rows=None)
 
 
-def models_document(serving: str = "", ttl: float = 60.0):
+def models_document(serving: str = ""):
     """`/models.json` -- what else is on this machine, and what is loaded.
 
-    Cached for `ttl` seconds: a scan walks every store on every volume and
-    takes about 1.4s here, which is fine once and not fine behind a status
-    poll. The TTL rather than a permanent cache because models arrive while
-    the server is up -- a download finishing should show up without a
-    restart.
+    The model folders are read only when someone acts: the first request,
+    `?rescan=1` (the picker was opened), or after forget_models (a download
+    finished). Never on a timer: a folder on a network share that stalls
+    held the page, and a page that stalls gets a healthy job stopped.
 
     Switching is NOT offered. A loaded model is loaded; what this can
     honestly hand over is the command that would serve another one.
     """
-    def handler(_q: dict) -> dict:
-        import time
-
+    def handler(q: dict) -> dict:
         from knurlogic.engine.vision import registry as vision_registry
         from knurlogic.machine import discover
-        now = time.time()
-        def scan():
+        rescan = (q or {}).get("rescan", [""])[0] in ("1", "true", "yes")
+        if _MODELS["rows"] is None or rescan:
             try:
-                rows = discover.find()
+                _MODELS["rows"] = discover.find()
             except (OSError, ValueError, KeyError, AttributeError):
-                rows = []
-            _MODELS.update(rows=rows, at=time.time(), scanning=False)
-        if _MODELS["rows"] is None:
-            scan()
-        elif now - _MODELS["at"] > ttl and not _MODELS.get("scanning"):
-            # a refresh runs on its own thread and the last scan answers
-            # meanwhile: a model folder on a stalling share (SMB) must not
-            # hold a peer's Read or the page past its timeout
-            _MODELS["scanning"] = True
-            import threading
-            threading.Thread(target=scan, daemon=True,
-                             name="knurlogic-models-scan").start()
+                _MODELS["rows"] = []
         out = []
         from knurlogic.machine import allowance, wired
         from knurlogic.machine.artifact import identity as artifact_identity
@@ -268,7 +254,7 @@ _LOADED: dict = {"at": 0.0, "doc": None}
 def loaded_document(ttl: float = 4.0):
     """`/loaded.json` -- every runtime on this box and what it holds.
 
-    Short TTL, not the 60s the disk scan gets: residency changes the moment
+    A short TTL: residency changes the moment
     someone loads something, and a stale answer here is the answer being
     wrong rather than merely old. Four HTTP reads with short timeouts came
     back in 0.08s against a live exo, so the TTL is about coalescing a

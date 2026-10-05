@@ -264,7 +264,7 @@ def test_the_models_listing_loads_no_artifact(tmp_path, monkeypatch):
     documents.forget_models()
     try:
         t0 = time.perf_counter()
-        out = documents.models_document(ttl=0)({})["models"]
+        out = documents.models_document()({"rescan": ["1"]})["models"]
         took = time.perf_counter() - t0
     finally:
         documents.forget_models()

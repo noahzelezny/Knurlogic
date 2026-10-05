@@ -23,7 +23,6 @@ def test_follower_ranks_counted_once(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "registry", lambda: {8000: rank0})
     monkeypatch.setattr(J, "registry", lambda: jobs)
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
-    monkeypatch.setattr(server, "_artifact_bytes", lambda p: 1000)
     doc = {"memory": {"processes": [{"pid": 100, "bytes": 10},
                                     {"pid": 101, "bytes": 600}]}}
     loads = server.load_progress(doc)
@@ -54,7 +53,6 @@ def test_each_rank_is_measured_against_its_own_share(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "registry", lambda: {8000: rank0})
     monkeypatch.setattr(J, "registry", lambda: jobs)
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
-    monkeypatch.setattr(server, "_artifact_bytes", lambda p: 1000)
     doc = {"memory": {"processes": [{"pid": 100, "bytes": 300},
                                     {"pid": 101, "bytes": 500}]}}
     got = {e["rank"]: e["total_bytes"] for e in server.load_progress(doc)}

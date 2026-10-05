@@ -225,8 +225,11 @@ function renderPicker(){
   $('pbudget').innerHTML=ws?`<b>${gb(ws)}</b> to fill`:'';
 }
 
-async function loadModels(){
-  let d; try{ d=await (await fetch('/models.json')).json() }catch(e){ return }
+// the server reads its model folders only when asked to (rescan): the picker
+// opening or a download finishing; otherwise it answers from its last read
+async function loadModels(rescan){
+  let d; try{ d=await (await fetch('/models.json'+(rescan?'?rescan=1':''))).json() }
+  catch(e){ return }
   window.ALLMODELS=d.models||[];
   MODELS=(d.models||[]).filter(m=>!m.serving && published(m))
     .sort((a,b)=>b.size_bytes-a.size_bytes);
@@ -368,7 +371,9 @@ function onPeer(m){
 async function loadPeerModels(){
   const todo=selNodes().filter(n=>!isLocal(n) && n.address && !PEERMODELS[n.id]);
   for(const n of todo){
-    const d=await getJSON(peekURL('http://'+n.address,'/models.json'));
+    // the picker is open: the peer reads its model folders again
+    const d=await getJSON(peekURL('http://'+n.address,'/models.json',
+      {rescan:'1'}));
     if(d.error || !Array.isArray(d.models)) continue;
     PEERMODELS[n.id]=new Set(d.models.map(m=>m.identity).filter(Boolean));
   }
@@ -478,6 +483,7 @@ $('openpick').onclick=()=>{
   for(const k of Object.keys(PEERMODELS)) delete PEERMODELS[k];
   loadPeerModels();
   renderPicker(); $('psearch').focus();
+  loadModels(true).then(()=>{ if(!$('picker').hidden) renderPicker() });
 };
 $('pclose').onclick=()=>OVL.close();
 $('psearch').oninput=e=>{
@@ -671,7 +677,7 @@ async function loadDownloads(){
   DLS=d.downloads||[];
   const fresh=DLS.filter(x=>x.state==='done'&&!DONESEEN.has(x.id));
   fresh.forEach(x=>DONESEEN.add(x.id));
-  if(fresh.length) await loadModels();
+  if(fresh.length) await loadModels(true);
   if(!$('picker').hidden && FAM===HUB) renderHub();
 }
 const allDownloads=()=>DLS;
