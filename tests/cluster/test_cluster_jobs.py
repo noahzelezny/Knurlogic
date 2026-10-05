@@ -1121,7 +1121,8 @@ def test_peer_verdict_counts_an_unreachable_page_for_peer_gone_s(
 
     def down(page, j):
         raise OSError("no route to host")
-    kw = dict(pages={"b": "192.0.2.1:8765"}, me="a")
+    kw = dict(pages={"b": "192.0.2.1:8765"}, me="a",
+              reach=lambda page: False)
     assert C.peer_verdict(job, recs, now=100, ask=down, **kw) == ""
     assert C.peer_verdict(job, recs, now=110, ask=down, **kw) == ""
     why = C.peer_verdict(job, recs, now=100 + J.PEER_GONE_S, ask=down, **kw)
@@ -1143,6 +1144,86 @@ def test_peer_verdict_counts_an_unreachable_page_for_peer_gone_s(
     assert C.peer_verdict(job, recs, now=0, ask=up, pages={}, me="a") == ""
     assert "M3" in C.peer_verdict(job, recs, now=J.PEER_GONE_S, ask=up,
                                   pages={}, me="a")
+
+
+def test_a_slow_page_whose_machine_is_there_keeps_the_job(monkeypatch):
+    """2026-10-04: the M4 page was slow to answer for 28 s while both ranks
+    ran and the ring was fine; the M3 stopped the job. A page that does not
+    answer while its machine accepts a connection is slow, not gone."""
+    monkeypatch.setattr(C, "_PEER_OK", {})
+    monkeypatch.setattr(C, "_PEER_SLOW", set())
+    monkeypatch.setattr(C, "peers_fn", lambda: [])
+    job = "ab12cd34ef567890"
+    recs = [{"job": job, "rank": 0, "pid": 1, "t": 0.0,
+             "nodes": [{"rank": 0, "id": "a", "name": "M4"},
+                       {"rank": 1, "id": "b", "name": "M3"}]}]
+
+    def down(page, j):
+        raise C.transport.PeerUnreachable("timed out")
+    there = dict(pages={"b": "192.0.2.1:8765"}, me="a", reach=lambda p: True)
+    for t in (100, 130, 100 + 10 * J.PEER_GONE_S):
+        assert C.peer_verdict(job, recs, now=t, ask=down, **there) == ""
+    # its machine stops accepting too (off, unplugged, page died): gone
+    # PEER_GONE_S after the last time it was there
+    gone = dict(there, reach=lambda p: False)
+    t0 = 100 + 10 * J.PEER_GONE_S
+    assert C.peer_verdict(job, recs, now=t0 + 5, ask=down, **gone) == ""
+    assert "has not answered" in C.peer_verdict(
+        job, recs, now=t0 + J.PEER_GONE_S, ask=down, **gone)
+    # a page that answers without the rank still stops it, reachable or not
+    monkeypatch.setattr(C, "_PEER_OK", {})
+    norank = (lambda page, j: {"ranks_here": [], "prepared": False})
+    assert C.peer_verdict(job, recs, now=0, ask=norank, **there) == ""
+    assert "no longer runs its rank" in C.peer_verdict(
+        job, recs, now=J.PEER_GONE_S, ask=norank, **there)
+
+
+def test_page_up_is_the_machine_accepting_not_the_page_answering():
+    """A listening socket nobody accepts from (a page whose handlers are
+    stuck) still connects through the kernel's backlog; a closed port does
+    not."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    port = srv.getsockname()[1]
+    try:
+        assert C._page_up(f"127.0.0.1:{port}", timeout=1.0)
+    finally:
+        srv.close()
+    assert not C._page_up(f"127.0.0.1:{port}", timeout=1.0)
+
+
+def test_watch_keeps_a_job_whose_peer_page_is_slow(monkeypatch):
+    """The watcher end to end: ranks alive here, the peer page silent but
+    its machine there -> nothing stopped, so recovery has nothing to
+    relaunch; a rank dead here -> stopped as before."""
+    from knurlogic.cluster import recovery as R
+    monkeypatch.setattr(C, "_PEER_OK", {})
+    monkeypatch.setattr(C, "_PEER_SLOW", set())
+    job = "ab12cd34ef567890"
+    recs = [{"job": job, "rank": 0, "pid": 4242, "t": 990.0,
+             "nodes": [{"rank": 0, "id": "a", "name": "M4"},
+                       {"rank": 1, "id": "b", "name": "M3"}]}]
+    monkeypatch.setattr(J, "by_job", lambda: {job: recs})
+    monkeypatch.setattr(C, "_peer_pages", lambda: {"b": "192.0.2.1:8765"})
+    monkeypatch.setattr(C, "peers_fn", lambda: [])
+    monkeypatch.setattr(C, "_page_up", lambda page, timeout=2.0: True)
+
+    def down(page, j):
+        raise C.transport.PeerUnreachable("timed out")
+    monkeypatch.setattr(C, "_ask_job", down)
+    from knurlogic.machine import identity
+    monkeypatch.setattr(identity, "identity", lambda: {"id": "a"})
+    stops = []
+    monkeypatch.setattr(C, "stop", lambda job, **kw: stops.append(kw))
+    alive = {"v": True}
+    monkeypatch.setattr(C, "_alive", lambda j, pid: alive["v"])
+    for t in (1000.0, 1010.0, 1000.0 + 5 * J.PEER_GONE_S):
+        assert C.watch_once(now=t) == []
+    assert stops == [] and job not in R.MODELS
+    alive["v"] = False
+    out = C.watch_once(now=1110.0)
+    assert out and out[0][0] == job and stops
 
 
 def test_peer_verdict_reads_the_peer_lists_clock_and_boot_id(monkeypatch):

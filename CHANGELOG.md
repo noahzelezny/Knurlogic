@@ -3,6 +3,7 @@
 ## 0.1.4
 
 Long generations hold up; `knurlogic` starts the page.
+* A peer page that is slow to answer no longer stops a cluster job whose ranks run: a job stops only when a rank dies, the ring fails, or the peer machine stops accepting connections at all; the liveness status, /loaded.json and /models.json refresh off the request (a stalling SMB model share or a busy rank 0 held them past the peers' timeouts), and a peer that gives up mid-answer prints no traceback.
 - Chat: scrolling up while a reply streams keeps the view where you are; it follows the reply again once you scroll back to the bottom.
 Starting knurlogic is one word: `knurlogic` on each Mac.
 

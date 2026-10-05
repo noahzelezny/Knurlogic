@@ -88,7 +88,7 @@ _MODELS: dict = {"at": 0.0, "rows": None}
 def forget_models() -> None:
     """Drop the cached model scan: the next /models.json reads the stores
     again (a download finished, or a model was deleted)."""
-    _MODELS["at"] = 0.0
+    _MODELS.update(at=0.0, rows=None)
 
 
 def models_document(serving: str = "", ttl: float = 60.0):
@@ -109,12 +109,22 @@ def models_document(serving: str = "", ttl: float = 60.0):
         from knurlogic.engine.vision import registry as vision_registry
         from knurlogic.machine import discover
         now = time.time()
-        if _MODELS["rows"] is None or now - _MODELS["at"] > ttl:
+        def scan():
             try:
-                _MODELS["rows"] = discover.find()
+                rows = discover.find()
             except (OSError, ValueError, KeyError, AttributeError):
-                _MODELS["rows"] = []
-            _MODELS["at"] = now
+                rows = []
+            _MODELS.update(rows=rows, at=time.time(), scanning=False)
+        if _MODELS["rows"] is None:
+            scan()
+        elif now - _MODELS["at"] > ttl and not _MODELS.get("scanning"):
+            # a refresh runs on its own thread and the last scan answers
+            # meanwhile: a model folder on a stalling share (SMB) must not
+            # hold a peer's Read or the page past its timeout
+            _MODELS["scanning"] = True
+            import threading
+            threading.Thread(target=scan, daemon=True,
+                             name="knurlogic-models-scan").start()
         out = []
         from knurlogic.machine import allowance, wired
         from knurlogic.machine.artifact import identity as artifact_identity
@@ -266,29 +276,48 @@ def loaded_document(ttl: float = 4.0):
     """
     def handler(_q: dict) -> dict:
         import time
-
-        from knurlogic.engine.vision import served_vision
-        from knurlogic.machine import loaded
         now = time.time()
         doc = _LOADED["doc"]   # read once: a POST may clear it meanwhile
+        if doc is not None and now - _LOADED["at"] > ttl \
+                and not _LOADED.get("refreshing"):
+            # the last survey answers while a new one runs on its own
+            # thread: it asks each server (a busy rank 0 answers slowly),
+            # and a peer's Survey times out at 2.5 s
+            _LOADED["refreshing"] = True
+
+            def refresh():
+                try:
+                    survey_now(time.time())
+                finally:
+                    _LOADED["refreshing"] = False
+            import threading
+            threading.Thread(target=refresh, daemon=True,
+                             name="knurlogic-loaded-survey").start()
+            return doc
         if doc is None or now - _LOADED["at"] > ttl:
-            try:
-                doc = loaded.survey()
-            # the survey is a page document that must still answer; the error is in it
-            except Exception as e:
-                doc = {"resident": [], "runtimes": [],
-                       "bytes_resident": 0, "error": str(e)}
-            # What the SERVED model sees, read fresh every time regardless
-            # of the survey's own cache path -- a load/unload changes this
-            # the moment it happens, and the chat panel's attach button
-            # gates on this exact field.
-            try:
-                spec = served_vision()
-                doc["vision"] = spec.to_json() if spec else None
-            except (AttributeError, TypeError, ValueError):
-                doc["vision"] = None
-            _LOADED["doc"] = doc
-            _LOADED["at"] = now
+            doc = survey_now(now)
+        return doc
+
+    def survey_now(now: float) -> dict:
+        from knurlogic.engine.vision import served_vision
+        from knurlogic.machine import loaded
+        try:
+            doc = loaded.survey()
+        # the survey is a page document that must still answer; the error is in it
+        except Exception as e:
+            doc = {"resident": [], "runtimes": [],
+                   "bytes_resident": 0, "error": str(e)}
+        # What the SERVED model sees, read fresh every time regardless
+        # of the survey's own cache path -- a load/unload changes this
+        # the moment it happens, and the chat panel's attach button
+        # gates on this exact field.
+        try:
+            spec = served_vision()
+            doc["vision"] = spec.to_json() if spec else None
+        except (AttributeError, TypeError, ValueError):
+            doc["vision"] = None
+        _LOADED["doc"] = doc
+        _LOADED["at"] = now
         return doc
     return handler
 
