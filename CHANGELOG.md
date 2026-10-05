@@ -3,6 +3,8 @@
 ## 0.1.4
 
 Long generations hold up; `knurlogic` starts the page.
+- Chat: scrolling up while a reply streams keeps the view where you are; it follows the reply again once you scroll back to the bottom.
+Starting knurlogic is one word: `knurlogic` on each Mac.
 
 * `knurlogic` with no command starts the page and says where to open it;
   `--open` opens it in the browser (never over SSH). `knurlogic help` lists
