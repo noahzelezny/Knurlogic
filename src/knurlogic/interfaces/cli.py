@@ -33,24 +33,26 @@ COMMANDS = {
 
 def usage() -> int:
     print(f"knurlogic {__version__}\n")
-    print("usage: knurlogic <command> [args]\n")
+    print("usage: knurlogic [<command>] [args]\n")
+    print("  (no command: start the page, same as `knurlogic ui`; "
+          "its options work too)\n")
     for name, (_, desc) in COMMANDS.items():
         print(f"  {name:8s} {desc}")
-    print("\nknurlogic with no command opens the page (knurlogic ui).")
-    print("knurlogic <command> --help for a command's own options.")
+    print("\nknurlogic <command> --help for a command's own options.")
     return 0
 
 
 def main(argv=None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if not args:
-        # `pip install knurlogic` then `knurlogic`: the page, in the browser
-        args = ["ui"]
-    if args[0] in ("-h", "--help", "help"):
+    if args and args[0] in ("-h", "--help", "help"):
         return usage()
-    if args[0] in ("-V", "--version", "version"):
+    if args and args[0] in ("-V", "--version", "version"):
         print(__version__)
         return 0
+    if not args or args[0].startswith("-"):
+        # `knurlogic` alone (or with the page's options, e.g. --port)
+        # starts the page, as `exo` alone starts exo
+        args = ["ui", *args]
     cmd = args[0]
     if cmd not in COMMANDS:
         print(f"knurlogic: unknown command {cmd!r}", file=sys.stderr)

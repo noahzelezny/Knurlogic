@@ -562,6 +562,21 @@ def models(fits_only: bool = False, **_) -> dict[str, Any]:
             "count": len(out)}
 
 
+def model_folders(add: str = "", remove: str = "", **_) -> dict[str, Any]:
+    """The model folders this Mac remembers; `add` or `remove` one."""
+    from pathlib import Path
+
+    from knurlogic.machine import folders
+    out: dict[str, Any] = {}
+    if add:
+        out = folders.add(add)
+    elif remove:
+        out = folders.remove(remove)
+    rows = [{"path": f, "mounted": Path(f).is_dir()} for f in folders.saved()]
+    return {**({"error": out["error"]} if "error" in out else {}),
+            "folders": rows}
+
+
 def settings(artifact: str = "", tune: str = "default", **_) -> dict[str, Any]:
     """The knobs for this artifact, each with the measurement behind it.
 
@@ -1042,6 +1057,17 @@ TOOLS: dict[str, dict[str, Any]] = {
                        "one, moving to the next if link init fails; "
                        "ignored with three or more (each pair picks its own)"),
         }, ["artifact"]),
+    },
+    "model_folders": {
+        "fn": model_folders,
+        "description": "The model folders this Mac remembers beside every "
+                       "tool's own store (e.g. a folder on an external "
+                       "drive), each with whether it is mounted. `add` or "
+                       "`remove` one; `models` lists what is in them.",
+        "schema": _schema({
+            "add": S("a folder to remember (it must exist)"),
+            "remove": S("a remembered folder to forget (the models in it "
+                        "are not touched)")}),
     },
     "deps": {
         "fn": deps,

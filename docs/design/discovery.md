@@ -100,8 +100,9 @@ peer sees it leave and return.
 
 ## Binding
 
-The default is **loopback**: a model endpoint must not appear on the network
-by accident. `--host cluster` binds every address but answers only on
+A model endpoint (`knurlogic serve`) defaults to **loopback**: it must not
+appear on the network by accident. The page (`knurlogic`, `knurlogic ui`)
+defaults to `--host cluster`, which binds every address but answers only on
 loopback and the Thunderbolt links, checked per connection against the local
 address it arrived on (`getsockname()`), so a replugged bridge that
 re-addresses keeps working; a request from elsewhere gets 403 naming the

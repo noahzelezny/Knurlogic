@@ -171,15 +171,16 @@ def report(port: int = 8899) -> tuple[str, int]:
                 bad += 1
                 L.append(f"    -> {p.problem}")
     elif not found:
-        L.append("  -> none seen. Start `knurlogic ui --host <this "
-                 "machine's address>` on each Mac. If one is running and "
+        L.append("  -> none seen. Start `knurlogic` on each Mac and link them "
+                 "with Thunderbolt. If one is running and "
                  "still not seen: System Settings -> Privacy & Security -> "
                  "Local Network -> allow the app that started knurlogic "
                  "(the terminal; or, under launchd or a script, the Python "
                  f"binary itself: {python_binary()}); or name it once "
-                 "with `knurlogic ui --peer HOST:PORT` (it is remembered).")
+                 "with `knurlogic --peer HOST:PORT` (it is remembered).")
     L.append("")
     L.append("to be found  " + (
-        f"knurlogic ui --host {tb[0]['ip']}   (the Thunderbolt link)"
-        if tb else "knurlogic ui --host <an address above>"))
+        f"knurlogic   (answers on the Thunderbolt link {tb[0]['ip']})"
+        if tb else "knurlogic   (link the Macs with Thunderbolt), or "
+                   "knurlogic --host <an address above>"))
     return "\n".join(L), bad

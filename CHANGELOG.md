@@ -17,6 +17,17 @@ Long generations hold up; `knurlogic` starts the page.
   of being copied whole every few tokens: long generations no longer slow
   down as the context grows or fill mlx's buffer cache until the machine
   stutters and the job is torn down.
+* The page answers on the Thunderbolt link(s) and 127.0.0.1 by default
+  (what `--host cluster` did), and never on Wi-Fi or Ethernet. A Mac with no
+  Thunderbolt link starts the same way and answers on 127.0.0.1.
+  `--host 127.0.0.1` keeps it to this Mac.
+* Model folders are remembered per Mac: `knurlogic models add <folder>`,
+  `knurlogic models remove <folder>`, `knurlogic models folders`, and the
+  MCP tool `model_folders`. A folder on a drive that is not mounted is
+  skipped until it is back.
+* A Mac started with `EXO_MODELS_DIRS`, `EXO_MODELS_READ_ONLY_DIRS` or
+  `KNURLOGIC_MODELS` remembers those folders on its first start (while none
+  are saved), so the variable is not needed after that.
 
 ## 0.1.3
 
