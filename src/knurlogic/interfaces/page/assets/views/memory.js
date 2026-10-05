@@ -173,7 +173,7 @@ async function loadResident(){
           : r.state!=='loaded' ? esc(r.state)
           : r.cluster&&r.cluster.phase&&r.cluster.phase!=='ready' ? esc(r.cluster.phase)
           : r.requests&&(r.requests.in_flight||r.requests.pending) ? 'running'
-          : r.requests&&r.requests.memory_short ? esc(r.requests.memory_short) : 'ready'}</span>
+          : r.requests&&r.requests.memory_short ? 'no memory' : 'ready'}</span>
         <span class="grow"></span>
         ${r.can_unload?`<button class="mini danger" data-i="${i}"
           >Unload</button>`:''}
@@ -191,6 +191,8 @@ async function loadResident(){
         .filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
         .map(esc).join(' · ')}</div>
       <div class="s">on ${esc(on(r))}</div>
+      ${r.requests&&r.requests.memory_short&&r.state==='loaded'
+        ?`<div class="why">${esc(r.requests.memory_short.replace(/^loaded, no memory for requests: /,''))}</div>`:''}
     </div>`;
   const none='<div class="card offered"><div class="cardhd">'+
     '<span class="dot"></span><span class="n">nothing loaded</span></div></div>';
