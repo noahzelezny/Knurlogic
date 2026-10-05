@@ -20,6 +20,7 @@ Design: docs/design/server.md (memory guard).
 from __future__ import annotations
 
 import logging
+import math
 import queue
 import threading
 import time
@@ -42,9 +43,11 @@ logger = logging.getLogger(__name__)
 GIB = 1 << 30
 
 
-#: a step's transient growth per token of context while only one context
-#: is measured: 0.1 GiB per 1k tokens, above the steepest real model seen
-ONE_SAMPLE_SLOPE = int(0.1 * (1 << 30) / 1000)
+#: a prefill step's transient is read off a line in context x chunk, in
+#: units of this chunk (so x reads in tokens of context at chunk 512)
+UNIT_CHUNK = 512
+#: the smallest prefill chunk an admission is shrunk to before it waits
+MIN_CHUNK = 128
 
 
 class OutOfMemory(RuntimeError):
@@ -67,8 +70,8 @@ def _terms(mem: dict) -> str:
     return (f"rank {mem['rank']} working_set {g(mem['working_set'])} "
             f"others {g(mem['others'])} (readings "
             f"{[g(x) for x in mem['others_readings']]}) margin "
-            f"{g(mem['margin'])} (spike {g(mem['spike'])}, transient "
-            f"samples {mem['transient_samples']}, context "
+            f"{g(mem['margin'])} (transient {g(mem['transient'])} at chunk "
+            f"{mem['chunk']}, samples {mem['transient_samples']}, context "
             f"{mem['context']}+{mem['tokens']}) local_active "
             f"{g(mem['local_active'])} active {g(mem['active'])} cached "
             f"{g(mem['cached'])} prompt_cache {g(mem['prompt_cache'])} "
@@ -310,6 +313,7 @@ class _Row:
     first: float = 0.0        # ... when its first token came out
     began: float = 0.0        # ... when the first step that computes it began
     made: int = 0             # tokens it has generated (its context grows)
+    chunk: int = 0            # the prefill chunk it was fitted at
 
 
 class Scheduler:
@@ -341,13 +345,15 @@ class Scheduler:
         #: the GPU working set the guard keeps under; None = asked of the
         #: framework on first use; 0 = unguarded
         self.working_set = working_set_bytes
-        #: the largest transient a step has been measured to add (bytes
-        #: above the active memory it started at), 0 until measured
-        self._spike = 0
-        #: the transient against the context a step spans: "lo" and "hi"
-        #: are (context tokens, bytes) at the shortest context seen and
-        #: (longest context, largest transient) -- _transient's line
-        self._tx: dict = {}
+        #: measured step transients (bytes above the active memory the
+        #: step started and ended at), two lines (_transient): "decode"
+        #: keyed by the context the step spans, "prefill" by context x
+        #: chunk / UNIT_CHUNK; each {bucket: (x, bytes)}
+        self._tx: dict = {"decode": {}, "prefill": {}}
+        #: the chunk _make_room fitted the prompt being admitted at, and
+        #: each row not yet prefilled's (set on the engine before its step)
+        self._chunk_pick: int | None = None
+        self._chunk_of: dict[int, int] = {}
         self._gpu_in_use = gpu_in_use
         #: other processes' GPU bytes, the largest of the recent readings
         self._others: list[int] = []
@@ -604,6 +610,8 @@ class Scheduler:
         self._holding = self._why_waiting(room)
         if self._ex is not None and self._rows:
             self._guard_memory()
+            if self._rows:
+                self._fit_next()
         if self._ex is not None and self._rows:
             self._step()
             return
@@ -665,8 +673,9 @@ class Scheduler:
                 # what was measured belongs to the model it was measured on
                 # (a 35B's slope admitting a 397B's prompt is the abort the
                 # guard exists for)
-                self._kv, self._samples, self._spike = None, {}, 0
-                self._tx = {}
+                self._kv, self._samples = None, {}
+                self._tx = {"decode": {}, "prefill": {}}
+                self._chunk_of = {}
                 if c.kind == "load":
                     self.host.load(c.path,
                                    executes_artifact_code=c.executes)
@@ -934,6 +943,7 @@ class Scheduler:
             lean = self._make_room(len(prompt),
                                    _checkpoints(segs, len(prompt), hit)) \
                 == "lean"
+            chunk = int(self._chunk_pick or self.prefill_step_size)
             cache, rest = self.cache.fetch(self.host.model_key, prompt)
             n = len(prompt) - len(rest)
             segs, types = [list(s) for s in segs], list(types)
@@ -963,7 +973,7 @@ class Scheduler:
                 prefix=prompt[:len(prompt) - len(rest)],
                 sampling=sampling, processors=procs, state_machine=sm,
                 top_logprobs=job.top_logprobs, report=job.request,
-                wire=wire))
+                wire=wire, chunk=chunk))
         try:
             text = Request(tok.detokenizer, sequences=seqs, stops=job.stops,
                            tool_parser=getattr(tok, "tool_parser", None),
@@ -974,29 +984,36 @@ class Scheduler:
             ex.remove([uid])      # admitted but unobserved: never orphaned
             raise
         self._rows[uid] = _Row(job, text, types,
-                               admitted=time.perf_counter())
+                               admitted=time.perf_counter(), chunk=chunk)
+        self._chunk_of[uid] = chunk
         if self.cache_bytes is not None:
             self.cache.trim_to(self.cache_bytes - ex.cache_nbytes)
 
     # ------------------------------------------------------------- memory
 
     def _memory(self, n_tokens: int = 0, need: int | None = None,
-                room: int | None = None) -> dict:
-        """The guard's terms for a prompt of n_tokens, in bytes: limit =
-        working_set - others - margin; room = limit - active, where on a
-        ring active is max(local, limit() + peers_over). Which term made a
-        refusal is read off this (the log line, the 503's `memory`)."""
+                room: int | None = None, chunk: int | None = None) -> dict:
+        """The guard's terms for a prompt of n_tokens prefilled `chunk`
+        tokens at a time (None: the configured chunk), in bytes: limit =
+        working_set - others - margin; room = limit - active, on a ring the
+        tighter of that and the peers' (_room). Which term made a refusal
+        is read off this (the log line, the 503's `memory`)."""
         peers = self.tensor.peers_over_now() if self.tensor is not None \
             else None
+        if n_tokens and chunk is None:
+            chunk = self.prefill_step_size
         out = {"rank": int(getattr(getattr(self.tensor, "link", None),
                                    "rank", 0) or 0),
                "tokens": int(n_tokens),
+               "chunk": int(chunk) if chunk else None,
                "working_set": self._working_set(),
                "others": self._others_bytes(),
                "others_readings": list(self._others),
-               "margin": self._margin(n_tokens),
-               "spike": self._spike,
-               "transient_samples": {k: list(v) for k, v in self._tx.items()},
+               "margin": self._margin(n_tokens, chunk),
+               "transient": self._transient(self._context() + n_tokens,
+                                            chunk),
+               "transient_samples": {k: sorted(v.values())
+                                     for k, v in self._tx.items()},
                "context": self._context(),
                "local_active": self._local_active(),
                "active": self._active(),
@@ -1004,7 +1021,7 @@ class Scheduler:
                "prompt_cache": (self.cache.nbytes
                                 if self.cache is not None else 0),
                "peers_over": peers,
-               "limit": self._limit(n_tokens)}
+               "limit": self._limit(n_tokens, chunk)}
         if peers is not None:
             from knurlogic.engine.serve import state
             out["ranks"] = [dict(r) for r in
@@ -1019,22 +1036,29 @@ class Scheduler:
         """Why a minimal prompt would be refused now, or None: a loaded
         server that cannot admit one is not ready (/v1/models, the page's
         instance card). Only with nothing running -- then a refusal is
-        final, not a wait. Side-effect free (_fits)."""
+        final, not a wait. Read at the smallest chunk, the one a refusal
+        is made at, and with no reserve for a prompt nobody sent: the
+        margin is the step about to run's (_margin). Side-effect free
+        (_fits)."""
         try:
             if self._rows or not self._kv or not self._limit() or \
                     self._fits(n_tokens):
                 return None
-            m = self._memory(n_tokens)
+            m = self._memory(n_tokens, chunk=MIN_CHUNK)
         except Exception:   # a status read must never fail the server
             return None
         peers = m["peers_over"]
-        if peers is not None and peers > 0 and \
-                m["local_active"] <= m["limit"]:
+        if peers is not None and \
+                self._peer_room(peers, n_tokens, MIN_CHUNK) < \
+                m["limit"] - m["local_active"]:
             over = [r for r in m.get("ranks", [])
                     if r.get("rank") and r.get("over_limit_bytes", 0) > 0]
             who = (f"rank {over[0]['rank']}" if len(over) == 1
                    else "a peer rank")
-            why = f"{peers / GIB:.1f} GiB over its limit"
+            why = (f"{peers / GIB:.1f} GiB over its limit" if peers > 0
+                   else f"{-peers / GIB:.1f} GiB under its limit, short of "
+                   f"a {n_tokens}-token step's "
+                   f"{m['transient'] / GIB:.1f} GiB transient")
         else:
             who = f"rank {m['rank']}"
             why = (f"limit {m['limit'] / GIB:.1f} GiB (working set "
@@ -1052,52 +1076,78 @@ class Scheduler:
                                    or 0)
         return self.working_set
 
-    def _margin(self, extra: int = 0) -> int:
-        """Room one step's temporaries need: the transient a step of THIS
-        model is predicted to make at the context it is about to span (the
-        running rows' plus `extra`, a prompt being admitted), with a
-        quarter again -- but never below 5% of the working set (at least 4
-        GiB). GLM-5.3 on an M4 Max (128 GB) learned 2.6 GiB at 8k-token
-        prompts, ran at 116 of a 116.8 GiB limit, and a step at 16k aborted
-        Metal: the largest transient seen so far under-reads a longer
-        context's."""
+    def _margin(self, extra: int = 0, chunk: int | None = None) -> int:
+        """Room the next step's temporaries need: the transient THIS model
+        is predicted to make in the step about to run (_transient: the
+        running rows' context plus `extra`, a prompt being admitted and
+        prefilled `chunk` tokens at a time -- None with no prompt: a decode
+        step), with a quarter again -- but never below 5% of the working
+        set (at least 4 GiB). Never the largest transient ever seen: one
+        59k-token prefill's 17 GiB (GLM-5.3-Flash, 2026-10-05) stayed the
+        margin of every later step, idle included, and every prompt was
+        refused with 30-60 GiB unused across the ring."""
         floor = max(4 * GIB, self._working_set() // 20)
-        return max(floor, int(self._transient(self._context() + extra)
-                              * 1.25))
+        if extra and chunk is None:
+            chunk = self.prefill_step_size
+        return max(floor, int(self._transient(self._context() + extra,
+                                              chunk) * 1.25))
 
     def _context(self) -> int:
         """Tokens of context the running rows' next step spans."""
         return sum(r.job.prompt_tokens + r.made for r in self._rows.values())
 
-    def _transient(self, ctx: int) -> int:
-        """A step's transient at `ctx` tokens of context: the largest
-        measured, or, past the longest context measured, that line carried
-        on. A prefill chunk attends over every token before it, so its
-        temporaries grow with the context: the 27B on an M3 Ultra (96 GB)
-        measured 1.58, 2.40 then 3.39 GiB as four agents' prompts grew to
-        98k tokens, and the step that first ran past the margin those left
-        aborted Metal. Until two contexts 8192 apart are known, the line
-        runs from the one measurement at the steepest slope seen on a real
-        model, not proportional to the context: a 3.1 GiB spike at 2.7k
-        tokens taken as proportional asked 47 GiB of margin for a 33k
-        prompt (GLM-5.3-Flash, 2026-10-05) and refused it with 40 GiB
-        unused. Measured slopes: DeepSeek-V4-Flash 0.066 GiB per 1k tokens
-        (1.0 at 685, 1.89 at 14k), the 27B 0.02 (1.58 to 3.39 by 98k)."""
-        lo, hi = self._tx.get("lo"), self._tx.get("hi")
-        if hi is None or lo is None or ctx <= hi[0]:
-            return self._spike
-        if hi[0] - lo[0] >= 8192 and hi[1] > lo[1]:
-            slope = (hi[1] - lo[1]) / (hi[0] - lo[0])
-        else:
-            slope = min(hi[1] / hi[0], ONE_SAMPLE_SLOPE)
-        return max(self._spike, int(hi[1] + slope * (ctx - hi[0])))
+    def _transient(self, ctx: int, chunk: int | None = None) -> int:
+        """A step's predicted transient at `ctx` tokens of context, read
+        off two measured lines. A step that admits a prompt prefills it
+        `chunk` tokens at a time (the whole admission is one step), each
+        chunk's temporaries spanning the chunk against the context before
+        it: the prefill line is keyed by x = ctx x chunk / UNIT_CHUNK, so
+        a smaller chunk reads lower (GLM-5.3-Flash at chunk 2048, its DSA
+        indexer scoring chunk x context: 3.2 GiB at 2.7k tokens, 10.4 at
+        33k, 17.0 at 59k). A decode step (`chunk` None) is keyed by the
+        context alone. A prefill step decodes the running rows too: never
+        under the decode line's reading."""
+        dec = self._line("decode", ctx)
+        if chunk is None:
+            return dec
+        return max(dec, self._line("prefill", ctx * int(chunk) // UNIT_CHUNK))
 
-    def _limit(self, extra: int = 0) -> int:
+    def _line(self, kind: str, x: int) -> int:
+        """The measured `kind` transients read at x: between two samples,
+        the line between them; past the longest, the line through the
+        shortest and longest carried on (once they are 8192 apart and
+        rising, else in proportion to x); below the shortest, the larger
+        of that first segment and the proportion. With one sample, in
+        proportion to x -- the safe side; a shrinking chunk is what makes a
+        long prompt fit then, not a guessed slope. Never under a sample
+        at or below x. 0 until measured."""
+        pts = sorted(self._tx.get(kind, {}).values())
+        if not pts or x <= 0:
+            return 0
+        (x0, y0), (x1, y1) = pts[0], pts[-1]
+        if len(pts) == 1:
+            est = y0 * x / x0
+        elif x <= x0:
+            xb, yb = pts[1]
+            est = max(y0 * x / x0, y0 + (yb - y0) * (x - x0) / (xb - x0))
+        elif x >= x1:
+            slope = ((y1 - y0) / (x1 - x0) if x1 - x0 >= 8192 and y1 > y0
+                     else y1 / x1)
+            est = y1 + slope * (x - x1)
+        else:
+            k = next(i for i, (px, _) in enumerate(pts) if px >= x)
+            (xa, ya), (xb, yb) = pts[k - 1], pts[k]
+            est = ya + (yb - ya) * (x - xa) / (xb - xa)
+        seen = max((py for px, py in pts if px <= x), default=0)
+        return max(int(est), seen, 0)
+
+    def _limit(self, extra: int = 0, chunk: int | None = None) -> int:
         """Active bytes a step may start at: the working set less what
-        other processes hold of the GPU and a step's temporaries. 0 =
-        unguarded."""
+        other processes hold of the GPU and the next step's temporaries
+        (_margin). 0 = unguarded."""
         ws = self._working_set()
-        return ws - self._others_bytes() - self._margin(extra) if ws else 0
+        return ws - self._others_bytes() - self._margin(extra, chunk) \
+            if ws else 0
 
     def _others_bytes(self) -> int:
         """GPU memory the other processes on this machine hold, the most
@@ -1115,26 +1165,30 @@ class Scheduler:
                 self._others = (self._others + [max(total - mine, 0)])[-10:]
         return max(self._others, default=0)
 
-    def _measure(self, before: int, ctx: int = 0) -> None:
+    def _measure(self, before: int, ctx: int = 0,
+                 chunk: int | None = None) -> None:
         """The step's TRANSIENT: its peak above the larger of where it
         started and where it ended. What it kept (an admitted row's KV,
         checkpoint copies) is growth, not transient -- counted as spike, one
         50k-token admission ratcheted the margin up for the life of the
-        load. `ctx`: the context the step spanned."""
+        load. `ctx`: the context the step spanned; `chunk`: the step
+        prefilled a row at that chunk (the prefill line), None: a decode
+        step (the decode line)."""
         import mlx.core as mx
         spike = int(mx.get_peak_memory()) - max(before, self._here())
-        grew = spike > self._transient(ctx) * 1.25 and spike > GIB // 4
-        self._spike = max(self._spike, spike)
-        if ctx >= 1024 and spike > 0:
-            lo, hi = self._tx.get("lo"), self._tx.get("hi")
-            if lo is None or ctx < lo[0]:
-                self._tx["lo"] = (ctx, spike)
-            self._tx["hi"] = (max(ctx, hi[0] if hi else 0),
-                              max(spike, hi[1] if hi else 0))
+        kind = "decode" if chunk is None else "prefill"
+        x = ctx if chunk is None else ctx * int(chunk) // UNIT_CHUNK
+        grew = spike > self._line(kind, x) * 1.25 and spike > GIB // 4
+        if ctx >= 1024 and spike > 0 and x > 0:
+            # one sample per eighth of a doubling of x, the largest kept
+            pts = self._tx.setdefault(kind, {})
+            b = int(math.log2(x) * 8)
+            if b not in pts or spike > pts[b][1]:
+                pts[b] = (x, spike)
         if grew:
-            logger.info("a step's transient measured at %.2f GiB over %d "
-                        "tokens of context: the memory margin is now %.2f "
-                        "GiB", spike / GIB, ctx, self._margin() / GIB)
+            logger.info("a %s step's transient measured at %.2f GiB over "
+                        "%d tokens of context%s", kind, spike / GIB, ctx,
+                        f" at chunk {chunk}" if chunk else "")
 
     def _reset_peak(self) -> int:
         import mlx.core as mx
@@ -1234,25 +1288,61 @@ class Scheduler:
         return need
 
     def _fits(self, n_tokens: int) -> bool:
-        """Could a prompt of n_tokens fit once, counting what the prompt
-        cache would give up? No side effects: a request that waits must not
-        empty the shared prompt cache on every tick it waits."""
-        limit = self._limit(n_tokens)
-        if not limit or not self._kv:
+        """Could a prompt of n_tokens fit once, at the smallest chunk,
+        counting what the prompt cache would give up? No side effects: a
+        request that waits must not empty the shared prompt cache on every
+        tick it waits."""
+        if not self._limit() or not self._kv:
             return True
-        room = limit - self._active() + (self.cache.nbytes
-                                         if self.cache is not None else 0)
+        room = self._room(n_tokens, MIN_CHUNK) + (
+            self.cache.nbytes if self.cache is not None else 0)
         return self._need(n_tokens, ()) <= room
 
-    def _room_for(self, n_tokens: int, checkpoints=()):
+    def _chunks(self) -> list[int]:
+        """The prefill chunks an admission may take, largest first: the
+        launch chunk, halved down to MIN_CHUNK (2048 -> 1024 -> 512 -> 256
+        -> 128)."""
+        c = max(int(self.prefill_step_size), 1)
+        out = [c]
+        while c // 2 >= MIN_CHUNK:
+            c //= 2
+            out.append(c)
+        return out
+
+    def _peer_room(self, peers: int, n_tokens: int, chunk: int | None) -> int:
+        """Room on the tightest peer rank for the step admitting n_tokens
+        at `chunk`. A peer reports its active memory less its own limit,
+        which already holds its floor margin (at least 4 GiB) free; the
+        step's transient past that floor is taken from its room -- the
+        same transient as here (equal shards under tensor; a pipeline's
+        stages run one layer's temporaries at a time, near enough)."""
+        t = self._transient(self._context() + n_tokens, chunk)
+        return -peers - max(0, int(t * 1.25) - 4 * GIB)
+
+    def _room(self, n_tokens: int = 0, chunk: int | None = None) -> int:
+        """Bytes free for a prompt of n_tokens' cache in the step that
+        prefills it at `chunk`: under this rank's limit for that step, and
+        on a ring under every peer's (_peer_room)."""
+        limit = self._limit(n_tokens, chunk)
+        if self.tensor is None:
+            return limit - self._active()
+        room = limit - self._local_active()
+        peers = self.tensor.peers_over_now()
+        if peers is not None:
+            room = min(room, self._peer_room(peers, n_tokens, chunk))
+        return room
+
+    def _room_for(self, n_tokens: int, checkpoints=(),
+                  chunk: int | None = None):
         """(fits, need, room) for a prompt of n_tokens with checkpoints at
-        these lengths, the prompt cache giving way if that is what it
+        these lengths, prefilled `chunk` tokens at a time (None: the
+        launch chunk), the prompt cache giving way if that is what it
         takes."""
-        limit = self._limit(n_tokens)
-        if not limit or not self._kv:
+        chunk = chunk or self.prefill_step_size
+        if not self._limit(n_tokens, chunk) or not self._kv:
             return True, 0, 0
         need = self._need(n_tokens, checkpoints)
-        room = limit - self._active()
+        room = self._room(n_tokens, chunk)
         held = self.cache.nbytes if self.cache is not None else 0
         if need > room + held:
             # not even an empty prompt cache would make it fit: evicting
@@ -1264,7 +1354,7 @@ class Scheduler:
             self.cache.trim_to(max(before - (need - room), 0))
             self._ring_trimmed = self.cache.nbytes < before
             self._release()
-            room = limit - self._active()
+            room = self._room(n_tokens, chunk)
             logger.info("the prompt cache gave up %.1f GiB for a %d-token "
                         "prompt", (before - self.cache.nbytes) / GIB,
                         n_tokens)
@@ -1274,20 +1364,34 @@ class Scheduler:
         """"full" if a prompt of n_tokens fits with its checkpoints (at
         these lengths; None = one, at its end), "lean" if only without;
         else _Wait (rows are running and will free memory) or OutOfMemory
-        (none are)."""
+        (none are). The chunk it fits at is left in _chunk_pick.
+
+        Cheapest loss first: the prompt cache gives way; then the prefill
+        chunk shrinks (2048 -> ... -> 128: a chunk's temporaries span it
+        against the whole context before it, and a whole admission is ONE
+        step, so the chunk is chosen here, for the whole prompt -- a
+        little slower, instead of a refusal); then the checkpoints go;
+        then it waits, or with nothing running is refused."""
         if checkpoints is None:
             checkpoints = [n_tokens]
-        fits, full, room = self._room_for(n_tokens, checkpoints)
-        if fits:
-            return "full"
-        fits, need, room = self._room_for(n_tokens)
-        if fits:
-            logger.info("a %d-token prompt admitted without checkpoints: "
-                        "%.1f GiB free, with them it would take %.1f; %s",
-                        n_tokens, room / GIB, full / GIB,
-                        _terms(self._memory(n_tokens, need, room)))
-            return "lean"
-        limit = self._limit(n_tokens)
+        chunks = self._chunks()
+        self._chunk_pick = None
+        full = 0
+        for c in chunks:
+            fits, full, room = self._room_for(n_tokens, checkpoints, c)
+            if fits:
+                self._picked(c, n_tokens, room)
+                return "full"
+        for c in chunks:
+            fits, need, room = self._room_for(n_tokens, (), c)
+            if fits:
+                self._picked(c, n_tokens, room)
+                logger.info("a %d-token prompt admitted without checkpoints: "
+                            "%.1f GiB free, with them it would take %.1f; %s",
+                            n_tokens, room / GIB, full / GIB,
+                            _terms(self._memory(n_tokens, need, room, c)))
+                return "lean"
+        limit = self._limit(n_tokens, chunks[-1])
         if self._rows:
             raise _Wait()
         # On a ring the peers' number is as of the last exchange: what the
@@ -1299,7 +1403,7 @@ class Scheduler:
                 self._ring_trimmed:
             self._ring_trimmed = False
             raise _RingWait()
-        mem = self._memory(n_tokens, need, room)
+        mem = self._memory(n_tokens, need, room, chunks[-1])
         logger.warning("refused a %d-token prompt: %s", n_tokens, _terms(mem))
         if room <= 0 and not (self.cache is not None and self.cache.nbytes):
             # nothing runs and nothing is left to give up, yet no memory is
@@ -1312,8 +1416,19 @@ class Scheduler:
         raise OutOfMemory(
             f"this prompt ({n_tokens} tokens) needs about {need / GIB:.1f} "
             f"GiB for its cache; {max(room, 0) / GIB:.1f} GiB is free under "
-            f"the server's limit ({limit / GIB:.1f} GiB). Send a shorter "
-            f"conversation, or serve a smaller model", mem)
+            f"the server's limit ({limit / GIB:.1f} GiB) even prefilled "
+            f"{chunks[-1]} tokens at a time. Send a shorter conversation, "
+            f"or serve a smaller model", mem)
+
+    def _picked(self, chunk: int, n_tokens: int, room: int) -> None:
+        self._chunk_pick = chunk
+        if chunk < self.prefill_step_size:
+            logger.info("a %d-token prompt is prefilled %d tokens at a time "
+                        "(not %d) to fit the memory left: a %.1f GiB "
+                        "transient predicted, %.1f GiB free for its cache",
+                        n_tokens, chunk, self.prefill_step_size,
+                        self._transient(self._context() + n_tokens, chunk)
+                        / GIB, room / GIB)
 
     def _guard_memory(self) -> None:
         limit = self._limit()
@@ -1338,6 +1453,12 @@ class Scheduler:
                            (before - self.cache.nbytes) / GIB)
         while over > 0 and self._rows:
             uid = max(self._rows)             # the newest: least work lost
+            if len(self._rows) > 1 and uid in self._queued():
+                # not prefilled yet: nothing is lost by queueing it again
+                self._requeue(uid, "memory past the limit (%.1f GiB)"
+                              % (limit / GIB))
+                over = self._active() - limit
+                continue
             row = self._rows.pop(uid)
             assert self._ex is not None     # there are rows, so an executor
             self._ex.remove([uid])
@@ -1351,10 +1472,87 @@ class Scheduler:
                 f"request(s) running); retry, or ask for fewer tokens"))
             over = self._active() - limit
 
+    def _queued(self) -> set:
+        f = getattr(self._ex, "queued", None)
+        return f() if f is not None else set()
+
+    def _next_admission(self) -> int | None:
+        f = getattr(self._ex, "next_admission", None)
+        return f() if f is not None else None
+
+    def _requeue(self, uid: int, why: str) -> None:
+        """Row `uid`, inserted but not yet prefilled, goes back to the head
+        of the queue: admitted again (tokenized, fitted) when there is
+        room. It has computed nothing, so nothing is lost."""
+        row = self._rows.pop(uid)
+        self._chunk_of.pop(uid, None)
+        assert self._ex is not None
+        self._ex.remove([uid])
+        self._release()
+        row.job.waiting_on = None
+        self._waiting.insert(0, row.job)
+        logger.info("%s: a %d-token prompt not yet prefilled waits for the "
+                    "rows running", why, row.job.prompt_tokens)
+
+    def _fit_next(self) -> None:
+        """Before a step that prefills a row: refit its chunk to the room
+        now. It was fitted when inserted; rows inserted in the same tick
+        were each fitted against the same free memory, and the rows
+        running have grown since. The largest chunk whose step fits on
+        every rank is set (on a ring, the `chunk` op carries it to the
+        other ranks before the step). If not even MIN_CHUNK fits: with
+        other rows running it goes back to the queue (they will free
+        memory); alone it is stopped with OutOfMemory. A row once
+        prefilled has no chunk left to shrink: its admission is one
+        step."""
+        uid = self._next_admission()
+        row = self._rows.get(uid) if uid is not None else None
+        if row is None or not self._kv or not self._limit():
+            return
+        n = row.job.prompt_tokens
+        need = self._cost(n, 2 if len(self._rows) > 1 else 1)
+        cur = self._chunk_of.get(uid, self.prefill_step_size)
+        for c in self._chunks():
+            room = self._room(0, c)
+            if need <= room:
+                if c != cur:
+                    self._chunk_of[uid] = row.chunk = c
+                    refit = getattr(self._ex, "refit", None)
+                    if refit is not None:
+                        refit(uid, c)
+                    logger.info("a %d-token prompt about to prefill is "
+                                "refitted to chunk %d (was %d): a %.1f GiB "
+                                "transient predicted, %.1f GiB free after "
+                                "its cache", n, c, cur,
+                                self._transient(self._context(), c) / GIB,
+                                (room - need) / GIB)
+                return
+        if len(self._rows) > 1:
+            self._requeue(uid, f"no room to prefill at chunk {MIN_CHUNK}")
+            return
+        self._rows.pop(uid)
+        self._chunk_of.pop(uid, None)
+        assert self._ex is not None
+        self._ex.remove([uid])
+        self._release()
+        mem = self._memory(0, need, self._room(0, MIN_CHUNK), MIN_CHUNK)
+        logger.warning("stopped a %d-token prompt before its prefill: %s", n,
+                       _terms(mem))
+        self._error(row.job, OutOfMemory(
+            f"this prompt ({n} tokens) no longer fits: about "
+            f"{need / GIB:.1f} GiB for its cache and a step prefilling it "
+            f"{MIN_CHUNK} tokens at a time; retry, or send a shorter "
+            f"conversation", mem))
+
     def _step(self) -> None:
         ex = self._ex
         assert ex is not None
         ctx = self._context()
+        nxt = self._next_admission()
+        chunk = None
+        if nxt is not None:
+            chunk = int(self._chunk_of.get(nxt) or self.prefill_step_size)
+            ex.set_chunk(chunk)
         before = self._reset_peak()
         now = time.perf_counter()
         for r in self._rows.values():
@@ -1371,7 +1569,8 @@ class Scheduler:
             self._fail_all(exc)
             self._close_executor()
             return
-        self._measure(before, ctx)
+        self._measure(before, ctx, chunk)
+        self._chunk_of.pop(nxt, None)
         drop = []
         for e in events:
             row = self._rows.get(e.uid)
@@ -1411,6 +1610,8 @@ class Scheduler:
                 self._rows.pop(uid, None)
         if drop:
             ex.remove(sorted(set(drop)))
+        for uid in [u for u in self._chunk_of if u not in self._rows]:
+            del self._chunk_of[uid]
 
     def _done(self, uid: int) -> None:
         row = self._rows.pop(uid, None)
@@ -1425,7 +1626,7 @@ class Scheduler:
         usage.setdefault("knurlogic", {})["timing"] = _timing(
             row, time.perf_counter(), usage.get("completion_tokens", 0),
             (report or {}).get("prefilled"),
-            (report or {}).get("used"), self.prefill_step_size)
+            (report or {}).get("used"), row.chunk or self.prefill_step_size)
         row.job.outbox.put(("done", usage))
 
     def _error(self, job: Job, err: BaseException) -> None:

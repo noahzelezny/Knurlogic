@@ -695,8 +695,14 @@ class TensorExecutor(LocalExecutor):
             "admit", uid=int(uid), prompt=ids, segs=segs,
             hit=len(a.prefix), max_tokens=int(a.max_tokens),
             sampling=dict(a.sampling), penalties=dict(a.wire["penalties"]),
-            initial=a.wire["initial"], images=images, refs=refs)
+            initial=a.wire["initial"], images=images, refs=refs,
+            chunk=int(a.chunk or self.gen.prefill_step_size))
         return uid
+
+    def refit(self, uid: int, chunk: int) -> None:
+        """Row `uid`, not yet prefilled, prefills `chunk` tokens at a time
+        on every rank (the `chunk` op, applied before the step)."""
+        self.ring.journal.add("chunk", uid=int(uid), chunk=int(chunk))
 
     def _ref_of(self, sha: str, ph: str):
         """(n_tokens, grid_thw) of an image of a key being admitted: the
@@ -732,8 +738,13 @@ class TensorExecutor(LocalExecutor):
 # --------------------------------------------------------------- follower
 
 class Mark:
-    """A follower's memory limit: the working set less one step's measured
-    transient (at least 5% of it, at least 4 GiB) -- the scheduler's rule."""
+    """A follower's memory limit: the working set less one DECODE step's
+    measured transient (at least 5% of it, at least 4 GiB). A step that
+    prefills a row is not counted: its transient grows with that prompt's
+    context x chunk, and rank 0 prices it per admission against this
+    rank's room (scheduler._room) -- held here, one 59k-token prefill's
+    17 GiB stayed the margin of every later step and the GLM-5.3-Flash
+    pipeline's M3 read 1.4 GiB over its limit with nothing running."""
 
     def __init__(self, working_set: int):
         self.ws = int(working_set)
@@ -748,12 +759,13 @@ class Mark:
         lim = self.limit()
         return int(mx.get_active_memory()) - lim if lim else 0
 
-    def around(self, fn):
+    def around(self, fn, prefill: bool = False):
         mx.reset_peak_memory()
         before = int(mx.get_active_memory())
         out = fn()
-        self.spike = max(self.spike, int(mx.get_peak_memory())
-                         - max(before, int(mx.get_active_memory())))
+        if not prefill:
+            self.spike = max(self.spike, int(mx.get_peak_memory())
+                             - max(before, int(mx.get_active_memory())))
         return out
 
 
@@ -831,6 +843,10 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     _defer_sigterm(link.rank)
     cache = PromptCache(prompt_cache_size)
     mark = Mark(working_set)
+    #: the prefill chunk rank 0 fitted each row not yet prefilled at (the
+    #: admit and chunk ops): a rank prefilling in a different number of
+    #: chunks deadlocks
+    chunks: dict = {}
     ex: LocalExecutor | None = None
     last: dict = {}
     events: list = []
@@ -892,9 +908,14 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                     state_machine=sm))
                 if uid != op["uid"]:
                     raise Desync(f"admitted as {uid}, rank 0 has {op['uid']}")
+                chunks[uid] = int(op["chunk"])
+            elif kind == "chunk":
+                chunks[op["uid"]] = int(op["chunk"])
             elif kind == "remove":
                 if ex is not None:
                     ex.remove(op["uids"])
+                for u in op["uids"]:
+                    chunks.pop(u, None)
             elif kind == "insert":
                 got = last.get((op["event"], op["uid"]))
                 if got is None:
@@ -909,6 +930,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                 if ex is not None:
                     ex.close()
                 ex = None
+                chunks.clear()
                 if vision is not None:
                     vision.clear()
                 halt = True
@@ -948,7 +970,10 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                                "rank 0's are used", link.rank,
                                sum(a != c for a, c in zip(mine, theirs)))
             b.t1 = mx.array(theirs, dtype=mx.int32)
-        events = mark.around(e.step)
+        nxt = e.next_admission()
+        if nxt is not None:
+            e.set_chunk(chunks.pop(nxt, prefill_step_size))
+        events = mark.around(e.step, prefill=nxt is not None)
         steps += 1
         for ev in events:
             if isinstance(ev, Checkpoint):

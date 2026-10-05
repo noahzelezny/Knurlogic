@@ -47,6 +47,10 @@ class Admission:
     #: data here (processors, the state machine): {"penalties": the
     #: make_logits_processors kwargs, "initial": the machine's start state}
     wire: dict | None = None
+    #: the prefill chunk the scheduler fitted this admission at (0 = the
+    #: engine's own); on a ring it rides the admit op, as ranks prefilling
+    #: in different chunk counts deadlock in the collectives
+    chunk: int = 0
 
 
 @dataclass
@@ -164,6 +168,29 @@ class LocalExecutor:
         for u in uids:
             self._top.pop(u, None)
         self.gen.remove(list(uids))
+
+    def next_admission(self) -> int | None:
+        """The row the next step() admits (prefills, whole), or None: the
+        engine admits the head of its queue, one per step, while the batch
+        has room (MTPBatchGenerator._next)."""
+        g = self.gen
+        q = getattr(g, "_unprocessed_sequences", None)
+        if not q:
+            return None
+        batch = getattr(g, "_batch", None)
+        if batch is not None and len(batch) >= g.completion_batch_size:
+            return None
+        return q[0][0]
+
+    def queued(self) -> set:
+        """Rows inserted but not yet prefilled."""
+        return {s[0] for s in getattr(self.gen, "_unprocessed_sequences",
+                                      None) or ()}
+
+    def set_chunk(self, n: int) -> None:
+        """The prefill chunk for the next admission: the engine reads
+        prefill_step_size when it admits, inside step()."""
+        self.gen.prefill_step_size = int(n)
 
     @property
     def cache_nbytes(self) -> int:

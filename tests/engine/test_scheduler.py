@@ -216,7 +216,7 @@ def test_memory_past_the_limit_empties_the_prompt_cache_then_stops_the_newest():
 
     mem = {"active": 110 * GIB}
     s = Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
-    s._spike = 4 * GIB          # measured: margin 5, limit 100
+    s._margin = lambda *a, **k: 5 * GIB  # measured: margin 5, limit 100
     s.cache, s._ex = Cache(), Ex()
     s._active = lambda: mem["active"]
     s._release = lambda: None
@@ -248,7 +248,7 @@ def test_the_guard_trims_the_cache_by_the_overage_not_a_margin_more():
 
     mem = {"active": 105 * GIB}
     s = Scheduler(Host(None, Tok({})), working_set_bytes=100 * GIB)
-    s._spike = 4 * GIB          # margin 5, limit 95
+    s._margin = lambda *a, **k: 5 * GIB  # margin 5, limit 95
     s.cache = Cache()
     s._active = lambda: mem["active"]
     s._release = lambda: None
@@ -283,7 +283,7 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
 
     mem = {"active": 95 * GIB}
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
-    s._spike = 4 * GIB          # measured: margin 5, limit 100
+    s._margin = lambda *a, **k: 5 * GIB  # measured: margin 5, limit 100
     s.cache = Cache()
     s._active = lambda: mem["active"]
     s._release = lambda: None
@@ -348,7 +348,7 @@ def test_a_cache_that_could_never_make_room_is_not_evicted():
 
     mem = {"active": 97 * GIB}
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
-    s._spike = 4 * GIB                             # limit 100: 3 GiB free
+    s._margin = lambda *a, **k: 5 * GIB  # limit 100: 3 GiB free
     s.cache = Cache()
     s._active = lambda: mem["active"]
     s._release = lambda: None
@@ -358,29 +358,31 @@ def test_a_cache_that_could_never_make_room_is_not_evicted():
 
 
 def test_the_step_margin_is_measured_not_published():
-    """The largest spike measured, with a quarter again -- never below 5%
-    of the working set: a spike learned on short contexts under-reads a
-    longer one (GLM-5.3 aborted Metal at a 3.2 GiB learned margin)."""
+    """The decode step's measured transient at the context it spans, with
+    a quarter again -- never below 5% of the working set."""
     from knurlogic.engine.runtime.scheduler import GIB, Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     assert s._margin() == 6 * GIB                 # the floor: 5%
     peak = {"v": 0}
     s._active = lambda: 100 * GIB
+    _rows_of(s, 20_000)
     import mlx.core as mx
     real = mx.get_peak_memory
     try:
         mx.get_peak_memory = lambda: peak["v"]
         peak["v"] = 102 * GIB
-        s._measure(100 * GIB)
+        s._measure(100 * GIB, 20_000)
         assert s._margin() == 6 * GIB              # 2.5 GiB is under it
         peak["v"] = 108 * GIB
-        s._measure(100 * GIB)
+        s._measure(100 * GIB, 20_000)
         assert s._margin() == 10 * GIB             # 8 GiB spike x 1.25
         peak["v"] = 101 * GIB                      # a smaller one: kept max
-        s._measure(100 * GIB)
+        s._measure(100 * GIB, 20_000)
         assert s._limit() == 110 * GIB
     finally:
         mx.get_peak_memory = real
+    s._rows = {}
+    assert s._margin() == 6 * GIB                  # idle: no step to run
 
 
 def _rows_of(s, *contexts):
@@ -390,31 +392,36 @@ def _rows_of(s, *contexts):
     s._rows = {i: S._Row(job(n), None, []) for i, n in enumerate(contexts)}
 
 
+def _samples(**lines):
+    """{"decode"/"prefill": [(x, bytes), ...]} as _measure keeps them."""
+    import math
+    return {k: {int(math.log2(x) * 8): (x, y) for x, y in pts}
+            for k, pts in {"decode": [], "prefill": [], **lines}.items()}
+
+
 def test_the_margin_follows_the_context_the_step_will_span():
     """The 27B on an M3 Ultra: the transient grew 1.58 -> 3.39 GiB as
     four agents' prompts grew, and the first step at a longer context than
     any measured ran past a margin the shorter ones had set."""
     from knurlogic.engine.runtime.scheduler import GIB, Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=80 * GIB)
-    s._tx = {"lo": (10_000, 1 * GIB), "hi": (50_000, 3 * GIB)}
-    s._spike = 3 * GIB
+    s._tx = _samples(decode=[(10_000, 1 * GIB), (50_000, 3 * GIB)])
     _rows_of(s, 50_000)
     assert s._margin() == 4 * GIB                 # 3.75 under the floor
     _rows_of(s, 60_000, 30_000)                  # 90k: 3 + 40k x 1/20k
     assert s._transient(90_000) == 5 * GIB
     assert s._margin() == int(6.25 * GIB)
-    # admitting a prompt adds its tokens to the context the step spans
-    assert s._limit(10_000) == 80 * GIB - int(5.5 * 1.25 * GIB)
-    _rows_of(s, 20_000)                          # inside what was measured
+    _rows_of(s, 20_000)                          # between the samples
+    assert s._transient(20_000) == int(1.5 * GIB)
     assert s._margin() == 4 * GIB
 
 
 def test_one_context_measured_scales_the_transient_in_proportion():
     from knurlogic.engine.runtime.scheduler import GIB, Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=200 * GIB)
-    s._spike = 2 * GIB
-    s._tx = {"lo": (40_000, 2 * GIB), "hi": (40_000, 2 * GIB)}
+    s._tx = _samples(decode=[(40_000, 2 * GIB)])
     assert s._transient(100_000) == 5 * GIB       # the safe side
+    assert s._transient(20_000) == 1 * GIB        # and below it
 
 
 def test_measure_records_the_transient_against_its_context():
@@ -426,15 +433,20 @@ def test_measure_records_the_transient_against_its_context():
     real = mx.get_peak_memory
     try:
         mx.get_peak_memory = lambda: 101 * GIB
-        s._measure(100 * GIB, 20_000)
+        s._measure(100 * GIB, 20_000, 2048)       # a prefill at 2048
         mx.get_peak_memory = lambda: 103 * GIB
-        s._measure(100 * GIB, 60_000)
+        s._measure(100 * GIB, 60_000, 2048)
         mx.get_peak_memory = lambda: int(100.5 * GIB)
         s._measure(100 * GIB, 70_000)            # a decode step: small
     finally:
         mx.get_peak_memory = real
-    assert s._tx == {"lo": (20_000, GIB), "hi": (70_000, 3 * GIB)}
-    assert s._spike == 3 * GIB
+    assert s._tx == _samples(prefill=[(80_000, GIB), (240_000, 3 * GIB)],
+                             decode=[(70_000, GIB // 2)])
+    # a prefill at chunk 512 of the 60k context reads x = 60k: below
+    # the samples, on the line through them (and the proportion)
+    assert s._transient(60_000, 512) == int(0.75 * GIB)
+    assert s._transient(60_000, 2048) == 3 * GIB
+    assert s._transient(60_000) == GIB // 2 * 60 // 70     # decode
 
 
 def test_other_processes_gpu_memory_comes_off_the_working_set():
@@ -501,7 +513,7 @@ def test_397b_on_the_m4_admits_the_prompts_it_refused():
     from knurlogic.engine.runtime import scheduler as S
     GIB = S.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
-    s._spike = int(5.2 * GIB)                    # margin 6.5, limit 113.5
+    s._margin = lambda *a, **k: int(6.5 * GIB)  # margin 6.5, limit 113.5
     s._active = lambda: int(106.9 * GIB)
     s._release = lambda: None
     s.cache = type("C", (), {"nbytes": 0})()
@@ -521,11 +533,13 @@ def test_what_was_measured_goes_with_the_model():
         def load(self, p, **k):
             self.path = p
     s = Scheduler(H())
-    s._kv, s._samples, s._spike = (1.0, 2.0), {"lo": (1, 1)}, 5 << 30
+    s._kv, s._samples = (1.0, 2.0), {"lo": (1, 1)}
+    s._tx = _samples(prefill=[(4096, 5 << 30)])
     c = Command("load", "/m/b")
     s._commands.put(c)
     s._do_commands()
-    assert c.error == "" and s._samples == {} and s._spike == 0
+    assert c.error == "" and s._samples == {}
+    assert s._tx == {"decode": {}, "prefill": {}}
     assert s._kv is None          # /m/b has no config to seed from
 
 
@@ -540,10 +554,10 @@ def test_the_spike_is_what_the_step_did_not_keep():
     real = mx.get_peak_memory
     try:
         mx.get_peak_memory = lambda: 102 * GIB
-        s._measure(100 * GIB)
+        s._measure(100 * GIB, 4096, 512)
     finally:
         mx.get_peak_memory = real
-    assert s._spike == GIB // 2
+    assert s._tx == _samples(prefill=[(4096, GIB // 2)])
 
 
 def test_a_waiting_prompt_neither_empties_the_cache_nor_blocks_the_line():
@@ -557,7 +571,7 @@ def test_a_waiting_prompt_neither_empties_the_cache_nor_blocks_the_line():
         def trim_to(self, n):
             raise AssertionError("a waiting prompt trimmed the cache")
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
-    s._spike = 4 * GIB                            # limit 100
+    s._margin = lambda *a, **k: 5 * GIB  # limit 100
     s._active = lambda: 95 * GIB
     s.cache = Cache()
     s._kv = (0.0, float(2**20))                   # 1 MiB per token
@@ -577,7 +591,7 @@ def test_a_held_prompt_waits_for_the_rows_it_found_not_for_newcomers():
     from knurlogic.engine.runtime import scheduler as S
     GIB = S.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
-    s._spike = 4 * GIB                            # limit 100
+    s._margin = lambda *a, **k: 5 * GIB  # limit 100
     s._active = lambda: 95 * GIB
     s.cache = type("C", (), {"nbytes": 0})()
     s._kv = (0.0, float(2**20))
@@ -649,7 +663,7 @@ def test_nothing_running_nothing_cached_and_no_room_says_restart():
         nbytes = 0
 
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
-    s._spike = 4 * GIB
+    s._margin = lambda *a, **k: 5 * GIB
     s.cache = Cache()
     s._active = lambda: 100 * GIB       # the whole limit, nothing running
     s._kv = (0.0, float(2**20))
@@ -673,30 +687,23 @@ def test_timing_reports_cached_vs_computed_and_the_chunk():
 
 def test_a_refusal_names_every_term_of_the_limit():
     """GLM-5.3-Flash pipeline rank 0, 2026-10-05: working set 120 GiB,
-    weights 75.6, others 1.6. A step's transient measured only at ~1.1k
-    tokens of context is carried on in proportion to the context, so a 33k
-    prompt's margin is tens of GiB and the limit falls below the weights:
-    refused with 0.0 GiB free. The 503 says which term did it; the status
+    weights 75.6, others 1.6. The 503 says which term did it; the status
     says when the server cannot admit even a 1k-token prompt."""
     from knurlogic.engine.runtime import scheduler as S
     from knurlogic.interfaces.http.openai import _status_of, models_document
     GIB = S.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
-    s._local_active = lambda: int(75.6 * GIB)
+    s._local_active = lambda: int(75.1 * GIB)
     s._cached = lambda: 0
     s._gpu_in_use = lambda: None       # keep the one reading below
-    s._others = [int(1.6 * GIB)]
-    s._spike = int(1.6 * GIB)
-    s._tx = {"lo": (1100, int(1.6 * GIB)), "hi": (1100, int(1.6 * GIB))}
-    s._kv = (0.0, 12 * 2**10)           # ~0.4 GiB at 33k tokens
-    # one sample no longer carried on in proportion: the live refusal
-    # (15:07, 3.1 GiB at 2733 tokens, margin 47.4 GiB) now fits
-    s._spike = int(3.14 * GIB)
-    s._tx = {"lo": (2733, 3368886056), "hi": (2733, 3368886056)}
     s._others = [int(0.7 * GIB)]
-    s._local_active = lambda: int(75.1 * GIB)
-    assert s._margin(33002) < 10 * GIB
-    assert s._make_room(33002) in ("full", "lean")
+    s._kv = (0.0, 12 * 2**10)           # ~0.4 GiB at 33k tokens
+    # one sample (15:07, 3.1 GiB at 2733 tokens, chunk 2048) is carried
+    # on in proportion: 37.6 GiB at 33k and chunk 2048, so the chunk
+    # shrinks until the step fits instead of a 47 GiB margin's refusal
+    s._tx = _samples(prefill=[(2733 * 4, 3368886056)])
+    assert s._make_room(33002) == "full"
+    assert s._chunk_pick == 1024
     # a server whose weights leave no room still refuses, naming every term
     s._local_active = lambda: int(114 * GIB)
     with pytest.raises(S.OutOfMemory) as e:
@@ -704,7 +711,7 @@ def test_a_refusal_names_every_term_of_the_limit():
     m = e.value.memory
     assert m["working_set"] == 120 * GIB and m["others"] == int(0.7 * GIB)
     assert m["limit"] == m["working_set"] - m["others"] - m["margin"]
-    assert m["room"] < 0 and m["need"] > 0
+    assert m["chunk"] == 128 and m["room"] < 0 and m["need"] > 0
     body = _status_of(e.value).body()
     assert body["error"]["memory"]["margin"] == m["margin"]
     # a 1k prompt fits beside the 75.1 GiB of weights
@@ -735,3 +742,152 @@ def test_status_names_a_peer_rank_over_its_limit():
                                     "rank 1, 2.0 GiB over its limit")
     finally:
         state.SERVED.pop("ranks", None)
+
+
+def _glm_flash_ring(peer_over):
+    """GLM-5.3-Flash pipeline, 2026-10-05: rank 0 an M4 (working set 120
+    GiB, 77.6 active, others 0.8), rank 1 an M3 reporting `peer_over`;
+    prefill transients measured at chunk 2048: 3.47e9 bytes at 2733 tokens,
+    1.82e10 at 59174 (GLM's DSA indexer scores chunk x context)."""
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
+    s._local_active = lambda: int(77.6 * GIB)
+    s._cached = lambda: 0
+    s._release = lambda: None
+    s._gpu_in_use = lambda: None
+    s._others = [int(0.8 * GIB)]
+    s._kv = (0.0, 40 * 2**10)                    # 2 GiB at 53k tokens
+    s._tx = _samples(prefill=[(2733 * 4, int(3.47e9)),
+                              (59174 * 4, int(1.82e10))])
+    s.tensor = type("T", (), {"peers_over_now": lambda self: peer_over})()
+    return s
+
+
+def test_one_long_prefill_leaves_no_reserve_on_an_idle_ring():
+    """After the 59k-token prefill every request was refused, 14k too, and
+    the card said "rank 1, 1.4 GiB over" with 30-60 GiB unused: the margin
+    was the largest transient ever seen (21.2 GiB) on every rank, idle
+    included. Now idle holds the floor; the reserve is the step about to
+    run's -- a 14k prompt at the launch chunk, 2048."""
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+    # the M3: 64.2 GiB active under 84 - 4.2 (its decode-only margin)
+    s = _glm_flash_ring(int(64.2 * GIB) - (84 * GIB - 84 * GIB // 20))
+    assert s._margin() == 6 * GIB and s.memory_short() is None
+    assert s._limit() == 120 * GIB - int(0.8 * GIB) - 6 * GIB
+    assert s._make_room(14000) == "full" and s._chunk_pick == 2048
+    t = s._transient(14000, 2048) / GIB
+    assert 5.5 < t < 6.5                          # on the measured line
+
+
+def test_a_long_prompt_on_the_tight_rank_takes_a_smaller_chunk(caplog):
+    """53k tokens at 2048 would need ~15.5 GiB of transient; the M3 has
+    ~15.6 free past its floor, short of the prompt's cache beside it. At
+    1024 the step predicts ~9 GiB and fits: a little slower, not a 503."""
+    import logging
+
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+    s = _glm_flash_ring(int(64.2 * GIB) - (84 * GIB - 84 * GIB // 20))
+    with caplog.at_level(logging.INFO, logger=S.__name__):
+        assert s._make_room(53000) == "full"
+    assert s._chunk_pick == 1024
+    assert any("prefilled 1024 tokens at a time" in r.message
+               for r in caplog.records)
+    # only when one row at 128 cannot fit: wait with rows running ...
+    s = _glm_flash_ring(-GIB)             # 1 GiB under its limit
+    _rows_of(s, 1000)
+    with pytest.raises(S._Wait):
+        s._make_room(53000)
+    # ... and refuse alone, at chunk 128
+    s._rows = {}
+    with pytest.raises(S.OutOfMemory, match="128 tokens at a time"):
+        s._make_room(53000)
+
+
+def test_a_row_about_to_prefill_is_refitted_or_requeued():
+    """Rows inserted together were each fitted against the same free
+    memory: before the step that prefills one, its chunk is refitted to the
+    room then (on a ring the `chunk` op carries it); if not even 128 fits
+    it goes back to the queue while others run, never stopped mid-work."""
+    from knurlogic.engine.runtime import prompt as P
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+    mem = {"active": 90 * GIB}
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
+    s._active = lambda: mem["active"]
+    s._release = lambda: None
+    s._kv = (0.0, 40 * 2**10)
+    s._tx = _samples(prefill=[(2733 * 4, int(3.47e9)),
+                              (59174 * 4, int(1.82e10))])
+
+    class Ex:
+        removed, refits = [], []
+
+        def next_admission(self):
+            return 2
+
+        def queued(self):
+            return {2}
+
+        def refit(self, uid, c):
+            self.refits.append((uid, c))
+
+        def remove(self, uids):
+            self.removed += uids
+    s._ex = Ex()
+    job = lambda n: setattr(j := S.Job(P.ChatRequest(), P.PromptArgs()),
+                            "prompt_tokens", n) or j
+    s._rows = {1: S._Row(job(1000), None, []),
+               2: S._Row(job(40000), None, [], chunk=2048)}
+    s._chunk_of = {2: 2048}
+    s._fit_next()                       # 30 free: 2048 (~12.5 x 1.25) fits
+    assert s._ex.refits == [] and s._chunk_of[2] == 2048
+    mem["active"] = 104 * GIB           # 16 free: 1024 (~7.6 x 1.25) fits
+    s._fit_next()
+    assert s._ex.refits == [(2, 1024)] and s._rows[2].chunk == 1024
+    mem["active"] = 114 * GIB           # under the floor at any chunk
+    s._fit_next()
+    assert s._ex.removed == [2] and list(s._rows) == [1]
+    assert s._waiting and s._waiting[0].prompt_tokens == 40000
+    assert s._waiting[0].outbox.empty()   # waits, not an error
+
+
+def test_the_step_sets_the_rows_chunk_and_measures_the_prefill_line():
+    import mlx.core as mx
+
+    from knurlogic.engine.runtime import prompt as P
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
+    s._active = lambda: 100 * GIB
+    s._reset_peak = lambda: 100 * GIB
+
+    class Ex:
+        chunk = None
+
+        def next_admission(self):
+            return 5
+
+        def set_chunk(self, n):
+            self.chunk = n
+
+        def step(self):
+            return []
+
+        def remove(self, uids):
+            pass
+    s._ex = Ex()
+    j = S.Job(P.ChatRequest(), P.PromptArgs())
+    j.prompt_tokens = 8192
+    s._rows = {5: S._Row(j, None, [], chunk=512)}
+    s._chunk_of = {5: 512}
+    real = mx.get_peak_memory
+    try:
+        mx.get_peak_memory = lambda: 102 * GIB
+        s._step()
+    finally:
+        mx.get_peak_memory = real
+    assert s._ex.chunk == 512 and s._chunk_of == {}
+    assert s._tx == _samples(prefill=[(8192, 2 * GIB)])
