@@ -145,6 +145,8 @@ nav a.relnote[hidden]{display:none}
 .card.failed .dot{background:var(--bad)}
 .card.failed .rt{color:var(--bad);letter-spacing:.08em}
 .card.failed .why{color:var(--bad);margin-top:4px;overflow-wrap:anywhere;font-size:12.5px}
+.card .why{color:var(--warn);margin-top:4px;overflow-wrap:anywhere;font-size:12.5px}
+.cardhd .rt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card.failed .x{margin-left:auto;padding:0 6px}
 .card.loading .dot{background:var(--warn);animation:pulse 2s ease-in-out infinite}
 .card .lpct{color:var(--acc);font-weight:600;font-variant-numeric:tabular-nums}
