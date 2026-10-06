@@ -20,7 +20,7 @@ import http.client
 import json
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 GIB = 1 << 30
@@ -200,6 +200,12 @@ def _openai_port(base: str) -> list:
             for r in rows[:12]]
 
 
+#: the last /status.json row each of our ports answered with: a server busy
+#: generating can miss the 1.5 s read while /v1/models still answers, and
+#: the card fell back to an anonymous "mlx ... offered" until it caught up
+_LAST: dict = {}
+
+
 def _knurlogic(base: str) -> list:
     d = _get(f"{base}/status.json")
     if not isinstance(d, dict) or "schema" not in d:
@@ -318,7 +324,15 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
         # Ours answers /status.json; anything else gets read as a plain
         # OpenAI port. Asking ours first stops knurlogic listing itself as
         # an anonymous mlx server.
-        rows = _knurlogic(base) or _openai_port(base)
+        rows = _knurlogic(base)
+        if rows:
+            _LAST[base] = rows
+        elif base in _LAST and (port in ours or port in by_hand):
+            # ours, slow to answer while it works: still the same model
+            rows = [replace(r, detail=(r.detail + " · " if r.detail else "")
+                            + "busy") for r in _LAST[base]]
+        else:
+            rows = _openai_port(base)
         if port in by_hand:
             for r in rows:
                 r.can_unload = False
