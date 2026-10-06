@@ -678,21 +678,20 @@ KV_BITS_VALUES = ["bf16", "8", "6", "4"]
 KV_BITS_OFFERED = ("bf16", "8")
 
 
-#: the Thinking default's values: the model's own, or a level on the
-#: reasoning_effort ladder (engine/serve/thinking.LADDER, which the page and
-#: the resolver read without importing the engine)
-THINKING_DEFAULT_VALUES = ["model", "none", "minimal", "low", "medium",
-                           "high", "xhigh"]
+#: the Thinking default's values: a model's own level names, which the
+#: resolver narrows the range to per model (GLM: off, low, high, max); unset
+#: (the page's "default") is the template's own default
+THINKING_DEFAULT_VALUES = ["off", "low", "medium", "high", "max"]
 
 
 def thinking_default_of(v) -> str:
-    """'model' or a level on the ladder."""
+    """'model' (unset) or a level name: one word. Which names a model has
+    is its template's (resolve narrows the range; the server maps it)."""
     s = str(v if v is not None else "").strip().lower()
-    if s in ("", "default"):
+    if s in ("", "default", "model"):
         return "model"
-    if s not in THINKING_DEFAULT_VALUES:
-        raise ValueError(f"{s!r} isn't one of "
-                         f"{', '.join(THINKING_DEFAULT_VALUES)}")
+    if not s.isalpha():
+        raise ValueError(f"{s!r} isn't a thinking level")
     return s
 
 

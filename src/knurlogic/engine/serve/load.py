@@ -296,7 +296,7 @@ def apply_live(env: dict) -> dict:
             os.environ[k] = v
             done[k] = ("applied: a request that names no level gets "
                        + ("the model's own default" if v == "model"
-                          else v))
+                          else f"its {v} level"))
         elif k == "KNURLOGIC_CONTEXT_LENGTH":
             # the scheduler reads it at every admission
             try:

@@ -951,13 +951,17 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
     # the level a silent request gets: shown where the template has levels
     try:
         from knurlogic.engine.serve import thinking
-        has_levels = bool(thinking.levels(
-            thinking.template_of(artifact.path)).get("native"))
+        native = thinking.levels(
+            thinking.template_of(artifact.path)).get("native") or []
     except (OSError, ValueError, ImportError):
-        has_levels = False
-    if has_levels:
+        native = []
+    if native:
         emit(r, artifact, "thinking_default",
              launch.get("thinking_default", "model"))
+        # the template's own names (GLM: off, low, high, max), not the
+        # ladder's, whose words mean other levels there
+        r.ranges["KNURLOGIC_THINKING_DEFAULT"] = [
+            str(n["name"]) for n in native]
     emit(r, artifact, "preset", tune)
     r.ranges["KNURLOGIC_KV_BITS"] = ["bf16"] + [
         str(b) for b in bits if str(b) in S.KV_BITS_OFFERED]
