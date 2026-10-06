@@ -470,7 +470,7 @@ KNOB_DOC = {
         "Prefill is dequantize + attention either way."),
     "KNURLOGIC_THINKING_DEFAULT": (
         "the thinking level a request that names none is served at "
-        "(model: the template's own default)",
+        "(default: the template's own)",
         "for a client that sends no reasoning_effort, or whose control is "
         "broken: the level goes through the same translation as a "
         "request's own (engine/serve/thinking), to the nearest native "
@@ -560,7 +560,7 @@ KNOB_HELP = {
                          "same memory, slightly slower.",
     "KNURLOGIC_KV_KERNEL": "A faster way to read an 8-bit cache; leave on.",
     "KNURLOGIC_THINKING_DEFAULT": "How hard the model thinks when a client "
-                                  "doesn't say. model = its own default.",
+                                  "doesn't say. default = the model's own.",
     "KNURLOGIC_CACHE_LIMIT_GB": "Freed memory held back for reuse instead of "
                                 "returned to the system. No measured speed "
                                 "difference; less leaves more memory free.",
