@@ -7,7 +7,8 @@
   whole prompt to its end: a 339k-token prompt kept two Macs busy for half
   an hour after the harness stopped.
 * A per-model "Thinking default" setting: the thinking level a request
-  that names none is served at ("model" keeps the template's own). For a
+  that names none is served at, offered as the model's own level names
+  (GLM: off, low, high, max); unset keeps the template's own default. For a
   client that sends no reasoning_effort, or whose control is broken --
   GLM-5.3's own default is max, and long conversations thought for hours
   without answering. A request that names a level still wins; live, so a

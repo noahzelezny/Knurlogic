@@ -212,16 +212,33 @@ def test_the_thinking_default_is_live_and_checked(monkeypatch):
     from knurlogic.engine.serve.load import apply_live
     from knurlogic.tuning import settings as S
     monkeypatch.delenv(T.DEFAULT_ENV, raising=False)
-    done = apply_live({T.DEFAULT_ENV: "medium"})
+    done = apply_live({T.DEFAULT_ENV: "high"})
     assert done[T.DEFAULT_ENV].startswith("applied")
-    assert os.environ[T.DEFAULT_ENV] == "medium"
-    done = apply_live({T.DEFAULT_ENV: "max"})
+    assert os.environ[T.DEFAULT_ENV] == "high"
+    done = apply_live({T.DEFAULT_ENV: "hi gh"})
     assert done[T.DEFAULT_ENV].startswith("failed")
-    assert os.environ[T.DEFAULT_ENV] == "medium"
-    assert S.check_knob(T.DEFAULT_ENV, "max")
-    assert S.check_knob(T.DEFAULT_ENV, "low") is None
-    assert S.KNOB_RANGE[T.DEFAULT_ENV][0][0] == "model"
-    assert set(S.THINKING_DEFAULT_VALUES[1:]) == set(T.LADDER)
+    assert os.environ[T.DEFAULT_ENV] == "high"
+    assert S.check_knob(T.DEFAULT_ENV, "max") is None
+    assert S.check_knob(T.DEFAULT_ENV, "4") is not None
+    assert "model" not in S.KNOB_RANGE[T.DEFAULT_ENV][0]   # that is unset
+
+
+def test_the_thinking_default_reads_the_templates_own_names(monkeypatch):
+    """The page offers a model's own level names (GLM: off, low, high,
+    max), whose words mean other ladder levels there: GLM's "high" is the
+    ladder's medium and its "max" the ladder's high."""
+    from knurlogic.engine import families
+    spec = families.build_maps()["thinking"]["glm_effort"]
+    for name, level in (("off", "none"), ("low", "low"), ("high", "medium"),
+                        ("max", "high")):
+        monkeypatch.setenv(T.DEFAULT_ENV, name)
+        assert T.default_level(spec) == level, name
+    monkeypatch.setenv(T.DEFAULT_ENV, "model")
+    assert T.default_level(spec) is None
+    monkeypatch.setenv(T.DEFAULT_ENV, "turbo")      # not this template's
+    assert T.default_level(spec) is None
+    monkeypatch.setenv(T.DEFAULT_ENV, "low")
+    assert T.default_level(None) is None            # no controls
 
 
 def test_a_client_override_is_reported_by_what_it_renders():

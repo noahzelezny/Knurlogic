@@ -32,11 +32,26 @@ DEFAULT_ENV = "KNURLOGIC_THINKING_DEFAULT"
 
 
 def server_default():
-    """The THINKING_DEFAULT level, or None (the model's own). A value off
-    the ladder is None here: the setting is checked where it is set."""
+    """The Thinking default as set -- one of the template's own level names
+    (GLM: off, low, high, max), which the page offers, or a ladder level --
+    or None (the model's own)."""
     import os
     v = os.environ.get(DEFAULT_ENV, "").strip().lower()
-    return v if v in LADDER else None
+    return None if v in ("", "default", "model") else v
+
+
+def default_level(spec: dict | None):
+    """The Thinking default as a ladder level for this template: its own
+    level name mapped back (GLM's "high" is the ladder's medium, its "max"
+    the ladder's high), a ladder level as is; None when unset or when this
+    template has no such level."""
+    v = server_default()
+    if v is None:
+        return None
+    for lvl, name, _kw in (spec or {}).get("native") or ():
+        if str(name).lower() == v:
+            return lvl
+    return v if v in LADDER and spec is not None else None
 
 _dialect_cache: dict = {}
 
@@ -313,11 +328,11 @@ def translate(body: dict, client_kwargs: dict | None):
     translation, and the report says so. ValueError: a level off the
     ladder, for the caller to refuse with 400."""
     level = requested(body)
-    by_server = level is None and server_default() is not None
-    if by_server:
-        level = server_default()
     tmpl = _served_template()
     name, spec = detect(tmpl)
+    by_server = level is None and default_level(spec) is not None
+    if by_server:
+        level = default_level(spec)
     tok = _served_tokenizer()
     p = probe(tok, tmpl, spec) if (spec is not None and
                                    tok is not None) else None
