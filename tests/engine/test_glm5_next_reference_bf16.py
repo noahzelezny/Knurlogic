@@ -34,10 +34,10 @@ GOLD = dict(np.load(G.OUT))
 
 
 def _model():
-    from knurlogic.engine.families.glm5.architecture.glm5_next.config import \
-        TextConfig
-    from knurlogic.engine.families.glm5.architecture.glm5_next.language import \
-        LanguageModel
+    from knurlogic.engine.families.glm5.architecture.glm5_next.config import TextConfig
+    from knurlogic.engine.families.glm5.architecture.glm5_next.language import (
+        LanguageModel,
+    )
     cfg = json.loads(str(GOLD["config"]))
     model = LanguageModel(TextConfig.from_dict(cfg))
     w = {k[2:]: mx.array(v) for k, v in GOLD.items() if k.startswith("w/")}

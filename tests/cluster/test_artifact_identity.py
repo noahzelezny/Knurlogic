@@ -294,6 +294,7 @@ def test_the_pickers_splits_are_kept_on_disk_under_the_identity(
     # after a page restart the picker read every model's shard headers
     # again (~8 s over the library); the answer is kept under the identity
     from types import SimpleNamespace
+
     from knurlogic.interfaces.page import documents as D
     a = _art(tmp_path, "m", b"a")
     calls = []

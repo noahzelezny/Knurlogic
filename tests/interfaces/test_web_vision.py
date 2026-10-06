@@ -119,7 +119,8 @@ def test_models_document_says_why_a_conversion_has_no_vision(monkeypatch,
     monkeypatch.setattr("knurlogic.machine.discover.find",
                         lambda *a, **k: rows)
     documents.forget_models()
-    doc = {m["name"]: m for m in documents.models_document()({"rescan": ["1"]})["models"]}
+    doc = {m["name"]: m
+           for m in documents.models_document()({"rescan": ["1"]})["models"]}
     assert doc["text"]["vision"] is False
     assert doc["text"]["vision_why"] == "this conversion has no vision weights"
     assert doc["flash"]["vision"] is False and doc["flash"]["vision_why"] == ""

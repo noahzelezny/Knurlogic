@@ -131,5 +131,6 @@ def main(argv) -> int:
     if "error" in out:
         print(f"knurlogic: {out['error']}", file=sys.stderr)
         return 1
-    print(f"{'added' if cmd == 'add' else 'removed'} {out.get('added') or out.get('removed')}")
+    print(f"{'added' if cmd == 'add' else 'removed'} "
+          f"{out.get('added') or out.get('removed')}")
     return 0

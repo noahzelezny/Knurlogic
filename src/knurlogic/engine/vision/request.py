@@ -72,7 +72,8 @@ def with_placeholders(messages: list[dict[str, Any]],
     part holding texts[i]. mlx-lm then joins a message's text parts with ""
     (server.process_message_content), so the placeholder lands exactly
     where the image was (runtime/prompt.flatten joins them, with the
-    template's own separator where it has one). The caller's messages are not touched: mlx-lm
+    template's own separator where it has one). The caller's messages are
+    not touched: mlx-lm
     rewrites content in place, and the request may be read again."""
     from knurlogic.engine.runtime.prompt import MARK, PLACEHOLDER
     it = iter(texts)

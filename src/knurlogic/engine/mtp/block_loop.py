@@ -49,20 +49,27 @@ pipeline.carry. Design: docs/design/deepseek-vision.md (DSpark).
 """
 from __future__ import annotations
 
-from collections import deque
-from typing import Any
-
 import logging
 import os
 import statistics
+from collections import deque
+from typing import Any
 
 import mlx.core as mx
 
-from .batch_loop import EXPLORE_STEPS, Emitted, MTPBatch, \
-    RowStep, _apply, _finite_rows, _key, _mark, _pick
+from .batch_loop import (
+    EXPLORE_STEPS,
+    Emitted,
+    MTPBatch,
+    RowStep,
+    _apply,
+    _finite_rows,
+    _key,
+    _mark,
+    _pick,
+)
 from .caches import release, rollback, snapshot
 from .sampling import rejection_correct
-
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +215,7 @@ class BlockBatch(MTPBatch):
         return out
 
     # ------------------------------------------------------------ width
-    def _predicted(self, conf, live) -> "mx.array | None":
+    def _predicted(self, conf, live) -> mx.array | None:
         """P(the batch accepts >= j drafts), j = 1..K, from the confidence
         scores [B, K]: per row the running product of sigmoid(score), over
         the drafting rows the product of those (None without scores). An

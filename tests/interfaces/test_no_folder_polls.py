@@ -7,8 +7,7 @@ import time
 import pytest
 
 from knurlogic.cluster import jobs as J
-from knurlogic.interfaces.page import documents
-from knurlogic.interfaces.page import server
+from knurlogic.interfaces.page import documents, server
 from knurlogic.machine import discover, servers
 from knurlogic.machine.artifact import Artifact
 

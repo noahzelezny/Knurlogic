@@ -23,10 +23,10 @@ CFG = dict(G.CONFIG, kv_lora_rank=64)
 
 
 def _model(bits=None):
-    from knurlogic.engine.families.glm5.architecture.glm5_next.config import \
-        TextConfig
-    from knurlogic.engine.families.glm5.architecture.glm5_next.language import \
-        LanguageModel
+    from knurlogic.engine.families.glm5.architecture.glm5_next.config import TextConfig
+    from knurlogic.engine.families.glm5.architecture.glm5_next.language import (
+        LanguageModel,
+    )
     from knurlogic.engine.kvquant import install
     mx.random.seed(0)
     model = LanguageModel(TextConfig.from_dict(json.loads(json.dumps(CFG))))

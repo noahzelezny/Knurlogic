@@ -489,7 +489,8 @@ def test_a_dsml_tool_call_parses_through_the_engine(tmp_path):
 
 
 @pytest.mark.parametrize("mode", ["chat", "thinking"])
-def test_the_latest_reminder_kwarg_is_deepseeks_reminder_before_the_last_user_turn(mode):
+def test_the_latest_reminder_kwarg_is_deepseeks_reminder_before_the_last_user_turn(
+        mode):
     """The chat page sends the date and language as a kwarg (without a
     language the model reasons in Chinese): it renders as the official
     latest_reminder message before the last user turn, and a request that

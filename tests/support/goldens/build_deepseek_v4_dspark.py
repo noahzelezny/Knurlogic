@@ -55,7 +55,7 @@ TINY = HERE / "deepseek_v4_dspark_tiny"
 HF = HERE / "deepseek_v4_dspark_hf"
 OUT = HERE / "deepseek_v4_dspark.npz"
 
-V, D, L, E, I = 64, 128, 4, 4, 256
+V, D, L, E, INTER = 64, 128, 4, 4, 256
 K, NOISE, R, STAGES, TARGETS = 5, 63, 8, 3, [1, 2, 3]
 HD, RD, IH, IHD = 80, 16, 16, 128
 RATIOS = [0, 4, 128, 4]
@@ -69,7 +69,7 @@ CONFIG = dict(
                   "original_max_position_embeddings": 64,
                   "beta_fast": 32, "beta_slow": 1},
     index_n_heads=IH, index_head_dim=IHD, index_topk=8,
-    moe_intermediate_size=I, n_routed_experts=E, n_shared_experts=1,
+    moe_intermediate_size=INTER, n_routed_experts=E, n_shared_experts=1,
     num_experts_per_tok=2, num_hash_layers=1, hc_mult=4,
     hc_sinkhorn_iters=3, max_position_embeddings=256,
     num_nextn_predict_layers=STAGES, dspark_block_size=K,
@@ -113,7 +113,8 @@ def _tensors(rng) -> dict:
 
     def experts(pre):
         for e in range(E):
-            for w, (o, i) in (("w1", (I, D)), ("w2", (D, I)), ("w3", (I, D))):
+            for w, (o, i) in (("w1", (INTER, D)), ("w2", (D, INTER)),
+                              ("w3", (INTER, D))):
                 k = f"{pre}.ffn.experts.{e}.{w}"
                 t[k + ".weight"] = ("I8", rng.integers(
                     0, 256, size=(o, i // 2), dtype=np.uint8))
@@ -152,7 +153,7 @@ def _tensors(rng) -> dict:
                 [rng.permutation(E)[:2] for _ in range(V)]).astype(np.int32))
         else:
             f32(f"{pre}.ffn.gate.bias", (E,), 0.05)
-        for w, shape in (("w1", (I, D)), ("w2", (D, I)), ("w3", (I, D))):
+        for w, shape in (("w1", (INTER, D)), ("w2", (D, INTER)), ("w3", (INTER, D))):
             lin(f"{pre}.ffn.shared_experts.{w}.weight", shape)
         experts(pre)
         for hc in ("attn", "ffn"):
@@ -465,7 +466,7 @@ def golden(ref: str) -> None:
     args = M.ModelArgs(
         max_batch_size=1, max_seq_len=256, temperature=0, dtype="fp8",
         scale_fmt="ue8m0", expert_dtype="fp4", scale_dtype="fp32",
-        vocab_size=V, dim=D, moe_inter_dim=I, n_layers=L,
+        vocab_size=V, dim=D, moe_inter_dim=INTER, n_layers=L,
         n_hash_layers=c["num_hash_layers"], n_mtp_layers=STAGES,
         n_heads=c["num_attention_heads"], n_routed_experts=E,
         n_shared_experts=1, n_activated_experts=c["num_experts_per_tok"],

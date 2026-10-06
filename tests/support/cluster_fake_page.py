@@ -59,8 +59,8 @@ def main():
     if os.environ.get("FAKE_FAST"):
         fast()
     if os.environ.get("FAKE_JOB_ID"):
-        from types import SimpleNamespace
         import secrets
+        from types import SimpleNamespace
         C.secrets = SimpleNamespace(
             token_hex=lambda n: os.environ["FAKE_JOB_ID"],
             randbits=secrets.randbits)

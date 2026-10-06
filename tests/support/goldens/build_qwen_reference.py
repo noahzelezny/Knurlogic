@@ -21,7 +21,8 @@ What the tiny configs make run (each is a path the real models take):
   FLA's) is visible in the logits;
 - qwen4_exp's QSA sparse path (indexer_budget 8 < the 21-token prefill) and
   its block rope (4 index heads: with 2, a relu-zero tie between blocks
-  made the reference's top-k pick arbitrary at one row); its PLE n-gram hash with an EOS inside the prompt (the
+  made the reference's top-k pick arbitrary at one row); its PLE n-gram
+  hash with an EOS inside the prompt (the
   segment reset); `seed` left out of the config, as every released
   config.json does, so the hash multipliers are the config default's;
 - partial rotary with interleaved MRoPE sections (text positions).
@@ -246,12 +247,13 @@ def from_levels(u: np.ndarray) -> np.ndarray:
 def _vision_reference(arrays: dict, meta: dict):
     import torch
     from PIL import Image
+    from transformers.models.qwen2_vl.image_processing_pil_qwen2_vl import (
+        Qwen2VLImageProcessorPil,
+    )
     from transformers.models.qwen3_5 import configuration_qwen3_5 as c35
     from transformers.models.qwen3_5 import modeling_qwen3_5 as m35
     from transformers.models.qwen4_exp import configuration_qwen4_exp as c4
     from transformers.models.qwen4_exp import modeling_qwen4_exp as m4
-    from transformers.models.qwen2_vl.image_processing_pil_qwen2_vl import \
-        Qwen2VLImageProcessorPil
     px, img = vision_inputs()
     meta["vision/config"] = VISION
     for fam, cfg_cls, cls in (
@@ -278,8 +280,9 @@ def _vision_reference(arrays: dict, meta: dict):
         arrays[f"proc/{tag}/px"] = to_levels(r["pixel_values"])
         arrays[f"proc/{tag}/grid"] = np.asarray(r["image_grid_thw"])
         try:
-            from transformers.models.qwen2_vl.image_processing_qwen2_vl \
-                import Qwen2VLImageProcessor
+            from transformers.models.qwen2_vl.image_processing_qwen2_vl import (
+                Qwen2VLImageProcessor,
+            )
             r = Qwen2VLImageProcessor(**kw, size=size)(
                 images=pil, return_tensors="np")
             arrays[f"proc/{tag}/tv_px"] = to_levels(r["pixel_values"])
@@ -341,13 +344,12 @@ def _components(family: str) -> dict:
     each on component_input."""
     import torch
     torch.set_grad_enabled(False)
-    from transformers.models.qwen3_5_moe import modeling_qwen3_5_moe as m35m
-    from transformers.models.qwen3_5 import modeling_qwen3_5 as m35
-    from transformers.models.qwen4_exp import modeling_qwen4_exp as m4
     from transformers.models.qwen3_5 import configuration_qwen3_5 as c35
-    from transformers.models.qwen3_5_moe import \
-        configuration_qwen3_5_moe as c35m
+    from transformers.models.qwen3_5 import modeling_qwen3_5 as m35
+    from transformers.models.qwen3_5_moe import configuration_qwen3_5_moe as c35m
+    from transformers.models.qwen3_5_moe import modeling_qwen3_5_moe as m35m
     from transformers.models.qwen4_exp import configuration_qwen4_exp as c4
+    from transformers.models.qwen4_exp import modeling_qwen4_exp as m4
     cls = {"qwen3_5": (c35.Qwen3_5TextConfig, m35.Qwen3_5ForCausalLM),
            "qwen3_5_moe": (c35m.Qwen3_5MoeTextConfig,
                            m35m.Qwen3_5MoeForCausalLM),
@@ -385,13 +387,12 @@ def bf16_weights_of(shapes: dict) -> dict:
 def _reference(family: str, cfg: dict = None, dtype: str = "float32",
                bf16_weights: bool = False):
     import torch
-    from transformers.models.qwen3_5 import modeling_qwen3_5 as m35
     from transformers.models.qwen3_5 import configuration_qwen3_5 as c35
+    from transformers.models.qwen3_5 import modeling_qwen3_5 as m35
+    from transformers.models.qwen3_5_moe import configuration_qwen3_5_moe as c35m
     from transformers.models.qwen3_5_moe import modeling_qwen3_5_moe as m35m
-    from transformers.models.qwen3_5_moe import \
-        configuration_qwen3_5_moe as c35m
-    from transformers.models.qwen4_exp import modeling_qwen4_exp as m4
     from transformers.models.qwen4_exp import configuration_qwen4_exp as c4
+    from transformers.models.qwen4_exp import modeling_qwen4_exp as m4
     cls = {"qwen3_5": (c35.Qwen3_5TextConfig, m35.Qwen3_5ForCausalLM),
            "qwen3_5_moe": (c35m.Qwen3_5MoeTextConfig,
                            m35m.Qwen3_5MoeForCausalLM),

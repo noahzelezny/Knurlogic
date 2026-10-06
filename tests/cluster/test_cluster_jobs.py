@@ -23,6 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from procs import reap_registries
 
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import launch as C
@@ -30,7 +31,6 @@ from knurlogic.cluster import links
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
 from knurlogic.tuning import settings
-from procs import reap_registries
 
 GIB = 1 << 30
 HERE = Path(__file__).resolve().parents[1] / "support"
@@ -199,7 +199,8 @@ def spec(**kw):
 def prep(s, **kw):
     return C.prepare(s, resolve=kw.get("resolve", lambda i: "/m/x"),
                      info=kw.get("info", info("Apple M3 Ultra", "192.0.2.2")),
-                     shape=lambda p, w, sp, vision=True, mtp=True: kw.get("shape", SHAPE),
+                     shape=lambda p, w, sp, vision=True, mtp=True:
+                     kw.get("shape", SHAPE),
                      registry=lambda: {})
 
 
@@ -902,14 +903,16 @@ def test_prepare_refuses_a_share_beside_what_another_job_holds(cache):
     ws = info("Apple M3 Ultra", "192.0.2.2", ws=84 * GIB)
     held = [("job 41648583878fcdfc rank 1", 54699, int(49.5 * GIB))]
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
-                          shape=lambda p, w, s, vision=True, mtp=True: big, registry=lambda: {},
+                          shape=lambda p, w, s, vision=True, mtp=True: big,
+                          registry=lambda: {},
                           held=lambda job: held)
     assert not doc["ok"], doc
     r = doc["refused"]
     assert "50.0 GiB" in r and "84.0 GiB" in r and "49.5 GiB of it held now" in r
     assert "pid 54699" in r and "41648583878fcdfc" in r
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x", info=ws,
-                          shape=lambda p, w, s, vision=True, mtp=True: big, registry=lambda: {},
+                          shape=lambda p, w, s, vision=True, mtp=True: big,
+                          registry=lambda: {},
                           held=lambda job: [])
     assert doc["ok"], doc
     C.PREPARED.clear()
@@ -938,13 +941,15 @@ def test_prepare_refuses_while_another_jobs_rank_is_loading(cache):
     J._write(J.marker_path(other, 1), {"phase": "loading"})
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x",
                           info=info("Apple M3 Ultra", "192.0.2.2"),
-                          shape=lambda p, w, s, vision=True, mtp=True: SHAPE, registry=lambda: reg,
+                          shape=lambda p, w, s, vision=True, mtp=True: SHAPE,
+                          registry=lambda: reg,
                           held=lambda job: [])
     assert not doc["ok"] and "one load at a time" in doc["refused"]
     J._write(J.marker_path(other, 1), {"phase": "ready"})
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x",
                           info=info("Apple M3 Ultra", "192.0.2.2"),
-                          shape=lambda p, w, s, vision=True, mtp=True: SHAPE, registry=lambda: reg,
+                          shape=lambda p, w, s, vision=True, mtp=True: SHAPE,
+                          registry=lambda: reg,
                           held=lambda job: [])
     assert doc["ok"], doc
     C.PREPARED.clear()
@@ -1024,7 +1029,8 @@ def test_prepare_waits_for_a_stopping_rank_then_goes(cache, monkeypatch):
     p.send_signal(signal.SIGTERM)          # its bye handler exits in 0.3s
     code, doc = C.prepare(spec(job=new), resolve=lambda i: "/m/x",
                          info=info("Apple M3 Ultra", "192.0.2.2"),
-                         shape=lambda p, w, s, vision=True, mtp=True: SHAPE, held=lambda job: [])
+                         shape=lambda p, w, s, vision=True, mtp=True: SHAPE,
+                         held=lambda job: [])
     assert doc["ok"], doc
     p.wait(timeout=5)
     C._PROCS.clear()
@@ -1041,7 +1047,8 @@ def test_prepare_names_a_stuck_old_rank_in_its_refusal(cache, monkeypatch):
     J.save_registry(reg)
     code, doc = C.prepare(spec(job=new), resolve=lambda i: "/m/x",
                          info=info("Apple M3 Ultra", "192.0.2.2"),
-                         shape=lambda p, w, s, vision=True, mtp=True: SHAPE, held=lambda job: [])
+                         shape=lambda p, w, s, vision=True, mtp=True: SHAPE,
+                         held=lambda job: [])
     assert not doc["ok"], doc
     assert old in doc["refused"] and "still exiting" in doc["refused"]
     p.kill()

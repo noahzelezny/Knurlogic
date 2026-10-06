@@ -195,7 +195,7 @@ def write(src: _Source, path: Path, meta: dict | None = None) -> int:
     with tmp.open("wb") as fh:
         fh.write(struct.pack("<Q", len(blob)))
         fh.write(blob)
-        for name, dt, shape, produce in items:
+        for name, _dt, _shape, produce in items:
             want = hdr[name]["data_offsets"][1] - hdr[name]["data_offsets"][0]
             got = 0
             for chunk in produce():

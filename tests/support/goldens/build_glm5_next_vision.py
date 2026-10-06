@@ -4,7 +4,8 @@ maker's published reference) run in float32 on a tiny random tower with
 the real vision_config's structure (patch 14, merge 2, temporal patch 2,
 silu, swiglu_limit 10) and small dims.
 
-    python tests/support/goldens/build_glm5_next_vision.py   # needs torch + transformers 5.16.1
+    # needs torch + transformers 5.16.1
+    python tests/support/goldens/build_glm5_next_vision.py
 
 The image is 168x112 (w x h), four flat quadrants of distinct colours, so
 any patch mis-order shows up. 168x112 is already a multiple of

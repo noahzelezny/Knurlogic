@@ -1825,8 +1825,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         logger.warning("cluster launch: %s", alert)
         req = dict(req, identity=ident)
     path = _resolve(ident, aname)
-    from knurlogic.tuning.settings import (clean_sets, mtp_of, preset_or,
-                                           vision_of)
+    from knurlogic.tuning.settings import clean_sets, mtp_of, preset_or, vision_of
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         return {"error": f"not a launch setting: {', '.join(bad)}"}

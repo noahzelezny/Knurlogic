@@ -45,10 +45,11 @@ def reference(ref: Path) -> dict:
     """The reference's functions, executed from its own source: model.py
     imports its tilelang kernels at the top, so the four definitions are
     cut out of it with ast, not imported."""
+    from typing import Optional
+
     import torch
     import torch.nn.functional as F
     from torch import nn
-    from typing import Optional, Tuple
 
     src = (ref / "inference" / "model.py").read_text()
     tree = ast.parse(src)
@@ -61,7 +62,7 @@ def reference(ref: Path) -> dict:
     import image_processor
     import vision
     ns = {"torch": torch, "F": F, "nn": nn, "Optional": Optional,
-          "Tuple": Tuple, "ModelArgs": object,
+          "Tuple": tuple, "ModelArgs": object,
           "lru_cache": __import__("functools").lru_cache,
           "linear": lambda x, w, b=None: F.linear(x, w, b),
           "IMAGE_START": image_processor.IMAGE_START,

@@ -195,8 +195,8 @@ def _resolved(arch, rec):
     out = {f: getattr(args, f) for f in rec["hf"]
            if f not in ("layer_head_dim", "layer_kv_heads")}
     out["final_logit_softcapping"] = model.final_logit_softcapping
-    out["layer_head_dim"] = [l.self_attn.head_dim for l in model.layers]
-    out["layer_kv_heads"] = [l.self_attn.n_kv_heads for l in model.layers]
+    out["layer_head_dim"] = [layer.self_attn.head_dim for layer in model.layers]
+    out["layer_kv_heads"] = [layer.self_attn.n_kv_heads for layer in model.layers]
     return out
 
 

@@ -96,8 +96,8 @@ def test_no_norm_with_a_weight_rounds_twice(A):
     """Every weighted norm the trunk, the MTP head and the DSpark head
     build is the single-rounding module (the reference's RMSNorm), never
     mlx's nn.RMSNorm."""
-    from knurlogic.engine.families.deepseek.heads import (
-        deepseek_v4 as mtp, deepseek_v4_dspark as dspark)
+    from knurlogic.engine.families.deepseek.heads import deepseek_v4 as mtp
+    from knurlogic.engine.families.deepseek.heads import deepseek_v4_dspark as dspark
     args = A.ModelArgs(hidden_size=128, num_hidden_layers=2,
                        num_attention_heads=2, q_lora_rank=128,
                        o_lora_rank=64, o_groups=2, head_dim=80,
@@ -386,9 +386,9 @@ def tiny16(A, tmp_path_factory):
     DSpark golden's are."""
     import json
 
+    import build_deepseek_v4_dspark as G
     from mlx.utils import tree_flatten
 
-    import build_deepseek_v4_dspark as G
     from knurlogic.engine.families.deepseek.heads import dspark_pack
     root = tmp_path_factory.mktemp("bf16")
     hf, tiny = root / "hf", root / "tiny"
@@ -412,9 +412,9 @@ def _trace16(path):
     the head's draft at each) through the MLX load path, in bf16."""
     from contextlib import ExitStack
 
+    import build_deepseek_v4_dspark as G
     from mlx_lm.utils import load_model
 
-    import build_deepseek_v4_dspark as G
     from knurlogic.engine.mtp import registry
     from knurlogic.engine.mtp.capture import capture_input
     from knurlogic.interfaces import loading
