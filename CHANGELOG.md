@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+* GLM-5.3: a long prompt's prefill attends in the MLA latent over only the
+  tokens the sparse indexer picked, instead of expanding every cached token
+  into per-head K/V and masking it away: prefill memory no longer grows
+  with the context (a 334k-token prompt had shrunk the chunk to 256 and was
+  still killed at 98% on a 96 GB M3 Ultra), and a chunk reads K rows rather
+  than the whole context. Same logits as before to rounding. New launch
+  setting "Sparse prefill from" (KNURLOGIC_SPARSE_PREFILL_FROM: 0 always,
+  off never, or a context in tokens); tools/bench_glm5_sparse_prefill.py
+  measures where it is the faster on your Mac.
+
 ## 0.1.4
 
 Long generations hold up; `knurlogic` starts the page.
