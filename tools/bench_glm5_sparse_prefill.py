@@ -60,6 +60,11 @@ def _expanded(on: bool) -> None:
     L.EXPANDED_PREFILL = on
 
 
+def _pool_reuse(on: bool) -> None:
+    from knurlogic.engine.families.glm5.architecture.glm5_next import language as L
+    L.INCREMENTAL_POOL = on
+
+
 def _fill(layer, tc, cache, tokens: int, step: int = 4096) -> None:
     """The cache to `tokens` of context, through the latent path (the
     cache it leaves is the same either way)."""
@@ -109,6 +114,11 @@ def main(argv=None) -> int:
     p.add_argument("--contexts", default="8192,32768,131072")
     p.add_argument("--chunk", type=int, default=2048)
     p.add_argument("--repeat", type=int, default=3)
+    p.add_argument("--pools", action="store_true",
+                   help="compare the latent path with the indexer pooling "
+                        "the whole context every chunk (full) against "
+                        "reusing its stable pools (reuse, edit 11), instead "
+                        "of expanded against latent")
     a = p.parse_args(argv)
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
     cfg = _text_config(a.artifact)
@@ -117,16 +127,24 @@ def main(argv=None) -> int:
     print(f"{a.artifact.name}: one sparse-attention layer, heads "
           f"{tc.num_attention_heads}, kv_lora_rank {tc.kv_lora_rank}, "
           f"index_topk {tc.index_topk}, chunk {a.chunk}")
-    print(f"{'context':>9}  {'expanded s':>10} {'GiB':>6}  "
-          f"{'latent s':>9} {'GiB':>6}  faster")
+    a_name, b_name = (("full pool", "reuse") if a.pools
+                      else ("expanded", "latent"))
+    print(f"{'context':>9}  {a_name + ' s':>10} {'GiB':>6}  "
+          f"{b_name + ' s':>9} {'GiB':>6}  faster")
     cache, have = _cache(), 0
     for ctx in contexts:
         _fill(layer, tc, cache, ctx - have)
         have = ctx
-        e_s, e_m = _time(layer, tc, cache, a.chunk, True, a.repeat)
-        l_s, l_m = _time(layer, tc, cache, a.chunk, False, a.repeat)
-        win = ("latent" if e_s is None or (l_s is not None and l_s < e_s)
-               else "expanded")
+        if a.pools:
+            _pool_reuse(False)
+            e_s, e_m = _time(layer, tc, cache, a.chunk, False, a.repeat)
+            _pool_reuse(True)
+            l_s, l_m = _time(layer, tc, cache, a.chunk, False, a.repeat)
+        else:
+            e_s, e_m = _time(layer, tc, cache, a.chunk, True, a.repeat)
+            l_s, l_m = _time(layer, tc, cache, a.chunk, False, a.repeat)
+        win = (b_name if e_s is None or (l_s is not None and l_s < e_s)
+               else a_name)
 
         def cell(s, m):
             return (f"{'OOM':>10} {'':>6}" if s is None
