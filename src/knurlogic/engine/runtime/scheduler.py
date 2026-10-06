@@ -1250,7 +1250,34 @@ class Scheduler:
         dec = self._line("decode", ctx)
         if chunk is None:
             return dec
-        return max(dec, self._line("prefill", ctx * int(chunk) // UNIT_CHUNK))
+        return max(dec, self._line("prefill", self._prefill_x(ctx, chunk)))
+
+    def _prefill_x(self, ctx: int, chunk: int) -> int:
+        """The prefill line's key: the context a chunk's temporaries span
+        (the model's `prefill_span`, else all of it) x chunk / UNIT_CHUNK.
+        GLM-5.3's latent prefill reads at most index_topk keys a query: keyed
+        by the whole context, one 2.7k-token warm-up carried in proportion
+        refused a 339k-token prompt even at chunk 128."""
+        span = self._span_fn()
+        try:
+            c = int(span(ctx)) if span is not None else ctx
+        except Exception:  # a model's hint must never fail the guard
+            c = ctx
+        return c * int(chunk) // UNIT_CHUNK
+
+    def _span_fn(self):
+        """The served model's prefill_span, wherever the wrappers put it
+        (the model, its language_model, its trunk), or None."""
+        m = getattr(self.host, "model", None)
+        if getattr(self, "_span_for", self) is not m:   # read per model
+            self._span_for, self._span = m, None
+            for o in (m, getattr(m, "language_model", None),
+                      getattr(m, "model", None)):
+                f = getattr(o, "prefill_span", None)
+                if callable(f):
+                    self._span = f
+                    break
+        return self._span
 
     def _line(self, kind: str, x: int) -> int:
         """The measured `kind` transients read at x: between two samples,
@@ -1317,7 +1344,7 @@ class Scheduler:
         import mlx.core as mx
         spike = int(mx.get_peak_memory()) - max(before, self._here())
         kind = "decode" if chunk is None else "prefill"
-        x = ctx if chunk is None else ctx * int(chunk) // UNIT_CHUNK
+        x = ctx if chunk is None else self._prefill_x(ctx, chunk)
         grew = spike > self._line(kind, x) * 1.25 and spike > GIB // 4
         if ctx >= 1024 and spike > 0 and x > 0:
             # one sample per eighth of a doubling of x, the largest kept

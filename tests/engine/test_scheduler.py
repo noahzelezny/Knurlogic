@@ -726,6 +726,65 @@ def test_a_refusal_names_every_term_of_the_limit():
     assert s.requests()["memory_short"] == why
 
 
+def test_a_sparse_model_keys_its_prefill_by_what_a_chunk_reads():
+    """GLM-5.3-Flash split over an M4 Max and an M3 Ultra, 2026-10-06: with
+    the latent prefill (glm5_next edit 10) a chunk reads at most index_topk
+    keys a query, but the guard keyed the prefill line by the whole context:
+    one 2.7k-token warm-up carried in proportion refused a 339k-token prompt
+    "even prefilled 128 tokens at a time". Keyed by the model's
+    prefill_span, it is admitted at a full chunk; without one, unchanged."""
+    from knurlogic.engine.runtime import scheduler as S
+    GIB = S.GIB
+
+    def server(model):
+        s = S.Scheduler(Host(model, Tok({})), working_set_bytes=120 * GIB)
+        # keyed by the whole context, chunk 128 still reads 24.8 GiB of
+        # transient (31 with the quarter): the limit leaves 3 GiB beside
+        # these 85, under the 3.7 the cache needs -- refused, as it was
+        s._local_active = lambda: 85 * GIB
+        s._cached = lambda: 0
+        s._gpu_in_use = lambda: None
+        s._others = [int(0.7 * GIB)]
+        s._kv = (0.0, 12 * 2**10)        # ~3.7 GiB at 339k tokens
+        s._tx = _samples(prefill=[(2733 * 4, int(3.2 * GIB))])
+        return s
+
+    glm = type("M", (), {"prefill_span": staticmethod(
+        lambda ctx: min(ctx, 2048) + ctx // 72)})()
+    s = server(glm)
+    assert s._prefill_x(339141, 2048) == (2048 + 339141 // 72) * 4
+    assert s._make_room(339141) == "full"
+    assert s._chunk_pick >= 1024
+    with pytest.raises(S.OutOfMemory):        # keyed by the whole context
+        server(None)._make_room(339141)
+    # the hint is found through the wrappers (Model.language_model)
+    wrapped = type("W", (), {"language_model": glm})()
+    assert server(wrapped)._prefill_x(339141, 512) == 2048 + 339141 // 72
+
+
+def test_glm_prefill_span_reads_its_config():
+    import json
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]
+                           / "support" / "goldens"))
+    import build_glm5_next as G
+
+    from knurlogic.engine.families.glm5.architecture.glm5_next import language as L
+    from knurlogic.engine.families.glm5.architecture.glm5_next.config import TextConfig
+    real = dict(G.CONFIG, index_topk=2048, index_n_heads=32, index_kpool=4,
+                num_attention_heads=64, kv_lora_rank=512)
+    lm = L.LanguageModel.__new__(L.LanguageModel)
+    lm.args = TextConfig.from_dict(json.loads(json.dumps(real)))
+    assert lm.prefill_span(1000) == 1000 + 1000 // 72
+    assert lm.prefill_span(339141) == 2048 + 339141 // 72
+    old = L.EXPANDED_PREFILL
+    try:
+        L.EXPANDED_PREFILL = True                 # mlx-vlm's path: all of it
+        assert lm.prefill_span(339141) == 339141
+    finally:
+        L.EXPANDED_PREFILL = old
+
+
 def test_status_names_a_peer_rank_over_its_limit():
     from knurlogic.engine.runtime import scheduler as S
     from knurlogic.engine.serve import state

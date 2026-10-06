@@ -985,6 +985,25 @@ class LanguageModel(nn.Module):
 
         return predicate
 
+    def prefill_span(self, ctx: int) -> int:
+        """The context a prefill chunk's temporaries span, for the memory
+        guard (engine/runtime/scheduler.Scheduler._prefill_x; edit 10): past
+        index_topk the latent attention reads at most index_topk keys a
+        query, and only the indexer reads the whole context -- its pooled
+        keys, ctx / index_kpool, at index_n_heads float32 scores each,
+        against the attention's kv_lora_rank float32 latent plus a score
+        per head for each key it reads. So a chunk spans
+        min(ctx, index_topk) + ctx x (indexer bytes a token / attention
+        bytes a key): GLM-5.3-Flash 2048 + ctx / 72 (measured: +0.7 GiB a
+        layer from 32k to 131k, about 1/500 -- this is the safe side)."""
+        a = self.args
+        topk = int(getattr(a, "index_topk", 0) or 0)
+        if not topk or EXPANDED_PREFILL:
+            return ctx
+        per_key = 4 * (int(a.kv_lora_rank) + int(a.num_attention_heads))
+        per_tok = 4 * int(a.index_n_heads) / max(int(a.index_kpool or 1), 1)
+        return min(ctx, topk) + int(ctx * per_tok / per_key)
+
     def make_cache(self):
         caches = []
         for layer in self.layers:
