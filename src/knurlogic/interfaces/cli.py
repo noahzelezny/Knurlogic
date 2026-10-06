@@ -10,9 +10,9 @@ from knurlogic import __version__
 #: routing: interfaces.* talk to people and agents, machine.* read this box,
 #: engine.* touch what runs a model.
 COMMANDS = {
-    "ui": ("interfaces.page.server", "open the page without loading "
-           "anything: every model, every runtime, and where the memory "
-           "went"),
+    "ui": ("interfaces.page.server", "open the page in the browser (the "
+           "default with no command): every model, every runtime, and "
+           "where the memory went"),
     "serve": ("interfaces.serve", "run an OpenAI-compatible endpoint for an artifact"),
     "doctor": ("interfaces.doctor", "say whether an artifact will run, and why not"),
     "smoke": ("engine.smoke", "generate a token and prove where the code came from"),
@@ -36,13 +36,17 @@ def usage() -> int:
     print("usage: knurlogic <command> [args]\n")
     for name, (_, desc) in COMMANDS.items():
         print(f"  {name:8s} {desc}")
-    print("\nknurlogic <command> --help for a command's own options.")
+    print("\nknurlogic with no command opens the page (knurlogic ui).")
+    print("knurlogic <command> --help for a command's own options.")
     return 0
 
 
 def main(argv=None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if not args or args[0] in ("-h", "--help", "help"):
+    if not args:
+        # `pip install knurlogic` then `knurlogic`: the page, in the browser
+        args = ["ui"]
+    if args[0] in ("-h", "--help", "help"):
         return usage()
     if args[0] in ("-V", "--version", "version"):
         print(__version__)
