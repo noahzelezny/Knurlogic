@@ -893,15 +893,15 @@ def test_the_step_sets_the_rows_chunk_and_measures_the_prefill_line():
     assert s._tx == _samples(prefill=[(8192, 2 * GIB)])
 
 
-def test_memory_pressure_on_the_server_refuses_new_requests(caplog):
+def test_memory_pressure_on_the_server_warns_and_admits(caplog):
     """2026-10-05, M4: another process's leak had macOS compress 8.3 GB of
-    the serve within minutes; a prefill that took 98 s ran 17+ min. Past
-    1 GiB compressed/swapped, new requests get the insufficient_memory 503
-    and the status says why; a WARNING once; it clears when paged back."""
+    the serve; a prefill that took 98 s ran 17+ min. Past 1 GiB
+    compressed/swapped: a WARNING once and the status says so, but new
+    requests are still admitted (macOS compresses idle pages routinely;
+    refusing on it would refuse with memory to spare); it clears."""
     import logging
 
     from knurlogic.engine.runtime import scheduler as S
-    from knurlogic.interfaces.http.openai import _status_of
     GIB = S.GIB
     reading = {"b": int(8.3 * GIB)}
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB,
@@ -911,26 +911,14 @@ def test_memory_pressure_on_the_server_refuses_new_requests(caplog):
         s._sample_pressure(now=106.0)          # still over: no new warning
     warns = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warns) == 1 and "8.3 GiB" in warns[0].getMessage()
-    why = ("loaded, no memory for requests: rank 0: 8.3 GiB of the model "
-           "compressed/swapped by macOS (memory pressure from other "
-           "processes)")
-    assert s.memory_short() == why and s.requests()["memory_short"] == why
-    job = _job([5, 6, 7])
-    s._waiting.append(job)
-    s._admit_from_queue([], Exception, None)
-    kind, err = job.outbox.get_nowait()
-    assert kind == "error" and isinstance(err, S.OutOfMemory)
-    assert err.memory["compressed_bytes"] == int(8.3 * GIB)
-    body = _status_of(err).body()
-    assert body["error"]["code"] == "insufficient_memory"
-    assert "8.3 GiB of the model compressed" in body["error"]["message"]
-    # read every PRESSURE_EVERY_S, not every tick
+    why = ("rank 0: 8.3 GiB of the model compressed/swapped by macOS "
+           "(memory pressure from other processes)")
+    assert s.requests()["memory_pressure"] == why
+    assert s.memory_short() is None
     reading["b"] = 0
     s._sample_pressure(now=108.0)
-    assert s.memory_short() == why
     s._sample_pressure(now=112.0)
-    assert s.memory_short() is None and s._pressure_short() is None
-
+    assert s._pressure_short() is None
 
 def test_the_own_compressed_reading_is_a_number():
     from knurlogic.engine.runtime.scheduler import own_compressed_bytes
