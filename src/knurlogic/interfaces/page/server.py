@@ -2107,6 +2107,8 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
               f" and http://127.0.0.1:{port}; Wi-Fi and Ethernet refused")
     else:
         print(f"knurlogic  http://{host}:{port}")
+    print(f"  open http://127.0.0.1:{port}/ in your browser "
+          "(--open does it for you).")
     print("  nothing loaded, no model required.")
     print(f"  loading from the page starts `knurlogic serve` on port "
           f"{serve_port}.")
@@ -2170,9 +2172,9 @@ def main(argv=None) -> int:
                         "(HF_HUB_OFFLINE=1 does the same)")
     p.add_argument("--no-menubar", action="store_true",
                    help="do not show the macOS menu-bar icon")
-    p.add_argument("--no-open", action="store_true",
-                   help="do not open the page in the browser (it is not "
-                        "opened over SSH either)")
+    p.add_argument("--open", action="store_true",
+                   help="open the page in the default browser once it is "
+                        "up (not over SSH)")
     a = p.parse_args(argv)
     peers = []
     for spec in a.peer:
@@ -2181,13 +2183,12 @@ def main(argv=None) -> int:
     return serve_ui(a.host, a.port, a.serve_port, peers,
                     allow_origins=a.allow_origin, allow_hosts=a.allow_host,
                     offline=a.offline, menubar=not a.no_menubar,
-                    open_page=not a.no_open)
+                    open_page=a.open)
 
 
 def _open_when_up(host: str, port: int) -> None:
-    """Open the page in the default browser once it answers -- `pip
-    install knurlogic`, `knurlogic`, and the page is in front of you. Not
-    over SSH: the browser would open on the remote Mac's screen."""
+    """Open the page in the default browser once it answers (`--open`).
+    Not over SSH: the browser would open on the remote Mac's screen."""
     import os
     import threading
     if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):

@@ -10,8 +10,8 @@ from knurlogic import __version__
 #: routing: interfaces.* talk to people and agents, machine.* read this box,
 #: engine.* touch what runs a model.
 COMMANDS = {
-    "ui": ("interfaces.page.server", "open the page in the browser (the "
-           "default with no command): every model, every runtime, and "
+    "ui": ("interfaces.page.server", "start the page (the default with no "
+           "command): every model, every runtime, and "
            "where the memory went"),
     "serve": ("interfaces.serve", "run an OpenAI-compatible endpoint for an artifact"),
     "doctor": ("interfaces.doctor", "say whether an artifact will run, and why not"),

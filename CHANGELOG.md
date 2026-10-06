@@ -2,11 +2,11 @@
 
 ## 0.1.4
 
-Long generations hold up; `knurlogic` opens the page.
+Long generations hold up; `knurlogic` starts the page.
 
-* `knurlogic` with no command starts the page and opens it in the browser
-  (`knurlogic ui` too; `--no-open` skips it, and it never opens over SSH).
-  `knurlogic help` lists the commands.
+* `knurlogic` with no command starts the page and says where to open it;
+  `--open` opens it in the browser (never over SSH). `knurlogic help` lists
+  the commands.
 * GLM no longer fails after ~40 minutes of one generation with
   `[metal::malloc] Resource limit (499000) exceeded`: two cache fields no
   forward reads (the MLA latent's zero-width V and its offset) grew a lazy
