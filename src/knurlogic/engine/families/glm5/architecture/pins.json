@@ -1,11 +1,12 @@
 {
   "glm5_next": {
     "host": "mlx_lm",
-    "sha256": "319886b63c91d13a23f41bcf7f0b7b5a5eaffc70ab41571709b4af516c587737",
+    "sha256": "4633af99c782b71a85bef3e976acc9c61173b83307b19d4b73737433aff4fc8d",
     "validated_on_artifact": "TheDrainFlorist--GLM-5.3-Flash-VQ-2.7bpw",
     "validated_with_mlx_lm": "0.32.0",
     "validated_with_mlx_vlm": "0.6.17",
     "validated_live": "2026-10-03, mlx 0.32.3 / mlx-lm 0.32.0, two-Mac pipeline: text, tool call, one and two images",
-    "sparse_prefill": "edit 10: once the indexer selects, prefill attends in the latent over the selection; parity with the expanded path on the tiny model (tests/engine/test_glm5_sparse_prefill.py); real-rung re-validation pending"
+    "sparse_prefill": "edit 10: once the indexer selects, prefill attends in the latent over the selection; parity with the expanded path on the tiny model (tests/engine/test_glm5_sparse_prefill.py); real-rung re-validation pending",
+    "incremental_pool": "edit 11: prefill chunks reuse the indexer's stable pools; parity with full pooling (tests/engine/test_glm5_sparse_prefill.py); real-rung re-validation pending"
   }
 }
