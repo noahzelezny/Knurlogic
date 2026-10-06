@@ -51,6 +51,10 @@ class Admission:
     #: engine's own); on a ring it rides the admit op, as ranks prefilling
     #: in different chunk counts deadlock in the collectives
     chunk: int = 0
+    #: (uid, done, total) -> stop?, after every prefill chunk of this
+    #: admission (Scheduler._prefill_hook): progress, and True to stop the
+    #: prefill -- honoured on a single machine only (MTPBatchGenerator)
+    on_chunk: Any = None
 
 
 @dataclass
@@ -131,6 +135,9 @@ class LocalExecutor:
             samplers=[dict(a.sampling)], logits_processors=[list(a.processors)],
             control=[a.state_machine] if a.state_machine else None,
             reports=[a.report])
+        if a.on_chunk is not None and \
+                hasattr(self.gen, "prefill_hooks"):
+            self.gen.prefill_hooks[uid] = a.on_chunk
         if a.top_logprobs:
             self._top[uid] = a.top_logprobs
         return uid

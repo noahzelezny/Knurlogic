@@ -307,3 +307,46 @@ def test_max_tokens_zero_ends_on_the_first_token_as_one_does():
         out.append(toks[uid])
         ex.close()
     assert out[0] == out[1] and len(out[0]) == 1
+
+
+def test_a_prefill_stops_between_chunks_when_its_hook_says_so():
+    """2026-10-05: a 137k-token prefill ran 17+ min for a client that had
+    gone. The admission's hook sees every chunk; True stops the prefill
+    there (single machine), and the row fails alone."""
+    from knurlogic.engine.mtp.batch_generator import PrefillCancelled
+    from knurlogic.engine.runtime.executor import Admission, RowFailure
+    model, head, prompts = _tiny(512)
+    ex = _executor(model, head)
+    seen = []
+
+    def hook(uid, done, total):
+        seen.append((uid, done, total))
+        return len(seen) >= 2
+    long = (list(prompts[0]) * 8)[:80]
+    bad = ex.insert(Admission(segments=[long], max_tokens=6, on_chunk=hook))
+    good = ex.insert(Admission(segments=[prompts[1]], max_tokens=6))
+    toks, events = _drain(ex, [bad, good])
+    [f] = [e for e in events if isinstance(e, RowFailure)]
+    assert f.uid == bad and isinstance(f.error, PrefillCancelled)
+    assert [d for _, d, _ in seen] == [16, 32]       # stopped after chunk 2
+    assert all(u == bad and t == len(long) for u, _, t in seen)
+    assert len(toks[good]) == 6 and not ex.gen.prefill_hooks
+    ex.close()
+
+
+def test_on_a_ring_a_prefill_is_never_stopped_mid_chunk_loop():
+    """Every rank runs the same forwards: rank 0 leaving a prefill would
+    leave the others in a collective. The hook still sees progress; the
+    row is dropped at the next step boundary instead (the scheduler)."""
+    from knurlogic.engine.mtp.batch_generator import PrefillCancelled
+    model, head, _ = _tiny(512)
+    ex = _executor(model, head)
+    ex.gen.prefill_hooks[7] = lambda uid, done, total: True
+    ex.gen._coord = object()
+    try:
+        ex.gen._on_progress(7)(16, 80)        # no PrefillCancelled
+    finally:
+        ex.gen._coord = None
+    with pytest.raises(PrefillCancelled, match="client went away"):
+        ex.gen._on_progress(7)(16, 80)
+    ex.close()

@@ -45,6 +45,10 @@ logger = logging.getLogger(__name__)
 _NEVER = 1 << 62
 
 
+class PrefillCancelled(RuntimeError):
+    """A row's prefill stopped between chunks: its client went away."""
+
+
 @dataclass
 class TokenResponse(GenerationBatch.Response):
     """mlx-lm's per-token response plus the control machine's reading of
@@ -253,6 +257,9 @@ class MTPBatchGenerator(BatchGenerator):
         self._n_trunk = len(make_prompt_cache(self.model))
         #: engine/runtime/pipeline.Coord on a pipeline split, else None
         self._coord = None
+        #: uid -> (uid, done, total) -> stop?, called after each prefill
+        #: chunk of that row's admission (LocalExecutor.insert)
+        self.prefill_hooks: dict = {}
         #: wraps a row's prefill chunks (admit's prefill_ctx): a pipeline
         #: follower's overlapped sends (pipeline.silence), else None
         self._prefill_ctx = None
@@ -398,7 +405,7 @@ class MTPBatchGenerator(BatchGenerator):
                             prefill_ctx=self._prefill_ctx,
                             cache=cache or None, hcache=hcache, start_pos=hit,
                             checkpoints=bounds, on_checkpoint=on_checkpoint,
-                            **kw)
+                            on_progress=self._on_progress(uid), **kw)
                 if stash:
                     self._ckpt_pending[uid] = stash
                 self._report(uid, prompt, len(prefix), hit, n,
@@ -415,6 +422,23 @@ class MTPBatchGenerator(BatchGenerator):
         self._counters.prompt_tokens += n - hit
         self._stats["requests"] = self._stats.get("requests", 0) + 1
         return PromptProcessingBatch.Response(uid, (n, n), True, True)
+
+    def _on_progress(self, uid):
+        """admit's per-chunk callback for this row: its hook, and a stop
+        (PrefillCancelled) when the hook asks for one -- on a single
+        machine only. On a ring every rank runs the same forwards; one rank
+        leaving the prefill would leave the others waiting in a collective,
+        so there the row runs on and is dropped at the next step."""
+        hook = self.prefill_hooks.get(uid)
+        if hook is None:
+            return None
+
+        def on_progress(done, total):
+            if hook(uid, done, total) and self._coord is None:
+                raise PrefillCancelled(
+                    f"prefill of request {uid} stopped at {done}/{total} "
+                    f"tokens: the client went away")
+        return on_progress
 
     def _report(self, uid, prompt, offered, hit, n, via, n_ckpt, vis):
         """The cache report for this row's request (engine/cachereport)."""
@@ -627,6 +651,13 @@ class MTPBatchGenerator(BatchGenerator):
             uid = self._unprocessed_sequences[0][0]
             try:
                 admitted = self._admit_one()
+            except PrefillCancelled as e:
+                logger.info("%s", e)
+                self._rows.pop(uid, None)
+                self._ckpt_pending.pop(uid, None)
+                self._failed[uid] = e
+                self._requests.pop(uid, None)
+                return prompt_responses + self._failed_responses(), []
             # one request's failure goes to that request; the generation thread lives
             # (logged)
             except Exception as e:
@@ -649,6 +680,7 @@ class MTPBatchGenerator(BatchGenerator):
                 prompt_responses += self._failed_responses()
                 return prompt_responses, []
             finally:
+                self.prefill_hooks.pop(uid, None)
                 if self._coord is not None:
                     # B0, after every admission attempt (a failed one too:
                     # the ranks make the same broadcasts; rank 0's plan
@@ -788,6 +820,7 @@ class MTPBatchGenerator(BatchGenerator):
         for u in uids:
             self._failed.pop(u, None)
             self._requests.pop(u, None)
+            self.prefill_hooks.pop(u, None)
         caches = self.extract_cache(uids) if return_prompt_caches else {}
         if self._vision is not None:
             # A row dropped before admission still holds its tokenize pin.
