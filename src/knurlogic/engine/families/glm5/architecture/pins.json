@@ -1,7 +1,7 @@
 {
   "glm5_next": {
     "host": "mlx_lm",
-    "sha256": "3c12a75f1334be467014c1d8748e36f6f38ebe32aeaf157cc86f98ba965f0596",
+    "sha256": "319886b63c91d13a23f41bcf7f0b7b5a5eaffc70ab41571709b4af516c587737",
     "validated_on_artifact": "TheDrainFlorist--GLM-5.3-Flash-VQ-2.7bpw",
     "validated_with_mlx_lm": "0.32.0",
     "validated_with_mlx_vlm": "0.6.17",

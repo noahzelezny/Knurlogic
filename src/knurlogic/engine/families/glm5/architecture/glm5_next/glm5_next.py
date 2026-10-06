@@ -154,3 +154,7 @@ class Model(nn.Module):
 
     def make_cache(self):
         return self.language_model.make_cache()
+
+    def prefill_span(self, ctx: int) -> int:
+        """LanguageModel.prefill_span (edit 10)."""
+        return self.language_model.prefill_span(ctx)

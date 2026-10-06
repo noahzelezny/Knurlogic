@@ -10,7 +10,10 @@
   rounding. Measured on one layer at GLM-5.3-Flash's shapes (M3 Ultra,
   chunk 2048): 131k tokens 0.47 s and 8.1 GiB against 2.72 s and 42 GiB;
   32k 0.30 s / 7.4 GiB against 0.67 s / 11.4 GiB.
-  tools/bench_glm5_sparse_prefill.py measures your Mac.
+  tools/bench_glm5_sparse_prefill.py measures your Mac. The memory guard
+  reads a GLM prefill chunk as spanning what it reads (min(context, 2048)
+  + context / 72), not the whole context: one warm-up sample no longer
+  refuses a 339k-token prompt "even prefilled 128 tokens at a time".
 
 ## 0.1.4
 

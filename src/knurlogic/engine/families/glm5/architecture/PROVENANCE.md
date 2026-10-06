@@ -152,5 +152,10 @@ rows of the max |logit diff|: prefill 0.055 before, 0.051 with edit 7,
    42.04 vs 0.473 / 8.14. The expanded path's one win (~0.05 s a chunk at
    short context) is not worth a crossover: there is no setting;
    EXPANDED_PREFILL (False) runs mlx-vlm's path for the test and the bench.
-   Live validation on the released rungs pending.
+   `LanguageModel.prefill_span` (and `Model.prefill_span`) tells the
+   memory guard what a chunk's temporaries span: min(ctx, index_topk) +
+   ctx x (indexer bytes a token / attention bytes a key) = 2048 + ctx / 72
+   on GLM-5.3-Flash (measured ~1/500; the safe side). Keyed by the whole
+   context, one 2.7k-token warm-up refused a 339k-token prompt even at
+   chunk 128. Live validation on the released rungs pending.
 
