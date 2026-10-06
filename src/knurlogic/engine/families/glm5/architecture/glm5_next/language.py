@@ -536,6 +536,76 @@ class _LatentCache(KVCache):
 # single-token decode and the MTP verify forward (1 + draft depth tokens).
 SMALL_L = 4
 
+# knurlogic edit 10: from this many tokens of context a prefill chunk attends
+# in the latent too (absorbed MLA over each query's own selection,
+# _gathered_attention), not over per-head K/V expanded for the WHOLE context
+# and masked down to the selection: at 334k tokens that expansion is
+# heads x (qk + v) x bf16 for every cached token, every layer, every chunk,
+# and the prefill chunk had to shrink to 256 to fit (an M3 Ultra at 96 GB
+# was still killed at 98%). Read per forward (live). 0 = always once the
+# indexer selects; "off" = the expanded path only.
+SPARSE_PREFILL_ENV = "KNURLOGIC_SPARSE_PREFILL_FROM"
+SPARSE_PREFILL_DEFAULT = 0
+# query rows per block of _gathered_attention: its gathered latent is
+# rows x topk x kv_lora_rank, bounded whatever the chunk
+GATHER_ROWS = 128
+
+
+def sparse_prefill_from() -> Optional[int]:
+    """Tokens of context from which prefill takes the gathered latent path;
+    None = never (the expanded path)."""
+    import os
+    v = os.environ.get(SPARSE_PREFILL_ENV, "").strip().lower()
+    if v in ("off", "never", "false", "no"):
+        return None
+    try:
+        return max(int(v), 0) if v else SPARSE_PREFILL_DEFAULT
+    except ValueError:
+        return SPARSE_PREFILL_DEFAULT
+
+
+def _gathered_attention(q, kv_latent, topk, mask, scale):
+    """Absorbed MLA over each query row's own selection, a block of rows at
+    a time: the same attention as the expanded path's dense scatter mask
+    (the same keys, the same softmax), without expanding the context.
+
+    q [B, H, L, D] (already absorbed into the latent: embed_q);
+    kv_latent [B, 1, Kv, D]; topk [B, L, K] (-1 = unselected); `mask` the
+    forward's mask (bool, as _gather_selected reads it) or None.
+    -> [B, H, L, D] in the latent (unembed_out follows)."""
+    B, H, L, D = q.shape
+    Kv = kv_latent.shape[2]
+    K = topk.shape[-1]
+    lat = kv_latent[:, 0]                                   # [B, Kv, D]
+    valid = topk >= 0
+    clamped = mx.clip(topk, 0, Kv - 1)
+    if mask is not None and mask.dtype == mx.bool_:
+        m = mask
+        if m.ndim == 2:
+            m = m[None] if (L > 1 and m.shape[0] == L) else m[:, None, :]
+        else:
+            m = m.reshape(m.shape[0], -1, m.shape[-1])
+        m = mx.broadcast_to(m, (B, L, Kv))
+        valid = valid & mx.take_along_axis(m, clamped, axis=-1)
+    out = []
+    for r0 in range(0, L, GATHER_ROWS):
+        r1 = min(r0 + GATHER_ROWS, L)
+        n = r1 - r0
+        idx = clamped[:, r0:r1].reshape(B, n * K, 1)
+        keys = mx.take_along_axis(
+            lat, mx.broadcast_to(idx, (B, n * K, D)), axis=1
+        ).reshape(B, n, K, D)                               # [B, n, K, D]
+        qb = q[:, :, r0:r1].transpose(0, 2, 1, 3)           # [B, n, H, D]
+        scores = (qb.astype(mx.float32)
+                  @ keys.astype(mx.float32).swapaxes(-1, -2)) * scale
+        ok = valid[:, r0:r1][:, :, None, :]                 # [B, n, 1, K]
+        scores = mx.where(ok, scores, -mx.inf)
+        w = mx.softmax(scores, axis=-1, precise=True)
+        w = mx.where(ok, w, 0.0)            # a row with nothing valid: 0
+        o = (w.astype(keys.dtype) @ keys)                   # [B, n, H, D]
+        out.append(o.transpose(0, 2, 1, 3).astype(q.dtype))
+    return out[0] if len(out) == 1 else mx.concatenate(out, axis=2)
+
 
 def _gather_selected(kv_latent, topk, mask, B, L, Kv):
     """Gather the L rows' selected latent keys; mask each row to its own block.
@@ -654,8 +724,11 @@ class Glm5NextSparseAttention(nn.Module):
         # Absorbed MLA (queries into the latent, one shared K=V latent head) for
         # decode and small verify widths; the expanded per-head K/V only for prefill.
         absorbed = L <= SMALL_L
+        frm = sparse_prefill_from()
+        gathered = (not absorbed and topk_indices is not None
+                    and frm is not None and kv_latent.shape[2] >= frm)
         attn_mask = mask
-        if topk_indices is not None:
+        if topk_indices is not None and not gathered:
             Kv = kv_latent.shape[2]
             valid_sel = topk_indices >= 0
             if absorbed:
@@ -685,18 +758,23 @@ class Glm5NextSparseAttention(nn.Module):
             # returns the list (engine/kvquant.QuantKVCache)
             cache[0].keys = mx.depends(cache[0].keys, (cache[1].keys, cache[1].values))
 
-        if absorbed:
-            q = self.embed_q(q)
-            k = v = kv_latent
+        if gathered:
+            output = self.unembed_out(_gathered_attention(
+                self.embed_q(q), kv_latent, topk_indices[:, 0], mask,
+                self.scale))
         else:
-            k = self.embed_q(kv_latent, transpose=False)
-            v = self.unembed_out(kv_latent)
+            if absorbed:
+                q = self.embed_q(q)
+                k = v = kv_latent
+            else:
+                k = self.embed_q(kv_latent, transpose=False)
+                v = self.unembed_out(kv_latent)
 
-        output = scaled_dot_product_attention(
-            q, k, v, cache=cache, scale=self.scale, mask=attn_mask
-        )
-        if absorbed:
-            output = self.unembed_out(output)
+            output = scaled_dot_product_attention(
+                q, k, v, cache=cache, scale=self.scale, mask=attn_mask
+            )
+            if absorbed:
+                output = self.unembed_out(output)
 
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
         return self.o_proj(output)

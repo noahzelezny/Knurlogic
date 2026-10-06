@@ -125,3 +125,30 @@ rows of the max |logit diff|: prefill 0.055 before, 0.051 with edit 7,
    in current thread". They are built from numpy now, as the other
    branches already were. A scan of the whole glm5 folder found no other
    cached or module-level lazy array. No result changes.
+
+10. **Prefill past the crossover attends in the latent** (`Glm5NextSparseAttention`,
+   new `_gathered_attention`, `sparse_prefill_from`, `GATHER_ROWS`;
+   KNURLOGIC_SPARSE_PREFILL_FROM). mlx-vlm's port absorbs MLA (queries into
+   the latent, one shared K=V head) and gathers the indexer's selection
+   only at L <= SMALL_L (decode, MTP verify); every prefill chunk expanded
+   the latent of EVERY cached token into per-head K and V and masked the
+   result down to the selection, so its memory and work grew with the whole
+   context: at 334k tokens the scheduler had shrunk the prefill chunk to
+   256 to fit, and an M3 Ultra (96 GB) holding 21 of 45 layers was still
+   killed at 98% of the prompt. Past the crossover a chunk now attends each
+   query row over its own top-k latent rows, GATHER_ROWS (128) rows at a
+   time: absorbed q against the gathered latent, float32 scores, a precise
+   softmax over exactly the selected-and-visible keys (the dense mask's
+   set), the latent as V, then unembed_out -- the expanded path's attention
+   in another association, and a row with no valid key gives 0 where sdpa
+   gives NaN. Memory: rows x topk x kv_lora_rank per block, independent of
+   the context. Parity: tests/engine/test_glm5_sparse_prefill.py, a tiny
+   float32 model prefilled in 16-token chunks past index_topk through the
+   cache, both paths, plain and 8-bit latent: logits equal to 1e-4 of their
+   range (the bf16 cases run where mlx's backend runs bf16 MoE). The
+   crossover is a launch setting (0 = always once the indexer selects;
+   "off" = mlx-vlm's path); tools/bench_glm5_sparse_prefill.py times one
+   layer at the artifact's shapes, both paths, at several contexts, and
+   says where the latent path is the faster on that machine. Live
+   validation on the released rungs pending.
+

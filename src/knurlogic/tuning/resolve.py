@@ -122,8 +122,8 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 #: Knobs `engine.serve` turns into argv or an mlx call, so they are real
 #: whether or not an artifact's bundled runtime reads them.
 ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp",
-                   "mtp_dynamic", "kv_bits", "kv_kernel", "cross_chip",
-                   "long_context", "preset", "vision")
+                   "mtp_dynamic", "kv_bits", "kv_kernel", "sparse_prefill",
+                   "cross_chip", "long_context", "preset", "vision")
 
 
 def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
@@ -948,6 +948,11 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
            else launch.get("kv_bits", "bf16")) == "8":
         emit(r, artifact, "kv_kernel", launch.get("kv_kernel", "on"))
     emit(r, artifact, "cross_chip", launch.get("cross_chip", "off"))
+    # GLM's prefill in the latent past the crossover (glm5_next edit 10):
+    # shown for the family whose attention reads it
+    if artifact.model_type in ("glm5_next", "glm5_next_text"):
+        emit(r, artifact, "sparse_prefill",
+             launch.get("sparse_prefill", S.SPARSE_PREFILL_DEFAULT))
     emit(r, artifact, "preset", tune)
     r.ranges["KNURLOGIC_KV_BITS"] = ["bf16"] + [
         str(b) for b in bits if str(b) in S.KV_BITS_OFFERED]
