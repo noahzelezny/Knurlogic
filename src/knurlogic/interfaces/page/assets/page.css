@@ -497,7 +497,7 @@ nav a[aria-pressed=true]{text-shadow:var(--glow)}
 .grp.no .var.no{opacity:1}
 #pickinfo .note{color:var(--faint);margin-top:6px}
 #lmwhere{font-size:12.5px;color:var(--dim);margin-top:8px;overflow-wrap:anywhere}
-.optrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0}
+.optrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0} .optrow[hidden]{display:none}
 .optrow .optlab{margin:0}
 .lbar{height:3px;background:var(--line);border-radius:2px;margin:5px 0 3px;overflow:hidden}
 .lbar i{display:block;height:100%;background:var(--acc);transition:width .4s}
