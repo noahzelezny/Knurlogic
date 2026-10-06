@@ -123,7 +123,7 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 #: whether or not an artifact's bundled runtime reads them.
 ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp",
                    "mtp_dynamic", "kv_bits", "kv_kernel", "cross_chip",
-                   "long_context", "preset", "vision")
+                   "long_context", "preset", "vision", "thinking_default")
 
 
 def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
@@ -948,6 +948,16 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
            else launch.get("kv_bits", "bf16")) == "8":
         emit(r, artifact, "kv_kernel", launch.get("kv_kernel", "on"))
     emit(r, artifact, "cross_chip", launch.get("cross_chip", "off"))
+    # the level a silent request gets: shown where the template has levels
+    try:
+        from knurlogic.engine.serve import thinking
+        has_levels = bool(thinking.levels(
+            thinking.template_of(artifact.path)).get("native"))
+    except (OSError, ValueError, ImportError):
+        has_levels = False
+    if has_levels:
+        emit(r, artifact, "thinking_default",
+             launch.get("thinking_default", "model"))
     emit(r, artifact, "preset", tune)
     r.ranges["KNURLOGIC_KV_BITS"] = ["bf16"] + [
         str(b) for b in bits if str(b) in S.KV_BITS_OFFERED]

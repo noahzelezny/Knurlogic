@@ -24,6 +24,19 @@ from knurlogic.engine.templates import TEMPLATE_ERRORS
 from . import state
 
 LADDER = ("none", "minimal", "low", "medium", "high", "xhigh")
+#: the level a request that names none is served at (a per-model setting,
+#: live); unset or "model": the template's own default. GLM-5.3's is max,
+#: and with the harness's effort control broken every long conversation thought
+#: for hours without committing to an answer.
+DEFAULT_ENV = "KNURLOGIC_THINKING_DEFAULT"
+
+
+def server_default():
+    """The THINKING_DEFAULT level, or None (the model's own). A value off
+    the ladder is None here: the setting is checked where it is set."""
+    import os
+    v = os.environ.get(DEFAULT_ENV, "").strip().lower()
+    return v if v in LADDER else None
 
 _dialect_cache: dict = {}
 
@@ -300,6 +313,9 @@ def translate(body: dict, client_kwargs: dict | None):
     translation, and the report says so. ValueError: a level off the
     ladder, for the caller to refuse with 400."""
     level = requested(body)
+    by_server = level is None and server_default() is not None
+    if by_server:
+        level = server_default()
     tmpl = _served_template()
     name, spec = detect(tmpl)
     tok = _served_tokenizer()
@@ -309,6 +325,10 @@ def translate(body: dict, client_kwargs: dict | None):
         # The text named controls the template does not act on.
         name, spec = None, None
     kwargs, report = resolve(level, name, spec)
+    if by_server:
+        report["note"] = ((report["note"] + "; ") if report["note"] else ""
+                          ) + "the server's Thinking default (the request " \
+                              "named no level)"
     if level is None and p is not None and spec is not None:
         report["applied"] = p["default"] or "the model's own"
         report["note"] = ("what the server renders when the "

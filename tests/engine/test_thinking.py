@@ -188,6 +188,42 @@ def test_a_silent_request_reports_what_the_server_renders():
     assert rep["applied"] == "xhigh"                    # the bare render
 
 
+def test_the_thinking_default_serves_a_silent_request(monkeypatch):
+    """KNURLOGIC_THINKING_DEFAULT: a request that names no level is served
+    at the per-model default (GLM-5.3's own is max, and a client whose
+    effort control broke left every long conversation thinking for hours);
+    one that names a level still wins; "model" is the template's own."""
+    _serve(_Qwen38Tok())
+    monkeypatch.setenv(T.DEFAULT_ENV, "low")
+    kwargs, rep = T.translate({}, None)
+    assert kwargs == {"reasoning_effort": "low"}
+    assert rep["applied"] == "low" and "Thinking default" in rep["note"]
+    kwargs, rep = T.translate({"reasoning_effort": "medium"}, None)
+    assert kwargs == {"reasoning_effort": "medium"}
+    assert "Thinking default" not in rep["note"]
+    monkeypatch.setenv(T.DEFAULT_ENV, "model")
+    kwargs, rep = T.translate({}, None)
+    assert kwargs is None and rep["applied"] == "xhigh"
+
+
+def test_the_thinking_default_is_live_and_checked(monkeypatch):
+    import os
+
+    from knurlogic.engine.serve.load import apply_live
+    from knurlogic.tuning import settings as S
+    monkeypatch.delenv(T.DEFAULT_ENV, raising=False)
+    done = apply_live({T.DEFAULT_ENV: "medium"})
+    assert done[T.DEFAULT_ENV].startswith("applied")
+    assert os.environ[T.DEFAULT_ENV] == "medium"
+    done = apply_live({T.DEFAULT_ENV: "max"})
+    assert done[T.DEFAULT_ENV].startswith("failed")
+    assert os.environ[T.DEFAULT_ENV] == "medium"
+    assert S.check_knob(T.DEFAULT_ENV, "max")
+    assert S.check_knob(T.DEFAULT_ENV, "low") is None
+    assert S.KNOB_RANGE[T.DEFAULT_ENV][0][0] == "model"
+    assert set(S.THINKING_DEFAULT_VALUES[1:]) == set(T.LADDER)
+
+
 def test_a_client_override_is_reported_by_what_it_renders():
     """The case: reasoning_effort low, but the client's own kwargs turn
     thinking off. The prompt is closed-think; the report must say off."""

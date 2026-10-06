@@ -358,6 +358,7 @@ KNOB_TITLES: dict = {
     "KNURLOGIC_VISION": "Vision",
     "KNURLOGIC_KV_KERNEL": "KV kernel",
     "KNURLOGIC_LONG_CONTEXT": "Long context",
+    "KNURLOGIC_THINKING_DEFAULT": "Thinking default",
 }
 KNOB_TITLES["VQLAB_PREFILL_CHUNK"] = KNOB_TITLES["KNURLOGIC_PREFILL_CHUNK"]
 KNOB_TITLES["VQ_CACHE_LIMIT_GB"] = KNOB_TITLES["KNURLOGIC_CACHE_LIMIT_GB"]
@@ -467,6 +468,17 @@ KNOB_DOC = {
         "KV-shared layers always take dequantize + attention). A row with "
         "every key masked returns 0 here where mlx sdpa returns NaN. "
         "Prefill is dequantize + attention either way."),
+    "KNURLOGIC_THINKING_DEFAULT": (
+        "the thinking level a request that names none is served at "
+        "(model: the template's own default)",
+        "for a client that sends no reasoning_effort, or whose control is "
+        "broken: the level goes through the same translation as a "
+        "request's own (engine/serve/thinking), to the nearest native "
+        "level at or above it, and usage.knurlogic.thinking says it was "
+        "the server's default. A request that names a level still wins. "
+        "GLM-5.3's own default is max: on a 339k-token conversation it "
+        "thought for hours without committing to an answer. Live: "
+        "applies to the next request."),
     "KNURLOGIC_LONG_CONTEXT": (
         "reach past the model's trained window: off, or yarn (Qwen's "
         "documented YaRN rope scaling, factor 4 over 262,144 -> ~1M tokens)",
@@ -547,6 +559,8 @@ KNOB_HELP = {
     "KNURLOGIC_KV_BITS": "8-bit holds about twice the conversation in the "
                          "same memory, slightly slower.",
     "KNURLOGIC_KV_KERNEL": "A faster way to read an 8-bit cache; leave on.",
+    "KNURLOGIC_THINKING_DEFAULT": "How hard the model thinks when a client "
+                                  "doesn't say. model = its own default.",
     "KNURLOGIC_CACHE_LIMIT_GB": "Freed memory held back for reuse instead of "
                                 "returned to the system. No measured speed "
                                 "difference; less leaves more memory free.",
@@ -596,6 +610,8 @@ KNOB_ALIASES = {
     "kv_bits": ("KNURLOGIC_KV_BITS",),
     # the 8-bit KV decode kernel (engine/kvattn): on unless "off"; A/B knob
     "kv_kernel": ("KNURLOGIC_KV_KERNEL",),
+    # the level a request that names none is served at (engine/serve/thinking)
+    "thinking_default": ("KNURLOGIC_THINKING_DEFAULT",),
     "cross_chip": ("KNURLOGIC_CROSS_CHIP",),
     "long_context": ("KNURLOGIC_LONG_CONTEXT",),
     "preset": ("KNURLOGIC_PRESET",),
@@ -619,7 +635,7 @@ MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_VISION",
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "context_length", "mtp",
                                       "mtp_dynamic", "vision", "kv_bits",
-                                      "kv_kernel",
+                                      "kv_kernel", "thinking_default",
                                       "cross_chip", "long_context",
                                       "preset")
                           for n in KNOB_ALIASES[k])
@@ -660,6 +676,24 @@ KV_BITS_VALUES = ["bf16", "8", "6", "4"]
 #: what Settings offers: 6 and 4 have no fused decode kernel and were never
 #: measured on a real model, so they are taken from env / --set only
 KV_BITS_OFFERED = ("bf16", "8")
+
+
+#: the Thinking default's values: the model's own, or a level on the
+#: reasoning_effort ladder (engine/serve/thinking.LADDER, which the page and
+#: the resolver read without importing the engine)
+THINKING_DEFAULT_VALUES = ["model", "none", "minimal", "low", "medium",
+                           "high", "xhigh"]
+
+
+def thinking_default_of(v) -> str:
+    """'model' or a level on the ladder."""
+    s = str(v if v is not None else "").strip().lower()
+    if s in ("", "default"):
+        return "model"
+    if s not in THINKING_DEFAULT_VALUES:
+        raise ValueError(f"{s!r} isn't one of "
+                         f"{', '.join(THINKING_DEFAULT_VALUES)}")
+    return s
 
 
 def kv_bits_of(v):
@@ -780,7 +814,8 @@ KNOB_TIER_REACH = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB",
                    "KNURLOGIC_CACHE_LIMIT_GB",
                    "VQLAB_CACHE_LIMIT_GB", "KNURLOGIC_PREFILL_CHUNK",
                    "VQLAB_PREFILL_CHUNK",
-                   "KNURLOGIC_CONTEXT_LENGTH") + MODEL_KNOBS
+                   "KNURLOGIC_CONTEXT_LENGTH",
+                   "KNURLOGIC_THINKING_DEFAULT") + MODEL_KNOBS
 
 
 def knob_tier(name: str) -> str:
@@ -817,6 +852,7 @@ KNOB_RANGE: dict = {
     # that refuses quantized KV offers bf16 alone
     "KNURLOGIC_KV_BITS": (KV_BITS_VALUES, "bits"),
     "KNURLOGIC_KV_KERNEL": (["on", "off"], ""),
+    "KNURLOGIC_THINKING_DEFAULT": (THINKING_DEFAULT_VALUES, ""),
     "KNURLOGIC_CROSS_CHIP": (["off", "on", "auto"], ""),
     # narrowed per family by the resolver: ["off"] where no model card
     # documents YaRN
@@ -1068,6 +1104,8 @@ def check_knob(name: str, value, window: int = 0):
             cross_chip_of(s)
         elif name == "KNURLOGIC_LONG_CONTEXT":
             long_context_of(s)
+        elif name == "KNURLOGIC_THINKING_DEFAULT":
+            thinking_default_of(s)
     except ValueError as e:
         m = str(e)
         return m if m.startswith(knob_title(name) + ":") \
