@@ -526,14 +526,18 @@ def test_images_on_a_split_model_are_the_unsplit_engines(tmp_path, split):
                                                  ("tensor", "nan", ""),
                                                  ("tensor", "admit", ""),
                                                  ("tensor", "nan", "1"),
-                                                 ("tensor", "admit", "1")])
+                                                 ("tensor", "admit", "1"),
+                                                 ("pipeline", "cancel", "1"),
+                                                 ("tensor", "cancel", "")])
 def test_a_row_failing_on_rank_0_only_fails_that_row(tmp_path, split, fail,
                                                      drafting):
     """Rank 0 alone fails one row (non-finite logits mid-decode, or an
     admission that raised after its forward): that row ends, the others
     stream every token, and the follower -- which still held the row --
     drops it from the next plan's remove instead of raising Desync (both
-    processes exit 0; _ring asserts it)."""
+    processes exit 0; _ring asserts it). "cancel": rank 0's client goes
+    away mid-prefill, and every rank stops that prefill at the same chunk
+    boundary (Coord.stop) -- a ring used to run it to its end."""
     d = _ring(tmp_path, "engine", fail, split, drafting)
     lens = [len(t) for t in d["split"]]
     assert lens[0] == lens[2] == 30, lens

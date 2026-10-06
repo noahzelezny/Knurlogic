@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* A split model (pipeline or tensor) stops a prefill when its client goes
+  away, at the next chunk on every Mac together, instead of running the
+  whole prompt to its end: a 339k-token prompt kept two Macs busy for half
+  an hour after the harness stopped.
 * A per-model "Thinking default" setting: the thinking level a request
   that names none is served at ("model" keeps the template's own). For a
   client that sends no reasoning_effort, or whose control is broken --
