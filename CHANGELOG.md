@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.4
+
+Long generations hold up; `knurlogic` opens the page.
+
+* `knurlogic` with no command starts the page and opens it in the browser
+  (`knurlogic ui` too; `--no-open` skips it, and it never opens over SSH).
+  `knurlogic help` lists the commands.
+* GLM no longer fails after ~40 minutes of one generation with
+  `[metal::malloc] Resource limit (499000) exceeded`: two cache fields no
+  forward reads (the MLA latent's zero-width V and its offset) grew a lazy
+  graph every step, each link holding a GPU buffer, until Metal's cap on
+  live buffers. They are evaluated every step now, drafting or not, on
+  every rank.
+* DeepSeek-V4's compressed pools grow in place, 256 rows at a time, instead
+  of being copied whole every few tokens: long generations no longer slow
+  down as the context grows or fill mlx's buffer cache until the machine
+  stutters and the job is torn down.
+
 ## 0.1.3
 
 DeepSeek-V4-Flash-Vision-Exp with images, its thinking levels and DSpark
