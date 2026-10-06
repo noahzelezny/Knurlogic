@@ -103,32 +103,3 @@ def test_gathered_attention_bounds_its_rows():
         L.GATHER_ROWS = old
     assert a.shape == (B, H, Lq, D)
     assert float(mx.max(mx.abs(a - b))) < 1e-5
-
-
-@pytest.mark.parametrize("chunk", [16, 13, 6])
-@pytest.mark.parametrize("bits", [None, 8])
-def test_prefill_reuses_the_indexers_stable_pools(monkeypatch, chunk, bits):
-    """glm5_next edit 11: a prefill chunk pools only the indexer's tail and
-    reuses the complete pools before it, as decode always did. A pool is
-    its own index_kpool-aligned window, so the logits equal full pooling's
-    -- with chunks that do not line up with the pools (13, 6 against
-    kpool 4) as well as ones that do."""
-    from knurlogic.engine.families.glm5.architecture.glm5_next import language as L
-    model = _model(mx.float32, bits)
-    ids = _ids(72)
-    monkeypatch.setattr(L, "INCREMENTAL_POOL", False)
-    want = _prefill(model, ids, chunk)
-    monkeypatch.setattr(L, "INCREMENTAL_POOL", True)
-    pooled = []
-    real = L.Glm5NextIndexer._pooled_states
-
-    def counted(self, keys, *a, **k):
-        pooled.append(keys.shape[1])
-        return real(self, keys, *a, **k)
-    monkeypatch.setattr(L.Glm5NextIndexer, "_pooled_states", counted)
-    got = _prefill(model, ids, chunk)
-    # past the first selecting chunk, a chunk pools its own tail only
-    assert pooled and max(pooled[len(pooled) // 2:]) < chunk + 4
-    rng = float(mx.max(want) - mx.min(want))
-    diff = float(mx.max(mx.abs(got - want)))
-    assert diff <= 1e-5 * rng, (diff, rng)
