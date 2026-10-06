@@ -358,7 +358,6 @@ KNOB_TITLES: dict = {
     "KNURLOGIC_VISION": "Vision",
     "KNURLOGIC_KV_KERNEL": "KV kernel",
     "KNURLOGIC_LONG_CONTEXT": "Long context",
-    "KNURLOGIC_SPARSE_PREFILL_FROM": "Sparse prefill from",
 }
 KNOB_TITLES["VQLAB_PREFILL_CHUNK"] = KNOB_TITLES["KNURLOGIC_PREFILL_CHUNK"]
 KNOB_TITLES["VQ_CACHE_LIMIT_GB"] = KNOB_TITLES["KNURLOGIC_CACHE_LIMIT_GB"]
@@ -468,20 +467,6 @@ KNOB_DOC = {
         "KV-shared layers always take dequantize + attention). A row with "
         "every key masked returns 0 here where mlx sdpa returns NaN. "
         "Prefill is dequantize + attention either way."),
-    "KNURLOGIC_SPARSE_PREFILL_FROM": (
-        "tokens of context from which GLM's prefill attends in the latent, "
-        "over each query's own sparse selection (0: always; off: never)",
-        "GLM-5.3 (glm5_next) only. Past the indexer's top-k, a prefill "
-        "chunk otherwise expands every cached token's latent into per-head "
-        "K/V and masks it down to the selection: memory and work grow with "
-        "the whole context, and at 334k tokens the prefill chunk shrank to "
-        "256 and an M3 Ultra (96 GB) was still killed at 98%. In the "
-        "latent the chunk reads only what the indexer chose: the same "
-        "keys and softmax (equal logits to rounding, "
-        "tests/engine/test_glm5_sparse_prefill.py), memory independent "
-        "of the context. Below the crossover the expanded path keeps the "
-        "fused attention kernel; where it pays is measured by "
-        "tools/bench_glm5_sparse_prefill.py, not assumed."),
     "KNURLOGIC_LONG_CONTEXT": (
         "reach past the model's trained window: off, or yarn (Qwen's "
         "documented YaRN rope scaling, factor 4 over 262,144 -> ~1M tokens)",
@@ -562,9 +547,6 @@ KNOB_HELP = {
     "KNURLOGIC_KV_BITS": "8-bit holds about twice the conversation in the "
                          "same memory, slightly slower.",
     "KNURLOGIC_KV_KERNEL": "A faster way to read an 8-bit cache; leave on.",
-    "KNURLOGIC_SPARSE_PREFILL_FROM": "GLM: long prompts read only the "
-                                     "tokens attention picks, in far less "
-                                     "memory. 0 = always.",
     "KNURLOGIC_CACHE_LIMIT_GB": "Freed memory held back for reuse instead of "
                                 "returned to the system. No measured speed "
                                 "difference; less leaves more memory free.",
@@ -614,8 +596,6 @@ KNOB_ALIASES = {
     "kv_bits": ("KNURLOGIC_KV_BITS",),
     # the 8-bit KV decode kernel (engine/kvattn): on unless "off"; A/B knob
     "kv_kernel": ("KNURLOGIC_KV_KERNEL",),
-    # GLM's prefill in the latent from this context (glm5_next edit 10)
-    "sparse_prefill": ("KNURLOGIC_SPARSE_PREFILL_FROM",),
     "cross_chip": ("KNURLOGIC_CROSS_CHIP",),
     "long_context": ("KNURLOGIC_LONG_CONTEXT",),
     "preset": ("KNURLOGIC_PRESET",),
@@ -626,8 +606,7 @@ KNOB_ALIASES = {
 MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_VISION",
                "KNURLOGIC_KV_BITS",
                "KNURLOGIC_KV_KERNEL", "KNURLOGIC_CROSS_CHIP",
-               "KNURLOGIC_LONG_CONTEXT", "KNURLOGIC_SPARSE_PREFILL_FROM",
-               "KNURLOGIC_PRESET")
+               "KNURLOGIC_LONG_CONTEXT", "KNURLOGIC_PRESET")
 
 
 # --- which knobs the ENGINE consumes ----------------------------------------
@@ -640,7 +619,7 @@ MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_VISION",
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "context_length", "mtp",
                                       "mtp_dynamic", "vision", "kv_bits",
-                                      "kv_kernel", "sparse_prefill",
+                                      "kv_kernel",
                                       "cross_chip", "long_context",
                                       "preset")
                           for n in KNOB_ALIASES[k])
@@ -681,32 +660,6 @@ KV_BITS_VALUES = ["bf16", "8", "6", "4"]
 #: what Settings offers: 6 and 4 have no fused decode kernel and were never
 #: measured on a real model, so they are taken from env / --set only
 KV_BITS_OFFERED = ("bf16", "8")
-
-
-#: GLM's sparse-prefill crossover, in tokens of context: "0" always, "off"
-#: never (glm5_next edit 10). The default is "0": in the latent a chunk
-#: reads K rows where the expanded path reads the whole context; the
-#: crossover is for where a fused kernel over a short context measures
-#: faster (tools/bench_glm5_sparse_prefill.py).
-SPARSE_PREFILL_DEFAULT = "0"
-SPARSE_PREFILL_VALUES = ["0", "8192", "16384", "32768", "65536", "131072",
-                         "off"]
-
-
-def sparse_prefill_of(v) -> str:
-    """'off' or a whole number of tokens >= 0, as a string."""
-    s = str(v if v is not None else "").strip().lower()
-    if s in ("", "default"):
-        return SPARSE_PREFILL_DEFAULT
-    if s in ("off", "never"):
-        return "off"
-    try:
-        n = int(s)
-    except ValueError:
-        raise ValueError(f"{s!r} isn't a number of tokens or off") from None
-    if n < 0:
-        raise ValueError(f"{n} is below 0")
-    return str(n)
 
 
 def kv_bits_of(v):
@@ -864,7 +817,6 @@ KNOB_RANGE: dict = {
     # that refuses quantized KV offers bf16 alone
     "KNURLOGIC_KV_BITS": (KV_BITS_VALUES, "bits"),
     "KNURLOGIC_KV_KERNEL": (["on", "off"], ""),
-    "KNURLOGIC_SPARSE_PREFILL_FROM": (SPARSE_PREFILL_VALUES, "tokens"),
     "KNURLOGIC_CROSS_CHIP": (["off", "on", "auto"], ""),
     # narrowed per family by the resolver: ["off"] where no model card
     # documents YaRN
@@ -1116,8 +1068,6 @@ def check_knob(name: str, value, window: int = 0):
             cross_chip_of(s)
         elif name == "KNURLOGIC_LONG_CONTEXT":
             long_context_of(s)
-        elif name == "KNURLOGIC_SPARSE_PREFILL_FROM":
-            sparse_prefill_of(s)
     except ValueError as e:
         m = str(e)
         return m if m.startswith(knob_title(name) + ":") \

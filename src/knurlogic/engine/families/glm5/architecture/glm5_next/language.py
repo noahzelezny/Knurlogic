@@ -536,32 +536,23 @@ class _LatentCache(KVCache):
 # single-token decode and the MTP verify forward (1 + draft depth tokens).
 SMALL_L = 4
 
-# knurlogic edit 10: from this many tokens of context a prefill chunk attends
-# in the latent too (absorbed MLA over each query's own selection,
+# knurlogic edit 10: once the indexer selects, a prefill chunk attends in
+# the latent too (absorbed MLA over each query's own selection,
 # _gathered_attention), not over per-head K/V expanded for the WHOLE context
 # and masked down to the selection: at 334k tokens that expansion is
 # heads x (qk + v) x bf16 for every cached token, every layer, every chunk,
 # and the prefill chunk had to shrink to 256 to fit (an M3 Ultra at 96 GB
-# was still killed at 98%). Read per forward (live). 0 = always once the
-# indexer selects; "off" = the expanded path only.
-SPARSE_PREFILL_ENV = "KNURLOGIC_SPARSE_PREFILL_FROM"
-SPARSE_PREFILL_DEFAULT = 0
+# was still killed at 98%). Measured on one layer at GLM-5.3-Flash 2.7bpw's
+# shapes, chunk 2048, M3 Ultra (tools/bench_glm5_sparse_prefill.py),
+# expanded vs latent: 8k 0.181 s / 4.2 GiB vs 0.230 s / 7.4 GiB; 32k
+# 0.665 / 11.4 vs 0.297 / 7.4; 131k 2.722 / 42.0 vs 0.473 / 8.1. The
+# expanded path's one win, ~0.05 s a chunk at short context, is not worth
+# a crossover. True runs mlx-vlm's expanded path (the parity test and the
+# bench compare the two).
+EXPANDED_PREFILL = False
 # query rows per block of _gathered_attention: its gathered latent is
 # rows x topk x kv_lora_rank, bounded whatever the chunk
 GATHER_ROWS = 128
-
-
-def sparse_prefill_from() -> Optional[int]:
-    """Tokens of context from which prefill takes the gathered latent path;
-    None = never (the expanded path)."""
-    import os
-    v = os.environ.get(SPARSE_PREFILL_ENV, "").strip().lower()
-    if v in ("off", "never", "false", "no"):
-        return None
-    try:
-        return max(int(v), 0) if v else SPARSE_PREFILL_DEFAULT
-    except ValueError:
-        return SPARSE_PREFILL_DEFAULT
 
 
 def _gathered_attention(q, kv_latent, topk, mask, scale):
@@ -724,9 +715,8 @@ class Glm5NextSparseAttention(nn.Module):
         # Absorbed MLA (queries into the latent, one shared K=V latent head) for
         # decode and small verify widths; the expanded per-head K/V only for prefill.
         absorbed = L <= SMALL_L
-        frm = sparse_prefill_from()
         gathered = (not absorbed and topk_indices is not None
-                    and frm is not None and kv_latent.shape[2] >= frm)
+                    and not EXPANDED_PREFILL)
         attn_mask = mask
         if topk_indices is not None and not gathered:
             Kv = kv_latent.shape[2]

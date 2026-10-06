@@ -1,9 +1,9 @@
-"""GLM-5.3's prefill past the crossover attends in the latent over each
-query's own selection (glm5_next edit 10, _gathered_attention) instead of
-expanding per-head K/V for the whole context: the same keys and the same
-softmax, so the logits match the expanded path's -- chunked through the
-cache past index_topk, in float32 (to rounding) and bf16 / an 8-bit
-latent (to bf16's), and the setting picks the path."""
+"""GLM-5.3's prefill, once the indexer selects, attends in the latent over
+each query's own selection (glm5_next edit 10, _gathered_attention)
+instead of expanding per-head K/V for the whole context: the same keys and
+the same softmax, so the logits match the expanded path's -- chunked
+through the cache past index_topk, in float32 (to rounding) and bf16 / an
+8-bit latent (to bf16's)."""
 import json
 import sys
 from pathlib import Path
@@ -19,7 +19,6 @@ mx = pytest.importorskip("mlx.core")
 import build_glm5_next as G  # noqa: E402
 
 CFG = dict(G.CONFIG, kv_lora_rank=64)
-ENV = "KNURLOGIC_SPARSE_PREFILL_FROM"
 
 
 def _model(dtype, bits=None):
@@ -70,7 +69,7 @@ def test_the_gathered_prefill_matches_the_expanded(monkeypatch, dtype, bits,
         calls["n"] += 1
         return real(*a, **k)
     monkeypatch.setattr(L, "_gathered_attention", counted)
-    monkeypatch.setenv(ENV, "off")
+    monkeypatch.setattr(L, "EXPANDED_PREFILL", True)
     try:
         want = _prefill(model, ids, 16)
     except RuntimeError as e:          # mlx's CPU build: bf16 MoE gather
@@ -78,46 +77,12 @@ def test_the_gathered_prefill_matches_the_expanded(monkeypatch, dtype, bits,
             pytest.skip(f"this mlx backend cannot run it: {e}")
         raise
     assert calls["n"] == 0
-    monkeypatch.setenv(ENV, "0")
+    monkeypatch.setattr(L, "EXPANDED_PREFILL", False)
     got = _prefill(model, ids, 16)
     assert calls["n"] > 0
     rng = float(mx.max(want) - mx.min(want))
     diff = float(mx.max(mx.abs(got - want)))
     assert diff <= tol * rng, (diff, rng)
-
-
-def test_the_crossover_is_tokens_of_context(monkeypatch):
-    from knurlogic.engine.families.glm5.architecture.glm5_next import language as L
-    model = _model(mx.float32)
-    seen = []
-    real = L._gathered_attention
-
-    def counted(q, kv_latent, *a, **k):
-        seen.append(kv_latent.shape[2])
-        return real(q, kv_latent, *a, **k)
-    monkeypatch.setattr(L, "_gathered_attention", counted)
-    monkeypatch.setenv(ENV, "48")
-    _prefill(model, _ids(72), 16)
-    assert seen and min(seen) >= 48
-
-
-def test_the_setting_reads():
-    import os
-
-    from knurlogic.engine.families.glm5.architecture.glm5_next.language import (
-        sparse_prefill_from,
-    )
-    old = os.environ.pop(ENV, None)
-    try:
-        assert sparse_prefill_from() == 0
-        for v, want in (("off", None), ("32768", 32768), ("junk", 0),
-                        ("-5", 0)):
-            os.environ[ENV] = v
-            assert sparse_prefill_from() == want
-    finally:
-        os.environ.pop(ENV, None)
-        if old is not None:
-            os.environ[ENV] = old
 
 
 def test_gathered_attention_bounds_its_rows():

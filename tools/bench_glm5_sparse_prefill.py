@@ -1,5 +1,5 @@
 """Where GLM-5.3's prefill in the latent pays: one attention layer, both
-paths, at several contexts (glm5_next edit 10, KNURLOGIC_SPARSE_PREFILL_FROM).
+paths, at several contexts (glm5_next edit 10).
 
     python tools/bench_glm5_sparse_prefill.py <artifact> \\
         [--contexts 8192,32768,131072] [--chunk 2048] [--repeat 3]
@@ -7,24 +7,19 @@ paths, at several contexts (glm5_next edit 10, KNURLOGIC_SPARSE_PREFILL_FROM).
 Builds ONE sparse-attention layer at the artifact's own shapes (its
 config.json; random bf16 weights -- the cost is the shapes', not the
 values'), fills its cache to each context, then times one prefill chunk
-through the expanded path (off) and the latent path (0) and reads mlx's
-peak memory for each. Prints a row per context and the crossover: the
-smallest context from which the latent path is the faster, which is what
-KNURLOGIC_SPARSE_PREFILL_FROM should be set to on this machine (the latent
-path's memory is the smaller everywhere past index_topk). A path that
-runs out of memory is reported as such, not as a crash. Loads no model
+through mlx-vlm's expanded path and the latent path (the one served) and
+reads mlx's peak memory for each: a row per context. A path that runs
+out of memory is reported as such, not as a crash. Loads no model
 weights; never run from tests/.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
 
-ENV = "KNURLOGIC_SPARSE_PREFILL_FROM"
 GIB = 1 << 30
 
 
@@ -60,11 +55,16 @@ def _mask(x, cache):
     return base.create_attention_mask(x, cache[0], return_array=True)
 
 
+def _expanded(on: bool) -> None:
+    from knurlogic.engine.families.glm5.architecture.glm5_next import language as L
+    L.EXPANDED_PREFILL = on
+
+
 def _fill(layer, tc, cache, tokens: int, step: int = 4096) -> None:
     """The cache to `tokens` of context, through the latent path (the
     cache it leaves is the same either way)."""
     import mlx.core as mx
-    os.environ[ENV] = "0"
+    _expanded(False)
     done = 0
     while done < tokens:
         n = min(step, tokens - done)
@@ -74,10 +74,10 @@ def _fill(layer, tc, cache, tokens: int, step: int = 4096) -> None:
     mx.clear_cache()
 
 
-def _time(layer, tc, cache, chunk: int, setting: str, repeat: int):
-    """(seconds, peak GiB) for one chunk at `setting`, or (None, why)."""
+def _time(layer, tc, cache, chunk: int, expanded: bool, repeat: int):
+    """(seconds, peak GiB) for one chunk on that path, or (None, why)."""
     import mlx.core as mx
-    os.environ[ENV] = setting
+    _expanded(expanded)
     x = mx.random.normal((1, chunk, tc.hidden_size)).astype(mx.bfloat16)
     best, peak = None, 0
     for _ in range(repeat):
@@ -117,26 +117,19 @@ def main(argv=None) -> int:
           f"index_topk {tc.index_topk}, chunk {a.chunk}")
     print(f"{'context':>9}  {'expanded s':>10} {'GiB':>6}  "
           f"{'latent s':>9} {'GiB':>6}  faster")
-    cache, have, crossover = _cache(), 0, None
+    cache, have = _cache(), 0
     for ctx in contexts:
         _fill(layer, tc, cache, ctx - have)
         have = ctx
-        e_s, e_m = _time(layer, tc, cache, a.chunk, "off", a.repeat)
-        l_s, l_m = _time(layer, tc, cache, a.chunk, "0", a.repeat)
+        e_s, e_m = _time(layer, tc, cache, a.chunk, True, a.repeat)
+        l_s, l_m = _time(layer, tc, cache, a.chunk, False, a.repeat)
         win = ("latent" if e_s is None or (l_s is not None and l_s < e_s)
                else "expanded")
-        if win == "latent" and crossover is None:
-            crossover = ctx
 
         def cell(s, m):
             return (f"{'OOM':>10} {'':>6}" if s is None
                     else f"{s:>10.3f} {m:>6.2f}")
         print(f"{ctx:>9}  {cell(e_s, e_m)}  {cell(l_s, l_m)}  {win}")
-    print(f"\n{ENV}: " + (f"{crossover} (the latent path is the faster from "
-                           f"there on this machine)" if crossover is not None
-                           else "the expanded path was the faster at every "
-                                "context measured; set the largest above, or "
-                                "measure longer ones"))
     return 0
 
 
