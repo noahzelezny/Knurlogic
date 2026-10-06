@@ -54,10 +54,10 @@ def _cache():
 
 
 def _mask(x, cache):
-    from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models.base import (
-        create_attention_mask,  # noqa: E501
+    from knurlogic.engine.families.glm5.architecture.glm5_next._mlx_vlm.models import (  # noqa: E501
+        base,
     )
-    return create_attention_mask(x, cache[0], return_array=True)
+    return base.create_attention_mask(x, cache[0], return_array=True)
 
 
 def _fill(layer, tc, cache, tokens: int, step: int = 4096) -> None:
