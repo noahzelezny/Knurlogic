@@ -99,9 +99,11 @@ times and quotas. Presented as `Authorization: Bearer` or `x-api-key`,
 both already allowed by CORS.
 
 Mode, per server: `--auth off | optional | required`. Default `optional`
-on loopback (today's behaviour: dummy keys still work, attributed to
-`anonymous`), `required` when `--host` is not loopback, because a server
-on a LAN with no keys is a server anyone on the LAN can run out of memory.
+everywhere: today's behaviour, dummy keys still work and are attributed to
+`anonymous`. Nothing is required until the ledger and keys have been used
+for real and proved themselves. The page shows a one-line notice when a
+server is bound off-loopback with no key required, because such a server
+is one anyone on the LAN can run out of memory; `required` stays a choice.
 
 Quotas per key, each optional: `tokens_per_day`, `requests_per_minute`,
 `concurrency`. Counted in `machine/keys.py` from the ledger plus an
