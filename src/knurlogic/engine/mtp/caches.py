@@ -31,6 +31,49 @@ from __future__ import annotations
 
 import mlx.core as mx
 
+#: cache fields a forward writes and may never read: GLM's MLA latent
+#: cache keeps a zero-width V (`values`, three arrays when quantized) and
+#: an mx `offset` that no op consumes
+_SIDE = ("values", "offset")
+
+
+def side_state(caches) -> list:
+    """The arrays of `caches` (lists, CacheLists, nested) that no forward
+    reads. Left lazy, each is a graph that grows by a link a step, every
+    link holding a scalar buffer alive: a 40-minute GLM generation reached
+    Metal's limit on live buffers (`Resource limit (499000) exceeded`)."""
+    out: list = []
+    todo = list(caches or ())
+    while todo:
+        c = todo.pop()
+        if c is None:
+            continue
+        if isinstance(c, (list, tuple)):
+            todo += c
+            continue
+        sub = getattr(c, "caches", None)
+        if isinstance(sub, (list, tuple)):
+            todo += sub
+            continue
+        for name in _SIDE:
+            try:
+                v = getattr(c, name, None)
+            except Exception:  # a property with nothing to read yet
+                continue
+            if isinstance(v, mx.array):
+                out.append(v)
+            elif isinstance(v, (list, tuple)):
+                out += [x for x in v if isinstance(x, mx.array)]
+    return out
+
+
+def settle(caches) -> None:
+    """Evaluate side_state(caches): zero-width or scalar, so it costs
+    nothing, and the chains end every step."""
+    arrays = side_state(caches)
+    if arrays:
+        mx.eval(arrays)
+
 
 def is_untrimmable(c) -> bool:
     f = getattr(c, "is_trimmable", None)
