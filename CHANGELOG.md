@@ -20,10 +20,6 @@
   reads a GLM prefill chunk as spanning what it reads (min(context, 2048)
   + context / 72), not the whole context: one warm-up sample no longer
   refuses a 339k-token prompt "even prefilled 128 tokens at a time".
-* GLM-5.3: a prefill chunk pools only the sparse indexer's new tail and
-  reuses the pools before it, as decode always did, instead of pooling the
-  whole context again every chunk: long prefills no longer slow down with
-  the context for that (340 tok/s at 8k fell to 275 by 75k). Same logits.
 
 ## 0.1.4
 

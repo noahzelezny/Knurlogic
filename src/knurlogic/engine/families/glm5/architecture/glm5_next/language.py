@@ -439,14 +439,8 @@ class Glm5NextIndexer(nn.Module):
         # the cache is trimmed below the length the cached pools were built at, so
         # only pools wholly before min(t_prev, T - S) are reused -- those positions
         # were never rewritten.
-        # knurlogic edit 11: prefill chunks take it too (INCREMENTAL_POOL):
-        # a pool is its own index_kpool-aligned window, so the stable ones
-        # are the same whatever chunk added the tokens after them -- full
-        # pooling every chunk made each chunk's indexer O(context) on top of
-        # its scoring, and a 339k-token prefill fell from 340 to 275 tok/s
-        # by 75k tokens.
         if (
-            (S <= SMALL_L or INCREMENTAL_POOL)
+            S <= SMALL_L
             and valid_cur_all
             and cache is not None
             and getattr(cache, "_pool", None) is not None
@@ -556,10 +550,6 @@ SMALL_L = 4
 # a crossover. True runs mlx-vlm's expanded path (the parity test and the
 # bench compare the two).
 EXPANDED_PREFILL = False
-# knurlogic edit 11: prefill chunks reuse the indexer's stable pools (as
-# decode always did) instead of pooling the whole context again; False is
-# mlx-vlm's full pooling, for the parity test.
-INCREMENTAL_POOL = True
 # query rows per block of _gathered_attention: its gathered latent is
 # rows x topk x kv_lora_rank, bounded whatever the chunk
 GATHER_ROWS = 128
