@@ -43,15 +43,36 @@ logger = logging.getLogger(__name__)
 GIB = 1 << 30
 
 #: this server's own memory macOS has compressed or swapped out, past which
-#: new requests are refused (Scheduler._pressure_short): the model's pages
-#: are being paged back in by every step, and a prefill that took 98 s ran
-#: 17+ min with both GPUs at 100% (2026-10-05, another process's leak)
+#: -- while macOS itself reports memory pressure -- the server warns
+#: (Scheduler._pressure_short): the model's pages are being paged back in
+#: by every step, and a prefill that took 98 s ran 17+ min with both GPUs
+#: at 100% (2026-10-05, another process's leak). Compressed pages alone
+#: are not pressure: 11.3 GiB sat compressed with 80 GiB unused and no
+#: swap (left from an earlier squeeze; a page stays compressed until it is
+#: touched), and the card said "slowed" about nothing.
 PRESSURE_BYTES = 1 << 30
 #: how often that is read (a task_info call; on the scheduler thread)
 PRESSURE_EVERY_S = 5.0
 #: a running prefill's progress line: every this many chunks or seconds
 PREFILL_LOG_CHUNKS = 8
 PREFILL_LOG_S = 10.0
+
+
+def system_pressure_level() -> int:
+    """macOS's own memory pressure: kern.memorystatus_vm_pressure_level,
+    1 normal, 2 warn, 4 critical. 1 where it cannot be read."""
+    import ctypes
+    import ctypes.util
+    try:
+        lib = ctypes.CDLL(ctypes.util.find_library("c"))
+        v = ctypes.c_int(0)
+        n = ctypes.c_size_t(ctypes.sizeof(v))
+        if lib.sysctlbyname(b"kern.memorystatus_vm_pressure_level",
+                            ctypes.byref(v), ctypes.byref(n), None, 0):
+            return 1
+        return int(v.value) or 1
+    except (OSError, AttributeError, ValueError, TypeError):
+        return 1
 
 
 def own_compressed_bytes() -> int:
@@ -98,8 +119,9 @@ def _terms(mem: dict) -> str:
     def g(v):
         return "-" if v is None else f"{v / GIB:.1f}"
     ranks = mem.get("ranks")
-    per = (f" per rank {[(r.get('rank'), g(r.get('over_limit_bytes')))
-                          for r in ranks]}" if ranks else "")
+    pairs = [(r.get("rank"), g(r.get("over_limit_bytes")))
+             for r in ranks or ()]
+    per = f" per rank {pairs}" if ranks else ""
     return (f"rank {mem['rank']} working_set {g(mem['working_set'])} "
             f"others {g(mem['others'])} (readings "
             f"{[g(x) for x in mem['others_readings']]}) margin "
@@ -355,9 +377,12 @@ class Scheduler:
                  prompt_cache_bytes: int | None = None,
                  working_set_bytes: int | None = None,
                  stats: dict | None = None, tensor=None,
-                 gpu_in_use=None, compressed=own_compressed_bytes):
+                 gpu_in_use=None, compressed=own_compressed_bytes,
+                 system_pressure=system_pressure_level):
         """`compressed`: () -> bytes of this process macOS has compressed
         or swapped (own_compressed_bytes), or None not to watch.
+        `system_pressure`: () -> macOS's pressure level
+        (system_pressure_level); compressed bytes warn only above normal.
         `tensor`: rank 0's engine/runtime/tensor.Ring when this model is
         split across ranks; the prompt cache is then count-based only.
         `gpu_in_use`: () -> bytes of GPU memory every process on this
@@ -406,7 +431,9 @@ class Scheduler:
         self._holding: str | None = None
         #: this process's compressed/swapped bytes, last read, and when
         self._compressed = compressed
+        self._system_pressure = system_pressure
         self._pressure = 0
+        self._pressure_level = 1
         self._pressure_at = 0.0
         #: the prompt cache gave way on a ring and the peers have not yet
         #: said what that freed there (_make_room)
@@ -1118,9 +1145,11 @@ class Scheduler:
     # ---------------------------------------------------- pressure, prefill
 
     def _sample_pressure(self, now: float | None = None) -> None:
-        """Read this process's compressed/swapped bytes every
-        PRESSURE_EVERY_S; one WARNING when it passes PRESSURE_BYTES, one
-        INFO when it drops back."""
+        """Read this process's compressed/swapped bytes and macOS's pressure
+        level every PRESSURE_EVERY_S; one WARNING when both say so (past
+        PRESSURE_BYTES, level above normal), one INFO when either drops
+        back. Compressed pages with the system at normal are not pressure
+        (PRESSURE_BYTES)."""
         if self._compressed is None:
             return
         now = time.monotonic() if now is None else now
@@ -1129,27 +1158,29 @@ class Scheduler:
         self._pressure_at = now
         try:
             b = int(self._compressed() or 0)
+            level = int(self._system_pressure() or 1) \
+                if self._system_pressure is not None else 1
         except Exception:   # a reading must never fail the server
-            b = 0
-        was = self._pressure > PRESSURE_BYTES
-        self._pressure = b
-        if b > PRESSURE_BYTES and not was:
-            logger.warning("%s; new requests are refused until it is paged "
-                           "back in", self._pressure_short())
-        elif was and b <= PRESSURE_BYTES:
+            b, level = 0, 1
+        was = self._pressure_short() is not None
+        self._pressure, self._pressure_level = b, level
+        now_short = self._pressure_short()
+        if now_short and not was:
+            logger.warning("%s; requests are still admitted", now_short)
+        elif was and not now_short:
             logger.info("memory pressure over: %.1f GiB of this server "
-                        "compressed/swapped; admitting again", b / GIB)
+                        "compressed, macOS pressure level %d", b / GIB, level)
 
     def _pressure_short(self) -> str | None:
-        """Why new requests are refused for memory pressure, or None."""
+        """Why the server may run slow for memory pressure, or None."""
         b = self._pressure
-        if b <= PRESSURE_BYTES:
+        if b <= PRESSURE_BYTES or self._pressure_level < 2:
             return None
         rank = int(getattr(getattr(self.tensor, "link", None), "rank", 0)
                    or 0)
-        return (f"rank {rank}: {b / GIB:.1f} GiB of the model "
-                f"compressed/swapped by macOS (memory pressure from other "
-                f"processes)")
+        what = "critical" if self._pressure_level >= 4 else "warn"
+        return (f"rank {rank}: macOS reports memory pressure ({what}) and "
+                f"has compressed {b / GIB:.1f} GiB of the model")
 
     def _prefill_hook(self, job: Job, total: int, hit: int):
         """(uid, done, total) -> stop?, called by the engine after every

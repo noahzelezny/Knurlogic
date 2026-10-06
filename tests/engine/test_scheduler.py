@@ -896,29 +896,54 @@ def test_the_step_sets_the_rows_chunk_and_measures_the_prefill_line():
 def test_memory_pressure_on_the_server_warns_and_admits(caplog):
     """2026-10-05, M4: another process's leak had macOS compress 8.3 GB of
     the serve; a prefill that took 98 s ran 17+ min. Past 1 GiB
-    compressed/swapped: a WARNING once and the status says so, but new
-    requests are still admitted (macOS compresses idle pages routinely;
-    refusing on it would refuse with memory to spare); it clears."""
+    compressed while macOS reports pressure: a WARNING once and the status
+    says so, but new requests are still admitted; it clears."""
     import logging
 
     from knurlogic.engine.runtime import scheduler as S
     GIB = S.GIB
-    reading = {"b": int(8.3 * GIB)}
+    reading = {"b": int(8.3 * GIB), "level": 2}
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB,
-                    compressed=lambda: reading["b"])
+                    compressed=lambda: reading["b"],
+                    system_pressure=lambda: reading["level"])
     with caplog.at_level(logging.INFO, logger=S.__name__):
         s._sample_pressure(now=100.0)
         s._sample_pressure(now=106.0)          # still over: no new warning
     warns = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warns) == 1 and "8.3 GiB" in warns[0].getMessage()
-    why = ("rank 0: 8.3 GiB of the model compressed/swapped by macOS "
-           "(memory pressure from other processes)")
+    assert "refused" not in warns[0].getMessage()
+    why = ("rank 0: macOS reports memory pressure (warn) and has "
+           "compressed 8.3 GiB of the model")
     assert s.requests()["memory_pressure"] == why
     assert s.memory_short() is None
     reading["b"] = 0
     s._sample_pressure(now=108.0)
     s._sample_pressure(now=112.0)
     assert s._pressure_short() is None
+
+
+def test_compressed_pages_without_pressure_are_not_a_warning(caplog):
+    """2026-10-06: a freshly loaded GLM-5.3 split showed 'slowed: 2.8 GiB
+    of the model compressed/swapped' with 88 GiB unused and no swap
+    growing: pages stay compressed until touched. macOS at normal: no
+    warning, nothing on the card."""
+    import logging
+
+    from knurlogic.engine.runtime import scheduler as S
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * S.GIB,
+                    compressed=lambda: int(11.3 * S.GIB),
+                    system_pressure=lambda: 1)
+    with caplog.at_level(logging.INFO, logger=S.__name__):
+        s._sample_pressure(now=100.0)
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert s._pressure_short() is None
+    assert s.requests()["memory_pressure"] is None
+
+
+def test_the_system_pressure_reading_is_a_level():
+    from knurlogic.engine.runtime.scheduler import system_pressure_level
+    assert system_pressure_level() in (1, 2, 4)
+
 
 def test_the_own_compressed_reading_is_a_number():
     from knurlogic.engine.runtime.scheduler import own_compressed_bytes
