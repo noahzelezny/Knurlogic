@@ -425,16 +425,21 @@ class MTPBatchGenerator(BatchGenerator):
 
     def _on_progress(self, uid):
         """admit's per-chunk callback for this row: its hook, and a stop
-        (PrefillCancelled) when the hook asks for one -- on a single
-        machine only. On a ring every rank runs the same forwards; one rank
-        leaving the prefill would leave the others waiting in a collective,
-        so there the row runs on and is dropped at the next step."""
+        (PrefillCancelled) when the hook asks for one. On a ring every rank
+        runs the same forwards, so every rank calls this after every chunk
+        -- a follower has no hook and asks nothing -- and rank 0's answer
+        (Coord.stop) stops them all at the same chunk boundary; the failed
+        admission's B0 then keeps them in step as any failed admission
+        does."""
         hook = self.prefill_hooks.get(uid)
-        if hook is None:
+        if hook is None and self._coord is None:
             return None
 
         def on_progress(done, total):
-            if hook(uid, done, total) and self._coord is None:
+            want = bool(hook(uid, done, total)) if hook is not None else False
+            if self._coord is not None:
+                want = self._coord.stop(want)
+            if want:
                 raise PrefillCancelled(
                     f"prefill of request {uid} stopped at {done}/{total} "
                     f"tokens: the client went away")

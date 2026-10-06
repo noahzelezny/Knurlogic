@@ -904,6 +904,18 @@ def _fail_on_rank_0(gen, fail):
                             em.finite = False
             return out
         gen._batch.step = step
+    elif fail == "cancel":
+        # rank 0's client goes away during the second admission's prefill:
+        # its hook asks to stop at the first chunk boundary (Coord.stop)
+        real, n = gen._admit_one, [0]
+
+        def admit():
+            n[0] += 1
+            if n[0] == 2:
+                uid = gen._unprocessed_sequences[0][0]
+                gen.prefill_hooks[uid] = lambda u, done, total: True
+            return real()
+        gen._admit_one = admit
     elif fail == "admit":
         real, n = gen._admit_one, [0]
 
@@ -934,6 +946,10 @@ def engine(link, out_path, fail="", split_kind="pipeline", drafting=""):
 
     def admissions(prompts):
         out = []
+        if fail == "cancel":
+            # several prefill chunks (16 tokens) a prompt, so the stop lands
+            # mid-prefill
+            prompts = [list(p) * 6 for p in prompts]
         for p in prompts:
             sm, _ = control_machine(tok, "normal")
             out.append(Admission(

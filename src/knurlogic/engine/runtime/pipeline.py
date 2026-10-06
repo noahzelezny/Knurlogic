@@ -431,7 +431,8 @@ class Coord:
         self.group = group
         self.leader = group.rank() == 0
         self.head = bool(head)
-        self.calls = {"b0": 0, "b1": 0, "b2": 0, "ba": 0, "img": 0}
+        self.calls = {"b0": 0, "b1": 0, "b2": 0, "ba": 0, "img": 0,
+                      "stop": 0}
         #: the last b0 found the ranks holding different row counts (one
         #: rank's admission failed): every rank skips that call's decode
         #: step, whose collectives would not line up, and rank 0's next
@@ -443,6 +444,16 @@ class Coord:
         v = mx.array(vals if self.leader else [0] * n, dtype=mx.int32)
         out = mx.distributed.all_gather(v, group=self.group, stream=mx.cpu)
         return out[:n].tolist()           # rank 0's block is the first
+
+    def stop(self, want: bool) -> bool:
+        """After every prefill chunk, on every rank: rank 0's word on
+        stopping this admission there (its client went away). Every rank
+        then leaves the prefill at the same chunk boundary, so their
+        collectives stay in step -- before this a ring ran a cancelled
+        prefill to its end (a 339k-token prompt kept two Macs busy for
+        half an hour after the client stopped)."""
+        self.calls["stop"] += 1
+        return bool(self._bcast([int(bool(want))])[0])
 
     def b0(self, t1: mx.array | None) -> mx.array | None:
         """After every admission attempt (and a failed decode step): every
