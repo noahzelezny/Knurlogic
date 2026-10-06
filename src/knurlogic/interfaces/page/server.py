@@ -2036,7 +2036,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
 
 def serve_ui(host: str, port: int, serve_port: int, peers=(),
              allow_origins=(), allow_hosts=(), offline: bool = False,
-             menubar: bool = False) -> int:
+             menubar: bool = False, open_page: bool = False) -> int:
     global PEERS
     from knurlogic.interfaces.page import updates
     updates.start_for_page(offline)
@@ -2110,6 +2110,8 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     print("  nothing loaded, no model required.")
     print(f"  loading from the page starts `knurlogic serve` on port "
           f"{serve_port}.")
+    if open_page:
+        _open_when_up(host, port)
     if menubar:
         import signal
 
@@ -2168,6 +2170,9 @@ def main(argv=None) -> int:
                         "(HF_HUB_OFFLINE=1 does the same)")
     p.add_argument("--no-menubar", action="store_true",
                    help="do not show the macOS menu-bar icon")
+    p.add_argument("--no-open", action="store_true",
+                   help="do not open the page in the browser (it is not "
+                        "opened over SSH either)")
     a = p.parse_args(argv)
     peers = []
     for spec in a.peer:
@@ -2175,7 +2180,33 @@ def main(argv=None) -> int:
         peers.append((host, int(port) if port.isdigit() else a.port))
     return serve_ui(a.host, a.port, a.serve_port, peers,
                     allow_origins=a.allow_origin, allow_hosts=a.allow_host,
-                    offline=a.offline, menubar=not a.no_menubar)
+                    offline=a.offline, menubar=not a.no_menubar,
+                    open_page=not a.no_open)
+
+
+def _open_when_up(host: str, port: int) -> None:
+    """Open the page in the default browser once it answers -- `pip
+    install knurlogic`, `knurlogic`, and the page is in front of you. Not
+    over SSH: the browser would open on the remote Mac's screen."""
+    import os
+    import threading
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+        return
+    shown = "127.0.0.1" if host in ("cluster", "0.0.0.0", "::", "") else host
+    url = f"http://{shown}:{port}/"
+
+    def go():
+        import webbrowser
+        try:
+            webbrowser.open(url)
+        except Exception:  # no browser here: the printed URL still works
+            logger.debug("could not open %s", url, exc_info=True)
+
+    # the socket is bound and listening already; serve_forever answers
+    # within a moment of this timer
+    t = threading.Timer(0.5, go)
+    t.daemon = True
+    t.start()
 
 
 def _wire() -> None:

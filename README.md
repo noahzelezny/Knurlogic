@@ -15,6 +15,12 @@ also be split across two or more Macs.
 ## Install
 
     pip install knurlogic
+    knurlogic
+
+`knurlogic` starts the page at http://127.0.0.1:8899/ and opens it in
+your browser (`--no-open` skips that; it is never opened over SSH): every
+model on the disk with a Launch button, a model picker for downloading
+more, a chat, and where the memory went.
 
 From source:
 
