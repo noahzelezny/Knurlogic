@@ -408,3 +408,39 @@ def test_the_row_says_mtp_and_vision_only_when_they_run(fake):
     fake({"/status.json": {**base, "drafting": {"drafts_now": False},
                            "vision": {"served": False}}})
     assert loaded._knurlogic("http://x")[0].detail == "qwen3_5"
+
+
+def test_our_server_busy_generating_keeps_its_card(monkeypatch):
+    """A server busy generating missed /status.json's 1.5 s read while
+    /v1/models still answered, and the card turned into an anonymous
+    "mlx ... served on demand . offered" until it caught up. It keeps the
+    last card it had, marked busy."""
+    from knurlogic.machine import servers
+    status = {"schema": 2, "artifact": {"name": "GLM", "path": "/m/GLM"},
+              "memory": {"active_bytes": 3 << 30}}
+    up = {"ok": True}
+
+    def get(url, timeout=1.5):
+        if url.endswith("/status.json"):
+            return status if up["ok"] else None
+        if url.endswith("/v1/models"):
+            return {"data": [{"id": "GLM"}]}
+        return None
+    monkeypatch.setattr(loaded, "_get", get)
+    monkeypatch.setattr(loaded, "memory_map", lambda *a, **k: {})
+    monkeypatch.setattr(loaded, "_LAST", {})
+    monkeypatch.setattr(servers, "registry", lambda: {
+        8080: {"pid": 1, "artifact": "/m/GLM"}})
+    monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
+    monkeypatch.setattr(servers, "listening_serves", lambda: [])
+
+    def ours():
+        (r,) = [r for r in loaded.survey()["resident"]
+                if r["where"].endswith(":8080")]
+        return r
+    r = ours()
+    assert r["runtime"] == "knurlogic" and r["state"] == "loaded"
+    up["ok"] = False
+    r = ours()
+    assert r["runtime"] == "knurlogic" and r["state"] == "loaded"
+    assert r["detail"].endswith("busy")
