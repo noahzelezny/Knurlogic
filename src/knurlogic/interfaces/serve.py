@@ -261,8 +261,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             # rank 0 holds the tower only with vision on and the head only
             # with MTP on -- the ring-wide sets, never this rank's --no-draft,
             # so every rank computes the same split
-            from knurlogic.tuning.settings import (canonical_sets, mtp_of,
-                                                   vision_of)
+            from knurlogic.tuning.settings import canonical_sets, mtp_of, vision_of
             rs = canonical_sets(dict(overrides or {}))
             lead = R.leader_bytes(a, vision=vision_of(rs), mtp=mtp_of(rs))
             bw = ring.get("bandwidth_gbs") or R.chip_bandwidth_gbs(_chip())
@@ -284,8 +283,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                   + (f"{bw:g} GB/s" if bw else "unknown here"))
         else:
             from knurlogic.tuning.resolve import leader_bytes, tensor_placement
-            from knurlogic.tuning.settings import (canonical_sets, mtp_of,
-                                                   vision_of)
+            from knurlogic.tuning.settings import canonical_sets, mtp_of, vision_of
             pl = tensor_placement(a, world)
             # rank 0 alone holds the head (MTP on) and the tower (vision on)
             rs = canonical_sets(dict(overrides or {}))

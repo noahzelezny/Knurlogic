@@ -112,7 +112,8 @@ def test_the_vision_template_is_the_vision_exp_encoder(mode, effort):
     cu = pytest.importorskip("transformers.utils.chat_template_utils")
     from knurlogic.engine import templates
     from knurlogic.engine.families.deepseek.vision import (
-        IMAGE_PLACEHOLDER, DeepseekVisionFamily)
+        IMAGE_PLACEHOLDER,
+    )
     from knurlogic.engine.runtime.prompt import flatten
     from knurlogic.engine.vision.request import with_placeholders
     official = _vision_encoder()
@@ -197,6 +198,7 @@ def test_text_parts_are_joined_as_the_vision_encoder_joins_them():
     """Vision-Exp's encoder joins every list of content parts with "\n\n"
     (a text-only one too); Flash's template keeps mlx-lm's ""."""
     from types import SimpleNamespace
+
     from knurlogic.engine import templates
     from knurlogic.engine.runtime.prompt import flatten, part_separator
     cu = pytest.importorskip("transformers.utils.chat_template_utils")
@@ -315,7 +317,9 @@ def test_the_tower_on_the_real_weights_is_the_references():
     from PIL import Image
 
     from knurlogic.engine.families.deepseek.vision import (
-        DeepseekVisionFamily, processor)
+        DeepseekVisionFamily,
+        processor,
+    )
     cfg = json.loads((REF / "config.json").read_text())
     fam = DeepseekVisionFamily(cfg, 129264)
     n = fam.load_weights(str(REF))
@@ -431,7 +435,7 @@ def _prompt(fam, images):
     from knurlogic.engine.vision import key as K
     text = [[3, 17, 42, 5, 9], [11, 48], [27, 7, 30]]
     ids = text[0] + [IMG_ID] + text[1] + [IMG_ID] + text[2]
-    refs, store, ref_ids = [], {}, []
+    refs, store = [], {}
     for i, img in enumerate(images):
         pixels, ref = fam.preprocess(img, f"{i:064x}")
         store[(ref.sha, ref.proc_hash)] = fam.encode(pixels, ref)
@@ -599,6 +603,7 @@ def test_vision_tag_needs_a_tower_in_the_artifact(tmp_path):
     and a text-only conversion of Vision-Exp keeps vision_n_layers: only
     the artifact whose index names the tower's tensors is a vision one."""
     import json
+
     from knurlogic.engine.vision import registry
     vcfg = {"model_type": "deepseek_v4", "vision_n_layers": 32}
     rigs = {"flash": ({"model_type": "deepseek_v4"}, ["model.norm.weight"]),
@@ -648,6 +653,7 @@ def _load(monkeypatch, path):
     """engine/serve/load.load_unlocked with mlx-lm's load_model under it
     (the tiny checkpoint has no tokenizer)."""
     import mlx_lm.utils as U
+
     from knurlogic.engine import templates
     from knurlogic.engine.serve.load import load_unlocked
 
@@ -691,7 +697,7 @@ def test_a_vision_config_with_no_vision_weights_loads_text_only(
         state.VISION.update(error="")
 
 
-def test_a_conversion_without_the_tower_but_with_the_trunks_vision_tensors_loads_text_only(
+def test_a_conversion_without_the_tower_but_with_the_trunks_vision_tensors_loads_text_only(  # noqa: E501
         tmp_path, monkeypatch):
     """Every vision-only trunk tensor kept (bias_vl, the image rows, the
     hash layers' bias) but no tower: built as the config says, so those

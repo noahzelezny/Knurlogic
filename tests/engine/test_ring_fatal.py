@@ -13,8 +13,7 @@ import threading
 import pytest
 
 from knurlogic.engine.runtime import tensor as T
-from knurlogic.engine.runtime.scheduler import (RingFailed, Scheduler,
-                                                ring_error)
+from knurlogic.engine.runtime.scheduler import RingFailed, Scheduler, ring_error
 
 
 class _Host:

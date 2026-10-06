@@ -740,7 +740,8 @@ def _v4_mtp_tiny(tmp):
 def ends(link, out_path, split_kind="tensor", loop="mtp"):
     """Rows ending inside a drafting step on the serving path. Every rank
     first finds the end token the same way (the unsplit plain run's 9th
-    token of the last prompt, whose cap is 12), so the follower's control machine is rank
+    token of the last prompt, whose cap is 12), so the follower's control
+    machine is rank
     0's. Then, through rank 0's TensorExecutor and the follower's
     tensor.follow: eight rows in one batch ending on max_tokens 3, 6..12 or
     the end token, then each of them alone. Rank 0 counts the steps that
@@ -748,7 +749,6 @@ def ends(link, out_path, split_kind="tensor", loop="mtp"):
     step) and the regimes taken."""
     import tempfile
 
-    import mlx.core as mx
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "goldens"))
     import build_deepseek_v4 as G
 

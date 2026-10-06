@@ -82,11 +82,16 @@ def tower(name, standardize, clipped, head_dim, hidden, heads, text_hidden,
           rec):
     import torch
     from transformers.models.gemma4.configuration_gemma4 import (
-        Gemma4TextConfig, Gemma4VisionConfig)
-    from transformers.models.gemma4.image_processing_gemma4 import \
-        convert_image_to_patches
+        Gemma4TextConfig,
+        Gemma4VisionConfig,
+    )
+    from transformers.models.gemma4.image_processing_gemma4 import (
+        convert_image_to_patches,
+    )
     from transformers.models.gemma4.modeling_gemma4 import (
-        Gemma4MultimodalEmbedder, Gemma4VisionModel)
+        Gemma4MultimodalEmbedder,
+        Gemma4VisionModel,
+    )
 
     vd = _vcfg(hidden, heads, head_dim, standardize, clipped)
     vc = Gemma4VisionConfig(**vd)
@@ -151,8 +156,7 @@ def pool(dtype_name, rec):
     HF's own code."""
     import torch
     from transformers.modeling_outputs import BaseModelOutputWithPast
-    from transformers.models.gemma4.configuration_gemma4 import \
-        Gemma4VisionConfig
+    from transformers.models.gemma4.configuration_gemma4 import Gemma4VisionConfig
     from transformers.models.gemma4.modeling_gemma4 import Gemma4VisionModel
 
     dtype = getattr(torch, dtype_name)
@@ -205,8 +209,9 @@ def pool(dtype_name, rec):
 
 
 def resize():
-    from transformers.models.gemma4.image_processing_gemma4 import \
-        get_aspect_ratio_preserving_size
+    from transformers.models.gemma4.image_processing_gemma4 import (
+        get_aspect_ratio_preserving_size,
+    )
     rows = []
     for w, h in RESIZE_SIZES:
         try:
@@ -238,10 +243,14 @@ def vision_tower():
 
 def mask_overlay():
     import torch
-    from transformers.masking_utils import (blockwise_overlay,
-                                            causal_mask_function, or_masks)
-    from transformers.models.gemma4.modeling_gemma4 import \
-        get_block_sequence_ids_for_mask
+    from transformers.masking_utils import (
+        blockwise_overlay,
+        causal_mask_function,
+        or_masks,
+    )
+    from transformers.models.gemma4.modeling_gemma4 import (
+        get_block_sequence_ids_for_mask,
+    )
     B, N = 2, 12
     # two images: positions 2-4 (image 0) and 7-9 (image 1); rest is text
     mm_type = np.zeros((B, N), dtype=np.int64)

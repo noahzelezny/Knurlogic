@@ -173,7 +173,9 @@ def _resolved(tc):
 
 def resolve():
     from transformers.models.gemma4.configuration_gemma4 import (
-        Gemma4Config, Gemma4TextConfig)
+        Gemma4Config,
+        Gemma4TextConfig,
+    )
     rec = {}
     for name, d in RESOLVE.items():
         rec[name] = {"input": d, "text": True,
@@ -287,8 +289,7 @@ def _prefill_decode(model, cfg):
 def _run(name, cfg_dict, seed):
     import torch
     from transformers import DynamicCache
-    from transformers.models.gemma4.configuration_gemma4 import \
-        Gemma4TextConfig
+    from transformers.models.gemma4.configuration_gemma4 import Gemma4TextConfig
     from transformers.models.gemma4.modeling_gemma4 import Gemma4ForCausalLM
 
     torch.manual_seed(seed)
@@ -313,8 +314,9 @@ def _run(name, cfg_dict, seed):
         ids = torch.tensor([PROMPT])
         if cfg_dict.get("use_bidirectional_attention") == "vision" \
                 and name not in BF16:
-            from transformers.models.gemma4.modeling_gemma4 import \
-                create_masks_for_vision_model
+            from transformers.models.gemma4.modeling_gemma4 import (
+                create_masks_for_vision_model,
+            )
             emb = model.model.embed_tokens(ids)
             masks = create_masks_for_vision_model(
                 cfg, emb, None, None, torch.arange(len(PROMPT))[None],

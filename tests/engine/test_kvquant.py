@@ -448,5 +448,5 @@ def test_the_glm_head_builds_the_trunks_moe():
     h = MTPHeadGlm5(model, arch)
     assert type(h.mlp).__name__ == "Glm5NextMoE"
     assert type(h.mlp) is type(next(
-        l.mlp for l in model.model.layers
-        if type(l.mlp).__name__ == "Glm5NextMoE"))
+        layer.mlp for layer in model.model.layers
+        if type(layer.mlp).__name__ == "Glm5NextMoE"))

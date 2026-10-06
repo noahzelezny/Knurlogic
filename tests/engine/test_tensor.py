@@ -810,6 +810,7 @@ def test_a_runtime_split_needs_output_rows_that_divide(tmp_path):
 
 def test_without_the_runtime_split_load_config_adds_nothing(tmp_path):
     import types
+
     from knurlogic.engine.runtime.tensor import load_config
     a = _artifact(tmp_path, QWEN36, _layer0(_skipzero(70095)))
     g = types.SimpleNamespace(rank=lambda: 0, size=lambda: 2)

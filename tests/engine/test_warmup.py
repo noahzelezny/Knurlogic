@@ -87,6 +87,7 @@ def test_the_walker_finds_arrays_parameters_does_not_see():
 def _warm_prompt(monkeypatch, chunk, cap, native=0):
     """The prompt _warm_up hands _insert for this chunk and window."""
     from types import SimpleNamespace
+
     from knurlogic.engine.runtime import scheduler as S
     from knurlogic.machine import artifact as A
     monkeypatch.setenv("KNURLOGIC_CONTEXT_LENGTH", str(cap))

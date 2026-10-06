@@ -170,8 +170,8 @@ def _pooled(dtype_name):
     """Our VisionModel's tail (pool, sqrt(hidden), strip, standardize,
     cast) on the golden's hidden states: the patch embedder and encoder
     are stubbed to hand them over, as the golden stubs HF's."""
-    from knurlogic.engine.families.gemma4.vision.vision import VisionModel
     from knurlogic.engine.families.gemma4.vision.config import VisionConfig
+    from knurlogic.engine.families.gemma4.vision.vision import VisionModel
     arrays, _ = fv.load_golden("gemma4_vision_tower")
     pre = f"pool/{dtype_name}/"
     dtype = getattr(mx, dtype_name)

@@ -95,6 +95,7 @@ def test_a_loading_rank_0_stops_its_read_between_batches(monkeypatch):
 def test_the_weight_read_stops_at_a_batch_boundary(monkeypatch):
     import mlx.core as mx
     import pytest
+
     from knurlogic.engine.runtime import host as Hst
     m = {"a": [mx.zeros((256,)) + i for i in range(8)]}
     monkeypatch.setattr(Hst, "LOAD_BATCH_BYTES", 2048)    # two per batch

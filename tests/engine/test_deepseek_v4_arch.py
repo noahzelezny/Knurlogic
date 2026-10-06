@@ -438,7 +438,7 @@ def test_the_batch_engine_admits_short_rows_beside_any_row():
             got = {uids[0]: 0}
             done = set()
 
-            def step():
+            def step(gen=gen, got=got, done=done):
                 for r in gen.next()[1]:
                     got[r.uid] = got.get(r.uid, 0) + 1
                     if r.finish_reason is not None:
@@ -478,7 +478,8 @@ def test_module_arrays_evaluate_first_in_another_thread():
         "    importlib.import_module(f'{host_for(name)}.models.{name}')\n"
         "dirs = [str(d.resolve()) for d in families.architecture_dirs()]\n"
         "mods = [m for m in list(sys.modules.values())\n"
-        "        if any(str(getattr(m, '__file__', '') or '').startswith(d) for d in dirs)]\n"
+        "        if any(str(getattr(m, '__file__', '') or '').startswith(d)"
+        " for d in dirs)]\n"
         "arrs = [(m.__name__, k, v) for m in mods for k, v in vars(m).items()\n"
         "        if isinstance(v, mx.array)]\n"
         "bad = []\n"

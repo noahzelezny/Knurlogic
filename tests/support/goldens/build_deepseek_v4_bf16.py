@@ -99,8 +99,8 @@ def _hidden(rng, shape):
 def _reference(ref: str):
     """model.py with kernel.py's CUDA kernels as torch ports; the FP8 /
     FP4 casts torch has no MPS kernel for run on the CPU."""
-    import torch
     import build_deepseek_v4_dspark as G
+    import torch
     k = G.kernels()
 
     def hop(fn):
@@ -386,10 +386,9 @@ def e2e(M, hf: Path, dev: str) -> dict:
     126-token prefill, then 5 decode steps with forward_spec at
     temperature 0) with the reference in bf16, its default dtype, on
     `dev`."""
+    import build_deepseek_v4_dspark as G
     import torch
     from safetensors.torch import load_file
-
-    import build_deepseek_v4_dspark as G
     for f in (M.get_window_topk_idxs, M.get_compress_topk_idxs,
               M.get_dspark_topk_idxs, M.precompute_freqs_cis):
         f.cache_clear()

@@ -10,7 +10,8 @@ through knurlogic's vendored sanitize.
 Reference: transformers 5.16.1, models/glm5_next/modeling_glm5_next.py.
 glm5_next.npz holds: the config, the weights (float16 values, read as
 float32 on both sides so they are exact), a 21-token prompt and 4 decode
-tokens, `meta` (what built it), and the reference's logits for the prefill and each decode step
+tokens, `meta` (what built it), and the reference's logits for the prefill
+and each decode step
 through its DynamicCache. index_topk (8) is below the sequence, so the
 DSA indexer really selects (pools of 4, tail appended); weights are scaled
 so some SwiGLU inputs leave +-swiglu_limit. Seed 0; no model files read.
@@ -121,11 +122,9 @@ def _meta():
 
 def main():
     import torch
-    from transformers.models.glm5_next.configuration_glm5_next import \
-        Glm5NextTextConfig
-    from transformers.models.glm5_next.modeling_glm5_next import \
-        Glm5NextTextModel
     from transformers.cache_utils import DynamicCache
+    from transformers.models.glm5_next.configuration_glm5_next import Glm5NextTextConfig
+    from transformers.models.glm5_next.modeling_glm5_next import Glm5NextTextModel
 
     torch.manual_seed(0)
     cfg = Glm5NextTextConfig(**{k: v for k, v in CONFIG.items()
@@ -162,7 +161,7 @@ def main():
         meta=np.array(json.dumps(_meta())),
         prompt=np.array(PROMPT, np.int32), decode=np.array(DECODE, np.int32),
         prefill_logits=logits[0].astype(np.float32),
-        decode_logits=np.stack([l[-1] for l in logits[1:]]).astype(np.float32),
+        decode_logits=np.stack([step[-1] for step in logits[1:]]).astype(np.float32),
         **arrays)
     print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
 

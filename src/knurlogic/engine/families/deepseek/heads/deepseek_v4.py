@@ -228,7 +228,7 @@ class MTPHead:
             raise ValueError(f"deepseek_v4 head: shape mismatch {wrong[:4]}")
         return mw
 
-    def load_weights(self, w: dict) -> "MTPHead":
+    def load_weights(self, w: dict) -> MTPHead:
         """Fill from sidecar tensors (keys with the `mtp.0.` prefix)."""
         mw = self.bind(w)
         self.m.load_weights(list(mw.items()), strict=True)

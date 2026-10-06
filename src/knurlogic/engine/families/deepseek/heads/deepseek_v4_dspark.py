@@ -271,7 +271,7 @@ class DSparkCache:
 
     # ------------------------------------------------------------- batch
     @classmethod
-    def merge(cls, caches: list) -> "DSparkCache":
+    def merge(cls, caches: list) -> DSparkCache:
         c0 = caches[0]
         out = cls(c0.n_stages, c0.window)
         out.lengths = [n for c in caches for n in c.lengths]
@@ -299,7 +299,7 @@ class DSparkCache:
         out.keys = stacked
         return out
 
-    def extend(self, other: "DSparkCache") -> None:
+    def extend(self, other: DSparkCache) -> None:
         m = type(self).merge([self, other])
         self.keys, self.lengths = m.keys, m.lengths
 
@@ -309,7 +309,7 @@ class DSparkCache:
             idx = mx.array(keep)
             self.keys = [k[idx] for k in self.keys]
 
-    def extract(self, i: int) -> "DSparkCache":
+    def extract(self, i: int) -> DSparkCache:
         out = type(self)(self.n_stages, self.window)
         n = self.lengths[i]
         out.lengths = [n]
@@ -407,7 +407,7 @@ class DSparkHead:
             raise ValueError(f"deepseek_v4 DSpark: shape mismatch {wrong[:4]}")
         return mw
 
-    def load_weights(self, w: dict) -> "DSparkHead":
+    def load_weights(self, w: dict) -> DSparkHead:
         mw = self.bind(w)
         self.m.load_weights(list(mw.items()), strict=True)
         mx.eval(self.m.parameters())

@@ -53,8 +53,7 @@ def test_the_dspark_sidecar_is_found_and_chosen():
     """find_head sees it (fit and launch count it like any head); the
     registry picks DSpark for a config with dspark_block_size."""
     from knurlogic.engine import mtp
-    from knurlogic.engine.families.deepseek.heads.deepseek_v4_dspark import \
-        DSparkHead
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4_dspark import DSparkHead
     found = mtp.find_head(G.TINY)
     assert found is not None and found.family == "deepseek_v4"
     assert found.path.name == "mtp-head-dspark-mxfp4.safetensors"
@@ -83,8 +82,9 @@ def _trace(model, head):
     """The golden's run through the MLX trunk and head: prefill, then each
     forced decode token -> the trunk's logits, the main hidden state and
     the head's draft (temperature 0)."""
-    from knurlogic.engine.mtp.capture import capture_input
     from contextlib import ExitStack
+
+    from knurlogic.engine.mtp.capture import capture_input
     out = {k: [] for k in ("logits", "main_hidden", "draft_ids",
                            "draft_logits", "confidence")}
     with ExitStack() as st:
@@ -344,10 +344,8 @@ def test_a_finished_rows_entry_carries_its_dspark_cache(monkeypatch):
     """The prompt-cache entry of a drafting row holds the DSpark cache at
     the trunk's offset, and a request continuing from it drafts the same
     tokens a fresh prefill of the whole prompt does."""
-    from knurlogic.engine.families.deepseek.heads.deepseek_v4_dspark import \
-        DSparkCache
-    from knurlogic.engine.mtp.batch_generator import (MTPBatchGenerator,
-                                                      trunk_offset)
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4_dspark import DSparkCache
+    from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator, trunk_offset
     from knurlogic.engine.mtp.caches import position
     monkeypatch.setenv("KNURLOGIC_MTP_BATCH_MAX_ROWS", "8")
     model = _load()
@@ -383,8 +381,7 @@ def test_the_real_sidecar_binds_by_its_header_alone():
     """Every name and shape dspark_pack wrote from the real checkpoint,
     against stages built from its config -- lazily, nothing loaded."""
     from knurlogic.engine import register
-    from knurlogic.engine.families.deepseek.heads.deepseek_v4_dspark import \
-        DSparkHead
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4_dspark import DSparkHead
     register.register("deepseek_v4")
     import mlx_lm.models.deepseek_v4 as M
     hdr = _header(REAL)
@@ -615,6 +612,7 @@ def test_the_verify_width_converges_through_outliers_and_spikes(
     an EMA read width 2 at 113 ms for as long as it went unmeasured), and
     the picker settles on the width that is truly best."""
     import random
+
     from knurlogic.engine.mtp import block_loop as BL
     monkeypatch.delenv("KNURLOGIC_MTP_VERIFY", raising=False)
     cost = {1: 0.070, 2: 0.077, 3: 0.085, 4: 0.097, 5: 0.107}
@@ -635,6 +633,7 @@ def test_a_width_timed_too_few_times_takes_the_fitted_line(monkeypatch):
     through the widths that have them; before any are, the picker times
     K and 1 only, and the rest come from the line until timed."""
     import random
+
     from knurlogic.engine.mtp import block_loop as BL
     monkeypatch.delenv("KNURLOGIC_MTP_VERIFY", raising=False)
     b = BL.BlockBatch(None, None, lambda: None, copy_caches=True,

@@ -38,7 +38,7 @@ class VisionArgs:
     vision_max_wh_ratio: float | None = 8
 
     @classmethod
-    def from_config(cls, config: dict) -> "VisionArgs":
+    def from_config(cls, config: dict) -> VisionArgs:
         kw = {k: config[k] for k in cls.__dataclass_fields__ if k in config}
         if "hidden_size" in config:
             kw["dim"] = config["hidden_size"]
@@ -46,7 +46,8 @@ class VisionArgs:
 
 
 def grid_tokens(best_height, best_width, patch_size, downsample_ratio):
-    """Number of LLM tokens the aligner grid occupies (N-layout, incl. row/align padding)."""
+    """Number of LLM tokens the aligner grid occupies (N-layout, incl.
+    row/align padding)."""
     n_llm_h = math.ceil((best_height // patch_size) / downsample_ratio)
     n_llm_w = math.ceil((best_width // patch_size) / downsample_ratio)
     num_tokens = n_llm_h * (n_llm_w + 1) + 2
@@ -78,16 +79,20 @@ def solve_resize_ratio(height, width, patch_size, downsample_ratio, max_n_token)
         max_h = math.floor(max_h_float)
         if max_h % 2 == 1:
             max_h -= 1
-        beta = min(max_w * patch_size * downsample_ratio / width, max_h * patch_size * downsample_ratio / height)
+        beta = min(max_w * patch_size * downsample_ratio / width,
+                   max_h * patch_size * downsample_ratio / height)
         best_width = math.floor(width * beta / patch_size) * patch_size
         best_height = math.floor(height * beta / patch_size) * patch_size
-    n_llm_h, n_llm_w, num_tokens = grid_tokens(best_height, best_width, patch_size, downsample_ratio)
+    n_llm_h, n_llm_w, num_tokens = grid_tokens(
+        best_height, best_width, patch_size, downsample_ratio)
     return n_llm_h, n_llm_w, best_height, best_width, num_tokens
 
 
-def safe_resize(height, width, best_height, best_width, patch_size, downsample_ratio, max_n_token):
+def safe_resize(height, width, best_height, best_width, patch_size,
+                downsample_ratio, max_n_token):
     max_n_token -= COMPRESS_PAD_TO - 1
-    n_llm_h, n_llm_w, num_tokens = grid_tokens(best_height, best_width, patch_size, downsample_ratio)
+    n_llm_h, n_llm_w, num_tokens = grid_tokens(
+        best_height, best_width, patch_size, downsample_ratio)
     budget = max_n_token
     while num_tokens > max_n_token:
         n_llm_h, n_llm_w, best_height, best_width, num_tokens = solve_resize_ratio(
@@ -107,12 +112,13 @@ def to_bf16(x: np.ndarray) -> np.ndarray:
 def load_image(image, args: VisionArgs):
     """An RGB PIL image -> (patches [n_vit_h * n_vit_w, 3 * p * p] float32
     holding bf16 values, n_vit_h, n_vit_w, n_llm_h, n_llm_w)."""
-    from PIL import Image, ImageOps
+    from PIL import ImageOps
 
     p = args.vision_patch_size
     image = image.convert("RGB")
     width, height = image.size
-    if args.vision_max_wh_ratio is not None and width > height * args.vision_max_wh_ratio:
+    if (args.vision_max_wh_ratio is not None
+            and width > height * args.vision_max_wh_ratio):
         width = height * args.vision_max_wh_ratio
     if 0 < width * height < args.vision_min_pixels:
         ratio = (args.vision_min_pixels / (width * height)) ** 0.5
@@ -121,9 +127,11 @@ def load_image(image, args: VisionArgs):
     best_width = math.ceil(width / p) * p
     best_height = math.ceil(height / p) * p
     n_llm_h, n_llm_w, best_height, best_width = safe_resize(
-        height, width, best_height, best_width, p, args.vision_downsample_ratio, args.vision_max_n_token)
+        height, width, best_height, best_width, p, args.vision_downsample_ratio,
+        args.vision_max_n_token)
     n_vit_h, n_vit_w = best_height // p, best_width // p
-    if args.vision_max_wh_ratio is not None and image.width >= args.vision_max_wh_ratio * image.height:
+    if (args.vision_max_wh_ratio is not None
+            and image.width >= args.vision_max_wh_ratio * image.height):
         image = image.resize((best_width, best_height))
     else:
         image = ImageOps.pad(image, (best_width, best_height), color=(127, 127, 127))

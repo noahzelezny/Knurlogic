@@ -1,5 +1,6 @@
 """The tensor split's rules: which arrays of a qwen3_5 / qwen4_exp /
-deepseek_v4 layer are cut, on which axis, in which segments -- one table that engine/runtime/tensor.py
+deepseek_v4 layer are cut, on which axis, in which segments -- one table
+that engine/runtime/tensor.py
 `shard` applies to loaded arrays and tuning/resolve checks against the
 safetensors headers before anything loads, so the refusal and the loader
 cannot disagree. No mlx here: the picker asks this of ~80 models.

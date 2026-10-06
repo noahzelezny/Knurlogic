@@ -83,6 +83,7 @@ extend-exclude = [
     "src/knurlogic/engine/families/qwen/vision",
     "src/knurlogic/engine/families/gemma4/vision",
     "tests/support/fixtures_deepseek_v4",
+    "tests/support/fixtures_deepseek_v4_vision/encoding_dsv4.py",
 ]
 
 [tool.ruff.lint]

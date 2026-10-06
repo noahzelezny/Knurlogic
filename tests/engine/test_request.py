@@ -258,8 +258,10 @@ def test_thinking_tag_in_content_after_the_close_is_kept():
 def test_the_real_qwen_tokenizers_close_tag_sequences_are_matched():
     """Qwen3.6's tokenizer: "</thinking>" after a newline or a word is
     `</` `thinking` `>`; after a space ` </` is another token. Both close."""
-    import pytest
     from pathlib import Path
+
+    import pytest
+
     from knurlogic.engine.runtime.request import _extra_think_closes
     p = Path.home() / ".exo/models/mlx-community--Qwen3.6-35B-A3B-8bit"
     if not (p / "tokenizer.json").exists():

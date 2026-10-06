@@ -27,10 +27,10 @@ TOL = 2e-4
 
 
 def _model():
-    from knurlogic.engine.families.glm5.architecture.glm5_next.config import \
-        TextConfig
-    from knurlogic.engine.families.glm5.architecture.glm5_next.language import \
-        LanguageModel
+    from knurlogic.engine.families.glm5.architecture.glm5_next.config import TextConfig
+    from knurlogic.engine.families.glm5.architecture.glm5_next.language import (
+        LanguageModel,
+    )
     cfg = json.loads(str(GOLD["config"]))
     model = LanguageModel(TextConfig.from_dict(cfg))
     w = {k[2:]: mx.array(v.astype(np.float32))

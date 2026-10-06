@@ -240,8 +240,7 @@ def test_a_bfloat16_component_rounds_as_the_reference(family, path):
 
 @pytest.mark.parametrize("family", ["qwen3_5", "qwen4_exp"])
 def test_the_vision_tower_computes_the_reference_features(family):
-    from knurlogic.engine.families.qwen.vision.vision import (VisionConfig,
-                                                              VisionModel)
+    from knurlogic.engine.families.qwen.vision.vision import VisionConfig, VisionModel
     z, meta = _golden()
     tower = VisionModel(VisionConfig.from_dict(
         dict(meta["vision/config"], model_type=family)))
@@ -266,8 +265,8 @@ def test_the_image_processor_computes_the_reference_pixels(tag):
     resizes with a different bicubic: there a pixel may be one uint8 step
     (2/255 after the 0.5/0.5 normalize) off."""
     from PIL import Image
-    from knurlogic.engine.families.qwen.vision.processing import \
-        ImageProcessor
+
+    from knurlogic.engine.families.qwen.vision.processing import ImageProcessor
     z, meta = _golden()
     size = meta["proc/sizes"][tag]
     kw = {k: v for k, v in G.PROC.items() if k != "size"}

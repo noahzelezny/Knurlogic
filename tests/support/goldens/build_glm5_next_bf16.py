@@ -58,10 +58,8 @@ def main():
 
     import torch
     import transformers
-    from transformers.models.glm5_next.configuration_glm5_next import \
-        Glm5NextTextConfig
-    from transformers.models.glm5_next.modeling_glm5_next import \
-        Glm5NextTextModel
+    from transformers.models.glm5_next.configuration_glm5_next import Glm5NextTextConfig
+    from transformers.models.glm5_next.modeling_glm5_next import Glm5NextTextModel
 
     assert Glm5NextTextModel._keep_in_fp32_modules_strict == list(KEEP_FP32) \
         or set(Glm5NextTextModel._keep_in_fp32_modules_strict or []) <= \
