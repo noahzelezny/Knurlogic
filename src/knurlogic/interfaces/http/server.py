@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
+import select
+import socket
 import threading
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,6 +36,48 @@ CHAT_PATHS = ("/v1/chat/completions", "/chat/completions")
 #: into memory before anything else can judge it, so it is bounded first.
 #: Generous: images are bounded separately by the image store's memory.
 DEFAULT_MAX_BODY = 512 * 1024 * 1024
+
+
+#: How often a non-streamed request's connection is checked for a hang-up
+#: while it waits, seconds.
+HANGUP_POLL_S = 1.0
+
+#: The connection of the request this handler thread is serving, for
+#: App.submit's hang-up watch (_watch_hangup).
+_CONN = threading.local()
+
+
+def _hung_up(sock) -> bool:
+    """True when the peer has closed: readable with nothing to read (EOF)
+    or an error. Peeks, so a request's bytes are never consumed; data
+    waiting (a pipelined request) is not a hang-up."""
+    try:
+        ready, _, _ = select.select([sock], [], [], 0)
+        if not ready:
+            return False
+        return sock.recv(1, socket.MSG_PEEK) == b""
+    except BlockingIOError:
+        return False
+    except (OSError, ValueError):
+        return True
+
+
+def _watch_hangup(job, sock, done: threading.Event) -> None:
+    """Cancel `job` when its client hangs up while a non-streamed reply is
+    being made. Nothing is written until such a reply is complete, so the
+    failed write that stops a stream never happens: a client that timed
+    out and resent its request (the harness's 120 s read timeout, 2026-10-06)
+    left every copy prefilling 170k tokens to the end. Off with
+    KNURLOGIC_DISCONNECT_POLL=off, for a client that half-closes its side
+    after sending (none known)."""
+    while not done.wait(HANGUP_POLL_S):
+        if job.cancelled:
+            return
+        if _hung_up(sock):
+            logger.info("a non-streamed request's client hung up: "
+                        "cancelling it")
+            job.cancel()
+            return
 
 
 class BodyError(Exception):
@@ -106,6 +151,12 @@ class App:
         ctx.update(extra or {})
         self._count()
         self.scheduler.submit(job)
+        conn = getattr(_CONN, "sock", None)
+        if conn is not None and not ctx.get("stream") and \
+                os.environ.get("KNURLOGIC_DISCONNECT_POLL", "on") != "off":
+            threading.Thread(target=_watch_hangup,
+                             args=(job, conn, _CONN.done),
+                             daemon=True).start()
         host = self.scheduler.host
 
         def decode(t):
@@ -458,7 +509,12 @@ class Handler(BaseHTTPRequestHandler):
         self._guarded(self._get)
 
     def do_POST(self):
-        self._guarded(self._post)
+        _CONN.sock, _CONN.done = self.connection, threading.Event()
+        try:
+            self._guarded(self._post)
+        finally:
+            _CONN.done.set()
+            _CONN.sock = None
 
     def _guarded(self, fn) -> None:
         """Any error a route did not answer itself is a 500 with a body --

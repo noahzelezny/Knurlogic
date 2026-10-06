@@ -499,7 +499,14 @@ and the page's routes (web.routes): /, /status.json, /settings.json, ...
 ```
 
 A write that fails (the client went away) cancels the Job, so the
-scheduler frees its row on the next step.
+scheduler frees its row on the next step. A non-streamed request writes
+nothing until its reply is complete, so its connection is watched instead:
+once a second the handler peeks at the socket, and end-of-file or an error
+cancels the Job (data waiting is not a hang-up). Without it, a client that
+timed out and resent its request left every copy running to the end.
+`KNURLOGIC_DISCONNECT_POLL=off` turns the watch off, for a client that
+closes its sending side after the request and still reads the reply (none
+known).
 
 **Browsers.** A web page open in the user's browser can send requests to
 localhost; without care, any site could make this server load a model.
