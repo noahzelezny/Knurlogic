@@ -97,7 +97,9 @@ def _time(layer, tc, cache, chunk: int, expanded: bool, repeat: int):
         for c, s, o in zip(cache.caches, state, offs):
             c.state = s
             c.offset = o
-        cache.caches[1]._pool = None
+        # the indexer's pools are kept, as a served prefill keeps them
+        # (edit 11): built to the longer context, only those before the
+        # chunk are reused
     return best, peak / GIB
 
 

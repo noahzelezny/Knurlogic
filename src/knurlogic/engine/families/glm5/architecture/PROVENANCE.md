@@ -159,3 +159,18 @@ rows of the max |logit diff|: prefill 0.055 before, 0.051 with edit 7,
    context, one 2.7k-token warm-up refused a 339k-token prompt even at
    chunk 128. Live validation on the released rungs pending.
 
+11. **Prefill reuses the indexer's stable pools** (`Glm5NextIndexer.__call__`,
+   `INCREMENTAL_POOL`). mlx-vlm pools the indexer's keys incrementally only
+   at S <= SMALL_L: every prefill chunk pooled the WHOLE context again, so
+   each chunk's indexer cost grew with the context on top of its scoring
+   (a 339k-token prefill at chunk 2048, two Macs: 340 tok/s at 8k, 275 by
+   75k). A pool is its own index_kpool-aligned window of keys, so a
+   complete one is the same whatever chunk added the tokens after it; a
+   prefill chunk now pools only from the last complete pool before it, as
+   decode always did (the same guards: no padding, the batch unchanged,
+   and after a rollback only pools wholly before min(t_prev, T - S)).
+   Parity: tests/engine/test_glm5_sparse_prefill.py, chunks of 16, 13 and
+   6 against kpool 4, plain and 8-bit latent: logits equal full pooling's
+   to 1e-5 of their range, and past the first selecting chunk a chunk
+   pools its own tail only. False runs mlx-vlm's full pooling.
+
