@@ -891,3 +891,70 @@ def test_the_step_sets_the_rows_chunk_and_measures_the_prefill_line():
         mx.get_peak_memory = real
     assert s._ex.chunk == 512 and s._chunk_of == {}
     assert s._tx == _samples(prefill=[(8192, 2 * GIB)])
+
+
+def test_memory_pressure_on_the_server_refuses_new_requests(caplog):
+    """2026-10-05, M4: another process's leak had macOS compress 8.3 GB of
+    the serve within minutes; a prefill that took 98 s ran 17+ min. Past
+    1 GiB compressed/swapped, new requests get the insufficient_memory 503
+    and the status says why; a WARNING once; it clears when paged back."""
+    import logging
+
+    from knurlogic.engine.runtime import scheduler as S
+    from knurlogic.interfaces.http.openai import _status_of
+    GIB = S.GIB
+    reading = {"b": int(8.3 * GIB)}
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB,
+                    compressed=lambda: reading["b"])
+    with caplog.at_level(logging.INFO, logger=S.__name__):
+        s._sample_pressure(now=100.0)
+        s._sample_pressure(now=106.0)          # still over: no new warning
+    warns = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warns) == 1 and "8.3 GiB" in warns[0].getMessage()
+    why = ("loaded, no memory for requests: rank 0: 8.3 GiB of the model "
+           "compressed/swapped by macOS (memory pressure from other "
+           "processes)")
+    assert s.memory_short() == why and s.requests()["memory_short"] == why
+    job = _job([5, 6, 7])
+    s._waiting.append(job)
+    s._admit_from_queue([], Exception, None)
+    kind, err = job.outbox.get_nowait()
+    assert kind == "error" and isinstance(err, S.OutOfMemory)
+    assert err.memory["compressed_bytes"] == int(8.3 * GIB)
+    body = _status_of(err).body()
+    assert body["error"]["code"] == "insufficient_memory"
+    assert "8.3 GiB of the model compressed" in body["error"]["message"]
+    # read every PRESSURE_EVERY_S, not every tick
+    reading["b"] = 0
+    s._sample_pressure(now=108.0)
+    assert s.memory_short() == why
+    s._sample_pressure(now=112.0)
+    assert s.memory_short() is None and s._pressure_short() is None
+
+
+def test_the_own_compressed_reading_is_a_number():
+    from knurlogic.engine.runtime.scheduler import own_compressed_bytes
+    assert own_compressed_bytes() >= 0
+
+
+def test_a_running_prefill_reports_progress_logs_and_sees_a_cancel(caplog):
+    """The prefill hook: progress to the client every chunk (a stream
+    writes a keepalive, so a client that hung up is noticed), one log line
+    every 8 chunks, and the job's cancel flag as its answer."""
+    import logging
+
+    from knurlogic.engine.runtime import scheduler as S
+    s = S.Scheduler(Host(None, Tok({})), compressed=None)
+    job = _job([1, 2, 3])
+    hook = s._prefill_hook(job, 4096, 0)
+    with caplog.at_level(logging.INFO, logger=S.__name__):
+        stops = [hook(9, 512 * (i + 1), 4096) for i in range(8)]
+    assert stops == [False] * 8
+    lines = [r.getMessage() for r in caplog.records
+             if r.getMessage().startswith("prefill 9:")]
+    assert len(lines) == 1 and lines[0].startswith(
+        "prefill 9: 4096/4096 tokens, chunk 8, ")
+    assert job.outbox.qsize() == 8 and \
+        job.outbox.get_nowait() == ("progress", (512, 4096))
+    job.cancel()
+    assert hook(9, 4096, 4096) is True

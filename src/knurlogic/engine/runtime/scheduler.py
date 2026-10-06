@@ -42,6 +42,39 @@ from .request import Request, control_machine
 logger = logging.getLogger(__name__)
 GIB = 1 << 30
 
+#: this server's own memory macOS has compressed or swapped out, past which
+#: new requests are refused (Scheduler._pressure_short): the model's pages
+#: are being paged back in by every step, and a prefill that took 98 s ran
+#: 17+ min with both GPUs at 100% (2026-10-05, another process's leak)
+PRESSURE_BYTES = 1 << 30
+#: how often that is read (a task_info call; on the scheduler thread)
+PRESSURE_EVERY_S = 5.0
+#: a running prefill's progress line: every this many chunks or seconds
+PREFILL_LOG_CHUNKS = 8
+PREFILL_LOG_S = 10.0
+
+
+def own_compressed_bytes() -> int:
+    """Bytes of this process the macOS compressor holds (compressed in RAM
+    or swapped out with its segment): task_info(TASK_VM_INFO).compressed.
+    0 where it cannot be read."""
+    import ctypes
+    import ctypes.util
+    try:
+        lib = ctypes.CDLL(ctypes.util.find_library("System"))
+        buf = (ctypes.c_uint64 * 64)()
+        cnt = ctypes.c_uint32(ctypes.sizeof(buf) // 4)
+        task = ctypes.c_uint32.in_dll(lib, "mach_task_self_")
+        if lib.task_info(task, 22, ctypes.byref(buf), ctypes.byref(cnt)):
+            return 0
+        # task_vm_info: virtual_size, region_count+page_size, resident,
+        # resident_peak, device, device_peak, internal, internal_peak,
+        # external, external_peak, reusable, reusable_peak, purgeable x3,
+        # compressed (u64 index 15)
+        return int(buf[15])
+    except (OSError, AttributeError, ValueError, TypeError):
+        return 0
+
 
 #: a prefill step's transient is read off a line in context x chunk, in
 #: units of this chunk (so x reads in tokens of context at chunk 512)
@@ -322,8 +355,10 @@ class Scheduler:
                  prompt_cache_bytes: int | None = None,
                  working_set_bytes: int | None = None,
                  stats: dict | None = None, tensor=None,
-                 gpu_in_use=None):
-        """`tensor`: rank 0's engine/runtime/tensor.Ring when this model is
+                 gpu_in_use=None, compressed=own_compressed_bytes):
+        """`compressed`: () -> bytes of this process macOS has compressed
+        or swapped (own_compressed_bytes), or None not to watch.
+        `tensor`: rank 0's engine/runtime/tensor.Ring when this model is
         split across ranks; the prompt cache is then count-based only.
         `gpu_in_use`: () -> bytes of GPU memory every process on this
         machine holds (serve.load.gpu_in_use), or None; what the others
@@ -369,6 +404,10 @@ class Scheduler:
         self._rows: dict[int, _Row] = {}
         #: why the last tick left requests waiting (requests()), or None
         self._holding: str | None = None
+        #: this process's compressed/swapped bytes, last read, and when
+        self._compressed = compressed
+        self._pressure = 0
+        self._pressure_at = 0.0
         #: the prompt cache gave way on a ring and the peers have not yet
         #: said what that freed there (_make_room)
         self._ring_trimmed = False
@@ -594,6 +633,7 @@ class Scheduler:
             self._close_executor()
 
     def _tick(self) -> None:
+        self._sample_pressure()
         self._do_commands()
         if self.tensor is not None:
             self._journal_sets()
@@ -860,6 +900,17 @@ class Scheduler:
             job = self._waiting.pop(0)
             if job.cancelled:
                 continue
+            short = self._pressure_short()
+            if short:
+                try:
+                    mem = self._memory(job.prompt_tokens)
+                except Exception:   # the refusal stands without its terms
+                    mem = {}
+                mem["compressed_bytes"] = int(self._pressure)
+                logger.info("refused a request: %s", short)
+                self._error(job, OutOfMemory(
+                    f"{short}; retry once it is paged back in", memory=mem))
+                continue
             if job.prompt_tokens and self._rows \
                     and not self._fits(job.prompt_tokens):
                 # waited before and still would not fit: not tokenized
@@ -973,7 +1024,9 @@ class Scheduler:
                 prefix=prompt[:len(prompt) - len(rest)],
                 sampling=sampling, processors=procs, state_machine=sm,
                 top_logprobs=job.top_logprobs, report=job.request,
-                wire=wire, chunk=chunk))
+                wire=wire, chunk=chunk,
+                on_chunk=self._prefill_hook(job, len(prompt),
+                                            len(prompt) - len(rest))))
         try:
             text = Request(tok.detokenizer, sequences=seqs, stops=job.stops,
                            tool_parser=getattr(tok, "tool_parser", None),
@@ -1039,7 +1092,11 @@ class Scheduler:
         final, not a wait. Read at the smallest chunk, the one a refusal
         is made at, and with no reserve for a prompt nobody sent: the
         margin is the step about to run's (_margin). Side-effect free
-        (_fits)."""
+        (_fits). Memory pressure on this process comes first
+        (_pressure_short): while it lasts every new request is refused."""
+        short = self._pressure_short()
+        if short:
+            return f"loaded, no memory for requests: {short}"
         try:
             if self._rows or not self._kv or not self._limit() or \
                     self._fits(n_tokens):
@@ -1067,6 +1124,68 @@ class Scheduler:
                    f"{m['margin'] / GIB:.1f}), active "
                    f"{m['local_active'] / GIB:.1f}")
         return f"loaded, no memory for requests: {who}, {why}"
+
+    # ---------------------------------------------------- pressure, prefill
+
+    def _sample_pressure(self, now: float | None = None) -> None:
+        """Read this process's compressed/swapped bytes every
+        PRESSURE_EVERY_S; one WARNING when it passes PRESSURE_BYTES, one
+        INFO when it drops back."""
+        if self._compressed is None:
+            return
+        now = time.monotonic() if now is None else now
+        if self._pressure_at and now - self._pressure_at < PRESSURE_EVERY_S:
+            return
+        self._pressure_at = now
+        try:
+            b = int(self._compressed() or 0)
+        except Exception:   # a reading must never fail the server
+            b = 0
+        was = self._pressure > PRESSURE_BYTES
+        self._pressure = b
+        if b > PRESSURE_BYTES and not was:
+            logger.warning("%s; new requests are refused until it is paged "
+                           "back in", self._pressure_short())
+        elif was and b <= PRESSURE_BYTES:
+            logger.info("memory pressure over: %.1f GiB of this server "
+                        "compressed/swapped; admitting again", b / GIB)
+
+    def _pressure_short(self) -> str | None:
+        """Why new requests are refused for memory pressure, or None."""
+        b = self._pressure
+        if b <= PRESSURE_BYTES:
+            return None
+        rank = int(getattr(getattr(self.tensor, "link", None), "rank", 0)
+                   or 0)
+        return (f"rank {rank}: {b / GIB:.1f} GiB of the model "
+                f"compressed/swapped by macOS (memory pressure from other "
+                f"processes)")
+
+    def _prefill_hook(self, job: Job, total: int, hit: int):
+        """(uid, done, total) -> stop?, called by the engine after every
+        prefill chunk of this request's admission: its progress goes to the
+        client (a stream writes a keepalive, so a client that hung up is
+        noticed), a line goes to the log every PREFILL_LOG_CHUNKS chunks or
+        PREFILL_LOG_S seconds, and True asks the engine to stop the prefill
+        (the client is gone). The engine honours a stop on a single machine
+        only: on a ring every rank must run the same forwards, so there a
+        cancelled row is dropped at the next step boundary (_step)."""
+        st = {"n": 0, "t0": time.perf_counter()}
+        st["logged"] = st["t0"]
+
+        def hook(uid: int, done: int, n: int) -> bool:
+            st["n"] += 1
+            now = time.perf_counter()
+            if st["n"] % PREFILL_LOG_CHUNKS == 0 or \
+                    now - st["logged"] >= PREFILL_LOG_S:
+                st["logged"] = now
+                rate = (done - hit) / max(now - st["t0"], 1e-9)
+                logger.info("prefill %d: %d/%d tokens, chunk %d, %.0f tok/s",
+                            uid, done, n, st["n"], rate)
+            job.outbox.put(("progress", (done, n)))
+            return job.cancelled
+
+        return hook
 
     def _working_set(self) -> int:
         if self.working_set is None:
