@@ -32,7 +32,7 @@ from knurlogic.engine.serve import cache_report as cachereport
 from ..vision import key as K
 from .batch_loop import ForwardFailed, MTPBatch, RowParams, admit
 from .block_loop import BlockBatch
-from .caches import position
+from .caches import position, settle
 from .capture import capture_input
 from .registry import resolve
 from .sampling import Keys, NonFiniteLogits, make_distribution, nonfinite_message
@@ -677,6 +677,9 @@ class MTPBatchGenerator(BatchGenerator):
         try:
             with mx.stream(self._stream):
                 row_steps = self._batch.step()
+                # the caches' unread fields, ended every step (side_state)
+                settle([self._batch.cache,
+                               getattr(self._batch, "hcache", None)])
         # a failed decode step fails its rows; the generation thread lives (logged)
         except Exception as e:
             # Same rule as a failed admission: the rows in this step fail
