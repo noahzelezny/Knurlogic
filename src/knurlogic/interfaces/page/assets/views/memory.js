@@ -193,6 +193,8 @@ async function loadResident(){
       <div class="s">on ${esc(on(r))}</div>
       ${r.requests&&r.requests.memory_short&&r.state==='loaded'
         ?`<div class="why">${esc(r.requests.memory_short.replace(/^loaded, no memory for requests: /,''))}</div>`:''}
+      ${r.requests&&r.requests.memory_pressure&&r.state==='loaded'
+        ?`<div class="why">slowed: ${esc(r.requests.memory_pressure)}</div>`:''}
     </div>`;
   const none='<div class="card offered"><div class="cardhd">'+
     '<span class="dot"></span><span class="n">nothing loaded</span></div></div>';

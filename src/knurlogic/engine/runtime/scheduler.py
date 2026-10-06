@@ -563,7 +563,11 @@ class Scheduler:
                 "capacity": cap, "oldest_pending_s": round(oldest, 1),
                 "holding": holding,
                 "memory_short": None if self._warming
-                else self.memory_short()}
+                else self.memory_short(),
+                # a warning, not a refusal: macOS compresses idle pages
+                # routinely, and a guard that refuses on it refuses with
+                # memory to spare
+                "memory_pressure": self._pressure_short()}
 
     def more_helps(self, rows: int):
         """Would one more concurrent row raise throughput? True/False from
@@ -900,17 +904,6 @@ class Scheduler:
             job = self._waiting.pop(0)
             if job.cancelled:
                 continue
-            short = self._pressure_short()
-            if short:
-                try:
-                    mem = self._memory(job.prompt_tokens)
-                except Exception:   # the refusal stands without its terms
-                    mem = {}
-                mem["compressed_bytes"] = int(self._pressure)
-                logger.info("refused a request: %s", short)
-                self._error(job, OutOfMemory(
-                    f"{short}; retry once it is paged back in", memory=mem))
-                continue
             if job.prompt_tokens and self._rows \
                     and not self._fits(job.prompt_tokens):
                 # waited before and still would not fit: not tokenized
@@ -1092,11 +1085,8 @@ class Scheduler:
         final, not a wait. Read at the smallest chunk, the one a refusal
         is made at, and with no reserve for a prompt nobody sent: the
         margin is the step about to run's (_margin). Side-effect free
-        (_fits). Memory pressure on this process comes first
-        (_pressure_short): while it lasts every new request is refused."""
-        short = self._pressure_short()
-        if short:
-            return f"loaded, no memory for requests: {short}"
+        (_fits). Memory pressure is reported apart (requests()'s
+        memory_pressure), never as a refusal."""
         try:
             if self._rows or not self._kv or not self._limit() or \
                     self._fits(n_tokens):
