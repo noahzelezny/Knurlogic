@@ -130,9 +130,12 @@ resets at..."}}`, a `refused` ledger row, and the page shows it.
 
 ## Live progress (the harness's request)
 
-Prefill is silent on the wire until the first token. The engine already
-calls `on_chunk` after every prefill chunk (`engine/mtp/batch_loop.py`).
-Streaming responses get one event per chunk:
+Prefill progress is already on the wire for OpenAI streaming: the
+scheduler's hook puts `("progress", (done, total))` on the job outbox per
+chunk (`engine/runtime/scheduler.py:1206`) and `http/openai.py:336` writes
+`: keepalive <done>/<total>`. The Messages path flattens it to a bare
+`ping` (`http/messages.py:326`). Promote it to a named event on every
+streaming API:
 
 ```
 event: knurlogic.progress
