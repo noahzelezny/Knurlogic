@@ -237,7 +237,8 @@ def generate(model, tokenizer, prompt: str, max_tokens: int = 8) -> str:
 #:     baked into Metal kernel source that is compiled once. Those genuinely
 #:     need a restart, or an override module that reads them per dispatch.
 LIVE_KNOBS = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB",
-              "KNURLOGIC_CACHE_LIMIT_GB", "KNURLOGIC_CONTEXT_LENGTH")
+              "KNURLOGIC_CACHE_LIMIT_GB", "KNURLOGIC_CONTEXT_LENGTH",
+              "KNURLOGIC_THINKING_DEFAULT")
 
 
 def _artifact_runtime_modules():
@@ -284,6 +285,18 @@ def apply_live(env: dict) -> dict:
                 done[k] = f"applied now ({v} GiB)"
             except (ValueError, TypeError, AttributeError, RuntimeError, OSError) as e:
                 done[k] = f"failed: {e}"
+        elif k == "KNURLOGIC_THINKING_DEFAULT":
+            # engine/serve/thinking reads it at every request
+            from knurlogic.tuning.settings import thinking_default_of
+            try:
+                v = thinking_default_of(v)
+            except ValueError as e:
+                done[k] = f"failed: {e}"
+                continue
+            os.environ[k] = v
+            done[k] = ("applied: a request that names no level gets "
+                       + ("the model's own default" if v == "model"
+                          else v))
         elif k == "KNURLOGIC_CONTEXT_LENGTH":
             # the scheduler reads it at every admission
             try:
