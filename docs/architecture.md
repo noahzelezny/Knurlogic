@@ -97,6 +97,8 @@ Start with `engine.md` and `server.md` for the shape of a server.
 - Conversations: [compaction](design/compaction.md)
 - Cluster: [cluster](design/cluster.md), [discovery](design/discovery.md)
 - Real-model gates: [tools](design/tools.md)
+- Usage and the control plane: [fleet](design/fleet.md),
+  [telemetry](design/telemetry.md) (the contract clients share)
 
 ## Tests
 
