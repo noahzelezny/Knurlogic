@@ -672,6 +672,18 @@ admitted LEAN, without checkpoints (the request beats the cache); failing
 that it waits for running rows, or with none running is refused -- never
 admitted to abort the process.
 
+### knurlogic/interfaces/http/request_id.py -- X-Request-Id
+
+A client's own id for a request, echoed unchanged so its trace joins the
+server's record of the request: as a response header on every answer to a
+request that carried one (success, stream or error -- the handler's
+end_headers adds it), and as `request_id` in usage.knurlogic beside the
+timing partition. Opaque; accepted at 1-128 visible ASCII characters,
+otherwise ignored (never repeated into a header). Never generated. The
+page's router (`_stream`) sends it to the model server and returns the
+model server's echo, or the client's own id when the upstream predates the
+echo; its refusals (`_send_json`) carry it as well.
+
 ### src/knurlogic/engine/runtime/spans.py -- where a request's time went
 
 `usage.knurlogic.timing` gives the rates (TTFT, prefill and decode tok/s).

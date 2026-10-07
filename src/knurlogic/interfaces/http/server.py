@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, urlparse
 from knurlogic.engine.templates import TEMPLATE_ERRORS
 
 from . import openai as O
+from . import request_id as RID
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +154,7 @@ class App:
         ctx.update(extra or {})
         self._count()
         job.received = received     # usage.knurlogic.timing: http_build
+        job.request_id = getattr(_CONN, "rid", None)   # X-Request-Id
         self.scheduler.submit(job)
         conn = getattr(_CONN, "sock", None)
         if conn is not None and not ctx.get("stream") and \
@@ -505,19 +507,29 @@ class Handler(BaseHTTPRequestHandler):
                              "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers",
                              "Content-Type, Authorization, x-api-key, "
-                             "anthropic-version")
+                             "anthropic-version, X-Request-Id")
         self.end_headers()
 
     def do_GET(self):
         self._guarded(self._get)
 
+    def end_headers(self):
+        # X-Request-Id echoed on every answer to a request that carried
+        # one: success, stream or error alike (request_id.py)
+        rid = getattr(self, "_rid", None)
+        if rid:
+            self.send_header(RID.HEADER, rid)
+        super().end_headers()
+
     def do_POST(self):
         _CONN.sock, _CONN.done = self.connection, threading.Event()
+        self._rid = _CONN.rid = RID.of(self.headers)
         try:
             self._guarded(self._post)
         finally:
             _CONN.done.set()
             _CONN.sock = None
+            _CONN.rid = None
 
     def _guarded(self, fn) -> None:
         """Any error a route did not answer itself is a 500 with a body --

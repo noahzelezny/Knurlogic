@@ -112,7 +112,9 @@ def test_the_step_loop_partitions_a_request():
     s._learn = lambda *a, **k: None
     s.cache = NS(insert=lambda *a, **k: None)
     s._ex = _Ex()
-    job = s.submit(S.Job(P.ChatRequest(), P.PromptArgs()))
+    job = S.Job(P.ChatRequest(), P.PromptArgs())
+    job.request_id = "client-1"
+    job = s.submit(job)
     job.spans.to("admit_other")
     s._rows = {1: S._Row(job, _Text(), [], admitted=time.perf_counter())}
     s._step()
@@ -120,6 +122,7 @@ def test_the_step_loop_partitions_a_request():
     kind, usage = job.outbox.get_nowait()
     while kind != "done":
         kind, usage = job.outbox.get_nowait()
+    assert usage["knurlogic"]["request_id"] == "client-1"
     t = usage["knurlogic"]["timing"]
     spans = t["spans_s"]
     assert spans["prefill_forward"] >= 0.02
