@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+* `X-Request-Id` is echoed: a request to /v1/chat/completions or
+  /v1/messages that carries one (1-128 visible ASCII characters, opaque)
+  gets the same value back as a response header -- on errors too -- and as
+  `request_id` in the answer's usage.knurlogic. The page's router passes
+  it to the model server and the echo back (its own refusals carry it
+  too). None is generated when a request sends none. A harness that tags
+  its calls joins its trace to the server's record of each request on it.
 * `usage.knurlogic.timing.spans_s`: each request's wall time, partitioned
   -- HTTP build, queue, tokenize, memory admission, prompt-cache lookup,
   and the gap / forward / host time of its prefill and decode steps -- with

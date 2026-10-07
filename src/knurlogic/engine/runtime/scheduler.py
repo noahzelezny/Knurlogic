@@ -281,6 +281,8 @@ class Job:
     received: float = 0.0
     #: where its wall time went, bucket by bucket (spans.py); None when off
     spans: Spans | None = None
+    #: the client's X-Request-Id, echoed as usage.knurlogic.request_id
+    request_id: str | None = None
 
     def cancel(self) -> None:
         """From the HTTP thread: the client went away; free the row."""
@@ -1834,7 +1836,10 @@ class Scheduler:
         if sp is not None:
             sp.to(step_bucket(row.prefilling, "host"), done)
             timing.update(sp.report(done))
-        usage.setdefault("knurlogic", {})["timing"] = timing
+        kn = usage.setdefault("knurlogic", {})
+        kn["timing"] = timing
+        if row.job.request_id:
+            kn["request_id"] = row.job.request_id
         row.job.outbox.put(("done", usage))
 
     def _error(self, job: Job, err: BaseException) -> None:
