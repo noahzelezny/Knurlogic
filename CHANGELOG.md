@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+* `usage.knurlogic.timing.spans_s`: each request's wall time, partitioned
+  -- HTTP build, queue, tokenize, memory admission, prompt-cache lookup,
+  and the gap / forward / host time of its prefill and decode steps -- with
+  `spans_whole_s` and `spans_unaccounted_s` beside it. The buckets sum to
+  the whole by construction, so a served prefill slower than a plain
+  forward of the same model now names where the time went. Host clocks
+  only; `KNURLOGIC_TIMING_SPANS=off` turns it off (docs/design/server.md).
 * A split model (pipeline or tensor) stops a prefill when its client goes
   away, at the next chunk on every Mac together, instead of running the
   whole prompt to its end: a 339k-token prompt kept two Macs busy for half

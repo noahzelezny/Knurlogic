@@ -20,6 +20,7 @@ import queue
 import select
 import socket
 import threading
+import time
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -140,6 +141,7 @@ class App:
 
     def submit(self, body: dict, chat: bool, extra: dict = None):
         from knurlogic.machine.artifact import sampling_defaults
+        received = time.perf_counter()
         path = self.scheduler.host.path
         job, ctx = O.build_job(body, chat=chat,
                                translate=self.translate if chat else None,
@@ -150,6 +152,7 @@ class App:
             ctx["window"] = self.window()
         ctx.update(extra or {})
         self._count()
+        job.received = received     # usage.knurlogic.timing: http_build
         self.scheduler.submit(job)
         conn = getattr(_CONN, "sock", None)
         if conn is not None and not ctx.get("stream") and \

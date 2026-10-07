@@ -672,6 +672,42 @@ admitted LEAN, without checkpoints (the request beats the cache); failing
 that it waits for running rows, or with none running is refused -- never
 admitted to abort the process.
 
+### src/knurlogic/engine/runtime/spans.py -- where a request's time went
+
+`usage.knurlogic.timing` gives the rates (TTFT, prefill and decode tok/s).
+A rate says how fast, not where the rest went, so the timing also carries a
+partition of the request's wall time, `spans_s`, from the HTTP handler
+starting to build the job to the moment its usage is written:
+
+    http_build       request body -> job (parse, translate)       HTTP thread
+    queue            submitted -> the scheduler began admitting it
+    tokenize         chat template + tokenizer (vision: the tower)
+    admit_memory     fitting the prompt into memory (_make_room)
+    cache_fetch      the prompt-cache lookup
+    admit_other      the rest of _insert (executor insert, request setup)
+    {prefill,decode}_gap      scheduler work before a step (memory guard,
+                              chunk refit, admitting others)
+    {prefill,decode}_forward  the executor's step (model, sampling, on a
+                              ring the collectives)
+    {prefill,decode}_host     after the step (events, detokenize, deltas)
+    decode_forward_shared     a decode step that also prefilled ANOTHER
+                              request's prompt: time waited on someone
+                              else's admission
+    prefill_waiting           a step that admitted another request while
+                              this one waited its turn (one admission
+                              per step)
+
+It is a cursor, not a set of timers: each boundary charges the time since
+the previous one to a bucket, so the buckets sum to `spans_whole_s` by
+construction; `spans_unaccounted_s` is the instrument's own check and is 0
+unless a mark was skipped. A step shared by several rows is charged in full
+to each (each waited for all of it). A request that waited for memory and
+was re-admitted carries its failed attempts in `queue`. Host clocks only:
+nothing is evaluated or synchronized for it, so it does not change what the
+GPU runs. `KNURLOGIC_TIMING_SPANS=off` turns it off, read live.
+`vqlab serve-timeline` drives n requests of a stated length and prints the
+median of each bucket.
+
 ### src/knurlogic/engine/serve/__init__.py -- engine boundary
 
   load.py          engine info, load, memory, the cache limit, knobs a
