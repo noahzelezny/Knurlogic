@@ -100,3 +100,8 @@ there is a finding. The checklist, per family:
   [ ] pipeline / tensor_split: what the trunk freezes from the whole layer
       list; any block-wise activation rounding a split must respect
   [ ] prefill_chunk / kv_quant: measured, with the numbers
+  [ ] speed: a served request's partition (usage.knurlogic.timing.spans_s,
+      engine/runtime/spans.py) at a 2048-token prompt, n >= 3, recorded
+      with the machine: TTFT, prefill and decode tok/s, the engine-only
+      prefill rate (prompt / prefill_forward), and spans_unaccounted_s ~ 0
+      (`vqlab bench serve-timeline` drives it)
