@@ -2,8 +2,9 @@
 each query's own selection (glm5_next edit 10, _gathered_attention)
 instead of expanding per-head K/V for the whole context: the same keys and
 the same softmax, so the logits match the expanded path's -- chunked
-through the cache past index_topk, in float32 (to rounding) and bf16 / an
-8-bit latent (to bf16's)."""
+through the cache past index_topk, in float32 to rounding; in bf16 / an
+8-bit latent, no worse-rounded than the expanded path against a float32
+reference of the same weights."""
 import json
 import sys
 from pathlib import Path
@@ -54,14 +55,11 @@ def _ids(n):
     return [(7 * i + 3) % CFG["vocab_size"] for i in range(n)]
 
 
-@pytest.mark.parametrize("dtype,bits,tol", [
-    ("float32", None, 1e-4), ("float32", 8, 1e-4),
-    ("bfloat16", None, 0.08), ("bfloat16", 8, 0.08)])
-def test_the_gathered_prefill_matches_the_expanded(monkeypatch, dtype, bits,
-                                                   tol):
+def _both_paths(monkeypatch, dtype, bits, ids):
+    """(expanded, gathered) logits of one model; asserts the gathered path
+    was taken in the second run only."""
     from knurlogic.engine.families.glm5.architecture.glm5_next import language as L
     model = _model(getattr(mx, dtype), bits)
-    ids = _ids(72)                     # past index_topk (8) from chunk 2 on
     calls = {"n": 0}
     real = L._gathered_attention
 
@@ -80,9 +78,36 @@ def test_the_gathered_prefill_matches_the_expanded(monkeypatch, dtype, bits,
     monkeypatch.setattr(L, "EXPANDED_PREFILL", False)
     got = _prefill(model, ids, 16)
     assert calls["n"] > 0
+    return want, got
+
+
+@pytest.mark.parametrize("bits", [None, 8])
+def test_in_float32_the_gathered_prefill_is_the_expanded(monkeypatch, bits):
+    """Same keys, same softmax: equal to float32 rounding."""
+    want, got = _both_paths(monkeypatch, "float32", bits, _ids(72))
     rng = float(mx.max(want) - mx.min(want))
     diff = float(mx.max(mx.abs(got - want)))
-    assert diff <= tol * rng, (diff, rng)
+    assert diff <= 1e-4 * rng, (diff, rng)
+
+
+@pytest.mark.parametrize("bits", [None, 8])
+def test_in_bf16_the_gathered_prefill_rounds_no_worse_than_the_expanded(
+        monkeypatch, bits):
+    """In bf16 the two paths round in different orders, so they DISAGREE
+    by an amount no fixed threshold can call right or wrong (it was 8% of
+    the logit range, then a measured 10%, with float32 equal to 1e-4). A
+    disagreement says the roundings differ, not which is worse. The
+    question that is a defect: against a float32 reference of the SAME
+    weights (the seeded model, before its cast), is the gathered path's
+    error any worse than the expanded path's? Allowed: 1.5x, for the
+    run-to-run spread of which order happens to round better."""
+    ids = _ids(72)                     # past index_topk (8) from chunk 2 on
+    ref, _ = _both_paths(monkeypatch, "float32", bits, ids)
+    want, got = _both_paths(monkeypatch, "bfloat16", bits, ids)
+    rng = float(mx.max(ref) - mx.min(ref))
+    e_exp = float(mx.max(mx.abs(want - ref)))
+    e_gat = float(mx.max(mx.abs(got - ref)))
+    assert e_gat <= 1.5 * e_exp + 1e-4 * rng, (e_gat, e_exp, rng)
 
 
 def test_gathered_attention_bounds_its_rows():
