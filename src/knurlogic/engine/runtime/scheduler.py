@@ -38,6 +38,8 @@ from .executor import (
     Token,
 )
 from .request import Request, control_machine
+from .spans import Spans, step_bucket
+from .spans import enabled as spans_enabled
 
 logger = logging.getLogger(__name__)
 GIB = 1 << 30
@@ -275,6 +277,10 @@ class Job:
     waiting_on: set | None = None
     #: perf_counter at submit, for usage.knurlogic.timing
     submitted: float = 0.0
+    #: perf_counter when the HTTP layer began building it (0: not stamped)
+    received: float = 0.0
+    #: where its wall time went, bucket by bucket (spans.py); None when off
+    spans: Spans | None = None
 
     def cancel(self) -> None:
         """From the HTTP thread: the client went away; free the row."""
@@ -369,6 +375,7 @@ class _Row:
     began: float = 0.0        # ... when the first step that computes it began
     made: int = 0             # tokens it has generated (its context grows)
     chunk: int = 0            # the prefill chunk it was fitted at
+    prefilling: bool = True   # no token out before the step now running
 
 
 class Scheduler:
@@ -487,6 +494,10 @@ class Scheduler:
 
     def submit(self, job: Job) -> Job:
         job.submitted = time.perf_counter()
+        if spans_enabled():
+            job.spans = Spans(job.received or job.submitted)
+            if job.received:
+                job.spans.to("http_build", job.submitted)
         if self._aborted is not None:
             job.outbox.put(("error", self._aborted))
             return job
@@ -979,6 +990,9 @@ class Scheduler:
         from knurlogic.engine.vision import cachehook
         from knurlogic.engine.vision import request as vreq
         tok = self.host.tokenizer
+        sp = job.spans
+        if sp is not None:
+            sp.to("queue")
         ex = self._executor()
         cachehook.sweep()
         with cachehook.admit_guard():
@@ -996,6 +1010,8 @@ class Scheduler:
             else:
                 prompt, segs, types, initial = P.tokenize(
                     self, tok, job.request, job.args)
+            if sp is not None:
+                sp.to("tokenize")
             job.prompt_tokens = len(prompt)
             cap, window = self._window()
             if window and len(prompt) >= window:
@@ -1014,8 +1030,12 @@ class Scheduler:
             lean = self._make_room(len(prompt),
                                    _checkpoints(segs, len(prompt), hit)) \
                 == "lean"
+            if sp is not None:
+                sp.to("admit_memory")
             chunk = int(self._chunk_pick or self.prefill_step_size)
             cache, rest = self.cache.fetch(self.host.model_key, prompt)
+            if sp is not None:
+                sp.to("cache_fetch")
             n = len(prompt) - len(rest)
             segs, types = [list(s) for s in segs], list(types)
             while n > 0 and segs:
@@ -1061,6 +1081,8 @@ class Scheduler:
         self._chunk_of[uid] = chunk
         if self.cache_bytes is not None:
             self.cache.trim_to(self.cache_bytes - ex.cache_nbytes)
+        if sp is not None:
+            sp.to("admit_other")
 
     # ------------------------------------------------------------- memory
 
@@ -1725,6 +1747,9 @@ class Scheduler:
         for r in self._rows.values():
             if not r.began:
                 r.began = now
+            r.prefilling = not r.first
+            if r.job.spans is not None:
+                r.job.spans.to(step_bucket(r.prefilling, "gap"), now)
         try:
             events = ex.step()          # on the executor's own stream
         # a failed step fails its rows; the scheduler thread lives on (logged)
@@ -1736,6 +1761,12 @@ class Scheduler:
             self._fail_all(exc)
             self._close_executor()
             return
+        stepped = time.perf_counter()
+        for uid, r in self._rows.items():
+            if r.job.spans is not None:
+                r.job.spans.to(step_bucket(
+                    r.prefilling, "forward",
+                    shared=nxt is not None and uid != nxt), stepped)
         self._measure(before, ctx, chunk)
         self._chunk_of.pop(nxt, None)
         drop = []
@@ -1779,6 +1810,10 @@ class Scheduler:
             ex.remove(sorted(set(drop)))
         for uid in [u for u in self._chunk_of if u not in self._rows]:
             del self._chunk_of[uid]
+        now = time.perf_counter()
+        for r in self._rows.values():
+            if r.job.spans is not None:
+                r.job.spans.to(step_bucket(r.prefilling, "host"), now)
 
     def _done(self, uid: int) -> None:
         row = self._rows.pop(uid, None)
@@ -1790,10 +1825,16 @@ class Scheduler:
         from knurlogic.engine.serve import cache_report
         report = cache_report.of(row.job.request)
         usage = row.text.usage(report)
-        usage.setdefault("knurlogic", {})["timing"] = _timing(
-            row, time.perf_counter(), usage.get("completion_tokens", 0),
+        done = time.perf_counter()
+        timing = _timing(
+            row, done, usage.get("completion_tokens", 0),
             (report or {}).get("prefilled"),
             (report or {}).get("used"), row.chunk or self.prefill_step_size)
+        sp = row.job.spans
+        if sp is not None:
+            sp.to(step_bucket(row.prefilling, "host"), done)
+            timing.update(sp.report(done))
+        usage.setdefault("knurlogic", {})["timing"] = timing
         row.job.outbox.put(("done", usage))
 
     def _error(self, job: Job, err: BaseException) -> None:
