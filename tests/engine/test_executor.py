@@ -334,19 +334,39 @@ def test_a_prefill_stops_between_chunks_when_its_hook_says_so():
     ex.close()
 
 
-def test_on_a_ring_a_prefill_is_never_stopped_mid_chunk_loop():
-    """Every rank runs the same forwards: rank 0 leaving a prefill would
-    leave the others in a collective. The hook still sees progress; the
-    row is dropped at the next step boundary instead (the scheduler)."""
+def test_on_a_ring_rank_0s_word_stops_every_rank_at_one_chunk():
+    """Every rank runs the same forwards, so a split model's prefill stops
+    only on rank 0's word (Coord.stop, broadcast after every chunk): a hook
+    that wants out is overruled while the ring says go on, every rank
+    stops together when it says stop, and a follower with no hook of its
+    own still asks -- so it stops at the same chunk boundary."""
     from knurlogic.engine.mtp.batch_generator import PrefillCancelled
+
+    class Coord:
+        def __init__(self, answer):
+            self.answer, self.asked = answer, []
+
+        def stop(self, want):
+            self.asked.append(want)
+            return self.answer
+
     model, head, _ = _tiny(512)
     ex = _executor(model, head)
     ex.gen.prefill_hooks[7] = lambda uid, done, total: True
-    ex.gen._coord = object()
     try:
-        ex.gen._on_progress(7)(16, 80)        # no PrefillCancelled
+        ex.gen._coord = go_on = Coord(False)
+        ex.gen._on_progress(7)(16, 80)        # overruled: no PrefillCancelled
+        assert go_on.asked == [True]
+        ex.gen._coord = stop = Coord(True)
+        with pytest.raises(PrefillCancelled, match="client went away"):
+            ex.gen._on_progress(7)(16, 80)
+        follower = Coord(True)
+        ex.gen._coord = follower
+        with pytest.raises(PrefillCancelled):
+            ex.gen._on_progress(99)(16, 80)   # no hook here: rank 0 decides
+        assert follower.asked == [False] and stop.asked == [True]
     finally:
         ex.gen._coord = None
     with pytest.raises(PrefillCancelled, match="client went away"):
-        ex.gen._on_progress(7)(16, 80)
+        ex.gen._on_progress(7)(16, 80)        # one machine: the hook decides
     ex.close()

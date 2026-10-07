@@ -477,8 +477,10 @@ KNOB_DOC = {
         "level at or above it, and usage.knurlogic.thinking says it was "
         "the server's default. A request that names a level still wins. "
         "GLM-5.3's own default is max: on a 339k-token conversation it "
-        "thought for hours without committing to an answer. Live: "
-        "applies to the next request."),
+        "thought for hours without committing to an answer. The trade: a "
+        "higher level answers slower and spends more of the context on "
+        "thinking; a lower one is faster but loses reasoning on hard "
+        "questions. Live: applies to the next request."),
     "KNURLOGIC_LONG_CONTEXT": (
         "reach past the model's trained window: off, or yarn (Qwen's "
         "documented YaRN rope scaling, factor 4 over 262,144 -> ~1M tokens)",
