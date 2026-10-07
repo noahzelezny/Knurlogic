@@ -129,3 +129,14 @@ def test_the_step_loop_partitions_a_request():
     assert spans["decode_forward"] >= 0.02
     assert abs(t["spans_unaccounted_s"]) < 1e-3
     assert abs(sum(spans.values()) - t["spans_whole_s"]) < 1e-3
+
+
+def test_a_bare_job_like_object_is_still_accepted():
+    """A ring's control jobs and test doubles carry no HTTP stamp, spans or
+    request id: submit and the step loop must not ask them for one."""
+    import queue
+    s = _bare()
+    job = type("J", (), {})()
+    job.outbox = queue.Queue()
+    s.submit(job)
+    assert job.spans.buckets == {}

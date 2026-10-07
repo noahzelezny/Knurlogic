@@ -497,8 +497,11 @@ class Scheduler:
     def submit(self, job: Job) -> Job:
         job.submitted = time.perf_counter()
         if spans_enabled():
-            job.spans = Spans(job.received or job.submitted)
-            if job.received:
+            # getattr: a scheduler is also handed bare job-like objects
+            # (a ring's control jobs, test doubles) with no HTTP stamp
+            received = getattr(job, "received", 0.0)
+            job.spans = Spans(received or job.submitted)
+            if received:
                 job.spans.to("http_build", job.submitted)
         if self._aborted is not None:
             job.outbox.put(("error", self._aborted))
@@ -992,7 +995,7 @@ class Scheduler:
         from knurlogic.engine.vision import cachehook
         from knurlogic.engine.vision import request as vreq
         tok = self.host.tokenizer
-        sp = job.spans
+        sp = getattr(job, "spans", None)
         if sp is not None:
             sp.to("queue")
         ex = self._executor()
@@ -1750,7 +1753,7 @@ class Scheduler:
             if not r.began:
                 r.began = now
             r.prefilling = not r.first
-            if r.job.spans is not None:
+            if getattr(r.job, "spans", None) is not None:
                 r.job.spans.to(step_bucket(r.prefilling, "gap"), now)
         try:
             events = ex.step()          # on the executor's own stream
@@ -1765,7 +1768,7 @@ class Scheduler:
             return
         stepped = time.perf_counter()
         for uid, r in self._rows.items():
-            if r.job.spans is not None:
+            if getattr(r.job, "spans", None) is not None:
                 r.job.spans.to(step_bucket(
                     r.prefilling, "forward",
                     shared=nxt is not None and uid != nxt), stepped)
@@ -1814,7 +1817,7 @@ class Scheduler:
             del self._chunk_of[uid]
         now = time.perf_counter()
         for r in self._rows.values():
-            if r.job.spans is not None:
+            if getattr(r.job, "spans", None) is not None:
                 r.job.spans.to(step_bucket(r.prefilling, "host"), now)
 
     def _done(self, uid: int) -> None:
@@ -1832,14 +1835,15 @@ class Scheduler:
             row, done, usage.get("completion_tokens", 0),
             (report or {}).get("prefilled"),
             (report or {}).get("used"), row.chunk or self.prefill_step_size)
-        sp = row.job.spans
+        sp = getattr(row.job, "spans", None)
         if sp is not None:
             sp.to(step_bucket(row.prefilling, "host"), done)
             timing.update(sp.report(done))
         kn = usage.setdefault("knurlogic", {})
         kn["timing"] = timing
-        if row.job.request_id:
-            kn["request_id"] = row.job.request_id
+        rid = getattr(row.job, "request_id", None)
+        if rid:
+            kn["request_id"] = rid
         row.job.outbox.put(("done", usage))
 
     def _error(self, job: Job, err: BaseException) -> None:
