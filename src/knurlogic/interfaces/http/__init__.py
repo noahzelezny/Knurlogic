@@ -256,6 +256,15 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     _CURRENT["scheduler"] = sched
     if ring:
         watch_ring(sched, mh)
+    else:
+        # the page's unload: leave through the `finally` below, so the
+        # scheduler's own exit saves the prompt cache to disk; SIGTERM's
+        # default ended the process with nothing saved
+        import signal
+
+        def on_term(_sig, _frame):
+            raise KeyboardInterrupt
+        signal.signal(signal.SIGTERM, on_term)
 
     served = res_api.served(artifact, mh)
     from .server import DEFAULT_MAX_BODY
