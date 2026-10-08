@@ -124,6 +124,10 @@ class _SessionSched(_Sched):
         self.calls.append(("pin", session, pinned))
         return _cmd({"session": session, "pinned": pinned, "entries": 1})
 
+    def drop_sessionless(self, older_than_s=None):
+        self.calls.append(("drop_sessionless", older_than_s))
+        return _cmd({"sessionless": True, "memory": 1, "disk": 4})
+
     def park_prompt_cache(self, session):
         self.calls.append(("park", session))
         return _cmd({"session": session, "saved": 1, "bytes": 5,
@@ -163,8 +167,15 @@ def test_drop_pin_and_a_sessions_save_reach_the_scheduler():
         assert body["freed"] == 2 and body["in_memory"] == 0
         st, _, _ = _post(url + "/v1/prompt-cache/park", {})
         assert st == 400
+        st, _, body = _post(url + "/v1/prompt-cache/drop",
+                            {"sessionless": True, "older_than_s": 600})
+        assert st == 200 and body["disk"] == 4
+        st, _, _ = _post(url + "/v1/prompt-cache/drop",
+                         {"sessionless": True, "older_than_s": "x"})
+        assert st == 400
         assert sched.calls == [("drop", "a"), ("pin", "a", False),
-                               ("save", "a"), ("park", "a")]
+                               ("save", "a"), ("park", "a"),
+                               ("drop_sessionless", 600)]
     finally:
         srv.shutdown()
 

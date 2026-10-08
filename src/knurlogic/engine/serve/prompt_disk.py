@@ -553,6 +553,29 @@ def drop_files(session: str, base: Path | None = None) -> int:
     return n
 
 
+def drop_sessionless_files(d: Path, older_than_s=None,
+                           now: float | None = None) -> tuple:
+    """Delete the files in key directory `d` no session owns (requests
+    that named none, the shared system-prompt checkpoints) -- only those
+    unused for `older_than_s`, when given. Returns (count, {paths})."""
+    now = time.time() if now is None else now
+    n, gone = 0, set()
+    for _, _, _, f in entries(d):
+        m = _header(f)
+        if m is None or (m.get("owner") or {}).get("session"):
+            continue
+        try:
+            if older_than_s is not None and \
+                    now - f.stat().st_mtime < float(older_than_s):
+                continue
+            f.unlink()
+            n += 1
+            gone.add(str(f))
+        except OSError:
+            pass
+    return n, gone
+
+
 def list_disk(base: Path | None = None) -> list:
     """Every entry file's registry row, from its header alone: {key_id,
     model, hash, session, role, run, tokens, bytes, saved_at, pinned,

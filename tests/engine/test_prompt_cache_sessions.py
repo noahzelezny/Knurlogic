@@ -500,3 +500,29 @@ def test_a_session_parked_on_request_is_read_back(sched):
     assert warm["knurlogic"]["cache"]["disk"]["tokens"] >= len(p) - 1
     again = s.park_prompt_cache("nobody")
     assert again.done.wait(60) and again.result["freed"] == 0
+
+
+def test_entries_no_session_owns_can_be_dropped(sched):
+    """the harness's eval batches leave session-less entries (calls with no
+    session, shared system-prompt copies) that drop {"session"} cannot
+    name: drop {"sessionless": true} clears them, memory and disk; with an
+    age, only files unused that long."""
+    s = sched
+    s.load("/nonexistent/tiny-sessionless").done.wait(60)
+    s._prefill_tps = None
+    sys_p = list(s.prompts[0][:20])
+    _collect(s.submit(_chat(sys_p, list(s.prompts[1]), max_tokens=3,
+                            session="e1", keep_latest=True)))
+    _collect(s.submit(_job(s.prompts[2], max_tokens=3)))        # nobody's
+    assert s.save_prompt_cache().done.wait(60)
+    mine = lambda: [f for f in D.list_disk()                   # noqa: E731
+                    if f["model"] == "tiny-sessionless"]
+    assert any(f["session"] is None for f in mine())           # the shared
+    young = s.drop_sessionless(older_than_s=3600)
+    assert young.done.wait(60) and young.result["disk"] == 0
+    cmd = s.drop_sessionless()
+    assert cmd.done.wait(60) and not cmd.error
+    assert cmd.result["memory"] >= 2 and cmd.result["disk"] >= 1
+    assert not [f for f in mine() if f["session"] is None]
+    assert [f for f in mine() if f["session"] == "e1"]          # untouched
+    assert s.cache.of_session("e1") and not s.cache.shared

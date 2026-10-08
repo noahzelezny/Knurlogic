@@ -432,6 +432,14 @@ class PromptCache:
         self.pinned.discard(session)
         return n
 
+    def drop_sessionless(self) -> int:
+        """Every entry no session owns (requests that named none, the
+        shared system-prompt checkpoints) out of memory."""
+        n = sum(self.remove(m, t) for m, t, _e, meta in self.live()
+                if meta is None)
+        self.shared.clear()
+        return n
+
     def set_pinned(self, session: str, pinned: bool) -> int:
         """Pin or unpin `session` here (its live entries and its later
         ones). Returns its live entries."""
@@ -703,6 +711,15 @@ class Scheduler:
         (on a ring every rank's part, a `drop` op) and its files off disk
         under every model's key. Command.result: {"memory", "disk"}."""
         return self._command(Command("drop", None, session=session))
+
+    def drop_sessionless(self, older_than_s: float | None = None) -> Command:
+        """Queue a drop of the loaded model's entries no session owns: its
+        files off disk (only those unused for `older_than_s`, when given)
+        and, with no age given, its in-memory ones too (every rank's part
+        on a ring). Command.result: {"memory", "disk"}."""
+        c = Command("drop", None, session=None)
+        c.result = {"older_than_s": older_than_s}
+        return self._command(c)
 
     def pin_prompt_cache(self, session: str, pinned: bool) -> Command:
         """Queue a pin (or unpin) of `session`: its files are then never
@@ -1188,6 +1205,8 @@ class Scheduler:
     def _cmd_drop(self, c: Command) -> dict:
         from knurlogic.engine.serve import prompt_disk
         s = c.session
+        if s is None:
+            return self._drop_sessionless((c.result or {}).get("older_than_s"))
         mem = self.cache.drop(s) if self.cache is not None else 0
         disk = prompt_disk.drop_files(s)
         for t in [t for t, v in self._disk_index.items()
@@ -1199,6 +1218,26 @@ class Scheduler:
         logger.info("prompt cache: session %s dropped (%d in memory, %d on "
                     "disk)", s, mem, disk)
         return {"session": s, "memory": mem, "disk": disk}
+
+    def _drop_sessionless(self, older_than_s) -> dict:
+        """The loaded model's session-less entries: on disk (by age when
+        asked), and in memory when no age is given -- a live entry's age
+        is not its file's."""
+        from knurlogic.engine.serve import prompt_disk
+        mem = 0
+        if older_than_s is None and self.cache is not None:
+            mem = self.cache.drop_sessionless()
+        disk, gone = 0, set()
+        if self._disk_key is not None:
+            disk, gone = prompt_disk.drop_sessionless_files(
+                prompt_disk.root() / prompt_disk.key_id(self._disk_key),
+                older_than_s)
+        for t in [t for t, v in self._disk_index.items()
+                  if str(v.get("file")) in gone]:
+            del self._disk_index[t]
+        logger.info("prompt cache: entries with no session dropped (%d in "
+                    "memory, %d on disk)", mem, disk)
+        return {"sessionless": True, "memory": mem, "disk": disk}
 
     def _cmd_park(self, c: Command) -> dict:
         if self.tensor is not None:
