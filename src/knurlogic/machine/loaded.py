@@ -315,7 +315,8 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
             ours[port] = rec
     # and serves started by hand: shown, but only the page's own children
     # are offered for unloading (it stops only what it started)
-    by_hand = {port for port in servers.listening_serves() if port not in ours}
+    listening = servers.listening_serves()
+    by_hand = {port for port in listening if port not in ours}
     for port in list(p.get("openai", [])) + sorted(ours) + sorted(by_hand):
         if port in seen_ports:
             continue
@@ -327,6 +328,11 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
         rows = _knurlogic(base)
         if rows:
             _LAST[base] = rows
+        elif base in _LAST and port in ours and port not in listening:
+            # alive but its port closed: an unload's SIGTERM, on its way out
+            # -- not busy (shown READY · busy, a dead model looked live)
+            rows = [replace(r, state="stopping", detail="stopping",
+                            can_unload=False) for r in _LAST[base]]
         elif base in _LAST and (port in ours or port in by_hand):
             # ours, slow to answer while it works: still the same model
             rows = [replace(r, detail=(r.detail + " · " if r.detail else "")

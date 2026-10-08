@@ -432,7 +432,8 @@ def test_our_server_busy_generating_keeps_its_card(monkeypatch):
     monkeypatch.setattr(servers, "registry", lambda: {
         8080: {"pid": 1, "artifact": "/m/GLM"}})
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
-    monkeypatch.setattr(servers, "listening_serves", lambda: [])
+    listen = {8080: 1}
+    monkeypatch.setattr(servers, "listening_serves", lambda: dict(listen))
 
     def ours():
         (r,) = [r for r in loaded.survey()["resident"]
@@ -444,3 +445,8 @@ def test_our_server_busy_generating_keeps_its_card(monkeypatch):
     r = ours()
     assert r["runtime"] == "knurlogic" and r["state"] == "loaded"
     assert r["detail"].endswith("busy")
+    # its port closed while the process lives: an unload on its way out,
+    # not a busy model (the maintainer: a READY · busy card for a server that was gone)
+    listen.clear()
+    r = ours()
+    assert r["state"] == "stopping" and r["can_unload"] is False
