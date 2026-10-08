@@ -27,9 +27,12 @@ class _Handler:
         return json.loads(self.wfile.getvalue())
 
 
-def _run(monkeypatch, table, method, path, query=None, body=b"", ip=None):
+def _run(monkeypatch, table, method, path, query=None, body=b"", ip=None,
+         routed=None):
     monkeypatch.setattr(page_server, "local_models",
                         lambda fetch=None: dict(table))
+    monkeypatch.setattr(page_server, "routable",
+                        lambda fetch=None: dict(routed or table))
     sent = []
     h = _Handler(ip or "127.0.0.1")
     page_server.prompt_cache_forward(
@@ -62,6 +65,58 @@ def test_several_unnamed_is_a_400_listing_them(monkeypatch):
     assert not sent
     h, sent = _run(monkeypatch, t, "GET", "/v1/prompt-cache",
                    query={"model": ["nope"]})
+    assert h.code == 404 and not sent
+
+
+def test_a_peers_model_goes_through_its_pages_relay(monkeypatch):
+    """a coordinator session runs on the M4: the M3's page sends its cache calls to
+    the M4 page's relay, like a chat, which resolves the name there."""
+    far = "http://192.0.2.2:8081"
+    monkeypatch.setitem(page_server._PEER_TARGETS, far,
+                        {"relay": "http://192.0.2.2:8899",
+                         "machine": "Laptop B"})
+    routed = {"qwen": "http://127.0.0.1:8080", "flash": far}
+    h, sent = _run(monkeypatch, {"qwen": "http://127.0.0.1:8080"}, "GET",
+                   "/v1/prompt-cache", query={"model": ["flash"]},
+                   routed=routed)
+    assert h.code == 200 and sent == [
+        ("http://192.0.2.2:8899/peer/v1/prompt-cache?model=flash", "GET",
+         None)]
+    body = json.dumps({"model": "flash", "session": "pm"}).encode()
+    h, sent = _run(monkeypatch, {"qwen": "http://127.0.0.1:8080"}, "POST",
+                   "/v1/prompt-cache/pin", body=body, routed=routed)
+    assert sent == [("http://192.0.2.2:8899/peer/v1/prompt-cache/pin",
+                     "POST", body)]
+
+
+def _relay(monkeypatch, table, method, path, url_path, body=b""):
+    monkeypatch.setattr(page_server, "local_models",
+                        lambda fetch=None, docs=None: dict(table))
+    sent = []
+    monkeypatch.setattr(page_server, "_send_up",
+                        lambda u, m, b: sent.append((u, m, b)) or (200, {}))
+    h = _Handler()
+    h.path = url_path
+    page_server.peer_relay(h, method, path, body)
+    return h, sent
+
+
+def test_the_relay_serves_its_own_models_cache(monkeypatch):
+    t = {"flash": "http://127.0.0.1:8081"}
+    h, sent = _relay(monkeypatch, t, "GET", "/v1/prompt-cache",
+                     "/peer/v1/prompt-cache?model=flash")
+    assert h.code == 200 and sent == [
+        ("http://127.0.0.1:8081/v1/prompt-cache", "GET", None)]
+    b = json.dumps({"model": "flash", "session": "pm"}).encode()
+    h, sent = _relay(monkeypatch, t, "POST", "/v1/prompt-cache/drop",
+                     "/peer/v1/prompt-cache/drop", b)
+    assert sent == [("http://127.0.0.1:8081/v1/prompt-cache/drop", "POST", b)]
+    # nothing else under the path, and no model it does not serve
+    h, sent = _relay(monkeypatch, t, "POST", "/v1/prompt-cache/other",
+                     "/peer/v1/prompt-cache/other", b)
+    assert h.code == 404 and not sent
+    h, sent = _relay(monkeypatch, t, "GET", "/v1/prompt-cache",
+                     "/peer/v1/prompt-cache?model=glm")
     assert h.code == 404 and not sent
 
 
