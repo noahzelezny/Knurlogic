@@ -140,6 +140,12 @@ The cache belongs to the agent (the client session), not the model.
   / `prompt_disk.READ_BPS`, 3 GB/s: the M3 read 70-128 MB in ~24 ms).
   Counted `not_worth`. No rate measured yet: written. Off on a ring (every
   rank must keep the same entries, and each has its own bytes).
+- **Park.** `POST /v1/prompt-cache/park {"session"}`, between steps: the
+  session's entries saved (only what is not on disk), then freed from
+  memory; one the save did not write stays. Its next request reads the
+  longest on-disk prefix back. The client decides when (the harness parks its
+  PM while sub-agents work); the server keeps no idle policy beyond a
+  pinned session's. Refused on a split model (no read-back there yet).
 - **Drop.** `POST /v1/prompt-cache/drop {"session"}`, between steps:
   out of memory (mlx-lm 0.32 has no single-entry removal;
   `prompt_disk.remove_entry` does what its `insert_cache` does to a

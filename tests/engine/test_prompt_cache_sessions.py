@@ -496,3 +496,32 @@ def test_the_shared_system_checkpoint_is_saved_and_restored(sched):
     s.load("/nonexistent/tiny-shared").done.wait(60)
     assert tuple(sys_p) in s.cache.shared       # restored as shared
     assert s.cache.hit_length(s.host.model_key, sys_p + [1, 2]) >= len(sys_p)
+
+
+def test_a_session_parked_on_request_is_read_back(sched):
+    """POST .../park (the harness parks its PM while sub-agents work): saved,
+    out of memory, the registry says disk only, and the next request reads
+    it back from disk."""
+    s = sched
+    s.load("/nonexistent/tiny-park-req").done.wait(60)
+    s._prefill_tps = None
+    p = s.prompts[2]
+    _collect(s.submit(_job(p, max_tokens=4, session="pm")))
+    _collect(s.submit(_job(s.prompts[0], max_tokens=3, session="w1")))
+    cmd = s.park_prompt_cache("pm")
+    assert cmd.done.wait(60) and not cmd.error, cmd.error
+    r = cmd.result
+    assert r["session"] == "pm" and r["freed"] >= 1 and r["in_memory"] == 0
+    assert r["saved"] >= 1 and r["bytes"] > 0
+    assert s.cache.of_session("pm") == [] and s.cache.of_session("w1")
+    lst = s.list_prompt_cache()
+    assert lst.done.wait(60)
+    assert not [e for e in lst.result["entries"] if e["session"] == "pm"]
+    on = [f for f in D.list_disk()
+          if f["model"] == "tiny-park-req" and f["session"] == "pm"]
+    assert on
+    _, warm = _collect(s.submit(_job(p + [5, 6, 7], max_tokens=4,
+                                     session="pm")))
+    assert warm["knurlogic"]["cache"]["disk"]["tokens"] >= len(p) - 1
+    again = s.park_prompt_cache("nobody")
+    assert again.done.wait(60) and again.result["freed"] == 0

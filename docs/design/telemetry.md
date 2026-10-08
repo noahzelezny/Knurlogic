@@ -30,6 +30,9 @@ entries with a session are saved to disk (prompt-cache-disk.md,
 - `POST /v1/prompt-cache/drop` `{"session"}`: out of memory and off disk
   (every model). `{memory, disk}`.
 - `POST /v1/prompt-cache/pin` `{"session", "pinned"}`.
+- `POST /v1/prompt-cache/park` `{"session"}`: saved to disk (what is not
+  there yet), then freed from memory; the next request reads it back.
+  Returns `{saved, bytes, freed, in_memory}`. One Mac's models only.
 - `GET /v1/prompt-cache`: `data: [{session, role, run, tokens, bytes,
   in_memory, on_disk, saved_at, pinned, hash, model, key_id}]`.
 

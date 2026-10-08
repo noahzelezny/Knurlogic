@@ -725,6 +725,14 @@ class Scheduler:
         return self._command(Command("pin", None, session=session,
                                      pinned=bool(pinned)))
 
+    def park_prompt_cache(self, session: str) -> Command:
+        """Queue a park of `session`: its entries saved to disk (what is not
+        there yet), then freed from memory; its next request reads them
+        back (_read_back). The client's call -- a coordinator parking an
+        agent that waits on others. Command.result: {"session", "saved",
+        "bytes", "freed", "in_memory"}."""
+        return self._command(Command("park", None, session=session))
+
     def list_prompt_cache(self) -> Command:
         """Queue a listing of the in-memory entries (read between steps).
         Command.result: {"entries": [...], "key_id", "model"}."""
@@ -948,7 +956,7 @@ class Scheduler:
                 finally:
                     c.done.set()
                 continue
-            if c.kind in ("drop", "pin", "list"):
+            if c.kind in ("drop", "pin", "list", "park"):
                 c.started.set()
                 try:
                     c.result = getattr(self, "_cmd_" + c.kind)(c)
@@ -1141,24 +1149,25 @@ class Scheduler:
             if time.time() - self.cache.seen.get(s, 0.0) > PARK_IDLE_S:
                 self._park(s)
 
-    def _park(self, session: str) -> int:
+    def _park(self, session: str, why: str = "pinned and idle") -> dict:
         """`session`'s entries to disk (what is not there yet), then out of
         memory -- one the save did not write (not worth it, unsaveable)
-        stays. Its next request reads them back (_read_back). Returns how
-        many were freed."""
+        stays. Its next request reads them back (_read_back). Returns
+        {"saved", "bytes", "freed", "in_memory"}: written now, their size,
+        taken out of memory, still in it."""
         mine = {tuple(t) for _, t in self.cache.of_session(session)}
-        if mine:
-            self._save_disk(only_new=True, select=mine)
+        got = self._save_disk(only_new=True, select=mine) if mine else None
         n = 0
         for m, t in self.cache.of_session(session):
             meta = self.cache.owners.get(tuple(t)) or {}
             if meta.get("file") and Path(meta["file"]).exists():
                 n += self.cache.remove(m, t)
         if n:
-            logger.info("prompt cache: pinned session %s idle; %d entr%s "
-                        "parked on disk", session, n,
-                        "y" if n == 1 else "ies")
-        return n
+            logger.info("prompt cache: session %s %s; %d entr%s parked on "
+                        "disk", session, why, n, "y" if n == 1 else "ies")
+        return {"saved": int((got or {}).get("saved", 0)),
+                "bytes": int((got or {}).get("bytes", 0)), "freed": n,
+                "in_memory": len(self.cache.of_session(session))}
 
     def _read_back(self, job: Job, prompt: list) -> None:
         """Before the admission's hit: when an entry of this model on disk
@@ -1232,6 +1241,14 @@ class Scheduler:
         logger.info("prompt cache: session %s dropped (%d in memory, %d on "
                     "disk)", s, mem, disk)
         return {"session": s, "memory": mem, "disk": disk}
+
+    def _cmd_park(self, c: Command) -> dict:
+        if self.tensor is not None:
+            # a ring's ranks cannot read a parked entry back in step yet
+            raise RuntimeError("parking is not available on a model split "
+                               "across machines yet; drop or save instead")
+        got = self._park(c.session, why="parked on request")
+        return {"session": c.session, **got}
 
     def _cmd_pin(self, c: Command) -> dict:
         n = self._pin(c.session, c.pinned)

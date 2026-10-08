@@ -1402,7 +1402,7 @@ def _client_headers(handler) -> dict:
 #: the model server's prompt-cache endpoints the page forwards
 PROMPT_CACHE_PATH = "/v1/prompt-cache"
 PROMPT_CACHE_POSTS = tuple(PROMPT_CACHE_PATH + p
-                           for p in ("/save", "/drop", "/pin"))
+                           for p in ("/save", "/drop", "/pin", "/park"))
 
 
 def prompt_cache_forward(handler, method: str, path: str, query: dict,
