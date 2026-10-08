@@ -22,7 +22,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from knurlogic.interfaces.page import documents
 from knurlogic.machine import identity, loaded, status, wired
@@ -1397,6 +1397,8 @@ def _client_headers(handler) -> dict:
 
 #: the model server's prompt-cache endpoints the page forwards
 PROMPT_CACHE_PATH = "/v1/prompt-cache"
+PROMPT_CACHE_POSTS = tuple(PROMPT_CACHE_PATH + p
+                           for p in ("/save", "/drop", "/pin"))
 
 
 def prompt_cache_forward(handler, method: str, path: str, query: dict,
@@ -1430,10 +1432,22 @@ def prompt_cache_forward(handler, method: str, path: str, query: dict,
     if model is not None:
         base = _resolve(table, model)
         if base is None:
+            # a peer's model: its page's relay, like a chat (the peer
+            # resolves the name again against the servers it started)
+            far = _resolve(routable(fetch), model)
+            if far is not None and _PEER_TARGETS.get(far) is not None:
+                q = f"?model={quote(str(model))}" \
+                    if method == "GET" else ""
+                code, doc = (send or _send_up)(
+                    upstream(far, path) + q, method,
+                    body if method == "POST" else None)
+                _send_json(handler, code, doc)
+                return
+            here = sorted(set(table) | set(routable(fetch)))
             _send_json(handler, 404, {"error": {
-                "message": f"no running model {model!r} on this machine; "
-                           f"running: {', '.join(sorted(table)) or 'none'}",
-                "type": "not_found"}, "models": sorted(table)})
+                "message": f"no running model {model!r} here or on a peer; "
+                           f"running: {', '.join(here) or 'none'}",
+                "type": "not_found"}, "models": here})
             return
     else:
         bases = set(table.values())
@@ -1717,6 +1731,33 @@ def peer_relay(handler, method: str, path: str, body: bytes,
     peer page whose router or chat names it. The caller has passed
     peer_refusal. Resolved by model name against the servers this machine
     started (local_models) and streamed back as it arrives."""
+    if path == PROMPT_CACHE_PATH or path.startswith(PROMPT_CACHE_PATH + "/"):
+        # a peer page managing the prompt cache of a model this machine
+        # serves: resolved here by name, sent on to it from loopback
+        if not (method == "GET" and path == PROMPT_CACHE_PATH or
+                method == "POST" and path in PROMPT_CACHE_POSTS):
+            _send_json(handler, 404, {"error": "not a relayed path"})
+            return
+        q = parse_qs(urlparse(getattr(handler, "path", "")).query)
+        model = (q.get("model") or [None])[0]
+        if model is None and body:
+            try:
+                got = json.loads(body)
+                model = got.get("model") if isinstance(got, dict) else None
+            except ValueError:
+                model = None
+        table = local_models(fetch)
+        base = _resolve(table, model)
+        if base is None:
+            _send_json(handler, 404, {"error": {
+                "message": f"no running model {model!r} on "
+                           f"{identity.identity().get('name') or 'this machine'}",
+                "type": "not_found"}, "models": sorted(table)})
+            return
+        code, doc = _send_up(base + path, method,
+                             body if method == "POST" else None)
+        _send_json(handler, code, doc)
+        return
     docs: dict = {}
     table = local_models(fetch, docs)
     if method == "GET":
