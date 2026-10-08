@@ -1,4 +1,4 @@
-"""The prompt cache on disk: saved when its model unloads (or on request),
+"""The prompt cache on disk: saved when a client asks (never on its own),
 restored when the same model loads again (docs/design/prompt-cache-disk.md).
 
 Layout: ~/.cache/knurlogic/prompt-cache/<key id>/ (XDG_CACHE_HOME
@@ -620,9 +620,9 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
     file carries its owner, and each saved entry's meta gets "file" and
     "saved_at". None (a bare LRU): every entry, no owner.
 
-    The unload's save (`only_new` False) renames an entry already on disk
+    A full save (`only_new` False) renames an entry already on disk
     (same tokens, same owner) into this save, so the files' (gen, seq)
-    order is the LRU's at unload. A session's save (`only_new`) writes
+    order is the LRU's at that save. A session's save (`only_new`) writes
     only what is not on disk yet -- an entry whose meta names no file, or
     whose file is gone -- under one new gen, in LRU order, and touches
     nothing else: cheap, and a restore still inserts oldest save first.

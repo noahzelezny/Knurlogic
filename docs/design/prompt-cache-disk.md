@@ -11,14 +11,14 @@ followers in `engine/runtime/tensor.serve_follower` / `follow`.
 
 ## When
 
-- **Save** (entries with a session only; see Sessions): when the model
-  unloads or is switched (`Scheduler._do_commands`,
-  after the rows are failed and the executor closed, before the prompt
-  cache is replaced), when the server stops (`Scheduler._run`'s cleanup;
-  on a ring after the other ranks are sent `stop`, and each of them saves
-  at that op), and on request: `POST /v1/prompt-cache/save` (loopback
-  only), a scheduler command run between steps; on a ring a `save_cache`
-  op tells every rank. Never on the request path.
+- **Save**: only when a client asks -- `POST /v1/prompt-cache/save`
+  (entries with a session, or one session's newest) and `.../park`
+  (loopback only), scheduler commands run between steps; on a ring a
+  `save_cache` op tells every rank. Never on the request path, and never
+  on its own: an unload, a model switch or a stop saves nothing (the maintainer,
+  2026-10-08: nobody running knurlogic is surprised by cache files; the
+  coordinator -- the harness -- decides what is kept). It was saved at unload
+  and stop until then.
 - **Restore**: `ModelHost.after_bind`, on the loading thread once weights,
   vision and head are bound and before the warm-up: the entries are read
   and inserted into the new in-memory prompt cache. On a ring every rank
@@ -164,10 +164,9 @@ The cache belongs to the agent (the client session), not the model.
   and on disk, so a session holds one step (its conversation checkpoint
   and its answer). Its system-prompt checkpoint is nobody's: one copy per
   distinct system prompt and tools, which every session starting from it
-  shares. It is saved (at unload, and at a save with no session) and
-  restored as shared, so the first worker after a reload skips that
-  prefill; its file's mtime is refreshed at each save and restore, and a
-  model in use longer than the TTL writes it again at unload. Opt-in,
+  shares. A save with no session writes it too, and it is restored as
+  shared, so the first worker after a reload skips that prefill; its
+  file's mtime is refreshed at each save and restore. Opt-in,
   because the page's chat regenerates and edits from
   earlier messages. On a ring the owner rides the `insert` op with its
   step, and every rank replaces the same entries.

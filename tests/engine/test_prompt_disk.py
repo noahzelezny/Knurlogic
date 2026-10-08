@@ -320,14 +320,22 @@ def disk_sched():
     yield s
 
 
-def test_unload_saves_load_restores_and_usage_says_disk(disk_sched,
-                                                        monkeypatch):
+def test_a_save_asked_for_restores_at_load_and_usage_says_disk(
+        disk_sched, monkeypatch):
     s = disk_sched
     s.load("/nonexistent/tiny-a").done.wait(60)
     p = s.prompts[2]
     _, cold = _collect(s.submit(_job(p, max_tokens=4, session="t1")))
     assert cold["knurlogic"]["cache"]["disk"] == {"tokens": 0,
                                                   "read_ms": 0.0}
+    before = set(D._all_files(D.root()))
+    s.unload().done.wait(60)
+    # an unload saves nothing: only a client's ask does (the maintainer: nobody is
+    # surprised by cache files)
+    assert set(D._all_files(D.root())) == before
+    s.load("/nonexistent/tiny-a").done.wait(60)
+    _collect(s.submit(_job(p, max_tokens=4, session="t1")))
+    assert s.save_prompt_cache().done.wait(60)
     s.unload().done.wait(60)
     assert D._all_files(D.root())
     s.load("/nonexistent/tiny-a").done.wait(60)
