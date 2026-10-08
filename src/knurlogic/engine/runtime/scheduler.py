@@ -1235,6 +1235,10 @@ class Scheduler:
         for t in [t for t, v in self._disk_index.items()
                   if str(v.get("file")) in gone]:
             del self._disk_index[t]
+        if self.tensor is not None and gone:
+            # every rank deletes the same names: no rank keeps half an entry
+            self.tensor.journal.add(
+                "drop_files", names=sorted(Path(f).name for f in gone))
         logger.info("prompt cache: entries with no session dropped (%d in "
                     "memory, %d on disk)", mem, disk)
         return {"sessionless": True, "memory": mem, "disk": disk}

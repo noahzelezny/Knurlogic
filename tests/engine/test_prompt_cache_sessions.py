@@ -526,3 +526,21 @@ def test_entries_no_session_owns_can_be_dropped(sched):
     assert not [f for f in mine() if f["session"] is None]
     assert [f for f in mine() if f["session"] == "e1"]          # untouched
     assert s.cache.of_session("e1") and not s.cache.shared
+
+
+def test_a_follower_drops_the_same_files_by_name(tmp_path):
+    """No half entries on a split model: rank 0's drop by age names the
+    files it deleted, and each other rank deletes its own of those names
+    -- nothing else, and nothing outside its key directory."""
+    from knurlogic.engine.runtime.tensor import apply_cache_op
+    d = tmp_path / "key"
+    d.mkdir()
+    a, b = d / "00000001-000000-aaa.safetensors", \
+        d / "00000001-000001-bbb.safetensors"
+    a.write_bytes(b"x")
+    b.write_bytes(b"x")
+    (tmp_path / "outside.safetensors").write_bytes(b"x")
+    op = {"op": "drop_files", "names": [a.name, "../outside.safetensors"]}
+    assert apply_cache_op(op, None, "m", {}, None, d)
+    assert not a.exists() and b.exists()
+    assert (tmp_path / "outside.safetensors").exists()

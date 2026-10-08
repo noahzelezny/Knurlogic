@@ -853,7 +853,7 @@ def _defer_sigterm(rank: int) -> None:
 
 
 def apply_cache_op(op: dict, cache, model_key, last: dict,
-                   save_disk) -> bool:
+                   save_disk, disk_dir=None) -> bool:
     """A following rank's prompt-cache ops, applied to its own part as rank
     0 applied them to its: insert (with the owner), pop, drop and pin of a
     session (memory and this rank's own files), and the saves. False for
@@ -882,10 +882,19 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
         cache.drop(op["session"])
         prompt_disk.drop_files(op["session"])
     elif kind == "drop_sessionless":
-        cache.drop_sessionless()          # memory only: rank 0's call drops
-        # files by age on its own; each rank's files are its own part, and
-        # a ring's model is the same on every rank, so rank 0's choice
-        # (all, no age) is this rank's too
+        cache.drop_sessionless()          # memory: the same entries as rank 0
+    elif kind == "drop_files":
+        # rank 0's files of a drop, by name: an entry's files carry the same
+        # name on every rank, so this rank's part goes too and no rank keeps
+        # half an entry (a restore would refuse it on every rank)
+        if disk_dir is not None:
+            for name in op.get("names") or ():
+                if "/" in name or not name.endswith(prompt_disk.SUFFIX):
+                    continue
+                try:
+                    (disk_dir / name).unlink()
+                except OSError:
+                    pass
     elif kind == "pin":
         cache.set_pinned(op["session"], op["pinned"])
         prompt_disk.set_pin(op["session"], op["pinned"])
@@ -1023,7 +1032,9 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                     ex.remove(op["uids"])
                 for u in op["uids"]:
                     chunks.pop(u, None)
-            elif apply_cache_op(op, cache, model_key, last, save_disk):
+            elif apply_cache_op(op, cache, model_key, last, save_disk,
+                                prompt_disk.root() / prompt_disk.key_id(
+                                    disk_key) if disk_key else None):
                 pass
             elif kind == "set":
                 apply_set(op, link.rank)
