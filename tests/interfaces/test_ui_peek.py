@@ -110,3 +110,39 @@ def test_connect_json_lists_every_way_in():
     # the scoped settings file, never the global one
     assert all("~/.claude" not in b["text"]
                for b in by["claude"]["blocks"])
+
+
+def test_a_peers_preview_goes_by_identity_never_by_path(monkeypatch):
+    """The picker with the other Mac picked showed no room line: the
+    preview was this machine's. It asks the peer's page now, naming the
+    model by identity -- an `artifact` path never travels."""
+    monkeypatch.setattr(page_server, "PEERS", Peers(_peer("192.0.2.2")))
+    monkeypatch.setattr(page_server, "chat_targets", lambda: set())
+    seen = []
+
+    def fetch(url, t):
+        seen.append(url)
+        return b'{"knobs": []}'
+    code, _ = page_server.peek(q(where="http://192.0.2.2:8899",
+                                 path="/settings.json", identity="5e07",
+                                 name="Qwen", kv_bits="8",
+                                 artifact="/etc"), fetch=fetch)
+    assert code == 200 and len(seen) == 1
+    assert "identity=5e07" in seen[0] and "kv_bits=8" in seen[0]
+    assert "artifact" not in seen[0]
+
+
+def test_the_settings_preview_resolves_an_identity_here(monkeypatch):
+    """The peer side: its own copy of the model, from its own stores."""
+    got = {}
+    monkeypatch.setattr(
+        "knurlogic.machine.artifact.resolve_identity",
+        lambda ident, paths=None, name="": "/models/q" if ident == "5e07"
+        else None)
+    monkeypatch.setattr(documents, "_preview",
+                        lambda art, tune, ws=None, **kw:
+                        got.update(art=art) or {"knobs": []})
+    h = documents.machine_settings()
+    assert h(q(identity="5e07", name="q")) == {"knobs": []}
+    assert got == {"art": "/models/q"}
+    assert "does not have" in h(q(identity="ffff"))["error"]

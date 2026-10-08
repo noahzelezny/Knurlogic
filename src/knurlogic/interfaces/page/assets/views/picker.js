@@ -261,7 +261,15 @@ async function loadPreview(){
   // YaRN long context moves the context cap and what its KV needs
   const lc=launchSets(baseKey(m.name)).KNURLOGIC_LONG_CONTEXT;
   if(lc) q.set('long_context', lc);
-  try{ PREVIEW=await (await fetch('/settings.json?'+q)).json(); PREVIEW.for=m.path }
+  // one peer picked: ITS page previews it (by identity, from its own
+  // stores), so the room is that machine's free memory, not this one's
+  const peer=launchPeer();
+  const url=peer&&peer.address
+    ? peekURL('http://'+peer.address,'/settings.json',
+        {identity:m.identity||'', name:m.name, tune:q.get('tune'),
+         ...(kvb?{kv_bits:kvb}:{}), ...(lc?{long_context:lc}:{})})
+    : '/settings.json?'+q;
+  try{ PREVIEW=await (await fetch(url)).json(); PREVIEW.for=m.path }
   catch(e){ PREVIEW=null }
   if(SEL!==m) return;
   // the preview's room is asked against the tune picked, and fresher
@@ -308,8 +316,8 @@ function pickInfo(){
   $('launch').title=blocked||'';
   el.innerHTML=''+
     (!fits?`<div class="warn">more space required</div>`
-     : ns.length===1&&isLocal(ns[0])
-       ? `<div id="pickroom">${roomHTML(m.room)}</div>` : '')+
+     : ns.length===1
+       ? `<div id="pickroom">${isLocal(ns[0])?roomHTML(m.room):''}</div>` : '')+
     (blocked && !/does not fit/.test(blocked)?`<div class="note">${esc(blocked)}</div>`:'');
   SETS=launchSets(baseKey(m.name)); mtpState(); loadPreview();
 }
