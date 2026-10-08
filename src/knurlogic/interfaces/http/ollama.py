@@ -183,6 +183,9 @@ def _piece(content: str, thinking: str, calls: list, generate: bool,
     if done is not None:
         out["done_reason"] = "stop" if calls else done
         out.update(_durations(usage or {}, started))
+        kn = (usage or {}).get("knurlogic")
+        if kn:
+            out["usage"] = {"knurlogic": kn}   # request_id, timing, ...
     return out
 
 

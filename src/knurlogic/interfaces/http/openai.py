@@ -247,6 +247,33 @@ class Reply:
                    else f"cmpl-{uuid.uuid4().hex}")
         self.created = int(time.time())
         self.model = served or ctx["model"]
+        #: the ledger's open Request (telemetry.py), or None
+        self.record = ctx.get("record")
+        self._pace = None      # (perf_counter, done) at the first progress
+
+    def _closed(self, usage, finish) -> None:
+        if self.record is not None:
+            self.record.done(usage, finish)
+
+    def _failed(self) -> None:
+        if self.record is not None:
+            self.record.failed()
+
+    def progress(self, phase: str, done: int = 0, total: int = 0,
+                 ahead: int = 0) -> bytes:
+        """A knurlogic.progress event (telemetry.md); tps over the prefill
+        chunks seen so far."""
+        from . import telemetry as T
+        tps = None
+        if phase == "prefill":
+            now = time.perf_counter()
+            if self._pace is None:
+                self._pace = (now, done)
+            elif now > self._pace[0]:
+                tps = round((done - self._pace[1]) / (now - self._pace[0]),
+                            1)
+        return T.progress(self.job.request_id, phase, done, total, tps,
+                          ahead)
 
     def first(self, timeout: float | None = None):
         """The Job's first event, which decides the status: a refusal at
@@ -275,6 +302,7 @@ class Reply:
                 usage = val
                 break
             elif kind == "error":
+                self._failed()
                 raise _status_of(val)
             ev = self.job.outbox.get()
         choice = {"index": 0, "finish_reason": finish}
@@ -300,6 +328,7 @@ class Reply:
                                          else "text_completion"),
                "created": self.created, "model": self.model,
                "choices": [choice], "usage": self._usage(usage)}
+        self._closed(usage, finish)
         if self.ctx.get("applied"):
             out["context_management"] = {"applied_edits":
                                          self.ctx["applied"]}
@@ -329,11 +358,13 @@ class Reply:
         # whitespace-only text is held until real text follows, and dropped
         # when a tool call comes first: the separator a model writes before
         # its tool block (DeepSeek-V4's "\n\n") is not text to show
-        held = ""
+        held, finish = "", "stop"
         while True:
             kind, val = ev
             if kind == "progress":
                 yield f": keepalive {val[0]}/{val[1]}\n\n".encode()
+                if self.ctx.get("progress"):
+                    yield self.progress("prefill", val[0], val[1])
             elif kind == "delta":
                 d = {}
                 if self.ctx["chat"]:
@@ -354,10 +385,12 @@ class Reply:
                                            for c in val.tool_calls]
                 else:
                     d = {"text": val.content} if val.content else {}
+                finish = val.finish or finish
                 if d or val.finish:
                     yield self._sse(obj, d, val.finish,
                                     [self._lp(x) for x in val.logprobs])
             elif kind == "done":
+                self._closed(val, finish)
                 if self.ctx["include_usage"]:
                     yield _data({"id": self.id, "object": obj,
                                  "created": self.created,
@@ -365,6 +398,7 @@ class Reply:
                                  "usage": self._usage(val)})
                 break
             elif kind == "error":
+                self._failed()
                 e = _status_of(val)
                 yield _data(e.body())
                 break
@@ -450,4 +484,5 @@ def models_document(served: dict, sampling: dict | None = None,
          "context_length": int(context_length or 0)}
     if thinking is not None:
         m["thinking"] = thinking
-    return {"object": "list", "data": [m]}
+    # the telemetry contract this server speaks (docs/design/telemetry.md)
+    return {"object": "list", "data": [m], "knurlogic": {"telemetry": 1}}

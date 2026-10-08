@@ -85,3 +85,14 @@ def test_lower_layers_do_not_import_interfaces():
                            or n.startswith("knurlogic.interfaces.")))
     assert not bad, ("engine/machine/tuning/context_management importing "
                      "interfaces:\n" + "\n".join(bad))
+
+
+def test_engine_never_imports_the_ledger_and_only_it_opens_the_file():
+    """fleet.md: the scheduler reports timings on the job; the HTTP layer
+    writes the row; machine/ledger.py alone opens ledger.db."""
+    bad = _violations(lambda pkg, n: pkg == "engine"
+                      and n.startswith("knurlogic.machine.ledger"))
+    assert not bad, "engine/ imports the ledger:\n" + "\n".join(bad)
+    opens = [p.relative_to(SRC) for p in SRC.rglob("*.py")
+             if "ledger.db" in p.read_text()]
+    assert opens == [Path("machine/ledger.py")], opens

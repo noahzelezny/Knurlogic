@@ -129,6 +129,11 @@ def test_the_step_loop_partitions_a_request():
     assert spans["decode_forward"] >= 0.02
     assert abs(t["spans_unaccounted_s"]) < 1e-3
     assert abs(sum(spans.values()) - t["spans_whole_s"]) < 1e-3
+    # the telemetry contract's names (docs/design/telemetry.md)
+    assert {"queue_ms", "prefill_ms", "decode_ms"} <= set(t)
+    assert t["queue_ms"] == round(t["queue_s"] * 1000, 1)
+    assert t["prefill_ms"] >= 20 and t["decode_ms"] >= 20
+    assert t.get("decode_tps") == t.get("decode_tok_s")
 
 
 def test_a_bare_job_like_object_is_still_accepted():

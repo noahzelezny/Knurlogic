@@ -2,13 +2,31 @@
 
 ## Unreleased
 
-* `X-Request-Id` is echoed: a request to /v1/chat/completions or
-  /v1/messages that carries one (1-128 visible ASCII characters, opaque)
-  gets the same value back as a response header -- on errors too -- and as
-  `request_id` in the answer's usage.knurlogic. The page's router passes
-  it to the model server and the echo back (its own refusals carry it
-  too). None is generated when a request sends none. A harness that tags
-  its calls joins its trace to the server's record of each request on it.
+* The telemetry contract (docs/design/telemetry.md, `telemetry: 1`),
+  server side. Every inference request -- chat/completions, completions,
+  /v1/messages, /v1/responses, Ollama -- gets a ULID, answered as
+  `X-Request-Id` (on errors too) and as `usage.knurlogic.request_id` in
+  the final usage of every API, streamed or not, beside
+  `usage.knurlogic.timing` {queue_ms, prefill_ms, decode_ms, prefill_tps,
+  decode_tps}. The `X-Client`, `X-Client-Session`, `X-Client-Run` and
+  `X-Client-Role` headers are stored opaquely with the request, cut to
+  128 bytes (Role: 32), never refused. A client's own X-Request-Id is no
+  longer echoed by the model server (the page's router passes it on and
+  returns the model server's id).
+* The request ledger (docs/design/fleet.md): one row per request -- labels,
+  model, api, token counts, timing, outcome (stop / length / tool_calls /
+  error / cancelled), HTTP status; never text -- in
+  `KNURLOGIC_HOME/ledger.db` (~/.knurlogic), kept 30 days or 256 MiB,
+  whichever first (`KNURLOGIC_LEDGER_DAYS`, `KNURLOGIC_LEDGER_MIB`).
+  `GET /v1/usage?group=session|run|client|role|model|api|key&since=&until=`
+  sums it, from this machine (loopback) only.
+* Streams carry `event: knurlogic.progress` ({request_id, phase
+  queue|prefill, done, total, tps, queue.ahead}) beside the keepalive
+  comment: always on /v1/messages (the Anthropic SDK skips event names it
+  does not know), on OpenAI chat/completions and /v1/responses only for a
+  client that sends `X-Client` (the OpenAI SDK would hand the event on as
+  a chunk). A queued stream gets a `queue` event every second.
+* `GET /v1/models` advertises `knurlogic.telemetry: 1`.
 * `usage.knurlogic.timing.spans_s`: each request's wall time, partitioned
   -- HTTP build, queue, tokenize, memory admission, prompt-cache lookup,
   and the gap / forward / host time of its prefill and decode steps -- with

@@ -143,11 +143,14 @@ def _usage(u: dict | None) -> dict:
         int(u.get("completion_tokens", 0) or 0)
     cached = int((u.get("prompt_tokens_details") or {})
                  .get("cached_tokens", 0) or 0)
-    return {"input_tokens": inp,
-            "input_tokens_details": {"cached_tokens": cached},
-            "output_tokens": out,
-            "output_tokens_details": {"reasoning_tokens": 0},
-            "total_tokens": inp + out}
+    doc = {"input_tokens": inp,
+           "input_tokens_details": {"cached_tokens": cached},
+           "output_tokens": out,
+           "output_tokens_details": {"reasoning_tokens": 0},
+           "total_tokens": inp + out}
+    if u.get("knurlogic"):
+        doc["knurlogic"] = u["knurlogic"]     # request_id, timing, ...
+    return doc
 
 
 def _message_item(text: str, item_id: str = None, done: bool = True) -> dict:
@@ -297,6 +300,9 @@ def stream(lines, req: dict, model: str):
         if isinstance(line, bytes):
             line = line.decode("utf-8", "replace")
         line = line.strip()
+        if line.startswith("event: knurlogic.progress"):
+            yield (line + "\n\n").encode()       # telemetry.md, opted in
+            continue
         if not line.startswith("data:"):
             continue
         payload = line[5:].strip()

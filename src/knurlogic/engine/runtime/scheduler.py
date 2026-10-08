@@ -219,6 +219,15 @@ def _timing(row, done: float, completion: int, prefilled,
     dec = done - first
     if completion > 1 and dec > 0:
         out["decode_tok_s"] = round((completion - 1) / dec, 1)
+    # the telemetry contract's names (docs/design/telemetry.md): submitted
+    # -> admitted, admitted -> first token, first token -> finish
+    out["queue_ms"] = round(out["queue_s"] * 1000, 1)
+    out["prefill_ms"] = round(max(first - row.admitted, 0) * 1000, 1)
+    out["decode_ms"] = round(max(dec, 0) * 1000, 1)
+    if "prefill_tok_s" in out:
+        out["prefill_tps"] = out["prefill_tok_s"]
+    if "decode_tok_s" in out:
+        out["decode_tps"] = out["decode_tok_s"]
     return out
 
 
@@ -281,7 +290,7 @@ class Job:
     received: float = 0.0
     #: where its wall time went, bucket by bucket (spans.py); None when off
     spans: Spans | None = None
-    #: the client's X-Request-Id, echoed as usage.knurlogic.request_id
+    #: the request's id (a ULID, X-Request-Id), as usage.knurlogic.request_id
     request_id: str | None = None
 
     def cancel(self) -> None:
@@ -611,6 +620,16 @@ class Scheduler:
                 # routinely, and a guard that refuses on it refuses with
                 # memory to spare
                 "memory_pressure": self._pressure_short()}
+
+    def ahead(self, job) -> int:
+        """How many requests wait in front of `job` for admission (0 once
+        it is admitted or gone); any thread, copies only, as requests()."""
+        waiting = [j for j in list(self._waiting) + list(self._jobs.queue)
+                   if not j.cancelled]
+        try:
+            return waiting.index(job)
+        except ValueError:
+            return 0
 
     def more_helps(self, rows: int):
         """Would one more concurrent row raise throughput? True/False from
