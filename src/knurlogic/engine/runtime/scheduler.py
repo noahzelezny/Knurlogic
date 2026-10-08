@@ -869,7 +869,12 @@ class Scheduler:
         # sleep too, rather than spin in the next collective
         if self.tensor is not None and self.host.state == "ready":
             self.tensor.park()
-        self._wake.wait(0.5 if self._waiting else None)
+        # a pinned session's parking is due on the clock, not on a request:
+        # an idle server wakes for it (_park_idle)
+        parking = self.tensor is None and self.cache is not None and \
+            bool(self.cache.pinned)
+        self._wake.wait(0.5 if self._waiting
+                        else PARK_CHECK_S if parking else None)
         self._wake.clear()
 
     def _why_waiting(self, room: bool) -> str | None:
