@@ -581,10 +581,12 @@ def _preview(path: str, tune: str, working_set_gib=None,
                                    "limited_by": "given by the caller"}),
         "knobs": knobs, "notes": r.notes, "warnings": r.warnings,
         "wired": wired.advise(a.bytes_on_disk),
-        # what the fit leaves to talk in, against the working set given or
-        # this machine's (under its allowance)
-        "room": room_for(a.bytes_on_disk, a.raw_config,
-                         ws if budget is None else None, kv_bits=bits),
+        # what the fit leaves to talk in, against the budget it is resolved
+        # in: the working set given, or what this machine has room for now
+        # (wired.load_budget: memory available now, so a model already
+        # loaded here counts; the working set alone said "leaves 87 GiB" on
+        # a 128 GiB Mac holding a 108 GiB model)
+        "room": room_for(a.bytes_on_disk, a.raw_config, ws, kv_bits=bits),
         "preview": True,
         # what the Load model toggles free: the MTP head, and vision's
         # tower + image store + image KV allowance (0: no such part)

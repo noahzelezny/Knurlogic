@@ -353,3 +353,19 @@ def test_deepseek_vision_exp_is_budgeted_only_with_its_tower(tmp_path):
     assert vb["tower_bytes"] == 2 * TOWER and vb["tower_tensors"] == 2
     assert vb["store_bytes"] == DEFAULT_MAX_BYTES
     assert R.vision_budget(Artifact.load(tmp_path / "teacher")) is None
+
+
+def test_the_previews_room_is_what_this_machine_has_free_now(tmp_path,
+                                                            monkeypatch):
+    """A 128 GiB Mac already holding a 108 GiB model: the room line said
+    "leaves 87 GiB" -- measured against the whole working set. It is the
+    load budget's: memory available now."""
+    from knurlogic.interfaces.page import documents
+    ws, free = 120 * GIB, 10 * GIB
+    monkeypatch.setattr(
+        "knurlogic.machine.wired.load_budget",
+        lambda: {"bytes": free, "working_set_bytes": ws,
+                 "available_bytes": free, "allowance_bytes": 0,
+                 "limited_by": "memory available now"})
+    p = documents._preview(str(_rung(tmp_path / "r")), "default")
+    assert p["room"]["working_set_bytes"] == free
