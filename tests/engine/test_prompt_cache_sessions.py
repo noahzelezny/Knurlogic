@@ -394,44 +394,19 @@ def test_a_sessions_save_writes_its_longest_entry_only(sched):
     assert none.done.wait(60) and none.result["entries"] == 0
 
 
-def test_an_idle_pinned_session_is_parked(sched, monkeypatch):
-    from knurlogic.engine.runtime import scheduler as SC
+def test_a_pin_never_moves_a_session_out_of_memory(sched):
+    """Pin means never deleted automatically, nothing else: when a session
+    leaves memory is the client's call (POST .../park), never a clock's."""
     s = sched
-    s.load("/nonexistent/tiny-park").done.wait(60)
+    s.load("/nonexistent/tiny-pin-stays").done.wait(60)
     s._prefill_tps = None
-    monkeypatch.setattr(SC, "PARK_CHECK_S", 0.0)
     _collect(s.submit(_job(s.prompts[1], max_tokens=3, session="c1",
                            pin=True)))
-    _collect(s.submit(_job(s.prompts[0], max_tokens=3, session="c2")))
-    assert s.cache.of_session("c1")            # not idle yet: kept
-    s.cache.seen["c1"] = time.time() - SC.PARK_IDLE_S - 1
-    end = time.time() + 20
-    while time.time() < end and s.cache.of_session("c1"):
+    assert "c1" in s.cache.pinned
+    for _ in range(5):
         s._wake.set()
         time.sleep(0.05)
-    assert s.cache.of_session("c1") == []       # parked
-    assert s.cache.of_session("c2")             # unpinned: stays
-    # (the switch from the last test's model saved its sessions too)
-    on_disk = {f["session"] for f in D.list_disk()}
-    assert "c1" in on_disk and "c2" not in on_disk
-
-
-def test_an_idle_server_wakes_to_park(sched, monkeypatch):
-    """Nothing arriving must not hold a park off: an idle scheduler slept
-    until the next request (seen live: a pinned session idle 13 min parked
-    only when the registry was read)."""
-    from knurlogic.engine.runtime import scheduler as SC
-    s = sched
-    s.load("/nonexistent/tiny-park-idle").done.wait(60)
-    s._prefill_tps = None
-    monkeypatch.setattr(SC, "PARK_CHECK_S", 0.2)
-    _collect(s.submit(_job(s.prompts[1], max_tokens=3, session="i1",
-                           pin=True)))
-    s.cache.seen["i1"] = time.time() - SC.PARK_IDLE_S - 1
-    end = time.time() + 20                  # no _wake.set(): the clock only
-    while time.time() < end and s.cache.of_session("i1"):
-        time.sleep(0.05)
-    assert s.cache.of_session("i1") == []
+    assert s.cache.of_session("c1")
 
 
 def _chat(system, user, **kw):

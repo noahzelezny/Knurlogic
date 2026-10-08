@@ -330,9 +330,6 @@ class PromptCache:
         #: sessions pinned (X-Cache-Retain: pin, or POST .../pin): sticky
         #: on this server, for their later entries too
         self.pinned: set = set()
-        #: {session: time.time() of its last entry}: a pinned session idle
-        #: longer than PARK_IDLE_S is parked (Scheduler._park_idle)
-        self.seen: dict = {}
         #: token tuples of the shared system-prompt checkpoints (a
         #: keep-latest session's, nobody's): saved and restored like a
         #: session's entries, so a reload's first worker skips that prefill
@@ -392,7 +389,6 @@ class PromptCache:
                           "run": owner.get("run"),
                           "pinned": s in self.pinned, "file": None,
                           "saved_at": None, "step": step}
-        self.seen[s] = time.time()
         if not owner.get("latest"):
             return []
         old = [(u, m) for u, m in self.owners.items()
@@ -434,7 +430,6 @@ class PromptCache:
         """Every entry of `session` out of memory; forgets its pin."""
         n = sum(self.remove(m, t) for m, t in self.of_session(session))
         self.pinned.discard(session)
-        self.seen.pop(session, None)
         return n
 
     def set_pinned(self, session: str, pinned: bool) -> int:
@@ -485,13 +480,6 @@ def _checkpoints(segs, n: int, hit: int) -> list[int]:
         if hit < at < n:
             out.append(at)
     return out
-
-
-#: a pinned session with no new entry this long has its entries moved to
-#: disk and freed from memory (read back on its next request)
-PARK_IDLE_S = 600.0
-#: how often idle pinned sessions are looked for
-PARK_CHECK_S = 30.0
 
 
 def _owner(job, uid=None, kind: str | None = None) -> dict | None:
@@ -586,8 +574,6 @@ class Scheduler:
         #: back on demand (_read_back), kept current at each save and drop
         self._disk_key: dict | None = None
         self._disk_index: dict = {}
-        #: when idle pinned sessions were last looked for (monotonic)
-        self._park_checked = time.monotonic()
         #: the last measured prefill rate (tok/s) of this model: the
         #: save's break-even rule (prompt_disk.not_worth); None: not yet
         self._prefill_tps: float | None = None
@@ -891,7 +877,6 @@ class Scheduler:
     def _tick(self) -> None:
         self._sample_pressure()
         self._do_commands()
-        self._park_idle()
         if self.tensor is not None:
             self._journal_sets()
         self._take_jobs()
@@ -916,12 +901,7 @@ class Scheduler:
         # sleep too, rather than spin in the next collective
         if self.tensor is not None and self.host.state == "ready":
             self.tensor.park()
-        # a pinned session's parking is due on the clock, not on a request:
-        # an idle server wakes for it (_park_idle)
-        parking = self.tensor is None and self.cache is not None and \
-            bool(self.cache.pinned)
-        self._wake.wait(0.5 if self._waiting
-                        else PARK_CHECK_S if parking else None)
+        self._wake.wait(0.5 if self._waiting else None)
         self._wake.clear()
 
     def _why_waiting(self, room: bool) -> str | None:
@@ -1131,25 +1111,7 @@ class Scheduler:
                     "why": [], "entries": 0, "not_worth": 0}
         return self._save_disk(only_new=True, select={max(mine, key=len)})
 
-    def _park_idle(self) -> None:
-        """Between steps, at most every PARK_CHECK_S: a pinned session with
-        no new entry for PARK_IDLE_S is parked -- its entries saved and
-        freed from memory -- on a single server (a ring has no read-back
-        yet: parked, it would only miss)."""
-        now = time.monotonic()
-        if self.tensor is not None or self.cache is None or \
-                not self.cache.pinned or self.host.state != "ready" or \
-                now - self._park_checked < PARK_CHECK_S:
-            return
-        self._park_checked = now
-        busy = {getattr(r.job, "session", None)
-                for r in self._rows.values()} | \
-            {getattr(j, "session", None) for j in self._waiting}
-        for s in sorted(self.cache.pinned - busy):
-            if time.time() - self.cache.seen.get(s, 0.0) > PARK_IDLE_S:
-                self._park(s)
-
-    def _park(self, session: str, why: str = "pinned and idle") -> dict:
+    def _park(self, session: str, why: str = "parked on request") -> dict:
         """`session`'s entries to disk (what is not there yet), then out of
         memory -- one the save did not write (not worth it, unsaveable)
         stays. Its next request reads them back (_read_back). Returns
