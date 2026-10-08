@@ -302,6 +302,9 @@ class Job:
     run: str | None = None
     #: X-Cache-Retain: pin -- its session's entries are never auto-deleted
     pin: bool = False
+    #: X-Cache-Keep: latest -- its entries replace its session's earlier
+    #: ones (the client never resumes from an earlier step)
+    keep_latest: bool = False
 
     def cancel(self) -> None:
         """From the HTTP thread: the client went away; free the row."""
@@ -358,26 +361,45 @@ class PromptCache:
         return short
 
     def insert(self, key, tokens, cache, kind: str, origin=None,
-               owner: dict | None = None) -> None:
+               owner: dict | None = None) -> list:
         """`origin`: (event, uid) the cache came from -- what a ring's
         journal names (engine/runtime/tensor.JournalPromptCache). `owner`:
-        {session, role, run} of the request that made it."""
+        {session, role, run[, step, latest]} of the request that made it.
+        Returns the files of the entries it superseded (owner["latest"]),
+        for the caller to delete."""
         self.lru.insert_cache(key, list(tokens), cache, cache_type=kind)
-        self.own(tokens, owner)
+        return self.own(tokens, owner, key)
 
-    def own(self, tokens, owner: dict | None) -> None:
+    def own(self, tokens, owner: dict | None, key=None) -> list:
         """Record who an entry (just inserted) belongs to. A new insert of
-        the same tokens is a new entry: not on disk until saved again."""
+        the same tokens is a new entry: not on disk until saved again.
+        With owner["latest"] the session keeps only this step's entries
+        (`step`: the row that made them): every earlier one leaves memory,
+        and its file is returned to be deleted."""
         t = tuple(tokens)
         s = (owner or {}).get("session")
         if not s:
             self.owners.pop(t, None)
-            return
+            return []
+        step = owner.get("step")
         self.owners[t] = {"session": s, "role": owner.get("role"),
                           "run": owner.get("run"),
                           "pinned": s in self.pinned, "file": None,
-                          "saved_at": None}
+                          "saved_at": None, "step": step}
         self.seen[s] = time.time()
+        if not owner.get("latest"):
+            return []
+        old = [(u, m) for u, m in self.owners.items()
+               if m["session"] == s and u != t and m.get("step") != step]
+        files = []
+        for u, m in old:
+            if m.get("file"):
+                files.append(m["file"])
+            self.owners.pop(u, None)
+            if key is not None:
+                from knurlogic.engine.serve import prompt_disk
+                prompt_disk.remove_entry(self.lru, key, list(u))
+        return files
 
     def live(self) -> list:
         """(model, tokens, CacheEntry, meta or None) of every entry in the
@@ -465,14 +487,24 @@ PARK_IDLE_S = 600.0
 PARK_CHECK_S = 30.0
 
 
-def _owner(job) -> dict | None:
+def _owner(job, uid=None, kind: str | None = None) -> dict | None:
     """{session, role, run} of the request a cache entry came from, or
-    None when it named no session (it owns nothing)."""
+    None when it named no session (it owns nothing). X-Cache-Keep: latest
+    adds the step (`uid`, the row) and `latest`: the entry replaces the
+    session's earlier steps. Its system-prompt checkpoint belongs to no
+    session: one copy per distinct prefix, shared by every session that
+    starts from it."""
     s = getattr(job, "session", None)
     if not s:
         return None
-    return {"session": s, "role": getattr(job, "role", None),
-            "run": getattr(job, "run", None)}
+    latest = bool(getattr(job, "keep_latest", False))
+    if latest and kind == "system":
+        return None
+    out = {"session": s, "role": getattr(job, "role", None),
+           "run": getattr(job, "run", None)}
+    if latest:
+        out.update(step=uid, latest=True)
+    return out
 
 
 @dataclass
@@ -1058,6 +1090,20 @@ class Scheduler:
         except Exception:  # never fails an unload or a stop (logged)
             logger.exception("saving the prompt cache to disk failed")
             return None
+
+    def _superseded(self, files) -> None:
+        """The files of entries a keep-latest session's new step replaced:
+        off disk, and out of the read-back index."""
+        for f in files or ():
+            try:
+                Path(f).unlink()
+            except OSError:
+                pass
+        if files:
+            gone = {str(f) for f in files}
+            for t in [t for t, v in self._disk_index.items()
+                      if str(v.get("file")) in gone]:
+                del self._disk_index[t]
 
     def _save_session(self, session: str) -> dict | None:
         """POST /v1/prompt-cache/save {"session"}: that session's newest
@@ -2190,10 +2236,11 @@ class Scheduler:
             elif isinstance(e, Checkpoint):
                 self._learn(e.tokens, e.cache)
                 if row.types:
-                    self.cache.insert(self.host.model_key, e.tokens, e.cache,
-                                      row.types.pop(0),
-                                      origin=("checkpoint", e.uid),
-                                      owner=_owner(row.job))
+                    kind = row.types.pop(0)
+                    self._superseded(self.cache.insert(
+                        self.host.model_key, e.tokens, e.cache, kind,
+                        origin=("checkpoint", e.uid),
+                        owner=_owner(row.job, e.uid, kind)))
             elif isinstance(e, Token):
                 row.made += 1
                 if not row.first:
@@ -2208,9 +2255,10 @@ class Scheduler:
                     self._done(e.uid)
             elif isinstance(e, Finished):
                 self._learn(e.tokens, e.cache)
-                self.cache.insert(self.host.model_key, e.tokens, e.cache,
-                                  "assistant", origin=("finished", e.uid),
-                                  owner=_owner(row.job))
+                self._superseded(self.cache.insert(
+                    self.host.model_key, e.tokens, e.cache, "assistant",
+                    origin=("finished", e.uid),
+                    owner=_owner(row.job, e.uid, "assistant")))
                 self._done(e.uid)
             elif isinstance(e, RowFailure):
                 self._rows.pop(e.uid, None)

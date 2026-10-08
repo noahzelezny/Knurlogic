@@ -432,3 +432,45 @@ def test_an_idle_server_wakes_to_park(sched, monkeypatch):
     while time.time() < end and s.cache.of_session("i1"):
         time.sleep(0.05)
     assert s.cache.of_session("i1") == []
+
+
+def _chat(system, user, **kw):
+    from knurlogic.engine.runtime import prompt as P
+    from knurlogic.engine.runtime.scheduler import Job
+    say = lambda ids: " ".join(str(i) for i in ids)     # noqa: E731
+    return Job(P.ChatRequest(messages=[
+        {"role": "system", "content": say(system)},
+        {"role": "user", "content": say(user)}]), P.PromptArgs(), **kw)
+
+
+def test_keep_latest_replaces_the_sessions_earlier_steps(sched):
+    """X-Cache-Keep: latest (the harness: a worker only appends, so only its
+    latest step is ever reused): each step's entries replace the
+    session's earlier ones in memory and on disk; the system prompt's
+    checkpoint is nobody's, one copy every session shares."""
+    s = sched
+    s.load("/nonexistent/tiny-latest").done.wait(60)
+    s._prefill_tps = None
+    sys_p = list(s.prompts[0][:20])
+    a = list(s.prompts[1])
+    b = a + list(s.prompts[2])                  # the worker appended
+    _collect(s.submit(_chat(sys_p, a, max_tokens=3, session="k1",
+                            keep_latest=True)))
+    first = {tuple(t) for _, t in s.cache.of_session("k1")}
+    assert first
+    cmd = s.save_prompt_cache()                 # the first step on disk
+    assert cmd.done.wait(60) and cmd.result["saved"] == len(first)
+    assert {f["session"] for f in D.list_disk()} == {"k1"}
+    _collect(s.submit(_chat(sys_p, b, max_tokens=3, session="k1",
+                            keep_latest=True)))
+    now = {tuple(t) for _, t in s.cache.of_session("k1")}
+    assert now and not (now & first)            # replaced, not stacked
+    assert len(now) <= 2                        # its checkpoint + answer
+    assert not [f for f in D.list_disk() if f["session"] == "k1"]
+    shared = [t for _, t, _, m in s.cache.live()
+              if m is None and list(t) == sys_p]
+    assert len(shared) == 1                     # the system prompt's, unowned
+    # a session that does not ask keeps every step, as before
+    _collect(s.submit(_chat(sys_p, a, max_tokens=3, session="k2")))
+    _collect(s.submit(_chat(sys_p, b, max_tokens=3, session="k2")))
+    assert len(s.cache.of_session("k2")) > 2

@@ -13,6 +13,7 @@ client that wants attribution (an agent harness is the first). No shared code.
 | `X-Client-Role` | a short label the client chooses (`pm`, `worker`, `sidecar`, …) | 32 bytes |
 
 | `X-Cache-Retain` | `pin`: this session's prompt-cache entries are never auto-deleted from disk (sticky for the session) | — |
+| `X-Cache-Keep` | `latest`: this request's prompt-cache entries replace its session's earlier ones (memory and disk); its system-prompt checkpoint is shared, not the session's | — |
 
 All optional. The server stores them as opaque strings and groups by them.
 A request with none is attributed to the key only, or `anonymous`.
