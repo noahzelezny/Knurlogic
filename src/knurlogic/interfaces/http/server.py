@@ -184,6 +184,8 @@ class App:
                                            labs.get("role"), labs.get("run"))
         job.pin = bool(hdrs) and (hdrs.get("X-Cache-Retain") or ""
                                   ).strip().lower() == "pin"
+        job.keep_latest = bool(hdrs) and (hdrs.get("X-Cache-Keep") or ""
+                                          ).strip().lower() == "latest"
         if rec is not None:
             job.request_id = rec.id    # X-Request-Id: the client's, or a ULID
             rec.model = self.served().get("id") or None
@@ -560,7 +562,7 @@ class Handler(BaseHTTPRequestHandler):
                              "Content-Type, Authorization, x-api-key, "
                              "anthropic-version, X-Request-Id, X-Client, "
                              "X-Client-Session, X-Client-Run, "
-                             "X-Client-Role, X-Cache-Retain")
+                             "X-Client-Role, X-Cache-Retain, X-Cache-Keep")
         self.end_headers()
 
     def do_GET(self):

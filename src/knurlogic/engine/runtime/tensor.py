@@ -644,16 +644,17 @@ class JournalPromptCache:
         return self.inner.fetch(key, tokens)
 
     def insert(self, key, tokens, cache, kind: str, origin=None,
-               owner: dict | None = None) -> None:
+               owner: dict | None = None) -> list:
         if origin is None:
             raise ValueError("a ring's prompt cache inserts only from an "
                              "event (origin=(event, uid))")
-        self.inner.insert(key, tokens, cache, kind, owner=owner)
+        files = self.inner.insert(key, tokens, cache, kind, owner=owner)
         event, uid = origin
         # the owner rides along: every rank's side map mirrors rank 0's,
         # so a session's drop, pin or save selects the same entries there
         self.journal.add("insert", uid=int(uid), event=event, kind=kind,
                          **({"owner": owner} if owner else {}))
+        return files
 
     # the side map is rank 0's to read; changes to it are journaled
     @property
@@ -865,8 +866,15 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
         if got is None:
             raise Desync(f"no {op['event']} for row {op['uid']} in "
                          f"the last step")
-        cache.insert(model_key, got[0], got[1], op["kind"],
-                     owner=op.get("owner"))
+        # a keep-latest step replaces the session's earlier entries here
+        # as on rank 0 (the side maps match): this rank's files go too
+        from pathlib import Path
+        for f in cache.insert(model_key, got[0], got[1], op["kind"],
+                              owner=op.get("owner")) or ():
+            try:
+                Path(f).unlink()
+            except OSError:
+                pass
     elif kind == "pop":
         cache.lru.trim_to(n_sequences=len(cache.lru) - op["n"])
     elif kind == "drop":

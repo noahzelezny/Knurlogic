@@ -152,6 +152,15 @@ The cache belongs to the agent (the client session), not the model.
   file; a header's `pinned` is only what it was at write. The sweep never
   deletes a pinned session's files (TTL nor budget; the budget counts
   unpinned files only); only a drop does. A `pin` op on a ring.
+- **Latest step only.** `X-Cache-Keep: latest` (per request; a client
+  that only appends -- the harness's workers -- sends it on every one): the
+  entries a request makes replace its session's earlier steps, in memory
+  and on disk, so a session holds one step (its conversation checkpoint
+  and its answer). Its system-prompt checkpoint is nobody's: one copy per
+  distinct system prompt and tools, which every session starting from it
+  shares. Opt-in, because the page's chat regenerates and edits from
+  earlier messages. On a ring the owner rides the `insert` op with its
+  step, and every rank replaces the same entries.
 - **Parking and read-back.** A pinned session with no new entry for
   `PARK_IDLE_S` (10 min) has its entries saved and freed from memory. An
   admission whose best memory hit is shorter than an on-disk entry of

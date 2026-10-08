@@ -1388,7 +1388,7 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
 #: the client's labels (telemetry.md) and its cache retention: passed up
 #: to the model server, which owns the prompt-cache entries by them
 CLIENT_HEADERS = ("X-Client", "X-Client-Session", "X-Client-Run",
-                  "X-Client-Role", "X-Cache-Retain")
+                  "X-Client-Role", "X-Cache-Retain", "X-Cache-Keep")
 
 
 def _client_headers(handler) -> dict:
