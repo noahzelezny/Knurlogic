@@ -95,6 +95,11 @@ def scheduler_options(settings: dict) -> dict:
             "working_set_bytes": settings.get("working_set_bytes")}
 
 
+#: how long a stopping server waits for its scheduler's exit, which saves
+#: the prompt cache to disk; the page's unload waits as long (page/server)
+STOP_SAVE_S = 120.0
+
+
 def watch_ring(sched, mh, exit_after: float = 1.5,
                stop_within: float = 15.0) -> None:
     """Rank 0 of a split model: its progress marker says whether work is
@@ -296,6 +301,10 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
         for srv in servers:
             srv.server_close()
         sched.stop()
+        # the scheduler's exit saves the prompt cache to disk (a daemon
+        # thread: returning now would end the process mid-save). Measured:
+        # 22.9 GiB in 7.1 s on the M3
+        sched.wait_stopped(STOP_SAVE_S)
     return 0
 
 
