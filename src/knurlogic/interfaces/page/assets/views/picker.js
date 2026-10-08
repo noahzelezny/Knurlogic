@@ -288,15 +288,43 @@ function launchGate(){
 // shared by every conversation. Amber when it is small: GLM-5.3 "fit" the
 // 128 GB M4 with 6 GiB left, and four long agent conversations never ran.
 const ktok=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?Math.round(n/1e3)+'k':String(n);
+// The room with what the Load panel switches off given back: the MTP head
+// and vision's tower, image store and image KV are counted in the weights
+// the server measured, so a part switched off is room to talk in.
+let LASTROOM=null;
+function freedBytes(){
+  const m=SEL; if(!m) return 0;
+  const off=(k,name)=>(LMTP.for===m.path&&LMTP[k]?LMTP[k]:mtpDefault(name))==='off';
+  return (hasMTP(m)&&off('mtp','KNURLOGIC_MTP')?partBytes(m,'mtp_bytes'):0)+
+         (hasVis(m)&&off('vis','KNURLOGIC_VISION')?partBytes(m,'vision_bytes'):0);
+}
+function roomText(left, tokens, per){
+  const t=tokens>=1e6?(tokens/1e6).toFixed(1)+'M':tokens>=1e3?Math.round(tokens/1e3)+'k':String(tokens);
+  return `leaves ${Math.round(left/2**30)} GiB`+(per
+    ? `, about ${t} tokens of context across all conversations`
+    : ' (its KV size per token is not known)');
+}
 function roomHTML(r){
   if(!r) return '';
-  // asked of THIS machine: a model picked for a bigger peer does not fit here
+  LASTROOM={r, for:SEL&&SEL.path};
+  const freed=freedBytes();
+  if(freed>0){
+    // the same sum as the server's context_room, with the parts off
+    const ws=r.working_set_bytes||0, margin=r.margin_bytes||0;
+    const need=Math.max((r.weights_bytes||0)-freed,0);
+    const left=Math.max(ws-need-margin,0), per=r.kv_bytes_per_token||0;
+    const tokens=per?Math.floor(left/per):0;
+    r={...r, fits:!!ws&&need+margin<=ws, left_bytes:left, tokens,
+       text:roomText(left,tokens,per),
+       small:left<2*2**30||!!(per&&r.window&&tokens<r.window/5)};
+  }
+  // asked of the machine it would load on: what it has free now
   if(!r.fits) return `<div class="room small">${gb(r.weights_bytes)} does not fit
-    this machine's ${gb(r.working_set_bytes)} (its working set, under the
-    knurlogic allowance)</div>`;
+    the ${gb(r.working_set_bytes)} free there now</div>`;
   return `<div class="room${r.small?' small':''}" title="${esc(
-    `working set ${gb(r.working_set_bytes)} − weights ${gb(r.weights_bytes)} − `+
-    `step margin ${gb(r.margin_bytes)}`+(r.kv_why?` · KV ${r.kv_why}`:'')+
+    `free now ${gb(r.working_set_bytes)} − weights ${gb(r.weights_bytes)}`+
+    (freedBytes()>0?` + switched off ${gb(freedBytes())}`:'')+
+    ` − step margin ${gb(r.margin_bytes)}`+(r.kv_why?` · KV ${r.kv_why}`:'')+
     (r.window?` · its window is ${r.window.toLocaleString()} tokens`:''))}">${esc(r.text)}${
     r.small?' — little room for long conversations':''}</div>`;
 }
@@ -589,6 +617,9 @@ function mtpState(){
   $('mtplab').textContent='MTP'+(mb>0?` (${gb(mb)})`:'');
   $('vislab').textContent='Vision'+(off?` (${m.vision_why})`
                                        :vb>0?` (${gb(vb)})`:'');
+  // a part switched off is room to talk in: the line follows the toggles
+  const pr=$('pickroom');
+  if(pr && LASTROOM && SEL && LASTROOM.for===SEL.path) pr.innerHTML=roomHTML(LASTROOM.r);
 }
 $('mtpopts').querySelectorAll('.seg').forEach(g=>
   g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
