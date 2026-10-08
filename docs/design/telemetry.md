@@ -17,7 +17,11 @@ A request with none is attributed to the key only, or `anonymous`.
 
 ## Response (server → client)
 
-- `X-Request-Id`: ULID of the ledger row.
+- `X-Request-Id`: the ledger row's id. If the client sent `X-Request-Id`
+  (1..128 printable ASCII), it is echoed exactly and is the row's id;
+  otherwise the server mints a ULID. An invalid value is ignored, not
+  refused. A client that reuses an id replaces the earlier row. The page's
+  router passes the header through.
 - `usage.knurlogic.request_id`: the same, in the final usage object of
   every API (OpenAI, Messages, Responses, Ollama).
 - `usage.knurlogic.timing`: `{queue_ms, prefill_ms, decode_ms,

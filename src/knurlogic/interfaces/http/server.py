@@ -176,7 +176,7 @@ class App:
         job.received = received     # usage.knurlogic.timing: http_build
         rec = getattr(_CONN, "record", None)    # the ledger's Request
         if rec is not None:
-            job.request_id = rec.id                # X-Request-Id, a ULID
+            job.request_id = rec.id    # X-Request-Id: the client's, or a ULID
             rec.model = self.served().get("id") or None
             rec.jobs.append(job)
             ctx["record"], ctx["progress"] = rec, rec.progress
@@ -565,7 +565,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def end_headers(self):
         # X-Request-Id on every answer to an inference request: success,
-        # stream or error alike -- the ULID of its ledger row (telemetry.py)
+        # stream or error alike -- its ledger row's id: the client's own
+        # X-Request-Id echoed exactly, else a ULID (telemetry.py)
         rec = getattr(self, "_record", None)
         if rec is not None:
             self.send_header(RID.HEADER, rec.id)

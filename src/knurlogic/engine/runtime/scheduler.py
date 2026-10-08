@@ -290,7 +290,7 @@ class Job:
     received: float = 0.0
     #: where its wall time went, bucket by bucket (spans.py); None when off
     spans: Spans | None = None
-    #: the request's id (a ULID, X-Request-Id), as usage.knurlogic.request_id
+    #: the request's id (the client's X-Request-Id, else a ULID), as usage.knurlogic.request_id
     request_id: str | None = None
 
     def cancel(self) -> None:
@@ -1095,6 +1095,7 @@ class Scheduler:
             text = Request(tok.detokenizer, sequences=seqs, stops=job.stops,
                            tool_parser=getattr(tok, "tool_parser", None),
                            tools=job.request.tools,
+                           no_tools=job.request.tool_choice == "none",
                            logprobs=job.logprobs or bool(job.top_logprobs),
                            prompt_tokens=len(prompt))
         except BaseException:

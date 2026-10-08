@@ -1,10 +1,10 @@
 """X-Request-Id as the page's router handles it.
 
-The model server answers every inference request with its own id, the
-ULID of the request's ledger row (interfaces/http/telemetry.py,
-docs/design/telemetry.md); a client's id is not echoed there. The page's
-router passes a client's header on and returns the model server's id,
-falling back to the client's own when an upstream predates the ledger.
+The model server echoes a client's valid id exactly (and uses it as the
+ledger row's id and usage.knurlogic.request_id); without one it answers
+with a minted ULID (interfaces/http/telemetry.py, docs/design/telemetry.md).
+The page's router passes a client's header on and returns the model
+server's id, falling back to the client's own when an upstream sends none.
 
 A value is accepted only if it is 1..128 visible ASCII characters (and
 spaces): anything else is not an id this server will repeat into a

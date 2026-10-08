@@ -34,6 +34,13 @@ class ChatRequest:
     messages: list[dict] = field(default_factory=list)
     tools: list | None = None
     role_mapping: dict | None = None
+    #: OpenAI chat form: None/"auto", "none", "required", or
+    #: {"type": "function", "function": {"name": ...}}. "none" keeps the
+    #: tools in the prompt (the prefix stays the same as the turns that
+    #: offer them, so the prompt cache holds) and drops any tool call the
+    #: model makes (request.Request no_tools). "required" and a named tool
+    #: go to a chat template that reads `tool_choice`; nothing enforces them.
+    tool_choice: object = None
 
 
 @dataclass
@@ -226,6 +233,9 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
     tools = _neutralize_values(request.tools, control_strings(tokenizer)) \
         if request.tools else None
     render = dict(kw, tools=tools) if tools else dict(kw)
+    if tools and request.tool_choice not in (None, "auto") \
+            and "tool_choice" in _template_text(tokenizer):
+        render.setdefault("tool_choice", request.tool_choice)
     # The thinking probe renders on HTTP threads under this lock; a
     # tokenizer's template environment is not safe to share across threads.
     with thinking._render_lock:

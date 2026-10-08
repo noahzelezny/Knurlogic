@@ -10,9 +10,18 @@
   `usage.knurlogic.timing` {queue_ms, prefill_ms, decode_ms, prefill_tps,
   decode_tps}. The `X-Client`, `X-Client-Session`, `X-Client-Run` and
   `X-Client-Role` headers are stored opaquely with the request, cut to
-  128 bytes (Role: 32), never refused. A client's own X-Request-Id is no
-  longer echoed by the model server (the page's router passes it on and
-  returns the model server's id).
+  128 bytes (Role: 32), never refused. A client's own X-Request-Id
+  (1..128 printable ASCII) is echoed exactly and is the request's id
+  (ledger row, `usage.knurlogic.request_id`); only without one does the
+  server mint the ULID. The page's router passes it through.
+* `tool_choice` is honoured on chat/completions, /v1/messages ({type:
+  auto|any|tool|none}) and /v1/responses (Ollama has none): `"none"`
+  returns no tool calls, streamed or not -- the tools stay in the prompt,
+  so its prefix and the prompt cache match the turns that offer them, and
+  a call the model makes anyway is dropped. `"required"`/`any` and a named
+  tool are passed to a chat template that reads `tool_choice`; they are
+  not enforced. A malformed `tool_choice` is a 400. /v1/responses echoes
+  the request's `tool_choice`.
 * The request ledger (docs/design/fleet.md): one row per request -- labels,
   model, api, token counts, timing, outcome (stop / length / tool_calls /
   error / cancelled), HTTP status; never text -- in
