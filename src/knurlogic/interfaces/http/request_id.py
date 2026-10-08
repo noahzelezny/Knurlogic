@@ -1,11 +1,10 @@
-"""X-Request-Id: a client's own id for a request, echoed back unchanged.
+"""X-Request-Id as the page's router handles it.
 
-A harness that tags each call with its own id (the harness does) joins its trace
-to the server's record of the request on that id. The server generates
-none: a request without the header gets none back. The value is opaque
-and echoed verbatim -- as a response header, and as `request_id` in the
-answer's usage.knurlogic -- by the model server and by the page's router,
-which passes it to the model server and the model server's echo back.
+The model server answers every inference request with its own id, the
+ULID of the request's ledger row (interfaces/http/telemetry.py,
+docs/design/telemetry.md); a client's id is not echoed there. The page's
+router passes a client's header on and returns the model server's id,
+falling back to the client's own when an upstream predates the ledger.
 
 A value is accepted only if it is 1..128 visible ASCII characters (and
 spaces): anything else is not an id this server will repeat into a

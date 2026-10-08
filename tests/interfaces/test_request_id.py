@@ -55,18 +55,17 @@ def model_server():
     srv.shutdown()
 
 
-def test_the_model_server_echoes_it_even_on_an_error(model_server):
-    code, echo, _ = _post(model_server + "/v1/chat/completions", b"{nope",
-                          rid="client-1")
-    assert code == 400 and echo == "client-1"
-
-
-def test_no_id_in_no_id_out_and_a_bad_one_is_not_repeated(model_server):
-    _, echo, _ = _post(model_server + "/v1/chat/completions", b"{nope")
-    assert echo is None
-    _, echo, _ = _post(model_server + "/v1/chat/completions", b"{nope",
-                       rid="x" * 200)
-    assert echo is None
+def test_the_model_server_answers_its_own_ulid_even_on_an_error(
+        model_server):
+    """telemetry.md: X-Request-Id is the ULID of the ledger row; a
+    client's own id is neither echoed nor adopted (and a bad one never
+    reaches a header)."""
+    import re
+    for rid in ("client-1", None, "x" * 200):
+        code, echo, _ = _post(model_server + "/v1/chat/completions",
+                              b"{nope", rid=rid)
+        assert code == 400
+        assert re.match(r"^[0-9A-HJKMNP-TV-Z]{26}$", echo), echo
 
 
 def _fake_model(model_id, seen, echo=True):

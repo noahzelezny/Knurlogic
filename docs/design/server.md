@@ -672,17 +672,32 @@ admitted LEAN, without checkpoints (the request beats the cache); failing
 that it waits for running rows, or with none running is refused -- never
 admitted to abort the process.
 
-### knurlogic/interfaces/http/request_id.py -- X-Request-Id
+### knurlogic/interfaces/http/telemetry.py -- the telemetry contract
 
-A client's own id for a request, echoed unchanged so its trace joins the
-server's record of the request: as a response header on every answer to a
-request that carried one (success, stream or error -- the handler's
-end_headers adds it), and as `request_id` in usage.knurlogic beside the
-timing partition. Opaque; accepted at 1-128 visible ASCII characters,
-otherwise ignored (never repeated into a header). Never generated. The
-page's router (`_stream`) sends it to the model server and returns the
-model server's echo, or the client's own id when the upstream predates the
-echo; its refusals (`_send_json`) carry it as well.
+docs/design/telemetry.md (`telemetry: 1`), server side. Every inference
+request (chat/completions, completions, Messages, Responses, Ollama) opens
+a `Request` at the handler: a ULID, its api, and the four `X-Client*`
+labels cut to their byte limits (128, Role 32; truncated, never refused).
+The ULID is the answer's `X-Request-Id` (on success, stream or error) and
+the job's `request_id`, which the scheduler writes as
+usage.knurlogic.request_id beside the timing, whose contract fields
+(`queue_ms`, `prefill_ms`, `decode_ms`, `prefill_tps`, `decode_tps`) sit
+beside the older ones. A client's own X-Request-Id is not echoed. When the
+handler finishes, the Request is one row of machine/ledger.py
+(KNURLOGIC_HOME/ledger.db; 30 days or 256 MiB, `KNURLOGIC_LEDGER_DAYS` /
+`KNURLOGIC_LEDGER_MIB`); `GET /v1/usage?group=session|run|...` sums it
+(loopback only until keys exist).
+
+A streamed request's prefill progress is an SSE `event:
+knurlogic.progress` beside the `: keepalive d/n` comment, and while queued
+a `phase: "queue"` event every second with the requests ahead. Messages
+streams always carry it (the Anthropic SDK skips unknown event names);
+OpenAI chat/completions and Responses streams only for a client that sends
+`X-Client` (the OpenAI SDK hands an unknown event's data on as a chunk);
+Ollama's NDJSON has none. `/v1/models` says `knurlogic.telemetry: 1`.
+
+The page's router (`request_id.py`, `_stream`) passes a client's
+X-Request-Id on and returns the model server's.
 
 ### src/knurlogic/engine/runtime/spans.py -- where a request's time went
 

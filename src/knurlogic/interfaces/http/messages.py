@@ -328,6 +328,11 @@ def stream(openai_lines, model: str):
             # API does, so the client does not time out
             yield _sse("ping", {"type": "ping"})
             continue
+        if line.startswith("event: knurlogic.progress"):
+            # telemetry.md; the Anthropic SDK skips event names it does
+            # not know, as the SSE rule says
+            yield (line + "\n\n").encode()
+            continue
         if not line.startswith("data:"):
             continue
         payload = line[5:].strip()

@@ -51,6 +51,10 @@ def _no_real_cache(monkeypatch, tmp_path_factory):
     # person's real ones must not steer a test
     monkeypatch.setenv("XDG_CONFIG_HOME",
                        str(tmp_path_factory.mktemp("xdg-config")))
+    # and its own KNURLOGIC_HOME: the request ledger (machine/ledger.py)
+    # is written there by every served request
+    monkeypatch.setenv("KNURLOGIC_HOME",
+                       str(tmp_path_factory.mktemp("knurlogic-home")))
 
 
 # --- no process a test starts outlives it ------------------------------------

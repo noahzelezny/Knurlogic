@@ -116,6 +116,8 @@ def test_responses_non_streaming_shape():
     fc = r["output"][2]
     assert (fc["call_id"], fc["name"]) == ("call_1", "read")
     assert json.loads(fc["arguments"]) == {"path": "a.py"}
+    # usage.knurlogic passed on (telemetry.md)
+    assert "timing" in r["usage"].pop("knurlogic")
     assert r["usage"] == {"input_tokens": 7, "output_tokens": 11,
                           "total_tokens": 18,
                           "input_tokens_details": {"cached_tokens": 0},

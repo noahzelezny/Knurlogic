@@ -29,10 +29,30 @@ from knurlogic.engine.templates import TEMPLATE_ERRORS
 
 from . import openai as O
 from . import request_id as RID
+from . import telemetry as T
 
 logger = logging.getLogger(__name__)
 
 CHAT_PATHS = ("/v1/chat/completions", "/chat/completions")
+
+#: the inference routes: each opens a ledger Request (telemetry.py) named
+#: by its api; the second value says whether its stream carries
+#: knurlogic.progress events without the client asking. The Anthropic SDK
+#: skips an event name it does not know; the OpenAI SDK does not (it hands
+#: the event's data on as a chunk, which has no `choices`), so the OpenAI
+#: shapes carry it only for a client that names itself with X-Client.
+#: Ollama's stream is NDJSON, not SSE: it has no events.
+INFERENCE = {"/v1/chat/completions": ("chat", False),
+             "/chat/completions": ("chat", False),
+             "/v1/completions": ("completions", False),
+             "/v1/messages": ("messages", True),
+             "/v1/responses": ("responses", False),
+             "/api/chat": ("ollama", None),
+             "/api/generate": ("ollama", None)}
+
+#: How often a streamed request waiting for admission is told where it
+#: stands (knurlogic.progress, phase "queue"), seconds.
+PROGRESS_S = 1.0
 
 #: Largest request body read, bytes (--max-request-mib). The body is read
 #: into memory before anything else can judge it, so it is bounded first.
@@ -154,7 +174,12 @@ class App:
         ctx.update(extra or {})
         self._count()
         job.received = received     # usage.knurlogic.timing: http_build
-        job.request_id = getattr(_CONN, "rid", None)   # X-Request-Id
+        rec = getattr(_CONN, "record", None)    # the ledger's Request
+        if rec is not None:
+            job.request_id = rec.id                # X-Request-Id, a ULID
+            rec.model = self.served().get("id") or None
+            rec.jobs.append(job)
+            ctx["record"], ctx["progress"] = rec, rec.progress
         self.scheduler.submit(job)
         conn = getattr(_CONN, "sock", None)
         if conn is not None and not ctx.get("stream") and \
@@ -295,9 +320,11 @@ class App:
             job, reply = self.submit(run2[0], chat=True, extra=extra())
             if reply.ctx["stream"]:
                 try:
-                    first = reply.first(timeout=QUEUED_KEEPALIVE_S)
+                    first = reply.first(timeout=PROGRESS_S
+                                        if reply.ctx.get("progress")
+                                        else QUEUED_KEEPALIVE_S)
                 except queue.Empty:
-                    return "stream", _queued(job, reply)
+                    return "stream", _queued(job, reply, self.scheduler)
             else:
                 first = reply.first()
             if first[0] == "error":
@@ -380,19 +407,34 @@ class App:
 QUEUED_KEEPALIVE_S = 5.0
 
 
-def _queued(job, reply):
+def _queued(job, reply, sched=None):
     """SSE for a streamed request still waiting for its first event: a
-    keepalive comment every QUEUED_KEEPALIVE_S until it starts, then the
-    reply as usual. A refusal that arrives after the 200 is an error event.
-    A failed write (the client is gone) closes this generator, and the job
-    is cancelled: the scheduler drops a cancelled job from the queue."""
+    keepalive comment every QUEUED_KEEPALIVE_S until it starts (and, when
+    its stream carries them, a knurlogic.progress "queue" event with the
+    requests ahead of it every PROGRESS_S), then the reply as usual. A
+    refusal that arrives after the 200 is an error event. A failed write
+    (the client is gone) closes this generator, and the job is cancelled:
+    the scheduler drops a cancelled job from the queue."""
+    progress = bool(getattr(reply, "ctx", {}).get("progress"))
+    tick = PROGRESS_S if progress else QUEUED_KEEPALIVE_S
+    waited = QUEUED_KEEPALIVE_S      # a comment at once, then every 5 s
     try:
         while True:
+            if progress:
+                f = getattr(sched, "ahead", None)
+                try:
+                    ahead = f(job) if callable(f) else 0
+                except (TypeError, ValueError):
+                    ahead = 0
+                yield reply.progress("queue", ahead=ahead)
+            if waited >= QUEUED_KEEPALIVE_S:
+                waited = 0.0
+                yield b": keepalive queued\n\n"
             try:
-                first = reply.first(timeout=QUEUED_KEEPALIVE_S)
+                first = reply.first(timeout=tick)
                 break
             except queue.Empty:
-                yield b": keepalive queued\n\n"
+                waited += tick
         if first[0] == "error":
             yield O._data(O._status_of(first[1]).body())
             yield b"data: [DONE]\n\n"
@@ -507,29 +549,49 @@ class Handler(BaseHTTPRequestHandler):
                              "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers",
                              "Content-Type, Authorization, x-api-key, "
-                             "anthropic-version, X-Request-Id")
+                             "anthropic-version, X-Request-Id, X-Client, "
+                             "X-Client-Session, X-Client-Run, "
+                             "X-Client-Role")
         self.end_headers()
 
     def do_GET(self):
         self._guarded(self._get)
 
+    def send_response(self, code, message=None):
+        rec = getattr(self, "_record", None)
+        if rec is not None and rec.status is None:
+            rec.status = int(code)
+        super().send_response(code, message)
+
     def end_headers(self):
-        # X-Request-Id echoed on every answer to a request that carried
-        # one: success, stream or error alike (request_id.py)
-        rid = getattr(self, "_rid", None)
-        if rid:
-            self.send_header(RID.HEADER, rid)
+        # X-Request-Id on every answer to an inference request: success,
+        # stream or error alike -- the ULID of its ledger row (telemetry.py)
+        rec = getattr(self, "_record", None)
+        if rec is not None:
+            self.send_header(RID.HEADER, rec.id)
         super().end_headers()
 
     def do_POST(self):
         _CONN.sock, _CONN.done = self.connection, threading.Event()
-        self._rid = _CONN.rid = RID.of(self.headers)
+        route = INFERENCE.get(urlparse(self.path).path.rstrip("/"))
+        rec = None
+        if route is not None:
+            api, events = route
+            # the Messages stream always carries progress; an OpenAI shape
+            # only for a client that names itself; Ollama never (INFERENCE)
+            rec = T.Request(api, self.headers, progress=bool(
+                events or (events is not None
+                           and self.headers.get("X-Client"))))
+        self._record = _CONN.record = rec
         try:
             self._guarded(self._post)
         finally:
             _CONN.done.set()
             _CONN.sock = None
-            _CONN.rid = None
+            _CONN.record = None
+            self._record = None
+            if rec is not None:
+                rec.close()        # one ledger row, at the last byte
 
     def _guarded(self, fn) -> None:
         """Any error a route did not answer itself is a 500 with a body --
@@ -570,6 +632,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             return self._json(200, {"status": "ok", "server": "knurlogic",
                                     "model": self.app.scheduler.host.state})
+        if path == "/v1/usage":
+            return self._usage(parse_qs(u.query))
         if path == "/v1/residency" and self.app.residency:
             return self._json(200, self.app.residency())
         h = self.app.routes.get(path)
@@ -578,6 +642,36 @@ class Handler(BaseHTTPRequestHandler):
                                               "type": "not_found"}})
         body, ctype = h(parse_qs(u.query), self.app.requests)
         self._send(200, body, ctype)
+
+    def _usage(self, q: dict) -> None:
+        """GET /v1/usage?since=&until=&group=&key=: this machine's ledger
+        summed by one label (fleet.md, "Reading it back"). Until keys
+        exist, the loopback operator only."""
+        import ipaddress
+
+        from knurlogic.machine import ledger as L
+        try:
+            loop = ipaddress.ip_address(
+                self.client_address[0].split("%")[0]).is_loopback
+        except ValueError:
+            loop = False
+        if not loop:
+            return self._json(403, {"error": {
+                "message": "usage is read on this machine (loopback) only",
+                "type": "permission_error"}})
+
+        def one(name, default=None):
+            return (q.get(name) or [default])[0]
+        try:
+            since = float(one("since", 0))
+            until = float(one("until")) if one("until") else None
+            group = one("group", "model")
+            rows = L.ledger().summary(since, until, group, one("key"))
+        except ValueError as e:
+            return self._error(O.ApiError(400, str(e)))
+        return self._json(200, {"object": "usage", "since": since,
+                                "until": until, "group": group,
+                                "summary": rows})
 
     def _ollama_get(self, path: str) -> None:
         from knurlogic import __version__
