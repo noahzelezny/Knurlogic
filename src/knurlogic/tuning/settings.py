@@ -1089,6 +1089,8 @@ def check_knob(name: str, value, window: int = 0):
         return None
     if name in COMPACT_KNOBS:
         return check_compact_knob(name, value)
+    if name in PROMPT_CACHE_KNOBS:
+        return check_prompt_cache_knob(name, value)
     try:
         if name in ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC",
                     "KNURLOGIC_VISION"):
@@ -1251,6 +1253,56 @@ def check_compact_knob(name: str, value):
         return f"{name}={s!r}: not a number"
     if not lo <= v <= hi:
         return f"{name}={s}: between {lo:g} and {hi:g}"
+    return None
+
+
+# --- the prompt cache on disk (engine/serve/prompt_disk) --------------------
+# Knurlogic-wide, like compaction: one cache directory holds every model's
+# saved prompt caches, so one budget and one TTL cover them all. Read at
+# each save and load (machine/preferences over the environment).
+PROMPT_CACHE_KNOBS = {
+    # name: (default, values, unit, what, why)
+    "KNURLOGIC_PROMPT_CACHE_DISK": (
+        "on", ["on", "off"], "",
+        "save every prompt cache to disk when its model unloads and restore "
+        "it when that model loads again",
+        "on turns a reload's re-prefill into a disk read (a 110k-token "
+        "session took ~13.5 min to prefill at 136 tok/s; an SSD reads its "
+        "cache in seconds), at the cost of disk space up to the budget and "
+        "a few seconds at unload. Off writes and reads nothing."),
+    "KNURLOGIC_PROMPT_CACHE_DISK_GB": (
+        "", ["", "8", "16", "32", "64", "128"], "GiB",
+        "the most disk the saved prompt caches may take, every model "
+        "together; the least recently used go first",
+        "more keeps more sessions (and longer ones) restorable; less keeps "
+        "the disk free. Unset: 20% of the disk's free space plus what the "
+        "cache holds, at most 64 GiB."),
+    "KNURLOGIC_PROMPT_CACHE_TTL_H": (
+        "24", ["1", "6", "24", "72", "168"], "hours",
+        "how long a saved prompt cache nobody used is kept",
+        "longer keeps a session restorable after a longer break, holding "
+        "its disk meanwhile; shorter frees it sooner."),
+}
+
+
+def check_prompt_cache_knob(name: str, value):
+    """None when `value` is one prompt-cache knob `name` may take, else
+    why not."""
+    s = str(value if value is not None else "").strip()
+    if name == "KNURLOGIC_PROMPT_CACHE_DISK":
+        try:
+            on_off(s)
+            return None
+        except ValueError as e:
+            return f"{name}: {e}"
+    if name == "KNURLOGIC_PROMPT_CACHE_DISK_GB" and not s:
+        return None
+    try:
+        v = float(s)
+    except ValueError:
+        return f"{name}={s!r}: not a number"
+    if v < 0 or (name == "KNURLOGIC_PROMPT_CACHE_TTL_H" and v <= 0):
+        return f"{name}={s}: must be more than 0"
     return None
 
 

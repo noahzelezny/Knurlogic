@@ -290,6 +290,9 @@ class Job:
     received: float = 0.0
     #: where its wall time went, bucket by bucket (spans.py); None when off
     spans: Spans | None = None
+    #: the prompt cache entry it was served came from disk, unused since
+    #: its restore: {"tokens", "read_ms"} (usage.knurlogic.cache.disk)
+    disk: dict | None = None
     #: the request's id (the client's X-Request-Id, else a ULID), as usage.knurlogic.request_id
     request_id: str | None = None
 
@@ -362,6 +365,8 @@ class Command:
     started: threading.Event = field(default_factory=threading.Event)
     done: threading.Event = field(default_factory=threading.Event)
     error: str = ""
+    #: what a "save" did (engine/serve/prompt_disk.save's counts)
+    result: dict | None = None
 
 
 def _checkpoints(segs, n: int, hit: int) -> list[int]:
@@ -440,6 +445,11 @@ class Scheduler:
         self._kv: tuple | None = None
         self._samples: dict = {}
         self.cache = self._new_cache(prompt_cache_size)
+        #: prompt-cache entries restored from disk at this load and not yet
+        #: served: {tuple(tokens): {"tokens", "read_ms"}}
+        self._restored: dict = {}
+        if hasattr(host, "after_bind"):
+            host.after_bind = self._restore_disk
         self.stats = stats if stats is not None else {}
         self._jobs: queue.Queue = queue.Queue()
         self._commands: queue.Queue = queue.Queue()
@@ -550,6 +560,12 @@ class Scheduler:
 
     def unload(self, *, force: bool = True) -> Command:
         return self._command(Command("unload", None, force))
+
+    def save_prompt_cache(self) -> Command:
+        """Queue a save of the prompt cache to disk (prompt_disk.save), on
+        the scheduler thread between steps; on a ring every rank saves its
+        own part. Command.result has the counts."""
+        return self._command(Command("save", None))
 
     def share_live(self, applied: dict) -> None:
         """Knobs this server just applied live (engine/serve.apply_live):
@@ -672,6 +688,9 @@ class Scheduler:
                     self.tensor.stop()        # the other ranks leave too
                 except Exception:  # shutdown must finish whatever the ranks do (logged)
                     logger.exception("stopping the other ranks")
+            # kept across a restart (engine/serve/prompt_disk)
+            if self.ring_failed is None:
+                self._save_disk()
             self.cache = None
             # the model too: its lazily built arrays (rope tables, caches)
             # were made on this thread
@@ -748,6 +767,15 @@ class Scheduler:
                 c.started.set()
                 c.done.set()      # already served: nothing to fail or drop
                 continue
+            if c.kind == "save":
+                c.started.set()
+                try:
+                    c.result = self._save_disk()
+                    if self.tensor is not None:
+                        self.tensor.journal.add("save_cache")
+                finally:
+                    c.done.set()
+                continue
             if self.tensor is not None and (
                     c.kind == "unload"
                     or getattr(self.host, "model", None) is not None):
@@ -775,6 +803,11 @@ class Scheduler:
                         "the model was switched while this request was "
                         "running"))
                 self._close_executor()
+                # the model going: its prompt cache to disk, restored when
+                # it loads again (engine/serve/prompt_disk)
+                if getattr(self.host, "model", None) is not None:
+                    self._save_disk()
+                self._restored = {}
                 self.cache = self._new_cache(self.cache.lru.max_size)
                 # what was measured belongs to the model it was measured on
                 # (a 35B's slope admitting a 397B's prompt is the abort the
@@ -843,6 +876,52 @@ class Scheduler:
                 self._waiting.append(self._jobs.get_nowait())
             except queue.Empty:
                 return
+
+    # ------------------------------------------- the prompt cache on disk
+
+    def _save_disk(self) -> dict | None:
+        """The prompt cache to disk under the loaded model's key
+        (engine/serve/prompt_disk). Never raises: a save that fails is
+        logged and the unload goes on."""
+        if self.cache is None:
+            return None
+        from knurlogic.engine.serve import prompt_disk
+        try:
+            key = prompt_disk.host_key(self.host)
+            if key is None:
+                return None
+            return prompt_disk.save(self.cache.lru, key)
+        except Exception:  # never fails an unload or a stop (logged)
+            logger.exception("saving the prompt cache to disk failed")
+            return None
+
+    def _restore_disk(self) -> None:
+        """ModelHost.after_bind: what was saved for this model, into the
+        new prompt cache, before the warm-up. On a ring a collective (every
+        rank restores the same entries, or none)."""
+        from knurlogic.engine.serve import prompt_disk
+        try:
+            key = prompt_disk.host_key(self.host)
+        except Exception:  # a key that cannot be made is a miss (logged)
+            logger.exception("prompt cache: no key for the loaded model")
+            key = None
+        self._restored = prompt_disk.restore(
+            self.cache.lru, self.host.model_key, key,
+            max_bytes=self.cache_bytes,
+            link=self.tensor.link if self.tensor is not None else None)
+
+    def _disk_hit(self, job: Job, prompt: list, used: int) -> None:
+        """The entry fetch() handed `job` is one restored from disk: say so
+        in its usage (usage.knurlogic.cache.disk). Once the session's next
+        answer is cached, the entry it hits is that one, made in memory --
+        a memory hit."""
+        from knurlogic.engine.serve import prompt_disk
+        src = prompt_disk.source_of(self.cache.lru, self.host.model_key,
+                                    prompt, used)
+        d = self._restored.get(src) if src is not None else None
+        if d is not None:
+            job.disk = {"tokens": min(int(d["tokens"]), used),
+                        "read_ms": d["read_ms"]}
 
     def _new_cache(self, size: int):
         c = PromptCache(size)
@@ -1058,6 +1137,8 @@ class Scheduler:
                 sp.to("admit_memory")
             chunk = int(self._chunk_pick or self.prefill_step_size)
             cache, rest = self.cache.fetch(self.host.model_key, prompt)
+            if self._restored and len(rest) < len(prompt):
+                self._disk_hit(job, prompt, len(prompt) - len(rest))
             if sp is not None:
                 sp.to("cache_fetch")
             n = len(prompt) - len(rest)
@@ -1849,6 +1930,12 @@ class Scheduler:
             row.job.outbox.put(("delta", tail))
         from knurlogic.engine.serve import cache_report
         report = cache_report.of(row.job.request)
+        if report is not None:
+            d = row.job.disk or {}
+            used = int(report.get("used", 0) or 0)
+            report["disk"] = {"tokens": min(int(d.get("tokens", 0)), used),
+                              "read_ms": d.get("read_ms", 0.0)
+                              if d and used else 0.0}
         usage = row.text.usage(report)
         done = time.perf_counter()
         timing = _timing(

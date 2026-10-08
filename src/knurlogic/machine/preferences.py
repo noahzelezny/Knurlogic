@@ -20,12 +20,14 @@ from knurlogic.tuning.settings import (
     COMPACT_KNOBS,
     MTP_MODE,
     PRESET_ROW_NAMES,
+    PROMPT_CACHE_KNOBS,
     check_knob,
 )
 
 CROSS_CHIP = "KNURLOGIC_CROSS_CHIP"
 #: every name kept here
-NAMES = (CROSS_CHIP,) + PRESET_ROW_NAMES + tuple(COMPACT_KNOBS)
+NAMES = (CROSS_CHIP,) + PRESET_ROW_NAMES + tuple(COMPACT_KNOBS) + \
+    tuple(PROMPT_CACHE_KNOBS)
 
 
 def path() -> Path:
@@ -115,6 +117,16 @@ def launch_sets(sets: dict | None) -> dict:
             out.setdefault("KNURLOGIC_MTP_DYNAMIC",
                            "on" if mode == "dynamic" else "off")
     return out
+
+
+def prompt_cache_env(env=None) -> dict:
+    """The environment the disk prompt cache reads
+    (engine/serve/prompt_disk): `env` (os.environ by default) with the
+    saved knurlogic-wide values over it."""
+    import os
+    base = dict(os.environ if env is None else env)
+    base.update({k: v for k, v in get().items() if k in PROMPT_CACHE_KNOBS})
+    return base
 
 
 def compaction_env(env=None) -> dict:

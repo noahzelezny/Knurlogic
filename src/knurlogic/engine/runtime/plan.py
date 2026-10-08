@@ -26,7 +26,7 @@ CONTROL_LEN = 5
 OVER, STEP, LENGTH, ACTIVE, PEAK = range(CONTROL_LEN)
 
 OPS = ("admit", "remove", "chunk", "insert", "pop", "reset", "stop", "park",
-       "set")
+       "set", "save_cache")
 #: admit's `chunk` is the prefill chunk rank 0 fitted the row at (memory:
 #: scheduler._make_room); `chunk` (uid, chunk) refits a row not yet
 #: prefilled (scheduler._fit_next). Ranks prefilling one row in different
@@ -42,6 +42,7 @@ _FIELDS = {
     "stop": (),
     "park": (),
     "set": ("name", "value"),
+    "save_cache": (),
 }
 #: the live knobs (engine/serve/load.LIVE_KNOBS) that act on a rank's own
 #: engine, so a change on rank 0 must reach every rank

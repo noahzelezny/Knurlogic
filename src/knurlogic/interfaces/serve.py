@@ -607,11 +607,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # -- and they are knurlogic-wide (machine/preferences): a change
         # here is saved for every server on this machine, not this one's
         from knurlogic.machine import preferences
-        from knurlogic.tuning.settings import COMPACT_KNOBS
-        cur = preferences.compaction_env()
+        from knurlogic.tuning.settings import COMPACT_KNOBS, PROMPT_CACHE_KNOBS
+        cur = preferences.compaction_env(preferences.prompt_cache_env())
+        wide = {**COMPACT_KNOBS, **PROMPT_CACHE_KNOBS}
         compact = {k: str(v) for k, v in want.items()
-                   if k in COMPACT_KNOBS
-                   and str(v) != cur.get(k, COMPACT_KNOBS[k][0])}
+                   if k in wide and str(v) != cur.get(k, wide[k][0])}
         want = {k: str(v) for k, v in want.items()
                 if k in engine.LIVE_KNOBS and str(v) != live_env.get(k)}
         why = documents.refuse_sets(a, {**want, **compact})

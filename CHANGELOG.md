@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+* The prompt cache is kept on disk (docs/design/prompt-cache-disk.md).
+  When a model unloads or its server stops, every prompt-cache entry is
+  written to `~/.cache/knurlogic/prompt-cache/<key>/` (XDG_CACHE_HOME
+  honoured), one safetensors file per entry, atomically; when the same
+  model loads again they are read back into the in-memory prompt cache
+  before the warm-up, and its own prefix rule serves any prompt that
+  starts with a restored entry's tokens. `POST /v1/prompt-cache/save`
+  (loopback only) saves now. The key is the artifact's identity (weights,
+  quant, shipped model.py) plus the KV bits, the drafting head, long-
+  context rope, per-chip rounding and, on a split, the rank, world and
+  layer runs; another key is a miss, never a load. On a ring each rank
+  saves and restores its own part, and restores only when every rank has
+  the same entries (all or none). Kept across unloads and restarts until
+  a total budget (least recently used first) or an idle TTL removes them:
+  `KNURLOGIC_PROMPT_CACHE_DISK` (on), `KNURLOGIC_PROMPT_CACHE_DISK_GB`
+  (default 20% of the disk's free space plus what the cache holds, at most
+  64 GiB), `KNURLOGIC_PROMPT_CACHE_TTL_H` (24), knurlogic-wide settings.
+  A corrupt or mismatched file is deleted and is a miss; an entry holding
+  something the format cannot carry (an image key) is skipped and logged.
+* `usage.knurlogic.cache.disk` {tokens, read_ms}: the cached tokens that
+  came from an entry restored from disk, and its read time -- so a client
+  tells a disk hit (disk.tokens > 0), a memory hit (used > 0, disk 0) and
+  a cold prefill (used 0) apart. The ledger records it as `disk_tokens`
+  (a column added to an existing ledger).
 * The telemetry contract (docs/design/telemetry.md, `telemetry: 1`),
   server side. Every inference request -- chat/completions, completions,
   /v1/messages, /v1/responses, Ollama -- gets a ULID, answered as

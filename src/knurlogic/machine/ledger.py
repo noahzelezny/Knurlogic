@@ -35,7 +35,8 @@ LABELS = {"X-Client": ("client", 128), "X-Client-Session": ("session", 128),
 COLUMNS = ("id", "ts_start", "ts_end", "machine", "model", "api", "key_id",
            "client", "session", "run", "role", "prompt_tokens",
            "cached_tokens", "output_tokens", "queue_ms", "prefill_ms",
-           "prefill_tps", "decode_ms", "decode_tps", "finish", "status")
+           "prefill_tps", "decode_ms", "decode_tps", "finish", "status",
+           "disk_tokens")
 GROUPS = ("key", "model", "client", "session", "run", "role", "api")
 _GROUP_COL = {"key": "key_id"}
 
@@ -46,7 +47,8 @@ CREATE TABLE IF NOT EXISTS requests (
   client TEXT, session TEXT, run TEXT, role TEXT,
   prompt_tokens INTEGER, cached_tokens INTEGER, output_tokens INTEGER,
   queue_ms REAL, prefill_ms REAL, prefill_tps REAL,
-  decode_ms REAL, decode_tps REAL, finish TEXT, status INTEGER);
+  decode_ms REAL, decode_tps REAL, finish TEXT, status INTEGER,
+  disk_tokens INTEGER);
 CREATE INDEX IF NOT EXISTS requests_ts ON requests (ts_start);
 CREATE INDEX IF NOT EXISTS requests_key ON requests (key_id, ts_start);
 CREATE INDEX IF NOT EXISTS requests_model ON requests (model, ts_start);
@@ -114,6 +116,11 @@ class Ledger:
             db.execute("PRAGMA auto_vacuum=INCREMENTAL")   # before tables
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(_SCHEMA)
+            # columns added since a ledger was made: added to it
+            have = {r[1] for r in db.execute("PRAGMA table_info(requests)")}
+            if "disk_tokens" not in have:
+                db.execute("ALTER TABLE requests ADD COLUMN disk_tokens "
+                           "INTEGER")
             self._db = db
             self._prune(db)
         return self._db
