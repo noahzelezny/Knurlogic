@@ -842,8 +842,12 @@ async function runTurn(){
   try{
     const url=c.where ? '/chat?where='+encodeURIComponent(c.where)
                       : '/v1/chat/completions';
+    // X-Client-Session: this chat's id -- the model server owns its
+    // prompt-cache entries by it, so they are saved to disk (an entry with
+    // no session is never saved) and can be dropped by chat.
     const r=await fetch(url,{method:'POST',
-      headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),
+      headers:{'Content-Type':'application/json',
+               'X-Client-Session':String(c.id)}, body:JSON.stringify(body),
       signal:ABORTC.signal});
     if(!r.ok||!r.body) throw new Error(await httpWhy(r));
     for await (const ev of events(r.body)){
