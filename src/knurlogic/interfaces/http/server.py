@@ -799,6 +799,20 @@ class Handler(BaseHTTPRequestHandler):
         if r is not None:
             self._json(200, {"object": "prompt_cache.pin", **r})
 
+    def _park_prompt_cache(self, raw: bytes) -> None:
+        """POST /v1/prompt-cache/park {"session"}: that session's entries
+        saved to disk (what is not there yet), then freed from memory; its
+        next request reads them back. The loopback operator only."""
+        if self._refused_remote("parked"):
+            return
+        got = self._session_body(raw)
+        if got is None:
+            return
+        r = self._cache_command(
+            self.app.scheduler.park_prompt_cache(got[0]), "park")
+        if r is not None:
+            self._json(200, {"object": "prompt_cache.park", **r})
+
     def _list_prompt_cache(self) -> None:
         """GET /v1/prompt-cache: every entry, in memory (this model's, read
         between steps) and on disk (every model's, from file headers). One
@@ -882,6 +896,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._drop_prompt_cache(raw)
         if path == "/v1/prompt-cache/pin":
             return self._pin_prompt_cache(raw)
+        if path == "/v1/prompt-cache/park":
+            return self._park_prompt_cache(raw)
         if path == "/v1/ensure" and self.app.ensure:
             try:
                 body = json.loads(raw or b"{}")
