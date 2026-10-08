@@ -440,7 +440,11 @@ def _stop(port: int) -> dict:
         return {"error": f"the server on port {port} (pid {pid}) is already "
                          f"gone; record cleared", "log": rec.get("log")}
     os.kill(pid, signal.SIGTERM)
-    for _ in range(40):
+    # it saves its prompt cache to disk on the way out (seconds for tens of
+    # GiB): killed sooner, what it had not written is lost
+    from knurlogic.interfaces.http import STOP_SAVE_S
+    end = time.monotonic() + STOP_SAVE_S + 5.0
+    while time.monotonic() < end:
         time.sleep(0.25)
         if not is_our_server(pid):
             break
