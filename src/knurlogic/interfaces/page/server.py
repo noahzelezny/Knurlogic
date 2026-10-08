@@ -440,8 +440,8 @@ def _stop(port: int) -> dict:
         return {"error": f"the server on port {port} (pid {pid}) is already "
                          f"gone; record cleared", "log": rec.get("log")}
     os.kill(pid, signal.SIGTERM)
-    # it saves its prompt cache to disk on the way out (seconds for tens of
-    # GiB): killed sooner, what it had not written is lost
+    # it finishes the step it is in and its scheduler's cleanup on the way
+    # out: the same ceiling as its own (http.STOP_SAVE_S)
     from knurlogic.interfaces.http import STOP_SAVE_S
     end = time.monotonic() + STOP_SAVE_S + 5.0
     while time.monotonic() < end:
