@@ -131,6 +131,12 @@ nav a.relnote[hidden]{display:none}
 .card .n{font-size:13.5px;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
 .card .s{font-size:12px;color:var(--faint);letter-spacing:.04em;margin-top:3px}
+/* the size line changes every refresh (resident GiB, swap): one line of
+   fixed-width digits, so the card keeps its height and the text its place */
+.card .s.sz{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-variant-numeric:tabular-nums}
+.cardhd .iid{font-size:12px;color:var(--faint);letter-spacing:.04em;
+  white-space:nowrap}
 .card.offered .n{color:var(--dim)}
 #resident .machine{color:var(--faint);margin:10px 0 5px}
 #resident .machine:first-child{margin-top:0}

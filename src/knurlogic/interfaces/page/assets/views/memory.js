@@ -174,20 +174,20 @@ async function loadResident(){
           : r.cluster&&r.cluster.phase&&r.cluster.phase!=='ready' ? esc(r.cluster.phase)
           : r.requests&&(r.requests.in_flight||r.requests.pending) ? 'running'
           : r.requests&&r.requests.memory_short ? 'no memory' : 'ready'}</span>
+        ${r.instance?`<span class="iid" title="instance id">id ${esc(r.instance.slice(0,6))}</span>`:''}
         <span class="grow"></span>
         ${r.can_unload?`<button class="mini danger" data-i="${i}"
           >Unload</button>`:''}
       </div>
       <div class="n">${esc(r.name)}</div>
-      <div class="s">${[
+      <div class="s sz">${[
         r.bytes_resident?gb(r.bytes_resident)+(r.swapped_bytes>0
           ?` · ${gb(r.swapped_bytes)} in swap`:'')
           :(r.state==='offered'?'':'size not reported'),
         r.cluster&&r.cluster.split?`${r.cluster.split} over ${
           (r.cluster.link==='rdma'||r.cluster.link==='jaccl')?'RDMA':'TCP/IP'}${
           r.cluster.phase&&r.cluster.phase!=='ready'?' · '+r.cluster.phase:''}`:'',
-        r.detail, r.state==='loaded'?'':r.state,
-        r.instance?`id ${r.instance.slice(0,6)}`:'']
+        r.detail, r.state==='loaded'?'':r.state]
         .filter(Boolean).filter((v,i,x)=>x.indexOf(v)===i)
         .map(esc).join(' · ')}</div>
       <div class="s">on ${esc(on(r))}</div>
