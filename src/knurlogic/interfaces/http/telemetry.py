@@ -3,14 +3,18 @@
 byte into one ledger row (machine/ledger.py), and the SSE
 `knurlogic.progress` event.
 
-A Request's id is a ULID, minted here for every inference request: it is
-the X-Request-Id answered, usage.knurlogic.request_id, and the row's id."""
+A Request's id is the client's X-Request-Id when it sent a valid one
+(request_id.valid: 1..128 printable ASCII), echoed exactly; otherwise a
+ULID minted here. Either way it is the X-Request-Id answered,
+usage.knurlogic.request_id, and the row's id."""
 from __future__ import annotations
 
 import json
 import time
 
 from knurlogic.machine import ledger as L
+
+from . import request_id as RID
 
 VERSION = 1
 EVENT = "knurlogic.progress"
@@ -32,7 +36,7 @@ class Request:
     """One HTTP inference request, as the ledger records it."""
 
     def __init__(self, api: str, headers, *, progress: bool = False):
-        self.id = L.ulid()
+        self.id = RID.of(headers) or L.ulid()
         self.api = api
         self.ts_start = time.time()
         self.labels = L.labels(headers)

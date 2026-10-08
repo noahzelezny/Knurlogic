@@ -1,6 +1,6 @@
 """The telemetry contract, server side (docs/design/telemetry.md,
 `telemetry: 1`; the ledger per docs/design/fleet.md): X-Client-* labels
-stored with each request, X-Request-Id a ULID naming its ledger row,
+stored with each request, X-Request-Id (the client's, else a ULID) naming its ledger row,
 usage.knurlogic.{request_id, timing} on every API, the SSE
 knurlogic.progress event, and /v1/models advertising the version.
 
@@ -147,6 +147,17 @@ def test_every_api_names_its_ledger_row(server, api):
     assert row["cached_tokens"] == 256
     assert row["prefill_tps"] == 1920.0 and row["queue_ms"] == 2.0
     assert row["finish"] == "stop" and row["status"] == 200
+
+
+@pytest.mark.parametrize("api", sorted(APIS))
+def test_a_client_request_id_is_echoed_and_names_the_row(server, api):
+    url, _ = server
+    path, body, usage_of = APIS[api]
+    mine = f"client-{api}-7"
+    code, rid, raw = _post(url + path, body, {"X-Request-Id": mine})
+    assert code == 200 and rid == mine, raw
+    assert usage_of(json.loads(raw))["knurlogic"]["request_id"] == mine
+    assert _row(mine)["api"] == api
 
 
 def _final_usage(api, raw):

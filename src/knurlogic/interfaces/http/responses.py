@@ -134,6 +134,12 @@ def to_chat(req: dict) -> dict:
             or {"type": "object", "properties": {}}}})
     if tools:
         body["tools"] = tools
+    tc = req.get("tool_choice")
+    if isinstance(tc, dict) and tc.get("type") == "function" \
+            and "function" not in tc:
+        tc = {"type": "function", "function": {"name": tc.get("name")}}
+    if tc is not None:
+        body["tool_choice"] = tc      # build_job refuses what it is not
     return body
 
 
@@ -184,7 +190,7 @@ def _envelope(rid: str, model: str, created: int, req: dict,
             "temperature": req.get("temperature"),
             "top_p": req.get("top_p"),
             "max_output_tokens": req.get("max_output_tokens"),
-            "tools": req.get("tools") or [], "tool_choice": "auto",
+            "tools": req.get("tools") or [], "tool_choice": req.get("tool_choice") or "auto",
             "usage": usage}
 
 

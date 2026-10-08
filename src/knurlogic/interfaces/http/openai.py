@@ -80,6 +80,20 @@ def _non_thinking(body: dict, nt: dict, sampling: dict, penalties: dict,
     ctx["sampling"]["mode"] = "non-thinking"
 
 
+def _tool_choice(tc):
+    """OpenAI chat's tool_choice, checked: None, "auto", "none",
+    "required", or {"type": "function", "function": {"name": str}}."""
+    if tc is None or tc in ("auto", "none", "required"):
+        return tc
+    if isinstance(tc, dict) and tc.get("type") == "function" \
+            and isinstance((tc.get("function") or {}).get("name"), str):
+        return {"type": "function",
+                "function": {"name": tc["function"]["name"]}}
+    raise ApiError(400, 'tool_choice must be "auto", "none", "required" or '
+                        '{"type": "function", "function": {"name": ...}}',
+                   param="tool_choice")
+
+
 def build_job(body: dict, *, chat: bool, translate: Callable = None,
               has_vision: Callable[[], bool] = lambda: False,
               sampling_defaults: dict | None = None) -> tuple:
@@ -198,7 +212,8 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
             if non_thinking and (ctx["thinking"] or {}).get("applied") == "off":
                 _non_thinking(body, non_thinking, sampling, penalties, ctx)
         req = P.ChatRequest("chat", "", msgs, body.get("tools") or None,
-                            body.get("role_mapping"))
+                            body.get("role_mapping"),
+                            _tool_choice(body.get("tool_choice")))
         args = P.PromptArgs(kwargs)
     else:
         prompt = body.get("prompt")

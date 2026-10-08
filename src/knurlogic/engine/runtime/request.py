@@ -128,7 +128,7 @@ class Request:
     def __init__(self, detokenizer, *, sequences: dict[tuple, str],
                  stops: Sequence[str] = (), tool_parser: Callable = None,
                  tools: Any = None, logprobs: bool = False,
-                 prompt_tokens: int = 0):
+                 prompt_tokens: int = 0, no_tools: bool = False):
         self.detok = detokenizer
         self.detok.reset()
         self.seqs = dict(sequences)
@@ -144,6 +144,8 @@ class Request:
         self.stop_hold = max((len(s) for s in self.stops), default=1) - 1
         self.tool_parser = tool_parser
         self.tools = tools
+        #: tool_choice "none": a tool call the model makes is dropped
+        self.no_tools = no_tools
         self.want_logprobs = logprobs
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = 0
@@ -242,7 +244,7 @@ class Request:
 
     def _close_tool(self, out: Delta) -> None:
         text, self._tool_text = self._tool_text, ""
-        if not text:
+        if not text or self.no_tools:
             return
         self.made_tool_call = True
         out.tool_calls += self._parse_tool(text)

@@ -197,6 +197,15 @@ def to_openai(req: dict) -> dict:
                          "parameters": t.get("input_schema")
                          or {"type": "object", "properties": {}}},
         } for t in req["tools"]]
+    tc = req.get("tool_choice")
+    if isinstance(tc, dict):
+        kind = tc.get("type")
+        body["tool_choice"] = (
+            {"type": "function", "function": {"name": tc.get("name")}}
+            if kind == "tool" else
+            {"auto": "auto", "any": "required", "none": "none"}.get(kind, tc))
+    elif tc is not None:
+        body["tool_choice"] = tc      # build_job refuses what it is not
     return body
 
 
