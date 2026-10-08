@@ -1807,7 +1807,12 @@ PEEK_PATHS = ("/settings.json", "/v1/models", "/models.json")
 PEEK_KEYS = ("tune", "working_set_gib", "wired_gib")
 #: keys passed along for one path only: `rescan=1` reads a peer's model
 #: folders again -- its picker was opened, never a poll
-PEEK_PATH_KEYS = {"/models.json": ("rescan",)}
+PEEK_PATH_KEYS = {"/models.json": ("rescan",),
+                  # a peer's preview of a model it holds, named by identity
+                  # (resolved there, from its own stores): its room is
+                  # counted against ITS memory free now
+                  "/settings.json": ("identity", "name", "kv_bits",
+                                     "long_context")}
 
 
 def _peek_keys(path: str) -> tuple:

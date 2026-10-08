@@ -399,6 +399,19 @@ def machine_settings():
         # model is up they are facts, not settings. The only moment they can
         # be chosen is the moment being prepared here.
         art = _one(q, "artifact")
+        if not art and _one(q, "identity"):
+            # a peer page's picker asks by identity (never by path): this
+            # machine's own copy, from its own model stores only
+            from knurlogic.machine.artifact import (AmbiguousIdentity,
+                                                    resolve_identity)
+            try:
+                art = resolve_identity(_one(q, "identity"),
+                                       name=str(_one(q, "name") or ""))
+            except AmbiguousIdentity as e:
+                return {"knobs": [], "error": str(e)}
+            if not art:
+                return {"knobs": [], "error": "this machine does not have "
+                                              "that model"}
         if art:
             try:
                 return _preview(art, S.preset_or(_one(q, "tune"), "default"),
