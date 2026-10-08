@@ -310,7 +310,8 @@ def _header(f: Path) -> dict | None:
 
 def save_entry(d: Path, key: dict, tokens, cache: list, kind: str,
                gen: int, seq: int, owner: dict | None = None,
-               pinned: bool = False, model: str | None = None) -> Path:
+               pinned: bool = False, model: str | None = None,
+               shared: bool = False) -> Path:
     """Write one entry atomically; raises Unserializable for one the format
     cannot carry (nothing is written). `owner`: {session, role, run} of the
     request that made it; `model`: the served model's name (the
@@ -324,7 +325,8 @@ def save_entry(d: Path, key: dict, tokens, cache: list, kind: str,
             "n_tokens": len(toks), "tokens_hash": tokens_hash(toks),
             "kind": kind, "nbytes": nbytes, "tree": tree,
             "owner": _owner_of(owner), "pinned": bool(pinned),
-            "saved_at": round(time.time(), 3), "model": model}
+            "saved_at": round(time.time(), 3), "model": model,
+            "shared": bool(shared)}
     d.mkdir(parents=True, exist_ok=True)
     final = d / f"{gen:08d}-{seq:06d}-{tokens_hash(toks)}{SUFFIX}"
     tmp = d / f".tmp-{os.getpid()}-{final.stem}{SUFFIX}"
@@ -609,7 +611,7 @@ def _lru_entries(lru) -> list:
 
 def save(lru, key: dict, base: Path | None = None, *, owners=None,
          only_new: bool = False, model: str | None = None,
-         select=None, prefill_tps=None) -> dict:
+         select=None, prefill_tps=None, shared=None) -> dict:
     """Write the entries of `lru` (the scheduler's mlx-lm LRUPromptCache)
     under `key`. Returns counts; never raises for one entry.
 
@@ -626,7 +628,9 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
     nothing else: cheap, and a restore still inserts oldest save first.
     `select`: the token tuples to consider (None: all). `prefill_tps`: the
     measured prefill rate; an entry quicker to recompute than to read back
-    is not written (counted "not_worth")."""
+    is not written (counted "not_worth"). `shared`: token tuples of the
+    shared system-prompt checkpoints (nobody's), saved with `owners` too:
+    marked "shared" in their header, restored as shared."""
     t0 = time.monotonic()
     stats = {"saved": 0, "kept": 0, "skipped": 0, "bytes": 0, "why": [],
              "entries": 0, "not_worth": 0}
@@ -639,7 +643,9 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
     seq = 0
     for _m, tokens, e in _lru_entries(lru):
         own = owners.get(tuple(tokens)) if owners is not None else None
-        if owners is not None and not (own and own.get("session")):
+        common = shared is not None and tuple(tokens) in shared
+        if owners is not None and not (own and own.get("session")) \
+                and not common:
             continue
         if select is not None and tuple(tokens) not in select:
             continue
@@ -673,7 +679,7 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
             f = save_entry(d, key, tokens, e.prompt_cache, e.cache_type,
                            gen, seq, owner=own,
                            pinned=bool(own and own.get("pinned")),
-                           model=model)
+                           model=model, shared=common)
             seq += 1
             if old is not None and old != f:
                 try:
@@ -801,7 +807,7 @@ def read(key: dict, files) -> list:
         out.append((Path(f), toks, cache, kind,
                     round((time.perf_counter() - t0) * 1000, 1),
                     {k: head.get(k) for k in ("owner", "pinned",
-                                              "saved_at")}))
+                                              "saved_at", "shared")}))
     return out
 
 
@@ -819,7 +825,8 @@ def insert(lru, model_key, got: list) -> dict:
         m = meta[0] if meta else {}
         out[tuple(toks)] = {"tokens": len(toks), "read_ms": ms,
                             "file": str(f), "owner": m.get("owner"),
-                            "saved_at": m.get("saved_at")}
+                            "saved_at": m.get("saved_at"),
+                            "shared": bool(m.get("shared"))}
     if out:
         logger.info("prompt cache: %d entr%s restored from disk (%d tokens, "
                     "%.1fs)", len(out), "y" if len(out) == 1 else "ies",
@@ -847,12 +854,16 @@ def restore(lru, model_key, key: dict | None, *, max_bytes=None,
 
 
 def adopt(owners: dict, pinned: set, restored: dict,
-          base: Path | None = None) -> None:
+          base: Path | None = None, shared: set | None = None) -> None:
     """Restored entries' owners into the prompt cache's side map (and the
     pinned sessions into its sticky set), as the files said: an entry read
-    back is on disk already."""
+    back is on disk already. A shared system-prompt checkpoint goes back
+    into `shared`, so the next save keeps it."""
     on = {s for s, v in pins(base).items() if v}
     for t, v in restored.items():
+        if v.get("shared") and shared is not None:
+            shared.add(t)
+            continue
         o = v.get("owner") or {}
         if not o.get("session"):
             continue

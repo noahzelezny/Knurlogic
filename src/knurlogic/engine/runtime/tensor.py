@@ -930,7 +930,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     disk_key, restored = disk if disk is not None else (None, [])
     if restored:
         prompt_disk.adopt(cache.owners, cache.pinned, prompt_disk.insert(
-            cache.lru, model_key, restored))
+            cache.lru, model_key, restored), shared=cache.shared)
 
     def save_disk(only_new: bool = False, select=None):
         if disk_key is None:
@@ -938,6 +938,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
         try:
             cache.live()                    # prunes the side map
             prompt_disk.save(cache.lru, disk_key, owners=cache.owners,
+                             shared=cache.shared,
                              only_new=only_new, select=select)
         except Exception:  # never stops a rank (logged)
             logger.exception("rank %d: saving the prompt cache failed",
