@@ -126,6 +126,22 @@ def test_models_lists_every_routable_model(cluster):
         "glm-peer": base_b, "qwen-local": base_a}
 
 
+def test_models_name_the_machine_each_runs_on(cluster, monkeypatch):
+    """A client (the harness) tells which Mac serves a model from /v1/models
+    alone, without the page's loaded.json."""
+    from knurlogic.machine import identity as I
+    page, base_a, base_b, _ = cluster
+    monkeypatch.setattr(I, "identity", lambda: {"name": "Studio"})
+    monkeypatch.setitem(page_server._PEER_TARGETS, base_b,
+                        {"machine": "Laptop B"})
+    # the fake peer answers directly, not through a peer page's relay
+    monkeypatch.setattr(page_server, "upstream", lambda b, p: b + p)
+    with urllib.request.urlopen(page + "/v1/models", timeout=5) as r:
+        doc = json.loads(r.read())
+    assert {m["id"]: m["machine"] for m in doc["data"]} == {
+        "glm-peer": "Laptop B", "qwen-local": "Studio"}
+
+
 def test_models_carry_each_servers_own_entry(cluster):
     """The page's chat reads a model's recommended sampling and thinking
     levels from /v1/models; the router listed only ids, so a cluster job

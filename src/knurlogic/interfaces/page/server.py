@@ -1520,12 +1520,19 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
 def route_models_document(fetch=None) -> dict:
     """GET /v1/models on the page: every model its router can reach, each
     with its server's own entry (sampling_defaults, thinking,
-    context_length: what the page's chat reads)."""
+    context_length: what the page's chat reads), and the machine that
+    answers for it (a split model's rank 0)."""
+    from knurlogic.machine.identity import identity
     table = routable(fetch)
     docs = _ROUTES.get("docs") or {}
+    here = identity().get("name")
+
+    def machine(b):
+        t = _PEER_TARGETS.get(b.rstrip("/"))
+        return (t or {}).get("machine") if t is not None else here
     return {"object": "list", "data": [
         dict(docs.get(m) or {}, id=m, object="model", owned_by="knurlogic",
-             server=b)
+             server=b, machine=machine(b))
         for m, b in sorted(table.items())]}
 
 
