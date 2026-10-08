@@ -35,6 +35,14 @@ Settings (read at use, so live):
                                   space plus what the cache holds, at most
                                   64 GiB)
   KNURLOGIC_PROMPT_CACHE_TTL_H    hours an entry nobody used is kept (24)
+
+Ownership: an entry belongs to the client session that made it
+(X-Client-Session; telemetry.md). Its header carries the owner {session,
+role, run}, `pinned` and `saved_at`. Only entries with a session are saved.
+A pinned session's files are never swept (TTL nor budget): only an
+explicit drop removes them. Pins live in one `pins.json` at the root
+({session: true|false}), the truth for every key directory; a header's
+`pinned` is what it was when the file was written.
 """
 from __future__ import annotations
 
@@ -59,6 +67,12 @@ DEFAULT_FREE_SHARE = 0.20
 ENV_ON = "KNURLOGIC_PROMPT_CACHE_DISK"
 ENV_GB = "KNURLOGIC_PROMPT_CACHE_DISK_GB"
 ENV_TTL = "KNURLOGIC_PROMPT_CACHE_TTL_H"
+PINS = "pins.json"
+#: bytes/s an entry is read back at, for the break-even rule (an entry
+#: whose recompute -- tokens / the measured prefill rate -- is quicker than
+#: its read is not written). Measured on the M3 Ultra: 70-128 MB read in
+#: ~24 ms (and ~3 GB/s written); 3 GB/s is the conservative read side.
+READ_BPS = 3e9
 SUFFIX = ".safetensors"
 _NAME = re.compile(r"^(\d{8})-(\d{6})-([0-9a-f]{24})\.safetensors$")
 #: a temp file this old is a dead writer's
@@ -98,6 +112,15 @@ def ttl_s() -> float:
     except ValueError:
         h = DEFAULT_TTL_H
     return max(h, 0.0) * 3600.0
+
+
+def not_worth(n_tokens: int, nbytes: int, prefill_tps) -> bool:
+    """Recomputing the entry (n_tokens at the measured prefill rate) is
+    quicker than reading it back (nbytes at READ_BPS). No rate measured
+    yet: worth saving."""
+    if not prefill_tps or prefill_tps <= 0:
+        return False
+    return n_tokens / float(prefill_tps) < nbytes / READ_BPS
 
 
 def budget_bytes(base: Path | None = None) -> int:
@@ -286,9 +309,12 @@ def _header(f: Path) -> dict | None:
 
 
 def save_entry(d: Path, key: dict, tokens, cache: list, kind: str,
-               gen: int, seq: int) -> Path:
+               gen: int, seq: int, owner: dict | None = None,
+               pinned: bool = False, model: str | None = None) -> Path:
     """Write one entry atomically; raises Unserializable for one the format
-    cannot carry (nothing is written)."""
+    cannot carry (nothing is written). `owner`: {session, role, run} of the
+    request that made it; `model`: the served model's name (the
+    registry's)."""
     import mlx.core as mx
     toks = [int(t) for t in tokens]
     arrays, tree = encode_entry(cache)
@@ -296,7 +322,9 @@ def save_entry(d: Path, key: dict, tokens, cache: list, kind: str,
     arrays["__tokens__"] = mx.array(toks, dtype=mx.int32)
     meta = {"format": FORMAT, "key": key, "key_id": key_id(key),
             "n_tokens": len(toks), "tokens_hash": tokens_hash(toks),
-            "kind": kind, "nbytes": nbytes, "tree": tree}
+            "kind": kind, "nbytes": nbytes, "tree": tree,
+            "owner": _owner_of(owner), "pinned": bool(pinned),
+            "saved_at": round(time.time(), 3), "model": model}
     d.mkdir(parents=True, exist_ok=True)
     final = d / f"{gen:08d}-{seq:06d}-{tokens_hash(toks)}{SUFFIX}"
     tmp = d / f".tmp-{os.getpid()}-{final.stem}{SUFFIX}"
@@ -308,6 +336,33 @@ def save_entry(d: Path, key: dict, tokens, cache: list, kind: str,
         if tmp.exists():
             tmp.unlink()
     return final
+
+
+def _owner_of(meta) -> dict | None:
+    """{session, role, run} of an owner record, or None for no session."""
+    if not meta or not meta.get("session"):
+        return None
+    return {k: meta.get(k) for k in ("session", "role", "run")}
+
+
+def tokens_of(f: Path) -> list | None:
+    """An entry file's tokens, read from its `__tokens__` bytes alone (the
+    header says where): no other array is read."""
+    try:
+        with open(f, "rb") as fh:
+            (n,) = struct.unpack("<Q", fh.read(8))
+            if n <= 0 or n > (256 << 20):
+                return None
+            h = json.loads(fh.read(n))
+            t = h["__tokens__"]
+            if t.get("dtype") != "I32":
+                return None
+            a, b = t["data_offsets"]
+            fh.seek(8 + n + a)
+            raw = fh.read(b - a)
+        return list(struct.unpack(f"<{len(raw) // 4}i", raw))
+    except (OSError, ValueError, KeyError, struct.error, TypeError):
+        return None
 
 
 def load_entry(f: Path, key: dict):
@@ -379,15 +434,68 @@ def entries(d: Path) -> list:
     return sorted(out)
 
 
+# ----------------------------------------------------------------- pins
+
+def pins(base: Path | None = None) -> dict:
+    """{session: pinned} from the root's pins.json ({} when none)."""
+    try:
+        got = json.loads(((base or root()) / PINS).read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(got, dict):
+        return {}
+    return {str(k): bool(v) for k, v in got.items()}
+
+
+def set_pin(session: str, pinned: bool | None,
+            base: Path | None = None) -> None:
+    """Pin or unpin a session's files (None: forget it, as a drop does).
+    Written atomically; one small file for every key directory, so a pin
+    never rewrites an entry file."""
+    base = base or root()
+    p = pins(base)
+    if pinned is None:
+        if session not in p:
+            return
+        p.pop(session)
+    elif p.get(session) is bool(pinned):
+        return
+    else:
+        p[session] = bool(pinned)
+    base.mkdir(parents=True, exist_ok=True)
+    tmp = base / f".tmp-{os.getpid()}-{PINS}"
+    tmp.write_text(json.dumps(p, indent=1, sort_keys=True))
+    os.replace(tmp, base / PINS)
+
+
+def _pinned_files(files, base: Path) -> set:
+    """The files among `files` whose session is pinned (headers are read
+    only when some session is)."""
+    on = {s for s, v in pins(base).items() if v}
+    if not on:
+        return set()
+    out = set()
+    for f, _, _ in files:
+        o = (_header(f) or {}).get("owner") or {}
+        if o.get("session") in on:
+            out.add(f)
+    return out
+
+
 def sweep(base: Path | None = None, now: float | None = None) -> dict:
     """The TTL, then the budget (least recently used first), over every
-    model's entries; stale temp files too. Returns what it removed."""
+    model's unpinned entries; stale temp files too. A pinned session's
+    files are exempt from both (only a drop removes them), and the budget
+    counts unpinned files only. Returns what it removed."""
     base = base or root()
     now = time.time() if now is None else now
     ttl, gone_ttl, gone_lru = ttl_s(), 0, 0
     files = _all_files(base)
+    held = _pinned_files(files, base)
     keep = []
     for f, size, mt in files:
+        if f in held:
+            continue
         if now - mt > ttl:
             try:
                 f.unlink()
@@ -422,7 +530,62 @@ def sweep(base: Path | None = None, now: float | None = None) -> dict:
                 shutil.rmtree(d, ignore_errors=True)
     except OSError:
         pass
-    return {"ttl": gone_ttl, "budget": gone_lru, "bytes": total, "cap": cap}
+    return {"ttl": gone_ttl, "budget": gone_lru, "bytes": total, "cap": cap,
+            "pinned": len(held)}
+
+
+def drop_files(session: str, base: Path | None = None) -> int:
+    """Delete every file of `session`, in every model's key directory, and
+    forget its pin. Returns how many went."""
+    base = base or root()
+    n = 0
+    for f, _, _ in _all_files(base):
+        o = (_header(f) or {}).get("owner") or {}
+        if o.get("session") == session:
+            try:
+                f.unlink()
+                n += 1
+            except OSError:
+                pass
+    set_pin(session, None, base)
+    return n
+
+
+def list_disk(base: Path | None = None) -> list:
+    """Every entry file's registry row, from its header alone: {key_id,
+    model, hash, session, role, run, tokens, bytes, saved_at, pinned,
+    file}. `pinned` is pins.json's word, else the header's."""
+    base = base or root()
+    p = pins(base)
+    out = []
+    for f, size, _ in _all_files(base):
+        m = _header(f)
+        if m is None:
+            continue
+        o = m.get("owner") or {}
+        s = o.get("session")
+        out.append({"key_id": m.get("key_id"), "model": m.get("model"),
+                    "hash": m.get("tokens_hash"), "session": s,
+                    "role": o.get("role"), "run": o.get("run"),
+                    "tokens": m.get("n_tokens"), "bytes": size,
+                    "saved_at": m.get("saved_at"),
+                    "pinned": p.get(s, bool(m.get("pinned"))) if s else False,
+                    "file": str(f)})
+    return out
+
+
+def index(d: Path) -> dict:
+    """{tuple(tokens): {"file", "owner"}} of a key directory's entries: the
+    on-demand read-back's lookup, built once (only the tokens' bytes are
+    read, no other array). A later save of the same tokens wins."""
+    out = {}
+    for _, _, _, f in entries(d):
+        toks = tokens_of(f)
+        m = _header(f)
+        if toks is None or m is None or len(toks) != m.get("n_tokens"):
+            continue
+        out[tuple(toks)] = {"file": f, "owner": m.get("owner")}
+    return out
 
 
 # ----------------------------------------------- the prompt cache's side
@@ -444,35 +607,81 @@ def _lru_entries(lru) -> list:
     return out
 
 
-def save(lru, key: dict, base: Path | None = None) -> dict:
-    """Write every entry of `lru` (the scheduler's mlx-lm LRUPromptCache)
-    under `key`. An entry already on disk (same tokens) is renamed into this
-    save, not rewritten. Returns counts; never raises for one entry."""
+def save(lru, key: dict, base: Path | None = None, *, owners=None,
+         only_new: bool = False, model: str | None = None,
+         select=None, prefill_tps=None) -> dict:
+    """Write the entries of `lru` (the scheduler's mlx-lm LRUPromptCache)
+    under `key`. Returns counts; never raises for one entry.
+
+    `owners`: the prompt cache's side map {tuple(tokens): meta}. Given,
+    only entries with a session are saved (anonymous ones never are), each
+    file carries its owner, and each saved entry's meta gets "file" and
+    "saved_at". None (a bare LRU): every entry, no owner.
+
+    The unload's save (`only_new` False) renames an entry already on disk
+    (same tokens, same owner) into this save, so the files' (gen, seq)
+    order is the LRU's at unload. A session's save (`only_new`) writes
+    only what is not on disk yet -- an entry whose meta names no file, or
+    whose file is gone -- under one new gen, in LRU order, and touches
+    nothing else: cheap, and a restore still inserts oldest save first.
+    `select`: the token tuples to consider (None: all). `prefill_tps`: the
+    measured prefill rate; an entry quicker to recompute than to read back
+    is not written (counted "not_worth")."""
     t0 = time.monotonic()
-    stats = {"saved": 0, "kept": 0, "skipped": 0, "bytes": 0, "why": []}
+    stats = {"saved": 0, "kept": 0, "skipped": 0, "bytes": 0, "why": [],
+             "entries": 0, "not_worth": 0}
     if lru is None or not enabled() or key is None:
         return stats
     base = base or root()
     d = base / key_id(key)
     have = {h: f for _, _, h, f in entries(d)}
     gen = max((g for g, _, _, _ in entries(d)), default=0) + 1
-    for seq, (_m, tokens, e) in enumerate(_lru_entries(lru)):
+    seq = 0
+    for _m, tokens, e in _lru_entries(lru):
+        own = owners.get(tuple(tokens)) if owners is not None else None
+        if owners is not None and not (own and own.get("session")):
+            continue
+        if select is not None and tuple(tokens) not in select:
+            continue
+        stats["entries"] += 1
+        if not_worth(len(tokens), int(e.nbytes), prefill_tps):
+            stats["not_worth"] += 1
+            continue
         try:
             if not all(isinstance(t, int) for t in tokens):
                 raise Unserializable("an image key (its image store does "
                                      "not outlive the model)")
             h = tokens_hash(tokens)
-            name = d / f"{gen:08d}-{seq:06d}-{h}{SUFFIX}"
             old = have.pop(h, None)
-            meta = _header(old) if old is not None else None
+            if only_new and old is not None and own is not None and \
+                    own.get("file") == str(old):
+                stats["kept"] += 1          # on disk and unchanged
+                continue
+            name = d / f"{gen:08d}-{seq:06d}-{h}{SUFFIX}"
+            meta = _header(old) if old is not None and not only_new \
+                else None
             if meta is not None and meta.get("key") == key and \
-                    meta.get("n_tokens") == len(tokens):
+                    meta.get("n_tokens") == len(tokens) and \
+                    (own is None or meta.get("owner") == _owner_of(own)):
                 os.replace(old, name)
                 os.utime(name)
+                seq += 1
                 stats["kept"] += 1
+                if own is not None:
+                    own["file"] = str(name)
                 continue
             f = save_entry(d, key, tokens, e.prompt_cache, e.cache_type,
-                           gen, seq)
+                           gen, seq, owner=own,
+                           pinned=bool(own and own.get("pinned")),
+                           model=model)
+            seq += 1
+            if old is not None and old != f:
+                try:
+                    old.unlink()        # the same tokens' older file
+                except OSError:
+                    pass
+            if own is not None:
+                own["file"], own["saved_at"] = str(f), round(time.time(), 3)
             stats["saved"] += 1
             stats["bytes"] += f.stat().st_size
         except Unserializable as ex:
@@ -493,11 +702,31 @@ def save(lru, key: dict, base: Path | None = None) -> dict:
             pass
     stats["sweep"] = sweep(base)
     stats["seconds"] = round(time.monotonic() - t0, 3)
-    logger.info("prompt cache saved to %s: %d written (%.2f GiB), %d already "
-                "there, %d skipped, %.1fs", d, stats["saved"],
-                stats["bytes"] / GIB, stats["kept"], stats["skipped"],
-                stats["seconds"])
+    logger.info("prompt cache saved to %s: %d entries, %d written "
+                "(%d bytes, %.2f GiB), %d already there, %d not worth it, "
+                "%d skipped, %.3fs", d, stats["entries"], stats["saved"],
+                stats["bytes"], stats["bytes"] / GIB, stats["kept"],
+                stats["not_worth"], stats["skipped"], stats["seconds"])
     return stats
+
+
+def remove_entry(lru, model, tokens) -> bool:
+    """Take one entry out of an mlx-lm LRUPromptCache. mlx-lm 0.32 has no
+    public single-entry removal (only trim_to, which pops least recently
+    used), so this is what its own insert_cache does to a replaced entry:
+    PromptTrie.pop, CacheOrder.remove, and the byte counters. False when
+    the entry is not there."""
+    tokens = list(tokens)       # CacheOrder holds lists: a tuple never matches
+    try:
+        if lru._trie.get(model, tokens) is None:
+            return False
+    except (KeyError, AttributeError, IndexError):
+        return False
+    e = lru._trie.pop(model, tokens)
+    lru._lru.remove(model, tokens)
+    lru._n_bytes -= e.nbytes
+    lru._n_bytes_by_type[e.cache_type] -= e.nbytes
+    return True
 
 
 def candidates(key: dict, max_n: int, max_bytes: int | None = None,
@@ -556,34 +785,41 @@ def agree(link, files) -> list:
 
 def read(key: dict, files) -> list:
     """Read `files` (candidates()) into memory, in order: [(file, tokens,
-    cache, kind, read_ms)] for each that passes its checks (one that does
-    not is deleted and left out)."""
+    cache, kind, read_ms, meta)] for each that passes its checks (one that
+    does not is deleted and left out); meta: {owner, pinned, saved_at}
+    from its header."""
     import mlx.core as mx
     out = []
     for f in files:
         t0 = time.perf_counter()
+        head = _header(Path(f)) or {}
         got = load_entry(Path(f), key)
         if got is None:
             continue
         toks, cache, kind = got
         mx.eval(list(_arrays_of(cache)))
         out.append((Path(f), toks, cache, kind,
-                    round((time.perf_counter() - t0) * 1000, 1)))
+                    round((time.perf_counter() - t0) * 1000, 1),
+                    {k: head.get(k) for k in ("owner", "pinned",
+                                              "saved_at")}))
     return out
 
 
 def insert(lru, model_key, got: list) -> dict:
     """What read() returned, into `lru` in order (insert_cache: the
     in-memory trie's own prefix rules then serve them). Returns
-    {tuple(tokens): {"tokens", "read_ms"}}."""
+    {tuple(tokens): {"tokens", "read_ms", "file", "owner", "saved_at"}}."""
     out = {}
-    for f, toks, cache, kind, ms in got:
+    for f, toks, cache, kind, ms, *meta in got:
         lru.insert_cache(model_key, list(toks), cache, cache_type=kind)
         try:
             os.utime(f)
         except OSError:
             pass
-        out[tuple(toks)] = {"tokens": len(toks), "read_ms": ms}
+        m = meta[0] if meta else {}
+        out[tuple(toks)] = {"tokens": len(toks), "read_ms": ms,
+                            "file": str(f), "owner": m.get("owner"),
+                            "saved_at": m.get("saved_at")}
     if out:
         logger.info("prompt cache: %d entr%s restored from disk (%d tokens, "
                     "%.1fs)", len(out), "y" if len(out) == 1 else "ies",
@@ -608,6 +844,24 @@ def restore(lru, model_key, key: dict | None, *, max_bytes=None,
     if link is not None and not agree(link, [g[0] for g in got]):
         got = []
     return insert(lru, model_key, got) if got else {}
+
+
+def adopt(owners: dict, pinned: set, restored: dict,
+          base: Path | None = None) -> None:
+    """Restored entries' owners into the prompt cache's side map (and the
+    pinned sessions into its sticky set), as the files said: an entry read
+    back is on disk already."""
+    on = {s for s, v in pins(base).items() if v}
+    for t, v in restored.items():
+        o = v.get("owner") or {}
+        if not o.get("session"):
+            continue
+        s = o["session"]
+        if s in on:
+            pinned.add(s)
+        owners[t] = {"session": s, "role": o.get("role"),
+                     "run": o.get("run"), "pinned": s in on,
+                     "file": v.get("file"), "saved_at": v.get("saved_at")}
 
 
 def _arrays_of(obj):
