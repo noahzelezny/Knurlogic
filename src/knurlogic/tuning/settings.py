@@ -1264,12 +1264,13 @@ PROMPT_CACHE_KNOBS = {
     # name: (default, values, unit, what, why)
     "KNURLOGIC_PROMPT_CACHE_DISK": (
         "on", ["on", "off"], "",
-        "save every prompt cache to disk when its model unloads and restore "
-        "it when that model loads again",
-        "on turns a reload's re-prefill into a disk read (a 110k-token "
-        "session took ~13.5 min to prefill at 136 tok/s; an SSD reads its "
-        "cache in seconds), at the cost of disk space up to the budget and "
-        "a few seconds at unload. Off writes and reads nothing."),
+        "let a client save prompt caches to disk (POST "
+        "/v1/prompt-cache/save or /park) and restore them when that model "
+        "loads again; nothing is saved unless a client asks",
+        "on lets a coordinator turn a reload's re-prefill into a disk read "
+        "(a 110k-token session took ~13.5 min to prefill at 136 tok/s; an "
+        "SSD reads its cache in seconds), at the cost of disk space up to "
+        "the budget. Off refuses those saves and reads nothing."),
     "KNURLOGIC_PROMPT_CACHE_DISK_GB": (
         "", ["", "8", "16", "32", "64", "128"], "GiB",
         "the most disk the saved prompt caches may take, every model "

@@ -913,7 +913,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     encodes; the admit op carries each image's ref and the admission its
     rows), else None. `disk`: (key, entries read and agreed at load) of the
     prompt cache on disk (engine/serve/prompt_disk): inserted first, as
-    rank 0 inserts its own; saved again at `stop` and `save_cache`."""
+    rank 0 inserts its own; saved again at `save_cache` (a client's ask)."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
 
     from .request import control_machine
@@ -1028,7 +1028,6 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
             elif kind == "stop":
                 if ex is not None:
                     ex.close()
-                save_disk()
                 logger.info("rank %d: stopped by rank 0 after %d steps "
                             "(%d token mismatches)", link.rank, steps,
                             mismatches)

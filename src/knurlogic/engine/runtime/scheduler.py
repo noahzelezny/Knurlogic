@@ -845,9 +845,8 @@ class Scheduler:
                     self.tensor.stop()        # the other ranks leave too
                 except Exception:  # shutdown must finish whatever the ranks do (logged)
                     logger.exception("stopping the other ranks")
-            # kept across a restart (engine/serve/prompt_disk)
-            if self.ring_failed is None:
-                self._save_disk()
+            # nothing is saved on the way out: a prompt cache reaches disk
+            # only when a client asks (POST /v1/prompt-cache/save, park)
             self.cache = None
             # the model too: its lazily built arrays (rope tables, caches)
             # were made on this thread
@@ -973,10 +972,7 @@ class Scheduler:
                         "the model was switched while this request was "
                         "running"))
                 self._close_executor()
-                # the model going: its prompt cache to disk, restored when
-                # it loads again (engine/serve/prompt_disk)
-                if getattr(self.host, "model", None) is not None:
-                    self._save_disk()
+                # the model going: nothing saved unless a client asked
                 self._restored = {}
                 self._disk_key, self._disk_index = None, {}
                 self._prefill_tps = None
