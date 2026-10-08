@@ -158,7 +158,11 @@ The cache belongs to the agent (the client session), not the model.
   and on disk, so a session holds one step (its conversation checkpoint
   and its answer). Its system-prompt checkpoint is nobody's: one copy per
   distinct system prompt and tools, which every session starting from it
-  shares. Opt-in, because the page's chat regenerates and edits from
+  shares. It is saved (at unload, and at a save with no session) and
+  restored as shared, so the first worker after a reload skips that
+  prefill; its file's mtime is refreshed at each save and restore, and a
+  model in use longer than the TTL writes it again at unload. Opt-in,
+  because the page's chat regenerates and edits from
   earlier messages. On a ring the owner rides the `insert` op with its
   step, and every rank replaces the same entries.
 - **Parking and read-back.** A pinned session with no new entry for

@@ -333,6 +333,10 @@ class PromptCache:
         #: {session: time.time() of its last entry}: a pinned session idle
         #: longer than PARK_IDLE_S is parked (Scheduler._park_idle)
         self.seen: dict = {}
+        #: token tuples of the shared system-prompt checkpoints (a
+        #: keep-latest session's, nobody's): saved and restored like a
+        #: session's entries, so a reload's first worker skips that prefill
+        self.shared: set = set()
 
     def fetch(self, key, tokens):
         from mlx_lm.models import cache as C
@@ -380,6 +384,8 @@ class PromptCache:
         s = (owner or {}).get("session")
         if not s:
             self.owners.pop(t, None)
+            if (owner or {}).get("shared"):
+                self.shared.add(t)
             return []
         step = owner.get("step")
         self.owners[t] = {"session": s, "role": owner.get("role"),
@@ -410,6 +416,7 @@ class PromptCache:
         here = {tuple(t) for _, t, _, _ in out}
         for t in [t for t in self.owners if t not in here]:
             del self.owners[t]
+        self.shared &= here
         return out
 
     def of_session(self, session: str) -> list:
@@ -499,7 +506,7 @@ def _owner(job, uid=None, kind: str | None = None) -> dict | None:
         return None
     latest = bool(getattr(job, "keep_latest", False))
     if latest and kind == "system":
-        return None
+        return {"shared": True}
     out = {"session": s, "role": getattr(job, "role", None),
            "run": getattr(job, "run", None)}
     if latest:
@@ -1076,6 +1083,7 @@ class Scheduler:
             self.cache.live()               # prunes the side map
             got = prompt_disk.save(
                 self.cache.lru, key, owners=self.cache.owners,
+                shared=self.cache.shared,
                 only_new=only_new, select=select,
                 prefill_tps=self._prefill_tps if self.tensor is None
                 else None,
@@ -1179,7 +1187,8 @@ class Scheduler:
             self._disk_index.pop(best, None)    # gone or corrupt: a miss
             return
         back = prompt_disk.insert(self.cache.lru, self.host.model_key, got)
-        prompt_disk.adopt(self.cache.owners, self.cache.pinned, back)
+        prompt_disk.adopt(self.cache.owners, self.cache.pinned, back,
+                          shared=self.cache.shared)
         self._restored.update(back)
 
     def _restore_disk(self) -> None:
@@ -1197,7 +1206,7 @@ class Scheduler:
             max_bytes=self.cache_bytes,
             link=self.tensor.link if self.tensor is not None else None)
         prompt_disk.adopt(self.cache.owners, self.cache.pinned,
-                          self._restored)
+                          self._restored, shared=self.cache.shared)
         self._disk_key = key
         self._disk_index = {}
         if key is not None and self.tensor is None:

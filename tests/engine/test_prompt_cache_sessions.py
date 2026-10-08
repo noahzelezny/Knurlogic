@@ -459,8 +459,9 @@ def test_keep_latest_replaces_the_sessions_earlier_steps(sched):
     first = {tuple(t) for _, t in s.cache.of_session("k1")}
     assert first
     cmd = s.save_prompt_cache()                 # the first step on disk
-    assert cmd.done.wait(60) and cmd.result["saved"] == len(first)
-    assert {f["session"] for f in D.list_disk()} == {"k1"}
+    assert cmd.done.wait(60) and cmd.result["saved"] == len(first) + 1  # + shared
+    assert {f["session"] for f in D.list_disk()
+            if f["model"] == "tiny-latest"} == {"k1", None}    # None: shared
     _collect(s.submit(_chat(sys_p, b, max_tokens=3, session="k1",
                             keep_latest=True)))
     now = {tuple(t) for _, t in s.cache.of_session("k1")}
@@ -474,3 +475,24 @@ def test_keep_latest_replaces_the_sessions_earlier_steps(sched):
     _collect(s.submit(_chat(sys_p, a, max_tokens=3, session="k2")))
     _collect(s.submit(_chat(sys_p, b, max_tokens=3, session="k2")))
     assert len(s.cache.of_session("k2")) > 2
+
+
+def test_the_shared_system_checkpoint_is_saved_and_restored(sched):
+    """Nobody's, yet kept across a reload: the first worker after it
+    starts from the system prompt and tools, not from nothing."""
+    s = sched
+    s.load("/nonexistent/tiny-shared").done.wait(60)
+    s._prefill_tps = None
+    sys_p = list(s.prompts[0][:20])
+    _collect(s.submit(_chat(sys_p, list(s.prompts[1]), max_tokens=3,
+                            session="w1", keep_latest=True)))
+    assert tuple(sys_p) in s.cache.shared
+    cmd = s.save_prompt_cache()
+    assert cmd.done.wait(60) and not cmd.error
+    on = [f for f in D.list_disk()
+          if f["model"] == "tiny-shared" and f["tokens"] == len(sys_p)]
+    assert len(on) == 1 and on[0]["session"] is None
+    s.unload().done.wait(60)
+    s.load("/nonexistent/tiny-shared").done.wait(60)
+    assert tuple(sys_p) in s.cache.shared       # restored as shared
+    assert s.cache.hit_length(s.host.model_key, sys_p + [1, 2]) >= len(sys_p)
