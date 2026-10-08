@@ -1320,7 +1320,8 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
     rid = RID.of(getattr(handler, "headers", None))
     req = urllib.request.Request(url, data=body,
                                  headers={"Content-Type": "application/json",
-                                          **({RID.HEADER: rid} if rid else {})},
+                                          **({RID.HEADER: rid} if rid else {}),
+                                          **_client_headers(handler)},
                                  method="POST")
     try:
         up = urllib.request.urlopen(req, timeout=timeout)
@@ -1378,6 +1379,94 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
         pass            # the client stopped listening; nothing to answer
     finally:
         up.close()
+
+
+#: the client's labels (telemetry.md) and its cache retention: passed up
+#: to the model server, which owns the prompt-cache entries by them
+CLIENT_HEADERS = ("X-Client", "X-Client-Session", "X-Client-Run",
+                  "X-Client-Role", "X-Cache-Retain")
+
+
+def _client_headers(handler) -> dict:
+    h = getattr(handler, "headers", None)
+    if h is None:
+        return {}
+    return {k: h.get(k) for k in CLIENT_HEADERS
+            if isinstance(h.get(k), str) and h.get(k)}
+
+
+#: the model server's prompt-cache endpoints the page forwards
+PROMPT_CACHE_PATH = "/v1/prompt-cache"
+
+
+def prompt_cache_forward(handler, method: str, path: str, query: dict,
+                         body: bytes, fetch=None, send=None) -> None:
+    """GET /v1/prompt-cache, POST /v1/prompt-cache/{save,drop,pin} on the
+    page: forwarded to the model server on this machine that serves the
+    model named by a "model" query or body field; with none named, the only
+    one; several and none named is a 400 listing them. The loopback
+    operator only (the model server refuses anyone else; the page forwards
+    from loopback, so it must refuse first). `send`: (url, method, body)
+    -> (status, doc), for tests."""
+    import ipaddress
+    try:
+        loop = ipaddress.ip_address(
+            handler.client_address[0].split("%")[0]).is_loopback
+    except (ValueError, AttributeError, IndexError):
+        loop = False
+    if not loop:
+        _send_json(handler, 403, {"error": {
+            "message": "the prompt cache is managed from this machine "
+                       "(loopback) only", "type": "permission_error"}})
+        return
+    model = (query.get("model") or [None])[0]
+    if model is None and body:
+        try:
+            got = json.loads(body)
+            model = got.get("model") if isinstance(got, dict) else None
+        except ValueError:
+            model = None
+    table = local_models(fetch)
+    if model is not None:
+        base = _resolve(table, model)
+        if base is None:
+            _send_json(handler, 404, {"error": {
+                "message": f"no running model {model!r} on this machine; "
+                           f"running: {', '.join(sorted(table)) or 'none'}",
+                "type": "not_found"}, "models": sorted(table)})
+            return
+    else:
+        bases = set(table.values())
+        if len(bases) != 1:
+            _send_json(handler, 400, {"error": {
+                "message": "name the model (a \"model\" query or body "
+                           "field): " + (", ".join(sorted(table))
+                                         or "none is running"),
+                "type": "invalid_request_error"}, "models": sorted(table)})
+            return
+        base = bases.pop()
+    code, doc = (send or _send_up)(base + path, method,
+                                   body if method == "POST" else None)
+    _send_json(handler, code, doc)
+
+
+def _send_up(url: str, method: str, body: bytes | None):
+    """(status, JSON doc) of one request to a model server."""
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(
+        url, data=body if body is not None else None, method=method,
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=600) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except ValueError:
+            return e.code, {"error": {"message": str(e)}}
+    except (OSError, ValueError) as e:
+        return 502, {"error": {"message": f"{type(e).__name__}: {e}"}}
 
 
 def proxy_chat(handler, where: str, body: bytes) -> None:
@@ -1922,6 +2011,10 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 self._send(json.dumps(route_models_document()).encode(),
                            "application/json")
                 return
+            if u.path.rstrip("/") == PROMPT_CACHE_PATH:
+                prompt_cache_forward(self, "GET", PROMPT_CACHE_PATH,
+                                     parse_qs(u.query), b"")
+                return
             if u.path.rstrip("/") == "/peek":
                 code, doc = peek(parse_qs(u.query))
                 self._send(doc.encode(), "application/json", code)
@@ -1959,6 +2052,11 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             if u.path.rstrip("/") in ROUTE_PATHS:
                 route(self, u.path.rstrip("/"),
                       self.rfile.read(n) if n else b"")
+                return
+            if u.path.startswith(PROMPT_CACHE_PATH + "/"):
+                prompt_cache_forward(self, "POST", u.path.rstrip("/"),
+                                     parse_qs(u.query),
+                                     self.rfile.read(n) if n else b"")
                 return
             if u.path.rstrip("/") == "/machine.json":
                 where = (parse_qs(u.query).get("where") or [""])[0]
