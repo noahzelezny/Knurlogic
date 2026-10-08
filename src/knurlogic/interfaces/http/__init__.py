@@ -241,6 +241,13 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                    load_wait_s=3600.0 if ring else 0.0,
                    kv_bits=settings.get("kv_bits"),
                    cross_chip=settings.get("cross_chip"))
+    if ring:
+        # the disk prompt cache's key: this rank's part of the split
+        # (engine/serve/prompt_disk; the followers' in tensor.serve_follower)
+        mh.cache_layout = {"split": ring.get("split", "tensor"),
+                           "world": link.size, "rank": link.rank}
+        if pipe:
+            mh.cache_layout["bounds"] = [list(b) for b in shares["bounds"]]
     from knurlogic.engine.serve.load import gpu_in_use
     sched = Scheduler(mh, **scheduler_options(settings),
                       tensor=tensor, gpu_in_use=gpu_in_use).start()

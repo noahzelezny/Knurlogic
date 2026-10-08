@@ -135,6 +135,15 @@ class ModelHost:
         #: request path (Scheduler._warm_up), so the first user request
         #: does not pay for compiling kernels and filling buffers
         self.warm = None
+        #: () -> None, run on the loading thread once the weights, vision
+        #: and head are bound and before the warm-up: the scheduler's
+        #: prompt-cache restore from disk (engine/serve/prompt_disk). On
+        #: a ring every rank runs its own here, at the same point (the
+        #: restore agrees across ranks: a collective)
+        self.after_bind = None
+        #: this rank's part of a split, for the disk prompt cache's key
+        #: (prompt_disk.identity); None for a whole model
+        self.cache_layout: dict | None = None
         self.state = "empty"
         self.path: str | None = None
         self.error = ""
@@ -221,6 +230,8 @@ class ModelHost:
                     state.DRAFT.update(head=None, on=False,
                                        why="not every rank of the pipeline "
                                            "bound a drafting head")
+            if self.after_bind is not None:
+                self.after_bind()
         except BaseException as e:
             logger.exception("loading %s failed", path)
             self.model = self.tokenizer = self.model_key = None

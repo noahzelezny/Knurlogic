@@ -674,6 +674,35 @@ class Handler(BaseHTTPRequestHandler):
                                 "until": until, "group": group,
                                 "summary": rows})
 
+    def _loopback(self) -> bool:
+        import ipaddress
+        try:
+            return ipaddress.ip_address(
+                self.client_address[0].split("%")[0]).is_loopback
+        except ValueError:
+            return False
+
+    def _save_prompt_cache(self) -> None:
+        """POST /v1/prompt-cache/save: the prompt cache to disk now
+        (engine/serve/prompt_disk), between steps; on a ring every rank
+        saves its part. The loopback operator only."""
+        if not self._loopback():
+            return self._json(403, {"error": {
+                "message": "the prompt cache is saved from this machine "
+                           "(loopback) only", "type": "permission_error"}})
+        cmd = self.app.scheduler.save_prompt_cache()
+        if not cmd.done.wait(600):
+            return self._error(O.ApiError(504, "the save did not finish "
+                                               "within 600 s"))
+        if cmd.error:
+            return self._error(O.ApiError(409, cmd.error))
+        r = dict(cmd.result or {})
+        r.pop("why", None)
+        return self._json(200, {"object": "prompt_cache.save",
+                                "model": os.path.basename(
+                                    self.app.scheduler.host.path or "")
+                                or None, **r})
+
     def _ollama_get(self, path: str) -> None:
         from knurlogic import __version__
         from knurlogic.interfaces.http import ollama
@@ -717,6 +746,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._ollama_show()
         if path == "/v1/messages/count_tokens":
             return self._count_tokens(raw)
+        if path == "/v1/prompt-cache/save":
+            return self._save_prompt_cache()
         if path == "/v1/ensure" and self.app.ensure:
             try:
                 body = json.loads(raw or b"{}")

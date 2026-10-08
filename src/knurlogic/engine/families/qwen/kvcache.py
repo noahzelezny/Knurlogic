@@ -93,6 +93,10 @@ def _classes():
             BatchQuantKVCache.state.fset(self, tuple(kv))
 
     _CLASSES.update(single=QuantAttnCache, batch=BatchQuantAttnCache)
+    # how the disk prompt cache names a class made here, to make it again
+    # (engine/serve/prompt_disk): this module's _classes()[i]
+    QuantAttnCache._disk_class = (__name__, "_classes", 0)
+    BatchQuantAttnCache._disk_class = (__name__, "_classes", 1)
     return QuantAttnCache, BatchQuantAttnCache
 
 

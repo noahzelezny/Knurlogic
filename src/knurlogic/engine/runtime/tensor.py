@@ -818,7 +818,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
            completion_batch_size: int, prefill_step_size: int,
            working_set: int, split: str = "tensor", drafting: bool = False,
            why: str = "", vision=None, block: int = 0,
-           outputs: tuple = ()) -> int:
+           outputs: tuple = (), disk=None) -> int:
     """Rank >= 1: apply rank 0's plans and step until told to stop. The
     return value is the number of steps taken.
 
@@ -833,7 +833,9 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     loop's steps (MTPBatchGenerator.follow_block). `vision`:
     engine.vision.request.MirrorVision for a model with vision (rank 0
     encodes; the admit op carries each image's ref and the admission its
-    rows), else None."""
+    rows), else None. `disk`: (key, entries read and agreed at load) of the
+    prompt cache on disk (engine/serve/prompt_disk): inserted first, as
+    rank 0 inserts its own; saved again at `stop` and `save_cache`."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
 
     from .request import control_machine
@@ -842,6 +844,19 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     stream = mx.default_stream(mx.default_device())
     _defer_sigterm(link.rank)
     cache = PromptCache(prompt_cache_size)
+    from knurlogic.engine.serve import prompt_disk
+    disk_key, restored = disk if disk is not None else (None, [])
+    if restored:
+        prompt_disk.insert(cache.lru, model_key, restored)
+
+    def save_disk():
+        if disk_key is None:
+            return
+        try:
+            prompt_disk.save(cache.lru, disk_key)
+        except Exception:  # never stops a rank (logged)
+            logger.exception("rank %d: saving the prompt cache failed",
+                             link.rank)
     mark = Mark(working_set)
     #: the prefill chunk rank 0 fitted each row not yet prefilled at (the
     #: admit and chunk ops): a rank prefilling in a different number of
@@ -926,6 +941,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                 cache.lru.trim_to(n_sequences=len(cache.lru) - op["n"])
             elif kind == "set":
                 apply_set(op, link.rank)
+            elif kind == "save_cache":
+                save_disk()
             elif kind == "reset":
                 if ex is not None:
                     ex.close()
@@ -937,6 +954,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
             elif kind == "stop":
                 if ex is not None:
                     ex.close()
+                save_disk()
                 logger.info("rank %d: stopped by rank 0 after %d steps "
                             "(%d token mismatches)", link.rank, steps,
                             mismatches)
@@ -1101,6 +1119,9 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
     # a follower never loads the MTP head: rank 0 drafts, and tells this
     # rank whether it does (agree_head)
     heads = agree_head(link)
+    layout = {"split": split, "world": link.size, "rank": link.rank}
+    if split == "pipeline":
+        layout["bounds"] = [list(b) for b in shares["bounds"]]
     # nor the vision tower: rank 0 encodes; this rank embeds its rows with
     # the family's own code (engine.vision.request.MirrorVision)
     host = ModelHost(draft=False,
@@ -1109,6 +1130,24 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                      tower=False, load_wait_s=3600.0,
                      head_agree=heads, kv_bits=kv_bits,
                      cross_chip=cross_chip)
+    host.cache_layout = layout
+    disk: list = [None, []]
+
+    def restore_disk():
+        # the same point as rank 0's Scheduler._restore_disk: a collective
+        from knurlogic.engine.serve import prompt_disk
+        try:
+            key = prompt_disk.host_key(host)
+            got = prompt_disk.read(key, prompt_disk.candidates(
+                key, prompt_cache_size)) if key is not None else []
+        except Exception:  # a restore that fails is a miss (logged)
+            logger.exception("rank %d: reading the saved prompt cache "
+                             "failed", link.rank)
+            key, got = None, []
+        if not prompt_disk.agree(link, [g[0] for g in got]):
+            got = []
+        disk[:] = [key, got]
+    host.after_bind = restore_disk
     host.load(path)
     if host.state != "ready":
         raise RuntimeError(f"rank {link.rank} could not load {path}: "
@@ -1127,6 +1166,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                   working_set=working_set, split=split, drafting=drafting,
                   block=heads.block if drafting else 0,
                   outputs=tuple(heads.outputs) if drafting else (),
+                  disk=tuple(disk),
                   why=("rank 0 drafts; this rank runs its verify steps"
                        if drafting else "rank 0 does not draft"))
 

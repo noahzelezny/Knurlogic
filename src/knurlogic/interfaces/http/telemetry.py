@@ -44,7 +44,7 @@ class Request:
         self.progress = progress
         self.model: str | None = None
         self.tokens = {"prompt_tokens": 0, "cached_tokens": 0,
-                       "output_tokens": 0}
+                       "output_tokens": 0, "disk_tokens": 0}
         self.timing: dict = {}
         self.finish: str | None = None
         self.status: int | None = None
@@ -58,6 +58,11 @@ class Request:
         self.tokens["cached_tokens"] += int(
             (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
         self.tokens["output_tokens"] += int(u.get("completion_tokens") or 0)
+        # the cached tokens that came from a prompt cache restored from
+        # disk (usage.knurlogic.cache.disk; engine/serve/prompt_disk)
+        disk = (((u.get("knurlogic") or {}).get("cache") or {})
+                .get("disk") or {})
+        self.tokens["disk_tokens"] += int(disk.get("tokens") or 0)
         self.timing = (u.get("knurlogic") or {}).get("timing") or {}
         self.finish = finish or "stop"
 
