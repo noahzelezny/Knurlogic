@@ -325,7 +325,7 @@ def test_unload_saves_load_restores_and_usage_says_disk(disk_sched,
     s = disk_sched
     s.load("/nonexistent/tiny-a").done.wait(60)
     p = s.prompts[2]
-    _, cold = _collect(s.submit(_job(p, max_tokens=4)))
+    _, cold = _collect(s.submit(_job(p, max_tokens=4, session="t1")))
     assert cold["knurlogic"]["cache"]["disk"] == {"tokens": 0,
                                                   "read_ms": 0.0}
     s.unload().done.wait(60)
@@ -348,7 +348,7 @@ def test_unload_saves_load_restores_and_usage_says_disk(disk_sched,
 def test_a_save_on_request(disk_sched):
     s = disk_sched
     s.load("/nonexistent/tiny-c").done.wait(60)
-    _collect(s.submit(_job(s.prompts[0], max_tokens=3)))
+    _collect(s.submit(_job(s.prompts[0], max_tokens=3, session="t1")))
     cmd = s.save_prompt_cache()
     assert cmd.done.wait(60) and not cmd.error
     assert cmd.result["saved"] + cmd.result["kept"] >= 1
