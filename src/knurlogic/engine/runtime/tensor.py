@@ -643,13 +643,49 @@ class JournalPromptCache:
         # the admit op carries the hit; fetching changes nothing
         return self.inner.fetch(key, tokens)
 
-    def insert(self, key, tokens, cache, kind: str, origin=None) -> None:
+    def insert(self, key, tokens, cache, kind: str, origin=None,
+               owner: dict | None = None) -> None:
         if origin is None:
             raise ValueError("a ring's prompt cache inserts only from an "
                              "event (origin=(event, uid))")
-        self.inner.insert(key, tokens, cache, kind)
+        self.inner.insert(key, tokens, cache, kind, owner=owner)
         event, uid = origin
-        self.journal.add("insert", uid=int(uid), event=event, kind=kind)
+        # the owner rides along: every rank's side map mirrors rank 0's,
+        # so a session's drop, pin or save selects the same entries there
+        self.journal.add("insert", uid=int(uid), event=event, kind=kind,
+                         **({"owner": owner} if owner else {}))
+
+    # the side map is rank 0's to read; changes to it are journaled
+    @property
+    def owners(self) -> dict:
+        return self.inner.owners
+
+    @property
+    def pinned(self) -> set:
+        return self.inner.pinned
+
+    @property
+    def seen(self) -> dict:
+        return self.inner.seen
+
+    def live(self) -> list:
+        return self.inner.live()
+
+    def of_session(self, session: str) -> list:
+        return self.inner.of_session(session)
+
+    def hit_length(self, key, tokens) -> int:
+        return self.inner.hit_length(key, tokens)
+
+    def drop(self, session: str) -> int:
+        n = self.inner.drop(session)
+        self.journal.add("drop", session=session)
+        return n
+
+    def set_pinned(self, session: str, pinned: bool) -> int:
+        n = self.inner.set_pinned(session, pinned)
+        self.journal.add("pin", session=session, pinned=bool(pinned))
+        return n
 
     def trim_to(self, n_bytes: int) -> None:
         before = len(self.inner.lru)
@@ -814,6 +850,44 @@ def _defer_sigterm(rank: int) -> None:
         pass
 
 
+def apply_cache_op(op: dict, cache, model_key, last: dict,
+                   save_disk) -> bool:
+    """A following rank's prompt-cache ops, applied to its own part as rank
+    0 applied them to its: insert (with the owner), pop, drop and pin of a
+    session (memory and this rank's own files), and the saves. False for
+    an op that is not one of them. `last`: the last step's checkpoint and
+    finished caches by (event, uid); `save_disk(only_new, select)`: this
+    rank's save."""
+    from knurlogic.engine.serve import prompt_disk
+    kind = op["op"]
+    if kind == "insert":
+        got = last.get((op["event"], op["uid"]))
+        if got is None:
+            raise Desync(f"no {op['event']} for row {op['uid']} in "
+                         f"the last step")
+        cache.insert(model_key, got[0], got[1], op["kind"],
+                     owner=op.get("owner"))
+    elif kind == "pop":
+        cache.lru.trim_to(n_sequences=len(cache.lru) - op["n"])
+    elif kind == "drop":
+        cache.drop(op["session"])
+        prompt_disk.drop_files(op["session"])
+    elif kind == "pin":
+        cache.set_pinned(op["session"], op["pinned"])
+        prompt_disk.set_pin(op["session"], op["pinned"])
+    elif kind == "save_cache" and op.get("session"):
+        # rank 0's choice, made the same way on the same side map: the
+        # session's longest entry
+        mine = [tuple(t) for _, t in cache.of_session(op["session"])]
+        if mine:
+            save_disk(only_new=True, select={max(mine, key=len)})
+    elif kind == "save_cache":
+        save_disk()
+    else:
+        return False
+    return True
+
+
 def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
            completion_batch_size: int, prefill_step_size: int,
            working_set: int, split: str = "tensor", drafting: bool = False,
@@ -847,13 +921,16 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     from knurlogic.engine.serve import prompt_disk
     disk_key, restored = disk if disk is not None else (None, [])
     if restored:
-        prompt_disk.insert(cache.lru, model_key, restored)
+        prompt_disk.adopt(cache.owners, cache.pinned, prompt_disk.insert(
+            cache.lru, model_key, restored))
 
-    def save_disk():
+    def save_disk(only_new: bool = False, select=None):
         if disk_key is None:
             return
         try:
-            prompt_disk.save(cache.lru, disk_key)
+            cache.live()                    # prunes the side map
+            prompt_disk.save(cache.lru, disk_key, owners=cache.owners,
+                             only_new=only_new, select=select)
         except Exception:  # never stops a rank (logged)
             logger.exception("rank %d: saving the prompt cache failed",
                              link.rank)
@@ -931,18 +1008,10 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                     ex.remove(op["uids"])
                 for u in op["uids"]:
                     chunks.pop(u, None)
-            elif kind == "insert":
-                got = last.get((op["event"], op["uid"]))
-                if got is None:
-                    raise Desync(f"no {op['event']} for row {op['uid']} in "
-                                 f"the last step")
-                cache.insert(model_key, got[0], got[1], op["kind"])
-            elif kind == "pop":
-                cache.lru.trim_to(n_sequences=len(cache.lru) - op["n"])
+            elif apply_cache_op(op, cache, model_key, last, save_disk):
+                pass
             elif kind == "set":
                 apply_set(op, link.rank)
-            elif kind == "save_cache":
-                save_disk()
             elif kind == "reset":
                 if ex is not None:
                     ex.close()

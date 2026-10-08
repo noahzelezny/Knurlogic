@@ -12,8 +12,28 @@ client that wants attribution (an agent harness is the first). No shared code.
 | `X-Client-Run` | an id for a sub-unit (a worker, a sub-task), or `-` | 128 bytes |
 | `X-Client-Role` | a short label the client chooses (`pm`, `worker`, `sidecar`, …) | 32 bytes |
 
+| `X-Cache-Retain` | `pin`: this session's prompt-cache entries are never auto-deleted from disk (sticky for the session) | — |
+
 All optional. The server stores them as opaque strings and groups by them.
 A request with none is attributed to the key only, or `anonymous`.
+The session also owns the prompt-cache entries the request makes: only
+entries with a session are saved to disk (prompt-cache-disk.md,
+"Sessions"). The page's router passes all five headers up.
+
+## Prompt-cache endpoints (loopback only; the page forwards them)
+
+- `POST /v1/prompt-cache/save` `{"session"?}`: with a session, that
+  session's newest (longest) entry if not on disk yet -- call it right
+  after the context compacts; without, every session's entries.
+  Counts: `saved, kept, skipped, not_worth, entries, bytes, seconds`.
+- `POST /v1/prompt-cache/drop` `{"session"}`: out of memory and off disk
+  (every model). `{memory, disk}`.
+- `POST /v1/prompt-cache/pin` `{"session", "pinned"}`.
+- `GET /v1/prompt-cache`: `data: [{session, role, run, tokens, bytes,
+  in_memory, on_disk, saved_at, pinned, hash, model, key_id}]`.
+
+On the page, name the model with a `model` query or body field when it
+serves more than one.
 
 ## Response (server → client)
 

@@ -295,6 +295,13 @@ class Job:
     disk: dict | None = None
     #: the request's id (the client's X-Request-Id, else a ULID), as usage.knurlogic.request_id
     request_id: str | None = None
+    #: who made it (X-Client-Session / -Role / -Run; telemetry.md): the
+    #: owner of the prompt-cache entries it makes. No session: owns nothing
+    session: str | None = None
+    role: str | None = None
+    run: str | None = None
+    #: X-Cache-Retain: pin -- its session's entries are never auto-deleted
+    pin: bool = False
 
     def cancel(self) -> None:
         """From the HTTP thread: the client went away; free the row."""
@@ -313,6 +320,16 @@ class PromptCache:
         self.lru = LRUPromptCache(max_size=max_size,
                                   **({"max_bytes": max_bytes}
                                      if max_bytes else {}))
+        #: the side map: {tuple(tokens): {session, role, run, pinned, file,
+        #: saved_at}} of the entries a session made. mlx-lm's LRU evicts
+        #: silently (and drops prefixes on insert): pruned against it lazily
+        self.owners: dict = {}
+        #: sessions pinned (X-Cache-Retain: pin, or POST .../pin): sticky
+        #: on this server, for their later entries too
+        self.pinned: set = set()
+        #: {session: time.time() of its last entry}: a pinned session idle
+        #: longer than PARK_IDLE_S is parked (Scheduler._park_idle)
+        self.seen: dict = {}
 
     def fetch(self, key, tokens):
         from mlx_lm.models import cache as C
@@ -340,10 +357,67 @@ class PromptCache:
             return min(len(tokens) - 1, r.common_prefix)
         return short
 
-    def insert(self, key, tokens, cache, kind: str, origin=None) -> None:
+    def insert(self, key, tokens, cache, kind: str, origin=None,
+               owner: dict | None = None) -> None:
         """`origin`: (event, uid) the cache came from -- what a ring's
-        journal names (engine/runtime/tensor.JournalPromptCache)."""
+        journal names (engine/runtime/tensor.JournalPromptCache). `owner`:
+        {session, role, run} of the request that made it."""
         self.lru.insert_cache(key, list(tokens), cache, cache_type=kind)
+        self.own(tokens, owner)
+
+    def own(self, tokens, owner: dict | None) -> None:
+        """Record who an entry (just inserted) belongs to. A new insert of
+        the same tokens is a new entry: not on disk until saved again."""
+        t = tuple(tokens)
+        s = (owner or {}).get("session")
+        if not s:
+            self.owners.pop(t, None)
+            return
+        self.owners[t] = {"session": s, "role": owner.get("role"),
+                          "run": owner.get("run"),
+                          "pinned": s in self.pinned, "file": None,
+                          "saved_at": None}
+        self.seen[s] = time.time()
+
+    def live(self) -> list:
+        """(model, tokens, CacheEntry, meta or None) of every entry in the
+        LRU, least recent first; prunes the side map of what is gone."""
+        from knurlogic.engine.serve import prompt_disk
+        out = [(m, t, e, self.owners.get(tuple(t)))
+               for m, t, e in prompt_disk._lru_entries(self.lru)]
+        here = {tuple(t) for _, t, _, _ in out}
+        for t in [t for t in self.owners if t not in here]:
+            del self.owners[t]
+        return out
+
+    def of_session(self, session: str) -> list:
+        """(model, tokens) of the live entries `session` owns: the one
+        selection a drop, a park and a save of a session share."""
+        return [(m, t) for m, t, _, meta in self.live()
+                if meta is not None and meta["session"] == session]
+
+    def remove(self, model, tokens) -> bool:
+        from knurlogic.engine.serve import prompt_disk
+        self.owners.pop(tuple(tokens), None)
+        return prompt_disk.remove_entry(self.lru, model, tokens)
+
+    def drop(self, session: str) -> int:
+        """Every entry of `session` out of memory; forgets its pin."""
+        n = sum(self.remove(m, t) for m, t in self.of_session(session))
+        self.pinned.discard(session)
+        self.seen.pop(session, None)
+        return n
+
+    def set_pinned(self, session: str, pinned: bool) -> int:
+        """Pin or unpin `session` here (its live entries and its later
+        ones). Returns its live entries."""
+        (self.pinned.add if pinned else self.pinned.discard)(session)
+        n = 0
+        for meta in self.owners.values():
+            if meta["session"] == session:
+                meta["pinned"] = bool(pinned)
+                n += 1
+        return n
 
     def trim_to(self, n_bytes: int) -> None:
         self.lru.trim_to(n_bytes=n_bytes)
@@ -367,6 +441,9 @@ class Command:
     error: str = ""
     #: what a "save" did (engine/serve/prompt_disk.save's counts)
     result: dict | None = None
+    #: a "drop" or "pin"'s session, and a "pin"'s word
+    session: str | None = None
+    pinned: bool = True
 
 
 def _checkpoints(segs, n: int, hit: int) -> list[int]:
@@ -379,6 +456,23 @@ def _checkpoints(segs, n: int, hit: int) -> list[int]:
         if hit < at < n:
             out.append(at)
     return out
+
+
+#: a pinned session with no new entry this long has its entries moved to
+#: disk and freed from memory (read back on its next request)
+PARK_IDLE_S = 600.0
+#: how often idle pinned sessions are looked for
+PARK_CHECK_S = 30.0
+
+
+def _owner(job) -> dict | None:
+    """{session, role, run} of the request a cache entry came from, or
+    None when it named no session (it owns nothing)."""
+    s = getattr(job, "session", None)
+    if not s:
+        return None
+    return {"session": s, "role": getattr(job, "role", None),
+            "run": getattr(job, "run", None)}
 
 
 @dataclass
@@ -448,6 +542,16 @@ class Scheduler:
         #: prompt-cache entries restored from disk at this load and not yet
         #: served: {tuple(tokens): {"tokens", "read_ms"}}
         self._restored: dict = {}
+        #: the loaded model's disk key, and {tuple(tokens): {"file",
+        #: "owner"}} of its key directory's files: what an admission reads
+        #: back on demand (_read_back), kept current at each save and drop
+        self._disk_key: dict | None = None
+        self._disk_index: dict = {}
+        #: when idle pinned sessions were last looked for (monotonic)
+        self._park_checked = time.monotonic()
+        #: the last measured prefill rate (tok/s) of this model: the
+        #: save's break-even rule (prompt_disk.not_worth); None: not yet
+        self._prefill_tps: float | None = None
         if hasattr(host, "after_bind"):
             host.after_bind = self._restore_disk
         self.stats = stats if stats is not None else {}
@@ -561,11 +665,31 @@ class Scheduler:
     def unload(self, *, force: bool = True) -> Command:
         return self._command(Command("unload", None, force))
 
-    def save_prompt_cache(self) -> Command:
+    def save_prompt_cache(self, session: str | None = None) -> Command:
         """Queue a save of the prompt cache to disk (prompt_disk.save), on
         the scheduler thread between steps; on a ring every rank saves its
-        own part. Command.result has the counts."""
-        return self._command(Command("save", None))
+        own part. `session`: only that session's newest entry (its longest),
+        if not on disk yet -- what a client asks for right after its context
+        compacts. Command.result has the counts."""
+        return self._command(Command("save", None, session=session))
+
+    def drop_prompt_cache(self, session: str) -> Command:
+        """Queue a drop of `session`'s prompt-cache entries: out of memory
+        (on a ring every rank's part, a `drop` op) and its files off disk
+        under every model's key. Command.result: {"memory", "disk"}."""
+        return self._command(Command("drop", None, session=session))
+
+    def pin_prompt_cache(self, session: str, pinned: bool) -> Command:
+        """Queue a pin (or unpin) of `session`: its files are then never
+        swept, only dropped. Command.result: {"session", "pinned",
+        "entries"}."""
+        return self._command(Command("pin", None, session=session,
+                                     pinned=bool(pinned)))
+
+    def list_prompt_cache(self) -> Command:
+        """Queue a listing of the in-memory entries (read between steps).
+        Command.result: {"entries": [...], "key_id", "model"}."""
+        return self._command(Command("list", None))
 
     def share_live(self, applied: dict) -> None:
         """Knobs this server just applied live (engine/serve.apply_live):
@@ -720,6 +844,7 @@ class Scheduler:
     def _tick(self) -> None:
         self._sample_pressure()
         self._do_commands()
+        self._park_idle()
         if self.tensor is not None:
             self._journal_sets()
         self._take_jobs()
@@ -770,9 +895,22 @@ class Scheduler:
             if c.kind == "save":
                 c.started.set()
                 try:
-                    c.result = self._save_disk()
+                    c.result = self._save_session(c.session) if c.session \
+                        else self._save_disk()
                     if self.tensor is not None:
-                        self.tensor.journal.add("save_cache")
+                        self.tensor.journal.add(
+                            "save_cache", **({"session": c.session}
+                                             if c.session else {}))
+                finally:
+                    c.done.set()
+                continue
+            if c.kind in ("drop", "pin", "list"):
+                c.started.set()
+                try:
+                    c.result = getattr(self, "_cmd_" + c.kind)(c)
+                except Exception as e:  # answered as the command's error (logged)
+                    logger.exception("prompt cache %s failed", c.kind)
+                    c.error = f"{type(e).__name__}: {e}"
                 finally:
                     c.done.set()
                 continue
@@ -808,6 +946,8 @@ class Scheduler:
                 if getattr(self.host, "model", None) is not None:
                     self._save_disk()
                 self._restored = {}
+                self._disk_key, self._disk_index = None, {}
+                self._prefill_tps = None
                 self.cache = self._new_cache(self.cache.lru.max_size)
                 # what was measured belongs to the model it was measured on
                 # (a 35B's slope admitting a 397B's prompt is the abort the
@@ -879,10 +1019,16 @@ class Scheduler:
 
     # ------------------------------------------- the prompt cache on disk
 
-    def _save_disk(self) -> dict | None:
-        """The prompt cache to disk under the loaded model's key
-        (engine/serve/prompt_disk). Never raises: a save that fails is
-        logged and the unload goes on."""
+    def _save_disk(self, only_new: bool = False,
+                   select=None) -> dict | None:
+        """The sessions' prompt-cache entries to disk under the loaded
+        model's key (engine/serve/prompt_disk); anonymous entries are not
+        saved, nor one quicker to recompute than to read back (the
+        break-even rule; on a single server only: a ring's ranks must all
+        keep the same entries, and each has its own bytes). `only_new`:
+        only what is not on disk yet; `select`: these token tuples only.
+        Never raises: a save that fails is logged and the unload goes
+        on."""
         if self.cache is None:
             return None
         from knurlogic.engine.serve import prompt_disk
@@ -890,10 +1036,100 @@ class Scheduler:
             key = prompt_disk.host_key(self.host)
             if key is None:
                 return None
-            return prompt_disk.save(self.cache.lru, key)
+            self.cache.live()               # prunes the side map
+            got = prompt_disk.save(
+                self.cache.lru, key, owners=self.cache.owners,
+                only_new=only_new, select=select,
+                prefill_tps=self._prefill_tps if self.tensor is None
+                else None,
+                model=Path(self.host.path or "").name or None)
+            for t, meta in self.cache.owners.items():
+                if meta.get("file"):
+                    self._disk_index[t] = {
+                        "file": Path(meta["file"]),
+                        "owner": {k: meta[k] for k in
+                                  ("session", "role", "run")}}
+            return got
         except Exception:  # never fails an unload or a stop (logged)
             logger.exception("saving the prompt cache to disk failed")
             return None
+
+    def _save_session(self, session: str) -> dict | None:
+        """POST /v1/prompt-cache/save {"session"}: that session's newest
+        entry -- its longest -- to disk if it is not there yet."""
+        mine = [tuple(t) for _, t in self.cache.of_session(session)] \
+            if self.cache is not None else []
+        if not mine:
+            return {"saved": 0, "kept": 0, "skipped": 0, "bytes": 0,
+                    "why": [], "entries": 0, "not_worth": 0}
+        return self._save_disk(only_new=True, select={max(mine, key=len)})
+
+    def _park_idle(self) -> None:
+        """Between steps, at most every PARK_CHECK_S: a pinned session with
+        no new entry for PARK_IDLE_S is parked -- its entries saved and
+        freed from memory -- on a single server (a ring has no read-back
+        yet: parked, it would only miss)."""
+        now = time.monotonic()
+        if self.tensor is not None or self.cache is None or \
+                not self.cache.pinned or self.host.state != "ready" or \
+                now - self._park_checked < PARK_CHECK_S:
+            return
+        self._park_checked = now
+        busy = {getattr(r.job, "session", None)
+                for r in self._rows.values()} | \
+            {getattr(j, "session", None) for j in self._waiting}
+        for s in sorted(self.cache.pinned - busy):
+            if time.time() - self.cache.seen.get(s, 0.0) > PARK_IDLE_S:
+                self._park(s)
+
+    def _park(self, session: str) -> int:
+        """`session`'s entries to disk (what is not there yet), then out of
+        memory -- one the save did not write (not worth it, unsaveable)
+        stays. Its next request reads them back (_read_back). Returns how
+        many were freed."""
+        mine = {tuple(t) for _, t in self.cache.of_session(session)}
+        if mine:
+            self._save_disk(only_new=True, select=mine)
+        n = 0
+        for m, t in self.cache.of_session(session):
+            meta = self.cache.owners.get(tuple(t)) or {}
+            if meta.get("file") and Path(meta["file"]).exists():
+                n += self.cache.remove(m, t)
+        if n:
+            logger.info("prompt cache: pinned session %s idle; %d entr%s "
+                        "parked on disk", session, n,
+                        "y" if n == 1 else "ies")
+        return n
+
+    def _read_back(self, job: Job, prompt: list) -> None:
+        """Before the admission's hit: when an entry of this model on disk
+        is a prefix of `prompt` and longer than the best memory hit, read
+        it back into the prompt cache (here, on the scheduler thread), so
+        fetch() serves it -- and usage.knurlogic.cache.disk says so, like a
+        restored hit. Any on-disk entry, pinned or not. A single server
+        only: a ring's ranks would each have to read theirs in step."""
+        if not self._disk_index or self.tensor is not None or \
+                self._disk_key is None:
+            return
+        hit = self.cache.hit_length(self.host.model_key, prompt)
+        best = None
+        for t in self._disk_index:
+            n = len(t)
+            if n > hit + 1 and n <= len(prompt) and \
+                    (best is None or n > len(best)) and \
+                    tuple(prompt[:n]) == t:
+                best = t
+        if best is None:
+            return
+        from knurlogic.engine.serve import prompt_disk
+        f = self._disk_index[best]["file"]
+        got = prompt_disk.read(self._disk_key, [f])
+        if not got:
+            self._disk_index.pop(best, None)    # gone or corrupt: a miss
+            return
+        back = prompt_disk.insert(self.cache.lru, self.host.model_key, got)
+        prompt_disk.adopt(self.cache.owners, self.cache.pinned, back)
+        self._restored.update(back)
 
     def _restore_disk(self) -> None:
         """ModelHost.after_bind: what was saved for this model, into the
@@ -909,6 +1145,64 @@ class Scheduler:
             self.cache.lru, self.host.model_key, key,
             max_bytes=self.cache_bytes,
             link=self.tensor.link if self.tensor is not None else None)
+        prompt_disk.adopt(self.cache.owners, self.cache.pinned,
+                          self._restored)
+        self._disk_key = key
+        self._disk_index = {}
+        if key is not None and self.tensor is None:
+            try:
+                self._disk_index = prompt_disk.index(
+                    prompt_disk.root() / prompt_disk.key_id(key))
+            except OSError:
+                logger.exception("prompt cache: indexing the saved entries")
+
+    # ------------------------------------------ sessions' entries (commands)
+
+    def _cmd_drop(self, c: Command) -> dict:
+        from knurlogic.engine.serve import prompt_disk
+        s = c.session
+        mem = self.cache.drop(s) if self.cache is not None else 0
+        disk = prompt_disk.drop_files(s)
+        for t in [t for t, v in self._disk_index.items()
+                  if (v.get("owner") or {}).get("session") == s]:
+            del self._disk_index[t]
+        for t in [t for t, v in self._restored.items()
+                  if (v.get("owner") or {}).get("session") == s]:
+            del self._restored[t]
+        logger.info("prompt cache: session %s dropped (%d in memory, %d on "
+                    "disk)", s, mem, disk)
+        return {"session": s, "memory": mem, "disk": disk}
+
+    def _cmd_pin(self, c: Command) -> dict:
+        n = self._pin(c.session, c.pinned)
+        return {"session": c.session, "pinned": c.pinned, "entries": n}
+
+    def _pin(self, session: str, pinned: bool) -> int:
+        from knurlogic.engine.serve import prompt_disk
+        n = self.cache.set_pinned(session, pinned) \
+            if self.cache is not None else 0
+        prompt_disk.set_pin(session, pinned)
+        return n
+
+    def _cmd_list(self, c: Command) -> dict:
+        from knurlogic.engine.serve import prompt_disk
+        key = self._disk_key
+        out = []
+        for _m, t, e, meta in (self.cache.live() if self.cache else []):
+            meta = meta or {}
+            ints = all(isinstance(x, int) for x in t)
+            f = meta.get("file")
+            out.append({
+                "session": meta.get("session"), "role": meta.get("role"),
+                "run": meta.get("run"), "tokens": len(t),
+                "bytes": int(e.nbytes), "in_memory": True,
+                "on_disk": bool(f) and Path(f).exists(),
+                "saved_at": meta.get("saved_at"),
+                "pinned": bool(meta.get("pinned")),
+                "hash": prompt_disk.tokens_hash(t) if ints else None})
+        return {"entries": out,
+                "key_id": prompt_disk.key_id(key) if key else None,
+                "model": Path(self.host.path or "").name or None}
 
     def _disk_hit(self, job: Job, prompt: list, used: int) -> None:
         """The entry fetch() handed `job` is one restored from disk: say so
@@ -1128,6 +1422,12 @@ class Scheduler:
                 job.max_tokens = window - len(prompt) if window else 1 << 20
             elif window:
                 job.max_tokens = min(job.max_tokens, window - len(prompt))
+            s = getattr(job, "session", None)
+            if s and getattr(job, "pin", False) and \
+                    s not in self.cache.pinned:
+                self._pin(s, True)          # sticky for the session
+            if s:
+                self._read_back(job, prompt)
             hit = getattr(self.cache, "hit_length", lambda k, t: 0)(
                 self.host.model_key, prompt)
             lean = self._make_room(len(prompt),
@@ -1887,7 +2187,8 @@ class Scheduler:
                 if row.types:
                     self.cache.insert(self.host.model_key, e.tokens, e.cache,
                                       row.types.pop(0),
-                                      origin=("checkpoint", e.uid))
+                                      origin=("checkpoint", e.uid),
+                                      owner=_owner(row.job))
             elif isinstance(e, Token):
                 row.made += 1
                 if not row.first:
@@ -1903,7 +2204,8 @@ class Scheduler:
             elif isinstance(e, Finished):
                 self._learn(e.tokens, e.cache)
                 self.cache.insert(self.host.model_key, e.tokens, e.cache,
-                                  "assistant", origin=("finished", e.uid))
+                                  "assistant", origin=("finished", e.uid),
+                                  owner=_owner(row.job))
                 self._done(e.uid)
             elif isinstance(e, RowFailure):
                 self._rows.pop(e.uid, None)
@@ -1946,6 +2248,8 @@ class Scheduler:
         if sp is not None:
             sp.to(step_bucket(row.prefilling, "host"), done)
             timing.update(sp.report(done))
+        if timing.get("prefill_tok_s"):
+            self._prefill_tps = float(timing["prefill_tok_s"])
         kn = usage.setdefault("knurlogic", {})
         kn["timing"] = timing
         rid = getattr(row.job, "request_id", None)

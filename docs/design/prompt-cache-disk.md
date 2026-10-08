@@ -11,7 +11,8 @@ followers in `engine/runtime/tensor.serve_follower` / `follow`.
 
 ## When
 
-- **Save**: when the model unloads or is switched (`Scheduler._do_commands`,
+- **Save** (entries with a session only; see Sessions): when the model
+  unloads or is switched (`Scheduler._do_commands`,
   after the rows are failed and the executor closed, before the prompt
   cache is replaced), when the server stops (`Scheduler._run`'s cleanup;
   on a ring after the other ranks are sent `stop`, and each of them saves
@@ -116,6 +117,51 @@ from an entry restored from disk, and how long that entry took to read.
 hit; `used == 0` a cold prefill. Once the session's next answer is cached,
 its hits come from that newer, in-memory entry. The ledger keeps it per
 request as `disk_tokens`.
+
+## Sessions
+
+The cache belongs to the agent (the client session), not the model.
+
+- **Owner.** Each entry records `{session, role, run}` from the request
+  that made it (`X-Client-Session` / `-Role` / `-Run`, the ledger's parsing
+  and byte limits) in a side map on `PromptCache` keyed by the entry's
+  token tuple, pruned lazily against mlx-lm's LRU (which evicts
+  silently). On a ring the `insert` op carries the owner, so every rank's
+  side map mirrors rank 0's. A request with no session owns nothing, and
+  its entries are never saved. Files carry `owner`, `pinned`, `saved_at`
+  and `model` in their header; restore puts them back.
+- **Saves.** Unload / stop / `POST .../save` with no body: every live
+  entry that has a session. `POST .../save {"session"}`: that session's
+  newest entry (its longest), written only if not already on disk --
+  under a new gen, renaming nothing, so a restore still inserts oldest
+  save first. There is no timed save.
+- **Break-even.** An entry is not written when recomputing it (tokens /
+  the last measured prefill tok/s) is quicker than reading it back (bytes
+  / `prompt_disk.READ_BPS`, 3 GB/s: the M3 read 70-128 MB in ~24 ms).
+  Counted `not_worth`. No rate measured yet: written. Off on a ring (every
+  rank must keep the same entries, and each has its own bytes).
+- **Drop.** `POST /v1/prompt-cache/drop {"session"}`, between steps:
+  out of memory (mlx-lm 0.32 has no single-entry removal;
+  `prompt_disk.remove_entry` does what its `insert_cache` does to a
+  replaced entry: `PromptTrie.pop`, `CacheOrder.remove`, the byte
+  counters), its files off disk under every key, its pin forgotten. A
+  `drop` op on a ring.
+- **Pins.** `X-Cache-Retain: pin` (sticky for the session on this
+  server) or `POST .../pin`. Stored in one `pins.json` at the cache root
+  (`{session: bool}`, written atomically): a pin never rewrites an entry
+  file; a header's `pinned` is only what it was at write. The sweep never
+  deletes a pinned session's files (TTL nor budget; the budget counts
+  unpinned files only); only a drop does. A `pin` op on a ring.
+- **Parking and read-back.** A pinned session with no new entry for
+  `PARK_IDLE_S` (10 min) has its entries saved and freed from memory. An
+  admission whose best memory hit is shorter than an on-disk entry of
+  this model that prefixes the prompt reads that entry back first (an
+  in-memory index of the key directory's tokens, built at restore,
+  updated at save and drop: no file is opened to look). Any on-disk
+  entry, pinned or not; reported in `usage.knurlogic.cache.disk`. Single
+  server only for now: a ring's ranks would each have to read in step.
+- **Registry.** `GET /v1/prompt-cache`: memory entries (between steps)
+  and every model's files (headers only), one row per entry.
 
 ## What it cannot do
 
