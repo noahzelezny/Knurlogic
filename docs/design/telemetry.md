@@ -29,6 +29,10 @@ entries with a session are saved to disk (prompt-cache-disk.md,
   Counts: `saved, kept, skipped, not_worth, entries, bytes, seconds`.
 - `POST /v1/prompt-cache/drop` `{"session"}`: out of memory and off disk
   (every model). `{memory, disk}`.
+- `POST /v1/prompt-cache/drop` `{"sessionless": true[, "older_than_s"]}`:
+  the loaded model's entries no session owns (calls without
+  `X-Client-Session`, the shared system-prompt copies); with an age, only
+  its files unused that long (memory untouched).
 - `POST /v1/prompt-cache/pin` `{"session", "pinned"}`.
 - `POST /v1/prompt-cache/park` `{"session"}`: saved to disk (what is not
   there yet), then freed from memory; the next request reads it back.

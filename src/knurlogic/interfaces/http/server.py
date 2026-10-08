@@ -771,8 +771,27 @@ class Handler(BaseHTTPRequestHandler):
     def _drop_prompt_cache(self, raw: bytes) -> None:
         """POST /v1/prompt-cache/drop {"session"}: that session's entries
         out of memory (every rank's part on a ring) and its files off disk
-        under every model's key. The loopback operator only."""
+        under every model's key. {"sessionless": true[, "older_than_s"]}:
+        the loaded model's entries no session owns (calls that named none,
+        the shared system-prompt copies) -- with an age, only its files
+        unused that long. The loopback operator only."""
         if self._refused_remote("dropped"):
+            return
+        try:
+            body = json.loads(raw or b"{}")
+        except ValueError:
+            body = None
+        if isinstance(body, dict) and body.get("sessionless") is True:
+            age = body.get("older_than_s")
+            if age is not None and (isinstance(age, bool) or
+                                    not isinstance(age, (int, float))
+                                    or age < 0):
+                return self._error(O.ApiError(
+                    400, '"older_than_s" is a number of seconds'))
+            r = self._cache_command(
+                self.app.scheduler.drop_sessionless(age), "drop")
+            if r is not None:
+                self._json(200, {"object": "prompt_cache.drop", **r})
             return
         got = self._session_body(raw)
         if got is None:

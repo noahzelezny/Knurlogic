@@ -679,6 +679,11 @@ class JournalPromptCache:
         self.journal.add("drop", session=session)
         return n
 
+    def drop_sessionless(self) -> int:
+        n = self.inner.drop_sessionless()
+        self.journal.add("drop_sessionless")
+        return n
+
     def set_pinned(self, session: str, pinned: bool) -> int:
         n = self.inner.set_pinned(session, pinned)
         self.journal.add("pin", session=session, pinned=bool(pinned))
@@ -876,6 +881,11 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
     elif kind == "drop":
         cache.drop(op["session"])
         prompt_disk.drop_files(op["session"])
+    elif kind == "drop_sessionless":
+        cache.drop_sessionless()          # memory only: rank 0's call drops
+        # files by age on its own; each rank's files are its own part, and
+        # a ring's model is the same on every rank, so rank 0's choice
+        # (all, no age) is this rank's too
     elif kind == "pin":
         cache.set_pinned(op["session"], op["pinned"])
         prompt_disk.set_pin(op["session"], op["pinned"])
