@@ -5,7 +5,7 @@
 :root{
   --bg:oklch(.12 0 0);--panel:oklch(.16 0 0);--med:oklch(.22 0 0);
   --fg:oklch(.9 0 0);--dim:oklch(.6 0 0);--faint:oklch(.45 0 0);
-  --line:oklch(.25 0 0);--grid:oklch(.2 0 0/.3);
+  --line:oklch(.25 0 0);--grid:oklch(.26 0 0/.45);
   --ok:oklch(.78 .15 150);--warn:oklch(.78 .15 70);--bad:oklch(.68 .19 25);
   --acc:oklch(.82 .14 185);--accfg:oklch(.14 .02 185);--star:oklch(.86 .17 92);
   --glow:0 0 20px oklch(.82 .14 185/.3);
@@ -397,7 +397,10 @@ select:focus{outline:none;border-color:var(--acc)}
 /* The overlay's header already names the panel; the notch label would say
    it a second time, six lines lower. */
 .sheetbody .panel>.lab{display:none}
-.cbar{position:relative}
+/* the chat bar sits on a solid inset like the machine map and the instance
+   cards, not on the panel's thin gradient */
+.cbar{position:relative;background:var(--bg);border:1px solid var(--line);
+  border-radius:var(--r);padding:8px 10px}
 /* The chat list is a handful tall and scrolls: fifteen chats pushed the
    settings under it off the screen. */
 #chats{max-height:max(6em,calc(100vh - 470px));overflow-y:auto;
