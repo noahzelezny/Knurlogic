@@ -17,7 +17,7 @@ page says where things are.
 | `engine/families/<family>/vision/` | the vision tower and its `Family` (see [vision](vision.md)) |
 | `engine/families/<family>/pipeline_stage.py` | `restage` functions for a pipeline split, where the trunk froze per-layer indices (qwen, glm5) |
 | `engine/families/qwen/kvcache.py` | a family's own cache classes |
-| `engine/register.py` | `register(*names)`: makes `mlx_lm.models.<name>` import knurlogic's vendored module without writing site-packages. Public: vqlab calls it (pinned by `tests/engine/test_register_public.py`) |
+| `engine/register.py` | `register(*names)`: makes `mlx_lm.models.<name>` import knurlogic's vendored module without writing site-packages. Public: external tools that load knurlogic architectures call it (pinned by `tests/engine/test_register_public.py`) |
 | `engine/arch.py` | which architecture module a `model_type` needs, and pins (`supported`, `required_modules`, `check`) |
 | `engine/vendor.py` | `knurlogic vendor`: copy an architecture file and record where it came from |
 | `engine/smoke.py` | `knurlogic smoke`: generate a token and prove where the code came from; `--pin` writes pins |

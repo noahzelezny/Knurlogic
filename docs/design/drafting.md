@@ -5,8 +5,8 @@
 Upstream GLM-5.3-Flash ships its MTP head as a PLAIN layer one past the
 trunk (`layers.45` on Flash: eh_proj/enorm/hnorm glue, a NoPE-MLA
 sparse-attention block with the DSA indexer, a 288-expert MoE, and its own
-`shared_head.norm`). It is extracted with `vqlab mtp-extract`
-(--key-regex '\.layers\.45\.'); the module only LOADS the packed q6 sidecar
+`shared_head.norm`). It is extracted by an external quantization tool
+(selecting keys matching `\.layers\.45\.`); the module only LOADS the packed q6 sidecar
 (`mtp-head-q6.safetensors`, 889 tensors).
 
 Two structural facts, both read off the graft's key set, make this head
@@ -33,7 +33,7 @@ holding the full VLM wrapper, pass its `.language_model`. `arch` is the
 module those classes live in (mlx_vlm.models.glm5_next.language), per the
 registry contract.
 
-Measured in vqlab on a single machine (an M4 Max), not on a cluster:
+Measured with an external quantization/scoring tool on a single machine (an M4 Max), not on a cluster:
 acceptance 0.8516 pooled over 12 prompts x 128 tokens (q6 head, 2.7bpw
 trunk) and 1.05x end-to-end WITHOUT the absorbed-MLA shim. Neither number
 has been measured on a cluster.
@@ -56,7 +56,7 @@ Wiring, from the checkpoint's own key set:
 
 THREE details are not determined by the key set, and each one is a silent
 zero-acceptance failure if guessed wrong. All three are therefore flags,
-and `vqlab mtp-probe35` sweeps them rather than trusting a guess:
+and an external probe sweeps them rather than trusting a guess:
 
   norm_shift  This family stores RMSNorm gains as DELTAS: mlx-lm's
               `TextModel.sanitize` adds 1.0 to every norm it recognizes, but
@@ -145,7 +145,7 @@ it at all. Read the FILES, not the index.
 
 ## src/knurlogic/engine/mtp/batch_generator.py
 
-Ported from the maintainer's own code in github.com/noahzelezny/exo
+Ported from the knurlogic author's earlier exo fork
 (`generator/mtp_batch_generate.py`, Apache-2.0); it contains no code from
 upstream exo.
 

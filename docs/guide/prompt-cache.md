@@ -29,8 +29,8 @@ whose:
 |---|---|
 | `X-Client-Session: <id>` | the conversation these entries belong to |
 | `X-Client-Role`, `X-Client-Run` | optional labels, shown in the registry and usage |
-| `X-Cache-Keep: latest` | keep only this session's newest step (for clients that only append) |
-| `X-Cache-Retain: pin` | never delete this session's saved files |
+| `X-Cache-Keep: latest` | keep only the session's newest step (for clients that only append) |
+| `X-Cache-Retain: pin` | never delete the session's saved files |
 
 A request without `X-Client-Session` still uses the cache, but nobody owns
 its entries and they are never saved.

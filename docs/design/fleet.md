@@ -134,7 +134,7 @@ resets at..."}}`, a `refused` ledger row, and the page shows it.
 - `knurlogic usage [--since 24h] [--group model]` prints it.
 - Export: `knurlogic usage export --since --until > rows.jsonl`.
 
-## Live progress (the harness's request)
+## Live progress
 
 Prefill progress is already on the wire for OpenAI streaming: the
 scheduler's hook puts `("progress", (done, total))` on the job outbox per
@@ -150,8 +150,8 @@ data: {"request_id": "...", "phase": "prefill", "done": 1840, "total": 3200,
 ```
 
 Non-streaming requests get nothing new. Clients that do not know the event
-ignore it (SSE rule). the harness's status line reads it; so can the page's own
-chat. Also `queue` while waiting for admission, with `ahead` from
+ignore it (SSE rule). A client harness can show it in its status line;
+so can the page's own chat. Also `queue` while waiting for admission, with `ahead` from
 `scheduler.requests()`, every second.
 
 ## Fleet

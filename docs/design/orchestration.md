@@ -1,5 +1,8 @@
 # Orchestration: the control plane between pages
 
+Status: built for 0.1.0 (all eight migration steps in section 6 are done;
+section 8 lists what is not in this pass).
+
 The control plane is how knurlogic pages on 2..16 Macs find each other, agree
 on a job, start and watch its ranks, and stop it. Model data (tensors, ring,
 jaccl) stays on MLX's backends and is not part of it.

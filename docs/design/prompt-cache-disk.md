@@ -1,9 +1,13 @@
 # The prompt cache on disk
 
-The ask: an agent harness `docs/design/telemetry.md`, "Ask: save prompt caches to
-disk and restore them" (2026-10-07). A model swap loses every resident
-context, and each session's next request re-prefills it (110k tokens at
-136 tok/s is ~13.5 min). Saved to disk, the reload is a read.
+Status: built.
+
+## Problem
+
+A model swap loses every resident context, and each session's next request
+re-prefills it (110k tokens at 136 tok/s is ~13.5 min). Agent harnesses
+that manage many long-lived sessions hit this on every swap. Saved to
+disk, the reload is a read.
 
 Code: `engine/prompt_cache/disk.py`; the scheduler's `_save_disk`,
 `_restore_disk`, `_disk_hit` (engine/prompt_cache/commands.py); a ring's
@@ -17,10 +21,10 @@ followers in `engine/split/follower.serve_follower` / `follow` and
   (entries with a session, or one session's newest) and `.../park`
   (loopback only), scheduler commands run between steps; on a ring a
   `save_cache` op tells every rank. Never on the request path, and never
-  on its own: an unload, a model switch or a stop saves nothing (the maintainer,
-  2026-10-08: nobody running knurlogic is surprised by cache files; the
-  coordinator -- the harness -- decides what is kept). It was saved at unload
-  and stop until then.
+  on its own: an unload, a model switch or a stop saves nothing. Reason:
+  nobody running knurlogic should be surprised by cache files appearing,
+  and the client coordinating the sessions is the one that knows what is
+  worth keeping. (Earlier builds saved at unload and stop; see History.)
 - **Restore**: `ModelHost.after_bind`, on the loading thread once weights,
   vision and head are bound and before the warm-up: the entries are read
   and inserted into the new in-memory prompt cache. On a ring every rank
@@ -79,7 +83,7 @@ they vote (`prompt_disk.agree`: one all_gather of the count and a digest of
 the entry names, after `Link.align`). Equal everywhere: every rank inserts
 its entries, in the same order, into its own prompt cache, bypassing the
 journal (each does it itself). Any difference -- a split that changed, a
-budget that evicted on one Mac only, a corrupt file -- and none restores: a
+budget that evicted on one machine only, a corrupt file -- and none restores: a
 miss, not an error. Files are read before the vote, so a rank cannot fail
 after agreeing.
 
@@ -139,14 +143,14 @@ The cache belongs to the agent (the client session), not the model.
   save first. There is no timed save.
 - **Break-even.** An entry is not written when recomputing it (tokens /
   the last measured prefill tok/s) is quicker than reading it back (bytes
-  / `prompt_disk.READ_BPS`, 3 GB/s: the M3 read 70-128 MB in ~24 ms).
+  / `prompt_disk.READ_BPS`, 3 GB/s: an M3 Ultra 96 GB read 70-128 MB in ~24 ms).
   Counted `not_worth`. No rate measured yet: written. Off on a ring (every
   rank must keep the same entries, and each has its own bytes).
 - **Park.** `POST /v1/prompt-cache/park {"session"}`, between steps: the
   session's entries saved (only what is not on disk), then freed from
   memory; one the save did not write stays. Its next request reads the
-  longest on-disk prefix back. The client decides when (the harness parks its
-  PM while sub-agents work); the server keeps no idle policy: a
+  longest on-disk prefix back. The client decides when (e.g. an agent
+  harness parks its coordinating session while sub-agents work); the server keeps no idle policy: a
   pin only exempts a session from deletion, never moves it. On a split
   model a `park_session` op has every rank save and free the same
   entries, and a request that hits a parked entry is preceded by a
@@ -170,7 +174,7 @@ The cache belongs to the agent (the client session), not the model.
   deletes a pinned session's files (TTL nor budget; the budget counts
   unpinned files only); only a drop does. A `pin` op on a ring.
 - **Latest step only.** `X-Cache-Keep: latest` (per request; a client
-  that only appends -- the harness's workers -- sends it on every one): the
+  that only appends -- e.g. a harness's worker sessions -- sends it on every one): the
   entries a request makes replace its session's earlier steps, in memory
   and on disk, so a session holds one step (its conversation checkpoint
   and its answer). Its system-prompt checkpoint is nobody's: one copy per
@@ -195,3 +199,11 @@ The cache belongs to the agent (the client session), not the model.
 Cut a segment off the front of a cache: past the first layer every later
 token's K/V carries the removed tokens' influence. A side call keeps the
 whole prefix.
+
+## History
+
+- 2026-10-07: disk save and restore built, saving at unload and stop.
+- 2026-10-08: automatic saves at unload, model switch and stop removed;
+  saves happen only on an explicit client request (save / park).
+- Successor format (layout-independent key, per-layer files):
+  prompt-cache-shards.md.

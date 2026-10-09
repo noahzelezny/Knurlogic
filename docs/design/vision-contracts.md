@@ -1,5 +1,7 @@
 # Vision contracts
 
+Status: built; the interfaces below are in the code and held by tests.
+
 The interfaces every vision component builds against: the families, the
 serve path, the interfaces and the VQ runtime. The code is the authority --
 `src/knurlogic/engine/vision/__init__.py` holds every signature below with

@@ -60,7 +60,7 @@ no bias_vl, no MTP layers).
 
 ## 6. Drafting
 - The maker's MTP / draft head runs, exact and quantized, with its
-  acceptance rate and speedup measured on one Mac.
+  acceptance rate and speedup measured on a single machine.
 - A seeded request reproduces with drafting on.
 
 ## 7. Clusters

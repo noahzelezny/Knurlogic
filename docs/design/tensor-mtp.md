@@ -1,6 +1,8 @@
 # MTP drafting on a tensor split
 
-Status: plan, nothing built. Goal: a tensor-split cluster job drafts with
+Status: designed, not built.
+
+Goal: a tensor-split cluster job drafts with
 the model's MTP head the way a pipeline job does today. The existing MTP
 on/off launch option (`launch["mtp"]`, `--no-draft`, `KNURLOGIC_MTP`) and
 the dynamic switch (`mtp_dynamic`) apply unchanged. No new settings, no UI.
@@ -11,7 +13,7 @@ else below marked *guess* is not measured.
 
 ## Correction to the proposed shape
 
-The proposal said "rank 0 drafts K tokens". The batch loop drafts **one**
+The original proposal said "rank 0 drafts K tokens". The batch loop drafts **one**
 token per step and verifies it in a **2-wide** forward
 (`engine/mtp/batch_loop.py`, `MTPBatch._draft_step`): every row commits
 exactly two tokens per step (t1, then the draft or the trunk's correction),
@@ -227,7 +229,7 @@ sampling:
 
 | Run | Setting |
 |---|---|
-| A | tensor, MTP off (the baseline, rerun the same night) |
+| A | tensor, MTP off (the baseline, rerun in the same sitting) |
 | B | tensor, MTP on, dynamic |
 | C | tensor, MTP on, `KNURLOGIC_MTP_DYNAMIC=off` (always draft) |
 | D | pipeline + MTP (reference) |
@@ -261,12 +263,12 @@ should fall back to plain steps, and B ≈ A shows that.
 3. **Fit** (section 4, test 7.5): `artifact_shape`, `placement`, the
    per-rank refusal. ~0.5 day.
 4. **Live check** (section 8) plus the SKIPZERO head-load check (section 1)
-   on the real artifact. One capped run per condition. ~0.5 day, done by
-   the maintainer or with him present.
+   on the real artifact. One capped run per condition. ~0.5 day, run
+   attended by the maintainer (live hardware).
 
 Total ~2 days (*guess*).
 
-## 10. Open questions for the maintainer
+## 10. Open questions
 
 1. Does the q6 head sidecar load correctly on a tensor rank 0 whose config
    carries `vq_skipzero.shard`? This needs a look at the real 397B
@@ -274,8 +276,8 @@ Total ~2 days (*guess*).
 2. Fit under tensor already omits the vision tower on rank 0
    (`trunk_headers` drops it, though rank 0 encodes). Should `leader_bytes`
    fix both at once, or the head only?
-3. Should d2 be folded into the plan to save B1's all_gather, or should we
-   keep B1 for parity with pipeline? The proposal is to keep it unless
+3. Should d2 be folded into the plan to save B1's all_gather, or should
+   B1 be kept for parity with pipeline? The proposal is to keep it unless
    section 8 shows it matters.
 4. 3+ rank tensor jobs: the same code applies (Coord is N-rank), but only
    2 ranks will be tested. Is that acceptable for now?

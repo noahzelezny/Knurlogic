@@ -1,13 +1,13 @@
-# Memory ledger (design, 2026-09-28) -- replaces measured-memory pacing
+# Memory ledger -- replaces measured-memory pacing
 
-> **Parked (2026-09-28).** Kept for the reasoning; the code lived on the deleted `memory-pacing` branch (last commit a94a8df) and is not in knurlogic. Revisit only against realistic loads (compaction on).
+> **Status: designed, not built; parked (2026-09-28).** Kept for the reasoning; the code lived on the deleted `memory-pacing` branch (last commit a94a8df) and is not in knurlogic. Revisit only against realistic loads (compaction on).
 
 Goal: knurlogic never crashes from memory. Whatever agents send, however many
 at once, whatever else the user opens, the worst outcome is a wait.
 
 Done when: (1) a simulator proves the ledger's invariants; (2) a few-minute
 calibration per model family shows the ledger matches real memory; (3) one
-time-capped soak on the M4 (big model, long agents, another app grabbing
+time-capped soak on an M4 Max 128 GB (big model, long agents, another app grabbing
 memory) passes with no crash.
 
 ## Why the measured-memory guard failed
@@ -18,7 +18,7 @@ prefill is one step) and only reports a mistake after it is made. Every live
 bug in memory-pacing phase 1 came from it; each fix added a heuristic
 (learned prices, x1.3, growth ratio, min-of-readings, reservations).
 
-review also found what the "unexplained" growth was: `BatchKVCache` is one
+A design review also found what the "unexplained" growth was: `BatchKVCache` is one
 dense `[B, H, Lmax, D]` tensor per layer. A 1k row beside a 130k row costs
 130k of full-attention KV, and growth by `concatenate` in 256-token steps
 briefly holds old + new -- a transient the size of the whole batch KV.
@@ -67,9 +67,9 @@ reservations, the measured-room search in `_fits`/`_room_for`/`_make_room`,
    (admit, boundary, pause, resume, finish, cancel, evict, shrink); FIFO, no
    starvation under random arrivals; no pause/resume cycle without a budget
    change. Seconds, no model.
-2. Per-family calibration on the M4, minutes each: cache nbytes match the
+2. Per-family calibration on the M4 Max, minutes each: cache nbytes match the
    formula; one 32k prefill for k_model; measured peak <= ledger.
-3. One soak on the M4, time-capped, pass criteria written first.
+3. One soak on the M4 Max, time-capped, pass criteria written first.
 
 ## Open
 

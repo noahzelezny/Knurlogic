@@ -1,5 +1,10 @@
 # Vision
 
+Status: built and released for qwen3_5, qwen3_5_moe, qwen4_exp, glm5_next
+and gemma4 (DeepSeek-V4-Flash-Vision-Exp: [deepseek-vision.md](deepseek-vision.md)).
+
+## Problem and goal
+
 The released families -- qwen3_5, qwen3_5_moe, qwen4_exp (Flash-Next),
 glm5_next (GLM-5.3), gemma4 -- serve text and images from
 `pip install knurlogic`, with code knurlogic owns rather than mlx-vlm, and
@@ -21,8 +26,9 @@ A VQ model ships its own `model.py`, and that file is what runs it.
 knurlogic carries no VQ runtime of its own: it loads the artifact through
 mlx-lm with the bundled runtime and says that the file WILL be executed. A
 VQ artifact with no `model.py` is refused plainly ("this VQ model does not
-ship its runtime (model.py); re-download it"). When VQLab publishes a newer
-runtime the model is re-published on Hugging Face, and the picker shows an
+ship its runtime (model.py); re-download it"). When the external
+quantization tool that produces VQ models releases a newer runtime, the
+model is re-published on Hugging Face, and the picker shows an
 "update" tag on the downloaded copy (`interfaces/page/updates.py`).
 
 * **Numerics are the model's own.** The bf16-I/O flags are numerics-active
@@ -115,6 +121,23 @@ Reuse depends on the chat template keeping earlier reasoning:
   (it sits in an earlier user turn, before the divergence), but each new
   turn re-prefills the previous answer. A cache checkpoint at the end of
   each user message would recover full reuse; it is not implemented.
+
+## Alternatives considered
+
+Each rejected option and why (details in the module notes below):
+
+* **Depend on mlx-vlm.** Rejected: knurlogic vendors the five towers from
+  mlx-vlm 0.6.17 and owns the serve path, so image reuse across turns and
+  the prefix cache can be designed in; goldens keep the ports honest.
+* **Encode images on the HTTP thread.** Rejected: two threads on one GPU
+  are two uncoordinated allocations.
+* **One cache entry per image list.** Rejected: adding a second image would
+  re-encode the first.
+* **A count-bounded feature cache (mlx-vlm's, 20 entries).** Rejected:
+  feature sizes differ by ~50x between families, so the bound is bytes.
+* **One sentinel per image, or plain pad ids.** Rejected: the key must be
+  as long as the KV, and plain ids let two same-size images collide.
+* **Fetch image URLs.** Rejected: an SSRF hole.
 
 ## Gates
 

@@ -1,6 +1,6 @@
 # The shard-agnostic prompt cache
 
-Status: design, decided 2026-10-08 (the maintainer). Not built yet. Today's format is
+Status: designed, not built (design decided 2026-10-08). Today's format is
 in prompt-cache-disk.md; this replaces its key and its location. Everything
 a client sees (save / park / drop / pin / keep-latest / registry / diverged)
 stays as it is.
@@ -9,7 +9,7 @@ stays as it is.
 
 A saved entry is keyed by the split today: the key holds `{split, world,
 rank}` plus every rank's layer runs. Re-split the 397B (26/34 instead of
-30/30, another Mac first, pipeline instead of tensor) and every saved
+30/30, another machine first, pipeline instead of tensor) and every saved
 session is gone, though the K/V of layer 17 for those tokens is the same
 numbers wherever layer 17 runs. The split decides who holds a layer, not
 what is in it.
@@ -68,16 +68,16 @@ rank.
 
 **Beside the models**, visible: `<models folder>/Prompt cache/`, a folder a
 person sees in Finder next to their models (not a hidden dot-folder), with a README.txt that says it is
-regenerable and safe to delete. the maintainer: software should not hide GBs from
-people.
+regenerable and safe to delete. Reason: software should not hide
+gigabytes of disk use from the people who own the disk.
 
-- **Shared model storage** (a shared external drive, read by both Macs over the
-  network): every Mac reads and writes the same folder. A rank writes only
+- **Shared model storage** (a shared external drive, read by every machine over the
+  network): every machine reads and writes the same folder. A rank writes only
   the layers and heads it holds, so writers never collide on a file. Rank 0
   writes `entry.json` after every rank has reported its files written (one
   journal op), so the entry appears whole or not at all.
-- **No shared storage** (option 2): each Mac keeps its own folder beside its
-  own models. When a load needs a layer or head range this Mac does not
+- **No shared storage** (option 2): each machine keeps its own folder beside its
+  own models. When a load needs a layer or head range this machine does not
   have, it asks the peer page that does: `GET /v1/prompt-cache/piece` over
   the cluster link. The page serves files from its cache folder only.
 - **No writable models folder**: fall back to `~/.cache/knurlogic/prompt-cache/`
@@ -85,7 +85,7 @@ people.
 
 Budget, TTL, pins and the sweep work per folder as today. On shared
 storage only one sweeper may run: the coordinator's rank 0 (as today on a
-ring), and it journals the names it deletes so no other Mac reads a
+ring), and it journals the names it deletes so no other machine reads a
 half-deleted entry.
 
 ## Loading
@@ -126,6 +126,15 @@ transfer.
 Each step ships with its tests and a live check on the split 397B: save,
 re-split differently, reload, and the session hits.
 
+## Alternatives considered
+
+- **Keep the per-split key** (today): simplest, but every re-split
+  orphans every saved session.
+- **A converter from old entries**: not needed; old entries restore under
+  their own split and are rewritten in the new format at the next save.
+- **Keep the hidden cache directory**: rejected for the default, kept as
+  the fallback when the models folder is not writable.
+
 ## Code
 
 All prompt-cache code lives in `engine/prompt_cache/`:
@@ -139,6 +148,6 @@ All prompt-cache code lives in `engine/prompt_cache/`:
 | `report.py` | what a request's usage says about the cache |
 
 The HTTP endpoints are in `interfaces/http/prompt_cache.py`; the page
-forwards them to the Mac that runs the model (`interfaces/page/prompt_cache.py`).
+forwards them to the machine that runs the model (`interfaces/page/prompt_cache.py`).
 The new format adds `layers.py` (per-layer, per-head pieces) and
 `transfer.py` (option 2).
