@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -88,6 +89,13 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 return
             if u.path.startswith(peers.PEER_RELAY + "/v1/"):
                 self._peer_relay("GET", u.path)
+                return
+            if u.path.rstrip("/") in prompt_cache.PIECE_PATHS:
+                # a peer's (or this machine's model server's) read of the
+                # prompt cache's pieces: its own gate (piece_route)
+                prompt_cache.piece_route(self, u.path.rstrip("/"),
+                                         parse_qs(u.query),
+                                         gate=gate_for_peers)
                 return
             if self._gated():
                 return
@@ -263,6 +271,9 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     updates.start_for_page(offline)
     spawn.SERVE_PORT["n"] = serve_port
     spawn.SERVE_PORT["ui"] = port
+    # the model servers this page starts (and cluster ranks a peer's page
+    # starts here) ask it for the peers to fetch prompt-cache pieces from
+    os.environ[prompt_cache.PAGE_PORT_ENV] = str(port)
     from knurlogic.cluster import links
     from knurlogic.cluster.peers import Peers
     me = identity.identity()

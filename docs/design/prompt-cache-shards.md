@@ -1,10 +1,11 @@
 # The shard-agnostic prompt cache
 
-Status: phase 1 built (0.1.6): whole models and pipeline splits, a shared
-folder beside the models, the local fallback. Phases 2 (fetch a missing
-piece from a peer) and 3 (tensor, per head range) are not built; a tensor
-split still saves in prompt-cache-disk.md's per-split format. What phase 1
-changed against this design is under "As built". Everything a client sees
+Status: phases 1 and 2 built (0.1.6): whole models and pipeline splits,
+a shared folder beside the models, the local fallback, and missing pieces
+fetched from a peer when machines do not share storage. Phase 3 (tensor,
+per head range) is not built; a tensor split still saves in
+prompt-cache-disk.md's per-split format. What phases 1 and 2 changed
+against this design is under "As built". Everything a client sees
 (save / park / drop / pin / keep-latest / registry / diverged) stays as it
 is; registry rows gain a `location`.
 
@@ -218,11 +219,72 @@ removes both formats' entries in every root (`entry.json` first).
 the old code. New saves write only the per-layer format (a tensor split
 excepted). No converter.
 
-**Left for later phases.** Phase 2: a rank lacking a piece fetches it
-from the peer page (the seam: `Store.holds` / `read_part` read local
-files only; a fetcher slots in there). Phase 3: tensor splits, per head
+**Left for later phases.** Phase 3: tensor splits, per head
 range (the seam: `part_of` returns None for a tensor layout, and those
 splits keep the per-split format); file names would gain `.h{a}-{b}`.
+
+## As built (phase 2)
+
+**Who fetches, when.** Each rank, for itself, at two points: at load,
+inside `layers.restore` before the rank lists what it can read (so before
+the vote), and at a read-back, before the entry is read (rank 0 in
+`_read_back`, a follower at the `read_back` op; on a ring the index holds
+only restored entries, so nothing is missing there). `transfer.fill`
+lists this model's entries on every answering peer, takes the newest
+(the in-memory cache's count, local and the peers' together), and for
+each one this rank lacks pieces of (entry.json, a layer file of its part,
+`draft.safetensors` when the entry has one and the rank holds the head)
+fetches them from a peer that lists them. An entry some piece of which no
+peer holds is not fetched at all. On shared storage every file is already
+here: nothing is fetched (a read-back of a whole entry asks no peer).
+
+**The routes**, on every page (`interfaces/page/prompt_cache.py`):
+
+- `GET /v1/prompt-cache/entries?key=<key id>`: this machine's whole
+  entries of that key, over every root it knows (`location.known`):
+  `{hash: {gen, seq, n_tokens, draft, layers, sizes}}`.
+- `GET /v1/prompt-cache/piece?key=<key id>&entry=<hash>&layer=<n | draft |
+  entry>`: one file's bytes.
+- `GET /v1/prompt-cache/peers`: the answering peer pages, for this
+  machine's model servers.
+
+The first two take the peer gate every page-to-page route takes
+(`peers.peer_refusal`: no Origin header; arrived on loopback or
+Thunderbolt, or from a `--peer` address); the third is loopback only.
+They are routed before the browser gate, like `/peer/v1/msg`. No request
+string becomes a path: the key id must be 16 hex digits, the entry 24, the
+layer an integer (or `draft` / `entry`); the file is served only when its
+entry has `entry.json` there, it is not a symbolic link, and it resolves
+inside the root (`transfer.piece_path`).
+
+**How a model server reaches the peers.** The page sets
+`KNURLOGIC_PAGE_PORT` (its port) in its environment; the model servers it
+starts, and the cluster ranks a page starts, inherit it, and
+`interfaces/serve.py` installs a `PageFetcher` (engine/prompt_cache never
+imports interfaces: the engine takes a fetcher object, `transfer.use`).
+The fetcher asks the local page for the peer list, then each peer page
+directly. A server started by hand (no page) fetches nothing.
+
+**Verification.** Each piece is downloaded into the entry directory under
+a temp name, then checked: its size equals the peer's listing; a layer or
+draft file's header names this key id, these tokens (hash and count),
+this slot and the format version, and its arrays match the header
+(`layers._read`); a fetched entry.json must carry this model's key, its
+tokens must hash to the entry's name, and its layers be this model's.
+Then it is renamed into place; entry.json is written last, once every
+piece is. A piece that fails is deleted, the next peer listing it is
+tried, and with none left the entry is a miss on this rank (the vote
+drops it on every rank).
+
+**Break-even.** Each peer's transfer rate is measured on every fetch (the
+last one counts). An entry whose missing bytes at the measured rates take
+longer than recomputing its tokens at the measured prefill rate is not
+fetched. Nothing measured yet (a fresh load): fetched. At load the
+prefill rate is usually not measured yet either, so the check bites at
+read-back on a server that has run prefills.
+
+**After.** A fetched file is an ordinary local file: the sweep, TTL and
+pins apply, and the next load reads it without asking.
 
 ## Code
 
@@ -237,7 +299,9 @@ All prompt-cache code lives in `engine/prompt_cache/`:
 | `report.py` | what a request's usage says about the cache |
 | `layers.py` | the per-layer format: Part, key, write / read / complete check, save, commit and restore votes (built) |
 | `location.py` | where the cache root is (built) |
+| `transfer.py` | phase 2: what a rank lacks, fetched through an injected fetcher, verified, written (built) |
 
 The HTTP endpoints are in `interfaces/http/prompt_cache.py`; the page
 forwards them to the machine that runs the model (`interfaces/page/prompt_cache.py`).
-Phase 2 would add `transfer.py`.
+The same page module serves the pieces to peers and holds the fetcher
+(`PageFetcher`) the model server installs.

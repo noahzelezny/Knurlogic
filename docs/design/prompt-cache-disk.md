@@ -214,4 +214,6 @@ whole prefix.
 - 0.1.6: successor format (layout-independent key, per-layer files,
   beside the models) built for whole models and pipeline splits:
   prompt-cache-shards.md. The sweep, pins (one pins.json per root), drops
-  and the registry cover both formats and every root.
+  and the registry cover both formats and every root. Machines without
+  shared storage fetch the per-layer pieces they lack from a peer's page
+  (phase 2); fetched files are local files like any other.

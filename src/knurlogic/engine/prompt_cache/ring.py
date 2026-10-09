@@ -145,6 +145,8 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
         # about to admit: this rank reads its own part, by the same name.
         # Missing, the ranks would prefill different lengths -- out of step
         if store is not None and layers.is_entry_name(op["name"]):
+            from knurlogic.engine.prompt_cache import transfer
+            transfer.fill(store, dirs=[store.dir / op["name"]])
             got = store.read([store.dir / op["name"]])
         else:
             got = prompt_disk.read(disk_key, [disk_dir / op["name"]]) \

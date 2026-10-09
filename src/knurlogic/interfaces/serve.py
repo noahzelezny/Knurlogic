@@ -480,6 +480,10 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if pc_bytes:
         serving["prompt_cache_bytes"] = pc_bytes
     print(f"prompt cache  {pc_why}")
+    # a server a page started: saved entries' pieces this machine lacks
+    # are fetched from that page's peers (machines without shared storage)
+    from knurlogic.interfaces.page import prompt_cache as page_prompt_cache
+    page_prompt_cache.install_fetcher()
 
     if world > 1 and int(ring["rank"]) > 0:
         # a follower: no HTTP, no scheduler -- rank 0's plans, until it stops

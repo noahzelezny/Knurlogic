@@ -21,6 +21,17 @@
   every Mac uses the same folder. When that folder cannot be written, it
   falls back to `~/.cache/knurlogic/prompt-cache/`. The log says which;
   `GET /v1/prompt-cache` rows carry a `location`.
+* Machines that do not share model storage each keep their own cache
+  folder; a rank that lacks some files of a saved entry (saved under
+  another split, or loaded on one machine) fetches them from the peer's
+  page before the load's vote and before a read-back
+  (prompt-cache-shards.md, phase 2). Pages serve
+  `GET /v1/prompt-cache/entries` and `/v1/prompt-cache/piece` to peers
+  only (the peer gate; names checked against their formats, files inside
+  the cache folder only). Each piece is checked (size, header, arrays)
+  before it is kept; a refused piece makes the entry a miss. A fetch
+  slower than recomputing, at the measured rates, is skipped. Fetched
+  files are ordinary cache files.
 * Entries saved by 0.1.5 are still read under their own split; new saves
   use the new layout only. A tensor split still saves per split.
 

@@ -61,6 +61,11 @@ def _no_real_cache(monkeypatch, tmp_path_factory):
     # lookup patches it itself.
     from knurlogic.machine import servers
     monkeypatch.setattr(servers, "listener_pid", lambda port: None)
+    # and no prompt-cache fetcher: a page started in this process sets the
+    # port its servers ask for peers; a restore must not ask a real page
+    monkeypatch.delenv("KNURLOGIC_PAGE_PORT", raising=False)
+    from knurlogic.engine.prompt_cache import transfer
+    monkeypatch.setattr(transfer, "_FETCHER", [None])
 
 
 # --- no process a test starts outlives it ------------------------------------

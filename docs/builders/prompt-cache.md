@@ -14,6 +14,7 @@ Everything is in one package, `src/knurlogic/engine/prompt_cache/`:
 | `memory.py` | `PromptCache`: mlx-lm's LRU trie plus who owns each entry (`owners`), pins, shared checkpoints, keep-latest |
 | `layers.py` | the per-layer format (whole models and pipeline splits): `Part` (which slots a rank holds), `shard_key`, `Store` (write / read / complete check, save, index), `commit` (the ring's entry.json vote), `restore` and `agree` (the load's vote) |
 | `location.py` | where the cache root is: `<models folder>/Prompt cache/`, else the fallback; `locations.json` remembers every root |
+| `transfer.py` | machines without shared storage: what this rank lacks of an entry, fetched from a peer (`fill`), verified, renamed into place; `listing` / `piece_path` are what a page serves. No networking: the fetcher is injected (`use`) |
 | `disk.py` | the per-split format (a tensor split's, and entries earlier builds wrote), the object encoding both formats use, the settings, the sweep (TTL and budget, both formats, per root), pins.json, drops, the registry's disk side, the per-split vote (`agree`) |
 | `commands.py` | `PromptCacheCommands`, a mixin of the `Scheduler`: save, park, drop, pin, list, read-back, divergence, restore at load |
 | `ring.py` | a split model: `JournalPromptCache` journals every cache change, `apply_cache_op` replays it on the other ranks |
@@ -25,6 +26,10 @@ Outside it, only thin hooks:
   mixin of the model server's handler (only `interfaces/` serves HTTP).
 - `interfaces/page/prompt_cache.py` (`prompt_cache_forward`): the page forwards
   to the right model server, or through the peer relay to another Mac.
+  The same module serves saved pieces to peers (`piece_route`:
+  `/v1/prompt-cache/entries`, `/piece`, `/peers`, behind the peer gate)
+  and holds `PageFetcher`, which `interfaces/serve.py` installs into
+  `transfer` when a page started the server (`KNURLOGIC_PAGE_PORT`).
 - `engine/runtime/scheduler.py` inherits the commands mixin and calls
   into it at admission (read-back, divergence) and at load (restore).
 - `engine/split/plan.py`: the schema every journaled op must match.
@@ -63,6 +68,12 @@ tensor code or HTTP server only by a call into it.
 - **Only rank 0 deletes files on a ring**, and it journals the names
   (`drop_files`), so no rank reads an entry another has half-deleted.
   Followers save with `sweep_after=False` and read with `sweep_first=False`.
+- **A fetched piece is checked before it is a file.** `transfer.fill`
+  downloads under a temp name, checks the size against the peer's
+  listing and the header (key id, tokens, slot) and arrays as a read
+  does, then renames; entry.json last. A request's names never become a
+  path: `transfer.piece_path` matches each against its format and keeps
+  the file inside a root.
 - **A file is complete or absent.** Write to a temp name, then rename. A
   read checks the key, token count, hash and bytes; any mismatch deletes
   the file and is a miss, never an error.
@@ -86,7 +97,10 @@ checklist: [new-model.md](../design/new-model.md), "Cache saving".
 park, the journal), `test_prompt_disk.py` (format, sweep, restore),
 `test_prompt_cache_layers.py` (save under one split, restore under
 another; incomplete entries; location; sweep and pins on entry
-directories; a follower's ops), `test_pipeline.py`'s two-process
+directories; a follower's ops), `test_prompt_cache_transfer.py` (two
+machines' roots: restore under another split with the missing pieces
+fetched, refused pieces, the route's guards, read-back fetch),
+`test_pipeline.py`'s two-process
 `test_a_prompt_cache_saved_under_one_cut_restores_under_another`,
 `tests/interfaces/test_prompt_cache_http.py` and
 `test_prompt_cache_page.py` (endpoints and forwarding). Run all:

@@ -91,7 +91,12 @@ says which one is used, and `GET /v1/prompt-cache` lists each entry's
 A saved prompt does not depend on how a model is split across Macs: a
 session saved on one Mac is found again when the same model runs split
 over two (pipeline), and the other way round, or with the layers cut
-differently. On a shared drive both Macs use the same folder. A model
+differently. On a shared drive both Macs use the same folder. When
+each Mac keeps its models on its own disk, each has its own folder: a
+Mac that needs layers another Mac saved copies them from that Mac's page
+(over the link the pages use) before the model's first request, and
+keeps them. A copy that would take longer than reading the prompt again
+is skipped. A model
 split by tensor still saves per split. Entries saved by 0.1.5 are still
 read back for the split they were saved under; new saves use the new
 layout.

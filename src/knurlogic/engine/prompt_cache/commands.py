@@ -270,6 +270,12 @@ class PromptCacheCommands:
         st = self._store
         if f.is_dir() and st is not None and f.name in st.pending:
             return          # its entry.json waits for the ring's commit
+        if f.is_dir() and st is not None:
+            # pieces another machine holds, fetched first (transfer.fill;
+            # nothing on a ring, whose index holds only restored entries)
+            from knurlogic.engine.prompt_cache import transfer
+            st.prefill_tps = self._prefill_tps
+            transfer.fill(st, dirs=[f], prefill_tps=self._prefill_tps)
         got = st.read([f]) if f.is_dir() and st is not None \
             else prompt_disk.read(self._disk_key, [f])
         if not got:

@@ -6,6 +6,9 @@ the scheduler's commands on it (docs/design/prompt-cache-disk.md).
   layers.py    the entries on disk, one file per layer, readable under
                any split (whole model, pipeline): save, commit, restore
                (docs/design/prompt-cache-shards.md)
+  transfer.py  an entry's missing pieces, fetched from a peer's page
+               (machines without shared storage); the fetcher is
+               installed by the interfaces side
   location.py  where they live: <models folder>/Prompt cache/, else
                the fallback under ~/.cache
   disk.py      the per-split format (tensor splits, older entries), the
@@ -17,6 +20,7 @@ the scheduler's commands on it (docs/design/prompt-cache-disk.md).
   report.py    usage.knurlogic.cache: what the prompt cache did for a
                request
 
-The HTTP side (/v1/prompt-cache) is interfaces/http/prompt_cache.py.
+The HTTP side (/v1/prompt-cache) is interfaces/http/prompt_cache.py;
+the pieces a peer fetches are served by interfaces/page/prompt_cache.py.
 Import from the submodules.
 """

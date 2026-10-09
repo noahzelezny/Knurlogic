@@ -32,8 +32,10 @@ over the ring's link after the ranks' saves), so an entry is whole or
 absent. An entry directory without `entry.json` is incomplete: never
 read, and removed by the sweep once stale.
 
-Reading: a rank reads only the layers it holds (`Part`); an entry missing
-any of them is a miss on that rank, and the restore's vote (`agree`) keeps
+Reading: a rank reads only the layers it holds (`Part`); one that lacks
+some (machines with their own cache roots, another split) first fetches
+them from the peer that has them (transfer.py); an entry still missing
+any is a miss on that rank, and the restore's vote (`agree`) keeps
 only the entries every rank read. Tensor splits keep disk.py's per-split
 format (a later phase).
 """
@@ -352,6 +354,9 @@ class Store:
         #: rank 0's records of the entries saved since the last commit op
         #: (engine/prompt_cache/commands._journal_commit)
         self.outbox: list = []
+        #: the measured prefill rate (tokens/s), when known: a fetch from a
+        #: peer slower than recomputing is skipped (transfer.fill)
+        self.prefill_tps = None
 
     @classmethod
     def for_host(cls, host) -> Store | None:
@@ -468,12 +473,15 @@ class Store:
 
     def index(self) -> dict:
         """{tuple(tokens): {"file": dir, "owner"}}: the read-back's lookup
-        (entries this rank can read whole)."""
+        (entries this rank can read whole, or, with a fetcher installed,
+        whose missing pieces a peer may hold: transfer.fill at the read)."""
+        from . import transfer
+        fetching = transfer.fetcher() is not None
         out = {}
         for _, _, _, d, m in self.entries():
             toks = m.get("tokens")
             if not isinstance(toks, list) or len(toks) != m.get("n_tokens") \
-                    or not self.holds(d, m):
+                    or not (fetching or self.holds(d, m)):
                 continue
             out[tuple(toks)] = {"file": d, "owner": m.get("owner")}
         return out
@@ -773,6 +781,10 @@ def restore(max_n: int, store: Store | None, *, max_bytes=None, link=None,
         if store is not None and disk.enabled():
             if sweep_first and link is None:
                 disk.sweep(store.base)
+            # what this rank lacks, from the peers, before it says what it
+            # read (no fetcher, or every file here: nothing is fetched)
+            from . import transfer
+            transfer.fill(store, max_n, prefill_tps=store.prefill_tps)
             got = store.read(store.candidates(
                 max_n, max_bytes if link is None else None))
     except Exception:  # a restore that fails is a miss, never a failed load (logged)
