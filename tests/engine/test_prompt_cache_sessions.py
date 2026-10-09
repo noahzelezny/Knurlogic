@@ -419,7 +419,7 @@ def _chat(system, user, **kw):
 
 
 def test_keep_latest_replaces_the_sessions_earlier_steps(sched):
-    """X-Cache-Keep: latest (the harness: a worker only appends, so only its
+    """X-Cache-Keep: latest (a worker that only appends reuses only its
     latest step is ever reused): each step's entries replace the
     session's earlier ones in memory and on disk; the system prompt's
     checkpoint is nobody's, one copy every session shares."""
@@ -474,7 +474,7 @@ def test_the_shared_system_checkpoint_is_saved_and_restored(sched):
 
 
 def test_a_session_parked_on_request_is_read_back(sched):
-    """POST .../park (the harness parks its PM while sub-agents work): saved,
+    """POST .../park (a coordinator session parked while its workers run): saved,
     out of memory, the registry says disk only, and the next request reads
     it back from disk."""
     s = sched
@@ -503,7 +503,7 @@ def test_a_session_parked_on_request_is_read_back(sched):
 
 
 def test_entries_no_session_owns_can_be_dropped(sched):
-    """the harness's eval batches leave session-less entries (calls with no
+    """Evaluation batches leave session-less entries (calls with no
     session, shared system-prompt copies) that drop {"session"} cannot
     name: drop {"sessionless": true} clears them, memory and disk; with an
     age, only files unused that long."""
@@ -596,8 +596,8 @@ def test_every_journaled_cache_op_passes_the_plan_check():
 
 
 def test_a_sessions_prompt_that_parts_from_its_entries_says_where(sched):
-    """a coordinator session missed its 29k cache on resumes (hit only the 5.9k system
-    copy): usage now says where the prompt left the session's entries."""
+    """A coordinator session missed its 29k cache on resumes (hit only the
+    5.9k system copy): usage now says where the prompt left the session's entries."""
     s = sched
     s.load("/nonexistent/tiny-diverge").done.wait(60)
     p = list(s.prompts[2])

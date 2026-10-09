@@ -177,7 +177,7 @@ class PromptCacheCommands:
     def _diverged(self, job: Job, prompt: list, hit: int) -> None:
         """A session's prompt that does not extend its own longest entry:
         where the two part, with a few tokens of each side as text -- a
-        client resuming a session (a coordinator session) can see what it rendered
+        client resuming a long-lived session can see what it rendered
         differently (a turn's reasoning dropped, a header changed) instead
         of an unexplained re-prefill. Logged, and in usage."""
         mine = [tuple(t) for _, t in self.cache.of_session(job.session)] \

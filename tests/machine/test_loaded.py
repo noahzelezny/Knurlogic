@@ -447,7 +447,7 @@ def test_our_server_busy_generating_keeps_its_card(monkeypatch):
     assert r["runtime"] == "knurlogic" and r["state"] == "loaded"
     assert r["detail"].endswith("busy")
     # its port closed while the process lives: an unload on its way out,
-    # not a busy model (the maintainer: a READY · busy card for a server that was gone)
+    # not a busy model (a READY · busy card for a server that was gone)
     listen.clear()
     r = ours()
     assert r["state"] == "stopping" and r["can_unload"] is False

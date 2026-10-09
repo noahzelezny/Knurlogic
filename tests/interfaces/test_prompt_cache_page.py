@@ -72,8 +72,8 @@ def test_several_unnamed_is_a_400_listing_them(monkeypatch):
 
 
 def test_a_peers_model_goes_through_its_pages_relay(monkeypatch):
-    """a coordinator session runs on the M4: the M3's page sends its cache calls to
-    the M4 page's relay, like a chat, which resolves the name there."""
+    """A client's model runs on the peer: this Mac's page sends its cache
+    calls to the peer page's relay, like a chat, which resolves the name there."""
     far = "http://192.0.2.2:8081"
     monkeypatch.setitem(page_peers.PEER_TARGETS, far,
                         {"relay": "http://192.0.2.2:8899",

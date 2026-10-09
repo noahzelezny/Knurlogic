@@ -330,8 +330,8 @@ def test_a_save_asked_for_restores_at_load_and_usage_says_disk(
                                                   "read_ms": 0.0}
     before = set(D._all_files(D.root()))
     s.unload().done.wait(60)
-    # an unload saves nothing: only a client's ask does (the maintainer: nobody is
-    # surprised by cache files)
+    # an unload saves nothing: only a client's ask does (nobody running
+    # knurlogic should be surprised by cache files)
     assert set(D._all_files(D.root())) == before
     s.load("/nonexistent/tiny-a").done.wait(60)
     _collect(s.submit(_job(p, max_tokens=4, session="t1")))

@@ -25,7 +25,7 @@ from knurlogic.machine import ledger as L
 
 ULID = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 TIMING = {"queue_ms", "prefill_ms", "decode_ms", "prefill_tps", "decode_tps"}
-LABELS = {"X-Client": "client/0.0.1", "X-Client-Session": "sess-1",
+LABELS = {"X-Client": "myharness/0.0.1", "X-Client-Session": "sess-1",
           "X-Client-Run": "worker-2", "X-Client-Role": "pm"}
 
 
@@ -141,7 +141,7 @@ def test_every_api_names_its_ledger_row(server, api):
     row = _row(rid)
     assert row["api"] == api and row["model"] == "tiny"
     assert (row["client"], row["session"], row["run"], row["role"]) == \
-        ("client/0.0.1", "sess-1", "worker-2", "pm")
+        ("myharness/0.0.1", "sess-1", "worker-2", "pm")
     assert row["key_id"] == "anonymous"
     assert row["prompt_tokens"] == 1024 and row["output_tokens"] == 3
     assert row["cached_tokens"] == 256
@@ -196,7 +196,7 @@ def test_progress_events_on_an_opted_in_openai_stream(server):
     url, _ = server
     code, rid, raw = _post(url + "/v1/chat/completions",
                            {"messages": MSG, "stream": True},
-                           {"X-Client": "client/0.0.1"})
+                           {"X-Client": "myharness/0.0.1"})
     ev = _progress(raw)
     assert [(e["phase"], e["done"], e["total"]) for e in ev] == \
         [("prefill", 512, 1024), ("prefill", 1024, 1024)]
@@ -223,7 +223,7 @@ def test_responses_stream_carries_progress_when_opted_in(server):
     url, _ = server
     _, rid, raw = _post(url + "/v1/responses", {"input": "hi",
                                                 "stream": True},
-                        {"X-Client": "client/0.0.1"})
+                        {"X-Client": "myharness/0.0.1"})
     ev = _progress(raw)
     assert len(ev) == 2 and ev[0]["type"] == "knurlogic.progress"
 
