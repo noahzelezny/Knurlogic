@@ -1,31 +1,49 @@
 # Changelog
 
-## Unreleased
+## 0.1.5
 
-* The prompt cache is kept on disk (docs/design/prompt-cache-disk.md).
-  When a model unloads or its server stops, every prompt-cache entry is
-  written to `~/.cache/knurlogic/prompt-cache/<key>/` (XDG_CACHE_HOME
-  honoured), one safetensors file per entry, atomically; when the same
-  model loads again they are read back into the in-memory prompt cache
-  before the warm-up, and its own prefix rule serves any prompt that
-  starts with a restored entry's tokens. `POST /v1/prompt-cache/save`
-  (loopback only) saves now. The key is the artifact's identity (weights,
-  quant, shipped model.py) plus the KV bits, the drafting head, long-
-  context rope, per-chip rounding and, on a split, the rank, world and
-  layer runs; another key is a miss, never a load. On a ring each rank
-  saves and restores its own part, and restores only when every rank has
-  the same entries (all or none). Kept across unloads and restarts until
-  a total budget (least recently used first) or an idle TTL removes them:
+Prompt cache management, a reorganized library with user and builder
+documentation, role-based placement for agents, and fixes.
+
+### Prompt cache
+
+* The prompt cache can be kept on disk (docs/design/prompt-cache-disk.md,
+  docs/guide/prompt-cache.md). Nothing is saved unless a client asks: an
+  unload, a model switch or a stop saves nothing. Saved entries live in
+  `~/.cache/knurlogic/prompt-cache/<key>/` (XDG_CACHE_HOME honoured), one
+  safetensors file per entry, written atomically, and are read back into the
+  in-memory cache when the same model loads again, before the warm-up. The
+  key is the artifact's identity (weights, quant, shipped model.py) plus the
+  KV bits, the drafting head, long-context rope, per-chip rounding and, on a
+  split, the rank, world and layer runs; another key is a miss, never a load.
+  On a split model every rank saves and restores its own part, and restores
+  only when every rank holds the same entries. Kept until a total budget
+  (least recently used first) or an idle TTL removes them:
   `KNURLOGIC_PROMPT_CACHE_DISK` (on), `KNURLOGIC_PROMPT_CACHE_DISK_GB`
   (default 20% of the disk's free space plus what the cache holds, at most
-  64 GiB), `KNURLOGIC_PROMPT_CACHE_TTL_H` (24), knurlogic-wide settings.
-  A corrupt or mismatched file is deleted and is a miss; an entry holding
-  something the format cannot carry (an image key) is skipped and logged.
+  64 GiB), `KNURLOGIC_PROMPT_CACHE_TTL_H` (24). A corrupt or mismatched file
+  is deleted and is a miss.
+* Entries belong to the client's session (`X-Client-Session`). Loopback-only
+  endpoints, also forwarded by the page to the Mac that runs the model:
+  `POST /v1/prompt-cache/save` (one session's newest entry, or every owned
+  entry), `/park` (save, then free the session's memory; its next request
+  reads it back from disk), `/pin` (never deleted by the budget or TTL),
+  `/drop` (a session, or the entries no session owns, optionally only those
+  older than `older_than_s`), and `GET /v1/prompt-cache` (every entry, in
+  memory and on disk). `X-Cache-Retain: pin` pins from a request;
+  `X-Cache-Keep: latest` keeps only a session's newest step, with one shared
+  copy of each system-prompt checkpoint. A save skips an entry that is
+  quicker to recompute than to read back. All of this works on split models.
+* `usage.knurlogic.cache.diverged` {entry_tokens, at, hit, prompt_text,
+  entry_text}: where a session's prompt left its own cached entry, so a
+  client can see what it rendered differently.
 * `usage.knurlogic.cache.disk` {tokens, read_ms}: the cached tokens that
   came from an entry restored from disk, and its read time -- so a client
   tells a disk hit (disk.tokens > 0), a memory hit (used > 0, disk 0) and
   a cold prefill (used 0) apart. The ledger records it as `disk_tokens`
   (a column added to an existing ledger).
+### Telemetry, API and models
+
 * The telemetry contract (docs/design/telemetry.md, `telemetry: 1`),
   server side. Every inference request -- chat/completions, completions,
   /v1/messages, /v1/responses, Ollama -- gets a ULID, answered as
@@ -90,6 +108,40 @@
   reads a GLM prefill chunk as spanning what it reads (min(context, 2048)
   + context / 72), not the whole context: one warm-up sample no longer
   refuses a 339k-token prompt "even prefilled 128 tokens at a time".
+
+### Placement, tools and fixes
+
+* MCP `load` takes role words in `machines`, so an agent needs no machine
+  names: `"here"` (this Mac), `"peers"` (every other Mac answering this
+  page), `"all"`, and `"fit"` (this Mac if the model fits, else the
+  smallest set of answering Macs it fits on, placed as the page's Launch
+  places it). Several machines default to a pipeline split.
+* Tool calls: when a model's call omits a `</parameter>`, writes its
+  arguments as JSON, or writes a bare value with no `<parameter=...>`
+  opener, the arguments are read back from the call's text instead of
+  arriving empty (mlx-lm's qwen3_coder parser drops them silently). A call
+  that still has none while its tool requires some is logged with the text.
+* Unload stops a knurlogic server the page did not start (from a shell or
+  another agent), found by its port, so a failed card can be cleared.
+* A folded request header no longer puts a line break into a session label.
+* The page: the free-memory line reflects the picked machine and the MTP
+  and vision switches; a stopping server shows as "stopping"; pipeline is
+  the default split.
+
+### Library and documentation
+
+* The library is reorganized so each feature has one home: the prompt cache
+  (`engine/prompt_cache/`), settings (`tuning/`), memory
+  (`engine/runtime/memory_guard.py`, `machine/memory/`), model splitting
+  (`engine/split/`), the MCP server (`interfaces/mcp/`) and the page server
+  (`interfaces/page/`, one module per concern). `engine/serve/` is now
+  `engine/model/`. Every package's `__init__` maps its files.
+* A user guide (`docs/guide/`) and a builder guide (`docs/builders/`).
+* A test, the pre-push hook and the release workflow refuse home
+  directories, non-example volume paths and private-network addresses in
+  tracked files; tests and docs use placeholders and environment variables
+  (real-model tests name the variable they need when they skip).
+* The `dev` extra installs pytest-xdist; `pytest -n 8 tests` runs the suite.
 
 ## 0.1.4
 
