@@ -80,7 +80,7 @@ def _no_load(**_):
 
 
 # What recovery needs of the page that runs it, injected by that page at
-# startup (interfaces/page/server._wire) so this module never imports it.
+# startup (interfaces/page/server.wire, from make_handler) so this module never imports it.
 # Unset, there is nothing to relaunch with and nothing of the page's to
 # look at.
 #: () -> [peer record]: the page's PEERS store

@@ -38,6 +38,9 @@ from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
 from knurlogic.tuning import checks
 
+# this test process plays the page: wire launch and recovery to it
+page_server.wire()
+
 GIB = 1 << 30
 HERE = Path(__file__).resolve().parents[1] / "support"
 SRC = str(HERE.parents[1] / "src")

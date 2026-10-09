@@ -44,7 +44,7 @@ The page, `src/knurlogic/interfaces/page/`:
 
 | file | what |
 |---|---|
-| `server.py` | `knurlogic ui`: `main`, `serve_ui`, `make_handler` (every route and the guards in front of them), `_wire` (what `cluster/launch` and `recovery` need of the page) |
+| `server.py` | `knurlogic ui`: `main`, `serve_ui`, `make_handler` (every route and the guards in front of them), `wire` (what `cluster/launch` and `recovery` need of the page; make_handler calls it, import does not) |
 | `nodes.py` | the machines this page sees: `PEERS`, Bonjour (`_start_discovery`), `/status.json` (`_status_fn`) and the light liveness document (`_status_light`, `hot`) |
 | `loads.py` | load and unload from the page: `_load_fn` (POST `/loaded.json`), `tracked_load`, `forward_launch` (one peer), `cluster_launch`, `peer_launch` (the peer side); GET `/loaded.json` (`_loaded_fn`, `with_jobs`, `load_progress`) |
 | `router.py` | the router to model servers: `route`, `ROUTE_PATHS`, `routable`, `route_models_document`, `proxy_chat`, `chat_targets`, `_stream` (with `cluster_failure`), `CLIENT_HEADERS` |
