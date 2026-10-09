@@ -45,7 +45,8 @@ def _no_status():
 
 
 # What this module needs of the page that runs it, injected by that page at
-# startup (interfaces/page/server.wire, from make_handler) so this module never imports it.
+# startup (interfaces/page/server.wire, from make_handler) so this module
+# never imports it.
 # Unset, this machine is alone: no status snapshot (node_info() answers)
 # and no peers.
 #: () -> (status snapshot, _): the page's own status document
@@ -989,14 +990,16 @@ def _local_info() -> dict:
 
 def rank_argv(path: str, spec: dict, files: dict) -> list:
     """`knurlogic serve` for one rank, with the hidden ring flags."""
-    cmd = [sys.executable, "-m", "knurlogic", "serve", path,
-           "--rank", str(spec["rank"]), "--world", str(spec["world"]),
-           "--split", spec["split"], "--link", spec["link"],
-           "--job", spec["job"],
-           "--prefill-chunk", str(spec["prefill_chunk"]),
-           "--prefill-why", str(spec.get("prefill_why") or ""),
-           "--working-set-gib", f"{float(spec.get('working_set_gib') or 0):.3f}",
-           "--tune", spec.get("tune") or "default"]
+    from knurlogic.machine.servers import serve_argv
+    cmd = serve_argv(
+        path,
+        "--rank", str(spec["rank"]), "--world", str(spec["world"]),
+        "--split", spec["split"], "--link", spec["link"],
+        "--job", spec["job"],
+        "--prefill-chunk", str(spec["prefill_chunk"]),
+        "--prefill-why", str(spec.get("prefill_why") or ""),
+        "--working-set-gib", f"{float(spec.get('working_set_gib') or 0):.3f}",
+        "--tune", spec.get("tune") or "default")
     if spec.get("port"):
         cmd += ["--port", str(int(spec["port"]))]
     if spec.get("serve_hosts") and spec["rank"] == 0:

@@ -17,7 +17,7 @@ why: [memory](../design/memory.md), [memory-ledger](../design/memory-ledger.md),
 | `memory/pressure.py` | macOS's pressure level (`system_pressure_level`) and this process's compressed bytes (`own_compressed_bytes`), which the scheduler's guard watches |
 | `loaded.py` | what is resident now in every runtime (knurlogic, exo, ollama, mlx-lm), by their own account: `survey` (with `memory_map` beside it), `ollama_unload` |
 | `metrics.py` | how hard the machine is working: CPU, GPU, swap, pressure, thermal (`sample`, `metrics`) |
-| `servers.py` | the record of running knurlogic servers (`registry`, `save_registry`, `listening_serves`, `free_port`, `serve_log`) |
+| `servers.py` | the record of running knurlogic servers (`registry`, `save_registry`, `listening_serves`, `free_port`, `serve_log`, `serve_argv`: the one `knurlogic serve` command line, for spawn and cluster ranks) |
 | `loadlock.py` | the model-load lock: `model_load(...)` holds `flock` on `~/.cache/knurlogic/load.lock`; `holder`, `Busy` |
 | `artifact.py` | what a model directory is: `Artifact`, `identity` (content hash), `resolve_identity`, `context_length`, `sampling_defaults`, `on_network` |
 | `discover.py` | every model on disk in every tool's store (`find`, `find_named`) |

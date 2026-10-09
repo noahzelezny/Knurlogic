@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import http.client
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -170,8 +169,8 @@ def _spawn_unlocked(path: str, port: int, tune: str = "default",
     if rec and is_our_server(int(rec["pid"])):
         return {"error": f"port {port} is already serving "
                          f"{rec.get('artifact')} (pid {rec['pid']})"}
-    cmd = [sys.executable, "-m", "knurlogic", "serve", path,
-           "--port", str(port), "--tune", tune]
+    from knurlogic.machine.servers import serve_argv
+    cmd = serve_argv(path, "--port", str(port), "--tune", tune)
     # Settings chosen at LAUNCH, which for most of these is the only moment
     # they can be chosen: they are read at import and compiled into kernel
     # source, so a running server cannot be told about them.
