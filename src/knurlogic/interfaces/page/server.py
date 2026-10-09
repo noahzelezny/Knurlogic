@@ -44,6 +44,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
     the guards in front of every one of them. `gate_for_peers`: the
     /peer/ gate's link check (default cluster/links.Gate; tests pass
     their own)."""
+    wire()
 
     table = messages.peer_table(routes)
 
@@ -437,8 +438,9 @@ def _open_when_up(host: str, port: int) -> None:
     t.start()
 
 
-def _wire() -> None:
-    """Give launch and recovery what they need of this page. Each is
+def wire() -> None:
+    """Give launch and recovery what they need of this page; every page
+    handler (make_handler) calls it, never this module's import. Each is
     a late-bound lambda, so a swapped PEERS or mcp lifecycle.load is what they see."""
     from knurlogic.cluster import launch, recovery
     from knurlogic.interfaces.mcp import lifecycle
@@ -449,5 +451,3 @@ def _wire() -> None:
     recovery.answers_fn = lambda port: spawn._answers(port)
     recovery.load_fn = lambda **kw: lifecycle.load(**kw)
 
-
-_wire()

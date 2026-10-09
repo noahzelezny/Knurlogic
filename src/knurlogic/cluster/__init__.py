@@ -15,7 +15,7 @@ across them.
 
 launch.py and recovery.py never import interfaces/: the page injects its
 status, peers, children and load at startup (interfaces/page/server.py
-_wire). Nothing here imports mlx.
+wire, called by make_handler). Nothing here imports mlx.
 """
 
 import http.client  # noqa: E402

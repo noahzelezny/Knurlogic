@@ -18,6 +18,10 @@ from knurlogic.cluster import launch as C
 from knurlogic.cluster import recovery as R
 from knurlogic.interfaces import spawn
 from knurlogic.interfaces.page import loads as page_loads
+from knurlogic.interfaces.page import server as page_server
+
+# this test process plays the page: wire launch and recovery to it
+page_server.wire()
 
 
 def ticks_until(pred, t=40.0):
