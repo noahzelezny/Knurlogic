@@ -28,11 +28,9 @@
   vendored forward's all_gather are not used: `split` sets start/end to
   the whole kept slice and pipeline_size to 1, so the vendored forward
   does no collective of its own.
-- the per-family index fixups follow commits in knurlogic's exo fork (after
-  merge-base 90f24bef): f3ab3a83 (glm5_next fa_idx/ssm_idx on the slice),
-  dd946407 (qwen4_exp ple_layers and a sliced make_cache); the receive
-  in the receiving rank's own dtype follows 574a7bd7 / 12038d1b / 15170e22.
-- `Coord` (B1/B2) follows the design of knurlogic's exo fork
-  src/exo/worker/engines/mlx/mtp/pipeline.py (0b544af3): head on the
-  last-layers rank, two fixed per-step broadcasts, never a verdict-dependent
-  collective count; B0 (the admitted row's first token) is new here.
+- the per-family index fixups: glm5_next's fa_idx/ssm_idx on the slice,
+  qwen4_exp's ple_layers and a sliced make_cache; the receive is in the
+  receiving rank's own dtype.
+- `Coord` (B0/B1/B2): the head on the last-layers rank, two fixed per-step
+  broadcasts, never a verdict-dependent collective count; B0 carries the
+  admitted row's first token.

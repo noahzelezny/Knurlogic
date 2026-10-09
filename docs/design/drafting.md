@@ -145,9 +145,6 @@ it at all. Read the FILES, not the index.
 
 ## src/knurlogic/engine/mtp/batch_generator.py
 
-Ported from the knurlogic author's earlier exo fork
-(`generator/mtp_batch_generate.py`, Apache-2.0); it contains no code from
-upstream exo.
 
 The engine underneath -- `admit` prefills a row and seeds the head,
 `MTPBatch.step` advances every row with a verified draft -- rests on three

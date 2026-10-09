@@ -38,8 +38,3 @@ vqlab (https://github.com/noahzelezny/VQLab)
   src/knurlogic/engine/families/glm5/heads/glm5.py and the snapshot caches
   in src/knurlogic/engine/mtp/caches.py.
 
-exo fork (https://github.com/noahzelezny/exo)
-  Apache License 2.0; the ported code is the knurlogic author's own
-  src/knurlogic/engine/mtp/batch_generator.py: ported from the maintainer's
-  own code in github.com/noahzelezny/exo (generator/mtp_batch_generate.py),
-  Apache-2.0. It contains no code from upstream exo.
