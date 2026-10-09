@@ -36,7 +36,7 @@ attention function, not rebound) -- takes the dequantize path.
 One difference from mlx sdpa: a query row with EVERY key masked returns 0
 here, where mlx sdpa returns NaN.
 
-`KNURLOGIC_KV_KERNEL=off` turns it off (tuning/settings.py), for A/B.
+`KNURLOGIC_KV_KERNEL=off` turns it off (tuning/knobs.py), for A/B.
 Whether it is live is counted, not assumed: `STATS` (hits: decode
 attentions it served; misses: a decode step the cache offered it that took
 dequantize + sdpa -- keys transformed after the fetch, as GLM's MLA does,

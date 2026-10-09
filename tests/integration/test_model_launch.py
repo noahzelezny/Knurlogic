@@ -9,13 +9,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from knurlogic.machine.artifact import Artifact
-from knurlogic.tuning import settings as S
-from knurlogic.tuning.resolve import (
-    context_room,
-    kv_bytes_per_token,
-    kv_refusal,
-    resolve,
-)
+from knurlogic.tuning import context_window, knobs
+from knurlogic.tuning.fit import context_room, kv_bytes_per_token
+from knurlogic.tuning.resolve import kv_refusal, resolve
 
 GIB = 1 << 30
 TC = {"num_hidden_layers": 8, "full_attention_interval": 4,
@@ -71,23 +67,23 @@ def test_kv_bits_offered_per_family(tmp_path, mt, bits):
 
 
 def test_the_launch_knobs_need_a_reload_and_are_reach_tier():
-    from knurlogic.engine.serve.load import LIVE_KNOBS
-    for k in S.MODEL_KNOBS:
-        assert k in S.ENGINE_KNOB_NAMES and k not in LIVE_KNOBS
-        assert S.knob_tier(k) == "reach" and k in S.KNOB_DOC
+    from knurlogic.tuning.live import LIVE_KNOBS
+    for k in knobs.MODEL_KNOBS:
+        assert k in knobs.ENGINE_KNOB_NAMES and k not in LIVE_KNOBS
+        assert knobs.knob_tier(k) == "reach" and k in knobs.KNOB_DOC
 
 
 def test_engine_settings_reads_them():
-    got = S.engine_settings({"KNURLOGIC_MTP": "off",
-                             "KNURLOGIC_MTP_DYNAMIC": "on",
-                             "KNURLOGIC_KV_BITS": "6"})
+    got = knobs.engine_settings({"KNURLOGIC_MTP": "off",
+                                 "KNURLOGIC_MTP_DYNAMIC": "on",
+                                 "KNURLOGIC_KV_BITS": "6"})
     assert got == {"mtp": False, "mtp_dynamic": True, "kv_bits": 6}
-    assert S.engine_settings({"KNURLOGIC_KV_BITS": "bf16"}) == {
+    assert knobs.engine_settings({"KNURLOGIC_KV_BITS": "bf16"}) == {
         "kv_bits": None}
     with pytest.raises(ValueError):
-        S.engine_settings({"KNURLOGIC_KV_BITS": "5"})
+        knobs.engine_settings({"KNURLOGIC_KV_BITS": "5"})
     with pytest.raises(ValueError):
-        S.engine_settings({"KNURLOGIC_MTP": "maybe"})
+        knobs.engine_settings({"KNURLOGIC_MTP": "maybe"})
 
 
 def test_the_launch_allowlist_takes_them():
@@ -237,9 +233,9 @@ def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
         assert ks["KNURLOGIC_KV_BITS"]["values"] == want
         # the 8-bit decode kernel's switch is offered only at 8 bits
         assert "KNURLOGIC_KV_KERNEL" not in ks
-        for k in S.MODEL_KNOBS:
+        for k in knobs.MODEL_KNOBS:
             if k == "KNURLOGIC_LONG_CONTEXT" and \
-                    S.long_context_family(mt) is None:
+                    context_window.long_context_family(mt) is None:
                 # offered only where a model card documents YaRN
                 assert k not in ks
             elif k == "KNURLOGIC_VISION" and \
@@ -261,7 +257,7 @@ def test_the_kv_kernel_switch_is_emitted_only_at_8_bits(tmp_path):
 def test_bf16_rows_do_not_follow_the_vision_allowance_dtype(monkeypatch):
     """DeepSeek-V4's pools and MLA rope keys are bf16 in their own right;
     changing the vision allowance's dtype must not move them."""
-    from knurlogic.tuning import settings as S
+    from knurlogic.tuning import measured
     v4 = {"model_type": "deepseek_v4", "num_hidden_layers": 3,
           "head_dim": 512, "index_head_dim": 128, "compress_ratios": [0, 4, 128],
           "sliding_window": 128}
@@ -270,7 +266,7 @@ def test_bf16_rows_do_not_follow_the_vision_allowance_dtype(monkeypatch):
            "layer_types": ["linear_attention", "deepseek_sparse_attention"]}
     before = kv_bytes_per_token(v4)[0], kv_bytes_per_token(mla)[0]
     assert before[0] == round((512 / 4 + 128 / 4 + 512 / 128) * 2)
-    monkeypatch.setattr(S, "VISION_KV_DTYPE_BYTES", 4)
+    monkeypatch.setattr(measured, "VISION_KV_DTYPE_BYTES", 4)
     assert (kv_bytes_per_token(v4)[0], kv_bytes_per_token(mla)[0]) == before
 
 

@@ -1,8 +1,8 @@
 """The knurlogic-wide settings: chosen once, for every model.
 
 Beside the strategy (the default launch preset): a custom set is that preset
-plus explicit values for its rows (tuning/settings.PRESET_ROWS), and compaction
-(tuning/settings.COMPACT_KNOBS, read per request by every server) and
+plus explicit values for its rows (tuning/presets.PRESET_ROWS), and compaction
+(tuning/groups.COMPACT_KNOBS, read per request by every server) and
 identical results across chips (KNURLOGIC_CROSS_CHIP, read at launch;
 unset means the preset decides). Kept in ~/.config/knurlogic/settings.json
 (XDG_CONFIG_HOME honoured). A saved value beats the same name in a
@@ -16,13 +16,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from knurlogic.tuning.settings import (
-    COMPACT_KNOBS,
-    MTP_MODE,
-    PRESET_ROW_NAMES,
-    PROMPT_CACHE_KNOBS,
-    check_knob,
-)
+from knurlogic.tuning.checks import check_knob
+from knurlogic.tuning.groups import COMPACT_KNOBS, PROMPT_CACHE_KNOBS
+from knurlogic.tuning.presets import MTP_MODE, PRESET_ROW_NAMES
 
 CROSS_CHIP = "KNURLOGIC_CROSS_CHIP"
 #: every name kept here

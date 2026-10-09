@@ -5,7 +5,7 @@ VQ layer's halves add up to the whole; a sliced codebook is caught)."""
 import pytest
 
 from knurlogic.engine.runtime import plan as P
-from knurlogic.tuning import resolve as R
+from knurlogic.tuning import rank_order, tensor_split
 
 # ------------------------------------------------------------------ plan
 
@@ -49,7 +49,7 @@ def test_plan_refuses_a_set_that_is_not_a_ranks_live_knob(op):
 
 
 def test_the_knobs_that_travel_are_live_ones():
-    from knurlogic.engine.serve.load import LIVE_KNOBS
+    from knurlogic.tuning.live import LIVE_KNOBS
     assert set(P.SETS) < set(LIVE_KNOBS)
 
 
@@ -152,12 +152,12 @@ QWEN36 = {"model_type": "qwen3_5_moe", "quantization": {"group_size": 64},
 
 
 def test_the_35b_splits_two_ways():
-    assert R.tensor_refusals(QWEN36, 2) == []
-    assert R.tensor_refusals(QWEN36, 1) == []
+    assert tensor_split.tensor_refusals(QWEN36, 2) == []
+    assert tensor_split.tensor_refusals(QWEN36, 1) == []
 
 
 def test_three_ways_is_refused_with_the_arithmetic():
-    why = "\n".join(R.tensor_refusals(QWEN36, 3))
+    why = "\n".join(tensor_split.tensor_refusals(QWEN36, 3))
     assert "num_attention_heads = 16 is not divisible by 3" in why
     assert "16 / 3 = 5.33333" in why
     assert "num_key_value_heads = 2 is fewer than 3" in why
@@ -170,7 +170,7 @@ def test_a_packed_down_proj_that_would_cut_a_word_is_refused():
     # 8 ranks: heads divide (16, 32, 16), kv repeats (8 % 2 == 0) -- but
     # down_proj's 512 inputs / 8 = 64 < 32 codes x dim 4 = 128
     cfg["text_config"]["linear_num_value_heads"] = 32
-    why = R.tensor_refusals(cfg, 8)
+    why = tensor_split.tensor_refusals(cfg, 8)
     down = [w for w in why if "down_proj" in w and "switch_mlp" in w]
     assert down and "512 / 8 = 64" in down[0]
     assert "not a multiple of 128" in down[0]
@@ -178,7 +178,7 @@ def test_a_packed_down_proj_that_would_cut_a_word_is_refused():
     # the same layer unpacked needs only whole scale groups (64): fits
     for m in cfg["vq_modules"].values():
         m.pop("pack_bits")
-    assert not [w for w in R.tensor_refusals(cfg, 8)
+    assert not [w for w in tensor_split.tensor_refusals(cfg, 8)
                 if "switch_mlp.down_proj" in w]
 
 
@@ -193,16 +193,16 @@ def test_a_deepseek_v4_split_must_keep_whole_rounding_blocks():
              "num_key_value_heads": 1, "o_groups": 8, "o_lora_rank": 1024,
              "moe_intermediate_size": 2048, "n_shared_experts": 1}
     for n in (2, 4, 8):
-        assert R.tensor_refusals(flash, n) == [], n
+        assert tensor_split.tensor_refusals(flash, n) == [], n
     # the released Vision-Exp config.json (deepseek-ai, MIT), copied in
     real = Path(__file__).resolve().parents[1] / "support" \
         / "fixtures_deepseek_v4_vision" / "config.json"
     cfg = json.loads(real.read_text())
     for n in (2, 4, 8):
-        assert R.tensor_refusals(cfg, n) == [], n
+        assert tensor_split.tensor_refusals(cfg, n) == [], n
     tiny = dict(flash, num_attention_heads=4, o_groups=2, o_lora_rank=64,
                 moe_intermediate_size=128)
-    why = "\n".join(R.tensor_refusals(tiny, 2))
+    why = "\n".join(tensor_split.tensor_refusals(tiny, 2))
     assert "wo_b's input" in why and "a rank's 64 is not whole 128-blocks" \
         in why
     assert "routed experts' down_proj input" in why
@@ -212,16 +212,16 @@ def test_a_deepseek_v4_split_must_keep_whole_rounding_blocks():
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support"
                            / "goldens"))
     from build_deepseek_v4_dspark import CONFIG
-    assert R.tensor_refusals(CONFIG, 2) == []
+    assert tensor_split.tensor_refusals(CONFIG, 2) == []
 
 
 def test_vq_dense_and_other_families_are_refused():
     cfg = dict(QWEN36, vq_linear={"a.self_attn.q_proj": {}})
-    assert any("vq_linear" in w for w in R.tensor_refusals(cfg, 2))
+    assert any("vq_linear" in w for w in tensor_split.tensor_refusals(cfg, 2))
     cfg = dict(QWEN36, vq_embed={"a.embed": {}})
-    assert any("vq_embed" in w for w in R.tensor_refusals(cfg, 2))
+    assert any("vq_embed" in w for w in tensor_split.tensor_refusals(cfg, 2))
     other = {"model_type": "glm5_next", "text_config": {}}
-    assert "glm5_next" in R.tensor_refusals(other, 2)[0]
+    assert "glm5_next" in tensor_split.tensor_refusals(other, 2)[0]
 
 
 # ------------------------------------------------------------ placement
@@ -240,11 +240,11 @@ def test_placement_splits_layers_and_replicates_the_rest():
         "language_model.model.layers.0.linear_attn.in_proj_qkv.weight": 81,
         "language_model.model.layers.3.self_attn.o_proj.scales": 20,
     }
-    p = R.tensor_placement_of(t, 2)
+    p = tensor_split.tensor_placement_of(t, 2)
     assert p["sharded_bytes"] == 400 + 40 + 60 + 81 + 20
     assert p["replicated_bytes"] == 100 + 100 + 2 + 10 + 1 + 16
     assert p["per_rank_bytes"] == 301 + 229          # ceil(601 / 2) + 229
-    assert not R.tensor_sharded("x.layers.0.mlp.switch_mlp.up_proj.codebook")
+    assert not tensor_split.tensor_sharded("x.layers.0.mlp.switch_mlp.up_proj.codebook")
 
 
 # ------------------------------------------------------------ rank order
@@ -256,20 +256,20 @@ M3 = {"name": "m3", "chip": "Apple M3 Ultra", "p_core_ghz": 4.05,
 
 
 def test_leader_is_the_fastest_single_core():
-    assert R.rank_order([M3, M4]) == ["m4", "m3"]      # generation beats RAM
-    assert R.chip_generation("Apple M4 Max") == 4
-    assert R.chip_generation(None) == 0
+    assert rank_order.rank_order([M3, M4]) == ["m4", "m3"]      # generation beats RAM
+    assert rank_order.chip_generation("Apple M4 Max") == 4
+    assert rank_order.chip_generation(None) == 0
 
 
 def test_leader_ties_go_to_clock_then_free_memory_then_order():
     a = dict(M4, name="a", p_core_ghz=4.4)
     b = dict(M4, name="b")
-    assert R.rank_order([a, b])[0] == "b"                  # higher clock
+    assert rank_order.rank_order([a, b])[0] == "b"                  # higher clock
     c = dict(M4, name="c", free_bytes=10)
     d = dict(M4, name="d", free_bytes=20)
-    assert R.rank_order([c, d])[0] == "d"                  # more free memory
+    assert rank_order.rank_order([c, d])[0] == "d"                  # more free memory
     e, f = dict(M4, name="e"), dict(M4, name="f")
-    assert R.rank_order([e, f]) == ["e", "f"]              # given order
+    assert rank_order.rank_order([e, f]) == ["e", "f"]              # given order
 
 
 def test_after_the_leader_the_ring_follows_the_links():
@@ -277,15 +277,15 @@ def test_after_the_leader_the_ring_follows_the_links():
     x = dict(M3, name="x", links={"lead": "wifi", "y": "ethernet"})
     y = dict(M3, name="y", chip="Apple M2 Ultra",
              links={"lead": "tb5", "x": "ethernet"})
-    assert R.rank_order([x, y, lead]) == ["lead", "y", "x"]
+    assert rank_order.rank_order([x, y, lead]) == ["lead", "y", "x"]
 
 
 def test_an_explicit_order_wins_and_must_name_everyone():
-    assert R.rank_order([M4, M3], explicit=["m3", "m4"]) == ["m3", "m4"]
+    assert rank_order.rank_order([M4, M3], explicit=["m3", "m4"]) == ["m3", "m4"]
     with pytest.raises(ValueError):
-        R.rank_order([M4, M3], explicit=["m3"])
+        rank_order.rank_order([M4, M3], explicit=["m3"])
     with pytest.raises(ValueError):
-        R.rank_order([M4, dict(M4)])
+        rank_order.rank_order([M4, dict(M4)])
 
 
 # ------------------------------------------------- the ring's prompt cache
@@ -706,8 +706,8 @@ VQ_SWITCH = {"gate_proj.codes": (256, 512, 176),
 
 def test_a_vq_moe_header_set_splits_two_ways(tmp_path):
     a = _artifact(tmp_path, QWEN36, _layer0(VQ_SWITCH))
-    assert R.tensor_split_refusals(a, 2) == []
-    assert R.tensor_unverified(a) == {}
+    assert tensor_split.tensor_split_refusals(a, 2) == []
+    assert tensor_split.tensor_unverified(a) == {}
     from knurlogic.interfaces.page.documents import splits_of
     assert splits_of(a) == ["tensor", "pipeline"]
 
@@ -720,13 +720,13 @@ def test_an_affine_quant_header_set_splits_two_ways(tmp_path):
         "down_proj.weight": (256, 2048, 64),
         "down_proj.scales": (256, 2048, 8),
         "down_proj.biases": (256, 2048, 8)}))
-    assert R.tensor_split_refusals(a, 2) == []
+    assert tensor_split.tensor_split_refusals(a, 2) == []
 
 
 def test_an_array_that_does_not_divide_is_refused_with_its_numbers(tmp_path):
     a = _artifact(tmp_path, QWEN36, _layer0(dict(
         VQ_SWITCH, **{"down_proj.vq_scales": (256, 2048, 7)})))
-    why = R.tensor_split_refusals(a, 2)
+    why = tensor_split.tensor_split_refusals(a, 2)
     assert why == ["layers.0.mlp.switch_mlp.down_proj.vq_scales: 7 on axis "
                    "-1 do not divide by 2"]
     # a fused qkv divides per segment: q, k, v each cut n ways, so a whole
@@ -734,7 +734,7 @@ def test_an_array_that_does_not_divide_is_refused_with_its_numbers(tmp_path):
     import copy
     cfg = copy.deepcopy(QWEN36)
     cfg["text_config"].update(linear_num_key_heads=1, linear_key_head_dim=127)
-    why = R.tensor_header_refusals(a, cfg, 2)
+    why = tensor_split.tensor_header_refusals(a, cfg, 2)
     assert "layers.0.linear_attn.conv1d.weight: 8192 rows (in segments " \
         "[127, 127, 7938]) do not divide by 2" in why
 
@@ -751,7 +751,7 @@ def test_a_skipzero_module_odd_rows_are_refused_by_its_headers(tmp_path):
     # Qwen3.5-397B 2.4bpw: a tensor launch died loading on rank 1 at
     # "Array split ... (70095, 1024)" -- the headers say it first
     a = _artifact(tmp_path, QWEN36, _layer0(_skipzero(70095)))
-    why = R.tensor_split_refusals(a, 2)
+    why = tensor_split.tensor_split_refusals(a, 2)
     assert "layers.0.mlp.switch_mlp.gate_proj.sz_codes: 70095 rows do not " \
         "divide by 2" in why
     from knurlogic.interfaces.page.documents import splits_of
@@ -762,8 +762,8 @@ def test_a_skipzero_module_even_rows_is_unverified_not_refused(tmp_path):
     # even rows divide, but the layout is none a rule knows: offered, and
     # run whole and split at launch (engine/runtime/viability)
     a = _artifact(tmp_path, QWEN36, _layer0(_skipzero(70096)))
-    assert R.tensor_split_refusals(a, 2) == []
-    assert R.tensor_unverified(a) == {
+    assert tensor_split.tensor_split_refusals(a, 2) == []
+    assert tensor_split.tensor_unverified(a) == {
         ("mlp.switch_mlp.gate_proj",
          ("sz_codes", "sz_rowmask", "sz_scales", "sz_shape")): 0}
 
@@ -792,8 +792,8 @@ def test_a_runtime_that_splits_skipzero_itself_is_offered_tensor(tmp_path):
         "down_proj.sz_shape": (4,),
         "down_proj.codebook": (256, 4)})))
     _sz_runtime(a)
-    assert R.tensor_split_refusals(a, 2) == []
-    assert R.tensor_unverified(a) == {}
+    assert tensor_split.tensor_split_refusals(a, 2) == []
+    assert tensor_split.tensor_unverified(a) == {}
     from knurlogic.interfaces.page.documents import splits_of
     assert "tensor" in splits_of(a)
     import types
@@ -805,7 +805,7 @@ def test_a_runtime_that_splits_skipzero_itself_is_offered_tensor(tmp_path):
 def test_a_runtime_split_needs_output_rows_that_divide(tmp_path):
     a = _artifact(tmp_path, QWEN36, _layer0(_skipzero(70095)))
     _sz_runtime(a, out=1023)
-    why = R.tensor_split_refusals(a, 2)
+    why = tensor_split.tensor_split_refusals(a, 2)
     assert any("1023 output rows do not divide by 2" in w for w in why)
 
 
@@ -871,17 +871,17 @@ def test_flash_next_deals_its_ngram_parts_whole(tmp_path):
     the PLE are replicated."""
     from knurlogic.engine.runtime import tensor_rules as TR
     a = _artifact(tmp_path, FLASH_NEXT, _flash_next_layer1())
-    assert R.tensor_split_refusals(a, 2) == []
-    assert R.tensor_unverified(a) == {}
+    assert tensor_split.tensor_split_refusals(a, 2) == []
+    assert tensor_split.tensor_unverified(a) == {}
     t = "model.layers.1.ple.ple_embedding.ngram_embedding.shard_3."
     assert TR.locate(t + "codes") == (
         1, "ple.ple_embedding.ngram_embedding", "shard_3.codes", None)
-    assert R.tensor_sharded(t + "codebook")
-    assert not R.tensor_sharded("model.layers.1.ple.key_proj.weight")
-    assert not R.tensor_sharded(
+    assert tensor_split.tensor_sharded(t + "codebook")
+    assert not tensor_split.tensor_sharded("model.layers.1.ple.key_proj.weight")
+    assert not tensor_split.tensor_sharded(
         "model.layers.1.attn_hyper_connection.input_mix_weight_up.weight")
     assert [TR.owner(i, 4, 2) for i in range(4)] == [0, 0, 1, 1]
-    p = R.tensor_placement(type("A", (), {"path": a}), 2)
+    p = tensor_split.tensor_placement(type("A", (), {"path": a}), 2)
     # replicated: the hyper-connection, key_proj, the hash multipliers and
     # down_proj's codebook
     assert p["replicated_bytes"] == 10240 * 40 + 10240 * 640 + 3 + 1024 * 2
@@ -889,7 +889,7 @@ def test_flash_next_deals_its_ngram_parts_whole(tmp_path):
 
 def test_ngram_parts_that_do_not_divide_are_refused(tmp_path):
     a = _artifact(tmp_path, FLASH_NEXT, _flash_next_layer1(parts=3))
-    assert R.tensor_header_refusals(a, FLASH_NEXT, 2) == [
+    assert tensor_split.tensor_header_refusals(a, FLASH_NEXT, 2) == [
         "layers.1.ple.ple_embedding.ngram_embedding: 3 parts do not "
         "divide by 2"]
 
@@ -944,29 +944,29 @@ def test_deepseek_v4_cuts_heads_and_experts_and_keeps_the_kv_whole(tmp_path):
     the one shared kv head (wq_a, wkv), the compressor, the indexer, the
     router and the hyper-connections are replicated."""
     a = _artifact(tmp_path, DSV4, _dsv4_layer2())
-    assert R.tensor_split_refusals(a, 2) == []
-    assert R.tensor_split_refusals(a, 4) == []
-    assert R.tensor_unverified(a) == {}
+    assert tensor_split.tensor_split_refusals(a, 2) == []
+    assert tensor_split.tensor_split_refusals(a, 4) == []
+    assert tensor_split.tensor_unverified(a) == {}
     pre = "model.layers.2."
     for k in ("attn.wq_b.weight", "attn.attn_sink", "attn.wo_a.scales",
               "attn.wo_b.weight", "ffn.switch_mlp.down_proj.codes",
               "ffn.shared_experts.up_proj.biases"):
-        assert R.tensor_sharded(pre + k), k
+        assert tensor_split.tensor_sharded(pre + k), k
     for k in ("attn.wq_a.weight", "attn.wkv.weight", "attn.kv_norm.weight",
               "attn.compressor.wkv.weight", "attn.indexer.wq_b.weight",
               "attn.indexer.weights_proj.weight", "attn_hc.fn",
               "ffn.gate.weight", "ffn.switch_mlp.gate_proj.codebook"):
-        assert not R.tensor_sharded(pre + k), k
+        assert not tensor_split.tensor_sharded(pre + k), k
 
 
 def test_deepseek_v4_refuses_groups_and_shapes_that_do_not_divide(tmp_path):
     # 16 ranks: 64 heads and wo_a's 8192 rows divide, 8 o_groups do not --
     # a rank would hold half a group
-    assert R.tensor_refusals(DSV4, 16) == [
+    assert tensor_split.tensor_refusals(DSV4, 16) == [
         "o_groups = 8 is not divisible by 16 ranks (8 / 16 = 0.5)"]
-    assert len(R.tensor_refusals(DSV4, 3)) == 2         # heads and groups
+    assert len(tensor_split.tensor_refusals(DSV4, 3)) == 2         # heads and groups
     a = _artifact(tmp_path, DSV4, _dsv4_layer2(sink=63))
-    assert R.tensor_header_refusals(a, DSV4, 2) == [
+    assert tensor_split.tensor_header_refusals(a, DSV4, 2) == [
         "layers.2.attn.attn_sink: 63 rows do not divide by 2"]
 
 
@@ -1113,7 +1113,7 @@ def test_tensor_shape_carries_rank_0s_head_bytes(tmp_path, monkeypatch):
         path = tmp_path
         raw_config = {"text_config": {"num_hidden_layers": 1}}
     monkeypatch.setattr(artifact.Artifact, "load", staticmethod(lambda p: A))
-    monkeypatch.setattr(R, "tensor_split_refusals", lambda *a: [])
+    monkeypatch.setattr(tensor_split, "tensor_split_refusals", lambda *a: [])
     assert C.shape_of(str(tmp_path), 2, "tensor")["leader_bytes"] == 50 + 30
     assert C.shape_of(str(tmp_path), 2, "tensor",
                       vision=False)["leader_bytes"] == 50

@@ -123,7 +123,7 @@ def fit(artifact: str = "", draft: bool = True, vision: bool = True,
     from knurlogic.machine import wired
     from knurlogic.machine.artifact import Artifact
     from knurlogic.machine.loaded import available_memory
-    from knurlogic.tuning import settings as S
+    from knurlogic.tuning import measured
 
     artifact, refused = _named(artifact)
     if refused:
@@ -132,24 +132,24 @@ def fit(artifact: str = "", draft: bool = True, vision: bool = True,
     mem = available_memory()
     b = wired.load_budget()
     budget = b["bytes"]
-    from knurlogic.tuning.resolve import room_for, vision_budget
+    from knurlogic.tuning.fit import room_for, vision_budget
     adv = wired.advise(a.bytes_on_disk)
     # A vision rung also holds its tower, its image store and its images'
     # KV -- the resolver's terms, so `fit` and `settings` agree.
     vb = vision_budget(a)
     extra = vb["extra_bytes"] if vb else 0
-    from knurlogic.tuning.resolve import mtp_head_bytes, vision_freed_bytes
+    from knurlogic.tuning.fit import mtp_head_bytes, vision_freed_bytes
     # what the load will really hold: MTP off takes the head out, vision
     # off the tower, image store and image KV (single_fit_check's terms)
     holds = (a.bytes_on_disk + extra
              - (0 if draft else mtp_head_bytes(a))
              - (0 if vision else vision_freed_bytes(a)))
     headroom = budget - holds
-    from knurlogic.interfaces.serve import launch_fit
+    from knurlogic.tuning.checks import launch_fit
     chk = launch_fit(a, {} if vision else {"KNURLOGIC_VISION": "off"},
                      "default", draft, budget)
     fits = bool(budget) and headroom > 0 and chk["state"] != "cannot"
-    low_headroom = fits and headroom < S.low_headroom_bytes(budget)
+    low_headroom = fits and headroom < measured.low_headroom_bytes(budget)
     verdict = ("will not fit" if not fits else
                "fits, low headroom" if low_headroom else "fits")
     return {
@@ -168,13 +168,13 @@ def fit(artifact: str = "", draft: bool = True, vision: bool = True,
         "headroom_gib": round(headroom / GIB, 1),
         "limited_by": b["limited_by"],
         "what_low_headroom_means": (
-            f"under {S.low_headroom_bytes(budget) / GIB:.0f} GiB left "
+            f"under {measured.low_headroom_bytes(budget) / GIB:.0f} GiB left "
             f"after the weights, "
             f"so a load now narrows the prompt chunk to "
-            f"{S.PREFILL_CHUNK_LOW_HEADROOM} tokens and prefills one prompt at a "
-            f"time. It loads; long prompts are slower to start."
+            f"{measured.PREFILL_CHUNK_LOW_HEADROOM} tokens and prefills one "
+            f"prompt at a time. It loads; long prompts are slower to start."
             if low_headroom else ""),
-        # what a fit leaves to talk in (tuning/resolve.context_room)
+        # what a fit leaves to talk in (tuning/fit.context_room)
         "room": room_for(holds, a.raw_config),
         "available_now_gib": round(b["available_bytes"] / GIB, 1),
         "working_set_gib": round(b["working_set_bytes"] / GIB, 1),
@@ -198,8 +198,8 @@ def _mtp_off_doc(artifact: str, sets: dict, tune: str,
     "retry with draft=false"; None when that is not the case."""
     if not draft:
         return None
-    from knurlogic.interfaces.serve import launch_fit
     from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning.checks import launch_fit
     try:
         a = Artifact.load(artifact)
         chk = launch_fit(a, sets, tune, True)
@@ -230,7 +230,7 @@ def _mtp_off_doc(artifact: str, sets: dict, tune: str,
 
 
 def _vision_terms(vb) -> dict[str, Any] | None:
-    """The resolver's vision terms (tuning.resolve.vision_budget) in GiB,
+    """The resolver's vision terms (tuning.fit.vision_budget) in GiB,
     each with its note; None for a text-only artifact."""
     if not vb:
         return None
@@ -584,7 +584,7 @@ def settings(artifact: str = "", tune: str = "default", **_) -> dict[str, Any]:
     changes for no reason, and these were expensive to establish.
     """
     from knurlogic.interfaces.page import documents
-    from knurlogic.tuning.settings import preset_of
+    from knurlogic.tuning.presets import preset_of
     artifact, refused = _named(artifact)
     if refused:
         return refused
@@ -594,7 +594,7 @@ def settings(artifact: str = "", tune: str = "default", **_) -> dict[str, Any]:
         return {"error": str(e)}
     doc = documents._preview(artifact, tune)
     from knurlogic.machine.artifact import Artifact
-    from knurlogic.tuning.resolve import vision_budget
+    from knurlogic.tuning.fit import vision_budget
     try:
         doc["vision_budget"] = _vision_terms(vision_budget(
             Artifact.load(artifact)))
@@ -649,7 +649,7 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
     `vision=false` launches without the vision tower, image store and
     image KV (KNURLOGIC_VISION=off): more headroom, and images get a 400.
     """
-    from knurlogic.tuning.settings import preset_of
+    from knurlogic.tuning.presets import preset_of
     if not vision:
         sets = {**dict(sets or {}), "KNURLOGIC_VISION": "off"}
     try:
@@ -674,8 +674,8 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
     # serve's deterministic refusals (bad settings, a context past the
     # model's maximum, ...), asked before a process is started: a server
     # that prints REFUSING and exits is a reason nobody sees
-    from knurlogic.interfaces.serve import launch_fit, launch_refusal
     from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning.checks import launch_fit, launch_refusal
     try:
         why = launch_refusal(Artifact.load(artifact), dict(sets or {}),
                             tune)
@@ -701,7 +701,7 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
         return {"loaded": False, "refused": "will not fit",
                 "detail": chk["why"],
                 "note": "no flag overrides this; it is arithmetic."}
-    from knurlogic.tuning.settings import vision_of
+    from knurlogic.tuning.knobs import vision_of
     f = fit(artifact=artifact, draft=bool(draft),
             vision=vision_of(dict(sets or {})))
     if not f["fits"]:

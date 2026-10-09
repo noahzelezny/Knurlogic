@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 
-from knurlogic.tuning import resolve as R  # noqa: E402
+from knurlogic.tuning import fit, pipeline_split  # noqa: E402
 
 ARCH = ROOT / "src/knurlogic/engine/families/deepseek/architecture"
 # A local DeepSeek-V4-Flash artifact directory (optional).
@@ -50,7 +50,7 @@ def _real_like_config():
 
 
 def test_kv_per_token_counts_the_compressed_pools_not_k_and_v_per_layer():
-    per, why = R.kv_bytes_per_token(_real_like_config())
+    per, why = fit.kv_bytes_per_token(_real_like_config())
     # 21 ratio-4 layers x (512 + 128) / 4 + 20 ratio-128 layers x 512 / 128,
     # bf16 -- the generic count (43 x K,V x 512) would be ~13x this
     assert per == (21 * (512 + 128) // 4 + 20 * 512 // 128) * 2 == 6880
@@ -58,13 +58,13 @@ def test_kv_per_token_counts_the_compressed_pools_not_k_and_v_per_layer():
 
 
 def test_kv_quantization_is_refused():
-    from knurlogic.tuning import settings as S
-    bits, why = S.kv_quant_for("deepseek_v4")
+    from knurlogic.tuning import measured
+    bits, why = measured.kv_quant_for("deepseek_v4")
     assert bits == [] and "DeepseekV4Cache" in why
 
 
 def test_it_may_be_pipelined():
-    assert R.pipeline_refusals(_real_like_config(), 2) == []
+    assert pipeline_split.pipeline_refusals(_real_like_config(), 2) == []
 
 
 @pytest.mark.skipif(not (REAL / "config.json").is_file(),

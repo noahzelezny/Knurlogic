@@ -56,7 +56,7 @@ function migrateLaunchSets(){
     delete v.KNURLOGIC_LONG_CONTEXT; moved++ } });
   if(moved) try{ localStorage.setItem(LSKEY, JSON.stringify(all)) }catch(e){}
 }
-// set once for every model (machine/preferences), never per model
+// set once for every model (tuning/preferences), never per model
 const isGlobal=n=>n==='KNURLOGIC_CROSS_CHIP'||/^KNURLOGIC_COMPACT_/.test(n);
 
 // One knob, one line: NAME (i) live|needs reload, and its control on the

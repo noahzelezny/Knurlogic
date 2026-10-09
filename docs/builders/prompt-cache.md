@@ -26,7 +26,7 @@ Outside it, only thin hooks:
 - `engine/runtime/scheduler.py` inherits the commands mixin and calls
   into it at admission (read-back, divergence) and at load (restore).
 - `engine/runtime/plan.py`: the schema every journaled op must match.
-- `tuning/settings.py` (`PROMPT_CACHE_KNOBS`): the disk on/off, GB and TTL
+- `tuning/groups.py` (`PROMPT_CACHE_KNOBS`): the disk on/off, GB and TTL
   settings.
 
 New prompt-cache behavior goes in the package. Grow the scheduler,

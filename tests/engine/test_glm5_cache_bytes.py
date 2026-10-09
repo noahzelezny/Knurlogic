@@ -95,7 +95,7 @@ def test_the_quantized_latent_is_stored_once():
 
 @pytest.mark.parametrize("bits", [None, 8])
 def test_kv_bytes_per_token_is_what_the_cache_stores(bits):
-    from knurlogic.tuning.resolve import kv_bytes_per_token
+    from knurlogic.tuning.fit import kv_bytes_per_token
     got = _bytes_per_token(_model(bits))
     want, _ = kv_bytes_per_token(CFG, bits)
     assert got == want, (got, want)

@@ -241,7 +241,7 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
     if doc is None or now - _INFO["at"] > ttl:
         from knurlogic import __version__
         from knurlogic.cluster import links
-        from knurlogic.tuning.resolve import chip_bandwidth_gbs
+        from knurlogic.tuning.pipeline_split import chip_bandwidth_gbs
         chip = _chip()
         try:
             tb = [{"iface": i["iface"], "ip": i["ip"],
@@ -468,11 +468,11 @@ def placement(machines: list, shape: dict, split: str,
     -> {"order": [names], "leader", "split", "shares": [{"rank", "machine",
         "bytes", "layers"?, "bounds"?}], "layers": [counts] | [],
         "reason"}. Raises ValueError with the arithmetic when it cannot."""
-    from knurlogic.tuning import resolve as R
+    from knurlogic.tuning import fit, pipeline_split, rank_order
     if shape.get("refusals"):
         raise ValueError("; ".join(shape["refusals"]))
-    names = R.rank_order([{**m, "free_bytes": m.get("working_set_bytes")}
-                          for m in machines], order)
+    names = rank_order.rank_order([{**m, "free_bytes": m.get("working_set_bytes")}
+                                   for m in machines], order)
     by = {m["name"]: m for m in machines}
     n = len(names)
     if split == "tensor":
@@ -482,7 +482,7 @@ def placement(machines: list, shape: dict, split: str,
         shares, left = [], []
         for r, nm in enumerate(names):
             ws = budget_of(by[nm])
-            floor = R.step_margin(ws)
+            floor = fit.step_margin(ws)
             own = per + (lead if r == 0 else 0)
             if own > ws - floor:
                 plus = (f" + {lead / GIB:.1f} GiB rank 0 alone holds (the "
@@ -511,14 +511,14 @@ def placement(machines: list, shape: dict, split: str,
     lead = int(shape.get("leader_bytes") or 0)
     layers, other = list(shape["layer_bytes"]), int(shape.get("other_bytes") or 0)
     try:
-        sh = R.pipeline_shares(layers, ranks, other, lead,
-                               reserve=shape.get("reserve"))
+        sh = pipeline_split.pipeline_shares(layers, ranks, other, lead,
+                                            reserve=shape.get("reserve"))
     except ValueError:
         if not shape.get("reserve"):
             raise
         # the layers fit with only the step margin kept free: the fit
-        # line is the step margin (resolve.single_fit_check), so it fits
-        sh = R.pipeline_shares(layers, ranks, other, lead, reserve=None)
+        # line is the step margin (fit.single_fit_check), so it fits
+        sh = pipeline_split.pipeline_shares(layers, ranks, other, lead, reserve=None)
     shares = [{"rank": r, "machine": nm,
                "bytes": sh["bytes"][r] + int(shape.get("other_bytes") or 0)
                + (lead if r == 0 else 0),
@@ -535,21 +535,21 @@ def shape_of(path: str, world: int, split: str,
     `vision`: KNURLOGIC_VISION; off, rank 0 holds no tower. `mtp`:
     KNURLOGIC_MTP; off, rank 0 holds no head."""
     from knurlogic.machine.artifact import Artifact
-    from knurlogic.tuning import resolve as R
+    from knurlogic.tuning import fit, pipeline_split, tensor_split
     a = Artifact.load(path)
     if split == "pipeline":
-        per, other = R.pipeline_layer_bytes(a)
-        refusals = R.pipeline_refusals(a.raw_config, world)
+        per, other = pipeline_split.pipeline_layer_bytes(a)
+        refusals = pipeline_split.pipeline_refusals(a.raw_config, world)
         return {"layer_bytes": per, "other_bytes": other,
-                "leader_bytes": R.leader_bytes(a, vision=vision, mtp=mtp),
-                "reserve": R.fit_reserve(a.raw_config),
+                "leader_bytes": pipeline_split.leader_bytes(a, vision=vision, mtp=mtp),
+                "reserve": fit.fit_reserve(a.raw_config),
                 "tensor_per_rank_bytes": 0, "refusals": refusals}
     return {"layer_bytes": [], "other_bytes": 0,
-            "leader_bytes": R.leader_bytes(a, vision=vision, mtp=mtp),
-            "reserve": R.fit_reserve(a.raw_config),
+            "leader_bytes": pipeline_split.leader_bytes(a, vision=vision, mtp=mtp),
+            "reserve": fit.fit_reserve(a.raw_config),
             "tensor_per_rank_bytes":
-                R.tensor_placement(a, world)["per_rank_bytes"],
-            "refusals": R.tensor_split_refusals(a.path, world, a.raw_config)}
+                tensor_split.tensor_placement(a, world)["per_rank_bytes"],
+            "refusals": tensor_split.tensor_split_refusals(a.path, world, a.raw_config)}
 
 
 def viability_refusals(path: str, world: int) -> list:
@@ -557,8 +557,8 @@ def viability_refusals(path: str, world: int) -> list:
     whole and split on this machine (engine/runtime/viability) before any
     rank starts; rank 0's page asks, once."""
     from knurlogic.machine.artifact import Artifact
-    from knurlogic.tuning import resolve as R
-    todo = R.tensor_unverified(path)
+    from knurlogic.tuning import tensor_split
+    todo = tensor_split.tensor_unverified(path)
     if not todo:
         return []
     from knurlogic.engine.runtime import viability
@@ -587,8 +587,8 @@ def sets_refusal(path, sets: dict, tune: str = "default") -> str:
     context past the model's maximum, a preset or KV precision it cannot
     take), asked BEFORE a rank starts: a refusal at startup would only be
     seen in a rank's log."""
-    from knurlogic.interfaces.serve import launch_refusal
     from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning.checks import launch_refusal
     try:
         a = Artifact.load(path)
     except (OSError, ValueError, AttributeError):
@@ -662,7 +662,7 @@ def check_spec(spec) -> str:
             return f"{k} is a number >= 0"
     tune = spec.get("tune")
     if tune is not None:
-        from knurlogic.tuning.settings import preset_of
+        from knurlogic.tuning.presets import preset_of
         try:
             preset_of(tune)
         except ValueError as e:
@@ -736,19 +736,19 @@ def rank_room_chunk(path, spec: dict, ws: int, share: int):
     cannot be worked out (the ring then runs PREFILL_CHUNK)."""
     try:
         from knurlogic.machine.artifact import Artifact
-        from knurlogic.tuning import settings as S
+        from knurlogic.tuning import knobs
         from knurlogic.tuning.resolve import preset_env, resolve
         a = Artifact.load(path)
         tune = spec.get("tune") or "default"
-        sets = S.canonical_sets(dict(spec.get("sets") or {}))
-        launch = S.engine_settings({**preset_env(a, tune),
-                                    **{k: v for k, v in sets.items()
-                                       if k in S.MODEL_KNOBS}})
+        sets = knobs.canonical_sets(dict(spec.get("sets") or {}))
+        launch = knobs.engine_settings({**preset_env(a, tune),
+                                        **{k: v for k, v in sets.items()
+                                           if k in knobs.MODEL_KNOBS}})
         r = resolve(a, int(ws), tune=tune, holds_bytes=int(share),
                     kv_bits=launch.get("kv_bits"),
                     long_context=launch.get("long_context", "off"),
                     vision=launch.get("vision", True))
-        v = S.engine_settings(r.env).get("prefill_step_size")
+        v = knobs.engine_settings(r.env).get("prefill_step_size")
         return int(v) if v else None
     except Exception:  # a rank that cannot say leaves the ring on the floor
         logger.exception("could not work out this rank's prompt chunk")
@@ -816,7 +816,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                             f": every rank runs the same build")
             if k == "mlx":
                 break           # the build names mlx too; say it once
-    from knurlogic.tuning.settings import clean_sets
+    from knurlogic.tuning.checks import clean_sets
     ok_sets, bad_sets = clean_sets(spec.get("sets") or {})
     if bad_sets:
         refusals.append(f"settings a rank does not take: "
@@ -827,7 +827,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         refusals.append(why)
     rank, world = spec["rank"], spec["world"]
     try:
-        from knurlogic.tuning.settings import mtp_of, vision_of
+        from knurlogic.tuning.knobs import mtp_of, vision_of
         sh = (shape or shape_of)(path, world, spec["split"],
                                  vision=vision_of(ok_sets),
                                  mtp=mtp_of(ok_sets))
@@ -849,7 +849,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                 + int(sh.get("other_bytes") or 0) \
                 + (int(sh.get("leader_bytes") or 0) if rank == 0 else 0) \
                 if counts else 0
-        from knurlogic.tuning.resolve import step_margin
+        from knurlogic.tuning.fit import step_margin
         # the weights and the minimum step margin are the refusal
         floor = step_margin(ws)
         busy = (held or held_here)(spec["job"]) if need and ws else []
@@ -1825,7 +1825,9 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         logger.warning("cluster launch: %s", alert)
         req = dict(req, identity=ident)
     path = _resolve(ident, aname)
-    from knurlogic.tuning.settings import clean_sets, mtp_of, preset_or, vision_of
+    from knurlogic.tuning.checks import clean_sets
+    from knurlogic.tuning.knobs import mtp_of, vision_of
+    from knurlogic.tuning.presets import preset_or
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
         return {"error": f"not a launch setting: {', '.join(bad)}"}
@@ -2004,7 +2006,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     chunk = PREFILL_CHUNK
     for k in ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"):
         if k in sets:
-            from knurlogic.tuning.settings import check_knob
+            from knurlogic.tuning.checks import check_knob
             why = check_knob(k, sets[k])
             if why:
                 return {"error": why}
@@ -2212,7 +2214,7 @@ def peer_step(kind: str, req: dict) -> tuple:
     (status, doc)."""
     if not isinstance(req, dict):
         return 400, {"error": "the body must be a JSON object"}
-    from knurlogic.tuning.settings import PATH_KEYS
+    from knurlogic.tuning.checks import PATH_KEYS
     if any(k in req for k in PATH_KEYS):
         return 400, {"error": "a cluster job names its model by identity, "
                               "never by a path"}

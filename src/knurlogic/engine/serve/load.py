@@ -185,7 +185,7 @@ def vq_without_runtime(p) -> str:
 
 
 def long_context_overlay(path, env=None) -> dict:
-    """The config overlay KNURLOGIC_LONG_CONTEXT asks for (settings.
+    """The config overlay KNURLOGIC_LONG_CONTEXT asks for (context_window.
     long_context_config): {} when off. Read from the environment the
     launch set (serve applies a model's launch settings there, on every
     rank of a split), and applied as mlx-lm's `model_config` -- the
@@ -194,13 +194,13 @@ def long_context_overlay(path, env=None) -> dict:
     import os
     from pathlib import Path
 
-    from knurlogic.tuning import settings as S
-    mode = S.long_context_of((os.environ if env is None else env).get(
+    from knurlogic.tuning import context_window
+    mode = context_window.long_context_of((os.environ if env is None else env).get(
         "KNURLOGIC_LONG_CONTEXT"))
     if mode == "off":
         return {}
     cfg = json.loads((Path(str(path)) / "config.json").read_text())
-    return S.long_context_config(cfg, mode)
+    return context_window.long_context_config(cfg, mode)
 
 
 def set_cache_limit(gib: float) -> str:
@@ -220,25 +220,6 @@ def generate(model, tokenizer, prompt: str, max_tokens: int = 8) -> str:
 
     return _generate(model, tokenizer, prompt=prompt,
                      max_tokens=max_tokens, verbose=False) or ""
-
-
-#: Knobs that can be changed on a RUNNING process, and how.
-#:
-#: Measured by reading a real bundled runtime (4523 lines) rather than
-#: assuming. Of eleven knobs the resolver emits:
-#:
-#:   * VQ_DECODE_CHUNK is captured into a module global on FIRST PREFILL
-#:     (`_DECODE_CHUNK = _default_decode_chunk()`) and then read inside the
-#:     expert loop as a global. Rebinding that global takes effect on the next
-#:     prefill -- no reload.
-#:   * VQ_CACHE_LIMIT_GB (and its old names) is applied through the framework's own live
-#: API.
-#:   * the eight GEMM/numerics flags are read into module globals AT IMPORT and
-#:     baked into Metal kernel source that is compiled once. Those genuinely
-#:     need a restart, or an override module that reads them per dispatch.
-LIVE_KNOBS = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB",
-              "KNURLOGIC_CACHE_LIMIT_GB", "KNURLOGIC_CONTEXT_LENGTH",
-              "KNURLOGIC_THINKING_DEFAULT")
 
 
 def _artifact_runtime_modules():
@@ -287,7 +268,7 @@ def apply_live(env: dict) -> dict:
                 done[k] = f"failed: {e}"
         elif k == "KNURLOGIC_THINKING_DEFAULT":
             # engine/serve/thinking reads it at every request
-            from knurlogic.tuning.settings import thinking_default_of
+            from knurlogic.tuning.knobs import thinking_default_of
             try:
                 v = thinking_default_of(v)
             except ValueError as e:

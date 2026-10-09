@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from knurlogic.tuning.settings import PRESET_DEFAULT, PRESETS, preset_of
+from knurlogic.tuning.presets import PRESET_DEFAULT, PRESETS, preset_of
 
 
 def path() -> Path:

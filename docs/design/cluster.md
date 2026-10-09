@@ -31,9 +31,9 @@ everything can:
 
 - **plan** -- gather each machine's facts (its status' `cluster` block:
   chip, working set under its allowance, memory bandwidth, Thunderbolt
-  addresses, RDMA, versions), order the ranks (`tuning/resolve.rank_order`)
+  addresses, RDMA, versions), order the ranks (`tuning/rank_order.rank_order`)
   and place the model (tensor: an equal share each; pipeline:
-  `tuning/resolve.pipeline_shares`). Deterministic, and shown before
+  `tuning/pipeline_split.pipeline_shares`). Deterministic, and shown before
   anything loads.
 - **prepare** -- a `Prepare` message (`POST /peer/v1/msg`, an envelope:
   docs/design/orchestration.md) to every page (this one

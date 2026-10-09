@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from knurlogic.machine import wired
 from knurlogic.machine.artifact import Artifact
-from knurlogic.tuning import settings as S
+from knurlogic.tuning import knobs, measured, presets
 from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
@@ -35,9 +35,9 @@ def test_no_preset_raises_the_decode_chunk():
     (128 -> 32 is 1.37x), so there is no tradeoff to offer here -- a preset
     that raised it would be selling a regression as a feature."""
     room = _art(size_gib=20)
-    for tune in S.PRESETS:
+    for tune in presets.PRESETS:
         r = resolve(room, 200 * GIB, tune=tune)
-        assert int(r.env["VQ_DECODE_CHUNK"]) <= S.DECODE_CHUNK_DEFAULT
+        assert int(r.env["VQ_DECODE_CHUNK"]) <= measured.DECODE_CHUNK_DEFAULT
 
 
 def test_lean_bounds_memory_tighter_than_default():
@@ -58,7 +58,7 @@ def test_default_on_a_low_headroom_box_degrades_and_says_why():
     a knob and a wish is whether it tells you it did not happen."""
     a = _art(model_type="qwen3_5")                 # measured wider than 512
     r = resolve(a, 71 * GIB, tune="default")   # ~1 GiB: under 1024's ~1.9
-    assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_LOW_HEADROOM)
+    assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(measured.PREFILL_CHUNK_LOW_HEADROOM)
     assert any(n.startswith("prompt chunk 512") and "reserved" in n
                for n in r.notes)
     assert any("headroom to hold it in" in n for n in r.notes)
@@ -68,7 +68,7 @@ def test_default_on_a_low_headroom_box_degrades_and_says_why():
 
 def test_the_cache_cap_holds_even_with_unlimited_headroom():
     r = resolve(_art(size_gib=1), 10_000 * GIB, tune="default")
-    assert float(r.env["VQ_CACHE_LIMIT_GB"]) <= S.CACHE_LIMIT_GB_MAX
+    assert float(r.env["VQ_CACHE_LIMIT_GB"]) <= measured.CACHE_LIMIT_GB_MAX
 
 
 def test_an_unknown_tune_is_refused_not_ignored():
@@ -161,8 +161,8 @@ def test_a_knob_the_bundled_runtime_never_reads_is_called_out(tmp_path):
     """Knurlogic emitted VQLAB_PREFILL_CHUNK for every artifact and not one
     bundled runtime on this machine reads it. A resolved setting that does
     nothing is the exact failure this package exists to prevent."""
-    from knurlogic.interfaces.page.documents import knob_reach
     from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning.live import knob_reach
     (tmp_path / "config.json").write_text('{"model_type":"x","model_file":"model.py"}')
     (tmp_path / "model.py").write_text(
         'import os\nC = os.environ.get("VQ_DECODE_CHUNK", "32")\n')
@@ -233,7 +233,7 @@ def test_an_engine_knob_is_emitted_even_when_the_runtime_ignores_it(tmp_path):
     dropping it would be the theatre, just the other way round."""
     a = _artifact_reading(tmp_path, "VQ_DECODE_CHUNK")
     r = resolve(a, 96 * GIB)
-    assert S.engine_settings(r.env).get("prefill_step_size")
+    assert knobs.engine_settings(r.env).get("prefill_step_size")
 
 
 def test_the_resolved_prompt_chunk_reaches_the_scheduler():
@@ -259,16 +259,16 @@ def test_a_measured_family_width_is_a_cap_the_room_decides_how_much_of():
     a = Artifact(path=Path("/nonexistent"), model_type="qwen3_5",
                  model_file=None, bytes_on_disk=20 * GIB, hidden_size=4096,
                  moe_intermediate_size=1024, vq_other={})
-    default = S.engine_settings(resolve(a, 96 * GIB).env)
-    roomy = S.engine_settings(resolve(a, 96 * GIB, tune="default").env)
-    huge = S.engine_settings(resolve(a, 400 * GIB).env)
-    low = S.engine_settings(resolve(a, 21 * GIB, tune="default").env)
+    default = knobs.engine_settings(resolve(a, 96 * GIB).env)
+    roomy = knobs.engine_settings(resolve(a, 96 * GIB, tune="default").env)
+    huge = knobs.engine_settings(resolve(a, 400 * GIB).env)
+    low = knobs.engine_settings(resolve(a, 21 * GIB, tune="default").env)
     # 7.5 GiB predicted at 4096 > the ~4.8 GiB reserved; 3.75 at 2048 fits
     assert default["prefill_step_size"] == 2048
     assert roomy["prefill_step_size"] == 2048
     assert huge["prefill_step_size"] == 4096
-    assert "prompt_concurrency" not in roomy   # dead: settings.py says why
-    assert low["prefill_step_size"] == S.PREFILL_CHUNK_LOW_HEADROOM
+    assert "prompt_concurrency" not in roomy   # dead: measured.py says why
+    assert low["prefill_step_size"] == measured.PREFILL_CHUNK_LOW_HEADROOM
     assert "prompt_concurrency" not in low
 
 
@@ -292,10 +292,10 @@ def test_knobs_are_tiered_by_who_would_reach_for_one():
     """33 knobs on one real artifact: 2 you reach for, 8 measured flags, 23
     kernel internals. Showing all of them equally is the busy-panel mistake --
     every knob visible, none weighted, the eye with nowhere to go."""
-    assert S.knob_tier("VQ_DECODE_CHUNK") == "reach"
-    assert S.knob_tier("VQ_CACHE_LIMIT_GB") == "reach"
-    assert S.knob_tier("VQ_GEMMSEG_BF16IO") == "deeper"
-    assert S.knob_tier("VQ_D8_REGBUF") == "kernel"
+    assert knobs.knob_tier("VQ_DECODE_CHUNK") == "reach"
+    assert knobs.knob_tier("VQ_CACHE_LIMIT_GB") == "reach"
+    assert knobs.knob_tier("VQ_GEMMSEG_BF16IO") == "deeper"
+    assert knobs.knob_tier("VQ_D8_REGBUF") == "kernel"
 
 
 def test_unmeasured_knobs_are_named_but_never_given_a_default(tmp_path):
@@ -322,10 +322,10 @@ def test_a_dial_offers_only_positions_that_were_measured():
     """Discrete, not continuous. A slider over chunk width would invent
     positions no run ever measured, and 32 is the top because 128 -> 32 is
     1.37x and nothing above it was ever better."""
-    vals, _unit = S.KNOB_RANGE["VQ_DECODE_CHUNK"]
+    vals, _unit = knobs.KNOB_RANGE["VQ_DECODE_CHUNK"]
     assert vals == [4, 8, 16, 32]
-    assert max(vals) == S.DECODE_CHUNK_DEFAULT
-    assert min(vals) == S.DECODE_CHUNK_MIN
+    assert max(vals) == measured.DECODE_CHUNK_DEFAULT
+    assert min(vals) == measured.DECODE_CHUNK_MIN
 
 
 def test_the_cache_dial_stops_at_what_the_box_can_hold(tmp_path):
@@ -462,10 +462,11 @@ def test_preview_says_which_knobs_are_launch_only(tmp_path):
 def test_a_family_spelled_with_text_still_gets_its_measured_width():
     """A qwen3_5 27B reports model_type `qwen3_5_text`. Measured end to end
     through the MCP: it got the 2048 default instead of qwen3_5's 4096."""
-    assert S.prefill_chunk_for("qwen3_5_text")[0] == 4096
-    assert S.prefill_chunk_for("qwen3_5_moe_text")[0] == 2048
-    assert S.prefill_chunk_for("glm5_next_text")[0] == 2048
-    assert S.prefill_chunk_for("somebody_else")[0] == S.PREFILL_CHUNK_DEFAULT
+    assert measured.prefill_chunk_for("qwen3_5_text")[0] == 4096
+    assert measured.prefill_chunk_for("qwen3_5_moe_text")[0] == 2048
+    assert measured.prefill_chunk_for("glm5_next_text")[0] == 2048
+    assert measured.prefill_chunk_for("somebody_else")[0] == \
+        measured.PREFILL_CHUNK_DEFAULT
 
 
 def test_the_command_line_no_longer_forces_a_numerics_profile():
@@ -482,7 +483,7 @@ def test_mla_caches_are_costed_as_their_latent():
     """GLM-5.3's attention layers are deepseek_sparse_attention with an MLA
     latent: they read as 0 full-attention layers (the first prompt after a
     load went uncosted), and as K,V per head would be ~10x too high."""
-    from knurlogic.tuning.resolve import kv_bytes_per_token
+    from knurlogic.tuning.fit import kv_bytes_per_token
     tc = {"num_hidden_layers": 4, "kv_lora_rank": 512,
           "qk_rope_head_dim": 0, "index_head_dim": 128,
           "num_attention_heads": 64, "num_key_value_heads": 64,
@@ -494,7 +495,8 @@ def test_mla_caches_are_costed_as_their_latent():
 
 
 def test_the_context_length_applies_live(monkeypatch):
-    from knurlogic.engine.serve.load import LIVE_KNOBS, apply_live
+    from knurlogic.engine.serve.load import apply_live
+    from knurlogic.tuning.live import LIVE_KNOBS
     monkeypatch.delenv("KNURLOGIC_CONTEXT_LENGTH", raising=False)
     assert "KNURLOGIC_CONTEXT_LENGTH" in LIVE_KNOBS
     done = apply_live({"KNURLOGIC_CONTEXT_LENGTH": "32768"})
@@ -509,10 +511,10 @@ def test_low_headroom_scales_with_the_machine():
     """12 GiB was low headroom for a 96 GiB box and not for a 120 GiB one: 397B
     on an M4 Max kept ~14 GiB, took the 4096 prompt chunk, and one agent at
     25k tokens aborted Metal. A fifth of the working set, at least 12."""
-    from knurlogic.tuning import settings as S
+    from knurlogic.tuning import measured
     G = 1 << 30
-    assert S.low_headroom_bytes(120 * G) == 24 * G
-    assert S.low_headroom_bytes(48 * G) == 12 * G
+    assert measured.low_headroom_bytes(120 * G) == 24 * G
+    assert measured.low_headroom_bytes(48 * G) == 12 * G
 
 
 # --- the prompt chunk reads the room free at launch --------------------------
@@ -534,11 +536,11 @@ def _qwen_moe(hidden=2048, size_gib=13.8):
 
 
 def _chunk(r):
-    return S.engine_settings(r.env)["prefill_step_size"]
+    return knobs.engine_settings(r.env)["prefill_step_size"]
 
 
 def test_qwen3_5_moe_measured_best_is_2048():
-    assert S.prefill_chunk_for("qwen3_5_moe_text")[0] == 2048
+    assert measured.prefill_chunk_for("qwen3_5_moe_text")[0] == 2048
 
 
 def test_35b_a3b_with_100_gib_free_takes_2048():
@@ -567,7 +569,7 @@ def test_397b_with_14_gib_left_never_takes_4096():
 def test_an_explicit_prompt_chunk_still_wins():
     r = resolve(_qwen_moe(), 100 * GIB)
     rec = apply_preset_overrides_(r, {"KNURLOGIC_PREFILL_CHUNK": "1024"})
-    assert S.engine_settings({**r.env, **rec})["prefill_step_size"] == 1024
+    assert knobs.engine_settings({**r.env, **rec})["prefill_step_size"] == 1024
 
 
 def apply_preset_overrides_(r, sets):

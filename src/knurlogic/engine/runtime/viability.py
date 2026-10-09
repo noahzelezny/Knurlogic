@@ -113,7 +113,7 @@ def check_module(m, rule, n: int, key_dim: int = 0, seed: int = 0):
 
 def refusals(path, n: int, unverified: dict, cfg: dict,
              executes_artifact_code: bool = False) -> list:
-    """`unverified` (tuning/resolve.tensor_unverified) run as above on the
+    """`unverified` (tuning/tensor_split.tensor_unverified) run as above on the
     artifact at `path`; one line per module that fails. Loads the model
     lazily on this machine: only the probed modules' weights are read."""
     key = (str(path), n, tuple(sorted(unverified.items())))

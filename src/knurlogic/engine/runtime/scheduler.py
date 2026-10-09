@@ -187,7 +187,7 @@ def _kv_from_config(path, kv_bits=None) -> tuple | None:
     config does not say."""
     try:
         from knurlogic.machine.artifact import Artifact
-        from knurlogic.tuning.resolve import kv_bytes_per_token
+        from knurlogic.tuning.fit import kv_bytes_per_token
         cfg = Artifact.load(path).raw_config
         per, _why = kv_bytes_per_token(cfg.get("text_config", cfg), kv_bits)
         return (0.0, float(per)) if per > 0 else None

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from knurlogic.interfaces.page import documents
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine.artifact import Artifact
-from knurlogic.tuning import settings as S
+from knurlogic.tuning import checks, context_window, knobs, live, presets
 from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
@@ -32,7 +32,7 @@ def _art(cfg=None, model_type="qwen3_5"):
 # --- the context length -----------------------------------------------------
 
 def test_the_window_is_max_position_embeddings_without_yarn():
-    w, why = S.model_window(FLASH_NEXT)
+    w, why = context_window.model_window(FLASH_NEXT)
     assert w == 262144 and "no YaRN" in why
 
 
@@ -40,21 +40,21 @@ def test_yarn_rope_scaling_extends_the_window():
     cfg = {"max_position_embeddings": 262144, "rope_scaling": {
         "rope_type": "yarn", "factor": 4.0,
         "original_max_position_embeddings": 262144}}
-    w, why = S.model_window(cfg)
+    w, why = context_window.model_window(cfg)
     assert w == 1048576 and "YaRN" in why
 
 
 def test_a_context_past_the_models_window_is_refused():
     """1048576 was taken for a 262144-token model: the engine computes rope
     for any position, so it would just run past its trained length."""
-    why = S.check_knob("KNURLOGIC_CONTEXT_LENGTH", "1048576", 262144)
+    why = checks.check_knob("KNURLOGIC_CONTEXT_LENGTH", "1048576", 262144)
     assert why and "maximum is 262,144" in why
-    assert S.check_knob("KNURLOGIC_CONTEXT_LENGTH", "262144", 262144) is None
-    assert "whole number" in S.check_knob("KNURLOGIC_CONTEXT_LENGTH", "1e6")
+    assert checks.check_knob("KNURLOGIC_CONTEXT_LENGTH", "262144", 262144) is None
+    assert "whole number" in checks.check_knob("KNURLOGIC_CONTEXT_LENGTH", "1e6")
     a = _art(FLASH_NEXT)
-    assert "262,144" in documents.refuse_sets(
+    assert "262,144" in checks.refuse_sets(
         a, {"KNURLOGIC_CONTEXT_LENGTH": "1048576"})
-    assert documents.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "131072"}) is None
+    assert checks.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "131072"}) is None
 
 
 def test_the_control_stops_at_the_window_and_says_so():
@@ -79,19 +79,19 @@ def test_the_context_length_is_the_engines_and_live(tmp_path):
         '{"model_type":"x","model_file":"model.py"}')
     (tmp_path / "model.py").write_text("import os\n")
     a = Artifact.load(tmp_path)
-    assert documents.knob_reach(a, "KNURLOGIC_CONTEXT_LENGTH",
-                          ("KNURLOGIC_CONTEXT_LENGTH",))[0] == "live"
+    assert live.knob_reach(a, "KNURLOGIC_CONTEXT_LENGTH",
+                           ("KNURLOGIC_CONTEXT_LENGTH",))[0] == "live"
 
 
 def test_other_knobs_are_checked_for_type_and_range():
-    assert S.check_knob("VQ_DECODE_CHUNK", "64")          # capped at 32
-    assert S.check_knob("VQ_DECODE_CHUNK", "16") is None
-    assert S.check_knob("KNURLOGIC_CACHE_LIMIT_GB", "40")
-    assert S.check_knob("KNURLOGIC_MTP", "maybe")
-    assert S.check_knob("KNURLOGIC_KV_BITS", "3")
-    assert S.check_knob("KNURLOGIC_PRESET", "turbo")
-    assert S.check_knob("KNURLOGIC_CROSS_CHIP", "auto") is None
-    assert S.check_knob("VQ_GEMMSEG_PIPE", "anything") is None  # not ours
+    assert checks.check_knob("VQ_DECODE_CHUNK", "64")          # capped at 32
+    assert checks.check_knob("VQ_DECODE_CHUNK", "16") is None
+    assert checks.check_knob("KNURLOGIC_CACHE_LIMIT_GB", "40")
+    assert checks.check_knob("KNURLOGIC_MTP", "maybe")
+    assert checks.check_knob("KNURLOGIC_KV_BITS", "3")
+    assert checks.check_knob("KNURLOGIC_PRESET", "turbo")
+    assert checks.check_knob("KNURLOGIC_CROSS_CHIP", "auto") is None
+    assert checks.check_knob("VQ_GEMMSEG_PIPE", "anything") is None  # not ours
 
 
 # --- the prompt chunk: one knob, one name -----------------------------------
@@ -100,24 +100,24 @@ def test_the_prompt_chunk_is_emitted_under_knurlogics_own_name():
     """VQLAB_PREFILL_CHUNK is read by no bundled runtime -- only the engine,
     under either name -- so it is emitted under knurlogic's own name. So is
     the cache limit (the VQ runtime's name is passed the same value)."""
-    assert S.default_alias("prefill_chunk") == "KNURLOGIC_PREFILL_CHUNK"
-    assert S.default_alias("cache_limit_gb") == "KNURLOGIC_CACHE_LIMIT_GB"
+    assert knobs.default_alias("prefill_chunk") == "KNURLOGIC_PREFILL_CHUNK"
+    assert knobs.default_alias("cache_limit_gb") == "KNURLOGIC_CACHE_LIMIT_GB"
     env = resolve(_art(), 96 * GIB).env
     assert "KNURLOGIC_PREFILL_CHUNK" in env
     assert "VQLAB_PREFILL_CHUNK" not in env
-    assert "KNURLOGIC_PREFILL_CHUNK" in S.KNOB_DOC
-    assert "VQLAB_PREFILL_CHUNK" not in S.KNOB_DOC
+    assert "KNURLOGIC_PREFILL_CHUNK" in knobs.KNOB_DOC
+    assert "VQLAB_PREFILL_CHUNK" not in knobs.KNOB_DOC
 
 
 def test_the_legacy_name_is_still_accepted_and_beats_the_resolver():
-    sets = S.canonical_sets({"VQLAB_PREFILL_CHUNK": "2048"})
+    sets = knobs.canonical_sets({"VQLAB_PREFILL_CHUNK": "2048"})
     assert sets == {"KNURLOGIC_PREFILL_CHUNK": "2048"}
     env = {**resolve(_art(), 96 * GIB).env, **sets}
-    assert S.engine_settings(env)["prefill_step_size"] == 2048
+    assert knobs.engine_settings(env)["prefill_step_size"] == 2048
     ok, bad = page_server.clean_sets({"VQLAB_PREFILL_CHUNK": "1024"})
     assert ok and not bad
-    both = S.canonical_sets({"VQLAB_PREFILL_CHUNK": "2048",
-                             "KNURLOGIC_PREFILL_CHUNK": "1024"})
+    both = knobs.canonical_sets({"VQLAB_PREFILL_CHUNK": "2048",
+                                 "KNURLOGIC_PREFILL_CHUNK": "1024"})
     assert both == {"KNURLOGIC_PREFILL_CHUNK": "1024"}
 
 
@@ -125,14 +125,14 @@ def test_the_old_cache_limit_name_is_accepted_and_reaches_an_old_runtime():
     """VQLAB_CACHE_LIMIT_GB and VQ_CACHE_LIMIT_GB (saved settings, --set)
     become KNURLOGIC_CACHE_LIMIT_GB; an artifact whose bundled runtime reads
     an old name still gets the explicit value under it."""
-    assert S.canonical_sets({"VQ_CACHE_LIMIT_GB": "3.0"}) == \
+    assert knobs.canonical_sets({"VQ_CACHE_LIMIT_GB": "3.0"}) == \
         {"KNURLOGIC_CACHE_LIMIT_GB": "3.0"}
-    sets = S.canonical_sets({"VQLAB_CACHE_LIMIT_GB": "2.0"})
+    sets = knobs.canonical_sets({"VQLAB_CACHE_LIMIT_GB": "2.0"})
     assert sets == {"KNURLOGIC_CACHE_LIMIT_GB": "2.0"}
     env = {"KNURLOGIC_CACHE_LIMIT_GB": "4.0",   # what the resolver emitted
            "VQLAB_CACHE_LIMIT_GB": "4.0"}
-    assert S.legacy_mirror(env, sets) == {"VQLAB_CACHE_LIMIT_GB": "2.0"}
-    assert S.engine_settings({**env, **sets})["cache_limit_gb"] == 2.0
+    assert knobs.legacy_mirror(env, sets) == {"VQLAB_CACHE_LIMIT_GB": "2.0"}
+    assert knobs.engine_settings({**env, **sets})["cache_limit_gb"] == 2.0
 
 
 from test_cluster_jobs import cache  # noqa: E402,F401 (a fixture)
@@ -160,11 +160,11 @@ def test_a_cluster_job_runs_the_saved_prompt_chunk(cache, monkeypatch):
 def test_prompt_concurrency_is_not_offered():
     """knurlogic's engine admits one row per step; the knob went with
     mlx-lm's server and was shown as 'needs reload' over nothing."""
-    for tune in S.PRESETS:
+    for tune in presets.PRESETS:
         env = resolve(_art(), 24 * GIB, tune=tune).env
         assert "KNURLOGIC_PROMPT_CONCURRENCY" not in env, tune
-    assert "KNURLOGIC_PROMPT_CONCURRENCY" not in S.KNOB_DOC
-    assert "KNURLOGIC_PROMPT_CONCURRENCY" not in S.ENGINE_KNOB_NAMES
+    assert "KNURLOGIC_PROMPT_CONCURRENCY" not in knobs.KNOB_DOC
+    assert "KNURLOGIC_PROMPT_CONCURRENCY" not in knobs.ENGINE_KNOB_NAMES
     # a launch setting saved before still passes, so it cannot fail a launch
     assert page_server.clean_sets({"KNURLOGIC_PROMPT_CONCURRENCY": "1"})[0]
 

@@ -23,7 +23,6 @@ why: [memory](../design/memory.md), [memory-ledger](../design/memory-ledger.md),
 | `identity.py` | which machine this is: a stable `id`, never the name |
 | `status.py` | the snapshot `/status.json` serves (`snapshot`, `aggregate`) |
 | `deps.py` | which mlx, mlx-lm, mlx-vlm builds are installed, read off the fix itself |
-| `preferences.py`, `strategy.py` | saved settings (see [settings](settings.md)) |
 | `ledger.py` | the request ledger (see [telemetry](telemetry.md)) |
 | `disk_cache.py` | a small JSON cache so a start does not redo unchanged work |
 
@@ -53,12 +52,13 @@ Who uses it:
 - **A runtime that is not running is absent, not an error** (`loaded`).
 - **A node is its id.** Names collide.
 - **Stdlib only** where the page reads it: allowance, loadlock,
-  preferences, servers.
+  servers. The saved settings are `tuning/preferences.py` and
+  `tuning/strategy.py` ([settings](settings.md)).
 
 ## Notes
 
 Memory is spread across packages: `machine/wired.py`, `allowance.py` and
-`loaded.py` (the machine), `tuning/resolve.py` (the fit), the scheduler's
+`loaded.py` (the machine), `tuning/fit.py` (the fit), the scheduler's
 guard in `engine/runtime/scheduler.py`, `engine/serve/load.py`
 (`memory`, `gpu_in_use`, `set_cache_limit`), and
 `cluster/launch.py` (`available_now`, `budget_of`, `gpu_working_set`)

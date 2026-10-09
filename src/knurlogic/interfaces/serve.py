@@ -24,6 +24,8 @@ from knurlogic.engine import serve as engine
 from knurlogic.interfaces.page import documents
 from knurlogic.machine import status, wired
 from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning.checks import refuse_sets, settings_refusal
+from knurlogic.tuning.live import LIVE_KNOBS
 from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
@@ -143,86 +145,6 @@ REFUSED_EXIT = 78
 REFUSING = "REFUSING: "
 
 
-def settings_refusal(a, overrides) -> str | None:
-    """The first value a launch would use that its own setting refuses,
-    named in the page's words and where to fix it: this model's settings
-    (Settings -> Models) or the saved knurlogic-wide ones (Settings ->
-    Knurlogic). Nothing is dropped silently. Launch knobs in the
-    environment are not read at all (ignored_env says so), so they are not
-    checked here."""
-    from knurlogic.machine import preferences
-    from knurlogic.tuning import settings as S
-    # past the native window is long context where the family has YaRN
-    # (settings.settle_context turns it on), so the ceiling is the YaRN one
-    w = S.context_ceiling(getattr(a, "model_type", ""),
-                          getattr(a, "raw_config", None) or {})
-    why = next((m for m in (S.check_knob(k, v, w) for k, v in
-                            S.canonical_sets(dict(overrides or {})).items())
-                if m), None)
-    if why:
-        return f"{why} (Settings \u2192 Models)"
-    why = next((m for _, m in preferences.invalid()), None)
-    return f"{why} (Settings \u2192 Knurlogic)" if why else None
-
-
-def launch_refusal(a, overrides, tune: str = "default") -> str | None:
-    """None when `overrides` (a launch's --set values) and the preset `tune`
-    can start `a`, else why not -- the deterministic refusals `run` makes
-    before it loads a thing, in the same words, so a page or the MCP can
-    refuse the launch BEFORE a process (or a ring of them) is started."""
-    from knurlogic.machine import preferences
-    from knurlogic.tuning import settings as S
-    from knurlogic.tuning.resolve import kv_refusal, preset_env
-    # a context past the native window is settled (turned on / lowered)
-    # before the values are checked, as run does
-    sets, _ = S.settle_context(a.model_type, a.raw_config,
-                               S.canonical_sets(dict(overrides or {})))
-    why = settings_refusal(a, sets)
-    if why:
-        return why
-    sets = preferences.launch_sets(sets)
-    why = documents.refuse_sets(a, sets)
-    if why:
-        return why
-    try:
-        tune = S.preset_of(sets.get("KNURLOGIC_PRESET"), tune)
-        launch = S.engine_settings({**preset_env(a, tune),
-                                    **{k: v for k, v in sets.items()
-                                       if k in S.MODEL_KNOBS}})
-    except ValueError as e:
-        return str(e)
-    return (kv_refusal(a, launch.get("kv_bits"))
-            or S.long_context_refusal(a.model_type,
-                                      launch.get("long_context", "off"))
-            or None)
-
-
-def launch_fit(a, overrides, tune: str = "default", draft: bool = True,
-               budget_bytes: int | None = None) -> dict:
-    """`tuning.resolve.single_fit_check` for a launch's settings against
-    `budget_bytes` (default: the load budget): the same check `run` makes,
-    so the MCP and the page can refuse before a process starts."""
-    from knurlogic.machine import preferences, wired
-    from knurlogic.tuning import settings as S
-    from knurlogic.tuning.resolve import preset_env, single_fit_check
-    if budget_bytes is None:
-        budget_bytes = wired.load_budget()["bytes"]
-    try:
-        sets, _ = S.settle_context(a.model_type, a.raw_config,
-                                   S.canonical_sets(dict(overrides or {})))
-        sets = preferences.launch_sets(sets)
-        tune = S.preset_of(sets.get("KNURLOGIC_PRESET"), tune)
-        launch = S.engine_settings({**preset_env(a, tune),
-                                    **{k: v for k, v in sets.items()
-                                       if k in S.MODEL_KNOBS}})
-    except ValueError:
-        launch = {}
-    if launch.get("mtp") is False:
-        draft = False
-    return single_fit_check(a, budget_bytes, draft, launch.get("kv_bits"),
-                            launch.get("vision", True))
-
-
 def run(path: str, host: str, port: int, working_set_gib: float,
         profile: str | None, tune: str = "default",
         overrides: dict | None = None, draft: bool = True,
@@ -256,21 +178,21 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                 print(f"  - {w}", file=sys.stderr)
             return REFUSED_EXIT
         if ring.get("split") == "pipeline":
-            from knurlogic.tuning import resolve as R
-            per, other = R.pipeline_layer_bytes(a)
+            from knurlogic.tuning import fit, pipeline_split
+            per, other = pipeline_split.pipeline_layer_bytes(a)
             # rank 0 holds the tower only with vision on and the head only
             # with MTP on -- the ring-wide sets, never this rank's --no-draft,
             # so every rank computes the same split
-            from knurlogic.tuning.settings import canonical_sets, mtp_of, vision_of
+            from knurlogic.tuning.knobs import canonical_sets, mtp_of, vision_of
             rs = canonical_sets(dict(overrides or {}))
-            lead = R.leader_bytes(a, vision=vision_of(rs), mtp=mtp_of(rs))
-            bw = ring.get("bandwidth_gbs") or R.chip_bandwidth_gbs(_chip())
+            lead = pipeline_split.leader_bytes(a, vision=vision_of(rs), mtp=mtp_of(rs))
+            bw = ring.get("bandwidth_gbs") or pipeline_split.chip_bandwidth_gbs(_chip())
             # every rank's working set and bandwidth are gathered once the
             # ring is up; the split is computed the same way on every rank
             ring["pipeline"] = {
                 "layer_bytes": per, "other_bytes": other,
                 "leader_bytes": lead,
-                "reserve": R.fit_reserve(a.raw_config),
+                "reserve": fit.fit_reserve(a.raw_config),
                 "working_set": int(working_set_gib * GIB),
                 "bandwidth_gbs": bw, "counts": ring.get("layers") or None}
             share = pipeline_share_bytes(per, other, int(ring["rank"]),
@@ -282,8 +204,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                   f"{other / GIB:.1f} GiB on every rank; memory bandwidth "
                   + (f"{bw:g} GB/s" if bw else "unknown here"))
         else:
-            from knurlogic.tuning.resolve import leader_bytes, tensor_placement
-            from knurlogic.tuning.settings import canonical_sets, mtp_of, vision_of
+            from knurlogic.tuning.knobs import canonical_sets, mtp_of, vision_of
+            from knurlogic.tuning.pipeline_split import leader_bytes
+            from knurlogic.tuning.tensor_split import tensor_placement
             pl = tensor_placement(a, world)
             # rank 0 alone holds the head (MTP on) and the tower (vision on)
             rs = canonical_sets(dict(overrides or {}))
@@ -310,20 +233,20 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # The model's own launch settings (MTP, its controller, KV precision):
     # read before the resolver, since the KV bits change what the context
     # costs, and refused here with the reason rather than at load.
-    from knurlogic.tuning import settings as S
+    from knurlogic.tuning import context_window, knobs, presets
     from knurlogic.tuning.resolve import apply_preset_overrides, kv_refusal, preset_env
     # A launch preset IS the tune: a per-model KNURLOGIC_PRESET (Settings
     # -> Models, carried ring-wide like every launch set) picks it over
     # --tune; its launch values are defaults every explicit set beats.
-    overrides = S.canonical_sets(overrides)
+    overrides = knobs.canonical_sets(overrides)
     # identical results across chips is knurlogic-wide (Settings ->
-    # Knurlogic, machine/preferences), not a model's: saved, it beats the
+    # Knurlogic, tuning/preferences), not a model's: saved, it beats the
     # preset's value; an explicit --set still beats it
-    from knurlogic.machine import preferences
+    from knurlogic.tuning import preferences
     # a context past the native window turns long context on (or is lowered
     # to what the model reaches): a value never refuses a launch for that
-    overrides, settled = S.settle_context(
-        a.model_type, a.raw_config, S.canonical_sets(dict(overrides or {})))
+    overrides, settled = context_window.settle_context(
+        a.model_type, a.raw_config, knobs.canonical_sets(dict(overrides or {})))
     for n in settled:
         print(f"  note: {n}")
     why = settings_refusal(a, overrides)
@@ -331,19 +254,19 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(f"REFUSING: {why}", file=sys.stderr)
         return REFUSED_EXIT
     overrides = preferences.launch_sets(overrides)
-    why = documents.refuse_sets(a, overrides)
+    why = refuse_sets(a, overrides)
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
         return REFUSED_EXIT
     try:
-        tune = S.preset_of(overrides.pop("KNURLOGIC_PRESET", None), tune)
+        tune = presets.preset_of(overrides.pop("KNURLOGIC_PRESET", None), tune)
     except ValueError as e:
         print(f"REFUSING: {e}", file=sys.stderr)
         return REFUSED_EXIT
     try:
-        launch = S.engine_settings({**preset_env(a, tune),
-                                    **{k: v for k, v in overrides.items()
-                                       if k in S.MODEL_KNOBS}})
+        launch = knobs.engine_settings({**preset_env(a, tune),
+                                        **{k: v for k, v in overrides.items()
+                                           if k in knobs.MODEL_KNOBS}})
     except ValueError as e:
         print(f"REFUSING: {e}", file=sys.stderr)
         return REFUSED_EXIT
@@ -353,7 +276,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(f"REFUSING: {why}", file=sys.stderr)
         return REFUSED_EXIT
     long_context = launch.get("long_context", "off")
-    why = S.long_context_refusal(a.model_type, long_context)
+    why = context_window.long_context_refusal(a.model_type, long_context)
     if why:
         print(f"REFUSING: {why}", file=sys.stderr)
         return REFUSED_EXIT
@@ -379,7 +302,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # The weights, the MTP head and vision bytes that will be bound,
         # and the step margin: a load that fills the budget swaps
         # on its first request instead of failing here.
-        from knurlogic.tuning.resolve import single_fit_check
+        from knurlogic.tuning.fit import single_fit_check
         chk = single_fit_check(a, ws, draft, kv_bits, vision)
         if chk["state"] == "cannot":
             print(f"REFUSING: {chk['why']}", file=sys.stderr)
@@ -396,7 +319,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if long_context != "off" and ws:
         # YaRN: the KV of the chosen context must fit, or the load is
         # refused here rather than an OOM a million tokens in
-        from knurlogic.tuning.resolve import long_context_room
+        from knurlogic.tuning.context_window import long_context_room
         ctx = int(overrides.get("KNURLOGIC_CONTEXT_LENGTH")
                   or r.env.get("KNURLOGIC_CONTEXT_LENGTH") or 0)
         why = long_context_room(a, ws, a.bytes_on_disk if share is None
@@ -416,7 +339,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     forced = dict(overrides or {})
     # an explicit value under a knob's current name also reaches the old
     # name this artifact's bundled runtime reads
-    forced.update(S.legacy_mirror(r.env, forced))
+    forced.update(knobs.legacy_mirror(r.env, forced))
     for line in ignored_env(r.env, forced, os.environ):
         print(line)
     for k, v in sorted(r.env.items()):
@@ -604,17 +527,17 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             want = {k: v for k, v in _resolve_for(ws, tune_name).env.items()}
         # compaction's knobs are read per request by this server's HTTP
         # side (context_management/compaction): the environment is the setting
-        # -- and they are knurlogic-wide (machine/preferences): a change
+        # -- and they are knurlogic-wide (tuning/preferences): a change
         # here is saved for every server on this machine, not this one's
-        from knurlogic.machine import preferences
-        from knurlogic.tuning.settings import COMPACT_KNOBS, PROMPT_CACHE_KNOBS
+        from knurlogic.tuning import preferences
+        from knurlogic.tuning.groups import COMPACT_KNOBS, PROMPT_CACHE_KNOBS
         cur = preferences.compaction_env(preferences.prompt_cache_env())
         wide = {**COMPACT_KNOBS, **PROMPT_CACHE_KNOBS}
         compact = {k: str(v) for k, v in want.items()
                    if k in wide and str(v) != cur.get(k, wide[k][0])}
         want = {k: str(v) for k, v in want.items()
-                if k in engine.LIVE_KNOBS and str(v) != live_env.get(k)}
-        why = documents.refuse_sets(a, {**want, **compact})
+                if k in LIVE_KNOBS and str(v) != live_env.get(k)}
+        why = refuse_sets(a, {**want, **compact})
         if why:
             return {"error": why}
         if not want and not compact:
@@ -649,13 +572,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         settings_fn=documents.settings_document(
             a, live_env=live_env, live_tune=tune, live_working_set=ws,
             resolve_fn=_resolve_for, wired_advice=adv,
-            live_knobs=engine.LIVE_KNOBS),
+            live_knobs=LIVE_KNOBS),
         models_fn=documents.models_document(serving=a.path.name),
         loaded_fn=documents.loaded_document(),
         load_fn=documents.load_action(
             artifact_for=lambda p: Artifact.load(p),
             resolve_fn=lambda art: resolve(art, ws, profile=profile, tune=tune),
-            live_knobs=engine.LIVE_KNOBS,
+            live_knobs=LIVE_KNOBS,
             switch_fn=http.switch, unload_fn=http.unload),
         apply_fn=_apply)
     # A packed head is used because it is there. Nobody should have to know
@@ -674,7 +597,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if kv_bits is not None:
         print(f"kv cache   attention K/V stored at {kv_bits} bits")
     if not vision:
-        from knurlogic.tuning.resolve import vision_freed_bytes
+        from knurlogic.tuning.fit import vision_freed_bytes
         freed = vision_freed_bytes(a, kv_bits)
         if freed:
             print(f"vision     off (KNURLOGIC_VISION=off): no tower, image "
@@ -684,7 +607,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
 
     # The knobs the ENGINE reads -- argv and a process-global mlx call --
     # from the environment as it finally stands, overrides included.
-    from knurlogic.tuning.settings import engine_settings
+    from knurlogic.tuning.knobs import engine_settings
     eng = engine_settings({**r.env, **forced})
     if eng:
         print("engine    " + "  ".join(f"{k}={v}" for k, v in sorted(eng.items())))
@@ -718,7 +641,7 @@ def _ring_chips(text: str) -> list | None:
 def _ring_refusals(a: Artifact, ring: dict, working_set_gib: float,
                    overrides: dict) -> list:
     """Why this rank cannot join a tensor split, with the numbers."""
-    from knurlogic.tuning.resolve import tensor_split_refusals
+    from knurlogic.tuning.tensor_split import tensor_split_refusals
     why = []
     if ring.get("split") not in ("tensor", "pipeline"):
         why.append(f"--split {ring.get('split')!r}: this build splits "
@@ -742,7 +665,7 @@ def _ring_refusals(a: Artifact, ring: dict, working_set_gib: float,
                                             and ring.get("coordinator")):
         why.append("--link jaccl needs --ibv-devices and --coordinator")
     if ring.get("split") == "pipeline":
-        from knurlogic.tuning.resolve import pipeline_refusals
+        from knurlogic.tuning.pipeline_split import pipeline_refusals
         why += pipeline_refusals(a.raw_config, int(ring["world"]))
         n = ring.get("layers") or []
         if n and len(n) != int(ring["world"]):
@@ -805,7 +728,7 @@ def _parse_sets(pairs) -> dict:
 
 
 def main(argv=None) -> int:
-    from knurlogic.tuning import settings as S
+    from knurlogic.tuning import presets
     p = argparse.ArgumentParser(prog="knurlogic serve",
                                description=__doc__.split("\n")[0])
     p.add_argument("artifact")
@@ -845,7 +768,7 @@ def main(argv=None) -> int:
                         "Most knobs are read at import, so this is the only "
                         "moment they can be chosen.")
     p.add_argument("--tune", "--preset", dest="tune", default="default",
-                   type=S.preset_arg, metavar="{default,lean}",
+                   type=presets.preset_arg, metavar="{default,lean}",
                    help="launch preset: default (the measured settings) or "
                         "lean (8-bit KV where the family takes it, 512-token "
                         "prompt chunks, MTP off: most context and agents). "
@@ -882,7 +805,7 @@ def main(argv=None) -> int:
                    help="memory for encoded images (default 0.25). A "
                         "request's images must fit it together")
     # Cluster plumbing: the cluster page passes these to each machine's
-    # serve (tuning/resolve.rank_order picks the order). Hidden from --help:
+    # serve (tuning/rank_order.rank_order picks the order). Hidden from --help:
     # nobody types a rank.
     hide = argparse.SUPPRESS
     p.add_argument("--rank", type=int, default=0, help=hide)

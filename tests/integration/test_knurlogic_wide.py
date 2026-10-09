@@ -1,4 +1,4 @@
-"""Knurlogic-wide settings (machine/preferences): compaction and identical
+"""Knurlogic-wide settings (tuning/preferences): compaction and identical
 results across chips are set once for every model, not per model -- read
 per request (compaction) and at launch (cross-chip)."""
 
@@ -7,8 +7,7 @@ import pytest
 from knurlogic.context_management import compaction as C
 from knurlogic.interfaces.page import documents
 from knurlogic.interfaces.page import server as page_server
-from knurlogic.machine import preferences
-from knurlogic.tuning import settings as S
+from knurlogic.tuning import groups, knobs, preferences, presets
 
 
 @pytest.fixture
@@ -56,7 +55,7 @@ def test_compaction_document_is_one_live_set(home):
     preferences.set({"KNURLOGIC_COMPACT_TRIGGER": "0.6"})
     doc = documents.compaction_document()
     by = {k["name"]: k for k in doc["knobs"]}
-    assert set(by) == set(S.COMPACT_KNOBS)
+    assert set(by) == set(groups.COMPACT_KNOBS)
     assert by["KNURLOGIC_COMPACT_TRIGGER"]["value"] == "0.6"
     assert all(k["reach"] == "live" for k in doc["knobs"])
     assert doc["effective"]["trigger"] == 0.6
@@ -89,11 +88,11 @@ def test_every_setting_says_what_it_costs():
     """Each explanation names a trade-off, not only what the knob does."""
     words = ("cost", "slower", "faster", "memory", "loses", "lost",
              "no trade", "changes the output", "speed")
-    for name, (_what, why) in S.KNOB_DOC.items():
+    for name, (_what, why) in knobs.KNOB_DOC.items():
         assert any(w in why.lower() for w in words), name
-    for name, spec in S.COMPACT_KNOBS.items():
+    for name, spec in groups.COMPACT_KNOBS.items():
         assert any(w in spec[4].lower() for w in words), name
-    assert "+2-6%" in S.KNOB_DOC["KNURLOGIC_CROSS_CHIP"][1]
+    assert "+2-6%" in knobs.KNOB_DOC["KNURLOGIC_CROSS_CHIP"][1]
 
 
 def test_a_launch_reads_cross_chip_from_knurlogic_wide(home):
@@ -106,17 +105,17 @@ def test_a_launch_reads_cross_chip_from_knurlogic_wide(home):
         {"KNURLOGIC_CROSS_CHIP": "off"}
     # and it beats the preset's value, as any launch set does
     from knurlogic.tuning.resolve import preset_env  # noqa: F401
-    launch = S.engine_settings({"KNURLOGIC_CROSS_CHIP": "off",
-                                **preferences.launch_sets({})})
+    launch = knobs.engine_settings({"KNURLOGIC_CROSS_CHIP": "off",
+                                    **preferences.launch_sets({})})
     assert launch["cross_chip"] == "on"
 
 
 def test_a_custom_preset_is_saved_rows_the_launch_reads(home):
-    assert S.preset_row_values("lean") == {
+    assert presets.preset_row_values("lean") == {
         "KNURLOGIC_PREFILL_CHUNK": "512", "KNURLOGIC_CACHE_LIMIT_GB": "1",
-        S.MTP_MODE: "off", "KNURLOGIC_KV_BITS": "8"}
-    assert S.preset_row_values("default")[S.MTP_MODE] == "dynamic"
-    preferences.set({S.MTP_MODE: "every", "KNURLOGIC_KV_BITS": "8",
+        presets.MTP_MODE: "off", "KNURLOGIC_KV_BITS": "8"}
+    assert presets.preset_row_values("default")[presets.MTP_MODE] == "dynamic"
+    preferences.set({presets.MTP_MODE: "every", "KNURLOGIC_KV_BITS": "8",
                      "KNURLOGIC_CACHE_LIMIT_GB": "2"})
     assert preferences.launch_sets({}) == {
         "KNURLOGIC_MTP": "on", "KNURLOGIC_MTP_DYNAMIC": "off",
@@ -127,8 +126,8 @@ def test_a_custom_preset_is_saved_rows_the_launch_reads(home):
     assert preferences.launch_sets({"KNURLOGIC_PRESET": "lean"}) == \
         {"KNURLOGIC_PRESET": "lean"}
     assert "error" in documents.set_knurlogic(b'{"KNURLOGIC_MTP_MODE": "x"}')
-    preferences.set({S.MTP_MODE: ""})
-    assert S.MTP_MODE not in preferences.get()
+    preferences.set({presets.MTP_MODE: ""})
+    assert presets.MTP_MODE not in preferences.get()
 
 
 def test_serve_takes_knurlogic_wide_before_the_preset():
@@ -137,4 +136,4 @@ def test_serve_takes_knurlogic_wide_before_the_preset():
     from knurlogic.interfaces import serve
     src = inspect.getsource(serve)
     assert src.index("preferences.launch_sets(overrides)") < \
-        src.index("S.preset_of(overrides.pop(\"KNURLOGIC_PRESET\"")
+        src.index("presets.preset_of(overrides.pop(\"KNURLOGIC_PRESET\"")

@@ -28,8 +28,9 @@ from knurlogic.interfaces.page import documents
 from knurlogic.machine import identity, loaded, status, wired
 from knurlogic.machine.servers import is_our_server, registry, save_registry, serve_log
 
-# the launch facts cluster jobs share: tuning/settings owns them
-from knurlogic.tuning.settings import PATH_KEYS, clean_sets, preset_or
+# the launch facts cluster jobs share: tuning/checks owns them
+from knurlogic.tuning.checks import PATH_KEYS, clean_sets
+from knurlogic.tuning.presets import preset_or
 
 if TYPE_CHECKING:
     from knurlogic.cluster.peers import Peers
@@ -566,8 +567,8 @@ def _load_fn(serve_port: int):
 
 def _default_tune() -> str:
     """The tune a launch takes when none is named: this machine's knurlogic
-    strategy (machine/strategy.py), default unless one was chosen."""
-    from knurlogic.machine import strategy
+    strategy (tuning/strategy.py), default unless one was chosen."""
+    from knurlogic.tuning import strategy
     return strategy.get()
 
 

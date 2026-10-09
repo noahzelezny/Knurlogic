@@ -37,9 +37,9 @@ Hooks outside it:
 - `engine/mtp/batch_generator.py`: the batch engine takes `vision=`.
 - `engine/runtime/plan.py`: `admit` carries `images` and `refs` to the
   other ranks of a split (`key_to_wire`, `key_from_wire`).
-- `tuning/resolve.py`: `vision_budget`, `vision_freed_bytes`,
-  `_tower_bytes`; `tuning/settings.py`: `VISION_*` constants,
-  `vision_of`.
+- `tuning/fit.py`: `vision_budget`, `vision_freed_bytes`,
+  `_tower_bytes`; `tuning/measured.py`: `VISION_*` constants;
+  `tuning/knobs.py`: `vision_of`.
 - `interfaces/http/openai.py` and `messages.py`: image parts in requests.
 
 ## Rules that keep it correct
@@ -72,7 +72,7 @@ returning a `Family`, a tiny fixture in
 
 Vision spans `engine/vision/` (generic), `engine/families/*/vision/`
 (towers, by design), `engine/serve/vision.py` (bind at load),
-`tuning/resolve.py` and `tuning/settings.py` (memory budget), and the
+`tuning/fit.py` and `tuning/measured.py` (memory budget), and the
 request parsing in `interfaces/http/`.
 
 ## Tests

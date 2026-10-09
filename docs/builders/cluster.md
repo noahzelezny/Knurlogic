@@ -70,8 +70,8 @@ Hooks outside it:
 Cluster code is spread: `cluster/` holds discovery, protocol, launch,
 jobs and recovery, but the page's peer routes and relay live in
 `interfaces/page/server.py`, the rank
-launch in `interfaces/serve.py`, the split fit in `tuning/resolve.py`
-(`resolve_cluster`), and the ranks themselves in `engine/runtime/`.
+launch in `interfaces/serve.py`, the split fit in `tuning/` (`resolve_cluster`,
+`tensor_split.py`, `pipeline_split.py`, `rank_order.py`), and the ranks themselves in `engine/runtime/`.
 
 ## Tests
 

@@ -13,7 +13,8 @@ import pytest
 
 from knurlogic.interfaces.page import documents
 from knurlogic.interfaces.page import server as page_server
-from knurlogic.machine import allowance, strategy, wired
+from knurlogic.machine import allowance, wired
+from knurlogic.tuning import strategy
 
 GIB = 1 << 30
 
@@ -42,7 +43,7 @@ def test_strategy_round_trips_and_defaults(home):
 
 
 def test_every_preset_is_explained(home):
-    from knurlogic.tuning.settings import PRESETS
+    from knurlogic.tuning.presets import PRESETS
     doc = documents.strategy_doc()
     assert [p["name"] for p in doc["presets"]] and \
         {p["name"] for p in doc["presets"]} == set(PRESETS)

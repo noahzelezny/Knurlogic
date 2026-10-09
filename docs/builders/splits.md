@@ -31,8 +31,11 @@ Outside the runtime:
   `pipeline_share_bytes`); a rank >= 1 calls `tensor.serve_follower`.
 - `interfaces/http/__init__.py` (`watch_ring`): rank 0's server watches
   the ring.
-- `tuning/resolve.py`: `resolve_cluster`, `tensor_refusals`,
-  `pipeline_layer_bytes`, `tensor_sharded`.
+- `tuning/tensor_split.py`: `tensor_refusals`, `tensor_sharded`,
+  `tensor_placement`, `tensor_split_refusals`; `tuning/pipeline_split.py`:
+  `pipeline_refusals`, `pipeline_layer_bytes`, `pipeline_shares`,
+  `leader_bytes`; `tuning/rank_order.py`: `rank_order`;
+  `tuning/resolve.py`: `resolve_cluster`.
 - `cluster/launch.py`: `placement`, `shape_of`, `viability_refusals`,
   `rank_argv`, `rank_env`.
 
@@ -54,7 +57,7 @@ Outside the runtime:
 - **A VQ codebook is replicated, never sliced** (`check_codebooks`).
   Slicing it decodes against half a codebook and emits fluent garbage.
 - **The split rule table is one.** `tensor.shard` applies
-  `tensor_rules.RULES` to loaded arrays and `tuning/resolve` checks the
+  `tensor_rules.RULES` to loaded arrays and `tuning/tensor_split` checks the
   same table against headers, so the refusal and the loader agree.
 - **Pipeline: rank 0 holds the last layers.** The logits are born on the
   rank that samples; the MTP head lives on rank 0 alone.
@@ -73,8 +76,8 @@ Outside the runtime:
 
 The splits span packages: `engine/runtime/` (tensor, pipeline, plan,
 rules, viability), `engine/prompt_cache/ring.py`, `engine/mtp/` (the
-pipeline `Coord` is used by the batch loop), `tuning/resolve.py` (fit
-and refusals), `interfaces/serve.py` (rank launch), `cluster/launch.py`
+pipeline `Coord` is used by the batch loop), `tuning/` (`fit.py`,
+`tensor_split.py`, `pipeline_split.py`: fit and refusals), `interfaces/serve.py` (rank launch), `cluster/launch.py`
 (placement and argv). Rank progress (steps, prefill
 chunks, loaded) goes through `engine/runtime/marker.py`, so engine never
 imports cluster; `tests/integration/test_layers.py` enforces it.

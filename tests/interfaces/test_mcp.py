@@ -93,7 +93,7 @@ def _fit_setup(tmp_path, monkeypatch, budget_gib=10):
                         lambda: {"bytes": b, "limited_by": "working set",
                                  "available_bytes": b,
                                  "working_set_bytes": b})
-    monkeypatch.setattr("knurlogic.tuning.resolve.fit_reserve",
+    monkeypatch.setattr("knurlogic.tuning.fit.fit_reserve",
                         lambda cfg, kv_bits=None: {
                             "transient_bytes": 8 << 30, "kv_bytes": 1 << 30})
     spawned = []
@@ -313,7 +313,7 @@ def test_load_cannot_fit_with_mtp_but_fits_without_offers_mtp_off(tmp_path,
                            "head) plus 5.5 GiB step margin; the budget is "
                            "110.8 GiB; turn MTP off (Settings) to fit"}
         return {"state": "fits", "head_bytes": 0, "why": ""}
-    monkeypatch.setattr("knurlogic.interfaces.serve.launch_fit", fake)
+    monkeypatch.setattr("knurlogic.tuning.checks.launch_fit", fake)
     monkeypatch.setattr(mcp, "fit", lambda **k: pytest.fail("fit hid it"))
     r = mcp.load(artifact=str(d))
     assert r["loaded"] is False and r["refused"] == "will not fit"

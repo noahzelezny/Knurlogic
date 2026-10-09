@@ -465,7 +465,7 @@ const launching=()=>$('launch').textContent.trim()!=='Launch';
 // A tensor split puts the same share on every picked machine, plus the
 // MTP head and tower on one: greyed when a machine cannot hold it (the
 // launch refuses the same, with the arithmetic). The step margin is
-// tuning/resolve.step_margin's: 5% of the working set, at least 4 GiB.
+// tuning/fit.step_margin's: 5% of the working set, at least 4 GiB.
 function tensorWhy(ns){
   // the picked model's preview carries it (the listing loads no artifact)
   const t=SEL&&PREVIEW&&PREVIEW.for===SEL.path&&PREVIEW.tensor_bytes;

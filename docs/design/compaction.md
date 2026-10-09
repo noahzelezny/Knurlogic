@@ -84,7 +84,7 @@ for one).
 
 `context_management` is a top-level package, model-agnostic, with no mlx and no
 HTTP. `interfaces/http/server.py` (`App.chat`) wires it in. Knobs
-`KNURLOGIC_COMPACT_*` in `tuning/settings.py`: AUTO off, TRIGGER 0.8,
+`KNURLOGIC_COMPACT_*` in `tuning/groups.py`: AUTO off, TRIGGER 0.8,
 KEEP_TURNS 6, TOOL_RESULTS distill; the Settings page has a Compaction tab.
 Tests: `tests/test_compaction.py`.
 

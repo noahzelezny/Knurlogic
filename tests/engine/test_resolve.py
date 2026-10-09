@@ -6,8 +6,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from knurlogic.machine.artifact import Artifact
-from knurlogic.tuning import settings as S
-from knurlogic.tuning.resolve import decode_chunk_for, resolve
+from knurlogic.tuning import measured, numerics
+from knurlogic.tuning.fit import decode_chunk_for
+from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
 
@@ -23,31 +24,31 @@ def _art(**kw):
 
 def test_unknown_budget_keeps_defaults():
     r = resolve(_art(), 0)
-    assert r.env["VQ_DECODE_CHUNK"] == str(S.DECODE_CHUNK_DEFAULT)
-    assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(S.PREFILL_CHUNK_DEFAULT)
+    assert r.env["VQ_DECODE_CHUNK"] == str(measured.DECODE_CHUNK_DEFAULT)
+    assert r.env["KNURLOGIC_PREFILL_CHUNK"] == str(measured.PREFILL_CHUNK_DEFAULT)
 
 
 def test_does_not_fit_goes_tightest_not_default():
     """The bug this pins: negative headroom must not fall into the
     'unknown budget' branch and hand back the roomy default."""
     r = resolve(_art(), 48 * GIB)
-    assert r.env["VQ_DECODE_CHUNK"] == str(S.DECODE_CHUNK_MIN)
+    assert r.env["VQ_DECODE_CHUNK"] == str(measured.DECODE_CHUNK_MIN)
     assert r.warnings, "an artifact that does not fit must say so"
 
 
 def test_chunk_never_exceeds_default():
     """Smaller is also faster (128 -> 32 is 1.37x), so headroom never buys
     a larger chunk."""
-    assert decode_chunk_for(10_000 * GIB) == S.DECODE_CHUNK_DEFAULT
+    assert decode_chunk_for(10_000 * GIB) == measured.DECODE_CHUNK_DEFAULT
 
 
 
 
 def test_profile_selects_numerics_flags():
     assert all(resolve(_art(), 96 * GIB, "v1.5").env[f] == "0"
-               for f in S.NUMERICS_FLAGS)
+               for f in numerics.NUMERICS_FLAGS)
     assert all(resolve(_art(), 96 * GIB, "v2").env[f] == "1"
-               for f in S.NUMERICS_FLAGS)
+               for f in numerics.NUMERICS_FLAGS)
 
 
 def test_vq_without_model_file_is_a_warning():
@@ -64,8 +65,8 @@ def test_non_vq_artifact_gets_only_the_generic_knobs():
     # the prompt chunk is still set -- its width is read from the room
     # (test_tuning.py covers which width)
     assert int(r.env["KNURLOGIC_PREFILL_CHUNK"]) in (
-        S.PREFILL_CHUNK_DEFAULT, *S.PREFILL_CHUNK_LADDER)
-    assert r.env["KNURLOGIC_CACHE_LIMIT_GB"] == str(S.CACHE_LIMIT_GB_DEFAULT)
+        measured.PREFILL_CHUNK_DEFAULT, *measured.PREFILL_CHUNK_LADDER)
+    assert r.env["KNURLOGIC_CACHE_LIMIT_GB"] == str(measured.CACHE_LIMIT_GB_DEFAULT)
     assert "VQ_CACHE_LIMIT_GB" not in r.env
 
 
@@ -242,10 +243,7 @@ def test_the_model_shape_may_tighten_but_not_loosen_yet():
     """Sizing from the model loosens the knob for small-expert families. That
     direction has not been measured, and being wrong there is an OOM -- so it
     is refused, and the refusal is said out loud rather than hidden."""
-    from knurlogic.tuning.resolve import (
-        decode_chunk_for,
-        expert_transient_bytes_per_unit,
-    )
+    from knurlogic.tuning.fit import decode_chunk_for, expert_transient_bytes_per_unit
     small = _family(2560, 640)
     headroom = 2 * GIB
     per, _ = expert_transient_bytes_per_unit(small)

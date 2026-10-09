@@ -4,7 +4,7 @@ Keyed PER IMAGE by (model_key, sha, proc_hash): adding a second image to a
 conversation is one miss, not a re-encode of the first; two models'
 features are different spaces; a processor change cannot serve stale
 features. BYTE-bounded, not count-bounded (a GLM image can be ~65 MB of
-features, a small gemma one 1.4 MB); `tuning/resolve.py` counts
+features, a small gemma one 1.4 MB); `tuning/fit.py` counts
 DEFAULT_MAX_BYTES before a load.
 
 Refs are never evicted (positions for a later text turn need the grid);
@@ -70,7 +70,7 @@ class ImageStore:
 
     def budget_bytes(self) -> int:
         """What the memory budget must reserve for this store: the bound,
-        or more if pins currently hold it over. tuning/resolve.py counts
+        or more if pins currently hold it over. tuning/fit.py counts
         this (or DEFAULT_MAX_BYTES before a store exists)."""
         return max(self._max, self._nbytes)
 

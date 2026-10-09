@@ -31,7 +31,7 @@ used, so asking what a family supports imports no mlx. Its shape:
                       {"divisible": [config keys the ranks must divide]}
       tensor_split    {"act_quant_block": n, "inputs": [{what, keys,
                       defaults}]}: linear inputs rounded in blocks a tensor
-                      split must not cut (tuning/resolve.tensor_refusals)
+                      split must not cut (tuning/tensor_split.tensor_refusals)
   vision          {"build": "module:attr", "architectures": [...],
                    "signature": {"config": nested key | "config_layers":
                    flat count key, "tower_in_weights": prefix,

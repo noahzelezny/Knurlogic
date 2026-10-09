@@ -62,7 +62,7 @@ MANIFEST = {
             # embedding. The block takes the token ids as a third argument
             # (hash routing); the stage wrappers pass it through.
             "pipeline": {"core": "DeepseekV4Model"},
-            # A tensor split (tuning/resolve.tensor_refusals): architecture
+            # A tensor split (tuning/tensor_split.tensor_refusals): architecture
             # edit 21 (architecture/PROVENANCE.md) rounds every FP8 / FP4
             # linear's input through act_quant in blocks of 128 along it,
             # as DeepSeek's reference does. A split cuts three of those
