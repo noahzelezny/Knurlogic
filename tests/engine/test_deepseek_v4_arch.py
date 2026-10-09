@@ -99,13 +99,13 @@ import build_deepseek_v4 as G  # noqa: E402
 
 def _load(model_config=None):
     """The tiny artifact the way `knurlogic serve` loads one: Artifact,
-    loading.register (the vendored set), then mlx-lm's loader."""
+    load_checks.register (the vendored set), then mlx-lm's loader."""
     from mlx_lm.utils import load_model
 
-    from knurlogic.interfaces import loading
+    from knurlogic.interfaces import load_checks
     from knurlogic.machine.artifact import Artifact
     a = Artifact.load(str(G.TINY))
-    assert loading.register(a) == []
+    assert load_checks.register(a) == []
     model, _ = load_model(G.TINY, model_config=model_config)
     mod = sys.modules[type(model).__module__]
     assert mod.__name__ == "mlx_lm.models.deepseek_v4"

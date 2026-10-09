@@ -120,7 +120,7 @@ def refusals(path, n: int, unverified: dict, cfg: dict,
     key = (str(path), n, tuple(sorted(unverified.items())))
     if key in _SEEN:
         return _SEEN[key]
-    from knurlogic.engine.serve.load import load_unlocked
+    from knurlogic.engine.model.load import load_unlocked
 
     from .tensor_rules import RULES
     t0 = time.perf_counter()

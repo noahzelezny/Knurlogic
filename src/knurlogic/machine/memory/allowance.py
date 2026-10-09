@@ -5,7 +5,7 @@ for the machine and is remembered, because the reason for it is the
 machine's -- a Mac that also runs exo, or a desk machine whose owner wants
 room for everything else -- not any one model's. It only ever LOWERS what
 knurlogic would otherwise take: the load budget (`wired.load_budget`, and so
-the fit check in `interfaces/loading.prepare`) and the model server's
+the fit check in `interfaces/load_checks.prepare`) and the model server's
 working set, which is what the scheduler's memory guard counts against.
 
 Kept in ~/.config/knurlogic/allowance.json (XDG_CONFIG_HOME honoured): it

@@ -274,8 +274,8 @@ def test_the_models_listing_loads_no_artifact(tmp_path, monkeypatch):
 
 
 def test_an_image_with_vision_off_is_a_clear_400(monkeypatch):
-    from knurlogic.engine.serve import state
-    from knurlogic.engine.serve import vision as SV
+    from knurlogic.engine.model import state
+    from knurlogic.engine.model import vision as SV
     from knurlogic.interfaces.http import openai as O
     body = {"messages": [{"role": "user", "content": [
         {"type": "image_url", "image_url": {"url": "data:image/png;"

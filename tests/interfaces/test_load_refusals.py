@@ -52,9 +52,9 @@ def test_prepare_refuses_bad_settings_before_a_rank_starts(cache):
 
 
 def test_mcp_load_refuses_before_spawning(cache, monkeypatch):
-    from knurlogic.interfaces import loading, mcp, spawn
+    from knurlogic.interfaces import load_checks, mcp, spawn
     d = _model(cache)
-    monkeypatch.setattr(loading, "resolve_name", lambda a, _: str(d))
+    monkeypatch.setattr(load_checks, "resolve_name", lambda a, _: str(d))
     spawned = []
     monkeypatch.setattr(spawn, "spawn",
                         lambda *a, **k: spawned.append(a) or {"pid": 1})

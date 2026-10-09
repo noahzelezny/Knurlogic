@@ -417,9 +417,9 @@ def _trace16(path):
 
     from knurlogic.engine.mtp import registry
     from knurlogic.engine.mtp.capture import capture_input
-    from knurlogic.interfaces import loading
+    from knurlogic.interfaces import load_checks
     from knurlogic.machine.artifact import Artifact
-    assert loading.register(Artifact.load(str(path))) == []
+    assert load_checks.register(Artifact.load(str(path))) == []
     model, _ = load_model(path)
     assert model.model.embed_tokens.weight.dtype == BF
     head, _ = registry.load_head(model, model_path=path)

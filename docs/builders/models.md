@@ -22,7 +22,7 @@ page says where things are.
 | `engine/vendor.py` | `knurlogic vendor`: copy an architecture file and record where it came from |
 | `engine/smoke.py` | `knurlogic smoke`: generate a token and prove where the code came from; `--pin` writes pins |
 | `engine/templates/__init__.py` | the generic half of supplied chat templates; the templates themselves are in the manifests (`chat_templates`) |
-| `engine/serve/thinking.py` | one thinking control translated to each template's dialect (from the manifest's `thinking`) |
+| `engine/model/thinking.py` | one thinking control translated to each template's dialect (from the manifest's `thinking`) |
 | `machine/artifact.py` | what an artifact declares: `Artifact`, `context_length`, `sampling_defaults`, `identity` |
 
 ## Rules that keep it correct

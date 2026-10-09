@@ -29,7 +29,7 @@ entry.
 
 Hooks outside it:
 
-- `engine/serve/vision.py`: `bind` at load (through `registry.build`),
+- `engine/model/vision.py`: `bind` at load (through `registry.build`),
   `clear` at unload, `vision_status`.
 - `engine/runtime/scheduler.py`: images go through tokenize; the
   scheduler wraps tokenize-to-insert in `cachehook.admit_guard()` and
@@ -71,7 +71,7 @@ returning a `Family`, a tiny fixture in
 ## Notes
 
 Vision spans `engine/vision/` (generic), `engine/families/*/vision/`
-(towers, by design), `engine/serve/vision.py` (bind at load),
+(towers, by design), `engine/model/vision.py` (bind at load),
 `tuning/fit.py` and `tuning/measured.py` (memory budget), and the
 request parsing in `interfaces/http/`.
 

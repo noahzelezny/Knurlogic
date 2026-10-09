@@ -94,7 +94,7 @@ def with_placeholders(messages: list[dict[str, Any]],
 class VisionServe:
     """The served model's vision, as the serve path uses it: its Family,
     its image store and the model key the store is partitioned by. One per
-    loaded vision model; serve/vision.py builds it at load and drops it (and the
+    loaded vision model; model/vision.py builds it at load and drops it (and the
     store) at unload.
 
     `encodes` counts tower runs made through here, for /status.json; the
@@ -108,7 +108,7 @@ class VisionServe:
         self.model_key = model_key
         self.allow_paths = allow_paths
         self.encodes = 0
-        self.tensors = 0            # vision weights loaded (serve/vision.py)
+        self.tensors = 0            # vision weights loaded (model/vision.py)
         self._lock = threading.Lock()
         self._pins: dict[tuple[str, str], list[ExitStack]] = {}
 

@@ -116,7 +116,7 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
     return out
 
 
-#: Knobs `engine.serve` turns into argv or an mlx call, so they are real
+#: Knobs `engine.model` turns into argv or an mlx call, so they are real
 #: whether or not an artifact's bundled runtime reads them.
 ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp",
                    "mtp_dynamic", "kv_bits", "kv_kernel", "cross_chip",
@@ -508,7 +508,7 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
     emit(r, artifact, "cross_chip", launch.get("cross_chip", "off"))
     # the level a silent request gets: shown where the template has levels
     try:
-        from knurlogic.engine.serve import thinking
+        from knurlogic.engine.model import thinking
         native = thinking.levels(
             thinking.template_of(artifact.path)).get("native") or []
     except (OSError, ValueError, ImportError):

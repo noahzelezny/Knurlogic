@@ -20,7 +20,7 @@ import subprocess
 import sys
 
 from knurlogic.engine import arch, mtp
-from knurlogic.engine import serve as engine
+from knurlogic.engine import model as engine
 from knurlogic.engine.mtp import binding
 from knurlogic.interfaces.page import documents
 from knurlogic.machine import status
@@ -155,13 +155,13 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
     print(f"engine    {engine.describe()}")
 
-    # the same registration a switch gets (interfaces/loading.py)
-    from knurlogic.interfaces import loading
+    # the same registration a switch gets (interfaces/load_checks.py)
+    from knurlogic.interfaces import load_checks
     needed = arch.modules_for_artifact(a)
     print(f"registered {needed} from knurlogic's vendored set" if needed
           else f"no mapping for {a.model_type!r}; relying on what the "
                f"engine ships")
-    missing = loading.register(a)
+    missing = load_checks.register(a)
     if missing:
         print(f"REFUSING: no implementation for {missing}. This artifact "
               f"cannot load, and starting a server that 500s on every request "
@@ -372,7 +372,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
               f"and it WILL be executed -- that is where its kernels live.")
     else:
         print(stock_runtime_line())
-        from knurlogic.engine.serve.load import vq_without_runtime
+        from knurlogic.engine.model.load import vq_without_runtime
         why = vq_without_runtime(a.path)
         if why:
             print(f"\nREFUSING: {why}", file=sys.stderr)
@@ -415,7 +415,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # when a model will not load. Advice only -- knurlogic never sets it.
         snap["wired"] = wired.advise(a.bytes_on_disk)
         snap["drafting"] = binding.drafting_status()
-        from knurlogic.engine.serve import state as _st
+        from knurlogic.engine.model import state as _st
         snap["cross_chip"] = dict(_st.SERVED.get("cross_chip") or cross)
         # 8-bit KV decode kernel: hits vs fallbacks, so an A/B of
         # KNURLOGIC_KV_KERNEL can see which path actually ran

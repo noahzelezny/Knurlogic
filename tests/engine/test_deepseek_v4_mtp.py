@@ -32,9 +32,9 @@ REAL = Path(os.environ.get("KNURLOGIC_TEST_DEEPSEEK_V4_HEAD") or
 def _load():
     from mlx_lm.utils import load_model
 
-    from knurlogic.interfaces import loading
+    from knurlogic.interfaces import load_checks
     from knurlogic.machine.artifact import Artifact
-    assert loading.register(Artifact.load(str(G.TINY))) == []
+    assert load_checks.register(Artifact.load(str(G.TINY))) == []
     model, _ = load_model(G.TINY)
     return model
 
@@ -188,14 +188,14 @@ def _load_bundled(tmp_path):
     The trunk itself declares no VQ modules."""
     from mlx_lm.utils import load_model
 
-    from knurlogic.interfaces import loading
+    from knurlogic.interfaces import load_checks
     from knurlogic.machine.artifact import Artifact
     d = tmp_path / "m"
     shutil.copytree(G.TINY, d)
     shutil.copy(BUNDLED, d / "model.py")
     cfg = json.loads((d / "config.json").read_text())
     (d / "config.json").write_text(json.dumps(dict(cfg, model_file="model.py")))
-    assert loading.register(Artifact.load(str(d))) == []
+    assert load_checks.register(Artifact.load(str(d))) == []
     model, _ = load_model(d, trust_remote_code=True)
     assert type(model).__module__ != type(model.model).__module__
     return model

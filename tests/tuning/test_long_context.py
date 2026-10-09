@@ -154,7 +154,7 @@ def test_the_page_accepts_a_million_tokens_only_with_yarn():
 
 
 def test_the_loader_overlays_from_the_launch_env(tmp_path):
-    from knurlogic.engine.serve.load import long_context_overlay
+    from knurlogic.engine.model.load import long_context_overlay
     (tmp_path / "config.json").write_text(json.dumps(REAL_35B))
     assert long_context_overlay(tmp_path, {}) == {}
     assert long_context_overlay(tmp_path, {"KNURLOGIC_LONG_CONTEXT": "off"}) == {}

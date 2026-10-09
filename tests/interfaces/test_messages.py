@@ -189,7 +189,7 @@ def test_the_template_is_read_from_either_place_an_artifact_keeps_it(tmp_path):
 def test_a_template_asking_for_tools_with_no_parser_is_flagged():
     """The failure this catches is silent: nothing errors, the model just
     talks about calling functions."""
-    from knurlogic.engine import serve as engine
+    from knurlogic.engine import model as engine
     ts = engine.tool_support(
         "You have tools. Emit <weird_custom_tag>name</weird_custom_tag>.")
     assert ts["mentions_tools"] is True
@@ -199,7 +199,7 @@ def test_a_template_asking_for_tools_with_no_parser_is_flagged():
 def test_the_agentic_dialect_is_recognised():
     """<tool_call>\\n<function=NAME>\\n<parameter=P> is the Qwen3-Coder /
     agentic-harness form, not the JSON that plain Qwen emits."""
-    from knurlogic.engine import serve as engine
+    from knurlogic.engine import model as engine
     ts = engine.tool_support(
         "reply in the following format:\n\n<tool_call>\n<function=example>\n"
         "<parameter=p>v</parameter>\n</function>\n</tool_call>")
@@ -207,7 +207,7 @@ def test_the_agentic_dialect_is_recognised():
 
 
 def test_no_template_is_not_reported_as_no_tools():
-    from knurlogic.engine import serve as engine
+    from knurlogic.engine import model as engine
     ts = engine.tool_support("")
     assert ts["has_template"] is False and ts["mentions_tools"] is False
 

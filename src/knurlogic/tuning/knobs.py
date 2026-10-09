@@ -120,7 +120,7 @@ KNOB_DOC = {
         "(default: the template's own)",
         "for a client that sends no reasoning_effort, or whose control is "
         "broken: the level goes through the same translation as a "
-        "request's own (engine/serve/thinking), to the nearest native "
+        "request's own (engine/model/thinking), to the nearest native "
         "level at or above it, and usage.knurlogic.thinking says it was "
         "the server's default. A request that names a level still wins. "
         "GLM-5.3's own default is max: on a 339k-token conversation it "
@@ -259,7 +259,7 @@ KNOB_ALIASES = {
     "kv_bits": ("KNURLOGIC_KV_BITS",),
     # the 8-bit KV decode kernel (engine/kvattn): on unless "off"; A/B knob
     "kv_kernel": ("KNURLOGIC_KV_KERNEL",),
-    # the level a request that names none is served at (engine/serve/thinking)
+    # the level a request that names none is served at (engine/model/thinking)
     "thinking_default": ("KNURLOGIC_THINKING_DEFAULT",),
     "cross_chip": ("KNURLOGIC_CROSS_CHIP",),
     "long_context": ("KNURLOGIC_LONG_CONTEXT",),

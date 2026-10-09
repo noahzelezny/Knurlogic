@@ -129,7 +129,7 @@ def test_a_live_knob_lands_on_the_loaded_runtime(monkeypatch):
     import sys
     import types
 
-    from knurlogic.engine import serve as engine
+    from knurlogic.engine import model as engine
 
     fake = types.ModuleType("_fake_vq_runtime")
     fake._DECODE_CHUNK = 32
@@ -145,13 +145,13 @@ def test_a_live_knob_lands_on_the_loaded_runtime(monkeypatch):
 def test_a_restart_knob_is_reported_not_silently_skipped():
     """A panel that said 'applied' over a value that did not move would be
     the same lie as an env file sourced after the one that overwrites it."""
-    from knurlogic.engine import serve as engine
+    from knurlogic.engine import model as engine
     out = engine.apply_live({"VQ_MOE_GEMMSEG_RTILE": "32"})
     assert "restart" in out["VQ_MOE_GEMMSEG_RTILE"]
 
 
 def test_the_cache_limit_uses_the_engines_live_setter():
-    from knurlogic.engine import serve as engine
+    from knurlogic.engine import model as engine
     out = engine.apply_live({"VQLAB_CACHE_LIMIT_GB": "2.0"})
     assert "applied now" in out["VQLAB_CACHE_LIMIT_GB"] or \
         "no live setter" in out["VQLAB_CACHE_LIMIT_GB"]
@@ -385,13 +385,13 @@ def test_an_artifact_declaring_mtp_is_recognised(tmp_path):
 def test_the_architecture_is_asked_whether_it_keeps_them():
     """Read off the module that will actually run, not assumed: the answer
     is a line in sanitize(), and it is 'no'."""
-    from knurlogic.engine import serve as engine
+    from knurlogic.engine import model as engine
     assert engine.keeps_mtp_weights("qwen4_exp_text") is False
 
 
 def test_an_unknown_architecture_says_unknown_not_no():
     """'Could not find the module' is not 'it discards them'."""
-    from knurlogic.engine import serve as engine
+    from knurlogic.engine import model as engine
     assert engine.keeps_mtp_weights("not_a_real_model_type") is None
 
 
@@ -495,7 +495,7 @@ def test_mla_caches_are_costed_as_their_latent():
 
 
 def test_the_context_length_applies_live(monkeypatch):
-    from knurlogic.engine.serve.load import apply_live
+    from knurlogic.engine.model.load import apply_live
     from knurlogic.tuning.live import LIVE_KNOBS
     monkeypatch.delenv("KNURLOGIC_CONTEXT_LENGTH", raising=False)
     assert "KNURLOGIC_CONTEXT_LENGTH" in LIVE_KNOBS

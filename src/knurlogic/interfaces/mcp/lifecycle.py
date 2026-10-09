@@ -45,9 +45,9 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
         return _load_on(names, artifact, port, tune, sets, force, draft,
                         split, link, cable)
     from knurlogic.interfaces import spawn
-    from knurlogic.interfaces.loading import NotLoadable, resolve_name
+    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
 
-    # a model named, never a directory (interfaces/loading.py): the same
+    # a model named, never a directory (interfaces/load_checks.py): the same
     # rule a switch on a running server follows
     try:
         artifact = resolve_name(artifact, None)
@@ -155,7 +155,7 @@ def _identity_of(artifact: str) -> tuple:
     identity is taken as given, for a model this Mac does not hold."""
     import re
 
-    from knurlogic.interfaces.loading import NotLoadable, resolve_name
+    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
     from knurlogic.machine.artifact import identity
     try:
         ident = identity(resolve_name(artifact, None))
@@ -181,7 +181,7 @@ def _artifact_name(artifact: str) -> str:
         return ""
     from pathlib import Path
 
-    from knurlogic.interfaces.loading import NotLoadable, resolve_name
+    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
     try:
         # a path (or a pin's real path) -> the store's own name for it
         return Path(resolve_name(a, None)).name

@@ -48,8 +48,8 @@ def test_nothing_moving_is_ready(monkeypatch):
 
 def test_load_refuses_a_model_that_does_not_fit(tmp_path, monkeypatch):
     """And no flag overrides it: force is for moving memory, not arithmetic."""
-    from knurlogic.interfaces import loading
-    monkeypatch.setattr(loading, "resolve_name", lambda m, served: m)
+    from knurlogic.interfaces import load_checks
+    monkeypatch.setattr(load_checks, "resolve_name", lambda m, served: m)
     d = _artifact(tmp_path / "big", gib=8)
     monkeypatch.setattr("knurlogic.machine.memory.footprint.available_memory",
                         lambda: {"available_bytes": 1 << 20,
@@ -63,8 +63,8 @@ def test_load_refuses_a_model_that_does_not_fit(tmp_path, monkeypatch):
 
 def test_load_refuses_while_memory_moves_but_force_overrides(tmp_path,
                                                              monkeypatch):
-    from knurlogic.interfaces import loading
-    monkeypatch.setattr(loading, "resolve_name", lambda m, served: m)
+    from knurlogic.interfaces import load_checks
+    monkeypatch.setattr(load_checks, "resolve_name", lambda m, served: m)
     d = _artifact(tmp_path / "small", gib=1)
     monkeypatch.setattr(
         "knurlogic.machine.loadlock.holder",
@@ -86,8 +86,8 @@ def test_load_refuses_while_memory_moves_but_force_overrides(tmp_path,
 
 
 def _fit_setup(tmp_path, monkeypatch, budget_gib=10):
-    from knurlogic.interfaces import loading
-    monkeypatch.setattr(loading, "resolve_name", lambda m, served: m)
+    from knurlogic.interfaces import load_checks
+    monkeypatch.setattr(load_checks, "resolve_name", lambda m, served: m)
     d = _artifact(tmp_path / "m", gib=1)
     b = budget_gib << 30
     monkeypatch.setattr("knurlogic.machine.memory.wired.load_budget",
@@ -330,12 +330,12 @@ def test_fit_settings_and_drafting_refuse_an_unknown_name(monkeypatch):
     """They resolve a model name as load does: an unknown one is a
     refusal with its reason, not a FileNotFoundError (live: fit raised on
     a bare model name load accepted)."""
-    from knurlogic.interfaces import loading
+    from knurlogic.interfaces import load_checks
     from knurlogic.interfaces import mcp as M
 
     def nope(m, served):
-        raise loading.NotLoadable(404, f"{m!r} is not an artifact")
-    monkeypatch.setattr(loading, "resolve_name", nope)
+        raise load_checks.NotLoadable(404, f"{m!r} is not an artifact")
+    monkeypatch.setattr(load_checks, "resolve_name", nope)
     for tool in (M.fit, M.settings, M.drafting):
         out = tool(artifact="no-such-model")
         assert out["refused"] == "not a known artifact", (tool, out)

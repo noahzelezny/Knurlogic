@@ -21,8 +21,8 @@ import logging
 import threading
 import time
 
+from knurlogic.engine.model import state
 from knurlogic.engine.mtp import binding
-from knurlogic.engine.serve import state
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +265,7 @@ class ModelHost:
     def unload(self) -> None:
         had = self.model is not None
         self._set("unloading")
-        from knurlogic.engine.serve import vision
+        from knurlogic.engine.model import vision
         vision.clear()
         binding.DRAFT.update(head=None, spec=None, on=False,
                              why="model unloaded")
@@ -282,7 +282,7 @@ class ModelHost:
     def _split_lazily(self, path: str):
         """A ring's model, loaded lazily and split in place: nothing read
         yet, and the split's collectives done."""
-        from knurlogic.engine.serve.load import load_unlocked
+        from knurlogic.engine.model.load import load_unlocked
         extra = self.shard_config(path) if self.shard_config else None
         model, tok = load_unlocked(path, self.executes_artifact_code,
                                    lazy=True, model_config=extra)
@@ -292,7 +292,7 @@ class ModelHost:
     def _weights(self, path: str, lazy=None):
         """`lazy`: _split_lazily's (model, tokenizer), evaluated here."""
 
-        from knurlogic.engine.serve.load import load_unlocked
+        from knurlogic.engine.model.load import load_unlocked
         if lazy is None:
             model, tok = load_unlocked(path, self.executes_artifact_code)
             # Evaluate EVERY parameter here, inside the load. A model that
@@ -336,7 +336,7 @@ class ModelHost:
                     self.kv_bits)
 
     def _bind_vision(self, path: str) -> None:
-        from knurlogic.engine.serve import vision
+        from knurlogic.engine.model import vision
         if not self.vision:
             state.VISION.update(serve=None, model=self.model,
                                 error=vision.VISION_OFF)

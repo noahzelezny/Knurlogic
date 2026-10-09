@@ -62,7 +62,7 @@ class Mark:
 def apply_set(op: dict, rank: int) -> str:
     """A follower applies a live knob rank 0 applied (the `set` op) to its
     own engine, exactly as rank 0's Settings apply did. -> what happened."""
-    from knurlogic.engine.serve.load import apply_live
+    from knurlogic.engine.model.load import apply_live
     said = apply_live({op["name"]: op["value"]}).get(op["name"], "")
     logger.info("rank %d: %s=%s: %s", rank, op["name"], op["value"], said)
     return said
@@ -76,7 +76,7 @@ def _stop_load_on_sigterm(rank: int) -> None:
     with _defer_sigterm."""
     import signal
 
-    from knurlogic.engine.runtime.host import LOAD_STOP
+    from knurlogic.engine.runtime.model_host import LOAD_STOP
 
     def stop(_sig, _frame):
         logger.info("SIGTERM while loading: stopping at the next batch")
@@ -300,7 +300,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
     """A rank >= 1 from start to stop: join, load its shard, follow.
     `pipeline`: agree()'s keyword arguments for a pipeline split.
     `cross_chip`: engine/crosschip.resolve(...) for this job."""
-    from knurlogic.engine.runtime.host import ModelHost
+    from knurlogic.engine.runtime.model_host import ModelHost
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     _stop_load_on_sigterm(0)
@@ -360,7 +360,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
     from .marker import after_load
     after_load()
     drafting = bool(heads and heads.leader)
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.model import state
     return follow(host.model, host.tokenizer, host.model_key, link,
                   vision=state.VISION.get("serve"),
                   prompt_cache_size=prompt_cache_size,

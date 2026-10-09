@@ -171,7 +171,7 @@ def key_id(key: dict) -> str:
 
 
 def host_key(host) -> dict | None:
-    """The key for what `host` (engine/runtime/host.ModelHost) has loaded
+    """The key for what `host` (engine/runtime/model_host.ModelHost) has loaded
     now, or None when nothing is."""
     if getattr(host, "model", None) is None or not getattr(host, "path", None):
         return None

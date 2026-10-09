@@ -15,7 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from knurlogic.engine.serve import thinking as T  # noqa: E402
+from knurlogic.engine.model import thinking as T  # noqa: E402
 
 MODELS = Path(os.environ.get("KNURLOGIC_MODELS",
                            Path.home() / ".exo" / "models"))
@@ -169,7 +169,7 @@ def _serve(tok):
     registers it)."""
     import types
 
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.model import state
     T._probe_cache.clear()
     state.SERVED["provider"] = types.SimpleNamespace(tokenizer=tok)
 
@@ -209,7 +209,7 @@ def test_the_thinking_default_serves_a_silent_request(monkeypatch):
 def test_the_thinking_default_is_live_and_checked(monkeypatch):
     import os
 
-    from knurlogic.engine.serve.load import apply_live
+    from knurlogic.engine.model.load import apply_live
     from knurlogic.tuning import checks, knobs
     monkeypatch.delenv(T.DEFAULT_ENV, raising=False)
     done = apply_live({T.DEFAULT_ENV: "high"})
@@ -375,7 +375,7 @@ def test_probe_holds_when_requests_race_it():
     import threading
     import time
 
-    from knurlogic.engine.serve import thinking as T
+    from knurlogic.engine.model import thinking as T
 
     class Tok:
         busy = False
@@ -410,7 +410,7 @@ def test_a_request_during_load_still_gets_its_level(monkeypatch):
     disk, not served the model's default."""
     import mlx_lm.utils
 
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.model import state
     state.SERVED["provider"] = types.SimpleNamespace(tokenizer=None)
     state.SERVED["path"] = "/artifact/still-loading"
     T._probe_cache.clear()
@@ -458,7 +458,7 @@ def test_glm_off_closes_the_think_block_so_the_answer_starts_normal():
 
 
 def test_every_way_of_saying_no_thinking_is_none():
-    from knurlogic.engine.serve.thinking import requested
+    from knurlogic.engine.model.thinking import requested
     assert requested({"reasoning_effort": "none"}) == "none"
     assert requested({"reasoning": {"effort": "none"}}) == "none"
     assert requested({"reasoning": {"enabled": False}}) == "none"

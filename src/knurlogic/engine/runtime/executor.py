@@ -37,7 +37,7 @@ class Admission:
     #: top_k, min_p); empty = greedy
     sampling: dict = field(default_factory=dict)
     processors: list = field(default_factory=list)
-    #: the control-token machine (runtime/control.ControlMachine), or None
+    #: the control-token machine (runtime/control_tokens.ControlMachine), or None
     #: for the engine's default
     state_machine: Any = None
     top_logprobs: int = 0

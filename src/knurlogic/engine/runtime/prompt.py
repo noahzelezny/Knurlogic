@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from knurlogic.engine import templates as _templates
-from knurlogic.engine.serve import segments as _segments
-from knurlogic.engine.serve import thinking
+from knurlogic.engine.model import segments as _segments
+from knurlogic.engine.model import thinking
 
 
 @dataclass
@@ -383,7 +383,7 @@ def _segment(tokenizer, messages, render, prompt):
     if not segs:
         segs, types = [prompt], ["assistant"]
     # ... or, where the empty turn renders as a pure prefix, where the
-    # system render ends (engine/serve/segments.py)
+    # system render ends (engine/model/segments.py)
     segs, types = _segments.split_system(tokenizer, messages, prompt, segs,
                                          types, render)
     return prompt, segs, types, state

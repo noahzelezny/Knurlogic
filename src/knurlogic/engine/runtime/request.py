@@ -72,7 +72,7 @@ def control_machine(tokenizer, initial: str = "normal"):
     hit = _MACHINES.get(key)
     if hit is not None and hit[0] is tokenizer:
         return hit[1], hit[2]
-    from .control import ControlMachine
+    from .control_tokens import ControlMachine
 
     seqs: dict[tuple[int, ...], str] = {}
     ends: list = []

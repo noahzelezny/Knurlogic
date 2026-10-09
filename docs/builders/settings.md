@@ -43,7 +43,7 @@ Where the settings meet the rest (thin calls, no settings logic):
   (`settings_document`, `knob_limit`, `machine_settings`,
   `compaction_document`, `strategy_doc`): page JSON built from the
   registry, `knob_reach` and `resolve`.
-- `engine/serve/load.py`: `apply_live`, which applies a live knob to the
+- `engine/model/load.py`: `apply_live`, which applies a live knob to the
   running process (it needs mlx, so it stays in the engine).
 - `machine/memory/allowance.py`: the most memory knurlogic may use. It stays in
   `machine/` because it lowers the load budget (`wired.load_budget`);
@@ -81,7 +81,7 @@ The tables a knob can appear in:
 2. If a preset sets it, a row in `PRESET_ROWS` (`presets.py`).
 3. Its resolution in `resolve.py`, with a note saying why.
 4. If it can change on a running server, add it to `live.LIVE_KNOBS` and
-   apply it in `engine/serve/load.apply_live`; if it must reach every rank
+   apply it in `engine/model/load.apply_live`; if it must reach every rank
    of a split, to `plan.SETS`.
 5. A test in `tests/tuning/` (the settings audit checks claims against
    code).

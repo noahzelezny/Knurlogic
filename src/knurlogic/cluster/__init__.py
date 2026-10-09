@@ -8,6 +8,10 @@ across them.
   jobs.py       a job's files, rank progress markers and health verdict.
   recovery.py   a model that died unasked is relaunched, bounded.
   links.py      which link a peer is reached over and a page answers on.
+  protocol.py   the control-plane contract: the message envelope and kinds.
+  transport.py  the one client of the control plane, page to page.
+  checks.py     `knurlogic doctor --cluster`: what stops Macs finding each
+                other, each with the fix.
 
 launch.py and recovery.py never import interfaces/: the page injects its
 status, peers, children and load at startup (interfaces/page/server.py

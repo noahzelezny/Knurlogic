@@ -211,7 +211,7 @@ loadlock.EXIT_BUSY = 75                     # a gate tool's exit when Busy
 `flock(LOCK_EX|LOCK_NB)`: the kernel releases a dead holder's lock, SIGKILL
 included. Not reentrant. Record `{pid, host, agent, artifact, purpose,
 started}` is display only. Callers: model load and switch
-(`engine/runtime/host.py`, `engine/serve/load.py`); the MCP's `ready()`
+(`engine/runtime/model_host.py`, `engine/model/load.py`); the MCP's `ready()`
 blocker; the gate tools. Tiny tests never take it.
 
 ## Test fixtures and goldens

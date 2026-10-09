@@ -300,7 +300,7 @@ def test_a_qwen_xml_tool_call_parses_through_knurlogics_path():
     parser knurlogic serves with is the one inferred from the shipped
     template (serve.tool_support, mlx-lm's rule), run by Request._parse_tool
     into OpenAI tool_calls with typed arguments."""
-    from knurlogic.engine import serve as engine
+    from knurlogic.engine import model as engine
     from knurlogic.engine.runtime.request import Request
     tpl = (ROOT / "tests/support/goldens/qwen3_6_chat_template.jinja"
            ).read_text()

@@ -36,23 +36,24 @@ interfaces/http/            the wire
   residency.py              /v1/residency, /v1/ensure, the concurrency hint
   prompt_cache.py           /v1/prompt-cache: save, drop, pin, park, list
   messages.py               /v1/messages, in-process
-  __init__.py               serve(), switch() (through interfaces/loading)
+  __init__.py               serve(), switch() (through interfaces/load_checks)
 interfaces/page/            the page (`knurlogic ui`)
-interfaces/loading.py       what a model must pass before it loads
+interfaces/load_checks.py   what a model must pass before it loads
 cluster/launch.py           a cluster job, page to page; recovery.py
 context_management/         what the model sees; no mlx, no HTTP
                             (see compaction.md)
 engine/runtime/             everything that touches mlx
-  host.py                   ModelHost: empty/loading/ready/unloading/failed
+  model_host.py             ModelHost: empty/loading/ready/unloading/failed
   scheduler.py              ONE thread owns the MLX stream: commands,
                             tokenize, prompt cache, admission, steps
   memory_guard.py           the Scheduler's memory guard (a mixin)
   prompt.py                 template, segments, initial reasoning state
   request.py                per-request text: reasoning split, text stops,
                             tool calls, usage
-  executor.py               the step: LocalExecutor, TensorExecutor
-  tensor.py, pipeline.py,   the cluster splits and their step plan
-  plan.py
+  executor.py               the step: LocalExecutor
+  control_tokens.py         the control-token state machine
+engine/split/               the cluster splits, their step plan and ring
+                            (TensorExecutor is split/ring.py)
 engine/prompt_cache/        the prompt cache: memory.py (PromptCache),
                             disk.py, commands.py (the Scheduler's cache
                             methods), ring.py (a ring's journaled cache),
@@ -480,7 +481,7 @@ on for a cluster job whose machines have different GPU architectures.
   nodes, state (`loading` / `ready` / `unloading` / `failed`).
 - `/v1/ensure` -- `{model, wait}`: idempotent; a different model is a
   switch -- only to an artifact this machine's stores hold, through the
-  same checks as startup (`interfaces/loading.py`); 409 while requests are
+  same checks as startup (`interfaces/load_checks.py`); 409 while requests are
   running, unless `force`.
 - **413** -- an image over the decode limit (judged from its header before
   decoding: `engine/vision/images.py`), or a request whose images together
@@ -741,7 +742,7 @@ GPU runs. `KNURLOGIC_TIMING_SPANS=off` turns it off, read live.
 `vqlab serve-timeline` drives n requests of a stated length and prints the
 median of each bucket.
 
-### src/knurlogic/engine/serve/__init__.py -- engine boundary
+### src/knurlogic/engine/model/__init__.py -- engine boundary
 
   load.py          engine info, load, memory, the cache limit, knobs a
                    running process can change, tool dialects
@@ -782,7 +783,7 @@ without it. Passing the kwarg blindly is a TypeError on one, omitting it a
 ValueError on the other, so a VQ artifact cannot load on both unless
 something inspects the signature. Nobody downstream should ever learn that.
 
-### src/knurlogic/engine/serve/thinking.py
+### src/knurlogic/engine/model/thinking.py
 
 Which controls a template has is its DIALECT, detected from the template
 text -- not from the architecture: one module (qwen3_5) ships templates

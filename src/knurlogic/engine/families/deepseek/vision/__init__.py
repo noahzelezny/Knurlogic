@@ -289,5 +289,5 @@ class DeepseekVisionFamily:
 def build(model_path: str, text_model: Any, config: dict[str, Any]):
     if int(config.get("vision_n_layers") or 0) <= 0:
         return None
-    # the tower is read by serve/vision.bind (fam.load_weights), not here
+    # the tower is read by model/vision.bind (fam.load_weights), not here
     return DeepseekVisionFamily(config, _image_token_id(model_path))

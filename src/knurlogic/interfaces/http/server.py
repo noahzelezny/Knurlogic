@@ -121,7 +121,7 @@ class App(CompactingChat):
                  ensure: Callable[[dict], dict] = None,
                  max_body: int = DEFAULT_MAX_BODY,
                  allow_origins: tuple = (), allow_hosts: tuple = ()):
-        from knurlogic.engine.serve import thinking
+        from knurlogic.engine.model import thinking
         from knurlogic.interfaces.http import messages, ollama, responses
         self.scheduler = scheduler
         self.served = served
@@ -151,7 +151,7 @@ class App(CompactingChat):
         one, and the scheduler refuses it at admission if the loaded model
         has none (otherwise an image sent during a load gets a 400 "no
         vision" while a text request waits and is served)."""
-        from knurlogic.engine.serve import state
+        from knurlogic.engine.model import state
         if getattr(self.scheduler.host, "state", "ready") != "ready":
             return True
         return state.VISION.get("serve") is not None
@@ -479,7 +479,7 @@ class Handler(PromptCacheHandlers, T.TelemetryHandlers,
         if path == "/v1/models":
             from knurlogic.machine.artifact import context_length, sampling_defaults
             path = self.app.scheduler.host.path
-            from knurlogic.engine.serve import thinking as TH
+            from knurlogic.engine.model import thinking as TH
             try:
                 think = TH.levels(TH.template_of(path)) if path else None
             except (ImportError, OSError, *TEMPLATE_ERRORS):
@@ -525,7 +525,7 @@ class Handler(PromptCacheHandlers, T.TelemetryHandlers,
             self.app.served(), self.app.scheduler.host.path))
 
     def _ollama_show(self) -> None:
-        from knurlogic.engine.serve import thinking as TH
+        from knurlogic.engine.model import thinking as TH
         from knurlogic.interfaces.http import ollama
         from knurlogic.machine.artifact import context_length
         path = self.app.scheduler.host.path

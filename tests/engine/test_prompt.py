@@ -5,8 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
+from knurlogic.engine.model import thinking  # noqa: E402
 from knurlogic.engine.runtime import prompt as P  # noqa: E402
-from knurlogic.engine.serve import thinking  # noqa: E402
 
 SYS, USR, END, GEN, TS, TE = 100, 200, 300, 400, 1, 2
 

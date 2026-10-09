@@ -296,7 +296,7 @@ def test_keys_transformed_after_the_fetch_fall_back_and_count_a_miss(
     c.update_and_fetch(k[:, :, :1], k[:, :, :1])
     c.update_and_fetch(k[:, :, :1], k[:, :, :1])
     assert kvattn.STATS["misses"] == 2
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.model import state
     assert state.SERVED["kv_kernel"] is kvattn.STATS
 
 

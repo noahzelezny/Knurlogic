@@ -141,7 +141,7 @@ class MemoryGuard:
                "peers_over": peers,
                "limit": self._limit(n_tokens, chunk)}
         if peers is not None:
-            from knurlogic.engine.serve import state
+            from knurlogic.engine.model import state
             out["ranks"] = [dict(r) for r in
                             state.SERVED.get("ranks") or []]
         if need is not None:
@@ -229,8 +229,8 @@ class MemoryGuard:
 
     def _working_set(self) -> int:
         if self.working_set is None:
-            import importlib  # engine.serve exports a load() function
-            load = importlib.import_module("knurlogic.engine.serve.load")
+            import importlib  # engine.model exports a load() function
+            load = importlib.import_module("knurlogic.engine.model.load")
             self.working_set = int(load.memory().get("working_set_bytes")
                                    or 0)
         return self.working_set

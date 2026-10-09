@@ -196,7 +196,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         `tensor`: rank 0's engine/split/ring.Ring when this model is
         split across ranks; the prompt cache is then count-based only.
         `gpu_in_use`: () -> bytes of GPU memory every process on this
-        machine holds (serve.load.gpu_in_use), or None; what the others
+        machine holds (model.load.gpu_in_use), or None; what the others
         hold comes off the working set."""
         if tensor is not None and prompt_cache_bytes:
             raise ValueError("a tensor-split server's prompt cache is "
@@ -357,7 +357,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         return self._command(Command("unload", None, force))
 
     def share_live(self, applied: dict) -> None:
-        """Knobs this server just applied live (engine/serve.apply_live):
+        """Knobs this server just applied live (engine/model.apply_live):
         on a ring, the ones that act on a rank's own engine (plan.SETS) go
         to every other rank as `set` ops. Journaled on the scheduler thread
         (the journal is that thread's); an idle, parked ring is rung to
@@ -687,9 +687,9 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
     def _executor(self) -> LocalExecutor:
         if self._ex is not None or self.tensor is None:
             return self._executor_local()
+        from knurlogic.engine.model import state
         from knurlogic.engine.mtp import binding
         from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
-        from knurlogic.engine.serve import state
         from knurlogic.engine.split.ring import TensorExecutor
         # a drafting head on either split: rank 0 has the true final hidden
         # state (a pipeline's last layers; a tensor split's all_sums make
@@ -723,9 +723,9 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
 
     def _executor_local(self) -> LocalExecutor:
         if self._ex is None:
+            from knurlogic.engine.model import state
             from knurlogic.engine.mtp import binding
             from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
-            from knurlogic.engine.serve import state
             head = binding.DRAFT.get("head") if binding.DRAFT.get("on") else None
             vision = state.VISION.get("serve")
             gen = MTPBatchGenerator(
@@ -844,7 +844,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             f"shorter conversation, or serve a smaller model"))
 
     def _insert(self, job: Job) -> None:
-        from knurlogic.engine.serve import state
+        from knurlogic.engine.model import state
         from knurlogic.engine.vision import cachehook
         from knurlogic.engine.vision import request as vreq
         tok = self.host.tokenizer
@@ -857,7 +857,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             if vreq.has_images(job.request.messages):
                 v = state.VISION.get("serve")
                 if v is None:
-                    from knurlogic.engine.serve.vision import no_vision_why
+                    from knurlogic.engine.model.vision import no_vision_why
                     raise P.PromptError(no_vision_why())
                 prompt, segs, types, initial = v.tokenize(
                     P.tokenize, self, tok, job.request, job.args)

@@ -54,7 +54,7 @@ def _named(artifact: str):
     (None, the refusal): fit, settings and drafting resolve a name the way
     load does, instead of raising on a bare name. A path stays a path
     (these tools read one; load does not)."""
-    from knurlogic.interfaces.loading import NotLoadable, resolve_name
+    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
     try:
         return resolve_name(artifact, None), None
     except NotLoadable as e:
@@ -211,7 +211,7 @@ def state(**_) -> dict[str, Any]:
 
 def models(fits_only: bool = False, **_) -> dict[str, Any]:
     """Every model on this machine, with what can actually run."""
-    from knurlogic.engine.serve import thinking
+    from knurlogic.engine.model import thinking
     from knurlogic.engine.vision import registry as vision_registry
     from knurlogic.machine import discover
     from knurlogic.machine.memory import wired
@@ -228,7 +228,7 @@ def models(fits_only: bool = False, **_) -> dict[str, Any]:
                "vision_unavailable": vision_registry.unavailable_why(
                    f.model_type, f.path),
                # what reasoning_effort does on this model: its template's
-               # dialect, native levels and default (engine/serve/thinking)
+               # dialect, native levels and default (engine/model/thinking)
                "thinking": thinking.levels(thinking.template_of(f.path))}
         if fits_only and not (row["fits"] and row["servable"]):
             continue

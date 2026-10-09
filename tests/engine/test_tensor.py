@@ -479,7 +479,7 @@ def test_a_follower_applies_a_set_even_while_parked(monkeypatch):
 
     from knurlogic.engine.split import follower as split_follower
 
-    load = importlib.import_module("knurlogic.engine.serve.load")
+    load = importlib.import_module("knurlogic.engine.model.load")
     got = []
     monkeypatch.setattr(load, "apply_live",
                         lambda env: got.append(env) or {
@@ -612,7 +612,7 @@ def test_rank_0_publishes_every_ranks_memory(monkeypatch):
     in the control rows and rank 0 publishes it (`ranks`)."""
     from types import SimpleNamespace
 
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.model import state
     from knurlogic.engine.split import ring as split_ring
     monkeypatch.setitem(state.SERVED, "ranks", None)
     rows = [P.control(0, 3, 0, 100, 150), P.control(-4, 3, 0, 200, 260)]

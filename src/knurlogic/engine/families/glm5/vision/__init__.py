@@ -340,7 +340,7 @@ def build(model_path: str, text_model: Any, config: dict[str, Any]):
             mean, std = ip.get("image_mean"), ip.get("image_std")
         lo, hi = ip.get("min_image_tokens"), ip.get("max_image_tokens")
         _refuse_unimplemented(ip)
-    # the tower is read by serve/vision.bind (fam.load_weights), not here:
+    # the tower is read by model/vision.bind (fam.load_weights), not here:
     # it was read twice per load, and a follower rank builds the family
     # without one
     return Glm5VisionFamily(config, image_mean=mean, image_std=std,

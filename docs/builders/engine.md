@@ -15,20 +15,20 @@ and the memory guard: [server](../design/server.md) and
 | `scheduler.py` | `Scheduler`: the ONE thread that owns the MLX stream. `submit(Job)` queues; `_run` / `_tick` take jobs, run commands, admit, step |
 | `memory_guard.py` | `MemoryGuard`, the mixin Scheduler inherits: the memory guard (`_guard_memory`, `_make_room`, `_fit_next`, `memory_short`, the pressure warning), the transient lines it measures (`_measure`, `_line`), and `OutOfMemory` |
 | `executor.py` | the seam: `Executor` protocol, `LocalExecutor`, and the events it returns (`Admission`, `Progress`, `Checkpoint`, `Token`, `Finished`, `RowFailure`) |
-| `host.py` | `ModelHost`: the one served model and its state (empty, loading, ready, unloading, failed); loads on the scheduler thread |
+| `model_host.py` | `ModelHost`: the one served model and its state (empty, loading, ready, unloading, failed); loads on the scheduler thread |
 | `prompt.py` | messages to tokens, cut into segments (`flatten`, `tokenize`, `ChatRequest`, `PromptArgs`) |
 | `request.py` | `Request`: token events to reasoning, answer, tool calls, stop strings and usage; no mlx |
-| `control.py` | `ControlMachine`: which part of an answer a token is in, and which sequence ends the row |
+| `control_tokens.py` | `ControlMachine`: which part of an answer a token is in, and which sequence ends the row |
 | `timing.py` | `usage.knurlogic.timing`: `rates` and where a request's time went, `Spans` (see [telemetry](telemetry.md)) |
-| `tensor.py`, `pipeline.py`, `plan.py`, `tensor_rules.py`, `viability.py` | the splits (see [splits](splits.md)) |
 
 Around it, in `engine/`:
 
 | file | what |
 |---|---|
-| `serve/` | what the served model is: `load.py` (load, memory, `apply_live`, `tool_support`), `state.py` (process state: `SERVED`, `VISION`), `segments.py`, `thinking.py`, `vision.py`. Importing it imports no mlx |
+| `model/` | what the served model is: `load.py` (load, memory, `apply_live`, `tool_support`), `state.py` (process state: `SERVED`, `VISION`), `segments.py`, `thinking.py`, `vision.py`. Importing it imports no mlx |
 | `kvquant.py` | `QuantKVCache`, `BatchQuantKVCache`, `install`: K/V stored at 8, 6 or 4 bits |
 | `kvattn.py` | the 8-bit decode attention kernel (`decode_sdpa`, `patch_model`) |
+| `split/` | one model across ranks: `tensor.py`, `pipeline.py`, `plan.py`, `tensor_rules.py`, `viability.py`, the ring (see [splits](splits.md)) |
 | `crosschip.py` | identical results across chips (`KNURLOGIC_CROSS_CHIP`) |
 | `templates/` | chat templates knurlogic supplies in place of an artifact's own |
 | `prompt_cache/` | see [prompt-cache](prompt-cache.md) |
@@ -71,8 +71,8 @@ scheduler does the rest on its thread.
 - **Events stay small.** A token event carries the token and its logprob
   (top-k when asked), never a vocabulary row: the same executor runs on
   every rank of a split.
-- **`engine/serve/` is the one door to the engine.** Code outside the
-  engine asks `engine.serve` names, not mlx; version skew in mlx-lm is
+- **`engine/model/` is the one door to the engine.** Code outside the
+  engine asks `engine.model` names, not mlx; version skew in mlx-lm is
   handled there (`load.load_unlocked`).
 - **A live knob reaches every rank.** `tuning/live.LIVE_KNOBS` can change
   on a running server (`apply_live`); on a split, `Scheduler.share_live` journals them
@@ -92,7 +92,7 @@ scheduler does the rest on its thread.
 ## Notes
 
 Memory, by layer: the guard is `engine/runtime/memory_guard.py`; what mlx
-reports and the cache limit, `engine/serve/load.py` (`memory`,
+reports and the cache limit, `engine/model/load.py` (`memory`,
 `set_cache_limit`); the fit and margins, `tuning/fit.py` (`step_margin`,
 `rank_margin`, `fit_reserve`, `single_fit_check`); the machine's budget,
 `machine/memory/` (`wired.load_budget`, the allowance,

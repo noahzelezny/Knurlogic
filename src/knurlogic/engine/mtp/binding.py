@@ -39,8 +39,8 @@ def bind_head(model_path: str):
     mlx-lm's `model*.safetensors` glob precisely so a directory carrying one
     still loads normally through the stock loader.
     """
+    from knurlogic.engine.model import state
     from knurlogic.engine.mtp import find_head
-    from knurlogic.engine.serve import state
 
     # a new model's counters start at zero: after a switch to one with no
     # head, /status.json showed the previous model's acceptance as current
