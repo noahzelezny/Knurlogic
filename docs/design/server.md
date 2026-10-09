@@ -361,7 +361,7 @@ chips alone do.
 
 ### The MCP across machines
 
-The MCP (`interfaces/mcp.py`, stdio) runs in its own process; the page on
+The MCP (`interfaces/mcp/`, stdio) runs in its own process; the page on
 this Mac holds the peers, the jobs it coordinates and the watcher. So
 everything past this Mac is a request to that page over loopback
 (`KNURLOGIC_PAGE`, default `127.0.0.1:8899`) -- the same `POST /loaded.json`

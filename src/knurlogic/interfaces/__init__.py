@@ -3,7 +3,7 @@
 Everything a person can see or do on the page, an agent can do through the
 MCP, from the same functions.
 
-  mcp.py       the agent interface: stdio JSON-RPC, stdlib only
+  mcp/        the agent interface: stdio JSON-RPC, stdlib only
   http/        OpenAI and Anthropic Messages on one server
   page/        `knurlogic ui`, its routes and assets
   serve.py     `knurlogic serve`: settings resolved, then an endpoint

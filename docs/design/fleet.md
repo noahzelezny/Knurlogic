@@ -62,7 +62,7 @@ engine/runtime/scheduler.py   already measures admit/prefill/decode; it
 machine/ledger.py             the ring: schema, insert, query, retention
 machine/keys.py               keys file, lookup, quota counters
 interfaces/page/              /usage.json, /keys.json, the Usage tab
-interfaces/mcp.py             `usage` tool (read-only)
+interfaces/mcp/               `usage` tool (read-only)
 ```
 
 Rule 3 holds: `engine/` and `machine/` never import `interfaces/`. The

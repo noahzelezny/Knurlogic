@@ -33,7 +33,7 @@ Elsewhere:
 - `engine/split/pipeline.py` (`Coord`): rank 0's drafts and verdicts
   broadcast to followers.
 - `interfaces/drafting.py`: `knurlogic mtp`, the machine-wide survey;
-  `interfaces/mcp.py`: the `drafting` tool.
+  `interfaces/mcp/inspection.py`: the `drafting` tool.
 - `tuning/presets.py`: `MTP_MODE`, `MTP_MODES`; `tuning/knobs.py`:
   `mtp_of`, the `KNURLOGIC_MTP*` knobs; `tuning/fit.py`: `mtp_head_bytes`.
 
