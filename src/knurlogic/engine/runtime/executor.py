@@ -41,7 +41,7 @@ class Admission:
     #: for the engine's default
     state_machine: Any = None
     top_logprobs: int = 0
-    #: receives the cache report (engine/serve/cache_report.attach)
+    #: receives the cache report (engine/prompt_cache/report.attach)
     report: Any = None
     #: on a tensor ring, what the other ranks need to rebuild what is not
     #: data here (processors, the state machine): {"penalties": the

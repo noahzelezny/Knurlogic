@@ -1049,6 +1049,8 @@ def hit(link, out_path, split_kind="pipeline"):
     follower must too (Coord.ba) -- its own trie says 5. Both prompts'
     tokens are the unsplit executor's."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.prompt_cache.memory import PromptCache
+    from knurlogic.engine.prompt_cache.ring import JournalPromptCache
     from knurlogic.engine.runtime import pipeline as PL
     from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.runtime.executor import (
@@ -1058,7 +1060,6 @@ def hit(link, out_path, split_kind="pipeline"):
         Token,
     )
     from knurlogic.engine.runtime.request import control_machine
-    from knurlogic.engine.runtime.scheduler import PromptCache
     tok = FakeTok()
     key = ("tiny", None, None)
 
@@ -1109,7 +1110,7 @@ def hit(link, out_path, split_kind="pipeline"):
     PL.coordinate(gen, link.group)
     ring = T.Ring(link, split=split_kind)
     ex = T.TensorExecutor(gen, ring, over=lambda: 0)
-    pc = T.JournalPromptCache(PromptCache(4), ring.journal)
+    pc = JournalPromptCache(PromptCache(4), ring.journal)
     n_trunk = gen._n_trunk
 
     def store(e):
@@ -1141,6 +1142,8 @@ def image(link, out_path, split_kind="pipeline"):
     import test_vision_qwen as tq
 
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.prompt_cache.memory import PromptCache
+    from knurlogic.engine.prompt_cache.ring import JournalPromptCache
     from knurlogic.engine.runtime import pipeline as PL
     from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.runtime.executor import (
@@ -1150,7 +1153,6 @@ def image(link, out_path, split_kind="pipeline"):
         Token,
     )
     from knurlogic.engine.runtime.request import control_machine
-    from knurlogic.engine.runtime.scheduler import PromptCache
     from knurlogic.engine.vision import key as K
     from knurlogic.engine.vision import registry
     from knurlogic.engine.vision.request import MirrorVision, VisionServe
@@ -1229,7 +1231,7 @@ def image(link, out_path, split_kind="pipeline"):
     ring = T.Ring(link, split=split_kind)
     ex = T.TensorExecutor(gen, ring, over=lambda: 0)
     coord = gen._coord
-    pc = T.JournalPromptCache(PromptCache(4), ring.journal)
+    pc = JournalPromptCache(PromptCache(4), ring.journal)
 
     def store(e):
         pc.insert(mkey, e.tokens, e.cache, "user",

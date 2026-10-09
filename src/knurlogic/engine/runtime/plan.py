@@ -56,7 +56,7 @@ _FIELDS = {
     "read_back": ("name",),
 }
 #: fields an op may carry besides its own: insert's owner (the session that
-#: made the entry, engine/runtime/tensor.JournalPromptCache), a session's
+#: made the entry, engine/prompt_cache/ring.JournalPromptCache), a session's
 #: save. Missing from the check, a split model failed its first request
 #: that named a session ("insert takes [...], got [... 'owner' ...]").
 _OPTIONAL = {"insert": ("owner",), "save_cache": ("session",)}

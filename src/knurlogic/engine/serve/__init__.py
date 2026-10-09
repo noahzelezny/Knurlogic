@@ -1,7 +1,7 @@
 """engine/serve/ -- what the served model is and what it can do: the pieces
 knurlogic's own server (engine/runtime, interfaces/http) builds on, one
 module each: load.py (load, memory, knobs, tool dialects), state.py,
-cache_report.py, segments.py, thinking.py, drafting.py, vision.py.
+segments.py, thinking.py, drafting.py, vision.py.
 
 Callers import the package and use the names below; which module holds a
 name is this package's business. Importing it imports no mlx -- only

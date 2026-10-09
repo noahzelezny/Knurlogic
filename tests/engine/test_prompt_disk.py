@@ -1,4 +1,4 @@
-"""The prompt cache on disk (engine/serve/prompt_disk.py): saved at unload,
+"""The prompt cache on disk (engine/prompt_cache/disk.py): saved at unload,
 restored at load, keyed to the model, budgeted, expired, prefix-served,
 reported. Tiny fixtures only."""
 import os
@@ -13,7 +13,7 @@ mx = pytest.importorskip("mlx.core")
 
 from test_scheduler import Tok, _collect, _job  # noqa: E402
 
-from knurlogic.engine.serve import prompt_disk as D  # noqa: E402
+from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
 
 
 def _key(**kw):
@@ -231,7 +231,7 @@ def test_a_corrupt_file_is_a_miss_and_deleted(tmp_path):
 def test_a_restored_entry_serves_any_prompt_it_prefixes(tmp_path):
     """Restored into the in-memory trie, the entry is found by its own
     prefix rule: a longer prompt is served the cached tokens."""
-    from knurlogic.engine.runtime.scheduler import PromptCache
+    from knurlogic.engine.prompt_cache.memory import PromptCache
     lru = _lru(1, length=30)
     D.save(lru, _key(), base=tmp_path)
     (toks,) = [t for _, t, _ in D._lru_entries(lru)]

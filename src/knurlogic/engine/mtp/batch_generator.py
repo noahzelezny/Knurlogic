@@ -26,8 +26,8 @@ import mlx.core as mx
 from mlx_lm.generate import BatchGenerator, GenerationBatch, PromptProcessingBatch
 from mlx_lm.models.cache import make_prompt_cache
 
+from knurlogic.engine.prompt_cache import report as cachereport
 from knurlogic.engine.runtime.control import stop_machine
-from knurlogic.engine.serve import cache_report as cachereport
 
 from ..vision import key as K
 from .batch_loop import ForwardFailed, MTPBatch, RowParams, admit
@@ -594,7 +594,7 @@ class MTPBatchGenerator(BatchGenerator):
                         logits_processors=None, stop_sequences=None, *,
                         reports=None, control=None):
         """`reports`: one object per row to receive its cache report (the
-        executor passes them; engine/serve/cache_report.attach).
+        executor passes them; engine/prompt_cache/report.attach).
         `control`: one runtime/control.ControlMachine per row (None: the
         generator's stop tokens). It rides in the queue entry's last slot,
         which mlx-lm names stop_sequences: this generator never hands rows

@@ -5,9 +5,11 @@ disk and restore them" (2026-10-07). A model swap loses every resident
 context, and each session's next request re-prefills it (110k tokens at
 136 tok/s is ~13.5 min). Saved to disk, the reload is a read.
 
-Code: `engine/serve/prompt_disk.py`; the scheduler's `_save_disk`,
-`_restore_disk`, `_disk_hit` (engine/runtime/scheduler.py); a ring's
-followers in `engine/runtime/tensor.serve_follower` / `follow`.
+Code: `engine/prompt_cache/disk.py`; the scheduler's `_save_disk`,
+`_restore_disk`, `_disk_hit` (engine/prompt_cache/commands.py); a ring's
+followers in `engine/runtime/tensor.serve_follower` / `follow` and
+`engine/prompt_cache/ring.apply_cache_op`; the HTTP routes in
+`interfaces/http/prompt_cache.py`.
 
 ## When
 

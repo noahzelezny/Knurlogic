@@ -1256,7 +1256,7 @@ def check_compact_knob(name: str, value):
     return None
 
 
-# --- the prompt cache on disk (engine/serve/prompt_disk) --------------------
+# --- the prompt cache on disk (engine/prompt_cache/disk) --------------------
 # Knurlogic-wide, like compaction: one cache directory holds every model's
 # saved prompt caches, so one budget and one TTL cover them all. Read at
 # each save and load (machine/preferences over the environment).
