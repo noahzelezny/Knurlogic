@@ -36,7 +36,7 @@ def _rss_bytes() -> int:
 def memory() -> dict:
     """Delegated: how memory is accounted is an ENGINE question, and the
     machine/ never imports mlx (a tripwire test checks)."""
-    from knurlogic.engine.serve import memory as _m
+    from knurlogic.engine.model import memory as _m
 
     d = _m()
     d["process_rss_bytes"] = _rss_bytes()

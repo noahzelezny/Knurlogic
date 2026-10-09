@@ -169,8 +169,8 @@ class Host(Provider):
 @pytest.fixture
 def server(monkeypatch):
     """The serve package's module state, pristine for each test."""
+    from knurlogic.engine.model import state
     from knurlogic.engine.mtp import binding
-    from knurlogic.engine.serve import state
     monkeypatch.setattr(state, "VISION",
                         {"serve": None, "model": None, "error": ""})
     monkeypatch.setattr(state, "VISION_STATS", {})
@@ -218,8 +218,8 @@ class Harness:
 
     def __init__(self, srv, model, tok=None, family=None, *, store=None,
                  start=True, prefill_step_size=16):
+        from knurlogic.engine.model import state
         from knurlogic.engine.runtime.scheduler import Scheduler
-        from knurlogic.engine.serve import state
         from knurlogic.interfaces.http.server import App
         self.host = Host(model, tok if tok is not None else byte_tok())
         state.SERVED["provider"] = self.host
@@ -539,8 +539,8 @@ def test_load_builds_the_family_through_the_registry(server, model, tmp_path,
     """bind_vision reads config.json, builds through registry.build (here
     pointed at the P0 stub builder, exactly as a real family is), loads the
     tower and publishes the spec; clear_vision takes it all back."""
-    from knurlogic.engine import serve
-    from knurlogic.engine.serve import state
+    from knurlogic.engine import model as engine
+    from knurlogic.engine.model import state
     from knurlogic.engine.vision import registry, served_vision
 
     monkeypatch.setitem(registry.FAMILIES, "qwen3_5",
@@ -550,18 +550,18 @@ def test_load_builds_the_family_through_the_registry(server, model, tmp_path,
                text_config={"hidden_size": 128})
     (tmp_path / "config.json").write_text(json.dumps(cfg))
     prov = Provider(model, byte_tok())
-    v = serve.bind_vision(str(tmp_path), prov)
+    v = engine.bind_vision(str(tmp_path), prov)
     assert v is not None and state.VISION["serve"] is v
-    assert served_vision() is v.spec and serve.served_vision() is v.spec
+    assert served_vision() is v.spec and engine.served_vision() is v.spec
     assert v.spec.image_token_id == IMG
-    assert serve.vision_status()["on"]
+    assert engine.vision_status()["on"]
 
-    serve.clear_vision()
+    engine.clear_vision()
     assert served_vision() is None and state.VISION["serve"] is None
 
     cfg.pop("vision_config")                      # a text-only artifact
     (tmp_path / "config.json").write_text(json.dumps(cfg))
-    assert serve.bind_vision(str(tmp_path), prov) is None
+    assert engine.bind_vision(str(tmp_path), prov) is None
     assert served_vision() is None
 
 
@@ -640,7 +640,7 @@ def test_a_burst_of_image_requests_interleaves_with_decoding(server, model,
 def test_an_image_sent_while_the_model_loads_waits(monkeypatch):
     """Vision is unknown until the model has loaded: an image request
     queues like a text one instead of a 400."""
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.model import state
     from knurlogic.interfaces.http.server import App
     monkeypatch.setitem(state.VISION, "serve", None)
     app = types.SimpleNamespace(scheduler=types.SimpleNamespace(

@@ -1,6 +1,6 @@
-"""engine/serve/segments: a system prompt whose render is a pure prefix of
+"""engine/model/segments: a system prompt whose render is a pure prefix of
 the prompt still gets its own segment, so its checkpoint can be reused."""
-from knurlogic.engine.serve.segments import split_system
+from knurlogic.engine.model.segments import split_system
 
 
 class GLMish:

@@ -5,6 +5,16 @@
 `serve()` builds the host and the scheduler, queues the load, and answers
 HTTP at once: /status.json and the page work while the model loads, and
 inference requests wait for it (they are queued, not refused).
+
+  server.py        the HTTP server: routes, one thread per connection
+  openai.py        /v1/chat/completions, /v1/completions, /v1/models
+  messages.py      the Anthropic Messages API, over the OpenAI one
+  responses.py     the OpenAI Responses API, over the OpenAI one
+  ollama.py        the Ollama API, over the OpenAI one
+  residency.py     what the server holds: capabilities, ensure, unload
+  prompt_cache.py  /v1/prompt-cache: save, drop, pin, park, list
+  compaction.py    the chat path through context_management/
+  telemetry.py     request ids, the ledger row, progress, /v1/usage
 """
 
 from __future__ import annotations
@@ -38,10 +48,10 @@ def load_now():
 def switch(model: str, *, force: bool = False, wait: bool = True,
            timeout: float = 3600.0) -> dict:
     """Serve `model` (an id from /models.json, or the served one): the
-    checks startup makes (interfaces/loading.prepare), then a load on the
+    checks startup makes (interfaces/load_checks.prepare), then a load on the
     scheduler's thread. Idempotent. NotLoadable says why not; `force`
     switches even with requests running (they fail, saying so)."""
-    from knurlogic.interfaces.loading import NotLoadable, prepare
+    from knurlogic.interfaces.load_checks import NotLoadable, prepare
     sched = _CURRENT["scheduler"]
     host = sched.host
     st = host.status()
@@ -76,7 +86,7 @@ def unload() -> dict:
     cmd = sched.unload(force=False)
     cmd.done.wait()
     if cmd.error:
-        from knurlogic.interfaces.loading import NotLoadable
+        from knurlogic.interfaces.load_checks import NotLoadable
         raise NotLoadable(409, cmd.error, "model_busy")
     return {"unloaded": had}
 
@@ -181,7 +191,7 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
         # Loading: the read stops at its next batch boundary (host.LOAD_STOP)
         # rather than dying inside one, which left the GPU's utilization
         # counter stuck at 100% until a reboot.
-        from knurlogic.engine.runtime import host as H
+        from knurlogic.engine.runtime import model_host as H
         H.LOAD_STOP.set()
 
         def after_load_stops():
@@ -206,7 +216,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     """`ring`: this is rank 0 of a tensor or pipeline split
     (interfaces/serve.py's ring dict); the other ranks follow its
     scheduler."""
-    from knurlogic.engine.runtime.host import ModelHost
+    from knurlogic.engine.runtime.model_host import ModelHost
     from knurlogic.engine.runtime.scheduler import Scheduler
 
     from . import residency as res_api
@@ -216,7 +226,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                         format="%(asctime)s %(levelname)s %(message)s")
     settings = dict(settings or {})
     if "cache_limit_gb" in settings:
-        from knurlogic.engine.serve import set_cache_limit
+        from knurlogic.engine.model import set_cache_limit
         print(f"cache limit {set_cache_limit(settings['cache_limit_gb'])}")
     tensor = shard = shard_config = agree = None
     pipe = bool(ring and ring.get("split") == "pipeline")
@@ -256,7 +266,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                            "world": link.size, "rank": link.rank}
         if pipe:
             mh.cache_layout["bounds"] = [list(b) for b in shares["bounds"]]
-    from knurlogic.engine.serve.load import gpu_in_use
+    from knurlogic.engine.model.load import gpu_in_use
     sched = Scheduler(mh, **scheduler_options(settings),
                       tensor=tensor, gpu_in_use=gpu_in_use).start()
     sched.load(str(artifact.path),

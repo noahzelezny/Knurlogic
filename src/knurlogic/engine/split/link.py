@@ -353,7 +353,7 @@ def bell_early():
     host, port, nonce, world = spec.rsplit(":", 3)
     port, nonce, world = int(port), int(nonce), int(world)
     rank = int(os.environ.get("MLX_RANK", "0"))
-    from knurlogic.engine.runtime.host import LOAD_STOP
+    from knurlogic.engine.runtime.model_host import LOAD_STOP
     if rank == 0:
         srv = socket.create_server((host, port))
         logger.info("bell: rank 0 listening on %s:%d for ranks 1..%d before "

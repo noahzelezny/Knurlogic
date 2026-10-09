@@ -81,7 +81,7 @@ def test_a_warming_ring_also_stops_between_steps(monkeypatch):
 
 
 def test_a_loading_rank_0_stops_its_read_between_batches(monkeypatch):
-    from knurlogic.engine.runtime import host as Hst
+    from knurlogic.engine.runtime import model_host as Hst
     Hst.LOAD_STOP.clear()
     try:
         # the read never stops here (no load runs): the wait runs out and
@@ -96,7 +96,7 @@ def test_the_weight_read_stops_at_a_batch_boundary(monkeypatch):
     import mlx.core as mx
     import pytest
 
-    from knurlogic.engine.runtime import host as Hst
+    from knurlogic.engine.runtime import model_host as Hst
     m = {"a": [mx.zeros((256,)) + i for i in range(8)]}
     monkeypatch.setattr(Hst, "LOAD_BATCH_BYTES", 2048)    # two per batch
     evals = []

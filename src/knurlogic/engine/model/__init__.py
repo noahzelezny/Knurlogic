@@ -1,7 +1,13 @@
-"""engine/serve/ -- what the served model is and what it can do: the pieces
-knurlogic's own server (engine/runtime, interfaces/http) builds on, one
-module each: load.py (load, memory, knobs, tool dialects), state.py,
-segments.py, thinking.py, vision.py. (Drafting is engine/mtp/binding.py.)
+"""engine/model/ -- the model this process serves and what it can do: the
+pieces knurlogic's own server (engine/runtime, interfaces/http) builds on.
+
+  load.py      load it, its memory, the engine's knobs, tool dialects
+  state.py     what is served and its vision (process state, by attribute)
+  segments.py  the system prompt's own prompt-cache segment
+  thinking.py  reasoning_effort, translated to each chat template's own
+  vision.py    bind a vision family at load, clear it at unload
+
+Drafting is engine/mtp/binding.py.
 
 Callers import the package and use the names below; which module holds a
 name is this package's business. Importing it imports no mlx -- only

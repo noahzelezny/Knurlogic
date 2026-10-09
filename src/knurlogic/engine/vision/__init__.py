@@ -3,10 +3,17 @@ the serve path build against (ImageRef, EncodedImage, VisionSpec, the
 Family protocol, the errors, served_vision()). docs/design/vision-contracts.md
 is the prose home of what is written here, with the data shapes.
 
-Modules: key.py (the cache key), store.py (encoded images), images.py
-(request bytes -> RGB + pixel hash), scatter.py, _base.py, registry.py,
-request.py, cachehook.py, quant.py; each family's tower lives under
-engine/families/<family>/vision/.
+  key.py        the cache key: token ids with image sentinels
+  store.py      encoded images, kept so an image is encoded once
+  images.py     request bytes -> a bounded RGB image and its pixel hash
+  request.py    a chat request with images -> the cache key
+  scatter.py    image features into text embeddings, uncached span only
+  cachehook.py  the prompt cache pins the images it references
+  registry.py   model_type -> the family package that serves its images
+  quant.py      quantize a vision module to match the checkpoint
+  _base.py      the three mlx-vlm helpers the vendored towers import
+
+Each family's tower lives under engine/families/<family>/vision/.
 
 This front door is stdlib only: the page and the MCP read `VisionSpec` and
 `served_vision()` without paying for mlx or PIL (tests/test_resolve.py).
@@ -236,7 +243,7 @@ class Family(Protocol):
 
 # --- what is being served ------------------------------------------------------
 # The page and the MCP must say whether the served model sees images
-# without importing engine/serve. The serve path sets this when a vision
+# without importing engine/model. The serve path sets this when a vision
 # family is built and clears it on unload; interfaces only read it.
 
 _SERVED_SPEC: VisionSpec | None = None

@@ -4,12 +4,13 @@
 
 The engine folder is laid out as:
 
-  serve/           what is served: load, memory, the live knobs, thinking
-                   translation, the vision family and drafting head bound
-                   to the loaded model (see serve/__init__.py)
+  model/           the served model: load, memory, the live knobs, thinking
+                   translation, the vision family bound to the loaded
+                   model (see model/__init__.py; drafting is mtp/binding.py)
   runtime/         knurlogic's own server's engine half: the model host,
                    the scheduler, the executor, the prompt and request
                    stages (docs/design/server.md; HTTP is interfaces/http)
+  split/           one model across ranks: tensor and pipeline splits
   mtp/             multi-token-prediction drafting, sequential and batched.
                    Its front door (`knurlogic.engine.mtp`) is stdlib only, so
                    asking whether an artifact has a head costs no mlx import

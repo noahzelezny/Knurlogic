@@ -171,7 +171,7 @@ def detected_working_set_bytes() -> int:
         return limit
     # the sysctl left at its default reads 0: only the framework knows the
     # default it applies, so it is asked -- on a box nobody has tuned. It is
-    # asked in a CHILD process: importing engine.serve.memory here pulled
+    # asked in a CHILD process: importing engine.model.memory here pulled
     # mlx into the page process on every untuned Mac (CI runners among
     # them), which is the very thing this function exists to avoid.
     return _framework_working_set_bytes()
@@ -193,7 +193,7 @@ def _framework_working_set_bytes() -> int:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
         [src] + [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p])
-    code = ("from knurlogic.engine.serve import memory\n"
+    code = ("from knurlogic.engine.model import memory\n"
             "print(int(memory().get('working_set_bytes') or 0))\n")
     try:
         r = subprocess.run([sys.executable, "-c", code], capture_output=True,

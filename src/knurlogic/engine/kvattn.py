@@ -32,7 +32,7 @@ def reset(on: bool) -> None:
     """Zero the counters for a newly installed model and publish them."""
     STATS.update(on=bool(on), hits=0, misses=0, last_miss=None)
     _LOGGED.clear()
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.model import state
     state.SERVED["kv_kernel"] = STATS
 
 

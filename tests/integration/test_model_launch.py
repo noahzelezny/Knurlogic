@@ -152,7 +152,7 @@ def test_dynamic_off_drafts_every_step(monkeypatch):
 
 def test_the_host_refuses_bits_on_a_model_it_cannot_quantize(monkeypatch):
     pytest.importorskip("mlx.core")
-    from knurlogic.engine.runtime.host import ModelHost
+    from knurlogic.engine.runtime.model_host import ModelHost
 
     class M:
         def make_cache(self):
@@ -167,10 +167,10 @@ def test_the_host_refuses_bits_on_a_model_it_cannot_quantize(monkeypatch):
 
 def _serve_until_resolve(monkeypatch, art, argv):
     """Run serve.main up to the resolver; return what it was given."""
-    from knurlogic.interfaces import loading, serve
+    from knurlogic.interfaces import load_checks, serve
     seen = {}
     monkeypatch.setattr(serve.Artifact, "load", staticmethod(lambda p: art))
-    monkeypatch.setattr(loading, "register", lambda a: [])
+    monkeypatch.setattr(load_checks, "register", lambda a: [])
 
     def stop(*a, **k):
         seen.update(k)

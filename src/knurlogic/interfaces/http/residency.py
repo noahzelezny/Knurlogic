@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def _capabilities() -> list:
-    from knurlogic.engine.serve import state, thinking
+    from knurlogic.engine.model import state, thinking
     caps = ["text"]
     if state.VISION.get("serve") is not None:
         caps.append("vision")
@@ -60,7 +60,7 @@ def ensure(body: dict) -> dict:
     """POST /v1/ensure {model, wait?, timeout?, force?} -- see
     interfaces/http.switch."""
     from knurlogic.interfaces import http
-    from knurlogic.interfaces.loading import NotLoadable
+    from knurlogic.interfaces.load_checks import NotLoadable
     if not isinstance(body, dict):
         raise ApiError(400, "the body must be a JSON object")
     try:

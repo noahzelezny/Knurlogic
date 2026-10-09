@@ -629,7 +629,7 @@ def test_e6_seeded_image_request_takes_the_batch_path(server, rigs):
     """A seeded image request comes through the batch engine like any
     other (mlx-lm sent seeds down a sequential path that could not read a
     key) -- and answers as the reference does."""
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.model import state
     rig = rigs("qwen3_5")
     msgs = [user(Q1, rig.url(41))]
     h = harness(server, rig, rig.make_family())

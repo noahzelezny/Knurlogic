@@ -199,11 +199,11 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
         from knurlogic.engine.vision import request as vreq
         if vreq.has_images(msgs):
             if not has_vision():
-                from knurlogic.engine.serve.vision import no_vision_why
+                from knurlogic.engine.model.vision import no_vision_why
                 raise ApiError(400, no_vision_why(), param="messages")
         kwargs = body.get("chat_template_kwargs")
         if translate is not None:
-            from knurlogic.engine.serve import thinking
+            from knurlogic.engine.model import thinking
             try:
                 kwargs, ctx["thinking"] = translate(body, kwargs)
             except ValueError as e:
@@ -477,7 +477,7 @@ def models_document(served: dict, sampling: dict | None = None,
     """/v1/models: the one served model, with its capabilities and size, the
     sampling a request that says nothing gets (the model's recommendation;
     {} is greedy), its context window (0: the config does not say), and
-    the thinking levels its template has (engine/serve/thinking.levels:
+    the thinking levels its template has (engine/model/thinking.levels:
     dialect, default, native [{level on the reasoning_effort ladder, the
     template's own name}]) when known.
 

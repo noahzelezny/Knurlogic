@@ -30,7 +30,7 @@ from knurlogic.engine import families as _families
 #: on the config: Flash-Next declares `language_model_only: false` yet its
 #: quantizer scores it through mlx_lm. So `host` here records where a
 #: module LIVES; choosing the host per artifact is still an open question.
-from knurlogic.engine.serve import HOST_PACKAGES
+from knurlogic.engine.model import HOST_PACKAGES
 
 _MAPS = _families.build_maps()
 
@@ -104,7 +104,7 @@ class ArchStatus:
 
 
 def _models_dir(host: str = "mlx_lm") -> Path | None:
-    from knurlogic.engine.serve import models_module
+    from knurlogic.engine.model import models_module
     try:
         return Path(models_module(host).__file__).parent
     except (ImportError, AttributeError, TypeError, OSError):

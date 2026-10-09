@@ -3,7 +3,7 @@ knob on one artifact whether a change applies now, needs a restart, or
 does nothing at all (its bundled runtime never reads it).
 
 Applying a live knob to the running process is the engine's
-(engine/serve/load.apply_live); the page and `serve` ask here which ones
+(engine/model/load.apply_live); the page and `serve` ask here which ones
 it can.
 """
 

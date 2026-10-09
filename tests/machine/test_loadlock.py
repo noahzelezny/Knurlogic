@@ -133,8 +133,8 @@ def test_ring_ranks_on_one_machine_do_not_deadlock_on_the_lock(
 
     import mlx.nn as nn
 
-    from knurlogic.engine.runtime import host as H
-    L = importlib.import_module("knurlogic.engine.serve.load")
+    from knurlogic.engine.runtime import model_host as H
+    L = importlib.import_module("knurlogic.engine.model.load")
     monkeypatch.setenv("KNURLOGIC_LOADLOCK", str(tmp_path / "load.lock"))
     monkeypatch.setattr(L, "load_unlocked",
                         lambda path, code, lazy=False, model_config=None:

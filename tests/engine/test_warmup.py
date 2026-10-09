@@ -4,12 +4,12 @@ import importlib
 import mlx.nn as nn
 import pytest
 
-from knurlogic.engine.runtime import host as H
+from knurlogic.engine.runtime import model_host as H
 
 
 @pytest.fixture
 def host(tmp_path, monkeypatch):
-    L = importlib.import_module("knurlogic.engine.serve.load")
+    L = importlib.import_module("knurlogic.engine.model.load")
     monkeypatch.setenv("KNURLOGIC_LOADLOCK", str(tmp_path / "load.lock"))
     monkeypatch.setattr(L, "load_unlocked",
                         lambda path, code, lazy=False: (nn.Linear(2, 2),

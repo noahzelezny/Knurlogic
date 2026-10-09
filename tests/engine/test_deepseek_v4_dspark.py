@@ -37,9 +37,9 @@ REAL_CONFIG = Path("/Volumes/Models/Teacher Models/"
 def _load(path=G.TINY):
     from mlx_lm.utils import load_model
 
-    from knurlogic.interfaces import loading
+    from knurlogic.interfaces import load_checks
     from knurlogic.machine.artifact import Artifact
-    assert loading.register(Artifact.load(str(path))) == []
+    assert load_checks.register(Artifact.load(str(path))) == []
     model, _ = load_model(Path(path))
     return model
 

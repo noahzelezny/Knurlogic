@@ -157,7 +157,7 @@ def test_a_deepseek_v4_vision_artifact_gets_the_vision_template(tmp_path):
     assert templates.served_family(vt) == "deepseek_v4_vision"
     assert templates.served_family(templates.text("deepseek_v4")) == \
         "deepseek_v4"
-    from knurlogic.engine.serve import thinking
+    from knurlogic.engine.model import thinking
     assert thinking.detect(vt)[0] == "deepseek_vision_effort"
     assert [n["name"] for n in thinking.levels(vt)["native"]] == \
         ["off", "low", "high", "max"]
@@ -176,7 +176,7 @@ def test_the_template_is_chosen_by_the_config_not_the_folder_name(tmp_path):
     from types import SimpleNamespace
 
     from knurlogic.engine import templates
-    from knurlogic.engine.serve import thinking
+    from knurlogic.engine.model import thinking
     plain = _artifact(tmp_path, "DeepSeek-V4-Flash-mlx-4bit", **_VISION_EXP)
     assert templates.family_for(None, plain) == "deepseek_v4_vision"
     tok = SimpleNamespace(chat_template=None, name_or_path=plain)
@@ -650,12 +650,12 @@ def _checkpoint(root, name, *, trunk_vision, extra=()):
 
 
 def _load(monkeypatch, path):
-    """engine/serve/load.load_unlocked with mlx-lm's load_model under it
+    """engine/model/load.load_unlocked with mlx-lm's load_model under it
     (the tiny checkpoint has no tokenizer)."""
     import mlx_lm.utils as U
 
     from knurlogic.engine import templates
-    from knurlogic.engine.serve.load import load_unlocked
+    from knurlogic.engine.model.load import load_unlocked
 
     def load(p, model_config=None, **kw):
         return U.load_model(Path(p), model_config=model_config)[0], object()
@@ -669,7 +669,7 @@ def test_a_vision_config_with_no_vision_weights_loads_text_only(
     """vision_n_layers in config.json but no tower, no bias_vl, no image
     rows and no hash-layer bias in the weights (the -mlx conversion of
     Vision-Exp): it loads as the text model and refuses images."""
-    from knurlogic.engine.serve import state, vision
+    from knurlogic.engine.model import state, vision
     from knurlogic.engine.vision import registry
     d = _checkpoint(tmp_path, "text", trunk_vision=False)
     v = registry.vision_weights(TINY, d)

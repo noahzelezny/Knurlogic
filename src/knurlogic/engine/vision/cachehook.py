@@ -95,7 +95,7 @@ def install(target: Any, store: StoreGetter | StoreLike) -> None:
     class itself, or an instance. The class's mutators are wrapped once
     (idempotent); each instance keeps its own refcount. `store` is the
     ImageStore, or a zero-argument callable returning the current one (or
-    None when nothing with vision is served) -- serve/vision.py passes a getter,
+    None when nothing with vision is served) -- model/vision.py passes a getter,
     since the store changes with every load."""
     getter: StoreGetter
     if callable(store) and not hasattr(store, "pinned"):

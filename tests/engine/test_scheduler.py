@@ -760,8 +760,8 @@ def test_glm_prefill_span_reads_its_config():
 
 
 def test_status_names_a_peer_rank_over_its_limit():
+    from knurlogic.engine.model import state
     from knurlogic.engine.runtime import scheduler as S
-    from knurlogic.engine.serve import state
     GIB = MG.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._local_active = lambda: 76 * GIB

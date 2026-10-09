@@ -1,4 +1,4 @@
-"""The serve package's process state: what is served, vision. (Drafting's
+"""engine/model's process state: what is served, vision. (Drafting's
 is engine/mtp/binding.DRAFT.)
 
 One module so every file reaches the same dicts by attribute at call time

@@ -330,8 +330,8 @@ def test_thinking_reads_the_template_as_deepseeks_own_dialect():
     """The template carries GLM's and Qwen's effort words too (Think Max
     says "Reasoning Effort", the kwarg is reasoning_effort): its own,
     more specific dialect must win, not their on/off or effort ladders."""
-    from knurlogic.engine.serve import thinking
-    from knurlogic.engine.serve.load import tool_support
+    from knurlogic.engine.model import thinking
+    from knurlogic.engine.model.load import tool_support
     assert thinking.detect(TEMPLATE)[0] == "deepseek_effort"
     assert tool_support(TEMPLATE)["parser"] == "deepseek_v4 (knurlogic)"
 
@@ -521,7 +521,7 @@ def test_think_max_is_deepseeks_prefix_and_the_three_modes_are_the_dialect():
     assert render(h, thinking_mode="thinking", reasoning_effort="max") == want
     assert render(h, thinking_mode="chat", reasoning_effort="max") == \
         encode(h)                           # chat mode: no prefix
-    from knurlogic.engine.serve import thinking
+    from knurlogic.engine.model import thinking
     name, spec = thinking.detect(TEMPLATE)
     assert name == "deepseek_effort"
     assert [n[1] for n in spec["native"]] == ["off", "high", "max"]

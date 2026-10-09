@@ -35,7 +35,7 @@ The model server, `src/knurlogic/interfaces/http/`:
 settings (`tuning/checks`: `launch_refusal`, `settings_refusal`,
 `refuse_sets`), then
 `run` starts the scheduler and server, or a follower rank.
-`interfaces/loading.py` (`prepare`, `NotLoadable`) is the check every load
+`interfaces/load_checks.py` (`prepare`, `NotLoadable`) is the check every load
 passes, at startup and on every switch. `interfaces/spawn.py` starts,
 lists and stops the `knurlogic serve` children (`spawn`, `children`,
 `loading`, `stop`, `SERVE_PORT`): the page and the MCP share it.

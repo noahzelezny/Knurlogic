@@ -92,7 +92,7 @@ def test_models_json_carries_update(tmp_path, monkeypatch):
 
 
 def test_a_vq_model_without_model_py_is_refused_plainly(tmp_path):
-    from knurlogic.engine.serve.load import vq_without_runtime
+    from knurlogic.engine.model.load import vq_without_runtime
     (tmp_path / "config.json").write_text(json.dumps(
         {"model_type": "qwen3_5_moe", "vq_modules": {"a": {}}}))
     assert "does not ship its runtime (model.py)" in vq_without_runtime(

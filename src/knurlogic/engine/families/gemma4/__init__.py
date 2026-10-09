@@ -23,7 +23,7 @@ MANIFEST = {
     # passes enable_thinking=True to any request that is silent about it
     # when the tokenizer has thinking tokens -- gemma's does -- so SERVED,
     # the default is on. `default` states what knurlogic serves; the render
-    # probe (engine/serve/thinking.probe) confirms it on the loaded model.
+    # probe (engine/model/thinking.probe) confirms it on the loaded model.
     "thinking": {
         "gemma_toggle": {
             "detect": {"all": ["enable_thinking", "<|think|>"]},

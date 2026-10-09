@@ -1,4 +1,4 @@
-"""interfaces/loading.py: what a model must pass before it loads, at startup
+"""interfaces/load_checks.py: what a model must pass before it loads, at startup
 and on every switch -- known to this machine, runnable, and fits -- and the
 scheduler's refusal to switch under running requests."""
 import json
@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.interfaces import loading as L  # noqa: E402
+from knurlogic.interfaces import load_checks as L  # noqa: E402
 
 GIB = 1 << 30
 

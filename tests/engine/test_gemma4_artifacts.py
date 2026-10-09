@@ -42,11 +42,11 @@ def test_stop_tokens_are_the_generation_configs(art):
 def test_the_tool_parser_is_inferred_as_gemma4(art):
     """The template's <|tool_call> ... <tool_call|> names mlx-lm's gemma4
     parser (mlx_lm.tokenizer_utils._infer_tool_parser, through
-    engine/serve/load.tool_support); a tokenizer_config.json
+    engine/model/load.tool_support); a tokenizer_config.json
     tool_parser_type, which mlx-lm reads before inferring (the 26B VQ
     artifact sets one), names the same parser."""
     pytest.importorskip("mlx_lm")
-    from knurlogic.engine.serve.load import tool_support
+    from knurlogic.engine.model.load import tool_support
     tc = json.loads((art / "tokenizer_config.json").read_text())
     assert tc.get("tool_parser_type", "gemma4") == "gemma4"
     template = (art / "chat_template.jinja").read_text()

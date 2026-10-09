@@ -27,14 +27,14 @@ REVERIFY = (
     "(1) BatchGenerator: `_unprocessed_sequences` entries are still (uid, "
     "segments, max_tokens, cache, all_tokens, sampler, procs, stop slot) "
     "-- the stop slot carries knurlogic's own control machine "
-    "(engine/runtime/control.py) --, insert_segments/extract_cache/remove/"
+    "(engine/runtime/control_tokens.py) --, insert_segments/extract_cache/remove/"
     "close keep their contracts, `_counters` keeps its fields, and "
     "PromptProcessingBatch/GenerationBatch.Response keep their fields; "
     "(2) LRUPromptCache: fetch_nearest_cache/insert_cache/trim_to and "
     "`_lru._lrus` (engine/vision/cachehook.py), and non-int hashable tokens "
     "(tests/test_vision_key.py runs the real one); (3) TokenizerWrapper's "
     "think/tool fields (engine/runtime/request.py) and _infer_tool_parser's "
-    "signature (engine/serve/load.tool_support); "
+    "signature (engine/model/load.tool_support); "
     "(4) the full suite and tests/api on a served model. Then update "
     "pyproject.toml's dependency pins and [tool.knurlogic.pins] together.")
 

@@ -4,8 +4,8 @@ Knurlogic is one Python package, `src/knurlogic/`, in six parts.
 
 | package | what it does |
 |---|---|
-| `engine/` | Runs models. The only place that imports mlx: model families and architectures, the batch scheduler, prompt cache, KV cache, MTP drafting, vision, the VQ runtime, the serve loop inside one process. |
-| `interfaces/` | How people and agents reach it. The CLI, the HTTP API (`http/`), the web page (`page/`), the MCP server, model loading and `doctor`. The only place that opens an HTTP server. |
+| `engine/` | Runs models. The only place that imports mlx: the served model (`model/`), the server's engine half (`runtime/`: model host, batch scheduler), one model across ranks (`split/`), model families and architectures, prompt cache, KV cache, MTP drafting, vision. |
+| `interfaces/` | How people and agents reach it. The CLI, the HTTP API (`http/`), the web page (`page/`), the MCP server (`mcp/`), the checks before a load (`load_checks.py`) and `doctor`. The only place that opens an HTTP server. |
 | `machine/` | Facts about this Mac and what runs on it: memory (`machine/memory/`: the wired limit, the allowance, where memory went, pressure), installed models and artifacts, running servers, the load lock. No mlx, and it does not import `tuning/`. |
 | `tuning/` | Every setting, in one package: the measured constants, the knob registry, the presets, the checks that refuse a value or a launch, which knobs apply live, the memory fit, the split arithmetic, the saved knurlogic-wide settings and strategy, and `resolve()`, which returns the final value of every knob with the measurement behind it. See [builders/settings](builders/settings.md). |
 | `cluster/` | Several Macs as one: finding peers, link checks, launching one job across machines, watching its ranks, recovering after a failure. |

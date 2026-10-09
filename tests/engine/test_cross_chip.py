@@ -71,8 +71,8 @@ def test_install_is_idempotent(qm):
 
 
 def test_the_host_installs_it_only_when_on(qm, monkeypatch):
-    from knurlogic.engine.runtime.host import ModelHost
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.model import state
+    from knurlogic.engine.runtime.model_host import ModelHost
     monkeypatch.setattr(crosschip, "install", lambda: True)
     monkeypatch.setattr(crosschip, "installed", lambda: True)
     ModelHost(cross_chip=crosschip.resolve("auto", [M3, M4]))._cross_chip()

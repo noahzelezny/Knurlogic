@@ -177,7 +177,7 @@ def test_no_serve_module_imports_a_sibling_the_package_shadows():
     import types
     from pathlib import Path
 
-    import knurlogic.engine.serve as pkg
+    import knurlogic.engine.model as pkg
     for f in Path(pkg.__file__).parent.glob("*.py"):
         for node in ast.walk(ast.parse(f.read_text())):
             if isinstance(node, ast.ImportFrom) and node.level == 1 \

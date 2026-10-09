@@ -27,7 +27,7 @@ def publish_ranks(rows) -> list:
     """Every rank's memory as of this exchange, for rank 0's /status.json
     (`ranks`): a follower serves no status of its own, so this is the one
     place a pipeline stage's memory is visible from outside."""
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.model import state
     ranks = [{"rank": i, "active_bytes": int(r[P.ACTIVE]),
               "peak_bytes": int(r[P.PEAK]),
               "over_limit_bytes": int(r[P.OVER])}

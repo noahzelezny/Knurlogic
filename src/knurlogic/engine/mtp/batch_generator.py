@@ -27,7 +27,7 @@ from mlx_lm.generate import BatchGenerator, GenerationBatch, PromptProcessingBat
 from mlx_lm.models.cache import make_prompt_cache
 
 from knurlogic.engine.prompt_cache import report as cachereport
-from knurlogic.engine.runtime.control import stop_machine
+from knurlogic.engine.runtime.control_tokens import stop_machine
 
 from ..vision import key as K
 from .batch_loop import ForwardFailed, MTPBatch, RowParams, admit
@@ -52,7 +52,7 @@ class PrefillCancelled(RuntimeError):
 @dataclass
 class TokenResponse(GenerationBatch.Response):
     """mlx-lm's per-token response plus the control machine's reading of
-    the token (runtime/control.py): the state it left the row in and the
+    the token (runtime/control_tokens.py): the state it left the row in and the
     marker sequence it completed. mlx-lm 0.32's Response dropped both when
     its generator stopped tracking state; request.py needs them."""
     current_state: str | None = None
@@ -595,7 +595,7 @@ class MTPBatchGenerator(BatchGenerator):
                         reports=None, control=None):
         """`reports`: one object per row to receive its cache report (the
         executor passes them; engine/prompt_cache/report.attach).
-        `control`: one runtime/control.ControlMachine per row (None: the
+        `control`: one runtime/control_tokens.ControlMachine per row (None: the
         generator's stop tokens). It rides in the queue entry's last slot,
         which mlx-lm names stop_sequences: this generator never hands rows
         to mlx-lm's GenerationBatch, so the slot is only read back here."""

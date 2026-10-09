@@ -267,7 +267,7 @@ def apply_live(env: dict) -> dict:
             except (ValueError, TypeError, AttributeError, RuntimeError, OSError) as e:
                 done[k] = f"failed: {e}"
         elif k == "KNURLOGIC_THINKING_DEFAULT":
-            # engine/serve/thinking reads it at every request
+            # engine/model/thinking reads it at every request
             from knurlogic.tuning.knobs import thinking_default_of
             try:
                 v = thinking_default_of(v)

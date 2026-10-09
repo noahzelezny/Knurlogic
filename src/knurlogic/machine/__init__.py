@@ -7,6 +7,13 @@
                 one number every fit / settings / load answer is computed
                 against), the allowance, where memory went, pressure
   status.py     the snapshot /status.json serves
+  servers.py    the record of knurlogic servers running on this box
+  loadlock.py   the model-load lock: one real load at a time
+  identity.py   which machine this is (an id that survives renames)
+  folders.py    the model folders this Mac remembers
+  metrics.py    how hard this machine is working (GPU, CPU, swap)
+  ledger.py     the request ledger: one row per served request
+  disk_cache.py a small JSON cache of work whose inputs have not changed
   deps.py       which build of mlx, mlx-lm and mlx-vlm is installed, read off
                 the fix itself rather than a version string
 

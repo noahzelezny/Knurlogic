@@ -7,7 +7,7 @@ from __future__ import annotations
 from . import state
 
 #: what /status.json says, and an image request's 400, when a launch set
-#: KNURLOGIC_VISION=off (runtime/host.py binds no vision with it)
+#: KNURLOGIC_VISION=off (runtime/model_host.py binds no vision with it)
 VISION_OFF = ("vision is off for this launch (KNURLOGIC_VISION=off); "
               "relaunch with vision on to send images")
 
