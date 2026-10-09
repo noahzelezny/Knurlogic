@@ -4,9 +4,11 @@ mlx-lm's qwen3_coder parser reads `<parameter=NAME>VALUE</parameter>` and
 nothing else: a call whose model left out a `</parameter>` (ending the value
 at the next `<parameter=` or at `</function>`), or wrote its arguments as a
 JSON object inside `<function=...>`, comes back with `arguments: {}` and no
-error. Qwen3.6 does both late in long agent conversations, and an agent then
-calls a tool with nothing in it. `recover` reads those two forms back from the
-call's text; a call that still has no arguments while its tool requires some
+error. Qwen3.6 does both late in long agent conversations, and writes a
+bare value with no `<parameter=NAME>` opener at all (seen 2026-10-09); an
+agent then calls a tool with nothing in it. `recover` reads all three back
+from the call's text (a bare value goes to the tool's only parameter, when
+it has exactly one); a call that still has no arguments while its tool requires some
 is logged with the text, so the next form shows up instead of an empty call.
 No mlx here (request.py's rule).
 """
@@ -61,6 +63,14 @@ def recover(text: str, call: dict, tools) -> dict:
                 got = obj if isinstance(obj, dict) else {}
             except ValueError:
                 got = {}
+    if not got:
+        # a bare value with no <parameter=...> opener ("<function=answer>
+        # engine/x.py </parameter>"): it is the tool's only parameter's
+        names = list(props) or list(schema.get("required") or [])
+        body = text.split(f"<function={name}>", 1)[-1]
+        bare = re.sub(r"</?(parameter|function)[^>]*>", "", body).strip()
+        if len(names) == 1 and bare and "<" not in bare:
+            got = {names[0]: _value(bare, props.get(names[0], {}))}
     if got:
         return {**call, "arguments": got}
     if schema.get("required"):
