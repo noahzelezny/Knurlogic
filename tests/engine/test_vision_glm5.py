@@ -372,17 +372,16 @@ def test_an_image_is_framed_as_the_makers_template_frames_it():
 
 GLM_TEMPLATE = Path(__file__).resolve().parents[1] / "support" / "glm5_template"
 #: tokenizer.json (20 MB) is not copied into the repo: read from the BF16
-#: source checkpoint when this machine has it
-GLM_SOURCE = Path("/Volumes/Models/Teacher Models/"
-                  "zai-org--GLM-5.3-Flash-BF16")
+#: source checkpoint named by KNURLOGIC_GLM5_SOURCE
 
 
 def _glm_tokenizer():
     import json
     import os
-    src = Path(os.environ.get("KNURLOGIC_GLM5_SOURCE", GLM_SOURCE))
+    src = Path(os.environ.get("KNURLOGIC_GLM5_SOURCE") or "/nonexistent")
     if not (src / "tokenizer.json").is_file():
-        pytest.skip(f"GLM-5.3-Flash's tokenizer.json is not at {src}")
+        pytest.skip("set KNURLOGIC_GLM5_SOURCE to the GLM-5.3-Flash BF16 "
+                    "checkpoint (needs its tokenizer.json)")
     transformers = pytest.importorskip("transformers")
     cfg = json.loads((GLM_TEMPLATE / "tokenizer_config.json").read_text())
     tok = transformers.PreTrainedTokenizerFast(

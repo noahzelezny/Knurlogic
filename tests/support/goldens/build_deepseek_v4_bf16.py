@@ -37,7 +37,7 @@ tests' tolerances are read against.
 
     # the end-to-end checkpoint (FP8 values need mlx): anywhere, it is
     # not kept -- the test writes the same one and checks its sha256
-    PYTHONPATH=src ~/venv/bin/python \\
+    PYTHONPATH=src path/to/your/venv/bin/python \\
         tests/support/goldens/build_deepseek_v4_bf16.py weights "$HF"
     REF=".../deepseek-ai--DeepSeek-V4-Flash-Vision-Exp"
     $TORCH_PYTHON tests/support/goldens/build_deepseek_v4_bf16.py \\

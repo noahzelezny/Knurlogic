@@ -13,15 +13,14 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-ART = Path(os.environ.get(
-    "KNURLOGIC_DSV4_VISION",
-    "/Volumes/Models/Models/"
-    "deepseek-ai--DeepSeek-V4-Flash-Vision-Exp-mlx-vision"))
+#: the converted Vision-Exp artifact's folder
+ART = Path(os.environ.get("KNURLOGIC_DSV4_VISION") or "/nonexistent")
 FIX = ROOT / "tests/support/fixtures_deepseek_v4_vision"
 IMAGE_ID = 129264       # <｜deepseek_image｜>
 
 pytestmark = pytest.mark.skipif(not (ART / "tokenizer.json").is_file(),
-                                reason="no Vision-Exp artifact here")
+                                reason="set KNURLOGIC_DSV4_VISION to the "
+                                "converted Vision-Exp artifact")
 
 
 def _encoder():

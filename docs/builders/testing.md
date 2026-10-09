@@ -61,7 +61,17 @@ Every test, automatically:
 
 - A test that needs real weights, a second Mac, Bonjour or a Thunderbolt
   link skips itself (`pytest.mark.skipif` on the file or path it needs;
-  some name the variable to set, e.g. `KNURLOGIC_TEST_DEEPSEEK_V4_HEAD` and `KNURLOGIC_TEST_DEEPSEEK_V4_VQ_HEAD`).
+  real-model paths come only from these variables; unset, the test skips
+  and names the variable):
+
+  | Variable | Points at | Tests |
+  |---|---|---|
+  | `KNURLOGIC_TEST_DEEPSEEK_V4_HEAD` | the DeepSeek-V4-Flash VQ build's folder (MTP head, bundled `model.py`) | `tests/engine/test_deepseek_v4_mtp.py` |
+  | `KNURLOGIC_TEST_DEEPSEEK_V4_VQ_HEAD` | a VQ-expert MTP head `.safetensors` file | `tests/engine/test_deepseek_v4_mtp.py` |
+  | `KNURLOGIC_TEST_DSPARK_SIDECAR` | a DSpark sidecar packed from the real checkpoint | `tests/engine/test_deepseek_v4_dspark.py` |
+  | `KNURLOGIC_TEST_DEEPSEEK_V4_VISION` | the DeepSeek-V4-Flash-Vision-Exp checkpoint folder (HF layout) | `tests/engine/test_vision_deepseek.py`, `tests/engine/test_deepseek_v4_dspark.py` |
+  | `KNURLOGIC_DSV4_VISION` | the converted Vision-Exp MLX artifact's folder | `tests/engine/test_vision_deepseek_tokens.py` |
+  | `KNURLOGIC_GLM5_SOURCE` | the GLM-5.3-Flash BF16 checkpoint (its `tokenizer.json`) | `tests/engine/test_vision_glm5.py` |
 - Real-model gates are scripts in `tools/` (`vision_gate.py`), run by
   hand, one artifact at a time, behind the load lock. Never call them from
   `tests/`.
