@@ -41,7 +41,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "pytest-xdist", "ruff", "mypy"]
 
 [project.scripts]
 knurlogic = "knurlogic.interfaces.cli:main"

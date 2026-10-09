@@ -66,7 +66,7 @@ ADDING A FAMILY, the whole checklist:
   4. heads/ if it ships an MTP head: the head class, and a `head` entry in
      the manifest (capture point, cache semantics MEASURED with
      mtp.caches.check_snapshot_semantics).
-  5. tests/test_families.py runs over every listed family; the real-model
+  5. tests/engine/test_families.py runs over every listed family; the real-model
      gate is tools/vision_gate.py.
 
 Where a family quirk lives: code quirks in the family's own code;
