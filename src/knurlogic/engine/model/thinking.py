@@ -26,7 +26,7 @@ from . import state
 LADDER = ("none", "minimal", "low", "medium", "high", "xhigh")
 #: the level a request that names none is served at (a per-model setting,
 #: live); unset or "model": the template's own default. GLM-5.3's is max,
-#: and with the harness's effort control broken every long conversation thought
+#: and with a client's effort control broken every long conversation thought
 #: for hours without committing to an answer.
 DEFAULT_ENV = "KNURLOGIC_THINKING_DEFAULT"
 
