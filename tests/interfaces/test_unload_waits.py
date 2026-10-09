@@ -22,7 +22,7 @@ def _setup(monkeypatch, proc):
     monkeypatch.setattr(spawn, "is_our_server", lambda pid: True)
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
     monkeypatch.setattr(spawn.time, "sleep", lambda s: None)
-    monkeypatch.setitem(spawn._CHILDREN, 8080, (proc,))
+    monkeypatch.setitem(spawn.CHILDREN, 8080, (proc,))
     return reg
 
 
@@ -41,4 +41,4 @@ def test_unload_reports_still_exiting_instead_of_hanging(monkeypatch):
     out = spawn.stop(8080)
     assert out["exiting"] == [4242] and "still exiting" in out["note"]
     assert 8080 in reg
-    spawn._CHILDREN.pop(8080, None)
+    spawn.CHILDREN.pop(8080, None)

@@ -483,8 +483,8 @@ def test_rank_env_sets_the_timeout_to_zero_for_the_load_only_with_the_fork():
 
 def test_a_ring_failure_is_a_503():
     from knurlogic.engine.runtime.scheduler import RingFailed
-    from knurlogic.interfaces.http.openai import _status_of
-    e = _status_of(RingFailed("a rank exited"))
+    from knurlogic.interfaces.http.openai import status_of
+    e = status_of(RingFailed("a rank exited"))
     assert e.status == 503 and e.body()["error"]["code"] == "cluster_failed"
 
 
@@ -718,7 +718,7 @@ def test_every_rank_syncs_the_gpu_fast():
 
 
 class _Capture:
-    """Just enough of a request handler for page_router._send_json."""
+    """Just enough of a request handler for page_router.send_json."""
 
     def __init__(self):
         import io
@@ -743,14 +743,14 @@ def test_a_dead_rank_0_is_a_503_cluster_failed_with_the_reason(two_pages):
     assert wait(lambda: not alive(p.rank0["pid"]), 5)
     base = f"http://127.0.0.1:{p.port}"
     h = _Capture()
-    page_router._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_router.stream(h, base + "/v1/chat/completions", b"{}", base=base)
     assert h.code == 503, h.doc()
     err = h.doc()["error"]
     assert err["code"] == "cluster_failed" and err["type"] == "server_error"
     assert "rank 0 on A " in err["message"] and "exited" in err["message"]
     # and once the job is stopped, still that reason (not a 502)
     h = _Capture()
-    page_router._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_router.stream(h, base + "/v1/chat/completions", b"{}", base=base)
     assert h.code == 503 and "rank 0 on A " in h.doc()["error"]["message"]
 
 
@@ -758,7 +758,7 @@ def test_an_unreachable_server_that_is_no_job_is_still_a_502(cache):
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     h = _Capture()
-    page_router._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_router.stream(h, base + "/v1/chat/completions", b"{}", base=base)
     assert h.code == 502
 
 
@@ -766,21 +766,21 @@ def test_a_peers_dead_rank_0_is_a_503_with_the_peers_stop_reason(
         monkeypatch):
     base = "http://192.0.2.2:8080"
     dead = f"http://127.0.0.1:{free_port()}"
-    monkeypatch.setitem(page_peers._PEER_TARGETS, base, {
+    monkeypatch.setitem(page_peers.PEER_TARGETS, base, {
         "machine": "M4", "relay": dead, "job": "ab12cd34ef567890"})
 
     def survey():
-        page_peers._PEER_JOBS["ab12cd34ef567890"] = {
+        page_peers.PEER_JOBS["ab12cd34ef567890"] = {
             "job": "ab12cd34ef567890", "phase": "stopped",
             "reason": "rank 0 on M4 (pid 7) exited"}
     monkeypatch.setattr(page_router, "refresh_targets", survey)
     h = _Capture()
-    page_router._stream(h, page_peers.upstream(base, "/v1/chat/completions"), b"{}",
+    page_router.stream(h, page_peers.upstream(base, "/v1/chat/completions"), b"{}",
                base=base)
     assert h.code == 503
     assert h.doc()["error"]["code"] == "cluster_failed"
     assert "rank 0 on M4 (pid 7) exited" in h.doc()["error"]["message"]
-    page_peers._PEER_JOBS.clear()
+    page_peers.PEER_JOBS.clear()
 
 
 def _sse_upstream(events, done):
@@ -823,7 +823,7 @@ def test_a_rank_0_dying_mid_stream_ends_the_stream_with_cluster_failed(
                         lambda b: asked.append(b) or "rank 1 on B exited")
     base = _sse_upstream([b'{"x": 1}'], done)
     h = _Capture()
-    page_router._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_router.stream(h, base + "/v1/chat/completions", b"{}", base=base)
     out = h.wfile.getvalue().decode()
     assert h.code == 200 and out.startswith('data: {"x": 1}')
     if done:
@@ -845,7 +845,7 @@ def test_a_relayed_cluster_failed_is_not_said_twice(monkeypatch):
     relayed = json.dumps(page_router.cluster_failed("rank 0 on A exited")).encode()
     base = _sse_upstream([b'{"x": 1}', relayed], False)
     h = _Capture()
-    page_router._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_router.stream(h, base + "/v1/chat/completions", b"{}", base=base)
     out = h.wfile.getvalue().decode()
     assert out.count("cluster_failed") == 1
     assert "rank 0 on A exited" in out and "rank 1 on B" not in out
@@ -855,7 +855,7 @@ def test_a_cut_stream_that_is_no_cluster_job_just_ends(monkeypatch):
     monkeypatch.setattr(page_router, "cluster_failure", lambda b: "")
     base = _sse_upstream([b'{"x": 1}'], False)
     h = _Capture()
-    page_router._stream(h, base + "/v1/chat/completions", b"{}", base=base)
+    page_router.stream(h, base + "/v1/chat/completions", b"{}", base=base)
     assert h.wfile.getvalue() == b'data: {"x": 1}\n\n'
 
 

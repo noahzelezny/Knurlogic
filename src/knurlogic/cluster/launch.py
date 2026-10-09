@@ -1083,7 +1083,7 @@ def rank_env(spec: dict, files: dict, selfheal: bool) -> dict:
     return env
 
 
-def _exiting(reg: dict) -> dict:
+def exiting(reg: dict) -> dict:
     """{pid: job} of the ranks here that were stopped and are not gone."""
     return {int(r["pid"]): str(r.get("job") or "") for r in reg.values()
             if r.get("stopping")}
@@ -1179,7 +1179,7 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
     spec, path = prep["spec"], prep["path"]
     from knurlogic.machine import identity
     me = identity.identity().get("name") or "this machine"
-    going = _exiting(J.registry())
+    going = exiting(J.registry())
     left = J.wait_gone(list(going), wait_s,
                        alive=lambda p: _alive(going[p], p)) if going else []
     if left:
@@ -1709,7 +1709,7 @@ def refresh_memory(infos: list, post, wait_s: float = EXIT_WAIT_S,
         busy = False
         for m in infos:
             if m.get("page") is None:
-                av, going = available_now(), len(_exiting(J.registry()))
+                av, going = available_now(), len(exiting(J.registry()))
             else:
                 try:
                     doc = post(m["page"], "Survey", {})
@@ -2115,7 +2115,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                     f"poll /loaded.json"}
 
 
-def _job_end(job: str, order: list, post):
+def job_end(job: str, order: list, post):
     """None while `job` runs (or loads) on every page, else why it ended:
     this page's record, or a page of the job saying it ended there."""
     e = ENDED.get(job)
@@ -2176,7 +2176,7 @@ def _follow(job: str, ctx: dict, clock=time.time, sleep=time.sleep):
         end = clock() + FAILOVER_S
         while clock() < end:
             sleep(FAILOVER_POLL_S)
-            why = _job_end(job, ctx["order"], ctx["post"])
+            why = job_end(job, ctx["order"], ctx["post"])
             if why is not None:
                 return failover(job, ctx, why)
             recs = J.by_job().get(job)

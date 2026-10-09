@@ -235,9 +235,9 @@ def test_mcp_fit_with_vision_off(tmp_path, monkeypatch):
 def test_the_picked_models_preview_carries_the_part_sizes(tmp_path):
     from knurlogic.interfaces.page import documents
     d = _with_head(_rung(tmp_path / "v"), 3 << 20)
-    p = documents._preview(str(d), "default", 64)
+    p = documents.preview(str(d), "default", 64)
     assert (p["mtp_bytes"], p["vision_bytes"]) == (3 << 20, _freed())
-    t = documents._preview(str(_rung(tmp_path / "t", vision=False)),
+    t = documents.preview(str(_rung(tmp_path / "t", vision=False)),
                            "default", 64)
     assert (t["mtp_bytes"], t["vision_bytes"]) == (0, 0)
 
@@ -325,7 +325,7 @@ def test_the_picked_models_preview_carries_its_tensor_bytes(tmp_path):
     # the picker fits a tensor split from the picked model's preview (the
     # listing loads no artifact, so it no longer carries them)
     from knurlogic.interfaces.page import documents
-    t = documents._preview(str(_with_head(_rung(tmp_path / "t"), 3 << 20)),
+    t = documents.preview(str(_with_head(_rung(tmp_path / "t"), 3 << 20)),
                            "default", 64)
     tb = t["tensor_bytes"]
     assert {"sharded", "replicated", "head", "tower"} <= set(tb)
@@ -367,5 +367,5 @@ def test_the_previews_room_is_what_this_machine_has_free_now(tmp_path,
         lambda: {"bytes": free, "working_set_bytes": ws,
                  "available_bytes": free, "allowance_bytes": 0,
                  "limited_by": "memory available now"})
-    p = documents._preview(str(_rung(tmp_path / "r")), "default")
+    p = documents.preview(str(_rung(tmp_path / "r")), "default")
     assert p["room"]["working_set_bytes"] == free

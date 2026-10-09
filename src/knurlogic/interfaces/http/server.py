@@ -226,8 +226,8 @@ class App(CompactingChat):
         """The context a request may use: the server's cap
         (KNURLOGIC_CONTEXT_LENGTH) else the model's own window; 0 when
         neither is known."""
-        from knurlogic.engine.runtime.scheduler import _context_cap
-        cap = _context_cap()
+        from knurlogic.engine.runtime.scheduler import context_cap
+        cap = context_cap()
         if cap:
             return cap
         path = getattr(self.scheduler.host, "path", None)
@@ -266,7 +266,7 @@ class App(CompactingChat):
 QUEUED_KEEPALIVE_S = 5.0
 
 
-def _queued(job, reply, sched=None):
+def queued(job, reply, sched=None):
     """SSE for a streamed request still waiting for its first event: a
     keepalive comment every QUEUED_KEEPALIVE_S until it starts (and, when
     its stream carries them, a knurlogic.progress "queue" event with the
@@ -295,7 +295,7 @@ def _queued(job, reply, sched=None):
             except queue.Empty:
                 waited += tick
         if first[0] == "error":
-            yield O._data(O._status_of(first[1]).body())
+            yield O.sse_data(O.status_of(first[1]).body())
             yield b"data: [DONE]\n\n"
             return
         yield from reply.events(first)
@@ -604,7 +604,7 @@ class Handler(PromptCacheHandlers, T.TelemetryHandlers,
             return self._error(e)
         first = reply.first()
         if first[0] == "error":
-            return self._error(O._status_of(first[1]))
+            return self._error(O.status_of(first[1]))
         if not reply.ctx["stream"]:
             try:
                 out = reply.complete(first)

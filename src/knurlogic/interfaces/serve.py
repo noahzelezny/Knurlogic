@@ -559,7 +559,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             if "applied" in done.get(k, "") or "set for" in done.get(k, ""):
                 live_env[k] = v
         # on a ring the other ranks apply what took here (plan `set`)
-        sched = http._CURRENT.get("scheduler")
+        sched = http.CURRENT.get("scheduler")
         if sched is not None:
             sched.share_live({k: v for k, v in want.items()
                               if live_env.get(k) == v})

@@ -622,7 +622,7 @@ def index(d: Path) -> dict:
 
 # ----------------------------------------------- the prompt cache's side
 
-def _lru_entries(lru) -> list:
+def lru_entries(lru) -> list:
     """(model, tokens, CacheEntry) of an mlx-lm LRUPromptCache, in the
     order its per-type queues hold them (least recent first within a
     type)."""
@@ -672,7 +672,7 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
     have = {h: f for _, _, h, f in entries(d)}
     gen = max((g for g, _, _, _ in entries(d)), default=0) + 1
     seq = 0
-    for _m, tokens, e in _lru_entries(lru):
+    for _m, tokens, e in lru_entries(lru):
         own = owners.get(tuple(tokens)) if owners is not None else None
         common = shared is not None and tuple(tokens) in shared
         if owners is not None and not (own and own.get("session")) \

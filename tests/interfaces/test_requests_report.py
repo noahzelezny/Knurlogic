@@ -107,19 +107,19 @@ def test_mcp_state_lists_requests_per_model(monkeypatch):
         {"name": "x", "where": "http://127.0.0.1:11434", "requests": None}],
         "runtimes": ["knurlogic"], "memory": {}})
     monkeypatch.setattr(spawn, "children", lambda: [])
-    monkeypatch.setattr(page_client, "_me_name", lambda: "here")
+    monkeypatch.setattr(page_client, "me_name", lambda: "here")
     st = mcp.state()           # no page (conftest): this Mac's survey
     assert st["requests"] == [dict(req, model="m", machine="here",
                                    where="http://127.0.0.1:9")]
 
 
 def test_the_503s_say_when_to_retry():
-    from knurlogic.interfaces.http.openai import _status_of
-    assert _status_of(OutOfMemory("x")).retry_after == 10
-    assert _status_of(RingFailed("x")).retry_after == 30
-    e = _status_of(RuntimeError("no model to serve: gone"))
+    from knurlogic.interfaces.http.openai import status_of
+    assert status_of(OutOfMemory("x")).retry_after == 10
+    assert status_of(RingFailed("x")).retry_after == 30
+    e = status_of(RuntimeError("no model to serve: gone"))
     assert e.status == 503 and e.retry_after == 5
-    assert _status_of(ValueError("bad")).retry_after is None
+    assert status_of(ValueError("bad")).retry_after is None
 
 
 def test_messages_refusal_sends_retry_after():

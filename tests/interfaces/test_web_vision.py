@@ -131,11 +131,11 @@ def test_models_document_says_why_a_conversion_has_no_vision(monkeypatch,
 
 
 def _reset_loaded_cache():
-    """`web._LOADED` is a module-level TTL cache (deliberately, so a status
+    """`web.LOADED` is a module-level TTL cache (deliberately, so a status
     poll is free) -- a test that does not clear it sees the PREVIOUS test's
     served-vision answer, not the one it just set up."""
-    documents._LOADED["doc"] = None
-    documents._LOADED["at"] = 0.0
+    documents.LOADED["doc"] = None
+    documents.LOADED["at"] = 0.0
 
 
 def test_loaded_document_carries_served_vision_spec(monkeypatch):

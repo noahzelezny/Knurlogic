@@ -2,7 +2,7 @@
 on peers. POST /v1/messages, /v1/chat/completions and count_tokens by
 `model` (`route`), the page's chat (`proxy_chat`), GET /v1/models
 (`route_models_document`), and the streaming that carries the answer back
-(`_stream`, with a cluster job's failure said in its words)."""
+(`stream`, with a cluster job's failure said in its words)."""
 
 from __future__ import annotations
 
@@ -51,11 +51,11 @@ def chat_targets() -> set:
             out.add(f"http://127.0.0.1:{port}")
     # and knurlogic servers a peer reported in its own residency: machines
     # this page already polls, never an address taken from the request
-    out.update(peers._PEER_TARGETS)
+    out.update(peers.PEER_TARGETS)
     return out
 
 
-def _send_json(handler, code: int, doc) -> None:
+def send_json(handler, code: int, doc) -> None:
     from knurlogic.interfaces.http import telemetry as T
     out = json.dumps(doc).encode()
     handler.send_response(code)
@@ -77,13 +77,13 @@ def cluster_failure(base: str) -> str:
     when it is not one. A peer's job is looked up in a fresh survey (its
     page reports the jobs that ended, with why); this machine's by port."""
     base = (base or "").rstrip("/")
-    t = peers._PEER_TARGETS.get(base)
+    t = peers.PEER_TARGETS.get(base)
     if t is not None:
         job = t.get("job")
         if not job:
             return ""
         refresh_targets()
-        e = peers._PEER_JOBS.get(job) or {}
+        e = peers.PEER_JOBS.get(job) or {}
         if e.get("phase") == "stopped" and e.get("reason"):
             return e["reason"]
         return (f"rank 0 of cluster job {job} on {t.get('machine')} "
@@ -97,14 +97,14 @@ def cluster_failure(base: str) -> str:
 
 def cluster_failed(reason: str) -> dict:
     """The OpenAI-style error a rank 0 answers with when its ring fails
-    (http/openai.py _status_of), for a job that could not answer at all."""
+    (http/openai.py status_of), for a job that could not answer at all."""
     return {"error": {"message": f"this model is split across machines and "
                                  f"its cluster job failed: {reason}",
                       "type": "server_error", "param": None,
                       "code": "cluster_failed"}}
 
 
-def _stream(handler, url: str, body: bytes, timeout: float = 3600,
+def stream(handler, url: str, body: bytes, timeout: float = 3600,
             base: str = "") -> None:
     """POST `body` to `url` and pass the answer back as it arrives, byte for
     byte: SSE, prefill keepalives and all. The upstream's status and
@@ -133,9 +133,9 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
     except (OSError, ValueError, http.client.HTTPException) as e:
         why = cluster_failure(base) if base else ""
         if why:
-            _send_json(handler, 503, cluster_failed(why))
+            send_json(handler, 503, cluster_failed(why))
         else:
-            _send_json(handler, 502, {"error": f"{type(e).__name__}: {e}"})
+            send_json(handler, 502, {"error": f"{type(e).__name__}: {e}"})
         return
     handler.send_response(code)
     handler.send_header("Content-Type", ctype)
@@ -195,7 +195,7 @@ def _client_headers(handler) -> dict:
             if isinstance(h.get(k), str) and h.get(k)}
 
 
-def _send_up(url: str, method: str, body: bytes | None):
+def send_up(url: str, method: str, body: bytes | None):
     """(status, JSON doc) of one request to a model server."""
     import urllib.error
     import urllib.request
@@ -223,10 +223,10 @@ def proxy_chat(handler, where: str, body: bytes) -> None:
     will not let a page on this port call another port directly."""
     base = (where or "").rstrip("/")
     if not known_target(base):
-        _send_json(handler, 403, {"error": f"not a running model this page "
+        send_json(handler, 403, {"error": f"not a running model this page "
                                            f"knows: {base or '(none)'}"})
         return
-    _stream(handler, peers.upstream(base, "/v1/chat/completions"), body,
+    stream(handler, peers.upstream(base, "/v1/chat/completions"), body,
             base=base)
 
 
@@ -266,7 +266,7 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
         # the page's own polling refreshes what peers serve, but a client
         # (Claude Code) may call before anyone has opened the page: the
         # router then saw only this machine
-        if nodes.PEERS is not None and now - peers._PEER_AT[0] > PEER_SURVEY_MAX_AGE_S:
+        if nodes.PEERS is not None and now - peers.PEER_AT[0] > PEER_SURVEY_MAX_AGE_S:
             try:
                 peers.peer_residency(nodes.PEERS)
             except Exception:  # peer survey (logged)
@@ -307,7 +307,7 @@ def route_models_document(fetch=None) -> dict:
     here = identity().get("name")
 
     def machine(b):
-        t = peers._PEER_TARGETS.get(b.rstrip("/"))
+        t = peers.PEER_TARGETS.get(b.rstrip("/"))
         return (t or {}).get("machine") if t is not None else here
     return {"object": "list", "data": [
         dict(docs.get(m) or {}, id=m, object="model", owned_by="knurlogic",
@@ -337,14 +337,14 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
         base = table.get(model) if isinstance(model, str) else None
     if base is None:
         # say it in the shape either client reads as an error
-        _send_json(handler, 404, {
+        send_json(handler, 404, {
             "type": "error",
             "error": {"type": "not_found_error",
                       "message": f"no running model {model!r}; running: "
                                  f"{', '.join(sorted(table)) or 'none'}"},
             "models": sorted(table)})
         return
-    _stream(handler, peers.upstream(base, path), body, base=base)
+    stream(handler, peers.upstream(base, path), body, base=base)
 
 
 def local_models(fetch=None, docs=None) -> dict:
@@ -385,7 +385,7 @@ def local_models(fetch=None, docs=None) -> dict:
     return dict(found)
 
 
-def _resolve(table: dict, model):
+def resolve(table: dict, model):
     """The base serving `model`: by exact id, else by its last path part
     (a page may name a model by its folder). Absent, and only one model is
     running, that one."""

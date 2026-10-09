@@ -75,7 +75,7 @@ def test_a_peers_model_goes_through_its_pages_relay(monkeypatch):
     """a coordinator session runs on the M4: the M3's page sends its cache calls to
     the M4 page's relay, like a chat, which resolves the name there."""
     far = "http://192.0.2.2:8081"
-    monkeypatch.setitem(page_peers._PEER_TARGETS, far,
+    monkeypatch.setitem(page_peers.PEER_TARGETS, far,
                         {"relay": "http://192.0.2.2:8899",
                          "machine": "Laptop B"})
     routed = {"qwen": "http://127.0.0.1:8080", "flash": far}
@@ -96,7 +96,7 @@ def _relay(monkeypatch, table, method, path, url_path, body=b""):
     monkeypatch.setattr(page_router, "local_models",
                         lambda fetch=None, docs=None: dict(table))
     sent = []
-    monkeypatch.setattr(page_router, "_send_up",
+    monkeypatch.setattr(page_router, "send_up",
                         lambda u, m, b: sent.append((u, m, b)) or (200, {}))
     h = _Handler()
     h.path = url_path

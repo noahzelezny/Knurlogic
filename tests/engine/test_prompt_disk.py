@@ -234,7 +234,7 @@ def test_a_restored_entry_serves_any_prompt_it_prefixes(tmp_path):
     from knurlogic.engine.prompt_cache.memory import PromptCache
     lru = _lru(1, length=30)
     D.save(lru, _key(), base=tmp_path)
-    (toks,) = [t for _, t, _ in D._lru_entries(lru)]
+    (toks,) = [t for _, t, _ in D.lru_entries(lru)]
     pc = PromptCache(10)
     got = D.restore(pc.lru, "m", _key(), base=tmp_path)
     assert list(got) == [tuple(toks)]

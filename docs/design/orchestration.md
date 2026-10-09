@@ -26,7 +26,7 @@ on loopback, Thunderbolt, or a `--peer` address) on every `/peer/*` route.
 | `POST /peer/cluster/prepare` | coordinator -> every rank page (and itself) | `SPEC_KEYS` spec: job, rank, world, split, link, identity, hosts, nodes, versions, port, auto_port, ... -> `{ok, machine, refused?, free_port?, alert?, note?}` | `launch()` `ask()` -> `prepare` |
 | `POST /peer/cluster/start` | coordinator -> every rank page | `{job}` -> `{started, rank, pid, log}` or `{error}` | `launch()` -> `start` |
 | `POST /peer/cluster/stop` | any rank page -> every other page of the job | `{job, reason}` -> stop result | `stop(propagate)`, `_abandon` -> `peer_route` |
-| `POST /peer/cluster/job` | any rank page -> every other page of the job | `{job}` -> `{ranks_here, prepared, stopping, phase, processes, ended}` | `_ask_job` (`peer_verdict`), `_job_end` -> `job_state` |
+| `POST /peer/cluster/job` | any rank page -> every other page of the job | `{job}` -> `{ranks_here, prepared, stopping, phase, processes, ended}` | `_ask_job` (`peer_verdict`), `job_end` -> `job_state` |
 | `POST /peer/cluster/shape` | coordinator -> peer | `{identity, name, world, split}` -> model shape | planner -> `shape_of` |
 | `GET /peek` | page -> peer | the page reads a peer's server state through `/peek` (page->peer read, same gate) | `peek` |
 | `POST /peer/machine.json` | page -> peer | `{allowance_gib?, strategy?}` | `/machine.json?where=` -> `peer_machine` |

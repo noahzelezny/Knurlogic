@@ -115,7 +115,7 @@ def prefill_chunk_by_room(artifact: Artifact, headroom, working_set_bytes: int,
         f"reserve, else the widest that does, floor {floor}")
 
 
-def _tower_bytes(artifact: Artifact) -> tuple:
+def tower_bytes(artifact: Artifact) -> tuple:
     """(tower bytes, bytes of them OUTSIDE what bytes_on_disk counted,
     tensors) from the safetensors headers -- read, never guessed.
     bytes_on_disk sums the artifact directory's top-level *.safetensors;
@@ -265,13 +265,13 @@ def rank_margin(working_set_bytes: int, reserve: dict | None = None) -> int:
         + int(reserve.get("kv_bytes") or 0)
 
 
-def _vision_off_tower(artifact: Artifact) -> int:
+def vision_off_tower(artifact: Artifact) -> int:
     """The tower bytes inside the artifact's size: what vision off takes
     out of the weights (the text load never reads them; `vision.bind`
     does). 0 for an artifact with no vision_config."""
     if vision_budget(artifact) is None:
         return 0
-    tower, outside, _ = _tower_bytes(artifact)
+    tower, outside, _ = tower_bytes(artifact)
     return max(int(tower) - int(outside), 0)
 
 
@@ -423,7 +423,7 @@ def vision_budget(artifact: Artifact, store_bytes: int | None = None,
         return None
     from knurlogic.engine.vision.store import DEFAULT_MAX_BYTES
 
-    tower, outside, n = _tower_bytes(artifact)
+    tower, outside, n = tower_bytes(artifact)
     live = store_bytes is not None
     store = int(store_bytes) if store_bytes is not None else DEFAULT_MAX_BYTES
     tc = cfg.get("text_config") or cfg

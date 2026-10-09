@@ -62,11 +62,11 @@ from .batch_loop import (
     Emitted,
     MTPBatch,
     RowStep,
-    _apply,
-    _finite_rows,
-    _key,
-    _mark,
-    _pick,
+    apply,
+    finite_rows,
+    mark,
+    pick,
+    row_key,
 )
 from .caches import release, rollback, snapshot
 from .sampling import rejection_correct
@@ -425,7 +425,7 @@ class BlockBatch(MTPBatch):
             for i in range(B):
                 p = self.params[i]
                 n = len(self.emitted[i])
-                row = _apply(rows[i:i + 1], p.processors,
+                row = apply(rows[i:i + 1], p.processors,
                              _hist(self.emitted[i],
                                    [self.t1[i:i + 1]]
                                    + [c[i:i + 1] for c in cols])
@@ -434,7 +434,7 @@ class BlockBatch(MTPBatch):
                     picks.append(mx.argmax(row, axis=-1))
                 else:
                     q = p.dist(row)
-                    picks.append(q.sample(_key(p, n + 1 + k)))
+                    picks.append(q.sample(row_key(p, n + 1 + k)))
                     qs[i][k] = q
             prev = mx.concatenate(picks).astype(mx.int32)
             cols.append(prev)
@@ -469,11 +469,11 @@ class BlockBatch(MTPBatch):
             n = len(em)
             ok_i, tt_i = [], []
             for k in range(K + 1):
-                row = _apply(lg[i:i + 1, k], p.processors,
+                row = apply(lg[i:i + 1, k], p.processors,
                              _hist(em, [self.t1[i:i + 1]]
                                    + [d[i:i + 1, j] for j in range(k)])
                              if p.processors else em)
-                key = _key(p, n + 1 + k)
+                key = row_key(p, n + 1 + k)
                 if k == K or not live[i]:
                     # the bonus row, or a row that does not draft: the
                     # trunk's own token
@@ -561,8 +561,8 @@ class BlockBatch(MTPBatch):
             h_c = self.get_h()
             self._prof("replay", h_c)
 
-        fin = mx.stack([_finite_rows(self.row_t1)]
-                       + [_finite_rows(lg[:, k]) for k in range(m)], axis=1)
+        fin = mx.stack([finite_rows(self.row_t1)]
+                       + [finite_rows(lg[:, k]) for k in range(m)], axis=1)
 
         # --- emit --------------------------------------------------------
         d_list = [r[:m] for r in d_all]
@@ -594,7 +594,7 @@ class BlockBatch(MTPBatch):
         self.filter(keep)
         if not keep:
             mx.eval(fin)
-            _mark(out, fin)
+            mark(out, fin)
             return out
         idx = mx.array(keep)
         t_next = mx.array([nxt[i] for i in keep], dtype=mx.int32)
@@ -606,7 +606,7 @@ class BlockBatch(MTPBatch):
             # a tensor follower: the replay's all_sums, as rank 0's head
             # cache runs them (its captured hidden state, mirror_hidden)
             mx.eval(t_next, fin, *([h_c] if h_c is not None else []))
-        _mark(out, fin)
+        mark(out, fin)
         self.t1 = t_next
         self.row_t1 = row_next[idx]
         return out
@@ -617,7 +617,7 @@ class BlockBatch(MTPBatch):
         B = len(self.uids)
         lg = self.model(self.t1[:, None], cache=self.cache,
                         **self._pos_kw(1))
-        fin = _finite_rows(self.row_t1)[:, None]
+        fin = finite_rows(self.row_t1)[:, None]
         t1_list = self.t1.tolist()
         out: list[RowStep] = []
         keep: list[int] = []
@@ -640,12 +640,12 @@ class BlockBatch(MTPBatch):
                 keep.append(i)
         row_t1 = lg[:, 0]
         h = self.get_h() if self.any_drafting else None
-        t_next_rows = [_pick(row_t1[i:i + 1], self.params[i], self.emitted[i])
+        t_next_rows = [pick(row_t1[i:i + 1], self.params[i], self.emitted[i])
                        for i in keep]
         self.filter(keep)
         if not keep:
             mx.eval(fin)
-            _mark(out, fin)
+            mark(out, fin)
             return out
         idx = mx.array(keep)
         t_next = mx.concatenate(t_next_rows).astype(mx.int32)
@@ -654,7 +654,7 @@ class BlockBatch(MTPBatch):
             self.head.advance(h[idx], self.hcache)
             want += self.hcache.state
         mx.eval(*want)
-        _mark(out, fin)
+        mark(out, fin)
         self.t1 = t_next
         self.row_t1 = row_t1[idx]
         return out

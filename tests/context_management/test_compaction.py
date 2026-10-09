@@ -40,7 +40,7 @@ def agent_history(n=4):
 
 def count(msgs, tools=None):
     """four characters a token, as a fake tokenizer"""
-    return sum(len(E._text(m.get("content")) or "") + 4 for m in msgs) // 4
+    return sum(len(E.content_text(m.get("content")) or "") + 4 for m in msgs) // 4
 
 
 # ------------------------------------------------------------ parsing

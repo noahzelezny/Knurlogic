@@ -432,7 +432,7 @@ def test_preview_reads_and_sets_nothing(tmp_path, monkeypatch):
     (d / "model.safetensors").write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")
 
     before = dict(os.environ)
-    doc = documents._preview(str(d), "default", 84)
+    doc = documents.preview(str(d), "default", 84)
     assert doc["preview"] is True
     assert doc["artifact"]["name"] == "m"
     assert {k["name"] for k in doc["knobs"]}          # it resolved something
@@ -453,7 +453,7 @@ def test_preview_says_which_knobs_are_launch_only(tmp_path):
         "moe_intermediate_size": 768,
         "vq_modules": {"a": {"d": 2, "K": 256}}}))
     (d / "model.safetensors").write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")
-    doc = documents._preview(str(d), "default", 84)
+    doc = documents.preview(str(d), "default", 84)
     reach = {k["name"]: k["reach"] for k in doc["knobs"]}
     assert any(v == "restart" for v in reach.values())
     assert all(k["reach_why"] for k in doc["knobs"])

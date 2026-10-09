@@ -300,4 +300,4 @@ def leader_bytes(artifact: Artifact, vision: bool = True,
             if f.name.startswith("mtp") or k.split(".")[0] == "mtp":
                 a, b = v.get("data_offsets", (0, 0))
                 total += int(b) - int(a)
-    return total + (fit._tower_bytes(artifact)[0] if vision else 0)
+    return total + (fit.tower_bytes(artifact)[0] if vision else 0)

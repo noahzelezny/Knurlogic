@@ -251,7 +251,7 @@ def memory_map(floor: int = 256 << 20) -> dict:
     # Each runtime's row is then its RESIDENT part, so the rows add up to
     # the machine from this one sample.
     from knurlogic.machine import metrics as _metrics
-    swap = _metrics._swap() or 0
+    swap = _metrics.swap() or 0
     foot_rt = dict(by_runtime)
     fp = sum(foot_rt.values())
     in_swap = min(swap, max(sum(foot.values()) - used, 0), fp) \

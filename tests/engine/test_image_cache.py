@@ -256,7 +256,7 @@ class Harness:
         from knurlogic.interfaces.http import openai as O
         first = reply.first(timeout=120)
         if first[0] == "error":
-            raise O._status_of(first[1])
+            raise O.status_of(first[1])
         return reply.complete(first)
 
     @property
@@ -272,7 +272,7 @@ class Harness:
             job, reply = self.app.submit(body, chat=True)
             first = reply.first(timeout=120)
             if first[0] == "error":
-                raise O._status_of(first[1])
+                raise O.status_of(first[1])
             out = reply.complete(first)
         except O.ApiError as e:
             return e.status, [], json.dumps(e.body()).encode()

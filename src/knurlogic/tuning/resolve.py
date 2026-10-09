@@ -210,7 +210,7 @@ def resolve(artifact: Artifact, budget, profile: str | None = None,
         holds = artifact.bytes_on_disk if holds_bytes is None \
             else int(holds_bytes)
         r = _resolve_one(artifact, int(budget),
-                         holds - (fit._vision_off_tower(artifact)
+                         holds - (fit.vision_off_tower(artifact)
                                   if not vision and holds_bytes is None
                                   else 0),
                          profile, tune, store_bytes=store_bytes,

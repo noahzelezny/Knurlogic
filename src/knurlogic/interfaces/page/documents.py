@@ -56,7 +56,7 @@ def asset_names() -> list:
     return sorted(n for n in names if asset(n) is not None)
 
 
-def _json(obj) -> tuple:
+def json_reply(obj) -> tuple:
     return json.dumps(obj, indent=1).encode(), "application/json"
 
 
@@ -252,7 +252,7 @@ def _rules_stamp() -> str:
     return _RULES[0]
 
 
-_LOADED: dict = {"at": 0.0, "doc": None}
+LOADED: dict = {"at": 0.0, "doc": None}
 
 
 def loaded_document(ttl: float = 4.0):
@@ -267,24 +267,24 @@ def loaded_document(ttl: float = 4.0):
     def handler(_q: dict) -> dict:
         import time
         now = time.time()
-        doc = _LOADED["doc"]   # read once: a POST may clear it meanwhile
-        if doc is not None and now - _LOADED["at"] > ttl \
-                and not _LOADED.get("refreshing"):
+        doc = LOADED["doc"]   # read once: a POST may clear it meanwhile
+        if doc is not None and now - LOADED["at"] > ttl \
+                and not LOADED.get("refreshing"):
             # the last survey answers while a new one runs on its own
             # thread: it asks each server (a busy rank 0 answers slowly),
             # and a peer's Survey times out at 2.5 s
-            _LOADED["refreshing"] = True
+            LOADED["refreshing"] = True
 
             def refresh():
                 try:
                     survey_now(time.time())
                 finally:
-                    _LOADED["refreshing"] = False
+                    LOADED["refreshing"] = False
             import threading
             threading.Thread(target=refresh, daemon=True,
                              name="knurlogic-loaded-survey").start()
             return doc
-        if doc is None or now - _LOADED["at"] > ttl:
+        if doc is None or now - LOADED["at"] > ttl:
             doc = survey_now(now)
         return doc
 
@@ -306,8 +306,8 @@ def loaded_document(ttl: float = 4.0):
             doc["vision"] = spec.to_json() if spec else None
         except (AttributeError, TypeError, ValueError):
             doc["vision"] = None
-        _LOADED["doc"] = doc
-        _LOADED["at"] = now
+        LOADED["doc"] = doc
+        LOADED["at"] = now
         return doc
     return handler
 
@@ -417,7 +417,7 @@ def machine_settings():
                                               "that model"}
         if art:
             try:
-                return _preview(art, presets.preset_or(_one(q, "tune"), "default"),
+                return preview(art, presets.preset_or(_one(q, "tune"), "default"),
                                 _one(q, "working_set_gib"),
                                 kv_bits=_one(q, "kv_bits"),
                                 long_context=_one(q, "long_context"))
@@ -527,7 +527,7 @@ def set_strategy(body) -> dict:
                                           strategy.get()}}
 
 
-def _preview(path: str, tune: str, working_set_gib=None,
+def preview(path: str, tune: str, working_set_gib=None,
              kv_bits=None, long_context=None) -> dict:
     """What this artifact WOULD resolve to, and which of those can still be
     chosen. Nothing is loaded and nothing is set: this only reads.
@@ -625,7 +625,7 @@ def routes(status_fn=None, settings_fn=None, apply_fn=None,
         # page's to say (it knows what is running on every machine), so the
         # placeholders are filled in there.
         from knurlogic.interfaces import connect
-        return _json({"endpoints": connect.endpoints("__BASE__",
+        return json_reply({"endpoints": connect.endpoints("__BASE__",
                                                      "__MODEL__")})
     r["/connect.json"] = _connect
 
@@ -649,32 +649,32 @@ def routes(status_fn=None, settings_fn=None, apply_fn=None,
             return _text(status_fn(n)[1])
 
         def _status_json(_q, n=0):
-            return _json(status_fn(n)[0])
+            return json_reply(status_fn(n)[0])
         r["/status"] = _status
         r["/status.json"] = _status_json
 
     if settings_fn is not None:
         def _settings(q, _n=0):
-            return _json(settings_fn(q))
+            return json_reply(settings_fn(q))
         r["/settings.json"] = _settings
     if models_fn is not None:
         def _models(q, _n=0):
-            return _json(models_fn(q))
+            return json_reply(models_fn(q))
         r["/models.json"] = _models
     if loaded_fn is not None:
         def _loaded(q, _n=0):
-            return _json(loaded_fn(q))
+            return json_reply(loaded_fn(q))
         r["/loaded.json"] = _loaded
     if load_fn is not None:
         def _load(q, _n=0, body=None):
-            _LOADED["doc"] = None       # residency just changed; do not
-            return _json(load_fn(q, body))   # serve the cached answer
+            LOADED["doc"] = None       # residency just changed; do not
+            return json_reply(load_fn(q, body))   # serve the cached answer
         r["POST /loaded.json"] = _load
     if messages_fn is not None:
         r["POST /v1/messages"] = raw(messages_fn)
     if apply_fn is not None:
         def _apply(q, _n=0, body=None):
-            return _json(apply_fn(q, body))
+            return json_reply(apply_fn(q, body))
         r["POST /settings.json"] = _apply
     return r
 

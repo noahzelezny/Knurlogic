@@ -156,7 +156,7 @@ def summarize(body: dict, pending: Pending, out: Outcome,
         why = f"{type(e).__name__}: {e}"
         logger.warning("compaction summary failed: %s", why)
     summary, found = E.parse_output(text, len(uses))
-    dropped_chars = sum(len(E._text(m.get("content")) or "")
+    dropped_chars = sum(len(E.content_text(m.get("content")) or "")
                         for m in pending.view[p.start:p.end])
     if why is None and not summary:
         why = "the summary pass returned no text"

@@ -1,5 +1,5 @@
 """The prompt cache in memory: PromptCache (mlx-lm's LRU plus the side map
-of who owns each entry) and _owner, the owner a request's entry gets."""
+of who owns each entry) and entry_owner, the owner a request's entry gets."""
 
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ class PromptCache:
         LRU, least recent first; prunes the side map of what is gone."""
         from knurlogic.engine.prompt_cache import disk as prompt_disk
         out = [(m, t, e, self.owners.get(tuple(t)))
-               for m, t, e in prompt_disk._lru_entries(self.lru)]
+               for m, t, e in prompt_disk.lru_entries(self.lru)]
         here = {tuple(t) for _, t, _, _ in out}
         for t in [t for t in self.owners if t not in here]:
             del self.owners[t]
@@ -152,7 +152,7 @@ class PromptCache:
         return int(self.lru.nbytes)
 
 
-def _owner(job, uid=None, kind: str | None = None) -> dict | None:
+def entry_owner(job, uid=None, kind: str | None = None) -> dict | None:
     """{session, role, run} of the request a cache entry came from, or
     None when it named no session (it owns nothing). X-Cache-Keep: latest
     adds the step (`uid`, the row) and `latest`: the entry replaces the

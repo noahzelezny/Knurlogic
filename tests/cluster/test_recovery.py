@@ -150,7 +150,7 @@ def faked(monkeypatch):
     """One tracked cluster model whose job ends whenever `ended` says, and
     whose relaunches are recorded."""
     state = {"ended": None, "launches": [], "n": 0, "down": ""}
-    monkeypatch.setattr(C, "_job_end", lambda job, order, post:
+    monkeypatch.setattr(C, "job_end", lambda job, order, post:
                         state["ended"])
     monkeypatch.setattr(R, "_leftovers", lambda rec, job: "")
     monkeypatch.setattr(R, "_machines_down", lambda rec: state["down"])

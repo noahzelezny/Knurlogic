@@ -72,11 +72,11 @@ def _terms(mem: dict) -> str:
             f"{g(mem.get('need'))}")
 
 
-class _Wait(Exception):
+class Wait(Exception):
     """Not admitted yet: the request goes back to the front of the queue."""
 
 
-class _RingWait(_Wait):
+class RingWait(Wait):
     """The prompt cache gave way on a ring; wait one exchange for the
     peers' memory before deciding (Scheduler._make_room)."""
 
@@ -549,7 +549,7 @@ class MemoryGuard:
     def _make_room(self, n_tokens: int, checkpoints=None) -> str:
         """"full" if a prompt of n_tokens fits with its checkpoints (at
         these lengths; None = one, at its end), "lean" if only without;
-        else _Wait (rows are running and will free memory) or OutOfMemory
+        else Wait (rows are running and will free memory) or OutOfMemory
         (none are). The chunk it fits at is left in _chunk_pick.
 
         Cheapest loss first: the prompt cache gives way; then the prefill
@@ -579,7 +579,7 @@ class MemoryGuard:
                 return "lean"
         limit = self._limit(n_tokens, chunks[-1])
         if self._rows:
-            raise _Wait()
+            raise Wait()
         # On a ring the peers' number is as of the last exchange: what the
         # prompt cache just gave up here is given up there only when the
         # pops travel (the next exchange; an idle rank 0 sends them in
@@ -588,7 +588,7 @@ class MemoryGuard:
         if self.tensor is not None and self.cache is not None and \
                 self._ring_trimmed:
             self._ring_trimmed = False
-            raise _RingWait()
+            raise RingWait()
         mem = self._memory(n_tokens, need, room, chunks[-1])
         logger.warning("refused a %d-token prompt: %s", n_tokens, _terms(mem))
         if room <= 0 and not (self.cache is not None and self.cache.nbytes):

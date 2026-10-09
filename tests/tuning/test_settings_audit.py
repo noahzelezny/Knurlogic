@@ -176,7 +176,7 @@ def test_prompt_concurrency_is_not_offered():
 # --- a peer's model: read AND changed on the peer ---------------------------
 
 def test_a_peers_settings_go_through_its_page_by_port(monkeypatch):
-    monkeypatch.setitem(page_peers._PEER_TARGETS, "http://192.0.2.2:8080",
+    monkeypatch.setitem(page_peers.PEER_TARGETS, "http://192.0.2.2:8080",
                         {"machine": "M4", "relay": "http://192.0.2.2:8899"})
     # chat goes by model name, through the peer's relay
 
@@ -266,7 +266,7 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
         page_peers.peer_residency(
             page_nodes.PEERS, fetch=lambda url, t: {"resident": [row]})
         base = f"http://127.0.0.1:{mport}"
-        assert base in page_peers._PEER_TARGETS
+        assert base in page_peers.PEER_TARGETS
         with urllib.request.urlopen(
                 f"http://127.0.0.1:{hport}/peek?where={base}"
                 f"&path=/settings.json&tune=lean", timeout=5) as r:
@@ -283,4 +283,4 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
     finally:
         for s in (model, peer_page, here):
             s.shutdown()
-        page_peers._PEER_TARGETS.clear()
+        page_peers.PEER_TARGETS.clear()

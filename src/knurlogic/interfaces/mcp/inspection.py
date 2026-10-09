@@ -171,12 +171,12 @@ def state(**_) -> dict[str, Any]:
     # across machines: what the page on this Mac sees (its own residency and
     # each answering peer's). Without the page, this Mac's survey alone.
     try:
-        page = page_client._page_get("/loaded.json?peers=1")
+        page = page_client.page_get("/loaded.json?peers=1")
     except page_client.PageDown as e:
         page, page_note = None, str(e)
     else:
         page_note = ""
-    here = page_client._me_name()
+    here = page_client.me_name()
     everywhere = page_client.models_across(
         page if page is not None else {"resident": doc.get("resident", [])},
         here)
@@ -184,7 +184,7 @@ def state(**_) -> dict[str, Any]:
         # one entry per model: a cluster job once, on its leader, with its
         # machines, split, link, job and rank 0's `requests`
         "models": everywhere,
-        "machines": page_client._machines_of(page, here),
+        "machines": page_client.machines_of(page, here),
         **({"page": page_note} if page_note else {}),
         "resident": doc.get("resident", []),
         "runtimes": doc.get("runtimes", []),
@@ -270,7 +270,7 @@ def settings(artifact: str = "", tune: str = "default", **_) -> dict[str, Any]:
         tune = preset_of(tune)
     except ValueError as e:
         return {"error": str(e)}
-    doc = documents._preview(artifact, tune)
+    doc = documents.preview(artifact, tune)
     from knurlogic.machine.artifact import Artifact
     from knurlogic.tuning.fit import vision_budget
     try:

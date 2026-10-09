@@ -34,7 +34,7 @@ def prompt_cache_forward(handler, method: str, path: str, query: dict,
     except (ValueError, AttributeError, IndexError):
         loop = False
     if not loop:
-        router._send_json(handler, 403, {"error": {
+        router.send_json(handler, 403, {"error": {
             "message": "the prompt cache is managed from this machine "
                        "(loopback) only", "type": "permission_error"}})
         return
@@ -47,21 +47,21 @@ def prompt_cache_forward(handler, method: str, path: str, query: dict,
             model = None
     table = router.local_models(fetch)
     if model is not None:
-        base = router._resolve(table, model)
+        base = router.resolve(table, model)
         if base is None:
             # a peer's model: its page's relay, like a chat (the peer
             # resolves the name again against the servers it started)
-            far = router._resolve(router.routable(fetch), model)
-            if far is not None and peers._PEER_TARGETS.get(far) is not None:
+            far = router.resolve(router.routable(fetch), model)
+            if far is not None and peers.PEER_TARGETS.get(far) is not None:
                 q = f"?model={quote(str(model))}" \
                     if method == "GET" else ""
-                code, doc = (send or router._send_up)(
+                code, doc = (send or router.send_up)(
                     peers.upstream(far, path) + q, method,
                     body if method == "POST" else None)
-                router._send_json(handler, code, doc)
+                router.send_json(handler, code, doc)
                 return
             here = sorted(set(table) | set(router.routable(fetch)))
-            router._send_json(handler, 404, {"error": {
+            router.send_json(handler, 404, {"error": {
                 "message": f"no running model {model!r} here or on a peer; "
                            f"running: {', '.join(here) or 'none'}",
                 "type": "not_found"}, "models": here})
@@ -69,13 +69,13 @@ def prompt_cache_forward(handler, method: str, path: str, query: dict,
     else:
         bases = set(table.values())
         if len(bases) != 1:
-            router._send_json(handler, 400, {"error": {
+            router.send_json(handler, 400, {"error": {
                 "message": "name the model (a \"model\" query or body "
                            "field): " + (", ".join(sorted(table))
                                          or "none is running"),
                 "type": "invalid_request_error"}, "models": sorted(table)})
             return
         base = bases.pop()
-    code, doc = (send or router._send_up)(base + path, method,
+    code, doc = (send or router.send_up)(base + path, method,
                                    body if method == "POST" else None)
-    router._send_json(handler, code, doc)
+    router.send_json(handler, code, doc)

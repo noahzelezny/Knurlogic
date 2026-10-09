@@ -95,7 +95,7 @@ def apply_settings(where: str, body: bytes, post=None) -> tuple:
         want = None
     if not isinstance(want, dict):
         return 400, {"error": "the body must be a JSON object of knobs"}
-    target = peers._PEER_TARGETS.get(base)
+    target = peers.PEER_TARGETS.get(base)
     if target:
         # a peer's model through that peer's page (a Settings message): its
         # server listens on the peer's loopback, not at `base`
@@ -145,7 +145,7 @@ PEEK_PATH_KEYS = {"/models.json": ("rescan",),
                                      "long_context")}
 
 
-def _peek_keys(path: str) -> tuple:
+def peek_keys(path: str) -> tuple:
     return PEEK_KEYS + PEEK_PATH_KEYS.get(path, ())
 
 
@@ -169,7 +169,7 @@ def _peek_peer(where: str, path: str, fwd: dict):
     /settings.json. None when `where` is not a peer's (a model's /v1/models
     goes through the peer's relay, a local one direct)."""
     from knurlogic.cluster import transport
-    t = peers._PEER_TARGETS.get(where)
+    t = peers.PEER_TARGETS.get(where)
     if t and path == PEER_SETTINGS:
         page, port = t["relay"].removeprefix("http://"), urlparse(where).port
     elif where in {f"http://{p.key}"
@@ -203,7 +203,7 @@ def peek(q: dict, fetch=None) -> tuple:
     if where not in peek_targets():
         return 403, json.dumps({"error": f"not a server this page knows: "
                                          f"{where or '(none)'}"})
-    fwd = {k: q[k][0] for k in _peek_keys(path) if q.get(k)}
+    fwd = {k: q[k][0] for k in peek_keys(path) if q.get(k)}
     if fetch is None:
         peer = _peek_peer(where, path, fwd)
         if peer is not None:

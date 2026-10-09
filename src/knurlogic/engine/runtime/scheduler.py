@@ -27,7 +27,7 @@ from knurlogic.engine.prompt_cache.commands import (
     Command,
     PromptCacheCommands,
 )
-from knurlogic.engine.prompt_cache.memory import PromptCache, _owner
+from knurlogic.engine.prompt_cache.memory import PromptCache, entry_owner
 from knurlogic.machine.memory.pressure import (
     own_compressed_bytes,
     system_pressure_level,
@@ -43,7 +43,7 @@ from .executor import (
     RowFailure,
     Token,
 )
-from .memory_guard import MemoryGuard, OutOfMemory, _RingWait, _Wait
+from .memory_guard import MemoryGuard, OutOfMemory, RingWait, Wait
 from .request import Request, control_machine
 from .timing import Spans, rates, step_bucket
 from .timing import enabled as spans_enabled
@@ -82,7 +82,7 @@ def ring_error(exc: BaseException) -> bool:
 _WARM_MARGIN = 128
 
 
-def _context_cap() -> int:
+def context_cap() -> int:
     """KNURLOGIC_CONTEXT_LENGTH: the longest prompt + answer a request may
     use, read at every admission so the setting applies live. 0 = none."""
     import os
@@ -634,7 +634,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         """(KNURLOGIC_CONTEXT_LENGTH or 0, the context window _insert
         checks a prompt against: that cap, else the model's own; 0 = none)."""
         from knurlogic.machine.artifact import context_length
-        cap = _context_cap()
+        cap = context_cap()
         return cap, cap or context_length(
             getattr(self.host, "path", "") or "")
 
@@ -809,10 +809,10 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             images = vreq.has_images(job.request.messages)
             try:
                 self._insert(job)
-            except _RingWait:
+            except RingWait:
                 held.append(job)        # retried after the next exchange
                 continue
-            except _Wait:
+            except Wait:
                 self._hold(job, held)
                 continue
             except (P.PromptError, VisionError, OutOfMemory) as e:
@@ -1051,7 +1051,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                     self._superseded(self.cache.insert(
                         self.host.model_key, e.tokens, e.cache, kind,
                         origin=("checkpoint", e.uid),
-                        owner=_owner(row.job, e.uid, kind)))
+                        owner=entry_owner(row.job, e.uid, kind)))
             elif isinstance(e, Token):
                 row.made += 1
                 if not row.first:
@@ -1069,7 +1069,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 self._superseded(self.cache.insert(
                     self.host.model_key, e.tokens, e.cache, "assistant",
                     origin=("finished", e.uid),
-                    owner=_owner(row.job, e.uid, "assistant")))
+                    owner=entry_owner(row.job, e.uid, "assistant")))
                 self._done(e.uid)
             elif isinstance(e, RowFailure):
                 self._rows.pop(e.uid, None)
