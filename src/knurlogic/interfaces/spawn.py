@@ -214,8 +214,15 @@ def stop(port: int) -> dict:
     reg = registry()
     rec = reg.get(port)
     if not rec:
-        return {"error": f"knurlogic has no record of a server on port "
-                         f"{port}; it stops only what it started"}
+        # a knurlogic server this page did not start (`knurlogic serve` from
+        # a shell, another agent): the page lists it with Unload, so Unload
+        # stops it -- found by its port, and only if it is a knurlogic serve
+        from knurlogic.machine import servers
+        pid = servers.listener_pid(port)
+        if not pid or not servers.is_our_server(pid):
+            return {"error": f"no knurlogic server is listening on port "
+                             f"{port}"}
+        rec = {"pid": pid, "artifact": f"the server on port {port}"}
     if rec.get("job"):
         # rank 0 of a cluster job: the job stops, on every machine
         from knurlogic.cluster import launch

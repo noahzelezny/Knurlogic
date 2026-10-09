@@ -126,7 +126,7 @@ async function loadResident(){
   // shown and chatted with, never unloaded from here: this page drives only
   // what its own machine started.
   // A peer's knurlogic model is unloaded through that peer (forwarded
-  // by port; the peer stops only what it started).
+  // by port; the peer stops any knurlogic server on that port).
   const all=(d.resident||[]).concat(...peers.map(m=>(m.resident||[])
       .map(r=>({...r, node:m.id}))))
     .map(r=>r.machine?{...r, can_unload:r.runtime==='knurlogic' && !!r.node

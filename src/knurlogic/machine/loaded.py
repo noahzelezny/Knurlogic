@@ -315,8 +315,9 @@ def survey(ports: dict | None = None, self_url: str = "") -> dict:
     for port, rec in servers.registry().items():
         if servers.is_our_server(int(rec["pid"])):
             ours[port] = rec
-    # and serves started by hand: shown, but only the page's own children
-    # are offered for unloading (it stops only what it started)
+    # and serves started by hand (a shell, another agent): shown, and
+    # unloaded like the page's own children (interfaces/spawn.stop finds
+    # them by port)
     listening = servers.listening_serves()
     by_hand = {port for port in listening if port not in ours}
     for port in list(p.get("openai", [])) + sorted(ours) + sorted(by_hand):
