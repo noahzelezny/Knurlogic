@@ -11,6 +11,8 @@ from types import SimpleNamespace as NS
 import pytest
 
 from knurlogic.interfaces.http import telemetry as T
+from knurlogic.interfaces.page import nodes as page_nodes
+from knurlogic.interfaces.page import router as page_router
 from knurlogic.interfaces.page import server as page_server
 
 
@@ -106,9 +108,9 @@ def _fake_model(model_id, seen, echo=True):
 
 
 def _page(monkeypatch, *bases):
-    monkeypatch.setattr(page_server, "chat_targets", lambda: set(bases))
-    monkeypatch.setattr(page_server, "PEERS", None)
-    page_server._ROUTES.update(at=0.0, map={})
+    monkeypatch.setattr(page_router, "chat_targets", lambda: set(bases))
+    monkeypatch.setattr(page_nodes, "PEERS", None)
+    page_router._ROUTES.update(at=0.0, map={})
     _, url = _serve(page_server.make_handler({}))
     return url
 

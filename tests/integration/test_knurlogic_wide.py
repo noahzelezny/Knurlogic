@@ -6,7 +6,7 @@ import pytest
 
 from knurlogic.context_management import compaction as C
 from knurlogic.interfaces.page import documents
-from knurlogic.interfaces.page import server as page_server
+from knurlogic.interfaces.page import peers as page_peers
 from knurlogic.tuning import groups, knobs, preferences, presets
 
 
@@ -62,7 +62,7 @@ def test_compaction_document_is_one_live_set(home):
 
 
 def test_peer_machine_saves_knurlogic_wide_settings(home):
-    code, doc = page_server.peer_machine(
+    code, doc = page_peers.peer_machine(
         {"strategy": "lean",
          "settings": {"KNURLOGIC_CROSS_CHIP": "auto",
                       "KNURLOGIC_COMPACT_AUTO": "on"}})
@@ -70,7 +70,7 @@ def test_peer_machine_saves_knurlogic_wide_settings(home):
     assert doc["knurlogic"]["saved"] == {"KNURLOGIC_CROSS_CHIP": "auto",
                                          "KNURLOGIC_COMPACT_AUTO": "on"}
     assert doc["knurlogic"]["cross_chip"]["value"] == "auto"
-    code, doc = page_server.peer_machine(
+    code, doc = page_peers.peer_machine(
         {"settings": {"KNURLOGIC_CONTEXT_LENGTH": "512"}})
     assert code == 400
     assert preferences.get()["KNURLOGIC_CROSS_CHIP"] == "auto"

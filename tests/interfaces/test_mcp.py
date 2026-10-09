@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from knurlogic.interfaces import mcp
+from knurlogic.interfaces import mcp, spawn
 
 
 @pytest.fixture(autouse=True)
@@ -40,7 +40,7 @@ def test_every_tool_is_in_the_table_with_a_schema():
 
 def test_nothing_moving_is_ready(monkeypatch):
     """No load in flight and no lock held: ready, with nothing to wait on."""
-    monkeypatch.setattr("knurlogic.interfaces.page.server.loading", lambda: [])
+    monkeypatch.setattr("knurlogic.interfaces.spawn.loading", lambda: [])
     r = mcp.ready()
     assert r["ready"] is True and r["blockers"] == []
 
@@ -53,7 +53,7 @@ def test_load_refuses_a_model_that_does_not_fit(tmp_path, monkeypatch):
     monkeypatch.setattr("knurlogic.machine.memory.footprint.available_memory",
                         lambda: {"available_bytes": 1 << 20,
                                  "free_bytes": 1 << 20, "cached_bytes": 0})
-    monkeypatch.setattr("knurlogic.interfaces.page.server._spawn",
+    monkeypatch.setattr("knurlogic.interfaces.spawn.spawn",
                         lambda *a, **k: pytest.fail("spawned anyway"))
     r = mcp.load(artifact=str(d), force=True)
     assert r["loaded"] is False and r["refused"] == "will not fit"
@@ -73,7 +73,7 @@ def test_load_refuses_while_memory_moves_but_force_overrides(tmp_path,
                         lambda: {"available_bytes": 64 << 30,
                                  "free_bytes": 64 << 30, "cached_bytes": 0})
     spawned = []
-    monkeypatch.setattr("knurlogic.interfaces.page.server._spawn",
+    monkeypatch.setattr("knurlogic.interfaces.spawn.spawn",
                         lambda *a, **k: spawned.append(a) or {"starting": a[0]})
 
     r = mcp.load(artifact=str(d))
@@ -97,7 +97,7 @@ def _fit_setup(tmp_path, monkeypatch, budget_gib=10):
                         lambda cfg, kv_bits=None: {
                             "transient_bytes": 8 << 30, "kv_bytes": 1 << 30})
     spawned = []
-    monkeypatch.setattr("knurlogic.interfaces.page.server._spawn",
+    monkeypatch.setattr("knurlogic.interfaces.spawn.spawn",
                         lambda *a, **k: spawned.append((a, k))
                         or {"starting": a[0], "pid": 1, "port": a[1]})
     return d, spawned
@@ -180,19 +180,19 @@ def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,
     import os
     import time
 
-    from knurlogic.interfaces.page import server as page_server
+    from knurlogic.interfaces import spawn
     log = tmp_path / "serve.log"
     log.write_text("artifact  x\nloading weights\n")
     t = time.time() - quiet_s
     os.utime(log, (t, t))
-    monkeypatch.setattr(page_server, "registry", lambda: {
+    monkeypatch.setattr(spawn, "registry", lambda: {
         9001: {"pid": 4242, "artifact": "/m/x", "log": str(log), "t": 0,
                "bytes": size}})
-    monkeypatch.setattr(page_server, "is_our_server", lambda pid: alive)
-    monkeypatch.setattr(page_server, "_answers", lambda port: answers)
-    monkeypatch.setattr(page_server.footprint, "memory_map",
+    monkeypatch.setattr(spawn, "is_our_server", lambda pid: alive)
+    monkeypatch.setattr(spawn, "_answers", lambda port: answers)
+    monkeypatch.setattr(spawn.footprint, "memory_map",
                         lambda: {"processes": [{"pid": 4242, "bytes": held}]})
-    return page_server
+    return spawn
 
 
 @pytest.mark.parametrize("alive,answers,held,quiet,want", [
@@ -207,9 +207,9 @@ def test_every_server_says_what_phase_it_is_in(monkeypatch, tmp_path, alive,
     """`alive: true` for loading, serving and hung alike is how an agent ends
     up waiting forever. Each phase is read off evidence: the port, the
     weights actually resident, and how long the log has been quiet."""
-    page_server = _phase_world(monkeypatch, tmp_path, alive=alive, answers=answers,
-                      held=held, size=int(15.5 * (1 << 30)), quiet_s=quiet)
-    (c,) = page_server.children()
+    _phase_world(monkeypatch, tmp_path, alive=alive, answers=answers,
+                 held=held, size=int(15.5 * (1 << 30)), quiet_s=quiet)
+    (c,) = spawn.children()
     assert c["phase"] == want
     if want == "stalled":
         assert "Stop waiting" in c["advice"]
@@ -231,7 +231,7 @@ def test_ready_blocks_on_another_process_holding_the_load_lock(monkeypatch):
     """The lock (`machine/loadlock.py`, P0) is a second source of the same
     blocker `ready()` already reports for knurlogic's own children -- a
     load started by a DIFFERENT process (another agent, a hand-run `serve`)
-    holds it, and would not show up in `ui.loading()`."""
+    holds it, and would not show up in `spawn.loading()`."""
     monkeypatch.setattr(
         "knurlogic.machine.loadlock.holder",
         lambda *a, **k: {"pid": 999, "artifact": "other-model",

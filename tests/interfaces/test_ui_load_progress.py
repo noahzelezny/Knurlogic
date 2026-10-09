@@ -2,7 +2,7 @@
 import time
 
 from knurlogic.cluster import jobs as J
-from knurlogic.interfaces.page import server
+from knurlogic.interfaces.page import loads as page_loads
 from knurlogic.machine import servers
 
 
@@ -20,12 +20,12 @@ def test_follower_ranks_counted_once(monkeypatch, tmp_path):
                      "artifact": str(art), "log": str(log), "t": now},
             "j1/1": {"job": "j1", "rank": 1, "pid": 101,
                      "artifact": str(art), "log": str(log), "t": now}}
-    monkeypatch.setattr(server, "registry", lambda: {8000: rank0})
+    monkeypatch.setattr(page_loads, "registry", lambda: {8000: rank0})
     monkeypatch.setattr(J, "registry", lambda: jobs)
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
     doc = {"memory": {"processes": [{"pid": 100, "bytes": 10},
                                     {"pid": 101, "bytes": 600}]}}
-    loads = server.load_progress(doc)
+    loads = page_loads.load_progress(doc)
     assert sorted((e["job"], e["rank"], e["bytes"]) for e in loads) == [
         ("j1", 0, 10), ("j1", 1, 600)]
     assert [e["port"] for e in loads if e["rank"] == 1] == [0]
@@ -50,10 +50,10 @@ def test_each_rank_is_measured_against_its_own_share(monkeypatch, tmp_path):
     monkeypatch.setattr(J, "read_marker", lambda job, rank: {
         ("j1", 0): {"share_bytes": 560}, ("j1", 1): {"share_bytes": 500}}
         .get((job, rank)))
-    monkeypatch.setattr(server, "registry", lambda: {8000: rank0})
+    monkeypatch.setattr(page_loads, "registry", lambda: {8000: rank0})
     monkeypatch.setattr(J, "registry", lambda: jobs)
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
     doc = {"memory": {"processes": [{"pid": 100, "bytes": 300},
                                     {"pid": 101, "bytes": 500}]}}
-    got = {e["rank"]: e["total_bytes"] for e in server.load_progress(doc)}
+    got = {e["rank"]: e["total_bytes"] for e in page_loads.load_progress(doc)}
     assert got == {0: 560, 1: 500}

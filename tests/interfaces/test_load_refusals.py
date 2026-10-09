@@ -52,12 +52,11 @@ def test_prepare_refuses_bad_settings_before_a_rank_starts(cache):
 
 
 def test_mcp_load_refuses_before_spawning(cache, monkeypatch):
-    from knurlogic.interfaces import loading, mcp
-    from knurlogic.interfaces.page import server as page_server
+    from knurlogic.interfaces import loading, mcp, spawn
     d = _model(cache)
     monkeypatch.setattr(loading, "resolve_name", lambda a, _: str(d))
     spawned = []
-    monkeypatch.setattr(page_server, "_spawn",
+    monkeypatch.setattr(spawn, "spawn",
                         lambda *a, **k: spawned.append(a) or {"pid": 1})
     out = mcp.load(artifact="m", sets={"KNURLOGIC_PRESET": "bogus"})
     assert out["loaded"] is False and "bogus" in out["refused"]

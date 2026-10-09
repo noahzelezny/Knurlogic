@@ -12,6 +12,9 @@ from types import SimpleNamespace
 import pytest
 
 from knurlogic.interfaces.page import documents
+from knurlogic.interfaces.page import loads as page_loads
+from knurlogic.interfaces.page import nodes as page_nodes
+from knurlogic.interfaces.page import peers as page_peers
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine.memory import allowance, wired
 from knurlogic.tuning import strategy
@@ -58,29 +61,29 @@ def test_every_preset_is_explained(home):
 
 
 def test_a_launch_without_a_tune_takes_the_strategy(home):
-    assert page_server._default_tune() == "default"
+    assert page_loads._default_tune() == "default"
     strategy.set("lean")
-    assert page_server._default_tune() == "lean"
+    assert page_loads._default_tune() == "lean"
 
 
 def test_peer_machine_applies_to_this_machine(home):
-    code, doc = page_server.peer_machine({"allowance_gib": 64, "strategy": "lean"})
+    code, doc = page_peers.peer_machine({"allowance_gib": 64, "strategy": "lean"})
     assert code == 200
     assert allowance.get() == 64 * GIB and strategy.get() == "lean"
     assert doc["allowance"]["allowance_gib"] == 64
     assert doc["strategy"]["preset"] == "lean"
     assert set(doc["applied"]) == {"knurlogic allowance",
                                    "knurlogic strategy"}
-    assert page_server.peer_machine({"allowance_gib": 500})[0] == 400
-    assert page_server.peer_machine({"wired_mb": 1})[0] == 400
-    assert page_server.peer_machine([])[0] == 400
+    assert page_peers.peer_machine({"allowance_gib": 500})[0] == 400
+    assert page_peers.peer_machine({"wired_mb": 1})[0] == 400
+    assert page_peers.peer_machine([])[0] == 400
     assert allowance.get() == 64 * GIB      # refusals change nothing
 
 
 def _peers(monkeypatch, *keys):
     ps = [SimpleNamespace(key=k, state="answering", found_by=("bonjour",),
                           host=k.split(":")[0]) for k in keys]
-    monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(all=lambda: ps))
+    monkeypatch.setattr(page_nodes, "PEERS", SimpleNamespace(all=lambda: ps))
 
 
 def test_machine_apply_forwards_only_to_an_answering_peer(home, monkeypatch):
@@ -90,27 +93,27 @@ def test_machine_apply_forwards_only_to_an_answering_peer(home, monkeypatch):
     def post(page, kind, doc):
         sent.append((page, kind, doc))
         return {"applied": {"knurlogic allowance": "80 GiB"}}
-    code, doc = page_server.machine_apply("http://192.0.2.2:8899",
+    code, doc = page_peers.machine_apply("http://192.0.2.2:8899",
                                  b'{"allowance_gib": 80}', post=post)
     assert code == 200 and doc["applied"]
     assert sent == [("192.0.2.2:8899", "MachineSet", {"allowance_gib": 80})]
     # nothing of this machine's changed: the peer sets its own
     assert allowance.get() == 0
-    assert page_server.machine_apply("http://203.0.113.9:8899", b"{}", post=post)[0] \
+    assert page_peers.machine_apply("http://203.0.113.9:8899", b"{}", post=post)[0] \
         == 403
     from knurlogic.cluster.protocol import VersionMismatch
 
     def old(*a):
         raise VersionMismatch("M4 does not speak this protocol: update "
                               "knurlogic on M4")
-    code, doc = page_server.machine_apply(
+    code, doc = page_peers.machine_apply(
         "http://192.0.2.2:8899", b'{"strategy": "lean"}', post=old)
     assert code == 502 and "update knurlogic on M4" in doc["error"]
 
 
 def test_machine_apply_with_no_peer_is_this_machine(home, monkeypatch):
     _peers(monkeypatch)
-    code, doc = page_server.machine_apply("", b'{"strategy": "lean"}')
+    code, doc = page_peers.machine_apply("", b'{"strategy": "lean"}')
     assert code == 200 and strategy.get() == "lean"
 
 

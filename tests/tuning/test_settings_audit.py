@@ -8,6 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from knurlogic.interfaces.page import documents
+from knurlogic.interfaces.page import nodes as page_nodes
+from knurlogic.interfaces.page import peek as page_peek
+from knurlogic.interfaces.page import peers as page_peers
+from knurlogic.interfaces.page import router as page_router
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine.artifact import Artifact
 from knurlogic.tuning import checks, context_window, knobs, live, presets
@@ -114,7 +118,7 @@ def test_the_legacy_name_is_still_accepted_and_beats_the_resolver():
     assert sets == {"KNURLOGIC_PREFILL_CHUNK": "2048"}
     env = {**resolve(_art(), 96 * GIB).env, **sets}
     assert knobs.engine_settings(env)["prefill_step_size"] == 2048
-    ok, bad = page_server.clean_sets({"VQLAB_PREFILL_CHUNK": "1024"})
+    ok, bad = checks.clean_sets({"VQLAB_PREFILL_CHUNK": "1024"})
     assert ok and not bad
     both = knobs.canonical_sets({"VQLAB_PREFILL_CHUNK": "2048",
                                  "KNURLOGIC_PREFILL_CHUNK": "1024"})
@@ -166,21 +170,21 @@ def test_prompt_concurrency_is_not_offered():
     assert "KNURLOGIC_PROMPT_CONCURRENCY" not in knobs.KNOB_DOC
     assert "KNURLOGIC_PROMPT_CONCURRENCY" not in knobs.ENGINE_KNOB_NAMES
     # a launch setting saved before still passes, so it cannot fail a launch
-    assert page_server.clean_sets({"KNURLOGIC_PROMPT_CONCURRENCY": "1"})[0]
+    assert checks.clean_sets({"KNURLOGIC_PROMPT_CONCURRENCY": "1"})[0]
 
 
 # --- a peer's model: read AND changed on the peer ---------------------------
 
 def test_a_peers_settings_go_through_its_page_by_port(monkeypatch):
-    monkeypatch.setitem(page_server._PEER_TARGETS, "http://192.0.2.2:8080",
+    monkeypatch.setitem(page_peers._PEER_TARGETS, "http://192.0.2.2:8080",
                         {"machine": "M4", "relay": "http://192.0.2.2:8899"})
     # chat goes by model name, through the peer's relay
 
-    assert page_server.upstream("http://192.0.2.2:8080", "/v1/models") == \
+    assert page_peers.upstream("http://192.0.2.2:8080", "/v1/models") == \
         "http://192.0.2.2:8899/peer/v1/models"
     sent = []
-    monkeypatch.setattr(page_server, "known_target", lambda b: True)
-    code, doc = page_server.apply_settings(
+    monkeypatch.setattr(page_router, "known_target", lambda b: True)
+    code, doc = page_peek.apply_settings(
         "http://192.0.2.2:8080", b'{"VQ_DECODE_CHUNK": "16"}',
         post=lambda page, kind, d: sent.append((page, kind, d))
         or {"applied": {}})
@@ -193,21 +197,21 @@ def test_a_peers_settings_go_through_its_page_by_port(monkeypatch):
 def test_peer_settings_only_reaches_a_server_this_machine_started(
         monkeypatch):
     from knurlogic.machine import servers
-    monkeypatch.setattr(page_server, "registry", lambda: {8080: {"pid": 1}})
+    monkeypatch.setattr(page_peek, "registry", lambda: {8080: {"pid": 1}})
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
     calls = []
 
     def call(u, d, t):
         calls.append((u, d))
         return 200, b'{"ok": 1}'
-    assert page_server.peer_settings("GET", 9, {}, call)[0] == 404
-    assert page_server.peer_settings("GET", None, {}, call)[0] == 400
-    assert page_server.peer_settings("POST", 8080, [1], call)[0] == 400
-    code, doc = page_server.peer_settings("GET", 8080, {"tune": "lean"},
+    assert page_peek.peer_settings("GET", 9, {}, call)[0] == 404
+    assert page_peek.peer_settings("GET", None, {}, call)[0] == 400
+    assert page_peek.peer_settings("POST", 8080, [1], call)[0] == 400
+    code, doc = page_peek.peer_settings("GET", 8080, {"tune": "lean"},
                                           call)
     assert code == 200 and calls[-1] == (
         "http://127.0.0.1:8080/settings.json?tune=lean", None)
-    code, _ = page_server.peer_settings("POST", 8080,
+    code, _ = page_peek.peer_settings("POST", 8080,
                                         {"VQ_DECODE_CHUNK": "16"}, call)
     assert code == 200 and calls[-1] == (
         "http://127.0.0.1:8080/settings.json", b'{"VQ_DECODE_CHUNK": "16"}')
@@ -247,7 +251,8 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
             self._json({"applied": {"VQ_DECODE_CHUNK": "applied"}})
 
     model, mport = _serve(M)
-    monkeypatch.setattr(page_server, "registry", lambda: {mport: {"pid": 1}})
+    monkeypatch.setattr(page_peek, "registry", lambda: {mport: {"pid": 1}})
+    monkeypatch.setattr(page_router, "registry", lambda: {mport: {"pid": 1}})
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
     peer_page, pport = _serve(page_server.make_handler({}))
     here, hport = _serve(page_server.make_handler({}))
@@ -255,13 +260,13 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
         p = SimpleNamespace(name="M4", host="127.0.0.1", port=pport,
                             state="answering", key=f"127.0.0.1:{pport}",
                             id="m4", found_by={"bonjour"})
-        monkeypatch.setattr(page_server, "PEERS", Peers(p))
+        monkeypatch.setattr(page_nodes, "PEERS", Peers(p))
         row = {"runtime": "knurlogic", "name": "m", "state": "ready",
                "where": f"http://127.0.0.1:{mport}"}
-        page_server.peer_residency(
-            page_server.PEERS, fetch=lambda url, t: {"resident": [row]})
+        page_peers.peer_residency(
+            page_nodes.PEERS, fetch=lambda url, t: {"resident": [row]})
         base = f"http://127.0.0.1:{mport}"
-        assert base in page_server._PEER_TARGETS
+        assert base in page_peers._PEER_TARGETS
         with urllib.request.urlopen(
                 f"http://127.0.0.1:{hport}/peek?where={base}"
                 f"&path=/settings.json&tune=lean", timeout=5) as r:
@@ -278,4 +283,4 @@ def test_a_peers_live_knob_reaches_the_peers_model_end_to_end(monkeypatch):
     finally:
         for s in (model, peer_page, here):
             s.shutdown()
-        page_server._PEER_TARGETS.clear()
+        page_peers._PEER_TARGETS.clear()

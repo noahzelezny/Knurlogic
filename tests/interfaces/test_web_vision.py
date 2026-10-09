@@ -192,8 +192,8 @@ def test_the_chat_proxy_only_reaches_models_this_page_knows(monkeypatch):
     would forward anything to any address."""
     import io
 
-    from knurlogic.interfaces.page import server as page_server
-    monkeypatch.setattr(page_server, "chat_targets",
+    from knurlogic.interfaces.page import router as page_router
+    monkeypatch.setattr(page_router, "chat_targets",
                         lambda: {"http://127.0.0.1:8080"})
     sent = {}
 
@@ -202,7 +202,7 @@ def test_the_chat_proxy_only_reaches_models_this_page_knows(monkeypatch):
         def send_response(self, code): sent["code"] = code
         def send_header(self, *a): pass
         def end_headers(self): pass
-    page_server.proxy_chat(H(), "http://169.254.169.254", b"{}")
+    page_router.proxy_chat(H(), "http://169.254.169.254", b"{}")
     assert sent["code"] == 403
 
 

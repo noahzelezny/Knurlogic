@@ -16,7 +16,8 @@ from test_cluster_jobs import alive, two_pages, wait  # noqa: F401
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import launch as C
 from knurlogic.cluster import recovery as R
-from knurlogic.interfaces.page import server as page_server
+from knurlogic.interfaces import spawn
+from knurlogic.interfaces.page import loads as page_loads
 
 
 def ticks_until(pred, t=40.0):
@@ -57,7 +58,7 @@ def test_a_killed_rank_comes_back(two_pages, monkeypatch):
         assert v["next_at"] is None
         # reported: /loaded.json's job and rank 0's row, and the server's
         # own /v1/residency row (this machine's file, by port)
-        doc = page_server.with_jobs({"resident": [
+        doc = page_loads.with_jobs({"resident": [
             {"runtime": "knurlogic",
              "where": f"http://127.0.0.1:{p.port}"}]})
         assert doc["resident"][0]["recovery"]["state"] == "recovered"
@@ -77,7 +78,7 @@ def test_an_unload_is_not_recovered(two_pages, monkeypatch):
     p = two_pages
     monkeypatch.setattr(R, "BACKOFF_S", (0.0, 0.0, 0.0))
     assert R.MODELS
-    page_server._stop(p.port)                      # the Unload button
+    spawn.stop(p.port)                      # the Unload button
     assert wait(lambda: not alive(p.rank1["pid"]), 20)
     assert not R.MODELS
     assert R.tick() == []
@@ -118,7 +119,7 @@ def test_out_of_memory_is_failed_not_relaunched(two_pages, monkeypatch):
     assert "Insufficient Memory" in v["last_reason"]
     # surfaced while nothing serves: /loaded.json's `recovery`, and the
     # MCP's models
-    down = page_server.with_jobs({"resident": []})["recovery"]
+    down = page_loads.with_jobs({"resident": []})["recovery"]
     assert [d["state"] for d in down] == ["failed"]
     from knurlogic.interfaces import mcp
     ms = mcp.models_across({"resident": [], "recovery": down}, "A")
@@ -324,7 +325,7 @@ def test_a_one_mac_server_that_dies_is_relaunched_the_same_way(
         servers.save_registry(reg)
         return {"starting": "/m/qwen", "port": 8093, "pid": 424242}
     monkeypatch.setattr(mcp, "load", load)
-    out = page_server.tracked_load(artifact="/m/qwen", port=8093, tune="lean",
+    out = page_loads.tracked_load(artifact="/m/qwen", port=8093, tune="lean",
                           sets={"kv_bits": "8"})
     assert out["pid"] == 424242 and R.MODELS
     monkeypatch.setattr(servers, "is_our_server", lambda pid: False)
@@ -337,7 +338,7 @@ def test_a_one_mac_server_that_dies_is_relaunched_the_same_way(
     assert R.for_port(8093)["state"] == "recovering"
     assert R.read_file()["8093"]["state"] == "recovering"
     # its Unload: gone from recovery
-    page_server._stop(8093)
+    spawn.stop(8093)
     assert not R.MODELS and "8093" not in R.read_file()
 
 

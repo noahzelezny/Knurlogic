@@ -52,9 +52,10 @@ package the command is about (`machine.discover`, `machine.loaded`,
 
 ## Notes
 
-The MCP shares the page's code rather than owning its own: it imports
-`interfaces/page/server.py` (its spawner and `loading()`) and reshapes the
-page's `/loaded.json?peers=1` for cross-machine answers (`models_across`).
+The MCP and the page start and stop model servers through the same
+`interfaces/spawn.py` (`spawn`, `loading`, `children`, `stop`); the MCP
+reshapes the page's `/loaded.json?peers=1` for cross-machine answers
+(`models_across`).
 
 ## Tests
 

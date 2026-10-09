@@ -96,8 +96,7 @@ def test_status_json_requests_reach_loaded_rows(monkeypatch):
 
 
 def test_mcp_state_lists_requests_per_model(monkeypatch):
-    from knurlogic.interfaces import mcp
-    from knurlogic.interfaces.page import server as page_server
+    from knurlogic.interfaces import mcp, spawn
     from knurlogic.machine import loaded
     req = {"in_flight": 1, "pending": 0, "capacity": 4,
            "oldest_pending_s": 0.0, "holding": None,
@@ -106,7 +105,7 @@ def test_mcp_state_lists_requests_per_model(monkeypatch):
         {"name": "m", "where": "http://127.0.0.1:9", "requests": req},
         {"name": "x", "where": "http://127.0.0.1:11434", "requests": None}],
         "runtimes": ["knurlogic"], "memory": {}})
-    monkeypatch.setattr(page_server, "children", lambda: [])
+    monkeypatch.setattr(spawn, "children", lambda: [])
     monkeypatch.setattr(mcp, "_me_name", lambda: "here")
     st = mcp.state()           # no page (conftest): this Mac's survey
     assert st["requests"] == [dict(req, model="m", machine="here",

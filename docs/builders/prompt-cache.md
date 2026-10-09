@@ -21,7 +21,7 @@ Outside it, only thin hooks:
 
 - `interfaces/http/prompt_cache.py`: the `/v1/prompt-cache` endpoints, a
   mixin of the model server's handler (only `interfaces/` serves HTTP).
-- `interfaces/page/server.py` (`prompt_cache_forward`): the page forwards
+- `interfaces/page/prompt_cache.py` (`prompt_cache_forward`): the page forwards
   to the right model server, or through the peer relay to another Mac.
 - `engine/runtime/scheduler.py` inherits the commands mixin and calls
   into it at admission (read-back, divergence) and at load (restore).

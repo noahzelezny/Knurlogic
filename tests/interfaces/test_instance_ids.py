@@ -11,8 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cluster"))
 
 from test_mcp_cluster import JOB, REQS, STATUS, page, residency  # noqa: E402, F401
 
-from knurlogic.interfaces import mcp
-from knurlogic.interfaces.page import server as page_server
+from knurlogic.interfaces import mcp, spawn
 from knurlogic.machine import loaded, servers
 
 
@@ -28,13 +27,13 @@ def test_a_spawned_server_gets_an_instance_in_its_registry(monkeypatch,
     artifact = tmp_path / "A"
     artifact.mkdir()
     log = tmp_path / "s.log"
-    monkeypatch.setattr(page_server, "serve_log", lambda port: log)
+    monkeypatch.setattr(spawn, "serve_log", lambda port: log)
 
     class FakeProc:
         pid = 4242
 
-    monkeypatch.setattr(page_server.subprocess, "Popen", lambda *a, **k: FakeProc())
-    out = page_server._spawn_unlocked(str(artifact), 8091)
+    monkeypatch.setattr(spawn.subprocess, "Popen", lambda *a, **k: FakeProc())
+    out = spawn._spawn_unlocked(str(artifact), 8091)
     assert len(out["instance"]) == 16
     rec = servers.registry()[8091]
     assert rec["instance"] == out["instance"]

@@ -29,7 +29,7 @@ A request's path to its ledger row, in order:
 | `engine/runtime/timing.py` | `rates`: queue, TTFT, prefill and decode rates, the contract's `*_ms`/`*_tps`; `Spans`: a partition of one request's wall time into named buckets (`step_bucket`); off with `KNURLOGIC_TIMING_SPANS=off` |
 | `engine/prompt_cache/report.py` | `usage.knurlogic.cache` for one request (with the prompt cache, whose engine writes it) |
 
-The page's router (`interfaces/page/server.py`) passes `X-Request-Id`
+The page's router (`interfaces/page/router.py`) passes `X-Request-Id`
 through with `T.id_of` / `T.valid_id`.
 
 ## Rules that keep it correct
