@@ -70,6 +70,16 @@ no bias_vl, no MTP layers).
 - Stopping a cluster job mid-load, mid-warm-up and mid-generation leaves
   every GPU at baseline.
 
+## 7b. Cache saving
+- Every cache kind the family makes saves and restores bit for bit
+  (tests/engine/test_prompt_disk.py): the next tokens' logits from a
+  restored cache equal the original's.
+- The family's spec names each cache kind's tensor-split axis (KV heads,
+  value heads, replicated), so a saved entry restores under any pipeline
+  or tensor split (prompt-cache-shards.md). A kind without one is listed
+  here as missing, not dropped.
+- Live: save a session, reload under a different split, and it hits.
+
 ## 8. Computing what the maker computes
 
 Every item here was found wrong in a family that "worked" (0.1.3 audit,
