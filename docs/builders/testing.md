@@ -6,7 +6,7 @@ downloads. Real models are tested by hand, through the gates in
 
 ## Running
 
-    pip install -e '.[dev]' pytest-xdist
+    pip install -e '.[dev]'
     pytest -q -n 8 tests                      # the whole suite, 8 workers
     pytest -q tests/engine/test_scheduler.py  # one file
 
