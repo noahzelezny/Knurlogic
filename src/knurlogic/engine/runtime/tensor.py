@@ -665,6 +665,10 @@ class JournalPromptCache:
     def pinned(self) -> set:
         return self.inner.pinned
 
+    @property
+    def shared(self) -> set:
+        return self.inner.shared
+
     def live(self) -> list:
         return self.inner.live()
 

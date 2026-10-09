@@ -544,3 +544,20 @@ def test_a_follower_drops_the_same_files_by_name(tmp_path):
     assert apply_cache_op(op, None, "m", {}, None, d)
     assert not a.exists() and b.exists()
     assert (tmp_path / "outside.safetensors").exists()
+
+
+def test_a_rings_prompt_cache_has_what_the_scheduler_reads():
+    """A split model's cache is the journaled wrapper: every attribute the
+    scheduler reads on `self.cache` must be there (cache.shared was not,
+    and a 397B over two Macs failed at its load's restore)."""
+    import re
+    from pathlib import Path
+
+    from knurlogic.engine.runtime import scheduler as SC
+    from knurlogic.engine.runtime.tensor import JournalPromptCache
+    src = Path(SC.__file__).read_text()
+    used = set(re.findall(r"self\.cache\.(\w+)", src))
+    # park is refused on a ring before it would reach .remove
+    missing = {a for a in used - {"remove"}
+               if not hasattr(JournalPromptCache, a)}
+    assert not missing, missing
