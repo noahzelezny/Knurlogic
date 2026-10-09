@@ -169,11 +169,12 @@ class Host(Provider):
 @pytest.fixture
 def server(monkeypatch):
     """The serve package's module state, pristine for each test."""
+    from knurlogic.engine.mtp import binding
     from knurlogic.engine.serve import state
     monkeypatch.setattr(state, "VISION",
                         {"serve": None, "model": None, "error": ""})
     monkeypatch.setattr(state, "VISION_STATS", {})
-    monkeypatch.setattr(state, "DRAFT", dict(state.DRAFT, head=None,
+    monkeypatch.setattr(binding, "DRAFT", dict(binding.DRAFT, head=None,
                                              on=False, batch_installed=False))
     monkeypatch.setattr(state, "SERVED", {"path": None, "provider": None})
     yield None

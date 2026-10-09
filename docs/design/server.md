@@ -745,11 +745,10 @@ median of each bucket.
 
   load.py          engine info, load, memory, the cache limit, knobs a
                    running process can change, tool dialects
-  state.py         what is served, drafting, vision: the process's dicts
+  state.py         what is served, vision: the process's dicts
   segments.py      the system prompt gets its own segment (checkpoint) on
                    templates where the empty-turn diff finds none (GLM)
   thinking.py      reasoning_effort -> each chat template's own controls
-  drafting.py      an artifact's MTP head, bound to the loaded model
   vision.py        the served model's vision family, bound at load
 
 The engine is mlx-lm (and mlx-vlm for multimodal architectures). The cost

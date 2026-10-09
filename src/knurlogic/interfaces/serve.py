@@ -21,6 +21,7 @@ import sys
 
 from knurlogic.engine import arch, mtp
 from knurlogic.engine import serve as engine
+from knurlogic.engine.mtp import binding
 from knurlogic.interfaces.page import documents
 from knurlogic.machine import status
 from knurlogic.machine.artifact import Artifact
@@ -413,7 +414,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # The wired limit belongs here because this is where somebody looks
         # when a model will not load. Advice only -- knurlogic never sets it.
         snap["wired"] = wired.advise(a.bytes_on_disk)
-        snap["drafting"] = engine.drafting_status()
+        snap["drafting"] = binding.drafting_status()
         from knurlogic.engine.serve import state as _st
         snap["cross_chip"] = dict(_st.SERVED.get("cross_chip") or cross)
         # 8-bit KV decode kernel: hits vs fallbacks, so an A/B of

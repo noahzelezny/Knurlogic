@@ -88,8 +88,8 @@ def sched():
     model, and arrays the scheduler thread made inside it (rope tables,
     caches) must not be freed after that thread has ended -- MLX segfaults.
     A real server's stop() unloads on the thread instead."""
+    from knurlogic.engine.mtp import binding
     from knurlogic.engine.runtime.scheduler import Scheduler
-    from knurlogic.engine.serve import state
     model, head, prompts = _tiny(512)
     # everything evaluated here: MLX streams are per thread, and a lazy
     # array made on this one cannot be evaluated on the scheduler's
@@ -97,11 +97,11 @@ def sched():
     mx.eval([v if isinstance(v, mx.array) else v.parameters()
              for v in vars(head).values()
              if isinstance(v, (mx.array, nn.Module))])
-    state.DRAFT.update(head=head, on=True)
+    binding.DRAFT.update(head=head, on=True)
     s = Scheduler(Host(model, Tok(prompts)), prefill_step_size=16).start()
     s.prompts = prompts
     yield s
-    state.DRAFT.update(head=None, on=False)
+    binding.DRAFT.update(head=None, on=False)
 
 
 def _job(ids, **kw):

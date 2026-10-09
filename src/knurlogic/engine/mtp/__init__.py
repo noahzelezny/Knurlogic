@@ -6,8 +6,9 @@ key it inherited. Pure stdlib (a safetensors header is a length prefix and
 a JSON blob), so `doctor`, `discover` and the page ask without paying for
 mlx; its names are re-exported here.
 
-Everything else in this package RUNS a head and imports mlx, so none of it
-is imported here: `import knurlogic.engine.mtp` stays free;
+`binding` (the head bound to the loaded model, DRAFT) imports no mlx
+either. Everything else in this package RUNS a head and imports mlx, so
+none of it is imported here: `import knurlogic.engine.mtp` stays free;
 `from knurlogic.engine.mtp import batch_generator` is where the engine
 arrives. mlx-lm has no MTP path, so an artifact's drafting head is weight
 nothing else runs. Design: docs/design/drafting.md.

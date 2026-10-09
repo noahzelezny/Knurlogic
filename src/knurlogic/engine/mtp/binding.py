@@ -1,12 +1,18 @@
 """Drafting: an artifact's MTP head, bound to the loaded model.
 
 The batch engine (engine/mtp/batch_generator.MTPBatchGenerator) drafts
-with it; the scheduler hands it the head when one is bound.
+with it; the scheduler hands it the head when one is bound. DRAFT is the
+process's drafting state; every module reaches it by attribute at call
+time (`binding.DRAFT[...]`), never a copy taken at import, which is also
+what lets a test swap it out. Imports no mlx.
 """
 
 from __future__ import annotations
 
-from . import state
+#: Drafting: the bound head and its counters.
+DRAFT: dict = {"head": None, "spec": None, "why": "", "on": False,
+               "requests": 0, "steps": 0, "accepted": 0,
+               "batch_installed": False}
 
 # An artifact that ships a multi-token-prediction head carries weights mlx-lm
 # will never run: it has no MTP path at all, and neither does upstream exo.
@@ -14,10 +20,9 @@ from . import state
 # environment variable, no mode file.
 
 
-
 def drafting_status() -> dict:
     """What drafting is doing, for `/status.json` and the startup line."""
-    d = dict(state.DRAFT)
+    d = dict(DRAFT)
     d.pop("head", None)
     spec = d.pop("spec", None)
     d.pop("batch_installed", None)
@@ -27,7 +32,7 @@ def drafting_status() -> dict:
     return d
 
 
-def load_head(model_path: str):
+def bind_head(model_path: str):
     """Load the drafting head beside this artifact, if there is one.
 
     Absent is the ordinary case and not an error: sidecars are named outside
@@ -35,18 +40,19 @@ def load_head(model_path: str):
     still loads normally through the stock loader.
     """
     from knurlogic.engine.mtp import find_head
+    from knurlogic.engine.serve import state
 
     # a new model's counters start at zero: after a switch to one with no
     # head, /status.json showed the previous model's acceptance as current
-    state.DRAFT.update(steps=0, accepted=0)
+    DRAFT.update(steps=0, accepted=0)
     found = find_head(model_path)
     if found is None:
-        state.DRAFT.update(on=False, why="no drafting head beside the weights")
+        DRAFT.update(on=False, why="no drafting head beside the weights")
         return None
     prov = state.SERVED.get("provider")
     model = getattr(prov, "model", None) if prov else None
     if model is None:
-        state.DRAFT.update(on=False, why="model not loaded yet")
+        DRAFT.update(on=False, why="model not loaded yet")
         return None
     try:
         from knurlogic.engine.mtp.registry import load_head
@@ -55,8 +61,8 @@ def load_head(model_path: str):
     except Exception as e:
         # A head that will not bind is a fact worth printing, not a crash:
         # the model serves perfectly well without one.
-        state.DRAFT.update(on=False, why=f"{type(e).__name__}: {e}")
+        DRAFT.update(on=False, why=f"{type(e).__name__}: {e}")
         return None
-    state.DRAFT.update(head=head, spec=spec, on=True,
-                  why=f"{found.path.name}, {found.gib:.2f} GiB")
+    DRAFT.update(head=head, spec=spec, on=True,
+                 why=f"{found.path.name}, {found.gib:.2f} GiB")
     return head
