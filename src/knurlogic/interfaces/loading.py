@@ -8,7 +8,7 @@ switch (the page's load, POST /v1/ensure), the same checks:
   runnable  its architecture registered from knurlogic's vendored set, and
             every module it needs present.
   fits      its weights fit the memory it would have: the load budget
-            (machine/wired.load_budget), plus what unloading the current
+            (machine/memory/wired.load_budget), plus what unloading the current
             model frees.
 
 A refusal is a `NotLoadable` with an HTTP status and a message that names
@@ -101,8 +101,8 @@ def register(artifact) -> list:
 def prepare(model: str, *, served: str | None = None,
             freed_bytes: int = 0):
     """-> the Artifact to load, or NotLoadable saying why not."""
-    from knurlogic.machine import wired
     from knurlogic.machine.artifact import Artifact
+    from knurlogic.machine.memory import wired
     path = resolve_name(model, served)
     try:
         a = Artifact.load(path)

@@ -393,7 +393,7 @@ def room_for(weights_bytes: int, cfg: dict,
     hold today comes and goes; the working set is what the scheduler's
     guard will count against for the life of the load."""
     if working_set_bytes is None:
-        from knurlogic.machine import allowance, wired
+        from knurlogic.machine.memory import allowance, wired
         working_set_bytes = allowance.cap(wired.detected_working_set_bytes())
     return context_room(working_set_bytes, weights_bytes, cfg, kv_bits)
 

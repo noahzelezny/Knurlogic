@@ -8,6 +8,7 @@ into "has a model" loses the only fact anybody opened the page for.
 import pytest
 
 from knurlogic.machine import loaded
+from knurlogic.machine.memory import footprint
 
 
 class _Fake:
@@ -117,7 +118,7 @@ def test_nothing_running_is_an_ordinary_answer(monkeypatch):
     only the HTTP layer let this read the developer's actual machine -- the
     same leak the discovery tests had against the real disk."""
     monkeypatch.setattr(loaded, "_get", lambda *a, **k: None)
-    monkeypatch.setattr(loaded, "memory_map", lambda *a, **k: {})
+    monkeypatch.setattr(footprint, "memory_map", lambda *a, **k: {})
     # And the server record: the survey reads ~/.cache/knurlogic/servers.json
     # now, and this test first failed because a real model WAS running.
     from knurlogic.machine import servers
@@ -134,35 +135,35 @@ def test_a_shell_in_a_project_directory_is_not_a_runtime():
     against the whole command line: a shell whose cwd was named after a
     project, and a tail following a log. Reported as runtimes holding
     memory."""
-    assert loaded._runtime_of("-zsh") == ""
-    assert loaded._runtime_of("/bin/zsh /Users/x/vqlab/run.sh") == ""
-    assert loaded._runtime_of("tail -f /Users/x/exo/log.txt") == ""
+    assert footprint._runtime_of("-zsh") == ""
+    assert footprint._runtime_of("/bin/zsh /Users/x/vqlab/run.sh") == ""
+    assert footprint._runtime_of("tail -f /Users/x/exo/log.txt") == ""
     # a console script run by its interpreter names itself only as the
     # script (`knurlogic serve` must not read as "everything else")
-    assert loaded._runtime_of(
+    assert footprint._runtime_of(
         "/opt/homebrew/Cellar/python@3.12/3.12.13_2/Frameworks/Python."
         "framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python "
         "/Users/x/kl/venv/bin/knurlogic serve /m --port 8097") \
         == "knurlogic"
-    assert loaded._runtime_of("python3 -u run.py") == ""
-    assert loaded._runtime_of("grep -r knurlogic src/") == ""
+    assert footprint._runtime_of("python3 -u run.py") == ""
+    assert footprint._runtime_of("grep -r knurlogic src/") == ""
 
 
 def test_a_runtime_is_read_from_its_executable_or_its_module():
-    assert loaded._runtime_of(
+    assert footprint._runtime_of(
         "/opt/anaconda3/envs/exo/bin/python3.13 run.py") == "exo"
-    assert loaded._runtime_of("/usr/bin/python3 -m knurlogic.cli serve") \
+    assert footprint._runtime_of("/usr/bin/python3 -m knurlogic.cli serve") \
         == "knurlogic"
-    assert loaded._runtime_of("python3 -m mlx_lm.server --model x") == "mlx-lm"
-    assert loaded._runtime_of("python -m mlx_vlm.server") == "mlx-vlm"
-    assert loaded._runtime_of("/usr/local/bin/ollama serve") == "ollama"
-    assert loaded._runtime_of("/usr/bin/python3 other.py") == ""
+    assert footprint._runtime_of("python3 -m mlx_lm.server --model x") == "mlx-lm"
+    assert footprint._runtime_of("python -m mlx_vlm.server") == "mlx-vlm"
+    assert footprint._runtime_of("/usr/local/bin/ollama serve") == "ollama"
+    assert footprint._runtime_of("/usr/bin/python3 other.py") == ""
 
 
 def test_a_script_names_its_process_over_the_interpreters_env():
     # vqlab's benchmark run with exo's python read as exo on the page's
     # legend (M3, 2026-10-01)
-    assert loaded._runtime_of(
+    assert footprint._runtime_of(
         "/opt/anaconda3/envs/exo/bin/python /Users/x/.vqlab/queues/q/tree/"
         "src/vqlab/bench/speed_pair.py /Volumes/S/pin_Qwen") == "vqlab"
 
@@ -171,15 +172,15 @@ def test_an_idle_runtime_is_reported_below_the_floor(monkeypatch):
     """An idle exo holding 163 MiB is an ANSWER -- nothing is loaded. Dropped
     under a floor it looks identical to exo not running at all, which is the
     question the panel exists to settle."""
-    monkeypatch.setattr(loaded, "_footprints", lambda: ({
+    monkeypatch.setattr(footprint, "_footprints", lambda: ({
         1: 160 << 20,          # exo, idle, under the floor
         2: 4 << 30,            # something else, over it
         3: 100 << 20}, {}))    # something else, under it
-    monkeypatch.setattr(loaded, "_commands", lambda: {
+    monkeypatch.setattr(footprint, "_commands", lambda: {
         1: "/opt/anaconda3/envs/exo/bin/python3.13",
         2: "/Applications/Thing.app/Contents/MacOS/Thing",
         3: "/usr/bin/something-small"})
-    m = loaded.memory_map(floor=256 << 20)
+    m = footprint.memory_map(floor=256 << 20)
     pids = {r["pid"] for r in m["processes"]}
     assert pids == {1, 2}                 # 3 dropped, 1 kept despite the floor
     assert m["by_runtime"] == {"exo": 160 << 20}
@@ -188,11 +189,11 @@ def test_an_idle_runtime_is_reported_below_the_floor(monkeypatch):
 def test_the_unattributed_remainder_is_reported(monkeypatch):
     """"Where did the RAM go" is not answered by a list that sums to less
     than the machine and does not say so."""
-    monkeypatch.setattr(loaded, "_footprints", lambda: (
+    monkeypatch.setattr(footprint, "_footprints", lambda: (
         {1: 2 << 30, 2: 6 << 30}, {}))
-    monkeypatch.setattr(loaded, "_commands", lambda: {
+    monkeypatch.setattr(footprint, "_commands", lambda: {
         1: "/envs/exo/bin/python3", 2: "/Applications/Other"})
-    m = loaded.memory_map(floor=1 << 30)
+    m = footprint.memory_map(floor=1 << 30)
     assert m["runtime_bytes"] == 2 << 30
     assert m["other_bytes"] == 6 << 30
     assert m["seen_bytes"] == 8 << 30
@@ -205,12 +206,12 @@ def test_available_memory_counts_the_cache_macos_will_hand_over(monkeypatch):
     70 GiB available). What a model can actually have is free + inactive --
     the file cache is handed over on demand -- and that is the number exo
     reports and the one this had to match."""
-    monkeypatch.setattr(loaded, "_footprints", lambda: (
+    monkeypatch.setattr(footprint, "_footprints", lambda: (
         {1: 4 << 30},
         {"available_bytes": 70 << 30, "free_bytes": 2 << 30,
          "cached_bytes": 68 << 30, "wired_bytes": 10 << 30}))
-    monkeypatch.setattr(loaded, "_commands", lambda: {1: "/envs/exo/bin/python3"})
-    m = loaded.memory_map(floor=1 << 30)
+    monkeypatch.setattr(footprint, "_commands", lambda: {1: "/envs/exo/bin/python3"})
+    m = footprint.memory_map(floor=1 << 30)
     inst = m["installed_bytes"]
     assert m["free_bytes"] == 70 << 30         # available, not "unused"
     assert m["truly_free_bytes"] == 2 << 30    # kept, but not the headline
@@ -219,7 +220,7 @@ def test_available_memory_counts_the_cache_macos_will_hand_over(monkeypatch):
 
 def test_available_memory_reads_the_real_vm_stat():
     """Not mocked: the parse has to survive macOS's own wording."""
-    d = loaded.available_memory()
+    d = footprint.available_memory()
     if not d:
         return
     assert d["available_bytes"] >= d["free_bytes"]
@@ -228,9 +229,9 @@ def test_available_memory_reads_the_real_vm_stat():
 
 
 def test_a_missing_physmem_line_falls_back_rather_than_lying(monkeypatch):
-    monkeypatch.setattr(loaded, "_footprints", lambda: ({1: 4 << 30}, {}))
-    monkeypatch.setattr(loaded, "_commands", lambda: {1: "/envs/exo/bin/python3"})
-    m = loaded.memory_map(floor=1 << 30)
+    monkeypatch.setattr(footprint, "_footprints", lambda: ({1: 4 << 30}, {}))
+    monkeypatch.setattr(footprint, "_commands", lambda: {1: "/envs/exo/bin/python3"})
+    m = footprint.memory_map(floor=1 << 30)
     assert m["from_os"] is False
     assert m["used_bytes"] == 4 << 30
 
@@ -240,7 +241,7 @@ def test_a_registered_server_is_found_on_a_port_nobody_guessed(monkeypatch):
     only probed a fixed list of ports. It reads the record now."""
     from knurlogic.machine import servers
     monkeypatch.setattr(loaded, "_get", lambda *a, **k: None)
-    monkeypatch.setattr(loaded, "memory_map", lambda *a, **k: {})
+    monkeypatch.setattr(footprint, "memory_map", lambda *a, **k: {})
     monkeypatch.setattr(servers, "registry", lambda: {
         8092: {"pid": 1, "artifact": "/m/Qwen3.6-35B-A3B"}})
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
@@ -290,17 +291,17 @@ File-backed pages:                        150.
     # free + file-backed + purgeable; speculative is already inside
     # file-backed (vm_stat: active+inactive+speculative == file+anonymous)
     # and inactive is not added
-    assert loaded.available_memory()["available_bytes"] == 550 * 16384
+    assert footprint.available_memory()["available_bytes"] == 550 * 16384
 
 
 def test_a_module_in_exos_env_is_that_module_not_exo():
     """vqlab run from exo's conda env read as exo: the env path matched
     before the `-m` module was asked."""
     env = "/opt/anaconda3/envs/exo/bin/python"
-    assert loaded._runtime_of(f"{env} -m vqlab.cli pin /m") == "vqlab"
-    assert loaded._runtime_of(f"{env} -m some.tool /m") == ""
-    assert loaded._runtime_of(f"{env} -m exo.main") == "exo"
-    assert loaded._runtime_of("/opt/anaconda3/envs/exo/bin/exo") == "exo"
+    assert footprint._runtime_of(f"{env} -m vqlab.cli pin /m") == "vqlab"
+    assert footprint._runtime_of(f"{env} -m some.tool /m") == ""
+    assert footprint._runtime_of(f"{env} -m exo.main") == "exo"
+    assert footprint._runtime_of("/opt/anaconda3/envs/exo/bin/exo") == "exo"
 
 
 def test_a_cluster_row_holds_every_ranks_bytes():
@@ -338,7 +339,7 @@ def test_inactive_anonymous_pages_are_used_not_available(monkeypatch):
     ANONYMOUS pages, which macOS reclaims only by swapping. Counting them
     as available read 66.9 used when ~125 was."""
     _m4_vm_stat(monkeypatch)
-    d = loaded.available_memory()
+    d = footprint.available_memory()
     gib = 1 << 30
     assert d["available_bytes"] == pytest.approx(2.9 * gib, abs=gib / 100)
     assert d["used_bytes"] == pytest.approx(124.2 * gib, abs=gib / 100)
@@ -346,7 +347,7 @@ def test_inactive_anonymous_pages_are_used_not_available(monkeypatch):
 
 def test_purgeable_and_speculative_are_available_once(monkeypatch):
     _m4_vm_stat(monkeypatch, spec=0.5, purg=2)
-    d = loaded.available_memory()
+    d = footprint.available_memory()
     gib = 1 << 30
     # free + file-backed + purgeable (speculative is inside file-backed,
     # counted once); purgeable leaves used
@@ -359,15 +360,15 @@ def test_purgeable_and_speculative_are_available_once(monkeypatch):
 def test_the_map_takes_used_from_the_os_and_splits_swap(monkeypatch):
     from knurlogic.machine import metrics
     gib = 1 << 30
-    monkeypatch.setattr(loaded, "_footprints", lambda: (
+    monkeypatch.setattr(footprint, "_footprints", lambda: (
         {1: 109 * gib, 2: 3 * gib},
         {"available_bytes": 3 * gib, "free_bytes": gib,
          "cached_bytes": 2 * gib, "wired_bytes": 4 * gib,
          "used_bytes": 100 * gib}))
-    monkeypatch.setattr(loaded, "_commands", lambda: {
+    monkeypatch.setattr(footprint, "_commands", lambda: {
         1: "/v/bin/python -m knurlogic serve", 2: "/Applications/Other"})
     monkeypatch.setattr(metrics, "_swap", lambda: 12 * gib)
-    m = loaded.memory_map(floor=1 << 30)
+    m = footprint.memory_map(floor=1 << 30)
     assert m["used_bytes"] == 100 * gib
     # footprints (112) exceed used (100): the excess is swapped, and the
     # runtime's row is its resident part, so the rows add up
@@ -427,7 +428,7 @@ def test_our_server_busy_generating_keeps_its_card(monkeypatch):
             return {"data": [{"id": "GLM"}]}
         return None
     monkeypatch.setattr(loaded, "_get", get)
-    monkeypatch.setattr(loaded, "memory_map", lambda *a, **k: {})
+    monkeypatch.setattr(footprint, "memory_map", lambda *a, **k: {})
     monkeypatch.setattr(loaded, "_LAST", {})
     monkeypatch.setattr(servers, "registry", lambda: {
         8080: {"pid": 1, "artifact": "/m/GLM"}})

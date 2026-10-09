@@ -174,7 +174,7 @@ def launch_fit(a, overrides, tune: str = "default", draft: bool = True,
     """`tuning.fit.single_fit_check` for a launch's settings against
     `budget_bytes` (default: the load budget): the same check `run` makes,
     so the MCP and the page can refuse before a process starts."""
-    from knurlogic.machine import wired
+    from knurlogic.machine.memory import wired
     from knurlogic.tuning import preferences
     from knurlogic.tuning.fit import single_fit_check
     from knurlogic.tuning.resolve import preset_env

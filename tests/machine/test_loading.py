@@ -27,8 +27,9 @@ def _artifact(root: Path, name: str, gib: float = 1.0,
 @pytest.fixture
 def machine(tmp_path, monkeypatch):
     """Two artifacts in a store, one outside it; memory as asked."""
-    from knurlogic.machine import discover, wired
+    from knurlogic.machine import discover
     from knurlogic.machine.artifact import Artifact
+    from knurlogic.machine.memory import wired
     store = tmp_path / "store"
     store.mkdir()
     a = _artifact(store, "known-model")

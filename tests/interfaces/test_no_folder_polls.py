@@ -36,7 +36,7 @@ def test_polls_never_read_a_model_folder(monkeypatch, tmp_path, no_folders,
     monkeypatch.setattr(server, "is_our_server", lambda pid: True)
     monkeypatch.setattr(server, "_answers", lambda port: answers)
     mm = {"processes": [{"pid": 100, "bytes": 950}]}
-    monkeypatch.setattr(server.loaded, "memory_map", lambda: mm)
+    monkeypatch.setattr(server.footprint, "memory_map", lambda: mm)
     monkeypatch.setattr(server.loaded, "survey", lambda: {
         "resident": [], "runtimes": [], "bytes_resident": 0, "memory": mm})
     documents._LOADED.update(doc=None, at=0.0)

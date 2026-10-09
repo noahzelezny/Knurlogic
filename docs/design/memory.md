@@ -1,6 +1,6 @@
 # Memory accounting
 
-## knurlogic/machine/loaded.py
+## knurlogic/machine/loaded.py and machine/memory/footprint.py
 
 `discover` answers what is on the disk. This answers what is in memory,
 and they are different questions with different answers: forty artifacts
@@ -82,7 +82,7 @@ are 80 GiB of weights held, not 40. It also reports how many nodes
 answered, because a sum over nodes that did not reply is a smaller number
 that looks like good news.
 
-## knurlogic/machine/wired.py
+## knurlogic/machine/memory/wired.py
 
 On Apple Silicon `iogpu.wired_limit_mb` caps how much memory the GPU may
 wire, and it is what the framework's "recommended working set" follows.

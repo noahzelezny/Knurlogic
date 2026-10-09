@@ -113,8 +113,8 @@ def models_document(serving: str = ""):
             except (OSError, ValueError, KeyError, AttributeError):
                 _MODELS["rows"] = []
         out = []
-        from knurlogic.machine import allowance, wired
         from knurlogic.machine.artifact import identity as artifact_identity
+        from knurlogic.machine.memory import allowance, wired
         ws = allowance.cap(wired.detected_working_set_bytes())
         from knurlogic.interfaces.page import updates
         stale = updates.flagged([f.path for f in _MODELS["rows"]])
@@ -394,7 +394,7 @@ def machine_settings():
         return v
 
     def handler(q: dict) -> dict:
-        from knurlogic.machine import wired
+        from knurlogic.machine.memory import wired
         from knurlogic.tuning import presets
 
         # A PREVIEW for an artifact nobody has loaded. This is the point of
@@ -406,8 +406,7 @@ def machine_settings():
         if not art and _one(q, "identity"):
             # a peer page's picker asks by identity (never by path): this
             # machine's own copy, from its own model stores only
-            from knurlogic.machine.artifact import (AmbiguousIdentity,
-                                                    resolve_identity)
+            from knurlogic.machine.artifact import AmbiguousIdentity, resolve_identity
             try:
                 art = resolve_identity(_one(q, "identity"),
                                        name=str(_one(q, "name") or ""))
@@ -468,10 +467,10 @@ def machine_settings():
 
 
 def allowance_doc() -> dict:
-    """`GET /allowance.json`: the knurlogic allowance (machine/allowance.py)
+    """`GET /allowance.json`: the knurlogic allowance (machine/memory/allowance.py)
     and what it is lowering -- 0 means none, knurlogic takes the working
     set."""
-    from knurlogic.machine import allowance, wired
+    from knurlogic.machine.memory import allowance, wired
     ws = wired.detected_working_set_bytes()
     a = allowance.get()
     return {"allowance_gib": round(a / GIB, 1), "working_set_gib":
@@ -485,7 +484,7 @@ def set_allowance(body) -> dict:
     machine's: a peer's is set on that peer's own page. Refused above the
     installed memory -- an allowance past it would not lower anything and
     reads as a mistake."""
-    from knurlogic.machine import allowance, wired
+    from knurlogic.machine.memory import allowance, wired
     try:
         gib = float(json.loads(body or b"{}").get("gib"))
     except (ValueError, TypeError, AttributeError):
@@ -534,8 +533,8 @@ def _preview(path: str, tune: str, working_set_gib=None,
     chosen. Nothing is loaded and nothing is set: this only reads.
     `kv_bits`: the KV precision it would launch with ('bf16', '8', ...),
     for the room its context is counted in."""
-    from knurlogic.machine import wired
     from knurlogic.machine.artifact import Artifact
+    from knurlogic.machine.memory import wired
     from knurlogic.tuning import context_window, knobs, presets
     from knurlogic.tuning.fit import room_for
     from knurlogic.tuning.resolve import kv_refusal as resolve_kv_refusal

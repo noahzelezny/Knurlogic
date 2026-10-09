@@ -120,9 +120,9 @@ def fit(artifact: str = "", draft: bool = True, vision: bool = True,
     against and `load` starts a server with, so the three cannot disagree.
     """
     from knurlogic.engine.vision import registry as vision_registry
-    from knurlogic.machine import wired
     from knurlogic.machine.artifact import Artifact
-    from knurlogic.machine.loaded import available_memory
+    from knurlogic.machine.memory import wired
+    from knurlogic.machine.memory.footprint import available_memory
     from knurlogic.tuning import measured
 
     artifact, refused = _named(artifact)
@@ -536,7 +536,8 @@ def models(fits_only: bool = False, **_) -> dict[str, Any]:
     """Every model on this machine, with what can actually run."""
     from knurlogic.engine.serve import thinking
     from knurlogic.engine.vision import registry as vision_registry
-    from knurlogic.machine import discover, wired
+    from knurlogic.machine import discover
+    from knurlogic.machine.memory import wired
     avail = wired.load_budget()["bytes"]
     out = []
     for f in discover.find():

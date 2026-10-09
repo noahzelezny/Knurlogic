@@ -1,4 +1,4 @@
-"""machine/allowance.py: the most memory knurlogic may use on this machine,
+"""machine/memory/allowance.py: the most memory knurlogic may use on this machine,
 remembered in a file, lowering the load budget and the scheduler's working
 set; the page server's /allowance.json; and the room a fit leaves to talk
 in (tuning/fit.context_room)."""
@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.machine import allowance, wired  # noqa: E402
+from knurlogic.machine.memory import allowance, wired  # noqa: E402
 
 GIB = 1 << 30
 
@@ -48,9 +48,9 @@ def test_cap_only_lowers(home):
 
 
 def test_load_budget_is_capped_and_says_so(home, monkeypatch):
-    from knurlogic.machine import loaded
+    from knurlogic.machine.memory import footprint
     monkeypatch.setattr(wired, "detected_working_set_bytes", lambda: 100 * GIB)
-    monkeypatch.setattr(loaded, "available_memory",
+    monkeypatch.setattr(footprint, "available_memory",
                         lambda: {"available_bytes": 90 * GIB})
     b = wired.load_budget()
     assert b["bytes"] == 90 * GIB and b["allowance_bytes"] == 0

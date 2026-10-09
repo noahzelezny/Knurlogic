@@ -11,8 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from knurlogic.machine import wired
 from knurlogic.machine.artifact import Artifact
+from knurlogic.machine.memory import wired
 from knurlogic.tuning import knobs, measured, presets
 from knurlogic.tuning.resolve import resolve
 

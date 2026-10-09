@@ -12,8 +12,8 @@ import argparse
 import sys
 
 from knurlogic.engine import arch
-from knurlogic.machine import wired
 from knurlogic.machine.artifact import Artifact
+from knurlogic.machine.memory import wired
 from knurlogic.tuning import presets
 from knurlogic.tuning.resolve import resolve
 
@@ -34,7 +34,7 @@ def run(path: str, working_set_gib: float, profile: str | None,
         ws = wired.detected_working_set_bytes()
         if ws:
             detected = " (detected)"
-            from knurlogic.machine import allowance
+            from knurlogic.machine.memory import allowance
             if allowance.get() and allowance.cap(ws) < ws:
                 ws = allowance.cap(ws)
                 detected = " (the knurlogic allowance)"

@@ -25,7 +25,8 @@ from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, quote, urlparse
 
 from knurlogic.interfaces.page import documents
-from knurlogic.machine import identity, loaded, status, wired
+from knurlogic.machine import identity, loaded, status
+from knurlogic.machine.memory import footprint, wired
 from knurlogic.machine.servers import is_our_server, registry, save_registry, serve_log
 
 # the launch facts cluster jobs share: tuning/checks owns them
@@ -76,7 +77,7 @@ def _status_fn(_n=0):
     now = time.time()
     if _MM["doc"] is None or now - _MM["at"] > 4.0:
         try:
-            _MM["doc"] = loaded.memory_map()
+            _MM["doc"] = footprint.memory_map()
         except (OSError, subprocess.SubprocessError, ValueError, KeyError,
                 AttributeError):
             _MM["doc"] = None
@@ -177,7 +178,7 @@ def _build_light(now: float) -> None:
         return                      # built while this request waited
     if _MM["doc"] is None or now - _MM["at"] > _map_age_limit(now):
         try:
-            _MM["doc"] = loaded.memory_map()
+            _MM["doc"] = footprint.memory_map()
         except (OSError, subprocess.SubprocessError, ValueError, KeyError,
                 AttributeError):
             _MM["doc"] = None
@@ -272,7 +273,7 @@ def children() -> list:
     """
     now = time.time()
     try:
-        pids = {r["pid"]: r["bytes"] for r in loaded.memory_map()["processes"]}
+        pids = {r["pid"]: r["bytes"] for r in footprint.memory_map()["processes"]}
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         pids = {}
     out = []

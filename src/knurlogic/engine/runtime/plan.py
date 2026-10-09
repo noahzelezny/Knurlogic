@@ -29,8 +29,8 @@ OPS = ("admit", "remove", "chunk", "insert", "pop", "reset", "stop", "park",
        "set", "save_cache", "drop", "pin", "drop_sessionless", "drop_files",
        "park_session", "read_back")
 #: admit's `chunk` is the prefill chunk rank 0 fitted the row at (memory:
-#: scheduler._make_room); `chunk` (uid, chunk) refits a row not yet
-#: prefilled (scheduler._fit_next). Ranks prefilling one row in different
+#: memory_guard._make_room); `chunk` (uid, chunk) refits a row not yet
+#: prefilled (memory_guard._fit_next). Ranks prefilling one row in different
 #: chunk counts run different collectives and deadlock.
 _FIELDS = {
     "admit": ("uid", "prompt", "segs", "hit", "max_tokens", "sampling",
