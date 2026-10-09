@@ -84,7 +84,10 @@ new launch.
 ## From an agent
 
 The MCP `load` tool does what Launch does, with the same refusals; `fit`
-asks first; `unload` stops. See [mcp.md](mcp.md).
+asks first; `unload` stops. Its `machines` takes names, or role words that
+work on anyone's Macs: `here`, `peers`, `all`, or `fit` (this Mac if the
+model fits, else the smallest set of answering Macs it fits on, split
+pipeline unless asked). See [mcp.md](mcp.md).
 
 A model server also answers `POST /v1/ensure {"model", "wait"}`: it returns
 at once if the model is ready, otherwise loads it (one load at a time) and

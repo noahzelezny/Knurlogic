@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from knurlogic.interfaces.mcp import inspection, page_client
+from knurlogic.interfaces.mcp import inspection, page_client, placement
 from knurlogic.interfaces.mcp.inspection import GIB
 
 
@@ -28,6 +28,11 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
 
     `machines` names where: empty is this Mac. Another Mac, or several,
     go through the page on this Mac -- its Launch, the same request.
+    Role words need no machine names (placement.py): "here", "peers"
+    (every answering peer), "all" (here + peers), mixable with names;
+    "fit" alone -- this Mac if it fits here, else the smallest set of
+    answering Macs it fits on. A role that makes a cluster splits
+    pipeline unless `split` says otherwise.
 
     `vision=false` launches without the vision tower, image store and
     image KV (KNURLOGIC_VISION=off): more headroom, and images get a 400.
@@ -41,6 +46,15 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
         return {"loaded": False, "refused": str(e),
                 "note": "the tune is default or lean; nothing was started"}
     names = [str(m) for m in (machines or []) if str(m)]
+    if names and placement.is_role_list(names):
+        # role words (here | peers | all | fit): placement.py
+        try:
+            names, split, no = placement.resolve_machines(
+                names, artifact, split, draft, vision)
+        except page_client.PageDown as e:
+            return {"error": str(e)}
+        if no:
+            return no
     if names:
         return _load_on(names, artifact, port, tune, sets, force, draft,
                         split, link, cable)
