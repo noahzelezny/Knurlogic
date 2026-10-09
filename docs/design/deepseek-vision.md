@@ -100,7 +100,7 @@ In code (2026-10-02):
   drafts and judges, as with the 1-token head: `Coord.bk` carries its
   regime and the [B, 5] drafts (B1), `Coord.bm` the committed count and
   every row's next token (B2); a follower (`MTPBatchGenerator.follow_block`,
-  told the block size and the target layers by `tensor.agree_head`) runs
+  told the block size and the target layers by `follower.agree_head`) runs
   the 6-wide verify and the replay with them. The sidecar counts in rank
   0's share (`leader_bytes`). Image rows do not draft (as with every head).
 - Captures on a pipeline split (`pipeline.carry`). Rank 0 holds the LAST

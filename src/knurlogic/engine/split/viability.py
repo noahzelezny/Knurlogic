@@ -52,7 +52,8 @@ def check_module(m, rule, n: int, key_dim: int = 0, seed: int = 0):
     else why not with the numbers."""
     import mlx.core as mx
 
-    from .tensor import split_params
+    from knurlogic.engine.split.tensor import split_params
+
     from .tensor_rules import A2S, predicate, segment_points
 
     g = _geometry(m)

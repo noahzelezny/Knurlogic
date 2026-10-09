@@ -112,8 +112,8 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
     import signal
     import threading
 
-    from knurlogic.engine.runtime import marker
     from knurlogic.engine.runtime.scheduler import RingFailed
+    from knurlogic.engine.split import marker
 
     armed: list = []
 
@@ -221,11 +221,14 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
     tensor = shard = shard_config = agree = None
     pipe = bool(ring and ring.get("split") == "pipeline")
     if ring:
-        from knurlogic.engine.runtime import tensor as T
-        link = T.init(ring["link"])
-        tensor = T.Ring(link, split=ring.get("split", "tensor"))
+        from knurlogic.engine.split import follower as split_follower
+        from knurlogic.engine.split import link as split_link
+        from knurlogic.engine.split import ring as split_ring
+        from knurlogic.engine.split import tensor as T
+        link = split_link.init(ring["link"])
+        tensor = split_ring.Ring(link, split=ring.get("split", "tensor"))
         if pipe:
-            from knurlogic.engine.runtime import pipeline as PL
+            from knurlogic.engine.split import pipeline as PL
             shares = PL.agree(link.group, **ring["pipeline"])
             print(f"pipeline  rank 0: {shares['reason']}", flush=True)
             def shard(m):
@@ -237,7 +240,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
             def shard_config(p):
                 return T.load_config(p, link.group)
         # rank 0 drafts on either split and tells the others (agree_head)
-        agree = T.agree_head(link)
+        agree = split_follower.agree_head(link)
     mh = ModelHost(draft=draft, head_agree=agree,
                    executes_artifact_code=bool(artifact.model_file),
                    image_store_bytes=settings.get("image_store_bytes"),
@@ -248,7 +251,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                    cross_chip=settings.get("cross_chip"))
     if ring:
         # the disk prompt cache's key: this rank's part of the split
-        # (engine/prompt_cache/disk; the followers' in tensor.serve_follower)
+        # (engine/prompt_cache/disk; the followers' in follower.serve_follower)
         mh.cache_layout = {"split": ring.get("split", "tensor"),
                            "world": link.size, "rank": link.rank}
         if pipe:

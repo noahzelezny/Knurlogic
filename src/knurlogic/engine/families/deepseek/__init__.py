@@ -22,7 +22,7 @@ MANIFEST = {
         # indexer pools), which engine/kvquant.py does not know how to
         # quantize. Refused until someone measures it.
         "deepseek_v4": {
-            # a tensor split (engine/runtime/tensor.py) knows this trunk.
+            # a tensor split (engine/split/tensor.py) knows this trunk.
             # `divisible`: config keys a split must divide by the ranks --
             # wo_a is grouped over whole heads: a rank keeps whole groups
             # (its arrays alone would also divide at 16 ranks, 8 groups)

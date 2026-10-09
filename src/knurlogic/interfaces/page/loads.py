@@ -389,7 +389,7 @@ def load_progress(doc: dict) -> list:
              **({"rank": rec["rank"]} if "rank" in rec else {}),
              "seconds": round(now - t), "bytes": procs.get(pid, 0),
              # a rank of a split job holds its share, not the artifact:
-             # the rank writes it to its marker (engine/runtime/marker.progress)
+             # the rank writes it to its marker (engine/split/marker.progress)
              "total_bytes": int(_share_of(rec) or rec.get("bytes") or 0),
              "last_log_line": lines[-1][:200] if lines else ""}
         r = rows.get(port) if port else None

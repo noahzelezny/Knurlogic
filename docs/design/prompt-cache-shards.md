@@ -54,7 +54,7 @@ cache along some axis, and that axis differs by cache kind:
 | compressor / indexer pools | per family | DeepSeek V4, qwen4_exp |
 
 The axis comes from the family's spec, next to its tensor rules
-(engine/runtime/tensor_rules.py), not from a guess at array shapes. A kind
+(engine/split/tensor_rules.py), not from a guess at array shapes. A kind
 without a spec is saved whole per rank under that rank's layout (today's
 behavior) and is listed as missing in the onboarding checklist
 (new-model.md, "Cache saving").

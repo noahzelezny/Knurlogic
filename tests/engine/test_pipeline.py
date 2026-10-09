@@ -186,7 +186,7 @@ mx = pytest.importorskip("mlx.core")
 
 
 def test_bounds_of_puts_the_first_layers_on_the_last_rank():
-    from knurlogic.engine.runtime.pipeline import bounds_of
+    from knurlogic.engine.split.pipeline import bounds_of
     assert bounds_of([1, 3]) == [(3, 4), (0, 3)]
     assert bounds_of([2, 1, 1]) == [(2, 4), (1, 2), (0, 1)]
 
@@ -435,7 +435,7 @@ def test_dspark_drafting_on_a_split_is_the_undrafted_engine(
 def test_dspark_on_a_split_through_the_serving_path(tmp_path, monkeypatch,
                                                    split, counts):
     """Rank 0's TensorExecutor drafting with DSpark, the follower's
-    tensor.follow told the block size and target layers (agree_head):
+    follower.follow told the block size and target layers (agree_head):
     seeded and greedy rows stream the unsplit executor's tokens, and each
     finished row's entry is at its key's length."""
     d = _ring(tmp_path, "dspark", split, counts or "-", "1", "engine")
@@ -456,7 +456,7 @@ def test_rows_ending_inside_a_drafting_step_keep_the_ranks_in_step(
     1-token MTP head or DSpark's block head, the regime timing-chosen and
     every row seeded by the ring (assign_seed): rows ending on max_tokens
     and on the end token, eight in a batch and each alone, through rank
-    0's TensorExecutor and the follower's tensor.follow. Some end before a
+    0's TensorExecutor and the follower's follower.follow. Some end before a
     drafting step's last position (the step is cut there), both regimes
     run, every rank finishes, and each row alone streams the unsplit
     executor's tokens -- live, a 1-token step cut to t1 left the tensor
@@ -489,7 +489,7 @@ def test_the_serving_path_follows_rank_0s_plan_on_a_pipeline(tmp_path):
 def test_the_serving_path_follows_rank_0s_plan_on_a_drafting_tensor_split(
         tmp_path):
     """The same serving path on a tensor split, rank 0 alone holding the
-    head and the follower's tensor.follow drafting: rank 0 streams exactly
+    head and the follower's follower.follow drafting: rank 0 streams exactly
     the unsplit executor's tokens with the head."""
     d = _ring(tmp_path, "engine", "", "tensor", "1")
     assert d["split"] == d["whole"] and all(len(t) == 30 for t in d["whole"])
@@ -565,7 +565,7 @@ def _tiny(family):
 def _stage(model, start, end, *, recv, send):
     """`model` as the pipeline stage holding layers [start, end), its ends
     wrapped the way split() wraps them (no ring: nothing is called)."""
-    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.split import pipeline as PL
     keep = list(PL.core_of(model).layers)[start:end]
     if recv:
         keep[0] = PL.Recv(keep[0], 1, None, mx.float32)
@@ -578,7 +578,7 @@ def _stage(model, start, end, *, recv, send):
 def test_unwrap_sees_through_both_ends_of_a_one_layer_stage():
     import mlx.nn as nn
 
-    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.split import pipeline as PL
     lin = nn.Linear(2, 2)
     both = PL.Send(PL.Recv(lin, 1, None, mx.float32), 0, None, mx.float32)
     assert PL.unwrap(both) is lin and PL.unwrap(lin) is lin
@@ -594,7 +594,7 @@ def test_overlap_finds_a_stages_send_and_is_undone_on_the_way_out(
 
     import mlx.nn as nn
 
-    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.split import pipeline as PL
     send = PL.Send(PL.Recv(nn.Linear(2, 2), 1, None, mx.float32), 0, None,
                    mx.float32)
     model = types.SimpleNamespace(model=types.SimpleNamespace(
@@ -621,7 +621,7 @@ def test_the_flash_next_head_binds_on_any_stage(start, end, recv, send):
     import importlib
 
     from knurlogic.engine.families.qwen.heads.qwen4_exp import MTPHead
-    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.split import pipeline as PL
     model = _stage(_tiny("qwen4_exp"), start, end, recv=recv, send=send)
     core = PL.core_of(model)
     arch = importlib.import_module(type(core).__module__)
@@ -646,7 +646,7 @@ def test_restage_reads_the_layer_kinds_through_the_stage_ends(family):
     the tiny models' layers 0-2 are linear and layer 3 full attention, so
     the stage [2, 4) with both ends wrapped has its recurrent cache at 0 and
     its attention cache at 1."""
-    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.split import pipeline as PL
     model = _stage(_tiny(family), 2, 4, recv=True, send=True)
     core = PL.core_of(model)
     assert (core.ssm_idx, core.fa_idx) == (0, 1)

@@ -2,7 +2,7 @@
 
 Builds the tiny text model of a family (qwen3_5_moe unless named: the
 second argument), splits it with
-engine/runtime/tensor.shard, and prefills + decodes a few tokens; rank 0
+engine/split/tensor.shard, and prefills + decodes a few tokens; rank 0
 also runs the unsplit model and writes both logits for the test to
 compare. Run with MLX_RANK and MLX_HOSTFILE set."""
 import json
@@ -85,8 +85,10 @@ def run(model, ids, then):
 
 
 def main(out_path, family="qwen3_5_moe"):
-    from knurlogic.engine.runtime import tensor as T
-    link = T.init("ring")
+    from knurlogic.engine.split import link as split_link
+    from knurlogic.engine.split import ring as split_ring
+    from knurlogic.engine.split import tensor as T
+    link = split_link.init("ring")
     ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]
     then = [31, 104, 331, 32, 439, 214]
     if family == "deepseek_v4":                 # its vocabulary is 64
@@ -109,9 +111,9 @@ def main(out_path, family="qwen3_5_moe"):
     # idle: rank 0 parks rank 1 on the bell, then the next exchange wakes it
     import time
 
-    from knurlogic.engine.runtime import plan as P
+    from knurlogic.engine.split import plan as P
     if link.rank == 0:
-        T.Ring(link).park()
+        split_ring.Ring(link).park()
         time.sleep(1.0)
         link.exchange(0, None)
     else:

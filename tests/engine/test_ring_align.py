@@ -13,7 +13,7 @@ import time
 import pytest
 
 from knurlogic.cluster import launch
-from knurlogic.engine.runtime import tensor as T
+from knurlogic.engine.split import link as split_link
 
 
 def test_the_launcher_says_where_the_bell_is():
@@ -49,11 +49,11 @@ def _pair():
     port = srv.getsockname()[1]
     got = {}
     t = threading.Thread(target=lambda: got.setdefault(
-        "c", T.bell_dial("127.0.0.1", port, 7, 1, 10.0)))
+        "c", split_link.bell_dial("127.0.0.1", port, 7, 1, 10.0)))
     t.start()
-    socks = T.bell_answer(srv, "127.0.0.1", 7, 2, 10.0)
+    socks = split_link.bell_answer(srv, "127.0.0.1", 7, 2, 10.0)
     t.join(5)
-    a, b = T.Link(_G(0, 2)), T.Link(_G(1, 2))
+    a, b = split_link.Link(_G(0, 2)), split_link.Link(_G(1, 2))
     a.socks, b.socks = socks, [got["c"]]
     return a, b
 
@@ -92,7 +92,7 @@ def test_a_woken_rank_lines_up_again():
 
 
 def test_without_a_bell_lining_up_is_a_no_op():
-    lk = T.Link(_G(0, 2))
+    lk = split_link.Link(_G(0, 2))
     lk.align()
     assert not lk.socks
 
@@ -106,18 +106,18 @@ def test_the_early_bell_connects_every_rank_before_the_ring(monkeypatch):
 
     def rank1():
         time.sleep(0.3)
-        got["socks"] = T.bell_dial("127.0.0.1", port, 99, 1, 10.0)
+        got["socks"] = split_link.bell_dial("127.0.0.1", port, 99, 1, 10.0)
     t = threading.Thread(target=rank1)
     t.start()
     monkeypatch.setenv("KNURLOGIC_BELL", spec)
     monkeypatch.setenv("MLX_RANK", "0")
-    socks = T.bell_early()
+    socks = split_link.bell_early()
     t.join(5)
     assert len(socks) == 1 and got["socks"] is not None
     for c in socks + [got["socks"]]:
         c.close()
     monkeypatch.delenv("KNURLOGIC_BELL")
-    assert T.bell_early() is None
+    assert split_link.bell_early() is None
 
 
 def test_a_lining_up_rank_that_never_comes_is_a_connection_error():
@@ -131,7 +131,7 @@ def test_a_lining_up_rank_that_never_comes_is_a_connection_error():
 def test_a_dead_link_raises_at_once():
     r0, _ = _pair()
     r0.dead = True
-    with pytest.raises(T.Desync):
+    with pytest.raises(split_link.Desync):
         r0.align()
-    with pytest.raises(T.Desync):
+    with pytest.raises(split_link.Desync):
         r0.exchange(0, None)

@@ -4,7 +4,7 @@ VQ layer's halves add up to the whole; a sliced codebook is caught)."""
 
 import pytest
 
-from knurlogic.engine.runtime import plan as P
+from knurlogic.engine.split import plan as P
 from knurlogic.tuning import rank_order, tensor_split
 
 # ------------------------------------------------------------------ plan
@@ -304,7 +304,7 @@ class _Entry:
 def test_journal_cache_turns_byte_trims_into_counted_pops():
     from knurlogic.engine.prompt_cache.memory import PromptCache
     from knurlogic.engine.prompt_cache.ring import JournalPromptCache
-    from knurlogic.engine.runtime.tensor import Journal
+    from knurlogic.engine.split.ring import Journal
     j = Journal()
     c = JournalPromptCache(PromptCache(10), j)
     with pytest.raises(ValueError):
@@ -331,7 +331,7 @@ def test_journal_cache_turns_byte_trims_into_counted_pops():
 
 
 def test_every_ring_row_gets_a_seed():
-    from knurlogic.engine.runtime.tensor import assign_seed
+    from knurlogic.engine.split.ring import assign_seed
     s = assign_seed({"temp": 0.5})
     assert isinstance(s["seed"], int) and s["temp"] == 0.5
     assert assign_seed({"seed": 7})["seed"] == 7
@@ -343,7 +343,7 @@ E, OUT, IN, K, D, G = 4, 64, 256, 256, 4, 64
 
 
 def test_the_predicate_never_splits_a_codebook():
-    from knurlogic.engine.runtime.tensor_rules import predicate
+    from knurlogic.engine.split.tensor_rules import predicate
     w = mx.zeros((K, D))
     for kind in ("all-to-sharded", "sharded-to-all"):
         assert predicate(kind)("mlp.switch_mlp.down_proj.codebook", w) is None
@@ -448,11 +448,12 @@ def test_rank_0s_frees_never_lower_the_peers_estimate(monkeypatch):
 
     import mlx.core as mx
 
-    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.split import ring as split_ring
+
     mem = {"a": 50}
     monkeypatch.setattr(mx, "get_active_memory", lambda: mem["a"])
     for split, took, freed in (("tensor", 17, 7), ("pipeline", 7, 7)):
-        r = T.Ring(SimpleNamespace(size=2), split=split)
+        r = split_ring.Ring(SimpleNamespace(size=2), split=split)
         r.peer_over, r.local_then = 7, 50
         mem["a"] = 60
         assert r.peers_over_now() == took
@@ -476,7 +477,8 @@ class _FakeLink:
 def test_a_follower_applies_a_set_even_while_parked(monkeypatch):
     import importlib
 
-    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.split import follower as split_follower
+
     load = importlib.import_module("knurlogic.engine.serve.load")
     got = []
     monkeypatch.setattr(load, "apply_live",
@@ -486,7 +488,7 @@ def test_a_follower_applies_a_set_even_while_parked(monkeypatch):
         {"ops": [{"op": "set", "name": "KNURLOGIC_CACHE_LIMIT_GB",
                   "value": "20"}, {"op": "park"}]},
         {"ops": [{"op": "stop"}]}])
-    assert T.follow(None, None, "m", link, prompt_cache_size=2,
+    assert split_follower.follow(None, None, "m", link, prompt_cache_size=2,
                     completion_batch_size=1, prefill_step_size=512,
                     working_set=0) == 0
     assert got == [{"KNURLOGIC_CACHE_LIMIT_GB": "20"}] and link.slept == 1
@@ -495,8 +497,8 @@ def test_a_follower_applies_a_set_even_while_parked(monkeypatch):
 def test_a_set_journaled_while_parked_rings_the_ring():
     """Rank 0 idle, the others parked: a Settings apply is journaled on the
     scheduler thread and the next park() rings them to take it."""
-    from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.runtime.scheduler import Scheduler
+    from knurlogic.engine.split import ring as split_ring
 
     sent = []
 
@@ -510,7 +512,7 @@ def test_a_set_journaled_while_parked_rings_the_ring():
     class H:
         state, path, error, model = "ready", "/m/a", "", object()
 
-    ring = T.Ring(L())
+    ring = split_ring.Ring(L())
     s = Scheduler(H(), tensor=ring)
     ring.park()
     assert sent == []                       # parked, nothing new: asleep
@@ -539,19 +541,19 @@ def test_a_rank_dialing_before_rank_0_listens_keeps_trying(caplog):
     import threading
     import time
 
-    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.split import link as split_link
     port = _bell_server()
     got = {}
 
     def dial():
-        got["c"] = T.bell_dial("127.0.0.1", port, 1234, 1, 10.0,
-                               pause_s=0.05)
+        got["c"] = split_link.bell_dial("127.0.0.1", port, 1234, 1, 10.0,
+                                        pause_s=0.05)
     t = threading.Thread(target=dial)
     t.start()
     time.sleep(0.4)                          # refused a few times meanwhile
     srv = socket.create_server(("127.0.0.1", port))
-    with caplog.at_level(logging.INFO, logger=T.__name__):
-        socks = T.bell_answer(srv, "127.0.0.1", 1234, 2, 10.0)
+    with caplog.at_level(logging.INFO, logger=split_link.__name__):
+        socks = split_link.bell_answer(srv, "127.0.0.1", 1234, 2, 10.0)
     t.join(5)
     assert len(socks) == 1
     socks[0].sendall(b"w")
@@ -570,20 +572,22 @@ def test_rank_0s_bell_names_the_ranks_that_never_came():
 
     import pytest
 
-    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.split import link as split_link
+
     srv = socket.create_server(("127.0.0.1", 0))
     port = srv.getsockname()[1]
     held = []
 
     def others():
-        held.append(T.bell_dial("127.0.0.1", port, 99, 2, 5.0))
+        from knurlogic.engine.split import link as split_link
+        held.append(split_link.bell_dial("127.0.0.1", port, 99, 2, 5.0))
         s = socket.create_connection(("127.0.0.1", port))
         s.sendall(b"\0" * 16)
         held.append(s)
     t = threading.Thread(target=others)
     t.start()
     with pytest.raises(TimeoutError) as e:
-        T.bell_answer(srv, "127.0.0.1", 99, 3, 1.0)
+        split_link.bell_answer(srv, "127.0.0.1", 99, 3, 1.0)
     t.join(5)
     msg = str(e.value)
     assert f"127.0.0.1:{port}" in msg and "[1]" in msg
@@ -595,11 +599,12 @@ def test_rank_0s_bell_names_the_ranks_that_never_came():
 def test_a_rank_that_cannot_reach_rank_0_says_where_it_dialed():
     import pytest
 
-    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.split import link as split_link
+
     port = _bell_server()
     with pytest.raises(ConnectionError, match=f"rank 1 could not reach rank "
                        f"0 at 127.0.0.1:{port}"):
-        T.bell_dial("127.0.0.1", port, 1, 1, 0.3, pause_s=0.05)
+        split_link.bell_dial("127.0.0.1", port, 1, 1, 0.3, pause_s=0.05)
 
 
 def test_rank_0_publishes_every_ranks_memory(monkeypatch):
@@ -607,12 +612,12 @@ def test_rank_0_publishes_every_ranks_memory(monkeypatch):
     in the control rows and rank 0 publishes it (`ranks`)."""
     from types import SimpleNamespace
 
-    from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.serve import state
+    from knurlogic.engine.split import ring as split_ring
     monkeypatch.setitem(state.SERVED, "ranks", None)
     rows = [P.control(0, 3, 0, 100, 150), P.control(-4, 3, 0, 200, 260)]
     link = SimpleNamespace(size=2, exchange=lambda over, payload: (rows, None))
-    r = T.Ring(link, split="pipeline")
+    r = split_ring.Ring(link, split="pipeline")
     r.exchange(0, {"ops": []})
     assert state.SERVED["ranks"] == [
         {"rank": 0, "active_bytes": 100, "peak_bytes": 150,
@@ -631,12 +636,13 @@ def test_a_parked_follower_holds_no_margin_a_long_prefill_measured(
     rank holds no row to step: it reports against the floor margin."""
     import mlx.core as mx
 
-    from knurlogic.engine.runtime import tensor as T
-    GIB = T.GIB
+    from knurlogic.engine.split import follower as split_follower
+
+    GIB = split_follower.GIB
     monkeypatch.setattr(mx, "get_active_memory", lambda: 60 * GIB)
     seen = []
 
-    class Mark(T.Mark):
+    class Mark(split_follower.Mark):
         def __init__(self, ws):
             super().__init__(ws)
             self.spike = 40 * GIB       # measured by the long prefill
@@ -646,9 +652,9 @@ def test_a_parked_follower_holds_no_margin_a_long_prefill_measured(
             seen.append(over)
             return super().exchange(over, payload)
 
-    monkeypatch.setattr(T, "Mark", Mark)
+    monkeypatch.setattr(split_follower, "Mark", Mark)
     link = Link([{"ops": [{"op": "park"}]}, {"ops": [{"op": "stop"}]}])
-    T.follow(None, None, "m", link, prompt_cache_size=2,
+    split_follower.follow(None, None, "m", link, prompt_cache_size=2,
              completion_batch_size=1, prefill_step_size=512,
              working_set=96 * GIB)
     assert seen[0] > 0                  # 60 held, limit 96 - 50 = 46
@@ -760,7 +766,7 @@ def test_a_skipzero_module_odd_rows_are_refused_by_its_headers(tmp_path):
 
 def test_a_skipzero_module_even_rows_is_unverified_not_refused(tmp_path):
     # even rows divide, but the layout is none a rule knows: offered, and
-    # run whole and split at launch (engine/runtime/viability)
+    # run whole and split at launch (engine/split/viability)
     a = _artifact(tmp_path, QWEN36, _layer0(_skipzero(70096)))
     assert tensor_split.tensor_split_refusals(a, 2) == []
     assert tensor_split.tensor_unverified(a) == {
@@ -798,7 +804,7 @@ def test_a_runtime_that_splits_skipzero_itself_is_offered_tensor(tmp_path):
     assert "tensor" in splits_of(a)
     import types
     g = types.SimpleNamespace(rank=lambda: 1, size=lambda: 2)
-    from knurlogic.engine.runtime.tensor import load_config
+    from knurlogic.engine.split.tensor import load_config
     assert load_config(a, g)["vq_skipzero"]["shard"] == {"rank": 1, "n": 2}
 
 
@@ -812,7 +818,7 @@ def test_a_runtime_split_needs_output_rows_that_divide(tmp_path):
 def test_without_the_runtime_split_load_config_adds_nothing(tmp_path):
     import types
 
-    from knurlogic.engine.runtime.tensor import load_config
+    from knurlogic.engine.split.tensor import load_config
     a = _artifact(tmp_path, QWEN36, _layer0(_skipzero(70095)))
     g = types.SimpleNamespace(rank=lambda: 0, size=lambda: 2)
     assert load_config(a, g) is None
@@ -823,8 +829,8 @@ def test_a_module_the_runtime_split_is_not_cut_again():
 
     import mlx.nn as nn
 
-    from knurlogic.engine.runtime import tensor as T
-    from knurlogic.engine.runtime.tensor_rules import RULES
+    from knurlogic.engine.split import tensor as T
+    from knurlogic.engine.split.tensor_rules import RULES
     lin = nn.Linear(8, 8)
     object.__setattr__(lin, "_vq_sharded", (1, 2))
     layer = types.SimpleNamespace(mlp=types.SimpleNamespace(
@@ -869,7 +875,7 @@ def test_flash_next_deals_its_ngram_parts_whole(tmp_path):
     all: no axis of a part is cut), so they count as split bytes and no
     layout in them is unverified; the hyper-connections and the rest of
     the PLE are replicated."""
-    from knurlogic.engine.runtime import tensor_rules as TR
+    from knurlogic.engine.split import tensor_rules as TR
     a = _artifact(tmp_path, FLASH_NEXT, _flash_next_layer1())
     assert tensor_split.tensor_split_refusals(a, 2) == []
     assert tensor_split.tensor_unverified(a) == {}
@@ -971,7 +977,7 @@ def test_deepseek_v4_refuses_groups_and_shapes_that_do_not_divide(tmp_path):
 
 
 def test_hf_bf16_names_map_to_the_rules_sanitize_feeds_shard():
-    from knurlogic.engine.runtime.tensor_rules import locate
+    from knurlogic.engine.split.tensor_rules import locate
     pre = "model.language_model.layers.3."
     assert locate(pre + "mlp.experts.gate_up_proj") == (
         3, "mlp.switch_mlp.gate_proj", "weight", 2)
@@ -1015,15 +1021,15 @@ def _probe_module(perm=None, experts=None):
 
 
 def test_a_layout_that_splits_like_the_rule_holds():
-    from knurlogic.engine.runtime.tensor_rules import A2S, S2A, Rule
-    from knurlogic.engine.runtime.viability import check_module
+    from knurlogic.engine.split.tensor_rules import A2S, S2A, Rule
+    from knurlogic.engine.split.viability import check_module
     assert check_module(_probe_module(), Rule(A2S), 2) is None
     assert check_module(_probe_module(), Rule(S2A), 2) is None
 
 
 def test_a_layout_whose_rows_are_not_in_order_fails_with_its_error():
-    from knurlogic.engine.runtime.tensor_rules import A2S, Rule
-    from knurlogic.engine.runtime.viability import check_module
+    from knurlogic.engine.split.tensor_rules import A2S, Rule
+    from knurlogic.engine.split.viability import check_module
     # rows stored by a table (as SKIPZERO's are): a row cut takes the
     # wrong rows, and the table itself is cut too
     perm = mx.array([(i * 7) % 32 for i in range(32)])
@@ -1037,8 +1043,8 @@ def test_skipzero_cut_by_rows_mixes_experts():
     # unhalved, so the part is refused unrun
     import mlx.nn as nn
 
-    from knurlogic.engine.runtime.tensor_rules import A2S, Rule
-    from knurlogic.engine.runtime.viability import check_module
+    from knurlogic.engine.split.tensor_rules import A2S, Rule
+    from knurlogic.engine.split.viability import check_module
 
     class SZ(nn.Module):
         def __init__(self):
@@ -1128,9 +1134,9 @@ def test_a_follower_prefills_each_row_at_the_chunk_rank_0_fitted(
     from types import SimpleNamespace as NS
 
     from knurlogic.engine.mtp import batch_generator as BG
-    from knurlogic.engine.runtime import pipeline as PL
     from knurlogic.engine.runtime import request as RQ
-    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.split import follower as split_follower
+    from knurlogic.engine.split import pipeline as PL
     chunks, marks = [], []
 
     class Ex:
@@ -1155,7 +1161,7 @@ def test_a_follower_prefills_each_row_at_the_chunk_rank_0_fitted(
         def close(self):
             pass
 
-    class Mark(T.Mark):
+    class Mark(split_follower.Mark):
         def around(self, fn, prefill=False):
             marks.append(prefill)
             return fn()
@@ -1164,8 +1170,8 @@ def test_a_follower_prefills_each_row_at_the_chunk_rank_0_fitted(
         _batch=NS(uids=[], t1=None)))
     monkeypatch.setattr(PL, "coordinate", lambda *a, **k: None)
     monkeypatch.setattr(RQ, "control_machine", lambda tok, init: (None, []))
-    monkeypatch.setattr(T, "LocalExecutor", Ex)
-    monkeypatch.setattr(T, "Mark", Mark)
+    monkeypatch.setattr(split_follower, "LocalExecutor", Ex)
+    monkeypatch.setattr(split_follower, "Mark", Mark)
 
     def admit(uid, c):
         return _admit(uid=uid, prompt=[1, 2, 3], segs=[[1, 2, 3]], hit=0,
@@ -1175,7 +1181,7 @@ def test_a_follower_prefills_each_row_at_the_chunk_rank_0_fitted(
         {"ops": [{"op": "chunk", "uid": 1, "chunk": 512}]},
         {"ops": [{"op": "stop"}]}])
     link.group = None
-    T.follow(None, None, "m", link, prompt_cache_size=2,
+    split_follower.follow(None, None, "m", link, prompt_cache_size=2,
              completion_batch_size=4, prefill_step_size=2048,
              working_set=0)
     assert chunks == [(0, 256), (1, 512)] and marks == [True, True]
@@ -1184,13 +1190,14 @@ def test_a_follower_prefills_each_row_at_the_chunk_rank_0_fitted(
 def test_a_prefill_steps_transient_is_not_a_followers_margin(monkeypatch):
     import mlx.core as mx
 
-    from knurlogic.engine.runtime import tensor as T
-    GIB = T.GIB
+    from knurlogic.engine.split import follower as split_follower
+
+    GIB = split_follower.GIB
     mem = {"active": 60 * GIB, "peak": 77 * GIB}
     monkeypatch.setattr(mx, "get_active_memory", lambda: mem["active"])
     monkeypatch.setattr(mx, "get_peak_memory", lambda: mem["peak"])
     monkeypatch.setattr(mx, "reset_peak_memory", lambda: None)
-    m = T.Mark(84 * GIB)
+    m = split_follower.Mark(84 * GIB)
     m.around(lambda: None, prefill=True)         # a 59k prefill: 17 GiB
     assert m.limit() == 84 * GIB - int(4.2 * GIB)
     mem["peak"] = 61 * GIB

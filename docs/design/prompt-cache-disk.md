@@ -7,7 +7,7 @@ context, and each session's next request re-prefills it (110k tokens at
 
 Code: `engine/prompt_cache/disk.py`; the scheduler's `_save_disk`,
 `_restore_disk`, `_disk_hit` (engine/prompt_cache/commands.py); a ring's
-followers in `engine/runtime/tensor.serve_follower` / `follow` and
+followers in `engine/split/follower.serve_follower` / `follow` and
 `engine/prompt_cache/ring.apply_cache_op`; the HTTP routes in
 `interfaces/http/prompt_cache.py`.
 

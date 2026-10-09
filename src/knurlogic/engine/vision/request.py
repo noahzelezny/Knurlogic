@@ -245,7 +245,7 @@ class VisionServe:
 
 
 class MirrorVision:
-    """A follower rank's vision on a split model (engine/runtime/tensor.py):
+    """A follower rank's vision on a split model (engine/split/tensor.py):
     the served model's Family with NO tower and no image store. Rank 0
     encodes every image (the one tokenize); a follower gets each image's
     ref in the admit op (`add_refs`) and its rows in the admission

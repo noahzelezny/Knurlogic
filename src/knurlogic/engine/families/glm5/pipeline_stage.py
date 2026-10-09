@@ -1,4 +1,4 @@
-"""GLM-5.3's trunk as a pipeline stage (engine/runtime/pipeline.restage),
+"""GLM-5.3's trunk as a pipeline stage (engine/split/pipeline.restage),
 named by the manifest's `pipeline` entry. Layers are read through their
 stage wrappers (attribute reads see through Recv / Send).
 """

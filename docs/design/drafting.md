@@ -182,7 +182,7 @@ assumed:
     a step commits was fed through the trunk, including one a stop sequence
     then hid, so the list is prompt + everything committed.
 
-IMAGES (docs/design/vision.md; on a split model, engine/runtime/tensor.py:
+IMAGES (docs/design/vision.md; on a split model, engine/split/tensor.py:
 rank 0 encodes and ships the rows, every rank embeds with its own family).
 Every request with an image comes here, head or no head (`head=None` is a
 plain batch engine with the same admission), because only `admit` snaps
@@ -245,7 +245,7 @@ TRUNK row that verifies the draft, not only to the draft and to t1 --
 otherwise a penalised token could be committed through the verify path that
 sampling would have refused.
 
-Across machines (a pipeline split, engine/runtime/pipeline.py) every rank
+Across machines (a pipeline split, engine/split/pipeline.py) every rank
 runs this same loop; `coord` carries rank 0's regime and drafts (B1) and its
 verdicts (B2) to the others, one fixed broadcast each per step. Only rank 0
 holds the head: a follower's batch has `head=None` and mirrors rank 0's

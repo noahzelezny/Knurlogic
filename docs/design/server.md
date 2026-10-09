@@ -229,7 +229,7 @@ followed by a step.
 
 ### Tensor split
 
-Every layer's weights split N ways (`engine/runtime/tensor.py`); rank 0's
+Every layer's weights split N ways (`engine/split/tensor.py`); rank 0's
 executor is `TensorExecutor`, the local batch engine with every admission,
 removal and prompt-cache change journaled into the plan.
 
@@ -250,7 +250,7 @@ removal and prompt-cache change journaled into the plan.
 
 ### Pipeline split
 
-Each rank holds a contiguous run of layers (`engine/runtime/pipeline.py`;
+Each rank holds a contiguous run of layers (`engine/split/pipeline.py`;
 the step plan is the tensor split's).
 
 - **Layout**: rank 0 -- the leader, which samples -- holds the last layers,
@@ -297,7 +297,7 @@ the step plan is the tensor split's).
   Per admission, BA `[ok, hit, drafts]` before its prefill: only rank 0 can
   tell whether a prompt-cache entry has an aligned head cache. The count of
   collectives depends on B1 and BA, which every rank receives, never on a
-  rank's own verdict. `tensor.agree_head` tells every rank after load
+  rank's own verdict. `follower.agree_head` tells every rank after load
   whether rank 0 bound a head.
 - **Memory**: stages are unequal, so the peers' own over-limit is used as
   reported, refreshed every step.
@@ -535,13 +535,13 @@ import, and the import happens inside the server's own model load. Setting
 them after would silently do nothing -- the same class of bug as an env
 file sourced after the one that overwrites it.
 
-### src/knurlogic/engine/runtime/pipeline.py
+### src/knurlogic/engine/split/pipeline.py
 
 Rank 0 holds the LAST layers, so the logits are born on the rank that
 samples and nothing is gathered: mlx-lm's pipeline all_gathers the final
 hidden state to every rank so every rank can compute logits; here the
 other ranks never need them (rank 0's step plan carries every token --
-engine/runtime/plan.py), so a follower's trunk returns zeros of the logits'
+engine/split/plan.py), so a follower's trunk returns zeros of the logits'
 shape and its lm_head never runs (`Silent`).
 
 Written for knurlogic. The layer slice keeps the contract of mlx-lm's
@@ -588,7 +588,7 @@ first token is sampled inside the admission, after the step's plan was
 sent, and a follower's own sample is noise. A follower's prompt-cache
 entries carry no head cache; BA makes that invisible.
 
-### src/knurlogic/engine/runtime/plan.py -- step plan format
+### src/knurlogic/engine/split/plan.py -- step plan format
 
 Control vector, one int64 per slot, one row per rank:
 

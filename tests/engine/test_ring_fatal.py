@@ -12,8 +12,9 @@ import threading
 
 import pytest
 
-from knurlogic.engine.runtime import tensor as T
 from knurlogic.engine.runtime.scheduler import RingFailed, Scheduler, ring_error
+from knurlogic.engine.split import link as split_link
+from knurlogic.engine.split import ring as split_ring
 
 
 class _Host:
@@ -30,7 +31,7 @@ class _Ring:
     def __init__(self, park_raises=None):
         self.park_raises = park_raises
         self.stopped = 0
-        self.journal = T.Journal()
+        self.journal = split_ring.Journal()
 
     def park(self):
         if self.park_raises is not None:
@@ -41,7 +42,7 @@ class _Ring:
 
 
 def test_what_is_a_ring_error():
-    assert ring_error(T.Desync("ranks at different steps: [1, 0]"))
+    assert ring_error(split_link.Desync("ranks at different steps: [1, 0]"))
     assert ring_error(RuntimeError("[jaccl] Recv failed with error code -12"))
     assert ring_error(RuntimeError("[ring] Send failed"))
 
@@ -62,13 +63,13 @@ def _sched(ring):
 
 
 def test_a_desync_in_an_idle_tick_ends_the_job_once():
-    ring = _Ring(park_raises=T.Desync("ranks at different steps: [1, 0]"))
+    ring = _Ring(park_raises=split_link.Desync("ranks at different steps: [1, 0]"))
     s = _sched(ring)
     told = []
     s.on_ring_failed = told.append
     s._loop_once()
     s._loop_once()                       # a second tick tells no one again
-    assert isinstance(s.ring_failed, T.Desync) and s._stop
+    assert isinstance(s.ring_failed, split_link.Desync) and s._stop
     assert len(told) == 1 and told[0] is s.ring_failed
     job = type("J", (), {})()
     import queue
@@ -112,7 +113,7 @@ def test_a_request_error_on_a_ring_is_not_fatal():
 
 
 def test_the_stopped_scheduler_sends_no_stop_over_a_broken_ring():
-    ring = _Ring(park_raises=T.Desync("ranks at different steps: [1, 0]"))
+    ring = _Ring(park_raises=split_link.Desync("ranks at different steps: [1, 0]"))
     s = _sched(ring)
     done = threading.Event()
     s.on_ring_failed = lambda e: done.set()
@@ -140,10 +141,10 @@ def test_the_executors_closing_reset_does_not_wait_on_a_dead_ring():
 
         def exchange(self, over, payload):
             if self.dead:
-                raise T.Desync("the ring between the ranks failed")
+                raise split_link.Desync("the ring between the ranks failed")
             self.sent += 1
             raise AssertionError("waited on the dead ring")
-    ring = _Ring(park_raises=T.Desync("ranks at different steps: [1, 0]"))
+    ring = _Ring(park_raises=split_link.Desync("ranks at different steps: [1, 0]"))
     ring.link = Link()
     s = _sched(ring)
 
@@ -198,5 +199,5 @@ def test_rank_0_leaves_non_zero_after_the_ring_fails(monkeypatch):
             pass
     s = S()
     H.watch_ring(s, _Host(), exit_after=0.0, stop_within=3.0)
-    s.on_ring_failed(T.Desync("x"))
+    s.on_ring_failed(split_link.Desync("x"))
     assert exited.wait(5) and code == [1] and s.waited == [3.0]

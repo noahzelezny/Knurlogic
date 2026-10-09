@@ -1,6 +1,6 @@
 """The pipeline split's arithmetic: which models pipeline, the bytes of
 each layer, how many layers each rank holds, and what the leader holds
-besides (engine/runtime/pipeline.py does the split).
+besides (engine/split/pipeline.py does the split).
 """
 
 from __future__ import annotations
@@ -11,12 +11,12 @@ from knurlogic.tuning import fit, measured
 # ---------------------------------------------------------- pipeline split
 #
 # One model served by N ranks, each holding a contiguous run of layers
-# (engine/runtime/pipeline.py). Rank 0 -- the leader, which samples -- holds
+# (engine/split/pipeline.py). Rank 0 -- the leader, which samples -- holds
 # the LAST layers, so the logits are born where they are used and nothing
 # is gathered; rank N-1 holds the first layers and embeds. Pure arithmetic,
 # so the split is said, with its reason, before anything loads.
 
-#: model types engine/runtime/pipeline.py knows how to slice (each has its
+#: model types engine/split/pipeline.py knows how to slice (each has its
 #: own index fixups there); anything else is refused with a reason
 PIPELINE_TYPES = ("qwen3_5", "qwen3_5_moe", "qwen3_5_text",
                   "qwen3_5_moe_text", "glm5_next", "qwen4_exp",

@@ -8,17 +8,21 @@ How the ranks get started on each Mac is [cluster](cluster.md).
 
 ## Where the code is
 
-In `src/knurlogic/engine/runtime/`:
+In `src/knurlogic/engine/split/`:
 
 | file | what |
 |---|---|
 | `plan.py` | the step plan: `OPS`, `_FIELDS`, `_OPTIONAL`, `SETS`, `check`, `encode` / `decode` (JSON, never pickle), the control vector (`CONTROL_LEN`: over, step, length, active, peak). Pure Python |
-| `tensor.py` | `shard` (cut every layer N ways), `Link` (the per-step exchange), `Journal` (rank 0's ops since the last exchange), `Ring` (rank 0's side, kept across executors), `TensorExecutor` (rank 0), `follow` (ranks >= 1: apply the plan, step, never sample), `init` (join the ring), `serve_follower` (a follower from start to stop), the bell (`bell_answer`, `bell_dial`) a parked rank sleeps on |
+| `tensor.py` | the tensor split: `shard` (cut every layer N ways), `split_params`, `Reduce`, `load_config`, `check_codebooks` |
+| `link.py` | how ranks reach each other: `init` (join the ring), `Link` (the per-step exchange), the bell (`bell_answer`, `bell_dial`, `bell_early`) a parked rank sleeps on, `Desync` |
+| `ring.py` | rank 0's side: `Ring` (kept across executors), `Journal` (its ops since the last exchange), `TensorExecutor` (rank 0's executor, either split), `assign_seed`, `publish_ranks` |
+| `follower.py` | ranks >= 1: `serve_follower` (from start to stop), `follow` (apply the plan, step, never sample), `Mark` (its memory limit), `agree_head` |
+| `marker.py` | a rank's progress (steps, prefill chunks, loaded) as the engine reports it; stdlib, so engine never imports cluster |
 | `tensor_rules.py` | `RULES`: which arrays of a layer are cut, on which axis, in which segments; `refusals`, `unverified`. No mlx, so `tuning/` checks safetensors headers against the same table |
 | `viability.py` | `refusals`: runs a module no rule knows, whole and split, and compares before the ring starts |
 | `pipeline.py` | `split` (contiguous runs of layers), `Send` / `Recv` wrappers, `Silent` (a follower's lm_head never runs), `restage`, `Coord` / `coordinate` (rank 0's drafts and verdicts broadcast), `agree` |
 
-Outside the runtime:
+Outside it:
 
 - `engine/prompt_cache/ring.py`: `JournalPromptCache` and `apply_cache_op`
   (see [prompt-cache](prompt-cache.md)).
@@ -28,7 +32,7 @@ Outside the runtime:
 - `engine/families/<family>/pipeline_stage.py` and the manifest's
   `pipeline` / `tensor` / `tensor_split` entries.
 - `interfaces/serve.py`: a rank's launch (`_ring_env`, `_ring_refusals`,
-  `pipeline_share_bytes`); a rank >= 1 calls `tensor.serve_follower`.
+  `pipeline_share_bytes`); a rank >= 1 calls `follower.serve_follower`.
 - `interfaces/http/__init__.py` (`watch_ring`): rank 0's server watches
   the ring.
 - `tuning/tensor_split.py`: `tensor_refusals`, `tensor_sharded`,
@@ -48,7 +52,7 @@ Outside the runtime:
 - **Every op is in the schema.** A journaled op that `plan.check` does not
   know fails the ring. A new op needs its fields in `OPS`, `_FIELDS` and
   (for extra fields) `_OPTIONAL`, and a case on the follower side
-  (`tensor.follow`, or `ring.apply_cache_op` for cache ops).
+  (`follower.follow`, or `ring.apply_cache_op` for cache ops).
 - **Ranks run the same collectives.** A row prefilled in different chunk
   counts deadlocks the ring, so `admit` carries the chunk rank 0 fitted
   (`memory_guard._make_room`) and `chunk` refits a row (`_fit_next`).
@@ -71,16 +75,6 @@ Outside the runtime:
   and a `restage` if the trunk froze per-layer indices at `__init__`.
 - A new plan op: see the rules above and the op list in
   [prompt-cache](prompt-cache.md).
-
-## Notes
-
-The splits span packages: `engine/runtime/` (tensor, pipeline, plan,
-rules, viability), `engine/prompt_cache/ring.py`, `engine/mtp/` (the
-pipeline `Coord` is used by the batch loop), `tuning/` (`fit.py`,
-`tensor_split.py`, `pipeline_split.py`: fit and refusals), `interfaces/serve.py` (rank launch), `cluster/launch.py`
-(placement and argv). Rank progress (steps, prefill
-chunks, loaded) goes through `engine/runtime/marker.py`, so engine never
-imports cluster; `tests/integration/test_layers.py` enforces it.
 
 ## Tests
 

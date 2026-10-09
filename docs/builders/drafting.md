@@ -30,7 +30,7 @@ Elsewhere:
   `head` entry names them.
 - `engine/runtime/scheduler.py` (`_executor_local`, `_executor`): builds
   the `MTPBatchGenerator` with the head when one is bound.
-- `engine/runtime/pipeline.py` (`Coord`): rank 0's drafts and verdicts
+- `engine/split/pipeline.py` (`Coord`): rank 0's drafts and verdicts
   broadcast to followers.
 - `interfaces/drafting.py`: `knurlogic mtp`, the machine-wide survey;
   `interfaces/mcp.py`: the `drafting` tool.
