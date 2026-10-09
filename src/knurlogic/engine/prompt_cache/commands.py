@@ -301,7 +301,8 @@ class PromptCacheCommands:
             key = None
         link = self.tensor.link if self.tensor is not None else None
         # the per-split format, read under its exact key (what earlier
-        # builds wrote, and a tensor split still writes)
+        # builds wrote, and a tensor split of a family with no cache spec
+        # still writes)
         old = prompt_disk.restore(
             self.cache.lru, self.host.model_key, key,
             max_bytes=self.cache_bytes, link=link)
@@ -312,7 +313,7 @@ class PromptCacheCommands:
             logger.exception("prompt cache: no per-layer store")
         new = {}
         if layers.uses_layers(self.host):
-            # every rank of a pipeline votes here, whatever it holds
+            # every rank of a split votes here, whatever it holds
             got = layers.restore(self.cache.lru.max_size, self._store,
                                  max_bytes=self.cache_bytes, link=link)
             new = prompt_disk.insert(self.cache.lru, self.host.model_key,

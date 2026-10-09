@@ -36,8 +36,14 @@ Reading: a rank reads only the layers it holds (`Part`); one that lacks
 some (machines with their own cache roots, another split) first fetches
 them from the peer that has them (transfer.py); an entry still missing
 any is a miss on that rank, and the restore's vote (`agree`) keeps
-only the entries every rank read. Tensor splits keep disk.py's per-split
-format (a later phase).
+only the entries every rank read.
+
+A tensor split (phase 3): every rank holds every slot but a head range of
+each cache; it writes `L{i:03d}.h{a}-{b}.safetensors` (slices.py), a
+replicated cache whole by rank 0 only, and a reader makes the range it
+needs from the files that cover it. The cut per cache kind is the
+family's spec (engine/split/tensor_rules.CACHE_LAYERS / CACHE_KINDS); a
+family without one keeps disk.py's per-split format under tensor.
 """
 from __future__ import annotations
 
@@ -50,7 +56,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import disk, location
+from . import disk, location, slices
 
 logger = logging.getLogger(__name__)
 
@@ -81,30 +87,94 @@ def is_entry_name(name: str) -> bool:
 class Part:
     """The cache slots one rank holds: [start, start + n) of `total`;
     `extras`: it also owns what follows them in an entry (the drafting
-    head's cache)."""
+    head's cache).
+
+    Per slot (index - start), when given: `cuts` -- the slot's cache kind
+    (slices.py's spec, None for a cache never cut); `heads` -- the units
+    [a, b) this rank holds of it, None for the whole layer (a single
+    machine, a pipeline); `writes` -- what this rank writes of it:
+    "whole", "slice" or "" (another rank does)."""
     start: int
     n: int
     total: int
     extras: bool = True
     rank: int = 0
     world: int = 1
+    cuts: tuple = ()
+    heads: tuple = ()
+    writes: tuple = ()
 
     @property
     def slots(self) -> range:
         return range(self.start, self.start + self.n)
 
+    def cut_of(self, i: int):
+        return self.cuts[i - self.start] if self.cuts else None
+
+    def heads_of(self, i: int):
+        return self.heads[i - self.start] if self.heads else None
+
+    def write_of(self, i: int) -> str:
+        return self.writes[i - self.start] if self.writes else "whole"
+
+
+def _cuts_of(host, n: int) -> tuple:
+    """Each of a whole model's or a pipeline stage's `n` slots' cut, when
+    its family has a spec (so it can join a tensor split's slices), else
+    ()."""
+    from knurlogic.engine.split.tensor_rules import cache_cuts
+    try:
+        got = cache_cuts(host.model)
+    except Exception:  # no spec is no slices read (logged)
+        logger.exception("prompt cache: reading the model's cache cut")
+        return ()
+    return tuple(got) if got is not None and len(got) == n else ()
+
+
+def _tensor_part(host, layout: dict, n: int) -> Part | None:
+    """A tensor rank's Part: every slot, its share of each, from the cut
+    tensor.shard recorded; None (the per-split format) for a family with
+    no spec, or one whose units do not split this many ways."""
+    from knurlogic.engine.split.tensor_rules import KV, head_range
+    cuts = getattr(host.model, "cache_cuts", None)
+    rank, world = int(layout.get("rank", 0)), int(layout.get("world", 1))
+    if not cuts or len(cuts) != n:
+        logger.info("prompt cache: no tensor cache spec for this model; "
+                    "saved per split")
+        return None
+    heads, writes = [], []
+    for c in cuts:
+        if c is None:
+            heads.append(None)
+            writes.append("whole" if rank == 0 else "")
+            continue
+        r = head_range(int(c[1]), world, rank, c[0] == KV)
+        if r is None:
+            logger.warning("prompt cache: %d %ss do not split %d ways; "
+                           "saved per split", c[1], c[0], world)
+            return None
+        heads.append((r[0], r[1]))
+        writes.append("slice" if r[2] else "")
+    # no drafting head's cache: a head on a tensor split is not cut by
+    # this spec, so its cache is not saved (a drafting row re-prefills)
+    return Part(0, n, n, False, rank, world, tuple(cuts), tuple(heads),
+                tuple(writes))
+
 
 def part_of(host) -> Part | None:
-    """This rank's Part, or None when this format does not apply (a tensor
-    split: its slices are a later phase; disk.py's format is used)."""
+    """This rank's Part, or None when this format does not apply (a
+    tensor split of a family with no cache spec, or a pipeline stage
+    whose cache list is not one slot per layer: disk.py's format)."""
     from mlx_lm.models.cache import make_prompt_cache
     layout = getattr(host, "cache_layout", None) or {"split": "none"}
     split = layout.get("split", "none")
-    if split not in ("none", "pipeline"):
+    if split not in ("none", "pipeline", "tensor"):
         return None
     n = len(make_prompt_cache(host.model))
+    if split == "tensor":
+        return _tensor_part(host, layout, n)
     if split == "none":
-        return Part(0, n, n)
+        return Part(0, n, n, cuts=_cuts_of(host, n))
     bounds = [list(b) for b in layout.get("bounds") or []]
     rank = int(layout.get("rank", 0))
     if not bounds or rank >= len(bounds):
@@ -117,14 +187,20 @@ def part_of(host) -> Part | None:
                        "cache slots; saved per split", rank, s, e, n)
         return None
     return Part(s, n, max(b[1] for b in bounds), rank == 0, rank,
-                int(layout.get("world", len(bounds))))
+                int(layout.get("world", len(bounds))),
+                cuts=_cuts_of(host, n))
 
 
 def uses_layers(host) -> bool:
-    """This format, not the per-split one: a whole model or a pipeline.
-    The same answer on every rank of a ring."""
+    """This format, not the per-split one: a whole model, a pipeline, or a
+    tensor split of a family with a cache spec. The same answer on every
+    rank of a ring (the same model and code)."""
     layout = getattr(host, "cache_layout", None) or {"split": "none"}
-    return layout.get("split", "none") in ("none", "pipeline")
+    split = layout.get("split", "none")
+    if split == "tensor":
+        return bool(getattr(getattr(host, "model", None), "cache_cuts",
+                            None))
+    return split in ("none", "pipeline")
 
 
 # ------------------------------------------------------------------- key
@@ -380,8 +456,8 @@ class Store:
 
     def write_part(self, tokens, cache: list) -> int:
         """This rank's files of one entry (every array encoded before any
-        file is written: an unsaveable entry writes nothing). Returns the
-        arrays' bytes."""
+        file is written: an unsaveable entry writes nothing): each slot it
+        writes, whole or as its head range. Returns the arrays' bytes."""
         toks = [int(t) for t in tokens]
         h = disk.tokens_hash(toks)
         p = self.part
@@ -390,6 +466,15 @@ class Store:
                                       f"this rank holds {p.n}")
         for c in cache:                      # fail before writing anything
             disk.encode_entry([c])
+        for i, c in enumerate(cache[:p.n]):
+            cut = p.cut_of(p.start + i)
+            if p.write_of(p.start + i) == "slice" and \
+                    slices.units_of(c, cut) not in \
+                    (0, p.heads_of(p.start + i)[1] -
+                     p.heads_of(p.start + i)[0]):
+                raise disk.Unserializable(
+                    f"layer {p.start + i}'s cache does not hold the "
+                    f"{cut[0]}s its range names")
         d = self.dir / h
         d.mkdir(parents=True, exist_ok=True)
         common = {"cache_format": CACHE_FORMAT, "key_id": self.key_id,
@@ -397,38 +482,131 @@ class Store:
         total = 0
         for i, c in enumerate(cache[:p.n]):
             idx = p.start + i
-            total += _write(d / layer_name(idx), [c], dict(common, layer=idx))
+            how = p.write_of(idx)
+            if how == "whole":
+                total += _write(d / layer_name(idx), [c],
+                                dict(common, layer=idx))
+            elif how == "slice":
+                a, b = p.heads_of(idx)
+                cut = p.cut_of(idx)
+                total += _write(d / slices.slice_name(idx, a, b), [c],
+                                dict(common, layer=idx, heads=[a, b],
+                                     units=int(cut[1]), kind=cut[0]))
         extra = list(cache[p.n:])
         if p.extras and extra:
             total += _write(d / DRAFT, extra,
                             dict(common, layer="draft", draft=self.draft))
         return total
 
+    def stored(self) -> dict:
+        """How an entry this split saves keeps its sliced layers:
+        {str(slot): [[a, b], ...]} over every rank (entry.json's
+        `stored`; a layer not named is one whole file)."""
+        from knurlogic.engine.split.tensor_rules import KV, head_range
+        p = self.part
+        if not p.heads:
+            return {}
+        out = {}
+        for i in p.slots:
+            cut = p.cut_of(i)
+            if cut is None or p.heads_of(i) is None:
+                continue
+            rs = []
+            for r in range(p.world):
+                a, b, w = head_range(int(cut[1]), p.world, r, cut[0] == KV)
+                if w:
+                    rs.append([a, b])
+            out[str(i)] = rs
+        return out
+
+    def _have(self, d: Path) -> dict:
+        try:
+            return slices.pieces_in(f.name for f in d.iterdir()
+                                    if not f.name.startswith("."))
+        except OSError:
+            return {}
+
+    def plans(self, d: Path, extra: dict | None = None) -> dict | None:
+        """{slot: the pieces read for it} for every slot this rank holds,
+        from the files in `d` (and the pieces `extra` names, {slot:
+        set}); None when some slot cannot be made."""
+        have = self._have(d)
+        out = {}
+        for i in self.part.slots:
+            got = set(have.get(i, ())) | set((extra or {}).get(i, ()))
+            pl = slices.plan(got, self.part.cut_of(i), self.part.heads_of(i))
+            if pl is None:
+                return None
+            out[i] = pl
+        return out
+
+    def lacking(self, d: Path, extra: dict | None = None) -> list | None:
+        """The layer pieces (slot, None | (a, b)) this rank must fetch to
+        read entry `d`, the ones here preferred: [] when every slot can be
+        made here; None when not even `extra` (what the peers hold) makes
+        some slot."""
+        here = self.plans(d)
+        if here is not None:
+            return []
+        have = self._have(d)
+        out = []
+        for i in self.part.slots:
+            mine = set(have.get(i, ()))
+            if slices.plan(mine, self.part.cut_of(i),
+                           self.part.heads_of(i)) is not None:
+                continue
+            pl = slices.plan(mine | set((extra or {}).get(i, ())),
+                             self.part.cut_of(i), self.part.heads_of(i))
+            if pl is None:
+                return None
+            out += [(i, r) for r in pl if r not in mine]
+        return out
+
     def holds(self, d: Path, meta: dict) -> bool:
-        """Every file this rank needs of entry `d` is there (`meta`: its
-        entry.json, or the commit's record of it)."""
+        """This rank can read every slot it needs of entry `d` from the
+        files there (`meta`: its entry.json, or the commit's record)."""
         p = self.part
         if meta.get("layers") != list(range(p.total)):
             return False
         if meta.get("key_id") not in (None, self.key_id):
             return False
-        return all((d / layer_name(i)).is_file() for i in p.slots) and \
+        return self.plans(d) is not None and \
             not (p.extras and meta.get("draft") and
                  not (d / DRAFT).is_file())
 
+    def _piece(self, d: Path, i: int, rng, want: dict):
+        if rng is None:
+            f, w = d / layer_name(i), dict(want, layer=i)
+        else:
+            cut = self.part.cut_of(i)
+            f = d / slices.slice_name(i, *rng)
+            w = dict(want, layer=i, heads=list(rng), units=int(cut[1]),
+                     kind=cut[0])
+        got = _read(f, w)
+        if len(got) != 1:
+            raise ValueError(f"{f.name} holds {len(got)} caches")
+        return got[0]
+
     def read_part(self, d: Path, meta: dict) -> list:
-        """This rank's caches of entry `d`, its layers in order, then the
-        drafting head's cache when this rank runs the same head. Raises
-        ValueError for any file that fails its checks."""
+        """This rank's caches of entry `d`, its layers in order (each made
+        from the files that cover its head range), then the drafting
+        head's cache when this rank runs the same head. Raises ValueError
+        for any file that fails its checks."""
         want = {"cache_format": CACHE_FORMAT, "key_id": self.key_id,
                 "tokens_hash": meta["tokens_hash"],
                 "n_tokens": meta["n_tokens"]}
+        plans = self.plans(d)
+        if plans is None:
+            raise ValueError("a layer file this rank needs is missing")
         out = []
         for i in self.part.slots:
-            got = _read(d / layer_name(i), dict(want, layer=i))
-            if len(got) != 1:
-                raise ValueError(f"{layer_name(i)} holds {len(got)} caches")
-            out.append(got[0])
+            cut = self.part.cut_of(i)
+            pieces = [(r, self._piece(d, i, r, want)) for r in plans[i]]
+            if cut is None:
+                out.append(pieces[0][1])
+                continue
+            out.append(slices.assemble(pieces, cut, self.part.heads_of(i),
+                                       int(cut[1])))
         f = d / DRAFT
         if self.part.extras and meta.get("draft") and self.draft and \
                 f.is_file() and (disk._header(f) or {}).get("draft") == \
@@ -628,6 +806,7 @@ class Store:
                         "pinned": bool(own and own.get("pinned")),
                         "shared": bool(common), "model": model,
                         "layers": list(range(self.part.total)),
+                        "stored": self.stored(),
                         "draft": draft, "gen": gen, "seq": seq,
                         "saved_at": round(time.time(), 3)}
                 om = old[4] if old is not None else None
@@ -638,6 +817,7 @@ class Store:
                     # on disk: only its place in the LRU changes
                     meta["saved_at"] = om.get("saved_at", meta["saved_at"])
                     meta["draft"] = bool(om.get("draft"))
+                    meta["stored"] = om.get("stored") or {}
                     stats["kept"] += 1
                 else:
                     stats["bytes"] += self.write_part(tokens, cache)
@@ -683,11 +863,26 @@ class Store:
         return stats
 
     def ready(self, meta: dict) -> bool:
-        """This rank saved its part of the entry `meta` names and holds
-        every file of it (the commit's vote)."""
+        """This rank saved its part of the entry `meta` names and wrote
+        every file it writes of it (the commit's vote: together the ranks
+        wrote the whole entry)."""
         h = meta.get("tokens_hash", "")
-        return h in self.pending and is_entry_name(h) and \
-            self.holds(self.dir / h, dict(meta, key_id=self.key_id))
+        if h not in self.pending or not is_entry_name(h):
+            return False
+        d, p = self.dir / h, self.part
+        if meta.get("layers") != list(range(p.total)):
+            return False
+        if p.extras and meta.get("draft") and not (d / DRAFT).is_file():
+            return False
+        for i in p.slots:
+            how = p.write_of(i)
+            if (how == "whole" and not (d / layer_name(i)).is_file()) or \
+                    (how == "slice" and not (d / slices.slice_name(
+                        i, *p.heads_of(i))).is_file()):
+                # not written now: kept from an earlier save, when this
+                # rank can read its part from what is there
+                return self.holds(d, dict(meta, key_id=self.key_id))
+        return True
 
 
 # ------------------------------------------------- across a ring's ranks

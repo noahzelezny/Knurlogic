@@ -309,3 +309,118 @@ def refusals(shapes: dict, n: int, key_dim: int, kv_heads: int,
         out.append(line + (f" (and {more} more layer{'s' * (more > 1)})"
                            if more else ""))
     return out
+
+
+# ------------------------------------------------- the prompt cache's cut
+#
+# Under tensor every rank holds every layer but only its share of each
+# layer's cache. The prompt cache saves that share per head range
+# (engine/prompt_cache/slices.py; docs/design/prompt-cache-shards.md,
+# "Which axis is heads"), so it must know, per family, which layer module
+# makes which cache and on which axis RULES cut it. A family not here keeps
+# the per-split format under tensor.
+
+KV, DELTANET, WHOLE = "kv", "deltanet", "whole"
+
+#: family (model_type) -> {the layer module RULES cuts: its cache kind}.
+#: deepseek_v4's `attn` keeps its one shared kv head, compressors and
+#: indexers whole on every rank (see RULES): its cache is replicated.
+CACHE_LAYERS = {
+    "qwen3_5": {"linear_attn": DELTANET, "self_attn": KV},
+    "qwen3_5_moe": {"linear_attn": DELTANET, "self_attn": KV},
+    "qwen4_exp": {"linear_attn": DELTANET, "self_attn": KV},
+    "deepseek_v4": {"attn": WHOLE},
+}
+
+#: cache kind -> (what one unit of a head range is, ((field, axis,
+#: widths), ...) for every array field it cuts). A field is an attribute,
+#: then list indexes ("cache.0"); every array under it (a quantized K/V's
+#: tuple) is cut on `axis`. `widths`: the slots one unit takes on that
+#: axis, per segment (a fused field holds its segments one after the
+#: other, each cut like a whole: linear_attn.conv1d's "qkv" rule). Every
+#: other field of a cache is replicated, carried whole in each slice
+#: (qwen4_exp's QSA indexer keys, its PLE conv and n-gram context slots).
+CACHE_KINDS = {
+    # K/V [B, kv heads, T, D] (each array of a quantized one too). Fewer
+    # kv heads than ranks: a rank holds a copy of one head
+    # (Rule.repeat_kv), written by the first rank holding it.
+    KV: ("kv head", (("keys", 1, "1"), ("values", 1, "1"))),
+    # gated deltanet: one key head and the v/k value heads that read it.
+    # conv state [B, k-1, q | k | v channels]; recurrent state
+    # [B, value heads, Dv, Dk].
+    DELTANET: ("key head", (("cache.0", -1, "qkv"),
+                            ("cache.1", 1, "v_per_k"))),
+}
+
+_KV_HEADS = ("num_key_value_heads", "n_kv_heads")
+_K_HEADS = ("num_k_heads", "n_k")
+_V_HEADS = ("num_v_heads", "n_v")
+_K_DIM = ("head_k_dim", "dk")
+_V_DIM = ("head_v_dim", "dv")
+
+
+def _attr(m, names) -> int:
+    for k in names:
+        v = getattr(m, k, None)
+        if v is not None:
+            return int(v)
+    raise AttributeError(f"{type(m).__name__} has none of {names}")
+
+
+def family_of(model) -> str | None:
+    t = getattr(model, "model_type", None)
+    if t is None:
+        t = getattr(getattr(model, "args", None), "model_type", None)
+    return t if isinstance(t, str) else None
+
+
+def cache_cuts(model) -> list | None:
+    """Per layer of an UNSPLIT `model` (its `layers`, in cache order): None
+    for a replicated cache, else (kind, units, ((field, axis, widths),
+    ...)) with the widths resolved from the layer's sizes. None for the
+    whole model when its family is not in CACHE_LAYERS or a layer holds
+    none of its modules."""
+    spec = CACHE_LAYERS.get(family_of(model) or "")
+    if spec is None:
+        return None
+    out = []
+    try:
+        for layer in model.layers:
+            mod = next((k for k in spec if k in layer), None)
+            if mod is None:
+                return None
+            kind = spec[mod]
+            if kind == WHOLE:
+                out.append(None)
+                continue
+            m = layer[mod]
+            if kind == KV:
+                units, w = _attr(m, _KV_HEADS), {"1": (1,)}
+            else:
+                hk, hv = _attr(m, _K_HEADS), _attr(m, _V_HEADS)
+                if hv % hk:
+                    return None
+                g = hv // hk
+                dk, dv = _attr(m, _K_DIM), _attr(m, _V_DIM)
+                units, w = hk, {"qkv": (dk, dk, g * dv), "v_per_k": (g,)}
+            out.append((kind, units, tuple(
+                (f, ax, w[s]) for f, ax, s in CACHE_KINDS[kind][1])))
+    except (AttributeError, TypeError, KeyError):
+        return None
+    return out
+
+
+def head_range(units: int, n: int, rank: int, repeat: bool = False):
+    """(a, b, writes): the units [a, b) rank `rank` of `n` holds of a cache
+    of `units`, and whether it writes them. `repeat` (K/V, Rule.repeat_kv):
+    fewer units than ranks, each rank holds a copy of one and the first of
+    its holders writes it. None when the units do not split n ways."""
+    if units >= n or not repeat:
+        if units % n:
+            return None
+        k = units // n
+        return rank * k, (rank + 1) * k, True
+    if n % units:
+        return None
+    per = n // units
+    return rank // per, rank // per + 1, rank % per == 0

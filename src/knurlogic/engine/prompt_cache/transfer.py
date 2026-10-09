@@ -28,8 +28,9 @@ entry whose missing bytes at those rates take longer than recomputing
 its tokens at the measured prefill rate is not fetched. No rate measured
 yet: fetched.
 
-A piece is named `entry` (entry.json), `draft` (draft.safetensors) or a
-layer's slot index. `piece_path` is the only way a request's names
+A piece is named `entry` (entry.json), `draft` (draft.safetensors), a
+layer's slot index (its whole file) or `<slot>.h<a>-<b>` (a tensor rank's
+head range of it, slices.py). `piece_path` is the only way a request's names
 become a file: each name must match its format, and the file must lie
 inside one of this machine's cache roots.
 """
@@ -42,7 +43,7 @@ import re
 import time
 from pathlib import Path
 
-from . import disk, layers, location
+from . import disk, layers, location, slices
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ ENTRY_PIECE = "entry"
 DRAFT_PIECE = "draft"
 _KEY_ID = re.compile(r"^[0-9a-f]{16}$")
 _LAYER = re.compile(r"^[0-9]{1,4}$")
-_LAYER_FILE = re.compile(r"^L([0-9]{3,4})" + re.escape(layers.SUFFIX) + "$")
+_SLICE = re.compile(r"^([0-9]{1,4})\.h([0-9]{1,4})-([0-9]{1,4})$")
 #: an entry.json is small; a larger one is refused
 ENTRY_MAX = 64 << 20
 
@@ -76,13 +77,31 @@ def is_key_id(s) -> bool:
 
 
 def parse_piece(s):
-    """"entry", "draft" or a layer's slot index (int), from a request's
-    string; None for anything else."""
+    """"entry", "draft", a layer's slot index (int) or a head range of it
+    ("<slot>.h<a>-<b>", kept as that string), from a request's string;
+    None for anything else."""
     if s in (ENTRY_PIECE, DRAFT_PIECE):
         return s
     if isinstance(s, str) and _LAYER.match(s):
         return int(s)
+    if isinstance(s, str):
+        m = _SLICE.match(s)
+        if m and int(m.group(2)) < int(m.group(3)):
+            return f"{int(m.group(1))}.h{int(m.group(2))}-{int(m.group(3))}"
     return None
+
+
+def piece_of(slot: int, rng) -> int | str:
+    """The piece name of a layer file: its slot, or "<slot>.h<a>-<b>"."""
+    return int(slot) if rng is None else f"{int(slot)}.h{rng[0]}-{rng[1]}"
+
+
+def _layer_piece(piece):
+    """(slot, None | (a, b)) of a layer piece."""
+    if isinstance(piece, int):
+        return piece, None
+    m = _SLICE.match(piece)
+    return int(m.group(1)), (int(m.group(2)), int(m.group(3)))
 
 
 def file_of(piece) -> str:
@@ -90,7 +109,9 @@ def file_of(piece) -> str:
         return layers.ENTRY
     if piece == DRAFT_PIECE:
         return layers.DRAFT
-    return layers.layer_name(int(piece))
+    i, rng = _layer_piece(piece)
+    return layers.layer_name(i) if rng is None else \
+        slices.slice_name(i, *rng)
 
 
 def _inside(p: Path, root: Path) -> bool:
@@ -111,6 +132,10 @@ def piece_path(key_id, entry, piece, roots=None) -> Path | None:
     piece = parse_piece(piece) if isinstance(piece, str) else piece
     if piece is None or (isinstance(piece, int) and not 0 <= piece < 10000):
         return None
+    if isinstance(piece, str) and piece not in (ENTRY_PIECE, DRAFT_PIECE):
+        piece = parse_piece(piece)
+        if piece is None:
+            return None
     name = file_of(piece)
     for root in (location.known() if roots is None else roots):
         root = Path(root)
@@ -130,8 +155,9 @@ def piece_path(key_id, entry, piece, roots=None) -> Path | None:
 def listing(key_id, roots=None) -> dict:
     """What this machine holds of one model's whole entries:
     {tokens hash: {"gen", "seq", "n_tokens", "draft", "layers": [slot
-    indexes held], "sizes": {piece: bytes}}}, over every cache root
-    (merged; the first root holding a piece names its size)."""
+    indexes held whole], "slices": [slice pieces held], "sizes": {piece:
+    bytes}}}, over every cache root (merged; the first root holding a
+    piece names its size)."""
     out: dict = {}
     if not is_key_id(key_id):
         return out
@@ -149,7 +175,7 @@ def listing(key_id, roots=None) -> dict:
             row = out.setdefault(d.name, {
                 "gen": int(m.get("gen", 0)), "seq": int(m.get("seq", 0)),
                 "n_tokens": m.get("n_tokens"), "draft": False,
-                "layers": [], "sizes": {}})
+                "layers": [], "slices": [], "sizes": {}})
             try:
                 files = list(d.iterdir())
             except OSError:
@@ -163,17 +189,19 @@ def listing(key_id, roots=None) -> dict:
                     piece = DRAFT_PIECE
                     row["draft"] = True
                 else:
-                    g = _LAYER_FILE.match(f.name)
+                    g = slices.parse_name(f.name)
                     if g is None:
                         continue
-                    piece = int(g.group(1))
-                    if piece not in row["layers"]:
-                        row["layers"].append(piece)
+                    piece = piece_of(*g)
+                    at = row["layers"] if g[1] is None else row["slices"]
+                    if piece not in at:
+                        at.append(piece)
                 try:
                     row["sizes"].setdefault(str(piece), f.stat().st_size)
                 except OSError:
                     continue
             row["layers"].sort()
+            row["slices"].sort()
     return out
 
 
@@ -184,7 +212,23 @@ def _has(info: dict, piece) -> bool:
         return True
     if piece == DRAFT_PIECE:
         return bool(info.get("draft"))
+    if isinstance(piece, str):
+        return piece in (info.get("slices") or [])
     return piece in (info.get("layers") or [])
+
+
+def _offered(has: dict) -> dict:
+    """{slot: set of (None | (a, b))}: the layer pieces any peer lists."""
+    out: dict = {}
+    for info in has.values():
+        for p in list(info.get("layers") or []) + \
+                list(info.get("slices") or []):
+            p = parse_piece(str(p))
+            if p is None or p in (ENTRY_PIECE, DRAFT_PIECE):
+                continue
+            i, rng = _layer_piece(p)
+            out.setdefault(i, set()).add(rng)
+    return out
 
 
 def _size(info: dict, piece) -> int | None:
@@ -217,8 +261,14 @@ def _verify(store, f: Path, meta: dict, piece) -> None:
     raises ValueError."""
     want = {"cache_format": layers.CACHE_FORMAT, "key_id": store.key_id,
             "tokens_hash": meta["tokens_hash"],
-            "n_tokens": meta["n_tokens"],
-            "layer": "draft" if piece == DRAFT_PIECE else int(piece)}
+            "n_tokens": meta["n_tokens"]}
+    if piece == DRAFT_PIECE:
+        want["layer"] = "draft"
+    else:
+        i, rng = _layer_piece(piece)
+        want["layer"] = i
+        if rng is not None:
+            want["heads"] = list(rng)
     layers._read(f, want)
 
 
@@ -264,10 +314,17 @@ def _fetch_one(f, store, name, piece, sources, d: Path, meta) -> bytes | None:
     return None
 
 
-def _missing(store, d: Path, meta: dict | None, info_draft: bool) -> list:
+def _missing(store, d: Path, meta: dict | None, info_draft: bool,
+             offered: dict | None = None) -> list | None:
+    """The pieces this rank lacks of entry `d` (the layer files that make
+    its head ranges, the ones here preferred), or None when not even
+    `offered` (the peers' layer pieces) makes every slot."""
     p = store.part
     out = [] if meta is not None else [ENTRY_PIECE]
-    out += [i for i in p.slots if not (d / layers.layer_name(i)).is_file()]
+    lack = store.lacking(d, offered)
+    if lack is None:
+        return None
+    out += [piece_of(i, rng) for i, rng in lack]
     draft = meta.get("draft") if meta is not None else info_draft
     if p.extras and draft and not (d / layers.DRAFT).is_file():
         out.append(DRAFT_PIECE)
@@ -283,7 +340,14 @@ def _complete(f, store, name: str, local: dict | None, lists: dict,
     if local is not None and (local.get("layers") !=
                               list(range(store.part.total))):
         return                          # not this model's layers
-    need = _missing(store, d, local, bool(first.get("draft")))
+    need = _missing(store, d, local, bool(first.get("draft")),
+                    _offered(has))
+    if need is None:
+        stats["entries"] += 1
+        stats["unavailable"] += 1
+        logger.info("prompt cache: entry %s: no peer holds the layer "
+                    "pieces this rank lacks", name)
+        return
     if not need:
         return
     stats["entries"] += 1
@@ -358,8 +422,8 @@ def fill(store, max_n: int | None = None, *, dirs=None, prefill_tps=None,
         if dirs is not None:
             names = [Path(x).name for x in dirs]
             names = [n for n in names if layers.is_entry_name(n)]
-            if all(n in local and not _missing(store, store.dir / n,
-                                               local[n], False)
+            if all(n in local and _missing(store, store.dir / n,
+                                           local[n], False) == []
                    for n in names):
                 return stats            # all here: no peer is asked
         try:

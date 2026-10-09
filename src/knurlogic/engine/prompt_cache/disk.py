@@ -4,7 +4,8 @@ restored when the same model loads again (docs/design/prompt-cache-disk.md).
 Two formats. New saves of a whole model or a pipeline split go to
 layers.py's (one file per layer, any split reads it, beside the models:
 location.py). This module keeps the per-split format below -- still
-written by a tensor split, still read under its exact key -- and the
+written by a tensor split of a family with no cache spec, still read
+under its exact key -- and the
 parts both share: the object encoding, the settings, the sweep (both
 formats, per root), pins, drops and the registry's disk side.
 

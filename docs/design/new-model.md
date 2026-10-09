@@ -79,6 +79,16 @@ no bias_vl, no MTP layers).
   or tensor split (prompt-cache-shards.md). A kind without one is listed
   here as missing, not dropped.
 - Live: save a session, reload under a different split, and it hits.
+- Status per family (tensor-split cache spec, engine/split/tensor_rules
+  `CACHE_LAYERS`):
+  - qwen3_5, qwen3_5_moe: done (K/V by kv heads, deltanet by key heads).
+  - qwen4_exp: done (as qwen3_5; QSA indexer keys, PLE conv and n-gram
+    context replicated).
+  - deepseek_v4: done (every cache replicated: written whole by rank 0).
+  - gemma4, glm5 (GLM-5 / glm5_next): missing; no tensor split is offered
+    for them, so nothing saves per split today. Their caches (gemma4: K/V
+    and rotating windows by kv heads; GLM: MLA latent and DSA indexer,
+    replicated) need an entry when their tensor split is built.
 
 ## 8. Computing what the maker computes
 

@@ -32,8 +32,18 @@
   before it is kept; a refused piece makes the entry a miss. A fetch
   slower than recomputing, at the measured rates, is skipped. Fetched
   files are ordinary cache files.
-* Entries saved by 0.1.5 are still read under their own split; new saves
-  use the new layout only. A tensor split still saves per split.
+* Tensor splits save per head range (prompt-cache-shards.md, phase 3):
+  each rank writes its share of each layer's cache as
+  `L{layer}.h{a}-{b}.safetensors` (K/V by kv heads, deltanet state by key
+  heads), a cache every rank holds whole once (rank 0). A reader takes
+  whatever files cover its range (the whole layer cut, one slice, or
+  slices joined), so an entry moves between one machine, a pipeline and
+  a tensor split either way; a range nothing covers is a miss on every
+  rank. Covered: qwen3_5, qwen3_5_moe, qwen4_exp, deepseek_v4. The cut
+  per family is a table beside the tensor rules; a family without one
+  keeps saving per split under tensor.
+* Entries saved by 0.1.5, and earlier tensor entries, are still read
+  under their own split; new saves use the new layout only.
 
 ### Engine
 

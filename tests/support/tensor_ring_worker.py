@@ -84,11 +84,105 @@ def run(model, ids, then):
     return np.array(y)
 
 
-def main(out_path, family="qwen3_5_moe"):
+def _cont(model, cache, then):
+    """The logits of `then` fed one at a time from `cache`."""
+    import mlx.core as mx
+    out = [model(mx.array([[t]]), cache=cache)[:, -1] for t in then]
+    y = mx.concatenate(out).astype(mx.float32)
+    mx.eval(y)
+    return np.array(y)
+
+
+def cache_main(out_path, family, link):
+    """The prompt cache across a real tensor split (phase 3 of
+    docs/design/prompt-cache-shards.md): rank 0 saves the whole model's
+    entry on one machine; both ranks save their slices of the split's
+    entry (a shared folder) and commit; then each rank restores the
+    tensor entry (the vote over the ring) and the whole one cut to its
+    range, and rank 0 alone reads the tensor entry joined. Writes each
+    rank's continuation logits for the test to compare."""
+    import copy
+    from pathlib import Path
+    from types import SimpleNamespace as NS
+
+    import mlx.core as mx
+
+    from knurlogic.engine.prompt_cache import layers as LY
+    from knurlogic.engine.split import tensor as T
+    base = Path(out_path).parent
+    shared, single = base / "shared", base / "single"
+    ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]
+    then = [31, 104, 331, 32]
+    if family == "deepseek_v4":                 # its vocabulary is 64
+        ids, then = [t % 64 for t in ids], [t % 64 for t in then]
+    key = LY.shard_key("/nonexistent/tiny-tensor")
+    res = {}
+    if link.rank == 0:
+        whole = build(family)
+        c = whole.make_cache()
+        whole(mx.array([ids]), cache=c)
+        st = LY.Store(single, key, LY.part_of(NS(model=whole,
+                                                 cache_layout=None)))
+        assert st.save(_lru(ids, c), sweep_after=False)["saved"] == 1
+        res["whole_own"] = _cont(whole, copy.deepcopy(c), then).tolist()
+    link.barrier()
+    model = build(family)
+    T.shard(model, link.group)
+    host = NS(model=model, cache_layout={"split": "tensor",
+                                         "world": link.size,
+                                         "rank": link.rank})
+    part = LY.part_of(host)
+    assert part is not None and LY.uses_layers(host)
+    c = model.make_cache()
+    model(mx.array([ids]), cache=c)
+    # every rank evaluates its prefill (its collectives) before the save:
+    # a rank that writes nothing (a replicated cache) would never run them
+    from knurlogic.engine.prompt_cache import disk as D
+    mx.eval(list(D._arrays_of(c)))
+    st = LY.Store(shared, key, part)
+    got = st.save(_lru(ids, c), commit=False, sweep_after=False)
+    assert LY.commit(link, st, got["pending"]) == [got["pending"][0][
+        "tokens_hash"]]
+    res["split_own"] = _cont(model, copy.deepcopy(c), then).tolist()
+    link.barrier()
+    back = LY.restore(8, st, link=link)
+    assert len(back) == 1 and back[0][1] == ids, back
+    res["split_back"] = _cont(model, list(back[0][2]), then).tolist()
+    res["files"] = sorted(f.name for f in (st.dir / back[0][0].name
+                                           ).iterdir())
+    one = LY.Store(single, key, part)
+    from_whole = one.read(one.candidates(8))
+    assert len(from_whole) == 1
+    res["split_from_whole"] = _cont(model, list(from_whole[0][2]),
+                                    then).tolist()
+    link.barrier()
+    if link.rank == 0:
+        whole = build(family)
+        w = LY.Store(shared, key, LY.part_of(NS(model=whole,
+                                                cache_layout=None)))
+        joined = w.read(w.candidates(8))
+        assert len(joined) == 1
+        res["whole_from_split"] = _cont(whole, list(joined[0][2]),
+                                        then).tolist()
+    json.dump(res, open(f"{out_path}.{link.rank}", "w"))
+    link.barrier()
+    return 0
+
+
+def _lru(tokens, cache):
+    from mlx_lm.models.cache import LRUPromptCache
+    lru = LRUPromptCache(max_size=8)
+    lru.insert_cache("m", list(tokens), cache, cache_type="user")
+    return lru
+
+
+def main(out_path, family="qwen3_5_moe", mode="logits"):
     from knurlogic.engine.split import link as split_link
     from knurlogic.engine.split import ring as split_ring
     from knurlogic.engine.split import tensor as T
     link = split_link.init("ring")
+    if mode == "cache":
+        return cache_main(out_path, family, link)
     ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]
     then = [31, 104, 331, 32, 439, 214]
     if family == "deepseek_v4":                 # its vocabulary is 64

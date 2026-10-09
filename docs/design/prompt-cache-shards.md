@@ -1,11 +1,12 @@
 # The shard-agnostic prompt cache
 
-Status: phases 1 and 2 built (0.1.6): whole models and pipeline splits,
-a shared folder beside the models, the local fallback, and missing pieces
-fetched from a peer when machines do not share storage. Phase 3 (tensor,
-per head range) is not built; a tensor split still saves in
-prompt-cache-disk.md's per-split format. What phases 1 and 2 changed
-against this design is under "As built". Everything a client sees
+Status: phases 1, 2 and 3 built (0.1.6): whole models, pipeline and
+tensor splits, a shared folder beside the models, the local fallback, and
+missing pieces fetched from a peer when machines do not share storage.
+Under tensor, qwen3_5, qwen3_5_moe, qwen4_exp and deepseek_v4 save per
+head range; a family with no cache spec still saves in
+prompt-cache-disk.md's per-split format. What each phase changed against
+this design is under "As built". Everything a client sees
 (save / park / drop / pin / keep-latest / registry / diverged) stays as it
 is; registry rows gain a `location`.
 
@@ -54,7 +55,7 @@ cache along some axis, and that axis differs by cache kind:
 |---|---|---|
 | K/V (KVCache, QuantKVCache, Rotating) | KV heads | qwen, gemma4 |
 | MLA latent (CacheList) | none: replicated | GLM-5, DeepSeek |
-| deltanet / recurrent state (ArraysCache) | value heads | qwen3.5 |
+| deltanet / recurrent state (ArraysCache) | key heads, each with the value heads that read it (as built) | qwen3.5 |
 | compressor / indexer pools | per family | DeepSeek V4, qwen4_exp |
 
 The axis comes from the family's spec, next to its tensor rules
@@ -219,9 +220,7 @@ removes both formats' entries in every root (`entry.json` first).
 the old code. New saves write only the per-layer format (a tensor split
 excepted). No converter.
 
-**Left for later phases.** Phase 3: tensor splits, per head
-range (the seam: `part_of` returns None for a tensor layout, and those
-splits keep the per-split format); file names would gain `.h{a}-{b}`.
+**Left for later phases.** Phase 3: tensor splits (built, below).
 
 ## As built (phase 2)
 
@@ -286,6 +285,73 @@ read-back on a server that has run prefills.
 **After.** A fetched file is an ordinary local file: the sweep, TTL and
 pins apply, and the next load reads it without asking.
 
+## As built (phase 3)
+
+**The spec.** `engine/split/tensor_rules.py`, beside RULES: `CACHE_LAYERS`
+names, per family (model_type), the cache kind each layer module makes;
+`CACHE_KINDS` the fields each kind cuts, the axis, and the slots one unit
+takes per segment. Any field not named is replicated: carried whole in
+every slice. `cache_cuts(model)` resolves it per layer from the unsplit
+model's sizes; `tensor.shard` records that (`model.cache_cuts`) before it
+splits. As built:
+
+| family | layer module | cache | kind | unit | fields cut (axis) | replicated |
+|---|---|---|---|---|---|---|
+| qwen3_5, qwen3_5_moe | self_attn | KVCache / QuantKVCache | kv | kv head | keys, values (1; each array of a quantized tuple) | offset, quant settings |
+| qwen3_5, qwen3_5_moe | linear_attn | ArraysCache(2) | deltanet | key head (+ v/k value heads) | conv state `cache.0` (-1, segments q, k, v: Dk, Dk, (v/k)Dv per unit); recurrent state `cache.1` (1, v/k per unit) | lengths, padding |
+| qwen4_exp | self_attn | _AttnCache / QuantAttnCache | kv | kv head | keys, values (1) | QSA indexer keys and positions |
+| qwen4_exp | linear_attn | _LayerCache(4) | deltanet | key head | `cache.0`, `cache.1` as qwen3_5 | PLE conv `cache.2`, n-gram context `cache.3` |
+| deepseek_v4 | attn | DeepseekV4Cache | whole | - | none | all (one shared kv head, compressor pools, indexer) |
+| gemma4, glm5 | - | - | no spec | - | - | no tensor split is offered |
+
+**Ranges and writers.** Rank r of n holds units [r*u/n, (r+1)*u/n) of a
+kind of u units. K/V with fewer kv heads than ranks (Rule.repeat_kv):
+each rank holds one head, [r // (n/u), +1), and only the first rank
+holding each copy writes it. deltanet units that do not divide (and any
+kind on more ranks than units, other than K/V) make `part_of` None: the
+per-split format, logged. A replicated (whole) layer is written by rank 0
+only, as `L{i:03d}.safetensors`.
+
+**Files.** A slice is `L{i:03d}.h{a}-{b}.safetensors`; its header adds
+`heads` [a, b], `units` and `kind` to phase 1's. `entry.json` gains
+`stored`: {slot: [[a, b], ...]} for each sliced layer (the ranges the
+saving split wrote); a slot not named is one whole file. A single machine
+and a pipeline write whole files as in phase 1 (their entries are
+unchanged; `CACHE_FORMAT` stays 2). The drafting head's cache is not
+saved under tensor (a drafting row re-prefills); the layers are.
+
+**Assembly** (`slices.py`). A reader's need per slot is a range [c, d)
+(a tensor rank) or the whole layer (one machine, a pipeline rank).
+`plan` picks from the files present: the whole layer if there, else a
+chain of slices from c, each the one reaching furthest; a gap is None.
+`assemble` cuts each piece to its overlap and joins them: per cut field,
+per segment (a conv state's q | k | v are joined segment by segment, so
+a slice's [q_r, k_r, v_r] becomes [q, k, v]), the other fields from the
+first piece. A whole layer read by a tensor rank is cut the same way.
+Cut and joined arrays are the saved arrays' exact bytes, so the logits
+are bit for bit.
+
+**Votes and fetches.** The commit asks each rank whether it wrote what
+it writes (`Store.ready`; a kept entry: whether it can read its part);
+the restore whether it can make every range it needs from the files
+there (`Store.holds` = `plans`). `transfer.listing` lists slices as
+`<slot>.h<a>-<b>` pieces beside whole layers; `fill` plans over the
+local files and every peer's, and fetches only the pieces the plan lacks
+(`Store.lacking`); the route serves a slice by the same name. A range no
+file anywhere covers is a miss on that rank, so on every rank.
+
+**Tests** (tests/engine/test_prompt_cache_tensor.py): single -> tensor,
+tensor -> single, tensor -> pipeline, pipeline -> tensor, for qwen3_5_moe
+(also 8-bit K/V), qwen4_exp and deepseek_v4, each rank's share equal to
+the original's cut and the rejoined cache's logits bit for bit; a
+replicated kind written once by rank 0 and fetched by rank 1; slices on
+separate machines fetched and joined; a missing slice a miss on every
+rank; fewer kv heads than ranks; the per-split fallback; an old tensor
+per-split entry restoring; and a two-process ring (save, commit, restore
+over the vote: a rank's continuation from its restored slices equals its
+own cache's bit for bit; the whole model's entry on the split and the
+split's on one machine to the split's float32 rounding).
+
 ## Code
 
 All prompt-cache code lives in `engine/prompt_cache/`:
@@ -298,6 +364,7 @@ All prompt-cache code lives in `engine/prompt_cache/`:
 | `ring.py` | a split model's journaled cache ops and follower apply |
 | `report.py` | what a request's usage says about the cache |
 | `layers.py` | the per-layer format: Part, key, write / read / complete check, save, commit and restore votes (built) |
+| `slices.py` | phase 3: a layer's cache per head range: names, plan, cut, join (built) |
 | `location.py` | where the cache root is (built) |
 | `transfer.py` | phase 2: what a rank lacks, fetched through an injected fetcher, verified, written (built) |
 

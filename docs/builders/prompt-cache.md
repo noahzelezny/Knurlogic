@@ -12,10 +12,11 @@ Everything is in one package, `src/knurlogic/engine/prompt_cache/`:
 | file | what |
 |---|---|
 | `memory.py` | `PromptCache`: mlx-lm's LRU trie plus who owns each entry (`owners`), pins, shared checkpoints, keep-latest |
-| `layers.py` | the per-layer format (whole models and pipeline splits): `Part` (which slots a rank holds), `shard_key`, `Store` (write / read / complete check, save, index), `commit` (the ring's entry.json vote), `restore` and `agree` (the load's vote) |
+| `layers.py` | the per-layer format (whole models, pipeline and tensor splits): `Part` (which slots a rank holds, and under tensor its head range of each and what it writes), `shard_key`, `Store` (write / read / complete check, save, index), `commit` (the ring's entry.json vote), `restore` and `agree` (the load's vote) |
+| `slices.py` | a layer's cache per head range: file names, `plan` (which files make a range), `cut` / `join` / `assemble` along the axes the family's spec names |
 | `location.py` | where the cache root is: `<models folder>/Prompt cache/`, else the fallback; `locations.json` remembers every root |
 | `transfer.py` | machines without shared storage: what this rank lacks of an entry, fetched from a peer (`fill`), verified, renamed into place; `listing` / `piece_path` are what a page serves. No networking: the fetcher is injected (`use`) |
-| `disk.py` | the per-split format (a tensor split's, and entries earlier builds wrote), the object encoding both formats use, the settings, the sweep (TTL and budget, both formats, per root), pins.json, drops, the registry's disk side, the per-split vote (`agree`) |
+| `disk.py` | the per-split format (a tensor split of a family with no cache spec, and entries earlier builds wrote), the object encoding both formats use, the settings, the sweep (TTL and budget, both formats, per root), pins.json, drops, the registry's disk side, the per-split vote (`agree`) |
 | `commands.py` | `PromptCacheCommands`, a mixin of the `Scheduler`: save, park, drop, pin, list, read-back, divergence, restore at load |
 | `ring.py` | a split model: `JournalPromptCache` journals every cache change, `apply_cache_op` replays it on the other ranks |
 | `report.py` | `usage.knurlogic.cache` for one request |
@@ -68,6 +69,23 @@ tensor code or HTTP server only by a call into it.
 - **Only rank 0 deletes files on a ring**, and it journals the names
   (`drop_files`), so no rank reads an entry another has half-deleted.
   Followers save with `sweep_after=False` and read with `sweep_first=False`.
+- **A tensor rank's cache is cut by its family's spec, not by its
+  shapes.** `engine/split/tensor_rules.CACHE_LAYERS` names, per family,
+  the cache kind each layer module makes; `CACHE_KINDS` the fields and
+  axis each kind is cut on (fields not named are carried whole in every
+  slice). `tensor.shard` records the unsplit model's cuts
+  (`model.cache_cuts`) before it splits; `layers.part_of` turns them into
+  this rank's head range per slot and what it writes (its slice; a
+  replicated cache whole, rank 0 only; with fewer kv heads than ranks,
+  the first holder of each copy). A family without an entry keeps the
+  per-split format under tensor; adding one is a CACHE_LAYERS line (and
+  a CACHE_KINDS kind if its caches are new), with the crossing tests of
+  tests/engine/test_prompt_cache_tensor.py.
+- **Reading is planning.** A rank reads what makes its range
+  (`slices.plan`): the whole layer, else a chain of slices; the commit's
+  vote asks whether each rank wrote what it writes (`Store.ready`), the
+  restore's whether it can make its ranges (`Store.holds`), and the
+  fetch fetches only the pieces the plan lacks (`Store.lacking`).
 - **A fetched piece is checked before it is a file.** `transfer.fill`
   downloads under a temp name, checks the size against the peer's
   listing and the header (key id, tokens, slot) and arrays as a read

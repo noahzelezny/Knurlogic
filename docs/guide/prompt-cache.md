@@ -90,16 +90,17 @@ says which one is used, and `GET /v1/prompt-cache` lists each entry's
 
 A saved prompt does not depend on how a model is split across Macs: a
 session saved on one Mac is found again when the same model runs split
-over two (pipeline), and the other way round, or with the layers cut
-differently. On a shared drive both Macs use the same folder. When
+over two (pipeline or tensor), and the other way round, or with the
+layers cut differently, or with a pipeline in place of a tensor split. On a shared drive both Macs use the same folder. When
 each Mac keeps its models on its own disk, each has its own folder: a
 Mac that needs layers another Mac saved copies them from that Mac's page
 (over the link the pages use) before the model's first request, and
 keeps them. A copy that would take longer than reading the prompt again
-is skipped. A model
-split by tensor still saves per split. Entries saved by 0.1.5 are still
-read back for the split they were saved under; new saves use the new
-layout.
+is skipped. Under a tensor split each Mac saves its share of every
+layer's heads. A model family the tensor saving does not cover yet (see
+the "Cache saving" list in [new-model.md](../design/new-model.md)) still
+saves per split under tensor. Entries saved by 0.1.5 are still read back
+for the split they were saved under; new saves use the new layout.
 
 ### Limits
 
@@ -122,9 +123,10 @@ is almost always a client-side rendering difference worth fixing.
 ## Two or more Macs
 
 A model split across Macs saves and restores the same way; each Mac keeps
-its own part. Today a saved session only comes back under the same split
-(same Macs, same layers each). Split-independent saves are designed in
-[prompt-cache-shards.md](../design/prompt-cache-shards.md).
+its own part, and a saved session comes back under any split of the same
+model (see above;
+[prompt-cache-shards.md](../design/prompt-cache-shards.md) has the
+design).
 
 ## What it cannot do
 

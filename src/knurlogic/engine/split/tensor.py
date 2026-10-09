@@ -203,6 +203,10 @@ def shard(model, group) -> None:
     hyper-connections, QSA indexer and the rest of its PLE run whole on
     every rank, on the whole hidden state the Reduces leave."""
     n, rank = group.size(), group.rank()
+    # what each layer's cache is before the cut: the prompt cache saves
+    # this rank's share per head range (engine/prompt_cache/layers.part_of)
+    from .tensor_rules import cache_cuts
+    object.__setattr__(model, "cache_cuts", cache_cuts(model))
     for layer in model.layers:
         for path, rule in RULES.items():
             _apply(layer, path, rule, rank, n)
