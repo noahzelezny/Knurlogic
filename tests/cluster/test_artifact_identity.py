@@ -132,11 +132,11 @@ def test_network_mounts_are_read_from_mount(monkeypatch):
 
     class R:
         stdout = ("/dev/disk3s1 on / (apfs, local, journaled)\n"
-                  "//user@studio-a._smb._tcp.local/Models on /Volumes/Models "
+                  "//user@studio-a._smb._tcp.local/Models on /mnt/shared-models "
                   "(smbfs, nodev, nosuid, mounted by user)\n")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R)
     monkeypatch.setattr(A, "_MOUNTS", [])
-    assert A._network_mounts() == ["/Volumes/Models"]
+    assert A._network_mounts() == ["/mnt/shared-models"]
 
 
 def test_spec_name_is_never_a_path():
