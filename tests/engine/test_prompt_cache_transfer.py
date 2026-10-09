@@ -298,6 +298,15 @@ def test_a_fetch_slower_than_recomputing_is_skipped(monkeypatch, machines):
     assert TR.RATES["http://peer"] != 1e12             # measured
 
 
+def test_a_fill_stops_at_its_time_budget(monkeypatch, machines):
+    # a slow peer must not hold a ring's ranks at the restore vote
+    key = _key()
+    _split_tiny(monkeypatch, machines, key)
+    st = LY.Store(machines[0], key, LY.Part(0, 4, 4))
+    got = TR.fill(st, 8, fetch=_Peer([machines[1]]), budget_s=-1.0)
+    assert got["out_of_time"] == 1 and got["fetched"] == 0
+
+
 # --- the route ------------------------------------------------------------
 
 def test_the_piece_route_refuses_names_that_are_not_its_formats(

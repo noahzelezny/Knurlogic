@@ -335,13 +335,21 @@ def _complete(f, store, name: str, local: dict | None, lists: dict,
     stats["fetched"] += 1
 
 
+#: the most one fill (a load's, a read-back's) spends fetching: a slow peer
+#: must not hold a ring's ranks at the restore vote; what is not fetched by
+#: then is a miss, recomputed as before
+FILL_BUDGET_S = 120.0
+
+
 def fill(store, max_n: int | None = None, *, dirs=None, prefill_tps=None,
-         fetch=None) -> dict:
+         fetch=None, budget_s: float | None = None) -> dict:
     """Fetch what this rank lacks of this model's entries: the newest
     `max_n` (local and the peers' together), or the entry directories
     `dirs` (a read-back). Never raises; stats say what happened."""
     stats = {"entries": 0, "fetched": 0, "pieces": 0, "unavailable": 0,
-             "not_worth": 0, "rejected": 0}
+             "not_worth": 0, "rejected": 0, "out_of_time": 0}
+    end = time.monotonic() + (FILL_BUDGET_S if budget_s is None
+                              else budget_s)
     f = fetch or _FETCHER[0]
     if f is None or store is None or not disk.enabled():
         return stats
@@ -384,7 +392,15 @@ def fill(store, max_n: int | None = None, *, dirs=None, prefill_tps=None,
             names = [o[2] for o in sorted(order.values())]
             if max_n is not None:
                 names = names[-max_n:] if max_n > 0 else []
-        for n in names:
+        for i, n in enumerate(names):
+            if time.monotonic() > end:
+                stats["out_of_time"] = len(names) - i
+                logger.warning("prompt cache: fetching from the peers took "
+                               "over %.0f s; %d entr%s left as misses",
+                               FILL_BUDGET_S if budget_s is None else budget_s,
+                               len(names) - i,
+                               "y" if len(names) - i == 1 else "ies")
+                break
             _complete(f, store, n, local.get(n), lists, prefill_tps, stats)
     except Exception:  # a fetch that fails is a miss, never a failed load
         logger.exception("prompt cache: fetching from the peers failed")
