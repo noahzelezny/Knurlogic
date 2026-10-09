@@ -89,7 +89,7 @@ def _watch_hangup(job, sock, done: threading.Event) -> None:
     """Cancel `job` when its client hangs up while a non-streamed reply is
     being made. Nothing is written until such a reply is complete, so the
     failed write that stops a stream never happens: a client that timed
-    out and resent its request (the harness's 120 s read timeout, 2026-10-06)
+    out and resent its request (a 120 s client read timeout)
     left every copy prefilling 170k tokens to the end. Off with
     KNURLOGIC_DISCONNECT_POLL=off, for a client that half-closes its side
     after sending (none known)."""

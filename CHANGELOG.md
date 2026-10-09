@@ -88,7 +88,7 @@ documentation, role-based placement for agents, and fixes.
 * A split model (pipeline or tensor) stops a prefill when its client goes
   away, at the next chunk on every Mac together, instead of running the
   whole prompt to its end: a 339k-token prompt kept two Macs busy for half
-  an hour after the harness stopped.
+  an hour after its client stopped.
 * A per-model "Thinking default" setting: the thinking level a request
   that names none is served at, offered as the model's own level names
   (GLM: off, low, high, max); unset keeps the template's own default. For a
