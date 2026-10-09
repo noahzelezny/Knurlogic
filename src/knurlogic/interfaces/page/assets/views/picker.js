@@ -336,9 +336,8 @@ function pickInfo(){
   if(!m){ el.innerHTML=''; $('launch').disabled=true; $('launch').title='choose a model';
     $('mtpopts').hidden=true; return }
   const ws=fitWS(), fits=!ws||m.size_bytes<=ws, ns=selNodes();
-  // Launch loads on THIS machine and nowhere else: the page has no way yet
-  // to start a model on a peer, or across several. Picking those still
-  // answers the fit question; it does not pretend to launch.
+  // Launch loads on the picked machine: this one, a peer, or several as a
+  // cluster job; launchBlock says why it cannot.
   const blocked=launchBlock(ns);
   $('launch').disabled=!!blocked;
   $('launch').title=blocked||'';

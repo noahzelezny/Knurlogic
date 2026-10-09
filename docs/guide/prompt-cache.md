@@ -86,7 +86,7 @@ folder next to your models is coming: see
 | setting | default | |
 |---|---|---|
 | `KNURLOGIC_PROMPT_CACHE_DISK` | on | saving allowed at all |
-| `KNURLOGIC_PROMPT_CACHE_DISK_GB` | 20% of free space, at most 64 GiB | all models' files together; oldest go first |
+| `KNURLOGIC_PROMPT_CACHE_DISK_GB` | 20% of free space plus what the cache holds, at most 64 GiB | all models' files together; oldest go first |
 | `KNURLOGIC_PROMPT_CACHE_TTL_H` | 24 | files unused this long are deleted |
 
 Pinned sessions are exempt from both limits; only a drop removes them.
