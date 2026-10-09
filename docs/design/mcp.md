@@ -1,6 +1,6 @@
 # The MCP server
 
-## knurlogic/interfaces/mcp.py
+## knurlogic/interfaces/mcp/
 
 Managing local models by hand means guessing: whether memory has
 settled, whether a model fits, what the knobs are and why they are set that

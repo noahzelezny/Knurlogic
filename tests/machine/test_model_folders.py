@@ -79,10 +79,10 @@ def test_adopt_from_env_once(tmp_path):
 
 
 def test_mcp_model_folders_tool(tmp_path):
-    from knurlogic.interfaces import mcp
+    from knurlogic.interfaces.mcp import server
     f = tmp_path / "x"
     f.mkdir()
-    out = mcp._call("model_folders", {"add": str(f)})
+    out = server._call("model_folders", {"add": str(f)})
     assert out["folders"] == [{"path": str(f), "mounted": True}]
-    out = mcp._call("model_folders", {"remove": str(f)})
+    out = server._call("model_folders", {"remove": str(f)})
     assert out["folders"] == []

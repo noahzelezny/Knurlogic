@@ -17,6 +17,7 @@ import test_cluster_jobs as T
 
 from knurlogic.cluster import launch as C
 from knurlogic.interfaces import mcp, spawn
+from knurlogic.interfaces.mcp import lifecycle, page_client
 from knurlogic.interfaces.page import documents
 from knurlogic.interfaces.page import loads as page_loads
 from knurlogic.interfaces.page import nodes as page_nodes
@@ -62,15 +63,15 @@ def page(monkeypatch):
             return p.docs[path]
         p.posts.append(doc)
         return p.answer
-    monkeypatch.setattr(mcp, "_page_call", call)
+    monkeypatch.setattr(page_client, "_page_call", call)
     monkeypatch.setitem(identity._ID, "id", "aaaa")
     monkeypatch.setitem(identity._ID, "name", "A")
-    monkeypatch.setattr(mcp, "_identity_of", lambda a: ("abc", None))
+    monkeypatch.setattr(lifecycle, "_identity_of", lambda a: ("abc", None))
     return p
 
 
 def test_a_cluster_job_is_one_model_with_its_requests_and_link():
-    ms = mcp.models_across(residency(), "A")
+    ms = page_client.models_across(residency(), "A")
     job = [m for m in ms if m["job"] == "j1"]
     assert len(job) == 1, ms
     j = job[0]
@@ -84,7 +85,7 @@ def test_a_cluster_job_is_one_model_with_its_requests_and_link():
 
 
 def test_a_job_whose_rank_0_has_no_row_yet_is_listed_once_from_the_job():
-    ms = mcp.models_across(residency(rank0_row=False), "A")
+    ms = page_client.models_across(residency(rank0_row=False), "A")
     job = [m for m in ms if m["job"] == "j1"]
     assert len(job) == 1 and job[0]["port"] == 8080
     assert job[0]["phase"] == "ready" and job[0]["requests"] is None
@@ -94,7 +95,7 @@ def test_a_stopped_job_is_not_resident():
     doc = residency(rank0_row=False)
     doc["jobs"][0]["phase"] = "stopped"
     doc["peers"][0]["jobs"][0]["phase"] = "stopped"
-    assert not [m for m in mcp.models_across(doc, "A") if m["job"]]
+    assert not [m for m in page_client.models_across(doc, "A") if m["job"]]
 
 
 def test_load_on_two_machines_sends_the_pages_launch(page):
@@ -164,7 +165,7 @@ def test_load_refuses_what_it_cannot_send(page):
 
 
 def test_no_page_is_an_error_that_says_to_start_it(monkeypatch):
-    monkeypatch.setattr(mcp, "_identity_of", lambda a: ("abc", None))
+    monkeypatch.setattr(lifecycle, "_identity_of", lambda a: ("abc", None))
     out = mcp.load(artifact="M", machines=["A", "B"], split="tensor",
                    link="tcp")
     assert "knurlogic ui" in out["error"]
@@ -272,7 +273,7 @@ def page_a(tmp_path, monkeypatch, owned_procs):
 
 def test_mcp_load_state_unload_across_two_pages(page_a, monkeypatch):
     from knurlogic.cluster import jobs as J
-    monkeypatch.setattr(mcp, "_identity_of", lambda a: ("abc", None))
+    monkeypatch.setattr(lifecycle, "_identity_of", lambda a: ("abc", None))
     out = mcp.load(artifact="M", port=page_a.port, machines=["A", "B"],
                    split="tensor", link="tcp")
     assert out.get("job"), out

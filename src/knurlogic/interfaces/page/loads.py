@@ -21,11 +21,11 @@ from knurlogic.tuning.presets import preset_or
 
 
 def tracked_load(**kw) -> dict:
-    """mcp.load, for a load this page was asked for: a server it starts is
+    """mcp lifecycle.load, for a load this page was asked for: a server it starts is
     relaunched if it dies unasked (cluster/recovery.py)."""
     from knurlogic.cluster import recovery
-    from knurlogic.interfaces import mcp
-    out = mcp.load(**kw)
+    from knurlogic.interfaces.mcp import lifecycle
+    out = lifecycle.load(**kw)
     if isinstance(out, dict) and out.get("pid") and out.get("port"):
         recovery.track_single(int(out["port"]), {
             "artifact": out.get("starting") or kw.get("artifact"),

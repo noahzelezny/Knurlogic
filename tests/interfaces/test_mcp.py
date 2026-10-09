@@ -10,6 +10,7 @@ import json
 import pytest
 
 from knurlogic.interfaces import mcp, spawn
+from knurlogic.interfaces.mcp import inspection, lifecycle, server, tools
 
 
 @pytest.fixture(autouse=True)
@@ -33,9 +34,9 @@ def _artifact(d, gib=4, **cfg):
 
 
 def test_every_tool_is_in_the_table_with_a_schema():
-    for t in mcp.tool_list():
+    for t in tools.tool_list():
         assert t["description"] and t["inputSchema"]["type"] == "object"
-        assert t["name"] in mcp.TOOLS
+        assert t["name"] in tools.TOOLS
 
 
 def test_nothing_moving_is_ready(monkeypatch):
@@ -133,12 +134,12 @@ def test_settings_carries_the_measurement_not_just_the_value(tmp_path):
 
 
 def test_an_unknown_tool_says_what_there_is():
-    out = mcp._call("nope", {})
+    out = server._call("nope", {})
     assert "unknown tool" in out["error"] and "ready" in out["available"]
 
 
 def test_a_failing_tool_reports_rather_than_raises():
-    out = mcp._call("fit", {"artifact": "/does/not/exist"})
+    out = server._call("fit", {"artifact": "/does/not/exist"})
     assert "error" in out and out["tool"] == "fit"
 
 
@@ -314,7 +315,7 @@ def test_load_cannot_fit_with_mtp_but_fits_without_offers_mtp_off(tmp_path,
                            "110.8 GiB; turn MTP off (Settings) to fit"}
         return {"state": "fits", "head_bytes": 0, "why": ""}
     monkeypatch.setattr("knurlogic.tuning.checks.launch_fit", fake)
-    monkeypatch.setattr(mcp, "fit", lambda **k: pytest.fail("fit hid it"))
+    monkeypatch.setattr(inspection, "fit", lambda **k: pytest.fail("fit hid it"))
     r = mcp.load(artifact=str(d))
     assert r["loaded"] is False and r["refused"] == "will not fit"
     assert r["mtp_off_fits"] is True and not spawned
@@ -322,7 +323,7 @@ def test_load_cannot_fit_with_mtp_but_fits_without_offers_mtp_off(tmp_path,
     assert "draft=false" in r["text"]
     # asked with MTP off already, the same numbers are a plain refusal
     calls.clear()
-    assert mcp._mtp_off_doc(str(d), {}, "default", False) is None and not calls
+    assert lifecycle._mtp_off_doc(str(d), {}, "default", False) is None and not calls
 
 
 def test_fit_settings_and_drafting_refuse_an_unknown_name(monkeypatch):

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cluster"))
 from test_mcp_cluster import JOB, REQS, STATUS, page, residency  # noqa: E402, F401
 
 from knurlogic.interfaces import mcp, spawn
+from knurlogic.interfaces.mcp import page_client
 from knurlogic.machine import loaded, servers
 
 
@@ -81,13 +82,13 @@ def test_models_across_dedupes_a_single_mac_server_by_instance():
     doc = {"resident": [row], "jobs": [], "recovery": [],
            "peers": [{"machine": "B", "resident": [dict(row)],
                       "jobs": [], "recovery": []}]}
-    out = mcp.models_across(doc, "A")
+    out = page_client.models_across(doc, "A")
     assert len(out) == 1
     assert out[0]["instance"] == "deadbeefcafefeed"
 
 
 def test_models_across_carries_a_cluster_jobs_instance_as_its_job_id():
-    out = mcp.models_across(residency(), "A")
+    out = page_client.models_across(residency(), "A")
     m = [r for r in out if r["job"] == "j1"]
     assert len(m) == 1 and m[0]["instance"] == "j1"
 
@@ -156,5 +157,5 @@ def test_unload_of_a_failed_job_clears_its_record_by_its_first_id(page):  # noqa
         out = mcp.unload(job=job)
         assert page.posts == [{"action": "unload", "job": "4edaa9ea5df6e73e"}]
         assert out["cleared"] == ["4edaa9ea5df6e73e"]
-    assert len([m for m in mcp.models_across(doc, "A")
+    assert len([m for m in page_client.models_across(doc, "A")
                 if m["job"] == "4edaa9ea5df6e73e"]) == 1

@@ -439,15 +439,15 @@ def _open_when_up(host: str, port: int) -> None:
 
 def _wire() -> None:
     """Give launch and recovery what they need of this page. Each is
-    a late-bound lambda, so a swapped PEERS or mcp.load is what they see."""
+    a late-bound lambda, so a swapped PEERS or mcp lifecycle.load is what they see."""
     from knurlogic.cluster import launch, recovery
-    from knurlogic.interfaces import mcp
+    from knurlogic.interfaces.mcp import lifecycle
     launch.status_fn = lambda: nodes._status_fn()
     launch.peers_fn = lambda: nodes.PEERS.all() if nodes.PEERS else []
     recovery.peers_fn = lambda: nodes.PEERS.all() if nodes.PEERS else []
     recovery.child_fn = lambda port: spawn._CHILDREN.get(port)
     recovery.answers_fn = lambda port: spawn._answers(port)
-    recovery.load_fn = lambda **kw: mcp.load(**kw)
+    recovery.load_fn = lambda **kw: lifecycle.load(**kw)
 
 
 _wire()

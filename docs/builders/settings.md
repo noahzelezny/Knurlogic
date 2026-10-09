@@ -48,7 +48,7 @@ Where the settings meet the rest (thin calls, no settings logic):
 - `machine/memory/allowance.py`: the most memory knurlogic may use. It stays in
   `machine/` because it lowers the load budget (`wired.load_budget`);
   `tuning/` takes that budget as an input.
-- `interfaces/mcp.py`: the `settings` and `fit` tools.
+- `interfaces/mcp/inspection.py`: the `settings` and `fit` tools.
 
 ## Rules that keep it correct
 

@@ -66,8 +66,8 @@ def test_a_killed_rank_comes_back(two_pages, monkeypatch):
         assert job["recovery"]["attempts"] == 1
         assert R.served_view(p.port, True)["state"] == "recovered"
         # the MCP's models: one entry, carrying it
-        from knurlogic.interfaces import mcp
-        ms = mcp.models_across(doc, "A")
+        from knurlogic.interfaces.mcp import page_client
+        ms = page_client.models_across(doc, "A")
         assert [m["recovery"]["state"] for m in ms] == ["recovered"]
     finally:
         if new:
@@ -121,8 +121,8 @@ def test_out_of_memory_is_failed_not_relaunched(two_pages, monkeypatch):
     # MCP's models
     down = page_loads.with_jobs({"resident": []})["recovery"]
     assert [d["state"] for d in down] == ["failed"]
-    from knurlogic.interfaces import mcp
-    ms = mcp.models_across({"resident": [], "recovery": down}, "A")
+    from knurlogic.interfaces.mcp import page_client
+    ms = page_client.models_across({"resident": [], "recovery": down}, "A")
     assert ms[0]["state"] == "failed" and ms[0]["machines"] == ["A", "B"]
 
 
@@ -310,7 +310,7 @@ def test_reasons_are_sorted_into_kinds():
 
 def test_a_one_mac_server_that_dies_is_relaunched_the_same_way(
         monkeypatch, tmp_path):
-    from knurlogic.interfaces import mcp
+    from knurlogic.interfaces.mcp import lifecycle
     from knurlogic.machine import servers
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     monkeypatch.setattr(R, "BACKOFF_S", (0.0, 0.0, 0.0))
@@ -324,7 +324,7 @@ def test_a_one_mac_server_that_dies_is_relaunched_the_same_way(
                      "t": time.time()}
         servers.save_registry(reg)
         return {"starting": "/m/qwen", "port": 8093, "pid": 424242}
-    monkeypatch.setattr(mcp, "load", load)
+    monkeypatch.setattr(lifecycle, "load", load)
     out = page_loads.tracked_load(artifact="/m/qwen", port=8093, tune="lean",
                           sets={"kv_bits": "8"})
     assert out["pid"] == 424242 and R.MODELS

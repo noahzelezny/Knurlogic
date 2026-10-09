@@ -8,7 +8,12 @@ on silence: [mcp](../design/mcp.md).
 
 | file | what |
 |---|---|
-| `interfaces/mcp.py` | `knurlogic mcp`: stdio JSON-RPC, stdlib only. `TOOLS` (name to `fn`, `description`, `schema`), `tool_list`, `_call`, `_serve_stdio`, `INSTRUCTIONS` (sent at `initialize`) |
+| `interfaces/mcp/` | `knurlogic mcp`: stdio JSON-RPC, stdlib only. Its `__init__` is the public API (the tool functions and `main`) |
+| `interfaces/mcp/server.py` | the stdio loop: `_call`, `_serve_stdio`, `main`, `INSTRUCTIONS` (sent at `initialize`) |
+| `interfaces/mcp/tools.py` | `TOOLS` (name to `fn`, `description`, `schema`), `tool_list` |
+| `interfaces/mcp/inspection.py` | the read-only tools: `ready`, `fit`, `state`, `models`, `model_folders`, `settings`, `drafting`, `deps` |
+| `interfaces/mcp/lifecycle.py` | `load` and `unload`, on this Mac or through the page |
+| `interfaces/mcp/page_client.py` | the page on this Mac over loopback (`_page_get`, `_page_post`), `models_across` |
 | `interfaces/cli.py` | `knurlogic`: `COMMANDS` maps a subcommand to a module whose `main(argv)` runs it; no command starts the page |
 | `interfaces/connect.py` | `knurlogic connect`: how to point a client at a server (env lines, Claude Code, OpenAI, curl, Codex, MCP JSON) |
 | `interfaces/doctor.py` | `knurlogic doctor`: will this artifact run, and why not |
@@ -17,9 +22,10 @@ on silence: [mcp](../design/mcp.md).
 
 The MCP tools, in the order an agent uses them: `models`, `fit`,
 `settings`, `ready`, `load`, `state`, `unload`, plus `drafting`,
-`model_folders` and `deps`. Each is a plain function in `mcp.py` (`load`,
-`unload`, `fit`, `state`, ...). Tools that span machines ask the page on
-this Mac (`_page_get`, `_page_post`; address from `KNURLOGIC_PAGE`).
+`model_folders` and `deps`. Each is a plain function: the read-only ones in `mcp/inspection.py`,
+`load` and `unload` in `mcp/lifecycle.py`. Tools that span machines ask
+the page on this Mac (`mcp/page_client.py`: `_page_get`, `_page_post`;
+address from `KNURLOGIC_PAGE`).
 
 The CLI's commands: `ui`, `serve`, `doctor`, `smoke`, `vendor`,
 `connect`, `mcp`, `loaded`, `mtp`, `models`, `deps`. Most live in the
@@ -44,8 +50,10 @@ package the command is about (`machine.discover`, `machine.loaded`,
 
 ## Extending
 
-- A new tool: a function in `mcp.py` and an entry in `TOOLS` with its
-  description and `_schema`. If it acts on another Mac, go through the
+- A new tool: a function in `mcp/inspection.py` (reads) or
+  `mcp/lifecycle.py` (starts or stops), an entry in `mcp/tools.py`'s
+  `TOOLS` with its description and `_schema`, and its name in the
+  package `__init__`'s imports and `__all__`. If it acts on another Mac, go through the
   page (`_page_post`), not straight to the peer.
 - A new CLI command: one line in `cli.COMMANDS` naming the module, and a
   `main(argv) -> int` there.

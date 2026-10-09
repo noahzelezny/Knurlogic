@@ -30,7 +30,7 @@ Hooks outside it:
   route `MSG_PATH`, `/peer/v1/msg`), `messages.py` (`peer_table`),
   `peek.py` (`peer_settings`) and `relay.py` (the model relay under
   `/peer/v1/`, `peer_relay`).
-- `interfaces/mcp.py`: `load` with `machines`, `unload` with `job`.
+- `interfaces/mcp/lifecycle.py`: `load` with `machines`, `unload` with `job`.
 - `interfaces/serve.py`: starts a rank (`run` with a ring); `cluster/`
   calls back into it with a lazy import.
 - `machine/identity.py`: a node is its `id`, never its name.
