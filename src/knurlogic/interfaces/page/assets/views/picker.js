@@ -450,7 +450,7 @@ function tb5Why(a, b){
 }
 // A pick changed what "fits" means: the rail and an open picker follow.
 // Sharding and interconnect for a multi-machine launch: page state only.
-const MULTI={shard:'tensor', link:'tcp'};
+const MULTI={shard:'pipeline', link:'tcp'};   // pipeline first: the default
 $('multiopts').querySelectorAll('.seg').forEach(g=>
   g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
     if(b.disabled || launching()) return;
