@@ -1,18 +1,18 @@
 # Telemetry contract
 
 The one page shared, verbatim, between Knurlogic (the server) and any
-client that wants attribution (an agent harness is the first). No shared code.
+client that wants attribution (for example, an agent harness that runs
+many sessions against one server). No shared code.
 
 ## Request headers (client → server)
 
 | header | meaning | limit |
 |---|---|---|
-| `X-Client` | `<name>/<version>`, e.g. `client/0.0.1` | 128 bytes |
+| `X-Client` | `<name>/<version>`, e.g. `myharness/0.0.1` | 128 bytes |
 | `X-Client-Session` | an id the client uses for one conversation or job | 128 bytes |
 | `X-Client-Run` | an id for a sub-unit (a worker, a sub-task), or `-` | 128 bytes |
 | `X-Client-Role` | a short label the client chooses (`pm`, `worker`, `sidecar`, …) | 32 bytes |
-
-| `X-Cache-Retain` | `pin`: this session's prompt-cache entries are never auto-deleted from disk (sticky for the session) | — |
+| `X-Cache-Retain` | `pin`: the session's prompt-cache entries are never auto-deleted from disk (sticky for the session) | — |
 | `X-Cache-Keep` | `latest`: this request's prompt-cache entries replace its session's earlier ones (memory and disk); its system-prompt checkpoint is shared, not the session's | — |
 
 All optional. The server stores them as opaque strings and groups by them.

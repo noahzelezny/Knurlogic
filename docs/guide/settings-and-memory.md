@@ -55,7 +55,7 @@ the measurement behind it and whether it can change live or only at launch.
 
 The attention cache holds every token of every conversation. 8-bit takes
 about 53% of bf16's memory, so roughly twice the context fits. Decode is
-measured about 5% slower at 6k tokens of context and 6% at 16k (M4); prefill
+measured about 5% slower at 6k tokens of context and 6% at 16k (M4 Max); prefill
 is not slower. 6 and 4 bits take less (41%, 28%) but are not measured on a
 real model and are not offered on the page. GLM takes 8 only; DeepSeek-V4
 takes none. Recurrent state and sliding windows are not quantized.

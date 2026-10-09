@@ -1,11 +1,13 @@
-# Expert paging (idea, 2026-10-01)
+# Expert paging
 
-Goal: a MoE model that does not fit gets slower, never crashes. An agent's
-run is worth more than its speed.
+Status: idea, not designed or built (first written 2026-10-01).
 
-## What we saw
+Goal: a MoE model that does not fit gets slower, never crashes. A completed
+agent run is worth more than a fast one.
 
-Qwen3.5-397B 2.4 stage-1, MTP off, alone on the M4 (2026-10-01): the fit
+## Observation
+
+Qwen3.5-397B 2.4 stage-1, MTP off, alone on an M4 Max 128 GB (2026-10-01): the fit
 check passed by 2 GiB, macOS swapped ~15 GiB of the model while it loaded,
 then paged most of it back in (3.7 GiB left). Decode stayed ~18 tok/s.
 It worked because only ~17B of 397B parameters are active per token and

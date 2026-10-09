@@ -1,11 +1,11 @@
-# Memory pacing: a server that cannot OOM (draft 2026-09-28)
+# Memory pacing: a server that cannot OOM
 
-> **Chunk pacing in main (2026-10-05); the rest parked (2026-09-28).** The prefill-chunk part is built in `engine/runtime/memory_guard.py` (see "Chunk pacing in main" at the end). Pausing, `RamRoom`, the allowance and pending-KV reservations stay parked: that code lived on the deleted `memory-pacing` branch (last commit a94a8df). Revisit those only against realistic loads (compaction on).
+> **Status: chunk pacing built (2026-10-05); the rest parked (2026-09-28).** The prefill-chunk part is built in `engine/runtime/memory_guard.py` (see "Chunk pacing in main" at the end). Pausing, `RamRoom`, the allowance and pending-KV reservations stay parked: that code lived on the deleted `memory-pacing` branch (last commit a94a8df). Revisit those only against realistic loads (compaction on).
 
-Goal (the maintainer): "uncrashable" -- the server paces itself so a user never OOMs,
-including when they open Chrome mid-run.
+Goal: the server cannot crash from memory -- it paces itself so a user never
+OOMs, including when they open a browser or another large app mid-run.
 
-## What failed (M4, Flash-Next VQ 4.4, 4 agents at 50-75k tokens)
+## What failed (M4 Max 128 GB, Flash-Next VQ 4.4, 4 agents at 50-75k tokens)
 
 - The guard kept under Metal's recommended working set (120 GiB of 128), not
   the 112.3 GiB budget serve printed. Fixed in 41dd038.
@@ -14,7 +14,7 @@ including when they open Chrome mid-run.
   and 483k tokens of context. The guard had just measured a 3.02 GiB transient,
   stopped two rows -- after the fact. A Metal OOM is an uncatchable abort: the
   one step the guard mispredicts kills the process.
-- Two blind spots: (1) the guard sees GPU memory only (`gpu_in_use`); Chrome
+- Two blind spots: (1) the guard sees GPU memory only (`gpu_in_use`); another app
   is CPU memory of the same RAM. (2) the transient is learned by running the
   step, and the margin is the largest seen, carried on a line.
 
@@ -63,9 +63,9 @@ collectives stay in lockstep.
 
 ## Proof
 
-The M4 harness (`a local test harness`): 4 streams opening at 100k tokens, growing
+A stress harness on the M4 Max 128 GB: 4 streams opening at 100k tokens, growing
 to 150k; plus a round that allocates 20 GiB in another process mid-run
-(Chrome stand-in). Pass = 3/3 rounds with no METAL abort and no swap growth;
+(stand-in for another app). Pass = 3/3 rounds with no METAL abort and no swap growth;
 waits and 503s are fine.
 
 ## Open
@@ -73,7 +73,7 @@ waits and 503s are fine.
 - Whether chunk shrinking alone covers MoE decode transients at 8 rows.
 - Cost: pacing trades throughput for safety; measure tokens/s at the limit.
 
-## review review (2026-09-28): build with changes -- adopted
+## Design review (2026-09-28): build with changes -- adopted
 
 - **A step is a whole admission.** `MTPBatchGenerator._next` runs every
   prefill chunk, checkpoint copy and `seed_head` of one admission inside one
@@ -115,7 +115,7 @@ waits and 503s are fine.
 - `_pace` before `_step`: pause the newest row (`pause` op on a ring; its
   cache to the prompt cache, the job re-queued with `Job.resume`, re-admitted
   by `_resume` as a hit). The last row is left to `_guard_memory` (503).
-- M4 14:22-14:30 (Flash-Next VQ 4.4, 4 x ~106k prompts at once, Metal abort
+- Run on the M4 Max (Flash-Next VQ 4.4, 4 x ~106k prompts at once, Metal abort
   at ~116 GiB over a ~112.2 limit, no guard line): (1) all four were
   inserted in ONE tick and each priced against active memory that did not
   yet hold the others' KV (a queued row's KV lands only in its admission
@@ -123,26 +123,26 @@ waits and 503s are fine.
   inside one admission step. Fixed by `_reserve` / `_pending_bytes`: queued
   rows' priced KV is charged in `_room_for`, `_fits`, `_room_to_admit` and
   added to `_pace`'s prediction for the step that admits them.
-- What a pause costs (review review): a paused row resumes as ONE segment,
+- What a pause costs (design review): a paused row resumes as ONE segment,
   so segment checkpoints it had not yet stored are lost; its logits
   processors' penalty windows restart from the resumed prompt; the seed, if
   one was set, is folded forward by the tokens made (`seed + made`) so the
   resumed draw continues rather than replays its first tokens (the stream
   is not bit-identical to an unpaused run). A hit -- a resumed row always
   is one -- is priced and reserved past the hit only: its KV is resident.
-- M4 (b557e63, 107.1 GiB limit): a lone 106k row prefilled ~8 min and
+- Run on the M4 Max (b557e63, 107.1 GiB limit): a lone 106k row prefilled ~8 min and
   `_guard_memory` stopped it at once, every request. The guard stopped rows
   on the margin-reduced limit, a prediction. Now: prompt cache, then other
   rows paused (a queued one deferred), and a lone row is stopped only if
   active + its measured transient passes the hard ceiling (`_ceiling`: no
   margin). Its step's measured context also no longer counts prompts queued
   behind it ("208545 tokens" was 106k + a queued 102k). Why the lone row
-  landed over the limit is not settled without the box: the guard never
+  landed over the limit is not settled without another run on the hardware: the guard never
   read reservations (no double count there); candidates are growth the
   lean price omits (MTP head cache, the hybrid's state priced from config
   before a measurement) and the limit tightening over 8 min (the others'
   largest reading, RAM's least).
-- M4 (2584c3a, 1h45, no crash; 8 of 14 requests 503): (1) `_hold` refused
+- Run on the M4 Max (2584c3a, 1h45, no crash; 8 of 14 requests 503): (1) `_hold` refused
   a request once the rows it found had finished -- with one ~130k row fitting
   at a time, nearly everyone. Now a held request waits first in line and
   blocks newer admissions (anti-starvation); only `_make_room` on an idle
@@ -158,11 +158,11 @@ waits and 503s are fine.
 
 ## Chunk pacing in main (2026-10-05)
 
-GLM-5.3-Flash pipeline (M4 rank 0, M3 rank 1, launch chunk 2048):
+GLM-5.3-Flash pipeline (M4 Max 128 GB rank 0, M3 Ultra 96 GB rank 1, launch chunk 2048):
 prefill transients 3.2 GiB at 2.7k tokens, 10.4 at 33k, 17.0 at 59k (the
 DSA indexer scores chunk x context). After one 59k prompt every request
 was refused, 14k too, with 30-60 GiB unused: the margin was the largest
-transient ever seen (21.2 GiB) on every rank, idle included, and the M3's
+transient ever seen (21.2 GiB) on every rank, idle included, and rank 1's
 `Mark` held its own 17 GiB the same way.
 
 - Margin = the step about to run's predicted transient x 1.25 (floor 5% /
@@ -189,5 +189,5 @@ transient ever seen (21.2 GiB) on every rank, idle included, and the M3's
   prefills per admission. The peer's transient is assumed equal to rank
   0's (one line, measured on rank 0).
 - Live numbers (fitted on the two logged samples): 14k -> chunk 2048,
-  ~6.0 GiB transient, 7.5 margin; 53k on the M3 (~15.6 GiB under its
+  ~6.0 GiB transient, 7.5 margin; 53k on the M3 Ultra (rank 1, ~15.6 GiB under its
   floor-only limit) -> 2048 needs ~15.5 GiB, 1024 ~9.0 -> chunk 1024.

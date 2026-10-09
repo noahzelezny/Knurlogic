@@ -104,4 +104,5 @@ there is a finding. The checklist, per family:
       engine/runtime/timing.py) at a 2048-token prompt, n >= 3, recorded
       with the machine: TTFT, prefill and decode tok/s, the engine-only
       prefill rate (prompt / prefill_forward), and spans_unaccounted_s ~ 0
-      (`vqlab bench serve-timeline` drives it)
+      (an external benchmark driver that sends served requests and reads
+      the timing partition is enough)

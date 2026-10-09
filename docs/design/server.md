@@ -739,8 +739,8 @@ to each (each waited for all of it). A request that waited for memory and
 was re-admitted carries its failed attempts in `queue`. Host clocks only:
 nothing is evaluated or synchronized for it, so it does not change what the
 GPU runs. `KNURLOGIC_TIMING_SPANS=off` turns it off, read live.
-`vqlab serve-timeline` drives n requests of a stated length and prints the
-median of each bucket.
+A load driver that sends n requests of a stated length and reports the
+median of each bucket reads these fields directly.
 
 ### src/knurlogic/engine/model/__init__.py -- engine boundary
 

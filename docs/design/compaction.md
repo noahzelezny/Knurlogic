@@ -1,12 +1,12 @@
 # Context compaction
 
 Any harness can plug into knurlogic without managing its agents' context by
-hand: the harness asks for compaction, the server performs it.
+hand: the harness requests compaction, the server performs it.
 
-## The harness asks, the server performs
+## The harness requests, the server performs
 
-- The harness asks through Anthropic's `context_management` (the field Claude
-  Code already sends). The same object is accepted on `/v1/chat/completions` as
+- The harness requests it through Anthropic's `context_management` (the field
+  Anthropic-compatible coding harnesses already send). The same object is accepted on `/v1/chat/completions` as
   an extension.
 - The server runs the compaction with the model already serving the request, as
   a continuation of the cached conversation: the history is a prefix-cache hit

@@ -1,15 +1,18 @@
 # DeepSeek-V4-Flash-Vision-Exp
 
-Scope for running deepseek-ai/DeepSeek-V4-Flash-Vision-Exp with images.
+Status: built (phases 1-4); live since release 0.1.3 on a two-machine split.
+
+Design for running deepseek-ai/DeepSeek-V4-Flash-Vision-Exp with images.
 Reference: the repo's own `inference/` (model.py, vision.py,
 image_processor.py) and `encoding/encoding_dsv4.py`, MIT. Source on disk:
 the model folder `deepseek-ai--DeepSeek-V4-Flash-Vision-Exp`
 (156 GB, HF layout, FP8 attention + FP4 experts).
 
-## What the artifact on disk is not
+## Why a text-only conversion is not enough
 
-`deepseek-ai--DeepSeek-V4-Flash-Vision-Exp-mlx` (151 GB) is VQ
-Lab's `teacher-prep` output: the 43 trunk layers and the head only. It has
+A text-only MLX conversion, `deepseek-ai--DeepSeek-V4-Flash-Vision-Exp-mlx`
+(151 GB, produced by an external quantization/scoring tool's teacher-prep
+step), keeps the 43 trunk layers and the head only. It has
 no `vision.*`, `aligner.*`, `image_{start,end,newline,pad}`, no `mtp.*` and
 no `ffn.gate.bias_vl`. It runs as a text model on today's deepseek_v4 code;
 it can never take an image. Vision needs a conversion that keeps those keys.
@@ -75,7 +78,7 @@ trunk layers 40-42, a draft block of 5 (the committed token, then noise
 tokens 128799) decoded in one pass, a Markov head (rank 256) adding logits
 per position, and a confidence head.
 
-In code (2026-10-02):
+Implementation:
 - `families/deepseek/heads/deepseek_v4_dspark.py`: the stages (each a
   trunk-style block whose attention keys are a 128-position window of
   main kvs plus the whole block), their window cache (`DSparkCache`: only
@@ -96,7 +99,7 @@ In code (2026-10-02):
   against the verdicts; else measured per-position acceptance), over each
   width's timed cost; the reference's generate.py computes it and does not
   use it.
-- On a split (pipeline or tensor, 2026-10-03) rank 0 alone holds the head,
+- On a split (pipeline or tensor) rank 0 alone holds the head,
   drafts and judges, as with the 1-token head: `Coord.bk` carries its
   regime and the [B, 5] drafts (B1), `Coord.bm` the committed count and
   every row's next token (B2); a follower (`MTPBatchGenerator.follow_block`,
@@ -129,36 +132,45 @@ In code (2026-10-02):
   random inputs (main_x, the window kvs and the stage output, relative
   error 5e-6; scratch check, not a test: the reference side needs torch
   and ~3.6 GB).
-- Measured on the real weights (2026-10-03, two-Mac TCP split, greedy):
+- Measured on the real weights (two-machine TCP split, greedy):
   25.8 tok/s with DSpark against ~19 plain; first-draft acceptance ~0.70.
 
 ## Memory and placement
-Trunk ~150 GB at mxfp4 experts: over either Mac alone (96 / 128 GB), so it
-runs as a two-Mac split, pipeline or tensor, both with images (cluster
-scope for 0.1.0: images on every split); the tower and aligner sit on rank
-0, which encodes and hands every rank the image rows. Live 2026-10-03,
-release 0.1.3: tensor over RDMA, four thinking levels, a tool call, one and
-two images, DSpark drafting; pipeline over TCP the same.
-A lower-bit conversion (VQ Lab's) may bring it under 128 GB later; the
+Trunk ~150 GB at mxfp4 experts: more than either test machine alone (an
+M3 Ultra 96 GB, an M4 Max 128 GB), so it runs as a two-machine split,
+pipeline or tensor, both with images (the 0.1.0 cluster scope requires
+images on every split); the tower and aligner sit on rank 0, which encodes
+and hands every rank the image rows. Verified live for release 0.1.3:
+tensor over RDMA, four thinking levels, a tool call, one and two images,
+DSpark drafting; pipeline over TCP the same.
+A lower-bit conversion from an external quantization tool may bring it
+under 128 GB later; the
 `bias_vl` and image keys must survive that conversion too.
 
 ## Phases
 1. Conversion: extend the vendored `sanitize` (and Model) to keep
    `bias_vl`, the hash-layer `bias`, and the image vectors; the tower and
    aligner load standalone like GLM-5's. Convert from the HDD source. Text
-   output checked against VQ Lab's text-only copy (same trunk) on a fixed
+   output checked against the text-only conversion (same trunk) on a fixed
    prompt.
 2. Vision: tower + aligner + processor port, image-id splicing, `bias_vl`
    routing, the image-span window, the prefill-chunk rule. Checked against
    the reference's own example (`examples/example_vl.txt`) for token ids,
    then by asking about known images.
-3. Cluster: pipeline with images over the two Macs.
+3. Cluster: pipeline with images over two machines.
 4. DSpark drafting.
 
-Phases 1-2 in code (2026-10-02): the trunk's edits 14-15
+Phases 1-2 are built: the trunk's edits 14-15
 (`families/deepseek/architecture/PROVENANCE.md`), the family
 (`families/deepseek/vision/`, its PROVENANCE.md says what is verified and
 what waits for a conversion), and the Vision-Exp template variant
 (`families/deepseek/templates/PROVENANCE.md`; chosen by config.json). Run live on the converted artifact
-(`...-mlx-vision`) since 2026-10-03.
-Phase 4 in code (2026-10-02): see DSpark above.
+(`...-mlx-vision`).
+Phase 4 is built: see DSpark above.
+
+## History
+
+- 2026-10-02: phases 1-2 and DSpark (phase 4) in code.
+- 2026-10-03: DSpark on pipeline and tensor splits; first live runs on the
+  converted artifact; DSpark measured at 25.8 tok/s vs ~19 plain; release
+  0.1.3.
