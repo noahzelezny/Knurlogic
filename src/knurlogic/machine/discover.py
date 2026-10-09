@@ -479,7 +479,7 @@ def main(argv=None) -> int:
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
-    from knurlogic.machine import wired
+    from knurlogic.machine.memory import wired
     rows = find(stores=a.store or None, extra=a.path,
                 include_defaults=not a.only_path)
     if a.servable:

@@ -13,6 +13,8 @@ mx = pytest.importorskip("mlx.core")
 
 from test_batch_drafting import _tiny  # noqa: E402
 
+from knurlogic.engine.runtime import memory_guard as MG  # noqa: E402
+
 EOT = 3
 
 
@@ -191,13 +193,8 @@ def test_memory_past_the_limit_empties_the_prompt_cache_then_stops_the_newest():
     the scheduler gives up the prompt cache first, then the newest rows,
     each with an OutOfMemory -- and keeps new requests waiting."""
     from knurlogic.engine.runtime import prompt as P
-    from knurlogic.engine.runtime.scheduler import (
-        GIB,
-        Job,
-        OutOfMemory,
-        Scheduler,
-        _Row,
-    )
+    from knurlogic.engine.runtime.memory_guard import GIB, OutOfMemory
+    from knurlogic.engine.runtime.scheduler import Job, Scheduler, _Row
 
     class Cache:
         nbytes = 6 * GIB
@@ -237,7 +234,8 @@ def test_memory_past_the_limit_empties_the_prompt_cache_then_stops_the_newest():
 def test_the_guard_trims_the_cache_by_the_overage_not_a_margin_more():
     """The limit already leaves a step's margin: 10 GiB over with a 20 GiB
     cache gives up 10, not 10 + the margin."""
-    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.engine.runtime.scheduler import Scheduler
 
     class Cache:
         nbytes = 20 * GIB
@@ -257,7 +255,7 @@ def test_the_guard_trims_the_cache_by_the_overage_not_a_margin_more():
 
 
 def test_out_of_memory_is_a_503_to_retry():
-    from knurlogic.engine.runtime.scheduler import OutOfMemory
+    from knurlogic.engine.runtime.memory_guard import OutOfMemory
     from knurlogic.interfaces.http.openai import _status_of
     e = _status_of(OutOfMemory("stopped"))
     assert e.status == 503 and e.code == "insufficient_memory"
@@ -272,7 +270,7 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
 
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
 
     class Cache:
         nbytes = 4 * GIB
@@ -303,11 +301,11 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
     assert s._make_room(7000) == "lean" and 0 < s.cache.nbytes < held
     # 16000 tokens do not fit at all: with a row running it waits ...
     s._rows = {1: S._Row(S.Job(P.ChatRequest(), P.PromptArgs()), None, [])}
-    with pytest.raises(S._Wait):
+    with pytest.raises(MG._Wait):
         s._make_room(16000)
     # ... with none it is refused, and says why
     s._rows = {}
-    with pytest.raises(S.OutOfMemory, match="16000 tokens"):
+    with pytest.raises(MG.OutOfMemory, match="16000 tokens"):
         s._make_room(16000)
 
 
@@ -316,7 +314,7 @@ def test_one_length_prices_a_hybrids_fixed_state_once():
     not bytes per token -- the ratio at one length priced a 24k prompt at
     4x its measured cache and refused it (GLM-5.3 Flash, drafting, M4)."""
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
 
     class Rec:                                     # deltanet: 512 MiB
@@ -337,7 +335,7 @@ def test_a_cache_that_could_never_make_room_is_not_evicted():
     nothing: the lean admission that follows keeps the entries it (or the
     next request) could hit."""
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
 
     class Cache:
         nbytes = 1 * GIB
@@ -360,7 +358,8 @@ def test_a_cache_that_could_never_make_room_is_not_evicted():
 def test_the_step_margin_is_measured_not_published():
     """The decode step's measured transient at the context it spans, with
     a quarter again -- never below 5% of the working set."""
-    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     assert s._margin() == 6 * GIB                 # the floor: 5%
     peak = {"v": 0}
@@ -403,7 +402,8 @@ def test_the_margin_follows_the_context_the_step_will_span():
     """The 27B on an M3 Ultra: the transient grew 1.58 -> 3.39 GiB as
     four agents' prompts grew, and the first step at a longer context than
     any measured ran past a margin the shorter ones had set."""
-    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=80 * GIB)
     s._tx = _samples(decode=[(10_000, 1 * GIB), (50_000, 3 * GIB)])
     _rows_of(s, 50_000)
@@ -417,7 +417,8 @@ def test_the_margin_follows_the_context_the_step_will_span():
 
 
 def test_one_context_measured_scales_the_transient_in_proportion():
-    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=200 * GIB)
     s._tx = _samples(decode=[(40_000, 2 * GIB)])
     assert s._transient(100_000) == 5 * GIB       # the safe side
@@ -427,7 +428,8 @@ def test_one_context_measured_scales_the_transient_in_proportion():
 def test_measure_records_the_transient_against_its_context():
     import mlx.core as mx
 
-    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._active = lambda: 100 * GIB
     real = mx.get_peak_memory
@@ -451,7 +453,8 @@ def test_measure_records_the_transient_against_its_context():
 
 def test_other_processes_gpu_memory_comes_off_the_working_set():
     """iogpu.wired_limit_mb caps every process's GPU memory together."""
-    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.engine.runtime.scheduler import Scheduler
     seen = {"v": 50 * GIB}
     s = Scheduler(Host(None, Tok({})), working_set_bytes=100 * GIB,
                   gpu_in_use=lambda: seen["v"])
@@ -464,7 +467,8 @@ def test_other_processes_gpu_memory_comes_off_the_working_set():
 
 
 def test_mlx_buffer_cache_is_cleared_before_a_step_it_would_crowd():
-    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=100 * GIB)
     freed = []
     s._active = s._local_active = lambda: 94 * GIB
@@ -483,7 +487,7 @@ def test_an_admission_is_priced_as_the_copies_the_engine_makes():
     3.4, 5.4 and 5.4."""
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=84 * GIB)
     s._kv = (153944064.0, 67190.3)                # as learned there
     row = S._Row(S.Job(P.ChatRequest(), P.PromptArgs()), None, [])
@@ -511,7 +515,7 @@ def test_397b_on_the_m4_admits_the_prompts_it_refused():
     spike, and 31k/20k-token prompts needing ~1 GiB each were refused with
     nothing else running -- the margin was held back twice."""
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._margin = lambda *a, **k: int(6.5 * GIB)  # margin 6.5, limit 113.5
     s._active = lambda: int(106.9 * GIB)
@@ -548,7 +552,8 @@ def test_the_spike_is_what_the_step_did_not_keep():
     ENDED is transient."""
     import mlx.core as mx
 
-    from knurlogic.engine.runtime.scheduler import GIB, Scheduler
+    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._active = lambda: int(101.5 * GIB)
     real = mx.get_peak_memory
@@ -563,7 +568,7 @@ def test_the_spike_is_what_the_step_did_not_keep():
 def test_a_waiting_prompt_neither_empties_the_cache_nor_blocks_the_line():
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
 
     class Cache:
         nbytes = 2 * GIB
@@ -589,7 +594,7 @@ def test_a_waiting_prompt_neither_empties_the_cache_nor_blocks_the_line():
 def test_a_held_prompt_waits_for_the_rows_it_found_not_for_newcomers():
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=105 * GIB)
     s._margin = lambda *a, **k: 5 * GIB  # limit 100
     s._active = lambda: 95 * GIB
@@ -607,7 +612,7 @@ def test_a_held_prompt_waits_for_the_rows_it_found_not_for_newcomers():
     s._waiting = [big]
     s._admit_waiting()
     kind, err = big.outbox.get_nowait()
-    assert kind == "error" and isinstance(err, S.OutOfMemory)
+    assert kind == "error" and isinstance(err, MG.OutOfMemory)
     assert s._waiting == []
 
 
@@ -657,7 +662,7 @@ def test_nothing_running_nothing_cached_and_no_room_says_restart():
     import pytest
 
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
 
     class Cache:
         nbytes = 0
@@ -667,7 +672,7 @@ def test_nothing_running_nothing_cached_and_no_room_says_restart():
     s.cache = Cache()
     s._active = lambda: 100 * GIB       # the whole limit, nothing running
     s._kv = (0.0, float(2**20))
-    with pytest.raises(S.OutOfMemory, match="needs a restart"):
+    with pytest.raises(MG.OutOfMemory, match="needs a restart"):
         s._make_room(16)
 
 
@@ -691,7 +696,7 @@ def test_a_refusal_names_every_term_of_the_limit():
     says when the server cannot admit even a 1k-token prompt."""
     from knurlogic.engine.runtime import scheduler as S
     from knurlogic.interfaces.http.openai import _status_of, models_document
-    GIB = S.GIB
+    GIB = MG.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._local_active = lambda: int(75.1 * GIB)
     s._cached = lambda: 0
@@ -706,7 +711,7 @@ def test_a_refusal_names_every_term_of_the_limit():
     assert s._chunk_pick == 1024
     # a server whose weights leave no room still refuses, naming every term
     s._local_active = lambda: int(114 * GIB)
-    with pytest.raises(S.OutOfMemory) as e:
+    with pytest.raises(MG.OutOfMemory) as e:
         s._make_room(32994)
     m = e.value.memory
     assert m["working_set"] == 120 * GIB and m["others"] == int(0.7 * GIB)
@@ -734,7 +739,7 @@ def test_a_sparse_model_keys_its_prefill_by_what_a_chunk_reads():
     "even prefilled 128 tokens at a time". Keyed by the model's
     prefill_span, it is admitted at a full chunk; without one, unchanged."""
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
 
     def server(model):
         s = S.Scheduler(Host(model, Tok({})), working_set_bytes=120 * GIB)
@@ -755,7 +760,7 @@ def test_a_sparse_model_keys_its_prefill_by_what_a_chunk_reads():
     assert s._prefill_x(339141, 2048) == (2048 + 339141 // 72) * 4
     assert s._make_room(339141) == "full"
     assert s._chunk_pick >= 1024
-    with pytest.raises(S.OutOfMemory):        # keyed by the whole context
+    with pytest.raises(MG.OutOfMemory):        # keyed by the whole context
         server(None)._make_room(339141)
     # the hint is found through the wrappers (Model.language_model)
     wrapped = type("W", (), {"language_model": glm})()
@@ -788,7 +793,7 @@ def test_glm_prefill_span_reads_its_config():
 def test_status_names_a_peer_rank_over_its_limit():
     from knurlogic.engine.runtime import scheduler as S
     from knurlogic.engine.serve import state
-    GIB = S.GIB
+    GIB = MG.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._local_active = lambda: 76 * GIB
     s._cached = lambda: 0
@@ -809,7 +814,7 @@ def _glm_flash_ring(peer_over):
     prefill transients measured at chunk 2048: 3.47e9 bytes at 2733 tokens,
     1.82e10 at 59174 (GLM's DSA indexer scores chunk x context)."""
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._local_active = lambda: int(77.6 * GIB)
     s._cached = lambda: 0
@@ -829,8 +834,7 @@ def test_one_long_prefill_leaves_no_reserve_on_an_idle_ring():
     was the largest transient ever seen (21.2 GiB) on every rank, idle
     included. Now idle holds the floor; the reserve is the step about to
     run's -- a 14k prompt at the launch chunk, 2048."""
-    from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
     # the M3: 64.2 GiB active under 84 - 4.2 (its decode-only margin)
     s = _glm_flash_ring(int(64.2 * GIB) - (84 * GIB - 84 * GIB // 20))
     assert s._margin() == 6 * GIB and s.memory_short() is None
@@ -846,10 +850,9 @@ def test_a_long_prompt_on_the_tight_rank_takes_a_smaller_chunk(caplog):
     1024 the step predicts ~9 GiB and fits: a little slower, not a 503."""
     import logging
 
-    from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
     s = _glm_flash_ring(int(64.2 * GIB) - (84 * GIB - 84 * GIB // 20))
-    with caplog.at_level(logging.INFO, logger=S.__name__):
+    with caplog.at_level(logging.INFO, logger=MG.__name__):
         assert s._make_room(53000) == "full"
     assert s._chunk_pick == 1024
     assert any("prefilled 1024 tokens at a time" in r.message
@@ -857,11 +860,11 @@ def test_a_long_prompt_on_the_tight_rank_takes_a_smaller_chunk(caplog):
     # only when one row at 128 cannot fit: wait with rows running ...
     s = _glm_flash_ring(-GIB)             # 1 GiB under its limit
     _rows_of(s, 1000)
-    with pytest.raises(S._Wait):
+    with pytest.raises(MG._Wait):
         s._make_room(53000)
     # ... and refuse alone, at chunk 128
     s._rows = {}
-    with pytest.raises(S.OutOfMemory, match="128 tokens at a time"):
+    with pytest.raises(MG.OutOfMemory, match="128 tokens at a time"):
         s._make_room(53000)
 
 
@@ -872,7 +875,7 @@ def test_a_row_about_to_prefill_is_refitted_or_requeued():
     it goes back to the queue while others run, never stopped mid-work."""
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
     mem = {"active": 90 * GIB}
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._active = lambda: mem["active"]
@@ -918,7 +921,7 @@ def test_the_step_sets_the_rows_chunk_and_measures_the_prefill_line():
 
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._active = lambda: 100 * GIB
     s._reset_peak = lambda: 100 * GIB
@@ -960,12 +963,12 @@ def test_memory_pressure_on_the_server_warns_and_admits(caplog):
     import logging
 
     from knurlogic.engine.runtime import scheduler as S
-    GIB = S.GIB
+    GIB = MG.GIB
     reading = {"b": int(8.3 * GIB), "level": 2}
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB,
                     compressed=lambda: reading["b"],
                     system_pressure=lambda: reading["level"])
-    with caplog.at_level(logging.INFO, logger=S.__name__):
+    with caplog.at_level(logging.INFO, logger=MG.__name__):
         s._sample_pressure(now=100.0)
         s._sample_pressure(now=106.0)          # still over: no new warning
     warns = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -989,10 +992,10 @@ def test_compressed_pages_without_pressure_are_not_a_warning(caplog):
     import logging
 
     from knurlogic.engine.runtime import scheduler as S
-    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * S.GIB,
-                    compressed=lambda: int(11.3 * S.GIB),
+    s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * MG.GIB,
+                    compressed=lambda: int(11.3 * MG.GIB),
                     system_pressure=lambda: 1)
-    with caplog.at_level(logging.INFO, logger=S.__name__):
+    with caplog.at_level(logging.INFO, logger=MG.__name__):
         s._sample_pressure(now=100.0)
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert s._pressure_short() is None
@@ -1000,12 +1003,12 @@ def test_compressed_pages_without_pressure_are_not_a_warning(caplog):
 
 
 def test_the_system_pressure_reading_is_a_level():
-    from knurlogic.engine.runtime.scheduler import system_pressure_level
+    from knurlogic.machine.memory.pressure import system_pressure_level
     assert system_pressure_level() in (1, 2, 4)
 
 
 def test_the_own_compressed_reading_is_a_number():
-    from knurlogic.engine.runtime.scheduler import own_compressed_bytes
+    from knurlogic.machine.memory.pressure import own_compressed_bytes
     assert own_compressed_bytes() >= 0
 
 

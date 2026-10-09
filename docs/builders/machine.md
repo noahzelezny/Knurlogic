@@ -11,9 +11,11 @@ why: [memory](../design/memory.md), [memory-ledger](../design/memory-ledger.md),
 
 | file | what |
 |---|---|
-| `wired.py` | the GPU wired limit (`read`, `advise`, `command_for`; never sets it), `detected_working_set_bytes`, `machine()`, and `load_budget()`: the one number every fit, settings and load answer is computed against |
-| `allowance.py` | the most memory knurlogic may use on this Mac (`get`, `set`, `cap`), saved in `~/.config/knurlogic/allowance.json`. Only ever lowers the budget |
-| `loaded.py` | what is resident now in every runtime (knurlogic, exo, ollama, mlx-lm): `survey`, `available_memory` (from `vm_stat`), `memory_map` (every big process, attributed, the remainder reported) |
+| `memory/wired.py` | the GPU wired limit (`read`, `advise`, `command_for`; never sets it), `detected_working_set_bytes`, `machine()`, and `load_budget()`: the one number every fit, settings and load answer is computed against |
+| `memory/allowance.py` | the most memory knurlogic may use on this Mac (`get`, `set`, `cap`), saved in `~/.config/knurlogic/allowance.json`. Only ever lowers the budget |
+| `memory/footprint.py` | where memory went, from the OS: `available_memory` (from `vm_stat`), `memory_map` (every big process's footprint, attributed to a runtime, the remainder reported) |
+| `memory/pressure.py` | macOS's pressure level (`system_pressure_level`) and this process's compressed bytes (`own_compressed_bytes`), which the scheduler's guard watches |
+| `loaded.py` | what is resident now in every runtime (knurlogic, exo, ollama, mlx-lm), by their own account: `survey` (with `memory_map` beside it), `ollama_unload` |
 | `metrics.py` | how hard the machine is working: CPU, GPU, swap, pressure, thermal (`sample`, `metrics`) |
 | `servers.py` | the record of running knurlogic servers (`registry`, `save_registry`, `listening_serves`, `free_port`, `serve_log`) |
 | `loadlock.py` | the model-load lock: `model_load(...)` holds `flock` on `~/.cache/knurlogic/load.lock`; `holder`, `Busy` |
@@ -33,8 +35,8 @@ Who uses it:
   around a real load; the MCP's `ready` reads `loadlock.holder()`.
 - The scheduler's memory guard counts against the server's working set,
   which the allowance lowers ([engine](engine.md)).
-- The page and MCP read `loaded.survey`, `servers.registry` and
-  `discover.find`.
+- The page and MCP read `loaded.survey`, `footprint.memory_map`,
+  `servers.registry` and `discover.find`.
 
 ## Rules that keep it correct
 
@@ -57,12 +59,12 @@ Who uses it:
 
 ## Notes
 
-Memory is spread across packages: `machine/wired.py`, `allowance.py` and
-`loaded.py` (the machine), `tuning/fit.py` (the fit), the scheduler's
-guard in `engine/runtime/scheduler.py`, `engine/serve/load.py`
-(`memory`, `gpu_in_use`, `set_cache_limit`), and
-`cluster/launch.py` (`available_now`, `budget_of`, `gpu_working_set`)
-for a peer's share.
+Memory has three homes, one per layer: the machine's facts in
+`machine/memory/`, what a model needs in `tuning/fit.py`, and the serving
+process's guard in `engine/runtime/memory_guard.py` (with what mlx reports
+in `engine/serve/load.py`: `memory`, `gpu_in_use`, `set_cache_limit`). A
+peer's share of a cluster job is `cluster/launch.py`'s (`available_now`,
+`budget_of`, `gpu_working_set`).
 
 ## Tests
 

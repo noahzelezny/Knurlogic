@@ -1,6 +1,6 @@
 # Memory pacing: a server that cannot OOM (draft 2026-09-28)
 
-> **Chunk pacing in main (2026-10-05); the rest parked (2026-09-28).** The prefill-chunk part is built in `engine/runtime/scheduler.py` (see "Chunk pacing in main" at the end). Pausing, `RamRoom`, the allowance and pending-KV reservations stay parked: that code lived on the deleted `memory-pacing` branch (last commit a94a8df). Revisit those only against realistic loads (compaction on).
+> **Chunk pacing in main (2026-10-05); the rest parked (2026-09-28).** The prefill-chunk part is built in `engine/runtime/memory_guard.py` (see "Chunk pacing in main" at the end). Pausing, `RamRoom`, the allowance and pending-KV reservations stay parked: that code lived on the deleted `memory-pacing` branch (last commit a94a8df). Revisit those only against realistic loads (compaction on).
 
 Goal (the maintainer): "uncrashable" -- the server paces itself so a user never OOMs,
 including when they open Chrome mid-run.

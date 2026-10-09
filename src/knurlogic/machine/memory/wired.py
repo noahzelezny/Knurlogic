@@ -335,15 +335,15 @@ def load_budget() -> dict:
     the next, and the roomy defaults (2048-wide prefill, 8 prompts at once)
     are what OOM a box with 6.8 GiB to spare.
     """
-    from knurlogic.machine.loaded import available_memory
+    from knurlogic.machine.memory.footprint import available_memory
     ws = detected_working_set_bytes()
     try:
         avail = int(available_memory().get("available_bytes") or 0)
     except (OSError, ValueError, TypeError, AttributeError):
         avail = 0
-    # the knurlogic allowance (machine/allowance.py) caps both: the most
+    # the knurlogic allowance (machine/memory/allowance.py) caps both: the most
     # this machine's owner lets knurlogic have, whatever the GPU could hold
-    from knurlogic.machine import allowance
+    from knurlogic.machine.memory import allowance
     allow = allowance.get()
     known = [b for b in (ws, avail, allow) if b > 0]
     budget = min(known) if known else 0

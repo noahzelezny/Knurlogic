@@ -238,7 +238,8 @@ def _status_of(err: BaseException) -> ApiError:
                         code="image_too_large")
     if isinstance(err, VisionError):
         return ApiError(400, str(err), param="messages")
-    from knurlogic.engine.runtime.scheduler import OutOfMemory, RingFailed
+    from knurlogic.engine.runtime.memory_guard import OutOfMemory
+    from knurlogic.engine.runtime.scheduler import RingFailed
     if isinstance(err, RingFailed):
         return ApiError(503, str(err), type_="server_error",
                         code="cluster_failed", retry_after=30)

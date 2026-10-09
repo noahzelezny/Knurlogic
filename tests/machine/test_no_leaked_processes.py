@@ -5,7 +5,8 @@ import sys
 
 import conftest
 
-from knurlogic.machine import loaded, servers
+from knurlogic.machine import servers
+from knurlogic.machine.memory import footprint
 
 FAKE = ("/opt/python /Users/x/knurlogic/tests/support/cluster_fake_rank.py "
         "/fake/artifact knurlogic serve --rank 0 --job ab --port 8123 "
@@ -42,8 +43,8 @@ def test_a_fake_rank_is_no_runtime():
     assert servers.is_test_process("python -m knurlogic serve "
                                    "/private/var/folders/x/pytest-of-n/m")
     assert not servers.is_test_process("python -m knurlogic serve /m --port 1")
-    assert loaded._runtime_of(FAKE) == ""
-    assert loaded._runtime_of(
+    assert footprint._runtime_of(FAKE) == ""
+    assert footprint._runtime_of(
         "/usr/bin/python3 -m knurlogic serve /m --port 8080") == "knurlogic"
 
 

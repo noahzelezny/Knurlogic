@@ -108,7 +108,7 @@ def test_mcp_fit_and_settings_show_the_terms(tmp_path, monkeypatch):
     a = Artifact.load(d)
     need = a.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected()
     monkeypatch.setattr(
-        "knurlogic.machine.wired.load_budget",
+        "knurlogic.machine.memory.wired.load_budget",
         lambda: {"bytes": need - (1 << 20), "working_set_bytes": need,
                  "available_bytes": need, "limited_by": "test"})
     f = mcp.fit(artifact=str(d))
@@ -222,7 +222,7 @@ def test_mcp_fit_with_vision_off(tmp_path, monkeypatch):
     need = a.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected()
     b = need + fit.step_margin(8 * GIB) - (1 << 20)
     monkeypatch.setattr(
-        "knurlogic.machine.wired.load_budget",
+        "knurlogic.machine.memory.wired.load_budget",
         lambda: {"bytes": b, "working_set_bytes": b,
                  "available_bytes": b, "limited_by": "test"})
     assert mcp.fit(artifact=str(d))["fits"] is False
@@ -363,7 +363,7 @@ def test_the_previews_room_is_what_this_machine_has_free_now(tmp_path,
     from knurlogic.interfaces.page import documents
     ws, free = 120 * GIB, 10 * GIB
     monkeypatch.setattr(
-        "knurlogic.machine.wired.load_budget",
+        "knurlogic.machine.memory.wired.load_budget",
         lambda: {"bytes": free, "working_set_bytes": ws,
                  "available_bytes": free, "allowance_bytes": 0,
                  "limited_by": "memory available now"})

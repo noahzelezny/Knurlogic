@@ -45,7 +45,7 @@ Where the settings meet the rest (thin calls, no settings logic):
   registry, `knob_reach` and `resolve`.
 - `engine/serve/load.py`: `apply_live`, which applies a live knob to the
   running process (it needs mlx, so it stays in the engine).
-- `machine/allowance.py`: the most memory knurlogic may use. It stays in
+- `machine/memory/allowance.py`: the most memory knurlogic may use. It stays in
   `machine/` because it lowers the load budget (`wired.load_budget`);
   `tuning/` takes that budget as an input.
 - `interfaces/mcp.py`: the `settings` and `fit` tools.

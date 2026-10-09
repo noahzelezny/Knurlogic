@@ -51,7 +51,7 @@ Outside the runtime:
   (`tensor.follow`, or `ring.apply_cache_op` for cache ops).
 - **Ranks run the same collectives.** A row prefilled in different chunk
   counts deadlocks the ring, so `admit` carries the chunk rank 0 fitted
-  (`scheduler._make_room`) and `chunk` refits a row (`_fit_next`).
+  (`memory_guard._make_room`) and `chunk` refits a row (`_fit_next`).
 - **Everything between ranks goes through `Link.exchange`**, on the
   scheduler thread.
 - **A VQ codebook is replicated, never sliced** (`check_codebooks`).

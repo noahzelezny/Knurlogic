@@ -22,8 +22,9 @@ import sys
 from knurlogic.engine import arch, mtp
 from knurlogic.engine import serve as engine
 from knurlogic.interfaces.page import documents
-from knurlogic.machine import status, wired
+from knurlogic.machine import status
 from knurlogic.machine.artifact import Artifact
+from knurlogic.machine.memory import wired
 from knurlogic.tuning.checks import refuse_sets, settings_refusal
 from knurlogic.tuning.live import LIVE_KNOBS
 from knurlogic.tuning.resolve import resolve
@@ -391,11 +392,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     def _memory_map():
         import time
 
-        from knurlogic.machine import loaded
+        from knurlogic.machine.memory import footprint
         now = time.time()
         if _mm["doc"] is None or now - _mm["at"] > 4.0:
             try:
-                _mm["doc"] = loaded.memory_map()
+                _mm["doc"] = footprint.memory_map()
             except (OSError, subprocess.SubprocessError, ValueError, KeyError,
                     AttributeError):
                 _mm["doc"] = None
@@ -612,7 +613,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if eng:
         print("engine    " + "  ".join(f"{k}={v}" for k, v in sorted(eng.items())))
 
-    from knurlogic.machine import allowance
+    from knurlogic.machine.memory import allowance
     guard = int(working_set_gib * GIB) or (
         allowance.cap(wired.detected_working_set_bytes())
         if allowance.get() else 0)

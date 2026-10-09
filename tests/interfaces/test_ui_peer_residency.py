@@ -123,12 +123,13 @@ def test_a_serve_started_by_hand_is_found_by_its_listening_port(monkeypatch):
 def test_a_serve_started_by_hand_is_shown_but_not_offered_for_unload(
         monkeypatch):
     from knurlogic.machine import loaded, servers
+    from knurlogic.machine.memory import footprint
     monkeypatch.setattr(servers, "registry", lambda: {})
     monkeypatch.setattr(servers, "listening_serves", lambda: {8097: 101})
     monkeypatch.setattr(loaded, "_exo", lambda b: [])
     monkeypatch.setattr(loaded, "_ollama", lambda b: [])
     monkeypatch.setattr(loaded, "_openai_port", lambda b: [])
-    monkeypatch.setattr(loaded, "memory_map", lambda: {})
+    monkeypatch.setattr(footprint, "memory_map", lambda: {})
     monkeypatch.setattr(loaded, "_knurlogic", lambda b: [loaded.Resident(
         runtime="knurlogic", name="Qwen", where=b, can_unload=True)]
         if b.endswith(":8097") else [])

@@ -13,7 +13,7 @@ import pytest
 
 from knurlogic.interfaces.page import documents
 from knurlogic.interfaces.page import server as page_server
-from knurlogic.machine import allowance, wired
+from knurlogic.machine.memory import allowance, wired
 from knurlogic.tuning import strategy
 
 GIB = 1 << 30

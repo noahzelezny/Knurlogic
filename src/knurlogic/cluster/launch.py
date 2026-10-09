@@ -212,12 +212,12 @@ def _selfheal() -> bool:
 def available_now() -> int:
     """Bytes of memory macOS would hand this machine's next allocation now
     (free plus file cache and purgeable pages, not inactive
-    anonymous ones: machine/loaded.available_memory), 0 when
+    anonymous ones: machine/memory/footprint.available_memory), 0 when
     it cannot be read. Read fresh each time, never cached: it is the
     difference between a working set the GPU is ALLOWED and memory that is
     actually there (a 96 GiB Mac's 84 GiB working set leaves the OS and
     every other program 12 GiB; a share that fills the working set swaps)."""
-    from knurlogic.machine.loaded import available_memory
+    from knurlogic.machine.memory.footprint import available_memory
     try:
         return int(available_memory().get("available_bytes") or 0)
     except (OSError, ValueError, TypeError, AttributeError):
@@ -263,7 +263,7 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
                             "build": build_fingerprint()},
                "jaccl_selfheal": heal}
         _INFO.update(doc=doc, at=now)
-    from knurlogic.machine import allowance
+    from knurlogic.machine.memory import allowance
     return dict(doc, working_set_bytes=allowance.cap(
         gpu_working_set(int(working_set_bytes or 0))),
         available_bytes=available_now())
@@ -276,7 +276,7 @@ def gpu_working_set(installed: int, wired_limit=None) -> int:
     Ultra's 96 GiB has 84 wired; placing a 90 GiB share there on RAM
     alone would pass prepare and fail at load."""
     if wired_limit is None:
-        from knurlogic.machine import wired
+        from knurlogic.machine.memory import wired
         wired_limit = wired.read().limit_bytes
     known = [b for b in (int(installed or 0), int(wired_limit or 0)) if b > 0]
     return min(known) if known else 0

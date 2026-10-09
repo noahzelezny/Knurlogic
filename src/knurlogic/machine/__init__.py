@@ -2,9 +2,10 @@
 
   artifact.py   what a model directory IS: config, size, VQ, bundled runtime
   discover.py   every model on this machine, in every tool's store
-  loaded.py     what is in memory now, in every runtime, and where memory went
-  wired.py      the GPU wired limit, and `load_budget()`: the one number every
-                fit / settings / load answer is computed against
+  loaded.py     what is in memory now, in every runtime
+  memory/       this box's memory: the wired limit and `load_budget()` (the
+                one number every fit / settings / load answer is computed
+                against), the allowance, where memory went, pressure
   status.py     the snapshot /status.json serves
   deps.py       which build of mlx, mlx-lm and mlx-vlm is installed, read off
                 the fix itself rather than a version string

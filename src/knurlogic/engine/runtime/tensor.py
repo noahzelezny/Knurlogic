@@ -706,7 +706,7 @@ class Mark:
     measured transient (at least 5% of it, at least 4 GiB). A step that
     prefills a row is not counted: its transient grows with that prompt's
     context x chunk, and rank 0 prices it per admission against this
-    rank's room (scheduler._room) -- held here, one 59k-token prefill's
+    rank's room (memory_guard._room) -- held here, one 59k-token prefill's
     17 GiB stayed the margin of every later step and the GLM-5.3-Flash
     pipeline's M3 read 1.4 GiB over its limit with nothing running."""
 

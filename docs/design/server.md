@@ -46,6 +46,7 @@ engine/runtime/             everything that touches mlx
   host.py                   ModelHost: empty/loading/ready/unloading/failed
   scheduler.py              ONE thread owns the MLX stream: commands,
                             tokenize, prompt cache, admission, steps
+  memory_guard.py           the Scheduler's memory guard (a mixin)
   prompt.py                 template, segments, initial reasoning state
   request.py                per-request text: reasoning split, text stops,
                             tool calls, usage
@@ -646,7 +647,7 @@ plan (they follow in the admission: pipeline.Coord.images).
   usage            prompt, completion (every token the engine emitted),
                    reasoning tokens, and the engine's cache report.
 
-### src/knurlogic/engine/runtime/scheduler.py -- memory guard
+### src/knurlogic/engine/runtime/scheduler.py, memory_guard.py -- memory guard
 
 Everything that touches the model happens on the scheduler thread, in
 order: loads and unloads (commands), tokenizing (vision's image work

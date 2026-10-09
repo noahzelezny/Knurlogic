@@ -554,8 +554,9 @@ def test_a_rings_prompt_cache_has_what_the_scheduler_reads():
     from pathlib import Path
 
     from knurlogic.engine.prompt_cache.ring import JournalPromptCache
+    from knurlogic.engine.runtime import memory_guard as MG
     from knurlogic.engine.runtime import scheduler as SC
-    src = Path(SC.__file__).read_text()
+    src = Path(SC.__file__).read_text() + Path(MG.__file__).read_text()
     used = set(re.findall(r"self\.cache\.(\w+)", src))
     # park is refused on a ring before it would reach .remove
     missing = {a for a in used - {"remove"}

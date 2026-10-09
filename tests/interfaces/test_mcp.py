@@ -50,7 +50,7 @@ def test_load_refuses_a_model_that_does_not_fit(tmp_path, monkeypatch):
     from knurlogic.interfaces import loading
     monkeypatch.setattr(loading, "resolve_name", lambda m, served: m)
     d = _artifact(tmp_path / "big", gib=8)
-    monkeypatch.setattr("knurlogic.machine.loaded.available_memory",
+    monkeypatch.setattr("knurlogic.machine.memory.footprint.available_memory",
                         lambda: {"available_bytes": 1 << 20,
                                  "free_bytes": 1 << 20, "cached_bytes": 0})
     monkeypatch.setattr("knurlogic.interfaces.page.server._spawn",
@@ -69,7 +69,7 @@ def test_load_refuses_while_memory_moves_but_force_overrides(tmp_path,
         "knurlogic.machine.loadlock.holder",
         lambda *a, **k: {"pid": 999, "artifact": "other-model",
                          "agent": "someone-else", "started": 0})
-    monkeypatch.setattr("knurlogic.machine.loaded.available_memory",
+    monkeypatch.setattr("knurlogic.machine.memory.footprint.available_memory",
                         lambda: {"available_bytes": 64 << 30,
                                  "free_bytes": 64 << 30, "cached_bytes": 0})
     spawned = []
@@ -89,7 +89,7 @@ def _fit_setup(tmp_path, monkeypatch, budget_gib=10):
     monkeypatch.setattr(loading, "resolve_name", lambda m, served: m)
     d = _artifact(tmp_path / "m", gib=1)
     b = budget_gib << 30
-    monkeypatch.setattr("knurlogic.machine.wired.load_budget",
+    monkeypatch.setattr("knurlogic.machine.memory.wired.load_budget",
                         lambda: {"bytes": b, "limited_by": "working set",
                                  "available_bytes": b,
                                  "working_set_bytes": b})
@@ -190,7 +190,7 @@ def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,
                "bytes": size}})
     monkeypatch.setattr(page_server, "is_our_server", lambda pid: alive)
     monkeypatch.setattr(page_server, "_answers", lambda port: answers)
-    monkeypatch.setattr(page_server.loaded, "memory_map",
+    monkeypatch.setattr(page_server.footprint, "memory_map",
                         lambda: {"processes": [{"pid": 4242, "bytes": held}]})
     return page_server
 
@@ -249,7 +249,7 @@ def test_fit_reports_vision_capability(tmp_path, monkeypatch):
     way -- `fit`'s job is only to pass the answer through."""
     d = _artifact(tmp_path / "vqwen", model_type="qwen3_5")
     monkeypatch.setattr(
-        "knurlogic.machine.loaded.available_memory",
+        "knurlogic.machine.memory.footprint.available_memory",
         lambda: {"available_bytes": 64 << 30, "free_bytes": 64 << 30,
                  "cached_bytes": 0})
     monkeypatch.setattr(

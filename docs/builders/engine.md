@@ -12,7 +12,8 @@ and the memory guard: [server](../design/server.md) and
 
 | file | what |
 |---|---|
-| `scheduler.py` | `Scheduler`: the ONE thread that owns the MLX stream. `submit(Job)` queues; `_run` / `_tick` take jobs, run commands, admit, step. The memory guard (`_guard_memory`, `_make_room`, `_fit_next`, `memory_short`) |
+| `scheduler.py` | `Scheduler`: the ONE thread that owns the MLX stream. `submit(Job)` queues; `_run` / `_tick` take jobs, run commands, admit, step |
+| `memory_guard.py` | `MemoryGuard`, the mixin Scheduler inherits: the memory guard (`_guard_memory`, `_make_room`, `_fit_next`, `memory_short`, the pressure warning), the transient lines it measures (`_measure`, `_line`), and `OutOfMemory` |
 | `executor.py` | the seam: `Executor` protocol, `LocalExecutor`, and the events it returns (`Admission`, `Progress`, `Checkpoint`, `Token`, `Finished`, `RowFailure`) |
 | `host.py` | `ModelHost`: the one served model and its state (empty, loading, ready, unloading, failed); loads on the scheduler thread |
 | `prompt.py` | messages to tokens, cut into segments (`flatten`, `tokenize`, `ChatRequest`, `PromptArgs`) |
@@ -59,7 +60,8 @@ scheduler does the rest on its thread.
   and the thread lives. An executor reports a row's failure as an event,
   not an exception.
 - **Memory is guarded before every step.** Outgrowing the GPU working set
-  aborts the process, so `_guard_memory` runs first: past the limit,
+  aborts the process, so `_guard_memory` (`memory_guard.py`) runs
+  first: past the limit,
   freed buffers are released, then the prompt cache gives up entries
   (`trim_to`), then the newest rows are requeued (if not prefilled) or
   stopped with `OutOfMemory` (a 503). Admission estimates from what this
@@ -89,13 +91,12 @@ scheduler does the rest on its thread.
 
 ## Notes
 
-The memory story is spread: the scheduler's guard
-(`engine/runtime/scheduler.py`), the server's memory and cache limit
-(`engine/serve/load.py`: `memory`, `set_cache_limit`), the fit and margins
-(`tuning/fit.py`: `step_margin`, `rank_margin`, `fit_reserve`,
-`single_fit_check`), and the machine's budget (`machine/wired.py`
-`load_budget`, `machine/allowance.py`, `machine/loaded.py`
-`available_memory`). See [machine](machine.md) and
+Memory, by layer: the guard is `engine/runtime/memory_guard.py`; what mlx
+reports and the cache limit, `engine/serve/load.py` (`memory`,
+`set_cache_limit`); the fit and margins, `tuning/fit.py` (`step_margin`,
+`rank_margin`, `fit_reserve`, `single_fit_check`); the machine's budget,
+`machine/memory/` (`wired.load_budget`, the allowance,
+`footprint.available_memory`). See [machine](machine.md) and
 [settings](settings.md).
 
 ## Tests
