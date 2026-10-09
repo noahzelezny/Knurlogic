@@ -8,4 +8,5 @@ mlx. Serving one model across ranks is engine/split/.
   prompt.py          a request's messages -> the prompt's tokens and segments
   request.py         Request: a request's tokens -> the text the client reads
   control_tokens.py  the control-token state machine (reasoning, tool, stop)
-  timing.py          what one request took, and where the time went"""
+  timing.py          what one request took, and where the time went
+  tool_calls.py      tool-call arguments the tokenizer's parser dropped"""
