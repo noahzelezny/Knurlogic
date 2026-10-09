@@ -29,7 +29,7 @@ The model server, `src/knurlogic/interfaces/http/`:
 | `residency.py` | `/v1/residency` and `/v1/ensure` for orchestration clients |
 | `prompt_cache.py` | `/v1/prompt-cache` ([prompt-cache](prompt-cache.md)) |
 | `compaction.py` | `CompactingChat`, `App`'s chat path through context management ([compaction](compaction.md)) |
-| `telemetry.py`, `request_id.py` | see [telemetry](telemetry.md) |
+| `telemetry.py` | request ids, the ledger `Request`, progress events, `GET /v1/usage`: see [telemetry](telemetry.md) |
 
 `interfaces/serve.py` is `knurlogic serve`: it checks and resolves the
 settings (`tuning/checks`: `launch_refusal`, `settings_refusal`,

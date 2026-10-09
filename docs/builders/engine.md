@@ -19,7 +19,7 @@ and the memory guard: [server](../design/server.md) and
 | `prompt.py` | messages to tokens, cut into segments (`flatten`, `tokenize`, `ChatRequest`, `PromptArgs`) |
 | `request.py` | `Request`: token events to reasoning, answer, tool calls, stop strings and usage; no mlx |
 | `control.py` | `ControlMachine`: which part of an answer a token is in, and which sequence ends the row |
-| `spans.py` | where a request's time went (see [telemetry](telemetry.md)) |
+| `timing.py` | `usage.knurlogic.timing`: `rates` and where a request's time went, `Spans` (see [telemetry](telemetry.md)) |
 | `tensor.py`, `pipeline.py`, `plan.py`, `tensor_rules.py`, `viability.py` | the splits (see [splits](splits.md)) |
 
 Around it, in `engine/`:
@@ -102,7 +102,7 @@ reports and the cache limit, `engine/serve/load.py` (`memory`,
 ## Tests
 
 `tests/engine/test_scheduler.py`, `test_executor.py`, `test_request.py`,
-`test_prompt.py`, `test_segments.py`, `test_thinking.py`, `test_spans.py`,
+`test_prompt.py`, `test_segments.py`, `test_thinking.py`, `test_timing.py`,
 `test_kvquant.py`, `test_kvattn.py`, `test_cross_chip.py`,
 `test_warmup.py`, `test_thread_arrays.py`;
 `tests/interfaces/test_http_server.py` for the server around it.

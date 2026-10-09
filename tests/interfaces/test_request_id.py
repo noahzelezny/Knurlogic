@@ -1,5 +1,5 @@
 """X-Request-Id: echoed by the model server and passed both ways by the
-page's router (interfaces/http/request_id.py). No model is loaded: the
+page's router (interfaces/http/telemetry.py). No model is loaded: the
 model server is answered on its error path, the router in front of fakes."""
 import json
 import threading
@@ -10,19 +10,19 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from knurlogic.interfaces.http import request_id as RID
+from knurlogic.interfaces.http import telemetry as T
 from knurlogic.interfaces.page import server as page_server
 
 
 def test_what_is_echoed_and_what_is_not():
-    assert RID.valid("client-7f3a 2026") == "client-7f3a 2026"
-    assert RID.valid("x" * 128) == "x" * 128
-    assert RID.valid("x" * 129) is None
-    assert RID.valid("") is None and RID.valid(None) is None
-    assert RID.valid("a\r\nSet-Cookie: x") is None      # no header injection
-    assert RID.valid("é") is None
-    assert RID.of({"X-Request-Id": "abc"}) == "abc"
-    assert RID.of(None) is None
+    assert T.valid_id("client-7f3a 2026") == "client-7f3a 2026"
+    assert T.valid_id("x" * 128) == "x" * 128
+    assert T.valid_id("x" * 129) is None
+    assert T.valid_id("") is None and T.valid_id(None) is None
+    assert T.valid_id("a\r\nSet-Cookie: x") is None      # no header injection
+    assert T.valid_id("é") is None
+    assert T.id_of({"X-Request-Id": "abc"}) == "abc"
+    assert T.id_of(None) is None
 
 
 def _post(url, body: bytes, rid=None):

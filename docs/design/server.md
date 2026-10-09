@@ -702,10 +702,10 @@ OpenAI chat/completions and Responses streams only for a client that sends
 `X-Client` (the OpenAI SDK hands an unknown event's data on as a chunk);
 Ollama's NDJSON has none. `/v1/models` says `knurlogic.telemetry: 1`.
 
-The page's router (`request_id.py`, `_stream`) passes a client's
+The page's router (`interfaces/http/telemetry.py`'s `id_of`, `_stream`) passes a client's
 X-Request-Id on and returns the model server's.
 
-### src/knurlogic/engine/runtime/spans.py -- where a request's time went
+### src/knurlogic/engine/runtime/timing.py -- where a request's time went
 
 `usage.knurlogic.timing` gives the rates (TTFT, prefill and decode tok/s).
 A rate says how fast, not where the rest went, so the timing also carries a

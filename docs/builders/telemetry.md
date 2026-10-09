@@ -7,23 +7,30 @@ it. The contract clients share (`telemetry: 1`):
 
 ## Where the code is
 
+A request's path to its ledger row, in order:
+
+1. `interfaces/http/server.py`: `Handler.do_POST` looks the path up in
+   `INFERENCE` and opens a `T.Request` for each inference route (chat,
+   completions, messages, responses, Ollama); `App.submit` copies its id
+   and labels onto the job; `end_headers` answers `X-Request-Id`.
+2. `engine/runtime/scheduler.py`: the job's `Spans` is charged at each
+   step boundary; `_done` fills `usage.knurlogic.timing` with
+   `timing.rates` and the spans, and `usage.knurlogic.cache` from
+   `engine/prompt_cache/report.py`. The scheduler never writes the ledger.
+3. `interfaces/http/openai.py` (`Reply`): the final usage goes to
+   `Request.done`; streamed progress is `T.progress`.
+4. `Handler.do_POST`'s `finally`: `Request.close()` writes one row through
+   `machine/ledger.py`.
+
 | file | what |
 |---|---|
-| `interfaces/http/telemetry.py` | `Request`: opened at the handler, closed on its last byte into one ledger row; `progress(...)`: the SSE `knurlogic.progress` event |
-| `interfaces/http/request_id.py` | `valid`, `of`: a client's `X-Request-Id`, echoed exactly when valid (1..128 printable ASCII) |
-| `machine/ledger.py` | `Ledger` (SQLite at `KNURLOGIC_HOME/ledger.db`, WAL, one table): `insert`, `rows`, `summary`, `prune`; `record(row)`; `ulid`; `labels` (the `X-Client*` headers) |
-| `engine/runtime/spans.py` | `Spans`: a partition of one request's wall time into named buckets (`step_bucket`); off with `KNURLOGIC_TIMING_SPANS=off` |
-| `engine/prompt_cache/report.py` | `usage.knurlogic.cache` for one request |
+| `interfaces/http/telemetry.py` | request ids (`HEADER`, `valid_id`, `id_of`: a client's `X-Request-Id`, echoed exactly when valid, 1..128 printable ASCII); `Request`: opened at the handler, closed on its last byte into one ledger row; `progress(...)`: the SSE `knurlogic.progress` event; `TelemetryHandlers._usage`: `GET /v1/usage`, this machine's ledger (a mixin of `Handler`) |
+| `machine/ledger.py` | `Ledger` (SQLite at `KNURLOGIC_HOME/ledger.db`, WAL, one table): `insert`, `rows`, `summary`, `prune`; `record(row)`; `ulid`; `labels` (the `X-Client*` headers). In `machine/`: what this Mac remembers; `engine/` never imports it |
+| `engine/runtime/timing.py` | `rates`: queue, TTFT, prefill and decode rates, the contract's `*_ms`/`*_tps`; `Spans`: a partition of one request's wall time into named buckets (`step_bucket`); off with `KNURLOGIC_TIMING_SPANS=off` |
+| `engine/prompt_cache/report.py` | `usage.knurlogic.cache` for one request (with the prompt cache, whose engine writes it) |
 
-Hooks:
-
-- `interfaces/http/server.py`: `Handler.do_POST` opens a
-  `T.Request` for each inference route (`CHAT_PATHS`, messages,
-  responses, Ollama); `GET /v1/usage` (`_usage`) reads this machine's
-  ledger.
-- `engine/runtime/scheduler.py`: `_timing` and the spans fill
-  `usage.knurlogic.timing` on the job; the scheduler never writes the
-  ledger.
+The page's router (`interfaces/page/server.py`) passes `X-Request-Id`
+through with `T.id_of` / `T.valid_id`.
 
 ## Rules that keep it correct
 
@@ -46,14 +53,8 @@ job, report it in `usage.knurlogic`; if the ledger keeps it, a column in
 `machine/ledger.py`. A field clients rely on is part of the contract in
 [telemetry](../design/telemetry.md): change the doc with it.
 
-## Notes
-
-Telemetry spans `interfaces/http/` (`telemetry.py`, `request_id.py`, the
-handler), `machine/ledger.py` (storage), `engine/runtime/spans.py` and
-the scheduler (timing), and `engine/prompt_cache/report.py` (cache usage).
-
 ## Tests
 
 `tests/interfaces/test_telemetry.py`, `test_request_id.py`,
 `test_requests_report.py`, `tests/machine/test_ledger.py`,
-`tests/engine/test_spans.py`.
+`tests/engine/test_timing.py`.

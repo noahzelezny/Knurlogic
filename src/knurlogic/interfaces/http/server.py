@@ -28,7 +28,6 @@ from urllib.parse import parse_qs, urlparse
 from knurlogic.engine.templates import TEMPLATE_ERRORS
 
 from . import openai as O
-from . import request_id as RID
 from . import telemetry as T
 from .compaction import CompactingChat
 from .prompt_cache import PromptCacheHandlers
@@ -322,7 +321,8 @@ def _memory_short(sched) -> str | None:
     return f() if callable(f) else None
 
 
-class Handler(PromptCacheHandlers, BaseHTTPRequestHandler):
+class Handler(PromptCacheHandlers, T.TelemetryHandlers,
+              BaseHTTPRequestHandler):
     app: App = None  # type: ignore[assignment]  # set on the subclass by serve()
     server_version = "knurlogic"
 
@@ -429,7 +429,7 @@ class Handler(PromptCacheHandlers, BaseHTTPRequestHandler):
         # X-Request-Id echoed exactly, else a ULID (telemetry.py)
         rec = getattr(self, "_record", None)
         if rec is not None:
-            self.send_header(RID.HEADER, rec.id)
+            self.send_header(T.HEADER, rec.id)
         super().end_headers()
 
     def do_POST(self):
@@ -507,36 +507,6 @@ class Handler(PromptCacheHandlers, BaseHTTPRequestHandler):
                                               "type": "not_found"}})
         body, ctype = h(parse_qs(u.query), self.app.requests)
         self._send(200, body, ctype)
-
-    def _usage(self, q: dict) -> None:
-        """GET /v1/usage?since=&until=&group=&key=: this machine's ledger
-        summed by one label (fleet.md, "Reading it back"). Until keys
-        exist, the loopback operator only."""
-        import ipaddress
-
-        from knurlogic.machine import ledger as L
-        try:
-            loop = ipaddress.ip_address(
-                self.client_address[0].split("%")[0]).is_loopback
-        except ValueError:
-            loop = False
-        if not loop:
-            return self._json(403, {"error": {
-                "message": "usage is read on this machine (loopback) only",
-                "type": "permission_error"}})
-
-        def one(name, default=None):
-            return (q.get(name) or [default])[0]
-        try:
-            since = float(one("since", 0))
-            until = float(one("until")) if one("until") else None
-            group = one("group", "model")
-            rows = L.ledger().summary(since, until, group, one("key"))
-        except ValueError as e:
-            return self._error(O.ApiError(400, str(e)))
-        return self._json(200, {"object": "usage", "since": since,
-                                "until": until, "group": group,
-                                "summary": rows})
 
     def _loopback(self) -> bool:
         import ipaddress

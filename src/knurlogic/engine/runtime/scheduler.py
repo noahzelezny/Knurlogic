@@ -45,8 +45,8 @@ from .executor import (
 )
 from .memory_guard import MemoryGuard, OutOfMemory, _RingWait, _Wait
 from .request import Request, control_machine
-from .spans import Spans, step_bucket
-from .spans import enabled as spans_enabled
+from .timing import Spans, rates, step_bucket
+from .timing import enabled as spans_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -107,48 +107,6 @@ def _kv_from_config(path, kv_bits=None) -> tuple | None:
         return None
 
 
-# Under this much fresh prefill a rate is noise (the page's own floor):
-# nothing is sent, so nothing is shown.
-PREFILL_MIN_TOKENS = 256
-PREFILL_MIN_S = 0.05
-
-
-def _timing(row, done: float, completion: int, prefilled,
-            cached: int | None = 0, chunk: int | None = None) -> dict:
-    """What the request took, measured here where the steps run: time in
-    the queue, time to first token (from submit, as a client feels it), and
-    the rates of the two phases. Prefill is from admission to the first
-    token, over the tokens actually prefilled (not the ones the prompt
-    cache supplied); decode is over the tokens after the first."""
-    first = row.first or done
-    out = {"queue_s": round(max(row.admitted - row.job.submitted, 0), 4),
-           "ttft_s": round(max(first - row.job.submitted, 0), 4),
-           "prompt_cached_tokens": int(cached or 0),
-           "prompt_computed_tokens": int(prefilled or 0)}
-    if chunk:
-        out["prefill_chunk"] = int(chunk)
-    if cached and not prefilled:
-        out["prefill"] = "cached"    # nothing was computed: no rate exists
-    # the compute only: from the step that began the prefill, not from the
-    # admission (which also counts waiting for the scheduler's turn)
-    pre = first - (getattr(row, "began", 0.0) or row.admitted)
-    if (prefilled or 0) >= PREFILL_MIN_TOKENS and pre >= PREFILL_MIN_S:
-        out["prefill_tok_s"] = round(prefilled / pre, 1)
-    dec = done - first
-    if completion > 1 and dec > 0:
-        out["decode_tok_s"] = round((completion - 1) / dec, 1)
-    # the telemetry contract's names (docs/design/telemetry.md): submitted
-    # -> admitted, admitted -> first token, first token -> finish
-    out["queue_ms"] = round(out["queue_s"] * 1000, 1)
-    out["prefill_ms"] = round(max(first - row.admitted, 0) * 1000, 1)
-    out["decode_ms"] = round(max(dec, 0) * 1000, 1)
-    if "prefill_tok_s" in out:
-        out["prefill_tps"] = out["prefill_tok_s"]
-    if "decode_tok_s" in out:
-        out["decode_tps"] = out["decode_tok_s"]
-    return out
-
-
 @dataclass
 class Job:
     """One request as the scheduler takes it."""
@@ -172,7 +130,7 @@ class Job:
     submitted: float = 0.0
     #: perf_counter when the HTTP layer began building it (0: not stamped)
     received: float = 0.0
-    #: where its wall time went, bucket by bucket (spans.py); None when off
+    #: where its wall time went, bucket by bucket (timing.py); None when off
     spans: Spans | None = None
     #: the prompt cache entry it was served came from disk, unused since
     #: its restore: {"tokens", "read_ms"} (usage.knurlogic.cache.disk)
@@ -1147,7 +1105,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 report["diverged"] = row.job.diverged
         usage = row.text.usage(report)
         done = time.perf_counter()
-        timing = _timing(
+        timing = rates(
             row, done, usage.get("completion_tokens", 0),
             (report or {}).get("prefilled"),
             (report or {}).get("used"), row.chunk or self.prefill_step_size)
