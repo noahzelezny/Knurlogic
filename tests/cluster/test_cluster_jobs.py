@@ -28,6 +28,7 @@ from procs import reap_registries
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import launch as C
 from knurlogic.cluster import links
+from knurlogic.engine.runtime import marker
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
 from knurlogic.tuning import settings
@@ -427,9 +428,9 @@ def test_verdict_a_request_waiting_on_a_slow_load_is_not_a_stall():
 def test_a_prefill_chunk_bumps_the_marker(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     m = J.Marker("ab12cd34ef567890", 0)
-    monkeypatch.setitem(J.CURRENT, "marker", m)
-    J.chunk_done()
-    J.chunk_done()
+    monkeypatch.setitem(marker.CURRENT, "marker", m)
+    marker.chunk_done()
+    marker.chunk_done()
     m.beat()
     assert J.read_marker("ab12cd34ef567890", 0)["chunk"] == 2
 
@@ -456,7 +457,7 @@ def test_marker_writes_phase_changes_at_once(tmp_path, monkeypatch):
 def test_after_load_arms_the_jaccl_deadline(monkeypatch):
     monkeypatch.setenv("KNURLOGIC_JACCL_TIMEOUT_MS", "60000")
     monkeypatch.setenv("JACCL_COLLECTIVE_TIMEOUT_MS", "0")
-    J.after_load()
+    marker.after_load()
     assert os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] == "60000"
 
 

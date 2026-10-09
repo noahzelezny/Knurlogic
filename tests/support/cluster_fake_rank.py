@@ -25,9 +25,10 @@ def flag(name, default=None):
 
 def main():
     from knurlogic.cluster import jobs
+    from knurlogic.engine.runtime import marker
     job, rank = flag("--job"), int(flag("--rank"))
     m = jobs.Marker(job, rank).start()
-    jobs.CURRENT["marker"] = m
+    marker.CURRENT["marker"] = m
     time.sleep(0.2)
     bad = os.environ.get("FAKE_BAD_CABLE")
     if bad and rank == 1 and flag("--cable") == bad:
@@ -42,15 +43,15 @@ def main():
         # which reads a job whose rank 0 is ready as serving.)
         while True:
             time.sleep(0.3)
-    jobs.progress(phase="loading")
+    marker.progress(phase="loading")
     if rank != 0:
-        jobs.after_load()
+        marker.after_load()
         n = 0
         while True:
             time.sleep(0.3)
             if os.environ.get("FAKE_STEPS"):
                 n += 1
-                jobs.progress(step=n)
+                marker.progress(step=n)
 
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime.scheduler import Job, Scheduler

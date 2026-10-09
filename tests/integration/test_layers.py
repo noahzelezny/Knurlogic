@@ -7,7 +7,9 @@ a violation:
   1. only engine/ imports mlx, mlx_lm or mlx_vlm;
   2. only interfaces/ creates an HTTP server (http.server, socketserver);
   3. engine/, machine/, tuning/ and context_management/ never import
-     knurlogic.interfaces.
+     knurlogic.interfaces;
+  4. engine/, machine/ and tuning/ never import knurlogic.cluster
+     (cluster -> engine, never back).
 
 Nothing is exempt today. A new exception is a design decision: make it
 here, with the reason, not by loosening a rule silently.
@@ -20,6 +22,7 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "knurlogic"
 MLX = {"mlx", "mlx_lm", "mlx_vlm"}
 HTTP_SERVER = {"http.server", "socketserver"}
 BELOW_INTERFACES = {"engine", "machine", "tuning", "context_management"}
+BELOW_CLUSTER = {"engine", "machine", "tuning"}
 
 
 def _package(path):
@@ -85,6 +88,14 @@ def test_lower_layers_do_not_import_interfaces():
                            or n.startswith("knurlogic.interfaces.")))
     assert not bad, ("engine/machine/tuning/context_management importing "
                      "interfaces:\n" + "\n".join(bad))
+
+
+def test_the_core_does_not_import_cluster():
+    bad = _violations(lambda pkg, n: pkg in BELOW_CLUSTER
+                      and (n == "knurlogic.cluster"
+                           or n.startswith("knurlogic.cluster.")))
+    assert not bad, ("engine/machine/tuning importing cluster:\n"
+                     + "\n".join(bad))
 
 
 def test_engine_never_imports_the_ledger_and_only_it_opens_the_file():

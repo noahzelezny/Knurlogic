@@ -410,7 +410,7 @@ def test_a_headless_model_reuses_a_shared_prefix():
 def test_every_prefill_chunk_is_reported_to_the_job_marker(monkeypatch):
     """A long prompt is admitted in ONE engine step; the cluster watcher
     judges a stall by progress, so each prefill chunk says it finished
-    (cluster/jobs.chunk_done). 70 tokens at 16 a chunk: 5 chunks."""
+    (engine/runtime/marker.chunk_done). 70 tokens at 16 a chunk: 5 chunks."""
     from knurlogic.engine.mtp import batch_generator as bg
     from knurlogic.engine.mtp import batch_loop as bl
     model, head, prompts = _tiny(512)

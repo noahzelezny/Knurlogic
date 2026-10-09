@@ -75,10 +75,9 @@ The splits span packages: `engine/runtime/` (tensor, pipeline, plan,
 rules, viability), `engine/prompt_cache/ring.py`, `engine/mtp/` (the
 pipeline `Coord` is used by the batch loop), `tuning/resolve.py` (fit
 and refusals), `interfaces/serve.py` (rank launch), `cluster/launch.py`
-(placement and argv). `engine/runtime/tensor.py` and
-`engine/mtp/batch_loop.py` import `knurlogic.cluster.jobs` (progress
-markers), against the documented `cluster -> engine` direction; the layer
-test does not check this.
+(placement and argv). Rank progress (steps, prefill
+chunks, loaded) goes through `engine/runtime/marker.py`, so engine never
+imports cluster; `tests/integration/test_layers.py` enforces it.
 
 ## Tests
 

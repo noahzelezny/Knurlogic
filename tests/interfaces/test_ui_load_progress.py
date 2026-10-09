@@ -45,7 +45,7 @@ def test_each_rank_is_measured_against_its_own_share(monkeypatch, tmp_path):
                      "artifact": str(art), "log": str(log), "t": now},
             "j1/1": {"job": "j1", "rank": 1, "pid": 101,
                      "artifact": str(art), "log": str(log), "t": now}}
-    # each rank writes its share to its own marker (jobs.progress), not to
+    # each rank writes its share to its own marker (marker.progress), not to
     # the registry: the test that put it there passed while no page saw it
     monkeypatch.setattr(J, "read_marker", lambda job, rank: {
         ("j1", 0): {"share_bytes": 560}, ("j1", 1): {"share_bytes": 500}}
