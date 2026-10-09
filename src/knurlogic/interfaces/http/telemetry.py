@@ -8,7 +8,7 @@ A Request's id is the client's X-Request-Id when it sent a valid one
 minted here. Either way it is the X-Request-Id answered,
 usage.knurlogic.request_id, and the row's id. The page's router passes a
 client's header on and returns the model server's id, falling back to the
-client's own when an upstream sends none (interfaces/page/server.py).
+client's own when an upstream sends none (interfaces/page/router.py).
 
 A value that is not a valid id is not one this server will repeat into a
 header, and is ignored rather than refused.

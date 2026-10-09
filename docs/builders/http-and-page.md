@@ -36,13 +36,23 @@ settings (`tuning/checks`: `launch_refusal`, `settings_refusal`,
 `refuse_sets`), then
 `run` starts the scheduler and server, or a follower rank.
 `interfaces/loading.py` (`prepare`, `NotLoadable`) is the check every load
-passes, at startup and on every switch.
+passes, at startup and on every switch. `interfaces/spawn.py` starts,
+lists and stops the `knurlogic serve` children (`spawn`, `children`,
+`loading`, `stop`, `SERVE_PORT`): the page and the MCP share it.
 
 The page, `src/knurlogic/interfaces/page/`:
 
 | file | what |
 |---|---|
-| `server.py` | `knurlogic ui`: spawning and stopping model servers (`tracked_load`, `_spawn`, `_stop`), status (`_status_fn`, `_status_light`), the router (`route`, `ROUTE_PATHS`), cluster launch and every peer route (see [cluster](cluster.md)), `prompt_cache_forward` |
+| `server.py` | `knurlogic ui`: `main`, `serve_ui`, `make_handler` (every route and the guards in front of them), `_wire` (what `cluster/launch` and `recovery` need of the page) |
+| `nodes.py` | the machines this page sees: `PEERS`, Bonjour (`_start_discovery`), `/status.json` (`_status_fn`) and the light liveness document (`_status_light`, `hot`) |
+| `loads.py` | load and unload from the page: `_load_fn` (POST `/loaded.json`), `tracked_load`, `forward_launch` (one peer), `cluster_launch`, `peer_launch` (the peer side); GET `/loaded.json` (`_loaded_fn`, `with_jobs`, `load_progress`) |
+| `router.py` | the router to model servers: `route`, `ROUTE_PATHS`, `routable`, `route_models_document`, `proxy_chat`, `chat_targets`, `_stream` (with `cluster_failure`), `CLIENT_HEADERS` |
+| `peers.py` | the peer gate (`peer_refusal`), what peers serve (`peer_residency`, `upstream`, `MSG_PATH`, `PEER_RELAY`), a machine's settings from any page (`peer_machine`, `machine_apply`) |
+| `relay.py` | `peer_relay`: `/peer/v1/...`, a peer page reaching a model this machine started |
+| `peek.py` | `/peek` and `/apply` (a model's or a peer page's settings), and their peer side `peer_settings` |
+| `prompt_cache.py` | `prompt_cache_forward`: the page's `/v1/prompt-cache`, sent on to the model server that serves the model |
+| `messages.py` | `peer_table`: the protocol kinds a page answers on `MSG_PATH` (`survey_here`, `read_here`) |
 | `documents.py` | the routes shared by the page and `serve`: `routes(...)` (`/status.json`, `/settings.json`, `/models.json`, `/loaded.json`, `/connect.json`), `load_action`, `machine_settings`, `settings_document`, `knob_limit`, `compaction_document` (page JSON over `tuning/`) |
 | `hub.py` | Hugging Face search, download, cancel, delete |
 | `updates.py` | is a model or knurlogic out of date (asked once per page start) |
@@ -86,15 +96,10 @@ The page, `src/knurlogic/interfaces/page/`:
 - A new API shape: a translation module with `handler_over(transport,
   model)`, like `messages.py`.
 - A new page document: a route in `documents.routes` (shared with
-  `serve`) or in `page/server.py` if only the page serves it, and the
+  `serve`) or in `page/server.py` (`serve_ui`) if only the page serves it, and the
   view in `assets/views/`.
 - Something a peer must reach: through `peer_relay` or a protocol
   message, never a new direct route between pages.
-
-## Notes
-
-`interfaces/page/server.py` (2,400 lines) mixes the page's own server,
-the router, the peer relay and cluster launch glue.
 
 ## Tests
 

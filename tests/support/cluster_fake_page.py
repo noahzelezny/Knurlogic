@@ -52,7 +52,10 @@ def main():
                              json.loads(sys.argv[4]))
     from knurlogic.cluster import launch as C
     from knurlogic.cluster import protocol
+    from knurlogic.interfaces import spawn
     from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces.page import loads as page_loads
+    from knurlogic.interfaces.page import nodes as page_nodes
     from knurlogic.interfaces.page import server as page_server
     from knurlogic.machine import identity
     identity._ID.update(id=nid, name=name, id_source="test")
@@ -78,7 +81,7 @@ def main():
         for _pid, addr in json.loads(os.environ["FAKE_PEERS"]):
             host, pport = addr.rsplit(":", 1)
             manual.append((host, int(pport)))
-        page_server.PEERS = Peers({"id": nid, "name": name}, port,
+        page_nodes.PEERS = Peers({"id": nid, "name": name}, port,
                                   manual=manual, persist=False).start()
     elif len(sys.argv) > 6:
         from types import SimpleNamespace
@@ -87,30 +90,30 @@ def main():
         host, pport = sys.argv[6].rsplit(":", 1)
         peer = Peer(host=host, port=int(pport), id=sys.argv[5],
                     state="answering")
-        page_server.PEERS = SimpleNamespace(all=lambda: [peer],
+        page_nodes.PEERS = SimpleNamespace(all=lambda: [peer],
                                    introduce=lambda *a, **k: None)
     routes = {}
     serve_port = int(os.environ.get("FAKE_SERVE_PORT") or 0)
     if serve_port:
         routes = documents.routes(
-            status_fn=page_server._status_fn,
-            loaded_fn=page_server._loaded_fn(),
-            load_fn=page_server._load_fn(serve_port))
+            status_fn=page_nodes._status_fn,
+            loaded_fn=page_loads._loaded_fn(),
+            load_fn=page_loads._load_fn(serve_port))
         full = routes["/status.json"]
         routes["/status.json"] = lambda q, _n=0: (
-            documents._json(page_server._status_light())
+            documents._json(page_nodes._status_light())
             if (q.get("light") or [""])[0] else full(q, _n))
-        page_server._SERVE_PORT["ui"] = port
+        spawn.SERVE_PORT["ui"] = port
         C.start_watching_existing()
     else:
         routes = documents.routes(
-            status_fn=page_server._status_fn,
-            loaded_fn=page_server._loaded_fn())
+            status_fn=page_nodes._status_fn,
+            loaded_fn=page_loads._loaded_fn())
         full = routes["/status.json"]
         routes["/status.json"] = lambda q, _n=0: (
-            documents._json(page_server._status_light())
+            documents._json(page_nodes._status_light())
             if (q.get("light") or [""])[0] else full(q, _n))
-        page_server._SERVE_PORT["ui"] = port
+        spawn.SERVE_PORT["ui"] = port
     srv = ThreadingHTTPServer(("127.0.0.1", port), page_server.make_handler(
         routes, gate_for_peers=DenyGate()
         if os.environ.get("FAKE_DENY_PEER_GATE") else None))

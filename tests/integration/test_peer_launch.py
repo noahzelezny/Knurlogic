@@ -10,6 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from knurlogic.interfaces.page import loads as page_loads
+from knurlogic.interfaces.page import nodes as page_nodes
+from knurlogic.interfaces.page import peers as page_peers
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import artifact
 
@@ -30,7 +33,7 @@ def hdr(**kw):
 
 def call(body, **kw):
     loads = []
-    code, doc = page_server.peer_launch(
+    code, doc = page_loads.peer_launch(
         body,
         load=lambda **a: loads.append(a) or {"starting": a["artifact"]},
         resolve=kw.get("resolve", lambda i: "/models/X" if i == "abc"
@@ -46,17 +49,17 @@ LOAD = {"action": "load", "identity": "abc", "tune": "lean",
 # --- the peer's side ---------------------------------------------------------
 
 def test_refused_with_any_origin_header():
-    code, doc = page_server.peer_refusal(
+    code, doc = page_peers.peer_refusal(
         {"Origin": "http://192.0.2.2:8899"}, "192.0.2.1", "192.0.2.2", Open())
     assert code == 403 and "web page" in doc["error"]
 
 
 def test_refused_off_the_gate_unless_a_named_peer():
-    code, _ = page_server.peer_refusal({}, "192.0.2.1", "192.0.2.2", Shut())
+    code, _ = page_peers.peer_refusal({}, "192.0.2.1", "192.0.2.2", Shut())
     assert code == 403
-    assert page_server.peer_refusal({}, "192.0.2.1", "203.0.113.105", Shut(),
+    assert page_peers.peer_refusal({}, "192.0.2.1", "203.0.113.105", Shut(),
                                     manual_hosts=["192.0.2.1"]) is None
-    assert page_server.peer_refusal({}, "192.0.2.1", "192.0.2.2",
+    assert page_peers.peer_refusal({}, "192.0.2.1", "192.0.2.2",
                                     Open()) is None
 
 
@@ -119,7 +122,7 @@ def test_identity_is_content_not_place(tmp_path):
 # --- the coordinator's side --------------------------------------------------
 
 def peers_with(*ps, monkeypatch):
-    monkeypatch.setattr(page_server, "PEERS", SimpleNamespace(all=lambda: list(ps)))
+    monkeypatch.setattr(page_nodes, "PEERS", SimpleNamespace(all=lambda: list(ps)))
 
 
 def peer(state="answering"):
@@ -131,11 +134,11 @@ def peer(state="answering"):
 def test_forward_refuses_unknown_or_silent_peer(monkeypatch):
     peers_with(peer("gone"), monkeypatch=monkeypatch)
     sent = []
-    doc = page_server.forward_launch({"action": "load", "node": "m4id",
+    doc = page_loads.forward_launch({"action": "load", "node": "m4id",
                              "identity": "abc"},
                             post=lambda *a, **k: sent.append(a))
     assert "not a machine that is answering" in doc["error"] and not sent
-    doc = page_server.forward_launch({"action": "load", "node": "other",
+    doc = page_loads.forward_launch({"action": "load", "node": "other",
                              "identity": "abc"},
                             post=lambda *a, **k: sent.append(a))
     assert "error" in doc and not sent
@@ -144,7 +147,7 @@ def test_forward_refuses_unknown_or_silent_peer(monkeypatch):
 def test_forward_never_sends_a_path(monkeypatch):
     peers_with(peer(), monkeypatch=monkeypatch)
     for extra in ({"target": "/x"}, {"path": "/x"}, {"artifact": "/x"}):
-        doc = page_server.forward_launch({"action": "load", "node": "m4id",
+        doc = page_loads.forward_launch({"action": "load", "node": "m4id",
                                  "identity": "abc", **extra},
                                 post=lambda *a, **k: 1 / 0)
         assert "identity" in doc["error"]
@@ -154,8 +157,8 @@ def test_forward_to_a_real_peer_page(monkeypatch):
     """The coordinator's forward_launch against the real handler on a local
     port: identity resolution, refusal text passed back."""
     loads = []
-    monkeypatch.setattr(page_server, "peer_launch",
-                        _stubbed(page_server.peer_launch, loads))
+    monkeypatch.setattr(page_loads, "peer_launch",
+                        _stubbed(page_loads.peer_launch, loads))
     srv = ThreadingHTTPServer(("127.0.0.1", 0), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
@@ -164,16 +167,16 @@ def test_forward_to_a_real_peer_page(monkeypatch):
                             port=port, state="answering",
                             key=f"127.0.0.1:{port}", found_by={"manual"})
         peers_with(p, monkeypatch=monkeypatch)
-        doc = page_server.forward_launch({"action": "load", "node": "m4id",
+        doc = page_loads.forward_launch({"action": "load", "node": "m4id",
                                  "identity": "abc", "tune": "lean",
                                  "sets": {"VQ_DECODE_CHUNK": "8"}})
         assert doc.get("starting") == "/models/X", doc
         # no port is forwarded: the peer picks its own free one
         assert doc["machine"] == "M4" and loads[0]["port"] == 0
-        doc = page_server.forward_launch({"action": "load", "node": "m4id",
+        doc = page_loads.forward_launch({"action": "load", "node": "m4id",
                                  "identity": "zzz"})
         assert doc["refused"].startswith("not on")
-        doc = page_server.forward_launch({"action": "unload", "node": "m4id",
+        doc = page_loads.forward_launch({"action": "unload", "node": "m4id",
                                  "port": 8123})
         assert doc["stopped"] == 8123
         # a browser page cannot reach the peer route
@@ -208,7 +211,7 @@ def test_forward_refuses_a_port_that_is_not_a_number(monkeypatch):
     load's port went through int() unguarded -- a 500 -- where unload's
     answers with what is wrong."""
     peers_with(peer(), monkeypatch=monkeypatch)
-    doc = page_server.forward_launch({"action": "load", "node": "m4id",
+    doc = page_loads.forward_launch({"action": "load", "node": "m4id",
                              "identity": "abc", "port": "x"},
                             post=lambda *a, **k: 1 / 0)
     assert "port" in doc["error"]

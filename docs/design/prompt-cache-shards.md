@@ -139,6 +139,6 @@ All prompt-cache code lives in `engine/prompt_cache/`:
 | `report.py` | what a request's usage says about the cache |
 
 The HTTP endpoints are in `interfaces/http/prompt_cache.py`; the page
-forwards them to the Mac that runs the model (`interfaces/page/server.py`).
+forwards them to the Mac that runs the model (`interfaces/page/prompt_cache.py`).
 The new format adds `layers.py` (per-layer, per-head pieces) and
 `transfer.py` (option 2).

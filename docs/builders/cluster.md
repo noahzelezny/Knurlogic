@@ -24,11 +24,12 @@ share a model) is [splits](splits.md).
 
 Hooks outside it:
 
-- `interfaces/page/server.py`: the page is a node. `cluster_launch`,
-  `forward_launch`, `peer_launch`, `peer_refusal` (the gate on peer
-  routes), `peer_residency`, `peer_settings`, `peer_machine`, `peer_table`; the one
-  control-plane route `MSG_PATH` (`/peer/v1/msg`) and the model relay
-  under `/peer/v1/` (`peer_relay`).
+- `interfaces/page/`: the page is a node. `loads.py` (`cluster_launch`,
+  `forward_launch`, `peer_launch`), `peers.py` (`peer_refusal`, the gate
+  on peer routes; `peer_residency`; `peer_machine`; the one control-plane
+  route `MSG_PATH`, `/peer/v1/msg`), `messages.py` (`peer_table`),
+  `peek.py` (`peer_settings`) and `relay.py` (the model relay under
+  `/peer/v1/`, `peer_relay`).
 - `interfaces/mcp.py`: `load` with `machines`, `unload` with `job`.
 - `interfaces/serve.py`: starts a rank (`run` with a ring); `cluster/`
   calls back into it with a lazy import.
@@ -60,7 +61,7 @@ Hooks outside it:
 
 - A new message kind: a `Body` subclass in `protocol.py` registered with
   `_register`, a handler in the page's table (`peer_table` in
-  `interfaces/page/server.py`), and an entry in `transport.TIMEOUTS` if
+  `interfaces/page/messages.py`), and an entry in `transport.TIMEOUTS` if
   it needs its own timeout.
 - A new launch check: in `launch.check_spec` / `prepare` so it refuses in
   the first phase, with the reason.

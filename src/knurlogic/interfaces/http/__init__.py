@@ -96,7 +96,7 @@ def scheduler_options(settings: dict) -> dict:
 
 
 #: how long a stopping server waits for its scheduler's exit, which saves
-#: the prompt cache to disk; the page's unload waits as long (page/server)
+#: the prompt cache to disk; the page's unload waits as long (interfaces/spawn.stop)
 STOP_SAVE_S = 120.0
 
 

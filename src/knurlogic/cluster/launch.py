@@ -45,7 +45,7 @@ def _no_status():
 
 
 # What this module needs of the page that runs it, injected by that page at
-# startup (interfaces/page/server.py) so this module never imports it.
+# startup (interfaces/page/server._wire) so this module never imports it.
 # Unset, this machine is alone: no status snapshot (node_info() answers)
 # and no peers.
 #: () -> (status snapshot, _): the page's own status document

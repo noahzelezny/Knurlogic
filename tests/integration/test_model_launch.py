@@ -87,7 +87,7 @@ def test_engine_settings_reads_them():
 
 
 def test_the_launch_allowlist_takes_them():
-    from knurlogic.interfaces.page.server import clean_sets
+    from knurlogic.tuning.checks import clean_sets
     ok, bad = clean_sets({"KNURLOGIC_MTP": "off",
                           "KNURLOGIC_MTP_DYNAMIC": "off",
                           "KNURLOGIC_KV_BITS": "8"})

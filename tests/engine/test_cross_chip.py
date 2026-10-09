@@ -123,7 +123,7 @@ def test_it_is_a_model_launch_setting():
     assert knobs.KNOB_RANGE["KNURLOGIC_CROSS_CHIP"][0] == ["off", "on", "auto"]
     assert knobs.engine_settings({"KNURLOGIC_CROSS_CHIP": "on"}) == \
         {"cross_chip": "on"}
-    from knurlogic.interfaces.page.server import clean_sets
+    from knurlogic.tuning.checks import clean_sets
     assert clean_sets({"KNURLOGIC_CROSS_CHIP": "auto"})[0]
 
 

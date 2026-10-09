@@ -7,7 +7,13 @@ import time
 import pytest
 
 from knurlogic.cluster import jobs as J
-from knurlogic.interfaces.page import documents, server
+from knurlogic.interfaces import spawn
+from knurlogic.interfaces.page import documents
+from knurlogic.interfaces.page import loads as page_loads
+from knurlogic.interfaces.page import messages as page_messages
+from knurlogic.interfaces.page import nodes as page_nodes
+from knurlogic.interfaces.page import peek as page_peek
+from knurlogic.interfaces.page import router as page_router
 from knurlogic.machine import discover, servers
 from knurlogic.machine.artifact import Artifact
 
@@ -28,26 +34,27 @@ def test_polls_never_read_a_model_folder(monkeypatch, tmp_path, no_folders,
     now = time.time()
     rec = {"pid": 100, "artifact": str(tmp_path / "M"), "log": str(log),
            "t": now, "job": "j1", "bytes": 1000}
-    monkeypatch.setattr(server, "registry", lambda: {8000: rec})
+    monkeypatch.setattr(spawn, "registry", lambda: {8000: rec})
+    monkeypatch.setattr(page_loads, "registry", lambda: {8000: rec})
     monkeypatch.setattr(J, "registry", lambda: {
         "j1/0": dict(rec, rank=0, port=8000)})
     monkeypatch.setattr(J, "read_marker", lambda job, rank: None)
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
-    monkeypatch.setattr(server, "is_our_server", lambda pid: True)
-    monkeypatch.setattr(server, "_answers", lambda port: answers)
+    monkeypatch.setattr(spawn, "is_our_server", lambda pid: True)
+    monkeypatch.setattr(spawn, "_answers", lambda port: answers)
     mm = {"processes": [{"pid": 100, "bytes": 950}]}
-    monkeypatch.setattr(server.footprint, "memory_map", lambda: mm)
-    monkeypatch.setattr(server.loaded, "survey", lambda: {
+    monkeypatch.setattr(spawn.footprint, "memory_map", lambda: mm)
+    monkeypatch.setattr(page_loads.loaded, "survey", lambda: {
         "resident": [], "runtimes": [], "bytes_resident": 0, "memory": mm})
     documents._LOADED.update(doc=None, at=0.0)
-    server._LIGHT.update(doc=None, at=0.0)
+    page_nodes._LIGHT.update(doc=None, at=0.0)
 
-    (load,) = server.load_progress({"memory": mm})
+    (load,) = page_loads.load_progress({"memory": mm})
     assert load["total_bytes"] == 1000          # from the launch record
-    (c,) = server.children()
+    (c,) = spawn.children()
     assert c["phase"] == ("serving" if answers else "loading")
-    server._loaded_fn()({})
-    server._status_light()
+    page_loads._loaded_fn()({})
+    page_nodes._status_light()
 
 
 def _rows(monkeypatch):
@@ -79,16 +86,16 @@ def test_peek_passes_rescan_for_models_json_only(monkeypatch):
     from types import SimpleNamespace
     p = SimpleNamespace(name="M4", host="192.0.2.2", port=8899,
                         state="answering", key="192.0.2.2:8899")
-    monkeypatch.setattr(server, "PEERS",
+    monkeypatch.setattr(page_nodes, "PEERS",
                         SimpleNamespace(all=lambda: [p]))
-    monkeypatch.setattr(server, "chat_targets", lambda: set())
+    monkeypatch.setattr(page_router, "chat_targets", lambda: set())
     seen = []
 
     def fetch(url, t):
         seen.append(url)
         return b"{}"
     for path in ("/models.json", "/settings.json"):
-        server.peek({"where": ["http://192.0.2.2:8899"], "path": [path],
+        page_peek.peek({"where": ["http://192.0.2.2:8899"], "path": [path],
                      "rescan": ["1"]}, fetch=fetch)
     assert seen == ["http://192.0.2.2:8899/models.json?rescan=1",
                     "http://192.0.2.2:8899/settings.json"]
@@ -100,6 +107,6 @@ def test_a_peers_read_passes_rescan_to_its_models_json():
     def models(q, _n=0):
         got.append(q)
         return b"{}", "application/json"
-    server.read_here({"/models.json": models},
+    page_messages.read_here({"/models.json": models},
                      {"path": "/models.json", "query": {"rescan": "1"}})
     assert got == [{"rescan": ["1"]}]

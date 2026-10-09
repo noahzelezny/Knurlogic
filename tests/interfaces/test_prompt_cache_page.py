@@ -4,7 +4,10 @@ import io
 import json
 from types import SimpleNamespace as NS
 
-from knurlogic.interfaces.page import server as page_server
+from knurlogic.interfaces.page import peers as page_peers
+from knurlogic.interfaces.page import prompt_cache as page_prompt_cache
+from knurlogic.interfaces.page import relay as page_relay
+from knurlogic.interfaces.page import router as page_router
 
 
 class _Handler:
@@ -29,13 +32,13 @@ class _Handler:
 
 def _run(monkeypatch, table, method, path, query=None, body=b"", ip=None,
          routed=None):
-    monkeypatch.setattr(page_server, "local_models",
+    monkeypatch.setattr(page_router, "local_models",
                         lambda fetch=None: dict(table))
-    monkeypatch.setattr(page_server, "routable",
+    monkeypatch.setattr(page_router, "routable",
                         lambda fetch=None: dict(routed or table))
     sent = []
     h = _Handler(ip or "127.0.0.1")
-    page_server.prompt_cache_forward(
+    page_prompt_cache.prompt_cache_forward(
         h, method, path, query or {}, body,
         send=lambda url, m, b: sent.append((url, m, b)) or (200, {"ok": 1}))
     return h, sent
@@ -72,7 +75,7 @@ def test_a_peers_model_goes_through_its_pages_relay(monkeypatch):
     """a coordinator session runs on the M4: the M3's page sends its cache calls to
     the M4 page's relay, like a chat, which resolves the name there."""
     far = "http://192.0.2.2:8081"
-    monkeypatch.setitem(page_server._PEER_TARGETS, far,
+    monkeypatch.setitem(page_peers._PEER_TARGETS, far,
                         {"relay": "http://192.0.2.2:8899",
                          "machine": "Laptop B"})
     routed = {"qwen": "http://127.0.0.1:8080", "flash": far}
@@ -90,14 +93,14 @@ def test_a_peers_model_goes_through_its_pages_relay(monkeypatch):
 
 
 def _relay(monkeypatch, table, method, path, url_path, body=b""):
-    monkeypatch.setattr(page_server, "local_models",
+    monkeypatch.setattr(page_router, "local_models",
                         lambda fetch=None, docs=None: dict(table))
     sent = []
-    monkeypatch.setattr(page_server, "_send_up",
+    monkeypatch.setattr(page_router, "_send_up",
                         lambda u, m, b: sent.append((u, m, b)) or (200, {}))
     h = _Handler()
     h.path = url_path
-    page_server.peer_relay(h, method, path, body)
+    page_relay.peer_relay(h, method, path, body)
     return h, sent
 
 
@@ -129,5 +132,5 @@ def test_only_loopback(monkeypatch):
 def test_the_client_headers_go_up_with_a_chat():
     h = NS(headers={"X-Client-Session": "c1", "X-Cache-Retain": "pin",
                     "Authorization": "no"})
-    assert page_server._client_headers(h) == {"X-Client-Session": "c1",
+    assert page_router._client_headers(h) == {"X-Client-Session": "c1",
                                               "X-Cache-Retain": "pin"}

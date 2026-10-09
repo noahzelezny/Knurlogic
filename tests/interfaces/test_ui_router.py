@@ -10,6 +10,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from knurlogic.interfaces.page import nodes as page_nodes
+from knurlogic.interfaces.page import peek as page_peek
+from knurlogic.interfaces.page import peers as page_peers
+from knurlogic.interfaces.page import router as page_router
 from knurlogic.interfaces.page import server as page_server
 
 
@@ -73,9 +77,9 @@ def cluster(monkeypatch):
     seen = []
     a, base_a = _serve(_fake_model("qwen-local", seen))
     b, base_b = _serve(_fake_model("glm-peer", seen))
-    monkeypatch.setattr(page_server, "chat_targets", lambda: {base_a, base_b})
-    monkeypatch.setattr(page_server, "PEERS", None)
-    page_server._ROUTES.update(at=0.0, map={})
+    monkeypatch.setattr(page_router, "chat_targets", lambda: {base_a, base_b})
+    monkeypatch.setattr(page_nodes, "PEERS", None)
+    page_router._ROUTES.update(at=0.0, map={})
     page, page_url = _serve(page_server.make_handler({}))
     yield page_url, base_a, base_b, seen
     for s in (a, b, page):
@@ -132,10 +136,10 @@ def test_models_name_the_machine_each_runs_on(cluster, monkeypatch):
     from knurlogic.machine import identity as I
     page, base_a, base_b, _ = cluster
     monkeypatch.setattr(I, "identity", lambda: {"name": "Studio"})
-    monkeypatch.setitem(page_server._PEER_TARGETS, base_b,
+    monkeypatch.setitem(page_peers._PEER_TARGETS, base_b,
                         {"machine": "Laptop B"})
     # the fake peer answers directly, not through a peer page's relay
-    monkeypatch.setattr(page_server, "upstream", lambda b, p: b + p)
+    monkeypatch.setattr(page_peers, "upstream", lambda b, p: b + p)
     with urllib.request.urlopen(page + "/v1/models", timeout=5) as r:
         doc = json.loads(r.read())
     assert {m["id"]: m["machine"] for m in doc["data"]} == {
@@ -187,23 +191,23 @@ def test_apply_refuses_what_it_does_not_know(cluster):
     code, _, _ = _post(f"{page}/apply?where={base_a}", [1, 2])
     assert code == 400
     code, _, _ = _post(f"{page}/apply?where={base_a}",
-                       {"x": "y" * (page_server.APPLY_MAX + 1)})
+                       {"x": "y" * (page_peek.APPLY_MAX + 1)})
     assert code == 413
     assert not seen
 
 
 def test_apply_passes_the_servers_report_back(monkeypatch):
-    monkeypatch.setattr(page_server, "chat_targets", lambda: {"http://h:1"})
+    monkeypatch.setattr(page_router, "chat_targets", lambda: {"http://h:1"})
     calls = []
 
     def post(url, data, t):
         calls.append((url, data, t))
         return 200, b'{"applied": {"K": "failed: no"}}'
-    code, doc = page_server.apply_settings("http://h:1", b'{"K": "2"}', post=post)
+    code, doc = page_peek.apply_settings("http://h:1", b'{"K": "2"}', post=post)
     assert code == 200 and doc == {"applied": {"K": "failed: no"}}
     assert calls == [("http://h:1/settings.json", b'{"K": "2"}',
-                      page_server.APPLY_S)]
-    code, doc = page_server.apply_settings("http://h:1", b"{}",
+                      page_peek.APPLY_S)]
+    code, doc = page_peek.apply_settings("http://h:1", b"{}",
                                   post=lambda u, d, t: (200, b"<html>"))
     assert code == 502
 

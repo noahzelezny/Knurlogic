@@ -6,7 +6,7 @@ jaccl) stays on MLX's backends and is not part of it.
 
 Today the plane exists but is implicit: JSON dicts posted to `/peer/*` routes,
 parsed by hand at each end, with the shape spread over `cluster/launch.py`,
-`cluster/peers.py` and `interfaces/page/server.py`. This design makes that
+`cluster/peers.py` and the page server. This design makes that
 protocol an explicit, typed, versioned contract in one module, so a node
 could be reimplemented in another language by reading one file.
 
