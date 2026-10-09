@@ -28,6 +28,7 @@ The model server, `src/knurlogic/interfaces/http/`:
 | `ollama.py` | `/api/chat`, `/api/generate`, `/api/tags`, `/api/show`, `/api/version` |
 | `residency.py` | `/v1/residency` and `/v1/ensure` for orchestration clients |
 | `prompt_cache.py` | `/v1/prompt-cache` ([prompt-cache](prompt-cache.md)) |
+| `compaction.py` | `CompactingChat`, `App`'s chat path through context management ([compaction](compaction.md)) |
 | `telemetry.py`, `request_id.py` | see [telemetry](telemetry.md) |
 
 `interfaces/serve.py` is `knurlogic serve`: it checks and resolves the
