@@ -14,7 +14,7 @@ and the memory guard: [server](../design/server.md) and
 |---|---|
 | `scheduler.py` | `Scheduler`: the ONE thread that owns the MLX stream. `submit(Job)` queues; `_run` / `_tick` take jobs, run commands, admit, step |
 | `memory_guard.py` | `MemoryGuard`, the mixin Scheduler inherits: the memory guard (`_guard_memory`, `_make_room`, `_fit_next`, `memory_short`, the pressure warning), the transient lines it measures (`_measure`, `_line`), and `OutOfMemory` |
-| `executor.py` | the seam: `Executor` protocol, `LocalExecutor`, and the events it returns (`Admission`, `Progress`, `Checkpoint`, `Token`, `Finished`, `RowFailure`) |
+| `executor.py` | the seam: `LocalExecutor` and the events it returns (`Admission`, `Progress`, `Checkpoint`, `Token`, `Finished`, `RowFailure`) |
 | `model_host.py` | `ModelHost`: the one served model and its state (empty, loading, ready, unloading, failed); loads on the scheduler thread |
 | `prompt.py` | messages to tokens, cut into segments (`flatten`, `tokenize`, `ChatRequest`, `PromptArgs`) |
 | `request.py` | `Request`: token events to reasoning, answer, tool calls, stop strings and usage; no mlx |
