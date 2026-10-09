@@ -1,0 +1,8 @@
+#!/bin/sh
+# Refuse commits that add machine-specific strings (paths, machine names, IPs).
+# The scanner and its patterns are per-user and live outside the repo; when the
+# scanner is not installed this hook does nothing.
+if command -v no-machine-names >/dev/null 2>&1; then
+    no-machine-names --staged || exit 1
+fi
+exit 0
