@@ -24,6 +24,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from knurlogic.engine.runtime import tool_calls
+
 logger = logging.getLogger(__name__)
 
 _MACHINES: dict = {}
@@ -260,7 +262,7 @@ class Request:
             return []
         calls = []
         for tc in parsed if isinstance(parsed, list) else [parsed]:
-            tc = dict(tc)
+            tc = tool_calls.recover(text, dict(tc), self.tools)
             cid = tc.pop("id", None) or f"call_{uuid.uuid4().hex[:24]}"
             args = tc.get("arguments")
             if not isinstance(args, str):
