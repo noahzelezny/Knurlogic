@@ -41,7 +41,14 @@ def test_roles_order_and_dedupe(page):
     ids, split, no = placement.resolve_machines(["all"], split="tensor")
     assert ids == ["id-me", "id-m4", "id-m5"] and split == "tensor"
     ids, split, no = placement.resolve_machines(["here"])
-    assert ids == ["id-me"] and split == ""
+    assert ids == [] and split == "" and no is None     # load here
+
+
+def test_here_alone_needs_no_page(monkeypatch):
+    def down(path):
+        raise page_client.PageDown("no page")
+    monkeypatch.setattr(page_client, "page_get", down)
+    assert placement.resolve_machines(["here", "HERE"]) == ([], "", None)
 
 
 def test_peers_none_answering(page):

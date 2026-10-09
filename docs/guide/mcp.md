@@ -58,7 +58,7 @@ API instead ([chat-and-api.md](chat-and-api.md)).
   `knurlogic ui` must be running (the MCP finds it at `KNURLOGIC_PAGE`,
   default `127.0.0.1:8899`).
 - Role words in `machines` say where without knowing what the Macs are
-  called (peers are found on their own): `here` (this Mac), `peers` (every
+  called (peers are found on their own): `here` (this Mac, the same as empty; needs no page), `peers` (every
   peer answering this Mac's page; refused when none is), `all` (here +
   peers). They mix with names and ids; duplicates collapse; the order is
   this Mac first, then the peers in the page's order. A role or name that
