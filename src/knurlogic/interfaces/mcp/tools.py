@@ -147,11 +147,22 @@ TOOLS: dict[str, dict[str, Any]] = {
                                       "(tower, image store, image KV) and "
                                       "image requests get a 400"},
             "machines": {"type": "array", "items": {"type": "string"},
-                         "description": "machine names, as `state` lists "
-                                        "them; empty: this Mac only"},
+                         "description": "where, without knowing machine "
+                                        "names: \"here\" (this Mac), "
+                                        "\"peers\" (every peer answering "
+                                        "this Mac's page), \"all\" (here + "
+                                        "peers), or \"fit\" alone (this Mac "
+                                        "if the model fits here, else the "
+                                        "smallest set of answering Macs it "
+                                        "fits on; refused with each Mac's "
+                                        "numbers if none). Names or ids as "
+                                        "`state` lists them mix with here/"
+                                        "peers/all. Empty: this Mac only"},
             "split": S("with two or more machines: tensor (every layer "
                        "split, same share each) | pipeline (layers in "
-                       "runs, sized to each machine)"),
+                       "runs, sized to each machine); with a role word "
+                       "(here/peers/all/fit) it defaults to pipeline, as "
+                       "the page's Launch does"),
             "link": S("with two or more machines: tcp (the ring, any "
                       "link) | rdma (jaccl over Thunderbolt 5, every pair "
                       "cabled; beyond two machines experimental)"),

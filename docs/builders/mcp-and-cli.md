@@ -25,7 +25,10 @@ The MCP tools, in the order an agent uses them: `models`, `fit`,
 `model_folders` and `deps`. Each is a plain function: the read-only ones in `mcp/inspection.py`,
 `load` and `unload` in `mcp/lifecycle.py`. Tools that span machines ask
 the page on this Mac (`mcp/page_client.py`: `page_get`, `page_post`;
-address from `KNURLOGIC_PAGE`).
+address from `KNURLOGIC_PAGE`). `load`'s role words in `machines`
+(`here`, `peers`, `all`, `fit`) are resolved to page node ids in
+`mcp/placement.py` (`resolve_machines`; `fit_machines` reuses the `fit`
+tool and `cluster/launch.placement`).
 
 The CLI's commands: `ui`, `serve`, `doctor`, `smoke`, `vendor`,
 `connect`, `mcp`, `loaded`, `mtp`, `models`, `deps`. Most live in the

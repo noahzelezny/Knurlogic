@@ -57,6 +57,18 @@ API instead ([chat-and-api.md](chat-and-api.md)).
   chosen for you. Anything past this Mac goes through this Mac's page, so
   `knurlogic ui` must be running (the MCP finds it at `KNURLOGIC_PAGE`,
   default `127.0.0.1:8899`).
+- Role words in `machines` say where without knowing what the Macs are
+  called (peers are found on their own): `here` (this Mac), `peers` (every
+  peer answering this Mac's page; refused when none is), `all` (here +
+  peers). They mix with names and ids; duplicates collapse; the order is
+  this Mac first, then the peers in the page's order. A role or name that
+  is a Mac not answering is refused with the reason.
+- `fit`, alone (mixed with anything it is refused): this Mac when the
+  model fits here (the `fit` tool's check), else the smallest set of
+  answering Macs it fits on (the placement the page's Launch makes). It
+  splits `pipeline` unless `split` names `tensor`, as does any role that
+  makes a cluster. Nothing fits: refused with the reason, each Mac's
+  `working_set_gib` / `available_gib` and this Mac's `fit` numbers.
 
 A cluster load returns `job`, `port` (rank 0's, on the leader), `leader`,
 `machines` and `placement {order, leader, layers, cable, cable_note}`, and
