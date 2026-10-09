@@ -97,8 +97,9 @@ Start with `engine.md` and `server.md` for the shape of a server.
   [families](design/families.md), [drafting](design/drafting.md),
   [kv-cache](design/kv-cache.md)
 - Prompt cache: [on disk](design/prompt-cache-disk.md),
-  [shard-agnostic](design/prompt-cache-shards.md) (all its code is in
-  `engine/prompt_cache/`)
+  [shard-agnostic](design/prompt-cache-shards.md) (the cache is in
+  `engine/prompt_cache/`; its endpoints in `interfaces/http/prompt_cache.py`,
+  the page's forwarding in `interfaces/page/prompt_cache.py`)
 - Vision: [vision](design/vision.md),
   [vision-contracts](design/vision-contracts.md)
 - Server and interfaces: [server](design/server.md), [mcp](design/mcp.md)

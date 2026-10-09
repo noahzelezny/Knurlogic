@@ -18,7 +18,7 @@ share a model) is [splits](splits.md).
 | `protocol.py` | the control-plane messages: the envelope `{v, kind, from, job?, seq, ts, body}`, one frozen dataclass per kind (`Hello`, `Prepare`, `Start`, `Stop`, `Failure`, ...), `check_version` |
 | `transport.py` | the one client (`send`, `send_all`) and server half (`handle`) of the control plane; `PeerUnreachable`, `PeerRefused` |
 | `launch.py` | a job across machines: `check_spec`, `placement`, `prepare` then `start` (two phases), `launch`, `stop`, `watch_once`, `peer_verdict`, `failover`, `jobs_document`, `rank_argv` / `rank_env` |
-| `jobs.py` | a job's files and its ranks' progress markers (`Marker`, `progress`, `chunk_done`, `after_load`), `Watch`, `phase_of`, the job registry, `terminate`, `wait_gone`. Stdlib only |
+| `jobs.py` | a job's files and its ranks' progress markers (`Marker`, `read_marker`; a rank writes its own through engine/split/marker.py: `progress`, `chunk_done`, `after_load`), `Watch`, `phase_of`, the job registry, `terminate`, `wait_gone`. Stdlib only |
 | `recovery.py` | bounded auto-relaunch: `track_cluster`, `track_single`, `tick`, `cancel_job`, `view`; persisted in `recovery.json` and `recovery-models.json` |
 | `checks.py` | `knurlogic doctor --cluster`: interfaces, firewall, sleep, Bonjour browse (`report`) |
 
