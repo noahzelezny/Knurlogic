@@ -33,6 +33,15 @@ def test_labels_are_cut_on_a_character_boundary():
                    "role": "r" * 32}
 
 
+def test_a_folded_header_reads_as_one_line():
+    # a header line that starts with a space continues the one before it;
+    # http.server keeps the CRLF in the value
+    assert L.label("s2\r\n X-Cache-Keep:latest", 128) == \
+        "s2 X-Cache-Keep:latest"
+    assert L.label("pm\x00-1\x1b", 128) == "pm-1"
+    assert L.label(" \r\n ", 128) is None
+
+
 def test_the_ledger_lives_in_knurlogic_home(tmp_path, monkeypatch):
     monkeypatch.setenv("KNURLOGIC_HOME", str(tmp_path))
     assert L.path() == tmp_path / "ledger.db"
