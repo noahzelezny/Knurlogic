@@ -205,8 +205,8 @@ def overlap_on() -> bool:
 @contextlib.contextmanager
 def overlapped(model):
     """Around a prompt's prefill chunks (batch_loop.admit's prefill_ctx):
-    each chunk's hidden state is sent while the next chunk computes (the
-    exo fork queued its prefill sends for the same reason), and every send
+    each chunk's hidden state is sent while the next chunk computes, and
+    every send
     has completed on the way out -- before the prefill's last forward and
     any collective after it. Nothing but sends and receives happens
     between the chunks, so the point-to-point order is the program order

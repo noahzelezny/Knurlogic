@@ -10,8 +10,7 @@ lifetime; the head's cache rides in the prefix-cache entry beside the
 trunk's; the row count moves in lockstep. Every request with an image comes
 here (head or not), keyed by the vision cache KEY; segment checkpoints are
 handed back one per `next()` call as end-of-segment responses.
-Ported from the maintainer's own code in github.com/noahzelezny/exo
-(Apache-2.0). Design: docs/design/drafting.md (batch engine).
+Design: docs/design/drafting.md (batch engine).
 """
 from __future__ import annotations
 
