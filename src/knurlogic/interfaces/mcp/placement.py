@@ -59,7 +59,9 @@ def resolve_machines(words: list[str], artifact: str = "", split: str = "",
     """(ids, split, refusal): `load`'s `machines` -- role words mixed with
     names or ids -- as page node ids, here first then peers in page order,
     duplicates collapsed. `split` is the one asked, or the page's default
-    when a role made it a cluster. Reads the page's /status.json."""
+    when a role made it a cluster. Reads the page's /status.json, except for
+    "here" alone. This Mac alone comes back as [] (load here, as with no
+    `machines`)."""
     low = [str(w).lower() for w in words]
     if "fit" in low:
         if len(low) != 1:
@@ -67,6 +69,8 @@ def resolve_machines(words: list[str], artifact: str = "", split: str = "",
                                   "itself, so it is not mixed with names "
                                   "or other roles")
         return fit_machines(artifact, split, draft, vision)
+    if set(low) == {"here"}:
+        return [], split, None      # this Mac alone: the empty list, no page
     st = page_client.page_get("/status.json")
     ms = _machines(st)
     me, peers = ms[0], ms[1:]
@@ -91,6 +95,8 @@ def resolve_machines(words: list[str], artifact: str = "", split: str = "",
     order = [m["id"] for m in ms]
     ids = sorted(dict.fromkeys(picked),
                  key=lambda i: order.index(i) if i in order else len(order))
+    if ids == [me["id"]]:
+        return [], split, None      # resolved to this Mac alone: load here
     return ids, (split or DEFAULT_SPLIT) if len(ids) >= 2 else split, None
 
 
