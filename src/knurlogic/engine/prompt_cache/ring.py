@@ -95,16 +95,21 @@ class JournalPromptCache:
 
 
 def apply_cache_op(op: dict, cache, model_key, last: dict,
-                   save_disk, disk_dir=None, disk_key=None) -> bool:
+                   save_disk, disk_dir=None, disk_key=None, *,
+                   store=None, link=None) -> bool:
     """A following rank's prompt-cache ops, applied to its own part as rank
     0 applied them to its: insert (with the owner), pop, drop and pin of a
-    session (memory and this rank's own files), and the saves. False for
-    an op that is not one of them. `last`: the last step's checkpoint and
-    finished caches by (event, uid); `save_disk(only_new, select)`: this
-    rank's save."""
+    session (memory and this rank's own files), the saves and their
+    commit. False for an op that is not one of them. `last`: the last
+    step's checkpoint and finished caches by (event, uid);
+    `save_disk(only_new, select)`: this rank's save; `disk_dir` /
+    `disk_key`: its per-split directory and key; `store`: its per-layer
+    store (engine/prompt_cache/layers), `link` the ring's (the commit's
+    vote)."""
     from pathlib import Path
 
     from knurlogic.engine.prompt_cache import disk as prompt_disk
+    from knurlogic.engine.prompt_cache import layers
     from knurlogic.engine.split.link import Desync
     kind = op["op"]
     if kind == "insert":
@@ -114,13 +119,9 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
                          f"the last step")
         # a keep-latest step replaces the session's earlier entries here
         # as on rank 0 (the side maps match): this rank's files go too
-        from pathlib import Path
         for f in cache.insert(model_key, got[0], got[1], op["kind"],
                               owner=op.get("owner")) or ():
-            try:
-                Path(f).unlink()
-            except OSError:
-                pass
+            layers.discard(f)
     elif kind == "pop":
         cache.lru.trim_to(n_sequences=len(cache.lru) - op["n"])
     elif kind == "drop":
@@ -143,9 +144,12 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
         # rank 0 read a parked or evicted entry back for the request it is
         # about to admit: this rank reads its own part, by the same name.
         # Missing, the ranks would prefill different lengths -- out of step
-        got = prompt_disk.read(disk_key, [disk_dir / op["name"]]) \
-            if disk_dir is not None and disk_key is not None \
-            and "/" not in op["name"] else []
+        if store is not None and layers.is_entry_name(op["name"]):
+            got = store.read([store.dir / op["name"]])
+        else:
+            got = prompt_disk.read(disk_key, [disk_dir / op["name"]]) \
+                if disk_dir is not None and disk_key is not None \
+                and "/" not in op["name"] else []
         if not got:
             raise Desync(f"read_back: no {op['name']} on this rank")
         prompt_disk.adopt(cache.owners, cache.pinned, prompt_disk.insert(
@@ -154,14 +158,19 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
         # rank 0's files of a drop, by name: an entry's files carry the same
         # name on every rank, so this rank's part goes too and no rank keeps
         # half an entry (a restore would refuse it on every rank)
-        if disk_dir is not None:
-            for name in op.get("names") or ():
-                if "/" in name or not name.endswith(prompt_disk.SUFFIX):
-                    continue
+        for name in op.get("names") or ():
+            if store is not None and layers.is_entry_name(name):
+                store.remove([name])
+            elif disk_dir is not None and "/" not in name and \
+                    name.endswith(prompt_disk.SUFFIX):
                 try:
                     (disk_dir / name).unlink()
                 except OSError:
                     pass
+    elif kind == "commit_entries":
+        # after this rank's save: the vote, then each whole entry's
+        # entry.json -- a collective, run whatever this rank holds
+        layers.commit(link, store, op["entries"])
     elif kind == "pin":
         cache.set_pinned(op["session"], op["pinned"])
         prompt_disk.set_pin(op["session"], op["pinned"])

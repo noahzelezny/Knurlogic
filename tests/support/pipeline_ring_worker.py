@@ -25,6 +25,11 @@
                                greedy. `engine`: through rank 0's
                                TensorExecutor and the follower's
                                follower.follow instead of a hand-driven loop
+    pcache <family> <save> <load> <root>
+                               the per-layer prompt cache over the ring:
+                               saved by one machine and split by `save`
+                               (the commit's vote over the link), restored
+                               split by `load` (the restore's vote)
     ends <split> <loop>        rows that end inside a drafting step, on the
                                serving path (TensorExecutor / follower.follow),
                                the tiny DeepSeek-V4 split (`split`: tensor or
@@ -137,6 +142,92 @@ def logits(link, out_path, family, counts):
     if link.rank == 0:
         json.dump({"whole": whole.tolist(), "split": split.tolist(),
                    "info": info}, open(out_path, "w"))
+
+
+def pcache(link, out_path, family, save, load, root):
+    """The per-layer prompt cache across a real ring: rank 0 saves the
+    prompt's cache as one machine (root/whole); both ranks save it split by
+    `save` and commit over the link (root/split); then both ranks, split by
+    `load`, restore each with the vote and run the next tokens from the
+    restored cache and from a fresh prefill. Rank 0 also reads the split
+    save as one machine."""
+    from pathlib import Path
+
+    import mlx.core as mx
+    from mlx_lm.models.cache import LRUPromptCache
+
+    from knurlogic.engine.prompt_cache import layers as LY
+    from knurlogic.engine.split import pipeline as PL
+    ids = [5, 17, 3, 99, 42, 7, 64, 11, 23, 8, 2, 41]
+    then = [31, 104, 331, 32]
+    if family == "deepseek_v4":
+        ids, then = [t % 64 for t in ids], [t % 64 for t in then]
+    key = LY.shard_key(f"/nonexistent/{family}")
+    root = Path(root)
+
+    def part(counts, rank):
+        b = PL.bounds_of(counts)
+        s, e = b[rank]
+        return LY.Part(s, e - s, max(x[1] for x in b), rank == 0, rank,
+                       len(b))
+
+    def prefill(model):
+        cache = model.make_cache()
+        y = model(mx.array([ids]), cache=cache)
+        mx.eval(y if isinstance(y, mx.array) else y.logits)
+        return cache
+
+    def cont(model, cache):
+        out = []
+        for t in then:
+            y = model(mx.array([[t]]), cache=cache)
+            out.append((y if isinstance(y, mx.array) else y.logits)[:, -1])
+        y = mx.concatenate(out).astype(mx.float32)
+        mx.eval(y)
+        return np.array(y)
+
+    def lru(cache):
+        c = LRUPromptCache(max_size=4)
+        c.insert_cache("m", list(ids), cache)
+        return c
+    whole_ref = None
+    if link.rank == 0:
+        w = build(family)
+        LY.Store(root / "whole", key, LY.Part(0, len(w.make_cache()),
+                                              len(w.make_cache()))).save(
+            lru(prefill(w)), sweep_after=False)
+        whole_ref = cont(w, prefill(w))
+    link.barrier()
+    # saved split by `save`: each rank its layers, then the commit's vote
+    m = build(family)
+    PL.split(m, link.group, PL.bounds_of(save))
+    st = LY.Store(root / "split", key, part(save, link.rank))
+    got = st.save(lru(prefill(m)), commit=False, sweep_after=False)
+    # rank 0's records go to every rank in the commit op; here every rank
+    # made the same ones but for the time
+    entries = [dict(e, saved_at=0.0) for e in got["pending"]]
+    committed = LY.commit(link, st, entries)
+    link.barrier()
+    # restored split by `load`
+    m2 = build(family)
+    PL.split(m2, link.group, PL.bounds_of(load))
+    out = {"committed": committed}
+    for name in ("split", "whole"):
+        st2 = LY.Store(root / name, key, part(load, link.rank))
+        back = LY.restore(4, st2, link=link)
+        out[name + "_n"] = len(back)
+        out[name] = cont(m2, back[0][2]).tolist()
+    out["fresh"] = cont(m2, prefill(m2)).tolist()
+    link.barrier()
+    if link.rank == 0:
+        # the split save, read by one machine
+        w = build(family)
+        n = len(w.make_cache())
+        (got1,) = LY.Store(root / "split", key, LY.Part(0, n, n)).read(
+            LY.Store(root / "split", key, LY.Part(0, n, n)).candidates(4))
+        out["one"] = cont(w, got1[2]).tolist()
+        out["one_ref"] = whole_ref.tolist()
+        json.dump(out, open(out_path, "w"))
 
 
 def _tiny_with_head(vocab, family="qwen3_5"):
@@ -1274,6 +1365,9 @@ def main(argv):
         dspark(link, out_path, *argv[2:])
     elif mode == "ends":
         ends(link, out_path, *argv[2:])
+    elif mode == "pcache":
+        pcache(link, out_path, argv[2], [int(x) for x in argv[3].split(",")],
+               [int(x) for x in argv[4].split(",")], argv[5])
     elif mode == "logits":
         logits(link, out_path, argv[2], [int(x) for x in argv[3].split(",")])
     else:

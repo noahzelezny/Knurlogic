@@ -76,10 +76,25 @@ resumes.
 
 ### Where the files are
 
-`~/.cache/knurlogic/prompt-cache/`, one folder per model. They can be
-deleted at any time; the worst case is a slower next request. (A visible
-folder next to your models is coming: see
-[the design](../design/prompt-cache-shards.md).)
+In a folder named `Prompt cache` next to your models: the folder that
+holds the model's own folder (for a Hugging Face download, the `hub`
+folder). Inside, one folder per model and one folder per saved prompt,
+with a file per layer. A `README.txt` there says the same as this: the
+files can be deleted at any time; the worst case is a slower next
+request.
+
+If that folder cannot be written (a read-only drive, for example), the
+cache goes to `~/.cache/knurlogic/prompt-cache/` instead. The server log
+says which one is used, and `GET /v1/prompt-cache` lists each entry's
+`location`.
+
+A saved prompt does not depend on how a model is split across Macs: a
+session saved on one Mac is found again when the same model runs split
+over two (pipeline), and the other way round, or with the layers cut
+differently. On a shared drive both Macs use the same folder. A model
+split by tensor still saves per split. Entries saved by 0.1.5 are still
+read back for the split they were saved under; new saves use the new
+layout.
 
 ### Limits
 

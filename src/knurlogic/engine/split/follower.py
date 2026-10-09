@@ -125,7 +125,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     encodes; the admit op carries each image's ref and the admission its
     rows), else None. `disk`: (key, entries read and agreed at load) of the
     prompt cache on disk (engine/prompt_cache/disk): inserted first, as
-    rank 0 inserts its own; saved again at `save_cache` (a client's ask)."""
+    rank 0 inserts its own; saved again at `save_cache` (a client's ask);
+    a third item, when given, is this rank's per-layer store."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.prompt_cache.memory import PromptCache
     from knurlogic.engine.runtime.request import control_machine
@@ -134,7 +135,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     _defer_sigterm(link.rank)
     cache = PromptCache(prompt_cache_size)
     from knurlogic.engine.prompt_cache import disk as prompt_disk
-    disk_key, restored = disk if disk is not None else (None, [])
+    disk_key, restored, store = (list(disk) + [None])[:3] \
+        if disk is not None else (None, [], None)
     if restored:
         prompt_disk.adopt(cache.owners, cache.pinned, prompt_disk.insert(
             cache.lru, model_key, restored), shared=cache.shared)
@@ -146,6 +148,12 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
             cache.live()                    # prunes the side map
             # no sweep of its own: rank 0's saves sweep and name what they
             # delete (a drop_files op), so every rank keeps the same files
+            if store is not None:
+                # its layers only; entry.json waits for the commit op
+                store.save(cache.lru, owners=cache.owners,
+                           shared=cache.shared, only_new=only_new,
+                           select=select, commit=False, sweep_after=False)
+                return
             prompt_disk.save(cache.lru, disk_key, owners=cache.owners,
                              shared=cache.shared,
                              only_new=only_new, select=select,
@@ -230,7 +238,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
             elif apply_cache_op(op, cache, model_key, last, save_disk,
                                 prompt_disk.root() / prompt_disk.key_id(
                                     disk_key) if disk_key else None,
-                                disk_key):
+                                disk_key, store=store, link=link):
                 pass
             elif kind == "set":
                 apply_set(op, link.rank)
@@ -333,11 +341,13 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                      head_agree=heads, kv_bits=kv_bits,
                      cross_chip=cross_chip)
     host.cache_layout = layout
-    disk: list = [None, []]
+    disk: list = [None, [], None]
 
     def restore_disk():
-        # the same point as rank 0's Scheduler._restore_disk: a collective
+        # the same point as rank 0's Scheduler._restore_disk: collectives
+        # in the same order (the per-split vote, then the per-layer one)
         from knurlogic.engine.prompt_cache import disk as prompt_disk
+        from knurlogic.engine.prompt_cache import layers
         try:
             key = prompt_disk.host_key(host)
             got = prompt_disk.read(key, prompt_disk.candidates(
@@ -349,7 +359,15 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
             key, got = None, []
         if not prompt_disk.agree(link, [g[0] for g in got]):
             got = []
-        disk[:] = [key, got]
+        store = None
+        try:
+            store = layers.Store.for_host(host)
+        except Exception:  # no store is a miss (logged)
+            logger.exception("rank %d: no per-layer prompt cache store",
+                             link.rank)
+        if layers.uses_layers(host):
+            got = got + layers.restore(prompt_cache_size, store, link=link)
+        disk[:] = [key, got, store]
     host.after_bind = restore_disk
     host.load(path)
     if host.state != "ready":

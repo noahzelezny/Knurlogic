@@ -1,7 +1,14 @@
 """The prompt cache on disk: saved when a client asks (never on its own),
 restored when the same model loads again (docs/design/prompt-cache-disk.md).
 
-Layout: ~/.cache/knurlogic/prompt-cache/<key id>/ (XDG_CACHE_HOME
+Two formats. New saves of a whole model or a pipeline split go to
+layers.py's (one file per layer, any split reads it, beside the models:
+location.py). This module keeps the per-split format below -- still
+written by a tensor split, still read under its exact key -- and the
+parts both share: the object encoding, the settings, the sweep (both
+formats, per root), pins, drops and the registry's disk side.
+
+Per-split layout: ~/.cache/knurlogic/prompt-cache/<key id>/ (XDG_CACHE_HOME
 honoured), one safetensors file per prompt-cache entry, named
 `<gen>-<seq>-<tokens hash>.safetensors`: `gen` is the save it belongs to
 (1 + the newest in the directory), `seq` its place in the in-memory LRU at
@@ -86,9 +93,18 @@ class Unserializable(ValueError):
 # ------------------------------------------------------------- settings
 
 def root() -> Path:
-    base = Path(os.environ.get("XDG_CACHE_HOME",
-                               Path.home() / ".cache"))
-    return base / "knurlogic" / "prompt-cache"
+    """The per-split format's root, and the fallback for the per-layer
+    one (location.fallback)."""
+    from . import location
+    return location.fallback()
+
+
+def _roots(base: Path | None) -> list:
+    """`base`, or every root this machine's cache has used."""
+    if base is not None:
+        return [Path(base)]
+    from . import location
+    return location.known()
 
 
 def _env() -> dict:
@@ -133,7 +149,7 @@ def budget_bytes(base: Path | None = None) -> int:
         except ValueError:
             pass
     base = base or root()
-    held = sum(s for _, s, _ in _all_files(base))
+    held = sum(s for _, s, _ in _units(base))
     probe = base
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent
@@ -170,19 +186,23 @@ def key_id(key: dict) -> str:
                           ).hexdigest()[:16]
 
 
-def host_key(host) -> dict | None:
-    """The key for what `host` (engine/runtime/model_host.ModelHost) has loaded
-    now, or None when nothing is."""
-    if getattr(host, "model", None) is None or not getattr(host, "path", None):
-        return None
+def draft_of() -> dict | None:
+    """The drafting head bound now ({head: class, block}), or None."""
     from knurlogic.engine.mtp import binding
-    draft = None
     if binding.DRAFT.get("on") and binding.DRAFT.get("head") is not None:
         h = binding.DRAFT["head"]
-        draft = {"head": type(h).__module__ + ":" + type(h).__qualname__,
-                 "block": int(getattr(h, "block_size", 0) or 0)}
+        return {"head": type(h).__module__ + ":" + type(h).__qualname__,
+                "block": int(getattr(h, "block_size", 0) or 0)}
+    return None
+
+
+def host_key(host) -> dict | None:
+    """The per-split key for what `host` (engine/runtime/model_host.ModelHost)
+    has loaded now, or None when nothing is."""
+    if getattr(host, "model", None) is None or not getattr(host, "path", None):
+        return None
     return identity(host.path, kv_bits=getattr(host, "kv_bits", None),
-                    draft=draft, layout=getattr(host, "cache_layout", None),
+                    draft=draft_of(), layout=getattr(host, "cache_layout", None),
                     long_context=os.environ.get("KNURLOGIC_LONG_CONTEXT"),
                     cross_chip=getattr(host, "cross_chip", None))
 
@@ -422,6 +442,34 @@ def _all_files(base: Path):
     return out
 
 
+def _units(base: Path):
+    """(path, size, mtime) of every entry under `base`, both formats: a
+    per-split file, or a per-layer entry directory (layers.py)."""
+    from . import layers
+    return _all_files(base) + layers.units(base)
+
+
+def _session_of(p: Path):
+    """The session owning an entry (file or directory), or None."""
+    if p.is_dir():
+        from . import layers
+        m = layers.entry_meta(p) or {}
+    else:
+        m = _header(p) or {}
+    return (m.get("owner") or {}).get("session")
+
+
+def _remove(p: Path) -> bool:
+    from . import layers
+    if p.is_dir():
+        return layers.remove_dir(p)
+    try:
+        p.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def entries(d: Path) -> list:
     """(gen, seq, hash, path) of a key directory's entries, oldest save
     first."""
@@ -439,22 +487,30 @@ def entries(d: Path) -> list:
 # ----------------------------------------------------------------- pins
 
 def pins(base: Path | None = None) -> dict:
-    """{session: pinned} from the root's pins.json ({} when none)."""
-    try:
-        got = json.loads(((base or root()) / PINS).read_text())
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(got, dict):
-        return {}
-    return {str(k): bool(v) for k, v in got.items()}
+    """{session: pinned} from a root's pins.json ({} when none); with no
+    `base`, every root's (a pin anywhere counts)."""
+    out: dict = {}
+    for b in _roots(base):
+        try:
+            got = json.loads((b / PINS).read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(got, dict):
+            for k, v in got.items():
+                out[str(k)] = out.get(str(k), False) or bool(v)
+    return out
 
 
 def set_pin(session: str, pinned: bool | None,
             base: Path | None = None) -> None:
     """Pin or unpin a session's files (None: forget it, as a drop does).
     Written atomically; one small file for every key directory, so a pin
-    never rewrites an entry file."""
-    base = base or root()
+    never rewrites an entry file. With no `base`: every root this
+    machine's cache uses (each root's sweep reads its own)."""
+    if base is None:
+        for b in _roots(None):
+            set_pin(session, pinned, b)
+        return
     p = pins(base)
     if pinned is None:
         if session not in p:
@@ -476,12 +532,7 @@ def _pinned_files(files, base: Path) -> set:
     on = {s for s, v in pins(base).items() if v}
     if not on:
         return set()
-    out = set()
-    for f, _, _ in files:
-        o = (_header(f) or {}).get("owner") or {}
-        if o.get("session") in on:
-            out.add(f)
-    return out
+    return {f for f, _, _ in files if _session_of(f) in on}
 
 
 def sweep(base: Path | None = None, now: float | None = None,
@@ -495,20 +546,17 @@ def sweep(base: Path | None = None, now: float | None = None,
     base = base or root()
     now = time.time() if now is None else now
     ttl, gone_ttl, gone_lru = ttl_s(), 0, 0
-    files = _all_files(base)
+    files = _units(base)
     held = _pinned_files(files, base)
     keep = []
     for f, size, mt in files:
         if f in held:
             continue
         if now - mt > ttl:
-            try:
-                f.unlink()
+            if _remove(f):
                 gone_ttl += 1
                 if removed is not None:
                     removed.append(f)
-            except OSError:
-                pass
         else:
             keep.append((f, size, mt))
     cap = budget_bytes(base)
@@ -516,14 +564,13 @@ def sweep(base: Path | None = None, now: float | None = None,
     for f, size, _ in sorted(keep, key=lambda x: x[2]):
         if total <= cap:
             break
-        try:
-            f.unlink()
+        if _remove(f):
             total -= size
             gone_lru += 1
             if removed is not None:
                 removed.append(f)
-        except OSError:
-            pass
+    from . import layers
+    layers.clean(base, now, _TMP_STALE_S)
     try:
         for d in base.iterdir():
             if not d.is_dir():
@@ -535,7 +582,8 @@ def sweep(base: Path | None = None, now: float | None = None,
                             f.unlink()
                     except OSError:
                         pass
-            if not any(f.name.endswith(SUFFIX) for f in d.iterdir()):
+            if not any(f.name.endswith(SUFFIX) for f in d.iterdir()) \
+                    and not layers.has_entries(d):
                 shutil.rmtree(d, ignore_errors=True)
     except OSError:
         pass
@@ -544,19 +592,15 @@ def sweep(base: Path | None = None, now: float | None = None,
 
 
 def drop_files(session: str, base: Path | None = None) -> int:
-    """Delete every file of `session`, in every model's key directory, and
-    forget its pin. Returns how many went."""
-    base = base or root()
+    """Delete every entry of `session` (both formats), in every model's key
+    directory -- under `base`, or every root this machine's cache uses --
+    and forget its pin. Returns how many went."""
     n = 0
-    for f, _, _ in _all_files(base):
-        o = (_header(f) or {}).get("owner") or {}
-        if o.get("session") == session:
-            try:
-                f.unlink()
+    for b in _roots(base):
+        for f, _, _ in _units(b):
+            if _session_of(f) == session and _remove(f):
                 n += 1
-            except OSError:
-                pass
-    set_pin(session, None, base)
+        set_pin(session, None, b)
     return n
 
 
@@ -584,25 +628,36 @@ def drop_sessionless_files(d: Path, older_than_s=None,
 
 
 def list_disk(base: Path | None = None) -> list:
-    """Every entry file's registry row, from its header alone: {key_id,
-    model, hash, session, role, run, tokens, bytes, saved_at, pinned,
-    file}. `pinned` is pins.json's word, else the header's."""
-    base = base or root()
-    p = pins(base)
+    """Every entry's registry row, from its header or entry.json alone:
+    {key_id, model, hash, session, role, run, tokens, bytes, saved_at,
+    pinned, file, location}, under `base` or every root this machine's
+    cache uses. `pinned` is pins.json's word, else the entry's own;
+    `location` the root it is in."""
+    from . import layers
     out = []
-    for f, size, _ in _all_files(base):
-        m = _header(f)
-        if m is None:
-            continue
-        o = m.get("owner") or {}
-        s = o.get("session")
-        out.append({"key_id": m.get("key_id"), "model": m.get("model"),
-                    "hash": m.get("tokens_hash"), "session": s,
-                    "role": o.get("role"), "run": o.get("run"),
-                    "tokens": m.get("n_tokens"), "bytes": size,
-                    "saved_at": m.get("saved_at"),
-                    "pinned": p.get(s, bool(m.get("pinned"))) if s else False,
-                    "file": str(f)})
+    for b in _roots(base):
+        p = pins(b)
+        for f, size, _ in _all_files(b):
+            m = _header(f)
+            if m is None:
+                continue
+            o = m.get("owner") or {}
+            s = o.get("session")
+            out.append({"key_id": m.get("key_id"), "model": m.get("model"),
+                        "hash": m.get("tokens_hash"), "session": s,
+                        "role": o.get("role"), "run": o.get("run"),
+                        "tokens": m.get("n_tokens"), "bytes": size,
+                        "saved_at": m.get("saved_at"),
+                        "pinned": p.get(s, bool(m.get("pinned"))) if s
+                        else False,
+                        "file": str(f), "location": str(b)})
+        for d, size, _ in layers.units(b):
+            r = layers.row(d, size, b)
+            if r is None:
+                continue
+            s = r["session"]
+            r["pinned"] = p.get(s, r["pinned"]) if s else False
+            out.append(r)
     return out
 
 

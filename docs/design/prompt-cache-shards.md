@@ -1,9 +1,12 @@
 # The shard-agnostic prompt cache
 
-Status: designed, not built (design decided 2026-10-08). Today's format is
-in prompt-cache-disk.md; this replaces its key and its location. Everything
-a client sees (save / park / drop / pin / keep-latest / registry / diverged)
-stays as it is.
+Status: phase 1 built (0.1.6): whole models and pipeline splits, a shared
+folder beside the models, the local fallback. Phases 2 (fetch a missing
+piece from a peer) and 3 (tensor, per head range) are not built; a tensor
+split still saves in prompt-cache-disk.md's per-split format. What phase 1
+changed against this design is under "As built". Everything a client sees
+(save / park / drop / pin / keep-latest / registry / diverged) stays as it
+is; registry rows gain a `location`.
 
 ## Why
 
@@ -135,6 +138,92 @@ re-split differently, reload, and the session hits.
 - **Keep the hidden cache directory**: rejected for the default, kept as
   the fallback when the models folder is not writable.
 
+## As built (phase 1)
+
+**Layout.** `<root>/<key id>/<tokens hash>/` holds `entry.json` and one
+`L{i:03d}.safetensors` per cache slot, plus `draft.safetensors` when the
+entry carries a drafting head's cache. A file is indexed by the slot of
+the model's `make_cache()` list, which on every pipeline-capable family is
+the layer index. A stage whose cache list is not one slot per layer falls
+back to the per-split format (logged). `entry.json` holds the tokens,
+owner, pinned, saved_at, shared, model, kind, the key, `layers` (every
+slot index of the whole model), `draft` (whether the entry has a head
+cache) and `gen` / `seq` (the save and the LRU place, the restore order).
+
+**The key** (`layers.shard_key`): the artifact's identity, the KV bits,
+long-context rope, per-chip rounding and `CACHE_FORMAT` (2). Not
+knurlogic's version, and not the layout. **The drafting head is not in
+the key either** (a change from the design): only `draft.safetensors`
+depends on it, and only rank 0 knows which head is bound, so a key with
+the head in it would differ between rank 0 and a follower. Instead the
+draft file's header names the head ({class, block}); a reader running
+another head, or none, restores the entry's layers without it (a
+drafting row then re-prefills; a plain row hits).
+
+**Who writes what.** A single machine writes every file and `entry.json`
+at once. On a pipeline each rank writes the layer files of the layers it
+holds (`Part`: its slots, from the layout's bounds); rank 0 holds the
+drafting head, so it alone owns the non-layer state (`draft.safetensors`).
+`entry.json` is written by the commit:
+
+1. rank 0's save writes its files and queues a record of each entry;
+2. the scheduler journals `save_cache` (or `park_session`), then
+   `commit_entries` with those records;
+3. each follower applies the save op (its layers), then the commit op:
+   it says, per entry, whether it holds every file of its part, in one
+   all_gather after `Link.align`;
+4. rank 0 runs the same collective right after the exchange that shipped
+   the op (`Ring.after_ops`), before its next step;
+5. every rank writes `entry.json` for each entry every rank holds. The
+   records come from rank 0 and the tokens from each rank's own save, so
+   the bytes are identical: on a shared folder the second write replaces
+   the first with the same file; on separate folders each gets its copy.
+
+An entry some rank did not write never gets `entry.json` on any rank; its
+layer files are removed by the sweep once stale (an hour).
+
+**Restore and the vote.** At load the per-split restore runs first (its
+own all-or-none vote, unchanged), then this format's: each rank lists
+the complete entries of the key it can read whole (every layer file of
+its part, and `layers` matching the model), reads the newest (the
+in-memory cache's count; the byte cap on a single machine only), and
+votes: one all_gather of a fixed-width row (the count and two 28-bit
+ints of each entry's name, the newest 256). Each rank keeps the entries
+every rank read, in rank 0's order. A rank that lacks a file of an entry
+leaves it out on every rank: a miss, not an error. Read-back (a parked
+session's longer prefix) reads one entry the same way: rank 0 reads its
+part and journals `read_back` with the entry's name; each follower reads
+its part from its own folder. Rank 0 does not read back an entry whose
+commit has not run yet.
+
+**Location** (`location.py`). `<models folder>/Prompt cache/`, where the
+models folder holds the artifact's directory (for a Hugging Face cache
+path, the folder holding `models--org--name`), made with a README.txt.
+Not writable: the fallback, `~/.cache/knurlogic/prompt-cache/`
+(XDG_CACHE_HOME honoured). Each root used is recorded in the fallback's
+`locations.json`, so a drop, a pin and the registry reach every root.
+The log line at first use says which root and why; registry rows carry
+`location`; a save's result and the in-memory listing too.
+
+**Sweep, pins, drops per root.** The sweep (TTL, then budget, pinned
+sessions exempt) covers both formats in a root; an entry directory's age
+is its `entry.json`'s mtime (touched at save and restore) and its size
+its files'. `pins.json` is per root; a pin or unpin is written to every
+known root, and a read merges them. On a ring only rank 0 sweeps, after
+its saves, and journals the entry names it deleted (`drop_files`); the
+followers delete those names from their own folders. A drop by session
+removes both formats' entries in every root (`entry.json` first).
+
+**Migration.** Per-split entries are read under their exact old key, by
+the old code. New saves write only the per-layer format (a tensor split
+excepted). No converter.
+
+**Left for later phases.** Phase 2: a rank lacking a piece fetches it
+from the peer page (the seam: `Store.holds` / `read_part` read local
+files only; a fetcher slots in there). Phase 3: tensor splits, per head
+range (the seam: `part_of` returns None for a tensor layout, and those
+splits keep the per-split format); file names would gain `.h{a}-{b}`.
+
 ## Code
 
 All prompt-cache code lives in `engine/prompt_cache/`:
@@ -146,8 +235,9 @@ All prompt-cache code lives in `engine/prompt_cache/`:
 | `commands.py` | the scheduler's cache commands (save, park, drop, pin, list, read-back) |
 | `ring.py` | a split model's journaled cache ops and follower apply |
 | `report.py` | what a request's usage says about the cache |
+| `layers.py` | the per-layer format: Part, key, write / read / complete check, save, commit and restore votes (built) |
+| `location.py` | where the cache root is (built) |
 
 The HTTP endpoints are in `interfaces/http/prompt_cache.py`; the page
 forwards them to the machine that runs the model (`interfaces/page/prompt_cache.py`).
-The new format adds `layers.py` (per-layer, per-head pieces) and
-`transfer.py` (option 2).
+Phase 2 would add `transfer.py`.

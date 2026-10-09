@@ -27,7 +27,7 @@ OVER, STEP, LENGTH, ACTIVE, PEAK = range(CONTROL_LEN)
 
 OPS = ("admit", "remove", "chunk", "insert", "pop", "reset", "stop", "park",
        "set", "save_cache", "drop", "pin", "drop_sessionless", "drop_files",
-       "park_session", "read_back")
+       "park_session", "read_back", "commit_entries")
 #: admit's `chunk` is the prefill chunk rank 0 fitted the row at (memory:
 #: memory_guard._make_room); `chunk` (uid, chunk) refits a row not yet
 #: prefilled (memory_guard._fit_next). Ranks prefilling one row in different
@@ -54,6 +54,10 @@ _FIELDS = {
     # by file name before the admit that hits it
     "park_session": ("session",),
     "read_back": ("name",),
+    # the per-layer entries rank 0 just saved (after the save ops): every
+    # rank votes on holding its part, then writes each whole one's
+    # entry.json (engine/prompt_cache/layers.commit)
+    "commit_entries": ("entries",),
 }
 #: fields an op may carry besides its own: insert's owner (the session that
 #: made the entry, engine/prompt_cache/ring.JournalPromptCache), a session's
@@ -127,6 +131,14 @@ def check(plan) -> None:
                 isinstance(op["names"], list)
                 and all(isinstance(n, str) for n in op["names"])):
             raise PlanError("drop_files names is a list of strings")
+        if op["op"] == "commit_entries" and not (
+                isinstance(op["entries"], list)
+                and all(isinstance(e, dict)
+                        and isinstance(e.get("tokens_hash"), str)
+                        and "/" not in e["tokens_hash"]
+                        for e in op["entries"])):
+            raise PlanError("commit_entries entries is a list of entry "
+                            "records with a tokens_hash")
         if op["op"] == "pop" and (not isinstance(op["n"], int) or op["n"] < 1):
             raise PlanError(f"pop n must be a positive int, got {op['n']!r}")
         if op["op"] == "set" and (op["name"] not in SETS

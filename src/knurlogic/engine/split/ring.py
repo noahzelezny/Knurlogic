@@ -65,6 +65,14 @@ class Ring:
         self.peer_over: int | None = None
         self.local_then = 0
         self.mismatches = 0
+        #: called with the ops an exchange just shipped, before anything
+        #: else: rank 0's side of a collective an op runs on every rank
+        #: (the prompt cache's commit, engine/prompt_cache/commands)
+        self.after_ops: Callable[[list], None] | None = None
+
+    def _shipped(self, ops) -> None:
+        if ops and self.after_ops is not None:
+            self.after_ops(ops)
 
     @property
     def world(self) -> int:
@@ -76,6 +84,7 @@ class Ring:
         self.peer_over = max(r[P.OVER] for r in rows[1:])
         self.local_then = int(mx.get_active_memory())
         publish_ranks(rows)
+        self._shipped(plan.get("ops"))
 
     def peers_over_now(self) -> int | None:
         """The peers' over-limit as of the last exchange. Under tensor the
@@ -95,6 +104,7 @@ class Ring:
     def stop(self) -> None:
         ops = self.journal.take() + [{"op": "stop"}]
         self.link.exchange(0, P.encode({"ops": ops}))
+        self._shipped(ops)
         self.stopped = True
 
     def park(self) -> None:
@@ -110,6 +120,7 @@ class Ring:
             return
         ops = self.journal.take() + [{"op": "park"}]
         self.link.exchange(0, P.encode({"ops": ops}))
+        self._shipped(ops)
         self.link.parked = True
 
 
@@ -196,5 +207,6 @@ class TensorExecutor(LocalExecutor):
         try:
             ops = self.ring.journal.take() + [{"op": "reset"}]
             self.ring.link.exchange(0, P.encode({"ops": ops}))
+            self.ring._shipped(ops)
         finally:
             super().close()

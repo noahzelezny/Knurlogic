@@ -1,6 +1,12 @@
 # The prompt cache on disk
 
-Status: built.
+Status: built. Since 0.1.6 a whole model and a pipeline split save in the
+per-layer format of prompt-cache-shards.md (beside the models, any split
+reads it); this page's per-split format is still written by a tensor
+split and still read, under its exact key, for entries earlier builds
+saved. Everything below about sessions, pins, budget, TTL, park, drop and
+read-back holds for both formats; "Where and how", "The key" and
+"Clusters" describe the per-split format.
 
 ## Problem
 
@@ -205,5 +211,7 @@ whole prefix.
 - 2026-10-07: disk save and restore built, saving at unload and stop.
 - 2026-10-08: automatic saves at unload, model switch and stop removed;
   saves happen only on an explicit client request (save / park).
-- Successor format (layout-independent key, per-layer files):
-  prompt-cache-shards.md.
+- 0.1.6: successor format (layout-independent key, per-layer files,
+  beside the models) built for whole models and pipeline splits:
+  prompt-cache-shards.md. The sweep, pins (one pins.json per root), drops
+  and the registry cover both formats and every root.

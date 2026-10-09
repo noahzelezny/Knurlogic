@@ -269,6 +269,31 @@ def test_a_pipeline_over_an_8_bit_kv_cache_is_the_whole_model(
     assert (whole.argmax(-1) == split.argmax(-1)).all()
 
 
+@pytest.mark.parametrize("family,save,load", [("qwen3_5_moe", "1,3", "3,1"),
+                                              ("glm5_next", "3,1", "2,2")])
+def test_a_prompt_cache_saved_under_one_cut_restores_under_another(
+        tmp_path, family, save, load):
+    """Two processes, the real link: the ranks save their layers split by
+    `save` and commit over the link; split by `load` they restore it (and
+    one machine's save) with the vote, and the next tokens' logits from
+    the restored cache are a fresh prefill's under that cut. One machine
+    reads the split save and continues as its own prefill would."""
+    import numpy as np
+    d = _ring(tmp_path, "pcache", family, save, load, str(tmp_path / "pc"))
+    assert len(d["committed"]) == 1
+    assert d["split_n"] == d["whole_n"] == 1
+    fresh = np.array(d["fresh"])
+    for got in (d["split"], d["whole"]):
+        assert np.abs(np.array(got) - fresh).max() < 1e-4
+    assert np.abs(np.array(d["one"]) - np.array(d["one_ref"])).max() < 1e-4
+    entry = tmp_path / "pc" / "split"
+    (kd,) = [p for p in entry.iterdir() if p.is_dir()]
+    (ed,) = [p for p in kd.iterdir() if p.is_dir()]
+    assert sorted(f.name for f in ed.iterdir()) == [
+        "L000.safetensors", "L001.safetensors", "L002.safetensors",
+        "L003.safetensors", "entry.json"]
+
+
 @pytest.mark.parametrize("always", [False, True])
 def test_mtp_drafting_on_a_pipeline_is_the_unsplit_engine(tmp_path, always):
     """The tiny qwen3_5 with a random head (rejected almost every step:

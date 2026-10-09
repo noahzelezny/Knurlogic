@@ -12,7 +12,9 @@ Everything is in one package, `src/knurlogic/engine/prompt_cache/`:
 | file | what |
 |---|---|
 | `memory.py` | `PromptCache`: mlx-lm's LRU trie plus who owns each entry (`owners`), pins, shared checkpoints, keep-latest |
-| `disk.py` | the file format, the key (`identity`), save, restore, the sweep (TTL and budget), pins.json, the registry's disk side, the vote across ranks (`agree`) |
+| `layers.py` | the per-layer format (whole models and pipeline splits): `Part` (which slots a rank holds), `shard_key`, `Store` (write / read / complete check, save, index), `commit` (the ring's entry.json vote), `restore` and `agree` (the load's vote) |
+| `location.py` | where the cache root is: `<models folder>/Prompt cache/`, else the fallback; `locations.json` remembers every root |
+| `disk.py` | the per-split format (a tensor split's, and entries earlier builds wrote), the object encoding both formats use, the settings, the sweep (TTL and budget, both formats, per root), pins.json, drops, the registry's disk side, the per-split vote (`agree`) |
 | `commands.py` | `PromptCacheCommands`, a mixin of the `Scheduler`: save, park, drop, pin, list, read-back, divergence, restore at load |
 | `ring.py` | a split model: `JournalPromptCache` journals every cache change, `apply_cache_op` replays it on the other ranks |
 | `report.py` | `usage.knurlogic.cache` for one request |
@@ -49,6 +51,15 @@ tensor code or HTTP server only by a call into it.
      (a test lists the ones it must have).
   Op names are global across the journal: `park` is already the ring's
   idle op.
+- **An entry is whole or absent.** In the per-layer format each rank
+  writes the layer files it holds; `entry.json` is written last, by the
+  `commit_entries` op the scheduler journals after the save ops
+  (`_journal_save`, `_cmd_park`): every rank votes on holding its part,
+  and only entries every rank holds get `entry.json`. Rank 0's side of
+  that collective runs from `Ring.after_ops`, right after the exchange
+  that shipped the op. Anything that reads an entry checks `entry.json`
+  and every file it needs (`Store.holds`); a miss on one rank is a miss
+  on all (the votes).
 - **Only rank 0 deletes files on a ring**, and it journals the names
   (`drop_files`), so no rank reads an entry another has half-deleted.
   Followers save with `sweep_after=False` and read with `sweep_first=False`.
@@ -73,6 +84,10 @@ checklist: [new-model.md](../design/new-model.md), "Cache saving".
 
 `tests/engine/test_prompt_cache_sessions.py` (ownership, keep-latest,
 park, the journal), `test_prompt_disk.py` (format, sweep, restore),
+`test_prompt_cache_layers.py` (save under one split, restore under
+another; incomplete entries; location; sweep and pins on entry
+directories; a follower's ops), `test_pipeline.py`'s two-process
+`test_a_prompt_cache_saved_under_one_cut_restores_under_another`,
 `tests/interfaces/test_prompt_cache_http.py` and
 `test_prompt_cache_page.py` (endpoints and forwarding). Run all:
 `pytest -q -n 8 tests`.

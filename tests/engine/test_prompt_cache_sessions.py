@@ -571,10 +571,12 @@ def test_every_journaled_cache_op_passes_the_plan_check():
     import re
     from pathlib import Path
 
+    from knurlogic.engine.prompt_cache import commands as CM
     from knurlogic.engine.runtime import scheduler as SC
     from knurlogic.engine.split import plan as P
     from knurlogic.engine.split import ring as split_ring
-    src = Path(SC.__file__).read_text() + Path(split_ring.__file__).read_text()
+    src = Path(SC.__file__).read_text() + Path(split_ring.__file__).read_text() \
+        + Path(CM.__file__).read_text()
     added = set(re.findall(r'journal\.add\(\s*"(\w+)"', src))
     assert added and not added - set(P.OPS), added - set(P.OPS)
     ops = [{"op": "insert", "uid": 1, "event": "finished", "kind": "assistant",

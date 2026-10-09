@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.6 (unreleased)
+
+### Prompt cache
+
+* Saved prompts no longer depend on how a model is split
+  (docs/design/prompt-cache-shards.md, phase 1). An entry is a folder with
+  one file per layer and an `entry.json` written last; any split reads the
+  layers it holds, so a session saved on one Mac restores when the model
+  runs as a pipeline over two, and the other way round, or with the layers
+  cut differently. The key keeps what changes the numbers (artifact
+  identity, KV bits, long-context rope, per-chip rounding, a cache format
+  version) and drops the layout and knurlogic's version. On a pipeline each
+  rank writes its own layers and rank 0 the drafting head's cache;
+  `entry.json` appears only once every rank has written its part (a vote
+  over the ranks' link), and a load restores only entries every rank can
+  read whole.
+* The cache now lives beside the models, in a visible `Prompt cache`
+  folder with a README.txt (regenerable, safe to delete); on a shared drive
+  every Mac uses the same folder. When that folder cannot be written, it
+  falls back to `~/.cache/knurlogic/prompt-cache/`. The log says which;
+  `GET /v1/prompt-cache` rows carry a `location`.
+* Entries saved by 0.1.5 are still read under their own split; new saves
+  use the new layout only. A tensor split still saves per split.
+
 ## 0.1.5
 
 Prompt cache management, a reorganized library with user and builder

@@ -98,20 +98,29 @@ class PromptCacheCommands:
             return None
         from knurlogic.engine.prompt_cache import disk as prompt_disk
         try:
-            key = prompt_disk.host_key(self.host)
-            if key is None:
+            store = self._store
+            key = prompt_disk.host_key(self.host) if store is None else None
+            if store is None and key is None:
                 return None
             self.cache.live()               # prunes the side map
             removed: list = []
-            got = prompt_disk.save(
-                self.cache.lru, key, owners=self.cache.owners,
-                shared=self.cache.shared,
+            common = dict(
+                owners=self.cache.owners, shared=self.cache.shared,
                 only_new=only_new, select=select,
                 prefill_tps=self._prefill_tps if self.tensor is None
                 else None,
                 model=Path(self.host.path or "").name or None,
                 removed=removed)
-            mine = prompt_disk.root() / prompt_disk.key_id(key)
+            if store is not None:
+                # per layer: on a ring each entry.json waits for every
+                # rank's part (the commit op, _journal_commit)
+                got = store.save(self.cache.lru,
+                                 commit=self.tensor is None, **common)
+                store.outbox += got.pop("pending", [])
+                mine = store.dir
+            else:
+                got = prompt_disk.save(self.cache.lru, key, **common)
+                mine = prompt_disk.root() / prompt_disk.key_id(key)
             gone = sorted(f.name for f in removed if f.parent == mine)
             for t in [t for t, v in self._disk_index.items()
                       if Path(v.get("file", "")).name in gone]:
@@ -130,14 +139,40 @@ class PromptCacheCommands:
             logger.exception("saving the prompt cache to disk failed")
             return None
 
+    def _journal_save(self, session: str | None) -> None:
+        """A ring: every rank saves its part (save_cache), then the entries
+        rank 0 saved are committed (_journal_commit)."""
+        self.tensor.journal.add("save_cache", **({"session": session}
+                                                 if session else {}))
+        self._journal_commit()
+
+    def _journal_commit(self) -> None:
+        """The per-layer entries rank 0 saved since the last commit, in a
+        `commit_entries` op after the save ops: every rank applies the
+        saves, then votes and writes entry.json for the entries every rank
+        holds whole (engine/prompt_cache/layers.commit). Rank 0's side of
+        the vote runs once the op has shipped (_after_ops)."""
+        st = self._store
+        if self.tensor is None or st is None or not st.outbox:
+            return
+        entries, st.outbox = st.outbox, []
+        self.tensor.after_ops = self._after_ops
+        self.tensor.journal.add("commit_entries", entries=entries)
+
+    def _after_ops(self, ops) -> None:
+        """Rank 0, right after an exchange shipped `ops`: its side of each
+        collective an op runs on every rank (the commit's vote)."""
+        from knurlogic.engine.prompt_cache import layers
+        for op in ops or ():
+            if op.get("op") == "commit_entries":
+                layers.commit(self.tensor.link, self._store, op["entries"])
+
     def _superseded(self, files) -> None:
         """The files of entries a keep-latest session's new step replaced:
         off disk, and out of the read-back index."""
+        from knurlogic.engine.prompt_cache import layers
         for f in files or ():
-            try:
-                Path(f).unlink()
-            except OSError:
-                pass
+            layers.discard(f)
         if files:
             gone = {str(f) for f in files}
             for t in [t for t, v in self._disk_index.items()
@@ -231,8 +266,12 @@ class PromptCacheCommands:
         if best is None:
             return
         from knurlogic.engine.prompt_cache import disk as prompt_disk
-        f = self._disk_index[best]["file"]
-        got = prompt_disk.read(self._disk_key, [f])
+        f = Path(self._disk_index[best]["file"])
+        st = self._store
+        if f.is_dir() and st is not None and f.name in st.pending:
+            return          # its entry.json waits for the ring's commit
+        got = st.read([f]) if f.is_dir() and st is not None \
+            else prompt_disk.read(self._disk_key, [f])
         if not got:
             self._disk_index.pop(best, None)    # gone or corrupt: a miss
             return
@@ -248,15 +287,31 @@ class PromptCacheCommands:
         new prompt cache, before the warm-up. On a ring a collective (every
         rank restores the same entries, or none)."""
         from knurlogic.engine.prompt_cache import disk as prompt_disk
+        from knurlogic.engine.prompt_cache import layers
         try:
             key = prompt_disk.host_key(self.host)
         except Exception:  # a key that cannot be made is a miss (logged)
             logger.exception("prompt cache: no key for the loaded model")
             key = None
-        self._restored = prompt_disk.restore(
+        link = self.tensor.link if self.tensor is not None else None
+        # the per-split format, read under its exact key (what earlier
+        # builds wrote, and a tensor split still writes)
+        old = prompt_disk.restore(
             self.cache.lru, self.host.model_key, key,
-            max_bytes=self.cache_bytes,
-            link=self.tensor.link if self.tensor is not None else None)
+            max_bytes=self.cache_bytes, link=link)
+        self._store = None
+        try:
+            self._store = layers.Store.for_host(self.host)
+        except Exception:  # no store is a miss, never a failed load (logged)
+            logger.exception("prompt cache: no per-layer store")
+        new = {}
+        if layers.uses_layers(self.host):
+            # every rank of a pipeline votes here, whatever it holds
+            got = layers.restore(self.cache.lru.max_size, self._store,
+                                 max_bytes=self.cache_bytes, link=link)
+            new = prompt_disk.insert(self.cache.lru, self.host.model_key,
+                                     got) if got else {}
+        self._restored = {**old, **new}
         prompt_disk.adopt(self.cache.owners, self.cache.pinned,
                           self._restored, shared=self.cache.shared)
         self._disk_key = key
@@ -273,6 +328,8 @@ class PromptCacheCommands:
             try:
                 self._disk_index = prompt_disk.index(
                     prompt_disk.root() / prompt_disk.key_id(key))
+                if self._store is not None:
+                    self._disk_index.update(self._store.index())
             except OSError:
                 logger.exception("prompt cache: indexing the saved entries")
 
@@ -308,6 +365,9 @@ class PromptCacheCommands:
             disk, gone = prompt_disk.drop_sessionless_files(
                 prompt_disk.root() / prompt_disk.key_id(self._disk_key),
                 older_than_s)
+        if self._store is not None:
+            n, more = self._store.drop_sessionless(older_than_s)
+            disk, gone = disk + n, gone | more
         for t in [t for t, v in self._disk_index.items()
                   if str(v.get("file")) in gone]:
             del self._disk_index[t]
@@ -325,6 +385,7 @@ class PromptCacheCommands:
             # every rank saves and frees the same entries (park_session);
             # a request on the session reads them back in step (read_back)
             self.tensor.journal.add("park_session", session=c.session)
+            self._journal_commit()
         return {"session": c.session, **got}
 
     def _cmd_pin(self, c: Command) -> dict:
@@ -354,9 +415,13 @@ class PromptCacheCommands:
                 "saved_at": meta.get("saved_at"),
                 "pinned": bool(meta.get("pinned")),
                 "hash": prompt_disk.tokens_hash(t) if ints else None})
+        st = self._store
         return {"entries": out,
-                "key_id": prompt_disk.key_id(key) if key else None,
-                "model": Path(self.host.path or "").name or None}
+                "key_id": st.key_id if st is not None
+                else prompt_disk.key_id(key) if key else None,
+                "model": Path(self.host.path or "").name or None,
+                "location": st.location if st is not None
+                else str(prompt_disk.root()) if key else None}
 
     def _disk_hit(self, job: Job, prompt: list, used: int) -> None:
         """The entry fetch() handed `job` is one restored from disk: say so

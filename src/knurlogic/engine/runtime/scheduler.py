@@ -240,6 +240,9 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         #: back on demand (_read_back), kept current at each save and drop
         self._disk_key: dict | None = None
         self._disk_index: dict = {}
+        #: the loaded model's per-layer store (engine/prompt_cache/layers),
+        #: None for a tensor split or nothing loaded
+        self._store = None
         #: the last measured prefill rate (tok/s) of this model: the
         #: save's break-even rule (prompt_disk.not_worth); None: not yet
         self._prefill_tps: float | None = None
@@ -561,9 +564,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                     c.result = self._save_session(c.session) if c.session \
                         else self._save_disk()
                     if self.tensor is not None:
-                        self.tensor.journal.add(
-                            "save_cache", **({"session": c.session}
-                                             if c.session else {}))
+                        self._journal_save(c.session)
                 finally:
                     c.done.set()
                 continue
@@ -607,6 +608,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 # the model going: nothing saved unless a client asked
                 self._restored = {}
                 self._disk_key, self._disk_index = None, {}
+                self._store = None
                 self._prefill_tps = None
                 self.cache = self._new_cache(self.cache.lru.max_size)
                 # what was measured belongs to the model it was measured on

@@ -328,16 +328,16 @@ def test_a_save_asked_for_restores_at_load_and_usage_says_disk(
     _, cold = _collect(s.submit(_job(p, max_tokens=4, session="t1")))
     assert cold["knurlogic"]["cache"]["disk"] == {"tokens": 0,
                                                   "read_ms": 0.0}
-    before = set(D._all_files(D.root()))
+    before = set(D._units(D.root()))
     s.unload().done.wait(60)
     # an unload saves nothing: only a client's ask does (nobody running
     # knurlogic should be surprised by cache files)
-    assert set(D._all_files(D.root())) == before
+    assert set(D._units(D.root())) == before
     s.load("/nonexistent/tiny-a").done.wait(60)
     _collect(s.submit(_job(p, max_tokens=4, session="t1")))
     assert s.save_prompt_cache().done.wait(60)
     s.unload().done.wait(60)
-    assert D._all_files(D.root())
+    assert D._units(D.root())
     s.load("/nonexistent/tiny-a").done.wait(60)
     _, warm = _collect(s.submit(_job(p + [5, 6, 7], max_tokens=4)))
     c = warm["knurlogic"]["cache"]

@@ -161,7 +161,8 @@ class PromptCacheHandlers:
         kid, model = mem.get("key_id"), mem.get("model")
         rows, at = [], {}
         for e in mem.get("entries") or []:
-            row = dict(e, model=model, key_id=kid)
+            row = dict(e, model=model, key_id=kid,
+                       location=mem.get("location"))
             row["on_disk"] = False          # the disk side below says
             if e.get("hash"):
                 at[(kid, e["hash"])] = row
@@ -178,5 +179,6 @@ class PromptCacheHandlers:
                          "bytes": d["bytes"], "in_memory": False,
                          "on_disk": True, "saved_at": d["saved_at"],
                          "pinned": d["pinned"], "hash": d["hash"],
-                         "model": d["model"], "key_id": d["key_id"]})
+                         "model": d["model"], "key_id": d["key_id"],
+                         "location": d.get("location")})
         return self._json(200, {"object": "list", "data": rows})
