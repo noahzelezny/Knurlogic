@@ -302,8 +302,9 @@ class _Entry:
 
 
 def test_journal_cache_turns_byte_trims_into_counted_pops():
-    from knurlogic.engine.runtime.scheduler import PromptCache
-    from knurlogic.engine.runtime.tensor import Journal, JournalPromptCache
+    from knurlogic.engine.prompt_cache.memory import PromptCache
+    from knurlogic.engine.prompt_cache.ring import JournalPromptCache
+    from knurlogic.engine.runtime.tensor import Journal
     j = Journal()
     c = JournalPromptCache(PromptCache(10), j)
     with pytest.raises(ValueError):

@@ -248,7 +248,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                    cross_chip=settings.get("cross_chip"))
     if ring:
         # the disk prompt cache's key: this rank's part of the split
-        # (engine/serve/prompt_disk; the followers' in tensor.serve_follower)
+        # (engine/prompt_cache/disk; the followers' in tensor.serve_follower)
         mh.cache_layout = {"split": ring.get("split", "tensor"),
                            "world": link.size, "rank": link.rank}
         if pipe:

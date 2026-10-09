@@ -59,7 +59,7 @@ class Request:
             (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
         self.tokens["output_tokens"] += int(u.get("completion_tokens") or 0)
         # the cached tokens that came from a prompt cache restored from
-        # disk (usage.knurlogic.cache.disk; engine/serve/prompt_disk)
+        # disk (usage.knurlogic.cache.disk; engine/prompt_cache/disk)
         disk = (((u.get("knurlogic") or {}).get("cache") or {})
                 .get("disk") or {})
         self.tokens["disk_tokens"] += int(disk.get("tokens") or 0)

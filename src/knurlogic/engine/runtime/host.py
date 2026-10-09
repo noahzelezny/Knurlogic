@@ -137,7 +137,7 @@ class ModelHost:
         self.warm = None
         #: () -> None, run on the loading thread once the weights, vision
         #: and head are bound and before the warm-up: the scheduler's
-        #: prompt-cache restore from disk (engine/serve/prompt_disk). On
+        #: prompt-cache restore from disk (engine/prompt_cache/disk). On
         #: a ring every rank runs its own here, at the same point (the
         #: restore agrees across ranks: a collective)
         self.after_bind = None

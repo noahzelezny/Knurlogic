@@ -13,8 +13,8 @@ mx = pytest.importorskip("mlx.core")
 
 from test_scheduler import Tok, _collect, _job  # noqa: E402
 
-from knurlogic.engine.runtime.scheduler import PromptCache  # noqa: E402
-from knurlogic.engine.serve import prompt_disk as D  # noqa: E402
+from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
+from knurlogic.engine.prompt_cache.memory import PromptCache  # noqa: E402
 
 
 def _key(**kw):
@@ -247,9 +247,9 @@ class _Journal:
 def test_rank_0_journals_owner_drop_and_pin_and_a_follower_applies_them(
         tmp_path, monkeypatch):
     """Rank 0's JournalPromptCache records each change; a follower stub
-    applies the ops (tensor.apply_cache_op) to its own cache and its own
+    applies the ops (prompt_cache/ring.apply_cache_op) to its own cache and its own
     files, and ends with the same side map."""
-    from knurlogic.engine.runtime.tensor import (
+    from knurlogic.engine.prompt_cache.ring import (
         JournalPromptCache,
         apply_cache_op,
     )
@@ -532,7 +532,7 @@ def test_a_follower_drops_the_same_files_by_name(tmp_path):
     """No half entries on a split model: rank 0's drop by age names the
     files it deleted, and each other rank deletes its own of those names
     -- nothing else, and nothing outside its key directory."""
-    from knurlogic.engine.runtime.tensor import apply_cache_op
+    from knurlogic.engine.prompt_cache.ring import apply_cache_op
     d = tmp_path / "key"
     d.mkdir()
     a, b = d / "00000001-000000-aaa.safetensors", \
@@ -553,8 +553,8 @@ def test_a_rings_prompt_cache_has_what_the_scheduler_reads():
     import re
     from pathlib import Path
 
+    from knurlogic.engine.prompt_cache.ring import JournalPromptCache
     from knurlogic.engine.runtime import scheduler as SC
-    from knurlogic.engine.runtime.tensor import JournalPromptCache
     src = Path(SC.__file__).read_text()
     used = set(re.findall(r"self\.cache\.(\w+)", src))
     # park is refused on a ring before it would reach .remove
@@ -615,7 +615,8 @@ def test_a_follower_parks_and_reads_back_by_name(tmp_path, monkeypatch):
     entries (`park`), and before the admit that hits a parked entry each
     reads its own part by the name rank 0 read (`read_back`). A rank that
     lacks the file says so rather than prefill a different length."""
-    from knurlogic.engine.runtime.tensor import Desync, apply_cache_op
+    from knurlogic.engine.prompt_cache.ring import apply_cache_op
+    from knurlogic.engine.runtime.tensor import Desync
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     key = _key()
     d = D.root() / D.key_id(key)

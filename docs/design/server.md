@@ -34,6 +34,7 @@ interfaces/http/            the wire
   openai.py                 /v1/chat/completions, /v1/completions,
                             /v1/models, OpenAI error objects, SSE
   residency.py              /v1/residency, /v1/ensure, the concurrency hint
+  prompt_cache.py           /v1/prompt-cache: save, drop, pin, park, list
   messages.py               /v1/messages, in-process
   __init__.py               serve(), switch() (through interfaces/loading)
 interfaces/page/            the page (`knurlogic ui`)
@@ -51,6 +52,10 @@ engine/runtime/             everything that touches mlx
   executor.py               the step: LocalExecutor, TensorExecutor
   tensor.py, pipeline.py,   the cluster splits and their step plan
   plan.py
+engine/prompt_cache/        the prompt cache: memory.py (PromptCache),
+                            disk.py, commands.py (the Scheduler's cache
+                            methods), ring.py (a ring's journaled cache),
+                            report.py (usage.knurlogic.cache)
 engine/mtp/                 the batch engine, drafting, segment checkpoints
 engine/mtp/sampling.py      per-request seeds
 ```
@@ -740,7 +745,6 @@ median of each bucket.
   load.py          engine info, load, memory, the cache limit, knobs a
                    running process can change, tool dialects
   state.py         what is served, drafting, vision: the process's dicts
-  cache_report.py  usage.knurlogic.cache: what the prompt cache actually did
   segments.py      the system prompt gets its own segment (checkpoint) on
                    templates where the empty-turn diff finds none (GLM)
   thinking.py      reasoning_effort -> each chat template's own controls

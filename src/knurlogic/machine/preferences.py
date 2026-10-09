@@ -121,7 +121,7 @@ def launch_sets(sets: dict | None) -> dict:
 
 def prompt_cache_env(env=None) -> dict:
     """The environment the disk prompt cache reads
-    (engine/serve/prompt_disk): `env` (os.environ by default) with the
+    (engine/prompt_cache/disk): `env` (os.environ by default) with the
     saved knurlogic-wide values over it."""
     import os
     base = dict(os.environ if env is None else env)

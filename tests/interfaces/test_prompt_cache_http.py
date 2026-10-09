@@ -1,5 +1,5 @@
 """The disk prompt cache over HTTP: POST /v1/prompt-cache/save, and the
-ledger's disk_tokens (engine/serve/prompt_disk; usage.knurlogic.cache.disk)."""
+ledger's disk_tokens (engine/prompt_cache/disk; usage.knurlogic.cache.disk)."""
 import json
 import sqlite3
 import threading
@@ -184,7 +184,7 @@ def test_the_registry_lists_memory_and_disk_once_each():
     mx = pytest.importorskip("mlx.core")
     from mlx_lm.models.cache import KVCache
 
-    from knurlogic.engine.serve import prompt_disk as D
+    from knurlogic.engine.prompt_cache import disk as D
     key = D.identity("/nonexistent/tiny")
     d = D.root() / D.key_id(key)
 

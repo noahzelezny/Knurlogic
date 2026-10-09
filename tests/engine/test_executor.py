@@ -151,7 +151,7 @@ def test_a_segment_end_is_a_checkpoint_event_and_the_report_arrives():
     cps = [e for e in events if isinstance(e, Checkpoint)]
     assert [c.tokens for c in cps] == [sys_, prompts[2][:-1]]
     assert all(c.uid == uid and c.cache for c in cps)
-    from knurlogic.engine.serve import cache_report
+    from knurlogic.engine.prompt_cache import report as cache_report
     rep = cache_report.of(req)
     assert rep["checkpoints_stored"] == 2 and rep["prefilled"] == len(prompts[2])
     ex.close()
