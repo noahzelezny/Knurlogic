@@ -55,6 +55,12 @@ def _no_real_cache(monkeypatch, tmp_path_factory):
     # is written there by every served request
     monkeypatch.setenv("KNURLOGIC_HOME",
                        str(tmp_path_factory.mktemp("knurlogic-home")))
+    # and no port lookup: an unload finds a server the page did not start
+    # by the port it listens on (interfaces/spawn.stop), which would reach
+    # the REAL server on :8080 past the registry above. A test of that
+    # lookup patches it itself.
+    from knurlogic.machine import servers
+    monkeypatch.setattr(servers, "listener_pid", lambda port: None)
 
 
 # --- no process a test starts outlives it ------------------------------------

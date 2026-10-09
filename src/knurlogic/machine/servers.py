@@ -92,6 +92,17 @@ def is_our_server(pid: int) -> bool:
 
 
 
+def listener_pid(port: int) -> int | None:
+    """The pid listening on `port` on this Mac (lsof), or None."""
+    try:
+        out = subprocess.run(["lsof", "-nP", f"-iTCP:{int(port)}",
+                              "-sTCP:LISTEN", "-t"], capture_output=True,
+                             text=True, timeout=5).stdout.split()
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    return int(out[0]) if out and out[0].isdigit() else None
+
+
 #: what marks a process a TEST started, never a real server: the flag the
 #: suite's fake ranks carry (tests/cluster_fake_page.fake_argv), and
 #: pytest's temp directories in its arguments. A real page leaving these
