@@ -26,7 +26,7 @@ Around it, in `engine/`:
 
 | file | what |
 |---|---|
-| `serve/` | what the served model is: `load.py` (load, memory, `apply_live`, `tool_support`), `state.py` (process state: `SERVED`, `DRAFT`, `VISION`), `segments.py`, `thinking.py`, `drafting.py`, `vision.py`. Importing it imports no mlx |
+| `serve/` | what the served model is: `load.py` (load, memory, `apply_live`, `tool_support`), `state.py` (process state: `SERVED`, `VISION`), `segments.py`, `thinking.py`, `vision.py`. Importing it imports no mlx |
 | `kvquant.py` | `QuantKVCache`, `BatchQuantKVCache`, `install`: K/V stored at 8, 6 or 4 bits |
 | `kvattn.py` | the 8-bit decode attention kernel (`decode_sdpa`, `patch_model`) |
 | `crosschip.py` | identical results across chips (`KNURLOGIC_CROSS_CHIP`) |

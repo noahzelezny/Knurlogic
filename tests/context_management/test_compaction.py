@@ -395,8 +395,8 @@ def server():
     from test_batch_drafting import _tiny
     from test_scheduler import Host, Tok
 
+    from knurlogic.engine.mtp import binding
     from knurlogic.engine.runtime.scheduler import Scheduler
-    from knurlogic.engine.serve import state
     from knurlogic.interfaces.http.server import App, make_server
 
     class WordTok(Tok):
@@ -417,7 +417,7 @@ def server():
     mx.eval([v if isinstance(v, mx.array) else v.parameters()
              for v in vars(head).values()
              if isinstance(v, (mx.array, nn.Module))])
-    state.DRAFT.update(head=None, on=False)
+    binding.DRAFT.update(head=None, on=False)
     host = Host(model, WordTok(prompts))
     host.path, host.loaded_at = "", 0.0
     host.status = lambda: {"state": "ready", "model": "", "error": ""}

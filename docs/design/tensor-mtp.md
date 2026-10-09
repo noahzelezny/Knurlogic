@@ -232,7 +232,7 @@ sampling:
 | C | tensor, MTP on, `KNURLOGIC_MTP_DYNAMIC=off` (always draft) |
 | D | pipeline + MTP (reference) |
 
-For each run, record tok/s, acceptance (`state.DRAFT` accepted/steps), the
+For each run, record tok/s, acceptance (`engine/mtp/binding.DRAFT` accepted/steps), the
 `Coord.calls` counts, and the median step wall time split into: 1-wide
 forward, 2-wide verify, replay, head draft on rank 0, and the B1/B2
 all_gathers. The split is cheap timers on rank 0 behind a debug env var,

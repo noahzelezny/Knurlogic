@@ -22,13 +22,12 @@ split model: [tensor-mtp](../design/tensor-mtp.md).
 | `capture.py` | capture the pre-lm_head activation (`capture_input`) |
 | `sampling.py` | the same distribution mlx-lm samples from, exact rejection sampling (`rejection_correct`), `NonFiniteLogits` |
 | `seed.py` | seed a head over a prompt in prefill-sized chunks (`seed_head`) |
+| `binding.py` | the head bound to the loaded model: `bind_head` (called by `ModelHost` at load), `DRAFT` (the process's drafting state and counters), `drafting_status` (for `/status.json`). Imports no mlx |
 
 Elsewhere:
 
 - `engine/families/<family>/heads/`: the head classes; the manifest's
   `head` entry names them.
-- `engine/serve/drafting.py`: `load_head` binds an artifact's head to the
-  loaded model; `drafting_status`. State lives in `engine/serve/state.DRAFT`.
 - `engine/runtime/scheduler.py` (`_executor_local`, `_executor`): builds
   the `MTPBatchGenerator` with the head when one is bound.
 - `engine/runtime/pipeline.py` (`Coord`): rank 0's drafts and verdicts
@@ -37,6 +36,9 @@ Elsewhere:
   `interfaces/mcp.py`: the `drafting` tool.
 - `tuning/presets.py`: `MTP_MODE`, `MTP_MODES`; `tuning/knobs.py`:
   `mtp_of`, the `KNURLOGIC_MTP*` knobs; `tuning/fit.py`: `mtp_head_bytes`.
+
+These stay where they are on purpose: heads are family code, every knob
+is in `tuning/`, and a CLI command is in `interfaces/`.
 
 ## Rules that keep it correct
 
@@ -61,13 +63,6 @@ with `from_sidecar` and `draft_logits`, capture point, draft cache,
 cache semantics, sidecar name, layout) and the class in `heads/`. A block
 drafter adds `block`. The checklist item is
 [new-model](../design/new-model.md), "Drafting".
-
-## Notes
-
-Drafting spans `engine/mtp/` (the engine and registry),
-`engine/families/*/heads/` (by design), `engine/serve/drafting.py` and
-`state.py` (binding), `interfaces/drafting.py` (the survey) and
-`tuning/knobs.py` (the knobs).
 
 ## Tests
 

@@ -1,7 +1,7 @@
 """engine/serve/ -- what the served model is and what it can do: the pieces
 knurlogic's own server (engine/runtime, interfaces/http) builds on, one
 module each: load.py (load, memory, knobs, tool dialects), state.py,
-segments.py, thinking.py, drafting.py, vision.py.
+segments.py, thinking.py, vision.py. (Drafting is engine/mtp/binding.py.)
 
 Callers import the package and use the names below; which module holds a
 name is this package's business. Importing it imports no mlx -- only
@@ -14,8 +14,6 @@ it; the signature is inspected here so nobody downstream learns that.
 Design: docs/design/server.md (engine boundary).
 """
 
-from .drafting import drafting_status
-from .drafting import load_head as load_draft_head
 from .load import (
                    HOST_PACKAGES,
                    EngineInfo,
@@ -38,8 +36,8 @@ from .vision import served_vision, vision_status
 
 __all__ = [
     "HOST_PACKAGES", "EngineInfo", "apply_live",
-    "bind_vision", "clear_vision", "describe", "drafting_status", "generate",
-    "info", "keeps_mtp_weights", "load", "load_draft_head", "memory",
+    "bind_vision", "clear_vision", "describe", "generate",
+    "info", "keeps_mtp_weights", "load", "memory",
     "models_module", "served_path", "served_vision", "set_cache_limit",
     "thinking_status", "tool_support", "vision_status",
 ]

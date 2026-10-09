@@ -101,6 +101,8 @@ Package layout:
   batch_generator.py  mlx-lm's BatchGenerator contract over batch_loop,
                       incl. segment checkpoints and the cache report
   caches.py           snapshot and rollback for a speculative step
+  binding.py          the head bound to the loaded model (bind_head),
+                      DRAFT (its state and counters), drafting_status
   capture.py seed.py sampling.py   the pieces those share
 
 Drafting across machines comes with the cluster executor

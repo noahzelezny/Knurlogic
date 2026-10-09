@@ -175,10 +175,10 @@ def host_key(host) -> dict | None:
     now, or None when nothing is."""
     if getattr(host, "model", None) is None or not getattr(host, "path", None):
         return None
-    from knurlogic.engine.serve import state
+    from knurlogic.engine.mtp import binding
     draft = None
-    if state.DRAFT.get("on") and state.DRAFT.get("head") is not None:
-        h = state.DRAFT["head"]
+    if binding.DRAFT.get("on") and binding.DRAFT.get("head") is not None:
+        h = binding.DRAFT["head"]
         draft = {"head": type(h).__module__ + ":" + type(h).__qualname__,
                  "block": int(getattr(h, "block_size", 0) or 0)}
     return identity(host.path, kv_bits=getattr(host, "kv_bits", None),

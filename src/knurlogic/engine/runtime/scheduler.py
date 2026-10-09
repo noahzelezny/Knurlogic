@@ -687,6 +687,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
     def _executor(self) -> LocalExecutor:
         if self._ex is not None or self.tensor is None:
             return self._executor_local()
+        from knurlogic.engine.mtp import binding
         from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
         from knurlogic.engine.serve import state
 
@@ -696,18 +697,18 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         # every layer's output whole on every rank) and drafts; vision on
         # either split: rank 0 encodes, and every rank embeds the rows it
         # ships (tensor.py)
-        head = state.DRAFT.get("head") if state.DRAFT.get("on") else None
+        head = binding.DRAFT.get("head") if binding.DRAFT.get("on") else None
         vision = state.VISION.get("serve")
         gen = MTPBatchGenerator(
             self.host.model, head,
-            stats=state.DRAFT if head is not None else state.VISION_STATS,
-            vision=vision, why=str(state.DRAFT.get("why") or ""),
+            stats=binding.DRAFT if head is not None else state.VISION_STATS,
+            vision=vision, why=str(binding.DRAFT.get("why") or ""),
             completion_batch_size=self.completion_batch_size,
             prefill_step_size=self.prefill_step_size, stream=self._stream)
         from .pipeline import coordinate
         coordinate(gen, self.tensor.link.group)
         if head is not None:
-            state.DRAFT["batch_installed"] = True
+            binding.DRAFT["batch_installed"] = True
         self._ex = TensorExecutor(gen, self.tensor, over=self._over_local)
         if vision is not None:
             from knurlogic.engine.vision import cachehook
@@ -723,19 +724,20 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
 
     def _executor_local(self) -> LocalExecutor:
         if self._ex is None:
+            from knurlogic.engine.mtp import binding
             from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
             from knurlogic.engine.serve import state
-            head = state.DRAFT.get("head") if state.DRAFT.get("on") else None
+            head = binding.DRAFT.get("head") if binding.DRAFT.get("on") else None
             vision = state.VISION.get("serve")
             gen = MTPBatchGenerator(
                 self.host.model, head,
-                stats=state.DRAFT if head is not None else state.VISION_STATS,
-                vision=vision, why=str(state.DRAFT.get("why") or ""),
+                stats=binding.DRAFT if head is not None else state.VISION_STATS,
+                vision=vision, why=str(binding.DRAFT.get("why") or ""),
                 completion_batch_size=self.completion_batch_size,
                 prefill_step_size=self.prefill_step_size,
                 stream=self._stream)
             if head is not None:
-                state.DRAFT["batch_installed"] = True
+                binding.DRAFT["batch_installed"] = True
             self._ex = LocalExecutor(gen)
             if vision is not None:
                 from knurlogic.engine.vision import cachehook

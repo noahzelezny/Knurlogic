@@ -21,6 +21,7 @@ import logging
 import threading
 import time
 
+from knurlogic.engine.mtp import binding
 from knurlogic.engine.serve import state
 
 logger = logging.getLogger(__name__)
@@ -224,12 +225,12 @@ class ModelHost:
                         "lock + split %.1fs, vision + head %.1fs", path, gib,
                         t2 - t1, gib / max(t2 - t1, 1e-3), t1 - t0, t3 - t2)
             if self.head_agree is not None:
-                bound = bool(state.DRAFT.get("on"))
-                if not self.head_agree(bound, state.DRAFT.get("head")) \
+                bound = bool(binding.DRAFT.get("on"))
+                if not self.head_agree(bound, binding.DRAFT.get("head")) \
                         and bound:
-                    state.DRAFT.update(head=None, on=False,
-                                       why="not every rank of the pipeline "
-                                           "bound a drafting head")
+                    binding.DRAFT.update(head=None, on=False,
+                                         why="not every rank of the pipeline "
+                                             "bound a drafting head")
             if self.after_bind is not None:
                 self.after_bind()
         except BaseException as e:
@@ -266,8 +267,8 @@ class ModelHost:
         self._set("unloading")
         from knurlogic.engine.serve import vision
         vision.clear()
-        state.DRAFT.update(head=None, spec=None, on=False,
-                           why="model unloaded")
+        binding.DRAFT.update(head=None, spec=None, on=False,
+                             why="model unloaded")
         self.model = self.tokenizer = self.model_key = None
         if had:
             gc.collect()
@@ -354,12 +355,11 @@ class ModelHost:
             vision.set_spec(None)
 
     def _bind_head(self, path: str) -> None:
-        state.DRAFT.update(head=None, spec=None, on=False)
+        binding.DRAFT.update(head=None, spec=None, on=False)
         if not self.draft:
-            state.DRAFT["why"] = "disabled (KNURLOGIC_MTP=off or --no-draft)"
+            binding.DRAFT["why"] = "disabled (KNURLOGIC_MTP=off or --no-draft)"
             return
-        from knurlogic.engine.serve import drafting
-        drafting.load_head(path)
+        binding.bind_head(path)
 
     # --------------------------------------------------------------- status
 

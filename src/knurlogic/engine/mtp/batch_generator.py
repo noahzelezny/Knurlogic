@@ -277,7 +277,7 @@ class MTPBatchGenerator(BatchGenerator):
         if name:
             logger.info("batch engine drafting with the %s MTP head", name)
         else:
-            # `why`: state.DRAFT's reason (no sidecar, MTP off, a pipeline
+            # `why`: binding.DRAFT's reason (no sidecar, MTP off, a pipeline
             # rank that could not bind one). "vision" only when this engine
             # serves images: the line once said it on a text-only ring.
             logger.info("batch engine without a drafting head%s%s",

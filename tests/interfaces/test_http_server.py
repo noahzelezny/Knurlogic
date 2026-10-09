@@ -31,15 +31,15 @@ def url():
     """One server for the module, never stopped (see test_scheduler)."""
     import mlx.nn as nn
 
+    from knurlogic.engine.mtp import binding
     from knurlogic.engine.runtime.scheduler import Scheduler
-    from knurlogic.engine.serve import state
     from knurlogic.interfaces.http import residency as res_api
     from knurlogic.interfaces.http.server import App, make_server
     model, head, prompts = _tiny(512)
     mx.eval([v if isinstance(v, mx.array) else v.parameters()
              for v in vars(head).values()
              if isinstance(v, (mx.array, nn.Module))])
-    state.DRAFT.update(head=head, on=True)
+    binding.DRAFT.update(head=head, on=True)
     host = Host(model, DTok(prompts))
     host.path, host.loaded_at = "/models/tiny", 0.0
     host.status = lambda: {"state": "ready", "model": host.path, "error": ""}
@@ -51,7 +51,7 @@ def url():
     srv = make_server(app, "127.0.0.1", 0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{srv.server_address[1]}", prompts
-    state.DRAFT.update(head=None, on=False)
+    binding.DRAFT.update(head=None, on=False)
 
 
 def _msg(ids):
