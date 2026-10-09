@@ -78,7 +78,14 @@ TEST_ENV = "KNURLOGIC_TEST_SESSION"
 
 
 def pytest_configure(config):
-    _os.environ.setdefault(TEST_ENV, _secrets.token_hex(8))
+    # an xdist worker gets a token of its own: inherited, every worker's
+    # sweep found the other workers (and the controller) carrying it and
+    # killed them after its first test. A worker's own ps environment still
+    # shows the controller's token, so no worker's sweep matches another.
+    if _os.environ.get("PYTEST_XDIST_WORKER"):
+        _os.environ[TEST_ENV] = _secrets.token_hex(8)
+    else:
+        _os.environ.setdefault(TEST_ENV, _secrets.token_hex(8))
 
 
 def _ours() -> list:

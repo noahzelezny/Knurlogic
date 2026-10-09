@@ -26,7 +26,7 @@ CONTROL_LEN = 5
 OVER, STEP, LENGTH, ACTIVE, PEAK = range(CONTROL_LEN)
 
 OPS = ("admit", "remove", "chunk", "insert", "pop", "reset", "stop", "park",
-       "set", "save_cache")
+       "set", "save_cache", "drop", "pin", "drop_sessionless", "drop_files")
 #: admit's `chunk` is the prefill chunk rank 0 fitted the row at (memory:
 #: scheduler._make_room); `chunk` (uid, chunk) refits a row not yet
 #: prefilled (scheduler._fit_next). Ranks prefilling one row in different
@@ -43,7 +43,18 @@ _FIELDS = {
     "park": (),
     "set": ("name", "value"),
     "save_cache": (),
+    # a session's entries out of every rank's cache (and its files)
+    "drop": ("session",),
+    "pin": ("session", "pinned"),
+    "drop_sessionless": (),
+    # rank 0's dropped files, by name: every rank deletes the same
+    "drop_files": ("names",),
 }
+#: fields an op may carry besides its own: insert's owner (the session that
+#: made the entry, engine/runtime/tensor.JournalPromptCache), a session's
+#: save. Missing from the check, a split model failed its first request
+#: that named a session ("insert takes [...], got [... 'owner' ...]").
+_OPTIONAL = {"insert": ("owner",), "save_cache": ("session",)}
 #: the live knobs (engine/serve/load.LIVE_KNOBS) that act on a rank's own
 #: engine, so a change on rank 0 must reach every rank
 SETS = ("VQ_DECODE_CHUNK", "VQ_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB",
@@ -88,11 +99,25 @@ def check(plan) -> None:
         if not isinstance(op, dict) or op.get("op") not in OPS:
             raise PlanError(f"not an op: {op!r}")
         want = set(_FIELDS[op["op"]]) | {"op"}
-        if set(op) != want:
+        if not (want <= set(op) <= want | set(_OPTIONAL.get(op["op"], ()))):
             raise PlanError(f"{op['op']} takes {sorted(want)}, got "
                             f"{sorted(op)}")
         if op["op"] == "insert" and op["event"] not in EVENTS:
             raise PlanError(f"insert event {op['event']!r}")
+        if op["op"] == "insert" and "owner" in op and not (
+                isinstance(op["owner"], dict)
+                and all(isinstance(k, str) for k in op["owner"])):
+            raise PlanError(f"insert owner is an object, got {op['owner']!r}")
+        if op["op"] in ("drop", "pin") or (op["op"] == "save_cache"
+                                           and "session" in op):
+            if not isinstance(op["session"], str) or not op["session"]:
+                raise PlanError(f"{op['op']} session is a non-empty string")
+        if op["op"] == "pin" and not isinstance(op["pinned"], bool):
+            raise PlanError("pin pinned is true or false")
+        if op["op"] == "drop_files" and not (
+                isinstance(op["names"], list)
+                and all(isinstance(n, str) for n in op["names"])):
+            raise PlanError("drop_files names is a list of strings")
         if op["op"] == "pop" and (not isinstance(op["n"], int) or op["n"] < 1):
             raise PlanError(f"pop n must be a positive int, got {op['n']!r}")
         if op["op"] == "set" and (op["name"] not in SETS

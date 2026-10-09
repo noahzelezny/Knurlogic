@@ -561,3 +561,34 @@ def test_a_rings_prompt_cache_has_what_the_scheduler_reads():
     missing = {a for a in used - {"remove"}
                if not hasattr(JournalPromptCache, a)}
     assert not missing, missing
+
+
+def test_every_journaled_cache_op_passes_the_plan_check():
+    """A split model's plan is checked on every rank; the cache ops added
+    for sessions were never in its schema, so the 397B over two Macs died
+    on its first request that named a session (insert ... 'owner')."""
+    import re
+    from pathlib import Path
+
+    from knurlogic.engine.runtime import plan as P
+    from knurlogic.engine.runtime import scheduler as SC
+    from knurlogic.engine.runtime import tensor as T
+    src = Path(SC.__file__).read_text() + Path(T.__file__).read_text()
+    added = set(re.findall(r'journal\.add\(\s*"(\w+)"', src))
+    assert added and not added - set(P.OPS), added - set(P.OPS)
+    ops = [{"op": "insert", "uid": 1, "event": "finished", "kind": "assistant",
+            "owner": {"session": "pm", "role": None, "run": None,
+                      "step": 1, "latest": True}},
+           {"op": "insert", "uid": 2, "event": "checkpoint", "kind": "system"},
+           {"op": "save_cache", "session": "pm"}, {"op": "save_cache"},
+           {"op": "drop", "session": "pm"},
+           {"op": "pin", "session": "pm", "pinned": True},
+           {"op": "drop_sessionless"},
+           {"op": "drop_files", "names": ["00000001-000000-abc.safetensors"]}]
+    assert P.decode(P.encode({"ops": ops}))["ops"] == ops
+    for bad in ({"op": "insert", "uid": 1, "event": "finished",
+                 "kind": "assistant", "who": 1},
+                {"op": "drop", "session": ""},
+                {"op": "pin", "session": "a", "pinned": "yes"}):
+        with pytest.raises(P.PlanError):
+            P.check({"ops": [bad]})
