@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -18,6 +19,13 @@ def cache_dir() -> Path:
                                Path.home() / ".cache")) / "knurlogic"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def serve_argv(path: str, *args: str) -> list:
+    """The `knurlogic serve` command line for a model at `path`: the one
+    builder the page/MCP spawn (interfaces/spawn) and a cluster rank
+    (cluster/launch.rank_argv) share. `args` follow the path as given."""
+    return [sys.executable, "-m", "knurlogic", "serve", path, *args]
 
 
 def new_instance() -> str:
