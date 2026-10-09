@@ -484,11 +484,14 @@ def _pinned_files(files, base: Path) -> set:
     return out
 
 
-def sweep(base: Path | None = None, now: float | None = None) -> dict:
+def sweep(base: Path | None = None, now: float | None = None,
+          removed: list | None = None) -> dict:
     """The TTL, then the budget (least recently used first), over every
     model's unpinned entries; stale temp files too. A pinned session's
     files are exempt from both (only a drop removes them), and the budget
-    counts unpinned files only. Returns what it removed."""
+    counts unpinned files only. Returns what it removed; `removed`, when
+    given, gets each entry file deleted (a ring's rank 0 names them to the
+    other ranks, which never sweep on their own)."""
     base = base or root()
     now = time.time() if now is None else now
     ttl, gone_ttl, gone_lru = ttl_s(), 0, 0
@@ -502,6 +505,8 @@ def sweep(base: Path | None = None, now: float | None = None) -> dict:
             try:
                 f.unlink()
                 gone_ttl += 1
+                if removed is not None:
+                    removed.append(f)
             except OSError:
                 pass
         else:
@@ -515,6 +520,8 @@ def sweep(base: Path | None = None, now: float | None = None) -> dict:
             f.unlink()
             total -= size
             gone_lru += 1
+            if removed is not None:
+                removed.append(f)
         except OSError:
             pass
     try:
@@ -634,7 +641,8 @@ def _lru_entries(lru) -> list:
 
 def save(lru, key: dict, base: Path | None = None, *, owners=None,
          only_new: bool = False, model: str | None = None,
-         select=None, prefill_tps=None, shared=None) -> dict:
+         select=None, prefill_tps=None, shared=None,
+         sweep_after: bool = True, removed: list | None = None) -> dict:
     """Write the entries of `lru` (the scheduler's mlx-lm LRUPromptCache)
     under `key`. Returns counts; never raises for one entry.
 
@@ -729,7 +737,7 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
             (d / "key.json").write_text(json.dumps(key, indent=1))
         except OSError:
             pass
-    stats["sweep"] = sweep(base)
+    stats["sweep"] = sweep(base, removed=removed) if sweep_after else {}
     stats["seconds"] = round(time.monotonic() - t0, 3)
     logger.info("prompt cache saved to %s: %d entries, %d written "
                 "(%d bytes, %.2f GiB), %d already there, %d not worth it, "
@@ -759,14 +767,15 @@ def remove_entry(lru, model, tokens) -> bool:
 
 
 def candidates(key: dict, max_n: int, max_bytes: int | None = None,
-               base: Path | None = None) -> list:
+               base: Path | None = None, sweep_first: bool = True) -> list:
     """The files a load restores: the newest `max_n` (by save, then LRU
     place), within `max_bytes` if given, oldest first (the order they are
     inserted). The TTL and budget are applied first."""
     if not enabled() or key is None or max_n <= 0:
         return []
     base = base or root()
-    sweep(base)
+    if sweep_first:
+        sweep(base)
     es = entries(base / key_id(key))[-max_n:]
     if max_bytes:
         out, total = [], 0
@@ -867,7 +876,11 @@ def restore(lru, model_key, key: dict | None, *, max_bytes=None,
     got = []
     try:
         if key is not None:
-            got = read(key, candidates(key, lru.max_size, max_bytes, base))
+            # a ring's ranks do not sweep here: each would by its own
+            # disk's budget, and their lists would differ (rank 0's saves
+            # sweep and name what they delete to the others)
+            got = read(key, candidates(key, lru.max_size, max_bytes, base,
+                                       sweep_first=link is None))
     except Exception:  # a restore that fails is a miss, never a failed load (logged)
         logger.exception("prompt cache: reading the saved entries failed")
         got = []

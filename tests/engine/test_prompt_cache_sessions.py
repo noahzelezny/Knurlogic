@@ -592,3 +592,73 @@ def test_every_journaled_cache_op_passes_the_plan_check():
                 {"op": "pin", "session": "a", "pinned": "yes"}):
         with pytest.raises(P.PlanError):
             P.check({"ops": [bad]})
+
+
+def test_a_sessions_prompt_that_parts_from_its_entries_says_where(sched):
+    """a coordinator session missed its 29k cache on resumes (hit only the 5.9k system
+    copy): usage now says where the prompt left the session's entries."""
+    s = sched
+    s.load("/nonexistent/tiny-diverge").done.wait(60)
+    p = list(s.prompts[2])
+    _collect(s.submit(_job(p, max_tokens=3, session="dv")))
+    _, again = _collect(s.submit(_job(p + [5, 6], max_tokens=3,
+                                      session="dv")))
+    assert "diverged" not in again["knurlogic"]["cache"]     # it extends
+    other = p[:4] + [7, 7, 7] + p[7:]
+    _, miss = _collect(s.submit(_job(other, max_tokens=3, session="dv")))
+    d = miss["knurlogic"]["cache"]["diverged"]
+    assert d["at"] == 4 and d["entry_tokens"] >= len(p)
+
+
+def test_a_follower_parks_and_reads_back_by_name(tmp_path, monkeypatch):
+    """Park on a split model: each rank saves and frees the session's
+    entries (`park`), and before the admit that hits a parked entry each
+    reads its own part by the name rank 0 read (`read_back`). A rank that
+    lacks the file says so rather than prefill a different length."""
+    from knurlogic.engine.runtime.tensor import Desync, apply_cache_op
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    key = _key()
+    d = D.root() / D.key_id(key)
+    f = PromptCache(10)
+    toks = [1, 2, 3, 4, 5, 6, 7, 8]
+    f.insert("m", toks, _kv(), "assistant", owner=_own("pm"))
+
+    def save_disk(only_new=False, select=None):
+        f.live()
+        D.save(f.lru, key, owners=f.owners, only_new=only_new,
+               select=select, sweep_after=False)
+    assert apply_cache_op({"op": "park_session", "session": "pm"}, f, "m", {},
+                          save_disk, d, key)
+    assert f.of_session("pm") == [] and len(f.lru) == 0
+    (name,) = [p.name for p in d.iterdir() if p.suffix == ".safetensors"]
+    assert apply_cache_op({"op": "read_back", "name": name}, f, "m", {},
+                          save_disk, d, key)
+    assert [tuple(t) for _, t in f.of_session("pm")] == [tuple(toks)]
+    with pytest.raises(Desync):
+        apply_cache_op({"op": "read_back", "name": "nope.safetensors"}, f,
+                       "m", {}, save_disk, d, key)
+
+
+def test_park_and_read_back_are_plan_ops():
+    from knurlogic.engine.runtime import plan as P
+    ops = [{"op": "park_session", "session": "pm"},
+           {"op": "read_back", "name": "00000001-000000-abc.safetensors"}]
+    assert P.decode(P.encode({"ops": ops}))["ops"] == ops
+    with pytest.raises(P.PlanError):
+        P.check({"ops": [{"op": "read_back", "name": "../x.safetensors"}]})
+
+
+def test_only_rank_0_sweeps_and_names_what_it_deleted(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setenv("KNURLOGIC_PROMPT_CACHE_TTL_H", "0.0001")
+    pc = PromptCache(10)
+    pc.insert("m", [1, 2, 3, 4], _kv(4), "assistant", owner=_own("a"))
+    D.save(pc.lru, _key(), owners=pc.owners, sweep_after=False)
+    old = [p for p in (D.root() / D.key_id(_key())).iterdir()
+           if p.suffix == ".safetensors"]
+    import os
+    for p in old:
+        os.utime(p, (1, 1))
+    gone: list = []
+    D.sweep(removed=gone)
+    assert [p.name for p in gone] == [p.name for p in old]

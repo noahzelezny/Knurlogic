@@ -669,6 +669,11 @@ class JournalPromptCache:
     def shared(self) -> set:
         return self.inner.shared
 
+    def remove(self, model, tokens) -> bool:
+        # rank 0's side of a park: the followers free theirs at the `park`
+        # op, by the same rule
+        return self.inner.remove(model, tokens)
+
     def live(self) -> list:
         return self.inner.live()
 
@@ -857,13 +862,15 @@ def _defer_sigterm(rank: int) -> None:
 
 
 def apply_cache_op(op: dict, cache, model_key, last: dict,
-                   save_disk, disk_dir=None) -> bool:
+                   save_disk, disk_dir=None, disk_key=None) -> bool:
     """A following rank's prompt-cache ops, applied to its own part as rank
     0 applied them to its: insert (with the owner), pop, drop and pin of a
     session (memory and this rank's own files), and the saves. False for
     an op that is not one of them. `last`: the last step's checkpoint and
     finished caches by (event, uid); `save_disk(only_new, select)`: this
     rank's save."""
+    from pathlib import Path
+
     from knurlogic.engine.serve import prompt_disk
     kind = op["op"]
     if kind == "insert":
@@ -887,6 +894,28 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
         prompt_disk.drop_files(op["session"])
     elif kind == "drop_sessionless":
         cache.drop_sessionless()          # memory: the same entries as rank 0
+    elif kind == "park_session":
+        # rank 0 parked the session: the same entries saved, then freed --
+        # those this rank's save wrote (all of them: a ring has no
+        # not-worth-it skip)
+        mine = {tuple(t) for _, t in cache.of_session(op["session"])}
+        if mine:
+            save_disk(only_new=True, select=mine)
+        for m, t in cache.of_session(op["session"]):
+            meta = cache.owners.get(tuple(t)) or {}
+            if meta.get("file") and Path(meta["file"]).exists():
+                cache.remove(m, t)
+    elif kind == "read_back":
+        # rank 0 read a parked or evicted entry back for the request it is
+        # about to admit: this rank reads its own part, by the same name.
+        # Missing, the ranks would prefill different lengths -- out of step
+        got = prompt_disk.read(disk_key, [disk_dir / op["name"]]) \
+            if disk_dir is not None and disk_key is not None \
+            and "/" not in op["name"] else []
+        if not got:
+            raise Desync(f"read_back: no {op['name']} on this rank")
+        prompt_disk.adopt(cache.owners, cache.pinned, prompt_disk.insert(
+            cache.lru, model_key, got), shared=cache.shared)
     elif kind == "drop_files":
         # rank 0's files of a drop, by name: an entry's files carry the same
         # name on every rank, so this rank's part goes too and no rank keeps
@@ -956,9 +985,12 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
             return
         try:
             cache.live()                    # prunes the side map
+            # no sweep of its own: rank 0's saves sweep and name what they
+            # delete (a drop_files op), so every rank keeps the same files
             prompt_disk.save(cache.lru, disk_key, owners=cache.owners,
                              shared=cache.shared,
-                             only_new=only_new, select=select)
+                             only_new=only_new, select=select,
+                             sweep_after=False)
         except Exception:  # never stops a rank (logged)
             logger.exception("rank %d: saving the prompt cache failed",
                              link.rank)
@@ -1038,7 +1070,8 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                     chunks.pop(u, None)
             elif apply_cache_op(op, cache, model_key, last, save_disk,
                                 prompt_disk.root() / prompt_disk.key_id(
-                                    disk_key) if disk_key else None):
+                                    disk_key) if disk_key else None,
+                                disk_key):
                 pass
             elif kind == "set":
                 apply_set(op, link.rank)
@@ -1237,7 +1270,8 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
         try:
             key = prompt_disk.host_key(host)
             got = prompt_disk.read(key, prompt_disk.candidates(
-                key, prompt_cache_size)) if key is not None else []
+                key, prompt_cache_size, sweep_first=False)) \
+                if key is not None else []
         except Exception:  # a restore that fails is a miss (logged)
             logger.exception("rank %d: reading the saved prompt cache "
                              "failed", link.rank)
