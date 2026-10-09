@@ -1,5 +1,11 @@
 # Fleet: request records, attribution, and the control plane
 
+Status: planned, mostly not built. Fleet is the next stage: a higher-level
+management layer (team or company use, possibly hosted). Built today: the
+request ledger and `GET /v1/usage`. Keys, quotas, `/metrics`, the usage
+tab and the CLI commands below are not. Analytics inside knurlogic itself
+(outside fleet) is wanted too and not built yet.
+
 ## What someone pays for
 
 One person on one Mac gets everything for free and should. A team with
