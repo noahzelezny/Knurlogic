@@ -26,7 +26,8 @@ CONTROL_LEN = 5
 OVER, STEP, LENGTH, ACTIVE, PEAK = range(CONTROL_LEN)
 
 OPS = ("admit", "remove", "chunk", "insert", "pop", "reset", "stop", "park",
-       "set", "save_cache", "drop", "pin", "drop_sessionless", "drop_files")
+       "set", "save_cache", "drop", "pin", "drop_sessionless", "drop_files",
+       "park_session", "read_back")
 #: admit's `chunk` is the prefill chunk rank 0 fitted the row at (memory:
 #: scheduler._make_room); `chunk` (uid, chunk) refits a row not yet
 #: prefilled (scheduler._fit_next). Ranks prefilling one row in different
@@ -49,6 +50,10 @@ _FIELDS = {
     "drop_sessionless": (),
     # rank 0's dropped files, by name: every rank deletes the same
     "drop_files": ("names",),
+    # a session's entries saved and freed on every rank; one read back
+    # by file name before the admit that hits it
+    "park_session": ("session",),
+    "read_back": ("name",),
 }
 #: fields an op may carry besides its own: insert's owner (the session that
 #: made the entry, engine/runtime/tensor.JournalPromptCache), a session's
@@ -108,7 +113,11 @@ def check(plan) -> None:
                 isinstance(op["owner"], dict)
                 and all(isinstance(k, str) for k in op["owner"])):
             raise PlanError(f"insert owner is an object, got {op['owner']!r}")
-        if op["op"] in ("drop", "pin") or (op["op"] == "save_cache"
+        if op["op"] == "read_back" and (not isinstance(op["name"], str)
+                                        or "/" in op["name"]
+                                        or not op["name"]):
+            raise PlanError("read_back name is a file name")
+        if op["op"] in ("drop", "pin", "park_session") or (op["op"] == "save_cache"
                                            and "session" in op):
             if not isinstance(op["session"], str) or not op["session"]:
                 raise PlanError(f"{op['op']} session is a non-empty string")

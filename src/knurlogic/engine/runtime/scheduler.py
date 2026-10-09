@@ -305,6 +305,9 @@ class Job:
     #: X-Cache-Keep: latest -- its entries replace its session's earlier
     #: ones (the client never resumes from an earlier step)
     keep_latest: bool = False
+    #: where this prompt left its session's longest entry, when it did
+    #: (usage.knurlogic.cache.diverged; Scheduler._diverged)
+    diverged: dict | None = None
 
     def cancel(self) -> None:
         """From the HTTP thread: the client went away; free the row."""
@@ -1082,13 +1085,23 @@ class Scheduler:
             if key is None:
                 return None
             self.cache.live()               # prunes the side map
+            removed: list = []
             got = prompt_disk.save(
                 self.cache.lru, key, owners=self.cache.owners,
                 shared=self.cache.shared,
                 only_new=only_new, select=select,
                 prefill_tps=self._prefill_tps if self.tensor is None
                 else None,
-                model=Path(self.host.path or "").name or None)
+                model=Path(self.host.path or "").name or None,
+                removed=removed)
+            mine = prompt_disk.root() / prompt_disk.key_id(key)
+            gone = sorted(f.name for f in removed if f.parent == mine)
+            for t in [t for t, v in self._disk_index.items()
+                      if Path(v.get("file", "")).name in gone]:
+                del self._disk_index[t]
+            if self.tensor is not None and gone:
+                # the other ranks never sweep: they delete these, by name
+                self.tensor.journal.add("drop_files", names=gone)
             for t, meta in self.cache.owners.items():
                 if meta.get("file"):
                     self._disk_index[t] = {
@@ -1144,15 +1157,51 @@ class Scheduler:
                 "bytes": int((got or {}).get("bytes", 0)), "freed": n,
                 "in_memory": len(self.cache.of_session(session))}
 
+    def _diverged(self, job: Job, prompt: list, hit: int) -> None:
+        """A session's prompt that does not extend its own longest entry:
+        where the two part, with a few tokens of each side as text -- a
+        client resuming a session (a coordinator session) can see what it rendered
+        differently (a turn's reasoning dropped, a header changed) instead
+        of an unexplained re-prefill. Logged, and in usage."""
+        mine = [tuple(t) for _, t in self.cache.of_session(job.session)] \
+            if hasattr(self.cache, "of_session") else []
+        if not mine:
+            return
+        def common(e):
+            n = min(len(e), len(prompt))
+            return next((i for i in range(n) if e[i] != prompt[i]), n)
+        # an entry the prompt extends is a hit (its answer's own entry
+        # parting at the re-rendered answer is normal): only when none is
+        # does the prompt say something the session did not
+        if any(common(e) == len(e) for e in mine):
+            return
+        e = max(mine, key=lambda e: (common(e), len(e)))
+        at = common(e)
+        tok = getattr(self.host, "tokenizer", None)
+
+        def text(ts):
+            try:
+                return tok.decode(list(ts))[:120] if tok is not None else ""
+            except Exception:  # a text view only; never the request's failure
+                return ""
+        job.diverged = {"entry_tokens": len(e), "at": at, "hit": int(hit),
+                        "prompt_text": text(prompt[at:at + 32]),
+                        "entry_text": text(e[at:at + 32])}
+        logger.info("prompt cache: session %s's prompt (%d tokens) leaves "
+                    "its %d-token entry at token %d (hit %d): prompt %r vs "
+                    "entry %r", job.session, len(prompt), len(e), at, hit,
+                    job.diverged["prompt_text"], job.diverged["entry_text"])
+
     def _read_back(self, job: Job, prompt: list) -> None:
         """Before the admission's hit: when an entry of this model on disk
         is a prefix of `prompt` and longer than the best memory hit, read
         it back into the prompt cache (here, on the scheduler thread), so
         fetch() serves it -- and usage.knurlogic.cache.disk says so, like a
-        restored hit. Any on-disk entry, pinned or not. A single server
-        only: a ring's ranks would each have to read theirs in step."""
-        if not self._disk_index or self.tensor is not None or \
-                self._disk_key is None:
+        restored hit. Any on-disk entry, pinned or not. On a ring rank 0
+        picks the file and a `read_back` op names it, ahead of the admit:
+        every rank reads its own part (the ranks keep the same files: only
+        rank 0 sweeps, and names what it deletes)."""
+        if not self._disk_index or self._disk_key is None:
             return
         hit = self.cache.hit_length(self.host.model_key, prompt)
         best = None
@@ -1174,6 +1223,8 @@ class Scheduler:
         prompt_disk.adopt(self.cache.owners, self.cache.pinned, back,
                           shared=self.cache.shared)
         self._restored.update(back)
+        if self.tensor is not None:
+            self.tensor.journal.add("read_back", name=Path(f).name)
 
     def _restore_disk(self) -> None:
         """ModelHost.after_bind: what was saved for this model, into the
@@ -1193,7 +1244,15 @@ class Scheduler:
                           self._restored, shared=self.cache.shared)
         self._disk_key = key
         self._disk_index = {}
-        if key is not None and self.tensor is None:
+        if key is not None and self.tensor is not None:
+            # a ring: only what every rank agreed to and restored at this
+            # load (their directories may differ from before), then what
+            # they all write together -- a read_back of a file one rank
+            # lacks would put the ranks out of step
+            self._disk_index = {
+                t: {"file": Path(v["file"]), "owner": v.get("owner")}
+                for t, v in self._restored.items() if v.get("file")}
+        elif key is not None:
             try:
                 self._disk_index = prompt_disk.index(
                     prompt_disk.root() / prompt_disk.key_id(key))
@@ -1244,11 +1303,11 @@ class Scheduler:
         return {"sessionless": True, "memory": mem, "disk": disk}
 
     def _cmd_park(self, c: Command) -> dict:
-        if self.tensor is not None:
-            # a ring's ranks cannot read a parked entry back in step yet
-            raise RuntimeError("parking is not available on a model split "
-                               "across machines yet; drop or save instead")
         got = self._park(c.session, why="parked on request")
+        if self.tensor is not None:
+            # every rank saves and frees the same entries (park_session);
+            # a request on the session reads them back in step (read_back)
+            self.tensor.journal.add("park_session", session=c.session)
         return {"session": c.session, **got}
 
     def _cmd_pin(self, c: Command) -> dict:
@@ -1508,6 +1567,8 @@ class Scheduler:
                 self._read_back(job, prompt)
             hit = getattr(self.cache, "hit_length", lambda k, t: 0)(
                 self.host.model_key, prompt)
+            if s:
+                self._diverged(job, prompt, hit)
             lean = self._make_room(len(prompt),
                                    _checkpoints(segs, len(prompt), hit)) \
                 == "lean"
@@ -2318,6 +2379,8 @@ class Scheduler:
             report["disk"] = {"tokens": min(int(d.get("tokens", 0)), used),
                               "read_ms": d.get("read_ms", 0.0)
                               if d and used else 0.0}
+            if row.job.diverged:
+                report["diverged"] = row.job.diverged
         usage = row.text.usage(report)
         done = time.perf_counter()
         timing = _timing(

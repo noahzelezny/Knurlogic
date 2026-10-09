@@ -145,7 +145,16 @@ The cache belongs to the agent (the client session), not the model.
   memory; one the save did not write stays. Its next request reads the
   longest on-disk prefix back. The client decides when (the harness parks its
   PM while sub-agents work); the server keeps no idle policy: a
-  pin only exempts a session from deletion, never moves it. Refused on a split model (no read-back there yet).
+  pin only exempts a session from deletion, never moves it. On a split
+  model a `park_session` op has every rank save and free the same
+  entries, and a request that hits a parked entry is preceded by a
+  `read_back` op naming the file rank 0 read: every rank reads its own
+  part. That needs the ranks to hold the same files, so on a ring only
+  rank 0 sweeps (never at load) and names what it deletes (`drop_files`),
+  and rank 0 reads back only files agreed at load or written since.
+- **Divergence.** A session's prompt that extends none of its entries
+  reports where it left the closest one: `usage.knurlogic.cache.diverged`
+  {entry_tokens, at, hit, prompt_text, entry_text}, and a log line.
 - **Drop.** `POST /v1/prompt-cache/drop {"session"}`, between steps:
   out of memory (mlx-lm 0.32 has no single-entry removal;
   `prompt_disk.remove_entry` does what its `insert_cache` does to a
