@@ -8,7 +8,7 @@ from types import SimpleNamespace as NS
 from knurlogic.engine.runtime import prompt as P
 from knurlogic.engine.runtime import scheduler as S
 from knurlogic.engine.runtime.executor import Finished, Token
-from knurlogic.engine.runtime.spans import Spans, step_bucket
+from knurlogic.engine.runtime.timing import Spans, step_bucket
 
 
 def test_the_buckets_sum_to_the_whole_by_construction():
@@ -145,3 +145,34 @@ def test_a_bare_job_like_object_is_still_accepted():
     job.outbox = queue.Queue()
     s.submit(job)
     assert job.spans.buckets == {}
+
+
+def test_timing_prefill_rate_is_compute_only_and_floored():
+    from types import SimpleNamespace as NS
+
+    from knurlogic.engine.runtime.timing import rates
+    job = NS(submitted=0.0)
+    # waited 5 s for its turn, then 1000 fresh tokens in 2 s of compute
+    row = NS(job=job, admitted=1.0, began=6.0, first=8.0)
+    t = rates(row, 9.0, 10, 1000)
+    assert t["prefill_tok_s"] == 500.0
+    assert t["queue_s"] == 1.0
+    # too few fresh tokens, or too short a time: no rate is sent
+    assert "prefill_tok_s" not in rates(row, 9.0, 10, 255)
+    short = NS(job=job, admitted=1.0, began=1.0, first=1.04)
+    assert "prefill_tok_s" not in rates(short, 2.0, 10, 1000)
+    assert "prefill_tok_s" not in rates(row, 9.0, 10, None)
+
+
+def test_timing_reports_cached_vs_computed_and_the_chunk():
+    from types import SimpleNamespace as NS
+
+    from knurlogic.engine.runtime.timing import rates
+    row = NS(job=NS(submitted=0.0), admitted=1.0, began=1.0, first=1.17)
+    t = rates(row, 2.0, 10, 0, 296, 2048)
+    assert t["prefill"] == "cached" and "prefill_tok_s" not in t
+    assert (t["prompt_cached_tokens"], t["prompt_computed_tokens"],
+            t["prefill_chunk"]) == (296, 0, 2048)
+    mixed = NS(job=NS(submitted=0.0), admitted=1.0, began=1.0, first=3.0)
+    t = rates(mixed, 4.0, 10, 1000, 500, 2048)
+    assert t["prefill_tok_s"] == 500.0 and "prefill" not in t

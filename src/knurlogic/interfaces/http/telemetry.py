@@ -4,9 +4,17 @@ byte into one ledger row (machine/ledger.py), and the SSE
 `knurlogic.progress` event.
 
 A Request's id is the client's X-Request-Id when it sent a valid one
-(request_id.valid: 1..128 printable ASCII), echoed exactly; otherwise a
-ULID minted here. Either way it is the X-Request-Id answered,
-usage.knurlogic.request_id, and the row's id."""
+(valid_id: 1..128 printable ASCII), echoed exactly; otherwise a ULID
+minted here. Either way it is the X-Request-Id answered,
+usage.knurlogic.request_id, and the row's id. The page's router passes a
+client's header on and returns the model server's id, falling back to the
+client's own when an upstream sends none (interfaces/page/server.py).
+
+A value that is not a valid id is not one this server will repeat into a
+header, and is ignored rather than refused.
+
+TelemetryHandlers (a mixin of server.Handler) answers GET /v1/usage from
+this machine's ledger."""
 from __future__ import annotations
 
 import json
@@ -14,10 +22,31 @@ import time
 
 from knurlogic.machine import ledger as L
 
-from . import request_id as RID
+from . import openai as O
 
 VERSION = 1
 EVENT = "knurlogic.progress"
+
+HEADER = "X-Request-Id"
+MAX_LEN = 128
+
+
+def valid_id(value) -> str | None:
+    """`value` if it may be echoed, else None."""
+    if not isinstance(value, str) or not 0 < len(value) <= MAX_LEN:
+        return None
+    if any(not (0x20 <= ord(ch) <= 0x7E) for ch in value):
+        return None
+    return value
+
+
+def id_of(headers) -> str | None:
+    """The request's id from its headers (any case), or None."""
+    try:
+        return valid_id(headers.get(HEADER)) if headers is not None else None
+    except AttributeError:
+        return None
+
 
 _MACHINE: list = []
 
@@ -36,7 +65,7 @@ class Request:
     """One HTTP inference request, as the ledger records it."""
 
     def __init__(self, api: str, headers, *, progress: bool = False):
-        self.id = RID.of(headers) or L.ulid()
+        self.id = id_of(headers) or L.ulid()
         self.api = api
         self.ts_start = time.time()
         self.labels = L.labels(headers)
@@ -100,3 +129,36 @@ def progress(request_id, phase: str, done: int = 0, total: int = 0,
             "done": int(done), "total": int(total), "tps": tps,
             "queue": {"ahead": int(ahead)}}
     return f"event: {EVENT}\ndata: {json.dumps(data)}\n\n".encode()
+
+
+class TelemetryHandlers:
+    """Handler's GET /v1/usage (interfaces/http/server)."""
+
+    def _usage(self, q: dict) -> None:
+        """GET /v1/usage?since=&until=&group=&key=: this machine's ledger
+        summed by one label (fleet.md, "Reading it back"). Until keys
+        exist, the loopback operator only."""
+        import ipaddress
+
+        try:
+            loop = ipaddress.ip_address(
+                self.client_address[0].split("%")[0]).is_loopback
+        except ValueError:
+            loop = False
+        if not loop:
+            return self._json(403, {"error": {
+                "message": "usage is read on this machine (loopback) only",
+                "type": "permission_error"}})
+
+        def one(name, default=None):
+            return (q.get(name) or [default])[0]
+        try:
+            since = float(one("since", 0))
+            until = float(one("until")) if one("until") else None
+            group = one("group", "model")
+            rows = L.ledger().summary(since, until, group, one("key"))
+        except ValueError as e:
+            return self._error(O.ApiError(400, str(e)))
+        return self._json(200, {"object": "usage", "since": since,
+                                "until": until, "group": group,
+                                "summary": rows})

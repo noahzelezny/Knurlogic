@@ -1262,14 +1262,14 @@ def chat_targets() -> set:
 
 
 def _send_json(handler, code: int, doc) -> None:
-    from knurlogic.interfaces.http import request_id as RID
+    from knurlogic.interfaces.http import telemetry as T
     out = json.dumps(doc).encode()
     handler.send_response(code)
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(out)))
-    rid = RID.of(getattr(handler, "headers", None))
+    rid = T.id_of(getattr(handler, "headers", None))
     if rid:
-        handler.send_header(RID.HEADER, rid)
+        handler.send_header(T.HEADER, rid)
     try:
         handler.end_headers()
         handler.wfile.write(out)
@@ -1322,11 +1322,11 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
     import urllib.error
     import urllib.request
 
-    from knurlogic.interfaces.http import request_id as RID
-    rid = RID.of(getattr(handler, "headers", None))
+    from knurlogic.interfaces.http import telemetry as T
+    rid = T.id_of(getattr(handler, "headers", None))
     req = urllib.request.Request(url, data=body,
                                  headers={"Content-Type": "application/json",
-                                          **({RID.HEADER: rid} if rid else {}),
+                                          **({T.HEADER: rid} if rid else {}),
                                           **_client_headers(handler)},
                                  method="POST")
     try:
@@ -1347,9 +1347,9 @@ def _stream(handler, url: str, body: bytes, timeout: float = 3600,
     handler.send_header("Content-Type", ctype)
     # the model server's echo, else the client's own id (an upstream that
     # predates the echo); either way the client gets its id back
-    echo = RID.valid(up.headers.get(RID.HEADER)) or rid
+    echo = T.valid_id(up.headers.get(T.HEADER)) or rid
     if echo:
-        handler.send_header(RID.HEADER, echo)
+        handler.send_header(T.HEADER, echo)
     handler.send_header("Cache-Control", "no-store")
     handler.send_header("Connection", "close")
     handler.end_headers()
