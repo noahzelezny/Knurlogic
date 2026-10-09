@@ -112,7 +112,7 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
     import signal
     import threading
 
-    from knurlogic.cluster import jobs
+    from knurlogic.engine.runtime import marker
     from knurlogic.engine.runtime.scheduler import RingFailed
 
     armed: list = []
@@ -120,9 +120,9 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
     def probe():
         if not armed and getattr(mh, "state", "") == "ready":
             armed.append(1)
-            jobs.after_load()
+            marker.after_load()
         return {"busy": bool(sched.busy)}
-    m = jobs.CURRENT["marker"]
+    m = marker.CURRENT["marker"]
     if m is not None:
         m.probe = probe
 
@@ -143,7 +143,7 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
         # left on the GPU, then leave non-zero so the page's recovery
         # relaunches the job. A cleanup stuck behind a collective is not
         # waited for past stop_within.
-        jobs.progress(phase="stopping")
+        marker.progress(phase="stopping")
 
         def go():
             import time
@@ -158,7 +158,7 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
     sched.on_ring_failed = leave_after_ring_failure
 
     def on_term(_sig, _frame):
-        jobs.progress(phase="stopping")
+        marker.progress(phase="stopping")
         if getattr(mh, "state", "") in ("warming", "ready"):
             # An unload with the ring alive: stop at a step boundary (while
             # warming, once the warm-up's forwards are done). The

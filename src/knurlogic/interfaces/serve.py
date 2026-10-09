@@ -298,8 +298,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         _ring_marker(ring)
         # what this rank holds once loaded (rank 0: its share plus the MTP
         # head and tower it alone holds): the page's load % is against it
-        from knurlogic.cluster import jobs as _J
-        _J.progress(share_bytes=int(share or 0) or None)
+        from knurlogic.engine.runtime import marker
+        marker.progress(share_bytes=int(share or 0) or None)
         # the ring-wide knobs beat the resolver like any --set
         overrides = dict(overrides or {})
         overrides.pop("VQLAB_PREFILL_CHUNK", None)
@@ -787,9 +787,10 @@ def _ring_marker(ring: dict) -> None:
     in its job dir, which the page watches (cluster/jobs.py). A ring
     started by hand has no page watching it and no marker."""
     from knurlogic.cluster import jobs
+    from knurlogic.engine.runtime import marker
     if not jobs.JOB_RX.fullmatch(str(ring.get("job") or "")):
         return
-    jobs.CURRENT["marker"] = jobs.Marker(ring["job"],
+    marker.CURRENT["marker"] = jobs.Marker(ring["job"],
                                          int(ring["rank"])).start()
 
 

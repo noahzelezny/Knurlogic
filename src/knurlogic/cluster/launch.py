@@ -1073,7 +1073,7 @@ def rank_env(spec: dict, files: dict, selfheal: bool) -> dict:
         env["MLX_JACCL_COORDINATOR"] = spec["coordinator"]
         if selfheal and spec.get("jaccl_timeout_ms"):
             # 0 while loading -- a cold read is not a hang -- and the
-            # deadline once the model is in (cluster/jobs.after_load)
+            # deadline once the model is in (engine/runtime/marker.after_load)
             env["JACCL_COLLECTIVE_TIMEOUT_MS"] = "0"
             env["KNURLOGIC_JACCL_TIMEOUT_MS"] = str(int(
                 spec["jaccl_timeout_ms"]))

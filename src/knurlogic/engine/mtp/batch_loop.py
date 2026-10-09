@@ -28,7 +28,7 @@ from typing import Any
 import mlx.core as mx
 from mlx_lm.generate import _extend_cache, _merge_caches
 
-from knurlogic.cluster.jobs import chunk_done
+from knurlogic.engine.runtime.marker import chunk_done
 
 from .caches import position, release, restore, rollback, snapshot
 from .sampling import Distribution, Keys, rejection_correct

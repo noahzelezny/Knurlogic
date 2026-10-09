@@ -27,11 +27,11 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_map, tree_map_with_path
 
-from knurlogic.cluster.jobs import progress
 from knurlogic.engine.prompt_cache.ring import apply_cache_op
 
 from . import plan as P
 from .executor import Admission, Checkpoint, Finished, LocalExecutor
+from .marker import progress
 from .tensor_rules import (
     PARTS,
     RULES,
@@ -1120,7 +1120,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                            f"{host.error}")
     logger.info("rank %d: %s loaded, %.1f GiB active", link.rank, path,
                 mx.get_active_memory() / GIB)
-    from knurlogic.cluster.jobs import after_load
+    from .marker import after_load
     after_load()
     drafting = bool(heads and heads.leader)
     from knurlogic.engine.serve import state
