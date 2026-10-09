@@ -61,7 +61,7 @@ Every test, automatically:
 
 - A test that needs real weights, a second Mac, Bonjour or a Thunderbolt
   link skips itself (`pytest.mark.skipif` on the file or path it needs;
-  some name the variable to set, e.g. `KNURLOGIC_TEST_DEEPSEEK_V4`).
+  some name the variable to set, e.g. `KNURLOGIC_TEST_DEEPSEEK_V4_HEAD` and `KNURLOGIC_TEST_DEEPSEEK_V4_VQ_HEAD`).
 - Real-model gates are scripts in `tools/` (`vision_gate.py`), run by
   hand, one artifact at a time, behind the load lock. Never call them from
   `tests/`.
