@@ -204,11 +204,11 @@ def test_off_saves_and_restores_nothing(tmp_path, monkeypatch):
 
 
 def test_the_saved_setting_beats_the_environment(tmp_path, monkeypatch):
-    from knurlogic.machine import preferences
+    from knurlogic.tuning import preferences
     monkeypatch.setenv(D.ENV_TTL, "5")
     preferences.path().write_text('{"KNURLOGIC_PROMPT_CACHE_TTL_H": "2"}')
     assert D.ttl_s() == 7200
-    from knurlogic.tuning.settings import check_knob
+    from knurlogic.tuning.checks import check_knob
     assert check_knob("KNURLOGIC_PROMPT_CACHE_TTL_H", "0")
     assert check_knob("KNURLOGIC_PROMPT_CACHE_DISK", "maybe")
     assert check_knob("KNURLOGIC_PROMPT_CACHE_DISK_GB", "") is None

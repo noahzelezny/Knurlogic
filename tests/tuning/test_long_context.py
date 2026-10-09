@@ -22,8 +22,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from knurlogic.machine.artifact import Artifact  # noqa: E402
-from knurlogic.tuning import settings as S  # noqa: E402
-from knurlogic.tuning.resolve import GIB, long_context_room, resolve  # noqa: E402
+from knurlogic.tuning import checks, context_window  # noqa: E402
+from knurlogic.tuning.context_window import long_context_room  # noqa: E402
+from knurlogic.tuning.fit import GIB  # noqa: E402
+from knurlogic.tuning.resolve import resolve  # noqa: E402
 
 FACTOR, ORIG = 4.0, 262144
 
@@ -71,13 +73,14 @@ REAL_35B = {"model_type": "qwen3_5_moe", "text_config": {
 
 
 def test_off_is_no_overlay_and_the_window_stays():
-    assert S.long_context_config(REAL_35B, "off") == {}
-    assert S.long_context_config(REAL_35B, None) == {}
-    assert S.model_window(S.with_long_context(REAL_35B, "off"))[0] == 262144
+    assert context_window.long_context_config(REAL_35B, "off") == {}
+    assert context_window.long_context_config(REAL_35B, None) == {}
+    assert context_window.model_window(
+        context_window.with_long_context(REAL_35B, "off"))[0] == 262144
 
 
 def test_yarn_overlays_qwens_documented_rope_and_keeps_mrope():
-    ov = S.long_context_config(REAL_35B, "yarn")
+    ov = context_window.long_context_config(REAL_35B, "yarn")
     rp = ov["text_config"]["rope_parameters"]
     assert rp["rope_type"] == "yarn" and "type" not in rp
     assert rp["factor"] == 4.0
@@ -87,20 +90,21 @@ def test_yarn_overlays_qwens_documented_rope_and_keeps_mrope():
     assert rp["rope_theta"] == 10000000
     # the artifact's dict is not touched
     assert REAL_35B["text_config"]["rope_parameters"]["type"] == "default"
-    w, why = S.model_window(S.with_long_context(REAL_35B, "yarn"))
+    w, why = context_window.model_window(
+        context_window.with_long_context(REAL_35B, "yarn"))
     assert w == 1_048_576 and "YaRN" in why
 
 
 def test_only_documented_families_take_it():
-    assert S.long_context_refusal("qwen4_exp", "yarn") is None
-    assert S.long_context_refusal("qwen3_5_text", "yarn") is None
-    why = S.long_context_refusal("glm5_next", "yarn")
+    assert context_window.long_context_refusal("qwen4_exp", "yarn") is None
+    assert context_window.long_context_refusal("qwen3_5_text", "yarn") is None
+    why = context_window.long_context_refusal("glm5_next", "yarn")
     assert why and "qwen3_5" in why
-    assert S.long_context_refusal("glm5_next", "off") is None
+    assert context_window.long_context_refusal("glm5_next", "off") is None
     with pytest.raises(ValueError):
-        S.long_context_config({"model_type": "gemma4"}, "yarn")
-    assert S.check_knob("KNURLOGIC_LONG_CONTEXT", "yarn") is None
-    assert S.check_knob("KNURLOGIC_LONG_CONTEXT", "ntk")
+        context_window.long_context_config({"model_type": "gemma4"}, "yarn")
+    assert checks.check_knob("KNURLOGIC_LONG_CONTEXT", "yarn") is None
+    assert checks.check_knob("KNURLOGIC_LONG_CONTEXT", "ntk")
 
 
 def _art(cfg=REAL_35B, gib=20):
@@ -140,13 +144,13 @@ def test_a_context_the_box_cannot_hold_is_refused_with_the_numbers():
 
 
 def test_the_page_accepts_a_million_tokens_only_with_yarn():
-    from knurlogic.interfaces.page import documents
+    from knurlogic.tuning import checks
     a = _art()
-    assert documents.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "1000000"})
-    assert documents.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "1000000",
-                               "KNURLOGIC_LONG_CONTEXT": "yarn"}) is None
+    assert checks.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "1000000"})
+    assert checks.refuse_sets(a, {"KNURLOGIC_CONTEXT_LENGTH": "1000000",
+                                  "KNURLOGIC_LONG_CONTEXT": "yarn"}) is None
     glm = _art({"model_type": "glm5_next", "max_position_embeddings": 202752})
-    assert "refused" in documents.refuse_sets(glm, {"KNURLOGIC_LONG_CONTEXT": "yarn"})
+    assert "refused" in checks.refuse_sets(glm, {"KNURLOGIC_LONG_CONTEXT": "yarn"})
 
 
 def test_the_loader_overlays_from_the_launch_env(tmp_path):
@@ -171,7 +175,7 @@ def _tiny(fam, mode):
     register.register("qwen3_5", "qwen3_5_moe", "qwen4_exp", override=True)
     arch = importlib.import_module(f"mlx_lm.models.{fam}")
     _, meta = fv.load_golden("qwen_g5_text")
-    cfg = S.with_long_context(meta[f"{fam}/config"], mode)
+    cfg = context_window.with_long_context(meta[f"{fam}/config"], mode)
     mx.random.seed(0)
     model = arch.Model(arch.ModelArgs.from_dict(cfg))
     model.set_dtype(mx.float32)

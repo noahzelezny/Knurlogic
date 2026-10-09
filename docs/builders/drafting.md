@@ -35,8 +35,8 @@ Elsewhere:
   broadcast to followers.
 - `interfaces/drafting.py`: `knurlogic mtp`, the machine-wide survey;
   `interfaces/mcp.py`: the `drafting` tool.
-- `tuning/settings.py`: `MTP_MODE`, `MTP_MODES`, `mtp_of`, the
-  `KNURLOGIC_MTP*` knobs; `tuning/resolve.py`: `mtp_head_bytes`.
+- `tuning/presets.py`: `MTP_MODE`, `MTP_MODES`; `tuning/knobs.py`:
+  `mtp_of`, the `KNURLOGIC_MTP*` knobs; `tuning/fit.py`: `mtp_head_bytes`.
 
 ## Rules that keep it correct
 
@@ -67,7 +67,7 @@ drafter adds `block`. The checklist item is
 Drafting spans `engine/mtp/` (the engine and registry),
 `engine/families/*/heads/` (by design), `engine/serve/drafting.py` and
 `state.py` (binding), `interfaces/drafting.py` (the survey) and
-`tuning/settings.py` (the knobs).
+`tuning/knobs.py` (the knobs).
 
 ## Tests
 

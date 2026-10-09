@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from knurlogic.machine.artifact import Artifact
-from knurlogic.tuning import settings as S
+from knurlogic.tuning import checks, knobs, measured, presets
 from knurlogic.tuning.resolve import apply_preset_overrides, preset_env, resolve
 
 GIB = 1 << 30
@@ -21,12 +21,12 @@ def _art(model_type="qwen3_5"):
 
 
 def test_presets_are_the_tune_axis_and_default_is_the_default():
-    assert set(S.PRESETS) == set(S.TUNE_PROFILES) == {"default", "lean"}
-    assert S.PRESET_DEFAULT == "default"
-    assert S.preset_of("") == "default"
-    assert S.preset_of(None, "lean") == "lean"
+    assert set(presets.PRESETS) == set(presets.TUNE_PROFILES) == {"default", "lean"}
+    assert presets.PRESET_DEFAULT == "default"
+    assert presets.preset_of("") == "default"
+    assert presets.preset_of(None, "lean") == "lean"
     with pytest.raises(ValueError):
-        S.preset_of("turbo")
+        presets.preset_of("turbo")
     r = resolve(_art(), 96 * GIB)
     assert r.env["KNURLOGIC_PRESET"] == "default"
     assert r.preset["name"] == "default"
@@ -39,20 +39,20 @@ def test_the_names_presets_once_had_are_the_two_now():
     for old, now in (("balanced", "default"), ("fast", "default"),
                      ("stable", "default"), ("safe", "lean"),
                      ("Default", "default"), ("LEAN", "lean")):
-        assert S.preset_of(old) == now
-        assert S.preset_arg(old) == now
+        assert presets.preset_of(old) == now
+        assert presets.preset_arg(old) == now
     r = resolve(_art(), 96 * GIB, tune="safe")
     assert r.env["KNURLOGIC_PRESET"] == "lean"
     assert resolve(_art(), 96 * GIB, tune="fast").env[
         "KNURLOGIC_PRESET"] == "default"
-    assert S.check_knob("KNURLOGIC_PRESET", "stable") is None
+    assert checks.check_knob("KNURLOGIC_PRESET", "stable") is None
     with pytest.raises(argparse.ArgumentTypeError):
-        S.preset_arg("turbo")
+        presets.preset_arg("turbo")
 
 
 def test_default_takes_the_family_width_and_dynamic_mtp():
     r = resolve(_art(), 96 * GIB, tune="default")
-    e = S.engine_settings(r.env)
+    e = knobs.engine_settings(r.env)
     assert e["prefill_step_size"] == 2048    # the room rule
     assert e["kv_bits"] is None and e["cross_chip"] == "off"
     assert preset_env(_art(), "default") == {}    # it asks for nothing
@@ -61,7 +61,7 @@ def test_default_takes_the_family_width_and_dynamic_mtp():
 def test_lean_is_512_and_keeps_less_cache():
     r = resolve(_art(), 96 * GIB, tune="lean")
     b = resolve(_art(), 96 * GIB)
-    e, eb = S.engine_settings(r.env), S.engine_settings(b.env)
+    e, eb = knobs.engine_settings(r.env), knobs.engine_settings(b.env)
     assert e["prefill_step_size"] == 512
     assert e["cross_chip"] == "off"    # per-chip rounding is no preset's
     assert e["cache_limit_gb"] < eb["cache_limit_gb"]
@@ -69,7 +69,7 @@ def test_lean_is_512_and_keeps_less_cache():
 
 def test_lean_quantizes_kv_where_the_family_takes_it():
     r = resolve(_art(), 96 * GIB, tune="lean")
-    e = S.engine_settings(r.env)
+    e = knobs.engine_settings(r.env)
     assert e["kv_bits"] == 8
     assert e["prefill_step_size"] == 512
     assert "prompt_concurrency" not in e    # the engine prefills one anyway
@@ -80,10 +80,10 @@ def test_lean_on_a_family_that_refuses_kv_quant_stays_bf16_and_says_so(
         monkeypatch):
     """Every served family takes 8 bits now; a family that declared none
     (a new one, before its caches are wired) still falls back."""
-    monkeypatch.setattr(S, "kv_quant_for",
+    monkeypatch.setattr(measured, "kv_quant_for",
                         lambda mt: ([], "no family declares it"))
     r = resolve(_art("glm5_next"), 96 * GIB, tune="lean")
-    assert S.engine_settings(r.env)["kv_bits"] is None
+    assert knobs.engine_settings(r.env)["kv_bits"] is None
     assert any("stays bf16" in n and "preset lean" in n for n in r.notes)
     assert preset_env(_art("glm5_next"), "lean")["KNURLOGIC_KV_BITS"] == "bf16"
 
@@ -92,7 +92,7 @@ def test_lean_on_a_family_that_refuses_kv_quant_stays_bf16_and_says_so(
                                 "gemma4_text"])
 def test_lean_takes_8_bit_kv_on_every_family(mt):
     r = resolve(_art(mt), 96 * GIB, tune="lean")
-    assert S.engine_settings(r.env)["kv_bits"] == 8
+    assert knobs.engine_settings(r.env)["kv_bits"] == 8
 
 
 def test_an_explicit_setting_beats_the_preset_and_is_reported():
@@ -107,8 +107,8 @@ def test_an_explicit_setting_beats_the_preset_and_is_reported():
 
 
 def test_the_preset_is_a_launch_knob_with_a_native_range():
-    assert "KNURLOGIC_PRESET" in S.MODEL_KNOBS
-    assert S.KNOB_RANGE["KNURLOGIC_PRESET"][0] == list(S.PRESETS)
+    assert "KNURLOGIC_PRESET" in knobs.MODEL_KNOBS
+    assert knobs.KNOB_RANGE["KNURLOGIC_PRESET"][0] == list(presets.PRESETS)
     from knurlogic.interfaces.page.server import clean_sets
     ok, bad = clean_sets({"KNURLOGIC_PRESET": "lean"})
     assert ok == {"KNURLOGIC_PRESET": "lean"} and not bad

@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from knurlogic.engine import crosschip
-from knurlogic.tuning import settings as S
+from knurlogic.tuning import knobs
 
 M3 = {"name": "M3 Ultra", "arch": "applegpu_g15d"}
 M4 = {"name": "M4 Max", "arch": "applegpu_g16s"}
@@ -119,9 +119,9 @@ def test_a_bad_value_is_refused():
 # --- settings and ring-wide passthrough -------------------------------------
 
 def test_it_is_a_model_launch_setting():
-    assert "KNURLOGIC_CROSS_CHIP" in S.MODEL_KNOBS
-    assert S.KNOB_RANGE["KNURLOGIC_CROSS_CHIP"][0] == ["off", "on", "auto"]
-    assert S.engine_settings({"KNURLOGIC_CROSS_CHIP": "on"}) == \
+    assert "KNURLOGIC_CROSS_CHIP" in knobs.MODEL_KNOBS
+    assert knobs.KNOB_RANGE["KNURLOGIC_CROSS_CHIP"][0] == ["off", "on", "auto"]
+    assert knobs.engine_settings({"KNURLOGIC_CROSS_CHIP": "on"}) == \
         {"cross_chip": "on"}
     from knurlogic.interfaces.page.server import clean_sets
     assert clean_sets({"KNURLOGIC_CROSS_CHIP": "auto"})[0]
@@ -156,7 +156,7 @@ def test_each_rank_resolves_auto_from_the_ring_chips(monkeypatch):
                 "sets": {"KNURLOGIC_CROSS_CHIP": "auto"}, "chips": [M3, M4]}
         serve.main(rank_argv("/m", spec, {})[4:])
     for a, k in got:
-        launch = S.engine_settings(a[6])
+        launch = knobs.engine_settings(a[6])
         assert crosschip.resolve(launch["cross_chip"],
                                  k["ring"]["chips"])["on"] is True
     assert len(got) == 2

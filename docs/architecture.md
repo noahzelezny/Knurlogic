@@ -6,8 +6,8 @@ Knurlogic is one Python package, `src/knurlogic/`, in six parts.
 |---|---|
 | `engine/` | Runs models. The only place that imports mlx: model families and architectures, the batch scheduler, prompt cache, KV cache, MTP drafting, vision, the VQ runtime, the serve loop inside one process. |
 | `interfaces/` | How people and agents reach it. The CLI, the HTTP API (`http/`), the web page (`page/`), the MCP server, model loading and `doctor`. The only place that opens an HTTP server. |
-| `machine/` | Facts about this Mac and what runs on it: memory and the wired limit, the allowance, installed models and artifacts, running servers, the load lock, saved machine-wide preferences. No mlx. |
-| `tuning/` | Turns a model plus a memory budget into settings: the knobs, the presets, and `resolve()`, which returns the final value of every knob with the measurement behind it. |
+| `machine/` | Facts about this Mac and what runs on it: memory and the wired limit, the allowance, installed models and artifacts, running servers, the load lock. No mlx, and it does not import `tuning/`. |
+| `tuning/` | Every setting, in one package: the measured constants, the knob registry, the presets, the checks that refuse a value or a launch, which knobs apply live, the memory fit, the split arithmetic, the saved knurlogic-wide settings and strategy, and `resolve()`, which returns the final value of every knob with the measurement behind it. See [builders/settings](builders/settings.md). |
 | `cluster/` | Several Macs as one: finding peers, link checks, launching one job across machines, watching its ranks, recovering after a failure. |
 | `context_management/` | Compaction of long conversations so a harness does not have to manage its agents' context. |
 
@@ -16,7 +16,8 @@ Knurlogic is one Python package, `src/knurlogic/`, in six parts.
 ```
 interfaces  ->  cluster, context_management, engine, machine, tuning
 cluster     ->  engine, machine, tuning
-engine, machine, tuning   (a mutual core: they share data types and knobs)
+engine, machine, tuning   (a mutual core: they share data types and knobs;
+                           machine does not import tuning)
 context_management  ->  machine, tuning
 ```
 
@@ -74,14 +75,16 @@ Peers are found by `cluster/discovery.py` and `cluster/peers.py`.
 ## Where settings live
 
 - **Saved per machine**: `~/.config/knurlogic/settings.json`
-  (`XDG_CONFIG_HOME` honoured), managed by `machine/preferences.py`. It
-  holds the default preset (the strategy), compaction, and cross-chip
-  rounding. Every model server on the machine reads it.
+  (`XDG_CONFIG_HOME` honoured), managed by `tuning/preferences.py`. It
+  holds a custom preset's values, compaction, the disk prompt cache and
+  cross-chip rounding; the default preset (the strategy) is beside it in
+  `strategy.json` (`tuning/strategy.py`). Every model server on the
+  machine reads them.
 - **Per model**: chosen in the page's Settings panel and applied when that
   model loads. `--set KEY=VALUE` on the command line does the same for one
   launch and beats the saved value.
 - **Presets**: named bundles of knob values (the default one and
-  `lean` among them), defined in `tuning/settings.py`.
+  `lean` among them), defined in `tuning/presets.py`.
   `resolve()` starts from the preset, then the model's fit in memory, then
   your overrides.
 

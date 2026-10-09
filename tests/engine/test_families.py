@@ -54,17 +54,17 @@ def test_the_spellings_that_have_bitten_before_resolve():
     from knurlogic.engine import arch
     from knurlogic.engine.mtp import registry as mreg
     from knurlogic.engine.vision import registry as vreg
-    from knurlogic.tuning import settings
+    from knurlogic.tuning import measured
     a = arch.ARCH_FOR_MODEL_TYPE
     assert a["qwen3_5_text"] == "qwen3_5" and a["gemma4_text"] == "gemma4_text"
     assert a["gemma4"] == "gemma4" and a["glm5_next_text"] == "glm5_next"
     assert arch.ARCH_DEPENDS_ON == {"qwen3_5_moe": ["qwen3_5"],
                                     "gemma4": ["gemma4_text"]}
     assert arch.ARCH_HOST == {}        # every architecture is mlx_lm's name
-    assert {k: v[0] for k, v in settings.PREFILL_CHUNK_MEASURED.items()} == {
+    assert {k: v[0] for k, v in measured.PREFILL_CHUNK_MEASURED.items()} == {
         "glm5_next": 2048, "qwen3_5": 4096, "qwen3_5_moe": 2048,
         "qwen4_exp": 2048}
-    w, why = settings.prefill_chunk_for("qwen3_5_text")
+    w, why = measured.prefill_chunk_for("qwen3_5_text")
     assert w == 4096 and why.startswith("measured for qwen3_5: ")
     assert set(vreg.FAMILIES) == {"qwen3_5", "qwen3_5_moe", "qwen4_exp",
                                   "gemma4", "gemma4_text", "glm5_next",

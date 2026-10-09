@@ -136,7 +136,7 @@ registry.has_family(model_type) -> bool
 DeepSeek-V4's flat `vision_n_layers > 0` with its `vision.*` tensors in the
 artifact), the family module is absent, or its build declines. The
 signatures, and the tower tensor prefixes tuning/ counts
-(`settings.VISION_TOWER_PREFIXES`), are the manifests' (families.md). An ImportError raised INSIDE
+(`measured.VISION_TOWER_PREFIXES`), are the manifests' (families.md). An ImportError raised INSIDE
 a present family module propagates (a broken build is not "no vision").
 
 ## Store
@@ -160,7 +160,7 @@ estimate_nbytes(n_tokens, text_hidden, dtype_bytes=2) -> int
   `model_provider.model_key` (any hashable).
 * Byte-bounded; eviction is oldest-unpinned-first. Pins hold entries above
   the bound until released (the overshoot shows in `stats()`).
-* **For tuning/resolve.py:** reserve `DEFAULT_MAX_BYTES` (or the configured
+* **For tuning/fit.py:** reserve `DEFAULT_MAX_BYTES` (or the configured
   `max_bytes`) per served vision model BEFORE the load; a live store answers
   `budget_bytes()`.
 * **For the serve path:** pin every image of a request from tokenize (`engine/vision/request.py`)

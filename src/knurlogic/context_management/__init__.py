@@ -8,6 +8,6 @@
 
 Pure history surgery and compaction, model-agnostic: messages in, messages
 out, callable by any harness -- the HTTP servers in interfaces/http are one
-caller. No mlx, no HTTP. Depends only on tuning/settings (the
-KNURLOGIC_COMPACT_* knobs).
+caller. No mlx, no HTTP. Depends only on tuning/ (the KNURLOGIC_COMPACT_*
+knobs in tuning/groups, their saved values in tuning/preferences).
 """

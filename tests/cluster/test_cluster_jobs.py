@@ -31,7 +31,7 @@ from knurlogic.cluster import links
 from knurlogic.engine.runtime import marker
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
-from knurlogic.tuning import settings
+from knurlogic.tuning import checks
 
 GIB = 1 << 30
 HERE = Path(__file__).resolve().parents[1] / "support"
@@ -336,7 +336,7 @@ def test_prepare_type_checks_the_spec(cache, bad):
 
 def test_prepare_refuses_unknown_sets_and_stores_only_clean_ones(
         cache, monkeypatch):
-    monkeypatch.setattr(settings, "launch_knobs",
+    monkeypatch.setattr(checks, "launch_knobs",
                         lambda: frozenset({"kv_bits"}))
     code, doc = prep(spec(sets={"kv_bits": "8", "evil": "x"}))
     assert not doc["ok"] and "evil" in doc["refused"]

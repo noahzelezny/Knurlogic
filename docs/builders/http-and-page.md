@@ -31,7 +31,8 @@ The model server, `src/knurlogic/interfaces/http/`:
 | `telemetry.py`, `request_id.py` | see [telemetry](telemetry.md) |
 
 `interfaces/serve.py` is `knurlogic serve`: it checks and resolves the
-settings (`launch_refusal`, `launch_fit`, `settings_refusal`), then
+settings (`tuning/checks`: `launch_refusal`, `settings_refusal`,
+`refuse_sets`), then
 `run` starts the scheduler and server, or a follower rank.
 `interfaces/loading.py` (`prepare`, `NotLoadable`) is the check every load
 passes, at startup and on every switch.
@@ -41,7 +42,7 @@ The page, `src/knurlogic/interfaces/page/`:
 | file | what |
 |---|---|
 | `server.py` | `knurlogic ui`: spawning and stopping model servers (`tracked_load`, `_spawn`, `_stop`), status (`_status_fn`, `_status_light`), the router (`route`, `ROUTE_PATHS`), cluster launch and every peer route (see [cluster](cluster.md)), `prompt_cache_forward` |
-| `documents.py` | the routes shared by the page and `serve`: `routes(...)` (`/status.json`, `/settings.json`, `/models.json`, `/loaded.json`, `/connect.json`), `load_action`, `machine_settings`, `settings_document`, `refuse_sets`, `knob_reach`, `compaction_document` |
+| `documents.py` | the routes shared by the page and `serve`: `routes(...)` (`/status.json`, `/settings.json`, `/models.json`, `/loaded.json`, `/connect.json`), `load_action`, `machine_settings`, `settings_document`, `knob_limit`, `compaction_document` (page JSON over `tuning/`) |
 | `hub.py` | Hugging Face search, download, cancel, delete |
 | `updates.py` | is a model or knurlogic out of date (asked once per page start) |
 | `assets/` | the page itself: `index.html`, `app.js`, `api.js`, `views/`, `page.css`, shipped as package data |

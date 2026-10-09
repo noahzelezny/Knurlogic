@@ -210,7 +210,7 @@ def test_the_thinking_default_is_live_and_checked(monkeypatch):
     import os
 
     from knurlogic.engine.serve.load import apply_live
-    from knurlogic.tuning import settings as S
+    from knurlogic.tuning import checks, knobs
     monkeypatch.delenv(T.DEFAULT_ENV, raising=False)
     done = apply_live({T.DEFAULT_ENV: "high"})
     assert done[T.DEFAULT_ENV].startswith("applied")
@@ -218,9 +218,9 @@ def test_the_thinking_default_is_live_and_checked(monkeypatch):
     done = apply_live({T.DEFAULT_ENV: "hi gh"})
     assert done[T.DEFAULT_ENV].startswith("failed")
     assert os.environ[T.DEFAULT_ENV] == "high"
-    assert S.check_knob(T.DEFAULT_ENV, "max") is None
-    assert S.check_knob(T.DEFAULT_ENV, "4") is not None
-    assert "model" not in S.KNOB_RANGE[T.DEFAULT_ENV][0]   # that is unset
+    assert checks.check_knob(T.DEFAULT_ENV, "max") is None
+    assert checks.check_knob(T.DEFAULT_ENV, "4") is not None
+    assert "model" not in knobs.KNOB_RANGE[T.DEFAULT_ENV][0]   # that is unset
 
 
 def test_the_thinking_default_reads_the_templates_own_names(monkeypatch):

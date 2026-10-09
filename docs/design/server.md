@@ -222,7 +222,7 @@ followed by a step.
 - **Bring-up**: `knurlogic serve <artifact> --rank r --world n --split
   tensor|pipeline --link ring|jaccl --hosts a:p,b:p --prefill-chunk N
   --working-set-gib G [--layers a,b] [--bandwidth-gbs X]` (hidden flags; the
-  page passes them; rank order is `tuning/resolve.rank_order`).
+  page passes them; rank order is `tuning/rank_order.rank_order`).
   `mx.distributed.init(strict=True)`, a barrier, then each rank loads
   lazily, splits, and evaluates its shard. Only rank 0 binds HTTP.
 
@@ -233,7 +233,7 @@ executor is `TensorExecutor`, the local batch engine with every admission,
 removal and prompt-cache change journaled into the plan.
 
 - **VQ**: a codebook is replicated, never sliced (`tensor.predicate`); codes
-  and scales split. `tuning/resolve.tensor_refusals` refuses with the
+  and scales split. `tuning/tensor_split.tensor_refusals` refuses with the
   arithmetic when heads do not divide or a packed slice would cut a code
   word or a quantization group.
 - **Memory**: shards are equal, so the guard raises the peers' last
@@ -271,7 +271,7 @@ the step plan is the tensor split's).
   step that admits a row broadcasts every row's next token after the
   admission, because the admission samples its first token after that
   step's plan went out.
-- **Layer shares** (`tuning/resolve.pipeline_shares`, pure Python): each
+- **Layer shares** (`tuning/pipeline_split.pipeline_shares`, pure Python): each
   rank's weight is what it can hold (working set less the replicated
   embed/norm/lm_head), times its memory bandwidth when every rank's is known
   (a table of unbinned chips, or `--bandwidth-gbs`; a binned chip is

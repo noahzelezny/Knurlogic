@@ -120,7 +120,7 @@ committed caches, so they are unaffected.
 - The verify forward is 2 tokens wide. Activation transients double, which is
   small next to the step margin (*guess*). The `snapshot` copy is the same
   as on pipeline.
-- Fit today ignores the head under tensor: `resolve.trunk_headers` drops
+- Fit today ignores the head under tensor: `tensor_split.trunk_headers` drops
   `mtp*` files, and `cluster/launch.py` `artifact_shape` returns no
   `leader_bytes` for tensor. Changes:
   - `launch.artifact_shape` (tensor branch): add

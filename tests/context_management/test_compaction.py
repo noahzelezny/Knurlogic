@@ -291,12 +291,12 @@ def test_automatic_compaction_is_off_by_default_and_on_asks_nothing():
 
 
 def test_the_settings_fall_back_to_their_defaults():
-    from knurlogic.tuning import settings as S
-    cfg = S.compact_settings({"KNURLOGIC_COMPACT_TRIGGER": "lots"})
+    from knurlogic.tuning import checks, groups
+    cfg = groups.compact_settings({"KNURLOGIC_COMPACT_TRIGGER": "lots"})
     assert cfg == {"auto": False, "trigger": 0.8, "keep": 6,
                    "distill": True}
-    assert S.check_knob("KNURLOGIC_COMPACT_TOOL_RESULTS", "burn")
-    assert S.check_knob("KNURLOGIC_COMPACT_TRIGGER", "0.7") is None
+    assert checks.check_knob("KNURLOGIC_COMPACT_TOOL_RESULTS", "burn")
+    assert checks.check_knob("KNURLOGIC_COMPACT_TRIGGER", "0.7") is None
 
 
 # ------------------------------------------------------------ Anthropic shape

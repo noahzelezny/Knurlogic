@@ -1,11 +1,11 @@
 # Settings resolution
 
-## knurlogic/machine/preferences.py
+## knurlogic/tuning/preferences.py
 
 Beside the strategy (the default launch preset), two kinds of setting are
 not a model's to vary and so are not kept per base model:
 
-- **compaction** (`tuning/settings.COMPACT_KNOBS`) -- how a server compacts
+- **compaction** (`tuning/groups.COMPACT_KNOBS`) -- how a server compacts
   a long conversation. Policy, not a property of any model. Every model
   server on the machine reads it per request, so a change applies to the
   next request of every running model.

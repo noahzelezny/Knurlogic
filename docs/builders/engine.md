@@ -25,7 +25,7 @@ Around it, in `engine/`:
 
 | file | what |
 |---|---|
-| `serve/` | what the served model is: `load.py` (load, memory, `LIVE_KNOBS`, `apply_live`, `tool_support`), `state.py` (process state: `SERVED`, `DRAFT`, `VISION`), `segments.py`, `thinking.py`, `drafting.py`, `vision.py`. Importing it imports no mlx |
+| `serve/` | what the served model is: `load.py` (load, memory, `apply_live`, `tool_support`), `state.py` (process state: `SERVED`, `DRAFT`, `VISION`), `segments.py`, `thinking.py`, `drafting.py`, `vision.py`. Importing it imports no mlx |
 | `kvquant.py` | `QuantKVCache`, `BatchQuantKVCache`, `install`: K/V stored at 8, 6 or 4 bits |
 | `kvattn.py` | the 8-bit decode attention kernel (`decode_sdpa`, `patch_model`) |
 | `crosschip.py` | identical results across chips (`KNURLOGIC_CROSS_CHIP`) |
@@ -72,8 +72,8 @@ scheduler does the rest on its thread.
 - **`engine/serve/` is the one door to the engine.** Code outside the
   engine asks `engine.serve` names, not mlx; version skew in mlx-lm is
   handled there (`load.load_unlocked`).
-- **A live knob reaches every rank.** `LIVE_KNOBS` can change on a running
-  server (`apply_live`); on a split, `Scheduler.share_live` journals them
+- **A live knob reaches every rank.** `tuning/live.LIVE_KNOBS` can change
+  on a running server (`apply_live`); on a split, `Scheduler.share_live` journals them
   as `set` ops (`plan.SETS`).
 
 ## Extending
@@ -92,7 +92,7 @@ scheduler does the rest on its thread.
 The memory story is spread: the scheduler's guard
 (`engine/runtime/scheduler.py`), the server's memory and cache limit
 (`engine/serve/load.py`: `memory`, `set_cache_limit`), the fit and margins
-(`tuning/resolve.py`: `step_margin`, `rank_margin`, `fit_reserve`,
+(`tuning/fit.py`: `step_margin`, `rank_margin`, `fit_reserve`,
 `single_fit_check`), and the machine's budget (`machine/wired.py`
 `load_budget`, `machine/allowance.py`, `machine/loaded.py`
 `available_memory`). See [machine](machine.md) and

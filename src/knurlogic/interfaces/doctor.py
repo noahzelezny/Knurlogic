@@ -14,7 +14,7 @@ import sys
 from knurlogic.engine import arch
 from knurlogic.machine import wired
 from knurlogic.machine.artifact import Artifact
-from knurlogic.tuning import settings as S
+from knurlogic.tuning import presets
 from knurlogic.tuning.resolve import resolve
 
 GIB = 1 << 30
@@ -52,7 +52,7 @@ def run(path: str, working_set_gib: float, profile: str | None,
           + (f"   working set {working_set_gib:.1f} GiB{detected}"
              if ws else "   working set UNKNOWN"))
     if ws and a.bytes_on_disk < ws:
-        from knurlogic.tuning.resolve import room_for
+        from knurlogic.tuning.fit import room_for
         room = room_for(a.bytes_on_disk, a.raw_config, ws)
         print(f"  room     {room['text']}"
               + ("   SMALL: little to talk in" if room["small"] else ""))
@@ -153,7 +153,7 @@ def main(argv=None) -> int:
                         "each model runs the numerics its own model.py "
                         "ships with. Forcing v1.5 on a v2 model changes "
                         "its outputs.")
-    p.add_argument("--tune", default="default", type=S.preset_arg,
+    p.add_argument("--tune", default="default", type=presets.preset_arg,
                    metavar="{default,lean}",
                    help="the launch preset, the same two `serve --tune` "
                         "takes: default (the measured settings) or lean "

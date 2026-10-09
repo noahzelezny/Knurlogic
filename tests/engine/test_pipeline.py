@@ -5,7 +5,7 @@ tokens with a fixed number of broadcasts per step."""
 
 import pytest
 
-from knurlogic.tuning import resolve as R
+from knurlogic.tuning import fit, pipeline_split
 
 GIB = 1 << 30
 
@@ -20,7 +20,8 @@ def _ranks(*ws, bw=None):
 
 def test_shares_follow_capacity_and_rank_0_holds_the_last_layers():
     per = [GIB] * 40
-    s = R.pipeline_shares(per, _ranks(120 + 4, 60 + 4), other_bytes=4 * GIB)
+    s = pipeline_split.pipeline_shares(per, _ranks(120 + 4, 60 + 4),
+                                       other_bytes=4 * GIB)
     # capacity 120 : 60 -> 26.67 : 13.33 -> 27 : 13 (largest remainder)
     assert s["layers"] == [27, 13]
     assert s["bounds"] == [(13, 40), (0, 13)]          # rank 1 embeds
@@ -31,10 +32,10 @@ def test_shares_follow_capacity_and_rank_0_holds_the_last_layers():
 
 def test_shares_weigh_bandwidth_only_when_every_rank_says_it():
     per = [GIB] * 40
-    both = R.pipeline_shares(per, _ranks(100, 100, bw=[800, 400]))
+    both = pipeline_split.pipeline_shares(per, _ranks(100, 100, bw=[800, 400]))
     assert both["layers"] == [27, 13]                   # 2 : 1 by bandwidth
     assert "capacity x memory bandwidth" in both["reason"]
-    one = R.pipeline_shares(per, _ranks(100, 100, bw=[800, None]))
+    one = pipeline_split.pipeline_shares(per, _ranks(100, 100, bw=[800, None]))
     assert one["layers"] == [20, 20]
     assert "unknown on m1" in one["reason"]
 
@@ -43,27 +44,27 @@ def test_shares_are_capped_by_what_fits_and_every_rank_gets_one():
     per = [GIB] * 40
     # bandwidth wants rank 0 to take ~36; it holds 30 layers at most
     # (working sets here are what the layers get plus the 4+ GiB margin)
-    s = R.pipeline_shares(per, _ranks(34.5, 104, bw=[8000, 100]))
+    s = pipeline_split.pipeline_shares(per, _ranks(34.5, 104, bw=[8000, 100]))
     assert s["layers"] == [30, 10]
-    tiny = R.pipeline_shares([GIB] * 4, _ranks(104, 5.001, 104,
-                                              bw=[1, 1, 1]))
+    tiny = pipeline_split.pipeline_shares([GIB] * 4, _ranks(104, 5.001, 104,
+                                                            bw=[1, 1, 1]))
     assert min(tiny["layers"]) >= 1 and sum(tiny["layers"]) == 4
     with pytest.raises(ValueError, match="cannot give each of 3 ranks"):
-        R.pipeline_shares([GIB] * 2, _ranks(10, 10, 10))
+        pipeline_split.pipeline_shares([GIB] * 2, _ranks(10, 10, 10))
     with pytest.raises(ValueError, match="the ranks hold"):
-        R.pipeline_shares([GIB] * 40, _ranks(10, 10))
+        pipeline_split.pipeline_shares([GIB] * 40, _ranks(10, 10))
     with pytest.raises(ValueError, match="holds none of the layers"):
-        R.pipeline_shares([GIB] * 4, _ranks(10, 3), other_bytes=4 * GIB)
+        pipeline_split.pipeline_shares([GIB] * 4, _ranks(10, 3), other_bytes=4 * GIB)
 
 
 def test_shares_are_deterministic_and_ties_go_to_the_lower_rank():
     per = [3, 1, 4, 1, 5, 9, 2, 6, 5]
-    a = R.pipeline_shares(per, _ranks(14, 14))
-    assert a == R.pipeline_shares(list(per), _ranks(14, 14))
+    a = pipeline_split.pipeline_shares(per, _ranks(14, 14))
+    assert a == pipeline_split.pipeline_shares(list(per), _ranks(14, 14))
     # by bytes (36, equal ranks): rank 1 takes 3+1+4+1+5 = 14 (the 9 would
     # make it 23, further from 18); rank 0 the other 22
     assert a["layers"] == [4, 5]
-    three = R.pipeline_shares([1] * 10, _ranks(5, 5, 5))
+    three = pipeline_split.pipeline_shares([1] * 10, _ranks(5, 5, 5))
     assert three["layers"] == [4, 3, 3]
     assert three["bounds"] == [(6, 10), (3, 6), (0, 3)]
 
@@ -72,12 +73,12 @@ def test_uneven_layers_are_checked_exactly():
     # the average says 2 + 2; the real last two layers (6 GiB) do not fit
     # a 5 GiB rank, so the cut goes by bytes: 1+1+3 and 3
     per = [1 * GIB, 1 * GIB, 3 * GIB, 3 * GIB]
-    s = R.pipeline_shares(per, _ranks(9, 9))
+    s = pipeline_split.pipeline_shares(per, _ranks(9, 9))
     assert s["bounds"] == [(3, 4), (0, 3)] and s["layers"] == [1, 3]
     assert s["bytes"] == [3 * GIB, 5 * GIB]
     # and when no contiguous cut fits, the count split's arithmetic is said
     with pytest.raises(ValueError, match="layers 2..3 are 6.0 GiB"):
-        R.pipeline_shares(per, _ranks(8, 8))
+        pipeline_split.pipeline_shares(per, _ranks(8, 8))
 
 
 def test_one_huge_layer_is_placed_by_bytes_not_by_count():
@@ -87,16 +88,16 @@ def test_one_huge_layer_is_placed_by_bytes_not_by_count():
     # the model would be refused though it fits the pair with room
     per = [int(1.96 * GIB)] * 48
     per[1] += int(41.75 * GIB)
-    s = R.pipeline_shares(per, _ranks(120, 84), other_bytes=GIB)
+    s = pipeline_split.pipeline_shares(per, _ranks(120, 84), other_bytes=GIB)
     assert sum(s["layers"]) == 48 and s["bounds"][1][0] == 0
-    caps = [120 - 1 - R.step_margin(int(120 * GIB)) / GIB,
-            84 - 1 - R.step_margin(int(84 * GIB)) / GIB]
+    caps = [120 - 1 - fit.step_margin(int(120 * GIB)) / GIB,
+            84 - 1 - fit.step_margin(int(84 * GIB)) / GIB]
     assert all(b / GIB <= c for b, c in zip(s["bytes"], caps))
     assert s["bounds"][0][1] == 48
 
 
 def test_layer_bytes_keep_the_head_and_the_rest_out_of_the_layers():
-    per, other = R.layer_bytes_of({
+    per, other = pipeline_split.layer_bytes_of({
         "language_model.model.layers.0.mlp.gate.weight": 10,
         "language_model.model.layers.1.self_attn.q_proj.weight": 7,
         "language_model.model.layers.1.input_layernorm.weight": 1,
@@ -111,15 +112,15 @@ def test_what_rank_0_alone_holds_counts_on_rank_0_alone():
     """The MTP head and the vision tower live on rank 0 only: their bytes
     come off rank 0's room for layers, not every rank's."""
     per = [GIB] * 40
-    even = R.pipeline_shares(per, _ranks(104, 104), other_bytes=4 * GIB)
-    lead = R.pipeline_shares(per, _ranks(104, 104), other_bytes=4 * GIB,
-                             leader_bytes=10 * GIB)
+    even = pipeline_split.pipeline_shares(per, _ranks(104, 104), other_bytes=4 * GIB)
+    lead = pipeline_split.pipeline_shares(per, _ranks(104, 104), other_bytes=4 * GIB,
+                                          leader_bytes=10 * GIB)
     assert even["layers"] == [20, 20]
     assert lead["layers"][0] < 20 < lead["layers"][1]
     assert "leaves" in lead["reason"]
     with pytest.raises(ValueError, match="MTP head"):
-        R.pipeline_shares([GIB] * 4, _ranks(10, 104), other_bytes=GIB,
-                          leader_bytes=5 * GIB)
+        pipeline_split.pipeline_shares([GIB] * 4, _ranks(10, 104), other_bytes=GIB,
+                                       leader_bytes=5 * GIB)
 
 
 def test_the_head_and_tower_are_not_in_the_replicated_bytes(tmp_path):
@@ -145,15 +146,15 @@ def test_the_head_and_tower_are_not_in_the_replicated_bytes(tmp_path):
     class A:
         path = tmp_path
         raw_config = {"text_config": {"num_hidden_layers": 2}}
-    per, other = R.pipeline_layer_bytes(A)
+    per, other = pipeline_split.pipeline_layer_bytes(A)
     assert per == [10, 10] and other == 100
-    assert R.leader_bytes(A) == 50 + 30     # head + tower
+    assert pipeline_split.leader_bytes(A) == 50 + 30     # head + tower
     # a DSpark sidecar drafts on a split too: rank 0's, like any head
     shard(tmp_path / "mtp-head-dspark-mxfp4.safetensors",
           {"mtp.0.attn.wkv.weight": 70})
-    assert R.leader_bytes(A) == 50 + 70 + 30
-    assert R.leader_bytes(A, vision=False) == 50 + 70
-    assert R.leader_bytes(A, mtp=False) == 30
+    assert pipeline_split.leader_bytes(A) == 50 + 70 + 30
+    assert pipeline_split.leader_bytes(A, vision=False) == 50 + 70
+    assert pipeline_split.leader_bytes(A, mtp=False) == 30
 
 
 # ------------------------------------------------------------ refusals
@@ -161,22 +162,22 @@ def test_the_head_and_tower_are_not_in_the_replicated_bytes(tmp_path):
 def test_pipeline_families():
     for mt in ("qwen3_5_moe", "qwen3_5", "glm5_next", "qwen4_exp",
                "deepseek_v4"):
-        assert R.pipeline_refusals({"model_type": mt, "text_config": {
+        assert pipeline_split.pipeline_refusals({"model_type": mt, "text_config": {
             "num_hidden_layers": 40}}, 2) == []
-    why = R.pipeline_refusals({"model_type": "gemma4", "text_config": {
+    why = pipeline_split.pipeline_refusals({"model_type": "gemma4", "text_config": {
         "model_type": "gemma4_text"}}, 2)
     assert "gemma4" in why[0] and "shares KV across layers" in why[0]
-    why = R.pipeline_refusals({"model_type": "llama"}, 2)
+    why = pipeline_split.pipeline_refusals({"model_type": "llama"}, 2)
     assert "'llama'" in why[0]
-    assert "fewer than 3 ranks" in R.pipeline_refusals(
+    assert "fewer than 3 ranks" in pipeline_split.pipeline_refusals(
         {"model_type": "qwen3_5", "num_hidden_layers": 2}, 3)[0]
-    assert R.pipeline_refusals({"model_type": "llama"}, 1) == []
+    assert pipeline_split.pipeline_refusals({"model_type": "llama"}, 1) == []
 
 
 def test_chip_bandwidth_is_known_only_for_unbinned_chips():
-    assert R.chip_bandwidth_gbs("Apple M3 Ultra") == 819.0
-    assert R.chip_bandwidth_gbs("Apple M4 Max") is None      # 410 or 546
-    assert R.chip_bandwidth_gbs(None) is None
+    assert pipeline_split.chip_bandwidth_gbs("Apple M3 Ultra") == 819.0
+    assert pipeline_split.chip_bandwidth_gbs("Apple M4 Max") is None      # 410 or 546
+    assert pipeline_split.chip_bandwidth_gbs(None) is None
 
 
 # ------------------------------------------------------ two processes
@@ -549,7 +550,7 @@ def test_a_heavy_first_layer_is_balanced_by_bytes_not_count():
     # smaller M3 Ultra takes 19 layers = 63.5 GiB with 13 GiB to spare while
     # the M4 Max keeps 70; by bytes each rank fills about the same fraction.
     per = [0.5 * GIB, 42 * GIB] + [1.4 * GIB] * 46
-    s = R.pipeline_shares(per, _ranks(120, 84))
+    s = pipeline_split.pipeline_shares(per, _ranks(120, 84))
     fill = [s["bytes"][i] / (w * GIB) for i, w in enumerate((120, 84))]
     assert abs(fill[0] - fill[1]) < 0.15, s["reason"]
 

@@ -11,8 +11,8 @@ import pytest
 
 from knurlogic.engine.vision.store import DEFAULT_MAX_BYTES
 from knurlogic.machine.artifact import Artifact
+from knurlogic.tuning import checks, fit, knobs, measured, pipeline_split
 from knurlogic.tuning import resolve as R
-from knurlogic.tuning import settings as S
 
 GIB = 1 << 30
 TOWER = 3 << 20                                  # 3 MiB of tower tensors
@@ -52,25 +52,25 @@ def _rung(d, vision=True, sidecar=False):
 def _kv_expected():
     # 8 layers / every 4th full = 2 layers x 2 heads x 64 dims x K,V x bf16
     per = 2 * 2 * 2 * 64 * 2
-    return per * S.VISION_KV_IMAGES * S.VISION_KV_TOKENS_PER_IMAGE
+    return per * measured.VISION_KV_IMAGES * measured.VISION_KV_TOKENS_PER_IMAGE
 
 
 @pytest.mark.parametrize("sidecar", [False, True])
 def test_vision_budget_has_three_terms(tmp_path, sidecar):
     a = Artifact.load(_rung(tmp_path / "r", sidecar=sidecar))
-    vb = R.vision_budget(a)
+    vb = fit.vision_budget(a)
     assert vb["tower_bytes"] == TOWER            # read from the headers
     assert vb["tower_outside_bytes"] == 0        # inside bytes_on_disk
     assert vb["store_bytes"] == DEFAULT_MAX_BYTES and not vb["store_is_live"]
     assert vb["kv_allowance_bytes"] == _kv_expected()
     assert vb["extra_bytes"] == DEFAULT_MAX_BYTES + _kv_expected()
     assert len(vb["notes"]) == 3
-    assert R.vision_budget(a, store_bytes=7 << 20)["store_bytes"] == 7 << 20
+    assert fit.vision_budget(a, store_bytes=7 << 20)["store_bytes"] == 7 << 20
 
 
 def test_text_only_artifact_has_no_vision_budget(tmp_path):
     a = Artifact.load(_rung(tmp_path / "t", vision=False))
-    assert R.vision_budget(a) is None
+    assert fit.vision_budget(a) is None
     assert R.resolve(a, 64 * GIB).vision is None
 
 
@@ -97,7 +97,7 @@ def test_tower_outside_the_counted_files_is_added(tmp_path):
     (d / "vision").mkdir()
     _safetensors(d / "vision" / "tower.safetensors",
                  {"vision_tower.encoder.w": 2 << 20})
-    vb = R.vision_budget(Artifact.load(d))
+    vb = fit.vision_budget(Artifact.load(d))
     assert vb["tower_outside_bytes"] == 2 << 20
     assert vb["extra_bytes"] == (2 << 20) + DEFAULT_MAX_BYTES + _kv_expected()
 
@@ -146,8 +146,8 @@ def _with_head(d, nbytes):
 
 def test_vision_off_frees_the_tower_store_and_image_kv(tmp_path):
     v = Artifact.load(_rung(tmp_path / "v"))
-    assert R.vision_freed_bytes(v) == _freed()
-    assert R.vision_freed_bytes(
+    assert fit.vision_freed_bytes(v) == _freed()
+    assert fit.vision_freed_bytes(
         Artifact.load(_rung(tmp_path / "t", vision=False))) == 0
     on, off = R.resolve(v, 64 * GIB), R.resolve(v, 64 * GIB, vision=False)
     assert off.vision is None and on.vision is not None
@@ -164,50 +164,50 @@ def test_vision_off_frees_the_tower_store_and_image_kv(tmp_path):
 def test_single_fit_check_subtracts_vision_when_off_and_says_so(tmp_path):
     v = Artifact.load(_rung(tmp_path / "v"))
     on_need = v.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected()
-    margin = R.step_margin(8 * GIB)             # the 4 GiB floor
+    margin = fit.step_margin(8 * GIB)             # the 4 GiB floor
     budget = on_need + margin - (1 << 20)       # just short with vision on
-    c = R.single_fit_check(v, budget)
+    c = fit.single_fit_check(v, budget)
     assert c["state"] == "cannot" and c["vision_bytes"] == _freed()
     assert "turn vision off" in c["why"] and "MTP" not in c["why"]
-    assert R.single_fit_check(v, budget, vision=False)["state"] == "fits"
+    assert fit.single_fit_check(v, budget, vision=False)["state"] == "fits"
     # off, the tower inside the artifact's size is out of the weights too
     off_line = on_need - _freed() + margin
-    assert R.single_fit_check(v, off_line, vision=False)["state"] == "fits"
-    assert R.single_fit_check(v, off_line - 1,
-                              vision=False)["state"] == "cannot"
+    assert fit.single_fit_check(v, off_line, vision=False)["state"] == "fits"
+    assert fit.single_fit_check(v, off_line - 1,
+                                vision=False)["state"] == "cannot"
 
 
 def test_mtp_and_vision_off_together_is_named_when_only_both_fit(tmp_path):
     head = 2 << 20
     v = Artifact.load(_with_head(_rung(tmp_path / "v"), head))
-    assert R.mtp_head_bytes(v) == head
+    assert fit.mtp_head_bytes(v) == head
     need = v.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected()
-    budget = need - head - _freed() + R.step_margin(8 * GIB)
-    c = R.single_fit_check(v, budget)
+    budget = need - head - _freed() + fit.step_margin(8 * GIB)
+    c = fit.single_fit_check(v, budget)
     assert c["state"] == "cannot"
     assert "turn MTP off (Settings → Presets) and vision off" in c["why"]
-    assert R.single_fit_check(v, budget, draft=False,
-                              vision=False)["state"] == "fits"
+    assert fit.single_fit_check(v, budget, draft=False,
+                                vision=False)["state"] == "fits"
     # either alone fits: both are offered
-    roomy = need - min(head, _freed()) + R.step_margin(8 * GIB)
-    assert "or vision off" in R.single_fit_check(v, roomy)["why"]
+    roomy = need - min(head, _freed()) + fit.step_margin(8 * GIB)
+    assert "or vision off" in fit.single_fit_check(v, roomy)["why"]
 
 
 def test_the_launch_setting_is_parsed_and_applied(tmp_path, monkeypatch):
-    assert S.engine_settings({"KNURLOGIC_VISION": "off"}) == {"vision": False}
-    assert S.engine_settings({"KNURLOGIC_VISION": "on"}) == {"vision": True}
-    assert S.vision_of({}) is True
-    assert S.vision_of({"KNURLOGIC_VISION": "off"}) is False
-    assert "KNURLOGIC_VISION" in S.MODEL_KNOBS
-    assert "KNURLOGIC_VISION" in S.launch_knobs()
-    assert S.check_knob("KNURLOGIC_VISION", "off") is None
-    assert S.check_knob("KNURLOGIC_VISION", "maybe")
-    from knurlogic.interfaces.serve import launch_fit
-    from knurlogic.machine import preferences
+    assert knobs.engine_settings({"KNURLOGIC_VISION": "off"}) == {"vision": False}
+    assert knobs.engine_settings({"KNURLOGIC_VISION": "on"}) == {"vision": True}
+    assert knobs.vision_of({}) is True
+    assert knobs.vision_of({"KNURLOGIC_VISION": "off"}) is False
+    assert "KNURLOGIC_VISION" in knobs.MODEL_KNOBS
+    assert "KNURLOGIC_VISION" in checks.launch_knobs()
+    assert checks.check_knob("KNURLOGIC_VISION", "off") is None
+    assert checks.check_knob("KNURLOGIC_VISION", "maybe")
+    from knurlogic.tuning import preferences
+    from knurlogic.tuning.checks import launch_fit
     monkeypatch.setattr(preferences, "launch_sets", lambda s: dict(s))
     v = Artifact.load(_rung(tmp_path / "v"))
     budget = (v.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected()
-              + R.step_margin(8 * GIB) - (1 << 20))
+              + fit.step_margin(8 * GIB) - (1 << 20))
     assert launch_fit(v, {}, "default", True, budget)["state"] == "cannot"
     assert launch_fit(v, {"KNURLOGIC_VISION": "off"}, "default", True,
                       budget)["state"] == "fits"
@@ -215,12 +215,12 @@ def test_the_launch_setting_is_parsed_and_applied(tmp_path, monkeypatch):
 
 def test_mcp_fit_with_vision_off(tmp_path, monkeypatch):
     from knurlogic.interfaces import mcp
-    from knurlogic.machine import preferences
+    from knurlogic.tuning import preferences
     monkeypatch.setattr(preferences, "launch_sets", lambda s: dict(s))
     d = _rung(tmp_path / "m")
     a = Artifact.load(d)
     need = a.bytes_on_disk + DEFAULT_MAX_BYTES + _kv_expected()
-    b = need + R.step_margin(8 * GIB) - (1 << 20)
+    b = need + fit.step_margin(8 * GIB) - (1 << 20)
     monkeypatch.setattr(
         "knurlogic.machine.wired.load_budget",
         lambda: {"bytes": b, "working_set_bytes": b,
@@ -294,7 +294,7 @@ def test_an_image_with_vision_off_is_a_clear_400(monkeypatch):
 
 def test_pipeline_rank_0_holds_no_tower_with_vision_off(tmp_path):
     v = Artifact.load(_rung(tmp_path / "v"))
-    assert R.leader_bytes(v) - R.leader_bytes(
+    assert pipeline_split.leader_bytes(v) - pipeline_split.leader_bytes(
         v, vision=False) == TOWER
 
 
@@ -304,11 +304,11 @@ def test_rank_0_holds_no_head_with_mtp_off(tmp_path):
     d = _rung(tmp_path / "m", vision=False)
     _safetensors(d / "mtp-head-q6.safetensors", {"mtp.fc.weight": TEXT})
     a = Artifact.load(d)
-    on, off = R.leader_bytes(a, vision=False), R.leader_bytes(
+    on, off = pipeline_split.leader_bytes(a, vision=False), pipeline_split.leader_bytes(
         a, vision=False, mtp=False)
     assert on > 0 and off == 0
-    assert S.mtp_of({"KNURLOGIC_MTP": "off"}) is False
-    assert S.mtp_of({}) is True
+    assert knobs.mtp_of({"KNURLOGIC_MTP": "off"}) is False
+    assert knobs.mtp_of({}) is True
 
 
 def test_a_cluster_launchs_mtp_off_reaches_its_shape(tmp_path, monkeypatch):
@@ -349,10 +349,10 @@ def test_deepseek_vision_exp_is_budgeted_only_with_its_tower(tmp_path):
                       **{f"model.image_{r}": 1024 for r in
                          ("start", "end", "newline", "pad")}})
         _safetensors(d / "model.safetensors", t)
-    vb = R.vision_budget(Artifact.load(tmp_path / "vision"))
+    vb = fit.vision_budget(Artifact.load(tmp_path / "vision"))
     assert vb["tower_bytes"] == 2 * TOWER and vb["tower_tensors"] == 2
     assert vb["store_bytes"] == DEFAULT_MAX_BYTES
-    assert R.vision_budget(Artifact.load(tmp_path / "teacher")) is None
+    assert fit.vision_budget(Artifact.load(tmp_path / "teacher")) is None
 
 
 def test_the_previews_room_is_what_this_machine_has_free_now(tmp_path,

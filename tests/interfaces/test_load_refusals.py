@@ -1,5 +1,5 @@
 """A deterministic refusal -- bad settings, a model that cannot take them
--- is caught BEFORE a process starts (serve.launch_refusal, asked by the
+-- is caught BEFORE a process starts (checks.launch_refusal, asked by the
 cluster prepare, the coordinator and mcp.load) and handed back with serve's
 own words; a server that refuses anyway exits REFUSED_EXIT and says why."""
 import json
@@ -9,6 +9,7 @@ from test_cluster_jobs import SHAPE, info, spec  # noqa: F401
 
 from knurlogic.cluster import launch as C
 from knurlogic.interfaces import serve
+from knurlogic.tuning import checks
 
 
 def _model(tmp_path, **cfg):
@@ -30,10 +31,10 @@ def cache(tmp_path, monkeypatch):
 def test_launch_refusal_says_what_serve_would(cache):
     from knurlogic.machine.artifact import Artifact
     a = Artifact.load(_model(cache))
-    assert serve.launch_refusal(a, {}) is None
-    why = serve.launch_refusal(a, {"KNURLOGIC_PRESET": "bogus"})
+    assert checks.launch_refusal(a, {}) is None
+    why = checks.launch_refusal(a, {"KNURLOGIC_PRESET": "bogus"})
     assert why and "bogus" in why
-    why = serve.launch_refusal(a, {"KNURLOGIC_KV_BITS": "3"})
+    why = checks.launch_refusal(a, {"KNURLOGIC_KV_BITS": "3"})
     assert why and "KV cache" in why
 
 
@@ -69,30 +70,30 @@ def test_a_serve_refusal_exits_with_its_own_code():
 
 # --- a saved context past the model's window never bricks a launch --------
 
-from knurlogic.tuning import settings as S  # noqa: E402
+from knurlogic.tuning import context_window  # noqa: E402
 
 QWEN = {"max_position_embeddings": 262144}
 
 
 def test_past_native_turns_long_context_on_for_a_yarn_family():
-    sets, notes = S.settle_context("qwen3_5_moe", QWEN,
-                                   {"KNURLOGIC_CONTEXT_LENGTH": "1048576"})
+    sets, notes = context_window.settle_context("qwen3_5_moe", QWEN,
+                                                {"KNURLOGIC_CONTEXT_LENGTH": "1048576"})
     assert sets["KNURLOGIC_LONG_CONTEXT"] == "yarn"
     assert sets["KNURLOGIC_CONTEXT_LENGTH"] == "1048576"
     assert len(notes) == 1 and "YaRN" in notes[0]
 
 
 def test_past_even_yarn_is_lowered_to_what_yarn_reaches():
-    sets, notes = S.settle_context("qwen3_5_moe", QWEN,
-                                   {"KNURLOGIC_CONTEXT_LENGTH": "4000000"})
+    sets, notes = context_window.settle_context("qwen3_5_moe", QWEN,
+                                                {"KNURLOGIC_CONTEXT_LENGTH": "4000000"})
     assert sets["KNURLOGIC_CONTEXT_LENGTH"] == "1048576"
     assert sets["KNURLOGIC_LONG_CONTEXT"] == "yarn"
     assert len(notes) == 2
 
 
 def test_a_family_without_yarn_is_clamped_with_a_note():
-    sets, notes = S.settle_context("glm5_next", QWEN,
-                                   {"KNURLOGIC_CONTEXT_LENGTH": "1048576"})
+    sets, notes = context_window.settle_context("glm5_next", QWEN,
+                                                {"KNURLOGIC_CONTEXT_LENGTH": "1048576"})
     assert sets["KNURLOGIC_CONTEXT_LENGTH"] == "262144"
     assert "KNURLOGIC_LONG_CONTEXT" not in sets
     assert notes and "lowered to 262,144" in notes[0]
@@ -100,8 +101,8 @@ def test_a_family_without_yarn_is_clamped_with_a_note():
 
 def test_within_the_window_nothing_changes():
     for v in ("32768", "262144", "junk"):
-        sets, notes = S.settle_context("qwen3_5_moe", QWEN,
-                                       {"KNURLOGIC_CONTEXT_LENGTH": v})
+        sets, notes = context_window.settle_context("qwen3_5_moe", QWEN,
+                                                    {"KNURLOGIC_CONTEXT_LENGTH": v})
         assert sets == {"KNURLOGIC_CONTEXT_LENGTH": v} and notes == []
 
 
@@ -110,10 +111,10 @@ def test_the_maintainers_saved_context_launches(cache):
     rank used to print REFUSING and exit."""
     from knurlogic.machine.artifact import Artifact
     a = Artifact.load(_model(cache))
-    assert serve.launch_refusal(
+    assert checks.launch_refusal(
         a, {"KNURLOGIC_CONTEXT_LENGTH": "1048576"}) is None
     b = Artifact.load(_model(cache, model_type="glm5_next"))
-    assert serve.launch_refusal(
+    assert checks.launch_refusal(
         b, {"KNURLOGIC_CONTEXT_LENGTH": "1048576"}) is None
 
 

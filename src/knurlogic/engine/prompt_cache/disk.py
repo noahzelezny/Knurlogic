@@ -92,10 +92,10 @@ def root() -> Path:
 
 
 def _env() -> dict:
-    """The settings as saved knurlogic-wide (machine/preferences) over the
+    """The settings as saved knurlogic-wide (tuning/preferences) over the
     environment."""
     try:
-        from knurlogic.machine import preferences
+        from knurlogic.tuning import preferences
         return preferences.prompt_cache_env()
     except (OSError, ValueError, ImportError):
         return dict(os.environ)

@@ -68,9 +68,9 @@ hooks it needs:
 A model's support is spread by design across the family folder (the
 manifest) and the generic tables that read it, but a few family facts sit
 outside the folder: the tensor split rules are one table for every family
-in `engine/runtime/tensor_rules.py`, and `tuning/settings.py` holds
-per-family helpers (`prefill_chunk_for`, `kv_quant_for`,
-`long_context_family`).
+in `engine/runtime/tensor_rules.py`, and `tuning/` reads
+the manifests through per-family helpers (`measured.prefill_chunk_for`,
+`measured.kv_quant_for`, `context_window.long_context_family`).
 
 ## Tests
 

@@ -51,13 +51,13 @@ class Outcome:
 
 def settings(env=None) -> dict:
     """The operator's compaction settings. With no `env`: this process's
-    environment under the knurlogic-wide ones (machine/preferences), read
+    environment under the knurlogic-wide ones (tuning/preferences), read
     per request so a change in Settings -> Knurlogic applies to the next
     request of every running server."""
-    from knurlogic.tuning.settings import compact_settings
+    from knurlogic.tuning.groups import compact_settings
     if env is not None:
         return compact_settings(env)
-    from knurlogic.machine import preferences
+    from knurlogic.tuning import preferences
     return compact_settings(preferences.compaction_env())
 
 

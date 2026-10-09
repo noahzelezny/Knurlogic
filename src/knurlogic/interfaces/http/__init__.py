@@ -82,7 +82,7 @@ def unload() -> dict:
 
 
 def scheduler_options(settings: dict) -> dict:
-    """The resolved settings (tuning.settings.engine_settings plus the
+    """The resolved settings (tuning.knobs.engine_settings plus the
     serve flags) as the scheduler takes them."""
     return {"completion_batch_size": int(settings.get("decode_concurrency",
                                                       32)),

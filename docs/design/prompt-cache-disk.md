@@ -89,8 +89,8 @@ file never becomes an entry.
 
 ## Budget and TTL
 
-Knurlogic-wide settings (machine/preferences over the environment, read at
-each save and load; tuning/settings.PROMPT_CACHE_KNOBS):
+Knurlogic-wide settings (tuning/preferences over the environment, read at
+each save and load; tuning/groups.PROMPT_CACHE_KNOBS):
 
 - `KNURLOGIC_PROMPT_CACHE_DISK` on / off (on).
 - `KNURLOGIC_PROMPT_CACHE_DISK_GB`: every model's files together; least

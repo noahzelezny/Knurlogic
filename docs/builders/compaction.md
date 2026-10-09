@@ -20,9 +20,9 @@ Hooks outside it:
   through `C.prepare`, then `C.summarize` when a pass is pending, then the
   engine; `App._warm` prefills a compacted prompt into the prompt cache;
   `count_tokens` counts what the model would see (`E.view`).
-- `tuning/settings.py`: `COMPACT_KNOBS`, `compact_settings`,
+- `tuning/groups.py`: `COMPACT_KNOBS`, `compact_settings`,
   `check_compact_knob`.
-- `machine/preferences.py`: `compaction_env` (saved values over the
+- `tuning/preferences.py`: `compaction_env` (saved values over the
   environment).
 - `interfaces/page/documents.py`: `compaction_document` for the Settings
   panel.
@@ -37,7 +37,7 @@ Hooks outside it:
   backstop marker with `fallback: true`, and the user's turn still runs.
 - **Automatic compaction is opt-in** (`KNURLOGIC_COMPACT_AUTO`, off by
   default). Off, a client that does not ask is refused past the window.
-- **This package depends only on `tuning/settings`.** The model is reached
+- **This package depends only on `tuning/`** (`groups`, `preferences`). The model is reached
   through what the caller passes (`prepare`'s `count`, `summarize`'s
   `generate`).
 
@@ -50,8 +50,8 @@ A new knob goes in `COMPACT_KNOBS` with its default, values and reason.
 ## Notes
 
 Compaction spans `context_management/` (the logic), `interfaces/http/server.py`
-(`App.chat`, `_warm`: the summary pass and warm-up), `tuning/settings.py`
-(knobs), `machine/preferences.py` (saved values) and
+(`App.chat`, `_warm`: the summary pass and warm-up), `tuning/groups.py`
+(knobs), `tuning/preferences.py` (saved values) and
 `interfaces/page/documents.py` (the panel).
 
 ## Tests

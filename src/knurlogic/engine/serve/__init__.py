@@ -18,7 +18,6 @@ from .drafting import drafting_status
 from .drafting import load_head as load_draft_head
 from .load import (
                    HOST_PACKAGES,
-                   LIVE_KNOBS,
                    EngineInfo,
                    apply_live,
                    describe,
@@ -38,7 +37,7 @@ from .vision import clear as clear_vision
 from .vision import served_vision, vision_status
 
 __all__ = [
-    "HOST_PACKAGES", "LIVE_KNOBS", "EngineInfo", "apply_live",
+    "HOST_PACKAGES", "EngineInfo", "apply_live",
     "bind_vision", "clear_vision", "describe", "drafting_status", "generate",
     "info", "keeps_mtp_weights", "load", "load_draft_head", "memory",
     "models_module", "served_path", "served_vision", "set_cache_limit",

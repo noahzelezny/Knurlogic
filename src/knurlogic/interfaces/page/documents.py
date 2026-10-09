@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from knurlogic.machine.disk_cache import DiskCache
+from knurlogic.tuning.live import LIVE_KNOBS, RESTART_WHY, knob_reach
 
 GIB = 1 << 30
 ASSETS = Path(__file__).parent / "assets"
@@ -145,11 +146,11 @@ def models_document(serving: str = ""):
 
 def _part_bytes(a) -> dict:
     """{"mtp_bytes", "vision_bytes"} of a loaded Artifact: what MTP off and
-    vision off would free (tuning/resolve.mtp_head_bytes,
+    vision off would free (tuning/fit.mtp_head_bytes,
     vision_freed_bytes); 0 when it has no such part or cannot be read.
     Only the ONE picked model's preview counts these -- the listing would
     read every artifact on every build (slow on a network store)."""
-    from knurlogic.tuning.resolve import mtp_head_bytes, vision_freed_bytes
+    from knurlogic.tuning.fit import mtp_head_bytes, vision_freed_bytes
     out = {"mtp_bytes": 0, "vision_bytes": 0}
     try:
         out["mtp_bytes"] = mtp_head_bytes(a)
@@ -160,9 +161,9 @@ def _part_bytes(a) -> dict:
 
 
 def _room(f, ws: int):
-    """A found model's room to talk (tuning/resolve.context_room), for the
+    """A found model's room to talk (tuning/fit.context_room), for the
     picker -- None when it would not fit at all or cannot be read."""
-    from knurlogic.tuning.resolve import room_for
+    from knurlogic.tuning.fit import room_for
     if not (f.servable and ws and f.bytes_on_disk < ws):
         return None
     try:
@@ -177,7 +178,8 @@ def splits_of(path, n: int = 2) -> list:
     machines, in the order the picker offers them: the same refusals a
     launch runs (tuning/resolve, its config and its headers), so the picker
     never offers one a launch would refuse."""
-    from knurlogic.tuning.resolve import pipeline_refusals, tensor_split_refusals
+    from knurlogic.tuning.pipeline_split import pipeline_refusals
+    from knurlogic.tuning.tensor_split import tensor_split_refusals
     cfg = json.loads((Path(path) / "config.json").read_text())
     return [s for s, why in (
         ("tensor", lambda: tensor_split_refusals(path, n, cfg)),
@@ -218,31 +220,33 @@ def tensor_bytes_of(a) -> dict | None:
     weights (divided by the ranks), the replicated ones, and what rank 0
     alone adds -- the MTP head and the vision tower, apart, since each
     counts only when that launch has it on. None: no tensor split."""
-    from knurlogic.tuning import resolve as R
-    if R.tensor_refusals(a.raw_config, 2):
+    from knurlogic.tuning import pipeline_split, tensor_split
+    if tensor_split.tensor_refusals(a.raw_config, 2):
         return None
     try:
-        pl = R.tensor_placement(a, 1)
+        pl = tensor_split.tensor_placement(a, 1)
     except (OSError, ValueError, KeyError):
         return None
-    head = R.leader_bytes(a, vision=False)
+    head = pipeline_split.leader_bytes(a, vision=False)
     return {"sharded": pl["sharded_bytes"], "replicated": pl["replicated_bytes"],
-            "head": head, "tower": R.leader_bytes(a, mtp=False)}
+            "head": head, "tower": pipeline_split.leader_bytes(a, mtp=False)}
 
 
 _RULES: list = []
 
 
 def _rules_stamp() -> str:
-    """sha256 of the source that decides a model's splits (tuning/resolve,
-    engine/runtime/tensor_rules, pipeline's refusals live in resolve)."""
+    """sha256 of the source that decides a model's splits
+    (tuning/tensor_split, tuning/pipeline_split,
+    engine/runtime/tensor_rules)."""
     if not _RULES:
         import hashlib
 
         import knurlogic.engine.runtime.tensor_rules as tr
-        import knurlogic.tuning.resolve as rs
+        import knurlogic.tuning.pipeline_split as ps
+        import knurlogic.tuning.tensor_split as ts
         h = hashlib.sha256()
-        for m in (rs, tr):
+        for m in (ts, ps, tr):
             h.update(Path(m.__file__).read_bytes())
         _RULES.append(h.hexdigest()[:16])
     return _RULES[0]
@@ -391,7 +395,7 @@ def machine_settings():
 
     def handler(q: dict) -> dict:
         from knurlogic.machine import wired
-        from knurlogic.tuning import settings as S
+        from knurlogic.tuning import presets
 
         # A PREVIEW for an artifact nobody has loaded. This is the point of
         # showing settings before a launch rather than after: nearly every
@@ -414,7 +418,7 @@ def machine_settings():
                                               "that model"}
         if art:
             try:
-                return _preview(art, S.preset_or(_one(q, "tune"), "default"),
+                return _preview(art, presets.preset_or(_one(q, "tune"), "default"),
                                 _one(q, "working_set_gib"),
                                 kv_bits=_one(q, "kv_bits"),
                                 long_context=_one(q, "long_context"))
@@ -497,24 +501,23 @@ def set_allowance(body) -> dict:
 
 def strategy_doc() -> dict:
     """`GET /strategy.json`: this machine's knurlogic strategy -- the launch
-    preset a launch takes when none is named (machine/strategy.py) -- with
+    preset a launch takes when none is named (tuning/strategy.py) -- with
     every preset's values for the rows a custom set changes
-    (tuning/settings.PRESET_ROWS)."""
-    from knurlogic.machine import strategy
-    from knurlogic.tuning import settings as S
-    return {"preset": strategy.get(), "default": S.PRESET_DEFAULT,
+    (tuning/presets.PRESET_ROWS)."""
+    from knurlogic.tuning import presets, strategy
+    return {"preset": strategy.get(), "default": presets.PRESET_DEFAULT,
             "presets": [{"name": n, "title": n.capitalize(),
-                         "values": S.preset_row_values(n)}
-                        for n in S.PRESETS],
+                         "values": presets.preset_row_values(n)}
+                        for n in presets.PRESETS],
             "rows": [{**r, "options": [{"v": v, "t": t}
                                        for v, t in r["options"]]}
-                     for r in S.PRESET_ROWS]}
+                     for r in presets.PRESET_ROWS]}
 
 
 def set_strategy(body) -> dict:
     """`POST /strategy.json` {"preset": name}: remember it for this
     machine; the next launch without a preset of its own takes it."""
-    from knurlogic.machine import strategy
+    from knurlogic.tuning import strategy
     try:
         name = json.loads(body or b"{}").get("preset")
         strategy.set(name)
@@ -531,12 +534,12 @@ def _preview(path: str, tune: str, working_set_gib=None,
     chosen. Nothing is loaded and nothing is set: this only reads.
     `kv_bits`: the KV precision it would launch with ('bf16', '8', ...),
     for the room its context is counted in."""
-    from knurlogic.engine import serve as engine
     from knurlogic.machine import wired
     from knurlogic.machine.artifact import Artifact
-    from knurlogic.tuning import settings as S
+    from knurlogic.tuning import context_window, knobs, presets
+    from knurlogic.tuning.fit import room_for
     from knurlogic.tuning.resolve import kv_refusal as resolve_kv_refusal
-    from knurlogic.tuning.resolve import resolve, room_for
+    from knurlogic.tuning.resolve import resolve
 
     a = Artifact.load(path)
     try:
@@ -547,37 +550,37 @@ def _preview(path: str, tune: str, working_set_gib=None,
     if not ws:
         budget = wired.load_budget()
         ws = budget["bytes"]
-    tune = S.preset_or(tune, "default")
+    tune = presets.preset_or(tune, "default")
     if not kv_bits:
         # the room is counted at the preset's KV precision (lean: 8-bit)
-        kv_bits = S.preset_launch(tune, a.model_type)[0].get("kv_bits")
-    bits = S.kv_bits_of(kv_bits)
+        kv_bits = presets.preset_launch(tune, a.model_type)[0].get("kv_bits")
+    bits = knobs.kv_bits_of(kv_bits)
     if resolve_kv_refusal(a, bits):
         bits = None
     try:
-        lc = S.long_context_of(long_context)
+        lc = context_window.long_context_of(long_context)
     except ValueError:
         lc = "off"
-    if S.long_context_refusal(a.model_type, lc):
+    if context_window.long_context_refusal(a.model_type, lc):
         lc = "off"
     r = resolve(a, ws, tune=tune, kv_bits=bits, long_context=lc)
 
-    knobs = []
+    rows = []
     for name, value in sorted(r.env.items()):
         # KNOB_DOC and friends are keyed by the EMITTED name, which is what
         # the resolver puts in `env`. (`default_alias` goes the other way --
         # logical to emitted -- and calling it here threw a KeyError on the
         # first artifact tried.)
-        what, why = S.KNOB_DOC.get(name, ("", ""))
-        reach, reach_why = knob_reach(a, name, engine.LIVE_KNOBS)
-        vals = S.KNOB_RANGE.get(name)
+        what, why = knobs.KNOB_DOC.get(name, ("", ""))
+        reach, reach_why = knob_reach(a, name, LIVE_KNOBS)
+        vals = knobs.KNOB_RANGE.get(name)
         if name in r.ranges:
             vals = (list(r.ranges[name]), vals[1] if vals else "")
-        knobs.append({
+        rows.append({
             "name": name, "value": str(value), "reach": reach,
             "reach_why": reach_why, "what": what, "why": why,
-            "help": S.KNOB_HELP.get(name, ""),
-            "tier": S.knob_tier(name),
+            "help": knobs.KNOB_HELP.get(name, ""),
+            "tier": knobs.knob_tier(name),
             "values": vals[0] if isinstance(vals, tuple) else vals,
             **knob_limit(a, name),
         })
@@ -592,7 +595,7 @@ def _preview(path: str, tune: str, working_set_gib=None,
                     "headroom_gib": round((ws - a.bytes_on_disk) / GIB, 1)}
                    if budget else {"gib": round(ws / GIB, 1),
                                    "limited_by": "given by the caller"}),
-        "knobs": knobs, "notes": r.notes, "warnings": r.warnings,
+        "knobs": rows, "notes": r.notes, "warnings": r.warnings,
         "wired": wired.advise(a.bytes_on_disk),
         # what the fit leaves to talk in, against the budget it is resolved
         # in: the working set given, or what this machine has room for now
@@ -679,98 +682,48 @@ def routes(status_fn=None, settings_fn=None, apply_fn=None,
 
 def knob_limit(artifact, name: str) -> dict:
     """{max, max_why} where the MODEL bounds a knob: the context length
-    stops at its window (tuning/settings.model_window). {} otherwise."""
-    from knurlogic.tuning import settings as S
+    stops at its window (tuning/context_window.model_window). {} otherwise."""
+    from knurlogic.tuning import context_window
     if name != "KNURLOGIC_CONTEXT_LENGTH":
         return {}
     cfg = getattr(artifact, "raw_config", None) or {}
-    w, why = S.model_window(cfg)
+    w, why = context_window.model_window(cfg)
     if not w:
         return {}
-    top = S.context_ceiling(getattr(artifact, "model_type", ""), cfg)
+    top = context_window.context_ceiling(getattr(artifact, "model_type", ""), cfg)
     if top > w:
         # past the native window is long context: offered, and turned on
-        # at launch (settings.settle_context)
+        # at launch (context_window.settle_context)
         return {"max": top, "max_why":
                 f"Above {w:,} it uses YaRN scaling to reach up to "
                 f"{top:,}, at a slight cost of quality."}
     return {"max": w, "max_why": f"This model's maximum is {w:,} tokens."}
 
 
-def refuse_sets(artifact, sets: dict):
-    """None when every {name: value} in `sets` is one it may take on this
-    artifact (tuning/settings.check_knob, the context length against the
-    model's window), else the first refusal. Used by a live apply and by a
-    launch, so neither takes a value the other would refuse."""
-    from knurlogic.tuning import settings as S
-    lc = (sets or {}).get("KNURLOGIC_LONG_CONTEXT")
-    try:
-        why = S.long_context_refusal(getattr(artifact, "model_type", ""), lc)
-    except ValueError as e:
-        why = f"KNURLOGIC_LONG_CONTEXT: {e}"
-    if why:
-        return why
-    w, _ = S.model_window(S.with_long_context(
-        getattr(artifact, "raw_config", None) or {}, lc))
-    for k, v in (sets or {}).items():
-        why = S.check_knob(k, v, w)
-        if why:
-            return why
-    return None
-
-
-RESTART_WHY = ("read at import and compiled into the kernel, so it takes a "
-               "restart")
-
-
-def knob_reach(artifact, name: str, live_knobs, restart_why=RESTART_WHY):
-    """(reach, why) for one knob on THIS artifact.
-
-    Three outcomes, and keeping them apart is the point: it applies now, it
-    needs a restart, or -- the one nobody checks -- the bundled runtime does
-    not read it at all, so it will never do anything however it is set.
-    """
-    from knurlogic.tuning import settings as S
-    if name in S.ENGINE_KNOB_NAMES:
-        # Read by the engine -- server argv or a process-global mlx call --
-        # so whether the artifact's runtime also reads it is beside the point.
-        if name in live_knobs:
-            return "live", "the engine applies this on the running server"
-        return "restart", ("engine server argv, read once at startup: set it "
-                           "before loading, or restart to change it")
-    reads = artifact.reads_knob(name)
-    if reads is False:
-        return "no-effect", ("this artifact's bundled runtime never reads "
-                             "this variable, so setting it does nothing")
-    if name in live_knobs:
-        return "live", "can be changed on the running server"
-    return "restart", restart_why
-
-
 def compaction_document(env=None, running: bool = True) -> dict:
-    """Compaction's operator defaults (tuning/settings.COMPACT_KNOBS), each
-    value and what it does. Knurlogic-wide (machine/preferences): one set
+    """Compaction's operator defaults (tuning/groups.COMPACT_KNOBS), each
+    value and what it does. Knurlogic-wide (tuning/preferences): one set
     for every model, read per request by every running server, so each is
     `live`. `env`: an environment to read instead of this process's under
     the saved values; `running` is kept for callers and changes nothing."""
-    from knurlogic.machine import preferences
-    from knurlogic.tuning import settings as S
+    from knurlogic.tuning import groups, knobs, preferences
     env = preferences.compaction_env(env)
-    knobs = []
-    for name, (default, values, unit, what, why) in S.COMPACT_KNOBS.items():
-        knobs.append({
+    rows = []
+    for name, (default, values, unit, what, why) in \
+            groups.COMPACT_KNOBS.items():
+        rows.append({
             "name": name, "running": env.get(name) or default,
             "would_be": default, "value": env.get(name) or default,
             "default": default,
             "changed": False, "tier": "reach",
-            "what": what, "why": why, "help": S.KNOB_HELP.get(name, ""),
+            "what": what, "why": why, "help": knobs.KNOB_HELP.get(name, ""),
             "values": list(values), "unit": unit,
             "reach": "live",
             "reach_why": ("knurlogic-wide: every model server reads it for "
                           "every request, so a change applies to the next "
                           "one")})
-    return {"knobs": knobs,
-            "effective": S.compact_settings(env),
+    return {"knobs": rows,
+            "effective": groups.compact_settings(env),
             "about": ("Harnesses ask with context_management (Anthropic's "
                       "compact_20260112, clear_tool_uses_20250919, "
                       "clear_thinking_20251015; the same object on "
@@ -781,19 +734,18 @@ def compaction_document(env=None, running: bool = True) -> dict:
 
 
 def knurlogic_doc() -> dict:
-    """The knurlogic-wide settings (machine/preferences) on this machine:
+    """The knurlogic-wide settings (tuning/preferences) on this machine:
     what is saved, identical results across chips with its trade-off, and
     compaction."""
-    from knurlogic.machine import preferences
-    from knurlogic.tuning import settings as S
+    from knurlogic.tuning import knobs, preferences
     saved = preferences.get()
-    what, why = S.KNOB_DOC[preferences.CROSS_CHIP]
+    what, why = knobs.KNOB_DOC[preferences.CROSS_CHIP]
     return {"saved": saved,
             "cross_chip": {"name": preferences.CROSS_CHIP,
                            "value": saved.get(preferences.CROSS_CHIP, ""),
-                           "values": S.KNOB_RANGE[preferences.CROSS_CHIP][0],
+                           "values": knobs.KNOB_RANGE[preferences.CROSS_CHIP][0],
                            "what": what, "why": why,
-                           "help": S.KNOB_HELP[preferences.CROSS_CHIP]},
+                           "help": knobs.KNOB_HELP[preferences.CROSS_CHIP]},
             "compaction": compaction_document(),
             "file": str(preferences.path())}
 
@@ -803,7 +755,7 @@ def set_knurlogic(body) -> dict:
     settings on this machine ('' clears one). Compaction applies to the
     next request of every running server; identical results across chips
     to the next launch."""
-    from knurlogic.machine import preferences
+    from knurlogic.tuning import preferences
     try:
         want = json.loads(body or b"{}")
         preferences.set(want)
@@ -827,11 +779,11 @@ def settings_document(artifact, live_env: dict, live_tune: str,
     show a number without its provenance, which is the whole complaint about
     settings UIs that show neither.
     """
-    from knurlogic.tuning import settings as S
-    tunes = tunes or S.PRESETS
+    from knurlogic.tuning import knobs, presets
+    tunes = tunes or presets.PRESETS
 
     def handler(q: dict) -> dict:
-        tune = S.preset_or((q.get("tune") or [live_tune])[0], live_tune)
+        tune = presets.preset_or((q.get("tune") or [live_tune])[0], live_tune)
         try:
             ws = int(float((q.get("working_set_gib") or [0])[0]) * (1 << 30))
         except (TypeError, ValueError):
@@ -849,9 +801,9 @@ def settings_document(artifact, live_env: dict, live_tune: str,
             if d.get("values"):
                 return list(d["values"]), d.get("unit", "")
             if name in r.ranges:
-                return list(r.ranges[name]), S.KNOB_RANGE.get(
+                return list(r.ranges[name]), knobs.KNOB_RANGE.get(
                     name, (None, ""))[1]
-            return S.KNOB_RANGE.get(name, (None, ""))
+            return knobs.KNOB_RANGE.get(name, (None, ""))
 
         def _cap(name, values):
             """Where the control stops, and why. The knob turns as far as the
@@ -866,36 +818,36 @@ def settings_document(artifact, live_env: dict, live_tune: str,
             return usable[-1], (f"{headroom / (1 << 30):.1f} GiB of headroom "
                                 f"is all there is to hold it in")
 
-        knobs = []
+        rows = []
         for k in sorted(set(live_env) | set(r.env)):
-            what, why = S.KNOB_DOC.get(k, ("", ""))
+            what, why = knobs.KNOB_DOC.get(k, ("", ""))
             reach, reach_why = knob_reach(artifact, k, live_knobs,
                                           restart_why)
-            knobs.append({
-                "tier": S.knob_tier(k),
+            rows.append({
+                "tier": knobs.knob_tier(k),
                 "name": k, "running": live_env.get(k),
                 "would_be": r.env.get(k),
                 "changed": live_env.get(k) != r.env.get(k),
-                "what": what, "why": why, "help": S.KNOB_HELP.get(k, ""),
+                "what": what, "why": why, "help": knobs.KNOB_HELP.get(k, ""),
                 "reach": reach, "reach_why": reach_why,
                 **knob_limit(artifact, k),
             })
             vals, unit = _range(k)
             if vals:
                 cap, cap_why = _cap(k, vals)
-                knobs[-1].update(values=vals, unit=unit, cap=cap,
-                                 cap_why=cap_why,
-                                 doc=(declared.get(k) or {}).get("doc", ""))
+                rows[-1].update(values=vals, unit=unit, cap=cap,
+                                cap_why=cap_why,
+                                doc=(declared.get(k) or {}).get("doc", ""))
         return {
             "artifact": artifact.path.name,
             "live": {"tune": live_tune,
                      "working_set_bytes": live_working_set},
             "asked": {"tune": tune, "working_set_bytes": ws},
-            "knobs": knobs,
+            "knobs": rows,
             "notes": r.notes,
             "warnings": r.warnings,
             "tunes": [{"name": t,
-                       "why": S.TUNE_PROFILES[t].get("why", "")}
+                       "why": presets.TUNE_PROFILES[t].get("why", "")}
                       for t in tunes],
             # Per knob, because it is per knob: some apply now, some need a
             # restart, and some do nothing on this artifact at all. Saying
@@ -906,12 +858,12 @@ def settings_document(artifact, live_env: dict, live_tune: str,
             # own defaults apply, and pretending the resolved list is the
             # whole environment is a quieter kind of overclaiming.
             "unmanaged": [
-                {"name": n, "tier": S.knob_tier(n)}
+                {"name": n, "tier": knobs.knob_tier(n)}
                 for n in artifact.knobs_read() if n not in r.env],
             "live_knobs": sorted(
-                k["name"] for k in knobs if k["reach"] == "live"),
+                k["name"] for k in rows if k["reach"] == "live"),
             "dead_knobs": sorted(
-                k["name"] for k in knobs if k["reach"] == "no-effect"),
+                k["name"] for k in rows if k["reach"] == "no-effect"),
             "exports": r.as_exports(),
             "compaction": compaction_document(),
             "connect": _connect_doc(artifact),

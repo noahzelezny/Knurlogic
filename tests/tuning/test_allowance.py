@@ -1,7 +1,7 @@
 """machine/allowance.py: the most memory knurlogic may use on this machine,
 remembered in a file, lowering the load budget and the scheduler's working
 set; the page server's /allowance.json; and the room a fit leaves to talk
-in (tuning/resolve.context_room)."""
+in (tuning/fit.context_room)."""
 import json
 import sys
 from pathlib import Path
@@ -91,7 +91,7 @@ GLM = {"num_hidden_layers": 78, "kv_lora_rank": 512, "qk_rope_head_dim": 64,
 
 
 def test_room_is_working_set_less_weights_less_the_step_margin():
-    from knurlogic.tuning.resolve import context_room, step_margin
+    from knurlogic.tuning.fit import context_room, step_margin
     assert step_margin(40 * GIB) == 4 * GIB           # the 4 GiB floor
     assert step_margin(120 * GIB) == 6 * GIB          # 5%
     r = context_room(120 * GIB, 108 * GIB, GLM)
@@ -104,7 +104,7 @@ def test_room_is_working_set_less_weights_less_the_step_margin():
 
 
 def test_room_never_goes_negative_and_says_when_kv_is_unknown():
-    from knurlogic.tuning.resolve import context_room
+    from knurlogic.tuning.fit import context_room
     r = context_room(10 * GIB, 9 * GIB, {})
     assert r["left_bytes"] == 0 and r["tokens"] == 0 and r["small"]
     # weights that leave no step margin do not "fit": the first request swaps

@@ -610,14 +610,14 @@ def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
           leader_bytes: int = 0, reserve: dict | None = None) -> dict:
     """Every rank's working set and memory bandwidth, gathered, and the
     layer split computed from them the same way on every rank
-    (tuning/resolve.pipeline_shares: same inputs, same split; rank 0's
+    (tuning/pipeline_split.pipeline_shares: same inputs, same split; rank 0's
     `leader_bytes` -- the head and the tower -- counted on rank 0 alone). `counts`
     (layers per rank, rank order) overrides the arithmetic. Raises when the
     ranks read different artifacts."""
     import json
     import zlib
 
-    from knurlogic.tuning import resolve as R
+    from knurlogic.tuning import pipeline_split
     n, rank = group.size(), group.rank()
     sig = zlib.crc32(json.dumps([list(map(int, layer_bytes)),
                                  int(other_bytes), int(leader_bytes)]
@@ -647,8 +647,8 @@ def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
                          f"{','.join(map(str, counts))}); rank 0 holds the "
                          f"last layers and samples"}
     else:
-        out = R.pipeline_shares(list(layer_bytes), ranks, int(other_bytes),
-                                int(leader_bytes), reserve=reserve)
+        out = pipeline_split.pipeline_shares(list(layer_bytes), ranks, int(other_bytes),
+                                             int(leader_bytes), reserve=reserve)
     out["ranks"] = ranks
     out["rank"] = rank
     return out

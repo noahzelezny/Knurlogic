@@ -26,7 +26,7 @@ runtime the model is re-published on Hugging Face, and the picker shows an
 "update" tag on the downloaded copy (`interfaces/page/updates.py`).
 
 * **Numerics are the model's own.** The bf16-I/O flags are numerics-active
-  (up to +0.97% perplexity), so `tuning/resolve.numerics_for` applies only
+  (up to +0.97% perplexity), so `tuning/numerics.numerics_for` applies only
   what the artifact declares or its own `model.py` defaults to, and a
   runtime profile applies only when a person asks for it.
 
@@ -67,7 +67,7 @@ per image token, so key length always equals KV length.
   image would never reach the sequence.
 * **The image store** is keyed `(model_key, sha, proc_hash)`, per image (a
   whole-list key would re-encode everything when a second image is added),
-  byte-bounded LRU, and counted in the memory budget (`tuning/resolve.py`):
+  byte-bounded LRU, and counted in the memory budget (`tuning/fit.py`):
   a GLM image can be ~65 MB of features. An image is pinned from tokenize
   through admission; image metadata (grid, token count) is never evicted.
 
@@ -436,7 +436,7 @@ BYTE-BOUNDED, NOT COUNT-BOUNDED. mlx-vlm's VisionFeatureCache
 memory: a GLM image at up to ~8000 tokens x 4096 hidden in bf16 is ~65 MB
 of features, a small gemma image is 280 x 2560 x 2 = 1.4 MB. On a shared
 host the bound has to be bytes, it has to default small, and
-`tuning/resolve.py` has to count it BEFORE a load -- `max_bytes` is that
+`tuning/fit.py` has to count it BEFORE a load -- `max_bytes` is that
 number, one home: DEFAULT_MAX_BYTES.
 
 REFS ARE NOT EVICTED. The ImageRef of every image ever put stays (a few
