@@ -16,10 +16,12 @@ messages out. No mlx, no HTTP.
 
 Hooks outside it:
 
-- `interfaces/http/server.py`: `App.chat` runs every chat request
-  through `C.prepare`, then `C.summarize` when a pass is pending, then the
-  engine; `App._warm` prefills a compacted prompt into the prompt cache;
-  `count_tokens` counts what the model would see (`E.view`).
+- `interfaces/http/compaction.py`: `CompactingChat`, a mixin of
+  `server.App`: `chat` runs every chat request through `C.prepare`, then
+  `C.summarize` (via `_generate`) when a pass is pending, then the engine;
+  `_warm` prefills a compacted prompt into the prompt cache.
+- `interfaces/http/server.py`: `_count_tokens` counts what the model would
+  see (`E.view`).
 - `tuning/groups.py`: `COMPACT_KNOBS`, `compact_settings`,
   `check_compact_knob`.
 - `tuning/preferences.py`: `compaction_env` (saved values over the
@@ -46,13 +48,6 @@ Hooks outside it:
 A new edit type: a class and its parsing in `context_edits.parse`, its
 surgery in `context_edits.py`, applied in `compaction.prepare` in order.
 A new knob goes in `COMPACT_KNOBS` with its default, values and reason.
-
-## Notes
-
-Compaction spans `context_management/` (the logic), `interfaces/http/server.py`
-(`App.chat`, `_warm`: the summary pass and warm-up), `tuning/groups.py`
-(knobs), `tuning/preferences.py` (saved values) and
-`interfaces/page/documents.py` (the panel).
 
 ## Tests
 

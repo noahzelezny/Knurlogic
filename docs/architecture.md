@@ -55,7 +55,8 @@ page / MCP / CLI  ->  tuning.resolve  ->  interfaces.serve  ->  engine
    Each chat request is handed to `engine/`: prompt and template, prompt
    cache, scheduler, generation with MTP drafting where the family has
    it, vision inputs through the image store. Compaction runs here too,
-   per request, from `context_management/`.
+   per request, from `context_management/`, wired in by
+   `interfaces/http/compaction.py`.
 
 ## How a cluster job flows
 
