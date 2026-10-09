@@ -131,7 +131,7 @@ def test_models_lists_every_routable_model(cluster):
 
 
 def test_models_name_the_machine_each_runs_on(cluster, monkeypatch):
-    """A client (the harness) tells which Mac serves a model from /v1/models
+    """A client tells which Mac serves a model from /v1/models
     alone, without the page's loaded.json."""
     from knurlogic.machine import identity as I
     page, base_a, base_b, _ = cluster
