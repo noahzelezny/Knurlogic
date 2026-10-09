@@ -1,13 +1,13 @@
 """A ring's prompt cache: JournalPromptCache, the scheduler's PromptCache
 on rank 0 with every change journaled, and apply_cache_op, the following
-ranks' side of those ops (engine/runtime/tensor)."""
+ranks' side of those ops (engine/split/tensor)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from knurlogic.engine.runtime.tensor import Journal
+    from knurlogic.engine.split.ring import Journal
 
 
 class JournalPromptCache:
@@ -105,7 +105,7 @@ def apply_cache_op(op: dict, cache, model_key, last: dict,
     from pathlib import Path
 
     from knurlogic.engine.prompt_cache import disk as prompt_disk
-    from knurlogic.engine.runtime.tensor import Desync
+    from knurlogic.engine.split.link import Desync
     kind = op["op"]
     if kind == "insert":
         got = last.get((op["event"], op["uid"]))

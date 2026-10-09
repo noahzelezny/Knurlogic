@@ -554,14 +554,14 @@ def shape_of(path: str, world: int, split: str,
 
 def viability_refusals(path: str, world: int) -> list:
     """A tensor split of a module whose layout no split rule knows is run
-    whole and split on this machine (engine/runtime/viability) before any
+    whole and split on this machine (engine/split/viability) before any
     rank starts; rank 0's page asks, once."""
     from knurlogic.machine.artifact import Artifact
     from knurlogic.tuning import tensor_split
     todo = tensor_split.tensor_unverified(path)
     if not todo:
         return []
-    from knurlogic.engine.runtime import viability
+    from knurlogic.engine.split import viability
     a = Artifact.load(path)
     try:
         return viability.refusals(path, world, todo, a.raw_config,
@@ -1037,7 +1037,7 @@ def _bell_nonce() -> int:
 
 
 def bell_address(spec: dict) -> str:
-    """"host:port:nonce:world" of rank 0's bell (engine/runtime/tensor.init):
+    """"host:port:nonce:world" of rank 0's bell (engine/split/link.init):
     every rank connects to it over TCP BEFORE the ring is joined, so the
     ranks enter jaccl's first collectives together -- a rank that arrives
     seconds late (a slower chip, a longer start) can have rank 0's first
@@ -1073,7 +1073,7 @@ def rank_env(spec: dict, files: dict, selfheal: bool) -> dict:
         env["MLX_JACCL_COORDINATOR"] = spec["coordinator"]
         if selfheal and spec.get("jaccl_timeout_ms"):
             # 0 while loading -- a cold read is not a hang -- and the
-            # deadline once the model is in (engine/runtime/marker.after_load)
+            # deadline once the model is in (engine/split/marker.after_load)
             env["JACCL_COLLECTIVE_TIMEOUT_MS"] = "0"
             env["KNURLOGIC_JACCL_TIMEOUT_MS"] = str(int(
                 spec["jaccl_timeout_ms"]))

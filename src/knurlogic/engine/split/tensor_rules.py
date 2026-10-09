@@ -1,6 +1,6 @@
 """The tensor split's rules: which arrays of a qwen3_5 / qwen4_exp /
 deepseek_v4 layer are cut, on which axis, in which segments -- one table
-that engine/runtime/tensor.py
+that engine/split/tensor.py
 `shard` applies to loaded arrays and tuning/resolve checks against the
 safetensors headers before anything loads, so the refusal and the loader
 cannot disagree. No mlx here: the picker asks this of ~80 models.
@@ -8,7 +8,7 @@ cannot disagree. No mlx here: the picker asks this of ~80 models.
 A rule also names the parameter layouts it knows. A module holding any
 other parameter is UNVERIFIED, not refused: the header arithmetic still
 applies to it, and a launch runs that one module whole and split
-(engine/runtime/viability.py) before the ring starts. VQ SKIPZERO is the
+(engine/split/viability.py) before the ring starts. VQ SKIPZERO is the
 case that made this: `sz_codes` packs the live rows of every expert into
 one [NLIVE, W] list, which a row cut does not respect.
 """

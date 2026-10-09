@@ -66,14 +66,6 @@ Hooks outside it:
 - A new launch check: in `launch.check_spec` / `prepare` so it refuses in
   the first phase, with the reason.
 
-## Notes
-
-Cluster code is spread: `cluster/` holds discovery, protocol, launch,
-jobs and recovery, but the page's peer routes and relay live in
-`interfaces/page/server.py`, the rank
-launch in `interfaces/serve.py`, the split fit in `tuning/` (`resolve_cluster`,
-`tensor_split.py`, `pipeline_split.py`, `rank_order.py`), and the ranks themselves in `engine/runtime/`.
-
 ## Tests
 
 `tests/cluster/` (`test_cluster.py`, `test_cluster_jobs.py`,

@@ -56,7 +56,7 @@ class Keys:
         self.seed = int(seed) & 0xFFFFFFFFFFFFFFFF
         #: a seed the client asked for: its row must reproduce, so the
         #: drafting regime and verify width stay fixed (batch_loop,
-        #: block_loop). A ring's own seed (tensor.assign_seed: every rank
+        #: block_loop). A ring's own seed (ring.assign_seed: every rank
         #: draws alike) promises nothing to anyone and pins nothing.
         self.pins = bool(pins)
 

@@ -25,7 +25,7 @@ def flag(name, default=None):
 
 def main():
     from knurlogic.cluster import jobs
-    from knurlogic.engine.runtime import marker
+    from knurlogic.engine.split import marker
     job, rank = flag("--job"), int(flag("--rank"))
     m = jobs.Marker(job, rank).start()
     marker.CURRENT["marker"] = m

@@ -221,7 +221,7 @@ class MTPBatchGenerator(BatchGenerator):
                 # a block head (DSpark) drafts from several layers' outputs
                 # and says which; get_h hands it what it reads. On a
                 # pipeline stage some may be another rank's (carried here)
-                from knurlogic.engine.runtime import pipeline as PL
+                from knurlogic.engine.split import pipeline as PL
                 if PL.run_of(core) is not None:
                     gets = self._stack.enter_context(PL.carry(
                         core, head.targets, head.capture_paths()))
@@ -255,7 +255,7 @@ class MTPBatchGenerator(BatchGenerator):
         self._batch = batch(self._trunk, head, get_h, copy_caches=copy)
         self._batch.finish_at = self._finish_at
         self._n_trunk = len(make_prompt_cache(self.model))
-        #: engine/runtime/pipeline.Coord on a pipeline split, else None
+        #: engine/split/pipeline.Coord on a pipeline split, else None
         self._coord = None
         #: uid -> (uid, done, total) -> stop?, called after each prefill
         #: chunk of that row's admission (LocalExecutor.insert)
@@ -304,11 +304,11 @@ class MTPBatchGenerator(BatchGenerator):
 
     def follow_block(self, block_size: int, outputs) -> None:
         """A split's follower of a rank 0 drafting with a block head
-        (tensor.agree_head: its K and the layers whose outputs it reads):
+        (follower.agree_head: its K and the layers whose outputs it reads):
         the block loop's steps with no head here, and on a pipeline stage
         those outputs carried on to rank 0 (pipeline.carry). Before
         silence / mirror_hidden / coordinate, which set the batch's parts."""
-        from knurlogic.engine.runtime import pipeline as PL
+        from knurlogic.engine.split import pipeline as PL
         b = self._batch
         self._batch = BlockBatch(self._trunk, None, b.get_h,
                                  copy_caches=b.copy_caches,

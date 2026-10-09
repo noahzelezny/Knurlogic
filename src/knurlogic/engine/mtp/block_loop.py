@@ -136,7 +136,7 @@ class BlockBatch(MTPBatch):
     def __init__(self, *a, block_size: int = 0, **kw):
         super().__init__(*a, **kw)
         #: K: the head's, or on a split's follower (which holds none)
-        #: rank 0's (tensor.agree_head)
+        #: rank 0's (follower.agree_head)
         self.block_size = int(block_size
                               or getattr(self.head, "block_size", 0))
         #: (rows, k) -> (seconds per drafting step verifying k: the median

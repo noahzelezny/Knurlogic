@@ -571,10 +571,10 @@ def test_every_journaled_cache_op_passes_the_plan_check():
     import re
     from pathlib import Path
 
-    from knurlogic.engine.runtime import plan as P
     from knurlogic.engine.runtime import scheduler as SC
-    from knurlogic.engine.runtime import tensor as T
-    src = Path(SC.__file__).read_text() + Path(T.__file__).read_text()
+    from knurlogic.engine.split import plan as P
+    from knurlogic.engine.split import ring as split_ring
+    src = Path(SC.__file__).read_text() + Path(split_ring.__file__).read_text()
     added = set(re.findall(r'journal\.add\(\s*"(\w+)"', src))
     assert added and not added - set(P.OPS), added - set(P.OPS)
     ops = [{"op": "insert", "uid": 1, "event": "finished", "kind": "assistant",
@@ -617,7 +617,7 @@ def test_a_follower_parks_and_reads_back_by_name(tmp_path, monkeypatch):
     reads its own part by the name rank 0 read (`read_back`). A rank that
     lacks the file says so rather than prefill a different length."""
     from knurlogic.engine.prompt_cache.ring import apply_cache_op
-    from knurlogic.engine.runtime.tensor import Desync
+    from knurlogic.engine.split.link import Desync
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     key = _key()
     d = D.root() / D.key_id(key)
@@ -642,7 +642,7 @@ def test_a_follower_parks_and_reads_back_by_name(tmp_path, monkeypatch):
 
 
 def test_park_and_read_back_are_plan_ops():
-    from knurlogic.engine.runtime import plan as P
+    from knurlogic.engine.split import plan as P
     ops = [{"op": "park_session", "session": "pm"},
            {"op": "read_back", "name": "00000001-000000-abc.safetensors"}]
     assert P.decode(P.encode({"ops": ops}))["ops"] == ops

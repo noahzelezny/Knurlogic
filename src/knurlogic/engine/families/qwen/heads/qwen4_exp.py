@@ -27,7 +27,7 @@ import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
 from mlx_lm.models.base import create_attention_mask
 
-from knurlogic.engine.runtime.pipeline import unwrap
+from knurlogic.engine.split.pipeline import unwrap
 
 SIDECAR_NAME = "mtp-head-q6.safetensors"
 
@@ -83,7 +83,7 @@ class MTPHead:
         # Built by its GLOBAL index: the class picks its attention type from
         # args.layer_types[idx], and a pipeline stage holds a slice of the
         # layers -- one that may hold no full-attention layer at all (a
-        # follower binds a head too; engine/runtime/pipeline). The class is
+        # follower binds a head too; engine/split/pipeline). The class is
         # the layer's own, never a stage end's Recv / Send wrapper.
         self.fa_idx = args_t.layer_types.index("full_attention")
         self.block = type(unwrap(core.layers[0]))(args_t, self.fa_idx)

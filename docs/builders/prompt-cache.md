@@ -25,7 +25,7 @@ Outside it, only thin hooks:
   to the right model server, or through the peer relay to another Mac.
 - `engine/runtime/scheduler.py` inherits the commands mixin and calls
   into it at admission (read-back, divergence) and at load (restore).
-- `engine/runtime/plan.py`: the schema every journaled op must match.
+- `engine/split/plan.py`: the schema every journaled op must match.
 - `tuning/groups.py` (`PROMPT_CACHE_KNOBS`): the disk on/off, GB and TTL
   settings.
 

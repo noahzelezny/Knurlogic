@@ -390,7 +390,7 @@ class MemoryGuard:
     def _active(self) -> int:
         """Active memory as the guard counts it. On a ring, the tightest
         rank rules: the peers' over-limit from the last exchange
-        (tensor.Ring.peers_over_now) is read as if it were here."""
+        (ring.Ring.peers_over_now) is read as if it were here."""
         a = self._local_active()
         peers = self.tensor.peers_over_now() if self.tensor is not None \
             else None

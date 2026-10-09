@@ -30,9 +30,9 @@ all written as "pipeline only":
 |---|---|
 | `interfaces/serve.py` ~l.290, tensor branch | `draft = False` (hence the rank-0 log line "drafting head present, off", l.662) |
 | `interfaces/http/__init__.py` l.168/175 | `agree = T.agree_head(link)` only `if pipe`; `ModelHost(draft=draft and (not ring or pipe))` |
-| `engine/runtime/tensor.py` `serve_follower` l.860 | `heads = agree_head(link) if split == "pipeline" else None` |
+| `engine/split/tensor.py` `serve_follower` l.860 | `heads = agree_head(link) if split == "pipeline" else None` |
 | `engine/runtime/scheduler.py` `_executor` l.661-678 | `head = ... if (pipe and DRAFT["on"])`; `coordinate(gen, group)` only `if pipe` |
-| `engine/runtime/tensor.py` `TensorExecutor.__init__` and `follow()` | `_admission_coord` installs `Coord(group)` with `head=False` (B0 only) instead of `pipeline.coordinate` |
+| `engine/split/tensor.py` `TensorExecutor.__init__` and `follow()` | `_admission_coord` installs `Coord(group)` with `head=False` (B0 only) instead of `pipeline.coordinate` |
 
 The scheduler comment gives the original reason: "a drafting head on a
 pipeline only (rank 0 holds the last layers, so the true final hidden
@@ -139,12 +139,12 @@ committed caches, so they are unaffected.
 ## 5. Reuse versus new code
 
 Reused as-is: `pipeline.Coord` (B0/BA/B1/B2), `pipeline.coordinate`,
-`tensor.agree_head`, `ModelHost.head_agree`, the whole of
+`follower.agree_head`, `ModelHost.head_agree`, the whole of
 `MTPBatch.step` / `_draft_step` / `drafting_pays`, `MTPBatchGenerator`
 admission with `coord.ba`, and the follower's `follow()` loop and plan.
 
 What changes is gating and wiring, roughly 30-60 lines (*guess*):
-- `tensor.follow`: in the `else` branch call
+- `follower.follow`: in the `else` branch call
   `PL.coordinate(gen, link.group, drafting=drafting)` instead of
   `_admission_coord`. No `silence`: the follower's logits are real.
 - `TensorExecutor.__init__`: leave a Coord the scheduler already installed

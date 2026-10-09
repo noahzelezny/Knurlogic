@@ -161,7 +161,7 @@ def test_two_stages_in_one_process_are_the_whole_model(cut):
     prefill and six decode steps are the unsplit model's."""
     import numpy as np
 
-    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.split import pipeline as PL
     whole = G.logits_of(_load())
     first, last = _load(), _load()
     assert PL.family_of(first) == "deepseek_v4"

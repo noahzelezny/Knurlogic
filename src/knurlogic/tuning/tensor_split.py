@@ -1,6 +1,6 @@
 """The tensor split's arithmetic: which models split, what each rank
 holds, and why a split is refused -- from the config and the safetensors
-headers, before anything loads (engine/runtime/tensor.py does the split).
+headers, before anything loads (engine/split/tensor.py does the split).
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from knurlogic.tuning import measured
 # ------------------------------------------------------------ tensor split
 #
 # One model served by N ranks, every layer's weights split N ways (the
-# qwen3_5 families, qwen4_exp and deepseek_v4: engine/runtime/tensor.py does
+# qwen3_5 families, qwen4_exp and deepseek_v4: engine/split/tensor.py does
 # the split).
 # Pure arithmetic over the config and the safetensors headers, so a refusal is
 # said -- with its numbers -- before anything loads.
@@ -23,7 +23,7 @@ def _tensor_maps() -> tuple:
 
 
 #: model type -> its family's `tensor` entry (engine/families/<family>):
-#: the model types engine/runtime/tensor.py knows how to split, and the
+#: the model types engine/split/tensor.py knows how to split, and the
 #: config keys each needs divisible by the ranks; and those architectures
 _TENSOR, _TENSOR_ARCHS = _tensor_maps()
 TENSOR_TYPES = tuple(_TENSOR)
@@ -32,7 +32,7 @@ TENSOR_TYPES = tuple(_TENSOR)
 def tensor_sharded(name: str) -> bool:
     """Is this weight split across ranks under tensor? (tensor_rules: a VQ
     codebook never is.)"""
-    from knurlogic.engine.runtime.tensor_rules import sharded
+    from knurlogic.engine.split.tensor_rules import sharded
     return sharded(name)
 
 
@@ -211,8 +211,8 @@ def tensor_placement(artifact: Artifact, n: int) -> dict:
 
 def tensor_header_refusals(path, cfg: dict, n: int) -> list:
     """Why the arrays on disk cannot be cut `n` ways by the split's own
-    rules (engine/runtime/tensor_rules), each with its numbers."""
-    from knurlogic.engine.runtime.tensor_rules import refusals, skipzero_split
+    rules (engine/split/tensor_rules), each with its numbers."""
+    from knurlogic.engine.split.tensor_rules import refusals, skipzero_split
     if n < 2:
         return []
     tc = cfg.get("text_config", cfg)
@@ -237,8 +237,8 @@ def tensor_header_refusals(path, cfg: dict, n: int) -> list:
 def tensor_unverified(path) -> dict:
     """{(rule path, unknown parameters): a layer holding them} -- the
     modules whose layout no split rule knows, for a launch to run
-    (engine/runtime/viability)."""
-    from knurlogic.engine.runtime.tensor_rules import skipzero_split, unverified
+    (engine/split/viability)."""
+    from knurlogic.engine.split.tensor_rules import skipzero_split, unverified
     return unverified({k: s for k, (s, _) in trunk_headers(path).items()},
                       skipzero_split(path))
 

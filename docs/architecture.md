@@ -29,7 +29,7 @@ parses every source file, function-level imports included:
 3. `engine/`, `machine/`, `tuning/` and `context_management/` never import
    `knurlogic.interfaces`.
 4. `engine/`, `machine/` and `tuning/` never import `knurlogic.cluster`. A
-   rank's progress calls from engine go through `engine/runtime/marker.py`;
+   rank's progress calls from engine go through `engine/split/marker.py`;
    `interfaces/serve.py` sets the marker there.
 
 Everything else in the diagram is convention. `cluster/` does call back

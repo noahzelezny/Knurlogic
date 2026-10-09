@@ -423,7 +423,7 @@ class Coord:
     0's verdicts count: fp32-reduced logits need not be bit-equal across
     ranks, and a different verdict is a different replay -- a hang.
 
-    `head`: rank 0 drafts (it bound a head; `tensor.agree_head` told every
+    `head`: rank 0 drafts (it bound a head; `follower.agree_head` told every
     rank). The same on every rank, so BA / B1 are made on every rank or on
     none -- a follower holds no head of its own to ask."""
 

@@ -62,10 +62,10 @@ class RingFailed(RuntimeError):
 
 def ring_error(exc: BaseException) -> bool:
     """A failure of the link between the ranks, not of one request: the
-    ranks out of step (tensor.Desync), a forward a rank could not finish
+    ranks out of step (link.Desync), a forward a rank could not finish
     (mtp ForwardFailed), or a collective MLX's distributed backends
     raised ("[jaccl] Send failed with error code -12", "[ring] ...")."""
-    from .tensor import Desync
+    from knurlogic.engine.split.link import Desync
     if isinstance(exc, (Desync, ConnectionError)):
         # ConnectionError: the bell (TCP) between the ranks closed, broke or
         # timed out lining up (Link.align)
@@ -193,7 +193,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         or swapped (own_compressed_bytes), or None not to watch.
         `system_pressure`: () -> macOS's pressure level
         (system_pressure_level); compressed bytes warn only above normal.
-        `tensor`: rank 0's engine/runtime/tensor.Ring when this model is
+        `tensor`: rank 0's engine/split/ring.Ring when this model is
         split across ranks; the prompt cache is then count-based only.
         `gpu_in_use`: () -> bytes of GPU memory every process on this
         machine holds (serve.load.gpu_in_use), or None; what the others
@@ -364,7 +364,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         take them (Ring.park)."""
         if self.tensor is None:
             return
-        from .plan import SETS
+        from knurlogic.engine.split.plan import SETS
         for k, v in applied.items():
             if k in SETS:
                 self._sets.put((k, str(v)))
@@ -690,8 +690,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         from knurlogic.engine.mtp import binding
         from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
         from knurlogic.engine.serve import state
-
-        from .tensor import TensorExecutor
+        from knurlogic.engine.split.ring import TensorExecutor
         # a drafting head on either split: rank 0 has the true final hidden
         # state (a pipeline's last layers; a tensor split's all_sums make
         # every layer's output whole on every rank) and drafts; vision on
@@ -705,7 +704,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             vision=vision, why=str(binding.DRAFT.get("why") or ""),
             completion_batch_size=self.completion_batch_size,
             prefill_step_size=self.prefill_step_size, stream=self._stream)
-        from .pipeline import coordinate
+        from knurlogic.engine.split.pipeline import coordinate
         coordinate(gen, self.tensor.link.group)
         if head is not None:
             binding.DRAFT["batch_installed"] = True
@@ -924,7 +923,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 procs = make_logits_processors(**job.penalties)
             sampling, wire = job.sampling, None
             if self.tensor is not None:
-                from .tensor import assign_seed
+                from knurlogic.engine.split.ring import assign_seed
                 sampling = assign_seed(sampling)
                 wire = {"penalties": dict(job.penalties or {}),
                         "initial": initial}

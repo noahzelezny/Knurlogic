@@ -51,11 +51,11 @@ def test_a_seeded_row_drafts_every_step_whatever_the_timing():
 
 
 def test_a_rings_own_seed_does_not_pin_drafting():
-    """A split seeds every row so its ranks draw alike (tensor.assign_seed);
+    """A split seeds every row so its ranks draw alike (ring.assign_seed);
     that seed is not the client's and must not force drafting -- it did,
     so a split drafted (and DSpark verified all K) whatever the timing."""
     from knurlogic.engine.mtp.sampling import Keys
-    from knurlogic.engine.runtime.tensor import RING_SEED, assign_seed
+    from knurlogic.engine.split.ring import RING_SEED, assign_seed
     s = assign_seed({"temp": 0.0})
     assert s[RING_SEED] is True and assign_seed({"seed": 7}).get(RING_SEED) is None
     b = _batch()

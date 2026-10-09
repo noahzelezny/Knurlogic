@@ -223,7 +223,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         _ring_marker(ring)
         # what this rank holds once loaded (rank 0: its share plus the MTP
         # head and tower it alone holds): the page's load % is against it
-        from knurlogic.engine.runtime import marker
+        from knurlogic.engine.split import marker
         marker.progress(share_bytes=int(share or 0) or None)
         # the ring-wide knobs beat the resolver like any --set
         overrides = dict(overrides or {})
@@ -483,10 +483,10 @@ def run(path: str, host: str, port: int, working_set_gib: float,
 
     if world > 1 and int(ring["rank"]) > 0:
         # a follower: no HTTP, no scheduler -- rank 0's plans, until it stops
-        from knurlogic.engine.runtime import tensor
+        from knurlogic.engine.split import follower as split_follower
         print(f"\nrank {ring['rank']}: following rank 0 (no HTTP here)",
               flush=True)
-        tensor.serve_follower(
+        split_follower.serve_follower(
             str(a.path), link_kind=ring["link"],
             working_set=int(working_set_gib * GIB),
             prompt_cache_size=int((serving or {}).get("prompt_cache_size",
@@ -712,7 +712,7 @@ def _ring_marker(ring: dict) -> None:
     in its job dir, which the page watches (cluster/jobs.py). A ring
     started by hand has no page watching it and no marker."""
     from knurlogic.cluster import jobs
-    from knurlogic.engine.runtime import marker
+    from knurlogic.engine.split import marker
     if not jobs.JOB_RX.fullmatch(str(ring.get("job") or "")):
         return
     marker.CURRENT["marker"] = jobs.Marker(ring["job"],

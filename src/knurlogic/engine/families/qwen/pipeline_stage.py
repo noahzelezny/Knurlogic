@@ -1,4 +1,4 @@
-"""Qwen's trunks as a pipeline stage (engine/runtime/pipeline.restage):
+"""Qwen's trunks as a pipeline stage (engine/split/pipeline.restage):
 the per-layer indices each trunk froze from the WHOLE layer list at
 __init__, re-taken over the stage's `keep` = its layers [start, end).
 Named by the manifest's `pipeline` entries. Layers are read through their

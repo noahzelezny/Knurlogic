@@ -27,7 +27,7 @@ used, so asking what a family supports imports no mlx. Its shape:
                       "module:attr" or absent}: a pipeline split's trunk,
                       and what re-takes the indices it froze from the whole
                       layer list over a stage's layers (pipeline_stage.py)
-      tensor          present when engine/runtime/tensor.py splits it:
+      tensor          present when engine/split/tensor.py splits it:
                       {"divisible": [config keys the ranks must divide]}
       tensor_split    {"act_quant_block": n, "inputs": [{what, keys,
                       defaults}]}: linear inputs rounded in blocks a tensor

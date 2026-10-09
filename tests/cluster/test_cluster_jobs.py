@@ -28,7 +28,7 @@ from procs import reap_registries
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import launch as C
 from knurlogic.cluster import links
-from knurlogic.engine.runtime import marker
+from knurlogic.engine.split import marker
 from knurlogic.interfaces import spawn
 from knurlogic.interfaces.page import loads as page_loads
 from knurlogic.interfaces.page import nodes as page_nodes

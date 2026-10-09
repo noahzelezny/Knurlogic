@@ -238,11 +238,11 @@ _RULES: list = []
 def _rules_stamp() -> str:
     """sha256 of the source that decides a model's splits
     (tuning/tensor_split, tuning/pipeline_split,
-    engine/runtime/tensor_rules)."""
+    engine/split/tensor_rules)."""
     if not _RULES:
         import hashlib
 
-        import knurlogic.engine.runtime.tensor_rules as tr
+        import knurlogic.engine.split.tensor_rules as tr
         import knurlogic.tuning.pipeline_split as ps
         import knurlogic.tuning.tensor_split as ts
         h = hashlib.sha256()

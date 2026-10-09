@@ -28,7 +28,7 @@ from typing import Any
 import mlx.core as mx
 from mlx_lm.generate import _extend_cache, _merge_caches
 
-from knurlogic.engine.runtime.marker import chunk_done
+from knurlogic.engine.split.marker import chunk_done
 
 from .caches import position, release, restore, rollback, snapshot
 from .sampling import Distribution, Keys, rejection_correct
@@ -463,7 +463,7 @@ class MTPBatch:
         # rows -> (backoff multiplier, winner when the last recheck began)
         self._backoff: dict = {}
         self._explore: tuple | None = None   # (rows, drafting, steps left)
-        #: engine/runtime/pipeline.Coord on a pipeline split: rank 0's regime,
+        #: engine/split/pipeline.Coord on a pipeline split: rank 0's regime,
         #: drafts and verdicts reach every rank through it (B1, B2)
         self.coord = None
         #: finish_at(uid, tokens) -> the index of the token in `tokens` (a

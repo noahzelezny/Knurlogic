@@ -58,7 +58,7 @@ hooks it needs:
 | KV quantization | `kv_quant` in the architecture entry; its `caches` names the quantized factory of any family cache class (read by `engine/kvquant.family_caches`) |
 | drafting | `head` entry and the class in `heads/` ([drafting](drafting.md)) |
 | vision | `vision` entry and `vision/` with `build(...)` ([vision](vision.md)) |
-| tensor split | `tensor` / `tensor_split` entries and rules in `engine/runtime/tensor_rules.py` ([splits](splits.md)) |
+| tensor split | `tensor` / `tensor_split` entries and rules in `engine/split/tensor_rules.py` ([splits](splits.md)) |
 | pipeline split | `pipeline` entry, and a `restage` if the trunk froze layer indices |
 | cache saving | the class round-trips in `tests/engine/test_prompt_disk.py` ([prompt-cache](prompt-cache.md)) |
 | prefill width | a measured `prefill_chunk` |
@@ -68,7 +68,7 @@ hooks it needs:
 A model's support is spread by design across the family folder (the
 manifest) and the generic tables that read it, but a few family facts sit
 outside the folder: the tensor split rules are one table for every family
-in `engine/runtime/tensor_rules.py`, and `tuning/` reads
+in `engine/split/tensor_rules.py`, and `tuning/` reads
 the manifests through per-family helpers (`measured.prefill_chunk_for`,
 `measured.kv_quant_for`, `context_window.long_context_family`).
 

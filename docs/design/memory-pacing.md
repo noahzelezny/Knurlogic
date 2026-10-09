@@ -106,7 +106,7 @@ waits and 503s are fine.
 - Room: `Scheduler._limit` = min(working set - others' GPU, allowance,
   `RamRoom`) - margin, and a margin more under pressure; RAM from
   `machine/ram.py` (ctypes `host_statistics64`, sysctl pressure level).
-  Followers: `tensor.Mark` takes the same `RamRoom`.
+  Followers: `follower.Mark` takes the same `RamRoom`.
 - Two lines: `_tx["prefill"]` (x = context x chunk / 512) and
   `_tx["decode"]` (x = rows' contexts summed); `_measure(admitted=, chunk=)`.
 - Chunk search in `_make_room` (512 -> 256 -> 128, full before lean), else

@@ -24,9 +24,9 @@
                                with no head. `seeded`: two rows seeded, one
                                greedy. `engine`: through rank 0's
                                TensorExecutor and the follower's
-                               tensor.follow instead of a hand-driven loop
+                               follower.follow instead of a hand-driven loop
     ends <split> <loop>        rows that end inside a drafting step, on the
-                               serving path (TensorExecutor / tensor.follow),
+                               serving path (TensorExecutor / follower.follow),
                                the tiny DeepSeek-V4 split (`split`: tensor or
                                pipeline), rank 0 holding its 1-token MTP head
                                (`loop` mtp) or DSpark block head (dspark),
@@ -116,7 +116,7 @@ def run(model, ids, then):
 
 
 def logits(link, out_path, family, counts):
-    from knurlogic.engine.runtime import pipeline as PL
+    from knurlogic.engine.split import pipeline as PL
     ids = [5, 17, 3, 99, 42, 7, 64, 11, 23]
     then = [31, 104, 331, 32, 439, 214]
     if family == "deepseek_v4":                 # its vocabulary is 64
@@ -181,8 +181,8 @@ def mtp(link, out_path, always, split_kind="pipeline", family="qwen3_5"):
     import mlx.core as mx
 
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
-    from knurlogic.engine.runtime import pipeline as PL
-    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.split import pipeline as PL
+    from knurlogic.engine.split import tensor as T
     if always:
         os.environ["KNURLOGIC_MTP_BATCH_MAX_ROWS"] = "8"
     vocab, max_tokens = (8, 40) if always else (512, 40)
@@ -480,8 +480,8 @@ def dspark(link, out_path, split_kind="pipeline", counts="1,3", seeded="",
     import test_deepseek_v4_dspark as D
 
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
-    from knurlogic.engine.runtime import pipeline as PL
-    from knurlogic.engine.runtime import tensor as T
+    from knurlogic.engine.split import pipeline as PL
+    from knurlogic.engine.split import tensor as T
     os.environ["KNURLOGIC_MTP_BATCH_MAX_ROWS"] = "8"      # draft always
     if os.environ.get("KNURLOGIC_TEST_NO_ROUNDING"):
         _no_rounding()
@@ -636,7 +636,7 @@ def dspark(link, out_path, split_kind="pipeline", counts="1,3", seeded="",
 def _dspark_engine(link, out_path, model, head, prompts, samp, max_tokens,
                    split_kind, K, outs, load, ref):
     """The serving path for `dspark ... engine`: rank 0's TensorExecutor
-    and the follower's tensor.follow with rank 0's block size and target
+    and the follower's follower.follow with rank 0's block size and target
     layers (as agree_head tells it), against rank 0's unsplit executor
     with no head (FakeTok's end token on both). `keyed`: every Finished
     entry is at exactly its key's length."""
@@ -644,8 +644,6 @@ def _dspark_engine(link, out_path, model, head, prompts, samp, max_tokens,
         MTPBatchGenerator,
         trunk_offset,
     )
-    from knurlogic.engine.runtime import pipeline as PL
-    from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.runtime.executor import (
         Admission,
         Finished,
@@ -653,9 +651,12 @@ def _dspark_engine(link, out_path, model, head, prompts, samp, max_tokens,
         Token,
     )
     from knurlogic.engine.runtime.request import control_machine
+    from knurlogic.engine.split import follower as split_follower
+    from knurlogic.engine.split import pipeline as PL
+    from knurlogic.engine.split import ring as split_ring
     tok = FakeTok()
     if link.rank > 0:
-        T.follow(model, tok, ("tiny", None, None), link,
+        split_follower.follow(model, tok, ("tiny", None, None), link,
                  prompt_cache_size=4, completion_batch_size=8,
                  prefill_step_size=4, working_set=0, split=split_kind,
                  drafting=True, block=K, outputs=tuple(outs))
@@ -692,8 +693,8 @@ def _dspark_engine(link, out_path, model, head, prompts, samp, max_tokens,
     gen = MTPBatchGenerator(model, head, stats=stats, prefill_step_size=4,
                             completion_batch_size=8)
     PL.coordinate(gen, link.group)
-    ring = T.Ring(link, split=split_kind)
-    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    ring = split_ring.Ring(link, split=split_kind)
+    ex = split_ring.TensorExecutor(gen, ring, over=lambda: 0)
     split, keyed = drain(ex, gen._n_trunk)
     ring.stop()
     json.dump(dict(ref, served=served, split=split, keyed=keyed,
@@ -743,18 +744,19 @@ def ends(link, out_path, split_kind="tensor", loop="mtp"):
     token of the last prompt, whose cap is 12), so the follower's control
     machine is rank
     0's. Then, through rank 0's TensorExecutor and the follower's
-    tensor.follow: eight rows in one batch ending on max_tokens 3, 6..12 or
+    follower.follow: eight rows in one batch ending on max_tokens 3, 6..12 or
     the end token, then each of them alone. Rank 0 counts the steps that
     ended a row before their last position (`_ends` hit inside a drafting
     step) and the regimes taken."""
     import tempfile
 
+    from knurlogic.engine.split import follower as split_follower
+    from knurlogic.engine.split import ring as split_ring
+
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "goldens"))
     import build_deepseek_v4 as G
 
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
-    from knurlogic.engine.runtime import pipeline as PL
-    from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.runtime.executor import (
         Admission,
         Finished,
@@ -762,6 +764,8 @@ def ends(link, out_path, split_kind="tensor", loop="mtp"):
         Token,
     )
     from knurlogic.engine.runtime.request import control_machine
+    from knurlogic.engine.split import pipeline as PL
+    from knurlogic.engine.split import tensor as T
     tmp = tempfile.mkdtemp()
 
     def load():
@@ -777,7 +781,7 @@ def ends(link, out_path, split_kind="tensor", loop="mtp"):
     # the first row's first block step commits 5 under DSpark (_guess):
     # a cap of 3 ends it inside
     caps = [3] + list(range(6, 13))
-    seeds = [T.assign_seed({}) for _ in prompts]   # as a ring admits
+    seeds = [split_ring.assign_seed({}) for _ in prompts]   # as a ring admits
 
     class Tok:
         eos_token_ids = [1 << 20]                  # none, until found
@@ -834,7 +838,7 @@ def ends(link, out_path, split_kind="tensor", loop="mtp"):
     block = head.block_size if loop == "dspark" else 0
     outs = (tuple(model.args.dspark_target_layer_ids) if block else ())
     if link.rank > 0:
-        T.follow(model, tok, ("tiny", None, None), link,
+        split_follower.follow(model, tok, ("tiny", None, None), link,
                  prompt_cache_size=4, completion_batch_size=8,
                  prefill_step_size=4, working_set=0, split=split_kind,
                  drafting=True, block=block, outputs=outs)
@@ -865,8 +869,8 @@ def ends(link, out_path, split_kind="tensor", loop="mtp"):
             inside[0] += 1
         return j
     b._note_regime, b._ends = note, ends_
-    ring = T.Ring(link, split=split_kind)
-    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    ring = split_ring.Ring(link, split=split_kind)
+    ex = split_ring.TensorExecutor(gen, ring, over=lambda: 0)
     split = phases(ex)
     ring.stop()
     json.dump({"served": served, "split": split, "inside": inside[0],
@@ -931,17 +935,18 @@ def _fail_on_rank_0(gen, fail):
 
 def engine(link, out_path, fail="", split_kind="pipeline", drafting=""):
     """The serving path: rank 0's TensorExecutor journals a step plan, the
-    follower runs tensor.follow (split="pipeline"), MTP on both.
+    follower runs follower.follow (split="pipeline"), MTP on both.
 
     `fail`: rank 0 alone fails one row (_fail_on_rank_0); the other rows
     stream to the end and the follower drops the row from the next plan.
     `split_kind="tensor"`: the tiny qwen3_5_moe sharded, no head; with
     `drafting`, the tiny qwen3_5 sharded, rank 0 holding the head."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
-    from knurlogic.engine.runtime import pipeline as PL
-    from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.runtime.executor import Admission, LocalExecutor, Token
     from knurlogic.engine.runtime.request import control_machine
+    from knurlogic.engine.split import follower as split_follower
+    from knurlogic.engine.split import pipeline as PL
+    from knurlogic.engine.split import ring as split_ring
     tok = FakeTok()
 
     def admissions(prompts):
@@ -984,7 +989,7 @@ def engine(link, out_path, fail="", split_kind="pipeline", drafting=""):
     model, head, prompts = _tiny_with_head(512)
     PL.split(model, link.group, PL.bounds_of([1, 3]))
     if link.rank > 0:
-        T.follow(model, tok, ("tiny", None, None), link,
+        split_follower.follow(model, tok, ("tiny", None, None), link,
                  prompt_cache_size=4, completion_batch_size=32,
                  prefill_step_size=16, working_set=0,
                  split="pipeline", drafting=True)
@@ -993,8 +998,8 @@ def engine(link, out_path, fail="", split_kind="pipeline", drafting=""):
                             completion_batch_size=32)
     PL.coordinate(gen, link.group)
     _fail_on_rank_0(gen, fail)
-    ring = T.Ring(link, split="pipeline")
-    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    ring = split_ring.Ring(link, split="pipeline")
+    ex = split_ring.TensorExecutor(gen, ring, over=lambda: 0)
     split = drain(ex, [ex.insert(a) for a in admissions(prompts)])
     ring.stop()
     json.dump({"whole": whole, "split": split}, open(out_path, "w"))
@@ -1005,9 +1010,11 @@ def _tensor_engine(link, out_path, fail, admissions, drain, tok,
     from tensor_ring_worker import build
 
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
-    from knurlogic.engine.runtime import pipeline as PL
-    from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.runtime.executor import LocalExecutor
+    from knurlogic.engine.split import follower as split_follower
+    from knurlogic.engine.split import pipeline as PL
+    from knurlogic.engine.split import ring as split_ring
+    from knurlogic.engine.split import tensor as T
     prompts = [[5, 17, 3, 99, 42, 7, 64, 11], [23, 31, 104, 33, 9, 8, 7, 6],
                [1, 4, 9, 16, 25, 36, 49, 64]]
     whole, head = None, None
@@ -1023,7 +1030,7 @@ def _tensor_engine(link, out_path, fail, admissions, drain, tok,
         model = build()
     T.shard(model, link.group)
     if link.rank > 0:
-        T.follow(model, tok, ("tiny", None, None), link,
+        split_follower.follow(model, tok, ("tiny", None, None), link,
                  prompt_cache_size=4, completion_batch_size=32,
                  prefill_step_size=16, working_set=0, split="tensor",
                  drafting=drafting)
@@ -1033,8 +1040,8 @@ def _tensor_engine(link, out_path, fail, admissions, drain, tok,
     if drafting:
         PL.coordinate(gen, link.group)          # as the scheduler does
     _fail_on_rank_0(gen, fail)
-    ring = T.Ring(link)
-    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    ring = split_ring.Ring(link)
+    ex = split_ring.TensorExecutor(gen, ring, over=lambda: 0)
     split = drain(ex, [ex.insert(a) for a in admissions(prompts)])
     ring.stop()
     json.dump({"whole": whole, "split": split}, open(out_path, "w"))
@@ -1051,8 +1058,6 @@ def hit(link, out_path, split_kind="pipeline"):
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.prompt_cache.memory import PromptCache
     from knurlogic.engine.prompt_cache.ring import JournalPromptCache
-    from knurlogic.engine.runtime import pipeline as PL
-    from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.runtime.executor import (
         Admission,
         Checkpoint,
@@ -1060,6 +1065,10 @@ def hit(link, out_path, split_kind="pipeline"):
         Token,
     )
     from knurlogic.engine.runtime.request import control_machine
+    from knurlogic.engine.split import follower as split_follower
+    from knurlogic.engine.split import pipeline as PL
+    from knurlogic.engine.split import ring as split_ring
+    from knurlogic.engine.split import tensor as T
     tok = FakeTok()
     key = ("tiny", None, None)
 
@@ -1101,15 +1110,15 @@ def hit(link, out_path, split_kind="pipeline"):
     else:
         PL.split(model, link.group, PL.bounds_of([1, 3]))
     if link.rank > 0:
-        T.follow(model, tok, key, link, prompt_cache_size=4,
+        split_follower.follow(model, tok, key, link, prompt_cache_size=4,
                  completion_batch_size=8, prefill_step_size=4,
                  working_set=0, split=split_kind, drafting=True)
         return
     gen = MTPBatchGenerator(model, head, stats={}, prefill_step_size=4,
                             completion_batch_size=8)
     PL.coordinate(gen, link.group)
-    ring = T.Ring(link, split=split_kind)
-    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    ring = split_ring.Ring(link, split=split_kind)
+    ex = split_ring.TensorExecutor(gen, ring, over=lambda: 0)
     pc = JournalPromptCache(PromptCache(4), ring.journal)
     n_trunk = gen._n_trunk
 
@@ -1136,6 +1145,8 @@ def image(link, out_path, split_kind="pipeline"):
     so the follower's key must be rank 0's for its trie to hit, and its
     positions must come from the refs alone. Both prompts' tokens are the
     unsplit engine's."""
+    from knurlogic.engine.split import follower as split_follower
+    from knurlogic.engine.split import ring as split_ring
     sys.path.insert(0, os.path.dirname(__file__))
     from pathlib import Path
 
@@ -1144,8 +1155,6 @@ def image(link, out_path, split_kind="pipeline"):
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.prompt_cache.memory import PromptCache
     from knurlogic.engine.prompt_cache.ring import JournalPromptCache
-    from knurlogic.engine.runtime import pipeline as PL
-    from knurlogic.engine.runtime import tensor as T
     from knurlogic.engine.runtime.executor import (
         Admission,
         Checkpoint,
@@ -1153,6 +1162,8 @@ def image(link, out_path, split_kind="pipeline"):
         Token,
     )
     from knurlogic.engine.runtime.request import control_machine
+    from knurlogic.engine.split import pipeline as PL
+    from knurlogic.engine.split import tensor as T
     from knurlogic.engine.vision import key as K
     from knurlogic.engine.vision import registry
     from knurlogic.engine.vision.request import MirrorVision, VisionServe
@@ -1220,7 +1231,7 @@ def image(link, out_path, split_kind="pipeline"):
     else:
         T.shard(model, link.group)
     if link.rank > 0:
-        T.follow(model, tok, mkey, link, prompt_cache_size=4,
+        split_follower.follow(model, tok, mkey, link, prompt_cache_size=4,
                  completion_batch_size=8, prefill_step_size=16,
                  working_set=0, split=split_kind, vision=vs)
         return
@@ -1228,8 +1239,8 @@ def image(link, out_path, split_kind="pipeline"):
                             prefill_step_size=16, completion_batch_size=8)
     if split_kind == "pipeline":
         coord = PL.coordinate(gen, link.group)
-    ring = T.Ring(link, split=split_kind)
-    ex = T.TensorExecutor(gen, ring, over=lambda: 0)
+    ring = split_ring.Ring(link, split=split_kind)
+    ex = split_ring.TensorExecutor(gen, ring, over=lambda: 0)
     coord = gen._coord
     pc = JournalPromptCache(PromptCache(4), ring.journal)
 
@@ -1247,10 +1258,11 @@ def image(link, out_path, split_kind="pipeline"):
 
 def main(argv):
     import faulthandler
+
+    from knurlogic.engine.split import link as split_link
     faulthandler.dump_traceback_later(float(os.environ.get(
         "PIPELINE_WORKER_DEADLINE", "150")), exit=True)
-    from knurlogic.engine.runtime import tensor as T
-    link = T.init("ring")
+    link = split_link.init("ring")
     mode, out_path = argv[0], argv[1]
     if mode == "engine":
         engine(link, out_path, *argv[2:])
