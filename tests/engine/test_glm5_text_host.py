@@ -2,7 +2,7 @@
 
 `mlx_lm.utils.load` resolves `(Model, ModelArgs)` from the module
 registered as `mlx_lm.models.<model_type>`. Rank 0 and a pipeline follower
-both reach it through `serve.load.load_unlocked`, so the vendored package
+both reach it through `model.load.load_unlocked`, so the vendored package
 must answer that contract: a follower died with "module
 'mlx_lm.models.glm5_next' has no attribute 'ModelArgs'".
 

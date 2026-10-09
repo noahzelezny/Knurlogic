@@ -207,7 +207,7 @@ class ModelHost:
             # the lock. Split lazily (no weights read) before the lock.
             t0 = time.monotonic()
             lazy = self._split_lazily(path) if self.shard else None
-            with loadlock.model_load(path, "runtime.host",
+            with loadlock.model_load(path, "runtime.model_host",
                                      wait_s=self.load_wait_s):
                 t1 = time.monotonic()
                 self.model, self.tokenizer = self._weights(path, lazy)

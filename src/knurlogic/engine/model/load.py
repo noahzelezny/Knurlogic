@@ -106,7 +106,7 @@ def load(path: str, executes_artifact_code: bool = False):
 
     # The box is shared: one model load at a time, across processes
     # (machine/loadlock.py; vision-contracts.md "Load lock" names this caller).
-    with loadlock.model_load(str(path), "serve.load"):
+    with loadlock.model_load(str(path), "model.load"):
         return load_unlocked(path, executes_artifact_code)
 
 
