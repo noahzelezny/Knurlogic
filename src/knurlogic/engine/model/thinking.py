@@ -149,17 +149,17 @@ _probe_cache: dict = {}
 # what is cached. Measured on an M4 Max (128 GB) without the lock: the first
 # four concurrent requests of every bench arm were served "not
 # controllable" -- a `none` request reasoned for 242 tokens.
-_render_lock = threading.RLock()
+render_lock = threading.RLock()
 
 
 def _render(tokenizer, kwargs: dict):
-    with _render_lock:
+    with render_lock:
         return _render_unlocked(tokenizer, kwargs)
 
 
 def _render_unlocked(tokenizer, kwargs: dict):
     try:
-        return _Closing(tokenizer).apply_chat_template(
+        return Closing(tokenizer).apply_chat_template(
             _PROBE_MSGS, add_generation_prompt=True, tokenize=False,
             **kwargs)
     except TEMPLATE_ERRORS:
@@ -171,13 +171,13 @@ def _render_unlocked(tokenizer, kwargs: dict):
 #: writes `<think></think>` into every past assistant turn; its template has
 #: no off switch). Measured before it was offered: GLM 2.7, 12/12 right, 0
 #: reasoning tokens. Never reaches the
-#: template -- `_Closing` strips it and appends the tokenizer's think_end
+#: template -- `Closing` strips it and appends the tokenizer's think_end
 #: to the generation prompt, so mlx-lm's own rfind sees a closed block and
 #: starts the response in its normal state.
 CLOSE = "_knurlogic_close_think"
 
 
-class _Closing:
+class Closing:
     """A tokenizer whose generation prompt ends with the think block
     closed when CLOSE is asked for; every other call passes through."""
 
@@ -209,7 +209,7 @@ def probe(tokenizer, template: str | None, spec: dict) -> dict:
     """Render once per native level and once bare, through the tokenizer the
     server uses. {verified, default, renders}. Cached per template."""
     h = hashlib.sha256((template or "").encode()).hexdigest()
-    with _render_lock:
+    with render_lock:
         if h not in _probe_cache:
             _probe_cache[h] = _probe(tokenizer, spec)
         return _probe_cache[h]
@@ -282,13 +282,13 @@ def _served_tokenizer():
     prov = state.SERVED.get("provider")
     tok = getattr(prov, "tokenizer", None) if prov is not None else None
     if tok is not None:
-        with _render_lock:        # a reader inside it is mid-lookup
+        with render_lock:        # a reader inside it is mid-lookup
             _disk_tok.clear()
         return tok
     path = state.served_path()
     if not path:
         return None
-    with _render_lock:
+    with render_lock:
         if _disk_tok.get("path") != path:
             try:
                 from pathlib import Path

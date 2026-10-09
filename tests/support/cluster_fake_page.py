@@ -96,22 +96,22 @@ def main():
     serve_port = int(os.environ.get("FAKE_SERVE_PORT") or 0)
     if serve_port:
         routes = documents.routes(
-            status_fn=page_nodes._status_fn,
-            loaded_fn=page_loads._loaded_fn(),
-            load_fn=page_loads._load_fn(serve_port))
+            status_fn=page_nodes.status_fn,
+            loaded_fn=page_loads.loaded_fn(),
+            load_fn=page_loads.load_fn(serve_port))
         full = routes["/status.json"]
         routes["/status.json"] = lambda q, _n=0: (
-            documents._json(page_nodes._status_light())
+            documents.json_reply(page_nodes.status_light())
             if (q.get("light") or [""])[0] else full(q, _n))
         spawn.SERVE_PORT["ui"] = port
         C.start_watching_existing()
     else:
         routes = documents.routes(
-            status_fn=page_nodes._status_fn,
-            loaded_fn=page_loads._loaded_fn())
+            status_fn=page_nodes.status_fn,
+            loaded_fn=page_loads.loaded_fn())
         full = routes["/status.json"]
         routes["/status.json"] = lambda q, _n=0: (
-            documents._json(page_nodes._status_light())
+            documents.json_reply(page_nodes.status_light())
             if (q.get("light") or [""])[0] else full(q, _n))
         spawn.SERVE_PORT["ui"] = port
     srv = ThreadingHTTPServer(("127.0.0.1", port), page_server.make_handler(

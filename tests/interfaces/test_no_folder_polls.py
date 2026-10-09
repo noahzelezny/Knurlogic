@@ -41,20 +41,20 @@ def test_polls_never_read_a_model_folder(monkeypatch, tmp_path, no_folders,
     monkeypatch.setattr(J, "read_marker", lambda job, rank: None)
     monkeypatch.setattr(servers, "is_our_server", lambda pid: True)
     monkeypatch.setattr(spawn, "is_our_server", lambda pid: True)
-    monkeypatch.setattr(spawn, "_answers", lambda port: answers)
+    monkeypatch.setattr(spawn, "answers", lambda port: answers)
     mm = {"processes": [{"pid": 100, "bytes": 950}]}
     monkeypatch.setattr(spawn.footprint, "memory_map", lambda: mm)
     monkeypatch.setattr(page_loads.loaded, "survey", lambda: {
         "resident": [], "runtimes": [], "bytes_resident": 0, "memory": mm})
-    documents._LOADED.update(doc=None, at=0.0)
+    documents.LOADED.update(doc=None, at=0.0)
     page_nodes._LIGHT.update(doc=None, at=0.0)
 
     (load,) = page_loads.load_progress({"memory": mm})
     assert load["total_bytes"] == 1000          # from the launch record
     (c,) = spawn.children()
     assert c["phase"] == ("serving" if answers else "loading")
-    page_loads._loaded_fn()({})
-    page_nodes._status_light()
+    page_loads.loaded_fn()({})
+    page_nodes.status_light()
 
 
 def _rows(monkeypatch):

@@ -25,12 +25,12 @@ from pathlib import Path
 
 #: the running server's scheduler, for the page's load/unload actions,
 #: which are built before the server is
-_CURRENT: dict = {}
+CURRENT: dict = {}
 
 
 def requests_now():
     """The running server's scheduler.requests(), or None before it runs."""
-    sched = _CURRENT.get("scheduler")
+    sched = CURRENT.get("scheduler")
     return sched.requests() if sched is not None else None
 
 
@@ -38,7 +38,7 @@ def load_now():
     """The running server's host state ({state, error}: loading, warming,
     ready, failed, empty), or None before it runs. /status.json carries it
     so a page does not call a model ready because its port answers."""
-    sched = _CURRENT.get("scheduler")
+    sched = CURRENT.get("scheduler")
     if sched is None:
         return None
     st = sched.host.status()
@@ -52,7 +52,7 @@ def switch(model: str, *, force: bool = False, wait: bool = True,
     scheduler's thread. Idempotent. NotLoadable says why not; `force`
     switches even with requests running (they fail, saying so)."""
     from knurlogic.interfaces.load_checks import NotLoadable, prepare
-    sched = _CURRENT["scheduler"]
+    sched = CURRENT["scheduler"]
     host = sched.host
     st = host.status()
     if not (model in ("", Path(host.path or "").name, host.path)
@@ -81,7 +81,7 @@ def switch(model: str, *, force: bool = False, wait: bool = True,
 
 
 def unload() -> dict:
-    sched = _CURRENT["scheduler"]
+    sched = CURRENT["scheduler"]
     had = sched.host.path
     cmd = sched.unload(force=False)
     cmd.done.wait()
@@ -271,7 +271,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                       tensor=tensor, gpu_in_use=gpu_in_use).start()
     sched.load(str(artifact.path),
                executes_artifact_code=bool(artifact.model_file))
-    _CURRENT["scheduler"] = sched
+    CURRENT["scheduler"] = sched
     if ring:
         watch_ring(sched, mh)
     else:

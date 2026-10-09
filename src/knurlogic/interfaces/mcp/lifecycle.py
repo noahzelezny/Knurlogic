@@ -192,7 +192,7 @@ def _artifact_name(artifact: str) -> str:
 def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
              cable) -> dict[str, Any]:
     """`load` on other machines: the page's Launch request, sent to the
-    page on this Mac (interfaces/page/loads._load_fn), which forwards a
+    page on this Mac (interfaces/page/loads.load_fn), which forwards a
     one-peer load and coordinates a cluster (cluster/launch.launch)."""
     if len(set(names)) != len(names):
         return {"loaded": False, "refused": "a machine is named twice"}
@@ -207,7 +207,7 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
     if no:
         return no
     try:
-        ids, no = page_client._node_ids(names)
+        ids, no = page_client.node_ids(names)
         if no:
             return no
         from knurlogic.machine import identity
@@ -232,10 +232,10 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
             req.update(nodes=ids, split=split, link=link)
             if cable:
                 req["cable"] = cable
-        out = page_client._page_post(req)
+        out = page_client.page_post(req)
     except page_client.PageDown as e:
         return {"error": str(e)}
-    no = page_client._refusal(out)
+    no = page_client.refusal(out)
     if no:
         return no
     if len(ids) == 1:
@@ -246,7 +246,7 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
             "job": out.get("job"), "port": out.get("port"),
             "url": out.get("url"),
             "leader": out.get("leader"), "machines": out.get("machines"),
-            "split": split, "link": page_client._link_name(out.get("link") or link),
+            "split": split, "link": page_client.link_name(out.get("link") or link),
             "placement": plan,
             **({"alerts": out["alerts"]} if out.get("alerts") else {}),
             "note": out.get("note", "") + " -- or `state`: the job is one "
@@ -266,12 +266,12 @@ def unload(port: int | None = None, model: str = "", job: str = "",
     if not (port or model or job or instance):
         return {"error": "name the port, the model, the job or the instance"}
     try:
-        page = page_client._page_get("/loaded.json?peers=1")
+        page = page_client.page_get("/loaded.json?peers=1")
     except page_client.PageDown as e:
         if port and not (model or job or instance or machine):
             return spawn.stop(int(port))      # this Mac, without its page
         return {"error": str(e)}
-    here = page_client._me_name()
+    here = page_client.me_name()
     rows = [r for r in page_client.models_across(page, here)
             if r.get("runtime") == "knurlogic"]
     if instance:
@@ -317,19 +317,19 @@ def unload(port: int | None = None, model: str = "", job: str = "",
             # a rank of it runs here: this page stops it everywhere; or
             # it runs nowhere (failed, waiting to relaunch): the unload
             # clears its record on every Mac, and says what it cleared
-            out = page_client._page_post({"action": "unload", "job": r["job"]}, 60)
+            out = page_client.page_post({"action": "unload", "job": r["job"]}, 60)
         elif r.get("machine") == here:
-            out = page_client._page_post({"action": "unload",
+            out = page_client.page_post({"action": "unload",
                               "target": str(r.get("port"))}, 60)
         else:
             if not r.get("port"):
                 return {"error": f"{r.get('name')} on {r.get('machine')} "
                                  f"has no port yet; stop it there"}
-            ids, no = page_client._node_ids([r["machine"]])
+            ids, no = page_client.node_ids([r["machine"]])
             if no:
                 return {"error": no["refused"]}
             # the peer's rank 0 port: that page stops its job everywhere
-            out = page_client._page_post({"action": "unload", "node": ids[0],
+            out = page_client.page_post({"action": "unload", "node": ids[0],
                               "port": int(r["port"])}, 60)
     except page_client.PageDown as e:
         return {"error": str(e)}

@@ -439,13 +439,13 @@ def test_glm_off_closes_the_think_block_so_the_answer_starts_normal():
     text = T._render(tok, kw)
     assert text.endswith("<think></think>")
     assert "Reasoning Effort: Low" in text
-    ids = T._Closing(tok).apply_chat_template(
+    ids = T.Closing(tok).apply_chat_template(
         [{"role": "user", "content": "hi"}], add_generation_prompt=True,
         tokenize=True, **kw)
     assert tok.rfind_think_end(ids) > tok.rfind_think_start(ids)
     # the system-prompt split mlx-lm renders WITHOUT a generation prompt
     # is untouched, so its segments still line up with the prompt
-    plain = T._Closing(tok).apply_chat_template(
+    plain = T.Closing(tok).apply_chat_template(
         [{"role": "user", "content": "hi"}], add_generation_prompt=False,
         tokenize=True, **kw)
     assert plain == tok.apply_chat_template(

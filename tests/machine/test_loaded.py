@@ -367,7 +367,7 @@ def test_the_map_takes_used_from_the_os_and_splits_swap(monkeypatch):
          "used_bytes": 100 * gib}))
     monkeypatch.setattr(footprint, "_commands", lambda: {
         1: "/v/bin/python -m knurlogic serve", 2: "/Applications/Other"})
-    monkeypatch.setattr(metrics, "_swap", lambda: 12 * gib)
+    monkeypatch.setattr(metrics, "swap", lambda: 12 * gib)
     m = footprint.memory_map(floor=1 << 30)
     assert m["used_bytes"] == 100 * gib
     # footprints (112) exceed used (100): the excess is swapped, and the

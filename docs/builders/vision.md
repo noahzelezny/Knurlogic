@@ -38,7 +38,7 @@ Hooks outside it:
 - `engine/split/plan.py`: `admit` carries `images` and `refs` to the
   other ranks of a split (`key_to_wire`, `key_from_wire`).
 - `tuning/fit.py`: `vision_budget`, `vision_freed_bytes`,
-  `_tower_bytes`; `tuning/measured.py`: `VISION_*` constants;
+  `tower_bytes`; `tuning/measured.py`: `VISION_*` constants;
   `tuning/knobs.py`: `vision_of`.
 - `interfaces/http/openai.py` and `messages.py`: image parts in requests.
 

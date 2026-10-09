@@ -49,7 +49,7 @@ def serve_log(port: int) -> Path:
 # should its ability to stop it. Measured: a server started through the MCP
 # kept running after the session closed, and the next session could not
 # unload it because the only record was a dict in the dead process. So the
-# record is a file, and `_CHILDREN` only keeps the Popen for exit codes.
+# record is a file, and `CHILDREN` only keeps the Popen for exit codes.
 
 def registry_path() -> Path:
     return cache_dir() / "servers.json"

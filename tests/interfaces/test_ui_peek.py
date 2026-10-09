@@ -141,7 +141,7 @@ def test_the_settings_preview_resolves_an_identity_here(monkeypatch):
         "knurlogic.machine.artifact.resolve_identity",
         lambda ident, paths=None, name="": "/models/q" if ident == "5e07"
         else None)
-    monkeypatch.setattr(documents, "_preview",
+    monkeypatch.setattr(documents, "preview",
                         lambda art, tune, ws=None, **kw:
                         got.update(art=art) or {"knobs": []})
     h = documents.machine_settings()

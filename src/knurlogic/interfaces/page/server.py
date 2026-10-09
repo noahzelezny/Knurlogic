@@ -177,14 +177,14 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             started. The peer gate (peer_refusal), then a plain
             Content-Length body -- never Transfer-Encoding, the framing a
             smuggled request hides behind -- then peer_relay."""
-            manual = peers._manual_hosts()
+            manual = peers.manual_hosts()
             refused = peers.peer_refusal(
                 self.headers, self.client_address[0],
                 self.connection.getsockname()[0], manual_hosts=manual,
                 what="relayed requests")
             if refused:
                 self.close_connection = True
-                router._send_json(self, *refused)
+                router.send_json(self, *refused)
                 return
             if self._refuse_chunked():
                 return
@@ -194,7 +194,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 n = -1
             if not 0 <= n <= MAX_BODY:
                 self.close_connection = True
-                router._send_json(self, 400, {"error": f"Content-Length must be a "
+                router.send_json(self, 400, {"error": f"Content-Length must be a "
                                        f"number of bytes up to {MAX_BODY}"})
                 return
             body = self.rfile.read(n) if n else b""
@@ -208,7 +208,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             if not self.headers.get("Transfer-Encoding"):
                 return False
             self.close_connection = True
-            router._send_json(self, 411, {"error": "send the body with a "
+            router.send_json(self, 411, {"error": "send the body with a "
                        "Content-Length and no Transfer-Encoding"})
             return True
 
@@ -238,9 +238,9 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 n = -1
             if not 0 <= n <= launch.PEER_MAX:
                 self.close_connection = True
-                router._send_json(self, 413, {"error": "a peer message is small"})
+                router.send_json(self, 413, {"error": "a peer message is small"})
                 return
-            manual = peers._manual_hosts()
+            manual = peers.manual_hosts()
             refused = peers.peer_refusal(
                 self.headers, self.client_address[0],
                 self.connection.getsockname()[0], gate=gate_for_peers,
@@ -248,10 +248,10 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             body = self.rfile.read(n) if n else b""
             if refused:
                 self.close_connection = True
-                router._send_json(self, *refused)
+                router.send_json(self, *refused)
                 return
             code, doc = transport.handle(body, table)
-            router._send_json(self, code, doc)
+            router.send_json(self, code, doc)
 
     return H
 
@@ -272,48 +272,48 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     bind = "0.0.0.0" if gate else host
     reachable = host not in ("127.0.0.1", "localhost", "::1")
     nodes.PEERS = Peers(me, port, manual=peers, reachable=reachable).start()
-    nodes._start_discovery(me, host, port, reachable)
+    nodes.start_discovery(me, host, port, reachable)
     routes = documents.routes(
-        status_fn=nodes._status_fn,
+        status_fn=nodes.status_fn,
         settings_fn=documents.machine_settings(),
         models_fn=documents.models_document(serving=""),
-        loaded_fn=loads._loaded_fn(),
-        load_fn=loads._load_fn(serve_port))
+        loaded_fn=loads.loaded_fn(),
+        load_fn=loads.load_fn(serve_port))
     # /status.json?light=1: the liveness document every peer polls
     full_status = routes["/status.json"]
     routes["/status.json"] = lambda q, _n=0: (
-        documents._json(nodes._status_light()) if (q.get("light") or [""])[0]
+        documents.json_reply(nodes.status_light()) if (q.get("light") or [""])[0]
         else full_status(q, _n))
     # the knurlogic allowance: THIS machine's only, and set only by a POST
     # the page sends when its user applies it; a peer's is read from that
     # peer's /settings.json through /peek
-    routes["/allowance.json"] = lambda _q, _n=0: documents._json(
+    routes["/allowance.json"] = lambda _q, _n=0: documents.json_reply(
         documents.allowance_doc())
-    routes["POST /allowance.json"] = lambda _q, _n=0, body=None: documents._json(
+    routes["POST /allowance.json"] = lambda _q, _n=0, body=None: documents.json_reply(
         documents.set_allowance(body))
     # the knurlogic strategy: this machine's default launch preset
-    routes["/strategy.json"] = lambda _q, _n=0: documents._json(
+    routes["/strategy.json"] = lambda _q, _n=0: documents.json_reply(
         documents.strategy_doc())
     # a newer knurlogic on PyPI (asked once at page start, page/updates.py)
-    routes["/release.json"] = lambda _q, _n=0: documents._json(
+    routes["/release.json"] = lambda _q, _n=0: documents.json_reply(
         updates.release_doc())
     # the knurlogic-wide settings: compaction, identical results across chips
-    routes["/knurlogic.json"] = lambda _q, _n=0: documents._json(
+    routes["/knurlogic.json"] = lambda _q, _n=0: documents.json_reply(
         documents.knurlogic_doc())
-    routes["POST /knurlogic.json"] = lambda _q, _n=0, body=None: documents._json(
+    routes["POST /knurlogic.json"] = lambda _q, _n=0, body=None: documents.json_reply(
         documents.set_knurlogic(body))
-    routes["POST /strategy.json"] = lambda _q, _n=0, body=None: documents._json(
+    routes["POST /strategy.json"] = lambda _q, _n=0, body=None: documents.json_reply(
         documents.set_strategy(body))
 
     from knurlogic.interfaces.page import hub
-    routes["/hub/search.json"] = lambda q, _n=0: documents._json(
+    routes["/hub/search.json"] = lambda q, _n=0: documents.json_reply(
         hub.search((q.get("q") or [""])[0]))
-    routes["/hub/repo.json"] = lambda q, _n=0: documents._json(
+    routes["/hub/repo.json"] = lambda q, _n=0: documents.json_reply(
         hub.repo((q.get("id") or [""])[0]))
-    routes["/hub/downloads.json"] = lambda _q, _n=0: documents._json(
+    routes["/hub/downloads.json"] = lambda _q, _n=0: documents.json_reply(
         hub.downloads())
     routes["POST /hub/download.json"] = lambda _q, _n=0, body=None: (
-        documents._json(hub.act(body)))
+        documents.json_reply(hub.act(body)))
 
     H = make_handler(routes, gate, allow_origins, allow_hosts)
     from knurlogic.cluster import launch
@@ -350,7 +350,7 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     finally:
         # The page's own children end with the page. Through _stop, so the
         # registry an MCP session reads does not keep a dead entry.
-        for port in list(spawn._CHILDREN):
+        for port in list(spawn.CHILDREN):
             spawn.stop(port)
         # and the cluster ranks it started, on every machine of their job
         from knurlogic.cluster import launch
@@ -444,10 +444,10 @@ def wire() -> None:
     a late-bound lambda, so a swapped PEERS or mcp lifecycle.load is what they see."""
     from knurlogic.cluster import launch, recovery
     from knurlogic.interfaces.mcp import lifecycle
-    launch.status_fn = lambda: nodes._status_fn()
+    launch.status_fn = lambda: nodes.status_fn()
     launch.peers_fn = lambda: nodes.PEERS.all() if nodes.PEERS else []
     recovery.peers_fn = lambda: nodes.PEERS.all() if nodes.PEERS else []
-    recovery.child_fn = lambda port: spawn._CHILDREN.get(port)
-    recovery.answers_fn = lambda port: spawn._answers(port)
+    recovery.child_fn = lambda port: spawn.CHILDREN.get(port)
+    recovery.answers_fn = lambda port: spawn.answers(port)
     recovery.load_fn = lambda **kw: lifecycle.load(**kw)
 

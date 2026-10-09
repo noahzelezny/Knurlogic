@@ -18,7 +18,7 @@ from knurlogic.machine.memory import footprint
 from knurlogic.machine.servers import is_our_server, registry, save_registry, serve_log
 
 #: Children started from the page: {port: (Popen, artifact path)}.
-_CHILDREN: dict = {}
+CHILDREN: dict = {}
 
 
 #: the page serves requests on threads: check-the-port-then-spawn is one step
@@ -48,7 +48,7 @@ def _artifact_bytes(path: str) -> int:
         return 0
 
 
-def _answers(port: int) -> bool:
+def answers(port: int) -> bool:
     import urllib.request
     try:
         urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=1.5)
@@ -81,7 +81,7 @@ def children() -> list:
     out = []
     for port, rec in sorted(registry().items()):
         pid = int(rec["pid"])
-        mine = _CHILDREN.get(port)
+        mine = CHILDREN.get(port)
         code = mine[0].poll() if mine and mine[0].pid == pid else None
         alive = code is None and is_our_server(pid)
         log = Path(rec.get("log", ""))
@@ -98,7 +98,7 @@ def children() -> list:
                "log": str(log), "started": rec.get("started"),
                "seconds_since_start": (round(now - rec["t"]) if rec.get("t")
                                        else None)}
-        if alive and _answers(port):
+        if alive and answers(port):
             held = pids.get(pid, 0)
             # the size the launch measured: a poll reads no model folder
             size = int(rec.get("bytes") or 0)
@@ -190,7 +190,7 @@ def _spawn_unlocked(path: str, port: int, tune: str = "default",
                                     start_new_session=True)
     except (OSError, ValueError, subprocess.SubprocessError) as e:
         return {"error": f"{type(e).__name__}: {e}"}
-    _CHILDREN[port] = (proc, path)
+    CHILDREN[port] = (proc, path)
     reg = registry()
     reg[port] = {"pid": proc.pid, "artifact": path, "log": str(log),
                  # measured once here (a launch is the user acting); the
@@ -225,7 +225,7 @@ def stop(port: int) -> dict:
     if not is_our_server(pid):
         reg.pop(port, None)
         save_registry(reg)
-        _CHILDREN.pop(port, None)
+        CHILDREN.pop(port, None)
         return {"error": f"the server on port {port} (pid {pid}) is already "
                          f"gone; record cleared", "log": rec.get("log")}
     os.kill(pid, signal.SIGTERM)
@@ -239,7 +239,7 @@ def stop(port: int) -> dict:
             break
     else:
         os.kill(pid, signal.SIGKILL)
-    mine = _CHILDREN.get(port)
+    mine = CHILDREN.get(port)
     # answer when the process is gone and its memory is back, not when the
     # signal was sent: a caller that loads next must see the memory free
     gone = _wait_exit(pid, mine[0] if mine else None)
@@ -248,7 +248,7 @@ def stop(port: int) -> dict:
                 "exiting": [pid],
                 "note": f"pid {pid} is still exiting after "
                         f"{EXIT_WAIT_S:.0f} s; its memory is not free yet"}
-    _CHILDREN.pop(port, None)
+    CHILDREN.pop(port, None)
     reg.pop(port, None)
     save_registry(reg)
     return {"stopped": rec.get("artifact"), "port": port, "pid": pid}

@@ -223,7 +223,7 @@ class Peers:
 
     def id_of_instance(self, instance: str) -> str:
         """The id of the known machine a Bonjour instance name ("<name>
-        <first six of id>", as ui._start_discovery registers it) belongs
+        <first six of id>", as ui.start_discovery registers it) belongs
         to, "" if none -- for an advertisement whose TXT did not arrive."""
         name, _, short = (instance or "").rpartition(" ")
         if len(short) != 6:

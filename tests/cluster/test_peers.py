@@ -383,7 +383,7 @@ def test_one_probe_is_in_flight_per_peer(tmp_path):
 
 def test_a_plain_answer_carries_the_liveness_document_not_the_heavy_one(tmp_path):
     from knurlogic.interfaces.page import nodes as page_nodes
-    doc_ = page_nodes._status_light()
+    doc_ = page_nodes.status_light()
     assert set(doc_) == {"schema", "nodes", "boot_id", "v", "peers"}
     assert doc_["v"] == [1, 0] and doc_["nodes"][0]["role"] == "local"
     assert "cluster" in doc_["nodes"][0]

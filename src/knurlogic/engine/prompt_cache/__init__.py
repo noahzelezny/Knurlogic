@@ -2,7 +2,7 @@
 the scheduler's commands on it (docs/design/prompt-cache-disk.md).
 
   memory.py    PromptCache: the in-memory LRU and who owns its entries
-               (_owner)
+               (entry_owner)
   disk.py      the entries on disk: save, restore, read back, sweep
   commands.py  the Scheduler's cache methods (PromptCacheCommands,
                a mixin) and Command, what they queue

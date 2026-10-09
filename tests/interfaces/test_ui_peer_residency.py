@@ -104,7 +104,7 @@ def test_peers_are_only_gathered_when_asked_for(monkeypatch):
     monkeypatch.setattr(page_loads.documents, "loaded_document",
                         lambda: (lambda q: {"resident": []}))
     monkeypatch.setattr(page_peers, "peer_residency", lambda ps: [{"machine": "M4"}])
-    h = page_loads._loaded_fn()
+    h = page_loads.loaded_fn()
     assert "peers" not in h({})
     assert h({"peers": ["1"]})["peers"] == [{"machine": "M4"}]
 

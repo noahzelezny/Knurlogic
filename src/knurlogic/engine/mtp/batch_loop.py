@@ -135,7 +135,7 @@ class RowStep:
     steps: int
 
 
-def _apply(row: mx.array, procs, emitted) -> mx.array:
+def apply(row: mx.array, procs, emitted) -> mx.array:
     """Logits processors over the history; `emitted` is a list of ids or
     an id array (lazy: the draft step's history ends in t1, which it has
     not read back yet)."""
@@ -153,27 +153,27 @@ def _with(emitted: list[int], t1: mx.array) -> mx.array:
                            t1.astype(mx.int32)])
 
 
-def _finite_rows(rows: mx.array) -> mx.array:
+def finite_rows(rows: mx.array) -> mx.array:
     """[B, V] -> [B] bool, lazy: evaluated with the step's last sync."""
     return mx.isfinite(rows).all(axis=-1)
 
 
-def _mark(out: list[RowStep], fin: mx.array) -> None:
+def mark(out: list[RowStep], fin: mx.array) -> None:
     """fin: [B, k] already evaluated; token j of row i gets fin[i][j]."""
     for rs, flags in zip(out, fin.tolist()):
         for em, good in zip(rs.tokens, flags):
             em.finite = bool(good)
 
 
-def _pick(row: mx.array, p: RowParams, emitted: list[int]) -> mx.array:
+def pick(row: mx.array, p: RowParams, emitted: list[int]) -> mx.array:
     """row: [1, V] -> token [1]."""
-    row = _apply(row, p.processors, emitted)
+    row = apply(row, p.processors, emitted)
     if p.dist is None:
         return mx.argmax(row, axis=-1)
-    return p.dist(row).sample(_key(p, len(emitted)))
+    return p.dist(row).sample(row_key(p, len(emitted)))
 
 
-def _key(p: RowParams, position: int):
+def row_key(p: RowParams, position: int):
     """The seeded row's key for the token at `position`, or None."""
     return p.keys.at(position) if p.keys is not None else None
 
@@ -370,7 +370,7 @@ def admit(
 
     logits = model(ids[:, max(last, 0):], cache=cache, **_kw(max(last, 0), n))
     row_t1 = logits[:, -1]
-    t1 = _pick(row_t1, params, []).astype(mx.int32)
+    t1 = pick(row_t1, params, []).astype(mx.int32)
 
     draft_row = None
     if block:
@@ -766,7 +766,7 @@ class MTPBatch:
                 qs.append(None)
                 continue
             # position len+1: its history includes t1, as in a plain step
-            row = _apply(self.draft_row[i:i + 1], p.processors,
+            row = apply(self.draft_row[i:i + 1], p.processors,
                          _with(self.emitted[i], self.t1[i:i + 1])
                          if p.processors else self.emitted[i])
             if p.dist is None:
@@ -775,7 +775,7 @@ class MTPBatch:
             else:
                 q = p.dist(row)
                 # the draft for position len+1 (t1 is at len)
-                d2_rows.append(q.sample(_key(p, len(self.emitted[i]) + 1)))
+                d2_rows.append(q.sample(row_key(p, len(self.emitted[i]) + 1)))
                 qs.append(q)
         d2 = mx.concatenate(d2_rows).astype(mx.int32)
         return live, d2, qs
@@ -800,7 +800,7 @@ class MTPBatch:
         judge = self.coord is None or self.coord.leader
         for i in (range(B) if judge else ()):
             p = self.params[i]
-            row = _apply(lg2[i:i + 1, 0], p.processors,
+            row = apply(lg2[i:i + 1, 0], p.processors,
                          _with(self.emitted[i], self.t1[i:i + 1])
                          if p.processors else self.emitted[i])
             if not live[i]:
@@ -808,7 +808,7 @@ class MTPBatch:
                 # the replay below.
                 t2 = (mx.argmax(row, axis=-1) if p.dist is None
                       else p.dist(row).sample(
-                          _key(p, len(self.emitted[i]) + 1)))
+                          row_key(p, len(self.emitted[i]) + 1)))
                 oks[i] = False
                 t2_rows[i] = t2
                 lazy.append(t2)
@@ -821,7 +821,7 @@ class MTPBatch:
             elif p.keys is not None:
                 # seeded: the target's own draw under the draft's key; the
                 # draft is accepted iff they agree (sampling.Keys)
-                t2 = p.dist(row).sample(_key(p, len(self.emitted[i]) + 1))
+                t2 = p.dist(row).sample(row_key(p, len(self.emitted[i]) + 1))
                 acc = t2 == d2[i:i + 1]
                 oks[i] = acc
                 t2_rows[i] = t2
@@ -885,7 +885,7 @@ class MTPBatch:
                                  cache=self.cache, **pos2)
 
         # NaN guard, lazy: joins the eval at the end of the step.
-        fin = mx.stack([_finite_rows(self.row_t1), _finite_rows(lg2[:, 0])],
+        fin = mx.stack([finite_rows(self.row_t1), finite_rows(lg2[:, 0])],
                        axis=1)
 
         # --- emit --------------------------------------------------------
@@ -921,12 +921,12 @@ class MTPBatch:
         if h_pair is None and self.any_drafting:
             h_pair = self.get_h()
         t_next_rows = [
-            _pick(row_t1[i:i + 1], self.params[i], self.emitted[i]) for i in keep
+            pick(row_t1[i:i + 1], self.params[i], self.emitted[i]) for i in keep
         ]
         self.filter(keep)
         if not keep:
             mx.eval(fin)
-            _mark(out, fin)
+            mark(out, fin)
             return out
         idx = mx.array(keep)
         row_t1 = row_t1[idx]
@@ -945,7 +945,7 @@ class MTPBatch:
         else:
             self.draft_row = None if self.head is None else self.draft_row
             mx.eval(t_next, fin)
-        _mark(out, fin)
+        mark(out, fin)
         self.t1 = t_next
         self.row_t1 = row_t1
         return out
@@ -963,7 +963,7 @@ class MTPBatch:
         assert self.t1 is not None and self.row_t1 is not None
         lg = self.model(self.t1[:, None], cache=self.cache,
                         **self._pos_kw(1))                      # [B, 1, V]
-        fin = _finite_rows(self.row_t1)[:, None]     # lazy NaN guard
+        fin = finite_rows(self.row_t1)[:, None]     # lazy NaN guard
         t1_list = self.t1.tolist()
         # The head already drafted the token after t1 (draft_row); the trunk
         # is about to choose it too, so score the head at no cost and keep
@@ -1000,7 +1000,7 @@ class MTPBatch:
         h = self.get_h() if self.any_drafting else None
         t_next_rows = [
             then[i:i + 1] if then is not None
-            else _pick(row_t1[i:i + 1], self.params[i], self.emitted[i])
+            else pick(row_t1[i:i + 1], self.params[i], self.emitted[i])
             for i in keep
         ]
         if standing is not None and keep:
@@ -1011,7 +1011,7 @@ class MTPBatch:
         self.filter(keep)
         if not keep:
             mx.eval(fin)
-            _mark(out, fin)
+            mark(out, fin)
             return out
         idx = mx.array(keep)
         row_t1 = row_t1[idx]
@@ -1025,7 +1025,7 @@ class MTPBatch:
             mx.eval(t_next, self.draft_row, fin)
         else:
             mx.eval(t_next, fin)
-        _mark(out, fin)
+        mark(out, fin)
         self.t1 = t_next
         self.row_t1 = row_t1
         return out

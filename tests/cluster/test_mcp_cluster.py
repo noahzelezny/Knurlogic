@@ -63,7 +63,7 @@ def page(monkeypatch):
             return p.docs[path]
         p.posts.append(doc)
         return p.answer
-    monkeypatch.setattr(page_client, "_page_call", call)
+    monkeypatch.setattr(page_client, "page_call", call)
     monkeypatch.setitem(identity._ID, "id", "aaaa")
     monkeypatch.setitem(identity._ID, "name", "A")
     monkeypatch.setattr(lifecycle, "_identity_of", lambda a: ("abc", None))
@@ -227,7 +227,7 @@ def page_a(tmp_path, monkeypatch, owned_procs):
                            found_by=set())
     monkeypatch.setattr(page_nodes, "PEERS", SimpleNamespace(
         all=lambda: [peer], introduce=lambda *a, **k: None))
-    monkeypatch.setattr(page_nodes, "_status_fn", lambda _n=0: ({
+    monkeypatch.setattr(page_nodes, "status_fn", lambda _n=0: ({
         "nodes": [{"role": "local", "cluster": info_a}],
         "me": {"id": "aaaa", "name": "A"},
         "peers": [{"id": "bbbb", "name": "B", "state": "answering"}]}, ""))
@@ -244,9 +244,9 @@ def page_a(tmp_path, monkeypatch, owned_procs):
     monkeypatch.setattr(documents, "loaded_document", local_residency)
     monkeypatch.setattr("knurlogic.machine.loaded.survey", lambda: {})
     serve_port = T.free_port()
-    routes = documents.routes(status_fn=page_nodes._status_fn,
-                        loaded_fn=page_loads._loaded_fn(),
-                        load_fn=page_loads._load_fn(serve_port))
+    routes = documents.routes(status_fn=page_nodes.status_fn,
+                        loaded_fn=page_loads.loaded_fn(),
+                        load_fn=page_loads.load_fn(serve_port))
     srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler(routes))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     monkeypatch.setenv("KNURLOGIC_PAGE", f"127.0.0.1:{ui_a}")

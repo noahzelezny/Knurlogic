@@ -35,7 +35,7 @@ def _page_addr() -> str:
     return os.environ.get(PAGE_ENV) or "127.0.0.1:8899"
 
 
-def _page_call(path: str, doc=None, timeout: float = PAGE_READ_S):
+def page_call(path: str, doc=None, timeout: float = PAGE_READ_S):
     import urllib.error
     import urllib.request
     url = f"http://{_page_addr()}{path}"
@@ -63,20 +63,20 @@ def _page_call(path: str, doc=None, timeout: float = PAGE_READ_S):
     return out
 
 
-def _page_get(path: str) -> dict:
-    return _page_call(path)
+def page_get(path: str) -> dict:
+    return page_call(path)
 
 
-def _page_post(doc: dict, timeout: float = PAGE_LOAD_S) -> dict:
-    return _page_call("/loaded.json", doc, timeout)
+def page_post(doc: dict, timeout: float = PAGE_LOAD_S) -> dict:
+    return page_call("/loaded.json", doc, timeout)
 
 
-def _me_name() -> str:
+def me_name() -> str:
     from knurlogic.machine import identity
     return identity.identity().get("name") or "this Mac"
 
 
-def _machines_of(page, here: str) -> list:
+def machines_of(page, here: str) -> list:
     """This Mac and each peer its page asked, with whether it answered."""
     out = [{"machine": here, "here": True}]
     for p in (page or {}).get("peers") or []:
@@ -86,9 +86,9 @@ def _machines_of(page, here: str) -> list:
     return out
 
 
-def _link_name(link):
-    from knurlogic.cluster.launch import link_name
-    return link_name(link)
+def link_name(link):
+    from knurlogic.cluster import launch
+    return launch.link_name(link)
 
 
 def models_across(page: dict, here: str) -> list:
@@ -145,7 +145,7 @@ def models_across(page: dict, here: str) -> list:
             "machines": list(c.get("machines") or j.get("machines")
                              or [machine]),
             "split": c.get("split") or j.get("split"),
-            "link": _link_name(c.get("link") or j.get("link")),
+            "link": link_name(c.get("link") or j.get("link")),
             "job": job or None,
             **({"url": c.get("url") or j.get("url")}
                if c.get("url") or j.get("url") else {}),
@@ -165,7 +165,7 @@ def models_across(page: dict, here: str) -> list:
             "machine": j.get("leader") or j["_on"], "where": None,
             "port": j.get("port"), "state": None, "requests": None,
             "machines": list(j.get("machines") or []),
-            "split": j.get("split"), "link": _link_name(j.get("link")),
+            "split": j.get("split"), "link": link_name(j.get("link")),
             "job": job, "instance": job, "leader": j.get("leader"),
             **({"url": j["url"]} if j.get("url") else {}),
             "phase": j.get("phase"),
@@ -183,7 +183,7 @@ def models_across(page: dict, here: str) -> list:
             "machine": ms[0] if d.get("job") else machine, "where": None,
             "port": d.get("port"), "state": d.get("state"),
             "requests": None, "machines": ms, "split": d.get("split"),
-            "link": _link_name(d.get("link")), "job": d.get("job"),
+            "link": link_name(d.get("link")), "job": d.get("job"),
             "instance": d.get("job") or None,
             "leader": ms[0] if d.get("job") else None,
             "recovery": d.get("recovery")})
@@ -208,10 +208,10 @@ def _port_of(where):
         return None
 
 
-def _node_ids(names: list[str]) -> tuple:
+def node_ids(names: list[str]) -> tuple:
     """([page node ids], refusal or None): machine names as this Mac's page
     knows them -- itself and the peers answering it. An id is accepted too."""
-    st = _page_get("/status.json")
+    st = page_get("/status.json")
     me = st.get("me") or {}
     known = [(me.get("id"), me.get("name"), "answering")] + [
         (p.get("id"), p.get("name"), p.get("state"))
@@ -234,7 +234,7 @@ def _node_ids(names: list[str]) -> tuple:
     return ids, None
 
 
-def _refusal(out: dict) -> dict[str, Any] | None:
+def refusal(out: dict) -> dict[str, Any] | None:
     """The page's refusal, as a refusal: an answer, never a crash."""
     why = out.get("refused") or out.get("error")
     if not why:

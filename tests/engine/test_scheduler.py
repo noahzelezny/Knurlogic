@@ -256,8 +256,8 @@ def test_the_guard_trims_the_cache_by_the_overage_not_a_margin_more():
 
 def test_out_of_memory_is_a_503_to_retry():
     from knurlogic.engine.runtime.memory_guard import OutOfMemory
-    from knurlogic.interfaces.http.openai import _status_of
-    e = _status_of(OutOfMemory("stopped"))
+    from knurlogic.interfaces.http.openai import status_of
+    e = status_of(OutOfMemory("stopped"))
     assert e.status == 503 and e.code == "insufficient_memory"
 
 
@@ -301,7 +301,7 @@ def test_a_prompt_that_would_not_fit_waits_or_is_refused_not_admitted():
     assert s._make_room(7000) == "lean" and 0 < s.cache.nbytes < held
     # 16000 tokens do not fit at all: with a row running it waits ...
     s._rows = {1: S._Row(S.Job(P.ChatRequest(), P.PromptArgs()), None, [])}
-    with pytest.raises(MG._Wait):
+    with pytest.raises(MG.Wait):
         s._make_room(16000)
     # ... with none it is refused, and says why
     s._rows = {}
@@ -664,7 +664,7 @@ def test_a_refusal_names_every_term_of_the_limit():
     weights 75.6, others 1.6. The 503 says which term did it; the status
     says when the server cannot admit even a 1k-token prompt."""
     from knurlogic.engine.runtime import scheduler as S
-    from knurlogic.interfaces.http.openai import _status_of, models_document
+    from knurlogic.interfaces.http.openai import models_document, status_of
     GIB = MG.GIB
     s = S.Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._local_active = lambda: int(75.1 * GIB)
@@ -686,7 +686,7 @@ def test_a_refusal_names_every_term_of_the_limit():
     assert m["working_set"] == 120 * GIB and m["others"] == int(0.7 * GIB)
     assert m["limit"] == m["working_set"] - m["others"] - m["margin"]
     assert m["chunk"] == 128 and m["room"] < 0 and m["need"] > 0
-    body = _status_of(e.value).body()
+    body = status_of(e.value).body()
     assert body["error"]["memory"]["margin"] == m["margin"]
     # a 1k prompt fits beside the 75.1 GiB of weights
     s._local_active = lambda: int(75.1 * GIB)
@@ -829,7 +829,7 @@ def test_a_long_prompt_on_the_tight_rank_takes_a_smaller_chunk(caplog):
     # only when one row at 128 cannot fit: wait with rows running ...
     s = _glm_flash_ring(-GIB)             # 1 GiB under its limit
     _rows_of(s, 1000)
-    with pytest.raises(MG._Wait):
+    with pytest.raises(MG.Wait):
         s._make_room(53000)
     # ... and refuse alone, at chunk 128
     s._rows = {}

@@ -238,7 +238,7 @@ def tokenize(gen, tokenizer, request: ChatRequest, args: PromptArgs):
         render.setdefault("tool_choice", request.tool_choice)
     # The thinking probe renders on HTTP threads under this lock; a
     # tokenizer's template environment is not safe to share across threads.
-    with thinking._render_lock:
+    with thinking.render_lock:
         try:
             prompt = _render(tokenizer, messages, render, close)
         # a chat template is third-party code; its failure is the request's refusal
@@ -305,8 +305,8 @@ def _template_text(tokenizer) -> str:
 def _render(tokenizer, messages, render, close) -> list:
     if close:
         # the generation prompt ends with the think block already closed;
-        # _Closing reads the flag from this call's kwargs
-        return list(thinking._Closing(tokenizer).apply_chat_template(
+        # Closing reads the flag from this call's kwargs
+        return list(thinking.Closing(tokenizer).apply_chat_template(
             messages, add_generation_prompt=True, tokenize=True,
             **{**render, thinking.CLOSE: True}))
     return list(tokenizer.apply_chat_template(

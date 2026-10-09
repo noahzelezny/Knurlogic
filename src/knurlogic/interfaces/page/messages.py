@@ -21,7 +21,7 @@ def survey_here(routes: dict) -> tuple:
         # a launch right after an unload needs, not the last status
         from knurlogic.cluster import launch
         doc["available_bytes"] = launch.available_now()
-        doc["exiting"] = len(launch._exiting(launch.J.registry()))
+        doc["exiting"] = len(launch.exiting(launch.J.registry()))
     return 200, doc
 
 
@@ -48,7 +48,7 @@ def read_here(routes: dict, req: dict) -> tuple:
     if h is None:
         return 404, {"error": "no such document here"}
     body, _ctype = h({k: [str(v)] for k, v in q.items()
-                      if k in peek._peek_keys(path)}, 0)
+                      if k in peek.peek_keys(path)}, 0)
     try:
         return 200, json.loads(body)
     except ValueError:
@@ -64,7 +64,7 @@ def peer_table(routes: dict) -> dict:
     def changes(fn):
         def run(body):
             out = fn(body)
-            documents._LOADED["doc"] = None     # residency may have changed
+            documents.LOADED["doc"] = None     # residency may have changed
             return out
         return run
     t: dict = {k: changes(lambda b, k=k: launch.peer_step(k, b))

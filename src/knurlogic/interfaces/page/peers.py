@@ -35,7 +35,7 @@ def _addresses_of(host: str, ttl: float = 60.0) -> set:
     return got
 
 
-def _manual_hosts() -> list:
+def manual_hosts() -> list:
     """Every address of every --peer machine: the probe moves p.host to the
     fastest answering address, the machine may call from any other."""
     out: list = []
@@ -79,7 +79,7 @@ PEER_LOADED_S = 2.5
 #: by); a peer's server listens on ITS loopback, so every request for it
 #: goes to the peer's page relay (PEER_RELAY) instead. Refilled by every
 #: peer survey.
-_PEER_TARGETS: dict = {}
+PEER_TARGETS: dict = {}
 
 
 #: each peer's last good survey, {address: (time, entry)}
@@ -88,7 +88,7 @@ _PEER_LAST: dict = {}
 
 #: the cluster jobs peers last reported, {job: doc} (running, and the ones
 #: that ended lately with why): what a dropped connection is explained by
-_PEER_JOBS: dict = {}
+PEER_JOBS: dict = {}
 
 
 #: the peer page's relay prefix: /peer/v1/... reaches the model servers
@@ -105,7 +105,7 @@ def upstream(base: str, path: str) -> str:
     """The URL a request for `path` on the model at `base` goes to: the
     server itself when it is this machine's, the peer page's relay when it
     is a peer's."""
-    t = _PEER_TARGETS.get(base)
+    t = PEER_TARGETS.get(base)
     if t:
         return t["relay"] + PEER_RELAY + path
     return base + path
@@ -291,13 +291,13 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
         for j in m.get("jobs") or []:
             if j.get("job"):
                 pjobs[str(j["job"])] = j
-    _PEER_TARGETS.clear()
-    _PEER_TARGETS.update(targets)
+    PEER_TARGETS.clear()
+    PEER_TARGETS.update(targets)
     # a job that ended stays explainable after its page stops listing it
-    _PEER_JOBS.update(pjobs)
-    _PEER_AT[0] = time.time()
+    PEER_JOBS.update(pjobs)
+    PEER_AT[0] = time.time()
     return res
 
 
 #: when peers were last asked what they serve (peer_residency)
-_PEER_AT = [0.0]
+PEER_AT = [0.0]

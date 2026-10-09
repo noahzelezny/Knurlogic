@@ -190,7 +190,7 @@ def _phase_world(monkeypatch, tmp_path, *, alive, answers, held, size,
         9001: {"pid": 4242, "artifact": "/m/x", "log": str(log), "t": 0,
                "bytes": size}})
     monkeypatch.setattr(spawn, "is_our_server", lambda pid: alive)
-    monkeypatch.setattr(spawn, "_answers", lambda port: answers)
+    monkeypatch.setattr(spawn, "answers", lambda port: answers)
     monkeypatch.setattr(spawn.footprint, "memory_map",
                         lambda: {"processes": [{"pid": 4242, "bytes": held}]})
     return spawn

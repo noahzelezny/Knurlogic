@@ -35,7 +35,7 @@ PEERS: Peers | None = None
 _BOOT_ID = uuid.uuid4().hex
 
 
-def _status_fn(_n=0):
+def status_fn(_n=0):
     """A status for a box that is serving nothing.
 
     The node, its machine and its memory map are all still real -- that is
@@ -108,7 +108,7 @@ def _status_fn(_n=0):
     return snap, status.render_cluster(snap)
 
 
-def _status_light(_n=0):
+def status_light(_n=0):
     """The liveness document: what every peer asks of this page every
     couple of seconds (/status.json?light=1). This machine's own node
     entry -- its cluster block and the memory map as last measured, never a
@@ -204,7 +204,7 @@ def hot() -> None:
 def _answering() -> bool:
     """A model on this machine has a request in flight or queued, by the
     residency document the page already keeps (never a fresh survey)."""
-    doc = documents._LOADED.get("doc") or {}
+    doc = documents.LOADED.get("doc") or {}
     for r in doc.get("resident") or []:
         q = r.get("requests") or {}
         if q.get("in_flight") or q.get("pending"):
@@ -220,7 +220,7 @@ def _map_age_limit(now: float) -> float:
 DISCOVERY = None
 
 
-def _start_discovery(me: dict, host: str, port: int, reachable: bool):
+def start_discovery(me: dict, host: str, port: int, reachable: bool):
     """Browse always -- a loopback page can still reach peers outbound --
     and advertise only when bound where others can reach it: advertising an
     address nobody can connect to is the silence this replaces."""

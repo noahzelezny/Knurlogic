@@ -72,7 +72,7 @@ def _gpu():
 _UNITS = {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30}
 
 
-def _swap():
+def swap():
     """Bytes of swap in use. `used = 7168.00M` in sysctl's own words."""
     try:
         out = subprocess.run(["sysctl", "-n", "vm.swapusage"],
@@ -229,7 +229,7 @@ def sample(memory_map=None) -> dict:
     gpu, gpu_mem = _gpu()
     return {"t": round(time.time(), 1), "gpu_pct": gpu,
             "gpu_in_use_bytes": gpu_mem, "cpu_pct": _cpu_pct(),
-            "memory_pct": _pressure(memory_map), "swap_bytes": _swap(),
+            "memory_pct": _pressure(memory_map), "swap_bytes": swap(),
             "vm_pressure": _vm_pressure(),
             "thermal": _thermal(), "temp_c": _temp_c()}
 

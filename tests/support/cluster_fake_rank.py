@@ -56,7 +56,7 @@ def main():
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime.scheduler import Job, Scheduler
     from knurlogic.interfaces import http
-    from knurlogic.interfaces.http.openai import _status_of
+    from knurlogic.interfaces.http.openai import status_of
 
     class Host:
         state = "ready"
@@ -84,7 +84,7 @@ def main():
             j = sched.submit(Job(P.ChatRequest("text", "hi"),
                                  P.PromptArgs()))
             kind, val = j.outbox.get()
-            err = _status_of(val) if kind == "error" else None
+            err = status_of(val) if kind == "error" else None
             code = err.status if err else 200
             out = json.dumps(err.body() if err else {"ok": True}).encode()
             self.send_response(code)

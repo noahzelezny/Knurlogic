@@ -226,7 +226,7 @@ def build_job(body: dict, *, chat: bool, translate: Callable = None,
     return job, ctx
 
 
-def _status_of(err: BaseException) -> ApiError:
+def status_of(err: BaseException) -> ApiError:
     if isinstance(err, ApiError):
         return err
     if isinstance(err, P.PromptError):
@@ -319,7 +319,7 @@ class Reply:
                 break
             elif kind == "error":
                 self._failed()
-                raise _status_of(val)
+                raise status_of(val)
             ev = self.job.outbox.get()
         choice = {"index": 0, "finish_reason": finish}
         if self.ctx["chat"]:
@@ -366,7 +366,7 @@ class Reply:
                 yield self._sse(obj, {"compaction": self.ctx["compaction"]},
                                 None)
             if self.ctx.get("applied"):
-                yield _data({"id": self.id, "object": obj,
+                yield sse_data({"id": self.id, "object": obj,
                              "created": self.created, "model": self.model,
                              "choices": [], "context_management": {
                                  "applied_edits": self.ctx["applied"]}})
@@ -408,15 +408,15 @@ class Reply:
             elif kind == "done":
                 self._closed(val, finish)
                 if self.ctx["include_usage"]:
-                    yield _data({"id": self.id, "object": obj,
+                    yield sse_data({"id": self.id, "object": obj,
                                  "created": self.created,
                                  "model": self.model, "choices": [],
                                  "usage": self._usage(val)})
                 break
             elif kind == "error":
                 self._failed()
-                e = _status_of(val)
-                yield _data(e.body())
+                e = status_of(val)
+                yield sse_data(e.body())
                 break
             ev = self.job.outbox.get()
         yield b"data: [DONE]\n\n"
@@ -429,7 +429,7 @@ class Reply:
             ch.update(delta or {"text": ""})
         if lps:
             ch["logprobs"] = {"content": lps}
-        return _data({"id": self.id, "object": obj, "created": self.created,
+        return sse_data({"id": self.id, "object": obj, "created": self.created,
                       "model": self.model, "choices": [ch]})
 
     def _lp(self, x) -> dict:
@@ -465,7 +465,7 @@ def _call(c: dict, stream: bool = False) -> dict:
     return out
 
 
-def _data(obj: Any) -> bytes:
+def sse_data(obj: Any) -> bytes:
     return f"data: {json.dumps(obj)}\n\n".encode()
 
 

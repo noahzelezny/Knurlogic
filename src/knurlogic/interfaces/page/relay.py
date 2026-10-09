@@ -24,7 +24,7 @@ def peer_relay(handler, method: str, path: str, body: bytes,
         # serves: resolved here by name, sent on to it from loopback
         if not (method == "GET" and path == prompt_cache.PROMPT_CACHE_PATH or
                 method == "POST" and path in prompt_cache.PROMPT_CACHE_POSTS):
-            router._send_json(handler, 404, {"error": "not a relayed path"})
+            router.send_json(handler, 404, {"error": "not a relayed path"})
             return
         q = parse_qs(urlparse(getattr(handler, "path", "")).query)
         model = (q.get("model") or [None])[0]
@@ -35,44 +35,44 @@ def peer_relay(handler, method: str, path: str, body: bytes,
             except ValueError:
                 model = None
         table = router.local_models(fetch)
-        base = router._resolve(table, model)
+        base = router.resolve(table, model)
         if base is None:
-            router._send_json(handler, 404, {"error": {
+            router.send_json(handler, 404, {"error": {
                 "message": f"no running model {model!r} on "
                            f"{identity.identity().get('name') or 'this machine'}",
                 "type": "not_found"}, "models": sorted(table)})
             return
-        code, doc = router._send_up(base + path, method,
+        code, doc = router.send_up(base + path, method,
                              body if method == "POST" else None)
-        router._send_json(handler, code, doc)
+        router.send_json(handler, code, doc)
         return
     docs: dict = {}
     table = router.local_models(fetch, docs)
     if method == "GET":
         if path != "/v1/models":
-            router._send_json(handler, 404, {"error": "not a relayed path"})
+            router.send_json(handler, 404, {"error": "not a relayed path"})
             return
         # each server's own entry, so a peer page's chat sees the model's
         # sampling_defaults and context_length, not just its name
-        router._send_json(handler, 200, {"object": "list", "data": [
+        router.send_json(handler, 200, {"object": "list", "data": [
             dict(docs.get(m) or {}, id=m, object="model",
                  owned_by="knurlogic")
             for m in sorted(table)]})
         return
     if path not in router.ROUTE_PATHS:
-        router._send_json(handler, 404, {"error": "not a relayed path"})
+        router.send_json(handler, 404, {"error": "not a relayed path"})
         return
     try:
         doc = json.loads(body or b"{}")
     except ValueError:
         doc = None
     if not isinstance(doc, dict):
-        router._send_json(handler, 400, {"error": "the body must be a JSON object"})
+        router.send_json(handler, 400, {"error": "the body must be a JSON object"})
         return
     model = doc.get("model")
-    base = router._resolve(table, model)
+    base = router.resolve(table, model)
     if base is None:
-        router._send_json(handler, 404, {
+        router.send_json(handler, 404, {
             "type": "error",
             "error": {"type": "not_found_error",
                       "message": f"no running model {model!r} on "
@@ -81,4 +81,4 @@ def peer_relay(handler, method: str, path: str, body: bytes,
                                  f"{', '.join(sorted(table)) or 'none'}"},
             "models": sorted(table)})
         return
-    router._stream(handler, base + path, body, base=base)
+    router.stream(handler, base + path, body, base=base)

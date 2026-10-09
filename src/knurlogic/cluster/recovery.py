@@ -571,7 +571,7 @@ def _tick_cluster(rec: dict, now: float) -> str:
         if e.get("relaunched"):           # the cable failover moved it
             _set_job(rec, e["relaunched"])
             return f"followed the cable failover to job {e['relaunched']}"
-        why = C._job_end(job, rec["order"], rec["args"].get("post")
+        why = C.job_end(job, rec["order"], rec["args"].get("post")
                          or transport.send)
         if why is None:
             if rec.get("state") == "recovering" and \

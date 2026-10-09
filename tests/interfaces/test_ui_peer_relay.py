@@ -100,7 +100,7 @@ def two(monkeypatch):
     yield f"http://127.0.0.1:{hport}", f"http://127.0.0.1:{pport}", seen
     for s in (model, peer_page, here):
         s.shutdown()
-    page_peers._PEER_TARGETS.clear()
+    page_peers.PEER_TARGETS.clear()
     page_router._ROUTES.update(at=0.0, map={})
 
 
@@ -229,9 +229,9 @@ def test_relay_gate_refuses_other_networks():
 
 def test_relay_resolves_by_folder_name_or_the_only_model():
     t = {"org--Qwen": "http://127.0.0.1:1"}
-    assert page_router._resolve(t, "/models/org--Qwen/") == "http://127.0.0.1:1"
-    assert page_router._resolve(t, None) == "http://127.0.0.1:1"
-    assert page_router._resolve(t, "other") is None
+    assert page_router.resolve(t, "/models/org--Qwen/") == "http://127.0.0.1:1"
+    assert page_router.resolve(t, None) == "http://127.0.0.1:1"
+    assert page_router.resolve(t, "other") is None
 
 
 def _counting_survey(monkeypatch, rows):
@@ -249,7 +249,7 @@ def _counting_survey(monkeypatch, rows):
 def test_a_chat_to_a_model_the_page_has_not_surveyed_yet_resurveys(
         two, monkeypatch):
     here, _, seen = two
-    page_peers._PEER_TARGETS.clear()            # launched since the last survey
+    page_peers.PEER_TARGETS.clear()            # launched since the last survey
     calls = _counting_survey(monkeypatch, [
         {"runtime": "knurlogic", "name": "glm-peer",
          "where": "http://127.0.0.1:8080"}])
@@ -264,7 +264,7 @@ def test_a_chat_to_a_model_the_page_has_not_surveyed_yet_resurveys(
 
 def test_the_router_resurveys_once_on_a_miss(two, monkeypatch):
     here, _, seen = two
-    page_peers._PEER_TARGETS.clear()
+    page_peers.PEER_TARGETS.clear()
     page_router._ROUTES.update(at=1e18, map={})      # a fresh, empty cached table
     calls = _counting_survey(monkeypatch, [
         {"runtime": "knurlogic", "name": "glm-peer",
@@ -292,7 +292,7 @@ def test_a_launch_refreshes_what_the_page_can_reach(monkeypatch, req, which,
     monkeypatch.setattr(page_router, "refresh_targets", lambda: calls.append(1))
     from knurlogic.machine import identity
     monkeypatch.setitem(identity._ID, "id", "m3")
-    out = page_loads._load_fn(8080)({}, json.dumps(req).encode())
+    out = page_loads.load_fn(8080)({}, json.dumps(req).encode())
     assert out == answer and bool(calls) is refresh
 
 
@@ -322,6 +322,6 @@ def test_manual_hosts_cover_every_address_of_a_named_peer(monkeypatch):
                         found_by={"bonjour"}, state="answering",
                         key="203.0.113.9:8899", addresses={"203.0.113.9:8899"})
     monkeypatch.setattr(page_nodes, "PEERS", Peers(p, q))
-    hosts = page_peers._manual_hosts()
+    hosts = page_peers.manual_hosts()
     assert {"192.0.2.2", "203.0.113.105"} <= set(hosts)
     assert "203.0.113.9" not in hosts

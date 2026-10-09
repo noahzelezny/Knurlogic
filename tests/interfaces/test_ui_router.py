@@ -136,7 +136,7 @@ def test_models_name_the_machine_each_runs_on(cluster, monkeypatch):
     from knurlogic.machine import identity as I
     page, base_a, base_b, _ = cluster
     monkeypatch.setattr(I, "identity", lambda: {"name": "Studio"})
-    monkeypatch.setitem(page_peers._PEER_TARGETS, base_b,
+    monkeypatch.setitem(page_peers.PEER_TARGETS, base_b,
                         {"machine": "Laptop B"})
     # the fake peer answers directly, not through a peer page's relay
     monkeypatch.setattr(page_peers, "upstream", lambda b, p: b + p)

@@ -1,7 +1,7 @@
-"""Loads and unloads from the page: POST /loaded.json (`_load_fn`) on this
+"""Loads and unloads from the page: POST /loaded.json (`load_fn`) on this
 machine, on one peer (`forward_launch`, a Load/Unload message) or across
 machines (`cluster_launch`); the peer side of that message
-(`peer_launch`); and GET /loaded.json (`_loaded_fn`): residency with its
+(`peer_launch`); and GET /loaded.json (`loaded_fn`): residency with its
 cluster jobs, recovery state and each recent launch's progress."""
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ def tracked_load(**kw) -> dict:
     return out
 
 
-def _load_fn(serve_port: int):
+def load_fn(serve_port: int):
     def handler(_q: dict, body=None) -> dict:
         try:
             req = json.loads(body or b"{}")
@@ -195,7 +195,7 @@ def cluster_launch(req: dict, serve_port: int) -> dict:
                          "identity, never by a path"}
     # tcp|rdma (older callers: ring|jaccl) -> mlx's backend, in one place
     link = launch.backend(req.get("link")) or req.get("link")
-    snap, _ = nodes._status_fn()
+    snap, _ = nodes.status_fn()
     own: dict = next((n for n in snap.get("nodes") or []
                 if n.get("role") in ("local", "server")), {})
     return launch.launch(
@@ -413,7 +413,7 @@ def load_progress(doc: dict) -> list:
     return out
 
 
-def _loaded_fn():
+def loaded_fn():
     """/loaded.json as `web` answers it for this box; with ?peers=1 (what the
     page asks) it also carries `peers`: each other machine's residency."""
     local = documents.loaded_document()

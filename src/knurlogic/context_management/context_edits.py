@@ -264,7 +264,7 @@ def _args(fn: dict, width: int = 160) -> str:
     return raw if len(raw) <= width else raw[:width - 1] + "…"
 
 
-def _text(c) -> str:
+def content_text(c) -> str:
     if isinstance(c, str):
         return c
     if isinstance(c, list):
@@ -275,7 +275,7 @@ def _text(c) -> str:
 
 def tool_uses(msgs: list) -> list[ToolUse]:
     """Every tool call in `msgs`, in order, with its result."""
-    results = {m.get("tool_call_id"): _text(m.get("content"))
+    results = {m.get("tool_call_id"): content_text(m.get("content"))
                for m in msgs if m.get("role") == "tool"}
     out: list = []
     for m in msgs:
@@ -398,7 +398,7 @@ def clear_tool_uses(msgs: list, e: ClearTools, tokens: int,
     out, cleared, saved = list(msgs), 0, 0
     for k, m in enumerate(out):
         if m.get("role") == "tool" and m.get("tool_call_id") in ids:
-            text = _text(m.get("content"))
+            text = content_text(m.get("content"))
             if text == CLEARED:
                 continue
             saved += max(ntok(text) - ntok(CLEARED), 0)

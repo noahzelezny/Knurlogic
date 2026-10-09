@@ -279,7 +279,7 @@ def test_queued_streams_say_how_many_are_ahead(monkeypatch):
     from knurlogic.interfaces.http.openai import Reply
     job = Job()
     reply = Reply(job, {"chat": True, "model": "m", "progress": True})
-    gen = S._queued(job, reply, NS(ahead=lambda j: 3))
+    gen = S.queued(job, reply, NS(ahead=lambda j: 3))
     out = [next(gen) for _ in range(4)]
     ev = [json.loads(c.split(b"data: ")[1]) for c in out
           if c.startswith(b"event: knurlogic.progress")]

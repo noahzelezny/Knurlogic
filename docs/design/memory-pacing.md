@@ -92,7 +92,7 @@ waits and 503s are fine.
 - **Two transient lines**: prefill (chunk x context, steps with an admission)
   and decode (rows x context, steps without). `_measure(admitted=)`.
 - **Ladder**: cache -> chunk 512/256/128 (search inside `_room_for`) -> defer
-  admission (`_Wait`) -> pause newest row, checked BEFORE `_step` -> 503.
+  admission (`Wait`) -> pause newest row, checked BEFORE `_step` -> 503.
 - **Ring**: rank 0's chunk ships in the `admit` journal op (differing chunk
   counts deadlock the collectives); follower `Mark.limit()` computes the same
   RAM-based room.
@@ -110,7 +110,7 @@ waits and 503s are fine.
 - Two lines: `_tx["prefill"]` (x = context x chunk / 512) and
   `_tx["decode"]` (x = rows' contexts summed); `_measure(admitted=, chunk=)`.
 - Chunk search in `_make_room` (512 -> 256 -> 128, full before lean), else
-  `_Wait`; the chunk rides the `admit` op (`chunk`, plan.py) and is set on
+  `Wait`; the chunk rides the `admit` op (`chunk`, plan.py) and is set on
   the engine before the step that prefills that row, on every rank.
 - `_pace` before `_step`: pause the newest row (`pause` op on a ring; its
   cache to the prompt cache, the job re-queued with `Job.resume`, re-admitted
@@ -175,7 +175,7 @@ transient ever seen (21.2 GiB) on every rank, idle included, and the M3's
 - `_make_room` tries the launch chunk, halving to 128, full before lean;
   picks the largest chunk whose step fits here and on every peer
   (`_peer_room`: the peer's reported over less the transient past its 4
-  GiB floor); else `_Wait` with rows running, else 503 at chunk 128. One
+  GiB floor); else `Wait` with rows running, else 503 at chunk 128. One
   INFO line names a smaller chunk, its predicted transient and the room.
 - The chunk rides the `admit` op; a `chunk` op refits a row not yet
   prefilled. Every rank sets it on its engine (`LocalExecutor.set_chunk`)

@@ -35,7 +35,7 @@ class CompactingChat:
             job, reply = self.submit(body, chat=True)
         first = reply.first()
         if first[0] == "error":
-            raise O._status_of(first[1])
+            raise O.status_of(first[1])
         return reply.complete(first)
 
     def _warm(self, body: dict) -> None:
@@ -105,11 +105,11 @@ class CompactingChat:
                                         if reply.ctx.get("progress")
                                         else S.QUEUED_KEEPALIVE_S)
                 except queue.Empty:
-                    return "stream", S._queued(job, reply, self.scheduler)
+                    return "stream", S.queued(job, reply, self.scheduler)
             else:
                 first = reply.first()
             if first[0] == "error":
-                raise O._status_of(first[1])
+                raise O.status_of(first[1])
             if not reply.ctx["stream"]:
                 return "json", reply.complete(first)
 
@@ -136,7 +136,7 @@ class CompactingChat:
                 if t.is_alive():
                     yield b": keepalive compaction\n\n"
             if "error" in box:
-                yield O._data(O._status_of(box["error"]).body())
+                yield O.sse_data(O.status_of(box["error"]).body())
                 yield b"data: [DONE]\n\n"
                 return
             run2[0] = box["run"]
@@ -145,31 +145,31 @@ class CompactingChat:
                 msg = doc["choices"][0]["message"]
                 base = {"id": doc["id"], "object": "chat.completion.chunk",
                         "created": doc["created"], "model": doc["model"]}
-                yield O._data(dict(base, choices=[{
+                yield O.sse_data(dict(base, choices=[{
                     "index": 0, "finish_reason": None,
                     "delta": {"role": "assistant",
                               "compaction": msg["compaction"]}}]))
-                yield O._data(dict(base, choices=[],
+                yield O.sse_data(dict(base, choices=[],
                                    context_management=doc[
                                        "context_management"]))
-                yield O._data(dict(base, choices=[{
+                yield O.sse_data(dict(base, choices=[{
                     "index": 0, "finish_reason": "compaction",
                     "delta": {}}]))
                 if (body.get("stream_options") or {}).get("include_usage"):
-                    yield O._data(dict(base, choices=[],
+                    yield O.sse_data(dict(base, choices=[],
                                        usage=doc["usage"]))
                 yield b"data: [DONE]\n\n"
                 return
             try:
                 job, reply = self.submit(run2[0], chat=True, extra=extra())
             except O.ApiError as e:
-                yield O._data(e.body())
+                yield O.sse_data(e.body())
                 yield b"data: [DONE]\n\n"
                 return
             try:
                 first = reply.first()
                 if first[0] == "error":
-                    yield O._data(O._status_of(first[1]).body())
+                    yield O.sse_data(O.status_of(first[1]).body())
                     yield b"data: [DONE]\n\n"
                     return
                 yield from reply.events(first)
