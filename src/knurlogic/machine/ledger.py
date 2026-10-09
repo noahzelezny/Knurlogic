@@ -67,8 +67,15 @@ def ulid(now: float | None = None) -> str:
 
 def label(value, limit: int) -> str | None:
     """A header value cut to `limit` UTF-8 bytes (never refused), on a
-    character boundary; None for none."""
-    if not isinstance(value, str) or not value:
+    character boundary; None for none. A folded header (a line starting
+    with a space continues the one before it; Python's parser keeps the
+    CRLF) reads as one space, as RFC 9112 says, and other control
+    characters go: a label is one line."""
+    if not isinstance(value, str):
+        return None
+    value = " ".join("".join(c if c.isprintable() or c in " \t\r\n" else ""
+                             for c in value).split())
+    if not value:
         return None
     b = value.encode("utf-8", "replace")
     return b[:limit].decode("utf-8", "ignore") if len(b) > limit else value
