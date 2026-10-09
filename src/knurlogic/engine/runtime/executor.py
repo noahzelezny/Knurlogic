@@ -5,7 +5,7 @@ A scheduler hands the executor admissions and asks it for steps; the
 executor answers with events. The local batch engine (MTPBatchGenerator,
 drafting or not, with vision) is the executor; a tensor split runs the
 same executor on every rank. Nothing here assumes the layers run in this
-process. Rules the protocol keeps:
+process. Rules the executor keeps:
 
   * A token event carries the token and ITS logprob (plus top-k when
     asked), never a [V] row: what crosses a process boundary stays small.
@@ -18,7 +18,7 @@ process. Rules the protocol keeps:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any
 
 
 @dataclass
@@ -102,27 +102,8 @@ class RowFailure:
 Event = Progress | Checkpoint | Token | Finished | RowFailure
 
 
-class Executor(Protocol):
-    def insert(self, admission: Admission) -> int: ...
-
-    def step(self) -> list[Event]:
-        """One admission and/or one decode step; [] when idle."""
-        ...
-
-    def remove(self, uids: list[int]) -> None: ...
-
-    @property
-    def cache_nbytes(self) -> int: ...
-
-    def cost_per_token(self, rows: int) -> float | None:
-        """Measured seconds per token at this batch width, or None."""
-        ...
-
-    def close(self) -> None: ...
-
-
 class LocalExecutor:
-    """The batch engine in this process, behind the protocol."""
+    """The batch engine in this process."""
 
     def __init__(self, generator):
         self.gen = generator
