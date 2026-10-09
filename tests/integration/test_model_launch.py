@@ -242,7 +242,9 @@ def test_settings_offer_a_family_only_the_bits_it_takes(tmp_path):
                     not isinstance(a.raw_config.get("vision_config"), dict):
                 # offered only on a rung with a vision tower
                 assert k not in ks
-            elif k != "KNURLOGIC_KV_KERNEL":
+            elif k not in ("KNURLOGIC_KV_KERNEL", "KNURLOGIC_GDN_COMPILE"):
+                # (the DeltaNet compile switch is an A/B `--set`, never
+                # offered)
                 assert ks[k]["reach"] == "restart"
 
 

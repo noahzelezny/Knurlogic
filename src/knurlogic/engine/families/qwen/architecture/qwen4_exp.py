@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
+import functools
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Any, Optional, Union
 
@@ -36,6 +38,71 @@ def _sigmoid(x: mx.array) -> mx.array:
 
 def _silu(x: mx.array) -> mx.array:
     return nn.silu(x.astype(mx.float32)).astype(x.dtype)
+
+
+# --- knurlogic vendored edit 9: GatedDeltaNet glue under mx.compile ---------
+# The elementwise work around the recurrent scan -- depthwise causal conv +
+# silu + q/k/v split + q/k l2 norm before it, the gated output norm after --
+# runs as one compiled graph each (fewer kernel launches per decode step).
+# Pure functions of arrays: the cache writes, the scan and the projections
+# stay outside. One compiled fn per head layout (a tensor split's shard
+# sizes are part of the key); mlx keys each on input shapes, so decode
+# (T=1) compiles once and each prefill chunk length once. The same ops in
+# the same order: logits identical to the plain path (tests/engine/
+# test_gdn_compile.py). KNURLOGIC_GDN_COMPILE=off runs the plain path.
+_GDN_COMPILE_ENV = "KNURLOGIC_GDN_COMPILE"
+
+
+def _gdn_compile_on() -> bool:
+    s = os.environ.get(_GDN_COMPILE_ENV, "").strip().lower()
+    return s not in ("off", "0", "false", "no")
+
+
+def _gdn_pre_plain(conv_input, conv_w, n_k, dk, n_v, dv):
+    key_dim = n_k * dk
+    conv_out = _silu(mx.conv1d(conv_input, conv_w, groups=conv_w.shape[0]))
+    B, S = conv_out.shape[:2]
+    q, k, v = mx.split(conv_out, [key_dim, 2 * key_dim], axis=-1)
+    q = q.reshape(B, S, n_k, dk)
+    k = k.reshape(B, S, n_k, dk)
+    v = v.reshape(B, S, n_v, dv)
+    inv_scale = dk**-0.5
+    # knurlogic vendored edit 1: the reference's l2norm adds its eps
+    # (1e-6) to sum(x^2); rms_norm adds it to mean(x^2), so scale it
+    # by 1/dk (mlx-lm's own normalize_qk does the same).
+    l2_eps = 1e-6 * inv_scale**2
+    q = (inv_scale**2) * mx.fast.rms_norm(q, None, l2_eps)
+    k = inv_scale * mx.fast.rms_norm(k, None, l2_eps)
+    return q, k, v
+
+
+@functools.lru_cache(maxsize=None)
+def _gdn_pre_compiled(n_k, dk, n_v, dv):
+    return mx.compile(lambda x, w: _gdn_pre_plain(x, w, n_k, dk, n_v, dv))
+
+
+def _gdn_pre(conv_input, conv_w, n_k, dk, n_v, dv):
+    """conv + silu + split + q/k norm: (q, k, v)."""
+    if _gdn_compile_on():
+        return _gdn_pre_compiled(n_k, dk, n_v, dv)(conv_input, conv_w)
+    return _gdn_pre_plain(conv_input, conv_w, n_k, dk, n_v, dv)
+
+
+@functools.lru_cache(maxsize=None)
+def _gdn_norm_compiled(eps, activation):
+    act = mx.sigmoid if activation == "sigmoid" else nn.silu
+
+    def f(out, z, w):
+        x = mx.fast.rms_norm(out, w, eps)
+        return (act(z.astype(mx.float32)) * x.astype(mx.float32)).astype(out.dtype)
+    return mx.compile(f)
+
+
+def _gdn_norm(norm, out, z):
+    """RMSNormGated(out, z) (knurlogic vendored edit 9)."""
+    if _gdn_compile_on():
+        return _gdn_norm_compiled(norm.eps, norm.activation)(out, z, norm.weight)
+    return norm(out, z)
 
 
 class _SwiGLU(nn.Module):
@@ -691,20 +758,10 @@ class GatedDeltaNet(nn.Module):
                 cache[0] = mx.take_along_axis(conv_input, positions, axis=1)
             else:
                 cache[0] = mx.contiguous(conv_input[:, -n_keep:, :])
-        conv_out = _silu(self.conv1d(conv_input))
-
-        q, k, v = mx.split(conv_out, [self.key_dim, 2 * self.key_dim], axis=-1)
-        q = q.reshape(B, S, self.n_k, self.dk)
-        k = k.reshape(B, S, self.n_k, self.dk)
-        v = v.reshape(B, S, self.n_v, self.dv)
-
-        inv_scale = self.dk**-0.5
-        # knurlogic vendored edit 1: the reference's l2norm adds its eps
-        # (1e-6) to sum(x^2); rms_norm adds it to mean(x^2), so scale it
-        # by 1/dk (mlx-lm's own normalize_qk does the same).
-        l2_eps = 1e-6 * inv_scale**2
-        q = (inv_scale**2) * mx.fast.rms_norm(q, None, l2_eps)
-        k = inv_scale * mx.fast.rms_norm(k, None, l2_eps)
+        # knurlogic vendored edit 9: conv + silu + split + q/k norm, compiled
+        # (edits 1 and 8 inside _gdn_pre_plain)
+        q, k, v = _gdn_pre(conv_input, self.conv1d.weight, self.n_k, self.dk,
+                           self.n_v, self.dv)
 
         state = cache[1] if cache is not None else None
         out, state = gated_delta(  # knurlogic vendored edit 8
@@ -722,7 +779,8 @@ class GatedDeltaNet(nn.Module):
         if cache is not None:
             cache[1] = state
             cache.advance(S)
-        return self.out_proj(self.norm(out, z).reshape(B, S, -1))
+        # knurlogic vendored edit 9
+        return self.out_proj(_gdn_norm(self.norm, out, z).reshape(B, S, -1))
 
 
 # ------------------------------------------------------------------------- MoE

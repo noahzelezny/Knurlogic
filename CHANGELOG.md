@@ -35,6 +35,16 @@
 * Entries saved by 0.1.5 are still read under their own split; new saves
   use the new layout only. A tensor split still saves per split.
 
+### Engine
+
+* Qwen's GatedDeltaNet layers (qwen3_5, qwen3_5_moe, qwen4_exp) run the
+  elementwise work around the recurrent scan under `mx.compile`: the conv +
+  silu + q/k/v split + q/k norm before it and the gated output norm after
+  it (vendored edit 9). The logits are bit-for-bit the uncompiled path's on
+  the tiny test models, single machine and tensor / pipeline splits. A
+  prototype measured ~1.01-1.05x decode. `KNURLOGIC_GDN_COMPILE=off` runs
+  the plain path, for A/B.
+
 ## 0.1.5
 
 Prompt cache management, a reorganized library with user and builder

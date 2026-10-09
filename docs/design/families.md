@@ -106,3 +106,16 @@ there is a finding. The checklist, per family:
       prefill rate (prompt / prefill_forward), and spans_unaccounted_s ~ 0
       (an external benchmark driver that sends served requests and reads
       the timing partition is enough)
+
+## Qwen GatedDeltaNet compiled glue
+
+The qwen architectures' linear-attention layers (qwen3_5, qwen3_5_moe,
+qwen4_exp; vendored edit 9, architecture/PROVENANCE.md) run the elementwise
+work around the recurrent scan as two `mx.compile`d pure functions: conv +
+silu + q/k/v split + q/k norm before it, the gated output norm after. The
+scan, the projections and every cache write stay uncompiled, so tensor
+splits (the fns take a rank's head counts), pipeline splits and MTP
+rollback are unchanged. The same ops in the same order: logits identical to
+the plain path (tests/engine/test_gdn_compile.py). A prototype measured
+~1.01-1.05x decode; merging the projections gave nothing.
+`KNURLOGIC_GDN_COMPILE=off` (tuning/knobs.py) is the A/B switch.

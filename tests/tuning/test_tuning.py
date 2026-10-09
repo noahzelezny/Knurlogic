@@ -588,3 +588,13 @@ def test_an_unmeasured_family_stays_512_with_room():
         path=_qwen_moe().path, model_type="somebody_else", model_file=None,
         bytes_on_disk=14 * GIB, hidden_size=2048, moe_intermediate_size=512,
         vq_other={}), 100 * GIB)) == 512
+
+
+def test_the_gdn_compile_switch_is_a_documented_on_off_knob():
+    from knurlogic.tuning import checks, knobs
+    name = "KNURLOGIC_GDN_COMPILE"
+    assert name in knobs.KNOB_DOC and name in knobs.KNOB_HELP
+    assert name in knobs.MODEL_KNOBS and name in knobs.ENGINE_KNOB_NAMES
+    assert checks.check_knob(name, "off") is None
+    assert checks.check_knob(name, "on") is None
+    assert checks.check_knob(name, "fast") is not None

@@ -189,3 +189,18 @@ on the files before these edits and passes after.
    (qwen3_5 / _moe / qwen4_exp), was 1.38 / 1.34 / 1.32; max 0.15 / 0.33 /
    0.07, was 0.79 / 1.27 / 0.18. Float32 is unchanged (the casts are
    no-ops).
+
+## Vendored edit 9 (speed, 2026-10-09; qwen3_5.py, qwen4_exp.py)
+
+**GatedDeltaNet's elementwise glue under `mx.compile`.** Before the
+recurrent scan, the depthwise causal conv + silu + q/k/v split + q/k l2
+norm (edits 1 and 8 kept, in `_gdn_pre_plain`); after it, the gated output
+norm (`_gdn_norm`, RMSNormGated's ops inlined). Pure functions of arrays:
+the conv-state and recurrent-state cache writes, the scan and the
+projections stay outside, so MTP's snapshot / rollback sees the same cache
+slots. One compiled function per head layout (`functools.lru_cache` over
+the head counts and dims, which a tensor split divides), shape-keyed by
+mlx as usual (decode compiles once, each prefill chunk length once).
+Logits bit-for-bit the uncompiled path's (tests/engine/test_gdn_compile.py:
+float32 and bf16, batch 1 and 2, prefill + 6 decode steps, 2-rank tensor
+and pipeline splits). `KNURLOGIC_GDN_COMPILE=off` runs the plain path.

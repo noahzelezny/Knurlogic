@@ -45,6 +45,7 @@ The names `safe`, `fast`, `stable` and `balanced` are still accepted
 | Vision | `KNURLOGIC_VISION` | on, off | [vision.md](vision.md) |
 | Thinking default | `KNURLOGIC_THINKING_DEFAULT` | default (the model's own), or a level the model's template has | the level for requests that name none. Live. |
 | KV kernel | `KNURLOGIC_KV_KERNEL` | on, off | reads an 8-bit cache directly during decode. Leave on; off is for comparison. |
+| DeltaNet compile | `KNURLOGIC_GDN_COMPILE` | on, off (`--set` only) | Qwen's linear-attention layers run their elementwise work compiled; same output. Leave on; off is for comparison. |
 | Per-chip rounding | `KNURLOGIC_CROSS_CHIP` | page: on, off; `--set` also takes `auto` | for a split across different Mac chips: off pads some matmuls so every chip gives the same tokens (+2-6% time on those calls). |
 | Preset | `KNURLOGIC_PRESET` | default, lean | per model |
 

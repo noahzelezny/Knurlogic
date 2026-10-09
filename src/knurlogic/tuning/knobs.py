@@ -22,6 +22,7 @@ KNOB_TITLES: dict = {
     "KNURLOGIC_MTP_DYNAMIC": "MTP dynamic",
     "KNURLOGIC_VISION": "Vision",
     "KNURLOGIC_KV_KERNEL": "KV kernel",
+    "KNURLOGIC_GDN_COMPILE": "DeltaNet compile",
     "KNURLOGIC_LONG_CONTEXT": "Long context",
     "KNURLOGIC_THINKING_DEFAULT": "Thinking default",
 }
@@ -115,6 +116,17 @@ KNOB_DOC = {
         "KV-shared layers always take dequantize + attention). A row with "
         "every key masked returns 0 here where mlx sdpa returns NaN. "
         "Prefill is dequantize + attention either way."),
+    "KNURLOGIC_GDN_COMPILE": (
+        "the qwen GatedDeltaNet layers' elementwise work around the "
+        "recurrent scan under mx.compile (on) or op by op (off)",
+        "no trade: qwen3_5 / qwen3_5_moe / qwen4_exp only, the conv + silu + q/k/v "
+        "split + q/k norm before the scan and the gated output norm after "
+        "it run as compiled graphs (fewer kernel launches per decode "
+        "step); a prototype of the same change measured ~1.01-1.05x "
+        "decode, not yet measured here. The same ops in the same order: "
+        "logits identical to off on the tiny test models (float32 and "
+        "bf16, batch 1 and 2, tensor and pipeline splits). Off is for "
+        "A/B."),
     "KNURLOGIC_THINKING_DEFAULT": (
         "the thinking level a request that names none is served at "
         "(default: the template's own)",
@@ -208,6 +220,8 @@ KNOB_HELP = {
     "KNURLOGIC_KV_BITS": "8-bit holds about twice the conversation in the "
                          "same memory, slightly slower.",
     "KNURLOGIC_KV_KERNEL": "A faster way to read an 8-bit cache; leave on.",
+    "KNURLOGIC_GDN_COMPILE": "A faster way to run Qwen's linear-attention "
+                             "layers, same output; leave on.",
     "KNURLOGIC_THINKING_DEFAULT": "How hard the model thinks when a client "
                                   "doesn't say. default = the model's own.",
     "KNURLOGIC_CACHE_LIMIT_GB": "Freed memory held back for reuse instead of "
@@ -259,6 +273,8 @@ KNOB_ALIASES = {
     "kv_bits": ("KNURLOGIC_KV_BITS",),
     # the 8-bit KV decode kernel (engine/kvattn): on unless "off"; A/B knob
     "kv_kernel": ("KNURLOGIC_KV_KERNEL",),
+    # the qwen GatedDeltaNet compiled glue (vendored edit 9): on unless "off"
+    "gdn_compile": ("KNURLOGIC_GDN_COMPILE",),
     # the level a request that names none is served at (engine/model/thinking)
     "thinking_default": ("KNURLOGIC_THINKING_DEFAULT",),
     "cross_chip": ("KNURLOGIC_CROSS_CHIP",),
@@ -270,7 +286,8 @@ KNOB_ALIASES = {
 #: every rank of a split (cluster/launch passes them ring-wide)
 MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_VISION",
                "KNURLOGIC_KV_BITS",
-               "KNURLOGIC_KV_KERNEL", "KNURLOGIC_CROSS_CHIP",
+               "KNURLOGIC_KV_KERNEL", "KNURLOGIC_GDN_COMPILE",
+               "KNURLOGIC_CROSS_CHIP",
                "KNURLOGIC_LONG_CONTEXT", "KNURLOGIC_PRESET")
 
 
@@ -284,7 +301,8 @@ MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_VISION",
 ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "context_length", "mtp",
                                       "mtp_dynamic", "vision", "kv_bits",
-                                      "kv_kernel", "thinking_default",
+                                      "kv_kernel", "gdn_compile",
+                                      "thinking_default",
                                       "cross_chip", "long_context",
                                       "preset")
                           for n in KNOB_ALIASES[k])
@@ -475,6 +493,7 @@ KNOB_RANGE: dict = {
     # that refuses quantized KV offers bf16 alone
     "KNURLOGIC_KV_BITS": (KV_BITS_VALUES, "bits"),
     "KNURLOGIC_KV_KERNEL": (["on", "off"], ""),
+    "KNURLOGIC_GDN_COMPILE": (["on", "off"], ""),
     "KNURLOGIC_THINKING_DEFAULT": (THINKING_DEFAULT_VALUES, ""),
     "KNURLOGIC_CROSS_CHIP": (["off", "on", "auto"], ""),
     # narrowed per family by the resolver: ["off"] where no model card

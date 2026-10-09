@@ -38,7 +38,7 @@ def check_knob(name: str, value, window: int = 0):
         return groups.check_prompt_cache_knob(name, value)
     try:
         if name in ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC",
-                    "KNURLOGIC_VISION"):
+                    "KNURLOGIC_VISION", "KNURLOGIC_GDN_COMPILE"):
             if s.lower() not in ("", "on", "off", "1", "0", "true", "false",
                                  "yes", "no"):
                 raise ValueError(f"{s!r} isn't on or off")
