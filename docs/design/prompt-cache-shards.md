@@ -71,7 +71,7 @@ person sees in Finder next to their models (not a hidden dot-folder), with a REA
 regenerable and safe to delete. the maintainer: software should not hide GBs from
 people.
 
-- **Shared model storage** (the external drive, read by both Macs over the
+- **Shared model storage** (a shared external drive, read by both Macs over the
   network): every Mac reads and writes the same folder. A rank writes only
   the layers and heads it holds, so writers never collide on a file. Rank 0
   writes `entry.json` after every rank has reported its files written (one

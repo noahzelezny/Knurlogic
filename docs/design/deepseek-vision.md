@@ -3,12 +3,12 @@
 Scope for running deepseek-ai/DeepSeek-V4-Flash-Vision-Exp with images.
 Reference: the repo's own `inference/` (model.py, vision.py,
 image_processor.py) and `encoding/encoding_dsv4.py`, MIT. Source on disk:
-`/Volumes/Models/Teacher Models/deepseek-ai--DeepSeek-V4-Flash-Vision-Exp`
+the model folder `deepseek-ai--DeepSeek-V4-Flash-Vision-Exp`
 (156 GB, HF layout, FP8 attention + FP4 experts).
 
 ## What the artifact on disk is not
 
-`Models/deepseek-ai--DeepSeek-V4-Flash-Vision-Exp-mlx` (151 GB) is VQ
+`deepseek-ai--DeepSeek-V4-Flash-Vision-Exp-mlx` (151 GB) is VQ
 Lab's `teacher-prep` output: the 43 trunk layers and the head only. It has
 no `vision.*`, `aligner.*`, `image_{start,end,newline,pad}`, no `mtp.*` and
 no `ffn.gate.bias_vl`. It runs as a text model on today's deepseek_v4 code;

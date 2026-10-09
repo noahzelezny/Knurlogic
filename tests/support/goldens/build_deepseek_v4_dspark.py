@@ -5,7 +5,7 @@ MIT) computes from it under torch.
 
     # 1. the tiny HF checkpoint, and from it the MLX artifact: the trunk
     #    through the vendored sanitize, the sidecar through dspark_pack
-    PYTHONPATH=src ~/venv/bin/python \\
+    PYTHONPATH=src path/to/your/venv/bin/python \\
         tests/support/goldens/build_deepseek_v4_dspark.py weights
     # 2. the golden, from the HF checkpoint, under torch
     REF=".../deepseek-ai--DeepSeek-V4-Flash-Vision-Exp"

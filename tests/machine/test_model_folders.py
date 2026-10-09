@@ -27,7 +27,7 @@ def _model(d: Path):
 
 
 def test_add_list_remove(tmp_path, capsys):
-    f = tmp_path / "Models"
+    f = tmp_path / "My Models"
     f.mkdir()
     assert folders.main(["add", str(f)]) == 0
     assert folders.saved() == [str(f)]
@@ -46,7 +46,7 @@ def test_models_command_routes_folder_subcommands(tmp_path):
 
 
 def test_discovery_reads_saved_folders(tmp_path, monkeypatch):
-    f = tmp_path / "external drive"
+    f = tmp_path / "External Drive"
     _model(f / "qwen-x")
     folders.add(str(f))
     monkeypatch.setattr(discover, "_running_tool_roots", lambda: [])

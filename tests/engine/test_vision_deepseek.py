@@ -6,8 +6,8 @@ artifact's `inference/` code under torch
 (tests/support/goldens/build_deepseek_v4_vision.py): its Gate with
 bias_vl, its image-span window, its image processor and, on the real
 `vision.*` / `aligner.*` weights, its ViT + aligner. The tower test reads
-those weights from the artifact (set KNURLOGIC_TEST_DEEPSEEK_V4_VISION,
-default the external drive copy) and skips without it; everything else runs
+those weights from the artifact (set KNURLOGIC_TEST_DEEPSEEK_V4_VISION
+to its folder) and skips without it; everything else runs
 anywhere. Then a tiny random DeepSeek-V4 with vision end to end, the key
 and the prompt.
 """
@@ -27,10 +27,8 @@ sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 
 import build_deepseek_v4_vision as G  # noqa: E402
 
-REF = Path(os.environ.get(
-    "KNURLOGIC_TEST_DEEPSEEK_V4_VISION",
-    "/Volumes/Models/Teacher Models/"
-    "deepseek-ai--DeepSeek-V4-Flash-Vision-Exp"))
+REF = Path(os.environ.get("KNURLOGIC_TEST_DEEPSEEK_V4_VISION")
+           or "/nonexistent")
 GOLD = dict(np.load(G.OUT))
 
 

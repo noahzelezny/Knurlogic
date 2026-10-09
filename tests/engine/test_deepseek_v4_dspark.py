@@ -30,8 +30,8 @@ import build_deepseek_v4_dspark as G  # noqa: E402
 GOLD = dict(np.load(G.OUT))
 #: a sidecar packed from the real checkpoint (optional; headers only)
 REAL = Path(os.environ.get("KNURLOGIC_TEST_DSPARK_SIDECAR", "/nonexistent"))
-REAL_CONFIG = Path("/Volumes/Models/Teacher Models/"
-                   "deepseek-ai--DeepSeek-V4-Flash-Vision-Exp/config.json")
+REAL_CONFIG = Path(os.environ.get("KNURLOGIC_TEST_DEEPSEEK_V4_VISION")
+                   or "/nonexistent") / "config.json"
 
 
 def _load(path=G.TINY):
@@ -375,8 +375,9 @@ def _header(f):
 
 
 @pytest.mark.skipif(not (REAL.is_file() and REAL_CONFIG.is_file()),
-                    reason="no sidecar packed from the real checkpoint "
-                           "(KNURLOGIC_TEST_DSPARK_SIDECAR)")
+                    reason="set KNURLOGIC_TEST_DSPARK_SIDECAR (a packed sidecar) "
+                           "and KNURLOGIC_TEST_DEEPSEEK_V4_VISION (the "
+                           "checkpoint folder)")
 def test_the_real_sidecar_binds_by_its_header_alone():
     """Every name and shape dspark_pack wrote from the real checkpoint,
     against stages built from its config -- lazily, nothing loaded."""

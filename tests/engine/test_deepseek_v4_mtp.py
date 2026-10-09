@@ -24,9 +24,9 @@ nn = pytest.importorskip("mlx.nn")
 import build_deepseek_v4 as G  # noqa: E402
 
 #: VQ Lab's head beside its Flash build (optional; headers only)
+#: (the Flash VQ build's folder; set KNURLOGIC_TEST_DEEPSEEK_V4_HEAD)
 REAL = Path(os.environ.get("KNURLOGIC_TEST_DEEPSEEK_V4_HEAD") or
-            "/Volumes/Models/Models/"
-            "TheDrainFlorist--DeepSeek-V4-Flash-VQ-3.2bpw")
+            "/nonexistent")
 
 
 def _load():
@@ -145,7 +145,8 @@ def _header(f):
 
 
 @pytest.mark.skipif(not (REAL / "mtp-head-mxfp4.safetensors").is_file(),
-                    reason="VQ Lab's DeepSeek-V4-Flash head is not mounted")
+                    reason="set KNURLOGIC_TEST_DEEPSEEK_V4_HEAD to VQ Lab's "
+                           "DeepSeek-V4-Flash head")
 def test_the_real_vqlab_head_binds_by_its_header_alone():
     """Every name and shape of the packed Flash head, against a head built
     from the build's own config -- lazily, nothing loaded."""
@@ -175,11 +176,12 @@ def test_the_real_vqlab_head_binds_by_its_header_alone():
 #: the Flash build's bundled VQ runtime (model.py) -- knurlogic ships none
 BUNDLED = REAL / "model.py"
 #: VQ Lab's head with VQ routed experts (optional; headers only)
+#: (a .safetensors file; set KNURLOGIC_TEST_DEEPSEEK_V4_VQ_HEAD)
 REAL_VQ = Path(os.environ.get("KNURLOGIC_TEST_DEEPSEEK_V4_VQ_HEAD") or
-               "/Volumes/Models/vqlab-scratch/night-20261002/"
-               "mtp-head-vq-d4k2048.safetensors")
+               "/nonexistent")
 needs_runtime = pytest.mark.skipif(
-    not BUNDLED.is_file(), reason="no bundled VQ runtime (model.py) mounted")
+    not BUNDLED.is_file(), reason="no bundled VQ runtime (model.py): set "
+    "KNURLOGIC_TEST_DEEPSEEK_V4_HEAD to the Flash VQ build")
 
 
 def _load_bundled(tmp_path):
@@ -326,8 +328,8 @@ def test_vq_head_greedy_drafting_is_the_plain_steps_token_for_token(
 
 @needs_runtime
 @pytest.mark.skipif(not REAL_VQ.is_file(),
-                    reason="VQ Lab's VQ-expert DeepSeek-V4-Flash head is "
-                           "not mounted")
+                    reason="set KNURLOGIC_TEST_DEEPSEEK_V4_VQ_HEAD to VQ Lab's "
+                           "VQ-expert DeepSeek-V4-Flash head")
 def test_the_real_vq_head_binds_by_its_header_alone():
     """Every name and shape of the VQ-expert Flash head, against a head
     built from the build's own config, its experts the bundled runtime's
