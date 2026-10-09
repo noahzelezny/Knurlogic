@@ -436,3 +436,16 @@ def test_the_commit_op_is_in_the_plan_schema():
     with pytest.raises(P.PlanError):
         P.check({"ops": [{"op": "commit_entries",
                           "entries": [{"tokens_hash": "../x"}]}]})
+
+
+def test_cross_chip_off_is_one_key_on_any_machines():
+    # a single Mac and a two-Mac split with rounding off read the same
+    # entries; the split's descriptor lists its chips even when off
+    one = {"on": False, "setting": "off", "chips": [], "why": "off",
+           "label": ""}
+    two = {"on": False, "setting": "off", "chips": ["chip A", "chip B"],
+           "why": "off", "label": "chip A + chip B"}
+    assert LY.rounding_of(one) == LY.rounding_of(two) == "off"
+    on_ab = dict(two, on=True, setting="auto")
+    on_ba = dict(on_ab, chips=["chip B", "chip A"])
+    assert LY.rounding_of(on_ab) == LY.rounding_of(on_ba) != "off"

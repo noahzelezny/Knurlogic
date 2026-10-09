@@ -139,7 +139,22 @@ def shard_key(path, *, kv_bits=None, long_context=None,
             "artifact": ident or f"path:{path}",
             "kv_bits": None if kv_bits is None else int(kv_bits),
             "long_context": long_context or None,
-            "cross_chip": None if cross_chip is None else repr(cross_chip)}
+            "cross_chip": rounding_of(cross_chip)}
+
+
+def rounding_of(cross_chip) -> str | None:
+    """What per-chip rounding changes in the numbers: whether it is on and,
+    when on, its setting and the chips it rounds for. Off is off, whatever
+    machines a split spans (their names would make a single machine's
+    entries and a cluster's different keys for identical K/V)."""
+    if cross_chip is None:
+        return None
+    if isinstance(cross_chip, dict):
+        if not cross_chip.get("on"):
+            return "off"
+        return repr({"setting": cross_chip.get("setting"),
+                     "chips": sorted(cross_chip.get("chips") or [])})
+    return repr(cross_chip)
 
 
 def host_shard_key(host) -> dict | None:
