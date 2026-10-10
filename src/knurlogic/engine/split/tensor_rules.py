@@ -313,6 +313,10 @@ def refusals(shapes: dict, n: int, key_dim: int, kv_heads: int,
 
 # ------------------------------------------------- the prompt cache's cut
 #
+# FOR THE PROMPT CACHE ONLY: nothing that splits weights reads this; the
+# saved-prompt format does (engine/prompt_cache/layers.py, slices.py). It
+# lives here because it must agree with RULES above.
+#
 # Under tensor every rank holds every layer but only its share of each
 # layer's cache. The prompt cache saves that share per head range
 # (engine/prompt_cache/slices.py; docs/design/prompt-cache-shards.md,
