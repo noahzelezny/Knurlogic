@@ -116,6 +116,9 @@ silu + q/k/v split + q/k norm before it, the gated output norm after. The
 scan, the projections and every cache write stay uncompiled, so tensor
 splits (the fns take a rank's head counts), pipeline splits and MTP
 rollback are unchanged. The same ops in the same order: logits identical to
-the plain path (tests/engine/test_gdn_compile.py). A prototype measured
-~1.01-1.05x decode; merging the projections gave nothing.
-`KNURLOGIC_GDN_COMPILE=off` (tuning/knobs.py) is the A/B switch.
+the plain path (tests/engine/test_gdn_compile.py). Measured with MTP off,
+5 greedy 256-token runs per arm: a VQ Qwen3.6-35B-A3B decoded 5.4% faster
+compiled (70.3 -> 74.2 tok/s); a VQ Qwen3.8 Flash-Next (qwen4_exp) ~9%
+slower (31.4 -> 28.4). So qwen3_5 compiles by default and qwen4_exp only
+with `KNURLOGIC_GDN_COMPILE=on`; `off` is the plain path everywhere
+(tuning/knobs.py). Merging the projections gave nothing.

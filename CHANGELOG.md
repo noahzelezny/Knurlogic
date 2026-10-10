@@ -41,9 +41,10 @@
   elementwise work around the recurrent scan under `mx.compile`: the conv +
   silu + q/k/v split + q/k norm before it and the gated output norm after
   it (vendored edit 9). The logits are bit-for-bit the uncompiled path's on
-  the tiny test models, single machine and tensor / pipeline splits. A
-  prototype measured ~1.01-1.05x decode. `KNURLOGIC_GDN_COMPILE=off` runs
-  the plain path, for A/B.
+  the tiny test models, single machine and tensor / pipeline splits.
+  Measured on a VQ Qwen3.6-35B-A3B: decode +5.4% (70.3 -> 74.2 tok/s). On
+  qwen4_exp it measured ~9% slower, so that architecture keeps the plain
+  path unless `KNURLOGIC_GDN_COMPILE=on`; `off` turns it off everywhere.
 
 ## 0.1.5
 

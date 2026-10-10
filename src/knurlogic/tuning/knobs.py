@@ -119,11 +119,12 @@ KNOB_DOC = {
     "KNURLOGIC_GDN_COMPILE": (
         "the qwen GatedDeltaNet layers' elementwise work around the "
         "recurrent scan under mx.compile (on) or op by op (off)",
-        "no trade: qwen3_5 / qwen3_5_moe / qwen4_exp only, the conv + silu + q/k/v "
+        "no trade: qwen3_5 / qwen3_5_moe (on by default; qwen4_exp only "
+        "when set to on, as it measured slower there), the conv + silu + q/k/v "
         "split + q/k norm before the scan and the gated output norm after "
         "it run as compiled graphs (fewer kernel launches per decode "
-        "step); a prototype of the same change measured ~1.01-1.05x "
-        "decode, not yet measured here. The same ops in the same order: "
+        "step); measured +5.4% decode on a Qwen3.6-35B-A3B and ~9% "
+        "slower on qwen4_exp, hence its default. The same ops in the same order: "
         "logits identical to off on the tiny test models (float32 and "
         "bf16, batch 1 and 2, tensor and pipeline splits). Off is for "
         "A/B."),
@@ -220,8 +221,8 @@ KNOB_HELP = {
     "KNURLOGIC_KV_BITS": "8-bit holds about twice the conversation in the "
                          "same memory, slightly slower.",
     "KNURLOGIC_KV_KERNEL": "A faster way to read an 8-bit cache; leave on.",
-    "KNURLOGIC_GDN_COMPILE": "A faster way to run Qwen's linear-attention "
-                             "layers, same output; leave on.",
+    "KNURLOGIC_GDN_COMPILE": "A faster way to run Qwen3.5/3.6's linear-"
+                             "attention layers, same output; leave on.",
     "KNURLOGIC_THINKING_DEFAULT": "How hard the model thinks when a client "
                                   "doesn't say. default = the model's own.",
     "KNURLOGIC_CACHE_LIMIT_GB": "Freed memory held back for reuse instead of "

@@ -1,6 +1,7 @@
 """GatedDeltaNet's compiled glue (qwen arch "knurlogic vendored edit 9"):
 the conv + silu + q/k/v split + q/k norm before the scan and the gated
-output norm after it run under mx.compile unless KNURLOGIC_GDN_COMPILE=off.
+output norm after it run under mx.compile (qwen3_5 unless KNURLOGIC_GDN_COMPILE=off;
+qwen4_exp only when it is on).
 The same ops in the same order, so the logits are bit-for-bit the plain
 path's: single machine (batch 1 and 2, float32 and bfloat16, prefill and
 decode), and through a 2-rank tensor and pipeline split."""
@@ -51,11 +52,14 @@ def test_compiled_glue_is_the_plain_path_bit_for_bit(monkeypatch, family,
     assert np.array_equal(plain, compiled), np.abs(plain - compiled).max()
 
 
-@pytest.mark.parametrize("value,on", [("", True), ("on", True),
-                                      ("off", False), ("0", False)])
-def test_the_switch(monkeypatch, value, on):
+# unset: qwen3_5 compiles, qwen4_exp does not (it measured slower there)
+@pytest.mark.parametrize("value,q35,q4", [("", True, False),
+                                          ("on", True, True),
+                                          ("off", False, False),
+                                          ("0", False, False)])
+def test_the_switch(monkeypatch, value, q35, q4):
     monkeypatch.setenv("KNURLOGIC_GDN_COMPILE", value)
-    for family in ("qwen3_5", "qwen4_exp"):
+    for family, on in (("qwen3_5", q35), ("qwen4_exp", q4)):
         W.build(family)  # registers the vendored arch
         assert _arch(family)._gdn_compile_on() is on
 

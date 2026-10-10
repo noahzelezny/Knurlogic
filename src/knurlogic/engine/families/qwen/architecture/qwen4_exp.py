@@ -49,13 +49,15 @@ def _silu(x: mx.array) -> mx.array:
 # sizes are part of the key); mlx keys each on input shapes, so decode
 # (T=1) compiles once and each prefill chunk length once. The same ops in
 # the same order: logits identical to the plain path (tests/engine/
-# test_gdn_compile.py). KNURLOGIC_GDN_COMPILE=off runs the plain path.
+# test_gdn_compile.py). Off unless KNURLOGIC_GDN_COMPILE=on: measured on a
+# VQ Flash-Next, decode was ~9% SLOWER compiled (28.4 vs 31.4 tok/s), while
+# qwen3_5 gains (see qwen3_5.py), so this architecture keeps the plain path.
 _GDN_COMPILE_ENV = "KNURLOGIC_GDN_COMPILE"
 
 
 def _gdn_compile_on() -> bool:
     s = os.environ.get(_GDN_COMPILE_ENV, "").strip().lower()
-    return s not in ("off", "0", "false", "no")
+    return s in ("on", "1", "true", "yes")
 
 
 def _gdn_pre_plain(conv_input, conv_w, n_k, dk, n_v, dv):
