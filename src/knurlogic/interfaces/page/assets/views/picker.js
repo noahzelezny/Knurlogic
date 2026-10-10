@@ -849,11 +849,17 @@ function followLaunch(L, d){
   const r=mine.flatMap(x=>x.doc.resident||[]).find(r=>r.runtime==='knurlogic'
     && r.name===nm && (!L.port||(r.where||'').endsWith(':'+L.port)));
   if(r) L.phase=r.state==='loaded'?'ready':'loading weights';
+  // a machine that reports its loads and has neither this one nor its row:
+  // the server is gone (unloaded or exited before it was ready). An adopted
+  // card (a load another client started) goes; one launched here says so.
+  else if(secs>60 && mine.some(x=>Array.isArray(x.doc.loads))){
+    if(L.adopted) L.phase='gone';
+    else { L.phase='failed'; L.why='the server is gone (unloaded or exited before it was ready)' } }
   else if(secs>60) L.phase='starting';
 }
 function renderLaunches(){
   for(let i=LAUNCHES.length-1;i>=0;i--)
-    if(LAUNCHES[i].phase==='ready') LAUNCHES.splice(i,1);
+    if(LAUNCHES[i].phase==='ready'||LAUNCHES[i].phase==='gone') LAUNCHES.splice(i,1);
 }
 // the launches that failed, kept as INSTANCES cards until dismissed
 function failedLaunches(){ return LAUNCHES.filter(L=>L.phase==='failed') }
