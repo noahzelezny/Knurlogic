@@ -173,6 +173,8 @@ class PromptCacheHandlers:
                 row["on_disk"] = True
                 row["saved_at"] = row.get("saved_at") or d["saved_at"]
                 row["pinned"] = bool(row["pinned"] or d["pinned"])
+                if d.get("kv_bits") is not None:
+                    row["kv_bits"] = d["kv_bits"]
                 continue
             rows.append({"session": d["session"], "role": d["role"],
                          "run": d["run"], "tokens": d["tokens"],
@@ -180,5 +182,6 @@ class PromptCacheHandlers:
                          "on_disk": True, "saved_at": d["saved_at"],
                          "pinned": d["pinned"], "hash": d["hash"],
                          "model": d["model"], "key_id": d["key_id"],
-                         "location": d.get("location")})
+                         "location": d.get("location"),
+                         "kv_bits": d.get("kv_bits")})
         return self._json(200, {"object": "list", "data": rows})
