@@ -317,8 +317,11 @@ only, as `L{i:03d}.safetensors`.
 `stored`: {slot: [[a, b], ...]} for each sliced layer (the ranges the
 saving split wrote); a slot not named is one whole file. A single machine
 and a pipeline write whole files as in phase 1 (their entries are
-unchanged; `CACHE_FORMAT` stays 2). The drafting head's cache is not
-saved under tensor (a drafting row re-prefills); the layers are.
+unchanged; `CACHE_FORMAT` stays 2). Under tensor, rank 0 alone loads and
+runs the drafting head, whole, so it writes and reads `draft.safetensors`
+whole, as a pipeline's rank 0 does. Without it, a restored entry has no
+aligned head cache and a drafting model re-prefills the whole prompt (seen
+in the live single-machine -> tensor check before this was added).
 
 **Assembly** (`slices.py`). A reader's need per slot is a range [c, d)
 (a tensor rank) or the whole layer (one machine, a pipeline rank).

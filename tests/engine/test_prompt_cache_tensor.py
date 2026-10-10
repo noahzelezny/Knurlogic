@@ -183,6 +183,15 @@ def test_an_entry_crosses_between_tensor_and_other_splits(
     assert mx.array_equal(cont(keep), cont(back))
 
 
+def test_rank_0_alone_owns_the_drafting_heads_cache():
+    # rank 0 alone loads and runs the head, whole (a follower never loads
+    # it), so it writes and reads draft.safetensors; without it a restored
+    # entry has no aligned head cache and a drafting row re-prefills
+    model, _, _, _, _ = _entry("qwen3_5_moe")
+    parts = _tensor_parts(model, 2)
+    assert [p.extras for p in parts] == [True, False]
+
+
 def test_a_replicated_cache_is_written_once_by_rank_0(tmp_path, monkeypatch):
     """deepseek_v4 keeps its caches whole on every rank: rank 0 writes the
     whole layers, rank 1 nothing, and both read them."""

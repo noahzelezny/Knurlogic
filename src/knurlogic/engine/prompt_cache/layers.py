@@ -155,9 +155,12 @@ def _tensor_part(host, layout: dict, n: int) -> Part | None:
             return None
         heads.append((r[0], r[1]))
         writes.append("slice" if r[2] else "")
-    # no drafting head's cache: a head on a tensor split is not cut by
-    # this spec, so its cache is not saved (a drafting row re-prefills)
-    return Part(0, n, n, False, rank, world, tuple(cuts), tuple(heads),
+    # the drafting head's cache: rank 0 alone loads and runs the head,
+    # whole (split/follower: a follower never loads it), so rank 0 writes
+    # and reads draft.safetensors whole, as a pipeline's rank 0 does --
+    # without it a restored entry has no aligned head cache and a drafting
+    # row re-prefills (found live, single -> tensor)
+    return Part(0, n, n, rank == 0, rank, world, tuple(cuts), tuple(heads),
                 tuple(writes))
 
 
