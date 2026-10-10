@@ -35,6 +35,28 @@ SERVE_PORT: dict = {"n": 8080, "ui": 8899}
 #: but named, so an agent stops waiting and a person looks at the log.
 STALL_QUIET_S = 180
 
+#: pid -> (resident bytes last seen, when they last changed)
+_GROWTH: dict = {}
+
+
+def stalled(pid: int, quiet, resident: int, now: float) -> bool:
+    """A loading server is stalled when its log has been quiet AND its
+    memory has not moved for STALL_QUIET_S. The log alone was wrong: a
+    pipeline rank reading 70 GiB over a network share prints nothing for
+    minutes while its memory climbs steadily, and read "stalled"."""
+    last = _GROWTH.get(pid)
+    if last is None:
+        # first sight: still as long as the log is, until a poll sees growth
+        _GROWTH[pid] = (resident, now - (quiet or 0))
+    elif last[0] != resident:
+        _GROWTH[pid] = (resident, now)
+        if len(_GROWTH) > 256:      # pids long gone
+            for k in sorted(_GROWTH, key=lambda k: _GROWTH[k][1])[:128]:
+                _GROWTH.pop(k, None)
+    still = now - _GROWTH[pid][1]
+    return quiet is not None and quiet > STALL_QUIET_S \
+        and still > STALL_QUIET_S
+
 
 #: A server holding less than this share of its weights is still warming.
 WARM_FRACTION = 0.9
@@ -69,7 +91,7 @@ def children() -> list:
       serving   answering, and holding its weights
       loading   alive, not answering yet; with seconds elapsed, the last log
                 line, and how long the log has been quiet
-      stalled   loading, and the log has been quiet for STALL_QUIET_S --
+      stalled   loading, the log quiet and memory unmoved for STALL_QUIET_S --
                 stop waiting and read the log
       exited    gone; exit code when this process started it, log tail
     """
@@ -113,12 +135,12 @@ def children() -> list:
             else:
                 row["phase"] = "serving"
         elif alive:
-            stalled = quiet is not None and quiet > STALL_QUIET_S
-            row["phase"] = "stalled" if stalled else "loading"
+            is_stalled = stalled(pid, quiet, pids.get(pid, 0), now)
+            row["phase"] = "stalled" if is_stalled else "loading"
             row["log_quiet_seconds"] = round(quiet) if quiet is not None else None
             row["last_log_line"] = lines[-1][:200] if lines else ""
             row["bytes_resident"] = pids.get(pid, 0)
-            if stalled:
+            if is_stalled:
                 row["advice"] = (f"no log output for {round(quiet or 0)}s while "
                                  f"loading. Stop waiting; read {log}. "
                                  f"unload(port={port}) if it is hung.")

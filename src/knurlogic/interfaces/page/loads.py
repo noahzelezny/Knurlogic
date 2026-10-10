@@ -205,6 +205,34 @@ def cluster_launch(req: dict, serve_port: int) -> dict:
         ui_port=spawn.SERVE_PORT["ui"], serve_port=serve_port)
 
 
+def room_across(path: str, ids: list, split: str, mtp: bool = True,
+                vision: bool = True, kv_bits=None) -> dict:
+    """The Load panel's room for a model split across the picked machines:
+    placed as Launch would place it (cluster/launch.placement), each
+    rank's memory free now less its share and step margin, and the
+    context the smallest leaves (tuning/fit.split_room). {"error"} when
+    it cannot be placed: Launch says the same."""
+    from knurlogic.cluster import launch
+    from knurlogic.machine.artifact import Artifact
+    snap, _ = nodes.status_fn()
+    own: dict = next((n for n in snap.get("nodes") or []
+                      if n.get("role") in ("local", "server")), {})
+    infos, why = launch.machine_infos(
+        ids, me=identity.identity(),
+        peers=nodes.PEERS.all() if nodes.PEERS else [],
+        local_info=own.get("cluster") or launch.node_info())
+    if why:
+        return {"error": why}
+    try:
+        shape = launch.shape_of(path, len(infos), split, vision=vision,
+                                mtp=mtp)
+        plan = launch.placement(infos, shape, split)
+    except (OSError, ValueError, KeyError) as e:
+        return {"error": str(e)}
+    return launch.placed_room(plan, infos, Artifact.load(path).raw_config,
+                              kv_bits)
+
+
 def peer_launch(req: dict, load=None, stop=None, resolve=None) -> tuple:
     """A Load or Unload message, on the machine asked to load: (status,
     doc). The caller has passed the peer gate (no Origin; loopback,
@@ -403,8 +431,8 @@ def load_progress(doc: dict) -> list:
         elif r is not None and r.get("state") == "warming":
             e["phase"] = "warming"       # weights in; the first-request warm-up
         elif r is None or r.get("state") == "loading":
-            e["phase"] = ("stalled" if quiet is not None
-                          and quiet > spawn.STALL_QUIET_S else "loading")
+            e["phase"] = ("stalled" if spawn.stalled(pid, quiet, e["bytes"], now)
+                          else "loading")
         elif e["total_bytes"] and e["bytes"] < spawn.WARM_FRACTION * e["total_bytes"]:
             e["phase"] = "warming"
         else:

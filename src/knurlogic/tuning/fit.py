@@ -398,6 +398,85 @@ def room_for(weights_bytes: int, cfg: dict,
     return context_room(working_set_bytes, weights_bytes, cfg, kv_bits)
 
 
+def kv_layer_weights(tc: dict) -> list:
+    """Each layer's part of `kv_bytes_per_token`, as relative weights (0
+    for a layer whose cache does not grow with context), by the same rules:
+    a pipeline rank's KV per token is its layers' share of the whole."""
+    layers = int(tc.get("num_hidden_layers") or 0)
+    types = tc.get("layer_types")
+    interval = tc.get("full_attention_interval")
+    if tc.get("model_type") == "deepseek_v4":
+        ihd = int(tc.get("index_head_dim") or 0)
+        hd = int(tc.get("head_dim") or 0)
+        rs = [int(r) for r in (tc.get("compress_ratios") or [])][:layers]
+        rs += [0] * (layers - len(rs))
+        return [(hd / r + (ihd / r if r == 4 else 0)) if r > 0 else 0.0
+                for r in rs]
+    if isinstance(types, list) and tc.get("kv_lora_rank"):
+        return [0.0 if t == "linear_attention" else 1.0 for t in types]
+    if isinstance(types, list) and types:
+        return [1.0 if t == "full_attention" else 0.0 for t in types]
+    if interval:
+        k = int(interval)
+        return [1.0 if (i + 1) % k == 0 else 0.0 for i in range(layers)]
+    return [1.0] * layers
+
+
+def split_room(ranks: list, cfg: dict, split: str, kv_bits=None) -> dict:
+    """`context_room` for a model split across machines. `ranks`, rank 0
+    first: [{"name", "budget_bytes" (what it may hold now), "holds_bytes"
+    (its weights: layers or tensor share, plus what it holds besides),
+    "bounds" ((start, end) layers, pipeline only)}].
+
+    Every rank keeps its step margin; what is left on each holds KV for
+    every token at its share of the KV per token (a pipeline rank: its
+    layers' part, `kv_layer_weights`; tensor: 1/N of the heads). The
+    context the cluster holds is the smallest any rank allows: the rank
+    that fills first stops every conversation."""
+    cfg = cfg or {}
+    tc = cfg.get("text_config") or cfg
+    per, why = kv_bytes_per_token(tc, kv_bits)
+    window = int(tc.get("max_position_embeddings")
+                 or cfg.get("max_position_embeddings") or 0)
+    w = kv_layer_weights(tc)
+    whole = sum(w) or 1.0
+    n = len(ranks)
+    rows, tokens = [], None
+    for r in ranks:
+        ws = int(r.get("budget_bytes") or 0)
+        margin = step_margin(ws)
+        held = int(r.get("holds_bytes") or 0)
+        left = max(ws - held - margin, 0)
+        if split == "pipeline" and r.get("bounds"):
+            a, b = r["bounds"]
+            share = sum(w[a:b]) / whole
+        else:
+            share = 1.0 / n if n else 1.0
+        own = int(per * share)
+        t = left // own if own else None
+        if t is not None:
+            tokens = t if tokens is None else min(tokens, t)
+        rows.append({"name": r.get("name"), "budget_bytes": ws,
+                     "holds_bytes": held, "margin_bytes": margin,
+                     "left_bytes": left, "kv_bytes_per_token": own,
+                     "tokens": t})
+    tokens = tokens or 0
+    left = sum(x["left_bytes"] for x in rows)
+    fits = all(x["budget_bytes"] and x["holds_bytes"] + x["margin_bytes"]
+               <= x["budget_bytes"] for x in rows)
+    small = (min((x["left_bytes"] for x in rows), default=0) < 2 * GIB
+             or bool(per and window and tokens < window / 5))
+    t = (f"{tokens / 1e6:.1f}M" if tokens >= 1e6 else
+         f"{tokens / 1e3:.0f}k" if tokens >= 1e3 else str(tokens))
+    text = (f"leaves {left / GIB:.0f} GiB across {n} machines"
+            + (f", about {t} tokens of context across all conversations"
+               if per else " (its KV size per token is not known)"))
+    return {"fits": fits, "split": split, "ranks": rows,
+            "left_bytes": left, "kv_bytes_per_token": per, "kv_why": why,
+            "tokens": tokens, "window": window, "small": small,
+            "text": text}
+
+
 def room_text(left: int, tokens: int, per: int) -> str:
     """'leaves 6 GiB, about 400k tokens of context across all
     conversations' -- one sentence, shared by the page and doctor."""

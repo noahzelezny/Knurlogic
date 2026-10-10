@@ -261,6 +261,13 @@ async function loadPreview(){
   // YaRN long context moves the context cap and what its KV needs
   const lc=launchSets(baseKey(m.name)).KNURLOGIC_LONG_CONTEXT;
   if(lc) q.set('long_context', lc);
+  // several machines picked: the room under the split Launch would place
+  const ns=selNodes();
+  if(ns.length>1){
+    const on=launchMTP(m);
+    q.set('nodes', ns.map(n=>n.id).join(',')); q.set('split', MULTI.shard);
+    q.set('mtp', on.KNURLOGIC_MTP||'on'); q.set('vision', on.KNURLOGIC_VISION||'on');
+  }
   // one peer picked: ITS page previews it (by identity, from its own
   // stores), so the room is that machine's free memory, not this one's
   const peer=launchPeer();
@@ -273,7 +280,9 @@ async function loadPreview(){
   catch(e){ PREVIEW=null }
   if(SEL!==m) return;
   // the preview's room is asked against the tune picked, and fresher
-  const pr=$('pickroom'); if(pr && PREVIEW && PREVIEW.room) pr.innerHTML=roomHTML(PREVIEW.room);
+  const pr=$('pickroom');
+  if(pr && PREVIEW && selNodes().length>1) pr.innerHTML=splitRoomHTML(PREVIEW.split_room);
+  else if(pr && PREVIEW && PREVIEW.room) pr.innerHTML=roomHTML(PREVIEW.room);
   mtpState(); splitState(); launchGate();
 }
 function launchGate(){
@@ -328,6 +337,22 @@ function roomHTML(r){
     (r.window?` · its window is ${r.window.toLocaleString()} tokens`:''))}">${esc(r.text)}${
     r.small?' — little room for long conversations':''}</div>`;
 }
+// The same line for a model split across machines (the page's
+// split_room: each rank's free memory less its share and step margin;
+// the context is what the first rank to fill allows). MTP and vision are
+// asked of the page with the split, so nothing is given back here.
+function splitRoomHTML(r){
+  if(!r) return '';
+  if(r.error) return `<div class="room small">${esc(r.error)}</div>`;
+  if(!r.fits) return `<div class="room small">does not fit the memory free there now</div>`;
+  const per=(r.ranks||[]).map(x=>`${x.name}: free now ${gb(x.budget_bytes)} − holds ${
+    gb(x.holds_bytes)} − step margin ${gb(x.margin_bytes)} = ${gb(x.left_bytes)}`+
+    (x.tokens!=null?`, ${ktok(x.tokens)} tokens`:'')).join('\n');
+  return `<div class="room${r.small?' small':''}" title="${esc(per+
+    (r.kv_why?`\nKV ${r.kv_why}`:'')+
+    (r.window?`\nits window is ${r.window.toLocaleString()} tokens`:''))}">${esc(r.text)}${
+    r.small?' — little room for long conversations':''}</div>`;
+}
 function pickInfo(){
   const m=SEL, el=$('pickinfo');
   $('pickname').textContent=m?m.name:'choose a model';
@@ -343,8 +368,7 @@ function pickInfo(){
   $('launch').title=blocked||'';
   el.innerHTML=''+
     (!fits?`<div class="warn">more space required</div>`
-     : ns.length===1
-       ? `<div id="pickroom">${isLocal(ns[0])?roomHTML(m.room):''}</div>` : '')+
+     : `<div id="pickroom">${ns.length===1&&isLocal(ns[0])?roomHTML(m.room):''}</div>`)+
     (blocked && !/does not fit/.test(blocked)?`<div class="note">${esc(blocked)}</div>`:'');
   SETS=launchSets(baseKey(m.name)); mtpState(); loadPreview();
 }
@@ -618,11 +642,13 @@ function mtpState(){
                                        :vb>0?` (${gb(vb)})`:'');
   // a part switched off is room to talk in: the line follows the toggles
   const pr=$('pickroom');
-  if(pr && LASTROOM && SEL && LASTROOM.for===SEL.path) pr.innerHTML=roomHTML(LASTROOM.r);
+  if(pr && LASTROOM && SEL && LASTROOM.for===SEL.path && selNodes().length<2) pr.innerHTML=roomHTML(LASTROOM.r);
 }
 $('mtpopts').querySelectorAll('.seg').forEach(g=>
   g.querySelectorAll('button').forEach(b=>b.onclick=()=>{
     LMTP[g.dataset.k]=b.dataset.v; mtpState();
+    // split across machines: the page places it again without the part
+    if(selNodes().length>1 && g.dataset.k!=='dyn') loadPreview();
   }));
 // The launch's settings: the saved ones, with this panel's MTP choice
 function launchMTP(m){
@@ -842,7 +868,7 @@ function followLaunch(L, d){
       L.why=e.refused||(e.log_tail||[]).slice(-2).join(' / ')||'the server exited'; return }
     L.phase={loading:'loading weights', stalled:'stalled', warming:'warming',
              ready:'ready'}[e.phase]||'starting';
-    if(e.phase==='stalled') L.why=`no log output for a while; last: ${e.last_log_line||'--'}`;
+    if(e.phase==='stalled') L.why=`no log output and no memory growth for 3 min; last: ${e.last_log_line||'--'}`;
     return;
   }
   // a machine that does not report `loads` (older knurlogic): its row says

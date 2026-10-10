@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Page
+
+* Load model says how much room a split leaves for context, as it does
+  for one Mac: placed as Launch would place it, each Mac's free memory
+  less its share and step margin, and the tokens the first Mac to fill
+  allows. It follows the split and the MTP and vision switches; hover
+  for each Mac's numbers.
+* A load is called stalled only when its log is quiet and its memory has
+  stopped growing for 3 minutes. A rank reading weights from a network
+  share is silent for minutes while its memory climbs.
+* The header's "2/2 nodes" badge shows only when the page or a Mac stops
+  answering.
+
 ## 0.1.6
 
 ### Prompt cache

@@ -5,8 +5,11 @@ import {nodeSelChanged} from './picker.js';
 import {RAM, RAMCOL, ramWent, SWAP_FLOOR} from './memory.js';
 
 // --- status ---------------------------------------------------------------
+// Said only when something is wrong: the Memory cards already show every
+// machine, so "2/2 nodes" and "serving" were noise.
 function setState(ok, text){
   const el=$('state');
+  el.style.visibility=ok?"hidden":"";   // keeps its grid cell: the logo stays centred
   el.classList.toggle('off', !ok);
   el.lastElementChild.textContent=text;
 }

@@ -1729,6 +1729,48 @@ def refresh_memory(infos: list, post, wait_s: float = EXIT_WAIT_S,
         sleep(1.0)
 
 
+def machine_infos(ids: list, *, me: dict, peers: list,
+                  local_info: dict) -> tuple:
+    """([info per machine], "") for the picked node ids, in their order:
+    this machine's cluster block or each answering peer's, with its id,
+    name and page; ([], why) when one cannot take part."""
+    by_id = {getattr(p, "id", ""): p for p in peers
+             if p.state == "answering"}
+    infos = []
+    for nid in ids:
+        if nid == me.get("id"):
+            infos.append({**local_info, "id": nid, "name": me.get("name"),
+                          "page": None, "links": {}})
+            continue
+        p = by_id.get(nid)
+        if p is None:
+            old = next((q for q in peers if getattr(q, "id", "") == nid
+                        and q.state == "version_mismatch"), None)
+            if old is not None:
+                return [], (old.problem or f"{old.name or old.host} "
+                            f"speaks another protocol: update knurlogic "
+                            f"there")
+            return [], f"{nid!r} is not a machine answering this page"
+        c = (p.node or {}).get("cluster")
+        if not isinstance(c, dict):
+            return [], (f"{p.name or p.host} runs a knurlogic without "
+                        f"cluster launch; update it")
+        infos.append({**c, "id": nid, "name": p.name or p.host,
+                      "page": p.key, "links": {}})
+    return infos, ""
+
+
+def placed_room(plan: dict, infos: list, cfg: dict, kv_bits=None) -> dict:
+    """What a placement (`placement`) leaves its conversations
+    (tuning/fit.split_room), each rank against its budget now."""
+    from knurlogic.tuning import fit
+    by = {m["name"]: m for m in infos}
+    ranks = [{"name": s["machine"], "budget_bytes": budget_of(by[s["machine"]]),
+              "holds_bytes": s["bytes"], "bounds": s.get("bounds")}
+             for s in plan["shares"]]
+    return fit.split_room(ranks, cfg, plan["split"], kv_bits)
+
+
 def launch(req: dict, *, me: dict, peers: list, local_info: dict,
            ui_port: int, serve_port: int, post=None, follow=None,
            tried: tuple = (), moved: dict | None = None,
@@ -1764,27 +1806,10 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     aname = Path(str(req.get("name") or "")).name[:255]
     by_id = {getattr(p, "id", ""): p for p in peers
              if p.state == "answering"}
-    infos = []
-    for nid in ids:
-        if nid == me.get("id"):
-            infos.append({**local_info, "id": nid, "name": me.get("name"),
-                          "page": None, "links": {}})
-            continue
-        p = by_id.get(nid)
-        if p is None:
-            old = next((q for q in peers if getattr(q, "id", "") == nid
-                        and q.state == "version_mismatch"), None)
-            if old is not None:
-                return {"error": old.problem or f"{old.name or old.host} "
-                        f"speaks another protocol: update knurlogic there"}
-            return {"error": f"{nid!r} is not a machine answering this "
-                             f"page"}
-        c = (p.node or {}).get("cluster")
-        if not isinstance(c, dict):
-            return {"error": f"{p.name or p.host} runs a knurlogic without "
-                             f"cluster launch; update it"}
-        infos.append({**c, "id": nid, "name": p.name or p.host,
-                      "page": p.key, "links": {}})
+    infos, why = machine_infos(ids, me=me, peers=peers,
+                               local_info=local_info)
+    if why:
+        return {"error": why}
     # the links this page can see: its own to each peer
     kinds = {"thunderbolt": "rdma" if link == "jaccl" else "tb4",
              "ethernet": "ethernet", "wifi": "wifi"}

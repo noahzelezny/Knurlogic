@@ -417,10 +417,20 @@ def machine_settings():
                                               "that model"}
         if art:
             try:
-                return preview(art, presets.preset_or(_one(q, "tune"), "default"),
-                                _one(q, "working_set_gib"),
-                                kv_bits=_one(q, "kv_bits"),
-                                long_context=_one(q, "long_context"))
+                doc = preview(art, presets.preset_or(_one(q, "tune"), "default"),
+                              _one(q, "working_set_gib"),
+                              kv_bits=_one(q, "kv_bits"),
+                              long_context=_one(q, "long_context"))
+                ids = [i for i in str(_one(q, "nodes") or "").split(",") if i]
+                if len(ids) >= 2:
+                    # several machines picked: the room under that split
+                    from knurlogic.interfaces.page import loads
+                    doc["split_room"] = loads.room_across(
+                        art, ids, _one(q, "split") or "pipeline",
+                        mtp=_one(q, "mtp") != "off",
+                        vision=_one(q, "vision") != "off",
+                        kv_bits=doc.get("kv_bits"))
+                return doc
             # a preview that cannot be built is the page's answer; the error is in it
             except Exception as e:
                 return {"knobs": [], "error": f"{type(e).__name__}: {e}"}
@@ -602,6 +612,7 @@ def preview(path: str, tune: str, working_set_gib=None,
         # loaded here counts; the working set alone said "leaves 87 GiB" on
         # a 128 GiB Mac holding a 108 GiB model)
         "room": room_for(a.bytes_on_disk, a.raw_config, ws, kv_bits=bits),
+        "kv_bits": bits,
         "preview": True,
         # what the Load model toggles free: the MTP head, and vision's
         # tower + image store + image KV allowance (0: no such part)
