@@ -1104,6 +1104,10 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             report["disk"] = {"tokens": min(int(d.get("tokens", 0)), used),
                               "read_ms": d.get("read_ms", 0.0)
                               if d and used else 0.0}
+            if d.get("converted") and used:
+                # served from an entry converted from another KV width at
+                # this load or read-back (prompt_cache/convert)
+                report["converted"] = dict(d["converted"])
             if row.job.diverged:
                 report["diverged"] = row.job.diverged
         usage = row.text.usage(report)

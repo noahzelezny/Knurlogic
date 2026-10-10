@@ -15,10 +15,11 @@ function keepKn(){ try{ const k=JSON.parse(sessionStorage.getItem('kl.settings')
   k.kn=SKN; sessionStorage.setItem('kl.settings', JSON.stringify(k)) }catch(e){} }
 function showKnurlogic(){
   const L=$('setlist'), ms=machines();
-  if(!['strategy','compaction'].includes(SKN)) SKN='strategy';
+  if(!['strategy','compaction','prompt_cache'].includes(SKN)) SKN='strategy';
   const it=(id,name,sub)=>`<div class="fam" data-k="${id}" aria-current="${id===SKN}">${esc(name)}<small>${esc(sub)}</small></div>`;
   L.innerHTML=it('strategy','Presets','')+
-    it('compaction','Compaction','');
+    it('compaction','Compaction','')+
+    it('prompt_cache','Prompt cache','');
   L.querySelectorAll('[data-k]').forEach(v=>v.onclick=()=>{
     if(v.dataset.k===SKN) return;
     SKN=v.dataset.k; keepKn();
@@ -27,7 +28,8 @@ function showKnurlogic(){
   });
   keepKn(); showKnOf(ms);
 }
-function showKnOf(ms){ return SKN==='compaction' ? showCompaction(ms) : showStrategy(ms) }
+function showKnOf(ms){ return SKN==='compaction' ? showCompaction(ms)
+  : SKN==='prompt_cache' ? showPromptCache(ms) : showStrategy(ms) }
 // Each machine's own documents: /strategy.json and /knurlogic.json here, a
 // peer's through its /settings.json (/peek reads nothing else).
 async function knDocs(ms){
@@ -163,6 +165,24 @@ async function showCompaction(ms){
   el.innerHTML=`<div class="sgrp"><div class="shd">Compaction</div>
     <div class="gks">${ks.map(k=>gsel(k.name, TITLE[k.name]||k.name, k.help||k.what, k.help?'':k.why,
       k.values.map(v=>({v, t:v+(k.unit?' '+k.unit:'')})), k.value, k.default)).join('')}</div>
+  </div>`;
+  wireGks(el);
+}
+// The prompt cache on disk: one set for every model on every machine, read
+// at each save, load and read-back.
+async function showPromptCache(ms){
+  const el=$('machbody'), seq=nextSeq();
+  el.innerHTML='<div class="msg">reading…</div>';
+  const docs=await knDocs(ms);
+  if(seq!==SEQ) return;
+  const kn=docs[0].knurlogic||{}, pc=kn.prompt_cache;
+  if(!pc){ el.innerHTML=`<div class="msg">${esc(kn.error||'this page predates knurlogic-wide prompt-cache settings')}</div>`; return }
+  const ks=pc.knobs||[];
+  const TITLE={KNURLOGIC_PROMPT_CACHE_DISK:'Save to disk', KNURLOGIC_PROMPT_CACHE_DISK_GB:'Disk budget',
+    KNURLOGIC_PROMPT_CACHE_TTL_H:'Keep unused', KNURLOGIC_PROMPT_CACHE_CONVERT:'Convert KV bits'};
+  el.innerHTML=`<div class="sgrp"><div class="shd">Prompt cache</div>
+    <div class="gks">${ks.map(k=>gsel(k.name, TITLE[k.name]||k.name, k.help||k.what, k.help?'':k.why,
+      k.values.map(v=>({v, t:v===''?'auto':v+(k.unit?' '+k.unit:'')})), k.value, k.default)).join('')}</div>
   </div>`;
   wireGks(el);
 }

@@ -44,6 +44,20 @@
   keeps saving per split under tensor.
 * Entries saved by 0.1.5, and earlier tensor entries, are still read
   under their own split; new saves use the new layout only.
+* Saved sessions survive a change of KV bits. When a load or read-back
+  finds fewer entries under its key than it wants, entries saved at
+  another KV width (the key differing in `kv_bits` only) are converted:
+  attention K/V quantized with the same call the 8-bit cache makes, or
+  dequantized; recurrent state, windows, indexer keys and the drafting
+  head's cache are carried as read. The converted entry is written under
+  the loaded key and the old one deleted, so a session is on disk once;
+  on a split every rank converts its own part and a vote commits it.
+  New knurlogic-wide setting `KNURLOGIC_PROMPT_CACHE_CONVERT`: `down`
+  (default, 16-bit to quantized), `both`, `off`, shown with the other
+  prompt-cache settings in a new Settings -> Knurlogic -> Prompt cache
+  section. `usage.knurlogic.cache.converted` = `{from_bits, to_bits}`;
+  registry rows carry `kv_bits` (docs/design/prompt-cache-shards.md,
+  "Conversion between KV widths").
 
 ### Engine
 

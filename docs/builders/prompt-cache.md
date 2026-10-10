@@ -15,6 +15,7 @@ Everything is in one package, `src/knurlogic/engine/prompt_cache/`:
 | `layers.py` | the per-layer format (whole models, pipeline and tensor splits): `Part` (which slots a rank holds, and under tensor its head range of each and what it writes), `shard_key`, `Store` (write / read / complete check, save, index), `commit` (the ring's entry.json vote), `restore` and `agree` (the load's vote) |
 | `slices.py` | a layer's cache per head range: file names, `plan` (which files make a range), `cut` / `join` / `assemble` along the axes the family's spec names |
 | `location.py` | where the cache root is: `<models folder>/Prompt cache/`, else the fallback; `locations.json` remembers every root |
+| `convert.py` | entries of another KV width: which widths the setting allows (`allowed`), the per-slot conversion against a fresh cache list of the loaded model (`convert_caches`), finding and reading them (`candidates`, `read`, `index`), and writing them under the loaded key in place of the old (`persist`, `persist_ring` with its vote, `read_back`) |
 | `transfer.py` | machines without shared storage: what this rank lacks of an entry, fetched from a peer (`fill`), verified, renamed into place; `listing` / `piece_path` are what a page serves. No networking: the fetcher is injected (`use`) |
 | `disk.py` | the per-split format (a tensor split of a family with no cache spec, and entries earlier builds wrote), the object encoding both formats use, the settings, the sweep (TTL and budget, both formats, per root), pins.json, drops, the registry's disk side, the per-split vote (`agree`) |
 | `commands.py` | `PromptCacheCommands`, a mixin of the `Scheduler`: save, park, drop, pin, list, read-back, divergence, restore at load |
@@ -34,8 +35,10 @@ Outside it, only thin hooks:
 - `engine/runtime/scheduler.py` inherits the commands mixin and calls
   into it at admission (read-back, divergence) and at load (restore).
 - `engine/split/plan.py`: the schema every journaled op must match.
-- `tuning/groups.py` (`PROMPT_CACHE_KNOBS`): the disk on/off, GB and TTL
-  settings.
+- `tuning/groups.py` (`PROMPT_CACHE_KNOBS`): the disk on/off, GB, TTL
+  and KV-width conversion settings; `interfaces/page/documents.py`
+  (`prompt_cache_document`) shows them under Settings -> Knurlogic ->
+  Prompt cache.
 
 New prompt-cache behavior goes in the package. Grow the scheduler,
 tensor code or HTTP server only by a call into it.

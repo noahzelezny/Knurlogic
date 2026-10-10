@@ -132,6 +132,18 @@ PROMPT_CACHE_KNOBS = {
         "how long a saved prompt cache nobody used is kept",
         "longer keeps a session restorable after a longer break, holding "
         "its disk meanwhile; shorter frees it sooner."),
+    "KNURLOGIC_PROMPT_CACHE_CONVERT": (
+        "down", ["down", "both", "off"], "",
+        "convert a saved prompt cache of another KV width (KV bits) when "
+        "the model loads or reads it back: down turns 16-bit entries into "
+        "the quantized width the model now runs, both also turns quantized "
+        "entries back into 16-bit, off leaves them; the converted entry "
+        "replaces the old one",
+        "converting takes a fraction of a second per entry where re-reading "
+        "the prompt takes minutes (a 300k-token session is ~30 min). 16 -> "
+        "8 matches what an 8-bit model stores up to quantization noise; "
+        "8 -> 16 carries the 8-bit error into a 16-bit run, so it is "
+        "asked for separately."),
 }
 
 
@@ -145,6 +157,10 @@ def check_prompt_cache_knob(name: str, value):
             return None
         except ValueError as e:
             return f"{name}: {e}"
+    if name == "KNURLOGIC_PROMPT_CACHE_CONVERT":
+        if s.lower() in ("", "down", "both", "off"):
+            return None
+        return f"{name}={s!r}: down, both or off"
     if name == "KNURLOGIC_PROMPT_CACHE_DISK_GB" and not s:
         return None
     try:

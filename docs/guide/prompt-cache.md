@@ -109,6 +109,15 @@ for the split they were saved under; new saves use the new layout.
 | `KNURLOGIC_PROMPT_CACHE_DISK` | on | saving allowed at all |
 | `KNURLOGIC_PROMPT_CACHE_DISK_GB` | 20% of free space plus what the cache holds, at most 64 GiB | all models' files together; oldest go first |
 | `KNURLOGIC_PROMPT_CACHE_TTL_H` | 24 | files unused this long are deleted |
+| `KNURLOGIC_PROMPT_CACHE_CONVERT` | down | sessions saved at another KV width: `down` converts 16-bit ones to the quantized width the model now runs, `both` also converts quantized ones back to 16-bit, `off` leaves them |
+
+Converting takes a fraction of a second per entry where re-reading the
+prompt takes minutes. 16 -> 8 matches what an 8-bit model stores up to
+quantization noise; 8 -> 16 carries the 8-bit error into a 16-bit run.
+The converted entry replaces the old one, so a session is saved once;
+`usage.knurlogic.cache.converted` says when a request was served from
+one, and registry rows carry each entry's `kv_bits`. All four settings
+are under Settings -> Knurlogic -> Prompt cache.
 
 Pinned sessions are exempt from both limits; only a drop removes them.
 

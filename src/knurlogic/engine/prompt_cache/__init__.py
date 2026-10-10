@@ -6,6 +6,9 @@ the scheduler's commands on it (docs/design/prompt-cache-disk.md).
   layers.py    the entries on disk, one file per layer, readable under
                any split (whole model, pipeline): save, commit, restore
                (docs/design/prompt-cache-shards.md)
+  convert.py   an entry of another KV width (16-bit <-> quantized),
+               converted at a restore or read-back and written under the
+               loaded model's key in place of the old one
   transfer.py  an entry's missing pieces, fetched from a peer's page
                (machines without shared storage); the fetcher is
                installed by the interfaces side

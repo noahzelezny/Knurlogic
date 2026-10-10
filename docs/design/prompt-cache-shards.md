@@ -113,6 +113,66 @@ today. Once restored into memory they are just entries: the next client
 save writes them in the new format, and the old files age out by TTL. No
 converter.
 
+## Conversion between KV widths
+
+The key holds the KV bits, so a model switched between 16-bit and
+quantized KV (`KNURLOGIC_KV_BITS`) would find none of its saved sessions,
+and a 300k-token session costs about 30 minutes to prefill again. So when
+a load's restore, or a read-back, finds fewer entries under its key than
+it wants, it also looks under the keys that differ in `kv_bits` alone
+(every other field identical) and converts what it finds
+(engine/prompt_cache/convert.py).
+
+**What converts.** Exactly what `kvquant.install` swaps when the model
+runs quantized: an mlx-lm `KVCache` becomes a `QuantKVCache`, and a
+family cache its manifest names (`kv_quant.caches`: qwen4_exp's
+`_AttnCache`, GLM's MLA `_LatentCache`) becomes that factory's quantized
+class; a `CacheList`'s members the same way. Recurrent state
+(`ArraysCache`), sliding windows, indexer keys, DeepSeek V4's pools and
+the drafting head's cache are 16-bit at every width and are carried as
+read. The conversion runs per slot against a fresh cache list of the
+loaded model: where that slot is quantized and the entry's is not, its
+K/V are quantized with the model's bits and the group size the quantized
+cache picks, by the same `mx.quantize` call the cache makes on insert;
+where the slot is 16-bit and the entry's is quantized, they are
+dequantized. A quantized entry is never converted to another quantized
+width.
+
+**Fidelity.** 16 -> 8 equals what the 8-bit cache stores for the same
+16-bit K/V; a native 8-bit prefill differs only in that its later layers
+saw dequantized K/V while prefilling (tiny qwen3_5_moe, 48 tokens: the
+next tokens' logits within 5.2e-2 of a native 8-bit prefill's, where the
+unconverted cache is 4.4 away). 8 -> 16 carries the 8-bit error into a
+16-bit run.
+
+**Setting.** `KNURLOGIC_PROMPT_CACHE_CONVERT`, knurlogic-wide: `down`
+(default: 16-bit to quantized only), `both` (also quantized to 16-bit),
+`off`.
+
+**One copy.** The converted entry is written under the loaded model's key
+(its layer files by temp file and rename, `entry.json` last, with
+`converted_from`), then the old width's directory is deleted: a session
+is on disk once. Registry rows carry each entry's `kv_bits`; a request
+served from an entry converted at this load or read-back has
+`usage.knurlogic.cache.converted` = `{from_bits, to_bits}` (`from_bits`
+null for 16-bit).
+
+**Splits.** Every rank converts the slots it holds after reading them;
+under tensor that is its head range, and since quantization groups run
+along the head dim, a range converted equals the layer converted and cut.
+The restore's vote then keeps the entries every rank read, converted or
+not; the setting is knurlogic-wide, so every rank makes the same choice,
+and a rank that did not convert does not vote for the entry. A second
+vote at the same collective point says which ranks wrote their part under
+the new key; an entry every rank wrote gets its `entry.json` on every
+rank, and every rank deletes the old directory by name (what a journaled
+`drop_files` does), so no rank keeps half of either. An entry a rank did
+not write stays in memory and keeps its old files. A ring's read-back
+only reads entries restored at its load, so it never converts; a single
+machine's read-back index also lists the other widths' entries and
+converts one when it is read back. Pieces another machine holds are not
+fetched for a conversion.
+
 ## Cost
 
 Per-layer files mean more files (60 layers x entries). A directory per

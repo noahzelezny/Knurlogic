@@ -746,7 +746,28 @@ def knurlogic_doc() -> dict:
                            "what": what, "why": why,
                            "help": knobs.KNOB_HELP[preferences.CROSS_CHIP]},
             "compaction": compaction_document(),
+            "prompt_cache": prompt_cache_document(),
             "file": str(preferences.path())}
+
+
+def prompt_cache_document(env=None) -> dict:
+    """The disk prompt cache's settings (tuning/groups.PROMPT_CACHE_KNOBS),
+    each value and what it does. Knurlogic-wide (tuning/preferences): read
+    at each save, load and read-back, so each is `live`."""
+    from knurlogic.tuning import groups, knobs, preferences
+    env = preferences.prompt_cache_env(env)
+    rows = []
+    for name, (default, values, unit, what, why) in \
+            groups.PROMPT_CACHE_KNOBS.items():
+        v = env.get(name) or default
+        rows.append({
+            "name": name, "running": v, "would_be": default, "value": v,
+            "default": default, "changed": False, "tier": "reach",
+            "what": what, "why": why, "help": knobs.KNOB_HELP.get(name, ""),
+            "values": list(values), "unit": unit, "reach": "live",
+            "reach_why": ("knurlogic-wide: read at every save, load and "
+                          "read-back of the prompt cache on disk")})
+    return {"knobs": rows}
 
 
 def set_knurlogic(body) -> dict:

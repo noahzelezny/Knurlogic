@@ -11,6 +11,10 @@ and the request's text stage puts it in usage:
                                       encoded},
                              checkpoints_stored}
 
+plus, set by the scheduler: `disk` {tokens, read_ms}, `converted`
+{from_bits, to_bits} when the entry was converted from another KV width
+at this load or read-back (convert.py), `diverged`.
+
 with `prompt_tokens_details.cached_tokens` = `used`.
 """
 from __future__ import annotations

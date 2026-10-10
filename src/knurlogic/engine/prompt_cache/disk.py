@@ -43,6 +43,8 @@ Settings (read at use, so live):
                                   space plus what the cache holds, at most
                                   64 GiB)
   KNURLOGIC_PROMPT_CACHE_TTL_H    hours an entry nobody used is kept (24)
+  KNURLOGIC_PROMPT_CACHE_CONVERT  entries of another KV width: down
+                                  (default) / both / off (convert.py)
 
 Ownership: an entry belongs to the client session that made it
 (X-Client-Session; telemetry.md). Its header carries the owner {session,
@@ -915,6 +917,10 @@ def insert(lru, model_key, got: list) -> dict:
                             "file": str(f), "owner": m.get("owner"),
                             "saved_at": m.get("saved_at"),
                             "shared": bool(m.get("shared"))}
+        if m.get("converted"):
+            # read from another KV width's entry and converted
+            # (engine/prompt_cache/convert)
+            out[tuple(toks)]["converted"] = dict(m["converted"])
     if out:
         logger.info("prompt cache: %d entr%s restored from disk (%d tokens, "
                     "%.1fs)", len(out), "y" if len(out) == 1 else "ies",

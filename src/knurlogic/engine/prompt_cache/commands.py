@@ -276,8 +276,15 @@ class PromptCacheCommands:
             from knurlogic.engine.prompt_cache import transfer
             st.prefill_tps = self._prefill_tps
             transfer.fill(st, dirs=[f], prefill_tps=self._prefill_tps)
-        got = st.read([f]) if f.is_dir() and st is not None \
-            else prompt_disk.read(self._disk_key, [f])
+        if "convert" in self._disk_index[best]:
+            # another KV width's entry: converted, written under this
+            # model's key, the old one deleted (prompt_cache/convert)
+            from knurlogic.engine.prompt_cache import convert
+            got = convert.read_back(st, f) if st is not None else []
+        elif f.is_dir() and st is not None:
+            got = st.read([f])
+        else:
+            got = prompt_disk.read(self._disk_key, [f])
         if not got:
             self._disk_index.pop(best, None)    # gone or corrupt: a miss
             return
@@ -285,6 +292,11 @@ class PromptCacheCommands:
         prompt_disk.adopt(self.cache.owners, self.cache.pinned, back,
                           shared=self.cache.shared)
         self._restored.update(back)
+        for t, v in back.items():
+            if "convert" in self._disk_index.get(t, {}):
+                # now under this model's key
+                self._disk_index[t] = {"file": Path(v["file"]),
+                                       "owner": v.get("owner")}
         if self.tensor is not None:
             self.tensor.journal.add("read_back", name=Path(f).name)
 
@@ -337,6 +349,12 @@ class PromptCacheCommands:
                     prompt_disk.root() / prompt_disk.key_id(key))
                 if self._store is not None:
                     self._disk_index.update(self._store.index())
+                    # other KV widths' entries this model may convert at
+                    # their read-back (prompt_cache/convert)
+                    from knurlogic.engine.prompt_cache import convert
+                    self._disk_index.update(convert.index(
+                        self._store,
+                        set(self._disk_index) | set(self._restored)))
             except OSError:
                 logger.exception("prompt cache: indexing the saved entries")
 
@@ -442,3 +460,5 @@ class PromptCacheCommands:
         if d is not None:
             job.disk = {"tokens": min(int(d["tokens"]), used),
                         "read_ms": d["read_ms"]}
+            if d.get("converted"):
+                job.disk["converted"] = dict(d["converted"])

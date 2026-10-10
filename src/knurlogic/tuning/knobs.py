@@ -249,6 +249,14 @@ KNOB_HELP = {
                                       "results, making compaction slower. "
                                       "Clear is faster, but the model is "
                                       "more likely to repeat calls.",
+    "KNURLOGIC_PROMPT_CACHE_CONVERT": "Converting a saved session to the "
+                                      "KV bits the model now runs takes a "
+                                      "fraction of a second, not a re-read "
+                                      "of the prompt. 16 to 8 matches an "
+                                      "8-bit model's own cache up to "
+                                      "quantization noise; 8 to 16 (both) "
+                                      "carries the 8-bit error into a 16-bit "
+                                      "run.",
 }
 
 

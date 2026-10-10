@@ -409,6 +409,7 @@ def row(d: Path, size: int, base: Path) -> dict | None:
             "role": o.get("role"), "run": o.get("run"),
             "tokens": m.get("n_tokens"), "bytes": size,
             "saved_at": m.get("saved_at"), "pinned": bool(m.get("pinned")),
+            "kv_bits": (m.get("key") or {}).get("kv_bits") or 16,
             "file": str(d), "location": str(base)}
 
 
@@ -436,6 +437,9 @@ class Store:
         #: the measured prefill rate (tokens/s), when known: a fetch from a
         #: peer slower than recomputing is skipped (transfer.fill)
         self.prefill_tps = None
+        #: a fresh cache list of the loaded model's slots (make_cache), for
+        #: converting another KV width's entries (convert.py); None: none
+        self.template = None
 
     @classmethod
     def for_host(cls, host) -> Store | None:
@@ -447,9 +451,12 @@ class Store:
         part = part_of(host)
         if part is None:
             return None
+        from mlx_lm.models.cache import make_prompt_cache
         base, _ = location.root_for(host.path)
-        return cls(base, host_shard_key(host), part,
-                   disk.draft_of() if part.extras else None)
+        st = cls(base, host_shard_key(host), part,
+                 disk.draft_of() if part.extras else None)
+        st.template = lambda: make_prompt_cache(host.model)
+        return st
 
     @property
     def location(self) -> str:
@@ -974,6 +981,7 @@ def restore(max_n: int, store: Store | None, *, max_bytes=None, link=None,
     same point, whatever it holds; a ring's ranks do not sweep here, rank
     0's saves do). Returns disk.read's shape for disk.insert. Never
     raises."""
+    from . import convert
     got = []
     try:
         if store is not None and disk.enabled():
@@ -983,11 +991,23 @@ def restore(max_n: int, store: Store | None, *, max_bytes=None, link=None,
             # read (no fetcher, or every file here: nothing is fetched)
             from . import transfer
             transfer.fill(store, max_n, prefill_tps=store.prefill_tps)
-            got = store.read(store.candidates(
-                max_n, max_bytes if link is None else None))
+            mb = max_bytes if link is None else None
+            mine = store.candidates(max_n, mb)
+            got = store.read(mine)
+            if len(mine) < max_n:
+                # fewer than wanted: entries of another KV width, converted
+                # (convert.py); written under this key on a single machine
+                # now, on a ring after the vote
+                more = convert.read(store, convert.candidates(
+                    store, max_n - len(mine), mb,
+                    skip={Path(d).name for d in mine}))
+                if link is None:
+                    more = convert.persist(store, more)
+                got = more + got
     except Exception:  # a restore that fails is a miss, never a failed load (logged)
         logger.exception("prompt cache: reading the saved entries failed")
         got = []
     if link is not None:
         got = agree(link, got)
+        got = convert.persist_ring(link, store, got)
     return got

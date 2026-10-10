@@ -16,6 +16,7 @@ restarted.
 |---|---|---|
 | **Knurlogic** -> Presets | the preset every model launches with, each setting it sets, and per-chip rounding | every machine |
 | **Knurlogic** -> Compaction | [compaction.md](compaction.md) | every model on every machine, from the next request |
+| **Knurlogic** -> Prompt cache | saving to disk, its budget, how long unused entries are kept, and converting entries saved at another KV width ([prompt-cache.md](prompt-cache.md)) | every model on every machine, at the next save, load or read-back |
 | **Cluster** | each machine: what it is, its memory, its wired limit and its knurlogic allowance | that machine |
 | **Models** | each base model's own launch settings, and a running one's live values | that model |
 
@@ -120,7 +121,7 @@ model server's `/status.json` has its own numbers.
 
 | what | file |
 |---|---|
-| the default preset, compaction, per-chip rounding | `~/.config/knurlogic/settings.json` (`XDG_CONFIG_HOME` honoured) |
+| the default preset, compaction, the prompt cache's settings, per-chip rounding | `~/.config/knurlogic/settings.json` (`XDG_CONFIG_HOME` honoured) |
 | the allowance | `~/.config/knurlogic/allowance.json` |
 | per-model launch settings | chosen in Settings -> Models, applied when that model loads |
 
