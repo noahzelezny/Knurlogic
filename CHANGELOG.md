@@ -70,6 +70,12 @@
   qwen4_exp it measured ~9% slower, so that architecture keeps the plain
   path unless `KNURLOGIC_GDN_COMPILE=on`; `off` turns it off everywhere.
 
+### Page
+
+* A launch card whose server is gone -- unloaded or exited before it was
+  ready -- no longer reads STARTING forever: a card the page picked up from
+  another client's load leaves, and one launched from the page says why.
+
 ## 0.1.5
 
 Prompt cache management, a reorganized library with user and builder
