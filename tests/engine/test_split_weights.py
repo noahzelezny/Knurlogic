@@ -30,14 +30,15 @@ def shard(tmp_path):
 class Peer:
     """A fake peer page: serves byte ranges of the shard by file name."""
 
-    def __init__(self, root, fail_after=None):
-        self.root, self.calls, self.fail_after = root, [], fail_after
+    def __init__(self, root, fail_at=None):
+        self.root, self.calls, self.fail_at = root, [], fail_at
 
     def __call__(self, file, offset, length, into):
         assert "/" not in file
-        if self.fail_after is not None and len(self.calls) >= self.fail_after:
+        if self.fail_at is not None and offset >= self.fail_at:
             raise ConnectionError("the peer went away")
         self.calls.append((file, offset, length))
+        assert length <= W.PIECE
         with open(self.root / file, "rb") as f:
             f.seek(offset)
             into[:] = f.read(length)
@@ -95,11 +96,12 @@ def test_a_tensor_cut_is_rebuilt_from_the_fetched_source(shard, plan):
 
 
 def test_a_failing_peer_leaves_the_rest_to_the_mount(shard, plan):
-    peer = Peer(shard.parent, fail_after=2)
+    last = max(W.header(str(shard)).values())    # the shard's last tensor
+    peer = Peer(shard.parent, fail_at=last)
     W.CURRENT["plan"] = W.ReadPlan(read=peer)
     m = lazy_model(shard)
     out = W.fill(m, peer)
-    assert out["failed"] and out["fetched"] > 0
+    assert out["failed"] and out["left"] > 0
     mx.eval(m.parameters())                  # the mount reads the rest
     ref = mx.load(str(shard))
     for k, v in flat(m).items():
@@ -149,3 +151,16 @@ def test_the_plan_comes_from_the_environment():
     own = W.plan_from_env({"KNURLOGIC_WEIGHTS": '{"turn": 1, "ordered": true}'},
                           lambda p: 1 / 0)
     assert own.read is None and own.turn == 1
+
+
+def test_a_large_tensor_comes_in_parallel_pieces(shard, plan, monkeypatch):
+    monkeypatch.setattr(W, "PIECE", 64)          # bytes: many pieces each
+    monkeypatch.setattr(W, "BUDGET", 256)
+    peer = Peer(shard.parent)
+    W.CURRENT["plan"] = W.ReadPlan(read=peer)
+    m = lazy_model(shard)
+    out = W.fill(m, peer)
+    assert out["left"] == 0 and len(peer.calls) > len(flat(m))
+    ref = mx.load(str(shard))
+    for k, v in flat(m).items():
+        assert mx.array_equal(v, ref[k]).item(), k

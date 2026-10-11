@@ -221,3 +221,14 @@ def test_the_marker_phase_stays_one_the_watcher_knows():
     from knurlogic.cluster import jobs as J
     assert J.phase_of("j", [{"rank": 0}], read=lambda j, r: {
         "phase": "loading", "turn": "waiting"}) == "loading"
+
+
+def test_a_turn_change_is_written_at_once(tmp_path, monkeypatch):
+    from knurlogic.cluster import jobs as J
+    monkeypatch.setattr(J, "marker_path", lambda job, rank: tmp_path / "m.json")
+    m = J.Marker("j", 1)
+    m.set(phase="loading")
+    m.set(turn="waiting")
+    m.set(turn="reading")
+    import json
+    assert json.loads((tmp_path / "m.json").read_text())["turn"] == "reading"

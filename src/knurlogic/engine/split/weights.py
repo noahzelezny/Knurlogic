@@ -159,88 +159,156 @@ def _put(c, k, v) -> None:
         c[k] = v
 
 
+#: concurrent range requests: the holder's array reads cold at ~0.5 GB/s
+#: one request at a time and ~2 GB/s with 8 in flight (measured over the
+#: Thunderbolt 4 link, 64 MiB pieces)
+PARALLEL = 8
+#: a tensor is fetched in pieces of at most this
+PIECE = 64 << 20
+#: fetched bytes waiting to be built, beyond the tensor being built: the
+#: memory bound of a fill (a larger tensor still goes, alone)
+BUDGET = 1 << 30
+
+
+class _Fetch:
+    """The tensors of a fill, fetched ahead in order by PARALLEL workers,
+    PIECE at a time, at most BUDGET bytes waiting; `take(i)` gives tensor
+    i's buffer once all its pieces are in (or raises the first error)."""
+
+    def __init__(self, items: list, read: Callable):
+        self.items, self.read = items, read          # [(file, off, n)]
+        self.bufs: dict = {}
+        self.left: dict = {}
+        self.cv = threading.Condition()
+        self.held = 0
+        self.err: BaseException | None = None
+        self.closed = False
+        self.tasks: list = []
+        self.next = 0                    # the next tensor to schedule
+        self.ts = [threading.Thread(target=self._work, daemon=True)
+                   for _ in range(min(PARALLEL, max(len(items), 1)))]
+        for t in self.ts:
+            t.start()
+
+    def _schedule(self) -> None:
+        """(under cv) give buffers to tensors while the budget allows."""
+        while self.next < len(self.items) and (
+                self.held == 0 or
+                self.held + self.items[self.next][2] <= BUDGET):
+            i = self.next
+            f, off, n = self.items[i]
+            self.bufs[i] = bytearray(n)
+            self.held += n
+            ps = [(i, o, min(PIECE, n - o)) for o in range(0, n, PIECE)] \
+                or [(i, 0, 0)]
+            self.left[i] = len(ps)
+            self.tasks.extend(ps)
+            self.next += 1
+        self.cv.notify_all()
+
+    def _work(self) -> None:
+        while True:
+            with self.cv:
+                while not self.tasks and not self.closed:
+                    if self.err is None:
+                        self._schedule()
+                    if self.tasks:
+                        break
+                    self.cv.wait()
+                if self.closed:
+                    return
+                i, o, n = self.tasks.pop(0)
+                buf = self.bufs[i]
+            try:
+                if n:
+                    f, off, _ = self.items[i]
+                    self.read(f, off + o, n, memoryview(buf)[o:o + n])
+            except BaseException as e:  # the mount reads what the peer did not
+                with self.cv:
+                    self.err = self.err or e
+                    self.tasks.clear()
+                    self.cv.notify_all()
+                continue
+            with self.cv:
+                self.left[i] -= 1
+                self.cv.notify_all()
+
+    def take(self, i: int) -> bytearray:
+        with self.cv:
+            while self.err is None and self.left.get(i, 1) > 0:
+                self._schedule()
+                self.cv.wait()
+            if self.err is not None:
+                raise self.err
+            buf = self.bufs.pop(i)
+            self.held -= len(buf)
+            self.left.pop(i)
+            self._schedule()
+            return buf
+
+    def close(self) -> None:
+        with self.cv:
+            self.closed = True
+            self.tasks.clear()
+            self.cv.notify_all()
+        for t in self.ts:
+            t.join()
+
+
 def fill(model, read: Callable, source: str = "", stop=None) -> dict:
-    """Put fetched arrays in place of the lazy ones `model` holds, one
-    source tensor in flight (and the next being fetched). -> {fetched,
-    left, failed}: bytes fetched, arrays left lazy (read from the mount)."""
+    """Put fetched arrays in place of the lazy ones `model` holds, in the
+    model's order, fetched ahead in parallel pieces under BUDGET. ->
+    {fetched, left, failed}: bytes fetched, arrays not from the peer."""
     import mlx.core as mx
     import numpy as np
     heads: dict = {}
-    todo, done = [], {}
-    for c, k, a in _slots(model):
-        o = _origin(a)
-        todo.append((c, k, a, o))
+    todo = [(c, k, a, _origin(a)) for c, k, a in _slots(model)]
     left = sum(1 for *_, o in todo if o is None)
-
-    def fetch(o):
-        src, path, name, _ = o
+    order: dict = {}                     # id(array) -> index among uniques
+    uniq: list = []
+    for c, k, a, o in todo:
+        if o is not None and id(a) not in order:
+            order[id(a)] = len(uniq)
+            uniq.append((a, o))
+    items = []
+    for a, (src, path, name, _) in uniq:
         if path not in heads:
             heads[path] = header(path)
-        off = heads[path][name]
-        buf = bytearray(src.nbytes)
-        read(Path(path).name, off, len(buf), memoryview(buf))
-        return buf
-
-    jobs = [(c, k, a, o) for c, k, a, o in todo if o is not None]
+        items.append((Path(path).name, heads[path][name], src.nbytes))
+    built: dict = {}
     got, failed, last = 0, "", 0
-    nxt: dict = {}
-
-    def ahead(i):
-        if i >= len(jobs) or id(jobs[i][2]) in done:
-            return
-        box: dict = {}
-
-        def run():
+    f = _Fetch(items, read)
+    try:
+        for i, (a, (src, _, _, fn)) in enumerate(uniq):
+            if stop is not None and stop():
+                break
             try:
-                box["buf"] = fetch(jobs[i][3])
-            except Exception as e:  # the mount reads what the peer did not
-                box["err"] = e
-        t = threading.Thread(target=run, daemon=True)
-        t.start()
-        nxt[i] = (t, box)
-    ahead(0)
-    for i, (c, k, a, o) in enumerate(jobs):
-        if id(a) in done:
-            _put(c, k, done[id(a)])
-            continue
-        if failed:
-            continue
-        t, box = nxt.pop(i, (None, None))
-        if t is None:
-            ahead(i)
-            t, box = nxt.pop(i)
-        t.join()
-        if stop is not None and stop():
-            break
-        if "err" in box:
-            failed = f"{type(box['err']).__name__}: {box['err']}"
-            logger.warning("weights: fetching from %s failed (%s); the rest "
-                           "is read from the mount", source or "the peer",
-                           failed)
-            continue
-        j = i + 1
-        while j < len(jobs) and id(jobs[j][2]) in done:
-            j += 1
-        ahead(j)
-        src, _, _, fn = o
-        buf = box.pop("buf")
-        arr = mx.array(np.frombuffer(buf, dtype=np.uint8)).view(
-            src.dtype).reshape(src.shape)
-        del buf
-        if fn is not None:
-            arr = fn(arr)
-        mx.eval(arr)
-        done[id(a)] = arr
-        _put(c, k, arr)
-        got += src.nbytes
-        if got - last >= GIB:
-            last = got
-            progress(fetched_bytes=got, reading_from=source)
-    for t, _ in nxt.values():
-        t.join()
+                buf = f.take(i)
+            except BaseException as e:
+                failed = f"{type(e).__name__}: {e}"
+                logger.warning("weights: fetching from %s failed (%s); the "
+                               "rest is read from the mount",
+                               source or "the peer", failed)
+                break
+            arr = mx.array(np.frombuffer(buf, dtype=np.uint8)).view(
+                src.dtype).reshape(src.shape)
+            del buf
+            if fn is not None:
+                arr = fn(arr)
+            mx.eval(arr)
+            built[id(a)] = arr
+            got += src.nbytes
+            if got - last >= GIB:
+                last = got
+                progress(fetched_bytes=got, reading_from=source)
+    finally:
+        f.close()
+    for c, k, a, _ in todo:
+        if id(a) in built:
+            _put(c, k, built[id(a)])
     progress(fetched_bytes=got, reading_from="")
-    return {"fetched": got, "left": left + (len(jobs) - len(done) if failed
-                                            else 0), "failed": failed}
+    return {"fetched": got, "left": left + len(uniq) - len(built),
+            "failed": failed}
 
 
 def read_share(model, evaluate: Callable) -> None:
