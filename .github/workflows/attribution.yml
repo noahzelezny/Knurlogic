@@ -1,0 +1,59 @@
+name: attribution
+
+# The server-side copy of scripts/git-hooks/pre-push's history checks. Local
+# hooks only guard a clone that enabled them; this runs on every push and pull
+# request, whoever made it (another clone, a cloud session, a web merge,
+# --no-verify), and fails on any commit:
+#   - authored or committed by an AI identity, or whose message carries an AI
+#     co-author trailer or names an AI model as author or reviewer
+#     (scripts/git-hooks/ai_identity.sh);
+#   - authored or committed with a personal email (only no-reply addresses);
+#   - adding a machine-specific string or a personal email address
+#     (scripts/check_machine_specifics.py).
+# It is a required status check on main, which also refuses force pushes.
+on:
+  push:
+  pull_request:
+
+jobs:
+  attribution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: no AI attribution, personal emails or machine-specific strings
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          . scripts/git-hooks/ai_identity.sh
+          from="${BASE:-$BEFORE}"
+          if [ -z "$from" ] || [ "$from" = 0000000000000000000000000000000000000000 ] \
+             || ! git cat-file -e "$from" 2>/dev/null; then
+            # a new branch: what it adds over main (history already on
+            # main was checked when it got there)
+            # (a branch at a commit already on main adds nothing: empty range)
+            from=$(git merge-base "$HEAD" origin/main 2>/dev/null || true)
+          fi
+          if [ -z "$from" ]; then
+            range="$HEAD"            # no common history with main: check all of it
+          else
+            range="$from..$HEAD"
+          fi
+          bad=0
+          who=$(git log --format='%h %an <%ae> / %cn <%ce>' "$range" | grep -iE "$AI_IDENT" || true)
+          if [ -n "$who" ]; then echo "AI identity in $range:"; echo "$who" | head -20; bad=1; fi
+          msg=$(git log --format='%h %s%n%b' "$range" | grep -iE "$AI_NAMED" || true)
+          if [ -n "$msg" ]; then echo "AI attribution in messages of $range:"; echo "$msg" | head -20; bad=1; fi
+          mail=$(git log --format='%h %ae %ce' "$range" \
+            | awk '{for(i=2;i<=3;i++) if ($i !~ /(^no-?reply@|@users\.noreply\.github\.com$)/) {print; break}}')
+          if [ -n "$mail" ]; then echo "personal email as author or committer in $range:"; echo "$mail" | head -20; bad=1; fi
+          if [ "$range" = "$HEAD" ]; then
+            python3 scripts/check_machine_specifics.py --tree || bad=1
+          else
+            python3 scripts/check_machine_specifics.py --range "$range" || bad=1
+          fi
+          exit $bad
