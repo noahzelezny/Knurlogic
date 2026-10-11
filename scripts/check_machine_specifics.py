@@ -45,6 +45,8 @@ EMAIL = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Z
 EXAMPLE_EMAIL = re.compile(
     r"@(example\.(com|org|net)|[a-z0-9.-]*\.(example|test|invalid))$"
     r"|^no-?reply@|@users\.noreply\.github\.com$", re.I)
+#: the project's published contact (README, NOTICE): public on purpose
+PUBLIC_EMAILS = {"hello@thedrainflorist.com"}
 
 
 def hits(line: str) -> list[str]:
@@ -54,7 +56,8 @@ def hits(line: str) -> list[str]:
     out += [m.group(0) for m in VOLUME.finditer(line)
             if m.group(1).strip() not in EXAMPLE_VOLUMES]
     out += [m.group(0) for m in EMAIL.finditer(line)
-            if not EXAMPLE_EMAIL.search(m.group(0))]
+            if not EXAMPLE_EMAIL.search(m.group(0))
+            and m.group(0).lower() not in PUBLIC_EMAILS]
     return out
 
 

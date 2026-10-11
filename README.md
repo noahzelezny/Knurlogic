@@ -165,6 +165,7 @@ CHANGELOG.md.
 AGPL-3.0-only (LICENSE). Releases up to 0.1.6 were Apache-2.0.
 
 A commercial license is available for use the AGPL does not allow, such as
-a closed product or a hosted service that keeps its changes private.
+a closed product or a hosted service that keeps its changes private:
+hello@thedrainflorist.com.
 
 Vendored third-party code keeps its own license and is listed in NOTICE.
