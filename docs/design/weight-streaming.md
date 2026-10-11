@@ -107,11 +107,29 @@ that evaluation:
    every array after a fetch failed -- is read from the mount by the
    normal evaluation. Nothing breaks without the peer; it is only slower.
 
-Memory is bounded: at most one source tensor's bytes and its built array
-are in flight (two while the next tensor is fetched as the current one is
-built), on top of what the rank holds anyway. A tensor split rank fetches
-a whole source tensor to keep its slice -- the same bytes the mount read
-moved before.
+**How it is fetched.** The array behind the serving page reads cold at
+~0.5 GB/s one request at a time and ~2 GB/s with eight 64 MiB requests in
+flight (measured over the Thunderbolt 4 link; 4.5 GB/s from the page
+cache). So a fill sorts the tensors into file order, merges neighbours in
+one file into one request (a layer's scales and norms go together), and
+fetches 64 MiB pieces, 8 at a time (`PARALLEL`, `PIECE`).
+
+Memory is bounded: at most `BUDGET` (4 GiB) of fetched bytes wait to be
+built, on top of what the rank holds anyway (a tensor larger than that
+goes alone). 1 GiB was too little: a 397B's 0.7 GiB expert tensors then
+went one at a time and a cold fetch fell to 0.46 GiB/s. A tensor split
+rank fetches a whole source tensor to keep its slice -- the same bytes the
+mount read moved before.
+
+**The head and the tower.** The drafting head and the vision tower are
+bound after the weights, by family code that evaluates what it loads.
+Each family hands what it gathered to `weights.fetch_now` first, so
+those come from the peer too (the 397B's tower took 149 s of scattered
+SMB reads, its head 129 s); `fill_bound` catches anything left.
+
+**A fetch never fails a load.** Any error while fetching (the peer gone,
+an object the walk cannot read) is logged and leaves the arrays lazy;
+the mount reads them.
 
 Each fetched GiB is written to the rank's marker (`reading_from`,
 `fetched_bytes`), and the share's percentage rises as before (the page
@@ -137,10 +155,10 @@ at once, as before.
 The wait is a rendezvous over the bell -- the plain TCP channel every
 rank already holds to rank 0 (`engine/split/link.Link.align`) -- not a
 collective: nothing spins on a Thunderbolt queue or the GPU while a rank
-waits half an hour. Turn-1 ranks align *before* reading, turn-0 ranks
-*after*; each rank aligns exactly once, so they meet when the last turn-0
-rank is done. While a turn-1 rank waits, the serving machine's disk and
-page cache work only for the remote ranks.
+waits several minutes. Turn-1 ranks align *before* reading; turn-0 ranks
+align once their share, head and tower are all in (`let_next_go`, after
+binding -- not after the share alone, or the holder's own read competes
+with the remote rank's last fetches). Each rank aligns exactly once.
 
 No overlap: the holder's disk is the shared bottleneck (it reads for the
 peer and for itself), so reading in turn costs nothing against reading at
@@ -172,3 +190,19 @@ its memory flat on purpose. The Load panel's per-machine line says
   (the mount counts): the headers and the code it runs come from there.
   A machine with no copy at all is a separate change.
 - One-Mac loads are untouched.
+
+## Measured (2026-10-11, M4 rank fetching from the M3 over Thunderbolt 4)
+
+Before: the M4 read its share over SMB cold at 0.18-0.33 GB/s.
+
+| model, split | M4 share | fetched over the link | rate |
+|---|---|---|---|
+| 35B 8-bit, pipeline (first build: one request at a time) | 22.5 GiB | 21.0 GiB | 0.34 GiB/s |
+| 35B 8-bit, tensor (warm) | 19.2 GiB held | 34.3 GiB | 4.2 GiB/s |
+| 397B VQ-2.2bpw, pipeline, cold | 59.5 GiB | 53.1 GiB in 27 s | 2.0 GiB/s |
+| 397B VQ-3.1bpw, pipeline, cold | 81.7 GiB | 75.3 GiB in 60 s | 1.25 GiB/s |
+| 397B VQ-3.5bpw, pipeline | 90.9 GiB | 84.4 GiB in 173 s | 0.49 GiB/s |
+
+What is left to the mount is ~70 small arrays (VQ row tables, 0.01 GiB
+each). Open: why the 3.5bpw share fetches at a quarter of the 2.2bpw's
+rate; the M4's free memory falls to ~25 GiB during it.

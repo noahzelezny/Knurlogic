@@ -230,6 +230,7 @@ class ModelHost:
                                 tv - tb, time.monotonic() - tv)
                 weights.fill_bound([binding.DRAFT.get("head"),
                                     state.VISION.get("serve")])
+                weights.let_next_go()
                 t3 = time.monotonic()
             # each step's time, so a slow load says which step was slow
             # (the read itself, the lock, or vision and the drafting head)

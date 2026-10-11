@@ -131,15 +131,19 @@ def test_the_turn_is_kept_over_the_bell(turn, want, monkeypatch, plan):
         read=(lambda *a: None) if turn == 0 else None, turn=turn,
         ordered=True))
     W.read_share(object(), lambda m: log.append("eval"))
+    W.let_next_go()                          # after the head and the tower
     assert log == want
     if turn == 1:
         assert marks[0] == {"turn": "waiting"}
 
 
-def test_no_order_no_waiting(plan):
+@pytest.mark.parametrize("turn", [0, 1])
+def test_no_order_no_waiting(plan, turn):
     log = []
-    W.CURRENT.update(link=Bell(log), plan=W.ReadPlan(turn=1, ordered=False))
+    W.CURRENT.update(link=Bell(log), plan=W.ReadPlan(turn=turn,
+                                                     ordered=False))
     W.read_share(object(), lambda m: log.append("eval"))
+    W.let_next_go()
     assert log == ["eval"]
 
 

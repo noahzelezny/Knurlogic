@@ -399,7 +399,8 @@ def fill_bound(roots: list) -> None:
 
 def read_share(model, evaluate: Callable) -> None:
     """The rank's read: wait its turn, fill from the peer, evaluate the
-    rest, let the next turn go. Without a plan: evaluate(model)."""
+    rest (`let_next_go` ends a turn-0 rank's turn once its head and tower
+    are in too). Without a plan: evaluate(model)."""
     plan = CURRENT["plan"]
     if plan is None:
         evaluate(model)
@@ -429,7 +430,15 @@ def read_share(model, evaluate: Callable) -> None:
         evaluate(model)
     finally:
         forget()
-    if plan.ordered and plan.turn == 0 and link is not None:
+
+
+def let_next_go() -> None:
+    """A turn-0 rank has its share, its head and its tower in: the ranks
+    waiting their turn read now (called once the load is done, so their
+    reads never compete with this rank's last fetches)."""
+    plan, link = CURRENT["plan"], CURRENT["link"]
+    if plan is not None and plan.ordered and plan.turn == 0 \
+            and link is not None:
         link.align()
 
 
