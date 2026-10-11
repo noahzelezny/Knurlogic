@@ -1,7 +1,23 @@
 #!/bin/sh
-# Refuse commits that add machine-specific strings (paths, machine names, IPs).
-# The scanner and its patterns are per-user and live outside the repo; when the
-# scanner is not installed this hook does nothing.
+# 1. Refuse a commit authored or committed as an AI agent, or as anyone but
+#    this repo's configured user.email: an agent that sets its own author
+#    (GIT_AUTHOR_NAME/EMAIL) is stopped here, not found after a push.
+# 2. Refuse commits that add machine-specific strings (paths, machine names,
+#    IPs). That scanner and its patterns are per-user and live outside the
+#    repo; when it is not installed this step does nothing.
+. "$(dirname "$0")/ai_identity.sh"
+me=$(git config user.email)
+for who in AUTHOR COMMITTER; do
+    id=$(git var GIT_${who}_IDENT | sed 's/ [0-9]* [-+][0-9]*$//')
+    if printf '%s\n' "$id" | grep -qiE "$AI_IDENT"; then
+        echo "pre-commit: the commit's $who is an AI identity ($id); not committing" >&2
+        exit 1
+    fi
+    if [ -n "$me" ] && ! printf '%s\n' "$id" | grep -qiF "<$me>"; then
+        echo "pre-commit: the commit's $who ($id) is not this repo's user.email ($me); not committing" >&2
+        exit 1
+    fi
+done
 if command -v no-machine-names >/dev/null 2>&1; then
     no-machine-names --staged || exit 1
 fi
