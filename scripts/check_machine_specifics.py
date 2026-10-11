@@ -41,7 +41,10 @@ HOME = re.compile("/" + "Users" + r"/([A-Za-z0-9._-]+)/")
 VOLUME = re.compile("/" + "Volumes" + r"/([^/\"'`)\n]+)")
 #: an email address; allowed: the RFC 2606 example domains and no-reply
 #: addresses (a bot's or GitHub's), never a person's own
-EMAIL = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[a-z]{2,12}(?![A-Za-z0-9])")
+EMAIL = re.compile(
+    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9-]+"
+    r"(\.[A-Za-z0-9-]+)*\.(com|org|net|io|dev|ai|app|co|me|edu|gov|us|uk"
+    r"|ca|de|fr|nl|eu|info|biz|xyz|tech|email|mail)(?![A-Za-z0-9])", re.I)
 EXAMPLE_EMAIL = re.compile(
     r"@(example\.(com|org|net)|[a-z0-9.-]*\.(example|test|invalid))$"
     r"|^no-?reply@|@users\.noreply\.github\.com$", re.I)
