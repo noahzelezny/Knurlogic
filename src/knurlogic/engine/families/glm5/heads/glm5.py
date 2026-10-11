@@ -1,10 +1,12 @@
 """GLM-5.3 (glm5_next) MTP drafting head.
 
-Vendored from vqlab `src/vqlab/mtp_head_glm5.py` @ 9eff3f0. Copied rather
-than imported; fixes go upstream first, then re-vendor. Deviation from that
-source: none in the module body; only this header and the `vqlab_mtp`
-metadata key (kept as-is, so sidecars built by `vqlab mtp-pack` load here
-unchanged).
+Vendored from vqlab `src/vqlab/mtp_head_glm5.py` @ c492d1d (since moved to
+`src/vqlab/mtp/mtp_head_glm5.py`, unchanged). Copied rather than imported;
+fixes go upstream first, then re-vendor. Deviations from that source: the
+MoE half is built with `Glm5NextMoE`, not `DeepseekV32MoE`, so the head
+carries the trunk's SwiGLU clamp and float32 router (glm5_next edits 1-2);
+the docstrings and comments are rewritten. The `vqlab_mtp` metadata key is
+kept as-is, so sidecars built by `vqlab mtp-pack` load here unchanged.
 
 This module only LOADS the packed q6 sidecar (`mtp-head-q6.safetensors`,
 889 tensors). The head is NOT a trunk `Glm5NextDecoderLayer`: it has no
