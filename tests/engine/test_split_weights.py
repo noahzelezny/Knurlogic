@@ -229,3 +229,21 @@ def test_a_failing_fill_leaves_the_share_to_the_mount(monkeypatch, plan):
     W.CURRENT.update(plan=W.ReadPlan(read=lambda *a: None))
     W.read_share(object(), lambda m: log.append("eval"))
     assert log == ["eval"]
+
+
+def test_a_family_takes_its_tensors_from_the_peer_before_using_them(
+        shard, plan):
+    peer = Peer(shard.parent)
+    W.CURRENT["plan"] = W.ReadPlan(read=peer)
+    with W.recording():
+        arrays = mx.load(str(shard))
+        got = W.fetch_now({k: arrays[k] for k in ("norm.weight",
+                                                  "layers.1.weight")})
+    assert peer.calls
+    for k, v in got.items():
+        assert mx.array_equal(v, mx.load(str(shard))[k]).item()
+
+
+def test_without_a_plan_a_family_reads_as_before(shard, plan):
+    d = {"w": mx.load(str(shard))["norm.weight"]}
+    assert W.fetch_now(d) is d

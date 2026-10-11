@@ -151,6 +151,9 @@ class QwenFamily:
                 weights[_tower_key(k)] = arrays[k]
                 n += 1
             del arrays
+        # a split rank fetching its share takes these from the peer
+        from knurlogic.engine.split.weights import fetch_now
+        weights = fetch_now(weights)
         tower = VisionModel(self.vision_config)
         weights = tower.sanitize(weights)
         dtype = next(iter(weights.values())).dtype

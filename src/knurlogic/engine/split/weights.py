@@ -180,8 +180,10 @@ PARALLEL = 8
 #: a tensor is fetched in pieces of at most this
 PIECE = 64 << 20
 #: fetched bytes waiting to be built, beyond the tensor being built: the
-#: memory bound of a fill (a larger tensor still goes, alone)
-BUDGET = 1 << 30
+#: memory bound of a fill (a larger tensor still goes, alone). Several of a
+#: 397B's 0.7 GiB expert tensors: at 1 GiB one went at a time and a cold
+#: fetch fell from 2.0 to 0.46 GiB/s
+BUDGET = 4 << 30
 
 
 class _Fetch:
@@ -352,6 +354,27 @@ def fill(model, read: Callable, source: str = "", stop=None) -> dict:
     progress(fetched_bytes=got, reading_from="")
     return {"fetched": got, "left": left + len(uniq) - len(built),
             "failed": failed, "seconds": time.monotonic() - t0}
+
+
+def fetch_now(arrays: dict) -> dict:
+    """`arrays` (a family's tensors, gathered from mx.load under
+    `recording`) with each one fetched from the peer now -- before the
+    family's own code evaluates them, which would read them one by one
+    from the mount (a vision tower: 333 scattered tensors, 149 s over
+    SMB). Without a plan, or on any failure, `arrays` as given."""
+    plan = CURRENT["plan"]
+    if plan is None or plan.read is None or not _SOURCES:
+        return arrays
+    try:
+        out = dict(arrays)
+        got = fill(out, plan.read, plan.source)
+        logger.info("weights: %d tensors, %.2f GiB from %s over the link in "
+                    "%.1fs", len(out), got["fetched"] / GIB,
+                    plan.source or "the peer", got["seconds"])
+        return out
+    except Exception:  # only slower: the mount reads them
+        logger.exception("weights: not fetched; read from the mount")
+        return arrays
 
 
 def fill_bound(roots: list) -> None:

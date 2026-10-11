@@ -93,7 +93,9 @@ def _load_filtered(model_path: Path, prefixes: Tuple[str, ...]) -> Dict[str, mx.
             for key, v in weights.items():
                 if key.startswith(prefixes):
                     out[key] = v
-    return out
+    # a split rank fetching its share takes these from the peer
+    from knurlogic.engine.split.weights import fetch_now
+    return fetch_now(out)
 
 
 class Gemma4Vision:

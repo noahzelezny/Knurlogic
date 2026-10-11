@@ -126,6 +126,9 @@ class Glm5VisionFamily:
                     weights[k[len(_TOWER_PREFIX):]] = v
         if not weights:
             return 0
+        # a split rank fetching its share takes these from the peer
+        from knurlogic.engine.split.weights import fetch_now
+        weights = fetch_now(weights)
         weights = tower.sanitize(weights)
         from knurlogic.engine.vision.quant import artifact_quantization, quantize_like
         quantize_like(tower, weights, artifact_quantization(model_path))
