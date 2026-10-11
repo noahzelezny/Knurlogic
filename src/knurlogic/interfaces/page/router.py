@@ -333,8 +333,13 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
     if base is None:
         # launched a moment ago? ask the peers once more before refusing
         refresh_targets()
-        table = routable(fetch)
+        table = routable(fetch, ttl=0)
         base = table.get(model) if isinstance(model, str) else None
+    if base is None and isinstance(model, str) and fetch is None:
+        # a split job still starting: its rank 0 serves (and queues) only
+        # once every rank has loaded, so until then nothing here answers
+        # for the model. Wait for it, as a one-Mac server would queue.
+        base, table = _await_launch(handler, model, table)
     if base is None:
         # say it in the shape either client reads as an error
         send_json(handler, 404, {
@@ -345,6 +350,52 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
             "models": sorted(table)})
         return
     stream(handler, peers.upstream(base, path), body, base=base)
+
+
+#: How long a request waits for a split job still joining or loading; and,
+#: once its ranks are loaded, for its rank 0 to answer (seconds)
+LAUNCH_WAIT_S = 1800.0
+READY_GRACE_S = 60.0
+
+
+def _starting_jobs() -> tuple:
+    """(any job joining or loading, any job loaded) among the split jobs
+    with a rank here."""
+    try:
+        from knurlogic.cluster import launch
+        js = launch.jobs_document()
+    except (OSError, ValueError, KeyError, AttributeError, TypeError):
+        return False, False
+    ph = {j.get("phase") for j in js if isinstance(j, dict)}
+    return bool(ph & {"joining", "loading"}), "ready" in ph
+
+
+def _await_launch(handler, model: str, table: dict | None = None,
+                  poll: float = 1.0) -> tuple:
+    """(base, table) once `model` is served, or (None, table) when no
+    split job here is starting, the wait runs out, or the client hangs
+    up. A job counted ready gets READY_GRACE_S for its server to answer."""
+    from knurlogic.interfaces.http.server import _hung_up
+    start = time.time()
+    ready_since = None
+    table = dict(table or {})
+    while time.time() - start < LAUNCH_WAIT_S:
+        starting, loaded = _starting_jobs()
+        if not starting:
+            if not loaded:
+                break
+            ready_since = ready_since or time.time()
+            if time.time() - ready_since > READY_GRACE_S:
+                break
+        if _hung_up(handler.connection):
+            break
+        time.sleep(poll)
+        refresh_targets()
+        table = routable(ttl=0)
+        base = table.get(model)
+        if base:
+            return base, table
+    return None, table
 
 
 def local_models(fetch=None, docs=None) -> dict:
