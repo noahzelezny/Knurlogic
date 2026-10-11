@@ -194,6 +194,17 @@ From the ranks' logs. Before: the M4 read its share over SMB cold at
 | 397B VQ-2.6bpw, pipeline | 65.3 GiB in 33.0 s | -- | 1.98 GiB/s |
 | 35B 8-bit, tensor | 34.3 GiB in 24.9 s | 0 | 1.38 GiB/s |
 | 35B VQ-4.6bpw, pipeline, warm | 11.1 GiB in 3.0 s | 0 | 3.7 GiB/s |
+| DeepSeek-V4-Flash VQ-3.2bpw, pipeline | 62.9 GiB in 45.3 s | 189 arrays, 0.34 GiB | 1.39 GiB/s |
+| GLM-5.3-Flash VQ-2.7bpw, pipeline | 62.5 GiB in 43.4 s | 0 | 1.44 GiB/s |
+| Qwen3.8-Flash-Next VQ-4.4bpw, tensor | 80.2 GiB in 56.6 s | 0 | 1.42 GiB/s |
+
+Read from the files: on DeepSeek-V4 the attention compressor's
+`wkv_gate`, which its loader builds from file tensors rather than taking
+one as-is, so no file range gives it. 0.34 GiB, but scattered small reads
+over SMB: about 19 s on a cold load, 0.0 s once that Mac has them cached.
+On the 397B, its VQ runtime's row tables. Gemma 4 does not split yet (both
+splits refuse it), so it never streams; its tower loads through the same
+opener on one Mac.
 
 The 397B's drafting head (5.41 GiB) and vision tower (0.85 GiB) come
 over the link in about 5 s; read over SMB they took 129 s and 149 s. The

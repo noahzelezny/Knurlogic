@@ -81,19 +81,21 @@ def _chain(fns: list) -> Callable:
 
 def fill(model, stop: Callable | None = None) -> dict:
     """Fetch every parameter `model` holds that a file's tensor (or a cut of
-    one) gives, and put it in place. -> {fetched, left, seconds}."""
+    one) gives, and put it in place. -> {fetched, left, left_bytes,
+    largest_left, seconds}: what came over the link, and what (by name and
+    size) is read from the files."""
     import mlx.core as mx
     from mlx.utils import tree_flatten, tree_unflatten
     p = weight_files.peer()
     t0 = time.monotonic()
     names: dict = {}                     # id(array) -> its parameter names
     found: dict = {}                     # id(array) -> its _origin
-    left = 0
+    left: list = []                      # (bytes, name): read from the files
     for name, a in tree_flatten(model.parameters()):
         if id(a) not in names:
             o = _origin(a)
             if o is None:
-                left += 1
+                left.append((int(a.nbytes), name))
             else:
                 found[id(a)] = o
         names.setdefault(id(a), []).append(name)
@@ -124,7 +126,9 @@ def fill(model, stop: Callable | None = None) -> dict:
     model.update(tree_unflatten([(n, built[k]) for k in built
                                  for n in names[k]]))
     progress(fetched_bytes=got, reading_from="")
-    return {"fetched": got, "left": left,
+    left.sort(reverse=True)
+    return {"fetched": got, "left": len(left),
+            "left_bytes": sum(n for n, _ in left), "largest_left": left[:4],
             "seconds": time.monotonic() - t0}
 
 
@@ -147,8 +151,11 @@ def read_share(model, evaluate: Callable) -> None:
         try:
             out = fill(model, stop=LOAD_STOP.is_set)
             logger.info("weights: %.1f GiB from %s over the link in %.1fs; "
-                        "%d arrays read from the files", out["fetched"] / GIB,
-                        p.source, out["seconds"], out["left"])
+                        "%d arrays, %.2f GiB, read from the files%s",
+                        out["fetched"] / GIB, p.source, out["seconds"],
+                        out["left"], out["left_bytes"] / GIB,
+                        "".join(f"; {k} {n / GIB:.2f} GiB"
+                                for n, k in out["largest_left"]))
         except Exception as e:  # only slower: the files are read instead
             logger.warning("weights: the share was not fetched from %s "
                            "(%s: %s); read from the files", p.source,
@@ -156,6 +163,11 @@ def read_share(model, evaluate: Callable) -> None:
         finally:
             _DERIVED.clear()
             weight_files.forget()
+        t0 = time.monotonic()
+        evaluate(model)
+        logger.info("weights: the rest read from the files in %.1fs",
+                    time.monotonic() - t0)
+        return
     evaluate(model)
 
 
