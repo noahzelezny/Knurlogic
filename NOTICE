@@ -1,7 +1,11 @@
 knurlogic
 Copyright 2026 Noah Zelezny
 
-This product is licensed under the Apache License, Version 2.0 (LICENSE).
+This product is licensed under the GNU Affero General Public License,
+version 3 only (AGPL-3.0-only; LICENSE). Releases up to and including 0.1.6
+were licensed under the Apache License, Version 2.0, and stay so.
+A commercial license, without the AGPL's terms, is available from the
+author.
 
 This product includes software developed by other projects, vendored under
 their own licenses. Each folder that carries vendored source records it in

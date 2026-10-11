@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### License
+
+* knurlogic is now licensed under the GNU Affero General Public License,
+  version 3 only (AGPL-3.0-only), with a commercial license available.
+  0.1.6 and earlier stay Apache-2.0. Vendored third-party code keeps its
+  own license (NOTICE).
+
 ### Page
 
 * Load model says how much room a split leaves for context, as it does
