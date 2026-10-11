@@ -281,6 +281,11 @@ class PromptCacheCommands:
             # model's key, the old one deleted (prompt_cache/convert)
             from knurlogic.engine.prompt_cache import convert
             got = convert.read_back(st, f) if st is not None else []
+        elif "borrow" in self._disk_index[best]:
+            # another quant's entry of the same model: read, used in
+            # memory, left where it is (prompt_cache/quants)
+            from knurlogic.engine.prompt_cache import quants
+            got = quants.read_back(st, f) if st is not None else []
         elif f.is_dir() and st is not None:
             got = st.read([f])
         else:
@@ -342,7 +347,8 @@ class PromptCacheCommands:
             # lacks would put the ranks out of step
             self._disk_index = {
                 t: {"file": Path(v["file"]), "owner": v.get("owner")}
-                for t, v in self._restored.items() if v.get("file")}
+                for t, v in self._restored.items()
+                if v.get("file") and not v.get("borrowed_from")}
         elif key is not None:
             try:
                 self._disk_index = prompt_disk.index(
@@ -353,6 +359,12 @@ class PromptCacheCommands:
                     # their read-back (prompt_cache/convert)
                     from knurlogic.engine.prompt_cache import convert
                     self._disk_index.update(convert.index(
+                        self._store,
+                        set(self._disk_index) | set(self._restored)))
+                    # then other quants' entries of the same model, read
+                    # back in place (prompt_cache/quants)
+                    from knurlogic.engine.prompt_cache import quants
+                    self._disk_index.update(quants.index(
                         self._store,
                         set(self._disk_index) | set(self._restored)))
             except OSError:
@@ -440,6 +452,10 @@ class PromptCacheCommands:
                 "saved_at": meta.get("saved_at"),
                 "pinned": bool(meta.get("pinned")),
                 "hash": prompt_disk.tokens_hash(t) if ints else None})
+            lent = (self._restored.get(tuple(t)) or {}).get("borrowed_from")
+            if lent:
+                # read from another quant's entry (prompt_cache/quants)
+                out[-1]["borrowed_from"] = lent
         st = self._store
         return {"entries": out,
                 "key_id": st.key_id if st is not None
@@ -462,3 +478,5 @@ class PromptCacheCommands:
                         "read_ms": d["read_ms"]}
             if d.get("converted"):
                 job.disk["converted"] = dict(d["converted"])
+            if d.get("borrowed_from"):
+                job.disk["borrowed_from"] = d["borrowed_from"]

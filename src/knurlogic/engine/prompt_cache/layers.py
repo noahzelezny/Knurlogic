@@ -440,6 +440,10 @@ class Store:
         #: a fresh cache list of the loaded model's slots (make_cache), for
         #: converting another KV width's entries (convert.py); None: none
         self.template = None
+        #: what makes another quant's entries this model's (quants.py:
+        #: architecture and tokenizer), recorded in each entry it saves;
+        #: None: never borrows
+        self.fingerprint = None
 
     @classmethod
     def for_host(cls, host) -> Store | None:
@@ -456,6 +460,11 @@ class Store:
         st = cls(base, host_shard_key(host), part,
                  disk.draft_of() if part.extras else None)
         st.template = lambda: make_prompt_cache(host.model)
+        from . import quants
+        try:
+            st.fingerprint = quants.fingerprint(host.path)
+        except Exception:  # no fingerprint is no borrowing (logged)
+            logger.exception("prompt cache: the model's fingerprint")
         return st
 
     @property
@@ -819,6 +828,8 @@ class Store:
                         "stored": self.stored(),
                         "draft": draft, "gen": gen, "seq": seq,
                         "saved_at": round(time.time(), 3)}
+                if self.fingerprint:
+                    meta["fingerprint"] = self.fingerprint
                 om = old[4] if old is not None else None
                 if om is not None and om.get("owner") == meta["owner"] and \
                         om.get("n_tokens") == len(tokens) and \
@@ -981,7 +992,7 @@ def restore(max_n: int, store: Store | None, *, max_bytes=None, link=None,
     same point, whatever it holds; a ring's ranks do not sweep here, rank
     0's saves do). Returns disk.read's shape for disk.insert. Never
     raises."""
-    from . import convert
+    from . import convert, quants
     got = []
     try:
         if store is not None and disk.enabled():
@@ -1004,6 +1015,14 @@ def restore(max_n: int, store: Store | None, *, max_bytes=None, link=None,
                 if link is None:
                     more = convert.persist(store, more)
                 got = more + got
+                held = {Path(d).name for d in mine} | \
+                    {Path(g[0]).name for g in more}
+                if len(held) < max_n:
+                    # still fewer: another quant's entries of the same
+                    # model (quants.py), read and used in memory, never
+                    # written or deleted
+                    got = quants.read(store, quants.candidates(
+                        store, max_n - len(held), mb, skip=held)) + got
     except Exception:  # a restore that fails is a miss, never a failed load (logged)
         logger.exception("prompt cache: reading the saved entries failed")
         got = []

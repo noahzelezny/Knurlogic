@@ -45,6 +45,8 @@ Settings (read at use, so live):
   KNURLOGIC_PROMPT_CACHE_TTL_H    hours an entry nobody used is kept (24)
   KNURLOGIC_PROMPT_CACHE_CONVERT  entries of another KV width: down
                                   (default) / both / off (convert.py)
+  KNURLOGIC_PROMPT_CACHE_ANY_QUANT  another quant's entries of the same
+                                  model: on (default) / off (quants.py)
 
 Ownership: an entry belongs to the client session that made it
 (X-Client-Session; telemetry.md). Its header carries the owner {session,
@@ -908,11 +910,12 @@ def insert(lru, model_key, got: list) -> dict:
     out = {}
     for f, toks, cache, kind, ms, *meta in got:
         lru.insert_cache(model_key, list(toks), cache, cache_type=kind)
+        m = meta[0] if meta else {}
         try:
-            os.utime(f)
+            if not m.get("borrowed_from"):     # another quant's: untouched
+                os.utime(f)
         except OSError:
             pass
-        m = meta[0] if meta else {}
         out[tuple(toks)] = {"tokens": len(toks), "read_ms": ms,
                             "file": str(f), "owner": m.get("owner"),
                             "saved_at": m.get("saved_at"),
@@ -921,6 +924,10 @@ def insert(lru, model_key, got: list) -> dict:
             # read from another KV width's entry and converted
             # (engine/prompt_cache/convert)
             out[tuple(toks)]["converted"] = dict(m["converted"])
+        if m.get("borrowed_from"):
+            # another quant's entry of the same model, used in memory
+            # (engine/prompt_cache/quants)
+            out[tuple(toks)]["borrowed_from"] = m["borrowed_from"]
     if out:
         logger.info("prompt cache: %d entr%s restored from disk (%d tokens, "
                     "%.1fs)", len(out), "y" if len(out) == 1 else "ies",
@@ -956,7 +963,10 @@ def adopt(owners: dict, pinned: set, restored: dict,
     """Restored entries' owners into the prompt cache's side map (and the
     pinned sessions into its sticky set), as the files said: an entry read
     back is on disk already. A shared system-prompt checkpoint goes back
-    into `shared`, so the next save keeps it."""
+    into `shared`, so the next save keeps it. A borrowed entry (another
+    quant's, quants.py) is not on disk for this model: no `file`, so the
+    next save writes it under this model's key and nothing deletes the
+    other quant's."""
     on = {s for s, v in pins(base).items() if v}
     for t, v in restored.items():
         if v.get("shared") and shared is not None:
@@ -970,7 +980,9 @@ def adopt(owners: dict, pinned: set, restored: dict,
             pinned.add(s)
         owners[t] = {"session": s, "role": o.get("role"),
                      "run": o.get("run"), "pinned": s in on,
-                     "file": v.get("file"), "saved_at": v.get("saved_at")}
+                     "file": None if v.get("borrowed_from")
+                     else v.get("file"),
+                     "saved_at": v.get("saved_at")}
 
 
 def _arrays_of(obj):

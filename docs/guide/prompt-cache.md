@@ -110,14 +110,25 @@ for the split they were saved under; new saves use the new layout.
 | `KNURLOGIC_PROMPT_CACHE_DISK_GB` | 20% of free space plus what the cache holds, at most 64 GiB | all models' files together; oldest go first |
 | `KNURLOGIC_PROMPT_CACHE_TTL_H` | 24 | files unused this long are deleted |
 | `KNURLOGIC_PROMPT_CACHE_CONVERT` | down | sessions saved at another KV width: `down` converts 16-bit ones to the quantized width the model now runs, `both` also converts quantized ones back to 16-bit, `off` leaves them |
+| `KNURLOGIC_PROMPT_CACHE_ANY_QUANT` | on | sessions saved by another quant of the same model (same architecture and tokenizer) are used; `off` reads only this quant's |
 
 Converting takes a fraction of a second per entry where re-reading the
 prompt takes minutes. 16 -> 8 matches what an 8-bit model stores up to
 quantization noise; 8 -> 16 carries the 8-bit error into a 16-bit run.
 The converted entry replaces the old one, so a session is saved once;
 `usage.knurlogic.cache.converted` says when a request was served from
-one, and registry rows carry each entry's `kv_bits`. All four settings
-are under Settings -> Knurlogic -> Prompt cache.
+one, and registry rows carry each entry's `kv_bits`.
+
+Borrowing: a model loaded at another quant (say 5.4 bpw after 3.4 bpw)
+continues from the sessions the other quant saved, when it has none of
+its own for them. It is an approximation: measured on Qwen3.6-35B quants,
+the next-token distribution differs from reading the prompt again by mean
+KL 0.015-0.042 (the top token agrees 89-96% of the time), about half of
+what the two quants differ anyway. The other quant's files are only read,
+never moved or deleted; the borrowing model saves its own copy at its
+next save. `usage.knurlogic.cache.borrowed_from` names the quant a
+request was served from. All five settings are under Settings ->
+Knurlogic -> Prompt cache.
 
 Pinned sessions are exempt from both limits; only a drop removes them.
 

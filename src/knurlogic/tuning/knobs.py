@@ -257,6 +257,12 @@ KNOB_HELP = {
                                       "quantization noise; 8 to 16 (both) "
                                       "carries the 8-bit error into a 16-bit "
                                       "run.",
+    "KNURLOGIC_PROMPT_CACHE_ANY_QUANT": "Another quant of the same model "
+                                        "continues from this one's saved "
+                                        "session in seconds; its next "
+                                        "tokens differ from a re-read by "
+                                        "about half of what the two quants "
+                                        "differ anyway.",
 }
 
 

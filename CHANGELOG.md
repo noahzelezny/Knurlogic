@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Prompt cache
+
+* A model loaded at another quant of the same model (same architecture
+  and tokenizer) continues from the sessions the other quant saved, when
+  it has none of its own: after its own entries and its own converted KV
+  widths, it borrows the other quant's, converting the KV width when it
+  differs. The other quant's files are only read, never moved or
+  deleted. Measured on Qwen3.6-35B quants, the next token's distribution
+  differs from re-reading the prompt by mean KL 0.015-0.042, about half
+  the gap between the quants. `usage.knurlogic.cache.borrowed_from` and
+  the prompt-cache listing name the source. Setting
+  `KNURLOGIC_PROMPT_CACHE_ANY_QUANT` (on by default; Settings ->
+  Knurlogic -> Prompt cache).
+
 ### License
 
 * knurlogic is now licensed under the GNU Affero General Public License,

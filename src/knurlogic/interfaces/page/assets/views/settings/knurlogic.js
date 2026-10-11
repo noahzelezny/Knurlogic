@@ -179,7 +179,8 @@ async function showPromptCache(ms){
   if(!pc){ el.innerHTML=`<div class="msg">${esc(kn.error||'this page predates knurlogic-wide prompt-cache settings')}</div>`; return }
   const ks=pc.knobs||[];
   const TITLE={KNURLOGIC_PROMPT_CACHE_DISK:'Save to disk', KNURLOGIC_PROMPT_CACHE_DISK_GB:'Disk budget',
-    KNURLOGIC_PROMPT_CACHE_TTL_H:'Keep unused', KNURLOGIC_PROMPT_CACHE_CONVERT:'Convert KV bits'};
+    KNURLOGIC_PROMPT_CACHE_TTL_H:'Keep unused', KNURLOGIC_PROMPT_CACHE_CONVERT:'Convert KV bits',
+    KNURLOGIC_PROMPT_CACHE_ANY_QUANT:'Any quant'};
   el.innerHTML=`<div class="sgrp"><div class="shd">Prompt cache</div>
     <div class="gks">${ks.map(k=>gsel(k.name, TITLE[k.name]||k.name, k.help||k.what, k.help?'':k.why,
       k.values.map(v=>({v, t:v===''?'auto':v+(k.unit?' '+k.unit:'')})), k.value, k.default)).join('')}</div>

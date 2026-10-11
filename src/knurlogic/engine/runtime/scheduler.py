@@ -1108,6 +1108,10 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 # served from an entry converted from another KV width at
                 # this load or read-back (prompt_cache/convert)
                 report["converted"] = dict(d["converted"])
+            if d.get("borrowed_from") and used:
+                # served from another quant's entry of the same model
+                # (prompt_cache/quants)
+                report["borrowed_from"] = d["borrowed_from"]
             if row.job.diverged:
                 report["diverged"] = row.job.diverged
         usage = row.text.usage(report)

@@ -9,6 +9,9 @@ the scheduler's commands on it (docs/design/prompt-cache-disk.md).
   convert.py   an entry of another KV width (16-bit <-> quantized),
                converted at a restore or read-back and written under the
                loaded model's key in place of the old one
+  quants.py    an entry of another quant of the same model (architecture
+               and tokenizer), borrowed at a restore or read-back and
+               used in memory, never moved or deleted
   transfer.py  an entry's missing pieces, fetched from a peer's page
                (machines without shared storage); the fetcher is
                installed by the interfaces side

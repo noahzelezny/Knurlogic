@@ -13,7 +13,9 @@ and the request's text stage puts it in usage:
 
 plus, set by the scheduler: `disk` {tokens, read_ms}, `converted`
 {from_bits, to_bits} when the entry was converted from another KV width
-at this load or read-back (convert.py), `diverged`.
+at this load or read-back (convert.py), `borrowed_from` (the source
+artifact's name) when it was another quant's entry (quants.py),
+`diverged`.
 
 with `prompt_tokens_details.cached_tokens` = `used`.
 """

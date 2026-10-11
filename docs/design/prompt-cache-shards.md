@@ -415,6 +415,72 @@ over the vote: a rank's continuation from its restored slices equals its
 own cache's bit for bit; the whole model's entry on the split and the
 split's on one machine to the split's float32 rounding).
 
+## As built: borrowing between quants
+
+**Why.** The key holds the artifact's identity, so the same model loaded
+at another quant (3.4 / 5.4 bpw VQ, 8-bit MLX) finds none of the sessions
+the others saved, and re-reads every prompt.
+
+**Same model.** `quants.fingerprint`: 16 hex of what fixes a cache's
+shape and meaning -- the text config's architecture (model type, layer
+count, hidden size, attention and KV heads, head dim, layer types / full
+attention interval, sliding window, MLA and indexer dims, compress
+ratios, linear-attention dims, vocabulary size, rope and context-length
+settings; `text_config` for a multimodal wrapper; never `quantization`)
+and the bytes of the tokenizer files that map text to ids
+(`tokenizer.json`, `tokenizer.model`, `vocab.json`, `merges.txt`,
+`added_tokens.json`, `special_tokens_map.json`; not
+`tokenizer_config.json`, whose chat template does not change what an id
+means). Each new entry's `entry.json` records it as `fingerprint`; an
+entry saved before takes it from its key's artifact when that identity
+resolves to a local artifact (`machine/artifact.resolve_identity`), and
+is skipped otherwise.
+
+**Order.** When a restore at load, or a single machine's read-back, finds
+fewer entries than it wants under its key and its own other widths
+(convert.py), it looks under the keys that differ only in `artifact`
+(and in `kv_bits` where `KNURLOGIC_PROMPT_CACHE_CONVERT` allows) for
+entries with the loaded model's fingerprint: own entries, then own
+converted widths, then borrowed at the same width, then borrowed and
+converted (with convert.py's code).
+
+**Never the lender's to lose.** A borrowed entry is read and used in
+memory; nothing is written, moved, touched or deleted under the other
+quant's key. Its restored owner has no `file`, so the session's next save
+writes it under the borrowing model's key and a keep-latest step never
+deletes the lender's. (convert.py still replaces its own other width.)
+`usage.knurlogic.cache.borrowed_from` names the source artifact when a
+request is served from one, and the in-memory rows of
+`GET /v1/prompt-cache` carry it too.
+
+**Splits.** Each rank reads its own part of the borrowed entry, as for
+its own entries; the restore's vote keeps what every rank read. The
+setting is knurlogic-wide, so every rank decides the same. There is no
+persist step.
+
+**Setting.** `KNURLOGIC_PROMPT_CACHE_ANY_QUANT`, knurlogic-wide: `on`
+(default) or `off`.
+
+**Measured** (docs/dev/quant_cache_test.py; Qwen3.6-35B at 3.4 and 5.4
+bpw VQ and 8-bit MLX; prompts of 2k-65k tokens; 16-bit and 8-bit KV):
+quant B continuing from quant A's cache differs from B reading the prompt
+itself by mean KL 0.015-0.042 over the next token (top-1 agreement
+89-96%), about 40-60% of the gap the two quants have anyway
+(0.035-0.072). An approximation, accepted as the 16 -> 8 conversion is.
+
+**Limits.** A ring's read-back reads only entries under its own key that
+were restored at its load, so it never borrows (a borrowed entry evicted
+on a ring is re-read from the prompt). Peer fetch (transfer.py) fetches
+only the loaded model's own entries; a borrowed entry whose pieces are on
+another machine is not borrowed.
+
+**Tests** (tests/engine/test_prompt_cache_quants.py): the fingerprint
+across quants, and not across layer count, heads or tokenizer; an older
+entry's from its artifact; the order; the lender's files byte for byte
+unchanged after a restore, a read-back, a conversion and the borrower's
+save; the setting off; a pipeline's and a tensor split's ranks; the
+scheduler's usage and listing.
+
 ## Code
 
 All prompt-cache code lives in `engine/prompt_cache/`:
@@ -429,6 +495,8 @@ All prompt-cache code lives in `engine/prompt_cache/`:
 | `layers.py` | the per-layer format: Part, key, write / read / complete check, save, commit and restore votes (built) |
 | `slices.py` | phase 3: a layer's cache per head range: names, plan, cut, join (built) |
 | `location.py` | where the cache root is (built) |
+| `convert.py` | an entry of another KV width, converted and written in place of the old one |
+| `quants.py` | an entry of another quant of the same model, borrowed in memory |
 | `transfer.py` | phase 2: what a rank lacks, fetched through an injected fetcher, verified, written (built) |
 
 The HTTP endpoints are in `interfaces/http/prompt_cache.py`; the page

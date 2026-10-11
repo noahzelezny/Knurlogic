@@ -249,6 +249,8 @@ def _meta_for(store, src: dict, draft: bool) -> dict:
     m.update(key=store.key, key_id=store.key_id, stored=store.stored(),
              layers=list(range(store.part.total)), draft=bool(draft),
              converted_from=bits_of(src) or 16)
+    if getattr(store, "fingerprint", None):
+        m["fingerprint"] = store.fingerprint
     return m
 
 
