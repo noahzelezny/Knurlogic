@@ -184,16 +184,19 @@ its memory flat on purpose. The Load panel's per-machine line says
 
 ## Measured (2026-10-11, M4 rank fetching from the M3 over Thunderbolt 4)
 
-Before: the M4 read its share over SMB cold at 0.18-0.33 GB/s.
+From the ranks' logs. Before: the M4 read its share over SMB cold at
+0.18-0.33 GB/s (a 397B VQ-3.5bpw pipeline share: 90.9 GiB in 451 s).
 
-| model, split | M4 share | fetched over the link | rate |
+| model, split | fetched over the link | read from the files | rate |
 |---|---|---|---|
-| 35B 8-bit, pipeline (first build: one request at a time) | 22.5 GiB | 21.0 GiB | 0.34 GiB/s |
-| 35B 8-bit, tensor (warm) | 19.2 GiB held | 34.3 GiB | 4.2 GiB/s |
-| 397B VQ-2.2bpw, pipeline, cold | 59.5 GiB | 53.1 GiB in 27 s | 2.0 GiB/s |
-| 397B VQ-3.1bpw, pipeline, cold | 81.7 GiB | 75.3 GiB in 60 s | 1.25 GiB/s |
-| 397B VQ-3.5bpw, pipeline | 90.9 GiB | 84.4 GiB in 173 s | 0.49 GiB/s |
+| 397B VQ-3.5bpw, pipeline | 84.4 GiB in 77.6 s | 68 arrays (row tables) | 1.09 GiB/s |
+| 397B VQ-3.1bpw, pipeline, cold | 75.3 GiB in 52.9 s | 74 arrays | 1.42 GiB/s |
+| 397B VQ-2.6bpw, pipeline | 65.3 GiB in 33.0 s | -- | 1.98 GiB/s |
+| 35B 8-bit, tensor | 34.3 GiB in 24.9 s | 0 | 1.38 GiB/s |
+| 35B VQ-4.6bpw, pipeline, warm | 11.1 GiB in 3.0 s | 0 | 3.7 GiB/s |
 
-What is left to the mount is ~70 small arrays (VQ row tables, 0.01 GiB
-each). Open: why the 3.5bpw share fetches at a quarter of the 2.2bpw's
-rate; the M4's free memory falls to ~25 GiB during it.
+The 397B's drafting head (5.41 GiB) and vision tower (0.85 GiB) come
+over the link in about 5 s; read over SMB they took 129 s and 149 s. The
+rate is the holder's array: it read 1.1-1.5 GB/s while serving, the same
+as for its own share. With socket.sendfile on the serving side the
+3.5bpw share came at 0.46-0.49 GiB/s.
