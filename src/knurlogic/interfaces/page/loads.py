@@ -348,17 +348,16 @@ def with_jobs(doc: dict) -> dict:
 LOAD_REPORT_S = 1800
 
 
-def _share_of(rec: dict) -> int:
-    """What a cluster rank holds once loaded, from its marker; 0 when it is
-    not a rank or has not said yet."""
+def _marker_of(rec: dict) -> dict:
+    """A cluster rank's progress marker ({} when it is not a rank or has
+    not written one)."""
     if not rec.get("job") or rec.get("rank") is None:
-        return 0
+        return {}
     from knurlogic.cluster import jobs as J
     try:
-        m = J.read_marker(rec["job"], int(rec["rank"])) or {}
+        return J.read_marker(rec["job"], int(rec["rank"])) or {}
     except ValueError:
-        return 0
-    return int(m.get("share_bytes") or 0)
+        return {}
 
 
 def load_progress(doc: dict) -> list:
@@ -367,7 +366,9 @@ def load_progress(doc: dict) -> list:
     and the OS memory map), plus each server's log: no extra HTTP.
 
     One entry per server started in the last LOAD_REPORT_S: phase (loading,
-    stalled, waiting, warming, ready, exited), seconds since start, bytes its process
+    stalled, waiting -- `waiting` says for its "turn" or for the "others"
+    --, warming, ready, exited), `reading_from` a machine while a rank
+    fetches its share from that machine's disk, seconds since start, bytes its process
     holds against the artifact's size, the last log line, and for one that
     exited the tail of its log (why it failed)."""
     from knurlogic.machine.servers import is_our_server
@@ -413,6 +414,7 @@ def load_progress(doc: dict) -> list:
             quiet = now - log.stat().st_mtime
         except OSError:
             lines, quiet = [], None
+        mk = _marker_of(rec)
         e = {"port": port, "name": Path(path).name,
              **({"job": rec["job"]} if rec.get("job") else {}),
              **({"identity": rec["identity"]} if rec.get("identity") else {}),
@@ -420,8 +422,13 @@ def load_progress(doc: dict) -> list:
              "seconds": round(now - t), "bytes": procs.get(pid, 0),
              # a rank of a split job holds its share, not the artifact:
              # the rank writes it to its marker (engine/split/marker.progress)
-             "total_bytes": int(_share_of(rec) or rec.get("bytes") or 0),
+             "total_bytes": int(mk.get("share_bytes") or rec.get("bytes")
+                                or 0),
              "last_log_line": lines[-1][:200] if lines else ""}
+        # the job's read plan (docs/design/weight-streaming.md): fetching
+        # from another machine's disk, or waiting for the ranks that do
+        if mk.get("reading_from"):
+            e["reading_from"] = str(mk["reading_from"])[:80]
         r = rows.get(port) if port else None
         if not is_our_server(pid) and not (
                 rec.get("job") and J.is_rank(pid, rec["job"])):
@@ -433,11 +440,16 @@ def load_progress(doc: dict) -> list:
         elif r is None and rec.get("job") and \
                 job_phase.get(rec["job"]) == "ready":
             e["phase"] = "ready"         # a follower rank: its job serves
+        elif r is None and rec.get("job") and mk.get("turn") == "waiting" \
+                and mk.get("phase") == "loading":
+            # its machine holds the files: it reads its own share once the
+            # ranks fetching theirs from here are done -- quiet on purpose
+            e.update(phase="waiting", waiting="turn")
         elif r is None and rec.get("job") and e["total_bytes"] and \
                 e["bytes"] >= spawn.WARM_FRACTION * e["total_bytes"]:
             # its share is in and its log quiet: the other machines are
             # still reading theirs, which is not this rank stalling
-            e["phase"] = "waiting"
+            e.update(phase="waiting", waiting="others")
         elif r is not None and r.get("state") == "warming":
             e["phase"] = "warming"       # weights in; the first-request warm-up
         elif r is None or r.get("state") == "loading":

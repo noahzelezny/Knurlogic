@@ -23,6 +23,8 @@ SAMPLES = {
     "MachineSet": P.MachineSet(allowance_gib=4.0, settings={"k": 1}),
     "Read": P.Read(path="/settings.json", query={"tune": "x"}, port=8),
     "Settings": P.Settings(port=8, values={"k": 1}),
+    "Weights": P.Weights(identity="0123456789abcdef", file="model.safetensors",
+                         offset=8, length=16, name="m"),
 }
 
 

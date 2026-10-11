@@ -948,9 +948,11 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
                 f"{have.get('knurlogic') or 'missing'} here and "
                 f"{want.get('knurlogic') or 'missing'} on the "
                 f"coordinator")
+    from knurlogic.machine.artifact import on_network
     return 200, typed(PrepareReply(
         ok=True, machine=me, rank=rank, prefill_chunk=room_chunk,
-        alert=f"on {me}: {differs}" if differs else None, note=note))
+        alert=f"on {me}: {differs}" if differs else None, note=note,
+        local_copy=not on_network(path)))
 
 
 def _local_copy_differs(path, spec: dict) -> str:
@@ -1069,6 +1071,8 @@ def rank_env(spec: dict, files: dict, selfheal: bool) -> dict:
     bell = bell_address(spec)
     if bell:
         env["KNURLOGIC_BELL"] = bell
+    from knurlogic.cluster import weights
+    env.update(weights.rank_env(spec.get("read")))
     if spec["link"] == "ring":
         env["MLX_HOSTFILE"] = files["hostfile"]
     else:
@@ -1142,6 +1146,11 @@ def start(job: str | None, *, spawn=None, wait_s: float | None = None,
         # the ring's chunk, known only once every rank answered Prepare
         prep["spec"] = dict(prep["spec"], prefill_chunk=c,
                             prefill_why=str(ring.get("prefill_why") or "")[:120])
+    reads = (ring or {}).get("reads")
+    if prep is not None and isinstance(reads, list) and \
+            len(reads) == prep["spec"]["world"]:
+        # this rank's entry of the job's read plan (cluster/weights.py)
+        prep["spec"] = dict(prep["spec"], read=reads[prep["spec"]["rank"]])
     if prep is None:
         # a retried Start (the answer was lost): the rank is already here
         again = _running_here(str(job or ""))
@@ -2096,7 +2105,16 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         logger.warning("cluster job %s: %s", job, a)
     chunk, chunk_why = ring_chunk(sets, got)
     base["prefill_chunk"] = chunk
-    start_doc = {"job": job, "prefill_chunk": chunk}
+    # who reads from whose disk, and in what order: a rank on a network
+    # mount fetches its share from a machine with a local copy, over the
+    # job's link, and that machine reads its own share after
+    from knurlogic.cluster import weights
+    reads = weights.read_plan(
+        [m["name"] for m in order],
+        [bool(isinstance(g, dict) and g.get("local_copy")) for g in got],
+        [f"{ips[r]}:{(n['page'] or '').rpartition(':')[2] or ui_port}"
+         for r, n in enumerate(nodes)])
+    start_doc = {"job": job, "prefill_chunk": chunk, "reads": reads}
     if chunk_why != "set":
         start_doc["prefill_why"] = chunk_why
     got = transport.parallel(lambda r: ask("Start", r, start_doc),

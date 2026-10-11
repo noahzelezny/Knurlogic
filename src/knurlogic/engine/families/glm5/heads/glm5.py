@@ -24,6 +24,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
 
+from knurlogic.engine.split.weights import fetch_now
+
 _GLUE = ("eh_proj", "enorm", "hnorm", "shared_head")
 
 
@@ -181,7 +183,8 @@ class MTPHeadGlm5:
 
     @classmethod
     def from_sidecar(cls, model, arch, path):
-        w = mx.load(str(path))
+        # from the peer when a split rank fetches its share
+        w = fetch_now(mx.load(str(path)))
         meta = mx.load(str(path), return_metadata=True)[1]
         cfg = json.loads(meta.get("vqlab_mtp", "{}"))
         head = cls(model, arch)

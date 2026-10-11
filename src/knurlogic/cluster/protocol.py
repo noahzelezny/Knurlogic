@@ -158,6 +158,9 @@ class PrepareReply(Body):
     note: str | None = None
     #: the prompt chunk this rank's own room allows (None: not worked out)
     prefill_chunk: int | None = None
+    #: this machine's copy is on its own disk, not a network mount: it can
+    #: serve the job's other ranks their shares (cluster/weights.py)
+    local_copy: bool | None = None
 
 
 @_register
@@ -167,6 +170,8 @@ class Start(Body):
     #: the ring's prompt chunk once every rank has answered Prepare, and why
     prefill_chunk: int | None = None
     prefill_why: str | None = None
+    #: the job's read plan, one entry per rank (cluster/weights.read_plan)
+    reads: list | None = None
 
 
 @_register
@@ -293,6 +298,19 @@ class Read(Body):
     path: str
     query: dict = field(default_factory=dict)
     port: int | None = None
+
+
+@_register
+@dataclass(frozen=True)
+class Weights(Body):
+    """A byte range of one shard of an artifact this machine holds on its
+    own disk, by identity and file name (never a path). The reply is the
+    bytes, not an envelope (cluster/weights.py)."""
+    identity: str
+    file: str
+    offset: int
+    length: int
+    name: str | None = None
 
 
 @_register

@@ -326,6 +326,8 @@ def init(link_kind: str) -> Link:
         if armed:
             os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = "0"
     progress(phase="loading")
+    from . import weights
+    weights.CURRENT["link"] = link      # its bell carries the load order
     return link
 
 

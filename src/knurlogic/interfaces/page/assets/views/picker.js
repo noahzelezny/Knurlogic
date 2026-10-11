@@ -837,14 +837,19 @@ function followLaunch(L, d){
   if(L.cluster && L.job){
     L.per=[];
     for(const x of ms) for(const jb of (x.doc.jobs||[])) if(jb.job===L.job){
-      L.per.push({machine:x.name, phase:jb.phase});
+      // its rank's own load says more while the job loads: waiting its
+      // turn, waiting for the others, or reading from another machine
+      const k=(x.doc.loads||[]).find(k=>k.job===L.job);
+      L.per.push({machine:x.name, phase:!k||jb.phase!=='loading' ? jb.phase
+        : k.phase==='waiting' ? (k.waiting==='turn'?'waiting its turn':'waiting for the others')
+        : k.reading_from ? 'loading from '+k.reading_from : jb.phase});
       if(jb.phase==='stopped'||jb.phase==='stopping'){
         // unloaded on purpose (here, on a peer, or by the MCP): no card
         if(jb.kind==='requested'){ dismissLaunch(L.id); return }
         L.phase='failed'; L.why=jb.reason||'the cluster job stopped'; return }
     }
     const lead=ms.flatMap(x=>x.doc.resident||[]).find(r=>r.cluster&&r.cluster.job===L.job);
-    const ph=L.per.map(p=>p.phase);
+    const ph=L.per.map(p=>/^(waiting|loading from)/.test(p.phase)?'loading':p.phase);
     if(lead && lead.state==='loaded' && ph.length && ph.every(p=>p==='ready')) L.phase='ready';
     // rank 0's own row says it is warming (the first-request warm-up) while
     // the job's phase still reads loading: warming wins over loading then

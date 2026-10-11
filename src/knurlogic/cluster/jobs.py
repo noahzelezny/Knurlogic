@@ -99,6 +99,9 @@ class Marker:
             if phase and phase != self.doc["phase"]:
                 self.doc["since"] = time.time()
                 self._last = 0.0          # a phase change is written now
+            turn = fields.get("turn")
+            if turn and turn != self.doc.get("turn"):
+                self._last = 0.0          # so is a load-order turn
             self.doc.update({k: v for k, v in fields.items()
                              if v is not None})
             now = time.time()

@@ -23,6 +23,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_map, tree_map_with_path
 
+from . import weights
 from .tensor_rules import (
     PARTS,
     RULES,
@@ -52,12 +53,17 @@ def split_params(params, pred, rank: int, n: int, segments=1):
         axis = pred(path, w)
         if axis is None:
             return w
-        if isinstance(segments, int):
-            parts = mx.split(w, segments, axis=axis)
-        else:
-            parts = mx.split(w, list(segments), axis=axis)
-        return mx.contiguous(mx.concatenate(
-            [mx.split(p, n, axis=axis)[rank] for p in parts], axis=axis))
+        def cut(x):
+            if isinstance(segments, int):
+                parts = mx.split(x, segments, axis=axis)
+            else:
+                parts = mx.split(x, list(segments), axis=axis)
+            return mx.contiguous(mx.concatenate(
+                [mx.split(p, n, axis=axis)[rank] for p in parts], axis=axis))
+        out = cut(w)
+        # a rank fetching its share from a peer rebuilds this from w's bytes
+        weights.derived(out, w, cut)
+        return out
     return tree_map_with_path(one, params)
 
 
@@ -101,8 +107,10 @@ def _apply(layer, path: str, rule, rank: int, n: int) -> None:
     if rule.repeat_kv and n > h:
         def rep(p):
             s = p.shape
-            p = p.reshape(h, s[0] // h, *s[1:])
-            return mx.repeat(p, n // h, axis=0).reshape(-1, *s[1:])
+            q = p.reshape(h, s[0] // h, *s[1:])
+            out = mx.repeat(q, n // h, axis=0).reshape(-1, *s[1:])
+            weights.derived(out, p, rep)
+            return out
         obj.update(tree_map(rep, obj.parameters()))
     _split_inplace(obj, pred, rank, n, seg)
 
