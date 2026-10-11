@@ -26,7 +26,7 @@ restarted.
 |---|---|
 | `default` | the measured settings; fastest |
 | `lean` | most context and most agents: 8-bit KV where the family takes it, 512-token prompt chunks, MTP off, 1 GiB cache reserve |
-| `benchmark` | reproducible runs: per-chip rounding off (the same rounding on every chip), MTP as set but drafting every step when on, the default 512-token prompt chunk whatever the room, and no prompt-cache reuse (nothing restored at load or read back, no earlier request's prefix). KV bits stay as set: benchmark the width you choose |
+| `benchmark` | reproducible runs: per-chip rounding off (the same rounding on every chip), MTP as set but drafting every step when on, a 2048-token prompt chunk whatever the room, and no prompt-cache reuse (nothing restored at load or read back, no earlier request's prefix). KV bits stay as set: benchmark the width you choose |
 
 Pick one in Settings -> Knurlogic, per model in Settings -> Models
 (Preset), with `knurlogic serve --tune lean`, or `tune` in the MCP. A

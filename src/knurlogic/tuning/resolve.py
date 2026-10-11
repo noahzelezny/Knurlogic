@@ -391,9 +391,14 @@ def _resolve_one(artifact: Artifact, working_set_bytes: int,
     family, family_why = measured.prefill_chunk_for(artifact.model_type)
     asked = t.get("KNURLOGIC_PREFILL_CHUNK")
     if asked is not None:
-        # lean: narrow whatever the room
-        prefill = asked
-        if family > asked:
+        # lean: narrow whatever the room; benchmark: fixed whatever the
+        # room, never past what the family measured as its ceiling
+        prefill = min(asked, family)
+        if asked > family:
+            r.notes.append(
+                f"prompt chunk {family}: tune={tune} asked for {asked}, "
+                f"past {family_why}")
+        elif family > asked:
             r.notes.append(
                 f"prompt chunk {asked}: tune={tune} keeps it narrow; "
                 f"{family} was {family_why}")

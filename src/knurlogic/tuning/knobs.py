@@ -61,7 +61,8 @@ KNOB_DOC = {
         "Unset, it is read from the room free at launch: the widest "
         "width up to the family's measured best whose predicted spike "
         "fits in 10% of the room left after weights, KV and cache, else "
-        "512 (lean and benchmark: always 512). Output is identical at "
+        "512 (lean: always 512; benchmark: always 2048, capped by the "
+        "family's measured width). Output is identical at "
         "every width."),
     "KNURLOGIC_CONTEXT_LENGTH": (
         "the longest conversation (prompt + answer, in tokens) a request may "
@@ -183,7 +184,7 @@ KNOB_DOC = {
         "settings; lean buys context and agents with some speed and "
         "precision (8-bit KV, 512-token prompt chunks, MTP off); benchmark "
         "pins what makes two runs differ (the same rounding on every chip, "
-        "MTP drafting every step, 512-token chunks, no prompt-cache "
+        "MTP drafting every step, 2048-token chunks, no prompt-cache "
         "reuse). Any "
         "setting changed beside it beats the preset's value."),
     "VQ_CACHE_LIMIT_GB": (

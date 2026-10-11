@@ -45,14 +45,14 @@ TUNE_PROFILES: dict = {
     # and no prompt-cache reuse. KV bits are left alone: a benchmark sets
     # the width it measures.
     "benchmark": {
-        "KNURLOGIC_PREFILL_CHUNK": measured.PREFILL_CHUNK_DEFAULT,
+        "KNURLOGIC_PREFILL_CHUNK": 2048,
         "launch": {"cross_chip": "on", "mtp_dynamic": "off",
                    "prompt_cache_reuse": "off"},
         "why": "reproducible runs: the same rounding on every chip "
                "(per-chip rounding off), MTP as set but drafting every "
-               "step when on, the default 512-token prompt chunk "
-               "(measured.PREFILL_CHUNK_DEFAULT) whatever the room free "
-               "at launch, and no prompt-cache reuse (nothing restored "
+               "step when on, a 2048-token prompt chunk (what the "
+               "measured families run on a roomy Mac; a family's measured "
+               "ceiling caps it) whatever the room free at launch, and no prompt-cache reuse (nothing restored "
                "or read back, no earlier request's prefix); KV bits as "
                "set",
     },

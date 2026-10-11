@@ -118,11 +118,11 @@ def test_the_preset_is_a_launch_knob_with_a_native_range():
 
 def test_benchmark_pins_what_makes_runs_differ():
     """Same rounding on every chip, MTP drafting every step, the default
-    512-token chunk whatever the room, no prompt-cache reuse; MTP itself
+    2048-token chunk whatever the room, no prompt-cache reuse; MTP itself
     and KV bits as they were."""
     r = resolve(_art(), 96 * GIB, tune="benchmark")
     e = knobs.engine_settings(r.env)
-    assert e["prefill_step_size"] == measured.PREFILL_CHUNK_DEFAULT == 512
+    assert e["prefill_step_size"] == 2048
     assert e["cross_chip"] == "on"
     assert e["prompt_cache_reuse"] is False
     assert e["kv_bits"] is None
@@ -130,26 +130,26 @@ def test_benchmark_pins_what_makes_runs_differ():
     # the room does not move it: a tight box and a roomy one alike
     small = knobs.engine_settings(resolve(_art(), 24 * GIB,
                                           tune="benchmark").env)
-    assert small["prefill_step_size"] == 512
+    assert small["prefill_step_size"] == 2048
     env = preset_env(_art(), "benchmark")
     assert env == {"KNURLOGIC_CROSS_CHIP": "on",
                    "KNURLOGIC_MTP_DYNAMIC": "off",
                    "KNURLOGIC_PROMPT_CACHE_REUSE": "off"}
     assert "KNURLOGIC_MTP" not in env and "KNURLOGIC_KV_BITS" not in env
-    assert "512" in presets.TUNE_PROFILES["benchmark"]["why"]
+    assert "2048" in presets.TUNE_PROFILES["benchmark"]["why"]
     fp = r.preset["from_preset"]
-    assert fp["KNURLOGIC_PREFILL_CHUNK"] == "512"
+    assert fp["KNURLOGIC_PREFILL_CHUNK"] == "2048"
     assert fp["KNURLOGIC_PROMPT_CACHE_REUSE"] == "off"
     assert fp["KNURLOGIC_CROSS_CHIP"] == "on"
 
 
 def test_benchmark_values_and_rows():
     v = presets.preset_values("benchmark")
-    assert v["prefill"] == 512 and v["mtp"] == "on"
+    assert v["prefill"] == 2048 and v["mtp"] == "on"
     assert v["mtp_dynamic"] == "off" and v["kv_bits"] == "bf16"
     assert v["cross_chip"] == "on" and v["prompt_cache_reuse"] == "off"
     rows = presets.preset_row_values("benchmark")
-    assert rows == {"KNURLOGIC_PREFILL_CHUNK": "512",
+    assert rows == {"KNURLOGIC_PREFILL_CHUNK": "2048",
                     "KNURLOGIC_CACHE_LIMIT_GB":
                         f"{measured.CACHE_LIMIT_GB_DEFAULT:g}",
                     presets.MTP_MODE: "every",

@@ -20,7 +20,7 @@
 
 * A `benchmark` launch preset, beside default and lean, for reproducible
   runs: per-chip rounding off (the same rounding on every chip), MTP as
-  set but drafting every step when on, the default 512-token prompt chunk
+  set but drafting every step when on, a 2048-token prompt chunk
   whatever the room free at launch, and no prompt-cache reuse. KV bits
   stay as set. Any setting changed beside it still wins.
 * `KNURLOGIC_PROMPT_CACHE_REUSE` (on by default; a launch setting): off,
