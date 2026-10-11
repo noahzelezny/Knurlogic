@@ -184,3 +184,48 @@ def test_what_is_bound_after_the_weights_comes_from_the_peer(shard, plan):
     W.fill_bound([head, None])
     assert peer.calls and not W._SOURCES
     assert mx.array_equal(head["w"], mx.load(str(shard))["layers.2.weight"])
+
+
+class Raising:
+    """A transformers-like object whose attributes import (and raise)."""
+    __module__ = "transformers.models.auto"
+
+    def __init__(self):
+        self.mapping = {"k": 1}
+
+    @property
+    def __dict__(self):
+        raise ValueError("Could not find a model class")
+
+
+class Holder:
+    def __init__(self, w):
+        self.w = w
+        self.processor = Raising()
+
+
+def test_a_walk_skips_what_it_cannot_read(shard, plan):
+    peer = Peer(shard.parent)
+    W.CURRENT["plan"] = W.ReadPlan(read=peer)
+    with W.recording():
+        h = Holder(mx.load(str(shard))["layers.2.weight"])
+    W.fill_bound([h])
+    assert peer.calls
+    assert mx.array_equal(h.w, mx.load(str(shard))["layers.2.weight"])
+
+
+def test_a_failing_bound_fill_never_fails_the_load(shard, plan, monkeypatch):
+    W.CURRENT["plan"] = W.ReadPlan(read=Peer(shard.parent))
+    with W.recording():
+        head = {"w": mx.load(str(shard))["layers.2.weight"]}
+    monkeypatch.setattr(W, "fill", lambda *a, **k: 1 / 0)
+    W.fill_bound([head])                     # logged, not raised
+    assert not W._SOURCES
+
+
+def test_a_failing_fill_leaves_the_share_to_the_mount(monkeypatch, plan):
+    log = []
+    monkeypatch.setattr(W, "fill", lambda *a, **k: 1 / 0)
+    W.CURRENT.update(plan=W.ReadPlan(read=lambda *a: None))
+    W.read_share(object(), lambda m: log.append("eval"))
+    assert log == ["eval"]

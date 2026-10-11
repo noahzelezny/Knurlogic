@@ -123,6 +123,14 @@ def _origin(a):
     return src, path, name, (fn if fns else None)
 
 
+#: libraries whose objects never hold the model's arrays: a walk does not
+#: go into them (a transformers processor's lazy auto-mappings import whole
+#: model families when touched, and can raise)
+_FOREIGN = ("transformers", "tokenizers", "huggingface_hub", "jinja2",
+            "PIL", "numpy", "torch", "threading", "logging", "http",
+            "socket", "concurrent")
+
+
 def _slots(root, limit: int = 2_000_000):
     """(container, key, array) for every mx.array slot under `root`: the
     places held_arrays (runtime/model_host) finds arrays, writable ones
@@ -136,15 +144,20 @@ def _slots(root, limit: int = 2_000_000):
                           bytearray, mx.array)) or id(o) in seen:
             continue
         seen.add(id(o))
+        if type(o).__module__.split(".")[0] in _FOREIGN:
+            continue
         items = []
-        if isinstance(o, dict):
-            items += [(o, k, v) for k, v in o.items()]
-        elif isinstance(o, list):
-            items += [(o, i, v) for i, v in enumerate(o)]
-        elif isinstance(o, (tuple, set, frozenset)):
-            stack.extend(o)
-        if hasattr(o, "__dict__") and not isinstance(o, type):
-            items += [(o, ("attr", k), v) for k, v in vars(o).items()]
+        try:
+            if isinstance(o, dict):
+                items += [(o, k, v) for k, v in dict.items(o)]
+            elif isinstance(o, list):
+                items += [(o, i, v) for i, v in enumerate(o)]
+            elif isinstance(o, (tuple, set, frozenset)):
+                stack.extend(o)
+            if hasattr(o, "__dict__") and not isinstance(o, type):
+                items += [(o, ("attr", k), v) for k, v in vars(o).items()]
+        except Exception:   # an object that will not be walked holds no share
+            continue
         for c, k, v in items:
             if isinstance(v, mx.array):
                 yield c, k, v
@@ -347,6 +360,9 @@ def fill_bound(roots: list) -> None:
                         "link%s", out["fetched"] / GIB,
                         plan.source or "the peer",
                         f" ({out['failed']})" if out["failed"] else "")
+    except Exception:  # only slower: what is left lazy is read from the mount
+        logger.exception("weights: the head and tower were not fetched; "
+                         "they are read from the mount")
     finally:
         forget()
 
@@ -367,7 +383,14 @@ def read_share(model, evaluate: Callable) -> None:
     try:
         if plan.read is not None:
             from knurlogic.engine.runtime.model_host import LOAD_STOP
-            out = fill(model, plan.read, plan.source, stop=LOAD_STOP.is_set)
+            try:
+                out = fill(model, plan.read, plan.source,
+                           stop=LOAD_STOP.is_set)
+            except Exception as e:  # only slower: the mount reads it all
+                logger.exception("weights: not fetched; the share is read "
+                                 "from the mount")
+                out = {"fetched": 0, "left": 0,
+                       "failed": f"{type(e).__name__}: {e}"}
             logger.info("weights: %.1f GiB from %s over the link; %d arrays "
                         "not from the peer (read here)%s", out["fetched"] / GIB,
                         plan.source or "the peer", out["left"],
