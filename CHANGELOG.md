@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.7
 
 ### Prompt cache
 
@@ -54,6 +54,9 @@
 * A load is called stalled only when its log is quiet and its memory has
   stopped growing for 3 minutes. A rank reading weights from a network
   share is silent for minutes while its memory climbs.
+* A Mac whose part of a split is loaded reads "waiting" while the other
+  Macs still load theirs, then "ready" when the model serves. It read
+  "stalled" after 3 quiet minutes, and "loading" after the model served.
 * The header's "2/2 nodes" badge shows only when the page or a Mac stops
   answering.
 
