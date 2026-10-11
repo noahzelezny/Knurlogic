@@ -1,5 +1,6 @@
 #!/bin/sh
-# Refuses a push carrying any commit that is AI-attributed -- authored or
+# Refuses a push carrying any commit authored or committed with a personal
+# email (only no-reply addresses), any commit that is AI-attributed -- authored or
 # committed as an AI agent, or a message with a trailer or naming an AI
 # model as its author or reviewer (ai_identity.sh) -- or one that adds a
 # machine-specific string (scripts/check_machine_specifics.py: home
@@ -15,6 +16,14 @@ while read lref lsha rref rsha; do
     if [ -n "$who" ]; then
         echo "pre-push: $lref has commits by an AI identity; not pushing:" >&2
         echo "$who" | head -5 >&2
+        bad=1
+    fi
+    # a person's own email as author or committer: only no-reply addresses
+    mail=$(git log --format='%h %ae %ce' "$range" 2>/dev/null \
+        | awk '{for(i=2;i<=3;i++) if ($i !~ /(^no-?reply@|@users\.noreply\.github\.com$)/) {print; break}}')
+    if [ -n "$mail" ]; then
+        echo "pre-push: $lref has commits with a personal email as author or committer; not pushing:" >&2
+        echo "$mail" | head -5 >&2
         bad=1
     fi
     hits=$(git log --format='%h %s%n%b' "$range" 2>/dev/null | grep -ciE "$AI_NAMED")

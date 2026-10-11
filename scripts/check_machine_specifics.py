@@ -39,6 +39,12 @@ PRIVATE_IP = re.compile(
 # split so this file holds no hit of its own
 HOME = re.compile("/" + "Users" + r"/([A-Za-z0-9._-]+)/")
 VOLUME = re.compile("/" + "Volumes" + r"/([^/\"'`)\n]+)")
+#: an email address; allowed: the RFC 2606 example domains and no-reply
+#: addresses (a bot's or GitHub's), never a person's own
+EMAIL = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[a-z]{2,12}(?![A-Za-z0-9])")
+EXAMPLE_EMAIL = re.compile(
+    r"@(example\.(com|org|net)|[a-z0-9.-]*\.(example|test|invalid))$"
+    r"|^no-?reply@|@users\.noreply\.github\.com$", re.I)
 
 
 def hits(line: str) -> list[str]:
@@ -47,6 +53,8 @@ def hits(line: str) -> list[str]:
             if m.group(1) not in EXAMPLE_HOMES]
     out += [m.group(0) for m in VOLUME.finditer(line)
             if m.group(1).strip() not in EXAMPLE_VOLUMES]
+    out += [m.group(0) for m in EMAIL.finditer(line)
+            if not EXAMPLE_EMAIL.search(m.group(0))]
     return out
 
 
