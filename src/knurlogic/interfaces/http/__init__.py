@@ -110,6 +110,40 @@ def scheduler_options(settings: dict) -> dict:
 STOP_SAVE_S = 120.0
 
 
+#: a live ring finishes an exchange in milliseconds: a stopping rank 0
+#: whose scheduler is inside one younger than this lets it finish
+EXCHANGE_S = 3.0
+
+
+def ring_stopped(sched, within: float) -> bool:
+    """sched.stop_ring(within), and past `within` the exchange it is in, if
+    that one is still young. Leaving inside a moving exchange tears it: on
+    a 2-Mac pipeline unload the follower got rank 0's control row and lost
+    rank 0 before the plan bytes, 2 s later (its marker's timing fits rank
+    0 leaving 1.5 s after a stop that ran out its 15 s). A gone peer's exchange never ends;
+    one that has waited EXCHANGE_S is taken as that. Logs where the
+    scheduler is when it gives up."""
+    import sys
+    import time
+    import traceback
+    if sched.stop_ring(timeout=within):
+        return True
+    link = getattr(getattr(sched, "tensor", None), "link", None)
+    while True:
+        entered = getattr(link, "entered", None)
+        if entered is None or time.monotonic() - entered >= EXCHANGE_S:
+            break
+        if sched.wait_stopped(0.05):
+            return True
+    thread = getattr(sched, "_thread", None)
+    frame = sys._current_frames().get(getattr(thread, "ident", None))
+    where = "".join(traceback.format_stack(frame)) if frame else "(gone)"
+    logging.getLogger(__name__).error(
+        "the scheduler did not reach a step boundary within %.0f s; failing "
+        "what is in flight and leaving. It is at:\n%s", within, where)
+    return False
+
+
 def watch_ring(sched, mh, exit_after: float = 1.5,
                stop_within: float = 15.0) -> None:
     """Rank 0 of a split model: its progress marker says whether work is
@@ -125,6 +159,7 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
     from knurlogic.engine.runtime.scheduler import RingFailed
     from knurlogic.engine.split import marker
 
+    log = logging.getLogger(__name__)
     armed: list = []
 
     def probe():
@@ -143,6 +178,7 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
             "retry once it is loaded again"))
         import time
         time.sleep(exit_after)          # the 503s go out first
+        logging.shutdown()
         # a failed ring leaves non-zero: the page relaunches it
         os._exit(1 if getattr(sched, "ring_failed", None) else 0)
 
@@ -182,7 +218,11 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
             # A step that never ends means a peer is gone: fail what is in
             # flight as before and leave.
             def stop_then_leave():
-                if sched.stop_ring(timeout=stop_within):
+                log.info("SIGTERM: stopping the ring at the next step "
+                         "boundary (waiting up to %.0f s)", stop_within)
+                if ring_stopped(sched, stop_within):
+                    log.info("the ring stopped between steps; leaving")
+                    logging.shutdown()
                     os._exit(0)
                 else:
                     fail_and_leave()
@@ -202,7 +242,9 @@ def watch_ring(sched, mh, exit_after: float = 1.5,
                 time.sleep(0.05)
             # read past the flag into its warm-up: stop the ring as ready
             if getattr(mh, "state", "") in ("warming", "ready") and \
-                    sched.stop_ring(timeout=stop_within):
+                    ring_stopped(sched, stop_within):
+                log.info("the ring stopped between steps; leaving")
+                logging.shutdown()
                 os._exit(0)
             else:
                 fail_and_leave()

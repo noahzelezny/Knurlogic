@@ -383,17 +383,29 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
     after_load()
     drafting = bool(heads and heads.leader)
     from knurlogic.engine.model import state
-    return follow(host.model, host.tokenizer, host.model_key, link,
-                  vision=state.VISION.get("serve"),
-                  prompt_cache_size=prompt_cache_size,
-                  completion_batch_size=completion_batch_size,
-                  prefill_step_size=prefill_step_size,
-                  working_set=working_set, split=split, drafting=drafting,
-                  block=heads.block if drafting else 0,
-                  outputs=tuple(heads.outputs) if drafting else (),
-                  disk=tuple(disk),
-                  why=("rank 0 drafts; this rank runs its verify steps"
-                       if drafting else "rank 0 does not draft"))
+    try:
+        return follow(host.model, host.tokenizer, host.model_key, link,
+                      vision=state.VISION.get("serve"),
+                      prompt_cache_size=prompt_cache_size,
+                      completion_batch_size=completion_batch_size,
+                      prefill_step_size=prefill_step_size,
+                      working_set=working_set, split=split,
+                      drafting=drafting,
+                      block=heads.block if drafting else 0,
+                      outputs=tuple(heads.outputs) if drafting else (),
+                      disk=tuple(disk),
+                      why=("rank 0 drafts; this rank runs its verify steps"
+                           if drafting else "rank 0 does not draft"))
+    except Exception as e:
+        from knurlogic.engine.runtime.scheduler import ring_error
+        if not ring_error(e):
+            raise
+        # rank 0 is gone (exited, killed, or its machine down): nothing
+        # more can arrive. One error line and a non-zero exit, not a
+        # traceback or an abort.
+        logger.error("rank %d: lost the ring to rank 0 after step %d "
+                     "(%s); leaving", link.rank, link.step, e)
+        raise SystemExit(1) from None
 
 
 class agree_head:

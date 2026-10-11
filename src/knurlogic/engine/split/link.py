@@ -43,6 +43,10 @@ class Link:
         #: the ring failed (scheduler._ring_fatal): every later exchange or
         #: align raises at once instead of waiting on a gone peer
         self.dead = False
+        #: time.monotonic() an exchange in progress began, None between
+        #: exchanges: a stopping rank 0 does not leave inside one that is
+        #: still moving (http.watch_ring), which tore the peer's half
+        self.entered: float | None = None
 
     def barrier(self) -> None:
         mx.eval(mx.distributed.all_sum(mx.array(1), group=self.group,
@@ -131,9 +135,17 @@ class Link:
 
     def exchange(self, over: int, payload: bytes | None = None):
         """-> (control rows, one per rank; the plan bytes or None)."""
-        import numpy as np
+        import time
         if self.dead:
             raise Desync("the ring between the ranks failed")
+        self.entered = time.monotonic()
+        try:
+            return self._exchange(over, payload)
+        finally:
+            self.entered = None
+
+    def _exchange(self, over: int, payload: bytes | None):
+        import numpy as np
         if self.parked:
             for c in self.socks:
                 c.sendall(b"w")
@@ -164,6 +176,11 @@ class Link:
         else:
             buf = mx.zeros((length,), dtype=mx.uint8)
         out = mx.distributed.all_sum(buf, group=self.group, stream=mx.cpu)
+        # evaluated here, not inside np.array: a collective whose peer is
+        # gone raises from mx.eval, while numpy's conversion let MLX's
+        # error escape as an uncaught C++ exception (libc++abi abort, a
+        # crash report on every unload that tore an exchange)
+        mx.eval(out)
         return rows, np.array(out).tobytes()
 
 
