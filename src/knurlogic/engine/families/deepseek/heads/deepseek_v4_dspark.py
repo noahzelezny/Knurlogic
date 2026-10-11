@@ -59,6 +59,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten
 
+from knurlogic.engine.split.weights import fetch_now
+
 from .deepseek_v4 import _recipe
 
 SIDECAR_NAME = "mtp-head-dspark-mxfp4.safetensors"
@@ -424,7 +426,7 @@ class DSparkHead:
 
     @classmethod
     def from_sidecar(cls, model, arch, path):
-        return cls(model, arch).load_weights(mx.load(str(path)))
+        return cls(model, arch).load_weights(fetch_now(mx.load(str(path))))
 
     # -------------------------------------------------------------- draft
     def advance(self, main_h, cache: DSparkCache) -> DSparkCache:

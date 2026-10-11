@@ -23,6 +23,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
 
+from knurlogic.engine.split.weights import fetch_now
+
 logger = logging.getLogger(__name__)
 
 SIDECAR_NAME = "mtp-head-q6.safetensors"
@@ -197,7 +199,8 @@ class MTPHeadQwen35:
 
     @classmethod
     def from_sidecar(cls, model, arch, path):
-        w = mx.load(str(path))
+        # from the peer when a split rank fetches its share
+        w = fetch_now(mx.load(str(path)))
         # Older sidecars store the shifted norm gains in
         # float32 (the accumulate dtype leaked into the file). Seven tensors
         # — the two layernorms, q_norm/k_norm, and the three pre-fc norms —
