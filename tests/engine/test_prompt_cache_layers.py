@@ -438,7 +438,7 @@ def test_the_commit_op_is_in_the_plan_schema():
                           "entries": [{"tokens_hash": "../x"}]}]})
 
 
-def test_cross_chip_off_is_one_key_on_any_machines():
+def test_rounding_on_is_one_key_on_any_machines():
     # a single Mac and a two-Mac split with rounding off read the same
     # entries; the split's descriptor lists its chips even when off
     one = {"on": False, "setting": "off", "chips": [], "why": "off",
@@ -449,3 +449,39 @@ def test_cross_chip_off_is_one_key_on_any_machines():
     on_ab = dict(two, on=True, setting="auto")
     on_ba = dict(on_ab, chips=["chip B", "chip A"])
     assert LY.rounding_of(on_ab) == LY.rounding_of(on_ba) != "off"
+
+
+# the cache key's own field for per-chip rounding (KNURLOGIC_PER_CHIP_ROUNDING)
+# keeps its name and values, so these ids -- the ones saved entries carry,
+# computed before the setting was renamed -- must hold
+_M3 = {"name": "M3 Ultra", "arch": "applegpu_g15d"}
+_M4 = {"name": "M4 Max", "arch": "applegpu_g16s"}
+
+
+@pytest.mark.parametrize("setting,chips,field,kid", [
+    # the default: per-chip rounding on
+    ("on", None, "off", "25e9a271a6701d86"),
+    # rounding off on one machine
+    ("off", None, repr({"setting": "on", "chips": []}), "45d63a889b85a83e"),
+    # rounding off across chips (an M3 and an M4)
+    ("off", [_M3, _M4],
+     repr({"setting": "on", "chips": ["M3 Ultra", "M4 Max"]}),
+     "8a2d7e49284719da"),
+    # auto across chips pads
+    ("auto", [_M3, _M4],
+     repr({"setting": "auto", "chips": ["M3 Ultra", "M4 Max"]}),
+     "b8186da89f0bfbb4"),
+])
+def test_the_rounding_key_is_the_one_saved_before_the_rename(
+        setting, chips, field, kid):
+    from knurlogic.engine import matmul_padding
+    from knurlogic.engine.prompt_cache import disk
+    r = matmul_padding.resolve(setting, chips)
+    key = LY.shard_key(None, rounding=r)
+    assert key["cross_chip"] == field
+    assert disk.key_id(key) == kid
+    # the whole-model entry's key: the full resolution, as before
+    ident = disk.identity(None, rounding=r)["cross_chip"]
+    assert ident == repr({"on": r["on"], "setting": r["setting"],
+                          "chips": r["chips"], "why": r["why"],
+                          "label": r["label"]})

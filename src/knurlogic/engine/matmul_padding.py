@@ -1,4 +1,5 @@
-"""Identical results across chips (KNURLOGIC_CROSS_CHIP).
+"""Quantized-matmul row padding: the same rounding on every chip, for
+per-chip rounding off (KNURLOGIC_PER_CHIP_ROUNDING).
 
 mlx 0.31.2's `mx.quantized_matmul` switches from its matrix-vector kernel
 (qmv) to its matrix-matrix kernel (qmm) at a row count that depends on the
@@ -7,37 +8,52 @@ rounds differently on M3- and M4-generation chips. A call with 9-31 rows
 against a 2-D weight is therefore zero-padded to 32 rows, run (qmm on every
 chip) and sliced back; 1-8 and >=32 rows are untouched.
 
-Off by default (rank 0 samples every token, so rounding cannot desync a
-cluster). `on` forces it; `auto` turns it on for a cluster job whose
-machines have different GPU architectures. mlx is imported only by
-`install`. Design: docs/design/server.md (cross-chip rounding).
+Per-chip rounding is on by default: each chip runs its own fastest kernel
+and nothing is padded (rank 0 samples every token, so rounding cannot
+desync a cluster). `off` pads on every machine; `auto` pads (rounding off)
+only for a cluster job whose machines have different GPU architectures.
+mlx is imported only by `install`. Design: docs/design/server.md
+(per-chip rounding).
 """
 from __future__ import annotations
 
 #: rows in [LO, HI) are padded to HI
 LO, HI = 9, 32
-VALUES = ("auto", "on", "off")
+#: what KNURLOGIC_PER_CHIP_ROUNDING takes
+VALUES = ("on", "off", "auto")
+#: the prompt cache key's own words for a setting (the `setting` of
+#: resolve's dict): they say whether to pad, so rounding off is "on"
+KEY_SETTING = {"on": "off", "off": "on", "auto": "auto"}
 
 _STATE = {"orig": None, "installed": False}
 
 
 def parse(v) -> str:
-    """'auto' | 'on' | 'off' ('' / None -> off; 1/0, true/false too)."""
+    """'on' | 'off' | 'auto' ('' / None -> on; 1/0, true/false too)."""
     s = str(v if v is not None else "").strip().lower()
     if s == "auto":
         return "auto"
-    if s in ("on", "1", "true", "yes"):
+    if s in ("", "on", "1", "true", "yes"):
         return "on"
-    if s in ("", "off", "0", "false", "no"):
+    if s in ("off", "0", "false", "no"):
         return "off"
-    raise ValueError(f"KNURLOGIC_CROSS_CHIP {v!r}: one of {list(VALUES)}")
+    raise ValueError(f"KNURLOGIC_PER_CHIP_ROUNDING {v!r}: one of "
+                     f"{list(VALUES)}")
 
 
 def resolve(setting, chips=None) -> dict:
-    """{on, setting, chips, why}. `chips`: one {name, arch} per machine of
-    the job (rank order), or None/one for a single machine. Machines differ
-    by GPU architecture; one that did not report it is compared by name."""
-    s = parse(setting)
+    """{on, setting, chips, why, label} for per-chip rounding `setting`.
+    `chips`: one {name, arch} per machine of the job (rank order), or
+    None/one for a single machine. Machines differ by GPU architecture; one
+    that did not report it is compared by name.
+
+    The dict is the prompt cache key's own (engine/prompt_cache:
+    disk.identity and layers.rounding_of hash it into key ids, so its shape
+    and values never change or every saved entry is orphaned): `on` is
+    whether calls are padded (per-chip rounding OFF) and `setting` is in
+    the key's words (KEY_SETTING). `describe` and `public` give it in the
+    setting's words."""
+    s = KEY_SETTING[parse(setting)]
     chips = [c for c in (chips or []) if isinstance(c, dict)]
     names = [str(c.get("name") or c.get("arch") or "?") for c in chips]
     keys = {str(c.get("arch") or c.get("name") or "") for c in chips} - {""}
@@ -56,11 +72,33 @@ def resolve(setting, chips=None) -> dict:
             "label": label}
 
 
+def public(r: dict) -> dict:
+    """A resolution in per-chip rounding's words, for status and the page:
+    {per_chip_rounding: on|off, setting, padded, chips, why} (plus
+    `installed` when the host recorded it)."""
+    setting = KEY_SETTING.get(r.get("setting"), r.get("setting"))
+    padded_ = bool(r.get("on"))
+    if setting == "auto":
+        why = ("auto: machines differ" if padded_ else
+               "auto: one GPU architecture" if len(r.get("chips") or []) > 1
+               else "auto: one machine")
+    else:
+        why = "set " + str(setting)
+    out = {"per_chip_rounding": "off" if padded_ else "on",
+           "setting": setting, "padded": padded_,
+           "chips": list(r.get("chips") or []), "why": why}
+    if "installed" in r:
+        out["installed"] = r["installed"]
+    return out
+
+
 def describe(r: dict) -> str:
-    """'on (M3 Ultra + M4 Max)' / 'off (auto: one machine)'."""
-    if r["on"] and r.get("label"):
-        return f"on ({r['label']})"
-    return f"{'on' if r['on'] else 'off'} ({r['why']})"
+    """'off (M3 Ultra + M4 Max)' / 'on (auto: one machine)': per-chip
+    rounding off means the same rounding on every chip."""
+    p = public(r)
+    if p["padded"] and r.get("label"):
+        return f"off ({r['label']})"
+    return f"{p['per_chip_rounding']} ({p['why']})"
 
 
 def padded(orig):
@@ -80,7 +118,7 @@ def padded(orig):
         return orig(x, w, scales, biases, transpose=transpose,
                     group_size=group_size, bits=bits, mode=mode, **kw)
 
-    quantized_matmul._knurlogic_cross_chip = True
+    quantized_matmul._knurlogic_padded = True
     return quantized_matmul
 
 
@@ -88,7 +126,7 @@ def install() -> bool:
     """Wrap mx.quantized_matmul, once per process. True if it is wrapped."""
     import mlx.core as mx
     cur = mx.quantized_matmul
-    if getattr(cur, "_knurlogic_cross_chip", False):
+    if getattr(cur, "_knurlogic_padded", False):
         _STATE["installed"] = True
         return True
     _STATE["orig"] = cur

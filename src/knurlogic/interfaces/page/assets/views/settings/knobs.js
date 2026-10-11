@@ -57,7 +57,7 @@ function migrateLaunchSets(){
   if(moved) try{ localStorage.setItem(LSKEY, JSON.stringify(all)) }catch(e){}
 }
 // set once for every model (tuning/preferences), never per model
-const isGlobal=n=>n==='KNURLOGIC_CROSS_CHIP'||/^KNURLOGIC_COMPACT_/.test(n);
+const isGlobal=n=>n==='KNURLOGIC_PER_CHIP_ROUNDING'||/^KNURLOGIC_COMPACT_/.test(n);
 
 // One knob, one line: NAME (i) live|needs reload, and its control on the
 // right. `c` says whose it is: g (the staging group), where (the model
@@ -66,7 +66,7 @@ const isGlobal=n=>n==='KNURLOGIC_CROSS_CHIP'||/^KNURLOGIC_COMPACT_/.test(n);
 // (nothing of it runs: every change is a launch setting), label (how the confirm lists it) and url
 // (a setting of this page's own, POSTed there as {gib}: the allowance).
 // a launch setting's plain name, where its variable is not one
-const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Per-chip rounding', KNURLOGIC_PRESET:'Preset',
+const KNOB_TITLE={KNURLOGIC_PER_CHIP_ROUNDING:'Per-chip rounding', KNURLOGIC_PRESET:'Preset',
   KNURLOGIC_CONTEXT_LENGTH:'Context length', KNURLOGIC_KV_BITS:'KV cache',
   KNURLOGIC_PREFILL_CHUNK:'Prompt chunk', KNURLOGIC_CACHE_LIMIT_GB:'Cache reserve',
   KNURLOGIC_MTP:'MTP', KNURLOGIC_MTP_DYNAMIC:'MTP dynamic', KNURLOGIC_VISION:'Vision', KNURLOGIC_KV_KERNEL:'KV kernel',

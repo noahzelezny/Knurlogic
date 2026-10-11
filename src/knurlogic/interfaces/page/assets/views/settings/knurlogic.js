@@ -101,8 +101,8 @@ function wireGks(el){
 }
 // The presets, every setting a preset sets as its own row, and per-chip
 // rounding last (no preset row: benchmark turns it off at launch, and a
-// value saved here beats that): on unless KNURLOGIC_CROSS_CHIP
-// is on (the same rounding on every chip); a saved auto or off reads as on.
+// value saved here beats that): on unless KNURLOGIC_PER_CHIP_ROUNDING is
+// off (the same rounding on every chip); a saved auto or on reads as on.
 // A preset button sets the rows; a row changed by hand leaves no preset
 // pressed, unless the rows come to equal one. Saved: the preset when the
 // rows equal it, otherwise default plus each row that differs from it.
@@ -113,7 +113,7 @@ async function showStrategy(ms){
   if(seq!==SEQ) return;
   const me=docs[0].strategy||{}, ps=me.presets||[], rows=me.rows||[], cur=me.preset||'default';
   if(!ps.length||!rows.length){ el.innerHTML=`<div class="msg">${esc(me.error||'this page predates the strategy')}</div>`; return }
-  const kn=docs[0].knurlogic||{}, cc=kn.cross_chip, saved=kn.saved||{};
+  const kn=docs[0].knurlogic||{}, cc=kn.per_chip_rounding, saved=kn.saved||{};
   const names=rows.map(r=>r.name), pv=n=>ps.find(p=>p.name===n).values;
   const ov=n=>{ const t=stagedVal(KNG,n); return t==null?saved[n]||'':t==='(unset)'?'':t };
   const V0={...pv(stagedVal(KNG,'strategy')??cur)};
@@ -129,7 +129,7 @@ async function showStrategy(ms){
       aria-label="${esc(r.title)}">${r.options.map(o=>
       `<option value="${esc(o.v)}">${esc(o.t)}</option>`).join('')}</select></label>`).join('')}</div>
     ${cc?`<div class="gks">${gsel(cc.name,'Per-chip rounding',cc.help||cc.what,'',
-      [{v:'',t:'on'},{v:'on',t:'off'}], cc.value==='on'?'on':'',null)}</div>`:''}
+      [{v:'',t:'on'},{v:'off',t:'off'}], cc.value==='off'?'off':'',null)}</div>`:''}
   </div>`;
   const show=()=>{
     const m=match();

@@ -453,7 +453,7 @@ suite: 0.90 (Flash-Next), 0.89 (GLM-5.3).
 
 ## Module notes
 
-### src/knurlogic/engine/crosschip.py
+### src/knurlogic/engine/matmul_padding.py
 
 mlx 0.31.2's `mx.quantized_matmul` moves from its matrix-vector kernel (qmv)
 to its matrix-matrix kernel (qmm) at a row count that depends on the GPU
@@ -469,9 +469,17 @@ matmul are independent, so the result is what a real 32-row call gives for
 those rows; 1-8 and >=32 rows are untouched. Measured: M3- and M4-generation
 chips bit-identical across all layers; +2-6% on the affected calls only.
 
-Off by default: rank 0 samples every token, so rounding differences cannot
-desync a cluster. `on` forces it; `auto` turns it
-on for a cluster job whose machines have different GPU architectures.
+This is per-chip rounding off (`KNURLOGIC_PER_CHIP_ROUNDING=off`). Per-chip
+rounding is on by default -- nothing padded, each chip its own fastest
+kernel: rank 0 samples every token, so rounding differences cannot desync a
+cluster. `off` pads on every machine; `auto` pads (rounding off) for a
+cluster job whose machines have different GPU architectures.
+
+`resolve()` returns the prompt cache key's own dict (`on` = padded,
+`setting` in the key's words, `KEY_SETTING`): the cache hashes it into its
+key ids (`disk.identity`, `layers.rounding_of`, under the key's own field
+`cross_chip`), so a new shape would orphan every saved session. `public()` and
+`describe()` give it in today's words.
 
 ### knurlogic/interfaces/http/residency.py
 

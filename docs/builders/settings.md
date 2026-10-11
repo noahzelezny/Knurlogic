@@ -12,7 +12,7 @@ each value. The why: [settings](../design/settings.md); memory:
 | `tuning/measured.py` | every measured constant with its provenance: decode and prefill chunks (`DECODE_CHUNK_*`, `PREFILL_CHUNK_*`, `prefill_chunk_for`), the fit reserve (`FIT_*`), cache limits (`CACHE_LIMIT_GB_DEFAULT`, `CACHE_LIMIT_GB_MAX`), low headroom (`low_headroom_bytes`), KV element size and the KV precisions a family takes (`kv_bytes_per_element`, `kv_quant_for`), the vision allowance (`VISION_*`, `BF16_BYTES`) |
 | `tuning/numerics.py` | the VQ numerics flags: `NUMERICS_FLAGS`, `RUNTIME_PROFILES`, `NUMERICS_SOURCES`, `numerics_for` |
 | `tuning/presets.py` | the presets (the tune axis): `TUNE_PROFILES`, `PRESETS` (`default`, `lean`), `preset_of`, `preset_or`, `preset_arg`, `preset_launch`, `preset_values`; the rows a custom set is saved as: `PRESET_ROWS`, `MTP_MODE`, `preset_row_values` |
-| `tuning/knobs.py` | the knob registry: `KNOB_DOC`, `KNOB_HELP`, `KNOB_TITLES`, `KNOB_ALIASES`, `MODEL_KNOBS`, `ENGINE_KNOB_NAMES`, `knob_tier`, `KNOB_RANGE`, `KNOB_BOUNDS`; the readers of a set value (`on_off`, `vision_of`, `mtp_of`, `kv_bits_of`, `thinking_default_of`, `cross_chip_of`); aliases: `engine_settings`, `canonical_sets`, `legacy_mirror`, `default_alias` |
+| `tuning/knobs.py` | the knob registry: `KNOB_DOC`, `KNOB_HELP`, `KNOB_TITLES`, `KNOB_ALIASES`, `MODEL_KNOBS`, `ENGINE_KNOB_NAMES`, `knob_tier`, `KNOB_RANGE`, `KNOB_BOUNDS`; the readers of a set value (`on_off`, `vision_of`, `mtp_of`, `kv_bits_of`, `thinking_default_of`, `per_chip_rounding_of`); aliases: `engine_settings`, `canonical_sets`, `legacy_mirror`, `default_alias` |
 | `tuning/groups.py` | the knurlogic-wide groups read per request: `COMPACT_KNOBS`, `compact_settings`, `check_compact_knob`; `PROMPT_CACHE_KNOBS`, `check_prompt_cache_knob` |
 | `tuning/context_window.py` | `model_window`, long context (YaRN): `long_context_of`, `long_context_refusal`, `context_ceiling`, `settle_context`, `long_context_config`, `with_long_context`, `long_context_room` |
 | `tuning/checks.py` | every refusal: `check_knob` (one value), `clean_sets` and `PATH_KEYS` (a request's knobs, `launch_knobs`), `refuse_sets` (a set on one artifact), `settings_refusal`, `launch_refusal`, `launch_fit` (a whole launch, before a process starts) |
@@ -68,7 +68,7 @@ Where the settings meet the rest (thin calls, no settings logic):
   a cluster job call `tuning/checks` (`check_knob`, `refuse_sets`,
   `launch_refusal`), so a value is refused the same way on every surface.
 - **A saved preference beats a server's environment**; an explicit
-  `--set` of the cross-chip knob still beats it at that launch.
+  `--set` of per-chip rounding still beats it at that launch.
 
 ## Adding a knob
 

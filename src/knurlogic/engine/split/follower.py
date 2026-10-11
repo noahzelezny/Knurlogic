@@ -304,10 +304,10 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                    executes_artifact_code: bool = False,
                    split: str = "tensor", pipeline: dict | None = None,
                    draft: bool = True, kv_bits: int | None = None,
-                   cross_chip: dict | None = None) -> int:
+                   rounding: dict | None = None) -> int:
     """A rank >= 1 from start to stop: join, load its shard, follow.
     `pipeline`: agree()'s keyword arguments for a pipeline split.
-    `cross_chip`: engine/crosschip.resolve(...) for this job."""
+    `rounding`: engine/matmul_padding.resolve(...) for this job."""
     from knurlogic.engine.runtime.model_host import ModelHost
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
@@ -339,7 +339,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
                      shard=cut, shard_config=cut_config, vision=True,
                      tower=False, load_wait_s=3600.0,
                      head_agree=heads, kv_bits=kv_bits,
-                     cross_chip=cross_chip)
+                     rounding=rounding)
     host.cache_layout = layout
     disk: list = [None, [], None]
 

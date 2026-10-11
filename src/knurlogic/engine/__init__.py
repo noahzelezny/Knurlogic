@@ -13,7 +13,7 @@ fails the suite, so swapping the engine stays a change to this folder.
   templates/     chat templates knurlogic supplies in place of an artifact's
   kvquant.py     the quantized KV cache (8, 6 or 4 bits)
   kvattn.py      the decode attention kernel over kvquant's 8-bit cache
-  crosschip.py   identical results across M3 and M4 chips
+  matmul_padding.py  per-chip rounding off: identical results on M3 and M4
   arch.py        which architecture module a model_type needs, verified
   register.py    installs the architecture modules into mlx-lm
   smoke.py       `knurlogic smoke`: generate a token, prove where code came from

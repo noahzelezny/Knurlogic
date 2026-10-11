@@ -254,7 +254,7 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
             heal = _selfheal()
         except (*PROC_ERRORS, ValueError):
             heal = False
-        from knurlogic.engine.crosschip import gpu_architecture
+        from knurlogic.engine.matmul_padding import gpu_architecture
         doc = {"chip": chip, "gpu_architecture": gpu_architecture(),
                "p_core_ghz": None,
                "bandwidth_gbs": chip_bandwidth_gbs(chip),
@@ -1018,8 +1018,8 @@ def rank_argv(path: str, spec: dict, files: dict) -> list:
     for k, v in sorted((spec.get("sets") or {}).items()):
         cmd += ["--set", f"{k}={v}"]
     if spec.get("chips"):
-        # every rank's chip, so each resolves KNURLOGIC_CROSS_CHIP=auto
-        # the same way (engine/crosschip.resolve)
+        # every rank's chip, so each resolves KNURLOGIC_PER_CHIP_ROUNDING=
+        # auto the same way (engine/matmul_padding.resolve)
         cmd += ["--ring-chips", json.dumps(spec["chips"])]
     return cmd
 
@@ -2052,7 +2052,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "jaccl_timeout_ms": J.JACCL_TIMEOUT_MS if link == "jaccl" else 0,
             "sets": sets, "cable": net, "cable_note": note[:400],
             # each machine's chip and GPU architecture, rank order: the
-            # ranks resolve KNURLOGIC_CROSS_CHIP=auto from it
+            # ranks resolve KNURLOGIC_PER_CHIP_ROUNDING=auto from it
             "chips": [{"name": m.get("chip") or m.get("name") or "",
                        "arch": m.get("gpu_architecture") or ""}
                       for m in order],

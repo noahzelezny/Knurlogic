@@ -46,7 +46,7 @@ TUNE_PROFILES: dict = {
     # the width it measures.
     "benchmark": {
         "KNURLOGIC_PREFILL_CHUNK": 2048,
-        "launch": {"cross_chip": "on", "mtp_dynamic": "off",
+        "launch": {"per_chip_rounding": "off", "mtp_dynamic": "off",
                    "prompt_cache_reuse": "off"},
         "why": "reproducible runs: the same rounding on every chip "
                "(per-chip rounding off), MTP as set but drafting every "
@@ -116,7 +116,7 @@ def preset_launch(tune: str, model_type: str = "") -> tuple:
 #: and the model launch settings.
 PRESET_BASE = {"prefill": None, "cache": measured.CACHE_LIMIT_GB_DEFAULT, "scale": 1.0,
                "mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16",
-               "cross_chip": "off", "prompt_cache_reuse": "on"}
+               "per_chip_rounding": "on", "prompt_cache_reuse": "on"}
 
 
 def preset_values(name: str) -> dict:

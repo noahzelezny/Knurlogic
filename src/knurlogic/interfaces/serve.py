@@ -241,7 +241,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # -> Models, carried ring-wide like every launch set) picks it over
     # --tune; its launch values are defaults every explicit set beats.
     overrides = knobs.canonical_sets(overrides)
-    # identical results across chips is knurlogic-wide (Settings ->
+    # per-chip rounding is knurlogic-wide (Settings ->
     # Knurlogic, tuning/preferences), not a model's: saved, it beats the
     # preset's value; an explicit --set still beats it
     from knurlogic.tuning import preferences
@@ -285,10 +285,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     if launch.get("mtp") is False:
         draft = False
     vision = launch.get("vision", True)
-    # identical rounding across GPU architectures (engine/crosschip.py):
-    # off by default; auto is on when this job's machines differ
-    from knurlogic.engine import crosschip
-    cross = crosschip.resolve(launch.get("cross_chip", "off"),
+    # per-chip rounding (engine/matmul_padding.py): on by default (each
+    # chip its own kernel); off pads for identical rounding on every chip;
+    # auto is off when this job's machines differ
+    from knurlogic.engine import matmul_padding
+    rounding = matmul_padding.resolve(launch.get("per_chip_rounding", "on"),
                               ring.get("chips") if world > 1 else None)
 
     ws = int(working_set_gib * GIB)
@@ -416,7 +417,9 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         snap["wired"] = wired.advise(a.bytes_on_disk)
         snap["drafting"] = binding.drafting_status()
         from knurlogic.engine.model import state as _st
-        snap["cross_chip"] = dict(_st.SERVED.get("cross_chip") or cross)
+        snap["per_chip_rounding"] = dict(
+            _st.SERVED.get("per_chip_rounding")
+            or matmul_padding.public(rounding))
         # 8-bit KV decode kernel: hits vs fallbacks, so an A/B of
         # KNURLOGIC_KV_KERNEL can see which path actually ran
         if _st.SERVED.get("kv_kernel") is not None:
@@ -500,7 +503,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             prefill_step_size=int(ring["prefill_chunk"]),
             executes_artifact_code=bool(a.model_file),
             split=ring.get("split", "tensor"), pipeline=ring.get("pipeline"),
-            draft=draft, kv_bits=kv_bits, cross_chip=cross)
+            draft=draft, kv_bits=kv_bits, rounding=rounding)
         return 0
 
     shown = host.split(",")[0]
@@ -609,7 +612,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             print(f"vision     off (KNURLOGIC_VISION=off): no tower, image "
                   f"store or image KV, {freed / GIB:.1f} GiB not held; "
                   f"image requests get a 400")
-    print(f"cross-chip: {crosschip.describe(cross)}")
+    print(f"per-chip rounding: {matmul_padding.describe(rounding)}")
 
     # The knobs the ENGINE reads -- argv and a process-global mlx call --
     # from the environment as it finally stands, overrides included.
@@ -627,7 +630,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
               + ("--working-set-gib" if working_set_gib else
                  f"the knurlogic allowance, {allowance.path()}") + ")")
     return http.serve(a, host, port, routes=routes,
-                      settings={**eng, "cross_chip": cross, **(serving or {}),
+                      settings={**eng, "rounding": rounding, **(serving or {}),
                                 **({"working_set_bytes": guard}
                                    if guard else {})}, draft=draft,
                       ring=ring if world > 1 else None)
@@ -835,7 +838,7 @@ def main(argv=None) -> int:
     # machine's memory bandwidth when the chip table does not know it
     p.add_argument("--layers", default="", help=hide)
     p.add_argument("--bandwidth-gbs", type=float, default=0.0, help=hide)
-    # every rank's {name, arch} as JSON, for KNURLOGIC_CROSS_CHIP=auto
+    # every rank's {name, arch} as JSON, for KNURLOGIC_PER_CHIP_ROUNDING=auto
     p.add_argument("--ring-chips", default="", help=hide)
     a = p.parse_args(argv)
     ring = None

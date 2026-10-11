@@ -49,8 +49,8 @@ def check_knob(name: str, value, window: int = 0):
             presets.preset_of(s)
         elif name == presets.MTP_MODE and s not in presets.MTP_MODES:
             raise ValueError(f"{s!r} isn't {', '.join(presets.MTP_MODES)}")
-        elif name == "KNURLOGIC_CROSS_CHIP":
-            knobs.cross_chip_of(s)
+        elif name == "KNURLOGIC_PER_CHIP_ROUNDING":
+            knobs.per_chip_rounding_of(s)
         elif name == "KNURLOGIC_LONG_CONTEXT":
             context_window.long_context_of(s)
         elif name == "KNURLOGIC_THINKING_DEFAULT":

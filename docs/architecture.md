@@ -78,7 +78,7 @@ Peers are found by `cluster/discovery.py` and `cluster/peers.py`.
 - **Saved per machine**: `~/.config/knurlogic/settings.json`
   (`XDG_CONFIG_HOME` honoured), managed by `tuning/preferences.py`. It
   holds a custom preset's values, compaction, the disk prompt cache and
-  cross-chip rounding; the default preset (the strategy) is beside it in
+  per-chip rounding; the default preset (the strategy) is beside it in
   `strategy.json` (`tuning/strategy.py`). Every model server on the
   machine reads them.
 - **Per model**: chosen in the page's Settings panel and applied when that

@@ -258,7 +258,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                    vision=settings.get("vision", True),
                    load_wait_s=3600.0 if ring else 0.0,
                    kv_bits=settings.get("kv_bits"),
-                   cross_chip=settings.get("cross_chip"))
+                   rounding=settings.get("rounding"))
     if ring:
         # the disk prompt cache's key: this rank's part of the split
         # (engine/prompt_cache/disk; the followers' in follower.serve_follower)

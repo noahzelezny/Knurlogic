@@ -1,6 +1,6 @@
-"""Knurlogic-wide settings (tuning/preferences): compaction and identical
-results across chips are set once for every model, not per model -- read
-per request (compaction) and at launch (cross-chip)."""
+"""Knurlogic-wide settings (tuning/preferences): compaction and per-chip
+rounding are set once for every model, not per model -- read per request
+(compaction) and at launch (per-chip rounding)."""
 
 import pytest
 
@@ -21,10 +21,10 @@ def home(tmp_path, monkeypatch):
 def test_round_trip_clear_and_refusals(home):
     assert preferences.get() == {}
     preferences.set({"KNURLOGIC_COMPACT_KEEP_TURNS": "4",
-                     "KNURLOGIC_CROSS_CHIP": "on"})
+                     "KNURLOGIC_PER_CHIP_ROUNDING": "off"})
     assert preferences.get() == {"KNURLOGIC_COMPACT_KEEP_TURNS": "4",
-                                 "KNURLOGIC_CROSS_CHIP": "on"}
-    preferences.set({"KNURLOGIC_CROSS_CHIP": ""})
+                                 "KNURLOGIC_PER_CHIP_ROUNDING": "off"}
+    preferences.set({"KNURLOGIC_PER_CHIP_ROUNDING": ""})
     assert preferences.get() == {"KNURLOGIC_COMPACT_KEEP_TURNS": "4"}
     with pytest.raises(ValueError):
         preferences.set({"KNURLOGIC_KV_KERNEL": "off"})  # a model's
@@ -64,24 +64,26 @@ def test_compaction_document_is_one_live_set(home):
 def test_peer_machine_saves_knurlogic_wide_settings(home):
     code, doc = page_peers.peer_machine(
         {"strategy": "lean",
-         "settings": {"KNURLOGIC_CROSS_CHIP": "auto",
+         "settings": {"KNURLOGIC_PER_CHIP_ROUNDING": "auto",
                       "KNURLOGIC_COMPACT_AUTO": "on"}})
     assert code == 200
-    assert doc["knurlogic"]["saved"] == {"KNURLOGIC_CROSS_CHIP": "auto",
+    assert doc["knurlogic"]["saved"] == {"KNURLOGIC_PER_CHIP_ROUNDING": "auto",
                                          "KNURLOGIC_COMPACT_AUTO": "on"}
-    assert doc["knurlogic"]["cross_chip"]["value"] == "auto"
+    assert doc["knurlogic"]["per_chip_rounding"]["value"] == "auto"
     code, doc = page_peers.peer_machine(
         {"settings": {"KNURLOGIC_CONTEXT_LENGTH": "512"}})
     assert code == 400
-    assert preferences.get()["KNURLOGIC_CROSS_CHIP"] == "auto"
+    assert preferences.get()["KNURLOGIC_PER_CHIP_ROUNDING"] == "auto"
 
 
 def test_set_knurlogic_clears_and_reports(home):
-    out = documents.set_knurlogic(b'{"KNURLOGIC_CROSS_CHIP": "on"}')
-    assert out["applied"] == {"KNURLOGIC_CROSS_CHIP": "on"}
-    out = documents.set_knurlogic(b'{"KNURLOGIC_CROSS_CHIP": ""}')
-    assert out["applied"] == {"KNURLOGIC_CROSS_CHIP": "cleared"}
-    assert "error" in documents.set_knurlogic(b'{"KNURLOGIC_CROSS_CHIP": "x"}')
+    out = documents.set_knurlogic(b'{"KNURLOGIC_PER_CHIP_ROUNDING": "off"}')
+    assert out["applied"] == {"KNURLOGIC_PER_CHIP_ROUNDING": "off"}
+    assert out["per_chip_rounding"]["value"] == "off"
+    out = documents.set_knurlogic(b'{"KNURLOGIC_PER_CHIP_ROUNDING": ""}')
+    assert out["applied"] == {"KNURLOGIC_PER_CHIP_ROUNDING": "cleared"}
+    assert "error" in documents.set_knurlogic(
+        b'{"KNURLOGIC_PER_CHIP_ROUNDING": "x"}')
 
 
 def test_every_setting_says_what_it_costs():
@@ -92,22 +94,21 @@ def test_every_setting_says_what_it_costs():
         assert any(w in why.lower() for w in words), name
     for name, spec in groups.COMPACT_KNOBS.items():
         assert any(w in spec[4].lower() for w in words), name
-    assert "+2-6%" in knobs.KNOB_DOC["KNURLOGIC_CROSS_CHIP"][1]
+    assert "+2-6%" in knobs.KNOB_DOC["KNURLOGIC_PER_CHIP_ROUNDING"][1]
 
 
-def test_a_launch_reads_cross_chip_from_knurlogic_wide(home):
+def test_a_launch_reads_per_chip_rounding_from_knurlogic_wide(home):
     assert preferences.launch_sets({"KNURLOGIC_KV_BITS": "8"}) == \
         {"KNURLOGIC_KV_BITS": "8"}         # unset: the preset decides
-    preferences.set({"KNURLOGIC_CROSS_CHIP": "on"})
-    assert preferences.launch_sets({})["KNURLOGIC_CROSS_CHIP"] == "on"
+    preferences.set({"KNURLOGIC_PER_CHIP_ROUNDING": "off"})
+    assert preferences.launch_sets({})["KNURLOGIC_PER_CHIP_ROUNDING"] == "off"
     # an explicit --set at that launch still wins
-    assert preferences.launch_sets({"KNURLOGIC_CROSS_CHIP": "off"}) == \
-        {"KNURLOGIC_CROSS_CHIP": "off"}
+    assert preferences.launch_sets({"KNURLOGIC_PER_CHIP_ROUNDING": "on"}) == \
+        {"KNURLOGIC_PER_CHIP_ROUNDING": "on"}
     # and it beats the preset's value, as any launch set does
-    from knurlogic.tuning.resolve import preset_env  # noqa: F401
-    launch = knobs.engine_settings({"KNURLOGIC_CROSS_CHIP": "off",
+    launch = knobs.engine_settings({"KNURLOGIC_PER_CHIP_ROUNDING": "on",
                                     **preferences.launch_sets({})})
-    assert launch["cross_chip"] == "on"
+    assert launch["per_chip_rounding"] == "off"
 
 
 def test_a_custom_preset_is_saved_rows_the_launch_reads(home):

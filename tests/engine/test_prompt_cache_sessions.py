@@ -296,7 +296,7 @@ class Host:
     state = "empty"
     error = ""
     kv_bits = None
-    cross_chip = None
+    rounding = None
 
     def __init__(self, model, tok):
         self._m, self._t = model, tok

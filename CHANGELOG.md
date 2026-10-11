@@ -28,6 +28,15 @@
   restored at load or read back. Saving is unchanged. The benchmark
   preset turns it off.
 
+### Settings
+
+* Per-chip rounding is the launch setting `KNURLOGIC_PER_CHIP_ROUNDING`,
+  named as the page shows it. `on` (the default) lets each chip run its
+  own fastest kernel; `off` rounds the same way on every chip, so a split
+  across M3 and M4 Macs gives the same tokens as one across a single chip
+  generation (+2-6% time on the 9-31-row quantized matmuls). Saved
+  prompt-cache sessions still match.
+
 ### License
 
 * knurlogic is now licensed under the GNU Affero General Public License,

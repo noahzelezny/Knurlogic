@@ -56,7 +56,7 @@ def test_default_takes_the_family_width_and_dynamic_mtp():
     r = resolve(_art(), 96 * GIB, tune="default")
     e = knobs.engine_settings(r.env)
     assert e["prefill_step_size"] == 2048    # the room rule
-    assert e["kv_bits"] is None and e["cross_chip"] == "off"
+    assert e["kv_bits"] is None and e["per_chip_rounding"] == "on"
     assert preset_env(_art(), "default") == {}    # it asks for nothing
 
 
@@ -65,7 +65,7 @@ def test_lean_is_512_and_keeps_less_cache():
     b = resolve(_art(), 96 * GIB)
     e, eb = knobs.engine_settings(r.env), knobs.engine_settings(b.env)
     assert e["prefill_step_size"] == 512
-    assert e["cross_chip"] == "off"    # per-chip rounding is no preset's
+    assert e["per_chip_rounding"] == "on"    # no preset's but benchmark's
     assert e["cache_limit_gb"] < eb["cache_limit_gb"]
 
 
@@ -123,7 +123,7 @@ def test_benchmark_pins_what_makes_runs_differ():
     r = resolve(_art(), 96 * GIB, tune="benchmark")
     e = knobs.engine_settings(r.env)
     assert e["prefill_step_size"] == 2048
-    assert e["cross_chip"] == "on"
+    assert e["per_chip_rounding"] == "off"
     assert e["prompt_cache_reuse"] is False
     assert e["kv_bits"] is None
     assert r.env["KNURLOGIC_PRESET"] == "benchmark"
@@ -132,7 +132,7 @@ def test_benchmark_pins_what_makes_runs_differ():
                                           tune="benchmark").env)
     assert small["prefill_step_size"] == 2048
     env = preset_env(_art(), "benchmark")
-    assert env == {"KNURLOGIC_CROSS_CHIP": "on",
+    assert env == {"KNURLOGIC_PER_CHIP_ROUNDING": "off",
                    "KNURLOGIC_MTP_DYNAMIC": "off",
                    "KNURLOGIC_PROMPT_CACHE_REUSE": "off"}
     assert "KNURLOGIC_MTP" not in env and "KNURLOGIC_KV_BITS" not in env
@@ -140,14 +140,14 @@ def test_benchmark_pins_what_makes_runs_differ():
     fp = r.preset["from_preset"]
     assert fp["KNURLOGIC_PREFILL_CHUNK"] == "2048"
     assert fp["KNURLOGIC_PROMPT_CACHE_REUSE"] == "off"
-    assert fp["KNURLOGIC_CROSS_CHIP"] == "on"
+    assert fp["KNURLOGIC_PER_CHIP_ROUNDING"] == "off"
 
 
 def test_benchmark_values_and_rows():
     v = presets.preset_values("benchmark")
     assert v["prefill"] == 2048 and v["mtp"] == "on"
     assert v["mtp_dynamic"] == "off" and v["kv_bits"] == "bf16"
-    assert v["cross_chip"] == "on" and v["prompt_cache_reuse"] == "off"
+    assert v["per_chip_rounding"] == "off" and v["prompt_cache_reuse"] == "off"
     rows = presets.preset_row_values("benchmark")
     assert rows == {"KNURLOGIC_PREFILL_CHUNK": "2048",
                     "KNURLOGIC_CACHE_LIMIT_GB":
@@ -160,10 +160,10 @@ def test_benchmark_values_and_rows():
 def test_an_explicit_setting_beats_benchmark():
     r = resolve(_art(), 96 * GIB, tune="benchmark")
     rec = apply_preset_overrides(r, {"KNURLOGIC_PROMPT_CACHE_REUSE": "on",
-                                     "KNURLOGIC_CROSS_CHIP": "off"})
+                                     "KNURLOGIC_PER_CHIP_ROUNDING": "on"})
     assert rec["overridden"] == {
         "KNURLOGIC_PROMPT_CACHE_REUSE": {"preset": "off", "set": "on"},
-        "KNURLOGIC_CROSS_CHIP": {"preset": "on", "set": "off"}}
+        "KNURLOGIC_PER_CHIP_ROUNDING": {"preset": "off", "set": "on"}}
 
 
 def test_the_error_names_every_preset():

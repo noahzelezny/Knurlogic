@@ -29,7 +29,7 @@ Around it, in `engine/`:
 | `kvquant.py` | `QuantKVCache`, `BatchQuantKVCache`, `install`: K/V stored at 8, 6 or 4 bits |
 | `kvattn.py` | the 8-bit decode attention kernel (`decode_sdpa`, `patch_model`) |
 | `split/` | one model across ranks: `tensor.py`, `pipeline.py`, `plan.py`, `tensor_rules.py`, `viability.py`, the ring (see [splits](splits.md)) |
-| `crosschip.py` | identical results across chips (`KNURLOGIC_CROSS_CHIP`) |
+| `matmul_padding.py` | per-chip rounding off (`KNURLOGIC_PER_CHIP_ROUNDING=off`): pads 9-31-row quantized matmuls so every chip rounds alike |
 | `templates/` | chat templates knurlogic supplies in place of an artifact's own |
 | `prompt_cache/` | see [prompt-cache](prompt-cache.md) |
 | `mtp/` | the batch engine and drafting (see [drafting](drafting.md)) |
@@ -103,6 +103,6 @@ reports and the cache limit, `engine/model/load.py` (`memory`,
 
 `tests/engine/test_scheduler.py`, `test_executor.py`, `test_request.py`,
 `test_prompt.py`, `test_segments.py`, `test_thinking.py`, `test_timing.py`,
-`test_kvquant.py`, `test_kvattn.py`, `test_cross_chip.py`,
+`test_kvquant.py`, `test_kvattn.py`, `test_per_chip_rounding.py`,
 `test_warmup.py`, `test_thread_arrays.py`;
 `tests/interfaces/test_http_server.py` for the server around it.

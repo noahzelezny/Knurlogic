@@ -308,7 +308,7 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     # a newer knurlogic on PyPI (asked once at page start, page/updates.py)
     routes["/release.json"] = lambda _q, _n=0: documents.json_reply(
         updates.release_doc())
-    # the knurlogic-wide settings: compaction, identical results across chips
+    # the knurlogic-wide settings: compaction, per-chip rounding
     routes["/knurlogic.json"] = lambda _q, _n=0: documents.json_reply(
         documents.knurlogic_doc())
     routes["POST /knurlogic.json"] = lambda _q, _n=0, body=None: documents.json_reply(

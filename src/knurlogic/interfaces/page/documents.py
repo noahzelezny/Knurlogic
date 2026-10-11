@@ -745,17 +745,18 @@ def compaction_document(env=None, running: bool = True) -> dict:
 
 def knurlogic_doc() -> dict:
     """The knurlogic-wide settings (tuning/preferences) on this machine:
-    what is saved, identical results across chips with its trade-off, and
+    what is saved, per-chip rounding with its trade-off, and
     compaction."""
     from knurlogic.tuning import knobs, preferences
     saved = preferences.get()
-    what, why = knobs.KNOB_DOC[preferences.CROSS_CHIP]
+    name = preferences.PER_CHIP_ROUNDING
+    what, why = knobs.KNOB_DOC[name]
     return {"saved": saved,
-            "cross_chip": {"name": preferences.CROSS_CHIP,
-                           "value": saved.get(preferences.CROSS_CHIP, ""),
-                           "values": knobs.KNOB_RANGE[preferences.CROSS_CHIP][0],
-                           "what": what, "why": why,
-                           "help": knobs.KNOB_HELP[preferences.CROSS_CHIP]},
+            "per_chip_rounding": {"name": name,
+                                  "value": saved.get(name, ""),
+                                  "values": knobs.KNOB_RANGE[name][0],
+                                  "what": what, "why": why,
+                                  "help": knobs.KNOB_HELP[name]},
             "compaction": compaction_document(),
             "prompt_cache": prompt_cache_document(),
             "file": str(preferences.path())}
@@ -784,7 +785,7 @@ def prompt_cache_document(env=None) -> dict:
 def set_knurlogic(body) -> dict:
     """`POST /knurlogic.json` {name: value, ...}: save knurlogic-wide
     settings on this machine ('' clears one). Compaction applies to the
-    next request of every running server; identical results across chips
+    next request of every running server; per-chip rounding
     to the next launch."""
     from knurlogic.tuning import preferences
     try:

@@ -9,18 +9,19 @@ not a model's to vary and so are not kept per base model:
   a long conversation. Policy, not a property of any model. Every model
   server on the machine reads it per request, so a change applies to the
   next request of every running model.
-- **per-chip rounding** (`KNURLOGIC_CROSS_CHIP`; on means the same rounding
-  on every chip, i.e. per-chip rounding off) -- a property of the cluster's
-  hardware mix, not of a model and not of any preset. Read at launch;
-  unset is off (per-chip rounding on). The page offers on/off only; `auto`
-  is still taken from env / `--set`.
+- **per-chip rounding** (`KNURLOGIC_PER_CHIP_ROUNDING`; on, the default,
+  lets each chip run its own fastest kernel; off rounds the same on every
+  chip) -- a property of the cluster's hardware mix, not of a model; only
+  the benchmark preset sets it (off). Read at launch; unset is on. The
+  page offers on/off only; `auto` (off only across GPU generations) is
+  still taken from `--set`.
 
 Kept in `~/.config/knurlogic/settings.json` (`XDG_CONFIG_HOME` honoured),
 beside the allowance and the strategy; the page's Knurlogic tab applies it
 to every machine, each through its own page. What is saved here beats the
 same name in a server's environment (a per-model launch value saved before
 compaction became knurlogic-wide is ignored rather than left to shadow
-it); an explicit `--set` of the cross-chip knob still beats it at that
+it); an explicit `--set` of per-chip rounding still beats it at that
 launch.
 
 ## knurlogic/tuning/resolve.py

@@ -209,7 +209,7 @@ def uses_layers(host) -> bool:
 # ------------------------------------------------------------------- key
 
 def shard_key(path, *, kv_bits=None, long_context=None,
-              cross_chip=None) -> dict:
+              rounding=None) -> dict:
     """What a layer's K/V depends on: no layout, no knurlogic version."""
     from knurlogic.machine import artifact
     try:
@@ -220,22 +220,27 @@ def shard_key(path, *, kv_bits=None, long_context=None,
             "artifact": ident or f"path:{path}",
             "kv_bits": None if kv_bits is None else int(kv_bits),
             "long_context": long_context or None,
-            "cross_chip": rounding_of(cross_chip)}
+            # per-chip rounding, under the cache key's own field name: key
+            # ids are hashed from this dict, so renaming the field or
+            # changing what rounding_of returns would orphan saved entries
+            "cross_chip": rounding_of(rounding)}
 
 
-def rounding_of(cross_chip) -> str | None:
-    """What per-chip rounding changes in the numbers: whether it is on and,
-    when on, its setting and the chips it rounds for. Off is off, whatever
-    machines a split spans (their names would make a single machine's
-    entries and a cluster's different keys for identical K/V)."""
-    if cross_chip is None:
+def rounding_of(rounding) -> str | None:
+    """What per-chip rounding changes in the numbers, in the cache key's
+    own words (engine/matmul_padding.resolve): "off" when nothing is padded (per-chip rounding
+    on), whatever machines a split spans (their names would make a single
+    machine's entries and a cluster's different keys for identical K/V);
+    when padded (per-chip rounding off), the key's setting and the chips it
+    rounds for."""
+    if rounding is None:
         return None
-    if isinstance(cross_chip, dict):
-        if not cross_chip.get("on"):
+    if isinstance(rounding, dict):
+        if not rounding.get("on"):
             return "off"
-        return repr({"setting": cross_chip.get("setting"),
-                     "chips": sorted(cross_chip.get("chips") or [])})
-    return repr(cross_chip)
+        return repr({"setting": rounding.get("setting"),
+                     "chips": sorted(rounding.get("chips") or [])})
+    return repr(rounding)
 
 
 def host_shard_key(host) -> dict | None:
@@ -243,7 +248,7 @@ def host_shard_key(host) -> dict | None:
         return None
     return shard_key(host.path, kv_bits=getattr(host, "kv_bits", None),
                      long_context=os.environ.get("KNURLOGIC_LONG_CONTEXT"),
-                     cross_chip=getattr(host, "cross_chip", None))
+                     rounding=getattr(host, "rounding", None))
 
 
 # ------------------------------------------------------------ files

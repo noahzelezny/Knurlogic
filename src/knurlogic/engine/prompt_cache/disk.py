@@ -168,7 +168,7 @@ def budget_bytes(base: Path | None = None) -> int:
 # ------------------------------------------------------------------ key
 
 def identity(path, *, kv_bits=None, draft=None, layout=None,
-             long_context=None, cross_chip=None) -> dict:
+             long_context=None, rounding=None) -> dict:
     """What the K/V of an entry depends on. `layout`: this rank's part of a
     split ({"split": "pipeline", "world", "rank", "layers": [a, b]}), None
     for a whole model."""
@@ -183,7 +183,10 @@ def identity(path, *, kv_bits=None, draft=None, layout=None,
             "kv_bits": None if kv_bits is None else int(kv_bits),
             "draft": draft, "layout": layout or {"split": "none"},
             "long_context": long_context or None,
-            "cross_chip": None if cross_chip is None else repr(cross_chip)}
+            # per-chip rounding (engine/matmul_padding.resolve), under the
+            # cache key's own field name: key ids are hashed from this
+            # dict, so a rename would orphan every saved entry
+            "cross_chip": None if rounding is None else repr(rounding)}
 
 
 def key_id(key: dict) -> str:
@@ -209,7 +212,7 @@ def host_key(host) -> dict | None:
     return identity(host.path, kv_bits=getattr(host, "kv_bits", None),
                     draft=draft_of(), layout=getattr(host, "cache_layout", None),
                     long_context=os.environ.get("KNURLOGIC_LONG_CONTEXT"),
-                    cross_chip=getattr(host, "cross_chip", None))
+                    rounding=getattr(host, "rounding", None))
 
 
 def tokens_hash(tokens) -> str:

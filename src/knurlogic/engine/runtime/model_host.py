@@ -103,7 +103,7 @@ class ModelHost:
                  shard=None, shard_config=None, vision: bool = True,
                  load_wait_s: float = 0.0,
                  head_agree=None, kv_bits: int | None = None,
-                 cross_chip: dict | None = None, tower: bool = True):
+                 rounding: dict | None = None, tower: bool = True):
         """`shard(model)`: split the weights in place before they are read
         (a tensor ring: loaded lazily, split, then evaluated, so a rank
         never holds the whole model); `shard_config(path)`: config the
@@ -114,10 +114,13 @@ class ModelHost:
         `load_wait_s`: how long to wait for the machine's load lock (ranks
         of one ring on one machine load one after another).
         `kv_bits`: store attention K/V at 8/6/4 bits (engine/kvquant.py);
-        a model with no cache that can be is refused, not served bf16."""
+        a model with no cache that can be is refused, not served bf16.
+        `rounding`: engine/matmul_padding.resolve(...) of this job's per-chip
+        rounding (KNURLOGIC_PER_CHIP_ROUNDING); None = on, nothing padded."""
         self.kv_bits = kv_bits
-        #: engine/crosschip.resolve(...) for this job, None = off
-        self.cross_chip = cross_chip
+        #: engine/matmul_padding.resolve(...) for this job, None = per-chip
+        #: rounding on (nothing padded)
+        self.rounding = rounding
         self.shard = shard
         self.shard_config = shard_config
         #: head_agree(bound: bool, head) -> bool, called after the head binds
@@ -213,7 +216,7 @@ class ModelHost:
                 self.model, self.tokenizer = self._weights(path, lazy)
                 t2 = time.monotonic()
                 self._quantize_kv()
-                self._cross_chip()
+                self._pad_matmuls()
                 self.model_key = (path, None, None)
                 self._bind_vision(path)
                 self._bind_head(path)
@@ -309,17 +312,19 @@ class ModelHost:
         evaluate_everything(model)
         return model, tok
 
-    def _cross_chip(self) -> None:
-        """Pad 9-31-row quantized matmuls to 32 (engine/crosschip.py) so
-        a split across GPU architectures rounds identically everywhere.
-        Process-wide and idempotent."""
-        from knurlogic.engine import crosschip
-        cc = dict(self.cross_chip or {"on": False, "why": "not set"})
+    def _pad_matmuls(self) -> None:
+        """Per-chip rounding off: pad 9-31-row quantized matmuls to 32
+        (engine/matmul_padding.py) so a split across GPU architectures
+        rounds identically everywhere. Process-wide and idempotent."""
+        from knurlogic.engine import matmul_padding
+        cc = dict(self.rounding or {"on": False, "setting": "off",
+                                    "why": "not set"})
         if cc.get("on"):
-            crosschip.install()
-            logger.info("cross-chip: %s", crosschip.describe(cc))
-        cc["installed"] = crosschip.installed()
-        state.SERVED["cross_chip"] = cc
+            matmul_padding.install()
+            logger.info("per-chip rounding: %s",
+                        matmul_padding.describe(cc))
+        cc["installed"] = matmul_padding.installed()
+        state.SERVED["per_chip_rounding"] = matmul_padding.public(cc)
 
     def _quantize_kv(self) -> None:
         state.SERVED["kv_bits"] = self.kv_bits

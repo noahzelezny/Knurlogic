@@ -3,10 +3,10 @@
 Beside the strategy (the default launch preset): a custom set is that preset
 plus explicit values for its rows (tuning/presets.PRESET_ROWS), and compaction
 (tuning/groups.COMPACT_KNOBS, read per request by every server) and
-identical results across chips (KNURLOGIC_CROSS_CHIP, read at launch;
-unset means the preset decides). Kept in ~/.config/knurlogic/settings.json
+per-chip rounding (KNURLOGIC_PER_CHIP_ROUNDING, read at launch; unset
+means the preset decides). Kept in ~/.config/knurlogic/settings.json
 (XDG_CONFIG_HOME honoured). A saved value beats the same name in a
-server's environment; an explicit --set of the cross-chip knob still beats
+server's environment; an explicit --set of per-chip rounding still beats
 it at that launch. Stdlib only.
 
 Design: docs/design/settings.md (preferences).
@@ -20,9 +20,9 @@ from knurlogic.tuning.checks import check_knob
 from knurlogic.tuning.groups import COMPACT_KNOBS, PROMPT_CACHE_KNOBS
 from knurlogic.tuning.presets import MTP_MODE, PRESET_ROW_NAMES
 
-CROSS_CHIP = "KNURLOGIC_CROSS_CHIP"
+PER_CHIP_ROUNDING = "KNURLOGIC_PER_CHIP_ROUNDING"
 #: every name kept here
-NAMES = (CROSS_CHIP,) + PRESET_ROW_NAMES + tuple(COMPACT_KNOBS) + \
+NAMES = (PER_CHIP_ROUNDING,) + PRESET_ROW_NAMES + tuple(COMPACT_KNOBS) + \
     tuple(PROMPT_CACHE_KNOBS)
 
 
@@ -34,15 +34,19 @@ def path() -> Path:
     return root / "settings.json"
 
 
-def get() -> dict:
-    """{name: value} as saved; a damaged file or an unknown name or value is
-    left out, never an error: a launch or a request must not fail on it."""
+def _raw() -> dict:
+    """The file as saved; {} when damaged."""
     try:
         raw = json.loads(path().read_text())
     except (OSError, ValueError):
         return {}
-    if not isinstance(raw, dict):
-        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def get() -> dict:
+    """{name: value} as saved; a damaged file or an unknown name or value is
+    left out, never an error: a launch or a request must not fail on it."""
+    raw = _raw()
     return {k: str(v) for k, v in raw.items()
             if k in NAMES and str(v).strip() and check_knob(k, v) is None}
 
@@ -51,12 +55,7 @@ def invalid() -> list:
     """[(name, why)] for each saved knurlogic-wide value a launch would
     drop as unreadable (get() leaves it out): the launch refuses on these
     instead of running without them."""
-    try:
-        raw = json.loads(path().read_text())
-    except (OSError, ValueError):
-        return []
-    if not isinstance(raw, dict):
-        return []
+    raw = _raw()
     return [(k, check_knob(k, v)) for k, v in raw.items()
             if k in NAMES and str(v).strip() and check_knob(k, v)]
 
@@ -92,15 +91,15 @@ def set(values: dict) -> dict:
 
 def launch_sets(sets: dict | None) -> dict:
     """A launch's explicit settings with the saved knurlogic-wide ones a
-    launch reads added where the launch names none: identical results
-    across chips, and the custom preset values (a launch that names its own
+    launch reads added where the launch names none: per-chip rounding,
+    and the custom preset values (a launch that names its own
     preset takes none of those). Saved beats the preset's value, an
     explicit set beats saved."""
     out = dict(sets or {})
     saved = get()
-    v = saved.get(CROSS_CHIP)
-    if v and CROSS_CHIP not in out:
-        out[CROSS_CHIP] = v
+    v = saved.get(PER_CHIP_ROUNDING)
+    if v and PER_CHIP_ROUNDING not in out:
+        out[PER_CHIP_ROUNDING] = v
     if "KNURLOGIC_PRESET" in out:
         return out
     for k, v in saved.items():

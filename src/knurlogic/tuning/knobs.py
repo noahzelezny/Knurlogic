@@ -17,7 +17,7 @@ KNOB_TITLES: dict = {
     **{r["name"]: r["title"] for r in presets.PRESET_ROWS},
     "KNURLOGIC_PRESET": "Preset",
     "KNURLOGIC_CONTEXT_LENGTH": "Context length",
-    "KNURLOGIC_CROSS_CHIP": "Per-chip rounding",
+    "KNURLOGIC_PER_CHIP_ROUNDING": "Per-chip rounding",
     "KNURLOGIC_MTP": "MTP",
     "KNURLOGIC_MTP_DYNAMIC": "MTP dynamic",
     "KNURLOGIC_VISION": "Vision",
@@ -167,14 +167,15 @@ KNOB_DOC = {
         "refused where the box cannot hold the chosen context's KV. Only "
         "for families whose model card documents it (qwen3_5, "
         "qwen3_5_moe, qwen4_exp)."),
-    "KNURLOGIC_CROSS_CHIP": (
-        "identical results across chips: a split over an M3 and an M4 "
-        "gives the same tokens as a split over two of one",
-        "on costs speed: mlx picks a different quantized-matmul kernel "
-        "for 9-31 rows on each GPU generation, so on pads those calls to 32 "
-        "rows, +2-6% time on them. Off is faster, and a mixed-chip split "
+    "KNURLOGIC_PER_CHIP_ROUNDING": (
+        "per-chip rounding: on (the default) lets each chip run its own "
+        "fastest kernel; off rounds the same on every chip, so a split over "
+        "an M3 and an M4 gives the same tokens as a split over two of one",
+        "off costs speed: mlx picks a different quantized-matmul kernel "
+        "for 9-31 rows on each GPU generation, so off pads those calls to "
+        "32 rows, +2-6% time on them. On is faster, and a mixed-chip split "
         "may then produce different (equally valid) tokens than a same-chip "
-        "one -- it cannot desync, rank 0 samples every token. auto: on only "
+        "one -- it cannot desync, rank 0 samples every token. auto: off only "
         "when a cluster job's machines have different GPU architectures."),
     "KNURLOGIC_PRESET": (
         "launch preset for this model: default, lean or benchmark -- the "
@@ -250,10 +251,10 @@ KNOB_HELP = {
     "VQ_DECODE_BF16IO": "Changes the output slightly; keep what the model "
                         "shipped with.",
     "KNURLOGIC_PRESET": "Default follows the Knurlogic presets.",
-    "KNURLOGIC_CROSS_CHIP": "On: faster, but a split across different "
-                            "chips can give different (still valid) tokens. "
-                            "Turn off if you need identical output; "
-                            "slightly slower.",
+    "KNURLOGIC_PER_CHIP_ROUNDING": "On: faster, but a split across "
+                                   "different chips can give different "
+                                   "(still valid) tokens. Turn off if you "
+                                   "need identical output; slightly slower.",
     "KNURLOGIC_COMPACT_AUTO": "Compacts the conversation automatically "
                               "when it reaches the Auto compact point, even if "
                               "the client didn't ask.",
@@ -309,7 +310,7 @@ KNOB_ALIASES = {
     "gdn_compile": ("KNURLOGIC_GDN_COMPILE",),
     # the level a request that names none is served at (engine/model/thinking)
     "thinking_default": ("KNURLOGIC_THINKING_DEFAULT",),
-    "cross_chip": ("KNURLOGIC_CROSS_CHIP",),
+    "per_chip_rounding": ("KNURLOGIC_PER_CHIP_ROUNDING",),
     "long_context": ("KNURLOGIC_LONG_CONTEXT",),
     "preset": ("KNURLOGIC_PRESET",),
     # whether the prompt cache serves a hit (engine/prompt_cache/memory)
@@ -321,7 +322,7 @@ KNOB_ALIASES = {
 MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_VISION",
                "KNURLOGIC_KV_BITS",
                "KNURLOGIC_KV_KERNEL", "KNURLOGIC_GDN_COMPILE",
-               "KNURLOGIC_CROSS_CHIP",
+               "KNURLOGIC_PER_CHIP_ROUNDING",
                "KNURLOGIC_LONG_CONTEXT", "KNURLOGIC_PRESET",
                "KNURLOGIC_PROMPT_CACHE_REUSE")
 
@@ -338,7 +339,7 @@ ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "mtp_dynamic", "vision", "kv_bits",
                                       "kv_kernel", "gdn_compile",
                                       "thinking_default",
-                                      "cross_chip", "long_context",
+                                      "per_chip_rounding", "long_context",
                                       "preset", "prompt_cache_reuse")
                           for n in KNOB_ALIASES[k])
 
@@ -409,9 +410,9 @@ def kv_bits_of(v):
     return int(s)
 
 
-def cross_chip_of(v) -> str:
-    """'auto' | 'on' | 'off' (engine/crosschip.parse, without mlx)."""
-    from knurlogic.engine.crosschip import parse
+def per_chip_rounding_of(v) -> str:
+    """'on' | 'off' | 'auto' (engine/matmul_padding.parse, without mlx)."""
+    from knurlogic.engine.matmul_padding import parse
     return parse(v)
 
 
@@ -428,7 +429,8 @@ def engine_settings(env: dict) -> dict:
                                 on_off),
                                ("vision", "vision", on_off),
                                ("kv_bits", "kv_bits", kv_bits_of),
-                               ("cross_chip", "cross_chip", cross_chip_of),
+                               ("per_chip_rounding", "per_chip_rounding",
+                                per_chip_rounding_of),
                                ("long_context", "long_context",
                                 context_window.long_context_of)):
         for name in KNOB_ALIASES[logical]:
@@ -533,7 +535,7 @@ KNOB_RANGE: dict = {
     "KNURLOGIC_KV_KERNEL": (["on", "off"], ""),
     "KNURLOGIC_GDN_COMPILE": (["on", "off"], ""),
     "KNURLOGIC_THINKING_DEFAULT": (THINKING_DEFAULT_VALUES, ""),
-    "KNURLOGIC_CROSS_CHIP": (["off", "on", "auto"], ""),
+    "KNURLOGIC_PER_CHIP_ROUNDING": (["on", "off", "auto"], ""),
     # narrowed per family by the resolver: ["off"] where no model card
     # documents YaRN
     "KNURLOGIC_LONG_CONTEXT": (["off", "yarn"], ""),
