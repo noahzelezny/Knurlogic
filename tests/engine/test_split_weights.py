@@ -35,7 +35,8 @@ class Peer:
 
     def __call__(self, file, offset, length, into):
         assert "/" not in file
-        if self.fail_at is not None and offset >= self.fail_at:
+        if self.fail_at is not None and \
+                offset <= self.fail_at < offset + length:
             raise ConnectionError("the peer went away")
         self.calls.append((file, offset, length))
         assert length <= W.PIECE
@@ -71,7 +72,8 @@ def test_a_pipeline_share_comes_from_the_peer(shard, plan):
     out = W.fill(m, peer, "holder")
     assert out["left"] == 0 and not out["failed"]
     # only the share's tensors were asked for, and nothing of layer 0
-    assert len(peer.calls) == len(flat(m))
+    # neighbours in the file go as one request
+    assert 0 < len(peer.calls) <= len(flat(m))
     ref = mx.load(str(shard))
     for k, v in flat(m).items():
         kk = k.replace("layers.0.", "layers.1.", 1) if k.startswith(
@@ -164,3 +166,21 @@ def test_a_large_tensor_comes_in_parallel_pieces(shard, plan, monkeypatch):
     ref = mx.load(str(shard))
     for k, v in flat(m).items():
         assert mx.array_equal(v, ref[k]).item(), k
+
+
+def test_neighbouring_tensors_go_as_one_request_in_file_order():
+    items = [("b", 0, 10), ("a", 100, 5), ("a", 0, 100), ("a", 105, 1 << 40)]
+    got = W._groups(items)
+    assert [(f, o, n) for f, o, n, _ in got] == [
+        ("a", 0, 105), ("a", 105, 1 << 40), ("b", 0, 10)]
+    assert got[0][3] == [(2, 0, 100), (1, 100, 5)]
+
+
+def test_what_is_bound_after_the_weights_comes_from_the_peer(shard, plan):
+    peer = Peer(shard.parent)
+    W.CURRENT["plan"] = W.ReadPlan(read=peer)
+    with W.recording():                      # a head bound beside the model
+        head = {"w": mx.load(str(shard))["layers.2.weight"]}
+    W.fill_bound([head, None])
+    assert peer.calls and not W._SOURCES
+    assert mx.array_equal(head["w"], mx.load(str(shard))["layers.2.weight"])

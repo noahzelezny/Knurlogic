@@ -255,49 +255,72 @@ class _Fetch:
             t.join()
 
 
+def _groups(items: list) -> list:
+    """Tensors (file, offset, n) in file order, neighbours in one file
+    merged up to PIECE: [(file, offset, n, [(index, rel, n)])]. The array
+    reads a file front to back, and a layer's small tensors (scales,
+    norms) go as one request, not one each."""
+    out: list = []
+    for i in sorted(range(len(items)), key=lambda i: items[i][:2]):
+        f, off, n = items[i]
+        g = out[-1] if out else None
+        if g and g[0] == f and g[1] + g[2] == off and g[2] + n <= PIECE:
+            g[2] += n
+            g[3].append((i, off - g[1], n))
+        else:
+            out.append([f, off, n, [(i, 0, n)]])
+    return [tuple(g) for g in out]
+
+
 def fill(model, read: Callable, source: str = "", stop=None) -> dict:
-    """Put fetched arrays in place of the lazy ones `model` holds, in the
-    model's order, fetched ahead in parallel pieces under BUDGET. ->
-    {fetched, left, failed}: bytes fetched, arrays not from the peer."""
+    """Put fetched arrays in place of the lazy ones `model` (or each of a
+    list of roots) holds, fetched in file order, in parallel pieces, at
+    most BUDGET waiting. -> {fetched, left, failed}: bytes fetched,
+    arrays not from the peer."""
     import mlx.core as mx
     import numpy as np
     heads: dict = {}
-    todo = [(c, k, a, _origin(a)) for c, k, a in _slots(model)]
+    roots = model if isinstance(model, list) else [model]
+    todo = [(c, k, a, _origin(a)) for r in roots for c, k, a in _slots(r)]
     left = sum(1 for *_, o in todo if o is None)
     order: dict = {}                     # id(array) -> index among uniques
     uniq: list = []
-    for c, k, a, o in todo:
+    for _c, _k, a, o in todo:
         if o is not None and id(a) not in order:
             order[id(a)] = len(uniq)
             uniq.append((a, o))
     items = []
-    for a, (src, path, name, _) in uniq:
+    for _a, (src, path, name, _) in uniq:
         if path not in heads:
             heads[path] = header(path)
         items.append((Path(path).name, heads[path][name], src.nbytes))
+    groups = _groups(items)
     built: dict = {}
     got, failed, last = 0, "", 0
-    f = _Fetch(items, read)
+    f = _Fetch([g[:3] for g in groups], read)
     try:
-        for i, (a, (src, _, _, fn)) in enumerate(uniq):
+        for gi, (_, _, _, members) in enumerate(groups):
             if stop is not None and stop():
                 break
             try:
-                buf = f.take(i)
+                buf = f.take(gi)
             except BaseException as e:
                 failed = f"{type(e).__name__}: {e}"
                 logger.warning("weights: fetching from %s failed (%s); the "
                                "rest is read from the mount",
                                source or "the peer", failed)
                 break
-            arr = mx.array(np.frombuffer(buf, dtype=np.uint8)).view(
-                src.dtype).reshape(src.shape)
+            for i, rel, n in members:
+                a, (src, _, _, fn) = uniq[i]
+                arr = mx.array(np.frombuffer(buf, dtype=np.uint8, count=n,
+                                             offset=rel)).view(
+                    src.dtype).reshape(src.shape)
+                if fn is not None:
+                    arr = fn(arr)
+                mx.eval(arr)
+                built[id(a)] = arr
+                got += n
             del buf
-            if fn is not None:
-                arr = fn(arr)
-            mx.eval(arr)
-            built[id(a)] = arr
-            got += src.nbytes
             if got - last >= GIB:
                 last = got
                 progress(fetched_bytes=got, reading_from=source)
@@ -309,6 +332,23 @@ def fill(model, read: Callable, source: str = "", stop=None) -> dict:
     progress(fetched_bytes=got, reading_from="")
     return {"fetched": got, "left": left + len(uniq) - len(built),
             "failed": failed}
+
+
+def fill_bound(roots: list) -> None:
+    """After the weights: what was bound beside them (the drafting head,
+    the vision tower) under `recording`, filled from the peer too."""
+    plan = CURRENT["plan"]
+    try:
+        if plan is not None and plan.read is not None and _SOURCES:
+            from knurlogic.engine.runtime.model_host import LOAD_STOP
+            out = fill([r for r in roots if r is not None], plan.read,
+                       plan.source, stop=LOAD_STOP.is_set)
+            logger.info("weights: head and tower %.1f GiB from %s over the "
+                        "link%s", out["fetched"] / GIB,
+                        plan.source or "the peer",
+                        f" ({out['failed']})" if out["failed"] else "")
+    finally:
+        forget()
 
 
 def read_share(model, evaluate: Callable) -> None:

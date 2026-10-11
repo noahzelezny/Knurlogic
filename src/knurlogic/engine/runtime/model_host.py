@@ -218,8 +218,14 @@ class ModelHost:
                 self._quantize_kv()
                 self._pad_matmuls()
                 self.model_key = (path, None, None)
-                self._bind_vision(path)
-                self._bind_head(path)
+                # the head and the tower too, from the peer when this
+                # rank fetches its share (engine/split/weights.py)
+                from knurlogic.engine.split import weights
+                with weights.recording():
+                    self._bind_vision(path)
+                    self._bind_head(path)
+                weights.fill_bound([binding.DRAFT.get("head"),
+                                    state.VISION.get("serve")])
                 t3 = time.monotonic()
             # each step's time, so a slow load says which step was slow
             # (the read itself, the lock, or vision and the drafting head)
