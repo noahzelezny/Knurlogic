@@ -164,7 +164,7 @@ def send(page: str, kind: str, doc: dict | None = None, *,
 
 class Bytes:
     """A handler's reply that is a file's byte range, not an envelope:
-    the page sends it as application/octet-stream (socket.sendfile)."""
+    the page reads and sends it as application/octet-stream."""
 
     def __init__(self, path: str, offset: int, length: int):
         self.path, self.offset, self.length = path, offset, length

@@ -37,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 #: the largest body the page accepts (the API server's default cap)
 MAX_BODY = 512 << 20
+#: a Weights reply reads its range at most this much at a time (the
+#: fetching rank asks for 64 MiB pieces, 8 at once)
+RANGE_READ = 64 << 20
 
 
 def make_handler(routes: dict, gate=None, allow_origins=(),
@@ -265,8 +268,11 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             router.send_json(self, code, doc)
 
         def _send_range(self, b) -> None:
-            """A Weights reply: the shard's byte range, sent by the kernel
-            (socket.sendfile), never read through Python."""
+            """A Weights reply: the shard's byte range, read in pieces of
+            at most RANGE_READ with pread and sent. Not socket.sendfile:
+            measured on a cold SoftRAID array, 8 sendfiles at once moved
+            0.08 GB/s, 8 preads of 64 MiB 0.76 GB/s (sendfile reads a cold
+            file in small steps; a split's share came at 0.5 GiB/s)."""
             try:
                 fh = open(b.path, "rb")
             except OSError as e:
@@ -280,8 +286,16 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 self.send_header("Content-Length", str(b.length))
                 self.end_headers()
                 self.wfile.flush()
+                sent = 0
                 try:
-                    sent = self.connection.sendfile(fh, b.offset, b.length)
+                    fd = fh.fileno()
+                    while sent < b.length:
+                        n = min(RANGE_READ, b.length - sent)
+                        chunk = os.pread(fd, n, b.offset + sent)
+                        if not chunk:
+                            break
+                        self.connection.sendall(chunk)
+                        sent += len(chunk)
                 except OSError:
                     sent = -1
                 if sent != b.length:

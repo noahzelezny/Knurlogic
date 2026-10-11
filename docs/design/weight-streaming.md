@@ -74,9 +74,11 @@ a `--peer` address) and the same envelope (`cluster/transport`):
 The serving page refuses when it has no copy with that identity, or when
 its copy is itself on a network mount (it would only relay SMB). The reply
 to a good request is **not** a JSON envelope: it is the bytes,
-`Content-Type: application/octet-stream`, `Content-Length: length`, sent
-with `socket.sendfile` (no copy through Python; the page never imports
-mlx). A refusal is the usual typed `Failure` envelope. `transport.fetch`
+`Content-Type: application/octet-stream`, `Content-Length: length`, read
+with `pread` at most 64 MiB at a time and sent (the page never imports
+mlx). Not `socket.sendfile`: on a cold SoftRAID array 8 sendfiles at once
+moved 0.08 GB/s against 0.76 GB/s for 8 preads of 64 MiB, and a 397B
+VQ-3.5bpw share came at 0.48 GiB/s with it. A refusal is the usual typed `Failure` envelope. `transport.fetch`
 is the client: it posts the envelope and reads the body straight into the
 caller's buffer.
 
