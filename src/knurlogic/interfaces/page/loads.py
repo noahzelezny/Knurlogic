@@ -367,7 +367,7 @@ def load_progress(doc: dict) -> list:
     and the OS memory map), plus each server's log: no extra HTTP.
 
     One entry per server started in the last LOAD_REPORT_S: phase (loading,
-    stalled, warming, ready, exited), seconds since start, bytes its process
+    stalled, waiting, warming, ready, exited), seconds since start, bytes its process
     holds against the artifact's size, the last log line, and for one that
     exited the tail of its log (why it failed)."""
     from knurlogic.machine.servers import is_our_server
@@ -378,6 +378,8 @@ def load_progress(doc: dict) -> list:
     rows = {urlparse(r.get("where") or "").port: r
             for r in doc.get("resident") or []
             if isinstance(r, dict) and r.get("runtime") == "knurlogic"}
+    job_phase = {j.get("job"): j.get("phase") for j in doc.get("jobs") or []
+                 if isinstance(j, dict)}
     out = []
     entries = [(port, rec) for port, rec in sorted(registry().items())]
     # a follower rank binds no port, so only jobs.json holds it; rank 0 is in
@@ -428,6 +430,14 @@ def load_progress(doc: dict) -> list:
             why = refusal_line("\n".join(lines[-60:]))
             if why:
                 e["refused"] = why
+        elif r is None and rec.get("job") and \
+                job_phase.get(rec["job"]) == "ready":
+            e["phase"] = "ready"         # a follower rank: its job serves
+        elif r is None and rec.get("job") and e["total_bytes"] and \
+                e["bytes"] >= spawn.WARM_FRACTION * e["total_bytes"]:
+            # its share is in and its log quiet: the other machines are
+            # still reading theirs, which is not this rank stalling
+            e["phase"] = "waiting"
         elif r is not None and r.get("state") == "warming":
             e["phase"] = "warming"       # weights in; the first-request warm-up
         elif r is None or r.get("state") == "loading":
