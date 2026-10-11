@@ -10,9 +10,8 @@ chip) and sliced back; 1-8 and >=32 rows are untouched.
 
 Per-chip rounding is on by default: each chip runs its own fastest kernel
 and nothing is padded (rank 0 samples every token, so rounding cannot
-desync a cluster). `off` pads on every machine; `auto` pads (rounding off)
-only for a cluster job whose machines have different GPU architectures.
-mlx is imported only by `install`. Design: docs/design/server.md
+desync a cluster). `off` pads on every machine, so a split across chip
+generations gives the same tokens as one over a single generation. mlx is imported only by `install`. Design: docs/design/server.md
 (per-chip rounding).
 """
 from __future__ import annotations
@@ -20,19 +19,17 @@ from __future__ import annotations
 #: rows in [LO, HI) are padded to HI
 LO, HI = 9, 32
 #: what KNURLOGIC_PER_CHIP_ROUNDING takes
-VALUES = ("on", "off", "auto")
+VALUES = ("on", "off")
 #: the prompt cache key's own words for a setting (the `setting` of
 #: resolve's dict): they say whether to pad, so rounding off is "on"
-KEY_SETTING = {"on": "off", "off": "on", "auto": "auto"}
+KEY_SETTING = {"on": "off", "off": "on"}
 
 _STATE = {"orig": None, "installed": False}
 
 
 def parse(v) -> str:
-    """'on' | 'off' | 'auto' ('' / None -> on; 1/0, true/false too)."""
+    """'on' | 'off' ('' / None -> on; 1/0, true/false too)."""
     s = str(v if v is not None else "").strip().lower()
-    if s == "auto":
-        return "auto"
     if s in ("", "on", "1", "true", "yes"):
         return "on"
     if s in ("off", "0", "false", "no"):
@@ -56,18 +53,11 @@ def resolve(setting, chips=None) -> dict:
     s = KEY_SETTING[parse(setting)]
     chips = [c for c in (chips or []) if isinstance(c, dict)]
     names = [str(c.get("name") or c.get("arch") or "?") for c in chips]
-    keys = {str(c.get("arch") or c.get("name") or "") for c in chips} - {""}
-    mixed = len(chips) > 1 and len(keys) > 1
     label = " + ".join(dict.fromkeys(names))
     if s == "on":
         on, why = True, "forced on"
-    elif s == "off":
-        on, why = False, "off"
-    elif mixed:
-        on, why = True, f"auto: machines differ ({label})"
     else:
-        on, why = False, ("auto: one GPU architecture" if len(chips) > 1
-                          else "auto: one machine")
+        on, why = False, "off"
     return {"on": on, "setting": s, "chips": names, "why": why,
             "label": label}
 
@@ -78,12 +68,7 @@ def public(r: dict) -> dict:
     `installed` when the host recorded it)."""
     setting = KEY_SETTING.get(r.get("setting"), r.get("setting"))
     padded_ = bool(r.get("on"))
-    if setting == "auto":
-        why = ("auto: machines differ" if padded_ else
-               "auto: one GPU architecture" if len(r.get("chips") or []) > 1
-               else "auto: one machine")
-    else:
-        why = "set " + str(setting)
+    why = "set " + str(setting)
     out = {"per_chip_rounding": "off" if padded_ else "on",
            "setting": setting, "padded": padded_,
            "chips": list(r.get("chips") or []), "why": why}
@@ -93,7 +78,7 @@ def public(r: dict) -> dict:
 
 
 def describe(r: dict) -> str:
-    """'off (M3 Ultra + M4 Max)' / 'on (auto: one machine)': per-chip
+    """'off (M3 Ultra + M4 Max)' / 'on (set on)': per-chip
     rounding off means the same rounding on every chip."""
     p = public(r)
     if p["padded"] and r.get("label"):

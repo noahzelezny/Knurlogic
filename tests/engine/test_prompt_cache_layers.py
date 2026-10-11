@@ -467,10 +467,6 @@ _M4 = {"name": "M4 Max", "arch": "applegpu_g16s"}
     ("off", [_M3, _M4],
      repr({"setting": "on", "chips": ["M3 Ultra", "M4 Max"]}),
      "8a2d7e49284719da"),
-    # auto across chips pads
-    ("auto", [_M3, _M4],
-     repr({"setting": "auto", "chips": ["M3 Ultra", "M4 Max"]}),
-     "b8186da89f0bfbb4"),
 ])
 def test_the_rounding_key_is_the_one_saved_before_the_rename(
         setting, chips, field, kid):

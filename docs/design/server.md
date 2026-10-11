@@ -472,8 +472,8 @@ chips bit-identical across all layers; +2-6% on the affected calls only.
 This is per-chip rounding off (`KNURLOGIC_PER_CHIP_ROUNDING=off`). Per-chip
 rounding is on by default -- nothing padded, each chip its own fastest
 kernel: rank 0 samples every token, so rounding differences cannot desync a
-cluster. `off` pads on every machine; `auto` pads (rounding off) for a
-cluster job whose machines have different GPU architectures.
+cluster. `off` pads on every machine: what a split across chip
+generations sets when it needs the same tokens as one generation would give.
 
 `resolve()` returns the prompt cache key's own dict (`on` = padded,
 `setting` in the key's words, `KEY_SETTING`): the cache hashes it into its

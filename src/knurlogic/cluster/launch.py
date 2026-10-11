@@ -1018,8 +1018,8 @@ def rank_argv(path: str, spec: dict, files: dict) -> list:
     for k, v in sorted((spec.get("sets") or {}).items()):
         cmd += ["--set", f"{k}={v}"]
     if spec.get("chips"):
-        # every rank's chip, so each resolves KNURLOGIC_PER_CHIP_ROUNDING=
-        # auto the same way (engine/matmul_padding.resolve)
+        # every rank's chip: per-chip rounding off names them in status
+        # and the log (engine/matmul_padding.resolve)
         cmd += ["--ring-chips", json.dumps(spec["chips"])]
     return cmd
 
@@ -2052,7 +2052,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "jaccl_timeout_ms": J.JACCL_TIMEOUT_MS if link == "jaccl" else 0,
             "sets": sets, "cable": net, "cable_note": note[:400],
             # each machine's chip and GPU architecture, rank order: the
-            # ranks resolve KNURLOGIC_PER_CHIP_ROUNDING=auto from it
+            # ranks name them when per-chip rounding is off
             "chips": [{"name": m.get("chip") or m.get("name") or "",
                        "arch": m.get("gpu_architecture") or ""}
                       for m in order],

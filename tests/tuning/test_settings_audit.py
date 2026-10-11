@@ -94,7 +94,8 @@ def test_other_knobs_are_checked_for_type_and_range():
     assert checks.check_knob("KNURLOGIC_MTP", "maybe")
     assert checks.check_knob("KNURLOGIC_KV_BITS", "3")
     assert checks.check_knob("KNURLOGIC_PRESET", "turbo")
-    assert checks.check_knob("KNURLOGIC_PER_CHIP_ROUNDING", "auto") is None
+    assert checks.check_knob("KNURLOGIC_PER_CHIP_ROUNDING", "off") is None
+    assert checks.check_knob("KNURLOGIC_PER_CHIP_ROUNDING", "auto")
     assert checks.check_knob("VQ_GEMMSEG_PIPE", "anything") is None  # not ours
 
 

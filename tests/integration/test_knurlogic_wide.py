@@ -64,16 +64,16 @@ def test_compaction_document_is_one_live_set(home):
 def test_peer_machine_saves_knurlogic_wide_settings(home):
     code, doc = page_peers.peer_machine(
         {"strategy": "lean",
-         "settings": {"KNURLOGIC_PER_CHIP_ROUNDING": "auto",
+         "settings": {"KNURLOGIC_PER_CHIP_ROUNDING": "off",
                       "KNURLOGIC_COMPACT_AUTO": "on"}})
     assert code == 200
-    assert doc["knurlogic"]["saved"] == {"KNURLOGIC_PER_CHIP_ROUNDING": "auto",
+    assert doc["knurlogic"]["saved"] == {"KNURLOGIC_PER_CHIP_ROUNDING": "off",
                                          "KNURLOGIC_COMPACT_AUTO": "on"}
-    assert doc["knurlogic"]["per_chip_rounding"]["value"] == "auto"
+    assert doc["knurlogic"]["per_chip_rounding"]["value"] == "off"
     code, doc = page_peers.peer_machine(
         {"settings": {"KNURLOGIC_CONTEXT_LENGTH": "512"}})
     assert code == 400
-    assert preferences.get()["KNURLOGIC_PER_CHIP_ROUNDING"] == "auto"
+    assert preferences.get()["KNURLOGIC_PER_CHIP_ROUNDING"] == "off"
 
 
 def test_set_knurlogic_clears_and_reports(home):

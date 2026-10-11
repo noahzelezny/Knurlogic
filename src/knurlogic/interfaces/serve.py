@@ -838,7 +838,7 @@ def main(argv=None) -> int:
     # machine's memory bandwidth when the chip table does not know it
     p.add_argument("--layers", default="", help=hide)
     p.add_argument("--bandwidth-gbs", type=float, default=0.0, help=hide)
-    # every rank's {name, arch} as JSON, for KNURLOGIC_PER_CHIP_ROUNDING=auto
+    # every rank's {name, arch} as JSON: named when per-chip rounding is off
     p.add_argument("--ring-chips", default="", help=hide)
     a = p.parse_args(argv)
     ring = None

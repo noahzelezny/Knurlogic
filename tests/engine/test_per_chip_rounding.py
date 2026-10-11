@@ -1,6 +1,6 @@
 """KNURLOGIC_PER_CHIP_ROUNDING (on by default): off pads 9-31-row quantized
-matmuls to 32 rows so M3 and M4 round alike; auto is off for a job across
-GPU architectures; the setting and every rank's chip pass ring-wide."""
+matmuls to 32 rows so M3 and M4 round alike; the setting and every rank's
+chip pass ring-wide."""
 import json
 import sys
 from pathlib import Path
@@ -74,7 +74,7 @@ def test_the_host_pads_only_when_rounding_is_off(qm, monkeypatch):
     from knurlogic.engine.runtime.model_host import ModelHost
     monkeypatch.setattr(mp, "install", lambda: True)
     monkeypatch.setattr(mp, "installed", lambda: True)
-    ModelHost(rounding=mp.resolve("auto", [M3, M4]))._pad_matmuls()
+    ModelHost(rounding=mp.resolve("off", [M3, M4]))._pad_matmuls()
     got = state.SERVED["per_chip_rounding"]
     assert got["padded"] is True and got["per_chip_rounding"] == "off"
     hit = []
@@ -85,29 +85,18 @@ def test_the_host_pads_only_when_rounding_is_off(qm, monkeypatch):
     assert got["per_chip_rounding"] == "on"
 
 
-# --- auto --------------------------------------------------------------------
+# --- the two values ----------------------------------------------------------
 
-def test_auto_pads_for_mixed_chips():
-    r = mp.resolve("auto", [M3, M4])
+def test_off_across_chips_says_which():
+    r = mp.resolve("off", [M3, M4])
     assert r["on"] and mp.describe(r) == "off (M3 Ultra + M4 Max)"
     assert mp.public(r)["per_chip_rounding"] == "off"
-
-
-@pytest.mark.parametrize("chips", [None, [M3], [M3, dict(M3)],
-                                   [M4, M4, M4]])
-def test_auto_does_not_pad_for_one_architecture(chips):
-    assert mp.resolve("auto", chips)["on"] is False
 
 
 def test_off_pads_and_on_does_not():
     assert mp.resolve("off", None)["on"] is True
     assert mp.resolve("on", [M3, M4])["on"] is False
     assert mp.describe(mp.resolve("on", None)) == "on (set on)"
-
-
-def test_a_chip_without_its_architecture_is_compared_by_name():
-    assert mp.resolve("auto", [{"name": "M3 Ultra"},
-                                  {"name": "M4 Max"}])["on"]
 
 
 def test_the_default_is_on():
@@ -118,6 +107,8 @@ def test_the_default_is_on():
 def test_a_bad_value_is_refused():
     with pytest.raises(ValueError):
         mp.parse("maybe")
+    with pytest.raises(ValueError):
+        mp.parse("auto")
 
 
 # --- settings and ring-wide passthrough -------------------------------------
@@ -125,11 +116,11 @@ def test_a_bad_value_is_refused():
 def test_it_is_a_model_launch_setting():
     assert "KNURLOGIC_PER_CHIP_ROUNDING" in knobs.MODEL_KNOBS
     assert knobs.KNOB_RANGE["KNURLOGIC_PER_CHIP_ROUNDING"][0] == \
-        ["on", "off", "auto"]
+        ["on", "off"]
     assert knobs.engine_settings({"KNURLOGIC_PER_CHIP_ROUNDING": "off"}) == \
         {"per_chip_rounding": "off"}
     from knurlogic.tuning.checks import clean_sets
-    assert clean_sets({"KNURLOGIC_PER_CHIP_ROUNDING": "auto"})[0]
+    assert clean_sets({"KNURLOGIC_PER_CHIP_ROUNDING": "off"})[0]
 
 
 def test_every_rank_gets_the_setting_and_the_chips():
@@ -138,9 +129,9 @@ def test_every_rank_gets_the_setting_and_the_chips():
     for r in (0, 1):
         spec = {"rank": r, "world": 2, "split": "tensor", "link": "ring",
                 "job": "ab", "hosts": ["a", "b"], "prefill_chunk": 512,
-                "sets": {"KNURLOGIC_PER_CHIP_ROUNDING": "auto"}, "chips": chips}
+                "sets": {"KNURLOGIC_PER_CHIP_ROUNDING": "off"}, "chips": chips}
         a = rank_argv("/m", spec, {})
-        assert "KNURLOGIC_PER_CHIP_ROUNDING=auto" in a
+        assert "KNURLOGIC_PER_CHIP_ROUNDING=off" in a
         assert json.loads(a[a.index("--ring-chips") + 1]) == chips
     assert "chips is" in check_spec({**spec, "job": "0123456789abcdef",
                                     "nodes": [{"name": "a", "id": "a"},
@@ -148,7 +139,7 @@ def test_every_rank_gets_the_setting_and_the_chips():
                                     "chips": "x"})
 
 
-def test_each_rank_resolves_auto_from_the_ring_chips(monkeypatch):
+def test_each_rank_resolves_the_setting_with_the_ring_chips(monkeypatch):
     """A rank's argv -> serve.main -> run(ring=...) carries the chips and
     the setting; every rank resolves them to the same answer."""
     from knurlogic.cluster.launch import rank_argv
@@ -158,7 +149,7 @@ def test_each_rank_resolves_auto_from_the_ring_chips(monkeypatch):
     for r in (0, 1):
         spec = {"rank": r, "world": 2, "split": "tensor", "link": "ring",
                 "job": "ab", "hosts": ["a:1", "b:2"], "prefill_chunk": 512,
-                "sets": {"KNURLOGIC_PER_CHIP_ROUNDING": "auto"}, "chips": [M3, M4]}
+                "sets": {"KNURLOGIC_PER_CHIP_ROUNDING": "off"}, "chips": [M3, M4]}
         serve.main(rank_argv("/m", spec, {})[4:])
     for a, k in got:
         launch = knobs.engine_settings(a[6])

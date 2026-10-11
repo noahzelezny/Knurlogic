@@ -411,7 +411,7 @@ def kv_bits_of(v):
 
 
 def per_chip_rounding_of(v) -> str:
-    """'on' | 'off' | 'auto' (engine/matmul_padding.parse, without mlx)."""
+    """'on' | 'off' (engine/matmul_padding.parse, without mlx)."""
     from knurlogic.engine.matmul_padding import parse
     return parse(v)
 
@@ -535,7 +535,7 @@ KNOB_RANGE: dict = {
     "KNURLOGIC_KV_KERNEL": (["on", "off"], ""),
     "KNURLOGIC_GDN_COMPILE": (["on", "off"], ""),
     "KNURLOGIC_THINKING_DEFAULT": (THINKING_DEFAULT_VALUES, ""),
-    "KNURLOGIC_PER_CHIP_ROUNDING": (["on", "off", "auto"], ""),
+    "KNURLOGIC_PER_CHIP_ROUNDING": (["on", "off"], ""),
     # narrowed per family by the resolver: ["off"] where no model card
     # documents YaRN
     "KNURLOGIC_LONG_CONTEXT": (["off", "yarn"], ""),
