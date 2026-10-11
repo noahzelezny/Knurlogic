@@ -1,5 +1,6 @@
 """The protocol messages a page answers on MSG_PATH (`peer_table`): the
-cluster kinds, Load/Unload, MachineSet, Settings, Survey and Read."""
+cluster kinds, Load/Unload, MachineSet, Settings, Survey, Read and
+Weights (a shard's bytes for a split rank, cluster/weights.py)."""
 
 from __future__ import annotations
 
@@ -76,4 +77,6 @@ def peer_table(routes: dict) -> dict:
         "POST", b.get("port"), b.get("values"))
     t["Survey"] = lambda b: survey_here(routes)
     t["Read"] = lambda b: read_here(routes, b)
+    from knurlogic.cluster import weights
+    t["Weights"] = weights.serve
     return t

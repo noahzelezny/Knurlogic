@@ -259,7 +259,33 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 router.send_json(self, *refused)
                 return
             code, doc = transport.handle(body, table)
+            if isinstance(doc, transport.Bytes):
+                self._send_range(doc)
+                return
             router.send_json(self, code, doc)
+
+        def _send_range(self, b) -> None:
+            """A Weights reply: the shard's byte range, sent by the kernel
+            (socket.sendfile), never read through Python."""
+            try:
+                fh = open(b.path, "rb")
+            except OSError as e:
+                from knurlogic.cluster.transport import failure_reply
+                router.send_json(self, 404, failure_reply(
+                    f"could not open the shard: {type(e).__name__}"))
+                return
+            with fh:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(b.length))
+                self.end_headers()
+                self.wfile.flush()
+                try:
+                    sent = self.connection.sendfile(fh, b.offset, b.length)
+                except OSError:
+                    sent = -1
+                if sent != b.length:
+                    self.close_connection = True
 
     return H
 

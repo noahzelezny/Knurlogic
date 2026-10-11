@@ -56,6 +56,9 @@ TIMEOUTS: dict = {
     "MachineSet": 10.0,
     "Settings": 10.0,
     "Read": 3.0,
+    # per socket read, not the whole range: a shard's range streams for as
+    # long as it takes (cluster/weights.py)
+    "Weights": 60.0,
 }
 
 #: the request kind -> the kind its reply is (others reply with their own)
@@ -159,6 +162,66 @@ def send(page: str, kind: str, doc: dict | None = None, *,
     return decode_reply(code, raw, who, seq)
 
 
+class Bytes:
+    """A handler's reply that is a file's byte range, not an envelope:
+    the page sends it as application/octet-stream (socket.sendfile)."""
+
+    def __init__(self, path: str, offset: int, length: int):
+        self.path, self.offset, self.length = path, offset, length
+
+
+#: what fetch reads per recv_into: bounded, whatever the range
+FETCH_CHUNK = 8 << 20
+
+
+def fetch(page: str, kind: str, doc: dict, into, *,
+          timeout: float | None = None, who: str | None = None,
+          conn=None) -> None:
+    """Post `kind` with body `doc` to `page` and read the reply's bytes
+    straight into `into` (a writable memoryview, exactly as long as the
+    range). A refusal raises PeerRefused with the peer's reason; a short
+    or broken stream, PeerUnreachable. `conn`: an http.client connection
+    to reuse (one per reader)."""
+    import http.client
+    data, seq = encode(kind, doc, doc.get("job"))
+    who = who or page
+    host, _, port = page.rpartition(":")
+    own = conn is None
+    c = conn or http.client.HTTPConnection(
+        host, int(port), timeout=timeout_for(kind) if timeout is None
+        else timeout)
+    try:
+        c.request("POST", MSG_PATH, body=data,
+                  headers={"Content-Type": "application/json"})
+        r = c.getresponse()
+        if r.status != 200 or r.getheader("Content-Type") != \
+                "application/octet-stream":
+            out = decode_reply(r.status, r.read(), who, seq)
+            raise PeerRefused(str(out.get("error") or "refused")[:500])
+        n = int(r.getheader("Content-Length") or -1)
+        if n != len(into):
+            r.close()
+            raise PeerUnreachable(f"{who}: sent {n} bytes for {len(into)}")
+        got = 0
+        while got < n:
+            k = r.readinto(into[got:got + FETCH_CHUNK])
+            if not k:
+                raise PeerUnreachable(f"{who}: the stream ended at {got} of "
+                                      f"{n} bytes")
+            got += k
+    except OSError as e:
+        if isinstance(e, PeerUnreachable):
+            raise
+        c.close()
+        raise PeerUnreachable(f"{who}: {type(e).__name__}: {e}") from e
+    except http.client.HTTPException as e:
+        c.close()
+        raise PeerUnreachable(f"{who}: {type(e).__name__}: {e}") from e
+    finally:
+        if own:
+            c.close()
+
+
 def parallel(fn: Callable, items: list, limit: float | None = None) -> list:
     """fn(item) for every item at once; one item's failure is its result
     ({"ok": False, "error": ...}), the others go on."""
@@ -214,6 +277,8 @@ def failure_reply(reason: str, kind: str = "refusal", re_: int | None = None,
 def reply(kind: str, code: int, doc: dict, re_: int | None) -> dict:
     """A handler's (code, doc) as a reply envelope: a bare {"error": ...}
     is a typed refusal, anything else the reply kind's own body."""
+    if isinstance(doc, Bytes):
+        return doc                      # sent raw by the page
     if isinstance(doc, dict) and set(doc) <= {"error", "v"} and "error" in doc:
         return failure_reply(str(doc["error"]), re_=re_)
     env = {"v": list(P.VERSION), "kind": REPLY_KIND.get(kind, kind),

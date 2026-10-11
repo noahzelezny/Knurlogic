@@ -286,10 +286,14 @@ class ModelHost:
         """A ring's model, loaded lazily and split in place: nothing read
         yet, and the split's collectives done."""
         from knurlogic.engine.model.load import load_unlocked
+        from knurlogic.engine.split import weights
         extra = self.shard_config(path) if self.shard_config else None
-        model, tok = load_unlocked(path, self.executes_artifact_code,
-                                   lazy=True, model_config=extra)
-        self.shard(model)
+        # what each lazy array is read from, for a rank that fetches its
+        # share from a peer (engine/split/weights.py)
+        with weights.recording():
+            model, tok = load_unlocked(path, self.executes_artifact_code,
+                                       lazy=True, model_config=extra)
+            self.shard(model)
         return model, tok
 
     def _weights(self, path: str, lazy=None):
@@ -309,7 +313,9 @@ class ModelHost:
             evaluate_everything(model)
             return model, tok
         model, tok = lazy
-        evaluate_everything(model)
+        # in its turn, and from a peer's disk when the job's plan says so
+        from knurlogic.engine.split import weights
+        weights.read_share(model, evaluate_everything)
         return model, tok
 
     def _pad_matmuls(self) -> None:

@@ -221,6 +221,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                   f"+ {pl['replicated_bytes'] / GIB:.1f} replicated)")
         _ring_env(ring)
         _ring_marker(ring)
+        _read_plan(a)
         # what this rank holds once loaded (rank 0: its share plus the MTP
         # head and tower it alone holds): the page's load % is against it
         from knurlogic.engine.split import marker
@@ -724,6 +725,25 @@ def _ring_marker(ring: dict) -> None:
         return
     marker.CURRENT["marker"] = jobs.Marker(ring["job"],
                                          int(ring["rank"])).start()
+
+
+def _read_plan(a) -> None:
+    """This rank's entry of the job's read plan (KNURLOGIC_WEIGHTS, set by
+    its page): where its share comes from and when it reads
+    (docs/design/weight-streaming.md). Absent: it reads as before."""
+    from knurlogic.cluster import weights as CW
+    from knurlogic.engine.split import weights
+    from knurlogic.machine.artifact import identity
+
+    def reader(page):
+        return CW.reader(page, identity(a.path), a.path.name)
+    plan = weights.plan_from_env(os.environ, reader)
+    weights.CURRENT["plan"] = plan
+    if plan is not None:
+        print("weights   "
+              + (f"from {plan.source or 'a peer'} over the link"
+                 if plan.read else "from this machine's own copy")
+              + (f", turn {plan.turn}" if plan.ordered else ""), flush=True)
 
 
 def _parse_sets(pairs) -> dict:
