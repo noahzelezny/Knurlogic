@@ -18,6 +18,7 @@ import json
 import logging
 import struct
 import threading
+import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -296,6 +297,12 @@ def fill(model, read: Callable, source: str = "", stop=None) -> dict:
     roots = model if isinstance(model, list) else [model]
     todo = [(c, k, a, _origin(a)) for r in roots for c, k, a in _slots(r)]
     left = sum(1 for *_, o in todo if o is None)
+    t0 = time.monotonic()
+    big = sorted(((int(a.nbytes), k[1] if isinstance(k, tuple) else k)
+                  for _, k, a, o in todo if o is None), reverse=True)[:6]
+    if big:
+        logger.info("weights: largest arrays not fetched: %s", ", ".join(
+            f"{k} {n / GIB:.2f} GiB" for n, k in big))
     order: dict = {}                     # id(array) -> index among uniques
     uniq: list = []
     for _c, _k, a, o in todo:
@@ -344,7 +351,7 @@ def fill(model, read: Callable, source: str = "", stop=None) -> dict:
             _put(c, k, built[id(a)])
     progress(fetched_bytes=got, reading_from="")
     return {"fetched": got, "left": left + len(uniq) - len(built),
-            "failed": failed}
+            "failed": failed, "seconds": time.monotonic() - t0}
 
 
 def fill_bound(roots: list) -> None:
@@ -357,8 +364,8 @@ def fill_bound(roots: list) -> None:
             out = fill([r for r in roots if r is not None], plan.read,
                        plan.source, stop=LOAD_STOP.is_set)
             logger.info("weights: head and tower %.1f GiB from %s over the "
-                        "link%s", out["fetched"] / GIB,
-                        plan.source or "the peer",
+                        "link in %.1fs%s", out["fetched"] / GIB,
+                        plan.source or "the peer", out["seconds"],
                         f" ({out['failed']})" if out["failed"] else "")
     except Exception:  # only slower: what is left lazy is read from the mount
         logger.exception("weights: the head and tower were not fetched; "
@@ -391,9 +398,10 @@ def read_share(model, evaluate: Callable) -> None:
                                  "from the mount")
                 out = {"fetched": 0, "left": 0,
                        "failed": f"{type(e).__name__}: {e}"}
-            logger.info("weights: %.1f GiB from %s over the link; %d arrays "
-                        "not from the peer (read here)%s", out["fetched"] / GIB,
-                        plan.source or "the peer", out["left"],
+            logger.info("weights: %.1f GiB from %s over the link in %.1fs; "
+                        "%d arrays not from the peer (read here)%s",
+                        out["fetched"] / GIB, plan.source or "the peer",
+                        out.get("seconds", 0.0), out["left"],
                         f" ({out['failed']})" if out["failed"] else "")
         evaluate(model)
     finally:

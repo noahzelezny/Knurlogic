@@ -222,8 +222,12 @@ class ModelHost:
                 # rank fetches its share (engine/split/weights.py)
                 from knurlogic.engine.split import weights
                 with weights.recording():
+                    tb = time.monotonic()
                     self._bind_vision(path)
+                    tv = time.monotonic()
                     self._bind_head(path)
+                    logger.info("bound vision in %.1fs, the head in %.1fs",
+                                tv - tb, time.monotonic() - tv)
                 weights.fill_bound([binding.DRAFT.get("head"),
                                     state.VISION.get("serve")])
                 t3 = time.monotonic()
