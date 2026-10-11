@@ -10,7 +10,7 @@ name: attribution
 #   - authored or committed with a personal email (only no-reply addresses);
 #   - adding a machine-specific string or a personal email address
 #     (scripts/check_machine_specifics.py).
-# It is a required status check on main, which also refuses force pushes.
+# main refuses force pushes and deletion (a repository ruleset).
 on:
   push:
   pull_request:
