@@ -115,3 +115,101 @@ def test_the_weight_read_stops_at_a_batch_boundary(monkeypatch):
     finally:
         Hst.LOAD_STOP.clear()
     assert Hst.evaluate_everything(m) == 8
+
+
+class _Link:
+    entered = None
+
+
+class _Ring:
+    def __init__(self):
+        self.link = _Link()
+
+
+class _Stuck:
+    """stop_ring timed out; the scheduler thread ends after `ends_in`."""
+
+    def __init__(self, entered_ago, ends_in):
+        self.tensor = _Ring()
+        self.tensor.link.entered = time.monotonic() - entered_ago
+        self.end = time.monotonic() + ends_in
+
+    def stop_ring(self, timeout):
+        return False
+
+    def wait_stopped(self, timeout):
+        time.sleep(timeout)
+        return time.monotonic() >= self.end
+
+
+def test_a_stopping_rank_0_lets_a_young_exchange_finish():
+    # rank 0 left 1.5 s after its stop timed out, inside an exchange the
+    # follower had half done: the follower died in its plan bytes
+    assert H.ring_stopped(_Stuck(entered_ago=0.0, ends_in=0.2), 15.0)
+
+
+def test_an_exchange_a_gone_peer_holds_is_not_waited_for():
+    t = time.monotonic()
+    assert not H.ring_stopped(_Stuck(entered_ago=H.EXCHANGE_S, ends_in=60),
+                              15.0)
+    assert time.monotonic() - t < 1
+
+
+def test_outside_an_exchange_a_timed_out_stop_leaves_at_once():
+    s = _Stuck(entered_ago=0.0, ends_in=60)
+    s.tensor.link.entered = None
+    assert not H.ring_stopped(s, 15.0)
+
+
+_LEAVES = """
+import os, sys
+import mlx.core as mx
+from knurlogic.engine.split.link import Link
+link = Link(mx.distributed.init(backend="ring", strict=True))
+if link.rank == 0:
+    # rank 0's control row says plan bytes follow; it leaves before them
+    from knurlogic.engine.split import plan as P
+    ctl = mx.array([P.control(0, 0, 16, 0, 0)], dtype=mx.int64)
+    mx.distributed.all_gather(ctl, group=link.group, stream=mx.cpu).tolist()
+    os._exit(0)
+try:
+    link.exchange(0, None)
+except Exception as e:
+    from knurlogic.engine.runtime.scheduler import ring_error
+    print("raised", ring_error(e), flush=True)
+"""
+
+
+def test_a_follower_whose_rank_0_leaves_mid_exchange_raises_not_aborts(
+        tmp_path):
+    # it aborted (libc++abi, uncaught C++ exception, a crash report) when
+    # the plan's bytes were read through numpy
+    import json
+    import socket
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    def free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+    hosts = tmp_path / "hosts.json"
+    hosts.write_text(json.dumps([[f"127.0.0.1:{free_port()}"],
+                                 [f"127.0.0.1:{free_port()}"]]))
+    src = Path(__file__).resolve().parents[2] / "src"
+    env = dict(os.environ, MLX_HOSTFILE=str(hosts),
+               PYTHONPATH=os.pathsep.join([str(src)] + sys.path))
+    procs = [subprocess.Popen([sys.executable, "-c", _LEAVES],
+                              env=dict(env, MLX_RANK=str(r)),
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT) for r in range(2)]
+    try:
+        logs = [p.communicate(timeout=60)[0].decode() for p in procs]
+    finally:
+        for p in procs:
+            p.kill()
+    assert procs[1].returncode == 0, logs[1]
+    assert "raised True" in logs[1], logs[1]
