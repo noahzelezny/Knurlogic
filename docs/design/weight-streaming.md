@@ -147,7 +147,7 @@ The wait is a rendezvous over the bell -- the plain TCP channel every
 rank already holds to rank 0 (`engine/split/link.Link.align`) -- not a
 collective: nothing spins on a Thunderbolt queue or the GPU while a rank
 waits several minutes. Turn-1 ranks align *before* reading; turn-0 ranks
-align once their share, head and tower are all in (`let_next_go`, after
+align once their share, head and tower are all in (`split/weights.done`, after
 binding -- not after the share alone, or the holder's own read competes
 with the remote rank's last fetches). Each rank aligns exactly once.
 
