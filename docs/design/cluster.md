@@ -43,7 +43,10 @@ everything can:
   forget it, the refusal is shown.
 - **start** -- a `Start` message: each page spawns its own rank
   (`knurlogic serve` with the hidden ring flags), records it, and watches
-  it.
+  it. The message carries the job's read plan: a rank whose copy is on a
+  network mount fetches its share from a machine with a local copy over
+  the link, and that machine reads its own share after
+  (docs/design/weight-streaming.md).
 
 Every page that runs a rank watches it (cluster/jobs.py); any rank dying or
 stalling stops the whole job: its own ranks SIGTERM then SIGKILL, and
