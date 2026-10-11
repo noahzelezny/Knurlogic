@@ -23,6 +23,14 @@ marker):
 2. the ranks that read remotely load first; the machines with local copies
    read their own share after the others have theirs.
 
+## Rule: no copy on the receiver's disk
+
+Streamed tensors go straight into the rank's memory. The receiving Mac
+never writes them to disk: no staging files, no local mirror, and no
+"copy the model locally" fallback. Keeping a duplicate of a 100 GB model
+wastes space that belongs to the prompt cache, among other things. The
+only fallback is the shared mount, read as before.
+
 ## 1. Tensors from a peer's page
 
 ### Who serves, who fetches
