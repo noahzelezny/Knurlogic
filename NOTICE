@@ -17,7 +17,7 @@ mlx-lm (https://github.com/ml-explore/mlx-lm)
   (qwen3_5.py, qwen3_5_moe.py; qwen4_exp.py via the mlx-lm fork at
   https://github.com/eauchs/mlx-lm) and
   src/knurlogic/engine/families/gemma4/architecture/ (gemma4.py,
-  gemma4_text.py).
+  gemma4_text.py); load_model in src/knurlogic/engine/model/load_model.py.
 
 mlx-lm fork (the knurlogic author's own)
   MIT License, Copyright (c) 2023-2025 Apple Inc.; changes by Noah Zelezny

@@ -23,7 +23,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
 
-from knurlogic.engine.split.weights import fetch_now
+from knurlogic.engine.model import weight_files
 
 logger = logging.getLogger(__name__)
 
@@ -199,8 +199,7 @@ class MTPHeadQwen35:
 
     @classmethod
     def from_sidecar(cls, model, arch, path):
-        # from the peer when a split rank fetches its share
-        w = fetch_now(mx.load(str(path)))
+        w = weight_files.load(path)
         # Older sidecars store the shifted norm gains in
         # float32 (the accumulate dtype leaked into the file). Seven tensors
         # — the two layernorms, q_norm/k_norm, and the three pre-fc norms —
@@ -212,7 +211,7 @@ class MTPHeadQwen35:
         if _dt != mx.float32:
             w = {k: (v.astype(_dt) if v.dtype == mx.float32 else v)
                  for k, v in w.items()}
-        meta = mx.load(str(path), return_metadata=True)[1]
+        meta = weight_files.metadata(path)
         cfg = json.loads(meta.get("vqlab_mtp", "{}"))
         head = cls(model, arch,
                    fc_order=cfg.get("fc_order", "eh"),

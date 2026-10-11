@@ -19,6 +19,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from knurlogic.engine.model import weight_files
 from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
 
 _PATCH_PREFIX = "vision_model."
@@ -119,16 +120,17 @@ class Glm5VisionFamily:
             p = root / shard
             if not p.is_file():
                 continue
-            for k, v in mx.load(str(p)).items():
+            keys = [k for k in weight_files.names(p)
+                    if k.startswith((_PATCH_PREFIX, _TOWER_PREFIX))]
+            if not keys:
+                continue
+            for k, v in weight_files.load(p, keys=keys).items():
                 if k.startswith(_PATCH_PREFIX):
                     weights[k[len(_PATCH_PREFIX):]] = v
                 elif k.startswith(_TOWER_PREFIX):
                     weights[k[len(_TOWER_PREFIX):]] = v
         if not weights:
             return 0
-        # a split rank fetching its share takes these from the peer
-        from knurlogic.engine.split.weights import fetch_now
-        weights = fetch_now(weights)
         weights = tower.sanitize(weights)
         from knurlogic.engine.vision.quant import artifact_quantization, quantize_like
         quantize_like(tower, weights, artifact_quantization(model_path))

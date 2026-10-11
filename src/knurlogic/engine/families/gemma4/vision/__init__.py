@@ -20,6 +20,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
 
+from knurlogic.engine.model import weight_files
 from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
 from knurlogic.engine.vision.key import Span, image_spans, is_sentinel, to_ids
 from knurlogic.engine.vision.scatter import merge as scatter_merge
@@ -80,22 +81,18 @@ def _load_filtered(model_path: Path, prefixes: Tuple[str, ...]) -> Dict[str, mx.
     weight_map = _load_index(model_path)
     out: Dict[str, mx.array] = {}
     if weight_map:
-        shards = {}
+        by_shard: Dict[str, list] = {}
         for key, shard_name in weight_map.items():
-            if not key.startswith(prefixes):
-                continue
-            if shard_name not in shards:
-                shards[shard_name] = mx.load(str(model_path / shard_name))
-            out[key] = shards[shard_name][key]
+            if key.startswith(prefixes):
+                by_shard.setdefault(shard_name, []).append(key)
+        for shard_name, keys in by_shard.items():
+            out.update(weight_files.load(model_path / shard_name, keys=keys))
     else:
         for f in sorted(model_path.glob("*.safetensors")):
-            weights = mx.load(str(f))
-            for key, v in weights.items():
-                if key.startswith(prefixes):
-                    out[key] = v
-    # a split rank fetching its share takes these from the peer
-    from knurlogic.engine.split.weights import fetch_now
-    return fetch_now(out)
+            keys = [k for k in weight_files.names(f) if k.startswith(prefixes)]
+            if keys:
+                out.update(weight_files.load(f, keys=keys))
+    return out
 
 
 class Gemma4Vision:

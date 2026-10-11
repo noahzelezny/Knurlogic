@@ -2,17 +2,14 @@
 memory it has, the server's argv, the cache limit, and what can change on a
 running process.
 
-VERSION SKEW IS THIS FILE'S JOB. mlx-lm 0.31.3 executes `model_file`
-unconditionally; 0.32.0 put it behind `trust_remote_code=` and raises without
-it. Passing the kwarg blindly is a TypeError on one, omitting it a ValueError
-on the other, so a VQ artifact cannot load on both unless something inspects
-the signature. Nobody downstream should ever learn that.
+A model is built by knurlogic's copy of mlx-lm's load_model
+(load_model.py), which opens the weight files through weight_files.py and
+always takes `trust_remote_code` (a VQ artifact runs its own model.py).
 """
 
 from __future__ import annotations
 
 import importlib
-import inspect
 import subprocess
 from dataclasses import dataclass
 
@@ -118,11 +115,12 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
     says "bundled"."""
     from pathlib import Path
 
-    from mlx_lm.utils import load as _load
+    from mlx_lm.utils import load_tokenizer
 
     from knurlogic.engine import templates
 
     from . import state
+    from .load_model import load_model
     p = Path(str(path))
     why = vq_without_runtime(p)
     if why:
@@ -133,14 +131,13 @@ def load_unlocked(path: str, executes_artifact_code: bool = False,
     if text:
         overlay = {**(overlay or {}), **text}
     state.SERVED["runtime"] = "bundled"
-    kw: dict = {"lazy": True} if lazy else {}
-    if overlay or model_config:
-        # mlx-lm merges it over config.json before the model is built
-        kw["model_config"] = {**(overlay or {}), **(model_config or {})}
-    if executes_artifact_code and \
-            "trust_remote_code" in inspect.signature(_load).parameters:
-        kw["trust_remote_code"] = True
-    model, tok = _load(path, **kw)
+    # knurlogic's copy of mlx-lm's load_model: the weight files are opened
+    # by engine/model/weight_files.py (a split rank may stream them)
+    cfg = {**(overlay or {}), **(model_config or {})} or None
+    model, config = load_model(p, lazy, model_config=cfg,
+                               trust_remote_code=executes_artifact_code)
+    tok = load_tokenizer(p, None,
+                         eos_token_ids=config.get("eos_token_id", None))
     templates.install(tok)
     return model, tok
 

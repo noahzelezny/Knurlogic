@@ -648,16 +648,14 @@ def _checkpoint(root, name, *, trunk_vision, extra=()):
 
 
 def _load(monkeypatch, path):
-    """engine/model/load.load_unlocked with mlx-lm's load_model under it
-    (the tiny checkpoint has no tokenizer)."""
+    """engine/model/load.load_unlocked, the tokenizer stubbed (the tiny
+    checkpoint has none)."""
     import mlx_lm.utils as U
 
     from knurlogic.engine import templates
     from knurlogic.engine.model.load import load_unlocked
 
-    def load(p, model_config=None, **kw):
-        return U.load_model(Path(p), model_config=model_config)[0], object()
-    monkeypatch.setattr(U, "load", load)
+    monkeypatch.setattr(U, "load_tokenizer", lambda *a, **k: object())
     monkeypatch.setattr(templates, "install", lambda tok: None)
     return load_unlocked(str(path))[0]
 

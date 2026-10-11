@@ -5,8 +5,10 @@ Vendored from vqlab `src/vqlab/mtp_head_glm5.py` @ c492d1d (since moved to
 fixes go upstream first, then re-vendor. Deviations from that source: the
 MoE half is built with `Glm5NextMoE`, not `DeepseekV32MoE`, so the head
 carries the trunk's SwiGLU clamp and float32 router (glm5_next edits 1-2);
-the docstrings and comments are rewritten. The `vqlab_mtp` metadata key is
-kept as-is, so sidecars built by `vqlab mtp-pack` load here unchanged.
+the sidecar is opened through engine/model/weight_files (every artifact
+file is); the docstrings and comments are rewritten. The `vqlab_mtp`
+metadata key is kept as-is, so sidecars built by `vqlab mtp-pack` load
+here unchanged.
 
 This module only LOADS the packed q6 sidecar (`mtp-head-q6.safetensors`,
 889 tensors). The head is NOT a trunk `Glm5NextDecoderLayer`: it has no
@@ -24,7 +26,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_unflatten
 
-from knurlogic.engine.split.weights import fetch_now
+from knurlogic.engine.model import weight_files
 
 _GLUE = ("eh_proj", "enorm", "hnorm", "shared_head")
 
@@ -183,9 +185,8 @@ class MTPHeadGlm5:
 
     @classmethod
     def from_sidecar(cls, model, arch, path):
-        # from the peer when a split rank fetches its share
-        w = fetch_now(mx.load(str(path)))
-        meta = mx.load(str(path), return_metadata=True)[1]
+        w = weight_files.load(path)
+        meta = weight_files.metadata(path)
         cfg = json.loads(meta.get("vqlab_mtp", "{}"))
         head = cls(model, arch)
         bits, gs = cfg.get("bits"), cfg.get("group_size", 32)

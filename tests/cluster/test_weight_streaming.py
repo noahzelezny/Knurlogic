@@ -43,8 +43,8 @@ def test_the_plan_reaches_the_rank_environment():
         "from": PAGES[0], "source": "holder", "turn": 0, "ordered": True}}
     env = launch.rank_env(spec, {"hostfile": "h"}, False)
     from knurlogic.engine.split import weights as W
-    got = W.plan_from_env(env, lambda page: page)
-    assert (got.read, got.source, got.turn, got.ordered) == (
+    plan, page, source = W.plan_from_env(env)
+    assert (page, source, plan.turn, plan.ordered) == (
         PAGES[0], "holder", 0, True)
     assert "KNURLOGIC_WEIGHTS" not in launch.rank_env(
         dict(spec, read=None), {"hostfile": "h"}, False)
@@ -141,6 +141,7 @@ def test_a_rank_fills_its_share_from_a_real_page(tmp_path, monkeypatch):
     import mlx.nn as nn
     from mlx.utils import tree_flatten
 
+    from knurlogic.engine.model import weight_files as WF
     from knurlogic.engine.split import weights as W
     from knurlogic.interfaces.page import server as page_server
     d = tmp_path / "Tiny"
@@ -156,17 +157,15 @@ def test_a_rank_fills_its_share_from_a_real_page(tmp_path, monkeypatch):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         read = CW.reader(f"127.0.0.1:{srv.server_address[1]}", "id", "Tiny")
-        W.CURRENT["plan"] = W.ReadPlan(read=read, source="holder")
-        with W.recording():
-            lazy = nn.Linear(64, 32)
-            lazy.load_weights(list(mx.load(str(f)).items()))
-        out = W.fill(lazy, read, "holder")
+        WF.use_peer(WF.Peer(read=read, source="holder", root=d))
+        lazy = nn.Linear(64, 32)
+        lazy.load_weights(list(WF.load(f, deferred=True).items()))
+        out = W.fill(lazy)
         assert out["left"] == 0 and out["fetched"] == (64 * 32 + 32) * 4
         for k, v in tree_flatten(lazy.parameters()):
             assert mx.array_equal(v, dict(tree_flatten(m.parameters()))[k])
     finally:
-        W.CURRENT.update(plan=None)
-        W.forget()
+        WF.use_peer(None)
         srv.shutdown()
         CW._RESOLVED.clear()
 

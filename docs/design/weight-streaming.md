@@ -82,64 +82,53 @@ VQ-3.5bpw share came at 0.48 GiB/s with it. A refusal is the usual typed `Failur
 is the client: it posts the envelope and reads the body straight into the
 caller's buffer.
 
-### On the fetching rank: substitution, with bounded memory
+### On the fetching rank: one opener, the share by its parameters
 
-A rank loads lazily (`mlx_lm` with `lazy=True`: each array is a promise to
-read a byte range of a shard file), cuts the model to its share (pipeline:
-its layers; tensor: its slice of each array), and only then evaluates
-(`runtime/model_host.evaluate_everything`). The fetch slots in before
-that evaluation:
+Every tensor file of an artifact is opened by one function,
+`engine/model/weight_files.load` -- the trunk through knurlogic's copy of
+mlx-lm's `load_model` (`engine/model/load_model.py`, pinned to the
+installed mlx-lm by `tests/engine/test_load_model_pin.py`), a family's
+drafting head and vision tower directly. While a split rank has a peer
+(`weight_files.use_peer`, set at the rank's start from its plan):
 
-1. **Record** -- while the model is built lazily, `mx.load` is wrapped
-   (`engine/split/weights.recording`) so every array it hands out is
-   remembered with its shard file and tensor name. The offsets come from
-   the shard's safetensors header, read once from the mount (a few MB,
-   not the weights).
-2. **Derive** -- the tensor split's cut (`engine/split/tensor`) builds new
-   arrays from loaded ones (a slice, a repeated KV head). It records each
-   as "derived from source X by f" (`weights.derived`), so the rank can
-   rebuild it from X's bytes.
-3. **Fill** -- for each array the model still holds (its share only: a
-   pipeline rank dropped the other layers, a tensor rank holds slices),
-   in the model's order: fetch the source tensor's bytes from the peer
-   into a buffer, build the array, apply the derivation if any, evaluate
-   it, and put it in place of the lazy one. Then the buffer is dropped.
-4. Whatever is left lazy -- an array no record covers (a family's
-   `sanitize` that stacks or renames, a bundled runtime's own tables), or
-   every array after a fetch failed -- is read from the mount by the
-   normal evaluation. Nothing breaks without the peer; it is only slower.
+1. **The trunk is opened deferred.** Its files are opened lazily, as
+   before, and each array is recorded with its file and tensor name
+   (`weight_files.origin`). Names alone would not do: a bundled VQ
+   runtime renames tensors in its `sanitize` (the 397B's `sz_codes` is a
+   parameter named `codes`), so the record follows the array itself.
+2. **The model is cut to the share,** as before. The tensor split's cut
+   (`engine/split/tensor`) records each new array as "made from source X
+   by f" (`split/weights.derived`), so the rank can redo it on X's bytes.
+3. **The share is filled** (`split/weights.fill`): every array
+   `model.parameters()` still holds whose origin is a file's tensor (or a
+   cut of one) is fetched over the link, built, cut if it was, and put in
+   place with `model.update`. On the 35B and 397B models measured, every
+   array a lazily built model holds is a parameter.
+4. **The rest is read from the files** by the normal evaluation: a
+   parameter no file gives as-is (a runtime's computed tables), or
+   everything after a failed fetch.
 
-**How it is fetched.** The array behind the serving page reads cold at
-~0.5 GB/s one request at a time and ~2 GB/s with eight 64 MiB requests in
-flight (measured over the Thunderbolt 4 link; 4.5 GB/s from the page
-cache). So a fill sorts the tensors into file order, merges neighbours in
-one file into one request (a layer's scales and norms go together), and
-fetches 64 MiB pieces, 8 at a time (`PARALLEL`, `PIECE`).
+**The head and the tower** are fetched as their family opens them:
+`weight_files.load(path)` fetches the file's tensors (only `keys=` when
+the family asks for some of a trunk shard) and hands back built arrays.
+A file outside the artifact's folder is read from disk.
 
-Memory is bounded: at most `BUDGET` (4 GiB) of fetched bytes wait to be
-built, on top of what the rank holds anyway (a tensor larger than that
-goes alone). 1 GiB was too little: a 397B's 0.7 GiB expert tensors then
-went one at a time and a cold fetch fell to 0.46 GiB/s. A tensor split
-rank fetches a whole source tensor to keep its slice -- the same bytes the
-mount read moved before.
+**How it is fetched** (`weight_files.ranges`): tensors in file order,
+neighbours in one file merged into one request up to 64 MiB, a larger
+tensor in 64 MiB pieces, 8 requests in flight (`PIECE`, `PARALLEL`).
+Measured from the M4 against the M3's SoftRAID array, cold: 0.50 GB/s
+with one request in flight, 2.04 GB/s with eight. At most `BUDGET`
+(4 GiB) of fetched bytes wait to be built; a tensor larger than that
+goes alone. A tensor split rank fetches a whole source tensor to keep its
+slice: the bytes the file read moved before.
 
-**The head and the tower.** The drafting head and the vision tower are
-bound after the weights, by family code that evaluates what it loads.
-Each family hands what it gathered to `weights.fetch_now` first, so
-those come from the peer too (the 397B's tower took 149 s of scattered
-SMB reads, its head 129 s); `fill_bound` catches anything left.
-
-**A fetch never fails a load.** Any error while fetching (the peer gone,
-an object the walk cannot read) is logged and leaves the arrays lazy;
-the mount reads them.
+**Failures.** An `Exception` while fetching is logged and the files are
+read instead: a fetch never fails a load, it is only slower.
+`KeyboardInterrupt` and `SystemExit` are never caught; a stopped load
+(`LOAD_STOP`) stops the fetch between ranges.
 
 Each fetched GiB is written to the rank's marker (`reading_from`,
-`fetched_bytes`), and the share's percentage rises as before (the page
-measures what the rank's process holds).
-
-**Fallback.** No `from` in the plan, or the peer refuses or goes away
-mid-load: the remaining arrays are read from the mount, and the log says
-how many bytes came each way.
+`fetched_bytes`), and the share's percentage rises as before.
 
 ## 2. Load order
 

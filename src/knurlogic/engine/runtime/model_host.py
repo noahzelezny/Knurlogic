@@ -218,19 +218,16 @@ class ModelHost:
                 self._quantize_kv()
                 self._pad_matmuls()
                 self.model_key = (path, None, None)
-                # the head and the tower too, from the peer when this
-                # rank fetches its share (engine/split/weights.py)
+                tb = time.monotonic()
+                self._bind_vision(path)
+                tv = time.monotonic()
+                self._bind_head(path)
+                logger.info("bound vision in %.1fs, the head in %.1fs",
+                            tv - tb, time.monotonic() - tv)
+                # a split rank's load is done: the ranks waiting their
+                # turn read now (engine/split/weights.py)
                 from knurlogic.engine.split import weights
-                with weights.recording():
-                    tb = time.monotonic()
-                    self._bind_vision(path)
-                    tv = time.monotonic()
-                    self._bind_head(path)
-                    logger.info("bound vision in %.1fs, the head in %.1fs",
-                                tv - tb, time.monotonic() - tv)
-                weights.fill_bound([binding.DRAFT.get("head"),
-                                    state.VISION.get("serve")])
-                weights.let_next_go()
+                weights.done()
                 t3 = time.monotonic()
             # each step's time, so a slow load says which step was slow
             # (the read itself, the lock, or vision and the drafting head)
@@ -297,14 +294,10 @@ class ModelHost:
         """A ring's model, loaded lazily and split in place: nothing read
         yet, and the split's collectives done."""
         from knurlogic.engine.model.load import load_unlocked
-        from knurlogic.engine.split import weights
         extra = self.shard_config(path) if self.shard_config else None
-        # what each lazy array is read from, for a rank that fetches its
-        # share from a peer (engine/split/weights.py)
-        with weights.recording():
-            model, tok = load_unlocked(path, self.executes_artifact_code,
-                                       lazy=True, model_config=extra)
-            self.shard(model)
+        model, tok = load_unlocked(path, self.executes_artifact_code,
+                                   lazy=True, model_config=extra)
+        self.shard(model)
         return model, tok
 
     def _weights(self, path: str, lazy=None):

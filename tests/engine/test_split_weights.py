@@ -1,10 +1,13 @@
 """engine/split/weights.py: a split rank's share filled from a fake peer
-instead of the mount, the load order over the bell, and the fallback."""
-
+instead of its files (model.parameters(), model.update), a tensor split's
+cut redone on the fetched bytes, the load order over the bell, and the
+fallback."""
 import mlx.core as mx
 import mlx.nn as nn
 import pytest
+from mlx.utils import tree_flatten
 
+from knurlogic.engine.model import weight_files as WF
 from knurlogic.engine.split import tensor as T
 from knurlogic.engine.split import weights as W
 
@@ -17,104 +20,116 @@ class Tiny(nn.Module):
 
 
 @pytest.fixture
-def shard(tmp_path):
-    """One safetensors shard of a Tiny with known weights, bf16 and f32."""
+def art(tmp_path):
+    """An artifact folder: one shard of a Tiny with known weights."""
+    d = tmp_path / "Tiny"
+    d.mkdir()
     m = Tiny()
     m.layers[0].weight = mx.random.normal((16, 8)).astype(mx.bfloat16)
-    path = tmp_path / "model-00001-of-00001.safetensors"
-    from mlx.utils import tree_flatten
-    mx.save_safetensors(str(path), dict(tree_flatten(m.parameters())))
-    return path
+    mx.save_safetensors(str(d / "model.safetensors"),
+                        dict(tree_flatten(m.parameters())))
+    return d
 
 
-class Peer:
-    """A fake peer page: serves byte ranges of the shard by file name."""
-
-    def __init__(self, root, fail_at=None):
-        self.root, self.calls, self.fail_at = root, [], fail_at
+class Page:
+    def __init__(self, root, fail=False):
+        self.root, self.fail, self.calls = root, fail, []
 
     def __call__(self, file, offset, length, into):
-        assert "/" not in file
-        if self.fail_at is not None and \
-                offset <= self.fail_at < offset + length:
+        if self.fail:
             raise ConnectionError("the peer went away")
         self.calls.append((file, offset, length))
-        assert length <= W.PIECE
         with open(self.root / file, "rb") as f:
             f.seek(offset)
             into[:] = f.read(length)
 
 
 @pytest.fixture
-def plan():
-    yield
+def peer():
+    def use(root, **kw):
+        page = Page(root, **kw)
+        WF.use_peer(WF.Peer(read=page, source="holder", root=root))
+        return page
+    yield use
+    WF.use_peer(None)
     W.CURRENT.update(plan=None, link=None)
-    W.forget()
 
 
-def lazy_model(path):
-    with W.recording():
-        m = Tiny()
-        m.load_weights(list(mx.load(str(path)).items()))
+def lazy_model(d):
+    m = Tiny()
+    m.load_weights(list(WF.load(d / "model.safetensors",
+                                deferred=True).items()))
     return m
 
 
 def flat(m):
-    from mlx.utils import tree_flatten
-    return {k: v for k, v in tree_flatten(m.parameters())}
+    return dict(tree_flatten(m.parameters()))
 
 
-def test_a_pipeline_share_comes_from_the_peer(shard, plan):
-    peer = Peer(shard.parent)
-    W.CURRENT["plan"] = W.ReadPlan(read=peer, source="holder")
-    m = lazy_model(shard)
-    m.layers = m.layers[1:]                  # this rank's stage: layers 1..2
-    out = W.fill(m, peer, "holder")
-    assert out["left"] == 0 and not out["failed"]
-    # only the share's tensors were asked for, and nothing of layer 0
-    # neighbours in the file go as one request
-    assert 0 < len(peer.calls) <= len(flat(m))
-    ref = mx.load(str(shard))
-    for k, v in flat(m).items():
-        kk = k.replace("layers.0.", "layers.1.", 1) if k.startswith(
-            "layers.0.") else k.replace("layers.1.", "layers.2.", 1) \
-            if k.startswith("layers.1.") else k
-        assert mx.array_equal(v, ref[kk]).item(), k
+def test_a_pipeline_share_comes_from_the_peer(art, peer):
+    page = peer(art)
+    m = lazy_model(art)
+    m.layers = m.layers[:2]                   # this rank's layers only
+    out = W.fill(m)
+    assert out["left"] == 0 and page.calls
+    ref = mx.load(str(art / "model.safetensors"))
+    got = flat(m)
+    assert "layers.2.weight" not in got
+    for k, v in got.items():
+        assert mx.array_equal(v, ref[k]).item(), k
+    # only the share's bytes moved
+    head = WF.header(art / "model.safetensors")
+    assert sum(n for _, _, n in page.calls) == sum(head[k][1] for k in got)
 
 
-def test_a_tensor_cut_is_rebuilt_from_the_fetched_source(shard, plan):
-    peer = Peer(shard.parent)
-    W.CURRENT["plan"] = W.ReadPlan(read=peer)
-    m = lazy_model(shard)
-    lay = m.layers[0]
-    lay.update(T.split_params(lay.parameters(),
-                              lambda p, w: 0 if w.ndim == 2 else None, 1, 2))
-    out = W.fill(m, peer)
-    assert out["left"] == 0
-    ref = mx.load(str(shard))["layers.0.weight"]
-    got = m.layers[0].weight
-    assert got.dtype == mx.bfloat16 and got.shape == (8, 8)
-    assert mx.array_equal(got, ref[8:]).item()
+def test_a_tensor_cut_is_rebuilt_from_the_fetched_source(art, peer):
+    peer(art)
+    m = lazy_model(art)
+    w = m.layers[0].weight
+    cut = T.split_params({"w": w}, lambda p, a: 0, rank=1, n=2)["w"]
+    m.layers[0].weight = cut
+    W.fill(m)
+    ref = mx.load(str(art / "model.safetensors"))["layers.0.weight"]
+    assert mx.array_equal(m.layers[0].weight, ref[8:]).item()
 
 
-def test_a_failing_peer_leaves_the_rest_to_the_mount(shard, plan):
-    last = max(W.header(str(shard)).values())    # the shard's last tensor
-    peer = Peer(shard.parent, fail_at=last)
-    W.CURRENT["plan"] = W.ReadPlan(read=peer)
-    m = lazy_model(shard)
-    out = W.fill(m, peer)
-    assert out["failed"] and out["left"] > 0
-    mx.eval(m.parameters())                  # the mount reads the rest
-    ref = mx.load(str(shard))
+def test_a_parameter_that_is_no_files_tensor_is_left(art, peer):
+    peer(art)
+    m = lazy_model(art)
+    m.norm.weight = m.norm.weight * 2         # made, not read
+    out = W.fill(m)
+    assert out["left"] == 1
+
+
+def test_a_failing_peer_leaves_the_share_to_the_files(art, peer):
+    peer(art, fail=True)
+    W.CURRENT["plan"] = W.ReadPlan()
+    m = lazy_model(art)
+    evaluated = []
+    W.read_share(m, lambda mm: evaluated.append(mm) or mx.eval(
+        mm.parameters()))
+    assert evaluated == [m]
+    ref = mx.load(str(art / "model.safetensors"))
     for k, v in flat(m).items():
         assert mx.array_equal(v, ref[k]).item(), k
+
+
+def test_ctrl_c_stops_the_read(art, peer, monkeypatch):
+    peer(art)
+    W.CURRENT["plan"] = W.ReadPlan()
+
+    def interrupted(*a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(W, "fill", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        W.read_share(lazy_model(art), lambda m: None)
 
 
 class Bell:
     def __init__(self, log):
         self.log = log
 
-    def align(self, timeout=None):
+    def align(self):
         self.log.append("align")
 
 
@@ -122,132 +137,47 @@ class Bell:
     (0, ["fill", "eval", "align"]),          # reads first, then lets go
     (1, ["align", "eval"]),                  # waits, then reads its own
 ])
-def test_the_turn_is_kept_over_the_bell(turn, want, monkeypatch, plan):
+def test_the_turn_is_kept_over_the_bell(turn, want, monkeypatch, peer,
+                                        tmp_path):
     log, marks = [], []
     monkeypatch.setattr(W, "progress", lambda **f: marks.append(f))
     monkeypatch.setattr(W, "fill", lambda *a, **k: log.append("fill") or {
-        "fetched": 0, "left": 0, "failed": ""})
-    W.CURRENT.update(link=Bell(log), plan=W.ReadPlan(
-        read=(lambda *a: None) if turn == 0 else None, turn=turn,
-        ordered=True))
+        "fetched": 0, "left": 0, "seconds": 0.0})
+    if turn == 0:
+        peer(tmp_path)
+    W.CURRENT.update(link=Bell(log), plan=W.ReadPlan(turn=turn,
+                                                     ordered=True))
     W.read_share(object(), lambda m: log.append("eval"))
-    W.let_next_go()                          # after the head and the tower
+    W.done()                                 # after the head and the tower
     assert log == want
     if turn == 1:
         assert marks[0] == {"turn": "waiting"}
+    assert WF.peer() is None                 # done stops reading the peer
 
 
 @pytest.mark.parametrize("turn", [0, 1])
-def test_no_order_no_waiting(plan, turn):
+def test_no_order_no_waiting(peer, turn):
     log = []
     W.CURRENT.update(link=Bell(log), plan=W.ReadPlan(turn=turn,
                                                      ordered=False))
     W.read_share(object(), lambda m: log.append("eval"))
-    W.let_next_go()
+    W.done()
     assert log == ["eval"]
 
 
-def test_the_plan_comes_from_the_environment():
-    got = W.plan_from_env(
-        {"KNURLOGIC_WEIGHTS": '{"from": "198.51.100.1:8899", "source": '
-                              '"holder", "turn": 0, "ordered": true}'},
-        lambda page: ("reader", page))
-    assert got.read == ("reader", "198.51.100.1:8899") and got.ordered
-    assert W.plan_from_env({}, lambda p: None) is None
-    own = W.plan_from_env({"KNURLOGIC_WEIGHTS": '{"turn": 1, "ordered": true}'},
-                          lambda p: 1 / 0)
-    assert own.read is None and own.turn == 1
-
-
-def test_a_large_tensor_comes_in_parallel_pieces(shard, plan, monkeypatch):
-    monkeypatch.setattr(W, "PIECE", 64)          # bytes: many pieces each
-    monkeypatch.setattr(W, "BUDGET", 256)
-    peer = Peer(shard.parent)
-    W.CURRENT["plan"] = W.ReadPlan(read=peer)
-    m = lazy_model(shard)
-    out = W.fill(m, peer)
-    assert out["left"] == 0 and len(peer.calls) > len(flat(m))
-    ref = mx.load(str(shard))
-    for k, v in flat(m).items():
-        assert mx.array_equal(v, ref[k]).item(), k
-
-
-def test_neighbouring_tensors_go_as_one_request_in_file_order():
-    items = [("b", 0, 10), ("a", 100, 5), ("a", 0, 100), ("a", 105, 1 << 40)]
-    got = W._groups(items)
-    assert [(f, o, n) for f, o, n, _ in got] == [
-        ("a", 0, 105), ("a", 105, 1 << 40), ("b", 0, 10)]
-    assert got[0][3] == [(2, 0, 100), (1, 100, 5)]
-
-
-def test_what_is_bound_after_the_weights_comes_from_the_peer(shard, plan):
-    peer = Peer(shard.parent)
-    W.CURRENT["plan"] = W.ReadPlan(read=peer)
-    with W.recording():                      # a head bound beside the model
-        head = {"w": mx.load(str(shard))["layers.2.weight"]}
-    W.fill_bound([head, None])
-    assert peer.calls and not W._SOURCES
-    assert mx.array_equal(head["w"], mx.load(str(shard))["layers.2.weight"])
-
-
-class Raising:
-    """A transformers-like object whose attributes import (and raise)."""
-    __module__ = "transformers.models.auto"
-
-    def __init__(self):
-        self.mapping = {"k": 1}
-
-    @property
-    def __dict__(self):
-        raise ValueError("Could not find a model class")
-
-
-class Holder:
-    def __init__(self, w):
-        self.w = w
-        self.processor = Raising()
-
-
-def test_a_walk_skips_what_it_cannot_read(shard, plan):
-    peer = Peer(shard.parent)
-    W.CURRENT["plan"] = W.ReadPlan(read=peer)
-    with W.recording():
-        h = Holder(mx.load(str(shard))["layers.2.weight"])
-    W.fill_bound([h])
-    assert peer.calls
-    assert mx.array_equal(h.w, mx.load(str(shard))["layers.2.weight"])
-
-
-def test_a_failing_bound_fill_never_fails_the_load(shard, plan, monkeypatch):
-    W.CURRENT["plan"] = W.ReadPlan(read=Peer(shard.parent))
-    with W.recording():
-        head = {"w": mx.load(str(shard))["layers.2.weight"]}
-    monkeypatch.setattr(W, "fill", lambda *a, **k: 1 / 0)
-    W.fill_bound([head])                     # logged, not raised
-    assert not W._SOURCES
-
-
-def test_a_failing_fill_leaves_the_share_to_the_mount(monkeypatch, plan):
+def test_without_a_plan_it_reads_as_before():
     log = []
-    monkeypatch.setattr(W, "fill", lambda *a, **k: 1 / 0)
-    W.CURRENT.update(plan=W.ReadPlan(read=lambda *a: None))
     W.read_share(object(), lambda m: log.append("eval"))
     assert log == ["eval"]
 
 
-def test_a_family_takes_its_tensors_from_the_peer_before_using_them(
-        shard, plan):
-    peer = Peer(shard.parent)
-    W.CURRENT["plan"] = W.ReadPlan(read=peer)
-    with W.recording():
-        arrays = mx.load(str(shard))
-        got = W.fetch_now({k: arrays[k] for k in ("norm.weight",
-                                                  "layers.1.weight")})
-    assert peer.calls
-    for k, v in got.items():
-        assert mx.array_equal(v, mx.load(str(shard))[k]).item()
-
-
-def test_without_a_plan_a_family_reads_as_before(shard, plan):
-    d = {"w": mx.load(str(shard))["norm.weight"]}
-    assert W.fetch_now(d) is d
+def test_the_plan_comes_from_the_environment():
+    plan, page, source = W.plan_from_env(
+        {"KNURLOGIC_WEIGHTS": '{"from": "198.51.100.1:8899", "source": '
+                              '"holder", "turn": 0, "ordered": true}'})
+    assert (page, source, plan.turn, plan.ordered) == (
+        "198.51.100.1:8899", "holder", 0, True)
+    assert W.plan_from_env({}) == (None, "", "")
+    own, page, _ = W.plan_from_env(
+        {"KNURLOGIC_WEIGHTS": '{"turn": 1, "ordered": true}'})
+    assert page == "" and own.turn == 1

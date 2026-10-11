@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import mlx.core as mx
 import numpy as np
 
+from knurlogic.engine.model import weight_files
 from knurlogic.engine.vision import (EncodedImage, ImageRef, VisionError,
                                      VisionSpec, proc_hash)
 from knurlogic.engine.vision import key as K
@@ -131,7 +132,8 @@ class QwenFamily:
                     files.setdefault(f, []).append(k)
             return files
         for f in sorted(p.glob("*.safetensors")):
-            names = [k for k in mx.load(str(f)) if _tower_key(k) is not None]
+            names = [k for k in weight_files.names(f)
+                     if _tower_key(k) is not None]
             if names:
                 files[f.name] = names
         return files
@@ -146,14 +148,11 @@ class QwenFamily:
         weights: Dict[str, Any] = {}
         n = 0
         for f, names in files.items():
-            arrays = mx.load(str(Path(model_path) / f))
+            arrays = weight_files.load(Path(model_path) / f, keys=names)
             for k in names:
                 weights[_tower_key(k)] = arrays[k]
                 n += 1
             del arrays
-        # a split rank fetching its share takes these from the peer
-        from knurlogic.engine.split.weights import fetch_now
-        weights = fetch_now(weights)
         tower = VisionModel(self.vision_config)
         weights = tower.sanitize(weights)
         dtype = next(iter(weights.values())).dtype

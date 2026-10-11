@@ -729,21 +729,24 @@ def _ring_marker(ring: dict) -> None:
 
 def _read_plan(a) -> None:
     """This rank's entry of the job's read plan (KNURLOGIC_WEIGHTS, set by
-    its page): where its share comes from and when it reads
+    its page): when it reads, and the page whose disk it reads from
     (docs/design/weight-streaming.md). Absent: it reads as before."""
     from knurlogic.cluster import weights as CW
+    from knurlogic.engine.model import weight_files
     from knurlogic.engine.split import weights
     from knurlogic.machine.artifact import identity
-
-    def reader(page):
-        return CW.reader(page, identity(a.path), a.path.name)
-    plan = weights.plan_from_env(os.environ, reader)
+    plan, page, source = weights.plan_from_env(os.environ)
     weights.CURRENT["plan"] = plan
-    if plan is not None:
-        print("weights   "
-              + (f"from {plan.source or 'a peer'} over the link"
-                 if plan.read else "from this machine's own copy")
-              + (f", turn {plan.turn}" if plan.ordered else ""), flush=True)
+    if plan is None:
+        return
+    if page:
+        weight_files.use_peer(weight_files.Peer(
+            read=CW.reader(page, identity(a.path), a.path.name),
+            source=source or "a peer", root=a.path))
+    print("weights   "
+          + (f"from {source or 'a peer'} over the link" if page
+             else "from this machine's own copy")
+          + (f", turn {plan.turn}" if plan.ordered else ""), flush=True)
 
 
 def _parse_sets(pairs) -> dict:

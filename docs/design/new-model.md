@@ -26,6 +26,15 @@ no bias_vl, no MTP layers).
   of it, including one that ships no chat template.
 - `sanitize` keeps every key a feature needs (no rename that breaks a
   later reader); a strict load proves nothing is left over.
+- Every tensor file the family opens (its drafting head's sidecar, its
+  vision tower's tensors in a trunk shard) is opened through
+  `engine/model/weight_files.load` -- never `mx.load` -- with `keys=`
+  when only some of a file's tensors are wanted, and `names` /
+  `metadata` for its header. That is what lets a split rank fetch them
+  from the machine holding the files (docs/design/weight-streaming.md);
+  `tests/engine/test_weight_files.py` fails on an `mx.load` anywhere
+  else. Nothing else is needed for the trunk: knurlogic's loader opens
+  it.
 - Fits are computed with every part counted: trunk, draft head, tower and
   image store, KV at the default context. Each optional part (MTP,
   vision) can be turned off at launch and says what it costs.
@@ -69,6 +78,9 @@ no bias_vl, no MTP layers).
   split does not know yet is a missing feature, listed, not a scope cut.
 - Stopping a cluster job mid-load, mid-warm-up and mid-generation leaves
   every GPU at baseline.
+- A split with the model's files on one Mac only: the other Macs' log
+  says their share, head and tower came "over the link", and only small
+  computed tables were "read from the files".
 
 ## 7b. Cache saving
 - Every cache kind the family makes saves and restores bit for bit
