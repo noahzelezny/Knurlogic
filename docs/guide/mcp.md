@@ -46,7 +46,7 @@ API instead ([chat-and-api.md](chat-and-api.md)).
 
 - `artifact`: the model's name (for another Mac, its 16-hex identity).
 - `port`: omitted, the first free port from 8080 up.
-- `tune`: `default` or `lean`. `sets`: launch-only overrides, `{KEY: VALUE}`.
+- `tune`: `default`, `lean` or `benchmark`. `sets`: launch-only overrides, `{KEY: VALUE}`.
 - `force`: load while another load is still moving memory (one Mac only).
   It never makes a model fit.
 - `draft` (default true), `vision` (default true): `false` frees the MTP

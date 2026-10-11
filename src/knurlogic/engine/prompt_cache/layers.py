@@ -1001,7 +1001,8 @@ def restore(max_n: int, store: Store | None, *, max_bytes=None, link=None,
             # what this rank lacks, from the peers, before it says what it
             # read (no fetcher, or every file here: nothing is fetched)
             from . import transfer
-            transfer.fill(store, max_n, prefill_tps=store.prefill_tps)
+            if max_n > 0:
+                transfer.fill(store, max_n, prefill_tps=store.prefill_tps)
             mb = max_bytes if link is None else None
             mine = store.candidates(max_n, mb)
             got = store.read(mine)

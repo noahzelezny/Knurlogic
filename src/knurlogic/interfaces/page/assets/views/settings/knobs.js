@@ -71,7 +71,7 @@ const KNOB_TITLE={KNURLOGIC_CROSS_CHIP:'Per-chip rounding', KNURLOGIC_PRESET:'Pr
   KNURLOGIC_PREFILL_CHUNK:'Prompt chunk', KNURLOGIC_CACHE_LIMIT_GB:'Cache reserve',
   KNURLOGIC_MTP:'MTP', KNURLOGIC_MTP_DYNAMIC:'MTP dynamic', KNURLOGIC_VISION:'Vision', KNURLOGIC_KV_KERNEL:'KV kernel',
   KNURLOGIC_GDN_COMPILE:'DeltaNet compile',
-  KNURLOGIC_THINKING_DEFAULT:'Thinking default'};
+  KNURLOGIC_THINKING_DEFAULT:'Thinking default', KNURLOGIC_PROMPT_CACHE_REUSE:'Prompt cache reuse'};
 // the preset may be left unset: the Knurlogic tab's preset then applies
 const UNSET='(unset)';
 function knobHTML(k, c){

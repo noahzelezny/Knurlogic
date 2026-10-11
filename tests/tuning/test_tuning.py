@@ -75,7 +75,7 @@ def test_an_unknown_tune_is_refused_not_ignored():
     try:
         resolve(_art(), 96 * GIB, tune="turbo")
     except ValueError as e:
-        assert "isn't default or lean" in str(e)
+        assert "isn't default, lean or benchmark" in str(e)
     else:
         raise AssertionError("a misspelled profile must not silently resolve")
 

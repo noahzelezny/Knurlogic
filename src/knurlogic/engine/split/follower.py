@@ -347,12 +347,15 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
         # the same point as rank 0's Scheduler._restore_disk: collectives
         # in the same order (the per-split vote, then the per-layer one)
         from knurlogic.engine.prompt_cache import disk as prompt_disk
-        from knurlogic.engine.prompt_cache import layers
+        from knurlogic.engine.prompt_cache import layers, memory
+        # KNURLOGIC_PROMPT_CACHE_REUSE off: nothing read, the votes still
+        # run (rank 0 decides the same: the setting is ring-wide)
+        reuse = memory.reuse_on()
         try:
             key = prompt_disk.host_key(host)
             got = prompt_disk.read(key, prompt_disk.candidates(
                 key, prompt_cache_size, sweep_first=False)) \
-                if key is not None else []
+                if key is not None and reuse else []
         except Exception:  # a restore that fails is a miss (logged)
             logger.exception("rank %d: reading the saved prompt cache "
                              "failed", link.rank)
@@ -366,7 +369,8 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
             logger.exception("rank %d: no per-layer prompt cache store",
                              link.rank)
         if layers.uses_layers(host):
-            got = got + layers.restore(prompt_cache_size, store, link=link)
+            got = got + layers.restore(prompt_cache_size if reuse else 0,
+                                       store, link=link)
         disk[:] = [key, got, store]
     host.after_bind = restore_disk
     host.load(path)

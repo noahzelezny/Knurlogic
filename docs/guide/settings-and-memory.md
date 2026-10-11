@@ -26,6 +26,7 @@ restarted.
 |---|---|
 | `default` | the measured settings; fastest |
 | `lean` | most context and most agents: 8-bit KV where the family takes it, 512-token prompt chunks, MTP off, 1 GiB cache reserve |
+| `benchmark` | reproducible runs: per-chip rounding off (the same rounding on every chip), MTP as set but drafting every step when on, the default 512-token prompt chunk whatever the room, and no prompt-cache reuse (nothing restored at load or read back, no earlier request's prefix). KV bits stay as set: benchmark the width you choose |
 
 Pick one in Settings -> Knurlogic, per model in Settings -> Models
 (Preset), with `knurlogic serve --tune lean`, or `tune` in the MCP. A
@@ -48,7 +49,8 @@ The names `safe`, `fast`, `stable` and `balanced` are still accepted
 | KV kernel | `KNURLOGIC_KV_KERNEL` | on, off | reads an 8-bit cache directly during decode. Leave on; off is for comparison. |
 | DeltaNet compile | `KNURLOGIC_GDN_COMPILE` | on, off (`--set` only) | Qwen's linear-attention layers run their elementwise work compiled; same output. Leave on; off is for comparison. |
 | Per-chip rounding | `KNURLOGIC_CROSS_CHIP` | page: on, off; `--set` also takes `auto` | for a split across different Mac chips: off pads some matmuls so every chip gives the same tokens (+2-6% time on those calls). |
-| Preset | `KNURLOGIC_PRESET` | default, lean | per model |
+| Prompt cache reuse | `KNURLOGIC_PROMPT_CACHE_REUSE` | on, off | off: no request is served from a cached prefix and nothing saved is restored; saving is unchanged. The `benchmark` preset turns it off. |
+| Preset | `KNURLOGIC_PRESET` | default, lean, benchmark | per model |
 
 The MCP `settings` tool and `knurlogic doctor <model>` list every value with
 the measurement behind it and whether it can change live or only at launch.

@@ -16,6 +16,18 @@
   `KNURLOGIC_PROMPT_CACHE_ANY_QUANT` (on by default; Settings ->
   Knurlogic -> Prompt cache).
 
+### Presets
+
+* A `benchmark` launch preset, beside default and lean, for reproducible
+  runs: per-chip rounding off (the same rounding on every chip), MTP as
+  set but drafting every step when on, the default 512-token prompt chunk
+  whatever the room free at launch, and no prompt-cache reuse. KV bits
+  stay as set. Any setting changed beside it still wins.
+* `KNURLOGIC_PROMPT_CACHE_REUSE` (on by default; a launch setting): off,
+  no request is served from a cached prefix and nothing saved is
+  restored at load or read back. Saving is unchanged. The benchmark
+  preset turns it off.
+
 ### License
 
 * knurlogic is now licensed under the GNU Affero General Public License,

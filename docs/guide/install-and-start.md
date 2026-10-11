@@ -105,7 +105,7 @@ code 1). `doctor` with no model lists what is on the disk.
 
 | option | |
 |---|---|
-| `--tune default\|lean` | the preset to check against |
+| `--tune default\|lean\|benchmark` | the preset to check against |
 | `--working-set-gib N` | pretend the GPU may use N GiB |
 | `--exports` | print only `export K=V` lines |
 | `--cluster [--port 8899]` | the cluster check instead |

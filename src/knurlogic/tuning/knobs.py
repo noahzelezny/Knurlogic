@@ -25,6 +25,7 @@ KNOB_TITLES: dict = {
     "KNURLOGIC_GDN_COMPILE": "DeltaNet compile",
     "KNURLOGIC_LONG_CONTEXT": "Long context",
     "KNURLOGIC_THINKING_DEFAULT": "Thinking default",
+    "KNURLOGIC_PROMPT_CACHE_REUSE": "Prompt cache reuse",
 }
 KNOB_TITLES["VQLAB_PREFILL_CHUNK"] = KNOB_TITLES["KNURLOGIC_PREFILL_CHUNK"]
 KNOB_TITLES["VQ_CACHE_LIMIT_GB"] = KNOB_TITLES["KNURLOGIC_CACHE_LIMIT_GB"]
@@ -60,7 +61,7 @@ KNOB_DOC = {
         "Unset, it is read from the room free at launch: the widest "
         "width up to the family's measured best whose predicted spike "
         "fits in 10% of the room left after weights, KV and cache, else "
-        "512 (lean: always 512). Output is identical at "
+        "512 (lean and benchmark: always 512). Output is identical at "
         "every width."),
     "KNURLOGIC_CONTEXT_LENGTH": (
         "the longest conversation (prompt + answer, in tokens) a request may "
@@ -84,6 +85,14 @@ KNOB_DOC = {
         "so that memory goes to headroom (a wider prompt chunk, or a fit "
         "that would not otherwise); a request with an image gets a 400 "
         "saying vision is off for this launch."),
+    "KNURLOGIC_PROMPT_CACHE_REUSE": (
+        "serve a request from a cached prompt prefix: an earlier request's "
+        "in memory, or a saved one restored at load or read back",
+        "on (the default): a prompt that continues a cached one reads only "
+        "its new tokens, faster. Off costs the full prefill every time: "
+        "every prompt is read in full and nothing "
+        "saved is restored -- what a benchmark wants, so two runs of one "
+        "request time the same work. Saving is unchanged."),
     "KNURLOGIC_MTP_DYNAMIC": (
         "switch between drafting and plain steps by their measured cost",
         "on: each regime is timed per batch width and the cheaper one "
@@ -167,11 +176,15 @@ KNOB_DOC = {
         "one -- it cannot desync, rank 0 samples every token. auto: on only "
         "when a cluster job's machines have different GPU architectures."),
     "KNURLOGIC_PRESET": (
-        "launch preset for this model: default or lean -- the knurlogic "
+        "launch preset for this model: default, lean or benchmark -- the "
+        "knurlogic "
         "strategy unless set here",
         "one named bundle of the settings below. default is the measured "
         "settings; lean buys context and agents with some speed and "
-        "precision (8-bit KV, 512-token prompt chunks, MTP off). Any "
+        "precision (8-bit KV, 512-token prompt chunks, MTP off); benchmark "
+        "pins what makes two runs differ (the same rounding on every chip, "
+        "MTP drafting every step, 512-token chunks, no prompt-cache "
+        "reuse). Any "
         "setting changed beside it beats the preset's value."),
     "VQ_CACHE_LIMIT_GB": (
         "how much freed-buffer cache the runtime may hold",
@@ -221,6 +234,9 @@ KNOB_HELP = {
     "KNURLOGIC_KV_BITS": "8-bit holds about twice the conversation in the "
                          "same memory, slightly slower.",
     "KNURLOGIC_KV_KERNEL": "A faster way to read an 8-bit cache; leave on.",
+    "KNURLOGIC_PROMPT_CACHE_REUSE": "Off reads every prompt in full, so "
+                                    "repeated runs measure the same work; "
+                                    "leave on otherwise.",
     "KNURLOGIC_GDN_COMPILE": "A faster way to run Qwen3.5/3.6's linear-"
                              "attention layers, same output; leave on.",
     "KNURLOGIC_THINKING_DEFAULT": "How hard the model thinks when a client "
@@ -295,6 +311,8 @@ KNOB_ALIASES = {
     "cross_chip": ("KNURLOGIC_CROSS_CHIP",),
     "long_context": ("KNURLOGIC_LONG_CONTEXT",),
     "preset": ("KNURLOGIC_PRESET",),
+    # whether the prompt cache serves a hit (engine/prompt_cache/memory)
+    "prompt_cache_reuse": ("KNURLOGIC_PROMPT_CACHE_REUSE",),
 }
 
 #: launch settings of the model itself, read when it loads: the same on
@@ -303,7 +321,8 @@ MODEL_KNOBS = ("KNURLOGIC_MTP", "KNURLOGIC_MTP_DYNAMIC", "KNURLOGIC_VISION",
                "KNURLOGIC_KV_BITS",
                "KNURLOGIC_KV_KERNEL", "KNURLOGIC_GDN_COMPILE",
                "KNURLOGIC_CROSS_CHIP",
-               "KNURLOGIC_LONG_CONTEXT", "KNURLOGIC_PRESET")
+               "KNURLOGIC_LONG_CONTEXT", "KNURLOGIC_PRESET",
+               "KNURLOGIC_PROMPT_CACHE_REUSE")
 
 
 # --- which knobs the ENGINE consumes ----------------------------------------
@@ -319,7 +338,7 @@ ENGINE_KNOB_NAMES = tuple(n for k in ("prefill_chunk", "cache_limit_gb",
                                       "kv_kernel", "gdn_compile",
                                       "thinking_default",
                                       "cross_chip", "long_context",
-                                      "preset")
+                                      "preset", "prompt_cache_reuse")
                           for n in KNOB_ALIASES[k])
 
 
@@ -404,6 +423,8 @@ def engine_settings(env: dict) -> dict:
                                ("cache_limit_gb", "cache_limit_gb", float),
                                ("mtp", "mtp", on_off),
                                ("mtp_dynamic", "mtp_dynamic", on_off),
+                               ("prompt_cache_reuse", "prompt_cache_reuse",
+                                on_off),
                                ("vision", "vision", on_off),
                                ("kv_bits", "kv_bits", kv_bits_of),
                                ("cross_chip", "cross_chip", cross_chip_of),
@@ -503,6 +524,7 @@ KNOB_RANGE: dict = {
     "VQ_DECODE_CHUNK": ([4, 8, 16, 32], ""),
     "KNURLOGIC_MTP": (["on", "off"], ""),
     "KNURLOGIC_MTP_DYNAMIC": (["on", "off"], ""),
+    "KNURLOGIC_PROMPT_CACHE_REUSE": (["on", "off"], ""),
     "KNURLOGIC_VISION": (["on", "off"], ""),
     # narrowed per family by the resolver (Resolution.ranges): a family
     # that refuses quantized KV offers bf16 alone

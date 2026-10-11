@@ -306,3 +306,14 @@ def test_the_picker_offers_only_the_splits_a_launch_takes(tmp_path):
     # neither knows it: nothing to offer across machines
     assert splits_of(at({"model_type": "llama",
                          "num_hidden_layers": 40})) == []
+
+
+def test_benchmark_keeps_mtp_and_drafts_every_step(tmp_path):
+    """The benchmark preset leaves MTP as set (on here) and turns off its
+    dynamic switching: every step drafts."""
+    r = resolve(_art(_with_head(tmp_path)), 96 * GIB, tune="benchmark")
+    assert r.env["KNURLOGIC_MTP"] == "on"
+    assert r.env["KNURLOGIC_MTP_DYNAMIC"] == "off"
+    assert r.env["KNURLOGIC_PROMPT_CACHE_REUSE"] == "off"
+    assert r.preset["from_preset"]["KNURLOGIC_MTP_DYNAMIC"] == "off"
+    assert "KNURLOGIC_MTP" not in r.preset["from_preset"]

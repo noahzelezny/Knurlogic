@@ -63,7 +63,7 @@ knurlogic serve <model> [options]
 |---|---|---|
 | `--port` | 8080 | |
 | `--host` | 127.0.0.1 | an address (comma-separated for several), or `cluster` (loopback and Thunderbolt only) |
-| `--tune` / `--preset` | default | `default` or `lean` ([settings-and-memory.md](settings-and-memory.md)) |
+| `--tune` / `--preset` | default | `default`, `lean` or `benchmark` ([settings-and-memory.md](settings-and-memory.md)) |
 | `--kv-bits` | bf16 | `bf16`, `8`, `6` or `4` (6 and 4 only where the family takes them) |
 | `--context-length N` | the model's window | the longest prompt + answer a request may use; a cap, nothing reserved |
 | `--no-draft` | | do not use an MTP head (`KNURLOGIC_MTP=off`) |

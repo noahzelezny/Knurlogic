@@ -121,7 +121,8 @@ def _shares(artifact: Artifact, nodes: list) -> dict:
 ENGINE_CONSUMED = ("prefill_chunk", "cache_limit_gb", "context_length", "mtp",
                    "mtp_dynamic", "kv_bits", "kv_kernel", "gdn_compile",
                    "cross_chip",
-                   "long_context", "preset", "vision", "thinking_default")
+                   "long_context", "preset", "vision", "thinking_default",
+                   "prompt_cache_reuse")
 
 
 def emit(r: Resolution, artifact: Artifact, logical: str, value) -> str | None:
@@ -509,6 +510,9 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
     # gdn_compile is not emitted: on is the arch's own default (an unset
     # variable), and off exists only for A/B by `--set`
     emit(r, artifact, "cross_chip", launch.get("cross_chip", "off"))
+    # whether a request is served from a cached prefix (benchmark: off)
+    emit(r, artifact, "prompt_cache_reuse",
+         launch.get("prompt_cache_reuse", "on"))
     # the level a silent request gets: shown where the template has levels
     try:
         from knurlogic.engine.model import thinking

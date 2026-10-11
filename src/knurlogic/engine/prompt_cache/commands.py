@@ -310,7 +310,11 @@ class PromptCacheCommands:
         new prompt cache, before the warm-up. On a ring a collective (every
         rank restores the same entries, or none)."""
         from knurlogic.engine.prompt_cache import disk as prompt_disk
-        from knurlogic.engine.prompt_cache import layers
+        from knurlogic.engine.prompt_cache import layers, memory
+        # KNURLOGIC_PROMPT_CACHE_REUSE off (benchmark): nothing restored and
+        # nothing to read back; the votes still run, over nothing, as every
+        # rank's do
+        reuse = memory.reuse_on()
         try:
             key = prompt_disk.host_key(self.host)
         except Exception:  # a key that cannot be made is a miss (logged)
@@ -321,7 +325,7 @@ class PromptCacheCommands:
         # builds wrote, and a tensor split of a family with no cache spec
         # still writes)
         old = prompt_disk.restore(
-            self.cache.lru, self.host.model_key, key,
+            self.cache.lru, self.host.model_key, key if reuse else None,
             max_bytes=self.cache_bytes, link=link)
         self._store = None
         try:
@@ -331,8 +335,9 @@ class PromptCacheCommands:
         new = {}
         if layers.uses_layers(self.host):
             # every rank of a split votes here, whatever it holds
-            got = layers.restore(self.cache.lru.max_size, self._store,
-                                 max_bytes=self.cache_bytes, link=link)
+            got = layers.restore(self.cache.lru.max_size if reuse else 0,
+                                 self._store, max_bytes=self.cache_bytes,
+                                 link=link)
             new = prompt_disk.insert(self.cache.lru, self.host.model_key,
                                      got) if got else {}
         self._restored = {**old, **new}
@@ -340,7 +345,9 @@ class PromptCacheCommands:
                           self._restored, shared=self.cache.shared)
         self._disk_key = key
         self._disk_index = {}
-        if key is not None and self.tensor is not None:
+        if not reuse:
+            pass
+        elif key is not None and self.tensor is not None:
             # a ring: only what every rank agreed to and restored at this
             # load (their directories may differ from before), then what
             # they all write together -- a read_back of a file one rank

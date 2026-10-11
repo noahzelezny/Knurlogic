@@ -774,10 +774,14 @@ def main(argv=None) -> int:
                         "Most knobs are read at import, so this is the only "
                         "moment they can be chosen.")
     p.add_argument("--tune", "--preset", dest="tune", default="default",
-                   type=presets.preset_arg, metavar="{default,lean}",
-                   help="launch preset: default (the measured settings) or "
+                   type=presets.preset_arg,
+                   metavar="{" + ",".join(presets.PRESETS) + "}",
+                   help="launch preset: default (the measured settings), "
                         "lean (8-bit KV where the family takes it, 512-token "
-                        "prompt chunks, MTP off: most context and agents). "
+                        "prompt chunks, MTP off: most context and agents) or "
+                        "benchmark (reproducible runs: the same rounding on "
+                        "every chip, MTP drafting every step, 512-token "
+                        "chunks, no prompt-cache reuse). "
                         "Explicit settings (--set, --kv-bits, a per-model "
                         "KNURLOGIC_PRESET) beat it.")
     p.add_argument("--decode-concurrency", type=int, default=32,

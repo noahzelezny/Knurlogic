@@ -95,7 +95,7 @@ TOOLS: dict[str, dict[str, Any]] = {
                        "measurement behind it and whether it can be changed "
                        "at runtime or only at launch.",
         "schema": _schema({"artifact": S("path to the artifact"),
-                           "tune": S("default | lean")},
+                           "tune": S("default | lean | benchmark")},
                           ["artifact"]),
     },
     "drafting": {
@@ -132,7 +132,7 @@ TOOLS: dict[str, dict[str, Any]] = {
             "port": S("port to serve on (a cluster job: rank 0's port on "
                       "the leader); omitted: the first free port from "
                       "8080 up", "integer"),
-            "tune": S("default | lean"),
+            "tune": S("default | lean | benchmark"),
             "sets": {"type": "object",
                      "description": "launch-only knob overrides, KEY: VALUE"},
             "force": {"type": "boolean",

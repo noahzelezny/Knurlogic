@@ -45,7 +45,8 @@ and the MCP `drafting` tool say the same for one model.
 - **Every step**: draft whenever a head is bound. Steady timing.
 - **Off**: the head is not loaded; its memory is free.
 
-The `lean` preset turns MTP off. When a model will not fit with its head
+The `lean` preset turns MTP off; `benchmark` keeps it as set and drafts
+every step. When a model will not fit with its head
 but would without it, `load` says so instead of only refusing.
 
 ## On a cluster

@@ -100,7 +100,8 @@ function wireGks(el){
   });
 }
 // The presets, every setting a preset sets as its own row, and per-chip
-// rounding last (it is no part of a preset): on unless KNURLOGIC_CROSS_CHIP
+// rounding last (no preset row: benchmark turns it off at launch, and a
+// value saved here beats that): on unless KNURLOGIC_CROSS_CHIP
 // is on (the same rounding on every chip); a saved auto or off reads as on.
 // A preset button sets the rows; a row changed by hand leaves no preset
 // pressed, unless the rows come to equal one. Saved: the preset when the

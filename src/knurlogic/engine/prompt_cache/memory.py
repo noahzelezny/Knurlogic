@@ -1,7 +1,27 @@
 """The prompt cache in memory: PromptCache (mlx-lm's LRU plus the side map
-of who owns each entry) and entry_owner, the owner a request's entry gets."""
+of who owns each entry) and entry_owner, the owner a request's entry gets.
+
+KNURLOGIC_PROMPT_CACHE_REUSE (a launch setting, on unless off; the
+benchmark preset turns it off): off, no request is served from a cached
+prefix -- fetch() misses, hit_length() is 0 -- and the scheduler restores
+nothing at load and reads nothing back (`reuse_on`). Entries are still
+made and saved."""
 
 from __future__ import annotations
+
+import os
+
+REUSE_ENV = "KNURLOGIC_PROMPT_CACHE_REUSE"
+
+
+def reuse_on(env=None) -> bool:
+    """KNURLOGIC_PROMPT_CACHE_REUSE as this launch set it (os.environ): on
+    unless off; a bad value is on (the launch refuses it)."""
+    from knurlogic.tuning.knobs import on_off
+    try:
+        return on_off((os.environ if env is None else env).get(REUSE_ENV))
+    except ValueError:
+        return True
 
 
 class PromptCache:
@@ -27,9 +47,14 @@ class PromptCache:
         #: keep-latest session's, nobody's): saved and restored like a
         #: session's entries, so a reload's first worker skips that prefill
         self.shared: set = set()
+        #: whether a request may be served from a cached prefix (reuse_on,
+        #: read once per launch)
+        self.reuse: bool = reuse_on()
 
     def fetch(self, key, tokens):
         from mlx_lm.models import cache as C
+        if not self.reuse:
+            return None, list(tokens)
         cache, rest = self.lru.fetch_nearest_cache(key, tokens)
         if cache is None or rest or not tokens:
             return cache, rest
@@ -43,6 +68,8 @@ class PromptCache:
         makes (the admission prices the checkpoints past the hit before it
         fetches). 0 if the trie cannot be asked: every boundary priced, the
         safe side."""
+        if not self.reuse:
+            return 0
         try:
             r = self.lru._trie.search(key, tokens)
         except (AttributeError, TypeError, ValueError, KeyError):

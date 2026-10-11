@@ -1,4 +1,5 @@
-"""Launch presets: the tune axis as named bundles (default and lean);
+"""Launch presets: the tune axis as named bundles (default, lean and
+benchmark);
 explicit per-model settings beat a preset's values and the resolution says
 which came from where."""
 
@@ -21,7 +22,8 @@ def _art(model_type="qwen3_5"):
 
 
 def test_presets_are_the_tune_axis_and_default_is_the_default():
-    assert set(presets.PRESETS) == set(presets.TUNE_PROFILES) == {"default", "lean"}
+    assert set(presets.PRESETS) == set(presets.TUNE_PROFILES) == {
+        "default", "lean", "benchmark"}
     assert presets.PRESET_DEFAULT == "default"
     assert presets.preset_of("") == "default"
     assert presets.preset_of(None, "lean") == "lean"
@@ -112,3 +114,63 @@ def test_the_preset_is_a_launch_knob_with_a_native_range():
     from knurlogic.tuning.checks import clean_sets
     ok, bad = clean_sets({"KNURLOGIC_PRESET": "lean"})
     assert ok == {"KNURLOGIC_PRESET": "lean"} and not bad
+
+
+def test_benchmark_pins_what_makes_runs_differ():
+    """Same rounding on every chip, MTP drafting every step, the default
+    512-token chunk whatever the room, no prompt-cache reuse; MTP itself
+    and KV bits as they were."""
+    r = resolve(_art(), 96 * GIB, tune="benchmark")
+    e = knobs.engine_settings(r.env)
+    assert e["prefill_step_size"] == measured.PREFILL_CHUNK_DEFAULT == 512
+    assert e["cross_chip"] == "on"
+    assert e["prompt_cache_reuse"] is False
+    assert e["kv_bits"] is None
+    assert r.env["KNURLOGIC_PRESET"] == "benchmark"
+    # the room does not move it: a tight box and a roomy one alike
+    small = knobs.engine_settings(resolve(_art(), 24 * GIB,
+                                          tune="benchmark").env)
+    assert small["prefill_step_size"] == 512
+    env = preset_env(_art(), "benchmark")
+    assert env == {"KNURLOGIC_CROSS_CHIP": "on",
+                   "KNURLOGIC_MTP_DYNAMIC": "off",
+                   "KNURLOGIC_PROMPT_CACHE_REUSE": "off"}
+    assert "KNURLOGIC_MTP" not in env and "KNURLOGIC_KV_BITS" not in env
+    assert "512" in presets.TUNE_PROFILES["benchmark"]["why"]
+    fp = r.preset["from_preset"]
+    assert fp["KNURLOGIC_PREFILL_CHUNK"] == "512"
+    assert fp["KNURLOGIC_PROMPT_CACHE_REUSE"] == "off"
+    assert fp["KNURLOGIC_CROSS_CHIP"] == "on"
+
+
+def test_benchmark_values_and_rows():
+    v = presets.preset_values("benchmark")
+    assert v["prefill"] == 512 and v["mtp"] == "on"
+    assert v["mtp_dynamic"] == "off" and v["kv_bits"] == "bf16"
+    assert v["cross_chip"] == "on" and v["prompt_cache_reuse"] == "off"
+    rows = presets.preset_row_values("benchmark")
+    assert rows == {"KNURLOGIC_PREFILL_CHUNK": "512",
+                    "KNURLOGIC_CACHE_LIMIT_GB":
+                        f"{measured.CACHE_LIMIT_GB_DEFAULT:g}",
+                    presets.MTP_MODE: "every",
+                    "KNURLOGIC_KV_BITS": "bf16"}
+    assert presets.preset_values("default")["prompt_cache_reuse"] == "on"
+
+
+def test_an_explicit_setting_beats_benchmark():
+    r = resolve(_art(), 96 * GIB, tune="benchmark")
+    rec = apply_preset_overrides(r, {"KNURLOGIC_PROMPT_CACHE_REUSE": "on",
+                                     "KNURLOGIC_CROSS_CHIP": "off"})
+    assert rec["overridden"] == {
+        "KNURLOGIC_PROMPT_CACHE_REUSE": {"preset": "off", "set": "on"},
+        "KNURLOGIC_CROSS_CHIP": {"preset": "on", "set": "off"}}
+
+
+def test_the_error_names_every_preset():
+    with pytest.raises(ValueError) as e:
+        presets.preset_of("turbo")
+    assert "default, lean or benchmark" in str(e.value)
+    assert checks.check_knob("KNURLOGIC_PRESET", "benchmark") is None
+    assert checks.check_knob("KNURLOGIC_PROMPT_CACHE_REUSE", "off") is None
+    assert checks.check_knob("KNURLOGIC_PROMPT_CACHE_REUSE", "maybe")
+    assert "KNURLOGIC_PROMPT_CACHE_REUSE" in knobs.MODEL_KNOBS

@@ -39,13 +39,30 @@ TUNE_PROFILES: dict = {
                "takes it (bf16 where it does not, and said), 512-token "
                "prompt chunks, MTP off so the head's memory is free",
     },
+    # what makes two runs of one request differ in numbers or timing,
+    # pinned: the same rounding on every chip, MTP (when on) drafting every
+    # step, a prompt chunk that does not follow the room free at launch,
+    # and no prompt-cache reuse. KV bits are left alone: a benchmark sets
+    # the width it measures.
+    "benchmark": {
+        "KNURLOGIC_PREFILL_CHUNK": measured.PREFILL_CHUNK_DEFAULT,
+        "launch": {"cross_chip": "on", "mtp_dynamic": "off",
+                   "prompt_cache_reuse": "off"},
+        "why": "reproducible runs: the same rounding on every chip "
+               "(per-chip rounding off), MTP as set but drafting every "
+               "step when on, the default 512-token prompt chunk "
+               "(measured.PREFILL_CHUNK_DEFAULT) whatever the room free "
+               "at launch, and no prompt-cache reuse (nothing restored "
+               "or read back, no earlier request's prefix); KV bits as "
+               "set",
+    },
 }
 
 #: The launch presets ARE the tune axis: one named bundle per value, the
 #: default "default" (the measured defaults, unchanged). A per-model
 #: KNURLOGIC_PRESET (Settings -> Models) picks one for that base model;
 #: any explicit knob set beside it beats the preset's value for that knob.
-PRESETS = ("default", "lean")
+PRESETS = ("default", "lean", "benchmark")
 PRESET_DEFAULT = "default"
 
 
@@ -57,7 +74,8 @@ def preset_of(v, default: str = PRESET_DEFAULT) -> str:
     s = {"safe": "lean", "fast": "default", "stable": "default",
          "balanced": "default"}.get(s, s)
     if s not in TUNE_PROFILES:
-        raise ValueError(f"Preset: {v!r} isn't default or lean")
+        raise ValueError(f"Preset: {v!r} isn't "
+                         f"{', '.join(PRESETS[:-1])} or {PRESETS[-1]}")
     return s
 
 
@@ -70,8 +88,8 @@ def preset_or(v, default: str) -> str:
 
 
 def preset_arg(v) -> str:
-    """argparse `type` for a --tune value: default or lean, or a name a
-    preset once had."""
+    """argparse `type` for a --tune value: a preset's name (PRESETS), or
+    a name a preset once had."""
     import argparse
     try:
         return preset_of(v)
@@ -97,7 +115,8 @@ def preset_launch(tune: str, model_type: str = "") -> tuple:
 #: read from the room free at launch), cache GiB, memory transient scale,
 #: and the model launch settings.
 PRESET_BASE = {"prefill": None, "cache": measured.CACHE_LIMIT_GB_DEFAULT, "scale": 1.0,
-               "mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16"}
+               "mtp": "on", "mtp_dynamic": "on", "kv_bits": "bf16",
+               "cross_chip": "off", "prompt_cache_reuse": "on"}
 
 
 def preset_values(name: str) -> dict:

@@ -154,10 +154,11 @@ def main(argv=None) -> int:
                         "ships with. Forcing v1.5 on a v2 model changes "
                         "its outputs.")
     p.add_argument("--tune", default="default", type=presets.preset_arg,
-                   metavar="{default,lean}",
-                   help="the launch preset, the same two `serve --tune` "
-                        "takes: default (the measured settings) or lean "
-                        "(lowest peak memory, most context). Capped by what "
+                   metavar="{" + ",".join(presets.PRESETS) + "}",
+                   help="the launch preset, the same ones `serve --tune` "
+                        "takes: default (the measured settings), lean "
+                        "(lowest peak memory, most context) or benchmark "
+                        "(reproducible runs). Capped by what "
                         "has been measured.")
     p.add_argument("--exports", action="store_true",
                    help="print only `export K=V` lines, for eval")

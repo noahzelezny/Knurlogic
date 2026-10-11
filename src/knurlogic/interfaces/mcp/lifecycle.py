@@ -44,7 +44,8 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
         tune = preset_of(tune)
     except ValueError as e:
         return {"loaded": False, "refused": str(e),
-                "note": "the tune is default or lean; nothing was started"}
+                "note": "the tune is default, lean or benchmark; nothing "
+                        "was started"}
     names = [str(m) for m in (machines or []) if str(m)]
     if names and placement.is_role_list(names):
         # role words (here | peers | all | fit): placement.py
