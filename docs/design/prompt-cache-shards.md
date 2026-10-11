@@ -426,12 +426,19 @@ shape and meaning -- the text config's architecture (model type, layer
 count, hidden size, attention and KV heads, head dim, layer types / full
 attention interval, sliding window, MLA and indexer dims, compress
 ratios, linear-attention dims, vocabulary size, rope and context-length
-settings; `text_config` for a multimodal wrapper; never `quantization`)
-and the bytes of the tokenizer files that map text to ids
-(`tokenizer.json`, `tokenizer.model`, `vocab.json`, `merges.txt`,
-`added_tokens.json`, `special_tokens_map.json`; not
-`tokenizer_config.json`, whose chat template does not change what an id
-means). Each new entry's `entry.json` records it as `fingerprint`; an
+settings, a rope block's `type` and `rope_type` read as one;
+`text_config` for a multimodal wrapper; never `quantization`) and what the
+tokenizer maps text to ids with: from `tokenizer.json`, its model type,
+vocabulary, merges, added tokens, splitting rule and normalizer, compared
+by meaning, not bytes (without one, the bytes of `tokenizer.model`,
+`vocab.json`, `merges.txt`, `added_tokens.json`,
+`special_tokens_map.json`; never `tokenizer_config.json`, whose chat
+template does not change what an id means). By bytes, Qwen3.6-35B's VQ
+and mlx-community 8-bit copies -- one vocabulary, formatted differently,
+one with side files -- read as two models; by meaning they are one. The
+397B VQ copies stay apart from Qwen's own and spicyneuron's: their
+splitting rule leaves out combining marks (`\p{M}`), so some text
+tokenizes differently. Each new entry's `entry.json` records it as `fingerprint`; an
 entry saved before takes it from its key's artifact when that identity
 resolves to a local artifact (`machine/artifact.resolve_identity`), and
 is skipped otherwise.

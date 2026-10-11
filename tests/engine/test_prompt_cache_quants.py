@@ -108,6 +108,36 @@ def test_another_shape_or_tokenizer_does_not(tmp_path, over):
     assert QT.fingerprint(_artifact(tmp_path / "b", **over)) != a
 
 
+def test_formatting_and_side_files_do_not_split_one_model(tmp_path):
+    """Measured: Qwen3.6-35B's VQ and mlx-community 8-bit copies ship one
+    vocabulary formatted differently, one with vocab.json and merges.txt
+    beside tokenizer.json, and rope blocks naming the type `type` or
+    `rope_type`."""
+    tok = {"model": {"type": "BPE", "vocab": {"a": 0, "b": 1},
+                     "merges": [["a", "b"]]},
+           "added_tokens": [{"id": 2, "content": "<x>", "special": True}],
+           "pre_tokenizer": {"type": "ByteLevel"}}
+    a = _artifact(tmp_path / "a", tokenizer=json.dumps(tok),
+                  rope_parameters={"type": "default", "rope_theta": 1e7})
+    tok2 = dict(tok, model=dict(tok["model"], merges=["a b"]))
+    b = _artifact(tmp_path / "b", tokenizer=json.dumps(tok2, indent=2),
+                  rope_parameters={"rope_type": "default", "rope_theta": 1e7})
+    (b / "vocab.json").write_text("{}")
+    (b / "merges.txt").write_text("a b\n")
+    assert QT.fingerprint(a) == QT.fingerprint(b)
+
+
+def test_a_different_splitting_rule_is_another_tokenizer(tmp_path):
+    """Measured: the 397B VQ copies split text without combining marks
+    (\\p{M}), Qwen's own with: some text tokenizes differently."""
+    tok = {"model": {"vocab": {"a": 0}},
+           "pre_tokenizer": {"type": "Split", "pattern": {"Regex": "\\p{L}+"}}}
+    a = _artifact(tmp_path / "a", tokenizer=json.dumps(tok))
+    tok["pre_tokenizer"]["pattern"]["Regex"] = "[\\p{L}\\p{M}]+"
+    b = _artifact(tmp_path / "b", tokenizer=json.dumps(tok))
+    assert QT.fingerprint(a) != QT.fingerprint(b)
+
+
 def test_an_older_entry_takes_its_fingerprint_from_its_artifact(tmp_path):
     a = _artifact(tmp_path / "a")
     meta = {"key": {"artifact": f"path:{a}"}}

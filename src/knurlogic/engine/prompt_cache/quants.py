@@ -57,7 +57,11 @@ FIELDS = (
     "rope_parameters", "partial_rotary_factor",
     "max_position_embeddings")
 #: the files that map text to token ids (a chat template does not: the
-#: cache is keyed by ids)
+#: cache is keyed by ids). With a tokenizer.json, what it DOES is compared
+#: (`_tokenizer_meaning`), not its bytes: publishers of one model ship the
+#: same vocabulary with other formatting and other side files (measured:
+#: Qwen3.6-35B's VQ and mlx-community 8-bit copies). Without one, the
+#: other files' bytes.
 TOKENIZER = ("tokenizer.json", "tokenizer.model", "vocab.json",
              "merges.txt", "added_tokens.json", "special_tokens_map.json")
 #: {path: (stamp, fingerprint)} and {artifact identity: fingerprint}
@@ -78,6 +82,33 @@ def on(env: dict | None = None) -> bool:
 def _text_config(cfg: dict) -> dict:
     tc = cfg.get("text_config")
     return tc if isinstance(tc, dict) else cfg
+
+
+def _rope(v):
+    """A rope block with its type under one name: publishers write `type`
+    or `rope_type` for the same thing."""
+    if isinstance(v, dict) and "type" in v and "rope_type" not in v:
+        v = {("rope_type" if k == "type" else k): x for k, x in v.items()}
+    return v
+
+
+def _tokenizer_meaning(raw: bytes) -> bytes:
+    """What a tokenizer.json maps text to ids with: its model's type,
+    vocabulary and merges (pairs as "a b"), the added tokens (id, text,
+    special), the splitting rule and the normalizer. A different splitting
+    rule tokenizes some text differently, so it counts (measured: the
+    397B VQ copies split without combining marks, Qwen's own with)."""
+    t = json.loads(raw)
+    m = t.get("model") or {}
+    merges = [" ".join(x) if isinstance(x, list) else x
+              for x in m.get("merges") or []]
+    added = sorted((a.get("id"), a.get("content"), bool(a.get("special")))
+                   for a in t.get("added_tokens") or [])
+    return json.dumps({"type": m.get("type"), "vocab": m.get("vocab"),
+                       "merges": merges, "added": added,
+                       "pre": t.get("pre_tokenizer"),
+                       "normalizer": t.get("normalizer")},
+                      sort_keys=True).encode()
 
 
 def fingerprint(path) -> str | None:
@@ -105,16 +136,21 @@ def fingerprint(path) -> str | None:
     if not isinstance(cfg, dict):
         return None
     tc = _text_config(cfg)
-    arch = {k: tc.get(k, cfg.get(k)) for k in FIELDS}
+    arch = {k: _rope(tc.get(k, cfg.get(k))) for k in FIELDS}
     arch["model_type"] = [cfg.get("model_type"), tc.get("model_type")]
     h = hashlib.sha256(json.dumps(arch, sort_keys=True).encode())
-    for f in files[1:]:
-        try:
-            h.update(f.name.encode() + b"\0" + f.read_bytes())
-        except FileNotFoundError:
-            continue
-        except OSError:
-            return None
+    tj = p / "tokenizer.json"
+    try:
+        if tj.is_file():
+            h.update(b"tokenizer.json\0" + _tokenizer_meaning(tj.read_bytes()))
+        else:
+            for f in files[1:]:
+                try:
+                    h.update(f.name.encode() + b"\0" + f.read_bytes())
+                except FileNotFoundError:
+                    continue
+    except (OSError, ValueError):
+        return None
     fp = h.hexdigest()[:16]
     _BY_PATH[str(p)] = (stamp, fp)
     return fp
