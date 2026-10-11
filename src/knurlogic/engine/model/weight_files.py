@@ -21,6 +21,7 @@ import json
 import logging
 import struct
 import threading
+import time
 from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -142,8 +143,14 @@ def load(path, *, keys: Iterable[str] | None = None,
     head = header(path)
     todo = [k for k in head if k != "__metadata__"
             and (want is None or k in want)]
+    t0 = time.monotonic()
     try:
-        return fetch(path, head, todo, p)
+        out = fetch(path, head, todo, p)
+        logger.info("weights: %s, %d tensors, %.2f GiB from %s over the "
+                    "link in %.1fs", path.name, len(out),
+                    sum(head[k][1] for k in todo) / GIB, p.source,
+                    time.monotonic() - t0)
+        return out
     except Exception as e:  # only slower: the file is read instead
         logger.warning("weights: %s not fetched from %s (%s: %s); read "
                        "from the file", path.name, p.source,
