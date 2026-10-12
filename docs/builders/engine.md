@@ -74,6 +74,14 @@ scheduler does the rest on its thread.
 - **`engine/model/` is the one door to the engine.** Code outside the
   engine asks `engine.model` names, not mlx; version skew in mlx-lm is
   handled there (`load.load_unlocked`).
+- **One opener for an artifact's tensor files.** `engine/model/weight_files.py`
+  (`load`, `names`, `metadata`) opens every model file: the trunk through
+  `load_model.py` (mlx-lm's `load_model`, copied with that one line
+  changed and pinned by `tests/engine/test_load_model_pin.py`), a
+  family's head and tower directly. Nothing else calls `mx.load` on an
+  artifact's files (`tests/engine/test_weight_files.py`): it is what lets
+  a split rank stream them ([splits](splits.md),
+  docs/design/weight-streaming.md).
 - **A live knob reaches every rank.** `tuning/live.LIVE_KNOBS` can change
   on a running server (`apply_live`); on a split, `Scheduler.share_live` journals them
   as `set` ops (`plan.SETS`).

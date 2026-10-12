@@ -17,6 +17,7 @@ In `src/knurlogic/engine/split/`:
 | `link.py` | how ranks reach each other: `init` (join the ring), `Link` (the per-step exchange), the bell (`bell_answer`, `bell_dial`, `bell_early`) a parked rank sleeps on, `Desync` |
 | `ring.py` | rank 0's side: `Ring` (kept across executors), `Journal` (its ops since the last exchange), `TensorExecutor` (rank 0's executor, either split), `assign_seed`, `publish_ranks` |
 | `follower.py` | ranks >= 1: `serve_follower` (from start to stop), `follow` (apply the plan, step, never sample), `Mark` (its memory limit), `agree_head` |
+| `weights.py` | a rank's read of its share: `read_share` (wait its turn, `fill` the share from a peer's page by `model.parameters()`, read the rest from the files), `derived` (a tensor cut, redone on fetched bytes), `done` (end the turn), `plan_from_env`. The bytes come through `engine/model/weight_files.py` |
 | `marker.py` | a rank's progress (steps, prefill chunks, loaded) as the engine reports it; stdlib, so engine never imports cluster |
 | `tensor_rules.py` | `RULES`: which arrays of a layer are cut, on which axis, in which segments; `refusals`, `unverified`. No mlx, so `tuning/` checks safetensors headers against the same table |
 | `viability.py` | `refusals`: runs a module no rule knows, whole and split, and compares before the ring starts |

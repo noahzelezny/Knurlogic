@@ -22,6 +22,7 @@ page says where things are.
 | `engine/vendor.py` | `knurlogic vendor`: copy an architecture file and record where it came from |
 | `engine/smoke.py` | `knurlogic smoke`: generate a token and prove where the code came from; `--pin` writes pins |
 | `engine/templates/__init__.py` | the generic half of supplied chat templates; the templates themselves are in the manifests (`chat_templates`) |
+| `engine/model/weight_files.py` | the one opener of a model's tensor files (`load`, `names`, `metadata`): a family opens its head sidecar and tower tensors here, never with `mx.load` |
 | `engine/model/thinking.py` | one thinking control translated to each template's dialect (from the manifest's `thinking`) |
 | `machine/artifact.py` | what an artifact declares: `Artifact`, `context_length`, `sampling_defaults`, `identity` |
 
