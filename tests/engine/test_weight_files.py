@@ -160,3 +160,54 @@ def test_no_artifact_file_is_opened_anywhere_else():
         if "mx.load(" in text.replace("`mx.load(", ""):
             bad.append(rel)
     assert not bad, f"open artifact files through weight_files: {bad}"
+
+
+class Fuses:
+    """A model whose sanitize glues two file tensors into one, drops one,
+    and passes one through -- popping from the dict it is given."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def sanitize(self, w):
+        self.calls += 1
+        if "a.weight" not in w:
+            raise KeyError("a.weight")
+        w["ab.weight"] = mx.concatenate([w.pop("a.weight"),
+                                         w.pop("b.weight").astype(
+                                             mx.bfloat16)], axis=0)
+        w.pop("d.empty")
+        return w
+
+
+def test_sanitize_records_what_it_consumed_and_made(art, peer):
+    d, t = art
+    page = peer(d)
+    f = str(d / "model.safetensors")
+    out = WF.sanitize(Fuses(), WF.load(f, deferred=True))
+    assert WF.made(out["ab.weight"]) == "ab.weight"
+    assert WF.made(out["c.scales"]) is None          # passed through
+    assert WF.origin(out["c.scales"]) == (f, "c.scales")
+    made, got = WF.remake()
+    assert mx.array_equal(made["ab.weight"], out["ab.weight"]).item()
+    head = WF.header(f)
+    want = sum(head[k][1] for k in ("a.weight", "b.weight", "d.empty"))
+    assert got == want == sum(n for _, _, n in page.calls)
+    WF.forget()
+    assert WF.made(out["ab.weight"]) is None
+
+
+def test_without_a_peer_sanitize_records_nothing(art):
+    d, _ = art
+    out = WF.sanitize(Fuses(), WF.load(d / "model.safetensors"))
+    assert WF.made(out["ab.weight"]) is None
+
+
+def test_remake_refuses_inputs_over_the_limit(art, peer, monkeypatch):
+    d, _ = art
+    page = peer(d)
+    WF.sanitize(Fuses(), WF.load(d / "model.safetensors", deferred=True))
+    monkeypatch.setattr(WF, "REMAKE_LIMIT", 64)
+    with pytest.raises(ValueError, match="over the limit"):
+        WF.remake()
+    assert not page.calls

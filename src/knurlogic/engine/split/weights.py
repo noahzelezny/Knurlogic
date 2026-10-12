@@ -6,8 +6,10 @@ records what each lazy array is (file, tensor) while this rank has a peer.
 After the model is cut to the rank's share, `read_share` waits for the
 rank's turn, fetches the bytes of every parameter the model still holds
 (`model.parameters()`; a tensor split's cut is redone on the fetched bytes,
-`derived`), puts them in place with `model.update`, and evaluates what is
-left from the files. `done` ends the rank's turn once its drafting head and
+`derived`), makes again what the model's sanitize made from the files
+(weight_files.remake: its inputs fetched, the same sanitize run on them),
+puts them in place with `model.update`, and evaluates what is left from
+the files. `done` ends the rank's turn once its drafting head and
 vision tower are in too.
 
 Whoever starts the rank sets the plan (interfaces/serve.py): engine never
@@ -54,14 +56,15 @@ def derived(out, src, fn) -> None:
         _DERIVED[id(out)] = (out, src, fn)
 
 
-def _origin(a):
-    """(file path, tensor name, source array, fn) for a parameter, or None
-    when it is not a file's tensor or a cut of one (read from the files)."""
+def _source(a):
+    """(source, fn) with a == fn(source) (fn None: a itself), the source
+    an array weight_files can give again -- a file's tensor or one the
+    model's sanitize made -- or None (read from the files)."""
     fns = []
     for _ in range(8):
-        o = weight_files.origin(a)
-        if o is not None:
-            return o[0], o[1], a, (_chain(fns[::-1]) if fns else None)
+        if weight_files.origin(a) is not None or \
+                weight_files.made(a) is not None:
+            return a, (_chain(fns[::-1]) if fns else None)
         d = _DERIVED.get(id(a))
         if d is None or d[0] is not a:
             return None
@@ -81,55 +84,86 @@ def _chain(fns: list) -> Callable:
 
 def fill(model, stop: Callable | None = None) -> dict:
     """Fetch every parameter `model` holds that a file's tensor (or a cut of
-    one) gives, and put it in place. -> {fetched, left, left_bytes,
-    largest_left, seconds}: what came over the link, and what (by name and
-    size) is read from the files."""
-    import mlx.core as mx
+    one) gives, make again those its sanitize made, and put them in place.
+    -> {fetched, made, left, left_bytes, largest_left, seconds}: what came
+    over the link, how many were made again, and what (by name and size) is
+    read from the files."""
     from mlx.utils import tree_flatten, tree_unflatten
-    p = weight_files.peer()
     t0 = time.monotonic()
     names: dict = {}                     # id(array) -> its parameter names
-    found: dict = {}                     # id(array) -> its _origin
+    read: dict = {}                      # id(array) -> (file tensor, fn)
+    make: dict = {}                      # id(array) -> (sanitize's, fn)
     left: list = []                      # (bytes, name): read from the files
     for name, a in tree_flatten(model.parameters()):
         if id(a) not in names:
-            o = _origin(a)
-            if o is None:
+            s = _source(a)
+            if s is None:
                 left.append((int(a.nbytes), name))
+            elif weight_files.origin(s[0]) is not None:
+                read[id(a)] = s
             else:
-                found[id(a)] = o
+                make[id(a)] = s
         names.setdefault(id(a), []).append(name)
-    heads: dict = {}
-    keys, items = [], []
-    for k, (path, tensor, _, _) in found.items():
-        if path not in heads:
-            heads[path] = weight_files.header(path)
-        off, n, _, _ = heads[path][tensor]
-        keys.append(k)
-        items.append((path.rsplit("/", 1)[-1], off, n))
     built: dict = {}
-    took = [0]
-
-    def build(i: int, view) -> None:
-        k = keys[i]
-        path, tensor, _, fn = found[k]
-        _, _, dt, shape = heads[path][tensor]
-        a = weight_files.to_array(view, weight_files.mx_dtype(dt), shape)
-        if fn is not None:
-            a = fn(a)
-            mx.eval(a)
-        built[k] = a
-        took[0] += len(view)
-        if len(built) % 64 == 0:
-            progress(fetched_bytes=took[0], reading_from=p.source)
-    got = weight_files.ranges(items, p.read, build, stop=stop)
+    got = _read(read, built, stop)
+    if make:
+        got += _make(make, built, stop)
+    left += [(int(src.nbytes), names[k][0]) for k, (src, _) in make.items()
+             if k not in built]
     model.update(tree_unflatten([(n, built[k]) for k in built
                                  for n in names[k]]))
     progress(fetched_bytes=got, reading_from="")
     left.sort(reverse=True)
-    return {"fetched": got, "left": len(left),
-            "left_bytes": sum(n for n, _ in left), "largest_left": left[:4],
-            "seconds": time.monotonic() - t0}
+    return {"fetched": got, "made": sum(k in built for k in make),
+            "left": len(left), "left_bytes": sum(n for n, _ in left),
+            "largest_left": left[:4], "seconds": time.monotonic() - t0}
+
+
+def _read(read: dict, built: dict, stop) -> int:
+    """Fetch the file tensors of `read` into `built` (the cut redone).
+    -> bytes."""
+    import mlx.core as mx
+    p = weight_files.peer()
+    took = [0]
+
+    def put(k, a) -> None:
+        took[0] += a.nbytes
+        fn = read[k][1]
+        if fn is not None:
+            a = fn(a)
+            mx.eval(a)
+        built[k] = a
+        if len(built) % 64 == 0:
+            progress(fetched_bytes=took[0], reading_from=p.source)
+    _, got = weight_files.fetch(
+        {k: weight_files.origin(src) for k, (src, _) in read.items()}, p,
+        each=put, stop=stop)
+    return got
+
+
+def _make(make: dict, built: dict, stop) -> int:
+    """Make again what the model's sanitize made (weight_files.remake) into
+    `built`, the cut redone; one whose name, shape or dtype does not match
+    stays out (read from the files). -> bytes fetched."""
+    import mlx.core as mx
+    try:
+        out, got = weight_files.remake(stop=stop)
+    except InterruptedError:
+        raise
+    except Exception as e:  # only slower: the files are read instead
+        logger.warning("weights: what the model's sanitize made was not "
+                       "made again (%s: %s); read from the files",
+                       type(e).__name__, e)
+        return 0
+    new = []
+    for k, (src, fn) in make.items():
+        a = out.get(weight_files.made(src))
+        if a is None or a.shape != src.shape or a.dtype != src.dtype:
+            continue
+        built[k] = a if fn is None else fn(a)
+        new.append(built[k])
+    mx.eval(new)
+    return got
 
 
 def read_share(model, evaluate: Callable) -> None:
@@ -150,10 +184,11 @@ def read_share(model, evaluate: Callable) -> None:
         from knurlogic.engine.runtime.model_host import LOAD_STOP
         try:
             out = fill(model, stop=LOAD_STOP.is_set)
-            logger.info("weights: %.1f GiB from %s over the link in %.1fs; "
+            logger.info("weights: %.1f GiB from %s over the link in %.1fs "
+                        "(%d arrays made by the model's sanitize from it); "
                         "%d arrays, %.2f GiB, read from the files%s",
                         out["fetched"] / GIB, p.source, out["seconds"],
-                        out["left"], out["left_bytes"] / GIB,
+                        out["made"], out["left"], out["left_bytes"] / GIB,
                         "".join(f"; {k} {n / GIB:.2f} GiB"
                                 for n, k in out["largest_left"]))
         except Exception as e:  # only slower: the files are read instead

@@ -1,10 +1,13 @@
-"""mlx-lm's `load_model`, with the one change that makes knurlogic the
+"""mlx-lm's `load_model`, with the two changes that make knurlogic the
 opener of a model's weight files: `mx.load(wf)` is
 `open_weight_file(wf, deferred=True)` (engine/model/weight_files.load), so
 where each array's bytes come from has one home -- the file, or a peer page
-on a split rank (docs/design/weight-streaming.md). Its relative import
-of bitnet_quantize names mlx_lm. Everything else is mlx-lm 0.32.0's,
-verbatim (MIT, NOTICE).
+on a split rank (docs/design/weight-streaming.md); and
+`model.sanitize(weights)` is `sanitize(model, weights)`
+(weight_files.sanitize), which records what the model's sanitize made from
+those files, so a split rank can make it again from fetched bytes. Its
+relative import of bitnet_quantize names mlx_lm. Everything else is mlx-lm
+0.32.0's, verbatim (MIT, NOTICE).
 
 tests/engine/test_load_model_pin.py holds it to the installed mlx-lm: the
 upstream function's source must hash to UPSTREAM_SHA256, so an mlx-lm that
@@ -31,6 +34,7 @@ from mlx_lm.utils import (
 )
 
 from .weight_files import load as open_weight_file
+from .weight_files import sanitize
 
 #: sha256 of mlx_lm.utils.load_model's source this copy was made from
 UPSTREAM_SHA256 = "1f769f19e63b4e81f3192670e4958a711fae1fd453bfb5b475f523a663c6e550"
@@ -115,7 +119,7 @@ def load_model(
     model = model_class(model_args)
 
     if hasattr(model, "sanitize"):
-        weights = model.sanitize(weights)
+        weights = sanitize(model, weights)
 
     def _quantize(quantization):
         def class_predicate(p, m):

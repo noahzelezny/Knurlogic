@@ -104,9 +104,28 @@ drafting head and vision tower directly. While a split rank has a peer
    cut of one) is fetched over the link, built, cut if it was, and put in
    place with `model.update`. On the 35B and 397B models measured, every
    array a lazily built model holds is a parameter.
-4. **The rest is read from the files** by the normal evaluation: a
-   parameter no file gives as-is (a runtime's computed tables), or
-   everything after a failed fetch.
+4. **What the model's sanitize made is made again.** A sanitize may build
+   a parameter from file tensors (DeepSeek-V4 concatenates `wq_a` and
+   `wkv` into `wqkv_a`, a compressor's `wkv` and `wgate` into
+   `wkv_gate`); no file range gives it. load_model's call goes through
+   `weight_files.sanitize`, which records the bound sanitize, the opened
+   tensors it consumed (gone from its output) and the arrays it made. If
+   a parameter of the share (or a cut of one) is such an array, the fill
+   fetches the consumed tensors in one batch (`weight_files.remake`), runs
+   the same sanitize on them, and takes each output whose name, shape and
+   dtype match. knurlogic knows nothing of the family: the recipe is the
+   family's own. mlx arrays expose no graph inputs, so which consumed
+   tensor feeds which output is not known: all of them are fetched (a
+   rank of a pipeline split fetches the other ranks' too, and anything
+   sanitize dropped: DeepSeek's 0.57 GiB). Nothing is
+   fetched when no parameter was made, so a sanitize that only drops (the
+   Vision-Exp build's tower) costs nothing.
+5. **The rest is read from the files** by the normal evaluation: a
+   parameter no file gives (a runtime's computed tables), what could not be
+   made again -- consumed inputs over `REMAKE_LIMIT` (2 GiB: a sanitize
+   that stacks every expert), a sanitize that raises on a partial dict, a
+   mismatch -- or everything after a failed fetch. The log says which and
+   why.
 
 **The head and the tower** are fetched as their family opens them:
 `weight_files.load(path)` fetches the file's tensors (only `keys=` when
@@ -194,14 +213,14 @@ From the ranks' logs. Before: the M4 read its share over SMB cold at
 | 397B VQ-2.6bpw, pipeline | 65.3 GiB in 33.0 s | -- | 1.98 GiB/s |
 | 35B 8-bit, tensor | 34.3 GiB in 24.9 s | 0 | 1.38 GiB/s |
 | 35B VQ-4.6bpw, pipeline, warm | 11.1 GiB in 3.0 s | 0 | 3.7 GiB/s |
-| DeepSeek-V4-Flash VQ-3.2bpw, pipeline | 62.9 GiB in 45.3 s | 189 arrays, 0.34 GiB | 1.39 GiB/s |
+| DeepSeek-V4-Flash VQ-3.2bpw, pipeline | 65.8 GiB in 46.9 s (195 arrays made by its sanitize) | 0 | 1.40 GiB/s |
 | GLM-5.3-Flash VQ-2.7bpw, pipeline | 62.5 GiB in 43.4 s | 0 | 1.44 GiB/s |
 | Qwen3.8-Flash-Next VQ-4.4bpw, tensor | 80.2 GiB in 56.6 s | 0 | 1.42 GiB/s |
 
-Read from the files: on DeepSeek-V4 the attention compressor's
-`wkv_gate`, which its loader builds from file tensors rather than taking
-one as-is, so no file range gives it. 0.34 GiB, but scattered small reads
-over SMB: about 19 s on a cold load, 0.0 s once that Mac has them cached.
+DeepSeek-V4's fused projections (`wqkv_a`, `wkv_gate`) are made again
+from their fetched inputs (step 4, measured 2026-10-12). Before, they were
+read from the files: 189 arrays, 0.34 GiB of scattered small reads over
+SMB, about 19 s on a cold load (weights step 63.5 s; now 46.9 s).
 On the 397B, its VQ runtime's row tables. Gemma 4 does not split yet (both
 splits refuse it), so it never streams; its tower loads through the same
 opener on one Mac.

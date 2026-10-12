@@ -76,8 +76,10 @@ scheduler does the rest on its thread.
   handled there (`load.load_unlocked`).
 - **One opener for an artifact's tensor files.** `engine/model/weight_files.py`
   (`load`, `names`, `metadata`) opens every model file: the trunk through
-  `load_model.py` (mlx-lm's `load_model`, copied with that one line
-  changed and pinned by `tests/engine/test_load_model_pin.py`), a
+  `load_model.py` (mlx-lm's `load_model`, copied with its file open and
+  its sanitize call -- `weight_files.sanitize`, which records what
+  sanitize made for `remake` -- changed, and pinned by
+  `tests/engine/test_load_model_pin.py`), a
   family's head and tower directly. Nothing else calls `mx.load` on an
   artifact's files (`tests/engine/test_weight_files.py`): it is what lets
   a split rank stream them ([splits](splits.md),

@@ -10,7 +10,10 @@ from in one home:
   machine holding the files (`peer` set by engine/split/weights.py): a
   family's open (`load`) is fetched over the link at once, in parallel
   pieces; the trunk's open (`load(..., deferred=True)`) stays lazy and is
-  recorded, so the split fills only the share it keeps (`origin`).
+  recorded, so the split fills only the share it keeps (`origin`). What the
+  model's sanitize makes from those tensors (a fused projection, say) is
+  in no file: `sanitize` records it, and `remake` makes it again from the
+  consumed tensors' fetched bytes (`made`).
 
 A fetch that fails falls back to the file, logged. KeyboardInterrupt and
 SystemExit are never caught. Design: docs/design/weight-streaming.md.
@@ -40,6 +43,9 @@ PIECE = 64 << 20
 #: fetched bytes waiting to be built: the memory bound of a fetch (a
 #: larger tensor still goes, alone)
 BUDGET = 4 << 30
+#: the most `remake` fetches; above it (a sanitize that stacks every
+#: expert, say) what sanitize made is read from the files
+REMAKE_LIMIT = 2 << 30
 
 
 # --------------------------------------------------------------- headers
@@ -84,6 +90,10 @@ class Peer:
 _PEER: dict = {"peer": None}
 #: id(array) -> (array, file path, tensor name): the deferred opens
 _OPENED: dict = {}
+#: the model's sanitize over the deferred opens: fn (the bound sanitize),
+#: inputs {name: (file path, tensor name)} it consumed, made
+#: {id(array): (array, name)} the arrays it made
+_SANITIZED: dict = {"fn": None, "inputs": {}, "made": {}}
 _LOCK = threading.Lock()
 
 
@@ -103,9 +113,17 @@ def origin(array):
     return (rec[1], rec[2]) if rec is not None and rec[0] is array else None
 
 
+def made(array) -> str | None:
+    """The name `array` has in the output of the sanitize that made it
+    (`sanitize`), or None."""
+    rec = _SANITIZED["made"].get(id(array))
+    return rec[1] if rec is not None and rec[0] is array else None
+
+
 def forget() -> None:
     with _LOCK:
         _OPENED.clear()
+        _SANITIZED.update(fn=None, inputs={}, made={})
 
 
 def _streamable(path: Path, p: Peer) -> bool:
@@ -140,16 +158,13 @@ def load(path, *, keys: Iterable[str] | None = None,
             for k, v in out.items():
                 _OPENED[id(v)] = (v, str(path), k)
         return out
-    head = header(path)
-    todo = [k for k in head if k != "__metadata__"
-            and (want is None or k in want)]
+    todo = [k for k in names(path) if want is None or k in want]
     t0 = time.monotonic()
     try:
-        out = fetch(path, head, todo, p)
+        out, got = fetch({k: (str(path), k) for k in todo}, p)
         logger.info("weights: %s, %d tensors, %.2f GiB from %s over the "
-                    "link in %.1fs", path.name, len(out),
-                    sum(head[k][1] for k in todo) / GIB, p.source,
-                    time.monotonic() - t0)
+                    "link in %.1fs", path.name, len(out), got / GIB,
+                    p.source, time.monotonic() - t0)
         return out
     except Exception as e:  # only slower: the file is read instead
         logger.warning("weights: %s not fetched from %s (%s: %s); read "
@@ -157,6 +172,36 @@ def load(path, *, keys: Iterable[str] | None = None,
                        type(e).__name__, e)
         out = mx.load(str(path))
         return {k: out[k] for k in todo}
+
+
+# ------------------------------------------------------------- sanitize
+
+def sanitize(model, weights: dict) -> dict:
+    """model.sanitize(weights) (load_model's call). While a peer is set it
+    also records what that did to the deferred opens: the tensors it
+    consumed (gone from its output) and the arrays it made, for `remake`."""
+    given = dict(weights)                # a sanitize may pop from weights
+    out = model.sanitize(weights)
+    if peer() is None:
+        return out
+    kept = {id(v) for v in out.values()}
+    inputs = {k: o for k, v in given.items()
+              if id(v) not in kept and (o := origin(v)) is not None}
+    known = {id(v) for v in given.values()}
+    with _LOCK:
+        _SANITIZED.update(
+            fn=model.sanitize, inputs=inputs,
+            made={id(v): (v, k) for k, v in out.items() if id(v) not in known})
+    return out
+
+
+def remake(stop: Callable | None = None) -> tuple:
+    """The recorded sanitize run again on the tensors it consumed, fetched
+    from the peer. -> ({name: array} it makes, bytes fetched). Raises when
+    the inputs pass REMAKE_LIMIT, or the fetch or the sanitize fails."""
+    got, n = fetch(_SANITIZED["inputs"], peer(), stop=stop,
+                   limit=REMAKE_LIMIT)
+    return _SANITIZED["fn"](got), n
 
 
 # --------------------------------------------------------------- fetching
@@ -167,28 +212,46 @@ _DTYPES = {"BF16": "bfloat16", "F16": "float16", "F32": "float32",
            "I64": "int64", "BOOL": "bool_"}
 
 
-def fetch(path: Path, head: dict, todo: list, p: Peer,
-          stop: Callable | None = None) -> dict:
-    """{name: array} for `todo` (tensor names of `path`), built from bytes
-    read over the link. Raises on a failed range."""
-    items = [(path.name, head[k][0], head[k][1]) for k in todo]
+def fetch(tensors: dict, p: Peer, *, each: Callable | None = None,
+          stop: Callable | None = None, limit: int | None = None) -> tuple:
+    """Fetch `tensors` {key: (file path, tensor name)}, from any files of
+    the artifact, over the link. -> ({key: array}, bytes fetched); with
+    `each`, each(key, array) takes every array as it is built instead.
+    Raises ValueError before fetching when the bytes pass `limit`, and on
+    a failed range."""
+    heads: dict = {}
+    keys = list(tensors)
+    items = []
+    for k in keys:
+        path, name = tensors[k]
+        if path not in heads:
+            heads[path] = header(path)
+        off, n, _, _ = heads[path][name]
+        items.append((Path(path).name, off, n))
+    total = sum(n for _, _, n in items)
+    if limit is not None and total > limit:
+        raise ValueError(f"{total / GIB:.2f} GiB to fetch, over the limit "
+                         f"({limit / GIB:.0f} GiB)")
     out: dict = {}
 
     def build(i: int, view) -> None:
-        k = todo[i]
-        _, _, dt, shape = head[k]
-        out[k] = to_array(view, mx_dtype(dt), shape)
-    ranges(items, p.read, build, stop=stop)
-    return out
+        path, name = tensors[keys[i]]
+        _, _, dt, shape = heads[path][name]
+        a = _to_array(view, _mx_dtype(dt), shape)
+        if each is None:
+            out[keys[i]] = a
+        else:
+            each(keys[i], a)
+    return out, ranges(items, p.read, build, stop=stop)
 
 
-def mx_dtype(name: str):
+def _mx_dtype(name: str):
     """The mx dtype of a safetensors dtype name ("BF16")."""
     import mlx.core as mx
     return getattr(mx, _DTYPES[name])
 
 
-def to_array(view, dtype, shape):
+def _to_array(view, dtype, shape):
     """An evaluated mx.array of `dtype` and `shape` from raw bytes."""
     import mlx.core as mx
     import numpy as np
