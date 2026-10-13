@@ -832,15 +832,15 @@ async function runTurn(){
   if(effort) body.reasoning_effort=effort;
   // The language and date, for a template that takes them (DeepSeek-V4's
   // latest_reminder); other templates ignore an unused kwarg. Language
-  // first: a date pulls DeepSeek-V4 toward reasoning in Chinese, and a
-  // language after it only partly pulls back (measured 2026-10-12, 60
-  // samples each: Vision-Exp 25% Chinese with the language last, 3% first;
-  // the text build 5% and 7%; 68% / 28% with no reminder).
+  // first, and no weekday: a date and above all a weekday pull DeepSeek-V4
+  // toward reasoning in Chinese, and a language after them only partly
+  // pulls back. Measured 2026-10-12, "hello!", 120 samples each, Chinese:
+  // Vision-Exp 1% with "en-US,2026-10-12", 12% with ",Monday" after it,
+  // 6% with no reminder; the text build 5%, 3%, 71%.
   const now=new Date(), pad=n=>String(n).padStart(2,'0');
   body.chat_template_kwargs={latest_reminder:
     `${navigator.language},`+
-    `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())},`+
-    `${now.toLocaleDateString('en-US',{weekday:'long'})}`};
+    `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`};
   const t0=performance.now();
   let first=0, last=0, ka=0, usage=null, finishReason=null, streamErr=null, aborted=false;
   try{
