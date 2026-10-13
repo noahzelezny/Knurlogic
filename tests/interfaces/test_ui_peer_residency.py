@@ -110,15 +110,15 @@ def test_peers_are_only_gathered_when_asked_for(monkeypatch):
 
 
 def test_a_serve_started_by_hand_is_found_by_its_listening_port(monkeypatch):
-    from knurlogic.machine import servers
+    from knurlogic.machine import processes, servers
+    monkeypatch.setattr(processes, "commands", lambda: {
+        101: "/venv/bin/python /venv/bin/knurlogic serve /m --port 8097",
+        102: "python -m knurlogic ui --port 8899"})
 
-    def run(cmd, **k):
-        out = ("  101 /venv/bin/python /venv/bin/knurlogic serve /m --port 8097\n"
-               "  102 python -m knurlogic ui --port 8899\n"
-               if cmd[0] == "ps" else "p101\nn*:8097\nn127.0.0.1:8097\n")
-        assert cmd[0] == "ps" or "101" in cmd       # ui is not a serve
-        return SimpleNamespace(stdout=out)
-    monkeypatch.setattr(servers.subprocess, "run", run)
+    def listening(pids):
+        assert pids == [101]                    # ui is not a serve
+        return {8097: 101}
+    monkeypatch.setattr(processes, "listening", listening)
     assert servers.listening_serves() == {8097: 101}
 
 

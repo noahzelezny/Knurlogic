@@ -101,38 +101,26 @@ def _running_tool_roots() -> list:
     at external volumes would be wrong on every other machine; asking the
     process that knows is right on all of them.
 
-    Parsed with a boundary regex, not `split()`: the value here is
-    a path with spaces such as "/Volumes/External SSD/Models", and splitting
-    on spaces turns one real path into two paths that do not exist.
+    The environment is read as the process holds it, so a value with
+    spaces ("/models dir/Store") stays one path.
     """
+    import os
     import re
-    import subprocess
+
+    from knurlogic.machine import processes
 
     out: list = []
-    try:
-        ps = subprocess.run(["ps", "-xo", "pid=,command="], capture_output=True,
-                            text=True, timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
-        return out
-    pids = [ln.split(None, 1)[0] for ln in ps.splitlines()
-            if re.search(r"/(exo|ollama)(\s|$)", ln.split(None, 1)[-1])]
+    pids = [pid for pid, cmd in processes.commands().items()
+            if re.search(r"/(exo|ollama)(\s|$)", cmd)]
     for pid in pids[:8]:
-        try:
-            env = subprocess.run(["ps", "eww", "-o", "command=", pid],
-                                 capture_output=True, text=True,
-                                 timeout=5).stdout
-        except (OSError, subprocess.SubprocessError):
-            continue
+        env = processes.environ(pid)
         for var in _ENV_OF_INTEREST:
-            m = re.search(rf"\b{var}=(.*?)(?=\s+[A-Z_]{{3,}}=|$)", env)
-            if not m:
-                continue
-            val = m.group(1).strip()
+            val = (env.get(var) or "").strip()
             if not val:
                 continue
             store = "ollama" if var == "OLLAMA_MODELS" else (
                 "huggingface" if var.startswith("HF") else "exo")
-            vals = val.split(":") if var.endswith("_DIRS") else [val]
+            vals = val.split(os.pathsep) if var.endswith("_DIRS") else [val]
             for v in filter(None, vals):
                 p = Path(v).expanduser()
                 for cand in ((p, p / "hub") if var.startswith("HF")

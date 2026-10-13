@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 import conftest
+import pytest
 
 from knurlogic.machine import servers
 from knurlogic.machine.memory import footprint
@@ -26,16 +27,11 @@ def test_a_detached_child_is_found_and_killed():
 
 
 def test_a_fake_rank_is_not_a_listening_serve(monkeypatch):
-    class R:
-        stdout = f"4242 {FAKE}\n"
-    calls = []
-
-    def run(cmd, **k):
-        calls.append(cmd)
-        return R
-    monkeypatch.setattr(servers.subprocess, "run", run)
+    from knurlogic.machine import processes
+    monkeypatch.setattr(processes, "commands", lambda: {4242: FAKE})
+    monkeypatch.setattr(processes, "listening",
+                        lambda pids: pytest.fail("asked about a fake rank"))
     assert servers.listening_serves() == {}
-    assert len(calls) == 1               # lsof never asked about it
 
 
 def test_a_fake_rank_is_no_runtime():
@@ -137,6 +133,8 @@ def _alive(pid: int) -> bool:
         os.kill(pid, 0)
     except OSError:
         return False
-    st = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
-                        capture_output=True, text=True).stdout.strip()
-    return bool(st) and not st.startswith("Z")
+    import psutil
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:
+        return False

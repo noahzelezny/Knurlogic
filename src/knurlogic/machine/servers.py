@@ -8,9 +8,10 @@ would never have guessed. Before it did, two models holding 33 GiB on ports
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
+
+from knurlogic.machine import processes
 
 
 def cache_dir() -> Path:
@@ -81,26 +82,13 @@ def save_registry(reg: dict) -> None:
 def is_our_server(pid: int) -> bool:
     """Alive AND still a knurlogic serve. A pid is reused once its process
     is gone; killing whatever inherited the number would be the bug."""
-    try:
-        out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
-                             capture_output=True, text=True,
-                             timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
-        return False
+    out = processes.command(pid)
     return "knurlogic" in out and "serve" in out.split()
 
 
-
-
 def listener_pid(port: int) -> int | None:
-    """The pid listening on `port` on this Mac (lsof), or None."""
-    try:
-        out = subprocess.run(["lsof", "-nP", f"-iTCP:{int(port)}",
-                              "-sTCP:LISTEN", "-t"], capture_output=True,
-                             text=True, timeout=5).stdout.split()
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-    return int(out[0]) if out and out[0].isdigit() else None
+    """The pid listening on `port` on this machine, or None."""
+    return processes.listener(port)
 
 
 #: what marks a process a TEST started, never a real server: the flag the
@@ -119,37 +107,11 @@ def listening_serves() -> dict:
     whoever started it. The registry holds only what the page launched; a
     serve started by hand in a terminal is just as loaded, and leaving it
     out made the page say "nothing loaded" beside 110 GiB of model.
-    Read-only (ps, lsof); an empty answer when either is unavailable."""
-    try:
-        ps = subprocess.run(["ps", "-axo", "pid=,command="],
-                            capture_output=True, text=True, timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    pids = []
-    for line in ps.splitlines():
-        pid, _, cmd = line.strip().partition(" ")
-        if "knurlogic" in cmd and "serve" in cmd.split() and pid.isdigit() \
-                and not is_test_process(cmd):
-            pids.append(pid)
-    if not pids:
-        return {}
-    try:
-        out = subprocess.run(["lsof", "-nP", "-a", "-iTCP", "-sTCP:LISTEN",
-                              "-p", ",".join(pids), "-Fpn"],
-                             capture_output=True, text=True,
-                             timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    found: dict = {}
-    owner = 0
-    for line in out.splitlines():
-        if line.startswith("p") and line[1:].isdigit():
-            owner = int(line[1:])
-        elif line.startswith("n") and owner:
-            port = line.rsplit(":", 1)[-1]
-            if port.isdigit():
-                found.setdefault(int(port), owner)
-    return found
+    Read-only (machine/processes)."""
+    pids = [pid for pid, cmd in processes.commands().items()
+            if "knurlogic" in cmd and "serve" in cmd.split()
+            and not is_test_process(cmd)]
+    return processes.listening(pids) if pids else {}
 
 
 def port_free(port: int) -> bool:

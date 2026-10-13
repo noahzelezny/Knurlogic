@@ -82,7 +82,6 @@ def _no_real_cache(monkeypatch, tmp_path_factory):
 import os as _os
 import secrets as _secrets
 import signal as _signal
-import subprocess as _subprocess
 import time as _time
 
 TEST_ENV = "KNURLOGIC_TEST_SESSION"
@@ -100,59 +99,27 @@ def pytest_configure(config):
 
 
 def _ours() -> list:
-    """[(pid, command)] of live processes carrying this session's token,
-    this pytest process excluded."""
-    mark = f"{TEST_ENV}={_os.environ.get(TEST_ENV, '')}"
-    out = _ps()
-    if out is None:
+    """[(pid, command)] of live processes carrying this session's token in
+    their environment, this pytest process excluded. A listing that fails
+    is recorded: it used to read as "nothing left", so a sweep that could
+    not look passed."""
+    import psutil
+    token, me, got = _os.environ.get(TEST_ENV, ""), _os.getpid(), []
+    try:
+        procs = list(psutil.process_iter(["status", "cmdline", "environ"]))
+    except Exception as e:
+        PS_FAILED.append(f"{type(e).__name__}: {e}")
         return []
-    me, got = _os.getpid(), []
-    for line in out.splitlines():
-        parts = line.strip().split(None, 2)
-        if len(parts) < 3 or not parts[0].isdigit():
+    for p in procs:
+        info = p.info
+        if p.pid == me or info.get("status") == psutil.STATUS_ZOMBIE \
+                or (info.get("environ") or {}).get(TEST_ENV) != token:
             continue
-        pid, stat, cmd = int(parts[0]), parts[1], parts[2]
-        if pid == me or stat.startswith("Z") or mark not in cmd \
-                or cmd.startswith(("ps -E -ww -ax ", "/bin/ps -E -ww -ax ")):
-            continue
-        got.append((pid, cmd[:160]))
+        got.append((p.pid, " ".join(info.get("cmdline") or [])[:160]))
     return got
 
 
 PS_FAILED: list = []
-# the real Popen, bound now: a test may monkeypatch subprocess.run or
-# subprocess.Popen (the module is shared, and run looks Popen up when
-# called), and the sweep after it must still look
-_POPEN = _subprocess.Popen
-
-
-def _ps():
-    """`ps` with every process's environment, or None when it failed three
-    times (a loaded box can time it out). A failure is recorded: it used to
-    read as "nothing left", so a sweep that could not look passed."""
-    why = ""
-    for _ in range(3):
-        try:
-            p = _POPEN(["/bin/ps", "-E", "-ww", "-ax", "-o",
-                        "pid=,stat=,command="],
-                       stdout=_subprocess.PIPE, stderr=_subprocess.PIPE,
-                       text=True, errors="replace")
-            try:
-                out, err = p.communicate(timeout=30)
-            except _subprocess.TimeoutExpired:
-                p.kill()
-                p.communicate()
-                raise
-            # a process that exits mid-scan makes ps exit non-zero with
-            # the rest of the list printed: that list still answers
-            if out.strip():
-                return out
-            why = f"rc {p.returncode}, no output: {err.strip()[:200]}"
-        except Exception as e:
-            why = f"{type(e).__name__}: {e}"
-        _time.sleep(0.5)
-    PS_FAILED.append(why)
-    return None
 
 
 def _kill(procs: list) -> None:
@@ -206,7 +173,7 @@ def pytest_terminal_summary(terminalreporter):
     _log_run(terminalreporter)
     if PS_FAILED:
         terminalreporter.write_line(
-            f"FAILED: the leftover-process sweep could not run ps "
+            f"FAILED: the leftover-process sweep could not list processes "
             f"{len(PS_FAILED)} time(s); a leaked process may be running "
             f"({PS_FAILED[-1]})",
             red=True)

@@ -120,22 +120,10 @@ def _footprints() -> tuple:
 
 
 def _commands() -> dict:
-    """{pid: command line}. `ps` is the only place the full argv lives, and
-    the argv is what says which runtime a bare `python3.12` belongs to."""
-    import subprocess
-    try:
-        out = subprocess.run(["ps", "-Ao", "pid=,command="],
-                             capture_output=True, text=True,
-                             timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    cmds = {}
-    for line in out.splitlines():
-        line = line.strip()
-        pid, _, rest = line.partition(" ")
-        if pid.isdigit():
-            cmds[int(pid)] = rest.strip()
-    return cmds
+    """{pid: command line}: the argv is what says which runtime a bare
+    `python3.12` belongs to."""
+    from knurlogic.machine import processes
+    return processes.commands()
 
 
 #: Never a model runtime, however the command line reads. A shell sitting in

@@ -15,22 +15,17 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 import time
 
 from knurlogic.machine import metrics as _metrics
+from knurlogic.machine import processes
 
 GIB = 1 << 30
 _STARTED = time.time()
 
 
 def _rss_bytes() -> int:
-    try:
-        out = subprocess.run(["ps", "-o", "rss=", "-p", str(os.getpid())],
-                             capture_output=True, text=True, timeout=5)
-        return int(out.stdout.strip()) * 1024
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return 0
+    return processes.rss(os.getpid())
 
 
 def memory() -> dict:

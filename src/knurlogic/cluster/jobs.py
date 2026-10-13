@@ -20,7 +20,7 @@ import threading
 import time
 from pathlib import Path
 
-from knurlogic.cluster import PROC_ERRORS
+from knurlogic.machine import processes
 
 #: how often a rank rewrites its marker
 MARK_S = 2.0
@@ -248,30 +248,16 @@ def by_job(reg: dict | None = None) -> dict:
 
 def is_rank(pid: int, job: str) -> bool:
     """Alive, and still this job's process (a pid is reused once free)."""
-    import subprocess
-    try:
-        out = subprocess.run(["ps", "-o", "command=", "-p", str(int(pid))],
-                             capture_output=True, text=True,
-                             timeout=5).stdout
-    except (*PROC_ERRORS, ValueError):
-        return False
+    out = processes.command(pid)
     return f"--job {job}" in out or f"--job={job}" in out
 
 
 def pids_of_job(job: str) -> list:
     """Every process on this machine running a rank of `job` (by its
     command line), records or not."""
-    import subprocess
     if not JOB_RX.fullmatch(str(job or "")):
         return []
-    try:
-        out = subprocess.run(["pgrep", "-f", f"[-]-job[ =]{job}( |$)"],
-                             capture_output=True, text=True,
-                             timeout=5).stdout
-    except PROC_ERRORS:
-        return []
-    return sorted(int(x) for x in out.split() if x.isdigit()
-                  and int(x) != os.getpid())
+    return processes.matching(rf"[-]-job[ =]{re.escape(job)}( |$)")
 
 
 def terminate(pids: list, grace: float = GRACE_S, alive=None,
@@ -318,14 +304,7 @@ def wait_gone(pids: list, timeout: float, alive=None,
 def rss_bytes(pid: int) -> int:
     """A process's resident size (on Apple silicon its Metal buffers are in
     it: a loaded 397B share reads ~50 GiB); 0 when it is gone."""
-    import subprocess
-    try:
-        out = subprocess.run(["ps", "-o", "rss=", "-p", str(int(pid))],
-                             capture_output=True, text=True,
-                             timeout=5).stdout.strip()
-        return int(out) * 1024 if out.isdigit() else 0
-    except (*PROC_ERRORS, ValueError):
-        return 0
+    return processes.rss(pid)
 
 
 def _pid_alive(pid: int) -> bool:

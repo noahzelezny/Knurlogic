@@ -45,13 +45,11 @@ def info(i: int, ws: int = 64 * GIB, **over) -> dict:
 
 
 def alive(pid: int) -> bool:
+    import psutil
     try:
-        os.kill(pid, 0)
-    except OSError:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:
         return False
-    out = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
-                         capture_output=True, text=True).stdout.strip()
-    return bool(out) and not out.startswith("Z")
 
 
 def wait(pred, t: float = 20.0, every: float = 0.1):

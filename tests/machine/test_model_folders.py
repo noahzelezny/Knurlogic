@@ -86,3 +86,21 @@ def test_mcp_model_folders_tool(tmp_path):
     assert out["folders"] == [{"path": str(f), "mounted": True}]
     out = server._call("model_folders", {"remove": str(f)})
     assert out["folders"] == []
+
+
+def test_a_running_tools_store_comes_from_its_environment(tmp_path,
+                                                          monkeypatch):
+    import os
+
+    from knurlogic.machine import processes
+    one, two = tmp_path / "External SSD" / "Models", tmp_path / "more"
+    one.mkdir(parents=True)
+    two.mkdir()
+    monkeypatch.setattr(processes, "commands", lambda: {
+        7: "/usr/local/bin/exo", 8: "/usr/bin/python other.py"})
+    envs = {7: {"EXO_MODELS_DIR": str(one),
+                "EXO_MODELS_DIRS": os.pathsep.join(
+                    [str(two), str(tmp_path / "missing")])},
+            8: {"EXO_MODELS_DIR": str(two)}}
+    monkeypatch.setattr(processes, "environ", lambda pid: envs[pid])
+    assert discover._running_tool_roots() == [("exo", one), ("exo", two)]

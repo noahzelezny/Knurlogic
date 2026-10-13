@@ -9,8 +9,8 @@ exactly the keys kvquant's cache just returned, and otherwise is mlx-lm's
 function unchanged. Prefill stays dequantize+sdpa.
 
 A query row with EVERY key masked returns 0 here, where mlx sdpa returns
-NaN. `KNURLOGIC_KV_KERNEL=off` turns it off; `STATS` counts hits and
-misses. Design: docs/design/kv-cache.md (decode kernel).
+NaN. `KNURLOGIC_KV_KERNEL=off` turns it off, and it is off on a back
+end other than Metal (engine/backend); `STATS` counts hits and misses. Design: docs/design/kv-cache.md (decode kernel).
 """
 from __future__ import annotations
 
@@ -70,8 +70,9 @@ ENV = "KNURLOGIC_KV_KERNEL"
 
 
 def enabled() -> bool:
+    from knurlogic.engine import backend
     s = os.environ.get(ENV, "").strip().lower()
-    return s not in ("off", "0", "false", "no")
+    return backend.metal() and s not in ("off", "0", "false", "no")
 
 
 _SRC = r"""

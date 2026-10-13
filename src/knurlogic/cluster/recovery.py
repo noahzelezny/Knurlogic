@@ -18,13 +18,13 @@ import json
 import logging
 import os
 import re
-import subprocess
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, PROC_ERRORS, transport
+from knurlogic.cluster import NET_ERRORS, transport
+from knurlogic.machine import processes
 
 logger = logging.getLogger(__name__)
 
@@ -786,12 +786,4 @@ def _tick_single(rec: dict, now: float) -> str:
 
 def _serve_pids(port: int) -> list:
     """`knurlogic serve` processes on `port` on this machine."""
-    try:
-        out = subprocess.run(["pgrep", "-f",
-                              f"knurlogic serve .*--port {port}( |$)"],
-                             capture_output=True, text=True,
-                             timeout=5).stdout
-    except PROC_ERRORS:
-        return []
-    return [int(x) for x in out.split() if x.isdigit()
-            and int(x) != os.getpid()]
+    return processes.matching(rf"knurlogic serve .*--port {int(port)}( |$)")
