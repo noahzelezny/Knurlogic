@@ -5,6 +5,8 @@ Every runtime here reports something slightly different, and flattening them
 into "has a model" loses the only fact anybody opened the page for.
 """
 
+import sys
+
 import pytest
 
 from knurlogic.machine import loaded
@@ -218,6 +220,7 @@ def test_available_memory_counts_the_cache_macos_will_hand_over(monkeypatch):
     assert m["used_bytes"] == inst - (70 << 30)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="vm_stat is macOS's")
 def test_available_memory_reads_the_real_vm_stat():
     """Not mocked: the parse has to survive macOS's own wording."""
     d = footprint.available_memory()
@@ -286,6 +289,7 @@ Pages purgeable:                          300.
 File-backed pages:                        150.
 """
     import subprocess as sp
+    monkeypatch.setattr("sys.platform", "darwin")      # vm_stat is macOS's
     monkeypatch.setattr(sp, "run", lambda *a, **k: sp.CompletedProcess(
         a, 0, stdout=out))
     # free + file-backed + purgeable; speculative is already inside
@@ -326,6 +330,7 @@ Pages occupied by compressor:             {comp}.
 
 def _m4_vm_stat(monkeypatch, **over):
     import subprocess as sp
+    monkeypatch.setattr("sys.platform", "darwin")      # vm_stat is macOS's
     g = dict(free=1.1, act=60, inact=60, spec=0, wired=4.5, purg=0,
              file=1.8, anon=118.7, comp=1.0)
     g.update(over)

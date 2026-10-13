@@ -3,16 +3,19 @@
 A node is its `id`, never its name: names collide (two "MacBook Pro"s) and
 get changed, and addresses move when a Thunderbolt cable is replugged.
 
-  id    first 12 hex of sha256(IOPlatformUUID). Stable across reboots,
-        addresses and renames. Not the raw hardware UUID on the wire -- but
+  id    first 12 hex of sha256 of the machine's own id: IOPlatformUUID
+        on macOS, /etc/machine-id on Linux, MachineGuid on Windows. Stable
+        across reboots,
+        addresses and renames. Not the raw id on the wire -- but
         it IS a persistent identifier for this machine on the local
         network, and is only sent to peers that ask for status.
-  name  the ComputerName ("Alex's Mac Studio"), for display only.
+  name  the ComputerName on macOS ("Alex's Mac Studio"), the hostname
+        elsewhere; for display only.
 
-The id is read through IOKit with ctypes, the same way the temperature
-sensors are; the name from `scutil --get ComputerName`. Nothing to
-install. A failure falls back to the hostname's
-hash and says so in `id_source`, rather than inventing a UUID.
+On macOS the id is read through IOKit with ctypes, the same way the
+temperature sensors are, and the name from `scutil --get ComputerName`.
+Nothing to install. A failure falls back to the hostname's hash and says so
+in `id_source`, rather than inventing a UUID.
 """
 
 from __future__ import annotations
@@ -21,6 +24,8 @@ import ctypes
 import hashlib
 import socket
 import subprocess
+import sys
+from pathlib import Path
 
 _ID: dict = {}
 
@@ -64,7 +69,33 @@ def _platform_uuid() -> str:
         io.IOObjectRelease(svc)
 
 
+#: Where Linux keeps the machine's id (systemd, then older D-Bus).
+MACHINE_ID_FILES = ("/etc/machine-id", "/var/lib/dbus/machine-id")
+
+
+def _machine_id() -> tuple:
+    """(this machine's own id, what it is), ("", "") where none is read."""
+    if sys.platform == "darwin":
+        return _platform_uuid(), "IOPlatformUUID"
+    if sys.platform == "win32":
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SOFTWARE\Microsoft\Cryptography") as k:
+            return str(winreg.QueryValueEx(k, "MachineGuid")[0]), \
+                "MachineGuid"
+    for f in MACHINE_ID_FILES:
+        try:
+            got = Path(f).read_text().strip()
+        except OSError:
+            continue
+        if got:
+            return got, "machine-id"
+    return "", ""
+
+
 def _computer_name() -> str:
+    if sys.platform != "darwin":
+        return socket.gethostname().removesuffix(".local")
     try:
         out = subprocess.run(["scutil", "--get", "ComputerName"],
                              capture_output=True, text=True, timeout=2)
@@ -80,7 +111,7 @@ def identity() -> dict:
     if _ID:
         return dict(_ID)
     try:
-        uuid, source = _platform_uuid(), "IOPlatformUUID"
+        uuid, source = _machine_id()
     except (OSError, AttributeError, ValueError, ctypes.ArgumentError):
         uuid = ""
     if not uuid:

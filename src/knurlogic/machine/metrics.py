@@ -1,10 +1,13 @@
 """How hard this machine is working, over the last few minutes.
 
 Memory says what fits; these say why tokens are slow. Each is readable
-without sudo: gpu (`ioreg` AGXAccelerator utilization), cpu
-(host_statistics ticks), swap (`sysctl vm.swapusage`), pressure
+without sudo. cpu and swap come from psutil on every OS. On macOS: gpu
+(`ioreg` AGXAccelerator utilization), pressure
 (`kern.memorystatus_vm_pressure_level`), thermal (NSProcessInfo) and
 temp_c (IOHIDEventSystemClient, undocumented: reads None if it moves).
+Elsewhere: gpu from nvidia-smi (machine/nvidia.py) and temp_c from the
+kernel's sensors (psutil); pressure and thermal have no counterpart and
+read None.
 
 History is kept in-process, sampled on status requests no more often than
 MIN_INTERVAL_S. Every probe fails to None, never to 0.
@@ -17,8 +20,11 @@ from __future__ import annotations
 import ctypes
 import re
 import subprocess
+import sys
 import time
 from collections import deque
+
+import psutil
 
 #: Samples kept. At the page's 2 s poll that is three minutes of line.
 HISTORY = 90
@@ -35,23 +41,15 @@ def _cpu_pct():
     The first call has nothing to diff against and answers None."""
     global _last_ticks
     try:
-        lib = ctypes.CDLL("/usr/lib/libSystem.dylib")
-        ticks = (ctypes.c_uint * 4)()          # user, system, idle, nice
-        count = ctypes.c_uint(4)
-        lib.mach_host_self.restype = ctypes.c_uint
-        rc = lib.host_statistics(lib.mach_host_self(), 3,   # HOST_CPU_LOAD_INFO
-                                 ticks, ctypes.byref(count))
-        if rc != 0:
-            return None
-        now = tuple(ticks)
-    except (OSError, AttributeError, ValueError, ctypes.ArgumentError):
+        t = psutil.cpu_times()
+    except (OSError, RuntimeError):
         return None
+    now = (sum(t), t.idle)
     prev, _last_ticks = _last_ticks, now
     if prev is None:
         return None
-    d = [a - b for a, b in zip(now, prev)]
-    total = sum(d)
-    return round(100 * (total - d[2]) / total, 1) if total > 0 else None
+    total, idle = now[0] - prev[0], now[1] - prev[1]
+    return round(100 * (total - idle) / total, 1) if total > 0 else None
 
 
 _GPU = re.compile(r'"Device Utilization %"\s*=\s*(\d+)')
@@ -59,6 +57,14 @@ _GPU_MEM = re.compile(r'"In use system memory"\s*=\s*(\d+)')
 
 
 def _gpu():
+    """(utilization %, bytes the GPU holds), each None where unread."""
+    if sys.platform != "darwin":
+        from knurlogic.machine import nvidia
+        got = nvidia.query("utilization.gpu", "memory.used")
+        if not got:
+            return None, None
+        mib = nvidia.number(got[1])
+        return nvidia.number(got[0]), mib << 20 if mib is not None else None
     try:
         out = subprocess.run(["ioreg", "-rw0", "-c", "AGXAccelerator"],
                              capture_output=True, text=True,
@@ -69,23 +75,18 @@ def _gpu():
     return (int(u.group(1)) if u else None, int(m.group(1)) if m else None)
 
 
-_UNITS = {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30}
-
-
 def swap():
-    """Bytes of swap in use. `used = 7168.00M` in sysctl's own words."""
+    """Bytes of swap in use."""
     try:
-        out = subprocess.run(["sysctl", "-n", "vm.swapusage"],
-                             capture_output=True, text=True,
-                             timeout=2).stdout
-        m = re.search(r"used\s*=\s*([\d.]+)([KMG])", out)
-        return int(float(m.group(1)) * _UNITS[m.group(2)]) if m else None
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return int(psutil.swap_memory().used)
+    except (OSError, RuntimeError):
         return None
 
 
 def _vm_pressure():
     """macOS's own memory pressure level: 1 normal, 2 warn, 4 critical."""
+    if sys.platform != "darwin":
+        return None
     try:
         out = subprocess.run(["sysctl", "-n",
                               "kern.memorystatus_vm_pressure_level"],
@@ -118,6 +119,8 @@ def _swapping(now, hist) -> bool:
 
 
 def _thermal():
+    if sys.platform != "darwin":
+        return None
     try:
         ctypes.CDLL("/System/Library/Frameworks/Foundation.framework/"
                     "Foundation")
@@ -200,7 +203,9 @@ def _hid():
 
 def _temp_c():
     """The hottest sensor, in °C. Temperature event type 15, its value
-    field 15 << 16."""
+    field 15 << 16. Off macOS, the hottest sensor the kernel reports."""
+    if sys.platform != "darwin":
+        return _sensors_c()
     try:
         h = _hid()
         io, cf, best = h["io"], h["cf"], None
@@ -215,6 +220,16 @@ def _temp_c():
         return round(best, 1) if best is not None else None
     except (OSError, AttributeError, ValueError, ctypes.ArgumentError, KeyError):
         return None
+
+
+def _sensors_c():
+    try:
+        temps = [t.current for ts in psutil.sensors_temperatures().values()
+                 for t in ts]
+    except (AttributeError, OSError, RuntimeError):   # none on Windows
+        return None
+    temps = [t for t in temps if 0 < t < 150]
+    return round(max(temps), 1) if temps else None
 
 
 def _pressure(memory_map):

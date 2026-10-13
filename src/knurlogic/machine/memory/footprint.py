@@ -50,9 +50,20 @@ def available_memory() -> dict:
     File-backed pages (active or inactive) are ONE bucket here, so nothing
     is counted twice; purgeable pages are anonymous and are moved from used
     to available.
+
+    Off macOS, the kernel's own estimate (MemAvailable on Linux), which
+    already counts reclaimable cache and leaves anonymous pages out.
     """
     import re
     import subprocess
+    import sys
+    if sys.platform != "darwin":
+        import psutil
+        vm = psutil.virtual_memory()
+        return {"available_bytes": int(vm.available),
+                "free_bytes": int(vm.free),
+                "cached_bytes": int(getattr(vm, "cached", 0)),
+                "used_bytes": int(vm.total - vm.available)}
     try:
         out = subprocess.run(["vm_stat"], capture_output=True, text=True,
                              timeout=10).stdout
@@ -91,9 +102,17 @@ def available_memory() -> dict:
 
 
 def _footprints() -> tuple:
-    """({pid: bytes}, physmem) from `top`, which reports phys_footprint."""
+    """({pid: bytes}, physmem) from `top`, which reports phys_footprint;
+    off macOS, each process's resident size."""
     import re
     import subprocess
+    import sys
+    if sys.platform != "darwin":
+        import psutil
+        found = {p.pid: p.info["memory_info"].rss
+                 for p in psutil.process_iter(["memory_info"])
+                 if p.info.get("memory_info")}
+        return found, available_memory()
     try:
         out = subprocess.run(
             # `-o mem` is load-bearing: without it `-n` takes the first N

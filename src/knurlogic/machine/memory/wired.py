@@ -15,6 +15,7 @@ Design: docs/design/memory.md (wired limit).
 from __future__ import annotations
 
 import subprocess
+import sys
 from dataclasses import dataclass
 
 GIB = 1 << 30
@@ -69,6 +70,11 @@ class Wired:
 
 
 def read() -> Wired:
+    """macOS's wired limit. Elsewhere there is none to read or set: the
+    total alone, and `known` is False."""
+    if sys.platform != "darwin":
+        import psutil
+        return Wired(total_bytes=int(psutil.virtual_memory().total))
     total = _sysctl("hw.memsize") or 0
     for key in SYSCTL_KEYS:
         mb = _sysctl(key)
@@ -242,6 +248,9 @@ def machine() -> dict:
     global _MACHINE
     if _MACHINE is not None:
         return _MACHINE
+    if sys.platform != "darwin":
+        _MACHINE = _other_machine()
+        return _MACHINE
     model_id = ""
     try:
         model_id = subprocess.run(["sysctl", "-n", "hw.model"],
@@ -283,6 +292,42 @@ def machine() -> dict:
     _MACHINE = {"kind": kind, "model": name, "model_id": model_id,
                 "chip": chip.removeprefix("Apple ").strip()}
     return _MACHINE
+
+
+#: The product name Linux reads from the firmware ("DGX Spark").
+DMI_PRODUCT = "/sys/devices/virtual/dmi/id/product_name"
+
+
+def _other_machine() -> dict:
+    """{kind, model, model_id, chip} off macOS. The chip is the GPU when
+    nvidia-smi names one, the processor otherwise; `kind` stays empty, so
+    the page draws a plain box."""
+    import platform
+    from pathlib import Path
+
+    from knurlogic.machine import nvidia
+    try:
+        model = Path(DMI_PRODUCT).read_text().strip()
+    except OSError:
+        model = ""
+    gpu = nvidia.query("name")
+    chip = gpu[0].removeprefix("NVIDIA ") if gpu else _processor()
+    return {"kind": "", "model": model, "model_id": platform.machine(),
+            "chip": chip}
+
+
+def _processor() -> str:
+    """The processor's marketing name: /proc/cpuinfo's on Linux, the
+    platform's own string elsewhere."""
+    import platform
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.lower().startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor()
 
 
 def kind_from(name: str = "", model_id: str = "", product: str = "") -> dict:
