@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.1.8
+
+### Split loads: weight streaming
+
+* A split rank whose copy of the model is on a network mount fetches its
+  share from the page of a Mac that holds the files, over the cluster
+  link, instead of reading the mount: 64 MiB pieces, 8 in flight, at most
+  4 GiB waiting. Nothing is copied to the receiving Mac's disk. Measured
+  from an M4 over Thunderbolt: 1.1-2.0 GiB/s, against 0.18-0.33 GiB/s
+  reading the same shares over SMB (a 397B VQ-3.5bpw share: 84.4 GiB in
+  78 s, was 451 s). A failed fetch falls back to the mount.
+* Ranks reading remotely load first and the Mac holding the files reads
+  its own share after, so the two never compete for its drive. The Load
+  panel says "waiting its turn" and "loading from".
+* The drafting head and the vision tower come over the link too (the
+  397B's 5.4 GiB head and 0.85 GiB tower: about 5 s, were 129 s and
+  149 s).
+* What a model's own loader builds from file tensors (DeepSeek-V4's fused
+  `wqkv_a` and `wkv_gate`) is built again on the rank from fetched
+  inputs, with the model's own code: a DeepSeek-V4-Flash pipeline rank
+  reads nothing from the mount (was 0.34 GiB of scattered reads, about
+  19 s cold).
+* Every model file is opened in one place (`engine/model/weight_files`),
+  the trunk through knurlogic's copy of mlx-lm's `load_model`, pinned to
+  the installed mlx-lm by a test. A new model family opens its files
+  there (docs/design/new-model.md).
+* The rank's log gives what came over the link, what was read from the
+  files (bytes, largest arrays), and how long each took.
+
+### Clusters
+
+* A request for a model whose split job is still loading waits for it
+  and queues, instead of a 404 in the seconds before rank 0 has a port.
+* Unloading a split no longer crashes its follower rank: a follower whose
+  rank 0 is gone logs one error and exits; rank 0 finishes an exchange in
+  progress and logs its stop.
+
+### Chat
+
+* The page's reminder for DeepSeek-V4 gives the language first and no
+  weekday ("en-US,2026-10-13"): a date, and above all a weekday, pulled
+  its reasoning toward Chinese. "hello!", Chinese reasoning: Vision-Exp
+  1% (0.1.7's "2026-10-12,Monday,en-US": 25-35%), the text build 5% (3%;
+  71% with no reminder).
+* A finished reply's last text and usage go out before its prompt cache
+  is stored.
+
+### Development
+
+* The pre-push hook checks only what the remote does not have yet, so
+  pushing a tag on a pushed commit no longer rechecks all of history.
+
 ## 0.1.7
 
 ### Prompt cache
