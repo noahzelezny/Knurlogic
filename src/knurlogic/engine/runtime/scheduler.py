@@ -1067,12 +1067,15 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                     drop.append(e.uid)
                     self._done(e.uid)
             elif isinstance(e, Finished):
+                # the reply's end first, so the client never waits on its
+                # cache being stored; the next request is admitted on this
+                # thread, after the store, and still finds it
+                self._done(e.uid)
                 self._learn(e.tokens, e.cache)
                 self._superseded(self.cache.insert(
                     self.host.model_key, e.tokens, e.cache, "assistant",
                     origin=("finished", e.uid),
                     owner=entry_owner(row.job, e.uid, "assistant")))
-                self._done(e.uid)
             elif isinstance(e, RowFailure):
                 self._rows.pop(e.uid, None)
                 self._error(row.job, e.error)
