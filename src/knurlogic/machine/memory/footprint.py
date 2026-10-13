@@ -220,14 +220,8 @@ def memory_map(floor: int = 256 << 20) -> dict:
             by_runtime[rt] = by_runtime.get(rt, 0) + b
     rows.sort(key=lambda r: -r["bytes"])
 
-    total = 0
-    try:
-        import subprocess
-        total = int(subprocess.run(["sysctl", "-n", "hw.memsize"],
-                                   capture_output=True, text=True,
-                                   timeout=5).stdout.strip() or 0)
-    except (OSError, subprocess.SubprocessError, ValueError):
-        pass
+    import psutil
+    total = int(psutil.virtual_memory().total)
     seen = sum(r["bytes"] for r in rows)
     avail = phys.get("available_bytes")
     used = phys.get("used_bytes")

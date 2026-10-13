@@ -152,6 +152,11 @@ def test_the_artifact_identity_covers_model_py(tmp_path):
     (tmp_path / "model.py").write_text("A = 1\n")
     a = D.key_id(D.identity(tmp_path))
     (tmp_path / "model.py").write_text("A = 2\n")
+    # an edit made later: Linux stamps a file in kernel ticks of a few ms,
+    # and two writes inside one tick look unchanged to the identity cache
+    st = (tmp_path / "model.py").stat()
+    os.utime(tmp_path / "model.py", ns=(st.st_atime_ns,
+                                        st.st_mtime_ns + 1_000_000_000))
     from knurlogic.machine import artifact
     artifact._IDENT.clear()
     assert D.key_id(D.identity(tmp_path)) != a

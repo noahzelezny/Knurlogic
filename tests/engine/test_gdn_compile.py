@@ -15,6 +15,7 @@ import pytest
 mx = pytest.importorskip("mlx.core")
 
 import tensor_ring_worker as W  # noqa: E402
+from backends import bf16_gather  # noqa: E402
 
 IDS = [[5, 17, 3, 99, 42, 7, 64, 11, 23], [8, 2, 77, 13, 5, 61, 40, 9, 30]]
 THEN = [[31, 104, 331, 32, 439, 214], [7, 12, 250, 3, 88, 19]]
@@ -35,6 +36,7 @@ def _run(model, rows):
     return np.array(y)
 
 
+@bf16_gather
 @pytest.mark.parametrize("dtype", ["float32", "bfloat16"])
 @pytest.mark.parametrize("rows", [1, 2])
 @pytest.mark.parametrize("family", ["qwen3_5", "qwen3_5_moe", "qwen4_exp"])

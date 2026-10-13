@@ -87,11 +87,12 @@ def test_g1_loads_a_quantized_embedder(tmp_path):
 
 def test_g1_quantized_embedder_can_fail(tmp_path, monkeypatch):
     """Without the quantize step the same artifact refuses to load -- the
-    e4b failure this guards ("no parameter named scales")."""
+    e4b failure this guards ("no parameter named scales"; or "biases",
+    whichever quantized parameter the load meets first)."""
     import knurlogic.engine.families.gemma4.vision as g4
     _write_quantized_embed(tmp_path)
     monkeypatch.setattr(g4, "quantize_like", lambda *a, **k: 0)
-    with pytest.raises(ValueError, match="scales"):
+    with pytest.raises(ValueError, match="scales|biases"):
         _tiny_family().load_weights(str(tmp_path))
 
 

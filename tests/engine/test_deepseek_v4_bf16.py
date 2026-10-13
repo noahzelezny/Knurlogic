@@ -21,6 +21,7 @@ mx = pytest.importorskip("mlx.core")
 nn = pytest.importorskip("mlx.nn")
 
 import build_deepseek_v4_bf16 as B  # noqa: E402
+from backends import gpu_rounding  # noqa: E402
 
 GOLD = dict(np.load(B.OUT))
 INP = B.inputs()
@@ -191,6 +192,7 @@ def _head_model(A, w):
     return model
 
 
+@gpu_rounding
 def test_the_head_is_float32_logits(A):
     """ParallelHead: `F.linear(x.float(), weight)`, the bf16 weight read in
     float32 and float32 logits, on 1, 6 and 20 rows (decode, a verify, a
@@ -242,6 +244,7 @@ def test_the_float32_linear_is_float32_and_the_same_in_any_batch(A, N):
     assert np.abs(big - exact).max() < 4e-6 * scale
 
 
+@gpu_rounding
 @pytest.mark.parametrize("mode,gs,bits", [("affine", 64, 8),
                                           ("mxfp4", 32, 4)])
 def test_a_quantized_head_is_float32_over_its_dequantized_weight(
@@ -284,6 +287,7 @@ def test_the_mtp_heads_logits_are_float32(A):
 
 
 # ------------------------------------------------------------ compressor
+@gpu_rounding
 @pytest.mark.parametrize("case", B.COMP, ids=[c[0] for c in B.COMP])
 def test_the_compressor_pools_in_float32(A, case):
     """Compressor.forward keeps float32 from wkv / wgate through the ape,
@@ -345,6 +349,7 @@ def test_the_fused_sinkhorn_takes_eps_where_the_reference_does(A):
     assert e_comb <= 2 * GOLD["spread_hc_big_comb"][3], e_comb
 
 
+@gpu_rounding
 def test_the_fused_sinkhorn_and_collapse_at_the_real_eps(A):
     """The real eps and 20 iterations on 256 rows of fixed float32 mixes:
     post and comb no farther from exact (the reference port in float64)

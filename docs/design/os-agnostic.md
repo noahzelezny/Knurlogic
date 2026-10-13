@@ -143,6 +143,33 @@ VQ models on Linux need VQ Lab's runtime kernels ported (CUDA twins or
 fallbacks in each artifact's `model.py`): VQ Lab's call and schedule,
 not part of these phases unless Noah decides otherwise.
 
+## Progress (branch os-agnostic)
+
+The suite runs in a Linux arm64 container on the Mac (python:3.12-slim,
+`mlx[cpu]` 0.32.3, `docker run --init`, 4 CPUs / 6 GB).
+
+| step | Linux suite |
+|---|---|
+| main as it was | 130 failed, 2048 passed |
+| kvattn off without Metal (`engine/backend`) | 43 failed |
+| `machine/processes` (psutil) for ps / pgrep / lsof, the test leak sweep | 41 failed |
+| test markers for CPU numerics, installed memory via psutil, test fixes | 1 failed, 2037 passed |
+
+The Mac suite is unchanged at every step (2211 passed with the new tests).
+
+- MLX's CPU back end has no bfloat16 `gather_mm` (MoE experts) and rounds
+  bfloat16 / FP8 differently from a GPU. Tests that need either are marked
+  (`tests/support/backends.py`: `bf16_gather`, `gpu_rounding`) and skip
+  on the CPU back end only; they run on Metal and must pass on CUDA
+  before the tag. Measured on the Mac: DeepSeek-V4's fallbacks for its 11
+  Metal kernels give the kernels' numbers on the GPU; the CPU difference
+  is MLX's.
+- OPEN: the two-page cluster tests (`tests/cluster/test_recovery.py`,
+  `test_cluster_jobs.py`: a killed rank, then `watch_once`) fail now and
+  then in the container, and pass alone and on the Mac. A theory that page
+  B stops the job first did not hold (slowing B's watcher did not fix
+  it). Not yet understood.
+
 ## Decided (Noah, 2026-10-13)
 
 - **Docker first.** Everything that can run without an Nvidia GPU is built

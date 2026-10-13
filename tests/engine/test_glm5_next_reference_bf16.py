@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 mx = pytest.importorskip("mlx.core")
 
 import build_glm5_next_bf16 as G  # noqa: E402
+from backends import bf16_gather  # noqa: E402
 
 GOLD = dict(np.load(G.OUT))
 
@@ -74,6 +75,7 @@ def _median_row_max(a, b):
     return float(np.median(np.abs(a - b).max(-1)))
 
 
+@bf16_gather
 def test_bf16_prefill_and_decode_match_the_bf16_reference():
     pre, dec = _run(_model())
     d_pre = _median_row_max(pre, GOLD["prefill_logits"])
@@ -81,6 +83,7 @@ def test_bf16_prefill_and_decode_match_the_bf16_reference():
     assert d_pre < 0.04 and d_dec < 0.08, (d_pre, d_dec)
 
 
+@bf16_gather
 def test_bf16_greedy_tokens_match_the_reference():
     pre, dec = _run(_model())
     assert (pre.argmax(-1) == GOLD["prefill_logits"].argmax(-1)).all()

@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "tests/support/goldens"))
 
 mx = pytest.importorskip("mlx.core")
 
+from backends import gpu_rounding  # noqa: E402
 from build_gemma4_text import np_weights  # noqa: E402
 
 GOLD = np.load(ROOT / "tests/support/goldens/gemma4_text.npz")
@@ -120,6 +121,7 @@ def test_bidirectional_all_prefilled_in_pieces_matches_the_reference():
 BF16_SPREAD_MULT = 2.0
 
 
+@gpu_rounding
 @pytest.mark.parametrize("name", ["dense_bf16", "moe_bf16"])
 def test_gemma4_text_bf16_matches_the_reference_in_bf16(name):
     prefill, decode = _run(_model(name, mx.bfloat16))

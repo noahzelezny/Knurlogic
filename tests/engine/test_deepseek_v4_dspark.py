@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 mx = pytest.importorskip("mlx.core")
 
 import build_deepseek_v4_dspark as G  # noqa: E402
+from backends import gpu_rounding  # noqa: E402
 
 GOLD = dict(np.load(G.OUT))
 #: a sidecar packed from the real checkpoint (optional; headers only)
@@ -109,6 +110,7 @@ def _trace(model, head):
             .astype(np.float32) for k, v in out.items()}
 
 
+@gpu_rounding
 def test_the_drafts_are_the_references():
     """Trunk logits, the HC-mean main hidden state of layers 1-3, and at
     each decode step forward_spec's 5 draft ids (exact), their logits with
@@ -223,6 +225,7 @@ PROMPTS = {"one-row": [DRAFT_PROMPT],
            "three-rows": [G.PROMPT, G.PROMPT[:3], G.PROMPT[2:9] + G.DECODE]}
 
 
+@gpu_rounding
 @pytest.mark.parametrize("rows", list(PROMPTS))
 @pytest.mark.parametrize("guess", [False, True], ids=["head", "guess"])
 def test_greedy_block_drafting_is_the_plain_steps_token_for_token(
@@ -438,6 +441,7 @@ def test_a_row_ending_mid_block_stores_only_what_it_committed(monkeypatch):
         assert stats["steps"] > 0 and cont == fresh, n
 
 
+@gpu_rounding
 @pytest.mark.parametrize("k", [1, 2, 3, 4, 5])
 def test_every_verify_width_is_the_plain_steps_token_for_token(k,
                                                                monkeypatch):

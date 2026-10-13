@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 mx = pytest.importorskip("mlx.core")
 
 import build_qwen_reference as G  # noqa: E402
+from backends import gpu_rounding  # noqa: E402
 
 #: float32 on both sides, different kernels and summation orders: measured
 #: max |diff| ~1e-6 on logits of magnitude ~4
@@ -183,6 +184,7 @@ def _rms(d):
     return float(np.sqrt(np.mean(np.square(d))))
 
 
+@gpu_rounding
 @pytest.mark.parametrize("family", G.BF16)
 def test_the_trunk_in_bfloat16_computes_the_reference_bfloat16_logits(family):
     z, meta = _golden()
@@ -215,6 +217,7 @@ COMPONENT_TOL = {"linear_attn": 1.5e-2}
 
 @pytest.mark.parametrize("family,path", [
     (f, p) for f in G.BF16 for p, _ in G.COMPONENTS[f]])
+@gpu_rounding
 def test_a_bfloat16_component_rounds_as_the_reference(family, path):
     z, meta = _golden()
     model = _model(family, meta, dtype=mx.bfloat16,

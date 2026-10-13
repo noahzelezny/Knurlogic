@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "tests" / "support" / "goldens"))
 mx = pytest.importorskip("mlx.core")
 
 import build_glm5_next as G  # noqa: E402
+from backends import bf16_gather  # noqa: E402
 
 CFG = dict(G.CONFIG, kv_lora_rank=64)
 
@@ -93,6 +94,7 @@ def test_the_quantized_latent_is_stored_once():
         assert all(p.shape[-1] == 0 for p in c.values)
 
 
+@bf16_gather
 @pytest.mark.parametrize("bits", [None, 8])
 def test_kv_bytes_per_token_is_what_the_cache_stores(bits):
     from knurlogic.tuning.fit import kv_bytes_per_token
@@ -101,6 +103,7 @@ def test_kv_bytes_per_token_is_what_the_cache_stores(bits):
     assert got == want, (got, want)
 
 
+@bf16_gather
 @pytest.mark.parametrize("bits", [None, 8])
 def test_a_latent_cache_state_round_trips(bits):
     """The prompt cache's path over the once-stored latent: a prefix's

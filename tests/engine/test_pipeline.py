@@ -4,6 +4,7 @@ unsplit logits, and MTP drafting on the pipeline emits the unsplit engine's
 tokens with a fixed number of broadcasts per step."""
 
 import pytest
+from backends import gpu_rounding
 
 from knurlogic.tuning import fit, pipeline_split
 
@@ -394,6 +395,7 @@ def _ring_exact(tmp_path, monkeypatch, *args):
         monkeypatch.delenv("KNURLOGIC_TEST_NO_ROUNDING")
 
 
+@gpu_rounding
 @pytest.mark.parametrize("split,counts", [("pipeline", "1,3"),
                                           ("pipeline", "2,2"),
                                           ("pipeline", "3,1"),

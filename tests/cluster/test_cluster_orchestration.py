@@ -67,7 +67,9 @@ def test_the_coordinators_page_dying_stops_the_job_everywhere_and_relaunches(
             os.kill(pid, 9)
         # every other page stops within PEER_GONE_S (plus its clocks)
         assert wait(lambda: c.job_stopped_everywhere(job), GONE_S + SLACK_S)
-        why = ended_reason(c.pages[1], job)
+        # the page records the stop on its watcher's next pass, after its
+        # ranks are gone
+        why = wait(lambda: ended_reason(c.pages[1], job), SLACK_S)
         assert why is not None
         assert "answered" in why["reason"] or "runs its rank" in why["reason"]
         # the coordinator's page returns: its recovery record relaunches

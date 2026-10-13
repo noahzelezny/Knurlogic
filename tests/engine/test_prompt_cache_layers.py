@@ -269,6 +269,8 @@ def test_the_cache_lives_beside_the_models(tmp_path):
     assert LOC.models_folder(snap) == tmp_path / "hub"
 
 
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                    reason="root writes into a read-only folder")
 def test_a_read_only_models_folder_falls_back(tmp_path):
     models = tmp_path / "ro"
     (models / "tiny").mkdir(parents=True)
