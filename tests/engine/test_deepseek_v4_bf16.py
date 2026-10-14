@@ -111,10 +111,10 @@ def test_no_norm_with_a_weight_rounds_twice(A):
                        dspark_target_layer_ids=[0, 1], dspark_markov_rank=8)
     model = A.Model(args)
     found = [p for p, m in model.named_modules() if type(m) is nn.RMSNorm]
-    head = mtp.MTPHead(model, A)
+    head = mtp.DeepseekV4Head(model, A)
     found += ["mtp." + p for p, m in head.m.named_modules()
               if type(m) is nn.RMSNorm]
-    ds = dspark.DSparkHead(model, A)
+    ds = dspark.DeepseekV4DSparkHead(model, A)
     found += ["dspark." + p for p, m in ds.m.named_modules()
               if type(m) is nn.RMSNorm]
     assert found == []
@@ -274,7 +274,7 @@ def test_the_mtp_heads_logits_are_float32(A):
     """The MTP head's draft logits through the same float32 head."""
     from knurlogic.engine.families.deepseek.heads import deepseek_v4 as mtp
     model = _head_model(A, _bf("head_w"))
-    head = object.__new__(mtp.MTPHead)
+    head = object.__new__(mtp.DeepseekV4Head)
     head.model, head.arch = model, A
     x = _bf("head_x6")[None]
     head._trunk = lambda *a, **k: x

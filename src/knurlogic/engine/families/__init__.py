@@ -25,6 +25,22 @@ HERE = Path(__file__).parent
 FAMILIES = ("qwen", "gemma4", "glm5", "deepseek")
 
 
+def resolve(target: str, *, optional: bool = False):
+    """"module:attr" -> the object it names. With `optional`, None when the
+    module itself (or a parent package) is not installed; any other import
+    failure propagates."""
+    mod_name, _, attr = target.partition(":")
+    try:
+        mod = importlib.import_module(mod_name)
+    except ModuleNotFoundError as e:
+        missing = e.name or ""
+        if optional and missing and (mod_name == missing
+                                     or mod_name.startswith(missing + ".")):
+            return None
+        raise
+    return getattr(mod, attr)
+
+
 def manifests() -> list:
     return [importlib.import_module(f"{__name__}.{f}").MANIFEST
             for f in FAMILIES]

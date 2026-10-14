@@ -44,7 +44,7 @@ state)". Checked against the code, that reason does not hold for tensor:
   and MLP in `Reduce` (fp32 `all_sum`), so each layer's output, and
   therefore the final hidden state the head reads (`get_h`, `h_source`
   pre/post norm), is whole and identical on every rank. Rank 0 has it.
-- **The head's own layer.** `MTPHeadQwen35` builds its own
+- **The head's own layer.** `Qwen35Head` builds its own
   `arch.DecoderLayer(args, fa_idx)` from `args`; `shard()` only walks
   `model.layers` and mutates per-instance head counts, never `args`. The head
   block stays whole and runs on rank 0 with no collectives. `embed_tokens`,

@@ -37,6 +37,7 @@ import logging
 from pathlib import Path
 
 from knurlogic.engine.arrays import arrays_of
+from knurlogic.engine.model import added_tokens
 
 from . import convert, disk
 
@@ -104,8 +105,7 @@ def _tokenizer_meaning(raw: bytes) -> bytes:
     m = t.get("model") or {}
     merges = [" ".join(x) if isinstance(x, list) else x
               for x in m.get("merges") or []]
-    added = sorted((a.get("id"), a.get("content"), bool(a.get("special")))
-                   for a in t.get("added_tokens") or [])
+    added = sorted(added_tokens.listed(t))
     return json.dumps({"type": m.get("type"), "vocab": m.get("vocab"),
                        "merges": merges, "added": added,
                        "pre": t.get("pre_tokenizer"),

@@ -16,7 +16,6 @@ Design: docs/design/server.md (thinking).
 from __future__ import annotations
 
 import hashlib
-import json
 import threading
 
 from knurlogic.engine.templates import TEMPLATE_ERRORS
@@ -241,27 +240,18 @@ def levels(template: str | None) -> dict:
             "native": [{"level": n[0], "name": n[1]} for n in spec["native"]]}
 
 
-def template_of(path) -> str | None:
-    """An artifact's chat template, read off disk (chat_template.jinja, else
-    tokenizer_config.json) -- what `levels` needs without loading anything."""
+def template_of(artifact) -> str | None:
+    """The chat template of `artifact` (a machine.artifact.Artifact, or the
+    path of one), read off disk -- what `levels` needs without loading
+    anything. The template knurlogic serves in place of a known stub wins."""
     from pathlib import Path
 
     from knurlogic.engine import templates
-    d = Path(str(path))
-    j = d / "chat_template.jinja"
-    t = None
-    if j.is_file():
-        t = j.read_text()
-    else:
-        c = d / "tokenizer_config.json"
-        if c.is_file():
-            try:
-                t = json.loads(c.read_text()).get("chat_template")
-            except ValueError:
-                return None
-    if not isinstance(t, str):
+    from knurlogic.machine.artifact import chat_template_at
+    d = Path(str(getattr(artifact, "path", artifact)))
+    t = chat_template_at(d)
+    if not isinstance(t, str) or not t:
         return None
-    # the template knurlogic serves in place of a known stub
     return templates.override(t, d.name) or t
 
 

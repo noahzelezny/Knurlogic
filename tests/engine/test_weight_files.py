@@ -211,3 +211,21 @@ def test_remake_refuses_inputs_over_the_limit(art, peer, monkeypatch):
     with pytest.raises(ValueError, match="over the limit"):
         WF.remake()
     assert not page.calls
+
+
+def test_tensors_under_reads_the_headers_without_an_index(art):
+    d, t = art
+    assert WF.weight_map(d) == {k: "model.safetensors" for k in t}
+    same(WF.tensors_under(d, ("a.", "c.")),
+         {k: t[k] for k in ("a.weight", "c.scales")})
+
+
+def test_tensors_under_follows_the_index(art):
+    import json
+    d, t = art
+    (d / "model.safetensors").rename(d / "shard-1.safetensors")
+    (d / WF.INDEX).write_text(json.dumps(
+        {"weight_map": {k: "shard-1.safetensors" for k in t}}))
+    assert WF.files_with(d, lambda k: k.startswith("b.")) == {
+        d / "shard-1.safetensors": ["b.weight"]}
+    same(WF.tensors_under(d, ("b.",)), {"b.weight": t["b.weight"]})

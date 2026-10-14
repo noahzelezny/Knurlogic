@@ -72,6 +72,47 @@ def metadata(path) -> dict:
     return dict(header(path)["__metadata__"])
 
 
+# ------------------------------------------------------- an artifact's map
+
+INDEX = "model.safetensors.index.json"
+
+
+def weight_map(model_path, pattern: str = "*.safetensors") -> dict:
+    """{tensor name: file name} of the artifact at `model_path`: its index's
+    weight_map, else every `pattern` file's header. Raises OSError /
+    ValueError when they cannot be read."""
+    import json
+    root = Path(str(model_path))
+    index = root / INDEX
+    if index.is_file():
+        wmap = json.loads(index.read_text()).get("weight_map") or {}
+        if wmap:
+            return dict(wmap)
+    return {k: f.name for f in sorted(root.glob(pattern)) for k in names(f)}
+
+
+def files_with(model_path, accept: Callable[[str], bool]) -> dict:
+    """{file path: [tensor names]} of the artifact's tensors `accept` takes,
+    in the order the map gives them."""
+    root = Path(str(model_path))
+    out: dict = {}
+    for k, f in weight_map(root).items():
+        if accept(k):
+            out.setdefault(root / f, []).append(k)
+    return out
+
+
+def tensors_under(model_path, prefixes) -> dict:
+    """{name: array} of every tensor of the artifact whose name starts with
+    one of `prefixes`, each file opened through `load`."""
+    prefixes = tuple(prefixes)
+    out: dict = {}
+    for f, keys in files_with(model_path,
+                              lambda k: k.startswith(prefixes)).items():
+        out.update(load(f, keys=keys))
+    return out
+
+
 # ------------------------------------------------------------ the source
 
 @dataclass

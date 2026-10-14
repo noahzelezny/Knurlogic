@@ -47,8 +47,8 @@ def test_unread_cache_fields_do_not_chain(tmp_path, bits, mtp):
         install(model, bits)
     head = None
     if mtp:
-        from knurlogic.engine.families.glm5.heads.glm5 import MTPHeadGlm5
-        head = MTPHeadGlm5(model, L)
+        from knurlogic.engine.families.glm5.heads.glm5 import Glm5Head
+        head = Glm5Head(model, L)
         for m in head._modules().values():
             m.set_dtype(mx.float32)
         mx.eval([m.parameters() for m in head._modules().values()])

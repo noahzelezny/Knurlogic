@@ -396,15 +396,15 @@ def _head(family, model):
     import importlib
     arch = importlib.import_module(type(model).__module__)
     if family == "qwen4_exp":
-        from knurlogic.engine.families.qwen.heads.qwen4_exp import MTPHead
-        h = MTPHead(model, arch)
+        from knurlogic.engine.families.qwen.heads.qwen4_exp import Qwen4ExpHead
+        h = Qwen4ExpHead(model, arch)
         D, hc = h.D, h.hc
         h.norm_e = h._norm(D, mx.ones((D,)))
         h.norm_h = h._norm(hc * D, mx.ones((hc * D,)), group_size=D)
         h.fc = 0.02 * mx.random.normal((D, 2 * D))
         return h
-    from knurlogic.engine.families.glm5.heads.glm5 import MTPHeadGlm5
-    h = MTPHeadGlm5(model, arch)
+    from knurlogic.engine.families.glm5.heads.glm5 import Glm5Head
+    h = Glm5Head(model, arch)
     for m in h._modules().values():
         m.set_dtype(mx.float32)
         mx.eval(m.parameters())
@@ -442,10 +442,10 @@ def test_the_glm_head_builds_the_trunks_moe():
     DeepseekV32MoE)."""
     import importlib
 
-    from knurlogic.engine.families.glm5.heads.glm5 import MTPHeadGlm5
+    from knurlogic.engine.families.glm5.heads.glm5 import Glm5Head
     model = _family("glm5_next")
     arch = importlib.import_module(type(model).__module__)
-    h = MTPHeadGlm5(model, arch)
+    h = Glm5Head(model, arch)
     assert type(h.mlp).__name__ == "Glm5NextMoE"
     assert type(h.mlp) is type(next(
         layer.mlp for layer in model.model.layers

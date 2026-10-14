@@ -20,22 +20,22 @@ Design: docs/design/drafting.md (GLM head).
 """
 from __future__ import annotations
 
-import json
-
 import mlx.core as mx
 import mlx.nn as nn
-from mlx.utils import tree_flatten, tree_unflatten
+from mlx.utils import tree_flatten
 
 from knurlogic.engine.model import weight_files
+from knurlogic.engine.model.trunk import text_model
+from knurlogic.engine.mtp.head_base import GraftHead, fill, read_recipe, save_sidecar
 
 _GLUE = ("eh_proj", "enorm", "hnorm", "shared_head")
 
 
-class MTPHeadGlm5:
+class Glm5Head(GraftHead):
     """One drafting head bound to a loaded glm5_next trunk."""
 
     def __init__(self, model, arch):
-        lang = getattr(model, "language_model", model)
+        lang = text_model(model)
         core = lang.model
         cfg = core.config
         self.model = lang
@@ -92,7 +92,7 @@ class MTPHeadGlm5:
         cfg = self.cfg
         w = {k[len(prefix):]: v for k, v in g.items() if k.startswith(prefix)}
         if not w:
-            raise SystemExit(f"FAIL: no graft keys under prefix {prefix!r}")
+            raise ValueError(f"no graft keys under prefix {prefix!r}")
 
         # 1. Expert stack -> switch_mlp (mirrors DSV32Model.sanitize).
         for m in ("gate_proj", "up_proj", "down_proj"):
@@ -119,23 +119,15 @@ class MTPHeadGlm5:
 
         # 4. Load by name, refusing silent drops in either direction.
         mods = self._modules()
-        slots = set()
-        for name, mod in mods.items():
-            slots |= {f"{name}.{k}" for k, _ in tree_flatten(mod.parameters())}
-        unmatched = sorted(set(w) - slots)
-        if unmatched:
-            raise SystemExit(
-                f"FAIL: {len(unmatched)} graft keys found no parameter "
-                f"slot, e.g. {unmatched[:4]}")
-        missing = sorted(slots - set(w))
+        slots = set().union(*(self.slots(mod, f"{name}.")
+                              for name, mod in mods.items()))
+        missing = self.check_slots(slots, w)
         if missing:
-            raise SystemExit(
-                f"FAIL: {len(missing)} head parameters got no graft "
+            raise ValueError(
+                f"{len(missing)} head parameters got no graft "
                 f"tensor, e.g. {missing[:4]}")
         for name, mod in mods.items():
-            mod.update(tree_unflatten(
-                [(k[len(name) + 1:], v) for k, v in w.items()
-                 if k.startswith(name + ".")]))
+            fill(mod, w, name + ".")
         mx.eval([p for m in mods.values()
                  for _, p in tree_flatten(m.parameters())])
         return self
@@ -143,23 +135,16 @@ class MTPHeadGlm5:
     def quantize(self, bits=6, group_size=32, expert_bits=None):
         """Quantize the head: the expert stack takes `expert_bits` (~96% of
         the weight), everything else `bits`. This is also the recipe
-        `from_sidecar` replays, so it must match the published heads.
-
-        The 8-bit/gs64 branch below never fires: `nn.quantize` hands the
-        predicate paths relative to `self_attn`/`mlp`, so "mlp.gate" and
-        ".indexer" do not match. As published, the router gate stays bf16
-        (it has no `to_quantized`) and the DSA indexer is `bits`/gs32
-        (mtp-head-q6: wk/wq_b/weights_proj at 6-bit, 32-wide groups).
-        Making the branch match would change the packed shapes and stop
-        every existing head loading; that is a new head format, not a
-        fix."""
+        `from_sidecar` replays, so it must match the published heads: the
+        router gate stays bf16 (it has no `to_quantized`) and the DSA
+        indexer is `bits`/gs32 (mtp-head-q6: wk/wq_b/weights_proj at 6-bit,
+        32-wide groups). Any other recipe changes the packed shapes and is
+        a new head format."""
         eb = bits if expert_bits is None else expert_bits
 
         def predicate(path, mod):
             if not hasattr(mod, "to_quantized"):
                 return False
-            if path.endswith("mlp.gate") or ".indexer" in path:
-                return {"group_size": 64, "bits": 8}
             if ".switch_mlp." in path or path.endswith(
                     ("gate_proj", "up_proj", "down_proj")):
                 return {"group_size": group_size, "bits": eb}
@@ -174,20 +159,14 @@ class MTPHeadGlm5:
         for name, mod in self._modules().items():
             for k, v in tree_flatten(mod.parameters()):
                 flat[f"{name}.{k}"] = v
-        mx.save_safetensors(str(path), flat, metadata={
-            "format": "mlx",
-            "vqlab_mtp": json.dumps({
-                "family": "glm5_next", "bits": bits,
-                "group_size": group_size, "expert_bits": expert_bits,
-            }),
-        })
-        return flat
+        return save_sidecar(path, flat, {
+            "family": "glm5_next", "bits": bits,
+            "group_size": group_size, "expert_bits": expert_bits})
 
     @classmethod
     def from_sidecar(cls, model, arch, path):
         w = weight_files.load(path)
-        meta = weight_files.metadata(path)
-        cfg = json.loads(meta.get("vqlab_mtp", "{}"))
+        cfg = read_recipe(path)
         head = cls(model, arch)
         bits, gs = cfg.get("bits"), cfg.get("group_size", 32)
         if bits:
@@ -197,9 +176,7 @@ class MTPHeadGlm5:
                           expert_bits=cfg.get("expert_bits"))
         mods = head._modules()
         for name, mod in mods.items():
-            mod.update(tree_unflatten(
-                [(k[len(name) + 1:], v) for k, v in w.items()
-                 if k.startswith(name + ".")]))
+            fill(mod, w, name + ".")
         mx.eval([p for m in mods.values()
                  for _, p in tree_flatten(m.parameters())])
         return head
@@ -222,15 +199,3 @@ class MTPHeadGlm5:
         x = x + r
         x = x + self.mlp(self.post_attention_layernorm(x))
         return self.final_norm(x)
-
-    def draft_logits(self, h_row, nxt_id, cache=None):
-        """(trunk hidden at t, token t+1) -> logits for token t+2."""
-        out = self._trunk(h_row, nxt_id, cache)
-        return (self.core.embed_tokens.as_linear(out) if self.tie
-                else self.lm_head(out))
-
-    def advance(self, h_row, nxt_id, cache):
-        """Fill the head's cache over these positions without the
-        vocab-wide projection (prompt seeding)."""
-        self._trunk(h_row, nxt_id, cache)
-        return cache

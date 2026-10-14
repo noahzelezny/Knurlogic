@@ -15,6 +15,30 @@ from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.machine.units import GIB, MIB
 
 
+def chat_template_at(path) -> str:
+    """The chat template text of the artifact at `path`, "" when it has none.
+
+    Newer exports put it in `chat_template.jinja` and leave
+    `tokenizer_config.json`'s field empty; older ones do the opposite.
+    Reading only one of the two answers "no template" for half the
+    artifacts on this machine.
+    """
+    p = Path(path)
+    f = p / "chat_template.jinja"
+    if f.is_file():
+        try:
+            return f.read_text()
+        except OSError:
+            return ""
+    cfg = p / "tokenizer_config.json"
+    if cfg.is_file():
+        try:
+            return json.loads(cfg.read_text()).get("chat_template") or ""
+        except (OSError, ValueError, AttributeError):
+            return ""
+    return ""
+
+
 @dataclass
 class Artifact:
     path: Path
@@ -77,25 +101,9 @@ class Artifact:
         return '"mtp"' in blob or "mtp_num_hidden_layers" in blob
 
     def chat_template(self) -> str:
-        """The template text, from wherever this artifact keeps it.
-
-        Newer exports put it in `chat_template.jinja` and leave
-        `tokenizer_config.json`'s field empty; older ones do the opposite.
-        Reading only one of the two answers "no template" for half the
-        artifacts on this machine.
-        """
-        f = self.path / "chat_template.jinja"
-        if f.is_file():
-            try:
-                return f.read_text()
-            except OSError:
-                return ""
-        cfg = self.path / "tokenizer_config.json"
-        if cfg.is_file():
-            try:
-                return json.loads(cfg.read_text()).get("chat_template") or ""
-            except (OSError, ValueError, AttributeError):
-                return ""
+        """The template text, from wherever this artifact keeps it
+        (`chat_template_at`)."""
+        return chat_template_at(self.path)
         return ""
 
     def declared_knobs(self) -> dict:

@@ -13,19 +13,23 @@ Design: docs/design/vision.md (Qwen).
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
 import numpy as np
 
 from knurlogic.engine.model import weight_files
-from knurlogic.engine.vision import (EncodedImage, ImageRef, VisionError,
-                                     VisionSpec, proc_hash)
+from knurlogic.engine.model.added_tokens import added_tokens
+from knurlogic.engine.model.packed import artifact_quantization, quantize_like
+from knurlogic.engine.vision import (
+    EncodedImage,
+    Family,
+    ImageRef,
+    VisionError,
+    VisionSpec,
+    proc_hash,
+)
 from knurlogic.engine.vision import key as K
-from knurlogic.engine.vision.quant import artifact_quantization, quantize_like
-from knurlogic.engine.vision.scatter import merge
 
 from .processing import ImageProcessor, image_kwargs
 from .rope_index import rope_index
@@ -50,25 +54,7 @@ def _tower_key(k: str) -> Optional[str]:
     return None
 
 
-def _special_tokens(model_path: str) -> Dict[int, Tuple[str, bool]]:
-    """id -> (content, special) for the rung's added tokens, from
-    tokenizer.json `added_tokens` or tokenizer_config.json
-    `added_tokens_decoder` (the released Qwen rungs carry the former)."""
-    out: Dict[int, Tuple[str, bool]] = {}
-    p = Path(model_path)
-    tc = p / "tokenizer_config.json"
-    if tc.is_file():
-        for i, d in (json.loads(tc.read_text()).get("added_tokens_decoder")
-                     or {}).items():
-            out[int(i)] = (d.get("content"), bool(d.get("special", False)))
-    tj = p / "tokenizer.json"
-    if tj.is_file():
-        for d in json.loads(tj.read_text()).get("added_tokens") or []:
-            out[int(d["id"])] = (d.get("content"), bool(d.get("special", False)))
-    return out
-
-
-class QwenFamily:
+class QwenVision(Family):
     """engine.vision.Family for the three Qwen families."""
 
     def __init__(self, model_path: str, config: Dict[str, Any]):
@@ -84,7 +70,7 @@ class QwenFamily:
         self.vision_start_token_id = ids["vision_start_token_id"]
         self.vision_end_token_id = ids["vision_end_token_id"]
 
-        toks = _special_tokens(model_path)
+        toks = added_tokens(model_path)
         names = []
         for k in _TOKEN_KEYS:
             got = toks.get(ids[k])
@@ -120,26 +106,9 @@ class QwenFamily:
 
     # --- weights -------------------------------------------------------------
 
-    def _vision_files(self, model_path: str) -> Dict[str, List[str]]:
-        """file -> [tensor names] for every vision tensor the rung has."""
-        p = Path(model_path)
-        idx = p / "model.safetensors.index.json"
-        files: Dict[str, List[str]] = {}
-        if idx.is_file():
-            wm = json.loads(idx.read_text()).get("weight_map", {})
-            for k, f in wm.items():
-                if _tower_key(k) is not None:
-                    files.setdefault(f, []).append(k)
-            return files
-        for f in sorted(p.glob("*.safetensors")):
-            names = [k for k in weight_files.names(f)
-                     if _tower_key(k) is not None]
-            if names:
-                files[f.name] = names
-        return files
-
     def load_weights(self, model_path: str) -> int:
-        files = self._vision_files(model_path)
+        files = weight_files.files_with(
+            model_path, lambda k: _tower_key(k) is not None)
         if not files:
             raise VisionError(f"no vision tensors in {model_path} (looked for "
                               f"{[p for p, _ in _PREFIXES]} in the index "
@@ -148,7 +117,7 @@ class QwenFamily:
         weights: Dict[str, Any] = {}
         n = 0
         for f, names in files.items():
-            arrays = weight_files.load(Path(model_path) / f, keys=names)
+            arrays = weight_files.load(f, keys=names)
             for k in names:
                 weights[_tower_key(k)] = arrays[k]
                 n += 1
@@ -157,7 +126,7 @@ class QwenFamily:
         weights = tower.sanitize(weights)
         dtype = next(iter(weights.values())).dtype
         tower.set_dtype(dtype)
-        quantize_like(tower, weights, artifact_quantization(model_path))
+        quantize_like(tower, weights, artifact_quantization(model_path).get("mode"))
         tower.load_weights(list(weights.items()), strict=True)
         tower.eval()
         mx.eval(tower.parameters())
@@ -192,25 +161,6 @@ class QwenFamily:
 
     # --- per prompt ------------------------------------------------------------
 
-    @staticmethod
-    def _embed_tokens(model):
-        for path in ("language_model.model.embed_tokens",   # qwen3_5, _moe
-                     "model.embed_tokens"):                  # qwen4_exp
-            obj = model
-            try:
-                for part in path.split("."):
-                    obj = getattr(obj, part)
-                return obj
-            except AttributeError:
-                continue
-        raise AttributeError("no embed_tokens on the Qwen trunk")
-
-    def embed(self, model, key: List[Any], start: int, features):
-        sl = list(key[start:])
-        ids = mx.array(K.to_ids(sl, self.image_token_id))[None]
-        text = self._embed_tokens(model)(ids)
-        return {"input_embeddings": merge(text, sl, features)}
-
     def positions(self, key: List[Any], refs) -> Tuple[Any, int]:
         """(mx int32 [3, 1, len(key)], rope_delta), or (None, 0) for a key
         with no image (the trunk's own 1-D positions are then exact)."""
@@ -228,5 +178,3 @@ class QwenFamily:
                                 self.vision_start_token_id, self.merge_size)
         return mx.array(pos)[:, None, :], delta
 
-    def chunk_boundaries(self, key: List[Any]) -> List[Tuple[int, int]]:
-        return []

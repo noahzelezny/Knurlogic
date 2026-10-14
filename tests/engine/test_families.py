@@ -69,7 +69,7 @@ def test_the_spellings_that_have_bitten_before_resolve():
     assert set(vreg.FAMILIES) == {"qwen3_5", "qwen3_5_moe", "qwen4_exp",
                                   "gemma4", "gemma4_text", "glm5_next",
                                   "deepseek_v4"}
-    assert vreg.family_of("gemma4_text") == "gemma4_text"
+    assert vreg.arch_for_type("gemma4_text") == "gemma4_text"
     assert vreg.FAMILIES["gemma4_text"] == vreg.FAMILIES["gemma4"]
     assert {"glm5_next", "glm5_next_text", "qwen4_exp", "qwen3_5",
             "qwen3_5_moe"} <= set(mreg.FAMILIES)

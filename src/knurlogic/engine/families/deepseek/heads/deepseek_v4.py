@@ -48,33 +48,17 @@ import dataclasses
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx.utils import tree_flatten, tree_unflatten
+from mlx.utils import tree_unflatten
 
-from knurlogic.engine.model import weight_files
-from knurlogic.engine.split.pipeline import unwrap
+from knurlogic.engine.model.trunk import unwrap
+from knurlogic.engine.mtp.head_base import DraftHead, PackedSidecar
 
-SIDECAR_NAME = "mtp-head-mxfp4.safetensors"
 PREFIX = "mtp.0."
-#: MTP-only tensors: official name -> this module's parameter path
-_OWN = {"hc_head_fn": "hc_head.fn", "hc_head_base": "hc_head.base",
-        "hc_head_scale": "hc_head.scale"}
+#: MTP-only tensors: official name -> this module's parameter path (DSpark
+#: names its last stage's the same)
+OWN = {"hc_head_fn": "hc_head.fn", "hc_head_base": "hc_head.base",
+       "hc_head_scale": "hc_head.scale"}
 _TOP = ("e_proj", "h_proj", "enorm", "hnorm", "norm", "hc_head")
-
-
-def _to_module(k: str) -> str:
-    """A sidecar key (prefix stripped) -> its path in `_Head`."""
-    if k in _OWN:
-        return _OWN[k]
-    if k.split(".")[0] in _TOP:
-        return k
-    return "block." + k
-
-
-def _to_sidecar(k: str) -> str:
-    for src, dst in _OWN.items():
-        if k == dst:
-            return src
-    return k[len("block."):] if k.startswith("block.") else k
 
 
 class _Head(nn.Module):
@@ -88,24 +72,6 @@ class _Head(nn.Module):
         self.hnorm = norm_cls(D, eps=eps)
         self.norm = norm_cls(D, eps=eps)
         self.hc_head = hc_head
-
-
-def _recipe(w: dict, path: str, mod) -> dict | None:
-    """The to_quantized kwargs a packed `path` was written with, or None."""
-    s = w.get(f"{path}.scales")
-    if s is None or not hasattr(mod, "to_quantized"):
-        return None
-    in_dims = int(mod.weight.shape[-1])
-    bits = int(w[f"{path}.weight"].shape[-1]) * 32 // in_dims
-    gs = in_dims // int(s.shape[-1])
-    if f"{path}.biases" in w:
-        mode = "affine"
-    else:
-        mode = {4: "mxfp4", 8: "mxfp8"}.get(bits)
-        if mode is None:
-            raise ValueError(f"{path}: {bits}-bit without biases is neither "
-                             f"affine nor mxfp4/mxfp8")
-    return {"group_size": gs, "bits": bits, "mode": mode}
 
 
 def _vq_class(model):
@@ -163,8 +129,10 @@ def _vq_module(w: dict, path: str, mod, vq_cls):
                   in_features=IN if pb else None)
 
 
-class MTPHead:
+class DeepseekV4Head(PackedSidecar, DraftHead):
     """One drafting head bound to a loaded deepseek_v4 trunk."""
+
+    LABEL = "deepseek_v4 head"
 
     def __init__(self, model, arch):
         core = model.model
@@ -190,18 +158,27 @@ class MTPHead:
         return self.arch.DeepseekV4Cache(self.args.sliding_window)
 
     # ------------------------------------------------------------- sidecar
-    def bind(self, w: dict) -> dict:
-        """Shape this head to sidecar tensors and check it matches them
-        exactly: every name, every shape. `w` maps sidecar keys (with the
-        `mtp.0.` prefix) to anything with a `.shape` -- arrays, or a
-        header's shapes, so a file can be checked without loading it.
-        Returns the same values under this module's parameter paths."""
+    def to_module(self, k: str) -> str:
+        """A sidecar key -> its path in `_Head`."""
+        k = k[len(PREFIX):]
+        if k in OWN:
+            return OWN[k]
+        if k.split(".")[0] in _TOP:
+            return k
+        return "block." + k
+
+    def to_sidecar(self, k: str) -> str:
+        k = self.own_names(OWN, k, back=True)
+        return PREFIX + (k[len("block."):] if k.startswith("block.") else k)
+
+    def _check_keys(self, w: dict) -> None:
         bad = [k for k in w if not k.startswith(PREFIX)]
         if bad:
             raise ValueError(f"deepseek_v4 head: {len(bad)} tensors outside "
                              f"{PREFIX!r}, e.g. {bad[:3]}")
-        mw = {_to_module(k[len(PREFIX):]): v for k, v in w.items()}
 
+    def _prepare(self, mw: dict) -> None:
+        """Routed experts packed VQ run on the trunk's runtime's class."""
         vq = {path: mod for path, mod in self.m.named_modules()
               if any(f"{path}.{t}" in mw
                      for t in ("codes", "codebook", "vq_scales"))}
@@ -209,46 +186,6 @@ class MTPHead:
             cls = _vq_class(self.model)
             vq = {p: _vq_module(mw, p, m, cls) for p, m in vq.items()}
             self.m.update_modules(tree_unflatten(list(vq.items())))
-
-        def pred(path, mod):
-            return _recipe(mw, path, mod) or False
-
-        nn.quantize(self.m, class_predicate=pred)
-        slots = dict(tree_flatten(self.m.parameters()))
-        missing = sorted(set(slots) - set(mw))
-        extra = sorted(set(mw) - set(slots))
-        if missing or extra:
-            raise ValueError(
-                f"deepseek_v4 head does not match the sidecar: missing "
-                f"{missing[:4]} ({len(missing)}), unexpected {extra[:4]} "
-                f"({len(extra)})")
-        wrong = [(k, tuple(v.shape), tuple(slots[k].shape))
-                 for k, v in mw.items()
-                 if tuple(v.shape) != tuple(slots[k].shape)]
-        if wrong:
-            raise ValueError(f"deepseek_v4 head: shape mismatch {wrong[:4]}")
-        return mw
-
-    def load_weights(self, w: dict) -> MTPHead:
-        """Fill from sidecar tensors (keys with the `mtp.0.` prefix)."""
-        mw = self.bind(w)
-        self.m.load_weights(list(mw.items()), strict=True)
-        mx.eval(self.m.parameters())
-        return self
-
-    def tensors(self) -> dict:
-        """This head's parameters under their sidecar names."""
-        return {PREFIX + _to_sidecar(k): v
-                for k, v in tree_flatten(self.m.parameters())}
-
-    def save(self, path) -> dict:
-        flat = self.tensors()
-        mx.save_safetensors(str(path), flat, metadata={"format": "mlx"})
-        return flat
-
-    @classmethod
-    def from_sidecar(cls, model, arch, path):
-        return cls(model, arch).load_weights(weight_files.load(path))
 
     # --------------------------------------------------------------- draft
     def _trunk(self, h_row, nxt_id, cache=None):
@@ -271,9 +208,3 @@ class MTPHead:
         as the reference's head (trunk edit 24)."""
         return self.arch.head_logits(self.model.lm_head,
                                      self._trunk(h_row, nxt_id, cache))
-
-    def advance(self, h_row, nxt_id, cache):
-        """Fill the head's cache for these positions without the lm_head
-        projection (the prompt seed never reads those logits)."""
-        self._trunk(h_row, nxt_id, cache)
-        return cache

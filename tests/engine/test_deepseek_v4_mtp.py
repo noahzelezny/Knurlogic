@@ -46,9 +46,9 @@ def _arch(model):
 
 def _pack(model, path):
     """A random head, experts mxfp4 like the trunk's, saved as a sidecar."""
-    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import MTPHead
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import DeepseekV4Head
     mx.random.seed(7)
-    h = MTPHead(model, _arch(model))
+    h = DeepseekV4Head(model, _arch(model))
     from mlx.utils import tree_flatten, tree_unflatten
     new = []
     for k, v in tree_flatten(h.m.parameters()):
@@ -151,7 +151,7 @@ def test_the_real_vqlab_head_binds_by_its_header_alone():
     """Every name and shape of the packed Flash head, against a head built
     from the build's own config -- lazily, nothing loaded."""
     from knurlogic.engine import register
-    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import MTPHead
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import DeepseekV4Head
     register.register("deepseek_v4")
     import mlx_lm.models.deepseek_v4 as M
     hdr = _header(REAL / "mtp-head-mxfp4.safetensors")
@@ -160,7 +160,7 @@ def test_the_real_vqlab_head_binds_by_its_header_alone():
     args = M.ModelArgs.from_dict(cfg)
     layer = M.DeepseekV4Block.__new__(M.DeepseekV4Block)
     core = types.SimpleNamespace(args=args, layers=[layer])
-    head = MTPHead(types.SimpleNamespace(model=core), M)
+    head = DeepseekV4Head(types.SimpleNamespace(model=core), M)
     shapes = {k: types.SimpleNamespace(shape=tuple(v["shape"]))
               for k, v in hdr.items()}
     mw = head.bind(shapes)
@@ -260,7 +260,7 @@ def test_a_vq_head_runs_on_the_bundled_runtimes_class(tmp_path):
 
 @needs_runtime
 def test_a_vq_head_that_does_not_match_raises(tmp_path):
-    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import MTPHead
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import DeepseekV4Head
     model = _load_bundled(tmp_path)
     good = _pack_vq(model, tmp_path / "h.safetensors")
     m = "mtp.0.ffn.switch_mlp.gate_proj"
@@ -272,7 +272,7 @@ def test_a_vq_head_that_does_not_match_raises(tmp_path):
                 w.pop(f"{m}.{t}")
             else:
                 w[f"{m}.{t}"] = types.SimpleNamespace(shape=shape)
-        return MTPHead(model, _arch(model)).bind(w)
+        return DeepseekV4Head(model, _arch(model)).bind(w)
 
     bind()
     E, OUT, W = good[m + ".codes"].shape
@@ -288,7 +288,7 @@ def test_a_vq_head_that_does_not_match_raises(tmp_path):
         bind(**{"codes.extra": (1,)})
     # a trunk loaded without a bundled runtime has no class to run them on
     with pytest.raises(ValueError, match="bundled VQ runtime"):
-        MTPHead(_load(), _arch(model)).bind(_shapes(good))
+        DeepseekV4Head(_load(), _arch(model)).bind(_shapes(good))
 
 
 @needs_runtime
@@ -337,7 +337,7 @@ def test_the_real_vq_head_binds_by_its_header_alone():
     import importlib.util
 
     from knurlogic.engine import register
-    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import MTPHead
+    from knurlogic.engine.families.deepseek.heads.deepseek_v4 import DeepseekV4Head
     register.register("deepseek_v4")
     import mlx_lm.models.deepseek_v4 as M
     spec = importlib.util.spec_from_file_location("custom_model", BUNDLED)
@@ -350,7 +350,7 @@ def test_the_real_vq_head_binds_by_its_header_alone():
     layer = M.DeepseekV4Block.__new__(M.DeepseekV4Block)
     trunk = rt.Model.__new__(rt.Model)          # its class, not its weights
     trunk["model"] = types.SimpleNamespace(args=args, layers=[layer])
-    head = MTPHead(trunk, M)
+    head = DeepseekV4Head(trunk, M)
     mw = head.bind({k: types.SimpleNamespace(shape=tuple(v["shape"]))
                     for k, v in hdr.items()})
     assert len(mw) == len(hdr) == 37

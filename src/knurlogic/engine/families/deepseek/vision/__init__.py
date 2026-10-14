@@ -24,11 +24,18 @@ which has refs but no store, computes the same.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
-from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
+from knurlogic.engine.model import weight_files
+from knurlogic.engine.model.added_tokens import token_id
+from knurlogic.engine.model.trunk import first_attr
+from knurlogic.engine.vision import (
+    EncodedImage,
+    Family,
+    ImageRef,
+    VisionSpec,
+    proc_hash,
+)
 
 from .processor import IMAGE, IMAGE_PAD, VisionArgs, compress_pad, image_block
 
@@ -40,53 +47,18 @@ _PREFIXES = ("vision.", "aligner.")
 _ROWS = ("image_start", "image_pad", "image_newline", "image_end")
 
 
-def _header(path: Path) -> dict:
-    """A safetensors file's header: name -> {dtype, shape, data_offsets}."""
-    from knurlogic.machine.artifact import safetensors_header
-    h = safetensors_header(path)
-    h.pop("__metadata__", None)
-    return h
-
-
-def _read(path: Path, keys: list[str]) -> dict:
-    """`keys` out of one safetensors file, each read on its own (a shard
-    holding the vision tensors can hold the 1 GB embedding too).
-    safetensors' own reader goes through numpy, which has no bfloat16."""
-    import mlx.core as mx
-    import numpy as np
-
-    from knurlogic.machine.artifact import safetensors_layout
-
-    np_of = {"BF16": (np.uint16, mx.bfloat16), "F16": (np.float16, None),
-             "F32": (np.float32, None), "U8": (np.uint8, None),
-             "U32": (np.uint32, None), "I32": (np.int32, None)}
-    out = {}
-    h, start = safetensors_layout(path)
-    with open(path, "rb") as f:
-        for k in keys:
-            m = h[k]
-            if m["dtype"] not in np_of:
-                raise ValueError(f"{k}: dtype {m['dtype']} not read here")
-            dt, view = np_of[m["dtype"]]
-            a, b = m["data_offsets"]
-            f.seek(start + a)
-            arr = mx.array(np.frombuffer(f.read(b - a), dtype=dt)
-                           .reshape(m["shape"]))
-            out[k] = arr.view(view) if view is not None else arr
-    return out
-
-
 def _image_token_id(model_path: str) -> int:
-    p = Path(model_path) / "tokenizer.json"
-    if p.is_file():
-        for t in json.loads(p.read_text()).get("added_tokens", ()):
-            if t.get("content") == IMAGE_PLACEHOLDER:
-                return int(t["id"])
-    return IMAGE_TOKEN_ID
+    tid = token_id(model_path, IMAGE_PLACEHOLDER)
+    return IMAGE_TOKEN_ID if tid is None else tid
 
 
-class DeepseekVisionFamily:
-    """`Family` (vision-contracts.md) for DeepSeek-V4-Flash-Vision-Exp."""
+class DeepseekVision(Family):
+    """`Family` (vision-contracts.md) for DeepSeek-V4-Flash-Vision-Exp: the
+    trunk's own 1D positions (an image token is one position); every image
+    block is whole in a chunk -- inside it a token sees forward to
+    IMAGE_END, and the reference prefills a block in one call."""
+
+    IMAGES_BIDIRECTIONAL = True
 
     def __init__(self, config: dict[str, Any], image_token_id: int):
         self.args = VisionArgs.from_config(config)
@@ -128,28 +100,21 @@ class DeepseekVisionFamily:
                               rows["image_end"]])
 
     def load_weights(self, model_path: str) -> int:
-        """The `vision.*` / `aligner.*` keys and the four image rows, read
-        one tensor at a time out of the shards the index names for them
-        (the trunk's shards are not opened otherwise). The image rows are
+        """The `vision.*` / `aligner.*` keys and the four image rows, out of
+        the shards the index names for them (weight_files.files_with; only
+        those tensors are read). The image rows are
         also the trunk's (sanitize keeps them); this copy is what `encode`
         builds a block from."""
         import mlx.core as mx
 
-        root = Path(model_path)
-        index = root / "model.safetensors.index.json"
-        if index.is_file():
-            wmap = json.loads(index.read_text()).get("weight_map", {})
-        else:
-            wmap = {k: p.name for p in sorted(root.glob("*.safetensors"))
-                    for k in _header(p)}
-        want: dict[str, list[str]] = {}
-        for k, shard in wmap.items():
+        def wanted(k: str) -> bool:
             name = k[len("model."):] if k.startswith("model.image_") else k
-            if name.startswith(_PREFIXES) or name in _ROWS:
-                want.setdefault(shard, []).append(k)
+            return name.startswith(_PREFIXES) or name in _ROWS
+
         tower, rows = {}, {}
-        for shard, keys in sorted(want.items()):
-            for k, v in _read(root / shard, keys).items():
+        for shard, keys in sorted(weight_files.files_with(
+                model_path, wanted).items()):
+            for k, v in weight_files.load(shard, keys=keys).items():
                 name = k[len("model."):] if k.startswith("model.") else k
                 if name in _ROWS:
                     rows[name] = v
@@ -162,8 +127,8 @@ class DeepseekVisionFamily:
             raise ValueError(f"deepseek_v4 vision: no {missing} in "
                              f"{model_path}; an image block needs them")
         model = self._build_tower()
-        from knurlogic.engine.vision.quant import artifact_quantization, quantize_like
-        quantize_like(model, tower, artifact_quantization(model_path))
+        from knurlogic.engine.model.packed import artifact_quantization, quantize_like
+        quantize_like(model, tower, artifact_quantization(model_path).get("mode"))
         model.load_weights(list(tower.items()), strict=True)
         self.set_rows(rows)
         mx.eval(model.parameters(), self.rows)
@@ -242,16 +207,9 @@ class DeepseekVisionFamily:
     @staticmethod
     def _core(model):
         """The trunk's DeepseekV4Model (it owns `embed`)."""
-        for path in ("model", "language_model.model", "_model.model"):
-            obj = model
-            try:
-                for part in path.split("."):
-                    obj = getattr(obj, part)
-            except AttributeError:
-                continue
-            if hasattr(obj, "embed") and hasattr(obj, "vocab_size"):
-                return obj
-        raise AttributeError("no deepseek_v4 trunk core with embed() found")
+        return first_attr(
+            model, ("model", "language_model.model", "_model.model"),
+            accept=lambda c: hasattr(c, "embed") and hasattr(c, "vocab_size"))
 
     def embed(self, model, key, start, features) -> dict[str, Any]:
         import mlx.core as mx
@@ -272,19 +230,8 @@ class DeepseekVisionFamily:
         return {"input_embeddings": merge(text, sl, features),
                 "vl_ids": mx.array(vl)[None]}
 
-    def positions(self, key, refs) -> tuple[Any | None, int]:
-        # the trunk's own 1D positions: an image token is one position
-        return None, 0
-
-    def chunk_boundaries(self, key):
-        """Every image block whole: inside it a token sees forward to
-        IMAGE_END, and the reference prefills a block in one call."""
-        from knurlogic.engine.vision.key import image_spans
-        return [(s.start, s.end) for s in image_spans(key)]
-
-
 def build(model_path: str, text_model: Any, config: dict[str, Any]):
     if int(config.get("vision_n_layers") or 0) <= 0:
         return None
     # the tower is read by model/vision.bind (fam.load_weights), not here
-    return DeepseekVisionFamily(config, _image_token_id(model_path))
+    return DeepseekVision(config, _image_token_id(model_path))

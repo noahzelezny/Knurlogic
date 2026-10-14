@@ -316,11 +316,11 @@ of a two-image prompt exact against mlx-vlm's own get_rope_index).
   store.py      encoded images, per image, byte-bounded LRU, counted
   images.py     request bytes -> a clamped RGB image and its pixel hash
   scatter.py    image features into text embeddings, by sentinel (mlx)
-  _base.py      the three helpers the vendored towers need from mlx-vlm (mlx)
+  _base.py      the two helpers the vendored towers need from mlx-vlm (mlx)
+  layers.py     the towers' shared float32 norms and rotate_half (mlx)
   registry.py   model_type -> the family package that serves its images
   request.py    a chat request with images -> the cache key (generator thread)
   cachehook.py  pins an image while a cached conversation still holds it
-  quant.py      quantizes a tower's layers to match its checkpoint (mlx)
   (each family's tower, preprocessing and embed live in its folder under
    engine/families/<family>/vision/, named by its manifest)
 

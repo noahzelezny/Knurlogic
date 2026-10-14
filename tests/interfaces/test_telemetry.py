@@ -9,7 +9,6 @@ from a script, as the real one does (progress, deltas, done with usage)."""
 import json
 import queue
 import re
-import sqlite3
 import threading
 import time
 import urllib.error

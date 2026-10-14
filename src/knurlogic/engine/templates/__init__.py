@@ -20,7 +20,6 @@ call it.
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
 import logging
 from pathlib import Path
@@ -49,14 +48,9 @@ def _base(name: str) -> str:
 STUBS = {h: n for n, s in SPECS.items() for h in s.get("stubs", ())}
 
 
-def _resolve(target: str):
-    mod, _, attr = target.partition(":")
-    return getattr(importlib.import_module(mod), attr)
-
-
 #: template -> (tool block start, end, parser(text, tools)); a variant
 #: takes its base's
-PARSERS = {n: _resolve(SPECS[_base(n)]["parser"]) for n in SPECS
+PARSERS = {n: _families.resolve(SPECS[_base(n)]["parser"]) for n in SPECS
            if SPECS[_base(n)].get("parser")}
 
 

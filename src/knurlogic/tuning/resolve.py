@@ -531,7 +531,7 @@ def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
     try:
         from knurlogic.engine.model import thinking
         native = thinking.levels(
-            thinking.template_of(artifact.path)).get("native") or []
+            thinking.template_of(artifact)).get("native") or []
     except (OSError, ValueError, ImportError):
         native = []
     if native:

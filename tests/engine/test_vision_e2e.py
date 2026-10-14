@@ -279,7 +279,7 @@ def _deepseek_rig(tmp):
     this file's vocab: image tokens are ids 512..516, past the vocab."""
     import test_vision_deepseek as td
 
-    from knurlogic.engine.families.deepseek.vision import DeepseekVisionFamily
+    from knurlogic.engine.families.deepseek.vision import DeepseekVision
     M = td._arch()
     cfg = dict(td.TINY, vocab_size=VOCAB)
     model = M.Model(M.ModelArgs.from_dict(cfg))
@@ -288,7 +288,7 @@ def _deepseek_rig(tmp):
     image_id = 501
 
     def make():
-        f = DeepseekVisionFamily(cfg, image_id)
+        f = DeepseekVision(cfg, image_id)
         td._random(f._build_tower(), np.random.default_rng(1))
         core = model.model
         f.set_rows({k: getattr(core, k) for k in

@@ -27,6 +27,9 @@ import dataclasses
 import importlib
 from dataclasses import dataclass
 
+from knurlogic.engine import families
+from knurlogic.engine.model.trunk import text_model
+
 
 @dataclass(frozen=True)
 class FamilySpec:
@@ -42,8 +45,7 @@ class FamilySpec:
     block: dict | None = None
 
     def head_cls(self):
-        mod, _, attr = self.head.partition(":")
-        return getattr(importlib.import_module(mod), attr)
+        return families.resolve(self.head)
 
     def arch_module(self, model):
         """The module the trunk's classes were defined in. Artifacts ship a
@@ -53,8 +55,7 @@ class FamilySpec:
         VLM wrapper) have no `.model` of their own -- the core hangs off
         `.language_model` -- so walk that first when it is there. The bound
         text model is what every head class binds to anyway."""
-        text = getattr(model, "language_model", model)
-        core = getattr(text, "model", None)
+        core = getattr(text_model(model), "model", None)
         if core is None:
             raise RuntimeError(
                 f"family {self.name}: {type(model).__name__} exposes neither "
@@ -113,7 +114,7 @@ def load_head(model, sidecar=None, family: str | None = None,
 
 def _block_on(model, block: dict) -> bool:
     """Does the model's config switch the family's block drafter on?"""
-    text = getattr(model, "language_model", model)
+    text = text_model(model)
     args = getattr(getattr(text, "model", None), "args", None) \
         or getattr(text, "args", None)
     return int(getattr(args, block["config"], 0) or 0) > 0
@@ -165,7 +166,6 @@ def resolve(model, family: str | None = None) -> FamilySpec:
 # capture point, draft cache and cache semantics are per-architecture facts
 # and live there, each beside the measurement that set it.
 def _register_builtins() -> None:
-    from knurlogic.engine import families
     for name, h in families.build_maps()["heads"].items():
         register(FamilySpec(name=name, **h))
 

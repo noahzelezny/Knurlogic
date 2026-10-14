@@ -26,7 +26,6 @@ from knurlogic.engine.vision import (  # noqa: E402
 from knurlogic.engine.vision.store import (  # noqa: E402
     DEFAULT_MAX_BYTES,
     ImageStore,
-    estimate_nbytes,
 )
 
 MB = 1 << 20
@@ -125,7 +124,6 @@ def test_nbytes_is_read_from_the_arrays():
     e = EncodedImage(ref, np.zeros((2, 8), np.float32),
                      {"deep": np.zeros(3, np.float32)})
     assert e.nbytes == 2 * 8 * 4 + 3 * 4
-    assert estimate_nbytes(8000, 4096) == 65_536_000   # the ~65 MB GLM image
     assert DEFAULT_MAX_BYTES == 256 * MB
 
 

@@ -21,6 +21,8 @@ import copy
 import logging
 import time
 
+from knurlogic.engine.model.trunk import attr_path
+
 logger = logging.getLogger(__name__)
 
 #: tokens and routed experts per token of the probe input
@@ -30,15 +32,6 @@ TOLERANCE = 0.01
 
 #: (path, n, the layouts) -> refusals, for this process
 _SEEN: dict = {}
-
-
-def _module(layer, path: str):
-    m = layer
-    for p in path.split("."):
-        m = getattr(m, p, None)
-        if m is None:
-            return None
-    return m
 
 
 def _geometry(m) -> dict:
@@ -131,7 +124,7 @@ def refusals(path, n: int, unverified: dict, cfg: dict,
     out = []
     for (rpath, leaves), layer in sorted(unverified.items()):
         where = f"layers.{layer}.{rpath} ({', '.join(leaves)})"
-        m = _module(model.layers[layer], rpath)
+        m = attr_path(model.layers[layer], rpath, None)
         if m is None:
             out.append(f"{where}: not in the built model, so the split "
                        f"cannot be checked")

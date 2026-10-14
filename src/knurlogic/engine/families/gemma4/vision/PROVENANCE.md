@@ -8,10 +8,10 @@ Design: docs/design/vision.md.
 
 | this file | from | lines |
 |---|---|---|
-| `vision.py` | `mlx_vlm/models/gemma4/vision.py` | full file (562), one import changed (`from .._base import ensure_fused_sdpa`, see `engine/vision/_base.py`), one structural trim (below), knurlogic edits 6 and 7 (below) |
+| `vision.py` | `mlx_vlm/models/gemma4/vision.py` | full file (562), one import changed (`from .._base import ensure_fused_sdpa`, see `engine/vision/_base.py`), `VisionRMSNorm` / `VisionRMSNormNoScale` / `_rotate_half` taken from `engine/vision/layers.py` (the same ops, shared with the other towers), one structural trim (below), knurlogic edits 6 and 7 (below) |
 | `config.py` | `mlx_vlm/models/gemma4/config.py::VisionConfig` | trimmed to the fields `vision.py` reads (audio/video-only fields dropped: out of scope, vision-only package) |
 | `__init__.py::MultimodalEmbedder` | `mlx_vlm/models/gemma4/gemma4.py:22-35` | verbatim |
-| `__init__.py::RMSNormNoScale` | `mlx_vlm/models/gemma4/language.py::RMSNormNoScale` | verbatim (duplicated from `vision.VisionRMSNormNoScale` rather than shared, because it sits on `embed_vision` in the weight tree, not the tower) |
+| `__init__.py` uses `engine/vision/layers.RMSNormNoScale` | `mlx_vlm/models/gemma4/language.py::RMSNormNoScale` | the same computation as `vision.py`'s no-scale norm, so both use the shared class (it has no parameters, so the weight tree is unchanged) |
 | `../architecture/gemma4_text.py::_make_masks` overlay | `mlx_vlm/models/gemma4/language.py:455-515` (`Gemma4TextModel._block_sequence_ids_for_mask`, `_apply_blockwise_bidirectional_overlay`, the `use_bidirectional_vision` gate) | ported, not copied verbatim -- see the deviation below and `../architecture/PROVENANCE.md` |
 
 `scatter.merge` (image features into text embeddings) is shared,

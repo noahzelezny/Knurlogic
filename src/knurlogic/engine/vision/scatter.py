@@ -19,7 +19,7 @@ from typing import Any
 import mlx.core as mx
 
 from . import FeatureLookup
-from .key import image_spans
+from .key import image_spans, is_sentinel
 
 
 def masked_scatter(input_tensor, mask, source):
@@ -33,7 +33,7 @@ def masked_scatter(input_tensor, mask, source):
 
 def image_mask(key_slice: Sequence[Any]) -> list[bool]:
     """True at every sentinel -- where features replace text embeddings."""
-    return [type(x) is tuple for x in key_slice]
+    return [is_sentinel(x) for x in key_slice]
 
 
 def rows_for(key_slice: Sequence[Any], features: FeatureLookup):

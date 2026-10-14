@@ -10,7 +10,7 @@ edits 14-15 (`../architecture/PROVENANCE.md`).
 
 ## Ported
 
-- `tower.py`: `inference/vision.py` (ViT, Aligner, its RMSNorm, 2D RoPE)
+- `tower.py`: `inference/vision.py` (ViT, Aligner, its RMSNorm -- `engine/vision/layers.RMSNorm` squaring with `mx.square` --, 2D RoPE)
   in MLX. Parameter names unchanged, so the artifact's `vision.*` /
   `aligner.*` load with their prefix kept (`Tower.vision`,
   `Tower.aligner`). The aligner's `F.pad` + `F.unfold(r, stride=r)` is a
