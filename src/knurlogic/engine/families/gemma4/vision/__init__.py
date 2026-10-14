@@ -21,7 +21,7 @@ from mlx.utils import tree_unflatten
 
 from knurlogic.engine.model import weight_files
 from knurlogic.engine.model.added_tokens import added_tokens
-from knurlogic.engine.model.packed import artifact_quantization, quantize_like
+from knurlogic.engine.model.packed import quantize_like
 from knurlogic.engine.model.trunk import core_of
 from knurlogic.engine.vision import (
     EncodedImage,
@@ -112,9 +112,8 @@ class Gemma4Vision(Family):
         embed_w = {k[len("embed_vision."):]: v for k, v in weights.items()
                   if k.startswith("embed_vision.")}
         tower_w = self.vision_tower.sanitize(tower_w)
-        mode = artifact_quantization(model_path).get("mode")
-        quantize_like(self.vision_tower, tower_w, mode)
-        quantize_like(self.embed_vision, embed_w, mode)
+        quantize_like(self.vision_tower, tower_w, model_path, "vision_tower.")
+        quantize_like(self.embed_vision, embed_w, model_path, "embed_vision.")
         if tower_w:
             self.vision_tower.update(tree_unflatten(list(tower_w.items())))
         if embed_w:
