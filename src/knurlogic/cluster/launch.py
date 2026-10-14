@@ -45,7 +45,7 @@ from knurlogic.machine.memory.wired import available_now, budget_of, gpu_working
 from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.machine.units import GIB, gib
 from knurlogic.tuning.knobs import canonical_sets
-from knurlogic.tuning.placement import placement, rank_room_chunk
+from knurlogic.tuning.placement import placement, rank_room_chunk, shape_of
 
 logger = logging.getLogger(__name__)
 
@@ -278,29 +278,6 @@ def ring_port(slot: int, offset: int) -> int:
 def _slot_of_port(port: int) -> int:
     """The ring-port slot a port of it (ring_port) belongs to."""
     return (port - RING_PORT) // SLOT_PORTS
-
-
-def shape_of(path: str, world: int, split: str,
-             vision: bool = True, mtp: bool = True) -> dict:
-    """What placement needs of an artifact, read off its headers.
-    `vision`: KNURLOGIC_VISION; off, rank 0 holds no tower. `mtp`:
-    KNURLOGIC_MTP; off, rank 0 holds no head."""
-    from knurlogic.machine.artifact import Artifact
-    from knurlogic.tuning import fit, pipeline_split, tensor_split
-    a = Artifact.load(path)
-    if split == "pipeline":
-        per, other = pipeline_split.pipeline_layer_bytes(a)
-        refusals = pipeline_split.pipeline_refusals(a.raw_config, world)
-        return {"layer_bytes": per, "other_bytes": other,
-                "leader_bytes": pipeline_split.leader_bytes(a, vision=vision, mtp=mtp),
-                "reserve": fit.fit_reserve(a.raw_config),
-                "tensor_per_rank_bytes": 0, "refusals": refusals}
-    return {"layer_bytes": [], "other_bytes": 0,
-            "leader_bytes": pipeline_split.leader_bytes(a, vision=vision, mtp=mtp),
-            "reserve": fit.fit_reserve(a.raw_config),
-            "tensor_per_rank_bytes":
-                tensor_split.tensor_placement(a, world)["per_rank_bytes"],
-            "refusals": tensor_split.tensor_split_refusals(a.path, world, a.raw_config)}
 
 
 def viability_refusals(path: str, world: int) -> list:
@@ -1527,7 +1504,7 @@ def placed_room(plan: dict, infos: list, cfg: dict, kv_bits=None) -> dict:
     return fit.split_room(ranks, cfg, plan["split"], kv_bits)
 
 
-class _Answer(Exception):
+class _Refused(Exception):
     """A launch step's final answer (an error or a refusal): `launch`
     returns `doc` as it is."""
 
@@ -1538,19 +1515,19 @@ class _Answer(Exception):
 
 def _launch_request(req: dict) -> tuple:
     """(node ids, split, backend or None, link unnamed, identity, name) of
-    a launch request, or _Answer naming what is wrong with it."""
+    a launch request, or _Refused naming what is wrong with it."""
     ids = req.get("nodes")
     if not isinstance(ids, list) or len(ids) < 2 or \
             len(set(map(str, ids))) != len(ids):
-        raise _Answer({"error": "a cluster launch names two or more machines"})
+        raise _Refused({"error": "a cluster launch names two or more machines"})
     split = req.get("split") if req.get("split") in SPLITS else None
     link = backend(req.get("link"))
     unnamed = req.get("link") in (None, "")
     if not split or not (link or unnamed):
-        raise _Answer({"error": "split is tensor|pipeline, link is tcp|rdma"})
+        raise _Refused({"error": "split is tensor|pipeline, link is tcp|rdma"})
     ident = str(req.get("identity") or "")
     if not ident:
-        raise _Answer({"error": "a cluster launch names the model by identity"})
+        raise _Refused({"error": "a cluster launch names the model by identity"})
     # what the requester called it: a directory name, never a path; each
     # rank prefers the artifact of that name among its identity's matches
     aname = Path(str(req.get("name") or "")).name[:255]
@@ -1574,7 +1551,7 @@ def _note_links(infos: list, me: dict, peers: list, link) -> None:
 
 
 def _unnamed_link(infos: list) -> str:
-    """No link named: tcp, over the one cable the machines share; _Answer
+    """No link named: tcp, over the one cable the machines share; _Refused
     when they share more than one (the request must name it)."""
     shared: set | None = None
     for i, a in enumerate(infos):
@@ -1584,7 +1561,7 @@ def _unnamed_link(infos: list) -> str:
     if shared and len(shared) > 1:
         kinds = sorted({links.cable_name(links.link_gbps(infos[0], infos[1], n))
                         .split(" (")[0] for n in shared})
-        raise _Answer({"refused": "link is tcp | rdma; the machines share "
+        raise _Refused({"refused": "link is tcp | rdma; the machines share "
                                   + ", ".join(sorted(shared)) + " over "
                                   + " and ".join(kinds) + ": name one"})
     return LINK_NAMES["tcp"]
@@ -1595,7 +1572,7 @@ def _launch_model(req: dict, infos: list, split: str, ident: str,
     """(request, identity, alert, launch settings, shape) of the model a
     launch runs: the shared copy over a local one that differs (the alert
     says so), its settings checked, and its shape read here when this
-    machine has it, else from a peer. _Answer when it cannot run."""
+    machine has it, else from a peer. _Refused when it cannot run."""
     from knurlogic.machine.artifact import prefer_shared
     from knurlogic.tuning.checks import clean_sets
     from knurlogic.tuning.knobs import mtp_of, vision_of
@@ -1612,14 +1589,14 @@ def _launch_model(req: dict, infos: list, split: str, ident: str,
     path = _resolve(ident, aname)
     sets, bad = clean_sets(req.get("sets") or {})
     if bad:
-        raise _Answer({"error": f"not a launch setting: {', '.join(bad)}"})
+        raise _Refused({"error": f"not a launch setting: {', '.join(bad)}"})
     if req.get("draft") is False:
         # "turn MTP off and launch": every rank's settings say so
         sets = dict(sets, KNURLOGIC_MTP="off")
     if path:
         why = sets_refusal(path, sets, preset_or(req.get("tune"), "default"))
         if why:
-            raise _Answer({"refused": f"nothing started: {why}"})
+            raise _Refused({"refused": f"nothing started: {why}"})
     world = len(infos)
     try:
         if path:
@@ -1632,9 +1609,9 @@ def _launch_model(req: dict, infos: list, split: str, ident: str,
                           "split": split, "vision": vision_of(sets),
                           "mtp": mtp_of(sets)})
             if shape.get("error"):
-                raise _Answer({"error": f"{first['name']}: {shape['error']}"})
+                raise _Refused({"error": f"{first['name']}: {shape['error']}"})
     except (*NET_ERRORS, LookupError, StopIteration, AttributeError) as e:
-        raise _Answer({"error": f"could not read the model's shape: "
+        raise _Refused({"error": f"could not read the model's shape: "
                                 f"{type(e).__name__}: {e}"}) from e
     return req, ident, alert, sets, shape
 
@@ -1651,7 +1628,7 @@ def _place(infos: list, shape: dict, split: str, order, post) -> dict:
                 raise
             return placement(infos, shape, split, order)
     except ValueError as e:
-        raise _Answer({"refused": f"cannot place it: {e}"}) from e
+        raise _Refused({"refused": f"cannot place it: {e}"}) from e
 
 
 def _auto_cable_note(order: list, net: str, nets: list, link) -> str:
@@ -1681,7 +1658,7 @@ def _choose_cable(order: list, link, cable, tried: tuple, moved,
     """(subnet, note, cable ignored) for the job's link: two machines run
     on the cable the launch names, else the first shared one not yet
     `tried`; more than two pick per pair, and a named cable is ignored.
-    _Answer when the named cable is not shared, or every one failed."""
+    _Refused when the named cable is not shared, or every one failed."""
     world = len(order)
     net, note, nets = "", "", []
     if world == 2:
@@ -1692,7 +1669,7 @@ def _choose_cable(order: list, link, cable, tried: tuple, moved,
         c = CABLE_RX.fullmatch(str(cable).strip()) if isinstance(
             cable, str) else None
         if not c or c.group(1) not in nets:
-            raise _Answer({"refused": f"cable {str(cable)[:40]!r}: a launch "
+            raise _Refused({"refused": f"cable {str(cable)[:40]!r}: a launch "
                                       f"names the Thunderbolt subnet both "
                                       f"machines share"
                                       + (" with RDMA up at both ends"
@@ -1704,7 +1681,7 @@ def _choose_cable(order: list, link, cable, tried: tuple, moved,
         return net, note, False
     left = [n for n in nets if n not in tried]
     if not left:
-        raise _Answer({"refused": f"every shared Thunderbolt cable failed "
+        raise _Refused({"refused": f"every shared Thunderbolt cable failed "
                                   f"link init: {', '.join(tried)}",
                        "placement": plan})
     net = left[0]
@@ -1724,7 +1701,7 @@ def _choose_cable(order: list, link, cable, tried: tuple, moved,
 
 
 def _rdma_refusal(order: list, net: str, plan: dict) -> None:
-    """_Answer when jaccl cannot join the machines: past two, every pair
+    """_Refused when jaccl cannot join the machines: past two, every pair
     needs a Thunderbolt 5 cable with RDMA up; two need one shared subnet
     with it."""
     world = len(order)
@@ -1735,7 +1712,7 @@ def _rdma_refusal(order: list, net: str, plan: dict) -> None:
                     "" if links.shared_subnets(order[i], order[j], rdma=True)
                     else "no Thunderbolt cable with RDMA up at both ends")
                 if why:
-                    raise _Answer({
+                    raise _Refused({
                         "refused": f"RDMA across {world} Macs needs every "
                                    f"pair joined by a Thunderbolt 5 cable: "
                                    f"{order[i]['name']} and "
@@ -1747,13 +1724,13 @@ def _rdma_refusal(order: list, net: str, plan: dict) -> None:
         return
     why = links.rdma_pair_reason(order[0], order[1])
     if why:
-        raise _Answer({"refused": why + ". Use the TCP ring, or join them "
+        raise _Refused({"refused": why + ". Use the TCP ring, or join them "
                                         "with a Thunderbolt 5 cable.",
                        "placement": plan})
 
     def up(m):
         return ", ".join((m.get("rdma") or {}).get("active") or []) or "none"
-    raise _Answer({"refused": f"link rdma needs RDMA up at both ends of one "
+    raise _Refused({"refused": f"link rdma needs RDMA up at both ends of one "
                               f"Thunderbolt cable, and no Thunderbolt subnet "
                               f"has it ({order[0]['name']}: {up(order[0])}; "
                               f"{order[1]['name']}: {up(order[1])}). Use "
@@ -1770,7 +1747,7 @@ def _ring_layout(order: list, link, net: str, job: str, plan: dict) -> tuple:
         ips = links.ring_ips(order, rdma=link == "jaccl", net=net)
         slot = _slot(job)
     except ValueError as e:
-        raise _Answer({"refused": str(e), "placement": plan}) from e
+        raise _Refused({"refused": str(e), "placement": plan}) from e
     hosts = [f"{ip}:{ring_port(slot, r)}" for r, ip in enumerate(ips)]
     if link != "jaccl":
         return ips, hosts, None, ""
@@ -1783,7 +1760,7 @@ def _ring_layout(order: list, link, net: str, job: str, plan: dict) -> tuple:
     a1 = links.rdma_device(order[1], order[0], net)
     for m, d in ((order[0], a0), (order[1], a1)):
         if d is None:
-            raise _Answer({"refused": f"{m['name']} has RDMA up on "
+            raise _Refused({"refused": f"{m['name']} has RDMA up on "
                                       f"{', '.join(m['rdma'].get('active') or [])}"
                                       f" and none of them is on "
                                       f"{order[1 - order.index(m)]['name']}'s "
@@ -1804,7 +1781,7 @@ def _saved_chunk(sets: dict) -> int:
     from knurlogic.tuning.checks import check_knob
     why = check_knob(PREFILL_KNOB, saved)
     if why:
-        raise _Answer({"error": why})
+        raise _Refused({"error": why})
     return int(saved)
 
 
@@ -1822,7 +1799,7 @@ def _prepare_round(job: str, order: list, specs: list, ask, post,
                    auto_port: bool, plan: dict) -> tuple:
     """(answers, rank 0's port): a Prepare to every page at once, rank 0
     retried once on the free port its machine suggests when nobody named
-    one. _Answer, every page told to forget the job, on any refusal."""
+    one. _Refused, every page told to forget the job, on any refusal."""
     got = transport.parallel(lambda r: ask("Prepare", r, specs[r]),
                              list(range(len(order))))
     port = specs[0]["port"]
@@ -1834,7 +1811,7 @@ def _prepare_round(job: str, order: list, specs: list, ask, post,
            if not (isinstance(g, dict) and g.get("ok"))]
     if bad:
         _abandon(job, order, post)
-        raise _Answer({"refused": "nothing started: " + "; ".join(
+        raise _Refused({"refused": "nothing started: " + "; ".join(
                            (g or {}).get("refused") or (g or {}).get("error")
                            or f"{nm} did not answer" for nm, g in bad),
                        "placement": plan})
@@ -1843,7 +1820,7 @@ def _prepare_round(job: str, order: list, specs: list, ask, post,
 
 def _start_round(job: str, order: list, start_doc: dict, ask, post,
                  plan: dict) -> None:
-    """A Start to every page at once; _Answer, every rank stopped, when one
+    """A Start to every page at once; _Refused, every rank stopped, when one
     did not start."""
     got = transport.parallel(lambda r: ask("Start", r, start_doc),
                              list(range(len(order))))
@@ -1851,7 +1828,7 @@ def _start_round(job: str, order: list, start_doc: dict, ask, post,
            if not (isinstance(g, dict) and g.get("started"))]
     if bad:
         _abandon(job, order, post, reason="a rank did not start")
-        raise _Answer({"error": "a rank did not start, so none run: "
+        raise _Refused({"error": "a rank did not start, so none run: "
                                 + "; ".join(
                                     f"{nm}: {(g or {}).get('error') or 'no answer'}"
                                     for nm, g in bad), "placement": plan})
@@ -1879,7 +1856,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                        ui_port=ui_port, serve_port=serve_port,
                        post=post or transport.send, follow=follow,
                        tried=tried, moved=moved, recovering=recovering)
-    except _Answer as a:
+    except _Refused as a:
         return a.doc
 
 
@@ -1887,13 +1864,13 @@ def _launch(req: dict, *, me: dict, peers: list, local_info: dict,
             ui_port: int, serve_port: int, post, follow, tried: tuple,
             moved: dict | None, recovering: dict | None) -> dict:
     """`launch`'s steps, in order; a step that ends the launch raises
-    _Answer with what it answers."""
+    _Refused with what it answers."""
     from knurlogic.tuning.presets import preset_or
     ids, split, link, unnamed, ident, aname = _launch_request(req)
     infos, why = machine_infos(ids, me=me, peers=peers,
                                local_info=local_info)
     if why:
-        return {"error": why}
+        raise _Refused({"error": why})
     _note_links(infos, me, peers, link)
     if unnamed:
         link = _unnamed_link(infos)
@@ -1901,8 +1878,8 @@ def _launch(req: dict, *, me: dict, peers: list, local_info: dict,
         for m in infos:
             rd = m.get("rdma") or {}
             if not rd.get("available"):
-                return {"error": f"RDMA on {m['name']}: "
-                                 f"{rd.get('reason') or 'unknown'}"}
+                raise _Refused({"error": f"RDMA on {m['name']}: "
+                                         f"{rd.get('reason') or 'unknown'}"})
     world = len(infos)
     req, ident, alert, sets, shape = _launch_model(req, infos, split, ident,
                                                    aname, post)
@@ -2132,11 +2109,7 @@ def peer_step(kind: str, req: dict) -> tuple:
             return 400, {"error": "job is a hex nonce"}
         return 200, job_state(req["job"])
     if kind == "Shape":
-        from knurlogic.machine.artifact import AmbiguousIdentity
-        try:
-            p = _resolve(req.get("identity"), str(req.get("name") or ""))
-        except AmbiguousIdentity as e:
-            return 409, {"error": str(e)}
+        p = _resolve(req.get("identity"), str(req.get("name") or ""))
         if not p:
             return 404, {"error": "no artifact with that identity here"}
         w, s = req.get("world"), req.get("split")

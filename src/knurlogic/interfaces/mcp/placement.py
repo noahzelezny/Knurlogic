@@ -6,8 +6,8 @@ where without knowing what the Macs are called.
   peers   every peer answering this machine's page
   all     here + peers
   fit     this machine if the model fits here (the `fit` tool's check), else the
-          smallest set of answering Macs it fits on (cluster/launch's
-          placement, the decision the page's Launch makes); alone only
+          smallest set of answering Macs it fits on (tuning/placement,
+          the decision the page's Launch makes); alone only
 
 resolve_machines turns the list into page node ids (names and ids pass
 through page_client.node_ids, unchanged); everything else in `load` stays
@@ -104,7 +104,7 @@ def fit_machines(artifact: str, split: str = "", draft: bool = True,
                  vision: bool = True) -> tuple:
     """(ids, split, refusal) for `fit`: [] (this machine, no page needed) when
     the `fit` tool says it fits here; else the smallest set of answering
-    Macs cluster/launch.placement places it on -- this machine and the peers
+    Macs tuning/placement places it on -- this machine and the peers
     in page order, the first set of each size tried first."""
     from knurlogic.interfaces.mcp import inspection
     split = split or DEFAULT_SPLIT
@@ -132,14 +132,14 @@ def fit_machines(artifact: str, split: str = "", draft: bool = True,
                                        / GIB, 1)}
                if m["cluster"].get("available_bytes") else {})}
            for m in up]
-    from knurlogic.cluster import launch
+    from knurlogic.tuning import placement as place
     from knurlogic.tuning.knobs import mtp_of, vision_of
     sets = {**({} if draft else {"KNURLOGIC_MTP": "off"}),
             **({} if vision else {"KNURLOGIC_VISION": "off"})}
     last = f"{here.get('verdict', 'will not fit')} on this machine"
     for k in range(2, len(up) + 1):
         try:
-            shape = launch.shape_of(path, k, split, vision=vision_of(sets),
+            shape = place.shape_of(path, k, split, vision=vision_of(sets),
                                     mtp=mtp_of(sets))
         except (OSError, ValueError, KeyError) as e:
             last = f"{split} across {k}: {e}"
@@ -150,7 +150,7 @@ def fit_machines(artifact: str, split: str = "", draft: bool = True,
         for group in combinations(up, k):
             infos = [{**m["cluster"], "name": m["name"]} for m in group]
             try:
-                launch.placement(infos, shape, split)
+                place.placement(infos, shape, split)
             except ValueError as e:
                 last = str(e)
                 continue

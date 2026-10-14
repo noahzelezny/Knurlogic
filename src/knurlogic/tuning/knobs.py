@@ -5,6 +5,12 @@ readers that turn a set value into what the engine takes.
 
 Whether a value is allowed is tuning/checks; whether a change applies to a
 running server is tuning/live.
+
+Settings are read here. Paths, addresses and test hooks are not settings
+and are read where used: KNURLOGIC_HOME (machine/paths),
+KNURLOGIC_LOADLOCK and KNURLOGIC_AGENT (machine/loadlock), KNURLOGIC_BELL
+(engine/split/link), KNURLOGIC_MENUBAR_LOCK (interfaces/menubar),
+KNURLOGIC_PAGE (interfaces/mcp/page_client).
 """
 
 from __future__ import annotations

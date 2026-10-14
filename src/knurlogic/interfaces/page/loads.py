@@ -6,7 +6,6 @@ cluster jobs, recovery state and each recent launch's progress."""
 
 from __future__ import annotations
 
-import http.client
 import json
 import time
 from pathlib import Path
@@ -15,6 +14,7 @@ from urllib.parse import urlparse
 from knurlogic.interfaces import documents, spawn
 from knurlogic.interfaces.page import nodes, peers, router
 from knurlogic.machine import identity, loaded
+from knurlogic.machine.http_client import NET_ERRORS
 from knurlogic.machine.servers import registry
 from knurlogic.tuning.checks import PATH_KEYS, clean_sets
 from knurlogic.tuning.presets import preset_or
@@ -65,14 +65,9 @@ def load_fn(serve_port: int):
             return _then_refresh(forward_launch(req))
         if node:
             # this machine, picked by id: the page's own load, by identity
-            from knurlogic.machine.artifact import AmbiguousIdentity, resolve_identity
-            try:
-                req = dict(req, target=req.get("target") or resolve_identity(
-                    req.get("identity"),
-                    name=str(req.get("name") or "")) or "")
-            except AmbiguousIdentity as e:
-                return {"loaded": False, "refused": "ambiguous identity",
-                        "note": str(e)}
+            from knurlogic.machine.artifact import resolve_identity
+            req = dict(req, target=req.get("target") or resolve_identity(
+                req.get("identity"), name=str(req.get("name") or "")) or "")
         target, where = req.get("target") or "", req.get("where") or ""
         try:
             # Through the MCP's own functions: the page refuses what an agent
@@ -177,7 +172,7 @@ def forward_launch(req: dict, post=None) -> dict:
     post = post or transport.send
     try:
         out = post(p.key, kind, doc, who=who)
-    except (OSError, ValueError, http.client.HTTPException) as e:
+    except NET_ERRORS as e:
         return {"error": f"{who} did not answer: {type(e).__name__}: {e}"}
     if not isinstance(out, dict):
         return {"error": f"{who} answered something not a reply"}
@@ -208,12 +203,13 @@ def cluster_launch(req: dict, serve_port: int) -> dict:
 def room_across(path: str, ids: list, split: str, mtp: bool = True,
                 vision: bool = True, kv_bits=None) -> dict:
     """The Load panel's room for a model split across the picked machines:
-    placed as Launch would place it (cluster/launch.placement), each
+    placed as Launch would place it (tuning/placement), each
     rank's memory free now less its share and step margin, and the
     context the smallest leaves (tuning/fit.split_room). {"error"} when
     it cannot be placed: Launch says the same."""
     from knurlogic.cluster import launch
     from knurlogic.machine.artifact import Artifact
+    from knurlogic.tuning import placement as place
     snap, _ = nodes.status_fn()
     own: dict = next((n for n in snap.get("nodes") or []
                       if n.get("role") in ("local", "server")), {})
@@ -224,9 +220,9 @@ def room_across(path: str, ids: list, split: str, mtp: bool = True,
     if why:
         return {"error": why}
     try:
-        shape = launch.shape_of(path, len(infos), split, vision=vision,
-                                mtp=mtp)
-        plan = launch.placement(infos, shape, split)
+        shape = place.shape_of(path, len(infos), split, vision=vision,
+                               mtp=mtp)
+        plan = place.placement(infos, shape, split)
     except (OSError, ValueError, KeyError) as e:
         return {"error": str(e)}
     return launch.placed_room(plan, infos, Artifact.load(path).raw_config,
@@ -258,13 +254,9 @@ def peer_launch(req: dict, load=None, stop=None, resolve=None) -> tuple:
     if bad:
         return 400, {"error": f"not a launch setting: {', '.join(bad)}"}
     tune = preset_or(req.get("tune"), _default_tune())
-    from knurlogic.machine.artifact import AmbiguousIdentity, resolve_identity
-    try:
-        path = resolve(req.get("identity")) if resolve else resolve_identity(
-            req.get("identity"), name=str(req.get("name") or ""))
-    except AmbiguousIdentity as e:
-        return 409, {"loaded": False, "refused": "ambiguous identity",
-                     "note": str(e)}
+    from knurlogic.machine.artifact import resolve_identity
+    path = resolve(req.get("identity")) if resolve else resolve_identity(
+        req.get("identity"), name=str(req.get("name") or ""))
     if not path:
         name = identity.identity().get("name") or "this machine"
         return 404, {"loaded": False, "refused": f"not on {name}",
