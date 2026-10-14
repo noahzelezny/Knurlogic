@@ -18,7 +18,7 @@ and the memory guard: [server](../design/server.md) and
 | `model_host.py` | `ModelHost`: the one served model and its state (empty, loading, ready, unloading, failed); loads on the scheduler thread |
 | `prompt.py` | messages to tokens, cut into segments (`flatten`, `tokenize`, `ChatRequest`, `PromptArgs`) |
 | `request.py` | `Request`: token events to reasoning, answer, tool calls, stop strings and usage; no mlx |
-| `control_tokens.py` | `ControlMachine`: which part of an answer a token is in, and which sequence ends the row |
+| `control_tokens.py` | `ControlMachine`: which part of an answer a token is in, and which sequence ends the row; its two builders, `control_machine` (a tokenizer's markers) and `stop_machine` (stops only) |
 | `timing.py` | `usage.knurlogic.timing`: `rates` and where a request's time went, `Spans` (see [telemetry](telemetry.md)) |
 
 Around it, in `engine/`:
@@ -26,6 +26,8 @@ Around it, in `engine/`:
 | file | what |
 |---|---|
 | `model/` | what the served model is: `load.py` (load, memory, `apply_live`, `tool_support`), `state.py` (process state: `SERVED`, `VISION`), `segments.py`, `thinking.py`, `vision.py`. Importing it imports no mlx |
+| `arrays.py` | `arrays_of`: every mx.array an object holds (cycle-safe; `unique` to count them), what a load evaluates and a cache entry saves |
+| `backend.py` | which MLX back end computes (`name`, `metal`) and the device's own description (`device_info`) |
 | `kvquant.py` | `QuantKVCache`, `BatchQuantKVCache`, `install`: K/V stored at 8, 6 or 4 bits |
 | `kvattn.py` | the 8-bit decode attention kernel (`decode_sdpa`, `patch_model`) |
 | `split/` | one model across ranks: `tensor.py`, `pipeline.py`, `plan.py`, `tensor_rules.py`, `viability.py`, the ring (see [splits](splits.md)) |
@@ -84,6 +86,12 @@ scheduler does the rest on its thread.
   artifact's files (`tests/engine/test_weight_files.py`): it is what lets
   a split rank stream them ([splits](splits.md),
   docs/design/weight-streaming.md).
+- **Every setting is a registered knob.** The engine reads its
+  environment only through `tuning/knobs` (`env_value`, `env_on`,
+  `env_int`), and a legacy name only through `KNOB_ALIASES`
+  (`logical_of`, `aliases`): a developer switch (`KNURLOGIC_TIMING_SPANS`,
+  `KNURLOGIC_PIPELINE_OVERLAP`, ...) is registered there too, tier
+  "developer" ([settings](settings.md)).
 - **A live knob reaches every rank.** `tuning/live.LIVE_KNOBS` can change
   on a running server (`apply_live`); on a split, `Scheduler.share_live` journals them
   as `set` ops (`plan.SETS`).
