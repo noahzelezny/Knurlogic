@@ -10,8 +10,10 @@ is the prose home of what is written here, with the data shapes.
   scatter.py    image features into text embeddings, uncached span only
   cachehook.py  the prompt cache pins the images it references
   registry.py   model_type -> the family package that serves its images
-  quant.py      quantize a vision module to match the checkpoint
-  _base.py      the three mlx-vlm helpers the vendored towers import
+  layers.py     the towers' shared float32 norms and rotate_half
+  _base.py      the two mlx-vlm helpers the vendored towers import
+
+Packed (quantized) tower layers are read through engine/model/packed.py.
 
 Each family's tower lives under engine/families/<family>/vision/.
 
@@ -190,9 +192,18 @@ class Family(Protocol):
 
     Key and positions below mean the full cache key (key.py): token ids with
     each image token replaced by a sentinel ("img", sha, proc_hash, k).
+
+    A family class subclasses this to take the defaults below: `embed`
+    (text embeddings with the image rows scattered in), `positions` (the
+    trunk's own 1D positions) and `chunk_boundaries` (none for a causal
+    family; every image span when IMAGES_BIDIRECTIONAL).
     """
 
     spec: VisionSpec
+    #: the token id each image token takes in the trunk's input
+    image_token_id: int
+    #: attention sees forward inside an image block (gemma, DeepSeek-V4)
+    IMAGES_BIDIRECTIONAL = False
 
     def load_weights(self, model_path: str) -> int:
         """Read the vision tensors (sidecar or main shards, filtered by the
@@ -227,6 +238,22 @@ class Family(Protocol):
         per_layer_inputs, a mask, ...). Image rows come from the store by
         sentinel (scatter.merge), so an image cut by the prefix hit takes
         rows k..n-1 with no global feature index to recompute."""
+        import mlx.core as mx
+
+        from .key import to_ids
+        from .scatter import merge
+        sl = list(key[start:])
+        ids = mx.array(to_ids(sl, self.image_token_id))[None]
+        return {"input_embeddings": merge(self.embed_tokens(model)(ids), sl,
+                                          features)}
+
+    def embed_tokens(self, model: Any) -> Any:
+        """The trunk's token embedding: under a multimodal wrapper
+        (`.language_model.model`), on the text model (`.model`), or on the
+        core itself."""
+        from knurlogic.engine.model.trunk import first_attr
+        return first_attr(model, ("language_model.model.embed_tokens",
+                                  "model.embed_tokens", "embed_tokens"))
 
     def positions(self, key: list[Any], refs: RefLookup) -> tuple[Any, int]:
         """(position ids for the WHOLE key or None, rope_delta). Pure in the
@@ -234,11 +261,16 @@ class Family(Protocol):
         holds an image, whether or not the new suffix does. None means the
         trunk's own 1D positions are right (gemma, GLM); Qwen returns
         mx [3, 1, len(key)] and the delta decode adds to the offset."""
+        return None, 0
 
     def chunk_boundaries(self, key: list[Any]) -> list[tuple[int, int]]:
         """[start, end) spans a prefill chunk edge must not fall strictly
         inside. gemma: every image span (bidirectional attention within
         an image block). Causal families: []."""
+        if not self.IMAGES_BIDIRECTIONAL:
+            return []
+        from .key import image_spans
+        return [(s.start, s.end) for s in image_spans(key)]
 
 
 # --- what is being served ------------------------------------------------------

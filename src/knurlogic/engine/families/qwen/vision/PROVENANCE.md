@@ -8,7 +8,7 @@ own classes (`tests/goldens/build_qwen.py`), so the tests run without it.
 
 | here | from (mlx_vlm/models/...) | sha256 of the source file | edits |
 |---|---|---|---|
-| `vision.py` | `qwen3_vl/vision.py` (447 lines, all) | `0c51d19e208e5d8fa7a6751aee0a9360a5bd8783dcfcf532286d14a0f1fbc7f9` | imports only: `..base.ensure_fused_sdpa` -> `engine.vision._base`; `.config.VisionConfig` -> defined in the file |
+| `vision.py` | `qwen3_vl/vision.py` (447 lines, all) | `0c51d19e208e5d8fa7a6751aee0a9360a5bd8783dcfcf532286d14a0f1fbc7f9` | imports only: `..base.ensure_fused_sdpa` -> `engine.vision._base`; `rotate_half` -> `engine.vision.layers` (the same ops); `.config.VisionConfig` -> defined in the file |
 | `vision.py` `VisionConfig` | `qwen3_vl/config.py:28-49` + `qwen3_5/config.py:47-58` (deepstack guard) | `8b529cfbd568c7d202140b4d5212be7fe740310c1a80374fa7dd4e59b9763017` | the two merged into one dataclass |
 | `processing.py` | `qwen3_vl/processing_qwen3_vl.py:164-227` verbatim; `:230-412` image half of `Qwen3VLImageProcessor`; `:593-626` `_qwen_vl_image_kwargs` | `21d68148d9bd99952445beaee21237993510dc4c3a2c94a2c5cda5f19429b180` | transformers base class dropped; one image per call; `settings()` added (feeds proc_hash); kwargs read from LOCAL files only (no Hub fallback: the server does not fetch); no video |
 | `rope_index.py` | `qwen3_5/language.py:1729-1904` `get_rope_index` | `4805ae90fb3bba463512cbce89c9bb7fa78d56b25bd8b541db1392ad34f18ae0` | ported, not copied: one row, no attention mask, numpy, grids per image from refs |

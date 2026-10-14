@@ -12,42 +12,33 @@ Design: docs/design/vision.md (gemma4).
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx.utils import tree_flatten, tree_unflatten
+from mlx.utils import tree_unflatten
 
 from knurlogic.engine.model import weight_files
-from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
-from knurlogic.engine.vision.key import Span, image_spans, is_sentinel, to_ids
-from knurlogic.engine.vision.scatter import merge as scatter_merge
-from .config import VisionConfig
+from knurlogic.engine.model.added_tokens import added_tokens
 from knurlogic.engine.model.packed import artifact_quantization, quantize_like
 from knurlogic.engine.model.trunk import core_of
+from knurlogic.engine.vision import (
+    EncodedImage,
+    Family,
+    ImageRef,
+    VisionSpec,
+    proc_hash,
+)
+from knurlogic.engine.vision.key import image_spans, is_sentinel, to_ids
+from knurlogic.engine.vision.layers import RMSNormNoScale
+from knurlogic.engine.vision.scatter import merge as scatter_merge
+
+from .config import VisionConfig
 from .vision import VisionModel
 
 PATCH = 16
 POOL = 3  # pooling_kernel_size
-
-
-class RMSNormNoScale(nn.Module):
-    """`embed_vision`'s pre-projection norm. Vendored from mlx-vlm 0.6.17
-    `gemma4/language.py` (`RMSNormNoScale`), MIT, Copyright (c) 2025 Prince
-    Canuma -- identical to `vision.VisionRMSNormNoScale`, kept as a separate
-    class because it lives on `embed_vision`, not the tower, in the weight
-    tree."""
-
-    def __init__(self, dim: int, eps: float = 1e-6):
-        super().__init__()
-        self.eps = eps
-
-    def __call__(self, x: mx.array) -> mx.array:
-        x_float = x.astype(mx.float32)
-        var = mx.mean(x_float**2, axis=-1, keepdims=True)
-        return (x_float * mx.rsqrt(var + self.eps)).astype(x.dtype)
 
 
 class MultimodalEmbedder(nn.Module):
@@ -67,8 +58,12 @@ class MultimodalEmbedder(nn.Module):
         return self.embedding_projection(normed)
 
 
-class Gemma4Vision:
-    """The `Family` (engine/vision/__init__.py) for gemma4."""
+class Gemma4Vision(Family):
+    """The `Family` (engine/vision/__init__.py) for gemma4: plain 1D RoPE
+    (image tokens are ordinary positions), attention bidirectional inside
+    an image block."""
+
+    IMAGES_BIDIRECTIONAL = True
 
     def __init__(self, vision_config: Dict[str, Any], text_hidden_size: int,
                  image_token_id: int, boi_token_id: Optional[int],
@@ -213,12 +208,6 @@ class Gemma4Vision:
             extras["mm_mask"] = mm_mask
         return extras
 
-    def positions(self, key: List[Any], refs) -> Tuple[Any, int]:
-        return None, 0  # gemma: plain 1D RoPE, image tokens ordinary positions
-
-    def chunk_boundaries(self, key: List[Any]) -> List[Tuple[int, int]]:
-        return [(s.start, s.end) for s in image_spans(key)]
-
     # -- internals --------------------------------------------------------------
 
     def _embed_scale(self) -> float:
@@ -238,15 +227,6 @@ class Gemma4Vision:
         return mx.array(out, dtype=mx.int32)[None]
 
 
-def _added_tokens(model_path: str) -> Dict[int, str]:
-    """id -> text for the artifact's added (special) tokens."""
-    p = Path(model_path) / "tokenizer.json"
-    if not p.is_file():
-        return {}
-    return {t["id"]: t["content"]
-            for t in json.loads(p.read_text()).get("added_tokens", [])}
-
-
 def build(model_path: str, text_model: Any, config: Dict[str, Any]):
     vision_config = config.get("vision_config")
     if not vision_config:
@@ -259,9 +239,9 @@ def build(model_path: str, text_model: Any, config: Dict[str, Any]):
         boi_token_id=config.get("boi_token_id"),
         eoi_token_id=config.get("eoi_token_id"),
     )
-    added = _added_tokens(model_path)
+    added = added_tokens(model_path)
     for name, tid in (("boi", fam.boi_token_id), ("image", fam.image_token_id),
                       ("eoi", fam.eoi_token_id)):
         if tid in added:
-            fam.token_text[name] = added[tid]
+            fam.token_text[name] = added[tid][0]
     return fam

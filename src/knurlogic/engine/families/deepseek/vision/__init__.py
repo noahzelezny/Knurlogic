@@ -24,13 +24,18 @@ which has refs but no store, computes the same.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 from knurlogic.engine.model import weight_files
+from knurlogic.engine.model.added_tokens import token_id
 from knurlogic.engine.model.trunk import first_attr
-from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
+from knurlogic.engine.vision import (
+    EncodedImage,
+    Family,
+    ImageRef,
+    VisionSpec,
+    proc_hash,
+)
 
 from .processor import IMAGE, IMAGE_PAD, VisionArgs, compress_pad, image_block
 
@@ -43,16 +48,17 @@ _ROWS = ("image_start", "image_pad", "image_newline", "image_end")
 
 
 def _image_token_id(model_path: str) -> int:
-    p = Path(model_path) / "tokenizer.json"
-    if p.is_file():
-        for t in json.loads(p.read_text()).get("added_tokens", ()):
-            if t.get("content") == IMAGE_PLACEHOLDER:
-                return int(t["id"])
-    return IMAGE_TOKEN_ID
+    tid = token_id(model_path, IMAGE_PLACEHOLDER)
+    return IMAGE_TOKEN_ID if tid is None else tid
 
 
-class DeepseekVisionFamily:
-    """`Family` (vision-contracts.md) for DeepSeek-V4-Flash-Vision-Exp."""
+class DeepseekVisionFamily(Family):
+    """`Family` (vision-contracts.md) for DeepSeek-V4-Flash-Vision-Exp: the
+    trunk's own 1D positions (an image token is one position); every image
+    block is whole in a chunk -- inside it a token sees forward to
+    IMAGE_END, and the reference prefills a block in one call."""
+
+    IMAGES_BIDIRECTIONAL = True
 
     def __init__(self, config: dict[str, Any], image_token_id: int):
         self.args = VisionArgs.from_config(config)
@@ -223,17 +229,6 @@ class DeepseekVisionFamily:
         text = self._core(model).embed(mx.array(ids)[None])
         return {"input_embeddings": merge(text, sl, features),
                 "vl_ids": mx.array(vl)[None]}
-
-    def positions(self, key, refs) -> tuple[Any | None, int]:
-        # the trunk's own 1D positions: an image token is one position
-        return None, 0
-
-    def chunk_boundaries(self, key):
-        """Every image block whole: inside it a token sees forward to
-        IMAGE_END, and the reference prefills a block in one call."""
-        from knurlogic.engine.vision.key import image_spans
-        return [(s.start, s.end) for s in image_spans(key)]
-
 
 def build(model_path: str, text_model: Any, config: dict[str, Any]):
     if int(config.get("vision_n_layers") or 0) <= 0:

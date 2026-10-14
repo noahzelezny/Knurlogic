@@ -20,14 +20,19 @@ from pathlib import Path
 from typing import Any
 
 from knurlogic.engine.model import weight_files
-from knurlogic.engine.model.trunk import first_attr
-from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
+from knurlogic.engine.vision import (
+    EncodedImage,
+    Family,
+    ImageRef,
+    VisionSpec,
+    proc_hash,
+)
 
 _PATCH_PREFIX = "vision_model."
 _TOWER_PREFIX = "vision_tower."
 
 
-class Glm5VisionFamily:
+class Glm5VisionFamily(Family):
     """`Family` (vision-contracts.md) for glm5_next."""
 
     #: CLIP's, the Glm5NextImageProcessor defaults; the artifact's own
@@ -210,39 +215,6 @@ class Glm5VisionFamily:
         # template as text, which bypasses that macro, so the framing is
         # ours to add, as gemma4's is.
         return "<|begin_of_image|><|image|><|end_of_image|>"
-
-    # -- embed / positions / chunking -------------------------------------
-
-    @staticmethod
-    def _embed_tokens(model):
-        """`model` is whatever `text_model` the caller loaded -- the plain
-        `LanguageModel` (`.model.embed_tokens`) when knurlogic serves
-        GLM text-only, or the multimodal `Model` (`.language_model.model.
-        embed_tokens`) if ever built directly. Try both rather than assume
-        one, the same defensiveness `fixtures_vision.StubFamily` uses."""
-        return first_attr(model, ("language_model.model.embed_tokens",
-                                  "model.embed_tokens", "embed_tokens"))
-
-    def embed(self, model, key, start, features) -> dict[str, Any]:
-        import mlx.core as mx
-
-        from knurlogic.engine.vision import key as K
-        from knurlogic.engine.vision.scatter import merge
-
-        sl = list(key[start:])
-        ids = mx.array(K.to_ids(sl, self.image_token_id))[None]
-        text = self._embed_tokens(model)(ids)
-        return {"input_embeddings": merge(text, sl, features)}
-
-    def positions(self, key, refs) -> tuple[Any | None, int]:
-        # NoPE: the trunk computes its own 1D positions; no MRoPE grid, no
-        # rope_delta (see module docstring).
-        return None, 0
-
-    def chunk_boundaries(self, key):
-        # GLM's attention is causal (unlike gemma's bidirectional image
-        # block); no chunk edge needs protecting.
-        return []
 
 
 def smart_resize(num_frames: int, height: int, width: int,

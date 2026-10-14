@@ -13,6 +13,8 @@ from __future__ import annotations
 import mlx.core as mx
 import mlx.nn as nn
 
+from knurlogic.engine.vision import layers
+
 from .processor import VisionArgs
 
 
@@ -34,17 +36,10 @@ def apply_rotary(x: mx.array, cos: mx.array, sin: mx.array) -> mx.array:
                           axis=-1).astype(dtype)
 
 
-class RMSNorm(nn.Module):
-    def __init__(self, dim: int, eps: float = 1e-6):
-        super().__init__()
-        self.eps = eps
-        self.weight = mx.ones((dim,))
+class RMSNorm(layers.RMSNorm):
+    """The tower's norm: squares with mx.square, as it was matched."""
 
-    def __call__(self, x: mx.array) -> mx.array:
-        dtype = x.dtype
-        x = x.astype(mx.float32)
-        x = x * mx.rsqrt(mx.mean(mx.square(x), axis=-1, keepdims=True) + self.eps)
-        return (self.weight.astype(mx.float32) * x).astype(dtype)
+    square = staticmethod(mx.square)
 
 
 class PatchEmbed(nn.Module):

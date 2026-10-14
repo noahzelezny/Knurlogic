@@ -21,6 +21,8 @@ import mlx.nn as nn
 import numpy as np
 
 from knurlogic.engine.vision._base import ensure_fused_sdpa
+from knurlogic.engine.vision.layers import RMSNorm as VisionRMSNorm
+from knurlogic.engine.vision.layers import RMSNormNoScale, rotate_half
 from .config import VisionConfig
 
 
@@ -53,30 +55,6 @@ def one_hot(indices: mx.array, num_classes: int) -> mx.array:
     return (mx.expand_dims(indices, -1) == mx.arange(num_classes)).astype(mx.float32)
 
 
-class VisionRMSNorm(nn.Module):
-    def __init__(self, dim: int, eps: float = 1e-6):
-        super().__init__()
-        self.eps = eps
-        self.weight = mx.ones((dim,))
-
-    def __call__(self, x: mx.array) -> mx.array:
-        x_float = x.astype(mx.float32)
-        var = mx.mean(x_float**2, axis=-1, keepdims=True)
-        normed = x_float * mx.rsqrt(var + self.eps)
-        return (normed * self.weight.astype(mx.float32)).astype(x.dtype)
-
-
-class VisionRMSNormNoScale(nn.Module):
-    def __init__(self, eps: float = 1e-6):
-        super().__init__()
-        self.eps = eps
-
-    def __call__(self, x: mx.array) -> mx.array:
-        x_float = x.astype(mx.float32)
-        var = mx.mean(x_float**2, axis=-1, keepdims=True)
-        return (x_float * mx.rsqrt(var + self.eps)).astype(x.dtype)
-
-
 class RMSNorm(nn.Module):
     """The encoder layers' norms. knurlogic edit 7: HF's Gemma4RMSNorm --
     (x * rsqrt(mean(x^2) + eps)) * w in float32, rounded once to the
@@ -102,12 +80,6 @@ def gelu_mul(gate: mx.array, up: mx.array) -> mx.array:
     return nn.gelu_approx(gate.astype(mx.float32)).astype(up.dtype) * up
 
 
-def _rotate_half(x):
-    x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2 :]
-    return mx.concatenate([-x2, x1], axis=-1)
-
-
 def apply_multidimensional_rope(inputs, positions, base_frequency=100.0):
     """2D RoPE over the patch grid; splits the head dim into `positions`'
     last axis' parts and rotates each independently (rotate_half must not
@@ -127,7 +99,7 @@ def apply_multidimensional_rope(inputs, positions, base_frequency=100.0):
         sin_val = mx.concatenate([sin_val, sin_val], axis=-1).astype(inputs.dtype)
         cos_val = mx.expand_dims(cos_val, axis=2)
         sin_val = mx.expand_dims(sin_val, axis=2)
-        return inputs * cos_val + _rotate_half(inputs) * sin_val
+        return inputs * cos_val + rotate_half(inputs) * sin_val
 
     ndim = positions.shape[-1]
     channels_per_dim = 2 * (head_dim // (2 * ndim))
@@ -147,7 +119,7 @@ def apply_multidimensional_rope(inputs, positions, base_frequency=100.0):
         sin_d = mx.concatenate([sin_d, sin_d], axis=-1).astype(inputs.dtype)
         cos_d = mx.expand_dims(cos_d, axis=2)
         sin_d = mx.expand_dims(sin_d, axis=2)
-        y_part = x_part * cos_d + _rotate_half(x_part) * sin_d
+        y_part = x_part * cos_d + rotate_half(x_part) * sin_d
         result_parts.append(y_part)
 
     return mx.concatenate(result_parts, axis=-1)
@@ -174,7 +146,7 @@ class VisionAttention(nn.Module):
 
         self.q_norm = VisionRMSNorm(self.head_dim)
         self.k_norm = VisionRMSNorm(self.head_dim)
-        self._v_norm = VisionRMSNormNoScale()
+        self._v_norm = RMSNormNoScale()
 
     def __call__(self, x: mx.array, positions: mx.array,
                  mask: Optional[mx.array] = None) -> mx.array:

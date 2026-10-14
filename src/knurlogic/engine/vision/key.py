@@ -39,7 +39,7 @@ def has_image(key: Iterable[Any]) -> bool:
     """Does this key hold any image token? The test that decides whether a
     row needs `Family.positions` on EVERY step, not just the ones whose
     new suffix has an image."""
-    return any(type(x) is tuple for x in key)
+    return any(is_sentinel(x) for x in key)
 
 
 def expand_pads(ids: Sequence[int], refs: Sequence[ImageRef],
@@ -136,7 +136,7 @@ def expand_segments(segments: Sequence[Sequence[int]],
 
 def to_ids(key: Iterable[Any], image_token_id: int) -> list[int]:
     """The key -> what the model is fed: every sentinel back to the pad."""
-    return [image_token_id if type(x) is tuple else x for x in key]
+    return [image_token_id if is_sentinel(x) else x for x in key]
 
 
 @dataclass(frozen=True)
@@ -158,7 +158,7 @@ def image_spans(key: Sequence[Any]) -> list[Span]:
     spans: list[Span] = []
     s = None
     for i, x in enumerate(key):
-        if type(x) is tuple:
+        if is_sentinel(x):
             if (s is not None and x[1] == s[2] and x[2] == s[3]
                     and x[3] == s[5] + 1):
                 s[1], s[5] = i + 1, x[3]
