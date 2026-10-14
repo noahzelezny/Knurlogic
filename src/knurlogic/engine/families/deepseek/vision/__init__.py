@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from knurlogic.engine.model import weight_files
 from knurlogic.engine.model.trunk import first_attr
 from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_hash
 
@@ -39,42 +40,6 @@ IMAGE_PLACEHOLDER = "<｜deepseek_image｜>"
 IMAGE_TOKEN_ID = 129264
 _PREFIXES = ("vision.", "aligner.")
 _ROWS = ("image_start", "image_pad", "image_newline", "image_end")
-
-
-def _header(path: Path) -> dict:
-    """A safetensors file's header: name -> {dtype, shape, data_offsets}."""
-    from knurlogic.machine.artifact import safetensors_header
-    h = safetensors_header(path)
-    h.pop("__metadata__", None)
-    return h
-
-
-def _read(path: Path, keys: list[str]) -> dict:
-    """`keys` out of one safetensors file, each read on its own (a shard
-    holding the vision tensors can hold the 1 GB embedding too).
-    safetensors' own reader goes through numpy, which has no bfloat16."""
-    import mlx.core as mx
-    import numpy as np
-
-    from knurlogic.machine.artifact import safetensors_layout
-
-    np_of = {"BF16": (np.uint16, mx.bfloat16), "F16": (np.float16, None),
-             "F32": (np.float32, None), "U8": (np.uint8, None),
-             "U32": (np.uint32, None), "I32": (np.int32, None)}
-    out = {}
-    h, start = safetensors_layout(path)
-    with open(path, "rb") as f:
-        for k in keys:
-            m = h[k]
-            if m["dtype"] not in np_of:
-                raise ValueError(f"{k}: dtype {m['dtype']} not read here")
-            dt, view = np_of[m["dtype"]]
-            a, b = m["data_offsets"]
-            f.seek(start + a)
-            arr = mx.array(np.frombuffer(f.read(b - a), dtype=dt)
-                           .reshape(m["shape"]))
-            out[k] = arr.view(view) if view is not None else arr
-    return out
 
 
 def _image_token_id(model_path: str) -> int:
@@ -129,28 +94,21 @@ class DeepseekVisionFamily:
                               rows["image_end"]])
 
     def load_weights(self, model_path: str) -> int:
-        """The `vision.*` / `aligner.*` keys and the four image rows, read
-        one tensor at a time out of the shards the index names for them
-        (the trunk's shards are not opened otherwise). The image rows are
+        """The `vision.*` / `aligner.*` keys and the four image rows, out of
+        the shards the index names for them (weight_files.files_with; only
+        those tensors are read). The image rows are
         also the trunk's (sanitize keeps them); this copy is what `encode`
         builds a block from."""
         import mlx.core as mx
 
-        root = Path(model_path)
-        index = root / "model.safetensors.index.json"
-        if index.is_file():
-            wmap = json.loads(index.read_text()).get("weight_map", {})
-        else:
-            wmap = {k: p.name for p in sorted(root.glob("*.safetensors"))
-                    for k in _header(p)}
-        want: dict[str, list[str]] = {}
-        for k, shard in wmap.items():
+        def wanted(k: str) -> bool:
             name = k[len("model."):] if k.startswith("model.image_") else k
-            if name.startswith(_PREFIXES) or name in _ROWS:
-                want.setdefault(shard, []).append(k)
+            return name.startswith(_PREFIXES) or name in _ROWS
+
         tower, rows = {}, {}
-        for shard, keys in sorted(want.items()):
-            for k, v in _read(root / shard, keys).items():
+        for shard, keys in sorted(weight_files.files_with(
+                model_path, wanted).items()):
+            for k, v in weight_files.load(shard, keys=keys).items():
                 name = k[len("model."):] if k.startswith("model.") else k
                 if name in _ROWS:
                     rows[name] = v

@@ -206,21 +206,9 @@ def weight_names(path) -> list[str] | None:
     """Every tensor name the artifact's weights hold: its index's
     weight_map, or without one each shard's header. None when they cannot
     be read."""
-    from pathlib import Path
-
-    from knurlogic.machine.artifact import safetensors_header
-    root = Path(path)
+    from knurlogic.engine.model import weight_files
     try:
-        index = root / "model.safetensors.index.json"
-        if index.is_file():
-            return list(json.loads(index.read_text()).get("weight_map", {}))
-        shards = sorted(root.glob("*.safetensors"))
-        if not shards:
-            return None
-        names: list[str] = []
-        for f in shards:
-            names += [k for k in safetensors_header(f) if k != "__metadata__"]
-        return names
+        return list(weight_files.weight_map(path)) or None
     except (OSError, ValueError):
         return None
 

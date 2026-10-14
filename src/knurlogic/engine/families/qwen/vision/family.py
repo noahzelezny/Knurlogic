@@ -121,26 +121,9 @@ class QwenFamily:
 
     # --- weights -------------------------------------------------------------
 
-    def _vision_files(self, model_path: str) -> Dict[str, List[str]]:
-        """file -> [tensor names] for every vision tensor the rung has."""
-        p = Path(model_path)
-        idx = p / "model.safetensors.index.json"
-        files: Dict[str, List[str]] = {}
-        if idx.is_file():
-            wm = json.loads(idx.read_text()).get("weight_map", {})
-            for k, f in wm.items():
-                if _tower_key(k) is not None:
-                    files.setdefault(f, []).append(k)
-            return files
-        for f in sorted(p.glob("*.safetensors")):
-            names = [k for k in weight_files.names(f)
-                     if _tower_key(k) is not None]
-            if names:
-                files[f.name] = names
-        return files
-
     def load_weights(self, model_path: str) -> int:
-        files = self._vision_files(model_path)
+        files = weight_files.files_with(
+            model_path, lambda k: _tower_key(k) is not None)
         if not files:
             raise VisionError(f"no vision tensors in {model_path} (looked for "
                               f"{[p for p, _ in _PREFIXES]} in the index "
@@ -149,7 +132,7 @@ class QwenFamily:
         weights: Dict[str, Any] = {}
         n = 0
         for f, names in files.items():
-            arrays = weight_files.load(Path(model_path) / f, keys=names)
+            arrays = weight_files.load(f, keys=names)
             for k in names:
                 weights[_tower_key(k)] = arrays[k]
                 n += 1

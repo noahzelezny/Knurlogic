@@ -110,26 +110,12 @@ class Glm5VisionFamily:
 
         tower = self._build_tower()
         weights: dict[str, Any] = {}
-        root = Path(model_path)
-        index = root / "model.safetensors.index.json"
-        if index.is_file():
-            manifest = json.loads(index.read_text())
-            shards = sorted(set(manifest.get("weight_map", {}).values()))
-        else:
-            shards = [p.name for p in root.glob("*.safetensors")]
-        for shard in shards:
-            p = root / shard
-            if not p.is_file():
-                continue
-            keys = [k for k in weight_files.names(p)
-                    if k.startswith((_PATCH_PREFIX, _TOWER_PREFIX))]
-            if not keys:
-                continue
-            for k, v in weight_files.load(p, keys=keys).items():
-                if k.startswith(_PATCH_PREFIX):
-                    weights[k[len(_PATCH_PREFIX):]] = v
-                elif k.startswith(_TOWER_PREFIX):
-                    weights[k[len(_TOWER_PREFIX):]] = v
+        for k, v in weight_files.tensors_under(
+                model_path, (_PATCH_PREFIX, _TOWER_PREFIX)).items():
+            if k.startswith(_PATCH_PREFIX):
+                weights[k[len(_PATCH_PREFIX):]] = v
+            else:
+                weights[k[len(_TOWER_PREFIX):]] = v
         if not weights:
             return 0
         weights = tower.sanitize(weights)

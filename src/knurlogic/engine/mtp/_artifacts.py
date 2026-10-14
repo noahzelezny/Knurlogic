@@ -20,6 +20,7 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from knurlogic.engine.model import weight_files
 from knurlogic.machine.artifact import MTP_HEAD_GLOB, safetensors_header
 from knurlogic.machine.units import GIB
 
@@ -121,20 +122,10 @@ def graft_weights(path) -> int:
     These are what a head is built FROM -- bf16, unquantized, inside the
     model glob. One artifact on this disk has them.
     """
-    d = Path(path)
-    idx = d / "model.safetensors.index.json"
-    keys: set = set()
-    if idx.is_file():
-        try:
-            keys = set(json.loads(idx.read_text()).get("weight_map", {}))
-        except (OSError, ValueError, AttributeError):
-            keys = set()
-    if not keys:
-        for f in sorted(d.glob("model*.safetensors")):
-            try:
-                keys |= set(_header(f))
-            except (OSError, ValueError, struct.error):
-                continue
+    try:
+        keys = set(weight_files.weight_map(path, "model*.safetensors"))
+    except (OSError, ValueError, struct.error):
+        keys = set()
     keys.discard("__metadata__")
     return sum(1 for k in keys if k.startswith("mtp.") or ".mtp." in k)
 

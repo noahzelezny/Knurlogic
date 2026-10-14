@@ -67,35 +67,6 @@ class MultimodalEmbedder(nn.Module):
         return self.embedding_projection(normed)
 
 
-def _load_index(model_path: Path) -> Optional[Dict[str, str]]:
-    idx = model_path / "model.safetensors.index.json"
-    if not idx.is_file():
-        return None
-    return json.loads(idx.read_text()).get("weight_map", {})
-
-
-def _load_filtered(model_path: Path, prefixes: Tuple[str, ...]) -> Dict[str, mx.array]:
-    """Every tensor under `model_path` whose key starts with one of
-    `prefixes`. Uses the shard index's weight_map when present (a
-    multi-shard release) and falls back to every `*.safetensors` file in
-    the directory (a single-file fixture) otherwise."""
-    weight_map = _load_index(model_path)
-    out: Dict[str, mx.array] = {}
-    if weight_map:
-        by_shard: Dict[str, list] = {}
-        for key, shard_name in weight_map.items():
-            if key.startswith(prefixes):
-                by_shard.setdefault(shard_name, []).append(key)
-        for shard_name, keys in by_shard.items():
-            out.update(weight_files.load(model_path / shard_name, keys=keys))
-    else:
-        for f in sorted(model_path.glob("*.safetensors")):
-            keys = [k for k in weight_files.names(f) if k.startswith(prefixes)]
-            if keys:
-                out.update(weight_files.load(f, keys=keys))
-    return out
-
-
 class Gemma4Vision:
     """The `Family` (engine/vision/__init__.py) for gemma4."""
 
@@ -140,7 +111,7 @@ class Gemma4Vision:
 
     def load_weights(self, model_path: str) -> int:
         p = Path(model_path)
-        weights = _load_filtered(p, ("vision_tower.", "embed_vision."))
+        weights = weight_files.tensors_under(p, ("vision_tower.", "embed_vision."))
         tower_w = {k[len("vision_tower."):]: v for k, v in weights.items()
                   if k.startswith("vision_tower.")}
         embed_w = {k[len("embed_vision."):]: v for k, v in weights.items()
