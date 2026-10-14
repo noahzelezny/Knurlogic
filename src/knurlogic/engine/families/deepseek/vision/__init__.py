@@ -121,8 +121,8 @@ class DeepseekVisionFamily:
             raise ValueError(f"deepseek_v4 vision: no {missing} in "
                              f"{model_path}; an image block needs them")
         model = self._build_tower()
-        from knurlogic.engine.vision.quant import artifact_quantization, quantize_like
-        quantize_like(model, tower, artifact_quantization(model_path))
+        from knurlogic.engine.model.packed import artifact_quantization, quantize_like
+        quantize_like(model, tower, artifact_quantization(model_path).get("mode"))
         model.load_weights(list(tower.items()), strict=True)
         self.set_rows(rows)
         mx.eval(model.parameters(), self.rows)

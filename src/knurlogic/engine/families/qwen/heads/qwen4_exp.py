@@ -20,26 +20,21 @@ drives draft acceptance to exactly 0.0. Do not "simplify" it back.
 """
 from __future__ import annotations
 
-import json
-
 import mlx.core as mx
 import mlx.nn as nn
-from mlx.utils import tree_flatten, tree_unflatten
+from mlx.utils import tree_flatten
 from mlx_lm.models.base import create_attention_mask
 
 from knurlogic.engine.model import weight_files
 from knurlogic.engine.model.trunk import unwrap
-
-SIDECAR_NAME = "mtp-head-q6.safetensors"
-
-
-def _quantizable(path, mod):
-    """nn.quantize hands the predicate EVERY submodule, norms included, and
-    raises on anything without to_quantized -- so gate on that, not on names.
-    The MoE router stays full precision, mirroring qwen4_exp's own
-    quant_predicate."""
-    return hasattr(mod, "to_quantized") and not path.endswith("mlp.gate")
-
+from knurlogic.engine.mtp.head_base import (
+    GraftHead,
+    fill,
+    mixed_predicate,
+    prefixed,
+    read_recipe,
+    save_sidecar,
+)
 
 # Measured from the bf16 graft header: the 512-expert MoE stack
 # is 4.688 of the head's 4.856 GiB -- 96.5% of it, in TWO tensors. Everything
@@ -51,22 +46,12 @@ def _quantizable(path, mod):
 # This is a pure speed/memory search. Head precision CANNOT affect output
 # quality -- the trunk verifies every drafted token, so a coarser head costs
 # a rejection, never a wrong token. The only risk is acceptance, and acceptance
-# is measurable directly (`vqlab mtp-probe`).
-_EXPERT_SUBSTR = "switch_mlp"
+# is measurable directly (`vqlab mtp-probe`). The MoE router stays full
+# precision, mirroring qwen4_exp's own quant_predicate.
+_KEEP_FP = ("mlp.gate",)
 
 
-def _mixed_predicate(bits, expert_bits, group_size):
-    """Per-module bit-widths. nn.quantize lets a predicate return the kwargs
-    for to_quantized, so one pass can carry two bit-widths."""
-    def predicate(path, mod):
-        if not _quantizable(path, mod):
-            return False
-        b = expert_bits if _EXPERT_SUBSTR in path else bits
-        return {"group_size": group_size, "bits": b}
-    return predicate
-
-
-class MTPHead:
+class MTPHead(GraftHead):
     """One drafting head bound to a loaded qwen4_exp trunk."""
 
     def __init__(self, model, arch):
@@ -117,25 +102,13 @@ class MTPHead:
             if not k.startswith("layers.0."):
                 continue
             k = k[len("layers.0."):]
-            # Upstream stacks the experts fused; apply the same split the
-            # model's own sanitize applies to trunk layers.
-            if k.endswith("mlp.experts.gate_up_proj"):
-                mid = v.shape[-2] // 2
-                layer_w["mlp.switch_mlp.gate_proj.weight"] = v[..., :mid, :]
-                layer_w["mlp.switch_mlp.up_proj.weight"] = v[..., mid:, :]
-            elif k.endswith("mlp.experts.down_proj"):
-                layer_w["mlp.switch_mlp.down_proj.weight"] = v
-            else:
+            # Upstream stacks the experts fused
+            if not self.split_experts(k, v, layer_w):
                 layer_w[k] = v
-        slots = {k for k, _ in tree_flatten(self.block.parameters())}
-        unmatched = sorted(set(layer_w) - slots)
-        if unmatched:
-            raise SystemExit(f"FAIL: {len(unmatched)} graft keys found no "
-                             f"parameter slot, e.g. {unmatched[:4]}")
+        self.check_slots(self.slots(self.block), layer_w)
         self.block.load_weights(list(layer_w.items()), strict=False)
-        self.mixer.load_weights(
-            [(k[len("hyper_connection_mixer."):], v) for k, v in g.items()
-             if k.startswith("hyper_connection_mixer.")], strict=False)
+        self.mixer.load_weights(prefixed(g, "hyper_connection_mixer."),
+                                strict=False)
         self.norm_e = self._norm(self.D, g["pre_fc_norm_embedding.weight"])
         self.norm_h = self._norm(self.hc * self.D,
                                  g["pre_fc_norm_hidden.weight"],
@@ -152,8 +125,8 @@ class MTPHead:
         nothing. `expert_bits=None` reproduces the uniform recipe."""
         eb = bits if expert_bits is None else expert_bits
         for m in (self.block, self.mixer):
-            nn.quantize(m, class_predicate=_mixed_predicate(
-                bits, eb, group_size))
+            nn.quantize(m, class_predicate=mixed_predicate(
+                bits, eb, group_size, _KEEP_FP))
         mx.eval(self.block.parameters(), self.mixer.parameters())
         return self
 
@@ -166,20 +139,15 @@ class MTPHead:
         flat["norm_e.weight"] = self.norm_e.weight
         flat["norm_h.weight"] = self.norm_h.weight
         flat["fc.weight"] = self.fc
-        mx.save_safetensors(str(path), flat, metadata={
-            "format": "mlx",
-            "mtplx_compatible": "false",
-            "vqlab_mtp": json.dumps({"bits": bits, "group_size": group_size,
-                                     "expert_bits": expert_bits,
-                                     "fa_idx": self.fa_idx}),
-        })
-        return flat
+        return save_sidecar(path, flat, {"bits": bits, "group_size": group_size,
+                                         "expert_bits": expert_bits,
+                                         "fa_idx": self.fa_idx},
+                            mtplx_compatible="false")
 
     @classmethod
     def from_sidecar(cls, model, arch, path):
         w = weight_files.load(path)
-        meta = weight_files.metadata(path)
-        cfg = json.loads(meta.get("vqlab_mtp", "{}"))
+        cfg = read_recipe(path)
         head = cls(model, arch)
         bits, gs = cfg.get("bits"), cfg.get("group_size", 32)
         if bits:
@@ -188,13 +156,10 @@ class MTPHead:
             # gives every expert tensor the wrong packed shape.
             eb = cfg.get("expert_bits") or bits
             for m in (head.block, head.mixer):
-                nn.quantize(m, class_predicate=_mixed_predicate(bits, eb, gs))
-        head.block.update(tree_unflatten(
-            [(k[len("block."):], v) for k, v in w.items()
-             if k.startswith("block.")]))
-        head.mixer.update(tree_unflatten(
-            [(k[len("mixer."):], v) for k, v in w.items()
-             if k.startswith("mixer.")]))
+                nn.quantize(m, class_predicate=mixed_predicate(bits, eb, gs,
+                                                               _KEEP_FP))
+        fill(head.block, w, "block.")
+        fill(head.mixer, w, "mixer.")
         head.norm_e = head._norm(head.D, w["norm_e.weight"])
         head.norm_h = head._norm(head.hc * head.D, w["norm_h.weight"],
                                  group_size=head.D)
@@ -225,17 +190,3 @@ class MTPHead:
         mask = create_attention_mask(hin, cache) if T > 1 else None
         out = self.block(hin, self.rope, mask, None, cache, idx, nxt_id, None)
         return self.mixer(out)
-
-    def draft_logits(self, h_row, nxt_id, cache=None):
-        """(trunk hidden at t, token t+1) -> logits for token t+2."""
-        out = self._trunk(h_row, nxt_id, cache)
-        return (self.core.embed_tokens.as_linear(out) if self.tie
-                else self.lm_head(out))
-
-    def advance(self, h_row, nxt_id, cache):
-        """Fill the head's cache for these positions without projecting to
-        the vocabulary. Used to seed the head over the prompt, where the
-        logits are never read and the lm_head matmul over the whole prompt
-        would be the single largest cost of the seed."""
-        self._trunk(h_row, nxt_id, cache)
-        return cache

@@ -25,7 +25,7 @@ from knurlogic.engine.vision import EncodedImage, ImageRef, VisionSpec, proc_has
 from knurlogic.engine.vision.key import Span, image_spans, is_sentinel, to_ids
 from knurlogic.engine.vision.scatter import merge as scatter_merge
 from .config import VisionConfig
-from knurlogic.engine.vision.quant import artifact_quantization, quantize_like
+from knurlogic.engine.model.packed import artifact_quantization, quantize_like
 from knurlogic.engine.model.trunk import core_of
 from .vision import VisionModel
 
@@ -117,9 +117,9 @@ class Gemma4Vision:
         embed_w = {k[len("embed_vision."):]: v for k, v in weights.items()
                   if k.startswith("embed_vision.")}
         tower_w = self.vision_tower.sanitize(tower_w)
-        quant = artifact_quantization(model_path)
-        quantize_like(self.vision_tower, tower_w, quant, "vision_tower.")
-        quantize_like(self.embed_vision, embed_w, quant, "embed_vision.")
+        mode = artifact_quantization(model_path).get("mode")
+        quantize_like(self.vision_tower, tower_w, mode)
+        quantize_like(self.embed_vision, embed_w, mode)
         if tower_w:
             self.vision_tower.update(tree_unflatten(list(tower_w.items())))
         if embed_w:

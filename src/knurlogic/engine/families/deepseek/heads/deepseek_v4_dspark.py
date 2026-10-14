@@ -49,7 +49,7 @@ post-sanitize layer layout where the stage is a trunk block:
 wq_a and wkv stay separate (the trunk fuses them as wqkv_a): the stage's
 kv projection runs on main_x and on the block, its q projection on the
 block only. Any linear may be packed; the recipe is read off the tensors
-(heads/deepseek_v4._recipe).
+(engine/model/packed.recipe).
 """
 from __future__ import annotations
 
@@ -57,31 +57,13 @@ import dataclasses
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx.utils import tree_flatten
 
-from knurlogic.engine.model import weight_files
 from knurlogic.engine.model.trunk import text_model
+from knurlogic.engine.mtp.head_base import PackedSidecar
 
-from .deepseek_v4 import _recipe
+from .deepseek_v4 import OWN
 
 SIDECAR_NAME = "mtp-head-dspark-mxfp4.safetensors"
-#: official name -> this module's parameter path, under each stage
-_OWN = {"hc_head_fn": "hc_head.fn", "hc_head_base": "hc_head.base",
-        "hc_head_scale": "hc_head.scale"}
-
-
-def _to_module(k: str) -> str:
-    """`mtp.<i>.<name>` -> `stages.<i>.<path>`."""
-    _, i, rest = k.split(".", 2)
-    return f"stages.{i}.{_OWN.get(rest, rest)}"
-
-
-def _to_sidecar(k: str) -> str:
-    _, i, rest = k.split(".", 2)
-    for src, dst in _OWN.items():
-        if rest == dst:
-            rest = src
-    return f"mtp.{i}.{rest}"
 
 
 def _rope_pe(x, rope, pos, inverse=False):
@@ -340,9 +322,11 @@ class DSparkCache:
         return self.keys is None
 
 
-class DSparkHead:
+class DSparkHead(PackedSidecar):
     """The DSpark stages bound to a loaded deepseek_v4 trunk. Drafts
     `block_size` tokens per pass (engine/mtp/block_loop.BlockBatch)."""
+
+    LABEL = "deepseek_v4 DSpark"
 
     def __init__(self, model, arch):
         text = text_model(model)
@@ -381,53 +365,20 @@ class DSparkHead:
         return DSparkCache(self.n_stages, self.args.sliding_window)
 
     # ------------------------------------------------------------ sidecar
-    def bind(self, w: dict) -> dict:
-        """Shape the stages to sidecar tensors and check they match exactly
-        (names and shapes; `w` may hold header shapes). Returns the values
-        under this module's parameter paths."""
+    def to_module(self, k: str) -> str:
+        """`mtp.<i>.<name>` -> `stages.<i>.<path>`."""
+        _, i, rest = k.split(".", 2)
+        return f"stages.{i}.{self.own_names(OWN, rest)}"
+
+    def to_sidecar(self, k: str) -> str:
+        _, i, rest = k.split(".", 2)
+        return f"mtp.{i}.{self.own_names(OWN, rest, back=True)}"
+
+    def _check_keys(self, w: dict) -> None:
         bad = [k for k in w if not k.startswith("mtp.")]
         if bad:
             raise ValueError(f"deepseek_v4 DSpark: {len(bad)} tensors "
                              f"outside 'mtp.', e.g. {bad[:3]}")
-        mw = {_to_module(k): v for k, v in w.items()}
-
-        def pred(path, mod):
-            return _recipe(mw, path, mod) or False
-
-        nn.quantize(self.m, class_predicate=pred)
-        slots = dict(tree_flatten(self.m.parameters()))
-        missing = sorted(set(slots) - set(mw))
-        extra = sorted(set(mw) - set(slots))
-        if missing or extra:
-            raise ValueError(
-                f"deepseek_v4 DSpark does not match the sidecar: missing "
-                f"{missing[:4]} ({len(missing)}), unexpected {extra[:4]} "
-                f"({len(extra)})")
-        wrong = [(k, tuple(v.shape), tuple(slots[k].shape))
-                 for k, v in mw.items()
-                 if tuple(v.shape) != tuple(slots[k].shape)]
-        if wrong:
-            raise ValueError(f"deepseek_v4 DSpark: shape mismatch {wrong[:4]}")
-        return mw
-
-    def load_weights(self, w: dict) -> DSparkHead:
-        mw = self.bind(w)
-        self.m.load_weights(list(mw.items()), strict=True)
-        mx.eval(self.m.parameters())
-        return self
-
-    def tensors(self) -> dict:
-        return {_to_sidecar(k): v
-                for k, v in tree_flatten(self.m.parameters())}
-
-    def save(self, path) -> dict:
-        flat = self.tensors()
-        mx.save_safetensors(str(path), flat, metadata={"format": "mlx"})
-        return flat
-
-    @classmethod
-    def from_sidecar(cls, model, arch, path):
-        return cls(model, arch).load_weights(weight_files.load(path))
 
     # -------------------------------------------------------------- draft
     def advance(self, main_h, cache: DSparkCache) -> DSparkCache:
