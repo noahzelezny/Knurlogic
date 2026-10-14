@@ -180,6 +180,24 @@ class _Row:
     prefilling: bool = True   # no token out before the step now running
 
 
+def _uncached(segs, types, cached: int, lean: bool) -> tuple:
+    """(segments, types) of a prompt left to prefill once its first
+    `cached` tokens came from the prompt cache; one segment and no types
+    when `lean` (no checkpoint copies of this prompt)."""
+    segs, types = [list(s) for s in segs], list(types)
+    n = cached
+    while n > 0 and segs:
+        if n >= len(segs[0]):
+            n -= len(segs.pop(0))
+            types.pop(0)
+        else:
+            segs[0] = segs[0][n:]
+            n = 0
+    if lean and len(segs) > 1:
+        segs, types = [[t for s in segs for t in s]], []
+    return segs, types
+
+
 class Scheduler(MemoryGuard, PromptCacheCommands):
     def __init__(self, host, *, completion_batch_size: int = 32,
                  prefill_step_size: int = 2048, prompt_cache_size: int = 10,
@@ -844,10 +862,45 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
             f"still does not fit beside the ones running now. Retry, send a "
             f"shorter conversation, or serve a smaller model"))
 
-    def _insert(self, job: Job) -> None:
+    def _tokenize(self, job: Job, tok) -> tuple:
+        """(prompt, segments, segment types, initial control state) of a
+        job: through the served vision binding when it carries images
+        (whose pins the admission guard then holds), else as text."""
         from knurlogic.engine.model import state
         from knurlogic.engine.vision import cachehook
         from knurlogic.engine.vision import request as vreq
+        if not vreq.has_images(job.request.messages):
+            return P.tokenize(self, tok, job.request, job.args)
+        v = state.VISION.get("serve")
+        if v is None:
+            from knurlogic.engine.model.vision import no_vision_why
+            raise P.PromptError(no_vision_why())
+        out = v.tokenize(P.tokenize, self, tok, job.request, job.args)
+        # the pins tokenize took belong to the guard until the row
+        # is admitted: a failure before then releases them
+        from knurlogic.engine.vision import key as K
+        cachehook.pending(v, K.images_in(out[0]))
+        return out
+
+    def _fit_answer(self, job: Job, n_prompt: int) -> None:
+        """Set the job's prompt size and bound its answer by the context
+        window; PromptError when the prompt leaves no room for one."""
+        job.prompt_tokens = n_prompt
+        cap, window = self._window()
+        if window and n_prompt >= window:
+            whose = ("this server's context length is "
+                     f"{cap} (KNURLOGIC_CONTEXT_LENGTH)" if cap else
+                     f"this model's context length is {window}")
+            raise P.PromptError(
+                f"this prompt is {n_prompt} tokens; {whose}, "
+                f"which leaves no room for an answer")
+        if job.max_tokens is None:
+            job.max_tokens = window - n_prompt if window else 1 << 20
+        elif window:
+            job.max_tokens = min(job.max_tokens, window - n_prompt)
+
+    def _insert(self, job: Job) -> None:
+        from knurlogic.engine.vision import cachehook
         tok = self.host.tokenizer
         sp = getattr(job, "spans", None)
         if sp is not None:
@@ -855,35 +908,10 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         ex = self._executor()
         cachehook.sweep()
         with cachehook.admit_guard():
-            if vreq.has_images(job.request.messages):
-                v = state.VISION.get("serve")
-                if v is None:
-                    from knurlogic.engine.model.vision import no_vision_why
-                    raise P.PromptError(no_vision_why())
-                prompt, segs, types, initial = v.tokenize(
-                    P.tokenize, self, tok, job.request, job.args)
-                # the pins tokenize took belong to the guard until the row
-                # is admitted: a failure before then releases them
-                from knurlogic.engine.vision import key as K
-                cachehook.pending(v, K.images_in(prompt))
-            else:
-                prompt, segs, types, initial = P.tokenize(
-                    self, tok, job.request, job.args)
+            prompt, segs, types, initial = self._tokenize(job, tok)
             if sp is not None:
                 sp.to("tokenize")
-            job.prompt_tokens = len(prompt)
-            cap, window = self._window()
-            if window and len(prompt) >= window:
-                whose = ("this server's context length is "
-                         f"{cap} (KNURLOGIC_CONTEXT_LENGTH)" if cap else
-                         f"this model's context length is {window}")
-                raise P.PromptError(
-                    f"this prompt is {len(prompt)} tokens; {whose}, "
-                    f"which leaves no room for an answer")
-            if job.max_tokens is None:
-                job.max_tokens = window - len(prompt) if window else 1 << 20
-            elif window:
-                job.max_tokens = min(job.max_tokens, window - len(prompt))
+            self._fit_answer(job, len(prompt))
             s = getattr(job, "session", None)
             if s and getattr(job, "pin", False) and \
                     s not in self.cache.pinned:
@@ -905,18 +933,8 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                 self._disk_hit(job, prompt, len(prompt) - len(rest))
             if sp is not None:
                 sp.to("cache_fetch")
-            n = len(prompt) - len(rest)
-            segs, types = [list(s) for s in segs], list(types)
-            while n > 0 and segs:
-                if n >= len(segs[0]):
-                    n -= len(segs.pop(0))
-                    types.pop(0)
-                else:
-                    segs[0] = segs[0][n:]
-                    n = 0
-            if lean and len(segs) > 1:
-                # one segment: no checkpoint copies of this prompt
-                segs, types = [[t for s in segs for t in s]], []
+            segs, types = _uncached(segs, types, len(prompt) - len(rest),
+                                    lean)
             sm, seqs = control_machine(tok, initial)
             procs = []
             if job.penalties:
