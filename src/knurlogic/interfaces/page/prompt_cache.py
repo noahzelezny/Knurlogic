@@ -38,9 +38,9 @@ def prompt_cache_forward(handler, method: str, path: str, query: dict,
     from loopback, so it must refuse first). `send`: (url, method, body)
     -> (status, doc), for tests."""
     if not _loopback(handler):
-        send_json(handler, 403, {"error": {
-            "message": "the prompt cache is managed from this machine "
-                       "(loopback) only", "type": "permission_error"}})
+        send_json(handler, 403, router.api_error(
+            "permission_error",
+            "the prompt cache is managed from this machine (loopback) only"))
         return
     model = router.requested_model(query, body)
     table = router.local_models(fetch)
@@ -59,19 +59,19 @@ def prompt_cache_forward(handler, method: str, path: str, query: dict,
                 send_json(handler, code, doc)
                 return
             here = sorted(set(table) | set(router.routable(fetch)))
-            send_json(handler, 404, {"error": {
-                "message": f"no running model {model!r} here or on a peer; "
-                           f"running: {', '.join(here) or 'none'}",
-                "type": "not_found"}, "models": here})
+            send_json(handler, 404, router.api_error(
+                "not_found_error",
+                f"no running model {model!r} here or on a peer; "
+                f"running: {', '.join(here) or 'none'}", models=here))
             return
     else:
         bases = set(table.values())
         if len(bases) != 1:
-            send_json(handler, 400, {"error": {
-                "message": "name the model (a \"model\" query or body "
-                           "field): " + (", ".join(sorted(table))
-                                         or "none is running"),
-                "type": "invalid_request_error"}, "models": sorted(table)})
+            send_json(handler, 400, router.api_error(
+                "invalid_request_error",
+                "name the model (a \"model\" query or body field): "
+                + (", ".join(sorted(table)) or "none is running"),
+                models=sorted(table)))
             return
         base = bases.pop()
     code, doc = (send or router.send_up)(base + path, method,
