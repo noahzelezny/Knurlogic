@@ -100,6 +100,10 @@ def test_model_py_is_part_of_the_identity(tmp_path):
     (b / "model.py").write_text("X = 2\n")
     assert A.identity(a) != A.identity(b)
     (b / "model.py").write_text("X = 1\n")
+    # a same-size rewrite within one tick of a coarse filesystem clock
+    # leaves the cache's stamp as it was; a real edit moves it
+    t = (b / "model.py").stat().st_mtime + 1
+    os.utime(b / "model.py", (t, t))
     assert A.identity(a) == A.identity(b)          # content, never mtime
     (b / "kernels.py").write_text("")
     assert A.identity(a) != A.identity(b)
