@@ -16,6 +16,7 @@ nothing else runs. Design: docs/design/drafting.md.
   _artifacts.py       what an artifact has: a built head, graft weights, a key
   binding.py          the head bound to the loaded model (DRAFT)
   registry.py         which head a family drafts with
+  head_base.py        what every family's head shares (draft, graft, sidecar)
   batch_generator.py  the batch engine, drafting with an MTP head
   batch_loop.py       one-token drafting over a batch
   block_loop.py       K-token block drafting over a batch (DSpark)

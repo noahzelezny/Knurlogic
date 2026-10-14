@@ -10,7 +10,7 @@ page says where things are.
 
 | path | what |
 |---|---|
-| `engine/families/__init__.py` | `FAMILIES` (the explicit list: `qwen`, `gemma4`, `glm5`, `deepseek`), `manifests()`, `build_maps()`: the tables generic code reads, built from the manifests |
+| `engine/families/__init__.py` | `FAMILIES` (the explicit list: `qwen`, `gemma4`, `glm5`, `deepseek`), `manifests()`, `build_maps()`: the tables generic code reads, built from the manifests; `resolve("module:attr")`, the one importer of a manifest's targets |
 | `engine/families/<family>/__init__.py` | `MANIFEST`: plain data. Anything that runs is a `"module:attr"` string, imported only when used |
 | `engine/families/<family>/architecture/` | the vendored model code, with `PROVENANCE.md` |
 | `engine/families/<family>/heads/` | MTP heads (see [drafting](drafting.md)) |
@@ -22,7 +22,10 @@ page says where things are.
 | `engine/vendor.py` | `knurlogic vendor`: copy an architecture file and record where it came from |
 | `engine/smoke.py` | `knurlogic smoke`: generate a token and prove where the code came from; `--pin` writes pins |
 | `engine/templates/__init__.py` | the generic half of supplied chat templates; the templates themselves are in the manifests (`chat_templates`) |
-| `engine/model/weight_files.py` | the one opener of a model's tensor files (`load`, `names`, `metadata`): a family opens its head sidecar and tower tensors here, never with `mx.load` |
+| `engine/model/weight_files.py` | the one opener of a model's tensor files (`load`, `names`, `metadata`): a family opens its head sidecar and tower tensors here, never with `mx.load`; which files hold which tensors (`weight_map`, `files_with`, `tensors_under`) |
+| `engine/model/trunk.py` | where things sit in a loaded model: `text_model`, `core_of`, `unwrap` (a layer behind a pipeline stage wrapper), `attr_path` / `first_attr` (dotted attribute paths) |
+| `engine/model/packed.py` | a packed (quantized) layer's recipe read off its tensors (`recipe`) and `quantize_like`, for heads and towers |
+| `engine/model/added_tokens.py` | an artifact's added tokens (`added_tokens`, `token_id`, `listed`), stdlib only |
 | `engine/model/thinking.py` | one thinking control translated to each template's dialect (from the manifest's `thinking`) |
 | `machine/artifact.py` | what an artifact declares: `Artifact`, `context_length`, `sampling_defaults`, `identity` |
 

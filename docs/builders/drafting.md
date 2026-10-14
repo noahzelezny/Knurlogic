@@ -22,6 +22,7 @@ split model: [tensor-mtp](../design/tensor-mtp.md).
 | `capture.py` | capture the pre-lm_head activation (`capture_input`) |
 | `sampling.py` | the same distribution mlx-lm samples from, exact rejection sampling (`rejection_correct`), `NonFiniteLogits` |
 | `seed.py` | seed a head over a prompt in prefill-sized chunks (`seed_head`) |
+| `head_base.py` | what every head shares: `DraftHead` (`advance`), `GraftHead` (`draft_logits`, the graft's expert split and slot check, the `vqlab_mtp` sidecar recipe read and written), `PackedSidecar` (bind / load / save of a sidecar whose recipe is read off its packed tensors), `mixed_predicate` |
 | `binding.py` | the head bound to the loaded model: `bind_head` (called by `ModelHost` at load), `DRAFT` (the process's drafting state and counters), `drafting_status` (for `/status.json`). Imports no mlx |
 
 Elsewhere:
@@ -60,8 +61,10 @@ is in `tuning/`, and a CLI command is in `interfaces/`.
 
 A `head` entry in the family's manifest (names, head `"module:Class"`
 with `from_sidecar` and `draft_logits`, capture point, draft cache,
-cache semantics, sidecar name, layout) and the class in `heads/`. A block
-drafter adds `block`. The checklist item is
+cache semantics, sidecar name, layout) and the class in `heads/`, named
+`<Arch>Head` and built on `engine/mtp/head_base` (a graft head on
+`GraftHead`, a packed one on `PackedSidecar`): the class holds only its
+wiring. A bad graft raises ValueError. A block drafter adds `block`. The checklist item is
 [new-model](../design/new-model.md), "Drafting".
 
 ## Tests

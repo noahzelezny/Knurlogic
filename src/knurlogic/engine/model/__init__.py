@@ -7,6 +7,11 @@ pieces knurlogic's own server (engine/runtime, interfaces/http) builds on.
   segments.py  the system prompt's own prompt-cache segment
   thinking.py  reasoning_effort, translated to each chat template's own
   vision.py    bind a vision family at load, clear it at unload
+  weight_files.py  the one opener of an artifact's tensor files, and
+               which files hold which tensors
+  trunk.py     where things sit in a loaded model (core_of, unwrap, ...)
+  packed.py    a packed layer's recipe, read off its tensors
+  added_tokens.py  an artifact's added tokens (stdlib)
 
 Drafting is engine/mtp/binding.py.
 

@@ -20,12 +20,22 @@ prompt, never evicted while a cache entry uses them. The why:
 | `request.py` | `VisionServe` (the served model's family, store and key; `tokenize`), `MirrorVision` (a follower rank's vision on a split model) |
 | `cachehook.py` | the prompt cache pins the images it references (`install`, `pending`, `claim`, `sweep`, `admit_guard`) |
 | `registry.py` | `model_type` to the family that serves its images, built from the manifests; `build`, `vision_weights`, `unavailable_why` |
-| `quant.py` | quantize a vision module to match the checkpoint |
+| `layers.py` | the towers' shared layers: float32 `RMSNorm` / `RMSNormNoScale` and `rotate_half` |
 | `_base.py` | the helpers the vendored towers import from mlx-vlm |
+
+A tower's packed (quantized) layers are swapped in before loading by
+`engine/model/packed.quantize_like` (the recipe read off the tensors); its
+tensors come from `engine/model/weight_files.tensors_under` /
+`files_with`; added-token ids from `engine/model/added_tokens`.
 
 Each family's tower and `Family` is under
 `engine/families/<family>/vision/`, named by the manifest's `vision`
-entry.
+entry. A family class subclasses `Family` and takes its defaults: `embed`
+(the trunk's embeddings with the image rows scattered in), `positions`
+(the trunk's own 1D positions) and `chunk_boundaries` (none, or every
+image span when `IMAGES_BIDIRECTIONAL`); it overrides only what differs.
+The classes are named `<Family>Vision` (`QwenVision`, `Gemma4Vision`,
+`Glm5Vision`, `DeepseekVision`).
 
 Hooks outside it:
 
