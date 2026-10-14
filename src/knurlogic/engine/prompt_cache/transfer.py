@@ -38,12 +38,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import time
 from pathlib import Path
 
-from knurlogic.machine.files import write_atomic
+from knurlogic.machine.files import atomic, temp_path, write_atomic
 
 from . import disk, layers, location, slices
 
@@ -294,25 +293,25 @@ def _fetch_one(f, store, name, piece, sources, d: Path, meta) -> bytes | None:
         size = _size(info, piece)
         if size is None or (piece == ENTRY_PIECE and size > ENTRY_MAX):
             continue
-        tmp = d / f".tmp-{os.getpid()}-fetch-{file_of(piece)}"
         try:
-            _get(f, peer, store, name, piece, tmp, size)
             if piece == ENTRY_PIECE:
-                body = tmp.read_bytes()
+                # held in memory: the caller writes entry.json last
+                tmp = temp_path(d / file_of(piece))
+                try:
+                    _get(f, peer, store, name, piece, tmp, size)
+                    body = tmp.read_bytes()
+                finally:
+                    tmp.unlink(missing_ok=True)
                 _check_entry(store, name, body)
                 return body
-            _verify(store, tmp, meta, piece)
-            os.replace(tmp, d / file_of(piece))
+            with atomic(d / file_of(piece)) as tmp:
+                _get(f, peer, store, name, piece, tmp, size)
+                _verify(store, tmp, meta, piece)
             return b""
         except Exception as e:  # any failed fetch or check: the next source
             logger.warning("prompt cache: %s of entry %s from %s refused: "
                            "%s: %s", file_of(piece), name, peer,
                            type(e).__name__, e)
-        finally:
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
     return None
 
 

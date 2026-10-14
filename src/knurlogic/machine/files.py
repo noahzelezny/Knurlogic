@@ -1,5 +1,11 @@
 """Small files several processes read: written whole or not at all.
 
+  atomic(path)               a context yielding a temporary path beside
+                             `path` to write any way (a streamed fetch,
+                             mx.save_safetensors), renamed over `path` on
+                             success and removed on failure
+  temp_path(path)            that temporary path, for a writer whose file
+                             is not renamed over `path`
   write_atomic(path, data)   text or bytes to a temporary file beside
                              `path`, then renamed over it, so a reader sees
                              the old file or the new one, never half
@@ -16,23 +22,41 @@ from __future__ import annotations
 import json
 import os
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 
-def write_atomic(path, data: str | bytes) -> None:
+def temp_path(path) -> Path:
+    """The temporary file beside `path`: `.tmp-<pid>-<thread>-<name>`."""
+    path = Path(path)
+    return path.with_name(
+        f".tmp-{os.getpid()}-{threading.get_ident()}-{path.name}")
+
+
+@contextmanager
+def atomic(path) -> Iterator[Path]:
+    """Yield `temp_path(path)` (its directory made) for the body to write;
+    rename it over `path` when the body returns, remove it when it
+    raises."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(
-        f".tmp-{os.getpid()}-{threading.get_ident()}-{path.name}")
+    tmp = temp_path(path)
     try:
-        if isinstance(data, bytes):
-            tmp.write_bytes(data)
-        else:
-            tmp.write_text(data)
+        yield tmp
         os.replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def write_atomic(path, data: str | bytes) -> None:
+    """`data` (text or bytes) to `path`, atomically."""
+    with atomic(path) as tmp:
+        if isinstance(data, bytes):
+            tmp.write_bytes(data)
+        else:
+            tmp.write_text(data)
 
 
 def write_json(path, doc, end: str = "", **dumps_kw) -> None:

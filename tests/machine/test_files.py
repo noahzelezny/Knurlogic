@@ -25,6 +25,20 @@ def test_read_json_falls_back(tmp_path):
     assert files.read_json(f) == [1, 2]
 
 
+def test_atomic_replaces_on_success_and_cleans_up_on_failure(tmp_path):
+    f = tmp_path / "d" / "x.bin"
+    with files.atomic(f) as tmp:
+        assert tmp.name.startswith(".tmp-") and tmp.name.endswith("x.bin")
+        tmp.write_bytes(b"new")
+    assert f.read_bytes() == b"new"
+    with pytest.raises(RuntimeError):
+        with files.atomic(f) as tmp:
+            tmp.write_bytes(b"half")
+            raise RuntimeError
+    assert f.read_bytes() == b"new"
+    assert [p.name for p in f.parent.iterdir()] == ["x.bin"]
+
+
 def test_a_failed_write_keeps_the_old_file(tmp_path, monkeypatch):
     f = tmp_path / "x.json"
     f.write_text("old")

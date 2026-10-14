@@ -57,7 +57,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from knurlogic.engine.arrays import arrays_of
-from knurlogic.machine.files import read_json, write_json
+from knurlogic.machine.files import atomic, read_json, write_json
 from knurlogic.tuning import knobs
 
 from . import disk, location, slices
@@ -267,13 +267,8 @@ def _write(path: Path, objs: list, meta: dict) -> int:
     if not arrays:
         arrays = {"__none__": mx.zeros((1,), dtype=mx.int8)}
     head = dict(meta, tree=tree, nbytes=nbytes)
-    tmp = path.parent / f".tmp-{os.getpid()}-{path.name}"
-    try:
+    with atomic(path) as tmp:
         mx.save_safetensors(str(tmp), arrays, {"knurlogic": json.dumps(head)})
-        os.replace(tmp, path)
-    finally:
-        if tmp.exists():
-            tmp.unlink()
     return nbytes
 
 

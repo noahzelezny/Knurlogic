@@ -71,7 +71,7 @@ from pathlib import Path
 
 from knurlogic.engine.arrays import arrays_of
 from knurlogic.machine.artifact import safetensors_header, safetensors_layout
-from knurlogic.machine.files import read_json, write_json
+from knurlogic.machine.files import atomic, read_json, write_json
 from knurlogic.machine.units import GIB
 from knurlogic.tuning import knobs
 
@@ -350,16 +350,10 @@ def save_entry(d: Path, key: dict, tokens, cache: list, kind: str,
             "owner": _owner_of(owner), "pinned": bool(pinned),
             "saved_at": round(time.time(), 3), "model": model,
             "shared": bool(shared)}
-    d.mkdir(parents=True, exist_ok=True)
     final = d / f"{gen:08d}-{seq:06d}-{tokens_hash(toks)}{SUFFIX}"
-    tmp = d / f".tmp-{os.getpid()}-{final.stem}{SUFFIX}"
-    try:
+    with atomic(final) as tmp:
         mx.save_safetensors(str(tmp), arrays,
                             {"knurlogic": json.dumps(meta)})
-        os.replace(tmp, final)
-    finally:
-        if tmp.exists():
-            tmp.unlink()
     return final
 
 
