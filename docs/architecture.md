@@ -71,7 +71,7 @@ page / MCP / CLI  ->  tuning.resolve  ->  interfaces.serve  ->  engine
    watches them (`cluster/jobs.py`) and tears the whole job down if a rank
    dies or stalls. `cluster/recovery.py` can relaunch it.
 
-Peers are found by `cluster/discovery.py` and `cluster/peers.py`.
+Peers are found by `cluster/discovery/` and `cluster/peers.py`.
 
 ## Where settings live
 

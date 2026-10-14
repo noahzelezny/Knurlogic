@@ -3,7 +3,7 @@ across them.
 
   peers.py      named, remembered and introduced peers, each with a
                 reachability state.
-  discovery.py  Bonjour: `_knurlogic._tcp`, advertised and browsed.
+  discovery/    `_knurlogic._tcp`, advertised and browsed: Bonjour, Avahi.
   launch.py     a cluster job, page to page: prepare, start, watch, stop.
   jobs.py       a job's files, rank progress markers and health verdict.
   recovery.py   a model that died unasked is relaunched, bounded.

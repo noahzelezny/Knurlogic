@@ -1,13 +1,9 @@
-"""Bonjour: every knurlogic page on the network, found without being named.
-
-DNS-SD service type `_knurlogic._tcp` through the `dns_sd.h` API in
-libSystem; mDNSResponder owns the registration and the multicast. The page
-(`ui`) registers one advertisement per machine (TXT: id, name, ver, schema,
-role); every page browses, resolving on the interface each result was seen
-on. The ctypes callbacks and DNSServiceRefs are owned by the Discovery
-object while the daemon may call them, and a ref is never freed inside its
-own callback. A failure is "nothing found", never a crash, and `status()`
-says which.
+"""Discovery on macOS: Bonjour, through the `dns_sd.h` API in libSystem;
+mDNSResponder owns the registration and the multicast. Each result is
+resolved on the interface it was seen on. The ctypes callbacks and
+DNSServiceRefs are owned by the Discovery object while the daemon may call
+them, and a ref is never freed inside its own callback. A failure is
+"nothing found", never a crash, and `status()` says which.
 
 Design: docs/design/discovery.md (Bonjour).
 """
@@ -20,9 +16,8 @@ import socket
 import threading
 import time
 
-from knurlogic.cluster import PROC_ERRORS
+from knurlogic.cluster.discovery import SERVICE, label, txt_decode, txt_encode
 
-SERVICE = "_knurlogic._tcp"
 LOCAL_ONLY = 0xFFFFFFFF          # kDNSServiceInterfaceIndexLocalOnly
 F_MORE, F_ADD = 0x1, 0x2          # kDNSServiceFlagsMoreComing / Add
 IPV4 = 0x1                        # kDNSServiceProtocol_IPv4
@@ -65,55 +60,6 @@ def _lib():
             getattr(lib, f).restype = i32
         _LIB = lib
     return _LIB
-
-
-def txt_encode(d: dict) -> bytes:
-    out = b""
-    for k, v in d.items():
-        item = f"{k}={v}".encode()[:255]
-        out += bytes([len(item)]) + item
-    return out
-
-
-def txt_decode(b: bytes) -> dict:
-    out, i = {}, 0
-    while i < len(b):
-        n = b[i]
-        item = b[i + 1:i + 1 + n].decode(errors="replace")
-        k, _, v = item.partition("=")
-        if k:
-            out[k] = v
-        i += 1 + n
-    return out
-
-
-def _label(s: str) -> bytes:
-    """A DNS label: at most 63 BYTES, never cut inside a UTF-8 character."""
-    b = s.encode()
-    return b[:63].decode(errors="ignore").encode() if len(b) > 63 else b
-
-
-def interface_of(ip: str) -> int:
-    """The interface index an address is configured on, or 0 (all). Read
-    from `ifconfig`, which is the one place that pairs the two."""
-    if ip in ("", "0.0.0.0", "::"):
-        return 0
-    import subprocess
-    try:
-        out = subprocess.run(["ifconfig"], capture_output=True, text=True,
-                             timeout=3).stdout
-    except PROC_ERRORS:
-        return 0
-    iface = None
-    for line in out.splitlines():
-        if line and not line[0].isspace():
-            iface = line.split(":", 1)[0]
-        elif iface and line.strip().startswith(f"inet {ip} "):
-            try:
-                return socket.if_nametoindex(iface)
-            except OSError:
-                return 0
-    return 0
 
 
 class Discovery:
@@ -161,7 +107,7 @@ class Discovery:
         ref = vp()
         rec = txt_encode(txt)
         err = lib.DNSServiceRegister(
-            ctypes.byref(ref), 0, self.if_index, _label(instance),
+            ctypes.byref(ref), 0, self.if_index, label(instance),
             self.service.encode(), None, None, socket.htons(port), len(rec),
             ctypes.c_char_p(rec), c, None)
         if err:

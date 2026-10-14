@@ -4,8 +4,8 @@ How a knurlogic page learns which machines exist, who each one is, and
 whether it can be reached. Running a model across machines builds on this
 (see [server.md](server.md), "Cluster").
 
-Code: `machine/identity.py` (who this machine is), `cluster/discovery.py`
-(Bonjour), `cluster/peers.py` (named, remembered and introduced peers,
+Code: `machine/identity.py` (who this machine is), `cluster/discovery/`
+(Bonjour on macOS, Avahi on Linux), `cluster/peers.py` (named, remembered and introduced peers,
 merge, reachability), `cluster/links.py` (which link, `--host cluster`),
 `cluster/checks.py` (`knurlogic doctor --cluster`). `machine/` holds facts
 about this box; `cluster/` holds everything about other boxes.
@@ -41,6 +41,16 @@ is printed as a diagnostic. ctypes rules that are load-bearing: callbacks and
 refs are owned by the discovery object; a ref is never deallocated inside its
 own callback; MoreComing and Add/remove are honoured. Any failure is "nothing
 found", never a crash, and `status()` says which.
+
+**Linux: Avahi.** The same rule -- ask the responder the OS already runs --
+so on Linux the module asks avahi-daemon, through libavahi-client (ctypes,
+`avahi_client_new`, an entry group per registration, a service browser, a
+resolver per result, one thread iterating `avahi_simple_poll`). Desktop and
+server distributions (Ubuntu, DGX OS) run it; a container does not, and
+there discovery is "nothing found" with the reason, and `--peer` still
+works. Measured: two containers on one Docker network, each running
+avahi-daemon, each registered and found the other with its address, port
+and TXT. Windows (its own DNS-SD API in dnsapi) is not written yet.
 
 ## Identity
 
@@ -124,7 +134,12 @@ choice.
 
 ## Module notes
 
-### knurlogic/cluster/discovery.py
+### knurlogic/cluster/discovery/
+
+`__init__.py` holds what both share (the service type, TXT encoding, DNS
+labels, `interface_of`) and picks this OS's `Discovery`; `bonjour.py` is
+macOS's, `avahi.py` Linux's, the same interface.
+
 
 DNS-SD service type `_knurlogic._tcp`, through the `dns_sd.h` API in
 libSystem. mDNSResponder -- the daemon every Mac already runs -- owns the

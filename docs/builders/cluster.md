@@ -12,7 +12,7 @@ share a model) is [splits](splits.md).
 
 | file | what |
 |---|---|
-| `discovery.py` | `Discovery`: Bonjour (`_knurlogic._tcp`) through `dns_sd.h`; register one advertisement, browse, resolve |
+| `discovery/` | `Discovery`: `_knurlogic._tcp` through the OS's own responder -- Bonjour (`bonjour.py`, `dns_sd.h`) on macOS, Avahi (`avahi.py`, libavahi-client) on Linux; register one advertisement, browse, resolve |
 | `peers.py` | `Peers` / `Peer`: named, remembered or introduced peers and their state (`answering`, `stale`, `gone`, `version_mismatch`); `peers.json` |
 | `links.py` | which link reaches a peer (`link_of`, `kind_of_iface`, `thunderbolt`, `rdma`), and `Gate`: answer only on loopback and Thunderbolt under `--host cluster` |
 | `protocol.py` | the control-plane messages: the envelope `{v, kind, from, job?, seq, ts, body}`, one frozen dataclass per kind (`Hello`, `Prepare`, `Start`, `Stop`, `Failure`, ...), `check_version` |

@@ -35,7 +35,7 @@ on loopback, Thunderbolt, or a `--peer` address) on every `/peer/*` route.
 | `POST /peer/machine.json` | page -> peer | `{allowance_gib?, strategy?}` | `/machine.json?where=` -> `peer_machine` |
 | `GET/POST /peer/settings.json?port=N` | page -> peer | a server's live knobs | `peer_settings` |
 | `GET/POST /peer/v1/*` | page -> peer | chat/models relay to a server on the peer's loopback | `peer_relay` |
-| mDNS `_knurlogic` | node <-> LAN | service + TXT (id, port) | `cluster/discovery.py` |
+| mDNS `_knurlogic` | node <-> LAN | service + TXT (id, port) | `cluster/discovery/` |
 
 HTTP codes that start/prepare/shape return today (404 unknown or expired job,
 409 refusal/conflict, 400 bad body) are kept as they are.
@@ -109,7 +109,7 @@ compatibility is not build compatibility.
 
 ## 3. Membership
 
-- **Discovery.** Unchanged: Bonjour (`discovery.py`) plus `--peer` manual and
+- **Discovery.** Unchanged: Bonjour / Avahi (`cluster/discovery/`) plus `--peer` manual and
   the introduction header. A discovered address is only a candidate; a node
   is real when its `Hello` answers with an id.
 - **Identity.** Node id is today's `machine/identity` id (persisted), carried

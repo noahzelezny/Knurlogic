@@ -216,7 +216,7 @@ def _map_age_limit(now: float) -> float:
     return HOT_MAP_S if now < _HOT["until"] or _answering() else LIGHT_MAP_S
 
 
-#: Bonjour (cluster/discovery.py); None when it could not start.
+#: Bonjour / Avahi (cluster/discovery/); None when it could not start.
 DISCOVERY = None
 
 

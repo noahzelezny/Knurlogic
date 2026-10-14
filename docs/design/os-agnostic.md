@@ -155,6 +155,7 @@ The suite runs in a Linux arm64 container on the Mac (python:3.12-slim,
 | `machine/processes` (psutil) for ps / pgrep / lsof, the test leak sweep | 41 failed |
 | test markers for CPU numerics, installed memory via psutil, test fixes | 1 failed, 2037 passed |
 | machine readouts per OS (below) | 1 failed, 2049 passed |
+| gated-delta's one home, discovery through Avahi | 1 failed, 2055 passed |
 
 The Mac suite is unchanged at every step (2223 passed with the new tests).
 
@@ -193,15 +194,16 @@ real cpu, swap and memory figures, the rest None. A container has no
   an Nvidia machine); elsewhere mlx-lm's ops evaluated every 64 tokens,
   bit for bit the same numbers. Rerun: no OOM (3.7 GB of 6), but the
   warm-up had not finished in 15 min on one core. OPEN: CPU speed (plain
-  mlx-lm was ~17 s a token on this model); whether `--set
-  prefill_step_size` reaches the MTP admit path (the engine line still
-  read 4096).
-- OPEN: peer discovery off macOS. The Bonjour code calls libSystem's
-  dns_sd; Avahi's compatibility library lacks DNSServiceGetAddrInfo and
-  needs avahi-daemon (absent in containers and on Windows). Candidate:
-  python-zeroconf (pure Python, every OS, LGPL-2.1) behind the same
-  Discovery interface, libSystem kept on macOS. A new dependency and its
-  license: Noah's call.
+  mlx-lm was ~17 s a token on this model). `prefill_step_size` was the
+  wrong key (the knob is KNURLOGIC_PREFILL_CHUNK; unknown keys pass by
+  design). With `--set KNURLOGIC_PREFILL_CHUNK=64` the first Linux chat
+  answered: warm-up 586 s (89 tokens), the reply's 12 tokens in 883 s,
+  ~13 s a token, prefill chunks of 1-2 tokens in the log. Usable on a
+  GPU, not on MLX's CPU back end.
+- Peer discovery off macOS (Noah: the service the OS already runs):
+  `cluster/discovery/avahi.py` asks avahi-daemon through libavahi-client,
+  the same interface as Bonjour's. Two containers found each other. Windows
+  (dnsapi's DNS-SD) is still to write.
 - OPEN: the two-page cluster tests (`tests/cluster/test_recovery.py`,
   `test_cluster_jobs.py`: a killed rank, then `watch_once`) fail now and
   then in the container, and pass alone and on the Mac. A theory that page
