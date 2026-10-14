@@ -204,3 +204,14 @@ mlx as usual (decode compiles once, each prefill chunk length once).
 Logits bit-for-bit the uncompiled path's (tests/engine/test_gdn_compile.py:
 float32 and bf16, batch 1 and 2, prefill + 6 decode steps, 2-rank tensor
 and pipeline splits). `KNURLOGIC_GDN_COMPILE=off` runs the plain path.
+
+## Vendored edit 10 (other back ends, 2026-10-13; qwen3_5.py, qwen4_exp.py)
+
+**The scan through `engine/gated_delta.recurrence`.** `gated_delta` no
+longer picks mlx-lm's kernel or ops itself: on Metal the shared function
+runs the same mlx-lm kernel under the same conditions; on CUDA a port of
+that kernel; everywhere else mlx-lm's per-token ops, evaluated every 64
+tokens so a prompt's scan does not keep every token's state alive. Numbers
+on Metal unchanged; the CPU path bit for bit mlx-lm's ops
+(tests/engine/test_gated_delta.py). GLM-5-next's vendored mlx-vlm copy
+routes through the same function with its own Metal kernel.

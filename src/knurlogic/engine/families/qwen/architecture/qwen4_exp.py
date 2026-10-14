@@ -21,7 +21,7 @@ from .base import (
     scaled_dot_product_attention,
 )
 from .cache import ArraysCache, BatchKVCache, KVCache, _BaseCache, dynamic_roll
-from .gated_delta import compute_g, gated_delta_kernel, gated_delta_ops
+from .gated_delta import compute_g
 from .switch_layers import SwitchGLU
 
 
@@ -126,15 +126,10 @@ def gated_delta(q, k, v, a, b, A_log, dt_bias, state=None, mask=None, *,
         B, _, Hk, Dk = q.shape
         Hv, Dv = v.shape[-2:]
         state = mx.zeros((B, Hv, Dv, Dk), dtype=mx.float32)
-    if (
-        not use_kernel
-        or mx.default_device() != mx.gpu
-        or not mx.metal.is_available()
-        or k.shape[-1] < 32
-        or k.shape[-1] % 32 != 0
-    ):
-        return gated_delta_ops(q, k, v, g, beta, state, mask)
-    return gated_delta_kernel(q, k, v, g, beta, state, mask)
+    # knurlogic vendored edit 10: the scan through engine/gated_delta, which
+    # keeps mlx-lm's Metal kernel and adds CUDA and a bounded CPU path
+    from knurlogic.engine.gated_delta import recurrence
+    return recurrence(q, k, v, g, beta, state, mask, use_kernel=use_kernel)
 
 
 @dataclass

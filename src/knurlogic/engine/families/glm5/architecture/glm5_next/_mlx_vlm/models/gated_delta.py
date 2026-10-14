@@ -289,12 +289,8 @@ def gated_delta_update(
         Hv, Dv = v.shape[-2:]
         state = mx.zeros((B, Hv, Dv, Dk), dtype=mx.float32)
 
-    if (
-        not use_kernel
-        or mx.default_device() != mx.gpu
-        or not mx.metal.is_available()
-        or k.shape[-1] < 32
-        or k.shape[-1] % 32 != 0
-    ):
-        return gated_delta_ops(q, k, v, g, beta, state, mask)
-    return gated_delta_kernel(q, k, v, g, beta, state, mask)
+    # knurlogic: the scan through engine/gated_delta, which keeps this
+    # file's Metal kernel and adds CUDA and a bounded CPU path
+    from knurlogic.engine.gated_delta import recurrence
+    return recurrence(q, k, v, g, beta, state, mask, use_kernel=use_kernel,
+                      metal=gated_delta_kernel)

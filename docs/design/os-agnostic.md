@@ -186,10 +186,16 @@ real cpu, swap and memory figures, the rest None. A container has no
   heads x Dv x Dk per layer per token kept alive until the chunk is
   evaluated. Plain mlx-lm on the same model stays at 1.5 GB for a short
   prompt but decodes ~10 tokens in 176 s. The same fallback runs on CUDA,
-  whose MLX has no gated-delta kernel. OPEN, Noah's call: a chunked
-  (matmul) gated-delta for non-Metal back ends, one shared home for the
-  three copies; and whether `--set prefill_step_size` reaches the MTP
-  admit path (the engine line still read 4096).
+  whose MLX has no gated-delta kernel. Noah: a working CUDA kernel
+  first, speed later. `engine/gated_delta.recurrence` is now the one home
+  the three families call: mlx-lm's (or GLM-5's vendored) Metal kernel,
+  unchanged; a CUDA port of it (one warp per value row, untested until
+  an Nvidia machine); elsewhere mlx-lm's ops evaluated every 64 tokens,
+  bit for bit the same numbers. Rerun: no OOM (3.7 GB of 6), but the
+  warm-up had not finished in 15 min on one core. OPEN: CPU speed (plain
+  mlx-lm was ~17 s a token on this model); whether `--set
+  prefill_step_size` reaches the MTP admit path (the engine line still
+  read 4096).
 - OPEN: peer discovery off macOS. The Bonjour code calls libSystem's
   dns_sd; Avahi's compatibility library lacks DNSServiceGetAddrInfo and
   needs avahi-daemon (absent in containers and on Windows). Candidate:
