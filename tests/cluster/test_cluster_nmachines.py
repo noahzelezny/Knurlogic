@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from knurlogic.cluster import launch as C
+from knurlogic.cluster import links
 
 GIB = 1 << 30
 SHAPE = {"layer_bytes": [GIB] * 8, "other_bytes": GIB,
@@ -34,7 +35,7 @@ def mesh_infos(n, missing=()):
             tb.append({"iface": f"en{10 + j}", "ip": f"10.0.{k}.{i + 1}",
                        "gbps": 80})
             act.append(f"rdma_en{10 + j}")
-        ms.append({"chip": "Apple M4 Max", "p_core_ghz": None,
+        ms.append({"chip": "Apple M4 Max",
                    "bandwidth_gbs": None, "thunderbolt": tb,
                    "rdma": {"available": True, "reason": "",
                             "devices": list(act), "active": list(act)},
@@ -46,7 +47,7 @@ def mesh_infos(n, missing=()):
 def n_launch(monkeypatch, infos, link, split="pipeline", req=None):
     monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
     monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
     monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
     peers = [SimpleNamespace(id=f"m{i}", name=f"M{i}", host=f"127.0.0.{i}",
@@ -110,12 +111,12 @@ def test_a_tcp_ring_launches_ignores_a_cable_and_has_no_rdma_note(
 @pytest.mark.parametrize("n", [3, 4])
 def test_ring_ips_take_an_address_a_neighbour_shares(n):
     ms = mesh_infos(n)
-    ips = C._ring_ips(ms)
+    ips = links.ring_ips(ms)
     assert len(ips) == n
     for r, ip in enumerate(ips):
-        near = {C._subnet(t["ip"]) for k in ((r - 1) % n, (r + 1) % n)
+        near = {links.subnet(t["ip"]) for k in ((r - 1) % n, (r + 1) % n)
                 for t in ms[k]["thunderbolt"]}
-        assert C._subnet(ip) in near
+        assert links.subnet(ip) in near
 
 
 def _busy_leader(busy, free):
@@ -137,7 +138,7 @@ def _port_launch(monkeypatch, prep, req=None):
     monkeypatch.setattr(servers, "free_port", lambda start, taken=(): start)
     monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
     monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     monkeypatch.setattr(C, "prepare", prep)
     monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
     infos = mesh_infos(2)

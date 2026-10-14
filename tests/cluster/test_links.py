@@ -118,35 +118,35 @@ def rig(m4_tb5=True):
 
 
 def test_jaccl_takes_only_the_thunderbolt_5_cable(monkeypatch):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     m3, m4 = rig()
-    assert C._shared_subnets(m3, m4, rdma=True) == ["198.51.100"]
-    assert C._rdma_device(m3, m4) == "rdma_en7"
-    assert C._rdma_device(m4, m3) == "rdma_en2"
-    assert C._ring_ips([m3, m4], rdma=True) == ["198.51.100.1", "198.51.100.2"]
-    assert C.rdma_pair_reason(m3, m4) == ""
+    assert links.shared_subnets(m3, m4, rdma=True) == ["198.51.100"]
+    assert links.rdma_device(m3, m4) == "rdma_en7"
+    assert links.rdma_device(m4, m3) == "rdma_en2"
+    assert links.ring_ips([m3, m4], rdma=True) == ["198.51.100.1", "198.51.100.2"]
+    assert links.rdma_pair_reason(m3, m4) == ""
 
 
 def test_the_ring_prefers_the_fastest_cable_then_the_lowest(monkeypatch):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     m3, m4 = rig()
-    assert C._shared_subnets(m3, m4) == ["198.51.100", "192.0.2"]
-    assert C._ring_ips([m3, m4]) == ["198.51.100.1", "198.51.100.2"]
+    assert links.shared_subnets(m3, m4) == ["198.51.100", "192.0.2"]
+    assert links.ring_ips([m3, m4]) == ["198.51.100.1", "198.51.100.2"]
     # two cables of one speed: the lowest subnet, as before
     slow3, slow4 = rig(m4_tb5=False)
-    assert C._shared_subnets(slow3, slow4) == ["192.0.2", "198.51.100"]
+    assert links.shared_subnets(slow3, slow4) == ["192.0.2", "198.51.100"]
     # an older peer that does not report speeds: its links count slowest
     old = {**m4, "thunderbolt": [{"iface": t["iface"], "ip": t["ip"]}
                                  for t in m4["thunderbolt"]]}
-    assert C._shared_subnets(m3, old) == ["192.0.2", "198.51.100"]
-    assert C._shared_subnets(m3, old, rdma=True) == ["192.0.2", "198.51.100"]
+    assert links.shared_subnets(m3, old) == ["192.0.2", "198.51.100"]
+    assert links.shared_subnets(m3, old, rdma=True) == ["192.0.2", "198.51.100"]
 
 
 def test_no_thunderbolt_5_cable_greys_rdma_with_the_reason(monkeypatch):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     m3, m4 = rig(m4_tb5=False)
-    assert C._shared_subnets(m3, m4, rdma=True) == []
-    why = C.rdma_pair_reason(m3, m4)
+    assert links.shared_subnets(m3, m4, rdma=True) == []
+    why = links.rdma_pair_reason(m3, m4)
     assert why.startswith("RDMA needs a Thunderbolt 5 cable between these "
                           "Macs; the 192.0.2 link is Thunderbolt 4")
     # the page greys the button with the same words
@@ -157,7 +157,7 @@ def test_no_thunderbolt_5_cable_greys_rdma_with_the_reason(monkeypatch):
 
 
 def test_the_cable_note_says_which_cable_and_why(monkeypatch):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     m3, m4 = rig()
     monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
     monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: {

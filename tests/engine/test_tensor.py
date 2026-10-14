@@ -250,9 +250,9 @@ def test_placement_splits_layers_and_replicates_the_rest():
 
 # ------------------------------------------------------------ rank order
 
-M4 = {"name": "m4", "chip": "Apple M4 Max", "p_core_ghz": 4.5,
+M4 = {"name": "m4", "chip": "Apple M4 Max",
       "working_set_bytes": 120 << 30}
-M3 = {"name": "m3", "chip": "Apple M3 Ultra", "p_core_ghz": 4.05,
+M3 = {"name": "m3", "chip": "Apple M3 Ultra",
       "working_set_bytes": 240 << 30}
 
 
@@ -262,10 +262,7 @@ def test_leader_is_the_fastest_single_core():
     assert identity.chip_generation(None) == 0
 
 
-def test_leader_ties_go_to_clock_then_free_memory_then_order():
-    a = dict(M4, name="a", p_core_ghz=4.4)
-    b = dict(M4, name="b")
-    assert rank_order.rank_order([a, b])[0] == "b"                  # higher clock
+def test_leader_ties_go_to_free_memory_then_order():
     c = dict(M4, name="c", free_bytes=10)
     d = dict(M4, name="d", free_bytes=20)
     assert rank_order.rank_order([c, d])[0] == "d"                  # more free memory
@@ -1064,7 +1061,7 @@ def test_skipzero_cut_by_rows_mixes_experts():
 
 def _two(ws0, ws1):
     gib = 1 << 30
-    return [{"name": n, "chip": c, "p_core_ghz": None, "bandwidth_gbs": None,
+    return [{"name": n, "chip": c, "bandwidth_gbs": None,
              "working_set_bytes": int(w * gib)}
             for n, c, w in (("A", "Apple M4 Max", ws0),
                             ("B", "Apple M3 Ultra", ws1))]

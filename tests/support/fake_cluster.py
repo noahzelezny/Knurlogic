@@ -37,7 +37,7 @@ def free_port() -> int:
 
 
 def info(i: int, ws: int = 64 * GIB, **over) -> dict:
-    return {"chip": "Apple M4 Max", "p_core_ghz": None,
+    return {"chip": "Apple M4 Max",
             "bandwidth_gbs": None,
             "thunderbolt": [{"iface": f"en{i}", "ip": f"192.0.2.{i + 1}"}],
             "rdma": {"available": False, "reason": "off", "devices": [],

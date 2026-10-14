@@ -7,6 +7,7 @@ import pytest
 from test_cluster_nmachines import GIB, SHAPE, mesh_infos
 
 from knurlogic.cluster import launch as C
+from knurlogic.cluster import links
 
 
 @pytest.fixture
@@ -21,7 +22,7 @@ def _stale_launch(monkeypatch, fresh, exiting=()):
     per call."""
     monkeypatch.setattr(C, "_resolve", lambda i, name="": "/m/x")
     monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     monkeypatch.setattr(C, "prepare", lambda spec: (200, {"ok": True}))
     monkeypatch.setattr(C, "start", lambda job, **k: (200, {"started": job}))
     monkeypatch.setattr(C, "available_now", lambda: 64 * GIB)

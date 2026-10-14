@@ -50,7 +50,7 @@ VERSIONS = {"knurlogic": "0.1.0.dev0", "mlx": "0.31.2",
 
 
 def info(chip, tb, ws=64 * GIB, rdma=None):
-    return {"chip": chip, "p_core_ghz": None, "bandwidth_gbs": None,
+    return {"chip": chip, "bandwidth_gbs": None,
             "thunderbolt": [{"iface": "en4", "ip": tb}],
             "rdma": rdma or {"available": False, "reason": "off",
                              "devices": [], "active": []},
@@ -114,9 +114,9 @@ def test_placement_leaves_the_step_margin():
 def test_ring_ips_pick_the_shared_thunderbolt_subnet():
     a = {"name": "A", "thunderbolt": [{"ip": "198.51.100.1"}, {"ip": "192.0.2.1"}]}
     b = {"name": "B", "thunderbolt": [{"ip": "192.0.2.2"}]}
-    assert C._ring_ips([a, b]) == ["192.0.2.1", "192.0.2.2"]
+    assert links.ring_ips([a, b]) == ["192.0.2.1", "192.0.2.2"]
     with pytest.raises(ValueError, match="no Thunderbolt address"):
-        C._ring_ips([a, {"name": "C", "thunderbolt": []}])
+        links.ring_ips([a, {"name": "C", "thunderbolt": []}])
 
 
 def test_rdma_device_is_the_one_on_the_peers_subnet():
@@ -125,8 +125,8 @@ def test_rdma_device_is_the_one_on_the_peers_subnet():
          "rdma": {"active": ["rdma_en4", "rdma_en7"]}}
     b = {"thunderbolt": [{"iface": "en2", "ip": "192.0.2.2"}],
          "rdma": {"active": ["rdma_en2"]}}
-    assert C._rdma_device(a, b) == "rdma_en4"
-    assert C._rdma_device(b, a) == "rdma_en2"
+    assert links.rdma_device(a, b) == "rdma_en4"
+    assert links.rdma_device(b, a) == "rdma_en2"
 
 
 def test_two_cables_both_ends_on_one_subnet():
@@ -139,15 +139,15 @@ def test_two_cables_both_ends_on_one_subnet():
     m4 = {"name": "M4", "thunderbolt": [{"iface": "en2", "ip": "198.51.100.2"},
                                         {"iface": "en3", "ip": "192.0.2.2"}],
           "rdma": {"active": ["rdma_en2", "rdma_en3"]}}
-    assert C._rdma_device(m4, m3) == "rdma_en3"
-    assert C._rdma_device(m3, m4) == "rdma_en4"
-    assert C._ring_ips([m4, m3]) == ["192.0.2.2", "192.0.2.1"]
-    assert C._ring_ips([m4, m3], rdma=True) == ["192.0.2.2", "192.0.2.1"]
+    assert links.rdma_device(m4, m3) == "rdma_en3"
+    assert links.rdma_device(m3, m4) == "rdma_en4"
+    assert links.ring_ips([m4, m3]) == ["192.0.2.2", "192.0.2.1"]
+    assert links.ring_ips([m4, m3], rdma=True) == ["192.0.2.2", "192.0.2.1"]
     # RDMA down on 192.0.2.x at one end: both move to 198.51.100.x
     m4d = {**m4, "rdma": {"active": ["rdma_en2"]}}
-    assert C._rdma_device(m4d, m3) == "rdma_en2"
-    assert C._rdma_device(m3, m4d) == "rdma_en7"
-    assert C._ring_ips([m4d, m3], rdma=True) == ["198.51.100.2", "198.51.100.1"]
+    assert links.rdma_device(m4d, m3) == "rdma_en2"
+    assert links.rdma_device(m3, m4d) == "rdma_en7"
+    assert links.ring_ips([m4d, m3], rdma=True) == ["198.51.100.2", "198.51.100.1"]
 
 
 # --- RDMA probe --------------------------------------------------------------
@@ -900,7 +900,7 @@ def test_jaccl_without_an_rdma_subnet_is_refused_not_rerouted(cache,
                    post=lambda *a, **k: pytest.fail("posted"))
     assert "refused" in out and "no Thunderbolt subnet" in out["refused"]
     assert "rdma_en4" in out["refused"] and "rdma_en7" in out["refused"]
-    assert C._rdma_device(ia, ib) is None
+    assert links.rdma_device(ia, ib) is None
 
 
 # --- one machine never holds two jobs' shares -------------------------------
@@ -1346,14 +1346,14 @@ def test_link_init_failure_reads_jaccl_and_ring_lines():
 def test_a_failing_cable_goes_last_for_that_pair_only(monkeypatch):
     a, b = two_cable_infos()
     a, b = {**a, "id": "aaaa"}, {**b, "id": "bbbb"}
-    monkeypatch.setattr(C, "BAD_CABLES", {})
-    assert C._shared_subnets(a, b, rdma=True) == ["127.0.0", "127.0.1"]
-    C.BAD_CABLES[C._pair(a, b)] = {"127.0.0": "RTR errno 96"}
-    assert C._shared_subnets(a, b, rdma=True) == ["127.0.1", "127.0.0"]
-    assert C._rdma_device(a, b) == "rdma_en7"
-    assert C._ring_ips([a, b]) == ["127.0.1.1", "127.0.1.2"]
+    monkeypatch.setattr(links, "BAD_CABLES", {})
+    assert links.shared_subnets(a, b, rdma=True) == ["127.0.0", "127.0.1"]
+    links.BAD_CABLES[links.machine_pair(a, b)] = {"127.0.0": "RTR errno 96"}
+    assert links.shared_subnets(a, b, rdma=True) == ["127.0.1", "127.0.0"]
+    assert links.rdma_device(a, b) == "rdma_en7"
+    assert links.ring_ips([a, b]) == ["127.0.1.1", "127.0.1.2"]
     c = {**b, "id": "cccc"}
-    assert C._shared_subnet(a, c) == "127.0.0"
+    assert links.shared_subnet(a, c) == "127.0.0"
 
 
 def jaccl_launch(monkeypatch, req, post=None, follow=None):
@@ -1385,7 +1385,7 @@ def jaccl_launch(monkeypatch, req, post=None, follow=None):
 
 
 def test_a_launch_can_name_its_cable(cache, monkeypatch):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     followed = []
     out, got = jaccl_launch(monkeypatch, {"cable": "127.0.1.x"},
                             follow=lambda j, c: followed.append(j))
@@ -1402,7 +1402,7 @@ def test_a_launch_can_name_its_cable(cache, monkeypatch):
 
 def test_the_default_is_the_lowest_cable_and_says_what_is_next(
         cache, monkeypatch):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     followed = []
     out, _ = jaccl_launch(monkeypatch, {},
                           follow=lambda j, c: followed.append((j, c)))
@@ -1413,7 +1413,7 @@ def test_the_default_is_the_lowest_cable_and_says_what_is_next(
 
 def test_a_link_init_failure_relaunches_on_the_next_cable(cache,
                                                           monkeypatch):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     ctxs = []
     out, _ = jaccl_launch(monkeypatch, {},
                           follow=lambda j, c: ctxs.append((j, c)))
@@ -1430,7 +1430,7 @@ def test_a_link_init_failure_relaunches_on_the_next_cable(cache,
     assert "errno 96" in new["cable_note"]
     assert C.ENDED[job]["relaunched"] == new["job"]
     assert "relaunched on cable 127.0.1" in C.ENDED[job]["reason"]
-    assert "127.0.0" in C.BAD_CABLES[frozenset(("aaaa", "bbbb"))]
+    assert "127.0.0" in links.BAD_CABLES[frozenset(("aaaa", "bbbb"))]
     # the next launch this session starts on the working cable, and says so
     later, _ = jaccl_launch(monkeypatch, {})
     assert later["cable"] == "127.0.1"
@@ -1443,7 +1443,7 @@ def test_a_link_init_failure_relaunches_on_the_next_cable(cache,
 
 
 def test_the_follower_stops_at_a_failure_or_gives_up(cache, monkeypatch):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     ctxs = []
     jaccl_launch(monkeypatch, {}, follow=lambda j, c: ctxs.append((j, c)))
     job, ctx = ctxs[0]
@@ -1474,7 +1474,7 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
     monkeypatch.setattr(C, "_resolve",
                         lambda i, name="": "/fake/artifact" if i == "abc" else None)
     monkeypatch.setattr(C, "shape_of", lambda p, w, s, vision=True, mtp=True: SHAPE)
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     monkeypatch.setattr(C, "FAILOVER_POLL_S", 0.2)
     info_a, info_b = two_cable_infos()
     monkeypatch.setattr(C, "_local_info", lambda: info_a)
@@ -1520,7 +1520,7 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
         doc = next(d for d in C.jobs_document() if d["job"] == moved)
         assert doc["cable"] == "127.0.1"
         assert "moved from 127.0.0" in doc["cable_note"]
-        assert "127.0.0" in C.BAD_CABLES[frozenset(("aaaa", "bbbb"))]
+        assert "127.0.0" in links.BAD_CABLES[frozenset(("aaaa", "bbbb"))]
     finally:
         for j in jobs:
             C.stop(j, grace=1)
@@ -1689,19 +1689,19 @@ def test_a_job_being_unloaded_is_requested_while_its_ranks_exit(
 
 
 def test_failover_beyond_two_machines_is_a_logged_no_op(monkeypatch, caplog):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     order = [{"id": c, "name": c.upper()} for c in "abc"]
     ctx = {"order": order, "net": "127.0.0", "tried": ("127.0.0",),
            "req": {}, "args": {}}
     why = ("rank 1 on B (pid 9) exited: link init failed: ValueError: "
            "[jaccl] Changing queue pair to RTR failed with errno 96")
     assert C.failover("ab12cd34ef567890", ctx, why) is None
-    assert C.BAD_CABLES == {}
+    assert links.BAD_CABLES == {}
     assert "no cable failover beyond two" in caplog.text
 
 
 def test_no_link_refuses_naming_the_shared_cables(cache, monkeypatch):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
+    monkeypatch.setattr(links, "BAD_CABLES", {})
     out, got = jaccl_launch(monkeypatch, {"link": ""})
     assert out["refused"].startswith("link is tcp | rdma; the machines "
                                      "share 127.0.0, 127.0.1")
@@ -1709,9 +1709,9 @@ def test_no_link_refuses_naming_the_shared_cables(cache, monkeypatch):
 
 
 def test_no_link_is_tcp_over_the_one_shared_cable(cache, monkeypatch):
-    monkeypatch.setattr(C, "BAD_CABLES", {})
-    real = C._shared_subnets
-    monkeypatch.setattr(C, "_shared_subnets",
+    monkeypatch.setattr(links, "BAD_CABLES", {})
+    real = links.shared_subnets
+    monkeypatch.setattr(links, "shared_subnets",
                         lambda a, b, rdma=False: real(a, b, rdma)[:1])
     out, got = jaccl_launch(monkeypatch, {"link": ""})
     assert "refused" not in out and "error" not in out

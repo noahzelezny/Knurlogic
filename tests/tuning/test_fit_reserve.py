@@ -4,8 +4,8 @@ cannot is refused ("more space required")."""
 
 import pytest
 
-from knurlogic.cluster import launch as L
 from knurlogic.tuning import fit, pipeline_split
+from knurlogic.tuning import placement as L
 from knurlogic.tuning import resolve as R
 
 GIB = 1 << 30

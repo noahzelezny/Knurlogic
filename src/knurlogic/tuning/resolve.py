@@ -50,11 +50,9 @@ class Node:
     name: str
     working_set_bytes: int
     holds_bytes: int | None = None
-    #: what the machine is, for rank order (rank_order) and, later,
-    #: pipeline layer shares: "Apple M4 Max", its P-core clock, and its
-    #: memory bandwidth when known
+    #: what the machine is, for rank order (rank_order) and pipeline layer
+    #: shares: "Apple M4 Max", and its memory bandwidth when known
     chip: str | None = None
-    p_core_ghz: float | None = None
     memory_bandwidth_gbs: float | None = None
 
 

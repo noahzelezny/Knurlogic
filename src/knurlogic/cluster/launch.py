@@ -26,7 +26,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, transport
+from knurlogic.cluster import NET_ERRORS, links, transport
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster.protocol import (
     FAILURE_KINDS,
@@ -40,6 +40,7 @@ from knurlogic.machine import identity, processes
 from knurlogic.machine.memory.wired import available_now, budget_of, gpu_working_set
 from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.machine.units import GIB, gib
+from knurlogic.tuning.placement import placement, rank_room_chunk
 
 logger = logging.getLogger(__name__)
 
@@ -136,10 +137,6 @@ _STOPPING: set = set()
 _PEER_OK: dict = {}
 #: the boot_id a peer had when it held its rank of a job: {(job, id): id}
 _PEER_BOOT: dict = {}
-#: frozenset of two machine ids -> {subnet: why} -- a cable a rank's link
-#: init failed on while this page runs (e.g. one cable failing jaccl QP
-#: RTR with errno 96 while the other works): tried last from then on
-BAD_CABLES: dict = {}
 #: how long the coordinator watches a job it launched for a link-init
 #: failure to move to the next cable on
 FAILOVER_S = 300.0
@@ -211,7 +208,6 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
     doc = _INFO["doc"]
     if doc is None or now - _INFO["at"] > ttl:
         from knurlogic import __version__
-        from knurlogic.cluster import links
         chip = identity.chip()
         try:
             tb = [{"iface": i["iface"], "ip": i["ip"],
@@ -225,7 +221,6 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
             heal = False
         from knurlogic.engine.matmul_padding import gpu_architecture
         doc = {"chip": chip, "gpu_architecture": gpu_architecture(),
-               "p_core_ghz": None,
                "bandwidth_gbs": identity.chip_bandwidth_gbs(chip),
                "thunderbolt": tb, "rdma": links.rdma(),
                "versions": {"knurlogic": __version__,
@@ -240,80 +235,6 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
 
 
 # ------------------------------------------------------------ plan
-
-def _subnet(ip: str) -> str:
-    return ".".join(str(ip).split(".")[:3])
-
-
-def _pair(a: dict, b: dict) -> frozenset:
-    return frozenset((str(a.get("id") or a.get("name") or ""),
-                      str(b.get("id") or b.get("name") or "")))
-
-
-def _link_gbps(a: dict, b: dict, net: str):
-    """The speed of the cable on subnet `net` between two machines: the
-    slower end's Gb/s, None when either end does not say (an older
-    knurlogic)."""
-    sp = []
-    for m in (a, b):
-        g = next((t.get("gbps") for t in m.get("thunderbolt") or []
-                  if t.get("ip") and _subnet(t["ip"]) == net), None)
-        if not isinstance(g, (int, float)) or isinstance(g, bool) or g <= 0:
-            return None
-        sp.append(g)
-    return min(sp)
-
-
-def _cable_name(gbps) -> str:
-    from knurlogic.cluster.links import generation
-    g = generation(gbps)
-    return f"Thunderbolt {g} ({gbps:g} Gb/s)" if g else "speed unknown"
-
-
-def _shared_subnets(a: dict, b: dict, rdma: bool = False) -> list:
-    """Every Thunderbolt /24 two machines both sit on, the order a launch
-    tries them: the fastest cable first (Thunderbolt 5 over Thunderbolt 4;
-    a link whose speed an older peer does not report counts as slowest),
-    then the lowest subnet, so every page picks the same -- except that a
-    cable whose link init failed between these two this session goes last.
-    `rdma`: only a subnet with RDMA up at both ends AND a Thunderbolt 5
-    link at both ends: over a 40 Gb/s Thunderbolt 4 cable ibv_devinfo
-    still says PORT_ACTIVE, and jaccl fails RTR with errno 96."""
-    from knurlogic.cluster.links import TB5_GBPS
-
-    def on(m):
-        act = set((m.get("rdma") or {}).get("active") or [])
-        return {_subnet(t["ip"]) for t in m.get("thunderbolt") or []
-                if t.get("ip") and (not rdma
-                                    or f"rdma_{t.get('iface')}" in act)}
-    bad = BAD_CABLES.get(_pair(a, b)) or {}
-    both = on(a) & on(b)
-    if rdma:
-        both = {n for n in both
-                if (_link_gbps(a, b, n) or TB5_GBPS) >= TB5_GBPS}
-    return sorted(both, key=lambda n: (n in bad, -(_link_gbps(a, b, n) or 0),
-                                       n))
-
-
-def rdma_pair_reason(a: dict, b: dict) -> str:
-    """Why jaccl cannot join these two machines ("" when it can): RDMA off
-    at either end, or no Thunderbolt 5 cable between them."""
-    from knurlogic.cluster.links import TB5_GBPS
-    for m in (a, b):
-        rd = m.get("rdma") or {}
-        if not rd.get("available"):
-            return f"RDMA on {m.get('name')}: {rd.get('reason') or 'unknown'}"
-    if _shared_subnets(a, b, rdma=True):
-        return ""
-    slow = [n for n in _shared_subnets(a, b)
-            if (_link_gbps(a, b, n) or TB5_GBPS) < TB5_GBPS]
-    if slow:
-        return ("RDMA needs a Thunderbolt 5 cable between these Macs; "
-                + "; ".join(f"the {n} link is "
-                            f"{_cable_name(_link_gbps(a, b, n))}"
-                            for n in slow))
-    return ""
-
 
 def link_init_failure(text: str) -> str:
     """The line of a rank's output saying its link init failed ("" if
@@ -331,61 +252,6 @@ def _log_tail(path, n: int = 64 << 10) -> str:
             return fh.read().decode("utf-8", "replace")
     except (OSError, TypeError):
         return ""
-
-
-def _shared_subnet(a: dict, b: dict, rdma: bool = False) -> str:
-    """The one Thunderbolt /24 two machines both sit on ("" if none) --
-    lowest first, so every page picks the same. Two Macs joined by two
-    cables share two subnets; BOTH ends of a link must be on the same one
-    (en2 on one /24 and en4 on another are different cables, and a jaccl queue
-    pair across them fails RTR with errno 60).
-    `rdma`: only a subnet whose interface has RDMA up on both ends. A
-    cable that failed link init between the two this session goes last
-    (`_shared_subnets`)."""
-    both = _shared_subnets(a, b, rdma)
-    return both[0] if both else ""
-
-
-def _on_subnet(m: dict, net: str, key: str = "ip"):
-    return next((t.get(key) for t in m.get("thunderbolt") or []
-                 if t.get("ip") and _subnet(t["ip"]) == net), None)
-
-
-def _ring_ips(infos: list, rdma: bool = False, net: str = "") -> list:
-    """Each rank's address on the ring, in rank order. Two machines: both
-    on the subnet they share (`_shared_subnet`). More: a Thunderbolt
-    address sharing a /24 with a neighbour's when there is one, else its
-    first. Raises ValueError naming a machine with none."""
-    ips = []
-    n = len(infos)
-    for _r, m in enumerate(infos):
-        mine = [t["ip"] for t in m.get("thunderbolt") or [] if t.get("ip")]
-        if not mine:
-            raise ValueError(f"{m['name']} has no Thunderbolt address: the "
-                             f"ring runs over the Thunderbolt bridge")
-    if n == 2:
-        net = net or _shared_subnet(infos[0], infos[1], rdma) \
-            or _shared_subnet(infos[0], infos[1])
-        if net:
-            return [_on_subnet(m, net) for m in infos]
-    for r, m in enumerate(infos):
-        mine = [t["ip"] for t in m.get("thunderbolt") or [] if t.get("ip")]
-        near = {_subnet(t["ip"]) for k in ((r - 1) % n, (r + 1) % n)
-                for t in infos[k].get("thunderbolt") or []}
-        ips.append(next((ip for ip in mine if _subnet(ip) in near), mine[0]))
-    return ips
-
-
-def _rdma_device(m: dict, peer: dict, net: str = ""):
-    """The rdma_<iface> device on `m` that reaches `peer`: the one on the
-    Thunderbolt subnet both share with RDMA up at both ends -- the same
-    subnet from either side --,
-    else None: a device on another subnet is another cable, never a
-    fallback."""
-    net = net or _shared_subnet(m, peer, rdma=True)
-    if net:
-        return "rdma_" + str(_on_subnet(m, net, "iface"))
-    return None
 
 
 def _slot(job: str, used=None) -> int:
@@ -412,78 +278,6 @@ def _used_slots() -> set:
             else:
                 out.add(int(job[:4], 16) % 100)
     return out
-
-
-def placement(machines: list, shape: dict, split: str,
-              order: list | None = None) -> dict:
-    """Rank order and each rank's share. `machines`: [{"name", "chip",
-    "p_core_ghz", "working_set_bytes", "bandwidth_gbs", "links"}];
-    `shape`: the artifact's {"layer_bytes", "other_bytes", "leader_bytes"
-    (rank 0's alone: the MTP head and the vision tower),
-    "tensor_per_rank_bytes", "refusals"}. Pure: the same inputs give the
-    same answer on every page.
-    -> {"order": [names], "leader", "split", "shares": [{"rank", "machine",
-        "bytes", "layers"?, "bounds"?}], "layers": [counts] | [],
-        "reason"}. Raises ValueError with the arithmetic when it cannot."""
-    from knurlogic.tuning import fit, pipeline_split, rank_order
-    if shape.get("refusals"):
-        raise ValueError("; ".join(shape["refusals"]))
-    names = rank_order.rank_order([{**m, "free_bytes": m.get("working_set_bytes")}
-                                   for m in machines], order)
-    by = {m["name"]: m for m in machines}
-    n = len(names)
-    if split == "tensor":
-        per = int(shape["tensor_per_rank_bytes"])
-        # the ranks' shares are equal; rank 0 alone adds the head and tower
-        lead = int(shape.get("leader_bytes") or 0)
-        shares, left = [], []
-        for r, nm in enumerate(names):
-            ws = budget_of(by[nm])
-            floor = fit.step_margin(ws)
-            own = per + (lead if r == 0 else 0)
-            if own > ws - floor:
-                plus = (f" + {gib(lead)} rank 0 alone holds (the "
-                        f"MTP head and vision tower)" if r == 0 and lead
-                        else "")
-                raise ValueError(f"{nm}: its tensor share {per / GIB:.1f} "
-                                 f"GiB{plus} does not fit its working set "
-                                 f"{gib(ws)} less the "
-                                 f"{gib(floor)} step margin: "
-                                 f"more space required")
-            shares.append({"rank": r, "machine": nm, "bytes": own})
-            left.append(f"{nm} leaves {gib(ws - own)}")
-        reason = (f"tensor split {n} ways: every rank holds "
-                  f"~{gib(per)}"
-                  + (f", rank 0 {gib(lead)} more (the MTP head and "
-                     f"vision tower)" if lead else "")
-                  + f" ({', '.join(left)}); rank 0 "
-                  f"{names[0]} leads (newest chip, then P-core clock, then "
-                  f"free memory) and samples")
-        return {"order": names, "leader": names[0], "split": split,
-                "shares": shares, "layers": [], "reason": reason}
-    ranks = [{"name": nm,
-              "working_set_bytes": budget_of(by[nm]),
-              "memory_bandwidth_gbs": by[nm].get("bandwidth_gbs")}
-             for nm in names]
-    lead = int(shape.get("leader_bytes") or 0)
-    layers, other = list(shape["layer_bytes"]), int(shape.get("other_bytes") or 0)
-    try:
-        sh = pipeline_split.pipeline_shares(layers, ranks, other, lead,
-                                            reserve=shape.get("reserve"))
-    except ValueError:
-        if not shape.get("reserve"):
-            raise
-        # the layers fit with only the step margin kept free: the fit
-        # line is the step margin (fit.single_fit_check), so it fits
-        sh = pipeline_split.pipeline_shares(layers, ranks, other, lead, reserve=None)
-    shares = [{"rank": r, "machine": nm,
-               "bytes": sh["bytes"][r] + int(shape.get("other_bytes") or 0)
-               + (lead if r == 0 else 0),
-               "layers": sh["layers"][r], "bounds": list(sh["bounds"][r])}
-              for r, nm in enumerate(names)]
-    return {"order": names, "leader": names[0], "split": split,
-            "shares": shares, "layers": sh["layers"],
-            "reason": f"rank 0 {names[0]} leads; " + sh["reason"]}
 
 
 def shape_of(path: str, world: int, split: str,
@@ -687,29 +481,6 @@ def _loading_elsewhere(job: str, reg: dict) -> str:
     return ""
 
 
-def rank_room_chunk(path, spec: dict, ws: int, share: int):
-    """The prompt chunk this rank's own room allows -- its share of the
-    weights against its own budget, the resolver's rule -- or None when it
-    cannot be worked out (the ring then runs PREFILL_CHUNK)."""
-    try:
-        from knurlogic.machine.artifact import Artifact
-        from knurlogic.tuning import knobs
-        from knurlogic.tuning.resolve import launch_settings, resolve
-        a = Artifact.load(path)
-        tune = spec.get("tune") or "default"
-        sets = knobs.canonical_sets(dict(spec.get("sets") or {}))
-        launch = launch_settings(a, tune, sets)
-        r = resolve(a, int(ws), tune=tune, holds_bytes=int(share),
-                    kv_bits=launch.get("kv_bits"),
-                    long_context=launch.get("long_context", "off"),
-                    vision=launch.get("vision", True))
-        v = knobs.engine_settings(r.env).get("prefill_step_size")
-        return int(v) if v else None
-    except Exception:  # a rank that cannot say leaves the ring on the floor
-        logger.exception("could not work out this rank's prompt chunk")
-        return None
-
-
 def ring_chunk(sets: dict, got: list) -> tuple:
     """(chunk, why) for the ring: an explicit set wins; else the smallest
     of the ranks' room-based chunks, or the floor when one cannot say."""
@@ -792,42 +563,23 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     refusals += sh.get("refusals") or []
     if not refusals and spec["split"] == "tensor" and rank == 0:
         refusals += viability_refusals(path, world)
-    ws = budget_of(info)
+    budget = budget_of(info)
+    need = 0
     if not refusals:
-        if spec["split"] == "tensor":
-            need = int(sh["tensor_per_rank_bytes"]) \
-                + (int(sh.get("leader_bytes") or 0) if rank == 0 else 0)
-        else:
-            counts = spec.get("layers") or []
-            start = sum(counts[rank + 1:])
-            need = sum(sh["layer_bytes"][start:start + counts[rank]]) \
-                + int(sh.get("other_bytes") or 0) \
-                + (int(sh.get("leader_bytes") or 0) if rank == 0 else 0) \
-                if counts else 0
-        from knurlogic.tuning.fit import step_margin
-        # the weights and the minimum step margin are the refusal
-        floor = step_margin(ws)
-        busy = (held or held_here)(spec["job"]) if need and ws else []
-        hold = sum(b for _, _, b in busy)
-        if need and ws and need > ws - floor and not hold:
-            refusals.append(f"rank {rank}'s share is {gib(need)} "
-                            f"and {me}'s working set (under its allowance) "
-                            f"is {gib(ws)}, which must leave the "
-                            f"{gib(floor)} step margin: more space "
-                            f"required")
-        elif need and ws and need > ws - hold - floor:
-            refusals.append(
-                f"rank {rank}'s share is {gib(need)} and {me}'s "
-                f"working set (under its allowance) is {gib(ws)}, "
-                f"{gib(hold)} of it held now by "
-                + ", ".join(f"{w} (pid {p}, {gib(b)})"
-                            for w, p, b in busy if b)
-                + f"; the {gib(ws - hold)} left must also leave "
-                  f"the {gib(floor)} step margin. Unload that "
-                  f"first")
+        from knurlogic.tuning.fit import rank_share_bytes, share_refusal
+        counts = spec.get("layers") or []
+        if spec["split"] == "tensor" or counts:
+            need = rank_share_bytes(sh, rank, counts or None)
+        # the weights and the minimum step margin are the refusal; what
+        # other ranks and servers hold here now comes off the budget
+        busy = (held or held_here)(spec["job"]) if need and budget else []
+        why = share_refusal(need, budget, busy) if need and budget else ""
+        if why:
+            refusals.append(f"rank {rank}'s share is {gib(need)} and {me}'s "
+                            + why)
     room_chunk = None
-    if not refusals and need and ws:
-        room_chunk = rank_room_chunk(path, spec, ws, need)
+    if not refusals and need and budget:
+        room_chunk = rank_room_chunk(path, spec, budget, need)
     if spec["link"] == "ring":
         ip = spec["hosts"][rank].rsplit(":", 1)[0]
         mine = {t.get("ip") for t in info.get("thunderbolt") or []}
@@ -1753,7 +1505,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
 
     Two machines on more than one shared Thunderbolt cable: the job runs
     on one cable's subnet (`req["cable"]` names it, else the first of
-    `_shared_subnets`), and unless it was named the coordinator follows
+    `links.shared_subnets`), and unless it was named the coordinator follows
     the job (`follow`, a thread by default): a rank whose link init fails
     on that cable has the job relaunched on the next one, the cable
     remembered as failing for the pair. `tried`/`moved`: that relaunch.
@@ -1797,10 +1549,10 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         shared: set | None = None
         for i, a_ in enumerate(infos):
             for b_ in infos[i + 1:]:
-                n_ = set(_shared_subnets(a_, b_))
+                n_ = set(links.shared_subnets(a_, b_))
                 shared = n_ if shared is None else shared & n_
         if shared and len(shared) > 1:
-            kinds_ = sorted({_cable_name(_link_gbps(infos[0], infos[1], n))
+            kinds_ = sorted({links.cable_name(links.link_gbps(infos[0], infos[1], n))
                              .split(" (")[0] for n in shared})
             return {"refused": "link is tcp | rdma; the machines share "
                                + ", ".join(sorted(shared)) + " over "
@@ -1873,7 +1625,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     net, note, nets = "", "", []
     cable_ignored = False
     if world == 2:
-        nets = _shared_subnets(order[0], order[1], rdma=link == "jaccl")
+        nets = links.shared_subnets(order[0], order[1], rdma=link == "jaccl")
     if cable not in (None, ""):
         c = CABLE_RX.fullmatch(str(cable).strip()) if isinstance(
             cable, str) else None
@@ -1895,7 +1647,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                                f"init: {', '.join(tried)}",
                     "placement": plan}
         net = left[0]
-        bad = (BAD_CABLES.get(_pair(order[0], order[1])) or {}) \
+        bad = (links.BAD_CABLES.get(links.machine_pair(order[0], order[1])) or {}) \
             if len(order) == 2 else {}
         if moved:
             note = (f"cable {net}: moved from {moved['from']}, whose link "
@@ -1906,22 +1658,22 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                     f"session ({bad[b]})")
         else:
             a_, b_ = order[0], order[1]
-            sp = _link_gbps(a_, b_, net)
-            others = [n for n in _shared_subnets(a_, b_) if n != net]
-            if sp and any((_link_gbps(a_, b_, n) or 0) < sp
+            sp = links.link_gbps(a_, b_, net)
+            others = [n for n in links.shared_subnets(a_, b_) if n != net]
+            if sp and any((links.link_gbps(a_, b_, n) or 0) < sp
                           for n in others):
-                note = (f"cable {net}: {_cable_name(sp)}, the fastest "
+                note = (f"cable {net}: {links.cable_name(sp)}, the fastest "
                         f"shared Thunderbolt link")
             elif sp:
-                note = (f"cable {net}: {_cable_name(sp)}, the lowest shared "
+                note = (f"cable {net}: {links.cable_name(sp)}, the lowest shared "
                         f"Thunderbolt subnet")
             else:
                 note = f"cable {net}: the lowest shared Thunderbolt subnet"
             skipped = [n for n in others if n not in nets]
             if skipped and link == "jaccl":
                 note += "; not " + ", ".join(
-                    f"{n} ({_cable_name(_link_gbps(a_, b_, n))}: RDMA "
-                    f"needs Thunderbolt 5)" if _link_gbps(a_, b_, n)
+                    f"{n} ({links.cable_name(links.link_gbps(a_, b_, n))}: RDMA "
+                    f"needs Thunderbolt 5)" if links.link_gbps(a_, b_, n)
                     else f"{n} (no RDMA at both ends)" for n in skipped)
         rest = [n for n in left[1:]]
         if rest:
@@ -1929,8 +1681,8 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     if link == "jaccl" and world > 2:
         for i in range(world):
             for j in range(i + 1, world):
-                why = rdma_pair_reason(order[i], order[j]) or (
-                    "" if _shared_subnets(order[i], order[j], rdma=True)
+                why = links.rdma_pair_reason(order[i], order[j]) or (
+                    "" if links.shared_subnets(order[i], order[j], rdma=True)
                     else "no Thunderbolt cable with RDMA up at both ends")
                 if why:
                     return {"refused": f"RDMA across {world} Macs needs "
@@ -1940,7 +1692,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                                        f"TCP ring, or cable that pair.",
                             "placement": plan}
     if link == "jaccl" and not net and world == 2:
-        why = rdma_pair_reason(order[0], order[1])
+        why = links.rdma_pair_reason(order[0], order[1])
         if why:
             return {"refused": why + ". Use the TCP ring, or join them "
                                      "with a Thunderbolt 5 cable.",
@@ -1956,7 +1708,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                            f"link tcp, or bring RDMA up on the shared cable.",
                 "placement": plan}
     try:
-        ips = _ring_ips(order, rdma=link == "jaccl", net=net)
+        ips = links.ring_ips(order, rdma=link == "jaccl", net=net)
     except ValueError as e:
         return {"refused": str(e), "placement": plan}
     try:
@@ -1970,12 +1722,12 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "Thunderbolt link")
     ibv, coord = None, ""
     if link == "jaccl" and world > 2:
-        ibv = [[None if i == j else _rdma_device(order[i], order[j])
+        ibv = [[None if i == j else links.rdma_device(order[i], order[j])
                 for j in range(world)] for i in range(world)]
         coord = f"{ips[0]}:{RING_PORT + slot * 20 + 19}"
     elif link == "jaccl":
-        a0 = _rdma_device(order[0], order[1], net)
-        a1 = _rdma_device(order[1], order[0], net)
+        a0 = links.rdma_device(order[0], order[1], net)
+        a1 = links.rdma_device(order[1], order[0], net)
         for m, d in ((order[0], a0), (order[1], a1)):
             if d is None:
                 return {"refused": f"{m['name']} has RDMA up on "
@@ -2154,7 +1906,8 @@ def failover(job: str, ctx: dict, reason: str):
                        "(%s); no cable failover beyond two", job,
                        len(order), line)
         return None
-    BAD_CABLES.setdefault(_pair(order[0], order[1]), {})[ctx["net"]] = line
+    pair = links.machine_pair(order[0], order[1])
+    links.BAD_CABLES.setdefault(pair, {})[ctx["net"]] = line
     out = launch(ctx["req"], tried=ctx["tried"],
                  moved={"from": ctx["net"], "why": line, "job": job},
                  **ctx["args"])

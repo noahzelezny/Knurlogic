@@ -1,5 +1,5 @@
 """Which machine is rank 0 and the order of the ring: the leader is the
-fastest single core, each next rank the one the last reaches fastest.
+newest chip, each next rank the one the last reaches fastest.
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from knurlogic.machine import identity
 #
 # Rank 0 does the CPU and Python side -- HTTP, the scheduler, tokenizing,
 # sampling, encoding the plan -- while under tensor every rank's GPU work
-# is equal. So the leader is the fastest single core: the newest chip
-# generation, then the higher P-core clock; then the most free memory (it
-# may host extras, like the vision tower); then the order given.
+# is equal. So the leader is the fastest single core, which the newest
+# chip generation stands for; then the most free memory (it may host
+# extras, like the vision tower); then the order given.
 
 #: link kinds, fastest first
 LINK_SPEED = ("rdma", "tb5", "tb4", "ethernet", "wifi")
@@ -29,18 +29,18 @@ def _link_rank(kind) -> int:
 
 def leader_key(m: dict, position: int = 0) -> tuple:
     """Sort key for the leader, smallest first: newest chip generation,
-    higher P-core clock, more free memory, earlier in the given order."""
+    more free memory, earlier in the given order."""
     free = m.get("free_bytes")
     if free is None:
         free = m.get("working_set_bytes") or 0
     return (-identity.chip_generation(m.get("chip")),
-            -float(m.get("p_core_ghz") or 0.0), -int(free), position)
+            -int(free), position)
 
 
 def rank_order(machines: list, explicit: list | None = None) -> list:
     """Machine names in rank order.
 
-    `machines`: [{"name", "chip" ("Apple M4 Max"), "p_core_ghz",
+    `machines`: [{"name", "chip" ("Apple M4 Max"),
     "free_bytes" (else "working_set_bytes"), "links": {other name: link
     kind}, ...}]; anything else (memory bandwidth, ...) rides along for
     later placement and is ignored here. Rank 0 is `leader_key`'s first.

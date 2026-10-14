@@ -256,6 +256,40 @@ def rank_margin(working_set_bytes: int, reserve: dict | None = None) -> int:
         + int(reserve.get("kv_bytes") or 0)
 
 
+def rank_share_bytes(shape: dict, rank: int, layers: list | None = None) -> int:
+    """What rank `rank` of a split holds, from the artifact's shape
+    (cluster/launch.shape_of). Tensor (`layers` None): the equal per-rank
+    share. Pipeline (`layers`: each rank's layer count, rank 0 holding the
+    last run): its run of `layer_bytes` plus the replicated `other_bytes`.
+    Rank 0 adds `leader_bytes` (the MTP head and the vision tower)."""
+    lead = int(shape.get("leader_bytes") or 0) if rank == 0 else 0
+    if layers is None:
+        return int(shape["tensor_per_rank_bytes"]) + lead
+    start = sum(layers[rank + 1:])
+    return (sum(shape["layer_bytes"][start:start + layers[rank]])
+            + int(shape.get("other_bytes") or 0) + lead)
+
+
+def share_refusal(share_bytes: int, budget_bytes: int, held: list = ()) -> str:
+    """"" when a rank's share fits its budget less what `held` holds there
+    now ([(what, pid, bytes)]) and the step margin (`step_margin`, the fit
+    line single_fit_check draws); else the arithmetic, as a clause that
+    follows "its": "working set ... is ..."."""
+    floor = step_margin(budget_bytes)
+    hold = sum(b for _, _, b in held)
+    if share_bytes <= budget_bytes - hold - floor:
+        return ""
+    if not hold:
+        return (f"working set (under its allowance) is {gib(budget_bytes)}, "
+                f"which must leave the {gib(floor)} step margin: more space "
+                f"required")
+    return (f"working set (under its allowance) is {gib(budget_bytes)}, "
+            f"{gib(hold)} of it held now by "
+            + ", ".join(f"{w} (pid {p}, {gib(b)})" for w, p, b in held if b)
+            + f"; the {gib(budget_bytes - hold)} left must also leave the "
+              f"{gib(floor)} step margin. Unload that first")
+
+
 def vision_off_tower(artifact: Artifact) -> int:
     """The tower bytes inside the artifact's size: what vision off takes
     out of the weights (the text load never reads them; `vision.bind`
