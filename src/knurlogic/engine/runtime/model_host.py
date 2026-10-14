@@ -23,6 +23,7 @@ import time
 
 from knurlogic.engine.model import state
 from knurlogic.engine.mtp import binding
+from knurlogic.engine.split.marker import LOAD_STOP
 from knurlogic.machine.units import GIB
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,6 @@ def held_arrays(root, limit: int = 2_000_000) -> list:
     return found
 
 
-#: set from a signal handler to stop a load at the next batch boundary
-LOAD_STOP = threading.Event()
 #: bytes evaluated per mx.eval during a load: the stop is checked between
 #: batches, so a cancelled load leaves no GPU work half-done
 LOAD_BATCH_BYTES = GIB

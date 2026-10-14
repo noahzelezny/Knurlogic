@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from knurlogic.engine.model import weight_files
 from knurlogic.machine.units import GIB, gib
 
-from .marker import progress
+from .marker import LOAD_STOP, progress
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +181,6 @@ def read_share(model, evaluate: Callable) -> None:
         progress(turn="reading")
     p = weight_files.peer()
     if p is not None:
-        from knurlogic.engine.runtime.model_host import LOAD_STOP
         try:
             out = fill(model, stop=LOAD_STOP.is_set)
             logger.info("weights: %.1f GiB from %s over the link in %.1fs "

@@ -17,6 +17,7 @@ from knurlogic.engine.runtime.executor import (
     LocalExecutor,
 )
 from knurlogic.machine.units import GIB
+from knurlogic.tuning import fit
 
 from . import plan as P
 from .link import Desync, Link, init
@@ -43,7 +44,8 @@ class Mark:
     def limit(self) -> int:
         if not self.ws:
             return 0
-        return self.ws - max(4 * GIB, self.ws // 20, int(self.spike * 1.25))
+        return self.ws - fit.rank_margin(self.ws,
+                                         {"transient_bytes": self.spike})
 
     def over(self) -> int:
         lim = self.limit()
@@ -70,13 +72,13 @@ def apply_set(op: dict, rank: int) -> str:
 
 def _stop_load_on_sigterm(rank: int) -> None:
     """Until it follows: a SIGTERM stops this rank's weight read at its next
-    batch boundary (host.LOAD_STOP; the load raises LoadCancelled and the
+    batch boundary (marker.LOAD_STOP; the load raises LoadCancelled and the
     rank exits) instead of killing it inside one, which left the GPU's
     utilization counter stuck at 100% until a reboot. follow() replaces it
     with _defer_sigterm."""
     import signal
 
-    from knurlogic.engine.runtime.model_host import LOAD_STOP
+    from .marker import LOAD_STOP
 
     def stop(_sig, _frame):
         logger.info("SIGTERM while loading: stopping at the next batch")
