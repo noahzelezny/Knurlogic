@@ -25,7 +25,7 @@ Around it, in `engine/`:
 
 | file | what |
 |---|---|
-| `model/` | what the served model is: `load.py` (load, memory, `apply_live`, `tool_support`), `state.py` (process state: `SERVED`, `VISION`), `segments.py`, `thinking.py`, `vision.py`. Importing it imports no mlx |
+| `model/` | what the served model is: `loading.py` (load, memory, `apply_live`, `tool_support`), `state.py` (process state: `SERVED`, `VISION`), `segments.py`, `thinking.py`, `vision.py`. Importing it imports no mlx |
 | `arrays.py` | `arrays_of`: every mx.array an object holds (cycle-safe; `unique` to count them), what a load evaluates and a cache entry saves |
 | `backend.py` | which MLX back end computes (`name`, `metal`) and the device's own description (`device_info`) |
 | `kvquant.py` | `QuantKVCache`, `BatchQuantKVCache`, `install`: K/V stored at 8, 6 or 4 bits |

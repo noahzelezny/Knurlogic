@@ -100,7 +100,7 @@ A knob a person sets goes in these tables:
 2. If a preset sets it, a row in `PRESET_ROWS` (`presets.py`).
 3. Its resolution in `resolve.py`, with a note saying why.
 4. If it can change on a running server, add it to `live.LIVE_KNOBS` and
-   apply it in `engine/model/load.apply_live`; if it must reach every rank
+   apply it in `engine/model/loading.apply_live`; if it must reach every rank
    of a split, to `plan.SETS`.
 5. A test in `tests/tuning/` (the settings audit checks claims against
    code).

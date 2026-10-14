@@ -752,7 +752,7 @@ median of each bucket reads these fields directly.
 
 ### src/knurlogic/engine/model/__init__.py -- engine boundary
 
-  load.py          engine info, load, memory, the cache limit, knobs a
+  loading.py       engine info, load, memory, the cache limit, knobs a
                    running process can change, tool dialects
   state.py         what is served, vision: the process's dicts
   segments.py      the system prompt gets its own segment (checkpoint) on

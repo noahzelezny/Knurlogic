@@ -1,7 +1,7 @@
 """engine/model/ -- the model this process serves and what it can do: the
 pieces knurlogic's own server (engine/runtime, interfaces/http) builds on.
 
-  load.py      load it, its memory (and this process's, process_memory),
+  loading.py   load it, its memory (and this process's, process_memory),
                the engine's knobs, tool dialects
   load_model.py  mlx-lm's load_model, opening weights through weight_files
   weight_files.py  the one place an artifact's tensor files are opened
