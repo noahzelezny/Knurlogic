@@ -165,19 +165,3 @@ def render(doc: dict) -> str:
     if doc.get("note"):
         lines.append(doc["note"])
     return "\n".join(lines).rstrip()
-
-
-def main(argv=None) -> int:
-    import argparse
-    p = argparse.ArgumentParser(prog="knurlogic deps",
-                                description="what this stack stands on, "
-                                            "and what is stock")
-    p.add_argument("--json", action="store_true")
-    a = p.parse_args(argv)
-    doc = survey()
-    print(json.dumps(doc, indent=1) if a.json else render(doc))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

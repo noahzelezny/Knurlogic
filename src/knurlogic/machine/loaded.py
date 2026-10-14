@@ -16,7 +16,6 @@ Design: docs/design/memory.md (loaded).
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -405,19 +404,6 @@ def render(doc: dict) -> str:
                 L.append(f"  {r['bytes'] / GIB:8.2f} GiB  {r['runtime']:<10} "
                          f"pid {r['pid']:<7} {r['name'][:32]}")
     return "\n".join(L)
-
-
-def main(argv=None) -> int:
-    import argparse
-    p = argparse.ArgumentParser(
-        prog="knurlogic loaded",
-        description="what is in memory right now, in every runtime on this "
-                    "machine")
-    p.add_argument("--json", action="store_true")
-    a = p.parse_args(argv)
-    doc = survey()
-    print(json.dumps(doc, indent=1) if a.json else render(doc))
-    return 0
 
 
 # --- acting on them ---------------------------------------------------------
