@@ -703,11 +703,12 @@ def test_peer_cluster_routes_are_gated_like_peer_loaded(two_pages):
 
 
 def test_a_ranks_working_set_is_the_wired_limit_not_the_ram():
+    from knurlogic.machine.memory import wired
     gib = 1 << 30
-    assert C.gpu_working_set(96 * gib, 84 * gib) == 84 * gib
-    assert C.gpu_working_set(96 * gib, 0) == 96 * gib
-    assert C.gpu_working_set(0, 84 * gib) == 84 * gib
-    assert C.gpu_working_set(0, 0) == 0
+    assert wired.gpu_working_set(96 * gib, 84 * gib) == 84 * gib
+    assert wired.gpu_working_set(96 * gib, 0) == 96 * gib
+    assert wired.gpu_working_set(0, 84 * gib) == 84 * gib
+    assert wired.gpu_working_set(0, 0) == 0
 
 
 def test_every_rank_syncs_the_gpu_fast():

@@ -1,7 +1,9 @@
 """machine/memory/ -- this box's memory, read rather than assumed.
 
   wired.py      the GPU wired limit, and `load_budget()`: the one number every
-                fit / settings / load answer is computed against
+                fit / settings / load answer is computed against, with
+                `budget_of` (the same rule for a peer's cluster block),
+                `available_now` and `gpu_working_set`
   allowance.py  the most memory knurlogic may use here, a person's setting
   footprint.py  where memory went: vm_stat's used/available, and every
                 process's footprint by runtime (memory_map)

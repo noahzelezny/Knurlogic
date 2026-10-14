@@ -68,8 +68,9 @@ Memory has three homes, one per layer: the machine's facts in
 `machine/memory/`, what a model needs in `tuning/fit.py`, and the serving
 process's guard in `engine/runtime/memory_guard.py` (with what mlx reports
 in `engine/model/load.py`: `memory`, `process_memory`, `set_cache_limit`). A
-peer's share of a cluster job is `cluster/launch.py`'s (`available_now`,
-`budget_of`, `gpu_working_set`).
+machine's budget is `machine/memory/wired.py`'s: `load_budget` here,
+`budget_of` for a machine read over the wire, with `available_now` and
+`gpu_working_set` beside them.
 
 ## Tests
 

@@ -208,6 +208,44 @@ def _metal_working_set_bytes() -> int:
     return _METAL_WS["ws"]
 
 
+def available_now() -> int:
+    """Bytes of memory macOS would hand this machine's next allocation now
+    (free plus file cache and purgeable pages, not inactive anonymous ones:
+    footprint.available_memory), 0 when it cannot be read. Read fresh each
+    time, never cached: it is the difference between a working set the GPU
+    is ALLOWED and memory that is actually there (a 96 GiB Mac's 84 GiB
+    working set leaves the OS and every other program 12 GiB; a load that
+    fills the working set swaps)."""
+    from knurlogic.machine.memory.footprint import available_memory
+    try:
+        return int(available_memory().get("available_bytes") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0
+
+
+def gpu_working_set(installed: int, wired_limit=None) -> int:
+    """What a load may use on this machine: the smaller of `installed` and
+    the GPU's wired limit (iogpu.wired_limit_mb, what Metal recommends),
+    never the installed RAM alone -- the M3 Ultra's 96 GiB has 84 wired, and
+    a 90 GiB share placed on RAM alone passes the check and fails at load.
+    `wired_limit` None reads it."""
+    if wired_limit is None:
+        wired_limit = read().limit_bytes
+    known = [b for b in (int(installed or 0), int(wired_limit or 0)) if b > 0]
+    return min(known) if known else 0
+
+
+def budget_of(m: dict) -> int:
+    """What a load on a machine described by `m` (a cluster block:
+    `working_set_bytes` under its allowance, `available_bytes` when it says
+    it) may hold: the working set, lowered to the memory available now when
+    both are known -- `load_budget`'s rule for a machine read over the
+    wire (a peer that predates `available_bytes` says nothing)."""
+    ws = int(m.get("working_set_bytes") or 0)
+    av = int(m.get("available_bytes") or 0)
+    return min(ws, av) if ws and av else ws
+
+
 def load_budget() -> dict:
     """What a model loaded NOW could have: the smaller of the GPU working set
     and the memory macOS would hand over right now.
@@ -220,12 +258,8 @@ def load_budget() -> dict:
     the next, and the roomy defaults (2048-wide prefill, 8 prompts at once)
     are what OOM a box with 6.8 GiB to spare.
     """
-    from knurlogic.machine.memory.footprint import available_memory
     ws = detected_working_set_bytes()
-    try:
-        avail = int(available_memory().get("available_bytes") or 0)
-    except (OSError, ValueError, TypeError, AttributeError):
-        avail = 0
+    avail = available_now()
     # the knurlogic allowance (machine/memory/allowance.py) caps both: the most
     # this machine's owner lets knurlogic have, whatever the GPU could hold
     from knurlogic.machine.memory import allowance

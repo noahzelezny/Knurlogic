@@ -37,6 +37,7 @@ from knurlogic.cluster.protocol import (
     typed,
 )
 from knurlogic.machine import identity, processes
+from knurlogic.machine.memory.wired import available_now, budget_of, gpu_working_set
 from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.machine.units import GIB, gib
 
@@ -203,30 +204,6 @@ def _selfheal() -> bool:
     return bool(m.get("jaccl_selfheal"))
 
 
-def available_now() -> int:
-    """Bytes of memory macOS would hand this machine's next allocation now
-    (free plus file cache and purgeable pages, not inactive
-    anonymous ones: machine/memory/footprint.available_memory), 0 when
-    it cannot be read. Read fresh each time, never cached: it is the
-    difference between a working set the GPU is ALLOWED and memory that is
-    actually there (a 96 GiB Mac's 84 GiB working set leaves the OS and
-    every other program 12 GiB; a share that fills the working set swaps)."""
-    from knurlogic.machine.memory.footprint import available_memory
-    try:
-        return int(available_memory().get("available_bytes") or 0)
-    except (OSError, ValueError, TypeError, AttributeError):
-        return 0
-
-
-def budget_of(m: dict) -> int:
-    """What a rank on machine `m` may hold: its working set (under its
-    allowance), lowered to the memory available now when the machine says
-    it (`available_bytes`; a peer that predates it says nothing)."""
-    ws = int(m.get("working_set_bytes") or 0)
-    av = int(m.get("available_bytes") or 0)
-    return min(ws, av) if ws and av else ws
-
-
 def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
     """What a coordinator needs to know of THIS machine, for its status'
     `cluster` block. Cached: it runs a few subprocesses."""
@@ -260,19 +237,6 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
     return dict(doc, working_set_bytes=allowance.cap(
         gpu_working_set(int(working_set_bytes or 0))),
         available_bytes=available_now())
-
-
-def gpu_working_set(installed: int, wired_limit=None) -> int:
-    """What a rank may use on this machine: the GPU's wired limit
-    (iogpu.wired_limit_mb -- what Metal recommends, what one-machine `serve`
-    guards), never the installed RAM the page's status reports. The M3
-    Ultra's 96 GiB has 84 wired; placing a 90 GiB share there on RAM
-    alone would pass prepare and fail at load."""
-    if wired_limit is None:
-        from knurlogic.machine.memory import wired
-        wired_limit = wired.read().limit_bytes
-    known = [b for b in (int(installed or 0), int(wired_limit or 0)) if b > 0]
-    return min(known) if known else 0
 
 
 # ------------------------------------------------------------ plan
