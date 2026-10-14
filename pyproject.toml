@@ -208,6 +208,8 @@ ignore = [
 # path so a file collects alone or in any order
 pythonpath = ["src", "tests/support", "tests/cluster", "tests/engine",
               "tests/interfaces"]
+# under -n, tests sharing an xdist_group run on one worker, one at a time
+addopts = "--dist=loadgroup"
 
 [tool.mypy]
 python_version = "3.10"

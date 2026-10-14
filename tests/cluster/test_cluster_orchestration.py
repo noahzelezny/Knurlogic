@@ -20,6 +20,10 @@ from fake_cluster import VERSIONS, FakeCluster, alive, wait
 
 from knurlogic.cluster import protocol, transport
 
+# each test starts up to eight pages with fixed deadlines: run them one at a
+# time, so a parallel suite on a busy machine does not starve them
+pytestmark = pytest.mark.xdist_group("orchestration")
+
 #: the fake pages' PEER_GONE_S (cluster_fake_page.fast) and slack for the
 #: watcher, the probes, and this machine being busy
 GONE_S = 4.0
@@ -98,7 +102,8 @@ def test_a_rank_or_a_whole_page_dying_stops_every_page_and_recovery_keeps_the_or
             victim.kill()
         os.kill(pid, 9)
         assert wait(lambda: c.job_stopped_everywhere(job), GONE_S + SLACK_S)
-        why = ended_reason(c.pages[0], job)
+        # the ended record is written after the ranks are gone: wait for it
+        why = wait(lambda: ended_reason(c.pages[0], job), SLACK_S)
         assert why and why.get("reason")
         if how == "rank":
             assert "exited" in why["reason"]
