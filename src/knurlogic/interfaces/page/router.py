@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 import time
 from urllib.parse import urlparse
 
+from knurlogic.cluster import transport
 from knurlogic.interfaces.http.guard import hung_up
 from knurlogic.interfaces.http.respond import send_json
 from knurlogic.interfaces.page import nodes, peers
@@ -258,13 +258,7 @@ def models_at(bases, fetch=None, docs: dict | None = None) -> dict:
         # one server's silence is logged, the others are still asked
         except Exception:
             logger.debug("no model list from %s", base, exc_info=True)
-    ts = [threading.Thread(target=one, args=(b,), daemon=True)
-          for b in sorted(bases)]
-    for t in ts:
-        t.start()
-    end = time.time() + ROUTE_S
-    for t in ts:
-        t.join(max(end - time.time(), 0))
+    transport.parallel(one, sorted(bases), deadline=ROUTE_S)
     return dict(found)
 
 

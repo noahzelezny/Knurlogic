@@ -287,7 +287,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         self._aborted: BaseException | None = None
         #: rank 0 of a split model: the collective error that ended the
         #: ring (_ring_fatal), and who is told so the process can leave
-        #: and the job be relaunched (interfaces/http watch_ring)
+        #: and the job be relaunched (interfaces/http/lifecycle watch_ring)
         self.ring_failed: BaseException | None = None
         self.on_ring_failed = None
         self._wake = threading.Event()

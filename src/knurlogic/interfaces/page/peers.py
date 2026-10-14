@@ -223,8 +223,6 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
     two pages asking each other cannot recurse. Each row is labelled with
     its machine and its address rewritten from the peer's loopback to the
     peer's address."""
-    import threading
-
     from knurlogic.cluster import transport
     from knurlogic.cluster.peers import clean
     if fetch is None:
@@ -254,12 +252,7 @@ def peer_residency(peers, timeout: float = PEER_LOADED_S,
             out[p.key] = {"machine": p.name or p.host, "address": p.key,
                           "resident": [],
                           "error": f"{type(e).__name__}: {e}"}
-    ts = [threading.Thread(target=one, args=(p,), daemon=True) for p in todo]
-    for t in ts:
-        t.start()
-    end = time.time() + timeout
-    for t in ts:
-        t.join(max(end - time.time(), 0))
+    transport.parallel(one, todo, deadline=timeout)
     res = []
     for p in todo:
         got = out.get(p.key)

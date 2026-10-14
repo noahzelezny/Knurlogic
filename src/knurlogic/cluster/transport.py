@@ -222,9 +222,12 @@ def fetch(page: str, kind: str, doc: dict, into, *,
             c.close()
 
 
-def parallel(fn: Callable, items: list, limit: float | None = None) -> list:
+def parallel(fn: Callable, items: list, limit: float | None = None, *,
+             deadline: float | None = None) -> list:
     """fn(item) for every item at once; one item's failure is its result
-    ({"ok": False, "error": ...}), the others go on."""
+    ({"ok": False, "error": ...}), the others go on. Waits `deadline`
+    seconds when given, else a request's own timeout (`limit`) and 5 s of
+    slack; an item still running then reads None."""
     out: list = [None] * len(items)
 
     def one(i, x):
@@ -240,7 +243,8 @@ def parallel(fn: Callable, items: list, limit: float | None = None) -> list:
           for i, x in enumerate(items)]
     for t in ts:
         t.start()
-    end_in = (limit if limit is not None else max(TIMEOUTS.values())) + 5
+    end_in = deadline if deadline is not None else (
+        limit if limit is not None else max(TIMEOUTS.values())) + 5
     end = time.time() + end_in
     for t in ts:
         t.join(max(end - time.time(), 0))
