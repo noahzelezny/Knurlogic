@@ -31,6 +31,7 @@ from . import telemetry as T
 from .compaction import CompactingChat
 from .guard import browser_refusal, hung_up, is_loopback
 from .prompt_cache import PromptCacheHandlers
+from .respond import send_json
 
 logger = logging.getLogger(__name__)
 
@@ -323,18 +324,22 @@ class Handler(PromptCacheHandlers, T.TelemetryHandlers,
         self.wfile.write(body)
 
     def _json(self, code: int, obj, headers=None) -> None:
-        self._send(code, json.dumps(obj).encode(), headers=headers)
+        send_json(self, code, obj, {**self._cors_headers(), **(headers or {})})
 
     def _error(self, e: O.ApiError) -> None:
         ra = getattr(e, "retry_after", None)
         self._json(e.status, e.body(),
                    headers={"Retry-After": str(int(ra))} if ra else None)
 
-    def _cors(self) -> None:
+    def _cors_headers(self) -> dict:
         o = self.headers.get("Origin")
         if o and o.rstrip("/") in self.app.allow_origins:
-            self.send_header("Access-Control-Allow-Origin", o)
-            self.send_header("Vary", "Origin")
+            return {"Access-Control-Allow-Origin": o, "Vary": "Origin"}
+        return {}
+
+    def _cors(self) -> None:
+        for k, v in self._cors_headers().items():
+            self.send_header(k, v)
 
     def _refused_browser(self) -> bool:
         why = browser_refusal(self.headers, self.app.allow_origins,
