@@ -11,18 +11,23 @@ why: [memory](../design/memory.md), [memory-ledger](../design/memory-ledger.md),
 
 | file | what |
 |---|---|
-| `memory/wired.py` | the GPU wired limit (`read`, `advise`, `command_for`; never sets it), `detected_working_set_bytes`, `machine()`, and `load_budget()`: the one number every fit, settings and load answer is computed against |
+| `memory/wired.py` | the GPU wired limit (`read`, `advise`, `command_for`; never sets it), `detected_working_set_bytes`, and `load_budget()`: the one number every fit, settings and load answer is computed against |
 | `memory/allowance.py` | the most memory knurlogic may use on this Mac (`get`, `set`, `cap`), saved in `~/.config/knurlogic/allowance.json`. Only ever lowers the budget |
 | `memory/footprint.py` | where memory went, from the OS: `available_memory` (from `vm_stat`), `memory_map` (every big process's footprint, attributed to a runtime, the remainder reported) |
 | `memory/pressure.py` | macOS's pressure level (`system_pressure_level`) and this process's compressed bytes (`own_compressed_bytes`), which the scheduler's guard watches |
 | `loaded.py` | what is resident now in every runtime (knurlogic, exo, ollama, mlx-lm), by their own account: `survey` (with `memory_map` beside it), `ollama_unload` |
-| `metrics.py` | how hard the machine is working: CPU, GPU, swap, pressure, thermal (`sample`, `metrics`) |
+| `metrics.py` | how hard the machine is working: CPU, GPU, swap, pressure, thermal (`sample`, `metrics`); `gpu_in_use`, the GPU memory every process holds |
 | `servers.py` | the record of running knurlogic servers (`registry`, `save_registry`, `listening_serves`, `free_port`, `serve_log`, `serve_argv`: the one `knurlogic serve` command line, for spawn and cluster ranks) |
 | `loadlock.py` | the model-load lock: `model_load(...)` holds `flock` on `~/.cache/knurlogic/load.lock`; `holder`, `Busy` |
-| `artifact.py` | what a model directory is: `Artifact`, `identity` (content hash), `resolve_identity`, `context_length`, `sampling_defaults`, `on_network` |
+| `artifact.py` | what a model directory is: `Artifact`, `identity` (content hash), `resolve_identity`, `context_length`, `sampling_defaults`, `on_network`; the one safetensors header reader (`safetensors_header`, `safetensors_layout`) and the MTP head sidecar (`MTP_HEAD_GLOB`, `mtp_head_file`) |
 | `discover.py` | every model on disk in every tool's store (`find`, `find_named`) |
 | `folders.py` | the extra model folders this Mac remembers (`add`, `remove`, `roots`) |
-| `identity.py` | which machine this is: a stable `id`, never the name |
+| `identity.py` | which machine this is: a stable `id`, never the name; its hardware: `chip()`, `machine()`, `kind_from()`, `hostname()`, `chip_generation`, `chip_bandwidth_gbs` |
+| `units.py` | `GIB`, `MIB`, and `gib(n)`: the one way bytes are written as GiB |
+| `paths.py` | `cache_dir()`, `config_dir()`, `state_dir()`: where knurlogic's files live |
+| `files.py` | `write_atomic`, `write_json`, `read_json`: files written whole or not at all |
+| `processes.py` | `running(pid)` (the one liveness check), `PROC_ERRORS`, command lines, ports |
+| `http_client.py` | `get_json`, `send_json`: JSON over HTTP, as a client |
 | `status.py` | the snapshot `/status.json` serves (`snapshot`, `aggregate`) |
 | `deps.py` | which mlx, mlx-lm, mlx-vlm builds are installed, read off the fix itself |
 | `ledger.py` | the request ledger (see [telemetry](telemetry.md)) |
@@ -62,7 +67,7 @@ Who uses it:
 Memory has three homes, one per layer: the machine's facts in
 `machine/memory/`, what a model needs in `tuning/fit.py`, and the serving
 process's guard in `engine/runtime/memory_guard.py` (with what mlx reports
-in `engine/model/load.py`: `memory`, `gpu_in_use`, `set_cache_limit`). A
+in `engine/model/load.py`: `memory`, `process_memory`, `set_cache_limit`). A
 peer's share of a cluster job is `cluster/launch.py`'s (`available_now`,
 `budget_of`, `gpu_working_set`).
 

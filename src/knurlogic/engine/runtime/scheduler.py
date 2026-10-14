@@ -196,7 +196,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
         `tensor`: rank 0's engine/split/ring.Ring when this model is
         split across ranks; the prompt cache is then count-based only.
         `gpu_in_use`: () -> bytes of GPU memory every process on this
-        machine holds (model.load.gpu_in_use), or None; what the others
+        machine holds (machine.metrics.gpu_in_use), or None; what the others
         hold comes off the working set."""
         if tensor is not None and prompt_cache_bytes:
             raise ValueError("a tensor-split server's prompt cache is "

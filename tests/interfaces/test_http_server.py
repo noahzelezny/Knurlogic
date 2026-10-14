@@ -380,7 +380,7 @@ def test_a_silent_request_samples_as_the_model_recommends(tmp_path):
     import json
 
     from knurlogic.interfaces.http import openai as O
-    from knurlogic.machine.artifact import sampling_defaults
+    from knurlogic.engine.families import sampling_defaults
     (tmp_path / "generation_config.json").write_text(json.dumps(
         {"do_sample": True, "temperature": 0.6, "top_p": 0.95,
          "top_k": 20}))

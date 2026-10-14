@@ -163,7 +163,7 @@ class App(CompactingChat):
             self.requests += 1
 
     def submit(self, body: dict, chat: bool, extra: dict = None):
-        from knurlogic.machine.artifact import sampling_defaults
+        from knurlogic.engine.families import sampling_defaults
         received = time.perf_counter()
         path = self.scheduler.host.path
         job, ctx = O.build_job(body, chat=chat,
@@ -478,7 +478,8 @@ class Handler(PromptCacheHandlers, T.TelemetryHandlers,
         u = urlparse(self.path)
         path = u.path.rstrip("/") or "/"
         if path == "/v1/models":
-            from knurlogic.machine.artifact import context_length, sampling_defaults
+            from knurlogic.engine.families import sampling_defaults
+            from knurlogic.machine.artifact import context_length
             path = self.app.scheduler.host.path
             from knurlogic.engine.model import thinking as TH
             try:

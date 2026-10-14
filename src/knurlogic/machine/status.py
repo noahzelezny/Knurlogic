@@ -14,29 +14,12 @@ Design: docs/design/memory.md (status).
 from __future__ import annotations
 
 import logging
-import os
 import time
 
 from knurlogic.machine import metrics as _metrics
-from knurlogic.machine import processes
 from knurlogic.machine.units import GIB, gib
 
 _STARTED = time.time()
-
-
-def _rss_bytes() -> int:
-    return processes.rss(os.getpid())
-
-
-def memory() -> dict:
-    """Delegated: how memory is accounted is an ENGINE question, and the
-    machine/ never imports mlx (a tripwire test checks)."""
-    from knurlogic.engine.model import memory as _m
-
-    d = _m()
-    d["process_rss_bytes"] = _rss_bytes()
-    d["scope"] = "process"      # see `scope` in aggregate/render_cluster
-    return d
 
 
 #: Bumped when the wire shape of /status.json changes incompatibly.
@@ -47,8 +30,11 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
              node="local", role="server", reachable=True,
              memory_fn=None, machine_fn=None, memory_map=None,
              metrics=None) -> dict:
-    """One node's answer. `memory_fn` exists so a snapshot can be BUILT from
-    numbers that came off another node rather than only from this process.
+    """One node's answer. `memory_fn` gives its memory block: how memory is
+    accounted is an ENGINE question and machine/ never imports the engine,
+    so the caller hands it in (engine.model.process_memory for this
+    process; numbers that came off another node for a peer). Without one
+    the block reads {"available": False}.
 
     `machine` says what the box IS -- a desktop, a mini, a laptop. It is
     reported per node for the same reason memory is: in a cluster the
@@ -60,7 +46,7 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
         "reachable": reachable,
         "uptime_seconds": round(time.time() - _STARTED, 1),
         "requests_served": requests,
-        "memory": (memory_fn or memory)(),
+        "memory": memory_fn() if memory_fn else {"available": False},
     }
     if machine_fn is not None:
         d["machine"] = machine_fn()

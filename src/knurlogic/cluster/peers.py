@@ -23,17 +23,16 @@ Design: docs/design/discovery.md (peers).
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from knurlogic.cluster import NET_ERRORS, protocol, transport
 from knurlogic.cluster import jobs as J
 from knurlogic.machine import files, paths
+from knurlogic.machine.http_client import send_json
 from knurlogic.machine.processes import PROC_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -274,10 +273,8 @@ class Peers:
     def _http(self, url: str) -> dict:
         hdr = ({HEADER: f"{self.me.get('id', '')} {self.my_port}"}
                if self.reachable else {})
-        req = urllib.request.Request(url, headers=hdr)
-        with urllib.request.urlopen(
-                req, timeout=transport.timeout_for("status")) as r:
-            return json.loads(r.read())
+        return send_json(url, method="GET", headers=hdr,
+                         timeout=transport.timeout_for("status"))
 
     @staticmethod
     def _speed(host: str) -> tuple:

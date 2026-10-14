@@ -308,7 +308,7 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
                            "world": link.size, "rank": link.rank}
         if pipe:
             mh.cache_layout["bounds"] = [list(b) for b in shares["bounds"]]
-    from knurlogic.engine.model.load import gpu_in_use
+    from knurlogic.machine.metrics import gpu_in_use
     sched = Scheduler(mh, **scheduler_options(settings),
                       tensor=tensor, gpu_in_use=gpu_in_use).start()
     sched.load(str(artifact.path),

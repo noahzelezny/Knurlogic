@@ -208,8 +208,7 @@ def _weights_bytes(d: Path, depth: int = 1) -> int:
 
 def _from_config_dir(d: Path, store: str) -> Found | None:
     """A directory that carries a config.json is an artifact we can read."""
-    from knurlogic.engine import mtp
-    from knurlogic.machine.artifact import Artifact
+    from knurlogic.machine.artifact import Artifact, mtp_head_file
     try:
         a = Artifact.load(d)
     except (OSError, ValueError, AttributeError):
@@ -239,7 +238,7 @@ def _from_config_dir(d: Path, store: str) -> Found | None:
                  # A built drafting head is a property of what is ON DISK, and
                  # it sits outside the model glob -- so nothing else in a
                  # listing would ever mention it.
-                 extra={"mtp_head": str(h.path)} if (h := mtp.find_head(d))
+                 extra={"mtp_head": str(h)} if (h := mtp_head_file(d))
                         else {})
 
 

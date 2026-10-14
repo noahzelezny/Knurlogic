@@ -10,10 +10,8 @@ always takes `trust_remote_code` (a VQ artifact runs its own model.py).
 from __future__ import annotations
 
 import importlib
-import subprocess
 from dataclasses import dataclass
 
-from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.machine.units import GIB
 
 #: Packages that can host a model architecture, in lookup order.
@@ -73,21 +71,16 @@ def memory() -> dict:
     }
 
 
-def gpu_in_use() -> int | None:
-    """Bytes of GPU memory in use on this Mac by EVERY process (the IOGPU
-    driver's "In use system memory"), or None where it cannot be read.
-    iogpu.wired_limit_mb caps this total, not one process's share: the
-    27B on an M3 Ultra (96 GB) aborted Metal with its own peak under
-    the working set while other processes held 2.9 GiB of it."""
-    import re
-    try:
-        out = subprocess.run(["ioreg", "-r", "-c", "IOAccelerator", "-d1",
-                              "-w0"], capture_output=True, text=True,
-                             timeout=2).stdout
-    except PROC_ERRORS:
-        return None
-    m = re.search(r'"In use system memory"=(\d+)', out)
-    return int(m.group(1)) if m else None
+def process_memory() -> dict:
+    """This process's memory as /status.json reports it: the framework's
+    accounting (memory()) plus the OS's resident size, scope "process"."""
+    import os
+
+    from knurlogic.machine import processes
+    d = memory()
+    d["process_rss_bytes"] = processes.rss(os.getpid())
+    d["scope"] = "process"      # see `scope` in machine/status.aggregate
+    return d
 
 
 def models_module(host: str = "mlx_lm"):

@@ -5,7 +5,7 @@ headers, before anything loads (engine/split/tensor.py does the split).
 
 from __future__ import annotations
 
-from knurlogic.machine.artifact import Artifact
+from knurlogic.machine.artifact import Artifact, safetensors_header
 from knurlogic.tuning import measured
 
 # ------------------------------------------------------------ tensor split
@@ -167,8 +167,6 @@ def trunk_headers(path) -> dict:
     packed MTP head (neither is split: rank 0 alone holds them,
     `leader_bytes`). Cached on each shard's
     (size, mtime_ns, ctime_ns)."""
-    import json
-    import struct
     from pathlib import Path
 
     files = sorted(f for f in Path(path).glob("*.safetensors")
@@ -184,12 +182,8 @@ def trunk_headers(path) -> dict:
     out = {}
     for f in files:
         try:
-            with open(f, "rb") as fh:
-                (hn,) = struct.unpack("<Q", fh.read(8))
-                if hn <= 0 or hn > (1 << 28):
-                    continue
-                header = json.loads(fh.read(hn))
-        except (OSError, ValueError, struct.error):
+            header = safetensors_header(f)
+        except (OSError, ValueError):
             continue
         for k, v in header.items():
             if k == "__metadata__" or not isinstance(v, dict):

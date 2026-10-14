@@ -15,6 +15,7 @@ Stdlib only.
 """
 from __future__ import annotations
 
+import functools
 import importlib
 from pathlib import Path
 
@@ -112,3 +113,15 @@ def family_of_module(module: str):
 
 def architecture_dirs() -> list:
     return [architecture_dir(f) for f in FAMILIES]
+
+
+@functools.cache
+def _non_thinking() -> dict:
+    return build_maps()["non_thinking_sampling"]
+
+
+def sampling_defaults(path) -> dict:
+    """machine.artifact.sampling_defaults, with the families' sampling for
+    thinking off: what a server reports and samples with."""
+    from knurlogic.machine.artifact import sampling_defaults as read
+    return read(path, _non_thinking())

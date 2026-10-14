@@ -16,13 +16,11 @@ Design: docs/design/memory.md (loaded).
 
 from __future__ import annotations
 
-import http.client
 import json
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from knurlogic.machine.http_client import get_json, send_json
 from knurlogic.machine.memory import footprint
 from knurlogic.machine.units import GIB, gib
 
@@ -68,14 +66,6 @@ class Resident:
         return self.bytes_resident / GIB
 
 
-def _get(url: str, timeout: float = 1.5):
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
-            return json.loads(r.read().decode() or "null")
-    except (OSError, ValueError, http.client.HTTPException):
-        return None
-
-
 def exo_placement(inst, names: dict, local_id=None) -> dict:
     """{model, nodes: [{node, layers, bytes_est, local}]} for one instance.
 
@@ -113,7 +103,7 @@ def exo_placement(inst, names: dict, local_id=None) -> dict:
 
 
 def _exo(base: str) -> list:
-    st = _get(f"{base}/state", timeout=2.5)
+    st = get_json(f"{base}/state", timeout=2.5)
     if st is None:
         return []
     runners = st.get("runners") or {}
@@ -131,7 +121,7 @@ def _exo(base: str) -> list:
     up = sum(1 for s in live if s in EXO_UP)
     coming = sum(1 for s in live if s in EXO_COMING)
 
-    local_id = _get(f"{base}/node_id", timeout=1.0)
+    local_id = get_json(f"{base}/node_id", timeout=1.0)
     names = {k: (v or {}).get("friendlyName") or k[:12]
              for k, v in (st.get("nodeIdentities") or {}).items()}
     out = []
@@ -167,7 +157,7 @@ def _exo(base: str) -> list:
 
 
 def _ollama(base: str) -> list:
-    ps = _get(f"{base}/api/ps")
+    ps = get_json(f"{base}/api/ps")
     if not isinstance(ps, dict):
         return []
     out = []
@@ -190,7 +180,7 @@ def _openai_port(base: str) -> list:
     over: claiming a port has a model loaded because it listed one would be
     inventing the only fact anybody came here for.
     """
-    d = _get(f"{base}/v1/models")
+    d = get_json(f"{base}/v1/models")
     if not isinstance(d, dict):
         return []
     rows = d.get("data") or []
@@ -208,7 +198,7 @@ _LAST: dict = {}
 
 
 def _knurlogic(base: str) -> list:
-    d = _get(f"{base}/status.json")
+    d = get_json(f"{base}/status.json")
     if not isinstance(d, dict) or "schema" not in d:
         return []
     a = d.get("artifact") or {}
@@ -434,20 +424,10 @@ def main(argv=None) -> int:
 # Reading is half of it. ollama's models can be let go from the page too;
 # exo is only read, never driven.
 
-def _post(url: str, payload=None, method: str = "POST", timeout: float = 30.0):
-    data = None if payload is None else json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url, data=data, method=method,
-        headers={"Content-Type": "application/json"} if data else {})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        body = r.read().decode()
-    return json.loads(body) if body.strip() else {}
-
-
 def ollama_unload(base: str, model: str) -> dict:
     """ollama has no unload endpoint; `keep_alive: 0` is the documented way.
 
     An empty prompt keeps it from generating anything on the way out.
     """
-    return _post(f"{base}/api/generate",
+    return send_json(f"{base}/api/generate",
                  {"model": model, "prompt": "", "keep_alive": 0})

@@ -8,7 +8,7 @@ Headroom is an input: a byte count from machine/, never measured here.
 
 from __future__ import annotations
 
-from knurlogic.machine.artifact import Artifact
+from knurlogic.machine.artifact import MTP_HEAD_GLOB, Artifact, safetensors_header
 from knurlogic.machine.units import GIB, gib
 from knurlogic.tuning import measured
 
@@ -119,8 +119,6 @@ def tower_bytes(artifact: Artifact) -> tuple:
     tensors) from the safetensors headers -- read, never guessed.
     bytes_on_disk sums the artifact directory's top-level *.safetensors;
     anything deeper would be extra."""
-    import json
-    import struct
 
     root = artifact.path
     total = outside = count = 0
@@ -130,14 +128,8 @@ def tower_bytes(artifact: Artifact) -> tuple:
         return 0, 0, 0
     for f in files:
         try:
-            with open(f, "rb") as fh:
-                (n,) = struct.unpack("<Q", fh.read(8))
-                if n <= 0 or n > (1 << 28):
-                    continue
-                header = json.loads(fh.read(n))
-        except (OSError, ValueError, struct.error):
-            continue
-        if not isinstance(header, dict):
+            header = safetensors_header(f)
+        except (OSError, ValueError):
             continue
         for k, v in header.items():
             if k == "__metadata__" or not isinstance(v, dict):
@@ -287,8 +279,8 @@ def vision_freed_bytes(artifact: Artifact, kv_bits=None) -> int:
 def mtp_head_bytes(artifact: Artifact) -> int:
     """The packed MTP head's bytes (its mtp-head*.safetensors sidecars):
     what MTP off frees. 0 without one."""
-    return sum(f.stat().st_size for f in artifact.path.glob(
-        "mtp-head*.safetensors") if f.is_file())
+    return sum(f.stat().st_size for f in artifact.path.glob(MTP_HEAD_GLOB)
+               if f.is_file())
 
 
 def single_fit_check(artifact: Artifact, budget_bytes: int,

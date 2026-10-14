@@ -9,7 +9,8 @@
   status.py     the snapshot /status.json serves
   servers.py    the record of knurlogic servers running on this box
   loadlock.py   the model-load lock: one real load at a time
-  identity.py   which machine this is (an id that survives renames)
+  identity.py   which machine this is (an id that survives renames) and its
+                hardware: chip(), machine(), kind_from()
   folders.py    the model folders this Mac remembers
   metrics.py    how hard this machine is working (GPU, CPU, swap)
   ledger.py     the request ledger: one row per served request
@@ -17,8 +18,18 @@
   deps.py       which build of mlx, mlx-lm and mlx-vlm is installed, read off
                 the fix itself rather than a version string
 
+The shared low-level layer every package builds on:
+
+  units.py       GIB, MIB, and gib(n) -> "12.3 GiB"
+  paths.py       cache_dir(), config_dir(), state_dir(): where files live
+  files.py       write_atomic / write_json / read_json: whole-file writes
+  processes.py   running(pid), PROC_ERRORS, command lines, ports
+  http_client.py get_json / send_json: JSON over HTTP, as a client
+
 Every answer here says how it was measured, because each one was wrong at
 least once while it was only assumed (see the docstrings).
 
-Depends on engine/ only for the working set and whether a head exists.
+Never imports engine/ (tests/integration/test_layers.py): what it needs
+from the engine -- a process's memory, the families' sampling tables, the
+framework's working set off macOS -- its callers hand in.
 """

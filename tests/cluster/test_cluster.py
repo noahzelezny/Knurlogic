@@ -90,7 +90,8 @@ def test_declared_placement_beats_the_assumption():
 
 def test_one_node_keeps_the_old_toplevel_contract():
     """A client written against one box must not break when the shape grows."""
-    s = status.snapshot(node="local")
+    from knurlogic.engine.model import process_memory
+    s = status.snapshot(node="local", memory_fn=process_memory)
     d = status.aggregate([s])
     assert d["memory"] == s["memory"] and d["uptime_seconds"] is not None
     assert d["nodes"] == [s] and d["cluster"]["nodes_total"] == 1

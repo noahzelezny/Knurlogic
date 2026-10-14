@@ -20,11 +20,12 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from knurlogic.machine.artifact import MTP_HEAD_GLOB, safetensors_header
 from knurlogic.machine.units import GIB
 
 #: What `vqlab mtp-pack` names its sidecar. Other names are read too -- the
 #: glob is the contract, this is only the default.
-SIDECAR_GLOB = "mtp-head*.safetensors"
+SIDECAR_GLOB = MTP_HEAD_GLOB
 
 def head_layouts() -> list:
     """(top-level tensor prefixes, head name) per head the family manifests
@@ -84,14 +85,10 @@ class Head:
 
 def _header(f: Path) -> dict:
     """The JSON header of a safetensors file. No tensor data is read."""
-    with f.open("rb") as fh:
-        raw = fh.read(8)
-        if len(raw) < 8:
-            return {}
-        n = struct.unpack("<Q", raw)[0]
-        if n <= 0 or n > (1 << 28):     # a header is kilobytes, not gigabytes
-            return {}
-        return json.loads(fh.read(n))
+    try:
+        return safetensors_header(f)
+    except ValueError:      # too short, or kilobytes it is not
+        return {}
 
 
 def find_head(path) -> Head | None:

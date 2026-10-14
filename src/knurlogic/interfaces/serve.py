@@ -409,7 +409,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         # shape now does not get rewritten when a second node shows up.
         snap = status.aggregate([status.snapshot(
             artifact=a, arch_rows=rows, env=r.env, requests=requests,
-            node="local", memory_map=_memory_map())])
+            node="local", memory_map=_memory_map(),
+            memory_fn=engine.process_memory)])
         # The wired limit belongs here because this is where somebody looks
         # when a model will not load. Advice only -- knurlogic never sets it.
         snap["wired"] = wired.advise(a.bytes_on_disk)
@@ -621,7 +622,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
 
     from knurlogic.machine.memory import allowance
     guard = int(working_set_gib * GIB) or (
-        allowance.cap(wired.detected_working_set_bytes())
+        allowance.cap(wired.detected_working_set_bytes(
+            engine.memory().get("working_set_bytes") or 0))
         if allowance.get() else 0)
     if guard:
         print(f"memory    the scheduler guards {gib(guard)} ("

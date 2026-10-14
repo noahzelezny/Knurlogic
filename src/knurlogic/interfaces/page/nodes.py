@@ -11,6 +11,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
+from knurlogic.engine.model import process_memory
 from knurlogic.interfaces import spawn
 from knurlogic.interfaces.page import documents
 from knurlogic.machine import identity, status
@@ -59,7 +60,8 @@ def status_fn(_n=0):
 
     me = identity.identity()
     # This machine, always, under its own name.
-    snaps = [status.snapshot(node=me["name"], role="local", memory_map=mm)]
+    snaps = [status.snapshot(node=me["name"], role="local", memory_map=mm,
+                             memory_fn=process_memory)]
 
     # Then every peer: a node that answers for itself is the best witness
     # of itself.
@@ -157,7 +159,7 @@ def _build_light(now: float) -> None:
         _MM["at"] = time.time()
     me = identity.identity()
     own = status.snapshot(node=me["name"], role="local",
-                          memory_map=_MM["doc"])
+                          memory_map=_MM["doc"], memory_fn=process_memory)
     try:
         from knurlogic.cluster import launch
         own["cluster"] = launch.node_info(

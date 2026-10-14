@@ -42,10 +42,8 @@ _ROWS = ("image_start", "image_pad", "image_newline", "image_end")
 
 def _header(path: Path) -> dict:
     """A safetensors file's header: name -> {dtype, shape, data_offsets}."""
-    import struct
-    with open(path, "rb") as f:
-        n = struct.unpack("<Q", f.read(8))[0]
-        h = json.loads(f.read(n))
+    from knurlogic.machine.artifact import safetensors_header
+    h = safetensors_header(path)
     h.pop("__metadata__", None)
     return h
 
@@ -54,25 +52,24 @@ def _read(path: Path, keys: list[str]) -> dict:
     """`keys` out of one safetensors file, each read on its own (a shard
     holding the vision tensors can hold the 1 GB embedding too).
     safetensors' own reader goes through numpy, which has no bfloat16."""
-    import struct
-
     import mlx.core as mx
     import numpy as np
+
+    from knurlogic.machine.artifact import safetensors_layout
 
     np_of = {"BF16": (np.uint16, mx.bfloat16), "F16": (np.float16, None),
              "F32": (np.float32, None), "U8": (np.uint8, None),
              "U32": (np.uint32, None), "I32": (np.int32, None)}
     out = {}
+    h, start = safetensors_layout(path)
     with open(path, "rb") as f:
-        n = struct.unpack("<Q", f.read(8))[0]
-        h = json.loads(f.read(n))
         for k in keys:
             m = h[k]
             if m["dtype"] not in np_of:
                 raise ValueError(f"{k}: dtype {m['dtype']} not read here")
             dt, view = np_of[m["dtype"]]
             a, b = m["data_offsets"]
-            f.seek(8 + n + a)
+            f.seek(start + a)
             arr = mx.array(np.frombuffer(f.read(b - a), dtype=dt)
                            .reshape(m["shape"]))
             out[k] = arr.view(view) if view is not None else arr

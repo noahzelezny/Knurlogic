@@ -200,22 +200,63 @@ _SAMPLING_KEYS = (("temperature", "temp"), ("top_p", "top_p"),
                   ("top_k", "top_k"), ("min_p", "min_p"))
 
 
-def _non_thinking() -> dict:
-    from knurlogic.engine import families
-    return families.build_maps()["non_thinking_sampling"]
+#: the largest safetensors header read: real ones are kilobytes to a few
+#: MiB; a length past this is a damaged or foreign file, not a header
+SAFETENSORS_HEADER_CAP = 256 * MIB
 
 
-#: model_type -> the sampling its makers publish for thinking OFF, which
-#: generation_config.json (one set, the thinking one) cannot carry: each
-#: family's manifest (`sampling`, with its sources), engine/families/
-_NON_THINKING = _non_thinking()
+def safetensors_layout(path, cap: int = SAFETENSORS_HEADER_CAP) -> tuple:
+    """(header, data_start) of a safetensors file: the parsed JSON header
+    -- {name: {dtype, shape, data_offsets}, "__metadata__": {...}} -- and
+    the byte offset tensor data starts at (data_offsets count from it).
+    No tensor data is read. Raises OSError, or ValueError for a file whose
+    header is missing, longer than `cap`, or not a JSON object."""
+    import struct
+    with open(path, "rb") as fh:
+        raw = fh.read(8)
+        if len(raw) < 8:
+            raise ValueError(f"{path}: no safetensors header")
+        (n,) = struct.unpack("<Q", raw)
+        if n <= 0 or n > cap:
+            raise ValueError(f"{path}: a {n}-byte header is not read")
+        doc = json.loads(fh.read(n))
+    if not isinstance(doc, dict):
+        raise ValueError(f"{path}: the header is not a JSON object")
+    return doc, 8 + n
 
 
-def sampling_defaults(path) -> dict:
+def safetensors_header(path, cap: int = SAFETENSORS_HEADER_CAP) -> dict:
+    """The parsed JSON header of a safetensors file (see safetensors_layout)."""
+    return safetensors_layout(path, cap)[0]
+
+
+#: the packed MTP head's sidecar files beside an artifact (engine/mtp builds
+#: and binds them; this is only where they are)
+MTP_HEAD_GLOB = "mtp-head*.safetensors"
+
+
+def mtp_head_file(path) -> Path | None:
+    """The first MTP head sidecar in the artifact at `path` whose header
+    holds tensors, or None."""
+    for f in sorted(Path(path).glob(MTP_HEAD_GLOB)):
+        try:
+            if any(k != "__metadata__" for k in safetensors_header(f)):
+                return f
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def sampling_defaults(path, non_thinking: dict | None = None) -> dict:
     """The sampling a model's makers recommend (its generation_config.json),
     as the sampler names it, plus "non_thinking": their set for thinking
-    off where they publish one (_NON_THINKING); {} when there is none, or
-    when it says do_sample false (greedy is then what they meant)."""
+    off where they publish one; {} when there is none, or when it says
+    do_sample false (greedy is then what they meant).
+
+    `non_thinking`: model_type -> the sampling its makers publish for
+    thinking OFF, which generation_config.json (one set, the thinking one)
+    cannot carry. The families own that table (each manifest's `sampling`,
+    with its sources) and hand it in: engine.families.sampling_defaults."""
     try:
         g = json.loads((Path(path) / "generation_config.json").read_text())
     except (OSError, ValueError):
@@ -233,8 +274,8 @@ def sampling_defaults(path) -> dict:
             "model_type")
     except (OSError, ValueError, AttributeError):
         mt = None
-    if out and mt in _NON_THINKING:
-        out["non_thinking"] = dict(_NON_THINKING[mt])
+    if out and mt in (non_thinking or {}):
+        out["non_thinking"] = dict(non_thinking[mt])
     return out
 
 

@@ -20,7 +20,7 @@ each value. The why: [settings](../design/settings.md); memory:
 | `tuning/fit.py` | the memory arithmetic: `kv_bytes_per_token`, `step_margin`, `fit_reserve`, `rank_margin`, `context_room`, `room_for`, `vision_budget`, `vision_freed_bytes`, `mtp_head_bytes`, `single_fit_check`; the widths the room allows: `decode_chunk_for`, `prefill_chunk_by_room` |
 | `tuning/resolve.py` | `resolve(artifact, budget, ...)` returns a `Resolution` (env, notes, warnings, vision, ranges, preset), or a `ClusterResolution` when given nodes (`resolve_cluster`). Emitting: `emit`, `emit_cache_limit`. A preset applied: `preset_env`, `apply_preset_overrides`. Launch: `model_launch`, `kv_refusal` |
 | `tuning/tensor_split.py` | the tensor split: `TENSOR_TYPES`, `tensor_refusals`, `tensor_placement`, `trunk_headers`, `tensor_split_refusals`, `tensor_unverified` |
-| `tuning/pipeline_split.py` | the pipeline split: `PIPELINE_TYPES`, `pipeline_refusals`, `pipeline_layer_bytes`, `pipeline_shares`, `leader_bytes`, `chip_bandwidth_gbs` |
+| `tuning/pipeline_split.py` | the pipeline split: `PIPELINE_TYPES`, `pipeline_refusals`, `pipeline_layer_bytes`, `pipeline_shares`, `leader_bytes` |
 | `tuning/rank_order.py` | which machine leads and the ring's order: `rank_order`, `leader_key`, `LINK_SPEED` |
 | `tuning/preferences.py` | the saved knurlogic-wide settings (`~/.config/knurlogic/settings.json`): `get`, `set`, `invalid`, `launch_sets`, `prompt_cache_env`, `compaction_env` |
 | `tuning/strategy.py` | the machine's default preset (`strategy.json`) |

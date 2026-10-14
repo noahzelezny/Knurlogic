@@ -88,7 +88,7 @@ def test_status_json_requests_reach_loaded_rows(monkeypatch):
     from knurlogic.machine import loaded
     req = {"in_flight": 1, "pending": 2, "capacity": 4,
            "oldest_pending_s": 3.0, "holding": "memory"}
-    monkeypatch.setattr(loaded, "_get", lambda url, timeout=1.5: {
+    monkeypatch.setattr(loaded, "get_json", lambda url, timeout=1.5: {
         "schema": 2, "artifact": {"name": "m", "path": "/m"},
         "memory": {"active_bytes": 5}, "requests": req})
     r = loaded._knurlogic("http://127.0.0.1:1")[0]

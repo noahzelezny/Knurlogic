@@ -32,7 +32,7 @@ class _Fake:
 def fake(monkeypatch):
     def install(table):
         f = _Fake(table)
-        monkeypatch.setattr(loaded, "_get", f)
+        monkeypatch.setattr(loaded, "get_json", f)
         return f
     return install
 
@@ -119,7 +119,7 @@ def test_nothing_running_is_an_ordinary_answer(monkeypatch):
     """`survey()` shells out to `top` and `ps` for the memory map, so stubbing
     only the HTTP layer let this read the developer's actual machine -- the
     same leak the discovery tests had against the real disk."""
-    monkeypatch.setattr(loaded, "_get", lambda *a, **k: None)
+    monkeypatch.setattr(loaded, "get_json", lambda *a, **k: None)
     monkeypatch.setattr(footprint, "memory_map", lambda *a, **k: {})
     # And the server record: the survey reads ~/.cache/knurlogic/servers.json
     # now, and this test first failed because a real model WAS running.
@@ -243,7 +243,7 @@ def test_a_registered_server_is_found_on_a_port_nobody_guessed(monkeypatch):
     """Two models holding 33 GiB on 8092 and 8093 were invisible: the survey
     only probed a fixed list of ports. It reads the record now."""
     from knurlogic.machine import servers
-    monkeypatch.setattr(loaded, "_get", lambda *a, **k: None)
+    monkeypatch.setattr(loaded, "get_json", lambda *a, **k: None)
     monkeypatch.setattr(footprint, "memory_map", lambda *a, **k: {})
     monkeypatch.setattr(servers, "registry", lambda: {
         8092: {"pid": 1, "artifact": "/m/Qwen3.6-35B-A3B"}})
@@ -396,7 +396,7 @@ def test_an_instance_card_reads_the_same_sample_and_says_its_swap():
 def test_a_port_that_answers_before_the_weights_are_in_is_loading(monkeypatch):
     doc = {"schema": 1, "artifact": {"name": "m", "size_bytes": 100},
            "memory": {"active_bytes": 40}, "load": {"state": "loading"}}
-    monkeypatch.setattr(loaded, "_get", lambda *a, **k: doc)
+    monkeypatch.setattr(loaded, "get_json", lambda *a, **k: doc)
     (r,) = loaded._knurlogic("http://127.0.0.1:1")
     assert r.state == "loading" and "40%" in r.detail
     doc["load"] = {"state": "ready"}
@@ -432,7 +432,7 @@ def test_our_server_busy_generating_keeps_its_card(monkeypatch):
         if url.endswith("/v1/models"):
             return {"data": [{"id": "GLM"}]}
         return None
-    monkeypatch.setattr(loaded, "_get", get)
+    monkeypatch.setattr(loaded, "get_json", get)
     monkeypatch.setattr(footprint, "memory_map", lambda *a, **k: {})
     monkeypatch.setattr(loaded, "_LAST", {})
     monkeypatch.setattr(servers, "registry", lambda: {

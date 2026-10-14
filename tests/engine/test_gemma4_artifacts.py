@@ -60,6 +60,6 @@ def test_the_tool_parser_is_inferred_as_gemma4(art):
 def test_sampling_defaults_are_the_generation_configs(art):
     """temperature 1.0, top_k 64, top_p 0.95 (Google's published set), and
     no non-thinking set for gemma4."""
-    from knurlogic.machine.artifact import sampling_defaults
+    from knurlogic.engine.families import sampling_defaults
     assert sampling_defaults(art) == {"temp": 1.0, "top_k": 64,
                                       "top_p": 0.95}

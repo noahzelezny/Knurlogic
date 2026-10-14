@@ -62,7 +62,7 @@ def test_instance_of_an_unregistered_port_is_empty(monkeypatch):
 
 
 def test_knurlogic_row_carries_its_instance(monkeypatch):
-    monkeypatch.setattr(loaded, "_get", lambda url, timeout=1.5: {
+    monkeypatch.setattr(loaded, "get_json", lambda url, timeout=1.5: {
         "schema": 2, "artifact": {"name": "A", "path": "/p/A"},
         "memory": {"active_bytes": 1 << 30}})
     monkeypatch.setattr(servers, "registry",

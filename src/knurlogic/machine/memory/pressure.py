@@ -6,9 +6,9 @@ macOS's own pressure level and this process's bytes in the compressor.
 from __future__ import annotations
 
 
-def system_pressure_level() -> int:
+def pressure_level() -> int | None:
     """macOS's own memory pressure: kern.memorystatus_vm_pressure_level,
-    1 normal, 2 warn, 4 critical. 1 where it cannot be read."""
+    1 normal, 2 warn, 4 critical. None where it cannot be read."""
     import ctypes
     import ctypes.util
     try:
@@ -17,10 +17,16 @@ def system_pressure_level() -> int:
         n = ctypes.c_size_t(ctypes.sizeof(v))
         if lib.sysctlbyname(b"kern.memorystatus_vm_pressure_level",
                             ctypes.byref(v), ctypes.byref(n), None, 0):
-            return 1
-        return int(v.value) or 1
+            return None
+        return int(v.value) or None
     except (OSError, AttributeError, ValueError, TypeError):
-        return 1
+        return None
+
+
+def system_pressure_level() -> int:
+    """pressure_level(), 1 (normal) where it cannot be read: the guard
+    warns on pressure it sees, never on pressure it could not read."""
+    return pressure_level() or 1
 
 
 def own_compressed_bytes() -> int:

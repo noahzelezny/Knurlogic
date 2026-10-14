@@ -218,8 +218,9 @@ def weight_names(path) -> list[str] | None:
     """Every tensor name the artifact's weights hold: its index's
     weight_map, or without one each shard's header. None when they cannot
     be read."""
-    import struct
     from pathlib import Path
+
+    from knurlogic.machine.artifact import safetensors_header
     root = Path(path)
     try:
         index = root / "model.safetensors.index.json"
@@ -230,12 +231,9 @@ def weight_names(path) -> list[str] | None:
             return None
         names: list[str] = []
         for f in shards:
-            with open(f, "rb") as fh:
-                (n,) = struct.unpack("<Q", fh.read(8))
-                names += [k for k in json.loads(fh.read(n))
-                          if k != "__metadata__"]
+            names += [k for k in safetensors_header(f) if k != "__metadata__"]
         return names
-    except (OSError, ValueError, struct.error):
+    except (OSError, ValueError):
         return None
 
 

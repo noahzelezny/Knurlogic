@@ -1,7 +1,8 @@
 """engine/model/ -- the model this process serves and what it can do: the
 pieces knurlogic's own server (engine/runtime, interfaces/http) builds on.
 
-  load.py      load it, its memory, the engine's knobs, tool dialects
+  load.py      load it, its memory (and this process's, process_memory),
+               the engine's knobs, tool dialects
   state.py     what is served and its vision (process state, by attribute)
   segments.py  the system prompt's own prompt-cache segment
   thinking.py  reasoning_effort, translated to each chat template's own
@@ -31,6 +32,7 @@ from .load import (
                    load,
                    memory,
                    models_module,
+                   process_memory,
                    set_cache_limit,
                    tool_support,
 )
@@ -44,6 +46,7 @@ __all__ = [
     "HOST_PACKAGES", "EngineInfo", "apply_live",
     "bind_vision", "clear_vision", "describe", "generate",
     "info", "keeps_mtp_weights", "load", "memory",
-    "models_module", "served_path", "served_vision", "set_cache_limit",
+    "models_module", "process_memory", "served_path", "served_vision",
+    "set_cache_limit",
     "thinking_status", "tool_support", "vision_status",
 ]

@@ -2,7 +2,7 @@
 
 Memory says what fits; these say why tokens are slow. Each is readable
 without sudo. cpu and swap come from psutil on every OS. On macOS: gpu
-(`ioreg` AGXAccelerator utilization), pressure
+(`ioreg` IOAccelerator utilization), pressure
 (`kern.memorystatus_vm_pressure_level`), thermal (NSProcessInfo) and
 temp_c (IOHIDEventSystemClient, undocumented: reads None if it moves).
 Elsewhere: gpu from nvidia-smi (machine/nvidia.py) and temp_c from the
@@ -58,6 +58,28 @@ _GPU = re.compile(r'"Device Utilization %"\s*=\s*(\d+)')
 _GPU_MEM = re.compile(r'"In use system memory"\s*=\s*(\d+)')
 
 
+def _ioreg_gpu() -> str:
+    """The GPU driver's registry entry. IOAccelerator is the class every
+    macOS GPU driver derives from (Apple silicon's AGXAccelerator is one),
+    so the same entry is read on every Mac; "" where it cannot be."""
+    try:
+        return subprocess.run(["ioreg", "-r", "-c", "IOAccelerator", "-d1",
+                               "-w0"], capture_output=True, text=True,
+                              timeout=2).stdout
+    except PROC_ERRORS:
+        return ""
+
+
+def gpu_in_use() -> int | None:
+    """Bytes of GPU memory in use on this Mac by EVERY process (the IOGPU
+    driver's "In use system memory"), or None where it cannot be read.
+    iogpu.wired_limit_mb caps this total, not one process's share: the
+    27B on an M3 Ultra (96 GB) aborted Metal with its own peak under
+    the working set while other processes held 2.9 GiB of it."""
+    m = _GPU_MEM.search(_ioreg_gpu())
+    return int(m.group(1)) if m else None
+
+
 def _gpu():
     """(utilization %, bytes the GPU holds), each None where unread."""
     if sys.platform != "darwin":
@@ -67,12 +89,7 @@ def _gpu():
             return None, None
         mib = nvidia.number(got[1])
         return nvidia.number(got[0]), mib << 20 if mib is not None else None
-    try:
-        out = subprocess.run(["ioreg", "-rw0", "-c", "AGXAccelerator"],
-                             capture_output=True, text=True,
-                             timeout=2).stdout
-    except PROC_ERRORS:
-        return None, None
+    out = _ioreg_gpu()
     u, m = _GPU.search(out), _GPU_MEM.search(out)
     return (int(u.group(1)) if u else None, int(m.group(1)) if m else None)
 
@@ -86,17 +103,12 @@ def swap():
 
 
 def _vm_pressure():
-    """macOS's own memory pressure level: 1 normal, 2 warn, 4 critical."""
+    """macOS's own memory pressure level: 1 normal, 2 warn, 4 critical;
+    None off macOS."""
     if sys.platform != "darwin":
         return None
-    try:
-        out = subprocess.run(["sysctl", "-n",
-                              "kern.memorystatus_vm_pressure_level"],
-                             capture_output=True, text=True,
-                             timeout=2).stdout
-        return int(out.strip())
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
+    from knurlogic.machine.memory.pressure import pressure_level
+    return pressure_level()
 
 
 #: How far back swap growth is looked for.

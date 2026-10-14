@@ -497,7 +497,7 @@ def test_thinking_off_takes_the_makers_non_thinking_sampling():
 def test_sampling_defaults_carry_qwen35s_non_thinking_set(tmp_path):
     import json
 
-    from knurlogic.machine.artifact import sampling_defaults
+    from knurlogic.engine.families import sampling_defaults
     (tmp_path / "generation_config.json").write_text(json.dumps(
         {"do_sample": True, "temperature": 0.6, "top_p": 0.95, "top_k": 20}))
     (tmp_path / "config.json").write_text('{"model_type": "qwen3_5_moe"}')

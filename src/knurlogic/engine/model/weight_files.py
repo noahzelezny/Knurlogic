@@ -20,9 +20,7 @@ SystemExit are never caught. Design: docs/design/weight-streaming.md.
 """
 from __future__ import annotations
 
-import json
 import logging
-import struct
 import threading
 import time
 from collections import deque
@@ -30,6 +28,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from knurlogic.machine.artifact import safetensors_layout
 from knurlogic.machine.units import GIB, gib
 
 logger = logging.getLogger(__name__)
@@ -54,13 +53,11 @@ REMAKE_LIMIT = 2 << 30
 def header(path) -> dict:
     """{tensor name: (absolute offset, length, dtype, shape)} of a
     safetensors file, and its metadata under "__metadata__"."""
-    with open(path, "rb") as f:
-        (n,) = struct.unpack("<Q", f.read(8))
-        doc = json.loads(f.read(n))
+    doc, start = safetensors_layout(path)
     out: dict = {"__metadata__": doc.pop("__metadata__", None) or {}}
     for k, v in doc.items():
         a, b = v["data_offsets"]
-        out[k] = (8 + n + int(a), int(b) - int(a), v["dtype"],
+        out[k] = (start + int(a), int(b) - int(a), v["dtype"],
                   tuple(v["shape"]))
     return out
 

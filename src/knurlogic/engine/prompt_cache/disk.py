@@ -69,6 +69,7 @@ import struct
 import time
 from pathlib import Path
 
+from knurlogic.machine.artifact import safetensors_header, safetensors_layout
 from knurlogic.machine.files import read_json, write_json
 from knurlogic.machine.units import GIB
 
@@ -328,11 +329,7 @@ def _header(f: Path) -> dict | None:
     """The knurlogic metadata of an entry file, read from its header only
     (no array bytes), or None."""
     try:
-        with open(f, "rb") as fh:
-            (n,) = struct.unpack("<Q", fh.read(8))
-            if n <= 0 or n > (256 << 20):
-                return None
-            h = json.loads(fh.read(n))
+        h = safetensors_header(f)
         return json.loads(h["__metadata__"]["knurlogic"])
     except (OSError, ValueError, KeyError, struct.error, TypeError):
         return None
@@ -381,16 +378,13 @@ def tokens_of(f: Path) -> list | None:
     """An entry file's tokens, read from its `__tokens__` bytes alone (the
     header says where): no other array is read."""
     try:
+        h, start = safetensors_layout(f)
+        t = h["__tokens__"]
+        if t.get("dtype") != "I32":
+            return None
+        a, b = t["data_offsets"]
         with open(f, "rb") as fh:
-            (n,) = struct.unpack("<Q", fh.read(8))
-            if n <= 0 or n > (256 << 20):
-                return None
-            h = json.loads(fh.read(n))
-            t = h["__tokens__"]
-            if t.get("dtype") != "I32":
-                return None
-            a, b = t["data_offsets"]
-            fh.seek(8 + n + a)
+            fh.seek(start + a)
             raw = fh.read(b - a)
         return list(struct.unpack(f"<{len(raw) // 4}i", raw))
     except (OSError, ValueError, KeyError, struct.error, TypeError):

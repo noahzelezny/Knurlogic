@@ -5,7 +5,7 @@ besides (engine/split/pipeline.py does the split).
 
 from __future__ import annotations
 
-from knurlogic.machine.artifact import Artifact
+from knurlogic.machine.artifact import Artifact, safetensors_header
 from knurlogic.tuning import fit, measured
 
 # ---------------------------------------------------------- pipeline split
@@ -230,8 +230,6 @@ def pipeline_layer_bytes(artifact: Artifact) -> tuple:
     """layer_bytes_of over the artifact's top-level safetensors headers.
     Neither the tower nor an MTP head is the trunk, and neither is on every
     rank: rank 0 alone holds them (`leader_bytes`)."""
-    import json
-    import struct
 
     cfg = artifact.raw_config or {}
     tc = cfg.get("text_config", cfg) or {}
@@ -241,12 +239,8 @@ def pipeline_layer_bytes(artifact: Artifact) -> tuple:
         if f.name.startswith("model-vision"):
             continue
         try:
-            with open(f, "rb") as fh:
-                (hn,) = struct.unpack("<Q", fh.read(8))
-                if hn <= 0 or hn > (1 << 28):
-                    continue
-                header = json.loads(fh.read(hn))
-        except (OSError, ValueError, struct.error):
+            header = safetensors_header(f)
+        except (OSError, ValueError):
             continue
         for k, v in header.items():
             if k == "__metadata__" or not isinstance(v, dict):
@@ -267,18 +261,12 @@ def leader_bytes(artifact: Artifact, vision: bool = True,
     the verify rows) and the vision tower when it serves images (`vision`;
     it encodes at tokenize and ships the image rows, a follower binds the
     family without one). Read off the safetensors headers."""
-    import json
-    import struct
 
     total = 0
     for f in sorted(artifact.path.glob("*.safetensors")) if mtp else ():
         try:
-            with open(f, "rb") as fh:
-                (hn,) = struct.unpack("<Q", fh.read(8))
-                if hn <= 0 or hn > (1 << 28):
-                    continue
-                header = json.loads(fh.read(hn))
-        except (OSError, ValueError, struct.error):
+            header = safetensors_header(f)
+        except (OSError, ValueError):
             continue
         for k, v in header.items():
             if k == "__metadata__" or not isinstance(v, dict):

@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
+from knurlogic.machine.artifact import safetensors_layout
 from knurlogic.machine.units import gib
 
 from .deepseek_v4_dspark import SIDECAR_NAME
@@ -43,9 +44,7 @@ _HC = re.compile(r"^hc_(attn|ffn)_(fn|base|scale)$")
 
 
 def _header(f: Path) -> tuple[dict, int]:
-    with f.open("rb") as fh:
-        n = struct.unpack("<Q", fh.read(8))[0]
-        return json.loads(fh.read(n)), 8 + n
+    return safetensors_layout(f)
 
 
 class _Source:

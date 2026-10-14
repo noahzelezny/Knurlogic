@@ -69,6 +69,8 @@ def test_metrics_ride_in_the_local_snapshot_and_a_peer_gets_none_invented():
 
 def test_a_missing_reading_is_none_not_zero(monkeypatch):
     from knurlogic.machine import metrics
+    from knurlogic.machine.memory import pressure
+    monkeypatch.setattr(pressure, "pressure_level", lambda: None)
     monkeypatch.setattr(metrics.subprocess, "run",
                         lambda *a, **k: (_ for _ in ()).throw(OSError()))
     monkeypatch.setattr(metrics.psutil, "swap_memory",

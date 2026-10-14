@@ -33,7 +33,7 @@ running is not an error; it is the ordinary case and it reports as absent.
 GPU busy, CPU busy, memory pressure, swap and thermal state are the
 things that quietly move decode speed, and each is readable without sudo:
 
-- **gpu** -- `ioreg -c AGXAccelerator` PerformanceStatistics, the same
+- **gpu** -- `ioreg -c IOAccelerator` PerformanceStatistics, the same
   "Device Utilization %" Activity Monitor's GPU History draws.
 - **cpu** -- `host_statistics(HOST_CPU_LOAD_INFO)` tick deltas, through
   ctypes.

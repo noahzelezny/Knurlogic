@@ -9,7 +9,10 @@ a violation:
   3. engine/, machine/, tuning/ and context_management/ never import
      knurlogic.interfaces;
   4. engine/, machine/ and tuning/ never import knurlogic.cluster
-     (cluster -> engine, never back).
+     (cluster -> engine, never back);
+  5. machine/ never imports knurlogic.engine: what it needs from the
+     engine (a process's memory, the families' sampling tables, the
+     framework's working set) its callers hand in.
 
 Nothing is exempt today. A new exception is a design decision: make it
 here, with the reason, not by loosening a rule silently.
@@ -96,6 +99,13 @@ def test_the_core_does_not_import_cluster():
                            or n.startswith("knurlogic.cluster.")))
     assert not bad, ("engine/machine/tuning importing cluster:\n"
                      + "\n".join(bad))
+
+
+def test_machine_does_not_import_the_engine():
+    bad = _violations(lambda pkg, n: pkg == "machine"
+                      and (n == "knurlogic.engine"
+                           or n.startswith("knurlogic.engine.")))
+    assert not bad, "machine/ importing engine:\n" + "\n".join(bad)
 
 
 def test_engine_never_imports_the_ledger_and_only_it_opens_the_file():
