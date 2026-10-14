@@ -70,11 +70,11 @@ import time
 from pathlib import Path
 
 from knurlogic.machine.files import read_json, write_json
+from knurlogic.machine.units import GIB
 
 logger = logging.getLogger(__name__)
 
 FORMAT = 1
-GIB = 1 << 30
 DEFAULT_TTL_H = 24.0
 DEFAULT_CAP_GIB = 64.0
 DEFAULT_FREE_SHARE = 0.20

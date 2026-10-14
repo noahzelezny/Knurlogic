@@ -11,8 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from knurlogic.interfaces.mcp import page_client
-
-GIB = 1 << 30
+from knurlogic.machine.units import GIB, gib
 
 
 def ready(**_) -> dict[str, Any]:
@@ -119,7 +118,7 @@ def fit(artifact: str = "", draft: bool = True, vision: bool = True,
         "headroom_gib": round(headroom / GIB, 1),
         "limited_by": b["limited_by"],
         "what_low_headroom_means": (
-            f"under {measured.low_headroom_bytes(budget) / GIB:.0f} GiB left "
+            f"under {gib(measured.low_headroom_bytes(budget), 0)} left "
             f"after the weights, "
             f"so a load now narrows the prompt chunk to "
             f"{measured.PREFILL_CHUNK_LOW_HEADROOM} tokens and prefills one "

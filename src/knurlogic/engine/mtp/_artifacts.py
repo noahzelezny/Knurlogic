@@ -20,7 +20,7 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
-GIB = 1 << 30
+from knurlogic.machine.units import GIB
 
 #: What `vqlab mtp-pack` names its sidecar. Other names are read too -- the
 #: glob is the contract, this is only the default.

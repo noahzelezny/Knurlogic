@@ -21,7 +21,7 @@ import threading
 import time
 from pathlib import Path
 
-from knurlogic.machine import paths
+from knurlogic.machine import paths, units
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ class Ledger:
     def _prune(self, db) -> None:
         db.execute("DELETE FROM requests WHERE ts_start < ?",
                    (time.time() - self.days * 86400,))
-        limit = self.mib * 1024 * 1024
+        limit = self.mib * units.MIB
         while self._used(db) > limit:
             n = db.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
             if not n:

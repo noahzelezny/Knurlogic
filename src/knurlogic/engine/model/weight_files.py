@@ -30,9 +30,10 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from knurlogic.machine.units import GIB, gib
+
 logger = logging.getLogger(__name__)
 
-GIB = 1 << 30
 
 #: range requests in flight. Measured from the M4 against an M3's SoftRAID
 #: array (cold, 64 MiB pieces): 0.50 GB/s with one, 2.04 GB/s with eight
@@ -230,8 +231,8 @@ def fetch(tensors: dict, p: Peer, *, each: Callable | None = None,
         items.append((Path(path).name, off, n))
     total = sum(n for _, _, n in items)
     if limit is not None and total > limit:
-        raise ValueError(f"{total / GIB:.2f} GiB to fetch, over the limit "
-                         f"({limit / GIB:.0f} GiB)")
+        raise ValueError(f"{gib(total, 2)} to fetch, over the limit "
+                         f"({gib(limit, 0)})")
     out: dict = {}
 
     def build(i: int, view) -> None:

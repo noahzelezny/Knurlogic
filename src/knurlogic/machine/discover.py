@@ -22,7 +22,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-GIB = 1 << 30
+from knurlogic.machine.units import GIB, gib
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".npz")
 
@@ -407,7 +407,7 @@ def render(rows: list, working_set_bytes: int = 0) -> str:
         elif working_set_bytes and f.bytes_on_disk > working_set_bytes:
             # Not "does not fit" flatly: knurlogic serves across nodes, so a
             # model bigger than one box is a clustering question, not a wall.
-            state = f"needs more than this box ({working_set_bytes / GIB:.0f} GiB)"
+            state = f"needs more than this box ({gib(working_set_bytes, 0)})"
         else:
             state = f.model_type or "ok"
         # Flags describe what is ON DISK, so they hold whatever the state

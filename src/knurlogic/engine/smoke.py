@@ -23,9 +23,8 @@ from pathlib import Path
 from knurlogic.engine import arch, register
 from knurlogic.engine import model as engine
 from knurlogic.machine.artifact import Artifact
+from knurlogic.machine.units import GIB
 from knurlogic.tuning.resolve import resolve
-
-GIB = 1 << 30
 
 
 def _origin(path, artifact_dir: Path) -> str:

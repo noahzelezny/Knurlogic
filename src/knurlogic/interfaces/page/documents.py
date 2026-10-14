@@ -14,9 +14,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from knurlogic.machine.disk_cache import DiskCache
+from knurlogic.machine.units import GIB, gib
 from knurlogic.tuning.live import LIVE_KNOBS, RESTART_WHY, knob_reach
 
-GIB = 1 << 30
 ASSETS = Path(__file__).parent / "assets"
 PAGE = ASSETS / "index.html"
 # The page is plain static files the browser loads as they are (native ES
@@ -818,7 +818,7 @@ def settings_document(artifact, live_env: dict, live_tune: str,
     def handler(q: dict) -> dict:
         tune = presets.preset_or((q.get("tune") or [live_tune])[0], live_tune)
         try:
-            ws = int(float((q.get("working_set_gib") or [0])[0]) * (1 << 30))
+            ws = int(float((q.get("working_set_gib") or [0])[0]) * GIB)
         except (TypeError, ValueError):
             ws = 0
         ws = ws or live_working_set
@@ -844,11 +844,11 @@ def settings_document(artifact, live_env: dict, live_tune: str,
             a setting the resolver would refuse is a control that lies."""
             if not values or "CACHE_LIMIT" not in name:
                 return None, ""
-            room = headroom / 2 / (1 << 30)
+            room = headroom / 2 / GIB
             usable = [v for v in values if v <= room] or [values[0]]
             if usable[-1] >= values[-1]:
                 return None, ""
-            return usable[-1], (f"{headroom / (1 << 30):.1f} GiB of headroom "
+            return usable[-1], (f"{gib(headroom)} of headroom "
                                 f"is all there is to hold it in")
 
         rows = []

@@ -14,6 +14,7 @@ import subprocess
 from dataclasses import dataclass
 
 from knurlogic.machine.processes import PROC_ERRORS
+from knurlogic.machine.units import GIB
 
 #: Packages that can host a model architecture, in lookup order.
 #: Where an architecture module is looked up. Only mlx_lm's namespace: every
@@ -210,7 +211,7 @@ def set_cache_limit(gib: float) -> str:
         getattr(getattr(mx, "metal", None), "set_cache_limit", None)
     if setter is None:
         return "no cache-limit setter in this engine build"
-    setter(int(float(gib) * (1 << 30)))
+    setter(int(float(gib) * GIB))
     return f"applied ({gib} GiB)"
 
 

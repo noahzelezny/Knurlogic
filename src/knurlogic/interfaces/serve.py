@@ -26,12 +26,10 @@ from knurlogic.machine import identity, status
 from knurlogic.machine.artifact import Artifact
 from knurlogic.machine.memory import wired
 from knurlogic.machine.processes import PROC_ERRORS
+from knurlogic.machine.units import GIB, MIB, gib
 from knurlogic.tuning.checks import refuse_sets, settings_refusal
 from knurlogic.tuning.live import LIVE_KNOBS
 from knurlogic.tuning.resolve import resolve
-
-GIB = 1 << 30
-
 
 #: prompt-cache entries one conversation keeps: its system prompt, turns
 #: and segment checkpoints (on a hybrid model each checkpoint is a whole
@@ -77,14 +75,14 @@ def prompt_cache_policy(serving: dict, world: int, working_set: int,
                          f"entries back first")
     if cap:
         n = size or PROMPT_CACHE_ENTRIES_BYTE_SIZED
-        return n, int(cap), (f"{int(cap) / GIB:.1f} GiB "
+        return n, int(cap), (f"{gib(int(cap))} "
                              f"(--prompt-cache-gib), up to {n} entries")
     room = int(working_set or 0) - int(holds or 0)
     if room > 0:
         b = int(room * PROMPT_CACHE_HEADROOM_SHARE)
         n = size or PROMPT_CACHE_ENTRIES_BYTE_SIZED
-        return n, b, (f"{b / GIB:.1f} GiB ({PROMPT_CACHE_HEADROOM_SHARE:.0%}"
-                      f" of the {room / GIB:.1f} GiB the working set leaves "
+        return n, b, (f"{gib(b)} ({PROMPT_CACHE_HEADROOM_SHARE:.0%}"
+                      f" of the {gib(room)} the working set leaves "
                       f"beside the model), up to {n} entries: sized by "
                       f"memory, not a count")
     n = size or PROMPT_CACHE_PER_AGENT * agents
@@ -202,8 +200,8 @@ def run(path: str, host: str, port: int, working_set_gib: float,
                                          leader=lead)
             print(f"pipeline  rank {ring['rank']} of {world} over "
                   f"{ring['link']}: {len(per)} layers, "
-                  f"{sum(per) / GIB:.1f} GiB split by layer + "
-                  f"{other / GIB:.1f} GiB on every rank; memory bandwidth "
+                  f"{gib(sum(per))} split by layer + "
+                  f"{gib(other)} on every rank; memory bandwidth "
                   + (f"{bw:g} GB/s" if bw else "unknown here"))
         else:
             from knurlogic.tuning.knobs import canonical_sets, mtp_of, vision_of
@@ -298,7 +296,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         b = wired.load_budget()
         ws = b["bytes"]
         if ws:
-            print(f"budget    {ws / GIB:.1f} GiB, limited by {b['limited_by']} "
+            print(f"budget    {gib(ws)}, limited by {b['limited_by']} "
                   f"(working set {b['working_set_bytes'] / GIB:.1f}, "
                   f"available now {b['available_bytes'] / GIB:.1f}; "
                   f"--working-set-gib overrides)")
@@ -610,7 +608,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         freed = vision_freed_bytes(a, kv_bits)
         if freed:
             print(f"vision     off (KNURLOGIC_VISION=off): no tower, image "
-                  f"store or image KV, {freed / GIB:.1f} GiB not held; "
+                  f"store or image KV, {gib(freed)} not held; "
                   f"image requests get a 400")
     print(f"per-chip rounding: {matmul_padding.describe(rounding)}")
 
@@ -626,7 +624,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         allowance.cap(wired.detected_working_set_bytes())
         if allowance.get() else 0)
     if guard:
-        print(f"memory    the scheduler guards {guard / GIB:.1f} GiB ("
+        print(f"memory    the scheduler guards {gib(guard)} ("
               + ("--working-set-gib" if working_set_gib else
                  f"the knurlogic allowance, {allowance.path()}") + ")")
     return http.serve(a, host, port, routes=routes,
@@ -865,7 +863,7 @@ def main(argv=None) -> int:
                 "bandwidth_gbs": a.bandwidth_gbs or None,
                 "chips": _ring_chips(a.ring_chips)}
     serving = {"decode_concurrency": a.decode_concurrency,
-               "max_body": a.max_request_mib * 1024 * 1024,
+               "max_body": a.max_request_mib * MIB,
                "allow_origins": a.allow_origin,
                "allow_hosts": a.allow_host,
                "prompt_cache_size": a.prompt_cache_size}

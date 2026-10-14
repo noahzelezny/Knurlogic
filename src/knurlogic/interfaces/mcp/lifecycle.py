@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from knurlogic.interfaces.mcp import inspection, page_client, placement
-from knurlogic.interfaces.mcp.inspection import GIB
+from knurlogic.machine.units import gib
 
 
 def load(artifact: str = "", port: int = 0, tune: str = "default",
@@ -146,13 +146,13 @@ def _mtp_off_doc(artifact: str, sets: dict, tune: str,
         return None
     why = chk["why"].split("; turn ")[0]
     reason = (f"{why}. It will not fit with MTP on; with MTP off the "
-              f"{chk['head_bytes'] / GIB:.1f} GiB head is not loaded and "
+              f"{gib(chk['head_bytes'])} head is not loaded and "
               f"it fits.")
     if chk.get("vision_bytes"):
         alone = launch_fit(a, {**sets, "KNURLOGIC_VISION": "off"}, tune,
                            True)["state"] != "cannot"
         reason += (f" Vision off (VISION in Load model) frees "
-                   f"{chk['vision_bytes'] / GIB:.1f} GiB"
+                   f"{gib(chk['vision_bytes'])}"
                    + (" and fits with MTP on, if you will not send images."
                       if alone else " more."))
     return {"loaded": False, "refused": "will not fit",

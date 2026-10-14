@@ -22,10 +22,12 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+from knurlogic.machine.units import MIB
+
 from . import ImageRejected, ImageTooLarge
 
 #: Encoded input bytes accepted per image (after base64 decode).
-MAX_BYTES = 32 * 1024 * 1024
+MAX_BYTES = 32 * MIB
 #: PIL's decompression-bomb limit (its Image.MAX_IMAGE_PIXELS default).
 #: Recorded rather than read so a process that raised PIL's global cannot
 #: raise ours.

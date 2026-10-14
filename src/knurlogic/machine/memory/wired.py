@@ -18,7 +18,7 @@ import sys
 from dataclasses import dataclass
 
 from knurlogic.machine.identity import _sysctl
-from knurlogic.machine.units import GIB, MIB
+from knurlogic.machine.units import GIB, MIB, gib
 
 #: Keys to try, in order. The name moved between macOS versions and the older
 #: one is still present on current systems; reading only one answers "unknown"
@@ -102,10 +102,10 @@ def advise(need_bytes: int = 0, w: Wired | None = None) -> dict:
     if need_bytes and need_bytes > w.ceiling_bytes:
         d["action"] = "will-not-fit"
         d["note"] = (
-            f"{need_bytes / GIB:.1f} GiB wanted against a "
-            f"{w.ceiling_bytes / GIB:.1f} GiB ceiling "
-            f"({w.total_bytes / GIB:.0f} GiB installed, leaving "
-            f"{w.reserve_bytes / GIB:.0f} GiB for macOS). Raising the wired "
+            f"{gib(need_bytes)} wanted against a "
+            f"{gib(w.ceiling_bytes)} ceiling "
+            f"({gib(w.total_bytes, 0)} installed, leaving "
+            f"{gib(w.reserve_bytes, 0)} for macOS). Raising the wired "
             f"limit will not fix this -- it needs a smaller rung or another "
             f"box.")
         return d
@@ -115,20 +115,20 @@ def advise(need_bytes: int = 0, w: Wired | None = None) -> dict:
         d.update(action="raise", target_bytes=target,
                  command=command_for(target, w.key or SYSCTL_KEYS[0]))
         d["note"] = (
-            f"the artifact wants {need_bytes / GIB:.1f} GiB and the GPU is "
-            f"allowed to wire {w.limit_bytes / GIB:.1f} GiB of the "
-            f"{w.total_bytes / GIB:.0f} GiB installed. It is not that the "
+            f"the artifact wants {gib(need_bytes)} and the GPU is "
+            f"allowed to wire {gib(w.limit_bytes)} of the "
+            f"{gib(w.total_bytes, 0)} installed. It is not that the "
             f"model does not fit -- the machine has not been told it may use "
             f"its own memory. Raising it leaves "
-            f"{(w.total_bytes - target) / GIB:.1f} GiB for macOS; that "
+            f"{gib(w.total_bytes - target)} for macOS; that "
             f"reserve is a judgement, and too little wedges the machine "
             f"rather than the model.")
         return d
 
     d["action"] = "ok"
-    d["note"] = (f"the GPU may wire {w.limit_bytes / GIB:.1f} GiB of "
-                 f"{w.total_bytes / GIB:.0f} GiB installed"
-                 + (f"; {w.headroom_to_ceiling / GIB:.1f} GiB more is "
+    d["note"] = (f"the GPU may wire {gib(w.limit_bytes)} of "
+                 f"{gib(w.total_bytes, 0)} installed"
+                 + (f"; {gib(w.headroom_to_ceiling)} more is "
                     f"available under the reserve if a bigger rung needs it"
                     if w.headroom_to_ceiling >= GIB else ""))
     return d
@@ -138,8 +138,8 @@ def render(d: dict) -> str:
     L = ["wired limit"]
     if not d.get("known"):
         return f"wired limit  unknown -- {d.get('note', '')}"
-    L.append(f"  {d['limit_bytes'] / GIB:.1f} GiB of "
-             f"{d['total_bytes'] / GIB:.0f} GiB installed  [{d['key']}]")
+    L.append(f"  {gib(d['limit_bytes'])} of "
+             f"{gib(d['total_bytes'], 0)} installed  [{d['key']}]")
     if d.get("note"):
         L.append(f"  {d['note']}")
     if d.get("command"):

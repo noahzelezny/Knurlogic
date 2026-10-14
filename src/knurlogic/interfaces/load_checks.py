@@ -20,7 +20,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-GIB = 1 << 30
+from knurlogic.machine.units import GIB, gib
+
 _KNOWN: dict = {"at": 0.0, "rows": None, "error": ""}
 
 
@@ -122,8 +123,8 @@ def prepare(model: str, *, served: str | None = None,
                default=0)
     if room and a.bytes_on_disk > room:
         raise NotLoadable(
-            507, f"{a.path.name} needs {a.bytes_on_disk / GIB:.1f} GiB; "
-                 f"{room / GIB:.1f} GiB is available to it (GPU working set "
+            507, f"{a.path.name} needs {gib(a.bytes_on_disk)}; "
+                 f"{gib(room)} is available to it (GPU working set "
                  f"{ws / GIB:.1f}, free now {avail / GIB:.1f}"
                  + (f", knurlogic allowance {allow / GIB:.1f}" if allow
                     else "")

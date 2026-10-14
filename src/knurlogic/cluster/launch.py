@@ -38,6 +38,7 @@ from knurlogic.cluster.protocol import (
 )
 from knurlogic.machine import identity, processes
 from knurlogic.machine.processes import PROC_ERRORS
+from knurlogic.machine.units import GIB, gib
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,6 @@ status_fn: Callable = _no_status
 #: () -> [peer record]: the page's PEERS store
 peers_fn: Callable[[], list] = list
 
-GIB = 1 << 30
 #: the message kinds a page answers for a job (cluster/protocol.py)
 CLUSTER_KINDS = ("Prepare", "Start", "Stop", "JobState", "Shape")
 #: a prepare's fields; nothing else is read, and a path is refused
@@ -478,19 +478,19 @@ def placement(machines: list, shape: dict, split: str,
             floor = fit.step_margin(ws)
             own = per + (lead if r == 0 else 0)
             if own > ws - floor:
-                plus = (f" + {lead / GIB:.1f} GiB rank 0 alone holds (the "
+                plus = (f" + {gib(lead)} rank 0 alone holds (the "
                         f"MTP head and vision tower)" if r == 0 and lead
                         else "")
                 raise ValueError(f"{nm}: its tensor share {per / GIB:.1f} "
                                  f"GiB{plus} does not fit its working set "
-                                 f"{ws / GIB:.1f} GiB less the "
-                                 f"{floor / GIB:.1f} GiB step margin: "
+                                 f"{gib(ws)} less the "
+                                 f"{gib(floor)} step margin: "
                                  f"more space required")
             shares.append({"rank": r, "machine": nm, "bytes": own})
-            left.append(f"{nm} leaves {(ws - own) / GIB:.1f} GiB")
+            left.append(f"{nm} leaves {gib(ws - own)}")
         reason = (f"tensor split {n} ways: every rank holds "
-                  f"~{per / GIB:.1f} GiB"
-                  + (f", rank 0 {lead / GIB:.1f} GiB more (the MTP head and "
+                  f"~{gib(per)}"
+                  + (f", rank 0 {gib(lead)} more (the MTP head and "
                      f"vision tower)" if lead else "")
                   + f" ({', '.join(left)}); rank 0 "
                   f"{names[0]} leads (newest chip, then P-core clock, then "
@@ -848,20 +848,20 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         busy = (held or held_here)(spec["job"]) if need and ws else []
         hold = sum(b for _, _, b in busy)
         if need and ws and need > ws - floor and not hold:
-            refusals.append(f"rank {rank}'s share is {need / GIB:.1f} GiB "
+            refusals.append(f"rank {rank}'s share is {gib(need)} "
                             f"and {me}'s working set (under its allowance) "
-                            f"is {ws / GIB:.1f} GiB, which must leave the "
-                            f"{floor / GIB:.1f} GiB step margin: more space "
+                            f"is {gib(ws)}, which must leave the "
+                            f"{gib(floor)} step margin: more space "
                             f"required")
         elif need and ws and need > ws - hold - floor:
             refusals.append(
-                f"rank {rank}'s share is {need / GIB:.1f} GiB and {me}'s "
-                f"working set (under its allowance) is {ws / GIB:.1f} GiB, "
-                f"{hold / GIB:.1f} GiB of it held now by "
-                + ", ".join(f"{w} (pid {p}, {b / GIB:.1f} GiB)"
+                f"rank {rank}'s share is {gib(need)} and {me}'s "
+                f"working set (under its allowance) is {gib(ws)}, "
+                f"{gib(hold)} of it held now by "
+                + ", ".join(f"{w} (pid {p}, {gib(b)})"
                             for w, p, b in busy if b)
-                + f"; the {(ws - hold) / GIB:.1f} GiB left must also leave "
-                  f"the {floor / GIB:.1f} GiB step margin. Unload that "
+                + f"; the {gib(ws - hold)} left must also leave "
+                  f"the {gib(floor)} step margin. Unload that "
                   f"first")
     room_chunk = None
     if not refusals and need and ws:

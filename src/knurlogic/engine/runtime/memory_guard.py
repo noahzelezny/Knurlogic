@@ -19,8 +19,9 @@ import logging
 import math
 import time
 
+from knurlogic.machine.units import GIB, gib
+
 logger = logging.getLogger(__name__)
-GIB = 1 << 30
 
 #: this server's own memory macOS has compressed or swapped out, past which
 #: -- while macOS itself reports memory pressure -- the server warns
@@ -30,7 +31,7 @@ GIB = 1 << 30
 #: are not pressure: 11.3 GiB sat compressed with 80 GiB unused and no
 #: swap (left from an earlier squeeze; a page stays compressed until it is
 #: touched), and the card said "slowed" about nothing.
-PRESSURE_BYTES = 1 << 30
+PRESSURE_BYTES = GIB
 #: how often that is read (a task_info call; on the scheduler thread)
 PRESSURE_EVERY_S = 5.0
 
@@ -174,13 +175,13 @@ class MemoryGuard:
                     if r.get("rank") and r.get("over_limit_bytes", 0) > 0]
             who = (f"rank {over[0]['rank']}" if len(over) == 1
                    else "a peer rank")
-            why = (f"{peers / GIB:.1f} GiB over its limit" if peers > 0
-                   else f"{-peers / GIB:.1f} GiB under its limit, short of "
+            why = (f"{gib(peers)} over its limit" if peers > 0
+                   else f"{gib(-peers)} under its limit, short of "
                    f"a {n_tokens}-token step's "
-                   f"{m['transient'] / GIB:.1f} GiB transient")
+                   f"{gib(m['transient'])} transient")
         else:
             who = f"rank {m['rank']}"
-            why = (f"limit {m['limit'] / GIB:.1f} GiB (working set "
+            why = (f"limit {gib(m['limit'])} (working set "
                    f"{m['working_set'] / GIB:.1f} - others "
                    f"{m['others'] / GIB:.1f} - margin "
                    f"{m['margin'] / GIB:.1f}), active "
@@ -225,7 +226,7 @@ class MemoryGuard:
                    or 0)
         what = "critical" if self._pressure_level >= 4 else "warn"
         return (f"rank {rank}: macOS reports memory pressure ({what}) and "
-                f"has compressed {b / GIB:.1f} GiB of the model")
+                f"has compressed {gib(b)} of the model")
 
     def _working_set(self) -> int:
         if self.working_set is None:
@@ -596,13 +597,13 @@ class MemoryGuard:
             # free: whatever holds it is out of this server's reach
             raise OutOfMemory(
                 f"no memory is free under the server's limit "
-                f"({limit / GIB:.1f} GiB) with nothing running and nothing "
+                f"({gib(limit)}) with nothing running and nothing "
                 f"cached; it is holding memory it cannot release, so this "
                 f"server needs a restart", mem)
         raise OutOfMemory(
             f"this prompt ({n_tokens} tokens) needs about {need / GIB:.1f} "
-            f"GiB for its cache; {max(room, 0) / GIB:.1f} GiB is free under "
-            f"the server's limit ({limit / GIB:.1f} GiB) even prefilled "
+            f"GiB for its cache; {gib(max(room, 0))} is free under "
+            f"the server's limit ({gib(limit)}) even prefilled "
             f"{chunks[-1]} tokens at a time. Send a shorter conversation, "
             f"or serve a smaller model", mem)
 
@@ -654,7 +655,7 @@ class MemoryGuard:
                            row.job.prompt_tokens)
             self._error(row.job, OutOfMemory(
                 f"stopped to keep the server within its memory "
-                f"({limit / GIB:.1f} GiB usable, {len(self._rows)} other "
+                f"({gib(limit)} usable, {len(self._rows)} other "
                 f"request(s) running); retry, or ask for fewer tokens"))
             over = self._active() - limit
 
@@ -705,6 +706,6 @@ class MemoryGuard:
                        _terms(mem))
         self._error(row.job, OutOfMemory(
             f"this prompt ({n} tokens) no longer fits: about "
-            f"{need / GIB:.1f} GiB for its cache and a step prefilling it "
+            f"{gib(need)} for its cache and a step prefilling it "
             f"{MIN_CHUNK} tokens at a time; retry, or send a shorter "
             f"conversation", mem))

@@ -14,10 +14,9 @@ import sys
 from knurlogic.engine import arch
 from knurlogic.machine.artifact import Artifact
 from knurlogic.machine.memory import wired
+from knurlogic.machine.units import GIB
 from knurlogic.tuning import presets
 from knurlogic.tuning.resolve import resolve
-
-GIB = 1 << 30
 
 
 def run(path: str, working_set_gib: float, profile: str | None,

@@ -23,6 +23,7 @@ import time
 
 from knurlogic.engine.model import state
 from knurlogic.engine.mtp import binding
+from knurlogic.machine.units import GIB
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def held_arrays(root, limit: int = 2_000_000) -> list:
 LOAD_STOP = threading.Event()
 #: bytes evaluated per mx.eval during a load: the stop is checked between
 #: batches, so a cancelled load leaves no GPU work half-done
-LOAD_BATCH_BYTES = 1 << 30
+LOAD_BATCH_BYTES = GIB
 
 
 class LoadCancelled(RuntimeError):
@@ -393,6 +394,6 @@ class ModelHost:
 def _active_gib() -> float:
     try:
         import mlx.core as mx
-        return mx.get_active_memory() / (1 << 30)
+        return mx.get_active_memory() / GIB
     except (ImportError, AttributeError, RuntimeError):
         return 0.0

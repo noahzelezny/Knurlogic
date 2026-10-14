@@ -21,13 +21,15 @@ from collections.abc import Hashable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from knurlogic.machine.units import MIB
+
 from . import EncodedImage, ImageEvicted, ImageRef
 
 #: Default bound for encoded features, bytes. 256 MiB:
 #: ~4 of the largest GLM images or ~180 gemma images -- a conversation's worth
 #: on any family, small next to a model on a 128 GB box. Also the number the
 #: memory budget adds per served vision model (`budget_bytes`).
-DEFAULT_MAX_BYTES = 256 * 1024 * 1024
+DEFAULT_MAX_BYTES = 256 * MIB
 
 Key = tuple[Hashable, str, str]
 

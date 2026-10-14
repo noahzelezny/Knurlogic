@@ -193,7 +193,8 @@ def test_memory_past_the_limit_empties_the_prompt_cache_then_stops_the_newest():
     the scheduler gives up the prompt cache first, then the newest rows,
     each with an OutOfMemory -- and keeps new requests waiting."""
     from knurlogic.engine.runtime import prompt as P
-    from knurlogic.engine.runtime.memory_guard import GIB, OutOfMemory
+    from knurlogic.engine.runtime.memory_guard import OutOfMemory
+    from knurlogic.machine.units import GIB
     from knurlogic.engine.runtime.scheduler import Job, Scheduler, _Row
 
     class Cache:
@@ -234,7 +235,7 @@ def test_memory_past_the_limit_empties_the_prompt_cache_then_stops_the_newest():
 def test_the_guard_trims_the_cache_by_the_overage_not_a_margin_more():
     """The limit already leaves a step's margin: 10 GiB over with a 20 GiB
     cache gives up 10, not 10 + the margin."""
-    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.machine.units import GIB
     from knurlogic.engine.runtime.scheduler import Scheduler
 
     class Cache:
@@ -358,7 +359,7 @@ def test_a_cache_that_could_never_make_room_is_not_evicted():
 def test_the_step_margin_is_measured_not_published():
     """The decode step's measured transient at the context it spans, with
     a quarter again -- never below 5% of the working set."""
-    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.machine.units import GIB
     from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     assert s._margin() == 6 * GIB                 # the floor: 5%
@@ -402,7 +403,7 @@ def test_the_margin_follows_the_context_the_step_will_span():
     """The 27B on an M3 Ultra: the transient grew 1.58 -> 3.39 GiB as
     four agents' prompts grew, and the first step at a longer context than
     any measured ran past a margin the shorter ones had set."""
-    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.machine.units import GIB
     from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=80 * GIB)
     s._tx = _samples(decode=[(10_000, 1 * GIB), (50_000, 3 * GIB)])
@@ -417,7 +418,7 @@ def test_the_margin_follows_the_context_the_step_will_span():
 
 
 def test_one_context_measured_scales_the_transient_in_proportion():
-    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.machine.units import GIB
     from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=200 * GIB)
     s._tx = _samples(decode=[(40_000, 2 * GIB)])
@@ -428,7 +429,7 @@ def test_one_context_measured_scales_the_transient_in_proportion():
 def test_measure_records_the_transient_against_its_context():
     import mlx.core as mx
 
-    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.machine.units import GIB
     from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._active = lambda: 100 * GIB
@@ -453,7 +454,7 @@ def test_measure_records_the_transient_against_its_context():
 
 def test_other_processes_gpu_memory_comes_off_the_working_set():
     """iogpu.wired_limit_mb caps every process's GPU memory together."""
-    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.machine.units import GIB
     from knurlogic.engine.runtime.scheduler import Scheduler
     seen = {"v": 50 * GIB}
     s = Scheduler(Host(None, Tok({})), working_set_bytes=100 * GIB,
@@ -467,7 +468,7 @@ def test_other_processes_gpu_memory_comes_off_the_working_set():
 
 
 def test_mlx_buffer_cache_is_cleared_before_a_step_it_would_crowd():
-    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.machine.units import GIB
     from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=100 * GIB)
     freed = []
@@ -552,7 +553,7 @@ def test_the_spike_is_what_the_step_did_not_keep():
     ENDED is transient."""
     import mlx.core as mx
 
-    from knurlogic.engine.runtime.memory_guard import GIB
+    from knurlogic.machine.units import GIB
     from knurlogic.engine.runtime.scheduler import Scheduler
     s = Scheduler(Host(None, Tok({})), working_set_bytes=120 * GIB)
     s._active = lambda: int(101.5 * GIB)

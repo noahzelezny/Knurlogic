@@ -14,6 +14,8 @@ holds besides its weights.
 
 from __future__ import annotations
 
+from knurlogic.machine.units import GIB
+
 # --- the two knobs that decide runnable-vs-not ------------------------------
 
 # Experts decoded to dense fp16 per prefill chunk. THIS IS THE MEMORY KNOB,
@@ -130,7 +132,7 @@ PREFILL_KV_ALLOWANCE_TOKENS = 32768
 # PREFILL_TRANSIENT_BYTES_PER_TOKEN_HIDDEN under-reads it there (0.47 GiB
 # predicted for the 35B against 0.93 measured): FIT_TRANSIENT_FLOOR is the
 # measured flat part.
-FIT_TRANSIENT_FLOOR = 1 << 30
+FIT_TRANSIENT_FLOOR = GIB
 #: the chunk the fit is asked at: the smallest the room rule can fall to
 FIT_PREFILL_CHUNK = PREFILL_CHUNK_DEFAULT
 #: the context every rank must be able to hold beyond its weights
@@ -189,7 +191,7 @@ LOW_HEADROOM_SHARE = 0.20
 
 
 def low_headroom_bytes(working_set_bytes: int) -> int:
-    return int(max(LOW_HEADROOM_GIB * (1 << 30),
+    return int(max(LOW_HEADROOM_GIB * GIB,
                    LOW_HEADROOM_SHARE * working_set_bytes))
 
 #: Hard ceiling on the reclaimable cache, whatever the profile asks. Freed

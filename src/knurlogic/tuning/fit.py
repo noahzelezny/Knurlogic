@@ -9,9 +9,8 @@ Headroom is an input: a byte count from machine/, never measured here.
 from __future__ import annotations
 
 from knurlogic.machine.artifact import Artifact
+from knurlogic.machine.units import GIB, gib
 from knurlogic.tuning import measured
-
-GIB = 1 << 30
 
 
 def expert_transient_bytes_per_unit(artifact: Artifact):
@@ -105,12 +104,12 @@ def prefill_chunk_by_room(artifact: Artifact, headroom, working_set_bytes: int,
     nxt = min((w for w in measured.PREFILL_CHUNK_LADDER if w > width), default=0)
     return width, (
         f"prompt chunk {width} (family best {family}): its step transient "
-        f"~{transient(width) / GIB:.2f} GiB"
+        f"~{gib(transient(width), 2)}"
         + (f" (next up, {nxt}: ~{transient(nxt) / GIB:.2f})"
            if width < family else "")
-        + f" vs {allowed / GIB:.2f} GiB reserved for transients (step "
-        f"margin / first-request reserve; {room / GIB:.1f} GiB more room "
-        f"after weights, {kv / GIB:.1f} GiB KV and {cache_bytes / GIB:.1f} "
+        + f" vs {gib(allowed, 2)} reserved for transients (step "
+        f"margin / first-request reserve; {gib(room)} more room "
+        f"after weights, {gib(kv)} KV and {cache_bytes / GIB:.1f} "
         f"GiB cache) -- the family best when its transient fits the "
         f"reserve, else the widest that does, floor {floor}")
 
@@ -322,12 +321,12 @@ def single_fit_check(artifact: Artifact, budget_bytes: int,
     out["vision_bytes"] = freed if vision else 0
     out["state"] = "cannot"
     out["why"] = (
-        f"{artifact.path.name} needs {need / GIB:.1f} GiB (weights"
-        + (f" incl. the {head / GIB:.1f} GiB MTP head" if draft and head
+        f"{artifact.path.name} needs {gib(need)} (weights"
+        + (f" incl. the {gib(head)} MTP head" if draft and head
            else "")
-        + (f", {freed / GIB:.1f} GiB vision" if vision and freed else "")
-        + f") plus {floor / GIB:.1f} GiB step margin; the budget is "
-        f"{ws / GIB:.1f} GiB")
+        + (f", {gib(freed)} vision" if vision and freed else "")
+        + f") plus {gib(floor)} step margin; the budget is "
+        f"{gib(ws)}")
     # what turning parts off would free, smallest change first
     mtp_off = draft and head and need - head + floor <= ws
     vis_off = vision and freed and need - freed + floor <= ws
@@ -468,7 +467,7 @@ def split_room(ranks: list, cfg: dict, split: str, kv_bits=None) -> dict:
              or bool(per and window and tokens < window / 5))
     t = (f"{tokens / 1e6:.1f}M" if tokens >= 1e6 else
          f"{tokens / 1e3:.0f}k" if tokens >= 1e3 else str(tokens))
-    text = (f"leaves {left / GIB:.0f} GiB across {n} machines"
+    text = (f"leaves {gib(left, 0)} across {n} machines"
             + (f", about {t} tokens of context across all conversations"
                if per else " (its KV size per token is not known)"))
     return {"fits": fits, "split": split, "ranks": rows,
@@ -482,7 +481,7 @@ def room_text(left: int, tokens: int, per: int) -> str:
     conversations' -- one sentence, shared by the page and doctor."""
     t = (f"{tokens / 1e6:.1f}M" if tokens >= 1e6 else
          f"{tokens / 1e3:.0f}k" if tokens >= 1e3 else str(tokens))
-    return (f"leaves {left / GIB:.0f} GiB"
+    return (f"leaves {gib(left, 0)}"
             + (f", about {t} tokens of context across all conversations"
                if per else " (its KV size per token is not known)"))
 
@@ -510,18 +509,18 @@ def vision_budget(artifact: Artifact, store_bytes: int | None = None,
     toks = measured.VISION_KV_IMAGES * measured.VISION_KV_TOKENS_PER_IMAGE
     kv = per_tok * toks
     notes = [
-        (f"vision tower: {tower / GIB:.2f} GiB in {n} tensors, read from "
+        (f"vision tower: {gib(tower, 2)} in {n} tensors, read from "
          f"the safetensors headers; "
-         + (f"{outside / GIB:.2f} GiB of it sits outside the files the "
+         + (f"{gib(outside, 2)} of it sits outside the files the "
             f"artifact size counts, so that much is added"
             if outside else "already inside the artifact's size, so "
                             "nothing is added for it")),
-        (f"image store: {store / GIB:.2f} GiB reserved -- "
+        (f"image store: {gib(store, 2)} reserved -- "
          + ("the live store's budget (its bound, or more while prompt-cache "
             "entries pin images in use)" if live else
             "the store's default bound (engine/vision/store.py "
             "DEFAULT_MAX_BYTES)")),
-        (f"image KV allowance: {kv / GIB:.2f} GiB for "
+        (f"image KV allowance: {gib(kv, 2)} for "
          f"{measured.VISION_KV_IMAGES} images x {measured.VISION_KV_TOKENS_PER_IMAGE} "
          f"tokens ({kv_why}) -- an ALLOWANCE for the context images add, "
          f"not a measurement"),

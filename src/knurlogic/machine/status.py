@@ -19,8 +19,8 @@ import time
 
 from knurlogic.machine import metrics as _metrics
 from knurlogic.machine import processes
+from knurlogic.machine.units import GIB, gib
 
-GIB = 1 << 30
 _STARTED = time.time()
 
 
@@ -174,7 +174,7 @@ def render_cluster(d: dict) -> str:
     a = (d.get("nodes") or [{}])[0].get("artifact")
     if a:
         L.append(f"artifact   {a['name']}  ({a['model_type']}, "
-                 f"{a['size_bytes'] / GIB:.1f} GiB on disk)")
+                 f"{gib(a['size_bytes'])} on disk)")
         L.append("")
     for s in d.get("nodes", []):
         m = s.get("memory", {})
@@ -209,7 +209,7 @@ def render_cluster(d: dict) -> str:
     L.append(f"  cache            {m['cache_bytes'] / GIB:8.2f} GiB   "
              f"(RECLAIMABLE -- not usage)")
     L.append(f"  headroom         {m['headroom_bytes'] / GIB:8.2f} GiB   "
-             f"of {m['working_set_bytes'] / GIB:.1f} GiB usable, summed over "
+             f"of {gib(m['working_set_bytes'])} usable, summed over "
              f"the nodes that answered")
     L.append("")
     L.append(f"{c['requests_served']} requests served")
@@ -223,7 +223,7 @@ def render(d: dict) -> str:
     if a:
         L.append(f"artifact   {a['name']}")
         L.append(f"           {a['model_type']}, "
-                 f"{a['size_bytes'] / GIB:.1f} GiB on disk"
+                 f"{gib(a['size_bytes'])} on disk"
                  + (f", runtime {a['bundled_runtime']}"
                     if a["bundled_runtime"] else ""))
         if a["geometry"]:
@@ -241,8 +241,8 @@ def render(d: dict) -> str:
                  f"(RECLAIMABLE -- not usage)")
         L.append(f"  peak this run    {m['peak_bytes'] / GIB:8.2f} GiB")
         L.append(f"  headroom         {m['headroom_bytes'] / GIB:8.2f} GiB   "
-                 f"of {m['working_set_bytes'] / GIB:.1f} GiB usable "
-                 f"({m['total_bytes'] / GIB:.0f} GiB installed)")
+                 f"of {gib(m['working_set_bytes'])} usable "
+                 f"({gib(m['total_bytes'], 0)} installed)")
         L.append(f"  process RSS      {m['process_rss_bytes'] / GIB:8.2f} GiB"
                  f"   (what Activity Monitor shows; diverges under pressure)")
     if d.get("settings"):

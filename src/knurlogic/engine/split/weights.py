@@ -24,12 +24,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from knurlogic.engine.model import weight_files
+from knurlogic.machine.units import GIB, gib
 
 from .marker import progress
 
 logger = logging.getLogger(__name__)
 
-GIB = 1 << 30
 
 
 @dataclass
@@ -189,7 +189,7 @@ def read_share(model, evaluate: Callable) -> None:
                         "%d arrays, %.2f GiB, read from the files%s",
                         out["fetched"] / GIB, p.source, out["seconds"],
                         out["made"], out["left"], out["left_bytes"] / GIB,
-                        "".join(f"; {k} {n / GIB:.2f} GiB"
+                        "".join(f"; {k} {gib(n, 2)}"
                                 for n, k in out["largest_left"]))
         except Exception as e:  # only slower: the files are read instead
             logger.warning("weights: the share was not fetched from %s "

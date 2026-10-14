@@ -31,6 +31,8 @@ from pathlib import Path
 
 import numpy as np
 
+from knurlogic.machine.units import gib
+
 from .deepseek_v4_dspark import SIDECAR_NAME
 
 #: safetensors dtype -> (numpy dtype of its bytes, bytes per element)
@@ -224,4 +226,4 @@ if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.exit(__doc__)
     p = pack(sys.argv[1], sys.argv[2])
-    print(f"{p}  {p.stat().st_size / (1 << 30):.2f} GiB")
+    print(f"{p}  {gib(p.stat().st_size, 2)}")

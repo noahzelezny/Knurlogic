@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from knurlogic.engine.templates import TEMPLATE_ERRORS
+from knurlogic.machine.units import MIB
 
 from . import openai as O
 from . import telemetry as T
@@ -58,7 +59,7 @@ PROGRESS_S = 1.0
 #: Largest request body read, bytes (--max-request-mib). The body is read
 #: into memory before anything else can judge it, so it is bounded first.
 #: Generous: images are bounded separately by the image store's memory.
-DEFAULT_MAX_BODY = 512 * 1024 * 1024
+DEFAULT_MAX_BODY = 512 * MIB
 
 
 #: How often a non-streamed request's connection is checked for a hang-up

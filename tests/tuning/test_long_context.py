@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from knurlogic.machine.artifact import Artifact  # noqa: E402
 from knurlogic.tuning import checks, context_window  # noqa: E402
 from knurlogic.tuning.context_window import long_context_room  # noqa: E402
-from knurlogic.tuning.fit import GIB  # noqa: E402
+from knurlogic.machine.units import GIB  # noqa: E402
 from knurlogic.tuning.resolve import resolve  # noqa: E402
 
 FACTOR, ORIG = 4.0, 262144

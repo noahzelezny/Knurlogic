@@ -20,11 +20,11 @@ from itertools import combinations
 from typing import Any
 
 from knurlogic.interfaces.mcp import page_client
+from knurlogic.machine.units import GIB
 
 ROLES = ("here", "peers", "all", "fit")
 #: the page's Launch picks pipeline first (assets/views/picker.js MULTI)
 DEFAULT_SPLIT = "pipeline"
-GIB = 1024 ** 3
 
 
 def _no(why: str, **more) -> dict[str, Any]:

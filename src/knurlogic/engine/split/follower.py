@@ -16,13 +16,13 @@ from knurlogic.engine.runtime.executor import (
     Finished,
     LocalExecutor,
 )
+from knurlogic.machine.units import GIB
 
 from . import plan as P
 from .link import Desync, Link, init
 from .tensor import load_config, shard
 
 logger = logging.getLogger(__name__)
-GIB = 1 << 30
 
 
 # --------------------------------------------------------------- follower

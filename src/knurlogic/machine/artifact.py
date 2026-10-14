@@ -12,8 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from knurlogic.machine.processes import PROC_ERRORS
-
-GIB = 1 << 30
+from knurlogic.machine.units import GIB, MIB
 
 
 @dataclass
@@ -256,7 +255,7 @@ _IDENT: dict = {}
 #: bytes read from each sampled window of a shard's tensor data
 _SAMPLE = 64 * 1024
 #: a safetensors header larger than this is not read whole (hashing stops)
-_MAX_HEADER = 64 * 1024 * 1024
+_MAX_HEADER = 64 * MIB
 
 
 # The cache persists in <cache_dir>/identities.json (machine/disk_cache),

@@ -24,8 +24,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from knurlogic.machine.memory import footprint
-
-GIB = 1 << 30
+from knurlogic.machine.units import GIB, gib
 
 #: Ports worth asking. exo and ollama have fixed defaults; the rest is where
 #: these servers are conventionally started, including mlx-lm's own default.
@@ -399,13 +398,13 @@ def render(doc: dict) -> str:
     if m.get("installed_bytes"):
         L.append("")
         L.append("WHERE THE MEMORY IS, per the OS rather than per runtime")
-        L.append(f"  {m['installed_bytes'] / GIB:.0f} GiB installed")
+        L.append(f"  {gib(m['installed_bytes'], 0)} installed")
         for rt, b in sorted(m.get("by_runtime", {}).items(),
                             key=lambda kv: -kv[1]):
             L.append(f"  {b / GIB:8.2f} GiB  {rt}")
         L.append(f"  {m.get('other_bytes', 0) / GIB:8.2f} GiB  "
                  f"everything else above "
-                 f"{m.get('floor_bytes', 0) / GIB:.2f} GiB")
+                 f"{gib(m.get('floor_bytes', 0), 2)}")
         L.append(f"  {m.get('seen_bytes', 0) / GIB:8.2f} GiB  seen in total")
         L.append("")
         L.append(f"  {m.get('metric', '')}")
