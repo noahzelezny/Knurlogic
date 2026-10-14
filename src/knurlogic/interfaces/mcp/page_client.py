@@ -8,8 +8,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from knurlogic.interfaces.ports import PAGE_PORT
 from knurlogic.machine.http_client import NET_ERRORS, request
+from knurlogic.machine.servers import PAGE_PORT
 
 # --- across machines: through the page on this machine ---------------------------
 # The page (`knurlogic ui`) is each Mac's node agent. It holds the peers it
@@ -43,7 +43,7 @@ def page_call(path: str, doc=None, timeout: float = PAGE_READ_S):
     try:
         _, raw = request(url, None if doc is None else json.dumps(doc).encode(),
                          timeout=timeout)
-    except (*NET_ERRORS, ValueError) as e:
+    except NET_ERRORS as e:
         raise PageDown(f"the page on this machine ({url.split(path)[0]}) did "
                        f"not answer: {type(e).__name__}: {e}. Across "
                        f"machines goes through it: start `knurlogic ui` "

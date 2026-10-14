@@ -6,13 +6,13 @@ through a peer's relay), and a machine's own settings set from any page
 
 from __future__ import annotations
 
-import http.client
 import json
 import time
 from urllib.parse import urlparse
 
 from knurlogic.interfaces.page import nodes
 from knurlogic.machine import identity
+from knurlogic.machine.http_client import NET_ERRORS
 
 _ADDRS: dict = {}
 
@@ -191,7 +191,7 @@ def machine_apply(where: str, body: bytes, post=None) -> tuple:
     post = post or transport.send
     try:
         out = post(base.removeprefix("http://"), "MachineSet", want)
-    except (OSError, ValueError, http.client.HTTPException) as e:
+    except NET_ERRORS as e:
         return 502, {"error": f"{base} did not take it: "
                               f"{type(e).__name__}: {e}"}
     if not isinstance(out, dict):

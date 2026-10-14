@@ -24,17 +24,17 @@ ONE timeout table (`TIMEOUTS`) for every call between pages.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 
 from knurlogic.cluster import NET_ERRORS
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster import protocol as P
+from knurlogic.machine import http_client
 
 log = logging.getLogger(__name__)
 
@@ -147,17 +147,11 @@ def send(page: str, kind: str, doc: dict | None = None, *,
     doc = doc or {}
     data, seq = encode(kind, doc, job)
     who = who or page
-    req = urllib.request.Request(
-        f"http://{page}{MSG_PATH}", data=data, method="POST",
-        headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(
-                req, timeout=timeout_for(kind) if timeout is None
-                else timeout) as r:
-            code, raw = r.status, r.read()
-    except urllib.error.HTTPError as e:
-        code, raw = e.code, e.read()
-    except OSError as e:
+        code, raw = http_client.request(
+            f"http://{page}{MSG_PATH}", data, method="POST",
+            timeout=timeout_for(kind) if timeout is None else timeout)
+    except NET_ERRORS as e:
         raise PeerUnreachable(f"{who}: {type(e).__name__}: {e}") from e
     return decode_reply(code, raw, who, seq)
 
@@ -168,6 +162,16 @@ class Bytes:
 
     def __init__(self, path: str, offset: int, length: int):
         self.path, self.offset, self.length = path, offset, length
+
+
+def connect(page: str, kind: str,
+            timeout: float | None = None) -> http.client.HTTPConnection:
+    """A connection to the page at `page` (host:port) for streaming `kind`
+    replies with `fetch`, timed out by `kind` unless `timeout` says."""
+    host, _, port = page.rpartition(":")
+    return http.client.HTTPConnection(
+        host, int(port), timeout=timeout_for(kind) if timeout is None
+        else timeout)
 
 
 #: what fetch reads per recv_into: bounded, whatever the range
@@ -182,14 +186,10 @@ def fetch(page: str, kind: str, doc: dict, into, *,
     range). A refusal raises PeerRefused with the peer's reason; a short
     or broken stream, PeerUnreachable. `conn`: an http.client connection
     to reuse (one per reader)."""
-    import http.client
     data, seq = encode(kind, doc, doc.get("job"))
     who = who or page
-    host, _, port = page.rpartition(":")
     own = conn is None
-    c = conn or http.client.HTTPConnection(
-        host, int(port), timeout=timeout_for(kind) if timeout is None
-        else timeout)
+    c = conn or connect(page, kind, timeout)
     try:
         c.request("POST", MSG_PATH, body=data,
                   headers={"Content-Type": "application/json"})
