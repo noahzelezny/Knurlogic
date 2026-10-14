@@ -292,26 +292,12 @@ def admit(
     last = _snap_down(n - 1, spans, start_pos)
 
     def _kw(a: int, b: int) -> dict:
-        """Trunk kwargs for ids[:, a:b]: the embeds/extras slices."""
-        if embeds is None and not extras:
-            return {}
-        kw = {}
-        if embeds is not None:
-            kw["input_embeddings"] = embeds[:, a - start_pos:b - start_pos]
-        for name, v in (extras or {}).items():
-            arr, axis = v if isinstance(v, tuple) else (v, 1)
-            sl = [slice(None)] * arr.ndim
-            sl[axis] = slice(a - start_pos, b - start_pos)
-            kw[name] = arr[tuple(sl)]
-        return kw
+        return _span_kwargs(embeds, extras, a - start_pos, b - start_pos)
 
     h_chunks: list[mx.array] = []
     seeded = start_pos          # the head is seeded over [start_pos, seeded)
-    cps = sorted(c for c in set(checkpoints or ())
-                 if start_pos < c <= last and _inside(c, spans) is None
-                 and (not row_drafts or c - start_pos >= 2))
-    if on_checkpoint is None:
-        cps = []
+    cps = ([] if on_checkpoint is None else
+           _checkpoints(checkpoints, start_pos, last, spans, row_drafts))
     ctx = prefill_ctx() if prefill_ctx is not None else contextlib.nullcontext()
     with ctx:
         i = start_pos
@@ -323,28 +309,10 @@ def admit(
             chunk = ids[:, i:end]
             if not chunk.shape[1]:
                 break
-            try:
-                model(chunk, cache=cache, **_kw(i, end))
-                # Evaluate the cache and the captured hidden state, never
-                # the logits: forcing them would materialise the lm_head
-                # projection for every prompt position (loop.py says the
-                # same).
-                want = [c.state for c in cache if hasattr(c, "state")]
-                if block:
-                    head.advance(get_h(), dcache)
-                    want += dcache.state
-                elif drafts:
-                    h = get_h()
-                    h_chunks.append(h)
-                    want.append(h)
-                elif row_drafts and (h := get_h()) is not None:
-                    # a tensor follower of a drafting rank 0: the final
-                    # hidden state holds the last layer's all_sum, which
-                    # rank 0 runs here for its head (mirror_hidden)
-                    want.append(h)
-                mx.eval(want)
-            except Exception as e:
-                raise ForwardFailed(str(e)) from e
+            h = _prefill_chunk(model, head, get_h, chunk, cache, dcache,
+                               _kw(i, end), block, drafts, row_drafts)
+            if h is not None:
+                h_chunks.append(h)
             i = end
             mx.clear_cache()
             chunk_done()
@@ -371,33 +339,99 @@ def admit(
     logits = model(ids[:, max(last, 0):], cache=cache, **_kw(max(last, 0), n))
     row_t1 = logits[:, -1]
     t1 = pick(row_t1, params, []).astype(mx.int32)
-
-    draft_row = None
-    if block:
-        head.advance(get_h(), dcache)
-        mx.eval(t1, dcache.state)
-    elif drafts:
-        h_chunks.append(get_h())
-        h_last = h_chunks[-1][:, -1:]
-        mx.eval(t1, h_last)
-        # Positions 0..P-2, so the head enters decoding with the trunk's
-        # history and cache.offset == P-1 == the true position. Chunked like
-        # the trunk's prefill: one call over the whole prompt is quadratic
-        # on an attention head (see seed.py).
-        seed_head(head, h_chunks, ids, n, dcache, prefill_step_size, start=seeded)
-        h_chunks.clear()
-        mx.clear_cache()
-        # Bootstrap draft at position P-1: input (h_{P-1}, x_P).
-        draft_row = head.draft_logits(h_last, t1[None], dcache)[:, -1]
-        mx.eval(draft_row)
-    else:
-        mx.eval(t1)
-
+    draft_row = _enter_decoding(head, get_h, ids, t1, dcache, h_chunks,
+                                seeded, prefill_step_size, block, drafts)
     return Row(
         uid=uid, params=params, cache=cache, hcache=dcache, t1=t1,
         row_t1=row_t1, draft_row=draft_row, n_prompt=n, drafts=row_drafts,
         rope_delta=int(rope_delta), mrope=bool(mrope),
     )
+
+
+def _span_kwargs(embeds, extras, a: int, b: int) -> dict:
+    """Trunk kwargs for the prompt span [a, b) (relative to the start of
+    `embeds` / `extras`): the slices of each. An extras value is an array
+    whose sequence axis is 1, or an `(array, axis)` pair naming it."""
+    if embeds is None and not extras:
+        return {}
+    kw = {}
+    if embeds is not None:
+        kw["input_embeddings"] = embeds[:, a:b]
+    for name, v in (extras or {}).items():
+        arr, axis = v if isinstance(v, tuple) else (v, 1)
+        sl = [slice(None)] * arr.ndim
+        sl[axis] = slice(a, b)
+        kw[name] = arr[tuple(sl)]
+    return kw
+
+
+def _checkpoints(checkpoints, start_pos: int, last: int, spans,
+                 row_drafts: bool) -> list[int]:
+    """The checkpoint positions prefill stops at, in order: inside the
+    prefilled span, never inside an image, and on a drafting row at least
+    two positions in (the head is seeded only to c-1)."""
+    return sorted(c for c in set(checkpoints or ())
+                  if start_pos < c <= last and _inside(c, spans) is None
+                  and (not row_drafts or c - start_pos >= 2))
+
+
+def _prefill_chunk(model, head, get_h, chunk, cache, dcache, kw: dict,
+                   block: bool, drafts: bool, row_drafts: bool):
+    """One prefill forward over `chunk`, evaluated. -> the captured hidden
+    state a one-token head is later seeded from, else None. A block head
+    is advanced over the chunk here."""
+    try:
+        model(chunk, cache=cache, **kw)
+        # Evaluate the cache and the captured hidden state, never the
+        # logits: forcing them would materialise the lm_head projection for
+        # every prompt position (loop.py says the same).
+        want = [c.state for c in cache if hasattr(c, "state")]
+        kept = None
+        if block:
+            head.advance(get_h(), dcache)
+            want += dcache.state
+        elif drafts:
+            kept = get_h()
+            want.append(kept)
+        elif row_drafts and (h := get_h()) is not None:
+            # a tensor follower of a drafting rank 0: the final hidden
+            # state holds the last layer's all_sum, which rank 0 runs here
+            # for its head (mirror_hidden)
+            want.append(h)
+        mx.eval(want)
+    except Exception as e:
+        raise ForwardFailed(str(e)) from e
+    return kept
+
+
+def _enter_decoding(head, get_h, ids, t1, dcache, h_chunks: list,
+                    seeded: int, prefill_step_size: int, block: bool,
+                    drafts: bool):
+    """After the forward that gave the first token `t1`: bring the head to
+    the prompt's end. -> a one-token head's bootstrap draft row, else
+    None."""
+    if block:
+        head.advance(get_h(), dcache)
+        mx.eval(t1, dcache.state)
+        return None
+    if not drafts:
+        mx.eval(t1)
+        return None
+    n = int(ids.shape[1])
+    h_chunks.append(get_h())
+    h_last = h_chunks[-1][:, -1:]
+    mx.eval(t1, h_last)
+    # Positions 0..P-2, so the head enters decoding with the trunk's
+    # history and cache.offset == P-1 == the true position. Chunked like
+    # the trunk's prefill: one call over the whole prompt is quadratic on
+    # an attention head (see seed.py).
+    seed_head(head, h_chunks, ids, n, dcache, prefill_step_size, start=seeded)
+    h_chunks.clear()
+    mx.clear_cache()
+    # Bootstrap draft at position P-1: input (h_{P-1}, x_P).
+    draft_row = head.draft_logits(h_last, t1[None], dcache)[:, -1]
+    mx.eval(draft_row)
+    return draft_row
 
 
 def _inside(p: int, spans) -> tuple | None:
@@ -793,46 +827,9 @@ class MTPBatch:
                          **pos2)
 
         # --- verdicts ----------------------------------------------------
-        oks: list[Any] = [False] * B
-        t2_rows: list[Any] = [self.t1[i:i + 1] for i in range(B)]
-        lazy: list[mx.array] = []
         # a pipeline follower's logits are zeros: its verdicts come in B2
         judge = self.coord is None or self.coord.leader
-        for i in (range(B) if judge else ()):
-            p = self.params[i]
-            row = apply(lg2[i:i + 1, 0], p.processors,
-                         _with(self.emitted[i], self.t1[i:i + 1])
-                         if p.processors else self.emitted[i])
-            if not live[i]:
-                # Non-drafting row: the trunk's own token, committed through
-                # the replay below.
-                t2 = (mx.argmax(row, axis=-1) if p.dist is None
-                      else p.dist(row).sample(
-                          row_key(p, len(self.emitted[i]) + 1)))
-                oks[i] = False
-                t2_rows[i] = t2
-                lazy.append(t2)
-            elif p.dist is None:
-                true_t2 = mx.argmax(row, axis=-1)
-                ok = true_t2 == d2[i:i + 1]
-                oks[i] = ok
-                t2_rows[i] = mx.where(ok, d2[i:i + 1], true_t2)
-                lazy += [ok, t2_rows[i]]
-            elif p.keys is not None:
-                # seeded: the target's own draw under the draft's key; the
-                # draft is accepted iff they agree (sampling.Keys)
-                t2 = p.dist(row).sample(row_key(p, len(self.emitted[i]) + 1))
-                acc = t2 == d2[i:i + 1]
-                oks[i] = acc
-                t2_rows[i] = t2
-                lazy += [acc, t2]
-            else:
-                pt = p.dist(row)
-                acc, t2 = rejection_correct(pt.probs, qs[i].probs,
-                                            d2[i:i + 1])
-                oks[i] = acc
-                t2_rows[i] = t2
-                lazy += [acc, t2]
+        oks, t2_rows, lazy = self._verdicts(B, live, d2, qs, lg2, judge)
         if lazy:
             mx.eval(*lazy)
         elif not judge:
@@ -889,32 +886,10 @@ class MTPBatch:
                        axis=1)
 
         # --- emit --------------------------------------------------------
-        t1_list = self.t1.tolist()
-        t2_list = t2.tolist()
-        out: list[RowStep] = []
-        keep: list[int] = []
-        for i in range(B):
-            p = self.params[i]
-            em = self.emitted[i]
-            toks: list[Emitted] = []
-            finish: str | None = None
-            for tok, from_draft, row in (
-                (t1_list[i], False, self.row_t1[i]),
-                (t2_list[i], ok_flags[i], lg2[i, 0]),
-            ):
-                em.append(tok)
-                if tok in p.eos:
-                    finish = "stop"
-                elif len(em) >= p.max_tokens:
-                    finish = "length"
-                toks.append(Emitted(token=tok, from_draft=from_draft,
-                                    finish=finish, logits=row))
-                if finish is not None:
-                    break
-            out.append(RowStep(uid=self.uids[i], tokens=toks,
-                               accepted=self.accepted[i], steps=self.steps[i]))
-            if finish is None:
-                keep.append(i)
+        t1_list, t2_list = self.t1.tolist(), t2.tolist()
+        out, keep = self._emit([[(t1_list[i], False, self.row_t1[i]),
+                                 (t2_list[i], ok_flags[i], lg2[i, 0])]
+                                for i in range(B)])
 
         # --- next-step state for the survivors ---------------------------
         row_t1 = lg2[:, 1]
@@ -949,6 +924,77 @@ class MTPBatch:
         self.t1 = t_next
         self.row_t1 = row_t1
         return out
+
+    def _verdicts(self, B: int, live, d2, qs, lg2, judge: bool):
+        """Each row's verdict on its draft from the verify's first logits.
+        -> (oks, t2_rows, the lazy arrays to evaluate); a row that is not
+        judged here keeps (False, t1)."""
+        oks: list[Any] = [False] * B
+        t2_rows: list[Any] = [self.t1[i:i + 1] for i in range(B)]
+        lazy: list[mx.array] = []
+        for i in (range(B) if judge else ()):
+            p = self.params[i]
+            row = apply(lg2[i:i + 1, 0], p.processors,
+                         _with(self.emitted[i], self.t1[i:i + 1])
+                         if p.processors else self.emitted[i])
+            if not live[i]:
+                # Non-drafting row: the trunk's own token, committed through
+                # the replay below.
+                t2 = (mx.argmax(row, axis=-1) if p.dist is None
+                      else p.dist(row).sample(
+                          row_key(p, len(self.emitted[i]) + 1)))
+                oks[i] = False
+                t2_rows[i] = t2
+                lazy.append(t2)
+            elif p.dist is None:
+                true_t2 = mx.argmax(row, axis=-1)
+                ok = true_t2 == d2[i:i + 1]
+                oks[i] = ok
+                t2_rows[i] = mx.where(ok, d2[i:i + 1], true_t2)
+                lazy += [ok, t2_rows[i]]
+            elif p.keys is not None:
+                # seeded: the target's own draw under the draft's key; the
+                # draft is accepted iff they agree (sampling.Keys)
+                t2 = p.dist(row).sample(row_key(p, len(self.emitted[i]) + 1))
+                acc = t2 == d2[i:i + 1]
+                oks[i] = acc
+                t2_rows[i] = t2
+                lazy += [acc, t2]
+            else:
+                pt = p.dist(row)
+                acc, t2 = rejection_correct(pt.probs, qs[i].probs,
+                                            d2[i:i + 1])
+                oks[i] = acc
+                t2_rows[i] = t2
+                lazy += [acc, t2]
+        return oks, t2_rows, lazy
+
+    def _emit(self, seqs: list) -> tuple[list[RowStep], list[int]]:
+        """Commit each row i's tokens `seqs[i]` [(token, from_draft,
+        logits)] in order, up to the one that finishes it. -> (RowSteps,
+        the indices of rows still running)."""
+        out: list[RowStep] = []
+        keep: list[int] = []
+        for i, seq in enumerate(seqs):
+            p = self.params[i]
+            em = self.emitted[i]
+            toks: list[Emitted] = []
+            finish: str | None = None
+            for tok, from_draft, row in seq:
+                em.append(tok)
+                if tok in p.eos:
+                    finish = "stop"
+                elif len(em) >= p.max_tokens:
+                    finish = "length"
+                toks.append(Emitted(token=tok, from_draft=from_draft,
+                                    finish=finish, logits=row))
+                if finish is not None:
+                    break
+            out.append(RowStep(uid=self.uids[i], tokens=toks,
+                               accepted=self.accepted[i], steps=self.steps[i]))
+            if finish is None:
+                keep.append(i)
+        return out, keep
 
     def _plain_step(self, then: mx.array | None = None) -> list[RowStep]:
         """One stock decode step: every row commits t1 and samples the next.

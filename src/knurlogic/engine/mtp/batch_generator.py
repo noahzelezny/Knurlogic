@@ -657,10 +657,7 @@ class MTPBatchGenerator(BatchGenerator):
                 admitted = self._admit_one()
             except PrefillCancelled as e:
                 logger.info("%s", e)
-                self._rows.pop(uid, None)
-                self._ckpt_pending.pop(uid, None)
-                self._failed[uid] = e
-                self._requests.pop(uid, None)
+                self._fail(uid, e, request=True)
                 return prompt_responses + self._failed_responses(), []
             # one request's failure goes to that request; the generation thread lives
             # (logged)
@@ -677,10 +674,7 @@ class MTPBatchGenerator(BatchGenerator):
                     os._exit(1)
                 logger.exception("admission of request %s failed; failing "
                                  "that request only", uid)
-                self._rows.pop(uid, None)
-                self._ckpt_pending.pop(uid, None)
-                self._failed[uid] = e
-                self._requests.pop(uid, None)
+                self._fail(uid, e, request=True)
                 prompt_responses += self._failed_responses()
                 return prompt_responses, []
             finally:
@@ -725,18 +719,42 @@ class MTPBatchGenerator(BatchGenerator):
             uids = list(self._batch.uids)
             self._batch.remove(uids)
             for u in uids:
-                self._rows.pop(u, None)
-                self._ckpt_pending.pop(u, None)
-                self._failed[u] = e
+                self._fail(u, e)
             if self._coord is not None:
                 # the same broadcast count as a failed admission's
                 self._batch.t1 = self._coord.b0(self._batch.t1)
             return prompt_responses + self._failed_responses(), []
 
-        # NaN guard: a row whose logits went non-finite this step is failed
-        # before any of this step's tokens leave (sampled, they are token 0
-        # forever -- "!!!!!"). The flags were computed inside the step's own
-        # eval (batch_loop), so this costs no sync.
+        row_steps, bad = self._drop_nonfinite(row_steps)
+        if bad:
+            prompt_responses += self._failed_responses()
+
+        self._counters.decode_time += time.perf_counter() - tic
+        out, finished = self._token_responses(row_steps)
+        if finished:
+            self._close_finished(out, finished)
+
+        self._counters.generation_tokens += len(out)
+        self._counters.generation_steps += 1
+        if self._counters.generation_steps % 512 == 0:
+            mx.clear_cache()
+        return prompt_responses, out
+
+    def _fail(self, uid, err: BaseException, *, request: bool = False):
+        """Fail one row's request with `err` (answered by
+        _failed_responses); `request` also forgets the queued request."""
+        self._rows.pop(uid, None)
+        self._ckpt_pending.pop(uid, None)
+        self._failed[uid] = err
+        if request:
+            self._requests.pop(uid, None)
+
+    def _drop_nonfinite(self, row_steps: list) -> tuple[list, dict]:
+        """NaN guard: a row whose logits went non-finite this step is failed
+        before any of this step's tokens leave (sampled, they are token 0
+        forever -- "!!!!!"). The flags were computed inside the step's own
+        eval (batch_loop), so this costs no sync. -> (the other rows'
+        steps, {uid: the error} of the failed)."""
         bad = {}
         for rs in row_steps:
             for em in rs.tokens:
@@ -746,18 +764,19 @@ class MTPBatchGenerator(BatchGenerator):
                 st = self._rows.get(uid)
                 bad[uid] = NonFiniteLogits(nonfinite_message(
                     (st["n"] if st else 0) + 1, "batch decode"))
-        if bad:
-            logger.error("non-finite logits in %d row(s); failing only those "
-                         "requests", len(bad))
-            self._batch.remove(list(bad))
-            for u, err in bad.items():
-                self._rows.pop(u, None)
-                self._ckpt_pending.pop(u, None)
-                self._failed[u] = err
-            prompt_responses += self._failed_responses()
-            row_steps = [rs for rs in row_steps if rs.uid not in bad]
+        if not bad:
+            return row_steps, bad
+        logger.error("non-finite logits in %d row(s); failing only those "
+                     "requests", len(bad))
+        self._batch.remove(list(bad))
+        for u, err in bad.items():
+            self._fail(u, err)
+        return [rs for rs in row_steps if rs.uid not in bad], bad
 
-        self._counters.decode_time += time.perf_counter() - tic
+    def _token_responses(self, row_steps: list) -> tuple[list, list]:
+        """This step's tokens as TokenResponses, each row's stop sequences
+        and token limit applied. -> (responses, [(uid, index of its last
+        response, RowStep)] of the rows that finished)."""
         out: list[TokenResponse] = []
         finished = []
         for rs in row_steps:
@@ -783,25 +802,22 @@ class MTPBatchGenerator(BatchGenerator):
                 if finish is not None:
                     finished.append((rs.uid, len(out) - 1, rs))
                     break                  # nothing after a finish, ever
+        return out, finished
 
-        if finished:
-            idx = {u: i for i, u in enumerate(self._batch.uids)}
-            for uid, k, rs in finished:
-                st = self._rows.pop(uid)
-                out[k].prompt_cache = self._entry(idx[uid])
-                out[k].all_tokens = st["fed"]
-                # RowStep carries RUNNING totals for the row, so they are
-                # counted once, when the row is done.
-                self._stats["steps"] = self._stats.get("steps", 0) + rs.steps
-                self._stats["accepted"] = (self._stats.get("accepted", 0)
-                                           + rs.accepted)
-            self._batch.remove([u for u, _, _ in finished])
-
-        self._counters.generation_tokens += len(out)
-        self._counters.generation_steps += 1
-        if self._counters.generation_steps % 512 == 0:
-            mx.clear_cache()
-        return prompt_responses, out
+    def _close_finished(self, out: list, finished: list) -> None:
+        """Give each finished row's last response its prompt cache entry and
+        tokens, count its drafting totals, and drop it from the batch."""
+        idx = {u: i for i, u in enumerate(self._batch.uids)}
+        for uid, k, rs in finished:
+            st = self._rows.pop(uid)
+            out[k].prompt_cache = self._entry(idx[uid])
+            out[k].all_tokens = st["fed"]
+            # RowStep carries RUNNING totals for the row, so they are
+            # counted once, when the row is done.
+            self._stats["steps"] = self._stats.get("steps", 0) + rs.steps
+            self._stats["accepted"] = (self._stats.get("accepted", 0)
+                                       + rs.accepted)
+        self._batch.remove([u for u, _, _ in finished])
 
     # ------------------------------------------------------ the rest of the
     # contract: the inherited versions look in _generation_batch, which this

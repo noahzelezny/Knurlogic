@@ -443,25 +443,11 @@ class BlockBatch(MTPBatch):
         return mx.stack(cols, axis=1), qs, conf
 
     # -------------------------------------------------------------- step
-    def _block_step(self, B: int, pre) -> list[RowStep]:
-        """`pre`: (d [B, K'], qs), the K' drafts this step verifies (qs
-        None on a follower, which never judges)."""
-        live = self._live(B)
-        d, qs = pre
+    def _block_verdicts(self, B: int, live, d, qs, lg, judge: bool):
+        """Every row's verdicts on its K drafts at once. -> (oks, tt, the
+        lazy arrays to evaluate): oks[i][k] whether d_k stands, tt[i][k]
+        the target's token at that position (k == K the bonus row)."""
         K = int(d.shape[1])
-        # rank 0 judges; a follower's verdicts come in B2
-        judge = self.coord is None or self.coord.leader
-
-        # --- verify: one (K + 1)-wide forward ----------------------------
-        csnap = snapshot(self.cache, copy=self.copy_caches)
-        inp = mx.concatenate([self.t1[:, None].astype(mx.int32), d], axis=1)
-        pos_v = self._pos_kw(K + 1)
-        lg = self.model(inp, cache=self.cache, **pos_v)       # [B, K+1, V]
-        h_v = self.get_h()
-        self._prof("verify", lg)
-
-        # --- verdicts, every position at once: oks[i][k] says whether d_k
-        # stands, tt[i][k] is the target's token at that position ---------
         oks, tt, lazy = [], [], []
         for i in (range(B) if judge else ()):
             p = self.params[i]
@@ -499,6 +485,28 @@ class BlockBatch(MTPBatch):
                 lazy += [ok, t]
             oks.append(ok_i)
             tt.append(tt_i)
+        return oks, tt, lazy
+
+    def _block_step(self, B: int, pre) -> list[RowStep]:
+        """`pre`: (d [B, K'], qs), the K' drafts this step verifies (qs
+        None on a follower, which never judges)."""
+        live = self._live(B)
+        d, qs = pre
+        K = int(d.shape[1])
+        # rank 0 judges; a follower's verdicts come in B2
+        judge = self.coord is None or self.coord.leader
+
+        # --- verify: one (K + 1)-wide forward ----------------------------
+        csnap = snapshot(self.cache, copy=self.copy_caches)
+        inp = mx.concatenate([self.t1[:, None].astype(mx.int32), d], axis=1)
+        pos_v = self._pos_kw(K + 1)
+        lg = self.model(inp, cache=self.cache, **pos_v)       # [B, K+1, V]
+        h_v = self.get_h()
+        self._prof("verify", lg)
+
+        # --- verdicts, every position at once: oks[i][k] says whether d_k
+        # stands, tt[i][k] is the target's token at that position ---------
+        oks, tt, lazy = self._block_verdicts(B, live, d, qs, lg, judge)
         if judge:
             # one sync for the verify, its verdicts, the drafts and the
             # confidence prediction (_record_accept reads it back)
@@ -565,30 +573,10 @@ class BlockBatch(MTPBatch):
                        + [finite_rows(lg[:, k]) for k in range(m)], axis=1)
 
         # --- emit --------------------------------------------------------
-        d_list = [r[:m] for r in d_all]
-        out: list[RowStep] = []
-        keep: list[int] = []
-        for i in range(B):
-            p = self.params[i]
-            em = self.emitted[i]
-            toks: list[Emitted] = []
-            finish: str | None = None
-            seq = [(t1_list[i], False, self.row_t1[i])] + [
-                (d_list[i][k], True, lg[i, k]) for k in range(m)]
-            for tok, from_draft, row in seq:
-                em.append(tok)
-                if tok in p.eos:
-                    finish = "stop"
-                elif len(em) >= p.max_tokens:
-                    finish = "length"
-                toks.append(Emitted(token=tok, from_draft=from_draft,
-                                    finish=finish, logits=row))
-                if finish is not None:
-                    break
-            out.append(RowStep(uid=self.uids[i], tokens=toks,
-                               accepted=self.accepted[i], steps=self.steps[i]))
-            if finish is None:
-                keep.append(i)
+        out, keep = self._emit([
+            [(t1_list[i], False, self.row_t1[i])]
+            + [(d_all[i][k], True, lg[i, k]) for k in range(m)]
+            for i in range(B)])
 
         row_next = lg[:, m]
         self.filter(keep)
