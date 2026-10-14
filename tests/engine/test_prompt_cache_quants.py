@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
 from test_prompt_cache_convert import _equal, _setup  # noqa: E402
-from test_prompt_cache_layers import _gather_as, _lru_of  # noqa: E402
+from test_prompt_cache_layers import LINK, _gather_as, _lru_of  # noqa: E402
 from test_prompt_cache_tensor import _layout_parts, _share  # noqa: E402
 
 from knurlogic.engine.prompt_cache import convert as CV  # noqa: E402
@@ -52,7 +52,7 @@ def _save(base, key, parts, prompt, cache, monkeypatch, fp=FP):
         _gather_as(monkeypatch, [[1 if st.ready(e) else 0 for e in entries]
                                  for st in stores])
         for st in stores:
-            LY.commit(object(), st, entries)
+            LY.commit(LINK, st, entries)
 
 
 def _store(base, key, part, make, fp=FP):
@@ -278,9 +278,9 @@ def test_a_rings_ranks_borrow_their_parts(tmp_path, monkeypatch, how):
     stores = [_store(tmp_path, _key("b"), p, make16) for p in parts]
     mine = [QT.read(st, QT.candidates(st, 8)) for st in stores]
     _gather_as(monkeypatch, [LY.vote_row(g) for g in mine])
-    agreed = [LY.agree(object(), g) for g in mine]
-    monkeypatch.setattr(LY, "_gather", lambda link, row: [row] * len(parts))
-    out = [CV.persist_ring(object(), st, g) for st, g in zip(stores, agreed)]
+    agreed = [LY.agree(LINK, g) for g in mine]
+    _gather_as(monkeypatch, lambda row: [row] * len(parts))
+    out = [CV.persist_ring(LINK, st, g) for st, g in zip(stores, agreed)]
     for p, got in zip(parts, out):
         assert len(got) == 1 and got[0][5]["borrowed_from"]
         for a, b in zip(_share(p, c), got[0][2][:p.n]):

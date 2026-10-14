@@ -231,9 +231,10 @@ def shard_key(path, *, kv_bits=None, long_context=None,
 
 def rounding_of(rounding) -> str | None:
     """What per-chip rounding changes in the numbers, in the cache key's
-    own words (engine/matmul_padding.resolve): "off" when nothing is padded (per-chip rounding
-    on), whatever machines a split spans (their names would make a single
-    machine's entries and a cluster's different keys for identical K/V);
+    own words (engine/matmul_padding.resolve): "off" when nothing is
+    padded (per-chip rounding on), whatever machines a split spans (their
+    names would make a single machine's entries and a cluster's different
+    keys for identical K/V);
     when padded (per-chip rounding off), the key's setting and the chips it
     rounds for."""
     if rounding is None:
@@ -691,17 +692,8 @@ class Store:
         rank can read whole, within `max_bytes` if given, oldest first."""
         if max_n <= 0:
             return []
-        es = [e for e in self.entries() if self.holds(e[3], e[4])][-max_n:]
-        if max_bytes:
-            out, total = [], 0
-            for e in reversed(es):
-                s = _dir_size(e[3])
-                if total + s > max_bytes:
-                    break
-                out.append(e)
-                total += s
-            es = list(reversed(out))
-        return [e[3] for e in es]
+        ds = [e[3] for e in self.entries() if self.holds(e[3], e[4])][-max_n:]
+        return disk.newest_within(ds, max_bytes, _dir_size)
 
     def read(self, dirs, drop_bad: bool | None = None) -> list:
         """Read entry directories into memory, in order: disk.read's shape,
@@ -758,21 +750,9 @@ class Store:
                          now: float | None = None) -> tuple:
         """This model's entries no session owns (only those unused for
         `older_than_s`, when given). Returns (count, {dir paths})."""
-        now = time.time() if now is None else now
-        n, gone = 0, set()
-        for _, _, _, d, m in self.entries():
-            if (m.get("owner") or {}).get("session"):
-                continue
-            try:
-                if older_than_s is not None and now - \
-                        (d / ENTRY).stat().st_mtime < float(older_than_s):
-                    continue
-            except OSError:
-                continue
-            if remove_dir(d):
-                n += 1
-                gone.add(str(d))
-        return n, gone
+        return disk.drop_unowned(
+            ((d, m, d / ENTRY) for _, _, _, d, m in self.entries()),
+            remove_dir, older_than_s, now)
 
     # ---------------------------------------------------------- save
 
@@ -794,24 +774,11 @@ class Store:
         have = {e[2]: e for e in self.entries()}
         gen = max((e[0] for e in have.values()), default=0) + 1
         seq = 0
-        for _m, tokens, e in disk.lru_entries(lru):
-            own = owners.get(tuple(tokens)) if owners is not None else None
-            common = shared is not None and tuple(tokens) in shared
-            if owners is not None and not (own and own.get("session")) \
-                    and not common:
-                continue
-            if select is not None and tuple(tokens) not in select:
-                continue
-            stats["entries"] += 1
-            if disk.not_worth(len(tokens), int(e.nbytes), prefill_tps):
-                stats["not_worth"] += 1
-                continue
+        for tokens, e, own, common in disk.entries_to_save(
+                lru, stats, owners=owners, shared=shared, select=select,
+                prefill_tps=prefill_tps):
             try:
-                if not all(isinstance(t, int) for t in tokens):
-                    raise disk.Unserializable(
-                        "an image key (its image store does not outlive "
-                        "the model)")
-                h = disk.tokens_hash(tokens)
+                h = disk.saved_hash(tokens)
                 d = self.dir / h
                 old = have.get(h)
                 if only_new and old is not None and own is not None and \
@@ -860,30 +827,16 @@ class Store:
                 if own is not None:
                     own["file"] = str(d)
                     own["saved_at"] = meta["saved_at"]
-            except disk.Unserializable as ex:
-                stats["skipped"] += 1
-                stats["why"].append(str(ex))
-            except (OSError, ValueError, RuntimeError) as ex:
-                stats["skipped"] += 1
-                stats["why"].append(f"{type(ex).__name__}: {ex}")
-        if stats["skipped"]:
-            logger.warning("prompt cache: %d entr%s not saved: %s",
-                           stats["skipped"],
-                           "y" if stats["skipped"] == 1 else "ies",
-                           "; ".join(sorted(set(stats["why"]))))
+            except disk.SAVE_ERRORS as ex:
+                disk.count_skipped(stats, ex)
+        disk.warn_skipped(stats)
         stats["sweep"] = {}
         if sweep_after:
             stats["sweep"] = disk.sweep(self.base, removed=removed)
             fb = location.fallback()
             if fb != self.base and fb.exists():
                 disk.sweep(fb)          # the old format ages out there
-        stats["seconds"] = round(time.monotonic() - t0, 3)
-        logger.info("prompt cache saved to %s: %d entries, %d written "
-                    "(%d bytes, %.2f GiB), %d already there, %d not worth "
-                    "it, %d skipped, %.3fs", self.dir, stats["entries"],
-                    stats["saved"], stats["bytes"], stats["bytes"] / disk.GIB,
-                    stats["kept"], stats["not_worth"], stats["skipped"],
-                    stats["seconds"])
+        disk.log_saved(stats, self.dir, t0)
         return stats
 
     def ready(self, meta: dict) -> bool:
@@ -911,17 +864,6 @@ class Store:
 
 # ------------------------------------------------- across a ring's ranks
 
-def _gather(link, row: list) -> list:
-    """Every rank's `row` (same length on every rank), rank order."""
-    import mlx.core as mx
-    link.align()
-    got = mx.distributed.all_gather(mx.array(row, dtype=mx.int32),
-                                    group=link.group, stream=mx.cpu).tolist()
-    if got and not isinstance(got[0], list):
-        got = [got[i:i + len(row)] for i in range(0, len(got), len(row))]
-    return got
-
-
 def commit(link, store: Store | None, entries: list) -> list:
     """A ring's commit op: every rank says which of rank 0's just-saved
     `entries` it holds its part of; each entry every rank holds gets its
@@ -933,7 +875,7 @@ def commit(link, store: Store | None, entries: list) -> list:
         return []
     mine = [1 if store is not None and store.ready(e) else 0
             for e in entries]
-    rows = _gather(link, mine) if link is not None else [mine]
+    rows = link.gather_ints(mine) if link is not None else [mine]
     whole = []
     for i, e in enumerate(entries):
         h = e.get("tokens_hash", "")
@@ -973,7 +915,7 @@ def agree(link, got: list) -> list:
     """The restore's vote: every rank says which entries it read (the
     newest MAX_VOTE); each rank keeps the ones every rank read, in rank
     0's order. A collective: every rank calls it at the same point."""
-    rows = _gather(link, vote_row(got))
+    rows = link.gather_ints(vote_row(got))
 
     def codes(r):
         return [tuple(r[1 + 2 * i:3 + 2 * i]) for i in range(r[0])]

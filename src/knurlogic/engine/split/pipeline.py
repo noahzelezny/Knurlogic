@@ -26,6 +26,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten
 
+from .link import gather_ints
+
 logger = logging.getLogger(__name__)
 
 _DTYPES = (mx.float32, mx.bfloat16, mx.float16)
@@ -276,9 +278,7 @@ def split(model, group, bounds: Sequence[tuple[int, int]]) -> dict:
     # every rank's stage dtype, so a send is cast to what its receiver
     # expects (one all_gather, on the CPU, while every rank is loading)
     mine = _dtype_code(own_dtype(keep[0]))
-    codes = mx.distributed.all_gather(mx.array([mine], dtype=mx.int32),
-                                      group=group, stream=mx.cpu).tolist()
-    dts = [_DTYPES[c] for c in codes]
+    dts = [_DTYPES[c] for c, in gather_ints(group, [mine])]
     if rank < n - 1:                       # not the first stage: receive
         keep[0] = Recv(keep[0], rank + 1, group, dts[rank])
     if rank > 0:                           # not the last stage: send
@@ -623,9 +623,7 @@ def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
                                 ).encode()) & 0x7FFFFFFF
     row = [int(working_set), int(round((bandwidth_gbs or 0) * 1000)),
            len(layer_bytes), sig]
-    got = mx.distributed.all_gather(mx.array(row, dtype=mx.int64),
-                                    group=group, stream=mx.cpu).tolist()
-    rows = [got[4 * r:4 * r + 4] for r in range(n)]
+    rows = gather_ints(group, row, mx.int64)
     if len({tuple(r[2:]) for r in rows}) != 1:
         raise RuntimeError(
             "the ranks read different artifacts (layer count, layer-bytes "

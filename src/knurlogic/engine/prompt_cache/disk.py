@@ -606,21 +606,30 @@ def drop_sessionless_files(d: Path, older_than_s=None,
     """Delete the files in key directory `d` no session owns (requests
     that named none, the shared system-prompt checkpoints) -- only those
     unused for `older_than_s`, when given. Returns (count, {paths})."""
+    return drop_unowned(((f, _header(f), f) for _, _, _, f in entries(d)),
+                        _remove, older_than_s, now)
+
+
+def drop_unowned(rows, remove, older_than_s=None,
+                 now: float | None = None) -> tuple:
+    """Either format's sessionless drop: of `rows` (path, meta, the file
+    whose mtime is its last use), remove (`remove(path)` -> bool) each whose
+    meta names no owning session -- only those unused for `older_than_s`,
+    when given. Returns (count, {paths})."""
     now = time.time() if now is None else now
     n, gone = 0, set()
-    for _, _, _, f in entries(d):
-        m = _header(f)
+    for p, m, stamp in rows:
         if m is None or (m.get("owner") or {}).get("session"):
             continue
         try:
             if older_than_s is not None and \
-                    now - f.stat().st_mtime < float(older_than_s):
+                    now - stamp.stat().st_mtime < float(older_than_s):
                 continue
-            f.unlink()
-            n += 1
-            gone.add(str(f))
         except OSError:
-            pass
+            continue
+        if remove(p):
+            n += 1
+            gone.add(str(p))
     return n, gone
 
 
@@ -691,6 +700,62 @@ def lru_entries(lru) -> list:
     return out
 
 
+def entries_to_save(lru, stats: dict, *, owners, shared, select, prefill_tps):
+    """Either format's save: the LRU entries a save considers, as (tokens,
+    entry, owner meta, shared). With `owners`, only entries with a session
+    or among `shared`; only those in `select` when given; an entry quicker
+    to recompute than to read back is counted "not_worth" and left out.
+    Counts each considered entry in `stats`."""
+    for _m, tokens, e in lru_entries(lru):
+        own = owners.get(tuple(tokens)) if owners is not None else None
+        common = shared is not None and tuple(tokens) in shared
+        if owners is not None and not (own and own.get("session")) \
+                and not common:
+            continue
+        if select is not None and tuple(tokens) not in select:
+            continue
+        stats["entries"] += 1
+        if not_worth(len(tokens), int(e.nbytes), prefill_tps):
+            stats["not_worth"] += 1
+            continue
+        yield tokens, e, own, common
+
+
+def saved_hash(tokens) -> str:
+    """The entry's tokens_hash; Unserializable for an image key."""
+    if not all(isinstance(t, int) for t in tokens):
+        raise Unserializable("an image key (its image store does "
+                             "not outlive the model)")
+    return tokens_hash(tokens)
+
+
+#: what one entry's save may raise without failing the rest
+SAVE_ERRORS = (Unserializable, OSError, ValueError, RuntimeError)
+
+
+def count_skipped(stats: dict, ex: Exception) -> None:
+    stats["skipped"] += 1
+    stats["why"].append(str(ex) if isinstance(ex, Unserializable)
+                        else f"{type(ex).__name__}: {ex}")
+
+
+def warn_skipped(stats: dict) -> None:
+    if stats["skipped"]:
+        logger.warning("prompt cache: %d entr%s not saved: %s",
+                       stats["skipped"],
+                       "y" if stats["skipped"] == 1 else "ies",
+                       "; ".join(sorted(set(stats["why"]))))
+
+
+def log_saved(stats: dict, where, t0: float) -> None:
+    stats["seconds"] = round(time.monotonic() - t0, 3)
+    logger.info("prompt cache saved to %s: %d entries, %d written "
+                "(%d bytes, %.2f GiB), %d already there, %d not worth it, "
+                "%d skipped, %.3fs", where, stats["entries"], stats["saved"],
+                stats["bytes"], stats["bytes"] / GIB, stats["kept"],
+                stats["not_worth"], stats["skipped"], stats["seconds"])
+
+
 def save(lru, key: dict, base: Path | None = None, *, owners=None,
          only_new: bool = False, model: str | None = None,
          select=None, prefill_tps=None, shared=None,
@@ -724,23 +789,11 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
     have = {h: f for _, _, h, f in entries(d)}
     gen = max((g for g, _, _, _ in entries(d)), default=0) + 1
     seq = 0
-    for _m, tokens, e in lru_entries(lru):
-        own = owners.get(tuple(tokens)) if owners is not None else None
-        common = shared is not None and tuple(tokens) in shared
-        if owners is not None and not (own and own.get("session")) \
-                and not common:
-            continue
-        if select is not None and tuple(tokens) not in select:
-            continue
-        stats["entries"] += 1
-        if not_worth(len(tokens), int(e.nbytes), prefill_tps):
-            stats["not_worth"] += 1
-            continue
+    for tokens, e, own, common in entries_to_save(
+            lru, stats, owners=owners, shared=shared, select=select,
+            prefill_tps=prefill_tps):
         try:
-            if not all(isinstance(t, int) for t in tokens):
-                raise Unserializable("an image key (its image store does "
-                                     "not outlive the model)")
-            h = tokens_hash(tokens)
+            h = saved_hash(tokens)
             old = have.pop(h, None)
             if only_new and old is not None and own is not None and \
                     own.get("file") == str(old):
@@ -773,29 +826,16 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
                 own["file"], own["saved_at"] = str(f), round(time.time(), 3)
             stats["saved"] += 1
             stats["bytes"] += f.stat().st_size
-        except Unserializable as ex:
-            stats["skipped"] += 1
-            stats["why"].append(str(ex))
-        except (OSError, ValueError, RuntimeError) as ex:
-            stats["skipped"] += 1
-            stats["why"].append(f"{type(ex).__name__}: {ex}")
-    if stats["skipped"]:
-        logger.warning("prompt cache: %d entr%s not saved: %s",
-                       stats["skipped"],
-                       "y" if stats["skipped"] == 1 else "ies",
-                       "; ".join(sorted(set(stats["why"]))))
+        except SAVE_ERRORS as ex:
+            count_skipped(stats, ex)
+    warn_skipped(stats)
     if d.exists() and not (d / "key.json").exists():
         try:
             (d / "key.json").write_text(json.dumps(key, indent=1))
         except OSError:
             pass
     stats["sweep"] = sweep(base, removed=removed) if sweep_after else {}
-    stats["seconds"] = round(time.monotonic() - t0, 3)
-    logger.info("prompt cache saved to %s: %d entries, %d written "
-                "(%d bytes, %.2f GiB), %d already there, %d not worth it, "
-                "%d skipped, %.3fs", d, stats["entries"], stats["saved"],
-                stats["bytes"], stats["bytes"] / GIB, stats["kept"],
-                stats["not_worth"], stats["skipped"], stats["seconds"])
+    log_saved(stats, d, t0)
     return stats
 
 
@@ -828,20 +868,27 @@ def candidates(key: dict, max_n: int, max_bytes: int | None = None,
     base = base or root()
     if sweep_first:
         sweep(base)
-    es = entries(base / key_id(key))[-max_n:]
-    if max_bytes:
-        out, total = [], 0
-        for e in reversed(es):
-            try:
-                s = e[3].stat().st_size
-            except OSError:
-                continue
-            if total + s > max_bytes:
-                break
-            out.append(e)
-            total += s
-        es = list(reversed(out))
-    return [e[3] for e in es]
+    fs = [e[3] for e in entries(base / key_id(key))[-max_n:]]
+    return newest_within(fs, max_bytes, lambda f: f.stat().st_size)
+
+
+def newest_within(paths: list, max_bytes: int | None, size_of) -> list:
+    """The newest of `paths` (oldest first) that fit `max_bytes` together,
+    still oldest first; all of them when `max_bytes` is None or 0. One whose
+    size cannot be read (`size_of` raises OSError) is left out."""
+    if not max_bytes:
+        return list(paths)
+    out, total = [], 0
+    for p in reversed(paths):
+        try:
+            s = size_of(p)
+        except OSError:
+            continue
+        if total + s > max_bytes:
+            break
+        out.append(p)
+        total += s
+    return out[::-1]
 
 
 def vote(files) -> list[int]:
@@ -859,13 +906,7 @@ def agree(link, files) -> list:
     names are the same entries in the same order); otherwise none does --
     a miss, not an error. A collective: every rank calls it at the same
     point (ModelHost.after_bind, before the warm-up)."""
-    import mlx.core as mx
-    row = vote(files)
-    link.align()
-    got = mx.distributed.all_gather(mx.array(row, dtype=mx.int32),
-                                    group=link.group, stream=mx.cpu).tolist()
-    rows = [got[i:i + len(row)] for i in range(0, len(got), len(row))] \
-        if got and not isinstance(got[0], list) else got
+    rows = link.gather_ints(vote(files))
     if all(r == rows[0] for r in rows):
         return list(files)
     logger.info("prompt cache: the ranks hold different saved entries "

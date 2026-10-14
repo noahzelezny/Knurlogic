@@ -26,6 +26,18 @@ class Desync(RuntimeError):
 
 # ------------------------------------------------------------------- link
 
+def gather_ints(group, row: list, dtype=None) -> list[list[int]]:
+    """Every rank's int `row` (the same length on every rank), in rank
+    order: one all_gather on the CPU. `dtype` defaults to int32. A
+    collective: every rank of `group` calls it at the same point."""
+    got = mx.distributed.all_gather(
+        mx.array(row, dtype=mx.int32 if dtype is None else dtype),
+        group=group, stream=mx.cpu).tolist()
+    if got and not isinstance(got[0], list):
+        got = [got[i:i + len(row)] for i in range(0, len(got), len(row))]
+    return got
+
+
 class Link:
     """The control exchange between ranks: one all_gather of a fixed-size
     vector per step, then the plan's bytes (all_sum; only rank 0's are
@@ -49,6 +61,11 @@ class Link:
         #: exchanges: a stopping rank 0 does not leave inside one that is
         #: still moving (http.watch_ring), which tore the peer's half
         self.entered: float | None = None
+
+    def gather_ints(self, row: list, dtype=None) -> list[list[int]]:
+        """gather_ints over this link, the ranks lined up first (align)."""
+        self.align()
+        return gather_ints(self.group, row, dtype)
 
     def barrier(self) -> None:
         mx.eval(mx.distributed.all_sum(mx.array(1), group=self.group,

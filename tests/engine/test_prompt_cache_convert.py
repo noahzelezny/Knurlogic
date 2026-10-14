@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from test_prompt_cache_layers import _gather_as, _key, _lru_of  # noqa: E402
+from test_prompt_cache_layers import LINK, _gather_as, _key, _lru_of  # noqa: E402
 from test_prompt_cache_tensor import _layout_parts, _share  # noqa: E402
 from test_prompt_disk import _family, _forced  # noqa: E402
 
@@ -67,7 +67,7 @@ def _save(base, bits, parts, prompt, cache, monkeypatch):
         _gather_as(monkeypatch, [[1 if st.ready(e) else 0 for e in entries]
                                  for st in stores])
         for st in stores:
-            LY.commit(object(), st, entries)
+            LY.commit(LINK, st, entries)
     return key
 
 
@@ -240,12 +240,11 @@ def _ring_restore(monkeypatch, base, parts, make):
         c = CV.candidates(st, 8, None)
         mine.append(CV.read(st, c))
     _gather_as(monkeypatch, [LY.vote_row(g) for g in mine])
-    agreed = [LY.agree(object(), g) for g in mine]
+    agreed = [LY.agree(LINK, g) for g in mine]
     out = []
     for st, g in zip(stores, agreed):
-        monkeypatch.setattr(LY, "_gather",
-                            lambda link, row: [row] * len(parts))
-        out.append(CV.persist_ring(object(), st, g))
+        _gather_as(monkeypatch, lambda row: [row] * len(parts))
+        out.append(CV.persist_ring(LINK, st, g))
     return stores, out
 
 

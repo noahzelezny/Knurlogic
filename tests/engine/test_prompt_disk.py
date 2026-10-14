@@ -263,8 +263,9 @@ class _Link:
     def __init__(self, others):
         self.others = others
 
-    def align(self):
-        pass
+    def gather_ints(self, row, dtype=None):
+        from knurlogic.engine.split.link import gather_ints
+        return gather_ints(self.group, row, dtype)
 
 
 def test_the_ranks_restore_all_or_none(monkeypatch, tmp_path):

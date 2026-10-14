@@ -441,9 +441,7 @@ class agree_head:
         row = [int(bool(has)), k, len(outs)] + outs + \
             [0] * (self.MAX_OUTPUTS - len(outs))
         # each rank gets here when ITS load is done: line them up first
-        self.link.align()
-        got = mx.distributed.all_gather(mx.array(row), group=self.link.group,
-                                        stream=mx.cpu).tolist()
+        got = self.link.gather_ints(row)[0]       # rank 0's
         self.leader = bool(got[0])
         self.block = int(got[1])
         self.outputs = [int(i) for i in got[3:3 + int(got[2])]]
