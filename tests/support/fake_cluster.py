@@ -21,9 +21,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from knurlogic.machine import processes
+from knurlogic.machine.units import GIB
+
 HERE = Path(__file__).resolve().parent
 SRC = str(HERE.parents[1] / "src")
-GIB = 1 << 30
 VERSIONS = {"knurlogic": "0.1.0.dev0", "mlx": "0.31.2",
             "build": "0123456789ab+mlx0.31.2"}
 
@@ -45,11 +47,7 @@ def info(i: int, ws: int = 64 * GIB, **over) -> dict:
 
 
 def alive(pid: int) -> bool:
-    import psutil
-    try:
-        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
-    except psutil.Error:
-        return False
+    return processes.running(pid)
 
 
 def wait(pred, t: float = 20.0, every: float = 0.1):

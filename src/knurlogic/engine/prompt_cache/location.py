@@ -19,10 +19,12 @@ model's cache, wherever it lives.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
+
+from knurlogic.machine import paths
+from knurlogic.machine.files import read_json, write_atomic, write_json
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +49,7 @@ _SEEN: dict = {}
 
 def fallback() -> Path:
     """The old location, used when the models folder cannot be written."""
-    base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return base / "knurlogic" / "prompt-cache"
+    return paths.cache_dir() / "prompt-cache"
 
 
 def models_folder(artifact_path) -> Path | None:
@@ -82,9 +83,7 @@ def _readme(d: Path) -> None:
     if f.exists():
         return
     try:
-        tmp = d / f".tmp-{os.getpid()}-{README}"
-        tmp.write_text(_README_TEXT)
-        os.replace(tmp, f)
+        write_atomic(f, _README_TEXT)
     except OSError:
         pass
 
@@ -120,11 +119,8 @@ def remember(d: Path) -> None:
     if str(d) in map(str, got):
         return
     try:
-        fb.mkdir(parents=True, exist_ok=True)
         names = [str(p) for p in got if p != fb] + [str(d)]
-        tmp = fb / f".tmp-{os.getpid()}-{LOCATIONS}"
-        tmp.write_text(json.dumps(sorted(set(names)), indent=1))
-        os.replace(tmp, fb / LOCATIONS)
+        write_json(fb / LOCATIONS, sorted(set(names)), indent=1)
     except OSError:
         pass
 
@@ -134,11 +130,7 @@ def known() -> list[Path]:
     (an unmounted volume's is left out), the fallback first."""
     fb = fallback()
     out = [fb]
-    try:
-        names = json.loads((fb / LOCATIONS).read_text())
-    except (OSError, ValueError):
-        names = []
-    for n in names if isinstance(names, list) else []:
+    for n in read_json(fb / LOCATIONS, []):
         p = Path(str(n))
         try:
             if p not in out and p.is_dir():

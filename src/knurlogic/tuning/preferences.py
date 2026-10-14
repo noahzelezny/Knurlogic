@@ -13,9 +13,9 @@ Design: docs/design/settings.md (preferences).
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
+from knurlogic.machine import files, paths
 from knurlogic.tuning.checks import check_knob
 from knurlogic.tuning.groups import COMPACT_KNOBS, PROMPT_CACHE_KNOBS
 from knurlogic.tuning.presets import MTP_MODE, PRESET_ROW_NAMES
@@ -27,20 +27,14 @@ NAMES = (PER_CHIP_ROUNDING,) + PRESET_ROW_NAMES + tuple(COMPACT_KNOBS) + \
 
 
 def path() -> Path:
-    import os
-    root = Path(os.environ.get("XDG_CONFIG_HOME",
-                               Path.home() / ".config")) / "knurlogic"
+    root = paths.config_dir()
     root.mkdir(parents=True, exist_ok=True)
     return root / "settings.json"
 
 
 def _raw() -> dict:
     """The file as saved; {} when damaged."""
-    try:
-        raw = json.loads(path().read_text())
-    except (OSError, ValueError):
-        return {}
-    return raw if isinstance(raw, dict) else {}
+    return files.read_json(path(), {})
 
 
 def get() -> dict:
@@ -83,9 +77,7 @@ def set(values: dict) -> dict:
     if not cur:
         p.unlink(missing_ok=True)
         return {}
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(cur, sort_keys=True) + "\n")
-    tmp.replace(p)
+    files.write_json(p, cur, end="\n", sort_keys=True)
     return cur
 
 

@@ -16,16 +16,16 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 
 from knurlogic.engine import arch, mtp
 from knurlogic.engine import model as engine
 from knurlogic.engine.mtp import binding
 from knurlogic.interfaces.page import documents
-from knurlogic.machine import status
+from knurlogic.machine import identity, status
 from knurlogic.machine.artifact import Artifact
 from knurlogic.machine.memory import wired
+from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.tuning.checks import refuse_sets, settings_refusal
 from knurlogic.tuning.live import LIVE_KNOBS
 from knurlogic.tuning.resolve import resolve
@@ -188,7 +188,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
             from knurlogic.tuning.knobs import canonical_sets, mtp_of, vision_of
             rs = canonical_sets(dict(overrides or {}))
             lead = pipeline_split.leader_bytes(a, vision=vision_of(rs), mtp=mtp_of(rs))
-            bw = ring.get("bandwidth_gbs") or pipeline_split.chip_bandwidth_gbs(_chip())
+            bw = ring.get("bandwidth_gbs") or identity.chip_bandwidth_gbs(identity.chip())
             # every rank's working set and bandwidth are gathered once the
             # ring is up; the split is computed the same way on every rank
             ring["pipeline"] = {
@@ -400,8 +400,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         if _mm["doc"] is None or now - _mm["at"] > 4.0:
             try:
                 _mm["doc"] = footprint.memory_map()
-            except (OSError, subprocess.SubprocessError, ValueError, KeyError,
-                    AttributeError):
+            except (*PROC_ERRORS, ValueError, KeyError, AttributeError):
                 _mm["doc"] = None
             _mm["at"] = now
         return _mm["doc"]
@@ -687,27 +686,15 @@ def _ring_refusals(a: Artifact, ring: dict, working_set_gib: float,
     return why
 
 
-def _chip() -> str:
-    """This machine's chip ("Apple M4 Max"), or "" when it does not say."""
-    import subprocess
-    try:
-        return subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
-                              capture_output=True, text=True,
-                              timeout=5).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return ""
-
-
 def _ring_env(ring: dict) -> None:
     """What mx.distributed.init reads, set before anything loads. The ring
     hostfile is written where the job's files live."""
     import json
-    from pathlib import Path
+
+    from knurlogic.cluster import jobs
     os.environ["MLX_RANK"] = str(int(ring["rank"]))
     if ring["link"] == "ring":
-        d = Path.home() / ".cache" / "knurlogic" / "jobs" / ring["job"]
-        d.mkdir(parents=True, exist_ok=True)
-        f = d / f"hostfile-rank{int(ring['rank'])}.json"
+        f = jobs.job_dir(ring["job"]) / f"hostfile-rank{int(ring['rank'])}.json"
         f.write_text(json.dumps([[h] for h in ring["hosts"]]))
         os.environ["MLX_HOSTFILE"] = str(f)
     else:

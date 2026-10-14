@@ -6,7 +6,6 @@ often while memory moves)."""
 from __future__ import annotations
 
 import logging
-import subprocess
 import sys
 import time
 import uuid
@@ -16,6 +15,7 @@ from knurlogic.interfaces import spawn
 from knurlogic.interfaces.page import documents
 from knurlogic.machine import identity, status
 from knurlogic.machine.memory import footprint, wired
+from knurlogic.machine.processes import PROC_ERRORS
 
 if TYPE_CHECKING:
     from knurlogic.cluster.peers import Peers
@@ -52,8 +52,7 @@ def status_fn(_n=0):
     if _MM["doc"] is None or now - _MM["at"] > 4.0:
         try:
             _MM["doc"] = footprint.memory_map()
-        except (OSError, subprocess.SubprocessError, ValueError, KeyError,
-                AttributeError):
+        except (*PROC_ERRORS, ValueError, KeyError, AttributeError):
             _MM["doc"] = None
         _MM["at"] = now
     mm = _MM["doc"]
@@ -153,8 +152,7 @@ def _build_light(now: float) -> None:
     if _MM["doc"] is None or now - _MM["at"] > _map_age_limit(now):
         try:
             _MM["doc"] = footprint.memory_map()
-        except (OSError, subprocess.SubprocessError, ValueError, KeyError,
-                AttributeError):
+        except (*PROC_ERRORS, ValueError, KeyError, AttributeError):
             _MM["doc"] = None
         _MM["at"] = time.time()
     me = identity.identity()

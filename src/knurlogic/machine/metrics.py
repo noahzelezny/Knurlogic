@@ -26,6 +26,8 @@ from collections import deque
 
 import psutil
 
+from knurlogic.machine.processes import PROC_ERRORS
+
 #: Samples kept. At the page's 2 s poll that is three minutes of line.
 HISTORY = 90
 MIN_INTERVAL_S = 1.5
@@ -69,7 +71,7 @@ def _gpu():
         out = subprocess.run(["ioreg", "-rw0", "-c", "AGXAccelerator"],
                              capture_output=True, text=True,
                              timeout=2).stdout
-    except (OSError, subprocess.SubprocessError):
+    except PROC_ERRORS:
         return None, None
     u, m = _GPU.search(out), _GPU_MEM.search(out)
     return (int(u.group(1)) if u else None, int(m.group(1)) if m else None)

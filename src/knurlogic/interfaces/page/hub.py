@@ -13,6 +13,8 @@ import subprocess
 import threading
 from pathlib import Path
 
+from knurlogic.machine.processes import PROC_ERRORS
+
 LIMIT = 50
 #: how many listing rows are read to find LIMIT runnable ones
 SCAN = 200
@@ -133,8 +135,8 @@ _LOADED: list = []
 
 
 def _store() -> Path:
-    from knurlogic.machine.servers import cache_dir
-    return cache_dir() / "downloads.json"
+    from knurlogic.machine import paths
+    return paths.cache_dir() / "downloads.json"
 
 
 def _load() -> None:
@@ -154,11 +156,11 @@ def _load() -> None:
 
 
 def _save() -> None:
-    import json
+    from knurlogic.machine import files
     rows = [{k: v for k, v in d.items() if k != "stop"}
             for d in _DOWNLOADS.values()]
     try:
-        _store().write_text(json.dumps(rows))
+        files.write_json(_store(), rows)
     except OSError:
         pass
 
@@ -281,7 +283,7 @@ def delete(repo_id: str) -> dict:
     if p:
         try:
             p.wait(10)
-        except (OSError, subprocess.SubprocessError):
+        except PROC_ERRORS:
             pass
     shutil.rmtree(_cache_dir(repo_id), ignore_errors=True)
     shutil.rmtree(_cache_dir(repo_id).parent / ".locks" /

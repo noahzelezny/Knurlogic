@@ -21,6 +21,8 @@ import threading
 import time
 from pathlib import Path
 
+from knurlogic.machine import paths
+
 logger = logging.getLogger(__name__)
 
 DAYS = 30
@@ -93,8 +95,7 @@ def labels(headers) -> dict:
 
 
 def path() -> Path:
-    return Path(os.environ.get("KNURLOGIC_HOME",
-                               Path.home() / ".knurlogic")) / "ledger.db"
+    return paths.state_dir() / "ledger.db"
 
 
 def _env_num(name: str, default: float) -> float:

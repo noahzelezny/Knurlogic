@@ -36,6 +36,7 @@ from knurlogic.interfaces.page import peers as page_peers
 from knurlogic.interfaces.page import router as page_router
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
+from knurlogic.machine.files import write_json
 from knurlogic.tuning import checks
 
 # this test process plays the page: wire launch and recovery to it
@@ -279,7 +280,7 @@ def test_build_fingerprint_hashes_the_source_and_names_mlx(tmp_path,
 
 def test_the_cluster_block_carries_the_build(monkeypatch):
     monkeypatch.setattr(C, "_INFO", {"doc": None, "at": 0.0})
-    monkeypatch.setattr(C, "_chip", lambda: "Apple M4 Max")
+    monkeypatch.setattr(C.identity, "chip", lambda: "Apple M4 Max")
     monkeypatch.setattr(C, "_selfheal", lambda: False)
     monkeypatch.setattr(links, "thunderbolt", lambda: [])
     monkeypatch.setattr(links, "rdma", lambda: {"available": False})
@@ -947,14 +948,14 @@ def test_what_is_held_counts_live_ranks_and_servers_not_the_stopping(
 def test_prepare_refuses_while_another_jobs_rank_is_loading(cache):
     other = "0123456789abcdef"
     reg = {f"{other}/1": {"job": other, "rank": 1, "pid": 1}}
-    J._write(J.marker_path(other, 1), {"phase": "loading"})
+    write_json(J.marker_path(other, 1), {"phase": "loading"})
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x",
                           info=info("Apple M3 Ultra", "192.0.2.2"),
                           shape=lambda p, w, s, vision=True, mtp=True: SHAPE,
                           registry=lambda: reg,
                           held=lambda job: [])
     assert not doc["ok"] and "one load at a time" in doc["refused"]
-    J._write(J.marker_path(other, 1), {"phase": "ready"})
+    write_json(J.marker_path(other, 1), {"phase": "ready"})
     code, doc = C.prepare(spec(), resolve=lambda i: "/m/x",
                           info=info("Apple M3 Ultra", "192.0.2.2"),
                           shape=lambda p, w, s, vision=True, mtp=True: SHAPE,
@@ -1752,3 +1753,23 @@ def test_a_stopped_job_does_not_claim_the_next_server_on_its_port(monkeypatch):
         {"runtime": "knurlogic", "where": "http://127.0.0.1:8080",
          "state": "loading"}]})
     assert not (doc["resident"][0].get("cluster") or {}).get("job")
+
+
+def test_a_failed_beat_does_not_end_the_heartbeat(tmp_path, monkeypatch):
+    """One beat raising (a full disk, a probe bug past its own guard) is
+    logged and the marker thread keeps beating."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setattr(J, "MARK_S", 0.01)
+    m = J.Marker("0123abcd", 0)
+    calls = []
+
+    def beat():
+        calls.append(1)
+        if len(calls) == 2:
+            raise TypeError("not JSON serializable")
+    m.beat = beat
+    m.start()
+    end = time.time() + 5
+    while len(calls) < 5 and time.time() < end:
+        time.sleep(0.01)
+    assert len(calls) >= 5

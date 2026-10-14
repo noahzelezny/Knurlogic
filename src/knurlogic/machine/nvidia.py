@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import subprocess
 
+from knurlogic.machine.processes import PROC_ERRORS
+
 
 def query(*fields: str) -> list | None:
     """The first GPU's `fields` (nvidia-smi --query-gpu names), as strings
@@ -17,7 +19,7 @@ def query(*fields: str) -> list | None:
             ["nvidia-smi", f"--query-gpu={','.join(fields)}",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=2)
-    except (OSError, subprocess.SubprocessError):
+    except PROC_ERRORS:
         return None
     line = out.stdout.strip().splitlines()[:1]
     if out.returncode != 0 or not line:

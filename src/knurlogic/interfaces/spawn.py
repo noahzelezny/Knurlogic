@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from knurlogic.machine.memory import footprint
+from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.machine.servers import is_our_server, registry, save_registry, serve_log
 
 #: Children started from the page: {port: (Popen, artifact path)}.
@@ -98,7 +99,7 @@ def children() -> list:
     now = time.time()
     try:
         pids = {r["pid"]: r["bytes"] for r in footprint.memory_map()["processes"]}
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+    except (*PROC_ERRORS, ValueError, KeyError, TypeError):
         pids = {}
     out = []
     for port, rec in sorted(registry().items()):
@@ -210,7 +211,7 @@ def _spawn_unlocked(path: str, port: int, tune: str = "default",
             proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT,
                                     env={**os.environ, "PYTHONUNBUFFERED": "1"},
                                     start_new_session=True)
-    except (OSError, ValueError, subprocess.SubprocessError) as e:
+    except (*PROC_ERRORS, ValueError) as e:
         return {"error": f"{type(e).__name__}: {e}"}
     CHILDREN[port] = (proc, path)
     reg = registry()

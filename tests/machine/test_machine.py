@@ -6,35 +6,34 @@ labels every node with `system_profiler` output is the same shape as a
 version check run with bare `python3` inside a loop over env paths -- every
 iteration answers for the local box.
 """
-from knurlogic.machine import status
-from knurlogic.machine.memory import wired
+from knurlogic.machine import identity, status
 
 
 def test_a_modern_identifier_cannot_name_the_product():
     """`Mac15,14` IS a Mac Studio and nothing in the string says so. Apple
     dropped the product prefix, so guessing from the identifier has to
     return nothing rather than a coin flip dressed as a fact."""
-    assert wired._kind_from_identifier("Mac15,14") == ""
-    assert wired._kind_from_identifier("Mac16,7") == ""
+    assert identity._kind_from_identifier("Mac15,14") == ""
+    assert identity._kind_from_identifier("Mac16,7") == ""
 
 
 def test_old_identifiers_still_name_the_product():
-    assert wired._kind_from_identifier("MacBookPro18,3") == "laptop"
-    assert wired._kind_from_identifier("Macmini9,1") == "mini"
-    assert wired._kind_from_identifier("iMac21,1") == "imac"
+    assert identity._kind_from_identifier("MacBookPro18,3") == "laptop"
+    assert identity._kind_from_identifier("Macmini9,1") == "mini"
+    assert identity._kind_from_identifier("iMac21,1") == "imac"
 
 
 def test_a_remote_node_is_read_from_what_it_reported():
-    assert wired.kind_from("Alex's Mac Studio", "Mac15,14")["kind"] == "studio"
-    assert wired.kind_from("Alex's MacBook Pro", "Mac16,7")["kind"] == "laptop"
-    assert wired.kind_from("kitchen mini", "")["kind"] == "mini"
+    assert identity.kind_from("Alex's Mac Studio", "Mac15,14")["kind"] == "studio"
+    assert identity.kind_from("Alex's MacBook Pro", "Mac16,7")["kind"] == "laptop"
+    assert identity.kind_from("kitchen mini", "")["kind"] == "mini"
 
 
 def test_an_unknown_machine_stays_unknown():
     """The page draws a dashed box for this, which is the right outcome:
     a machine nobody could identify should look unidentified."""
-    assert wired.kind_from("worker-07", "Mac15,14")["kind"] == ""
-    assert wired.kind_from("", "")["kind"] == ""
+    assert identity.kind_from("worker-07", "Mac15,14")["kind"] == ""
+    assert identity.kind_from("", "")["kind"] == ""
 
 
 def test_a_remote_snapshot_never_inherits_the_local_machine():
@@ -42,7 +41,7 @@ def test_a_remote_snapshot_never_inherits_the_local_machine():
     node in a snapshot would carry whatever box built the snapshot."""
     remote = status.snapshot(node="elsewhere", reachable=True,
                              memory_fn=lambda: {"available": False},
-                             machine_fn=lambda: wired.kind_from("elsewhere"))
+                             machine_fn=lambda: identity.kind_from("elsewhere"))
     assert remote["machine"]["kind"] == ""
     assert remote["machine"]["model"] == ""     # not this box's model name
 

@@ -19,9 +19,7 @@ wire, called by make_handler). Nothing here imports mlx.
 """
 
 import http.client  # noqa: E402
-import subprocess  # noqa: E402
 
-# What a call to another machine's page, or to a system tool, can raise.
+# What a call to another machine's page can raise.
 # Callers catch these (plus whatever their own parsing adds), not Exception.
 NET_ERRORS = (OSError, ValueError, http.client.HTTPException)
-PROC_ERRORS = (OSError, subprocess.SubprocessError)

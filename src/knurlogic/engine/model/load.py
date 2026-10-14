@@ -13,6 +13,8 @@ import importlib
 import subprocess
 from dataclasses import dataclass
 
+from knurlogic.machine.processes import PROC_ERRORS
+
 #: Packages that can host a model architecture, in lookup order.
 #: Where an architecture module is looked up. Only mlx_lm's namespace: every
 #: family registers there, GLM included (mlx-vlm is not needed).
@@ -81,7 +83,7 @@ def gpu_in_use() -> int | None:
         out = subprocess.run(["ioreg", "-r", "-c", "IOAccelerator", "-d1",
                               "-w0"], capture_output=True, text=True,
                              timeout=2).stdout
-    except (OSError, subprocess.SubprocessError):
+    except PROC_ERRORS:
         return None
     m = re.search(r'"In use system memory"=(\d+)', out)
     return int(m.group(1)) if m else None

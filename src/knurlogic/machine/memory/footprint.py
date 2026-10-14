@@ -8,6 +8,8 @@ Design: docs/design/memory.md (loaded).
 
 from __future__ import annotations
 
+from knurlogic.machine.processes import PROC_ERRORS
+
 # --- where the RAM went -----------------------------------------------------
 # The runtimes are unreliable narrators about their own size: exo reports none
 # per instance, and mlx-lm reports none at all. The OS knows, so ask it.
@@ -67,7 +69,7 @@ def available_memory() -> dict:
     try:
         out = subprocess.run(["vm_stat"], capture_output=True, text=True,
                              timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
+    except PROC_ERRORS:
         return {}
     m = re.search(r"page size of (\d+)", out)
     if not m:
@@ -123,7 +125,7 @@ def _footprints() -> tuple:
             # because nothing is loaded" is an answer, not noise.
             ["top", "-l", "1", "-o", "mem", "-stats", "pid,mem"],
             capture_output=True, text=True, timeout=15).stdout
-    except (OSError, subprocess.SubprocessError):
+    except PROC_ERRORS:
         return {}, {}
     found, phys = {}, available_memory()
     for line in out.splitlines():

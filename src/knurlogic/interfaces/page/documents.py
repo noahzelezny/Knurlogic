@@ -394,6 +394,7 @@ def machine_settings():
         return v
 
     def handler(q: dict) -> dict:
+        from knurlogic.machine import identity
         from knurlogic.machine.memory import wired
         from knurlogic.tuning import presets
 
@@ -440,7 +441,7 @@ def machine_settings():
             want = want[0] if want else None
         adv = wired.advise(0)
         doc = {"knobs": [], "tunes": [], "unmanaged": [], "exports": "",
-               "asked": {}, "wired": adv, "machine": wired.machine(),
+               "asked": {}, "wired": adv, "machine": identity.machine(),
                # the defaults a model launched from this page starts with
                "compaction": compaction_document()}
         if adv.get("known"):

@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from knurlogic.engine import families
+from knurlogic.machine.processes import PROC_ERRORS
 
 
 def _sha256(p: Path) -> str:
@@ -32,7 +33,7 @@ def _mlx_lm_version(python: str) -> str:
             [python, "-c", "import mlx_lm;print(mlx_lm.__version__)"],
             capture_output=True, text=True, check=True)
         return out.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    except PROC_ERRORS:
         return "unknown"
 
 
@@ -50,7 +51,7 @@ def _host_version(python: str, host: str) -> str:
             [python, "-c", f"import {host};print({host}.__version__)"],
             capture_output=True, text=True, check=True)
         return out.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    except PROC_ERRORS:
         return "unknown"
 
 

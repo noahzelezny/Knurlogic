@@ -24,7 +24,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from knurlogic.cluster import NET_ERRORS, transport
-from knurlogic.machine import processes
+from knurlogic.machine import files, paths, processes
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +148,7 @@ def memory_line(text: str) -> str:
 # reads its own port's row (interfaces/http/residency.residency).
 
 def _path() -> Path:
-    base = Path(os.environ.get("XDG_CACHE_HOME",
-                               Path.home() / ".cache")) / "knurlogic"
+    base = paths.cache_dir()
     base.mkdir(parents=True, exist_ok=True)
     return base / "recovery.json"
 
@@ -202,10 +201,8 @@ def save() -> None:
             return
         if doc == _SAVED.get("doc"):
             return
-        tmp = _models_path().with_suffix(".tmp")
         try:
-            tmp.write_text(doc)
-            tmp.replace(_models_path())
+            files.write_atomic(_models_path(), doc)
             _SAVED["doc"] = doc
         except OSError:
             pass
@@ -214,13 +211,12 @@ def save() -> None:
 def restore() -> list:
     """At page start: take back the models an earlier page process was
     tracking (not those this one already tracks). -> their keys."""
-    try:
-        d = json.loads(_models_path().read_text())
-    except (OSError, ValueError):
+    d = files.read_json(_models_path(), {})
+    if not d:
         return []
     got = []
     with _LOCK:
-        for k, r in (d.items() if isinstance(d, dict) else ()):
+        for k, r in d.items():
             if not isinstance(r, dict) or k in MODELS \
                     or r.get("kind") not in ("cluster", "single") \
                     or r.get("key") != k:
@@ -238,11 +234,7 @@ def restore() -> list:
 
 
 def read_file() -> dict:
-    try:
-        d = json.loads(_path().read_text())
-    except (OSError, ValueError):
-        return {}
-    return {str(k): v for k, v in (d.items() if isinstance(d, dict) else ())
+    return {str(k): v for k, v in files.read_json(_path(), {}).items()
             if isinstance(v, dict)}
 
 
@@ -260,10 +252,8 @@ def write_port(port, view) -> None:
             d[str(port)] = clean_view(view)
         else:
             d.pop(str(port), None)
-        tmp = _path().with_suffix(".tmp")
         try:
-            tmp.write_text(json.dumps(d))
-            tmp.replace(_path())
+            files.write_json(_path(), d)
         except OSError:
             pass
 

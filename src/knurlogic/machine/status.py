@@ -66,8 +66,7 @@ def snapshot(artifact=None, arch_rows=None, env=None, requests=0,
         d["machine"] = machine_fn()
     else:
         from knurlogic.machine import identity
-        from knurlogic.machine.memory import wired
-        d["machine"] = wired.machine()
+        d["machine"] = identity.machine()
         # Only a node answering for ITSELF has an id: it is what peers
         # deduplicate on, and a guessed one would merge two machines.
         d["id"] = identity.identity()["id"]

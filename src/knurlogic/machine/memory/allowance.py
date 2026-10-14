@@ -15,16 +15,13 @@ Stdlib only: the page server and the CLI read it without the engine.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-GIB = 1 << 30
+from knurlogic.machine import files, paths
 
 
 def path() -> Path:
-    import os
-    root = Path(os.environ.get("XDG_CONFIG_HOME",
-                               Path.home() / ".config")) / "knurlogic"
+    root = paths.config_dir()
     root.mkdir(parents=True, exist_ok=True)
     return root / "allowance.json"
 
@@ -34,10 +31,7 @@ def get() -> int:
     that cannot be read is no allowance, not an error: a setting that
     stopped a model loading because its file was damaged would be worse
     than the setting not being there."""
-    try:
-        v = json.loads(path().read_text()).get("allowance_bytes")
-    except (OSError, ValueError, AttributeError):
-        return 0
+    v = files.read_json(path(), {}).get("allowance_bytes")
     return int(v) if isinstance(v, (int, float)) and v > 0 else 0
 
 
@@ -50,9 +44,7 @@ def set(nbytes) -> int:
     if n == 0:
         p.unlink(missing_ok=True)
         return 0
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"allowance_bytes": n}) + "\n")
-    tmp.replace(p)      # a reader never sees half a file
+    files.write_json(p, {"allowance_bytes": n}, end="\n")
     return n
 
 

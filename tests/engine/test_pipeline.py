@@ -6,6 +6,7 @@ tokens with a fixed number of broadcasts per step."""
 import pytest
 from backends import gpu_rounding
 
+from knurlogic.machine import identity
 from knurlogic.tuning import fit, pipeline_split
 
 GIB = 1 << 30
@@ -176,9 +177,9 @@ def test_pipeline_families():
 
 
 def test_chip_bandwidth_is_known_only_for_unbinned_chips():
-    assert pipeline_split.chip_bandwidth_gbs("Apple M3 Ultra") == 819.0
-    assert pipeline_split.chip_bandwidth_gbs("Apple M4 Max") is None      # 410 or 546
-    assert pipeline_split.chip_bandwidth_gbs(None) is None
+    assert identity.chip_bandwidth_gbs("Apple M3 Ultra") == 819.0
+    assert identity.chip_bandwidth_gbs("Apple M4 Max") is None      # 410 or 546
+    assert identity.chip_bandwidth_gbs(None) is None
 
 
 # ------------------------------------------------------ two processes

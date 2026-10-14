@@ -43,6 +43,8 @@ import re
 import time
 from pathlib import Path
 
+from knurlogic.machine.files import write_atomic
+
 from . import disk, layers, location, slices
 
 logger = logging.getLogger(__name__)
@@ -392,9 +394,7 @@ def _complete(f, store, name: str, local: dict | None, lists: dict,
         stats["pieces"] += 1
     if entry_body is not None:
         # last: the entry is whole here only once every piece is
-        tmp = d / f".tmp-{os.getpid()}-{layers.ENTRY}"
-        tmp.write_bytes(entry_body)
-        os.replace(tmp, d / layers.ENTRY)
+        write_atomic(d / layers.ENTRY, entry_body)
         stats["pieces"] += 1
     stats["fetched"] += 1
 

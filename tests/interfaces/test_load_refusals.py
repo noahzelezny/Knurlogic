@@ -136,3 +136,19 @@ def test_stock_runtime_line_says_so_positively():
     line = stock_runtime_line()
     assert line.startswith("runtime   stock mlx-lm ")
     assert line.endswith("(no bundled model.py)")
+
+
+def test_the_ring_hostfile_goes_in_the_job_dir(tmp_path, monkeypatch):
+    """A ring rank's hostfile is written in the job's own directory, the
+    one cluster/jobs.py and its markers use (XDG_CACHE_HOME honoured)."""
+    from knurlogic.cluster import jobs
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    for k in ("MLX_RANK", "MLX_HOSTFILE"):
+        monkeypatch.delenv(k, raising=False)
+    serve._ring_env({"rank": 1, "link": "ring", "job": "0123abcd",
+                     "hosts": ["192.0.2.1:5000", "192.0.2.2:5000"]})
+    f = jobs.job_dir("0123abcd") / "hostfile-rank1.json"
+    assert str(f).startswith(str(tmp_path / "xdg"))
+    assert serve.os.environ["MLX_HOSTFILE"] == str(f)
+    assert json.loads(f.read_text()) == [["192.0.2.1:5000"],
+                                         ["192.0.2.2:5000"]]

@@ -1,5 +1,5 @@
-"""This machine's processes: command lines, resident size, environment, and
-who listens on which TCP port.
+"""This machine's processes: whether one is running, command lines, resident
+size, environment, and who listens on which TCP port.
 
 The one home for asking, on psutil (macOS, Linux and Windows alike). Each
 answer is empty -- "", 0, {}, [] -- for a process that is gone or that this
@@ -9,8 +9,13 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 
 import psutil
+
+#: What starting or talking to a system tool can raise. Callers catch these
+#: (plus whatever their own parsing adds), not Exception.
+PROC_ERRORS = (OSError, subprocess.SubprocessError)
 
 _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess,
          OSError, ValueError)
@@ -24,11 +29,26 @@ def command(pid: int) -> str:
         return ""
 
 
-def running(pid: int) -> bool:
+def running(pid: int, reap: bool = False) -> bool:
     """`pid` exists and has not exited (a zombie, exited and not yet
-    reaped, has)."""
+    reaped, has). A process this user may not inspect is running.
+
+    `reap`: `pid` may be a child of this process; one that has exited is
+    reaped (waitpid) here, so it does not stay a zombie."""
+    pid = int(pid)
+    if reap:
+        try:
+            done, _ = os.waitpid(pid, os.WNOHANG)
+            if done == pid:
+                return False
+        except ChildProcessError:
+            pass
+        except OSError:
+            return False
     try:
-        return psutil.Process(int(pid)).status() != psutil.STATUS_ZOMBIE
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.AccessDenied:
+        return True
     except _GONE:
         return False
 

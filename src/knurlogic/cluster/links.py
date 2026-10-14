@@ -18,7 +18,7 @@ from __future__ import annotations
 import subprocess
 import time
 
-from knurlogic.cluster import PROC_ERRORS
+from knurlogic.machine.processes import PROC_ERRORS
 
 _CACHE: dict = {}
 

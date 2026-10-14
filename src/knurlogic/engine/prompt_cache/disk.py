@@ -69,6 +69,8 @@ import struct
 import time
 from pathlib import Path
 
+from knurlogic.machine.files import read_json, write_json
+
 logger = logging.getLogger(__name__)
 
 FORMAT = 1
@@ -499,13 +501,8 @@ def pins(base: Path | None = None) -> dict:
     `base`, every root's (a pin anywhere counts)."""
     out: dict = {}
     for b in _roots(base):
-        try:
-            got = json.loads((b / PINS).read_text())
-        except (OSError, ValueError):
-            continue
-        if isinstance(got, dict):
-            for k, v in got.items():
-                out[str(k)] = out.get(str(k), False) or bool(v)
+        for k, v in read_json(b / PINS, {}).items():
+            out[str(k)] = out.get(str(k), False) or bool(v)
     return out
 
 
@@ -528,10 +525,7 @@ def set_pin(session: str, pinned: bool | None,
         return
     else:
         p[session] = bool(pinned)
-    base.mkdir(parents=True, exist_ok=True)
-    tmp = base / f".tmp-{os.getpid()}-{PINS}"
-    tmp.write_text(json.dumps(p, indent=1, sort_keys=True))
-    os.replace(tmp, base / PINS)
+    write_json(base / PINS, p, indent=1, sort_keys=True)
 
 
 def _pinned_files(files, base: Path) -> set:

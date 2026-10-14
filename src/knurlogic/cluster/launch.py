@@ -26,7 +26,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, PROC_ERRORS, transport
+from knurlogic.cluster import NET_ERRORS, transport
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster.protocol import (
     FAILURE_KINDS,
@@ -36,7 +36,8 @@ from knurlogic.cluster.protocol import (
     Stopped,
     typed,
 )
-from knurlogic.machine import processes
+from knurlogic.machine import identity, processes
+from knurlogic.machine.processes import PROC_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -156,15 +157,6 @@ LINK_INIT_RX = re.compile(
 _INFO: dict = {"doc": None, "at": 0.0}
 
 
-def _chip() -> str:
-    try:
-        return subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
-                              capture_output=True, text=True,
-                              timeout=5).stdout.strip()
-    except PROC_ERRORS:
-        return ""
-
-
 def _mlx_version() -> str:
     from importlib import metadata
     try:
@@ -243,8 +235,7 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
     if doc is None or now - _INFO["at"] > ttl:
         from knurlogic import __version__
         from knurlogic.cluster import links
-        from knurlogic.tuning.pipeline_split import chip_bandwidth_gbs
-        chip = _chip()
+        chip = identity.chip()
         try:
             tb = [{"iface": i["iface"], "ip": i["ip"],
                    "gbps": i.get("gbps"), "generation": i.get("generation")}
@@ -258,7 +249,7 @@ def node_info(working_set_bytes: int = 0, ttl: float = 30.0) -> dict:
         from knurlogic.engine.matmul_padding import gpu_architecture
         doc = {"chip": chip, "gpu_architecture": gpu_architecture(),
                "p_core_ghz": None,
-               "bandwidth_gbs": chip_bandwidth_gbs(chip),
+               "bandwidth_gbs": identity.chip_bandwidth_gbs(chip),
                "thunderbolt": tb, "rdma": links.rdma(),
                "versions": {"knurlogic": __version__,
                             "mlx": _mlx_version(),
@@ -1230,7 +1221,7 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
             proc = (spawn or subprocess.Popen)(
                 cmd, stdout=fh, stderr=subprocess.STDOUT, env=env,
                 start_new_session=True)
-    except (OSError, ValueError, subprocess.SubprocessError) as e:
+    except (*PROC_ERRORS, ValueError) as e:
         return 500, {"error": f"{type(e).__name__}: {e}"}
     rec = {"job": spec["job"], "rank": spec["rank"], "world": spec["world"],
            "pid": proc.pid, "artifact": path, "log": str(log),

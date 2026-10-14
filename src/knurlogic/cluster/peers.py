@@ -25,15 +25,16 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, PROC_ERRORS, protocol, transport
+from knurlogic.cluster import NET_ERRORS, protocol, transport
 from knurlogic.cluster import jobs as J
+from knurlogic.machine import files, paths
+from knurlogic.machine.processes import PROC_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +93,7 @@ def clean_node(node: dict) -> dict:
 
 
 def store_path() -> Path:
-    return Path(os.environ.get("KNURLOGIC_HOME",
-                               Path.home() / ".knurlogic")) / "peers.json"
+    return paths.state_dir() / "peers.json"
 
 
 @dataclass
@@ -547,12 +547,8 @@ class Peers:
 
     # -- memory ---------------------------------------------------------
     def _load(self) -> dict:
-        try:
-            d = json.loads(self.store.read_text())
-            return d.get("peers", {}) if d.get("schema") == STORE_SCHEMA \
-                else {}
-        except (OSError, ValueError, AttributeError):
-            return {}
+        d = files.read_json(self.store, {})
+        return d.get("peers", {}) if d.get("schema") == STORE_SCHEMA else {}
 
     def _save(self) -> None:
         """Only peers that have answered at least once are remembered, so a
@@ -575,10 +571,7 @@ class Peers:
         if not changed:
             return
         try:
-            self.store.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.store.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"schema": STORE_SCHEMA, "peers": old},
-                                      indent=1))
-            os.replace(tmp, self.store)
+            files.write_json(self.store, {"schema": STORE_SCHEMA,
+                                          "peers": old}, indent=1)
         except OSError:
             pass

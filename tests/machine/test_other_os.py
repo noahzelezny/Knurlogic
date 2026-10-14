@@ -83,17 +83,19 @@ def test_linux_id_is_the_machine_id(monkeypatch, tmp_path):
 
 
 def test_linux_machine_names_the_gpu(monkeypatch, tmp_path):
-    from knurlogic.machine import nvidia
-    from knurlogic.machine.memory import wired
+    from knurlogic.machine import identity, nvidia
     product = tmp_path / "product_name"
     product.write_text("DGX Spark\n")
-    monkeypatch.setattr(wired, "DMI_PRODUCT", str(product))
+    monkeypatch.setattr(identity, "DMI_PRODUCT", str(product))
+    monkeypatch.setattr(identity.sys, "platform", "linux")
+    monkeypatch.setattr(identity, "_CHIP", {})
     _smi(monkeypatch, nvidia, "NVIDIA GB10\n")
-    got = wired._other_machine()
+    got = identity._other_machine()
     assert got["model"] == "DGX Spark" and got["chip"] == "GB10"
     assert got["kind"] == ""
+    monkeypatch.setattr(identity, "_CHIP", {})
     _smi(monkeypatch, nvidia, "", code=9)
-    assert wired._other_machine()["chip"] == wired._processor()
+    assert identity._other_machine()["chip"] == identity._processor()
 
 
 def test_linux_has_no_wired_limit(monkeypatch):

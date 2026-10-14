@@ -28,20 +28,6 @@ _PIPELINE_WHY_NOT = {
               "two ranks; not built",
 }
 
-#: memory bandwidth (GB/s) of chips that come in ONE bandwidth only. A Max
-#: that is sold binned (M3 Max 300/400, M4 Max 410/546) is not here:
-#: unknown is said, never guessed.
-CHIP_BANDWIDTH_GBS = {
-    "Apple M1 Max": 400.0, "Apple M1 Ultra": 800.0,
-    "Apple M2 Max": 400.0, "Apple M2 Ultra": 800.0,
-    "Apple M3 Ultra": 819.0, "Apple M4 Pro": 273.0,
-}
-
-
-def chip_bandwidth_gbs(chip) -> float | None:
-    return CHIP_BANDWIDTH_GBS.get(str(chip or "").strip())
-
-
 def pipeline_refusals(cfg: dict, n: int) -> list:
     """Why this config cannot be pipelined `n` ways; [] when it can."""
     if n < 2:

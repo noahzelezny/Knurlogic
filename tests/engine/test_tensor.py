@@ -5,6 +5,7 @@ VQ layer's halves add up to the whole; a sliced codebook is caught)."""
 import pytest
 
 from knurlogic.engine.split import plan as P
+from knurlogic.machine import identity
 from knurlogic.tuning import rank_order, tensor_split
 
 # ------------------------------------------------------------------ plan
@@ -257,8 +258,8 @@ M3 = {"name": "m3", "chip": "Apple M3 Ultra", "p_core_ghz": 4.05,
 
 def test_leader_is_the_fastest_single_core():
     assert rank_order.rank_order([M3, M4]) == ["m4", "m3"]      # generation beats RAM
-    assert rank_order.chip_generation("Apple M4 Max") == 4
-    assert rank_order.chip_generation(None) == 0
+    assert identity.chip_generation("Apple M4 Max") == 4
+    assert identity.chip_generation(None) == 0
 
 
 def test_leader_ties_go_to_clock_then_free_memory_then_order():

@@ -14,12 +14,11 @@ Design: docs/design/memory.md (wired limit).
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from dataclasses import dataclass
 
-GIB = 1 << 30
-MIB = 1 << 20
+from knurlogic.machine.identity import _sysctl
+from knurlogic.machine.units import GIB, MIB
 
 #: Keys to try, in order. The name moved between macOS versions and the older
 #: one is still present on current systems; reading only one answers "unknown"
@@ -33,14 +32,10 @@ RESERVE_FRACTION = 0.125
 RESERVE_FLOOR_BYTES = 8 * GIB
 
 
-def _sysctl(key: str) -> int | None:
+def _sysctl_int(key: str) -> int | None:
     try:
-        out = subprocess.run(["sysctl", "-n", key], capture_output=True,
-                             text=True, timeout=5)
-        if out.returncode != 0:
-            return None
-        return int(out.stdout.strip())
-    except (OSError, subprocess.SubprocessError, ValueError):
+        return int(_sysctl(key))
+    except ValueError:
         return None
 
 
@@ -75,9 +70,9 @@ def read() -> Wired:
     if sys.platform != "darwin":
         import psutil
         return Wired(total_bytes=int(psutil.virtual_memory().total))
-    total = _sysctl("hw.memsize") or 0
+    total = _sysctl_int("hw.memsize") or 0
     for key in SYSCTL_KEYS:
-        mb = _sysctl(key)
+        mb = _sysctl_int(key)
         if mb:
             return Wired(total_bytes=total, limit_bytes=mb * MIB, key=key)
     return Wired(total_bytes=total)
@@ -154,7 +149,7 @@ def render(d: dict) -> str:
     return "\n".join(L)
 
 
-def detected_working_set_bytes() -> int:
+def detected_working_set_bytes(fallback: int = 0) -> int:
     """What the framework says it may use, read where it comes from.
 
     `resolve()` still takes headroom as an INPUT -- that stance is what keeps
@@ -171,201 +166,46 @@ def detected_working_set_bytes() -> int:
     -- the page process must never import mlx to report a number, and
     `memory()` would drag the whole framework in for one integer. Same
     value, no engine.
+
+    `fallback`: the framework's own working set, from a caller that has the
+    engine loaded, used where neither the wired limit nor Metal answers
+    (off macOS).
     """
     limit = read().limit_bytes
     if limit:
         return limit
-    # the sysctl left at its default reads 0: only the framework knows the
-    # default it applies, so it is asked -- on a box nobody has tuned. It is
-    # asked in a CHILD process: importing engine.model.memory here pulled
-    # mlx into the page process on every untuned Mac (CI runners among
-    # them), which is the very thing this function exists to avoid.
-    return _framework_working_set_bytes()
+    # the sysctl left at its default reads 0: the default then is Metal's
+    # own recommendedMaxWorkingSetSize, which is the number MLX reports
+    # (measured equal), asked of Metal directly so no mlx is imported.
+    # Elsewhere the caller that has the framework passes its number.
+    return _metal_working_set_bytes() or int(fallback or 0)
 
 
-_FRAMEWORK_WS = None
+_METAL_WS: dict = {}
 
 
-def _framework_working_set_bytes() -> int:
-    """MLX's max_recommended_working_set_size, from a child interpreter so
-    the caller never imports mlx. Cached: it is fixed for the machine."""
-    global _FRAMEWORK_WS
-    if _FRAMEWORK_WS is not None:
-        return _FRAMEWORK_WS
-    import os
-    import sys
-    from pathlib import Path
-    src = str(Path(__file__).resolve().parents[2])
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [src] + [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p])
-    code = ("from knurlogic.engine.model import memory\n"
-            "print(int(memory().get('working_set_bytes') or 0))\n")
-    try:
-        r = subprocess.run([sys.executable, "-c", code], capture_output=True,
-                           text=True, timeout=60, env=env)
-        _FRAMEWORK_WS = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
-    except (OSError, subprocess.SubprocessError, ValueError):
-        _FRAMEWORK_WS = 0
-    return _FRAMEWORK_WS
-
-
-#: Cached: a machine does not change model while the process runs, and the
-#: lookup costs a subprocess.
-_MACHINE = None
-
-
-def _kind_from_identifier(model_id: str) -> str:
-    """Last-resort guess from `hw.model`.
-
-    It is a GUESS and only that. The old identifiers said the product in
-    their name (`MacBookPro18,3`, `Macmini9,1`), but Apple dropped the
-    product prefix: `Mac15,14` is a Mac Studio, `Mac16,7` a MacBook Pro, and
-    nothing in either string says so. Anything without the old prefix reads
-    as unknown rather than as a coin flip dressed up as a fact.
-    """
-    m = model_id.lower()
-    if m.startswith(("macbookpro", "macbookair", "macbook")):
-        return "laptop"
-    if m.startswith("macmini"):
-        return "mini"
-    if m.startswith("macpro"):
-        return "pro"
-    if m.startswith("imac"):
-        return "imac"
-    return ""
-
-
-def machine() -> dict:
-    """What this box IS: {kind, model, model_id, chip}.
-
-    `system_profiler SPHardwareDataType` is the channel that actually knows
-    -- it prints "Model Name: Mac Studio" -- and it answers in about 0.13s,
-    once per process. Deriving the product from `hw.model` cannot work on
-    current hardware (`Mac15,14` is a Mac Studio), so the
-    identifier is a fallback for when the lookup fails, not the primary.
-    """
-    global _MACHINE
-    if _MACHINE is not None:
-        return _MACHINE
+def _metal_working_set_bytes() -> int:
+    """MTLDevice.recommendedMaxWorkingSetSize of the default GPU, through
+    the Objective-C runtime; 0 off macOS or where it cannot be read.
+    Cached: it is fixed for the machine."""
     if sys.platform != "darwin":
-        _MACHINE = _other_machine()
-        return _MACHINE
-    model_id = ""
-    try:
-        model_id = subprocess.run(["sysctl", "-n", "hw.model"],
-                                  capture_output=True, text=True,
-                                  timeout=2).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        pass
-    name = ""
-    try:
-        out = subprocess.run(["system_profiler", "SPHardwareDataType"],
-                             capture_output=True, text=True, timeout=8).stdout
-        for line in out.splitlines():
-            if line.strip().startswith("Model Name:"):
-                name = line.split(":", 1)[1].strip()
-                break
-    except (OSError, subprocess.SubprocessError):
-        pass
-    low = name.lower()
-    if "studio" in low:
-        kind = "studio"
-    elif "mini" in low:
-        kind = "mini"
-    elif "macbook" in low:
-        kind = "laptop"
-    elif "imac" in low:
-        kind = "imac"
-    elif "mac pro" in low:
-        kind = "pro"
-    else:
-        kind = _kind_from_identifier(model_id)
-    # The chip is what a person means by "which machine": M3 Ultra, M4 Max.
-    chip = ""
-    try:
-        chip = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
-                              capture_output=True, text=True,
-                              timeout=2).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        pass
-    _MACHINE = {"kind": kind, "model": name, "model_id": model_id,
-                "chip": chip.removeprefix("Apple ").strip()}
-    return _MACHINE
-
-
-#: The product name Linux reads from the firmware ("DGX Spark").
-DMI_PRODUCT = "/sys/devices/virtual/dmi/id/product_name"
-
-
-def _other_machine() -> dict:
-    """{kind, model, model_id, chip} off macOS. The chip is the GPU when
-    nvidia-smi names one, the processor otherwise; `kind` stays empty, so
-    the page draws a plain box."""
-    import platform
-    from pathlib import Path
-
-    from knurlogic.machine import nvidia
-    try:
-        model = Path(DMI_PRODUCT).read_text().strip()
-    except OSError:
-        model = ""
-    gpu = nvidia.query("name")
-    chip = gpu[0].removeprefix("NVIDIA ") if gpu else _processor()
-    return {"kind": "", "model": model, "model_id": platform.machine(),
-            "chip": chip}
-
-
-def _processor() -> str:
-    """The processor's marketing name: /proc/cpuinfo's on Linux, the
-    platform's own string elsewhere."""
-    import platform
-    try:
-        with open("/proc/cpuinfo") as f:
-            for line in f:
-                if line.lower().startswith("model name"):
-                    return line.split(":", 1)[1].strip()
-    except OSError:
-        pass
-    return platform.processor()
-
-
-def kind_from(name: str = "", model_id: str = "", product: str = "") -> dict:
-    """Best honest guess at ANOTHER node's kind, from what it told us.
-
-    A remote node cannot be asked -- `system_profiler` answers for THIS box,
-    and labelling every node in a cluster with the local machine is the same
-    bug as running a version check with bare `python3` inside a loop over
-    envs: every iteration answers for the wrong thing.
-
-    So two weak channels, in order, and neither pretends to be strong:
-
-      1. the friendly name, because macOS seeds it from the product and
-         people leave it ("Alex's Mac Studio", "Alex's MacBook Pro");
-      2. the model identifier, which only says the product on pre-2022
-         hardware -- see `_kind_from_identifier`.
-
-    Nothing matching leaves `kind` empty, and the page draws a plain box.
-    That is the correct outcome: an unknown machine should look unknown.
-    """
-    # A PRODUCT NAME, when the source has one, is not a weak channel at all.
-    # exo reports `modelId: "Mac Studio"` / `"MacBook Pro"` -- measured
-    # against the live daemon -- so when that is present it decides, and the
-    # guessing below is only for sources that give nothing better.
-    low = (product or name or "").lower()
-    if "studio" in low:
-        kind = "studio"
-    elif "mini" in low:
-        kind = "mini"
-    elif "imac" in low:
-        kind = "imac"
-    elif "mac pro" in low or "macpro" in low:
-        kind = "pro"
-    elif "book" in low:        # MacBook, and the -book names people give them
-        kind = "laptop"
-    else:
-        kind = _kind_from_identifier(model_id or "")
-    return {"kind": kind, "model": product or "", "model_id": model_id or ""}
+        return 0
+    if "ws" not in _METAL_WS:
+        import ctypes
+        try:
+            metal = ctypes.CDLL("/System/Library/Frameworks/Metal.framework/"
+                                "Metal")
+            objc = ctypes.CDLL("/usr/lib/libobjc.dylib")
+            metal.MTLCreateSystemDefaultDevice.restype = ctypes.c_void_p
+            objc.sel_registerName.restype = ctypes.c_void_p
+            send = ctypes.CFUNCTYPE(ctypes.c_uint64, ctypes.c_void_p,
+                                    ctypes.c_void_p)(("objc_msgSend", objc))
+            dev = metal.MTLCreateSystemDefaultDevice()
+            _METAL_WS["ws"] = int(send(dev, objc.sel_registerName(
+                b"recommendedMaxWorkingSetSize"))) if dev else 0
+        except (OSError, AttributeError, ValueError, ctypes.ArgumentError):
+            _METAL_WS["ws"] = 0
+    return _METAL_WS["ws"]
 
 
 def load_budget() -> dict:

@@ -4,6 +4,8 @@ fastest single core, each next rank the one the last reaches fastest.
 
 from __future__ import annotations
 
+from knurlogic.machine import identity
+
 # ------------------------------------------------------------- rank order
 #
 # Nobody types --rank. The cluster page asks this for the order, passes
@@ -25,20 +27,13 @@ def _link_rank(kind) -> int:
     return LINK_SPEED.index(k) if k in LINK_SPEED else len(LINK_SPEED)
 
 
-def chip_generation(chip) -> int:
-    """"Apple M4 Max" -> 4; 0 when it does not say."""
-    import re
-    m = re.search(r"\bM(\d+)\b", str(chip or ""))
-    return int(m.group(1)) if m else 0
-
-
 def leader_key(m: dict, position: int = 0) -> tuple:
     """Sort key for the leader, smallest first: newest chip generation,
     higher P-core clock, more free memory, earlier in the given order."""
     free = m.get("free_bytes")
     if free is None:
         free = m.get("working_set_bytes") or 0
-    return (-chip_generation(m.get("chip")),
+    return (-identity.chip_generation(m.get("chip")),
             -float(m.get("p_core_ghz") or 0.0), -int(free), position)
 
 

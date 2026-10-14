@@ -341,12 +341,8 @@ def chip() -> str:
     """The Apple chip family this runs on ("Apple M3", from "Apple M3
     Ultra" / "Apple M1 (Virtual)"): GPU kernels, and so float32 rounding,
     differ between chip generations, not between sizes of one."""
-    try:
-        s = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
-                           capture_output=True, text=True).stdout.strip()
-    except OSError:
-        return ""
-    return " ".join(s.split()[:2])
+    from knurlogic.machine import identity
+    return " ".join(identity.chip().split()[:2])
 
 
 def golden_path(name: str) -> Path:

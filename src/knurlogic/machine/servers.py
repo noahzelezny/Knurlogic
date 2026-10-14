@@ -7,19 +7,10 @@ would never have guessed. Before it did, two models holding 33 GiB on ports
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
-from knurlogic.machine import processes
-
-
-def cache_dir() -> Path:
-    import os
-    root = Path(os.environ.get("XDG_CACHE_HOME",
-                               Path.home() / ".cache")) / "knurlogic"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+from knurlogic.machine import files, paths, processes
 
 
 def serve_argv(path: str, *args: str) -> list:
@@ -42,7 +33,9 @@ def serve_log(port: int) -> Path:
     """Where a server started from here writes. A child whose output went
     to /dev/null could crash on load and leave its caller holding
     'starting' forever, with no way to learn why."""
-    return cache_dir() / f"serve-{port}.log"
+    d = paths.cache_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"serve-{port}.log"
 
 
 # --- servers outlive the session that started them --------------------------
@@ -53,18 +46,14 @@ def serve_log(port: int) -> Path:
 # record is a file, and `CHILDREN` only keeps the Popen for exit codes.
 
 def registry_path() -> Path:
-    return cache_dir() / "servers.json"
+    return paths.cache_dir() / "servers.json"
 
 
 def registry() -> dict:
     """port -> record, for records that name a port and a numeric pid; a
     hand-edited or half-written entry is skipped, not a KeyError later."""
-    try:
-        raw = json.loads(registry_path().read_text())
-    except (OSError, ValueError):
-        return {}
     out = {}
-    for k, v in (raw.items() if isinstance(raw, dict) else ()):
+    for k, v in files.read_json(registry_path(), {}).items():
         try:
             port = int(k)
             v = dict(v, pid=int(v["pid"]))
@@ -75,8 +64,10 @@ def registry() -> dict:
 
 
 def save_registry(reg: dict) -> None:
-    registry_path().write_text(json.dumps(
-        {str(k): v for k, v in sorted(reg.items())}, indent=1))
+    """Written whole or not at all: the page, the MCP and every server
+    started from here read it."""
+    files.write_json(registry_path(),
+                     {str(k): v for k, v in sorted(reg.items())}, indent=1)
 
 
 def is_our_server(pid: int) -> bool:

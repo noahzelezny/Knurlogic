@@ -11,6 +11,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from knurlogic.machine.processes import PROC_ERRORS
+
 GIB = 1 << 30
 
 
@@ -379,7 +381,7 @@ def _network_mounts() -> list:
     try:
         text = subprocess.run(["mount"], capture_output=True, text=True,
                               timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
+    except PROC_ERRORS:
         text = ""
     for line in text.splitlines():
         m = re.match(r".+? on (.+) \(([a-z0-9]+)[,)]", line)

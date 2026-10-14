@@ -23,6 +23,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from knurlogic.machine import paths
+
 #: Exit code for a gate tool that found the lock busy (EX_TEMPFAIL): "try
 #: again later", distinct from a failed gate.
 EXIT_BUSY = 75
@@ -45,9 +47,7 @@ def lock_path() -> Path:
     env = os.environ.get("KNURLOGIC_LOADLOCK")
     if env:
         return Path(env)
-    root = Path(os.environ.get("XDG_CACHE_HOME",
-                               Path.home() / ".cache")) / "knurlogic"
-    return root / "load.lock"
+    return paths.cache_dir() / "load.lock"
 
 
 def _open(path: Path) -> int:

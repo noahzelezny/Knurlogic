@@ -12,7 +12,6 @@ Design: docs/design/cluster.md (jobs).
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -20,7 +19,7 @@ import threading
 import time
 from pathlib import Path
 
-from knurlogic.machine import processes
+from knurlogic.machine import files, paths, processes
 
 #: how often a rank rewrites its marker
 MARK_S = 2.0
@@ -45,8 +44,7 @@ JOB_RX = re.compile(r"[0-9a-f]{8,32}")
 
 
 def root() -> Path:
-    base = Path(os.environ.get("XDG_CACHE_HOME",
-                               Path.home() / ".cache")) / "knurlogic" / "jobs"
+    base = paths.cache_dir() / "jobs"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -63,18 +61,9 @@ def marker_path(job: str, rank: int) -> Path:
     return job_dir(job) / f"rank{int(rank)}.json"
 
 
-def _write(path: Path, doc: dict) -> None:
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(doc))
-    tmp.replace(path)                # a reader never sees half a file
-
-
 def read_marker(job: str, rank: int) -> dict | None:
-    try:
-        d = json.loads(marker_path(job, rank).read_text())
-        return d if isinstance(d, dict) else None
-    except (OSError, ValueError):
-        return None
+    d = files.read_json(marker_path(job, rank))
+    return d if isinstance(d, dict) else None
 
 
 # ------------------------------------------------------------- rank side
@@ -120,7 +109,7 @@ class Marker:
         self.doc["t"] = now
         self._last = now
         try:
-            _write(self.path, self.doc)
+            files.write_json(self.path, self.doc)
         except OSError:
             pass
 
@@ -143,7 +132,11 @@ class Marker:
         def loop():
             while True:
                 time.sleep(MARK_S)
-                self.beat()
+                try:
+                    self.beat()
+                except Exception:  # one failed beat must not end the heartbeat
+                    logging.getLogger(__name__).warning(
+                        "rank marker beat failed", exc_info=True)
         threading.Thread(target=loop, daemon=True,
                          name="knurlogic-marker").start()
         return self
@@ -226,16 +219,12 @@ def registry_path() -> Path:
 
 
 def registry() -> dict:
-    try:
-        raw = json.loads(registry_path().read_text())
-    except (OSError, ValueError):
-        return {}
-    return {k: v for k, v in (raw.items() if isinstance(raw, dict) else ())
+    return {k: v for k, v in files.read_json(registry_path(), {}).items()
             if isinstance(v, dict) and isinstance(v.get("pid"), int)}
 
 
 def save_registry(reg: dict) -> None:
-    _write(registry_path(), reg)
+    files.write_json(registry_path(), reg)
 
 
 def by_job(reg: dict | None = None) -> dict:
@@ -266,7 +255,7 @@ def terminate(pids: list, grace: float = GRACE_S, alive=None,
     up to `reap` for the killed to be gone (wait_gone says which are not).
     -> the pids that needed the SIGKILL."""
     import signal
-    alive = alive or _pid_alive
+    alive = alive or _reaped_alive
     for pid in pids:
         try:
             os.kill(pid, signal.SIGTERM)
@@ -292,7 +281,7 @@ def wait_gone(pids: list, timeout: float, alive=None,
               every: float = 0.1) -> list:
     """Wait up to `timeout` for every pid to be gone. -> the ones still
     there."""
-    alive = alive or _pid_alive
+    alive = alive or _reaped_alive
     end = time.time() + timeout
     left = [p for p in pids if alive(p)]
     while left and time.time() < end:
@@ -307,17 +296,6 @@ def rss_bytes(pid: int) -> int:
     return processes.rss(pid)
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        done, _ = os.waitpid(pid, os.WNOHANG)     # reap a child of ours
-        if done == pid:
-            return False
-    except ChildProcessError:
-        pass
-    except OSError:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
+def _reaped_alive(pid: int) -> bool:
+    """Running, a child of ours that has exited reaped on the way."""
+    return processes.running(pid, reap=True)

@@ -6,9 +6,10 @@ after a short quiet spell (a /models.json build writes once, not per model),
 by temp file + rename -- page and serve may both write, last writer wins and
 the entries are idempotent. A corrupt or unreadable file is ignored. Keys
 are paths: a flush prunes the ones that no longer exist."""
-import json
 import threading
 from pathlib import Path
+
+from knurlogic.machine import files
 
 #: seconds of quiet before new entries are written
 DELAY = 1.0
@@ -30,8 +31,8 @@ class DiskCache:
 
     def path(self) -> Path | None:
         try:
-            from knurlogic.machine.servers import cache_dir
-            return cache_dir() / self.name
+            from knurlogic.machine import paths
+            return paths.cache_dir() / self.name
         except OSError:
             return None
 
@@ -41,14 +42,9 @@ class DiskCache:
         if self.file != f:
             data = {}
             if f is not None:
-                try:
-                    raw = json.loads(f.read_text())
-                    if isinstance(raw, dict):
-                        data = {k: v for k, v in raw.items()
-                                if isinstance(v, list) and len(v) == 2
-                                and self.valid(v[1])}
-                except (OSError, ValueError):
-                    data = {}
+                data = {k: v for k, v in files.read_json(f, {}).items()
+                        if isinstance(v, list) and len(v) == 2
+                        and self.valid(v[1])}
             self.file, self.data = f, data
         return self.data
 
@@ -70,7 +66,6 @@ class DiskCache:
         outside it, and only the pruned keys are dropped from the live
         dict, so a concurrent write is kept (and lands next flush)."""
         import os
-        import tempfile
         with self.lock:
             t, self.timer = self.timer, None
             self.dirty = False
@@ -86,20 +81,11 @@ class DiskCache:
                 if self.data.get(k) is snap[k]:
                     del self.data[k]
                 del snap[k]
-        tmp = None
         try:
-            fd, tmp = tempfile.mkstemp(dir=f.parent, prefix=f".{f.stem}.")
-            with os.fdopen(fd, "w") as fh:
-                json.dump(snap, fh)
-            os.replace(tmp, f)
+            files.write_json(f, snap)
         except OSError:
             with self.lock:
                 self.dirty = True       # atexit tries again
-            if tmp is not None:
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
 
     def _atexit_flush(self) -> None:
         if self.dirty:

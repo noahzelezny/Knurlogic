@@ -14,9 +14,10 @@ saved, so a Mac started with the old variable keeps its folder without it.
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
+
+from knurlogic.machine import files, paths
 
 #: the variables a folder is adopted from, once
 ADOPT_FROM = ("EXO_MODELS_DIRS", "EXO_MODELS_READ_ONLY_DIRS",
@@ -24,27 +25,17 @@ ADOPT_FROM = ("EXO_MODELS_DIRS", "EXO_MODELS_READ_ONLY_DIRS",
 
 
 def store_path() -> Path:
-    return Path(os.environ.get("KNURLOGIC_HOME",
-                               Path.home() / ".knurlogic")) / "model_folders.json"
+    return paths.state_dir() / "model_folders.json"
 
 
 def _read() -> dict:
-    try:
-        d = json.loads(store_path().read_text())
-    except (OSError, ValueError):
-        return {"folders": [], "adopted": False}
-    if not isinstance(d, dict):
-        return {"folders": [], "adopted": False}
+    d = files.read_json(store_path(), {})
     folders = [f for f in d.get("folders") or [] if isinstance(f, str) and f]
     return {"folders": folders, "adopted": bool(d.get("adopted"))}
 
 
 def _write(d: dict) -> None:
-    p = store_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(d, indent=1))
-    os.replace(tmp, p)
+    files.write_json(store_path(), d, indent=1)
 
 
 def _norm(folder: str) -> str:

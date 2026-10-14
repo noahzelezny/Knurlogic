@@ -56,6 +56,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from knurlogic.machine.files import read_json, write_json
+
 from . import disk, location, slices
 
 logger = logging.getLogger(__name__)
@@ -291,10 +293,7 @@ def _read(path: Path, want: dict) -> list:
 
 def entry_meta(d: Path) -> dict | None:
     """An entry directory's entry.json, or None (incomplete or unreadable)."""
-    try:
-        m = json.loads((Path(d) / ENTRY).read_text())
-    except (OSError, ValueError):
-        return None
+    m = read_json(Path(d) / ENTRY)
     return m if isinstance(m, dict) else None
 
 
@@ -643,9 +642,7 @@ class Store:
         record (no tokens); the same bytes on every rank."""
         d = self.dir / meta["tokens_hash"]
         body = dict(meta, tokens=[int(t) for t in tokens])
-        tmp = d / f".tmp-{os.getpid()}-{ENTRY}"
-        tmp.write_text(json.dumps(body, sort_keys=True))
-        os.replace(tmp, d / ENTRY)
+        write_json(d / ENTRY, body, sort_keys=True)
         if not (self.dir / "key.json").exists():
             try:
                 (self.dir / "key.json").write_text(json.dumps(self.key,

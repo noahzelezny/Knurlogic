@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 
-from knurlogic.cluster import PROC_ERRORS
+from knurlogic.machine.processes import PROC_ERRORS
 
 FW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 

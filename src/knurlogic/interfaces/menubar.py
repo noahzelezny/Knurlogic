@@ -20,6 +20,8 @@ import sys
 import urllib.request
 from pathlib import Path
 
+from knurlogic.machine import paths, processes
+
 REFRESH_S = 5.0
 ASSETS = Path(__file__).parent / "menubar_assets"
 
@@ -28,9 +30,7 @@ def lock_path() -> Path:
     env = os.environ.get("KNURLOGIC_MENUBAR_LOCK")
     if env:
         return Path(env)
-    root = Path(os.environ.get("XDG_CACHE_HOME",
-                               Path.home() / ".cache")) / "knurlogic"
-    return root / "menubar.lock"
+    return paths.cache_dir() / "menubar.lock"
 
 
 def acquire_lock(path: Path | None = None):
@@ -110,16 +110,6 @@ def _fetch(port: int):
         return None
 
 
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 def _dock_icon(path: Path) -> None:
     """The Dock shows this process as Python's rocket unless told otherwise:
     show the knurlogic wheel instead (macOS draws the SVG itself)."""
@@ -165,7 +155,7 @@ def run(port: int, parent: int) -> int:
         rumps.quit_application()
 
     def refresh(_=None):
-        if not _alive(parent):
+        if not processes.running(parent):
             rumps.quit_application()
             return
         m = menu_model(_fetch(port), host)
