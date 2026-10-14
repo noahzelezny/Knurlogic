@@ -325,11 +325,6 @@ from knurlogic.machine.disk_cache import DiskCache  # noqa: E402
 _DISK = DiskCache("identities.json", valid=lambda v: isinstance(v, str))
 
 
-class AmbiguousIdentity(ValueError):
-    """Kept for callers that catch it: resolve_identity no longer raises it.
-    Two paths with one identity are the same weights, and one is chosen."""
-
-
 def _shards(p: Path) -> list:
     return sorted((f for f in p.iterdir()
                    if f.suffix == ".safetensors" and f.is_file()),
@@ -337,6 +332,11 @@ def _shards(p: Path) -> list:
 
 
 def _shard_digest(f: Path, size: int) -> bytes:
+    """sha256 of a shard's raw header bytes and three sampled data blocks.
+    Reads the header length itself, not through safetensors_layout: that
+    parses and caps the header, and the digest hashes the raw bytes of any
+    file (a header past the cap or not JSON included), so identities stay
+    what they were."""
     import hashlib
     import struct
     h = hashlib.sha256()

@@ -138,7 +138,7 @@ def identity() -> dict:
 
 # ------------------------------------------------------------ the hardware
 
-def _sysctl(key: str) -> str:
+def sysctl(key: str) -> str:
     """`sysctl -n key`, stripped; "" where it cannot be read."""
     try:
         out = subprocess.run(["sysctl", "-n", key], capture_output=True,
@@ -158,7 +158,7 @@ def chip() -> str:
     Read once per process."""
     if "chip" not in _CHIP:
         if sys.platform == "darwin":
-            _CHIP["chip"] = _sysctl("machdep.cpu.brand_string")
+            _CHIP["chip"] = sysctl("machdep.cpu.brand_string")
         else:
             from knurlogic.machine import nvidia
             gpu = nvidia.query("name")
@@ -243,7 +243,7 @@ def machine() -> dict:
     if sys.platform != "darwin":
         _MACHINE = _other_machine()
         return _MACHINE
-    model_id = _sysctl("hw.model")
+    model_id = sysctl("hw.model")
     name = ""
     try:
         out = subprocess.run(["system_profiler", "SPHardwareDataType"],

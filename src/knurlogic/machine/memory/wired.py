@@ -17,7 +17,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-from knurlogic.machine.identity import _sysctl
+from knurlogic.machine.identity import sysctl
 from knurlogic.machine.units import GIB, MIB, gib
 
 #: Keys to try, in order. The name moved between macOS versions and the older
@@ -34,7 +34,7 @@ RESERVE_FLOOR_BYTES = 8 * GIB
 
 def _sysctl_int(key: str) -> int | None:
     try:
-        return int(_sysctl(key))
+        return int(sysctl(key))
     except ValueError:
         return None
 

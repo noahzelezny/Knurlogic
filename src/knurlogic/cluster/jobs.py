@@ -256,14 +256,21 @@ def terminate(pids: list, grace: float = GRACE_S, alive=None,
               reap: float = 0.0) -> list:
     """SIGTERM every pid, wait up to `grace`, SIGKILL what is left, then
     up to `reap` for the killed to be gone (wait_gone says which are not).
-    -> the pids that needed the SIGKILL."""
+    -> the pids that needed the SIGKILL. A pid this user may not signal
+    is not waited on: `alive` counts one it may not inspect as running
+    (machine/processes.running), so it would hold the whole grace."""
     import signal
     alive = alive or _reaped_alive
+    ours = []
     for pid in pids:
         try:
             os.kill(pid, signal.SIGTERM)
+        except PermissionError:
+            continue
         except OSError:
             pass
+        ours.append(pid)
+    pids = ours
     end = time.time() + grace
     while time.time() < end and any(alive(p) for p in pids):
         time.sleep(0.1)
