@@ -154,8 +154,20 @@ The suite runs in a Linux arm64 container on the Mac (python:3.12-slim,
 | kvattn off without Metal (`engine/backend`) | 43 failed |
 | `machine/processes` (psutil) for ps / pgrep / lsof, the test leak sweep | 41 failed |
 | test markers for CPU numerics, installed memory via psutil, test fixes | 1 failed, 2037 passed |
+| machine readouts per OS (below) | 1 failed, 2049 passed |
 
-The Mac suite is unchanged at every step (2211 passed with the new tests).
+The Mac suite is unchanged at every step (2223 passed with the new tests).
+
+Machine readouts off macOS: cpu and swap from psutil (on every OS now);
+gpu use, GPU bytes and the chip from `nvidia-smi` (`machine/nvidia.py`;
+a unified-memory GPU such as GB10 reports no bytes of its own); temperature
+from the kernel's sensors; the id from `/etc/machine-id` (Linux) or
+`MachineGuid` (Windows); available memory from the kernel's own estimate
+(MemAvailable); per-process memory as resident size. macOS's pressure
+level, thermal state and wired limit have no counterpart and read None
+(the wired limit: total only, `known` False). Read live in the container:
+real cpu, swap and memory figures, the rest None. A container has no
+`/etc/machine-id`, so its id falls back to the hostname's hash.
 
 - MLX's CPU back end has no bfloat16 `gather_mm` (MoE experts) and rounds
   bfloat16 / FP8 differently from a GPU. Tests that need either are marked
@@ -164,6 +176,26 @@ The Mac suite is unchanged at every step (2211 passed with the new tests).
   before the tag. Measured on the Mac: DeepSeek-V4's fallbacks for its 11
   Metal kernels give the kernels' numbers on the GPU; the CPU difference
   is MLX's.
+- First Linux chat (Qwen3.5-2B 4-bit, CPU, container): the server
+  installs, loads (1.6 GiB in 1.9 s from the container's disk; 167 s
+  through Docker's share of a macOS folder) and answers /v1/models, then
+  the warm-up prefill is OOM-killed (peak 7.7 GB at a 12 GB cap). Cause,
+  from a py-spy dump at 3 GB: without Metal, gated-delta (Qwen3.5,
+  Qwen4-exp, GLM-5-next) takes mlx-lm's ops fallback, which steps the
+  prompt one token at a time into ONE lazy graph, a float32 state of
+  heads x Dv x Dk per layer per token kept alive until the chunk is
+  evaluated. Plain mlx-lm on the same model stays at 1.5 GB for a short
+  prompt but decodes ~10 tokens in 176 s. The same fallback runs on CUDA,
+  whose MLX has no gated-delta kernel. OPEN, Noah's call: a chunked
+  (matmul) gated-delta for non-Metal back ends, one shared home for the
+  three copies; and whether `--set prefill_step_size` reaches the MTP
+  admit path (the engine line still read 4096).
+- OPEN: peer discovery off macOS. The Bonjour code calls libSystem's
+  dns_sd; Avahi's compatibility library lacks DNSServiceGetAddrInfo and
+  needs avahi-daemon (absent in containers and on Windows). Candidate:
+  python-zeroconf (pure Python, every OS, LGPL-2.1) behind the same
+  Discovery interface, libSystem kept on macOS. A new dependency and its
+  license: Noah's call.
 - OPEN: the two-page cluster tests (`tests/cluster/test_recovery.py`,
   `test_cluster_jobs.py`: a killed rank, then `watch_once`) fail now and
   then in the container, and pass alone and on the Mac. A theory that page
