@@ -178,6 +178,16 @@ class Artifact:
         )
 
 
+def bytes_on_disk(path) -> int:
+    """An artifact's weights size (`Artifact.bytes_on_disk`), 0 when it
+    cannot be read: what a starting server or rank records once, so a
+    page's polls never re-read the model folder."""
+    try:
+        return int(Artifact.load(path).bytes_on_disk)
+    except (OSError, ValueError, AttributeError, TypeError):
+        return 0
+
+
 def context_length(path) -> int:
     """The model's context window from its config.json --
     max_position_embeddings, or text_config's for a multimodal wrapper --

@@ -40,9 +40,11 @@ from knurlogic.cluster.protocol import (
     typed,
 )
 from knurlogic.machine import identity, processes
+from knurlogic.machine.artifact import bytes_on_disk
 from knurlogic.machine.memory.wired import available_now, budget_of, gpu_working_set
 from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.machine.units import GIB, gib
+from knurlogic.tuning.knobs import canonical_sets
 from knurlogic.tuning.placement import placement, rank_room_chunk
 
 logger = logging.getLogger(__name__)
@@ -86,10 +88,16 @@ def leader_url(spec: dict) -> str:
 #: the floor. Otherwise it is the smallest of the ranks' room-based chunks
 #: (each rank answers Prepare with its own; see ring_chunk)
 PREFILL_CHUNK = 512
+#: the launch setting that names the ring's chunk outright
+PREFILL_KNOB = "KNURLOGIC_PREFILL_CHUNK"
 RING_CHUNK_WHY = "ring: the smallest rank's room"
-#: first ring port; a job's ranks take RING_PORT + slot*20 + rank, and
-#: the jaccl coordinator slot*20 + 19
+#: first ring port; a job's ranks take ring_port(slot, rank) (+0..+17),
+#: rank 0's bell +BELL_OFFSET and the jaccl coordinator +COORDINATOR_OFFSET
 RING_PORT = 47200
+#: ports per slot, and slots
+SLOT_PORTS = 20
+SLOTS = 100
+COORDINATOR_OFFSET = 19
 #: a prepared job not started within this long is forgotten
 PREPARED_S = 120.0
 #: how long a prepare waits for a stopping rank of an earlier job to be gone
@@ -230,24 +238,14 @@ def link_init_failure(text: str) -> str:
     return m.group(0).strip()[:240] if m else ""
 
 
-def _log_tail(path, n: int = 64 << 10) -> str:
-    try:
-        with open(path, "rb") as fh:
-            fh.seek(0, 2)
-            fh.seek(max(fh.tell() - n, 0))
-            return fh.read().decode("utf-8", "replace")
-    except (OSError, TypeError):
-        return ""
-
-
 def _slot(job: str, used=None) -> int:
     """The job's ring-port slot: its nonce's, or the next one after it that
     no live job on this machine holds (`used`: default, the registry's)."""
     if used is None:
         used = _used_slots()
-    start = int(job[:4], 16) % 100
-    for i in range(100):
-        s = (start + i) % 100
+    start = _nonce_slot(job)
+    for i in range(SLOTS):
+        s = (start + i) % SLOTS
         if s not in used:
             return s
     raise ValueError("every ring-port slot is held by a live job here")
@@ -260,10 +258,26 @@ def _used_slots() -> set:
         for r in recs:
             rp = r.get("ring_port")
             if isinstance(rp, int) and rp >= RING_PORT:
-                out.add((rp - RING_PORT) // 20)
+                out.add(_slot_of_port(rp))
             else:
-                out.add(int(job[:4], 16) % 100)
+                out.add(_nonce_slot(job))
     return out
+
+
+def _nonce_slot(job: str) -> int:
+    """The ring-port slot a job's nonce names (`_slot` moves off it when a
+    live job holds it)."""
+    return int(job[:4], 16) % SLOTS
+
+
+def ring_port(slot: int, offset: int) -> int:
+    """Port `offset` of ring-port slot `slot`."""
+    return RING_PORT + slot * SLOT_PORTS + offset
+
+
+def _slot_of_port(port: int) -> int:
+    """The ring-port slot a port of it (ring_port) belongs to."""
+    return (port - RING_PORT) // SLOT_PORTS
 
 
 def shape_of(path: str, world: int, split: str,
@@ -470,9 +484,9 @@ def _loading_elsewhere(job: str, reg: dict) -> str:
 def ring_chunk(sets: dict, got: list) -> tuple:
     """(chunk, why) for the ring: an explicit set wins; else the smallest
     of the ranks' room-based chunks, or the floor when one cannot say."""
-    for k in ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"):
-        if k in sets:
-            return int(sets[k]), "set"
+    chunk = canonical_sets(sets).get(PREFILL_KNOB)
+    if chunk is not None:
+        return int(chunk), "set"
     rooms = [(g or {}).get("prefill_chunk") for g in got]
     if rooms and all(isinstance(x, int) and x > 0 for x in rooms):
         return min(rooms), RING_CHUNK_WHY
@@ -811,13 +825,13 @@ def _slot_conflict(spec: dict, reg: dict):
         port = int(spec["hosts"][spec["rank"]].rsplit(":", 1)[1])
     except (IndexError, ValueError, TypeError, AttributeError, KeyError):
         return None
-    slot = (port - RING_PORT) // 20
+    slot = _slot_of_port(port)
     for rec in reg.values():
         j = str(rec.get("job") or "")
         if not j or j == spec["job"]:
             continue
         rp = rec.get("ring_port")
-        if not isinstance(rp, int) or (rp - RING_PORT) // 20 != slot:
+        if not isinstance(rp, int) or _slot_of_port(rp) != slot:
             continue
         pid = int(rec["pid"])
         if _alive(j, pid):
@@ -865,15 +879,6 @@ def _running_here(job: str):
         except (KeyError, TypeError, ValueError):
             continue
     return None
-
-
-def _launch_bytes(path: str) -> int:
-    """The artifact's size, read once when a rank starts (0 if unreadable)."""
-    try:
-        from knurlogic.machine.artifact import Artifact
-        return int(Artifact.load(path).bytes_on_disk)
-    except (OSError, ValueError, AttributeError, TypeError):
-        return 0
 
 
 def _start(prep: dict, spawn, wait_s: float) -> tuple:
@@ -940,7 +945,7 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
                       "name": n.get("name")} for n in spec["nodes"]],
            # measured once at launch: the page's polls read this, not
            # the model folder
-           "bytes": _launch_bytes(path),
+           "bytes": bytes_on_disk(path),
            "started": time.strftime("%Y-%m-%d %H:%M:%S"), "t": time.time()}
     if spec.get("port") and spec["rank"] == 0:
         rec["port"] = int(spec["port"])
@@ -1144,12 +1149,12 @@ def watch_once(now: float | None = None) -> list:
             if why and "stopped the job:" not in why:
                 fkind = "machine"     # a page gone, or its rank gone
         if why and " exited" in why:
-            line = next((x for x in (link_init_failure(_log_tail(
+            line = next((x for x in (link_init_failure(J.log_tail(
                 r.get("log"))) for r in recs) if x), "")
             if line:
                 why = f"{why}: link init failed: {line}"[:300]
             else:
-                tails = [_log_tail(r.get("log")) for r in recs]
+                tails = [J.log_tail(r.get("log")) for r in recs]
                 ref = next((x for x in map(recovery.refusal_line, tails) if x), "")
                 mem = next((x for x in map(recovery.memory_line, tails) if x), "")
                 if ref:
@@ -1689,7 +1694,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         slot = _slot(job)
     except ValueError as e:
         return {"refused": str(e), "placement": plan}
-    hosts = [f"{ip}:{RING_PORT + slot * 20 + r}" for r, ip in enumerate(ips)]
+    hosts = [f"{ip}:{ring_port(slot, r)}" for r, ip in enumerate(ips)]
     if cable_ignored:
         note = (note + "; " if note else "") + (
             "cable ignored: with more than two Macs each pair picks its own "
@@ -1698,7 +1703,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     if link == "jaccl" and world > 2:
         ibv = [[None if i == j else links.rdma_device(order[i], order[j])
                 for j in range(world)] for i in range(world)]
-        coord = f"{ips[0]}:{RING_PORT + slot * 20 + 19}"
+        coord = f"{ips[0]}:{ring_port(slot, COORDINATOR_OFFSET)}"
     elif link == "jaccl":
         a0 = links.rdma_device(order[0], order[1], net)
         a1 = links.rdma_device(order[1], order[0], net)
@@ -1710,7 +1715,7 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
                                    f"{order[1 - order.index(m)]['name']}'s "
                                    f"Thunderbolt subnet", "placement": plan}
         ibv = [[None, a0], [a1, None]]
-        coord = f"{ips[0]}:{RING_PORT + slot * 20 + 19}"
+        coord = f"{ips[0]}:{ring_port(slot, COORDINATOR_OFFSET)}"
     my_tb = ips[plan["order"].index(me.get("name"))] \
         if me.get("name") in plan["order"] else None
     nodes = [{"rank": r, "id": m["id"], "name": m["name"],
@@ -1730,14 +1735,13 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     # --set, so the saved one must be resolved here or it is shown and
     # never runs.
     chunk = PREFILL_CHUNK
-    for k in ("KNURLOGIC_PREFILL_CHUNK", "VQLAB_PREFILL_CHUNK"):
-        if k in sets:
-            from knurlogic.tuning.checks import check_knob
-            why = check_knob(k, sets[k])
-            if why:
-                return {"error": why}
-            chunk = int(sets[k])
-            break
+    saved = canonical_sets(sets).get(PREFILL_KNOB)
+    if saved is not None:
+        from knurlogic.tuning.checks import check_knob
+        why = check_knob(PREFILL_KNOB, saved)
+        if why:
+            return {"error": why}
+        chunk = int(saved)
     base = {"job": job, "world": world, "split": split, "link": link,
             "identity": ident, "name": aname, "hosts": hosts, "ibv_devices": ibv,
             # the bell's nonce: random, in the spec the pages share, never

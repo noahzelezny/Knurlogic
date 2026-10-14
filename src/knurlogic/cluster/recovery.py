@@ -24,6 +24,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from knurlogic.cluster import NET_ERRORS, REFUSED_EXIT, every, transport
+from knurlogic.cluster.jobs import log_tail
 from knurlogic.cluster.protocol import link_name
 from knurlogic.machine import files, paths, processes
 
@@ -716,14 +717,7 @@ def _tick_single(rec: dict, now: float) -> str:
         why = f"the server on port {port} (pid {pid}) exited"
         if code is not None:
             why += f" with code {code}"
-        tail = ""
-        try:
-            with open(srec.get("log") or servers.serve_log(port), "rb") as f:
-                f.seek(0, 2)
-                f.seek(max(f.tell() - (64 << 10), 0))
-                tail = f.read().decode("utf-8", "replace")
-        except OSError:
-            pass
+        tail = log_tail(srec.get("log") or servers.serve_log(port))
         line = refusal_line(tail) or memory_line(tail)
         if line:
             why += f": {line}"

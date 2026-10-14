@@ -14,6 +14,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from knurlogic.machine.artifact import bytes_on_disk
 from knurlogic.machine.memory import footprint
 from knurlogic.machine.processes import PROC_ERRORS
 from knurlogic.machine.servers import is_our_server, registry, save_registry, serve_log
@@ -61,14 +62,6 @@ def stalled(pid: int, quiet, resident: int, now: float) -> bool:
 
 #: A server holding less than this share of its weights is still warming.
 WARM_FRACTION = 0.9
-
-
-def _artifact_bytes(path: str) -> int:
-    try:
-        from knurlogic.machine.artifact import Artifact
-        return int(Artifact.load(path).bytes_on_disk)
-    except (OSError, ValueError, AttributeError):
-        return 0
 
 
 def answers(port: int) -> bool:
@@ -218,7 +211,7 @@ def _spawn_unlocked(path: str, port: int, tune: str = "default",
     reg[port] = {"pid": proc.pid, "artifact": path, "log": str(log),
                  # measured once here (a launch is the user acting); the
                  # polls read it from this record, never the model folder
-                 "bytes": _artifact_bytes(path),
+                 "bytes": bytes_on_disk(path),
                  "started": time.strftime("%Y-%m-%d %H:%M:%S"),
                  "t": time.time(), "instance": instance}
     save_registry(reg)

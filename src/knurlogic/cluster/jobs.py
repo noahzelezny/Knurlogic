@@ -50,6 +50,18 @@ def root() -> Path:
     return base
 
 
+def log_tail(path, n: int = 64 << 10) -> str:
+    """The last `n` bytes of a rank's or server's log, as text ("" when it
+    cannot be read)."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(fh.tell() - n, 0))
+            return fh.read().decode("utf-8", "replace")
+    except (OSError, TypeError):
+        return ""
+
+
 def job_dir(job: str) -> Path:
     if not JOB_RX.fullmatch(str(job or "")):
         raise ValueError(f"not a job id: {str(job)[:40]!r}")
