@@ -15,17 +15,17 @@ Stdlib only; the family module is imported only when `build` is called.
 """
 from __future__ import annotations
 
-import importlib
 import json
 from collections.abc import Callable
 from typing import Any
+
+from knurlogic.engine import families
 
 
 #: architecture module -> "module:attr", from each family's manifest
 #: (engine/families/). The attr is
 #: `build(model_path: str, text_model, config: dict) -> Family | None`.
 def _families() -> dict[str, str]:
-    from knurlogic.engine import families
     return families.build_maps()["vision"]
 
 
@@ -33,19 +33,8 @@ FAMILIES: dict[str, str] = _families()
 
 
 def resolve(target: str) -> Callable[..., Any] | None:
-    """"module:attr" -> the callable, or None when the module is absent.
-    Only a ModuleNotFoundError naming the target module itself (or a parent
-    package) counts as absent; any other import failure propagates."""
-    mod_name, _, attr = target.partition(":")
-    try:
-        mod = importlib.import_module(mod_name)
-    except ModuleNotFoundError as e:
-        missing = e.name or ""
-        if missing and (mod_name == missing
-                        or mod_name.startswith(missing + ".")):
-            return None
-        raise
-    return getattr(mod, attr)
+    """"module:attr" -> the callable, or None when the module is absent."""
+    return families.resolve(target, optional=True)
 
 
 def family_of(model_type: str) -> str:
@@ -91,7 +80,6 @@ def has_family(model_type: str) -> bool:
 
 
 def _signatures() -> list[dict]:
-    from knurlogic.engine import families
     return families.build_maps()["vision_signatures"]
 
 

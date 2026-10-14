@@ -27,6 +27,7 @@ import dataclasses
 import importlib
 from dataclasses import dataclass
 
+from knurlogic.engine import families
 from knurlogic.engine.model.trunk import text_model
 
 
@@ -44,8 +45,7 @@ class FamilySpec:
     block: dict | None = None
 
     def head_cls(self):
-        mod, _, attr = self.head.partition(":")
-        return getattr(importlib.import_module(mod), attr)
+        return families.resolve(self.head)
 
     def arch_module(self, model):
         """The module the trunk's classes were defined in. Artifacts ship a
@@ -166,7 +166,6 @@ def resolve(model, family: str | None = None) -> FamilySpec:
 # capture point, draft cache and cache semantics are per-architecture facts
 # and live there, each beside the measurement that set it.
 def _register_builtins() -> None:
-    from knurlogic.engine import families
     for name, h in families.build_maps()["heads"].items():
         register(FamilySpec(name=name, **h))
 

@@ -221,10 +221,8 @@ def restage(model, keep: list, start: int, end: int) -> None:
     core = core_of(model)
     core.layers = keep
     if target:
-        import importlib
-        mod, _, attr = target.partition(":")
-        getattr(importlib.import_module(mod), attr)(model, core, keep,
-                                                    start, end)
+        from knurlogic.engine.families import resolve
+        resolve(target)(model, core, keep, start, end)
 
 
 def split(model, group, bounds: Sequence[tuple[int, int]]) -> dict:
