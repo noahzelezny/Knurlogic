@@ -8,6 +8,9 @@ MCP, from the same functions.
   page/           `knurlogic ui`, its routes and assets
   cli.py          `knurlogic`: its COMMANDS table routes to the rest
   serve.py        `knurlogic serve`: settings resolved, then an endpoint
+  documents.py    the documents and page files both servers answer with
+  ports.py        the default ports: MODEL_PORT, PAGE_PORT
+  machine_cli.py  `knurlogic loaded`, `models`, `deps`: machine/, printed
   spawn.py        the `knurlogic serve` children the page and MCP start
   load_checks.py  what a model must pass before it loads (known, runnable, fits)
   doctor.py       `knurlogic doctor`: will this artifact run, and why not

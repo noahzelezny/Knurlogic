@@ -67,13 +67,11 @@ def peer_relay(handler, method: str, path: str, body: bytes,
     model = doc.get("model")
     base = router.resolve(table, model)
     if base is None:
-        send_json(handler, 404, {
-            "type": "error",
-            "error": {"type": "not_found_error",
-                      "message": f"no running model {model!r} on "
-                                 f"{identity.identity().get('name') or 'this machine'}"
-                                 f"; running: "
-                                 f"{', '.join(sorted(table)) or 'none'}"},
-            "models": sorted(table)})
+        send_json(handler, 404, router.api_error(
+            "not_found_error",
+            f"no running model {model!r} on "
+            f"{identity.identity().get('name') or 'this machine'}; running: "
+            f"{', '.join(sorted(table)) or 'none'}",
+            models=sorted(table)))
         return
     router.stream(handler, base + path, body, base=base)

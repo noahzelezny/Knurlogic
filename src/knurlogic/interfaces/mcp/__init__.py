@@ -21,7 +21,7 @@ from the defining module.
   inspection.py   read-only tools: ready fit state models model_folders
                   settings drafting deps
   lifecycle.py    load and unload, here or through the page
-  page_client.py  the page on this machine, over loopback; models_across
+  page_client.py  the page on this machine, over loopback
   placement.py    load's role words (here peers all fit) -> machines
 
 Design: docs/design/mcp.md.

@@ -6,7 +6,7 @@ that may open one):
 - the **model server**, one per loaded model (`knurlogic serve`): the API
   clients call;
 - the **page** (`knurlogic ui`, and `knurlogic` with no command): the
-  view of every model and runtime on this Mac and its peers. It never
+  view of every model and runtime on this machine and its peers. It never
   imports mlx and holds no model; loading starts a model server as a
   child process.
 
@@ -20,8 +20,11 @@ The model server, `src/knurlogic/interfaces/http/`:
 
 | file | what |
 |---|---|
-| `__init__.py` | `serve` (build the scheduler and server), `scheduler_options`, `watch_ring`, `switch`, `unload`, `bind_all` |
-| `server.py` | `App` (the scheduler, what is served, hooks), `Handler` (`do_GET`, `do_POST`), `make_server`; `browser_refusal` and `host_is_local` (Origin and Host checks) |
+| `lifecycle.py` | `serve` (build the scheduler and server), `scheduler_options`, `watch_ring`, `switch`, `unload`, `bind_all`, `CURRENT` |
+| `server.py` | `App` (the scheduler, what is served, hooks), `Handler` (`do_GET`, `do_POST`), `make_server` |
+| `guard.py` | the guards both servers apply: `is_loopback`, `browser_refusal` and `host_is_local` (Origin and Host checks), `hung_up` |
+| `respond.py` | `send_json`: the page's one JSON reply writer |
+| `dialect.py` | what the translated APIs share: `handler_over`, `BadRequest`, `sse`, `new_id`, `image_part`, `cached_tokens` |
 | `openai.py` | `/v1/chat/completions`, `/v1/completions`, `/v1/models`: `build_job`, `Reply`, `ApiError`, `models_document` |
 | `messages.py` | the Anthropic Messages API as a translation over the OpenAI one (`to_openai`, `from_openai`, `stream`) |
 | `responses.py` | the OpenAI Responses API, the same way |
@@ -31,10 +34,21 @@ The model server, `src/knurlogic/interfaces/http/`:
 | `compaction.py` | `CompactingChat`, `App`'s chat path through context management ([compaction](compaction.md)) |
 | `telemetry.py` | request ids, the ledger `Request`, progress events, `GET /v1/usage`: see [telemetry](telemetry.md) |
 
-`interfaces/serve.py` is `knurlogic serve`: it checks and resolves the
-settings (`tuning/checks`: `launch_refusal`, `settings_refusal`,
-`refuse_sets`), then
-`run` starts the scheduler and server, or a follower rank.
+`interfaces/serve.py` is `knurlogic serve`: `run` registers the
+artifact (`register_artifact`), checks and resolves the settings
+(`resolve_launch`, over `tuning/checks`: `launch_refusal`,
+`settings_refusal`, `refuse_sets`, `ring_refusals`), sets and reports the
+environment (`apply_launch`), then `serve_launch` starts the scheduler and
+server, or a follower rank. A refusal is `Refused`, printed as the
+`REFUSING:` line with exit status `REFUSED_EXIT`.
+`interfaces/documents.py` holds the routes shared by the page and
+`serve`: `routes(...)` (`/status.json`, `/settings.json`, `/models.json`,
+`/loaded.json`, `/connect.json`, the page's files), `load_action`,
+`machine_settings`, `settings_document`, `knob_limit`,
+`compaction_document` (page JSON over `tuning/`); what only the page
+knows (update flags, the room across peers) is handed in, so `serve`
+imports nothing of the page's. `interfaces/ports.py` names the default
+ports (`MODEL_PORT`, `PAGE_PORT`).
 `interfaces/load_checks.py` (`prepare`, `NotLoadable`) is the check every load
 passes, at startup and on every switch. `interfaces/spawn.py` starts,
 lists and stops the `knurlogic serve` children (`spawn`, `children`,
@@ -47,13 +61,13 @@ The page, `src/knurlogic/interfaces/page/`:
 | `server.py` | `knurlogic ui`: `main`, `serve_ui`, `make_handler` (every route and the guards in front of them), `wire` (what `cluster/launch` and `recovery` need of the page; make_handler calls it, import does not) |
 | `nodes.py` | the machines this page sees: `PEERS`, Bonjour (`start_discovery`), `/status.json` (`status_fn`) and the light liveness document (`status_light`, `hot`) |
 | `loads.py` | load and unload from the page: `load_fn` (POST `/loaded.json`), `tracked_load`, `forward_launch` (one peer), `cluster_launch`, `peer_launch` (the peer side); GET `/loaded.json` (`loaded_fn`, `with_jobs`, `load_progress`) |
-| `router.py` | the router to model servers: `route`, `ROUTE_PATHS`, `routable`, `route_models_document`, `proxy_chat`, `chat_targets`, `stream` (with `cluster_failure`), `CLIENT_HEADERS` |
+| `router.py` | the router to model servers: `route`, `ROUTE_PATHS`, `routable`, `local_models` (both `models_at`), `requested_model`, `route_models_document`, `proxy_chat`, `chat_targets`, `stream` (with `cluster_failure`), `api_error`, `CLIENT_HEADERS` |
 | `peers.py` | the peer gate (`peer_refusal`), what peers serve (`peer_residency`, `upstream`, `MSG_PATH`, `PEER_RELAY`), a machine's settings from any page (`peer_machine`, `machine_apply`) |
 | `relay.py` | `peer_relay`: `/peer/v1/...`, a peer page reaching a model this machine started |
 | `peek.py` | `/peek` and `/apply` (a model's or a peer page's settings), and their peer side `peer_settings` |
 | `prompt_cache.py` | `prompt_cache_forward`: the page's `/v1/prompt-cache`, sent on to the model server that serves the model |
 | `messages.py` | `peer_table`: the protocol kinds a page answers on `MSG_PATH` (`survey_here`, `read_here`) |
-| `documents.py` | the routes shared by the page and `serve`: `routes(...)` (`/status.json`, `/settings.json`, `/models.json`, `/loaded.json`, `/connect.json`), `load_action`, `machine_settings`, `settings_document`, `knob_limit`, `compaction_document` (page JSON over `tuning/`) |
+| `running.py` | `/running.json`: every model running here and on the peers, one entry per model (`document`, `models_across`, `machines_of`); the MCP's `state` and `unload` read it |
 | `hub.py` | Hugging Face search, download, cancel, delete |
 | `updates.py` | is a model or knurlogic out of date (asked once per page start) |
 | `assets/` | the page itself: `index.html`, `app.js`, `api.js`, `views/`, `page.css`, shipped as package data |
@@ -83,6 +97,9 @@ The page, `src/knurlogic/interfaces/page/`:
 - **Local by default.** A request with an Origin is answered only for
   this server's own origin or one allowed with `--allow-origin`; the Host
   header must name this machine (`host_is_local`).
+- **One error shape per route.** The page's own endpoints answer
+  `{"error": "<why>"}`; a route that forwards an API answers in that
+  API's shape (`router.api_error`, or the model server's own document).
 - **The page holds no model and imports no mlx.** It starts `serve` as a
   child, which owns the model.
 - **A refusal is an answer.** `ApiError` carries a status, a message and

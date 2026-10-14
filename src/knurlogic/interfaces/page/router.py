@@ -2,7 +2,12 @@
 on peers. POST /v1/messages, /v1/chat/completions and count_tokens by
 `model` (`route`), the page's chat (`proxy_chat`), GET /v1/models
 (`route_models_document`), and the streaming that carries the answer back
-(`stream`, with a cluster job's failure said in its words)."""
+(`stream`, with a cluster job's failure said in its words).
+
+Errors: the page's own endpoints answer {"error": "<why>"}; a route that
+forwards an API (/v1/messages, /v1/chat/completions, the prompt cache)
+answers in that API's shape -- api_error, which both the Anthropic and the
+OpenAI clients read, or the model server's own document passed on."""
 
 from __future__ import annotations
 
@@ -81,6 +86,13 @@ def cluster_failure(base: str) -> str:
         return ""
 
 
+def api_error(status_type: str, message: str, **extra) -> dict:
+    """An error on a forwarded API route, in the shape both the Anthropic
+    and the OpenAI clients read as one (error.type, error.message)."""
+    return {"type": "error", "error": {"type": status_type,
+                                       "message": message}, **extra}
+
+
 def cluster_failed(reason: str) -> dict:
     """The OpenAI-style error a rank 0 answers with when its ring fails
     (http/openai.py status_of), for a job that could not answer at all."""
@@ -112,7 +124,8 @@ def stream(handler, url: str, body: bytes, timeout: float = 3600,
         if why:
             send_json(handler, 503, cluster_failed(why))
         else:
-            send_json(handler, 502, {"error": f"{type(e).__name__}: {e}"})
+            send_json(handler, 502, api_error("api_error",
+                                              f"{type(e).__name__}: {e}"))
         return
     handler.send_response(code)
     handler.send_header("Content-Type", ctype)
@@ -323,12 +336,10 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
         base, table = _await_launch(handler, model, table)
     if base is None:
         # say it in the shape either client reads as an error
-        send_json(handler, 404, {
-            "type": "error",
-            "error": {"type": "not_found_error",
-                      "message": f"no running model {model!r}; running: "
-                                 f"{', '.join(sorted(table)) or 'none'}"},
-            "models": sorted(table)})
+        send_json(handler, 404, api_error(
+            "not_found_error", f"no running model {model!r}; running: "
+                               f"{', '.join(sorted(table)) or 'none'}",
+            models=sorted(table)))
         return
     stream(handler, peers.upstream(base, path), body, base=base)
 
