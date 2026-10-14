@@ -1,6 +1,15 @@
 """Suite-wide guards."""
 
+import threading
+
 import pytest
+
+
+def _started() -> threading.Event:
+    """A loop's started flag, already set: the loop is never begun."""
+    ev = threading.Event()
+    ev.set()
+    return ev
 
 
 @pytest.fixture(autouse=True)
@@ -11,7 +20,7 @@ def _no_cluster_watcher_thread(monkeypatch):
     job's peer page unknown for 20 s, and stop that job. Tests call
     watch_once by hand; no thread is started."""
     from knurlogic.cluster import launch
-    monkeypatch.setattr(launch, "_WATCHER", [1])
+    monkeypatch.setattr(launch, "_WATCHER", _started())
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +39,7 @@ def _no_recovery_thread(monkeypatch, tmp_path):
     after the test, nor a test write the REAL recovery.json. Tests call
     recovery.tick by hand, on their own records and file."""
     from knurlogic.cluster import recovery
-    monkeypatch.setattr(recovery, "_THREAD", [1])
+    monkeypatch.setattr(recovery, "_THREAD", _started())
     monkeypatch.setattr(recovery, "MODELS", {})
     monkeypatch.setattr(recovery, "_SAVED", {})
     path = tmp_path / "recovery.json"
@@ -59,8 +68,8 @@ def _no_real_cache(monkeypatch, tmp_path_factory):
     # by the port it listens on (interfaces/spawn.stop), which would reach
     # the REAL server on :8080 past the registry above. A test of that
     # lookup patches it itself.
-    from knurlogic.machine import servers
-    monkeypatch.setattr(servers, "listener_pid", lambda port: None)
+    from knurlogic.machine import processes
+    monkeypatch.setattr(processes, "listener", lambda port: None)
     # and no prompt-cache fetcher: a page started in this process sets the
     # port its servers ask for peers; a restore must not ask a real page
     monkeypatch.delenv("KNURLOGIC_PAGE_PORT", raising=False)

@@ -26,14 +26,17 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, links, transport
+from knurlogic.cluster import NET_ERRORS, every, links, recovery, transport
 from knurlogic.cluster import jobs as J
 from knurlogic.cluster.protocol import (
     FAILURE_KINDS,
+    LINK_NAMES,
     JobState,
     PrepareReply,
     Started,
     Stopped,
+    backend,
+    link_name,
     typed,
 )
 from knurlogic.machine import identity, processes
@@ -69,26 +72,8 @@ SPEC_KEYS = ("job", "rank", "world", "split", "link", "identity", "hosts",
              "recovery", "serve_hosts", "name", "auto_port", "bell_nonce",
              "prefill_why")
 SPLITS = ("tensor", "pipeline")
-LINKS = ("ring", "jaccl")
-#: the link names people see (load(), state(), the page, the recovery
-#: record) -> mlx's distributed backend. The ONE place they are mapped:
-#: ring/jaccl are only ever the backend argument inside a job's spec.
-LINK_NAMES = {"tcp": "ring", "rdma": "jaccl"}
-
-
-def backend(link) -> str | None:
-    """mlx's backend for a link named either way (tcp|rdma, or an older
-    record's ring|jaccl); None when it is neither."""
-    if link in LINK_NAMES:
-        return LINK_NAMES[link]
-    return link if link in LINKS else None
-
-
-def link_name(link):
-    """The name people see for a link named either way: tcp | rdma."""
-    return {v: k for k, v in LINK_NAMES.items()}.get(link, link)
-
-
+#: mlx's distributed backends a spec names (protocol.LINK_NAMES)
+LINKS = tuple(LINK_NAMES.values())
 def leader_url(spec: dict) -> str:
     """The job's API as the other machines reach it: rank 0's link
     address (the leader binds loopback and that), or '' when unknown."""
@@ -127,7 +112,8 @@ SPECS: dict = {}
 _PROCS: dict = {}
 _LOCK = threading.Lock()
 _WATCH = J.Watch()
-_WATCHER: list = []
+#: set once the watcher runs
+_WATCHER = threading.Event()
 #: one start at a time on this page: the loading check and the spawn are
 #: one step, so two jobs' ranks never begin loading together
 _START_LOCK = threading.Lock()
@@ -446,7 +432,7 @@ def held_here(job: str = "", reg=None, sreg=None, rss=None) -> list:
     than `job`'s: [(what, pid, bytes)]. A rank being stopped is left out
     -- start waits for it to be gone -- so this is what a new load would
     have to share the working set with."""
-    rss = rss or J.rss_bytes
+    rss = rss or processes.rss
     reg = J.registry() if reg is None else reg
     out, seen = [], set()
     for rec in reg.values():
@@ -979,7 +965,6 @@ def _start(prep: dict, spawn, wait_s: float) -> tuple:
     if "port" in rec:
         # this job's recovery row (a relaunch carries it; a launch by
         # somebody clears it), for rank 0's own /v1/residency
-        from knurlogic.cluster import recovery
         recovery.write_port(rec["port"], spec.get("recovery"))
     _ensure_watcher()
     return 200, typed(Started(job=spec["job"], rank=spec["rank"],
@@ -1003,7 +988,6 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
     after `grace`), forget it, and -- when `propagate` -- tell every other
     page of the job to do the same."""
     job = str(job or "")
-    from knurlogic.cluster import recovery
     cleared: list = []
     if recovery.kind(reason, kind) == "requested":
         cleared = recovery.cancel_job(job)   # asked for: never recovered
@@ -1165,10 +1149,9 @@ def watch_once(now: float | None = None) -> list:
             if line:
                 why = f"{why}: link init failed: {line}"[:300]
             else:
-                from knurlogic.cluster.recovery import memory_line, refusal_line
                 tails = [_log_tail(r.get("log")) for r in recs]
-                ref = next((x for x in map(refusal_line, tails) if x), "")
-                mem = next((x for x in map(memory_line, tails) if x), "")
+                ref = next((x for x in map(recovery.refusal_line, tails) if x), "")
+                mem = next((x for x in map(recovery.memory_line, tails) if x), "")
                 if ref:
                     # a rank refused to start: the job fails with its words
                     why = f"{why}: {ref}"[:700]
@@ -1312,21 +1295,13 @@ def peer_verdict(job: str, recs: list, now: float | None = None,
 
 
 def _ensure_watcher() -> None:
+    """The page's watcher, started once per process: `watch_once` every
+    WATCH_S. A test sets _WATCHER and drives watch_once by hand."""
     with _LOCK:
-        if _WATCHER:
+        if _WATCHER.is_set():
             return
-        _WATCHER.append(1)
-
-    def loop():
-        while True:
-            time.sleep(WATCH_S)
-            try:
-                watch_once()
-            # a watcher thread must survive any one failed pass (logged)
-            except Exception as e:
-                logger.warning("cluster watch: %s: %s", type(e).__name__, e)
-    threading.Thread(target=loop, daemon=True,
-                     name="knurlogic-cluster-watch").start()
+        _WATCHER.set()
+    every(WATCH_S, watch_once, "knurlogic-cluster-watch")
 
 
 def start_watching_existing() -> None:
@@ -1334,7 +1309,6 @@ def start_watching_existing() -> None:
     and the models an earlier page process was recovering are again."""
     if J.registry():
         _ensure_watcher()
-    from knurlogic.cluster import recovery
     recovery.restore()
 
 
@@ -1851,7 +1825,6 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     if note:
         logger.warning("cluster job %s: %s", job, note)
     if recovering is None:
-        from knurlogic.cluster import recovery
         # a relaunch is the same launch: this machine order (so the same
         # split), this port, link, tune and settings
         recovery.track_cluster(

@@ -240,8 +240,8 @@ def stop(port: int) -> dict:
         # a knurlogic server this page did not start (`knurlogic serve` from
         # a shell, another agent): the page lists it with Unload, so Unload
         # stops it -- found by its port, and only if it is a knurlogic serve
-        from knurlogic.machine import servers
-        pid = servers.listener_pid(port)
+        from knurlogic.machine import processes, servers
+        pid = processes.listener(port)
         if not pid or not servers.is_our_server(pid):
             return {"error": f"no knurlogic server is listening on port "
                              f"{port}"}

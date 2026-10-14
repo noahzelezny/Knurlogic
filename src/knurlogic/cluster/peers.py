@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, protocol, transport
+from knurlogic.cluster import NET_ERRORS, every, protocol, transport
 from knurlogic.cluster import jobs as J
 from knurlogic.machine import files, paths
 from knurlogic.machine.http_client import send_json
@@ -489,18 +489,9 @@ class Peers:
 
     def start(self) -> Peers:
         if self._thread is None:
-            def loop():
-                while True:
-                    try:
-                        self.refresh()
-                    # the peer poll thread must survive one bad round (logged)
-                    except Exception:
-                        logger.debug("peer refresh failed; retrying in %ss",
-                                     REFRESH_S, exc_info=True)
-                    time.sleep(REFRESH_S)
-            self._thread = threading.Thread(target=loop, daemon=True,
-                                            name="knurlogic-peers")
-            self._thread.start()
+            # a failed round is retried the next one (logged at debug)
+            self._thread = every(REFRESH_S, self.refresh, "knurlogic-peers",
+                                 first=True, level=logging.DEBUG)
         return self
 
     # -- reading --------------------------------------------------------

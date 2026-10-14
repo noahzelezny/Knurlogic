@@ -15,6 +15,25 @@ from typing import Any, ClassVar
 VERSION = (1, 0)
 FAILURE_KINDS = ("refusal", "memory", "machine", "failure")
 
+#: the link names people see (load(), state(), the page, the recovery
+#: record) -> mlx's distributed backend. The ONE place they are mapped:
+#: ring/jaccl are only ever the backend argument inside a job's spec.
+LINK_NAMES = {"tcp": "ring", "rdma": "jaccl"}
+_LINK_SHOWN = {v: k for k, v in LINK_NAMES.items()}
+
+
+def backend(link) -> str | None:
+    """mlx's backend for a link named either way (tcp|rdma, or an older
+    record's ring|jaccl); None when it is neither."""
+    if link in LINK_NAMES:
+        return LINK_NAMES[link]
+    return link if link in _LINK_SHOWN else None
+
+
+def link_name(link):
+    """The name people see for a link named either way: tcp | rdma."""
+    return _LINK_SHOWN.get(link, link)
+
 
 class ProtocolError(ValueError):
     """A message that is not the contract; the text is for a person."""

@@ -77,11 +77,6 @@ def is_our_server(pid: int) -> bool:
     return "knurlogic" in out and "serve" in out.split()
 
 
-def listener_pid(port: int) -> int | None:
-    """The pid listening on `port` on this machine, or None."""
-    return processes.listener(port)
-
-
 #: what marks a process a TEST started, never a real server: the flag the
 #: suite's fake ranks carry (tests/cluster_fake_page.fake_argv), and
 #: pytest's temp directories in its arguments. A real page leaving these

@@ -39,6 +39,13 @@ from knurlogic.machine import identity
 from knurlogic.machine.files import write_json
 from knurlogic.tuning import checks
 
+
+def _started() -> threading.Event:
+    """The watcher's started flag, set: no thread; the test watches by hand."""
+    ev = threading.Event()
+    ev.set()
+    return ev
+
 # this test process plays the page: wire launch and recovery to it
 page_server.wire()
 
@@ -537,7 +544,7 @@ def two_pages(tmp_path, monkeypatch, owned_procs):
     sys.path.insert(0, str(HERE))
     import cluster_fake_page
     monkeypatch.setattr(C, "RANK_ARGV", [cluster_fake_page.fake_argv])
-    monkeypatch.setattr(C, "_WATCHER", [1])        # A is watched by hand
+    monkeypatch.setattr(C, "_WATCHER", _started())        # A is watched by hand
     ui_a, ui_b = free_port(), free_port()
     srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -1481,7 +1488,7 @@ def test_a_rank_that_fails_jaccl_init_moves_the_job_to_the_next_cable(
     sys.path.insert(0, str(HERE))
     import cluster_fake_page
     monkeypatch.setattr(C, "RANK_ARGV", [cluster_fake_page.fake_argv])
-    monkeypatch.setattr(C, "_WATCHER", [1])
+    monkeypatch.setattr(C, "_WATCHER", _started())
     ui_a, ui_b = free_port(), free_port()
     srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()

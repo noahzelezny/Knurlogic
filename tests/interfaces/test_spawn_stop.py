@@ -1,14 +1,14 @@
 """interfaces/spawn.stop: a knurlogic server the page did not start (a
 shell, another agent) is stopped by its port; anything else is refused."""
 from knurlogic.interfaces import spawn
-from knurlogic.machine import servers
+from knurlogic.machine import processes, servers
 
 
 def test_a_server_started_by_hand_is_found_by_its_port(monkeypatch):
     killed = []
     monkeypatch.setattr(spawn, "registry", lambda: {})
     monkeypatch.setattr(spawn, "save_registry", lambda reg: None)
-    monkeypatch.setattr(servers, "listener_pid", lambda port: 4242)
+    monkeypatch.setattr(processes, "listener", lambda port: 4242)
     alive = {4242: True}
     monkeypatch.setattr(servers, "is_our_server", lambda pid: alive.get(pid, False))
     monkeypatch.setattr(spawn, "is_our_server", lambda pid: alive.get(pid, False))
@@ -25,6 +25,6 @@ def test_a_server_started_by_hand_is_found_by_its_port(monkeypatch):
 
 def test_a_port_with_no_knurlogic_server_is_refused(monkeypatch):
     monkeypatch.setattr(spawn, "registry", lambda: {})
-    monkeypatch.setattr(servers, "listener_pid", lambda port: 777)
+    monkeypatch.setattr(processes, "listener", lambda port: 777)
     monkeypatch.setattr(servers, "is_our_server", lambda pid: False)
     assert "no knurlogic server" in spawn.stop(8095)["error"]

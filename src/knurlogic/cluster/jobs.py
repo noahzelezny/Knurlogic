@@ -19,6 +19,7 @@ import threading
 import time
 from pathlib import Path
 
+from knurlogic.cluster import every
 from knurlogic.machine import files, paths, processes
 
 #: how often a rank rewrites its marker
@@ -128,17 +129,7 @@ class Marker:
 
     def start(self) -> Marker:
         self.beat()
-
-        def loop():
-            while True:
-                time.sleep(MARK_S)
-                try:
-                    self.beat()
-                except Exception:  # one failed beat must not end the heartbeat
-                    logging.getLogger(__name__).warning(
-                        "rank marker beat failed", exc_info=True)
-        threading.Thread(target=loop, daemon=True,
-                         name="knurlogic-marker").start()
+        every(MARK_S, self.beat, "knurlogic-marker")
         return self
 
 
@@ -288,12 +279,6 @@ def wait_gone(pids: list, timeout: float, alive=None,
         time.sleep(every)
         left = [p for p in left if alive(p)]
     return left
-
-
-def rss_bytes(pid: int) -> int:
-    """A process's resident size (on Apple silicon its Metal buffers are in
-    it: a loaded 397B share reads ~50 GiB); 0 when it is gone."""
-    return processes.rss(pid)
 
 
 def _reaped_alive(pid: int) -> bool:

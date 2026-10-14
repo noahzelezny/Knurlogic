@@ -23,7 +23,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from knurlogic.cluster import NET_ERRORS, transport
+from knurlogic.cluster import NET_ERRORS, REFUSED_EXIT, every, transport
+from knurlogic.cluster.protocol import link_name
 from knurlogic.machine import files, paths, processes
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ load_fn = _no_load
 #: key -> record (in this page process)
 MODELS: dict = {}
 _LOCK = threading.RLock()
-_THREAD: list = []
+_THREAD = threading.Event()
 
 
 def enabled() -> bool:
@@ -334,7 +335,7 @@ def track_cluster(job: str, *, req: dict, args: dict, order: list,
             "args": dict(args), "order": list(order), "port": port,
             "leader_here": leader_here, "name": req.get("identity"),
             "machines": [m.get("name") for m in order],
-            "split": req.get("split"), "link": _link_name(req.get("link")),
+            "split": req.get("split"), "link": link_name(req.get("link")),
             "attempts": [], "state": None, "pending": False}
     _sync(key)
     save()
@@ -434,7 +435,7 @@ def not_serving() -> list:
             out.append({"name": r.get("name"), "port": r.get("port"),
                         "machines": r.get("machines"),
                         "split": r.get("split"),
-                        "link": _link_name(r.get("link")),
+                        "link": link_name(r.get("link")),
                         # the id the load answered: a caller holding it
                         # sees how its job ended, relaunches and all
                         "job": (r.get("jobs") or [None])[0]
@@ -443,30 +444,17 @@ def not_serving() -> list:
     return out
 
 
-def _link_name(link):
-    """tcp | rdma, for a record that says either (older ones: ring|jaccl)."""
-    from knurlogic.cluster.launch import link_name
-    return link_name(link)
 
 
 # ------------------------------------------------------------ the loop
 
 def ensure_thread() -> None:
+    """The recovery loop, started once per process: `tick` every TICK_S."""
     with _LOCK:
-        if _THREAD:
+        if _THREAD.is_set():
             return
-        _THREAD.append(1)
-
-    def loop():
-        while True:
-            time.sleep(TICK_S)
-            try:
-                tick()
-            # the recovery thread must survive one bad tick (logged)
-            except Exception as e:
-                logger.warning("recovery: %s: %s", type(e).__name__, e)
-    threading.Thread(target=loop, daemon=True,
-                     name="knurlogic-recovery").start()
+        _THREAD.set()
+    every(TICK_S, tick, "knurlogic-recovery")
 
 
 def tick(now: float | None = None) -> list:
@@ -736,7 +724,6 @@ def _tick_single(rec: dict, now: float) -> str:
                 tail = f.read().decode("utf-8", "replace")
         except OSError:
             pass
-        from knurlogic.interfaces.serve import REFUSED_EXIT
         line = refusal_line(tail) or memory_line(tail)
         if line:
             why += f": {line}"

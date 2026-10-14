@@ -18,6 +18,7 @@ import argparse
 import os
 import sys
 
+from knurlogic.cluster import REFUSED_EXIT
 from knurlogic.engine import arch, mtp
 from knurlogic.engine import model as engine
 from knurlogic.engine.mtp import binding
@@ -136,11 +137,6 @@ def ignored_env(env: dict, forced: dict, environ) -> list:
                    f"(runs {v}); use {flag}")
     return out
 
-#: `knurlogic serve`'s exit status when it refuses to start (bad settings,
-#: a model it cannot load as asked): deterministic, so the page fails the
-#: load with the REFUSING line and never relaunches it (cluster/recovery).
-#: EX_CONFIG, distinct from a crash (1) and from argparse's usage error (2).
-REFUSED_EXIT = 78
 #: the prefix of every refusal line serve prints; the page reads it back
 REFUSING = "REFUSING: "
 

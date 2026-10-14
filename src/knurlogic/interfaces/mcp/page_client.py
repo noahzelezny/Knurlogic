@@ -8,6 +8,8 @@ import http.client
 import json
 from typing import Any
 
+from knurlogic.cluster.protocol import link_name
+
 # --- across machines: through the page on this Mac ---------------------------
 # The page (`knurlogic ui`) is each Mac's node agent. It holds the peers it
 # can see, the cluster jobs it coordinates and the watcher that tears a
@@ -21,7 +23,7 @@ PAGE_ENV = "KNURLOGIC_PAGE"
 #: a cluster launch answers once every machine has prepared and started
 PAGE_LOAD_S = 300.0
 PAGE_READ_S = 15.0
-#: the MCP's link names, and the page's (cluster/launch.LINK_NAMES)
+#: the MCP's link names, and the page's (cluster/protocol.LINK_NAMES)
 LINKS = ("tcp", "rdma")
 SPLITS = ("tensor", "pipeline")
 
@@ -84,11 +86,6 @@ def machines_of(page, here: str) -> list:
             out.append({"machine": p.get("machine"), "here": False,
                         **({"error": p["error"]} if p.get("error") else {})})
     return out
-
-
-def link_name(link):
-    from knurlogic.cluster import launch
-    return launch.link_name(link)
 
 
 def models_across(page: dict, here: str) -> list:
