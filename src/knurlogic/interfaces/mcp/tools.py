@@ -50,7 +50,7 @@ TOOLS: dict[str, dict[str, Any]] = {
                        "holding; null when its server does not report "
                        "them). A cluster job is ONE entry, on its leader, "
                        "never one per rank. `machines`: the peers asked, "
-                       "with any that did not answer. The rest is this Mac "
+                       "with any that did not answer. The rest is this machine "
                        "alone: every runtime (knurlogic, ollama, exo, any "
                        "OpenAI port), where the memory went, and "
                        "`started_here` -- each server `load` started with "
@@ -108,10 +108,10 @@ TOOLS: dict[str, dict[str, Any]] = {
     "load": {
         "fn": load,
         "description": "Start a model. With no `machines`, a server on "
-                       "this Mac, its settings resolved against the load "
+                       "this machine, its settings resolved against the load "
                        "budget; refused if it will not fit (no override) "
                        "or another load is still moving memory (force "
-                       "overrides). With `machines`, through this Mac's "
+                       "overrides). With `machines`, through this machine's "
                        "page (`knurlogic ui` must run), exactly as its "
                        "Launch button: one other Mac is a load there, "
                        "checked by that Mac; two or more is a cluster job "
@@ -128,7 +128,7 @@ TOOLS: dict[str, dict[str, Any]] = {
                        "Nothing is ever evicted to make room: unload first.",
         "schema": _schema({
             "artifact": S("the model's name (or, for machines that are "
-                          "not this Mac, its 16-hex identity)"),
+                          "not this machine, its 16-hex identity)"),
             "port": S("port to serve on (a cluster job: rank 0's port on "
                       "the leader); omitted: the first free port from "
                       "8080 up", "integer"),
@@ -148,16 +148,16 @@ TOOLS: dict[str, dict[str, Any]] = {
                                       "image requests get a 400"},
             "machines": {"type": "array", "items": {"type": "string"},
                          "description": "where, without knowing machine "
-                                        "names: \"here\" (this Mac), "
+                                        "names: \"here\" (this machine), "
                                         "\"peers\" (every peer answering "
-                                        "this Mac's page), \"all\" (here + "
-                                        "peers), or \"fit\" alone (this Mac "
+                                        "this machine's page), \"all\" (here + "
+                                        "peers), or \"fit\" alone (this machine "
                                         "if the model fits here, else the "
                                         "smallest set of answering Macs it "
                                         "fits on; refused with each Mac's "
                                         "numbers if none). Names or ids as "
                                         "`state` lists them mix with here/"
-                                        "peers/all. Empty: this Mac only"},
+                                        "peers/all. Empty: this machine only"},
             "split": S("with two or more machines: tensor (every layer "
                        "split, same share each) | pipeline (layers in "
                        "runs, sized to each machine); with a role word "
@@ -174,7 +174,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     },
     "model_folders": {
         "fn": model_folders,
-        "description": "The model folders this Mac remembers beside every "
+        "description": "The model folders this machine remembers beside every "
                        "tool's own store (e.g. a folder on an external "
                        "drive), each with whether it is mounted. `add` or "
                        "`remove` one; `models` lists what is in them.",
@@ -194,13 +194,13 @@ TOOLS: dict[str, dict[str, Any]] = {
     "unload": {
         "fn": unload,
         "description": "Stop a model knurlogic started. `port` alone: the "
-                       "server on that port of this Mac. `model`, `job` or "
-                       "`instance`: on any machine this Mac's page sees "
+                       "server on that port of this machine. `model`, `job` or "
+                       "`instance`: on any machine this machine's page sees "
                        "(`machine` and `port` narrow it when a name matches "
                        "twice). A cluster job stops on every machine it "
                        "runs on.",
         "schema": _schema({
-            "port": S("port it serves on (this Mac, unless `machine`)",
+            "port": S("port it serves on (this machine, unless `machine`)",
                       "integer"),
             "model": S("its name, as `state` lists it"),
             "job": S("a cluster job's id, from `load` or `state`"),

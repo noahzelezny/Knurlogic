@@ -17,6 +17,7 @@ the cause and what to do about it.
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -85,6 +86,24 @@ def resolve_name(model: str, served: str | None) -> str:
                            f"model stores. /models.json lists the ones that "
                            f"are; a model is named by its id there, not by "
                            f"an arbitrary path.", "model_not_found")
+
+
+#: a model identity (machine/artifact.identity): 16 hex
+IDENTITY = re.compile(r"[0-9a-f]{16}")
+
+
+def is_identity(name) -> bool:
+    """`name` is a model identity, not a name or a path."""
+    return IDENTITY.fullmatch(str(name or "")) is not None
+
+
+def local_artifact(name: str) -> tuple:
+    """(path, "") of the artifact this machine's stores hold by `name` (as
+    resolve_name finds it), else (None, why not)."""
+    try:
+        return resolve_name(name, None), ""
+    except NotLoadable as e:
+        return None, str(e)
 
 
 def register(artifact) -> list:

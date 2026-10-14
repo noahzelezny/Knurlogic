@@ -176,7 +176,7 @@ def test_rank_0_leaves_non_zero_after_the_ring_fails(monkeypatch):
     os._exit(1) so the page counts the rank as down and relaunches."""
     import os
 
-    from knurlogic.interfaces import http as H
+    from knurlogic.interfaces.http import lifecycle as H
     exited = threading.Event()
     code = []
 

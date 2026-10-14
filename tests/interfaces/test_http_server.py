@@ -314,7 +314,7 @@ def test_a_rebound_domain_is_refused_by_host(url):
 
 
 def test_host_is_local_accepts_this_machine_only():
-    from knurlogic.interfaces.http.server import host_is_local
+    from knurlogic.interfaces.http.guard import host_is_local
     for h in ("localhost:8080", "127.0.0.1:1", "[::1]:80", "192.0.2.2:8098",
               "mac.local", "foo.localhost"):
         assert host_is_local(h), h
@@ -366,7 +366,7 @@ def test_the_cluster_gate_refuses_what_it_does_not_allow(url, monkeypatch):
 
 
 def test_an_allowed_host_name_is_answered():
-    from knurlogic.interfaces.http.server import browser_refusal
+    from knurlogic.interfaces.http.guard import browser_refusal
     h = {"Host": "studio.tail1234.ts.net:8080"}
     assert "--allow-host studio.tail1234.ts.net" in browser_refusal(h)
     assert browser_refusal(h, allow_hosts=("studio.tail1234.ts.net",)) \
@@ -379,8 +379,8 @@ def test_a_silent_request_samples_as_the_model_recommends(tmp_path):
     leaves out, and the answer says which."""
     import json
 
-    from knurlogic.interfaces.http import openai as O
     from knurlogic.engine.families import sampling_defaults
+    from knurlogic.interfaces.http import openai as O
     (tmp_path / "generation_config.json").write_text(json.dumps(
         {"do_sample": True, "temperature": 0.6, "top_p": 0.95,
          "top_k": 20}))

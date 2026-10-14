@@ -18,9 +18,10 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from knurlogic.interfaces import spawn
+from knurlogic.interfaces import documents, spawn
+from knurlogic.interfaces.http.guard import browser_refusal
+from knurlogic.interfaces.http.respond import send_json
 from knurlogic.interfaces.page import (
-    documents,
     loads,
     messages,
     nodes,
@@ -29,7 +30,9 @@ from knurlogic.interfaces.page import (
     prompt_cache,
     relay,
     router,
+    running,
 )
+from knurlogic.interfaces.ports import MODEL_PORT, PAGE_PORT
 from knurlogic.machine import identity
 
 logger = logging.getLogger(__name__)
@@ -77,7 +80,6 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 if not gate.allows(local):
                     self._send(gate.refusal(local), "text/plain", 403)
                     return True
-            from knurlogic.interfaces.http.server import browser_refusal
             why = browser_refusal(self.headers, allow_origins, allow_hosts)
             if why is not None:
                 self.close_connection = True
@@ -195,7 +197,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 what="relayed requests")
             if refused:
                 self.close_connection = True
-                router.send_json(self, *refused)
+                send_json(self, *refused)
                 return
             if self._refuse_chunked():
                 return
@@ -205,7 +207,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 n = -1
             if not 0 <= n <= MAX_BODY:
                 self.close_connection = True
-                router.send_json(self, 400, {"error": f"Content-Length must be a "
+                send_json(self, 400, {"error": f"Content-Length must be a "
                                        f"number of bytes up to {MAX_BODY}"})
                 return
             body = self.rfile.read(n) if n else b""
@@ -219,7 +221,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             if not self.headers.get("Transfer-Encoding"):
                 return False
             self.close_connection = True
-            router.send_json(self, 411, {"error": "send the body with a "
+            send_json(self, 411, {"error": "send the body with a "
                        "Content-Length and no Transfer-Encoding"})
             return True
 
@@ -232,14 +234,8 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             from knurlogic.cluster import launch, transport
             if method != "POST":
                 self.close_connection = True
-                out = json.dumps({"error": "POST a protocol envelope"}
-                                 ).encode()
-                self.send_response(405)
-                self.send_header("Allow", "POST")
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(out)))
-                self.end_headers()
-                self.wfile.write(out)
+                send_json(self, 405, {"error": "POST a protocol envelope"},
+                          {"Allow": "POST"})
                 return
             if self._refuse_chunked():
                 return
@@ -249,7 +245,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 n = -1
             if not 0 <= n <= launch.PEER_MAX:
                 self.close_connection = True
-                router.send_json(self, 413, {"error": "a peer message is small"})
+                send_json(self, 413, {"error": "a peer message is small"})
                 return
             manual = peers.manual_hosts()
             refused = peers.peer_refusal(
@@ -259,13 +255,13 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
             body = self.rfile.read(n) if n else b""
             if refused:
                 self.close_connection = True
-                router.send_json(self, *refused)
+                send_json(self, *refused)
                 return
             code, doc = transport.handle(body, table)
             if isinstance(doc, transport.Bytes):
                 self._send_range(doc)
                 return
-            router.send_json(self, code, doc)
+            send_json(self, code, doc)
 
         def _send_range(self, b) -> None:
             """A Weights reply: the shard's byte range, read in pieces of
@@ -277,7 +273,7 @@ def make_handler(routes: dict, gate=None, allow_origins=(),
                 fh = open(b.path, "rb")
             except OSError as e:
                 from knurlogic.cluster.transport import failure_reply
-                router.send_json(self, 404, failure_reply(
+                send_json(self, 404, failure_reply(
                     f"could not open the shard: {type(e).__name__}"))
                 return
             with fh:
@@ -324,12 +320,15 @@ def serve_ui(host: str, port: int, serve_port: int, peers=(),
     reachable = host not in ("127.0.0.1", "localhost", "::1")
     nodes.PEERS = Peers(me, port, manual=peers, reachable=reachable).start()
     nodes.start_discovery(me, host, port, reachable)
+    loaded = loads.loaded_fn()
     routes = documents.routes(
         status_fn=nodes.status_fn,
-        settings_fn=documents.machine_settings(),
-        models_fn=documents.models_document(serving=""),
-        loaded_fn=loads.loaded_fn(),
+        settings_fn=documents.machine_settings(split_room=loads.room_across),
+        models_fn=documents.models_document(serving="",
+                                            flagged=updates.flagged),
+        loaded_fn=loaded,
         load_fn=loads.load_fn(serve_port))
+    routes[running.RUNNING_PATH] = running.route(loaded)
     # /status.json?light=1: the liveness document every peer polls
     full_status = routes["/status.json"]
     routes["/status.json"] = lambda q, _n=0: (
@@ -422,8 +421,8 @@ def main(argv=None) -> int:
                         "Wi-Fi and Ethernet; a Mac with no Thunderbolt link "
                         "answers on loopback. 127.0.0.1: this machine only. "
                         "Or an address.")
-    p.add_argument("--port", type=int, default=8899)
-    p.add_argument("--serve-port", type=int, default=8080,
+    p.add_argument("--port", type=int, default=PAGE_PORT)
+    p.add_argument("--serve-port", type=int, default=MODEL_PORT,
                    help="the port a model loaded from this page is served on")
     p.add_argument("--peer", action="append", default=[],
                    metavar="HOST[:PORT]",

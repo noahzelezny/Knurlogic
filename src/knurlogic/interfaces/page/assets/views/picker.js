@@ -44,7 +44,7 @@ function pushRecent(path){
   r.unshift({path, at:Date.now()});
   try{ localStorage.setItem('kn.recent', JSON.stringify(r.slice(0,20))) }catch(e){}
 }
-// /models.json has no `vision` field (interfaces/page/documents.py), so
+// /models.json has no `vision` field (interfaces/documents.py), so
 // this is a family-name heuristic matching the vision-capable families
 // (gemma4, glm5, qwen-vl) until the server reports one.
 function isVision(m){
@@ -592,7 +592,7 @@ window.LOADTUNE='default';
 getJSON('/strategy.json').then(d=>{ if(d&&d.preset) window.LOADTUNE=d.preset });
 
 // --- which machines, and MTP -------------------------------------------------
-const localName=()=>((LASTNODES.find(isLocal)||{}).node)||'this Mac';
+const localName=()=>((LASTNODES.find(isLocal)||{}).node)||'this machine';
 function whereLine(){
   const ns=selNodes();
   $('lmwhere').textContent=ns.length ? 'on: '+ns.map(n=>n.node).join(' + ')
@@ -700,7 +700,7 @@ function hubDialog(){
   const busy=dl&&dl.state==='downloading';
   const ready=d&&!d.loading&&!d.error;
   const line=!d||d.loading?'':d.error?d.error
-    :local?'already on this Mac':busy?'downloading…'
+    :local?'already on this machine':busy?'downloading…'
     :!d.supported?d.why:!d.access?'needs access — run hf auth login'
     :ws&&d.size_bytes>ws?"doesn't fit the picked machines":'';
   const can=ready&&d.supported&&d.access&&!local&&!busy;

@@ -2,17 +2,25 @@
 on peers. POST /v1/messages, /v1/chat/completions and count_tokens by
 `model` (`route`), the page's chat (`proxy_chat`), GET /v1/models
 (`route_models_document`), and the streaming that carries the answer back
-(`stream`, with a cluster job's failure said in its words)."""
+(`stream`, with a cluster job's failure said in its words).
+
+Errors: the page's own endpoints answer {"error": "<why>"}; a route that
+forwards an API (/v1/messages, /v1/chat/completions, the prompt cache)
+answers in that API's shape -- api_error, which both the Anthropic and the
+OpenAI clients read, or the model server's own document passed on."""
 
 from __future__ import annotations
 
-import http.client
 import json
 import logging
+import threading
 import time
 from urllib.parse import urlparse
 
+from knurlogic.interfaces.http.guard import hung_up
+from knurlogic.interfaces.http.respond import send_json
 from knurlogic.interfaces.page import nodes, peers
+from knurlogic.machine.http_client import NET_ERRORS, open_url, request
 from knurlogic.machine.servers import registry
 
 logger = logging.getLogger(__name__)
@@ -55,23 +63,6 @@ def chat_targets() -> set:
     return out
 
 
-def send_json(handler, code: int, doc) -> None:
-    from knurlogic.interfaces.http import telemetry as T
-    out = json.dumps(doc).encode()
-    handler.send_response(code)
-    handler.send_header("Content-Type", "application/json")
-    handler.send_header("Content-Length", str(len(out)))
-    rid = T.id_of(getattr(handler, "headers", None))
-    if rid:
-        handler.send_header(T.HEADER, rid)
-    try:
-        handler.end_headers()
-        handler.wfile.write(out)
-    except (BrokenPipeError, ConnectionResetError):
-        # the asker gave up (its timeout) before the answer: nothing to do
-        handler.close_connection = True
-
-
 def cluster_failure(base: str) -> str:
     """Why the model at `base` is a cluster job that cannot answer, or ""
     when it is not one. A peer's job is looked up in a fresh survey (its
@@ -95,6 +86,13 @@ def cluster_failure(base: str) -> str:
         return ""
 
 
+def api_error(status_type: str, message: str, **extra) -> dict:
+    """An error on a forwarded API route, in the shape both the Anthropic
+    and the OpenAI clients read as one (error.type, error.message)."""
+    return {"type": "error", "error": {"type": status_type,
+                                       "message": message}, **extra}
+
+
 def cluster_failed(reason: str) -> dict:
     """The OpenAI-style error a rank 0 answers with when its ring fails
     (http/openai.py status_of), for a job that could not answer at all."""
@@ -113,29 +111,21 @@ def stream(handler, url: str, body: bytes, timeout: float = 3600,
     cluster job's rank 0 (dead, or its job stopped). When such a rank 0
     dies mid-way through an event stream, one `data: {"error": ...
     cluster_failed}` event goes out before the stream closes."""
-    import urllib.error
-    import urllib.request
-
     from knurlogic.interfaces.http import telemetry as T
     rid = T.id_of(getattr(handler, "headers", None))
-    req = urllib.request.Request(url, data=body,
-                                 headers={"Content-Type": "application/json",
-                                          **({T.HEADER: rid} if rid else {}),
-                                          **_client_headers(handler)},
-                                 method="POST")
     try:
-        up = urllib.request.urlopen(req, timeout=timeout)
-        code, ctype = up.status, up.headers.get("Content-Type",
-                                                "application/json")
-    except urllib.error.HTTPError as e:
-        up, code = e, e.code
-        ctype = e.headers.get("Content-Type", "application/json")
-    except (OSError, ValueError, http.client.HTTPException) as e:
+        up = open_url(url, body, "POST", timeout,
+                      {**({T.HEADER: rid} if rid else {}),
+                       **_client_headers(handler)})
+        code = up.status
+        ctype = up.headers.get("Content-Type", "application/json")
+    except (*NET_ERRORS, ValueError) as e:
         why = cluster_failure(base) if base else ""
         if why:
             send_json(handler, 503, cluster_failed(why))
         else:
-            send_json(handler, 502, {"error": f"{type(e).__name__}: {e}"})
+            send_json(handler, 502, api_error("api_error",
+                                              f"{type(e).__name__}: {e}"))
         return
     handler.send_response(code)
     handler.send_header("Content-Type", ctype)
@@ -155,7 +145,7 @@ def stream(handler, url: str, body: bytes, timeout: float = 3600,
             try:
                 chunk = (up.read1(8192) if hasattr(up, "read1")
                          else up.read(8192))
-            except (OSError, http.client.HTTPException):
+            except NET_ERRORS:
                 cut = True          # the upstream died mid-answer
                 break
             if not chunk:
@@ -196,21 +186,17 @@ def _client_headers(handler) -> dict:
 
 
 def send_up(url: str, method: str, body: bytes | None):
-    """(status, JSON doc) of one request to a model server."""
-    import urllib.error
-    import urllib.request
-    req = urllib.request.Request(
-        url, data=body if body is not None else None, method=method,
-        headers={"Content-Type": "application/json"})
+    """(status, JSON doc) of one request to a model server; the errors
+    are the model server's own shape ({"error": {"message"}})."""
     try:
-        with urllib.request.urlopen(req, timeout=600) as r:
-            return r.status, json.loads(r.read() or b"{}")
-    except urllib.error.HTTPError as e:
-        try:
-            return e.code, json.loads(e.read() or b"{}")
-        except ValueError:
-            return e.code, {"error": {"message": str(e)}}
-    except (OSError, ValueError) as e:
+        code, raw = request(url, body, method, timeout=600)
+    except (*NET_ERRORS, ValueError) as e:
+        return 502, {"error": {"message": f"{type(e).__name__}: {e}"}}
+    try:
+        return code, json.loads(raw or b"{}")
+    except ValueError as e:
+        if code >= 400:
+            return code, {"error": {"message": f"HTTP Error {code}"}}
         return 502, {"error": {"message": f"{type(e).__name__}: {e}"}}
 
 
@@ -247,22 +233,49 @@ _ROUTES: dict = {"at": 0.0, "map": {}, "docs": {}}
 PEER_SURVEY_MAX_AGE_S = 30.0
 
 
+def fetch_json(url: str, timeout: float):
+    """A server's JSON document; raises when it does not answer one."""
+    return json.loads(request(url, timeout=timeout)[1])
+
+
+def models_at(bases, fetch=None, docs: dict | None = None) -> dict:
+    """{model id: base} over `bases`, each asked its /v1/models -- the id a
+    client names is the one the server answers to -- in parallel with one
+    deadline (ROUTE_S); one that does not answer is left out. `docs`, when
+    given, is filled with each model's own /v1/models entry
+    (sampling_defaults, thinking, context_length)."""
+    fetch = fetch or fetch_json
+    found: dict = {}
+
+    def one(base):
+        try:
+            for m in fetch(peers.upstream(base, "/v1/models"),
+                           ROUTE_S).get("data") or []:
+                if isinstance(m, dict) and m.get("id"):
+                    found.setdefault(str(m["id"]), base)
+                    if docs is not None:
+                        docs.setdefault(str(m["id"]), m)
+        # one server's silence is logged, the others are still asked
+        except Exception:
+            logger.debug("no model list from %s", base, exc_info=True)
+    ts = [threading.Thread(target=one, args=(b,), daemon=True)
+          for b in sorted(bases)]
+    for t in ts:
+        t.start()
+    end = time.time() + ROUTE_S
+    for t in ts:
+        t.join(max(end - time.time(), 0))
+    return dict(found)
+
+
 def routable(fetch=None, ttl: float = 5.0) -> dict:
     """{model id: base} for every running knurlogic server this page knows
-    (chat_targets: its own and the ones peers reported). Each is asked its
-    /v1/models -- the id a client names is the one the server answers to --
-    in parallel with one deadline; one that does not answer is left out.
+    (chat_targets: its own and the ones peers reported), by models_at.
     Cached for a few seconds: Claude Code sends several requests a turn."""
-    import threading
-    import urllib.request
     now = time.time()
     if fetch is None:
         if now - _ROUTES["at"] < ttl:
             return dict(_ROUTES["map"])
-
-        def fetch(url, t):
-            with urllib.request.urlopen(url, timeout=t) as r:
-                return json.loads(r.read())
         # the page's own polling refreshes what peers serve, but a client
         # (Claude Code) may call before anyone has opened the page: the
         # router then saw only this machine
@@ -271,27 +284,8 @@ def routable(fetch=None, ttl: float = 5.0) -> dict:
                 peers.peer_residency(nodes.PEERS)
             except Exception:  # peer survey (logged)
                 logger.debug("peer survey failed", exc_info=True)
-    found: dict = {}
     docs: dict = {}
-
-    def one(base):
-        try:
-            for m in fetch(peers.upstream(base, "/v1/models"),
-                           ROUTE_S).get("data") or []:
-                if isinstance(m, dict) and m.get("id"):
-                    found.setdefault(str(m["id"]), base)
-                    docs.setdefault(str(m["id"]), m)
-        # peer survey thread: one peer's silence is logged, the others are still asked
-        except Exception:
-            logger.debug("no model list from %s", base, exc_info=True)
-    ts = [threading.Thread(target=one, args=(b,), daemon=True)
-          for b in sorted(chat_targets())]
-    for t in ts:
-        t.start()
-    end = time.time() + ROUTE_S
-    for t in ts:
-        t.join(max(end - time.time(), 0))
-    out = dict(found)
+    out = models_at(chat_targets(), fetch, docs)
     _ROUTES.update(at=now, map=out, docs=docs)
     return out
 
@@ -342,12 +336,10 @@ def route(handler, path: str, body: bytes, fetch=None) -> None:
         base, table = _await_launch(handler, model, table)
     if base is None:
         # say it in the shape either client reads as an error
-        send_json(handler, 404, {
-            "type": "error",
-            "error": {"type": "not_found_error",
-                      "message": f"no running model {model!r}; running: "
-                                 f"{', '.join(sorted(table)) or 'none'}"},
-            "models": sorted(table)})
+        send_json(handler, 404, api_error(
+            "not_found_error", f"no running model {model!r}; running: "
+                               f"{', '.join(sorted(table)) or 'none'}",
+            models=sorted(table)))
         return
     stream(handler, peers.upstream(base, path), body, base=base)
 
@@ -375,7 +367,6 @@ def _await_launch(handler, model: str, table: dict | None = None,
     """(base, table) once `model` is served, or (None, table) when no
     split job here is starting, the wait runs out, or the client hangs
     up. A job counted ready gets READY_GRACE_S for its server to answer."""
-    from knurlogic.interfaces.http.server import _hung_up
     start = time.time()
     ready_since = None
     table = dict(table or {})
@@ -387,7 +378,7 @@ def _await_launch(handler, model: str, table: dict | None = None,
             ready_since = ready_since or time.time()
             if time.time() - ready_since > READY_GRACE_S:
                 break
-        if _hung_up(handler.connection):
+        if hung_up(handler.connection):
             break
         time.sleep(poll)
         refresh_targets()
@@ -399,41 +390,26 @@ def _await_launch(handler, model: str, table: dict | None = None,
 
 
 def local_models(fetch=None, docs=None) -> dict:
-    """{model id: base} over the servers THIS machine started (never the
-    ones peers reported, so two pages relaying for each other cannot
-    loop). What a peer page's relay resolves a model name against.
-    `docs`, when given, is filled with each model's own /v1/models entry
-    (sampling_defaults, context_length) for the relay's GET."""
-    import threading
-    import urllib.request
-
+    """models_at over the servers THIS machine started (never the ones
+    peers reported, so two pages relaying for each other cannot loop):
+    what a peer page's relay resolves a model name against."""
     from knurlogic.machine.servers import is_our_server
-    if fetch is None:
-        def fetch(url, t):
-            with urllib.request.urlopen(url, timeout=t) as r:
-                return json.loads(r.read())
-    bases = sorted(f"http://127.0.0.1:{port}" for port, rec in
-                   registry().items() if is_our_server(int(rec["pid"])))
-    found: dict = {}
+    return models_at([f"http://127.0.0.1:{port}" for port, rec in
+                      registry().items() if is_our_server(int(rec["pid"]))],
+                     fetch, docs)
 
-    def one(base):
+
+def requested_model(query: dict, body: bytes):
+    """The model a request names: its `?model=` query, else its JSON
+    body's "model" field; None when it names none."""
+    model = (query.get("model") or [None])[0]
+    if model is None and body:
         try:
-            for m in fetch(f"{base}/v1/models", ROUTE_S).get("data") or []:
-                if isinstance(m, dict) and m.get("id"):
-                    found.setdefault(str(m["id"]), base)
-                    if docs is not None:
-                        docs.setdefault(str(m["id"]), m)
-        # peer survey thread: one server's silence is logged, the others are still asked
-        except Exception:
-            logger.debug("no model list from %s", base, exc_info=True)
-    ts = [threading.Thread(target=one, args=(b,), daemon=True)
-          for b in bases]
-    for t in ts:
-        t.start()
-    end = time.time() + ROUTE_S
-    for t in ts:
-        t.join(max(end - time.time(), 0))
-    return dict(found)
+            got = json.loads(body)
+        except ValueError:
+            return None
+        model = got.get("model") if isinstance(got, dict) else None
+    return model
 
 
 def resolve(table: dict, model):

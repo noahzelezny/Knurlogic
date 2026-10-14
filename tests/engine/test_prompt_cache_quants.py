@@ -157,7 +157,7 @@ def test_the_setting(monkeypatch):
 
 def test_the_page_shows_the_setting(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     doc = documents.prompt_cache_document({})
     row = next(k for k in doc["knobs"] if k["name"] == QT.ENV)
     assert row["values"] == ["on", "off"] and row["help"]

@@ -138,7 +138,7 @@ def test_settings_json_says_running_would_be_and_how_to_get_it(tmp_path):
     So the document has to carry the running value, the value another tune
     WOULD give, and the fact that it takes a restart.
     """
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     from knurlogic.tuning.resolve import resolve
 
     a = _art(bytes_on_disk=72 * GIB)
@@ -170,7 +170,7 @@ def test_settings_json_says_running_would_be_and_how_to_get_it(tmp_path):
 
 def test_a_misspelled_tune_from_a_url_falls_back_instead_of_500ing():
     """Query strings are user input; a typo must not take the page down."""
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     from knurlogic.tuning.resolve import resolve
     a = _art(bytes_on_disk=72 * GIB)
     doc = documents.settings_document(a, live_env={}, live_tune="default",

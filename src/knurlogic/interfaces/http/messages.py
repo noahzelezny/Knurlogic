@@ -11,7 +11,9 @@ model, not of this translation.
 from __future__ import annotations
 
 import json
-import uuid
+
+from .dialect import cached_tokens, image_part, new_id, sse
+from .dialect import handler_over as handler_over_dialect
 
 STOP_REASON = {
     "stop": "end_turn",
@@ -24,24 +26,22 @@ STOP_REASON = {
 
 
 def anthropic_images_to_openai(content) -> list:
-    """Anthropic Messages `content` blocks -> OpenAI `content` parts.
+    """Anthropic Messages `content` blocks -> OpenAI `content` parts: each
+    Anthropic image block becomes an OpenAI image part, everything else
+    passes through unchanged.
 
-    This module translates a Claude-shaped request onto the
-    engine's OpenAI surface (`serve.py`'s `messages_fn`), and until now that
-    translation dropped image blocks on the floor -- text only. An Anthropic
-    image block is `{"type": "image", "source": {"type": "base64",
-    "media_type": "...", "data": "..."}}` (or `{"type": "url", "url": ...}`,
-    which the engine's own image loader refuses -- P0's `images.decode`
-    does not fetch http(s), and this function does not either: it only
-    reshapes the block, `served_vision`'s caller does the fetching-or-not).
-    OpenAI's chat surface wants `{"type": "image_url",
-    "image_url": {"url": "data:<media_type>;base64,<data>"}}`.
+    An Anthropic image block is `{"type": "image", "source": {"type":
+    "base64", "media_type": "...", "data": "..."}}`, or a `{"type": "url",
+    "url": ...}` source; OpenAI's chat surface wants `{"type": "image_url",
+    "image_url": {"url": "data:<media_type>;base64,<data>"}}`. A URL is
+    only reshaped, never fetched here: the engine's image loader decides
+    (it refuses http(s)).
 
-    Anything already OpenAI-shaped, or any block this function does not
-    recognise as an Anthropic image, passes through unchanged -- this is a
-    shim for ONE block type, not a general content-block rewriter, and a
-    text block silently dropped would be a worse bug than one image block
-    left in a shape the engine already refuses with a clear error.
+    This is a shim for ONE block type, not a general content-block
+    rewriter: an OpenAI-shaped block, or one not recognised as an Anthropic
+    image, is left as it is -- a text block silently dropped would be a
+    worse bug than an image block left in a shape the engine refuses with
+    a clear error.
     """
     if not isinstance(content, list):
         return content
@@ -54,12 +54,10 @@ def anthropic_images_to_openai(content) -> list:
             src = block["source"]
             if src.get("type") == "base64" and src.get("data"):
                 media = src.get("media_type") or "image/png"
-                out.append({"type": "image_url",
-                            "image_url": {"url": f"data:{media};base64,{src['data']}"}})
+                out.append(image_part(f"data:{media};base64,{src['data']}"))
                 continue
             if src.get("type") == "url" and src.get("url"):
-                out.append({"type": "image_url",
-                            "image_url": {"url": src["url"]}})
+                out.append(image_part(src["url"]))
                 continue
         out.append(block)
     return out
@@ -232,7 +230,7 @@ def _blocks_from_choice(msg: dict) -> list:
             # translation problem -- pass the raw text through rather than
             # dropping the call silently.
             args = {"_raw": fn.get("arguments")}
-        blocks.append({"type": "tool_use", "id": c.get("id") or _id("toolu"),
+        blocks.append({"type": "tool_use", "id": c.get("id") or new_id("toolu"),
                        "name": fn.get("name"), "input": args})
     return blocks or [{"type": "text", "text": ""}]
 
@@ -242,8 +240,7 @@ def _usage(usage: dict) -> dict:
     the prompt cache, cache_read_input_tokens what was (a harness adds the
     two for the context it is using); a summary pass is an iteration;
     usage.knurlogic (context tokens against the window, ...) passed on."""
-    cached = int((usage.get("prompt_tokens_details") or {})
-                 .get("cached_tokens", 0) or 0)
+    cached = cached_tokens(usage)
     prompt = int(usage.get("prompt_tokens", 0) or 0)
     out: dict = {"input_tokens": max(prompt - cached, 0),
            "cache_creation_input_tokens": 0,
@@ -266,10 +263,6 @@ def _usage(usage: dict) -> dict:
     return out
 
 
-def _id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:24]}"
-
-
 def from_openai(resp: dict, model: str) -> dict:
     """OpenAI chat completion -> Anthropic Messages response."""
     choice = (resp.get("choices") or [{}])[0]
@@ -283,7 +276,7 @@ def from_openai(resp: dict, model: str) -> dict:
         # paused after compaction: the summary alone, no text block
         blocks = [b for b in blocks if b["type"] == "compaction"]
     out = {
-        "id": _id("msg"),
+        "id": new_id("msg"),
         "type": "message",
         "role": "assistant",
         "model": model,
@@ -301,10 +294,6 @@ def from_openai(resp: dict, model: str) -> dict:
     return out
 
 
-def _sse(event: str, data: dict) -> bytes:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
-
-
 def stream(openai_lines, model: str):
     """OpenAI SSE chunks -> Anthropic SSE events.
 
@@ -315,8 +304,8 @@ def stream(openai_lines, model: str):
     arrives as `input_json_delta`, which is why arguments are forwarded as
     raw JSON text instead of being parsed and re-serialised here.
     """
-    msg_id = _id("msg")
-    yield _sse("message_start", {
+    msg_id = new_id("msg")
+    yield sse("message_start", {
         "type": "message_start",
         "message": {"id": msg_id, "type": "message", "role": "assistant",
                     "model": model, "content": [], "stop_reason": None,
@@ -335,7 +324,7 @@ def stream(openai_lines, model: str):
         if line.startswith(": keepalive"):
             # a summary pass (or a long prefill) under way: say so, as the
             # API does, so the client does not time out
-            yield _sse("ping", {"type": "ping"})
+            yield sse("ping", {"type": "ping"})
             continue
         if line.startswith("event: knurlogic.progress"):
             # telemetry.md; the Anthropic SDK skips event names it does
@@ -355,7 +344,7 @@ def stream(openai_lines, model: str):
             # the engine failed mid-stream: say so, never end_turn with a
             # truncated answer
             err = chunk["error"]
-            yield _sse("error", {"type": "error", "error": {
+            yield sse("error", {"type": "error", "error": {
                 "type": "api_error",
                 "message": err.get("message") or "the engine failed"}})
             return
@@ -371,17 +360,17 @@ def stream(openai_lines, model: str):
             # whole, as the API streams it: start, one compaction_delta,
             # stop -- before any other block
             if open_block is not None:
-                yield _sse("content_block_stop",
+                yield sse("content_block_stop",
                            {"type": "content_block_stop", "index": index})
                 index += 1
-            yield _sse("content_block_start", {
+            yield sse("content_block_start", {
                 "type": "content_block_start", "index": index,
                 "content_block": {"type": "compaction", "content": ""}})
-            yield _sse("content_block_delta", {
+            yield sse("content_block_delta", {
                 "type": "content_block_delta", "index": index,
                 "delta": {"type": "compaction_delta",
                           "content": delta["compaction"]}})
-            yield _sse("content_block_stop",
+            yield sse("content_block_stop",
                        {"type": "content_block_stop", "index": index})
             index += 1
             open_block = None
@@ -390,34 +379,34 @@ def stream(openai_lines, model: str):
         if thought:
             if open_block != "thinking":
                 if open_block is not None:
-                    yield _sse("content_block_stop",
+                    yield sse("content_block_stop",
                                {"type": "content_block_stop", "index": index})
                     index += 1
-                yield _sse("content_block_start", {
+                yield sse("content_block_start", {
                     "type": "content_block_start", "index": index,
                     "content_block": {"type": "thinking", "thinking": "",
                                       "signature": ""}})
                 open_block = "thinking"
-            yield _sse("content_block_delta", {
+            yield sse("content_block_delta", {
                 "type": "content_block_delta", "index": index,
                 "delta": {"type": "thinking_delta", "thinking": thought}})
 
         if delta.get("content"):
             if open_block == "thinking":
                 # a thinking block closes with its (empty) signature
-                yield _sse("content_block_delta", {
+                yield sse("content_block_delta", {
                     "type": "content_block_delta", "index": index,
                     "delta": {"type": "signature_delta", "signature": ""}})
             if open_block != "text":
                 if open_block is not None:
-                    yield _sse("content_block_stop",
+                    yield sse("content_block_stop",
                                {"type": "content_block_stop", "index": index})
                     index += 1
-                yield _sse("content_block_start", {
+                yield sse("content_block_start", {
                     "type": "content_block_start", "index": index,
                     "content_block": {"type": "text", "text": ""}})
                 open_block = "text"
-            yield _sse("content_block_delta", {
+            yield sse("content_block_delta", {
                 "type": "content_block_delta", "index": index,
                 "delta": {"type": "text_delta", "text": delta["content"]}})
 
@@ -426,25 +415,25 @@ def stream(openai_lines, model: str):
             fn = tc.get("function") or {}
             if i not in tool_open:
                 if open_block == "thinking":
-                    yield _sse("content_block_delta", {
+                    yield sse("content_block_delta", {
                         "type": "content_block_delta", "index": index,
                         "delta": {"type": "signature_delta",
                                   "signature": ""}})
                 if open_block is not None:
-                    yield _sse("content_block_stop",
+                    yield sse("content_block_stop",
                                {"type": "content_block_stop", "index": index})
                     index += 1
                 tool_open[i] = index
                 open_block = "tool"
                 stop = "tool_use"
-                yield _sse("content_block_start", {
+                yield sse("content_block_start", {
                     "type": "content_block_start", "index": index,
                     "content_block": {"type": "tool_use",
-                                      "id": tc.get("id") or _id("toolu"),
+                                      "id": tc.get("id") or new_id("toolu"),
                                       "name": fn.get("name") or "",
                                       "input": {}}})
             if fn.get("arguments"):
-                yield _sse("content_block_delta", {
+                yield sse("content_block_delta", {
                     "type": "content_block_delta", "index": tool_open[i],
                     "delta": {"type": "input_json_delta",
                               "partial_json": fn["arguments"]}})
@@ -453,68 +442,33 @@ def stream(openai_lines, model: str):
             stop = STOP_REASON.get(choice["finish_reason"], stop)
 
     if open_block == "thinking":
-        yield _sse("content_block_delta", {
+        yield sse("content_block_delta", {
             "type": "content_block_delta", "index": index,
             "delta": {"type": "signature_delta", "signature": ""}})
     if open_block is not None:
-        yield _sse("content_block_stop",
+        yield sse("content_block_stop",
                    {"type": "content_block_stop", "index": index})
     final = {"type": "message_delta",
              "delta": {"stop_reason": stop, "stop_sequence": None},
              "usage": usage}
     if managed:
         final["context_management"] = managed
-    yield _sse("message_delta", final)
-    yield _sse("message_stop", {"type": "message_stop"})
+    yield sse("message_delta", final)
+    yield sse("message_stop", {"type": "message_stop"})
 
 
-class TransportError(Exception):
-    def __init__(self, status: int, message: str, retry_after: int = None):
-        super().__init__(message)
-        self.status = status
-        self.retry_after = retry_after
+def _error_body(message: str, status: int, _param=None) -> dict:
+    return {"type": "error", "error": {
+        "type": "invalid_request_error" if status < 500 else "api_error",
+        "message": message}}
 
 
 def handler_over(transport, model: str):
-    """A `/v1/messages` handler over any OpenAI chat transport:
-    transport(openai_body) -> the response dict, or (streaming) an
-    iterable of SSE lines; TransportError for a refusal. knurlogic's own
-    server passes its OpenAI surface directly -- no loopback request."""
-
-    def call(body: bytes, write, start_response):
-        try:
-            req = json.loads(body or b"{}")
-        except ValueError:
-            start_response(400, "application/json")
-            write(json.dumps({"type": "error", "error": {
-                "type": "invalid_request_error",
-                "message": "body must be JSON"}}).encode())
-            return
-
-        want_stream = bool(req.get("stream"))
-        oai = to_openai(req)
-        try:
-            resp = transport(oai)
-        except TransportError as e:
-            if e.retry_after:
-                start_response(e.status, "application/json",
-                               {"Retry-After": str(int(e.retry_after))})
-            else:
-                start_response(e.status, "application/json")
-            write(json.dumps({"type": "error", "error": {
-                "type": ("invalid_request_error" if e.status < 500
-                         else "api_error"),
-                "message": str(e)}}).encode())
-            return
-
-        if not want_stream:
-            out = from_openai(resp, req.get("model", model))
-            start_response(200, "application/json")
-            write(json.dumps(out).encode())
-            return
-
-        start_response(200, "text/event-stream")
-        for event in stream(resp, req.get("model", model)):
-            write(event)
-
-    return call
+    """A `/v1/messages` handler over the in-process OpenAI chat transport
+    (dialect.handler_over): knurlogic's own server passes its OpenAI
+    surface directly -- no loopback request."""
+    return handler_over_dialect(
+        transport, translate=to_openai, error_body=_error_body,
+        answer=lambda resp, req, _t: from_openai(resp,
+                                                 req.get("model", model)),
+        events=lambda resp, req, _t: stream(resp, req.get("model", model)))

@@ -1,8 +1,7 @@
 """The liveness document's memory map: 30 s old while the machine is quiet,
 3 s around anything that moves memory, so a card does not trail a load."""
 
-from knurlogic.interfaces import spawn
-from knurlogic.interfaces.page import documents
+from knurlogic.interfaces import documents, spawn
 from knurlogic.interfaces.page import nodes as page_nodes
 
 

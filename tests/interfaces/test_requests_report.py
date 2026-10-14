@@ -97,8 +97,7 @@ def test_status_json_requests_reach_loaded_rows(monkeypatch):
 
 def test_mcp_state_lists_requests_per_model(monkeypatch):
     from knurlogic.interfaces import mcp, spawn
-    from knurlogic.interfaces.mcp import page_client
-    from knurlogic.machine import loaded
+    from knurlogic.machine import identity, loaded
     req = {"in_flight": 1, "pending": 0, "capacity": 4,
            "oldest_pending_s": 0.0, "holding": None,
                             "memory_short": None, "memory_pressure": None}
@@ -107,7 +106,7 @@ def test_mcp_state_lists_requests_per_model(monkeypatch):
         {"name": "x", "where": "http://127.0.0.1:11434", "requests": None}],
         "runtimes": ["knurlogic"], "memory": {}})
     monkeypatch.setattr(spawn, "children", lambda: [])
-    monkeypatch.setattr(page_client, "me_name", lambda: "here")
+    monkeypatch.setitem(identity._ID, "name", "here")
     st = mcp.state()           # no page (conftest): this Mac's survey
     assert st["requests"] == [dict(req, model="m", machine="here",
                                    where="http://127.0.0.1:9")]
@@ -124,10 +123,11 @@ def test_the_503s_say_when_to_retry():
 
 def test_messages_refusal_sends_retry_after():
     from knurlogic.interfaces.http import messages as M
+    from knurlogic.interfaces.http.openai import ApiError
     sent = []
 
     def transport(_oai):
-        raise M.TransportError(503, "no model is loaded", 5)
+        raise ApiError(503, "no model is loaded", retry_after=5)
     h = M.handler_over(transport, "m")
     h(b"{}", lambda b: None, lambda *a: sent.append(a))
     assert sent == [(503, "application/json", {"Retry-After": "5"})]

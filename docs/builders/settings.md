@@ -40,7 +40,7 @@ Where the settings meet the rest (thin calls, no settings logic):
 - `interfaces/serve.py`: `_parse_sets` (`--set KEY=VALUE`), the
   `tuning/checks` refusals before a load, then the resolved env for the
   server; on a live change it applies `LIVE_KNOBS` through the engine.
-- `interfaces/page/documents.py`: the Settings panel's documents
+- `interfaces/documents.py`: the Settings panel's documents
   (`settings_document`, `knob_limit`, `machine_settings`,
   `compaction_document`, `strategy_doc`): page JSON built from the
   registry, `knob_reach` and `resolve`.

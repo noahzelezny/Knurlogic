@@ -6,9 +6,9 @@ import sys
 
 from knurlogic import __version__
 
-#: command -> (module under knurlogic, what it does). The module path IS the
-#: routing: interfaces.* talk to people and agents, machine.* read this box,
-#: engine.* touch what runs a model.
+#: command -> (module under knurlogic[:function], what it does); the
+#: function defaults to main. The module path IS the routing: interfaces.*
+#: talk to people and agents, engine.* touch what runs a model.
 COMMANDS = {
     "ui": ("interfaces.page.server", "start the page (the default with no "
            "command): every model, every runtime, and "
@@ -20,14 +20,15 @@ COMMANDS = {
     "connect": ("interfaces.connect",
                 "print how to point a client at a running server"),
     "mcp": ("interfaces.mcp", "serve the agent-facing tool interface on stdio"),
-    "loaded": ("machine.loaded", "what is in memory right now, in every runtime on "
-                         "this machine"),
+    "loaded": ("interfaces.machine_cli:loaded",
+               "what is in memory right now, in every runtime on this machine"),
     "mtp": ("interfaces.drafting", "which artifacts have a drafting head, "
             "and which only declare one"),
-    "models": ("machine.discover", "find the models already on this machine, in "
-                           "every tool's store"),
-    "deps": ("machine.deps", "what this stack stands on, and which pieces are "
-                     "stock and which are forks"),
+    "models": ("interfaces.machine_cli:models",
+               "find the models already on this machine, in every tool's store"),
+    "deps": ("interfaces.machine_cli:deps",
+             "what this stack stands on, and which pieces are stock and which "
+             "are forks"),
 }
 
 
@@ -65,9 +66,10 @@ def main(argv=None) -> int:
         return 2
     import importlib
 
-    mod = importlib.import_module(f"knurlogic.{COMMANDS[cmd][0]}")
-    return mod.main(args[1:], _say) if COMMANDS[cmd][0].startswith("engine.") \
-        else mod.main(args[1:])
+    module, _, fn = COMMANDS[cmd][0].partition(":")
+    run = getattr(importlib.import_module(f"knurlogic.{module}"), fn or "main")
+    return run(args[1:], _say) if module.startswith("engine.") \
+        else run(args[1:])
 
 
 if __name__ == "__main__":

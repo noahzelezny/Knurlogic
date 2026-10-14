@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
-from knurlogic.interfaces.page import documents
+from knurlogic.interfaces import documents
 from knurlogic.interfaces.page import nodes as page_nodes
 from knurlogic.interfaces.page import peek as page_peek
 from knurlogic.interfaces.page import peers as page_peers

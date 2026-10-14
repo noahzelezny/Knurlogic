@@ -8,7 +8,7 @@ import threading
 import time
 from types import SimpleNamespace
 
-from knurlogic.interfaces import http as H
+from knurlogic.interfaces.http import lifecycle as H
 
 
 class Sched:

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from knurlogic.interfaces.page import documents
+from knurlogic.interfaces import documents
 from knurlogic.interfaces.page import loads as page_loads
 from knurlogic.interfaces.page import nodes as page_nodes
 from knurlogic.interfaces.page import peers as page_peers

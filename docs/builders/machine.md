@@ -27,7 +27,7 @@ why: [memory](../design/memory.md), [memory-ledger](../design/memory-ledger.md),
 | `paths.py` | `cache_dir()`, `config_dir()`, `state_dir()`: where knurlogic's files live |
 | `files.py` | `write_atomic`, `write_json`, `read_json`: files written whole or not at all |
 | `processes.py` | `running(pid)` (the one liveness check), `PROC_ERRORS`, command lines, ports |
-| `http_client.py` | `get_json`, `send_json`: JSON over HTTP, as a client |
+| `http_client.py` | `get_json`, `send_json`, `request`, `open_url`: HTTP, as a client |
 | `status.py` | the snapshot `/status.json` serves (`snapshot`, `aggregate`) |
 | `deps.py` | which mlx, mlx-lm, mlx-vlm builds are installed, read off the fix itself |
 | `ledger.py` | the request ledger (see [telemetry](telemetry.md)) |

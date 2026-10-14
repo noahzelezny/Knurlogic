@@ -4,7 +4,7 @@ page spawns in place of `knurlogic serve --rank r ...`. No model loads.
 It writes the real progress marker (cluster/jobs.Marker) and walks the
 real phases. Rank 0 also serves POST /v1/chat/completions on --port through
 the REAL scheduler's submit/abort and the real SIGTERM path
-(interfaces/http.watch_ring), answering with the real error mapping: a
+(interfaces/http/lifecycle.watch_ring), answering with the real error mapping: a
 request is held in flight until the job is torn down, then 503s.
 
 argv: <artifact> knurlogic serve --rank R --job J [--port P] ...
@@ -55,14 +55,14 @@ def main():
 
     from knurlogic.engine.runtime import prompt as P
     from knurlogic.engine.runtime.scheduler import Job, Scheduler
-    from knurlogic.interfaces import http
+    from knurlogic.interfaces.http import lifecycle
     from knurlogic.interfaces.http.openai import status_of
 
     class Host:
         state = "ready"
 
     sched = Scheduler(Host())             # never started: nothing steps
-    http.watch_ring(sched, Host(), exit_after=1.0)
+    lifecycle.watch_ring(sched, Host(), exit_after=1.0)
     m.beat()
 
     class H(BaseHTTPRequestHandler):

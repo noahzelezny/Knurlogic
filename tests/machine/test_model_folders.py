@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import pytest
 
+from knurlogic.interfaces import machine_cli
 from knurlogic.machine import discover, folders
 
 
@@ -29,19 +30,19 @@ def _model(d: Path):
 def test_add_list_remove(tmp_path, capsys):
     f = tmp_path / "My Models"
     f.mkdir()
-    assert folders.main(["add", str(f)]) == 0
+    assert machine_cli.folders(["add", str(f)]) == 0
     assert folders.saved() == [str(f)]
-    assert folders.main(["folders"]) == 0
+    assert machine_cli.folders(["folders"]) == 0
     assert str(f) in capsys.readouterr().out
-    assert folders.main(["remove", str(f)]) == 0
+    assert machine_cli.folders(["remove", str(f)]) == 0
     assert folders.saved() == []
-    assert folders.main(["add", str(tmp_path / "nope")]) == 1
+    assert machine_cli.folders(["add", str(tmp_path / "nope")]) == 1
 
 
 def test_models_command_routes_folder_subcommands(tmp_path):
     f = tmp_path / "m"
     f.mkdir()
-    assert discover.main(["add", str(f)]) == 0
+    assert machine_cli.models(["add", str(f)]) == 0
     assert folders.saved() == [str(f)]
 
 

@@ -1,6 +1,6 @@
 """The MCP's tools that change what runs: load and unload.
 
-`load` on this Mac checks the launch, the fit and the ready gate before it
+`load` on this machine checks the launch, the fit and the ready gate before it
 spawns a server (interfaces/spawn.py); with `machines` it is the page's
 Launch request, sent through page_client.py. `unload` stops one by port,
 model, job or instance, on any machine the page sees.
@@ -26,11 +26,11 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
     overrides the moving-memory check only -- it will not make a model fit;
     `draft=false` (MTP off) may.
 
-    `machines` names where: empty is this Mac. Another Mac, or several,
-    go through the page on this Mac -- its Launch, the same request.
+    `machines` names where: empty is this machine. Another Mac, or several,
+    go through the page on this machine -- its Launch, the same request.
     Role words need no machine names (placement.py): "here", "peers"
     (every answering peer), "all" (here + peers), mixable with names;
-    "fit" alone -- this Mac if it fits here, else the smallest set of
+    "fit" alone -- this machine if it fits here, else the smallest set of
     answering Macs it fits on. A role that makes a cluster splits
     pipeline unless `split` says otherwise.
 
@@ -60,15 +60,14 @@ def load(artifact: str = "", port: int = 0, tune: str = "default",
         return _load_on(names, artifact, port, tune, sets, force, draft,
                         split, link, cable)
     from knurlogic.interfaces import spawn
-    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
+    from knurlogic.interfaces.load_checks import local_artifact
 
     # a model named, never a directory (interfaces/load_checks.py): the same
     # rule a switch on a running server follows
-    try:
-        artifact = resolve_name(artifact, None)
-    except NotLoadable as e:
+    artifact, why = local_artifact(artifact)
+    if artifact is None:
         return {"loaded": False, "refused": "not a known artifact",
-                "note": str(e)}
+                "note": why}
     # serve's deterministic refusals (bad settings, a context past the
     # model's maximum, ...), asked before a process is started: a server
     # that prints REFUSING and exits is a reason nobody sees
@@ -166,21 +165,19 @@ def _mtp_off_doc(artifact: str, sets: dict, tune: str,
 
 def _identity_of(artifact: str) -> tuple:
     """(identity, refusal): a model on other machines is named by identity
-    (machine/artifact.identity), read from this Mac's copy; a 16-hex
-    identity is taken as given, for a model this Mac does not hold."""
-    import re
-
-    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
+    (machine/artifact.identity), read from this machine's copy; a 16-hex
+    identity is taken as given, for a model this machine does not hold."""
+    from knurlogic.interfaces.load_checks import is_identity, local_artifact
     from knurlogic.machine.artifact import identity
-    try:
-        ident = identity(resolve_name(artifact, None))
-    except NotLoadable as e:
-        if re.fullmatch(r"[0-9a-f]{16}", str(artifact or "")):
+    path, why = local_artifact(artifact)
+    if path is None:
+        if is_identity(artifact):
             return artifact, None
         return "", {"loaded": False, "refused": "not a known artifact",
-                    "note": f"{e}. A model this Mac does not hold is named "
+                    "note": f"{why}. A model this machine does not hold is named "
                             f"by its identity (the page's /models.json on a "
                             f"Mac that has it)."}
+    ident = identity(path)
     if not ident:
         return "", {"loaded": False, "refused": "no identity",
                     "note": f"{artifact} has no config.json"}
@@ -190,24 +187,20 @@ def _identity_of(artifact: str) -> tuple:
 def _artifact_name(artifact: str) -> str:
     """The directory name `load` was given the artifact by ("" for a bare
     identity): the name the other machines resolve it by."""
-    import re
-    a = str(artifact or "").rstrip("/")
-    if re.fullmatch(r"[0-9a-f]{16}", a):
-        return ""
     from pathlib import Path
 
-    from knurlogic.interfaces.load_checks import NotLoadable, resolve_name
-    try:
-        # a path (or a pin's real path) -> the store's own name for it
-        return Path(resolve_name(a, None)).name
-    except NotLoadable:
-        return Path(a).name
+    from knurlogic.interfaces.load_checks import is_identity, local_artifact
+    a = str(artifact or "").rstrip("/")
+    if is_identity(a):
+        return ""
+    # a path (or a pin's real path) -> the store's own name for it
+    return Path(local_artifact(a)[0] or a).name
 
 
 def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
              cable) -> dict[str, Any]:
     """`load` on other machines: the page's Launch request, sent to the
-    page on this Mac (interfaces/page/loads.load_fn), which forwards a
+    page on this machine (interfaces/page/loads.load_fn), which forwards a
     one-peer load and coordinates a cluster (cluster/launch.launch)."""
     if len(set(names)) != len(names):
         return {"loaded": False, "refused": "a machine is named twice"}
@@ -227,7 +220,7 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
             return no
         from knurlogic.machine import identity
         if len(ids) == 1 and ids[0] == identity.identity().get("id"):
-            # this Mac, named: the same as naming none
+            # this machine, named: the same as naming none
             return load(artifact=artifact, port=port, tune=tune, sets=sets,
                         force=force, draft=draft)
         # the name too: a machine holding two artifacts with one identity
@@ -255,13 +248,14 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
         return no
     if len(ids) == 1:
         return dict(out, machines=names)
+    from knurlogic.cluster.launch import link_name
     plan = dict(out.get("placement") or {})
     plan.update(cable=out.get("cable"), cable_note=out.get("cable_note"))
     return {"starting": out.get("starting"), "artifact": artifact,
             "job": out.get("job"), "port": out.get("port"),
             "url": out.get("url"),
             "leader": out.get("leader"), "machines": out.get("machines"),
-            "split": split, "link": page_client.link_name(out.get("link") or link),
+            "split": split, "link": link_name(out.get("link") or link),
             "placement": plan,
             **({"alerts": out["alerts"]} if out.get("alerts") else {}),
             "note": out.get("note", "") + " -- or `state`: the job is one "
@@ -270,24 +264,25 @@ def _load_on(names, artifact, port, tune, sets, force, draft, split, link,
 
 def unload(port: int | None = None, model: str = "", job: str = "",
            instance: str = "", machine: str = "", **_) -> dict[str, Any]:
-    """Stop a model knurlogic started: by port on this Mac (as before), or
-    by model name, job id or instance id on any machine this Mac's page
+    """Stop a model knurlogic started: by port on this machine (as before), or
+    by model name, job id or instance id on any machine this machine's page
     sees. A cluster job stops on every machine -- the page's Unload, the
     same request. `instance` is the id `load` returned, or `state`'s
     `models[].instance` -- a single-Mac server's own 16-hex id, or a
     cluster job's id (its instance is its job id, so `instance` and `job`
     both find it)."""
     from knurlogic.interfaces import spawn
+    from knurlogic.interfaces.page.running import RUNNING_PATH
     if not (port or model or job or instance):
         return {"error": "name the port, the model, the job or the instance"}
     try:
-        page = page_client.page_get("/loaded.json?peers=1")
+        page = page_client.page_get(RUNNING_PATH)
     except page_client.PageDown as e:
         if port and not (model or job or instance or machine):
-            return spawn.stop(int(port))      # this Mac, without its page
+            return spawn.stop(int(port))      # this machine, without its page
         return {"error": str(e)}
     here = page_client.me_name()
-    rows = [r for r in page_client.models_across(page, here)
+    rows = [r for r in page.get("models") or []
             if r.get("runtime") == "knurlogic"]
     if instance:
         hit = [r for r in rows if r.get("instance") == str(instance)]
@@ -322,13 +317,10 @@ def unload(port: int | None = None, model: str = "", job: str = "",
                              ("name", "machine", "port", "job", "instance")}
                             for r in hit]}
     r = hit[0]
-    running = [j for d in [page] + list(page.get("peers") or [])
-               if isinstance(d, dict) for j in d.get("jobs") or []
-               if isinstance(j, dict) and j.get("job") == r.get("job")
-               and j.get("phase") != "stopped"]
+    jobs = page.get("jobs") or {}
     try:
-        if r.get("job") and (not running or any(
-                j.get("job") == r["job"] for j in page.get("jobs") or [])):
+        if r.get("job") and (r["job"] not in (jobs.get("live") or [])
+                             or r["job"] in (jobs.get("here") or [])):
             # a rank of it runs here: this page stops it everywhere; or
             # it runs nowhere (failed, waiting to relaunch): the unload
             # clears its record on every Mac, and says what it cleared

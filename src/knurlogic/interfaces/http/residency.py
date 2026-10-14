@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from . import lifecycle
 from .openai import ApiError
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,7 @@ def served(artifact, host):
 
 def ensure(body: dict) -> dict:
     """POST /v1/ensure {model, wait?, timeout?, force?} -- see
-    interfaces/http.switch."""
-    from knurlogic.interfaces import http
+    lifecycle.switch."""
     from knurlogic.interfaces.load_checks import NotLoadable
     if not isinstance(body, dict):
         raise ApiError(400, "the body must be a JSON object")
@@ -69,7 +69,7 @@ def ensure(body: dict) -> dict:
         raise ApiError(400, "timeout must be a number of seconds",
                        param="timeout") from None
     try:
-        return http.switch(str(body.get("model") or ""),
+        return lifecycle.switch(str(body.get("model") or ""),
                            force=bool(body.get("force")),
                            wait=bool(body.get("wait", False)),
                            timeout=timeout)

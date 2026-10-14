@@ -23,6 +23,7 @@ import time
 from knurlogic.machine import ledger as L
 
 from . import openai as O
+from .guard import is_loopback
 
 VERSION = 1
 EVENT = "knurlogic.progress"
@@ -138,14 +139,7 @@ class TelemetryHandlers:
         """GET /v1/usage?since=&until=&group=&key=: this machine's ledger
         summed by one label (fleet.md, "Reading it back"). Until keys
         exist, the loopback operator only."""
-        import ipaddress
-
-        try:
-            loop = ipaddress.ip_address(
-                self.client_address[0].split("%")[0]).is_loopback
-        except ValueError:
-            loop = False
-        if not loop:
+        if not is_loopback(self.client_address[0]):
             return self._json(403, {"error": {
                 "message": "usage is read on this machine (loopback) only",
                 "type": "permission_error"}})

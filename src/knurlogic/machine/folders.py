@@ -104,24 +104,7 @@ def adopt_from_env(env=None) -> list:
     return found
 
 
-def main(argv) -> int:
-    """knurlogic models add|remove <folder>, knurlogic models folders."""
-    import sys
-    cmd, rest = argv[0], argv[1:]
-    if cmd == "folders":
-        fs = saved()
-        if not fs:
-            print("no saved model folders (knurlogic models add <folder>)")
-        for f in fs:
-            print(f + ("" if _is_dir(Path(f)) else "   (not mounted)"))
-        return 0
-    if len(rest) != 1:
-        print(f"usage: knurlogic models {cmd} <folder>", file=sys.stderr)
-        return 2
-    out = add(rest[0]) if cmd == "add" else remove(rest[0])
-    if "error" in out:
-        print(f"knurlogic: {out['error']}", file=sys.stderr)
-        return 1
-    print(f"{'added' if cmd == 'add' else 'removed'} "
-          f"{out.get('added') or out.get('removed')}")
-    return 0
+def listing() -> list:
+    """The saved folders, one line each, an unmounted one marked."""
+    return [f + ("" if _is_dir(Path(f)) else "   (not mounted)")
+            for f in saved()]

@@ -712,7 +712,7 @@ def test_a_vq_moe_header_set_splits_two_ways(tmp_path):
     a = _artifact(tmp_path, QWEN36, _layer0(VQ_SWITCH))
     assert tensor_split.tensor_split_refusals(a, 2) == []
     assert tensor_split.tensor_unverified(a) == {}
-    from knurlogic.interfaces.page.documents import splits_of
+    from knurlogic.interfaces.documents import splits_of
     assert splits_of(a) == ["tensor", "pipeline"]
 
 
@@ -758,7 +758,7 @@ def test_a_skipzero_module_odd_rows_are_refused_by_its_headers(tmp_path):
     why = tensor_split.tensor_split_refusals(a, 2)
     assert "layers.0.mlp.switch_mlp.gate_proj.sz_codes: 70095 rows do not " \
         "divide by 2" in why
-    from knurlogic.interfaces.page.documents import splits_of
+    from knurlogic.interfaces.documents import splits_of
     assert "tensor" not in splits_of(a)
 
 
@@ -798,7 +798,7 @@ def test_a_runtime_that_splits_skipzero_itself_is_offered_tensor(tmp_path):
     _sz_runtime(a)
     assert tensor_split.tensor_split_refusals(a, 2) == []
     assert tensor_split.tensor_unverified(a) == {}
-    from knurlogic.interfaces.page.documents import splits_of
+    from knurlogic.interfaces.documents import splits_of
     assert "tensor" in splits_of(a)
     import types
     g = types.SimpleNamespace(rank=lambda: 1, size=lambda: 2)

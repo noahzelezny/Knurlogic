@@ -16,11 +16,11 @@ import pytest
 import test_cluster_jobs as T
 
 from knurlogic.cluster import launch as C
-from knurlogic.interfaces import mcp, spawn
+from knurlogic.interfaces import documents, mcp, spawn
 from knurlogic.interfaces.mcp import lifecycle, page_client
-from knurlogic.interfaces.page import documents
 from knurlogic.interfaces.page import loads as page_loads
 from knurlogic.interfaces.page import nodes as page_nodes
+from knurlogic.interfaces.page import running
 from knurlogic.interfaces.page import server as page_server
 from knurlogic.machine import identity
 
@@ -59,6 +59,8 @@ def page(monkeypatch):
         "/status.json": STATUS, "/loaded.json?peers=1": residency()})
 
     def call(path, doc=None, timeout=0):
+        if path == running.RUNNING_PATH:
+            return running.document(p.docs["/loaded.json?peers=1"])
         if doc is None:
             return p.docs[path]
         p.posts.append(doc)
@@ -71,7 +73,7 @@ def page(monkeypatch):
 
 
 def test_a_cluster_job_is_one_model_with_its_requests_and_link():
-    ms = page_client.models_across(residency(), "A")
+    ms = running.models_across(residency(), "A")
     job = [m for m in ms if m["job"] == "j1"]
     assert len(job) == 1, ms
     j = job[0]
@@ -85,7 +87,7 @@ def test_a_cluster_job_is_one_model_with_its_requests_and_link():
 
 
 def test_a_job_whose_rank_0_has_no_row_yet_is_listed_once_from_the_job():
-    ms = page_client.models_across(residency(rank0_row=False), "A")
+    ms = running.models_across(residency(rank0_row=False), "A")
     job = [m for m in ms if m["job"] == "j1"]
     assert len(job) == 1 and job[0]["port"] == 8080
     assert job[0]["phase"] == "ready" and job[0]["requests"] is None
@@ -95,7 +97,7 @@ def test_a_stopped_job_is_not_resident():
     doc = residency(rank0_row=False)
     doc["jobs"][0]["phase"] = "stopped"
     doc["peers"][0]["jobs"][0]["phase"] = "stopped"
-    assert not [m for m in page_client.models_across(doc, "A") if m["job"]]
+    assert not [m for m in running.models_across(doc, "A") if m["job"]]
 
 
 def test_load_on_two_machines_sends_the_pages_launch(page):
@@ -244,9 +246,11 @@ def page_a(tmp_path, monkeypatch, owned_procs):
     monkeypatch.setattr(documents, "loaded_document", local_residency)
     monkeypatch.setattr("knurlogic.machine.loaded.survey", lambda: {})
     serve_port = T.free_port()
+    loaded = page_loads.loaded_fn()
     routes = documents.routes(status_fn=page_nodes.status_fn,
-                        loaded_fn=page_loads.loaded_fn(),
+                        loaded_fn=loaded,
                         load_fn=page_loads.load_fn(serve_port))
+    routes[running.RUNNING_PATH] = running.route(loaded)
     srv = ThreadingHTTPServer(("127.0.0.1", ui_a), page_server.make_handler(routes))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     monkeypatch.setenv("KNURLOGIC_PAGE", f"127.0.0.1:{ui_a}")

@@ -241,7 +241,7 @@ def test_an_engine_knob_is_emitted_even_when_the_runtime_ignores_it(tmp_path):
 def test_the_resolved_prompt_chunk_reaches_the_scheduler():
     """The bug this closes (mlx-lm era): the resolver explained a prompt
     chunk the server never saw. Now the scheduler takes it directly."""
-    from knurlogic.interfaces.http import scheduler_options
+    from knurlogic.interfaces.http.lifecycle import scheduler_options
     got = scheduler_options({"prefill_step_size": 512,
                              "decode_concurrency": 4,
                              "prompt_cache_bytes": 1 << 30})
@@ -333,7 +333,7 @@ def test_a_dial_offers_only_positions_that_were_measured():
 def test_the_cache_dial_stops_at_what_the_box_can_hold(tmp_path):
     """A control that lets you pick a setting the resolver would refuse is a
     control that lies. The cap is headroom, and it says so."""
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     from knurlogic.machine.artifact import Artifact
     (tmp_path / "config.json").write_text(
         '{"model_type":"x","model_file":"model.py","vq_linear":{"a":1},'
@@ -424,7 +424,7 @@ def test_preview_reads_and_sets_nothing(tmp_path, monkeypatch):
     import json
     import os
 
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
 
     d = tmp_path / "m"
     d.mkdir()
@@ -446,7 +446,7 @@ def test_preview_says_which_knobs_are_launch_only(tmp_path):
     `restart` cannot be changed afterwards at all."""
     import json
 
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
 
     d = tmp_path / "m"
     d.mkdir()

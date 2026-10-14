@@ -295,7 +295,7 @@ def test_the_pickers_splits_are_kept_on_disk_under_the_identity(
     # again (~8 s over the library); the answer is kept under the identity
     from types import SimpleNamespace
 
-    from knurlogic.interfaces.page import documents as D
+    from knurlogic.interfaces import documents as D
     a = _art(tmp_path, "m", b"a")
     calls = []
     monkeypatch.setattr(D, "splits_of",

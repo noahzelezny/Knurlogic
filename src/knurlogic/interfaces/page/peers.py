@@ -129,7 +129,7 @@ def peer_machine(want) -> tuple:
     this machine's own page applies them. -> (status, doc): the machine's
     allowance and strategy after, with what applied, or the first
     refusal."""
-    from knurlogic.interfaces.page import documents
+    from knurlogic.interfaces import documents
     if isinstance(want, dict):
         want = {k: v for k, v in want.items() if v is not None}
     if not isinstance(want, dict) or not want or set(want) - {

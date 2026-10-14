@@ -26,7 +26,7 @@ Hooks outside it:
   `check_compact_knob`.
 - `tuning/preferences.py`: `compaction_env` (saved values over the
   environment).
-- `interfaces/page/documents.py`: `compaction_document` for the Settings
+- `interfaces/documents.py`: `compaction_document` for the Settings
   panel.
 
 ## Rules that keep it correct

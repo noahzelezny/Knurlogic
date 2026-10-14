@@ -15,20 +15,10 @@ from __future__ import annotations
 
 import json
 import time
-import uuid
 from typing import Any
 
-from .messages import TransportError
-
-
-class BadRequest(ValueError):
-    def __init__(self, message: str, param: str = None):
-        super().__init__(message)
-        self.param = param
-
-
-def _id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:24]}"
+from .dialect import BadRequest, cached_tokens, image_part, new_id, sse
+from .dialect import handler_over as handler_over_dialect
 
 
 def _parts(content, role: str | None):
@@ -48,7 +38,7 @@ def _parts(content, role: str | None):
                 raise BadRequest("an input_image needs an image_url "
                                  "(file_id images are not supported)",
                                  "input")
-            parts.append({"type": "image_url", "image_url": {"url": url}})
+            parts.append(image_part(url))
         elif t == "refusal":
             parts.append({"type": "text", "text": p.get("refusal", "")})
         else:
@@ -87,7 +77,7 @@ def to_chat(req: dict) -> dict:
                              else role,
                              "content": _parts(it.get("content"), role)})
             elif t == "function_call":
-                call = {"id": it.get("call_id") or it.get("id") or _id("call"),
+                call = {"id": it.get("call_id") or it.get("id") or new_id("call"),
                         "type": "function",
                         "function": {"name": it.get("name"),
                                      "arguments": it.get("arguments") or "{}"}}
@@ -147,8 +137,7 @@ def _usage(u: dict | None) -> dict:
     u = u or {}
     inp, out = int(u.get("prompt_tokens", 0) or 0), \
         int(u.get("completion_tokens", 0) or 0)
-    cached = int((u.get("prompt_tokens_details") or {})
-                 .get("cached_tokens", 0) or 0)
+    cached = cached_tokens(u)
     doc = {"input_tokens": inp,
            "input_tokens_details": {"cached_tokens": cached},
            "output_tokens": out,
@@ -160,7 +149,7 @@ def _usage(u: dict | None) -> dict:
 
 
 def _message_item(text: str, item_id: str = None, done: bool = True) -> dict:
-    return {"id": item_id or _id("msg"), "type": "message",
+    return {"id": item_id or new_id("msg"), "type": "message",
             "status": "completed" if done else "in_progress",
             "role": "assistant",
             "content": [{"type": "output_text", "text": text,
@@ -168,15 +157,15 @@ def _message_item(text: str, item_id: str = None, done: bool = True) -> dict:
 
 
 def _reasoning_item(text: str, item_id: str = None) -> dict:
-    return {"id": item_id or _id("rs"), "type": "reasoning",
+    return {"id": item_id or new_id("rs"), "type": "reasoning",
             "summary": [{"type": "summary_text", "text": text}]}
 
 
 def _call_item(name: str | None, args: str, call_id: str = None,
                item_id: str = None, done: bool = True) -> dict:
-    return {"id": item_id or _id("fc"), "type": "function_call",
+    return {"id": item_id or new_id("fc"), "type": "function_call",
             "status": "completed" if done else "in_progress",
-            "call_id": call_id or _id("call"), "name": name or "",
+            "call_id": call_id or new_id("call"), "name": name or "",
             "arguments": args}
 
 
@@ -215,19 +204,15 @@ def from_chat(resp: dict, req: dict, model: str) -> dict:
         out.append(_call_item(fn.get("name"), fn.get("arguments") or "{}",
                               c.get("id")))
     status, inc = _finish(choice.get("finish_reason"))
-    return _envelope(_id("resp"), model, int(time.time()), req, status, out,
+    return _envelope(new_id("resp"), model, int(time.time()), req, status, out,
                      _usage(resp.get("usage")), inc)
-
-
-def _sse(event: str, data: dict) -> bytes:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
 
 
 def stream(lines, req: dict, model: str):
     """OpenAI SSE chunks -> Responses events. One output item is open at a
     time (reasoning, then the message, then each call, as they arrive);
     each is opened, fed deltas, and closed with its `.done` events."""
-    rid, created = _id("resp"), int(time.time())
+    rid, created = new_id("resp"), int(time.time())
     seq = [0]
     output: list = []
     usage: dict = {}
@@ -236,7 +221,7 @@ def stream(lines, req: dict, model: str):
     def ev(name, **data):
         data.update(type=name, sequence_number=seq[0])
         seq[0] += 1
-        return _sse(name, data)
+        return sse(name, data)
 
     base = _envelope(rid, model, created, req, "in_progress", [])
     yield ev("response.created", response=base)
@@ -247,7 +232,7 @@ def stream(lines, req: dict, model: str):
     def open_item(kind, **kw):
         nonlocal cur
         idx = len(output)
-        item_id = _id({"reasoning": "rs", "message": "msg",
+        item_id = new_id({"reasoning": "rs", "message": "msg",
                        "call": "fc"}[kind])
         cur = dict(kind=kind, id=item_id, index=idx, text="", **kw)
         output.append(None)
@@ -352,7 +337,7 @@ def stream(lines, req: dict, model: str):
             i, fn = tc.get("index", 0), tc.get("function") or {}
             if i not in tool_open:
                 yield from close_item()
-                call_id = tc.get("id") or _id("call")
+                call_id = tc.get("id") or new_id("call")
                 yield from open_item("call", name=fn.get("name") or "",
                                      call_id=call_id)
                 tool_open[i] = cur
@@ -381,33 +366,11 @@ def _error_body(message: str, status: int, param: str = None) -> dict:
 
 
 def handler_over(transport, model: str):
-    """A `/v1/responses` handler over the same in-process OpenAI chat
-    transport messages.handler_over takes."""
-
-    def call(body: bytes, write, start_response):
-        def fail(status, message, param=None, headers=None):
-            start_response(status, "application/json", headers or {})
-            write(json.dumps(_error_body(message, status, param)).encode())
-        try:
-            req = json.loads(body or b"{}")
-        except ValueError:
-            return fail(400, "body must be JSON")
-        try:
-            oai = to_chat(req)
-        except BadRequest as e:
-            return fail(400, str(e), e.param)
-        try:
-            resp = transport(oai)
-        except TransportError as e:
-            return fail(e.status, str(e), headers=(
-                {"Retry-After": str(int(e.retry_after))}
-                if e.retry_after else None))
-        name = req.get("model") or model
-        if not req.get("stream"):
-            start_response(200, "application/json")
-            return write(json.dumps(from_chat(resp, req, name)).encode())
-        start_response(200, "text/event-stream")
-        for event in stream(resp, req, name):
-            write(event)
-
-    return call
+    """A `/v1/responses` handler over the in-process OpenAI chat transport
+    (dialect.handler_over)."""
+    return handler_over_dialect(
+        transport, translate=to_chat, error_body=_error_body,
+        answer=lambda resp, req, _t: from_chat(resp, req,
+                                               req.get("model") or model),
+        events=lambda resp, req, _t: stream(resp, req,
+                                            req.get("model") or model))

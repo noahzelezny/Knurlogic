@@ -11,11 +11,14 @@ engine/prompt_cache/transfer.py)."""
 
 from __future__ import annotations
 
-import json
 import os
 from urllib.parse import quote
 
+from knurlogic.interfaces.http.guard import is_loopback
+from knurlogic.interfaces.http.respond import send_json
 from knurlogic.interfaces.page import peers, router
+from knurlogic.machine.http_client import open_url
+from knurlogic.machine.http_client import send_json as send_json_to
 
 #: the model server's prompt-cache endpoints the page forwards
 PROMPT_CACHE_PATH = "/v1/prompt-cache"
@@ -34,24 +37,12 @@ def prompt_cache_forward(handler, method: str, path: str, query: dict,
     operator only (the model server refuses anyone else; the page forwards
     from loopback, so it must refuse first). `send`: (url, method, body)
     -> (status, doc), for tests."""
-    import ipaddress
-    try:
-        loop = ipaddress.ip_address(
-            handler.client_address[0].split("%")[0]).is_loopback
-    except (ValueError, AttributeError, IndexError):
-        loop = False
-    if not loop:
-        router.send_json(handler, 403, {"error": {
+    if not _loopback(handler):
+        send_json(handler, 403, {"error": {
             "message": "the prompt cache is managed from this machine "
                        "(loopback) only", "type": "permission_error"}})
         return
-    model = (query.get("model") or [None])[0]
-    if model is None and body:
-        try:
-            got = json.loads(body)
-            model = got.get("model") if isinstance(got, dict) else None
-        except ValueError:
-            model = None
+    model = router.requested_model(query, body)
     table = router.local_models(fetch)
     if model is not None:
         base = router.resolve(table, model)
@@ -65,10 +56,10 @@ def prompt_cache_forward(handler, method: str, path: str, query: dict,
                 code, doc = (send or router.send_up)(
                     peers.upstream(far, path) + q, method,
                     body if method == "POST" else None)
-                router.send_json(handler, code, doc)
+                send_json(handler, code, doc)
                 return
             here = sorted(set(table) | set(router.routable(fetch)))
-            router.send_json(handler, 404, {"error": {
+            send_json(handler, 404, {"error": {
                 "message": f"no running model {model!r} here or on a peer; "
                            f"running: {', '.join(here) or 'none'}",
                 "type": "not_found"}, "models": here})
@@ -76,7 +67,7 @@ def prompt_cache_forward(handler, method: str, path: str, query: dict,
     else:
         bases = set(table.values())
         if len(bases) != 1:
-            router.send_json(handler, 400, {"error": {
+            send_json(handler, 400, {"error": {
                 "message": "name the model (a \"model\" query or body "
                            "field): " + (", ".join(sorted(table))
                                          or "none is running"),
@@ -85,7 +76,7 @@ def prompt_cache_forward(handler, method: str, path: str, query: dict,
         base = bases.pop()
     code, doc = (send or router.send_up)(base + path, method,
                                    body if method == "POST" else None)
-    router.send_json(handler, code, doc)
+    send_json(handler, code, doc)
 
 
 # --- pieces of saved entries, between machines -----------------------------
@@ -108,12 +99,8 @@ PAGE_PORT_ENV = "KNURLOGIC_PAGE_PORT"
 
 
 def _loopback(handler) -> bool:
-    import ipaddress
-    try:
-        return ipaddress.ip_address(
-            handler.client_address[0].split("%")[0]).is_loopback
-    except (ValueError, AttributeError, IndexError):
-        return False
+    address = getattr(handler, "client_address", None)
+    return bool(address) and is_loopback(address[0])
 
 
 def piece_route(handler, path: str, query: dict, gate=None, roots=None,
@@ -126,10 +113,10 @@ def piece_route(handler, path: str, query: dict, gate=None, roots=None,
         if handler.headers.get("Origin") is not None or \
                 not _loopback(handler):
             handler.close_connection = True
-            router.send_json(handler, 403, {"error": "the peer list is for "
+            send_json(handler, 403, {"error": "the peer list is for "
                                             "this machine's model servers"})
             return
-        router.send_json(handler, 200, {"pages": sorted(peers.peer_pages())})
+        send_json(handler, 200, {"pages": sorted(peers.peer_pages())})
         return
     refused = peers.peer_refusal(
         handler.headers, handler.client_address[0],
@@ -138,7 +125,7 @@ def piece_route(handler, path: str, query: dict, gate=None, roots=None,
         what="prompt cache pieces")
     if refused:
         handler.close_connection = True
-        router.send_json(handler, *refused)
+        send_json(handler, *refused)
         return
 
     def one(name):
@@ -146,27 +133,27 @@ def piece_route(handler, path: str, query: dict, gate=None, roots=None,
         return v[0] if len(v) == 1 else None
     key = one("key")
     if not transfer.is_key_id(key):
-        router.send_json(handler, 400, {"error": "key is a 16-hex key id"})
+        send_json(handler, 400, {"error": "key is a 16-hex key id"})
         return
     if path == ENTRIES_PATH:
-        router.send_json(handler, 200, {"key": key, "entries":
+        send_json(handler, 200, {"key": key, "entries":
                                         transfer.listing(key, roots)})
         return
     entry, piece = one("entry"), transfer.parse_piece(one("layer"))
     if piece is None or entry is None:
-        router.send_json(handler, 400, {"error": "entry is a tokens hash, "
+        send_json(handler, 400, {"error": "entry is a tokens hash, "
                                         "layer a slot index, draft or "
                                         "entry"})
         return
     f = transfer.piece_path(key, entry, piece, roots)
     if f is None:
-        router.send_json(handler, 404, {"error": "no such piece here"})
+        send_json(handler, 404, {"error": "no such piece here"})
         return
     import shutil
     try:
         fh = open(f, "rb")
     except OSError:
-        router.send_json(handler, 404, {"error": "no such piece here"})
+        send_json(handler, 404, {"error": "no such piece here"})
         return
     with fh:
         handler.send_response(200)
@@ -189,19 +176,15 @@ class PageFetcher:
         self.page = page.rstrip("/")
         self.timeout = timeout
 
-    def _open(self, url: str):
-        import urllib.request
-        return urllib.request.urlopen(url, timeout=self.timeout)
-
     def peers(self) -> list:
-        with self._open(self.page + PEERS_PATH) as r:
-            got = json.loads(r.read() or b"{}")
+        got = send_json_to(self.page + PEERS_PATH, method="GET",
+                           timeout=self.timeout)
         return [p for p in (got.get("pages") or [])
                 if isinstance(p, str) and p.startswith("http://")]
 
     def listing(self, peer: str, key_id: str):
-        with self._open(f"{peer}{ENTRIES_PATH}?key={quote(key_id)}") as r:
-            got = json.loads(r.read() or b"{}")
+        got = send_json_to(f"{peer}{ENTRIES_PATH}?key={quote(key_id)}",
+                           method="GET", timeout=self.timeout)
         es = got.get("entries") if isinstance(got, dict) else None
         return es if isinstance(es, dict) else None
 
@@ -212,13 +195,16 @@ class PageFetcher:
         url = (f"{peer}{PIECE_PATH}?key={quote(key_id)}"
                f"&entry={quote(entry)}&layer={quote(str(piece))}")
         n = 0
-        with self._open(url) as r, open(dest, "wb") as out:
-            while n <= size:
-                buf = r.read(min(1 << 20, size + 1 - n))
-                if not buf:
-                    break
-                out.write(buf)
-                n += len(buf)
+        with open_url(url, timeout=self.timeout) as r:
+            if r.status != 200:
+                raise OSError(f"{url}: HTTP {r.status}")
+            with open(dest, "wb") as out:
+                while n <= size:
+                    buf = r.read(min(1 << 20, size + 1 - n))
+                    if not buf:
+                        break
+                    out.write(buf)
+                    n += len(buf)
         return n
 
 

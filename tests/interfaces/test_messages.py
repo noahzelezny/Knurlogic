@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from knurlogic.interfaces.http import messages as M
+from knurlogic.interfaces.http.openai import ApiError
 
 MARKER = "from-the-stub-engine"
 
@@ -44,7 +45,7 @@ def _engine(oai: dict):
 
 
 def _dead(oai: dict):
-    raise M.TransportError(502, "the engine is not answering")
+    raise ApiError(502, "the engine is not answering")
 
 
 def _call(transport, req):

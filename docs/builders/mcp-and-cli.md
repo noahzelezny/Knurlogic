@@ -12,9 +12,10 @@ on silence: [mcp](../design/mcp.md).
 | `interfaces/mcp/server.py` | the stdio loop: `_call`, `_serve_stdio`, `main`, `INSTRUCTIONS` (sent at `initialize`) |
 | `interfaces/mcp/tools.py` | `TOOLS` (name to `fn`, `description`, `schema`), `tool_list` |
 | `interfaces/mcp/inspection.py` | the read-only tools: `ready`, `fit`, `state`, `models`, `model_folders`, `settings`, `drafting`, `deps` |
-| `interfaces/mcp/lifecycle.py` | `load` and `unload`, on this Mac or through the page |
-| `interfaces/mcp/page_client.py` | the page on this Mac over loopback (`page_get`, `page_post`), `models_across` |
-| `interfaces/cli.py` | `knurlogic`: `COMMANDS` maps a subcommand to a module whose `main(argv)` runs it; no command starts the page |
+| `interfaces/mcp/lifecycle.py` | `load` and `unload`, on this machine or through the page |
+| `interfaces/mcp/page_client.py` | the page on this machine over loopback (`page_get`, `page_post`) |
+| `interfaces/cli.py` | `knurlogic`: `COMMANDS` maps a subcommand to a module (and function, `main` by default) that runs it; no command starts the page |
+| `interfaces/machine_cli.py` | `knurlogic loaded`, `models` (and `models add/remove/folders`), `deps`: prints what `machine/` returns |
 | `interfaces/connect.py` | `knurlogic connect`: how to point a client at a server (env lines, Claude Code, OpenAI, curl, Codex, MCP JSON) |
 | `interfaces/doctor.py` | `knurlogic doctor`: will this artifact run, and why not |
 | `interfaces/drafting.py` | `knurlogic mtp`: which artifacts can draft |
@@ -24,16 +25,17 @@ The MCP tools, in the order an agent uses them: `models`, `fit`,
 `settings`, `ready`, `load`, `state`, `unload`, plus `drafting`,
 `model_folders` and `deps`. Each is a plain function: the read-only ones in `mcp/inspection.py`,
 `load` and `unload` in `mcp/lifecycle.py`. Tools that span machines ask
-the page on this Mac (`mcp/page_client.py`: `page_get`, `page_post`;
+the page on this machine (`mcp/page_client.py`: `page_get`, `page_post`;
 address from `KNURLOGIC_PAGE`). `load`'s role words in `machines`
 (`here`, `peers`, `all`, `fit`) are resolved to page node ids in
 `mcp/placement.py` (`resolve_machines`; `fit_machines` reuses the `fit`
 tool and `tuning/placement.placement`).
 
 The CLI's commands: `ui`, `serve`, `doctor`, `smoke`, `vendor`,
-`connect`, `mcp`, `loaded`, `mtp`, `models`, `deps`. Most live in the
-package the command is about (`machine.discover`, `machine.loaded`,
-`machine.deps`, `engine.smoke`, `engine.vendor`).
+`connect`, `mcp`, `loaded`, `mtp`, `models`, `deps`. The engine's live in
+the package they are about (`engine.smoke`, `engine.vendor`); the
+machine's print through `interfaces/machine_cli.py`, since `machine/`
+only returns documents and text.
 
 ## Rules that keep it correct
 
@@ -56,17 +58,17 @@ package the command is about (`machine.discover`, `machine.loaded`,
 - A new tool: a function in `mcp/inspection.py` (reads) or
   `mcp/lifecycle.py` (starts or stops), an entry in `mcp/tools.py`'s
   `TOOLS` with its description and `_schema`, and its name in the
-  package `__init__`'s imports and `__all__`. If it acts on another Mac, go through the
+  package `__init__`'s imports and `__all__`. If it acts on another machine, go through the
   page (`page_post`), not straight to the peer.
-- A new CLI command: one line in `cli.COMMANDS` naming the module, and a
-  `main(argv) -> int` there.
+- A new CLI command: one line in `cli.COMMANDS` naming the module (and
+  `:function` when it is not `main`), and that `(argv) -> int` there.
 
 ## Notes
 
 The MCP and the page start and stop model servers through the same
-`interfaces/spawn.py` (`spawn`, `loading`, `children`, `stop`); the MCP
-reshapes the page's `/loaded.json?peers=1` for cross-machine answers
-(`models_across`).
+`interfaces/spawn.py` (`spawn`, `loading`, `children`, `stop`); for
+cross-machine answers the MCP reads the page's `/running.json`
+(`page/running.py`).
 
 ## Tests
 

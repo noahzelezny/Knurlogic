@@ -275,3 +275,17 @@ def leader_bytes(artifact: Artifact, vision: bool = True,
                 a, b = v.get("data_offsets", (0, 0))
                 total += int(b) - int(a)
     return total + (fit.tower_bytes(artifact)[0] if vision else 0)
+
+
+def pipeline_share_bytes(per: list, other: int, rank: int, world: int,
+                         counts=None, leader: int = 0) -> int:
+    """What pipeline rank `rank` holds: its layers (rank 0 the LAST
+    `counts[0]`, as launch.prepare places them) plus what every rank
+    holds, plus `leader` (the head and tower) on rank 0. Counts not given
+    yet (the resolver's split is made once the ring is up): an even share
+    of the layers."""
+    own = int(other) + (int(leader) if rank == 0 else 0)
+    if counts:
+        start = sum(counts[rank + 1:])
+        return sum(per[start:start + counts[rank]]) + own
+    return -(-sum(per) // max(world, 1)) + own

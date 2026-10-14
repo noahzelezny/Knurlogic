@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import json
 
-from knurlogic.interfaces.page import documents, loads, peek, peers, router
+from knurlogic.interfaces import documents
+from knurlogic.interfaces.page import loads, peek, peers, router
 
 
 def survey_here(routes: dict) -> tuple:
