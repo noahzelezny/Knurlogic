@@ -36,6 +36,8 @@ import json
 import logging
 from pathlib import Path
 
+from knurlogic.engine.arrays import arrays_of
+
 from . import convert, disk
 
 logger = logging.getLogger(__name__)
@@ -310,7 +312,7 @@ def read(store, dirs) -> list:
                         raise ValueError("no template to convert to")
                     cache = convert.convert_caches(
                         cache, store.template()[:store.part.n])
-                    mx.eval(list(disk._arrays_of(cache)))
+                    mx.eval(arrays_of(cache))
                 except Exception as e:  # a conversion that fails is a miss (logged)
                     logger.warning("prompt cache entry %s not converted: "
                                    "%s: %s", Path(d0).name,

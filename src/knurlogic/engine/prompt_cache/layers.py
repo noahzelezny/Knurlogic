@@ -56,6 +56,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from knurlogic.engine.arrays import arrays_of
 from knurlogic.machine.files import read_json, write_json
 from knurlogic.tuning import knobs
 
@@ -722,7 +723,7 @@ class Store:
                         why = "its tokens do not match entry.json"
                     else:
                         cache = self.read_part(d, m)
-                        mx.eval(list(disk._arrays_of(cache)))
+                        mx.eval(arrays_of(cache))
                         out.append((d, list(toks), cache,
                                     m.get("kind", "assistant"),
                                     round((time.perf_counter() - t0) * 1000,

@@ -18,19 +18,7 @@ from typing import Any
 
 import mlx.core as mx
 
-
-def _cache_state(cache: Any) -> list[mx.array]:
-    """The arrays to force after a chunk so the graph never spans chunks."""
-    from mlx.utils import tree_flatten
-    out: list[mx.array] = []
-    caches = cache if isinstance(cache, (list, tuple)) else [cache]
-    for c in caches:
-        st = getattr(c, "state", None)
-        if st is None:
-            continue
-        # nested: deepseek_v4's state is (window, compressor, indexer) tuples
-        out.extend(a for _, a in tree_flatten(st) if isinstance(a, mx.array))
-    return out
+from knurlogic.engine.arrays import arrays_of
 
 
 def seed_head(head: Any, h_chunks: list[mx.array], ids: mx.array, n: int,
@@ -52,6 +40,6 @@ def seed_head(head: Any, h_chunks: list[mx.array], ids: mx.array, n: int,
     for i in range(start, n - 1, step):
         j = min(i + step, n - 1)
         head.advance(h_all[:, i - start:j - start], ids[:, 1 + i:1 + j], cache)
-        mx.eval(_cache_state(cache))
+        mx.eval(arrays_of(cache))
         mx.clear_cache()
     del h_all

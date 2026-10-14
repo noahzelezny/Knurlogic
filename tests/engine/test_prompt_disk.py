@@ -13,6 +13,7 @@ mx = pytest.importorskip("mlx.core")
 
 from test_scheduler import Tok, _collect, _job  # noqa: E402
 
+from knurlogic.engine.arrays import arrays_of  # noqa: E402
 from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
 
 
@@ -31,7 +32,7 @@ def _forced(model, prompt, toks):
         y = model(mx.array([x]), cache=cache)
         return (y if isinstance(y, mx.array) else y.logits)[0]
     call(prompt, c)
-    mx.eval([a for a in D._arrays_of(c)])
+    mx.eval([a for a in arrays_of(c)])
     return c, lambda cache: mx.concatenate([call([t], cache)[-1:]
                                             for t in toks])
 

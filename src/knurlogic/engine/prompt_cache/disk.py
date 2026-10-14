@@ -69,6 +69,7 @@ import struct
 import time
 from pathlib import Path
 
+from knurlogic.engine.arrays import arrays_of
 from knurlogic.machine.artifact import safetensors_header, safetensors_layout
 from knurlogic.machine.files import read_json, write_json
 from knurlogic.machine.units import GIB
@@ -928,7 +929,7 @@ def read(key: dict, files) -> list:
         if got is None:
             continue
         toks, cache, kind = got
-        mx.eval(list(_arrays_of(cache)))
+        mx.eval(arrays_of(cache))
         out.append((Path(f), toks, cache, kind,
                     round((time.perf_counter() - t0) * 1000, 1),
                     {k: head.get(k) for k in ("owner", "pinned",
@@ -1016,21 +1017,6 @@ def adopt(owners: dict, pinned: set, restored: dict,
                      "file": None if v.get("borrowed_from")
                      else v.get("file"),
                      "saved_at": v.get("saved_at")}
-
-
-def _arrays_of(obj):
-    import mlx.core as mx
-    if isinstance(obj, mx.array):
-        yield obj
-    elif isinstance(obj, (list, tuple)):
-        for x in obj:
-            yield from _arrays_of(x)
-    elif isinstance(obj, dict):
-        for x in obj.values():
-            yield from _arrays_of(x)
-    elif hasattr(obj, "__dict__") and not callable(obj):
-        for x in vars(obj).values():
-            yield from _arrays_of(x)
 
 
 def source_of(lru, model_key, prompt, used: int):

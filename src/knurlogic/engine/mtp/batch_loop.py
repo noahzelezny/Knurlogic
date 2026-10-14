@@ -27,6 +27,7 @@ from typing import Any
 import mlx.core as mx
 from mlx_lm.generate import _extend_cache, _merge_caches
 
+from knurlogic.engine.arrays import arrays_of
 from knurlogic.engine.split.marker import chunk_done
 from knurlogic.tuning import knobs
 
@@ -654,16 +655,8 @@ class MTPBatch:
         mx.eval(self._arrays())
 
     def _arrays(self) -> list:
-        from mlx.utils import tree_flatten
-        out = [a for a in (self.t1, self.row_t1, self.draft_row)
-               if a is not None]
-        for c in list(self.cache) + ([self.hcache] if self.hcache else []):
-            try:
-                out += [a for _, a in tree_flatten(c.state)
-                        if isinstance(a, mx.array)]
-            except (AttributeError, TypeError, ValueError, RuntimeError):
-                pass            # a cache with no state to read yet
-        return out
+        return arrays_of([self.t1, self.row_t1, self.draft_row,
+                          list(self.cache), self.hcache])
 
     def _ends(self, i: int, toks: list[int]) -> int | None:
         """The index in `toks` (row i's tokens this step, in order) of the

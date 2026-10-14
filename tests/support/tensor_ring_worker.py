@@ -137,8 +137,8 @@ def cache_main(out_path, family, link):
     model(mx.array([ids]), cache=c)
     # every rank evaluates its prefill (its collectives) before the save:
     # a rank that writes nothing (a replicated cache) would never run them
-    from knurlogic.engine.prompt_cache import disk as D
-    mx.eval(list(D._arrays_of(c)))
+    from knurlogic.engine.arrays import arrays_of
+    mx.eval(arrays_of(c))
     st = LY.Store(shared, key, part)
     got = st.save(_lru(ids, c), commit=False, sweep_after=False)
     assert LY.commit(link, st, got["pending"]) == [got["pending"][0][

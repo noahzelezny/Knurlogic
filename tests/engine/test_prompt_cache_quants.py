@@ -20,6 +20,7 @@ from test_prompt_cache_convert import _equal, _setup  # noqa: E402
 from test_prompt_cache_layers import LINK, _gather_as, _lru_of  # noqa: E402
 from test_prompt_cache_tensor import _layout_parts, _share  # noqa: E402
 
+from knurlogic.engine.arrays import arrays_of  # noqa: E402
 from knurlogic.engine.prompt_cache import convert as CV  # noqa: E402
 from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
 from knurlogic.engine.prompt_cache import layers as LY  # noqa: E402
@@ -179,7 +180,7 @@ def test_a_restore_borrows_another_quants_entry_and_leaves_it(
     assert meta["borrowed_from"] == "path:/nonexistent/tiny-a"
     assert Path(d).parent.name == D.key_id(_key("a"))
     for a, b in zip(keep, back):
-        assert _equal(list(D._arrays_of(a)), list(D._arrays_of(b)))
+        assert _equal(list(arrays_of(a)), list(arrays_of(b)))
     # nothing written, moved or deleted
     assert _files(tmp_path) == before and not st.dir.exists()
     # inserted: says so, and the owner map holds no file of it
@@ -249,7 +250,7 @@ def test_another_width_is_converted_and_the_source_kept(tmp_path,
     assert got[0][5]["converted"] == {"from_bits": None, "to_bits": 8}
     for a, b in zip(whole, got[0][2]):
         assert type(a) is type(b)
-        assert _equal(list(D._arrays_of(a)), list(D._arrays_of(b)))
+        assert _equal(list(arrays_of(a)), list(arrays_of(b)))
     assert _files(tmp_path) == before
 
 
@@ -284,7 +285,7 @@ def test_a_rings_ranks_borrow_their_parts(tmp_path, monkeypatch, how):
     for p, got in zip(parts, out):
         assert len(got) == 1 and got[0][5]["borrowed_from"]
         for a, b in zip(_share(p, c), got[0][2][:p.n]):
-            assert _equal(list(D._arrays_of(a)), list(D._arrays_of(b)))
+            assert _equal(list(arrays_of(a)), list(arrays_of(b)))
     assert _files(tmp_path) == before
 
 

@@ -22,6 +22,7 @@ from test_prompt_cache_layers import LINK, _gather_as, _key, _lru_of  # noqa: E4
 from test_prompt_cache_transfer import _Peer  # noqa: E402
 from test_prompt_disk import _family, _forced  # noqa: E402
 
+from knurlogic.engine.arrays import arrays_of  # noqa: E402
 from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
 from knurlogic.engine.prompt_cache import layers as LY  # noqa: E402
 from knurlogic.engine.prompt_cache import slices as SL  # noqa: E402
@@ -124,7 +125,7 @@ def _whole(parts, caches: list) -> list:
 
 
 def _arrays_equal(a, b) -> bool:
-    xs, ys = list(D._arrays_of(a)), list(D._arrays_of(b))
+    xs, ys = list(arrays_of(a)), list(arrays_of(b))
     return len(xs) == len(ys) and all(
         x.shape == y.shape and x.dtype == y.dtype and mx.array_equal(x, y)
         for x, y in zip(xs, ys))
