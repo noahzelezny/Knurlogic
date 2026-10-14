@@ -371,7 +371,7 @@ def _attr(m, names) -> int:
     raise AttributeError(f"{type(m).__name__} has none of {names}")
 
 
-def family_of(model) -> str | None:
+def model_type_of(model) -> str | None:
     t = getattr(model, "model_type", None)
     if t is None:
         t = getattr(getattr(model, "args", None), "model_type", None)
@@ -384,7 +384,7 @@ def cache_cuts(model) -> list | None:
     ...)) with the widths resolved from the layer's sizes. None for the
     whole model when its family is not in CACHE_LAYERS or a layer holds
     none of its modules."""
-    spec = CACHE_LAYERS.get(family_of(model) or "")
+    spec = CACHE_LAYERS.get(model_type_of(model) or "")
     if spec is None:
         return None
     out = []

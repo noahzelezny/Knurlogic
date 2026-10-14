@@ -35,6 +35,7 @@ from knurlogic.machine.memory.pressure import (
 from knurlogic.tuning import knobs
 
 from . import prompt as P
+from .control_tokens import control_machine
 from .executor import (
     Admission,
     Checkpoint,
@@ -45,7 +46,7 @@ from .executor import (
     Token,
 )
 from .memory_guard import MemoryGuard, OutOfMemory, RingWait, Wait
-from .request import Request, control_machine
+from .request import Request
 from .timing import Spans, rates, step_bucket
 from .timing import enabled as spans_enabled
 

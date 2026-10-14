@@ -291,8 +291,8 @@ def serve(artifact, host: str, port: int, *, routes: dict | None = None,
 
             def shard_config(p):
                 return T.load_config(p, link.group)
-        # rank 0 drafts on either split and tells the others (agree_head)
-        agree = split_follower.agree_head(link)
+        # rank 0 drafts on either split and tells the others (HeadAgreement)
+        agree = split_follower.HeadAgreement(link)
     mh = ModelHost(draft=draft, head_agree=agree,
                    executes_artifact_code=bool(artifact.model_file),
                    image_store_bytes=settings.get("image_store_bytes"),

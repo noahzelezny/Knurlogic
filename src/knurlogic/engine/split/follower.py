@@ -1,7 +1,7 @@
 """A rank >= 1 of a split model, from start to stop: `serve_follower`
 (join, load its shard or stage, follow), `follow` (apply rank 0's plans
 and step), its memory limit (`Mark`), its SIGTERM handling, and
-`agree_head` (rank 0's drafting head told to every rank)."""
+`HeadAgreement` (rank 0's drafting head told to every rank)."""
 
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     `split="pipeline"`: this rank holds a run of layers, not a slice of
     every layer. Its trunk returns zeros for logits (pipeline.Silent: its
     samples are never used, so they are not compared with rank 0's).
-    `drafting`: rank 0 drafts with an MTP head (agree_head). This rank
+    `drafting`: rank 0 drafts with an MTP head (HeadAgreement). This rank
     holds none; it runs rank 0's drafting steps -- the verify forward with
     the drafted tokens, the rollback and replay -- as the Coord broadcasts
     say. `block`: rank 0's head drafts that many tokens a pass (DSpark),
@@ -132,7 +132,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     a third item, when given, is this rank's per-layer store."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.prompt_cache.memory import PromptCache
-    from knurlogic.engine.runtime.request import control_machine
+    from knurlogic.engine.runtime.control_tokens import control_machine
 
     stream = mx.default_stream(mx.default_device())
     _defer_sigterm(link.rank)
@@ -330,8 +330,8 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
         def cut_config(p):
             return load_config(p, link.group)
     # a follower never loads the MTP head: rank 0 drafts, and tells this
-    # rank whether it does (agree_head)
-    heads = agree_head(link)
+    # rank whether it does (HeadAgreement)
+    heads = HeadAgreement(link)
     layout = {"split": split, "world": link.size, "rank": link.rank}
     if split == "pipeline":
         layout["bounds"] = [list(b) for b in shares["bounds"]]
@@ -411,7 +411,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
         raise SystemExit(1) from None
 
 
-class agree_head:
+class HeadAgreement:
     """ModelHost's `head_agree` on a split model, on every rank after its
     load: rank 0's answer (it bound a head, or not) told to every rank.
     Only rank 0 holds one; `leader` is what a follower's Coord needs

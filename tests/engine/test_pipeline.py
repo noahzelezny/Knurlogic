@@ -463,7 +463,7 @@ def test_dspark_drafting_on_a_split_is_the_undrafted_engine(
 def test_dspark_on_a_split_through_the_serving_path(tmp_path, monkeypatch,
                                                    split, counts):
     """Rank 0's TensorExecutor drafting with DSpark, the follower's
-    follower.follow told the block size and target layers (agree_head):
+    follower.follow told the block size and target layers (HeadAgreement):
     seeded and greedy rows stream the unsplit executor's tokens, and each
     finished row's entry is at its key's length."""
     d = _ring(tmp_path, "dspark", split, counts or "-", "1", "engine")

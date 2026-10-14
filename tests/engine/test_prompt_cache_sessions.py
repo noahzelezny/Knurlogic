@@ -75,7 +75,7 @@ def test_drop_takes_a_session_out_of_memory_and_off_disk(tmp_path):
     assert len(pc.lru) == 2 and pc.of_session("s1") == []
     assert pc.lru.nbytes < nbytes
     assert D.drop_files("s1", tmp_path) == 4
-    left = [D._header(f)["owner"]["session"]
+    left = [D.file_meta(f)["owner"]["session"]
             for f, _, _ in D._all_files(tmp_path)]
     assert left == ["s2", "s2"]
 
@@ -98,7 +98,7 @@ def test_only_sessions_are_saved_and_files_carry_the_owner(tmp_path):
     got = D.save(pc.lru, _key(), base=tmp_path, owners=pc.owners,
                  model="tiny")
     assert got["saved"] == 3 and got["entries"] == 3
-    heads = [D._header(f) for f, _, _ in D._all_files(tmp_path)]
+    heads = [D.file_meta(f) for f, _, _ in D._all_files(tmp_path)]
     assert {h["owner"]["session"] for h in heads} == {"s1", "s2"}
     assert all(h["saved_at"] and h["model"] == "tiny" and
                h["pinned"] is False for h in heads)
@@ -166,7 +166,7 @@ def test_a_reinserted_entry_is_written_again_and_its_old_file_goes(tmp_path):
     got = D.save(pc.lru, _key(), base=tmp_path, owners=pc.owners,
                  only_new=True)
     assert got["saved"] == 1
-    owners = [D._header(f)["owner"]["session"]
+    owners = [D.file_meta(f)["owner"]["session"]
               for f, _, _ in D._all_files(tmp_path)]
     assert sorted(owners) == ["s1", "s1", "s3"]
 
@@ -194,7 +194,7 @@ def test_the_sweep_spares_pinned_files_from_ttl_and_budget(tmp_path,
     monkeypatch.setenv(D.ENV_TTL, "1")
     out = D.sweep(tmp_path, now=time.time() + 7200)
     assert out["ttl"] == 1 and out["pinned"] == 2
-    assert {D._header(f)["owner"]["session"]
+    assert {D.file_meta(f)["owner"]["session"]
             for f, _, _ in D._all_files(tmp_path)} == {"s1"}
     # the budget counts unpinned files only: a zero budget keeps them
     monkeypatch.setenv(D.ENV_TTL, "24")
@@ -285,7 +285,7 @@ def test_rank_0_journals_owner_drop_and_pin_and_a_follower_applies_them(
                        lambda only_new=False, select=None:
                        saves.append((only_new, select)))
     assert follower.of_session("s1") == [] and len(follower.lru) == 1
-    assert [D._header(f)["owner"]["session"]
+    assert [D.file_meta(f)["owner"]["session"]
             for f, _, _ in D._all_files(LOC.fallback())] == ["s2"]
     assert saves == [(True, {(5, 2, 3, 4)}), (False, None)]
     assert not apply_cache_op({"op": "set"}, follower, "m", last, None)

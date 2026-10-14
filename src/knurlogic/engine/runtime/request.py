@@ -25,85 +25,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from knurlogic.engine.runtime import tool_calls
+from knurlogic.engine.runtime.control_tokens import THINK_CLOSE_TAGS
 
 logger = logging.getLogger(__name__)
-
-_MACHINES: dict = {}
-
-#: The tags that close a think block. A model may end its thinking with
-#: `</thinking>` where its template says `</think>` (seen on Qwen3.6); both
-#: close the block, in the streamed and the non-streamed path alike. The
-#: tokenizer's own think_end is one of these; the others are matched as the
-#: token sequences their text encodes to.
-THINK_CLOSE_TAGS = ("</think>", "</thinking>")
-#: what may directly follow a close tag and merge with its last token
-#: (">\n\n" is one token in some vocabularies)
-_CLOSE_TAILS = ("", "\n", "\n\n", "\n\n\n", "\r\n")
-#: what may directly precede it and merge with its first token (Qwen3.6
-#: encodes " </" as one token, "</" as another)
-_CLOSE_HEADS = ("", " ")
-
-
-def _extra_think_closes(tokenizer) -> dict:
-    """{token sequence: its text} for the alternative close tags, as the
-    tokenizer encodes them bare and with a newline tail."""
-    if getattr(tokenizer, "think_end", None) not in THINK_CLOSE_TAGS:
-        return {}
-    out: dict = {}
-    for tag in THINK_CLOSE_TAGS:
-        if tag == tokenizer.think_end:
-            continue
-        for head in _CLOSE_HEADS:
-            for tail in _CLOSE_TAILS:
-                try:
-                    ids = tuple(tokenizer.encode(head + tag + tail,
-                                                 add_special_tokens=False))
-                except (AttributeError, TypeError, ValueError, KeyError):
-                    continue        # a vocabulary that cannot encode it
-                if ids:
-                    out[ids] = head + tag + tail
-    return out
-
-
-def control_machine(tokenizer, initial: str = "normal"):
-    """(ControlMachine, {token sequence: its text}) for the tokenizer's
-    control tokens: end-of-turn, think markers, tool markers. The user's
-    stop strings are NOT here -- they are text, matched by `Request`.
-    Cached per tokenizer and initial state."""
-    key = (id(tokenizer), initial)
-    hit = _MACHINES.get(key)
-    if hit is not None and hit[0] is tokenizer:
-        return hit[1], hit[2]
-    from .control_tokens import ControlMachine
-
-    seqs: dict[tuple[int, ...], str] = {}
-    ends: list = []
-    for t in tokenizer.eos_token_ids:
-        seqs[(t,)] = tokenizer.convert_ids_to_tokens(t)
-        ends.append(((t,), None))
-    edges: dict[str, list] = {"normal": list(ends)}
-    if getattr(tokenizer, "has_thinking", False):
-        ts, te = (tuple(tokenizer.think_start_tokens),
-                  tuple(tokenizer.think_end_tokens))
-        edges["normal"].append((ts, "reasoning"))
-        extra = _extra_think_closes(tokenizer)
-        edges["reasoning"] = [(te, "normal"),
-                              *((q, "normal") for q in extra), *ends]
-        seqs[ts], seqs[te] = tokenizer.think_start, tokenizer.think_end
-        seqs.update(extra)
-    if getattr(tokenizer, "has_tool_calling", False):
-        ts = tuple(tokenizer.tool_call_start_tokens)
-        te = tuple(tokenizer.tool_call_end_tokens or ())
-        edges["normal"].append((ts, "tool"))
-        edges["tool"] = ([(te, "normal")] if te else []) + ends
-        seqs[ts] = tokenizer.tool_call_start
-        if te:
-            seqs[te] = tokenizer.tool_call_end
-    sm = ControlMachine(edges, initial=initial)
-    if len(_MACHINES) > 64:
-        _MACHINES.clear()
-    _MACHINES[key] = (tokenizer, sm, seqs)
-    return sm, seqs
 
 
 @dataclass

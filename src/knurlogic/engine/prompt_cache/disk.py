@@ -321,7 +321,7 @@ def encode_entry(cache: list) -> tuple[dict, dict]:
 
 # ----------------------------------------------------------- one entry
 
-def _header(f: Path) -> dict | None:
+def file_meta(f: Path) -> dict | None:
     """The knurlogic metadata of an entry file, read from its header only
     (no array bytes), or None."""
     try:
@@ -393,7 +393,7 @@ def load_entry(f: Path, key: dict):
     import mlx.core as mx
     why = None
     try:
-        meta = _header(f)
+        meta = file_meta(f)
         if meta is None:
             why = "unreadable header"
         elif meta.get("key") != key:
@@ -455,7 +455,7 @@ def _session_of(p: Path):
         from . import layers
         m = layers.entry_meta(p) or {}
     else:
-        m = _header(p) or {}
+        m = file_meta(p) or {}
     return (m.get("owner") or {}).get("session")
 
 
@@ -601,7 +601,7 @@ def drop_sessionless_files(d: Path, older_than_s=None,
     """Delete the files in key directory `d` no session owns (requests
     that named none, the shared system-prompt checkpoints) -- only those
     unused for `older_than_s`, when given. Returns (count, {paths})."""
-    return drop_unowned(((f, _header(f), f) for _, _, _, f in entries(d)),
+    return drop_unowned(((f, file_meta(f), f) for _, _, _, f in entries(d)),
                         _remove, older_than_s, now)
 
 
@@ -639,7 +639,7 @@ def list_disk(base: Path | None = None) -> list:
     for b in _roots(base):
         p = pins(b)
         for f, size, _ in _all_files(b):
-            m = _header(f)
+            m = file_meta(f)
             if m is None:
                 continue
             o = m.get("owner") or {}
@@ -669,7 +669,7 @@ def index(d: Path) -> dict:
     out = {}
     for _, _, _, f in entries(d):
         toks = tokens_of(f)
-        m = _header(f)
+        m = file_meta(f)
         if toks is None or m is None or len(toks) != m.get("n_tokens"):
             continue
         out[tuple(toks)] = {"file": f, "owner": m.get("owner")}
@@ -795,7 +795,7 @@ def save(lru, key: dict, base: Path | None = None, *, owners=None,
                 stats["kept"] += 1          # on disk and unchanged
                 continue
             name = d / f"{gen:08d}-{seq:06d}-{h}{SUFFIX}"
-            meta = _header(old) if old is not None and not only_new \
+            meta = file_meta(old) if old is not None and not only_new \
                 else None
             if meta is not None and meta.get("key") == key and \
                     meta.get("n_tokens") == len(tokens) and \
@@ -918,7 +918,7 @@ def read(key: dict, files) -> list:
     out = []
     for f in files:
         t0 = time.perf_counter()
-        head = _header(Path(f)) or {}
+        head = file_meta(Path(f)) or {}
         got = load_entry(Path(f), key)
         if got is None:
             continue

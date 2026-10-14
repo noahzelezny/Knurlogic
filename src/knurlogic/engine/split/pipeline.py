@@ -58,7 +58,8 @@ def _stage(model) -> dict:
     return st[name]
 
 
-def family_of(model) -> str:
+def arch_of(model) -> str:
+    """The architecture name the pipeline split knows `model`'s trunk by."""
     return _stage(model)["name"]
 
 
@@ -260,7 +261,7 @@ def split(model, group, bounds: Sequence[tuple[int, int]]) -> dict:
     """Keep this rank's layers of `model` (bounds[rank]) and wire its stage
     ends, in place, before the weights are read. -> what was done."""
     rank, n = group.rank(), group.size()
-    fam = family_of(model)
+    fam = arch_of(model)
     core = core_of(model)
     full = list(core.layers)
     if len(bounds) != n:
@@ -422,7 +423,7 @@ class Coord:
     0's verdicts count: fp32-reduced logits need not be bit-equal across
     ranks, and a different verdict is a different replay -- a hang.
 
-    `head`: rank 0 drafts (it bound a head; `follower.agree_head` told every
+    `head`: rank 0 drafts (it bound a head; `follower.HeadAgreement` told every
     rank). The same on every rank, so BA / B1 are made on every rank or on
     none -- a follower holds no head of its own to ask."""
 

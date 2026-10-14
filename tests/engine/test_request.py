@@ -11,8 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 pytest.importorskip("mlx_lm")
 
+from knurlogic.engine.runtime.control_tokens import control_machine  # noqa: E402
 from knurlogic.engine.runtime.executor import Token  # noqa: E402
-from knurlogic.engine.runtime.request import Request, control_machine  # noqa: E402
+from knurlogic.engine.runtime.request import Request  # noqa: E402
 
 # A toy vocabulary: one string per id. 90 = end of turn.
 VOCAB = {1: "<think>", 2: "</think>", 3: "<tool_call>", 4: "</tool_call>",
@@ -262,7 +263,7 @@ def test_the_real_qwen_tokenizers_close_tag_sequences_are_matched():
 
     import pytest
 
-    from knurlogic.engine.runtime.request import _extra_think_closes
+    from knurlogic.engine.runtime.control_tokens import _extra_think_closes
     p = Path.home() / ".exo/models/mlx-community--Qwen3.6-35B-A3B-8bit"
     if not (p / "tokenizer.json").exists():
         pytest.skip("Qwen3.6 tokenizer not on this machine")

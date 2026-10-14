@@ -281,7 +281,7 @@ def _read(path: Path, want: dict) -> list:
     """The objects of a file whose header says `want` (every key equal);
     raises ValueError for any mismatch."""
     import mlx.core as mx
-    head = disk._header(path)
+    head = disk.file_meta(path)
     if head is None:
         raise ValueError(f"{path.name}: unreadable header")
     for k, v in want.items():
@@ -635,7 +635,7 @@ class Store:
                                        int(cut[1])))
         f = d / DRAFT
         if self.part.extras and meta.get("draft") and self.draft and \
-                f.is_file() and (disk._header(f) or {}).get("draft") == \
+                f.is_file() and (disk.file_meta(f) or {}).get("draft") == \
                 self.draft:
             out += _read(f, dict(want, layer="draft"))
         return out

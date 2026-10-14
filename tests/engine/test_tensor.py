@@ -1135,7 +1135,7 @@ def test_a_follower_prefills_each_row_at_the_chunk_rank_0_fitted(
     from types import SimpleNamespace as NS
 
     from knurlogic.engine.mtp import batch_generator as BG
-    from knurlogic.engine.runtime import request as RQ
+    from knurlogic.engine.runtime import control_tokens as RQ
     from knurlogic.engine.split import follower as split_follower
     from knurlogic.engine.split import pipeline as PL
     chunks, marks = [], []
