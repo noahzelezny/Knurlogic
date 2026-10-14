@@ -18,6 +18,7 @@ The sidecar file formats and their metadata keys (`vqlab_mtp`, written by
 from __future__ import annotations
 
 import json
+from abc import ABC, abstractmethod
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -198,7 +199,7 @@ class GraftHead(DraftHead):
         return {prefix + k for k, _ in tree_flatten(module.parameters())}
 
 
-class PackedSidecar:
+class PackedSidecar(ABC):
     """A head held as one module `m` whose sidecar is read off its packed
     tensors (no recipe metadata): `bind` shapes `m` to them and checks they
     match exactly. Subclasses name themselves (`LABEL`) and map keys between
@@ -213,18 +214,23 @@ class PackedSidecar:
             return next((src for src, dst in own.items() if k == dst), k)
         return own.get(k, k)
 
+    @abstractmethod
     def to_module(self, k: str) -> str:
-        raise NotImplementedError
+        """The module parameter path of sidecar key `k`."""
 
+    @abstractmethod
     def to_sidecar(self, k: str) -> str:
-        raise NotImplementedError
+        """The sidecar key of module parameter path `k`."""
 
     def _check_keys(self, w: dict) -> None:
-        """Refuse sidecar keys this head cannot hold (before renaming)."""
+        """Refuse sidecar keys this head cannot hold (before renaming): none
+        by default."""
+        return None
 
     def _prepare(self, mw: dict) -> None:
         """Swap modules the sidecar packs in a non-mlx format (before the
-        quantize pass)."""
+        quantize pass): none by default."""
+        return None
 
     def bind(self, w: dict) -> dict:
         """Shape this head to sidecar tensors and check it matches them
@@ -268,10 +274,12 @@ class PackedSidecar:
                 for k, v in tree_flatten(self.m.parameters())}
 
     def save(self, path) -> dict:
+        """Write this head's sidecar (packed tensors, no recipe). -> them."""
         flat = self.tensors()
         mx.save_safetensors(str(path), flat, metadata={"format": "mlx"})
         return flat
 
     @classmethod
     def from_sidecar(cls, model, arch, path):
+        """A head for `model` filled from the sidecar at `path`."""
         return cls(model, arch).load_weights(weight_files.load(path))
