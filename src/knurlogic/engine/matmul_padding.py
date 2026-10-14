@@ -11,8 +11,9 @@ chip) and sliced back; 1-8 and >=32 rows are untouched.
 Per-chip rounding is on by default: each chip runs its own fastest kernel
 and nothing is padded (rank 0 samples every token, so rounding cannot
 desync a cluster). `off` pads on every machine, so a split across chip
-generations gives the same tokens as one over a single generation. mlx is imported only by `install`. Design: docs/design/server.md
-(per-chip rounding).
+generations gives the same tokens as one over a single generation. mlx
+is imported only when the wrap is installed or the chip is asked.
+Design: docs/design/server.md (per-chip rounding).
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ VALUES = ("on", "off")
 #: resolve's dict): they say whether to pad, so rounding off is "on"
 KEY_SETTING = {"on": "off", "off": "on"}
 
-_STATE = {"orig": None, "installed": False}
+_STATE = {"installed": False}
 
 
 def parse(v) -> str:
@@ -114,18 +115,9 @@ def install() -> bool:
     if getattr(cur, "_knurlogic_padded", False):
         _STATE["installed"] = True
         return True
-    _STATE["orig"] = cur
     mx.quantized_matmul = padded(cur)
     _STATE["installed"] = True
     return True
-
-
-def uninstall() -> None:
-    """Put the original back (tests)."""
-    import mlx.core as mx
-    if _STATE["orig"] is not None:
-        mx.quantized_matmul = _STATE["orig"]
-    _STATE.update(orig=None, installed=False)
 
 
 def installed() -> bool:
@@ -135,9 +127,8 @@ def installed() -> bool:
 def gpu_architecture() -> str:
     """This machine's GPU architecture ('applegpu_g15d'), '' if unknown."""
     try:
-        import mlx.core as mx
-        info = (mx.device_info() if hasattr(mx, "device_info")
-                else mx.metal.device_info())
+        from knurlogic.engine import backend
+        info = backend.device_info()
         return str(info.get("architecture") or "")
     except (ImportError, AttributeError, RuntimeError, ValueError):
         return ""

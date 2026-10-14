@@ -1,7 +1,7 @@
 """A rank >= 1 of a split model, from start to stop: `serve_follower`
 (join, load its shard or stage, follow), `follow` (apply rank 0's plans
 and step), its memory limit (`Mark`), its SIGTERM handling, and
-`agree_head` (rank 0's drafting head told to every rank)."""
+`HeadAgreement` (rank 0's drafting head told to every rank)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import logging
 
 import mlx.core as mx
 
+from knurlogic.engine.prompt_cache import location as prompt_location
 from knurlogic.engine.prompt_cache.ring import apply_cache_op
 from knurlogic.engine.runtime.executor import (
     Admission,
@@ -17,6 +18,7 @@ from knurlogic.engine.runtime.executor import (
     LocalExecutor,
 )
 from knurlogic.machine.units import GIB
+from knurlogic.tuning import fit
 
 from . import plan as P
 from .link import Desync, Link, init
@@ -43,7 +45,8 @@ class Mark:
     def limit(self) -> int:
         if not self.ws:
             return 0
-        return self.ws - max(4 * GIB, self.ws // 20, int(self.spike * 1.25))
+        return self.ws - fit.rank_margin(self.ws,
+                                         {"transient_bytes": self.spike})
 
     def over(self) -> int:
         lim = self.limit()
@@ -70,13 +73,13 @@ def apply_set(op: dict, rank: int) -> str:
 
 def _stop_load_on_sigterm(rank: int) -> None:
     """Until it follows: a SIGTERM stops this rank's weight read at its next
-    batch boundary (host.LOAD_STOP; the load raises LoadCancelled and the
+    batch boundary (marker.LOAD_STOP; the load raises LoadCancelled and the
     rank exits) instead of killing it inside one, which left the GPU's
     utilization counter stuck at 100% until a reboot. follow() replaces it
     with _defer_sigterm."""
     import signal
 
-    from knurlogic.engine.runtime.model_host import LOAD_STOP
+    from .marker import LOAD_STOP
 
     def stop(_sig, _frame):
         logger.info("SIGTERM while loading: stopping at the next batch")
@@ -115,7 +118,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     `split="pipeline"`: this rank holds a run of layers, not a slice of
     every layer. Its trunk returns zeros for logits (pipeline.Silent: its
     samples are never used, so they are not compared with rank 0's).
-    `drafting`: rank 0 drafts with an MTP head (agree_head). This rank
+    `drafting`: rank 0 drafts with an MTP head (HeadAgreement). This rank
     holds none; it runs rank 0's drafting steps -- the verify forward with
     the drafted tokens, the rollback and replay -- as the Coord broadcasts
     say. `block`: rank 0's head drafts that many tokens a pass (DSpark),
@@ -129,7 +132,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
     a third item, when given, is this rank's per-layer store."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.prompt_cache.memory import PromptCache
-    from knurlogic.engine.runtime.request import control_machine
+    from knurlogic.engine.runtime.control_tokens import control_machine
 
     stream = mx.default_stream(mx.default_device())
     _defer_sigterm(link.rank)
@@ -236,7 +239,7 @@ def follow(model, tokenizer, model_key, link: Link, *, prompt_cache_size: int,
                 for u in op["uids"]:
                     chunks.pop(u, None)
             elif apply_cache_op(op, cache, model_key, last, save_disk,
-                                prompt_disk.root() / prompt_disk.key_id(
+                                prompt_location.fallback() / prompt_disk.key_id(
                                     disk_key) if disk_key else None,
                                 disk_key, store=store, link=link):
                 pass
@@ -327,8 +330,8 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
         def cut_config(p):
             return load_config(p, link.group)
     # a follower never loads the MTP head: rank 0 drafts, and tells this
-    # rank whether it does (agree_head)
-    heads = agree_head(link)
+    # rank whether it does (HeadAgreement)
+    heads = HeadAgreement(link)
     layout = {"split": split, "world": link.size, "rank": link.rank}
     if split == "pipeline":
         layout["bounds"] = [list(b) for b in shares["bounds"]]
@@ -408,7 +411,7 @@ def serve_follower(path: str, *, link_kind: str, working_set: int,
         raise SystemExit(1) from None
 
 
-class agree_head:
+class HeadAgreement:
     """ModelHost's `head_agree` on a split model, on every rank after its
     load: rank 0's answer (it bound a head, or not) told to every rank.
     Only rank 0 holds one; `leader` is what a follower's Coord needs
@@ -439,9 +442,7 @@ class agree_head:
         row = [int(bool(has)), k, len(outs)] + outs + \
             [0] * (self.MAX_OUTPUTS - len(outs))
         # each rank gets here when ITS load is done: line them up first
-        self.link.align()
-        got = mx.distributed.all_gather(mx.array(row), group=self.link.group,
-                                        stream=mx.cpu).tolist()
+        got = self.link.gather_ints(row)[0]       # rank 0's
         self.leader = bool(got[0])
         self.block = int(got[1])
         self.outputs = [int(i) for i in got[3:3 + int(got[2])]]

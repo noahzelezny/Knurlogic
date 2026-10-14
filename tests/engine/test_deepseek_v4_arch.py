@@ -164,7 +164,7 @@ def test_two_stages_in_one_process_are_the_whole_model(cut):
     from knurlogic.engine.split import pipeline as PL
     whole = G.logits_of(_load())
     first, last = _load(), _load()
-    assert PL.family_of(first) == "deepseek_v4"
+    assert PL.arch_of(first) == "deepseek_v4"
     n = len(PL.core_of(first).layers)
     box = []
     keep1 = list(PL.core_of(first).layers)[:cut]

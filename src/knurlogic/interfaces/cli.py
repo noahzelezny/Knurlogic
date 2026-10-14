@@ -31,6 +31,11 @@ COMMANDS = {
 }
 
 
+def _say(line: str, is_error: bool = False) -> None:
+    """Print an engine command's report line (engine modules never print)."""
+    print(line, file=sys.stderr if is_error else sys.stdout)
+
+
 def usage() -> int:
     print(f"knurlogic {__version__}\n")
     print("usage: knurlogic [<command>] [args]\n")
@@ -61,7 +66,8 @@ def main(argv=None) -> int:
     import importlib
 
     mod = importlib.import_module(f"knurlogic.{COMMANDS[cmd][0]}")
-    return mod.main(args[1:])
+    return mod.main(args[1:], _say) if COMMANDS[cmd][0].startswith("engine.") \
+        else mod.main(args[1:])
 
 
 if __name__ == "__main__":

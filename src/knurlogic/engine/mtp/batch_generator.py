@@ -303,7 +303,7 @@ class MTPBatchGenerator(BatchGenerator):
 
     def follow_block(self, block_size: int, outputs) -> None:
         """A split's follower of a rank 0 drafting with a block head
-        (follower.agree_head: its K and the layers whose outputs it reads):
+        (follower.HeadAgreement: its K and the layers whose outputs it reads):
         the block loop's steps with no head here, and on a pipeline stage
         those outputs carried on to rank 0 (pipeline.carry). Before
         silence / mirror_hidden / coordinate, which set the batch's parts."""

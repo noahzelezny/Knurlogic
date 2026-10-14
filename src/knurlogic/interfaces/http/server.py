@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import queue
 import select
 import socket
@@ -27,6 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 from knurlogic.engine.templates import TEMPLATE_ERRORS
 from knurlogic.machine.units import MIB
+from knurlogic.tuning import knobs
 
 from . import openai as O
 from . import telemetry as T
@@ -196,7 +196,7 @@ class App(CompactingChat):
         self.scheduler.submit(job)
         conn = getattr(_CONN, "sock", None)
         if conn is not None and not ctx.get("stream") and \
-                os.environ.get("KNURLOGIC_DISCONNECT_POLL", "on") != "off":
+                knobs.env_on("KNURLOGIC_DISCONNECT_POLL"):
             threading.Thread(target=_watch_hangup,
                              args=(job, conn, _CONN.done),
                              daemon=True).start()

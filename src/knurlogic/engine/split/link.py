@@ -12,8 +12,10 @@ import socket
 
 import mlx.core as mx
 
+from knurlogic.tuning import knobs
+
 from . import plan as P
-from .marker import progress
+from .marker import LOAD_STOP, progress
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,18 @@ class Desync(RuntimeError):
 
 
 # ------------------------------------------------------------------- link
+
+def gather_ints(group, row: list, dtype=None) -> list[list[int]]:
+    """Every rank's int `row` (the same length on every rank), in rank
+    order: one all_gather on the CPU. `dtype` defaults to int32. A
+    collective: every rank of `group` calls it at the same point."""
+    got = mx.distributed.all_gather(
+        mx.array(row, dtype=mx.int32 if dtype is None else dtype),
+        group=group, stream=mx.cpu).tolist()
+    if got and not isinstance(got[0], list):
+        got = [got[i:i + len(row)] for i in range(0, len(got), len(row))]
+    return got
+
 
 class Link:
     """The control exchange between ranks: one all_gather of a fixed-size
@@ -47,6 +61,11 @@ class Link:
         #: exchanges: a stopping rank 0 does not leave inside one that is
         #: still moving (http.watch_ring), which tore the peer's half
         self.entered: float | None = None
+
+    def gather_ints(self, row: list, dtype=None) -> list[list[int]]:
+        """gather_ints over this link, the ranks lined up first (align)."""
+        self.align()
+        return gather_ints(self.group, row, dtype)
 
     def barrier(self) -> None:
         mx.eval(mx.distributed.all_sum(mx.array(1), group=self.group,
@@ -317,10 +336,10 @@ def init(link_kind: str) -> Link:
     armed here for the join alone and dropped back to 0 once the ring is
     up, before the model's own cold read."""
     backend = {"ring": "ring", "jaccl": "jaccl"}[link_kind]
-    join_ms = os.environ.get("KNURLOGIC_JACCL_TIMEOUT_MS")
-    armed = bool(join_ms and join_ms.isdigit())
-    if armed and join_ms:
-        os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = join_ms
+    join_ms = knobs.env_int("KNURLOGIC_JACCL_TIMEOUT_MS")
+    armed = join_ms is not None and join_ms >= 0
+    if armed:
+        os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = str(join_ms)
     try:
         # the bell first, over TCP (the launcher said where): the ranks then
         # join and run the first collectives together (Link.align)
@@ -372,7 +391,6 @@ def bell_early():
     host, port, nonce, world = spec.rsplit(":", 3)
     port, nonce, world = int(port), int(nonce), int(world)
     rank = int(os.environ.get("MLX_RANK", "0"))
-    from knurlogic.engine.runtime.model_host import LOAD_STOP
     if rank == 0:
         srv = socket.create_server((host, port))
         logger.info("bell: rank 0 listening on %s:%d for ranks 1..%d before "

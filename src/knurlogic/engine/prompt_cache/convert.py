@@ -45,6 +45,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from knurlogic.engine.arrays import arrays_of
+
 from . import disk
 
 logger = logging.getLogger(__name__)
@@ -226,7 +228,7 @@ def read(store, dirs) -> list:
             try:
                 tmpl = store.template()[:store.part.n]
                 new = convert_caches(cache, tmpl)
-                mx.eval(list(disk._arrays_of(new)))
+                mx.eval(arrays_of(new))
             except Exception as e:  # a conversion that fails is a miss (logged)
                 logger.warning("prompt cache entry %s not converted: %s: %s",
                                Path(d0).name, type(e).__name__, e)
@@ -317,7 +319,7 @@ def persist_ring(link, store, got: list) -> list:
         else:
             marks.append(1)         # held under this key already
     row = [len(marks)] + marks + [0] * (layers.MAX_VOTE - len(marks))
-    rows = layers._gather(link, row)
+    rows = link.gather_ints(row)
     out = []
     for i, g in enumerate(got):
         if not (g[5] or {}).get("old"):

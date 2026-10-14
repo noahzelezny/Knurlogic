@@ -50,12 +50,13 @@ pipeline.carry. Design: docs/design/deepseek-vision.md (DSpark).
 from __future__ import annotations
 
 import logging
-import os
 import statistics
 from collections import deque
 from typing import Any
 
 import mlx.core as mx
+
+from knurlogic.tuning import knobs
 
 from .batch_loop import (
     EXPLORE_STEPS,
@@ -74,8 +75,7 @@ from .sampling import rejection_correct
 logger = logging.getLogger(__name__)
 
 #: KNURLOGIC_MTP_PROFILE=1: time each phase of a step (BlockBatch._prof)
-PROFILE = os.environ.get("KNURLOGIC_MTP_PROFILE", "").strip().lower() in (
-    "1", "on", "true", "yes")
+PROFILE = knobs.env_on("KNURLOGIC_MTP_PROFILE", False)
 PROFILE_EVERY = 32
 #: the confidence scores' calibration check (BlockBatch.calibrated):
 #: verdicts at a position before it counts, the largest |mean predicted -
@@ -105,14 +105,7 @@ ACC_SAMPLES = 64
 def _fixed_width() -> int | None:
     """KNURLOGIC_MTP_VERIFY=k: verify the first k drafts every step
     (clamped to 1..K); unset, k is chosen by measurement (_width)."""
-    v = os.environ.get("KNURLOGIC_MTP_VERIFY", "").strip()
-    if not v:
-        return None
-    try:
-        return int(v)
-    except ValueError:
-        raise ValueError(f"KNURLOGIC_MTP_VERIFY={v!r}: a whole number of "
-                         "drafts to verify (1..K), or unset") from None
+    return knobs.env_int("KNURLOGIC_MTP_VERIFY", strict=True)
 
 
 _fixed_width()   # a bad value refuses at import (serve start), not mid-request
@@ -136,7 +129,7 @@ class BlockBatch(MTPBatch):
     def __init__(self, *a, block_size: int = 0, **kw):
         super().__init__(*a, **kw)
         #: K: the head's, or on a split's follower (which holds none)
-        #: rank 0's (follower.agree_head)
+        #: rank 0's (follower.HeadAgreement)
         self.block_size = int(block_size
                               or getattr(self.head, "block_size", 0))
         #: (rows, k) -> (seconds per drafting step verifying k: the median

@@ -728,20 +728,20 @@ def _dspark_engine(link, out_path, model, head, prompts, samp, max_tokens,
                    split_kind, K, outs, load, ref):
     """The serving path for `dspark ... engine`: rank 0's TensorExecutor
     and the follower's follower.follow with rank 0's block size and target
-    layers (as agree_head tells it), against rank 0's unsplit executor
+    layers (as HeadAgreement tells it), against rank 0's unsplit executor
     with no head (FakeTok's end token on both). `keyed`: every Finished
     entry is at exactly its key's length."""
     from knurlogic.engine.mtp.batch_generator import (
         MTPBatchGenerator,
         trunk_offset,
     )
+    from knurlogic.engine.runtime.control_tokens import control_machine
     from knurlogic.engine.runtime.executor import (
         Admission,
         Finished,
         LocalExecutor,
         Token,
     )
-    from knurlogic.engine.runtime.request import control_machine
     from knurlogic.engine.split import follower as split_follower
     from knurlogic.engine.split import pipeline as PL
     from knurlogic.engine.split import ring as split_ring
@@ -848,13 +848,13 @@ def ends(link, out_path, split_kind="tensor", loop="mtp"):
     import build_deepseek_v4 as G
 
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime.control_tokens import control_machine
     from knurlogic.engine.runtime.executor import (
         Admission,
         Finished,
         LocalExecutor,
         Token,
     )
-    from knurlogic.engine.runtime.request import control_machine
     from knurlogic.engine.split import pipeline as PL
     from knurlogic.engine.split import tensor as T
     tmp = tempfile.mkdtemp()
@@ -1033,8 +1033,8 @@ def engine(link, out_path, fail="", split_kind="pipeline", drafting=""):
     `split_kind="tensor"`: the tiny qwen3_5_moe sharded, no head; with
     `drafting`, the tiny qwen3_5 sharded, rank 0 holding the head."""
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
+    from knurlogic.engine.runtime.control_tokens import control_machine
     from knurlogic.engine.runtime.executor import Admission, LocalExecutor, Token
-    from knurlogic.engine.runtime.request import control_machine
     from knurlogic.engine.split import follower as split_follower
     from knurlogic.engine.split import pipeline as PL
     from knurlogic.engine.split import ring as split_ring
@@ -1149,13 +1149,13 @@ def hit(link, out_path, split_kind="pipeline"):
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.prompt_cache.memory import PromptCache
     from knurlogic.engine.prompt_cache.ring import JournalPromptCache
+    from knurlogic.engine.runtime.control_tokens import control_machine
     from knurlogic.engine.runtime.executor import (
         Admission,
         Checkpoint,
         LocalExecutor,
         Token,
     )
-    from knurlogic.engine.runtime.request import control_machine
     from knurlogic.engine.split import follower as split_follower
     from knurlogic.engine.split import pipeline as PL
     from knurlogic.engine.split import ring as split_ring
@@ -1246,13 +1246,13 @@ def image(link, out_path, split_kind="pipeline"):
     from knurlogic.engine.mtp.batch_generator import MTPBatchGenerator
     from knurlogic.engine.prompt_cache.memory import PromptCache
     from knurlogic.engine.prompt_cache.ring import JournalPromptCache
+    from knurlogic.engine.runtime.control_tokens import control_machine
     from knurlogic.engine.runtime.executor import (
         Admission,
         Checkpoint,
         LocalExecutor,
         Token,
     )
-    from knurlogic.engine.runtime.request import control_machine
     from knurlogic.engine.split import pipeline as PL
     from knurlogic.engine.split import tensor as T
     from knurlogic.engine.vision import key as K

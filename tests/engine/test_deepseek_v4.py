@@ -449,8 +449,9 @@ def test_a_dsml_tool_call_parses_through_the_engine(tmp_path):
 
     from mlx_lm.utils import load_tokenizer
 
+    from knurlogic.engine.runtime.control_tokens import control_machine
     from knurlogic.engine.runtime.executor import Token
-    from knurlogic.engine.runtime.request import Request, control_machine
+    from knurlogic.engine.runtime.request import Request
     d = tmp_path / "DeepSeek-V4-Flash"
     d.mkdir()
     for f in ("tokenizer.json", "tokenizer_config.json",

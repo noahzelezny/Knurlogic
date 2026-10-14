@@ -20,6 +20,7 @@ import math
 import time
 
 from knurlogic.machine.units import GIB, gib
+from knurlogic.tuning import fit
 
 logger = logging.getLogger(__name__)
 
@@ -230,10 +231,8 @@ class MemoryGuard:
 
     def _working_set(self) -> int:
         if self.working_set is None:
-            import importlib  # engine.model exports a load() function
-            load = importlib.import_module("knurlogic.engine.model.load")
-            self.working_set = int(load.memory().get("working_set_bytes")
-                                   or 0)
+            from knurlogic.engine.model.load import memory
+            self.working_set = int(memory().get("working_set_bytes") or 0)
         return self.working_set
 
     def _margin(self, extra: int = 0, chunk: int | None = None) -> int:
@@ -246,7 +245,7 @@ class MemoryGuard:
         59k-token prefill's 17 GiB (GLM-5.3-Flash, 2026-10-05) stayed the
         margin of every later step, idle included, and every prompt was
         refused with 30-60 GiB unused across the ring."""
-        floor = max(4 * GIB, self._working_set() // 20)
+        floor = fit.rank_margin(self._working_set())
         if extra and chunk is None:
             chunk = self.prefill_step_size
         return max(floor, int(self._transient(self._context() + extra,
@@ -504,7 +503,7 @@ class MemoryGuard:
         same transient as here (equal shards under tensor; a pipeline's
         stages run one layer's temporaries at a time, near enough)."""
         t = self._transient(self._context() + n_tokens, chunk)
-        return -peers - max(0, int(t * 1.25) - 4 * GIB)
+        return -peers - max(0, int(t * 1.25) - fit.rank_margin(0))
 
     def _room(self, n_tokens: int = 0, chunk: int | None = None) -> int:
         """Bytes free for a prompt of n_tokens' cache in the step that

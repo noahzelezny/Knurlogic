@@ -20,7 +20,6 @@ verdicts. Design: docs/design/drafting.md (batched loop).
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -28,7 +27,9 @@ from typing import Any
 import mlx.core as mx
 from mlx_lm.generate import _extend_cache, _merge_caches
 
+from knurlogic.engine.arrays import arrays_of
 from knurlogic.engine.split.marker import chunk_done
+from knurlogic.tuning import knobs
 
 from .caches import position, release, restore, rollback, snapshot
 from .sampling import Distribution, Keys, rejection_correct
@@ -53,14 +54,10 @@ def default_draft_max_rows() -> int | None:
     never draft -- it read as 1); with none, KNURLOGIC_MTP_DYNAMIC=off
     drafts every step (ALWAYS_DRAFT); else None for the adaptive rule
     (`MTPBatch.drafting_pays`)."""
-    raw = os.environ.get("KNURLOGIC_MTP_BATCH_MAX_ROWS")
-    if not raw:
-        dyn = os.environ.get("KNURLOGIC_MTP_DYNAMIC", "").strip().lower()
-        return ALWAYS_DRAFT if dyn in ("off", "0", "false", "no") else None
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        return None
+    rows = knobs.env_int("KNURLOGIC_MTP_BATCH_MAX_ROWS")
+    if rows is not None:
+        return max(0, rows)
+    return None if knobs.env_on("KNURLOGIC_MTP_DYNAMIC") else ALWAYS_DRAFT
 
 
 #: steps taken in a regime before its cost estimate counts; and how often
@@ -658,16 +655,8 @@ class MTPBatch:
         mx.eval(self._arrays())
 
     def _arrays(self) -> list:
-        from mlx.utils import tree_flatten
-        out = [a for a in (self.t1, self.row_t1, self.draft_row)
-               if a is not None]
-        for c in list(self.cache) + ([self.hcache] if self.hcache else []):
-            try:
-                out += [a for _, a in tree_flatten(c.state)
-                        if isinstance(a, mx.array)]
-            except (AttributeError, TypeError, ValueError, RuntimeError):
-                pass            # a cache with no state to read yet
-        return out
+        return arrays_of([self.t1, self.row_t1, self.draft_row,
+                          list(self.cache), self.hcache])
 
     def _ends(self, i: int, toks: list[int]) -> int | None:
         """The index in `toks` (row i's tokens this step, in order) of the

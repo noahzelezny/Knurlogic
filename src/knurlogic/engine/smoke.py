@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
-import sys
 from pathlib import Path
 
 from knurlogic.engine import arch, register
@@ -42,37 +41,39 @@ def _origin(path, artifact_dir: Path) -> str:
 
 
 def run(path: str, max_tokens: int, pin: bool, strict: bool,
-        working_set_gib: float) -> int:
+        working_set_gib: float, say) -> int:
+    """The smoke. Each line of its report goes to `say(line, is_error)` as
+    it happens (the CLI prints it); returns the exit code."""
     a = Artifact.load(path)
-    print(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
+    say(f"artifact  {a.path.name}  ({a.model_type}, {a.gib:.1f} GiB)")
 
     # A smoke that thrashes swap produces no verdict, only a slow one.
     if working_set_gib and a.gib > working_set_gib:
-        print(f"REFUSED: {a.gib:.1f} GiB will not fit a "
-              f"{working_set_gib:.1f} GiB working set. A smoke that swaps "
-              f"measures nothing.", file=sys.stderr)
+        say(f"REFUSED: {a.gib:.1f} GiB will not fit a "
+            f"{working_set_gib:.1f} GiB working set. A smoke that swaps "
+            f"measures nothing.", True)
         return 2
 
     needed = arch.modules_for_artifact(a)
     if needed:
         done = register.register(*needed)
-        print(f"registered {done or '(already imported)'}")
+        say(f"registered {done or '(already imported)'}")
     else:
-        print(f"no architecture mapping for {a.model_type!r} -- "
-              f"relying on whatever mlx-lm ships")
+        say(f"no architecture mapping for {a.model_type!r} -- "
+            f"relying on whatever mlx-lm ships")
 
     r = resolve(a, int(working_set_gib * GIB))
     import os
     os.environ.update(r.env)
 
-    print(f"engine    {engine.describe()}")
+    say(f"engine    {engine.describe()}")
     if a.model_file:
-        print(f"executing {a.model_file} from the artifact "
-              f"(its VQ kernels live there)")
+        say(f"executing {a.model_file} from the artifact "
+            f"(its VQ kernels live there)")
     model, tokenizer = engine.load(str(a.path),
                                    executes_artifact_code=bool(a.model_file))
 
-    print("\nprovenance")
+    say("\nprovenance")
     problems = []
     for mod in needed:
         try:
@@ -80,32 +81,32 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
             where = _origin(getattr(m, "__file__", None), a.path)
         except (ImportError, ValueError, OSError):
             where, m = "unknown", None
-        print(f"  {mod:14s} {where}")
+        say(f"  {mod:14s} {where}")
         if where in ("site-packages", "checkout", "unknown"):
             problems.append(
                 f"{mod} resolved from {where}; a downloader installing "
                 f"knurlogic would not have that copy")
 
-    print("\ngenerating...")
+    say("\ngenerating...")
     text = engine.generate(model, tokenizer,
                            "The capital of France is", max_tokens).strip()
-    print(f"  -> {text!r}")
+    say(f"  -> {text!r}")
     if not text:
-        print("FAIL: loaded but produced no tokens", file=sys.stderr)
+        say("FAIL: loaded but produced no tokens", True)
         return 1
 
     if problems:
         for p in problems:
-            print(f"\n{'FAIL' if strict else 'WARNING'}: {p}", file=sys.stderr)
+            say(f"\n{'FAIL' if strict else 'WARNING'}: {p}", True)
         if strict:
-            print("\n(--no-strict to record the run anyway)", file=sys.stderr)
+            say("\n(--no-strict to record the run anyway)", True)
             return 1
 
-    print("\nSMOKE PASS")
+    say("\nSMOKE PASS")
 
     if pin:
         if problems:
-            print("refusing to pin: provenance is not clean", file=sys.stderr)
+            say("refusing to pin: provenance is not clean", True)
             return 1
         from knurlogic.engine import families
         for row in arch.check(a.model_type):
@@ -129,11 +130,11 @@ def run(path: str, max_tokens: int, pin: bool, strict: bool,
                 row_pin[f"validated_with_{row_pin['host']}"] = \
                     engine.info(row_pin["host"]).version
             pins.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
-            print(f"pinned {row.module} -> {row.sha256[:16]}...")
+            say(f"pinned {row.module} -> {row.sha256[:16]}...")
     return 0
 
 
-def main(argv=None) -> int:
+def main(argv, say) -> int:
     p = argparse.ArgumentParser(prog="knurlogic smoke")
     p.add_argument("artifact")
     p.add_argument("--max-tokens", type=int, default=4)
@@ -144,8 +145,6 @@ def main(argv=None) -> int:
     p.add_argument("--no-strict", dest="strict", action="store_false",
                    default=True)
     a = p.parse_args(argv)
-    return run(a.artifact, a.max_tokens, a.pin, a.strict, a.working_set_gib)
+    return run(a.artifact, a.max_tokens, a.pin, a.strict, a.working_set_gib,
+               say)
 
-
-if __name__ == "__main__":
-    raise SystemExit(main())

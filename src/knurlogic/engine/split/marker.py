@@ -1,6 +1,7 @@
 """The rank side of a cluster job's progress marker, as the engine sees it:
 calls the engine makes from inside a rank (a step taken, a prefill chunk
-done, the model loaded). Stdlib only, a no-op outside a job.
+done, the model loaded), and LOAD_STOP, the flag that stops a rank's
+weight read. Stdlib only at import; a no-op outside a job.
 
 The marker itself (cluster/jobs.Marker) is set here by whoever starts the
 rank (interfaces/serve.py); engine never imports cluster.
@@ -8,6 +9,11 @@ rank (interfaces/serve.py); engine never imports cluster.
 from __future__ import annotations
 
 import os
+import threading
+
+#: set from a signal handler to stop a load at the next batch boundary
+#: (engine/runtime/model_host.evaluate_everything, split/weights, the bell)
+LOAD_STOP = threading.Event()
 
 #: this process's marker, when it is a rank of a job
 CURRENT: dict = {"marker": None}
@@ -34,7 +40,8 @@ def after_load() -> None:
     """The model is in memory: arm the jaccl self-heal deadline, if the
     page asked for one (it does only when the fork is installed and the
     link is jaccl). Read live by libjaccl on every collective."""
-    ms = os.environ.get("KNURLOGIC_JACCL_TIMEOUT_MS")
-    if ms and ms.isdigit():
-        os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = ms
+    from knurlogic.tuning import knobs
+    ms = knobs.env_int("KNURLOGIC_JACCL_TIMEOUT_MS")
+    if ms is not None and ms >= 0:
+        os.environ["JACCL_COLLECTIVE_TIMEOUT_MS"] = str(ms)
     progress(phase="ready")

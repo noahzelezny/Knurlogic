@@ -26,6 +26,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten
 
+from .link import gather_ints
+
 logger = logging.getLogger(__name__)
 
 _DTYPES = (mx.float32, mx.bfloat16, mx.float16)
@@ -56,7 +58,8 @@ def _stage(model) -> dict:
     return st[name]
 
 
-def family_of(model) -> str:
+def arch_of(model) -> str:
+    """The architecture name the pipeline split knows `model`'s trunk by."""
     return _stage(model)["name"]
 
 
@@ -197,9 +200,8 @@ def sends_of(model) -> list[Send]:
 def overlap_on() -> bool:
     """KNURLOGIC_PIPELINE_OVERLAP=off sends each prefill chunk before the
     next one computes (the A/B for the overlap's gain)."""
-    import os
-    v = os.environ.get("KNURLOGIC_PIPELINE_OVERLAP", "").strip().lower()
-    return v not in ("off", "0", "false", "no")
+    from knurlogic.tuning import knobs
+    return knobs.env_on("KNURLOGIC_PIPELINE_OVERLAP")
 
 
 @contextlib.contextmanager
@@ -259,7 +261,7 @@ def split(model, group, bounds: Sequence[tuple[int, int]]) -> dict:
     """Keep this rank's layers of `model` (bounds[rank]) and wire its stage
     ends, in place, before the weights are read. -> what was done."""
     rank, n = group.rank(), group.size()
-    fam = family_of(model)
+    fam = arch_of(model)
     core = core_of(model)
     full = list(core.layers)
     if len(bounds) != n:
@@ -277,9 +279,7 @@ def split(model, group, bounds: Sequence[tuple[int, int]]) -> dict:
     # every rank's stage dtype, so a send is cast to what its receiver
     # expects (one all_gather, on the CPU, while every rank is loading)
     mine = _dtype_code(own_dtype(keep[0]))
-    codes = mx.distributed.all_gather(mx.array([mine], dtype=mx.int32),
-                                      group=group, stream=mx.cpu).tolist()
-    dts = [_DTYPES[c] for c in codes]
+    dts = [_DTYPES[c] for c, in gather_ints(group, [mine])]
     if rank < n - 1:                       # not the first stage: receive
         keep[0] = Recv(keep[0], rank + 1, group, dts[rank])
     if rank > 0:                           # not the last stage: send
@@ -423,7 +423,7 @@ class Coord:
     0's verdicts count: fp32-reduced logits need not be bit-equal across
     ranks, and a different verdict is a different replay -- a hang.
 
-    `head`: rank 0 drafts (it bound a head; `follower.agree_head` told every
+    `head`: rank 0 drafts (it bound a head; `follower.HeadAgreement` told every
     rank). The same on every rank, so BA / B1 are made on every rank or on
     none -- a follower holds no head of its own to ask."""
 
@@ -624,9 +624,7 @@ def agree(group, *, layer_bytes: Sequence[int], other_bytes: int,
                                 ).encode()) & 0x7FFFFFFF
     row = [int(working_set), int(round((bandwidth_gbs or 0) * 1000)),
            len(layer_bytes), sig]
-    got = mx.distributed.all_gather(mx.array(row, dtype=mx.int64),
-                                    group=group, stream=mx.cpu).tolist()
-    rows = [got[4 * r:4 * r + 4] for r in range(n)]
+    rows = gather_ints(group, row, mx.int64)
     if len({tuple(r[2:]) for r in rows}) != 1:
         raise RuntimeError(
             "the ranks read different artifacts (layer count, layer-bytes "

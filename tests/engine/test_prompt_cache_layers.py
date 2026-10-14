@@ -45,9 +45,22 @@ def _lru_of(tokens, cache, owner=None):
     return lru
 
 
+class _RowsLink:
+    """A ring's link whose collectives return `rows` (or rows(row))."""
+    rows: object = None
+
+    def gather_ints(self, row, dtype=None):
+        return self.rows(row) if callable(self.rows) else self.rows
+
+
+#: the link every ring call in these tests is given
+LINK = _RowsLink()
+
+
 def _gather_as(monkeypatch, rows):
-    """Every rank's row of the next collective, as if gathered."""
-    monkeypatch.setattr(LY, "_gather", lambda link, row: rows)
+    """Every rank's row of the next collective, as if gathered: `rows`, or
+    a function of this rank's row."""
+    monkeypatch.setattr(LINK, "rows", rows, raising=False)
 
 
 def _save_on(monkeypatch, base, key, parts, tokens, cache, owners=None):
@@ -67,7 +80,7 @@ def _save_on(monkeypatch, base, key, parts, tokens, cache, owners=None):
         _gather_as(monkeypatch, [[1 if st.ready(e) else 0 for e in entries]
                                  for st in stores])
         for st in stores:
-            assert LY.commit(object(), st, entries) == \
+            assert LY.commit(LINK, st, entries) == \
                 [e["tokens_hash"] for e in entries]
     return stores
 
@@ -79,7 +92,7 @@ def _restore_on(monkeypatch, base, key, parts):
     gots = [st.read(st.candidates(8)) for st in stores]
     if len(parts) > 1:
         _gather_as(monkeypatch, [LY.vote_row(g) for g in gots])
-        gots = [LY.agree(object(), g) for g in gots]
+        gots = [LY.agree(LINK, g) for g in gots]
     return stores, gots
 
 
@@ -218,7 +231,7 @@ def test_a_commit_a_rank_did_not_write_makes_no_entry(tmp_path, monkeypatch):
     _gather_as(monkeypatch, [[1 if s.ready(e) else 0 for e in entries]
                              for s in stores])
     for s in stores:
-        assert LY.commit(object(), s, entries) == []
+        assert LY.commit(LINK, s, entries) == []
     d = tmp_path / D.key_id(key) / D.tokens_hash(toks)
     assert not (d / LY.ENTRY).exists() and not stores[0].pending
     assert stores[0].entries() == []
@@ -248,10 +261,10 @@ def test_the_old_per_split_files_still_restore_at_load(tmp_path):
     _, warm = _collect(s.submit(_job(p + [5, 6, 7], max_tokens=4)))
     assert warm["knurlogic"]["cache"]["disk"]["tokens"] >= len(p) - 1
     # a new save: the per-layer format only
-    olds = len(D._all_files(D.root()))
+    olds = len(D._all_files(LOC.fallback()))
     assert s.save_prompt_cache().done.wait(60)
-    assert len(D._all_files(D.root())) == olds
-    assert LY.units(D.root())
+    assert len(D._all_files(LOC.fallback())) == olds
+    assert LY.units(LOC.fallback())
 
 
 # --- where it lives ------------------------------------------------------------
@@ -413,8 +426,8 @@ def test_a_follower_saves_commits_reads_back_and_drops_by_name(
     assert rows == [[1], [1]]
     _gather_as(monkeypatch, rows)
     assert apply_cache_op(op, pc1, "m", {}, save_disk, store=r1,
-                          link=object())
-    LY.commit(object(), r0, op["entries"])
+                          link=LINK)
+    LY.commit(LINK, r0, op["entries"])
     h = D.tokens_hash(toks)
     a, b = r0.dir / h / LY.ENTRY, r1.dir / h / LY.ENTRY
     assert a.read_bytes() == b.read_bytes()

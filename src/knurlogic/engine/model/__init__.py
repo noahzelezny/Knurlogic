@@ -3,6 +3,8 @@ pieces knurlogic's own server (engine/runtime, interfaces/http) builds on.
 
   load.py      load it, its memory (and this process's, process_memory),
                the engine's knobs, tool dialects
+  load_model.py  mlx-lm's load_model, opening weights through weight_files
+  weight_files.py  the one place an artifact's tensor files are opened
   state.py     what is served and its vision (process state, by attribute)
   segments.py  the system prompt's own prompt-cache segment
   thinking.py  reasoning_effort, translated to each chat template's own
@@ -10,10 +12,12 @@ pieces knurlogic's own server (engine/runtime, interfaces/http) builds on.
 
 Drafting is engine/mtp/binding.py.
 
-Callers import the package and use the names below; which module holds a
-name is this package's business. Importing it imports no mlx -- only
-calling into it does. Every other module asks here instead of importing
-mlx directly, which keeps the engine replaceable.
+Callers outside the engine import the package and use the names below;
+which module holds a name is this package's business. Importing it imports
+no mlx -- only calling into it does. (Engine code itself imports mlx
+where it computes; the boundary is engine/, see engine/__init__.py.)
+`load` here is the function, which shadows the load module as a package
+attribute: reach the module with `from knurlogic.engine.model.load import`.
 
 Version skew is this package's job: mlx-lm 0.31.3 executes `model_file`
 unconditionally, 0.32.0 requires `trust_remote_code=` and raises without

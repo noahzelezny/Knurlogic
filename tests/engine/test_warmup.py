@@ -4,6 +4,7 @@ import importlib
 import mlx.nn as nn
 import pytest
 
+from knurlogic.engine.arrays import arrays_of
 from knurlogic.engine.runtime import model_host as H
 
 
@@ -80,7 +81,7 @@ def test_the_walker_finds_arrays_parameters_does_not_see():
             self.loop = self          # a cycle must not hang
 
     m = M()
-    assert len(H.held_arrays(m)) == 5
+    assert len(arrays_of(m, unique=True)) == 5
     assert H.evaluate_everything(m) == 5
 
 

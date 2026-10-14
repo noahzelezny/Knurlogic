@@ -9,6 +9,8 @@ about a cap holding rather than a knob moving.
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from knurlogic.machine.artifact import Artifact
@@ -598,3 +600,17 @@ def test_the_gdn_compile_switch_is_a_documented_on_off_knob():
     assert checks.check_knob(name, "off") is None
     assert checks.check_knob(name, "on") is None
     assert checks.check_knob(name, "fast") is not None
+
+
+def test_env_readers_resolve_aliases_and_spellings():
+    env = {"VQLAB_CACHE_LIMIT_GB": "2", "KNURLOGIC_TIMING_SPANS": "0",
+           "KNURLOGIC_MTP_VERIFY": "x", "KNURLOGIC_CONTEXT_LENGTH": "4096"}
+    assert knobs.env_value("KNURLOGIC_CACHE_LIMIT_GB", env) == "2"
+    assert knobs.logical_of("VQ_CACHE_LIMIT_GB") == "cache_limit_gb"
+    assert knobs.env_on("KNURLOGIC_TIMING_SPANS", True, env) is False
+    assert knobs.env_on("KNURLOGIC_PIPELINE_OVERLAP", True, env) is True
+    assert knobs.env_int("KNURLOGIC_CONTEXT_LENGTH", 0, env) == 4096
+    assert knobs.env_int("KNURLOGIC_MTP_VERIFY", None, env) is None
+    with pytest.raises(ValueError):
+        knobs.env_int("KNURLOGIC_MTP_VERIFY", env=env, strict=True)
+    assert knobs.knob_tier("KNURLOGIC_MTP_PROFILE") == "developer"

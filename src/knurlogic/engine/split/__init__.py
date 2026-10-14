@@ -9,6 +9,6 @@ cluster/'s (no mlx there).
   plan.py          the step plan rank 0 sends every rank (pure Python)
   link.py          joining the ring, the per-step exchange, the bell (Link)
   ring.py          rank 0's side: Ring, Journal, TensorExecutor, assign_seed
-  follower.py      a rank >= 1: serve_follower, follow, Mark, agree_head
+  follower.py      a rank >= 1: serve_follower, follow, Mark, HeadAgreement
   marker.py        a rank's progress marker, as the engine reports it
 """

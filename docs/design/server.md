@@ -298,7 +298,7 @@ the step plan is the tensor split's).
   Per admission, BA `[ok, hit, drafts]` before its prefill: only rank 0 can
   tell whether a prompt-cache entry has an aligned head cache. The count of
   collectives depends on B1 and BA, which every rank receives, never on a
-  rank's own verdict. `follower.agree_head` tells every rank after load
+  rank's own verdict. `follower.HeadAgreement` tells every rank after load
   whether rank 0 bound a head.
 - **Memory**: stages are unequal, so the peers' own over-limit is used as
   reported, refreshed every step.

@@ -21,45 +21,15 @@ import logging
 import threading
 import time
 
+from knurlogic.engine.arrays import arrays_of
 from knurlogic.engine.model import state
 from knurlogic.engine.mtp import binding
+from knurlogic.engine.split.marker import LOAD_STOP
 from knurlogic.machine.units import GIB
 
 logger = logging.getLogger(__name__)
 
 
-def held_arrays(root, limit: int = 2_000_000) -> list:
-    """Every mx.array reachable from `root`: the module tree's parameters
-    AND arrays in "_"-named attributes, plain objects, lists, dicts and
-    tuples that nn.Module.parameters() skips (a bundled model.py's VQ
-    codebooks, expert tables kept on helper objects). Cycle-safe; `limit`
-    bounds the objects visited."""
-    import mlx.core as mx
-    seen: set = set()
-    found: list = []
-    stack = [root]
-    while stack and len(seen) < limit:
-        o = stack.pop()
-        if isinstance(o, mx.array):
-            if id(o) not in seen:
-                seen.add(id(o))
-                found.append(o)
-            continue
-        if isinstance(o, (str, bytes, int, float, bool, type(None),
-                          type, bytearray)) or id(o) in seen:
-            continue
-        seen.add(id(o))
-        if isinstance(o, dict):
-            stack.extend(o.values())      # an nn.Module is a dict too...
-        if isinstance(o, (list, tuple, set, frozenset)):
-            stack.extend(o)
-        if hasattr(o, "__dict__"):        # ...with plain attributes beside
-            stack.extend(vars(o).values())
-    return found
-
-
-#: set from a signal handler to stop a load at the next batch boundary
-LOAD_STOP = threading.Event()
 #: bytes evaluated per mx.eval during a load: the stop is checked between
 #: batches, so a cancelled load leaves no GPU work half-done
 LOAD_BATCH_BYTES = GIB
@@ -70,7 +40,7 @@ class LoadCancelled(RuntimeError):
 
 
 def evaluate_everything(model) -> int:
-    """mx.eval every array the model holds (held_arrays), in ~1 GiB batches
+    """mx.eval every array the model holds (arrays_of), in ~1 GiB batches
     in the model's own order (a layer's arrays together); returns how many.
     The load pays for the whole read, so the first request does not.
 
@@ -79,7 +49,7 @@ def evaluate_everything(model) -> int:
     stuck at 100% until a reboot. Between batches LOAD_STOP is checked and
     the load raises LoadCancelled with nothing in flight."""
     import mlx.core as mx
-    arrays = held_arrays(model)
+    arrays = arrays_of(model, unique=True)
     batch, size = [], 0
     for a in arrays:
         batch.append(a)
@@ -127,7 +97,7 @@ class ModelHost:
         #: head_agree(bound: bool, head) -> bool, called after the head binds
         #: (or does not) on every load of a split model's rank: rank 0's answer,
         #: told to every rank -- only rank 0 holds a head, and the others
-        #: follow its drafting steps (engine/split/follower.agree_head)
+        #: follow its drafting steps (engine/split/follower.HeadAgreement)
         self.head_agree = head_agree
         self.vision = vision
         self.tower = tower

@@ -11,6 +11,9 @@ fails the suite, so swapping the engine stays a change to this folder.
   vision/        images as context: the contracts, store and cache key
   families/      one folder per model family (VQLab imports these)
   templates/     chat templates knurlogic supplies in place of an artifact's
+  arrays.py      every mx.array an object holds (arrays_of)
+  backend.py     which MLX back end computes (metal, cuda, cpu), the device
+  gated_delta.py the gated-delta (GatedDeltaNet) scan on every back end
   kvquant.py     the quantized KV cache (8, 6 or 4 bits)
   kvattn.py      the decode attention kernel over kvquant's 8-bit cache
   matmul_padding.py  per-chip rounding off: identical results on M3 and M4
@@ -19,7 +22,9 @@ fails the suite, so swapping the engine stays a change to this folder.
   smoke.py       `knurlogic smoke`: generate a token, prove where code came from
   vendor.py      `knurlogic vendor`: take an architecture file under control
 
-Depends on nothing else in knurlogic. Importing this package imports no mlx;
-only calling into model/ or mtp's engine-side modules does.
+Of the rest of knurlogic it imports only machine/ (this box: units, paths,
+files), tuning/ (the knob registry and the fit arithmetic) and the
+package version, never cluster/ or interfaces/. Importing this package
+imports no mlx; only calling into model/ or mtp's engine-side modules does.
 Layout: docs/design/engine.md.
 """

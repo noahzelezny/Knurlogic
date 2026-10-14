@@ -13,7 +13,9 @@ mx = pytest.importorskip("mlx.core")
 
 from test_scheduler import Tok, _collect, _job  # noqa: E402
 
+from knurlogic.engine.arrays import arrays_of  # noqa: E402
 from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
+from knurlogic.engine.prompt_cache import location as LOC  # noqa: E402
 
 
 def _key(**kw):
@@ -31,7 +33,7 @@ def _forced(model, prompt, toks):
         y = model(mx.array([x]), cache=cache)
         return (y if isinstance(y, mx.array) else y.logits)[0]
     call(prompt, c)
-    mx.eval([a for a in D._arrays_of(c)])
+    mx.eval([a for a in arrays_of(c)])
     return c, lambda cache: mx.concatenate([call([t], cache)[-1:]
                                             for t in toks])
 
@@ -263,8 +265,9 @@ class _Link:
     def __init__(self, others):
         self.others = others
 
-    def align(self):
-        pass
+    def gather_ints(self, row, dtype=None):
+        from knurlogic.engine.split.link import gather_ints
+        return gather_ints(self.group, row, dtype)
 
 
 def test_the_ranks_restore_all_or_none(monkeypatch, tmp_path):
@@ -333,16 +336,16 @@ def test_a_save_asked_for_restores_at_load_and_usage_says_disk(
     _, cold = _collect(s.submit(_job(p, max_tokens=4, session="t1")))
     assert cold["knurlogic"]["cache"]["disk"] == {"tokens": 0,
                                                   "read_ms": 0.0}
-    before = set(D._units(D.root()))
+    before = set(D._units(LOC.fallback()))
     s.unload().done.wait(60)
     # an unload saves nothing: only a client's ask does (nobody running
     # knurlogic should be surprised by cache files)
-    assert set(D._units(D.root())) == before
+    assert set(D._units(LOC.fallback())) == before
     s.load("/nonexistent/tiny-a").done.wait(60)
     _collect(s.submit(_job(p, max_tokens=4, session="t1")))
     assert s.save_prompt_cache().done.wait(60)
     s.unload().done.wait(60)
-    assert D._units(D.root())
+    assert D._units(LOC.fallback())
     s.load("/nonexistent/tiny-a").done.wait(60)
     _, warm = _collect(s.submit(_job(p + [5, 6, 7], max_tokens=4)))
     c = warm["knurlogic"]["cache"]

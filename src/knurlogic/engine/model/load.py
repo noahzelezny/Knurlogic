@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib
 from dataclasses import dataclass
 
+from knurlogic.engine import backend
 from knurlogic.machine.units import GIB
 
 #: Packages that can host a model architecture, in lookup order.
@@ -49,8 +50,7 @@ def memory() -> dict:
     except ImportError:
         return {"available": False}
     try:
-        info = (mx.device_info() if hasattr(mx, "device_info")
-                else mx.metal.device_info())
+        info = backend.device_info()
         ws = int(info.get("max_recommended_working_set_size", 0))
         total = int(info.get("memory_size", ws))
         device = info.get("device_name", "unknown")
@@ -184,12 +184,11 @@ def long_context_overlay(path, env=None) -> dict:
     rank of a split), and applied as mlx-lm's `model_config` -- the
     artifact's config.json is never written."""
     import json
-    import os
     from pathlib import Path
 
-    from knurlogic.tuning import context_window
-    mode = context_window.long_context_of((os.environ if env is None else env).get(
-        "KNURLOGIC_LONG_CONTEXT"))
+    from knurlogic.tuning import context_window, knobs
+    mode = context_window.long_context_of(
+        knobs.env_value("KNURLOGIC_LONG_CONTEXT", env))
     if mode == "off":
         return {}
     cfg = json.loads((Path(str(path)) / "config.json").read_text())
@@ -246,10 +245,12 @@ def apply_live(env: dict) -> dict:
     """
     import os
 
+    from knurlogic.tuning import knobs
+
     done = {}
     for k, v in env.items():
-        if k in ("VQ_CACHE_LIMIT_GB", "VQLAB_CACHE_LIMIT_GB",
-                 "KNURLOGIC_CACHE_LIMIT_GB"):
+        logical = knobs.logical_of(k)
+        if logical == "cache_limit_gb":
             try:
                 said = set_cache_limit(v)
                 if said.startswith("no "):
@@ -259,11 +260,10 @@ def apply_live(env: dict) -> dict:
                 done[k] = f"applied now ({v} GiB)"
             except (ValueError, TypeError, AttributeError, RuntimeError, OSError) as e:
                 done[k] = f"failed: {e}"
-        elif k == "KNURLOGIC_THINKING_DEFAULT":
+        elif logical == "thinking_default":
             # engine/model/thinking reads it at every request
-            from knurlogic.tuning.knobs import thinking_default_of
             try:
-                v = thinking_default_of(v)
+                v = knobs.thinking_default_of(v)
             except ValueError as e:
                 done[k] = f"failed: {e}"
                 continue
@@ -271,17 +271,18 @@ def apply_live(env: dict) -> dict:
             done[k] = ("applied: a request that names no level gets "
                        + ("the model's own default" if v == "model"
                           else f"its {v} level"))
-        elif k == "KNURLOGIC_CONTEXT_LENGTH":
+        elif logical == "context_length":
             # the scheduler reads it at every admission
             try:
                 v = int(v)
-                assert v > 0
-            except (TypeError, ValueError, AssertionError):
+                if v <= 0:
+                    raise ValueError(v)
+            except (TypeError, ValueError):
                 done[k] = f"failed: {v!r} is not a positive number of tokens"
                 continue
             os.environ[k] = str(v)
             done[k] = f"applied: requests from now on are capped at {v} tokens"
-        elif k == "VQ_DECODE_CHUNK":
+        elif logical == "decode_chunk":
             try:
                 v = int(v)
             except (TypeError, ValueError):

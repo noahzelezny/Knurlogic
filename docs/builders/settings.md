@@ -12,7 +12,7 @@ each value. The why: [settings](../design/settings.md); memory:
 | `tuning/measured.py` | every measured constant with its provenance: decode and prefill chunks (`DECODE_CHUNK_*`, `PREFILL_CHUNK_*`, `prefill_chunk_for`), the fit reserve (`FIT_*`), cache limits (`CACHE_LIMIT_GB_DEFAULT`, `CACHE_LIMIT_GB_MAX`), low headroom (`low_headroom_bytes`), KV element size and the KV precisions a family takes (`kv_bytes_per_element`, `kv_quant_for`), the vision allowance (`VISION_*`, `BF16_BYTES`) |
 | `tuning/numerics.py` | the VQ numerics flags: `NUMERICS_FLAGS`, `RUNTIME_PROFILES`, `NUMERICS_SOURCES`, `numerics_for` |
 | `tuning/presets.py` | the presets (the tune axis): `TUNE_PROFILES`, `PRESETS` (`default`, `lean`), `preset_of`, `preset_or`, `preset_arg`, `preset_launch`, `preset_values`; the rows a custom set is saved as: `PRESET_ROWS`, `MTP_MODE`, `preset_row_values` |
-| `tuning/knobs.py` | the knob registry: `KNOB_DOC`, `KNOB_HELP`, `KNOB_TITLES`, `KNOB_ALIASES`, `MODEL_KNOBS`, `ENGINE_KNOB_NAMES`, `knob_tier`, `KNOB_RANGE`, `KNOB_BOUNDS`; the readers of a set value (`on_off`, `vision_of`, `mtp_of`, `kv_bits_of`, `thinking_default_of`, `per_chip_rounding_of`); aliases: `engine_settings`, `canonical_sets`, `legacy_mirror`, `default_alias` |
+| `tuning/knobs.py` | the knob registry: `KNOB_DOC`, `KNOB_HELP`, `KNOB_TITLES`, `KNOB_ALIASES`, `MODEL_KNOBS`, `ENGINE_KNOB_NAMES`, `knob_tier`, `KNOB_RANGE`, `KNOB_BOUNDS`; the readers of a set value (`on_off`, `vision_of`, `mtp_of`, `kv_bits_of`, `thinking_default_of`, `per_chip_rounding_of`); the environment readers every engine read goes through (`env_value`, `env_on`, `env_int`); aliases: `logical_of`, `aliases`, `engine_settings`, `canonical_sets`, `legacy_mirror`, `default_alias`; the developer knobs (`DEVELOPER_KNOBS`) |
 | `tuning/groups.py` | the knurlogic-wide groups read per request: `COMPACT_KNOBS`, `compact_settings`, `check_compact_knob`; `PROMPT_CACHE_KNOBS`, `check_prompt_cache_knob` |
 | `tuning/context_window.py` | `model_window`, long context (YaRN): `long_context_of`, `long_context_refusal`, `context_ceiling`, `settle_context`, `long_context_config`, `with_long_context`, `long_context_room` |
 | `tuning/checks.py` | every refusal: `check_knob` (one value), `clean_sets` and `PATH_KEYS` (a request's knobs, `launch_knobs`), `refuse_sets` (a set on one artifact), `settings_refusal`, `launch_refusal`, `launch_fit` (a whole launch, before a process starts) |
@@ -73,7 +73,25 @@ Where the settings meet the rest (thin calls, no settings logic):
 
 ## Adding a knob
 
-The tables a knob can appear in:
+A developer switch (an A/B or a diagnostic nobody resolves or shows) needs
+only a logical name in `KNOB_ALIASES`, its name in `DEVELOPER_KNOBS` and
+`KNOB_TITLES` (and `KNOB_BOUNDS` if it is a number); the engine reads it
+with `env_on` / `env_int`. Those registered now:
+
+| env name | what | default |
+|---|---|---|
+| `KNURLOGIC_JACCL_TIMEOUT_MS` | the jaccl collective deadline for the ring join and after load (cluster/launch sets it) | unset: none |
+| `KNURLOGIC_PIPELINE_OVERLAP` | off: each prefill chunk is sent before the next computes | on |
+| `KNURLOGIC_TIMING_SPANS` | off: no per-request timing buckets | on |
+| `KNURLOGIC_MTP_BATCH_MAX_ROWS` | a fixed row ceiling for drafting (0: never) | unset: adaptive |
+| `KNURLOGIC_MTP_PROFILE` | on: time each phase of a block step | off |
+| `KNURLOGIC_MTP_VERIFY` | verify the first k drafts every step | unset: measured |
+| `KNURLOGIC_DISCONNECT_POLL` | off: a non-streamed request does not watch for a hang-up | on |
+
+On/off knobs take `on_off`'s spellings (on/off, 1/0, true/false,
+yes/no); an unknown value is the default.
+
+A knob a person sets goes in these tables:
 
 1. Its name in `KNOB_DOC`, `KNOB_HELP` and `KNOB_TITLES`; values in
    `KNOB_RANGE` or `KNOB_BOUNDS`; aliases in `KNOB_ALIASES` if it has a

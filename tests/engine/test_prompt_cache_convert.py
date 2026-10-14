@@ -16,11 +16,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from test_prompt_cache_layers import _gather_as, _key, _lru_of  # noqa: E402
+from test_prompt_cache_layers import LINK, _gather_as, _key, _lru_of  # noqa: E402
 from test_prompt_cache_tensor import _layout_parts, _share  # noqa: E402
 from test_prompt_disk import _family, _forced  # noqa: E402
 
 from knurlogic.engine import kvquant as KQ  # noqa: E402
+from knurlogic.engine.arrays import arrays_of  # noqa: E402
 from knurlogic.engine.prompt_cache import convert as CV  # noqa: E402
 from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
 from knurlogic.engine.prompt_cache import layers as LY  # noqa: E402
@@ -67,7 +68,7 @@ def _save(base, bits, parts, prompt, cache, monkeypatch):
         _gather_as(monkeypatch, [[1 if st.ready(e) else 0 for e in entries]
                                  for st in stores])
         for st in stores:
-            LY.commit(object(), st, entries)
+            LY.commit(LINK, st, entries)
     return key
 
 
@@ -126,8 +127,8 @@ def test_a_16_bit_entry_restores_into_an_8_bit_model_converted(
             assert _equal(_kv_arrays(b), _quant_of(a))
         else:
             assert type(a) is type(b)
-            assert _equal([x for x in D._arrays_of(a)],
-                          [x for x in D._arrays_of(b)])
+            assert _equal([x for x in arrays_of(a)],
+                          [x for x in arrays_of(b)])
     assert nq >= 1
     # the old width's entry is gone; the converted one is there once
     assert _dirs(tmp_path, None) == [] and _dirs(tmp_path, 8) == [h]
@@ -187,7 +188,7 @@ def test_both_converts_8_to_16_as_dequantized(tmp_path, monkeypatch):
                        a.group, 8, a.keys[1].dtype)
             assert b.offset == a.offset and mx.array_equal(b.keys, k)
         else:
-            assert _equal(list(D._arrays_of(a)), list(D._arrays_of(b)))
+            assert _equal(list(arrays_of(a)), list(arrays_of(b)))
     assert n >= 1
     assert _dirs(tmp_path, 8) == [] and \
         _dirs(tmp_path, None) == [D.tokens_hash(prompt)]
@@ -240,12 +241,11 @@ def _ring_restore(monkeypatch, base, parts, make):
         c = CV.candidates(st, 8, None)
         mine.append(CV.read(st, c))
     _gather_as(monkeypatch, [LY.vote_row(g) for g in mine])
-    agreed = [LY.agree(object(), g) for g in mine]
+    agreed = [LY.agree(LINK, g) for g in mine]
     out = []
     for st, g in zip(stores, agreed):
-        monkeypatch.setattr(LY, "_gather",
-                            lambda link, row: [row] * len(parts))
-        out.append(CV.persist_ring(object(), st, g))
+        _gather_as(monkeypatch, lambda row: [row] * len(parts))
+        out.append(CV.persist_ring(LINK, st, g))
     return stores, out
 
 
@@ -264,7 +264,7 @@ def test_a_rings_ranks_convert_their_parts(tmp_path, monkeypatch, how):
         want = _share(p, whole)
         for a, b in zip(want, got[0][2][:p.n]):
             assert type(a) is type(b)
-            assert _equal(list(D._arrays_of(a)), list(D._arrays_of(b)))
+            assert _equal(list(arrays_of(a)), list(arrays_of(b)))
     h = D.tokens_hash(prompt)
     assert _dirs(tmp_path, None) == [] and _dirs(tmp_path, 8) == [h]
     # and the 8-bit key's entry now restores natively on every rank

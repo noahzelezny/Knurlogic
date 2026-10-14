@@ -55,18 +55,17 @@ def test_other_row_counts_are_untouched(qm, m):
     assert calls == [(m, 512)]
 
 
-def test_install_is_idempotent(qm):
+def test_install_is_idempotent(qm, monkeypatch):
     mx = qm[0]
     orig = mx.quantized_matmul
-    try:
-        mp.install()
-        once = mx.quantized_matmul
-        mp.install()
-        assert mx.quantized_matmul is once and once is not orig
-        assert mp.installed()
-    finally:
-        mp.uninstall()
-    assert mx.quantized_matmul is orig
+    # put back on the way out: the wrap is once per process otherwise
+    monkeypatch.setattr(mx, "quantized_matmul", orig)
+    monkeypatch.setitem(mp._STATE, "installed", False)
+    mp.install()
+    once = mx.quantized_matmul
+    mp.install()
+    assert mx.quantized_matmul is once and once is not orig
+    assert mp.installed()
 
 
 def test_the_host_pads_only_when_rounding_is_off(qm, monkeypatch):

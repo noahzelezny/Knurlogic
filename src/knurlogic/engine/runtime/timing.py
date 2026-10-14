@@ -23,13 +23,14 @@ KNURLOGIC_TIMING_SPANS=off.
 """
 from __future__ import annotations
 
-import os
 import time
+
+from knurlogic.tuning import knobs
 
 
 def enabled() -> bool:
     """Read live, so a running server can be switched without a restart."""
-    return os.environ.get("KNURLOGIC_TIMING_SPANS", "on") != "off"
+    return knobs.env_on("KNURLOGIC_TIMING_SPANS")
 
 
 class Spans:

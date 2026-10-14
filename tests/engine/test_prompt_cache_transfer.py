@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
 from test_prompt_cache_layers import (  # noqa: E402
+    LINK,
     _gather_as,
     _key,
     _lru_of,
@@ -112,7 +113,7 @@ def _save_apart(monkeypatch, roots, key, parts, tokens, cache):
         _gather_as(monkeypatch, [[1 if st.ready(e) else 0 for e in entries]
                                  for st in stores])
         for st in stores:
-            assert LY.commit(object(), st, entries)
+            assert LY.commit(LINK, st, entries)
     return stores
 
 
@@ -127,7 +128,7 @@ def _restore_apart(monkeypatch, roots, key, parts, peers):
     monkeypatch.setattr(TR, "_FETCHER", [None])
     if len(parts) > 1:
         _gather_as(monkeypatch, [LY.vote_row(g) for g in gots])
-        gots = [LY.agree(object(), g) for g in gots]
+        gots = [LY.agree(LINK, g) for g in gots]
     return gots
 
 

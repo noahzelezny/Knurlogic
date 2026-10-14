@@ -31,8 +31,8 @@ all written as "pipeline only":
 | Where | What |
 |---|---|
 | `interfaces/serve.py` ~l.290, tensor branch | `draft = False` (hence the rank-0 log line "drafting head present, off", l.662) |
-| `interfaces/http/__init__.py` l.168/175 | `agree = T.agree_head(link)` only `if pipe`; `ModelHost(draft=draft and (not ring or pipe))` |
-| `engine/split/tensor.py` `serve_follower` l.860 | `heads = agree_head(link) if split == "pipeline" else None` |
+| `interfaces/http/__init__.py` l.168/175 | `agree = T.HeadAgreement(link)` only `if pipe`; `ModelHost(draft=draft and (not ring or pipe))` |
+| `engine/split/tensor.py` `serve_follower` l.860 | `heads = HeadAgreement(link) if split == "pipeline" else None` |
 | `engine/runtime/scheduler.py` `_executor` l.661-678 | `head = ... if (pipe and DRAFT["on"])`; `coordinate(gen, group)` only `if pipe` |
 | `engine/split/tensor.py` `TensorExecutor.__init__` and `follow()` | `_admission_coord` installs `Coord(group)` with `head=False` (B0 only) instead of `pipeline.coordinate` |
 
@@ -141,7 +141,7 @@ committed caches, so they are unaffected.
 ## 5. Reuse versus new code
 
 Reused as-is: `pipeline.Coord` (B0/BA/B1/B2), `pipeline.coordinate`,
-`follower.agree_head`, `ModelHost.head_agree`, the whole of
+`follower.HeadAgreement`, `ModelHost.head_agree`, the whole of
 `MTPBatch.step` / `_draft_step` / `drafting_pays`, `MTPBatchGenerator`
 admission with `coord.ba`, and the follower's `follow()` loop and plan.
 
@@ -153,17 +153,17 @@ What changes is gating and wiring, roughly 30-60 lines (*guess*):
   in place (`_admission_coord` already skips one that exists).
 - `scheduler._executor`: drop `pipe and` from the head condition, and call
   `coordinate()` for both splits.
-- `serve_follower` and `http/__init__`: call `agree_head` for both splits;
+- `serve_follower` and `http/__init__`: call `HeadAgreement` for both splits;
   `ModelHost(draft=draft and bool(ring) ...)` on rank 0.
 - `interfaces/serve.py`: remove the tensor `draft = False`.
-- Docstrings: `agree_head`, `Coord`, and `_admission_coord` say "pipeline".
+- Docstrings: `HeadAgreement`, `Coord`, and `_admission_coord` say "pipeline".
 - Fit: section 4.
 
 ## 6. Failure modes
 
 - **Collective-count desync.** Rank 0 and the follower make different
   numbers of B1/B2 calls only if they disagree on `Coord.head`.
-  `agree_head` all_gathers rank 0's "bound a head" after load, and a head
+  `HeadAgreement` all_gathers rank 0's "bound a head" after load, and a head
   that fails to bind on rank 0 turns drafting off on every rank. The
   `calls` counters let the ring test assert equality, as the pipeline test
   does.
@@ -255,10 +255,10 @@ should fall back to plain steps, and B ≈ A shows that.
 ## 9. Effort, in independently landable steps
 
 1. **Engine wiring plus ring test 1** (sections 5 and 7.1): follow,
-   scheduler, TensorExecutor, agree_head on both splits. ~0.5 day.
+   scheduler, TensorExecutor, HeadAgreement on both splits. ~0.5 day.
    Independently testable on one machine through the 127.0.0.1 ring.
 2. **Serving path** (tests 7.2-7.4): the `serve_follower` / `http`
-   `agree_head` and `ModelHost(draft=...)` gating, and the serve.py
+   `HeadAgreement` and `ModelHost(draft=...)` gating, and the serve.py
    `draft = False` removal. ~0.5 day.
 3. **Fit** (section 4, test 7.5): `artifact_shape`, `placement`, the
    per-rank refusal. ~0.5 day.

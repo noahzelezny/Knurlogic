@@ -18,10 +18,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 mx = pytest.importorskip("mlx.core")
 
-from test_prompt_cache_layers import _gather_as, _key, _lru_of  # noqa: E402
+from test_prompt_cache_layers import LINK, _gather_as, _key, _lru_of  # noqa: E402
 from test_prompt_cache_transfer import _Peer  # noqa: E402
 from test_prompt_disk import _family, _forced  # noqa: E402
 
+from knurlogic.engine.arrays import arrays_of  # noqa: E402
 from knurlogic.engine.prompt_cache import disk as D  # noqa: E402
 from knurlogic.engine.prompt_cache import layers as LY  # noqa: E402
 from knurlogic.engine.prompt_cache import slices as SL  # noqa: E402
@@ -80,7 +81,7 @@ def _save(monkeypatch, roots, key, parts, tokens, cache):
         _gather_as(monkeypatch, [[1 if st.ready(e) else 0 for e in entries]
                                  for st in stores])
         for st in stores:
-            assert LY.commit(object(), st, entries) == \
+            assert LY.commit(LINK, st, entries) == \
                 [e["tokens_hash"] for e in entries]
     return stores
 
@@ -95,7 +96,7 @@ def _restore(monkeypatch, roots, key, parts, peers=None):
     monkeypatch.setattr(TR, "_FETCHER", [None])
     if len(parts) > 1:
         _gather_as(monkeypatch, [LY.vote_row(g) for g in gots])
-        gots = [LY.agree(object(), g) for g in gots]
+        gots = [LY.agree(LINK, g) for g in gots]
     return gots
 
 
@@ -124,7 +125,7 @@ def _whole(parts, caches: list) -> list:
 
 
 def _arrays_equal(a, b) -> bool:
-    xs, ys = list(D._arrays_of(a)), list(D._arrays_of(b))
+    xs, ys = list(arrays_of(a)), list(arrays_of(b))
     return len(xs) == len(ys) and all(
         x.shape == y.shape and x.dtype == y.dtype and mx.array_equal(x, y)
         for x, y in zip(xs, ys))

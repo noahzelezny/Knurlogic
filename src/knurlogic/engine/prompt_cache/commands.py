@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from knurlogic.engine.prompt_cache import location as prompt_location
+
 if TYPE_CHECKING:
     from knurlogic.engine.runtime.scheduler import Job
 
@@ -120,7 +122,7 @@ class PromptCacheCommands:
                 mine = store.dir
             else:
                 got = prompt_disk.save(self.cache.lru, key, **common)
-                mine = prompt_disk.root() / prompt_disk.key_id(key)
+                mine = prompt_location.fallback() / prompt_disk.key_id(key)
             gone = sorted(f.name for f in removed if f.parent == mine)
             for t in [t for t, v in self._disk_index.items()
                       if Path(v.get("file", "")).name in gone]:
@@ -359,7 +361,7 @@ class PromptCacheCommands:
         elif key is not None:
             try:
                 self._disk_index = prompt_disk.index(
-                    prompt_disk.root() / prompt_disk.key_id(key))
+                    prompt_location.fallback() / prompt_disk.key_id(key))
                 if self._store is not None:
                     self._disk_index.update(self._store.index())
                     # other KV widths' entries this model may convert at
@@ -407,7 +409,7 @@ class PromptCacheCommands:
         disk, gone = 0, set()
         if self._disk_key is not None:
             disk, gone = prompt_disk.drop_sessionless_files(
-                prompt_disk.root() / prompt_disk.key_id(self._disk_key),
+                prompt_location.fallback() / prompt_disk.key_id(self._disk_key),
                 older_than_s)
         if self._store is not None:
             n, more = self._store.drop_sessionless(older_than_s)
@@ -469,7 +471,7 @@ class PromptCacheCommands:
                 else prompt_disk.key_id(key) if key else None,
                 "model": Path(self.host.path or "").name or None,
                 "location": st.location if st is not None
-                else str(prompt_disk.root()) if key else None}
+                else str(prompt_location.fallback()) if key else None}
 
     def _disk_hit(self, job: Job, prompt: list, used: int) -> None:
         """The entry fetch() handed `job` is one restored from disk: say so
