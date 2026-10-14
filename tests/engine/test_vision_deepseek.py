@@ -653,7 +653,7 @@ def _load(monkeypatch, path):
     import mlx_lm.utils as U
 
     from knurlogic.engine import templates
-    from knurlogic.engine.model.load import load_unlocked
+    from knurlogic.engine.model.loading import load_unlocked
 
     monkeypatch.setattr(U, "load_tokenizer", lambda *a, **k: object())
     monkeypatch.setattr(templates, "install", lambda tok: None)

@@ -477,7 +477,7 @@ def test_a_follower_applies_a_set_even_while_parked(monkeypatch):
 
     from knurlogic.engine.split import follower as split_follower
 
-    load = importlib.import_module("knurlogic.engine.model.load")
+    load = importlib.import_module("knurlogic.engine.model.loading")
     got = []
     monkeypatch.setattr(load, "apply_live",
                         lambda env: got.append(env) or {

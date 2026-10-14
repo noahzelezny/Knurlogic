@@ -36,7 +36,7 @@ why: [memory](../design/memory.md), [memory-ledger](../design/memory-ledger.md),
 Who uses it:
 
 - `interfaces/load_checks.py` (`prepare`) checks fit against `load_budget`.
-- `engine/runtime/model_host.py` and `engine/model/load.py` take the load lock
+- `engine/runtime/model_host.py` and `engine/model/loading.py` take the load lock
   around a real load; the MCP's `ready` reads `loadlock.holder()`.
 - The scheduler's memory guard counts against the server's working set,
   which the allowance lowers ([engine](engine.md)).
@@ -67,7 +67,7 @@ Who uses it:
 Memory has three homes, one per layer: the machine's facts in
 `machine/memory/`, what a model needs in `tuning/fit.py`, and the serving
 process's guard in `engine/runtime/memory_guard.py` (with what mlx reports
-in `engine/model/load.py`: `memory`, `process_memory`, `set_cache_limit`). A
+in `engine/model/loading.py`: `memory`, `process_memory`, `set_cache_limit`). A
 machine's budget is `machine/memory/wired.py`'s: `load_budget` here,
 `budget_of` for a machine read over the wire, with `available_now` and
 `gpu_working_set` beside them.

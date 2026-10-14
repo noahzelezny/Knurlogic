@@ -497,7 +497,7 @@ def test_mla_caches_are_costed_as_their_latent():
 
 
 def test_the_context_length_applies_live(monkeypatch):
-    from knurlogic.engine.model.load import apply_live
+    from knurlogic.engine.model.loading import apply_live
     from knurlogic.tuning.live import LIVE_KNOBS
     monkeypatch.delenv("KNURLOGIC_CONTEXT_LENGTH", raising=False)
     assert "KNURLOGIC_CONTEXT_LENGTH" in LIVE_KNOBS

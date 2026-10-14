@@ -65,7 +65,7 @@ class Mark:
 def apply_set(op: dict, rank: int) -> str:
     """A follower applies a live knob rank 0 applied (the `set` op) to its
     own engine, exactly as rank 0's Settings apply did. -> what happened."""
-    from knurlogic.engine.model.load import apply_live
+    from knurlogic.engine.model.loading import apply_live
     said = apply_live({op["name"]: op["value"]}).get(op["name"], "")
     logger.info("rank %d: %s=%s: %s", rank, op["name"], op["value"], said)
     return said

@@ -264,7 +264,7 @@ class ModelHost:
     def _split_lazily(self, path: str):
         """A ring's model, loaded lazily and split in place: nothing read
         yet, and the split's collectives done."""
-        from knurlogic.engine.model.load import load_unlocked
+        from knurlogic.engine.model.loading import load_unlocked
         extra = self.shard_config(path) if self.shard_config else None
         model, tok = load_unlocked(path, self.executes_artifact_code,
                                    lazy=True, model_config=extra)
@@ -274,7 +274,7 @@ class ModelHost:
     def _weights(self, path: str, lazy=None):
         """`lazy`: _split_lazily's (model, tokenizer), evaluated here."""
 
-        from knurlogic.engine.model.load import load_unlocked
+        from knurlogic.engine.model.loading import load_unlocked
         if lazy is None:
             model, tok = load_unlocked(path, self.executes_artifact_code)
             # Evaluate EVERY parameter here, inside the load. A model that

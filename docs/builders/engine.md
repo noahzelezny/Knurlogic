@@ -110,7 +110,7 @@ scheduler does the rest on its thread.
 ## Notes
 
 Memory, by layer: the guard is `engine/runtime/memory_guard.py`; what mlx
-reports and the cache limit, `engine/model/load.py` (`memory`,
+reports and the cache limit, `engine/model/loading.py` (`memory`,
 `set_cache_limit`); the fit and margins, `tuning/fit.py` (`step_margin`,
 `rank_margin`, `fit_reserve`, `single_fit_check`); the machine's budget,
 `machine/memory/` (`wired.load_budget`, the allowance,

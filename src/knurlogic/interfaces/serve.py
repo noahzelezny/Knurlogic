@@ -365,7 +365,7 @@ def apply_launch(L: Launch) -> None:
               f"and it WILL be executed -- that is where its kernels live.")
     else:
         print(stock_runtime_line())
-        from knurlogic.engine.model.load import vq_without_runtime
+        from knurlogic.engine.model.loading import vq_without_runtime
         why = vq_without_runtime(a.path)
         if why:
             raise Refused(f"\n{REFUSING}{why}")

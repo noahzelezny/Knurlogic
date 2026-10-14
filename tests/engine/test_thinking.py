@@ -209,7 +209,7 @@ def test_the_thinking_default_serves_a_silent_request(monkeypatch):
 def test_the_thinking_default_is_live_and_checked(monkeypatch):
     import os
 
-    from knurlogic.engine.model.load import apply_live
+    from knurlogic.engine.model.loading import apply_live
     from knurlogic.tuning import checks, knobs
     monkeypatch.delenv(T.DEFAULT_ENV, raising=False)
     done = apply_live({T.DEFAULT_ENV: "high"})

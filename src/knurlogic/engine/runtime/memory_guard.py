@@ -231,7 +231,7 @@ class MemoryGuard:
 
     def _working_set(self) -> int:
         if self.working_set is None:
-            from knurlogic.engine.model.load import memory
+            from knurlogic.engine.model.loading import memory
             self.working_set = int(memory().get("working_set_bytes") or 0)
         return self.working_set
 

@@ -5,7 +5,7 @@ atomic. `fcntl.flock(LOCK_EX | LOCK_NB)` on ~/.cache/knurlogic/load.lock:
 the kernel releases it however the holder dies, so there is never a stale
 lock (tests/test_loadlock.py). The JSON record inside is for display only.
 
-Taken by real-model loads: model.load (engine/model/load.py), runtime.model_host
+Taken by real-model loads: model.loading (engine/model/loading.py), runtime.model_host
 (engine/runtime/model_host.py), MCP load, `knurlogic serve`
 and the tools/*.py gates. Tiny-fixture tests do not take it. A long-lived
 serve holds it only until its phase is `serving`. Stdlib only.

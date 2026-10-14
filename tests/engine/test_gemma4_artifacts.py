@@ -46,7 +46,7 @@ def test_the_tool_parser_is_inferred_as_gemma4(art):
     tool_parser_type, which mlx-lm reads before inferring (the 26B VQ
     artifact sets one), names the same parser."""
     pytest.importorskip("mlx_lm")
-    from knurlogic.engine.model.load import tool_support
+    from knurlogic.engine.model.loading import tool_support
     tc = json.loads((art / "tokenizer_config.json").read_text())
     assert tc.get("tool_parser_type", "gemma4") == "gemma4"
     template = (art / "chat_template.jinja").read_text()

@@ -21,8 +21,6 @@ Callers outside the engine import the package and use the names below;
 which module holds a name is this package's business. Importing it imports
 no mlx -- only calling into it does. (Engine code itself imports mlx
 where it computes; the boundary is engine/, see engine/__init__.py.)
-`load` here is the function, which shadows the load module as a package
-attribute: reach the module with `from knurlogic.engine.model.load import`.
 
 Version skew is this package's job: mlx-lm 0.31.3 executes `model_file`
 unconditionally, 0.32.0 requires `trust_remote_code=` and raises without
@@ -30,7 +28,7 @@ it; the signature is inspected here so nobody downstream learns that.
 Design: docs/design/server.md (engine boundary).
 """
 
-from .load import (
+from .loading import (
                    HOST_PACKAGES,
                    EngineInfo,
                    apply_live,

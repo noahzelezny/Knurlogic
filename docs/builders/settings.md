@@ -44,7 +44,7 @@ Where the settings meet the rest (thin calls, no settings logic):
   (`settings_document`, `knob_limit`, `machine_settings`,
   `compaction_document`, `strategy_doc`): page JSON built from the
   registry, `knob_reach` and `resolve`.
-- `engine/model/load.py`: `apply_live`, which applies a live knob to the
+- `engine/model/loading.py`: `apply_live`, which applies a live knob to the
   running process (it needs mlx, so it stays in the engine).
 - `machine/memory/allowance.py`: the most memory knurlogic may use. It stays in
   `machine/` because it lowers the load budget (`wired.load_budget`);

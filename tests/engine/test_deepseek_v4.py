@@ -331,7 +331,7 @@ def test_thinking_reads_the_template_as_deepseeks_own_dialect():
     says "Reasoning Effort", the kwarg is reasoning_effort): its own,
     more specific dialect must win, not their on/off or effort ladders."""
     from knurlogic.engine.model import thinking
-    from knurlogic.engine.model.load import tool_support
+    from knurlogic.engine.model.loading import tool_support
     assert thinking.detect(TEMPLATE)[0] == "deepseek_effort"
     assert tool_support(TEMPLATE)["parser"] == "deepseek_v4 (knurlogic)"
 

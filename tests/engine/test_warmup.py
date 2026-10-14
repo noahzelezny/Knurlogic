@@ -10,7 +10,7 @@ from knurlogic.engine.runtime import model_host as H
 
 @pytest.fixture
 def host(tmp_path, monkeypatch):
-    L = importlib.import_module("knurlogic.engine.model.load")
+    L = importlib.import_module("knurlogic.engine.model.loading")
     monkeypatch.setenv("KNURLOGIC_LOADLOCK", str(tmp_path / "load.lock"))
     monkeypatch.setattr(L, "load_unlocked",
                         lambda path, code, lazy=False: (nn.Linear(2, 2),
