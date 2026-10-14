@@ -5,8 +5,8 @@ whether it can be reached. Running a model across machines builds on this
 (see [server.md](server.md), "Cluster").
 
 Code: `machine/identity.py` (who this machine is), `cluster/discovery/`
-(Bonjour on macOS, Avahi on Linux), `cluster/peers.py` (named, remembered and introduced peers,
-merge, reachability), `cluster/links.py` (which link, `--host cluster`),
+(Bonjour on macOS, Avahi on Linux), `cluster/peers.py` (named, remembered
+and introduced peers, merge, reachability), `cluster/links.py` (which link, `--host cluster`),
 `cluster/checks.py` (`knurlogic doctor --cluster`). `machine/` holds facts
 about this box; `cluster/` holds everything about other boxes.
 
@@ -140,6 +140,7 @@ choice.
 labels, `interface_of`) and picks this OS's `Discovery`; `bonjour.py` is
 macOS's, `avahi.py` Linux's, the same interface.
 
+#### bonjour.py
 
 DNS-SD service type `_knurlogic._tcp`, through the `dns_sd.h` API in
 libSystem. mDNSResponder -- the daemon every Mac already runs -- owns the

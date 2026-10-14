@@ -1624,6 +1624,35 @@ def test_stop_carries_its_kind_to_the_ended_record_and_the_peers(
     C.ENDED.clear()
 
 
+def test_a_rank_whose_poll_cannot_answer_is_judged_by_its_process():
+    """Popen.poll() answers None while another thread waits on the process,
+    dead or not; a killed rank read as alive that way and the watch saw a
+    healthy job (now and then, in a Linux container)."""
+    job = "91648583878fcdfc"
+    dead = SimpleNamespace(pid=99999999, poll=lambda: None)
+    C._PROCS[(job, 0)] = dead
+    try:
+        assert not C._alive(job, dead.pid)
+    finally:
+        C._PROCS.pop((job, 0))
+
+
+def test_a_late_stop_keeps_the_failovers_relaunch(cache, monkeypatch):
+    """The coordinator's failover can move a job to the next cable before
+    the failing rank's stop reaches it; that stop must not erase where the
+    job went (it did, now and then, in a Linux container)."""
+    monkeypatch.setattr(C, "_peer_pages", lambda: {})
+    job = "81648583878fcdfc"
+    C.SPECS[job] = spec(job=job)
+    C.ENDED[job] = {"reason": "link init failed; relaunched on cable "
+                    "127.0.1 as job 9", "relaunched": "9", "t": 1.0}
+    C.stop(job, reason="rank 1 on B (pid 3) exited",
+           post=lambda *a, **k: {})
+    assert C.ENDED[job]["relaunched"] == "9"
+    assert "relaunched on cable" in C.ENDED[job]["reason"]
+    C.ENDED.clear()
+
+
 def test_an_unload_is_recorded_as_requested(cache, monkeypatch):
     """The page drops a launch's card for a requested stop and shows a
     failure otherwise (picker.js followLaunch reads the ended kind): an

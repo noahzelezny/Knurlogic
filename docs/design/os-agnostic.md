@@ -204,11 +204,19 @@ real cpu, swap and memory figures, the rest None. A container has no
   `cluster/discovery/avahi.py` asks avahi-daemon through libavahi-client,
   the same interface as Bonjour's. Two containers found each other. Windows
   (dnsapi's DNS-SD) is still to write.
-- OPEN: the two-page cluster tests (`tests/cluster/test_recovery.py`,
-  `test_cluster_jobs.py`: a killed rank, then `watch_once`) fail now and
-  then in the container, and pass alone and on the Mac. A theory that page
-  B stops the job first did not hold (slowing B's watcher did not fix
-  it). Not yet understood.
+- The two-page cluster tests that failed now and then in the container
+  were two real races, now fixed in `cluster/launch.py`:
+  - `_alive` trusted `Popen.poll()`, which answers None while another
+    thread waits on the process -- a killed rank (a zombie) read as alive
+    and the watch saw a healthy job. Our own rank is now alive only while
+    poll() says so and `processes.running` agrees.
+  - the failing rank's stop could land after the coordinator's failover
+    had moved the job to the next cable and overwrite its ended record,
+    losing where the job went; the record keeps the relaunch.
+  Repeated 15 times each in the container: all pass (the refusal test was
+  5 of 15). The many-page orchestration tests still fail now and then on
+  the Mac under load, on main as well (4 failures in 2 of 6 runs, a container
+  running beside them): not new, not yet understood.
 
 ## Decided (Noah, 2026-10-13)
 

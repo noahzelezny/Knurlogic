@@ -997,7 +997,7 @@ def test_a_running_prefill_reports_progress_logs_and_sees_a_cancel(caplog):
     lines = [r.getMessage() for r in caplog.records
              if r.getMessage().startswith("prefill 9:")]
     assert len(lines) == 1 and lines[0].startswith(
-        "prefill 9: 4096/4096 tokens, chunk 8, ")
+        "prefill 9: 4096/4096 tokens after 8 chunks, ")
     assert job.outbox.qsize() == 8 and \
         job.outbox.get_nowait() == ("progress", (512, 4096))
     job.cancel()

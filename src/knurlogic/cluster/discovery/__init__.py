@@ -9,7 +9,7 @@ is {(instance, if_index): {name, if_index, host, port, txt}} for services
 that resolved to an IPv4 address. A failure is "nothing found", never a
 crash, and `status()` says which.
 
-Design: docs/design/discovery.md (Bonjour).
+Design: docs/design/discovery.md (Bonjour, Linux: Avahi).
 """
 from __future__ import annotations
 

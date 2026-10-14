@@ -20,7 +20,7 @@ from knurlogic.cluster.discovery import SERVICE, label
 IF_UNSPEC, PROTO_INET = -1, 0
 BROWSER_NEW, BROWSER_REMOVE, BROWSER_FAILURE = 0, 1, 4
 RESOLVER_FOUND = 0
-CLIENT_RUNNING, CLIENT_FAILURE = 2, 100
+CLIENT_FAILURE = 100
 GROUP_COLLISION, GROUP_FAILURE = 3, 4
 
 vp, c_char_p, c_int = ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int
@@ -67,6 +67,7 @@ def _lib():
                  [vp, c_int, c_int, c_int, c_char_p, c_char_p, c_char_p,
                   c_char_p, ctypes.c_uint16, vp]),
                 (c, "avahi_entry_group_commit", c_int, [vp]),
+                (c, "avahi_entry_group_free", c_int, [vp]),
                 (c, "avahi_service_browser_new", vp,
                  [vp, c_int, c_int, c_char_p, c_char_p, c_int, BROWSE_CB,
                   vp]),
@@ -111,7 +112,7 @@ class Discovery:
         self._thread: threading.Thread | None = None
         self._poll = self._client = None
         # the C callbacks, alive as long as the client that calls them
-        self._cbs = (CLIENT_CB(lambda *a: None), GROUP_CB(self._on_group),
+        self._cbs = (CLIENT_CB(self._on_client), GROUP_CB(self._on_group),
                      BROWSE_CB(self._on_browse), RESOLVE_CB(self._on_resolve))
 
     # -- starting ---------------------------------------------------------
@@ -152,6 +153,8 @@ class Discovery:
         if not group or rc or lib.avahi_entry_group_commit(group):
             self.errors.append("register: " + lib.avahi_strerror(
                 lib.avahi_client_errno(self._client)).decode())
+            if group:
+                lib.avahi_entry_group_free(group)
             return False
         self.registered_as = name.decode(errors="replace")
         return True
@@ -173,6 +176,11 @@ class Discovery:
         return True
 
     # -- callbacks, on the loop thread ------------------------------------
+    def _on_client(self, client, state, ud):
+        if state == CLIENT_FAILURE:
+            self.errors.append("avahi-daemon went away; nothing more is "
+                               "found until the page restarts")
+
     def _on_group(self, group, state, ud):
         if state in (GROUP_COLLISION, GROUP_FAILURE):
             self.errors.append("register: " + (

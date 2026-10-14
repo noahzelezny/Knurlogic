@@ -5,9 +5,8 @@ get changed, and addresses move when a Thunderbolt cable is replugged.
 
   id    first 12 hex of sha256 of the machine's own id: IOPlatformUUID
         on macOS, /etc/machine-id on Linux, MachineGuid on Windows. Stable
-        across reboots,
-        addresses and renames. Not the raw id on the wire -- but
-        it IS a persistent identifier for this machine on the local
+        across reboots, addresses and renames. Not the raw id on the wire
+        -- but it IS a persistent identifier for this machine on the local
         network, and is only sent to peers that ask for status.
   name  the ComputerName on macOS ("Alex's Mac Studio"), the hostname
         elsewhere; for display only.

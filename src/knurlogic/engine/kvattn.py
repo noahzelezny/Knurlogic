@@ -10,7 +10,8 @@ function unchanged. Prefill stays dequantize+sdpa.
 
 A query row with EVERY key masked returns 0 here, where mlx sdpa returns
 NaN. `KNURLOGIC_KV_KERNEL=off` turns it off, and it is off on a back
-end other than Metal (engine/backend); `STATS` counts hits and misses. Design: docs/design/kv-cache.md (decode kernel).
+end other than Metal (engine/backend); `STATS` counts hits and misses.
+Design: docs/design/kv-cache.md (decode kernel).
 """
 from __future__ import annotations
 

@@ -108,11 +108,8 @@ def _footprints() -> tuple:
     import subprocess
     import sys
     if sys.platform != "darwin":
-        import psutil
-        found = {p.pid: p.info["memory_info"].rss
-                 for p in psutil.process_iter(["memory_info"])
-                 if p.info.get("memory_info")}
-        return found, available_memory()
+        from knurlogic.machine import processes
+        return processes.rss_all(), available_memory()
     try:
         out = subprocess.run(
             # `-o mem` is load-bearing: without it `-n` takes the first N

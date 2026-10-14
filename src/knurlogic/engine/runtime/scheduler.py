@@ -974,7 +974,7 @@ class Scheduler(MemoryGuard, PromptCacheCommands):
                     now - st["logged"] >= PREFILL_LOG_S:
                 st["logged"] = now
                 rate = (done - hit) / max(now - st["t0"], 1e-9)
-                logger.info("prefill %d: %d/%d tokens, chunk %d, %.0f tok/s",
+                logger.info("prefill %d: %d/%d tokens after %d chunks, %.0f tok/s",
                             uid, done, n, st["n"], rate)
             job.outbox.put(("progress", (done, n)))
             return job.cancelled

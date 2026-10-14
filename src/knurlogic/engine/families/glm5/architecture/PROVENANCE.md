@@ -159,3 +159,11 @@ rows of the max |logit diff|: prefill 0.055 before, 0.051 with edit 7,
    context, one 2.7k-token warm-up refused a 339k-token prompt even at
    chunk 128. Live validation on the released rungs pending.
 
+
+## The gated-delta scan through engine/gated_delta (2026-10-13)
+
+`_mlx_vlm/models/gated_delta.py`'s `gated_delta_update` calls
+`engine/gated_delta.recurrence` with this file's own Metal kernel. Off
+Metal its per-token fallback is now mlx-lm's `_gated_delta_step_ops`, the
+same arithmetic as this file's step (compiled with `mx.compile`), evaluated
+every 64 tokens: numbers unchanged on Metal and off it.

@@ -24,6 +24,15 @@ def command(pid: int) -> str:
         return ""
 
 
+def running(pid: int) -> bool:
+    """`pid` exists and has not exited (a zombie, exited and not yet
+    reaped, has)."""
+    try:
+        return psutil.Process(int(pid)).status() != psutil.STATUS_ZOMBIE
+    except _GONE:
+        return False
+
+
 def rss(pid: int) -> int:
     """`pid`'s resident size in bytes (on Apple silicon its Metal buffers
     are in it)."""
@@ -31,6 +40,13 @@ def rss(pid: int) -> int:
         return int(psutil.Process(int(pid)).memory_info().rss)
     except _GONE:
         return 0
+
+
+def rss_all() -> dict:
+    """{pid: resident bytes} of every process this user can read."""
+    return {p.pid: p.info["memory_info"].rss
+            for p in psutil.process_iter(["memory_info"])
+            if p.info.get("memory_info")}
 
 
 def environ(pid: int) -> dict:

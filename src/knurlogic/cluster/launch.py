@@ -36,6 +36,7 @@ from knurlogic.cluster.protocol import (
     Stopped,
     typed,
 )
+from knurlogic.machine import processes
 
 logger = logging.getLogger(__name__)
 
@@ -1284,7 +1285,9 @@ def _alive(job: str, pid: int) -> bool:
     proc = next((p for (j, _), p in _PROCS.items()
                  if j == job and p.pid == pid), None)
     if proc is not None:
-        return proc.poll() is None
+        # poll() answers None while another thread waits on the process
+        # (Popen's wait lock), dead or not; a zombie is dead
+        return proc.poll() is None and processes.running(pid)
     return J.is_rank(pid, job)
 
 
@@ -1362,6 +1365,10 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
             port = next((int(v["port"]) for v in mine.values()
                          if v.get("port")), None) or (
                 int((spec or {}).get("port") or 0) or None)
+            # a failover that already moved the job keeps saying where it
+            # went: the failing rank's stop can land after it
+            moved = ENDED.get(job) if (ENDED.get(job) or {}).get(
+                "relaunched") else None
             # an unload says so, so the page drops its card instead of
             # showing "failed" (picker.js followLaunch)
             ENDED[job] = {"reason": reason, "kind": stop_kind,
@@ -1373,6 +1380,9 @@ def stop(job: str, reason: str = "unloaded", propagate: bool = True,
                           "machines": any_rec.get("machines")
                           or [n.get("name") for n in (spec or {}).get(
                               "nodes") or []]}
+            if moved:
+                ENDED[job].update(reason=moved["reason"],
+                                  relaunched=moved["relaunched"])
     told = []
     # the job's machines: its spec, or -- after a page restart, SPECS being
     # in memory -- the ids its rank records here keep
