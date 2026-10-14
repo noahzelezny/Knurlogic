@@ -730,13 +730,11 @@ def rank_room_chunk(path, spec: dict, ws: int, share: int):
     try:
         from knurlogic.machine.artifact import Artifact
         from knurlogic.tuning import knobs
-        from knurlogic.tuning.resolve import preset_env, resolve
+        from knurlogic.tuning.resolve import launch_settings, resolve
         a = Artifact.load(path)
         tune = spec.get("tune") or "default"
         sets = knobs.canonical_sets(dict(spec.get("sets") or {}))
-        launch = knobs.engine_settings({**preset_env(a, tune),
-                                        **{k: v for k, v in sets.items()
-                                           if k in knobs.MODEL_KNOBS}})
+        launch = launch_settings(a, tune, sets)
         r = resolve(a, int(ws), tune=tune, holds_bytes=int(share),
                     kv_bits=launch.get("kv_bits"),
                     long_context=launch.get("long_context", "off"),

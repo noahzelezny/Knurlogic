@@ -491,6 +491,16 @@ def preset_env(artifact: Artifact, tune: str) -> dict:
             if knobs.KNOB_ALIASES[k][0] in knobs.MODEL_KNOBS}
 
 
+def launch_settings(artifact: Artifact, tune: str, sets: dict) -> dict:
+    """The model launch settings a start of `artifact` runs with: the
+    preset's, under the launch's own model knobs (`sets`, canonical env
+    names), parsed by knobs.engine_settings. Raises ValueError on a value
+    a knob does not take."""
+    return knobs.engine_settings({**preset_env(artifact, tune),
+                                  **{k: v for k, v in sets.items()
+                                     if k in knobs.MODEL_KNOBS}})
+
+
 def model_launch(r: Resolution, artifact: Artifact, kv_bits=None,
                  tune: str = presets.PRESET_DEFAULT) -> None:
     """The model's own launch settings: MTP drafting and its controller

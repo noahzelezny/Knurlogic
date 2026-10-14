@@ -235,7 +235,11 @@ def run(path: str, host: str, port: int, working_set_gib: float,
     # read before the resolver, since the KV bits change what the context
     # costs, and refused here with the reason rather than at load.
     from knurlogic.tuning import context_window, knobs, presets
-    from knurlogic.tuning.resolve import apply_preset_overrides, kv_refusal, preset_env
+    from knurlogic.tuning.resolve import (
+        apply_preset_overrides,
+        kv_refusal,
+        launch_settings,
+    )
     # A launch preset IS the tune: a per-model KNURLOGIC_PRESET (Settings
     # -> Models, carried ring-wide like every launch set) picks it over
     # --tune; its launch values are defaults every explicit set beats.
@@ -265,9 +269,7 @@ def run(path: str, host: str, port: int, working_set_gib: float,
         print(f"REFUSING: {e}", file=sys.stderr)
         return REFUSED_EXIT
     try:
-        launch = knobs.engine_settings({**preset_env(a, tune),
-                                        **{k: v for k, v in overrides.items()
-                                           if k in knobs.MODEL_KNOBS}})
+        launch = launch_settings(a, tune, overrides)
     except ValueError as e:
         print(f"REFUSING: {e}", file=sys.stderr)
         return REFUSED_EXIT

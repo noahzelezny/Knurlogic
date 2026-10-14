@@ -145,7 +145,7 @@ def launch_refusal(a, overrides, tune: str = "default") -> str | None:
     before it loads a thing, in the same words, so a page or the MCP can
     refuse the launch BEFORE a process (or a ring of them) is started."""
     from knurlogic.tuning import preferences
-    from knurlogic.tuning.resolve import kv_refusal, preset_env
+    from knurlogic.tuning.resolve import kv_refusal, launch_settings
     # a context past the native window is settled (turned on / lowered)
     # before the values are checked, as run does
     sets, _ = context_window.settle_context(
@@ -159,9 +159,7 @@ def launch_refusal(a, overrides, tune: str = "default") -> str | None:
         return why
     try:
         tune = presets.preset_of(sets.get("KNURLOGIC_PRESET"), tune)
-        launch = knobs.engine_settings({**preset_env(a, tune),
-                                        **{k: v for k, v in sets.items()
-                                           if k in knobs.MODEL_KNOBS}})
+        launch = launch_settings(a, tune, sets)
     except ValueError as e:
         return str(e)
     return (kv_refusal(a, launch.get("kv_bits"))
@@ -178,7 +176,7 @@ def launch_fit(a, overrides, tune: str = "default", draft: bool = True,
     from knurlogic.machine.memory import wired
     from knurlogic.tuning import preferences
     from knurlogic.tuning.fit import single_fit_check
-    from knurlogic.tuning.resolve import preset_env
+    from knurlogic.tuning.resolve import launch_settings
     if budget_bytes is None:
         budget_bytes = wired.load_budget()["bytes"]
     try:
@@ -187,9 +185,7 @@ def launch_fit(a, overrides, tune: str = "default", draft: bool = True,
             knobs.canonical_sets(dict(overrides or {})))
         sets = preferences.launch_sets(sets)
         tune = presets.preset_of(sets.get("KNURLOGIC_PRESET"), tune)
-        launch = knobs.engine_settings({**preset_env(a, tune),
-                                        **{k: v for k, v in sets.items()
-                                           if k in knobs.MODEL_KNOBS}})
+        launch = launch_settings(a, tune, sets)
     except ValueError:
         launch = {}
     if launch.get("mtp") is False:
