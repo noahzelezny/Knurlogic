@@ -493,56 +493,50 @@ def ring_chunk(sets: dict, got: list) -> tuple:
     return PREFILL_CHUNK, "ring: a rank could not work out its room"
 
 
-def prepare(spec: dict, *, resolve=None, info=None, shape=None,
-            registry=None, held=None) -> tuple:
-    """A Prepare message, on the page asked to run one rank:
-    (status, doc). Checks, and remembers the job for start; starts
-    nothing."""
-    why = check_spec(spec)
-    if why:
-        # a spec this page cannot read is most often a newer page's (a key
-        # added since): say the versions differ, which is the cause
-        theirs = (spec.get("versions") or {}) if isinstance(
-            spec.get("versions"), dict) else {}
-        try:
-            ours = (info if info is not None else _local_info()).get(
-                "versions") or {}
-        except (OSError, ValueError, AttributeError, TypeError):
-            ours = {}
-        k = "build" if theirs.get("build") and ours.get("build") \
-            else "knurlogic"
-        if theirs.get(k) and theirs.get(k) != ours.get(k):
-            why = (f"{why} -- the coordinator runs {k} {theirs.get(k)}, "
-                   f"this machine {ours.get(k) or 'missing'}: every rank "
-                   f"runs the same build")
-        return 400, {"error": why}
-    from knurlogic.machine import identity
-    me = identity.identity().get("name") or "this machine"
-    path = resolve(spec.get("identity")) if resolve else \
-        _resolve(spec.get("identity"), str(spec.get("name") or ""))
-    if not path:
-        return 200, {"ok": False, "machine": me,
-                     "refused": f"not on {me}: no artifact with identity "
-                                f"{str(spec.get('identity'))[:64]!r} in its "
-                                f"model stores. Copy it there first."}
-    info = info if info is not None else _local_info()
-    refusals = []
-    want = spec.get("versions") or {}
-    have = info.get("versions") or {}
-    # "same build" is the code hash (it names mlx too): when both sides
-    # send one, the version string is information only -- a source copy
-    # and a wheel of the same commit can disagree on it
+def _unreadable_spec(spec, why: str, info) -> str:
+    """`why` a spec failed check_spec, with the cause when it is the most
+    common one: a newer page's spec (a key added since), the versions
+    differing."""
+    theirs = (spec.get("versions") or {}) if isinstance(
+        spec.get("versions"), dict) else {}
+    try:
+        ours = (info if info is not None else _local_info()).get(
+            "versions") or {}
+    except (OSError, ValueError, AttributeError, TypeError):
+        ours = {}
+    k = "build" if theirs.get("build") and ours.get("build") else "knurlogic"
+    if theirs.get(k) and theirs.get(k) != ours.get(k):
+        why = (f"{why} -- the coordinator runs {k} {theirs.get(k)}, "
+               f"this machine {ours.get(k) or 'missing'}: every rank "
+               f"runs the same build")
+    return why
+
+
+def _version_refusals(want: dict, have: dict) -> list:
+    """The coordinator's build (`want`) against this machine's (`have`).
+    "Same build" is the code hash (it names mlx too): when both sides send
+    one, the version string is information only -- a source copy and a
+    wheel of the same commit can disagree on it."""
     keys = ("mlx", "build") if want.get("build") and have.get("build") \
         else ("knurlogic", "mlx", "build")
+    out = []
     for k in keys:
         if want.get(k) != have.get(k):
-            what = "build" if k == "build" else k
-            refusals.append(f"{what} {have.get(k) or 'missing'} here, "
-                            f"{want.get(k) or 'missing'} on the coordinator"
-                            f": every rank runs the same build")
+            out.append(f"{k} {have.get(k) or 'missing'} here, "
+                       f"{want.get(k) or 'missing'} on the coordinator"
+                       f": every rank runs the same build")
             if k == "mlx":
                 break           # the build names mlx too; say it once
+    return out
+
+
+def _model_refusals(spec: dict, path, shape) -> tuple:
+    """(refusals, the spec with only the settings a rank takes, the
+    artifact's shape): the launch settings, the shape's own refusals and,
+    for rank 0 of a tensor split, the viability check."""
     from knurlogic.tuning.checks import clean_sets
+    from knurlogic.tuning.knobs import mtp_of, vision_of
+    refusals = []
     ok_sets, bad_sets = clean_sets(spec.get("sets") or {})
     if bad_sets:
         refusals.append(f"settings a rank does not take: "
@@ -551,53 +545,66 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
     why = sets_refusal(path, ok_sets, spec.get("tune") or "default")
     if why:
         refusals.append(why)
-    rank, world = spec["rank"], spec["world"]
     try:
-        from knurlogic.tuning.knobs import mtp_of, vision_of
-        sh = (shape or shape_of)(path, world, spec["split"],
+        sh = (shape or shape_of)(path, spec["world"], spec["split"],
                                  vision=vision_of(ok_sets),
                                  mtp=mtp_of(ok_sets))
     except Exception as e:  # a failed read is reported as the launch's refusal
         sh = {"refusals": [f"could not read the artifact: "
                            f"{type(e).__name__}: {e}"]}
     refusals += sh.get("refusals") or []
-    if not refusals and spec["split"] == "tensor" and rank == 0:
-        refusals += viability_refusals(path, world)
-    budget = budget_of(info)
-    need = 0
-    if not refusals:
-        from knurlogic.tuning.fit import rank_share_bytes, share_refusal
-        counts = spec.get("layers") or []
-        if spec["split"] == "tensor" or counts:
-            need = rank_share_bytes(sh, rank, counts or None)
-        # the weights and the minimum step margin are the refusal; what
-        # other ranks and servers hold here now comes off the budget
-        busy = (held or held_here)(spec["job"]) if need and budget else []
-        why = share_refusal(need, budget, busy) if need and budget else ""
-        if why:
-            refusals.append(f"rank {rank}'s share is {gib(need)} and {me}'s "
-                            + why)
-    room_chunk = None
-    if not refusals and need and budget:
-        room_chunk = rank_room_chunk(path, spec, budget, need)
+    if not refusals and spec["split"] == "tensor" and spec["rank"] == 0:
+        refusals += viability_refusals(path, spec["world"])
+    return refusals, spec, sh
+
+
+def _share_check(spec: dict, shape: dict, budget: int, me: str,
+                 held) -> tuple:
+    """(this rank's share in bytes, why it does not fit or ""): the weights
+    and the minimum step margin against the budget, less what other ranks
+    and servers hold here now."""
+    from knurlogic.tuning.fit import rank_share_bytes, share_refusal
+    counts = spec.get("layers") or []
+    if spec["split"] != "tensor" and not counts:
+        return 0, ""
+    need = rank_share_bytes(shape, spec["rank"], counts or None)
+    if not (need and budget):
+        return need, ""
+    why = share_refusal(need, budget, (held or held_here)(spec["job"]))
+    return need, (f"rank {spec['rank']}'s share is {gib(need)} and {me}'s "
+                  + why if why else "")
+
+
+def _link_refusals(spec: dict, info: dict, me: str) -> list:
+    """This machine's end of the job's link: its ring address is one of its
+    Thunderbolt addresses, or its RDMA devices are active here."""
+    rank = spec["rank"]
     if spec["link"] == "ring":
         ip = spec["hosts"][rank].rsplit(":", 1)[0]
         mine = {t.get("ip") for t in info.get("thunderbolt") or []}
         if ip not in mine and not ip.startswith("127."):
-            refusals.append(f"{ip} is not one of {me}'s Thunderbolt "
-                            f"addresses ({', '.join(sorted(mine)) or 'none'})")
-    else:
-        rd = info.get("rdma") or {}
-        mine_devs = [d for d in (spec.get("ibv_devices") or [[]] * world)[rank]
-                     if d] if isinstance(spec.get("ibv_devices"), list) else []
-        if not rd.get("available"):
-            refusals.append(f"RDMA on {me}: {rd.get('reason') or 'unknown'}")
-        elif not mine_devs or any(d not in (rd.get("active") or [])
-                                  for d in mine_devs):
-            refusals.append(f"{', '.join(mine_devs) or 'no device'} is not an "
-                            f"active RDMA device on {me} (active: "
-                            f"{', '.join(rd.get('active') or []) or 'none'})")
-    reg = registry() if registry else J.registry()
+            return [f"{ip} is not one of {me}'s Thunderbolt addresses "
+                    f"({', '.join(sorted(mine)) or 'none'})"]
+        return []
+    rd = info.get("rdma") or {}
+    ibv = spec.get("ibv_devices")
+    mine_devs = [d for d in (ibv or [[]] * spec["world"])[rank]
+                 if d] if isinstance(ibv, list) else []
+    if not rd.get("available"):
+        return [f"RDMA on {me}: {rd.get('reason') or 'unknown'}"]
+    if not mine_devs or any(d not in (rd.get("active") or [])
+                            for d in mine_devs):
+        return [f"{', '.join(mine_devs) or 'no device'} is not an "
+                f"active RDMA device on {me} (active: "
+                f"{', '.join(rd.get('active') or []) or 'none'})"]
+    return []
+
+
+def _here_refusals(spec: dict, reg: dict, me: str) -> list:
+    """What this machine's own ranks say: the job already here, another
+    job still loading, a stopped rank not gone (waited for up to
+    EXIT_WAIT_S), or one holding this job's ring port."""
+    refusals = []
     if any(k.startswith(spec["job"] + "/") for k in reg):
         refusals.append(f"job {spec['job']} already runs here")
     why = _loading_elsewhere(spec["job"], reg)
@@ -608,26 +615,76 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         refusals.append("; ".join(
             f"rank {r} of job {j} is still exiting on {me}"
             for j, r, _ in stale))
-    else:
-        conflict = _slot_conflict(spec, reg)
-        if conflict:
-            j, r, pid = conflict
-            left = J.wait_gone([pid], EXIT_WAIT_S, alive=lambda p: _alive(j, p))
-            if left:
-                refusals.append(f"rank {r} of job {j} is still exiting on "
-                                f"{me} and holds this job's ring port; "
-                                f"wait for it to finish")
+        return refusals
+    conflict = _slot_conflict(spec, reg)
+    if conflict:
+        j, r, pid = conflict
+        if J.wait_gone([pid], EXIT_WAIT_S, alive=lambda p: _alive(j, p)):
+            refusals.append(f"rank {r} of job {j} is still exiting on "
+                            f"{me} and holds this job's ring port; "
+                            f"wait for it to finish")
+    return refusals
+
+
+def _port_refusals(port: int, me: str) -> list:
+    """Rank 0's serving port: taken by a knurlogic server, or in use."""
+    from knurlogic.machine.servers import is_our_server, port_free
+    from knurlogic.machine.servers import registry as sreg
+    rec = sreg().get(port)
+    if rec and is_our_server(int(rec["pid"])):
+        return [f"port {port} on {me} already serves {rec.get('artifact')}"]
+    if port and not port_free(port):
+        return [f"port {port} on {me} is in use"]
+    return []
+
+
+def _remember(spec: dict, path) -> None:
+    """Hold a prepared job for its Start, forgetting ones never started."""
+    with _LOCK:
+        now = time.time()
+        for j in [j for j, p in PREPARED.items() if now - p["t"] > PREPARED_S]:
+            PREPARED.pop(j)
+        PREPARED[spec["job"]] = {"spec": dict(spec), "path": path, "t": now}
+
+
+def prepare(spec: dict, *, resolve=None, info=None, shape=None,
+            registry=None, held=None) -> tuple:
+    """A Prepare message, on the page asked to run one rank:
+    (status, doc). Checks, and remembers the job for start; starts
+    nothing."""
+    why = check_spec(spec)
+    if why:
+        return 400, {"error": _unreadable_spec(spec, why, info)}
+    from knurlogic.machine import identity
+    me = identity.identity().get("name") or "this machine"
+    path = resolve(spec.get("identity")) if resolve else \
+        _resolve(spec.get("identity"), str(spec.get("name") or ""))
+    if not path:
+        return 200, {"ok": False, "machine": me,
+                     "refused": f"not on {me}: no artifact with identity "
+                                f"{str(spec.get('identity'))[:64]!r} in its "
+                                f"model stores. Copy it there first."}
+    info = info if info is not None else _local_info()
+    want = spec.get("versions") or {}
+    have = info.get("versions") or {}
+    rank = spec["rank"]
+    refusals = _version_refusals(want, have)
+    more, spec, sh = _model_refusals(spec, path, shape)
+    refusals += more
+    budget = budget_of(info)
+    need, room_chunk = 0, None
+    if not refusals:
+        need, why = _share_check(spec, sh, budget, me, held)
+        if why:
+            refusals.append(why)
+        elif need and budget:
+            room_chunk = rank_room_chunk(path, spec, budget, need)
+    refusals += _link_refusals(spec, info, me)
+    refusals += _here_refusals(spec, registry() if registry else J.registry(),
+                               me)
     if rank == 0:
-        from knurlogic.machine.servers import is_our_server
-        from knurlogic.machine.servers import registry as sreg
         port = int(spec.get("port") or 0)
-        rec = sreg().get(port)
-        from knurlogic.machine.servers import port_free
-        if rec and is_our_server(int(rec["pid"])):
-            refusals.append(f"port {port} on {me} already serves "
-                            f"{rec.get('artifact')}")
-        elif port and not port_free(port):
-            refusals.append(f"port {port} on {me} is in use")
+        refusals += _port_refusals(port, me)
         if refusals and spec.get("auto_port"):
             # a port nobody asked for: say which one is free instead
             from knurlogic.machine.servers import free_port
@@ -642,11 +699,7 @@ def prepare(spec: dict, *, resolve=None, info=None, shape=None,
         return 200, typed(PrepareReply(
             ok=False, machine=me, refused=f"{me} refuses rank {rank}: "
             + "; ".join(refusals)))
-    with _LOCK:
-        now = time.time()
-        for j in [j for j, p in PREPARED.items() if now - p["t"] > PREPARED_S]:
-            PREPARED.pop(j)
-        PREPARED[spec["job"]] = {"spec": dict(spec), "path": path, "t": now}
+    _remember(spec, path)
     differs = _local_copy_differs(path, spec)
     note = None
     if want.get("knurlogic") != have.get("knurlogic"):
@@ -1474,6 +1527,336 @@ def placed_room(plan: dict, infos: list, cfg: dict, kv_bits=None) -> dict:
     return fit.split_room(ranks, cfg, plan["split"], kv_bits)
 
 
+class _Answer(Exception):
+    """A launch step's final answer (an error or a refusal): `launch`
+    returns `doc` as it is."""
+
+    def __init__(self, doc: dict):
+        super().__init__(doc)
+        self.doc = doc
+
+
+def _launch_request(req: dict) -> tuple:
+    """(node ids, split, backend or None, link unnamed, identity, name) of
+    a launch request, or _Answer naming what is wrong with it."""
+    ids = req.get("nodes")
+    if not isinstance(ids, list) or len(ids) < 2 or \
+            len(set(map(str, ids))) != len(ids):
+        raise _Answer({"error": "a cluster launch names two or more machines"})
+    split = req.get("split") if req.get("split") in SPLITS else None
+    link = backend(req.get("link"))
+    unnamed = req.get("link") in (None, "")
+    if not split or not (link or unnamed):
+        raise _Answer({"error": "split is tensor|pipeline, link is tcp|rdma"})
+    ident = str(req.get("identity") or "")
+    if not ident:
+        raise _Answer({"error": "a cluster launch names the model by identity"})
+    # what the requester called it: a directory name, never a path; each
+    # rank prefers the artifact of that name among its identity's matches
+    aname = Path(str(req.get("name") or "")).name[:255]
+    return ids, split, link, unnamed, ident, aname
+
+
+def _note_links(infos: list, me: dict, peers: list, link) -> None:
+    """Each machine's `links`: the ones this page can see, its own to each
+    peer, by kind (rank order follows them)."""
+    by_id = {getattr(p, "id", ""): p for p in peers
+             if p.state == "answering"}
+    kinds = {"thunderbolt": "rdma" if link == "jaccl" else "tb4",
+             "ethernet": "ethernet", "wifi": "wifi"}
+    mine = next((m for m in infos if m["id"] == me.get("id")), None)
+    for m in infos:
+        p = by_id.get(m["id"])
+        if p is not None and mine is not None:
+            k = kinds.get(getattr(p, "link", ""), "")
+            mine["links"][m["name"]] = k
+            m["links"][mine["name"]] = k
+
+
+def _unnamed_link(infos: list) -> str:
+    """No link named: tcp, over the one cable the machines share; _Answer
+    when they share more than one (the request must name it)."""
+    shared: set | None = None
+    for i, a in enumerate(infos):
+        for b in infos[i + 1:]:
+            nets = set(links.shared_subnets(a, b))
+            shared = nets if shared is None else shared & nets
+    if shared and len(shared) > 1:
+        kinds = sorted({links.cable_name(links.link_gbps(infos[0], infos[1], n))
+                        .split(" (")[0] for n in shared})
+        raise _Answer({"refused": "link is tcp | rdma; the machines share "
+                                  + ", ".join(sorted(shared)) + " over "
+                                  + " and ".join(kinds) + ": name one"})
+    return LINK_NAMES["tcp"]
+
+
+def _launch_model(req: dict, infos: list, split: str, ident: str,
+                  aname: str, post) -> tuple:
+    """(request, identity, alert, launch settings, shape) of the model a
+    launch runs: the shared copy over a local one that differs (the alert
+    says so), its settings checked, and its shape read here when this
+    machine has it, else from a peer. _Answer when it cannot run."""
+    from knurlogic.machine.artifact import prefer_shared
+    from knurlogic.tuning.checks import clean_sets
+    from knurlogic.tuning.knobs import mtp_of, vision_of
+    from knurlogic.tuning.presets import preset_or
+    # a local copy beside a DIFFERENT shared (network) copy of the same
+    # name: every rank loads the shared one, and the launch says so
+    try:
+        ident, alert = prefer_shared(ident, aname)
+    except (OSError, ValueError):
+        alert = ""
+    if alert:
+        logger.warning("cluster launch: %s", alert)
+        req = dict(req, identity=ident)
+    path = _resolve(ident, aname)
+    sets, bad = clean_sets(req.get("sets") or {})
+    if bad:
+        raise _Answer({"error": f"not a launch setting: {', '.join(bad)}"})
+    if req.get("draft") is False:
+        # "turn MTP off and launch": every rank's settings say so
+        sets = dict(sets, KNURLOGIC_MTP="off")
+    if path:
+        why = sets_refusal(path, sets, preset_or(req.get("tune"), "default"))
+        if why:
+            raise _Answer({"refused": f"nothing started: {why}"})
+    world = len(infos)
+    try:
+        if path:
+            shape = shape_of(path, world, split, vision=vision_of(sets),
+                             mtp=mtp_of(sets))
+        else:
+            first = next(m for m in infos if m["page"])
+            shape = post(first["page"], "Shape",
+                         {"identity": ident, "name": aname, "world": world,
+                          "split": split, "vision": vision_of(sets),
+                          "mtp": mtp_of(sets)})
+            if shape.get("error"):
+                raise _Answer({"error": f"{first['name']}: {shape['error']}"})
+    except (*NET_ERRORS, LookupError, StopIteration, AttributeError) as e:
+        raise _Answer({"error": f"could not read the model's shape: "
+                                f"{type(e).__name__}: {e}"}) from e
+    return req, ident, alert, sets, shape
+
+
+def _place(infos: list, shape: dict, split: str, order, post) -> dict:
+    """`placement`, placed once more on fresh memory before refusing: a
+    peer's memory in its last status is stale right after an unload, so
+    any rank still exiting is waited out and every machine read again."""
+    try:
+        try:
+            return placement(infos, shape, split, order)
+        except ValueError:
+            if not refresh_memory(infos, post):
+                raise
+            return placement(infos, shape, split, order)
+    except ValueError as e:
+        raise _Answer({"refused": f"cannot place it: {e}"}) from e
+
+
+def _auto_cable_note(order: list, net: str, nets: list, link) -> str:
+    """Why a launch that named no cable runs on `net`."""
+    a, b = order[0], order[1]
+    sp = links.link_gbps(a, b, net)
+    others = [n for n in links.shared_subnets(a, b) if n != net]
+    if sp and any((links.link_gbps(a, b, n) or 0) < sp for n in others):
+        note = (f"cable {net}: {links.cable_name(sp)}, the fastest "
+                f"shared Thunderbolt link")
+    elif sp:
+        note = (f"cable {net}: {links.cable_name(sp)}, the lowest shared "
+                f"Thunderbolt subnet")
+    else:
+        note = f"cable {net}: the lowest shared Thunderbolt subnet"
+    skipped = [n for n in others if n not in nets]
+    if skipped and link == "jaccl":
+        note += "; not " + ", ".join(
+            f"{n} ({links.cable_name(links.link_gbps(a, b, n))}: RDMA "
+            f"needs Thunderbolt 5)" if links.link_gbps(a, b, n)
+            else f"{n} (no RDMA at both ends)" for n in skipped)
+    return note
+
+
+def _choose_cable(order: list, link, cable, tried: tuple, moved,
+                  plan: dict) -> tuple:
+    """(subnet, note, cable ignored) for the job's link: two machines run
+    on the cable the launch names, else the first shared one not yet
+    `tried`; more than two pick per pair, and a named cable is ignored.
+    _Answer when the named cable is not shared, or every one failed."""
+    world = len(order)
+    net, note, nets = "", "", []
+    if world == 2:
+        nets = links.shared_subnets(order[0], order[1], rdma=link == "jaccl")
+    if cable not in (None, ""):
+        if world > 2:
+            return net, note, True
+        c = CABLE_RX.fullmatch(str(cable).strip()) if isinstance(
+            cable, str) else None
+        if not c or c.group(1) not in nets:
+            raise _Answer({"refused": f"cable {str(cable)[:40]!r}: a launch "
+                                      f"names the Thunderbolt subnet both "
+                                      f"machines share"
+                                      + (" with RDMA up at both ends"
+                                         if link == "jaccl" else "")
+                                      + f" ({', '.join(nets) or 'none here'})",
+                           "placement": plan})
+        return c.group(1), f"cable {c.group(1)}: named by the launch", False
+    if not nets:
+        return net, note, False
+    left = [n for n in nets if n not in tried]
+    if not left:
+        raise _Answer({"refused": f"every shared Thunderbolt cable failed "
+                                  f"link init: {', '.join(tried)}",
+                       "placement": plan})
+    net = left[0]
+    bad = links.BAD_CABLES.get(links.machine_pair(order[0], order[1])) or {}
+    if moved:
+        note = (f"cable {net}: moved from {moved['from']}, whose link "
+                f"init failed ({moved['why']})")
+    elif bad and net != min(nets):
+        b = min(bad)
+        note = (f"cable {net}: {b} failed link init earlier this "
+                f"session ({bad[b]})")
+    else:
+        note = _auto_cable_note(order, net, nets, link)
+    if left[1:]:
+        note += f"; {left[1]} next if link init fails"
+    return net, note, False
+
+
+def _rdma_refusal(order: list, net: str, plan: dict) -> None:
+    """_Answer when jaccl cannot join the machines: past two, every pair
+    needs a Thunderbolt 5 cable with RDMA up; two need one shared subnet
+    with it."""
+    world = len(order)
+    if world > 2:
+        for i in range(world):
+            for j in range(i + 1, world):
+                why = links.rdma_pair_reason(order[i], order[j]) or (
+                    "" if links.shared_subnets(order[i], order[j], rdma=True)
+                    else "no Thunderbolt cable with RDMA up at both ends")
+                if why:
+                    raise _Answer({
+                        "refused": f"RDMA across {world} Macs needs every "
+                                   f"pair joined by a Thunderbolt 5 cable: "
+                                   f"{order[i]['name']} and "
+                                   f"{order[j]['name']}: {why}. Use the "
+                                   f"TCP ring, or cable that pair.",
+                        "placement": plan})
+        return
+    if net:
+        return
+    why = links.rdma_pair_reason(order[0], order[1])
+    if why:
+        raise _Answer({"refused": why + ". Use the TCP ring, or join them "
+                                        "with a Thunderbolt 5 cable.",
+                       "placement": plan})
+
+    def up(m):
+        return ", ".join((m.get("rdma") or {}).get("active") or []) or "none"
+    raise _Answer({"refused": f"link rdma needs RDMA up at both ends of one "
+                              f"Thunderbolt cable, and no Thunderbolt subnet "
+                              f"has it ({order[0]['name']}: {up(order[0])}; "
+                              f"{order[1]['name']}: {up(order[1])}). Use "
+                              f"link tcp, or bring RDMA up on the shared "
+                              f"cable.",
+                   "placement": plan})
+
+
+def _ring_layout(order: list, link, net: str, job: str, plan: dict) -> tuple:
+    """(each rank's address, its host:port, the ibv device matrix, the
+    jaccl coordinator) of the job's ring, on its ring-port slot."""
+    world = len(order)
+    try:
+        ips = links.ring_ips(order, rdma=link == "jaccl", net=net)
+        slot = _slot(job)
+    except ValueError as e:
+        raise _Answer({"refused": str(e), "placement": plan}) from e
+    hosts = [f"{ip}:{ring_port(slot, r)}" for r, ip in enumerate(ips)]
+    if link != "jaccl":
+        return ips, hosts, None, ""
+    coord = f"{ips[0]}:{ring_port(slot, COORDINATOR_OFFSET)}"
+    if world > 2:
+        return ips, hosts, [[None if i == j else
+                             links.rdma_device(order[i], order[j])
+                             for j in range(world)] for i in range(world)], coord
+    a0 = links.rdma_device(order[0], order[1], net)
+    a1 = links.rdma_device(order[1], order[0], net)
+    for m, d in ((order[0], a0), (order[1], a1)):
+        if d is None:
+            raise _Answer({"refused": f"{m['name']} has RDMA up on "
+                                      f"{', '.join(m['rdma'].get('active') or [])}"
+                                      f" and none of them is on "
+                                      f"{order[1 - order.index(m)]['name']}'s "
+                                      f"Thunderbolt subnet", "placement": plan})
+    return ips, hosts, [[None, a0], [a1, None]], coord
+
+
+def _saved_chunk(sets: dict) -> int:
+    """The ring's prompt chunk before Prepare answers. The base model's
+    saved chunk (Settings -> Models) is the ring's, like every launch set;
+    unset, the ring runs the smallest of its ranks' room-based chunks
+    (ring_chunk, once Prepare has answered; PREFILL_CHUNK until then).
+    serve puts the ring's value over any --set, so the saved one must be
+    resolved here or it is shown and never runs."""
+    saved = canonical_sets(sets).get(PREFILL_KNOB)
+    if saved is None:
+        return PREFILL_CHUNK
+    from knurlogic.tuning.checks import check_knob
+    why = check_knob(PREFILL_KNOB, saved)
+    if why:
+        raise _Answer({"error": why})
+    return int(saved)
+
+
+def _rank_specs(base: dict, order: list, port: int, auto_port: bool) -> list:
+    """Each rank's Prepare: the job's spec and what is that rank's own."""
+    return [{**base, "rank": r, "port": port if r == 0 else 0,
+             "auto_port": auto_port,
+             "working_set_gib": round(
+                 int(m.get("working_set_bytes") or 0) / GIB, 3),
+             "bandwidth_gbs": m.get("bandwidth_gbs") or 0}
+            for r, m in enumerate(order)]
+
+
+def _prepare_round(job: str, order: list, specs: list, ask, post,
+                   auto_port: bool, plan: dict) -> tuple:
+    """(answers, rank 0's port): a Prepare to every page at once, rank 0
+    retried once on the free port its machine suggests when nobody named
+    one. _Answer, every page told to forget the job, on any refusal."""
+    got = transport.parallel(lambda r: ask("Prepare", r, specs[r]),
+                             list(range(len(order))))
+    port = specs[0]["port"]
+    if auto_port and isinstance(got[0], dict) and got[0].get("free_port"):
+        port = int(got[0]["free_port"])
+        specs[0] = dict(specs[0], port=port)
+        got[0] = ask("Prepare", 0, specs[0])
+    bad = [(order[r]["name"], g) for r, g in enumerate(got)
+           if not (isinstance(g, dict) and g.get("ok"))]
+    if bad:
+        _abandon(job, order, post)
+        raise _Answer({"refused": "nothing started: " + "; ".join(
+                           (g or {}).get("refused") or (g or {}).get("error")
+                           or f"{nm} did not answer" for nm, g in bad),
+                       "placement": plan})
+    return got, port
+
+
+def _start_round(job: str, order: list, start_doc: dict, ask, post,
+                 plan: dict) -> None:
+    """A Start to every page at once; _Answer, every rank stopped, when one
+    did not start."""
+    got = transport.parallel(lambda r: ask("Start", r, start_doc),
+                             list(range(len(order))))
+    bad = [(order[r]["name"], g) for r, g in enumerate(got)
+           if not (isinstance(g, dict) and g.get("started"))]
+    if bad:
+        _abandon(job, order, post, reason="a rank did not start")
+        raise _Answer({"error": "a rank did not start, so none run: "
+                                + "; ".join(
+                                    f"{nm}: {(g or {}).get('error') or 'no answer'}"
+                                    for nm, g in bad), "placement": plan})
+
+
 def launch(req: dict, *, me: dict, peers: list, local_info: dict,
            ui_port: int, serve_port: int, post=None, follow=None,
            tried: tuple = (), moved: dict | None = None,
@@ -1491,231 +1874,51 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     `recovering`: this is auto-recovery's relaunch (cluster/recovery.py),
     carrying its report to rank 0's page; any other launch that starts is
     tracked there for recovery."""
-    post = post or transport.send
-    ids = req.get("nodes")
-    if not isinstance(ids, list) or len(ids) < 2 or \
-            len(set(map(str, ids))) != len(ids):
-        return {"error": "a cluster launch names two or more machines"}
-    split = req.get("split") if req.get("split") in SPLITS else None
-    link = backend(req.get("link"))
-    unnamed = req.get("link") in (None, "")
-    if not split or not (link or unnamed):
-        return {"error": "split is tensor|pipeline, link is tcp|rdma"}
-    ident = str(req.get("identity") or "")
-    if not ident:
-        return {"error": "a cluster launch names the model by identity"}
-    # what the requester called it: a directory name, never a path; each
-    # rank prefers the artifact of that name among its identity's matches
-    aname = Path(str(req.get("name") or "")).name[:255]
-    by_id = {getattr(p, "id", ""): p for p in peers
-             if p.state == "answering"}
+    try:
+        return _launch(req, me=me, peers=peers, local_info=local_info,
+                       ui_port=ui_port, serve_port=serve_port,
+                       post=post or transport.send, follow=follow,
+                       tried=tried, moved=moved, recovering=recovering)
+    except _Answer as a:
+        return a.doc
+
+
+def _launch(req: dict, *, me: dict, peers: list, local_info: dict,
+            ui_port: int, serve_port: int, post, follow, tried: tuple,
+            moved: dict | None, recovering: dict | None) -> dict:
+    """`launch`'s steps, in order; a step that ends the launch raises
+    _Answer with what it answers."""
+    from knurlogic.tuning.presets import preset_or
+    ids, split, link, unnamed, ident, aname = _launch_request(req)
     infos, why = machine_infos(ids, me=me, peers=peers,
                                local_info=local_info)
     if why:
         return {"error": why}
-    # the links this page can see: its own to each peer
-    kinds = {"thunderbolt": "rdma" if link == "jaccl" else "tb4",
-             "ethernet": "ethernet", "wifi": "wifi"}
-    mine = next((m for m in infos if m["id"] == me.get("id")), None)
-    for m in infos:
-        p = by_id.get(m["id"])
-        if p is not None and mine is not None:
-            k = kinds.get(getattr(p, "link", ""), "")
-            mine["links"][m["name"]] = k
-            m["links"][mine["name"]] = k
+    _note_links(infos, me, peers, link)
     if unnamed:
-        # no link named: tcp, over the one cable the machines share
-        shared: set | None = None
-        for i, a_ in enumerate(infos):
-            for b_ in infos[i + 1:]:
-                n_ = set(links.shared_subnets(a_, b_))
-                shared = n_ if shared is None else shared & n_
-        if shared and len(shared) > 1:
-            kinds_ = sorted({links.cable_name(links.link_gbps(infos[0], infos[1], n))
-                             .split(" (")[0] for n in shared})
-            return {"refused": "link is tcp | rdma; the machines share "
-                               + ", ".join(sorted(shared)) + " over "
-                               + " and ".join(kinds_) + ": name one"}
-        link = LINK_NAMES["tcp"]
+        link = _unnamed_link(infos)
     if link == "jaccl":
         for m in infos:
             rd = m.get("rdma") or {}
             if not rd.get("available"):
                 return {"error": f"RDMA on {m['name']}: "
                                  f"{rd.get('reason') or 'unknown'}"}
-    # the model's shape, from this machine when it has it, else a peer
     world = len(infos)
-    # a local copy beside a DIFFERENT shared (network) copy of the same
-    # name: every rank loads the shared one, and the launch says so
-    from knurlogic.machine.artifact import prefer_shared
-    try:
-        ident, alert = prefer_shared(ident, aname)
-    except (OSError, ValueError):
-        alert = ""
-    if alert:
-        logger.warning("cluster launch: %s", alert)
-        req = dict(req, identity=ident)
-    path = _resolve(ident, aname)
-    from knurlogic.tuning.checks import clean_sets
-    from knurlogic.tuning.knobs import mtp_of, vision_of
-    from knurlogic.tuning.presets import preset_or
-    sets, bad = clean_sets(req.get("sets") or {})
-    if bad:
-        return {"error": f"not a launch setting: {', '.join(bad)}"}
-    if req.get("draft") is False:
-        # "turn MTP off and launch": every rank's settings say so
-        sets = dict(sets, KNURLOGIC_MTP="off")
-    if path:
-        why = sets_refusal(path, sets, preset_or(req.get("tune"), "default"))
-        if why:
-            return {"refused": f"nothing started: {why}"}
-    try:
-        if path:
-            shape = shape_of(path, world, split, vision=vision_of(sets),
-                             mtp=mtp_of(sets))
-        else:
-            first = next(m for m in infos if m["page"])
-            shape = post(first["page"], "Shape",
-                         {"identity": ident, "name": aname, "world": world,
-                          "split": split, "vision": vision_of(sets),
-                          "mtp": mtp_of(sets)})
-            if shape.get("error"):
-                return {"error": f"{first['name']}: {shape['error']}"}
-    except (*NET_ERRORS, LookupError, StopIteration, AttributeError) as e:
-        return {"error": f"could not read the model's shape: "
-                         f"{type(e).__name__}: {e}"}
-    def plan_once():
-        return placement(infos, shape, split, req.get("order"))
-    try:
-        try:
-            plan = plan_once()
-        except ValueError:
-            # a peer's memory in its last status is stale right after an
-            # unload: wait out any rank still exiting, read every machine's
-            # memory fresh, and place once more before refusing
-            if not refresh_memory(infos, post):
-                raise
-            plan = plan_once()
-    except ValueError as e:
-        return {"refused": f"cannot place it: {e}"}
+    req, ident, alert, sets, shape = _launch_model(req, infos, split, ident,
+                                                   aname, post)
+    plan = _place(infos, shape, split, req.get("order"), post)
     order = [next(m for m in infos if m["name"] == nm) for nm in plan["order"]]
     job = secrets.token_hex(8)
     cable = req.get("cable")
-    net, note, nets = "", "", []
-    cable_ignored = False
-    if world == 2:
-        nets = links.shared_subnets(order[0], order[1], rdma=link == "jaccl")
-    if cable not in (None, ""):
-        c = CABLE_RX.fullmatch(str(cable).strip()) if isinstance(
-            cable, str) else None
-        if world > 2:
-            cable_ignored = True
-        elif not c or c.group(1) not in nets:
-            return {"refused": f"cable {str(cable)[:40]!r}: a launch names "
-                               f"the Thunderbolt subnet both machines share"
-                               + (" with RDMA up at both ends"
-                                  if link == "jaccl" else "")
-                               + f" ({', '.join(nets) or 'none here'})",
-                    "placement": plan}
-        else:
-            net, note = c.group(1), f"cable {c.group(1)}: named by the launch"
-    elif nets:
-        left = [n for n in nets if n not in tried]
-        if not left:
-            return {"refused": f"every shared Thunderbolt cable failed link "
-                               f"init: {', '.join(tried)}",
-                    "placement": plan}
-        net = left[0]
-        bad = (links.BAD_CABLES.get(links.machine_pair(order[0], order[1])) or {}) \
-            if len(order) == 2 else {}
-        if moved:
-            note = (f"cable {net}: moved from {moved['from']}, whose link "
-                    f"init failed ({moved['why']})")
-        elif bad and net != min(nets):
-            b = min(bad)
-            note = (f"cable {net}: {b} failed link init earlier this "
-                    f"session ({bad[b]})")
-        else:
-            a_, b_ = order[0], order[1]
-            sp = links.link_gbps(a_, b_, net)
-            others = [n for n in links.shared_subnets(a_, b_) if n != net]
-            if sp and any((links.link_gbps(a_, b_, n) or 0) < sp
-                          for n in others):
-                note = (f"cable {net}: {links.cable_name(sp)}, the fastest "
-                        f"shared Thunderbolt link")
-            elif sp:
-                note = (f"cable {net}: {links.cable_name(sp)}, the lowest shared "
-                        f"Thunderbolt subnet")
-            else:
-                note = f"cable {net}: the lowest shared Thunderbolt subnet"
-            skipped = [n for n in others if n not in nets]
-            if skipped and link == "jaccl":
-                note += "; not " + ", ".join(
-                    f"{n} ({links.cable_name(links.link_gbps(a_, b_, n))}: RDMA "
-                    f"needs Thunderbolt 5)" if links.link_gbps(a_, b_, n)
-                    else f"{n} (no RDMA at both ends)" for n in skipped)
-        rest = [n for n in left[1:]]
-        if rest:
-            note += f"; {rest[0]} next if link init fails"
-    if link == "jaccl" and world > 2:
-        for i in range(world):
-            for j in range(i + 1, world):
-                why = links.rdma_pair_reason(order[i], order[j]) or (
-                    "" if links.shared_subnets(order[i], order[j], rdma=True)
-                    else "no Thunderbolt cable with RDMA up at both ends")
-                if why:
-                    return {"refused": f"RDMA across {world} Macs needs "
-                                       f"every pair joined by a Thunderbolt 5"
-                                       f" cable: {order[i]['name']} and "
-                                       f"{order[j]['name']}: {why}. Use the "
-                                       f"TCP ring, or cable that pair.",
-                            "placement": plan}
-    if link == "jaccl" and not net and world == 2:
-        why = links.rdma_pair_reason(order[0], order[1])
-        if why:
-            return {"refused": why + ". Use the TCP ring, or join them "
-                                     "with a Thunderbolt 5 cable.",
-                    "placement": plan}
-
-        def up(m):
-            return ", ".join((m.get("rdma") or {}).get("active") or []) \
-                or "none"
-        return {"refused": f"link rdma needs RDMA up at both ends of one "
-                           f"Thunderbolt cable, and no Thunderbolt subnet "
-                           f"has it ({order[0]['name']}: {up(order[0])}; "
-                           f"{order[1]['name']}: {up(order[1])}). Use "
-                           f"link tcp, or bring RDMA up on the shared cable.",
-                "placement": plan}
-    try:
-        ips = links.ring_ips(order, rdma=link == "jaccl", net=net)
-    except ValueError as e:
-        return {"refused": str(e), "placement": plan}
-    try:
-        slot = _slot(job)
-    except ValueError as e:
-        return {"refused": str(e), "placement": plan}
-    hosts = [f"{ip}:{ring_port(slot, r)}" for r, ip in enumerate(ips)]
+    net, note, cable_ignored = _choose_cable(order, link, cable, tried, moved,
+                                             plan)
+    if link == "jaccl":
+        _rdma_refusal(order, net, plan)
+    ips, hosts, ibv, coord = _ring_layout(order, link, net, job, plan)
     if cable_ignored:
         note = (note + "; " if note else "") + (
             "cable ignored: with more than two Macs each pair picks its own "
             "Thunderbolt link")
-    ibv, coord = None, ""
-    if link == "jaccl" and world > 2:
-        ibv = [[None if i == j else links.rdma_device(order[i], order[j])
-                for j in range(world)] for i in range(world)]
-        coord = f"{ips[0]}:{ring_port(slot, COORDINATOR_OFFSET)}"
-    elif link == "jaccl":
-        a0 = links.rdma_device(order[0], order[1], net)
-        a1 = links.rdma_device(order[1], order[0], net)
-        for m, d in ((order[0], a0), (order[1], a1)):
-            if d is None:
-                return {"refused": f"{m['name']} has RDMA up on "
-                                   f"{', '.join(m['rdma'].get('active') or [])}"
-                                   f" and none of them is on "
-                                   f"{order[1 - order.index(m)]['name']}'s "
-                                   f"Thunderbolt subnet", "placement": plan}
-        ibv = [[None, a0], [a1, None]]
-        coord = f"{ips[0]}:{ring_port(slot, COORDINATOR_OFFSET)}"
     my_tb = ips[plan["order"].index(me.get("name"))] \
         if me.get("name") in plan["order"] else None
     nodes = [{"rank": r, "id": m["id"], "name": m["name"],
@@ -1728,27 +1931,13 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         # other machines answer for theirs at prepare, below)
         from knurlogic.machine.servers import free_port
         port = free_port(serve_port)
-    # the base model's saved prompt chunk (Settings -> Models) is the
-    # ring's, like every launch set; unset, the ring runs the smallest of
-    # its ranks' room-based chunks (ring_chunk, once Prepare has answered;
-    # PREFILL_CHUNK until then). serve puts the ring's value over any
-    # --set, so the saved one must be resolved here or it is shown and
-    # never runs.
-    chunk = PREFILL_CHUNK
-    saved = canonical_sets(sets).get(PREFILL_KNOB)
-    if saved is not None:
-        from knurlogic.tuning.checks import check_knob
-        why = check_knob(PREFILL_KNOB, saved)
-        if why:
-            return {"error": why}
-        chunk = int(saved)
     base = {"job": job, "world": world, "split": split, "link": link,
             "identity": ident, "name": aname, "hosts": hosts, "ibv_devices": ibv,
             # the bell's nonce: random, in the spec the pages share, never
             # shown (the job id is on the page)
             "bell_nonce": _bell_nonce(),
             "coordinator": coord, "layers": plan["layers"],
-            "prefill_chunk": chunk,
+            "prefill_chunk": _saved_chunk(sets),
             "tune": preset_or(req.get("tune"), "default"),
             "nodes": nodes, "versions": local_info.get("versions") or {},
             "jaccl_timeout_ms": J.JACCL_TIMEOUT_MS if link == "jaccl" else 0,
@@ -1761,14 +1950,6 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             "recovery": recovering,
             # rank 0 binds loopback and its own link address
             "serve_hosts": ["127.0.0.1", ips[0]]}
-    specs = []
-    for r, m in enumerate(order):
-        specs.append({**base, "rank": r,
-                      "port": port if r == 0 else 0,
-                      "auto_port": auto_port,
-                      "working_set_gib": round(
-                          int(m.get("working_set_bytes") or 0) / GIB, 3),
-                      "bandwidth_gbs": m.get("bandwidth_gbs") or 0})
 
     def ask(kind, r, doc):
         m = order[r]
@@ -1776,21 +1957,9 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
             return peer_step(kind, doc)[1]
         return post(m["page"], kind, doc)
 
-    got = transport.parallel(lambda r: ask("Prepare", r, specs[r]),
-                             list(range(world)))
-    if auto_port and isinstance(got[0], dict) and got[0].get("free_port"):
-        # rank 0's machine has that port taken: retry once on its suggestion
-        port = int(got[0]["free_port"])
-        specs[0] = dict(specs[0], port=port)
-        got[0] = ask("Prepare", 0, specs[0])
-    bad = [(order[r]["name"], g) for r, g in enumerate(got)
-           if not (isinstance(g, dict) and g.get("ok"))]
-    if bad:
-        _abandon(job, order, post)
-        return {"refused": "nothing started: " + "; ".join(
-                    (g or {}).get("refused") or (g or {}).get("error")
-                    or f"{nm} did not answer" for nm, g in bad),
-                "placement": plan}
+    got, port = _prepare_round(job, order,
+                               _rank_specs(base, order, port, auto_port),
+                               ask, post, auto_port, plan)
     alerts = ([alert] if alert else []) + (
         [RDMA_N_NOTE] if link == "jaccl" and world > 2 else []) + [
         g["alert"] for g in got if isinstance(g, dict) and g.get("alert")]
@@ -1810,22 +1979,14 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
     start_doc = {"job": job, "prefill_chunk": chunk, "reads": reads}
     if chunk_why != "set":
         start_doc["prefill_why"] = chunk_why
-    got = transport.parallel(lambda r: ask("Start", r, start_doc),
-                             list(range(world)))
-    bad = [(order[r]["name"], g) for r, g in enumerate(got)
-           if not (isinstance(g, dict) and g.get("started"))]
-    if bad:
-        _abandon(job, order, post, reason="a rank did not start")
-        return {"error": "a rank did not start, so none run: " + "; ".join(
-            f"{nm}: {(g or {}).get('error') or 'no answer'}"
-            for nm, g in bad), "placement": plan}
+    _start_round(job, order, start_doc, ask, post, plan)
+    args = {"me": me, "peers": peers, "local_info": local_info,
+            "ui_port": ui_port, "serve_port": serve_port,
+            "post": post, "follow": follow}
     if net and cable in (None, ""):
         (follow or _follow_thread)(job, {
             "req": req, "net": net, "tried": tuple(tried) + (net,),
-            "order": order, "link": link, "post": post,
-            "args": {"me": me, "peers": peers, "local_info": local_info,
-                     "ui_port": ui_port, "serve_port": serve_port,
-                     "post": post, "follow": follow}})
+            "order": order, "link": link, "post": post, "args": dict(args)})
     if note:
         logger.warning("cluster job %s: %s", job, note)
     if recovering is None:
@@ -1833,21 +1994,18 @@ def launch(req: dict, *, me: dict, peers: list, local_info: dict,
         # split), this port, link, tune and settings
         recovery.track_cluster(
             job, req=dict(req, order=list(plan["order"]), port=port),
-            args={"me": me, "peers": peers, "local_info": local_info,
-                  "ui_port": ui_port, "serve_port": serve_port,
-                  "post": post, "follow": follow},
-            order=order, port=port,
+            args=dict(args), order=order, port=port,
             leader_here=order[0]["page"] is None,
             previous=(moved or {}).get("job"))
+    url = leader_url(base | {"port": port})
     return {"job": job, "starting": ident, "placement": plan,
             "leader": plan["leader"], "port": port,
-            "link": link_name(link), "url": leader_url(base | {"port": port}),
+            "link": link_name(link), "url": url,
             "machines": plan["order"], "cable": net, "cable_note": note,
             **({"alerts": alerts} if alerts else {}),
             "note": f"rank 0 on {plan['leader']} serves on port {port} "
-                    f"(loopback there, {leader_url(base | {'port': port})} "
-                    f"from the job's machines) once every rank has loaded; "
-                    f"poll /loaded.json"}
+                    f"(loopback there, {url} from the job's machines) once "
+                    f"every rank has loaded; poll /loaded.json"}
 
 
 def job_end(job: str, order: list, post):
